@@ -35,7 +35,9 @@
 Each archive expands into a versioned, product-named root rather than loose
 generic files. Actions artifacts use the friendly names
 `PCController-Firmware-ATmega328P`, `PCController-Controller-<platform>`, and
-`PCController-VirtualBoard-<platform>`; release assets add the version. In the
+`PCController-VirtualBoard-<platform>`; the flagship also publishes the same
+flat AVR payload under the exact inspiration alias `firmware`. Release assets
+add the version. In the
 patterns above, `<version>` includes the leading `v`.
 
 ## What ships
@@ -84,7 +86,7 @@ for all three platforms. Then continue with
 
 ```mermaid
 flowchart LR
-    S["PCController source"] --> B["🚀 Build · PCController"]
+    S["PCController source"] --> B["Build"]
     B --> F["AVR firmware"]
     B --> C["Controller · 5 targets"]
     B --> V["Virtual Board · 5 targets"]

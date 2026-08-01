@@ -17,21 +17,21 @@ release-readiness view.
 
 | Workflow | Role | Triggers |
 |---|---|---|
-| `🚀 Build · PCController` (`build.yml`) | Flagship orchestrator and combined download catalog | pull request, `main`, manual dispatch |
-| AVR Firmware (`firmware.yml`) | Reusable MiniCore compile, HEX validation, footprint and firmware package | called by Build and Release |
-| Controller (`host.yml`) | Reusable Go test/vet, identity, C ABI smoke test and five-target packaging | called by Build and Release |
-| Virtual Board (`virtual-board.yml`) | Reusable native CMake/CTest and five-target packaging | called by Build and Release |
-| Repository Health (`repository-health.yml`) | Source, license, docs, build-tool, workflow and whitespace audits | pull request, `main`, manual dispatch |
-| Dependencies · AVR Supply Chain (`dependencies.yml`) | Daily pinned-toolchain health report and verified update proposal | daily schedule, manual dispatch |
-| Release (`release.yml`) | Rebuild, attest, and create or update a deterministic release | `v*` tag, manual dispatch |
-| AVR Hardware Deploy (`deploy-avr.yml`) | Explicitly gated physical programming path | manual dispatch on approved self-hosted runner only |
+| `Build` (`build.yml`) | Flagship orchestrator and combined download catalog | pull request, `main`, manual dispatch |
+| `⚡ Firmware · AVR` (`firmware.yml`) | Reusable MiniCore compile, HEX validation, footprint and firmware package | called by Build and Release |
+| `🖥️ Controller · Cross-platform` (`host.yml`) | Reusable Go test/vet, identity, C ABI smoke test and five-target packaging | called by Build and Release |
+| `🧪 Virtual Board · Cross-platform` (`virtual-board.yml`) | Reusable native CMake/CTest and five-target packaging | called by Build and Release |
+| `🛡️ Quality · Repository Health` (`repository-health.yml`) | Source, license, docs, build-tool, workflow and whitespace audits | pull request, `main`, manual dispatch |
+| `🔭 Dependencies · AVR Supply Chain` (`dependencies.yml`) | Daily pinned-toolchain health report and verified update proposal | daily schedule, manual dispatch |
+| `✨ Release · Attested Packages` (`release.yml`) | Rebuild, attest, and create or update a deterministic release | `v*` tag, manual dispatch |
+| `🔌 Deploy · Protected AVR Hardware` (`deploy-avr.yml`) | Explicitly gated physical programming path | manual dispatch on approved self-hosted runner only |
 
 The three build workflows remain independently callable and reusable, while
 the flagship workflow presents them as one product:
 
 ```mermaid
 flowchart TD
-    T["PR, main, or manual ref"] --> B["🚀 Build · PCController"]
+    T["PR, main, or manual ref"] --> B["Build"]
     B --> F["Firmware · ATmega328P"]
     B --> H["Controller · 5 targets"]
     B --> V["Virtual Board · 5 targets"]
@@ -46,6 +46,7 @@ flowchart TD
 | Deliverable | Actions artifact | Validation |
 |---|---|---|
 | AVR firmware | `PCController-Firmware-ATmega328P` | Pinned MiniCore 3.1.2 and rc-switch 2.6.4, real compile, strict Intel HEX validation, flash/static/estimated-peak SRAM report, dependency inventory |
+| AVR inspiration-compatible alias | `firmware` | Identical flat AVR payload from flagship `Build`, preserving the ASA0002E `Build` / `build` / `firmware` contract |
 | Controller | `PCController-Controller-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Go tests and vet, executable identity, native package, C ABI library and smoke test |
 | Virtual Board | `PCController-VirtualBoard-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Native CMake build and CTest |
 

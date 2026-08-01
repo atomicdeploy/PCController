@@ -149,10 +149,10 @@ jobs:
             if test "$HARDWARE_ENABLED" = true; then
               echo '| Protected runner gate | ✅ enabled; environment approval still required |'
             else
-              echo '| Protected runner gate | ⏸️ disabled by `ENABLE_AVR_DEPLOY`; no device will be touched |'
+              echo "| Protected runner gate | ⏸️ disabled by \`ENABLE_AVR_DEPLOY\`; no device will be touched |"
             fi
             echo
-            echo '> The hardware job is intentionally separate. It runs only on a labeled self-hosted runner after the `avr-hardware` environment gate.'
+            echo "> The hardware job is intentionally separate. It runs only on a labeled self-hosted runner after the \`avr-hardware\` environment gate."
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
@@ -310,8 +310,8 @@ jobs:
               echo
               echo '| Evidence | Result |'
               echo '|---|---|'
-              echo '| Protected environment | ✅ `avr-hardware` approved |'
-              echo '| Runner | ✅ self-hosted Linux `pccontroller-avr` |'
+              echo "| Protected environment | ✅ \`avr-hardware\` approved |"
+              echo "| Runner | ✅ self-hosted Linux \`pccontroller-avr\` |"
               echo '| Pre-flash backup | ✅ complete backup required by Controller guard |'
               echo '| Firmware write + AVRDUDE verification | ✅ completed |'
               echo '| Application reconnect | ✅ authenticated HELLO + status canary |'
