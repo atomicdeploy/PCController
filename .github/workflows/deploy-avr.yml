@@ -41,6 +41,13 @@ jobs:
     name: "🛡️ Verify and prepare programming bundle"
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    # GitHub exposes draft releases only to tokens with push access. This job
+    # performs no repository writes; the elevated contents capability is scoped
+    # only to preparation so a draft's attested assets can be read and checked.
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}

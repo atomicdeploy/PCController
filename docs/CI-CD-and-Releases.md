@@ -185,6 +185,12 @@ with a protected GitHub Environment. It requires explicit target/method inputs
 and confirmation, verifies the selected firmware SHA-256 before invoking the
 project's guarded programmer path, and retains the deployment log.
 
+The preparation job can validate either a published release or a release draft.
+GitHub exposes drafts only to tokens with push access, so `contents: write` is
+scoped to that job alone; its commands only download and verify assets. The
+hardware job retains the workflow's read-only token and cannot run until every
+independent hardware gate below is satisfied.
+
 The device job remains inert until repository setup explicitly sets
 `ENABLE_AVR_DEPLOY=true`, configures the protected `avr-hardware` environment,
 and registers a trusted runner with the `pccontroller-avr` label. The workflow
