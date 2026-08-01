@@ -4,8 +4,8 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
 - Normalized requirements: **62**
-- Open: **51**
-- Closed with current evidence: **11**
+- Open: **50**
+- Closed with current evidence: **12**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
@@ -66,14 +66,14 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#6 — Native UART protocol, telemetry, and event model](https://github.com/atomicdeploy/PCController/issues/6)
 
-3 open / 1 closed / 4 total
+2 open / 2 closed / 4 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
 | `protocol-native-uart` | [#14](https://github.com/atomicdeploy/PCController/issues/14) | ✅ closed | Replace Firmata with the native COBS/opcode UART protocol |
 | `protocol-command-event-coverage` | [#36](https://github.com/atomicdeploy/PCController/issues/36) | 🟡 open | Complete native command coverage and immediate typed event delivery |
 | `protocol-frontpanel-menu-uptime` | [#37](https://github.com/atomicdeploy/PCController/issues/37) | 🟡 open | Extend protocol schemas for live menus, front-panel snapshots, host state, and uptime |
-| `protocol-simulator-transport` | [#38](https://github.com/atomicdeploy/PCController/issues/38) | 🟡 open | Maintain deterministic native-protocol simulator and fragmented-transport tests |
+| `protocol-simulator-transport` | [#38](https://github.com/atomicdeploy/PCController/issues/38) | ✅ closed | Maintain deterministic native-protocol simulator and fragmented-transport tests |
 
 ## [#7 — PC host TUI, configuration, automation, and OS integration](https://github.com/atomicdeploy/PCController/issues/7)
 

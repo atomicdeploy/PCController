@@ -244,13 +244,13 @@ const R = [
       'Do not let completion of one macro or automation clear an explicit consumer-owned Running claim; publish every effective transition through status, events, history, scripting, IPC, and network APIs.',
       'Keep raw device uptime and render readable uptime in every monitoring/API/history/scripting surface.',
     ], 'Current status/menu commands expose basic IDs and telemetry, but the host fallback still confuses legacy Voltage=0/Status=14 with schema-2 Status=0/RF=14 instead of consuming the advertised live catalog; richer schemas, full snapshot, host session state, and cross-surface uptime remain incomplete.'),
-  requirement('protocol-simulator-transport', 6, 'Maintain deterministic native-protocol simulator and fragmented-transport tests', 'open',
-    ['🔌 protocol-api', '🧪 testing', '🐛 regression', '🚧 in progress'], 'Native virtual board', [
+  requirement('protocol-simulator-transport', 6, 'Maintain deterministic native-protocol simulator and fragmented-transport tests', 'closed',
+    ['🔌 protocol-api', '🧪 testing', '✅ verified'], 'Native virtual board', [
       'Model the current bounded COBS/CRC/opcode shapes over a desktop transport.',
       'Cover fragmented/delayed frames, HELLO, status, settings, displays, outputs, reset telemetry, and events.',
       'Keep virtual EEPROM and reset state separate from host configuration.',
       'Run repeatable unit and raw protocol smoke tests.',
-    ], 'A stale packaged host exposed a coverage gap: VirtualBoard still emitted legacy HELLO schema 1 while production firmware emits compact schema 3. PR #81 aligns the simulator, parser/authentication fixtures, and formatter; local Go/vet/CTest/TCP evidence passes, but the issue remains open until the PR is current, green, and merged.'),
+    ], 'Verified by merged PR #81: VirtualBoard now emits the production compact schema-3 HELLO, exact parser/authentication and formatter regressions are covered, all GitHub checks passed, and a fresh host authenticated over TCP and rendered the build hash plus packed timestamp.'),
 
   requirement('host-foundation-config-library', 7, 'Provide the Go host, Charm TUI foundation, separate hot-reloaded config, and reusable APIs', 'closed',
     ['🖥️ host', '🔌 protocol-api', '💾 storage', '✅ verified'], 'Host application, TUI, configuration, shell, IPC, and library', [
