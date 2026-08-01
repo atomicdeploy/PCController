@@ -781,24 +781,71 @@ function artifactRecord(path, base) {
 	}
 }
 
-function installPackage(stage) {
-	assertGeneratedPath(PROJECT_ROOT, CANONICAL_HOST_OUTPUT)
-	const previous = join(HOST_ROOT, `.bin-previous-${process.pid}`)
-	assertGeneratedPath(PROJECT_ROOT, previous)
-	rmSync(previous, { recursive: true, force: true })
-	let movedPrevious = false
-	try {
-		if (existsSync(CANONICAL_HOST_OUTPUT)) {
-			renameSync(CANONICAL_HOST_OUTPUT, previous)
-			movedPrevious = true
-		}
-		renameSync(stage, CANONICAL_HOST_OUTPUT)
-	} catch (error) {
-		if (movedPrevious && !existsSync(CANONICAL_HOST_OUTPUT) && existsSync(previous)) {
-			renameSync(previous, CANONICAL_HOST_OUTPUT)
-		}
-		throw new BuildError(`atomically publish canonical host package: ${error.message}`)
-	}
+function installPackageEntries(stage, canonical, previous, rename) {
+        mkdirSync(previous, { recursive: true })
+        const saved = []
+        const installed = []
+        try {
+                for (const name of readdirSync(canonical)) {
+                        rename(join(canonical, name), join(previous, name))
+                        saved.push(name)
+                }
+                for (const name of readdirSync(stage)) {
+                        rename(join(stage, name), join(canonical, name))
+                        installed.push(name)
+                }
+        } catch (error) {
+                const rollbackErrors = []
+                for (const name of installed.reverse()) {
+                        try {
+                                rename(join(canonical, name), join(stage, name))
+                        } catch (rollback) {
+                                rollbackErrors.push(`new ${name}: ${rollback.message}`)
+                        }
+                }
+                for (const name of saved.reverse()) {
+                        try {
+                                rename(join(previous, name), join(canonical, name))
+                        } catch (rollback) {
+                                rollbackErrors.push(`previous ${name}: ${rollback.message}`)
+                        }
+                }
+                const suffix = rollbackErrors.length === 0
+                        ? ''
+                        : `; rollback errors: ${rollbackErrors.join('; ')}`
+                throw new BuildError(`entry-wise package transaction: ${error.message}${suffix}`)
+        }
+        rmSync(stage, { recursive: true, force: true })
+        rmSync(previous, { recursive: true, force: true })
+}
+
+export function installPackage(stage, options = {}) {
+        const root = options.root || PROJECT_ROOT
+        const canonical = options.canonical || CANONICAL_HOST_OUTPUT
+        const rename = options.rename || renameSync
+        const previous = join(dirname(canonical), `.bin-previous-${process.pid}`)
+        assertGeneratedPath(root, stage)
+        assertGeneratedPath(root, canonical)
+        assertGeneratedPath(root, previous)
+        rmSync(previous, { recursive: true, force: true })
+        let movedPrevious = false
+        try {
+                if (existsSync(canonical)) {
+                        rename(canonical, previous)
+                        movedPrevious = true
+                }
+                rename(stage, canonical)
+        } catch (error) {
+                if (!movedPrevious && existsSync(canonical) &&
+                        ['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) {
+                        installPackageEntries(stage, canonical, previous, rename)
+                        return
+                }
+                if (movedPrevious && !existsSync(canonical) && existsSync(previous)) {
+                        rename(previous, canonical)
+                }
+                throw new BuildError(`atomically publish canonical host package: ${error.message}`)
+        }
 	rmSync(previous, { recursive: true, force: true })
 }
 
