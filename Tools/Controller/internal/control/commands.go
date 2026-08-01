@@ -3049,7 +3049,8 @@ func formatHello(hello native.Hello) string {
 		hello.BoardKind,
 		hello.Capabilities,
 	)
-	if hello.IdentitySchema == native.IdentitySchema {
+	if hello.IdentitySchema == native.IdentitySchema ||
+		hello.IdentitySchema == native.IdentitySchemaCompact {
 		stamp := hello.BuildStamp
 		if stamp == "" {
 			stamp = "unknown"

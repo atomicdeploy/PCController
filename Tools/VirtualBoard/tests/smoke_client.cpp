@@ -218,20 +218,16 @@ int main(int argc, char **argv) {
             frame.sequence != helloSequence || helloValidated) {
           continue;
         }
-        if (frame.payload.size() < 21 || frame.payload[8] != 12) {
+        if (frame.payload.size() != 14 || frame.payload[0] != 3 ||
+            frame.payload[1] != 1) {
           throw std::runtime_error("HELLO payload shape is invalid");
         }
-        const std::string name(frame.payload.begin() + 9,
-                               frame.payload.begin() + 21);
-        if (name != "PCController") {
-          throw std::runtime_error("unexpected device identity: " + name);
-        }
         const std::uint32_t hash =
-            static_cast<std::uint32_t>(frame.payload[22]) |
-            (static_cast<std::uint32_t>(frame.payload[23]) << 8U) |
-            (static_cast<std::uint32_t>(frame.payload[24]) << 16U) |
-            (static_cast<std::uint32_t>(frame.payload[25]) << 24U);
-        std::cout << "raw HELLO OK: " << name << " build=0x" << std::hex
+            static_cast<std::uint32_t>(frame.payload[6]) |
+            (static_cast<std::uint32_t>(frame.payload[7]) << 8U) |
+            (static_cast<std::uint32_t>(frame.payload[8]) << 16U) |
+            (static_cast<std::uint32_t>(frame.payload[9]) << 24U);
+        std::cout << "raw HELLO OK: PCController build=0x" << std::hex
                   << hash << std::dec << '\n';
         helloValidated = true;
         sendAll(socket.get(),
