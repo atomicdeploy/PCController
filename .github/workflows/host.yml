@@ -60,6 +60,12 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v7
 
+      - name: Install native Windows C compiler
+        if: matrix.windows
+        uses: egor-tensin/setup-mingw@v3
+        with:
+          platform: x64
+
       - name: Install Go from go.mod
         uses: actions/setup-go@v7
         with:
@@ -79,12 +85,6 @@ jobs:
         if: matrix.windows
         shell: pwsh
         run: go install github.com/tc-hib/go-winres@v0.3.3
-
-      - name: Install native Windows C compiler
-        if: matrix.windows
-        uses: egor-tensin/setup-mingw@v3
-        with:
-          platform: x64
 
       - name: Build complete Unix host package
         if: ${{ !matrix.windows }}

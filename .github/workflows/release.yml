@@ -108,7 +108,7 @@ jobs:
             echo
             echo '| Asset | Bytes |'
             echo '|---|---:|'
-            find release-assets -maxdepth 1 -type f -printf '| `%f` | %s |\n' | sort
+            find release-assets -maxdepth 1 -type f -printf "| \`%f\` | %s |\n" | sort
             echo
             echo 'SHA-256 checksums and GitHub build-provenance attestations are available.'
           } >> "$GITHUB_STEP_SUMMARY"
