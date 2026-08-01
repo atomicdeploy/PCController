@@ -42,7 +42,6 @@ jobs:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
 
   build:
-    name: "🏁 Build · Showcase & Catalog"
     needs: [firmware, controller, virtual-board]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
