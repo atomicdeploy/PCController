@@ -1,0 +1,77 @@
+name: Bug report
+description: Report a reproducible firmware, host, protocol, simulator, or tooling defect.
+title: "bug: "
+labels: []
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - AVR firmware
+        - Windows host or TUI
+        - UART or network protocol
+        - VirtualBoard simulator
+        - Build, backup, or programming
+        - Documentation or CI
+        - Hardware or wiring
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Include exact messages, visible state, and what the board or host did.
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Start ...
+        2. Send or press ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: identity
+    attributes:
+      label: Build and device identity
+      description: Provide the firmware hash/timestamp, host hash/version, board, port identity, and reset telemetry when applicable.
+      placeholder: Firmware hash, host hash, COM identity, reset count/cause...
+
+  - type: textarea
+    id: safety
+    attributes:
+      label: Output and safety state
+      description: State relay, motion, PWM, illumination, door, buzzer, and power conditions when relevant.
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs and evidence
+      description: Attach concise logs, screenshots, protocol traces, or simulator output. Remove secrets first.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched for an existing issue describing this defect.
+          required: true
+        - label: I have not included credentials, private keys, or other secrets.
+          required: true

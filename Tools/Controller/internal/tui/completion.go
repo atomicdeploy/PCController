@@ -1,0 +1,97 @@
+package tui
+
+import (
+	"sort"
+	"strings"
+
+	"pccontroller.local/controller/internal/shell"
+)
+
+var nestedCompletions = map[string][]string{
+	"silent":           {"status", "on", "off"},
+	"menu":             {"list", "prev", "next", "dec", "inc", "page"},
+	"menu page":        {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"},
+	"relay":            {"1", "2", "3", "4", "5", "6", "7", "8", "side", "off", "test"},
+	"relay 1":          {"on", "off", "toggle"},
+	"relay 2":          {"on", "off", "toggle"},
+	"relay 3":          {"on", "off", "toggle"},
+	"relay 4":          {"on", "off", "toggle"},
+	"relay 5":          {"on", "off", "toggle"},
+	"relay 6":          {"on", "off", "toggle"},
+	"relay 7":          {"on", "off", "toggle"},
+	"relay 8":          {"on", "off", "toggle"},
+	"relay side":       {"left", "right"},
+	"relay side left":  {"stop", "up", "down"},
+	"relay side right": {"stop", "up", "down"},
+	"pwm":              {"get", "off", "mode", "set"},
+	"pwm mode":         {"off", "manual", "auto"},
+	"settings":         {"decimals", "color", "set"},
+	"rf":               {"send", "learn", "cancel", "list", "remove", "map"},
+	"rf learn":         {"indefinite", "15s", "30s", "60s", "single", "multi"},
+	"rf remove":        {"all"},
+	"rgb":              {"effect"},
+	"rgb effect":       {"list", "play", "wait", "stop", "status"},
+	"melody":           {"list", "create", "play", "wait", "stop", "status"},
+	"macro":            {"list", "play", "status", "cancel"},
+	"automation":       {"list", "run"},
+	"reset":            {"lines", "app", "bootloader"},
+	"boot":             {"probe", "info", "metadata", "backup", "read", "write", "verify", "start"},
+	"program":          {"flash", "probe", "metadata", "backup", "read", "verify", "compile", "urclock", "usbasp"},
+	"program flash":    {"firmware.hex"},
+	"arduino":          {"update", "compile", "core-info", "burn-bootloader"},
+	"keyboard":         {"status", "list", "enable", "disable", "stop"},
+	"display":          {"segments", "lcd", "both"},
+	"i2c":              {"scan"},
+}
+
+func completionCandidates(engine *shell.Engine, line string) []string {
+	leading := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+	trimmed := strings.TrimLeft(line, " \t")
+	endsWithSpace := len(trimmed) > 0 && (trimmed[len(trimmed)-1] == ' ' || trimmed[len(trimmed)-1] == '\t')
+	words := strings.Fields(strings.ToLower(trimmed))
+	if len(words) == 0 {
+		return prefixLines(leading, engine.Complete(""))
+	}
+	if len(words) == 1 && !endsWithSpace {
+		return prefixLines(leading, engine.Complete(words[0]))
+	}
+
+	prefixWords := words
+	fragment := ""
+	if !endsWithSpace {
+		prefixWords = words[:len(words)-1]
+		fragment = words[len(words)-1]
+	}
+	path := strings.Join(prefixWords, " ")
+	choices := nestedCompletions[path]
+	var result []string
+	for _, choice := range choices {
+		if strings.HasPrefix(choice, fragment) {
+			parts := append(append([]string(nil), prefixWords...), choice)
+			result = append(result, leading+strings.Join(parts, " "))
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func prefixLines(prefix string, values []string) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		result[index] = prefix + value
+	}
+	return result
+}
+
+func commonCompletionPrefix(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	prefix := values[0]
+	for _, value := range values[1:] {
+		for !strings.HasPrefix(value, prefix) && prefix != "" {
+			prefix = prefix[:len(prefix)-1]
+		}
+	}
+	return prefix
+}

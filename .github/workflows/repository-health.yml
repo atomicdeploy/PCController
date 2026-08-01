@@ -1,0 +1,44 @@
+name: Repository Health
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-health-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-license-docs:
+    name: Source, license, and documentation
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check repository structure and links
+        run: node .github\scripts\repository-check.mjs
+
+      - name: Check build tooling
+        run: npm run check --prefix Tools\Build
+
+      - name: Check firmware tooling
+        run: npm run check --prefix Tools\Firmware
+
+      - name: Check whitespace
+        run: git diff --check HEAD

@@ -1,0 +1,187 @@
+package tui
+
+import (
+	"context"
+	"os"
+	"strings"
+	"time"
+
+	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/hostmenu"
+	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/native"
+)
+
+type Page int
+
+const (
+	PageDashboard Page = iota
+	PageOutputs
+	PageMenus
+	PageBoardSettings
+	PageAppSettings
+	PageRF
+	PageProgramming
+	PageAutomations
+	PageEvents
+	PageConsole
+	pageCount
+)
+
+type pageDefinition struct {
+	Key   string
+	Short string
+	Title string
+}
+
+var pageDefinitions = [...]pageDefinition{
+	{"1", "Dashboard", "Dashboard & Live Measurements"},
+	{"2", "Outputs", "Relays, Motion & PWM Outputs"},
+	{"3", "Menus", "Board Display Menus"},
+	{"4", "Board", "Board EEPROM Settings"},
+	{"5", "App", "PC Host Settings"},
+	{"6", "RF", "433 MHz Learn & Mapping"},
+	{"7", "Program", "Programming & Urboot/Urclock"},
+	{"8", "Automate", "Automations & Macros"},
+	{"9", "Events", "History, Graphs & Timeline"},
+	{"0", "Console", "Command Console"},
+}
+
+type Preferences struct {
+	AppTitle            string
+	PollInterval        time.Duration
+	EventLogLimit       int
+	HistoryWindow       time.Duration
+	VoltageDecimals     int
+	CurrentDecimals     int
+	PowerDecimals       int
+	TemperatureDecimals int
+	Visible             map[string]bool
+}
+
+func defaultPreferences() Preferences {
+	title := strings.TrimSpace(os.Getenv("PCCONTROLLER_APP_TITLE"))
+	if title == "" {
+		title = "PCController"
+	}
+	return Preferences{
+		AppTitle:            title,
+		PollInterval:        250 * time.Millisecond,
+		EventLogLimit:       2000,
+		HistoryWindow:       24 * time.Hour,
+		VoltageDecimals:     2,
+		CurrentDecimals:     1,
+		PowerDecimals:       2,
+		TemperatureDecimals: 2,
+		Visible: map[string]bool{
+			"supply": true, "bus": true, "current": true, "power": true,
+			"temperature_led": true, "temperature_bt": true,
+			"io": true, "diagnostics": true, "graphs": true,
+		},
+	}
+}
+
+func preferencesFromUI(value appconfig.UI) Preferences {
+	result := defaultPreferences()
+	if title := strings.TrimSpace(value.AppTitle); title != "" {
+		result.AppTitle = title
+	}
+	if value.StatusIntervalMS >= 100 {
+		result.PollInterval = time.Duration(value.StatusIntervalMS) * time.Millisecond
+	}
+	if value.EventLogLimit >= 50 {
+		result.EventLogLimit = value.EventLogLimit
+	}
+	if value.HistoryHours > 0 {
+		result.HistoryWindow = time.Duration(value.HistoryHours) * time.Hour
+	}
+	if value.VoltageDecimals >= 0 && value.VoltageDecimals <= 4 {
+		result.VoltageDecimals = value.VoltageDecimals
+	}
+	if value.CurrentDecimals >= 0 && value.CurrentDecimals <= 4 {
+		result.CurrentDecimals = value.CurrentDecimals
+	}
+	if value.PowerDecimals >= 0 && value.PowerDecimals <= 4 {
+		result.PowerDecimals = value.PowerDecimals
+	}
+	if value.TemperatureDecimals >= 0 && value.TemperatureDecimals <= 2 {
+		result.TemperatureDecimals = value.TemperatureDecimals
+	}
+	result.Visible = map[string]bool{
+		"supply":          value.ShowSupplyVoltage,
+		"bus":             value.ShowBusVoltage,
+		"current":         value.ShowCurrent,
+		"power":           value.ShowPower,
+		"temperature_led": value.ShowTemperatureLED,
+		"temperature_bt":  value.ShowTemperatureBT,
+		"io":              value.ShowIO,
+		"diagnostics":     value.ShowDiagnostics,
+		"graphs":          value.ShowGraphs,
+	}
+	return result
+}
+
+type measurementSample struct {
+	At        time.Time
+	SupplyMV  int32
+	BusMV     int32
+	CurrentMA int32
+	PowerMW   int32
+	TLEDCenti int16
+	TBTCenti  int16
+}
+
+type timelineEntry struct {
+	At        time.Time
+	Kind      string
+	Text      string
+	Important bool
+}
+
+type FrontPanelState struct {
+	Segments         string
+	RawSegments      [4]byte
+	HasRawSegments   bool
+	DecimalMask      byte
+	Blink            bool
+	CategorySelector bool
+	Brightness       byte
+	LCDLine1         string
+	LCDLine2         string
+	LCDBacklight     bool
+	MenuID           byte
+	MenuName         string
+	Submode          string
+	PressedKeys      byte
+	InputSource      string
+	Exact            bool
+}
+
+type Options struct {
+	UIConfig         func() appconfig.UI
+	SaveUI           func(appconfig.UI) error
+	HostIntegrations func() appconfig.Integrations
+	SaveIntegrations func(appconfig.Integrations) error
+	RFConfig         func() appconfig.RFConfig
+	SaveRF           func(appconfig.RFConfig) error
+	RFFetch          func(context.Context) ([]native.RFEntry, error)
+	RFApplyOrder     func(context.Context, []native.RFEntry) error
+	RFReplaceSupport func() control.RFReplaceSupport
+	RFProbeReplace   func(context.Context) (control.RFReplaceSupport, error)
+	HostMenus        *hostmenu.Manager
+	PushHostPanel    func(hostmenu.Snapshot) error
+	ReleaseHostPanel func() error
+	FrontPanel       func() FrontPanelState
+	FrontPanelKey    func(key int, phase string) error
+	MirrorLCD        func(line1, line2 string) error
+	Integrations     func() hostui.IntegrationStatus
+	Notifier         hostui.Notifier
+	AppActions       <-chan hostui.AppAction
+	Preview          *control.Snapshot
+	ForceWelcome     bool
+	DisableWelcome   bool
+	MarkWelcomed     func()
+	WelcomeMelody    func(context.Context) error
+	Debug            bool
+}

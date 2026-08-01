@@ -1,0 +1,65 @@
+name: Host - Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-vet-build:
+    name: Test, vet, and build
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: cmd
+        working-directory: Tools\Controller
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Go from go.mod
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: Tools/Controller/go.mod
+          cache-dependency-path: Tools/Controller/go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      - name: Run host tests
+        run: go test -count=1 . ./internal/... ./cmd/controller ./cmd/tui-preview
+
+      - name: Run Go vet
+        run: go vet . ./internal/... ./cmd/controller ./cmd/tui-preview
+
+      - name: Prepare artifact directory
+        run: if not exist .ci mkdir .ci
+
+      - name: Build controller
+        run: go build -trimpath -o .ci\controller.exe ./cmd/controller
+
+      - name: Build TUI preview
+        run: go build -trimpath -o .ci\tui-preview.exe ./cmd/tui-preview
+
+      - name: Verify host artifacts
+        run: if not exist .ci\controller.exe exit /b 1
+
+      - name: Upload host artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pccontroller-windows-${{ github.sha }}
+          path: |
+            Tools/Controller/.ci/controller.exe
+            Tools/Controller/.ci/tui-preview.exe
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,36 @@
+#pragma once
+
+#include <Arduino.h>
+
+// Compact fixed-pin TM1637 display with segment-level output caching. The
+// public surface intentionally matches the former TM1637TinyDisplay wrapper.
+class SevenSegments {
+public:
+  void begin(uint8_t brightness = 5);
+  void clear();
+  void showText(const char *text);
+  void showText(const __FlashStringHelper *text);
+  void showInteger(int32_t value);
+  // Avoids floating-point formatting when the caller already owns a scaled
+  // integer: showFixed(1234, 2) renders "12.34".
+  void showFixed(int32_t scaledValue, uint8_t decimalPlaces);
+
+  void showUnavailable();
+  void setBrightness(uint8_t brightness);
+  const uint8_t *rawSegments() const { return cachedSegments_; }
+  uint8_t brightness() const { return brightness_; }
+
+private:
+  static uint8_t encodeCharacter(char value);
+
+  void showScaled(int32_t value, uint8_t decimalPlaces);
+  void commit(const uint8_t segments[4]);
+  void sendCommand(uint8_t command);
+  void writeSegments(const uint8_t segments[4]);
+
+  uint8_t cachedSegments_[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+  uint8_t brightness_ = 0xFF;
+  bool begun_ = false;
+};
+
+extern SevenSegments display;

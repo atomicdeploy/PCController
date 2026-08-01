@@ -1,0 +1,44 @@
+name: Virtual Board - Windows
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: virtual-board-windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: CMake build and CTest
+    runs-on: windows-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Configure Visual Studio build
+        run: cmake -S Tools\VirtualBoard -B .build\virtual-board -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON
+
+      - name: Build native simulator and tests
+        run: cmake --build .build\virtual-board --config Release --parallel
+
+      - name: Run native tests
+        run: ctest --test-dir .build\virtual-board -C Release --output-on-failure
+
+      - name: Upload simulator
+        uses: actions/upload-artifact@v4
+        with:
+          name: pccontroller-virtual-board-windows-${{ github.sha }}
+          path: .build/virtual-board/bin/Release/virtual_board.exe
+          if-no-files-found: error
+          retention-days: 7

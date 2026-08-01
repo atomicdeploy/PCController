@@ -1,0 +1,482 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+
+	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/hostmenu"
+	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/programmer"
+)
+
+type recordingHostPanelBridge struct {
+	pushes   chan hostmenu.Snapshot
+	releases chan struct{}
+}
+
+func newRecordingHostPanelBridge() *recordingHostPanelBridge {
+	return &recordingHostPanelBridge{
+		pushes:   make(chan hostmenu.Snapshot, 16),
+		releases: make(chan struct{}, 16),
+	}
+}
+
+func (bridge *recordingHostPanelBridge) Push(snapshot hostmenu.Snapshot) error {
+	bridge.pushes <- snapshot
+	return nil
+}
+
+func (bridge *recordingHostPanelBridge) Release() error {
+	bridge.releases <- struct{}{}
+	return nil
+}
+
+func waitHostMenuDefinitionChange(
+	t *testing.T,
+	changes <-chan hostmenu.DefinitionChange,
+	menuID string,
+	predicate func(hostmenu.DefinitionChange) bool,
+) hostmenu.DefinitionChange {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case change := <-changes:
+			if change.MenuID == menuID && (predicate == nil || predicate(change)) {
+				return change
+			}
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for host-menu change %q", menuID)
+		}
+	}
+}
+
+func waitHostPanelPush(t *testing.T, pushes <-chan hostmenu.Snapshot) hostmenu.Snapshot {
+	t.Helper()
+	select {
+	case snapshot := <-pushes:
+		return snapshot
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for host front-panel push")
+		return hostmenu.Snapshot{}
+	}
+}
+
+func waitHostPanelRelease(t *testing.T, releases <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-releases:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for host front-panel release")
+	}
+}
+
+func assertNoHostPanelAction(t *testing.T, bridge *recordingHostPanelBridge) {
+	t.Helper()
+	select {
+	case snapshot := <-bridge.pushes:
+		t.Fatalf("inactive edit unexpectedly pushed front panel: %+v", snapshot)
+	case <-bridge.releases:
+		t.Fatal("inactive edit unexpectedly released front panel")
+	case <-time.After(120 * time.Millisecond):
+	}
+}
+
+func removeHostMenu(config *appconfig.Config, menuID string) {
+	menus := config.HostMenus.Menus[:0]
+	for _, menu := range config.HostMenus.Menus {
+		if menu.ID != menuID {
+			menus = append(menus, menu)
+		}
+	}
+	config.HostMenus.Menus = menus
+	for menuIndex := range config.HostMenus.Menus {
+		items := config.HostMenus.Menus[menuIndex].Items[:0]
+		for _, item := range config.HostMenus.Menus[menuIndex].Items {
+			if item.Type != "submenu" || item.Submenu != menuID {
+				items = append(items, item)
+			}
+		}
+		config.HostMenus.Menus[menuIndex].Items = items
+	}
+}
+
+func TestHelpAndVersion(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"help"}, "controller ws serve"},
+		{[]string{"version"}, "development source-hash=unknown built=unknown"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if err := run(test.args, &stdout, &stderr); err != nil {
+			t.Fatalf("%v: %v", test.args, err)
+		}
+		if !strings.Contains(stdout.String(), test.want) {
+			t.Fatalf("%v output %q missing %q", test.args, stdout.String(), test.want)
+		}
+	}
+}
+
+func TestUsageVT100StylingPreservesPlainContent(t *testing.T) {
+	const plain = "◆ PCController Tool\n\nInteractive control:\n  controller tui [connection flags]"
+	styled := decorateUsage(plain, true)
+	for _, want := range []string{"\x1b[1;36m", "\x1b[1;33m", "\x1b[1;32m", "\x1b[0m"} {
+		if !strings.Contains(styled, want) {
+			t.Fatalf("styled usage missing %q: %q", want, styled)
+		}
+	}
+	stripANSI := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	if got := stripANSI.ReplaceAllString(styled, ""); got != plain {
+		t.Fatalf("styled usage changed content: got %q want %q", got, plain)
+	}
+	if got := decorateUsage(plain, false); got != plain {
+		t.Fatalf("plain fallback changed content: got %q want %q", got, plain)
+	}
+}
+
+func TestDeniedHostMenuInteractionSelectsShortErrorCue(t *testing.T) {
+	opcode, payload, ok := hostMenuInteractionCue(hostmenu.InteractionEvent{Kind: "menu.action.denied"})
+	if !ok || opcode != native.OpBuzzer || len(payload) != 4 ||
+		binary.LittleEndian.Uint16(payload[:2]) != 180 ||
+		binary.LittleEndian.Uint16(payload[2:]) != 80 {
+		t.Fatalf("denied cue opcode/payload=0x%02X % X ok=%t", opcode, payload, ok)
+	}
+	if _, _, ok := hostMenuInteractionCue(hostmenu.InteractionEvent{Kind: "menu.changed"}); ok {
+		t.Fatal("non-denied interaction selected an error cue")
+	}
+}
+
+func TestWatchedHostMenusAcrossFormatsRoutePreviewAndRelease(t *testing.T) {
+	for _, extension := range []string{".json", ".yaml", ".toml"} {
+		t.Run(extension, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "controller"+extension)
+			store, err := appconfig.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			manager := hostmenu.New(store.Current().HostMenus, hostmenu.Callbacks{})
+			if err := manager.Open("host"); err != nil {
+				t.Fatal(err)
+			}
+			bridge := newRecordingHostPanelBridge()
+			changes := make(chan hostmenu.DefinitionChange, 32)
+			routeErrors := make(chan error, 4)
+			manager.SetDefinitionChanged(func(change hostmenu.DefinitionChange) {
+				changes <- change
+				if routeErr := syncLegacyHostMenuOverlay(manager, bridge, &change); routeErr != nil {
+					routeErrors <- routeErr
+				}
+			})
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			updates := store.Subscribe(ctx)
+			<-updates // The manager was constructed from this initial snapshot.
+			go func() {
+				for value := range updates {
+					manager.UpdateConfig(value.HostMenus)
+				}
+			}()
+			watchErrors := make(chan error, 4)
+			go store.Watch(ctx, 10*time.Millisecond, nil, func(watchErr error) {
+				watchErrors <- watchErr
+			})
+
+			// An external atomic file edit exercises fsnotify, format decoding,
+			// Store.Reload, the subscription, Manager.UpdateConfig, and the same
+			// production routing helper used by cap19 firmware.
+			active := store.Current()
+			active.HostMenus.Menus[0].Label = "LIVE"
+			active.HostMenus.Menus[0].Title = "Watched Menu"
+			active.HostMenus.Menus[0].Content = "Updated now"
+			if err := appconfig.Write(path, active); err != nil {
+				t.Fatal(err)
+			}
+			change := waitHostMenuDefinitionChange(t, changes, "host", func(change hostmenu.DefinitionChange) bool {
+				return change.Active
+			})
+			if change.Kind != "menu.content.changed" {
+				t.Fatalf("active change kind=%q", change.Kind)
+			}
+			preview := waitHostPanelPush(t, bridge.pushes)
+			if preview.Panel.Segments != "LIVE" ||
+				preview.Panel.LCDLine1 != "Watched Menu" ||
+				preview.Panel.LCDLine2 != "Updated now" {
+				t.Fatalf("active edit did not push matching TM1637/LCD preview: %+v", preview.Panel)
+			}
+			loaded, _, err := appconfig.Load(path)
+			if err != nil || loaded.HostMenus.Menus[0].Label != "LIVE" {
+				t.Fatalf("%s parse/write reload=%+v err=%v", extension, loaded.HostMenus.Menus[0], err)
+			}
+
+			// Store.Update uses the same atomic encoder/decoder for each format.
+			// Editing a different node must emit an event without disturbing the
+			// currently displayed host page.
+			if _, err := store.Update(func(config *appconfig.Config) error {
+				config.HostMenus.Menus[1].Content = "Inactive edit"
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			change = waitHostMenuDefinitionChange(t, changes, "pc-settings", nil)
+			if change.Active || change.Kind != "menu.content.changed" {
+				t.Fatalf("inactive change=%+v", change)
+			}
+			assertNoHostPanelAction(t, bridge)
+
+			// Hiding the active node closes the session and releases physical
+			// capture; restoring it is persisted before testing deletion too.
+			if err := manager.Open("pc-settings"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Update(func(config *appconfig.Config) error {
+				config.HostMenus.Menus[1].Flags.Visible = false
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			waitHostMenuDefinitionChange(t, changes, "pc-settings", nil)
+			waitHostPanelRelease(t, bridge.releases)
+			if manager.Snapshot().Active {
+				t.Fatal("hidden active host menu retained front-panel session")
+			}
+
+			if _, err := store.Update(func(config *appconfig.Config) error {
+				config.HostMenus.Menus[1].Flags.Visible = true
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			waitHostMenuDefinitionChange(t, changes, "pc-settings", nil)
+			waitHostPanelRelease(t, bridge.releases)
+			if err := manager.Open("pc-settings"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Update(func(config *appconfig.Config) error {
+				removeHostMenu(config, "pc-settings")
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			waitHostMenuDefinitionChange(t, changes, "pc-settings", nil)
+			waitHostPanelRelease(t, bridge.releases)
+			if manager.Snapshot().Active {
+				t.Fatal("deleted active host menu retained front-panel session")
+			}
+			persisted, _, err := appconfig.Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, menu := range persisted.HostMenus.Menus {
+				if menu.ID == "pc-settings" {
+					t.Fatal("deleted host menu remained in persisted configuration")
+				}
+			}
+
+			select {
+			case routeErr := <-routeErrors:
+				t.Fatalf("host-menu preview routing failed: %v", routeErr)
+			default:
+			}
+			select {
+			case watchErr := <-watchErrors:
+				t.Fatalf("configuration watcher failed: %v", watchErr)
+			default:
+			}
+		})
+	}
+}
+
+func TestArduinoUpdateDryRunUsesControllerOwnedPlan(t *testing.T) {
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := runArduinoUpdate(
+		[]string{"--dry-run", "--arduino-cli", "arduino-cli"},
+		&stdout,
+		&stderr,
+		store,
+	); err != nil {
+		t.Fatalf("dry-run: %v\nstderr=%s", err, stderr.String())
+	}
+	for _, want := range []string{
+		"core update-index",
+		"lib install \"Adafruit PWM Servo Driver Library\"",
+		"MiniCore:avr",
+		"no changes made",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("dry-run output missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+func TestBootAndArduinoCLIArguments(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []string
+		call  func([]string) ([]string, error)
+		want  []string
+	}{
+		{
+			name: "boot info", input: []string{"info", "--port", "COM18"},
+			call: bootCLIArguments,
+			want: []string{
+				"--method", "urclock", "--operation", "metadata",
+				"--port", "COM18",
+			},
+		},
+		{
+			name: "boot read", input: []string{"read", "backup.hex"},
+			call: bootCLIArguments,
+			want: []string{
+				"--method", "urclock", "--operation", "read-flash",
+				"--output", "backup.hex",
+			},
+		},
+		{
+			name: "boot backup", input: []string{"backup", "safe copies"},
+			call: bootCLIArguments,
+			want: []string{
+				"--method", "urclock", "--operation", "backup",
+				"--output", "safe copies",
+			},
+		},
+		{
+			name: "arduino burn", input: []string{"burn-bootloader", "--programmer", "usbasp"},
+			call: arduinoCLIArguments,
+			want: []string{
+				"--method", "arduino", "--operation", "burn-bootloader",
+				"--programmer", "usbasp",
+			},
+		},
+	}
+	for _, test := range tests {
+		got, err := test.call(test.input)
+		if err != nil {
+			t.Fatalf("%s: %v", test.name, err)
+		}
+		if !reflect.DeepEqual(got, test.want) {
+			t.Fatalf("%s: got %v, want %v", test.name, got, test.want)
+		}
+	}
+	if _, err := arduinoCLIArguments([]string{"upload", ".", "--port", "COM18"}); err == nil ||
+		!strings.Contains(err.Error(), "program flash") {
+		t.Fatalf("direct Arduino upload was not redirected to guarded flash: %v", err)
+	}
+}
+
+func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
+	got, err := normalizeProgramCLIArgs([]string{
+		"flash", "firmware image.hex", "COM18", "--allow-incomplete-backup",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"--operation", "write-flash", "--method", "urclock",
+		"--hex", "firmware image.hex", "--allow-incomplete-backup", "--port", "COM18",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("normalized=%#v want=%#v", got, want)
+	}
+	usb, err := normalizeProgramCLIArgs([]string{"flash", "firmware.hex", "--usbasp-troubleshooting"})
+	if err != nil || !strings.Contains(strings.Join(usb, " "), "--method usbasp --usbasp-troubleshooting") {
+		t.Fatalf("USBasp normalized=%#v err=%v", usb, err)
+	}
+	before, err := normalizeProgramCLIArgs([]string{
+		"--allow-incomplete-backup", "--app-reconnect=false", "flash",
+		"firmware.hex", "--dry-run", "COM18",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantBefore := []string{
+		"--operation", "write-flash", "--method", "urclock", "--hex", "firmware.hex",
+		"--allow-incomplete-backup", "--app-reconnect=false", "--dry-run", "--port", "COM18",
+	}
+	if !reflect.DeepEqual(before, wantBefore) {
+		t.Fatalf("flags-before normalized=%#v want=%#v", before, wantBefore)
+	}
+	canonical := []string{"--hex", "flash", "--operation", "verify-flash"}
+	gotCanonical, err := normalizeProgramCLIArgs(canonical)
+	if err != nil || !reflect.DeepEqual(gotCanonical, canonical) {
+		t.Fatalf("canonical flags were reinterpreted: got=%#v err=%v", gotCanonical, err)
+	}
+}
+
+func TestProgramShellWordsPreserveBackupAndEEPROMIntent(t *testing.T) {
+	backup := programShellWords(programmer.Options{
+		Method: programmer.MethodUrclock, Operation: programmer.OperationBackup,
+		OutputPath: `C:\safe backups`,
+	})
+	wantBackup := []string{"program", "backup", "urclock", `C:\safe backups`}
+	if !reflect.DeepEqual(backup, wantBackup) {
+		t.Fatalf("backup words = %#v, want %#v", backup, wantBackup)
+	}
+	eeprom := programShellWords(programmer.Options{
+		Method: programmer.MethodUSBasp, Operation: programmer.OperationWriteEEPROM,
+		HexPath: "settings.hex", ConfirmEEPROMWrite: true,
+	})
+	wantEEPROM := []string{
+		"program", "write-eeprom", "usbasp", "settings.hex", "CONFIRM",
+	}
+	if !reflect.DeepEqual(eeprom, wantEEPROM) {
+		t.Fatalf("EEPROM words = %#v, want %#v", eeprom, wantEEPROM)
+	}
+}
+
+func TestProgramShellWordsRouteFlashThroughGuard(t *testing.T) {
+	got := programShellWords(programmer.Options{
+		Method: programmer.MethodUrclock, Operation: programmer.OperationWriteFlash,
+		HexPath: `C:\build output\firmware.hex`,
+	})
+	want := []string{"program", "flash", `C:\build output\firmware.hex`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("guarded flash words=%#v want=%#v", got, want)
+	}
+}
+
+func TestWSClientRejectsUnsafeProgrammersBeforeNetwork(t *testing.T) {
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "controller.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := runWS(
+		[]string{"client", "--method", "usbasp"},
+		&stdout,
+		&stderr,
+		store,
+	); err == nil || !strings.Contains(err.Error(), "--usbasp-troubleshooting") {
+		t.Fatalf("unguarded USBasp was not rejected: %v", err)
+	}
+	if err := runWS(
+		[]string{"client", "--method", "avrdude"},
+		&stdout,
+		&stderr,
+		store,
+	); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("direct avrdude WS flashing was not rejected: %v", err)
+	}
+}
+
+func TestUnknownCommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"unknown"}, &stdout, &stderr); err == nil {
+		t.Fatal("expected unknown command error")
+	}
+}

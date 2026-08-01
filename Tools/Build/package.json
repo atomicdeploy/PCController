@@ -1,0 +1,13 @@
+{
+  "name": "pccontroller-build-tool",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "lint": "node --check build.mjs && node --check build.test.mjs",
+    "test": "node --test build.test.mjs",
+    "check": "npm run lint && npm test"
+  }
+}

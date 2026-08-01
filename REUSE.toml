@@ -1,0 +1,29 @@
+version = 1
+SPDX-PackageName = "PCController"
+SPDX-PackageSupplier = "David Refoua and PCController contributors"
+SPDX-PackageDownloadLocation = "https://github.com/atomicdeploy/PCController"
+
+[[annotations]]
+path = ["**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 David Refoua and PCController contributors"
+SPDX-License-Identifier = "MIT OR BSD-2-Clause"
+
+[[annotations]]
+path = ["Project/AddressableLeds.cpp"]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "Adafruit Industries and Adafruit NeoPixel contributors",
+  "2026 David Refoua and PCController contributors",
+]
+SPDX-License-Identifier = "LGPL-3.0-or-later"
+
+[[annotations]]
+path = ["LocalLib/DallasTemperatureBus.cpp"]
+precedence = "override"
+SPDX-FileCopyrightText = [
+  "2000 Dallas Semiconductor Corporation",
+  "2007 Jim Studt and OneWire contributors",
+  "2026 David Refoua and PCController contributors",
+]
+SPDX-License-Identifier = "MIT"

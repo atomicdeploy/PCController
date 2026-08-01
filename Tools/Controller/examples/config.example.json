@@ -1,0 +1,657 @@
+{
+  "schema": 1,
+  "connection": {
+    "vid": "1A86",
+    "pid": "7523",
+    "name": "USB-SERIAL CH340",
+    "baud_rate": 115200,
+    "startup_wait_ms": 1200,
+    "request_timeout_ms": 1200,
+    "hello_attempts": 3,
+    "reset_on_reconnect": false,
+    "last_device": {
+      "port": "tcp://127.0.0.1:8876",
+      "name": "PCController Virtual Board",
+      "last_seen": "2026-08-01T15:12:15.8259604Z"
+    }
+  },
+  "ui": {
+    "app_title": "PCController",
+    "setup_complete": false,
+    "welcome_melody": "notify",
+    "status_interval_ms": 250,
+    "idle_status_interval_ms": 0,
+    "event_log_limit": 500,
+    "history_hours": 24,
+    "history_sample_ms": 1000,
+    "voltage_decimals": 2,
+    "current_decimals": 1,
+    "power_decimals": 2,
+    "temperature_decimals": 1,
+    "show_supply_voltage": true,
+    "show_bus_voltage": true,
+    "show_current": true,
+    "show_power": true,
+    "show_temperature_led": true,
+    "show_temperature_bt": true,
+    "show_io": true,
+    "show_diagnostics": true,
+    "show_graphs": true,
+    "lcd_service_enabled": true,
+    "mirror_prompt_to_lcd": false,
+    "lcd_prompt_debounce_ms": 120,
+    "lcd_priority_hold_ms": 2000
+  },
+  "ipc": {
+    "listen": "127.0.0.1:8787",
+    "websocket_path": "/ipc",
+    "allow_remote": false,
+    "allowed_origins": [
+      "localhost:*",
+      "127.0.0.1:*",
+      "[::1]:*"
+    ],
+    "socket_io_path": "/socket.io/"
+  },
+  "integrations": {
+    "hotkeys": [
+      {
+        "name": "open-events",
+        "enabled": true,
+        "chord": "Ctrl+Alt+P",
+        "command": "app page events"
+      },
+      {
+        "name": "emergency-outputs-off",
+        "enabled": true,
+        "chord": "Ctrl+Alt+Shift+S",
+        "command": "relay off"
+      }
+    ],
+    "keyboard_control": {
+      "enabled": false,
+      "bindings": [
+        {
+          "name": "side-b-up",
+          "enabled": true,
+          "key": "A",
+          "primary": {
+            "type": "motion",
+            "behavior": "momentary",
+            "side": "B",
+            "direction": "up"
+          },
+          "control": {
+            "type": "motion",
+            "behavior": "latch",
+            "side": "B",
+            "direction": "up"
+          }
+        },
+        {
+          "name": "side-b-down",
+          "enabled": true,
+          "key": "S",
+          "primary": {
+            "type": "motion",
+            "behavior": "momentary",
+            "side": "B",
+            "direction": "down"
+          },
+          "control": {
+            "type": "motion",
+            "behavior": "latch",
+            "side": "B",
+            "direction": "down"
+          }
+        },
+        {
+          "name": "side-a-up",
+          "enabled": true,
+          "key": "K",
+          "primary": {
+            "type": "motion",
+            "behavior": "momentary",
+            "side": "A",
+            "direction": "up"
+          },
+          "control": {
+            "type": "motion",
+            "behavior": "latch",
+            "side": "A",
+            "direction": "up"
+          }
+        },
+        {
+          "name": "side-a-down",
+          "enabled": true,
+          "key": "L",
+          "primary": {
+            "type": "motion",
+            "behavior": "momentary",
+            "side": "A",
+            "direction": "down"
+          },
+          "control": {
+            "type": "motion",
+            "behavior": "latch",
+            "side": "A",
+            "direction": "down"
+          }
+        },
+        {
+          "name": "relay-1",
+          "enabled": true,
+          "key": "1",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 1
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 1
+          }
+        },
+        {
+          "name": "relay-2",
+          "enabled": true,
+          "key": "2",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 2
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 2
+          }
+        },
+        {
+          "name": "relay-3",
+          "enabled": true,
+          "key": "3",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 3
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 3
+          }
+        },
+        {
+          "name": "relay-4",
+          "enabled": true,
+          "key": "4",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 4
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 4
+          }
+        },
+        {
+          "name": "relay-5",
+          "enabled": true,
+          "key": "5",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 5
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 5
+          }
+        },
+        {
+          "name": "relay-6",
+          "enabled": true,
+          "key": "6",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 6
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 6
+          }
+        },
+        {
+          "name": "relay-7",
+          "enabled": true,
+          "key": "7",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 7
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 7
+          }
+        },
+        {
+          "name": "relay-8",
+          "enabled": true,
+          "key": "8",
+          "primary": {
+            "type": "relay",
+            "behavior": "toggle",
+            "relay": 8
+          },
+          "control": {
+            "type": "relay",
+            "behavior": "momentary",
+            "relay": 8
+          }
+        },
+        {
+          "name": "pwm-1",
+          "enabled": true,
+          "key": "9",
+          "primary": {
+            "type": "pwm",
+            "behavior": "toggle",
+            "value": 4095
+          },
+          "control": {
+            "type": "pwm",
+            "behavior": "momentary",
+            "value": 4095
+          }
+        }
+      ]
+    },
+    "notifications": {
+      "enabled": true,
+      "door_running_beep": true,
+      "door_running_toast": true,
+      "important_kinds": [
+        "error",
+        "door",
+        "warning.door-open-running",
+        "motion",
+        "rf.learn.ended",
+        "hot"
+      ],
+      "actions": [
+        {
+          "id": "events",
+          "label": "Open events",
+          "command": "app page events"
+        },
+        {
+          "id": "stop",
+          "label": "Stop outputs",
+          "command": "relay off"
+        }
+      ]
+    },
+    "discovery": {
+      "mdns_enabled": false,
+      "ssdp_enabled": false
+    },
+    "inbound_webhooks_enabled": false
+  },
+  "safety": {
+    "motion_door_policy": "always"
+  },
+  "rf": {
+    "display_radix": "hex"
+  },
+  "host_menus": {
+    "default_menu": "host",
+    "request_gesture": "status-hold-k4",
+    "display_duration_ms": 1500,
+    "session_timeout_ms": 120000,
+    "menus": [
+      {
+        "id": "host",
+        "label": "HOST",
+        "title": "PC Host",
+        "items": [
+          {
+            "id": "host-status",
+            "label": "PC",
+            "title": "Host status",
+            "type": "readonly",
+            "read_action": "host.status"
+          },
+          {
+            "id": "device-status",
+            "label": "DEV",
+            "title": "Device status",
+            "type": "readonly",
+            "read_action": "device.status"
+          },
+          {
+            "id": "ip",
+            "label": "IP",
+            "title": "Host IP",
+            "type": "readonly",
+            "read_action": "host.ip"
+          },
+          {
+            "id": "api",
+            "label": "API",
+            "title": "API and links",
+            "type": "readonly",
+            "read_action": "api.status"
+          },
+          {
+            "id": "settings",
+            "label": "CFG",
+            "title": "PC settings",
+            "type": "submenu",
+            "submenu": "pc-settings"
+          },
+          {
+            "id": "system",
+            "label": "SYS",
+            "title": "System actions",
+            "type": "submenu",
+            "submenu": "system-actions"
+          }
+        ]
+      },
+      {
+        "id": "pc-settings",
+        "label": "CFG",
+        "title": "PC Settings",
+        "items": [
+          {
+            "id": "app-title",
+            "label": "NAME",
+            "title": "Application title",
+            "type": "text",
+            "read_action": "pc.ui.app_title",
+            "write_action": "pc.ui.app_title"
+          },
+          {
+            "id": "poll",
+            "label": "POLL",
+            "title": "Polling ms",
+            "type": "number",
+            "value": "200",
+            "min": 100,
+            "max": 5000,
+            "step": 50,
+            "read_action": "pc.ui.status_interval_ms",
+            "write_action": "pc.ui.status_interval_ms"
+          },
+          {
+            "id": "lcd-service",
+            "label": "I2C",
+            "title": "PC LCD service",
+            "type": "bool",
+            "value": "true",
+            "read_action": "pc.ui.lcd_service_enabled",
+            "write_action": "pc.ui.lcd_service_enabled"
+          },
+          {
+            "id": "lcd-mirror",
+            "label": "LCD",
+            "title": "Prompt mirror",
+            "type": "bool",
+            "value": "false",
+            "read_action": "pc.ui.mirror_prompt_to_lcd",
+            "write_action": "pc.ui.mirror_prompt_to_lcd"
+          },
+          {
+            "id": "dtr",
+            "label": "DTR",
+            "title": "Reset reconnect",
+            "type": "bool",
+            "value": "false",
+            "read_action": "pc.connection.reset_on_reconnect",
+            "write_action": "pc.connection.reset_on_reconnect"
+          }
+        ]
+      },
+      {
+        "id": "system-actions",
+        "label": "SYS",
+        "title": "System Actions",
+        "items": [
+          {
+            "id": "brightness",
+            "label": "BRIT",
+            "title": "Monitor brightness",
+            "type": "number",
+            "value": "50",
+            "min": 0,
+            "max": 100,
+            "step": 5,
+            "read_action": "os.brightness",
+            "write_action": "os.brightness",
+            "guarded": true
+          },
+          {
+            "id": "lock",
+            "label": "LOCK",
+            "title": "Lock Windows",
+            "type": "action",
+            "write_action": "os.lock",
+            "guarded": true
+          },
+          {
+            "id": "suspend",
+            "label": "SUSP",
+            "title": "Suspend Windows",
+            "type": "action",
+            "write_action": "os.sleep",
+            "guarded": true
+          },
+          {
+            "id": "hibernate",
+            "label": "HIBR",
+            "title": "Hibernate Windows",
+            "type": "action",
+            "write_action": "os.hibernate",
+            "guarded": true
+          },
+          {
+            "id": "restart",
+            "label": "RSTR",
+            "title": "Restart Windows",
+            "type": "action",
+            "write_action": "os.restart",
+            "guarded": true
+          },
+          {
+            "id": "shutdown",
+            "label": "OFF",
+            "title": "Shut down PC",
+            "type": "action",
+            "write_action": "os.shutdown",
+            "guarded": true
+          }
+        ]
+      }
+    ]
+  },
+  "os_actions": {
+    "virtual_keys": {
+      "enabled": false,
+      "allowed": [
+        "UP",
+        "DOWN",
+        "LEFT",
+        "RIGHT",
+        "F13"
+      ],
+      "min_interval_ms": 120,
+      "hold_ms": 30
+    },
+    "power": {
+      "enabled": false,
+      "allowed": [
+        "lock",
+        "sleep",
+        "hibernate"
+      ],
+      "require_confirmation": true,
+      "confirmation_token": "CONFIRM",
+      "allow_automation": false
+    },
+    "brightness": {
+      "enabled": false,
+      "min_percent": 0,
+      "max_percent": 100
+    }
+  },
+  "paths": {},
+  "programming": {
+    "method": "urclock",
+    "fqbn": "MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external",
+    "programmer": "usbasp"
+  },
+  "scripts": {
+    "door-log": "scripts/door-log.ps1"
+  },
+  "macros": [
+    {
+      "id": 1,
+      "name": "output-demo",
+      "category": "lighting",
+      "color": "violet",
+      "label": "dEMO",
+      "lcd_message": "Output demo running",
+      "timing_tolerance_us": 20000,
+      "steps": [
+        {
+          "kind": "relay",
+          "target": 4,
+          "value": 1
+        },
+        {
+          "at_ms": 250,
+          "kind": "pwm",
+          "value": 1024
+        },
+        {
+          "at_ms": 750,
+          "kind": "pwm",
+          "value": 3072
+        },
+        {
+          "at_ms": 1250,
+          "kind": "relay",
+          "target": 4
+        },
+        {
+          "at_ms": 1500,
+          "kind": "pwm"
+        }
+      ]
+    }
+  ],
+  "melodies": [
+    {
+      "name": "notify",
+      "notes": [
+        {
+          "frequency_hz": 1047,
+          "duration_ms": 75,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 1319,
+          "duration_ms": 75,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 1568,
+          "duration_ms": 150
+        }
+      ]
+    }
+  ],
+  "status_effects": [
+    {
+      "name": "attention",
+      "kind": "flash",
+      "red": 255,
+      "green": 96,
+      "blue": 0,
+      "brightness": 220,
+      "period_ms": 700
+    },
+    {
+      "name": "breathe-blue",
+      "kind": "breathe",
+      "red": 30,
+      "green": 120,
+      "blue": 255,
+      "brightness": 200,
+      "min_brightness": 8,
+      "period_ms": 1800
+    }
+  ],
+  "automations": [
+    {
+      "name": "door-open-notify",
+      "enabled": true,
+      "cooldown_ms": 500,
+      "match": {
+        "kind": "door",
+        "contains": "opened"
+      },
+      "actions": [
+        {
+          "type": "board",
+          "command": "display lcd 2000 Door open"
+        },
+        {
+          "type": "emit",
+          "event": "door-open"
+        }
+      ]
+    },
+    {
+      "name": "remote-button-demo",
+      "enabled": false,
+      "cooldown_ms": 400,
+      "match": {
+        "kind": "rf",
+        "gesture": "down",
+        "rf_code": 1193046,
+        "rf_protocol": 1
+      },
+      "actions": [
+        {
+          "type": "board",
+          "command": "menu next"
+        },
+        {
+          "type": "rf",
+          "rf": {
+            "code": 6636321,
+            "bits": 24,
+            "protocol": 1,
+            "pulse_us": 350,
+            "repeats": 2
+          }
+        },
+        {
+          "type": "emit",
+          "event": "remote-button"
+        }
+      ]
+    }
+  ]
+}

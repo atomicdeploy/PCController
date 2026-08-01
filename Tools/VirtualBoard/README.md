@@ -1,0 +1,183 @@
+# PCController native virtual board
+
+This directory contains a native C++17 substitute for the ATmega328P
+controller. It implements the same bounded COBS + CRC-8 + opcode protocol as
+the firmware and listens on:
+
+```text
+tcp://127.0.0.1:8765
+```
+
+It is intentionally isolated from the PC host configuration. Board settings
+are stored in a separate 1 KiB virtual MCU EEPROM image
+(`virtual-mcu-eeprom.bin` by default), using the same conceptual ownership as
+the physical controller's EEPROM.
+
+## Architecture
+
+The emulator is split behind injectable hardware interfaces:
+
+- `ISensors`: INA-like supply/current values, tLED, tBT, door, and Bluetooth
+- `IRelays`: R1-R8 plus the two direction/enable side mappings
+- `IPwm`: all 16 logical 0-4095 PWM channels and Off/Manual/Auto modes
+- `IAddressableLeds`: 11 WS2811/WS2812 pixels plus global brightness
+- `IDisplays`: TM1637 text, 16x2 LCD text, and buzzer state
+- `IEeprom`: byte-addressable persistent MCU EEPROM
+
+`VirtualBoard` owns protocol/state-machine behavior and accepts those
+interfaces in its constructor, so tests or future firmware-facing adapters can
+replace any emulated peripheral independently.
+
+## Build
+
+Requirements available from `PATH`:
+
+- CMake 3.20+
+- Ninja
+- a working GCC `g++` with C++17 support
+
+Windows Git Bash, Linux, or macOS shell:
+
+```sh
+chmod +x ./build.sh
+./build.sh
+```
+
+The script configures, compiles, and runs tests. It discovers tools from
+`PATH` (or `CXX`) and contains no machine-specific toolchain paths.
+
+## Run and connect
+
+Start the board:
+
+```sh
+./.build/bin/virtual_board.exe
+```
+
+Choose another EEPROM image or endpoint if desired:
+
+```sh
+./.build/bin/virtual_board.exe \
+  --eeprom ./state/test-board.eeprom \
+  --bind 127.0.0.1 \
+  --port 8765
+```
+
+Point the PC host at it exactly like a serial device:
+
+```sh
+controller exec --port tcp://127.0.0.1:8765 hello
+controller monitor --port tcp://127.0.0.1:8765
+controller tui --port tcp://127.0.0.1:8765
+```
+
+The server accepts one active controller client at a time and automatically
+accepts a replacement after disconnect.
+
+## Interactive hardware controls
+
+Type `help` in the virtual-board console. Important controls are:
+
+```text
+door open|closed|toggle
+tled 28.25
+tbt 25.75
+bt off|on|blink
+voltage 12.10
+current 325
+key 1 down
+key 1 up
+relay 5 on
+pwm 0 2048
+strip pixel 3 255 80 0 128
+strip fill 0 0 255
+strip clear
+menu 4
+segments DEMO
+lcd Enclosure open
+reset 0x08
+show
+quit
+```
+
+Door and Bluetooth changes generate immediate asynchronous device events.
+`key` supports click, double, hold, repeat, and release gestures. To simulate
+an RF learn, first issue `RF_LEARN_START` from the host and then enter:
+
+```text
+rflearn 0xABCDEF 24 1 350
+```
+
+Generate the raw receive event used by host automation with:
+
+```text
+rfrecv 0xABCDEF 24 1 350
+```
+
+The emulator looks up the code in its learned-remote table and includes that
+entry ID, or `0xFF` when unmatched.
+
+`reset` defaults to watchdog cause `0x08`; an explicit cause can be supplied
+to simulate another MCU reset source. Both protocol reset modes and this
+console control advance the same wear-levelled counter in the virtual MCU
+EEPROM. That EEPROM image remains independent of the PC host's JSON
+configuration.
+
+Use `--no-stdin` for unattended test runs.
+
+## Implemented wire behavior
+
+- HELLO with build hash/date/time identity
+- fixed 48-byte live STATUS and configurable streaming; byte 43 is the
+  captured reset cause and bytes 44..47 are the persistent reset count in
+  little-endian order
+- schema-2 GET/SET_SETTINGS persisted to virtual MCU EEPROM
+- tLED/tBT temperature identities and values
+- PWM set/get/all-off/mode/RGB plus automatic channel demo
+- addressable LED opcode `0x16`, including per-pixel/fill RGB and brightness
+- safe side relay mapping, direct relays, all-off, and relay test
+- menu actions/direct page selection and save-last-page behavior
+- TM1637/LCD text overrides and buzzer commands
+- schema-2 MCU-timed macro begin/append/run/query/cancel over a 127-byte
+  circular queue; queued records reuse ordinary peripheral opcodes
+- macro buffer/status events plus reserved sequence `0xFE` dispatch evidence,
+  letting the host refill ahead and verify each device-side execution time
+- I2C scan (`0x27`, `0x40`, `0x41`)
+- RF transmit/learn/list/remove/map simulation
+- key events including gestures 5=down and 6=up
+- timestamped door, Bluetooth, PWM-channel, RF-learn, macro, and reset events;
+  the high bit marks the appended device-microsecond timestamp
+- reset event type 7 encoded as
+  `[0x87, cause, count LE u32, deviceMicros LE u32]`
+- raw RF receive event type 8 with code/timing fields and learned ID
+- application/bootloader reset requests as a persistent-EEPROM soft reset;
+  each request advances the MCU-owned reset journal and emits reset event 7
+
+The emulator models observable behavior, not AVR instruction timing or actual
+electrical faults.
+
+Every acknowledgement carries
+`[requestOpcode, error, deviceMicros LE u32]`. Macro timing is therefore
+measured at the emulated MCU rather than inferred from host/network arrival.
+Automations invoke named macros through the same playback path, so direct,
+scripted, TUI, API, and bridge requests share cancellation and timing rules.
+
+## Verification
+
+Unit tests cover framing/CRC, maximum payloads, HELLO shape, STATUS and
+temperature schemas, macro cancellation, events, and EEPROM persistence:
+
+```sh
+./build.sh
+```
+
+For a real TCP protocol smoke test, run the server and then:
+
+```sh
+./.build/bin/virtual_board_smoke.exe 127.0.0.1 8765
+```
+
+A successful exchange prints the authenticated `PCController` identity,
+its native build hash, confirmation that a raw addressable-LED fill command
+was acknowledged, the 48-byte reset telemetry fields, and a validated
+type-7 reset event whose persistent count advances by one.

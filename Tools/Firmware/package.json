@@ -1,0 +1,13 @@
+{
+  "name": "pccontroller-avr-firmware-tool",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "lint": "node --check firmware.mjs && node --check firmware.test.mjs",
+    "test": "node --test firmware.test.mjs",
+    "check": "npm run lint && npm test"
+  }
+}

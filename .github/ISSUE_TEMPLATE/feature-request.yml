@@ -1,0 +1,62 @@
+name: Feature request
+description: Propose a testable board, host, protocol, automation, or tooling capability.
+title: "feature: "
+labels: []
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - Front panel and menus
+        - Sensors and outputs
+        - RF and automation
+        - Host TUI or CLI
+        - API, IPC, or networking
+        - Firmware build or programming
+        - VirtualBoard or test tooling
+        - Documentation or project infrastructure
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: Explain the user-visible need before describing an implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe the board, host, API, and offline behavior that should result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: List concrete simulator, host, and physical-device checks that would prove completion.
+      placeholder: |
+        - [ ] Unit or protocol test ...
+        - [ ] Host interaction ...
+        - [ ] Physical board verification ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and resource tradeoffs
+      description: Note EEPROM migration, flash/SRAM cost, protocol compatibility, timing, safety, or licensing concerns.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched for an existing request and linked related issues where appropriate.
+          required: true
