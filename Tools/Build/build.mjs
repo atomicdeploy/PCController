@@ -390,10 +390,15 @@ function assertNodeVersion() {
 	}
 }
 
+function environmentValue(env, name) {
+	const key = Object.keys(env).find(candidate => candidate.toLowerCase() === name.toLowerCase())
+	return key ? env[key] : ''
+}
+
 function expandWindowsVariables(value, env) {
 	return value.replace(/%([^%]+)%/g, (match, name) => {
-		const key = Object.keys(env).find(candidate => candidate.toLowerCase() === name.toLowerCase())
-		return key ? env[key] : match
+		const expanded = environmentValue(env, name)
+		return expanded || match
 	})
 }
 
@@ -412,7 +417,7 @@ export function refreshedEnvironment(base = process.env, platform = process.plat
 	const user = registryPath('HKCU\\Environment', base)
 	// Preserve the invoking shell's priority. CI tool setup and developer shells
 	// intentionally prepend selected toolchains; registry entries only fill gaps.
-	const values = [base.PATH || '', machine, user].flatMap(value => value.split(delimiter)).filter(Boolean)
+	const values = [environmentValue(base, 'PATH'), machine, user].flatMap(value => value.split(delimiter)).filter(Boolean)
 	const seen = new Set()
 	const path = []
 	for (const entry of values) {
@@ -422,7 +427,11 @@ export function refreshedEnvironment(base = process.env, platform = process.plat
 			path.push(entry)
 		}
 	}
-	return { ...base, PATH: path.join(delimiter) }
+	const normalized = { ...base }
+	for (const key of Object.keys(normalized)) {
+		if (key.toLowerCase() === 'path') delete normalized[key]
+	}
+	return { ...normalized, PATH: path.join(delimiter) }
 }
 
 function executableCandidates(name, env, platform = process.platform) {

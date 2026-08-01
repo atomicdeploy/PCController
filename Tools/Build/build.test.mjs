@@ -27,9 +27,10 @@ test('refreshed Windows PATH preserves invoking shell precedence', () => {
 	const second = resolve('session-tools')
 	const refreshed = refreshedEnvironment({
 		...process.env,
-		PATH: [first, second].join(delimiter)
+		Path: [first, second].join(delimiter)
 	}, 'win32')
 	assert.deepEqual(refreshed.PATH.split(delimiter).slice(0, 2), [first, second])
+	assert.deepEqual(Object.keys(refreshed).filter(key => key.toLowerCase() === 'path'), ['PATH'])
 })
 
 test('package publishing tolerates a shell holding the canonical directory', async t => {
