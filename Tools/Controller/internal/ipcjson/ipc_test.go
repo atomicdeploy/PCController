@@ -328,17 +328,21 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 			Client: client, WebSocketPath: "/ipc", SocketIOPath: "/socket.io/",
 		})
 	}()
-	clientContext, stop := context.WithTimeout(ctx, 10*time.Second)
-	defer stop()
+	dialContext, stopDial := context.WithTimeout(ctx, 10*time.Second)
 	connection, _, err := websocket.Dial(
-		clientContext,
+		dialContext,
 		"ws://"+listener.Addr().String()+"/socket.io/?EIO=4&transport=websocket",
 		nil,
 	)
+	stopDial()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer connection.CloseNow()
+	// A busy hosted runner may spend most of the dial budget scheduling the
+	// listener. Protocol assertions get their own deadline after the upgrade.
+	clientContext, stopClient := context.WithTimeout(ctx, 10*time.Second)
+	defer stopClient()
 	readPacket := func() string {
 		_, data, readErr := connection.Read(clientContext)
 		if readErr != nil {
