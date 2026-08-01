@@ -72,6 +72,15 @@ jobs:
           go-version-file: Tools/Controller/go.mod
           cache-dependency-path: Tools/Controller/go.sum
 
+      - name: Pin selected Windows Go toolchain first on PATH
+        if: matrix.windows
+        shell: pwsh
+        run: |
+          $goRoot = go env GOROOT
+          $goBin = Join-Path $goRoot "bin"
+          $goBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $goBin "go.exe") version
+
       - name: Install Node.js
         uses: actions/setup-node@v7
         with:
@@ -84,7 +93,14 @@ jobs:
       - name: Install Win32 resource tool
         if: matrix.windows
         shell: pwsh
-        run: go install github.com/tc-hib/go-winres@v0.3.3
+        run: |
+          go version
+          $requiredGo = (Select-String -Path "Tools/Controller/go.mod" -Pattern '^go\s+(.+)$').Matches.Groups[1].Value
+          $actualGo = (go env GOVERSION) -replace '^go', ''
+          if ($actualGo -ne $requiredGo) {
+            throw "Expected Go $requiredGo from go.mod, found $actualGo"
+          }
+          go install github.com/tc-hib/go-winres@v0.3.3
 
       - name: Build complete Unix host package
         if: ${{ !matrix.windows }}
