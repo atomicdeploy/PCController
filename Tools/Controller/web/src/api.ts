@@ -28,6 +28,18 @@ function headers(json = false): HeadersInit {
   return result
 }
 
+export function responseErrorDetail(value: unknown, statusText: string, status: number): string {
+  if (typeof value === 'object' && value && 'error' in value) {
+    const error = (value as { error: unknown }).error
+    if (typeof error === 'object' && error && 'message' in error) {
+      return String((error as { message: unknown }).message)
+    }
+    return String(error)
+  }
+  if (typeof value === 'string') return value
+  return statusText || `HTTP ${status}`
+}
+
 async function decode<T>(response: Response): Promise<T> {
   const raw = await response.text()
   let value: unknown = null
@@ -39,9 +51,7 @@ async function decode<T>(response: Response): Promise<T> {
     }
   }
   if (!response.ok) {
-    const detail = typeof value === 'object' && value && 'error' in value
-      ? String((value as { error: unknown }).error)
-      : typeof value === 'string' ? value : response.statusText
+    const detail = responseErrorDetail(value, response.statusText, response.status)
     throw new Error(detail || `HTTP ${response.status}`)
   }
   return value as T

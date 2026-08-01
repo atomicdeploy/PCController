@@ -399,10 +399,23 @@ func (service *Service) dispatch(
 			Command string `json:"command"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
-			if strings.TrimSpace(params.Command) == "" {
+			command := strings.TrimSpace(params.Command)
+			if command == "" {
 				err = errors.New("command is required")
-			} else if strings.EqualFold(strings.TrimSpace(params.Command), "quit") ||
-				strings.EqualFold(strings.TrimSpace(params.Command), "exit") {
+			} else if strings.HasPrefix(strings.ToLower(command), "app ") {
+				var action hostui.AppAction
+				action, err = hostui.ParseAction(command, "ipc-command")
+				if err == nil {
+					if service.AppAction == nil {
+						err = errors.New("primary app action routing is unavailable")
+					} else {
+						err = service.AppAction(action)
+						if err == nil {
+							result = map[string]string{"output": "app action accepted"}
+						}
+					}
+				}
+			} else if strings.EqualFold(command, "quit") || strings.EqualFold(command, "exit") {
 				if service.Shutdown == nil {
 					err = errors.New("primary-process shutdown is unavailable")
 				} else {
@@ -414,7 +427,7 @@ func (service *Service) dispatch(
 				}
 			} else {
 				var output string
-				output, err = service.Client.Execute(ctx, params.Command)
+				output, err = service.Client.Execute(ctx, command)
 				if err == nil {
 					result = map[string]string{"output": output}
 				}

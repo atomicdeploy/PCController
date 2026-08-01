@@ -52,6 +52,28 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	}
 }
 
+func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	broker := hostui.NewActionBroker()
+	service := Service{Client: client, AppAction: broker.Publish}
+	params, _ := json.Marshal(map[string]string{"command": "app page settings"})
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.execute", Params: params,
+	})
+	if response.Error != nil || !strings.Contains(fmt.Sprint(response.Result), "accepted") {
+		t.Fatalf("execute app page response=%#v", response)
+	}
+	select {
+	case action := <-broker.Events():
+		if action.Kind != "app.page" || action.Value != "settings" || action.Source != "ipc-command" {
+			t.Fatalf("action=%#v", action)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("controller.execute app page did not reach action broker")
+	}
+}
+
 func TestOSRPCSurfacesAreAuditedAndDisabledByDefault(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
