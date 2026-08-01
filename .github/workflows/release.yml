@@ -181,6 +181,54 @@ jobs:
             release-assets/*-Dependencies.json
             release-assets/release-manifest.json
 
+      - name: "🧽 Resolve case-folded asset collisions on an existing draft"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! release_json="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json databaseId,isDraft,tagName 2>/dev/null)"; then
+            echo "No existing release needs collision repair."
+            exit 0
+          fi
+
+          release_id="$(jq -r '.databaseId' <<<"$release_json")"
+          is_draft="$(jq -r '.isDraft' <<<"$release_json")"
+          actual_tag="$(jq -r '.tagName' <<<"$release_json")"
+          test "$actual_tag" = "$RELEASE_TAG"
+          if test "$is_draft" != "true"; then
+            echo "Existing release is published; no pre-upload assets were removed."
+            exit 0
+          fi
+
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets?per_page=100" \
+            > existing-release-assets.json
+          shopt -s nullglob
+          published_assets=(
+            release-assets/*.tar.gz
+            release-assets/*.tar.gz.sha256
+            release-assets/*.hex
+            release-assets/SHA256SUMS.txt
+            release-assets/*-Firmware-Manifest.json
+            release-assets/*-Dependencies.json
+            release-assets/release-manifest.json
+          )
+          node .github/scripts/release-asset-collisions.mjs \
+            existing-release-assets.json "${published_assets[@]}" \
+            > case-folded-collisions.tsv
+
+          removed=0
+          while IFS=$'\t' read -r asset_id old_name replacement_name; do
+            test -n "$asset_id" || continue
+            echo "Replacing case-folded draft asset: ${old_name} -> ${replacement_name}"
+            gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+            removed=$((removed + 1))
+          done < case-folded-collisions.tsv
+          echo "Removed ${removed} case-folded draft collision(s)."
+
       - name: "🚀 Create or idempotently repair GitHub release"
         id: release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3

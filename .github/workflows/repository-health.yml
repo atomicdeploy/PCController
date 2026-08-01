@@ -50,6 +50,7 @@ jobs:
           node --check .github/scripts/step-summary.mjs
           node --test .github/scripts/package-directory.test.mjs
           node --test .github/scripts/dependency-report.test.mjs
+          node --test .github/scripts/release-asset-collisions.test.mjs
           node --test .github/scripts/release-showcase.test.mjs
           node --test .github/scripts/step-summary.test.mjs
 
