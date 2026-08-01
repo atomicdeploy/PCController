@@ -245,6 +245,12 @@ export default function App() {
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
+  const resolvedDirection = appearance.direction === 'auto'
+    ? appearance.locale === 'fa' ? 'rtl' : 'ltr'
+    : appearance.direction
+  const drawerClosedClip = resolvedDirection === 'rtl'
+    ? 'inset(0 0 0 100%)'
+    : 'inset(0 100% 0 0)'
 
   useEffect(() => {
     document.title = productTitle
@@ -701,7 +707,21 @@ export default function App() {
       </nav>
 
       <AnimatePresence>
-        {mobileNav && <motion.div className="mobile-drawer-layer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}><button className="mobile-drawer-backdrop" aria-label="Close navigation" onClick={() => setMobileNav(false)} /><motion.aside className="mobile-drawer" initial={{ clipPath: 'inset(0 100% 0 0)', filter: 'blur(7px)' }} animate={{ clipPath: 'inset(0 0% 0 0)', filter: 'blur(0)' }} exit={{ clipPath: 'inset(0 100% 0 0)', filter: 'blur(7px)' }} transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}><header><div className="brand__mark"><span>{productShortName}</span><i /><i /></div><strong>{productTitle}</strong><button onClick={() => setMobileNav(false)}><X size={19} /></button></header>{navigation.map((item) => <NavButton key={item.id} icon={item.icon} label={t(item.label)} active={page === item.id} onClick={() => navigate(item.id)} />)}</motion.aside></motion.div>}
+        {mobileNav && (
+          <motion.div className="mobile-drawer-layer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <button className="mobile-drawer-backdrop" aria-label="Close navigation" onClick={() => setMobileNav(false)} />
+            <motion.aside
+              className="mobile-drawer"
+              initial={{ clipPath: drawerClosedClip, filter: 'blur(7px)' }}
+              animate={{ clipPath: 'inset(0 0% 0 0)', filter: 'blur(0)' }}
+              exit={{ clipPath: drawerClosedClip, filter: 'blur(7px)' }}
+              transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <header><div className="brand__mark"><span>{productShortName}</span><i /><i /></div><strong>{productTitle}</strong><button onClick={() => setMobileNav(false)}><X size={19} /></button></header>
+              {navigation.map((item) => <NavButton key={item.id} icon={item.icon} label={t(item.label)} active={page === item.id} onClick={() => navigate(item.id)} />)}
+            </motion.aside>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       <AnimatePresence>

@@ -703,7 +703,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
   .command-trigger { width: auto; margin: 0 0 0 auto; padding-inline: 10px; }.command-trigger span { display: none; }[dir="rtl"] .command-trigger { margin: 0 auto 0 0; }
   .topbar { padding-inline: 15px; gap: 10px; }.topbar__actions .status-badge { display: none; }
   .mobile-drawer-layer { display: grid; place-items: stretch start; padding: 0; }.mobile-drawer { position: relative; width: min(320px, 88vw); height: 100%; padding: 14px; border-inline-end: 1px solid var(--line-strong); background: var(--glass-strong); backdrop-filter: blur(26px); box-shadow: 20px 0 80px rgba(0,0,0,.4); }.mobile-drawer > header { height: 55px; display: grid; grid-template-columns: 42px 1fr auto; gap: 10px; align-items: center; margin-bottom: 18px; }.mobile-drawer > header button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; background: var(--surface-muted); color: var(--text-muted); }.mobile-drawer .nav-button { margin-bottom: 3px; }
-  [dir="rtl"] .mobile-drawer-layer { place-items: stretch end; }[dir="rtl"] .mobile-drawer { border-inline-start: 1px solid var(--line-strong); border-inline-end: 0; }
+  [dir="rtl"] .mobile-drawer-layer { place-items: stretch start; }[dir="rtl"] .mobile-drawer { box-shadow: -20px 0 80px rgba(0,0,0,.4); }
 }
 
 @media (max-width: 720px) {
