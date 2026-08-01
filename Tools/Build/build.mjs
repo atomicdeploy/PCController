@@ -7,9 +7,11 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
+	chmodSync,
 	copyFileSync,
 	cpSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -644,6 +646,47 @@ export function assertGeneratedPath(root, target) {
 	return resolvedTarget
 }
 
+function makeTreeWritable(current) {
+	if (!existsSync(current)) return
+	try {
+		// Never follow a generated-tree symlink and mutate permissions outside it.
+		if (lstatSync(current).isSymbolicLink()) return
+	} catch {
+		return
+	}
+	let entries = []
+	try {
+		entries = readdirSync(current, { withFileTypes: true })
+	} catch {
+		// The final removal call retains the authoritative error.
+	}
+	for (const entry of entries) {
+		const path = join(current, entry.name)
+		if (entry.isSymbolicLink()) continue
+		if (entry.isDirectory()) makeTreeWritable(path)
+		try {
+			chmodSync(path, entry.isDirectory() ? 0o700 : 0o600)
+		} catch {
+			// Continue so other read-only entries can still be normalized.
+		}
+	}
+	try {
+		chmodSync(current, 0o700)
+	} catch {
+		// The final removal call retains the authoritative error.
+	}
+}
+
+export function removeGeneratedTree(target) {
+	try {
+		rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+	} catch (error) {
+		if (!['EPERM', 'EACCES'].includes(error.code)) throw error
+		makeTreeWritable(target)
+		rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+	}
+}
+
 function sha256Buffer(buffer) {
 	return createHash('sha256').update(buffer).digest('hex')
 }
@@ -755,7 +798,7 @@ function cleanGenerated(log) {
 	for (const path of [BUILD_ROOT, CANONICAL_HOST_OUTPUT, ...LEGACY_HOST_OUTPUTS]) {
 		assertGeneratedPath(PROJECT_ROOT, path)
 		if (existsSync(path)) {
-			rmSync(path, { recursive: true, force: true })
+			removeGeneratedTree(path)
 			log.success(`Removed ${relative(PROJECT_ROOT, path)}`)
 		}
 	}
@@ -766,7 +809,7 @@ function removeLegacyHostOutputs(log) {
 	for (const path of LEGACY_HOST_OUTPUTS) {
 		assertGeneratedPath(PROJECT_ROOT, path)
 		if (!existsSync(path)) continue
-		rmSync(path, { recursive: true, force: true })
+		removeGeneratedTree(path)
 		log.success(`Removed legacy host artifact ${relative(PROJECT_ROOT, path)}`)
 	}
 }
@@ -824,7 +867,7 @@ export function collectWebNotices(destination, webRoot = WEB_ROOT) {
 
 function collectModuleNotices(go, stage, env, options) {
 	const root = join(stage, 'licenses')
-	rmSync(root, { recursive: true, force: true })
+	removeGeneratedTree(root)
 	mkdirSync(root, { recursive: true })
 	copyProjectNotices(root)
 	let goModules = 0
@@ -1100,8 +1143,8 @@ function installPackageEntries(stage, canonical, previous, rename) {
                         : `; rollback errors: ${rollbackErrors.join('; ')}`
                 throw new BuildError(`entry-wise package transaction: ${error.message}${suffix}`)
         }
-        rmSync(stage, { recursive: true, force: true })
-        rmSync(previous, { recursive: true, force: true })
+        removeGeneratedTree(stage)
+        removeGeneratedTree(previous)
 }
 
 export function installPackage(stage, options = {}) {
@@ -1112,7 +1155,7 @@ export function installPackage(stage, options = {}) {
         assertGeneratedPath(root, stage)
         assertGeneratedPath(root, canonical)
         assertGeneratedPath(root, previous)
-        rmSync(previous, { recursive: true, force: true })
+        removeGeneratedTree(previous)
         let movedPrevious = false
         try {
                 if (existsSync(canonical)) {
@@ -1131,13 +1174,13 @@ export function installPackage(stage, options = {}) {
                 }
                 throw new BuildError(`atomically publish canonical host package: ${error.message}`)
         }
-	rmSync(previous, { recursive: true, force: true })
+	removeGeneratedTree(previous)
 }
 
 function buildHost(options, identity, env, log) {
 	const stage = join(PACKAGE_ROOT, `host-${process.pid}`)
 	assertGeneratedPath(PROJECT_ROOT, stage)
-	rmSync(stage, { recursive: true, force: true })
+	removeGeneratedTree(stage)
 	mkdirSync(stage, { recursive: true })
 	const webUI = buildWebUI(options, env, log)
 	log.stage('🪪', 'Checking package-derived product identity and Win32 metadata')
@@ -1250,7 +1293,7 @@ function buildHost(options, identity, env, log) {
 	atomicWriteJSON(join(stage, 'host-manifest.json'), manifest)
 	log.stage('📤', 'Publishing the canonical host package')
 	installPackage(stage)
-	rmSync(stage, { recursive: true, force: true })
+	removeGeneratedTree(stage)
 	removeLegacyHostOutputs(log)
 	log.table('📦 Host package', [
 		{ label: 'Artifact' },

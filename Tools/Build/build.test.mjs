@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { renameSync } from 'node:fs'
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve, sep } from 'node:path'
 import test from 'node:test'
@@ -119,7 +119,9 @@ test('package publishing tolerates a shell holding the canonical directory', asy
         await mkdir(join(canonical, 'licenses'), { recursive: true })
         await mkdir(join(stage, 'licenses'), { recursive: true })
         await writeFile(join(canonical, 'controller.exe'), 'old host')
-        await writeFile(join(canonical, 'stale.txt'), 'remove me')
+        const stale = join(canonical, 'stale.txt')
+        await writeFile(stale, 'remove me')
+        await chmod(stale, 0o444)
         await writeFile(join(stage, 'controller.exe'), 'new host')
         await writeFile(join(stage, 'licenses', 'NOTICE.txt'), 'current notice')
 
