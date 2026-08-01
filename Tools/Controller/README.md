@@ -503,6 +503,30 @@ hash/date/time when the native application was reachable before entering the
 bootloader. A partial read remains marked `incomplete`; it is never reported as
 a complete backup.
 
+### Offline development settings migration
+
+The host can convert the validated legacy unversioned 19-byte settings value
+plus CRC-8 into the current development-v2 29-byte value plus CRC-8 without
+opening a COM port:
+
+```console
+bin\controller.exe eeprom migrate --input .\backups\eeprom.hex --output .\settings-development-v2.hex
+```
+
+The converter preserves all 19 legacy value bytes, initializes the visible
+menu mask to `0x7FFF`, initializes packed menu order to page IDs 0 through 14,
+and recalculates the record CRC-8. Its canonical sparse Intel HEX contains
+exactly EEPROM addresses `0x0020` through `0x003D` (32 through 61); RF records
+starting at 64 and the reset journal starting at 320 are absent and therefore
+not part of the migration artifact. A fully valid current record is rejected;
+otherwise the CRC-valid legacy prefix is authoritative and ignored stale tail
+bytes are not copied. Existing output files are never replaced.
+
+This is deliberately host-side tooling, not AVR compatibility code, so it
+consumes no firmware flash. The command only creates a proposed file. Applying
+it remains a separate, explicitly confirmed `program --operation write-eeprom`
+operation followed by readback verification.
+
 The application protocol and Urboot/AVRDUDE are mutually exclusive users of
 the same UART. Programming closes the application session before invoking the
 tool, then re-arms connection and requires a fresh authenticated application
