@@ -60,6 +60,18 @@ func waitHostMenuDefinitionChange(
 	}
 }
 
+func findHostMenuDefinition(
+	manager *hostmenu.Manager,
+	menuID string,
+) (appconfig.HostMenu, bool) {
+	for _, menu := range manager.Config().Menus {
+		if menu.ID == menuID {
+			return menu, true
+		}
+	}
+	return appconfig.HostMenu{}, false
+}
+
 func waitHostPanelPush(t *testing.T, pushes <-chan hostmenu.Snapshot) hostmenu.Snapshot {
 	t.Helper()
 	select {
@@ -229,7 +241,10 @@ func TestWatchedHostMenusAcrossFormatsRoutePreviewAndRelease(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			change = waitHostMenuDefinitionChange(t, changes, "pc-settings", nil)
+			change = waitHostMenuDefinitionChange(t, changes, "pc-settings", func(hostmenu.DefinitionChange) bool {
+				menu, exists := findHostMenuDefinition(manager, "pc-settings")
+				return exists && menu.Content == "Inactive edit"
+			})
 			if change.Active || change.Kind != "menu.content.changed" {
 				t.Fatalf("inactive change=%+v", change)
 			}
@@ -246,7 +261,10 @@ func TestWatchedHostMenusAcrossFormatsRoutePreviewAndRelease(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			waitHostMenuDefinitionChange(t, changes, "pc-settings", nil)
+			waitHostMenuDefinitionChange(t, changes, "pc-settings", func(hostmenu.DefinitionChange) bool {
+				menu, exists := findHostMenuDefinition(manager, "pc-settings")
+				return exists && !menu.Flags.Visible
+			})
 			waitHostPanelRelease(t, bridge.releases)
 			if manager.Snapshot().Active {
 				t.Fatal("hidden active host menu retained front-panel session")
@@ -258,7 +276,10 @@ func TestWatchedHostMenusAcrossFormatsRoutePreviewAndRelease(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			waitHostMenuDefinitionChange(t, changes, "pc-settings", nil)
+			waitHostMenuDefinitionChange(t, changes, "pc-settings", func(hostmenu.DefinitionChange) bool {
+				menu, exists := findHostMenuDefinition(manager, "pc-settings")
+				return exists && menu.Flags.Visible
+			})
 			waitHostPanelRelease(t, bridge.releases)
 			if err := manager.Open("pc-settings"); err != nil {
 				t.Fatal(err)
@@ -269,7 +290,10 @@ func TestWatchedHostMenusAcrossFormatsRoutePreviewAndRelease(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			waitHostMenuDefinitionChange(t, changes, "pc-settings", nil)
+			waitHostMenuDefinitionChange(t, changes, "pc-settings", func(hostmenu.DefinitionChange) bool {
+				_, exists := findHostMenuDefinition(manager, "pc-settings")
+				return !exists
+			})
 			waitHostPanelRelease(t, bridge.releases)
 			if manager.Snapshot().Active {
 				t.Fatal("deleted active host menu retained front-panel session")

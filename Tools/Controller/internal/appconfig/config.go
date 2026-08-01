@@ -945,12 +945,15 @@ func (store *Store) RememberDevice(identity DeviceIdentity) (bool, error) {
 }
 
 func (store *Store) Reload() (Config, bool, error) {
+	// Serialize the disk read with Update's write/load/commit transaction. If
+	// Reload reads before taking the mutex, an older fsnotify snapshot can wait
+	// behind a newer Update and then incorrectly replace the newer value.
+	store.mu.Lock()
+	defer store.mu.Unlock()
 	value, digest, err := Load(store.path)
 	if err != nil {
 		return Config{}, false, err
 	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
 	if digest == store.digest {
 		return clone(store.value), false, nil
 	}
