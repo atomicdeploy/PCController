@@ -16,7 +16,8 @@ concurrency:
 jobs:
   build-and-test:
     name: CMake build and CTest
-    runs-on: windows-latest
+    # Pin the image that guarantees the Visual Studio 2022 generator used below.
+    runs-on: windows-2022
     timeout-minutes: 15
     defaults:
       run:
