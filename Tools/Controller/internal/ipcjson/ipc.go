@@ -509,7 +509,7 @@ func Serve(ctx context.Context, listener net.Listener, service *Service) error {
 	var wait sync.WaitGroup
 	websocketListener := newDispatchListener(listener.Addr())
 	websocketServer := &http.Server{
-		Handler:           websocketMux(service),
+		Handler:           websocketMux(ctx, service),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	websocketDone := make(chan error, 1)
@@ -652,7 +652,7 @@ type wsSubscription struct {
 	AfterID    uint64   `json:"after_id,omitempty"`
 }
 
-func websocketMux(service *Service) http.Handler {
+func websocketMux(serverContext context.Context, service *Service) http.Handler {
 	path := strings.TrimSpace(service.WebSocketPath)
 	if path == "" {
 		path = "/ipc"
@@ -666,7 +666,7 @@ func websocketMux(service *Service) http.Handler {
 			serveHTTPRPC(writer, request, service)
 			return
 		}
-		serveWebSocket(writer, request, service)
+		serveWebSocket(serverContext, writer, request, service)
 	})
 	mux.HandleFunc("/api/v1/rpc", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -888,7 +888,7 @@ func websocketMux(service *Service) http.Handler {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
-		serveSocketIO(writer, request, service)
+		serveSocketIO(serverContext, writer, request, service)
 	})
 	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
@@ -1033,6 +1033,7 @@ func writeHTTPJSON(writer http.ResponseWriter, status int, value any) {
 }
 
 func serveWebSocket(
+	serverContext context.Context,
 	writer http.ResponseWriter,
 	request *http.Request,
 	service *Service,
@@ -1051,7 +1052,10 @@ func serveWebSocket(
 	}
 	defer connection.CloseNow()
 	connection.SetReadLimit(maxMessage)
-	ctx := request.Context()
+	// websocket.Accept hijacks the HTTP connection, so request.Context must not
+	// be used afterward. The server-owned context keeps shutdown deterministic.
+	ctx, cancel := context.WithCancel(serverContext)
+	defer cancel()
 	var writeMu sync.Mutex
 	writeJSON := func(value any) error {
 		encoded, encodeErr := json.Marshal(value)
@@ -1150,6 +1154,7 @@ func serveWebSocket(
 // namespaces, or binary attachment support. The supported events are
 // subscribe, unsubscribe, message, command, and rpc.
 func serveSocketIO(
+	serverContext context.Context,
 	writer http.ResponseWriter,
 	request *http.Request,
 	service *Service,
@@ -1173,7 +1178,9 @@ func serveSocketIO(
 	}
 	defer connection.CloseNow()
 	connection.SetReadLimit(maxMessage)
-	ctx, cancel := context.WithCancel(request.Context())
+	// websocket.Accept hijacks the HTTP connection, so request.Context must not
+	// be used afterward. The server-owned context keeps shutdown deterministic.
+	ctx, cancel := context.WithCancel(serverContext)
 	defer cancel()
 
 	var writeMu sync.Mutex
@@ -1437,7 +1444,14 @@ func startWebSocketSubscription(
 	for _, topic := range subscription.Topics {
 		switch topic {
 		case "events":
-			go streamWebSocketEvents(ctx, client, subscription.AfterID, write)
+			afterID := subscription.AfterID
+			if afterID == 0 {
+				// Capture the cursor before acknowledging the subscription. An
+				// event published immediately after that acknowledgement must not
+				// be skipped while this goroutine is still being scheduled.
+				afterID = client.LatestEventID()
+			}
+			go streamWebSocketEvents(ctx, client, afterID, write)
 		case "status":
 			go streamWebSocketStatus(
 				ctx,
@@ -1455,9 +1469,6 @@ func streamWebSocketEvents(
 	afterID uint64,
 	write func(any) error,
 ) {
-	if afterID == 0 {
-		afterID = client.LatestEventID()
-	}
 	for ctx.Err() == nil {
 		event, err := client.NextEvent(ctx, afterID, "")
 		if err != nil {
