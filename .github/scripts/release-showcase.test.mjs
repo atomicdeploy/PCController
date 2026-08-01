@@ -118,6 +118,8 @@ test("generates a deterministic chooser, release body, and release manifest", ()
     const firstManifest = readFileSync(first.manifestPath, "utf8");
 
     assert.match(firstNotes, /^# 🚀 PCController v0\.1\.0-alpha\.1/u);
+    assert.match(firstNotes, /This is an alpha build\./u);
+    assert.doesNotMatch(firstNotes, /This is a alpha build\./u);
     assert.match(firstNotes, /Linux x64/u);
     assert.match(firstNotes, /macOS Apple Silicon/u);
     assert.match(firstNotes, /Application only/u);

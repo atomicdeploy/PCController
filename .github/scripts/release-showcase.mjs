@@ -460,8 +460,10 @@ function releaseNotes({ tag, sourceSha, assets, selection, context, metrics }) {
     : "";
   const repository = context.repository || "OWNER/REPOSITORY";
 
+  const channelName = channel.toLowerCase();
+  const channelArticle = /^[aeiou]/u.test(channelName) ? "an" : "a";
   const channelLimitation = prerelease
-    ? `- This is a ${channel.toLowerCase()} build. Configuration and protocol compatibility can still change before a stable release.`
+    ? `- This is ${channelArticle} ${channelName} build. Configuration and protocol compatibility can still change before a stable release.`
     : "- This release remains subject to the physical-hardware acceptance boundary above.";
   const draftNotice = context.draft
     ? `\n> [!TIP]\n> This is a GitHub draft, whose final tag/download URLs do not exist yet. The chooser therefore names each file without a broken link; use the release page's **Assets** section. Published reruns activate direct links.\n`
