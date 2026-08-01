@@ -119,7 +119,7 @@ if (kind === "firmware") {
     archivePath,
     artifactUrl = "",
     artifactDigest = "",
-    dependenciesPath = ".github/dependencies.json",
+    dependenciesPath = "Tools/Controller/toolchain-lock.json",
     packageRootPath = ".build/firmware",
   ] = arguments_;
   const manifest = readJson(manifestPath);

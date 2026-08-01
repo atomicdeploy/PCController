@@ -19,6 +19,12 @@ reset a board, start the TUI, write EEPROM, or invoke a programmer.
 | Build-output npm packages | Compatible ranges, Node.js 22.12 or newer | `Tools/Build/package-lock.json` |
 | Web npm packages | Compatible ranges | `Tools/Controller/web/package-lock.json` |
 
+These are the only dependency policy/lock sources. CI does not maintain a
+second abbreviated pin file. `Tools/Dependencies/export-lock.mjs` is a
+network-free read-only adapter that validates this canonical lock and exports
+the exact Linux build inputs plus package-metadata product identity to reusable
+workflows; it never resolves or writes a dependency.
+
 The policy is intentionally latest-first. `toolchain bootstrap` consumes the
 resolved stable lock by default; `--locked` is an explicit rollback/recovery
 choice, not the normal update policy. Lock writers compare substantive fields
@@ -136,6 +142,12 @@ the policy, lock, or build output.
 schedule and on manual dispatch. A normal run applies the stable candidate and
 performs the full validation **before** creating or refreshing its dependency
 pull request. A check-only dispatch reports drift without changing locks.
+
+This is the repository's only scheduled dependency updater. The firmware and
+protected-deploy workflows consume the canonical lock through the read-only
+export adapter, so reporting and reproducible installation do not introduce a
+second update engine. Firmware CI installs all six locked libraries and records
+the complete canonical lock with its package.
 
 The workflow always uploads its structured report and generated evidence. If a
 candidate fails, it creates or updates one actionable `dependency-blocked`

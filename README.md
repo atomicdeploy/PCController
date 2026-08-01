@@ -4,7 +4,7 @@
   <p>
     <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml"><img alt="Build" src="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml/badge.svg?branch=main"></a>
     <a href="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml"><img alt="Repository health" src="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml/badge.svg?branch=main"></a>
-    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/dependencies.yml"><img alt="Dependency health" src="https://github.com/atomicdeploy/PCController/actions/workflows/dependencies.yml/badge.svg?branch=main"></a>
+    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/update-dependencies.yml"><img alt="Dependency resolution" src="https://github.com/atomicdeploy/PCController/actions/workflows/update-dependencies.yml/badge.svg?branch=main"></a>
     <a href="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml"><img alt="Release" src="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml/badge.svg"></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/atomicdeploy/PCController"></a>
   </p>

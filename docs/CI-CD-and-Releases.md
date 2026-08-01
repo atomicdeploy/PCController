@@ -22,7 +22,7 @@ release-readiness view.
 | `🖥️ Controller · Cross-platform` (`host.yml`) | Reusable Go test/vet, identity, C ABI smoke test and five-target packaging | called by Build and Release |
 | `🧪 Virtual Board · Cross-platform` (`virtual-board.yml`) | Reusable native CMake/CTest and five-target packaging | called by Build and Release |
 | `🛡️ Quality · Repository Health` (`repository-health.yml`) | Source, license, docs, build-tool, workflow and whitespace audits | pull request, `main`, manual dispatch |
-| `🔭 Dependencies · AVR Supply Chain` (`dependencies.yml`) | Daily pinned-toolchain health report and verified update proposal | daily schedule, manual dispatch |
+| `Dependency Resolution and Validation` (`update-dependencies.yml`) | Latest-compatible resolution, full pre-PR validation, evidence, and blocked-update diagnostics | daily schedule, manual dispatch |
 | `✨ Release · Attested Packages` (`release.yml`) | Rebuild, attest, and create or update a deterministic release | `v*` tag, manual dispatch |
 | `🔌 Deploy · Protected AVR Hardware` (`deploy-avr.yml`) | Explicitly gated physical programming path | manual dispatch on approved self-hosted runner only |
 
@@ -45,7 +45,7 @@ flowchart TD
 
 | Deliverable | Actions artifact | Validation |
 |---|---|---|
-| AVR firmware | `PCController-Firmware-ATmega328P` | Pinned MiniCore 3.1.2 and rc-switch 2.6.4, real compile, strict Intel HEX validation, flash/static/estimated-peak SRAM report, dependency inventory |
+| AVR firmware | `<product slug>-Firmware-ATmega328P` | Package-metadata identity, canonical MiniCore lock and all six firmware libraries, real compile, strict Intel HEX validation, 32,256-byte ceiling, flash/static/estimated-peak SRAM report, dependency inventory |
 | AVR inspiration-compatible alias | `firmware` | Identical flat AVR payload from flagship `Build`, preserving the ASA0002E `Build` / `build` / `firmware` contract |
 | Controller | `PCController-Controller-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Go tests and vet, executable identity, native package, C ABI library and smoke test |
 | Virtual Board | `PCController-VirtualBoard-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Native CMake build and CTest |
@@ -164,15 +164,26 @@ from `SHA256SUMS.txt` or verify its GitHub attestation.
 
 ## Dependency automation
 
-The daily dependency radar reports the pinned Arduino CLI, MiniCore, and
-rc-switch versions in a readable summary and machine-readable artifact. When a
-new official version and checksum are verified, the scheduled run updates only
-the canonical pin file on a uniquely named automation branch and opens a
-reviewable pull request; it never merges or releases the change. An existing
-open proposal suppresses duplicates. Manual `check` and `apply` modes provide
-the same audit and proposal paths on demand.
+One scheduled workflow runs the project-owned latest-compatible resolver in
+`Tools/Dependencies/update.mjs`. Its firmware policy and exact source hashes
+come only from `Tools/Controller/toolchain-profile.json` and
+`toolchain-lock.json`; host tools have the equivalent policy/lock pair in
+`Tools/Dependencies`. The updater covers MiniCore, the dependency CLI, Urboot,
+Go, Node.js, UPX, go-winres, both npm domains, Go modules, and all six requested
+firmware libraries. It inherits proxy variables, retries once without them only
+after a configured-route failure, and never persists credentials.
 
-Dependabot independently checks GitHub Actions daily and Go modules weekly.
+A scheduled apply performs the complete firmware, Urboot-Custom, host, web,
+VirtualBoard, package, and memory-ceiling gate before opening or refreshing a
+reviewable pull request. A failed candidate produces an evidence artifact and
+one actionable blocked-update issue instead of a broken PR. Manual check-only
+dispatch reports drift without changing locks. Firmware and protected-deploy
+workflows use the small read-only `Tools/Dependencies/export-lock.mjs` adapter;
+that adapter exports CI values from the same canonical lock and is not a second
+resolver or updater.
+
+Dependabot independently checks GitHub Actions, Go modules, and npm lock
+domains.
 Minor and patch updates may be grouped to reduce noise; major updates remain
 isolated for review. The complete flagship build exposes any resulting flash
 or SRAM movement before an Arduino dependency proposal can be merged.

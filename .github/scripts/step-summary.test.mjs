@@ -108,9 +108,9 @@ test("flagship catalog presents AVR separately with live artifact links", () => 
           {
             role: "application",
             dataBytes: 32228,
-            capacityBytes: 32384,
-            freeBytes: 156,
-            usagePercent: 99.52,
+            capacityBytes: 32256,
+            freeBytes: 28,
+            usagePercent: 99.91,
           },
         ],
         stackBudget: {
@@ -136,7 +136,7 @@ test("flagship catalog presents AVR separately with live artifact links", () => 
     );
     const catalog = runSummary(directory, ["catalog", directory]);
     assert.match(catalog, /## ⚡ AVR ATmega328P target/u);
-    assert.match(catalog, /32,228 \/ 32,384 B/u);
+    assert.match(catalog, /32,228 \/ 32,256 B/u);
     assert.match(catalog, /`Build` \/ `build` \/ `firmware`/u);
     assert.match(
       catalog,

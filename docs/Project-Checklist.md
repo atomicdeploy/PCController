@@ -171,11 +171,18 @@ was recorded; they do not supersede the release-candidate summary above.
   fallback, source/license/security notes, Dependabot, scheduled pre-PR
   validation, canonical product-identity drift checks, shared Chalk/Unicode
   presentation, and stable-path local compile gates pass. Updater tests pass
-  5/5, Build tests 31/31, firmware-tool tests 19/19, the programmer stable-path
+  6/6 plus 3/3 canonical-export tests, Build tests 32/32, firmware-tool tests
+  19/19, the programmer stable-path
   suite passes, and actionlint passes. Reproducible builds consume exact
   resolved locks rather than treating policy minima as permanent pins; a real
   hosted scheduled/manual Actions run, artifact upload, and PR/blocked-issue
   lifecycle are still unobserved, so this requirement remains yellow.
+- ✅ Dependency automation now has one canonical resolver and one scheduled
+  updater: `Tools/Dependencies/update.mjs` consumes the complete policy/lock
+  pairs, including all six firmware libraries. The former abbreviated
+  three-dependency pin file and parallel daily updater were removed. Firmware
+  and deploy CI retain release/install reporting through a network-free,
+  read-only canonical-lock exporter; they do not implement a second resolver.
 - ✅ The release-candidate AVR intentionally links EEPROM 2.0 and rc-switch
   2.6.4 but no longer links MiniCore Wire. Fixed-hardware local drivers replace
   generic Wire/TM1637/Dallas/INA219/PWM/LCD/addressable-strip libraries to fit

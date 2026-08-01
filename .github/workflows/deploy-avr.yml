@@ -190,7 +190,7 @@ jobs:
 
       - name: "📌 Read canonical deployment tool pins"
         id: pins
-        run: node .github/scripts/dependency-report.mjs export
+        run: node Tools/Dependencies/export-lock.mjs export
 
       - name: "🔐 Install checksum-verified Arduino CLI"
         env:

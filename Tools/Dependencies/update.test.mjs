@@ -49,8 +49,27 @@ test('scheduled updater validates every required candidate gate before PR creati
   ]) assert.ok(updater.includes(expected), `updater missing ${expected}`)
 })
 
+test('one canonical scheduled updater owns dependency resolution', () => {
+  const workflows = readFileSync(join(repo, '.github', 'workflows', 'update-dependencies.yml'), 'utf8')
+  const exporter = readFileSync(join(repo, 'Tools', 'Dependencies', 'export-lock.mjs'), 'utf8')
+  assert.match(workflows, /update-dependencies\.cmd --apply --validate/u)
+  assert.match(exporter, /Tools[^\n]+Controller[^\n]+toolchain-lock\.json/u)
+  assert.equal(requiredWorkflowAbsent(join(repo, '.github', 'workflows', 'dependencies.yml')), true)
+  assert.equal(requiredWorkflowAbsent(join(repo, '.github', 'dependencies.json')), true)
+})
+
 test('dependency output uses the shared Chalk and Unicode table renderer', () => {
   const updater = readFileSync(join(here, 'update.mjs'), 'utf8')
   assert.match(updater, /createChalk, renderUnicodeTable/)
   assert.doesNotMatch(updater, /\\u001b|\\x1b|padEnd\(|\.repeat\(/)
 })
+
+function requiredWorkflowAbsent(path) {
+  try {
+    readFileSync(path, 'utf8')
+    return false
+  } catch (error) {
+    if (error?.code === 'ENOENT') return true
+    throw error
+  }
+}

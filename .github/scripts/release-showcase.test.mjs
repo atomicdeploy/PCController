@@ -59,17 +59,17 @@ function fixture({ includeBootloader = true, omitFromCombined = "" } = {}) {
           role: "application",
           sha256: hash(":00000001FF\n"),
           dataBytes: 32228,
-          capacityBytes: 32384,
-          freeBytes: 156,
-          usagePercent: 99.52,
+          capacityBytes: 32256,
+          freeBytes: 28,
+          usagePercent: 99.91,
         },
         {
           role: "flash+bootloader",
           sha256: hash(":00000001FF\n"),
-          dataBytes: 32612,
+          dataBytes: 32738,
           capacityBytes: 32768,
-          freeBytes: 156,
-          usagePercent: 99.52,
+          freeBytes: 30,
+          usagePercent: 99.91,
         },
       ],
     }, null, 2)}\n`,
@@ -132,7 +132,7 @@ test("generates a deterministic chooser, release body, and release manifest", ()
     assert.equal(parsed.release.prerelease, true);
     assert.equal(parsed.chooser.platforms.length, 5);
     assert.equal(parsed.validation.length, 11);
-    assert.equal(parsed.firmware.flash.freeBytes, 156);
+    assert.equal(parsed.firmware.flash.freeBytes, 28);
     assert.deepEqual(parsed.firmware.peakSram, {
       usedBytes: 1764,
       capacityBytes: 2048,

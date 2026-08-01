@@ -54,7 +54,7 @@ jobs:
 
       - name: "📌 Read canonical dependency pins"
         id: pins
-        run: node .github/scripts/dependency-report.mjs export
+        run: node Tools/Dependencies/export-lock.mjs export
 
       - name: "🔐 Install checksum-verified Arduino CLI"
         env:
@@ -90,10 +90,21 @@ jobs:
           arduino-cli core update-index --additional-urls "$MINICORE_INDEX_URL"
           arduino-cli core install "$MINICORE_PACKAGE@$MINICORE_VERSION" --additional-urls "$MINICORE_INDEX_URL"
 
-      - name: "📻 Install pinned Arduino library"
+      - name: "📚 Install all six locked firmware libraries"
         env:
+          PWM_LIBRARY_VERSION: ${{ steps.pins.outputs.adafruit_pwm_servo_driver_library_version }}
+          INA219_LIBRARY_VERSION: ${{ steps.pins.outputs.adafruit_ina219_version }}
           RC_SWITCH_VERSION: ${{ steps.pins.outputs.rc_switch_version }}
-        run: arduino-cli lib install "rc-switch@$RC_SWITCH_VERSION"
+          TM1637_LIBRARY_VERSION: ${{ steps.pins.outputs.tm1637_tiny_display_version }}
+          DALLAS_LIBRARY_VERSION: ${{ steps.pins.outputs.dallas_temperature_version }}
+          ONEWIRE_LIBRARY_VERSION: ${{ steps.pins.outputs.one_wire_version }}
+        run: |
+          arduino-cli lib install "Adafruit PWM Servo Driver Library@$PWM_LIBRARY_VERSION"
+          arduino-cli lib install "Adafruit INA219@$INA219_LIBRARY_VERSION"
+          arduino-cli lib install "rc-switch@$RC_SWITCH_VERSION"
+          arduino-cli lib install "TM1637TinyDisplay@$TM1637_LIBRARY_VERSION"
+          arduino-cli lib install "DallasTemperature@$DALLAS_LIBRARY_VERSION"
+          arduino-cli lib install "OneWire@$ONEWIRE_LIBRARY_VERSION"
 
       - name: "🚀 Build and validate real AVR firmware"
         run: >-
@@ -112,14 +123,16 @@ jobs:
           arduino-cli lib list >> .build/firmware/dependencies.txt
           arduino-cli core list --format json > .build/firmware/resolved-cores.json
           arduino-cli lib list --format json > .build/firmware/resolved-libraries.json
-          cp .github/dependencies.json .build/firmware/declared-dependencies.json
+          cp Tools/Controller/toolchain-lock.json .build/firmware/declared-dependencies.json
 
       - name: "📦 Create versioned firmware package"
         id: package
+        env:
+          PRODUCT_SLUG: ${{ steps.pins.outputs.product_slug }}
         run: >-
           node .github/scripts/package-directory.mjs
           .build/firmware
-          PCController-Firmware
+          "${PRODUCT_SLUG}-Firmware"
           AVR-ATmega328P
 
       - name: "🎁 Stage a flat ESP-style firmware artifact"
@@ -146,7 +159,7 @@ jobs:
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: PCController-Firmware-ATmega328P
+          name: ${{ steps.pins.outputs.product_slug }}-Firmware-ATmega328P
           path: .build/actions-artifact/*
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
@@ -175,5 +188,5 @@ jobs:
           "${{ steps.package.outputs.archive }}"
           "$ARTIFACT_URL"
           "$ARTIFACT_DIGEST"
-          .github/dependencies.json
+          Tools/Controller/toolchain-lock.json
           "${{ steps.package.outputs.package-root }}"
