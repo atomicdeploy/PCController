@@ -1,0 +1,243 @@
+// Implementation fragment compiled once; owns 433 MHz learn/map/send flow.
+// -----------------------------------------------------------------------------
+// Learned 433 MHz remotes and RC-switch
+// -----------------------------------------------------------------------------
+
+// Starts bounded, multi-code, or indefinite learning without blocking services.
+void beginLearning(uint8_t timeoutSeconds, uint8_t options = 0) {
+  if (timeoutSeconds == 0) {
+    timeoutSeconds = DEFAULT_LEARNING_SECONDS;
+  }
+  options &= static_cast<uint8_t>(LEARN_MULTI | LEARN_INDEFINITE);
+  if (timeoutSeconds > MAX_LEARNING_SECONDS) {
+    timeoutSeconds = MAX_LEARNING_SECONDS;
+  }
+
+  buzzer.stop();
+  const ProgramMode currentMode = modeManager.current();
+  if (currentMode <= MODE_RF) {
+    modeBeforeLearning = currentMode;
+  } else {
+    modeBeforeLearning = MODE_RF;
+  }
+  learningActive = true;
+  learningOptions = options;
+  learningEndsAt = (options & LEARN_INDEFINITE) != 0
+                       ? 0
+                       : now +
+                             static_cast<uint32_t>(timeoutSeconds) * 1000UL;
+  modeManager.transitionTo(MODE_RF_LEARNING);
+  appEvents.rfLearning(3, learnedRemotes.count());
+}
+
+// Ends learning, restores its prior page, emits state, and plays final feedback.
+void endLearning(uint8_t state, int8_t feedback) {
+  if (!learningActive) {
+    return;
+  }
+  learningActive = false;
+  learningOptions = 0;
+  learningEndsAt = 0;
+  if (modeManager.current() == MODE_RF_LEARNING) {
+    modeManager.transitionTo(modeBeforeLearning);
+  }
+  appEvents.rfLearning(state, learnedRemotes.count());
+  if (feedback > 0) {
+    buzzer.success();
+  } else if (feedback < 0) {
+    buzzer.error();
+  }
+}
+
+// Deactivates the output held by the current RF momentary mapping.
+void stopRemoteMomentary(uint32_t now) {
+  switch (remoteMomentaryKind) {
+    case RemoteActionKind::Relay:
+      relays.requestRelayForTest(
+          static_cast<uint8_t>(remoteMomentaryValue + 1), false, now);
+      break;
+    case RemoteActionKind::Side:
+      relays.stopSide(static_cast<::RelaySide>(remoteMomentaryValue), now);
+      break;
+    case RemoteActionKind::Pwm:
+      pwm.setChannel(remoteMomentaryValue, now);
+      pwm.setValue(0, now);
+      break;
+    default:
+      break;
+  }
+  remoteMomentaryKind = RemoteActionKind::None;
+  remoteMomentaryEndsAt = 0;
+}
+
+// Expires momentary RF outputs locally if their repeat stream stops.
+void serviceRemoteMomentary(uint32_t now) {
+  if (remoteMomentaryKind != RemoteActionKind::None &&
+      timeReached(now, remoteMomentaryEndsAt)) {
+    stopRemoteMomentary(now);
+  }
+}
+
+// Applies one persisted mapping through the same safe relay/PWM/menu APIs.
+void executeLearnedRemote(const LearnedRemote &remote, uint32_t now) {
+  const RemoteActionKind kind =
+      static_cast<RemoteActionKind>(remote.actionKind);
+  const RemoteBehavior behavior =
+      static_cast<RemoteBehavior>(remote.behavior);
+  if (remoteMomentaryKind != RemoteActionKind::None &&
+      (remoteMomentaryKind != kind ||
+       remoteMomentaryValue != remote.actionValue)) {
+    stopRemoteMomentary(now);
+  }
+  switch (kind) {
+    case RemoteActionKind::Key:
+      appEvents.key(remote.actionValue,
+                    static_cast<uint8_t>(KeyEvent::Click),
+                    InputEventSource::Radio, remote.id);
+      handleMenuAction(remote.actionValue, true);
+      return;
+    case RemoteActionKind::Menu:
+      handleMenuAction(remote.actionValue, true);
+      return;
+    case RemoteActionKind::Relay: {
+      const uint8_t mask = static_cast<uint8_t>(_BV(remote.actionValue));
+      const bool active = (relays.activeRelayMask() & mask) != 0;
+      const bool next = behavior == RemoteBehavior::Toggle ||
+                                behavior == RemoteBehavior::Press
+                            ? !active
+                            : true;
+      const bool accepted = relays.requestRelayForTest(
+          static_cast<uint8_t>(remote.actionValue + 1), next, now);
+      if (accepted && behavior == RemoteBehavior::Momentary) {
+        remoteMomentaryKind = kind;
+        remoteMomentaryValue = remote.actionValue;
+        remoteMomentaryEndsAt = now + 350;
+      }
+      return;
+    }
+    case RemoteActionKind::Side:
+      if (behavior != RemoteBehavior::Stop &&
+          !relays.motionAllowed()) {
+        return;
+      }
+      if (behavior == RemoteBehavior::Stop) {
+        relays.stopSide(static_cast<::RelaySide>(remote.actionValue), now);
+      } else {
+        const RelayDirection direction =
+            behavior == RemoteBehavior::Down ? RelayDirection::Reverse
+                                               : RelayDirection::Forward;
+        if (relays.requestSide(static_cast<::RelaySide>(remote.actionValue),
+                               direction, true, now)) {
+          remoteMomentaryKind = kind;
+          remoteMomentaryValue = remote.actionValue;
+          remoteMomentaryEndsAt = now + 350;
+        }
+      }
+      return;
+    case RemoteActionKind::Pwm: {
+      if (pwm.mode() == PwmTestMode::Auto) {
+        pwm.setMode(PwmTestMode::Manual, now);
+      }
+      pwm.setChannel(remote.actionValue, now);
+      const bool active = pwm.logicalValue(remote.actionValue) != 0;
+      pwm.setValue(behavior == RemoteBehavior::Momentary
+                       ? 4095
+                       : (active ? 0 : 4095),
+                   now);
+      if (behavior == RemoteBehavior::Momentary) {
+        remoteMomentaryKind = kind;
+        remoteMomentaryValue = remote.actionValue;
+        remoteMomentaryEndsAt = now + 350;
+      }
+      return;
+    }
+    case RemoteActionKind::None:
+      return;
+  }
+}
+
+// Consumes one RC-switch frame, emits it immediately, then learns or executes it.
+void serviceRadio() {
+  if (!radioReceiver.available()) {
+    return;
+  }
+
+  const uint32_t code = radioReceiver.getReceivedValue();
+  const uint8_t bits = radioReceiver.getReceivedBitlength();
+  const uint8_t protocol = radioReceiver.getReceivedProtocol();
+  const uint16_t pulseLength = radioReceiver.getReceivedDelay();
+  radioReceiver.resetAvailable();
+
+  if (code == 0 || bits == 0) {
+    return;
+  }
+
+  radioState.lastCode = code;
+  radioState.lastBitLength = bits;
+  radioState.lastProtocol = protocol;
+  radioState.lastPulseLength = pulseLength;
+
+  const bool repeated =
+      code == lastRemoteActionCode &&
+      static_cast<uint32_t>(now - lastRemoteActionAt) < 400;
+  lastRemoteActionCode = code;
+  lastRemoteActionAt = now;
+
+  if (learningActive) {
+    if (repeated) {
+      return;
+    }
+    uint8_t learnedId = 0;
+    const bool learned =
+        learnedRemotes.learn(code, bits, protocol, pulseLength, learnedId);
+    if (learned) {
+      appEvents.rfLearned(learnedId);
+    }
+    appEvents.rfReceived(code, bits, protocol, pulseLength,
+                         learned ? learnedId : 0xFF);
+    statusLeds.playCue(StatusLedCue::Radio, 320);
+    if (!learned) {
+      endLearning(2, -1);
+    } else if (learnedRemotes.count() >= RemoteLearningStore::Capacity) {
+      endLearning(2, 1);
+    } else if ((learningOptions & LEARN_MULTI) == 0) {
+      endLearning(0, 1);
+    }
+    return;
+  }
+
+  LearnedRemote remote;
+  const bool learned = learnedRemotes.find(code, bits, protocol, remote);
+  appEvents.rfReceived(code, bits, protocol, pulseLength,
+                       learned ? remote.id : 0xFF);
+  statusLeds.playCue(StatusLedCue::Radio, 240);
+  if (learned) {
+    const RemoteBehavior behavior =
+        static_cast<RemoteBehavior>(remote.behavior);
+    const bool refreshable =
+        behavior == RemoteBehavior::Momentary ||
+        behavior == RemoteBehavior::Up ||
+        behavior == RemoteBehavior::Down;
+    if (refreshable || !repeated) {
+      executeLearnedRemote(remote, now);
+    }
+  }
+}
+
+// Temporarily releases INT0 receive timing while INT1 transmits one RF frame.
+bool transmitRadio(uint32_t code, uint8_t bits, uint8_t protocol,
+                   uint16_t pulseLength) {
+  if (learningActive || code == 0 || bits == 0 || bits > 32 ||
+      protocol == 0 || protocol > MAX_RC_PROTOCOL) {
+    return false;
+  }
+
+  radioReceiver.disableReceive();
+  radioTransmitter.setProtocol(protocol);
+  if (pulseLength != 0) {
+    radioTransmitter.setPulseLength(pulseLength);
+  }
+  radioTransmitter.send(code, bits);
+  radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
+  return true;
+}

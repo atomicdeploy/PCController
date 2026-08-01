@@ -26,10 +26,13 @@ enum class StatusLedCue : uint8_t {
   Reset,
 };
 
+// Composes base state and transient cues onto PCA9685 RGB channels 13..15.
 class StatusLedController {
 public:
+  // Claims PWM output plus Power/On signal and starts the boot animation.
   void begin(PwmController &pwm, uint8_t brightness,
              uint32_t now = millis());
+  // Advances breathing/easing without blocking other services.
   void service(uint32_t now = millis());
 
   void setMode(StatusLedMode mode, uint32_t now = millis());
@@ -39,6 +42,7 @@ public:
   void setReadyColor(uint8_t color);
   void setCustom(uint8_t red, uint8_t green, uint8_t blue);
   void setPowerSignal(bool active);
+  // Overlays an informational transition before smoothly restoring base state.
   void playCue(StatusLedCue cue, uint16_t durationMs,
                uint32_t now = millis());
 
@@ -47,7 +51,7 @@ private:
   static uint8_t scale(uint8_t value, uint8_t level);
   static uint16_t easedValue(uint16_t current, uint16_t target);
 
-  PwmController *pwm_ = nullptr;
+  PwmController *pwm_ = nullptr; // Non-owning shared PWM controller.
   StatusLedMode mode_ = StatusLedMode::Off;
   uint8_t brightness_ = 128;
   uint8_t readyPalette_ = 2;
@@ -57,7 +61,7 @@ private:
   uint8_t pulse_ = 0;
   bool pulseRising_ = true;
   uint32_t lastStepAt_ = 0;
-  uint32_t cueEndsAt_ = 0;
+  uint32_t cueEndsAt_ = 0; // millis() deadline; zero means no active cue.
   StatusLedCue cue_ = StatusLedCue::None;
 };
 

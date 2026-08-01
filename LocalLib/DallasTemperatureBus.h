@@ -12,7 +12,7 @@ using Ds18b20Address = uint8_t[8];
 //
 // begin() enumerates and caches at most two valid DS18B20 ROMs. Conversion is
 // deliberately split between requestTemperatures() and getTempCentiC(), so the
-// caller can wait 750 ms without blocking the MCU.
+// caller can wait for the configured 9..12-bit conversion without blocking.
 class DallasTemperatureBus {
 public:
   static constexpr int16_t DisconnectedCentiC = INT16_MIN;
