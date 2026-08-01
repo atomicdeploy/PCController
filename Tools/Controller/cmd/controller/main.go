@@ -92,6 +92,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case "help", "--help", "-h":
 		printUsage(stdout)
 		return nil
+	case "eeprom":
+		// EEPROM conversion is intentionally dispatched before config or device
+		// setup: it is a file-only operation and must never open a serial port.
+		return runEEPROM(args[1:], stdout, stderr)
 	}
 	store, err := appconfig.Open(configPath)
 	if err != nil {
@@ -1720,6 +1724,41 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	return errors.Join(programErr, reconnectErr)
 }
 
+func runEEPROM(args []string, stdout, stderr io.Writer) error {
+	const usage = "usage: controller eeprom migrate --input LEGACY.hex --output SETTINGS-v2.hex"
+	if len(args) == 0 || !strings.EqualFold(args[0], "migrate") {
+		return errors.New(usage)
+	}
+	flags := flag.NewFlagSet("eeprom migrate", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	input := flags.String("input", "", "legacy unversioned 19+CRC8 EEPROM Intel HEX")
+	output := flags.String("output", "", "new sparse development-v2 settings Intel HEX")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || strings.TrimSpace(*input) == "" ||
+		strings.TrimSpace(*output) == "" {
+		return errors.New(usage)
+	}
+	result, err := programmer.MigrateLegacyEEPROMSettings(*input, *output)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "EEPROM settings migration created: %s\n", result.OutputPath)
+	fmt.Fprintf(stdout, "source: %s SHA-256=%s\n", result.SourceFormat, result.SourceSHA256)
+	fmt.Fprintf(stdout, "output: %s SHA-256=%s\n", result.OutputFormat, result.OutputSHA256)
+	fmt.Fprintf(
+		stdout,
+		"preserved %d legacy values; sparse EEPROM range 0x%04X..0x%04X (%d bytes)\n",
+		result.PreservedValueBytes,
+		result.OutputStart,
+		result.OutputEndExclusive-1,
+		result.OutputBytes,
+	)
+	fmt.Fprintln(stdout, "No serial port was opened and no board EEPROM was written.")
+	return nil
+}
+
 func normalizeProgramCLIArgs(args []string) ([]string, error) {
 	shortcut := 0
 	for shortcut < len(args) && guardedFlashBooleanFlag(args[shortcut]) {
@@ -2826,6 +2865,7 @@ Automation, monitoring and bridges:
 
 Device, firmware and recovery:
   controller reset [connection flags]
+  controller eeprom migrate --input LEGACY.hex --output SETTINGS-v2.hex
   controller program flash HEX [PORT] [--usbasp-troubleshooting] [--allow-incomplete-backup]
   controller program [non-write diagnostic flags]
   controller boot probe|info|metadata|backup|read|write|verify|start [flags]

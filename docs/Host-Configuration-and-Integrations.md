@@ -305,6 +305,20 @@ write, and read back. This avoids spending scarce AVR flash on a permanent
 chain of historical migration code. The acceptance checklist remains the
 authority on which parts of this workflow are implemented versus planned.
 
+The current narrow implementation is:
+
+```console
+Tools\Controller\bin\controller.exe eeprom migrate --input OLD.eep --output SETTINGS-v2.eep
+```
+
+It accepts only a CRC-valid legacy unversioned 19+CRC8 settings record,
+preserves the 19 value bytes, adds the all-visible `0x7FFF` menu mask and
+identity packed order, and emits only addresses 32 through 61. It neither
+opens serial nor copies RF/reset-journal regions. A fully valid current record
+is rejected first; otherwise a CRC-valid legacy prefix can be migrated without
+copying ignored stale extension bytes. Writing and readback remain separate
+explicit programming operations.
+
 ## Measurement demand and history
 
 Serial remains connected so asynchronous door, BT Audio, key, RF, reset, and
