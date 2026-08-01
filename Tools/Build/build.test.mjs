@@ -25,10 +25,12 @@ import {
 test('refreshed Windows PATH preserves invoking shell precedence', () => {
 	const first = resolve('selected-toolchain')
 	const second = resolve('session-tools')
-	const refreshed = refreshedEnvironment({
-		...process.env,
-		Path: [first, second].join(delimiter)
-	}, 'win32')
+	const windowsEnvironment = { ...process.env }
+	for (const key of Object.keys(windowsEnvironment)) {
+		if (key.toLowerCase() === 'path') delete windowsEnvironment[key]
+	}
+	windowsEnvironment.Path = [first, second].join(delimiter)
+	const refreshed = refreshedEnvironment(windowsEnvironment, 'win32')
 	assert.deepEqual(refreshed.PATH.split(delimiter).slice(0, 2), [first, second])
 	assert.deepEqual(Object.keys(refreshed).filter(key => key.toLowerCase() === 'path'), ['PATH'])
 })
