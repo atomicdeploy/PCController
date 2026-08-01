@@ -62,8 +62,8 @@ func ValidateBackupManifest(manifestPath string) (ValidatedBackup, error) {
 		return ValidatedBackup{}, errors.New("complete backup manifest contains errors")
 	}
 	if manifest.ApplicationPackedTimestamp != "" {
-		if manifest.ApplicationIdentitySchema != 2 {
-			return ValidatedBackup{}, errors.New("packed firmware timestamp requires identity schema 2")
+		if !packedIdentitySchema(manifest.ApplicationIdentitySchema) {
+			return ValidatedBackup{}, errors.New("packed firmware timestamp requires identity schema 2 or 3")
 		}
 		packed, parseErr := strconv.ParseUint(manifest.ApplicationPackedTimestamp, 16, 32)
 		if parseErr != nil || len(manifest.ApplicationPackedTimestamp) != 8 {

@@ -67,7 +67,7 @@ func TestBackupManifestContentAddressingValidationAndRestorePlan(t *testing.T) {
 	date := uint32((2026-2000)<<9 | 8<<5 | 1)
 	clock := uint32(19<<11 | 42<<5 | 58>>1)
 	options := fakeBackupOptions(root)
-	options.ApplicationIdentitySchema = 2
+	options.ApplicationIdentitySchema = 3
 	options.ApplicationPackedTimestamp = date<<16 | clock
 	directory, err := BackupWithRunner(context.Background(), options, io.Discard, runner)
 	if err != nil {
@@ -113,6 +113,25 @@ func TestBackupManifestContentAddressingValidationAndRestorePlan(t *testing.T) {
 	})
 	if err != nil || len(usbPlan.Steps) != 1 {
 		t.Fatalf("authorized USBasp restore plan=%#v err=%v", usbPlan, err)
+	}
+}
+
+func TestValidateBackupAcceptsPackedIdentitySchemasTwoAndThree(t *testing.T) {
+	date := uint32((2026-2000)<<9 | 8<<5 | 1)
+	clock := uint32(19<<11 | 42<<5 | 58>>1)
+	for _, schema := range []byte{2, 3} {
+		options := fakeBackupOptions(t.TempDir())
+		options.ApplicationIdentitySchema = schema
+		options.ApplicationPackedTimestamp = date<<16 | clock
+		if err := ValidateBackup(options); err != nil {
+			t.Fatalf("schema %d: %v", schema, err)
+		}
+	}
+	options := fakeBackupOptions(t.TempDir())
+	options.ApplicationIdentitySchema = 1
+	options.ApplicationPackedTimestamp = date<<16 | clock
+	if err := ValidateBackup(options); err == nil {
+		t.Fatal("legacy identity accepted a packed timestamp")
 	}
 }
 

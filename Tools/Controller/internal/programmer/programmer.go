@@ -411,7 +411,8 @@ func BackupWithRunner(
 		ApplicationTime:           strings.TrimSpace(options.ApplicationTime),
 		ApplicationIdentitySchema: options.ApplicationIdentitySchema,
 	}
-	if options.ApplicationIdentitySchema == 2 && options.ApplicationPackedTimestamp != 0 {
+	if packedIdentitySchema(options.ApplicationIdentitySchema) &&
+		options.ApplicationPackedTimestamp != 0 {
 		manifest.ApplicationPackedTimestamp = fmt.Sprintf("%08X", options.ApplicationPackedTimestamp)
 		if timestamp, timestampErr := DecodeFirmwareTimestampSchema2(options.ApplicationPackedTimestamp); timestampErr == nil {
 			manifest.ApplicationTimestamp = timestamp.Compact
@@ -565,8 +566,8 @@ func ValidateBackup(options Options) error {
 		return errors.New("avrdude backup requires --programmer")
 	}
 	if options.ApplicationPackedTimestamp != 0 {
-		if options.ApplicationIdentitySchema != 2 {
-			return errors.New("packed firmware timestamp requires identity schema 2")
+		if !packedIdentitySchema(options.ApplicationIdentitySchema) {
+			return errors.New("packed firmware timestamp requires identity schema 2 or 3")
 		}
 		if _, err := DecodeFirmwareTimestampSchema2(options.ApplicationPackedTimestamp); err != nil {
 			return err
@@ -574,6 +575,8 @@ func ValidateBackup(options Options) error {
 	}
 	return nil
 }
+
+func packedIdentitySchema(schema byte) bool { return schema == 2 || schema == 3 }
 
 func createBackupDirectory(root string, timestamp time.Time) (string, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
