@@ -547,7 +547,8 @@ export function hostSourceIdentity(hostRoot = HOST_ROOT) {
 }
 
 function styles(options) {
-	const enabled = !options.noColor && process.stdout.isTTY
+	const forceColor = ['1', 'true', 'always'].includes(String(process.env.FORCE_COLOR || '').toLowerCase()) || process.env.GITHUB_ACTIONS === 'true'
+	const enabled = !options.noColor && (process.stdout.isTTY || forceColor)
 	return enabled
 		? { cyan: '\u001b[1;96m', green: '\u001b[1;92m', yellow: '\u001b[1;93m', red: '\u001b[1;91m', magenta: '\u001b[1;95m', dim: '\u001b[90m', reset: '\u001b[0m' }
 		: { cyan: '', green: '', yellow: '', red: '', magenta: '', dim: '', reset: '' }

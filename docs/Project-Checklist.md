@@ -1,6 +1,6 @@
 # Project Checklist
 
-Audit date: 2026-08-01
+Audit date: 2026-08-02
 
 This is the domain-sorted successor to
 former `%TEMP%\PCController-check.md`. It includes the original checklist plus the
@@ -23,17 +23,21 @@ remains in this checklist.
 
 ## Current release-candidate status
 
-- ✅ The full cap23 release-candidate source builds at 32,084/32,384 flash and
-  1,444/2,048 static SRAM, leaving 300 flash bytes. Cap23 is the compact
-  persistent local-menu visibility/order/hierarchy/layout capability.
-- ✅ A complete physical cap24 overlay is **not** advertised. The measured
-  incomplete lower bound added 256 flash and 26 SRAM (32,340 flash, only 44
-  free) while still omitting navigation, requests/retries, failure fallback,
-  relationships, visual/blink handling, read-only cue, and unsolicited events.
-  Host and VirtualBoard retain cap24; the AVR uses cap19 exact front-panel push.
-- ✅ Current firmware `4C980157` (32,226/32,384 application bytes, 158 free)
+- ✅ The current pinned cap23 source/CI profile builds at 32,228/32,384
+  application-flash bytes, leaving 156 bytes. It uses 1,444/2,048 static SRAM
+  (604 free) and has a conservatively modeled 1,764/2,048 peak (284 free).
+  Cap23 is the compact persistent local-menu
+  visibility/order/hierarchy/layout capability.
+- ✅ A complete physical cap24 overlay is **not** advertised. A historical
+  incomplete experiment added 256 flash and 26 SRAM to its then-current base
+  (32,340 flash, only 44 free) while still omitting navigation,
+  requests/retries, failure fallback, relationships, visual/blink handling,
+  read-only cue, and unsolicited events. Host and VirtualBoard retain cap24;
+  the AVR uses cap19 exact front-panel push.
+- ✅ Hardware checkpoint `4C980157` (32,226/32,384 application bytes, 158 free)
   was guarded-backup uploaded and independently flash-verified through Urclock
-  on COM18. Live HELLO reports timestamp `260801223630`; settings retain
+  on COM18. It is distinct from the newer 32,228-byte pinned source profile.
+  Live HELLO reports timestamp `260801223630`; settings retain
   illumination/PWM Off, Status page 0, audible mode, 2/2 decimals, motion
   Always with a 1 ms break, and all 15 EEPROM menu pages visible in identity
   order. Relays and PWM channels 0-11 were verified off with zero UART framing
@@ -42,7 +46,8 @@ remains in this checklist.
 - ✅ The latest physically key-tested checkpoint remains `2FD9F81C`: page 0
   was Status, reset count stayed 9 through Previous/Next/Decrease/Increase,
   relays and user PWM outputs stayed off, and mute was restored afterward.
-- 🟡 Firmware `4C980157` still needs the final human button/RF/load-safe
+- 🟡 Hardware checkpoint `4C980157` still needs the final human
+  button/RF/load-safe
   acceptance pass; protocol, backup, upload, readback, and output-off evidence
   do not substitute for those physical checks.
 - ✅ Exact compiled and factory initialization parameters are documented in
@@ -59,8 +64,9 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ The application UART on COM18 is electrically working. A live native
   protocol probe returned an authenticated `PCController` HELLO, settings,
   telemetry, two temperature identities, and an I2C scan.
-- ✅ Current firmware `5DF10D05` was built, UART-uploaded through current
-  MiniCore Urboot/Urclock on COM18, flash-verified, and identified itself as
+- ✅ At the July 31 checkpoint, firmware `5DF10D05` was built, UART-uploaded
+  through MiniCore Urboot/Urclock on COM18, flash-verified, and identified
+  itself as
   `build=5DF10D05 date=Jul 31 2026 time=07:13:06`.
 - ✅ The immediately preceding 50-sample AFD check had only a 4 mV supply span
   (0.16 mV mean absolute step), 3 mA current span (0.82 mA mean absolute
@@ -94,20 +100,20 @@ was recorded; they do not supersede the release-candidate summary above.
   However, that live loop reported reset cause `0` instead of a watchdog flag,
   so reset-cause capture through the installed Urboot path is not yet proven
   correct.
-- ⚠️ The latest unattended 5DF sweep ran with Silent enabled. Sound factory
+- ⚠️ The historical unattended 5DF sweep ran with Silent enabled. Sound factory
   default remains on and earlier firmware produced the confirmed clean melody
   after the Timer1 fix. The running final host has now saved `silent=false`
-  and completed the `notify` melody command, but the physical 5DF boot melody,
+  and completed the `notify` melody command, but that physical 5DF boot melody,
   one-beep-per-key behavior, and save/discard cues still require a user-listen
   check.
 - ✅ The immediately preceding AFD menu and host commands exercised
   voltage/current precision 0, 1, and 2. Two decimals for each were saved, the
   board was reset, and the decoded settings plus raw extended byte `0xF0`
-  remained correct. Current 5DF retained those settings.
-- ✅ Current 5DF expands that local sequence to `Snd` → `diSP` → `StBr` →
+  remained correct. The 5DF checkpoint retained those settings.
+- ✅ That 5DF checkpoint expanded the local sequence to `Snd` → `diSP` → `StBr` →
   `CoLr` → `V-dP` → `A-dP`, with value blinking at approximately 300 ms.
   It is built and live; the new fields still need a physical-key pass.
-- 🟡 Current live image `5DF10D05` passed the verified COM18 upload, flash
+- 🟡 The then-live image `5DF10D05` passed the verified COM18 upload, flash
   verify, root-page sweep, and temperature soaks. The immediately preceding
   AFD image passed the 50-sample sensor stability and decimal-setting
   persistence tests on unchanged paths. `E2DCE296` remains the proven
@@ -116,8 +122,8 @@ was recorded; they do not supersede the release-candidate summary above.
   nested settings sequence under `Snd`, including display/status brightness,
   Ready color, reading precision, and blinking selection. A broader root
   category hierarchy remains missing.
-- ✅ The final PC host TUI is running against COM18 through its stable CH340
-  selector and primary-owner IPC. Secondary IPC-routed commands authenticated
+- ✅ At that checkpoint the final PC host TUI ran against COM18 through its
+  stable CH340 selector and primary-owner IPC. Secondary IPC-routed commands authenticated
   build `5DF10D05`, reported 12.226 V/263 mA with relays and PWM off and zero
   framing/CRC errors, confirmed `silent=false` in MCU EEPROM, and completed
   the host `notify` melody.
@@ -452,9 +458,10 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ The packaged host previously authenticated official firmware `A7E59058`
   on COM18 and completed read-only HELLO, STATUS, SETTINGS,
   temperature-list, and I2C-scan commands without a deadline error. The later
-  E2 rollback image completed its host-driven status/menu validation, and
-  current 5DF completed HELLO/STATUS/menu/settings validation plus the full
-  all-page sweep. The final packaged TUI launch/demonstration is still pending.
+  E2 rollback image completed its host-driven status/menu validation, and the
+  historical 5DF checkpoint completed HELLO/STATUS/menu/settings validation
+  plus its full all-page sweep. The final packaged TUI launch/demonstration is
+  still pending.
 
 ## Host application, TUI, configuration, shell, IPC, and library
 
@@ -665,9 +672,9 @@ was recorded; they do not supersede the release-candidate summary above.
   `E5109CA1`:
   32,056/32,384 flash bytes and 1,444/2,048 static SRAM bytes, leaving
   328 flash bytes and 604 static-RAM bytes.
-- ✅ The current live build is `5DF10D05`: 32,374/32,384 application bytes
-  and 1,455/2,048 static SRAM bytes, leaving 10 flash bytes and 593
-  static-RAM bytes. Firmware source-set SHA-256 is
+- ✅ The later historical live build `5DF10D05` used 32,374/32,384
+  application bytes and 1,455/2,048 static SRAM bytes, leaving 10 flash bytes
+  and 593 static-RAM bytes. Firmware source-set SHA-256 is
   `6416EB92A694C4CBEE7FFFFD66BA757033E3DE0FFBADAA44F044A46306BB7783`.
   Artifact SHA-256: application HEX
   `8BF7AE02FDCD6B10FF6B335FF49EEB55CCF59E4EE417CD27C3CE5AA5430FBC49`

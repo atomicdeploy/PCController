@@ -1,0 +1,328 @@
+name: "🔌 Deploy · Protected AVR Hardware"
+run-name: "🔌 AVR deploy · ${{ inputs.release_tag }} · ${{ inputs.method }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Attested release to deploy
+        required: true
+        default: v0.1.0-alpha.1
+        type: string
+      port:
+        description: Serial device on the protected hardware runner
+        required: true
+        default: /dev/ttyUSB0
+        type: string
+      method:
+        description: Urclock is normal; USBasp is explicit recovery only
+        required: true
+        default: urclock
+        type: choice
+        options:
+          - urclock
+          - usbasp
+      confirmation:
+        description: Type DEPLOY, or DEPLOY USBASP RECOVERY for USBasp
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  attestations: read
+
+concurrency:
+  group: protected-avr-hardware
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: "🛡️ Verify and prepare programming bundle"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    outputs:
+      source-sha: ${{ steps.verify.outputs.source_sha }}
+
+    steps:
+      - name: "📥 Check out deployment policy"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "🔐 Validate explicit operator confirmation"
+        env:
+          METHOD: ${{ inputs.method }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          if test "$METHOD" = urclock; then
+            test "$CONFIRMATION" = DEPLOY
+          else
+            test "$CONFIRMATION" = "DEPLOY USBASP RECOVERY"
+          fi
+
+      - name: "⬇️ Download direct firmware and release integrity records"
+        run: |
+          set -euo pipefail
+          mkdir deployment-bundle
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir deployment-bundle \
+            --pattern "PCController-${RELEASE_TAG}-ATmega328P-Application.hex" \
+            --pattern "PCController-${RELEASE_TAG}-ATmega328P-Full-Flash-Urboot.hex" \
+            --pattern SHA256SUMS.txt \
+            --pattern release-manifest.json
+
+      - name: "✅ Bind images, release manifest, SHA-256, and provenance"
+        id: verify
+        run: |
+          set -euo pipefail
+          application="PCController-${RELEASE_TAG}-ATmega328P-Application.hex"
+          full_flash="PCController-${RELEASE_TAG}-ATmega328P-Full-Flash-Urboot.hex"
+          (
+            cd deployment-bundle
+            grep -F -e "  ${application}" -e "  ${full_flash}" SHA256SUMS.txt \
+              | sha256sum --check --strict
+          )
+          node --input-type=module <<'NODE'
+          import { createHash } from "node:crypto";
+          import { appendFileSync, readFileSync } from "node:fs";
+          const tag = process.env.RELEASE_TAG;
+          const application = `PCController-${tag}-ATmega328P-Application.hex`;
+          const fullFlash = `PCController-${tag}-ATmega328P-Full-Flash-Urboot.hex`;
+          const manifest = JSON.parse(readFileSync("deployment-bundle/release-manifest.json", "utf8"));
+          if (manifest.release?.tag !== tag) throw new Error("release-manifest tag mismatch");
+          const source = String(manifest.release?.sourceSha || "").toLowerCase();
+          if (!/^[0-9a-f]{40}$/u.test(source)) throw new Error("release-manifest source SHA is invalid");
+          if (manifest.chooser?.firmware?.applicationImage !== application ||
+              manifest.chooser?.firmware?.flashWithBootloaderImage !== fullFlash) {
+            throw new Error("release-manifest firmware chooser mismatch");
+          }
+          const assets = new Map((manifest.assets || []).map((asset) => [asset.file, asset]));
+          for (const file of [application, fullFlash]) {
+            const actual = createHash("sha256")
+              .update(readFileSync(`deployment-bundle/${file}`)).digest("hex");
+            if (assets.get(file)?.sha256 !== actual) throw new Error(`${file} release-manifest SHA-256 mismatch`);
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `source_sha=${source}\n`, "utf8");
+          NODE
+          gh attestation verify "deployment-bundle/$application" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify "deployment-bundle/$full_flash" --repo "$GITHUB_REPOSITORY"
+          gh attestation verify deployment-bundle/release-manifest.json --repo "$GITHUB_REPOSITORY"
+
+      - name: "⬆️ Upload immutable programming bundle"
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PCController-Verified-Deployment-Bundle
+          path: deployment-bundle
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 9
+
+      - name: "✨ Publish deployment readiness summary"
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          HARDWARE_ENABLED: ${{ vars.ENABLE_AVR_DEPLOY }}
+        run: |
+          {
+            echo '# ✅ AVR programming bundle verified'
+            echo
+            echo "> [**⬇️ Download the verified programming bundle**](${ARTIFACT_URL})"
+            echo
+            echo '## 🛡️ Preflight gates'
+            echo
+            echo '| Gate | Result |'
+            echo '|---|---|'
+            echo "| Release | \`${RELEASE_TAG}\` |"
+            echo '| SHA-256 | ✅ both firmware images matched |'
+            echo '| Release manifest | ✅ tag, exact source, chooser, and image hashes matched |'
+            echo '| Build provenance | ✅ images and release manifest attested |'
+            echo "| Requested method | \`${{ inputs.method }}\` |"
+            if test "$HARDWARE_ENABLED" = true; then
+              echo '| Protected runner gate | ✅ enabled; environment approval still required |'
+            else
+              echo '| Protected runner gate | ⏸️ disabled by `ENABLE_AVR_DEPLOY`; no device will be touched |'
+            fi
+            echo
+            echo '> The hardware job is intentionally separate. It runs only on a labeled self-hosted runner after the `avr-hardware` environment gate.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: "🔌 Backup · Flash · Verify · HELLO"
+    needs: prepare
+    if: >-
+      ${{ vars.ENABLE_AVR_DEPLOY == 'true' &&
+          ((inputs.method == 'urclock' && inputs.confirmation == 'DEPLOY') ||
+           (inputs.method == 'usbasp' && inputs.confirmation == 'DEPLOY USBASP RECOVERY')) }}
+    runs-on: [self-hosted, linux, pccontroller-avr]
+    timeout-minutes: 20
+    environment: avr-hardware
+    env:
+      FORCE_COLOR: "1"
+      PCCONTROLLER_VERSION: ${{ inputs.release_tag }}
+      DEVICE_PORT: ${{ inputs.port }}
+      PCCONTROLLER_DATA_DIR: ${{ github.workspace }}/deployment-evidence/controller-data
+
+    steps:
+      - name: "📥 Check out deployment controller"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.prepare.outputs.source-sha }}
+
+      - name: "🐹 Install Go from go.mod"
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: Tools/Controller/go.mod
+          cache-dependency-path: Tools/Controller/go.sum
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "📌 Read canonical deployment tool pins"
+        id: pins
+        run: node .github/scripts/dependency-report.mjs export
+
+      - name: "🔐 Install checksum-verified Arduino CLI"
+        env:
+          ARDUINO_CLI_ASSET: ${{ steps.pins.outputs.arduino_cli_asset }}
+          ARDUINO_CLI_SHA256: ${{ steps.pins.outputs.arduino_cli_linux_64_sha256 }}
+          ARDUINO_CLI_URL: ${{ steps.pins.outputs.arduino_cli_download_url }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/$ARDUINO_CLI_ASSET"
+          install_dir="$RUNNER_TEMP/arduino-cli/bin"
+          curl --fail --location --retry 3 --output "$archive" "$ARDUINO_CLI_URL"
+          echo "$ARDUINO_CLI_SHA256  $archive" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" arduino-cli
+          echo "$install_dir" >> "$GITHUB_PATH"
+          "$install_dir/arduino-cli" version
+
+      - name: "🧩 Install the pinned MiniCore AVRDUDE backend"
+        env:
+          MINICORE_INDEX_URL: ${{ steps.pins.outputs.minicore_index_url }}
+          MINICORE_PACKAGE: ${{ steps.pins.outputs.minicore_package }}
+          MINICORE_VERSION: ${{ steps.pins.outputs.minicore_version }}
+        run: |
+          set -euo pipefail
+          arduino-cli core update-index --additional-urls "$MINICORE_INDEX_URL"
+          arduino-cli core install "$MINICORE_PACKAGE@$MINICORE_VERSION" \
+            --additional-urls "$MINICORE_INDEX_URL"
+          data_dir="$(arduino-cli config get directories.data)"
+          avrdude="$(find "$data_dir/packages/MiniCore/tools/avrdude" -type f -name avrdude -perm -u+x | sort -V | tail -n 1)"
+          test -x "$avrdude"
+          printf 'Verified AVRDUDE backend: %s\n' "$avrdude"
+
+      - name: "⬇️ Download verified programming bundle"
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: PCController-Verified-Deployment-Bundle
+          path: deployment-bundle
+
+      - name: "🖥️ Build the guarded native programmer"
+        run: ./build.sh --host-only --clean --version "$PCCONTROLLER_VERSION"
+
+      - name: "🔐 Validate the protected runner's serial device"
+        run: |
+          set -euo pipefail
+          if ! [[ "$DEVICE_PORT" =~ ^/dev/[A-Za-z0-9._/-]+$ ]]; then
+            echo "protected Linux runner requires an explicit /dev device path" >&2
+            exit 1
+          fi
+          resolved_port="$(realpath -e -- "$DEVICE_PORT")"
+          if [[ "$resolved_port" != /dev/* ]] || ! test -c "$resolved_port"; then
+            echo "serial port must resolve to an existing character device below /dev" >&2
+            exit 1
+          fi
+          echo "DEVICE_PORT_REAL=$resolved_port" >> "$GITHUB_ENV"
+
+      - name: "🔌 Back up, flash, verify, and authenticate the application"
+        id: program
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          METHOD: ${{ inputs.method }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source-sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p deployment-evidence
+          cp deployment-bundle/release-manifest.json deployment-evidence/
+          cp deployment-bundle/SHA256SUMS.txt deployment-evidence/
+          printf '%s\n' "$SOURCE_SHA" > deployment-evidence/source-sha.txt
+          {
+            arduino-cli version
+            arduino-cli core list
+          } > deployment-evidence/programmer-toolchain.txt
+          if test "$METHOD" = usbasp; then
+            image="deployment-bundle/PCController-${RELEASE_TAG}-ATmega328P-Full-Flash-Urboot.hex"
+            Tools/Controller/bin/controller program \
+              --method usbasp \
+              --operation write-flash \
+              --hex "$image" \
+              --usbasp-troubleshooting \
+              --app-reconnect=false 2>&1 | tee deployment-evidence/programming.log
+          else
+            image="deployment-bundle/PCController-${RELEASE_TAG}-ATmega328P-Application.hex"
+            Tools/Controller/bin/controller program \
+              --method urclock \
+              --operation write-flash \
+              --hex "$image" \
+              --port "$DEVICE_PORT_REAL" \
+              --app-reconnect=true 2>&1 | tee deployment-evidence/programming.log
+          fi
+          Tools/Controller/bin/controller exec --port "$DEVICE_PORT_REAL" hello \
+            2>&1 | tee -a deployment-evidence/programming.log
+          Tools/Controller/bin/controller exec --port "$DEVICE_PORT_REAL" status \
+            2>&1 | tee -a deployment-evidence/programming.log
+
+      - name: "⬆️ Preserve physical deployment evidence"
+        if: always()
+        id: evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PCController-Deployment-Evidence-${{ github.run_id }}
+          path: deployment-evidence
+          if-no-files-found: warn
+          retention-days: 90
+          compression-level: 9
+
+      - name: "✨ Publish physical deployment evidence"
+        if: always()
+        env:
+          PROGRAM_OUTCOME: ${{ steps.program.outcome }}
+          EVIDENCE_URL: ${{ steps.evidence.outputs.artifact-url }}
+        run: |
+          {
+            echo '# 🔌 Protected AVR deployment'
+            echo
+            if test "$PROGRAM_OUTCOME" = success; then
+              echo '> [!IMPORTANT]'
+              echo '> Physical deployment completed and the post-flash application canary passed.'
+              echo
+              echo '| Evidence | Result |'
+              echo '|---|---|'
+              echo '| Protected environment | ✅ `avr-hardware` approved |'
+              echo '| Runner | ✅ self-hosted Linux `pccontroller-avr` |'
+              echo '| Pre-flash backup | ✅ complete backup required by Controller guard |'
+              echo '| Firmware write + AVRDUDE verification | ✅ completed |'
+              echo '| Application reconnect | ✅ authenticated HELLO + status canary |'
+            else
+              echo '> [!WARNING]'
+              echo "> Deployment did not complete successfully (program step: \`${PROGRAM_OUTCOME}\`). No success claim is recorded; inspect the preserved log."
+            fi
+            echo
+            if test -n "$EVIDENCE_URL"; then
+              echo "[**Download the deployment evidence**]($EVIDENCE_URL)"
+              echo
+            fi
+            echo '> USBasp remains a recovery-only path with an independent explicit confirmation phrase.'
+          } >> "$GITHUB_STEP_SUMMARY"

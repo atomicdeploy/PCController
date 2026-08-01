@@ -20,13 +20,22 @@ const requiredFiles = [
   "Tools/Controller/README.md",
   "Tools/VirtualBoard/README.md",
   ".github/dependabot.yml",
+  ".github/actionlint.yaml",
+  ".github/dependencies.json",
+  ".github/workflows/build.yml",
+  ".github/workflows/dependencies.yml",
+  ".github/workflows/deploy-avr.yml",
   ".github/workflows/firmware.yml",
   ".github/workflows/host.yml",
   ".github/workflows/release.yml",
   ".github/workflows/repository-health.yml",
   ".github/workflows/virtual-board.yml",
   ".github/scripts/package-directory.mjs",
+  ".github/scripts/package-directory.test.mjs",
+  ".github/scripts/dependency-report.mjs",
+  ".github/scripts/release-showcase.mjs",
   ".github/scripts/step-summary.mjs",
+  ".github/scripts/step-summary.test.mjs",
 ];
 
 function report(message) {

@@ -1,0 +1,254 @@
+name: "🔭 Dependencies · AVR Supply Chain"
+run-name: "🔭 Dependency radar · ${{ github.event_name == 'schedule' && 'daily verified update' || inputs.mode }}"
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Audit only, or apply verified updates on a pull-request branch"
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - apply
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependencies-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: "🔭 Verify official sources"
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    outputs:
+      audit-complete: ${{ steps.radar.outputs.audit_complete }}
+      updates-available: ${{ steps.radar.outputs.updates_available }}
+      changed-dependencies: ${{ steps.radar.outputs.changed_dependencies }}
+    steps:
+      - name: "📥 Check out the canonical branch"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: "🟢 Install pinned Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "🧪 Validate pins and offline contract"
+        run: |
+          node .github/scripts/dependency-report.mjs validate
+          node --test .github/scripts/dependency-report.test.mjs
+
+      - name: "🌐 Compare pins with official indexes"
+        id: radar
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node .github/scripts/dependency-report.mjs check
+          --report "${RUNNER_TEMP}/dependency-health/dependency-report.json"
+          --markdown "${RUNNER_TEMP}/dependency-health/dependency-report.md"
+
+      - name: "📦 Upload the dependency health report"
+        id: upload_health
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PCController-Dependency-Health-${{ github.run_number }}
+          path: ${{ runner.temp }}/dependency-health/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: "✨ Publish dependency health artifact CTA"
+        if: ${{ always() }}
+        env:
+          ARTIFACT_URL: ${{ steps.upload_health.outputs.artifact-url }}
+          UPLOAD_OUTCOME: ${{ steps.upload_health.outcome }}
+          RADAR_OUTCOME: ${{ steps.radar.outcome }}
+          AUDIT_COMPLETE: ${{ steps.radar.outputs.audit_complete }}
+          UPDATES_AVAILABLE: ${{ steps.radar.outputs.updates_available }}
+          CHANGED_DEPENDENCIES: ${{ steps.radar.outputs.changed_dependencies }}
+        run: |
+          {
+            echo
+            echo '## 📥 Dependency health report'
+            echo
+            if test -n "$ARTIFACT_URL"; then
+              echo "> [**⬇️ Download the dependency health artifact**](${ARTIFACT_URL})"
+            else
+              echo '> No dependency health artifact was produced; inspect the failed validation or audit step above.'
+            fi
+            echo
+            echo '| Detail | Result |'
+            echo '|---|---|'
+            echo "| Official-source audit | \`${RADAR_OUTCOME:-not-run}\` |"
+            echo "| Audit complete | \`${AUDIT_COMPLETE:-false}\` |"
+            echo "| Updates available | \`${UPDATES_AVAILABLE:-unknown}\` |"
+            echo "| Changed dependencies | \`${CHANGED_DEPENDENCIES:-none}\` |"
+            echo "| Artifact upload | \`${UPLOAD_OUTCOME:-not-run}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: "🤖 Propose verified updates"
+    needs: audit
+    if: >-
+      ${{ needs.audit.result == 'success' &&
+          (github.event_name == 'schedule' || inputs.mode == 'apply') &&
+          needs.audit.outputs.audit-complete == 'true' &&
+          needs.audit.outputs.updates-available == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: "📥 Start from the default branch"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: "🟢 Install pinned Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "🔎 Reuse any open dependency proposal"
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          url="$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --search 'in:title "refresh AVR toolchain pins"' \
+            --json url \
+            --jq '.[0].url // ""')"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          if test -n "$url"; then
+            echo "An update proposal is already open: $url" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: "🚀 Apply official verified candidates"
+        id: refresh
+        if: ${{ steps.pending.outputs.url == '' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node .github/scripts/dependency-report.mjs apply
+          --report "${RUNNER_TEMP}/dependency-update/dependency-report.json"
+          --markdown "${RUNNER_TEMP}/dependency-update/dependency-report.md"
+
+      - name: "🔎 Confirm the canonical pins or synchronized docs changed"
+        id: changes
+        if: ${{ steps.pending.outputs.url == '' }}
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "${GITHUB_OUTPUT}"
+            echo "No pin or documentation diff remained after the verified refresh." >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "changed=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: "🌿 Commit a uniquely named update branch"
+        id: branch
+        if: ${{ steps.changes.outputs.changed == 'true' }}
+        shell: bash
+        env:
+          AUTOMATION_ACTOR: ${{ github.actor }}
+          AUTOMATION_ACTOR_ID: ${{ github.actor_id }}
+        run: |
+          branch="automation/dependencies-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git config user.name "${AUTOMATION_ACTOR}"
+          git config user.email "${AUTOMATION_ACTOR_ID}+${AUTOMATION_ACTOR}@users.noreply.github.com"
+          git switch -c "${branch}"
+          git add --update
+          git commit -m "chore(deps): refresh AVR toolchain pins"
+          git push --set-upstream origin "${branch}"
+          echo "name=${branch}" >> "${GITHUB_OUTPUT}"
+
+      - name: "📝 Open the dependency pull request"
+        id: pull-request
+        if: ${{ steps.changes.outputs.changed == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          UPDATE_BRANCH: ${{ steps.branch.outputs.name }}
+          REPORT_FILE: ${{ runner.temp }}/dependency-update/dependency-report.md
+        run: |
+          {
+            echo
+            echo "---"
+            echo "This pull request was produced from verified official indexes by the daily dependency radar or a manually authorized **apply** run."
+            echo
+            echo "Source run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } >> "${REPORT_FILE}"
+          pr_url=$(gh pr create \
+            --base "${BASE_BRANCH}" \
+            --head "${UPDATE_BRANCH}" \
+            --title "chore(deps): refresh AVR toolchain pins" \
+            --label "📦 dependencies" \
+            --label "🏗️ tooling-build" \
+            --body-file "${REPORT_FILE}")
+          echo "url=${pr_url}" >> "${GITHUB_OUTPUT}"
+          {
+            echo
+            echo "## 🎉 Update proposal created"
+            echo
+            echo "[Review the dependency pull request](${pr_url})"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: "📦 Upload the proposed update report"
+        id: upload_update
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PCController-Dependency-Update-${{ github.run_number }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/dependency-update/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: "✨ Publish dependency update artifact CTA"
+        if: ${{ always() }}
+        env:
+          ARTIFACT_URL: ${{ steps.upload_update.outputs.artifact-url }}
+          UPLOAD_OUTCOME: ${{ steps.upload_update.outcome }}
+          REFRESH_OUTCOME: ${{ steps.refresh.outcome }}
+          CONFIG_CHANGED: ${{ steps.changes.outputs.changed }}
+          CHANGED_DEPENDENCIES: ${{ needs.audit.outputs.changed-dependencies }}
+          PENDING_PR_URL: ${{ steps.pending.outputs.url }}
+          CREATED_PR_URL: ${{ steps.pull-request.outputs.url }}
+        run: |
+          {
+            echo
+            echo '## 📥 Dependency update report'
+            echo
+            if test -n "$ARTIFACT_URL"; then
+              echo "> [**⬇️ Download the proposed-update artifact**](${ARTIFACT_URL})"
+            else
+              echo '> No proposed-update artifact was produced; inspect the update steps above.'
+            fi
+            echo
+            echo '| Detail | Result |'
+            echo '|---|---|'
+            echo "| Candidate refresh | \`${REFRESH_OUTCOME:-not-run}\` |"
+            echo "| Canonical pin changed | \`${CONFIG_CHANGED:-false}\` |"
+            echo "| Changed dependencies | \`${CHANGED_DEPENDENCIES:-none}\` |"
+            echo "| Artifact upload | \`${UPLOAD_OUTCOME:-not-run}\` |"
+            if test -n "$CREATED_PR_URL"; then
+              echo "| Pull request | [new proposal](${CREATED_PR_URL}) |"
+            elif test -n "$PENDING_PR_URL"; then
+              echo "| Pull request | [existing proposal](${PENDING_PR_URL}) |"
+            else
+              echo '| Pull request | not created |'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

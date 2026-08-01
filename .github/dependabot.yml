@@ -10,8 +10,8 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     labels:
-      - dependencies
-      - github-actions
+      - "📦 dependencies"
+      - "🏗️ tooling-build"
     groups:
       actions-minor-and-patch:
         update-types: [minor, patch]
@@ -27,8 +27,8 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     labels:
-      - dependencies
-      - go
+      - "📦 dependencies"
+      - "🖥️ host"
     groups:
       go-minor-and-patch:
         update-types: [minor, patch]

@@ -380,7 +380,8 @@ Exit codes: 0 success, 2 usage, 3 validation, 4 build/program, 5 local I/O,
 }
 
 function createLogger(config) {
-	const color = !config.noColor && process.stdout.isTTY
+	const forceColor = ['1', 'true', 'always'].includes(String(process.env.FORCE_COLOR || '').toLowerCase()) || process.env.GITHUB_ACTIONS === 'true'
+	const color = !config.noColor && (process.stdout.isTTY || forceColor)
 	const code = color
 		? {
 				cyan: '\u001b[1;96m',
@@ -1185,7 +1186,8 @@ export async function main(
 		return error.exitCode || EXIT.USAGE
 	}
 	if (config.help) {
-		console.log(usage(!config.noColor && process.stdout.isTTY))
+		const forceColor = ['1', 'true', 'always'].includes(String(env.FORCE_COLOR || '').toLowerCase()) || env.GITHUB_ACTIONS === 'true'
+		console.log(usage(!config.noColor && (process.stdout.isTTY || forceColor)))
 		return EXIT.OK
 	}
 
