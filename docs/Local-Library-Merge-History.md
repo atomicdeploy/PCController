@@ -161,10 +161,11 @@ PWM, RELAY, key identification, persistent user PWM, R5-R8 control, two-side
 motion, and RF learning pages; editor submodes; save/discard feedback; RF
 learning; and Fault. This restores the project structure and menu manager
 without restoring removed business logic. This describes the proven
-state-manager foundation used by the current `5DF10D05` image. 5DF retains
-the flat 14-page root and adds a nested six-item Sound/display/status/
-precision settings sequence; the broader hierarchical-menu request is tracked
-separately and is not part of the LocalLib merge.
+state-manager foundation used by the historical `5DF10D05` image. That
+checkpoint retained the flat 14-page root and added a nested six-item
+Sound/display/status/precision settings sequence; the current source later
+added `STAT` as page 0 for a 15-page root. The broader hierarchical-menu
+request is tracked separately and is not part of the LocalLib merge.
 
 ## Deliberately excluded
 

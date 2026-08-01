@@ -2,7 +2,7 @@
 setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 chcp 65001 >nul
-title PCController project-owned build and packaging
+title Project-owned build and packaging
 
 where.exe node.exe >nul 2>nul
 if errorlevel 1 (
@@ -10,6 +10,10 @@ if errorlevel 1 (
     echo         Install Node.js, then run this command again.
     exit /b 1
 )
+
+for /f "usebackq delims=" %%I in (`node.exe -p "require('./Tools/Controller/web/package.json').productName"`) do set "PRODUCT_NAME=%%I"
+if not defined PRODUCT_NAME set "PRODUCT_NAME=Controller"
+title %PRODUCT_NAME% project-owned build and packaging
 
 if not exist "%~dp0Tools\Build\node_modules\chalk\package.json" goto :install_build_dependencies
 if not exist "%~dp0Tools\Build\node_modules\cli-table3\package.json" goto :install_build_dependencies
@@ -30,6 +34,6 @@ node.exe "%~dp0Tools\Build\build.mjs" %*
 set "RESULT=%ERRORLEVEL%"
 if not "%RESULT%"=="0" (
     echo.
-    echo [ERROR] PCController build exited with code %RESULT%.
+    echo [ERROR] %PRODUCT_NAME% build exited with code %RESULT%.
 )
 exit /b %RESULT%

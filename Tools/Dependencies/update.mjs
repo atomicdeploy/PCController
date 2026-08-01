@@ -19,7 +19,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { createChalk, renderUnicodeTable } from '../Build/presentation.mjs'
-import { resolveProductTitle } from '../Build/product-metadata.mjs'
+import { PRODUCT_METADATA, resolveProductTitle } from '../Build/product-metadata.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, '..', '..')
@@ -40,6 +40,7 @@ const chalk = createChalk({
   forceColor: Boolean(process.env.FORCE_COLOR),
 })
 const productTitle = resolveProductTitle(process.env)
+const productAgent = PRODUCT_METADATA.productName.replace(/[^0-9A-Za-z._-]+/gu, '-') || 'Controller'
 
 function parseArgs(argv) {
   const options = {
@@ -133,7 +134,7 @@ function curlJSON(url, directRetry = true) {
   const executable = platform() === 'win32' ? 'curl.exe' : 'curl'
   const base = ['--fail', '--silent', '--show-error', '--location',
     '--header', 'Accept: application/vnd.github+json, application/json',
-    '--header', 'User-Agent: PCController-dependency-updater/1', url]
+    '--header', `User-Agent: ${productAgent}-dependency-updater/1`, url]
   let result = spawnSync(executable, base, { encoding: 'utf8', windowsHide: true, env: process.env })
   if (result.status !== 0 && directRetry) {
     result = spawnSync(executable, ['--noproxy', '*', ...base], { encoding: 'utf8', windowsHide: true, env: process.env })

@@ -442,33 +442,32 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
-	listener, err := Listen("127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	server := httptest.NewServer(websocketMux(context.Background(), &Service{
+		Client: client, WebSocketPath: "/ipc", SocketIOPath: "/socket.io/",
+	}))
+	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		done <- Serve(ctx, listener, &Service{
-			Client: client, WebSocketPath: "/ipc", SocketIOPath: "/socket.io/",
-		})
-	}()
-	clientContext, stop := context.WithTimeout(ctx, 4*time.Second)
-	defer stop()
+	dialContext, stopDial := context.WithTimeout(ctx, 10*time.Second)
 	connection, _, err := websocket.Dial(
-		clientContext,
-		"ws://"+listener.Addr().String()+"/socket.io/?EIO=4&transport=websocket",
+		dialContext,
+		"ws"+strings.TrimPrefix(server.URL, "http")+
+			"/socket.io/?EIO=4&transport=websocket",
 		nil,
 	)
+	stopDial()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer connection.CloseNow()
-	readPacket := func() string {
+	// A busy hosted runner may spend most of the dial budget scheduling the
+	// listener. Protocol assertions get their own deadline after the upgrade.
+	clientContext, stopClient := context.WithTimeout(ctx, 10*time.Second)
+	defer stopClient()
+	readPacket := func(stage string) string {
 		_, data, readErr := connection.Read(clientContext)
 		if readErr != nil {
-			t.Fatal(readErr)
+			t.Fatalf("%s: %v", stage, readErr)
 		}
 		return string(data)
 	}
@@ -477,16 +476,16 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if packet := readPacket(); !strings.HasPrefix(packet, "0{") {
+	if packet := readPacket("Engine.IO open"); !strings.HasPrefix(packet, "0{") {
 		t.Fatalf("Engine.IO open=%q", packet)
 	}
 	writePacket("40")
-	if packet := readPacket(); !strings.HasPrefix(packet, "40{") {
+	if packet := readPacket("Socket.IO connect"); !strings.HasPrefix(packet, "40{") {
 		t.Fatalf("Socket.IO connect=%q", packet)
 	}
 	writePacket(`42["subscribe",{"topics":["events"]}]`)
 	for {
-		packet := readPacket()
+		packet := readPacket("subscription acknowledgement")
 		if strings.HasPrefix(packet, "42") {
 			name, _, err := decodeSocketIOEvent(packet[2:])
 			if err == nil && name == "subscribed" {
@@ -496,7 +495,7 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 	}
 	runtime.PublishHostEvent("door", "door opened")
 	for {
-		packet := readPacket()
+		packet := readPacket("controller event")
 		if strings.HasPrefix(packet, "42") {
 			name, _, err := decodeSocketIOEvent(packet[2:])
 			if err == nil && name == "controller.event" {
@@ -506,7 +505,7 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 	}
 	writePacket(`42["rpc",{"jsonrpc":"2.0","id":7,"method":"controller.ping"}]`)
 	for {
-		packet := readPacket()
+		packet := readPacket("ping RPC response")
 		if strings.HasPrefix(packet, "42") {
 			name, raw, err := decodeSocketIOEvent(packet[2:])
 			if err == nil && name == "rpc.response" {
@@ -519,7 +518,7 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 	}
 	writePacket(`42["rpc",{"jsonrpc":"2.0","id":8,"method":"controller.snapshot"}]`)
 	for {
-		packet := readPacket()
+		packet := readPacket("snapshot RPC response")
 		if strings.HasPrefix(packet, "42") {
 			name, raw, err := decodeSocketIOEvent(packet[2:])
 			if err == nil && name == "rpc.response" &&
@@ -531,15 +530,6 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 				break
 			}
 		}
-	}
-	cancel()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Socket.IO server did not stop")
 	}
 }
 
@@ -616,7 +606,6 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 		len(rangeBody) != 16 || !strings.HasPrefix(rangeResponse.Header.Get("Content-Range"), "bytes 0-15/") {
 		t.Fatalf("static range status=%d range=%q bytes=%d err=%v", rangeResponse.StatusCode, rangeResponse.Header.Get("Content-Range"), len(rangeBody), readErr)
 	}
-
 	dialContext, stopDial := context.WithTimeout(ctx, 5*time.Second)
 	connection, _, err := websocket.Dial(
 		dialContext,

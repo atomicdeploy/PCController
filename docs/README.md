@@ -37,11 +37,14 @@ order when the project is new to you:
 12. [Toolchain Bootstrap and Safe Programming](Toolchain-and-Safe-Programming.md)
     — reproducible clean-machine firmware dependencies, proxy behavior,
     guarded backup/flash/restore, and crash recovery.
-13. [Project Checklist](Project-Checklist.md) — the durable acceptance record.
+13. [CI/CD and Releases](CI-CD-and-Releases.md) — GitHub build matrices,
+   artifacts, checksums, dependency automation, and draft/published release
+   behavior.
+14. [Project Checklist](Project-Checklist.md) — the durable acceptance record.
    A green item requires source plus proportionate build, simulation, live-board,
    or user-observation evidence; yellow and warning items remain work or physical
    validation.
-14. [Completion Recovery Audit](Completion-Recovery-Audit.md) — the explicit
+15. [Completion Recovery Audit](Completion-Recovery-Audit.md) — the explicit
     boundary between implemented-and-verified, implemented-but-unverified,
     missing, and human-dependent work after the TUI/macro handoff gap.
 

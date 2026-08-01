@@ -23,19 +23,26 @@ remains in this checklist.
 
 ## Current release-candidate status
 
-- ✅ The full cap23 release-candidate source builds at 32,084/32,384 flash and
-  1,444/2,048 static SRAM, leaving 300 flash bytes. Cap23 is the compact
+- ✅ The latest verified source-only cap23 checkpoint, `F6D76FE4`, builds at
+  32,240/32,256 application bytes under the Urboot-Custom ceiling, leaving 16
+  bytes. It uses 1,441/2,048 static SRAM bytes (607 free). Cap23 is the compact
   persistent local-menu visibility/order/hierarchy/layout capability.
-- ✅ A complete physical cap24 overlay is **not** advertised. The measured
-  incomplete lower bound added 256 flash and 26 SRAM (32,340 flash, only 44
-  free) while still omitting navigation, requests/retries, failure fallback,
-  relationships, visual/blink handling, read-only cue, and unsolicited events.
-  The host retains dormant cap24 decode/test support, while the AVR and
-  VirtualBoard use cap19 exact front-panel push and reject the unadvertised
-  host-directory opcodes.
-- ✅ Current firmware `4C980157` (32,226/32,384 application bytes, 158 free)
+- 🟡 The merge-integrated firmware source has not yet been rebuilt or uploaded,
+  so the preceding footprint is a checkpoint rather than a post-merge claim.
+  The board still runs an older stock-Urboot image; Urboot-Custom is built but
+  not installed. The merge-integrated host likewise has not yet been packaged
+  or launched.
+- ✅ A complete physical cap24 overlay is **not** advertised. A historical
+  incomplete experiment added 256 flash and 26 SRAM to its then-current base
+  (32,340 flash, only 44 free) while still omitting navigation,
+  requests/retries, failure fallback, relationships, visual/blink handling,
+  read-only cue, and unsolicited events. Host and VirtualBoard retain cap24;
+  the AVR uses cap19 exact front-panel push.
+- ✅ Historical hardware checkpoint `4C980157` (32,226/32,384 application
+  bytes under the installed stock-Urboot profile, 158 free)
   was guarded-backup uploaded and independently flash-verified through Urclock
-  on COM18. Live HELLO reports timestamp `260801223630`; settings retain
+  on COM18. It is distinct from the newer source-only `F6D76FE4` checkpoint.
+  Live HELLO reports timestamp `260801223630`; settings retain
   illumination/PWM Off, Status page 0, audible mode, 2/2 decimals, motion
   Always with a 1 ms break, and all 15 EEPROM menu pages visible in identity
   order. Relays and PWM channels 0-11 were verified off with zero UART framing
@@ -44,7 +51,8 @@ remains in this checklist.
 - ✅ The latest physically key-tested checkpoint remains `2FD9F81C`: page 0
   was Status, reset count stayed 9 through Previous/Next/Decrease/Increase,
   relays and user PWM outputs stayed off, and mute was restored afterward.
-- 🟡 Firmware `4C980157` still needs the final human button/RF/load-safe
+- 🟡 Hardware checkpoint `4C980157` still needs the final human
+  button/RF/load-safe
   acceptance pass; protocol, backup, upload, readback, and output-off evidence
   do not substitute for those physical checks.
 - ✅ Exact compiled and factory initialization parameters are documented in
@@ -61,8 +69,9 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ The application UART on COM18 is electrically working. A live native
   protocol probe returned an authenticated `PCController` HELLO, settings,
   telemetry, two temperature identities, and an I2C scan.
-- ✅ Current firmware `5DF10D05` was built, UART-uploaded through current
-  MiniCore Urboot/Urclock on COM18, flash-verified, and identified itself as
+- ✅ At the July 31 checkpoint, firmware `5DF10D05` was built, UART-uploaded
+  through MiniCore Urboot/Urclock on COM18, flash-verified, and identified
+  itself as
   `build=5DF10D05 date=Jul 31 2026 time=07:13:06`.
 - ✅ The immediately preceding 50-sample AFD check had only a 4 mV supply span
   (0.16 mV mean absolute step), 3 mA current span (0.82 mA mean absolute
@@ -96,20 +105,20 @@ was recorded; they do not supersede the release-candidate summary above.
   However, that live loop reported reset cause `0` instead of a watchdog flag,
   so reset-cause capture through the installed Urboot path is not yet proven
   correct.
-- ⚠️ The latest unattended 5DF sweep ran with Silent enabled. Sound factory
+- ⚠️ The historical unattended 5DF sweep ran with Silent enabled. Sound factory
   default remains on and earlier firmware produced the confirmed clean melody
   after the Timer1 fix. The running final host has now saved `silent=false`
-  and completed the `notify` melody command, but the physical 5DF boot melody,
+  and completed the `notify` melody command, but that physical 5DF boot melody,
   one-beep-per-key behavior, and save/discard cues still require a user-listen
   check.
 - ✅ The immediately preceding AFD menu and host commands exercised
   voltage/current precision 0, 1, and 2. Two decimals for each were saved, the
   board was reset, and the decoded settings plus raw extended byte `0xF0`
-  remained correct. Current 5DF retained those settings.
-- ✅ Current 5DF expands that local sequence to `Snd` → `diSP` → `StBr` →
+  remained correct. The 5DF checkpoint retained those settings.
+- ✅ That 5DF checkpoint expanded the local sequence to `Snd` → `diSP` → `StBr` →
   `CoLr` → `V-dP` → `A-dP`, with value blinking at approximately 300 ms.
   It is built and live; the new fields still need a physical-key pass.
-- 🟡 Current live image `5DF10D05` passed the verified COM18 upload, flash
+- 🟡 The then-live image `5DF10D05` passed the verified COM18 upload, flash
   verify, root-page sweep, and temperature soaks. The immediately preceding
   AFD image passed the 50-sample sensor stability and decimal-setting
   persistence tests on unchanged paths. `E2DCE296` remains the proven
@@ -118,8 +127,8 @@ was recorded; they do not supersede the release-candidate summary above.
   nested settings sequence under `Snd`, including display/status brightness,
   Ready color, reading precision, and blinking selection. A broader root
   category hierarchy remains missing.
-- ✅ The final PC host TUI is running against COM18 through its stable CH340
-  selector and primary-owner IPC. Secondary IPC-routed commands authenticated
+- ✅ At that checkpoint the final PC host TUI ran against COM18 through its
+  stable CH340 selector and primary-owner IPC. Secondary IPC-routed commands authenticated
   build `5DF10D05`, reported 12.226 V/263 mA with relays and PWM off and zero
   framing/CRC errors, confirmed `silent=false` in MCU EEPROM, and completed
   the host `notify` melody.
@@ -149,9 +158,9 @@ was recorded; they do not supersede the release-candidate summary above.
   step and a subsequent Controller compile proved the managed config is reused.
   That source-only build was `F812539A`, 32,234/32,384 flash and 1,441/2,048
   static SRAM; it did not open COM18 or change the running board. The later
-  firmware/native audit build is `F6D76FE4`, 32,240/32,384 flash and the same
-  1,441/2,048 static SRAM. It likewise did not open COM18 or change the running
-  board.
+  firmware/native audit build is `F6D76FE4`, 32,240/32,256 application bytes
+  under the Urboot-Custom ceiling (16 free) and the same 1,441/2,048 static
+  SRAM. It likewise did not open COM18 or change the running board.
 - 🟡 Latest-stable policy, primary-registry resolution, substantive no-churn
   hash locks, check/apply/locked-bootstrap commands, and resolver tests exist.
   The current resolution selects dependency CLI 1.5.1, MiniCore 3.1.2, the six
@@ -512,10 +521,11 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ The packaged host previously authenticated official firmware `A7E59058`
   on COM18 and completed read-only HELLO, STATUS, SETTINGS,
   temperature-list, and I2C-scan commands without a deadline error. The later
-  E2 rollback image completed its host-driven status/menu validation, and
-  current 5DF completed HELLO/STATUS/menu/settings validation plus the full
-  all-page sweep. The packaged TUI was subsequently launched; a human visual
-  page-by-page acceptance sweep in the user's Windows Terminal remains open.
+  E2 rollback image completed its host-driven status/menu validation, and the
+  historical 5DF checkpoint completed HELLO/STATUS/menu/settings validation
+  plus its full all-page sweep. The merge-integrated host has not yet been
+  packaged or launched; its visual page-by-page/screenshot acceptance and the
+  remaining human RF/button checks are still pending.
 
 ## Host application, TUI, configuration, shell, IPC, and library
 
@@ -610,7 +620,8 @@ was recorded; they do not supersede the release-candidate summary above.
   primary-owner IPC, and full-backup changes. The Windows race detector was
   unavailable because the configured CGO tool failed before compilation; it
   is not counted as a pass.
-- ✅ Current packaged artifacts are:
+- 🟡 The last recorded packaged artifacts are historical and predate the
+  current merge-integrated source:
 
   | Artifact | Bytes | SHA-256 |
   |---|---:|---|
@@ -624,15 +635,17 @@ was recorded; they do not supersede the release-candidate summary above.
   `development`. The Go build injects a source hash and UTC build time.
   Regenerate and inspect the final EXE before marking packaging complete; the
   artifact hashes in the preceding table predate this identity change.
-- ⚠️ The newest stable-identity/primary-owner build now authenticates COM18
-  and serves live secondary IPC commands; the earlier external DLL smoke test
-  also passed. Physical USB removal/reappearance, opt-in DTR
-  reset-on-reconnect, macro playback, the current DLL against an external
+- ⚠️ An earlier stable-identity/primary-owner package authenticated COM18 and
+  served live secondary IPC commands; the earlier external DLL smoke test also
+  passed. The merge-integrated host must be freshly packaged and relaunched
+  before repeating that evidence. Physical USB removal/reappearance, opt-in
+  DTR reset-on-reconnect, macro playback, the rebuilt DLL against an external
   caller, and the AVRDUDE backup path still require validation.
-- ✅ The completed newest TUI was launched and left running for the user.
-  Its primary IPC owner authenticated `5DF10D05`; separate `exec` commands
-  successfully shared that connection for HELLO, status, settings, sound, and
-  melody operations without a second COM18 owner.
+- ⚠️ An earlier TUI package was launched and its primary IPC owner
+  authenticated `5DF10D05`; separate `exec` commands shared that connection
+  for HELLO, status, settings, sound, and melody operations without a second
+  COM18 owner. The newest host is not currently packaged or launched, and no
+  final physical screenshot/RF/button acceptance pass has been completed.
 
 ## Bootloader, programming, build scripts, and packaging
 
@@ -692,7 +705,7 @@ was recorded; they do not supersede the release-candidate summary above.
 
 ### Urboot-Custom progress fork
 
-- ✅ `Tools/Bootloader/Urboot-Custom` is a patch-based Urboot u8.0 prototype.
+- ✅ `Tools/Bootloader/Urboot-Custom` is a patch-based Urboot u8.0.1 prototype.
   The upstream diff exposes only a generic optional progress event hook; the
   TM1637 implementation is an isolated selectable backend so later peripherals
   do not require renaming or rewriting the core patch.
@@ -791,9 +804,9 @@ was recorded; they do not supersede the release-candidate summary above.
   `E5109CA1`:
   32,056/32,384 flash bytes and 1,444/2,048 static SRAM bytes, leaving
   328 flash bytes and 604 static-RAM bytes.
-- ✅ The current live build is `5DF10D05`: 32,374/32,384 application bytes
-  and 1,455/2,048 static SRAM bytes, leaving 10 flash bytes and 593
-  static-RAM bytes. Firmware source-set SHA-256 is
+- ✅ The later historical live build `5DF10D05` used 32,374/32,384
+  application bytes and 1,455/2,048 static SRAM bytes, leaving 10 flash bytes
+  and 593 static-RAM bytes. Firmware source-set SHA-256 is
   `6416EB92A694C4CBEE7FFFFD66BA757033E3DE0FFBADAA44F044A46306BB7783`.
   Artifact SHA-256: application HEX
   `8BF7AE02FDCD6B10FF6B335FF49EEB55CCF59E4EE417CD27C3CE5AA5430FBC49`
@@ -830,12 +843,11 @@ was recorded; they do not supersede the release-candidate summary above.
   no-bootloader profile exposes 384 more application bytes but loses the
   requested UART Urboot path. Neither cut was applied to the production
   feature set.
-- ⚠️ The latest source-only `F6D76FE4` build uses 32,240/32,384 application
-  bytes (144 free) and 1,441/2,048 static SRAM bytes. The optional four-page
-  Urboot-Custom image (with the current TM1637 progress backend) reduces the
-  application ceiling to 32,256 bytes, so
-  only 16 bytes remain with that bootloader. Any further growth requires a
-  measured optimization or a feature-profile/MCU choice.
+- ⚠️ The latest verified source-only `F6D76FE4` build uses 32,240 application
+  bytes and 1,441/2,048 static SRAM bytes. Under the four-page Urboot-Custom
+  ceiling of 32,256 application bytes, only 16 bytes remain. The
+  merge-integrated source still needs a fresh build; any further growth needs
+  a measured optimization or a feature-profile/MCU choice.
 - ✅ The current resource-stamped EXE was compressed and checked with UPX,
   and the DLL/header were rebuilt and smoke-tested with an external C caller.
 - ✅ USBasp/ISP is no longer needed for normal operation: Urboot/fuses were
@@ -1443,8 +1455,8 @@ check has passed.
   repeating host-streamed ringtone melody and a visible attention LED effect;
   stop/cancel both after acknowledgement and never use the notification loop
   merely as background noise.
-- 🟡 The resource-stamped/UPX-verified TUI is now running against COM18 and
-  secondary commands successfully use its primary IPC connection. The
-  operating guide is complete. This item remains partial only because the
-  load-safe hardware exercises listed above still require the user's physical
-  operation/observation.
+- 🟡 A historical resource-stamped/UPX-verified TUI ran against COM18 and
+  secondary commands successfully used its primary IPC connection. The newest
+  merge-integrated host has not yet been packaged or launched. The operating
+  guide is complete, while the screenshot/UI sweep and load-safe hardware/RF
+  exercises above still require physical operation or observation.

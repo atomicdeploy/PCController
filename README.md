@@ -1,11 +1,107 @@
-# PCController
+<div align="center">
+  <h1>⚡ PCController</h1>
+  <p><strong>One controller. Three first-class deliverables. Five native host targets.</strong></p>
+  <p>
+    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml"><img alt="Build" src="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml/badge.svg?branch=main"></a>
+    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml"><img alt="Repository health" src="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml/badge.svg?branch=main"></a>
+    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/dependencies.yml"><img alt="Dependency health" src="https://github.com/atomicdeploy/PCController/actions/workflows/dependencies.yml/badge.svg?branch=main"></a>
+    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml"><img alt="Release" src="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml/badge.svg"></a>
+    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/atomicdeploy/PCController"></a>
+  </p>
+  <p>ATmega328P firmware, a production-oriented Go control surface, and a native<br>virtual board for the ControllerBoardMini ecosystem.</p>
+  <p>
+    <a href="https://github.com/atomicdeploy/PCController/releases">Download a release</a> ·
+    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml">Watch the flagship build</a> ·
+    <a href="docs/README.md">Read the docs</a>
+  </p>
+</div>
 
-PCController is an ATmega328P ControllerBoardMini firmware and a matching Go
-host controller. It keeps the reusable hardware/project layer inherited from
-Puzzles, Timer, and the motor/HMI controller, but leaves their application
-rules behind.
+> [!IMPORTANT]
+> The current release line is **alpha**. Host executables are not platform
+> code-signed, and a successful GitHub build or provenance attestation is not a
+> physical-device acceptance test. AVR programming requires an explicitly
+> approved, self-hosted runner with the target attached; ordinary CI never
+> opens a serial port or programmer.
 
-The hash/timestamp-identified firmware currently provides:
+## Choose your download
+
+| I want to… | Download | Runs on / targets |
+|---|---|---|
+| Program the ControllerBoardMini | `PCController-Firmware-<version>-AVR-ATmega328P.tar.gz`, `PCController-<version>-ATmega328P-Application.hex`, or `PCController-<version>-ATmega328P-Full-Flash-Urboot.hex` | ATmega328P, MiniCore 3.1.2 |
+| Control a real board | `PCController-Controller-<version>-<platform>.tar.gz` | Linux x64/ARM64, Windows x64, macOS Intel/Apple Silicon |
+| Explore and test without hardware | `PCController-VirtualBoard-<version>-<platform>.tar.gz` | Linux x64/ARM64, Windows x64, macOS Intel/Apple Silicon |
+| Verify a release | `SHA256SUMS.txt`, release manifest, and GitHub attestations | Any SHA-256-capable system |
+
+Each archive expands into a versioned, product-named root rather than loose
+generic files. Actions artifacts use the friendly names
+`PCController-Firmware-ATmega328P`, `PCController-Controller-<platform>`, and
+`PCController-VirtualBoard-<platform>`; the flagship also publishes the same
+flat AVR payload under the exact inspiration alias `firmware`. Release assets
+add the version. In the
+patterns above, `<version>` includes the leading `v`.
+
+## What ships
+
+| Layer | Highlights | Build evidence |
+|---|---|---|
+| AVR firmware | 15-page TM1637 menu, COBS/CRC UART, INA219 and DS18B20 telemetry, 16 PWM outputs, guarded dual-side motion, learned 433 MHz actions, EEPROM settings | Real MiniCore compile, strict Intel HEX validation, memory report, SHA-256 manifest |
+| Controller | Charm TUI, monitor and shell, JSON-RPC/REST/WebSocket surfaces, Go API, C ABI library, programmer launcher, configuration, histories, macros and automation | Go test/vet, native build, executable identity, C ABI smoke test |
+| Virtual Board | Hardware-free protocol and behavior simulator for development and CI | Native CMake build and CTest on all five host targets |
+
+### Current AVR footprint
+
+| Region | Used | Free | Utilization |
+|---|---:|---:|---:|
+| Application flash | 32,240 / 32,256 bytes | 16 bytes | 99.95% |
+| Static SRAM | 1,441 / 2,048 bytes | 607 bytes | 70.36% |
+| Estimated peak SRAM | Not revalidated after integration | — | — |
+
+These are the latest verified source-only figures for build `F6D76FE4` under
+the 32,256-byte Urboot-Custom application ceiling, not a claim about the
+still-unbuilt post-integration tree. The memory tables and manifests attached
+to the latest successful
+[flagship build](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml)
+are authoritative for that artifact. Complete cap24 host-menu overlays remain
+in the Controller and Virtual Board; the space-constrained AVR keeps its exact
+cap19 front-panel push fallback.
+
+## Quick start
+
+Build everything without touching hardware:
+
+```console
+build.cmd --all --clean --no-upx
+```
+
+```bash
+./build.sh --all --clean --no-upx
+```
+
+Or download the matching Controller and Virtual Board packages from the latest
+[release](https://github.com/atomicdeploy/PCController/releases). For one
+archive, download its matching `.sha256` sidecar; Linux uses `sha256sum`, macOS
+uses `shasum -a 256`, and Windows PowerShell uses `Get-FileHash`. Linux and
+macOS extract with `tar -xzf`; current Windows includes `tar.exe -xzf`. The
+[CI/CD and releases guide](docs/CI-CD-and-Releases.md) gives copy-ready commands
+for all three platforms. Then continue with
+[Getting Started and Operations](docs/Getting-Started-and-Operations.md).
+
+```mermaid
+flowchart LR
+    S["PCController source"] --> B["Build"]
+    B --> F["AVR firmware"]
+    B --> C["Controller · 5 targets"]
+    B --> V["Virtual Board · 5 targets"]
+    F --> A["Friendly Actions artifacts"]
+    C --> A
+    V --> A
+    A --> R["Draft alpha release"]
+    R --> I["SHA-256 · manifest · attestations"]
+```
+
+## Firmware and host capabilities
+
+The hash/timestamp-identified firmware provides:
 
 - a mode-driven, 15-page TM1637 menu with persistent visibility, ordering,
   categories, cached flicker-free updates, and Status as stable page 0;
@@ -19,14 +115,16 @@ The hash/timestamp-identified firmware currently provides:
 - a Timer1 hardware buzzer, advanced button gestures, host-owned 16x2 I2C LCD,
   and CRC-checked EEPROM settings and reset telemetry.
 
-The current cap23 release-candidate source builds at 32,084 of 32,384
-application bytes and 1,444 of 2,048 static SRAM bytes, leaving 300 flash
-bytes. Complete cap24 host-menu overlays remain available in the host and
-virtual board; the physical AVR uses its cap19 exact front-panel push fallback
-because a complete cap24 implementation does not fit honestly in the remaining
-space. The final acceptance report identifies the exact hash uploaded and
-verified on COM18; older `5DF10D05` and `E2DCE296` results are historical
-checkpoints, not claims about the next frozen image.
+The latest verified source-only cap23 checkpoint, `F6D76FE4`, uses 32,240 of
+the 32,256 application bytes available with Urboot-Custom and 1,441 of 2,048
+static SRAM bytes, leaving 16 application bytes. The merge-integrated source
+must be rebuilt before those figures can be claimed for it. Complete cap24
+host-menu overlays remain available in the host and virtual board; the
+physical AVR uses its cap19 exact front-panel push fallback because a complete
+cap24 implementation does not fit honestly in the remaining space. The newest
+firmware has not yet been uploaded, the newest host has not yet been packaged
+or launched, and Urboot-Custom has not been installed. Older board and host
+results are historical checkpoints, not claims about the next frozen image.
 
 The companion tool under [Tools/Controller](Tools/Controller/README.md) provides
 a ten-page Charm TUI, an embedded responsive RTL/LTR web control center,
@@ -190,20 +288,21 @@ The root pages are:
 
 | # | Display | Purpose | Key 3 / Key 4 at the root |
 |---:|---|---|---|
-| 0 | `VOLT` | supply voltage | no edit |
-| 1 | `CURR` | current in mA | no edit |
-| 2 | `tLEd` | illumination temperature (`tLED`) | no edit |
-| 3 | `t-bt` | Bluetooth temperature (`tBT`) | no edit |
-| 4 | `LItE` | enclosure Off/Auto/On and brightness | Key 4 enters editor |
-| 5 | `bt` | Bluetooth LED Off/On/Blink state | read-only |
-| 6 | `Snd` | sound, display/status, and reading precision | Key 4 enters six-item settings submenu |
-| 7 | `PWM` | all-channel Off/Manual/Auto test | Key 4 enters editor |
-| 8 | `rELY` | relay identification/test | Key 3 auto test; Key 4 editor |
-| 9 | `KEY` | key identification | any pressed key shows `1`-`4` |
-| 10 | `uPWM` | saved 8-bit values for PWM 0-7 | Key 4 enters editor |
-| 11 | `r5-8` | user-relay toggle/momentary control | Key 4 enters control |
-| 12 | `MOVE` | two-side Up/Down control | Key 4 enters if door is open |
-| 13 | `LErn` | learned 433 MHz buttons | Key 3 clears all; Key 4 learns |
+| 0 | `STAT` | door `OPEN` or `CLSd` home page | read-only |
+| 1 | `VOLT` | supply voltage | read-only |
+| 2 | `CURR` | current in mA | read-only |
+| 3 | `tLED` | illumination temperature (`tLED`) | read-only |
+| 4 | `t-bt` | Bluetooth temperature (`tBT`) | read-only |
+| 5 | `LItE` | enclosure Off/Auto/On and brightness | Key 4 enters editor |
+| 6 | `bt` | Bluetooth LED Off/On/Blink state | read-only |
+| 7 | `Snd` | sound, display/status, and reading precision | Key 4 enters six-item settings submenu |
+| 8 | `PWM` | all-channel Off/Manual/Auto test | Key 4 enters editor |
+| 9 | `rELY` | relay identification/test | Key 3 All Off; Key 4 enters editor |
+| 10 | `KEY` | key identification | any pressed key shows `1`-`4` |
+| 11 | `uPWM` | saved 8-bit values for PWM 0-7 | Key 4 enters editor |
+| 12 | `r5-8` | user-relay toggle/momentary control | Key 4 enters control |
+| 13 | `MOVE` | two-side Up/Down control | Key 4 enters if the configured door policy permits it |
+| 14 | `LErn` | learned 433 MHz buttons | Key 4 starts one-code learning |
 
 The `Snd` submenu steps through `Snd`, `diSP`, `StBr`, `CoLr`, `V-dP`, and
 `A-dP` before Save/Discard. It controls sound, TM1637 brightness, status
@@ -345,6 +444,14 @@ and USBasp requires explicit troubleshooting authorization. The duplicated
 PowerShell build scripts were removed; CMD and Bash now share the same Node
 plan instead of carrying divergent policy.
 See the [build-tool guide](Tools/Build/README.md).
+
+GitHub Actions runs the same safety gates for AVR firmware and complete native
+host packages on Linux x64/ARM64, Windows x64, and macOS Intel/ARM64. The
+virtual board is compiled and tested on the same five targets. Every downloadable
+package is a versioned archive with deterministic build identities, a SHA-256
+sidecar, and a job summary; tag and manual release builds also receive GitHub
+build-provenance attestations. See
+[CI/CD and releases](docs/CI-CD-and-Releases.md).
 
 The ASA0002E-style Node firmware studio adds content-watched builds, serialized
 and debounced programming, byte-identical edit suppression, strict Intel HEX

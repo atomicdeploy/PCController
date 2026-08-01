@@ -1,0 +1,145 @@
+name: "🖥️ Controller · Cross-platform"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version embedded in the packages
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Version embedded in the packages
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: controller-${{ github.workflow }}-${{ inputs.version || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-build-package:
+    name: "🖥️ Controller · ${{ matrix.target }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: Linux-x64
+            windows: false
+          - runner: ubuntu-24.04-arm
+            target: Linux-ARM64
+            windows: false
+          - runner: windows-2025
+            target: Windows-x64
+            windows: true
+          - runner: macos-15-intel
+            target: macOS-Intel
+            windows: false
+          - runner: macos-15
+            target: macOS-Apple-Silicon
+            windows: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "1"
+      FORCE_COLOR: "1"
+      PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+      TZ: UTC
+
+    steps:
+      - name: "📥 Check out exact source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: "🧰 Install native Windows C compiler"
+        if: matrix.windows
+        uses: egor-tensin/setup-mingw@41b837e47d7f85214629d255b9c4bc3fcbe9fd63 # v3
+        with:
+          platform: x64
+
+      - name: "🐹 Install Go from go.mod"
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: Tools/Controller/go.mod
+          cache-dependency-path: Tools/Controller/go.sum
+
+      - name: "📌 Pin selected Windows Go toolchain first on PATH"
+        if: matrix.windows
+        shell: bash
+        run: |
+          go_root="$(go env GOROOT)"
+          printf '%s/bin\n' "$go_root" >> "$GITHUB_PATH"
+          go version
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "🕰️ Freeze reproducible build time"
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+
+      - name: "🪟 Install Win32 resource tool"
+        if: matrix.windows
+        shell: bash
+        run: |
+          go version
+          required_go="$(awk '$1 == "go" { print $2; exit }' Tools/Controller/go.mod)"
+          actual_go="$(go env GOVERSION)"
+          actual_go="${actual_go#go}"
+          test "$actual_go" = "$required_go" || {
+            printf 'Expected Go %s from go.mod, found %s\n' "$required_go" "$actual_go" >&2
+            exit 1
+          }
+          go install github.com/tc-hib/go-winres@v0.3.3
+
+      - name: "🚀 Build and validate complete Unix package"
+        if: ${{ !matrix.windows }}
+        shell: bash
+        run: ./build.sh --host-only --clean --version "$PCCONTROLLER_VERSION"
+
+      - name: "🚀 Build and validate complete Windows package"
+        if: matrix.windows
+        shell: cmd
+        run: build.cmd --host-only --clean --no-upx --version %PCCONTROLLER_VERSION%
+
+      - name: "📦 Create versioned Controller package"
+        id: package
+        run: >-
+          node .github/scripts/package-directory.mjs
+          Tools/Controller/bin
+          PCController-Controller
+          ${{ matrix.target }}
+
+      - name: "⬆️ Upload friendly Controller artifact"
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PCController-Controller-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
+          compression-level: 0
+
+      - name: "✨ Publish cross-platform Controller summary"
+        if: always() && steps.upload.outcome == 'success'
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: >-
+          node .github/scripts/step-summary.mjs
+          host
+          Tools/Controller/bin/host-manifest.json
+          "${{ steps.package.outputs.archive }}"
+          "${{ matrix.target }}"
+          "$ARTIFACT_URL"
+          "$ARTIFACT_DIGEST"

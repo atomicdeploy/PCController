@@ -30,9 +30,11 @@ func TestLegacyPanelAnimatorReloadCancelAndDisconnect(t *testing.T) {
 
 	second := hostmenu.Snapshot{MenuID: "second", Panel: hostmenu.Panel{Segments: "TWO ", EditVisual: "edit-dim"}}
 	animator.Start(second)
-	waitForLegacyFrames(t, &mu, &frames, 4)
 	mu.Lock()
-	reloadIndex := len(frames) - 2
+	reloadIndex := len(frames)
+	mu.Unlock()
+	waitForLegacyFrames(t, &mu, &frames, reloadIndex+2)
+	mu.Lock()
 	for _, frame := range frames[reloadIndex:] {
 		if len(frame) < len("second:") || frame[:len("second:")] != "second:" {
 			mu.Unlock()

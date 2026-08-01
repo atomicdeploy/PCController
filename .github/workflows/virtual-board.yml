@@ -1,0 +1,119 @@
+name: "🧪 Virtual Board · Cross-platform"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version associated with the simulator package
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Version associated with the simulator package
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: virtual-board-${{ github.workflow }}-${{ inputs.version || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: "🧪 Virtual Board · ${{ matrix.target }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: Linux-x64
+            windows: false
+            binary: .build/virtual-board/bin/virtual_board
+          - runner: ubuntu-24.04-arm
+            target: Linux-ARM64
+            windows: false
+            binary: .build/virtual-board/bin/virtual_board
+          - runner: windows-2025
+            target: Windows-x64
+            windows: true
+            binary: .build/virtual-board/bin/Release/virtual_board.exe
+          - runner: macos-15-intel
+            target: macOS-Intel
+            windows: false
+            binary: .build/virtual-board/bin/virtual_board
+          - runner: macos-15
+            target: macOS-Apple-Silicon
+            windows: false
+            binary: .build/virtual-board/bin/virtual_board
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      FORCE_COLOR: "1"
+      PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+      TZ: UTC
+
+    steps:
+      - name: "📥 Check out exact source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "⚙️ Configure native simulator"
+        run: >-
+          cmake
+          -S Tools/VirtualBoard
+          -B .build/virtual-board
+          -DBUILD_TESTING=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: "🔨 Build simulator and tests"
+        run: cmake --build .build/virtual-board --config Release --parallel
+
+      - name: "🧪 Run native CTest suite"
+        run: ctest --test-dir .build/virtual-board -C Release --output-on-failure
+
+      - name: "🕰️ Freeze reproducible package time"
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+
+      - name: "📦 Create versioned Virtual Board package"
+        id: package
+        run: >-
+          node .github/scripts/package-directory.mjs
+          "${{ matrix.binary }}"
+          PCController-VirtualBoard
+          ${{ matrix.target }}
+
+      - name: "⬆️ Upload friendly Virtual Board artifact"
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: PCController-VirtualBoard-${{ matrix.target }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
+          compression-level: 0
+
+      - name: "✨ Publish cross-platform Virtual Board summary"
+        if: always() && steps.upload.outcome == 'success'
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: >-
+          node .github/scripts/step-summary.mjs
+          simulator
+          "${{ matrix.target }}"
+          "${{ matrix.binary }}"
+          "${{ steps.package.outputs.archive }}"
+          "$ARTIFACT_URL"
+          "$ARTIFACT_DIGEST"

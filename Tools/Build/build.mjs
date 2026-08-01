@@ -939,6 +939,49 @@ int main(void) {
 `
 }
 
+export function unixSmokeSource(libraryName) {
+	return `#include <dlfcn.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+typedef char* (*invoke_fn)(char*);
+typedef void (*free_fn)(char*);
+int main(void) {
+  void *module = dlopen("./${libraryName}", RTLD_NOW | RTLD_LOCAL);
+  if (!module) {
+    fprintf(stderr, "dlopen failed: %s\\n", dlerror());
+    return 10;
+  }
+  invoke_fn invoke = (invoke_fn)dlsym(module, "PCControllerInvoke");
+  free_fn release = (free_fn)dlsym(module, "PCControllerFree");
+  if (!invoke || !release) return 11;
+  char create[] = "{\\"operation\\":\\"create\\"}";
+  char *response = invoke(create);
+  if (!response || !strstr(response, "\\"ok\\":true")) return 12;
+  char *handle_field = strstr(response, "\\"handle\\":");
+  if (!handle_field) return 13;
+  unsigned long long handle = strtoull(handle_field + 9, NULL, 10);
+  release(response);
+
+  char request[160];
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"build-smoke-invalid\\",\\"handle\\":%llu}",
+           handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "unknown operation build-smoke-invalid")) return 14;
+  release(response);
+
+  snprintf(request, sizeof(request),
+           "{\\"operation\\":\\"destroy\\",\\"handle\\":%llu}", handle);
+  response = invoke(request);
+  if (!response || !strstr(response, "\\"destroyed\\":true")) return 15;
+  release(response);
+  // The Go c-shared runtime owns process-lifetime state; do not dlclose it.
+  return 0;
+}
+`
+}
+
 function buildSharedLibrary(go, stage, env, goArch, options, log) {
 	const extension = process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'
 	const output = join(stage, `pccontroller${extension}`)
@@ -959,6 +1002,16 @@ function buildSharedLibrary(go, stage, env, goArch, options, log) {
 		const smoke = join(stage, 'pccontroller-smoke.exe')
 		writeFileSync(smokeSource, windowsSmokeSource(), 'utf8')
 		run(compiler.command, [smokeSource, '-o', smoke], { cwd: stage, env: compiler.env, verbose: options.verbose })
+		run(smoke, [], { cwd: stage, env: compiler.env, verbose: options.verbose })
+		rmSync(smokeSource, { force: true })
+		rmSync(smoke, { force: true })
+	} else {
+		const smokeSource = join(stage, 'pccontroller-smoke.c')
+		const smoke = join(stage, 'pccontroller-smoke')
+		writeFileSync(smokeSource, unixSmokeSource(basename(output)), 'utf8')
+		const smokeArgs = [smokeSource, '-o', smoke]
+		if (process.platform === 'linux') smokeArgs.push('-ldl')
+		run(compiler.command, smokeArgs, { cwd: stage, env: compiler.env, verbose: options.verbose })
 		run(smoke, [], { cwd: stage, env: compiler.env, verbose: options.verbose })
 		rmSync(smokeSource, { force: true })
 		rmSync(smoke, { force: true })
@@ -1127,8 +1180,11 @@ function buildHost(options, identity, env, log) {
 	const executable = join(stage, executableName)
 	const ldflags = `-s -w -X main.version=${identity.version} -X main.sourceHash=${before.sha256} -X main.buildTime=${identity.hostBuildTime}`
 	log.stage('🖥️', `Building host ${identity.version} from ${before.sha256.slice(0, 12)}`)
+	const executableCGO = process.platform === 'darwin' ? '1' : '0'
 	run(go, ['build', '-buildvcs=false', '-trimpath', '-ldflags', ldflags, '-o', executable, './cmd/controller'], {
-		cwd: HOST_ROOT, env: { ...goEnv, CGO_ENABLED: '0' }, verbose: options.verbose
+		// go.bug.st/serial uses Apple IOKit through CGO on macOS. Windows and
+		// Linux retain the self-contained executable build.
+		cwd: HOST_ROOT, env: { ...goEnv, CGO_ENABLED: executableCGO }, verbose: options.verbose
 	})
 	const after = hostSourceIdentity()
 	if (after.sha256 !== before.sha256) throw new BuildError('Controller source changed during packaging; retry from a stable tree')
