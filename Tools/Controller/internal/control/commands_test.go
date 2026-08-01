@@ -35,6 +35,29 @@ func TestDecodeHexAndStatusFormatting(t *testing.T) {
 	}
 }
 
+func TestFormatHelloUsesCompactBuildIdentity(t *testing.T) {
+	formatted := formatHello(native.Hello{
+		BoardKind:      native.BoardKindPCController,
+		Name:           "PCController",
+		IdentitySchema: native.IdentitySchemaCompact,
+		BuildHash:      0x2FD9F81C,
+		BuildTimestamp: 0x35019D5D,
+		BuildStamp:     "260801194258",
+	})
+	for _, expected := range []string{
+		"build=2FD9F81C",
+		"timestamp=260801194258",
+		"packed=0x35019D5D",
+	} {
+		if !strings.Contains(formatted, expected) {
+			t.Fatalf("missing %q in %q", expected, formatted)
+		}
+	}
+	if strings.Contains(formatted, "legacy-firmware") {
+		t.Fatalf("compact identity formatted as legacy: %q", formatted)
+	}
+}
+
 func TestParseBool(t *testing.T) {
 	for _, value := range []string{"on", "1", "true", "active"} {
 		result, err := parseBool(value)

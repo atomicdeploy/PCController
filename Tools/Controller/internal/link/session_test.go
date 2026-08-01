@@ -108,6 +108,46 @@ func TestAuthenticateRequiresPCControllerIdentity(t *testing.T) {
 	}
 }
 
+func TestAuthenticateAcceptsCompactHelloSchema3(t *testing.T) {
+	payload := []byte{
+		0x03, native.BoardKindPCController, 0x00, 0x00, 0x00, 0x00,
+		0x1C, 0xF8, 0xD9, 0x2F, 0x5D, 0x9D, 0x01, 0x35,
+	}
+	port := newFakePort()
+	port.onWrite = func(encoded []byte) {
+		request, err := native.Decode(encoded)
+		if err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		if request.Opcode != native.OpHello {
+			t.Errorf("request opcode=0x%02X, want HELLO", request.Opcode)
+			return
+		}
+		response, err := native.Encode(native.Frame{
+			Opcode: native.OpHelloResp, Seq: request.Seq, Payload: payload,
+		})
+		if err != nil {
+			t.Errorf("encode response: %v", err)
+			return
+		}
+		port.reads <- response
+	}
+
+	session := NewForPort("TEST", port)
+	defer session.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	hello, err := session.Authenticate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hello.IsPCController() || hello.IdentitySchema != native.IdentitySchemaCompact ||
+		hello.BuildHash != 0x2FD9F81C || hello.BuildStamp != "260801194258" {
+		t.Fatalf("unexpected compact identity: %#v", hello)
+	}
+}
+
 func TestReserveSequenceSkipsMacroExecutionSequence(t *testing.T) {
 	port := newFakePort()
 	session := NewForPort("TEST", port)

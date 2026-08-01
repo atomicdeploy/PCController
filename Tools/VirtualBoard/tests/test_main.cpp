@@ -94,11 +94,16 @@ void testBoardAndPersistence() {
                 response[0].opcode == pccontroller::wire::HelloResponse &&
                 response[0].sequence == 42,
             "HELLO response is invalid");
-    require(response[0].payload.size() == 45,
-            "HELLO identity extension is not the production shape");
-    const std::string name(response[0].payload.begin() + 9,
-                           response[0].payload.begin() + 21);
-    require(name == "PCController", "HELLO identity name is wrong");
+    require(response[0].payload.size() == 14 &&
+                response[0].payload[0] == 3 &&
+                response[0].payload[1] == 1 &&
+                std::any_of(response[0].payload.begin() + 6,
+                            response[0].payload.begin() + 10,
+                            [](std::uint8_t value) { return value != 0; }) &&
+                std::any_of(response[0].payload.begin() + 10,
+                            response[0].payload.end(),
+                            [](std::uint8_t value) { return value != 0; }),
+            "HELLO compact schema-3 identity is not production-shaped");
 
     response = board.handle({pccontroller::wire::MenuLayoutGet, 43, {}});
     require(response.size() == 1 &&

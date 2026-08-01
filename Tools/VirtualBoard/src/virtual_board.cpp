@@ -30,6 +30,52 @@ constexpr std::uint8_t kSettingsLcd = 1U << 1U;
 constexpr std::uint8_t kSettingsSwapTemperature = 1U << 2U;
 constexpr std::uint8_t kSaveLastPage = 1U << 0U;
 
+constexpr std::uint32_t decimal2(char tens, char ones) {
+  return (tens == ' ' ? 0U : static_cast<std::uint32_t>(tens - '0') * 10U) +
+         static_cast<std::uint32_t>(ones - '0');
+}
+
+constexpr std::uint32_t compileMonth(const char *date) {
+  if (date[0] == 'J') {
+    return date[1] == 'a' ? 1U : (date[2] == 'n' ? 6U : 7U);
+  }
+  if (date[0] == 'F') {
+    return 2U;
+  }
+  if (date[0] == 'M') {
+    return date[2] == 'r' ? 3U : 5U;
+  }
+  if (date[0] == 'A') {
+    return date[1] == 'p' ? 4U : 8U;
+  }
+  if (date[0] == 'S') {
+    return 9U;
+  }
+  if (date[0] == 'O') {
+    return 10U;
+  }
+  if (date[0] == 'N') {
+    return 11U;
+  }
+  return 12U;
+}
+
+// Mirror the AVR's DOS date/time identity using the simulator compile time.
+constexpr std::uint32_t packedBuildTimestamp() {
+  constexpr char date[] = __DATE__;
+  constexpr char time[] = __TIME__;
+  constexpr std::uint32_t year =
+      static_cast<std::uint32_t>(date[7] - '0') * 1000U +
+      static_cast<std::uint32_t>(date[8] - '0') * 100U +
+      static_cast<std::uint32_t>(date[9] - '0') * 10U +
+      static_cast<std::uint32_t>(date[10] - '0');
+  return ((year - 2000U) << 25U) | (compileMonth(date) << 21U) |
+         (decimal2(date[4], date[5]) << 16U) |
+         (decimal2(time[0], time[1]) << 11U) |
+         (decimal2(time[3], time[4]) << 5U) |
+         (decimal2(time[6], time[7]) / 2U);
+}
+
 constexpr std::uint16_t kStatusIna219 = 1U << 0U;
 constexpr std::uint16_t kStatusPwm = 1U << 1U;
 constexpr std::uint16_t kStatusTLed = 1U << 2U;
@@ -1011,19 +1057,12 @@ wire::Frame VirtualBoard::hostMenuStateFrame(std::uint8_t sequence) const {
 }
 
 wire::Frame VirtualBoard::helloFrame(std::uint8_t sequence) const {
-  constexpr char name[] = "PCController";
-  constexpr char date[] = __DATE__;
-  constexpr char time[] = __TIME__;
   constexpr std::uint32_t capabilities =
       0x1FFFU | (1UL << 22U) | (1UL << 23U) | (1UL << 24U);
-  std::vector<std::uint8_t> payload{0, 0, 0, 1};
+  std::vector<std::uint8_t> payload{3, 1};
   appendU32(payload, capabilities);
-  payload.push_back(static_cast<std::uint8_t>(sizeof(name) - 1U));
-  payload.insert(payload.end(), name, name + sizeof(name) - 1U);
-  payload.push_back(1);
   appendU32(payload, buildHash());
-  payload.insert(payload.end(), date, date + 11);
-  payload.insert(payload.end(), time, time + 8);
+  appendU32(payload, packedBuildTimestamp());
   return {wire::HelloResponse, sequence, std::move(payload)};
 }
 
