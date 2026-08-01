@@ -93,6 +93,15 @@ function walkGoFiles(root, current, files) {
 	}
 }
 
+function walkEmbeddedFiles(current, files) {
+	if (!existsSync(current)) return
+	for (const entry of readdirSync(current, { withFileTypes: true })) {
+		const path = join(current, entry.name)
+		if (entry.isDirectory()) walkEmbeddedFiles(path, files)
+		else if (entry.isFile()) files.push(path)
+	}
+}
+
 function sha256(value) {
 	return createHash('sha256').update(value).digest('hex')
 }
@@ -100,6 +109,9 @@ function sha256(value) {
 export function goTestSourceIdentity(moduleRoot, goVersion) {
 	const files = []
 	walkGoFiles(moduleRoot, moduleRoot, files)
+	// Go's compiler embeds these generated web assets into internal/webui. They
+	// must invalidate the stable test cache just like a changed .go source file.
+	walkEmbeddedFiles(join(moduleRoot, 'internal', 'webui', 'dist'), files)
 	for (const name of ['go.mod', 'go.sum']) {
 		const path = join(moduleRoot, name)
 		if (existsSync(path)) files.push(path)

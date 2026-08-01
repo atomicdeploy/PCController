@@ -25,7 +25,7 @@ import {
 	verboseCommandText,
 	windowsSmokeSource
 } from './build.mjs'
-import { createStableTestPlan, stableTestBinaryName } from './go-tests.mjs'
+import { createStableTestPlan, goTestSourceIdentity, stableTestBinaryName } from './go-tests.mjs'
 
 test('verbose command formatting obeys NO_COLOR byte-for-byte', () => {
 	const plain = verboseCommandText('go', ['test', './...'], { NO_COLOR: '' }, true)
@@ -109,6 +109,21 @@ test('stable Go test plan keeps every binary below its persistent output root', 
 	assert.equal(plan.length, 2)
 	assert.ok(plan.every(item => item.binary.startsWith(`${output}${sep}`)))
 	assert.equal(new Set(plan.map(item => item.binary)).size, plan.length)
+})
+
+test('stable Go test identity includes embedded web assets', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'controller-go-test-identity-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const dist = join(root, 'internal', 'webui', 'dist')
+	await mkdir(dist, { recursive: true })
+	await writeFile(join(root, 'go.mod'), 'module example.invalid/controller\n\ngo 1.26\n')
+	await writeFile(join(root, 'main_test.go'), 'package controller\n')
+	await writeFile(join(dist, 'index.html'), '<title>before</title>')
+	const before = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64')
+	await writeFile(join(dist, 'index.html'), '<title>after</title>')
+	const after = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64')
+	assert.notEqual(after.sha256, before.sha256)
+	assert.equal(after.files, before.files)
 })
 
 test('package publishing tolerates a shell holding the canonical directory', async t => {
