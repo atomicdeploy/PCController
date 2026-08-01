@@ -60,13 +60,13 @@ function requirement(id, parent, title, state, labels, section, criteria, eviden
 }
 
 const R = [
-  requirement('fw-core-architecture', 1, 'Reduce firmware entry point to modular, documented domain composition', 'open',
-    ['🧩 firmware', '⏳ finalization', '🚧 in progress'], 'Project import, LocalLib merge, and structure', [
+  requirement('fw-core-architecture', 1, 'Reduce firmware entry point to modular, documented domain composition', 'closed',
+    ['🧩 firmware', '✅ verified'], 'Project import, LocalLib merge, and structure', [
       'Keep the main sketch limited to composition, setup, and a short service-oriented loop.',
       'Move domain state and behavior behind focused classes/modules without changing safety or wire behavior.',
       'Document ownership, timing, units, hardware assumptions, and non-obvious invariants without syntax-noise comments.',
       'Rebuild and regression-test within the measured AVR flash/SRAM budget after behavior and layouts freeze.',
-    ], 'Domain classes and root source layout exist, but the main sketch remains roughly 2,740 lines and the final structure/comment gate is not complete.'),
+    ], 'Verified by merged PR #80: the sketch is 49 high-level lines composed from eight documented domain fragments; fixed-identity HEX and EEP are byte-identical, application flash is 32,226 bytes, static SRAM is 1,444 bytes, modeled stack margin is 284 bytes, and canonical compile, Go test/vet, and CTest 2/2 passed.'),
   requirement('mcu-eeprom-settings', 1, 'Persist independent MCU settings with CRC, deferred writes, and page defaults', 'closed',
     ['🧩 firmware', '💾 storage', '✅ verified'], 'Firmware lifecycle, persistence, and reset', [
       'During development, use the current unversioned packed MCU settings plus CRC-8 with EEPROM.update and deferred writes; defer whole-record versioning/migration until the layout is finalized.',
@@ -244,13 +244,13 @@ const R = [
       'Do not let completion of one macro or automation clear an explicit consumer-owned Running claim; publish every effective transition through status, events, history, scripting, IPC, and network APIs.',
       'Keep raw device uptime and render readable uptime in every monitoring/API/history/scripting surface.',
     ], 'Current status/menu commands expose basic IDs and telemetry, but the host fallback still confuses legacy Voltage=0/Status=14 with schema-2 Status=0/RF=14 instead of consuming the advertised live catalog; richer schemas, full snapshot, host session state, and cross-surface uptime remain incomplete.'),
-  requirement('protocol-simulator-transport', 6, 'Maintain deterministic native-protocol simulator and fragmented-transport tests', 'closed',
-    ['🔌 protocol-api', '🧪 testing', '✅ verified'], 'Native virtual board', [
+  requirement('protocol-simulator-transport', 6, 'Maintain deterministic native-protocol simulator and fragmented-transport tests', 'open',
+    ['🔌 protocol-api', '🧪 testing', '🐛 regression', '🚧 in progress'], 'Native virtual board', [
       'Model the current bounded COBS/CRC/opcode shapes over a desktop transport.',
       'Cover fragmented/delayed frames, HELLO, status, settings, displays, outputs, reset telemetry, and events.',
       'Keep virtual EEPROM and reset state separate from host configuration.',
       'Run repeatable unit and raw protocol smoke tests.',
-    ], 'The native virtual board and host TCP tests pass, including fragmented transport, HELLO, strip ACK, and reset-count/cause vectors.'),
+    ], 'A stale packaged host exposed a coverage gap: VirtualBoard still emitted legacy HELLO schema 1 while production firmware emits compact schema 3. PR #81 aligns the simulator, parser/authentication fixtures, and formatter; local Go/vet/CTest/TCP evidence passes, but the issue remains open until the PR is current, green, and merged.'),
 
   requirement('host-foundation-config-library', 7, 'Provide the Go host, Charm TUI foundation, separate hot-reloaded config, and reusable APIs', 'closed',
     ['🖥️ host', '🔌 protocol-api', '💾 storage', '✅ verified'], 'Host application, TUI, configuration, shell, IPC, and library', [
@@ -454,13 +454,13 @@ const R = [
       'Rebuild DLL/header and repeat an external caller smoke test for the final source.',
     ], 'Five generated copies with mixed versions/source identity were found, and current resource changes postdate the listed artifact hashes; final canonical packaging is open.'),
 
-  requirement('github-license-notices', 12, 'Publish the complete repository with dual licensing and preserved third-party notices', 'open',
-    ['📚 documentation', '🏗️ tooling-build', '⏳ finalization'], 'Development EEPROM, repository, licensing, and documentation', [
+  requirement('github-license-notices', 12, 'Publish the complete repository with dual licensing and preserved third-party notices', 'closed',
+    ['📚 documentation', '🏗️ tooling-build', '✅ verified'], 'Development EEPROM, repository, licensing, and documentation', [
       'Publish the audited project through the authenticated GitHub workflow with safe ignore rules.',
       'License original project code as MIT OR BSD-2-Clause.',
       'Preserve dependency licenses/notices and never relicense incorporated third-party code.',
       'Keep generated binaries, local caches, hardware identities, and private audit data out of public history.',
-    ], 'The public repository and issue tracker exist and local license/notice files are present, but the remote repository content is currently empty and a final public-file audit is still required.'),
+    ], 'Verified on public main: the source baseline is published, LICENSE declares MIT OR BSD-2-Clause with both license texts, THIRD_PARTY_NOTICES.md preserves dependency licenses, and a tracked-file audit found no generated executable, DLL, firmware image, log, cache, or private hardware-identity artifacts.'),
   requirement('canonical-documentation-guide', 12, 'Organize starter-friendly documentation with complete operational and architecture coverage', 'open',
     ['📚 documentation', '⏳ finalization', '🚧 in progress'], 'Development EEPROM, repository, licensing, and documentation', [
       'Use canonical semantic Markdown names and a clear reading order with repaired relative links.',
@@ -485,7 +485,7 @@ const R = [
       'Attach each requirement as a true GitHub sub-issue of exactly one epic and summarize open/closed counts on the epics.',
       'Keep a canonical repository map and an idempotent sync/validation helper.',
       'Maintain one repository-linked PCController Development project containing all 13 epics and 62 requirements exactly once, with truthful workflow, Area, Priority, Verification metadata and practical backlog/area/hardware/completed views.',
-    ], 'The stable-marker issue graph, GraphQL sub-issue links, labels, states, counts, local Requirements Backlog, and idempotent validator are complete. Project-board creation is currently blocked because the active gh credential lacks the writable project OAuth scope; the repository is also still empty remotely, so this remains open.'),
+    ], 'The public source baseline, stable-marker issue graph, GraphQL sub-issue links, labels, states, counts, Requirements Backlog, and idempotent validator are complete. A 16-page wiki commit is prepared outside the workspace and the repository wiki feature is enabled, but GitHub requires an initial page to be created in an owner-authorized web session before its .wiki.git remote exists. Project-board creation also remains blocked because the active gh credential lacks read:project (and therefore writable project access); authentication scopes were intentionally not changed.'),
 
   requirement('hardware-frontpanel-audio', 13, 'Validate final-image buttons, menus, reset stability, and audio cues on hardware', 'open',
     ['🧪 testing', '🔍 needs-hardware', '🎛️ front-panel', '🔥 priority: critical'], 'Final hardware validation and handoff', [
@@ -537,6 +537,8 @@ const R = [
       'Launch the final canonical host against the board and verify secondary IPC operation.',
       'Provide complete board/host operating, safety, programming, backup, recovery, and troubleshooting instructions.',
       'Publish a final per-area verification matrix with exact commands, artifact hashes, firmware identity, screenshots/logs, observed results, remaining blockers, and restored safe output state.',
+      'Show WAIT and play the unique continuous attention ringtone only when genuine physical user input is required, then stop the cue promptly after the response.',
+      'On final successful launch and handoff, leave the board in a safe-output state with the seven-segment display showing ok.',
       'Close parent epics only after every linked child has current completion evidence.',
     ], 'A prior host was launched and a current firmware image was verified, but source/tooling has continued to change and the outstanding physical/UX/network/finalization checks prevent release closure.'),
 ];

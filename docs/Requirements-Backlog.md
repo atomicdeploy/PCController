@@ -4,17 +4,17 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
 - Normalized requirements: **62**
-- Open: **52**
-- Closed with current evidence: **10**
+- Open: **51**
+- Closed with current evidence: **11**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
 
-3 open / 1 closed / 4 total
+2 open / 2 closed / 4 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `fw-core-architecture` | [#15](https://github.com/atomicdeploy/PCController/issues/15) | 🟡 open | Reduce firmware entry point to modular, documented domain composition |
+| `fw-core-architecture` | [#15](https://github.com/atomicdeploy/PCController/issues/15) | ✅ closed | Reduce firmware entry point to modular, documented domain composition |
 | `mcu-eeprom-settings` | [#16](https://github.com/atomicdeploy/PCController/issues/16) | ✅ closed | Persist independent MCU settings with CRC, deferred writes, and page defaults |
 | `reset-safety-journal` | [#17](https://github.com/atomicdeploy/PCController/issues/17) | 🟡 open | Complete graceful reset safety and reliable reset-cause journal telemetry |
 | `firmware-identity-layout-time` | [#18](https://github.com/atomicdeploy/PCController/issues/18) | 🟡 open | Finalize compact build identity, time model, flash budget, and migration architecture |
@@ -66,14 +66,14 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#6 — Native UART protocol, telemetry, and event model](https://github.com/atomicdeploy/PCController/issues/6)
 
-2 open / 2 closed / 4 total
+3 open / 1 closed / 4 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
 | `protocol-native-uart` | [#14](https://github.com/atomicdeploy/PCController/issues/14) | ✅ closed | Replace Firmata with the native COBS/opcode UART protocol |
 | `protocol-command-event-coverage` | [#36](https://github.com/atomicdeploy/PCController/issues/36) | 🟡 open | Complete native command coverage and immediate typed event delivery |
 | `protocol-frontpanel-menu-uptime` | [#37](https://github.com/atomicdeploy/PCController/issues/37) | 🟡 open | Extend protocol schemas for live menus, front-panel snapshots, host state, and uptime |
-| `protocol-simulator-transport` | [#38](https://github.com/atomicdeploy/PCController/issues/38) | ✅ closed | Maintain deterministic native-protocol simulator and fragmented-transport tests |
+| `protocol-simulator-transport` | [#38](https://github.com/atomicdeploy/PCController/issues/38) | 🟡 open | Maintain deterministic native-protocol simulator and fragmented-transport tests |
 
 ## [#7 — PC host TUI, configuration, automation, and OS integration](https://github.com/atomicdeploy/PCController/issues/7)
 
@@ -138,11 +138,11 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#12 — Documentation, licensing, GitHub, and final code quality](https://github.com/atomicdeploy/PCController/issues/12)
 
-4 open / 0 closed / 4 total
+3 open / 1 closed / 4 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `github-license-notices` | [#65](https://github.com/atomicdeploy/PCController/issues/65) | 🟡 open | Publish the complete repository with dual licensing and preserved third-party notices |
+| `github-license-notices` | [#65](https://github.com/atomicdeploy/PCController/issues/65) | ✅ closed | Publish the complete repository with dual licensing and preserved third-party notices |
 | `canonical-documentation-guide` | [#66](https://github.com/atomicdeploy/PCController/issues/66) | 🟡 open | Organize starter-friendly documentation with complete operational and architecture coverage |
 | `final-code-documentation-gate` | [#67](https://github.com/atomicdeploy/PCController/issues/67) | 🟡 open | Run the final concise code-comment and missing-requirement audit after layouts freeze |
 | `requirements-backlog-publication` | [#68](https://github.com/atomicdeploy/PCController/issues/68) | 🟡 open | Maintain a deduplicated public requirements map and true GitHub sub-issue hierarchy |
