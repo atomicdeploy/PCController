@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"pccontroller.local/controller/internal/productidentity"
 	"time"
 )
 
@@ -17,6 +19,8 @@ type HostDataPaths struct {
 	BackupsDir       string `json:"backups_dir"`
 	BackupOperations string `json:"backup_operations_dir"`
 	FirmwareBlobsDir string `json:"firmware_blobs_dir"`
+	BoardSettingsDir string `json:"board_settings_dir"`
+	ToolchainDir     string `json:"toolchain_dir"`
 	StateDir         string `json:"state_dir"`
 	LogsDir          string `json:"logs_dir"`
 	LastSessionPath  string `json:"last_session_path"`
@@ -46,6 +50,8 @@ func HostDataPathsFor(dataDirectory string) (HostDataPaths, error) {
 		BackupsDir:       backups,
 		BackupOperations: filepath.Join(backups, "operations"),
 		FirmwareBlobsDir: filepath.Join(backups, "firmware", "sha256"),
+		BoardSettingsDir: filepath.Join(backups, "board-settings", "sha256"),
+		ToolchainDir:     filepath.Join(dataDirectory, "tools", "toolchain"),
 		StateDir:         state,
 		LogsDir:          filepath.Join(dataDirectory, "logs"),
 		LastSessionPath:  filepath.Join(state, "last-session.json"),
@@ -55,7 +61,8 @@ func HostDataPathsFor(dataDirectory string) (HostDataPaths, error) {
 func EnsureHostDataPaths(paths HostDataPaths) error {
 	for _, directory := range []string{
 		paths.DataDir, paths.BackupsDir, paths.BackupOperations,
-		paths.FirmwareBlobsDir, paths.StateDir, paths.LogsDir,
+		paths.FirmwareBlobsDir, paths.BoardSettingsDir, paths.ToolchainDir,
+		paths.StateDir, paths.LogsDir,
 	} {
 		if strings.TrimSpace(directory) == "" || !filepath.IsAbs(directory) {
 			return fmt.Errorf("invalid host data path %q", directory)
@@ -89,13 +96,13 @@ func defaultHostDataDirectory(
 				return "", fmt.Errorf("locate Windows application data: %w", err)
 			}
 		}
-		return filepath.Join(base, "PCController"), nil
+		return filepath.Join(base, productidentity.ConfigDirectory), nil
 	case "darwin":
 		base, err := home()
 		if err != nil {
 			return "", fmt.Errorf("locate home directory: %w", err)
 		}
-		return filepath.Join(base, "Library", "Application Support", "PCController"), nil
+		return filepath.Join(base, "Library", "Application Support", productidentity.ConfigDirectory), nil
 	default:
 		base := strings.TrimSpace(lookup("XDG_DATA_HOME"))
 		if base == "" {
@@ -105,7 +112,7 @@ func defaultHostDataDirectory(
 			}
 			base = filepath.Join(homeDirectory, ".local", "share")
 		}
-		return filepath.Join(base, "pccontroller"), nil
+		return filepath.Join(base, strings.ToLower(productidentity.ConfigDirectory)), nil
 	}
 }
 

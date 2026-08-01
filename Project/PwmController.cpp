@@ -86,8 +86,6 @@ void PwmController::service(uint32_t now) {
   autoChannelChanged_ = true;
 }
 
-void PwmController::allOff() { (void)tryAllOff(); }
-
 bool PwmController::tryAllOff() {
   return clearMask(PwmChannels::AllMask);
 }
@@ -207,8 +205,6 @@ void PwmController::adjustValue(int16_t delta, uint32_t now) {
 }
 
 uint16_t PwmController::value() const { return value_; }
-
-uint16_t PwmController::channel0Value() const { return logicalValue(0); }
 
 bool PwmController::available() const { return available_; }
 

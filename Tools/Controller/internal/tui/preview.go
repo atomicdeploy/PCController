@@ -6,10 +6,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
+	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -22,12 +24,12 @@ func RichPreviewSnapshot() control.Snapshot {
 		Connected: true,
 		Port: ports.Info{
 			Name: "VIRTUAL", VID: "1A86", PID: "7523",
-			FriendlyName: "PCController Virtual Board (COM18 profile)",
+			FriendlyName: productidentity.DefaultTitle + " Virtual Board (COM18 profile)",
 		},
 		Hello: native.Hello{
 			Name: "PCController", BoardKind: native.BoardKindPCController,
 			Capabilities: native.CapabilityFrontPanelSnapshot | native.CapabilityMenuDirectory | native.CapabilityRFLearnReplace |
-				native.CapabilityHostFrontPanel | native.CapabilityBuzzerBusy | native.CapabilityMenuLayout,
+				native.CapabilityHostFrontPanel | native.CapabilityBuzzerBusy | native.CapabilityMenuLayout | native.CapabilityTimedMacroQueue,
 			IdentitySchema: native.IdentitySchema, BuildHash: 0x5DF10D05,
 			BuildTimestamp: 0x3501645C, BuildStamp: "260801123456",
 		},
@@ -79,6 +81,36 @@ func RichPreviewModel(welcome bool) Model {
 		{base.Add(70 * time.Second), "rf", "RF down code=1381717 bits=24 protocol=1 learned-id=0", true},
 		{base.Add(72 * time.Second), "relay", "R5 switched on by RF mapping", true},
 		{base.Add(110 * time.Second), "bluetooth", "BT Audio disconnected / pairing", true},
+	}
+	model.previewMacros = []appconfig.Macro{
+		{
+			ID: 1, Name: "output-demo", Category: "Demo", Color: "violet", Label: "dEMO",
+			LCDMessage: "Output demo", TimingToleranceUS: 2500,
+			Steps: []appconfig.MacroStep{
+				{AtUS: 0, Kind: "relay", Target: 5, Value: 1},
+				{AtUS: 500_000, Kind: "pwm", Target: 0, Value: 1024},
+				{AtUS: 1_250_000, Kind: "display", Text: "PLAY"},
+				{AtUS: 2_000_000, Kind: "buzzer", Value: 880},
+				{AtUS: 3_000_000, Kind: "relay", Target: 5, Value: 0},
+			},
+		},
+		{
+			ID: 2, Name: "door-notify", Category: "Safety", Color: "red", Label: "door",
+			LCDMessage: "Door warning", TimingToleranceUS: 1500,
+			Steps: []appconfig.MacroStep{
+				{AtUS: 0, Kind: "rgb", Value: 1},
+				{AtUS: 250_000, Kind: "buzzer", Value: 1200},
+			},
+		},
+		{ID: 3, Name: "draft-scene", Category: "Lighting", Color: "blue", Label: "drAF"},
+	}
+	model.previewMacroState = control.MacroState{
+		Running: true, ID: 1, Name: "output-demo", Category: "Demo", Color: "violet",
+		Step: 2, StepCount: 5, DurationUS: 3_000_000,
+		StartedAt:     time.Now().Add(-1250 * time.Millisecond),
+		AcceptedBytes: 95, BufferFill: 42, LastTimingDeltaUS: 267,
+		MaximumTimingErrorUS: 979, TimingToleranceUS: 2500,
+		Lifecycle: "playing",
 	}
 	return model
 }

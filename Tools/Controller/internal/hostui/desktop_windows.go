@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows/registry"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type registryWriter interface {
@@ -34,12 +36,9 @@ func ensurePlatformDesktopIntegration(
 ) (DesktopIntegrationStatus, error) {
 	appID := strings.TrimSpace(options.AppID)
 	if appID == "" {
-		appID = "DRSDavidSoft.PCController"
+		appID = productidentity.StableAppID
 	}
-	displayName := strings.TrimSpace(options.DisplayName)
-	if displayName == "" {
-		displayName = "PCController"
-	}
+	displayName := productidentity.Title(options.DisplayName)
 	executable, err := os.Executable()
 	if err != nil {
 		return DesktopIntegrationStatus{Supported: true, LastError: err.Error()}, err
@@ -60,7 +59,7 @@ func ensurePlatformDesktopIntegration(
 		status.LastError = err.Error()
 		return status, err
 	}
-	shortcut := filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "PCController.lnk")
+	shortcut := filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", shortcutFileName(displayName)+".lnk")
 	if err := os.MkdirAll(filepath.Dir(shortcut), 0o755); err != nil {
 		status.LastError = err.Error()
 		return status, err
@@ -84,10 +83,10 @@ func ensureProtocolRegistry(
 	executable, appID, displayName string,
 ) error {
 	values := []struct{ path, name, value string }{
-		{`Software\Classes\pccontroller`, "", "URL:PCController Protocol"},
-		{`Software\Classes\pccontroller`, "URL Protocol", ""},
-		{`Software\Classes\pccontroller\DefaultIcon`, "", quoteWindowsArgument(executable) + ",0"},
-		{`Software\Classes\pccontroller\shell\open\command`, "", protocolCommand(executable)},
+		{`Software\Classes\` + productidentity.ProtocolScheme, "", "URL:" + displayName + " Protocol"},
+		{`Software\Classes\` + productidentity.ProtocolScheme, "URL Protocol", ""},
+		{`Software\Classes\` + productidentity.ProtocolScheme + `\DefaultIcon`, "", quoteWindowsArgument(executable) + ",0"},
+		{`Software\Classes\` + productidentity.ProtocolScheme + `\shell\open\command`, "", protocolCommand(executable)},
 		{`Software\Classes\AppUserModelId\` + appID, "DisplayName", displayName},
 		{`Software\Classes\AppUserModelId\` + appID, "IconUri", executable},
 	}
@@ -97,6 +96,22 @@ func ensureProtocolRegistry(
 		}
 	}
 	return nil
+}
+
+func shortcutFileName(displayName string) string {
+	name := strings.Map(func(value rune) rune {
+		switch value {
+		case '<', '>', ':', '"', '/', '\\', '|', '?', '*':
+			return '-'
+		default:
+			return value
+		}
+	}, strings.TrimSpace(displayName))
+	name = strings.Trim(name, " .")
+	if name == "" {
+		return productidentity.DefaultTitle
+	}
+	return name
 }
 
 func protocolCommand(executable string) string {

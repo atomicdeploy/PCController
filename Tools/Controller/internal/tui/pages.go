@@ -45,7 +45,7 @@ func (model Model) pageView(snapshot control.Snapshot) string {
 
 func (model Model) portPickerPage(snapshot control.Snapshot) string {
 	lines := []string{
-		sectionHeader("SELECT SERIAL DEVICE", "↑/↓ select · Enter open · Esc cancel"),
+		sectionHeader(model.width, "SELECT SERIAL DEVICE", "↑/↓ select · Enter open · Esc cancel"),
 		labelStyle.Render("Friendly name, COM ID, VID/PID and serial identity are shown; authentication still verifies HELLO before use."),
 	}
 	if model.portLoading {
@@ -74,6 +74,10 @@ func (model Model) portPickerPage(snapshot control.Snapshot) string {
 
 func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	status := snapshot.Status
+	pageWidth := model.width
+	if pageWidth <= 0 {
+		pageWidth = 132
+	}
 	lcdStatus := "offline · physical contents unverified"
 	if snapshot.Connected {
 		lcdStatus = fmt.Sprintf("firmware-owned · 0x%02X", status.LCDAddress)
@@ -87,62 +91,67 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 			lcdStatus += " · " + lcd.LastError
 		}
 	}
+	sectionWidth := pageWidth
+	if pageWidth >= 96 {
+		outerCardWidth := (pageWidth - 1) / 2
+		sectionWidth = outerCardWidth - cardStyle.GetHorizontalFrameSize()
+	}
 	measurementLines := []string{
-		sectionHeader("LIVE MEASUREMENTS", freshnessLabel(snapshot.StatusUpdated, time.Now())),
+		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", freshnessLabel(snapshot.StatusUpdated, time.Now())),
 	}
 	if !snapshot.HaveStatus {
 		measurementLines = append(measurementLines, warnStyle.Render("Waiting for the first STATUS frame…"))
 	}
 	if model.prefs.Visible["supply"] {
-		measurementLines = append(measurementLines, kv("Supply Voltage", formatVoltage(status.SupplyMV, model.prefs.VoltageDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, "Supply Voltage", formatVoltage(status.SupplyMV, model.prefs.VoltageDecimals)))
 	}
 	if model.prefs.Visible["bus"] {
-		measurementLines = append(measurementLines, kv("INA219 Bus Voltage", formatVoltage(status.BusMV, model.prefs.VoltageDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, "INA219 Bus Voltage", formatVoltage(status.BusMV, model.prefs.VoltageDecimals)))
 	}
 	if model.prefs.Visible["current"] {
-		measurementLines = append(measurementLines, kv("Load Current", formatCurrent(status.CurrentMA, model.prefs.CurrentDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, "Load Current", formatCurrent(status.CurrentMA, model.prefs.CurrentDecimals)))
 	}
 	if model.prefs.Visible["power"] {
-		measurementLines = append(measurementLines, kv("Load Power", formatPower(status.PowerMW, model.prefs.PowerDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, "Load Power", formatPower(status.PowerMW, model.prefs.PowerDecimals)))
 	}
 	if model.prefs.Visible["temperature_led"] {
-		measurementLines = append(measurementLines, kv("Temperature · Illumination LED", formatTemperature(status.TLEDCenti, model.prefs.TemperatureDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, "Temperature · Illumination LED", formatTemperature(status.TLEDCenti, model.prefs.TemperatureDecimals)))
 	}
 	if model.prefs.Visible["temperature_bt"] {
-		measurementLines = append(measurementLines, kv("Temperature · BT Audio", formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, "Temperature · BT Audio", formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
 	}
 
 	stateLines := []string{
-		sectionHeader("BOARD STATE", model.menuPageByID(status.MenuPage).Name),
+		sectionHeader(sectionWidth, "BOARD STATE", model.menuPageByID(status.MenuPage).Name),
 		lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			buttonStyle.Render("I · Idle"), " ",
 			buttonGoodStyle.Render("R · Running"),
 		),
-		kv("PC Program State", programStateSummary(snapshot.ProgramState)),
-		kv("Device Uptime", formatUptime(status.UptimeMS)),
-		kv("Enclosure Door", boolWord(status.DoorOpen, "OPEN", "CLOSED")),
-		kv("Bluetooth", bluetoothAudioState(status.BluetoothState)),
-		kv("Active Keys", fmt.Sprintf("0x%02X", status.ActiveKeys)),
-		kv("Active Relays", relaySummary(status.ActiveRelays)),
-		kv("Display Menu", fmt.Sprintf("%d · %s", status.MenuPage, model.menuPageByID(status.MenuPage).Name)),
-		kv("Menu / Submode", fmt.Sprintf("%d · %s", status.ProgramMode, model.programModeName(status.ProgramMode))),
-		kv("PWM", fmt.Sprintf("mode %d · channel %d · %d/4095", status.PWMMode, status.PWMChannel, status.PWMValue)),
-		kv("I2C LCD", lcdStatus),
+		kvCard(sectionWidth, 22, "PC Program State", programStateSummary(snapshot.ProgramState)),
+		kvCard(sectionWidth, 22, "Device Uptime", formatUptime(status.UptimeMS)),
+		kvCard(sectionWidth, 22, "Enclosure Door", boolWord(status.DoorOpen, "OPEN", "CLOSED")),
+		kvCard(sectionWidth, 22, "Bluetooth", bluetoothAudioState(status.BluetoothState)),
+		kvCard(sectionWidth, 22, "Active Keys", fmt.Sprintf("0x%02X", status.ActiveKeys)),
+		kvCard(sectionWidth, 22, "Active Relays", relaySummary(status.ActiveRelays)),
+		kvCard(sectionWidth, 22, "Display Menu", fmt.Sprintf("%d · %s", status.MenuPage, model.menuPageByID(status.MenuPage).Name)),
+		kvCard(sectionWidth, 22, "Menu / Submode", fmt.Sprintf("%d · %s", status.ProgramMode, model.programModeName(status.ProgramMode))),
+		kvCard(sectionWidth, 22, "PWM", fmt.Sprintf("mode %d · channel %d · %d/4095", status.PWMMode, status.PWMChannel, status.PWMValue)),
+		kvCard(sectionWidth, 22, "I2C LCD", lcdStatus),
 	}
 	if model.prefs.Visible["diagnostics"] {
 		stateLines = append(stateLines,
-			kv("Reset Telemetry", fmt.Sprintf("#%d · cause 0x%02X", status.ResetCount, status.ResetCause)),
-			kv("Protocol Errors", fmt.Sprintf("frame %d · CRC %d · PWM %d", status.FramingErrors, status.CRCErrors, status.PWMErrors)),
+			kvCard(sectionWidth, 22, "Reset Telemetry", fmt.Sprintf("#%d · cause 0x%02X", status.ResetCount, status.ResetCause)),
+			kvCard(sectionWidth, 22, "Protocol Errors", fmt.Sprintf("frame %d · CRC %d · PWM %d", status.FramingErrors, status.CRCErrors, status.PWMErrors)),
 		)
 	}
 
-	cardWidth := (model.width - 3) / 2
-	if model.width < 96 {
+	if pageWidth < 96 {
 		return strings.Join(measurementLines, "\n") + "\n\n" + strings.Join(stateLines, "\n")
 	}
-	left := cardStyle.Copy().Width(cardWidth).Render(strings.Join(measurementLines, "\n"))
-	right := cardStyle.Copy().Width(cardWidth).Render(strings.Join(stateLines, "\n"))
+	cardRenderWidth := sectionWidth + cardStyle.GetHorizontalPadding()
+	left := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(measurementLines, "\n"))
+	right := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(stateLines, "\n"))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 }
 
@@ -164,7 +173,7 @@ func programStateSummary(state control.ProgramStateSnapshot) string {
 func (model Model) outputsPage(snapshot control.Snapshot) string {
 	status := snapshot.Status
 	lines := []string{
-		sectionHeader("OUTPUT CONTROL", "↑/↓ select · Enter activate · ←/→ PWM · Home/End min/max"),
+		sectionHeader(model.width, "OUTPUT CONTROL", "↑/↓ select · Enter activate · ←/→ PWM · Home/End min/max"),
 		labelStyle.Render("Motion wiring: R1 Direction A · R2 Output A · R3 Direction B · R4 Output B"),
 	}
 	labels := []string{
@@ -215,7 +224,7 @@ func (model Model) menusPage(snapshot control.Snapshot) string {
 		layoutState += " · STAGED"
 	}
 	overlayState := "unavailable · capability 24 absent · host-only pages show no false live state"
-	if snapshot.Hello.Capabilities&native.CapabilityHostMenuOverlay != 0 {
+	if native.SupportsHostMenuOverlay(snapshot.Hello) {
 		overlayState = "runtime directory/content enabled · volatile (PC connection required)"
 	}
 	searchState := model.menuLayoutSearch
@@ -226,10 +235,10 @@ func (model Model) menusPage(snapshot control.Snapshot) string {
 		searchState = "✎ " + searchState
 	}
 	lines := []string{
-		sectionHeader("DISPLAY MENU MIRROR", fmt.Sprintf("active %d · %s", active, model.menuPageByID(active).Name)),
+		sectionHeader(model.width, "DISPLAY MENU MIRROR", fmt.Sprintf("active %d · %s", active, model.menuPageByID(active).Name)),
 		renderFrontPanel(model.currentFrontPanel(snapshot)),
 		lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("K1 · previous"), " ", buttonStyle.Render("K2 · next"), " ", buttonStyle.Render("K3 · decrease"), " ", buttonStyle.Render("K4 · increase")),
-		renderHostMenuDirectory(model.hostMenus),
+		renderHostMenuDirectory(model.hostMenus, model.width),
 		fmt.Sprintf("LCD prompt mirroring  %s  %s", valueStyle.Render(boolWord(model.lcdMirror, "ON", "OFF")), labelStyle.Render("M toggles · priority events temporarily override and restore")),
 		labelStyle.Render(fmt.Sprintf("Catalog: %s · Layout: %s · Host overlay: %s · Search: %s · Sort: %s", model.menuCatalogSource, layoutState, overlayState, searchState, model.menuLayoutSort)),
 	}
@@ -255,7 +264,7 @@ func (model Model) menusPage(snapshot control.Snapshot) string {
 		lines = append(lines, errorStyle.Render("No board menu matches the current search. Press / and Ctrl+U to clear it."))
 	} else if selected, ok := model.selectedMenuConfiguration(); ok {
 		lines = append(lines,
-			sectionHeader("NESTED SEVEN-SEGMENT PREVIEW", fmt.Sprintf("%s › %s · immutable stable/wire ID %d · persistent Order ID/rank %d", selected.Page.Category, selected.Page.Name, selected.Page.ID, selected.Rank)),
+			sectionHeader(model.width, "NESTED SEVEN-SEGMENT PREVIEW", fmt.Sprintf("%s › %s · immutable stable/wire ID %d · persistent Order ID/rank %d", selected.Page.Category, selected.Page.Name, selected.Page.ID, selected.Rank)),
 			renderSevenSegments(selected.Page.Short, [4]byte{}, false, 0, false),
 			labelStyle.Render("/ search · S sort · V/Space show-hide · ←/→ or [/] rank · Home/End · E edit host label/content · A apply · X discard · R refresh · Enter jump"),
 		)
@@ -269,28 +278,28 @@ func (model Model) menusPage(snapshot control.Snapshot) string {
 func (model Model) boardSettingsPage(snapshot control.Snapshot) string {
 	settings := snapshot.Settings
 	lines := []string{
-		sectionHeader("BOARD EEPROM SETTINGS", boolWord(snapshot.HaveSettings, "live + persisted on MCU", "not queried yet")),
+		sectionHeader(model.width, "BOARD EEPROM SETTINGS", boolWord(snapshot.HaveSettings, "live + persisted on MCU", "not queried yet")),
 		labelStyle.Render("Select a row and use ←/→ or Enter. Every change is written through SET_SETTINGS; PC config remains separate."),
 	}
 	values := []string{
-		fmt.Sprintf("Silent mode                         %s", boolWord(settings.Flags&native.SettingsSilent != 0, "ON", "OFF")),
-		fmt.Sprintf("I²C LCD                            %s", boolWord(settings.Flags&native.SettingsLCDEnabled != 0, "ENABLED", "DISABLED")),
-		fmt.Sprintf("Swap temperature roles             %s", boolWord(settings.Flags&native.SettingsSwapTemperatureRoles != 0, "YES", "NO")),
-		fmt.Sprintf("Enclosure illumination mode        %s", lightModeName(settings.LightMode)),
-		fmt.Sprintf("Illumination brightness · on        %3d", settings.OnBrightness),
-		fmt.Sprintf("Illumination brightness · off       %3d", settings.OffBrightness),
-		fmt.Sprintf("Seven-segment brightness            %d / 7", settings.DisplayBrightness),
-		fmt.Sprintf("Status LED brightness               %3d", settings.StatusBrightness),
-		fmt.Sprintf("PWM boot mode                       %s", pwmModeName(settings.PWMBootMode)),
-		fmt.Sprintf("Board stream period                 %d ms", settings.StreamPeriodMS),
-		fmt.Sprintf("Default display page                %d · %s", settings.DefaultPage, model.menuPageByID(settings.DefaultPage).Name),
-		fmt.Sprintf("Save last page as default           %s", boolWord(settings.SaveLastPage(), "YES", "NO")),
-		fmt.Sprintf("Status palette color                %d / 7", settings.StatusColor()),
-		fmt.Sprintf("Board voltage decimals              %d", settings.VoltageDecimals()),
-		fmt.Sprintf("Board current decimals              %d", settings.CurrentDecimals()),
-		fmt.Sprintf("Motion allowed by door state        %s", motionDoorPolicyName(settings.MotionDoorPolicy())),
-		fmt.Sprintf("Door open/close audio cues          %s", boolWord(settings.DoorAudioEnabled(), "ENABLED", "DISABLED")),
-		fmt.Sprintf("Relay on/off audio cues             %s", boolWord(settings.RelayAudioEnabled(), "ENABLED", "DISABLED")),
+		settingsRow("Silent mode", boolWord(settings.Flags&native.SettingsSilent != 0, "ON", "OFF")),
+		settingsRow("I²C LCD", boolWord(settings.Flags&native.SettingsLCDEnabled != 0, "ENABLED", "DISABLED")),
+		settingsRow("Swap temperature roles", boolWord(settings.Flags&native.SettingsSwapTemperatureRoles != 0, "YES", "NO")),
+		settingsRow("Enclosure illumination mode", lightModeName(settings.LightMode)),
+		settingsRow("Illumination brightness · on", fmt.Sprintf("%3d", settings.OnBrightness)),
+		settingsRow("Illumination brightness · off", fmt.Sprintf("%3d", settings.OffBrightness)),
+		settingsRow("Seven-segment brightness", fmt.Sprintf("%d / 7", settings.DisplayBrightness)),
+		settingsRow("Status LED brightness", fmt.Sprintf("%3d", settings.StatusBrightness)),
+		settingsRow("PWM boot mode", pwmModeName(settings.PWMBootMode)),
+		settingsRow("Board stream period", fmt.Sprintf("%d ms", settings.StreamPeriodMS)),
+		settingsRow("Default display page", fmt.Sprintf("%d · %s", settings.DefaultPage, model.menuPageByID(settings.DefaultPage).Name)),
+		settingsRow("Save last page as default", boolWord(settings.SaveLastPage(), "YES", "NO")),
+		settingsRow("Status palette color", fmt.Sprintf("%d / 7", settings.StatusColor())),
+		settingsRow("Board voltage decimals", fmt.Sprintf("%d", settings.VoltageDecimals())),
+		settingsRow("Board current decimals", fmt.Sprintf("%d", settings.CurrentDecimals())),
+		settingsRow("Motion allowed by door state", motionDoorPolicyName(settings.MotionDoorPolicy())),
+		settingsRow("Door open/close audio cues", boolWord(settings.DoorAudioEnabled(), "ENABLED", "DISABLED")),
+		settingsRow("Relay on/off audio cues", boolWord(settings.RelayAudioEnabled(), "ENABLED", "DISABLED")),
 	}
 	for index, value := range values {
 		lines = append(lines, model.selectionLine(index, value))
@@ -302,17 +311,17 @@ func (model Model) appSettingsPage() string {
 	visible := model.prefs.Visible
 	statusLED := model.hostIntegrationValue.StatusLED
 	lines := []string{
-		sectionHeader("PC HOST SETTINGS", "saved in host JSON · never board EEPROM"),
+		sectionHeader(model.width, "PC HOST SETTINGS", "saved in host JSON · never board EEPROM"),
 		labelStyle.Render("Select with ↑/↓; ←/→ adjusts; Enter toggles visibility. Changes hot-apply through the config store."),
 	}
 	values := []string{
-		fmt.Sprintf("Application title                    %s", model.prefs.AppTitle),
-		fmt.Sprintf("Active polling interval              %s", model.prefs.PollInterval),
-		fmt.Sprintf("History retention                    %s", model.prefs.HistoryWindow),
-		fmt.Sprintf("Voltage display decimals             %d", model.prefs.VoltageDecimals),
-		fmt.Sprintf("Current display decimals             %d", model.prefs.CurrentDecimals),
-		fmt.Sprintf("Power display decimals               %d", model.prefs.PowerDecimals),
-		fmt.Sprintf("Temperature display decimals         %d", model.prefs.TemperatureDecimals),
+		settingsRow("Application title", model.prefs.AppTitle),
+		settingsRow("Active polling interval", model.prefs.PollInterval.String()),
+		settingsRow("History retention", model.prefs.HistoryWindow.String()),
+		settingsRow("Voltage display decimals", fmt.Sprintf("%d", model.prefs.VoltageDecimals)),
+		settingsRow("Current display decimals", fmt.Sprintf("%d", model.prefs.CurrentDecimals)),
+		settingsRow("Power display decimals", fmt.Sprintf("%d", model.prefs.PowerDecimals)),
+		settingsRow("Temperature display decimals", fmt.Sprintf("%d", model.prefs.TemperatureDecimals)),
 		visibilityValue("Supply voltage", visible["supply"]),
 		visibilityValue("INA219 bus voltage", visible["bus"]),
 		visibilityValue("Load current", visible["current"]),
@@ -322,13 +331,13 @@ func (model Model) appSettingsPage() string {
 		visibilityValue("I/O state", visible["io"]),
 		visibilityValue("Diagnostics", visible["diagnostics"]),
 		visibilityValue("Graphs", visible["graphs"]),
-		fmt.Sprintf("Event transcript limit               %d", model.prefs.EventLogLimit),
+		settingsRow("Event transcript limit", fmt.Sprintf("%d", model.prefs.EventLogLimit)),
 		visibilityValue("PC-owned LCD service", model.uiValue.LCDServiceEnabled),
 		visibilityValue("Mirror prompt/completion to LCD", model.lcdMirror),
 		visibilityValue("Host status-light policy", statusLED.Enabled),
-		fmt.Sprintf("Status-light eased transition          %d ms", statusLED.TransitionMS),
-		fmt.Sprintf("RF violet activity hold               %d ms", statusLED.RFHoldMS),
-		fmt.Sprintf("Host HOT threshold                    %.2f °C", float64(statusLED.HotThresholdCentiC)/100),
+		settingsRow("Status-light eased transition", fmt.Sprintf("%d ms", statusLED.TransitionMS)),
+		settingsRow("RF violet activity hold", fmt.Sprintf("%d ms", statusLED.RFHoldMS)),
+		settingsRow("Host HOT threshold", fmt.Sprintf("%.2f °C", float64(statusLED.HotThresholdCentiC)/100)),
 		statusLEDColorValue("Idle", statusLED.Idle),
 		statusLEDColorValue("Running", statusLED.Running),
 		statusLEDColorValue("BT Audio connected", statusLED.BluetoothAudioConnected),
@@ -346,10 +355,9 @@ func (model Model) appSettingsPage() string {
 }
 
 func statusLEDColorValue(label string, visual appconfig.StatusLEDVisual) string {
-	return fmt.Sprintf(
-		"Status %-27s #%02X%02X%02X · %s",
-		label, visual.Color.Red, visual.Color.Green, visual.Color.Blue,
-		visual.Effect,
+	return settingsRow(
+		"Status · "+label,
+		fmt.Sprintf("#%02X%02X%02X · %s", visual.Color.Red, visual.Color.Green, visual.Color.Blue, visual.Effect),
 	)
 }
 
@@ -393,7 +401,7 @@ func (model Model) rfPage() string {
 		applyState = "available (" + support.Reason + ") · full snapshot + readback + automatic rollback"
 	}
 	lines := []string{
-		sectionHeader("433 MHz RF", "receive INT0 · transmit INT1 · learning "+learnState),
+		sectionHeader(model.width, "433 MHz RF", "receive INT0 · transmit INT1 · learning "+learnState),
 		lipgloss.JoinHorizontal(lipgloss.Top, buttonGoodStyle.Render("L Learn indefinite + multi"), " ", buttonStyle.Render("C Cancel"), " ", buttonStyle.Render("R Refresh list"), " ", buttonStyle.Render("T Transmit")),
 		lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("A Search action"), " ", buttonStyle.Render("N Rename"), " ", buttonStyle.Render("K Category"), " ", buttonStyle.Render("Z Radix: "+radix), " ", buttonStyle.Render("[ / ] Move ID"), " ", buttonStyle.Render("V Review"), " ", buttonBadStyle.Render("G Apply"), " ", buttonStyle.Render("X Rollback")),
 		labelStyle.Render("Learned codes start UNMAPPED. Metadata follows the stable (code, bits, protocol) tuple even when IDs move."),
@@ -458,7 +466,7 @@ func (model Model) programmingPage(snapshot control.Snapshot) string {
 	firstButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("P Urclock probe"), " ", buttonStyle.Render("M Metadata"), " ", buttonStyle.Render("B Backup"))
 	secondButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonBadStyle.Render("R Safe app reset"), " ", buttonBadStyle.Render("D DTR/RTS reset"), " ", buttonGoodStyle.Render("U Safe flash"), " ", buttonBadStyle.Render("A Advanced USBasp"))
 	return strings.Join([]string{
-		sectionHeader("PROGRAMMING", "application opcodes and bootloader operations are mutually exclusive"),
+		sectionHeader(model.width, "PROGRAMMING", "application opcodes and bootloader operations are mutually exclusive"),
 		firstButtons,
 		secondButtons,
 		"",
@@ -470,29 +478,8 @@ func (model Model) programmingPage(snapshot control.Snapshot) string {
 		"",
 		warnStyle.Render("Normal writes use `program flash HEX [PORT]` and refuse to proceed without a complete verified backup. Progress and hashes appear in Console."),
 		errorStyle.Render("USBasp is hidden troubleshooting only. It requires `--usbasp-troubleshooting`; incomplete-backup override is separately explicit."),
-		labelStyle.Render("Commands: program flash · boot probe|metadata|backup|read|verify · arduino update|compile|core-info|burn-bootloader"),
+		labelStyle.Render("Commands: program flash · boot probe|metadata|backup|read|verify · toolchain bootstrap|sync|compile|core-info|install-bootloader"),
 	}, "\n")
-}
-
-func (model Model) automationsPage() string {
-	buttons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("A List automations"), " ", buttonStyle.Render("M List macros"), " ", buttonBadStyle.Render("C Cancel macro"))
-	lines := []string{
-		sectionHeader("AUTOMATIONS & MACROS", "PC rules are JSON; board rules depend on advertised EEPROM capability"),
-		buttons,
-		"",
-		kv("Host automation sources", "door · BT Audio · RF · keys · connection · macro"),
-		kv("Host actions", "board command · RF transmit · script · process · IPC/WebSocket event"),
-		kv("Board autonomy", "shown only when firmware advertises programmable EEPROM rules"),
-		"",
-		labelStyle.Render("Examples"),
-		txStyle.Render("automation run door-open-notify"),
-		txStyle.Render("macro play output-demo"),
-		txStyle.Render("display lcd 2000 Service required"),
-		warnStyle.Render("No board-resident automation is claimed until its opcode/capability is present."),
-	}
-	lines = append(lines, "", titleStyle.Render("HOST PLATFORM & BRIDGES"))
-	lines = append(lines, model.integrationStatusLines()...)
-	return strings.Join(lines, "\n")
 }
 
 func (model Model) integrationStatusLines() []string {
@@ -574,7 +561,7 @@ func serviceFromStatus(label string, status hostui.ServiceStatus) string {
 }
 
 func serviceLine(label, state, detail string) string {
-	line := fmt.Sprintf("%-20s %-22s", labelStyle.Render(label), valueStyle.Render(state))
+	line := labelStyle.Render(padRightVisible(label, 20)) + " " + valueStyle.Render(padRightVisible(state, 22))
 	if detail != "" {
 		line += labelStyle.Render(detail)
 	}
@@ -582,7 +569,7 @@ func serviceLine(label, state, detail string) string {
 }
 
 func (model Model) eventsPage() string {
-	lines := []string{sectionHeader("24-HOUR HISTORY & EVENT TIMELINE", fmt.Sprintf("%d samples · %d events", len(model.samples), len(model.timeline)))}
+	lines := []string{sectionHeader(model.width, "24-HOUR HISTORY & EVENT TIMELINE", fmt.Sprintf("%d samples · %d events", len(model.samples), len(model.timeline)))}
 	if model.prefs.Visible["graphs"] {
 		width := model.width - 30
 		if width < 16 {
@@ -625,7 +612,7 @@ func (model Model) consolePage() string {
 		labelStyle.Render("DEVICE") + " " + txStyle.Render("open close reconnect status menu settings"),
 		labelStyle.Render("OUTPUT") + " " + txStyle.Render("relay pwm rgb strip melody display macro"),
 		labelStyle.Render("RF & AUTOMATION") + " " + txStyle.Render("rf automation event"),
-		labelStyle.Render("PROGRAMMING") + " " + txStyle.Render("boot program arduino reset"),
+		labelStyle.Render("PROGRAMMING") + " " + txStyle.Render("boot program toolchain reset"),
 		labelStyle.Render("CONSOLE") + " " + txStyle.Render("help clear quit exit"),
 	}, "\n")
 	return quick + "\n" + model.viewport.View()
@@ -663,7 +650,7 @@ func (model Model) welcomeView() string {
 	}
 	body := lipgloss.JoinVertical(
 		lipgloss.Center,
-		titleStyle.Copy().Bold(true).Render(icon+"  PCController  "+icon),
+		titleStyle.Copy().Bold(true).Render(icon+"  "+model.prefs.AppTitle+"  "+icon),
 		"",
 		valueStyle.Render("One host. Every board surface."),
 		labelStyle.Render("Native opcodes · Urboot/Urclock · RF · motion · PWM · telemetry"),
@@ -733,12 +720,132 @@ func (model Model) selectionLine(index int, value string) string {
 	return prefix + value
 }
 
-func sectionHeader(title, detail string) string {
-	return titleStyle.Render(title) + "  " + labelStyle.Render(detail)
+func sectionHeader(width int, title, detail string) string {
+	if width <= 0 {
+		return titleStyle.Render(title) + "  " + labelStyle.Render(detail)
+	}
+	separator := "  "
+	title = truncateDisplayText(title, width)
+	remaining := width - lipgloss.Width(title)
+	if detail != "" && remaining > lipgloss.Width(separator) {
+		detail = truncateDisplayText(detail, remaining-lipgloss.Width(separator))
+	} else {
+		detail = ""
+	}
+	group := titleStyle.Render(title)
+	if detail != "" {
+		group += separator + labelStyle.Render(detail)
+	}
+	groupWidth := lipgloss.Width(group)
+	left := (width - groupWidth) / 2
+	right := width - groupWidth - left
+	return strings.Repeat(" ", left) + group + strings.Repeat(" ", right)
 }
 
 func kv(key, value string) string {
-	return fmt.Sprintf("%-33s %s", labelStyle.Render(key), valueStyle.Render(value))
+	return labelStyle.Render(padRightVisible(key, 33)) + " " + valueStyle.Render(value)
+}
+
+func kvCard(width, labelWidth int, key, value string) string {
+	if width <= 1 {
+		return truncateDisplayText(key+" "+value, width)
+	}
+	if labelWidth > width-2 {
+		labelWidth = width - 2
+	}
+	valueWidth := width - labelWidth - 1
+	valueLines := wrapDisplayText(value, valueWidth)
+	rows := make([]string, 0, len(valueLines))
+	for index, line := range valueLines {
+		label := strings.Repeat(" ", labelWidth)
+		if index == 0 {
+			label = labelStyle.Render(padRightVisible(key, labelWidth))
+		}
+		rows = append(rows, label+" "+valueStyle.Render(padRightVisible(line, valueWidth)))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func wrapDisplayText(value string, width int) []string {
+	if width <= 0 {
+		return []string{""}
+	}
+	words := strings.Fields(value)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	lines := make([]string, 0, 2)
+	current := ""
+	for _, word := range words {
+		candidate := word
+		if current != "" {
+			candidate = current + " " + word
+		}
+		if lipgloss.Width(candidate) <= width {
+			current = candidate
+			continue
+		}
+		if current != "" {
+			lines = append(lines, current)
+			current = ""
+		}
+		for lipgloss.Width(word) > width {
+			chunk, remainder := splitDisplayText(word, width)
+			lines = append(lines, chunk)
+			word = remainder
+		}
+		current = word
+	}
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
+}
+
+func splitDisplayText(value string, width int) (string, string) {
+	used := 0
+	byteIndex := 0
+	for index, character := range value {
+		characterWidth := lipgloss.Width(string(character))
+		if used+characterWidth > width {
+			if byteIndex == 0 {
+				next := index + len(string(character))
+				return value[:next], value[next:]
+			}
+			return value[:byteIndex], value[byteIndex:]
+		}
+		used += characterWidth
+		byteIndex = index + len(string(character))
+	}
+	return value, ""
+}
+
+func padRightVisible(value string, width int) string {
+	value = truncateDisplayText(value, width)
+	return value + strings.Repeat(" ", max(0, width-lipgloss.Width(value)))
+}
+
+func truncateDisplayText(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	if width == 1 {
+		return "…"
+	}
+	var result strings.Builder
+	used := 0
+	for _, character := range value {
+		characterWidth := lipgloss.Width(string(character))
+		if used+characterWidth > width-1 {
+			break
+		}
+		result.WriteRune(character)
+		used += characterWidth
+	}
+	return result.String() + "…"
 }
 
 func relaySummary(bits byte) string {
@@ -819,7 +926,11 @@ func (model Model) programModeName(value byte) string {
 }
 
 func visibilityValue(label string, visible bool) string {
-	return fmt.Sprintf("%-36s %s", label, boolWord(visible, "VISIBLE", "HIDDEN"))
+	return settingsRow(label, boolWord(visible, "VISIBLE", "HIDDEN"))
+}
+
+func settingsRow(label, value string) string {
+	return padRightVisible(label, 38) + " " + value
 }
 
 func firmwareIdentity(snapshot control.Snapshot) string {
@@ -853,5 +964,5 @@ func sampleValues(samples []measurementSample, value func(measurementSample) flo
 }
 
 func graphLine(label string, values []float64, width int) string {
-	return fmt.Sprintf("%-24s %s", labelStyle.Render(label), lipgloss.NewStyle().Foreground(colorAccent).Render(sparkline(values, width)))
+	return labelStyle.Render(padRightVisible(label, 24)) + " " + lipgloss.NewStyle().Foreground(colorAccent).Render(sparkline(values, width))
 }

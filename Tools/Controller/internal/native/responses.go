@@ -9,8 +9,7 @@ import (
 
 const (
 	BoardKindPCController   byte = 1
-	SettingsSchemaLegacy    byte = 1
-	SettingsSchema          byte = 2
+	SettingsShape           byte = 2
 	IdentitySchemaLegacy    byte = 1
 	IdentitySchema          byte = 2
 	IdentitySchemaCompact   byte = 3
@@ -33,13 +32,20 @@ const (
 	CapabilityMotionBreak        uint32 = 1 << 21
 	CapabilityTimedMacroQueue    uint32 = 1 << 22
 	CapabilityMenuLayout         uint32 = 1 << 23
-	// CapabilityHostMenuOverlay gates the volatile PC-owned directory/content
-	// protocol. Current AVR builds may omit it when the feature does not fit;
-	// callers must retain built-in flash labels and disable live host nodes.
-	CapabilityHostMenuOverlay uint32 = 1 << 24
+	CapabilityProgramState       uint32 = 1 << 24
 )
 
-const StatusBuzzerBusy uint16 = 0x1000
+const (
+	StatusBuzzerBusy     uint16 = 1 << 12
+	StatusProgramRunning uint16 = 1 << 13
+	StatusHostOffline    uint16 = 1 << 14
+	StatusHot            uint16 = 1 << 15
+)
+
+// SupportsHostMenuOverlay remains an explicit semantic probe for the
+// anticipatory host-menu code. No capability bit is currently assigned by the
+// firmware, so bit 24 must never be mistaken for this feature.
+func SupportsHostMenuOverlay(Hello) bool { return false }
 
 // BuzzerBusy only interprets status bit 12 when HELLO advertises the new
 // meaning; legacy firmware used the same raw bit for macro-active.
@@ -278,9 +284,8 @@ func ParseSettings(payload []byte) (Settings, error) {
 	if len(payload) < 10 {
 		return Settings{}, fmt.Errorf("SETTINGS payload is %d bytes, need 10", len(payload))
 	}
-	if payload[0] != SettingsSchemaLegacy && payload[0] != SettingsSchema {
-		return Settings{}, fmt.Errorf("unsupported settings schema %d", payload[0])
-	}
+	// Byte zero is an advisory shape marker. The recognized semantic prefix is
+	// authoritative, and newer peers may append fields without breaking us.
 	settings := Settings{
 		Flags:             payload[1],
 		LightMode:         payload[2],
@@ -291,11 +296,10 @@ func ParseSettings(payload []byte) (Settings, error) {
 		PWMBootMode:       payload[7],
 		StreamPeriodMS:    binary.LittleEndian.Uint16(payload[8:10]),
 	}
-	if payload[0] == SettingsSchema {
-		if len(payload) < 12 {
-			return Settings{}, fmt.Errorf("SETTINGS schema 2 payload is %d bytes, need 12", len(payload))
-		}
+	if len(payload) >= 11 {
 		settings.DefaultPage = payload[10]
+	}
+	if len(payload) >= 12 {
 		settings.ExtendedFlags = payload[11]
 	}
 	if _, err := settings.Payload(); err != nil {
@@ -313,6 +317,9 @@ type Status struct {
 	TLEDCenti      int16  `json:"temperature_led_centi_c"`
 	TBTCenti       int16  `json:"temperature_bt_audio_centi_c"`
 	Flags          uint16 `json:"flags"`
+	ProgramRunning bool   `json:"program_running"`
+	HostOffline    bool   `json:"host_offline"`
+	Hot            bool   `json:"hot"`
 	RawInputs      byte   `json:"raw_inputs"`
 	ActiveKeys     byte   `json:"active_keys"`
 	ActiveRelays   byte   `json:"active_relays"`
@@ -371,6 +378,9 @@ func ParseStatus(payload []byte) (Status, error) {
 		FramingErrors:  binary.LittleEndian.Uint16(payload[39:41]),
 		CRCErrors:      binary.LittleEndian.Uint16(payload[41:43]),
 	}
+	status.ProgramRunning = status.Flags&StatusProgramRunning != 0
+	status.HostOffline = status.Flags&StatusHostOffline != 0
+	status.Hot = status.Flags&StatusHot != 0
 	if len(payload) >= StatusPayloadSize {
 		status.ResetCause = payload[43]
 		status.ResetCount = binary.LittleEndian.Uint32(payload[44:48])

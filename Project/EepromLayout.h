@@ -2,8 +2,8 @@
 
 #include <avr/io.h>
 
-// Development layout v2. The user explicitly authorized a clean EEPROM
-// reinitialization, so no legacy migration code is retained.
+// Canonical MCU-owned layout. Invalid records are replaced with defaults;
+// firmware never carries a chain of development-layout migration handlers.
 namespace EepromLayout {
 constexpr int SettingsAddress = 32;
 constexpr int RemoteHeaderAddress = 64;

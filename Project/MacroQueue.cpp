@@ -59,7 +59,7 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
     // duplicating tolerance/statistics code in AVR flash.
     // Duration remains host-owned because the hosted front-panel macro page
     // already has the complete library and this saves scarce AVR flash.
-    if (length != 5 || payload[0] != Schema) {
+    if (length < 5 || payload[0] != Schema) {
       protocol_.sendError(frame.sequence, frame.opcode,
                           ControllerProtocol::BadPayload);
       return true;
@@ -82,12 +82,12 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
     return true;
   }
   if (frame.opcode == ControllerProtocol::MacroCancel) {
-    if (length > 1 || (length == 1 && payload[0] > 1)) {
+    if (length != 0 && payload[0] > 1) {
       protocol_.sendError(frame.sequence, frame.opcode,
                           ControllerProtocol::BadPayload);
       return true;
     }
-    cancel(length == 1 ? payload[0] != 0
+    cancel(length != 0 ? payload[0] != 0
                        : (options_ & KeepOutputsOnCancel) != 0);
     protocol_.sendAck(frame.sequence, frame.opcode);
     return true;
@@ -95,11 +95,11 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
   if (frame.opcode != ControllerProtocol::MacroStep) {
     return false;
   }
-  if (length == 1 && payload[0] == 2) {
+  if (length != 0 && payload[0] == 2) {
     sendStatus(ControllerProtocol::MacroStatusResponse, frame.sequence);
     return true;
   }
-  if (length == 1 && payload[0] == 1) {
+  if (length != 0 && payload[0] == 1) {
     if (report.state != Buffering ||
         (report.totalSteps != 0 &&
          (!recordReady() ||

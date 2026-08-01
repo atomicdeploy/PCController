@@ -30,8 +30,8 @@ constexpr uint8_t Reserved1 = 1U << 1;
 constexpr uint8_t SwapTemperatureSensors = 1U << 2;
 constexpr uint8_t MotionDoorPolicyMask = 3U << 3;
 constexpr uint8_t MotionDoorPolicyShift = 3;
-// Disabled bits are intentionally active-high: legacy EEPROM records have
-// them clear, so upgrading preserves the requested default of audible cues.
+// Disable bits keep the zero-valued factory representation audible while
+// still allowing each cue family to be independently muted.
 constexpr uint8_t DoorAudioDisabled = 1U << 5;
 constexpr uint8_t RelayAudioDisabled = 1U << 6;
 // Clear selects the compact 1 ms default; set selects a conservative 100 ms.
@@ -48,7 +48,8 @@ constexpr uint8_t StatusColorShift = 1;
 constexpr uint8_t VoltageDecimalsShift = 4;
 constexpr uint8_t CurrentDecimalsShift = 6;
 
-// Encoding 0 is reserved for legacy EEPROM records and means two decimals.
+// The compact mapping is 0->2, 1->0, 2->1, 3->2 decimal places. Mapping the
+// zero-filled representation to two decimals gives useful factory output.
 inline uint8_t decodeDecimals(uint8_t value) {
   return value == 0 ? 2 : static_cast<uint8_t>(value - 1);
 }
@@ -187,8 +188,9 @@ struct ControllerSettings {
 #endif
 };
 
-// The seven leading byte-sized settings are also the native UART settings
-// prefix. Keep this explicit so EEPROM and wire compatibility cannot drift.
+// The seven leading byte-sized settings form the canonical UART settings
+// prefix. Keep the shared semantic prefix explicit while allowing later
+// payloads to append independently discoverable fields.
 constexpr uint8_t ControllerSettingsPrefixSize = 7;
 static_assert(offsetof(ControllerSettings, streamPeriodMs) ==
                   ControllerSettingsPrefixSize,

@@ -55,8 +55,7 @@ public:
   void begin(bool available, uint32_t now = millis());
   void service(uint32_t now = millis());
 
-  // Compatibility API used by the phase-one menu.
-  void allOff();
+  // Front-panel commissioning controls.
   void setMode(PwmTestMode mode, uint32_t now = millis());
   PwmTestMode mode() const;
   void setChannel(uint8_t channel, uint32_t now = millis());
@@ -65,7 +64,6 @@ public:
   void setValue(uint16_t value, uint32_t now = millis());
   void adjustValue(int16_t delta, uint32_t now = millis());
   uint16_t value() const;
-  uint16_t channel0Value() const;
   bool available() const;
   bool rising() const;
   uint8_t errorCount() const;

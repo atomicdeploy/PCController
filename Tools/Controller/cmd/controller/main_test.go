@@ -17,6 +17,24 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
+func TestBrowserURLUsesReachableLoopbackAddress(t *testing.T) {
+	for input, expected := range map[string]string{
+		"127.0.0.1:8787": "http://127.0.0.1:8787/",
+		"localhost:9000": "http://localhost:9000/",
+		"[::1]:8787":     "http://[::1]:8787/",
+		"0.0.0.0:8787":   "http://127.0.0.1:8787/",
+		"[::]:8787":      "http://127.0.0.1:8787/",
+	} {
+		got, err := browserURL(input)
+		if err != nil || got != expected {
+			t.Errorf("browserURL(%q)=%q, %v; want %q", input, got, err, expected)
+		}
+	}
+	if _, err := browserURL("missing-port"); err == nil {
+		t.Fatal("invalid listen address should fail")
+	}
+}
+
 type recordingHostPanelBridge struct {
 	pushes   chan hostmenu.Snapshot
 	releases chan struct{}
@@ -140,8 +158,27 @@ func TestHelpAndVersion(t *testing.T) {
 	}
 }
 
+func TestPersistedProductTitleAppearsInHelpAndVersion(t *testing.T) {
+	t.Setenv("PCCONTROLLER_APP_TITLE", "")
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := appconfig.Defaults()
+	value.UI.AppTitle = "Workshop Controller"
+	if err := appconfig.Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"help", "version"} {
+		var stdout, stderr bytes.Buffer
+		if err := run([]string{"--config", path, command}, &stdout, &stderr); err != nil {
+			t.Fatalf("%s: %v", command, err)
+		}
+		if !strings.Contains(stdout.String(), "Workshop Controller") {
+			t.Fatalf("%s did not use persisted product title: %q", command, stdout.String())
+		}
+	}
+}
+
 func TestUsageVT100StylingPreservesPlainContent(t *testing.T) {
-	const plain = "◆ PCController Tool\n\nInteractive control:\n  controller tui [connection flags]"
+	const plain = "◆ Workshop Controller\n\nInteractive control:\n  controller tui [connection flags]"
 	styled := decorateUsage(plain, true)
 	for _, want := range []string{"\x1b[1;36m", "\x1b[1;33m", "\x1b[1;32m", "\x1b[0m"} {
 		if !strings.Contains(styled, want) {
@@ -322,14 +359,14 @@ func TestWatchedHostMenusAcrossFormatsRoutePreviewAndRelease(t *testing.T) {
 	}
 }
 
-func TestArduinoUpdateDryRunUsesControllerOwnedPlan(t *testing.T) {
+func TestToolchainSyncDryRunUsesControllerOwnedPlan(t *testing.T) {
 	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if err := runArduinoUpdate(
-		[]string{"--dry-run", "--arduino-cli", "arduino-cli"},
+	if err := runToolchainSync(
+		[]string{"--dry-run", "--cli", "arduino-cli"},
 		&stdout,
 		&stderr,
 		store,
@@ -348,7 +385,7 @@ func TestArduinoUpdateDryRunUsesControllerOwnedPlan(t *testing.T) {
 	}
 }
 
-func TestBootAndArduinoCLIArguments(t *testing.T) {
+func TestBootAndToolchainCLIArguments(t *testing.T) {
 	tests := []struct {
 		name  string
 		input []string
@@ -380,10 +417,10 @@ func TestBootAndArduinoCLIArguments(t *testing.T) {
 			},
 		},
 		{
-			name: "arduino burn", input: []string{"burn-bootloader", "--programmer", "usbasp"},
-			call: arduinoCLIArguments,
+			name: "toolchain bootloader", input: []string{"install-bootloader", "--programmer", "usbasp"},
+			call: toolchainCLIArguments,
 			want: []string{
-				"--method", "arduino", "--operation", "burn-bootloader",
+				"--method", "toolchain", "--operation", "install-bootloader",
 				"--programmer", "usbasp",
 			},
 		},
@@ -397,9 +434,9 @@ func TestBootAndArduinoCLIArguments(t *testing.T) {
 			t.Fatalf("%s: got %v, want %v", test.name, got, test.want)
 		}
 	}
-	if _, err := arduinoCLIArguments([]string{"upload", ".", "--port", "COM18"}); err == nil ||
-		!strings.Contains(err.Error(), "program flash") {
-		t.Fatalf("direct Arduino upload was not redirected to guarded flash: %v", err)
+	if _, err := toolchainCLIArguments([]string{"upload", ".", "--port", "COM18"}); err == nil ||
+		!strings.Contains(err.Error(), "usage") {
+		t.Fatalf("unpublished direct upload command was exposed: %v", err)
 	}
 }
 
@@ -417,8 +454,11 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalized=%#v want=%#v", got, want)
 	}
-	usb, err := normalizeProgramCLIArgs([]string{"flash", "firmware.hex", "--usbasp-troubleshooting"})
-	if err != nil || !strings.Contains(strings.Join(usb, " "), "--method usbasp --usbasp-troubleshooting") {
+	usb, err := normalizeProgramCLIArgs([]string{
+		"flash", "firmware.hex", "USB-SERIAL CH340", "--usbasp-troubleshooting",
+	})
+	if err != nil || !strings.Contains(strings.Join(usb, " "), "--method usbasp --usbasp-troubleshooting") ||
+		!strings.Contains(strings.Join(usb, " "), "--app-device USB-SERIAL CH340") {
 		t.Fatalf("USBasp normalized=%#v err=%v", usb, err)
 	}
 	before, err := normalizeProgramCLIArgs([]string{
@@ -439,6 +479,44 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	gotCanonical, err := normalizeProgramCLIArgs(canonical)
 	if err != nil || !reflect.DeepEqual(gotCanonical, canonical) {
 		t.Fatalf("canonical flags were reinterpreted: got=%#v err=%v", gotCanonical, err)
+	}
+}
+
+func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing.T) {
+	t.Setenv("PCCONTROLLER_DEVICE", "")
+	t.Setenv("PCCONTROLLER_PORT", "")
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "controller.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := []string{
+		"--method", "usbasp", "--operation", "write-flash",
+		"--hex", "firmware.hex", "--usbasp-troubleshooting", "--dry-run",
+	}
+	var stdout, stderr bytes.Buffer
+	err = runProgram(base, &stdout, &stderr, store)
+	if err == nil || !strings.Contains(err.Error(), "--app-device") {
+		t.Fatalf("standalone USBasp did not fail closed without application selector: %v", err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	withApplication := append(append([]string(nil), base...), "--app-device", "COM18")
+	if err := runProgram(withApplication, &stdout, &stderr, store); err != nil {
+		t.Fatalf("USBasp application lifecycle dry-run: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "application lifecycle selector=COM18 (never passed to ISP)") {
+		t.Fatalf("dry-run did not separate application selector from ISP:\n%s", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	withOverride := append(append([]string(nil), base...), "--allow-incomplete-backup")
+	if err := runProgram(withOverride, &stdout, &stderr, store); err != nil {
+		t.Fatalf("explicit recovery override rejected: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "application lifecycle skipped") {
+		t.Fatalf("override warning missing: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
 }
 

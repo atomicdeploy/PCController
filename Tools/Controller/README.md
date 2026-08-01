@@ -1,7 +1,7 @@
-# PCController Tool
+# Host Controller Tool
 
 `controller` is the PC-side utility for ControllerBoardMini. It combines an
-authenticated serial console, Charm terminal UI, native protocol client,
+authenticated serial console, Charm terminal UI, embedded browser UI, native protocol client,
 programmer launcher, JSON-RPC IPC service, script runner, reusable Go package,
 optional C-compatible library, and firmware WebSocket relay in one codebase.
 
@@ -18,16 +18,20 @@ optional C-compatible library, and firmware WebSocket relay in one codebase.
 - 115200 8N1 native COBS/CRC-8 protocol
 - Live voltage, current, power, temperature, input, relay, menu, and PWM
   status in a Bubble Tea/Bubbles/Lip Gloss interface
+- Responsive React control center embedded in `controller.exe`, with
+  Vazirmatn Persian typography, RTL/LTR flow, dark/light/system themes,
+  reduced-motion support, graphs, dialogs, audio cues, and keyboard navigation
 - Continuous text or newline-delimited JSON monitoring for logging
 - Host-side command shell with history, completion, quoting, and raw protocol
   access
 - Repeatable batch scripts with variables, sleeps, repeats, and fail-fast or
   continue-on-error behavior
-- Cross-platform loopback/stdio JSON-RPC 2.0 IPC; the first TUI/shell process
-  owns serial and later CLI processes route through that primary owner
+- Cross-platform NDJSON JSON-RPC 2.0, REST v1, authenticated standard
+  WebSocket, and bounded Engine.IO-v4/Socket.IO-over-WebSocket service; the
+  first TUI/shell process owns serial and later clients route through it
 - Importable Go API and optional `c-shared` JSON ABI
-- Persistent JSON host configuration, `fsnotify` hot reload, macros, and
-  event-driven automations
+- Persistent JSON host configuration, `fsnotify` hot reload, macros,
+  event-driven automations, a typed local-device contract, and loopback data-hub integration
 - DTR and RTS reset pulse
 - Controller-owned Arduino CLI compile/update, MiniCore `urclock`, and guarded
   USBasp/AVRDUDE recovery workflows; direct Arduino upload is disabled
@@ -43,7 +47,8 @@ build.cmd --host-only
 ```
 
 Run that command from the repository root. The shared project-owned Node build
-runs `go mod download`, `go test ./...`, and `go vet ./...`, embeds and verifies
+runs the locked web typecheck/tests/build before `go mod download`,
+`go test ./...`, and `go vet ./...`, embeds and verifies
 Windows icon/manifest/version resources, strips the Go binary, UPX-packs and
 tests it, builds and smoke-tests the C ABI, and publishes:
 
@@ -85,6 +90,12 @@ go run -buildvcs=false ./cmd/controller ports
 Manual equivalents:
 
 ```console
+cd web
+npm ci
+npm run typecheck
+npm test
+npm run build
+cd ..
 go mod download
 go test ./...
 go vet ./...
@@ -97,6 +108,41 @@ matching `go env GOARCH` on `PATH` (or an explicit compatible `CC`); the build
 rejects MSYS-only targets. Use `--no-shared-library` only when intentionally
 building without the ABI. See
 [C Library API](docs/C-Library-API.md).
+
+## Embedded web control center
+
+Launch the full primary host lifecycle and open the same-origin app:
+
+```console
+.\bin\controller.exe web
+.\bin\controller.exe web --no-open
+```
+
+The production bundle is compiled into the Go executable. The listener serves
+the SPA, REST, typed JSON-RPC, subscriptions, integration proxy, standard
+WebSocket, and Socket.IO without a second web server. Static delivery includes
+strong ETags and exact `HEAD`, suffix/open/closed `Range`, `If-Range`,
+multipart-range, and `416` behavior. Local-device actions use the bounded host
+manager; arbitrary data-hub resources stream through the authenticated
+loopback-only bridge without forwarding the controller token.
+
+`web` starts the complete primary runtime without instantiating Bubble Tea or
+reading terminal input. It owns controller discovery/reconnect, automations,
+global hotkeys, local integrations, and the shared command engine for its full
+lifetime, so a TUI is neither launched nor required. The browser terminal sends
+ordinary dispatcher commands while the persistent WebSocket independently
+pushes status, board events, host events, and global page actions. Those event
+lines are interleaved in the bounded terminal transcript and remain available
+in the filterable Activity page.
+
+The UI includes live electrical/thermal graphs, relay and PWM controls, a
+peripheral workbench for displays, addressable LEDs, sound, RF, macros, I2C,
+host actions and recovery diagnostics, a typed local-device surface, a
+service-neutral data workspace, dialogs/toasts, command palette, procedural
+audio, and guarded command confirmation. Its first-launch Fuji-inspired gate,
+clip/filter/spring transitions, glass layers, semantic colors, responsive
+mobile navigation, RTL geometry, and dark/light themes are code-native and do
+not require remote assets.
 
 ## Terminal UI
 
@@ -239,7 +285,9 @@ melody wait NAME [REPEATS]            # wait until all notes are acknowledged/pl
 melody stop|status
 silent status|on|off
 display segments|lcd|both DURATION_MS [TEXT]
-macro list|play NAME_OR_ID|status|cancel
+macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID
+macro record start NAME [CATEGORY [COLOR]]|record status|record save|record discard
+macro play NAME_OR_ID|status|cancel [keep]
 automation list|run NAME
 rf send CODE BITS PROTOCOL [PULSE_US]  # protocol 1..12
 rf learn [SECONDS]                     # 1..120
@@ -313,6 +361,9 @@ must be guaranteed.
 
 See [Protocol and Network API](docs/Protocol-and-Network-API.md) for exact framing and
 payload schemas.
+See the [Control-Surface Capability Matrix](docs/Control-Surface-Capability-Matrix.md)
+for command reachability across the TUI, CLI, Go/C libraries, IPC, REST,
+WebSocket, Socket.IO, bridge, and event surfaces.
 
 An explicit virtual-board endpoint uses the same authenticated native
 protocol:
@@ -363,15 +414,28 @@ bin\controller.exe ipc call --method controller.snapshot
 bin\controller.exe ipc call --method controller.execute --params "{\"command\":\"rf list\"}"
 bin\controller.exe ipc call --method controller.execute --params "{\"command\":\"melody play notify\"}"
 bin\controller.exe ipc call --method controller.execute --params "{\"command\":\"rgb effect play attention\"}"
+bin\controller.exe ipc call --method controller.bridge.list
+bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
 ```
 
 Use `ipc serve --stdio` for a parent process that wants newline-delimited
-JSON-RPC over pipes. Supported methods are `controller.ping`,
-`controller.connect`, `controller.close`, `controller.snapshot`,
-`controller.status`, `controller.execute`, `controller.rf.list`,
-`controller.event.latest`, `controller.event.next`, and
-`controller.reset.lines`.
-The TCP listener rejects non-loopback addresses.
+JSON-RPC over pipes. The API includes connection/reset/programming ownership,
+snapshots/status/history, menus, RF, messages, events, OS-policy operations,
+and correlated host-bridge calls; see
+[Protocol and Network API](docs/Protocol-and-Network-API.md) for the canonical
+method and REST route table.
+
+The TCP listener rejects non-loopback addresses by default. Remote mode
+requires `ipc.allow_remote`, a token of at least 24 characters, a non-wildcard
+browser origin list, and explicit `ipc.remote_policy` capabilities. Its safe
+default permits read/event subscriptions only. Token possession alone does not
+grant board writes, reset, programming, shutdown, virtual keys, power actions,
+host-automation execution, or bridge calls.
+
+Configured `integrations.websocket_clients` can subscribe to another primary,
+forward loop-safe typed events, and issue correlated `bridge call` requests.
+Each host still has exactly one local serial owner and the target reapplies its
+own remote policy and board safety guards.
 
 Go programs can import the module-root `controller` package directly:
 
@@ -424,6 +488,23 @@ bin\controller.exe config show
 bin\controller.exe --config lab.json config validate
 ```
 
+### Product identity
+
+User-visible default identity is owned by
+[`web/package.json`](web/package.json): `productName`, `productShortName`,
+`productTagline`, and `description`. The normal build verifies that the
+generated Go constants and Win32 resources still match that source. Set
+`ui.app_title` in the watched host configuration for a persistent title, or
+set `PCCONTROLLER_APP_TITLE` for a one-process override; TUI, CLI help/version,
+web navigation and browser title, desktop notifications, host-defined menus,
+and service display names all consume the effective value. `APP_TITLE` may
+also replace the web bundle's build-time fallback.
+
+Wire HELLO identity, URI/header names, C ABI symbols, module names, firmware
+artifact names, and the default config directory remain stable technical
+identifiers. They are intentionally not derived from a user-editable title,
+because changing them would break device, IPC, or upgrade compatibility.
+
 See [examples/config.example.json](examples/config.example.json) for the full
 schema: connection filters/timing, UI limits, project and firmware paths,
 programming tools, named scripts, host-streamed relay/PWM macros, melodies,
@@ -460,37 +541,44 @@ the policy, and TCP endpoints are never pulsed.
 
 ## Programming
 
-The tool locates `arduino-cli` through `PATH`. For direct AVRDUDE/Urclock
-operations it first accepts explicit executable/configuration paths, then
-checks `avrdude` on `PATH`, then asks Arduino CLI for
-`config get directories.data` and selects the newest MiniCore
-`tools/avrdude/*/bin` installation. This also supports portable Arduino CLI
-layouts instead of assuming `%LOCALAPPDATA%\Arduino15`. Add `--dry-run` to
-resolve and print a workflow without executing it.
+Bootstrap the latest resolved, host-data-local firmware toolchain with
+`controller toolchain bootstrap`; use `--locked` only for an intentional exact
+rollback. Its dependency executable, core/compiler data, downloads,
+and user-library directory are isolated below the PCController data root rather
+than the user's standard Arduino15/sketchbook locations. Explicit paths remain
+available; otherwise direct
+AVRDUDE/Urclock operations discover the programmer supplied by the selected
+MiniCore installation. Add `--dry-run` to inspect a workflow without executing
+it. The complete profile, proxy, artifact, and recovery rules are in
+[Toolchain Bootstrap and Safe Programming](../../docs/Toolchain-and-Safe-Programming.md).
 
 From `Tools\Controller`:
 
 ```console
-bin\controller.exe program --method compile --sketch ..\.. --output-dir ..\..\.build\firmware
-bin\controller.exe program --method urclock --operation write-flash --device 1A86:7523 --hex ..\..\.build\firmware\PCController.ino.hex
-bin\controller.exe program --method usbasp --operation write-flash --programmer usbasp --usbasp-troubleshooting --hex ..\..\.build\firmware\PCController.ino.with_bootloader.hex
+bin\controller.exe toolchain compile ..\.. --output-dir ..\..\.build\firmware
+bin\controller.exe program flash ..\..\.build\firmware\PCController.ino.hex 1A86:7523
+bin\controller.exe program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --usbasp-troubleshooting --app-device "USB-SERIAL CH340"
 bin\controller.exe boot backup .\backups --device "USB-SERIAL CH340"
 ```
 
-Direct Arduino upload is disabled. For either permitted flash method,
-Controller first attempts a complete timestamped flash/EEPROM backup, then
-writes, verifies, releases the programmer, and authenticates the application
-again. USBasp remains an explicitly authorized troubleshooting path.
+Direct dependency upload is disabled. Controller snapshots board-owned
+settings separately from PC configuration, prepares the displays, temporarily
+mutes an audible board, waits for deferred EEPROM persistence, completes a
+verified flash/EEPROM/metadata backup, writes and verifies, reconnects, restores
+the exact settings, and verifies their semantic readback. A durable recovery
+marker survives host/programmer interruption. USBasp remains an explicitly
+authorized troubleshooting path and its `--app-device` selector is never sent
+to ISP.
 
 The direct USBasp workflow writes only the selected flash image. It does not
 invent a sibling `.eep` filename and does not use the unsafe
-`arduino-cli upload --programmer ... --input-file ...with_bootloader.hex`
+dependency-backend `upload --programmer ... --input-file ...with_bootloader.hex`
 shortcut.
 
 Inside the TUI/shell, the compact equivalent is:
 
 ```text
-program urclock ..\..\.build\firmware\PCController.ino.hex COM18
+program flash ..\..\.build\firmware\PCController.ino.hex COM18
 program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --usbasp-troubleshooting
 boot backup .\backups
 ```
@@ -498,34 +586,30 @@ boot backup .\backups
 Each backup creates a new `pccontroller-YYYYMMDD-HHMMSS` directory containing
 `flash.hex`, `eeprom.hex`, raw `programmer.txt`, and an atomic
 `manifest.json`. The manifest records status, timestamps, method, port, MCU,
-programmer, file sizes and SHA-256 hashes, and the application build
-hash/date/time when the native application was reachable before entering the
-bootloader. A partial read remains marked `incomplete`; it is never reported as
-a complete backup.
+programmer, file sizes and SHA-256 hashes, and the application identity when
+the native application was reachable before entering the bootloader. Firmware
+blobs are stored by SHA-256 and reused rather than duplicated. A partial read
+remains marked `incomplete`; it is never reported as a complete backup.
 
-### Offline development settings migration
+### Offline current settings transfer
 
-The host can convert the validated legacy unversioned 19-byte settings value
-plus CRC-8 into the current development-v2 29-byte value plus CRC-8 without
-opening a COM port:
+No unpublished-build migration/version chain is retained. File-only commands
+understand the current semantic 29-value-byte plus CRC-8 settings record and
+report any other width/layout as unsupported:
 
 ```console
-bin\controller.exe eeprom migrate --input .\backups\eeprom.hex --output .\settings-development-v2.hex
+bin\controller.exe eeprom inspect --input .\eeprom.hex
+bin\controller.exe eeprom inspect --backup-manifest .\backup\manifest.json
+bin\controller.exe eeprom export --backup-manifest .\backup\manifest.json --output .\settings.hex
+bin\controller.exe eeprom import --backup-manifest .\backup\manifest.json --settings .\settings.hex --output .\eeprom-restore.hex
+bin\controller.exe eeprom restore --backup-manifest .\backup\manifest.json --output .\eeprom-original.hex
 ```
 
-The converter preserves all 19 legacy value bytes, initializes the visible
-menu mask to `0x7FFF`, initializes packed menu order to page IDs 0 through 14,
-and recalculates the record CRC-8. Its canonical sparse Intel HEX contains
-exactly EEPROM addresses `0x0020` through `0x003D` (32 through 61); RF records
-starting at 64 and the reset journal starting at 320 are absent and therefore
-not part of the migration artifact. A fully valid current record is rejected;
-otherwise the CRC-valid legacy prefix is authoritative and ignored stale tail
-bytes are not copied. Existing output files are never replaced.
-
-This is deliberately host-side tooling, not AVR compatibility code, so it
-consumes no firmware flash. The command only creates a proposed file. Applying
-it remains a separate, explicitly confirmed `program --operation write-eeprom`
-operation followed by readback verification.
+Export, import, and restore require a complete validated backup manifest.
+Import overlays only EEPROM addresses `0x0020..0x003D` and preserves every
+other byte from the full 1,024-byte backup. Outputs are canonical, hashed,
+created without overwrite, and never written to a device by these commands.
+An actual EEPROM write remains a separate explicitly confirmed operation.
 
 The application protocol and Urboot/AVRDUDE are mutually exclusive users of
 the same UART. Programming closes the application session before invoking the

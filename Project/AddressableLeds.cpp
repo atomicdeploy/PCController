@@ -125,5 +125,3 @@ RgbColor *buffer() { return pixels; }
 uint8_t count() { return PixelCount; }
 
 } // namespace AddressableLeds
-
-void setupWS2811() { AddressableLeds::begin(); }

@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
@@ -304,6 +305,25 @@ func TestAppSettingsPersistThroughSaveHook(t *testing.T) {
 	}
 }
 
+func TestConfiguredProductTitleAppearsAndHotReloadsInTUI(t *testing.T) {
+	t.Setenv("PCCONTROLLER_APP_TITLE", "")
+	ui := appconfig.Defaults().UI
+	ui.AppTitle = "Workshop Controller"
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		UIConfig: func() appconfig.UI { return ui }, DisableWelcome: true,
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	model = updated.(Model)
+	if rendered := ansi.Strip(model.View()); !strings.Contains(rendered, "◆ Workshop Controller") {
+		t.Fatalf("configured title missing from TUI header:\n%s", rendered)
+	}
+	ui.AppTitle = "Live Control Desk"
+	model.syncUIConfig(ui)
+	if rendered := ansi.Strip(model.View()); !strings.Contains(rendered, "◆ Live Control Desk") {
+		t.Fatalf("hot-reloaded title missing from TUI header:\n%s", rendered)
+	}
+}
+
 func TestRawHelloFramesHiddenOutsideDebug(t *testing.T) {
 	model := readyModel(t, PageConsole)
 	before := len(model.logs)
@@ -437,7 +457,7 @@ func TestBorderedPageButtonsShareHorizontalRow(t *testing.T) {
 			if page == PageProgramming && strings.Contains(line, "Urclock probe") && strings.Contains(line, "Metadata") {
 				found = true
 			}
-			if page == PageAutomations && strings.Contains(line, "List automations") && strings.Contains(line, "List macros") {
+			if page == PageAutomations && strings.Contains(line, "N New") && strings.Contains(line, "P Play") {
 				found = true
 			}
 		}
@@ -508,6 +528,85 @@ func TestPreviewHeaderAndFrontPanelFit160Columns(t *testing.T) {
 	}
 }
 
+func TestPrimaryTablesFitRepresentativeNarrowAndWideWidths(t *testing.T) {
+	for _, width := range []int{88, 120, 132, 160} {
+		for _, page := range []Page{PageDashboard, PageOutputs, PageBoardSettings, PageAppSettings} {
+			rendered := PreviewFrame(page, width, 46)
+			for index, line := range strings.Split(rendered, "\n") {
+				if actual := lipgloss.Width(line); actual > width {
+					t.Errorf("page %d width %d line %d overflowed to %d cells:\n%s", page, width, index, actual, line)
+				}
+			}
+		}
+	}
+
+	dashboard := PreviewFrame(PageDashboard, 132, 38)
+	foundPair := false
+	for _, line := range strings.Split(dashboard, "\n") {
+		if strings.Count(line, "╭") == 2 {
+			foundPair = true
+			if width := lipgloss.Width(line); width > 132 {
+				t.Fatalf("dashboard card pair width=%d:\n%s", width, line)
+			}
+		}
+	}
+	if !foundPair {
+		t.Fatalf("wide dashboard did not render a two-card row:\n%s", dashboard)
+	}
+}
+
+func TestDashboardLongValuesWrapInsideTheirValueColumn(t *testing.T) {
+	row := ansi.Strip(kvCard(55, 22, "Bluetooth", "BT Audio · disconnected / pairing (blinking indicator)"))
+	lines := strings.Split(row, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("representative long value did not wrap: %q", row)
+	}
+	for index, line := range lines[1:] {
+		leading := lipgloss.Width(line) - lipgloss.Width(strings.TrimLeft(line, " "))
+		if leading != 23 {
+			t.Fatalf("wrapped continuation %d starts at cell %d, want 23: %q", index, leading, line)
+		}
+		if width := lipgloss.Width(line); width != 55 {
+			t.Fatalf("wrapped continuation %d width=%d, want 55: %q", index, width, line)
+		}
+	}
+}
+
+func TestSectionHeadersAreCenteredAtNarrowAndWideWidths(t *testing.T) {
+	for _, width := range []int{72, 128} {
+		header := sectionHeader(width, "PC HOST SETTINGS", "saved in host JSON · never board EEPROM")
+		if actual := lipgloss.Width(header); actual != width {
+			t.Fatalf("header width=%d, want %d", actual, width)
+		}
+		left := len(header) - len(strings.TrimLeft(header, " "))
+		right := len(header) - len(strings.TrimRight(header, " "))
+		if difference := left - right; difference < -1 || difference > 1 {
+			t.Fatalf("header not centered at width %d: left=%d right=%d", width, left, right)
+		}
+	}
+}
+
+func TestTableColumnsUseVisibleCellPadding(t *testing.T) {
+	rows := []string{
+		ansi.Strip(kv("A", "first")),
+		ansi.Strip(kv("Temperature · Illumination LED", "second")),
+		settingsRow("Short", "third"),
+		settingsRow("Motion allowed by door state", "fourth"),
+	}
+	for index, row := range rows[:2] {
+		value := []string{"first", "second"}[index]
+		if column := lipgloss.Width(row[:strings.Index(row, value)]); column != 34 {
+			t.Fatalf("key/value row %d starts value at column %d, want 34: %q", index, column, row)
+		}
+	}
+	for index, row := range rows[2:] {
+		value := []string{"third", "fourth"}[index]
+		if column := lipgloss.Width(row[:strings.Index(row, value)]); column != 39 {
+			t.Fatalf("settings row %d starts value at column %d, want 39: %q", index, column, row)
+		}
+	}
+}
+
 func TestBoardPageShowsSafetyAndAudioCueSettings(t *testing.T) {
 	rendered := PreviewFrame(PageBoardSettings, 132, 42)
 	for _, expected := range []string{"Motion allowed by door state", "Door open/close audio cues", "Relay on/off audio cues"} {
@@ -527,6 +626,211 @@ func TestAutomationPageShowsHostPlatformAndBridgeStatus(t *testing.T) {
 	if !strings.Contains(rendered, "actions require registered") {
 		t.Fatal("toast activation limitation is not visible")
 	}
+}
+
+func TestAutomationPageProvidesCompleteMacroWorkspace(t *testing.T) {
+	rendered := PreviewFrame(PageAutomations, 160, 46)
+	for _, expected := range []string{
+		"MACRO LIBRARY", "output-demo", "door-notify", "PLAYBACK",
+		"Elapsed / Duration", "buffer 42/127 B", "accepted 95 B",
+		"last +267 µs", "faithful pending", "RECORDING",
+		"N New", "R Record", "C Cancel off", "K Cancel keep",
+		"HOST PLATFORM & BRIDGES",
+	} {
+		if !strings.Contains(rendered, expected) {
+			t.Errorf("macro workspace missing %q:\n%s", expected, rendered)
+		}
+	}
+	for _, width := range []int{88, 120, 160} {
+		rendered = PreviewFrame(PageAutomations, width, 46)
+		for lineNumber, line := range strings.Split(rendered, "\n") {
+			if cells := ansi.StringWidth(line); cells > width {
+				t.Errorf("width %d line %d uses %d cells: %q", width, lineNumber+1, cells, line)
+			}
+		}
+	}
+}
+
+func TestAutomationTableHeadersAreCenteredInExactDataColumns(t *testing.T) {
+	for _, width := range []int{88, 120, 160} {
+		nameWidth, categoryWidth := macroColumnWidths(width)
+		plain := ansi.Strip(macroTableHeader(width))
+		columns := []struct {
+			label string
+			start int
+			width int
+		}{
+			{label: "ID", start: 2, width: 3},
+			{label: "NAME", start: 6, width: nameWidth},
+			{label: "CATEGORY", start: 7 + nameWidth, width: categoryWidth},
+			{label: "COLOR", start: 8 + nameWidth + categoryWidth, width: 8},
+			{label: "STEPS", start: 17 + nameWidth + categoryWidth, width: 5},
+			{label: "DURATION", start: 23 + nameWidth + categoryWidth, width: 10},
+		}
+		for _, column := range columns {
+			end := column.start + column.width
+			if end > len(plain) {
+				t.Fatalf("width %d column %s exceeds header %q", width, column.label, plain)
+			}
+			cell := plain[column.start:end]
+			labelAt := strings.Index(cell, column.label)
+			if labelAt < 0 {
+				t.Fatalf("width %d column %s absent from exact cell %q in %q", width, column.label, cell, plain)
+			}
+			left := lipgloss.Width(cell[:labelAt])
+			right := column.width - left - lipgloss.Width(column.label)
+			if difference := left - right; difference < 0 || difference > 1 {
+				t.Errorf("width %d column %s is not visibly centered: left=%d right=%d cell=%q", width, column.label, left, right, cell)
+			}
+		}
+		expectedWidth := 33 + nameWidth + categoryWidth
+		if actual := lipgloss.Width(plain); actual != expectedWidth {
+			t.Errorf("width %d header consumes %d cells, want exact row geometry %d: %q", width, actual, expectedWidth, plain)
+		}
+	}
+}
+
+func TestAutomationSearchAndKeyboardLifecycle(t *testing.T) {
+	model := readyModel(t, PageAutomations)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	model = updated.(Model)
+	if !model.macroSearchEditing {
+		t.Fatal("slash did not enter macro search")
+	}
+	for _, value := range "door" {
+		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{value}})
+		model = updated.(Model)
+	}
+	matches := model.filteredMacros(model.macroLibrary())
+	if len(matches) != 1 || matches[0].Name != "door-notify" {
+		t.Fatalf("search matches=%#v", matches)
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if model.macroSearchEditing {
+		t.Fatal("enter did not finish macro search")
+	}
+
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'p'}})
+	model = updated.(Model)
+	if command == nil || !logsContain(model.logs, "macro play 2") {
+		t.Fatalf("play did not dispatch selected filtered macro: logs=%#v", model.logs)
+	}
+
+	model.macroSearch = ""
+	model.cursor = 0
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model = updated.(Model)
+	if got := model.input.Value(); got != "macro create 0 " {
+		t.Fatalf("new macro prompt=%q", got)
+	}
+	model.input.SetValue("")
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model = updated.(Model)
+	if got := model.input.Value(); got != "macro record start " {
+		t.Fatalf("record prompt=%q", got)
+	}
+}
+
+func TestAutomationDeleteRequiresTwoExplicitPresses(t *testing.T) {
+	model := readyModel(t, PageAutomations)
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	model = updated.(Model)
+	if command != nil || !model.macroDeleteArmed || model.macroDeleteReference != "1/output-demo" {
+		t.Fatalf("first delete press state=%+v command=%v", model, command)
+	}
+	updated, command = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	model = updated.(Model)
+	if command == nil || model.macroDeleteArmed || !logsContain(model.logs, "macro delete 1") {
+		t.Fatalf("second delete press did not dispatch: armed=%v logs=%#v", model.macroDeleteArmed, model.logs)
+	}
+}
+
+func TestAutomationDeleteConfirmationIsCancelledByAnotherAction(t *testing.T) {
+	model := readyModel(t, PageAutomations)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	model = updated.(Model)
+	if !model.macroDeleteArmed {
+		t.Fatal("delete was not armed")
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model = updated.(Model)
+	if model.macroDeleteArmed || model.macroDeleteReference != "" {
+		t.Fatalf("navigation did not cancel delete confirmation: %+v", model)
+	}
+}
+
+func TestAutomationLifecycleButtonsDispatchEveryRecorderAndCancelPolicy(t *testing.T) {
+	tests := []struct {
+		key       string
+		command   string
+		recording bool
+		playing   bool
+	}{
+		{key: "s", command: "macro record save", recording: true},
+		{key: "d", command: "macro record discard", recording: true},
+		{key: "c", command: "macro cancel", playing: true},
+		{key: "k", command: "macro cancel keep", playing: true},
+		{key: "i", command: "macro show 1"},
+		{key: "a", command: "automation list"},
+		{key: "m", command: "macro list"},
+	}
+	for _, test := range tests {
+		t.Run(test.key, func(t *testing.T) {
+			model := readyModel(t, PageAutomations)
+			model.previewMacroRecording.Active = test.recording
+			model.previewMacroState.Running = test.playing
+			updated, command, handled := model.macroShortcut(test.key)
+			if !handled || command == nil || !logsContain(updated.logs, test.command) {
+				t.Fatalf("key %q handled=%v command=%v logs=%#v", test.key, handled, command, updated.logs)
+			}
+		})
+	}
+}
+
+func TestAutomationMouseButtonsAndLibrarySelection(t *testing.T) {
+	model := readyModel(t, PageAutomations)
+	recordX := lipgloss.Width(buttonStyle.Render("N New")) + 1
+	updated, command := model.handleContentClick(1, recordX)
+	model = updated.(Model)
+	if command != nil || model.input.Value() != "macro record start " {
+		t.Fatalf("record mouse action command=%v input=%q", command, model.input.Value())
+	}
+	model.input.SetValue("")
+	updated, _ = model.handleContentClick(macroLibraryFirstRow+2, 4)
+	model = updated.(Model)
+	if model.cursor != 2 {
+		t.Fatalf("library mouse selection cursor=%d", model.cursor)
+	}
+}
+
+func TestTUIUsesCommandEngineMacroRunner(t *testing.T) {
+	runtime := control.New(control.Options{})
+	macros := []appconfig.Macro{{ID: 9, Name: "shared-runner", Steps: []appconfig.MacroStep{{Kind: "relay", Target: 5, Value: 1}}}}
+	config := appconfig.Defaults()
+	config.Macros = macros
+	engine := control.NewCommandEngine(runtime, control.CommandOptions{
+		Macros:     func() []appconfig.Macro { return append([]appconfig.Macro(nil), macros...) },
+		HostConfig: func() appconfig.Config { return config },
+	})
+	model := New(runtime, engine)
+	model.page = PageAutomations
+	if runtime.MacroRunner() == nil {
+		t.Fatal("command engine did not register its macro runner")
+	}
+	library := model.macroLibrary()
+	if len(library) != 1 || library[0].ID != 9 || library[0].Name != "shared-runner" {
+		t.Fatalf("TUI did not read command engine macro runner: %#v", library)
+	}
+}
+
+func logsContain(logs []string, expected string) bool {
+	for _, line := range logs {
+		if strings.Contains(line, expected) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFrontPanelPressAndHoldUseBackendCallback(t *testing.T) {

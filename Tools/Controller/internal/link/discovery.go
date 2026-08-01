@@ -8,6 +8,7 @@ import (
 
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type DiscoveryOptions struct {
@@ -44,7 +45,7 @@ func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error)
 
 	if IsNetworkEndpoint(options.Filter.Port) {
 		return OpenAuthenticated(ctx, ports.Info{
-			Name: options.Filter.Port, Product: "PCController Virtual Board",
+			Name: options.Filter.Port, Product: productidentity.DefaultTitle + " Virtual Board",
 		}, options)
 	}
 	all, err := ports.List()
@@ -140,7 +141,7 @@ func authenticateOpened(
 		options.RequestTimeout,
 	)
 	if err != nil {
-		return native.Hello{}, fmt.Errorf("PCController application HELLO: %w", err)
+		return native.Hello{}, fmt.Errorf("controller application HELLO: %w", err)
 	}
 	return hello, nil
 }

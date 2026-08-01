@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/integrationproxy"
 )
 
 // Integrations contains PC-host integrations only. None of these values is
@@ -21,6 +22,24 @@ type Integrations struct {
 	OutboundWebhooks       []Webhook         `json:"outbound_webhooks,omitempty"`
 	WebSocketClients       []WebSocketClient `json:"websocket_clients,omitempty"`
 	TextMappings           []TextMapping     `json:"text_mappings,omitempty"`
+	LocalDevice            LocalDevice       `json:"local_device"`
+	DataHub                DataHub           `json:"data_hub"`
+}
+
+// LocalDevice configures an optional LAN companion that implements the
+// PCController Local Device v1 capability contract. Browser code never talks
+// to the target directly.
+type LocalDevice struct {
+	Enabled bool   `json:"enabled"`
+	BaseURL string `json:"base_url,omitempty"`
+}
+
+// DataHub configures an optional loopback-only data service. Browser requests
+// cross PCController's authenticated same-origin bridge, and PCController
+// credentials are stripped before forwarding.
+type DataHub struct {
+	Enabled bool   `json:"enabled"`
+	BaseURL string `json:"base_url,omitempty"`
 }
 
 // KeyboardControl owns opt-in, low-level PC keyboard bindings. It is separate
@@ -193,6 +212,26 @@ func (value Config) validateIntegrations() error {
 	if err := validateStatusLEDPolicy(value.Integrations.StatusLED); err != nil {
 		return err
 	}
+	if baseURL := strings.TrimSpace(value.Integrations.LocalDevice.BaseURL); baseURL != "" {
+		if baseURL != value.Integrations.LocalDevice.BaseURL {
+			return fmt.Errorf("integrations.local_device.base_url must not contain surrounding whitespace")
+		}
+		if _, err := integrationproxy.NormalizeDeviceTarget(baseURL); err != nil {
+			return fmt.Errorf("integrations.local_device.base_url: %w", err)
+		}
+	} else if value.Integrations.LocalDevice.Enabled {
+		return fmt.Errorf("integrations.local_device.base_url is required when enabled")
+	}
+	if baseURL := strings.TrimSpace(value.Integrations.DataHub.BaseURL); baseURL != "" {
+		if baseURL != value.Integrations.DataHub.BaseURL {
+			return fmt.Errorf("integrations.data_hub.base_url must not contain surrounding whitespace")
+		}
+		if _, err := integrationproxy.NormalizeDataHubTarget(baseURL); err != nil {
+			return fmt.Errorf("integrations.data_hub.base_url: %w", err)
+		}
+	} else if value.Integrations.DataHub.Enabled {
+		return fmt.Errorf("integrations.data_hub.base_url is required when enabled")
+	}
 	if len(value.Integrations.Notifications.Actions) > 5 {
 		return fmt.Errorf("integrations.notifications.actions supports at most five actions")
 	}
@@ -247,6 +286,34 @@ func (value Config) validateIntegrations() error {
 		}
 		if peer.AllowCommands && strings.TrimSpace(peer.AuthToken) == "" {
 			return fmt.Errorf("integrations.websocket_clients[%d] allowing commands requires auth_token", index)
+		}
+		host := strings.Trim(parsed.Hostname(), "[]")
+		loopback := strings.EqualFold(host, "localhost")
+		if address := net.ParseIP(host); address != nil {
+			loopback = address.IsLoopback()
+		}
+		if peer.ForwardEvents && !loopback && strings.TrimSpace(peer.AuthToken) == "" {
+			return fmt.Errorf("integrations.websocket_clients[%d] forwarding events remotely requires auth_token", index)
+		}
+		topics := make(map[string]bool)
+		for topicIndex, topic := range peer.Topics {
+			topic = strings.ToLower(strings.TrimSpace(topic))
+			if topic == "telemetry" {
+				topic = "status"
+			}
+			if topic != "events" && topic != "status" {
+				return fmt.Errorf(
+					"integrations.websocket_clients[%d].topics[%d] must be events or status",
+					index, topicIndex,
+				)
+			}
+			if topics[topic] {
+				return fmt.Errorf(
+					"integrations.websocket_clients[%d].topics[%d] is duplicated",
+					index, topicIndex,
+				)
+			}
+			topics[topic] = true
 		}
 	}
 	for index, mapping := range value.Integrations.TextMappings {
@@ -368,9 +435,15 @@ func validateIPC(value IPC) error {
 	if len(value.AuthToken) > 512 || !printableText(value.AuthToken) {
 		return fmt.Errorf("ipc.auth_token must be at most 512 printable characters")
 	}
+	if value.AllowRemote && len(value.AllowedOrigins) == 0 {
+		return fmt.Errorf("ipc.allowed_origins is required when remote access is enabled")
+	}
 	for index, origin := range value.AllowedOrigins {
 		if strings.TrimSpace(origin) == "" || strings.ContainsAny(origin, "\r\n") {
 			return fmt.Errorf("ipc.allowed_origins[%d] is invalid", index)
+		}
+		if value.AllowRemote && strings.TrimSpace(origin) == "*" {
+			return fmt.Errorf("ipc.allowed_origins[%d] cannot allow every origin", index)
 		}
 	}
 	for name, path := range map[string]string{
@@ -383,6 +456,9 @@ func validateIPC(value IPC) error {
 	}
 	if value.WebSocketPath == value.SocketIOPath {
 		return fmt.Errorf("ipc.websocket_path and ipc.socket_io_path must differ")
+	}
+	if value.RemotePolicy.Programming && !value.RemotePolicy.ConnectionControl {
+		return fmt.Errorf("ipc.remote_policy.programming requires connection_control")
 	}
 	return nil
 }

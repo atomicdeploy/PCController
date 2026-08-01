@@ -32,11 +32,13 @@ func decodeConfig(path string, content []byte, target *Config) error {
 		return err
 	}
 	if format == "json" {
-		return decodeStrictJSON(content, target)
+		return decodeCompatibleJSON(content, target)
 	}
-	// Decode to a generic document first and then through strict JSON. This
-	// deliberately makes the canonical json tags (including snake_case names)
-	// identical across all three formats and rejects unknown YAML/TOML keys.
+	// Decode to a generic document first and then through JSON. This makes the
+	// canonical json tags (including snake_case names) identical across all
+	// three formats. Unknown future fields are ignored, while every known field
+	// still uses encoding/json's strict destination type checks and Config's
+	// semantic validation.
 	var document any
 	switch format {
 	case "yaml":
@@ -60,12 +62,11 @@ func decodeConfig(path string, content []byte, target *Config) error {
 	if err != nil {
 		return fmt.Errorf("normalize %s: %w", format, err)
 	}
-	return decodeStrictJSON(canonical, target)
+	return decodeCompatibleJSON(canonical, target)
 }
 
-func decodeStrictJSON(content []byte, target any) error {
+func decodeCompatibleJSON(content []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(content))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}

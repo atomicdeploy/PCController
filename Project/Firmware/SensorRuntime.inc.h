@@ -59,15 +59,15 @@ bool normalizePwmMode2() {
 
 // Low-pass a completed INA219 sample in-place without another history buffer.
 __attribute__((noinline)) int32_t
-smoothInaValue(int32_t previous, int32_t sample, bool quarter) {
+smoothInaValue(int32_t previous, int32_t sample, bool currentOrPower) {
   if (previous == INVALID_I32) {
     return sample;
   }
-  int32_t step = (sample - previous) >> 1;
-  if (quarter) {
-    step >>= 1;
-  }
-  return step == 0 ? sample : previous + step;
+  // Voltage uses a 1/4 EMA with a 1 mV deadband; noisier current/power use
+  // 1/8 with a two-unit deadband. First-valid and sensor errors remain fast.
+  return TransitionMath::smoothSample(previous, sample,
+                                      currentOrPower ? 3 : 2,
+                                      currentOrPower ? 2 : 1);
 }
 
 // Samples and filters INA219 at the door-dependent cadence.
@@ -128,9 +128,8 @@ void discoverTemperatureSensors() {
 
 // Maps sorted ROM index to tLED/tBT, honoring the EEPROM swap option.
 uint8_t temperatureRole(uint8_t addressIndex) {
-  return settingsStore.values().swapTemperatureSensors()
-             ? addressIndex
-             : static_cast<uint8_t>(1 - addressIndex);
+  return TemperatureRoles::fromSortedIndex(
+      addressIndex, settingsStore.values().swapTemperatureSensors());
 }
 
 // Starts a nonblocking conversion unless RF learning owns interrupt timing.
@@ -171,9 +170,9 @@ void serviceTemperatures(uint32_t now) {
       return;
     }
     for (uint8_t index = 0; index < temperatureAddressCount; ++index) {
-      // On this controller's physical harness the lexicographically first ROM
-      // is tLED and the second is tBT. The EEPROM swap flag remains available
-      // if either probe is replaced or the harness order changes.
+      // Factory semantics assign the first sorted ROM to tLED and the second
+      // to tBT; the EEPROM swap flag reverses them. Physical probe identity
+      // still requires the illumination-heating test after installation.
       const uint8_t destination = temperatureRole(index);
       const int16_t sample =
           temperatureBus.getTempCentiC(temperatureAddresses[index]);

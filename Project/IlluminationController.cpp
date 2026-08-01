@@ -1,11 +1,11 @@
 #include "IlluminationController.h"
 
 #include "PwmController.h"
+#include "TransitionMath.h"
 
 namespace {
 
 constexpr uint16_t FadeIntervalMs = 20;
-constexpr uint8_t FadeStep = 4;
 
 } // namespace
 
@@ -50,31 +50,15 @@ void IlluminationController::service(bool doorOpen, bool allowLedUpdate,
     lastFadeAt_ = now;
     return;
   }
-  const uint32_t elapsed = static_cast<uint32_t>(now - lastFadeAt_);
-  const uint32_t elapsedIntervals = elapsed / FadeIntervalMs;
-  const uint8_t intervals = static_cast<uint8_t>(
-      elapsedIntervals > 16 ? 16 : elapsedIntervals);
-  lastFadeAt_ += static_cast<uint32_t>(intervals) * FadeIntervalMs;
-  const uint16_t rawDistance =
-      static_cast<uint16_t>(FadeStep) * intervals;
-  const uint8_t distance =
-      static_cast<uint8_t>(rawDistance > 255 ? 255 : rawDistance);
-
-  if (currentBrightness_ < target) {
-    const uint16_t next =
-        static_cast<uint16_t>(currentBrightness_) + distance;
-    currentBrightness_ =
-        static_cast<uint8_t>(next > target ? target : next);
-  } else {
-    currentBrightness_ =
-        static_cast<uint8_t>(currentBrightness_ - target > distance
-                                 ? currentBrightness_ - distance
-                                 : target);
+  // Never catch up several frames after a delayed loop/I2C lease. One eased
+  // write per service prevents the visible off-transition jump and endpoint
+  // jitter while preserving the responsive 20 ms control cadence.
+  lastFadeAt_ = now;
+  const uint8_t next = TransitionMath::easedByte(currentBrightness_, target);
+  if (pwm_->setEnclosureIllumination(
+          static_cast<uint16_t>(next) * 16U + next / 16U)) {
+    currentBrightness_ = next;
   }
-
-  pwm_->setEnclosureIllumination(
-      static_cast<uint16_t>(currentBrightness_) * 16U +
-      currentBrightness_ / 16U);
 }
 
 void IlluminationController::setMode(IlluminationMode mode) { mode_ = mode; }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,9 +11,12 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	gort "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,10 +34,12 @@ import (
 	"pccontroller.local/controller/internal/ipcjson"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
+	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/programmer"
 	"pccontroller.local/controller/internal/script"
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/tui"
+	"pccontroller.local/controller/internal/webui"
 	"pccontroller.local/controller/internal/wsrelay"
 )
 
@@ -83,18 +89,19 @@ func run(args []string, stdout, stderr io.Writer) error {
 	case "version", "--version", "-version":
 		fmt.Fprintf(
 			stdout,
-			"pccontroller-tool %s source-hash=%s built=%s\n",
+			"%s %s source-hash=%s built=%s\n",
+			configuredProductTitle(configPath),
 			version,
 			sourceHash,
 			buildTime,
 		)
 		return nil
 	case "help", "--help", "-h":
-		printUsage(stdout)
+		printUsage(stdout, configuredProductTitle(configPath))
 		return nil
 	case "eeprom":
-		// EEPROM conversion is intentionally dispatched before config or device
-		// setup: it is a file-only operation and must never open a serial port.
+		// Offline EEPROM inspection/transfer is dispatched before config or
+		// device setup and therefore cannot open a serial port.
 		return runEEPROM(args[1:], stdout, stderr)
 	}
 	store, err := appconfig.Open(configPath)
@@ -105,6 +112,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	switch strings.ToLower(args[0]) {
 	case "tui":
 		return runTUI(args[1:], stdout, stderr, store)
+	case "web":
+		return runWeb(args[1:], stdout, stderr, store)
 	case "ports":
 		return runPorts(args[1:], stdout, stderr, store)
 	case "shell":
@@ -123,8 +132,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runProgram(args[1:], stdout, stderr, store)
 	case "boot":
 		return runBoot(args[1:], stdout, stderr, store)
-	case "arduino":
-		return runArduino(args[1:], stdout, stderr, store)
+	case "toolchain":
+		return runToolchain(args[1:], stdout, stderr, store)
 	case "ws":
 		return runWS(args[1:], stdout, stderr, store)
 	case "config":
@@ -150,8 +159,8 @@ func runDesktop(
 	}
 	status, err := hostui.EnsureDesktopIntegration(
 		hostui.DesktopIntegrationOptions{
-			AppID:       "DRSDavidSoft.PCController",
-			DisplayName: store.Current().UI.AppTitle,
+			AppID:       productidentity.StableAppID,
+			DisplayName: productidentity.Title(store.Current().UI.AppTitle),
 		},
 	)
 	encoded, _ := json.MarshalIndent(status, "", "  ")
@@ -165,7 +174,7 @@ func runURIAction(
 	store *appconfig.Store,
 ) error {
 	if len(args) != 1 {
-		return errors.New("usage: pccontroller uri pccontroller://page/events")
+		return fmt.Errorf("usage: controller uri %s://page/events", productidentity.ProtocolScheme)
 	}
 	action, err := hostui.ParseActionURI(args[0])
 	if err != nil {
@@ -195,6 +204,158 @@ func runTUI(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 	return runTUIWithInitialAction(args, stdout, stderr, store, hostui.AppAction{})
 }
 
+func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
+	flags := flag.NewFlagSet("web", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	connection := addConnectionFlags(flags, store.Current().Connection)
+	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
+	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: controller web [--no-open] [--no-auto] [connection flags]")
+	}
+	connection.captureOverrides(flags)
+	appURL, err := browserURL(store.Current().IPC.Listen)
+	if err != nil {
+		return err
+	}
+
+	probeContext, probeCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	havePrimary := primaryAvailable(probeContext)
+	probeCancel()
+	if havePrimary {
+		fmt.Fprintln(stdout, productidentity.ServiceName(store.Current().UI.AppTitle, "web app:"), appURL)
+		if *noOpen {
+			return nil
+		}
+		return openBrowser(appURL)
+	}
+
+	ctx, cancel := signalContext()
+	defer cancel()
+	runtime := newRuntime(connection, store)
+	bindRuntimeDevicePersistence(runtime, store)
+	if *noAuto {
+		_ = runtime.Close()
+	}
+	project := findProjectRoot()
+	engine := control.NewCommandEngine(runtime, commandOptions(store, project))
+	hostMenus := newHostMenuManager(store, runtime, engine)
+	if err := hostmenu.RegisterCommands(engine, hostMenus); err != nil {
+		_ = runtime.Close()
+		return err
+	}
+	hostPanel := &hostFrontPanelBridge{runtime: runtime}
+	hostMenus.SetDefinitionChanged(func(change hostmenu.DefinitionChange) {
+		publishHostMenuDefinitionChange(runtime, change)
+		go syncHostMenuOverlay(runtime, hostMenus, hostPanel, &change)
+	})
+	runtime.SetHostMenuRequestHandler(func(request native.HostMenuContentRequest) {
+		syncHostMenuRequest(runtime, hostMenus, request)
+	})
+	programDataPaths, err := programmer.DefaultHostDataPaths()
+	if err != nil {
+		_ = runtime.Close()
+		return err
+	}
+	runtime.SetConnectionReadyHandler(func(_ ports.Info, hello native.Hello) {
+		recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 8*time.Second)
+		var recoveryOutput bytes.Buffer
+		recoveryErr := control.RecoverPendingProgrammingSessions(
+			recoveryContext,
+			runtime,
+			control.ProgrammingLifecycleOptions{DataPaths: programDataPaths},
+			&recoveryOutput,
+		)
+		recoveryCancel()
+		if text := strings.TrimSpace(recoveryOutput.String()); text != "" {
+			runtime.PublishHostEvent("program.recovery", text)
+		}
+		if recoveryErr != nil {
+			runtime.PublishHostEvent(
+				"program.recovery.error",
+				"pending MCU settings restore failed: "+recoveryErr.Error(),
+			)
+		}
+		hostPanel.ConnectionReady()
+		if native.SupportsHostMenuOverlay(hello) ||
+			hello.Capabilities&native.CapabilityHostFrontPanel != 0 {
+			syncHostMenuOverlay(runtime, hostMenus, hostPanel, nil)
+		}
+	})
+
+	primary, err := startPrimaryIPC(ctx, runtime, engine, store)
+	if errors.Is(err, errPrimaryAlreadyRunning) {
+		_ = runtime.Close()
+		fmt.Fprintln(stdout, productidentity.ServiceName(store.Current().UI.AppTitle, "web app:"), appURL)
+		if *noOpen {
+			return nil
+		}
+		return openBrowser(appURL)
+	}
+	if err != nil {
+		_ = runtime.Close()
+		return err
+	}
+	defer primary.Close()
+	defer runtime.Close()
+	go watchConfiguration(ctx, store, runtime, connection)
+	go func() {
+		for value := range store.Subscribe(ctx) {
+			hostMenus.UpdateConfig(value.HostMenus)
+		}
+	}()
+	go control.RunAutomations(ctx, runtime, engine, store.Current)
+
+	fmt.Fprintln(stdout, productidentity.ServiceName(store.Current().UI.AppTitle, "web app:"), appURL)
+	if !*noOpen {
+		if err := openBrowser(appURL); err != nil {
+			fmt.Fprintln(stderr, "open browser:", err)
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return nil
+	case <-primary.QuitRequested():
+		return nil
+	}
+}
+
+func browserURL(address string) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return "", fmt.Errorf("build web app URL from ipc.listen: %w", err)
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	value := url.URL{Scheme: "http", Host: net.JoinHostPort(host, port), Path: "/"}
+	return value.String(), nil
+}
+
+func openBrowser(value string) error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return errors.New("browser URL must be an absolute HTTP(S) URL")
+	}
+	var command *exec.Cmd
+	switch gort.GOOS {
+	case "windows":
+		command = exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", value)
+	case "darwin":
+		command = exec.Command("open", value)
+	default:
+		command = exec.Command("xdg-open", value)
+	}
+	if err := command.Start(); err != nil {
+		return err
+	}
+	return command.Process.Release()
+}
+
 func runTUIWithInitialAction(
 	args []string,
 	stdout, stderr io.Writer,
@@ -216,7 +377,7 @@ func runTUIWithInitialAction(
 	havePrimary := primaryAvailable(probeContext)
 	probeCancel()
 	if havePrimary {
-		return runSecondaryConsole(os.Stdin, stdout, stderr)
+		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 	}
 	if err := selectInteractiveDevice(
 		connection,
@@ -247,9 +408,32 @@ func runTUIWithInitialAction(
 	runtime.SetHostMenuRequestHandler(func(request native.HostMenuContentRequest) {
 		syncHostMenuRequest(runtime, hostMenus, request)
 	})
+	programDataPaths, err := programmer.DefaultHostDataPaths()
+	if err != nil {
+		_ = runtime.Close()
+		return err
+	}
 	runtime.SetConnectionReadyHandler(func(_ ports.Info, hello native.Hello) {
+		recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 8*time.Second)
+		var recoveryOutput bytes.Buffer
+		recoveryErr := control.RecoverPendingProgrammingSessions(
+			recoveryContext,
+			runtime,
+			control.ProgrammingLifecycleOptions{DataPaths: programDataPaths},
+			&recoveryOutput,
+		)
+		recoveryCancel()
+		if text := strings.TrimSpace(recoveryOutput.String()); text != "" {
+			runtime.PublishHostEvent("program.recovery", text)
+		}
+		if recoveryErr != nil {
+			runtime.PublishHostEvent(
+				"program.recovery.error",
+				"pending MCU settings restore failed: "+recoveryErr.Error(),
+			)
+		}
 		hostPanel.ConnectionReady()
-		if hello.Capabilities&(native.CapabilityHostMenuOverlay|native.CapabilityHostFrontPanel) != 0 {
+		if native.SupportsHostMenuOverlay(hello) || hello.Capabilities&native.CapabilityHostFrontPanel != 0 {
 			syncHostMenuOverlay(runtime, hostMenus, hostPanel, nil)
 		}
 	})
@@ -258,7 +442,7 @@ func runTUIWithInitialAction(
 	primary, err := startPrimaryIPC(watchContext, runtime, engine, store)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
-		return runSecondaryConsole(os.Stdin, stdout, stderr)
+		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 	}
 	if err != nil {
 		_ = runtime.Close()
@@ -718,7 +902,7 @@ func syncHostMenuOverlay(runtime *control.Runtime, manager *hostmenu.Manager, le
 	if !live.Connected {
 		return
 	}
-	if live.Hello.Capabilities&native.CapabilityHostMenuOverlay == 0 {
+	if !native.SupportsHostMenuOverlay(live.Hello) {
 		if live.Hello.Capabilities&native.CapabilityHostFrontPanel != 0 {
 			if err := syncLegacyHostMenuOverlay(manager, legacy, change); err != nil {
 				runtime.PublishHostEvent("menu.preview.error", err.Error())
@@ -814,7 +998,7 @@ func runShell(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	havePrimary := primaryAvailable(probeContext)
 	probeCancel()
 	if havePrimary {
-		return runSecondaryConsole(os.Stdin, stdout, stderr)
+		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 	}
 	if err := selectInteractiveDevice(
 		connection,
@@ -835,7 +1019,7 @@ func runShell(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	}
 	primary, err := startPrimaryIPC(watchContext, runtime, engine, store)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
-		return runSecondaryConsole(os.Stdin, stdout, stderr)
+		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 	}
 	if err != nil {
 		return err
@@ -852,7 +1036,7 @@ func runShell(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 			fmt.Fprintln(stderr, "auto-connect:", err)
 		}
 	}
-	fmt.Fprintln(stdout, "PCController shell. Type help; Ctrl+Z then Enter exits on Windows.")
+	fmt.Fprintln(stdout, productidentity.ServiceName(store.Current().UI.AppTitle, "shell.")+" Type help; Ctrl+Z then Enter exits on Windows.")
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 1024), 64*1024)
 	for {
@@ -1334,14 +1518,23 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 				fmt.Fprintln(stderr, "initial auto-connect:", err)
 			}
 		}
+		integrationProxy, err := newIntegrationProxy(store)
+		if err != nil {
+			return fmt.Errorf("configure local integration proxy: %w", err)
+		}
+		localDevice := startLocalDeviceHost(ctx, client, store)
+		defer localDevice.Close()
 		service := &ipcjson.Service{
 			Client: client, WebSocketPath: *websocketPath,
-			SocketIOPath:    serverConfig.IPC.SocketIOPath,
-			AuthToken:       serverConfig.IPC.AuthToken,
-			AllowedOrigins:  append([]string(nil), serverConfig.IPC.AllowedOrigins...),
-			InboundWebhooks: serverConfig.Integrations.InboundWebhooksEnabled,
-			Shutdown:        cancel,
-			HostConfig:      store.Current,
+			SocketIOPath:     serverConfig.IPC.SocketIOPath,
+			WebUI:            webui.Handler(*websocketPath),
+			IntegrationProxy: integrationProxy,
+			LocalDevice:      localDevice,
+			AuthToken:        serverConfig.IPC.AuthToken,
+			AllowedOrigins:   append([]string(nil), serverConfig.IPC.AllowedOrigins...),
+			InboundWebhooks:  serverConfig.Integrations.InboundWebhooksEnabled,
+			Shutdown:         cancel,
+			HostConfig:       store.Current,
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err
@@ -1494,11 +1687,11 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	if defaultMethod == "" {
 		defaultMethod = "urclock"
 	}
-	method := flags.String("method", defaultMethod, "compile|arduino|urclock|usbasp|avrdude")
+	method := flags.String("method", defaultMethod, "compile|toolchain|urclock|usbasp|avrdude")
 	operation := flags.String(
 		"operation",
 		string(programmer.OperationWriteFlash),
-		"write-flash|read-flash|verify-flash|read-eeprom|write-eeprom|metadata|probe|start|core-info|burn-bootloader|backup",
+		"write-flash|read-flash|verify-flash|read-eeprom|write-eeprom|metadata|probe|start|core-info|install-bootloader|backup",
 	)
 	device := flags.String(
 		"device",
@@ -1506,9 +1699,14 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		"COM ID, friendly name, VID:PID, serial:VALUE, or instance:VALUE",
 	)
 	port := flags.String("port", envOr("PCCONTROLLER_PORT", config.Connection.Port), "serial port")
+	appDevice := flags.String(
+		"app-device",
+		"",
+		"application UART selector used only before/after hidden USBasp programming",
+	)
 	hexPath := flags.String("hex", config.Paths.FirmwareHex, "Intel HEX file for avrdude workflows")
 	sketch := flags.String("sketch", configuredProject(config, findProjectRoot()), "Arduino sketch directory")
-	outputDir := flags.String("output-dir", "", "arduino-cli compile output directory")
+	outputDir := flags.String("output-dir", "", "firmware dependency compile output directory")
 	outputPath := flags.String("output", "", "output file for flash/EEPROM reads")
 	fqbn := flags.String("fqbn", configuredFQBN(config), "Arduino FQBN")
 	defaultProgrammer := config.Programming.Programmer
@@ -1518,7 +1716,7 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	programmerName := flags.String("programmer", defaultProgrammer, "programmer ID (for example usbasp)")
 	mcu := flags.String("mcu", "atmega328p", "avrdude MCU")
 	baud := flags.Int("baud", 115200, "urclock baud rate")
-	arduinoCLI := flags.String("arduino-cli", config.Programming.ArduinoCLI, "arduino-cli executable")
+	toolchainCLI := flags.String("toolchain-cli", config.Programming.ToolchainCLI, "firmware dependency CLI executable")
 	avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
 	noVerify := flags.Bool("no-verify", false, "skip avrdude flash verification")
@@ -1547,8 +1745,13 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		return err
 	}
 	explicitDevice := false
+	explicitProgrammerPort := false
 	flags.Visit(func(value *flag.Flag) {
-		if value.Name == "device" || value.Name == "port" {
+		switch value.Name {
+		case "device", "port":
+			explicitDevice = true
+			explicitProgrammerPort = true
+		case "app-device":
 			explicitDevice = true
 		}
 	})
@@ -1562,7 +1765,7 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		Port:      *port, HexPath: *hexPath, SketchPath: *sketch,
 		OutputDir: *outputDir, OutputPath: *outputPath,
 		FQBN: *fqbn, Programmer: *programmerName,
-		MCU: *mcu, BaudRate: *baud, ArduinoCLI: *arduinoCLI,
+		MCU: *mcu, BaudRate: *baud, ArduinoCLI: *toolchainCLI,
 		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf, NoVerify: *noVerify,
 		ConfirmEEPROMWrite: *confirmEEPROM,
 	}
@@ -1571,13 +1774,19 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	if safeFlash {
 		switch options.Method {
 		case programmer.MethodUrclock:
+			if strings.TrimSpace(*appDevice) != "" {
+				return errors.New("--app-device is only valid with hidden USBasp programming")
+			}
 		case programmer.MethodUSBasp:
 			if !*allowUSBasp {
 				return errors.New("USBasp flash is hidden troubleshooting functionality; pass --usbasp-troubleshooting explicitly")
 			}
+			if explicitProgrammerPort {
+				return errors.New("USBasp does not accept --port/--device; use --app-device only for the separate application UART lifecycle")
+			}
 			options.Port = ""
 		case programmer.MethodArduino:
-			return errors.New("direct arduino upload is disabled; compile to Intel HEX, then use program flash HEX [PORT]")
+			return errors.New("direct dependency upload is disabled; compile to Intel HEX, then use program flash HEX [PORT]")
 		default:
 			return fmt.Errorf("guarded flash supports Urclock or explicitly authorized USBasp, got %q", options.Method)
 		}
@@ -1595,10 +1804,14 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			ctx, cancel := signalContext()
 			defer cancel()
 			if explicitDevice {
+				selector := *port
+				if options.Method == programmer.MethodUSBasp {
+					selector = *appDevice
+				}
 				openContext, openCancel := context.WithTimeout(ctx, 15*time.Second)
 				_, err := executeThroughPrimary(
 					openContext,
-					joinControllerCommand([]string{"open", *port}),
+					joinControllerCommand([]string{"open", selector}),
 				)
 				openCancel()
 				if err != nil {
@@ -1633,16 +1846,52 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		}
 		options.Port = resolvedPort
 	}
+	applicationPort := ""
+	if safeFlash {
+		switch options.Method {
+		case programmer.MethodUrclock:
+			applicationPort = options.Port
+		case programmer.MethodUSBasp:
+			selector := strings.TrimSpace(*appDevice)
+			if selector == "" {
+				if !*allowIncompleteBackup {
+					return errors.New("standalone USBasp flash requires --app-device SELECTOR so MCU settings/display/audio can be preserved; --allow-incomplete-backup is the explicit recovery override")
+				}
+				fmt.Fprintln(stderr, "WARNING: standalone USBasp application lifecycle skipped by explicit recovery override")
+			} else if !*dryRun {
+				resolved, resolveErr := resolveProgrammingPort(
+					selector,
+					config.Connection,
+					os.Stdin,
+					stderr,
+				)
+				if resolveErr != nil {
+					if !*allowIncompleteBackup {
+						return fmt.Errorf("resolve USBasp application lifecycle device: %w", resolveErr)
+					}
+					fmt.Fprintln(stderr, "WARNING: USBasp application lifecycle selector could not be resolved; explicit recovery override continues:", resolveErr)
+				} else {
+					applicationPort = resolved
+				}
+			} else {
+				applicationPort = selector
+			}
+		}
+	}
 	if options.Operation == programmer.OperationBackup {
 		if err := programmer.ValidateBackup(options); err != nil {
 			return err
 		}
 	}
+	identityPort := options.Port
+	if safeFlash && options.Method == programmer.MethodUSBasp {
+		identityPort = applicationPort
+	}
 	if (options.Operation == programmer.OperationBackup || safeFlash) &&
 		!*dryRun &&
-		options.Port != "" {
+		identityPort != "" {
 		hello, identityErr := readApplicationIdentityBeforeProgramming(
-			options.Port,
+			identityPort,
 			config.Connection,
 		)
 		if identityErr != nil {
@@ -1677,12 +1926,15 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			if *allowIncompleteBackup {
 				fmt.Fprintln(stdout, "dry-run WARNING: explicit incomplete-backup override enabled")
 			}
+			if applicationPort != "" {
+				fmt.Fprintf(stdout, "dry-run: application lifecycle selector=%s (never passed to ISP)\n", applicationPort)
+			}
 			return nil
 		}
 		ctx, cancel := signalContext()
 		defer cancel()
 		return executeGuardedCLIFlash(
-			ctx, options, config.Connection,
+			ctx, options, applicationPort, config.Connection,
 			*allowUSBasp, *allowIncompleteBackup, *appReconnect,
 			stdout,
 		)
@@ -1725,60 +1977,140 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 }
 
 func runEEPROM(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: controller eeprom migrate --input LEGACY.hex --output SETTINGS-v2.hex"
-	if len(args) == 0 || !strings.EqualFold(args[0], "migrate") {
+	const usage = "usage: controller eeprom inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
+	if len(args) == 0 {
 		return errors.New(usage)
 	}
-	flags := flag.NewFlagSet("eeprom migrate", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	input := flags.String("input", "", "legacy unversioned 19+CRC8 EEPROM Intel HEX")
-	output := flags.String("output", "", "new sparse development-v2 settings Intel HEX")
-	if err := flags.Parse(args[1:]); err != nil {
-		return err
-	}
-	if flags.NArg() != 0 || strings.TrimSpace(*input) == "" ||
-		strings.TrimSpace(*output) == "" {
+	switch strings.ToLower(args[0]) {
+	case "inspect":
+		flags := flag.NewFlagSet("eeprom inspect", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		input := flags.String("input", "", "current EEPROM Intel HEX image")
+		manifest := flags.String("backup-manifest", "", "validated complete backup manifest")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || (strings.TrimSpace(*input) == "") == (strings.TrimSpace(*manifest) == "") {
+			return errors.New(usage)
+		}
+		var decoded programmer.OfflineEEPROMDecode
+		var err error
+		if strings.TrimSpace(*manifest) != "" {
+			decoded, err = programmer.DecodeBackupEEPROM(*manifest)
+		} else {
+			decoded, err = programmer.DecodeOfflineEEPROMHex(*input)
+		}
+		if err != nil {
+			return err
+		}
+		encoded, _ := json.MarshalIndent(decoded, "", "  ")
+		fmt.Fprintln(stdout, string(encoded))
+		if !decoded.Settings.Supported {
+			return fmt.Errorf("unsupported current EEPROM settings layout: %s", decoded.Settings.Issue)
+		}
+		if !decoded.Settings.Valid {
+			return fmt.Errorf("current EEPROM settings failed semantic validation: %s", decoded.Settings.Issue)
+		}
+		return nil
+
+	case "export", "restore":
+		flags := flag.NewFlagSet("eeprom "+strings.ToLower(args[0]), flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		manifest := flags.String("backup-manifest", "", "validated complete backup manifest")
+		output := flags.String("output", "", "new no-overwrite Intel HEX artifact")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || strings.TrimSpace(*manifest) == "" || strings.TrimSpace(*output) == "" {
+			return errors.New(usage)
+		}
+		var result programmer.EEPROMTransferResult
+		var err error
+		if strings.EqualFold(args[0], "export") {
+			result, err = programmer.ExportCurrentEEPROMSettings(*manifest, *output)
+		} else {
+			result, err = programmer.PrepareCurrentEEPROMRestore(*manifest, *output)
+		}
+		return writeEEPROMTransferResult(stdout, result, err)
+
+	case "import":
+		flags := flag.NewFlagSet("eeprom import", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		manifest := flags.String("backup-manifest", "", "validated complete backup manifest")
+		settings := flags.String("settings", "", "sparse current settings Intel HEX artifact")
+		output := flags.String("output", "", "new full EEPROM restore image")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || strings.TrimSpace(*manifest) == "" ||
+			strings.TrimSpace(*settings) == "" || strings.TrimSpace(*output) == "" {
+			return errors.New(usage)
+		}
+		result, err := programmer.ImportCurrentEEPROMSettings(
+			*manifest, *settings, *output,
+		)
+		return writeEEPROMTransferResult(stdout, result, err)
+	default:
 		return errors.New(usage)
 	}
-	result, err := programmer.MigrateLegacyEEPROMSettings(*input, *output)
+}
+
+func writeEEPROMTransferResult(
+	output io.Writer,
+	result programmer.EEPROMTransferResult,
+	err error,
+) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "EEPROM settings migration created: %s\n", result.OutputPath)
-	fmt.Fprintf(stdout, "source: %s SHA-256=%s\n", result.SourceFormat, result.SourceSHA256)
-	fmt.Fprintf(stdout, "output: %s SHA-256=%s\n", result.OutputFormat, result.OutputSHA256)
-	fmt.Fprintf(
-		stdout,
-		"preserved %d legacy values; sparse EEPROM range 0x%04X..0x%04X (%d bytes)\n",
-		result.PreservedValueBytes,
-		result.OutputStart,
-		result.OutputEndExclusive-1,
-		result.OutputBytes,
-	)
-	fmt.Fprintln(stdout, "No serial port was opened and no board EEPROM was written.")
+	encoded, _ := json.MarshalIndent(result, "", "  ")
+	fmt.Fprintln(output, string(encoded))
+	fmt.Fprintln(output, "Validated backup remained unchanged; no serial port was opened and no board EEPROM was written.")
 	return nil
 }
 
 func normalizeProgramCLIArgs(args []string) ([]string, error) {
 	shortcut := 0
-	for shortcut < len(args) && guardedFlashBooleanFlag(args[shortcut]) {
-		shortcut++
+	for shortcut < len(args) {
+		argument := args[shortcut]
+		if guardedFlashBooleanFlag(argument) || guardedFlashInlineValueFlag(argument) {
+			shortcut++
+			continue
+		}
+		if guardedFlashValueFlag(argument) && shortcut+1 < len(args) {
+			shortcut += 2
+			continue
+		}
+		break
 	}
 	if shortcut >= len(args) || !strings.EqualFold(args[shortcut], "flash") {
 		return args, nil
 	}
 	if shortcut+1 >= len(args) {
-		return nil, errors.New("usage: controller program flash HEX [PORT] [--usbasp-troubleshooting] [--allow-incomplete-backup]")
+		return nil, errors.New("usage: controller program flash HEX [PORT] [--usbasp-troubleshooting] [--app-device SELECTOR] [--allow-incomplete-backup]")
 	}
 	arguments := append([]string(nil), args[:shortcut]...)
 	arguments = append(arguments, args[shortcut+1:]...)
 	positionals := make([]string, 0, 2)
 	flags := make([]string, 0, len(arguments))
 	usbasp := false
-	for _, argument := range arguments {
+	for index := 0; index < len(arguments); index++ {
+		argument := arguments[index]
 		if guardedFlashBooleanFlag(argument) {
 			flags = append(flags, argument)
 			usbasp = usbasp || strings.EqualFold(argument, "--usbasp-troubleshooting")
+			continue
+		}
+		if guardedFlashInlineValueFlag(argument) {
+			flags = append(flags, argument)
+			continue
+		}
+		if guardedFlashValueFlag(argument) {
+			if index+1 >= len(arguments) || strings.HasPrefix(arguments[index+1], "-") {
+				return nil, fmt.Errorf("guarded flash flag %s requires a value", argument)
+			}
+			flags = append(flags, argument, arguments[index+1])
+			index++
 			continue
 		}
 		if strings.HasPrefix(argument, "-") {
@@ -1787,7 +2119,7 @@ func normalizeProgramCLIArgs(args []string) ([]string, error) {
 		positionals = append(positionals, argument)
 	}
 	if len(positionals) < 1 || len(positionals) > 2 {
-		return nil, errors.New("usage: controller program flash HEX [PORT] [--usbasp-troubleshooting] [--allow-incomplete-backup]")
+		return nil, errors.New("usage: controller program flash HEX [PORT] [--usbasp-troubleshooting] [--app-device SELECTOR] [--allow-incomplete-backup]")
 	}
 	result := []string{
 		"--operation", string(programmer.OperationWriteFlash),
@@ -1799,7 +2131,11 @@ func normalizeProgramCLIArgs(args []string) ([]string, error) {
 	}
 	result = append(result, flags...)
 	if len(positionals) == 2 {
-		result = append(result, "--port", positionals[1])
+		selectorFlag := "--port"
+		if usbasp {
+			selectorFlag = "--app-device"
+		}
+		result = append(result, selectorFlag, positionals[1])
 	}
 	return result, nil
 }
@@ -1812,9 +2148,18 @@ func guardedFlashBooleanFlag(argument string) bool {
 	return lower == "--app-reconnect" || strings.HasPrefix(lower, "--app-reconnect=")
 }
 
+func guardedFlashValueFlag(argument string) bool {
+	return strings.EqualFold(argument, "--app-device")
+}
+
+func guardedFlashInlineValueFlag(argument string) bool {
+	return strings.HasPrefix(strings.ToLower(argument), "--app-device=")
+}
+
 func executeGuardedCLIFlash(
 	ctx context.Context,
 	options programmer.Options,
+	applicationPort string,
 	connection appconfig.Connection,
 	allowUSBasp, allowIncompleteBackup, appReconnect bool,
 	output io.Writer,
@@ -1825,6 +2170,57 @@ func executeGuardedCLIFlash(
 	}
 	if err := programmer.EnsureHostDataPaths(paths); err != nil {
 		return err
+	}
+	var application *control.Runtime
+	var programmingSession *control.ProgrammingSession
+	if applicationPort != "" {
+		candidate := control.New(control.Options{
+			Filter:         ports.Filter{Port: applicationPort},
+			BaudRate:       connection.BaudRate,
+			StartupWait:    time.Duration(connection.StartupWaitMS) * time.Millisecond,
+			RequestTimeout: time.Duration(connection.RequestTimeoutMS) * time.Millisecond,
+			HelloAttempts:  connection.HelloAttempts,
+		})
+		connectContext, connectCancel := context.WithTimeout(ctx, 8*time.Second)
+		connectErr := candidate.EnsureConnected(connectContext)
+		connectCancel()
+		if connectErr != nil {
+			_ = candidate.Close()
+			if !allowIncompleteBackup {
+				return fmt.Errorf("prepare guarded flash application connection: %w", connectErr)
+			}
+			fmt.Fprintln(
+				output,
+				"WARNING: application lifecycle connection failed; explicit recovery override continues:",
+				connectErr,
+			)
+		} else {
+			application = candidate
+			defer application.Close()
+			var prepareErr error
+			programmingSession, prepareErr = control.PrepareProgrammingSession(
+				ctx,
+				application,
+				options.HexPath,
+				control.ProgrammingLifecycleOptions{DataPaths: paths},
+				output,
+			)
+			if prepareErr != nil {
+				if !allowIncompleteBackup {
+					return fmt.Errorf("prepare application programming state: %w", prepareErr)
+				}
+				fmt.Fprintln(
+					output,
+					"WARNING: application programming preparation was incomplete; explicit recovery override continues:",
+					prepareErr,
+				)
+			}
+			if err := application.Close(); err != nil {
+				return fmt.Errorf(
+					"release application UART (settings recovery marker retained): %w", err,
+				)
+			}
+		}
 	}
 	backup := options
 	backup.Operation = programmer.OperationBackup
@@ -1861,12 +2257,53 @@ func executeGuardedCLIFlash(
 		fmt.Fprintln(output, "guarded firmware flash completed")
 	}
 	var reconnectErr error
-	if appReconnect && options.Method == programmer.MethodUrclock && options.Port != "" {
+	var restoreErr error
+	if application != nil {
+		application.ResumeAuto()
+		reconnectContext, reconnectCancel := context.WithTimeout(
+			context.WithoutCancel(ctx), 12*time.Second,
+		)
+		reconnectErr = application.EnsureConnected(reconnectContext)
+		reconnectCancel()
+		if reconnectErr != nil {
+			reconnectErr = fmt.Errorf(
+				"application HELLO reconnect failed; settings recovery marker retained: %w",
+				reconnectErr,
+			)
+		} else {
+			restoreContext, restoreCancel := context.WithTimeout(
+				context.WithoutCancel(ctx), 8*time.Second,
+			)
+			restoreErr = control.RestoreProgrammingSession(
+				restoreContext,
+				application,
+				programmingSession,
+				control.ProgrammingLifecycleOptions{DataPaths: paths},
+				output,
+			)
+			restoreCancel()
+			if restoreErr == nil {
+				connected := application.Snapshot()
+				fmt.Fprintf(
+					output,
+					"application mode restored and authenticated on %s: %s\n",
+					connected.Port.Name,
+					fmt.Sprintf(
+						"%s build=%08X timestamp=%s capabilities=0x%08X",
+						connected.Hello.Name,
+						connected.Hello.BuildHash,
+						connected.Hello.BuildStamp,
+						connected.Hello.Capabilities,
+					),
+				)
+			}
+		}
+	} else if appReconnect && applicationPort != "" {
 		reconnectErr = reconnectApplicationAfterProgramming(
-			context.WithoutCancel(ctx), options.Port, connection, output,
+			context.WithoutCancel(ctx), applicationPort, connection, output,
 		)
 	}
-	return errors.Join(flashErr, reconnectErr)
+	return errors.Join(flashErr, reconnectErr, restoreErr)
 }
 
 func readApplicationIdentityBeforeProgramming(
@@ -2061,32 +2498,47 @@ func bootCLIArguments(args []string) ([]string, error) {
 	}
 }
 
-func runArduino(
+func runToolchain(
 	args []string,
 	stdout, stderr io.Writer,
 	store *appconfig.Store,
 ) error {
-	if len(args) != 0 && strings.EqualFold(args[0], "update") {
-		return runArduinoUpdate(args[1:], stdout, stderr, store)
+	if len(args) != 0 && strings.EqualFold(args[0], "sync") {
+		return runToolchainSync(args[1:], stdout, stderr, store)
 	}
-	translated, err := arduinoCLIArguments(args)
+	if len(args) != 0 && strings.EqualFold(args[0], "bootstrap") {
+		return runToolchainBootstrap(args[1:], stdout, stderr, store)
+	}
+	if len(args) != 0 && strings.EqualFold(args[0], "profile") {
+		return runToolchainProfile(args[1:], stdout, stderr)
+	}
+	if len(args) != 0 && strings.EqualFold(args[0], "lock") {
+		return runToolchainLock(args[1:], stdout, stderr)
+	}
+	if len(args) != 0 && strings.EqualFold(args[0], "check") {
+		return runToolchainCheck(args[1:], stdout, stderr)
+	}
+	if len(args) != 0 && strings.EqualFold(args[0], "update") {
+		return runToolchainUpdate(args[1:], stdout, stderr)
+	}
+	translated, err := toolchainCLIArguments(args)
 	if err != nil {
 		return err
 	}
 	return runProgram(translated, stdout, stderr, store)
 }
 
-func runArduinoUpdate(
+func runToolchainSync(
 	args []string,
 	stdout, stderr io.Writer,
 	store *appconfig.Store,
 ) error {
-	flags := flag.NewFlagSet("arduino update", flag.ContinueOnError)
+	flags := flag.NewFlagSet("toolchain sync", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	arduinoCLI := flags.String(
-		"arduino-cli",
-		store.Current().Programming.ArduinoCLI,
-		"arduino-cli executable",
+	firmwareCLI := flags.String(
+		"cli",
+		store.Current().Programming.ToolchainCLI,
+		"firmware dependency CLI executable",
 	)
 	directRetry := flags.Bool(
 		"direct-retry",
@@ -2098,15 +2550,15 @@ func runArduinoUpdate(
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller arduino update [--arduino-cli PATH] [--direct-retry=false] [--dry-run]")
+		return errors.New("usage: controller toolchain sync [--cli PATH] [--direct-retry=false] [--dry-run]")
 	}
 	ctx, cancel := signalContext()
 	defer cancel()
-	report, err := programmer.UpdateArduino(ctx, programmer.ArduinoUpdateOptions{
-		ArduinoCLI: *arduinoCLI, DirectRetry: *directRetry, DryRun: *dryRun,
+	report, err := programmer.SyncToolchain(ctx, programmer.ToolchainSyncOptions{
+		ToolchainCLI: *firmwareCLI, DirectRetry: *directRetry, DryRun: *dryRun,
 	}, stdout)
 	if *dryRun {
-		fmt.Fprintf(stdout, "\nArduino update plan complete: %d steps; no changes made.\n", len(report.Steps))
+		fmt.Fprintf(stdout, "\nToolchain sync plan complete: %d steps; no changes made.\n", len(report.Steps))
 	} else {
 		succeeded := 0
 		for _, step := range report.Steps {
@@ -2114,13 +2566,276 @@ func runArduinoUpdate(
 				succeeded++
 			}
 		}
-		fmt.Fprintf(stdout, "\nArduino update result: %d/%d steps succeeded.\n", succeeded, len(report.Steps))
+		fmt.Fprintf(stdout, "\nToolchain sync result: %d/%d steps succeeded.\n", succeeded, len(report.Steps))
 	}
 	return err
 }
 
-func arduinoCLIArguments(args []string) ([]string, error) {
-	const usage = "usage: controller arduino update|compile SKETCH|core-info|burn-bootloader [flags]"
+func runToolchainBootstrap(
+	args []string,
+	stdout, stderr io.Writer,
+	store *appconfig.Store,
+) error {
+	flags := flag.NewFlagSet("toolchain bootstrap", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	policyPath := flags.String("policy", "", "latest-compatible toolchain policy JSON")
+	lockPath := flags.String("lock", "", "exact resolved toolchain lock JSON")
+	locked := flags.Bool("locked", false, "bootstrap the existing lock without checking registries")
+	installDir := flags.String("install-dir", "", "managed tool directory (host data directory by default)")
+	firmwareCLI := flags.String("cli", "", "use an existing dependency CLI instead of the managed resolved copy")
+	directRetry := flags.Bool("direct-retry", true, "retry failed network steps once without proxy variables")
+	dryRun := flags.Bool("dry-run", false, "print verified download/install plan without changing the machine")
+	saveCLI := flags.Bool("save-cli", true, "save the resolved dependency path in PC-side host config")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: controller toolchain bootstrap [--policy FILE] [--locked --lock FILE] [--install-dir DIR] [--cli PATH] [--direct-retry=false] [--dry-run]")
+	}
+	ctx, cancel := signalContext()
+	defer cancel()
+	var profile programmer.ToolchainProfile
+	if *locked {
+		resolvedLockPath := defaultToolchainMetadataPath(*lockPath, "toolchain-lock.json")
+		lock, err := programmer.LoadToolchainLock(resolvedLockPath)
+		if err != nil {
+			return fmt.Errorf("load exact rollback lock: %w", err)
+		}
+		profile = lock.Firmware
+		fmt.Fprintln(stdout, "Using exact resolved lock:", resolvedLockPath)
+	} else {
+		policy, err := programmer.LoadToolchainPolicy(defaultToolchainMetadataPath(*policyPath, "toolchain-profile.json"))
+		if err != nil {
+			return err
+		}
+		resolution, err := programmer.ResolveToolchainPolicy(ctx, policy, programmer.ToolchainResolveOptions{
+			DirectRetry: *directRetry, ModuleDir: defaultToolchainModuleDir(),
+		})
+		if err != nil {
+			return fmt.Errorf("resolve latest compatible toolchain (use --locked for an intentional offline rollback): %w", err)
+		}
+		profile = resolution.Lock.Firmware
+		fmt.Fprintf(stdout, "Resolved latest stable toolchain: CLI %s, %s@%s, Urboot %s, Go %s\n",
+			profile.CLI.Version, profile.CoreID, profile.CoreVersion,
+			resolution.Lock.Bootloader.Tag, resolution.Lock.Go.Version)
+	}
+	report, bootstrapErr := programmer.BootstrapToolchain(
+		ctx,
+		programmer.ToolchainBootstrapOptions{
+			Profile: profile, CLI: *firmwareCLI, InstallDir: *installDir,
+			DirectRetry: *directRetry, DryRun: *dryRun,
+		},
+		stdout,
+	)
+	if bootstrapErr == nil && !*dryRun && *saveCLI {
+		_, saveErr := store.Update(func(config *appconfig.Config) error {
+			config.Programming.ToolchainCLI = report.CLIPath
+			return nil
+		})
+		if saveErr != nil {
+			bootstrapErr = fmt.Errorf("save managed toolchain path in PC config: %w", saveErr)
+		} else {
+			fmt.Fprintln(stdout, "Saved managed firmware CLI path in PC-side host configuration.")
+		}
+	}
+	encoded, _ := json.MarshalIndent(report, "", "  ")
+	fmt.Fprintln(stdout, string(encoded))
+	return bootstrapErr
+}
+
+func runToolchainProfile(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("toolchain profile", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	manifest := flags.String("policy", "", "latest-compatible toolchain policy JSON")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: controller toolchain profile [--policy FILE]")
+	}
+	profile, err := programmer.LoadToolchainPolicy(defaultToolchainMetadataPath(*manifest, "toolchain-profile.json"))
+	if err != nil {
+		return err
+	}
+	encoded, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, string(encoded))
+	return nil
+}
+
+func runToolchainLock(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("toolchain lock", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	lockPath := flags.String("lock", "", "exact resolved toolchain lock JSON")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: controller toolchain lock [--lock FILE]")
+	}
+	lock, err := programmer.LoadToolchainLock(defaultToolchainMetadataPath(*lockPath, "toolchain-lock.json"))
+	if err != nil {
+		return err
+	}
+	encoded, err := json.MarshalIndent(lock, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, string(encoded))
+	return nil
+}
+
+func runToolchainCheck(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("toolchain check", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	policyPath := flags.String("policy", "", "latest-compatible toolchain policy JSON")
+	lockPath := flags.String("lock", "", "exact resolved toolchain lock JSON")
+	directRetry := flags.Bool("direct-retry", true, "retry failed registry reads once without proxy variables")
+	includeCanary := flags.Bool("include-canary", false, "report prerelease CLI and Urboot main without selecting them")
+	requireCurrent := flags.Bool("require-current", false, "fail when the generated stable lock is stale")
+	jsonOutput := flags.Bool("json", false, "emit machine-readable resolution report")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: controller toolchain check [--policy FILE] [--lock FILE] [--include-canary] [--require-current] [--json]")
+	}
+	policy, err := programmer.LoadToolchainPolicy(defaultToolchainMetadataPath(*policyPath, "toolchain-profile.json"))
+	if err != nil {
+		return err
+	}
+	current, err := programmer.LoadToolchainLock(defaultToolchainMetadataPath(*lockPath, "toolchain-lock.json"))
+	if err != nil {
+		return err
+	}
+	ctx, cancel := signalContext()
+	defer cancel()
+	resolution, err := programmer.ResolveToolchainPolicy(ctx, policy, programmer.ToolchainResolveOptions{
+		DirectRetry: *directRetry, IncludeCanary: *includeCanary,
+		ModuleDir: defaultToolchainModuleDir(),
+	})
+	if err != nil {
+		return err
+	}
+	changes := programmer.CompareToolchainLocks(current, resolution.Lock)
+	if *jsonOutput {
+		encoded, marshalErr := json.MarshalIndent(struct {
+			Current bool                         `json:"current"`
+			Changes []programmer.ToolchainChange `json:"changes"`
+			Canary  programmer.ToolchainCanary   `json:"canary,omitempty"`
+		}{Current: len(changes) == 0, Changes: changes, Canary: resolution.Canary}, "", "  ")
+		if marshalErr != nil {
+			return marshalErr
+		}
+		fmt.Fprintln(stdout, string(encoded))
+	} else {
+		printToolchainChanges(stdout, changes)
+		if *includeCanary {
+			fmt.Fprintf(stdout, "Canary only (never auto-deployed): CLI %s; Urboot %s@%s\n",
+				resolution.Canary.CLIRelease, resolution.Canary.BootloaderRef,
+				resolution.Canary.BootloaderCommit)
+		}
+	}
+	if *requireCurrent && len(changes) != 0 {
+		return fmt.Errorf("resolved toolchain lock is stale (%d changes)", len(changes))
+	}
+	return nil
+}
+
+func runToolchainUpdate(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("toolchain update", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	policyPath := flags.String("policy", "", "latest-compatible toolchain policy JSON")
+	lockPath := flags.String("lock", "", "exact resolved toolchain lock JSON")
+	directRetry := flags.Bool("direct-retry", true, "retry failed registry reads once without proxy variables")
+	includeCanary := flags.Bool("include-canary", true, "report canaries without writing them to the stable lock")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("usage: controller toolchain update [--policy FILE] [--lock FILE] [--include-canary=false]")
+	}
+	resolvedPolicyPath := defaultToolchainMetadataPath(*policyPath, "toolchain-profile.json")
+	resolvedLockPath := defaultToolchainMetadataPath(*lockPath, "toolchain-lock.json")
+	if resolvedLockPath == "" {
+		return errors.New("toolchain lock path cannot be resolved; pass --lock FILE")
+	}
+	policy, err := programmer.LoadToolchainPolicy(resolvedPolicyPath)
+	if err != nil {
+		return err
+	}
+	var current programmer.ToolchainLock
+	if loaded, loadErr := programmer.LoadToolchainLock(resolvedLockPath); loadErr == nil {
+		current = loaded
+	}
+	ctx, cancel := signalContext()
+	defer cancel()
+	resolution, err := programmer.ResolveToolchainPolicy(ctx, policy, programmer.ToolchainResolveOptions{
+		DirectRetry: *directRetry, IncludeCanary: *includeCanary,
+		ModuleDir: defaultToolchainModuleDir(),
+	})
+	if err != nil {
+		return err
+	}
+	changes := programmer.CompareToolchainLocks(current, resolution.Lock)
+	printToolchainChanges(stdout, changes)
+	written, err := programmer.UpdateToolchainLock(resolvedLockPath, current, resolution.Lock)
+	if err != nil {
+		return err
+	}
+	if written {
+		fmt.Fprintln(stdout, "Wrote exact stable dependency lock:", resolvedLockPath)
+	} else {
+		fmt.Fprintln(stdout, "Preserved lock timestamp; no substantive dependency changed.")
+	}
+	if *includeCanary {
+		fmt.Fprintf(stdout, "Observed canaries without selecting them: CLI %s; Urboot %s@%s\n",
+			resolution.Canary.CLIRelease, resolution.Canary.BootloaderRef,
+			resolution.Canary.BootloaderCommit)
+	}
+	return nil
+}
+
+func printToolchainChanges(output io.Writer, changes []programmer.ToolchainChange) {
+	if len(changes) == 0 {
+		fmt.Fprintln(output, "✅ Resolved dependency lock is current.")
+		return
+	}
+	fmt.Fprintf(output, "⬆ Latest-compatible resolution found %d change(s):\n", len(changes))
+	for _, change := range changes {
+		fmt.Fprintf(output, "  %-12s %-42s %s -> %s\n", change.Area, change.Name, change.Current, change.Resolved)
+	}
+}
+
+func defaultToolchainMetadataPath(explicit, name string) string {
+	if strings.TrimSpace(explicit) != "" {
+		return explicit
+	}
+	root := findProjectRoot()
+	if root != "." {
+		candidate := filepath.Join(root, "Tools", "Controller", name)
+		if _, err := os.Stat(candidate); err == nil || name == "toolchain-lock.json" {
+			return candidate
+		}
+	}
+	if _, err := os.Stat(name); err == nil {
+		return name
+	}
+	return ""
+}
+
+func defaultToolchainModuleDir() string {
+	root := findProjectRoot()
+	if root == "." {
+		return "."
+	}
+	return filepath.Join(root, "Tools", "Controller")
+}
+
+func toolchainCLIArguments(args []string) ([]string, error) {
+	const usage = "usage: controller toolchain check|update|bootstrap|sync|profile|lock|compile SKETCH|core-info|install-bootloader [flags]"
 	if len(args) == 0 {
 		return nil, errors.New(usage)
 	}
@@ -2134,17 +2849,13 @@ func arduinoCLIArguments(args []string) ([]string, error) {
 			"--sketch", args[1],
 		}
 		return append(result, args[2:]...), nil
-	case "upload":
-		return nil, errors.New(
-			"direct arduino upload is disabled; compile to Intel HEX, then use controller program flash HEX [PORT]",
-		)
 	case "core-info", "info":
 		result := []string{
 			"--method", string(programmer.MethodArduino),
 			"--operation", string(programmer.OperationCoreInfo),
 		}
 		return append(result, args[1:]...), nil
-	case "burn", "burn-bootloader":
+	case "install-bootloader":
 		result := []string{
 			"--method", string(programmer.MethodArduino),
 			"--operation", string(programmer.OperationBurnBoot),
@@ -2221,6 +2932,11 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 		url := flags.String("url", envOr("PCCONTROLLER_WS_URL", "ws://127.0.0.1:3000/firmware"), "relay WebSocket URL")
 		method := flags.String("method", "urclock", "urclock|usbasp")
 		port := flags.String("port", envOr("PCCONTROLLER_PORT", config.Connection.Port), "serial port")
+		appDevice := flags.String(
+			"app-device",
+			"",
+			"application UART selector used only before/after hidden USBasp programming",
+		)
 		programmerName := flags.String("programmer", "", "custom avrdude programmer")
 		mcu := flags.String("mcu", "atmega328p", "avrdude MCU")
 		baud := flags.Int("baud", 115200, "urclock baud rate")
@@ -2260,8 +2976,10 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 				probeCancel()
 				if havePrimary {
 					words := []string{"program", "flash", tempPath}
-					if strings.TrimSpace(*port) != "" {
+					if flashMethod == programmer.MethodUrclock && strings.TrimSpace(*port) != "" {
 						words = append(words, *port)
+					} else if flashMethod == programmer.MethodUSBasp && strings.TrimSpace(*appDevice) != "" {
+						words = append(words, *appDevice)
 					}
 					if *allowUSBasp {
 						words = append(words, "--usbasp-troubleshooting")
@@ -2278,10 +2996,34 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 					}
 					return routeErr
 				}
+				applicationSelector := strings.TrimSpace(*port)
+				if flashMethod == programmer.MethodUSBasp {
+					applicationSelector = strings.TrimSpace(*appDevice)
+					if applicationSelector == "" && !*allowIncomplete {
+						return errors.New("standalone USBasp relay programming requires --app-device SELECTOR or the explicit --allow-incomplete-backup recovery override")
+					}
+				}
+				applicationPort := ""
+				if applicationSelector != "" {
+					applicationPort, err = resolveProgrammingPort(
+						applicationSelector, config.Connection, os.Stdin, stderr,
+					)
+					if err != nil {
+						if !*allowIncomplete {
+							return fmt.Errorf("resolve relay programming application device: %w", err)
+						}
+						logger.Print("WARNING: application selector unresolved under explicit recovery override: ", err)
+						applicationPort = ""
+					}
+				}
+				programmerPort := applicationPort
+				if flashMethod == programmer.MethodUSBasp {
+					programmerPort = ""
+				}
 				flashOptions := programmer.Options{
 					Operation: programmer.OperationWriteFlash,
 					Method:    flashMethod,
-					Port:      *port, HexPath: tempPath, Programmer: *programmerName,
+					Port:      programmerPort, HexPath: tempPath, Programmer: *programmerName,
 					MCU: *mcu, BaudRate: *baud, Avrdude: *avrdude,
 					AvrdudeConf: *avrdudeConf,
 				}
@@ -2291,7 +3033,7 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 				}
 				logger.Print("guarded preflight: ", command.String())
 				return executeGuardedCLIFlash(
-					ctx, flashOptions, config.Connection,
+					ctx, flashOptions, applicationPort, config.Connection,
 					*allowUSBasp, *allowIncomplete, true, stdout,
 				)
 			},
@@ -2501,7 +3243,7 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 	options := control.CommandOptions{
 		ProjectPath: configuredProject(config, fallbackProject),
 		FQBN:        configuredFQBN(config),
-		ArduinoCLI:  config.Programming.ArduinoCLI,
+		ArduinoCLI:  config.Programming.ToolchainCLI,
 		Avrdude:     config.Programming.Avrdude,
 		AvrdudeConf: config.Programming.AvrdudeConf,
 		Programmer:  configuredProgrammer(config),
@@ -2519,7 +3261,7 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 		return control.CommandOptions{
 			ProjectPath:      configuredProject(current, fallbackProject),
 			FQBN:             configuredFQBN(current),
-			ArduinoCLI:       current.Programming.ArduinoCLI,
+			ArduinoCLI:       current.Programming.ToolchainCLI,
 			Avrdude:          current.Programming.Avrdude,
 			AvrdudeConf:      current.Programming.AvrdudeConf,
 			Programmer:       configuredProgrammer(current),
@@ -2635,7 +3377,7 @@ func apiOptions(
 		FQBN:             configuredFQBN(config), Macros: apiMacros(config.Macros),
 		Melodies:         config.Melodies,
 		StatusEffects:    config.StatusEffects,
-		ArduinoCLI:       config.Programming.ArduinoCLI,
+		ToolchainCLI:     config.Programming.ToolchainCLI,
 		Avrdude:          config.Programming.Avrdude,
 		AvrdudeConf:      config.Programming.AvrdudeConf,
 		Programmer:       configuredProgrammer(config),
@@ -2845,12 +3587,17 @@ func envInt(name string, fallback int) int {
 	return parsed
 }
 
-func printUsage(output io.Writer) {
-	const usage = `◆ PCController Tool
+func printUsage(output io.Writer, configuredTitle ...string) {
+	title := ""
+	if len(configuredTitle) != 0 {
+		title = configuredTitle[0]
+	}
+	usage := `◆ {{PRODUCT}}
 
 Interactive control:
   controller                         launch the Charm TUI
   controller tui [connection flags]
+  controller web [--no-open] [--no-auto] [connection flags]
   controller ports [connection flags]
   controller shell [connection flags]
   controller exec [connection flags] COMMAND...
@@ -2865,16 +3612,16 @@ Automation, monitoring and bridges:
 
 Device, firmware and recovery:
   controller reset [connection flags]
-  controller eeprom migrate --input LEGACY.hex --output SETTINGS-v2.hex
-  controller program flash HEX [PORT] [--usbasp-troubleshooting] [--allow-incomplete-backup]
+  controller eeprom inspect|export|import|restore [file-only backup flags]
+  controller program flash HEX [PORT] [--usbasp-troubleshooting] [--app-device SELECTOR] [--allow-incomplete-backup]
   controller program [non-write diagnostic flags]
   controller boot probe|info|metadata|backup|read|write|verify|start [flags]
-  controller arduino update|compile|core-info|burn-bootloader [flags]
+  controller toolchain check|update|bootstrap|lock|sync|profile|compile|core-info|install-bootloader [flags]
 
 Host configuration and integration:
   controller config [path|show|validate]
   controller desktop [install|ensure]
-  controller uri pccontroller://ACTION
+  controller uri {{SCHEME}}://ACTION
   controller version
 
 Connection flags:
@@ -2887,9 +3634,23 @@ Connection flags:
 
 Application UART and Urboot/AVRDUDE are mutually exclusive. Normal firmware
 writes first verify a complete flash + EEPROM + metadata backup, then flash,
-and finally authenticate application HELLO. Direct Arduino upload is disabled.
-Device auto-detection always requires a valid PCController HELLO identity.`
+and finally authenticate application HELLO. Direct dependency upload is disabled.
+Device auto-detection always requires a valid controller HELLO identity.`
+	usage = strings.NewReplacer(
+		"{{PRODUCT}}", productidentity.Title(title),
+		"{{SCHEME}}", productidentity.ProtocolScheme,
+	).Replace(usage)
 	fmt.Fprintln(output, decorateUsage(usage, usageANSIEnabled(output)))
+}
+
+func configuredProductTitle(configPath string) string {
+	resolved, err := appconfig.ResolvePath(configPath)
+	if err == nil {
+		if value, _, loadErr := appconfig.Load(resolved); loadErr == nil {
+			return productidentity.Title(value.UI.AppTitle)
+		}
+	}
+	return productidentity.Title("")
 }
 
 func usageANSIEnabled(output io.Writer) bool {

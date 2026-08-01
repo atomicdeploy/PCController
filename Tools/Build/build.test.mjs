@@ -3,22 +3,112 @@ import { spawnSync } from 'node:child_process'
 import { renameSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 
 import {
 	BuildError,
 	PROJECT_ROOT,
 	assertGeneratedPath,
+	collectWebNotices,
 	createPlan,
         hostSourceIdentity,
         installPackage,
 	packBuildTimestamp,
 	parseArguments,
+	refreshedEnvironment,
+	renderTable,
 	removeGeneratedWinResources,
 	resolveBuildIdentity,
+	resolveProductTitle,
+	verboseCommandText,
 	windowsSmokeSource
 } from './build.mjs'
+import { createStableTestPlan, stableTestBinaryName } from './go-tests.mjs'
+
+test('verbose command formatting obeys NO_COLOR byte-for-byte', () => {
+	const plain = verboseCommandText('go', ['test', './...'], { NO_COLOR: '' }, true)
+	assert.equal(plain, '$ go test ./...')
+	assert.equal(Buffer.from(plain).includes(0x1b), false)
+	assert.match(verboseCommandText('go', ['test', './...'], {}, true), /^\x1b\[90m/)
+	assert.doesNotMatch(verboseCommandText('go', ['test', './...'], {}, false), /\x1b/)
+	assert.match(verboseCommandText('go', ['test', './...'], { FORCE_COLOR: '' }, false), /^\x1b\[90m/)
+})
+
+test('visible build product title comes from metadata or app configuration', () => {
+	assert.equal(resolveProductTitle({}, { productName: 'Configured Controller' }), 'Configured Controller')
+	assert.equal(
+		resolveProductTitle({ APP_TITLE: 'Workshop Console' }, { productName: 'Configured Controller' }),
+		'Workshop Console'
+	)
+	assert.equal(resolveProductTitle({}, { name: '@vendor/device-tool' }), 'device tool')
+})
+
+test('empty NO_COLOR disables every entrypoint style even when output is captured', () => {
+	const environment = { ...process.env }
+	for (const key of Object.keys(environment)) {
+		if (key.toLowerCase() === 'no_color' || key.toLowerCase() === 'force_color') delete environment[key]
+	}
+	environment.NO_COLOR = ''
+	assert.equal(parseArguments([], environment).noColor, true)
+	const result = spawnSync(process.execPath, [
+		join(PROJECT_ROOT, 'Tools', 'Build', 'build.mjs'),
+		'--firmware-only', '--dry-run', '--verbose'
+	], { cwd: PROJECT_ROOT, env: environment, windowsHide: true })
+	assert.equal(result.status, 0, result.stderr?.toString() || result.stdout?.toString())
+	assert.equal(Buffer.concat([result.stdout, result.stderr]).includes(0x1b), false)
+})
+
+test('refreshed Windows PATH preserves invoking shell precedence and one canonical key', () => {
+	const selected = resolve('selected-latest-toolchain')
+	const session = resolve('session-tools')
+	const windowsEnvironment = { ...process.env }
+	for (const key of Object.keys(windowsEnvironment)) {
+		if (key.toLowerCase() === 'path') delete windowsEnvironment[key]
+	}
+	windowsEnvironment.Path = [selected, session].join(delimiter)
+	const refreshed = refreshedEnvironment(windowsEnvironment, 'win32')
+	assert.deepEqual(refreshed.PATH.split(delimiter).slice(0, 2), [selected, session])
+	assert.deepEqual(Object.keys(refreshed).filter(key => key.toLowerCase() === 'path'), ['PATH'])
+})
+
+test('build tables center headers and align numeric values', () => {
+	assert.equal(renderTable([
+		{ label: 'Name' },
+		{ label: 'Bytes', align: 'right' }
+	], [
+		['firmware', '32240'],
+		['EEPROM', '0']
+	]), [
+		'╭──────────┬───────╮',
+		'│   Name   │ Bytes │',
+		'├──────────┼───────┤',
+		'│ firmware │ 32240 │',
+		'│ EEPROM   │     0 │',
+		'╰──────────┴───────╯'
+	].join('\n'))
+})
+
+test('Go test executables use deterministic project-owned names', () => {
+	const importPath = 'github.com/atomicdeploy/pccontroller/internal/ipc'
+	assert.equal(
+		stableTestBinaryName(importPath, 'win32'),
+		stableTestBinaryName(importPath, 'win32')
+	)
+	assert.match(stableTestBinaryName(importPath, 'win32'), /^github\.com_atomicdeploy_pccontroller_internal_ipc-[0-9a-f]{10}\.test\.exe$/)
+	assert.doesNotMatch(stableTestBinaryName(importPath, 'win32'), /AppData|Temp/i)
+})
+
+test('stable Go test plan keeps every binary below its persistent output root', () => {
+	const output = join(PROJECT_ROOT, '.build', 'tests', 'go')
+	const plan = createStableTestPlan([
+		{ importPath: 'example.invalid/controller/ipc', directory: join(PROJECT_ROOT, 'ipc') },
+		{ importPath: 'example.invalid/controller/protocol', directory: join(PROJECT_ROOT, 'protocol') }
+	], output, 'win32')
+	assert.equal(plan.length, 2)
+	assert.ok(plan.every(item => item.binary.startsWith(`${output}${sep}`)))
+	assert.equal(new Set(plan.map(item => item.binary)).size, plan.length)
+})
 
 test('package publishing tolerates a shell holding the canonical directory', async t => {
         const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-lock-'))
@@ -59,7 +149,86 @@ test('safe default builds both targets without touching hardware', () => {
 	assert.equal(options.host, true)
 	assert.equal(options.firmware, true)
 	assert.equal(options.upload, false)
-	assert.equal(options.burnBootloader, false)
+	assert.equal(options.installBootloader, false)
+})
+
+test('host plan reproducibly builds the web application before Go embedding', () => {
+	const options = parseArguments([
+		'--host-only', '--build-time', '2026-08-01T16:12:58Z',
+		'--build-timestamp', '35019D5D'
+	], {})
+	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	assert.deepEqual(plan.actions.slice(0, 6).map(action => action.id), [
+		'web-install', 'web-typecheck', 'web-test', 'web-build',
+		'product-identity-check', 'go-mod-download'
+	])
+	assert.deepEqual(plan.actions[0].command.args, ['ci', '--no-audit', '--no-fund'])
+	assert.equal(plan.actions[0].command.cwd, join(PROJECT_ROOT, 'Tools', 'Controller', 'web'))
+	assert.ok(plan.actions.findIndex(action => action.id === 'web-build') <
+		plan.actions.findIndex(action => action.id === 'go-test'))
+	assert.deepEqual(plan.actions.find(action => action.id === 'product-identity-check').command.args, [
+		'Tools/Controller/internal/productidentity/generate.mjs', '--check'
+	])
+
+	const skipped = createPlan(
+		parseArguments(['--host-only', '--skip-tests'], {}),
+		resolveBuildIdentity(parseArguments(['--host-only', '--skip-tests'], {}), {}),
+		'win32'
+	)
+	assert.ok(!skipped.actions.some(action => action.id === 'web-test'))
+	assert.ok(skipped.actions.some(action => action.id === 'web-typecheck'))
+})
+
+test('embedded web package has a lock matching every declared dependency', async () => {
+	const web = join(PROJECT_ROOT, 'Tools', 'Controller', 'web')
+	const declared = JSON.parse(await readFile(join(web, 'package.json'), 'utf8'))
+	const lock = JSON.parse(await readFile(join(web, 'package-lock.json'), 'utf8'))
+	assert.equal(lock.lockfileVersion, 3)
+	assert.deepEqual(lock.packages[''].dependencies, declared.dependencies)
+	assert.deepEqual(lock.packages[''].devDependencies, declared.devDependencies)
+	for (const [name, range] of Object.entries({
+		...(declared.dependencies || {}),
+		...(declared.devDependencies || {})
+	})) {
+		assert.match(range, /^\^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/)
+		const resolved = lock.packages[`node_modules/${name}`]?.version
+		assert.match(resolved, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/, `${name} must resolve exactly in package-lock.json`)
+		const minimum = range.slice(1).split(/[+-]/, 1)[0].split('.').map(Number)
+		const actual = resolved.split(/[+-]/, 1)[0].split('.').map(Number)
+		assert.equal(actual[0], minimum[0], `${name} escaped its compatible major range`)
+		if (minimum[0] === 0) assert.equal(actual[1], minimum[1], `${name} escaped its compatible 0.x minor range`)
+		assert.ok(
+			actual[0] > minimum[0] ||
+			actual[1] > minimum[1] ||
+			(actual[1] === minimum[1] && actual[2] >= minimum[2]),
+			`${name}@${resolved} is older than ${range}`
+		)
+	}
+})
+
+test('packaging collects runtime web licenses and excludes build-only dependencies', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-web-notices-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const web = join(root, 'web')
+	const destination = join(root, 'licenses')
+	await mkdir(join(web, 'node_modules', 'runtime-package'), { recursive: true })
+	await mkdir(join(web, 'node_modules', 'build-package'), { recursive: true })
+	await writeFile(join(web, 'package-lock.json'), JSON.stringify({
+		lockfileVersion: 3,
+		packages: {
+			'': {},
+			'node_modules/runtime-package': { version: '1.2.3', license: 'MIT' },
+			'node_modules/build-package': { version: '4.5.6', license: 'MIT', dev: true }
+		}
+	}))
+	await writeFile(join(web, 'node_modules', 'runtime-package', 'package.json'), '{"name":"runtime-package","version":"1.2.3"}')
+	await writeFile(join(web, 'node_modules', 'runtime-package', 'LICENSE'), 'runtime license')
+	await writeFile(join(web, 'node_modules', 'build-package', 'package.json'), '{"name":"build-package","version":"4.5.6"}')
+	await writeFile(join(web, 'node_modules', 'build-package', 'LICENSE'), 'build license')
+
+	assert.equal(collectWebNotices(destination, web), 1)
+	assert.equal(await readFile(join(destination, 'web', 'runtime-package@1.2.3', 'LICENSE'), 'utf8'), 'runtime license')
+	assert.deepEqual(await readdir(join(destination, 'web')), ['runtime-package@1.2.3'])
 })
 
 test('root wrappers contain no PowerShell policy or invocation', async () => {
@@ -75,10 +244,10 @@ test('root wrappers contain no PowerShell policy or invocation', async () => {
 	assert.doesNotMatch(firmwareSource, /powershell|pwsh|build\.ps1|arduino-cli[^\n]*upload/i)
 })
 
-test('programming is explicit and unsupported direct Arduino upload is rejected', () => {
+test('programming is explicit and unsupported direct dependency upload is rejected', () => {
 	assert.throws(
 		() => parseArguments(['--method', 'arduino'], {}),
-		error => error instanceof BuildError && /direct Arduino upload/.test(error.message)
+		error => error instanceof BuildError && /direct dependency upload/.test(error.message)
 	)
 	assert.throws(
 		() => parseArguments(['--upload'], {}),
@@ -95,7 +264,7 @@ test('USBasp and bootloader paths require the troubleshooting guard', () => {
 		error => /USBasp is hidden troubleshooting only/.test(error.message)
 	)
 	assert.throws(
-		() => parseArguments(['--burn-bootloader'], {}),
+		() => parseArguments(['--install-bootloader'], {}),
 		error => /requires --usbasp-troubleshooting/.test(error.message)
 	)
 	const guarded = parseArguments(['--usbasp-flash'], {})
@@ -104,20 +273,20 @@ test('USBasp and bootloader paths require the troubleshooting guard', () => {
 	assert.equal(guarded.usbaspTroubleshooting, true)
 })
 
-test('Arduino dependency update is explicit and owned by Controller', () => {
+test('toolchain synchronization is explicit and owned by Controller', () => {
 	assert.throws(
-		() => parseArguments(['--arduino-cli', 'arduino-cli'], {}),
-		error => /only valid with --arduino-update/.test(error.message)
+		() => parseArguments(['--toolchain-cli', 'arduino-cli'], {}),
+		error => /only valid with --toolchain-sync/.test(error.message)
 	)
 	const options = parseArguments([
-		'--host-only', '--arduino-update', '--arduino-cli', 'CUSTOM_CLI',
+		'--host-only', '--toolchain-sync', '--toolchain-cli', 'CUSTOM_CLI',
 		'--build-time', '2026-08-01T16:12:58Z', '--build-timestamp', '35019D5D'
 	], {})
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
-	const update = plan.actions.find(action => action.id === 'arduino-update')
+	const update = plan.actions.find(action => action.id === 'toolchain-sync')
 	assert.ok(update)
 	assert.equal(update.externalMutation, true)
-	assert.match(update.command.args.join(' '), /arduino update --arduino-cli CUSTOM_CLI/)
+	assert.match(update.command.args.join(' '), /toolchain sync --cli CUSTOM_CLI/)
 	assert.doesNotMatch(JSON.stringify(update), /arduino-cli.*core.*update-index/i)
 })
 
@@ -241,6 +410,41 @@ test('host source identity is content-stable and changes with source bytes', asy
 	assert.deepEqual(hostSourceIdentity(root), first)
 	await writeFile(join(root, 'nested', 'a.go'), 'package nested\nconst A = 3\n')
 	assert.notEqual(hostSourceIdentity(root).sha256, first.sha256)
+})
+
+test('host source identity covers locked web inputs and exact embedded output', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-web-identity-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	await mkdir(join(root, 'web', 'src'), { recursive: true })
+	await mkdir(join(root, 'web', 'public', 'fonts'), { recursive: true })
+	await mkdir(join(root, 'internal', 'webui', 'dist', 'assets'), { recursive: true })
+	await writeFile(join(root, 'main.go'), 'package fixture\n')
+	await writeFile(join(root, 'go.mod'), 'module example.invalid/fixture\n')
+	await writeFile(join(root, 'web', 'package.json'), '{"name":"fixture"}\n')
+	await writeFile(join(root, 'web', 'package-lock.json'), '{"lockfileVersion":3}\n')
+	await writeFile(join(root, 'web', 'src', 'app.tsx'), 'export const app = 1\n')
+	await writeFile(join(root, 'web', 'public', 'fonts', 'ui.woff2'), 'font-v1')
+	await writeFile(join(root, 'internal', 'webui', 'dist', 'index.html'), '<script src="/assets/app.js"></script>\n')
+	await writeFile(join(root, 'internal', 'webui', 'dist', 'assets', 'app.js'), 'console.log(1)\n')
+
+	const first = hostSourceIdentity(root)
+	assert.match(first.manifest, /web\/package-lock\.json:/)
+	assert.match(first.manifest, /web\/src\/app\.tsx:/)
+	assert.match(first.manifest, /web\/public\/fonts\/ui\.woff2:/)
+	assert.match(first.manifest, /internal\/webui\/dist\/assets\/app\.js:/)
+
+	await writeFile(join(root, 'web', 'src', 'app.tsx'), 'export const app = 2\n')
+	const sourceChanged = hostSourceIdentity(root)
+	assert.notEqual(sourceChanged.sha256, first.sha256)
+	await writeFile(join(root, 'web', 'src', 'app.tsx'), 'export const app = 1\n')
+	await writeFile(join(root, 'internal', 'webui', 'dist', 'assets', 'app.js'), 'console.log(2)\n')
+	assert.notEqual(hostSourceIdentity(root).sha256, first.sha256)
+
+	await mkdir(join(root, 'web', 'node_modules', 'ignored'), { recursive: true })
+	await writeFile(join(root, 'web', 'node_modules', 'ignored', 'cache.js'), 'ignored')
+	const withInstallState = hostSourceIdentity(root)
+	await rm(join(root, 'web', 'node_modules'), { recursive: true, force: true })
+	assert.deepEqual(hostSourceIdentity(root), withInstallState)
 })
 
 test('stale generated Win32 resource objects are removed from package source', async t => {

@@ -114,6 +114,8 @@ func invoke(request libraryRequest) libraryResponse {
 	case "execute":
 		result, err := entry.client.Execute(ctx, request.Command)
 		return response(map[string]string{"output": result}, err)
+	case "commands":
+		return response(entry.client.CommandCatalog(), nil)
 	case "status":
 		result, err := entry.client.Status(ctx)
 		return response(result, err)

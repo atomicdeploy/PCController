@@ -12,6 +12,9 @@ enum class StatusLedMode : uint8_t {
   Warning,
   Fault,
   Custom,
+  Connected,
+  Disconnected,
+  Running,
 };
 
 enum class StatusLedCue : uint8_t {
@@ -49,7 +52,6 @@ public:
 private:
   void render(uint8_t level, bool eased);
   static uint8_t scale(uint8_t value, uint8_t level);
-  static uint16_t easedValue(uint16_t current, uint16_t target);
 
   PwmController *pwm_ = nullptr; // Non-owning shared PWM controller.
   StatusLedMode mode_ = StatusLedMode::Off;

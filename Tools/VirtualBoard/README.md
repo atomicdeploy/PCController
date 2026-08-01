@@ -10,8 +10,9 @@ tcp://127.0.0.1:8765
 
 It is intentionally isolated from the PC host configuration. Board settings
 are stored in a separate 1 KiB virtual MCU EEPROM image
-(`virtual-mcu-eeprom.bin` by default), using the same conceptual ownership as
-the physical controller's EEPROM.
+(`virtual-mcu-eeprom.bin` by default). The current 30-byte settings record,
+20 learned-RF records, and wear-levelled reset journal use the same canonical
+addresses, checksums, and no-version migration policy as the physical MCU.
 
 ## Architecture
 
@@ -130,20 +131,30 @@ Use `--no-stdin` for unattended test runs.
 - HELLO with build hash/date/time identity
 - fixed 48-byte live STATUS and configurable streaming; byte 43 is the
   captured reset cause and bytes 44..47 are the persistent reset count in
-  little-endian order
+  little-endian order; RF-received, buzzer-busy, Running, host-offline, and
+  hot-temperature flags have the production meanings in bits 7 and 12..15
 - schema-2 GET/SET_SETTINGS persisted to virtual MCU EEPROM
 - tLED/tBT temperature identities and values
 - PWM set/get/all-off/mode/RGB plus automatic channel demo
 - addressable LED opcode `0x16`, including per-pixel/fill RGB and brightness
-- safe side relay mapping, direct relays, all-off, and relay test
-- menu actions/direct page selection and save-last-page behavior
-- TM1637/LCD text overrides and buzzer commands
+- safe side relay mapping, direct relays, and all-off; the firmware's local
+  front-panel relay commissioning page is represented through menu state,
+  while unadvertised opcode `0x34` remains unsupported
+- paged board menu directory, schema-2 visibility/order, direct page
+  selection, and save-last-page behavior
+- exact front-panel snapshot plus TM1637/LCD text overrides; DisplayText
+  targets 3/4 capture and release the PC-presented panel just like the MCU
+- host-owned Idle/Running application state through opcode `0x45`
 - schema-2 MCU-timed macro begin/append/run/query/cancel over a 127-byte
   circular queue; queued records reuse ordinary peripheral opcodes
 - macro buffer/status events plus reserved sequence `0xFE` dispatch evidence,
   letting the host refill ahead and verify each device-side execution time
-- I2C scan (`0x27`, `0x40`, `0x41`)
-- RF transmit/learn/list/remove/map simulation
+- bounded cooperative I2C write/read/repeated-start transactions and leases;
+  simulated devices answer at `0x27`, `0x3F`, `0x40`, and `0x41`
+- RF transmit plus single, multi, indefinite, list/remove/map/replace learning
+  over all 20 persistent MCU slots; new codes remain unmapped, while assigned
+  key/menu/relay/side/PWM actions use production repeat and 350 ms momentary
+  semantics
 - key events including gestures 5=down and 6=up
 - timestamped door, Bluetooth, PWM-channel, RF-learn, macro, and reset events;
   the high bit marks the appended device-microsecond timestamp
@@ -153,8 +164,16 @@ Use `--no-stdin` for unattended test runs.
 - application/bootloader reset requests as a persistent-EEPROM soft reset;
   each request advances the MCU-owned reset journal and emits reset event 7
 
-The emulator models observable behavior, not AVR instruction timing or actual
-electrical faults.
+The emulator deliberately does not claim AVR-cycle or electrical fidelity:
+
+- wall-clock scheduling substitutes for AVR timers and interrupt latency;
+- connected I2C devices use deterministic register bytes, not analog/bus-fault
+  models or a PCF8574/INA219/PWM electrical implementation;
+- relay direction/enable semantics and policy are preserved, but native tests
+  (not the virtual relay bank) verify the physical 1 ms break and 50 ms settle;
+- host-menu directory opcodes `0x42..0x44` are unsupported because the current
+  production firmware does not advertise them; PC-presented menus use the
+  production DisplayText capture/release path instead.
 
 Every acknowledgement carries
 `[requestOpcode, error, deviceMicros LE u32]`. Macro timing is therefore
@@ -164,8 +183,12 @@ scripted, TUI, API, and bridge requests share cancellation and timing rules.
 
 ## Verification
 
-Unit tests cover framing/CRC, maximum payloads, HELLO shape, STATUS and
-temperature schemas, macro cancellation, events, and EEPROM persistence:
+Unit tests cover framing/CRC, maximum payloads, HELLO capabilities, STATUS,
+temperature/front-panel/menu/I2C schemas, semantic extension tails, all 20 RF
+slots, mapped-action execution/repeat suppression/momentary expiry, macro
+cancellation, events, and canonical EEPROM persistence. A second
+native target compiles the production key, relay, buzzer, shift-register, and
+DS18B20 sources against an Arduino mock.
 
 ```sh
 ./build.sh

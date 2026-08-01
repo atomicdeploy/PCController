@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf16"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type windowsNotifier struct {
@@ -23,7 +25,7 @@ type windowsNotifier struct {
 func newPlatformNotifier(options NotifierOptions) Notifier {
 	appID := strings.TrimSpace(options.AppID)
 	if appID == "" {
-		appID = "DRSDavidSoft.PCController"
+		appID = productidentity.StableAppID
 	}
 	return &windowsNotifier{
 		appID:  appID,

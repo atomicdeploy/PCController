@@ -9,7 +9,7 @@ Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
 ```text
 offset  type          meaning
 0       u8            magic = 0xA5
-1       u8            protocol version = 1
+1       u8            advisory envelope revision (currently 1)
 2       u8            opcode
 3       u8            sequence
 4       u8            payload length, 0..48
@@ -19,6 +19,14 @@ offset  type          meaning
 
 CRC uses polynomial `0x07`, initial value `0x00`, over every decoded byte
 before the CRC. Multi-byte values are little-endian.
+
+The MCU accepts a frame by canonical magic, bounded length, and CRC rather
+than requiring its advisory revision byte to equal the local build's value.
+Known write operations validate a required semantic payload prefix and ignore
+trailing extension fields. Structurally distinct record shapes retain their
+shape byte; unknown opcodes receive `Unsupported`. This provides loose
+capability-based interoperability without embedding a table of past firmware
+versions or development migrations.
 
 The stream decoder bounds incomplete frames, isolates a malformed frame at
 the next zero delimiter, and continues decoding later frames.
@@ -126,6 +134,7 @@ alter firmware EEPROM.
 | MACRO_CANCEL | `3A` | none |
 | MACRO_STEP | `3B` | `u8 kind, u8 target, u16 value` |
 | MENU_LIST | `3E` | `u8 cursor` |
+| PROGRAM_STATE | `45` | semantic prefix `u8 state` (`0` Idle, `1` Running); future tail tolerated |
 
 ### Host-streamed notifications
 
@@ -276,11 +285,13 @@ event to recover the latest reset information.
 
 ## Settings payload
 
-The host accepts legacy schema 1 and current schema 2. It always emits schema
-2 for `SET_SETTINGS`.
+The 10-byte form is the common semantic core. The 12-byte form appends default
+page and menu-presentation flags. Current firmware applies fields by presence,
+not by a table keyed to the first byte, and safely retains its current values
+for an absent optional tail. The host emits the complete 12-byte form.
 
 ```text
-schema 1 (10-byte legacy prefix):
+10-byte common core:
 u8  schema = 1
 u8  flags                   bit0 silent; bit1 reserved; bit2 swap tLED/tBT;
                             bits3-4 motion-door policy; bit5 door audio off;
@@ -293,7 +304,7 @@ u8  statusBrightness
 u8  pwmBootMode
 u16 streamPeriod_ms          0, or at least 100
 
-schema 2 (12 bytes):
+12-byte complete record:
 u8  schema = 2
 u8  flags
 u8  lightMode
@@ -348,6 +359,17 @@ Readers should require at least the 43-byte legacy prefix, decode reset
 telemetry when at least 48 bytes are present, and tolerate future appended
 fields.
 
+Status flag bit 13 reports the host-owned Running state, bit 14 reports that
+the firmware considers the host offline, and bit 15 reports its hot-temperature
+condition. The Go decoder exposes these as `program_running`, `host_offline`,
+and `hot` in addition to preserving the raw flags. HELLO capability bit 24
+advertises `PROGRAM_STATE`; the host sends the current state immediately after
+each authenticated connection/reconnection and after every state change. It
+also reasserts that semantic byte every two seconds without requesting status,
+so firmware's five-second host-presence watchdog stays truthful even when no
+telemetry view is subscribed. It does not probe older firmware that omits the
+capability.
+
 ## Host service architecture
 
 The UART protocol above is the MCU wire format. Network clients normally talk
@@ -369,7 +391,9 @@ The default host endpoint is `127.0.0.1:8787`. A single TCP listener
 multiplexes newline-delimited JSON-RPC and HTTP by inspecting the first request
 bytes. HTTP then serves REST, standard WebSocket, and Socket.IO paths. Closing
 the serial port does not stop this service; closing the service does not erase
-MCU EEPROM or the PC configuration.
+MCU EEPROM or the PC configuration. JSON-RPC uses protocol `2.0`; the durable
+application contract is API version `1`, returned by `controller.ping` and
+`GET /healthz` and represented by the `/api/v1/` route prefix.
 
 ### Authentication and exposure
 
@@ -378,7 +402,9 @@ non-loopback bind is rejected. Remote access requires all of the following:
 
 - `ipc.allow_remote: true`;
 - an `ipc.auth_token` containing at least 24 characters;
-- an explicit `ipc.allowed_origins` list for browser WebSocket clients.
+- an explicit, non-wildcard `ipc.allowed_origins` list for browser WebSocket
+  clients;
+- the relevant `ipc.remote_policy` capability set to `true`.
 
 Raw JSON-RPC carries the token in the top-level `auth` member. HTTP accepts
 `Authorization: Bearer TOKEN` or `X-PCController-Token: TOKEN`. WebSocket
@@ -387,11 +413,46 @@ set a header, but headers are preferred because URLs may be logged. Token
 comparison is constant-time. Discovery advertisements never contain the
 token.
 
-Authentication grants access to the API, not permission to bypass safety.
-Motion policies, door checks, relay sequencing, bounds, and exclusive
-programming ownership still apply after authentication. Use TLS termination,
-a VPN, or an SSH tunnel on untrusted networks; the built-in listener does not
-itself terminate TLS.
+Authentication proves possession of the host token; authorization is separate.
+The default remote policy permits only `read` and `events`. Messages, board
+commands, host-configuration writes, connection control, reset, programming,
+shutdown, virtual keys, power/display actions, host-automation execution,
+integration access, and bridge calls are independent
+opt-ins. Programming additionally requires connection control. A remote
+`controller.execute` request is classified before execution, so using the
+generic command surface cannot bypass the reset, programming, OS-action, or
+bridge-call gates. Authorized mutating attempts and denied attempts publish
+`security.remote.authorized` or `security.remote.denied` timeline events
+without recording the token or request payload.
+
+Motion policies, door checks, relay sequencing, bounds, OS confirmation rules,
+and exclusive programming ownership still apply after authorization. Use TLS
+termination, a VPN, or an SSH tunnel on untrusted networks; the built-in
+listener does not itself terminate TLS.
+
+```json
+"ipc": {
+  "allow_remote": true,
+  "auth_token": "replace-with-at-least-24-characters",
+  "allowed_origins": ["controller.example:*"],
+  "remote_policy": {
+    "read": true,
+    "events": true,
+    "messages": false,
+    "board_commands": false,
+    "host_configuration": false,
+    "connection_control": false,
+    "reset": false,
+    "programming": false,
+    "shutdown": false,
+    "virtual_keys": false,
+    "power_actions": false,
+    "host_automations": false,
+    "bridge_calls": false,
+    "integrations": false
+  }
+}
+```
 
 ## JSON-RPC 2.0
 
@@ -411,20 +472,28 @@ the standard `error.code`/`error.message` object. The primary serializes
 mutating RPC calls through the same controller client while snapshot and event
 subscriptions use cached/thread-safe paths.
 
+Standard codes are parse error `-32700`, invalid request `-32600`, method not
+found `-32601`, and invalid params `-32602`. Host extensions use authentication
+required `-32001`, remote capability denied `-32003`, and runtime/device error
+`-32000`. The request ID is preserved on every parsed request error.
+
 ### RPC methods
 
 | Method | Parameters | Result/behavior |
 |---|---|---|
-| `controller.ping` | `{}` | service/version health |
+| `controller.ping` | `{}` | service health, JSON-RPC version, and API version |
 | `controller.connect`, `controller.open`, `controller.port.open` | optional `port` | resume discovery or open the requested transport, then authenticate `HELLO` |
 | `controller.close`, `controller.port.close` | `{}` | close UART and pause automatic reconnect |
 | `controller.reset`, `controller.reset.lines`, `controller.port.reset` | optional `pulse_ms` | one explicit DTR-only pulse, then fresh application authentication |
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
+| `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
 | `controller.status` | `{}` | fresh board status |
 | `controller.temperatures` | optional `rescan` | named temperatures and ROM identities |
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when supported, otherwise the versioned host fallback |
 | `controller.menu.jump`, `controller.menu.page` | `page` ID or name | select a board menu page |
-| `controller.execute` | `command` | run any ordinary controller command; `quit`/`exit` requests primary shutdown |
+| `controller.command.execute`, `controller.execute` | `command` | run any ordinary controller command; `quit`/`exit` requests primary shutdown |
+| `controller.program_state.get` | `{}` | current host-owned Idle/Running owners, reason, and revision |
+| `controller.program_state.set` | `mode`, optional `owner`, `reason` | set/clear one host-owned Running claim and mirror it to capable firmware |
 | `controller.rf.list` | `{}` | all learned records |
 | `controller.rf.learn.start` | `timeout_ms`, `indefinite`, `multiple` | start finite/indefinite, single/multi learning |
 | `controller.rf.learn.status` | `{}` | current learn-session state |
@@ -438,6 +507,13 @@ subscriptions use cached/thread-safe paths.
 | `controller.lcd.prompt` | `line1`, `line2` | queue a debounced prompt mirror |
 | `controller.lcd.priority` | `kind`, `line1`, `line2`, optional `hold_ms` | display a priority overlay, then restore the prompt |
 | `controller.message.send` | typed message envelope below | route/log a message and optionally display it on the board LCD |
+| `controller.bridge.list` | `{}` | configured peers and live connection state, without URLs or credentials |
+| `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; recursive bridge calls are rejected |
+| `controller.device.status` | `{}` | local-device HTTP/event-stream health and last confirmed power state |
+| `controller.device.action` | `action`, optional `text` or `count` | bounded Local Device v1 power, display, alert, or passive-refresh action |
+| `controller.device.inspect` | `resource` | sanitized `capabilities` or `snapshot` document only |
+| `controller.integrations.local.get` | `{}` | credential-free local-device and data-hub enable/URL settings |
+| `controller.integrations.local.set` | `local_device`, `data_hub` | validate and persist LAN-only device and loopback-only data roots |
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
 
@@ -454,18 +530,58 @@ All JSON endpoints share the IPC listener:
 | Method and path | Purpose |
 |---|---|
 | `GET /healthz` | unauthenticated liveness and service identity; no board data |
+| `GET /api/v1/ui-config` | unauthenticated non-secret browser bootstrap contract |
 | `POST /api/v1/rpc` | one JSON-RPC request |
 | `GET /api/v1/snapshot` | cached controller snapshot |
+| `GET /api/v1/commands` | machine-readable shared command catalog |
+| `GET /api/v1/program-state` | current host-owned Idle/Running state |
+| `PUT` or `POST /api/v1/program-state` | update `owner`, `mode`, and optional `reason` |
 | `POST /api/v1/command` | `{"command":"..."}` through the ordinary command engine |
 | `POST /api/v1/messages` | typed message envelope |
+| `GET /api/v1/bridges` | configured peer names/protocols and live state |
+| `POST /api/v1/bridges/call` | `peer` plus a nested JSON-RPC `request` |
 | `POST /api/v1/webhooks/inbound` | typed incoming message when inbound webhooks are enabled |
+| `/api/v1/integrations/datahub/*` | authenticated service-neutral streaming bridge to the configured loopback data service |
+| `/api/v1/integrations/device/*` | always fails closed; device operations require typed RPC |
 | `POST /ipc` | JSON-RPC compatibility on the configured WebSocket path |
 
-All routes except `/healthz` apply host authentication. Bodies are limited to
+All data/API routes except `/healthz` and the non-secret `/api/v1/ui-config`
+bootstrap apply host authentication. Bodies are limited to
 1 MiB. Unsupported methods receive `405`; the inbound webhook path is `404`
 when disabled. An inbound webhook is data, not an implicit shell command. To
 make it actionable, enable a narrow text mapping whose resulting command still
 passes the normal safety path.
+
+### Embedded browser application and exact byte serving
+
+The production React application is compiled into the Go executable and served
+from the same listener at `/`; no adjacent asset directory is required at
+runtime. Hashed assets use immutable caching while the application shell uses
+revalidation. Static responses support `GET`, `HEAD`, strong ETags,
+`If-None-Match`, `If-Range`, closed/open/suffix byte ranges, multipart ranges,
+exact `Content-Length`/`Content-Range`, and `416` responses. API, WebSocket,
+Socket.IO, and health paths remain reserved and cannot fall through to the SPA
+shell. Canonical path validation rejects traversal and encoded separator/dot
+variants before opening an embedded file.
+
+`controller web` starts the same primary host services used by the TUI but does
+not construct a terminal model or read terminal input. It owns discovery,
+serial, automations, global hotkeys, integrations, and the command dispatcher
+for its whole lifetime; `--no-open` serves the application without launching a
+browser. The UI sends terminal commands through same-origin typed RPC and keeps
+a persistent subscription for status, board/host events, and global
+`app.page` actions. A TUI is therefore not required in web mode. When the TUI
+is the primary instead, the same action broker retains bounded TUI delivery and
+also mirrors each valid page action into cursor-based browser event history.
+
+The local-integration proxy resolves only the configured short names; request
+data can never supply an upstream URL. The data hub is restricted to loopback,
+while the typed device manager accepts only loopback/private/link-local addresses or explicitly local names. The bridge
+streams HTTP bodies and WebSocket upgrades without buffering full exports,
+preserves upstream range/ETag semantics, disables environment proxies, and
+removes PCController authorization, cookies, forwarding headers, and
+`access_token` before forwarding. Upstream `Set-Cookie` is also removed so a
+companion service cannot set cookies on the controller origin.
 
 ## Standard WebSocket
 
@@ -540,17 +656,26 @@ loop. Delivery success and errors are emitted to the host timeline.
 ## Outbound WebSocket bridge
 
 An enabled `integrations.websocket_clients` entry makes the primary host a
-standard WebSocket client. It authenticates with a Bearer token, subscribes to
-configured topics, reconnects with bounded backoff, and can forward local
-events. Incoming remote events/status are re-emitted locally as source-tagged
-messages. Incoming command requests are rejected unless `allow_commands` is
-explicitly true and an authentication token is configured; accepted commands
-use the same RPC dispatcher as local requests.
+standard WebSocket or bounded Socket.IO client. It authenticates with a Bearer
+token, subscribes to validated `events`/`status` topics, reconnects with bounded
+backoff, and can forward local events as correlated `controller.message.send`
+calls. Transport/control/error events and remote-origin messages are not
+re-forwarded, preventing a direct two-host echo loop. Incoming remote
+events/status are re-emitted locally as source-tagged messages.
+
+`controller.bridge.call`, `POST /api/v1/bridges/call`, and
+`bridge call PEER METHOD [PARAMS_JSON]` use the existing persistent connection
+and an internal wire ID, then restore the caller's nested JSON-RPC ID in the
+response. The target host applies its own token, remote capability policy, and
+ordinary safety path. Recursive bridge calls are rejected, so this API is not
+an unrestricted network pivot. Incoming command requests on an outbound peer
+connection additionally require that peer's `allow_commands` flag.
 
 The bridge does not open another host's COM port. Each instance retains one
-local serial owner. Programming through a remote primary follows the same
-application-UART close, AVRDUDE/Arduino CLI/Urclock exclusive run, and fresh
-`HELLO` recovery as local programming.
+local serial owner. Programming through a remote primary requires the target's
+`programming` and `connection_control` permissions and follows the same
+application-UART close, guarded toolchain/Urclock run, and fresh `HELLO`
+recovery as local programming.
 
 ## mDNS and SSDP discovery
 
@@ -590,6 +715,12 @@ digits, dot, dash, or underscore. Text/action lengths are bounded. A board/LCD
 target is converted to two printable 16-byte rows and sent through
 `DISPLAY_TEXT`; every accepted message is also a source-tagged host event.
 
+Network ingress does not trust a payload's claimed source. REST/raw IPC is
+tagged `ipc`, WebSocket/Socket.IO is tagged `websocket`, peer traffic is tagged
+`bridge`, and inbound HTTP hooks are tagged `webhook`; a different claimed
+value is retained only as bounded `metadata.claimed_source`. This prevents a
+remote message from impersonating a physical `board` event in text mappings.
+
 `action` is descriptive metadata. It is never executed automatically. A
 deliberately enabled host `text_mappings` rule can match source, target, type,
 and text content and then submit a fixed configured command. This separation
@@ -598,11 +729,29 @@ logging, motion policy, and board safety.
 
 ## Host configuration and USB lifecycle
 
-JSON, YAML, and TOML use one strict schema selected by file extension. Unknown
-keys, multiple YAML documents, invalid ranges, and unsafe remote combinations
-are rejected. Long-running processes watch atomic replacements and keep the
+JSON, YAML, and TOML use one semantic schema selected by file extension.
+Unknown future keys are ignored so an older host can continue with the fields
+it understands; known-field type errors, multiple YAML documents, invalid
+ranges, and unsafe remote combinations are rejected. Long-running processes watch atomic replacements and keep the
 last known-good configuration if a reload is invalid. This file is PC-owned;
 it never replaces the board's CRC-checked EEPROM record.
+
+Authentication tokens, origin lists, remote policy, webhook enablement,
+outbound hooks, and bridge clients are read from the current watched host
+configuration. Listener address and URL-path topology are established when the
+primary starts and require a host restart to move the bound socket/path; policy
+or token changes take effect without touching MCU EEPROM.
+
+### Verification boundary
+
+Automated tests cover the multiplexed raw/HTTP/WebSocket listener, Bearer and
+header authentication, remote capability denial, route-derived message
+provenance, REST, Engine.IO v4/Socket.IO framing, correlated host-to-host calls,
+forwarded event messages, discovery packet parsing, and secret-free SSDP
+advertisements. They use in-process loopback servers and never open a serial
+port. Actual mDNS/SSDP visibility across Windows Firewall/VLAN boundaries,
+TLS reverse-proxy commissioning, and remote flash against physical hardware
+remain deployment tests rather than claims made by this unit suite.
 
 The Windows serial mode starts both DTR and RTS inactive. Merely opening the
 application therefore does not request reset. `connection.reset_on_reconnect`
@@ -613,3 +762,6 @@ safety retry is used only if platform notification cannot be established.
 
 See [Host Configuration and Integrations](../../../docs/Host-Configuration-and-Integrations.md)
 for configuration examples, TUI surfaces, and commissioning guidance.
+See [Control-Surface Capability Matrix](Control-Surface-Capability-Matrix.md)
+for the per-domain CLI, library, IPC, REST, WebSocket, event, and authorization
+reachability contract.

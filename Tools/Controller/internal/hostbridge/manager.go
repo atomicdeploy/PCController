@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ import (
 	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type Status struct {
@@ -41,9 +43,130 @@ type Status struct {
 }
 
 type peerState struct {
-	name   string
-	cancel context.CancelFunc
-	events chan controller.Event
+	name          string
+	protocol      string
+	allowCommands bool
+	forwardEvents bool
+	cancel        context.CancelFunc
+	events        chan controller.Event
+	mu            sync.RWMutex
+	session       *peerRPCSession
+}
+
+// PeerInfo is the non-secret, live state exposed by bridge list APIs.
+type PeerInfo struct {
+	Name          string `json:"name"`
+	Protocol      string `json:"protocol"`
+	Connected     bool   `json:"connected"`
+	AllowCommands bool   `json:"allow_commands"`
+	ForwardEvents bool   `json:"forward_events"`
+}
+
+type peerRPCSession struct {
+	write   func(any) error
+	nextID  uint64
+	mu      sync.Mutex
+	pending map[string]chan ipcjson.Response
+	done    chan struct{}
+	err     error
+	once    sync.Once
+}
+
+func newPeerRPCSession(write func(any) error) *peerRPCSession {
+	return &peerRPCSession{
+		write: write, nextID: 1000,
+		pending: make(map[string]chan ipcjson.Response), done: make(chan struct{}),
+	}
+}
+
+func (session *peerRPCSession) Call(
+	ctx context.Context,
+	request ipcjson.Request,
+) (ipcjson.Response, error) {
+	session.mu.Lock()
+	session.nextID++
+	wireID := json.RawMessage(strconv.FormatUint(session.nextID, 10))
+	originalID := append(json.RawMessage(nil), request.ID...)
+	request.JSONRPC = ipcjson.Version
+	request.ID = wireID
+	request.Auth = ""
+	key := string(wireID)
+	responseChannel := make(chan ipcjson.Response, 1)
+	select {
+	case <-session.done:
+		err := session.err
+		session.mu.Unlock()
+		if err == nil {
+			err = errors.New("bridge session is closed")
+		}
+		return ipcjson.Response{}, err
+	default:
+		session.pending[key] = responseChannel
+	}
+	session.mu.Unlock()
+	if err := session.write(request); err != nil {
+		session.mu.Lock()
+		delete(session.pending, key)
+		session.mu.Unlock()
+		return ipcjson.Response{}, err
+	}
+	select {
+	case response := <-responseChannel:
+		if len(originalID) != 0 {
+			response.ID = originalID
+		}
+		return response, nil
+	case <-session.done:
+		session.mu.Lock()
+		err := session.err
+		session.mu.Unlock()
+		if err == nil {
+			err = errors.New("bridge session closed before response")
+		}
+		return ipcjson.Response{}, err
+	case <-ctx.Done():
+		session.mu.Lock()
+		delete(session.pending, key)
+		session.mu.Unlock()
+		return ipcjson.Response{}, ctx.Err()
+	}
+}
+
+func (session *peerRPCSession) Resolve(response ipcjson.Response) bool {
+	key := string(response.ID)
+	session.mu.Lock()
+	channel, ok := session.pending[key]
+	if ok {
+		delete(session.pending, key)
+	}
+	session.mu.Unlock()
+	if ok {
+		channel <- response
+	}
+	return ok
+}
+
+func (session *peerRPCSession) Close(err error) {
+	session.once.Do(func() {
+		session.mu.Lock()
+		session.err = err
+		close(session.done)
+		session.mu.Unlock()
+	})
+}
+
+func (peer *peerState) attach(session *peerRPCSession) func() {
+	peer.mu.Lock()
+	peer.session = session
+	peer.mu.Unlock()
+	return func() {
+		peer.mu.Lock()
+		if peer.session == session {
+			peer.session = nil
+		}
+		peer.mu.Unlock()
+		session.Close(errors.New("bridge peer disconnected"))
+	}
 }
 
 type Manager struct {
@@ -88,7 +211,7 @@ func Start(
 		keyboardLatches: make(map[string]keyboardLatch),
 		actions:         actions,
 		hotkeys:         hostui.NewHotkeyRegistrar(),
-		notifier:        hostui.NewNotifier(hostui.NotifierOptions{AppID: "DRSDavidSoft.PCController"}),
+		notifier:        hostui.NewNotifier(hostui.NotifierOptions{AppID: productidentity.StableAppID}),
 		warningBeep:     hostui.WarningBeep,
 	}
 	manager.statusLED = newStatusLEDArbiter(
@@ -116,8 +239,8 @@ func Start(
 	if store.Current().Integrations.Notifications.Enabled {
 		desktop, desktopErr := hostui.EnsureDesktopIntegration(
 			hostui.DesktopIntegrationOptions{
-				AppID:       "DRSDavidSoft.PCController",
-				DisplayName: store.Current().UI.AppTitle,
+				AppID:       productidentity.StableAppID,
+				DisplayName: productidentity.Title(store.Current().UI.AppTitle),
 			},
 		)
 		manager.mu.Lock()
@@ -188,6 +311,97 @@ func (manager *Manager) Status() Status {
 	result := manager.status
 	result.WSClientsActive = append([]string(nil), result.WSClientsActive...)
 	return result
+}
+
+// BridgePeers returns configured peers and their current connection state
+// without exposing authentication tokens or endpoint credentials.
+func (manager *Manager) BridgePeers() []PeerInfo {
+	manager.mu.RLock()
+	peers := make([]*peerState, 0, len(manager.peers))
+	for _, peer := range manager.peers {
+		peers = append(peers, peer)
+	}
+	manager.mu.RUnlock()
+	result := make([]PeerInfo, 0, len(peers))
+	for _, peer := range peers {
+		peer.mu.RLock()
+		result = append(result, PeerInfo{
+			Name: peer.name, Protocol: peer.protocol,
+			Connected: peer.session != nil, AllowCommands: peer.allowCommands,
+			ForwardEvents: peer.forwardEvents,
+		})
+		peer.mu.RUnlock()
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+	return result
+}
+
+// CallBridge invokes one versioned JSON-RPC method through an already
+// authenticated outbound peer connection. The remote host applies its own
+// remote capability policy before touching its serial owner.
+func (manager *Manager) CallBridge(
+	ctx context.Context,
+	name string,
+	request ipcjson.Request,
+) (ipcjson.Response, error) {
+	manager.mu.RLock()
+	peer := manager.peers[strings.ToLower(strings.TrimSpace(name))]
+	manager.mu.RUnlock()
+	if peer == nil {
+		return ipcjson.Response{}, fmt.Errorf("bridge peer %q is not configured", name)
+	}
+	peer.mu.RLock()
+	session := peer.session
+	peer.mu.RUnlock()
+	if session == nil {
+		return ipcjson.Response{}, fmt.Errorf("bridge peer %q is not connected", peer.name)
+	}
+	response, err := session.Call(ctx, request)
+	if err != nil {
+		manager.client.EmitHostEvent(
+			"bridge.call.error",
+			fmt.Sprintf("%s %s: %v", peer.name, request.Method, err),
+		)
+		return ipcjson.Response{}, err
+	}
+	manager.client.EmitHostEvent(
+		"bridge.call",
+		fmt.Sprintf("%s %s completed", peer.name, request.Method),
+	)
+	return response, nil
+}
+
+// BridgeCommand exposes the same correlated bridge calls to the interactive
+// shell/TUI console without creating another network or serial implementation.
+func (manager *Manager) BridgeCommand(
+	ctx context.Context,
+	args []string,
+) (string, error) {
+	if len(args) == 1 && strings.EqualFold(args[0], "list") {
+		encoded, err := json.MarshalIndent(manager.BridgePeers(), "", "  ")
+		return string(encoded), err
+	}
+	if len(args) < 3 || len(args) > 4 || !strings.EqualFold(args[0], "call") {
+		return "", errors.New("usage: bridge list | bridge call PEER METHOD [PARAMS_JSON]")
+	}
+	params := json.RawMessage("{}")
+	if len(args) == 4 {
+		if !json.Valid([]byte(args[3])) {
+			return "", errors.New("bridge call params must be one valid JSON value")
+		}
+		params = json.RawMessage(args[3])
+	}
+	response, err := manager.CallBridge(ctx, args[1], ipcjson.Request{
+		JSONRPC: ipcjson.Version, ID: json.RawMessage("1"),
+		Method: args[2], Params: params,
+	})
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.MarshalIndent(response, "", "  ")
+	return string(encoded), err
 }
 
 func (manager *Manager) Notifier() hostui.Notifier { return manager.notifier }
@@ -372,8 +586,10 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		}
 		peerContext, cancel := context.WithCancel(manager.ctx)
 		peer := &peerState{
-			name: peerConfig.Name, cancel: cancel,
-			events: make(chan controller.Event, 128),
+			name: peerConfig.Name, protocol: firstProtocol(peerConfig.Protocol),
+			allowCommands: peerConfig.AllowCommands,
+			forwardEvents: peerConfig.ForwardEvents,
+			cancel:        cancel, events: make(chan controller.Event, 128),
 		}
 		peers[strings.ToLower(peerConfig.Name)] = peer
 		status.WSClientsActive = append(
@@ -450,15 +666,28 @@ func (manager *Manager) eventLoop(afterID uint64) {
 		manager.dispatchWebhooks(config, event)
 		manager.dispatchTextMappings(config, event)
 		manager.dispatchNotification(config, event)
-		manager.mu.RLock()
-		for _, peer := range manager.peers {
-			select {
-			case peer.events <- event:
-			default:
+		if bridgeEventForwardable(event) {
+			manager.mu.RLock()
+			for _, peer := range manager.peers {
+				select {
+				case peer.events <- event:
+				default:
+				}
 			}
+			manager.mu.RUnlock()
 		}
-		manager.mu.RUnlock()
 	}
+}
+
+func bridgeEventForwardable(event controller.Event) bool {
+	kind := strings.ToLower(strings.TrimSpace(event.Kind))
+	if kind == "integration.error" || strings.HasPrefix(kind, "bridge.") ||
+		strings.HasPrefix(kind, "security.remote.") {
+		return false
+	}
+	return kind != "message" ||
+		(!strings.EqualFold(event.Source, "bridge") &&
+			!strings.EqualFold(event.Source, "websocket"))
 }
 
 // observeRunningDoor combines the explicit PC-owned Running state with the
@@ -548,7 +777,7 @@ func (manager *Manager) dispatchNotification(
 		return
 	}
 	notification, ok := hostui.NotificationForImportantEvent(hostui.ImportantEvent{
-		Kind: event.Kind, Message: event.Text,
+		Kind: event.Kind, Message: event.Text, AppTitle: config.UI.AppTitle,
 	})
 	if !ok {
 		return
@@ -733,10 +962,14 @@ func optionalEqual(expected, actual string) bool {
 }
 
 func (manager *Manager) recordError(message string) {
+	manager.setLastError(message)
+	manager.client.EmitHostEvent("integration.error", message)
+}
+
+func (manager *Manager) setLastError(message string) {
 	manager.mu.Lock()
 	manager.status.LastError = message
 	manager.mu.Unlock()
-	manager.client.EmitHostEvent("integration.error", message)
 }
 
 func (manager *Manager) runWebSocketPeer(
@@ -795,6 +1028,9 @@ func (manager *Manager) webSocketPeerSession(
 		defer cancel()
 		return connection.Write(writeContext, websocket.MessageText, encoded)
 	}
+	rpcSession := newPeerRPCSession(writeJSON)
+	detach := peer.attach(rpcSession)
+	defer detach()
 	topics := append([]string(nil), config.Topics...)
 	if len(topics) == 0 {
 		topics = []string{"events"}
@@ -815,10 +1051,29 @@ func (manager *Manager) webSocketPeerSession(
 				case <-sessionContext.Done():
 					return
 				case event := <-peer.events:
-					if err := writeJSON(map[string]any{
-						"jsonrpc": "2.0", "method": "controller.event",
-						"params": event,
-					}); err != nil {
+					encoded, _ := json.Marshal(event)
+					text := string(encoded)
+					if len(text) > 4096 {
+						text = text[:4096]
+					}
+					params, _ := json.Marshal(controller.TextMessage{
+						Source: "bridge", Target: "host", Type: "local-event",
+						Text: text, Metadata: map[string]string{
+							"event.id":   strconv.FormatUint(event.ID, 10),
+							"event.kind": event.Kind,
+						},
+					})
+					response, err := rpcSession.Call(sessionContext, ipcjson.Request{
+						JSONRPC: ipcjson.Version, Method: "controller.message.send",
+						Params: params,
+					})
+					if err == nil && response.Error != nil {
+						manager.setLastError(
+							"WebSocket " + config.Name + " event rejected: " + response.Error.Error(),
+						)
+						continue
+					}
+					if err != nil {
 						select {
 						case writeErrors <- err:
 						default:
@@ -842,6 +1097,21 @@ func (manager *Manager) webSocketPeerSession(
 		if messageType != websocket.MessageText {
 			continue
 		}
+		var responseEnvelope struct {
+			ID     json.RawMessage   `json:"id"`
+			Method string            `json:"method"`
+			Result json.RawMessage   `json:"result"`
+			Error  *ipcjson.RPCError `json:"error"`
+		}
+		if json.Unmarshal(data, &responseEnvelope) == nil &&
+			len(responseEnvelope.ID) != 0 && responseEnvelope.Method == "" &&
+			(len(responseEnvelope.Result) != 0 || responseEnvelope.Error != nil) {
+			var response ipcjson.Response
+			if json.Unmarshal(data, &response) == nil {
+				_ = rpcSession.Resolve(response)
+			}
+			continue
+		}
 		var request ipcjson.Request
 		if err := json.Unmarshal(data, &request); err != nil {
 			continue
@@ -863,8 +1133,8 @@ func (manager *Manager) webSocketPeerSession(
 			})
 			continue
 		}
-		service := ipcjson.Service{Client: manager.client}
-		if err := writeJSON(service.Dispatch(ctx, request)); err != nil {
+		service := manager.remotePeerService()
+		if err := writeJSON(service.DispatchRemote(ctx, request, "bridge")); err != nil {
 			return err
 		}
 	}
@@ -931,6 +1201,11 @@ func (manager *Manager) socketIOPeerSession(
 			break
 		}
 	}
+	rpcSession := newPeerRPCSession(func(value any) error {
+		return writeEvent("rpc", value)
+	})
+	detach := peer.attach(rpcSession)
+	defer detach()
 	topics := append([]string(nil), config.Topics...)
 	if len(topics) == 0 {
 		topics = []string{"events"}
@@ -992,6 +1267,11 @@ func (manager *Manager) socketIOPeerSession(
 			continue
 		}
 		switch name {
+		case "rpc.response":
+			var response ipcjson.Response
+			if json.Unmarshal(raw, &response) == nil {
+				_ = rpcSession.Resolve(response)
+			}
 		case "controller.event", "controller.status", "message.accepted":
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
@@ -1000,9 +1280,15 @@ func (manager *Manager) socketIOPeerSession(
 		case "message", "controller.message":
 			var message controller.TextMessage
 			if json.Unmarshal(raw, &message) == nil {
-				if message.Source == "" {
-					message.Source = "websocket"
+				if message.Metadata == nil {
+					message.Metadata = make(map[string]string)
 				}
+				if message.Source != "" && !strings.EqualFold(message.Source, "bridge") {
+					if _, exists := message.Metadata["claimed_source"]; exists || len(message.Metadata) < 64 {
+						message.Metadata["claimed_source"] = message.Source
+					}
+				}
+				message.Source = "bridge"
 				_, _ = manager.client.SendTextMessage(ctx, message)
 			}
 		case "command":
@@ -1016,10 +1302,13 @@ func (manager *Manager) socketIOPeerSession(
 			if json.Unmarshal(raw, &command) != nil {
 				continue
 			}
-			output, executeErr := manager.client.Execute(ctx, command.Command)
-			_ = writeEvent("command.response", map[string]any{
-				"output": output, "error": errorText(executeErr),
-			})
+			encoded, _ := json.Marshal(command)
+			service := manager.remotePeerService()
+			response := service.DispatchRemote(ctx, ipcjson.Request{
+				JSONRPC: ipcjson.Version, ID: json.RawMessage("1"),
+				Method: "controller.execute", Params: encoded,
+			}, "bridge")
+			_ = writeEvent("command.response", response)
 		case "rpc":
 			if !config.AllowCommands {
 				_ = writeEvent("error", map[string]string{"error": "peer RPC is disabled"})
@@ -1029,8 +1318,8 @@ func (manager *Manager) socketIOPeerSession(
 			if json.Unmarshal(raw, &request) != nil {
 				continue
 			}
-			service := ipcjson.Service{Client: manager.client}
-			_ = writeEvent("rpc.response", service.Dispatch(ctx, request))
+			service := manager.remotePeerService()
+			_ = writeEvent("rpc.response", service.DispatchRemote(ctx, request, "bridge"))
 		}
 	}
 }
@@ -1047,9 +1336,21 @@ func decodeSocketIOPacket(value string) (string, json.RawMessage, error) {
 	return name, parts[1], nil
 }
 
-func errorText(err error) string {
-	if err == nil {
-		return ""
+func (manager *Manager) remotePeerService() ipcjson.Service {
+	return ipcjson.Service{
+		Client:     manager.client,
+		HostConfig: manager.store.Current,
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			_, err := manager.store.Update(change)
+			return err
+		},
 	}
-	return err.Error()
+}
+
+func firstProtocol(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "jsonrpc"
+	}
+	return value
 }

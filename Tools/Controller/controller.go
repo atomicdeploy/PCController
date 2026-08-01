@@ -27,54 +27,64 @@ import (
 )
 
 type (
-	Hello                  = native.Hello
-	Status                 = native.Status
-	Settings               = native.Settings
-	RFEntry                = native.RFEntry
-	RFConfig               = appconfig.RFConfig
-	RFCategory             = appconfig.RFCategory
-	RFCodeKey              = appconfig.RFCodeKey
-	RFMetadata             = appconfig.RFMetadata
-	TemperatureSensor      = native.TemperatureSensor
-	DeviceEvent            = native.DeviceEvent
-	PWMValues              = native.PWMValues
-	Melody                 = appconfig.Melody
-	MelodyNote             = appconfig.MelodyNote
-	StatusLEDEffect        = appconfig.StatusLEDEffect
-	StatusLEDPolicy        = appconfig.StatusLEDPolicy
-	StatusLEDVisual        = appconfig.StatusLEDVisual
-	RGBColor               = appconfig.RGBColor
-	OutputStreamState      = control.OutputStreamState
-	StatusSample           = control.StatusSample
-	TimelineEntry          = control.TimelineEntry
-	HistoryOptions         = control.HistoryOptions
-	RFLearnOptions         = control.RFLearnOptions
-	RFLearnState           = control.RFLearnState
-	MenuPageInfo           = control.MenuPageInfo
-	MenuCatalog            = control.MenuCatalog
-	MenuLayout             = control.MenuLayout
-	HostMenuDirectory      = native.HostMenuDirectory
-	HostMenuDirectoryEntry = native.HostMenuDirectoryEntry
-	HostMenuContent        = native.HostMenuContent
-	HostMenuState          = native.HostMenuState
-	HostMenuContentRequest = native.HostMenuContentRequest
-	I2CTransferResult      = native.I2CTransferResult
-	LCDPresentationOptions = control.LCDPresentationOptions
-	LCDPresentationState   = control.LCDPresentationState
-	OSPolicy               = hostos.Policy
-	VirtualKeyPolicy       = hostos.VirtualKeyPolicy
-	PowerPolicy            = hostos.PowerPolicy
-	VirtualKeyRequest      = hostos.VirtualKeyRequest
-	PowerRequest           = hostos.PowerRequest
-	OSActionResult         = hostos.ActionResult
-	SystemStatus           = hostos.SystemStatus
-	ArduinoUpdateOptions   = programmer.ArduinoUpdateOptions
-	ArduinoUpdateStep      = programmer.ArduinoUpdateStep
-	ArduinoUpdateReport    = programmer.ArduinoUpdateReport
-	ProgramMode            = control.ProgramMode
-	ProgramStateOwner      = control.ProgramStateOwner
-	ProgramStateSnapshot   = control.ProgramStateSnapshot
-	ProgramStateLease      = control.ProgramStateLease
+	Hello                     = native.Hello
+	Status                    = native.Status
+	Settings                  = native.Settings
+	RFEntry                   = native.RFEntry
+	RFConfig                  = appconfig.RFConfig
+	RFCategory                = appconfig.RFCategory
+	RFCodeKey                 = appconfig.RFCodeKey
+	RFMetadata                = appconfig.RFMetadata
+	TemperatureSensor         = native.TemperatureSensor
+	DeviceEvent               = native.DeviceEvent
+	PWMValues                 = native.PWMValues
+	Melody                    = appconfig.Melody
+	MelodyNote                = appconfig.MelodyNote
+	StatusLEDEffect           = appconfig.StatusLEDEffect
+	StatusLEDPolicy           = appconfig.StatusLEDPolicy
+	StatusLEDVisual           = appconfig.StatusLEDVisual
+	RGBColor                  = appconfig.RGBColor
+	OutputStreamState         = control.OutputStreamState
+	StatusSample              = control.StatusSample
+	TimelineEntry             = control.TimelineEntry
+	HistoryOptions            = control.HistoryOptions
+	RFLearnOptions            = control.RFLearnOptions
+	RFLearnState              = control.RFLearnState
+	MenuPageInfo              = control.MenuPageInfo
+	MenuCatalog               = control.MenuCatalog
+	MenuLayout                = control.MenuLayout
+	HostMenuDirectory         = native.HostMenuDirectory
+	HostMenuDirectoryEntry    = native.HostMenuDirectoryEntry
+	HostMenuContent           = native.HostMenuContent
+	HostMenuState             = native.HostMenuState
+	HostMenuContentRequest    = native.HostMenuContentRequest
+	I2CTransferResult         = native.I2CTransferResult
+	LCDPresentationOptions    = control.LCDPresentationOptions
+	LCDPresentationState      = control.LCDPresentationState
+	OSPolicy                  = hostos.Policy
+	VirtualKeyPolicy          = hostos.VirtualKeyPolicy
+	PowerPolicy               = hostos.PowerPolicy
+	VirtualKeyRequest         = hostos.VirtualKeyRequest
+	PowerRequest              = hostos.PowerRequest
+	OSActionResult            = hostos.ActionResult
+	SystemStatus              = hostos.SystemStatus
+	CommandDescriptor         = shell.CommandDescriptor
+	ToolchainSyncOptions      = programmer.ToolchainSyncOptions
+	ToolchainSyncStep         = programmer.ToolchainSyncStep
+	ToolchainSyncReport       = programmer.ToolchainSyncReport
+	ToolchainProfile          = programmer.ToolchainProfile
+	ToolchainPolicy           = programmer.ToolchainPolicy
+	ToolchainLock             = programmer.ToolchainLock
+	ToolchainCanary           = programmer.ToolchainCanary
+	ToolchainResolution       = programmer.ToolchainResolution
+	ToolchainChange           = programmer.ToolchainChange
+	ToolchainResolveOptions   = programmer.ToolchainResolveOptions
+	ToolchainBootstrapOptions = programmer.ToolchainBootstrapOptions
+	ToolchainBootstrapReport  = programmer.ToolchainBootstrapReport
+	ProgramMode               = control.ProgramMode
+	ProgramStateOwner         = control.ProgramStateOwner
+	ProgramStateSnapshot      = control.ProgramStateSnapshot
+	ProgramStateLease         = control.ProgramStateLease
 )
 
 type RFAction byte
@@ -151,7 +161,7 @@ type Options struct {
 	ResetOnReconnect bool                   `json:"reset_on_reconnect,omitempty"`
 	ProjectPath      string                 `json:"project_path,omitempty"`
 	FQBN             string                 `json:"fqbn,omitempty"`
-	ArduinoCLI       string                 `json:"arduino_cli,omitempty"`
+	ToolchainCLI     string                 `json:"toolchain_cli,omitempty"`
 	Avrdude          string                 `json:"avrdude,omitempty"`
 	AvrdudeConf      string                 `json:"avrdude_conf,omitempty"`
 	Programmer       string                 `json:"programmer,omitempty"`
@@ -398,7 +408,7 @@ func New(options Options) *Client {
 	client.commandOptions = control.CommandOptions{
 		ProjectPath:      options.ProjectPath,
 		FQBN:             fqbn,
-		ArduinoCLI:       options.ArduinoCLI,
+		ArduinoCLI:       options.ToolchainCLI,
 		Avrdude:          options.Avrdude,
 		AvrdudeConf:      options.AvrdudeConf,
 		Programmer:       options.Programmer,
@@ -410,7 +420,7 @@ func New(options Options) *Client {
 		ProjectPath:      options.ProjectPath,
 		FQBN:             fqbn,
 		Macros:           client.currentMacros,
-		ArduinoCLI:       options.ArduinoCLI,
+		ArduinoCLI:       options.ToolchainCLI,
 		Avrdude:          options.Avrdude,
 		AvrdudeConf:      options.AvrdudeConf,
 		Programmer:       options.Programmer,
@@ -497,7 +507,7 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 	client.optionsMu.Lock()
 	client.commandOptions = control.CommandOptions{
 		ProjectPath: options.ProjectPath, FQBN: fqbn,
-		ArduinoCLI: options.ArduinoCLI, Avrdude: options.Avrdude,
+		ArduinoCLI: options.ToolchainCLI, Avrdude: options.Avrdude,
 		AvrdudeConf:      options.AvrdudeConf,
 		Programmer:       options.Programmer,
 		HostConfig:       client.currentHostConfig,
@@ -841,6 +851,14 @@ func (client *Client) Execute(ctx context.Context, command string) (string, erro
 	client.engineMu.Lock()
 	defer client.engineMu.Unlock()
 	return client.engine.Execute(ctx, command)
+}
+
+// CommandCatalog exposes the same discoverable command contract used by the
+// shell, primary IPC, REST, WebSocket RPC, and the C-compatible library.
+func (client *Client) CommandCatalog() []CommandDescriptor {
+	client.engineMu.Lock()
+	defer client.engineMu.Unlock()
+	return client.engine.Catalog()
 }
 
 // ProgramState returns the host-owned application state. Hardware conditions
@@ -1544,18 +1562,58 @@ func (client *Client) EmitHostActionEvent(
 	return publicEvent(event)
 }
 
-// UpdateArduinoDependencies updates installed Arduino cores/libraries and
-// ensures every PCController dependency through the controller-owned runner.
+// SyncToolchain updates installed cores/libraries and ensures every
+// PCController dependency through the controller-owned runner.
 // It never opens, resets, or programs a board.
-func (client *Client) UpdateArduinoDependencies(
+func (client *Client) SyncToolchain(
 	ctx context.Context,
-	options ArduinoUpdateOptions,
+	options ToolchainSyncOptions,
 	output io.Writer,
-) (ArduinoUpdateReport, error) {
-	if strings.TrimSpace(options.ArduinoCLI) == "" {
-		options.ArduinoCLI = client.currentCommandOptions().ArduinoCLI
+) (ToolchainSyncReport, error) {
+	if strings.TrimSpace(options.ToolchainCLI) == "" {
+		options.ToolchainCLI = client.currentCommandOptions().ArduinoCLI
 	}
-	return programmer.UpdateArduino(ctx, options, output)
+	return programmer.SyncToolchain(ctx, options, output)
+}
+
+// BootstrapToolchain installs one resolved, profile-local firmware toolchain.
+// It does not replace an unrelated global dependency installation. Callers may
+// supply the latest resolved profile or an intentionally selected rollback lock.
+func BootstrapToolchain(
+	ctx context.Context,
+	options ToolchainBootstrapOptions,
+	output io.Writer,
+) (ToolchainBootstrapReport, error) {
+	return programmer.BootstrapToolchain(ctx, options, output)
+}
+
+// LoadToolchainPolicy reads the latest-compatible dependency policy.
+func LoadToolchainPolicy(path string) (ToolchainPolicy, error) {
+	return programmer.LoadToolchainPolicy(path)
+}
+
+// LoadToolchainLock reads an exact, hash-bearing resolved dependency lock.
+func LoadToolchainLock(path string) (ToolchainLock, error) {
+	return programmer.LoadToolchainLock(path)
+}
+
+// ResolveToolchainPolicy resolves stable dependencies without device I/O.
+func ResolveToolchainPolicy(
+	ctx context.Context,
+	policy ToolchainPolicy,
+	options ToolchainResolveOptions,
+) (ToolchainResolution, error) {
+	return programmer.ResolveToolchainPolicy(ctx, policy, options)
+}
+
+// CompareToolchainLocks reports substantive changes between exact locks.
+func CompareToolchainLocks(current, resolved ToolchainLock) []ToolchainChange {
+	return programmer.CompareToolchainLocks(current, resolved)
+}
+
+// UpdateToolchainLock atomically writes a changed exact lock without timestamp churn.
+func UpdateToolchainLock(path string, current, resolved ToolchainLock) (bool, error) {
+	return programmer.UpdateToolchainLock(path, current, resolved)
 }
 
 // SetBeforeDisconnectHook lets the primary host bridge release momentary or

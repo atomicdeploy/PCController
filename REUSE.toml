@@ -27,3 +27,9 @@ SPDX-FileCopyrightText = [
   "2026 David Refoua and PCController contributors",
 ]
 SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["Tools/Controller/web/src/assets/vazirmatn.woff2"]
+precedence = "override"
+SPDX-FileCopyrightText = "2015 The Vazirmatn Project Authors"
+SPDX-License-Identifier = "OFL-1.1"

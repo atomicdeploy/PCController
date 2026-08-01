@@ -7,11 +7,10 @@
 namespace {
 
 constexpr uint16_t StoreMagic = 0x4C52; // "RL"
-constexpr uint8_t StoreVersion = 2;
 
 struct __attribute__((packed)) StoreHeader {
   uint16_t magic;
-  uint8_t version;
+  uint8_t recordBytes;
   uint8_t capacity;
 };
 
@@ -22,12 +21,13 @@ RemoteLearningStore learnedRemotes;
 void RemoteLearningStore::begin() {
   StoreHeader header;
   EEPROM.get(HeaderAddress, header);
-  if (header.magic == StoreMagic && header.version == StoreVersion &&
+  if (header.magic == StoreMagic &&
+      header.recordBytes == EepromLayout::RemoteRecordBytes &&
       header.capacity == Capacity) {
     return;
   }
 
-  header = {StoreMagic, StoreVersion, Capacity};
+  header = {StoreMagic, EepromLayout::RemoteRecordBytes, Capacity};
   EEPROM.put(HeaderAddress, header);
   clear();
 }

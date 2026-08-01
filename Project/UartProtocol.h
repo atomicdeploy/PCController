@@ -5,7 +5,10 @@
 namespace ControllerProtocol {
 
 constexpr uint8_t Magic = 0xA5;
-constexpr uint8_t Version = 1;
+// Sent as an advisory envelope revision. Receivers validate the canonical
+// magic/length/CRC shape and opcode payload semantics instead of rejecting an
+// otherwise understandable peer solely because this byte differs.
+constexpr uint8_t EnvelopeRevision = 1;
 constexpr uint8_t MaximumPayload = 48;
 
 enum Opcode : uint8_t {
@@ -50,6 +53,8 @@ enum Opcode : uint8_t {
   RadioLearnReplace = 0x3F,
   MenuLayoutGet = 0x40,
   MenuLayoutSet = 0x41,
+  // Host-owned application state: payload prefix [0=Idle, 1=Running].
+  ProgramState = 0x45,
 
   Ack = 0x80,
   HelloResponse = 0x81,

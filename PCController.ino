@@ -29,6 +29,8 @@
 #include "Project/SettingsStore.h"
 #include "Project/StatusLedController.h"
 #include "Project/SystemInputs.h"
+#include "Project/TemperatureRoles.h"
+#include "Project/TransitionMath.h"
 #include "Project/UartProtocol.h"
 #include "LocalLib/I2cLcd.h"
 

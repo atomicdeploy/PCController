@@ -3,6 +3,7 @@ package ipcjson
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/shell"
+	"pccontroller.local/controller/internal/webui"
 )
 
 func TestListenRejectsNonLoopback(t *testing.T) {
@@ -124,7 +126,7 @@ func TestHostMenuConfigRPCAndRESTUsePersistentHostConfig(t *testing.T) {
 		t.Fatalf("host-menu RPC set=%#v label=%q", set, config.HostMenus.Menus[0].Label)
 	}
 
-	server := httptest.NewServer(websocketMux(service))
+	server := httptest.NewServer(websocketMux(context.Background(), service))
 	defer server.Close()
 	response, err := http.Get(server.URL + "/api/v1/host-menus")
 	if err != nil {
@@ -158,6 +160,106 @@ func TestListenAllowsExplicitRemoteBind(t *testing.T) {
 	_ = listener.Close()
 }
 
+func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	config := appconfig.Defaults()
+	config.UI.AppTitle = "Controller Lab"
+	config.IPC.AuthToken = "0123456789abcdefghijklmn"
+	service := &Service{
+		Client: client, WebSocketPath: "/control", SocketIOPath: "/engine.io/",
+		HostConfig: func() appconfig.Config { return config },
+	}
+	server := httptest.NewServer(websocketMux(context.Background(), service))
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/v1/ui-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var result struct {
+		Name          string `json:"name"`
+		APIVersion    int    `json:"api_version"`
+		WebSocketPath string `json:"websocket_path"`
+		SocketIOPath  string `json:"socket_io_path"`
+		AuthRequired  bool   `json:"auth_required"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || result.Name != "Controller Lab" ||
+		result.APIVersion != APIVersion || result.WebSocketPath != "/control" ||
+		result.SocketIOPath != "/engine.io/" || !result.AuthRequired {
+		t.Fatalf("UI config status=%d result=%+v", response.StatusCode, result)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ui-config", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusMethodNotAllowed || response.Header.Get("Allow") != http.MethodGet {
+		t.Fatalf("UI config POST status=%d Allow=%q", response.StatusCode, response.Header.Get("Allow"))
+	}
+}
+
+func TestIntegrationProxyUsesAuthenticatedReservedRoute(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	const token = "0123456789abcdefghijklmn"
+	proxied := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("X-Integration-Path", request.URL.RequestURI())
+		writer.WriteHeader(http.StatusAccepted)
+	})
+	server := httptest.NewServer(websocketMux(context.Background(), &Service{
+		Client: client, AuthToken: token, IntegrationProxy: proxied,
+	}))
+	defer server.Close()
+
+	response, err := http.Get(server.URL + "/api/v1/integrations/datahub/v1/records?limit=5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated integration status=%d", response.StatusCode)
+	}
+
+	request, err := http.NewRequest(
+		http.MethodGet,
+		server.URL+"/api/v1/integrations/datahub/v1/records?limit=5",
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err = http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusAccepted ||
+		response.Header.Get("X-Integration-Path") !=
+			"/api/v1/integrations/datahub/v1/records?limit=5" {
+		t.Fatalf("authenticated integration status=%d path=%q", response.StatusCode, response.Header.Get("X-Integration-Path"))
+	}
+
+	policy := appconfig.DefaultRemoteAccessPolicy()
+	if remoteCapabilityAllowed(policy, capabilityIntegrations) {
+		t.Fatal("remote integration access must be opt-in")
+	}
+	policy.Integrations = true
+	if !remoteCapabilityAllowed(policy, capabilityIntegrations) {
+		t.Fatal("explicit remote integration capability was ignored")
+	}
+}
+
 func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
@@ -172,12 +274,36 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	go func() {
 		done <- Serve(ctx, listener, &Service{
 			Client: client, WebSocketPath: "/ipc", AuthToken: token,
-			InboundWebhooks: true,
+			InboundWebhooks: true, WebUI: webui.Handler("/ipc"),
 		})
 	}()
 
 	base := "http://" + listener.Addr().String()
-	response, err := http.Get(base + "/api/v1/snapshot")
+	response, err := http.Get(base + "/api/v1/ui-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uiConfigBody, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if readErr != nil || response.StatusCode != http.StatusOK ||
+		!strings.Contains(string(uiConfigBody), `"name":"PCController"`) ||
+		!strings.Contains(string(uiConfigBody), `"websocket_path":"/ipc"`) ||
+		!strings.Contains(string(uiConfigBody), `"socket_io_path":"/socket.io/"`) ||
+		!strings.Contains(string(uiConfigBody), `"auth_required":true`) {
+		t.Fatalf("unauthenticated UI config status=%d body=%s err=%v", response.StatusCode, uiConfigBody, readErr)
+	}
+	response, err = http.Get(base + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appShell, readErr := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if readErr != nil || response.StatusCode != http.StatusOK ||
+		!strings.Contains(string(appShell), "data-pccontroller-shell") {
+		t.Fatalf("unauthenticated app shell status=%d body=%s err=%v", response.StatusCode, appShell, readErr)
+	}
+
+	response, err = http.Get(base + "/api/v1/snapshot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +545,16 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 
 func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	engine := shell.New(8)
+	if err := engine.Register(shell.Command{
+		Name: "echo", Usage: "echo VALUE", Summary: "duplex test command",
+		Run: func(_ context.Context, args []string) (string, error) {
+			return strings.Join(args, " "), nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := controllerapi.AttachSharedRuntime(runtime, engine)
 	listener, err := Listen("127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -429,21 +564,72 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- Serve(ctx, listener, &Service{
-			Client: client, WebSocketPath: "/ipc",
+			Client: client, WebSocketPath: "/ipc", WebUI: webui.Handler("/ipc"),
 		})
 	}()
 
-	websocketContext, stopWebSocket := context.WithTimeout(ctx, 3*time.Second)
-	defer stopWebSocket()
+	base := "http://" + listener.Addr().String()
+	var shellBody string
+	for _, check := range []struct {
+		path, contains string
+	}{
+		{path: "/healthz", contains: `"ok":true`},
+		{path: "/api/v1/ui-config", contains: `"auth_required":false`},
+		{path: "/api/v1/snapshot", contains: `"uptime_ms":0`},
+		{path: "/", contains: "data-pccontroller-shell"},
+	} {
+		response, requestErr := http.Get(base + check.path)
+		if requestErr != nil {
+			t.Fatal(requestErr)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if readErr != nil || response.StatusCode != http.StatusOK ||
+			!strings.Contains(string(body), check.contains) {
+			t.Fatalf("GET %s status=%d body=%s err=%v", check.path, response.StatusCode, body, readErr)
+		}
+		if check.path == "/" {
+			shellBody = string(body)
+		}
+	}
+	cssEnd := strings.Index(shellBody, ".css\"")
+	cssStart := -1
+	if cssEnd >= 0 {
+		cssStart = strings.LastIndex(shellBody[:cssEnd], "href=\"")
+	}
+	if cssStart < 0 || cssEnd < 0 {
+		t.Fatalf("embedded shell has no stylesheet asset: %s", shellBody)
+	}
+	cssPath := shellBody[cssStart+len("href=\"") : cssEnd+len(".css")]
+	rangeRequest, err := http.NewRequest(http.MethodGet, base+cssPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rangeRequest.Header.Set("Range", "bytes=0-15")
+	rangeResponse, err := http.DefaultClient.Do(rangeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rangeBody, readErr := io.ReadAll(rangeResponse.Body)
+	_ = rangeResponse.Body.Close()
+	if readErr != nil || rangeResponse.StatusCode != http.StatusPartialContent ||
+		len(rangeBody) != 16 || !strings.HasPrefix(rangeResponse.Header.Get("Content-Range"), "bytes 0-15/") {
+		t.Fatalf("static range status=%d range=%q bytes=%d err=%v", rangeResponse.StatusCode, rangeResponse.Header.Get("Content-Range"), len(rangeBody), readErr)
+	}
+
+	dialContext, stopDial := context.WithTimeout(ctx, 5*time.Second)
 	connection, _, err := websocket.Dial(
-		websocketContext,
+		dialContext,
 		"ws://"+listener.Addr().String()+"/ipc",
 		nil,
 	)
+	stopDial()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer connection.CloseNow()
+	websocketContext, stopWebSocket := context.WithTimeout(ctx, 5*time.Second)
+	defer stopWebSocket()
 	writeRPC := func(value any) {
 		encoded, encodeErr := json.Marshal(value)
 		if encodeErr != nil {
@@ -506,6 +692,32 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 		if message.Method == "controller.event" && message.Params.Kind == "door" {
 			break
 		}
+	}
+
+	// The browser terminal can send a correlated dispatcher command over the
+	// same full-duplex WebSocket that just delivered the asynchronous event.
+	writeRPC(map[string]any{
+		"jsonrpc": "2.0", "id": 3, "method": "controller.execute",
+		"params": map[string]any{"command": "echo duplex-ready"},
+	})
+	for {
+		_, data, readErr := connection.Read(websocketContext)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		var envelope struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if string(envelope.ID) != "3" {
+			continue
+		}
+		if !strings.Contains(string(data), `"output":"duplex-ready"`) {
+			t.Fatalf("WebSocket command payload=%s", data)
+		}
+		break
 	}
 
 	writeRPC(map[string]any{
@@ -574,4 +786,298 @@ func TestCallRoundTripParseError(t *testing.T) {
 	if response.Result == nil {
 		t.Fatal("missing result")
 	}
+}
+
+func TestRemoteCapabilityPolicyAndMessageProvenance(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	config.IPC.AuthToken = "0123456789abcdefghijklmn"
+	service := Service{Client: client, HostConfig: func() appconfig.Config { return config }}
+
+	read := service.DispatchRemote(
+		context.Background(),
+		Request{Method: "controller.snapshot"},
+		"websocket",
+	)
+	if read.Error != nil {
+		t.Fatalf("default remote read=%#v", read)
+	}
+	reset := service.DispatchRemote(
+		context.Background(),
+		Request{Method: "controller.reset"},
+		"websocket",
+	)
+	if reset.Error == nil || reset.Error.Code != -32003 ||
+		!strings.Contains(reset.Error.Message, "reset") {
+		t.Fatalf("default remote reset=%#v", reset)
+	}
+	automationParams, _ := json.Marshal(map[string]string{"command": "automation run missing"})
+	automation := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.command.execute", Params: automationParams,
+	}, "websocket")
+	if automation.Error == nil || automation.Error.Code != -32003 ||
+		!strings.Contains(automation.Error.Message, capabilityAutomations) {
+		t.Fatalf("default remote host automation=%#v", automation)
+	}
+	config.IPC.RemotePolicy.HostAutomations = true
+	automation = service.DispatchRemote(context.Background(), Request{
+		Method: "controller.command.execute", Params: automationParams,
+	}, "websocket")
+	if automation.Error != nil && automation.Error.Code == -32003 {
+		t.Fatalf("explicitly enabled host automation remained policy-blocked=%#v", automation)
+	}
+
+	messageParams, _ := json.Marshal(controllerapi.TextMessage{
+		Source: "board", Target: "host", Type: "operator.notice", Text: "hello",
+	})
+	denied := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.message.send", Params: messageParams,
+	}, "websocket")
+	if denied.Error == nil || denied.Error.Code != -32003 {
+		t.Fatalf("default remote message=%#v", denied)
+	}
+	config.IPC.RemotePolicy.Messages = true
+	accepted := service.DispatchRemote(context.Background(), Request{
+		Method: "controller.message.send", Params: messageParams,
+	}, "websocket")
+	if accepted.Error != nil {
+		t.Fatal(accepted.Error)
+	}
+	event, ok := accepted.Result.(controllerapi.Event)
+	if !ok || event.Source != "websocket" || event.Metadata["claimed_source"] != "board" {
+		t.Fatalf("trusted message provenance=%#v", accepted.Result)
+	}
+
+	latest := client.LatestEventID()
+	if latest == 0 {
+		t.Fatal("remote authorization decisions were not audited")
+	}
+}
+
+func TestRemoteRESTPolicyBlocksDisruptiveCommand(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	config.IPC.AuthToken = "0123456789abcdefghijklmn"
+	service := &Service{
+		Client: client, HostConfig: func() appconfig.Config { return config },
+	}
+	handler := websocketMux(context.Background(), service)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"http://controller.example/api/v1/command",
+		strings.NewReader(`{"command":"program flash candidate.hex"}`),
+	)
+	request.RemoteAddr = "198.51.100.10:43210"
+	request.Header.Set("Authorization", "Bearer "+config.IPC.AuthToken)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden ||
+		!strings.Contains(response.Body.String(), "programming") {
+		t.Fatalf("remote programming status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(
+		http.MethodGet,
+		"http://controller.example/api/v1/snapshot",
+		nil,
+	)
+	request.RemoteAddr = "198.51.100.10:43210"
+	request.Header.Set("X-PCController-Token", config.IPC.AuthToken)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("remote read status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestBridgeCallPreservesNestedRPCResponse(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	service := Service{
+		Client:     client,
+		BridgeList: func() any { return []map[string]any{{"name": "lab", "connected": true}} },
+		BridgeCall: func(
+			_ context.Context,
+			peer string,
+			request Request,
+		) (Response, error) {
+			if peer != "lab" || request.Method != "controller.snapshot" {
+				t.Fatalf("bridge peer=%q request=%#v", peer, request)
+			}
+			return Response{
+				JSONRPC: Version, ID: request.ID,
+				Result: map[string]bool{"connected": true},
+			}, nil
+		},
+	}
+	params, _ := json.Marshal(map[string]any{
+		"peer": "lab",
+		"request": map[string]any{
+			"jsonrpc": "2.0", "id": 7, "method": "controller.snapshot",
+		},
+	})
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.bridge.call", Params: params,
+	})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	encoded, _ := json.Marshal(response.Result)
+	if !strings.Contains(string(encoded), `"peer":"lab"`) ||
+		!strings.Contains(string(encoded), `"connected":true`) {
+		t.Fatalf("bridge result=%s", encoded)
+	}
+}
+
+func TestInvalidParamsRetainStandardJSONRPCErrorCode(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	response := (&Service{Client: client}).Dispatch(context.Background(), Request{
+		JSONRPC: Version, ID: json.RawMessage("9"),
+		Method: "controller.open", Params: json.RawMessage(`{"port":42}`),
+	})
+	if response.Error == nil || response.Error.Code != -32602 ||
+		string(response.ID) != "9" {
+		t.Fatalf("invalid params response=%#v", response)
+	}
+}
+
+func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
+	runtime := control.New(control.Options{})
+	engine := control.NewCommandEngine(runtime, control.CommandOptions{})
+	client := controllerapi.AttachSharedRuntime(runtime, engine)
+	service := &Service{Client: client}
+
+	catalog := service.Dispatch(context.Background(), Request{
+		Method: "controller.command.catalog",
+	})
+	if catalog.Error != nil {
+		t.Fatal(catalog.Error)
+	}
+	descriptors, ok := catalog.Result.([]shell.CommandDescriptor)
+	if !ok || !catalogContains(descriptors, "settings") ||
+		!catalogContains(descriptors, "relay") ||
+		!catalogContains(descriptors, "program") {
+		t.Fatalf("RPC command catalog=%#v", catalog.Result)
+	}
+	executeParams, _ := json.Marshal(map[string]string{"command": "help strip"})
+	executed := service.Dispatch(context.Background(), Request{
+		Method: "controller.command.execute", Params: executeParams,
+	})
+	if executed.Error != nil || !strings.Contains(fmt.Sprint(executed.Result), "strip pixel") {
+		t.Fatalf("command.execute=%#v", executed)
+	}
+
+	stateParams, _ := json.Marshal(map[string]string{
+		"owner": "test", "mode": "running", "reason": "matrix test",
+	})
+	set := service.Dispatch(context.Background(), Request{
+		Method: "controller.program_state.set", Params: stateParams,
+	})
+	if set.Error != nil || client.ProgramState().Mode != controllerapi.ProgramRunning {
+		t.Fatalf("program-state set=%#v state=%#v", set, client.ProgramState())
+	}
+	get := service.Dispatch(context.Background(), Request{Method: "controller.program_state.get"})
+	if get.Error != nil {
+		t.Fatalf("program-state get=%#v", get)
+	}
+
+	server := httptest.NewServer(websocketMux(context.Background(), service))
+	defer server.Close()
+	for _, path := range []string{"/api/v1/commands", "/api/v1/program-state"} {
+		response, err := http.Get(server.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, readErr := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if readErr != nil || response.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s err=%v", path, response.StatusCode, body, readErr)
+		}
+	}
+	restRequest, _ := http.NewRequest(
+		http.MethodPut, server.URL+"/api/v1/program-state",
+		strings.NewReader(`{"owner":"test","mode":"idle"}`),
+	)
+	restRequest.Header.Set("Content-Type", "application/json")
+	restResponse, err := http.DefaultClient.Do(restRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(restResponse.Body)
+	_ = restResponse.Body.Close()
+	if restResponse.StatusCode != http.StatusOK || client.ProgramState().Mode != controllerapi.ProgramIdle {
+		t.Fatalf("REST program-state status=%d body=%s state=%#v", restResponse.StatusCode, body, client.ProgramState())
+	}
+
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	remote := &Service{Client: client, HostConfig: func() appconfig.Config { return config }}
+	if response := remote.DispatchRemote(context.Background(), Request{Method: "controller.command.catalog"}, "websocket"); response.Error != nil {
+		t.Fatalf("safe default remote catalog=%#v", response)
+	}
+	if response := remote.DispatchRemote(context.Background(), Request{
+		Method: "controller.program_state.set", Params: stateParams,
+	}, "websocket"); response.Error == nil || response.Error.Code != -32003 {
+		t.Fatalf("safe default remote program-state mutation=%#v", response)
+	}
+}
+
+func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testing.T) {
+	tests := []struct {
+		command string
+		want    string
+	}{
+		{"help relay", capabilityRead},
+		{"status", capabilityRead},
+		{"settings", capabilityRead},
+		{"settings color 2", capabilityBoard},
+		{"program-state status", capabilityRead},
+		{"program-state running", capabilityBoard},
+		{"menu layout", capabilityRead},
+		{"menu layout reset", capabilityBoard},
+		{"pwm get", capabilityRead},
+		{"pwm set 0 2048", capabilityBoard},
+		{"rf list", capabilityRead},
+		{"rf status", capabilityRead},
+		{"rf inspect 3", capabilityRead},
+		{"rf send 0x1234 24 1 350", capabilityBoard},
+		{"macro show demo", capabilityRead},
+		{"macro play demo", capabilityBoard},
+		{"macro create 1 demo", capabilityHostConfig},
+		{"macro record save", capabilityHostConfig},
+		{"melody create notify C4:100", capabilityHostConfig},
+		{"automation run door-open", capabilityAutomations},
+		{"hotkeys status", capabilityRead},
+		{"keyboard status", capabilityRead},
+		{"keyboard enable media", capabilityVirtualKeys},
+		{"bridge list", capabilityRead},
+		{"bridge call lab controller.status", capabilityBridgeCalls},
+		{"os status", capabilityRead},
+		{"os key F13", capabilityVirtualKeys},
+		{"program flash image.hex", capabilityProgramming},
+		{"toolchain profile", capabilityRead},
+		{"toolchain sync", capabilityProgramming},
+		{"query 0x35 0x80 00", capabilityProgramming},
+		{"write A50135010000", capabilityProgramming},
+	}
+	for _, test := range tests {
+		if got := commandCapability(test.command); got != test.want {
+			t.Errorf("commandCapability(%q)=%q want %q", test.command, got, test.want)
+		}
+	}
+}
+
+func catalogContains(catalog []shell.CommandDescriptor, name string) bool {
+	for _, descriptor := range catalog {
+		if descriptor.Name == name {
+			return true
+		}
+	}
+	return false
 }

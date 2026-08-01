@@ -20,9 +20,10 @@ void require(bool condition, const std::string &message) {
 
 std::vector<std::uint8_t>
 encode(std::uint8_t opcode, std::uint8_t sequence,
-       const std::vector<std::uint8_t> &payload) {
+       const std::vector<std::uint8_t> &payload,
+       std::uint8_t revision = ControllerProtocol::EnvelopeRevision) {
   std::vector<std::uint8_t> raw{
-      ControllerProtocol::Magic, ControllerProtocol::Version, opcode,
+      ControllerProtocol::Magic, revision, opcode,
       sequence, static_cast<std::uint8_t>(payload.size())};
   raw.insert(raw.end(), payload.begin(), payload.end());
   raw.push_back(UartProtocol::crc8(raw.data(),
@@ -62,6 +63,23 @@ void captureFrame(const Frame &frame, void *context) {
           "nested ACK write failed");
   capture.nestedResponseKeptViewStable &=
       std::equal(before.begin(), before.end(), frame.payload);
+}
+
+void testAdvisoryRevisionDoesNotBlockSemanticFrames() {
+  HardwareSerial serial;
+  UartProtocol protocol(serial);
+  Capture capture;
+  capture.protocol = &protocol;
+  protocol.begin(115200, captureFrame, &capture);
+
+  const std::vector<std::uint8_t> expected{0x41, 0x42};
+  serial.feed(encode(ControllerProtocol::DisplayText, 9, expected, 0x7E));
+  protocol.service();
+
+  require(capture.payloads.size() == 1 && capture.payloads[0] == expected,
+          "advisory envelope revision blocked a valid semantic frame");
+  require(protocol.framingErrors() == 0 && protocol.crcErrors() == 0,
+          "advisory revision advanced an envelope error counter");
 }
 
 void testRepresentativeAndMaximumPayloads() {
@@ -109,7 +127,8 @@ void testInvalidFramesAreRejected() {
 
   // Decode/re-encode with the public helper shape, but an invalid envelope.
   std::vector<std::uint8_t> raw{
-      0x5A, ControllerProtocol::Version, ControllerProtocol::GetStatus, 3, 0};
+      0x5A, ControllerProtocol::EnvelopeRevision,
+      ControllerProtocol::GetStatus, 3, 0};
   raw.push_back(UartProtocol::crc8(raw.data(),
                                    static_cast<std::uint8_t>(raw.size())));
   std::vector<std::uint8_t> malformed(1, 0);
@@ -170,6 +189,7 @@ void testMacroScratchCannotCorruptSplitSerialFrame() {
 int main() {
   try {
     testRepresentativeAndMaximumPayloads();
+    testAdvisoryRevisionDoesNotBlockSemanticFrames();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
     std::cout << "firmware_uart_protocol_tests: all checks passed\n";

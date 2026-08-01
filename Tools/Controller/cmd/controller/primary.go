@@ -19,11 +19,13 @@ import (
 	"pccontroller.local/controller/internal/hostbridge"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
+	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/shell"
+	"pccontroller.local/controller/internal/webui"
 )
 
 var errPrimaryAlreadyRunning = errors.New(
-	"another PCController process already owns the board",
+	"another host controller process already owns the board",
 )
 
 var primaryEndpoint atomic.Value
@@ -76,7 +78,8 @@ type primaryIPC struct {
 	quit         chan struct{}
 	quitOnce     sync.Once
 	client       *controllerapi.Client
-	integrations *hostbridge.Manager
+	integrations atomic.Pointer[hostbridge.Manager]
+	localDevice  *localDeviceHost
 	actions      *hostui.ActionBroker
 }
 
@@ -110,7 +113,23 @@ func startPrimaryIPC(
 		_ = server.Close()
 		return nil, fmt.Errorf("start host integrations: %w", err)
 	}
-	server.integrations = manager
+	server.integrations.Store(manager)
+	if err := engine.Register(shell.Command{
+		Name:    "hotkeys",
+		Usage:   "hotkeys status",
+		Summary: "inspect the active system-wide controller hotkey bindings",
+		Run: func(_ context.Context, args []string) (string, error) {
+			if len(args) != 1 || !strings.EqualFold(args[0], "status") {
+				return "", errors.New("usage: hotkeys status")
+			}
+			encoded, encodeErr := json.MarshalIndent(manager.HotkeyStatus(), "", "  ")
+			return string(encoded), encodeErr
+		},
+	}); err != nil {
+		manager.Close()
+		_ = server.Close()
+		return nil, fmt.Errorf("register global-hotkey status command: %w", err)
+	}
 	if err := engine.Register(shell.Command{
 		Name: "keyboard", Usage: "keyboard status|list|enable|disable|stop",
 		Summary: "inspect or control the primary low-level PC keyboard hook",
@@ -119,6 +138,16 @@ func startPrimaryIPC(
 		manager.Close()
 		_ = server.Close()
 		return nil, fmt.Errorf("register keyboard-control command: %w", err)
+	}
+	if err := engine.Register(shell.Command{
+		Name:    "bridge",
+		Usage:   "bridge list | bridge call PEER METHOD [PARAMS_JSON]",
+		Summary: "inspect or call authenticated remote controller hosts",
+		Run:     manager.BridgeCommand,
+	}); err != nil {
+		manager.Close()
+		_ = server.Close()
+		return nil, fmt.Errorf("register bridge command: %w", err)
 	}
 	return server, nil
 }
@@ -148,27 +177,58 @@ func startPrimaryIPCAt(
 		quit: make(chan struct{}),
 	}
 	server.actions = hostui.NewActionBroker()
+	server.actions.SetObserver(func(action hostui.AppAction) {
+		if event, ok := browserAppActionEvent(action); ok {
+			runtime.PublishStructuredEvent(event)
+		}
+	})
 	sharedClient := controllerapi.AttachSharedRuntime(runtime, engine)
 	server.client = sharedClient
 	service := &ipcjson.Service{
 		Client:          sharedClient,
 		WebSocketPath:   currentPrimaryEndpoint().WebSocketPath,
 		SocketIOPath:    currentPrimaryEndpoint().SocketIOPath,
+		WebUI:           webui.Handler(currentPrimaryEndpoint().WebSocketPath),
 		AuthToken:       currentPrimaryEndpoint().AuthToken,
 		AllowedOrigins:  append([]string(nil), currentPrimaryEndpoint().AllowedOrigins...),
 		InboundWebhooks: currentPrimaryEndpoint().InboundWebhooks,
 		AppAction:       server.actions.Publish,
 		Shutdown: func() {
 			server.quitOnce.Do(func() { close(server.quit) })
-			if server.integrations != nil {
-				_ = server.integrations.ReleaseKeyboard("ipc-shutdown")
+			if integrations := server.integrations.Load(); integrations != nil {
+				_ = integrations.ReleaseKeyboard("ipc-shutdown")
 			}
 			_ = runtime.Close()
 			cancel()
 		},
+		BridgeList: func() any {
+			if integrations := server.integrations.Load(); integrations != nil {
+				return integrations.BridgePeers()
+			}
+			return []hostbridge.PeerInfo{}
+		},
+		BridgeCall: func(
+			ctx context.Context,
+			peer string,
+			request ipcjson.Request,
+		) (ipcjson.Response, error) {
+			if integrations := server.integrations.Load(); integrations != nil {
+				return integrations.CallBridge(ctx, peer, request)
+			}
+			return ipcjson.Response{}, errors.New("host bridge manager is unavailable")
+		},
 	}
 	if len(stores) > 0 && stores[0] != nil {
 		store := stores[0]
+		proxy, proxyErr := newIntegrationProxy(store)
+		if proxyErr != nil {
+			_ = listener.Close()
+			cancel()
+			return nil, fmt.Errorf("configure local integration proxy: %w", proxyErr)
+		}
+		service.IntegrationProxy = proxy
+		server.localDevice = startLocalDeviceHost(ctx, sharedClient, store)
+		service.LocalDevice = server.localDevice
 		service.HostConfig = store.Current
 		service.UpdateHostConfig = func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
@@ -180,6 +240,24 @@ func startPrimaryIPCAt(
 		close(server.done)
 	}()
 	return server, nil
+}
+
+func browserAppActionEvent(action hostui.AppAction) (control.Event, bool) {
+	page := strings.TrimSpace(action.Value)
+	if action.Kind != "app.page" || page == "" {
+		return control.Event{}, false
+	}
+	return control.Event{
+		Kind:   "app.page",
+		Text:   "Open page " + page,
+		Source: action.Source,
+		Target: "app.clients",
+		Action: "navigate",
+		Metadata: map[string]string{
+			"page":  page,
+			"value": page,
+		},
+	}, true
 }
 
 func (server *primaryIPC) QuitRequested() <-chan struct{} {
@@ -199,39 +277,58 @@ func (server *primaryIPC) AppActions() <-chan hostui.AppAction {
 }
 
 func (server *primaryIPC) IntegrationStatus() hostbridge.Status {
-	if server == nil || server.integrations == nil {
+	if server == nil {
 		return hostbridge.Status{}
 	}
-	return server.integrations.Status()
+	integrations := server.integrations.Load()
+	if integrations == nil {
+		return hostbridge.Status{}
+	}
+	return integrations.Status()
 }
 
 func (server *primaryIPC) Notifier() hostui.Notifier {
-	if server == nil || server.integrations == nil {
+	if server == nil {
 		return nil
 	}
-	return server.integrations.Notifier()
+	integrations := server.integrations.Load()
+	if integrations == nil {
+		return nil
+	}
+	return integrations.Notifier()
 }
 
 func (server *primaryIPC) HotkeyStatus() hostui.HotkeyStatus {
-	if server == nil || server.integrations == nil {
+	if server == nil {
 		return hostui.HotkeyStatus{}
 	}
-	return server.integrations.HotkeyStatus()
+	integrations := server.integrations.Load()
+	if integrations == nil {
+		return hostui.HotkeyStatus{}
+	}
+	return integrations.HotkeyStatus()
 }
 
 func (server *primaryIPC) KeyboardStatus() hostui.KeyboardStatus {
-	if server == nil || server.integrations == nil {
+	if server == nil {
 		return hostui.KeyboardStatus{}
 	}
-	return server.integrations.KeyboardStatus()
+	integrations := server.integrations.Load()
+	if integrations == nil {
+		return hostui.KeyboardStatus{}
+	}
+	return integrations.KeyboardStatus()
 }
 
 func (server *primaryIPC) Close() error {
 	if server == nil {
 		return nil
 	}
-	if server.integrations != nil {
-		server.integrations.Close()
+	if integrations := server.integrations.Swap(nil); integrations != nil {
+		integrations.Close()
+	}
+	if server.localDevice != nil {
+		server.localDevice.Close()
 	}
 	server.cancel()
 	_ = server.listener.Close()
@@ -343,6 +440,7 @@ func joinControllerCommand(words []string) string {
 func runSecondaryConsole(
 	input io.Reader,
 	stdout, stderr io.Writer,
+	configuredTitle string,
 ) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -355,7 +453,8 @@ func runSecondaryConsole(
 	}
 	writeLine(
 		stdout,
-		"PCController secondary console (IPC). The primary process retains exclusive serial ownership.",
+		productidentity.ServiceName(configuredTitle, "secondary console (IPC).")+
+			" The primary process retains exclusive serial ownership.",
 	)
 	go streamPrimaryEvents(ctx, stdout, &outputMu)
 

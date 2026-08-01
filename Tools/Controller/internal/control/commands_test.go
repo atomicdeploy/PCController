@@ -230,7 +230,7 @@ func TestBootProgramArguments(t *testing.T) {
 	}
 }
 
-func TestArduinoProgramArguments(t *testing.T) {
+func TestToolchainProgramArguments(t *testing.T) {
 	tests := []struct {
 		input []string
 		want  []string
@@ -241,15 +241,15 @@ func TestArduinoProgramArguments(t *testing.T) {
 		},
 		{
 			[]string{"core-info"},
-			[]string{"core-info", "arduino"},
+			[]string{"core-info", "toolchain"},
 		},
 		{
-			[]string{"burn-bootloader"},
-			[]string{"burn-bootloader", "arduino"},
+			[]string{"install-bootloader"},
+			[]string{"install-bootloader", "toolchain"},
 		},
 	}
 	for _, test := range tests {
-		got, err := arduinoProgramArguments(test.input)
+		got, err := toolchainProgramArguments(test.input)
 		if err != nil {
 			t.Fatalf("%v: %v", test.input, err)
 		}
@@ -258,8 +258,8 @@ func TestArduinoProgramArguments(t *testing.T) {
 		}
 	}
 	for _, input := range [][]string{{"upload"}, {"upload", ".", "COM18"}} {
-		if _, err := arduinoProgramArguments(input); err == nil || !strings.Contains(err.Error(), "program flash") {
-			t.Fatalf("%v: expected guarded-flash error, got %v", input, err)
+		if _, err := toolchainProgramArguments(input); err == nil || !strings.Contains(err.Error(), "usage") {
+			t.Fatalf("%v: expected unpublished-command error, got %v", input, err)
 		}
 	}
 }

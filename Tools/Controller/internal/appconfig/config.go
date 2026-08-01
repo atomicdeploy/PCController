@@ -18,6 +18,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 
 	"pccontroller.local/controller/internal/hostos"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 const (
@@ -96,14 +97,42 @@ type UI struct {
 }
 
 type IPC struct {
-	Listen         string   `json:"listen"`
-	WebSocketPath  string   `json:"websocket_path"`
-	AllowRemote    bool     `json:"allow_remote"`
-	AuthToken      string   `json:"auth_token,omitempty"`
-	AllowedOrigins []string `json:"allowed_origins,omitempty"`
+	Listen         string             `json:"listen"`
+	WebSocketPath  string             `json:"websocket_path"`
+	AllowRemote    bool               `json:"allow_remote"`
+	AuthToken      string             `json:"auth_token,omitempty"`
+	AllowedOrigins []string           `json:"allowed_origins,omitempty"`
+	RemotePolicy   RemoteAccessPolicy `json:"remote_policy"`
 	// Socket.IO is a distinct protocol and is never advertised by the plain
 	// WebSocket endpoint. This path is reserved for an explicit adapter.
 	SocketIOPath string `json:"socket_io_path"`
+}
+
+// RemoteAccessPolicy grants authenticated network peers only the capabilities
+// the operator selected. Loopback IPC remains the trusted primary-owner API.
+// Monitoring and event subscriptions are safe defaults; every mutating or OS
+// capability is opt-in.
+type RemoteAccessPolicy struct {
+	Read              bool `json:"read"`
+	Events            bool `json:"events"`
+	Messages          bool `json:"messages"`
+	BoardCommands     bool `json:"board_commands"`
+	HostConfiguration bool `json:"host_configuration"`
+	ConnectionControl bool `json:"connection_control"`
+	Reset             bool `json:"reset"`
+	Programming       bool `json:"programming"`
+	Shutdown          bool `json:"shutdown"`
+	VirtualKeys       bool `json:"virtual_keys"`
+	PowerActions      bool `json:"power_actions"`
+	HostAutomations   bool `json:"host_automations"`
+	BridgeCalls       bool `json:"bridge_calls"`
+	Integrations      bool `json:"integrations"`
+}
+
+// DefaultRemoteAccessPolicy allows authenticated observation without granting
+// any remote write, reset, programming, OS, or bridge-pivot authority.
+func DefaultRemoteAccessPolicy() RemoteAccessPolicy {
+	return RemoteAccessPolicy{Read: true, Events: true}
 }
 
 type Safety struct {
@@ -120,12 +149,12 @@ type Paths struct {
 }
 
 type Programming struct {
-	Method      string `json:"method,omitempty"`
-	FQBN        string `json:"fqbn,omitempty"`
-	Programmer  string `json:"programmer,omitempty"`
-	ArduinoCLI  string `json:"arduino_cli,omitempty"`
-	Avrdude     string `json:"avrdude,omitempty"`
-	AvrdudeConf string `json:"avrdude_conf,omitempty"`
+	Method       string `json:"method,omitempty"`
+	FQBN         string `json:"fqbn,omitempty"`
+	Programmer   string `json:"programmer,omitempty"`
+	ToolchainCLI string `json:"toolchain_cli,omitempty"`
+	Avrdude      string `json:"avrdude,omitempty"`
+	AvrdudeConf  string `json:"avrdude_conf,omitempty"`
 }
 
 type Macro struct {
@@ -222,7 +251,7 @@ func Defaults() Config {
 			HelloAttempts:    3,
 		},
 		UI: UI{
-			AppTitle:             "PCController",
+			AppTitle:             productidentity.DefaultTitle,
 			WelcomeMelody:        "notify",
 			StatusIntervalMS:     200,
 			IdleStatusIntervalMS: 0,
@@ -252,6 +281,7 @@ func Defaults() Config {
 			WebSocketPath:  "/ipc",
 			AllowedOrigins: []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
 			SocketIOPath:   "/socket.io/",
+			RemotePolicy:   DefaultRemoteAccessPolicy(),
 		},
 		Safety:    Safety{MotionDoorPolicy: "always"},
 		RF:        DefaultRFConfig(),
@@ -276,6 +306,7 @@ func Defaults() Config {
 					{ID: "stop", Label: "Stop outputs", Command: "relay off"},
 				},
 			},
+			DataHub: DataHub{BaseURL: "http://127.0.0.1:8080"},
 		},
 		Scripts:       map[string]string{},
 		Macros:        []Macro{},
@@ -289,7 +320,7 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate user configuration directory: %w", err)
 	}
-	return filepath.Join(base, "PCController", "config.json"), nil
+	return filepath.Join(base, productidentity.ConfigDirectory, "config.json"), nil
 }
 
 func ResolvePath(explicit string) (string, error) {

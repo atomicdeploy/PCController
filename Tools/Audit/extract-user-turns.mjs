@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-// Extracts human-authored user turns from a Codex rollout JSONL file. Raw
-// session text is intended for local acceptance auditing, not publication.
+// Extracts human-authored user turns from one or more Codex rollout JSONL
+// files. Raw session text is intended for local acceptance auditing, not
+// publication.
 
 import { createReadStream, promises as fs } from 'node:fs';
 import { createInterface } from 'node:readline';
@@ -9,7 +10,7 @@ import { resolve } from 'node:path';
 
 function usage() {
   return [
-    'Usage: node extract-user-turns.mjs SESSION.jsonl [options]',
+    'Usage: node extract-user-turns.mjs SESSION.jsonl [SESSION2.jsonl ...] [options]',
     '',
     'Options:',
     '  --json FILE       write structured user turns',
@@ -19,23 +20,27 @@ function usage() {
 }
 
 function parseArguments(values) {
-  const result = { input: '', json: '', markdown: '', includeContext: false };
+  const result = { inputs: [], json: '', markdown: '', includeContext: false, help: false };
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
-    if (value === '--include-context') {
+    if (value === '--help' || value === '-h') {
+      result.help = true;
+    } else if (value === '--include-context') {
       result.includeContext = true;
     } else if (value === '--json' || value === '--markdown') {
       const output = values[index + 1];
       if (!output) throw new Error(`${value} requires a file path`);
       result[value === '--json' ? 'json' : 'markdown'] = output;
       index += 1;
-    } else if (!result.input) {
-      result.input = value;
+    } else if (!value.startsWith('-')) {
+      result.inputs.push(value);
     } else {
       throw new Error(`unexpected argument ${value}`);
     }
   }
-  if (!result.input) throw new Error('a session JSONL path is required');
+  if (!result.help && result.inputs.length === 0) {
+    throw new Error('at least one session JSONL path is required');
+  }
   return result;
 }
 
@@ -71,20 +76,47 @@ async function extract(input, includeContext) {
     const text = messageText(message);
     if (!text || (!includeContext && isGeneratedContext(text))) continue;
     turns.push({
-      index: turns.length + 1,
       timestamp: record.timestamp ?? '',
       turn_id: message.internal_chat_message_metadata_passthrough?.turn_id ?? '',
+      source: input,
       text,
     });
   }
   return turns;
 }
 
-function markdown(turns, source) {
+function mergeTurns(groups) {
+  // Compaction/export can copy an earlier rollout wholesale into a later one
+  // while changing its synthetic timestamps and coarse turn IDs. Prefer the
+  // most complete source, then discard only exact text duplicated by another
+  // source. Repeated messages inside one source remain valid timeline events.
+  const ordered = groups
+    .map((turns, order) => ({ turns, order }))
+    .sort((left, right) => right.turns.length - left.turns.length || left.order - right.order);
+  const seenFromEarlierSources = new Set();
+  const turns = [];
+  for (const group of ordered) {
+    const sourceTexts = new Set();
+    for (const turn of group.turns) {
+      if (seenFromEarlierSources.has(turn.text)) continue;
+      turns.push(turn);
+      sourceTexts.add(turn.text);
+    }
+    for (const text of sourceTexts) {
+      seenFromEarlierSources.add(text);
+    }
+  }
+  turns.sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  return turns.map((turn, index) => ({ ...turn, index: index + 1 }));
+}
+
+function markdown(turns, sources) {
   const sections = [
     '# Local User-Turn Audit',
     '',
-    `Source: \`${source}\``,
+    'Sources:',
+    '',
+    ...sources.map((source) => `- \`${source}\``),
     '',
     `Extracted user turns: ${turns.length}`,
   ];
@@ -104,16 +136,22 @@ async function main() {
     process.exitCode = 2;
     return;
   }
-  const input = resolve(options.input);
-  const turns = await extract(input, options.includeContext);
+  if (options.help) {
+    process.stdout.write(`${usage()}\n`);
+    return;
+  }
+  const inputs = options.inputs.map((input) => resolve(input));
+  const turns = mergeTurns(await Promise.all(
+    inputs.map((input) => extract(input, options.includeContext)),
+  ));
   if (options.json) {
-    await fs.writeFile(resolve(options.json), `${JSON.stringify({ source: input, turns }, null, 2)}\n`);
+    await fs.writeFile(resolve(options.json), `${JSON.stringify({ sources: inputs, turns }, null, 2)}\n`);
   }
   if (options.markdown) {
-    await fs.writeFile(resolve(options.markdown), markdown(turns, input));
+    await fs.writeFile(resolve(options.markdown), markdown(turns, inputs));
   }
   if (!options.json && !options.markdown) {
-    process.stdout.write(`${JSON.stringify({ source: input, turns }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ sources: inputs, turns }, null, 2)}\n`);
   } else {
     process.stdout.write(`Extracted ${turns.length} user turns.\n`);
   }

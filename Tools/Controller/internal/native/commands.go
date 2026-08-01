@@ -68,6 +68,15 @@ func StreamPeriodPayload(periodMS uint16) ([]byte, error) {
 	return U16(periodMS), nil
 }
 
+// ProgramStatePayload encodes the semantic prefix accepted by opcode 0x45.
+// Keeping this one byte avoids coupling the MCU to host owner/reason metadata.
+func ProgramStatePayload(running bool) []byte {
+	if running {
+		return []byte{ProgramStateRunning}
+	}
+	return []byte{ProgramStateIdle}
+}
+
 func RelayTestPayload(periodMS uint16) ([]byte, error) {
 	if periodMS != 0 && periodMS < MinimumRelayTestPeriodMS {
 		return nil, fmt.Errorf(
@@ -509,7 +518,7 @@ func (settings Settings) Payload() ([]byte, error) {
 		return nil, err
 	}
 	payload := []byte{
-		SettingsSchema,
+		SettingsShape,
 		settings.Flags,
 		settings.LightMode,
 		settings.OnBrightness,

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 func TestLoadOrCreateAndReload(t *testing.T) {
@@ -211,7 +213,7 @@ func TestLoadMergesNewUIDefaultsWithoutOverridingExplicitFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.UI.AppTitle != "PCController" || value.UI.HistoryHours != 24 ||
+	if value.UI.AppTitle != productidentity.DefaultTitle || value.UI.HistoryHours != 24 ||
 		!value.UI.ShowCurrent || value.UI.ShowPower ||
 		!value.UI.LCDServiceEnabled || value.UI.MirrorPromptToLCD {
 		t.Fatalf("merged UI defaults=%#v", value.UI)
@@ -374,16 +376,55 @@ func TestYAMLAndTOMLWatcherApplyChanges(t *testing.T) {
 	}
 }
 
-func TestUnsupportedConfigExtensionAndUnknownFieldsAreRejected(t *testing.T) {
+func TestUnsupportedConfigExtensionIsRejected(t *testing.T) {
 	value := Defaults()
 	if err := Write(filepath.Join(t.TempDir(), "config.ini"), value); err == nil {
 		t.Fatal("expected unsupported configuration extension error")
 	}
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("schema: 1\nunknown_field: true\n"), 0o600); err != nil {
-		t.Fatal(err)
+}
+
+func TestFutureConfigFieldsAreIgnoredButKnownTypesRemainStrict(t *testing.T) {
+	tests := []struct {
+		name       string
+		extension  string
+		compatible string
+		badKnown   string
+	}{
+		{
+			name: "JSON", extension: ".json",
+			compatible: `{"schema":1,"future_root":{"enabled":true},"ipc":{"future_policy":{"mode":"observe"}},"programming":{"future_toolchain_cli":"next-cli"}}`,
+			badKnown:   `{"schema":1,"connection":{"baud_rate":"fast"},"future_root":true}`,
+		},
+		{
+			name: "YAML", extension: ".yaml",
+			compatible: "schema: 1\nfuture_root:\n  enabled: true\nipc:\n  future_policy:\n    mode: observe\nprogramming:\n  future_toolchain_cli: next-cli\n",
+			badKnown:   "schema: 1\nconnection:\n  baud_rate: fast\nfuture_root: true\n",
+		},
+		{
+			name: "TOML", extension: ".toml",
+			compatible: "schema = 1\n[future_root]\nenabled = true\n[ipc.future_policy]\nmode = 'observe'\n[programming]\nfuture_toolchain_cli = 'next-cli'\n",
+			badKnown:   "schema = 1\nfuture_root = true\n[connection]\nbaud_rate = 'fast'\n",
+		},
 	}
-	if _, _, err := Load(path); err == nil {
-		t.Fatal("expected strict unknown YAML field rejection")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config"+test.extension)
+			if err := os.WriteFile(path, []byte(test.compatible), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, _, err := Load(path)
+			if err != nil {
+				t.Fatalf("future fields rejected: %v", err)
+			}
+			if loaded.Schema != SchemaVersion || loaded.Connection.BaudRate != Defaults().Connection.BaudRate {
+				t.Fatalf("known/default fields changed: %#v", loaded.Connection)
+			}
+			if err := os.WriteFile(path, []byte(test.badKnown), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := Load(path); err == nil {
+				t.Fatal("known field with wrong type was accepted")
+			}
+		})
 	}
 }

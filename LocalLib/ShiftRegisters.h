@@ -51,8 +51,3 @@ private:
 };
 
 extern ShiftRegisters shiftRegisters;
-
-// Compatibility wrappers for the inherited naming schemes.
-void setupShiftRegisters();
-void serviceShiftRegisters();
-void shiftRegistersService();

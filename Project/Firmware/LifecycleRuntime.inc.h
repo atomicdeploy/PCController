@@ -64,7 +64,6 @@ static inline __attribute__((always_inline)) void initializeController() {
   wdt_reset();
 
   temperatureBus.begin();
-  temperatureBus.setWaitForConversion(false);
   discoverTemperatureSensors();
   requestTemperatures(now);
   appProtocol.service();
@@ -101,9 +100,7 @@ static inline __attribute__((always_inline)) void serviceController() {
   if (macroPlayback.takeSafeStopRequest()) {
     safeStopMacroOutputs();
   }
-  const bool hostOffline = (hostLcdFlags & HOST_SEEN) != 0 &&
-                           static_cast<uint32_t>(now - lastHostActivityAt) >
-                               HOST_OFFLINE_MS;
+  const bool hostOffline = hostUnavailable();
   if (hostOffline && (hostLcdFlags & HOST_LCD_OFFLINE) == 0) {
     if ((hostLcdFlags & HOST_PANEL_CAPTURED) != 0) {
       releaseHostPanel();
@@ -126,30 +123,41 @@ static inline __attribute__((always_inline)) void serviceController() {
   }
   programService(now);
 
-  const bool hot =
-      sensors.temperatureCentiC[0] >= HOT_TEMPERATURE_CENTI_C ||
-      sensors.temperatureCentiC[1] >= HOT_TEMPERATURE_CENTI_C;
+  const bool hot = temperatureHot();
+  static bool hotReported = false;
+  static uint32_t lastHotAlertAt = 0;
+  if (hot && (!hotReported ||
+              static_cast<uint32_t>(now - lastHotAlertAt) >= 10000UL)) {
+    buzzer.error();
+    lastHotAlertAt = now;
+  }
+  hotReported = hot;
+
+  // Critical local safety conditions dominate host overrides and transient
+  // informational cues. Base operational state remains PC-owned.
+  StatusLedMode desiredLedMode;
   if (modeManager.current() == MODE_BOOT) {
-    if (statusLeds.mode() != StatusLedMode::Boot) {
-      statusLeds.setMode(StatusLedMode::Boot, now);
-    }
-  } else if (modeManager.current() == MODE_FAULT || hostOffline) {
-    if (statusLeds.mode() != StatusLedMode::Fault) {
-      statusLeds.setMode(StatusLedMode::Fault, now);
-    }
-  } else if (learningActive) {
-    if (statusLeds.mode() != StatusLedMode::Learning) {
-      statusLeds.setMode(StatusLedMode::Learning, now);
-    }
+    desiredLedMode = StatusLedMode::Boot;
+  } else if (modeManager.current() == MODE_FAULT || hostOffline ||
+             ((hostLcdFlags & HOST_PROGRAM_RUNNING) != 0 &&
+              systemInputs.doorOpen())) {
+    desiredLedMode = StatusLedMode::Fault;
   } else if (hot) {
-    if (statusLeds.mode() != StatusLedMode::Warning) {
-      statusLeds.setMode(StatusLedMode::Warning, now);
-    }
-  } else if (statusLeds.mode() == StatusLedMode::Boot ||
-             statusLeds.mode() == StatusLedMode::Learning ||
-             statusLeds.mode() == StatusLedMode::Warning ||
-             statusLeds.mode() == StatusLedMode::Fault) {
-    statusLeds.setMode(StatusLedMode::Ready, now);
+    desiredLedMode = StatusLedMode::Warning;
+  } else if (learningActive) {
+    desiredLedMode = StatusLedMode::Learning;
+  } else if ((hostLcdFlags & HOST_STATUS_OVERRIDE) != 0) {
+    desiredLedMode = StatusLedMode::Custom;
+  } else if ((hostLcdFlags & HOST_PROGRAM_RUNNING) != 0) {
+    desiredLedMode = StatusLedMode::Running;
+  } else if (systemInputs.bluetoothState(now) ==
+             BluetoothIndicatorState::On) {
+    desiredLedMode = StatusLedMode::Connected;
+  } else {
+    desiredLedMode = StatusLedMode::Disconnected;
+  }
+  if (statusLeds.mode() != desiredLedMode) {
+    statusLeds.setMode(desiredLedMode, now);
   }
 
   illumination.service(systemInputs.doorOpen(),

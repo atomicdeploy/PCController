@@ -101,3 +101,24 @@ func TestHelpIsTaskGroupedAndANSIHasPlainFallback(t *testing.T) {
 		t.Fatalf("ANSI help changed content\ngot:\n%s\nwant:\n%s", got, plain)
 	}
 }
+
+func TestCommandCatalogIsDetachedAndUsesHelpGroups(t *testing.T) {
+	engine := New(4)
+	aliases := []string{"st"}
+	if err := engine.Register(Command{
+		Name: "status", Aliases: aliases, Usage: "status", Summary: "read status",
+		Run: func(context.Context, []string) (string, error) { return "", nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	catalog := engine.Catalog()
+	if len(catalog) != 1 || catalog[0].Name != "status" ||
+		catalog[0].Group != "Connection and telemetry" ||
+		!reflect.DeepEqual(catalog[0].Aliases, []string{"st"}) {
+		t.Fatalf("catalog=%#v", catalog)
+	}
+	catalog[0].Aliases[0] = "changed"
+	if got := engine.Catalog()[0].Aliases[0]; got != "st" {
+		t.Fatalf("catalog aliases share mutable storage: %q", got)
+	}
+}

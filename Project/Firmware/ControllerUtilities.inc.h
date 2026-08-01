@@ -124,6 +124,19 @@ void safeStopMacroOutputs() {
   pwm.clearMask(PwmChannels::UserTestMask);
 }
 
+// Treats a never-seen or timed-out PC as unavailable after firmware startup.
+bool hostUnavailable() {
+  return firmwareReady &&
+         (((hostLcdFlags & HOST_SEEN) == 0) ||
+          static_cast<uint32_t>(now - lastHostActivityAt) > HOST_OFFLINE_MS);
+}
+
+// Collapses both named temperature channels into the safety warning state.
+bool temperatureHot() {
+  return sensors.temperatureCentiC[0] >= HOT_TEMPERATURE_CENTI_C ||
+         sensors.temperatureCentiC[1] >= HOT_TEMPERATURE_CENTI_C;
+}
+
 // Composes the compact availability/activity bitmap used by StatusResponse.
 uint16_t statusFlags() {
   uint16_t flags = 0;
@@ -162,6 +175,15 @@ uint16_t statusFlags() {
   }
   if (buzzer.isBusy()) {
     flags |= STATUS_BUZZER_BUSY;
+  }
+  if ((hostLcdFlags & HOST_PROGRAM_RUNNING) != 0) {
+    flags |= STATUS_PROGRAM_RUNNING;
+  }
+  if (hostUnavailable()) {
+    flags |= STATUS_HOST_OFFLINE;
+  }
+  if (temperatureHot()) {
+    flags |= STATUS_HOT;
   }
   return flags;
 }

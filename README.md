@@ -29,7 +29,8 @@ verified on COM18; older `5DF10D05` and `E2DCE296` results are historical
 checkpoints, not claims about the next frozen image.
 
 The companion tool under [Tools/Controller](Tools/Controller/README.md) provides
-a ten-page Charm TUI, continuous monitor, CLI/shell, scripts, JSON-RPC/REST,
+a ten-page Charm TUI, an embedded responsive RTL/LTR web control center,
+continuous monitor, CLI/shell, scripts, JSON-RPC/REST,
 standard WebSocket and bounded Socket.IO service, Go API, C-compatible dynamic
 library, programmer launcher, and WebSocket firmware relay. It also supports
 PC-side JSON/YAML/TOML configuration with live reload, histories/graphs,
@@ -38,16 +39,26 @@ webhook, and host-to-host bridge surfaces are documented with their current
 commissioning limits in the checklist. Stable USB identity,
 event-driven reconnect, an ambiguity picker, and primary-instance IPC keep one
 serial owner; DTR reset is an independent, default-disabled option.
+
+`controller.exe web` is a complete headless primary mode, not a terminal UI
+wrapper: it owns discovery, serial, automations, hotkeys, integrations, the
+command dispatcher, and the browser event stream without constructing or
+reading from the TUI. Browser terminal commands and live status/events share
+the same authenticated host runtime, while a global `app.page` action fans out
+to both terminal and browser clients when both surfaces are in use.
 Exact wire formats and opcodes are in the
 [protocol and network API reference](Tools/Controller/docs/Protocol-and-Network-API.md).
 Start with [Getting Started and Operations](docs/Getting-Started-and-Operations.md) for the physical
 menu, host commands, configuration, programming, RF, macros, IPC, safety, and
-troubleshooting. The [documentation index](docs/README.md) gives a complete,
+troubleshooting. New-machine setup and the recoverable flash sequence are in
+[Toolchain Bootstrap and Safe Programming](docs/Toolchain-and-Safe-Programming.md).
+The [documentation index](docs/README.md) gives a complete,
 starter-friendly reading order and keeps MCU EEPROM ownership separate from
 host-side configuration.
 The focused [Host Configuration and Integrations](docs/Host-Configuration-and-Integrations.md)
-guide covers the TUI, USB/DTR behavior, hotkeys, notifications, discovery,
-webhooks, remote bridges, and commissioning boundaries.
+guide covers the TUI and web app, USB/DTR behavior, hotkeys, notifications,
+local-device capabilities, the loopback data hub, discovery, webhooks, remote bridges, and
+commissioning boundaries.
 The [Hardware Initialization and Tuning](docs/Hardware-Initialization-and-Tuning.md)
 reference lists the exact INA219, PWM, DS18B20, display, RF, I2C, relay, LED,
 timer, and UART settings, their rationale, and safe alternatives.
@@ -162,10 +173,10 @@ firmware does not add an arbitrary correction.
 
 DS18B20 ROM addresses are sorted for repeatable startup ordering, and the host
 reports each 64-bit ROM. `tLED` is the illumination sensor and `tBT` is the
-Bluetooth-module sensor. On this harness the lower ROM is tBT and the higher
-ROM is tLED; settings flag bit 2 can reverse that assignment after a probe is
-replaced. Turn the enclosure light on: tLED should rise from roughly 26 °C
-toward 28 °C while tBT stays cool.
+Bluetooth-module sensor. The canonical default maps the lower sorted ROM to
+tLED and the higher ROM to tBT; settings flag bit 2 reverses that assignment.
+Turn the enclosure light on to confirm the harness: tLED should rise from
+roughly 26 °C toward 28 °C while tBT stays cool.
 
 ## Menu and controls
 
@@ -235,8 +246,8 @@ D3/INT1.
 
 ## Persistent settings
 
-The development cap23 layout stores an unversioned packed 29-byte settings
-value plus one CRC-8 byte at EEPROM address 32 and uses `EEPROM.update()`.
+The canonical cap23 layout stores an unversioned packed 29-byte settings value
+plus one CRC-8 byte at EEPROM address 32 and uses `EEPROM.update()`.
 Deferred writes wait 1.5 seconds to reduce wear. It stores:
 
 - sound/mute, door/relay audio, tLED/tBT assignment, motion-door policy, and
@@ -251,16 +262,20 @@ Deferred writes wait 1.5 seconds to reduce wear. It stores:
 Sound defaults **on**, LCD ownership is host-side, save-last-page defaults off,
 motion is allowed regardless of door state, the short motion break defaults to
 1 ms, and PWM Auto is the factory boot mode. Existing valid EEPROM overrides
-defaults because the build profile retains EEPROM during uploads. During this
-authorized development phase there is no settings magic/version or automatic
-firmware migration: an invalid settings CRC loads defaults and is rewritten.
-Learned RF records have a separate versioned, CRC-checked 20-slot EEPROM area.
+defaults because the build profile retains EEPROM during uploads. There is no
+settings magic/version or firmware-side migration chain: an invalid settings
+CRC loads canonical defaults and is rewritten. Learned RF records use a
+separate 20-slot area whose header describes record width and capacity rather
+than a project version; every populated record remains CRC checked.
 
 ## Native UART
 
 UART is the primary application interface and bootloader upload path. Native
 application frames use COBS with a `0x00` delimiter, CRC-8/ATM, one-byte
-opcodes, sequence IDs, and payloads up to 48 bytes. Commands cover settings,
+opcodes, sequence IDs, and payloads up to 48 bytes. The emitted envelope
+revision is advisory: receivers validate framing and known opcode semantics,
+ignore supported trailing extensions, and return `Unsupported` for unknown
+operations. Commands cover settings,
 menu navigation/page selection, relays, all PWM channels, status RGB, the
 addressable strip, buzzer, TM1637/LCD text, RF, macros, temperature identities,
 application/bootloader reset, and I2C scan.
@@ -323,8 +338,8 @@ build.cmd --usbasp-flash
 ```
 
 Host packaging publishes only to `Tools/Controller/bin`; firmware compile
-publishes only to `.build/firmware`. Firmware compile, Arduino dependency
-updates (`--arduino-update`), Urclock programming, and guarded USBasp recovery
+publishes only to `.build/firmware`. Firmware compile, resolved toolchain
+synchronization (`--toolchain-sync`), Urclock programming, and guarded USBasp recovery
 all route through the Controller interface. Direct Arduino upload is disabled,
 and USBasp requires explicit troubleshooting authorization. The duplicated
 PowerShell build scripts were removed; CMD and Bash now share the same Node

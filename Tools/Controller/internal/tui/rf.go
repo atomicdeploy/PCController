@@ -412,7 +412,7 @@ func (model Model) rfActionPickerPage() string {
 	entry, _ := model.selectedRFEntry()
 	matches := model.filteredRFActions()
 	lines := []string{
-		sectionHeader("SEARCH RF ACTION", "type to filter · ↑/↓ select · Enter map · Esc cancel"),
+		sectionHeader(model.width, "SEARCH RF ACTION", "type to filter · ↑/↓ select · Enter map · Esc cancel"),
 		kv("Selected code", fmt.Sprintf("ID %d · %s · %d bits · protocol %d", entry.ID, appconfig.FormatRFCode(entry.Code, model.rfValue.DisplayRadix), entry.Bits, entry.Protocol)),
 		kv("Search", model.rfActionQuery+"▏"),
 		"",
@@ -447,7 +447,7 @@ func (model Model) rfActionPickerPage() string {
 func (model Model) rfCategoryPickerPage() string {
 	entry, _ := model.selectedRFEntry()
 	lines := []string{
-		sectionHeader("RF CATEGORY", "↑/↓ select · Enter assign · C create named category · Esc cancel"),
+		sectionHeader(model.width, "RF CATEGORY", "↑/↓ select · Enter assign · C create named category · Esc cancel"),
 		kv("Selected code", fmt.Sprintf("ID %d · %s", entry.ID, appconfig.FormatRFCode(entry.Code, model.rfValue.DisplayRadix))),
 		"",
 	}
@@ -468,7 +468,7 @@ func (model Model) rfCategoryPickerPage() string {
 
 func (model Model) rfCategoryColorPage() string {
 	lines := []string{
-		sectionHeader("CATEGORY COLOR", "fixed ordered palette · ←/→ or ↑/↓ · Enter save · Esc cancel"),
+		sectionHeader(model.width, "CATEGORY COLOR", "fixed ordered palette · ←/→ or ↑/↓ · Enter save · Esc cancel"),
 		kv("Category", model.rfCategoryDraft),
 		"",
 	}

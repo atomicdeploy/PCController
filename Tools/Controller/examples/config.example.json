@@ -10,9 +10,9 @@
     "hello_attempts": 3,
     "reset_on_reconnect": false,
     "last_device": {
-      "port": "tcp://127.0.0.1:8876",
+      "port": "tcp://127.0.0.1:8899",
       "name": "PCController Virtual Board",
-      "last_seen": "2026-08-01T15:12:15.8259604Z"
+      "last_seen": "2026-08-01T20:05:25.3631391Z"
     }
   },
   "ui": {
@@ -46,6 +46,22 @@
     "listen": "127.0.0.1:8787",
     "websocket_path": "/ipc",
     "allow_remote": false,
+    "remote_policy": {
+      "read": true,
+      "events": true,
+      "messages": false,
+      "board_commands": false,
+      "host_configuration": false,
+      "connection_control": false,
+      "reset": false,
+      "programming": false,
+      "shutdown": false,
+      "virtual_keys": false,
+      "power_actions": false,
+      "host_automations": false,
+      "bridge_calls": false,
+      "integrations": false
+    },
     "allowed_origins": [
       "localhost:*",
       "127.0.0.1:*",
@@ -301,11 +317,202 @@
         }
       ]
     },
+    "status_led": {
+      "enabled": true,
+      "transition_ms": 420,
+      "step_ms": 50,
+      "rf_hold_ms": 1400,
+      "door_cue_hold_ms": 1600,
+      "hot_threshold_centi_c": 5000,
+      "idle": {
+        "effect": "steady",
+        "color": {
+          "red": 0,
+          "green": 255,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 128,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "running": {
+        "effect": "steady",
+        "color": {
+          "red": 255,
+          "green": 150,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 160,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "bluetooth_audio_connected": {
+        "effect": "steady",
+        "color": {
+          "red": 0,
+          "green": 0,
+          "blue": 255
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 150,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "bluetooth_audio_searching": {
+        "effect": "breathe",
+        "color": {
+          "red": 0,
+          "green": 80,
+          "blue": 255
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 145,
+        "minimum_brightness": 18,
+        "period_ms": 1800
+      },
+      "bluetooth_audio_off": {
+        "effect": "crossfade",
+        "color": {
+          "red": 0,
+          "green": 255,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 255,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 120,
+        "minimum_brightness": 0,
+        "period_ms": 1800
+      },
+      "rf_activity": {
+        "effect": "breathe",
+        "color": {
+          "red": 190,
+          "green": 0,
+          "blue": 255
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 190,
+        "minimum_brightness": 20,
+        "period_ms": 900
+      },
+      "door_opened": {
+        "effect": "steady",
+        "color": {
+          "red": 255,
+          "green": 96,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 190,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "door_closed": {
+        "effect": "steady",
+        "color": {
+          "red": 0,
+          "green": 255,
+          "blue": 72
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 170,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      },
+      "hot": {
+        "effect": "breathe",
+        "color": {
+          "red": 255,
+          "green": 0,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 255,
+          "green": 72,
+          "blue": 0
+        },
+        "brightness": 255,
+        "minimum_brightness": 72,
+        "period_ms": 1000
+      },
+      "running_door_open": {
+        "effect": "flash",
+        "color": {
+          "red": 255,
+          "green": 0,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 255,
+        "minimum_brightness": 0,
+        "period_ms": 400
+      },
+      "pc_offline": {
+        "effect": "steady",
+        "color": {
+          "red": 255,
+          "green": 0,
+          "blue": 0
+        },
+        "alternate_color": {
+          "red": 0,
+          "green": 0,
+          "blue": 0
+        },
+        "brightness": 180,
+        "minimum_brightness": 0,
+        "period_ms": 0
+      }
+    },
     "discovery": {
       "mdns_enabled": false,
       "ssdp_enabled": false
     },
-    "inbound_webhooks_enabled": false
+    "inbound_webhooks_enabled": false,
+    "local_device": {
+      "enabled": false
+    },
+    "data_hub": {
+      "enabled": false,
+      "base_url": "http://127.0.0.1:8080"
+    }
   },
   "safety": {
     "motion_door_policy": "always"
@@ -321,8 +528,18 @@
     "menus": [
       {
         "id": "host",
+        "node_id": 128,
+        "parent_id": 255,
+        "order_id": 128,
         "label": "HOST",
         "title": "PC Host",
+        "content": "Controls ready",
+        "brightness": 5,
+        "edit_visual": "blink",
+        "flags": {
+          "visible": true,
+          "selectable": true
+        },
         "items": [
           {
             "id": "host-status",
@@ -370,8 +587,19 @@
       },
       {
         "id": "pc-settings",
+        "node_id": 129,
+        "parent_id": 128,
+        "order_id": 129,
         "label": "CFG",
         "title": "PC Settings",
+        "content": "Configuration",
+        "brightness": 5,
+        "edit_visual": "blink",
+        "flags": {
+          "visible": true,
+          "selectable": true,
+          "editable": true
+        },
         "items": [
           {
             "id": "app-title",
@@ -424,8 +652,19 @@
       },
       {
         "id": "system-actions",
+        "node_id": 130,
+        "parent_id": 128,
+        "order_id": 130,
         "label": "SYS",
         "title": "System Actions",
+        "content": "Guarded actions",
+        "brightness": 5,
+        "edit_visual": "pulse",
+        "flags": {
+          "visible": true,
+          "selectable": true,
+          "action": true
+        },
         "items": [
           {
             "id": "brightness",
@@ -433,7 +672,6 @@
             "title": "Monitor brightness",
             "type": "number",
             "value": "50",
-            "min": 0,
             "max": 100,
             "step": 5,
             "read_action": "os.brightness",

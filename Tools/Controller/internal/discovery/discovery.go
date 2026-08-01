@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/grandcat/zeroconf"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 const (
@@ -57,7 +59,7 @@ func Advertise(
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "PCController"
+		name = productidentity.DefaultTitle
 	}
 	ctx, cancel := context.WithCancel(parent)
 	result := &Advertiser{cancel: cancel, done: make(chan struct{})}
@@ -231,7 +233,7 @@ func respondSSDP(
 			"CACHE-CONTROL: max-age=60",
 			"EXT:",
 			"LOCATION: http://" + net.JoinHostPort(locationHost, strconv.Itoa(port)) + "/healthz",
-			"SERVER: PCController/1 UPnP/1.1",
+			"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
 			"ST: " + SSDPType,
 			"USN: " + ssdpUSN(name, port) + "::" + SSDPType,
 			"X-PCController-Name: " + sanitizeHeader(name),
@@ -278,7 +280,7 @@ func ssdpNotify(name string, port int, nts string) string {
 		"LOCATION: http://" + net.JoinHostPort(hostname, strconv.Itoa(port)) + "/healthz",
 		"NT: " + SSDPType,
 		"NTS: " + nts,
-		"SERVER: PCController/1 UPnP/1.1",
+		"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
 		"USN: " + usn + "::" + SSDPType,
 		"X-PCController-Name: " + sanitizeHeader(name),
 		"", "",

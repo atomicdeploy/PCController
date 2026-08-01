@@ -6,6 +6,7 @@ building:
 
 ```console
 Tools\Controller\bin\controller.exe tui
+Tools\Controller\bin\controller.exe web
 ```
 
 The normal TUI keeps the UART open and reconnecting, but does **not** assert
@@ -36,9 +37,13 @@ The default Windows file is:
 ```
 
 Select another file with `PCCONTROLLER_CONFIG` or `--config FILE`. The filename
-extension selects strict `.json`, `.yaml`/`.yml`, or `.toml` decoding; unknown
-keys and invalid ranges are rejected. These commands show which file is active
-without opening the board:
+extension selects `.json`, `.yaml`/`.yml`, or `.toml` decoding; unknown future
+fields are ignored for semantic forward compatibility, while known fields
+retain strict type/range/relationship validation. Unknown fields are not
+available to the older process and may be omitted if that older binary
+explicitly rewrites the whole file. A newer binary recognizes and re-saves its
+current fields normally.
+These commands show which file is active without opening the board:
 
 ```console
 Tools\Controller\bin\controller.exe config path
@@ -116,6 +121,62 @@ CONNECT USB
 `CONNECT USB TO PC` is 17 characters and may be scrolled slowly instead of
 being written as a single 16-cell row.
 
+## Embedded web control center
+
+`controller.exe web` is a complete primary operating mode. It does not launch
+the Charm TUI, allocate a Bubble Tea program, or depend on terminal input. The
+headless process still owns USB discovery/reconnect, serial correlation,
+automations, host menus, global hotkeys, notifications, integration managers,
+and the same guarded command dispatcher. `--no-open` keeps that process and
+HTTP service running without opening a browser.
+
+The embedded responsive app includes the live dashboard and graphs, direct
+relay/motion/PWM controls, an advanced peripheral workbench, Activity history,
+local-device and loopback-data workspaces, and PC/board settings. Commands from
+the browser terminal enter the primary dispatcher; status plus asynchronous
+board, host, and global page-action events return over the persistent
+WebSocket. Incoming event lines also appear in the bounded terminal transcript,
+so command and event traffic remain visible together without losing the full
+filterable timeline.
+
+System-wide hotkeys remain registered in web-only mode. A validated
+`app.page` action is delivered to the TUI queue when one exists and independently
+published to browser subscribers, so a stalled or absent terminal consumer
+cannot starve the web clients. High-risk radio transmission, macro/automation,
+reset, raw/programming, remote-call, and host-power command families receive an
+additional browser confirmation; backend capability policy and programming
+guards remain authoritative.
+
+### Searchable macro workspace
+
+Page `8 Automate` is a first-class macro workspace rather than a shortcut to
+the Console. Its ID-sorted, file-watched library shows each macro's name,
+category, user color, step count, duration, and whether it is playing or being
+recorded. Press `/` and type any ID (decimal or hexadecimal), name, category,
+color, display label, LCD message, or step kind/text/destination to filter;
+`Ctrl+U` clears and `Enter` finishes the search. Arrow keys select a row and
+`Enter` or `P` starts it. Library rows and every bordered action are also
+mouse-selectable.
+
+The action keys are:
+
+- `N` creates a named empty draft; `R` starts recording board operations;
+- `S` saves the current recording and `D` discards it;
+- `P` plays the selected macro; `C` cancels and safely turns affected outputs
+  off, while `K` explicitly cancels and keeps their current states;
+- `I` shows the selected definition, `X` requires a second `X` before deleting
+  PC-side metadata, and `A` opens the automation rules list.
+
+Playback reads the same `MacroRunner` instance used by shell, IPC, and API
+commands. The page therefore reports live macro identity, elapsed/duration,
+step progress, MCU circular-buffer fill out of 127 bytes, accepted bytes,
+last/maximum device timing delta, configured tolerance, violations, underruns,
+dispatch errors, lifecycle, and final faithfulness. Recording offsets come from
+MCU acknowledgement timestamps, not variable USB/network arrival time. Macro
+definitions remain PC configuration; only the active timing queue occupies AVR
+RAM. The deterministic preview contains a safe representative library for UI
+inspection and never opens serial.
+
 ## Global hotkeys
 
 Windows builds use `RegisterHotKey`; registration is process-global and does
@@ -130,6 +191,43 @@ restricted to F1-F24; other chords require Ctrl, Alt, Shift, or Win. Repeats
 are suppressed by the operating system. A conflict is reported in App Settings
 and does not prevent the controller from starting. Non-Windows builds report
 the feature as unsupported.
+
+The embedded web control center receives the same validated `app.page` action
+stream, so `Ctrl+Alt+P` opens Events in whichever UI is active instead of being
+consumed only by the terminal model. Page-local shortcuts remain disabled in
+editable fields and during IME composition; press `?` in the web app for the
+current map. The ordinary low-level keyboard-control bindings remain opt-in
+and retain their focus-loss/fail-safe release behavior.
+
+## Local device and data hub
+
+Both companion applications are disabled by default and are host-side only:
+
+```json
+"integrations": {
+  "local_device": {
+    "enabled": false,
+    "base_url": "http://192.168.1.50"
+  },
+  "data_hub": {
+    "enabled": false,
+    "base_url": "http://127.0.0.1:8080"
+  }
+}
+```
+
+The local device accepts only HTTP(S) roots on loopback, private, or link-local
+networks and explicitly local hostnames. Its manager implements PCController's
+own fixed Local Device v1 capability, snapshot, action, and event-stream
+contract. Requests are bounded, redirects and environment proxies are disabled,
+and only sanitized capability/snapshot inspection is exposed to browser clients.
+
+The data hub must be a loopback root. It is deliberately service-neutral: the
+browser supplies only a relative resource path while the host owns the upstream
+origin. HTTP bodies and WebSocket upgrades stream without whole-payload
+buffering, byte-range and validator semantics are preserved, and PCController
+authorization, cookies, and forwarding headers are removed before forwarding.
+The bundled Persian UI uses the unmodified Vazirmatn font under OFL-1.1.
 
 ## Guarded system actions and monitor brightness
 
@@ -191,6 +289,15 @@ least 24 characters, and an origin allow-list. Query-string tokens exist for
 browser WebSocket clients that cannot set a header, but the Bearer or
 `X-PCController-Token` header is preferred because URLs may be logged.
 
+Authentication and authorization are separate. The default
+`ipc.remote_policy` permits authenticated read/event subscriptions only;
+messages, board commands, host configuration, port control, reset,
+programming, shutdown, virtual keys, power/display actions, bridge calls, and
+configured host-automation execution are independently opt-in. Remote
+programming also requires connection-control permission. Every denied or authorized mutating attempt is source-tagged in
+the host timeline, and generic `controller.execute` commands are classified so
+they cannot bypass a narrower gate.
+
 The exact methods, routes, frames, Socket.IO subset, and examples are in
 [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md).
 
@@ -204,12 +311,14 @@ token. Multicast discovery only finds a service; it grants no control rights.
 Firewall, VLAN, multicast, and corporate-network policy can still prevent
 discovery even when the service is healthy.
 
-Configured WebSocket clients let one host subscribe to another host and, only
-when explicitly enabled with credentials, accept command requests. They retry
-with bounded backoff and preserve the rule that exactly one local primary owns
-the attached serial port. Remote programming still closes that primary's UART,
-runs Arduino CLI/AVRDUDE/Urclock exclusively, and requires a fresh application
-`HELLO` afterward.
+Configured WebSocket clients let one host subscribe to another host and make
+correlated calls through `controller.bridge.call`, `/api/v1/bridges/call`, or
+the `bridge call` shell command. They retry with bounded backoff and preserve
+the rule that exactly one local primary owns the attached serial port. The
+target host independently checks its remote policy and ordinary safety guards;
+recursive bridge calls are rejected. Remote programming still closes that
+primary's UART, runs the guarded toolchain/Urclock workflow exclusively, and
+requires a fresh application `HELLO` afterward.
 
 ## HTTP, webhooks, WebSocket, and Socket.IO
 
@@ -253,6 +362,10 @@ host, or all. The type is a short machine-readable label; text and optional LCD
 rows remain human-readable. Sending to board/LCD uses the bounded native
 display command and emits the same source-tagged host event.
 
+Network routes assign the authoritative source (`ipc`, `websocket`, `bridge`,
+or `webhook`) instead of trusting a caller-supplied `board`/`host` identity. A
+different claimed source is retained as bounded metadata for diagnostics.
+
 `action` is descriptive and is never executed merely because it appeared in a
 message. An enabled host text mapping may turn a matching source/target/type/
 text pattern into an ordinary controller command. That command is logged and
@@ -275,7 +388,7 @@ and reorder tools remain acceptance work; the current learn/list/map/remove
 commands are the fallback. See the RF section of the
 [Project Checklist](Project-Checklist.md) before relying on record-ID order.
 
-## Programming data, backups, and future migration
+## Programming data, backups, and current settings transfer
 
 The existing host can coordinate Arduino CLI, AVRDUDE/Urclock, USBasp recovery,
 and explicit flash/EEPROM backups. The final durable workflow has stricter
@@ -298,26 +411,25 @@ None of these PC files is the MCU's active configuration. The board continues
 to own EEPROM, and a settings change reaches it only through a specific native
 command or a deliberate programmer write.
 
-While EEPROM layouts are still in development, migration belongs off-device:
-back up the old image, identify its layout/hash, preserve unknown bytes, parse
-it with the matching schema, propose a new image or explicit setting changes,
-write, and read back. This avoids spending scarce AVR flash on a permanent
-chain of historical migration code. The acceptance checklist remains the
-authority on which parts of this workflow are implemented versus planned.
-
-The current narrow implementation is:
+No unpublished-build migration/version chain is retained in firmware or host
+code. The file-only tools accept the current unversioned semantic settings
+record, require a complete validated raw-backup manifest, and reject every
+other width/layout explicitly:
 
 ```console
-Tools\Controller\bin\controller.exe eeprom migrate --input OLD.eep --output SETTINGS-v2.eep
+Tools\Controller\bin\controller.exe eeprom inspect --backup-manifest BACKUP\manifest.json
+Tools\Controller\bin\controller.exe eeprom export --backup-manifest BACKUP\manifest.json --output SETTINGS.hex
+Tools\Controller\bin\controller.exe eeprom import --backup-manifest BACKUP\manifest.json --settings SETTINGS.hex --output EEPROM-RESTORE.hex
+Tools\Controller\bin\controller.exe eeprom restore --backup-manifest BACKUP\manifest.json --output EEPROM-ORIGINAL.hex
 ```
 
-It accepts only a CRC-valid legacy unversioned 19+CRC8 settings record,
-preserves the 19 value bytes, adds the all-visible `0x7FFF` menu mask and
-identity packed order, and emits only addresses 32 through 61. It neither
-opens serial nor copies RF/reset-journal regions. A fully valid current record
-is rejected first; otherwise a CRC-valid legacy prefix can be migrated without
-copying ignored stale extension bytes. Writing and readback remain separate
-explicit programming operations.
+The current settings artifact is exactly 29 value bytes plus CRC-8 at EEPROM
+addresses `0x0020..0x003D`. Export emits only that sparse region. Import
+overlays it on the validated 1,024-byte backup so RF records, reset journal,
+and every unknown byte remain unchanged; restore reproduces the original full
+EEPROM image. Outputs are hashed and never overwritten. These commands do not
+open serial or write a device; an actual EEPROM write and readback remain
+separate, explicit programming operations.
 
 ## Measurement demand and history
 

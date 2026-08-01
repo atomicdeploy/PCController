@@ -3,13 +3,15 @@
 #include <avr/pgmspace.h>
 
 #include "PwmController.h"
+#include "TransitionMath.h"
 
 namespace {
 constexpr uint16_t PulseIntervalMs = 20;
 constexpr uint8_t PulseStep = 4;
+constexpr uint8_t StatusModePaletteCount = 10;
 
 // Data-driven palette keeps every cue visually distinct while using less
-// flash than a large branch tree. Rows 0..6 are StatusLedMode values; the
+// flash than a large branch tree. Rows 0..9 are StatusLedMode values; the
 // remaining rows are StatusLedCue values 1..8.
 const uint8_t StatusPalette[][3] PROGMEM = {
     {0, 0, 0},       // Off
@@ -19,6 +21,9 @@ const uint8_t StatusPalette[][3] PROGMEM = {
     {255, 96, 0},    // Warning / hot
     {255, 0, 0},     // Fault
     {0, 0, 0},       // Custom (supplied at runtime)
+    {16, 72, 255},   // BT Audio connected
+    {0, 255, 80},    // BT Audio unavailable phase A (phase B is Fault red)
+    {255, 144, 0},   // Running, enclosure closed
     {255, 120, 12},  // Door open
     {0, 255, 80},    // Door closed
     {16, 72, 255},   // Bluetooth
@@ -31,7 +36,7 @@ const uint8_t StatusPalette[][3] PROGMEM = {
 
 // User order: red, blue, violet, green, white. Reuse cue/mode palette rows
 // rather than duplicating RGB triples in flash.
-const uint8_t ReadyPalette[] PROGMEM = {5, 3, 11, 8, 2};
+const uint8_t ReadyPalette[] PROGMEM = {5, 3, 14, 11, 2};
 
 } // namespace
 
@@ -65,9 +70,17 @@ void StatusLedController::service(uint32_t now) {
     return;
   }
 
+  if (mode_ == StatusLedMode::Fault) {
+    // Critical/offline/running-door warnings intentionally hard-flash; all
+    // informational states and cues retain damped transitions.
+    pulse_ = ((now / 250U) & 1U) != 0 ? brightness_ : 0;
+    render(pulse_, false);
+    return;
+  }
+
   const bool breathing = mode_ == StatusLedMode::Learning ||
                          mode_ == StatusLedMode::Warning ||
-                         mode_ == StatusLedMode::Fault;
+                         mode_ == StatusLedMode::Disconnected;
   if (!breathing) {
     render(brightness_, true); // Continue a smooth post-cue restore.
     return;
@@ -84,9 +97,7 @@ void StatusLedController::service(uint32_t now) {
       pulseRising_ = true;
     }
   }
-  // Fault is the deliberate hard/critical path; other animated states use
-  // damped color and brightness changes.
-  render(pulse_, mode_ != StatusLedMode::Fault);
+  render(pulse_, true);
 }
 
 void StatusLedController::setMode(StatusLedMode mode, uint32_t now) {
@@ -95,8 +106,7 @@ void StatusLedController::setMode(StatusLedMode mode, uint32_t now) {
   pulseRising_ = false;
   lastStepAt_ = now;
   const bool immediate = mode == StatusLedMode::Boot ||
-                         mode == StatusLedMode::Fault ||
-                         mode == StatusLedMode::Custom;
+                         mode == StatusLedMode::Fault;
   if (immediate) {
     cue_ = StatusLedCue::None;
   }
@@ -160,12 +170,17 @@ void StatusLedController::render(uint8_t level, bool eased) {
     green = customGreen_;
     blue = customBlue_;
   } else {
-    const uint8_t paletteIndex =
+    uint8_t paletteIndex =
         cue_ == StatusLedCue::None
             ? (mode_ == StatusLedMode::Ready
                    ? readyPalette_
                    : static_cast<uint8_t>(mode_))
-            : static_cast<uint8_t>(6U + static_cast<uint8_t>(cue_));
+            : static_cast<uint8_t>(StatusModePaletteCount - 1U +
+                                   static_cast<uint8_t>(cue_));
+    if (cue_ == StatusLedCue::None &&
+        mode_ == StatusLedMode::Disconnected && !pulseRising_) {
+      paletteIndex = static_cast<uint8_t>(StatusLedMode::Fault);
+    }
     const uint8_t *color = StatusPalette[paletteIndex];
     red = pgm_read_byte(color);
     green = pgm_read_byte(color + 1);
@@ -185,24 +200,15 @@ void StatusLedController::render(uint8_t level, bool eased) {
     return;
   }
   pwm_->setStatusRgb12(
-      easedValue(pwm_->logicalValue(PwmChannels::StatusRed), targetRed),
-      easedValue(pwm_->logicalValue(PwmChannels::StatusGreen), targetGreen),
-      easedValue(pwm_->logicalValue(PwmChannels::StatusBlue), targetBlue));
+      TransitionMath::easedChannel(
+          pwm_->logicalValue(PwmChannels::StatusRed), targetRed),
+      TransitionMath::easedChannel(
+          pwm_->logicalValue(PwmChannels::StatusGreen), targetGreen),
+      TransitionMath::easedChannel(
+          pwm_->logicalValue(PwmChannels::StatusBlue), targetBlue));
 }
 
 uint8_t StatusLedController::scale(uint8_t value, uint8_t level) {
   return static_cast<uint8_t>(
       (static_cast<uint16_t>(value) * level + 127U) / 255U);
-}
-
-uint16_t StatusLedController::easedValue(uint16_t current, uint16_t target) {
-  const int16_t delta = static_cast<int16_t>(target - current);
-  if (delta == 0) {
-    return current;
-  }
-  int16_t step = static_cast<int16_t>(delta / 4);
-  if (step == 0) {
-    step = delta > 0 ? 1 : -1;
-  }
-  return static_cast<uint16_t>(static_cast<int16_t>(current) + step);
 }

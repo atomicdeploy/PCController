@@ -1,0 +1,75 @@
+{
+  "schema": 2,
+  "stockFixture": {
+    "purpose": "Exact MiniCore 3.1.2 stock-hash reproduction only",
+    "upstream": {
+      "repository": "https://github.com/stefanrueger/urboot",
+      "tag": "u8.0",
+      "commit": "b25d491a0b16eda79e8c5c10dd861d16396c12ae",
+      "license": "GPL-3.0-only",
+      "licenseSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "files": {
+        "urboot.c": "2ad71bf70f3bf802c57fc0298ba68bb53d00c74f972a77e57ff5439cd4ab2831",
+        "atmel_ports.h": "c6b7ef06abf70fd34455e6f83f454ed8178755ea16474df5c6c66e074dbc84c3",
+        "errata.h": "9bbc01fa6e63981fb0a6dd9712f0c1624cb1fa3434840b2e88589e0e2e7ed7b6",
+        "pin_defs.h": "5aa0166896453c0f5a8ac3c2b0e51bb753af85877920b633fe372caa694e07e5",
+        "urboot_ioregs.h": "d3a3cc931ca782b1c0cf6bdd3fa033f8636b69b9f93fa539ca24de3a54562ad5",
+        "urboot_mcuid.h": "ab5876990a0350f7567d2ce192e5db665e38ee480a10030e400c2550f2fded83",
+        "urboot_wdt.h": "322407edd1b6eae5a53be8db960500860e058eb42fe740a9a194c0cef19fbe28",
+        "ur_uart.h": "9763596b281a5db7c5b354ede48fe93ff77432442421607ac24655d4564603fb",
+        "ur_uartnum.h": "4760dd64dee6a63a3b17285326152301892e68b62c5dffeadbff7955747ae4ce"
+      }
+    },
+    "toolchain": {
+      "package": "arduino:avr-gcc@7.3.0-atmel3.6.1-arduino7",
+      "gcc": "7.3.0",
+      "binutils": "2.26.20160125",
+      "bootstrapCore": "MiniCore:avr@3.1.2",
+      "packageIndex": "https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json"
+    },
+    "references": {
+      "MiniCore": "3.1.2",
+      "led+b5": {
+        "hexSha256": "a1f557128760c597d12822faa072eb8712562fd49150cc03807dcdd40fa3a192",
+        "binarySha256": "35debc1341130cad85b566c364ae2639b4dc228b30cfa2f96b4cf99e2bccd650"
+      },
+      "no-led": {
+        "hexSha256": "b2aba91e0bd5a7ef64df3471684cc69c4942cfd587c64e7d884c08e78969354e",
+        "binarySha256": "28d3566779663909146b00d45e38df24f04fbcf33763d806d11578ff55c94d7c"
+      }
+    }
+  },
+  "activeUpstream": {
+    "repository": "https://github.com/stefanrueger/urboot",
+    "tag": "u8.0.1",
+    "commit": "bd52751acaa5923163e938a6e35051c22317da68",
+    "license": "GPL-3.0-only",
+    "licenseSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "files": {
+      "urboot.c": "70d6b0a1de4768267ad9a7cbde912008765dd142f8105f9d07fbf6fed0ea6490",
+      "atmel_ports.h": "c6b7ef06abf70fd34455e6f83f454ed8178755ea16474df5c6c66e074dbc84c3",
+      "errata.h": "9bbc01fa6e63981fb0a6dd9712f0c1624cb1fa3434840b2e88589e0e2e7ed7b6",
+      "pin_defs.h": "5aa0166896453c0f5a8ac3c2b0e51bb753af85877920b633fe372caa694e07e5",
+      "urboot_ioregs.h": "5667d2da78b2b035457d13cec47d91250f0234ee575af0a99e8c994155dd7d64",
+      "urboot_mcuid.h": "8ca581648884e2e7666e5c06cc89eab2f970cf61ac315c83ba72d37d307af64d",
+      "urboot_wdt.h": "322407edd1b6eae5a53be8db960500860e058eb42fe740a9a194c0cef19fbe28",
+      "ur_uart.h": "82a47defe6e10d21fc299a752240d6ea54570b021ebac364f2e49042f9de65bf",
+      "ur_uartnum.h": "abde089df03ee64c7e37a7742cfd4ff49067912ba471df729d08ae93803a8678"
+    }
+  },
+  "customProfile": {
+    "name": "Urboot-Custom",
+    "mcu": "atmega328p",
+    "clockHz": 16000000,
+    "startAddress": "0x7e00",
+    "allocatedBytes": 512,
+    "applicationMaximumBytes": 32256,
+    "backend": "tm1637",
+    "coreDefine": "URBOOT_PROGRESS_ENABLED=1",
+    "backendDefine": "URBOOT_PROGRESS_TM1637=1",
+    "pins": {
+      "clock": "D13/PB5",
+      "data": "D11/PB3"
+    }
+  }
+}

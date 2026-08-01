@@ -21,6 +21,7 @@ import (
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
+	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -125,6 +126,13 @@ type Model struct {
 	menuLayoutSearchEditing  bool
 	menuLayoutSort           string
 	menuLayoutError          string
+	macroSearch              string
+	macroSearchEditing       bool
+	macroDeleteArmed         bool
+	macroDeleteReference     string
+	previewMacros            []appconfig.Macro
+	previewMacroState        control.MacroState
+	previewMacroRecording    control.MacroRecordingState
 
 	welcome              bool
 	welcomeFrame         int
@@ -349,7 +357,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		welcomePhase: "Waiting for USB and application HELLO", welcomeMelody: options.WelcomeMelody,
 		markWelcomed: marker, debug: debug,
 		logs: []string{
-			"PCController command console ready",
+			productidentity.ServiceName(prefs.AppTitle, "command console ready"),
 			"Use the tabs or type help. UI controls use the same validated command paths as CLI and IPC.",
 		},
 	}
@@ -382,7 +390,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 				segD | segE | segF | segG,
 			},
 			HasRawSegments: true,
-			LCDLine1:       "PCController", LCDLine2: "Door OPEN · R5",
+			LCDLine1:       truncateText(prefs.AppTitle, 16), LCDLine2: "Door OPEN · R5",
 			LCDBacklight: true, MenuID: options.Preview.Status.MenuPage,
 			MenuName:    model.menuPageByID(options.Preview.Status.MenuPage).Name,
 			Submode:     model.programModeName(options.Preview.Status.ProgramMode),
@@ -782,7 +790,7 @@ func pageForName(value string) (Page, bool) {
 
 func (model Model) View() string {
 	if !model.ready {
-		return "Starting PCController…"
+		return "Starting " + model.prefs.AppTitle + "…"
 	}
 	if model.welcome {
 		return model.welcomeView()

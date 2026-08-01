@@ -38,7 +38,7 @@ var nestedCompletions = map[string][]string{
 	"boot":             {"probe", "info", "metadata", "backup", "read", "write", "verify", "start"},
 	"program":          {"flash", "probe", "metadata", "backup", "read", "verify", "compile", "urclock", "usbasp"},
 	"program flash":    {"firmware.hex"},
-	"arduino":          {"update", "compile", "core-info", "burn-bootloader"},
+	"toolchain":        {"bootstrap", "sync", "profile", "compile", "core-info", "install-bootloader"},
 	"keyboard":         {"status", "list", "enable", "disable", "stop"},
 	"display":          {"segments", "lcd", "both"},
 	"i2c":              {"scan"},

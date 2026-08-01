@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestDecodeOfflineEEPROMCurrentDevelopmentLayout(t *testing.T) {
+func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 	path := writeEEPROMFixture(t, func(data []byte) {
 		settings := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsRecordBytes]
 		values := settings[:EEPROMSettingsValueBytes]
@@ -29,7 +29,7 @@ func TestDecodeOfflineEEPROMCurrentDevelopmentLayout(t *testing.T) {
 
 		header := data[EEPROMRemoteHeaderAddress : EEPROMRemoteHeaderAddress+4]
 		binary.LittleEndian.PutUint16(header[0:2], 0x4C52)
-		header[2] = EEPROMRemoteStoreVersion
+		header[2] = EEPROMRemoteRecordSize
 		header[3] = EEPROMRemoteCapacity
 		for id := byte(0); id < EEPROMRemoteCapacity; id++ {
 			start := EEPROMRemoteEntriesAddress + uint32(id)*EEPROMRemoteRecordBytes
@@ -56,9 +56,9 @@ func TestDecodeOfflineEEPROMCurrentDevelopmentLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.SourceKind != "offline-eeprom-hex" ||
-		decoded.Layout != "development-v2/settings-unversioned-29/rf-v2-cap20/reset-journal-320" ||
-		!decoded.Settings.Valid || decoded.Settings.Legacy ||
-		decoded.Settings.Format != "development-v2/unversioned-29+crc8" ||
+		decoded.Layout != "settings-unversioned-29/rf-record12-cap20/reset-journal-320" ||
+		!decoded.Settings.Supported || !decoded.Settings.Valid ||
+		decoded.Settings.Format != "current/unversioned-29+crc8" ||
 		decoded.Settings.ValueBytes != 29 {
 		t.Fatalf("settings decode invalid: %#v", decoded.Settings)
 	}
@@ -126,38 +126,45 @@ func TestDecodeOfflineEEPROMReportsCRCAndHeaderDamage(t *testing.T) {
 	if decoded.Settings.Valid || !strings.Contains(decoded.Settings.Issue, "CRC-8") {
 		t.Fatalf("settings corruption not reported: %#v", decoded.Settings)
 	}
-	if decoded.Remotes.Valid || !strings.Contains(decoded.Remotes.Issue, "version") ||
+	if decoded.Remotes.Valid || !strings.Contains(decoded.Remotes.Issue, "record_bytes") ||
 		decoded.Remotes.InvalidCount != 1 || decoded.Remotes.Slots[0].Valid {
 		t.Fatalf("RF corruption not reported: %#v", decoded.Remotes)
 	}
 }
 
-func TestDecodeOfflineEEPROMAcceptsLegacyRaw19ByteSettingsForensics(t *testing.T) {
-	path := writeEEPROMFixture(t, func(data []byte) {
-		record := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsLegacyRecord]
-		values := record[:EEPROMSettingsLegacyBytes]
-		values[0] = 0x01 | 0x04
-		values[1] = 1
-		values[2] = 128
-		values[4] = 5
-		values[5] = 128
-		values[6] = 2
-		binary.LittleEndian.PutUint16(values[7:9], 500)
-		values[17] = 3
-		values[18] = 0x01
-		record[EEPROMSettingsLegacyBytes] = avrCRC8(values)
-	})
+func TestDecodeOfflineEEPROMRejectsUnsupportedShortSettingsLayout(t *testing.T) {
+	const unsupportedValueBytes = 19
+	values := make([]byte, unsupportedValueBytes)
+	values[0] = 0x01 | 0x04
+	values[1] = 1
+	values[2] = 128
+	values[4] = 5
+	values[5] = 128
+	values[6] = 2
+	binary.LittleEndian.PutUint16(values[7:9], 500)
+	values[17] = 3
+	values[18] = 0x01
+	record := append(append([]byte(nil), values...), avrCRC8(values))
+	image := &IntelHexImage{data: make(map[uint32]byte, len(record))}
+	for offset, value := range record {
+		image.data[EEPROMSettingsAddress+uint32(offset)] = value
+	}
+	content, err := image.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "unsupported.eep")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	decoded, err := DecodeOfflineEEPROMHex(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	settings := decoded.Settings
-	if !settings.Valid || !settings.Legacy ||
-		settings.Format != "legacy/unversioned-19+crc8" ||
-		settings.ValueBytes != EEPROMSettingsLegacyBytes ||
-		!settings.Values.Silent || !settings.Values.SwapTemperatureSensors ||
-		settings.Values.VisibleMenuMask != 0 || settings.Values.MenuOrder != [8]byte{} {
-		t.Fatalf("legacy forensic settings=%#v", settings)
+	if settings.Supported || settings.Valid ||
+		!strings.Contains(settings.Issue, "unsupported settings layout") {
+		t.Fatalf("unsupported settings layout was accepted: %#v", settings)
 	}
 }
 
@@ -197,7 +204,7 @@ func TestDecodeOfflineEEPROMRejectsInvalidCurrentMenuLayout(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if decoded.Settings.Valid || decoded.Settings.Legacy ||
+			if decoded.Settings.Valid || !decoded.Settings.Supported ||
 				!strings.Contains(decoded.Settings.Issue, test.issue) {
 				t.Fatalf("invalid layout was not rejected: %#v", decoded.Settings)
 			}

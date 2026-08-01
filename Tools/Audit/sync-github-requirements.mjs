@@ -74,6 +74,14 @@ const R = [
       'Persist sound, display, lighting, precision, PWM, telemetry, default-page, and save-last-page settings.',
       'Use sound-on as the factory default while honoring retained EEPROM, and verify saved precision across reset.',
     ], 'Current source implements the record and separation; live settings decoding and voltage/current precision persistence across reset were verified.'),
+  requirement('mcu-event-automation', 1, 'Persist compact board-owned event automations for offline-safe actions', 'open',
+    ['🧩 firmware', '💾 storage', '🛡️ safety', '💡 enhancement'], 'Motion, enclosure, RGB, audio, and board automation', [
+      'Store compact MCU-owned automation records in EEPROM separately from watched PC automation/configuration, without an unpublished-build migration chain.',
+      'Match door, BT Audio, host-connected/disconnected, relay, learned-RF, and other bounded board events.',
+      'Invoke existing safe relay/motion-stop, PWM, RGB/audio, RF-transmit, and host-macro-request paths without duplicating a flash-heavy policy engine.',
+      'Expose transactional list/add/edit/remove/clear and readback through the board menu where feasible, host TUI/CLI/APIs, and EEPROM backup/offline inspection.',
+      'Define deterministic ordering, recursion/rate bounds, reset behavior, and a safe host-loss action while keeping Silent and motion interlocks authoritative.',
+    ], 'PC-owned automations are implemented, but the firmware has no EEPROM automation table, board CRUD opcodes, or offline event-to-action executor; this remains genuinely missing.'),
   requirement('reset-safety-journal', 1, 'Complete graceful reset safety and reliable reset-cause journal telemetry', 'open',
     ['🧩 firmware', '🛡️ safety', '💾 storage', '🧪 testing', '🔥 priority: critical'], 'Firmware lifecycle, persistence, and reset', [
       'Turn off side/general relays, PWM test, and all PWM channels before watchdog reset, with an explicit RGB cue.',
@@ -148,10 +156,10 @@ const R = [
   requirement('relay-user-controls-break-setting', 3, 'Expose R5-R8 behaviors and configurable break timing across all control surfaces', 'open',
     ['🧩 firmware', '🖥️ host', '🛡️ safety', '🚧 in progress'], 'Relays and motion safety', [
       'Support R5-R8 toggle and momentary push behavior locally and remotely.',
-      'Persist a board-owned break-before-direction interval with a safe 1 ms minimum/default for the current loads.',
+      'Persist a board-owned break-before-direction interval with a safe 1 ms minimum/default for the current loads; document whether the compact 1/100 ms choices are sufficient or a freely ranged value justifies another EEPROM byte.',
       'Keep direction-settle and cross-side interlocks independent of the configurable break.',
       'Expose and decode the value in menus, TUI, CLI, APIs, backups, and offline EEPROM tools.',
-    ], 'R5-R8 behavior and host commands exist, but break timing is still compiled-in and the final cross-surface setting plus hardware test are open.'),
+    ], 'R5-R8 behavior is implemented; the EEPROM/settings/protocol/offline paths select a compact 1 ms factory value or 100 ms alternate while preserving independent settle/interlock timing. A user decision on arbitrary millisecond storage plus the load-safe physical timing test remain open.'),
 
   requirement('frontpanel-key-gestures', 4, 'Complete physical and remote key gestures with responsive hold acceleration', 'open',
     ['🧩 firmware', '🎛️ front-panel', '🧪 testing', '🔍 needs-hardware'], 'Buttons, gestures, menu, and audio', [
@@ -166,7 +174,8 @@ const R = [
       'Provide blinking editors and explicit SAVE/diSC flows with distinct audio cues.',
       'Expose board sound, display/status brightness, Ready color, precision, illumination, PWM, relay, motion, RF, and user-output settings.',
       'Use a configurable default page after boot/no-change door close and optionally save the last page across power loss.',
-    ], 'A six-field nested settings sequence, blinking, page commands, and default/save-last persistence exist; the broader category hierarchy and full physical-key validation remain incomplete.'),
+      'Persistently show/hide pages and reorder stable page IDs; browse visible pages and nested category children in configured ID/rank order.',
+    ], 'The cap23 source now implements persistent visibility/order plus four category parents, leaf Back/Enter navigation, six-field settings, blinking, save/discard, and default/save-last behavior. Builds/tests cover the layout, but the final-image all-key hierarchy/editor pass remains open.'),
   requirement('first-run-board-synchronization', 4, 'Synchronize first-run setup, board initialization, and welcome melody', 'open',
     ['🖥️ host', '🎛️ front-panel', '✨ ux', '⚡ priority: high'], 'TUI structure and interaction', [
       'Show a polished first-run setup/preview animation and persist completion in PC configuration.',
@@ -174,7 +183,7 @@ const R = [
       'Start or observe the welcome melody while the setup page is visible and keep progress synchronized with the physical board.',
       'Leave the page only after initialization and melody completion, or show a bounded, actionable offline/error result.',
       'Opening the app must not reset the board unless the user explicitly enabled DTR reset.',
-    ], 'The host authenticates the board and DTR reset defaults off, but the first-run page and melody/initialization synchronization are not implemented or screenshot-verified.'),
+    ], 'The persisted first-run animation, authenticated HELLO/READY gate, buzzer-busy or bounded legacy grace, host welcome melody, timeout/error path, mouse/keyboard acknowledgement, and DTR-off default are source/test complete. The rebuilt packaged TUI still needs an actual Windows Terminal screenshot/listening pass against the board.'),
   requirement('frontpanel-snapshot-remote-menus', 4, 'Mirror the live front panel and support remote keys plus PC-defined board menus', 'open',
     ['🧩 firmware', '🖥️ host', '🎛️ front-panel', '🔌 protocol-api'], 'Configuration, menus, melodies, and programming surfaces', [
       'Snapshot exact TM1637 bytes/mask/brightness/blink, LCD cells/address/backlight, active keys, current page, submenu, and mode.',
@@ -182,7 +191,7 @@ const R = [
       'Inject four remote keys with down/up/hold/gesture semantics through the same board state machine and source-tagged events.',
       'Serve host-defined nested typed menus from PC JSON/YAML/TOML with confirmation, callbacks, capture timeout, and host-loss fallback.',
       'Poll snapshots only while a subscriber needs them without closing the serial link.',
-    ], 'Basic menu/page and display commands exist, but exact snapshots, remote-key injection, subscriber-aware polling, and PC-owned menu sessions remain open.'),
+    ], 'Exact schema-2 front-panel snapshots, remote-key gesture injection, TUI preview/press-and-hold controls, watched host-menu definitions, live definition updates, and cap19 push/capture fallback are source/test complete. Physical mirroring and the flash-heavier board-pull/retry endpoint profile remain live/design acceptance gaps.'),
   requirement('lcd-console-status-events', 4, 'Mirror console context to LCD and make Status the event-aware default page', 'open',
     ['🧩 firmware', '🖥️ host', '🎛️ front-panel', '✨ ux'], 'Motion, enclosure, RGB, audio, and board automation', [
       'Optionally mirror the active console prompt, completion, and result context to the 2x16 LCD without routine telemetry flicker.',
@@ -205,7 +214,7 @@ const R = [
       'Support finite, indefinite, and multi-learn sessions with clear start/end/cancel/full notifications.',
       'Store at least 20 records if EEPROM endurance/layout permits, retaining CRC and individual management.',
       'Offer the action catalog locally when feasible and resolve compact IDs to host labels when connected.',
-    ], 'Current firmware stores eight records and implicitly assigns a default action; the requested session model, capacity, and unmapped flow are not complete.'),
+    ], 'Current source uses 20 twelve-byte CRC-checked records, learns new identities as Unmapped, and supports finite, indefinite, and multi-learn sessions with explicit started/ended/cancelled/full events. A fresh final-image EEPROM/readback pass and real multi-button session are still required.'),
   requirement('rf-latency-gestures-guided', 5, 'Reduce RF action latency and verify click/hold/repeat behavior with guided capture', 'open',
     ['🧩 firmware', '🖥️ host', '📡 rf-433', '🐛 regression', '🔍 needs-hardware'], 'RF learning, mapping, latency, and capacity', [
       'Make a short single burst invoke its mapping reliably and reduce receive-to-action delay.',
@@ -219,7 +228,7 @@ const R = [
       'Store names, notes, categories, and colors by stable code/bits/protocol identity rather than record ID.',
       'Offer a searchable action picker and user-named categories with color choices in this order: red, blue, violet/purple, green, white.',
       'Reorder/renumber transactionally, read back, keep the list sorted by ID, and update metadata without confusing ID and RF identity.',
-    ], 'Basic numeric mapping commands exist; consistent formatting, metadata UX, searchable actions, and transactional reorder are not implemented.'),
+    ], 'Watched PC metadata keyed by stable RF identity, uniform hexadecimal/decimal presentation, the fixed color palette, searchable TUI action picker, staged ID-sorted reorder, firmware replace opcode, and readback-oriented host flow are source/test complete. Final-board reorder/rollback and handset UX remain unverified.'),
 
   requirement('protocol-native-uart', 6, 'Replace Firmata with the native COBS/opcode UART protocol', 'closed',
     ['🧩 firmware', '🖥️ host', '🔌 protocol-api', '✅ verified'], 'Native UART protocol and asynchronous events', [
@@ -234,7 +243,7 @@ const R = [
       'Publish door, BT Audio, key, RF, output, programming, automation, fault, reset, and shutdown events immediately with source tags.',
       'Keep framing/CRC counters and recoverable errors visible without printing raw HELLO bytes outside debug mode.',
       'Deliver the same typed state through TUI, scripting, Go/C APIs, IPC, and network consumers.',
-    ], 'Broad command coverage and many asynchronous events pass, but dedicated firmware fault, relay-change, and temperature-alarm events remain missing.'),
+    ], 'Broad command coverage and immediate door, BT Audio, key, RF, PWM, relay, RF-learning, macro, and reset events pass source tests. Dedicated firmware fault and temperature-alarm event emission remain missing, and final-board cross-surface event latency still needs validation.'),
   requirement('protocol-frontpanel-menu-uptime', 6, 'Extend protocol schemas for live menus, front-panel snapshots, host state, and uptime', 'open',
     ['🧩 firmware', '🖥️ host', '🎛️ front-panel', '🔌 protocol-api', '🐛 regression'], 'Configuration, menus, melodies, and programming surfaces', [
       'Query the live menu catalog with IDs, labels, descriptions, current page, and submode.',
@@ -243,7 +252,7 @@ const R = [
       'Expose a PC-owned Idle/Running program state with source/reason text; consumers, APIs, macros, and the host UI may acquire/release named ownership claims and transient reference-counted leases without coupling state to the enclosure door.',
       'Do not let completion of one macro or automation clear an explicit consumer-owned Running claim; publish every effective transition through status, events, history, scripting, IPC, and network APIs.',
       'Keep raw device uptime and render readable uptime in every monitoring/API/history/scripting surface.',
-    ], 'Current status/menu commands expose basic IDs and telemetry, but the host fallback still confuses legacy Voltage=0/Status=14 with schema-2 Status=0/RF=14 instead of consuming the advertised live catalog; richer schemas, full snapshot, host session state, and cross-surface uptime remain incomplete.'),
+    ], 'The live menu catalog, exact front-panel snapshot, remote gestures, compact layout, PC-owned Idle/Running state heartbeat/claims, and raw/readable uptime are source/test complete. Host-provided date/time/optional labels, live final-image observation, and every external surface still need end-to-end acceptance.'),
   requirement('protocol-simulator-transport', 6, 'Maintain deterministic native-protocol simulator and fragmented-transport tests', 'closed',
     ['🔌 protocol-api', '🧪 testing', '✅ verified'], 'Native virtual board', [
       'Model the current bounded COBS/CRC/opcode shapes over a desktop transport.',
@@ -266,7 +275,7 @@ const R = [
       'Add visible port, reset, relay/motion, PWM slider, RGB, sound/melody, menu, RF, and programming controls.',
       'Distinguish live versus persisted board values and expose all watched host settings.',
       'Exercise the actual Windows TUI and inspect representative screenshots before completion.',
-    ], 'The current TUI has monitoring and command entry, but the requested pages, controls, mouse behavior, settings editors, and screenshot QA are unfinished.'),
+    ], 'The requested domain pages, port/output/settings/RF/programming controls, sliders/toggles, keyboard/mouse navigation, centered headers, ANSI-visible-cell padding, wrapped value alignment, and 88/120/132/160-column render tests are source-complete. Rebuild/relaunch plus actual Windows Terminal screenshot/focus QA remains open.'),
   requirement('monitoring-format-history', 7, 'Improve monitoring presentation, adaptive units, subscriptions, graphs, and timeline', 'open',
     ['🖥️ host', '✨ ux', '💾 storage', '💡 enhancement'], 'TUI structure and interaction', [
       'Style grouped key/value monitoring and expand LED Temperature and BT Audio Temperature names/states.',
@@ -274,7 +283,7 @@ const R = [
       'Configure sampling rates and stop status polling only when no TUI/script/automation/TCP/IPC/WebSocket subscriber needs it.',
       'Retain configurable history for 24 hours by default, graph measurements, and show important events in a timeline.',
       'Reflect authoritative relay/PWM/motion state from every source rather than optimistic local UI state.',
-    ], 'Basic live telemetry is present; styling, adaptive units, age debounce, subscriber accounting, durable graphs/timeline, and complete state reconciliation are open.'),
+    ], 'Grouped styling, expanded names, adaptive engineering units, sub-500 ms age suppression, configurable visibility/precision/rates, demand-counted polling, 24-hour history/sparklines/timeline, uptime, and event-driven output reconciliation are source/test complete. Long-running persistence and live multi-source TUI reconciliation remain acceptance gaps.'),
   requirement('console-command-ux', 7, 'Finish console history, nested completion, command organization, and clean output', 'open',
     ['🖥️ host', '✨ ux', '🐛 regression'], 'TUI structure and interaction', [
       'Recall the previous command with Right Arrow on an empty prompt.',
@@ -282,7 +291,7 @@ const R = [
       'Organize commands by task and use semantic color instead of one all-green style.',
       'Provide clear, quit, and exit and hide raw HELLO bytes outside debug mode.',
       'Provide menu list and grouped discoverable help for the native and Urboot/Urclock surfaces.',
-    ], 'The shell and command engine exist, but nested completion and the requested console interaction/styling regressions remain unresolved.'),
+    ], 'Empty-prompt Right Arrow recall, nested Tab/Right Arrow completion, grouped selectively styled VT-100 help with plain fallback, clear/quit/exit, menu list, and non-debug raw-HELLO suppression are source/test complete. The rebuilt real TUI still needs user-facing interaction/screenshot acceptance.'),
   requirement('host-automation-hotkeys-os', 7, 'Complete macros, melodies, automations, hotkeys, notifications, and guarded OS actions', 'open',
     ['🖥️ host', '✨ ux', '🛡️ safety', '💡 enhancement'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'Run/cancel named relay/PWM/display macros and create/preview/play/stop board or streamed melodies/effects.',
@@ -293,7 +302,7 @@ const R = [
       'Expose guarded IP/system/power actions with explicit policy and confirmation.',
       'Expose a PC-owned System Actions menu with Suspend, Hibernate, Restart, and policy-gated primary-monitor DDC/CI brightness; apply watched configuration immediately and publish accepted/denied events.',
       'Show actionable desktop notifications whose buttons return through the authenticated safety path.',
-    ], 'Guarded OS actions and DDC/CI brightness are source-complete with injectable-backend tests; a harmless live brightness/menu check remains. Macros, effects, melodies, and event automation exist, but hotkeys, actionable toasts, full UI, and live macro validation remain open.'),
+    ], 'Macros/effects/melodies, event automations, configurable global hotkeys, audited virtual-key injection, actionable Windows notifications, Running-door warning/clear, guarded OS actions, and DDC/CI brightness are source/test complete. Live hotkey/toast action, harmless brightness, and physical macro observations remain open.'),
   requirement('host-macro-recording-playback-sync', 7, 'Stream recorded macros into an MCU-timed queue with synchronized progress and safety', 'open',
     ['🧩 firmware', '🖥️ host', '🎛️ front-panel', '🔌 protocol-api', '🛡️ safety', '🔥 priority: critical'], 'Configuration, menus, melodies, and programming surfaces', [
       'Record relay, motion, PWM/MOSFET, buzzer/melody, seven-segment/LCD message, RF transmit, menu/front-panel, and extensible command steps using precise monotonic relative timestamps.',
@@ -306,7 +315,7 @@ const R = [
       'Let automations start by name/ID, cancel, or replace under an explicit concurrency policy and trigger from macro lifecycle/health events.',
       'Allow physical, host, automation, and API cancellation while applying identical relay, motion, output, programming, and queue-health gates to every source.',
       'Keep only the active queue in AVR RAM, report exact flash/SRAM costs and tradeoffs, and block release until live timing, refill, underrun, cancellation, and safety behavior are verified.',
-    ], 'Current source contains the bounded AVR queue/scheduler and MCU-clock execution acknowledgements plus a host macro foundation, but durable record/CRUD UX, hosted menu, automation invocation, final health reporting, and live refill/underrun/cancel/timing verification remain open.'),
+    ], 'The bounded AVR queue/scheduler, MCU-clock acknowledgements, host recorder/refill/faithfulness engine, durable library, automation invocation, hosted-menu model, and rich searchable keyboard/mouse TUI CRUD/progress workspace are source/test complete; the timestamped-event parser regression is fixed and virtual playback is faithful. Physical refill/underrun/cancel/timing/display/output validation remains open.'),
   requirement('host-keyboard-bindings-output-state', 7, 'Add configurable keyboard motion/output bindings with authoritative live-state reconciliation', 'open',
     ['🖥️ host', '✨ ux', '🛡️ safety', '⚡ priority: high'], 'TUI structure and interaction', [
       'Provide factory mappings A/S for Side B Up/Down and K/L for Side A Up/Down.',
@@ -314,7 +323,7 @@ const R = [
       'Make digits 1-9 configurable action bindings that may target relays or PWM outputs rather than fixed relay numbers.',
       'Let every binding select momentary or toggle/latch behavior and use Ctrl for its configured alternate behavior.',
       'Render authoritative relay, PWM, and motion state after actions from keyboard, RF, physical controls, automation, IPC, or a remote bridge.',
-    ], 'This is a newly normalized requirement; no current implementation or interaction test demonstrates the requested bindings or cross-source state reconciliation.'),
+    ], 'Watched bindings provide the A/S and K/L motion defaults plus configurable digit actions, Ctrl alternate semantics, and paired key-down/up handling with held-key release on disconnect/exit; unit tests cover configuration and injection. Real TUI key-hold behavior and authoritative physical/RF/bridge state reconciliation remain open.'),
 
   requirement('ipc-websocket-api-suite', 8, 'Provide versioned JSON-RPC, REST, and authenticated WebSocket command/event APIs', 'open',
     ['🔌 protocol-api', '🌐 networking', '🔒 security', '⚡ priority: high'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
@@ -322,28 +331,28 @@ const R = [
       'Run an authenticated or safely local WebSocket server alongside IPC for commands and typed subscriptions.',
       'Cover status, USB, RF, door, BT, keys, outputs, programming, reset, automation, and shutdown.',
       'Allow open, close, reconnect, reset, quit, programming, and every ordinary controller command.',
-    ], 'Loopback JSON-RPC and a Go WebSocket relay exist, but the unified versioned REST/WebSocket service and full lifecycle/event matrix are not complete.'),
+    ], 'One authenticated listener now serves correlated NDJSON JSON-RPC 2.0, REST v1, standard WebSocket commands/subscriptions, lifecycle methods, and the typed event stream; in-process coexistence tests pass. External-client compatibility and cross-machine commissioning remain open.'),
   requirement('network-bridge-discovery', 8, 'Bridge controller hosts over the network with mDNS/SSDP discovery', 'open',
     ['🖥️ host', '🔌 protocol-api', '🌐 networking', '🔒 security'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'Bridge one host through another for programming, monitoring, configuration, commands, queries, and events.',
       'Preserve one serial owner and surface remote lifecycle/errors like local IPC events.',
       'Advertise/discover non-secret service metadata through mDNS and SSDP where supported.',
       'Require explicit authenticated authority after discovery; discovery alone never grants control.',
-    ], 'Single-owner local IPC is proven, but network bridging and mDNS/SSDP discovery are not implemented end to end.'),
+    ], 'Correlated host-to-host JSON-RPC/Socket.IO calls, typed event forwarding without echo loops, mDNS/DNS-SD, and SSDP alive/byebye/search are source/test complete; an in-process two-host bridge passes. A second-PC/VLAN/firewall programming and failure-recovery pass remains open.'),
   requirement('http-webhooks-socketio-messages', 8, 'Add bidirectional HTTP, webhooks, WebSocket client/server, Socket.IO, and actionable messages', 'open',
     ['🔌 protocol-api', '🌐 networking', '🔒 security', '💡 enhancement'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'Provide inbound HTTP and configurable outbound GET/POST/PUT/PATCH/DELETE webhooks.',
       'Support WebSocket client and server roles and genuine Socket.IO compatibility as a separate protocol.',
       'Carry a typed source-tagged text envelope among local clients, servers, bridges, the board, and LCD.',
       'Authenticate, authorize, audit, and safety-check every actionable message.',
-    ], 'A limited WebSocket relay exists; the broader HTTP/webhook, client role, Socket.IO protocol, and actionable message envelope remain open.'),
+    ], 'Inbound HTTP, outbound multi-method webhooks, standard WebSocket client/server, a bounded genuine Engine.IO-v4/Socket.IO WebSocket adapter, and typed actionable messages across local/network/board-display paths are source/test complete. Live interoperability with independent external clients/services remains open.'),
   requirement('remote-control-security', 8, 'Define security and policy gates for every remote and disruptive control path', 'open',
     ['🔌 protocol-api', '🌐 networking', '🔒 security', '🛡️ safety', '🔥 priority: critical'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'Authenticate remote commands, subscriptions, toast actions, messages, bridges, and network APIs.',
       'Authorize operations by capability and route board commands through the same motion/programming safety guards.',
       'Keep disruptive OS actions and key injection disabled by default with explicit policy and confirmation.',
       'Protect secrets and publish only non-secret discovery metadata with a durable audit trail.',
-    ], 'Local loopback ownership reduces current exposure, but the requested remote services and their unified authorization/audit model are not complete.'),
+    ], 'Transport-assigned provenance, token authentication, file-watched per-capability authorization, default read/event-only remote access, default-denied mutation/programming/OS/bridge capabilities, and policy audit events are source/test complete. Deployment hardening and adversarial/live-network commissioning remain open.'),
 
   requirement('stable-device-selection', 9, 'Select the controller by stable identity, friendly name, COM name, or VID/PID', 'closed',
     ['🖥️ host', '🌐 networking', '✅ verified'], 'Host application, TUI, configuration, shell, IPC, and library', [
@@ -379,7 +388,7 @@ const R = [
       'Allow subscription accounting to stop polling without suppressing asynchronous events or closing serial.',
       'Make explicit Close pause reconnect until Open resumes it.',
       'Expose open, close, reconnect, reset, quit/exit, and all commands through IPC/WebSocket with correlated results.',
-    ], 'The current primary owner and basic port commands exist, but the subscriber-independent lifecycle contract and full remote lifecycle command coverage are not verified.'),
+    ], 'UART ownership/reconnect now remains independent from demand-counted STATUS polling; a program-state heartbeat preserves host presence without telemetry, explicit Close pauses reconnect, and IPC/WebSocket lifecycle commands are source-tested. Physical unplug/replug and paused-close/reopen acceptance remain open.'),
 
   requirement('uart-urclock-programming', 10, 'Use UART Urboot/Urclock as the normal programming path and verify application return', 'closed',
     ['🚀 programming', '🛡️ safety', '✅ verified'], 'Bootloader, programming, build scripts, and packaging', [
@@ -388,6 +397,14 @@ const R = [
       'Support probe, metadata, read, write, verify, and start without pretending the native application protocol is the bootloader protocol.',
       'Keep USBasp as an explicit troubleshooting fallback only.',
     ], 'Urboot/fuses were ISP-verified and current firmware was UART-uploaded, flash-verified, and reauthenticated; host commands delegate to the maintained backend.'),
+  requirement('urboot-custom-progress-backend', 10, 'Maintain a reproducible Urboot-Custom progress-hook patch and safe ISP install plan', 'open',
+    ['🧩 firmware', '🚀 programming', '🏗️ tooling-build', '🧪 testing', '🔍 needs-hardware'], 'Bootloader, programming, build scripts, and packaging', [
+      'Name the extensible fork Urboot-Custom and keep the core as an upstream-applicable diff with a generic optional progress hook; isolate TM1637 or future peripheral implementations as selectable backends.',
+      'Pin upstream Urboot source and hashes, reproduce the installed stock no-LED and PB5-LED images byte-for-byte with their historical AVR GCC/binutils, and fail before trusting a custom image on any mismatch.',
+      'Generate address/metadata/RJMPWP/size/hash assertions and a feature matrix that reports the exact bytes gained and capability lost for every optional Urboot removal; select no removal without user-approved tradeoff.',
+      'Enforce the reduced application ceiling, construct a vector-aware merged application-plus-bootloader image, and never use a generic chip-erase bootloader-only write that can erase page zero.',
+      'Require read-only signature/fuse/lock/flash/EEPROM capture before the first ISP write, verify readback, then prove subsequent UART/Urclock progress plus normal application return on hardware.',
+    ], 'The u8.0 patch-based prototype reproduces both stock MiniCore references exactly with GCC 7.3.0/binutils 2.26.20160125 and builds a validated 510-byte image in a 512-byte region; the generic hook, TM1637 backend, manifest, diff, feature-loss matrix, and bootstrap exist. It is deliberately not installed: first installation needs the agreed USBasp backup/attention sequence and vector-aware verified merged write.'),
   requirement('preflash-backup-dedup-restore', 10, 'Require atomic flash/EEPROM backup, hash deduplication, and verified restore before writes', 'open',
     ['🚀 programming', '💾 storage', '🛡️ safety', '🔥 priority: critical'], 'Development EEPROM, repository, licensing, and documentation', [
       'Before any flash write, read flash and EEPROM through Urclock into the host data directory.',
@@ -395,14 +412,17 @@ const R = [
       'Block a write after failed backup unless an explicit logged override is provided.',
       'Mark partial reads incomplete, retain raw logs, and verify restore/readback.',
       'Use hidden explicitly authorized USBasp only when UART cannot work.',
-    ], 'A tested backup workflow and atomic manifests exist, but it has not run on the current board and automatic pre-write gating, deduplication, restore, and fallback policy are incomplete.'),
+      'Before releasing the application UART, snapshot the board identity and MCU settings separately from PC configuration, show Prog on TM1637 plus Programming.../Do not disconnect on LCD, and temporarily enable Silent only when the board was audible.',
+      'After authenticated application return, restore the exact original MCU settings/audible state, wait through deferred EEPROM persistence, compare readback, and recover unfinished lifecycle markers after a host crash.',
+      'When ISP is genuinely required, first force safe outputs, retain flash/EEPROM/fuse/lock backups, show WAIT/Connect USBasp with the agreed ringtone/LED attention cue, and make the first ISP operation read-only.',
+    ], 'Content-addressed backup/manifests and a centralized crash-recoverable programming lifecycle with display, temporary-silence, independent MCU-settings snapshot, delayed restore, and readback tests are source-complete. The new lifecycle has not yet run through a current-board firmware update; flash dedup/restore and ISP fallback remain live acceptance gaps.'),
   requirement('canonical-host-programming-entrypoint', 10, 'Route every build, upload, verify, backup, and recovery through the host tool', 'open',
     ['🚀 programming', '🏗️ tooling-build', '🛡️ safety', '⚡ priority: high'], 'Development EEPROM, repository, licensing, and documentation', [
       'Make the canonical controller executable the normal entry point for compile/upload/verify/backup/recovery.',
       'Keep platform wrappers thin and route Node/root tooling through the guarded host command plan.',
       'Reject stale binaries and mismatched command contracts using embedded source identity.',
       'Provide hardware-free plan tests and a live UART programming verification.',
-    ], 'The host can program successfully, but root/Node wrappers still contain separate policy and stale generated executables can shadow the current source build.'),
+    ], 'Controller-owned compile/program plans, the shared Node/CMD/Bash wrappers, and guarded host programming now converge on one policy implementation in source. A final source-identified packaged executable, live UART lifecycle pass, and removal/rejection of every stale shadow artifact remain open.'),
   requirement('hex-patch-settings-export', 10, 'Finish guarded Intel HEX patching and separate live settings export from EEPROM parsing', 'open',
     ['🚀 programming', '💾 storage', '🛡️ safety', '🚧 in progress'], 'Development EEPROM, repository, licensing, and documentation', [
       'Inspect named application, bootloader, EEPROM, and metadata regions with checksum/address/bounds validation.',
@@ -418,20 +438,32 @@ const R = [
       'Use the snapshot as a safe input to future migration and recovery diagnostics.',
     ], 'Backup manifests exist, but the requested graceful-exit diagnostic snapshot and its recovery integration are not implemented.'),
 
-  requirement('arduino-go-dependencies', 11, 'Maintain current Arduino cores, libraries, Go modules, and globally discoverable UPX', 'closed',
-    ['🏗️ tooling-build', '📦 dependencies', '✅ verified'], 'Arduino toolchain and dependencies', [
+  requirement('arduino-go-dependencies', 11, 'Provision managed firmware and host toolchains plus globally discoverable UPX', 'closed',
+    ['🏗️ tooling-build', '📦 dependencies', '✅ verified'], 'Firmware toolchain and dependencies', [
       'Audit and update installed Arduino cores and requested well-supported libraries through the configured network path.',
       'Declare all Go host dependencies and package checksums.',
       'Use fixed-size local AVR drivers where needed to fit the target without misrepresenting linked libraries.',
       'Install UPX globally on PATH without hard-coding an extraction directory.',
-    ], 'The checklist records current core/library versions, declared Go modules, fixed local AVR drivers, and UPX 5.2.0 available globally without a source-path dependency.'),
+      'Bootstrap a clean machine from a resolved public profile with a SHA-verified dependency CLI, board core/compiler, libraries, caches, manifests, and compile/program prerequisites under project-owned data paths.',
+      'Inherit HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, and NO_PROXY case-insensitively into every dependency subprocess without logging secrets, with a bounded direct retry only when the configured proxy cannot reach the source.',
+      'Expose generic public toolchain bootstrap/sync/profile/compile/core-info/install-bootloader commands while retaining dependency-specific names only internally or when invoking the dependency itself.',
+    ], 'Current core/library/Go dependency versions are recorded as the verified bootstrap baseline, UPX 5.2.0 is globally discoverable without a hard-coded source path, and the isolated managed profile downloads/verifies its CLI, installs MiniCore 3.1.2 plus requested libraries, inherits proxy semantics, inventories dependencies, and completes a Controller compile. Source tests cover existing-path, dry-run, profile parity, extraction bounds, and proxy handling; the separate update-automation requirement owns latest-first resolution and generated locks.'),
+  requirement('latest-toolchain-update-automation', 11, 'Automate latest-compatible dependency updates with resolved-lock reproducibility', 'open',
+    ['🏗️ tooling-build', '📦 dependencies', '🧪 testing', '💡 enhancement'], 'Firmware toolchain and dependencies', [
+      'Resolve the latest compatible dependency CLI/core/libraries/Urboot, Go modules/toolchain, Node/npm packages, GitHub Actions, UPX, and go-winres instead of treating policy-file versions as permanent pins.',
+      'Generate an auditable resolved lock/manifest containing exact versions, sources, integrity hashes, compatibility decisions, and toolchain provenance; reproducible builds consume that lock.',
+      'Provide ASA0002E-style scheduled and manual update discovery that opens a reviewed pull request with release notes, license/security/size impact, regenerated locks, and focused plus full validation.',
+      'Keep update, bootstrap, compile, upload, and CI output polished and consistent across CMD/Bash/host tooling with VT-100 color, Unicode/emoji fallbacks, centered aligned tables, and secret-safe proxy diagnostics.',
+      'Test resolver determinism, no-update/idempotent behavior, partial/network failures, proxy/direct fallback, lock replay, and PR-plan generation; validate the real workflow in GitHub Actions before closing.',
+    ], 'Latest-stable policy, primary-registry resolution, exact hash locks, check/update/locked-bootstrap commands, mocked resolver tests, and a live resolution are present for the firmware CLI, MiniCore, six libraries, Urboot, and Go. The u8.0.1 Urboot patch rebase, remaining Node/npm/Actions/UPX/go-winres coverage, scheduled ASA-style update PR workflow, full validation, and an actual Actions run remain open.'),
   requirement('project-import-structure', 11, 'Preserve reusable project layers, merge LocalLib variants, and consolidate source/tool directories', 'closed',
     ['🏗️ tooling-build', '🧩 firmware', '🖥️ host', '✅ verified'], 'Project import, LocalLib merge, and structure', [
       'Start from the reusable Puzzles project layer without its business rules.',
       'Compare and selectively merge Puzzles, Timer, and motor/HMI LocalLib variants and document the choices.',
+      'Audit the supplied prototype sketch including comments and disabled branches; carry forward reusable debounce/hold, nonblocking feedback, relay/event, delayed persistence, watchdog, and RF-repeat semantics while replacing its hard-coded values and text UART parser with the native architecture.',
       'Keep root LocalLib/Project aggregation exactly once and use canonical Tools/Controller, Tools/Firmware, and Tools/VirtualBoard locations.',
       'Remove stale duplicate host/tool directories and align root documentation/scripts to canonical paths.',
-    ], 'The merge history is documented, project/state layers were restored, directories were consolidated, and current build references use the canonical tool locations.'),
+    ], 'The merge history is documented, project/state layers were restored, directories were consolidated, and current build references use canonical tool locations. Prototype semantics are represented by the nonblocking key/RF hold state machines, Timer1 feedback, native relay events/opcodes, watchdog service, and deferred CRC-backed EEPROM writes; its hard-coded RF IDs, relay pins, delays, and text parser were intentionally not copied.'),
   requirement('native-virtual-board', 11, 'Provide a desktop virtual board for fast native protocol and behavior tests', 'closed',
     ['🏗️ tooling-build', '🧪 testing', '🔌 protocol-api', '✅ verified'], 'Native virtual board', [
       'Build a C++17/CMake virtual board with desktop GCC-compatible tooling.',
@@ -484,8 +516,8 @@ const R = [
       'Give every normalized item a stable requirement marker, clear acceptance criteria, evidence/gaps, labels, and evidence-based state.',
       'Attach each requirement as a true GitHub sub-issue of exactly one epic and summarize open/closed counts on the epics.',
       'Keep a canonical repository map and an idempotent sync/validation helper.',
-      'Maintain one repository-linked PCController Development project containing all 13 epics and 62 requirements exactly once, with truthful workflow, Area, Priority, Verification metadata and practical backlog/area/hardware/completed views.',
-    ], 'The public source baseline, stable-marker issue graph, GraphQL sub-issue links, labels, states, counts, Requirements Backlog, and idempotent validator are complete. A 16-page wiki commit is prepared outside the workspace and the repository wiki feature is enabled, but GitHub requires an initial page to be created in an owner-authorized web session before its .wiki.git remote exists. Project-board creation also remains blocked because the active gh credential lacks read:project (and therefore writable project access); authentication scopes were intentionally not changed.'),
+      'Maintain one repository-linked PCController Development project containing all 13 epics and 65 requirements exactly once, with truthful workflow, Area, Priority, Verification metadata and practical backlog/area/hardware/completed views.',
+    ], 'The public graph now has 13 epics plus 65 normalized requirements with stable markers, labels, evidence-based states, counts, and true sub-issue links. The three additional public-safe requirements found by the private-history coverage audit are published as #87-#89 and linked exactly once; no raw conversation text or private audit path was uploaded. Wiki publication still needs the initial owner-created page, and project-board creation remains blocked because the active gh credential lacks read:project/write project access.'),
 
   requirement('hardware-frontpanel-audio', 13, 'Validate final-image buttons, menus, reset stability, and audio cues on hardware', 'open',
     ['🧪 testing', '🔍 needs-hardware', '🎛️ front-panel', '🔥 priority: critical'], 'Final hardware validation and handoff', [

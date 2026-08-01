@@ -3,7 +3,7 @@
 // Native UART protocol
 // -----------------------------------------------------------------------------
 
-// Reports build identity, board capabilities, and the fixed native schema.
+// Reports build identity, record shape, and independently testable capabilities.
 void sendHello(uint8_t sequence) {
   constexpr uint32_t capabilities =
       (1UL << 0) |  // INA219
@@ -33,6 +33,7 @@ void sendHello(uint8_t sequence) {
 #if PCCONTROLLER_MENU_LAYOUT_PROTOCOL
       (1UL << 23) | // persistent visible-mask and stable-ID rank permutation
 #endif
+      (1UL << 24) | // host-owned Idle/Running application state (opcode 0x45)
       0;
   struct __attribute__((packed)) HelloPayload {
     uint8_t schema;
@@ -191,9 +192,9 @@ void sendMenuLayout(uint8_t sequence) {
                    sizeof(payload));
 }
 
-// Validates and persists a complete schema-2 built-in menu layout.
+// Validates the canonical schema-2 prefix and ignores appended extension data.
 bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t now) {
-  if (length != 12 || payload[0] != 2 ||
+  if (length < 12 || payload[0] != 2 ||
       payload[1] != PAGE_COUNT) {
     return false;
   }
@@ -241,7 +242,7 @@ void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
     return;
   }
   if (leaseSeconds > 10 || writeLength > 16 || readLength > 16 ||
-      length != static_cast<uint8_t>(4 + writeLength)) {
+      length < static_cast<uint8_t>(4 + writeLength)) {
     appProtocol.sendError(sequence, ControllerProtocol::I2cTransfer,
                           ControllerProtocol::BadPayload);
     return;
@@ -300,13 +301,14 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
                    payload, index);
 }
 
-// Validates a complete settings payload before applying and marking it dirty.
+// Applies every semantically present settings field. The first ten bytes are
+// the common core; default-page/menu presentation fields are optional tails.
 bool applySettings(const uint8_t *payload, uint8_t length, uint32_t now) {
-  if (length != 12 || payload[0] != 2 || payload[2] > 2 ||
-      payload[5] > 7 || payload[7] > 2 || payload[10] >= PAGE_COUNT
+  if (length < 10 || payload[2] > 2 || payload[5] > 7 || payload[7] > 2
 #if PCCONTROLLER_MENU_VISIBILITY
-      || !settingsStore.values().menuPageVisible(payload[10])
+      || (length >= 11 && !settingsStore.values().menuPageVisible(payload[10]))
 #endif
+      || (length >= 11 && payload[10] >= PAGE_COUNT)
       ) {
     return false;
   }
@@ -316,6 +318,9 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t now) {
   }
 
   ControllerSettings &settings = settingsStore.values();
+  const uint8_t defaultMenuPage =
+      length >= 11 ? payload[10] : settings.defaultMenuPage;
+  const uint8_t menuFlags = length >= 12 ? payload[11] : settings.menuFlags;
   memcpy(&settings, payload + 1, ControllerSettingsPrefixSize);
   settings.flags &=
       SettingsFlags::Silent |
@@ -325,8 +330,8 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t now) {
       SettingsFlags::RelayAudioDisabled |
       SettingsFlags::ExtendedMotionBreak;
   settings.streamPeriodMs = newStreamPeriod;
-  settings.defaultMenuPage = payload[10];
-  settings.menuFlags = payload[11];
+  settings.defaultMenuPage = defaultMenuPage;
+  settings.menuFlags = menuFlags;
 
   applyStoredSettings(now);
   settingsStore.markDirty(now);
@@ -367,8 +372,8 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       return;
 
     case SetStreamPeriod: {
-      const uint16_t period = length == 2 ? readU16(payload) : 0;
-      if (length != 2 || (period != 0 && period < 100)) {
+      const uint16_t period = length >= 2 ? readU16(payload) : 0;
+      if (length < 2 || (period != 0 && period < 100)) {
         goto badPayload;
       }
       streamPeriodMs = period;
@@ -397,7 +402,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 
     case MenuList:
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
-      if (length != 1 || payload[0] >= PAGE_COUNT) {
+      if (length < 1 || payload[0] >= PAGE_COUNT) {
         goto badPayload;
       }
       sendMenuList(frame.sequence, payload[0]);
@@ -408,9 +413,6 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 
     case MenuLayoutGet:
 #if PCCONTROLLER_MENU_LAYOUT_PROTOCOL
-      if (length != 0) {
-        goto badPayload;
-      }
       sendMenuLayout(frame.sequence);
       return;
 #else
@@ -432,15 +434,15 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       return;
 
     case Buzzer:
-      if (length != 4) {
+      if (length < 4) {
         goto badPayload;
       }
       buzzer.beep(readU16(payload + 2), readU16(payload));
       goto acknowledged;
 
     case PwmSet: {
-      const uint16_t value = length == 3 ? readU16(payload + 1) : 0;
-      if (length != 3 || payload[0] >= PwmChannels::Count || value > 4095) {
+      const uint16_t value = length >= 3 ? readU16(payload + 1) : 0;
+      if (length < 3 || payload[0] >= PwmChannels::Count || value > 4095) {
         goto badPayload;
       }
       if (payload[0] < 11 && pwm.mode() == PwmTestMode::Auto) {
@@ -466,7 +468,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case PwmMode:
-      if (length != 1 || payload[0] > 2) {
+      if (length < 1 || payload[0] > 2) {
         goto badPayload;
       }
       pwm.setMode(static_cast<PwmTestMode>(payload[0]), now);
@@ -475,11 +477,26 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case StatusRgb:
-      if (length != 4) {
+      if (length < 4) {
         goto badPayload;
       }
+      hostLcdFlags |= HOST_STATUS_OVERRIDE;
       statusLeds.setBrightness(payload[3]);
       statusLeds.setCustom(payload[0], payload[1], payload[2]);
+      goto acknowledged;
+
+    case ProgramState:
+      // Only the semantic one-byte prefix is required; future appended state
+      // metadata is deliberately ignored by this small MCU implementation.
+      if (length < 1 || payload[0] > 1) {
+        goto badPayload;
+      }
+      if (payload[0] == 0) {
+        hostLcdFlags &= static_cast<uint8_t>(~HOST_PROGRAM_RUNNING);
+      } else {
+        hostLcdFlags |= HOST_PROGRAM_RUNNING;
+      }
+      hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
       goto acknowledged;
 
     case PwmGet:
@@ -488,7 +505,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 
     case AddressableLed: {
       // [pixel 0..10, or 0xFF=fill][R][G][B][brightness].
-      if (length != 5 ||
+      if (length < 5 ||
           (payload[0] != 0xFF &&
            payload[0] >= AddressableLeds::PixelCount)) {
         goto badPayload;
@@ -504,7 +521,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
     }
 
     case RadioTransmit:
-      if (length != 8 ||
+      if (length < 8 ||
           !transmitRadio(readU32(payload), payload[4], payload[5],
                          readU16(payload + 6))) {
         goto badPayload;
@@ -512,7 +529,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case RadioLearnStart:
-      if (length != 2) {
+      if (length < 2) {
         goto badPayload;
       }
       beginLearning(payload[0], payload[1]);
@@ -528,20 +545,20 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case RadioLearnList:
-      if (length != 1 || payload[0] >= RemoteLearningStore::Capacity) {
+      if (length < 1 || payload[0] >= RemoteLearningStore::Capacity) {
         goto badPayload;
       }
       sendLearnedRemotes(frame.sequence, payload[0]);
       return;
 
     case RadioLearnRemove:
-      if (length != 1 || !learnedRemotes.remove(payload[0])) {
+      if (length < 1 || !learnedRemotes.remove(payload[0])) {
         goto badPayload;
       }
       goto acknowledged;
 
     case RadioLearnMap:
-      if (length != 4 ||
+      if (length < 4 ||
           !learnedRemotes.map(
               payload[0], static_cast<RemoteActionKind>(payload[1]),
               payload[2], static_cast<RemoteBehavior>(payload[3]))) {
@@ -550,7 +567,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case RadioLearnReplace: {
-      if (length != sizeof(LearnedRemote)) {
+      if (length < sizeof(LearnedRemote)) {
         goto badPayload;
       }
       LearnedRemote remote;
@@ -562,14 +579,14 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
     }
 
     case ControllerProtocol::MenuAction:
-      if (length != 1 || payload[0] > MENU_INCREASE) {
+      if (length < 1 || payload[0] > MENU_INCREASE) {
         goto badPayload;
       }
       handleMenuAction(payload[0], true);
       goto acknowledged;
 
     case RemoteKeyGesture:
-      if (length != 2 || payload[0] > MENU_INCREASE ||
+      if (length < 2 || payload[0] > MENU_INCREASE ||
           payload[1] > static_cast<uint8_t>(KeyEvent::Up)) {
         goto badPayload;
       }
@@ -586,7 +603,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case MenuSetPage:
-      if (length != 1 || payload[0] >= PAGE_COUNT) {
+      if (length < 1 || payload[0] >= PAGE_COUNT) {
         goto badPayload;
       }
       if (modeManager.current() == MODE_MOTION_CONTROL) {
@@ -602,7 +619,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 
     case DisplayText: {
       if (length < 4 || payload[0] > 4 || payload[3] > 40 ||
-          length != static_cast<uint8_t>(4 + payload[3]) ||
+          length < static_cast<uint8_t>(4 + payload[3]) ||
           (payload[0] == 3 && (payload[3] < 4 || payload[3] > 36)) ||
           (payload[0] == 4 && payload[3] != 0)) {
         goto badPayload;
@@ -631,8 +648,11 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       }
       if (target == 1 || target == 2 || target == 3) {
         memset(hostLcdText, ' ', sizeof(hostLcdText));
-        const uint8_t lcdLength =
+        uint8_t lcdLength =
             target == 3 ? static_cast<uint8_t>(textLength - 4) : textLength;
+        if (lcdLength > sizeof(hostLcdText)) {
+          lcdLength = sizeof(hostLcdText);
+        }
         memcpy(hostLcdText, payload + (target == 3 ? 8 : 4), lcdLength);
       }
       goto acknowledged;
@@ -648,7 +668,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       return;
 
     case RelaySet:
-      if (length != 2 || payload[0] > 7 || payload[1] > 1) {
+      if (length < 2 || payload[0] > 7 || payload[1] > 1) {
         goto badPayload;
       }
       if (!relays.requestRelayForTest(static_cast<uint8_t>(payload[0] + 1),
@@ -658,7 +678,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case ControllerProtocol::RelaySide:
-      if (length != 2 || payload[0] > 1 || payload[1] > 2) {
+      if (length < 2 || payload[0] > 1 || payload[1] > 2) {
         goto badPayload;
       }
       if (payload[1] == 0) {
@@ -679,7 +699,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case Reset:
-      if (length != 1 || payload[0] > 1) {
+      if (length < 1 || payload[0] > 1) {
         goto badPayload;
       }
       endLearning(1, 0);

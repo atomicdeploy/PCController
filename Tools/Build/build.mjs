@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Cross-platform PCController build and packaging orchestrator. All firmware
+// Cross-platform project build and packaging orchestrator. All firmware
 // compile/program operations route through the project's Controller command;
 // this file never shells through PowerShell or invokes Arduino upload directly.
 
@@ -20,13 +20,23 @@ import {
 } from 'node:fs'
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { createChalk, renderUnicodeBanner, renderUnicodeTable } from './presentation.mjs'
+import { resolveProductTitle } from './product-metadata.mjs'
+
+export { resolveProductTitle } from './product-metadata.mjs'
 
 const SCRIPT = fileURLToPath(import.meta.url)
 export const PROJECT_ROOT = resolve(dirname(SCRIPT), '..', '..')
 const HOST_ROOT = join(PROJECT_ROOT, 'Tools', 'Controller')
+const WEB_ROOT = join(HOST_ROOT, 'web')
+const WEB_DIST = join(HOST_ROOT, 'internal', 'webui', 'dist')
+const WEB_LOCK = join(WEB_ROOT, 'package-lock.json')
 const BUILD_ROOT = join(PROJECT_ROOT, '.build')
 const FIRMWARE_OUTPUT = join(BUILD_ROOT, 'firmware')
 const PACKAGE_ROOT = join(BUILD_ROOT, 'package')
+const STABLE_GO_TEST_ROOT = join(BUILD_ROOT, 'tests', 'go')
+const STABLE_GO_TEST_RUNNER = join(PROJECT_ROOT, 'Tools', 'Build', 'go-tests.mjs')
+const PRODUCT_IDENTITY_GENERATOR = join(HOST_ROOT, 'internal', 'productidentity', 'generate.mjs')
 export const CANONICAL_HOST_OUTPUT = join(HOST_ROOT, 'bin')
 const LEGACY_HOST_OUTPUTS = [
 	join(BUILD_ROOT, 'host'),
@@ -38,7 +48,8 @@ const LEGACY_HOST_OUTPUTS = [
 ]
 const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest/v1'
 const FIRMWARE_MANIFEST_FORMAT = 'pccontroller-avr-firmware-manifest/v1'
-const MINIMUM_NODE = [20, 19, 0]
+const MINIMUM_NODE = [22, 12, 0]
+const MINIMUM_WEB_NODE = [22, 12, 0]
 
 export class BuildError extends Error {
 	constructor(message, exitCode = 1) {
@@ -128,12 +139,14 @@ export function parseArguments(argv, env = process.env) {
 		clean: false,
 		cleanOnly: false,
 		tests: true,
+		retest: false,
 		vet: true,
 		resources: true,
 		upx: true,
 		sharedLibrary: true,
 		verbose: false,
-		noColor: Boolean(env.NO_COLOR),
+		noColor: hasEnvironmentName(env, 'NO_COLOR'),
+		forceColor: hasEnvironmentName(env, 'FORCE_COLOR'),
 		dryRun: false,
 		planJSON: false,
 		help: false,
@@ -143,9 +156,9 @@ export function parseArguments(argv, env = process.env) {
 		programmer: env.PCCONTROLLER_PROGRAMMER || 'usbasp',
 		usbaspTroubleshooting: false,
 		allowIncompleteBackup: false,
-		burnBootloader: false,
-		arduinoUpdate: false,
-		arduinoCLI: '',
+		installBootloader: false,
+		toolchainSync: false,
+		toolchainCLI: '',
 		version: '',
 		buildTime: '',
 		buildTimestamp: ''
@@ -168,6 +181,7 @@ export function parseArguments(argv, env = process.env) {
 				substantive = true; options.selection = 'host'; options.firmware = false; options.host = true; break
 			case '--clean': options.clean = true; break
 			case '--skip-tests': options.tests = false; options.vet = false; break
+			case '--retest': options.retest = true; break
 			case '--skip-vet': options.vet = false; break
 			case '--skip-resources':
 			case '--no-resources': options.resources = false; break
@@ -175,6 +189,7 @@ export function parseArguments(argv, env = process.env) {
 			case '--no-shared-library': options.sharedLibrary = false; break
 			case '--verbose': options.verbose = true; break
 			case '--no-color': options.noColor = true; break
+			case '--force-color': options.forceColor = true; break
 			case '--dry-run': options.dryRun = true; break
 			case '--plan-json': options.planJSON = true; options.noColor = true; break
 			case '--upload': options.upload = true; substantive = true; break
@@ -182,8 +197,8 @@ export function parseArguments(argv, env = process.env) {
 				options.upload = true; options.method = 'usbasp'; options.usbaspTroubleshooting = true; substantive = true; break
 			case '--usbasp-troubleshooting': options.usbaspTroubleshooting = true; break
 			case '--allow-incomplete-backup': options.allowIncompleteBackup = true; break
-			case '--burn-bootloader': options.burnBootloader = true; substantive = true; break
-			case '--arduino-update': options.arduinoUpdate = true; options.host = true; substantive = true; break
+			case '--install-bootloader': options.installBootloader = true; substantive = true; break
+			case '--toolchain-sync': options.toolchainSync = true; options.host = true; substantive = true; break
 			case '--method': {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.method = value.toLowerCase(); index = next; break
@@ -197,9 +212,9 @@ export function parseArguments(argv, env = process.env) {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.programmer = value; index = next; break
 			}
-			case '--arduino-cli': {
+			case '--toolchain-cli': {
 				const [value, next] = valueAfter(argv, index, inline, name)
-				options.arduinoCLI = value; index = next; break
+				options.toolchainCLI = value; index = next; break
 			}
 			case '--version': {
 				const [value, next] = valueAfter(argv, index, inline, name)
@@ -218,9 +233,9 @@ export function parseArguments(argv, env = process.env) {
 	}
 	if (options.help) return options
 	if (!['urclock', 'usbasp'].includes(options.method)) {
-		throw new BuildError('--method must be urclock or usbasp; direct Arduino upload is intentionally disabled', 2)
+		throw new BuildError('--method must be urclock or usbasp; direct dependency upload is intentionally disabled', 2)
 	}
-	if ((options.upload || options.burnBootloader) && options.selection === 'host') {
+	if ((options.upload || options.installBootloader) && options.selection === 'host') {
 		throw new BuildError('--host-only cannot be combined with programming', 2)
 	}
 	if (options.upload) {
@@ -233,14 +248,14 @@ export function parseArguments(argv, env = process.env) {
 			throw new BuildError('USBasp is hidden troubleshooting only; pass --usbasp-troubleshooting', 2)
 		}
 	}
-	if (options.burnBootloader) {
+	if (options.installBootloader) {
 		options.host = true
 		if (!options.usbaspTroubleshooting) {
 			throw new BuildError('bootloader provisioning requires --usbasp-troubleshooting', 2)
 		}
 	}
-	if (options.arduinoCLI && !options.arduinoUpdate) {
-		throw new BuildError('--arduino-cli is only valid with --arduino-update', 2)
+	if (options.toolchainCLI && !options.toolchainSync) {
+		throw new BuildError('--toolchain-cli is only valid with --toolchain-sync', 2)
 	}
 	options.cleanOnly = options.clean && !substantive
 	return options
@@ -269,8 +284,30 @@ export function createPlan(options, identity, platform = process.platform) {
 		hardware: false
 	})
 	if (!options.cleanOnly && options.host) {
+		actions.push(commandAction('web-install', 'Install locked web dependencies', 'npm', ['ci', '--no-audit', '--no-fund'], WEB_ROOT))
+		actions.push(commandAction('web-typecheck', 'Type-check embedded web application', 'npm', ['run', 'typecheck'], WEB_ROOT))
+		if (options.tests) actions.push(commandAction('web-test', 'Run embedded web tests', 'npm', ['run', 'test', '--', '--passWithNoTests'], WEB_ROOT))
+		actions.push(commandAction('web-build', 'Build embedded web application', 'npm', ['run', 'build'], WEB_ROOT))
+		actions.push(commandAction(
+			'product-identity-check',
+			'Check generated product identity and Win32 metadata',
+			'node',
+			[relative(PROJECT_ROOT, PRODUCT_IDENTITY_GENERATOR).replaceAll('\\', '/'), '--check'],
+			PROJECT_ROOT
+		))
 		actions.push(commandAction('go-mod-download', 'Resolve Go modules', 'go', ['mod', 'download'], HOST_ROOT))
-		if (options.tests) actions.push(commandAction('go-test', 'Run Go tests', 'go', ['test', '-count=1', './...'], HOST_ROOT))
+		if (options.tests) actions.push(commandAction(
+			'go-test',
+			'Run Go tests from stable project-owned binaries',
+			'node',
+			[
+				relative(PROJECT_ROOT, STABLE_GO_TEST_RUNNER).replaceAll('\\', '/'),
+				'--module', relative(PROJECT_ROOT, HOST_ROOT).replaceAll('\\', '/'),
+				'--output', relative(PROJECT_ROOT, STABLE_GO_TEST_ROOT).replaceAll('\\', '/'),
+				...(options.retest ? ['--retest'] : [])
+			],
+			PROJECT_ROOT
+		))
 		if (options.vet) actions.push(commandAction('go-vet', 'Run Go vet', 'go', ['vet', './...'], HOST_ROOT))
 		actions.push(commandAction('host-build', 'Build controller host', 'go', ['build', '-buildvcs=false', '-trimpath', '-ldflags', `<identity ${identity.version} ${identity.hostBuildTime}>`, '-o', '<staging>/controller', './cmd/controller'], HOST_ROOT))
 		if (platform === 'win32' && options.resources) actions.push(commandAction('winres', 'Apply Win32 resources', 'go-winres', ['patch', '--in', 'winres/winres.json', '--delete', '--no-backup', '<staging>/controller.exe'], HOST_ROOT))
@@ -282,13 +319,13 @@ export function createPlan(options, identity, platform = process.platform) {
 		actions.push({ id: 'licenses', stage: 'Collect project and Go-module notices', hardware: false })
 		actions.push({ id: 'host-manifest', stage: 'Publish canonical host package and manifest', hardware: false })
 	}
-	if (!options.cleanOnly && options.arduinoUpdate) {
+	if (!options.cleanOnly && options.toolchainSync) {
 		const controller = controllerInvocation({ ...options, host: true })
-		const args = [...controller.prefix, 'arduino', 'update']
-		if (options.arduinoCLI) args.push('--arduino-cli', options.arduinoCLI)
+		const args = [...controller.prefix, 'toolchain', 'sync']
+		if (options.toolchainCLI) args.push('--cli', options.toolchainCLI)
 		const action = commandAction(
-			'arduino-update',
-			'Explicitly update Arduino indexes, cores, and libraries through Controller',
+			'toolchain-sync',
+			'Explicitly synchronize firmware indexes, cores, and libraries through Controller',
 			controller.file,
 			args,
 			controller.cwd
@@ -306,10 +343,10 @@ export function createPlan(options, identity, platform = process.platform) {
 			controller.cwd
 		))
 	}
-	if (!options.cleanOnly && options.burnBootloader) {
+	if (!options.cleanOnly && options.installBootloader) {
 		const controller = controllerInvocation({ ...options, host: true })
-		actions.push(commandAction('burn-bootloader', 'Provision Urboot/fuses through Controller', controller.file, [
-			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'burn-bootloader', '--programmer', options.programmer, '--usbasp-troubleshooting'
+		actions.push(commandAction('install-bootloader', 'Provision Urboot/fuses through Controller', controller.file, [
+			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'install-bootloader', '--programmer', options.programmer, '--usbasp-troubleshooting'
 		], controller.cwd, true))
 	}
 	if (!options.cleanOnly && options.upload) {
@@ -329,8 +366,8 @@ export function createPlan(options, identity, platform = process.platform) {
 	}
 }
 
-function usage() {
-	return `PCController project-owned build / package utility
+function usage(productTitle) {
+	return `${productTitle} project-owned build / package utility
 
 Usage:
   build.cmd [options]
@@ -342,6 +379,7 @@ Safe build options:
   --host-only               Test, vet, resource-stamp, package, UPX-test host
   --clean                   Remove generated output; alone, then stop
   --skip-tests              Explicitly skip Go tests and vet
+  --retest                  Re-run unchanged stable Go test binaries
   --skip-vet                Explicitly skip Go vet only
   --skip-resources          Build Windows host without regenerated resources
   --no-upx                  Leave Windows controller executable unpacked
@@ -349,23 +387,24 @@ Safe build options:
   --version VALUE           Host version identity (default: development)
   --build-time ISO          Freeze host build time for reproducible packaging
   --build-timestamp HEX     Freeze packed firmware timestamp
-	--arduino-update          Explicitly update Arduino dependencies via Controller
-	--arduino-cli PATH        Controller updater override (with --arduino-update)
+  --toolchain-sync          Explicitly synchronize firmware dependencies
+  --toolchain-cli PATH      Dependency CLI override (with --toolchain-sync)
   --dry-run                 Print the plan; run no subprocess and open no device
   --plan-json               Emit the shared CMD/Bash plan as JSON only
   --verbose                 Print every native argv vector
   --no-color                Disable ANSI styling
+  --force-color             Retain Chalk styling in captured/CI output
 
 Explicit programming only:
   --upload --port DEVICE    Build, backup, flash, verify via Urclock
   --usbasp-flash            Explicit hidden USBasp troubleshooting alias
   --method urclock|usbasp   Select guarded Controller programmer
   --usbasp-troubleshooting  Required for direct ISP/bootloader access
-  --burn-bootloader         Explicitly provision Urboot/fuses via Controller
+  --install-bootloader      Explicitly provision Urboot/fuses via Controller
   --programmer ID           ISP programmer ID (default: usbasp)
   --allow-incomplete-backup Advanced logged override; never the default
 
-No programming action is implied by a normal build. Direct arduino-cli upload
+No programming action is implied by a normal build. Direct dependency upload
 is disabled: Controller owns compile, backup, validation, programming, verify,
 and application reauthentication.`
 }
@@ -384,17 +423,24 @@ function compareVersion(left, right) {
 	return 0
 }
 
-function assertNodeVersion() {
-	if (compareVersion(process.versions.node, MINIMUM_NODE.join('.')) < 0) {
-		throw new BuildError(`Node.js ${MINIMUM_NODE.join('.')} or newer is required; found ${process.versions.node}`)
+function assertNodeVersion(minimum = MINIMUM_NODE, purpose = '') {
+	if (compareVersion(process.versions.node, minimum.join('.')) < 0) {
+		const suffix = purpose ? ` for ${purpose}` : ''
+		throw new BuildError(`Node.js ${minimum.join('.')} or newer is required${suffix}; found ${process.versions.node}`)
 	}
 }
 
+function environmentValue(env, name) {
+	const key = Object.keys(env).find(candidate => candidate.toLowerCase() === name.toLowerCase())
+	return key ? env[key] : ''
+}
+
+function hasEnvironmentName(env, name) {
+	return Object.keys(env).some(candidate => candidate.toLowerCase() === name.toLowerCase())
+}
+
 function expandWindowsVariables(value, env) {
-	return value.replace(/%([^%]+)%/g, (match, name) => {
-		const key = Object.keys(env).find(candidate => candidate.toLowerCase() === name.toLowerCase())
-		return key ? env[key] : match
-	})
+	return value.replace(/%([^%]+)%/g, (match, name) => environmentValue(env, name) || match)
 }
 
 function registryPath(key, env) {
@@ -410,7 +456,10 @@ export function refreshedEnvironment(base = process.env, platform = process.plat
 	if (platform !== 'win32') return { ...base }
 	const machine = registryPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', base)
 	const user = registryPath('HKCU\\Environment', base)
-	const values = [machine, user, base.PATH || ''].flatMap(value => value.split(delimiter)).filter(Boolean)
+	// The invoking shell or CI setup deliberately selects the active toolchain.
+	// Registry paths only add newly installed tools that this process has not
+	// inherited yet; they must never shadow an explicit current-process choice.
+	const values = [environmentValue(base, 'PATH'), machine, user].flatMap(value => value.split(delimiter)).filter(Boolean)
 	const seen = new Set()
 	const path = []
 	for (const entry of values) {
@@ -420,7 +469,11 @@ export function refreshedEnvironment(base = process.env, platform = process.plat
 			path.push(entry)
 		}
 	}
-	return { ...base, PATH: path.join(delimiter) }
+	const normalized = { ...base }
+	for (const key of Object.keys(normalized)) {
+		if (key.toLowerCase() === 'path') delete normalized[key]
+	}
+	return { ...normalized, PATH: path.join(delimiter) }
 }
 
 function executableCandidates(name, env, platform = process.platform) {
@@ -470,8 +523,14 @@ function commandText(file, args) {
 	return [file, ...args].map(value => quote(String(value))).join(' ')
 }
 
+export function verboseCommandText(file, args, env = process.env, isTTY = process.stdout.isTTY) {
+	const message = `$ ${commandText(file, args)}`
+	const color = !hasEnvironmentName(env, 'NO_COLOR') && (isTTY || hasEnvironmentName(env, 'FORCE_COLOR'))
+	return createChalk({ noColor: !color, forceColor: color }, isTTY).gray(message)
+}
+
 function run(file, args, { cwd = PROJECT_ROOT, env = process.env, capture = false, timeout = 0, verbose = false } = {}) {
-	if (verbose) process.stdout.write(`\u001b[90m$ ${commandText(file, args)}\u001b[0m\n`)
+	if (verbose) process.stdout.write(`${verboseCommandText(file, args, env)}\n`)
 	const result = spawnSync(file, args, {
 		cwd,
 		env,
@@ -487,6 +546,93 @@ function run(file, args, { cwd = PROJECT_ROOT, env = process.env, capture = fals
 		throw new BuildError(`${file} exited with code ${result.status}${detail}`)
 	}
 	return capture ? { stdout: result.stdout || '', stderr: result.stderr || '' } : result
+}
+
+function npmInvocation(env) {
+	const command = requireTool('npm', env)
+	if (process.platform !== 'win32' || !['.cmd', '.bat'].includes(extname(command).toLowerCase())) {
+		return { file: command, prefix: [] }
+	}
+	const candidates = [
+		join(dirname(command), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+		join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
+	]
+	const cli = candidates.find(path => existsSync(path))
+	if (!cli) throw new BuildError(`npm launcher was found at ${command}, but npm-cli.js could not be resolved`)
+	return { file: process.execPath, prefix: [cli] }
+}
+
+function directoryIdentity(root, excludeBuildState = false) {
+	const files = []
+	if (existsSync(root)) walkFiles(root, files, () => true, excludeBuildState)
+	files.sort((left, right) => {
+		const leftName = relative(root, left).replaceAll('\\', '/')
+		const rightName = relative(root, right).replaceAll('\\', '/')
+		return leftName < rightName ? -1 : leftName > rightName ? 1 : 0
+	})
+	const manifest = files.map(path => {
+		const name = relative(root, path).replaceAll('\\', '/')
+		return `${name}:${sha256File(path).toUpperCase()}\n`
+	}).join('')
+	return { sha256: sha256Buffer(Buffer.from(manifest, 'utf8')), files: files.length, manifest }
+}
+
+function verifyEmbeddedWebBuild() {
+	const index = join(WEB_DIST, 'index.html')
+	if (!existsSync(index)) throw new BuildError('web build did not produce internal/webui/dist/index.html')
+	const html = readFileSync(index, 'utf8')
+	if (/(?:\/src\/|@vite\/client)/i.test(html)) {
+		throw new BuildError('web build output still references Vite development sources')
+	}
+	const identity = directoryIdentity(WEB_DIST)
+	if (identity.files < 2) throw new BuildError('web build output is incomplete; expected index.html and bundled assets')
+	return identity
+}
+
+function buildWebUI(options, env, log) {
+	assertNodeVersion(MINIMUM_WEB_NODE, 'the embedded web build')
+	if (!existsSync(WEB_LOCK)) {
+		throw new BuildError('embedded web build requires Tools/Controller/web/package-lock.json; regenerate and review the lockfile')
+	}
+	const npm = npmInvocation(env)
+	const npmEnv = {
+		...env,
+		CI: '1',
+		npm_config_audit: 'false',
+		npm_config_fund: 'false',
+		npm_config_update_notifier: 'false'
+	}
+	const invoke = args => run(npm.file, [...npm.prefix, ...args], {
+		cwd: WEB_ROOT,
+		env: npmEnv,
+		verbose: options.verbose
+	})
+	const inputsBefore = directoryIdentity(WEB_ROOT, true)
+	log.stage('🔒', 'Installing locked web dependencies')
+	invoke(['ci', '--no-audit', '--no-fund'])
+	log.stage('🧭', 'Type-checking embedded web application')
+	invoke(['run', 'typecheck'])
+	if (options.tests) {
+		log.stage('🧪', 'Running embedded web tests')
+		invoke(['run', 'test', '--', '--passWithNoTests'])
+	} else log.warning('Embedded web tests were explicitly skipped.')
+	log.stage('✨', 'Building embedded web application')
+	invoke(['run', 'build'])
+	const inputsAfter = directoryIdentity(WEB_ROOT, true)
+	if (inputsAfter.sha256 !== inputsBefore.sha256) {
+		throw new BuildError('web source or package lock changed during the embedded build; retry from a stable tree')
+	}
+	const dist = verifyEmbeddedWebBuild()
+	log.detail(`embedded web: ${dist.files} files, SHA256 ${dist.sha256}`)
+	return {
+		dependencies: 'npm-ci',
+		typecheck: 'passed',
+		tests: options.tests ? 'passed' : 'skipped',
+		build: 'verified',
+		distFiles: dist.files,
+		distSHA256: dist.sha256,
+		inputSHA256: inputsBefore.sha256
+	}
 }
 
 export function assertGeneratedPath(root, target) {
@@ -506,54 +652,95 @@ function sha256File(path) {
 	return sha256Buffer(readFileSync(path))
 }
 
-function walk(root, current, output) {
+function walkFiles(current, output, include, excludeBuildState = true) {
 	for (const entry of readdirSync(current, { withFileTypes: true })) {
 		if (entry.isDirectory()) {
-			if (['.cache', 'bin', 'node_modules'].includes(entry.name) || entry.name.startsWith('.build')) continue
-			walk(root, join(current, entry.name), output)
-		} else if (entry.isFile() && extname(entry.name).toLowerCase() === '.go') {
-			output.push(join(current, entry.name))
+			if (excludeBuildState && (['.cache', 'bin', 'node_modules'].includes(entry.name) || entry.name.startsWith('.build'))) continue
+			walkFiles(join(current, entry.name), output, include, excludeBuildState)
+		} else if (entry.isFile()) {
+			const path = join(current, entry.name)
+			if (include(path)) output.push(path)
 		}
 	}
 }
 
 export function hostSourceIdentity(hostRoot = HOST_ROOT) {
 	const files = []
-	walk(hostRoot, hostRoot, files)
+	walkFiles(hostRoot, files, path => extname(path).toLowerCase() === '.go')
 	for (const path of [join(hostRoot, 'go.mod'), join(hostRoot, 'go.sum'), join(hostRoot, 'winres', 'winres.json')]) {
 		if (existsSync(path)) files.push(path)
 	}
-	files.sort((left, right) => {
+	const webRoot = join(hostRoot, 'web')
+	if (existsSync(webRoot)) walkFiles(webRoot, files, () => true)
+	const webDist = join(hostRoot, 'internal', 'webui', 'dist')
+	if (existsSync(webDist)) walkFiles(webDist, files, () => true, false)
+	const uniqueFiles = [...new Set(files)]
+	uniqueFiles.sort((left, right) => {
 		const leftName = relative(hostRoot, left).replaceAll('\\', '/')
 		const rightName = relative(hostRoot, right).replaceAll('\\', '/')
 		return leftName < rightName ? -1 : leftName > rightName ? 1 : 0
 	})
-	const manifest = files.map(path => {
+	const manifest = uniqueFiles.map(path => {
 		const name = relative(hostRoot, path).replaceAll('\\', '/')
 		return `${name}:${sha256File(path).toUpperCase()}\n`
 	}).join('')
-	return { sha256: sha256Buffer(Buffer.from(manifest, 'utf8')), files: files.length, manifest }
+	return { sha256: sha256Buffer(Buffer.from(manifest, 'utf8')), files: uniqueFiles.length, manifest }
 }
 
-function styles(options) {
-	const enabled = !options.noColor && process.stdout.isTTY
-	return enabled
-		? { cyan: '\u001b[1;96m', green: '\u001b[1;92m', yellow: '\u001b[1;93m', red: '\u001b[1;91m', magenta: '\u001b[1;95m', dim: '\u001b[90m', reset: '\u001b[0m' }
-		: { cyan: '', green: '', yellow: '', red: '', magenta: '', dim: '', reset: '' }
+export function renderTable(columns, rows, options = {}) {
+	return renderUnicodeTable(columns, rows, options)
 }
 
-function logger(options) {
-	const color = styles(options)
+function humanBytes(value) {
+	const bytes = Number(value) || 0
+	if (bytes < 1024) return `${bytes} B`
+	return `${(bytes / 1024).toFixed(bytes < 10240 ? 2 : 1)} KiB`
+}
+
+function usageGauge(used, capacity, width = 16) {
+	const ratio = capacity > 0 ? Math.max(0, Math.min(1, used / capacity)) : 0
+	const filled = Math.round(ratio * width)
+	return `${'█'.repeat(filled)}${'░'.repeat(width - filled)} ${(ratio * 100).toFixed(2)}%`
+}
+
+function shortHash(value) {
+	const text = String(value || '')
+	return text.length > 16 ? `${text.slice(0, 16)}…` : text
+}
+
+function logger(options, productTitle) {
+	const chalk = createChalk(options)
+	let activeStage = null
+	const elapsed = started => `${((Date.now() - started) / 1000).toFixed(2)}s`
+	const closeStage = () => {
+		if (!activeStage) return ''
+		const duration = elapsed(activeStage.started)
+		activeStage = null
+		return duration
+	}
 	return {
 		banner() {
-			process.stdout.write(`\n${color.magenta}╔════════════════════════════════════════╗${color.reset}\n`)
-			process.stdout.write(`${color.magenta}║  🚀 PCController project-owned build  ║${color.reset}\n`)
-			process.stdout.write(`${color.magenta}╚════════════════════════════════════════╝${color.reset}\n`)
+			const banner = renderUnicodeBanner([
+				[chalk.bold.whiteBright(`🚀  ${productTitle} Build & Device Toolchain`)],
+				[chalk.gray('AVR firmware • Go host • virtual board')]
+			].map(row => row[0]), { chalk, width: 50 })
+			process.stdout.write(`\n${banner}\n`)
 		},
-		stage(icon, message) { process.stdout.write(`\n${color.cyan}${icon}  ${message}${color.reset}\n`) },
-		success(message) { process.stdout.write(`${color.green}✅  ${message}${color.reset}\n`) },
-		warning(message) { process.stdout.write(`${color.yellow}⚠️  ${message}${color.reset}\n`) },
-		detail(message) { process.stdout.write(`${color.dim}${message}${color.reset}\n`) }
+		stage(icon, message) {
+			if (activeStage) process.stdout.write(`${chalk.gray(`   ↳ ${activeStage.name}: ${closeStage()}`)}\n`)
+			activeStage = { name: message, started: Date.now() }
+			process.stdout.write(`\n${chalk.bold.cyanBright(`${icon}  ${message}`)}\n`)
+		},
+		success(message) {
+			const duration = closeStage()
+			process.stdout.write(`${chalk.bold.greenBright(`✅  ${message}`)}${duration ? chalk.gray(`  (${duration})`) : ''}\n`)
+		},
+		warning(message) { process.stdout.write(`${chalk.bold.yellow(`⚠️  ${message}`)}\n`) },
+		detail(message) { process.stdout.write(`${chalk.gray(message)}\n`) },
+		table(title, columns, rows) {
+			process.stdout.write(`\n${chalk.bold.whiteBright(title)}\n`)
+			process.stdout.write(`${renderTable(columns, rows, { chalk })}\n`)
+		}
 	}
 }
 
@@ -595,11 +782,52 @@ function copyProjectNotices(destination) {
 	if (existsSync(licenses)) cpSync(licenses, join(project, 'LICENSES'), { recursive: true })
 }
 
+export function collectWebNotices(destination, webRoot = WEB_ROOT) {
+	const lockPath = join(webRoot, 'package-lock.json')
+	let lock
+	try {
+		lock = JSON.parse(readFileSync(lockPath, 'utf8'))
+	} catch (error) {
+		throw new BuildError(`decode embedded web package lock for notices: ${error.message}`)
+	}
+	let packages = 0
+	for (const [packagePath, metadata] of Object.entries(lock.packages || {}).sort(([left], [right]) => left.localeCompare(right))) {
+		if (!packagePath.startsWith('node_modules/') || metadata?.dev === true) continue
+		const segments = packagePath.split('/')
+		if (segments.includes('..')) throw new BuildError(`unsafe package path in embedded web lock: ${packagePath}`)
+		const directory = join(webRoot, ...segments)
+		if (!existsSync(directory)) throw new BuildError(`locked web dependency is not installed: ${packagePath}`)
+		const notices = readdirSync(directory, { withFileTypes: true }).filter(entry =>
+			entry.isFile() && /^(LICENSE|COPYING|NOTICE)/i.test(entry.name)
+		)
+		if (notices.length === 0) throw new BuildError(`bundled web dependency has no package notice: ${packagePath}`)
+		const packageJSON = join(directory, 'package.json')
+		let packageName = packagePath.slice('node_modules/'.length)
+		let version = metadata?.version || 'locked'
+		if (existsSync(packageJSON)) {
+			try {
+				const value = JSON.parse(readFileSync(packageJSON, 'utf8'))
+				packageName = value.name || packageName
+				version = value.version || version
+			} catch (error) {
+				throw new BuildError(`decode ${packagePath}/package.json for notices: ${error.message}`)
+			}
+		}
+		const safe = `${packageName}@${version}`.replace(/[\\/:*?"<>|]/g, '_')
+		const target = join(destination, 'web', safe)
+		mkdirSync(target, { recursive: true })
+		for (const notice of notices) copyFileSync(join(directory, notice.name), join(target, notice.name))
+		packages += 1
+	}
+	return packages
+}
+
 function collectModuleNotices(go, stage, env, options) {
 	const root = join(stage, 'licenses')
 	rmSync(root, { recursive: true, force: true })
 	mkdirSync(root, { recursive: true })
 	copyProjectNotices(root)
+	let goModules = 0
 	const result = run(go, ['list', '-m', '-f', '{{.Path}}|{{.Version}}|{{.Dir}}', 'all'], {
 		cwd: HOST_ROOT, env, capture: true, verbose: options.verbose
 	})
@@ -615,7 +843,9 @@ function collectModuleNotices(go, stage, env, options) {
 		const target = join(root, 'modules', safe)
 		mkdirSync(target, { recursive: true })
 		for (const notice of notices) copyFileSync(join(directory, notice.name), join(target, notice.name))
+		goModules += 1
 	}
+	return { goModules, webPackages: collectWebNotices(root) }
 }
 
 function compilerVersion(text) {
@@ -756,7 +986,9 @@ function peSectionNames(path) {
 function verifyWindowsResources(executable) {
 	if (!peSectionNames(executable).includes('.rsrc')) throw new BuildError('controller.exe does not contain a Win32 .rsrc section')
 	const binary = readFileSync(executable)
-	for (const value of ['PCController Tool', 'DRSDavidSoft']) {
+	const resources = JSON.parse(readFileSync(join(HOST_ROOT, 'winres', 'winres.json'), 'utf8'))
+	const info = resources.RT_VERSION?.['#1']?.['0409']?.info?.['0409'] || {}
+	for (const value of [info.ProductName, info.CompanyName].filter(Boolean)) {
 		if (binary.indexOf(Buffer.from(value, 'utf16le')) < 0) throw new BuildError(`controller.exe resource data is missing ${value}`)
 	}
 }
@@ -850,19 +1082,31 @@ export function installPackage(stage, options = {}) {
 }
 
 function buildHost(options, identity, env, log) {
-	const go = requireTool('go', env)
 	const stage = join(PACKAGE_ROOT, `host-${process.pid}`)
 	assertGeneratedPath(PROJECT_ROOT, stage)
 	rmSync(stage, { recursive: true, force: true })
 	mkdirSync(stage, { recursive: true })
+	const webUI = buildWebUI(options, env, log)
+	log.stage('🪪', 'Checking package-derived product identity and Win32 metadata')
+	run(process.execPath, [PRODUCT_IDENTITY_GENERATOR, '--check'], {
+		cwd: PROJECT_ROOT, env, verbose: options.verbose
+	})
+	const go = requireTool('go', env)
 	const goEnv = { ...env, GOCACHE: env.GOCACHE || join(HOST_ROOT, '.cache', 'go-build') }
 	removeGeneratedWinResources()
 
 	log.stage('📦', 'Resolving Go modules')
 	run(go, ['mod', 'download'], { cwd: HOST_ROOT, env: goEnv, verbose: options.verbose })
 	if (options.tests) {
-		log.stage('🧪', 'Running Go tests')
-		run(go, ['test', '-count=1', './...'], { cwd: HOST_ROOT, env: goEnv, verbose: options.verbose })
+		log.stage('🧪', 'Running Go tests from stable project-owned binaries')
+		const args = [
+			STABLE_GO_TEST_RUNNER,
+			'--module', HOST_ROOT,
+			'--output', STABLE_GO_TEST_ROOT,
+			'--go', go,
+			...(options.retest ? ['--retest'] : [])
+		]
+		run(process.execPath, args, { cwd: PROJECT_ROOT, env: goEnv, verbose: options.verbose })
 	} else log.warning('Go tests were explicitly skipped.')
 	if (options.vet) {
 		log.stage('🔎', 'Running Go vet')
@@ -923,7 +1167,7 @@ function buildHost(options, identity, env, log) {
 	} else log.warning('C ABI package was explicitly skipped.')
 
 	log.stage('📜', 'Collecting project and dependency notices')
-	collectModuleNotices(go, stage, goEnv, options)
+	const notices = collectModuleNotices(go, stage, goEnv, options)
 	const artifacts = [executable, ...shared].map(path => artifactRecord(path, stage))
 	const manifest = {
 		format: HOST_MANIFEST_FORMAT,
@@ -937,6 +1181,8 @@ function buildHost(options, identity, env, log) {
 			packedFirmwareTimestamp: identity.packedTimestamp
 		},
 		validation: {
+			webUI,
+			notices,
 			tests: options.tests ? 'passed' : 'skipped',
 			vet: options.vet ? 'passed' : 'skipped',
 			windowsResources: process.platform === 'win32' ? (resourceGenerated ? 'verified' : 'skipped') : 'not-applicable',
@@ -950,7 +1196,22 @@ function buildHost(options, identity, env, log) {
 	installPackage(stage)
 	rmSync(stage, { recursive: true, force: true })
 	removeLegacyHostOutputs(log)
-	for (const artifact of artifacts) log.detail(`${artifact.path}  ${artifact.bytes} bytes  SHA256 ${artifact.sha256}`)
+	log.table('📦 Host package', [
+		{ label: 'Artifact' },
+		{ label: 'Size', align: 'right' },
+		{ label: 'SHA-256' }
+	], artifacts.map(artifact => [artifact.path, humanBytes(artifact.bytes), shortHash(artifact.sha256)]))
+	log.table('🧾 Verified host identity', [
+		{ label: 'Property' },
+		{ label: 'Verified value' }
+	], [
+		['Version', identity.version],
+		['Source SHA-256', before.sha256],
+		['Build time', identity.hostBuildTime],
+		['Win32 resources', manifest.validation.windowsResources],
+		['UPX', upx.enabled ? `${upx.version} / ${upx.tested ? 'tested' : 'not tested'}` : 'disabled'],
+		['C ABI', manifest.validation.sharedLibrary]
+	])
 	log.success(`Canonical host package: ${relative(PROJECT_ROOT, CANONICAL_HOST_OUTPUT)}`)
 	return join(CANONICAL_HOST_OUTPUT, executableName)
 }
@@ -998,28 +1259,67 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 	if (String(manifest.source?.packedTimestamp).toUpperCase() !== identity.packedTimestamp) {
 		throw new BuildError('firmware manifest packed timestamp differs from the frozen build plan')
 	}
-	for (const artifact of manifest.artifacts) {
-		log.detail(`${artifact.role}  ${artifact.dataBytes}/${artifact.capacityBytes} bytes  free ${artifact.freeBytes}  SHA256 ${artifact.sha256}`)
+	log.table('⚙️ AVR target', [
+		{ label: 'Property' },
+		{ label: 'Resolved value' }
+	], [
+		['FQBN', manifest.target?.fqbn || 'MiniCore ATmega328P'],
+		['MCU / clock', `${manifest.target?.mcu || 'atmega328p'} / ${Number(manifest.target?.clockHz || 0).toLocaleString('en-US')} Hz`],
+		['Bootloader', `${manifest.target?.bootloader || 'Urboot/urclock'} @ ${manifest.target?.baud || '?'} baud`],
+		['Source', `${manifest.source?.buildHash || shortHash(manifest.source?.sha256)} (${manifest.source?.files || '?'} files)`],
+		['Packed build time', manifest.source?.buildTimestamp || identity.packedTimestamp]
+	])
+	log.table('💾 Firmware memory map', [
+		{ label: 'Image' },
+		{ label: 'Used', align: 'right' },
+		{ label: 'Capacity', align: 'right' },
+		{ label: 'Free', align: 'right' },
+		{ label: 'Utilization' },
+		{ label: 'SHA-256' }
+	], manifest.artifacts.map(artifact => [
+		artifact.role,
+		humanBytes(artifact.dataBytes),
+		humanBytes(artifact.capacityBytes),
+		humanBytes(artifact.freeBytes),
+		usageGauge(artifact.dataBytes, artifact.capacityBytes),
+		shortHash(artifact.sha256)
+	]))
+	if (manifest.stackBudget) {
+		log.table('🧠 SRAM safety budget', [
+			{ label: 'Static', align: 'right' },
+			{ label: 'Serial path', align: 'right' },
+			{ label: 'RF ISR', align: 'right' },
+			{ label: 'Peak', align: 'right' },
+			{ label: 'Estimated free', align: 'right' },
+			{ label: 'Required free', align: 'right' }
+		], [[
+			humanBytes(manifest.stackBudget.staticSramBytes),
+			humanBytes(manifest.stackBudget.serialPathBytes),
+			humanBytes(manifest.stackBudget.rfInterruptAllowanceBytes),
+			humanBytes(manifest.stackBudget.estimatedPeakSramBytes),
+			humanBytes(manifest.stackBudget.estimatedFreeSramBytes),
+			humanBytes(manifest.stackBudget.minimumFreeSramBytes)
+		]])
 	}
 	log.success(`Firmware manifest: ${relative(PROJECT_ROOT, join(FIRMWARE_OUTPUT, 'firmware-manifest.json'))}`)
 	return manifest
 }
 
-function updateArduino(options, env, controllerPath, log) {
-	if (!controllerPath) throw new BuildError('Arduino update requires the freshly packaged Controller')
-	log.stage('🌐', 'Updating Arduino indexes, cores, and libraries through Controller')
-	const args = ['arduino', 'update']
-	if (options.arduinoCLI) args.push('--arduino-cli', options.arduinoCLI)
+function syncToolchain(options, env, controllerPath, log) {
+	if (!controllerPath) throw new BuildError('Toolchain sync requires the freshly packaged Controller')
+	log.stage('🌐', 'Synchronizing firmware indexes, cores, and libraries through Controller')
+	const args = ['toolchain', 'sync']
+	if (options.toolchainCLI) args.push('--cli', options.toolchainCLI)
 	run(controllerPath, args, { cwd: PROJECT_ROOT, env, verbose: options.verbose })
-	log.success('Controller-owned Arduino update completed.')
+	log.success('Controller-owned toolchain sync completed.')
 }
 
 function executeProgramming(options, env, controllerPath, manifest, log) {
 	const controller = controllerCommand({ ...options, host: true }, controllerPath)
-	if (options.burnBootloader) {
+	if (options.installBootloader) {
 		log.stage('🔥', `Explicit Urboot/fuse provisioning through ${options.programmer}`)
 		run(controller.file, [
-			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'burn-bootloader',
+			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'install-bootloader',
 			'--programmer', options.programmer, '--usbasp-troubleshooting'
 		], { cwd: controller.cwd, env, verbose: options.verbose })
 	}
@@ -1050,8 +1350,9 @@ function printDryRun(plan, options, log) {
 export async function main(argv = process.argv.slice(2), env = process.env) {
 	assertNodeVersion()
 	const options = parseArguments(argv, env)
+	const productTitle = resolveProductTitle(env)
 	if (options.help) {
-		process.stdout.write(`${usage()}\n`)
+		process.stdout.write(`${usage(productTitle)}\n`)
 		return 0
 	}
 	const identity = resolveBuildIdentity(options, env)
@@ -1060,13 +1361,20 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 		process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`)
 		return 0
 	}
-	const log = logger(options)
+	const log = logger(options, productTitle)
 	if (options.dryRun) {
 		printDryRun(plan, options, log)
 		return 0
 	}
 	const started = Date.now()
-	const refreshed = refreshedEnvironment(identity.env)
+	const executionEnvironment = { ...identity.env }
+	if (options.noColor) {
+		for (const key of Object.keys(executionEnvironment)) {
+			if (key.toLowerCase() === 'no_color') delete executionEnvironment[key]
+		}
+		executionEnvironment.NO_COLOR = '1'
+	}
+	const refreshed = refreshedEnvironment(executionEnvironment)
 	log.banner()
 	log.detail(`identity: version=${identity.version} host-time=${identity.hostBuildTime} firmware-stamp=0x${identity.packedTimestamp}`)
 	if (options.clean) {
@@ -1076,10 +1384,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 	}
 	let controllerPath = ''
 	if (options.host) controllerPath = buildHost(options, identity, refreshed, log)
-	if (options.arduinoUpdate) updateArduino(options, refreshed, controllerPath, log)
+	if (options.toolchainSync) syncToolchain(options, refreshed, controllerPath, log)
 	let manifest = null
 	if (options.firmware) manifest = compileFirmware(options, identity, refreshed, controllerPath, log)
-	if (options.burnBootloader || options.upload) executeProgramming(options, refreshed, controllerPath, manifest, log)
+	if (options.installBootloader || options.upload) executeProgramming(options, refreshed, controllerPath, manifest, log)
 	log.success(`All selected operations completed in ${((Date.now() - started) / 1000).toFixed(1)}s.`)
 	return 0
 }

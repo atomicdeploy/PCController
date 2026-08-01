@@ -51,10 +51,3 @@ private:
 };
 
 extern TonePlayer buzzer;
-
-// Compatibility wrappers retained for reusable inherited code.
-void setupBuzzer();
-void addTone(unsigned int frequency, unsigned int duration);
-void resetTone();
-void playToneSequence();
-bool isPlayingTones();

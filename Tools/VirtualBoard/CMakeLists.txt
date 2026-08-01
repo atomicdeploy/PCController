@@ -81,4 +81,25 @@ if(BUILD_TESTING)
     target_compile_options(firmware_uart_protocol_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_uart_protocol_unit COMMAND firmware_uart_protocol_tests)
+
+  # Exercise production key, relay, 1-Wire, and transition primitives against
+  # host-native GPIO doubles before risking a physical firmware upload.
+  add_executable(firmware_controls_tests
+    tests/firmware_controls_test.cpp
+    ../../LocalLib/DallasTemperatureBus.cpp
+    ../../LocalLib/Keys.cpp
+    ../../LocalLib/ShiftRegisters.cpp
+    ../../LocalLib/TonePlayer.cpp
+    ../../Project/RelayController.cpp
+  )
+  target_include_directories(firmware_controls_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  if(MSVC)
+    target_compile_options(firmware_controls_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_controls_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_controls_unit COMMAND firmware_controls_tests)
 endif()

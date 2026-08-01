@@ -1,9 +1,9 @@
 #include "Keys.h"
 #include "ShiftRegisters.h"
 
-Key::Key(uint8_t bit, SimpleKeyCallback callback)
+Key::Key(uint8_t bit)
     : bit_(bit), initialized_(false), rawState_(false), stableState_(false),
-      holdActive_(false), clickPending_(false), simpleCallback_(callback) {}
+      holdActive_(false), clickPending_(false) {}
 
 void Key::update(uint32_t now) {
   const uint16_t tick = static_cast<uint16_t>(now);
@@ -58,10 +58,6 @@ void Key::setEventCallback(KeyEventCallback callback, void *context) {
   eventContext_ = context;
 }
 
-void Key::setCallback(SimpleKeyCallback callback) {
-  simpleCallback_ = callback;
-}
-
 bool Key::readCurrentState() const {
   return shiftRegisters.inputActive(bit_);
 }
@@ -77,9 +73,6 @@ void Key::handlePressed(uint16_t now) {
   holdActive_ = false;
   emitEvent(KeyEvent::Down);
 
-  if (simpleCallback_ != nullptr) {
-    simpleCallback_();
-  }
   if (pressCallback_ != nullptr) {
     pressCallback_(bit_, pressContext_);
   }

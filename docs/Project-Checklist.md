@@ -1,6 +1,6 @@
 # Project Checklist
 
-Audit date: 2026-08-01
+Audit date: 2026-08-02
 
 This is the domain-sorted successor to
 former `%TEMP%\PCController-check.md`. It includes the original checklist plus the
@@ -30,15 +30,17 @@ remains in this checklist.
   incomplete lower bound added 256 flash and 26 SRAM (32,340 flash, only 44
   free) while still omitting navigation, requests/retries, failure fallback,
   relationships, visual/blink handling, read-only cue, and unsolicited events.
-  Host and VirtualBoard retain cap24; the AVR uses cap19 exact front-panel push.
+  The host retains dormant cap24 decode/test support, while the AVR and
+  VirtualBoard use cap19 exact front-panel push and reject the unadvertised
+  host-directory opcodes.
 - ✅ Current firmware `4C980157` (32,226/32,384 application bytes, 158 free)
   was guarded-backup uploaded and independently flash-verified through Urclock
   on COM18. Live HELLO reports timestamp `260801223630`; settings retain
   illumination/PWM Off, Status page 0, audible mode, 2/2 decimals, motion
   Always with a 1 ms break, and all 15 EEPROM menu pages visible in identity
   order. Relays and PWM channels 0-11 were verified off with zero UART framing
-  and CRC errors. The complete post-migration restore manifest is under the
-  host data directory at `post-migration-4C980157`.
+  and CRC errors. The complete programming restore manifest is retained under
+  the host data directory.
 - ✅ The latest physically key-tested checkpoint remains `2FD9F81C`: page 0
   was Status, reset count stayed 9 through Previous/Next/Decrease/Increase,
   relays and user PWM outputs stayed off, and mute was restored afterward.
@@ -122,7 +124,7 @@ was recorded; they do not supersede the release-candidate summary above.
   framing/CRC errors, confirmed `silent=false` in MCU EEPROM, and completed
   the host `notify` melody.
 
-## Arduino toolchain and dependencies
+## Firmware toolchain and dependencies
 
 - ✅ `arduino-cli` package indexes, installed board cores, and installed
   libraries were audited and upgraded through the configured environment/CLI
@@ -134,6 +136,37 @@ was recorded; they do not supersede the release-candidate summary above.
   Adafruit PWM Servo Driver 3.0.3, Adafruit INA219 1.2.3, rc-switch 2.6.4,
   TM1637TinyDisplay 1.12.2, OneWire 2.3.8, and DallasTemperature 4.0.6.
 - ✅ Adafruit BusIO and other declared package dependencies were installed.
+- ✅ The generic `toolchain bootstrap` path resolves the latest compatible
+  stable dependency CLI/core/library policy by default, records an exact
+  hash-bearing lock, verifies per-platform CLI SHA-256, and
+  reports whether the CLI was
+  available versus downloaded during that run. It binds its generated config,
+  core/compiler data, download cache, and user-library directory below the
+  PCController data root instead of silently sharing Arduino15/sketchbook.
+  Existing-path and dry-run regression tests verify those semantics; proxy
+  variables are inherited/translated process-locally without exposing their
+  values. A live isolated bootstrap completed every resolved install/inventory
+  step and a subsequent Controller compile proved the managed config is reused.
+  That source-only build was `F812539A`, 32,234/32,384 flash and 1,441/2,048
+  static SRAM; it did not open COM18 or change the running board. The later
+  firmware/native audit build is `F6D76FE4`, 32,240/32,384 flash and the same
+  1,441/2,048 static SRAM. It likewise did not open COM18 or change the running
+  board.
+- 🟡 Latest-stable policy, primary-registry resolution, substantive no-churn
+  hash locks, check/apply/locked-bootstrap commands, and resolver tests exist.
+  The current resolution selects dependency CLI 1.5.1, MiniCore 3.1.2, the six
+  requested libraries, Urboot u8.0.1, Go 1.26.5, Node LTS 24.18.1, UPX 5.2.0,
+  and go-winres 0.3.3 while reporting prerelease/main observations only as
+  canaries. Urboot u8.0.1 rebase/build, the 32,256-byte application ceiling,
+  npm/Go/tool locks, proxy-first authenticated requests with bounded direct
+  fallback, source/license/security notes, Dependabot, scheduled pre-PR
+  validation, canonical product-identity drift checks, shared Chalk/Unicode
+  presentation, and stable-path local compile gates pass. Updater tests pass
+  5/5, Build tests 31/31, firmware-tool tests 19/19, the programmer stable-path
+  suite passes, and actionlint passes. Reproducible builds consume exact
+  resolved locks rather than treating policy minima as permanent pins; a real
+  hosted scheduled/manual Actions run, artifact upload, and PR/blocked-issue
+  lifecycle are still unobserved, so this requirement remains yellow.
 - ✅ The release-candidate AVR intentionally links EEPROM 2.0 and rc-switch
   2.6.4 but no longer links MiniCore Wire. Fixed-hardware local drivers replace
   generic Wire/TM1637/Dallas/INA219/PWM/LCD/addressable-strip libraries to fit
@@ -143,9 +176,10 @@ was recorded; they do not supersede the release-candidate summary above.
   installation is superseded; it is not included or linked by this project.
 - ✅ Go module dependencies for Charm, serial access, file watching, IPC, and
   the host utilities are declared in `go.mod`/`go.sum`.
-- ✅ UPX 5.2.0 is installed globally under `C:\Program Files\UPX`, and the
-  machine PATH contains that directory without hard-coding the original
-  extraction path.
+- ✅ UPX 5.2.0 is installed in the machine's existing tools directory, already
+  present on PATH. A fresh `cmd.exe` resolves `upx`, `upx --version` reports
+  5.2.0, and the installed SHA-256 matches the supplied executable; the project
+  does not hard-code either its extraction or installation path.
 
 ## Project import, LocalLib merge, and structure
 
@@ -154,6 +188,12 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ Puzzles, Timer, and motor/encoder/HMI LocalLib variants were compared and
   selectively merged. The differences and selected parts are documented in
   [Local Library Merge History](Local-Library-Merge-History.md).
+- ✅ `%TEMP%\ProtoType_Code.txt` was re-audited including comments and disabled
+  branches. Its reusable debounce/initial-press/accelerated-hold, nonblocking
+  feedback, relay-state event, watchdog, delayed EEPROM-write, and RF-repeat
+  ideas are represented by the current domains. Its hard-coded relay pins,
+  remote IDs/code rewrites, blocking delays, raw `tone()`, and text UART parser
+  were intentionally superseded rather than copied.
 - ✅ The useful mode/state manager was restored and expanded for menu,
   editors, motion, learning, boot, feedback, and fault states.
 - ✅ Reusable boot melody, feedback melodies, buzzer, shift-register, task,
@@ -162,10 +202,10 @@ was recorded; they do not supersede the release-candidate summary above.
   `LocalLib/` and `Project/`.
 - ✅ `PCControllerLocalLib.cpp` and `PCControllerProject.cpp` aggregate the
   root subdirectory implementations exactly once for the Arduino build.
-- 🟡 The firmware is substantially modularized into domain classes, but
-  `PCController.ino` is still about 2,740 lines/84 KB and contains the large
-  menu and opcode dispatchers. The request to reduce it to a small skeleton
-  entry point is only partially complete.
+- ✅ `PCController.ino` is now a 49-line high-level composition entry point;
+  implementation lives in focused `Project/Firmware/*.inc.h` domains and
+  classes. Byte-identical checkpoint builds and later native-domain tests
+  protect the refactor from changing wire or safety behavior.
 - ✅ Host/tool directory consolidation is complete: the active host is under
   `Tools/Controller`, the native simulator is under `Tools/VirtualBoard`, and
   the stale root `host/`, empty `Tool/`, and obsolete legacy host binary were
@@ -204,12 +244,16 @@ was recorded; they do not supersede the release-candidate summary above.
 
 - ✅ Startup restores EEPROM settings, initializes safe relay/PWM state,
   emits an early unsolicited HELLO, and enters the configured menu page.
-- ✅ During development, MCU configuration is deliberately an **unversioned**
-  packed 29-byte cap23 settings value plus one CRC-8 byte at EEPROM address 32.
+- ✅ MCU configuration is a canonical **unversioned** packed 29-byte cap23
+  settings value plus one CRC-8 byte at EEPROM address 32.
   It uses `EEPROM.update()` with a 1.5 s deferred write and remains separate
   from host JSON/YAML/TOML configuration. There is no settings magic/version
-  field or automatic firmware-side legacy migration in this development
-  layout; an invalid record is safely replaced by factory defaults.
+  field or firmware-side migration chain; an invalid record is safely replaced
+  by factory defaults.
+- ✅ Learned-RF storage no longer carries a development version number. Its
+  four-byte header semantically validates magic, record width, and capacity;
+  each occupied record has its own CRC. The reset journal now checksums only
+  its canonical count representation instead of reproducing an older seed.
 - ✅ Persistent MCU settings include Silent and door/relay audio cues,
   tLED/tBT swap, four-state motion-door policy, 1/100 ms motion break,
   illumination mode/levels, display/status brightness, persistent Ready color,
@@ -317,8 +361,9 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ The running final host currently lists tBT
   `28-616435FB503F-E9` and tLED `28-70F275000000-8A`; the latest open-door
   snapshot was 31.39 C and 32.75 C respectively.
-- ✅ The harness mapping in source treats the lower sorted ROM as tBT and the
-  higher ROM as tLED; an EEPROM swap flag remains available.
+- ✅ The canonical default mapping treats the lower sorted ROM as tLED and the
+  higher ROM as tBT; the EEPROM swap flag reverses those roles when the
+  controlled illumination-heating test proves the harness is opposite.
 - ⚠️ An earlier role-identification snapshot was tLED 26.50 C and tBT
   29.88 C; the later E2 stability sample was about 30.25 C and 30.66-30.68 C
   respectively. A controlled illumination-on/off test is still needed because
@@ -352,8 +397,9 @@ was recorded; they do not supersede the release-candidate summary above.
   by the host.
 - ✅ Enclosure illumination has Off/Auto/On plus separate Off/On brightness
   levels.
-- ✅ Auto mode follows the reed input and uses elapsed-time 20 ms fade steps;
-  catching up missed intervals fixes the former on-to-off jitter in source.
+- ✅ Auto mode follows the reed input and advances one eased 12-bit fade step
+  per elapsed 20 ms interval. It deliberately does not compress missed steps
+  into one service pass, preventing the former on-to-off jump/jitter.
 - ✅ Power indication and status RGB controllers are implemented.
 - ✅ RGB modes/cues cover boot, ready, learning, hot/warning, fault, door
   open/closed, BT activity, menu navigation, RF activity, save, discard, and
@@ -375,11 +421,14 @@ was recorded; they do not supersede the release-candidate summary above.
   enable for Side B, and R5-R8 general outputs.
 - ✅ Direction changes are sequenced disable -> break -> direction change ->
   settle -> enable, so opposing motion is not commanded simultaneously.
-- 🟡 Make the break-before-direction interval an EEPROM-backed board setting
-  when the final flash budget permits it. The current loads may use a 1 ms
-  default/minimum, while direction-settle and cross-side interlocks remain
-  independently enforced. Expose the value through menus, CLI, TUI, APIs, and
-  backup/offline EEPROM decoding instead of baking a single delay into code.
+- ✅ Break-before-direction is MCU-EEPROM-backed and exposed through settings,
+  host controls, protocol decoding, and backups. The compact zero-cost choice
+  is 1 ms (factory/current); the alternate bit selects 100 ms. Direction-settle
+  and cross-side interlocks remain independent.
+- 🟡 A freely ranged millisecond value is not stored: supporting values beyond
+  the current 1/100 ms choices would require another settings byte plus menu/
+  protocol/offline-tool changes. The real 1 ms transition still needs the
+  load-safe physical validation below.
 - ✅ Relay all-off, individual test, and automatic identification test modes
   exist.
 - ✅ R5-R8 support toggle and momentary push behavior.
@@ -390,11 +439,10 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ Closing the enclosure stops both sides and exits MOVE immediately.
 - ✅ The host can control individual relays, side motion, all-off, and relay
   tests.
-- 🟡 Local MOVE and learned RF Side actions enforce the reed policy in
-  firmware. The host also performs a fresh fail-closed status preflight before
-  R1-R4/side/macro start commands, while allowing stop/off. The host query and
-  command are not atomic, so a firmware-level gate inside every host motion
-  opcode would still be stronger.
+- ✅ The centralized firmware relay controller enforces the configured reed
+  policy for local MOVE, learned RF, direct host R1-R4/side commands, and macro
+  dispatch. Revoking policy immediately drops both motion enables; stop/off is
+  always allowed. The host retains its additional fail-closed status preflight.
 - ⚠️ Motor direction naming, interlock timing, R5-R8 wiring, door-close stop,
   and relay test mode require a load-safe physical test.
 
@@ -404,7 +452,7 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ Receive and transmit are both implemented; transmit temporarily disables
   receive, sends, then restores the receiver.
 - ✅ RF learning uses `learn` terminology throughout the active code and menu.
-- ✅ Eight CRC-checked EEPROM records can be learned, listed, removed
+- ✅ Twenty CRC-checked EEPROM records can be learned, listed, removed
   individually, cleared, and remapped.
 - ✅ Each record retains code, bit count, protocol, pulse width, action,
   action value, and behavior.
@@ -428,8 +476,20 @@ was recorded; they do not supersede the release-candidate summary above.
 
 - ✅ UART is the primary application interface at 115200 8N1, not a debug
   console.
-- ✅ The lightweight binary protocol uses magic/version, opcodes, sequence
-  IDs, bounded 48-byte payloads, COBS framing, a zero delimiter, and CRC-8.
+- ✅ The lightweight binary protocol uses magic plus an advisory envelope
+  revision, opcodes, sequence IDs, bounded 48-byte payloads, COBS framing, a
+  zero delimiter, and CRC-8. The MCU does not reject an otherwise valid frame
+  solely because its revision byte differs.
+- ✅ Compatibility is semantic and capability/opcode based: known commands
+  validate their required canonical prefix and safely ignore appended fields;
+  unavailable or unknown operations return `Unsupported`. No published-build
+  table, firmware-version branch, or historical payload migration is linked.
+- ✅ Hardware-free finalization build `CE472A67` passed through the canonical
+  tool at 31,910/32,384 application bytes (474 free) and 1,436/2,048 static
+  SRAM bytes. Against the prior 32,226/1,444 build this cleanup recovered 316
+  flash bytes and 8 static SRAM bytes; COM18 was deliberately not opened. Both
+  native virtual-board tests passed, including a production `UartProtocol`
+  test proving a CRC-valid frame with a different advisory revision dispatches.
 - ✅ It supports request/response, unsolicited boot HELLO, status streaming,
   and asynchronous event frames.
 - ✅ Commands cover identity/status/settings, temperatures, sound, all PWM,
@@ -454,7 +514,8 @@ was recorded; they do not supersede the release-candidate summary above.
   temperature-list, and I2C-scan commands without a deadline error. The later
   E2 rollback image completed its host-driven status/menu validation, and
   current 5DF completed HELLO/STATUS/menu/settings validation plus the full
-  all-page sweep. The final packaged TUI launch/demonstration is still pending.
+  all-page sweep. The packaged TUI was subsequently launched; a human visual
+  page-by-page acceptance sweep in the user's Windows Terminal remains open.
 
 ## Host application, TUI, configuration, shell, IPC, and library
 
@@ -557,11 +618,12 @@ was recorded; they do not supersede the release-candidate summary above.
   | `pccontroller.dll` | 8,792,378 | `88A7CEBFFFA043176CF0307E26880546379006F4ECAF016988E076E84BB11CBA` |
   | `pccontroller.h` | 2,108 | `61BB3FAF65771BDD4000C98EA218AE1262EFA53982ABF5AF7E01EA18BEBBD8C4` |
 
-- 🟡 The Windows resource source now reports `DRSDavidSoft`, `PCController
-  Host`, and `PCController Tool`, with numeric version `0.0.0.0` and string
-  version `development`. The Go build injects a source hash and UTC build
-  time. Regenerate and inspect the final EXE before marking packaging complete;
-  the artifact hashes in the preceding table predate this identity change.
+- 🟡 The Windows resource source now derives `PCController Host` and
+  `PCController` from canonical package metadata and reports
+  `DRSDavidSoft`, with numeric version `0.0.0.0` and string version
+  `development`. The Go build injects a source hash and UTC build time.
+  Regenerate and inspect the final EXE before marking packaging complete; the
+  artifact hashes in the preceding table predate this identity change.
 - ⚠️ The newest stable-identity/primary-owner build now authenticates COM18
   and serves live secondary IPC commands; the earlier external DLL smoke test
   also passed. Physical USB removal/reappearance, opt-in DTR
@@ -589,6 +651,19 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ Host tooling owns Arduino CLI compile/update, Urclock, and guarded
   USBasp/AVRDUDE recovery workflows plus EEPROM-preservation safety checks.
   Direct Arduino upload is intentionally disabled.
+- ⚠️ One centralized programming lifecycle now snapshots board identity and
+  MCU EEPROM settings separately from PC configuration, persists a content-
+  addressed semantic settings snapshot plus crash-recovery marker, shows
+  `Prog` and LCD `Programming...`/`Do not disconnect`, temporarily enables
+  Silent only when the board was audible, and waits through the 1.5 s deferred
+  EEPROM save before releasing UART. After authenticated application return it
+  restores the exact prior settings/audible state, waits again, compares
+  readback, and clears the marker. Unit/integration tests pass; the next real
+  firmware update must verify this full sequence on COM18.
+- ⚠️ A standalone ISP/programmer process must use an explicit application
+  device/port for the pre/post lifecycle; the USBasp selector is never treated
+  as an application UART. Missing application access fails safe unless an
+  explicit logged recovery override is selected. Live ISP remains pending.
 - ✅ Host and scripts do not hard-code the supplied UPX extraction directory;
   they resolve tools from PATH/configured tool discovery.
 - ✅ Root `build.cmd` and `build.sh` are thin argv-preserving launchers for one
@@ -615,6 +690,43 @@ was recorded; they do not supersede the release-candidate summary above.
   Urboot image; generated `.eep` data is never written implicitly. Root
   compile/update/program actions now delegate to the same Controller surfaces.
 
+### Urboot-Custom progress fork
+
+- ✅ `Tools/Bootloader/Urboot-Custom` is a patch-based Urboot u8.0 prototype.
+  The upstream diff exposes only a generic optional progress event hook; the
+  TM1637 implementation is an isolated selectable backend so later peripherals
+  do not require renaming or rewriting the core patch.
+- ✅ The reproducible build uses historical AVR GCC 7.3.0 and binutils
+  2.26.20160125 and fails unless both installed MiniCore references match
+  exactly: no-LED HEX/BIN SHA-256
+  `b2aba91e0bd5a7ef64df3471684cc69c4942cfd587c64e7d884c08e78969354e`/
+  `28d3566779663909146b00d45e38df24f04fbcf33763d806d11578ff55c94d7c`,
+  and PB5-LED
+  `a1f557128760c597d12822faa072eb8712562fd49150cc03807dcdd40fa3a192`/
+  `35debc1341130cad85b566c364ae2639b4dc228b30cfa2f96b4cf99e2bccd650`.
+- ✅ The selected custom image is 510 meaningful bytes in the 512-byte
+  `0x7E00..0x7FFF` region. Its HEX/BIN SHA-256 values are
+  `27a053dcf384818a4b18b806a1eb0f4020ebce1051d422afee8017dd48c615e0`/
+  `8e826f33e61bb87ce738deee1bf8045c2b6e14ae86892bab8e6dc6e676d6f8db`;
+  metadata, vector 25, `RJMPWP`, exported
+  `pgm_write_page`, address ceiling, and current application fit are asserted.
+  Full reproduction/install evidence is in
+  [Urboot-Custom README](../Tools/Bootloader/Urboot-Custom/README.md).
+- ✅ No Urboot protocol feature was silently removed. The old electrically
+  conflicting PB5 activity blink is replaced by progress; optional compile
+  variants report exact gains/losses for chip erase (28 B), EEPROM (56 B),
+  compare-before-write (26 B), application page writer (10 B), autobaud (16 B),
+  and reset-vector protection (14 B). None is selected.
+- ⚠️ The fork is not installed. First installation requires USBasp because the
+  current bootloader protects itself and the custom region starts one page
+  lower. Before any write: make outputs safe; retain flash/EEPROM/fuse/lock
+  backups; show `WAIT`/`Connect USBasp` with the agreed ringtone/attention LED;
+  release COM18; perform signature/fuse/lock/flash/EEPROM reads first; build a
+  vector-25-aware merged application+boot image; write/verify/read back; then
+  return to UART and prove visible progress plus application HELLO. A generic
+  chip-erase bootloader-only write is unsafe because it can leave page zero
+  erased. ISP itself cannot animate the display while the MCU is held in reset.
+
 ### Tooling entry-point consolidation audit
 
 - ❌ There is not yet one canonical generated `controller` executable. The
@@ -639,10 +751,24 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ Every active USBasp caller passes the source-required
   `--usbasp-troubleshooting` authorization; tests reject an unguarded ISP
   request and reject direct Arduino upload before any programmer subprocess.
-- ✅ `build.sh` is now a 10-line launcher and `build.cmd` a small native CMD
-  launcher. Both delegate policy to `Tools/Build/build.mjs`; frozen-identity
-  tests prove their JSON command plans are identical. The former large
-  `build.ps1` and duplicated Controller PowerShell build scripts were removed.
+- ✅ `build.sh` and `build.cmd` are native bootstrap launchers. They install the
+  exact locked build-presentation dependencies when absent, then delegate all
+  policy to `Tools/Build/build.mjs`; frozen-identity tests prove their JSON
+  command plans are identical. The former large `build.ps1` and duplicated
+  Controller PowerShell build scripts were removed.
+- ✅ Every project-owned Node presentation path now shares
+  `Tools/Build/presentation.mjs`: Chalk owns color/style and `cli-table3` owns
+  Unicode borders, display-width measurement, padding, centered headers, and
+  per-column alignment. Build, firmware, dependency-update, and wiki utilities
+  contain no hand-authored ANSI/table renderer. The exact npm graph is locked,
+  bootstrapped, license-noted, and covered by Dependabot and CI; Build tests
+  pass 29/29 and firmware-tool tests pass 19/19.
+- ✅ Go test packages are compiled and run from deterministic project-owned
+  executables under `.build/tests/go`, keyed by source/module/toolchain identity.
+  Unchanged passing results are reused; `--retest` reuses the same paths. This
+  prevents repeated random `%TEMP%` IPC executable names and their recurring
+  Windows Firewall prompts. The dependency gate likewise uses stable
+  `.build/tests/toolchain` artifacts.
 - ✅ The executable MiniCore build/program policy is owned by the Go programmer
   and consumed by the shared Node/CMD/Bash plan; the obsolete independent
   PowerShell copy was removed.
@@ -704,9 +830,12 @@ was recorded; they do not supersede the release-candidate summary above.
   no-bootloader profile exposes 384 more application bytes but loses the
   requested UART Urboot path. Neither cut was applied to the production
   feature set.
-- ⚠️ The current normal build leaves only 10 application-flash bytes. Any
-  further growth requires another measured optimization or a
-  feature-profile/MCU choice.
+- ⚠️ The latest source-only `F6D76FE4` build uses 32,240/32,384 application
+  bytes (144 free) and 1,441/2,048 static SRAM bytes. The optional four-page
+  Urboot-Custom image (with the current TM1637 progress backend) reduces the
+  application ceiling to 32,256 bytes, so
+  only 16 bytes remain with that bootloader. Any further growth requires a
+  measured optimization or a feature-profile/MCU choice.
 - ✅ The current resource-stamped EXE was compressed and checked with UPX,
   and the DLL/header were rebuilt and smoke-tested with an external C caller.
 - ✅ USBasp/ISP is no longer needed for normal operation: Urboot/fuses were
@@ -723,28 +852,48 @@ was recorded; they do not supersede the release-candidate summary above.
 - ✅ It models settings, separate virtual MCU EEPROM, sensors and ROM IDs,
   door/BT/keys/RF events, relays, PWM, displays, macros, and the 11-pixel
   addressable strip.
+- ✅ Its MCU EEPROM now uses the exact canonical unversioned settings record,
+  20-slot learned-RF header/records, and 64-slot reset journal at the same
+  addresses and with the same CRC rules as production; restart tests verify
+  menu layout, RF slot 19, settings, and reset-count persistence.
+- ✅ Virtual RF receive now executes assigned key/menu/relay/side/PWM actions,
+  suppresses repeat retriggers for non-refreshable mappings, and locally
+  expires momentary actions after the production 350 ms window.
 - ✅ Virtual STATUS is the same 48-byte shape with reset cause at byte 43 and
   little-endian count at bytes 44-47; event type 7 uses the same six-byte
   payload and virtual application/bootloader resets advance a wear-levelled
   MCU-EEPROM journal separate from PC configuration.
-- ✅ It provides interactive fault/input/sensor injection and portable
-  PowerShell/Bash build scripts.
-- ✅ Native unit tests and raw protocol smoke tests passed, including HELLO,
-  addressable-strip ACK, and reset count `1 -> 2` with watchdog cause `0x08`.
+- ✅ STATUS bits 7 and 12-15, capability bit 24/opcode `0x45`, paged menu and
+  front-panel responses, DisplayText capture/release targets 3/4, safe 2x16
+  LCD truncation, and cooperative I2C lease/write/read responses now match the
+  production protocol. Unadvertised host-directory opcodes `0x42..0x44` are
+  intentionally rejected instead of simulating firmware that is not shipped.
+- ✅ It provides interactive fault/input/sensor injection and a portable
+  CMake/Ninja build independent of the host controller's configuration.
+- ✅ Three native test targets pass: virtual protocol/EEPROM behavior, the
+  production UART codec, and production key/shift-register/relay/buzzer/
+  DS18B20 domains compiled against the desktop Arduino mock.
 - ✅ Host TCP tests cover fragmented/delayed transport behavior.
-- 🟡 This is a behavioral simulator, not the same AVR translation unit
-  compiled on the PC. Shared domain logic could be extracted further if
-  cycle-accurate firmware parity becomes necessary.
+- ⚠️ The simulator intentionally substitutes wall-clock scheduling and
+  deterministic I2C register bytes for AVR-cycle/interrupt and electrical
+  behavior. Native production-domain tests cover the safety/timing logic; live
+  hardware remains authoritative for waveforms, bus faults, and pin polarity.
 
 ## Remaining peripheral exposure
 
 - ✅ Safe named APIs expose all requested functional peripherals: raw shift
   inputs, relays, PWM, INA219, temperatures/ROMs, door, BT, buzzer, TM1637,
-  LCD, RGB, addressable strip, RF RX/TX, menu, reset, and I2C discovery.
-- 🟡 There is no unrestricted arbitrary GPIO/register/I2C-write console.
-  Reserved bits and the spare D12 pin therefore are observable/documented but
-  not exposed as unsafe generic host writes. Clarify any additional intended
-  peripheral before adding a bypass around the safety owners.
+  LCD, RGB, addressable strip, RF RX/TX, menu, reset, and bounded cooperative
+  I2C read/write/repeated-start transactions.
+- ✅ The machine-readable shared command catalog and the
+  [Control-Surface Capability Matrix](../Tools/Controller/docs/Control-Surface-Capability-Matrix.md)
+  now prove each peripheral/host domain is reachable through the primary
+  shell/CLI, Go and C-library contracts, JSON-RPC/REST/WebSocket/Socket.IO,
+  bridges, and status/event surfaces without duplicating command logic.
+- 🟡 There is no unrestricted arbitrary GPIO/register console. Cooperative
+  I2C is the deliberate exception: a short lease permits reads/writes to any
+  address, including known devices, while reserved shift bits and spare D12
+  remain observable but not generically driven.
 
 ## 2026-08-01 host UX, bridge, automation, and firmware acceptance pass
 
@@ -755,60 +904,84 @@ check has passed.
 
 ### TUI structure and interaction
 
-- 🟡 Provide a polished first-run setup animation and persist completion in
+- ⚠️ A polished first-run setup animation persists completion in
   PC-side configuration. Keep this page synchronized with the physical board:
   wait for authenticated HELLO/ready, start or observe the welcome melody,
   show initialization progress, and leave only after initialization and the
   melody finish or a bounded timeout gives a clear offline/error explanation.
-- 🟡 Replace the bare monitor/prompt layout with navigable pages/tabs for the
+  Source tests cover authenticated/busy/legacy/timeout/completion paths; the
+  rebuilt packaged TUI still needs a live board/listening/screenshot pass.
+- ⚠️ The bare monitor/prompt layout is replaced with navigable pages/tabs for
   dashboard, measurements, outputs, board settings, app settings, menus, RF,
-  programming/Urclock, automations, history/graphs, events, and console.
-- 🟡 Make tables and submenus navigable with arrows and make controls usable
-  with mouse clicks as well as the keyboard.
-- 🟡 Add visible Open, Close, Reset, Refresh/Select-port, relay, motion, RF,
+  programming/Urclock, automations, history/graphs, events, and console; source
+  render/interaction tests pass, while the newly packaged real TUI is pending.
+- ⚠️ Tables/submenus support arrows and controls support mouse clicks plus the
+  keyboard in deterministic interaction tests; real-terminal focus QA remains.
+- ✅ Deterministic TUI rendering now uses visible-cell rather than ANSI-byte
+  padding, centers section headers, sizes bordered dashboard cards correctly,
+  and aligns wrapped values beneath their value column. Render tests cover the
+  dashboard, outputs, board settings, and app settings at 88/120/132/160
+  columns, including both dashboard right borders at 120 columns. The packaged
+  host must be rebuilt/relaunched before this source fix is visible to the user.
+- ⚠️ Visible Open, Close, Reset, Refresh/Select-port, relay, motion, RF,
   PWM-slider, RGB, buzzer/melody, menu, and programming controls. Reflect
-  externally initiated relay/PWM changes immediately.
-- 🟡 Add configurable PC keyboard action bindings with true key-down/key-up
+  externally initiated relay/PWM changes immediately. The controls and event-
+  driven reconciliation are source-tested; live loaded operation is pending.
+- ⚠️ Configurable PC keyboard action bindings use true key-down/key-up
   hold semantics. Factory defaults are `A`/`S` for Side B Up/Down and `K`/`L`
   for Side A Up/Down. Digits `1`-`9` must be configurable action mappings that
   can target relays or PWM outputs rather than fixed relay numbers. Each binding
   supports momentary and toggle/latch behavior, with Ctrl selecting the
   configured alternate behavior. The host view must reconcile to authoritative
   live relay, PWM, and motion state after actions from any source, including RF,
-  physical controls, automations, IPC, and network bridges.
-- 🟡 Provide a configurable application title instead of fixing
-  `PCController Tool` in source.
-- 🟡 Style monitoring key/value pairs and groups distinctly; expand the names
+  physical controls, automations, IPC, and network bridges. Config/injection
+  tests pass; real key-hold/output observation remains.
+- ✅ User-visible product naming is configuration-owned. The checked-in default
+  and build metadata come from `Tools/Controller/web/package.json`; watched
+  `ui.app_title` persists the PC-side override, and the process environment may
+  provide a one-run override. Generated Go identity constants and Win32
+  resource metadata have an exact drift check in the normal host build. TUI,
+  CLI, web, notifications, and host-defined menus consume the effective title.
+  Stable wire HELLO tokens, URI scheme, C ABI symbols, environment names,
+  storage paths, and artifact filenames remain intentionally technical
+  compatibility identifiers rather than visible branding literals. Metadata
+  drift, persistent-config precedence, process override, TUI hot reload, web
+  source tests, and the compiled CLI help/version surfaces are verified.
+- ✅ Monitoring key/value pairs and groups are distinctly styled; names expand
   to `LED Temperature` and `BT Audio Temperature`; label BT Audio states as
   disconnected/blinking, connected/solid, off, or unknown.
-- 🟡 Format measurements with adaptive SI units (`3.5 W`, not `3500 mW`) and
+- ✅ Measurements use adaptive SI units (`3.5 W`, not `3500 mW`) and
   independently configurable field visibility and display precision.
-- 🟡 Do not flicker measurement age through `0/100/200 ms`; suppress age text
+- ✅ Measurement age no longer flickers through `0/100/200 ms`; age text is
   while a sample is under 500 ms old and show it only when useful.
-- 🟡 Provide configurable sample/poll rates and stop telemetry polling when
+- ✅ Sample/poll rates are configurable and telemetry polling stops when
   no TUI, script, automation, TCP, IPC, or WebSocket subscriber requires it.
-- 🟡 Keep configurable measurement history (24 hours by default), graph it,
-  and show important events in a navigable timeline.
-- 🟡 Implement empty-prompt history recall with Right Arrow, nested
+- ⚠️ Configurable measurement history (24 hours by default), sparklines, and
+  a navigable event timeline are source/test complete; a 24-hour persistence
+  and restart retention run remains.
+- ✅ Empty-prompt Right Arrow history recall and nested
   subcommand completion with Tab or Right Arrow, and never print a literal
   `completion:` diagnostic into the ordinary console.
-- 🟡 Organize commands by task, use semantic color styling, add `clear`,
-  `quit`, and `exit`, and hide raw HELLO bytes unless debug logging is enabled.
+- ✅ Commands are task-grouped, selectively VT-100 styled with a plain fallback,
+  include `clear`/`quit`/`exit`, and hide raw HELLO bytes unless debug logging
+  is enabled.
 - 🟡 Exercise the real TUI through Windows automation, inspect screenshots at
   representative sizes/pages, and fix visual or focus/navigation defects
   before marking this section complete.
 
 ### Configuration, menus, melodies, and programming surfaces
 
-- 🟡 App Settings must expose all watched PC JSON settings. Board Settings
-  must query/edit/save the independent MCU EEPROM settings and distinguish
-  live values from persisted values.
-- 🟡 Query a live menu catalog from the board, show ID, short display label,
+- ⚠️ App Settings exposes watched PC JSON and Board Settings queries/edits the
+  independent MCU EEPROM model while distinguishing live/persisted state in
+  source tests; the packaged real-board editor pass remains open.
+- ✅ The host queries the live menu catalog and shows ID, short display label,
   human description, current page/submode, and seven-segment/LCD preview;
-  support `menu list`, direct jump, and Previous/Next/Dec/Inc.
-- 🟡 Surface native opcode operations and Urboot/Urclock probe, metadata,
-  flash, verify, flash/EEPROM read-backup, Arduino CLI, AVRDUDE, reset, and
-  reconnect controls in the TUI—not only in the text shell.
+  `menu list`, direct jump, and Previous/Next/Dec/Inc are implemented; live
+  catalog queries already returned all current board pages.
+- ⚠️ Native opcode operations and Urboot/Urclock probe, metadata, flash,
+  verify, flash/EEPROM read-backup, managed dependency CLI, AVRDUDE, reset, and
+  reconnect controls exist in the TUI source/tests—not only the text shell—but
+  the rebuilt packaged programming page is not yet live-accepted.
 - 🟡 Support board-resident melodies where firmware capacity allows and
   PC-streamed melodies with custom notes/durations/gaps plus `melody create`,
   save, preview, play, stop, and configuration hot reload.
@@ -816,7 +989,7 @@ check has passed.
   Board-originated activation events include MCU monotonic timestamps/deltas
   where supported; USB/network arrival time is never authoritative. Durable
   names, IDs, categories, user colors, and the macro library remain PC-side.
-  During playback the host streams allow-listed opcode/payload records in chunks
+  During playback the host streams validated opcode/payload records in chunks
   into a bounded AVR SRAM circular buffer; the MCU schedules them locally while
   the host refills ahead. Queue ordinary native-protocol opcode/payload records
   for relay, motion, PWM/MOSFET, buzzer/melody, seven-segment/LCD messages, RF
@@ -838,19 +1011,35 @@ check has passed.
   AVR RAM, the same command-path safety and queue-health gates apply to every
   source, and the
   final report records exact flash/SRAM costs and tradeoffs. This remains a
-  release blocker until live timing and safety behavior are verified.
-- 🟡 Ensure opening the app does not reset the board by default. DTR reset on
-  reconnect remains an explicit, default-disabled PC setting.
-- 🟡 Add a synchronized Front Panel view and native snapshot: exact four
+  release blocker until live timing and safety behavior are verified. The
+  PC-side recorder, queue/chunk/refill engine, and virtual-board faithful
+  playback are source/test complete. This pass also fixed valid timed macro
+  events being rejected as `unsupported MACRO_STATUS envelope 134/schema 2`.
+  The rich Automations TUI is now source/test complete: it reads the same
+  `MacroRunner` as shell/API paths, provides searchable ID/name/category/color/
+  label/step metadata, ID-sorted rows, keyboard and mouse actions for create,
+  record, save, discard, play, both cancel policies, inspect, and guarded
+  delete, and shows live elapsed/duration/steps, 127-byte queue fill, accepted
+  bytes, MCU timing deltas/tolerance/violations, underruns, dispatch errors,
+  lifecycle, and faithfulness. Deterministic rendering and interaction tests
+  pass at 88, 120, and 160 columns. Physical-board playback/cancel and display/
+  output observation remain incomplete, so the overall item correctly stays
+  yellow.
+- ✅ Opening the app does not reset the board by default. DTR reset on
+  reconnect remains an explicit, default-disabled PC setting, and the current
+  retained host configuration confirms it is off.
+- ⚠️ A synchronized Front Panel view/native snapshot carries exact four
   TM1637 segment bytes/decimal or colon mask/brightness/blink state, 2x16 LCD
   cells/address/backlight, active-key mask, current menu page, and submenu or
   program mode. Render it in TUI/API clients and update it from physical board
-  changes.
-- 🟡 Expose four remote front-panel buttons with mouse and keyboard down/up/
+  changes. Schema parsing and TUI raw-segment rendering tests pass; live visual
+  parity is pending.
+- ⚠️ Four remote front-panel buttons support mouse/keyboard down/up/
   hold/gesture semantics. Route injected input through the same board menu
   state machine and source-tagged event path as physical keys. Poll front-panel
   snapshots only while at least one TUI/API/IPC/WebSocket subscriber needs
-  them; serial itself remains connected.
+  them; serial itself remains connected. Source tests cover press/hold and
+  demand behavior; final-board interaction remains.
 - 🟡 Add host-defined front-panel menus whose definitions live in PC-side
   JSON/YAML/TOML rather than AVR flash. Support nested pages, labels, typed
   values, ranges/steps/options, read/write callbacks, confirmation, and board-
@@ -874,61 +1063,76 @@ check has passed.
   bytes and retains schema-1 host decoding. Host/mock cap24 directory/content/
   state and retry behavior remain available for future hardware; current AVR
   capability and size accounting remain honestly cap23 plus cap19 fallback.
-- 🟡 Include host-menu providers for PC/device status, IP/network/API state,
+- ⚠️ Host-menu providers include PC/device status, IP/network/API state,
   host and board settings, commands, and guarded operating-system actions.
   Expose the same menu model through CLI, IPC, REST, JSON-RPC, WebSocket,
-  Socket.IO, scripting, and the physical front panel.
-- 🟡 When the host owns LCD presentation, optionally mirror the active Console
+  Socket.IO, scripting, and the physical front panel. Source tests pass; live
+  physical-front-panel traversal remains.
+- ⚠️ When the host owns LCD presentation, it can mirror the active Console
   prompt viewport and completion/result context to the 2x16 LCD. A priority
   arbiter temporarily displays error/HOT/door/motion/relay/RF events, then
   restores the prompt; routine telemetry must not cause LCD flicker. When the
   host heartbeat expires, the fallback is line 1 `PC OFFLINE`, line 2
-  `CONNECT USB` (the 17-character full phrase may scroll slowly).
+  `CONNECT USB` (the 17-character full phrase may scroll slowly). Presenter
+  tests pass, but no LCD backpack currently responds for physical validation.
 
 ### IPC, WebSocket, USB lifecycle, and primary ownership
 
-- 🟡 A single primary process must own the serial port. Secondary CLI/TUI/API
+- ✅ A single primary process owns the serial port. Secondary CLI/TUI/API
   processes forward commands and consume events through IPC instead of
-  competing for COM18.
-- 🟡 Add a WebSocket server on the IPC service, with authenticated or safely
-  local command requests and subscriptions for status, USB, RF, door, BT,
-  keys, outputs, programming, reset, automation, and shutdown events.
-- 🟡 IPC/WebSocket clients must be able to request open, close, reconnect,
-  reset, quit/exit, programming operations, and every ordinary controller
-  command with correlated results.
-- 🟡 Accept explicit COM names, friendly product/name matches, and VID/PID
+  competing for COM18; live secondary commands already shared the primary.
+- ✅ The single IPC listener now serves authenticated/safely local standard
+  WebSocket alongside NDJSON JSON-RPC and REST, with typed `events` and
+  demand-counted `status` subscriptions. In-process listener tests prove raw
+  RPC and WebSocket coexist, authenticate, correlate replies, and push events.
+  It carries the same status, USB, RF, door, BT, key, output, programming,
+  reset, automation, and shutdown event stream as the primary client.
+- ✅ IPC/WebSocket clients can request open, close, reconnect, reset,
+  quit/exit, guarded programming, and every ordinary command through direct
+  methods or `controller.execute`; native sequence and outer JSON-RPC IDs stay
+  independently correlated.
+- ✅ Explicit COM names, friendly product/name matches, and VID/PID
   filters. Use stable CH340 identity defaults with configuration/flag
   overrides, persist the last successful PC-side device, auto-select a unique
-  match, and prompt when several devices match.
-- 🟡 Use Windows device-arrival/removal notification as the reconnect trigger
+  match, and prompt when several devices match; COM18 identity persistence was
+  live-verified.
+- ⚠️ Windows device-arrival/removal notification is the reconnect trigger
   rather than periodic full-port enumeration; emit precise disconnect and
-  reconnect events to TUI, scripts, IPC, and WebSocket consumers.
+  reconnect events to TUI, scripts, IPC, and WebSocket consumers. Source tests
+  pass; a deliberate physical unplug/replug remains.
 - 🟡 Treat controller-owned discovery as authoritative for development and
   deployment. Investigate and regression-test why a direct WMI/CIM query saw
   only COM1 while `controller.exe ports` correctly found COM18 and COM19 via
   its live Windows device path; never block programming solely on WMI/CIM.
-- 🟡 Keep the serial application protocol enabled, open, and auto-reconnecting
+- ⚠️ The serial application protocol remains enabled, open, and auto-reconnecting
   by default even with no measurement subscribers. Subscription accounting may
   stop status polling, but must not close UART or suppress asynchronous board
   events. DTR reset is independent and default-disabled; explicit Close pauses
-  until the user resumes Open.
-- 🟡 Provide durable, versioned JSON-RPC and REST request/response APIs plus a
-  WebSocket client/server event and command channel. Use JSON on the wire and
-  support human-editable JSON, YAML, or TOML configuration where that format
-  is selected explicitly.
-- 🟡 Let one controller host bridge to another over the network for remote
-  programming, diagnostics/monitoring, configuration, commands, queries, and
-  event subscriptions. Preserve the single serial owner and expose remote
-  lifecycle/errors exactly as local IPC events.
-- 🟡 Add configurable global hotkeys that can invoke board commands, inject
+  until the user resumes Open. Demand/lifecycle tests pass; the unplug/Close/
+  Open live matrix remains.
+- ✅ API version 1 provides durable JSON-RPC 2.0, REST, standard WebSocket
+  client/server, and bounded genuine Engine.IO-v4/Socket.IO-over-WebSocket
+  request/event contracts. `controller.ping`, `/healthz`, and `/api/v1/`
+  expose the version; strict JSON/YAML/TOML remains PC-owned configuration.
+- ⚠️ Correlated host-to-host calls now work over configured standard WebSocket
+  or Socket.IO peers through `controller.bridge.call`, REST
+  `/api/v1/bridges/call`, and `bridge call`. Local events can be forwarded as
+  typed calls without echo loops; each target retains its one serial owner and
+  reapplies its own auth, remote policy, and safety guards. An in-process
+  two-host test proves monitoring calls and event forwarding; cross-PC
+  multicast, physical remote programming, and network-failure commissioning
+  still require the planned second-PC live test.
+- ⚠️ Configurable global hotkeys can invoke board commands, inject
   front-panel key gestures, or control the primary host application. Registration
   conflicts and unsupported platforms must be reported without preventing the
-  controller from starting.
-- 🟡 Add an explicit, default-disabled virtual-key automation action. Physical
+  controller from starting. Backends/tests exist; Windows registration needs a
+  harmless live check.
+- ⚠️ An explicit, default-disabled virtual-key automation action lets physical
   key gestures, stable learned-RF tuples, door/BT/device events, scripts, IPC,
   and APIs may emit a configured Windows key such as an arrow or F13. Validate
   named/numeric keys, pair down/up safely, rate-limit repeats, release held
-  keys on disconnect/exit, and emit an audit event for every injection.
+  keys on disconnect/exit, and emit an audit event for every injection. Source
+  tests pass; real key injection remains opt-in and unverified.
 - ⚠️ Guarded host OS information/actions are source-complete for custom menus,
   shell, and the shared API command path: inspect IP/system state; request Lock,
   Suspend, Hibernate, Restart, or Shut down; and read/set primary-monitor
@@ -938,37 +1142,44 @@ check has passed.
   confirmation. Unsupported monitors fail gracefully. A harmless live DDC/CI
   read/menu preview remains to be checked, while disruptive power actions must
   not be exercised merely to claim acceptance.
-- 🟡 Show configurable actionable desktop notifications for important
+- ⚠️ Configurable actionable desktop notifications cover important
   door/HOT/motion/RF/USB/programming/error events. Toast buttons must return
   through the authenticated primary process and the same safety-checked command
-  path as TUI, IPC, and scripts.
-- 🟡 Advertise and discover controller-host instances with mDNS and SSDP
-  where the platform/network allows it. Publish only non-secret service metadata;
-  discovery never grants control authority.
-- 🟡 Provide an inbound HTTP service and configurable outbound webhooks for
-  GET/POST/PUT/PATCH/DELETE as appropriate, plus bidirectional WebSocket client
-  and server modes. Add genuine Socket.IO protocol compatibility separately
-  rather than relabeling an ordinary WebSocket endpoint.
-- 🟡 Add a typed, source-tagged text-message envelope that can be sent and
-  received by a local client, HTTP/WebSocket/Socket.IO server, remote bridge, the
-  board, and its LCD. Messages may expose configured actions, but those actions
-  must be authenticated, authorized, logged, and routed through board safety
-  guards.
+  path as TUI, IPC, and scripts. Windows backend tests pass; a real actionable
+  toast remains to be accepted.
+- ⚠️ mDNS/DNS-SD and SSDP advertisement/discovery are implemented with
+  secret-free metadata, SSDP alive/byebye/search responses, and an
+  authenticated API after discovery. Deterministic tests cover SSDP packet
+  construction, header-injection sanitization, service-type filtering, and
+  parsing; actual visibility across Windows Firewall/VLANs remains a live
+  network commissioning check.
+- ✅ The authenticated inbound HTTP service and configurable outbound
+  GET/POST/PUT/PATCH/DELETE webhooks are implemented and tested. Standard
+  WebSocket client/server and the separate, honestly bounded Engine.IO 4 /
+  Socket.IO adapter are bidirectional; no long-polling, rooms, namespaces, or
+  binary support is claimed.
+- ✅ Typed text messages now cross local IPC, REST, WebSocket, Socket.IO,
+  webhooks, remote bridges, board display, and LCD paths. Network transports
+  assign authoritative provenance and retain a different claimed source only
+  as bounded metadata; fixed opt-in text mappings use the normal command and
+  safety path. Remote mutating capabilities are independently default-denied,
+  token authenticated, authorized, and audit-event logged.
 
 ### Motion, enclosure, RGB, audio, and board automation
 
-- 🟡 Correct the motion wiring model: R1/R3 select Direction for Sides A/B;
+- ✅ The motion wiring model uses R1/R3 as Direction for Sides A/B and
   R2/R4 control the corresponding Output/enable. Preserve break-before-make,
-  safe reset, stop, and side isolation.
-- 🟡 Add a persisted motion-door policy with `closed`, `open`, `always`, and
+  safe reset, stop, and side isolation; live loads remain a separate test.
+- ✅ The persisted motion-door policy has `closed`, `open`, `always`, and
   `never`; factory default is `always`. Apply it consistently to local keys,
-  learned RF, host commands, macros, and automations.
-- 🟡 Restore the nonblocking enclosure-light fade between configured Off and
+  learned RF, host commands, macros, and automations through the centralized
+  firmware relay gate; the full physical matrix remains open.
+- ⚠️ The nonblocking enclosure-light fade now moves between configured Off and
   On brightness on every door transition, without jitter or an initial jump,
-  and add a regression test for both directions.
-- 🟡 Configure coherent door-open/closed RGB base colors and transition
-  animations without unrelated intermediate colors.
-- 🟡 Replace independent RGB overrides with one priority arbiter. Required
+  with eased one-step-per-tick regression coverage; visual confirmation remains.
+- ⚠️ Coherent door-open/closed RGB base colors and transitions avoid unrelated
+  intermediate colors in source tests; live observation remains.
+- ⚠️ One priority arbiter replaces independent RGB overrides. Required
   states are: HOT red/orange breathing plus buzzer; Running with door open hard
   red warning flash; PC disconnected red; RF receive violet/purple breathing;
   Running with door closed orange/yellow; Idle with BT Audio connected blue;
@@ -976,30 +1187,43 @@ check has passed.
   PC-owned and must be mirrored to the board rather than inferred from door.
   Ease/damp transitions into and out of informational states and restore the
   prior/base state smoothly; warning/critical states may jump and hard-blink.
+  Host priority/easing tests pass; the newest firmware/host pair still needs
+  physical visual validation.
 - 🟡 Add configurable door-open, door-close, relay-on, and relay-off audio
   cues. Persist board-owned cue choices/mappings in MCU EEPROM and retain
   Silent-mode authority.
-- 🟡 Allow EEPROM-backed board automations to bind door, BT Audio,
+- ❌ EEPROM-backed board automations do not yet bind door, BT Audio,
   host-connected/disconnected, relay, and other control events to safe relay,
-  motion-stop, PWM, RGB/audio, or 433 MHz transmit actions.
-- 🟡 Add equivalent optional PC-side scripting/automation triggers for door
-  and BT Audio events; no such action is enabled by default.
-- 🟡 Add a PC-owned operational `Idle`/`Running` ProgramState with readable
+  motion-stop, PWM, RGB/audio, or 433 MHz transmit actions. PC automations are
+  not a substitute for this requested offline MCU-owned EEPROM feature.
+- ⚠️ Equivalent optional PC-side scripting/automation triggers for door and
+  BT Audio events are implemented/tested; none is enabled by default, and the
+  live event/action pass remains.
+- ✅ A PC-owned operational `Idle`/`Running` ProgramState has readable
   source/reason text and change events. The embedding application, TUI, CLI,
   IPC/API, or an activity lease such as macro playback can set it; explicit
   consumer ownership remains authoritative and the door must never determine
   this state. Mirror the state/event text to the board/front-panel displays.
-- 🟡 If the enclosure opens while ProgramState is `Running`, immediately emit
+- ✅ The host-to-board portion is source-complete: capability bit 24 now means
+  native opcode `0x45 PROGRAM_STATE`, the host sends/reasserts its one-byte
+  Idle/Running value after authenticated connect/reconnect and every state
+  change, and a two-second state heartbeat preserves host-presence semantics
+  without status polling. RPC/REST/library/shell paths share the same manager, and in-memory
+  wire tests verify exact frames while older capability sets are not probed.
+  Physical display/status-light observation remains part of the parent yellow
+  acceptance item above.
+- ⚠️ If the enclosure opens while ProgramState is `Running`, the host emits
   a source-tagged warning for TUI, scripting, IPC/API, and bridges and invoke
   configurable PC-host beep and actionable-toast cues. This warning is
   PC-owned/configured, not stored in AVR EEPROM, and ends or clears coherently
-  when the door closes or operation returns to `Idle`.
-- 🟡 Make Status the default board page and briefly display incoming actions
-  such as `R5` then flashing `On`/`Off`; add the Puzzle seven-segment animation
-  only if measured flash savings make it safe.
-- 🟡 Let the host provide date/time and optional display/mapping labels. The
-  board must expose host-connected/disconnected state and be able to apply a
-  configured safe automation when the host disappears.
+  when the door closes or operation returns to `Idle`. Source tests cover the
+  warning/clear path; a real toast/beep remains.
+- ✅ Status is the default board page.
+- 🟡 Brief incoming-action overlays such as `R5` then flashing `On`/`Off` and
+  the optional Puzzle seven-segment animation remain flash-budget decisions.
+- 🟡 Host-connected/disconnected state is exposed, but host-provided date/time,
+  optional mapping labels, and an MCU-owned safe automation on host loss remain
+  incomplete.
 
 ### RF learning, mapping, latency, and capacity
 
@@ -1010,50 +1234,63 @@ check has passed.
 - 🟡 Resume guided B/C/D capture only after this UX pass. Ask for one labeled
   button at a time, show its exact raw identity, request/confirm the intended
   action, then persist the mapping.
-- 🟡 Remove the firmware's implicit default Key-2 mapping. A newly learned RF
-  record is Unmapped until the local UI or host explicitly assigns it.
-- 🟡 Add finite and indefinite learn sessions, explicit start/end/cancel/full
+- ✅ New RF records use `RemoteActionKind::None` and remain unmapped until an
+  explicit local/host assignment; a persisted VirtualBoard list regression
+  checks the action/value/behavior zero tuple.
+- ✅ Finite and indefinite learn sessions, explicit start/end/cancel/full
   notifications, and an optional multi-learn session that accepts several
-  distinct buttons before it ends.
-- 🟡 Raise learned-record capacity from eight to at least twenty if EEPROM
-  layout and endurance permit it; retain CRC/version migration and individual
-  list/remove/remap operations.
+  distinct buttons are implemented by the two-byte semantic prefix and tested
+  with an ignored extension tail.
+- ✅ Learned-record capacity is 20 in the canonical MCU EEPROM layout, with
+  per-record CRC, paged list/remove/map/replace operations, no development
+  migration chain, and restart coverage proving slot 19 survives.
 - 🟡 Reduce receive-to-action latency and make a short single burst reliably
   invoke its mapped action. Validate repeat-gap/hold behavior against the real
   A/B/C/D handset after implementation.
 - 🟡 Let board menus show an action catalog before learning where feasible;
   compact IDs may be resolved to human labels supplied by the connected host.
-- 🟡 Add one PC-side RF number-format setting and apply it uniformly to TUI,
+- ✅ One watched PC-side RF number-format setting applies uniformly to TUI,
   Console, CLI, JSON/API presentation, exports, logs, and mapping dialogs.
   Supported views must include hexadecimal and decimal without changing the
-  raw `u32` value sent on the protocol.
-- 🟡 Store PC-only RF names, categories, colors, notes, and other presentation
+  raw `u32` value sent on the protocol; formatter tests cover both views.
+- ✅ PC-only RF names, categories, colors, notes, and other presentation
   metadata by the stable `(code,bits,protocol)` identity rather than the
   mutable EEPROM record ID. Provide a searchable/filterable action picker
   instead of forcing users to remember numeric action IDs. Categories are
   named by the user and manually assigned one of these choices in this exact
-  UI order: red, blue, violet/purple, green, white.
-- 🟡 Add an explicit reorder/renumber workflow for learned EEPROM records.
+  UI order: red, blue, violet/purple, green, white. Search/picker tests pass.
+- ⚠️ An explicit reorder/renumber workflow stages learned EEPROM records,
   It must read the current board list, show the proposed order, write it
   transactionally where the firmware permits, read it back, and update PC
-  metadata references without confusing record ID with RF identity.
+  metadata references without confusing record ID with RF identity. Source and
+  VirtualBoard tests pass; real EEPROM transaction/rollback remains.
 
-### Development EEPROM, repository, licensing, and documentation
+### Current EEPROM, repository, licensing, and documentation
 
-- ✅ The live MCU settings were migrated once from the valid unversioned
-  19+CRC8 record to development-v2 29+CRC8, preserving all legacy values and
-  adding the `0x7FFF` visibility mask plus identity page order. PR #83 added a
-  file-only host migrator that emits only EEPROM bytes 32-61; RF records and
-  the reset journal are outside that artifact. The final firmware was built
-  with `PCCONTROLLER_SAFE_EEPROM_MIGRATION=0`, so no migration path consumes
-  normal AVR flash or SRAM. Whole-history/versioned migration remains deferred
-  until the layout is declared stable.
+- ✅ Firmware and host retain no unpublished-build settings version branches,
+  legacy record structs, or migration converter. File-only `eeprom inspect`,
+  `export`, `import`, and `restore` accept only the current unversioned
+  29-value-byte plus CRC-8 settings record. Export/import/restore require a
+  complete validated 1,024-byte backup manifest; import changes only
+  `0x0020..0x003D`, preserves RF/reset/unknown bytes, hashes every output,
+  refuses overwrite, and never opens serial or writes a board. Unsupported
+  layouts fail explicitly. Backup/readback remains mandatory before a write.
 - ✅ Git is initialized and the audited public repository is published at
   `atomicdeploy/PCController`. Original project code uses
   `MIT OR BSD-2-Clause`; `REUSE.toml`, `LICENSES/`, and third-party notices keep
   dependency licensing separate. Generated/private paths are ignored, and
   larger changes use reviewed/checked PRs (including modularization #80,
   compact HELLO #81, locked-package publication #82, and EEPROM tooling #83).
+- ✅ The private-history audit normalizes 65 public-safe requirements: 12 closed
+  with current evidence and 53 open. GitHub now contains the matching graph and
+  links every requirement to exactly one of 13 epics. Issues #87, #88, and #89
+  cover MCU event automation, Urboot-Custom, and latest-first resolved-lock
+  updates; the final synchronization dry-run is idempotent. Raw turns and
+  machine-local paths remain excluded from public issue bodies.
+- 🟡 Repository wiki material is prepared but GitHub still requires an initial
+  owner-created wiki page before the `.wiki.git` remote exists. The repository
+  project board remains blocked by the active credential lacking project scope;
+  neither external blocker is represented as complete.
 - 🟡 Canonically rename and organize Markdown documents into a starter-friendly
   reading order. Repair every relative link and provide complete architecture,
   hardware, firmware, host/TUI, protocol/API/RPC/WebSocket, configuration,
@@ -1070,11 +1307,13 @@ check has passed.
   focused `Project/Firmware/*.inc.h` domains. The modularized build kept the
   firmware HEX and EEPROM byte-identical at that checkpoint; the current
   `4C980157` image was rebuilt with the same structure and stack guard.
-- 🟡 **Finalization-only conversation audit:** extract the complete user-message
-  sequence from the project session JSONL turns, normalize spelling only for
-  search, map every distinct requirement to this checklist and implementation
-  evidence, and perform one final missing/regression/contradiction review. Do
-  not mark an item complete merely because it appeared in a plan or comment.
+- 🟡 **Finalization-only conversation audit:** the current 99-turn merged audit
+  is complete in private `.cache/requirements-coverage-audit.md`; it maps every
+  turn/cluster to checklist, issue, source/test, and remaining evidence without
+  publishing raw private text. It found the three newly normalized requirements
+  above and corrected stale status contradictions. Repeat the audit after the
+  protocol/EEPROM/flash layouts and final artifacts freeze; do not mark an item
+  complete merely because it appeared in a plan or comment.
 - 🟡 Measure a host-driven LCD profile: MCU exposes bounded generic I2C
   probe/read/write/write-read operations, the PC owns rich device descriptions
   and LCD text/layout, and a tiny MCU fallback displays line 1 `PC OFFLINE` and
@@ -1120,9 +1359,10 @@ check has passed.
   display, and backup metadata are implemented and covered by exact-vector
   tests; final firmware rebuild and live HELLO verification remain pending.
 - 🟡 Distinguish a live settings export (native protocol plus board identity)
-  from an offline EEPROM-image parser. Both must preserve unknown bytes,
-  identify the EEPROM layout/hash they understand, and never merge MCU EEPROM
-  state into the PC configuration file.
+  from the completed current-layout offline EEPROM tools. The latter validate
+  the full backup manifest, preserve unknown bytes, report hashes/layout, and
+  never merge MCU EEPROM state into PC configuration; the richer live export
+  workflow still needs final end-to-end acceptance.
 - 🟡 Add named-region Intel HEX inspection and carefully bounded patching for
   application flash, bootloader, EEPROM images, and known metadata regions.
   Validate record checksums/address bounds, show before/after SHA-256 hashes,
@@ -1139,16 +1379,18 @@ check has passed.
 - 🟡 Keep raw device uptime in the live status/snapshot API and show a readable
   uptime alongside the other monitoring parameters in the TUI, CLI, REST,
   WebSocket, Socket.IO, history, and scripting surfaces.
-- 🟡 Consolidate the firmware's ordinary service time into one global loop
-  snapshot updated once at the beginning of `loop()`, and let domains consume
-  that consistent tick instead of passing many independent `millis()`/`now`
-  values where practical. Interrupt handlers must remain independent, and the
-  refactor must not weaken wrap-safe arithmetic or deterministic tests.
-- 🟡 Define the future migration architecture now: version/hash each board
-  settings and RF/automation layout, parse old images off-device, generate a
-  proposed new image or explicit protocol changes, back up first, and verify
-  readback. Do not spend current AVR flash on whole-history migration code
-  during development.
+- ✅ The firmware samples one global `now` at the start of each ordinary loop
+  and domains consume it where AVR code generation remains favorable.
+  A measured attempt to replace the remaining operation-local timestamps grew
+  the application by 62 bytes, so it was reverted; UART dispatch refreshes the
+  global value at its semantic operation boundary, while interrupt handlers
+  remain independent. This preserves wrap-safe arithmetic and the native
+  timing tests without spending the custom-bootloader margin.
+- ✅ Define only the off-device current-layout import/restore workflow: back up
+  first, validate the manifest/image and semantic fields, export or overlay the
+  exact current settings region, and produce a hashed no-overwrite image for a
+  later explicit write/readback. Unsupported layouts are rejected; firmware
+  build-version branches and whole-history migration chains are absent.
 
 ## Final hardware validation and handoff
 

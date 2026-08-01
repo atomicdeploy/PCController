@@ -145,14 +145,16 @@ was implemented specifically for PCController:
   settling intervals before re-enabling a side.
 - `Ina219Sensor` is a compact fixed-point driver that reports supply voltage
   as bus plus shunt voltage.
-- `SettingsStore` keeps the development cap23 unversioned 29-byte settings
+- `SettingsStore` keeps the canonical cap23 unversioned 29-byte settings
   value plus CRC-8, persists the eight user-PWM values and menu layout, and
   deliberately falls back to defaults instead of carrying migration code.
 - `RemoteLearningStore` keeps 20 independently removable learned 433 MHz
   button records with CRCs and mappings to keys, menu actions, relays, side
   motion, or user PWM.
 - `UartProtocol` supplies COBS framing, CRC-8, opcodes, bounded payloads,
-  request sequences, status streaming, and asynchronous events.
+  request sequences, status streaming, and asynchronous events. Its envelope
+  revision is advisory; capability discovery and per-opcode semantic checks
+  govern interoperability.
 
 The program state set now covers Boot; VOLT, CURR, tLED, tBT, LITE, BT, SOUND,
 PWM, RELAY, key identification, persistent user PWM, R5-R8 control, two-side

@@ -3,14 +3,14 @@
 This is the canonical public map from normalized project requirements to GitHub issues. Closely related requests are grouped into one verifiable requirement; raw conversation text, machine-local paths, and private audit data are intentionally excluded.
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
-- Normalized requirements: **62**
-- Open: **50**
+- Normalized requirements: **65**
+- Open: **53**
 - Closed with current evidence: **12**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
 
-2 open / 2 closed / 4 total
+3 open / 2 closed / 5 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
@@ -18,6 +18,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `mcu-eeprom-settings` | [#16](https://github.com/atomicdeploy/PCController/issues/16) | ✅ closed | Persist independent MCU settings with CRC, deferred writes, and page defaults |
 | `reset-safety-journal` | [#17](https://github.com/atomicdeploy/PCController/issues/17) | 🟡 open | Complete graceful reset safety and reliable reset-cause journal telemetry |
 | `firmware-identity-layout-time` | [#18](https://github.com/atomicdeploy/PCController/issues/18) | 🟡 open | Finalize compact build identity, time model, flash budget, and migration architecture |
+| `mcu-event-automation` | [#87](https://github.com/atomicdeploy/PCController/issues/87) | 🟡 open | Persist compact board-owned event automations for offline-safe actions |
 
 ## [#2 — Board peripherals, sensors, displays, lighting, and audio](https://github.com/atomicdeploy/PCController/issues/2)
 
@@ -114,7 +115,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#10 — Urboot/Urclock programming, backup, patch, and restore](https://github.com/atomicdeploy/PCController/issues/10)
 
-4 open / 1 closed / 5 total
+5 open / 1 closed / 6 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
@@ -123,18 +124,20 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `canonical-host-programming-entrypoint` | [#57](https://github.com/atomicdeploy/PCController/issues/57) | 🟡 open | Route every build, upload, verify, backup, and recovery through the host tool |
 | `hex-patch-settings-export` | [#58](https://github.com/atomicdeploy/PCController/issues/58) | 🟡 open | Finish guarded Intel HEX patching and separate live settings export from EEPROM parsing |
 | `graceful-host-snapshot` | [#59](https://github.com/atomicdeploy/PCController/issues/59) | 🟡 open | Write an atomic diagnostic board snapshot on graceful host exit |
+| `urboot-custom-progress-backend` | [#88](https://github.com/atomicdeploy/PCController/issues/88) | 🟡 open | Maintain a reproducible Urboot-Custom progress-hook patch and safe ISP install plan |
 
 ## [#11 — Build, dependencies, simulation, packaging, and developer tooling](https://github.com/atomicdeploy/PCController/issues/11)
 
-2 open / 3 closed / 5 total
+3 open / 3 closed / 6 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `arduino-go-dependencies` | [#60](https://github.com/atomicdeploy/PCController/issues/60) | ✅ closed | Maintain current Arduino cores, libraries, Go modules, and globally discoverable UPX |
+| `arduino-go-dependencies` | [#60](https://github.com/atomicdeploy/PCController/issues/60) | ✅ closed | Provision managed firmware and host toolchains plus globally discoverable UPX |
 | `project-import-structure` | [#61](https://github.com/atomicdeploy/PCController/issues/61) | ✅ closed | Preserve reusable project layers, merge LocalLib variants, and consolidate source/tool directories |
 | `native-virtual-board` | [#62](https://github.com/atomicdeploy/PCController/issues/62) | ✅ closed | Provide a desktop virtual board for fast native protocol and behavior tests |
 | `tooling-entrypoint-consolidation` | [#63](https://github.com/atomicdeploy/PCController/issues/63) | 🟡 open | Unify build and programmer policy behind one command-plan implementation |
 | `canonical-host-artifact-packaging` | [#64](https://github.com/atomicdeploy/PCController/issues/64) | 🟡 open | Produce one current source-identified controller artifact with verified packaging |
+| `latest-toolchain-update-automation` | [#89](https://github.com/atomicdeploy/PCController/issues/89) | 🟡 open | Automate latest-compatible dependency updates with resolved-lock reproducibility |
 
 ## [#12 — Documentation, licensing, GitHub, and final code quality](https://github.com/atomicdeploy/PCController/issues/12)
 

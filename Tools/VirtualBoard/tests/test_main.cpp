@@ -128,89 +128,97 @@ void testBoardAndPersistence() {
         13, 14};
     response = board.handle(
         {pccontroller::wire::MenuLayoutSet, 46, legacyLayout});
-    require(response[0].opcode == pccontroller::wire::Ack,
-            "legacy MENU_LAYOUT artifact was not accepted by the mock");
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "obsolete schema-1 MENU_LAYOUT baggage was accepted");
 
-    const std::vector<std::uint8_t> hostDirectory{
-        1, 7, 2, 0x80, 0xFF, 0x43, 0x81, 0x80, 0x43};
     response = board.handle(
-        {pccontroller::wire::HostMenuDirectory, 47, hostDirectory});
-    require(response[0].opcode == pccontroller::wire::Ack,
-            "HOST_MENU_DIRECTORY was not acknowledged");
-    require(board.console("hostmenu 128").message.find("loading") !=
-                std::string::npos,
-            "host-menu console selection did not enter loading state");
-    auto hostEvents = board.tick();
-    require(std::any_of(hostEvents.begin(), hostEvents.end(),
-                        [](const auto &event) {
-                          return event.opcode == pccontroller::wire::HostMenuContentRequest &&
-                                 event.sequence == 0 && event.payload.size() == 5 &&
-                                 event.payload[1] == 7 && event.payload[2] == 0x80 &&
-                                 event.payload[4] == 0;
-                        }),
-            "host-menu initial content request was not emitted");
-    std::vector<std::uint8_t> hostContent{
-        1, 7, 0x80, 9, 0x43, 6, 1, 'H', 'O', 'S', 'T'};
-    const auto appendFixed = [&hostContent](const std::string &value,
-                                           std::size_t width) {
-      hostContent.insert(hostContent.end(), value.begin(), value.end());
-      hostContent.insert(hostContent.end(), width - value.size(), ' ');
+        {pccontroller::wire::HostMenuDirectory, 47, {1, 7, 0}});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse &&
+                response[0].payload[1] == pccontroller::wire::Unsupported,
+            "unadvertised host-menu directory extension was not rejected");
+
+    response = board.handle({pccontroller::wire::MenuList, 48, {0, 0xAA}});
+    require(response[0].opcode == pccontroller::wire::MenuListResponse &&
+                response[0].payload.size() == 46 &&
+                response[0].payload[0] == 1 &&
+                response[0].payload[1] == 15 &&
+                response[0].payload[2] == 7 &&
+                response[0].payload[3] == 7,
+            "MENU_LIST does not match the paged production schema");
+
+    std::vector<std::uint8_t> capture{3, 0xBC, 0x2A, 36,
+                                      'H', 'O', 'S', 'T'};
+    const auto appendFixed = [&capture](const std::string &value,
+                                       std::size_t width) {
+      capture.insert(capture.end(), value.begin(), value.end());
+      capture.insert(capture.end(), width - value.size(), ' ');
     };
     appendFixed("Host controls", 16);
     appendFixed("Ready", 16);
     response = board.handle(
-        {pccontroller::wire::HostMenuContent, 48, hostContent});
+        {pccontroller::wire::DisplayText, 49, capture});
     require(response[0].opcode == pccontroller::wire::Ack &&
                 displays.state().segments == "HOST",
-            "HOST_MENU_CONTENT did not update the virtual front panel");
+            "host front-panel capture was not applied");
     response = board.handle(
-        {pccontroller::wire::HostMenuStateGet, 49, {}});
-    require(response[0].opcode == pccontroller::wire::HostMenuStateResponse &&
-                response[0].payload ==
-                    std::vector<std::uint8_t>({1, 7, 0x80, 2, 0, 9}),
-            "HOST_MENU_STATE did not report the applied revision");
+        {pccontroller::wire::FrontPanelGet, 50, {0xAA}});
+    require(response[0].opcode == pccontroller::wire::FrontPanelResponse &&
+                response[0].payload.size() == 47 &&
+                (response[0].payload[44] & 0x80U) != 0 &&
+                (response[0].payload[44] & 0x0FU) == 2 &&
+                response[0].payload[45] == 0xBC &&
+                response[0].payload[46] == 0x0A,
+            "front-panel snapshot omitted capture metadata");
     response = board.handle(
-        {pccontroller::wire::HostMenuDirectory, 50, {1, 8, 0}});
-    require(response[0].opcode == pccontroller::wire::Ack,
-            "empty host-menu generation was not accepted");
+        {pccontroller::wire::DisplayText, 51, {4, 0, 0, 0, 0xAA}});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                displays.state().segments == "tLED",
+            "target-4 release did not restore the local default page");
+
+    std::vector<std::uint8_t> oversizedLcd{1, 0, 0, 33};
+    oversizedLcd.insert(oversizedLcd.end(), 33, 'X');
     response = board.handle(
-        {pccontroller::wire::HostMenuStateGet, 51, {}});
-    require(response[0].payload[2] == 0xFF && response[0].payload[3] == 0,
-            "removing the active host menu did not release it");
+        {pccontroller::wire::DisplayText, 52, oversizedLcd});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                displays.state().lcdLine1 == std::string(16, 'X') &&
+                displays.state().lcdLine2 == std::string(16, 'X'),
+            "oversized LCD text was not safely truncated to 2x16");
 
     response = board.handle(
-        {pccontroller::wire::HostMenuDirectory, 52,
-         {1, 9, 1, 0x80, 0xFF, 0x43}});
+        {pccontroller::wire::I2cTransfer, 53,
+         {0x41, 2, 3, 0, 0x10, 0xAB, 0xCD}});
+    require(response[0].opcode == pccontroller::wire::I2cTransferResponse &&
+                response[0].payload ==
+                    std::vector<std::uint8_t>({0, 0x41, 0}),
+            "cooperative I2C write response is invalid");
+    response = board.handle(
+        {pccontroller::wire::I2cTransfer, 54, {0x41, 0, 1, 2, 0x10}});
+    require(response[0].payload ==
+                std::vector<std::uint8_t>({0, 0x41, 2, 0xAB, 0xCD}),
+            "cooperative I2C repeated-start read did not preserve bytes");
+    response = board.handle(
+        {pccontroller::wire::I2cTransfer, 55, {0x55, 0, 0, 1}});
+    require(response[0].payload ==
+                std::vector<std::uint8_t>({2, 0x55, 0}),
+            "unconnected I2C address did not return address-NACK status");
+    response = board.handle(
+        {pccontroller::wire::I2cTransfer, 56, {0, 0, 0, 0}});
     require(response[0].opcode == pccontroller::wire::Ack,
-            "retry-test host-menu generation was not accepted");
-    static_cast<void>(board.console("hostmenu 128"));
-    static_cast<void>(board.tick());
-    std::this_thread::sleep_for(std::chrono::milliseconds(270));
-    hostEvents = board.tick();
-    require(std::any_of(hostEvents.begin(), hostEvents.end(),
-                        [](const auto &event) {
-                          return event.opcode == pccontroller::wire::HostMenuContentRequest &&
-                                 event.payload[3] == 3 && event.payload[4] == 1;
-                        }),
-            "host-menu 250 ms retry was not emitted");
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    hostEvents = board.tick();
-    require(std::any_of(hostEvents.begin(), hostEvents.end(),
-                        [](const auto &event) {
-                          return event.opcode == pccontroller::wire::HostMenuContentRequest &&
-                                 event.payload[4] == 2;
-                        }),
-            "host-menu 750 ms retry was not emitted");
-    std::this_thread::sleep_for(std::chrono::milliseconds(760));
-    hostEvents = board.tick();
-    require(std::any_of(hostEvents.begin(), hostEvents.end(),
-                        [](const auto &event) {
-                          return event.opcode ==
-                                     pccontroller::wire::HostMenuStateResponse &&
-                                 event.sequence == 0 && event.payload[3] == 3;
-                        }) &&
-                displays.state().segments == "Err ",
-            "host-menu 1500 ms failure was not surfaced");
+            "I2C lease release was not acknowledged");
+
+    response = board.handle(
+        {pccontroller::wire::ProgramState, 57, {1, 0xAA}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "semantic PROGRAM_STATE prefix was not accepted");
+    response = board.handle({pccontroller::wire::GetStatus, 58, {}});
+    require((static_cast<std::uint16_t>(response[0].payload[24]) |
+             (static_cast<std::uint16_t>(response[0].payload[25]) << 8U)) &
+                (1U << 13U),
+            "running program state was absent from STATUS bit 13");
+    response = board.handle(
+        {pccontroller::wire::ProgramState, 59, {0}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "idle PROGRAM_STATE was not accepted");
 
     response =
         board.handle({pccontroller::wire::GetStatus, 8, {}});
@@ -320,7 +328,7 @@ void testBoardAndPersistence() {
     require(
         std::any_of(keyDownEvents.begin(), keyDownEvents.end(),
                     [](const auto &event) {
-                      return timedEventEquals(event, {1, 1, 5});
+                      return timedEventEquals(event, {1, 1, 5, 0, 0xFF});
                     }),
         "key-down gesture event was not emitted");
     auto keyStatus =
@@ -334,7 +342,7 @@ void testBoardAndPersistence() {
     require(
         std::any_of(keyUpEvents.begin(), keyUpEvents.end(),
                     [](const auto &event) {
-                      return timedEventEquals(event, {1, 1, 6});
+                      return timedEventEquals(event, {1, 1, 6, 0, 0xFF});
                     }),
         "key-up gesture event was not emitted");
     keyStatus = board.handle({pccontroller::wire::GetStatus, 18, {}});
@@ -342,7 +350,7 @@ void testBoardAndPersistence() {
             "key-up did not clear the active-key status mask");
 
     response =
-        board.handle({pccontroller::wire::RadioLearnStart, 19, {10}});
+        board.handle({pccontroller::wire::RadioLearnStart, 19, {10, 0}});
     require(response[0].opcode == pccontroller::wire::Ack,
             "RF learning did not start");
     require(board.console("rflearn 0x11223344 24 1 350")
@@ -377,6 +385,73 @@ void testBoardAndPersistence() {
                   {8, 0x88, 0x77, 0x66, 0x55, 24, 1, 0x90, 0x01, 0xFF});
             }),
         "unmatched raw RF receive event payload is invalid");
+
+    response = board.handle(
+        {pccontroller::wire::RadioLearnList, 190, {0}});
+    require(response[0].payload.size() >= 16 &&
+                response[0].payload[13] == 0 &&
+                response[0].payload[14] == 0 &&
+                response[0].payload[15] == 0,
+            "new learned RF entry was not left deliberately unmapped");
+    response = board.handle(
+        {pccontroller::wire::RadioLearnMap, 190, {0, 3, 4, 1}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "RF relay mapping was not acknowledged");
+    static_cast<void>(board.console("rfrecv 0x11223344 24 1 350"));
+    static_cast<void>(board.tick());
+    require((relays.mask() & (1U << 4U)) != 0,
+            "mapped RF toggle did not execute through the relay path");
+    static_cast<void>(board.console("rfrecv 0x11223344 24 1 350"));
+    static_cast<void>(board.tick());
+    require((relays.mask() & (1U << 4U)) != 0,
+            "repeated RF frame retriggered a non-refreshable mapping");
+
+    response = board.handle(
+        {pccontroller::wire::RadioLearnMap, 190, {0, 3, 5, 2}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "RF momentary mapping was not acknowledged");
+    static_cast<void>(board.console("rfrecv 0x11223344 24 1 350"));
+    static_cast<void>(board.tick());
+    require((relays.mask() & (1U << 5U)) != 0,
+            "mapped RF momentary action did not turn its relay on");
+    std::this_thread::sleep_for(std::chrono::milliseconds(370));
+    static_cast<void>(board.tick());
+    require((relays.mask() & (1U << 5U)) == 0,
+            "mapped RF momentary action did not expire locally");
+
+    response = board.handle(
+        {pccontroller::wire::RadioLearnStart, 191, {0, 3, 0xAA}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "multi/indefinite RF-learning prefix was not accepted");
+    for (std::uint8_t id = 1; id < 20; ++id) {
+      const std::uint32_t code = 0x12000000U + id;
+      const auto learned = board.console(
+          "rflearn " + std::to_string(code) + " 24 1 350");
+      require(learned.message.find("entry " + std::to_string(id)) !=
+                  std::string::npos,
+              "20-slot RF store did not allocate stable ID " +
+                  std::to_string(id));
+    }
+    const auto fullRfEvents = board.tick();
+    require(std::any_of(fullRfEvents.begin(), fullRfEvents.end(),
+                        [](const auto &event) {
+                          return timedEventEquals(event, {9, 2, 20});
+                        }),
+            "RF learning did not emit a clear full/end event at 20 entries");
+    response = board.handle(
+        {pccontroller::wire::RadioLearnList, 192, {0}});
+    require(response[0].payload.size() >= 16 &&
+                response[0].payload[1] == 20,
+            "RF list did not retain all 20 entries after mapping");
+    response = board.handle(
+        {pccontroller::wire::RadioLearnList, 193, {19}});
+    require(response[0].payload[1] == 20 && response[0].payload[2] == 0xFF &&
+                response[0].payload[3] == 1 &&
+                response[0].payload[4] == 19 &&
+                response[0].payload[13] == 0 &&
+                response[0].payload[14] == 0 &&
+                response[0].payload[15] == 0,
+            "RF slot 19 is absent or was not left deliberately unmapped");
 
     response = board.handle(
         {pccontroller::wire::Reset, 20, {0}});
@@ -449,6 +524,18 @@ void testBoardAndPersistence() {
                 temperatures[0].payload[0] == 1 &&
                 temperatures[0].payload[1] == 2,
             "temperature identity list is invalid");
+    const auto layout =
+        board.handle({pccontroller::wire::MenuLayoutGet, 17, {}});
+    require(layout[0].payload == std::vector<std::uint8_t>(
+                                     {2, 15, 0xFE, 0x7F, 0x30, 0x14,
+                                      0x52, 0x76, 0xCB, 0x8D, 0xA9, 0xFE}),
+            "MCU-owned menu visibility/order did not persist in EEPROM");
+    const auto remotes =
+        board.handle({pccontroller::wire::RadioLearnList, 18, {19}});
+    require(remotes[0].payload[1] == 20 &&
+                remotes[0].payload[3] == 1 &&
+                remotes[0].payload[4] == 19,
+            "20 learned RF records did not persist in virtual MCU EEPROM");
   }
 
   std::filesystem::remove(path, ignored);

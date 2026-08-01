@@ -1,0 +1,37 @@
+{
+  "name": "@pccontroller/control-center",
+  "productName": "PCController",
+  "productShortName": "PC",
+  "productTagline": "CONTROL CENTER",
+  "productAppId": "DRSDavidSoft.PCController",
+  "productProtocol": "pccontroller",
+  "productConfigDirectory": "PCController",
+  "version": "1.0.0",
+  "description": "Unified hardware and integration control center",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite --host 127.0.0.1",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lucide-react": "^1.28.0",
+    "motion": "^12.43.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

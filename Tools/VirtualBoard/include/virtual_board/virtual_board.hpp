@@ -14,7 +14,7 @@
 namespace pccontroller::virtual_board {
 
 struct Settings {
-  std::uint8_t flags = 0x02;
+  std::uint8_t flags = 0;
   std::uint8_t illuminationMode = 1;
   std::uint8_t illuminationOnBrightness = 128;
   std::uint8_t illuminationOffBrightness = 0;
@@ -22,8 +22,12 @@ struct Settings {
   std::uint8_t statusBrightness = 128;
   std::uint8_t pwmBootMode = 2;
   std::uint16_t streamPeriodMs = 500;
+  std::array<std::uint8_t, 8> userPwm{};
   std::uint8_t defaultMenuPage = 0;
   std::uint8_t menuFlags = 0;
+  std::uint16_t visibleMenuMask = 0x7FFF;
+  std::array<std::uint8_t, 8> menuOrder{
+      {0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE}};
 };
 
 struct ConsoleResult {
@@ -55,15 +59,9 @@ private:
     std::uint8_t bits = 24;
     std::uint8_t protocol = 1;
     std::uint16_t pulseUs = 350;
-    std::uint8_t actionKind = 1;
-    std::uint8_t actionValue = 1;
+    std::uint8_t actionKind = 0;
+    std::uint8_t actionValue = 0;
     std::uint8_t behavior = 0;
-  };
-
-  struct HostMenuEntry {
-    std::uint8_t id = 0xFF;
-    std::uint8_t parent = 0xFF;
-    std::uint8_t flags = 0;
   };
 
   wire::Frame helloFrame(std::uint8_t sequence) const;
@@ -71,13 +69,17 @@ private:
   wire::Frame settingsFrame(std::uint8_t sequence) const;
   wire::Frame pwmFrame(std::uint8_t sequence) const;
   wire::Frame temperaturesFrame(std::uint8_t sequence) const;
-  wire::Frame i2cFrame(std::uint8_t sequence) const;
+  wire::Frame frontPanelFrame(std::uint8_t sequence) const;
+  wire::Frame menuListFrame(std::uint8_t sequence,
+                            std::uint8_t cursor) const;
+  wire::Frame i2cTransferFrame(
+      std::uint8_t sequence, const std::vector<std::uint8_t> &request,
+      TimePoint now);
   wire::Frame remotesFrame(std::uint8_t sequence,
                            std::uint8_t cursor) const;
   wire::Frame macroStatusFrame(std::uint8_t opcode,
                                std::uint8_t sequence) const;
   wire::Frame menuLayoutFrame(std::uint8_t sequence) const;
-  wire::Frame hostMenuStateFrame(std::uint8_t sequence) const;
   wire::Frame ackFrame(std::uint8_t sequence, std::uint8_t opcode,
                        TimePoint now) const;
   wire::Frame errorFrame(std::uint8_t sequence, std::uint8_t opcode,
@@ -86,11 +88,22 @@ private:
 
   bool applySettings(const std::vector<std::uint8_t> &payload);
   bool applyMenuLayout(const std::vector<std::uint8_t> &payload);
-  bool applyHostMenuDirectory(const std::vector<std::uint8_t> &payload);
-  bool applyHostMenuContent(const std::vector<std::uint8_t> &payload);
+  bool applyDisplayText(const std::vector<std::uint8_t> &payload,
+                        TimePoint now);
+  bool validRemoteMapping(std::uint8_t kind, std::uint8_t value,
+                          std::uint8_t behavior) const;
+  void executeLearnedRemote(const RemoteEntry &remote, TimePoint now);
+  void stopRemoteMomentary(TimePoint now);
+  bool motionAllowed() const;
+  void stopMotion();
+  void endLearning(std::uint8_t state);
+  void releaseHostPanel();
   void loadSettings();
   void saveSettings();
   void resetSettings();
+  void loadRemotes();
+  void saveRemote(std::uint8_t id);
+  void clearRemotes();
   void recordReset(std::uint8_t cause, bool emitEvent);
   void resetRuntime(TimePoint now);
   void setMenuPage(std::uint8_t page);
@@ -104,8 +117,6 @@ private:
   void queueMacroEvent();
   void queueEvent(std::initializer_list<std::uint8_t> payload);
   void queueEvent(std::vector<std::uint8_t> payload);
-  void requestHostMenuContent(std::uint8_t id, std::uint8_t reason,
-                              TimePoint now);
   void serviceAutomation(TimePoint now);
   std::string describeLocked() const;
 
@@ -123,12 +134,16 @@ private:
   TimePoint lastPwmStepAt_;
   TimePoint lastFadeAt_;
   TimePoint lastRelayTestAt_;
+  TimePoint lastHostActivityAt_;
   TimePoint learningDeadline_;
   TimePoint segmentDeadline_;
-  TimePoint lcdDeadline_;
+  TimePoint buzzerDeadline_;
+  TimePoint i2cLeaseDeadline_;
+  TimePoint lastRemoteActionAt_;
+  TimePoint remoteMomentaryDeadline_;
 
   std::vector<wire::Frame> pendingEvents_;
-  std::array<RemoteEntry, 8> remotes_{};
+  std::array<RemoteEntry, 20> remotes_{};
   std::uint16_t framingErrors_ = 0;
   std::uint16_t crcErrors_ = 0;
   std::uint32_t resetCount_ = 0;
@@ -141,6 +156,17 @@ private:
   bool relayTestOn_ = false;
   bool pwmRising_ = true;
   bool learningActive_ = false;
+  std::uint8_t learningOptions_ = 0;
+  std::uint32_t lastRadioCode_ = 0;
+  std::uint32_t lastRemoteActionCode_ = 0;
+  std::uint8_t remoteMomentaryKind_ = 0;
+  std::uint8_t remoteMomentaryValue_ = 0;
+  bool lastRemoteActionValid_ = false;
+  bool hostSeen_ = false;
+  bool programRunning_ = false;
+  bool statusOverride_ = false;
+  bool hostPanelCaptured_ = false;
+  std::uint16_t hostPanelMeta_ = 0;
   std::uint8_t macroState_ = 0;
   std::uint8_t macroId_ = 0;
   std::uint8_t macroOptions_ = 0;
@@ -159,17 +185,11 @@ private:
   std::uint16_t menuVisibleMask_ = 0x7FFF;
   std::array<std::uint8_t, 15> menuOrder_{{0, 1, 2, 3, 4, 5, 6, 7,
                                            8, 9, 10, 11, 12, 13, 14}};
-  std::array<HostMenuEntry, 8> hostMenuDirectory_{};
-  std::uint8_t hostMenuCount_ = 0;
-  std::uint8_t hostMenuGeneration_ = 0;
-  std::uint8_t hostMenuActiveId_ = 0xFF;
-  std::uint8_t hostMenuPhase_ = 0;
-  std::uint8_t hostMenuAttempt_ = 0;
-  std::uint8_t hostMenuRevision_ = 0;
-  TimePoint hostMenuRequestedAt_;
-  bool hostMenuRequestActive_ = false;
   bool segmentDeadlineActive_ = false;
-  bool lcdDeadlineActive_ = false;
+  bool buzzerDeadlineActive_ = false;
+  std::uint8_t i2cLeaseAddress_ = 0;
+  std::array<std::uint8_t, 4> i2cRegisterPointers_{};
+  std::array<std::array<std::uint8_t, 256>, 4> i2cRegisters_{};
 };
 
 } // namespace pccontroller::virtual_board

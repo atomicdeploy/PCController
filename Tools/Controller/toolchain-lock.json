@@ -1,0 +1,146 @@
+{
+  "format": "pccontroller-toolchain-lock/v1",
+  "policy_name": "controllerboardmini-atmega328p",
+  "resolved_at_utc": "2026-08-01T22:30:11Z",
+  "firmware": {
+    "name": "controllerboardmini-atmega328p",
+    "fqbn": "MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external",
+    "package_indexes": [
+      "https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json"
+    ],
+    "cli": {
+      "dependency": "arduino-cli",
+      "version": "1.5.1",
+      "assets": [
+        {
+          "goos": "windows",
+          "goarch": "amd64",
+          "url": "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Windows_64bit.zip",
+          "sha256": "fabe42e0eb04d00e776a66178299ff95a46c623dbc260f997e58fd514853dd40",
+          "archive": "zip"
+        },
+        {
+          "goos": "windows",
+          "goarch": "386",
+          "url": "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Windows_32bit.zip",
+          "sha256": "885e491c7c7fb8b396151c09daa5c4c56d8b60697d172a5cfe72c939eed50fe3",
+          "archive": "zip"
+        },
+        {
+          "goos": "linux",
+          "goarch": "amd64",
+          "url": "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Linux_64bit.tar.gz",
+          "sha256": "28a8e119c498a25607821c36cb2dc49e8463941b261a0d99091baa7bc692dd2b",
+          "archive": "tar.gz"
+        },
+        {
+          "goos": "linux",
+          "goarch": "arm64",
+          "url": "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_Linux_ARM64.tar.gz",
+          "sha256": "1e69e077479f300614d4551334e0a33f08ee40b04315d83b8e7e0e94f0d0ee62",
+          "archive": "tar.gz"
+        },
+        {
+          "goos": "darwin",
+          "goarch": "amd64",
+          "url": "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_macOS_64bit.tar.gz",
+          "sha256": "c982e940027996bea9901050e95fae99c59c1dcfee54beedecaf28141e7bf2e7",
+          "archive": "tar.gz"
+        },
+        {
+          "goos": "darwin",
+          "goarch": "arm64",
+          "url": "https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli_1.5.1_macOS_ARM64.tar.gz",
+          "sha256": "cb952e8c1621c95ef5f1d17831c945e3d0ec5973f89c557a7ec8feb9c4f7d4c9",
+          "archive": "tar.gz"
+        }
+      ]
+    },
+    "core_id": "MiniCore:avr",
+    "core_version": "3.1.2",
+    "libraries": [
+      {
+        "name": "Adafruit PWM Servo Driver Library",
+        "version": "3.0.3"
+      },
+      {
+        "name": "Adafruit INA219",
+        "version": "1.2.3"
+      },
+      {
+        "name": "rc-switch",
+        "version": "2.6.4"
+      },
+      {
+        "name": "TM1637TinyDisplay",
+        "version": "1.12.2"
+      },
+      {
+        "name": "DallasTemperature",
+        "version": "4.0.6"
+      },
+      {
+        "name": "OneWire",
+        "version": "2.3.8"
+      }
+    ],
+    "provided_tools": [
+      "AVR compiler/programmer tools supplied by the resolved MiniCore package",
+      "Urboot/Urclock UART programmer metadata supplied by the resolved MiniCore package"
+    ]
+  },
+  "core_source": {
+    "url": "https://MCUdude.github.io/MiniCore/MiniCore-3.1.2.tar.bz2",
+    "sha256": "2aa8523aa24eb20f8277d90480286399c67a59b05164ac3bad81716a0c6490b3"
+  },
+  "libraries": [
+    {
+      "name": "Adafruit PWM Servo Driver Library",
+      "version": "3.0.3",
+      "url": "https://downloads.arduino.cc/libraries/github.com/adafruit/Adafruit_PWM_Servo_Driver_Library-3.0.3.zip",
+      "sha256": "320902ab529a1cfcf4df35212fa0c30293956a6a456b198820df58de3504dbc6"
+    },
+    {
+      "name": "Adafruit INA219",
+      "version": "1.2.3",
+      "url": "https://downloads.arduino.cc/libraries/github.com/adafruit/Adafruit_INA219-1.2.3.zip",
+      "sha256": "7187663dc53a87c2d4d83216ccd66f680453c9e9b48416d4632d6f00632e631e"
+    },
+    {
+      "name": "rc-switch",
+      "version": "2.6.4",
+      "url": "https://downloads.arduino.cc/libraries/github.com/sui77/rc_switch-2.6.4.zip",
+      "sha256": "ed53920db3a38debe53e43b3bf8849ec3583aa419ef1f421a45662bcf056e014"
+    },
+    {
+      "name": "TM1637TinyDisplay",
+      "version": "1.12.2",
+      "url": "https://downloads.arduino.cc/libraries/github.com/jasonacox/TM1637TinyDisplay-1.12.2.zip",
+      "sha256": "50cda70a5cae3ed1b3949ce9db417e9918330716b4d286a7dcb3b1f12ad6dba1"
+    },
+    {
+      "name": "DallasTemperature",
+      "version": "4.0.6",
+      "url": "https://downloads.arduino.cc/libraries/github.com/milesburton/DallasTemperature-4.0.6.zip",
+      "sha256": "fb90dffd2bbd10b8eb5943968e8300ada5e4af17793b0f80c10359702d9de4e4"
+    },
+    {
+      "name": "OneWire",
+      "version": "2.3.8",
+      "url": "https://downloads.arduino.cc/libraries/github.com/PaulStoffregen/OneWire-2.3.8.zip",
+      "sha256": "dd76d1480a2f4c94348e8c8307ea74206d2936d9c80c73be67783fd200f2be17"
+    }
+  ],
+  "bootloader": {
+    "repository": "stefanrueger/urboot",
+    "tag": "u8.0.1",
+    "version": "8.0.1",
+    "source_commit": "bd52751acaa5923163e938a6e35051c22317da68",
+    "tree_hash": "45f53abdb3c6164df0ff853232ba58b62fa1409b"
+  },
+  "go": {
+    "version": "1.26.5",
+    "go_mod_sha256": "92e720246dff37e56648484871667c508497a7f51b82c3e539a6b5aaef608c59",
+    "go_sum_sha256": "bd016d74fe999ee74b76563cfe0457f79f6785c42a036d24014134609c10f66f"
+  }
+}

@@ -46,6 +46,9 @@ const (
 	OpHostMenuDirectory byte = 0x42
 	OpHostMenuContent   byte = 0x43
 	OpHostMenuStateGet  byte = 0x44
+	// OpProgramState carries the semantic prefix [0=Idle, 1=Running]. Firmware
+	// deliberately ignores any future tail it does not understand.
+	OpProgramState byte = 0x45
 
 	OpACK             byte = 0x80
 	OpHelloResp       byte = 0x81
@@ -84,6 +87,11 @@ const (
 	ResetBootloader
 )
 
+const (
+	ProgramStateIdle byte = iota
+	ProgramStateRunning
+)
+
 var opcodeNames = map[byte]string{
 	OpHello: "HELLO", OpGetStatus: "GET_STATUS", OpSetStream: "SET_STREAM",
 	OpGetSettings: "GET_SETTINGS", OpSetSettings: "SET_SETTINGS",
@@ -104,7 +112,8 @@ var opcodeNames = map[byte]string{
 	OpRFLearnReplace: "RF_LEARN_REPLACE", OpMenuLayoutGet: "MENU_LAYOUT_GET",
 	OpMenuLayoutSet: "MENU_LAYOUT_SET", OpHostMenuDirectory: "HOST_MENU_DIRECTORY",
 	OpHostMenuContent: "HOST_MENU_CONTENT", OpHostMenuStateGet: "HOST_MENU_STATE_GET",
-	OpACK: "ACK", OpHelloResp: "HELLO", OpError: "ERROR", OpStatus: "STATUS",
+	OpProgramState: "PROGRAM_STATE",
+	OpACK:          "ACK", OpHelloResp: "HELLO", OpError: "ERROR", OpStatus: "STATUS",
 	OpSettings: "SETTINGS", OpPWMValues: "PWM_VALUES",
 	OpI2CResult: "I2C_RESULT", OpRFEntries: "RF_ENTRIES",
 	OpTemperatures: "TEMPERATURES", OpFrontPanel: "FRONT_PANEL",

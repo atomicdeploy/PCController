@@ -14,6 +14,11 @@ import {
 } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import {
+        createChalk,
+        renderUnicodeBanner
+} from '../Build/presentation.mjs'
+import { resolveProductTitle } from '../Build/product-metadata.mjs'
 
 export const EXIT = Object.freeze({
 	OK: 0,
@@ -324,23 +329,16 @@ export function parseArguments(argv, env = process.env) {
 	return config
 }
 
-function usage(color = true) {
-	const style = color
-		? {
-				title: '\u001b[1;96m',
-				heading: '\u001b[1;93m',
-				dim: '\u001b[90m',
-				reset: '\u001b[0m'
-			}
-		: { title: '', heading: '', dim: '', reset: '' }
-	return `${style.title}PCController AVR firmware studio${style.reset}
+function usage(color = true, productTitle = resolveProductTitle()) {
+        const chalk = createChalk({ noColor: !color, forceColor: color }, color)
+        return `${chalk.bold.cyanBright(`${productTitle} AVR firmware studio`)}
 
-${style.heading}Usage${style.reset}
+${chalk.bold.yellowBright('Usage')}
   node Tools/Firmware/firmware.mjs [command] [options]
   firmware.cmd [command] [options]
   ./firmware.sh [command] [options]
 
-${style.heading}Commands${style.reset}
+${chalk.bold.yellowBright('Commands')}
   build       Build AVR firmware, validate Intel HEX, and write a SHA-256 manifest
   upload      Build, upload, and verify through MiniCore Urboot/urclock
   watch       Watch firmware sources and run stable, coalesced builds
@@ -351,7 +349,7 @@ ${style.heading}Commands${style.reset}
   probe       Probe the AVR signature through Urclock
   metadata    Request Urboot/Urclock metadata
 
-${style.heading}Options${style.reset}
+${chalk.bold.yellowBright('Options')}
   --port PORT       Explicit serial port; required for every UART hardware action
   --method METHOD   urclock (default) or guarded usbasp; Arduino upload is disabled
   --programmer ID   ISP programmer ID used by the canonical build (default: usbasp)
@@ -367,56 +365,46 @@ ${style.heading}Options${style.reset}
   --quiet           Suppress informational output
   -h, --help        Show this help
 
-${style.heading}Watch options${style.reset}
+${chalk.bold.yellowBright('Watch options')}
   --upload          Program after each successful watched build (never implicit)
   --once            Run the initial watched action and exit
   --poll MS         Content scan interval (default: ${DEFAULT_POLL_MS})
   --debounce MS     Stable-source window (default: ${DEFAULT_DEBOUNCE_MS})
 
-${style.dim}Target: MiniCore 3.1.2+, ATmega328P, external 16 MHz, EEPROM retained,
+${chalk.dim(`Target: MiniCore 3.1.2+, ATmega328P, external 16 MHz, EEPROM retained,
 BOD 2.7 V, UART0 Urboot/urclock at 115200 baud. Default command is build.
 Exit codes: 0 success, 2 usage, 3 validation, 4 build/program, 5 local I/O,
-130 interrupted.${style.reset}`
+130 interrupted.`)}`
 }
 
-function createLogger(config) {
-	const color = !config.noColor && process.stdout.isTTY
-	const code = color
-		? {
-				cyan: '\u001b[1;96m',
-				green: '\u001b[1;92m',
-				yellow: '\u001b[1;93m',
-				red: '\u001b[1;91m',
-				magenta: '\u001b[1;95m',
-				dim: '\u001b[90m',
-				reset: '\u001b[0m'
-			}
-		: { cyan: '', green: '', yellow: '', red: '', magenta: '', dim: '', reset: '' }
+function createLogger(config, productTitle = resolveProductTitle()) {
+	const chalk = createChalk(config, process.stdout.isTTY)
 	return {
 		banner() {
 			if (config.quiet) return
-			console.log('')
-			console.log(`${code.magenta}╔══════════════════════════════════════════╗${code.reset}`)
-			console.log(`${code.magenta}║  ⚡ PCController AVR firmware studio     ║${code.reset}`)
-			console.log(`${code.magenta}╚══════════════════════════════════════════╝${code.reset}`)
+                        console.log('')
+                        console.log(renderUnicodeBanner(
+                                [chalk.bold(`⚡ ${productTitle} AVR firmware studio`)],
+				{ chalk, width: 44, borderColor: 'magentaBright' }
+			))
 		},
 		stage(icon, message) {
-			if (!config.quiet) console.log(`\n${code.cyan}${icon}  ${message}${code.reset}`)
+			if (!config.quiet) console.log(`\n${chalk.bold.cyanBright(`${icon}  ${message}`)}`)
 		},
 		info(message) {
 			if (!config.quiet) console.log(message)
 		},
 		detail(message) {
-			if (!config.quiet) console.log(`${code.dim}${message}${code.reset}`)
+			if (!config.quiet) console.log(chalk.dim(message))
 		},
 		success(message) {
-			if (!config.quiet) console.log(`${code.green}✅  ${message}${code.reset}`)
+			if (!config.quiet) console.log(chalk.bold.greenBright(`✅  ${message}`))
 		},
 		warn(message) {
-			if (!config.quiet) console.warn(`${code.yellow}⚠️  ${message}${code.reset}`)
+			if (!config.quiet) console.warn(chalk.bold.yellowBright(`⚠️  ${message}`))
 		},
 		error(message) {
-			console.error(`${code.red}❌  ${message}${code.reset}`)
+			console.error(chalk.bold.redBright(`❌  ${message}`))
 		}
 	}
 }
@@ -1174,22 +1162,26 @@ export async function main(
 	env = process.env,
 	projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 ) {
-	let config
+        const productTitle = resolveProductTitle(env)
+        let config
 	try {
 		assertNodeVersion()
 		config = parseArguments(argv, env)
 	} catch (error) {
-		const fallback = createLogger({ quiet: false, noColor: Boolean(env.NO_COLOR) })
+                const fallback = createLogger(
+                        { quiet: false, noColor: Boolean(env.NO_COLOR) },
+                        productTitle
+                )
 		fallback.error(error.message || String(error))
 		console.error('Run firmware.cmd --help for usage.')
 		return error.exitCode || EXIT.USAGE
-	}
-	if (config.help) {
-		console.log(usage(!config.noColor && process.stdout.isTTY))
-		return EXIT.OK
-	}
+        }
+        if (config.help) {
+                console.log(usage(!config.noColor && process.stdout.isTTY, productTitle))
+                return EXIT.OK
+        }
 
-	const logger = createLogger(config)
+        const logger = createLogger(config, productTitle)
 	logger.banner()
 	const started = process.hrtime.bigint()
 	try {

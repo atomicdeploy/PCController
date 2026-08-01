@@ -10,7 +10,6 @@ constexpr uint16_t KEY_HOLD_FAST_AFTER_MS = 1800;
 constexpr uint16_t KEY_HOLD_REPEAT_FAST_MS = 60;
 
 using KeyCallback = void (*)(uint8_t bit, void *context);
-using SimpleKeyCallback = void (*)();
 
 enum class KeyEvent : uint8_t {
   Click = 0,
@@ -27,24 +26,19 @@ using KeyEventCallback =
 
 class Key {
 public:
-  explicit Key(uint8_t bit, SimpleKeyCallback callback = nullptr);
+  explicit Key(uint8_t bit);
 
   void update(uint32_t now = millis());
 
   bool isPressed() const;
   bool isHeld() const;
-  bool getCurrentState() const { return isPressed(); }
   uint8_t inputBit() const;
 
-  // The press/release callbacks retain the immediate debounced behavior used
-  // by existing sketches. Click events are delayed briefly so a second click
-  // can be recognized without also emitting a single click.
+  // Press/release callbacks retain immediate debounced behavior. Click events
+  // are delayed briefly so a second click does not also emit a single click.
   void setPressCallback(KeyCallback callback, void *context = nullptr);
   void setReleaseCallback(KeyCallback callback, void *context = nullptr);
   void setEventCallback(KeyEventCallback callback, void *context = nullptr);
-
-  // Compatibility with the original LocalLib callback shape.
-  void setCallback(SimpleKeyCallback callback);
 
   explicit operator bool() const { return isPressed(); }
 
@@ -66,7 +60,6 @@ private:
   uint8_t stableState_ : 1;
   uint8_t holdActive_ : 1;
   uint8_t clickPending_ : 1;
-  SimpleKeyCallback simpleCallback_ = nullptr;
   KeyCallback pressCallback_ = nullptr;
   KeyCallback releaseCallback_ = nullptr;
   KeyEventCallback eventCallback_ = nullptr;

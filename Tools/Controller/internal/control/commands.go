@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -55,6 +56,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		options.HostConfig,
 		options.UpdateHostConfig,
 	)
+	runtime.setMacroRunner(macroRunner)
 	outputs := options.Outputs
 	if outputs == nil {
 		outputs = NewOutputScheduler(runtime)
@@ -866,32 +868,64 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name:    "arduino",
-		Usage:   "arduino update|compile SKETCH|core-info|burn-bootloader [PORT]",
-		Summary: "update dependencies or use arduino-cli; flash via guarded program flash",
+		Name:    "toolchain",
+		Usage:   "toolchain bootstrap|sync|profile|compile SKETCH|core-info|install-bootloader [PORT]",
+		Summary: "bootstrap or synchronize the firmware build/programming toolchain",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			resolved := options
 			if options.Resolve != nil {
 				resolved = options.Resolve()
 			}
-			if len(args) == 1 && strings.EqualFold(args[0], "update") {
+			if len(args) == 1 && strings.EqualFold(args[0], "sync") {
 				var output bytes.Buffer
-				report, updateErr := programmer.UpdateArduino(
+				report, updateErr := programmer.SyncToolchain(
 					ctx,
-					programmer.ArduinoUpdateOptions{
-						ArduinoCLI:  resolved.ArduinoCLI,
-						DirectRetry: true,
+					programmer.ToolchainSyncOptions{
+						ToolchainCLI: resolved.ArduinoCLI,
+						DirectRetry:  true,
 					},
 					&output,
 				)
 				fmt.Fprintf(
 					&output,
-					"\nArduino update finished: %d steps.\n",
+					"\nToolchain sync finished: %d steps.\n",
 					len(report.Steps),
 				)
 				return strings.TrimSpace(output.String()), updateErr
 			}
-			programArgs, err := arduinoProgramArguments(args)
+			if len(args) == 1 && strings.EqualFold(args[0], "profile") {
+				encoded, err := json.MarshalIndent(programmer.DefaultToolchainProfile(), "", "  ")
+				return string(encoded), err
+			}
+			if len(args) >= 1 && strings.EqualFold(args[0], "bootstrap") {
+				dryRun := false
+				if len(args) == 2 && strings.EqualFold(args[1], "--dry-run") {
+					dryRun = true
+				} else if len(args) != 1 {
+					return "", errors.New("usage: toolchain bootstrap [--dry-run]")
+				}
+				var output bytes.Buffer
+				report, bootstrapErr := programmer.BootstrapToolchain(
+					ctx,
+					programmer.ToolchainBootstrapOptions{
+						Profile:     programmer.DefaultToolchainProfile(),
+						DirectRetry: true, DryRun: dryRun,
+					},
+					&output,
+				)
+				if bootstrapErr == nil && !dryRun && options.UpdateHostConfig != nil {
+					if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
+						config.Programming.ToolchainCLI = report.CLIPath
+						return nil
+					}); err != nil {
+						bootstrapErr = fmt.Errorf("save managed toolchain path: %w", err)
+					}
+				}
+				encoded, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Fprintln(&output, string(encoded))
+				return strings.TrimSpace(output.String()), bootstrapErr
+			}
+			programArgs, err := toolchainProgramArguments(args)
 			if err != nil {
 				return "", err
 			}
@@ -1383,8 +1417,8 @@ func describeLiveMenuEntry(entry native.MenuEntry) (MenuPageInfo, bool) {
 	return MenuPageInfo{}, false
 }
 
-func arduinoProgramArguments(args []string) ([]string, error) {
-	const usage = "usage: arduino compile SKETCH | core-info | burn-bootloader [PORT]"
+func toolchainProgramArguments(args []string) ([]string, error) {
+	const usage = "usage: toolchain compile SKETCH | core-info | install-bootloader [PORT]"
 	if len(args) == 0 {
 		return nil, fmt.Errorf("%s", usage)
 	}
@@ -1394,10 +1428,6 @@ func arduinoProgramArguments(args []string) ([]string, error) {
 			return nil, fmt.Errorf("%s", usage)
 		}
 		return []string{string(programmer.MethodCompile), args[1]}, nil
-	case "upload":
-		return nil, errors.New(
-			"direct arduino upload is disabled; compile to Intel HEX, then use program flash HEX [PORT] so flash and EEPROM are backed up first",
-		)
 	case "core-info", "info":
 		if len(args) != 1 {
 			return nil, fmt.Errorf("%s", usage)
@@ -1406,7 +1436,7 @@ func arduinoProgramArguments(args []string) ([]string, error) {
 			string(programmer.OperationCoreInfo),
 			string(programmer.MethodArduino),
 		}, nil
-	case "burn", "burn-bootloader":
+	case "install-bootloader":
 		if len(args) > 2 {
 			return nil, fmt.Errorf("%s", usage)
 		}
@@ -2699,7 +2729,7 @@ func programCommand(
 				programOptions.SketchPath = options.ProjectPath
 			}
 		case programmer.OperationCoreInfo, programmer.OperationBurnBoot:
-			// These arduino-cli operations do not take a sketch or memory file.
+			// These dependency-CLI operations do not take a project or memory file.
 		default:
 			return "", fmt.Errorf("%s does not support operation %s", method, operation)
 		}
@@ -2904,12 +2934,35 @@ func safeFlashCommand(
 	writeOptions.Operation = programmer.OperationWriteFlash
 	writeOptions.HexPath = firmwarePath
 	serialWasOpen := snapshot.Connected
+	var programmingSession *ProgrammingSession
+	var prepareOutput bytes.Buffer
 	if serialWasOpen {
+		var prepareErr error
+		programmingSession, prepareErr = PrepareProgrammingSession(
+			ctx,
+			runtime,
+			firmwarePath,
+			ProgrammingLifecycleOptions{DataPaths: dataPaths},
+			&prepareOutput,
+		)
+		if prepareErr != nil {
+			return strings.TrimSpace(prepareOutput.String()), fmt.Errorf(
+				"prepare application programming state: %w", prepareErr,
+			)
+		}
 		if err := runtime.Close(); err != nil {
-			return "", fmt.Errorf("release application UART: %w", err)
+			return strings.TrimSpace(prepareOutput.String()), fmt.Errorf(
+				"release application UART (settings recovery marker retained): %w", err,
+			)
 		}
 	}
 	var output bytes.Buffer
+	if serialWasOpen {
+		output.Write(prepareOutput.Bytes())
+		if output.Len() != 0 && !strings.HasSuffix(output.String(), "\n") {
+			output.WriteByte('\n')
+		}
+	}
 	fmt.Fprintln(&output, "application UART released; guarded programmer transaction has exclusive ownership")
 	fmt.Fprintf(&output, "pre-flash method=%s firmware=%s\n", method, firmwarePath)
 	result, flashErr := programmer.AutomaticBackupThenFlash(
@@ -2940,22 +2993,33 @@ func safeFlashCommand(
 	if result.Flashed {
 		fmt.Fprintln(&output, "guarded firmware flash completed")
 	}
+	var reconnectErr error
+	var restoreErr error
 	if serialWasOpen {
 		runtime.ResumeAuto()
 		reconnectContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 12*time.Second)
-		reconnectErr := runtime.EnsureConnected(reconnectContext)
+		reconnectErr = runtime.EnsureConnected(reconnectContext)
 		cancel()
-		if reconnectErr != nil {
-			return strings.TrimSpace(output.String()), fmt.Errorf(
-				"guarded flash result (%v); application HELLO reconnect failed: %w",
-				flashErr, reconnectErr,
+		if reconnectErr == nil {
+			restoreContext, restoreCancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
+			restoreErr = RestoreProgrammingSession(
+				restoreContext, runtime, programmingSession,
+				ProgrammingLifecycleOptions{DataPaths: dataPaths}, &output,
+			)
+			restoreCancel()
+		} else {
+			reconnectErr = fmt.Errorf(
+				"application HELLO reconnect failed; settings recovery marker retained: %w",
+				reconnectErr,
 			)
 		}
-		connected := runtime.Snapshot()
-		fmt.Fprintf(&output, "application mode restored and authenticated on %s: %s\n", connected.Port.Name, formatHello(connected.Hello))
+		if reconnectErr == nil {
+			connected := runtime.Snapshot()
+			fmt.Fprintf(&output, "application mode restored and authenticated on %s: %s\n", connected.Port.Name, formatHello(connected.Hello))
+		}
 	}
-	if flashErr != nil {
-		return strings.TrimSpace(output.String()), flashErr
+	if joined := errors.Join(flashErr, reconnectErr, restoreErr); joined != nil {
+		return strings.TrimSpace(output.String()), joined
 	}
 	return strings.TrimSpace(output.String()), nil
 }
@@ -2977,7 +3041,7 @@ func parseProgramOperation(value string) programmer.Operation {
 func formatStatus(status native.Status) string {
 	return fmt.Sprintf(
 		"uptime=%s supply=%.3fV bus=%.3fV current=%dmA power=%dmW tLED=%.2fC tBT=%.2fC\n"+
-			"flags=0x%04X inputs=0x%02X keys=0x%02X relays=0x%02X menu=%d mode=%d door=%t bt=%d\n"+
+			"flags=0x%04X running=%t host_offline=%t hot=%t inputs=0x%02X keys=0x%02X relays=0x%02X menu=%d mode=%d door=%t bt=%d\n"+
 			"PWM mode=%d channel=%d value=%d errors=%d LCD=0x%02X framing=%d crc=%d reset_cause=0x%02X reset_count=%d",
 		(time.Duration(status.UptimeMS) * time.Millisecond).Round(time.Millisecond),
 		float64(status.SupplyMV)/1000,
@@ -2987,6 +3051,9 @@ func formatStatus(status native.Status) string {
 		float64(status.TLEDCenti)/100,
 		float64(status.TBTCenti)/100,
 		status.Flags,
+		status.ProgramRunning,
+		status.HostOffline,
+		status.Hot,
 		status.RawInputs,
 		status.ActiveKeys,
 		status.ActiveRelays,

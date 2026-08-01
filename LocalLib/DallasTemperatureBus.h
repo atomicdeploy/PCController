@@ -24,10 +24,6 @@ public:
   bool getAddress(Ds18b20Address destination, uint8_t index) const;
   bool setResolution(const uint8_t address[8], uint8_t resolutionBits);
 
-  // Compatibility with the old DallasTemperature call site. This driver is
-  // always asynchronous, so no state needs to be changed here.
-  void setWaitForConversion(bool) {}
-
   bool requestTemperatures();
   int16_t getTempCentiC(const uint8_t address[8]);
   float getTempC(const uint8_t address[8]);

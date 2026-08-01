@@ -2,8 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
-	"strings"
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
@@ -11,6 +9,7 @@ import (
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type Page int
@@ -61,12 +60,8 @@ type Preferences struct {
 }
 
 func defaultPreferences() Preferences {
-	title := strings.TrimSpace(os.Getenv("PCCONTROLLER_APP_TITLE"))
-	if title == "" {
-		title = "PCController"
-	}
 	return Preferences{
-		AppTitle:            title,
+		AppTitle:            productidentity.Title(""),
 		PollInterval:        250 * time.Millisecond,
 		EventLogLimit:       2000,
 		HistoryWindow:       24 * time.Hour,
@@ -84,9 +79,7 @@ func defaultPreferences() Preferences {
 
 func preferencesFromUI(value appconfig.UI) Preferences {
 	result := defaultPreferences()
-	if title := strings.TrimSpace(value.AppTitle); title != "" {
-		result.AppTitle = title
-	}
+	result.AppTitle = productidentity.Title(value.AppTitle)
 	if value.StatusIntervalMS >= 100 {
 		result.PollInterval = time.Duration(value.StatusIntervalMS) * time.Millisecond
 	}

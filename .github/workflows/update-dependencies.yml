@@ -1,0 +1,185 @@
+name: Dependency Resolution and Validation
+
+on:
+  schedule:
+    - cron: "17 1 * * *"
+  workflow_dispatch:
+    inputs:
+      check_only:
+        description: Resolve and report without updating locks or opening a PR
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: dependency-resolution
+  cancel-in-progress: false
+
+jobs:
+  resolve-update-validate:
+    name: Resolve latest stable dependencies and validate candidate
+    runs-on: windows-2025
+    timeout-minutes: 75
+    env:
+      NO_COLOR: "1"
+      TZ: UTC
+      CHECK_ONLY: ${{ inputs.check_only || false }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install current stable Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: stable
+          cache-dependency-path: Tools/Controller/go.sum
+
+      - name: Install current Node.js LTS
+        uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: |
+            Tools/Build/package-lock.json
+            Tools/Controller/web/package-lock.json
+
+      - name: Install dependency-updater presentation packages
+        shell: cmd
+        run: npm ci --prefix Tools\Build --no-audit --no-fund
+
+      - name: Resolve, update, and validate before PR creation
+        id: candidate
+        shell: cmd
+        continue-on-error: true
+        run: |
+          if /I "%CHECK_ONLY%"=="true" (
+            call update-dependencies.cmd --check --report .build\dependencies\update-report.json
+          ) else (
+            call update-dependencies.cmd --apply --validate --report .build\dependencies\update-report.json
+          )
+
+      - name: Render dependency report
+        if: always()
+        shell: cmd
+        run: node Tools\Dependencies\workflow-summary.mjs .build\dependencies\update-report.json
+
+      - name: Upload resolution, hash, and validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-resolution-${{ github.run_id }}
+          path: |
+            .build/dependencies/
+            .build/firmware/firmware-manifest.json
+            .build/bootloader/urboot-custom/build-manifest.json
+            Tools/Controller/toolchain-profile.json
+            Tools/Controller/toolchain-lock.json
+            Tools/Dependencies/dependency-policy.json
+            Tools/Dependencies/resolved-tools-lock.json
+            Tools/Build/package-lock.json
+            Tools/Controller/go.mod
+            Tools/Controller/go.sum
+            Tools/Controller/web/package-lock.json
+            Tools/Controller/bin/host-manifest.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Create or update one actionable blocked-update issue
+        if: steps.candidate.outcome != 'success'
+        uses: actions/github-script@v8
+        env:
+          REPORT_PATH: .build/dependencies/update-report.json
+        with:
+          script: |
+            const fs = require('fs');
+            const title = '🚨 Automated dependency update blocked';
+            let report = { error: 'The updater failed before producing its structured report.' };
+            if (fs.existsSync(process.env.REPORT_PATH)) {
+              report = JSON.parse(fs.readFileSync(process.env.REPORT_PATH, 'utf8'));
+            }
+            try {
+              await github.rest.issues.getLabel({ ...context.repo, name: 'dependency-blocked' });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.issues.createLabel({
+                ...context.repo, name: 'dependency-blocked', color: 'B60205',
+                description: 'Latest dependency candidate failed validation or patch rebase'
+              });
+            }
+            const body = [
+              'The latest-compatible dependency candidate did not pass the pre-PR gate.',
+              '',
+              `- Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              `- Commit: \`${context.sha}\``,
+              `- Error: \`${String(report.error || 'unknown').slice(0, 1500)}\``,
+              '',
+              'Download the `dependency-resolution` artifact for the exact locks, hashes, manifests, and logs. Resolve the source, Urboot-Custom patch, memory-ceiling, host, web, or VirtualBoard failure; the updater will retry on its next run.'
+            ].join('\n');
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: 'dependency-blocked', per_page: 100
+            });
+            const issue = existing.find(item => item.title === title && !item.pull_request);
+            if (issue) {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: issue.number, body });
+            } else {
+              await github.rest.issues.create({
+                ...context.repo, title, body,
+                labels: ['dependencies', 'dependency-blocked']
+              });
+            }
+
+      - name: Close resolved blocked-update issue
+        if: steps.candidate.outcome == 'success' && env.CHECK_ONLY != 'true'
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const title = '🚨 Automated dependency update blocked';
+            const existing = await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: 'dependency-blocked', per_page: 100
+            });
+            for (const issue of existing.filter(item => item.title === title && !item.pull_request)) {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: issue.number,
+                body: `✅ The dependency candidate passed again in ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}.`
+              });
+              await github.rest.issues.update({ ...context.repo, issue_number: issue.number, state: 'closed', state_reason: 'completed' });
+            }
+
+      - name: Create or refresh the validated dependency PR
+        if: steps.candidate.outcome == 'success' && env.CHECK_ONLY != 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: "chore(deps): refresh resolved dependencies"
+          title: "⬆️ Refresh latest-compatible dependencies"
+          body: |
+            ## ✅ Candidate validated before PR creation
+
+            This automated change resolves stable dependencies from primary registries, refreshes exact hash-bearing locks, and has already passed:
+
+            - AVR firmware compile and the **32,256-byte Urboot-Custom application ceiling**
+            - Urboot stable-source hash verification, patch application, stock fixture hashes, and 512-byte custom build
+            - Go tests/vet and host packaging
+            - Win32 resources and latest resolved UPX compression
+            - web clean install, typecheck, tests, production build, and exact npm lock
+            - build-output lint/tests and exact Chalk/cli-table3 npm lock
+            - canonical product-identity generation check before host compilation
+            - VirtualBoard configure/build/CTest
+
+            Prerelease CLI and Urboot `main` are observation-only canaries and are never silently selected.
+          branch: automation/latest-compatible-dependencies
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
+
+      - name: Fail the workflow after publishing diagnostics
+        if: steps.candidate.outcome != 'success'
+        shell: cmd
+        run: exit /b 1

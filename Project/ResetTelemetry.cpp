@@ -40,16 +40,8 @@ void captureResetCause() {
 }
 
 uint8_t resetRecordChecksum(uint32_t count) {
-  // 0x1F advances the protocol CRC-8 from its zero seed to the journal's
-  // historical 0x5D seed, preserving every record written by older firmware
-  // while sharing the already-linked CRC implementation.
-  struct __attribute__((packed)) ChecksumInput {
-    uint8_t seedPrefix;
-    uint32_t count;
-  };
-  const ChecksumInput input = {0x1F, count};
   return ControllerProtocol::UartProtocol::crc8(
-      reinterpret_cast<const uint8_t *>(&input), sizeof(input));
+      reinterpret_cast<const uint8_t *>(&count), sizeof(count));
 }
 
 bool validResetRecord(const ResetRecord &record) {

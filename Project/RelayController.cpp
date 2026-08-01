@@ -42,6 +42,14 @@ void RelayController::service(uint32_t now) {
   serviceSide(RelaySide::B, now, directionChangedThisService);
 }
 
+void RelayController::setMotionAllowed(bool allowed, uint32_t now) {
+  motionAllowed_ = allowed;
+  if (!allowed) {
+    stopSide(RelaySide::A, now);
+    stopSide(RelaySide::B, now);
+  }
+}
+
 bool RelayController::requestSide(RelaySide side, RelayDirection direction,
                                   bool enabled, uint32_t now) {
   if ((side != RelaySide::A && side != RelaySide::B) ||

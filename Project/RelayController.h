@@ -55,7 +55,8 @@ public:
   void begin(uint32_t now = millis());
   void allOff(uint32_t now = millis());
   void service(uint32_t now = millis());
-  void setMotionAllowed(bool allowed) { motionAllowed_ = allowed; }
+  // Revoking policy is fail-safe and immediately drops both motion enables.
+  void setMotionAllowed(bool allowed, uint32_t now = millis());
   bool motionAllowed() const { return motionAllowed_; }
   void setBreakBeforeDirectionMs(uint8_t value) {
     breakBeforeDirectionMs_ = value == 0 ? 1 : value;

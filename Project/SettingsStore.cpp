@@ -115,21 +115,13 @@ bool SettingsStore::dirty() const { return dirty_; }
 
 void SettingsStore::setDefaults() {
   // MotionDoorPolicy::Always is the zero encoding in the cleared policy bits.
-  settings_.flags = SettingsFlags::SwapTemperatureSensors;
-#if PCCONTROLLER_SAFE_EEPROM_MIGRATION
-  settings_.illuminationMode = 0; // Off during one-shot EEPROM migration.
-#else
+  settings_.flags = 0;
   settings_.illuminationMode = 1; // Auto
-#endif
   settings_.illuminationOnBrightness = 128;
   settings_.illuminationOffBrightness = 0;
   settings_.displayBrightness = 5;
   settings_.statusBrightness = 128;
-#if PCCONTROLLER_SAFE_EEPROM_MIGRATION
-  settings_.pwmBootMode = 0; // Off during one-shot EEPROM migration.
-#else
   settings_.pwmBootMode = 2; // Auto test
-#endif
   settings_.streamPeriodMs = 500;
   memset(settings_.userPwm, 0, sizeof(settings_.userPwm));
   settings_.defaultMenuPage = 0;

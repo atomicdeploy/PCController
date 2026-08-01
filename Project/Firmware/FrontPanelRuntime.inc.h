@@ -307,14 +307,7 @@ void menuFeedback(bool fromRemote) {
 
 // Rolls an 8-bit brightness by the configured front-panel step.
 uint8_t adjustedBrightness(uint8_t value, bool increase) {
-  if (increase) {
-    return value > 255 - ILLUMINATION_MENU_STEP
-               ? 0
-               : static_cast<uint8_t>(value + ILLUMINATION_MENU_STEP);
-  }
-  return value < ILLUMINATION_MENU_STEP
-             ? 255
-             : static_cast<uint8_t>(value - ILLUMINATION_MENU_STEP);
+  return TransitionMath::rollByte(value, ILLUMINATION_MENU_STEP, increase);
 }
 
 // Rolls Off/Auto/On and mirrors the result to the edit transaction.
@@ -396,12 +389,8 @@ void applyStoredSettings(uint32_t now) {
   statusLeds.setBrightness(settings.statusBrightness);
   statusLeds.setReadyColor(settings.statusColor());
   streamPeriodMs = settings.streamPeriodMs;
-  relays.setMotionAllowed(motionPolicyAllows());
+  relays.setMotionAllowed(motionPolicyAllows(), now);
   relays.setBreakBeforeDirectionMs(settings.motionBreakBeforeDirectionMs());
-  if (!relays.motionAllowed()) {
-    relays.stopSide(::RelaySide::A, now);
-    relays.stopSide(::RelaySide::B, now);
-  }
   pwm.setMode(static_cast<PwmTestMode>(settings.pwmBootMode), now);
   if (settings.pwmBootMode ==
       static_cast<uint8_t>(PwmTestMode::Manual)) {
@@ -946,10 +935,8 @@ void serviceSystemInputs(uint32_t now) {
     statusLeds.playCue(value ? StatusLedCue::DoorOpen
                              : StatusLedCue::DoorClosed,
                        720, now);
-    relays.setMotionAllowed(motionPolicyAllows());
+    relays.setMotionAllowed(motionPolicyAllows(), now);
     if (!relays.motionAllowed()) {
-      relays.stopSide(::RelaySide::A, now);
-      relays.stopSide(::RelaySide::B, now);
       if (modeManager.current() == MODE_MOTION_CONTROL) {
         modeManager.transitionTo(MODE_MOTION);
       }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,6 +18,8 @@ type AppAction struct {
 
 type ActionBroker struct {
 	events chan AppAction
+	mu     sync.RWMutex
+	watch  func(AppAction)
 }
 
 func NewActionBroker() *ActionBroker {
@@ -24,6 +27,18 @@ func NewActionBroker() *ActionBroker {
 }
 
 func (broker *ActionBroker) Events() <-chan AppAction { return broker.events }
+
+// SetObserver installs a single delivery observer without changing the
+// broker's original bounded TUI queue. The observer is used by the primary
+// process to mirror valid app.page actions into the typed runtime event
+// history, whose subscribers are independently cursor-based. Observer
+// delivery remains independent when a headless process does not drain the
+// optional TUI queue.
+func (broker *ActionBroker) SetObserver(observer func(AppAction)) {
+	broker.mu.Lock()
+	broker.watch = observer
+	broker.mu.Unlock()
+}
 
 func (broker *ActionBroker) Publish(action AppAction) error {
 	action.Kind = strings.ToLower(strings.TrimSpace(action.Kind))
@@ -47,10 +62,19 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 	default:
 		return fmt.Errorf("unsupported app action %q", action.Kind)
 	}
+	broker.mu.RLock()
+	observer := broker.watch
+	broker.mu.RUnlock()
 	select {
 	case broker.events <- action:
+		if observer != nil {
+			observer(action)
+		}
 		return nil
 	default:
+		if observer != nil {
+			observer(action)
+		}
 		return errors.New("app action queue is full")
 	}
 }

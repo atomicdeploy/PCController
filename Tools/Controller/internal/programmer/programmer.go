@@ -23,7 +23,7 @@ type Operation string
 
 const (
 	MethodCompile Method = "compile"
-	MethodArduino Method = "arduino"
+	MethodArduino Method = "toolchain"
 	MethodUrclock Method = "urclock"
 	MethodUSBasp  Method = "usbasp"
 	MethodAvrdude Method = "avrdude"
@@ -40,7 +40,7 @@ const (
 	OperationProbe       Operation = "probe"
 	OperationStart       Operation = "start"
 	OperationCoreInfo    Operation = "core-info"
-	OperationBurnBoot    Operation = "burn-bootloader"
+	OperationBurnBoot    Operation = "install-bootloader"
 	OperationBackup      Operation = "backup"
 )
 
@@ -158,7 +158,7 @@ func Build(options Options) (Command, error) {
 			args = append(args, "--output-dir", options.OutputDir)
 		}
 		args = append(args, options.SketchPath)
-		return Command{Name: executable, Args: args}, nil
+		return Command{Name: executable, Args: managedToolchainCLIArguments(executable, args...)}, nil
 
 	case MethodArduino:
 		executable, err := findExecutable(options.ArduinoCLI, "arduino-cli")
@@ -168,24 +168,24 @@ func Build(options Options) (Command, error) {
 		switch options.Operation {
 		case OperationWriteFlash:
 			if options.Port == "" {
-				return Command{}, errors.New("arduino upload requires a serial port")
+				return Command{}, errors.New("dependency CLI upload requires a serial port")
 			}
 			if options.SketchPath == "" {
-				return Command{}, errors.New("arduino upload requires a sketch path")
+				return Command{}, errors.New("dependency CLI upload requires a project path")
 			}
-			return Command{Name: executable, Args: []string{
+			return Command{Name: executable, Args: managedToolchainCLIArguments(executable,
 				"upload", "--port", options.Port, "--fqbn", options.FQBN,
 				options.SketchPath,
-			}}, nil
+			)}, nil
 		case OperationCoreInfo:
-			return Command{Name: executable, Args: []string{
+			return Command{Name: executable, Args: managedToolchainCLIArguments(executable,
 				"board", "details", "--fqbn", options.FQBN,
 				"--full", "--list-programmers",
-			}}, nil
+			)}, nil
 		case OperationBurnBoot:
 			if options.Programmer == "" {
 				return Command{}, errors.New(
-					"arduino burn-bootloader requires --programmer",
+					"toolchain install-bootloader requires --programmer",
 				)
 			}
 			args := []string{
@@ -195,10 +195,10 @@ func Build(options Options) (Command, error) {
 			if options.Port != "" {
 				args = append(args, "--port", options.Port)
 			}
-			return Command{Name: executable, Args: args}, nil
+			return Command{Name: executable, Args: managedToolchainCLIArguments(executable, args...)}, nil
 		default:
 			return Command{}, fmt.Errorf(
-				"arduino does not support operation %s",
+				"toolchain dependency does not support operation %s",
 				options.Operation,
 			)
 		}
@@ -772,13 +772,9 @@ func FindAvrdudeWithCLI(
 	if err == nil {
 		queryContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		command := exec.CommandContext(
-			queryContext,
-			cli,
-			"config",
-			"get",
-			"directories.data",
-		)
+		command := exec.CommandContext(queryContext, cli, managedToolchainCLIArguments(
+			cli, "config", "get", "directories.data",
+		)...)
 		output, commandErr := command.Output()
 		if commandErr == nil {
 			dataDirectory := strings.Trim(strings.TrimSpace(string(output)), `"`)

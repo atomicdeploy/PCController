@@ -47,6 +47,7 @@ Requests and representative operations:
 ```json
 {"operation":"create","options":{"vid":"1A86","pid":"7523","name":"USB-SERIAL CH340"}}
 {"operation":"connect","handle":1,"timeout_ms":15000}
+{"operation":"commands","handle":1}
 {"operation":"execute","handle":1,"command":"status"}
 {"operation":"status","handle":1}
 {"operation":"temperatures","handle":1,"rescan":true}
@@ -63,6 +64,7 @@ Requests and representative operations:
 | `create` | Create a client from the full Go `Options` JSON shape and return a handle. |
 | `ports` | Enumerate serial ports; no handle is required. |
 | `connect` | Auto-detect, or explicitly open top-level `port` when provided; returns the snapshot. |
+| `commands` | Return the shared command catalog with names, aliases, usage, summary, and task group. |
 | `execute` | Run any registered shell command and return `{"output":"..."}`. This includes status/settings, display/strip, macros, streamed melodies/status effects, relay/PWM/RF, reset, raw query, and programming commands. |
 | `status` | Request and decode current telemetry, including reset fields when supplied. |
 | `temperatures` | Return named DS18B20 role/ROM/value records; `rescan:true` asks the board to rescan first. |
@@ -95,6 +97,9 @@ their handle and the hosting process remain alive. They can be canceled through
 another `execute` request (`melody stop` or `rgb effect stop`). Definitions are
 PC-side JSON configuration only; they are not mixed with the MCU's
 EEPROM-owned settings.
+
+The complete per-domain reachability contract is in the
+[Control-Surface Capability Matrix](Control-Surface-Capability-Matrix.md).
 
 `examples/c_abi_smoke.c` is a minimal Windows consumer that resolves both
 exports, invokes the port-list operation, and releases the returned string.

@@ -18,6 +18,42 @@ import (
 func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	key := message.String()
 	inputEmpty := strings.TrimSpace(model.input.Value()) == ""
+	if model.macroSearchEditing {
+		switch key {
+		case "ctrl+c":
+			// Preserve the application's global clean-exit shortcut.
+		case "esc", "enter":
+			model.macroSearchEditing = false
+			return model, nil, true
+		case "ctrl+u":
+			model.macroSearch = ""
+			model.cursor = 0
+			model.macroDeleteArmed = false
+			model.macroDeleteReference = ""
+			return model, nil, true
+		case "backspace":
+			runes := []rune(model.macroSearch)
+			if len(runes) != 0 {
+				model.macroSearch = string(runes[:len(runes)-1])
+				model.cursor = 0
+				model.macroDeleteArmed = false
+				model.macroDeleteReference = ""
+			}
+			return model, nil, true
+		default:
+			if message.Type == tea.KeyRunes {
+				model.macroSearch += string(message.Runes)
+				model.cursor = 0
+				model.macroDeleteArmed = false
+				model.macroDeleteReference = ""
+				return model, nil, true
+			}
+		}
+	}
+	if model.page == PageAutomations && model.macroDeleteArmed && strings.ToLower(key) != "x" {
+		model.macroDeleteArmed = false
+		model.macroDeleteReference = ""
+	}
 	if model.menuLayoutSearchEditing {
 		switch key {
 		case "ctrl+c":
@@ -305,7 +341,7 @@ func (model Model) showPortPicker() (Model, tea.Cmd, bool) {
 func (model Model) submitLine(line string) (Model, tea.Cmd, bool) {
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "quit", "exit":
-		model.appendLog("info", "Exiting PCController cleanly…")
+		model.appendLog("info", "Exiting "+model.prefs.AppTitle+" cleanly…")
 		if model.preview == nil {
 			_ = model.runtime.Close()
 		}
@@ -431,6 +467,9 @@ func (model *Model) switchPage(page Page) {
 	model.cursor = 0
 	model.pageOffset = 0
 	model.completion = nil
+	model.macroSearchEditing = false
+	model.macroDeleteArmed = false
+	model.macroDeleteReference = ""
 }
 
 func pageForKey(value string) (Page, bool) {
@@ -462,6 +501,8 @@ func (model Model) selectionCount() int {
 		return 32
 	case PageRF:
 		return len(model.rfStaged)
+	case PageAutomations:
+		return len(model.filteredMacros(model.macroLibrary()))
 	default:
 		return 0
 	}
@@ -484,6 +525,8 @@ func (model Model) activateSelection() (Model, tea.Cmd, bool) {
 	case PageRF:
 		model.beginRFActionPicker()
 		return model, nil, true
+	case PageAutomations:
+		return model.playSelectedMacro()
 	}
 	return model, nil, true
 }
@@ -941,14 +984,7 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 			return model, nil, true
 		}
 	case PageAutomations:
-		switch key {
-		case "a":
-			return model.dispatchLine("automation list")
-		case "m":
-			return model.dispatchLine("macro list")
-		case "c":
-			return model.dispatchLine("macro cancel")
-		}
+		return model.macroShortcut(key)
 	case PageMenus:
 		switch key {
 		case "/":
@@ -1366,6 +1402,30 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 			case x < 67:
 				updated, command, _ := model.dispatchLine("rf list")
 				return updated, command
+			}
+		}
+	case PageAutomations:
+		switch row {
+		case 1, 2, 3:
+			if key, ok := macroButtonKeyAt(macroPrimaryButtons, x); ok {
+				updated, command, _ := model.macroShortcut(key)
+				return updated, command
+			}
+		case 4, 5, 6:
+			if key, ok := macroButtonKeyAt(macroSecondaryButtons, x); ok {
+				updated, command, _ := model.macroShortcut(key)
+				return updated, command
+			}
+		default:
+			if row >= macroLibraryFirstRow && row < macroLibraryFirstRow+macroLibraryVisibleRows {
+				filtered := model.filteredMacros(model.macroLibrary())
+				start, visible := macroWindow(filtered, model.cursor, macroLibraryVisibleRows)
+				index := row - macroLibraryFirstRow
+				if index >= 0 && index < len(visible) {
+					model.cursor = start + index
+					model.macroDeleteArmed = false
+					model.macroDeleteReference = ""
+				}
 			}
 		}
 	}

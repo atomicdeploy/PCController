@@ -12,6 +12,7 @@ import (
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type Options struct {
@@ -161,6 +162,8 @@ type Runtime struct {
 	historyWrites      chan TimelineEntry
 	lcdPresenter       *LCDPresenter
 	programState       *ProgramStateManager
+	programStateSyncMu sync.Mutex
+	macroRunner        *MacroRunner
 
 	commandObserverMu      sync.RWMutex
 	commandObservers       map[uint64]func(CommandEvidence)
@@ -168,6 +171,8 @@ type Runtime struct {
 	hostMenuRequestMu      sync.RWMutex
 	hostMenuRequestHandler func(native.HostMenuContentRequest)
 }
+
+const programStateHeartbeatPeriod = 2 * time.Second
 
 func New(options Options) *Runtime {
 	options = normalizedOptions(options)
@@ -186,6 +191,7 @@ func New(options Options) *Runtime {
 			State: string(state.Mode), Reason: state.Reason,
 			Text: fmt.Sprintf("program state %s: %s", state.Mode, state.Reason),
 		})
+		go runtime.syncProgramState(state, "changed")
 	})
 	runtime.lcdPresenter = NewLCDPresenter(runtime)
 	return runtime
@@ -197,6 +203,20 @@ func (runtime *Runtime) LCDPresenter() *LCDPresenter {
 
 func (runtime *Runtime) ProgramState() ProgramStateSnapshot {
 	return runtime.programState.Snapshot()
+}
+
+// MacroRunner returns the single runner registered by the command engine so
+// interactive views observe the same library, recorder, and playback state.
+func (runtime *Runtime) MacroRunner() *MacroRunner {
+	runtime.mu.RLock()
+	defer runtime.mu.RUnlock()
+	return runtime.macroRunner
+}
+
+func (runtime *Runtime) setMacroRunner(runner *MacroRunner) {
+	runtime.mu.Lock()
+	runtime.macroRunner = runner
+	runtime.mu.Unlock()
 }
 
 func (runtime *Runtime) SetProgramState(owner string, mode ProgramMode, reason string) (ProgramStateSnapshot, error) {
@@ -259,7 +279,7 @@ func (runtime *Runtime) PublishStructuredEvent(event Event) Event {
 	return runtime.publishEvent(event)
 }
 
-// SetHostMenuRequestHandler installs the capability-24 content responder. It
+// SetHostMenuRequestHandler installs the optional host-menu content responder. It
 // receives only validated unsolicited schema-1 requests and never runs on the
 // serial pump goroutine.
 func (runtime *Runtime) SetHostMenuRequestHandler(handler func(native.HostMenuContentRequest)) {
@@ -492,7 +512,7 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 		runtime.mu.RUnlock()
 		result, err := link.OpenAuthenticated(
 			ctx,
-			ports.Info{Name: name, Product: "PCController Virtual Board"},
+			ports.Info{Name: name, Product: productidentity.DefaultTitle + " Virtual Board"},
 			link.DiscoveryOptions{
 				BaudRate: options.BaudRate, StartupWait: options.StartupWait,
 				RequestTimeout: options.RequestTimeout,
@@ -696,6 +716,8 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	if ready != nil {
 		go ready(result.Port, result.Hello)
 	}
+	go runtime.syncProgramState(runtime.ProgramState(), "connected")
+	go runtime.programStateHeartbeat(generation)
 
 	lifecycle := "connect"
 	if reconnected {
@@ -707,6 +729,66 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 		"",
 	)
 	go runtime.pump(result.Session, generation)
+}
+
+// syncProgramState mirrors the latest host-owned semantic state after HELLO
+// and after every state change. Serialization prevents stale concurrent state
+// changes from becoming the board's final value; older firmware simply omits
+// the capability and continues to interoperate.
+func (runtime *Runtime) syncProgramState(snapshot ProgramStateSnapshot, lifecycle string) {
+	runtime.programStateSyncMu.Lock()
+	defer runtime.programStateSyncMu.Unlock()
+
+	current := runtime.ProgramState()
+	if current.Revision != snapshot.Revision {
+		snapshot = current
+	}
+	live := runtime.Snapshot()
+	if !live.Connected || live.Hello.Capabilities&native.CapabilityProgramState == 0 {
+		return
+	}
+	payload := native.ProgramStatePayload(snapshot.Mode == ProgramRunning)
+	runtime.mu.RLock()
+	timeout := runtime.options.RequestTimeout
+	runtime.mu.RUnlock()
+	if timeout <= 0 {
+		timeout = 1200 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	err := runtime.Command(ctx, native.OpProgramState, payload)
+	cancel()
+	if err != nil {
+		runtime.publishEvent(Event{
+			Kind: "program.state.sync", Lifecycle: "failed",
+			State: string(snapshot.Mode), Reason: err.Error(),
+			Text: fmt.Sprintf("program state %s sync failed: %v", snapshot.Mode, err),
+		})
+		return
+	}
+	if lifecycle != "heartbeat" {
+		runtime.publishEvent(Event{
+			Kind: "program.state.sync", Lifecycle: lifecycle,
+			State: string(snapshot.Mode),
+			Text:  fmt.Sprintf("program state %s sent to board", snapshot.Mode),
+		})
+	}
+}
+
+// programStateHeartbeat keeps firmware's host-presence watchdog truthful even
+// when no telemetry consumer is subscribed. It sends no status query and ends
+// automatically when this authenticated connection generation changes.
+func (runtime *Runtime) programStateHeartbeat(generation uint64) {
+	ticker := time.NewTicker(programStateHeartbeatPeriod)
+	defer ticker.Stop()
+	for range ticker.C {
+		runtime.mu.RLock()
+		active := runtime.generation == generation && runtime.session != nil
+		runtime.mu.RUnlock()
+		if !active {
+			return
+		}
+		runtime.syncProgramState(runtime.ProgramState(), "heartbeat")
+	}
 }
 
 func (runtime *Runtime) detach(pause bool) error {

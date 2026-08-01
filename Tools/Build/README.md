@@ -5,9 +5,26 @@ and `build.sh` launchers. Both wrappers forward their argv unchanged to the
 same Node process, so Windows and Bash produce the same command plan. Neither
 launcher invokes PowerShell.
 
-The default is hardware-free: it tests, vets, resource-stamps, packages, and
-UPX-tests the native host, then asks the current Controller implementation to
-compile the AVR firmware. It never selects or opens a serial/USB device.
+The interactive output carries forward the best presentation ideas from the
+ASA0002E tooling: Chalk-managed VT-100 color, clear emoji-labelled stages,
+elapsed timing, and real `cli-table3` Unicode tables with centered headers and
+correct width-aware alignment. Compact utilization gauges and visible hashes
+come from validated host and firmware manifests, so the attractive summary is
+also an auditable account of the exact artifacts that were built. No table
+border, column padding, or ANSI sequence is assembled by an ad-hoc renderer.
+Define `NO_COLOR` (even with an empty value) or pass `--no-color` for plain
+logs and automation. Define `FORCE_COLOR` to retain VT-100 styling in a
+non-interactive CI stream; `NO_COLOR` always wins when both are present.
+The visible product label comes from
+`Tools/Controller/web/package.json` (`productName`) rather than a build-script
+literal. `APP_TITLE` or the compatibility `PCCONTROLLER_APP_TITLE` environment
+setting may override it for one build invocation.
+
+The default is hardware-free: it installs the exact web dependency lock with
+`npm ci`, type-checks/tests/builds the embedded web application, then tests,
+vets, resource-stamps, packages, and UPX-tests the native host. Finally it asks
+the current Controller implementation to compile the AVR firmware. It never
+selects or opens a serial/USB device.
 
 ## Common commands
 
@@ -16,7 +33,7 @@ build.cmd --dry-run
 build.cmd --plan-json
 build.cmd --host-only
 build.cmd --firmware-only
-build.cmd --arduino-update
+build.cmd --toolchain-sync
 build.cmd --clean
 ```
 
@@ -34,10 +51,16 @@ host output directories and loose `Tools/Controller/controller[.exe]`
 artifacts so they cannot shadow or be mistaken for the canonical package.
 
 The host package embeds and then verifies its version, UTC build time, and
-SHA-256 source identity. Windows packaging also verifies the PE resource
-section before UPX, runs `upx -t`, re-runs the packed executable identity
-check, and smoke-tests `PCControllerInvoke`/`PCControllerFree` in the generated
-C ABI library. The manifest records exact artifact sizes and SHA-256 hashes.
+SHA-256 source identity. That identity covers Go sources, the web package and
+lockfile, web source/public assets, and the exact Vite `dist` bytes embedded by
+Go. The host manifest records the lock-based install, web type-check/test
+status, exact input/`dist` SHA-256 values, and copied license files for bundled
+runtime npm packages (build-only dependencies are excluded). Windows packaging
+also verifies
+the PE resource section before UPX, runs `upx -t`, re-runs the packed executable
+identity check, and smoke-tests `PCControllerInvoke`/`PCControllerFree` in the
+generated C ABI library. The manifest records exact artifact sizes and SHA-256
+hashes.
 Only after every validation succeeds does the publisher atomically swap the
 staged directory into the canonical `bin` location; a failed swap restores
 the previous package.
@@ -60,7 +83,7 @@ canonical Controller command. Direct `arduino-cli upload` is disabled.
 ```console
 build.cmd --upload --port COM18
 build.cmd --usbasp-flash
-build.cmd --burn-bootloader --usbasp-troubleshooting
+build.cmd --install-bootloader --usbasp-troubleshooting
 ```
 
 Urclock programming requires a device selector. USBasp is a hidden recovery
@@ -75,11 +98,16 @@ for wrapper parity and automation tests.
 
 ## Bootstrap requirements
 
-- Node.js 20.19 or newer must already be visible to the thin launcher.
-- Go 1.25 or newer is required for the host and for `--firmware-only`, which
+- Node.js 22.12 or newer must already be visible to the thin launcher. The
+  launcher bootstraps Chalk and `cli-table3` from the reviewed
+  `Tools/Build/package-lock.json` when needed; host builds independently use
+  the embedded web application's exact lock with `npm ci`.
+- Go 1.26 or newer is required for the host and for `--firmware-only`, which
   runs the current Controller source directly.
-- Firmware compile requires the Controller-supported Arduino CLI/MiniCore
-  installation. The build layer does not rediscover or program through it.
+- Firmware compile requires the Controller-supported dependency CLI/MiniCore
+  installation. Run `controller toolchain bootstrap` on a clean machine to
+  resolve the latest compatible profile into an exact, hash-verified local
+  lock without replacing unrelated global tools.
 - Windows host packaging requires `go-winres` unless
   `--skip-resources` is explicit, and UPX unless `--no-upx` is explicit.
 - The C ABI package requires a native target-matching C compiler unless
@@ -98,8 +126,12 @@ execute this same Node plan.
 
 ```console
 node --check Tools/Build/build.mjs
+node --check Tools/Build/go-tests.mjs
 node --test Tools/Build/build.test.mjs
 node --test Tools/Firmware/firmware.test.mjs
+npm --prefix Tools/Controller/web ci --no-audit --no-fund
+npm --prefix Tools/Controller/web run typecheck
+npm --prefix Tools/Controller/web run build
 build.cmd --dry-run --no-color
 bash.exe build.sh --dry-run --no-color
 ```
@@ -108,3 +140,9 @@ The integration suite freezes identity values and asserts that CMD and Bash
 emit byte-equivalent JSON plans, compile/program through Controller, preserve
 the USBasp authorization gate, and never introduce a PowerShell or direct
 Arduino upload action.
+
+Go tests are compiled to stable names under `.build/tests/go/` and then run
+from those project-owned paths. A content/toolchain identity reuses an existing
+passing result; `--retest` runs the same binaries again without inventing new
+temporary executable names. This keeps IPC/network test identities stable and
+avoids repeated Windows Firewall prompts.

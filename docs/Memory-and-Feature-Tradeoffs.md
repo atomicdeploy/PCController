@@ -6,6 +6,14 @@ importantly, states what a person will no longer be able to do after each cut.
 
 ## Decision summary
 
+- The latest source-only audit build is `F6D76FE4`: 32,240/32,384
+  application bytes, 1,441/2,048 static-SRAM bytes, and a conservative
+  278-byte stack/RF margin. It was built and tested without opening COM18, so
+  it is not live-board evidence.
+- Stock MiniCore Urboot leaves 144 application bytes for that image. The
+  optional four-page TM1637-progress Urboot lowers the application ceiling to
+  32,256 and leaves only 16 bytes; its build remains compile-verified, not
+  installed by this audit.
 - The physical COM18 board now runs interim pre-macro `32FAAD86` with
   capabilities `0x003FF7FF` and Status page 0. It is not the staged macro
   image.
@@ -103,6 +111,39 @@ Do not replace these fields with a checkpoint identity. The final values must
 come from one atomic controller-tool build and the same image's COM18 HELLO and
 read-back evidence.
 
+### Latest source-only firmware/native audit: `F6D76FE4`
+
+```text
+Build/source hash:        F6D76FE4
+Source SHA:               F6D76FE453258C99CC5BF00B34F0B82202839AEE8F1B84118F7FBC1621CA5144
+Packed date/time:         0x35020B0C (260802012424)
+Application flash:        32,240 / 32,384 bytes (144 bytes free)
+Static SRAM:              1,441 / 2,048 bytes
+Guarded stack/RF margin:  278 bytes
+Application SHA:          A64E76C341B4FB4762BD0A7C0C8750C09C9BA103C6C74AEBA6350BA35957D021
+Stock merged SHA:         94B568296905C91DA55009EA4667A398DB9760045EC0AC7C8DF4D1573A42873E
+EEPROM SHA:               788E5FFC44AE4EE912FE01F495951F96B0ACCD5705E184DCAEA197D8B64856A6
+Live read-back:           NOT UPLOADED OR VERIFIED
+```
+
+Against the earlier hardware-free cleanup baseline `CE472A67`
+(31,910 flash/1,436 static SRAM), this source is an aggregate **+330 flash
+bytes and +5 static-SRAM bytes**. That is a whole-image delta across several
+interacting changes, not a defensible per-feature price. The retained changes
+include centralized fail-safe motion-policy revocation, Idle/Running program
+state and status flags, eased illumination/RGB transitions, measurement
+smoothing, bounded DS18B20 behavior, corrected temperature-role defaults,
+expanded key semantics, exact RF20/current EEPROM parity, and native-simulator
+protocol parity.
+
+Two isolated measurements are available. Clamping accepted DisplayText LCD
+content to its physical 32 cells costs six flash bytes versus the immediately
+preceding build and prevents a buffer overwrite; it removes no displayable
+text. Replacing every remaining operation-local timestamp with the shared
+loop `now` grew the application by 62 bytes, so that experiment was reverted;
+the current design samples once per loop/semantic dispatch where codegen is
+smaller, with no timing feature removed.
+
 ### Latest compiled fitting non-live macro checkpoint
 
 ```text
@@ -134,10 +175,9 @@ stack/interrupt headroom, not spare feature RAM.
 
 ## Current compile profile
 
-This table describes non-live checkpoint `0E5FE035`, not live interim
-`32FAAD86`. The live
-interim was built before the macro/LCD-offload fit work and must not be used as
-evidence for the staged physical-LCD or macro behavior.
+This table describes source-only `F6D76FE4`, not live interim `32FAAD86`. The
+live interim was built before the later firmware/native work and must not be
+used as evidence for those source changes.
 
 | Setting | Staged value | User-visible consequence |
 |---|---|---|
@@ -147,7 +187,7 @@ evidence for the staged physical-LCD or macro behavior.
 | LTO | Enabled | Cross-file dead-code removal/inlining |
 | `-mcall-prologues` | Enabled | Shares function entry/exit sequences; small deterministic call-cycle cost |
 | Linker relaxation | Enabled | Shortens eligible calls/jumps; no feature loss |
-| MiniCore `WIRE_TIMEOUT` | Disabled | No 25 ms TWI-only reset; startup recovery plus 2 s watchdog remain |
+| MiniCore `Wire`/`WIRE_TIMEOUT` | Not linked | Fixed-hardware I2C master provides bounded transactions and startup recovery; the 2 s watchdog remains |
 | AVR LCD renderer | Disabled | Physical 2x16 LCD requires the PC host's generic-I2C renderer |
 | Generic I2C lease | Enabled | Host may cooperatively read/write other addresses, up to 16 bytes per transfer |
 | Menu directory | Enabled | Host can query exact staged menu IDs/labels instead of assuming them |
@@ -155,10 +195,10 @@ evidence for the staged physical-LCD or macro behavior.
 | PWM polarity | Active-high logical outputs | Logical 0 is Off; 4095 is fully On |
 | PWM/INA addresses | `0x41` / `0x40` | The former collision is removed |
 
-The development EEPROM layout intentionally has no whole-project migration
-history yet. A clean EEPROM initialization is authorized during development.
-This saves migration code but means an EEPROM written by an older build need
-not load in the staged firmware.
+The canonical EEPROM layout intentionally has no whole-project migration
+history. Invalid settings fall back to defaults; an RF header is accepted by
+record width/capacity rather than project version. This saves migration code
+but means an unrelated development image need not load in current firmware.
 
 ## Hardware configuration versus code size
 
@@ -187,6 +227,39 @@ and a clean linked A/B build proves the delta.
 | PWM status RGB and fixed D6 addressable sender | Gives local state/cues with small fixed drivers and no heap | Static-only status loses animation cues; strip removal loses 11-pixel effects and opcode/macro control | RGB about 332 named flash; strip about 219 flash/34 SRAM lower bound |
 | UART0 Urboot/urclock profile | One connector supports application control, programming, backup, and recovery | No-bootloader mode makes ISP mandatory and removes boot-mode integration | Exactly 384 additional application bytes, with the stated programming/recovery loss |
 
+### Urboot-Custom progress-backend budget
+
+The patch-based [`Urboot-Custom`](../Tools/Bootloader/Urboot-Custom/README.md)
+prototype moves the boot start from `0x7E80` to `0x7E00`. Its selected raw
+TM1637 backend occupies 510 meaningful bytes in a 512-byte allocation, so it
+costs the application exactly 128 bytes versus the installed 384-byte MiniCore
+image. Current source `F6D76FE4` leaves **16 bytes** under the new 32,256-byte
+ceiling (versus 144 bytes under stock Urboot).
+
+The selected image removes no Urboot protocol feature: EEPROM access,
+compare-before-write, application page writer, autobaud, chip erase, vector
+loading, and reset/bootloader protection remain. The only replaced behavior is
+the old single PB5 activity blink; PB5 is the TM1637 clock and the two drivers
+cannot coexist electrically. Keeping both also measured 520 bytes, eight bytes
+over four pages. A fifth page would consume another 128 application bytes.
+
+These compile-only escape profiles are available for a larger future backend;
+none is selected:
+
+| Optional Urboot removal | Bytes gained | Exact lost behavior |
+|---|---:|---|
+| Chip erase | 28 | No bootloader-managed `STK_CHIP_ERASE` request |
+| EEPROM access | 56 | No EEPROM settings backup or restore over Urboot |
+| Update check | 26 | Identical requested pages are erased/written again |
+| Application page writer | 10 | Application self-programming entry disappears; serial upload remains |
+| Autobaud | 16 | Requires fixed 115200 baud at 16 MHz |
+| Reset-vector protection | 14 | An unsafe page-zero write can strand the bootloader |
+
+The first Urboot-Custom installation still requires ISP and a vector-aware
+merged image. ISP cannot show its own progress because reset is held and the
+same D13/D11 pins carry SCK/MOSI; the display backend applies to later UART
+Urclock reads and writes.
+
 The fixed drivers save space by deliberately omitting generic portability:
 arbitrary TM1637 pin selection, arbitrary LED pixel counts/order at runtime,
 generic Dallas device counts/parasite power, a full AVR LCD renderer, and the
@@ -198,7 +271,6 @@ rather than treated as a free configuration change.
 
 | Library | Version at last dependency audit | Purpose in application |
 |---|---:|---|
-| Wire | MiniCore 1.1 | INA219, PWM, and generic host I2C transactions |
 | EEPROM | MiniCore 2.0 | Board settings, 20 RF records, reset-count journal |
 | rc-switch | 2.6.4 | 433 MHz receive and transmit |
 
@@ -209,8 +281,8 @@ board's required paths. Uninstalling an unused package frees PC disk space,
 not one byte of MCU flash or SRAM.
 
 `rc-switch` is therefore the heaviest linked third-party feature library.
-Wire is a larger shared platform area, but it serves several peripherals at
-once and is not an independently removable feature.
+The former generic Wire dependency is no longer linked; the project-owned
+fixed I2C master serves INA219, PWM, and cooperative host transactions.
 
 ## Board-feature inventory by code area
 
@@ -404,13 +476,13 @@ bounded COBS/CRC opcode protocol, bootloader handoff, precise events, and host
 bridge. Restoring Firmata would also reintroduce UART ownership ambiguity and
 is not a space-neutral compatibility switch.
 
-### Development EEPROM migrations removed: old EEPROM compatibility lost
+### Firmware-side EEPROM migrations removed: historical layouts are not imported
 
-The staged layout validates only its current checksummed settings and records.
-Removing project-history migration means an old development EEPROM may fall
-back to defaults and its old RF/settings bytes are not imported in place. It
-does not remove current settings or the PC host's ability to back up/restore
-the EEPROM.
+The firmware validates only canonical checksummed settings and semantically
+self-described RF records. It does not branch on build or layout versions.
+Unrecognized development data falls back to defaults; RF records and the reset
+journal start fresh when their current shape/checksum is absent. This does not
+remove the PC host's backup/readback capability.
 
 ### Changes that do not solve the flash limit
 
@@ -495,9 +567,8 @@ continually trading them against one another.
 Only compiler/linker dead code and redundant representations are truly free.
 The remaining useful approaches are:
 
-- remove duplicated old inbound wire schemas after confirming the new host is
-  the only writer; the loss is compatibility with older host executables, not
-  a current board feature;
+- keep one canonical payload prefix per writable operation, allow harmless
+  appended extension fields, and avoid build-specific decode branches;
 - consolidate repeated labels/serializers and let LTO share helpers;
 - keep fixed hardware drivers instead of generic APIs;
 - keep menus and macro steps data-driven rather than duplicating dispatch;
@@ -532,7 +603,7 @@ HEX, merged image, and manifest are regenerated atomically. Do not hard-code a
 machine-specific Arduino package path.
 
 ```text
-Tools\Controller\bin\controller.exe arduino compile
+Tools\Controller\bin\controller.exe toolchain compile
 avr-size.exe -A .build\firmware\PCController.ino.elf
 avr-nm.exe -S -l --size-sort --radix=d -C .build\firmware\PCController.ino.elf
 ```

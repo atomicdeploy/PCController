@@ -1,0 +1,37 @@
+diff --git a/urboot.c b/urboot.c
+--- a/urboot.c
++++ b/urboot.c
+@@ -1128,6 +1128,17 @@ void __attribute__ ((noinline)) putch(char);
+ uint8_t __attribute__ ((noinline)) getch(void);
+ void  __attribute__ ((noinline)) get_sync(void);
+ 
++#if defined(URBOOT_PROGRESS_ENABLED) && URBOOT_PROGRESS_ENABLED
++// Optional backend: selected operation event and address high byte.
++void __attribute__ ((noinline)) urboot_progress(uint8_t, uint8_t);
++#ifndef URBOOT_PROGRESS_WRITE_EVENT
++#define URBOOT_PROGRESS_WRITE_EVENT 0
++#endif
++#ifndef URBOOT_PROGRESS_READ_EVENT
++#define URBOOT_PROGRESS_READ_EVENT 1
++#endif
++#endif
++
+ void __attribute__ ((noinline)) watchdogConfig(uint8_t x);
+ 
+ // Endless loop leading to a watchdog reset; the equivalent while(1); can produce larger code
+@@ -2060,6 +2071,14 @@ int main(void) {
+       get_sync();               // Covers the rest, eg, STK_ENTER_PROGMODE, STK_GET_SYNC, ...
+     }
+ 
++#if defined(URBOOT_PROGRESS_ENABLED) && URBOOT_PROGRESS_ENABLED
++    // Commands 0..3 alternate write/read in their least-significant bit.
++    if(ch <= UR_READ_PAGE_FL) {
++      urboot_progress((ch & 1)? URBOOT_PROGRESS_READ_EVENT: URBOOT_PROGRESS_WRITE_EVENT,
++                      (uint8_t) (zaddress >> 8));
++    }
++#endif
++
+     asm volatile(".global ldi_stk_ok\nldi_stk_ok:\n" :::);
+     putch(STK_OK);
+   }
+ }

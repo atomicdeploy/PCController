@@ -36,6 +36,3 @@ RgbColor *buffer();
 uint8_t count();
 
 } // namespace AddressableLeds
-
-// Compatibility entry point used by the inherited project layer.
-void setupWS2811();

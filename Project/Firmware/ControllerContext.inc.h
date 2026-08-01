@@ -106,7 +106,7 @@ uint32_t modeEnteredAt = 0;
 uint32_t identifiedKeyEndsAt = 0;
 uint32_t motionExitStartedAt = 0;
 uint32_t flashMessageEndsAt = 0;
-// Menu edits only touch the legacy 19-byte settings prefix. Presentation
+// Menu edits snapshot only the locally editable settings prefix. Presentation
 // visibility/order is configured independently over UART and must neither be
 // duplicated in SRAM nor rolled back by an unrelated front-panel edit.
 constexpr size_t MenuEditSnapshotSize =
@@ -162,6 +162,8 @@ uint32_t now = 0;
 // Host state bits are intentionally sparse to preserve the existing wire value.
 constexpr uint8_t HOST_SEEN = 1U << 0;
 constexpr uint8_t HOST_LCD_OFFLINE = 1U << 1;
+constexpr uint8_t HOST_PROGRAM_RUNNING = 1U << 2;
+constexpr uint8_t HOST_STATUS_OVERRIDE = 1U << 3;
 constexpr uint8_t HOST_PANEL_CAPTURED = 1U << 4;
 
 // -----------------------------------------------------------------------------

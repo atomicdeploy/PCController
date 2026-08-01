@@ -32,6 +32,7 @@ func TestToastRejectsUntrustedActionSchemes(t *testing.T) {
 }
 
 func TestImportantEventMappingSuppressesTelemetryAndAddsSafetyAction(t *testing.T) {
+	t.Setenv("PCCONTROLLER_APP_TITLE", "")
 	if _, ok := NotificationForImportantEvent(ImportantEvent{Kind: "telemetry", Message: "status"}); ok {
 		t.Fatal("routine telemetry generated a notification")
 	}
@@ -45,5 +46,11 @@ func TestImportantEventMappingSuppressesTelemetryAndAddsSafetyAction(t *testing.
 	if !ok || warning.Title != "PCController · Door open during operation" ||
 		len(warning.Actions) != 2 || warning.Actions[1].Label != "Stop outputs" {
 		t.Fatalf("door-running notification=%#v ok=%t", warning, ok)
+	}
+	custom, ok := NotificationForImportantEvent(ImportantEvent{
+		Kind: "motion.fault", Message: "Side B timeout", AppTitle: "Workshop Controller",
+	})
+	if !ok || custom.Title != "Workshop Controller · MOTION.FAULT" {
+		t.Fatalf("custom-title notification=%#v ok=%t", custom, ok)
 	}
 }

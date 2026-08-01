@@ -61,12 +61,6 @@
 #define PCCONTROLLER_MENU_LAYOUT_PROTOCOL 1
 #endif
 
-// One-shot recovery build: seed a rejected/old EEPROM record with all PWM
-// outputs disabled; normal firmware keeps the requested Auto factory defaults.
-#ifndef PCCONTROLLER_SAFE_EEPROM_MIGRATION
-#define PCCONTROLLER_SAFE_EEPROM_MIGRATION 0
-#endif
-
 #if PCCONTROLLER_MENU_ORDERING && !PCCONTROLLER_MENU_VISIBILITY
 #error "Menu ordering requires persistent visibility"
 #endif

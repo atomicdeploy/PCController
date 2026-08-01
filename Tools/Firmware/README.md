@@ -74,8 +74,8 @@ flash layout.
 
 Direct `arduino-cli upload` is intentionally disabled. Controller owns the
 automatic pre-flash backup, write/verify, and post-program application
-reauthentication. The root `build.cmd --arduino-update` command likewise
-routes index/core/library maintenance through `controller arduino update`.
+reauthentication. The root `build.cmd --toolchain-sync` command likewise
+routes index/core/library maintenance through `controller toolchain sync`.
 
 Thus a malformed, oversized, incomplete, or missing image cannot reach a
 serial or ISP programmer through this tool.

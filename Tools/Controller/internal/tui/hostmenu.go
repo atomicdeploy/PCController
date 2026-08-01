@@ -132,13 +132,13 @@ func hostMenuPanelState(snapshot hostmenu.Snapshot) FrontPanelState {
 	}
 }
 
-func renderHostMenuDirectory(manager *hostmenu.Manager) string {
+func renderHostMenuDirectory(manager *hostmenu.Manager, width int) string {
 	if manager == nil {
 		return labelStyle.Render("Host-owned menus unavailable in this frontend.")
 	}
 	config := manager.Config()
 	active := manager.Snapshot()
-	lines := []string{sectionHeader("PC-OWNED MENUS", "watched config · E edits selected/active definition · H opens/closes")}
+	lines := []string{sectionHeader(width, "PC-OWNED MENUS", "watched config · E edits selected/active definition · H opens/closes")}
 	if active.Active {
 		lines = append(lines,
 			valueStyle.Render(fmt.Sprintf("ACTIVE · %s / %s · %d of %d", active.MenuTitle, active.ItemTitle, active.Cursor+1, active.Count)),

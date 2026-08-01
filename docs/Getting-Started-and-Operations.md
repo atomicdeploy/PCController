@@ -523,8 +523,9 @@ stream 0
 
 `temp list` reports the role, full 64-bit ROM, and value for both probes.
 `tLED` belongs to enclosure illumination and `tBT` to the BT module. The
-current harness assigns the higher sorted ROM to tLED and the lower ROM to
-tBT; MCU settings can swap roles after sensor replacement.
+canonical default assigns the lower sorted ROM to tLED and the higher ROM to
+tBT; MCU settings can swap roles after the controlled illumination-heating
+test or a sensor replacement.
 
 Current live identities:
 
@@ -956,8 +957,8 @@ build.cmd --upload --port COM18
 ```
 
 The canonical outputs are `Tools/Controller/bin` and `.build/firmware`.
-`build.cmd --arduino-update` explicitly routes index/core/library maintenance
-through `controller arduino update`; updates never occur during an ordinary
+`build.cmd --toolchain-sync` explicitly routes index/core/library maintenance
+through `controller toolchain sync`; updates never occur during an ordinary
 build. The former PowerShell build copies were removed so only the shared
 CMD/Bash/Node/Controller path remains.
 

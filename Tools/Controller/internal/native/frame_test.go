@@ -254,25 +254,32 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 	if decodedSettings != settings {
 		t.Fatalf("settings got %#v want %#v", decodedSettings, settings)
 	}
-	legacySettings := append([]byte(nil), payload[:10]...)
-	legacySettings[0] = SettingsSchemaLegacy
-	legacyDecoded, err := ParseSettings(legacySettings)
+	prefixOnly := append([]byte(nil), payload[:10]...)
+	prefixOnly[0] = 0xA7 // Advisory marker must not gate canonical semantics.
+	prefixDecoded, err := ParseSettings(prefixOnly)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if legacyDecoded.DefaultPage != 0 || legacyDecoded.SaveLastPage() {
-		t.Fatalf("legacy settings gained extended values: %#v", legacyDecoded)
+	if prefixDecoded.DefaultPage != 0 || prefixDecoded.SaveLastPage() {
+		t.Fatalf("prefix-only settings gained optional values: %#v", prefixDecoded)
 	}
-	if legacyDecoded.StatusColor() != 0 ||
-		legacyDecoded.VoltageDecimals() != SettingsDefaultDecimals ||
-		legacyDecoded.CurrentDecimals() != SettingsDefaultDecimals {
+	if prefixDecoded.StatusColor() != 0 ||
+		prefixDecoded.VoltageDecimals() != SettingsDefaultDecimals ||
+		prefixDecoded.CurrentDecimals() != SettingsDefaultDecimals {
 		t.Fatalf(
-			"legacy settings did not receive safe display defaults: %#v",
-			legacyDecoded,
+			"prefix-only settings did not receive safe display defaults: %#v",
+			prefixDecoded,
 		)
+	}
+	oneExtension := append(prefixOnly, 9)
+	oneDecoded, err := ParseSettings(oneExtension)
+	if err != nil || oneDecoded.DefaultPage != 9 || oneDecoded.ExtendedFlags != 0 {
+		t.Fatalf("one optional settings byte = %#v, %v", oneDecoded, err)
 	}
 
 	statusPayload := make([]byte, StatusPayloadSize+2)
+	binary.LittleEndian.PutUint16(statusPayload[24:26],
+		StatusProgramRunning|StatusHostOffline|StatusHot)
 	statusPayload[31] = 1
 	statusPayload[34] = 7
 	statusPayload[35] = 0x34
@@ -284,10 +291,20 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !status.DoorOpen || status.PWMChannel != 7 ||
+	if !status.DoorOpen || !status.ProgramRunning || !status.HostOffline || !status.Hot ||
+		status.PWMChannel != 7 ||
 		status.PWMValue != 0x1234 || status.CRCErrors != 0x0900 ||
 		status.ResetCause != 0x0A || status.ResetCount != 0x12345678 {
 		t.Fatalf("unexpected STATUS: %#v", status)
+	}
+	if CapabilityProgramState != 1<<24 || SupportsHostMenuOverlay(Hello{Capabilities: CapabilityProgramState}) {
+		t.Fatal("capability bit 24 must identify PROGRAM_STATE, not host-menu overlay")
+	}
+	if got := ProgramStatePayload(false); !bytes.Equal(got, []byte{ProgramStateIdle}) {
+		t.Fatalf("idle PROGRAM_STATE payload=% X", got)
+	}
+	if got := ProgramStatePayload(true); !bytes.Equal(got, []byte{ProgramStateRunning}) {
+		t.Fatalf("running PROGRAM_STATE payload=% X", got)
 	}
 	legacyStatus, err := ParseStatus(statusPayload[:StatusPayloadSizeLegacy])
 	if err != nil || legacyStatus.ResetCause != 0 || legacyStatus.ResetCount != 0 {
