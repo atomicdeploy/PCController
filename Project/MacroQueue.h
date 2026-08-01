@@ -23,8 +23,11 @@ public:
 
   explicit MacroQueue(ControllerProtocol::UartProtocol &protocol);
 
+  // Accepts Start/Step/Cancel protocol records into the byte-ring buffer.
   bool handle(const ControllerProtocol::Frame &frame);
+  // Releases one due opcode using the MCU microsecond clock for precise deltas.
   bool dequeueDue(ControllerProtocol::Frame &frame);
+  // Records dispatch fidelity and advances or terminates playback.
   void completeStep(bool succeeded);
   void cancel(bool keepOutputs = false);
   bool takeSafeStopRequest();
@@ -60,7 +63,7 @@ private:
   void fail();
 
   ControllerProtocol::UartProtocol &protocol_;
-  uint8_t queue_[QueueSize];
+  uint8_t queue_[QueueSize]; // Circular variable-record byte storage.
   uint32_t startedAtUs_ = 0;
   uint8_t head_ = 0;
   uint8_t used_ = 0;

@@ -10,9 +10,12 @@ enum class IlluminationMode : uint8_t {
   On,
 };
 
+// Drives enclosure PWM toward Off/Auto/On targets with a nonblocking fade.
 class IlluminationController {
 public:
+  // Starts from the electrically observed door target without a startup jump.
   void begin(PwmController &pwm, bool doorOpen, uint32_t now = millis());
+  // Advances at most one fade step; allowLedUpdate pauses around host I2C leases.
   void service(bool doorOpen, bool allowLedUpdate,
                uint32_t now = millis());
 
@@ -27,6 +30,7 @@ public:
   uint8_t targetBrightness(bool doorOpen) const;
 
 private:
+  // Brightness fields are 0..255 and are expanded by PwmController.
   IlluminationMode mode_ = IlluminationMode::Auto;
   uint8_t onBrightness_ = 128;
   uint8_t offBrightness_ = 0;

@@ -29,9 +29,11 @@ class ControllerEvents {
 public:
   explicit ControllerEvents(ControllerProtocol::UartProtocol &protocol);
 
+  // Emits stable key ID, gesture, source channel, and optional RF source ID.
   void key(uint8_t bit, uint8_t gesture,
            InputEventSource source = InputEventSource::Physical,
            uint8_t sourceId = 0xFF);
+  // State-change methods emit only normalized event payloads, never debug text.
   void door(bool open);
   void bluetooth(uint8_t state);
   void pwmChannel(uint8_t channel);
@@ -45,6 +47,7 @@ public:
   void reset(uint8_t cause, uint32_t count);
 
 private:
+  // Prepends the event type and sends it as an unsolicited native Event frame.
   void send(const uint8_t *payload, uint8_t length);
 
   ControllerProtocol::UartProtocol &protocol_;

@@ -4,11 +4,14 @@
 
 using TaskCallback = void (*)(void *context);
 
+// Tiny fixed-capacity one-shot scheduler retained for inherited project logic.
 class Tasks {
 public:
   Tasks();
 
+  // Runs every due callback once using rollover-safe millisecond deadlines.
   void update(uint32_t now = millis());
+  // Returns a reusable slot index, or -1 when all eight slots are active.
   int8_t addTask(uint32_t delayMs, TaskCallback callback,
                  void *context = nullptr);
   void cancelTask(int8_t taskIndex);
@@ -16,6 +19,7 @@ public:
   uint8_t count() const;
 
 private:
+  // One scheduled callback and its caller-owned opaque context.
   struct TaskItem {
     uint32_t dueAt;
     TaskCallback callback;

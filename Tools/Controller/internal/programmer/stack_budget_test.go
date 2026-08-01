@@ -129,6 +129,23 @@ func TestFinalListingFrameParserAndBudget(t *testing.T) {
 	}
 }
 
+func TestFinalListingAcceptsModularLifecycleInlineMarker(t *testing.T) {
+	fixture := strings.Replace(
+		completeAVRListingFixture(),
+		"loop():\n",
+		"serviceController():\n",
+		1,
+	)
+	report, err := estimateFirmwareStackBudget(parseListingFixture(t, fixture), 1800)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SerialPath[2].Function != "serviceController()" ||
+		report.SerialPathBytes != 70 {
+		t.Fatalf("modular lifecycle marker changed stack topology: %#v", report)
+	}
+}
+
 func TestFinalListingBudgetRejectsLessThanNinetySixBytes(t *testing.T) {
 	listing := parseListingFixture(t, completeAVRListingFixture())
 	_, err := estimateFirmwareStackBudget(listing, 1860)

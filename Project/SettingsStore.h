@@ -59,6 +59,7 @@ inline uint8_t encodeDecimals(uint8_t value) {
 } // namespace MenuSettingsFlags
 
 struct ControllerSettings {
+  // Core flags and illumination/display boot values use their native 8-bit units.
   uint8_t flags;
   uint8_t illuminationMode;
   uint8_t illuminationOnBrightness;
@@ -66,8 +67,11 @@ struct ControllerSettings {
   uint8_t displayBrightness;
   uint8_t statusBrightness;
   uint8_t pwmBootMode;
+  // Periodic native telemetry interval in milliseconds; zero disables streaming.
   uint16_t streamPeriodMs;
+  // Persistent channels 0..7 use 0..255 and expand to 12-bit PWM at runtime.
   uint8_t userPwm[8];
+  // Stable boot page ID plus packed save/color/decimal presentation options.
   uint8_t defaultMenuPage;
   uint8_t menuFlags;
 #if PCCONTROLLER_MENU_VISIBILITY
@@ -200,17 +204,22 @@ static_assert(sizeof(ControllerSettings) == 19,
               "Controller settings AVR layout changed");
 #endif
 
+// Owns the MCU EEPROM settings record, defaults, checksum, and delayed writes.
 class SettingsStore {
 public:
   static constexpr int EepromAddress = EepromLayout::SettingsAddress;
   static constexpr uint16_t SaveDelayMs = 1500;
 
+  // Loads a valid EEPROM record or installs development defaults in RAM.
   bool begin(uint32_t now = millis());
+  // Returns the single MCU-owned live settings record.
   ControllerSettings &values();
   const ControllerSettings &values() const;
 
+  // Coalesces edits before a delayed EEPROM write to reduce wear.
   void markDirty(uint32_t now = millis());
   bool service(uint32_t now = millis(), bool allowWrite = true);
+  // Writes the checksum-backed record immediately with EEPROM.update wear reduction.
   bool saveNow();
   bool dirty() const;
 
@@ -218,7 +227,7 @@ private:
   void setDefaults();
   bool loadCurrent();
 
-  ControllerSettings settings_{};
+  ControllerSettings settings_{}; // Live MCU settings; never host-config storage.
   uint32_t changedAt_ = 0;
   bool dirty_ = false;
 };

@@ -92,10 +92,11 @@ type listingStage struct {
 }
 
 type listingFunctionSpec struct {
-	Name        string
-	Match       string
-	Exact       bool
-	InlineLabel string
+	Name               string
+	Match              string
+	Exact              bool
+	InlineLabel        string
+	InlineLabelAliases []string
 }
 
 type responseBranchSpec struct {
@@ -241,6 +242,7 @@ func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, str
 	}
 	loopStage, err := functionOrInlineStage(listing, mainStage.Function, listingFunctionSpec{
 		Name: "sketch loop", Match: "loop", Exact: true, InlineLabel: "loop",
+		InlineLabelAliases: []string{"serviceController"},
 	})
 	if err != nil {
 		return nil, "", 0, err
@@ -438,11 +440,18 @@ func functionOrInlineStage(listing *avrListing, parent *avrListingFunction, spec
 	if len(functions) != 0 {
 		return requiredListingStage(listing, spec)
 	}
-	if spec.InlineLabel == "" || !functionHasSourceLabel(parent, spec.InlineLabel) {
+	inlineLabel := ""
+	for _, candidate := range append([]string{spec.InlineLabel}, spec.InlineLabelAliases...) {
+		if candidate != "" && functionHasSourceLabel(parent, candidate) {
+			inlineLabel = candidate
+			break
+		}
+	}
+	if inlineLabel == "" {
 		return listingStage{}, fmt.Errorf("required function/inlined marker %q is missing", spec.Name)
 	}
 	return listingStage{Manifest: compileManifestStackStage{
-		Name: spec.Name, Function: spec.InlineLabel + "()",
+		Name: spec.Name, Function: inlineLabel + "()",
 		Qualifier: "inlined; frame included by " + parent.Name,
 		Source:    fmt.Sprintf("listing parent address 0x%04X", parent.Address),
 	}}, nil
