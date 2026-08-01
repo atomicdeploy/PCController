@@ -29,10 +29,12 @@ import {
   TextField,
 } from './components'
 import { formatClock } from './i18n'
-import { shellArgument } from './command-line'
+import { redactSensitiveCommand, shellArgument } from './command-line'
+import { AdvancedWorkbench } from './advanced-workbench'
 import type { SharedViewProps } from './views'
 
-export function WorkbenchView({ appTitle, events, locale, t, command, snapshot }: SharedViewProps) {
+export function WorkbenchView(props: SharedViewProps) {
+  const { appTitle, events, locale, t, command, snapshot } = props
   const isPersian = locale === 'fa'
   const copy = (english: string, persian: string) => isPersian ? persian : english
   const [line, setLine] = useState('status')
@@ -94,7 +96,7 @@ export function WorkbenchView({ appTitle, events, locale, t, command, snapshot }
     const normalized = value.trim()
     if (!normalized) return ''
     setBusy(normalized)
-    setTranscript((current) => [...current.slice(-60), `pc› ${normalized}`])
+    setTranscript((current) => [...current.slice(-60), `pc› ${redactSensitiveCommand(normalized)}`])
     try {
       const output = await command(normalized)
       setTranscript((current) => [...current.slice(-60), output || copy('✓ accepted', '✓ پذیرفته شد')])
@@ -110,6 +112,7 @@ export function WorkbenchView({ appTitle, events, locale, t, command, snapshot }
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
+    if (redactSensitiveCommand(line.trim()) !== line.trim()) setLine('')
     void run(line)
   }
 
@@ -211,6 +214,7 @@ export function WorkbenchView({ appTitle, events, locale, t, command, snapshot }
           <div className="operation-buttons"><Button icon={Cpu} disabled={!snapshot.connected} onClick={() => void run('hello')}>{copy('Identity', 'شناسه')}</Button><Button icon={ListRestart} disabled={!snapshot.connected} onClick={() => void run('reset lines')}>{copy('Reconnect pulse', 'پالس اتصال مجدد')}</Button><Button icon={MemoryStick} onClick={() => void run('toolchain profile')}>{copy('Toolchain profile', 'مشخصات زنجیره‌ابزار')}</Button><Button icon={SquareTerminal} onClick={() => setLine('boot info')}>{copy('Prepare boot info', 'آماده‌سازی اطلاعات راه‌اندازی')}</Button></div>
         </Card>
       </section>
+      <AdvancedWorkbench {...props} run={run} busy={busy} />
     </>
   )
 }

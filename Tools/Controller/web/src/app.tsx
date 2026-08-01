@@ -48,6 +48,7 @@ import {
   type PageID,
 } from './hotkeys'
 import { translator, type MessageKey } from './i18n'
+import { redactSensitiveCommand } from './command-line'
 import { effectiveProductTitle, productMark } from './product-identity'
 import type {
   Appearance,
@@ -188,7 +189,7 @@ interface CommandWarning {
   confirmLabel: string
 }
 
-function commandWarning(command: string, locale: Appearance['locale']): CommandWarning | null {
+export function commandWarning(command: string, locale: Appearance['locale']): CommandWarning | null {
   const normalized = command.trim().toLowerCase().replace(/\s+/g, ' ')
   const fa = locale === 'fa'
   const warning = (title: string, body: string, confirmLabel: string): CommandWarning => ({ title, body, confirmLabel })
@@ -304,14 +305,14 @@ export default function App() {
 
   const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
     if (demo) {
-      const output = `[demo] ${command}`
+      const output = `[demo] ${redactSensitiveCommand(command)}`
       notify('info', success || 'Demonstration command', output)
       return output
     }
     try {
       const result = await execute(command)
       const output = result.output ?? ''
-      notify('success', success || 'Command completed', output || command)
+      notify('success', success || 'Command completed', output || redactSensitiveCommand(command))
       void refresh()
       return output
     } catch (cause) {
@@ -330,7 +331,7 @@ export default function App() {
         open: true,
         tone: 'danger',
         title: caution.title,
-        body: `${caution.body}\n\n${command}`,
+        body: `${caution.body}\n\n${redactSensitiveCommand(command)}`,
         confirmLabel: caution.confirmLabel,
         cancel: () => {
           if (settled) return

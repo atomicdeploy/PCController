@@ -1,8 +1,13 @@
 import type { ControllerSettings } from './types'
 
 export function shellArgument(value: string): string {
-  if (value.length > 0 && !/[\s"\\]/.test(value)) return value
+  if (value.length > 0 && !/[\s'"\\]/.test(value)) return value
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+export function redactSensitiveCommand(value: string): string {
+  const power = value.match(/^(\s*os\s+power\s+\S+)(\s+[\s\S]+)$/i)
+  return power ? `${power[1].trim()} [REDACTED]` : value
 }
 
 export function settingsSetCommand(
