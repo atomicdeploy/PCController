@@ -1,4 +1,5 @@
-name: Repository Health
+name: "🛡️ Quality · Repository Health"
+run-name: "🛡️ Repository health · ${{ github.ref_name }} · ${{ github.event_name }}"
 
 on:
   push:
@@ -15,51 +16,65 @@ concurrency:
 
 jobs:
   source-license-docs:
-    name: Source, license, and documentation
+    name: "🛡️ Source · License · Workflows · Docs"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
-      - name: Check out source
-        uses: actions/checkout@v7
+      - name: "📥 Check out exact source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Node.js
-        uses: actions/setup-node@v7
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
 
-      - name: Install Go from go.mod
-        uses: actions/setup-go@v7
+      - name: "🐹 Install Go from go.mod"
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: Tools/Controller/go.mod
           cache-dependency-path: Tools/Controller/go.sum
 
-      - name: Check repository structure and links
+      - name: "🧭 Check repository structure and links"
         run: node .github/scripts/repository-check.mjs
 
-      - name: Check build tooling
+      - name: "🏗️ Check project-owned build tooling"
         run: npm run check --prefix Tools/Build
 
-      - name: Check firmware tooling
+      - name: "⚡ Check project-owned firmware tooling"
         run: npm run check --prefix Tools/Firmware
 
-      - name: Check CI helper syntax
-        run: node --check .github/scripts/package-directory.mjs && node --check .github/scripts/step-summary.mjs
+      - name: "📦 Test CI, dependency, packaging, and release helpers"
+        run: |
+          node --check .github/scripts/package-directory.mjs
+          node --check .github/scripts/step-summary.mjs
+          node --test .github/scripts/package-directory.test.mjs
+          node --test .github/scripts/dependency-report.test.mjs
+          node --test .github/scripts/release-showcase.test.mjs
+          node --test .github/scripts/step-summary.test.mjs
 
-      - name: Validate GitHub Actions workflows
+      - name: "✅ Validate every GitHub Actions workflow"
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
-      - name: Check whitespace
-        run: git diff --check HEAD
+      - name: "🧹 Check whitespace"
+        run: git show --check --oneline HEAD
 
-      - name: Write repository summary
+      - name: "✨ Publish repository quality summary"
         if: success()
         run: |
           {
-            echo '# Repository health passed'
+            echo '# ✅ Repository health passed'
             echo
-            echo '- Required source, licensing, and documentation files are present.'
-            echo '- Build and firmware Node test suites passed.'
-            echo '- GitHub Actions workflows passed actionlint.'
-            echo '- Git whitespace validation passed.'
+            echo 'The source tree, licenses, documentation, project build tools, CI helpers, and every Actions workflow passed their policy gates.'
+            echo
+            echo '| Quality gate | Result |'
+            echo '|---|---|'
+            echo '| Required source and documentation | ✅ present and linked |'
+            echo '| Dual-license and REUSE metadata | ✅ verified |'
+            echo '| Build/Firmware Node test suites | ✅ passed |'
+            echo '| Dependency/Release helper tests | ✅ passed |'
+            echo '| GitHub Actions actionlint | ✅ passed |'
+            echo '| Whitespace | ✅ clean |'
+            echo
+            echo '> Release creation remains gated on the complete AVR plus ten native package jobs; physical-board acceptance remains separately protected.'
           } >> "$GITHUB_STEP_SUMMARY"

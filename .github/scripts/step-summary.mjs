@@ -1,18 +1,51 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { appendFileSync, readFileSync, statSync } from "node:fs";
-import { basename, resolve } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+} from "node:fs";
+import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dirname } from "node:path";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const [kind, ...arguments_] = process.argv.slice(2);
 
 const escape = (value) => String(value ?? "").replaceAll("|", "\\|");
+const code = (value) => `\`${String(value ?? "").replaceAll("`", "\\`")}\``;
+const absolute = (path) => resolve(root, path);
 const hashFile = (path) =>
   createHash("sha256").update(readFileSync(path)).digest("hex");
-const absolute = (path) => resolve(root, path);
+const number = (value) => new Intl.NumberFormat("en-US").format(Number(value || 0));
+const bytes = (value) => {
+  const size = Number(value || 0);
+  if (size < 1024) return `${number(size)} B`;
+  if (size < 1024 ** 2) return `${(size / 1024).toFixed(1)} KiB`;
+  return `${(size / 1024 ** 2).toFixed(2)} MiB`;
+};
+const percent = (used, total) =>
+  total ? Math.round((Number(used) / Number(total)) * 10000) / 100 : 0;
+const bar = (value, width = 50) => {
+  const bounded = Math.min(100, Math.max(0, Number(value || 0)));
+  const filled = Math.round((bounded / 100) * width);
+  return `${"█".repeat(filled)}${"░".repeat(width - filled)} ${bounded.toFixed(2)}%`;
+};
+const progress = (value, label) => {
+  const rounded = Math.min(100, Math.max(0, Math.floor(Number(value || 0))));
+  return `![${escape(label)} ${rounded}%](https://geps.dev/progress/${rounded}?dangerColor=dc3545&warningColor=ffc107&successColor=28a745)`;
+};
+const directoryBytes = (path) => {
+  if (!existsSync(path)) return 0;
+  const entry = statSync(path);
+  if (entry.isFile()) return entry.size;
+  return readdirSync(path, { withFileTypes: true }).reduce(
+    (total, item) => total + directoryBytes(resolve(path, item.name)),
+    0,
+  );
+};
 const archiveDetails = (path) => {
   const resolved = absolute(path);
   return {
@@ -21,6 +54,25 @@ const archiveDetails = (path) => {
     sha256: hashFile(resolved),
   };
 };
+const repositoryUrl = process.env.GITHUB_REPOSITORY
+  ? `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${process.env.GITHUB_REPOSITORY}`
+  : "https://github.com/atomicdeploy/PCController";
+const runUrl = process.env.GITHUB_RUN_ID
+  ? `${repositoryUrl}/actions/runs/${process.env.GITHUB_RUN_ID}`
+  : repositoryUrl;
+const commit = process.env.GITHUB_SHA || "local-build";
+const commitUrl = commit === "local-build" ? repositoryUrl : `${repositoryUrl}/commit/${commit}`;
+const shortCommit = commit.slice(0, 12);
+const workflowName = process.env.GITHUB_WORKFLOW || "Local build";
+const releaseBuild =
+  /release/iu.test(workflowName) || process.env.PCCONTROLLER_ATTESTED === "1";
+const retention = process.env.GITHUB_EVENT_NAME === "pull_request" ? "14 days" : "90 days";
+const artifactCta = (url, label) =>
+  url
+    ? `> [**⬇️ Download ${escape(label)}**](${url})
+>
+> Retained for ${retention}. The SHA-256 below verifies package integrity.`
+    : `> **${escape(label)}** — upload metadata is unavailable outside GitHub Actions.`;
 const emit = (markdown) => {
   const text = `${markdown.trim()}\n`;
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -29,80 +81,396 @@ const emit = (markdown) => {
     process.stdout.write(text);
   }
 };
+const readJson = (path) => JSON.parse(readFileSync(absolute(path), "utf8"));
+const friendlyRole = (role) =>
+  ({
+    application: "Application image (normal Urclock upload)",
+    eeprom: "EEPROM image",
+    "flash+bootloader": "Full flash + Urboot (ISP recovery only)",
+  })[role] || role;
+const provenanceCommand = (archiveName) =>
+  releaseBuild
+    ? `gh attestation verify ${archiveName} --repo ${process.env.GITHUB_REPOSITORY || "atomicdeploy/PCController"}`
+    : "# GitHub provenance is attached only when this package is promoted by the Release workflow.";
+const verificationBlock = (target, archiveName) => {
+  const provenance = provenanceCommand(archiveName);
+  if (/windows/iu.test(target)) {
+    return `~~~powershell
+$expected = (Get-Content ./${archiveName}.sha256 -Raw).Split()[0]
+$actual = (Get-FileHash ./${archiveName} -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected.ToLowerInvariant()) { throw "SHA-256 mismatch" }
+${provenance}
+~~~`;
+  }
+  const checksum = /macos/iu.test(target)
+    ? `shasum -a 256 -c ${archiveName}.sha256`
+    : `sha256sum -c ${archiveName}.sha256`;
+  return `~~~bash
+${checksum}
+${provenance}
+~~~`;
+};
 
-if (kind === "host") {
-  const [manifestPath, archivePath, target] = arguments_;
-  const manifest = JSON.parse(readFileSync(absolute(manifestPath), "utf8"));
+if (kind === "firmware") {
+  const [
+    manifestPath,
+    archivePath,
+    artifactUrl = "",
+    artifactDigest = "",
+    dependenciesPath = ".github/dependencies.json",
+    packageRootPath = ".build/firmware",
+  ] = arguments_;
+  const manifest = readJson(manifestPath);
   const archive = archiveDetails(archivePath);
+  const application = manifest.artifacts?.find((item) => item.role === "application");
+  const stack = manifest.stackBudget || {};
+  const staticPercent = percent(stack.staticSramBytes, stack.sramCapacityBytes);
+  const peakPercent = percent(stack.estimatedPeakSramBytes, stack.sramCapacityBytes);
+  const flashPercent = Number(application?.usagePercent || 0);
+  const rawBytes = directoryBytes(absolute(packageRootPath));
+  const compressedPercent = rawBytes ? percent(archive.bytes, rawBytes) : 0;
+  const dependencies = existsSync(absolute(dependenciesPath))
+    ? readJson(dependenciesPath)
+    : {};
+  const dependencyLibraries = Array.isArray(dependencies.libraries)
+    ? dependencies.libraries
+    : Object.entries(dependencies.libraries || {}).map(([name, version]) => ({
+        name,
+        version,
+        url: name === "rc-switch" ? "https://github.com/sui77/rc-switch" : repositoryUrl,
+      }));
+  const libraries = dependencyLibraries
+    .map((item) => `| [${escape(item.name)}](${item.url || repositoryUrl}) | ${code(item.version)} | pinned and resolved during this build |`)
+    .join("\n");
   const artifacts = (manifest.artifacts || [])
     .map(
       (artifact) =>
-        `| \`${escape(artifact.path)}\` | ${artifact.bytes} | \`${escape(artifact.sha256)}\` |`,
+        `| ${escape(friendlyRole(artifact.role))} | ${code(basename(artifact.path))} | ${number(artifact.dataBytes)} / ${number(artifact.capacityBytes)} | ${Number(artifact.usagePercent).toFixed(2)}% | ${number(artifact.freeBytes)} B | ${code(artifact.sha256)} |`,
     )
     .join("\n");
+  const staticSections = (stack.staticSections || [])
+    .map((item) => `| ${code(item.name)} | ${number(item.bytes)} B |`)
+    .join("\n");
+  const stackPath = (stack.serialPath || [])
+    .map((item) => `| ${escape(item.name)} | ${code(item.function)} | ${number(item.bytes)} B | ${escape(item.qualifier)} |`)
+    .join("\n");
+  const headroom = Number(application?.freeBytes || 0);
+  const aliasNote =
+    String(process.env.PCCONTROLLER_SHOWCASE_ALIAS || "").toLowerCase() === "true"
+      ? `\n> Compatibility preserved: the flagship ${code("Build")} workflow also publishes this curated flat payload under the exact inspiration artifact name ${code("firmware")}.\n`
+      : "";
+  const flashNotice = headroom < 256
+    ? `> [!WARNING]\n> **Only ${number(headroom)} application-flash bytes remain.** The build passed the exact ${number(application?.capacityBytes)}-byte Urboot boundary, but new AVR features require deliberate budget trade-offs.`
+    : `> [!NOTE]\n> ${number(headroom)} application-flash bytes remain.`;
+
   emit(`
-## Host package: ${escape(target)}
+# ✅ PCController AVR build successful
+
+The real ATmega328P firmware compiled, its Intel HEX records and address boundaries were revalidated, the conservative SRAM/stack budget passed, and the downloadable package was hashed.
+
+${artifactCta(artifactUrl, "PCController Firmware · ATmega328P")}
+${aliasNote}
+
+## 📦 Project information
 
 | Property | Value |
 |---|---|
-| Version | \`${escape(manifest.identity?.version)}\` |
-| Source SHA-256 | \`${escape(manifest.identity?.sourceSHA256)}\` |
-| Tests / vet | ${escape(manifest.validation?.tests)} / ${escape(manifest.validation?.vet)} |
-| C ABI | ${escape(manifest.validation?.sharedLibrary)} |
-| Archive | \`${archive.name}\` (${archive.bytes} bytes) |
-| Archive SHA-256 | \`${archive.sha256}\` |
+| Sketch | ${code("PCController.ino")} |
+| Target | ${code(manifest.target?.mcu || "atmega328p")} · ${number(manifest.target?.clockHz)} Hz |
+| Bootloader | ${escape(manifest.target?.bootloader)} · ${number(manifest.target?.baud)} baud |
+| Version | ${code(process.env.PCCONTROLLER_VERSION || "development")} |
+| Source | [${code(shortCommit)}](${commitUrl}) · ${number(manifest.source?.files)} files · ${code(manifest.source?.sha256)} |
+| Workflow | [${escape(workflowName)}](${runUrl}) |
+| Package | ${code(archive.name)} · ${bytes(archive.bytes)} |
 
-### Packaged host artifacts
+${flashNotice}
 
-| File | Bytes | SHA-256 |
+## 💾 Application flash
+
+${progress(flashPercent, "Application flash")}
+
+${code(bar(flashPercent))}
+
+| Used | Capacity | Free | Result |
+|---:|---:|---:|---|
+| **${number(application?.dataBytes)} B** | ${number(application?.capacityBytes)} B | **${number(application?.freeBytes)} B** | ✅ exact Intel HEX boundary passed |
+
+## 🧠 SRAM and stack headroom
+
+| Budget | Visualization | Used | Free |
+|---|---|---:|---:|
+| Static SRAM | ${progress(staticPercent, "Static SRAM")} | ${number(stack.staticSramBytes)} / ${number(stack.sramCapacityBytes)} B (${staticPercent.toFixed(2)}%) | ${number(Number(stack.sramCapacityBytes || 0) - Number(stack.staticSramBytes || 0))} B |
+| Conservative peak | ${progress(peakPercent, "Peak SRAM")} | ${number(stack.estimatedPeakSramBytes)} / ${number(stack.sramCapacityBytes)} B (${peakPercent.toFixed(2)}%) | **${number(stack.estimatedFreeSramBytes)} B** |
+
+~~~text
+Flash ${bar(flashPercent)}
+SRAM  ${bar(peakPercent)}
+~~~
+
+<details>
+<summary><strong>🔬 Detailed SRAM enforcement evidence</strong></summary>
+
+The release gate reserves ${number(stack.rfInterruptAllowanceBytes)} B for the RF interrupt path and enforces at least ${number(stack.minimumFreeSramBytes)} B free at the modeled peak. Analyzer: ${code(stack.analyzer)}.
+
+| Static section | Bytes |
+|---|---:|
+${staticSections}
+
+| Active path stage | Final linked function | Frame | Evidence |
+|---|---|---:|---|
+${stackPath}
+
+</details>
+
+<details>
+<summary><strong>⚙️ Reproducible build configuration</strong></summary>
+
+| Setting | Resolved value |
+|---|---|
+| FQBN | ${code(manifest.target?.fqbn)} |
+| MCU | ${code(manifest.target?.mcu)} |
+| Clock | ${number(manifest.target?.clockHz)} Hz external |
+| Brown-out detection | 2.7 V |
+| EEPROM policy | keep |
+| LTO | optimized for size |
+| Build hash | ${code(manifest.source?.buildHash)} |
+| Packed timestamp | ${code(manifest.source?.packedTimestamp)} |
+
+</details>
+
+<details>
+<summary><strong>📚 Declared and resolved dependencies</strong></summary>
+
+| Dependency | Version | Resolution |
 |---|---:|---|
-${artifacts}
-`);
-} else if (kind === "firmware") {
-  const [manifestPath, archivePath] = arguments_;
-  const manifest = JSON.parse(readFileSync(absolute(manifestPath), "utf8"));
-  const archive = archiveDetails(archivePath);
-  const artifacts = (manifest.artifacts || [])
-    .map(
-      (artifact) =>
-        `| ${escape(artifact.role)} | \`${escape(basename(artifact.path))}\` | ${artifact.dataBytes} / ${artifact.capacityBytes} | ${artifact.usagePercent}% | ${artifact.freeBytes} | \`${escape(artifact.sha256)}\` |`,
-    )
-    .join("\n");
-  emit(`
-## AVR firmware package
+| [Arduino CLI](https://github.com/arduino/arduino-cli/releases) | ${code(dependencies.arduinoCli?.version || "recorded in artifact")} | official archive, pinned SHA-256 |
+| [MiniCore](https://github.com/MCUdude/MiniCore) | ${code(dependencies.miniCore?.version || "recorded in artifact")} | canonical package index |
+${libraries}
 
-| Property | Value |
-|---|---|
-| Target | \`${escape(manifest.target?.fqbn || "MiniCore ATmega328P") }\` |
-| Source SHA-256 | \`${escape(manifest.source?.sha256)}\` |
-| Source files | ${escape(manifest.source?.files)} |
-| Archive | \`${archive.name}\` (${archive.bytes} bytes) |
-| Archive SHA-256 | \`${archive.sha256}\` |
+The artifact also contains the raw core/library inventory so declared-versus-resolved drift is reviewable rather than hidden.
 
-### Firmware artifacts
+</details>
 
-| Role | File | Used / capacity | Usage | Free | SHA-256 |
+## 📊 Firmware images
+
+| Role | File | Data / capacity | Usage | Free | SHA-256 |
 |---|---|---:|---:|---:|---|
 ${artifacts}
+
+## 🗜️ Package compression
+
+${progress(compressedPercent, "Archive size versus staged files")}
+
+The ${code(archive.name)} archive is ${bytes(archive.bytes)} versus ${bytes(rawBytes)} of staged build output (${compressedPercent.toFixed(2)}%). Its SHA-256 is ${code(archive.sha256)}.
+
+## ✅ Integrity and provenance
+
+${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
+
+${verificationBlock("Linux", archive.name)}
+
+> Normal deployment uses the application image through guarded Urclock programming. The full-flash image is for explicit ISP recovery only; CI compilation is not physical-hardware acceptance.
+
+---
+
+Built by [PCController Actions](${runUrl}) · source [${shortCommit}](${commitUrl}) · [CI/CD guide](${repositoryUrl}/blob/${commit}/docs/CI-CD-and-Releases.md)
+`);
+} else if (kind === "host") {
+  const [manifestPath, archivePath, target, artifactUrl = "", artifactDigest = ""] = arguments_;
+  const manifest = readJson(manifestPath);
+  const archive = archiveDetails(archivePath);
+  const artifacts = (manifest.artifacts || [])
+    .map((artifact) => `| ${code(artifact.path)} | ${bytes(artifact.bytes)} | ${code(artifact.sha256)} |`)
+    .join("\n");
+  emit(`
+# ✅ PCController Controller build successful
+
+Native tests, Go vet, executable identity checks, and the C ABI smoke test passed for **${escape(target)}**.
+
+${artifactCta(artifactUrl, `Controller · ${target}`)}
+
+## 🖥️ Package information
+
+| Property | Value |
+|---|---|
+| Platform | **${escape(target)}** |
+| Version | ${code(manifest.identity?.version)} |
+| Native target | ${code(`${manifest.target?.platform}/${manifest.target?.architecture}`)} |
+| Source | [${code(shortCommit)}](${commitUrl}) · tree ${code(manifest.identity?.sourceSHA256)} |
+| Workflow | [${escape(workflowName)}](${runUrl}) |
+| Package | ${code(archive.name)} · ${bytes(archive.bytes)} |
+| Package SHA-256 | ${code(archive.sha256)} |
+
+## 🧪 Validation matrix
+
+| Gate | Result |
+|---|---|
+| Go tests | ✅ ${escape(manifest.validation?.tests)} |
+| Go vet | ✅ ${escape(manifest.validation?.vet)} |
+| C ABI shared library | ✅ ${escape(manifest.validation?.sharedLibrary)} |
+| Native resources | ✅ ${escape(manifest.validation?.windowsResources || "not applicable")} |
+
+<details>
+<summary><strong>📦 Packaged files and hashes</strong></summary>
+
+| File | Size | SHA-256 |
+|---|---:|---|
+${artifacts}
+
+</details>
+
+## ✅ Integrity and provenance
+
+${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
+
+${verificationBlock(target, archive.name)}
+
+---
+
+[Download](${artifactUrl || runUrl}) · [source ${shortCommit}](${commitUrl}) · [Controller guide](${repositoryUrl}/blob/${commit}/Tools/Controller/README.md)
 `);
 } else if (kind === "simulator") {
-  const [target, binaryPath, archivePath] = arguments_;
+  const [target, binaryPath, archivePath, artifactUrl = "", artifactDigest = ""] = arguments_;
   const binary = absolute(binaryPath);
   const archive = archiveDetails(archivePath);
   emit(`
-## Virtual board: ${escape(target)}
+# ✅ PCController Virtual Board build successful
+
+The native simulator compiled and its protocol, hardware-model, UART, and smoke tests passed for **${escape(target)}**.
+
+${artifactCta(artifactUrl, `Virtual Board · ${target}`)}
+
+## 🧪 Simulator package
 
 | Property | Value |
 |---|---|
-| Binary | \`${escape(basename(binary))}\` (${statSync(binary).size} bytes) |
-| Binary SHA-256 | \`${hashFile(binary)}\` |
-| Archive | \`${archive.name}\` (${archive.bytes} bytes) |
-| Archive SHA-256 | \`${archive.sha256}\` |
-| Tests | CTest passed |
+| Target | **${escape(target)}** |
+| Binary | ${code(basename(binary))} · ${bytes(statSync(binary).size)} |
+| Binary SHA-256 | ${code(hashFile(binary))} |
+| Package | ${code(archive.name)} · ${bytes(archive.bytes)} |
+| Package SHA-256 | ${code(archive.sha256)} |
+| Native CTest | ✅ passed |
+| Source | [${code(shortCommit)}](${commitUrl}) |
+| Workflow | [${escape(workflowName)}](${runUrl}) |
+
+## ✅ Integrity and provenance
+
+${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
+
+${verificationBlock(target, archive.name)}
+
+---
+
+[Download](${artifactUrl || runUrl}) · [source ${shortCommit}](${commitUrl}) · [Virtual Board guide](${repositoryUrl}/blob/${commit}/Tools/VirtualBoard/README.md)
+`);
+} else if (kind === "catalog") {
+  const [directory] = arguments_;
+  const base = absolute(directory);
+  const files = [];
+  let firmwareManifestPath = "";
+  const visit = (path) => {
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const child = resolve(path, entry.name);
+      if (entry.isDirectory()) visit(child);
+      else {
+        if (/\.(?:tar\.gz|zip)$/u.test(entry.name)) files.push(child);
+        if (entry.name === "firmware-manifest.json") firmwareManifestPath = child;
+      }
+    }
+  };
+  visit(base);
+  files.sort();
+  const indexPath = resolve(base, "artifact-index.json");
+  const artifactIndex = existsSync(indexPath) ? readJson(indexPath) : { artifacts: [] };
+  const uploadedArtifacts = artifactIndex.artifacts || [];
+  const artifactForPackage = (path) => {
+    const fileName = basename(path);
+    if (/PCController-Firmware-/u.test(fileName)) {
+      return uploadedArtifacts.find(
+        (item) => item.name === "PCController-Firmware-ATmega328P",
+      );
+    }
+    for (const product of ["Controller", "VirtualBoard"]) {
+      const prefix = `PCController-${product}-`;
+      const match = uploadedArtifacts.find(
+        (item) =>
+          item.name.startsWith(prefix) &&
+          fileName.endsWith(`-${item.name.slice(prefix.length)}.tar.gz`),
+      );
+      if (match) return match;
+    }
+    return undefined;
+  };
+  const rows = files
+    .map((path) => {
+      const uploaded = artifactForPackage(path);
+      const downloadUrl = uploaded?.id
+        ? `${runUrl}/artifacts/${uploaded.id}`
+        : `${runUrl}#artifacts`;
+      return `| [${code(basename(path))}](${downloadUrl}) | ${bytes(statSync(path).size)} | ${code(hashFile(path))} |`;
+    })
+    .join("\n");
+  const firmwareManifest = firmwareManifestPath
+    ? JSON.parse(readFileSync(firmwareManifestPath, "utf8"))
+    : {};
+  const application = firmwareManifest.artifacts?.find(
+    (item) => item.role === "application",
+  );
+  const stack = firmwareManifest.stackBudget || {};
+  const flashPercent = Number(application?.usagePercent || 0);
+  const peakPercent = percent(
+    stack.estimatedPeakSramBytes,
+    stack.sramCapacityBytes,
+  );
+  emit(`
+# ✅ PCController build successful
+
+The AVR firmware plus every Controller and Virtual Board target completed in one flagship build. This is the cross-platform catalog for source [${code(shortCommit)}](${commitUrl}).
+
+> [**⬇️ Open all ${files.length} downloadable packages**](${runUrl}#artifacts)
+
+## ⚡ AVR ATmega328P target
+
+| Budget | Visual | Used | Free |
+|---|---|---:|---:|
+| Application flash | ${progress(flashPercent, "Application flash")} | **${number(application?.dataBytes)} / ${number(application?.capacityBytes)} B** (${flashPercent.toFixed(2)}%) | **${number(application?.freeBytes)} B** |
+| Conservative peak SRAM | ${progress(peakPercent, "Peak SRAM")} | **${number(stack.estimatedPeakSramBytes)} / ${number(stack.sramCapacityBytes)} B** (${peakPercent.toFixed(2)}%) | **${number(stack.estimatedFreeSramBytes)} B** |
+
+~~~text
+Flash ${bar(flashPercent)}
+SRAM  ${bar(peakPercent)}
+~~~
+
+The AVR result is its own hardware target—not a Linux binary. Both normal-upload and full-flash recovery images, resolved dependencies, and the firmware manifest are in the flat ${code("PCController-Firmware-ATmega328P")} artifact. The identical flat payload is also published as ${code("firmware")}, preserving the ASA0002E inspiration's exact workflow/job/artifact naming contract: ${code("Build")} / ${code("build")} / ${code("firmware")}.
+
+## 🌍 Native platform coverage
+
+| Product | Linux x64 | Linux ARM64 | Windows x64 | macOS Intel | macOS Apple Silicon |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Controller | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Virtual Board | ✅ | ✅ | ✅ | ✅ | ✅ |
+
+## 📦 Build catalog
+
+| Package / direct artifact | Size | SHA-256 |
+|---|---:|---|
+${rows}
+
+## 🛡️ What this run proved
+
+- ✅ Real MiniCore ATmega328P compilation and strict Intel HEX validation
+- ✅ Static and modeled peak-SRAM enforcement with stack-path evidence
+- ✅ Native Go tests, vet, C ABI smoke checks, and packaging on five targets
+- ✅ Native CMake/CTest Virtual Board validation on the same five targets
+- ✅ SHA-256 sidecars, canonical manifests, and direct Actions downloads
+
+Release runs additionally produce build-provenance attestations, a deterministic release manifest, direct firmware images, and a curated download chooser.
+
+---
+
+[Run details](${runUrl}) · [source ${shortCommit}](${commitUrl}) · [release guide](${repositoryUrl}/blob/${commit}/docs/CI-CD-and-Releases.md)
 `);
 } else {
-  process.stderr.write(
-    "Usage: step-summary.mjs host|firmware|simulator ...\n",
-  );
+  process.stderr.write("Usage: step-summary.mjs firmware|host|simulator|catalog ...\n");
   process.exit(2);
 }

@@ -1,4 +1,5 @@
-name: Release
+name: "✨ Release · Attested Packages"
+run-name: "✨ PCController ${{ inputs.tag || github.ref_name }} · exact source ${{ github.sha }}"
 
 on:
   push:
@@ -9,11 +10,6 @@ on:
       tag:
         description: SemVer tag for the release (for example v0.1.0-alpha.1)
         required: true
-        type: string
-      target_ref:
-        description: Branch or commit used when the tag does not exist
-        required: false
-        default: main
         type: string
       draft:
         description: Keep the release as a draft
@@ -28,6 +24,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
   id-token: write
   attestations: write
 
@@ -36,99 +33,227 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: "🔒 Pin release tag to the exact source"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: "📥 Fetch source and tags"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: "🔐 Validate SemVer and existing tag target"
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "release tag is not SemVer: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            tagged_sha="$(git rev-list -n 1 "$RELEASE_TAG")"
+            if test "$tagged_sha" != "$GITHUB_SHA"; then
+              echo "existing tag $RELEASE_TAG resolves to $tagged_sha, but this run builds $GITHUB_SHA" >&2
+              exit 1
+            fi
+          fi
+          echo "Release $RELEASE_TAG is pinned to exact source $GITHUB_SHA"
+
   firmware:
+    name: "⚡ Release Firmware"
+    needs: preflight
     uses: ./.github/workflows/firmware.yml
     with:
       version: ${{ inputs.tag || github.ref_name }}
 
-  host:
+  controller:
+    name: "🖥️ Release Controller · Five targets"
+    needs: preflight
     uses: ./.github/workflows/host.yml
     with:
       version: ${{ inputs.tag || github.ref_name }}
 
   virtual-board:
+    name: "🧪 Release Virtual Board · Five targets"
+    needs: preflight
     uses: ./.github/workflows/virtual-board.yml
     with:
       version: ${{ inputs.tag || github.ref_name }}
 
   draft-or-publish:
-    name: Attest and create GitHub release
-    needs: [firmware, host, virtual-board]
+    name: "🛡️ Attest · Curate · Release"
+    needs: [firmware, controller, virtual-board]
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      PCCONTROLLER_RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.draft }}
+      PCCONTROLLER_RELEASE_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || github.event_name != 'workflow_dispatch' && contains(github.ref_name, '-') }}
 
     steps:
-      - name: Check out source
-        uses: actions/checkout@v7
+      - name: "📥 Check out the exact built source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Download release packages
-        uses: actions/download-artifact@v8
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          pattern: pccontroller-*-${{ github.sha }}
+          node-version: "24"
+
+      - name: "⬇️ Download this run's eleven build artifacts"
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: PCController-*
           path: release-downloads
           merge-multiple: true
 
-      - name: Stage complete release asset set
+      - name: "📦 Stage friendly release assets and direct firmware images"
         run: |
+          set -euo pipefail
           mkdir -p release-assets
-          while IFS= read -r -d '' source; do
-            name="$(basename "$source")"
-            if test -e "release-assets/$name"; then
-              echo "duplicate release asset: $name" >&2
+
+          copy_unique() {
+            source="$1"
+            destination="$2"
+            if test -e "$destination"; then
+              echo "duplicate release asset: $(basename "$destination")" >&2
               exit 1
             fi
-            cp "$source" "release-assets/$name"
+            cp "$source" "$destination"
+          }
+
+          while IFS= read -r -d '' source; do
+            copy_unique "$source" "release-assets/$(basename "$source")"
           done < <(
             find release-downloads -type f \
               \( -name '*.tar.gz' -o -name '*.tar.gz.sha256' \) -print0
           )
+
+          application="$(find release-downloads -type f -name 'PCController.ino.hex' -print -quit)"
+          full_flash="$(find release-downloads -type f -name 'PCController.ino.with_bootloader.hex' -print -quit)"
+          firmware_manifest="$(find release-downloads -type f -name 'firmware-manifest.json' -print -quit)"
+          declared_dependencies="$(find release-downloads -type f -name 'declared-dependencies.json' -print -quit)"
+          test -n "$application" && test -n "$full_flash" && test -n "$firmware_manifest"
+
+          copy_unique "$application" "release-assets/PCController-${RELEASE_TAG}-ATmega328P-Application.hex"
+          copy_unique "$full_flash" "release-assets/PCController-${RELEASE_TAG}-ATmega328P-Full-Flash-Urboot.hex"
+          copy_unique "$firmware_manifest" "release-assets/PCController-${RELEASE_TAG}-Firmware-Manifest.json"
+          if test -n "$declared_dependencies"; then
+            copy_unique "$declared_dependencies" "release-assets/PCController-${RELEASE_TAG}-Dependencies.json"
+          fi
+
           archive_count="$(find release-assets -maxdepth 1 -type f -name '*.tar.gz' | wc -l | tr -d ' ')"
           checksum_count="$(find release-assets -maxdepth 1 -type f -name '*.tar.gz.sha256' | wc -l | tr -d ' ')"
           test "$archive_count" -eq 11
           test "$checksum_count" -eq 11
 
-      - name: Build combined checksum manifest
+      - name: "🔐 Build complete SHA-256 manifest"
         run: |
-          find release-assets -maxdepth 1 -type f -name '*.sha256' -print0 \
-            | sort -z \
-            | xargs -0 cat > release-assets/SHA256SUMS.txt
-          test -s release-assets/SHA256SUMS.txt
-          find release-assets -maxdepth 1 -type f -name '*.tar.gz' -print -quit | grep -q .
+          set -euo pipefail
+          (
+            cd release-assets
+            find . -maxdepth 1 -type f \
+              \( -name '*.tar.gz' -o -name '*.hex' \) \
+              -printf '%f\0' | sort -z | xargs -0 sha256sum
+          ) > release-assets/SHA256SUMS.txt
+          test "$(wc -l < release-assets/SHA256SUMS.txt | tr -d ' ')" -eq 13
+          (cd release-assets && sha256sum --check --strict SHA256SUMS.txt)
 
-      - name: Attest release archives
-        uses: actions/attest-build-provenance@v4
+      - name: "✨ Generate deterministic release showcase"
+        id: showcase
+        run: >-
+          node .github/scripts/release-showcase.mjs
+          release-assets
+          "$RELEASE_TAG"
+          "$GITHUB_SHA"
+
+      - name: "🛡️ Attest every published release asset"
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
         with:
-          subject-path: release-assets/*.tar.gz
+          subject-path: |
+            release-assets/*.tar.gz
+            release-assets/*.tar.gz.sha256
+            release-assets/*.hex
+            release-assets/SHA256SUMS.txt
+            release-assets/*-Firmware-Manifest.json
+            release-assets/*-Dependencies.json
+            release-assets/release-manifest.json
 
-      - name: Create or update GitHub release
-        uses: softprops/action-gh-release@v3
+      - name: "🚀 Create or idempotently repair GitHub release"
+        id: release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
-          target_commitish: ${{ inputs.target_ref || github.sha }}
-          name: PCController ${{ inputs.tag || github.ref_name }}
-          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(github.ref_name, '-') }}
-          generate_release_notes: true
+          target_commitish: ${{ github.sha }}
+          name: "⚡ PCController ${{ inputs.tag || github.ref_name }} · AVR & Cross-platform Suite"
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || github.event_name != 'workflow_dispatch' && contains(github.ref_name, '-') }}
+          body_path: ${{ steps.showcase.outputs.release_notes }}
+          generate_release_notes: false
           make_latest: false
+          overwrite_files: true
           fail_on_unmatched_files: true
           files: |
             release-assets/*.tar.gz
-            release-assets/*.sha256
+            release-assets/*.tar.gz.sha256
+            release-assets/*.hex
             release-assets/SHA256SUMS.txt
+            release-assets/*-Firmware-Manifest.json
+            release-assets/*-Dependencies.json
+            release-assets/release-manifest.json
 
-      - name: Write release summary
+      - name: "🧹 Prune only superseded generated assets from the completed draft"
         env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.release.outputs.id }}
+        run: |
+          set -euo pipefail
+          release_json="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json databaseId,isDraft,tagName,url)"
+          actual_id="$(jq -r '.databaseId' <<<"$release_json")"
+          is_draft="$(jq -r '.isDraft' <<<"$release_json")"
+          actual_tag="$(jq -r '.tagName' <<<"$release_json")"
+          test "$actual_tag" = "$RELEASE_TAG"
+          test "$actual_id" = "$RELEASE_ID"
+          if test "$is_draft" != true; then
+            echo "Published release detected; stale-asset pruning is intentionally skipped."
+            exit 0
+          fi
+
+          declare -A keep=()
+          while IFS= read -r path; do
+            keep["$(basename "$path")"]=1
+          done < <(find release-assets -maxdepth 1 -type f \
+            \( -name '*.tar.gz' -o -name '*.tar.gz.sha256' -o -name '*.hex' \
+               -o -name 'SHA256SUMS.txt' -o -name '*-Firmware-Manifest.json' \
+               -o -name '*-Dependencies.json' -o -name 'release-manifest.json' \) \
+            -print)
+
+          removed=0
+          while IFS=$'\t' read -r asset_id asset_name; do
+            lower_name="${asset_name,,}"
+            case "$lower_name" in
+              pccontroller-*|sha256s.txt|release-manifest.json)
+                if test -z "${keep[$asset_name]+present}"; then
+                  gh api --method DELETE \
+                    "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+                  removed=$((removed + 1))
+                fi
+                ;;
+            esac
+          done < <(gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/${actual_id}/assets" \
+            --paginate --jq '.[] | [.id, .name] | @tsv')
+          echo "Removed ${removed} superseded generated asset(s) after the replacement set was safely uploaded."
+
+      - name: "✨ Publish final release link"
         run: |
           {
-            echo "# Release package: ${RELEASE_TAG}"
             echo
-            echo "All AVR, host, and virtual-board jobs passed before release creation."
-            echo "Validated 11 archives and 11 per-archive checksums before upload."
+            echo '## 🎉 GitHub release ready'
             echo
-            echo '| Asset | Bytes |'
-            echo '|---|---:|'
-            find release-assets -maxdepth 1 -type f -printf "| \`%f\` | %s |\n" | sort
-            echo
-            echo 'SHA-256 checksums and GitHub build-provenance attestations are available.'
+            echo '[**Open the curated release and its assets**](${{ steps.release.outputs.url }})'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -6,23 +6,27 @@ newer source tree, because those are not the same image yet.
 
 ## Which menu is on the board right now?
 
-The latest physically verified checkpoint on COM18 is `2FD9F81C`. It reports
-the 15-page directory whose stable page 0 is `STAT`; reset returned to Status,
-and Previous/Next/Decrease/Increase left reset count 9 unchanged. Seeing Status
-and then `OPEN`/`CLSd` is therefore expected for that checkpoint.
+The latest recorded guarded upload/readback checkpoint on COM18 is
+`4C980157`. It reports the 15-page directory whose stable page 0 is `STAT` and
+retained all 15 EEPROM menu pages in identity order. The latest explicit
+physical-key checkpoint remains `2FD9F81C`: reset returned to Status, and
+Previous/Next/Decrease/Increase left reset count 9 unchanged. Seeing `STAT`
+and then `OPEN`/`CLSd` is therefore expected on both checkpoints.
 
-The full cap23 release-candidate source is newer and builds at 32,084 flash /
-1,444 static SRAM. Its final hash and live identity remain pending until the
-guarded backup/upload/readback/HELLO pass is complete. The earlier
+The current pinned source/CI profile keeps that same 15-page layout and builds
+at 32,228/32,384 application-flash bytes, with 1,444/2,048 static SRAM and a
+conservative 1,764/2,048 estimated peak. That source profile is newer than the
+recorded hardware checkpoints; a successful CI build is not a claim that its
+exact HEX has completed physical upload and acceptance. The earlier
 `5DF10D05` image had a 14-page menu whose page 0 was `VOLT`; it explains the
 old VOLT observation but is historical.
 
-| Image | Root page 0 | Root pages | Current status |
+| Image | Root page 0 | Root pages | Status |
 |---|---|---:|---|
-| Verified checkpoint `2FD9F81C` | `STAT` | 15 | UART-uploaded and flash-verified on COM18; four menu keys did not reset it |
-| Full cap23 release candidate | `STAT` | 15 | 32,084 flash / 1,444 SRAM; final frozen hash and live acceptance pending |
-| Historical `5DF10D05` | `VOLT` | 14 | Superseded evidence only |
-| Previous `5DF10D05` | `VOLT` | 14 | Historical accepted image, no longer live |
+| Current pinned source/CI profile | `STAT` | 15 | 32,228/32,384 application flash; 1,444 static and 1,764 estimated-peak SRAM; physical acceptance pending |
+| Guarded upload/readback checkpoint `4C980157` | `STAT` | 15 | 32,226/32,384 application flash; uploaded and independently flash-verified on COM18; final human button/RF/load-safe pass pending |
+| Physical-key checkpoint `2FD9F81C` | `STAT` | 15 | UART-uploaded and flash-verified on COM18; four menu keys did not reset it |
+| Historical `5DF10D05` | `VOLT` | 14 | Superseded accepted evidence; no longer the current source or hardware checkpoint |
 
 The previous 5DF order was:
 
@@ -93,10 +97,11 @@ enable relays before changing directions or other outputs.
 
 This section is the canonical hardware-configuration reference for the
 **current working source**. It is not proof that every value below is already
-running on COM18: the latest physically verified checkpoint is `2FD9F81C`,
-while the 32,084-byte cap23 release candidate still awaits its final guarded
-upload/readback acceptance. Values marked EEPROM default apply after an erased
-or invalid settings record; a valid board-owned EEPROM record overrides them.
+running on COM18: `4C980157` is the latest recorded guarded upload/readback
+checkpoint, `2FD9F81C` is the latest explicit physical-key checkpoint, and the
+current 32,228-byte source profile still needs its own hardware acceptance.
+Values marked EEPROM default apply after an erased or invalid settings record;
+a valid board-owned EEPROM record overrides them.
 
 The production target is an ATmega328P at 16 MHz with a 2 s watchdog. UART0 is
 started first so the host can receive an early `HELLO`; relay outputs are made

@@ -134,7 +134,8 @@ func TestHelpAndVersion(t *testing.T) {
 		if err := run(test.args, &stdout, &stderr); err != nil {
 			t.Fatalf("%v: %v", test.args, err)
 		}
-		if !strings.Contains(stdout.String(), test.want) {
+		plainOutput := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(stdout.String(), "")
+		if !strings.Contains(plainOutput, test.want) {
 			t.Fatalf("%v output %q missing %q", test.args, stdout.String(), test.want)
 		}
 	}

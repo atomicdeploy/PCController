@@ -1,9 +1,11 @@
 # Getting Started and Operations
 
 This is the canonical operating guide for the physical ControllerBoardMini,
-the `controller` PC host, and the native virtual board. The current live
-firmware is build `5DF10D05`; the proven rollback image is `E2DCE296`. The
-packaged host is under `Tools/Controller`.
+the `controller` PC host, and the native virtual board. It distinguishes the
+current pinned source/CI profile from named hardware checkpoints. The latest
+recorded guarded upload/readback checkpoint is `4C980157`, the latest explicit
+physical-key checkpoint is `2FD9F81C`, and `E2DCE296` remains a historical
+rollback image. The packaged host is under `Tools/Controller`.
 
 For exact implementation status, including items that still need physical
 validation, see the [Project Checklist](Project-Checklist.md).
@@ -11,9 +13,30 @@ For the full TUI, PC-only configuration, hotkey/toast, discovery, webhook, and
 remote-bridge guide, see
 [Host Configuration and Integrations](Host-Configuration-and-Integrations.md).
 
-## Current tested baseline
+## Current pinned source baseline
 
-The following current path has been exercised on the board attached as COM18:
+The current reproducible-input build profile targets MiniCore 3.1.2,
+ATmega328P, external 16 MHz, UART0 Urboot/Urclock at 115200 baud, retained
+EEPROM, and 2.7 V brown-out detection. Its build manifest reports:
+
+| Region | Used | Free | Utilization |
+|---|---:|---:|---:|
+| Application flash | 32,228 / 32,384 bytes | 156 bytes | 99.52% |
+| Static SRAM | 1,444 / 2,048 bytes | 604 bytes | 70.51% |
+| Conservative estimated peak SRAM | 1,764 / 2,048 bytes | 284 bytes | 86.13% |
+
+The source and Virtual Board expose 15 root pages, with `STAT` fixed at page 0
+and `LErn` at page 14. The manifest attached to the latest successful flagship
+Actions run is authoritative for a later commit. A green CI build proves
+compile, HEX-boundary, memory, test, and package gates; it does not prove that
+the exact HEX was programmed onto the physical board.
+
+## Historical July 31 hardware baseline
+
+The following evidence belongs to the superseded `5DF10D05` checkpoint on the
+board attached as COM18. It remains useful diagnostic history, but it does not
+replace the current source profile or the later `4C980157` upload/readback
+record:
 
 - MiniCore 3.1.2 UART0 Urboot/Urclock at 115200 baud;
 - official firmware `5DF10D05`, UART-uploaded and flash-verified;
@@ -32,16 +55,16 @@ The following current path has been exercised on the board attached as COM18:
   framing/CRC errors;
 - prior physical Buttons 1 and 2 testing on the E2 rollback image through
   Down, Up, and Click events;
-- current 5DF host-driven HELLO/STATUS/menu/settings validation, plus the
-  earlier packaged-host HELLO, STATUS, SETTINGS, temperature-list, and
+- 5DF host-driven HELLO/STATUS/menu/settings validation at that checkpoint,
+  plus the earlier packaged-host HELLO, STATUS, SETTINGS, temperature-list, and
   I2C-scan smoke test against the A7 image;
 - the final TUI running through the CH340 selector and primary IPC owner;
   secondary commands reported 12.226 V, 263 mA, relays/PWM off, zero
   framing/CRC errors, `silent=false`, and a completed `notify` melody;
-- the current EXE/DLL/header builds, an earlier external C-ABI smoke test,
-  current host unit tests, and current host static analysis.
+- the then-current EXE/DLL/header builds, an earlier external C-ABI smoke test,
+  host unit tests, and host static analysis.
 
-Current artifact identity:
+Historical 5DF artifact identity:
 
 ```text
 Flash: 32,374/32,384 application bytes (10 free)
@@ -53,7 +76,7 @@ Merged application + Urboot:
        E9AFF099A95862E36512BA4D1343487D219E6E68F58A1F589A7E5416C8327EBE
 ```
 
-Current host artifacts:
+Historical packaged-host artifacts from that checkpoint:
 
 ```text
 controller.exe  2,799,616 bytes
@@ -64,21 +87,23 @@ pccontroller.h  2,108 bytes
   61BB3FAF65771BDD4000C98EA218AE1262EFA53982ABF5AF7E01EA18BEBBD8C4
 ```
 
-The firmware currently leaves only 10 application-flash bytes. Treat every new
-firmware feature as a measured tradeoff; do not add code and assume it still
-fits.
+That historical 5DF image left only 10 application-flash bytes. The current
+pinned profile leaves 156 bytes, which is still a critical budget: treat every
+new firmware feature as a measured tradeoff and re-read the generated manifest
+after every change.
 
-Still pending physical validation includes Buttons 3/4 and advanced gestures,
-all editor submodes, door/BT transitions, loaded relay motion, PWM/RGB/strip
-visuals, a real 433 MHz handset, an attached LCD, macros on harmless outputs,
-USB removal/reconnect, and listening to the restored melody/key cues.
+Physical validation for the current source still includes Buttons 3/4 and
+advanced gestures, all editor submodes, door/BT transitions, loaded relay
+motion, PWM/RGB/strip visuals, a real 433 MHz handset, an attached LCD, macros
+on harmless outputs, USB removal/reconnect, and listening to the restored
+melody/key cues.
 
-The 5DF local UI still has a flat 14-page root menu with modal editors. The
-`Snd` page now opens a nested `Snd` → `diSP` → `StBr` → `CoLr` → `V-dP` →
-`A-dP` settings sequence and editing values blink at approximately 300 ms
-intervals. The broader requested root category hierarchy remains pending, but
-display brightness, status brightness/color, sound, and reading precision are
-now locally adjustable in that submenu.
+The historical 5DF local UI had a flat 14-page root menu with modal editors. In
+the current source, the `Snd` page opens a nested `Snd` → `diSP` → `StBr` →
+`CoLr` → `V-dP` → `A-dP` settings sequence, and editing values blink at
+approximately 300 ms intervals. The broader requested root category hierarchy
+remains pending, but display brightness, status brightness/color, sound, and
+reading precision are locally adjustable in that submenu.
 
 ## Safety first
 
@@ -123,13 +148,15 @@ From the project root:
 .\Tools\Controller\bin\controller.exe exec --port COM18 i2c scan
 ```
 
-Expected identity:
+Expected identity shape (historical 5DF example):
 
 ```text
 PCController ... build=5DF10D05 date=Jul 31 2026 time=07:13:06
 ```
 
-The build hash and compile date/time are the operational firmware identity;
+The connected board must report the hash and compile date/time of the image
+actually installed; do not require the historical value above. Those fields
+are the operational firmware identity;
 the leading legacy `0.0.0` compatibility bytes are not a semantic release
 version.
 
@@ -398,8 +425,9 @@ each 650 ms field label, the selected value blinks on/off at approximately
 editing; Discard restores the snapshot. The earlier AFD validation exercised
 all three precision values locally and from the host, saved two decimals for
 both readings, reset the board, and confirmed the settings persisted. The
-expanded six-item menu is installed in current 5DF; its new physical-key
-display/status fields still need a hands-on pass.
+expanded six-item menu is present in the current 15-page source; the
+historical 5DF checkpoint installed its earlier 14-page form. The newer
+physical-key display/status fields still need a hands-on pass.
 
 Host equivalents:
 
@@ -538,11 +566,12 @@ The two DS18B20s share D10/CS and require an external pull-up, normally
 should report unavailable rather than lock the MCU.
 
 INA219 uses address `0x40`; the PWM expander uses `0x41`. The supply reading is
-bus plus shunt voltage. The current 5DF firmware uses the INA219's 64-sample
+bus plus shunt voltage. The current source uses the INA219's 64-sample
 bus/shunt averaging mode, which takes about 68 ms and fits the 100 ms
-door-open sampling period. A 50-sample AFD check measured only 4 mV supply
-span and 3 mA current span. Temperature values use a 50/50 integer EMA, while
-a raw value at or above 50 C bypasses smoothing for immediate warning.
+door-open sampling period. A historical 50-sample AFD check measured only
+4 mV supply span and 3 mA current span. Temperature values use a 50/50 integer
+EMA, while a raw value at or above 50 C bypasses smoothing for immediate
+warning.
 
 ## Displays, RGB, and addressable LEDs
 
@@ -991,7 +1020,8 @@ protocol. Bootloader operations are different: the host deliberately delegates
 current MiniCore Urboot/Urclock wire handling to maintained AVRDUDE or
 `arduino-cli`; it does not claim to reimplement that boot protocol.
 
-The current 5DF firmware and the proven E2 rollback use this profile:
+The current pinned source and the recorded 4C, 5DF, and E2 hardware
+checkpoints use this profile:
 
 ```text
 MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external
@@ -1129,8 +1159,9 @@ instruction timing.
    UART directions.
 
 The packaged host authenticated the earlier A7 image, the E2 rollback image
-passed later host-driven status/menu checks, and current 5DF passed the
-HELLO/STATUS/menu/settings validations without the former deadline error.
+passed later host-driven status/menu checks, and the historical 5DF checkpoint
+passed the HELLO/STATUS/menu/settings validations without the former deadline
+error.
 
 ### Port busy
 
@@ -1153,9 +1184,8 @@ expected; repeated increments during one steady session are not. Watch
 - Expect INA219 at `0x40` and shared ground.
 - Supply voltage is bus plus shunt; compare VIN+ to ground with a meter.
 - Confirm shunt orientation and wiring.
-- Current 5DF uses the same averaging path; the immediately preceding AFD
-  live run produced a 4 mV supply span in a 50-sample
-  live test.
+- The current source uses the same averaging path; the historical AFD live run
+  produced a 4 mV supply span in a 50-sample test.
 
 ### Temperature missing or labels reversed
 
@@ -1198,11 +1228,12 @@ last-known-good configuration. Confirm the edited file is the one printed by
 
 ## Recommended next physical checks
 
-1. Keep `E2DCE296` available as the proven rollback image while validating
-   current `5DF10D05`.
-2. Physically test all four buttons on 5DF, including double-click, hold,
-   accelerated repeat, release, and all six nested `Snd` settings.
-3. Listen for the next boot melody and one short beep per key. The latest
+1. Keep `E2DCE296` available as a historical rollback image while validating
+   `4C980157` or a newer hash built from the current pinned source.
+2. Physically test all four buttons on the installed 15-page image, including
+   `STAT`, double-click, hold, accelerated repeat, release, and all six nested
+   `Snd` settings.
+3. Listen for the next boot melody and one short beep per key. The historical
    unattended 5DF sweep deliberately ran muted.
 4. Exercise every editor with Save and Discard while outputs are harmless.
 5. Decide whether the flat root plus six-item settings submenu is sufficient;
