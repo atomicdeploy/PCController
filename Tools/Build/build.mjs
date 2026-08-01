@@ -410,7 +410,9 @@ export function refreshedEnvironment(base = process.env, platform = process.plat
 	if (platform !== 'win32') return { ...base }
 	const machine = registryPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', base)
 	const user = registryPath('HKCU\\Environment', base)
-	const values = [machine, user, base.PATH || ''].flatMap(value => value.split(delimiter)).filter(Boolean)
+	// Preserve the invoking shell's priority. CI tool setup and developer shells
+	// intentionally prepend selected toolchains; registry entries only fill gaps.
+	const values = [base.PATH || '', machine, user].flatMap(value => value.split(delimiter)).filter(Boolean)
 	const seen = new Set()
 	const path = []
 	for (const entry of values) {
@@ -936,8 +938,11 @@ function buildHost(options, identity, env, log) {
 	const executable = join(stage, executableName)
 	const ldflags = `-s -w -X main.version=${identity.version} -X main.sourceHash=${before.sha256} -X main.buildTime=${identity.hostBuildTime}`
 	log.stage('🖥️', `Building host ${identity.version} from ${before.sha256.slice(0, 12)}`)
+	const executableCGO = process.platform === 'darwin' ? '1' : '0'
 	run(go, ['build', '-buildvcs=false', '-trimpath', '-ldflags', ldflags, '-o', executable, './cmd/controller'], {
-		cwd: HOST_ROOT, env: { ...goEnv, CGO_ENABLED: '0' }, verbose: options.verbose
+		// go.bug.st/serial uses Apple IOKit through CGO on macOS. Linux and
+		// Windows retain the self-contained executable build.
+		cwd: HOST_ROOT, env: { ...goEnv, CGO_ENABLED: executableCGO }, verbose: options.verbose
 	})
 	const after = hostSourceIdentity()
 	if (after.sha256 !== before.sha256) throw new BuildError('Controller source changed during packaging; retry from a stable tree')

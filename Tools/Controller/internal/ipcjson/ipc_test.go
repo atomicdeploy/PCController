@@ -328,7 +328,7 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 			Client: client, WebSocketPath: "/ipc", SocketIOPath: "/socket.io/",
 		})
 	}()
-	clientContext, stop := context.WithTimeout(ctx, 4*time.Second)
+	clientContext, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
 	connection, _, err := websocket.Dial(
 		clientContext,

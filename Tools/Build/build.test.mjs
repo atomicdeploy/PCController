@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { renameSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -12,14 +12,25 @@ import {
 	assertGeneratedPath,
 	createPlan,
         hostSourceIdentity,
-        installPackage,
+	installPackage,
 	packBuildTimestamp,
 	parseArguments,
+	refreshedEnvironment,
 	removeGeneratedWinResources,
 	resolveBuildIdentity,
 	unixSmokeSource,
 	windowsSmokeSource
 } from './build.mjs'
+
+test('refreshed Windows PATH preserves invoking shell precedence', () => {
+	const first = resolve('selected-toolchain')
+	const second = resolve('session-tools')
+	const refreshed = refreshedEnvironment({
+		...process.env,
+		PATH: [first, second].join(delimiter)
+	}, 'win32')
+	assert.deepEqual(refreshed.PATH.split(delimiter).slice(0, 2), [first, second])
+})
 
 test('package publishing tolerates a shell holding the canonical directory', async t => {
         const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-lock-'))
