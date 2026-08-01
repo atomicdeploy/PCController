@@ -31,14 +31,20 @@ remains in this checklist.
   free) while still omitting navigation, requests/retries, failure fallback,
   relationships, visual/blink handling, read-only cue, and unsolicited events.
   Host and VirtualBoard retain cap24; the AVR uses cap19 exact front-panel push.
-- ✅ The latest physically verified checkpoint was `2FD9F81C`: UART upload and
-  flash verification succeeded on COM18, page 0 was Status, reset count stayed
-  9 through Previous/Next/Decrease/Increase, relays were off, PWM user outputs
-  were off, and the temporary test mute was restored to `silent=false`.
-- 🟡 The 32,084-byte cap23 release candidate still needs its final frozen hash,
-  guarded UART backup/upload/readback, HELLO/status proof, and load-safe
-  acceptance pass. Do not substitute a successful source build for that live
-  evidence.
+- ✅ Current firmware `4C980157` (32,226/32,384 application bytes, 158 free)
+  was guarded-backup uploaded and independently flash-verified through Urclock
+  on COM18. Live HELLO reports timestamp `260801223630`; settings retain
+  illumination/PWM Off, Status page 0, audible mode, 2/2 decimals, motion
+  Always with a 1 ms break, and all 15 EEPROM menu pages visible in identity
+  order. Relays and PWM channels 0-11 were verified off with zero UART framing
+  and CRC errors. The complete post-migration restore manifest is under the
+  host data directory at `post-migration-4C980157`.
+- ✅ The latest physically key-tested checkpoint remains `2FD9F81C`: page 0
+  was Status, reset count stayed 9 through Previous/Next/Decrease/Increase,
+  relays and user PWM outputs stayed off, and mute was restored afterward.
+- 🟡 Firmware `4C980157` still needs the final human button/RF/load-safe
+  acceptance pass; protocol, backup, upload, readback, and output-off evidence
+  do not substitute for those physical checks.
 - ✅ Exact compiled and factory initialization parameters are documented in
   [Hardware Initialization and Tuning](Hardware-Initialization-and-Tuning.md),
   including rationale, alternatives, and the boundary between source settings,
@@ -1034,16 +1040,20 @@ check has passed.
 
 ### Development EEPROM, repository, licensing, and documentation
 
-- 🟡 Development firmware may erase/reinitialize the current MCU EEPROM and
-  adopt a clean layout; do not spend flash on whole-project EEPROM migration
-  until the layout is declared stable. Retain validation/CRC and document that
-  a development flash can reset saved settings, RF records, automations, and
-  reset telemetry.
-- 🟡 Initialize Git, audit generated/private files, add safe ignore rules, and
-  publish the project through the already-authenticated `gh` CLI/API. Use an
-  `MIT OR BSD-2-Clause` dual-license for original project code unless an
-  incorporated dependency requires different treatment; preserve all
-  third-party notices and do not relicense dependencies.
+- ✅ The live MCU settings were migrated once from the valid unversioned
+  19+CRC8 record to development-v2 29+CRC8, preserving all legacy values and
+  adding the `0x7FFF` visibility mask plus identity page order. PR #83 added a
+  file-only host migrator that emits only EEPROM bytes 32-61; RF records and
+  the reset journal are outside that artifact. The final firmware was built
+  with `PCCONTROLLER_SAFE_EEPROM_MIGRATION=0`, so no migration path consumes
+  normal AVR flash or SRAM. Whole-history/versioned migration remains deferred
+  until the layout is declared stable.
+- ✅ Git is initialized and the audited public repository is published at
+  `atomicdeploy/PCController`. Original project code uses
+  `MIT OR BSD-2-Clause`; `REUSE.toml`, `LICENSES/`, and third-party notices keep
+  dependency licensing separate. Generated/private paths are ignored, and
+  larger changes use reviewed/checked PRs (including modularization #80,
+  compact HELLO #81, locked-package publication #82, and EEPROM tooling #83).
 - 🟡 Canonically rename and organize Markdown documents into a starter-friendly
   reading order. Repair every relative link and provide complete architecture,
   hardware, firmware, host/TUI, protocol/API/RPC/WebSocket, configuration,
@@ -1055,12 +1065,11 @@ check has passed.
   descriptive one-line or compact multi-line comments. Prefer comments that
   explain purpose, ownership, timing, units, safety, or constraints; do not add
   noise that merely repeats the syntax.
-- 🟡 **Finalization-only firmware structure gate:** reduce `PCController.ino`
-  to high-level composition, `setup()`, and a short service-oriented `loop()`.
-  Move domain state and implementation functions into focused project classes
-  or modules with clear interfaces, without changing behavior or increasing
-  AVR flash beyond the final measured budget. Perform this only after the
-  active safety/protocol/size work is frozen, then rebuild and regression-test.
+- ✅ **Firmware structure gate:** PR #80 reduced `PCController.ino` to a
+  49-line high-level composition entrypoint and moved implementation into eight
+  focused `Project/Firmware/*.inc.h` domains. The modularized build kept the
+  firmware HEX and EEPROM byte-identical at that checkpoint; the current
+  `4C980157` image was rebuilt with the same structure and stack guard.
 - 🟡 **Finalization-only conversation audit:** extract the complete user-message
   sequence from the project session JSONL turns, normalize spelling only for
   search, map every distinct requirement to this checklist and implementation
