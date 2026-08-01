@@ -17,6 +17,7 @@ import {
 	parseArguments,
 	removeGeneratedWinResources,
 	resolveBuildIdentity,
+	unixSmokeSource,
 	windowsSmokeSource
 } from './build.mjs'
 
@@ -259,6 +260,14 @@ test('Windows C ABI smoke uses a valid handle and destroys it', () => {
 	assert.ok(source.includes('{\\"operation\\":\\"build-smoke-invalid\\",\\"handle\\":%llu}'))
 	assert.ok(source.includes('{\\"operation\\":\\"destroy\\",\\"handle\\":%llu}'))
 	assert.doesNotMatch(source, /FreeLibrary\(module\)/)
+})
+
+test('Unix C ABI smoke loads the generated library and destroys its handle', () => {
+	const source = unixSmokeSource('pccontroller.so')
+	assert.ok(source.includes('dlopen("./pccontroller.so"'))
+	assert.ok(source.includes('PCControllerInvoke'))
+	assert.ok(source.includes('{\\"operation\\":\\"destroy\\",\\"handle\\":%llu}'))
+	assert.doesNotMatch(source, /dlclose\(module\)/)
 })
 
 test('CMD and Bash wrappers emit the same shared plan on Windows', {

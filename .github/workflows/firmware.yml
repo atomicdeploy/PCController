@@ -1,0 +1,114 @@
+name: Firmware - AVR
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version associated with the firmware package
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Version associated with the firmware package
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firmware-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile-validate-package:
+    name: MiniCore ATmega328P compile and validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      NO_COLOR: "1"
+      PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+      TZ: UTC
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Go from go.mod
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: Tools/Controller/go.mod
+          cache-dependency-path: Tools/Controller/go.sum
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+
+      - name: Freeze reproducible build time
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install pinned MiniCore platform
+        run: |
+          arduino-cli core update-index \
+            --additional-urls https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json
+          arduino-cli core install MiniCore:avr@3.1.2 \
+            --additional-urls https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json
+
+      - name: Install linked Arduino library
+        run: arduino-cli lib install "rc-switch@2.6.4"
+
+      - name: Build and validate AVR firmware
+        run: >-
+          ./build.sh
+          --firmware-only
+          --clean
+          --version "$PCCONTROLLER_VERSION"
+
+      - name: Recheck Intel HEX artifacts
+        run: ./firmware.sh check --no-color
+
+      - name: Record dependency inventory
+        run: |
+          arduino-cli version > .build/firmware/dependencies.txt
+          arduino-cli core list >> .build/firmware/dependencies.txt
+          arduino-cli lib list >> .build/firmware/dependencies.txt
+
+      - name: Package firmware archive
+        id: package
+        run: >-
+          node .github/scripts/package-directory.mjs
+          .build/firmware
+          pccontroller-firmware
+          avr-atmega328p
+
+      - name: Write firmware step summary
+        if: always() && steps.package.outcome == 'success'
+        run: >-
+          node .github/scripts/step-summary.mjs
+          firmware
+          .build/firmware/firmware-manifest.json
+          ${{ steps.package.outputs.archive }}
+
+      - name: Upload firmware package
+        uses: actions/upload-artifact@v7
+        with:
+          name: pccontroller-firmware-avr-atmega328p-${{ github.sha }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+            .build/firmware/*.hex
+            .build/firmware/*.eep
+            .build/firmware/firmware-manifest.json
+            .build/firmware/dependencies.txt
+          if-no-files-found: error
+          retention-days: 14

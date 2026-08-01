@@ -16,29 +16,50 @@ concurrency:
 jobs:
   source-license-docs:
     name: Source, license, and documentation
-    runs-on: windows-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        shell: cmd
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: "24"
+
+      - name: Install Go from go.mod
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: Tools/Controller/go.mod
+          cache-dependency-path: Tools/Controller/go.sum
 
       - name: Check repository structure and links
-        run: node .github\scripts\repository-check.mjs
+        run: node .github/scripts/repository-check.mjs
 
       - name: Check build tooling
-        run: npm run check --prefix Tools\Build
+        run: npm run check --prefix Tools/Build
 
       - name: Check firmware tooling
-        run: npm run check --prefix Tools\Firmware
+        run: npm run check --prefix Tools/Firmware
+
+      - name: Check CI helper syntax
+        run: node --check .github/scripts/package-directory.mjs && node --check .github/scripts/step-summary.mjs
+
+      - name: Validate GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
       - name: Check whitespace
         run: git diff --check HEAD
+
+      - name: Write repository summary
+        if: success()
+        run: |
+          {
+            echo '# Repository health passed'
+            echo
+            echo '- Required source, licensing, and documentation files are present.'
+            echo '- Build and firmware Node test suites passed.'
+            echo '- GitHub Actions workflows passed actionlint.'
+            echo '- Git whitespace validation passed.'
+          } >> "$GITHUB_STEP_SUMMARY"

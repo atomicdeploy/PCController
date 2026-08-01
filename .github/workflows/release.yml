@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: SemVer tag for the release (for example v0.1.0-alpha.1)
+        required: true
+        type: string
+      target_ref:
+        description: Branch or commit used when the tag does not exist
+        required: false
+        default: main
+        type: string
+      draft:
+        description: Keep the release as a draft
+        required: false
+        default: true
+        type: boolean
+      prerelease:
+        description: Mark the release as a prerelease
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  firmware:
+    uses: ./.github/workflows/firmware.yml
+    with:
+      version: ${{ inputs.tag || github.ref_name }}
+
+  host:
+    uses: ./.github/workflows/host.yml
+    with:
+      version: ${{ inputs.tag || github.ref_name }}
+
+  virtual-board:
+    uses: ./.github/workflows/virtual-board.yml
+    with:
+      version: ${{ inputs.tag || github.ref_name }}
+
+  draft-or-publish:
+    name: Attest and create GitHub release
+    needs: [firmware, host, virtual-board]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Download release packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: pccontroller-*-${{ github.sha }}
+          path: release-assets
+          merge-multiple: true
+
+      - name: Build combined checksum manifest
+        run: |
+          find release-assets -maxdepth 1 -type f -name '*.sha256' -print0 \
+            | sort -z \
+            | xargs -0 cat > release-assets/SHA256SUMS.txt
+          test -s release-assets/SHA256SUMS.txt
+          find release-assets -maxdepth 1 -type f -name '*.tar.gz' -print -quit | grep -q .
+
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: release-assets/*.tar.gz
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          target_commitish: ${{ inputs.target_ref || github.sha }}
+          name: PCController ${{ inputs.tag || github.ref_name }}
+          draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/*.tar.gz
+            release-assets/*.sha256
+            release-assets/SHA256SUMS.txt
+
+      - name: Write release summary
+        env:
+          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          {
+            echo "# Release package: ${RELEASE_TAG}"
+            echo
+            echo "All AVR, host, and virtual-board jobs passed before release creation."
+            echo
+            echo '| Asset | Bytes |'
+            echo '|---|---:|'
+            find release-assets -maxdepth 1 -type f -printf '| `%f` | %s |\n' | sort
+            echo
+            echo 'SHA-256 checksums and GitHub build-provenance attestations are available.'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -331,6 +331,14 @@ PowerShell build scripts were removed; CMD and Bash now share the same Node
 plan instead of carrying divergent policy.
 See the [build-tool guide](Tools/Build/README.md).
 
+GitHub Actions runs the same safety gates for AVR firmware and complete native
+host packages on Linux x64/ARM64, Windows x64, and macOS Intel/ARM64. The
+virtual board is compiled and tested on the same five targets. Every downloadable
+package is a versioned archive with deterministic build identities, a SHA-256
+sidecar, and a job summary; tag and manual release builds also receive GitHub
+build-provenance attestations. See
+[CI/CD and releases](docs/CI-CD-and-Releases.md).
+
 The ASA0002E-style Node firmware studio adds content-watched builds, serialized
 and debounced programming, byte-identical edit suppression, strict Intel HEX
 checksum/address/size validation, SHA-256 manifests, atomic flash backups, and
