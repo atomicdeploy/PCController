@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { renameSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -10,13 +11,48 @@ import {
 	PROJECT_ROOT,
 	assertGeneratedPath,
 	createPlan,
-	hostSourceIdentity,
+        hostSourceIdentity,
+        installPackage,
 	packBuildTimestamp,
 	parseArguments,
 	removeGeneratedWinResources,
 	resolveBuildIdentity,
 	windowsSmokeSource
 } from './build.mjs'
+
+test('package publishing tolerates a shell holding the canonical directory', async t => {
+        const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-lock-'))
+        t.after(() => rm(root, { recursive: true, force: true }))
+        const canonical = join(root, 'bin')
+        const stage = join(root, 'stage')
+        await mkdir(join(canonical, 'licenses'), { recursive: true })
+        await mkdir(join(stage, 'licenses'), { recursive: true })
+        await writeFile(join(canonical, 'controller.exe'), 'old host')
+        await writeFile(join(canonical, 'stale.txt'), 'remove me')
+        await writeFile(join(stage, 'controller.exe'), 'new host')
+        await writeFile(join(stage, 'licenses', 'NOTICE.txt'), 'current notice')
+
+        let simulatedDirectoryLock = true
+        installPackage(stage, {
+                root,
+                canonical,
+                rename(source, target) {
+                        if (simulatedDirectoryLock && source === canonical) {
+                                simulatedDirectoryLock = false
+                                const error = new Error('directory is a process working directory')
+                                error.code = 'EBUSY'
+                                throw error
+                        }
+                        renameSync(source, target)
+                }
+        })
+
+        assert.equal(simulatedDirectoryLock, false)
+        assert.equal(await readFile(join(canonical, 'controller.exe'), 'utf8'), 'new host')
+        assert.equal(await readFile(join(canonical, 'licenses', 'NOTICE.txt'), 'utf8'), 'current notice')
+        assert.deepEqual(await readdir(root), ['bin'])
+        assert.deepEqual(await readdir(canonical), ['controller.exe', 'licenses'])
+})
 
 test('safe default builds both targets without touching hardware', () => {
 	const options = parseArguments([], {})
