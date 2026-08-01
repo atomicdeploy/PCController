@@ -1,0 +1,140 @@
+name: Host - Cross-platform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version embedded in the packages
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Version embedded in the packages
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-build-package:
+    name: ${{ matrix.target }} test, vet, and package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+            windows: false
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+            windows: false
+          - runner: windows-2025
+            target: windows-amd64
+            windows: true
+          - runner: macos-15-intel
+            target: darwin-amd64
+            windows: false
+          - runner: macos-15
+            target: darwin-arm64
+            windows: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      CGO_ENABLED: "1"
+      NO_COLOR: "1"
+      PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+      TZ: UTC
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install native Windows C compiler
+        if: matrix.windows
+        uses: egor-tensin/setup-mingw@v3
+        with:
+          platform: x64
+
+      - name: Install Go from go.mod
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: Tools/Controller/go.mod
+          cache-dependency-path: Tools/Controller/go.sum
+
+      - name: Pin selected Windows Go toolchain first on PATH
+        if: matrix.windows
+        shell: pwsh
+        run: |
+          $goRoot = go env GOROOT
+          $goBin = Join-Path $goRoot "bin"
+          $goBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $goBin "go.exe") version
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Freeze reproducible build time
+        shell: bash
+        run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+
+      - name: Install Win32 resource tool
+        if: matrix.windows
+        shell: pwsh
+        run: |
+          go version
+          $requiredGo = (Select-String -Path "Tools/Controller/go.mod" -Pattern '^go\s+(.+)$').Matches.Groups[1].Value
+          $actualGo = (go env GOVERSION) -replace '^go', ''
+          if ($actualGo -ne $requiredGo) {
+            throw "Expected Go $requiredGo from go.mod, found $actualGo"
+          }
+          go install github.com/tc-hib/go-winres@v0.3.3
+
+      - name: Build complete Unix host package
+        if: ${{ !matrix.windows }}
+        shell: bash
+        run: ./build.sh --host-only --clean --version "$PCCONTROLLER_VERSION"
+
+      - name: Build complete Windows host package
+        if: matrix.windows
+        shell: cmd
+        run: build.cmd --host-only --clean --no-upx --version %PCCONTROLLER_VERSION%
+
+      - name: Package host archive
+        id: package
+        run: >-
+          node .github/scripts/package-directory.mjs
+          Tools/Controller/bin
+          pccontroller-host
+          ${{ matrix.target }}
+
+      - name: Write host step summary
+        if: always() && steps.package.outcome == 'success'
+        run: >-
+          node .github/scripts/step-summary.mjs
+          host
+          Tools/Controller/bin/host-manifest.json
+          ${{ steps.package.outputs.archive }}
+          ${{ matrix.target }}
+
+      - name: Upload host package
+        uses: actions/upload-artifact@v7
+        with:
+          name: pccontroller-host-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            ${{ steps.package.outputs.archive }}
+            ${{ steps.package.outputs.checksum }}
+          if-no-files-found: error
+          retention-days: 14

@@ -28,7 +28,10 @@ order when the project is new to you:
    implementation was retained.
 9. [Upstream Source Audit](../Tools/Controller/docs/Upstream-Source-Audit.md) —
    reused ideas, external dependencies, licenses, and provenance.
-10. [Project Checklist](Project-Checklist.md) — the durable acceptance record.
+10. [CI/CD and Releases](CI-CD-and-Releases.md) — GitHub build matrices,
+   artifacts, checksums, dependency automation, and draft/published release
+   behavior.
+11. [Project Checklist](Project-Checklist.md) — the durable acceptance record.
    A green item requires source plus proportionate build, simulation, live-board,
    or user-observation evidence; yellow and warning items remain work or physical
    validation.

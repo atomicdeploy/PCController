@@ -15,9 +15,18 @@ const requiredFiles = [
   "LICENSES/BSD-2-Clause.txt",
   "docs/README.md",
   "docs/Getting-Started-and-Operations.md",
+  "docs/CI-CD-and-Releases.md",
   "docs/Project-Checklist.md",
   "Tools/Controller/README.md",
   "Tools/VirtualBoard/README.md",
+  ".github/dependabot.yml",
+  ".github/workflows/firmware.yml",
+  ".github/workflows/host.yml",
+  ".github/workflows/release.yml",
+  ".github/workflows/repository-health.yml",
+  ".github/workflows/virtual-board.yml",
+  ".github/scripts/package-directory.mjs",
+  ".github/scripts/step-summary.mjs",
 ];
 
 function report(message) {

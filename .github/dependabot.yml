@@ -3,11 +3,15 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: daily
       time: "05:00"
       timezone: Asia/Tehran
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies
+      - github-actions
     groups:
       actions-minor-and-patch:
         update-types: [minor, patch]
@@ -20,6 +24,11 @@ updates:
       time: "05:15"
       timezone: Asia/Tehran
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies
+      - go
     groups:
       go-minor-and-patch:
         update-types: [minor, patch]

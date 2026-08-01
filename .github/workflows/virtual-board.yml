@@ -1,0 +1,123 @@
+name: Virtual Board - Cross-platform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version associated with the simulator package
+        required: false
+        default: ""
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Version associated with the simulator package
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: virtual-board-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: ${{ matrix.target }} CMake, CTest, and package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+            windows: false
+          - runner: ubuntu-24.04-arm
+            target: linux-arm64
+            windows: false
+          - runner: windows-2025
+            target: windows-amd64
+            windows: true
+          - runner: macos-15-intel
+            target: darwin-amd64
+            windows: false
+          - runner: macos-15
+            target: darwin-arm64
+            windows: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Configure native build
+        run: >-
+          cmake
+          -S Tools/VirtualBoard
+          -B .build/virtual-board
+          -DBUILD_TESTING=ON
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build simulator and tests
+        run: cmake --build .build/virtual-board --config Release --parallel
+
+      - name: Run native tests
+        run: ctest --test-dir .build/virtual-board -C Release --output-on-failure
+
+      - name: Package Unix simulator
+        if: ${{ !matrix.windows }}
+        id: package-unix
+        run: >-
+          node .github/scripts/package-directory.mjs
+          .build/virtual-board/bin/virtual_board
+          pccontroller-virtual-board
+          ${{ matrix.target }}
+
+      - name: Package Windows simulator
+        if: matrix.windows
+        id: package-windows
+        run: >-
+          node .github/scripts/package-directory.mjs
+          .build/virtual-board/bin/Release/virtual_board.exe
+          pccontroller-virtual-board
+          ${{ matrix.target }}
+
+      - name: Write Unix simulator step summary
+        if: ${{ !matrix.windows && steps.package-unix.outcome == 'success' }}
+        run: >-
+          node .github/scripts/step-summary.mjs
+          simulator
+          ${{ matrix.target }}
+          .build/virtual-board/bin/virtual_board
+          ${{ steps.package-unix.outputs.archive }}
+
+      - name: Write Windows simulator step summary
+        if: ${{ matrix.windows && steps.package-windows.outcome == 'success' }}
+        run: >-
+          node .github/scripts/step-summary.mjs
+          simulator
+          ${{ matrix.target }}
+          .build/virtual-board/bin/Release/virtual_board.exe
+          ${{ steps.package-windows.outputs.archive }}
+
+      - name: Upload simulator package
+        uses: actions/upload-artifact@v7
+        with:
+          name: pccontroller-virtual-board-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            .build/release/*.tar.gz
+            .build/release/*.sha256
+          if-no-files-found: error
+          retention-days: 14

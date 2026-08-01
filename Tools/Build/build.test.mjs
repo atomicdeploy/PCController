@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { renameSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -12,13 +12,28 @@ import {
 	assertGeneratedPath,
 	createPlan,
         hostSourceIdentity,
-        installPackage,
+	installPackage,
 	packBuildTimestamp,
 	parseArguments,
+	refreshedEnvironment,
 	removeGeneratedWinResources,
 	resolveBuildIdentity,
+	unixSmokeSource,
 	windowsSmokeSource
 } from './build.mjs'
+
+test('refreshed Windows PATH preserves invoking shell precedence', () => {
+	const first = resolve('selected-toolchain')
+	const second = resolve('session-tools')
+	const windowsEnvironment = { ...process.env }
+	for (const key of Object.keys(windowsEnvironment)) {
+		if (key.toLowerCase() === 'path') delete windowsEnvironment[key]
+	}
+	windowsEnvironment.Path = [first, second].join(delimiter)
+	const refreshed = refreshedEnvironment(windowsEnvironment, 'win32')
+	assert.deepEqual(refreshed.PATH.split(delimiter).slice(0, 2), [first, second])
+	assert.deepEqual(Object.keys(refreshed).filter(key => key.toLowerCase() === 'path'), ['PATH'])
+})
 
 test('package publishing tolerates a shell holding the canonical directory', async t => {
         const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-lock-'))
@@ -259,6 +274,14 @@ test('Windows C ABI smoke uses a valid handle and destroys it', () => {
 	assert.ok(source.includes('{\\"operation\\":\\"build-smoke-invalid\\",\\"handle\\":%llu}'))
 	assert.ok(source.includes('{\\"operation\\":\\"destroy\\",\\"handle\\":%llu}'))
 	assert.doesNotMatch(source, /FreeLibrary\(module\)/)
+})
+
+test('Unix C ABI smoke loads the generated library and destroys its handle', () => {
+	const source = unixSmokeSource('pccontroller.so')
+	assert.ok(source.includes('dlopen("./pccontroller.so"'))
+	assert.ok(source.includes('PCControllerInvoke'))
+	assert.ok(source.includes('{\\"operation\\":\\"destroy\\",\\"handle\\":%llu}'))
+	assert.doesNotMatch(source, /dlclose\(module\)/)
 })
 
 test('CMD and Bash wrappers emit the same shared plan on Windows', {
