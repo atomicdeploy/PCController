@@ -100,7 +100,7 @@ jobs:
           retention-days: 30
 
       - name: Create or update one actionable blocked-update issue
-        if: steps.candidate.outcome != 'success'
+        if: always() && steps.candidate.outcome != 'success'
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           REPORT_PATH: .build/dependencies/update-report.json
@@ -180,18 +180,21 @@ jobs:
           env.CHECK_ONLY != 'true' &&
           (steps.dependency-pr.outputs.pull-request-operation == 'created' ||
           steps.dependency-pr.outputs.pull-request-operation == 'updated')
-        shell: bash
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           DEPENDENCY_BRANCH: ${{ steps.dependency-pr.outputs.pull-request-branch }}
-        run: |
-          set -euo pipefail
-          test -n "$DEPENDENCY_BRANCH"
-          gh workflow run build.yml --ref "$DEPENDENCY_BRANCH"
-          gh workflow run repository-health.yml --ref "$DEPENDENCY_BRANCH"
-          gh workflow run codeql.yml --ref "$DEPENDENCY_BRANCH"
-          echo "Dispatched Build, Repository Health, and CodeQL for $DEPENDENCY_BRANCH."
+        with:
+          script: |
+            const branch = process.env.DEPENDENCY_BRANCH;
+            if (!branch) throw new Error('create-pull-request returned no dependency branch');
+            for (const workflow_id of ['build.yml', 'repository-health.yml', 'codeql.yml']) {
+              await github.rest.actions.createWorkflowDispatch({
+                ...context.repo, workflow_id, ref: branch
+              });
+              core.info(`Dispatched ${workflow_id} for ${branch}.`);
+            }
 
       - name: Fail the workflow after publishing diagnostics
-        if: steps.candidate.outcome != 'success'
+        if: always() && steps.candidate.outcome != 'success'
         shell: cmd
         run: exit /b 1
