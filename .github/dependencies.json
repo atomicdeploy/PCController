@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "arduinoCli": {
     "version": "1.5.1",
     "repository": "arduino/arduino-cli",
@@ -11,9 +11,24 @@
   "miniCore": {
     "version": "3.1.2",
     "package": "MiniCore:avr",
-    "packageIndex": "https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json"
+    "packageIndex": "https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json",
+    "repository": "MCUdude/MiniCore",
+    "archive": {
+      "url": "https://MCUdude.github.io/MiniCore/MiniCore-3.1.2.tar.bz2",
+      "sha256": "2aa8523aa24eb20f8277d90480286399c67a59b05164ac3bad81716a0c6490b3"
+    }
   },
   "libraries": {
-    "rc-switch": "2.6.4"
+    "rc-switch": {
+      "version": "2.6.4",
+      "repository": "sui77/rc-switch",
+      "includes": [
+        "RCSwitch.h"
+      ],
+      "archive": {
+        "url": "https://downloads.arduino.cc/libraries/github.com/sui77/rc_switch-2.6.4.zip",
+        "sha256": "ed53920db3a38debe53e43b3bf8849ec3583aa419ef1f421a45662bcf056e014"
+      }
+    }
   }
 }

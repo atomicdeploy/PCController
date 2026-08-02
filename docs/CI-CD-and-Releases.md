@@ -164,13 +164,24 @@ from `SHA256SUMS.txt` or verify its GitHub attestation.
 
 ## Dependency automation
 
-The daily dependency radar reports the pinned Arduino CLI, MiniCore, and
-rc-switch versions in a readable summary and machine-readable artifact. When a
-new official version and checksum are verified, the scheduled run updates only
-the canonical pin file on a uniquely named automation branch and opens a
-reviewable pull request; it never merges or releases the change. An existing
-open proposal suppresses duplicates. Manual `check` and `apply` modes provide
-the same audit and proposal paths on demand.
+The daily dependency radar reports the pinned Arduino CLI, MiniCore, and every
+declared Arduino library in a readable summary and machine-readable artifact.
+The canonical manifest preserves exact archive URLs and SHA-256 digests for the
+core and libraries as well as the checksum-pinned Arduino CLI. Official index
+metadata must still agree with those pins, each library repository and exported
+header are verified, and source inventory rejects an undeclared third-party
+firmware include or a stale library declaration.
+
+When a newer stable version is available, the scheduled run updates the
+canonical pins and synchronized current-version documentation, installs the
+proposed core and complete library set, and performs a real ATmega328P compile
+plus strict Intel HEX validation before any branch is pushed. Only a successful
+preflight can open a reviewable pull request on a uniquely named automation
+branch; the workflow never merges or releases the change. The proposal includes
+bounded links to exact upstream release notes and archive provenance rather
+than copying third-party Markdown into a trusted PR body. An existing proposal
+suppresses duplicates. Manual `check` and `apply` modes provide the same audit
+and proposal paths on demand.
 
 Dependabot independently checks GitHub Actions daily, the Go Host module
 weekly, and both project-owned Node package roots weekly. Minor and patch
@@ -179,11 +190,12 @@ groups, and major updates remain isolated for review. The two Node tools do
 not currently declare third-party packages, but their roots are already
 covered so a future dependency cannot arrive outside update policy.
 
-Arduino CLI, MiniCore, and `rc-switch` do not have a native Dependabot package
-ecosystem. They remain covered by the checksum-verified AVR dependency radar
-rather than being presented as native Dependabot coverage. Build exposes any
-resulting flash or SRAM movement before an Arduino dependency proposal can be
-merged.
+Arduino CLI, MiniCore, and Arduino libraries do not have a native Dependabot
+package ecosystem. They remain covered by the checksum-verified AVR dependency
+radar rather than being presented as native Dependabot coverage. The updater's
+own preflight rejects an unbuildable proposal, and the protected pull-request
+build independently exposes any resulting flash or SRAM movement before it can
+be merged.
 
 Repository Health inventories every `go.mod` and `package.json`, validates the
 corresponding Dependabot roots, verifies the CodeQL language/platform matrix,
