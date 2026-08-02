@@ -60,9 +60,10 @@ type ToolchainProfile struct {
 }
 
 func DefaultToolchainProfile() ToolchainProfile {
+	policy := DefaultToolchainPolicy()
 	return ToolchainProfile{
-		Name:           "controllerboardmini-atmega328p",
-		FQBN:           DefaultFQBN(),
+		Name:           policy.Name,
+		FQBN:           policy.FQBN,
 		PackageIndexes: []string{MiniCorePackageIndexURL},
 		CLI: ToolchainCLI{
 			Dependency: "arduino-cli", Version: "1.5.1",
