@@ -229,6 +229,20 @@ scoped to that job alone; its commands only download and verify assets. The
 hardware job retains the workflow's read-only token and cannot run until every
 independent hardware gate below is satisfied.
 
+Bundle preparation also runs through the `avr-release-read` environment,
+whose deployment policy accepts only the `main` branch. It has no secrets and
+requires no manual approval; the environment exists to enforce the branch
+boundary independently of the workflow file.
+
+The release manifest's source SHA is firmware provenance, not executable
+runner input. The self-hosted job always builds its guarded programmer from
+the protected `main` branch with checkout credentials disabled; it never
+checks out a release-selected or operator-supplied commit. Deployment evidence
+records both the firmware source SHA and the independently trusted deployment
+controller SHA. Preparation also requires the release target to equal the
+manifest SHA and proves that commit is an ancestor of the protected `main`
+checkout before a programming bundle can reach the hardware job.
+
 The device job remains inert until repository setup explicitly sets
 `ENABLE_AVR_DEPLOY=true`, configures the protected `avr-hardware` environment,
 and registers a trusted runner with the `pccontroller-avr` label. The workflow

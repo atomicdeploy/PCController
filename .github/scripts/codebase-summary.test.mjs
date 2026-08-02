@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -48,7 +48,9 @@ const writePackage = (
   const content = Buffer.from(`native package for ${target}\n`, "utf8");
   const sha256 = createHash("sha256").update(content).digest("hex");
   writeFileSync(archivePath, content);
-  if (sidecar !== "missing") {
+  if (sidecar === "directory") {
+    mkdirSync(`${archivePath}.sha256`);
+  } else if (sidecar !== "missing") {
     const recorded = sidecar === "mismatch" ? "0".repeat(64) : sha256;
     const recordedName = sidecar === "wrong-name" ? `wrong-${archiveName}` : archiveName;
     const checksum = sidecar === "malformed"
@@ -302,6 +304,8 @@ test("package CLI writes checksum failures before exiting nonzero", () => {
         ? "mismatch"
         : target.id === "macOS-Intel"
           ? "missing"
+          : target.id === "macOS-Apple-Silicon"
+            ? "directory"
           : "valid";
       packages.set(
         target.id,
@@ -323,6 +327,7 @@ test("package CLI writes checksum failures before exiting nonzero", () => {
     assert.match(summary, /Linux-ARM64: Archive missing/u);
     assert.match(summary, /Windows-x64: SHA-256 mismatch/u);
     assert.match(summary, /macOS-Intel: SHA-256 sidecar missing/u);
+    assert.match(summary, /macOS-Apple-Silicon: SHA-256 sidecar is not a file/u);
     assert.match(summary, new RegExp(packages.get("Windows-x64").sha256, "u"));
     assert.match(
       summary,

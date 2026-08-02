@@ -68,11 +68,15 @@ func EncodeHostMenuDirectory(directory HostMenuDirectory) ([]byte, error) {
 	if directory.Schema == 0 {
 		directory.Schema = HostMenuSchema
 	}
+	entryCount := len(directory.Entries)
+	if entryCount > HostMenuMaximumEntries {
+		return nil, fmt.Errorf("host-menu directory has %d entries, maximum is %d", entryCount, HostMenuMaximumEntries)
+	}
 	if err := ValidateHostMenuDirectory(directory); err != nil {
 		return nil, err
 	}
-	payload := make([]byte, 3+len(directory.Entries)*3)
-	payload[0], payload[1], payload[2] = directory.Schema, directory.Generation, byte(len(directory.Entries))
+	payload := make([]byte, 3+entryCount*3)
+	payload[0], payload[1], payload[2] = directory.Schema, directory.Generation, byte(entryCount)
 	for index, entry := range directory.Entries {
 		offset := 3 + index*3
 		payload[offset], payload[offset+1] = entry.ID, entry.Parent
@@ -86,6 +90,9 @@ func ParseHostMenuDirectory(payload []byte) (HostMenuDirectory, error) {
 		return HostMenuDirectory{}, fmt.Errorf("HOST_MENU_DIRECTORY payload is %d bytes, need at least 3", len(payload))
 	}
 	count := int(payload[2])
+	if count > HostMenuMaximumEntries {
+		return HostMenuDirectory{}, fmt.Errorf("host-menu directory has %d entries, maximum is %d", count, HostMenuMaximumEntries)
+	}
 	if len(payload) != 3+count*3 {
 		return HostMenuDirectory{}, fmt.Errorf("HOST_MENU_DIRECTORY count %d requires exactly %d bytes, payload has %d", count, 3+count*3, len(payload))
 	}

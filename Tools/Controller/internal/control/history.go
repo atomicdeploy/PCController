@@ -20,6 +20,8 @@ type HistoryOptions struct {
 	TimelinePath   string
 }
 
+const maximumTimelineEntries = 100_000
+
 type StatusSample struct {
 	Time   time.Time     `json:"time"`
 	Status native.Status `json:"status"`
@@ -62,7 +64,7 @@ func (runtime *Runtime) ConfigureHistory(options HistoryOptions) error {
 	if options.TimelineLimit == 0 {
 		options.TimelineLimit = 2000
 	}
-	if options.TimelineLimit < 50 || options.TimelineLimit > 100_000 {
+	if options.TimelineLimit < 50 || options.TimelineLimit > maximumTimelineEntries {
 		return errors.New("timeline limit must be 50..100000")
 	}
 	path := strings.TrimSpace(options.TimelinePath)
@@ -112,6 +114,11 @@ func (runtime *Runtime) Timeline(since time.Time, limit int) []TimelineEntry {
 	defer runtime.historyMu.RUnlock()
 	if limit <= 0 || limit > runtime.timelineLimit {
 		limit = runtime.timelineLimit
+	}
+	if limit < 0 {
+		limit = 0
+	} else if limit > maximumTimelineEntries {
+		limit = maximumTimelineEntries
 	}
 	result := make([]TimelineEntry, 0, limit)
 	for _, entry := range runtime.timeline {

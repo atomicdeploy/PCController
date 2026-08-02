@@ -1,6 +1,7 @@
 package control
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,5 +50,8 @@ func TestHistorySamplesAtConfiguredRateAndPersistsImportantTimeline(t *testing.T
 	entries := reloaded.Timeline(time.Time{}, 100)
 	if len(entries) != 1 || entries[0].Kind != "door" {
 		t.Fatalf("reloaded timeline=%#v", entries)
+	}
+	if oversized := reloaded.Timeline(time.Time{}, math.MaxInt); len(oversized) > 100 {
+		t.Fatalf("oversize timeline request returned %d entries, configured maximum is 100", len(oversized))
 	}
 }

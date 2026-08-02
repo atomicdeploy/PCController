@@ -3,10 +3,12 @@
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
-  existsSync,
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
   readFileSync,
   readdirSync,
-  statSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,9 +79,6 @@ const formatBytes = (value) => {
   return `${(size / 1024 ** 2).toFixed(2)} MiB`;
 };
 
-const hashFile = (path) =>
-  createHash("sha256").update(readFileSync(path)).digest("hex");
-
 const collectFiles = (directory) => {
   const files = [];
   const visit = (path) => {
@@ -105,8 +104,9 @@ const inspectArchive = (archivePath) => {
   let archiveBytes;
   let sha256;
   try {
-    archiveBytes = statSync(archivePath).size;
-    sha256 = hashFile(archivePath);
+    const archive = readFileSync(archivePath);
+    archiveBytes = archive.byteLength;
+    sha256 = createHash("sha256").update(archive).digest("hex");
   } catch (error) {
     return packageFailure("Archive unreadable", "failure", {
       archiveName,
@@ -115,25 +115,21 @@ const inspectArchive = (archivePath) => {
   }
 
   const checksumPath = `${archivePath}.sha256`;
-  if (!existsSync(checksumPath)) {
-    return packageFailure("SHA-256 sidecar missing", "warning", {
-      archiveName,
-      archiveBytes,
-      sha256,
-    });
-  }
-
   let checksumText;
+  let checksumDescriptor;
   try {
-    if (!statSync(checksumPath).isFile()) {
-      return packageFailure("SHA-256 sidecar is not a file", "failure", {
+    checksumDescriptor = openSync(
+      checksumPath,
+      constants.O_RDONLY | (constants.O_NONBLOCK ?? 0),
+    );
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") {
+      return packageFailure("SHA-256 sidecar missing", "warning", {
         archiveName,
         archiveBytes,
         sha256,
       });
     }
-    checksumText = readFileSync(checksumPath, "utf8").replace(/^\uFEFF/u, "");
-  } catch (error) {
     return packageFailure("SHA-256 sidecar unreadable", "failure", {
       archiveName,
       archiveBytes,
@@ -142,6 +138,25 @@ const inspectArchive = (archivePath) => {
     });
   }
 
+  try {
+    if (!fstatSync(checksumDescriptor).isFile()) {
+      return packageFailure("SHA-256 sidecar is not a file", "failure", {
+        archiveName,
+        archiveBytes,
+        sha256,
+      });
+    }
+    checksumText = readFileSync(checksumDescriptor, "utf8").replace(/^\uFEFF/u, "");
+  } catch (error) {
+    return packageFailure("SHA-256 sidecar unreadable", "failure", {
+      archiveName,
+      archiveBytes,
+      sha256,
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    closeSync(checksumDescriptor);
+  }
   const lines = checksumText.split(/\r?\n/u).filter((line) => line.trim());
   const checksum = lines.length === 1
     ? /^([a-f0-9]{64})[ \t]+\*?(.+?)\s*$/iu.exec(lines[0])
@@ -187,9 +202,7 @@ export function inspectPackageDirectory(codebase, packagesDirectory) {
   const directory = resolve(packagesDirectory);
   let files;
   try {
-    files = existsSync(directory) && statSync(directory).isDirectory()
-      ? collectFiles(directory)
-      : null;
+    files = collectFiles(directory);
   } catch {
     files = null;
   }

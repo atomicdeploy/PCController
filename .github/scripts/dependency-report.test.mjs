@@ -207,7 +207,11 @@ test("documentation synchronization writes only existing curated files", () => {
   const repository = fs.mkdtempSync(path.join(os.tmpdir(), "pccontroller-doc-sync-"));
   const docs = path.join(repository, "docs");
   fs.mkdirSync(docs, { recursive: true });
-  fs.writeFileSync(path.join(repository, "README.md"), "MiniCore 3.1.2\n", "utf8");
+  fs.writeFileSync(
+    path.join(repository, "README.md"),
+    "MiniCore 3.1.2\nTRAILING-SENTINEL\n",
+    "utf8",
+  );
   fs.writeFileSync(
     path.join(docs, "Project-Checklist.md"),
     "Current rc-switch 2.6.4; unrelated 2.6.4.\n",
@@ -225,17 +229,20 @@ test("documentation synchronization writes only existing curated files", () => {
   };
   const next = {
     arduinoCli: { version: "1.6.0" },
-    miniCore: { version: "3.2.0" },
-    libraries: { "rc-switch": "2.7.0" },
+    miniCore: { version: "3.20.0" },
+    libraries: { "rc-switch": "3.0" },
   };
 
   try {
     const changed = synchronizeDependencyDocumentation(current, next, repository);
     assert.deepEqual(changed, ["README.md", "docs/Project-Checklist.md"]);
-    assert.equal(fs.readFileSync(path.join(repository, "README.md"), "utf8"), "MiniCore 3.2.0\n");
+    assert.equal(
+      fs.readFileSync(path.join(repository, "README.md"), "utf8"),
+      "MiniCore 3.20.0\nTRAILING-SENTINEL\n",
+    );
     assert.equal(
       fs.readFileSync(path.join(docs, "Project-Checklist.md"), "utf8"),
-      "Current rc-switch 2.7.0; unrelated 2.6.4.\n",
+      "Current rc-switch 3.0; unrelated 2.6.4.\n",
     );
     assert.equal(
       fs.readFileSync(path.join(docs, "Historical-Record.md"), "utf8"),
