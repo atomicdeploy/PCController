@@ -85,6 +85,7 @@ func TestResolveToolchainPolicySelectsLatestStableAndReportsCanaries(t *testing.
 	}
 	policy := ToolchainPolicy{
 		Format: ToolchainPolicyFormat, Name: "test", FQBN: "MiniCore:avr:test",
+		Target:       DefaultBoardTarget(),
 		LibraryIndex: server.URL + "/libraries",
 		CLI: ToolchainCLIPolicy{
 			Dependency: "firmware-cli", Repository: "example/cli", ReleaseAPI: server.URL + "/cli",

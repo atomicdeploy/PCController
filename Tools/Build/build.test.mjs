@@ -35,6 +35,17 @@ import {
 } from './build.mjs'
 import { createStableTestPlan, goTestSourceIdentity, stableTestBinaryName } from './go-tests.mjs'
 import { PRODUCT_METADATA } from './product-metadata.mjs'
+import {
+	BOARD,
+	PROGRAMMING_OPERATIONS,
+	canonicalControllerInvocation,
+	commandPlanPaths,
+	createControllerProgramCommand,
+	parseToolchainPolicy,
+	programmingArtifact,
+	relativeCommandPlanPaths,
+	sourceControllerInvocation
+} from '../CommandPlan/controller-command.mjs'
 
 test('verbose command formatting obeys NO_COLOR byte-for-byte', () => {
 	const plain = verboseCommandText('go', ['test', './...'], { NO_COLOR: '' }, true)
@@ -387,6 +398,87 @@ test('generated runtime toolchain policy is current with the canonical profile',
 		'--check'
 	], { cwd: PROJECT_ROOT, windowsHide: true, encoding: 'utf8' })
 	assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
+})
+
+test('one canonical policy owns FQBN, board geometry, and artifact routes', async () => {
+	const policyPath = join(PROJECT_ROOT, 'Tools', 'Controller', 'toolchain-profile.json')
+	const policy = parseToolchainPolicy(await readFile(policyPath, 'utf8'), policyPath)
+	assert.equal(BOARD.profile, policy.name)
+	assert.equal(BOARD.fqbn, policy.fqbn)
+	assert.equal(BOARD.mcu, policy.target.mcu)
+	assert.equal(BOARD.applicationLimitBytes, policy.target.applicationLimitBytes)
+	assert.equal(BOARD.flashBytes, policy.target.flashBytes)
+	assert.equal(BOARD.eepromBytes, policy.target.eepromBytes)
+
+	const absolute = commandPlanPaths(PROJECT_ROOT, 'win32')
+	const portable = relativeCommandPlanPaths(PROJECT_ROOT, 'win32')
+	assert.equal(portable.controller, 'Tools/Controller/bin/controller.exe')
+	assert.equal(portable.application, '.build/firmware/PCController.ino.hex')
+	assert.equal(portable.completeFlash, '.build/firmware/PCController.ino.with_bootloader.hex')
+	assert.equal(programmingArtifact(absolute, 'urclock'), absolute.application)
+	assert.equal(programmingArtifact(absolute, 'usbasp'), absolute.completeFlash)
+})
+
+test('build plan and execution share exact Controller programming argv construction', () => {
+	const source = sourceControllerInvocation(PROJECT_ROOT)
+	const compile = createControllerProgramCommand({
+		invocation: source,
+		method: 'compile',
+		sketch: PROJECT_ROOT,
+		outputDir: commandPlanPaths(PROJECT_ROOT).firmwareOutput
+	})
+	assert.deepEqual(compile.args.slice(0, 7), [
+		'run', '-buildvcs=false', './cmd/controller', 'program', '--method', 'compile', '--sketch'
+	])
+	assert.equal(compile.args.at(-2), '--output-dir')
+
+	const packaged = canonicalControllerInvocation(PROJECT_ROOT, 'win32')
+	const usbasp = createControllerProgramCommand({
+		invocation: packaged,
+		method: 'usbasp',
+		operation: PROGRAMMING_OPERATIONS.upload,
+		appDevice: 'DO_NOT_OPEN',
+		programmer: 'atmelice_isp',
+		hex: commandPlanPaths(PROJECT_ROOT).completeFlash,
+		allowIncompleteBackup: true
+	})
+	assert.deepEqual(usbasp.args.slice(0, 8), [
+		'program', '--method', 'usbasp', '--app-device', 'DO_NOT_OPEN',
+		'--programmer', 'atmelice_isp', '--operation'
+	])
+	assert.equal(usbasp.args.at(-1), '--allow-incomplete-backup')
+	assert.throws(
+		() => createControllerProgramCommand({
+			invocation: packaged,
+			method: 'urclock',
+			operation: PROGRAMMING_OPERATIONS.upload,
+			hex: 'firmware.hex'
+		}),
+		/serial device is required/
+	)
+})
+
+test('firmware plan publishes the same target, artifacts, and explicit USBasp route', () => {
+	const result = spawnSync(process.execPath, [
+		join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs'),
+		'upload', '--method', 'usbasp', '--plan-json'
+	], {
+		cwd: PROJECT_ROOT,
+		env: { ...process.env, PCCONTROLLER_BUILD_TIMESTAMP: '0x35019D5D', NO_COLOR: '1' },
+		encoding: 'utf8',
+		windowsHide: true
+	})
+	assert.equal(result.status, 0, result.stderr || result.stdout)
+	const plan = JSON.parse(result.stdout)
+	assert.equal(plan.format, 'pccontroller-firmware-plan/v1')
+	assert.deepEqual(plan.target, BOARD)
+	assert.equal(plan.artifacts.application, '.build/firmware/PCController.ino.hex')
+	assert.equal(plan.artifacts.completeFlash, '.build/firmware/PCController.ino.with_bootloader.hex')
+	const program = plan.actions.find(action => action.id === 'program')
+	assert.equal(program.hardware, true)
+	assert.match(program.command.args.join(' '), /--method usbasp --operation write-flash/)
+	assert.ok(program.command.args.includes(resolve(PROJECT_ROOT, plan.artifacts.completeFlash)))
+	assert.doesNotMatch(JSON.stringify(plan), /powershell|pwsh|arduino-cli.*upload/i)
 })
 
 test('embedded web package has a lock matching every declared dependency', async () => {
@@ -814,4 +906,14 @@ test('CMD and Bash wrappers emit the same shared plan on Windows', {
 	], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true })
 	assert.equal(bash.status, 0, bash.stderr || bash.stdout)
 	assert.deepEqual(JSON.parse(cmd.stdout), JSON.parse(bash.stdout))
+
+	const firmwareCMD = spawnSync('cmd.exe', [
+		'/d', '/s', '/c', 'firmware.cmd upload --method usbasp --plan-json'
+	], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true })
+	assert.equal(firmwareCMD.status, 0, firmwareCMD.stderr || firmwareCMD.stdout)
+	const firmwareBash = spawnSync('bash.exe', [
+		'firmware.sh', 'upload', '--method', 'usbasp', '--plan-json'
+	], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true })
+	assert.equal(firmwareBash.status, 0, firmwareBash.stderr || firmwareBash.stdout)
+	assert.deepEqual(JSON.parse(firmwareCMD.stdout), JSON.parse(firmwareBash.stdout))
 })

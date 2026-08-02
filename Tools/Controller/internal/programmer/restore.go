@@ -241,7 +241,7 @@ func PlanSafeRestore(manifestPath string, options RestorePlanOptions) (RestorePl
 		options.Method = MethodUrclock
 	}
 	if options.MCU == "" {
-		options.MCU = "atmega328p"
+		options.MCU = generatedBoardMCU
 	}
 	if !strings.EqualFold(options.MCU, backup.Manifest.MCU) {
 		return RestorePlan{}, fmt.Errorf(
