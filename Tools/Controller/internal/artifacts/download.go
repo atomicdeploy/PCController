@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/net/http/httpproxy"
+	"pccontroller.local/controller/internal/netpolicy"
 )
 
 const defaultDownloadTimeout = 10 * time.Minute
@@ -62,15 +63,9 @@ func (downloader *Downloader) Fetch(
 	if store == nil {
 		return Descriptor{}, errors.New("artifact store is unavailable")
 	}
-	parsed, err := url.Parse(strings.TrimSpace(request.URL))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return Descriptor{}, errors.New("artifact URL must be an absolute HTTP(S) URL")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return Descriptor{}, errors.New("artifact URL must use HTTP or HTTPS")
-	}
-	if parsed.User != nil || parsed.Fragment != "" {
-		return Descriptor{}, errors.New("artifact URL cannot contain user information or a fragment")
+	parsed, err := netpolicy.ParseHTTPURL(request.URL, "artifact URL")
+	if err != nil {
+		return Descriptor{}, err
 	}
 	kind, err := ParseKind(string(request.Kind))
 	if err != nil {
