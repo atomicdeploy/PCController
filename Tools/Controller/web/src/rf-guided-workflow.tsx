@@ -61,8 +61,9 @@ export function rfEntryNeedsReview(entry: RFLearnedEntry, entries: readonly RFLe
   return first?.id !== entry.id
 }
 
-export function defaultRFMapDraft(index: number): RFMapDraft {
-  return { action: 'key', target: String(Math.max(1, Math.min(4, index + 1))), behavior: 'press' }
+export function defaultRFMapDraft(entry?: Pick<RFLearnedEntry, 'action_kind' | 'action_value' | 'behavior'>): RFMapDraft {
+  // A fresh capture stays Unmapped. Only an authoritative board mapping is carried forward.
+  return entry?.action_kind ? mappingDraftForEntry(entry) : { action: 'none', target: '', behavior: '' }
 }
 
 export function rfMapRPCParams(id: number, draft: RFMapDraft): Record<string, string | number> {
@@ -71,7 +72,7 @@ export function rfMapRPCParams(id: number, draft: RFMapDraft): Record<string, st
   return { id, action: draft.action, target: draft.target, behavior: draft.behavior }
 }
 
-function mappingDraftForEntry(entry: RFLearnedEntry): RFMapDraft {
+function mappingDraftForEntry(entry: Pick<RFLearnedEntry, 'action_kind' | 'action_value' | 'behavior'>): RFMapDraft {
   const behaviors = ['press', 'toggle', 'momentary', 'up', 'down', 'stop']
   const behavior = behaviors[entry.behavior] ?? 'press'
   switch (entry.action_kind) {
@@ -82,6 +83,12 @@ function mappingDraftForEntry(entry: RFLearnedEntry): RFMapDraft {
     case 5: return { action: 'pwm', target: String(entry.action_value), behavior }
     default: return { action: 'none', target: '', behavior: '' }
   }
+}
+
+export function rfMapDraftIsComplete(draft: RFMapDraft): boolean {
+  if (draft.action === 'none') return true
+  if (!draft.target) return false
+  return draft.action === 'menu' || Boolean(draft.behavior)
 }
 
 function mappingSummary(entry: RFLearnedEntry, copy: (english: string, persian: string) => string): string {
@@ -134,7 +141,7 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
   const [candidate, setCandidate] = useState<RFLearnedEntry | null>(null)
   const [candidateIsGuided, setCandidateIsGuided] = useState(false)
   const [records, setRecords] = useState<RFLearnedEntry[]>([])
-  const [draft, setDraft] = useState<RFMapDraft>(() => defaultRFMapDraft(0))
+  const [draft, setDraft] = useState<RFMapDraft>(() => defaultRFMapDraft())
   const [busy, setBusy] = useState('')
   const [message, setMessage] = useState(() => copy('Choose button A to begin.', 'برای شروع دکمه A را انتخاب کنید.'))
   const captureAfterID = useRef(0)
@@ -230,10 +237,12 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
     setActiveIndex(index)
     setCandidate(null)
     setCandidateIsGuided(false)
-    setDraft(defaultRFMapDraft(index))
+    setDraft(defaultRFMapDraft())
     setPhase(captures[index] ? 'complete' : 'idle')
     setMessage(captures[index]
-      ? copy(`Button ${RF_GUIDE_LABELS[index]} is mapped. You can review or remap it.`, `دکمه ${RF_GUIDE_LABELS[index]} نگاشت شده و قابل بازبینی یا نگاشت دوباره است.`)
+      ? captures[index]?.action_kind === 0
+        ? copy(`Button ${RF_GUIDE_LABELS[index]} is captured and remains Unmapped.`, `دکمه ${RF_GUIDE_LABELS[index]} دریافت شده و بدون نگاشت باقی مانده است.`)
+        : copy(`Button ${RF_GUIDE_LABELS[index]} has an explicit mapping. You can review or remap it.`, `دکمه ${RF_GUIDE_LABELS[index]} نگاشت صریح دارد و قابل بازبینی یا نگاشت دوباره است.`)
       : copy(`Button ${RF_GUIDE_LABELS[index]} is ready to capture.`, `دکمه ${RF_GUIDE_LABELS[index]} آماده دریافت است.`))
   }
 
@@ -283,9 +292,11 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
 
   const confirmIdentity = () => {
     if (!candidate) return
-    setDraft(defaultRFMapDraft(activeIndex))
+    setDraft(defaultRFMapDraft(candidate))
     setPhase('mapping')
-    setMessage(copy(`Identity confirmed for button ${RF_GUIDE_LABELS[activeIndex]}. Choose its action, then save.`, `هویت دکمه ${RF_GUIDE_LABELS[activeIndex]} تأیید شد؛ عمل آن را انتخاب و ذخیره کنید.`))
+    setMessage(candidate.action_kind === 0
+      ? copy(`Identity confirmed for button ${RF_GUIDE_LABELS[activeIndex]}. It remains Unmapped unless you explicitly choose an action.`, `هویت دکمه ${RF_GUIDE_LABELS[activeIndex]} تأیید شد؛ تا زمانی که صریحاً عملی انتخاب نکنید، بدون نگاشت می‌ماند.`)
+      : copy(`Identity confirmed for button ${RF_GUIDE_LABELS[activeIndex]}. Its existing board mapping is preserved for review.`, `هویت دکمه ${RF_GUIDE_LABELS[activeIndex]} تأیید شد؛ نگاشت موجود برد برای بازبینی حفظ شده است.`))
   }
 
   const saveMapping = async () => {
@@ -304,9 +315,11 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
         const wrapped = next >= 0 ? next : nextCaptures.findIndex((entry) => !entry)
         if (wrapped >= 0) {
           setActiveIndex(wrapped)
-          setDraft(defaultRFMapDraft(wrapped))
+          setDraft(defaultRFMapDraft())
           setPhase('idle')
-          setMessage(copy(`Button ${RF_GUIDE_LABELS[activeIndex]} is mapped. Continue with button ${RF_GUIDE_LABELS[wrapped]}.`, `دکمه ${RF_GUIDE_LABELS[activeIndex]} نگاشت شد؛ با دکمه ${RF_GUIDE_LABELS[wrapped]} ادامه دهید.`))
+          setMessage(updated.action_kind === 0
+            ? copy(`Button ${RF_GUIDE_LABELS[activeIndex]} was captured and kept Unmapped. Continue with button ${RF_GUIDE_LABELS[wrapped]}.`, `دکمه ${RF_GUIDE_LABELS[activeIndex]} دریافت شد و بدون نگاشت ماند؛ با دکمه ${RF_GUIDE_LABELS[wrapped]} ادامه دهید.`)
+            : copy(`Button ${RF_GUIDE_LABELS[activeIndex]} mapping was saved. Continue with button ${RF_GUIDE_LABELS[wrapped]}.`, `نگاشت دکمه ${RF_GUIDE_LABELS[activeIndex]} ذخیره شد؛ با دکمه ${RF_GUIDE_LABELS[wrapped]} ادامه دهید.`))
         } else {
           setPhase('complete')
           setMessage(copy('A/B/C/D capture is complete. Review the inventory and test only the intended signal.', 'دریافت A/B/C/D کامل شد؛ فهرست را بازبینی و فقط سیگنال موردنظر را آزمایش کنید.'))
@@ -390,14 +403,14 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
     const next: RFMapDraft = action === 'none'
       ? { action, target: '', behavior: '' }
       : action === 'menu'
-        ? { action, target: 'next', behavior: '' }
+        ? { action, target: '', behavior: '' }
         : action === 'side'
-          ? { action, target: 'left', behavior: 'stop' }
+          ? { action, target: '', behavior: 'stop' }
           : action === 'relay'
-            ? { action, target: '5', behavior: 'press' }
+            ? { action, target: '', behavior: 'press' }
             : action === 'pwm'
-              ? { action, target: '0', behavior: 'press' }
-              : { action, target: String(activeIndex + 1), behavior: 'press' }
+              ? { action, target: '', behavior: 'press' }
+              : { action, target: '', behavior: 'press' }
     setDraft(next)
   }
 
@@ -511,10 +524,10 @@ export function RFGuidedWorkflow({ snapshot, events, locale, openDialog }: RFGui
               { value: 'pwm', label: 'PWM' }, { value: 'none', label: copy('None', 'بدون عمل') },
             ]} onChange={setAction} /></div>
             {draft.action !== 'none' && <div className="rf-guide__mapping-fields">
-              <label><span>{copy('Target', 'مقصد')}</span><select value={draft.target} onChange={(event) => setDraft((current) => ({ ...current, target: event.target.value }))}>{targets.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+              <label><span>{copy('Target', 'مقصد')}</span><select value={draft.target} onChange={(event) => setDraft((current) => ({ ...current, target: event.target.value }))}><option value="" disabled>{copy('Choose target…', 'مقصد را انتخاب کنید…')}</option>{targets.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
               {behaviors.length > 0 && <label><span>{copy('Behavior', 'رفتار')}</span><select value={draft.behavior} onChange={(event) => setDraft((current) => ({ ...current, behavior: event.target.value }))}>{behaviors.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>}
             </div>}
-            <div className="rf-guide__actions"><Button tone="primary" icon={Check} busy={busy === 'mapping'} onClick={() => void saveMapping()}>{copy('Save mapping', 'ذخیره نگاشت')}</Button><Button tone="ghost" icon={X} disabled={phase === 'saving'} onClick={() => { setCandidate(null); setCandidateIsGuided(false); setPhase('idle'); setMessage(copy('Mapping review closed without changing the board.', 'بازبینی نگاشت بدون تغییر برد بسته شد.')) }}>{copy('Close without saving', 'بستن بدون ذخیره')}</Button></div>
+            <div className="rf-guide__actions"><Button tone="primary" icon={Check} busy={busy === 'mapping'} disabled={!rfMapDraftIsComplete(draft)} onClick={() => void saveMapping()}>{draft.action === 'none' ? copy('Keep Unmapped', 'بدون نگاشت بماند') : copy('Save mapping', 'ذخیره نگاشت')}</Button><Button tone="ghost" icon={X} disabled={phase === 'saving'} onClick={() => { setCandidate(null); setCandidateIsGuided(false); setPhase('idle'); setMessage(copy('Mapping review closed without changing the board.', 'بازبینی نگاشت بدون تغییر برد بسته شد.')) }}>{copy('Close without saving', 'بستن بدون ذخیره')}</Button></div>
           </motion.div>}
         </AnimatePresence>
 

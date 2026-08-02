@@ -19,6 +19,38 @@ func rfGuidedMappingCommandMatches(line string, id int) bool {
 	return len(fields) >= 4 && fields[0] == "rf" && fields[1] == "map" && fields[2] == fmt.Sprint(id)
 }
 
+func rfGuidedMappingQuery(entry native.RFEntry) string {
+	behaviors := [...]string{"press", "toggle", "momentary", "up", "down", "stop"}
+	if int(entry.Behavior) >= len(behaviors) {
+		return "unmapped"
+	}
+	behavior := behaviors[entry.Behavior]
+	switch entry.ActionKind {
+	case native.RFActionKey:
+		if entry.ActionValue < 4 {
+			return fmt.Sprintf("key %d %s", entry.ActionValue+1, behavior)
+		}
+	case native.RFActionMenu:
+		actions := [...]string{"prev", "next", "dec", "inc"}
+		if int(entry.ActionValue) < len(actions) {
+			return "menu " + actions[entry.ActionValue]
+		}
+	case native.RFActionRelay:
+		if entry.ActionValue >= 4 && entry.ActionValue < 8 {
+			return fmt.Sprintf("relay %d %s", entry.ActionValue+1, behavior)
+		}
+	case native.RFActionSide:
+		if entry.ActionValue < 2 {
+			return fmt.Sprintf("side %c %s", 'A'+entry.ActionValue, behavior)
+		}
+	case native.RFActionPWM:
+		if entry.ActionValue <= 10 {
+			return fmt.Sprintf("pwm %d %s", entry.ActionValue, behavior)
+		}
+	}
+	return "unmapped"
+}
+
 func rfGuidedRecordNeedsReview(entry native.RFEntry, entries []native.RFEntry) bool {
 	if entry.ActionKind == native.RFActionNone {
 		return true
@@ -159,9 +191,8 @@ func (model Model) beginRFGuidedMapping(candidate native.RFEntry, captured bool)
 	model.rfGuideCandidateCaptured = captured
 	model.rfGuidePhase = "mapping"
 	model.beginRFActionPicker()
-	if captured {
-		model.rfActionQuery = fmt.Sprintf("physical key K%d press", model.rfGuideStep+1)
-	}
+	// Never infer A/B/C/D as K1-K4. Preserve only a mapping read back from the board.
+	model.rfActionQuery = rfGuidedMappingQuery(candidate)
 	return model
 }
 
@@ -181,7 +212,7 @@ func (model Model) completeRFGuidedMapping() Model {
 			completed := rfGuideLabels[model.rfGuideStep]
 			model.rfGuideStep = next
 			model.rfGuidePhase = "idle"
-			model.setNotice("Button " + completed + " mapped; continue with button " + rfGuideLabels[next])
+			model.setNotice("Button " + completed + " captured; continue with button " + rfGuideLabels[next])
 		} else {
 			model.rfGuidePhase = "complete"
 			model.setNotice("A/B/C/D capture complete; review stale records and test one intended signal")
@@ -327,7 +358,7 @@ func (model Model) rfGuidedPage() string {
 	case "identity":
 		phase, detail = "CONFIRM IDENTITY", "Review every identity field · Enter confirms · Delete twice discards"
 	case "mapping":
-		phase, detail = "MAP ACTION", "Search the validated action catalog and press Enter to save"
+		phase, detail = "MAP ACTION", "Keep Unmapped or search for an explicit action, then press Enter"
 	case "saving":
 		phase, detail = "SAVING", "Waiting for controller acknowledgement and inventory readback"
 	case "complete":
@@ -340,12 +371,12 @@ func (model Model) rfGuidedPage() string {
 	for index, stepLabel := range rfGuideLabels {
 		state := "pending"
 		if model.rfGuideCaptures[index] != nil {
-			state = "mapped"
+			state = "captured"
 		}
 		step := fmt.Sprintf(" %s  %s ", stepLabel, state)
 		if index == model.rfGuideStep {
 			step = selectedStyle.Render("›" + step)
-		} else if state == "mapped" {
+		} else if state == "captured" {
 			step = buttonGoodStyle.Render("✓" + step)
 		} else {
 			step = buttonStyle.Render(" " + step)

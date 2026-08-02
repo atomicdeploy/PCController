@@ -3,6 +3,7 @@ import {
   defaultRFMapDraft,
   isRFGuidedCaptureEvent,
   rfEntryNeedsReview,
+  rfMapDraftIsComplete,
   rfMapRPCParams,
   stableRFIdentity,
 } from './rf-guided-workflow'
@@ -42,11 +43,18 @@ describe('guided RF capture state helpers', () => {
     expect(isRFGuidedCaptureEvent(event({ rf_id: undefined }), 0)).toBe(false)
   })
 
-  it('builds semantic validated RPC mappings for A/B/C/D defaults', () => {
-    expect(defaultRFMapDraft(1)).toEqual({ action: 'key', target: '2', behavior: 'press' })
-    expect(rfMapRPCParams(7, defaultRFMapDraft(1))).toEqual({
-      id: 7, action: 'key', target: '2', behavior: 'press',
+  it('keeps fresh captures unmapped and preserves only an explicit board mapping', () => {
+    expect(defaultRFMapDraft()).toEqual({ action: 'none', target: '', behavior: '' })
+    expect(rfMapRPCParams(7, defaultRFMapDraft())).toEqual({ id: 7, action: 'none' })
+    expect(defaultRFMapDraft(entry({ action_kind: 4, action_value: 0, behavior: 3 }))).toEqual({
+      action: 'side', target: 'left', behavior: 'up',
     })
+  })
+
+  it('requires an explicit target before a non-empty mapping can be saved', () => {
+    expect(rfMapDraftIsComplete({ action: 'none', target: '', behavior: '' })).toBe(true)
+    expect(rfMapDraftIsComplete({ action: 'key', target: '', behavior: 'press' })).toBe(false)
+    expect(rfMapDraftIsComplete({ action: 'key', target: '2', behavior: 'press' })).toBe(true)
     expect(rfMapRPCParams(7, { action: 'menu', target: 'next', behavior: 'press' })).toEqual({
       id: 7, action: 'menu', target: 'next',
     })

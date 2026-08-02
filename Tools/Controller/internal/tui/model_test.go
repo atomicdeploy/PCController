@@ -136,7 +136,7 @@ func TestRFActionPickerSearchesAndMapsSelectedID(t *testing.T) {
 	}
 }
 
-func TestGuidedRFWorkflowCapturesConfirmsAndMapsExactHandsetIdentity(t *testing.T) {
+func TestGuidedRFWorkflowCapturesConfirmsAndKeepsFreshIdentityUnmapped(t *testing.T) {
 	model := readyModel(t, PageRF)
 	model = model.beginRFGuidedWorkflow()
 	if !model.rfGuideActive || model.rfGuideStep != 0 || model.rfGuidePhase != "idle" {
@@ -171,8 +171,8 @@ func TestGuidedRFWorkflowCapturesConfirmsAndMapsExactHandsetIdentity(t *testing.
 		t.Fatalf("identity confirmation did not open mapping review: phase=%q picker=%t", model.rfGuidePhase, model.rfActionPicker)
 	}
 	matches := model.filteredRFActions()
-	if len(matches) != 1 || matches[0].Args != "key 1 press" {
-		t.Fatalf("button A default mapping=%#v", matches)
+	if len(matches) != 1 || matches[0].Args != "none" {
+		t.Fatalf("fresh capture did not default to Unmapped: %#v", matches)
 	}
 
 	updatedModel, executeCommand := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -180,10 +180,31 @@ func TestGuidedRFWorkflowCapturesConfirmsAndMapsExactHandsetIdentity(t *testing.
 	if executeCommand == nil || model.rfGuidePhase != "saving" || model.rfGuideMappingID != 0 {
 		t.Fatalf("confirmed mapping was not dispatched: phase=%q id=%d command=%v", model.rfGuidePhase, model.rfGuideMappingID, executeCommand)
 	}
-	updatedModel, _ = model.Update(commandResultMsg{line: "rf map 0 key 1 press", output: "mapped"})
+	updatedModel, _ = model.Update(commandResultMsg{line: "rf map 0 none", output: "unmapped"})
 	model = updatedModel.(Model)
 	if model.rfGuideCaptures[0] == nil || model.rfGuideStep != 1 || model.rfGuidePhase != "idle" {
 		t.Fatalf("guide did not advance from A to B: phase=%q step=%d captures=%#v", model.rfGuidePhase, model.rfGuideStep, model.rfGuideCaptures)
+	}
+}
+
+func TestGuidedRFMappingPreservesOnlyAnExplicitBoardAssignment(t *testing.T) {
+	model := readyModel(t, PageRF)
+	existing := previewRFEntries()[1]
+	model = model.beginRFGuidedWorkflow()
+	model = model.beginRFGuidedMapping(existing, true)
+	matches := model.filteredRFActions()
+	if len(matches) != 1 || matches[0].Args != "side A up" {
+		t.Fatalf("existing board mapping was not preserved: %#v", matches)
+	}
+
+	fresh := previewRFEntries()[0]
+	model = model.beginRFGuidedMapping(fresh, true)
+	matches = model.filteredRFActions()
+	if len(matches) != 1 || matches[0].Args != "none" {
+		t.Fatalf("fresh capture did not default to Unmapped: %#v", matches)
+	}
+	if !rfGuidedMappingCommandMatches("rf map 0 none", 0) {
+		t.Fatal("the guided result matcher rejected the valid Unmapped command")
 	}
 }
 
