@@ -1017,7 +1017,11 @@ func (store *Store) Watch(
 			onChange(value)
 		}
 	}
-	reload()
+	// Reconcile once after the same debounce used for filesystem events. This
+	// closes the gap between Open and watcher registration without racing an
+	// editor's atomic replacement or Windows fallback write while it still has
+	// the destination open with restrictive sharing flags.
+	schedule()
 
 	// A slow safety poll covers unusual network filesystems that acknowledge a
 	// directory watch but omit replacement events. Normal local edits apply
