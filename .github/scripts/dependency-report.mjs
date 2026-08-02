@@ -50,6 +50,15 @@ const FRAMEWORK_OR_SYSTEM_INCLUDES = new Set([
 ]);
 const execFileAsync = promisify(execFile);
 
+function trustedLibraryRepository(name) {
+  switch (name) {
+    case "rc-switch":
+      return "sui77/rc-switch";
+    default:
+      throw new Error(`Arduino library is not release-source allowlisted: ${name}`);
+  }
+}
+
 function invariant(condition, message, errors) {
   if (!condition) errors.push(message);
 }
@@ -90,6 +99,18 @@ export function validateConfig(config) {
     invariant(/^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,79}$/u.test(name), `libraries contains an invalid Arduino Library Manager name: ${name}`, errors);
     invariant(VERSION_PATTERN.test(library?.version ?? ""), `libraries.${name}.version must be semantic version text`, errors);
     invariant(GITHUB_REPOSITORY_PATTERN.test(library?.repository ?? ""), `libraries.${name}.repository must be an owner/repository pair`, errors);
+    let trustedRepository = null;
+    try {
+      trustedRepository = trustedLibraryRepository(name);
+    } catch {
+      // Validation reports every error together instead of aborting at the first
+      // unreviewed outbound release-note source.
+    }
+    invariant(
+      trustedRepository !== null && library?.repository === trustedRepository,
+      `libraries.${name}.repository must match a code-reviewed release-source allowlist entry`,
+      errors,
+    );
     invariant(Array.isArray(library?.includes) && library.includes.length > 0, `libraries.${name}.includes must list its firmware headers`, errors);
     for (const include of Array.isArray(library?.includes) ? library.includes : []) {
       invariant(typeof include === "string" && /^[A-Za-z0-9_.-]+\.h(?:pp)?$/u.test(include), `libraries.${name}.includes contains an invalid header`, errors);
@@ -168,7 +189,7 @@ export function currentOutputs(config) {
   return {
     arduino_cli_version: version,
     arduino_cli_asset: asset,
-    arduino_cli_download_url: `https://github.com/${config.arduinoCli.repository}/releases/download/v${version}/${asset}`,
+    arduino_cli_download_url: `https://github.com/arduino/arduino-cli/releases/download/v${version}/${asset}`,
     arduino_cli_linux_64_sha256: config.arduinoCli.linux64.sha256,
     minicore_version: config.miniCore.version,
     minicore_package: config.miniCore.package,
@@ -359,12 +380,15 @@ async function latestArduinoCli(config) {
   const version = String(release.tag_name ?? "").replace(/^v/, "");
   if (!VERSION_PATTERN.test(version) || version.includes("-")) throw new Error(`Unexpected latest Arduino CLI tag: ${release.tag_name}`);
   const latestArchive = await arduinoCliArchiveEvidence(release, version);
-  const pinnedArchive = version === config.arduinoCli.version
-    ? latestArchive
-    : await arduinoCliArchiveEvidence(
-      await fetchJson(`https://api.github.com/repos/${config.arduinoCli.repository}/releases/tags/v${config.arduinoCli.version}`),
-      config.arduinoCli.version,
+  let pinnedArchive = latestArchive;
+  if (version !== config.arduinoCli.version) {
+    const releases = await fetchJson("https://api.github.com/repos/arduino/arduino-cli/releases?per_page=100");
+    const pinnedRelease = (Array.isArray(releases) ? releases : []).find(
+      (candidate) => String(candidate.tag_name ?? "").replace(/^v/iu, "") === config.arduinoCli.version,
     );
+    if (!pinnedRelease) throw new Error(`Pinned Arduino CLI ${config.arduinoCli.version} is absent from the official releases`);
+    pinnedArchive = await arduinoCliArchiveEvidence(pinnedRelease, config.arduinoCli.version);
+  }
   if (config.arduinoCli.linux64.asset !== pinnedArchive.asset) throw new Error(`Pinned Arduino CLI ${config.arduinoCli.version} asset no longer matches the official release`);
   if (config.arduinoCli.linux64.sha256 !== pinnedArchive.sha256) throw new Error(`Pinned Arduino CLI ${config.arduinoCli.version} SHA-256 no longer matches the official release`);
   return {
@@ -405,7 +429,7 @@ async function latestMiniCore(config) {
     `MiniCore ${version}`,
     (url) => url === `https://MCUdude.github.io/MiniCore/MiniCore-${version}.tar.bz2`,
   );
-  const release = await releaseEvidence(config.miniCore.repository, version);
+  const release = await releaseEvidence("MCUdude/MiniCore", version);
   return {
     version,
     source: OFFICIAL_SOURCES.miniCoreIndex,
@@ -422,6 +446,7 @@ async function loadArduinoLibraryIndex() {
 }
 
 async function latestArduinoLibrary(name, config, indexPromise) {
+  const repository = trustedLibraryRepository(name);
   const index = await indexPromise;
   const matching = (index.libraries ?? []).filter((library) => String(library.name).toLowerCase() === name.toLowerCase());
   const version = latestStable(matching.map((library) => String(library.version)));
@@ -450,11 +475,11 @@ async function latestArduinoLibrary(name, config, indexPromise) {
     `${name} ${version}`,
     (url) => url.startsWith("https://downloads.arduino.cc/libraries/"),
   );
-  const release = await releaseEvidence(config.repository, version);
+  const release = await releaseEvidence(repository, version);
   return {
     version,
     source: OFFICIAL_SOURCES.arduinoLibraryIndex,
-    repository: config.repository,
+    repository,
     ...archive,
     ...release,
   };

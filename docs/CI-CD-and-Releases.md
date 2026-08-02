@@ -169,8 +169,11 @@ declared Arduino library in a readable summary and machine-readable artifact.
 The canonical manifest preserves exact archive URLs and SHA-256 digests for the
 core and libraries as well as the checksum-pinned Arduino CLI. Official index
 metadata must still agree with those pins, each library repository and exported
-header are verified, and source inventory rejects an undeclared third-party
-firmware include or a stale library declaration.
+header are verified, release-note requests can target only code-reviewed
+repository constants, and source inventory rejects an undeclared third-party
+firmware include or a stale library declaration. Adding a new Arduino library
+therefore requires both a manifest entry and an explicit outbound-source
+allowlist change in review.
 
 When a newer stable version is available, the scheduled run updates the
 canonical pins and synchronized current-version documentation, installs the
