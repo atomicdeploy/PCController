@@ -30,7 +30,7 @@ void Tasks::update(uint32_t now) {
   }
 }
 
-int8_t Tasks::addTask(uint32_t delayMs, TaskCallback callback,
+int8_t Tasks::addTask(uint32_t now, uint32_t delayMs, TaskCallback callback,
                       void *context) {
   if (callback == nullptr || itemCount_ >= MAX_TASKS) {
     return -1;
@@ -40,7 +40,7 @@ int8_t Tasks::addTask(uint32_t delayMs, TaskCallback callback,
     if (tasks_[i].active) {
       continue;
     }
-    tasks_[i].dueAt = millis() + delayMs;
+    tasks_[i].dueAt = now + delayMs;
     tasks_[i].callback = callback;
     tasks_[i].context = context;
     tasks_[i].active = true;
@@ -75,4 +75,4 @@ void Tasks::clear() {
 
 uint8_t Tasks::count() const { return itemCount_; }
 
-void serviceTasks() { taskManager.update(); }
+void serviceTasks(uint32_t now) { taskManager.update(now); }

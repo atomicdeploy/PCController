@@ -10,9 +10,9 @@ public:
   Tasks();
 
   // Runs every due callback once using rollover-safe millisecond deadlines.
-  void update(uint32_t now = millis());
+  void update(uint32_t now);
   // Returns a reusable slot index, or -1 when all eight slots are active.
-  int8_t addTask(uint32_t delayMs, TaskCallback callback,
+  int8_t addTask(uint32_t now, uint32_t delayMs, TaskCallback callback,
                  void *context = nullptr);
   void cancelTask(int8_t taskIndex);
   void clear();
@@ -35,5 +35,5 @@ private:
 // taskManager is the single board-wide cooperative callback scheduler.
 extern Tasks taskManager;
 
-// Services the shared scheduler using the current Arduino millisecond clock.
-void serviceTasks();
+// Services the shared scheduler using the caller's one loop-time snapshot.
+void serviceTasks(uint32_t now);

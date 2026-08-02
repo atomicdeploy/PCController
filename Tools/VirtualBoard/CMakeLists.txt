@@ -124,4 +124,21 @@ if(BUILD_TESTING)
     target_compile_options(firmware_reset_telemetry_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_reset_telemetry_unit COMMAND firmware_reset_telemetry_tests)
+
+  # The cooperative scheduler must use the loop's single time snapshot; it
+  # may not sample millis() again while scheduling or servicing callbacks.
+  add_executable(firmware_tasks_tests
+    tests/tasks_test.cpp
+    ../../LocalLib/Tasks.cpp
+  )
+  target_include_directories(firmware_tasks_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  if(MSVC)
+    target_compile_options(firmware_tasks_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_tasks_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_tasks_unit COMMAND firmware_tasks_tests)
 endif()
