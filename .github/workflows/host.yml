@@ -114,6 +114,9 @@ jobs:
         with:
           node-version: ${{ steps.host-dependencies.outputs.node_version }}
 
+      - name: "📦 Restore locked build-tool dependencies"
+        run: npm ci --prefix Tools/Build --ignore-scripts
+
       - name: "🧹 Clean generated host output before accepting firmware"
         shell: bash
         run: node Tools/Build/build.mjs --clean --no-color

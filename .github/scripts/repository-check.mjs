@@ -165,6 +165,16 @@ try {
   report(error.message);
 }
 
+// These exact strings are positive/negative supply-chain policy fixtures. Keep
+// the exception file- and value-specific so docs and all other source remain
+// subject to the normal external-repository privacy gate.
+const reviewedRepositoryFixtures = new Map([
+  ["Tools/Dependencies/update.test.mjs", new Set([
+    ["https://github", ".com/arduino/arduino-cli"].join(""),
+    ["https://github", ".com/example/arduino-cli"].join(""),
+  ])],
+]);
+
 for (const relativePath of sourceFiles) {
   const normalized = relativePath.replaceAll("\\", "/");
   const absolutePath = resolve(root, relativePath);
@@ -177,6 +187,12 @@ for (const relativePath of sourceFiles) {
   }
   const content = readFileSync(absolutePath, "utf8");
   for (const finding of privacyFindings(normalized, content, { repository })) {
+    if (
+      finding.kind === "unreviewed repository reference" &&
+      reviewedRepositoryFixtures.get(normalized)?.has(finding.match)
+    ) {
+      continue;
+    }
     report(`${normalized}:${finding.line} contains ${finding.kind}: ${finding.match}`);
   }
   for (const finding of actionPinFindings(normalized, content)) {
