@@ -207,7 +207,8 @@ jobs:
           PCCONTROLLER_VERSION: 0.0.0-dependency.${{ github.run_number }}
         run: |
           set -euo pipefail
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          export SOURCE_DATE_EPOCH
           ./build.sh --firmware-only --clean --version "$PCCONTROLLER_VERSION"
           ./firmware.sh check
           {
@@ -216,10 +217,10 @@ jobs:
             echo
             echo '| Gate | Result |'
             echo '|---|---|'
-            echo '| Proposed Arduino CLI | `passed checksum verification` |'
-            echo '| Proposed MiniCore and libraries | `installed from pinned official indexes` |'
-            echo '| Real ATmega328P build | `passed` |'
-            echo '| Intel HEX validation | `passed` |'
+            echo "| Proposed Arduino CLI | \`passed checksum verification\` |"
+            echo "| Proposed MiniCore and libraries | \`installed from pinned official indexes\` |"
+            echo "| Real ATmega328P build | \`passed\` |"
+            echo "| Intel HEX validation | \`passed\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: "🌿 Commit a uniquely named update branch"
