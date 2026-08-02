@@ -95,6 +95,51 @@
         "security": []
       }
     },
+    "/api/v1/session/ticket": {
+      "post": {
+        "operationId": "post_api_v1_session_ticket",
+        "summary": "Exchange a header credential for a 15-second one-use browser WebSocket ticket",
+        "tags": [
+          "session"
+        ],
+        "x-required-capability": "session",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "201": {
+            "description": "One-use Origin-bound browser session ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionTicketRequest"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/rpc": {
       "post": {
         "operationId": "post_api_v1_rpc",
@@ -2712,7 +2757,7 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Host access credential. Never place durable credentials in URLs."
+        "description": "Durable host access credential for HTTP and non-browser WebSocket clients. Never place it in a URL."
       },
       "tokenHeader": {
         "type": "apiKey",
@@ -2882,6 +2927,60 @@
             "params": {}
           }
         ]
+      },
+      "SessionTicketRequest": {
+        "type": "object",
+        "required": [
+          "transport"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "transport": {
+            "type": "string",
+            "enum": [
+              "websocket",
+              "socket_io"
+            ]
+          }
+        }
+      },
+      "SessionTicket": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "protocol",
+          "expires_at",
+          "expires_in_ms",
+          "principal",
+          "correlation_id"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "writeOnly": true,
+            "description": "One-use ticket carried in Sec-WebSocket-Protocol, never in the URL."
+          },
+          "protocol": {
+            "type": "string",
+            "const": "pccontroller.v1"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_in_ms": {
+            "type": "integer",
+            "const": 15000
+          },
+          "principal": {
+            "type": "string"
+          },
+          "correlation_id": {
+            "type": "string"
+          }
+        }
       },
       "JSONRPCError": {
         "type": "object",

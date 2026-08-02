@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -180,9 +179,13 @@ func (rpcError *RPCError) Error() string {
 // Access records transport provenance for authorization and message tagging.
 // Remote means a non-loopback network peer, not merely a WebSocket client.
 type Access struct {
-	Remote        bool
-	Transport     string
-	authenticated bool
+	Remote         bool
+	Transport      string
+	Principal      string
+	Origin         string
+	CorrelationID  string
+	Authentication string
+	authenticated  bool
 }
 
 const (
@@ -231,6 +234,9 @@ type Service struct {
 	HotkeyStatus        func() any
 	LastSessionSnapshot func() (any, error)
 	mu                  sync.Mutex
+	sessionMu           sync.Mutex
+	sessionTickets      map[[32]byte]sessionTicket
+	sessionClock        func() time.Time
 }
 
 // browserUISettings is the narrow persistent host-owned subset exposed to the
@@ -290,7 +296,9 @@ func (service *Service) DispatchRemote(
 	transport string,
 ) Response {
 	return service.dispatch(ctx, request, Access{
-		Remote: true, Transport: transport, authenticated: true,
+		Remote: true, Transport: transport, Principal: "authenticated-peer",
+		CorrelationID: newSecurityID("rpc"), Authentication: "delegated",
+		authenticated: true,
 	})
 }
 
@@ -308,9 +316,25 @@ func (service *Service) dispatch(
 		response.Error = &RPCError{Code: -32603, Message: "controller client is unavailable"}
 		return response
 	}
-	if !access.authenticated && !service.authorized(request.Auth) {
-		response.Error = &RPCError{Code: -32001, Message: "authentication required"}
-		return response
+	if !access.authenticated {
+		principal, authentication, authenticated := service.authenticatedPrincipal(request.Auth)
+		if !authenticated {
+			response.Error = &RPCError{Code: -32001, Message: "authentication required"}
+			return response
+		}
+		access.Principal = principal
+		access.Authentication = authentication
+		access.authenticated = true
+	}
+	if access.Principal == "" {
+		if access.Remote {
+			access.Principal = "authenticated-peer"
+		} else {
+			access.Principal = "local-operator"
+		}
+	}
+	if access.CorrelationID == "" {
+		access.CorrelationID = newSecurityID("rpc")
 	}
 	if err := service.authorizeAccess(access, request.Method, request.Params); err != nil {
 		response.Error = &RPCError{Code: -32003, Message: err.Error()}
@@ -1315,9 +1339,19 @@ func (service *Service) auditRemote(
 	if transport == "" {
 		transport = "network"
 	}
-	service.Client.EmitHostEvent(
+	metadata := map[string]string{
+		"principal": access.Principal, "transport": transport,
+		"origin": access.Origin, "capability": capability,
+		"decision": decision, "correlation_id": access.CorrelationID,
+		"authentication": access.Authentication, "operation": method,
+	}
+	service.Client.EmitHostActionEvent(
 		"security.remote."+decision,
-		fmt.Sprintf("%s %s capability=%s method=%s", transport, decision, capability, method),
+		fmt.Sprintf(
+			"principal=%s transport=%s decision=%s capability=%s method=%s correlation=%s",
+			access.Principal, transport, decision, capability, method, access.CorrelationID,
+		),
+		"security", decision, metadata,
 	)
 }
 
@@ -1729,7 +1763,16 @@ func accessFromHTTPRequest(request *http.Request, transport string) Access {
 	if request == nil {
 		return Access{Remote: true, Transport: transport}
 	}
-	return accessFromAddress(stringAddress(request.RemoteAddr), transport)
+	access := accessFromAddress(stringAddress(request.RemoteAddr), transport)
+	security := securityFromRequest(request)
+	if security.Principal != "" {
+		access.Principal = security.Principal
+		access.Origin = security.Origin
+		access.CorrelationID = security.CorrelationID
+		access.Authentication = security.Authentication
+		access.authenticated = true
+	}
+	return access
 }
 
 type stringAddress string
@@ -1816,11 +1859,19 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(webSocketPath, func(writer http.ResponseWriter, request *http.Request) {
-		if !authorizeHTTPRequest(writer, request, service) {
+		if request.Method == http.MethodPost {
+			if !authorizeHTTPRequest(writer, request, service) {
+				return
+			}
+			serveHTTPRPC(writer, request, service, accessFromHTTPRequest(request, "rest"))
 			return
 		}
-		if request.Method == http.MethodPost {
-			serveHTTPRPC(writer, request, service, accessFromHTTPRequest(request, "rest"))
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeWebSocketUpgrade(writer, request, service, "websocket") {
 			return
 		}
 		serveWebSocket(
@@ -1840,18 +1891,19 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		config := service.hostConfig()
 		settings := service.browserUISettings()
 		writeHTTPJSON(writer, http.StatusOK, map[string]any{
-			"name":            settings.AppTitle,
-			"host_version":    strings.TrimSpace(service.HostVersion),
-			"source_hash":     strings.TrimSpace(service.HostSourceHash),
-			"build_time":      strings.TrimSpace(service.HostBuildTime),
-			"setup_complete":  config.UI.SetupComplete,
-			"welcome_melody":  config.UI.WelcomeMelody,
-			"appearance":      settings.Appearance,
-			"appearance_etag": settings.AppearanceETag,
-			"api_version":     APIVersion,
-			"websocket_path":  webSocketPath,
-			"socket_io_path":  socketIOPath,
-			"auth_required":   strings.TrimSpace(service.currentAuthToken()) != "",
+			"name":                settings.AppTitle,
+			"host_version":        strings.TrimSpace(service.HostVersion),
+			"source_hash":         strings.TrimSpace(service.HostSourceHash),
+			"build_time":          strings.TrimSpace(service.HostBuildTime),
+			"setup_complete":      config.UI.SetupComplete,
+			"welcome_melody":      config.UI.WelcomeMelody,
+			"appearance":          settings.Appearance,
+			"appearance_etag":     settings.AppearanceETag,
+			"api_version":         APIVersion,
+			"websocket_path":      webSocketPath,
+			"socket_io_path":      socketIOPath,
+			"session_ticket_path": SessionTicketPath,
+			"auth_required":       strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device": config.Integrations.LocalDevice.Enabled,
 				"data_hub":     config.Integrations.DataHub.Enabled,
@@ -1863,6 +1915,9 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		serveHTTPRPC(writer, request, service, accessFromHTTPRequest(request, "rest"))
+	})
+	mux.HandleFunc(SessionTicketPath, func(writer http.ResponseWriter, request *http.Request) {
+		serveSessionTicket(writer, request, service)
 	})
 	mux.HandleFunc("/api/v1/snapshot", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -2362,7 +2417,12 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		serveInboundWebhook(writer, request, service)
 	})
 	mux.HandleFunc(socketIOPath, func(writer http.ResponseWriter, request *http.Request) {
-		if !authorizeHTTPRequest(writer, request, service) {
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeWebSocketUpgrade(writer, request, service, "socket_io") {
 			return
 		}
 		serveSocketIO(
@@ -2532,7 +2592,7 @@ func serveHTTPRPC(
 	}
 	// The HTTP layer has already authenticated the request without copying the
 	// secret into its JSON body.
-	rpcRequest.Auth = service.currentAuthToken()
+	rpcRequest.Auth = ""
 	response := service.dispatch(request.Context(), rpcRequest, access)
 	status := http.StatusOK
 	if response.Error != nil {
@@ -2561,7 +2621,10 @@ func serveWebSocket(
 	connection, err := websocket.Accept(
 		writer,
 		request,
-		&websocket.AcceptOptions{OriginPatterns: origins},
+		&websocket.AcceptOptions{
+			OriginPatterns: origins,
+			Subprotocols:   []string{browserWebSocketProtocol},
+		},
 	)
 	if err != nil {
 		return
@@ -2607,7 +2670,7 @@ func serveWebSocket(
 			})
 			continue
 		}
-		rpcRequest.Auth = service.currentAuthToken()
+		rpcRequest.Auth = ""
 		if rpcRequest.Method == "controller.subscribe" {
 			var subscription wsSubscription
 			response := Response{JSONRPC: Version, ID: rpcRequest.ID}
@@ -2693,6 +2756,7 @@ func serveSocketIO(
 	}
 	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		OriginPatterns: origins,
+		Subprotocols:   []string{browserWebSocketProtocol},
 	})
 	if err != nil {
 		return
@@ -2860,7 +2924,7 @@ func serveSocketIO(
 				encoded, _ := json.Marshal(params)
 				response := service.dispatch(ctx, Request{
 					JSONRPC: Version, Method: "controller.command.execute",
-					Params: encoded, Auth: service.currentAuthToken(),
+					Params: encoded,
 				}, access)
 				_ = writeEvent("command.response", response)
 			case "rpc":
@@ -2869,7 +2933,7 @@ func serveSocketIO(
 					_ = writeEvent("error", map[string]string{"error": err.Error()})
 					continue
 				}
-				rpcRequest.Auth = service.currentAuthToken()
+				rpcRequest.Auth = ""
 				_ = writeEvent("rpc.response", service.dispatch(ctx, rpcRequest, access))
 			default:
 				_ = writeEvent("error", map[string]string{
@@ -2896,18 +2960,8 @@ func decodeSocketIOEvent(payload string) (string, json.RawMessage, error) {
 }
 
 func (service *Service) authorized(token string) bool {
-	expected := strings.TrimSpace(service.currentAuthToken())
-	if expected == "" {
-		return true
-	}
-	provided := strings.TrimSpace(token)
-	if len(expected) == len(provided) &&
-		subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1 {
-		return true
-	}
-	delegation := strings.TrimSpace(service.HostInstanceToken)
-	return delegation != "" && len(delegation) == len(provided) &&
-		subtle.ConstantTimeCompare([]byte(delegation), []byte(provided)) == 1
+	_, _, authenticated := service.authenticatedPrincipal(token)
+	return authenticated
 }
 
 func (service *Service) currentAuthToken() string {
@@ -2936,36 +2990,7 @@ func authorizeHTTPRequest(
 	request *http.Request,
 	service *Service,
 ) bool {
-	if !httpOriginAllowed(request, service.currentAllowedOrigins()) {
-		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{
-			"error": "request origin is not allowed",
-		})
-		return false
-	}
-	if strings.TrimSpace(service.currentAuthToken()) == "" {
-		return true
-	}
-	token := strings.TrimSpace(request.Header.Get("X-PCController-Token"))
-	if token == "" {
-		authorization := strings.TrimSpace(request.Header.Get("Authorization"))
-		if len(authorization) > 7 && strings.EqualFold(authorization[:7], "Bearer ") {
-			token = strings.TrimSpace(authorization[7:])
-		}
-	}
-	// Web browsers cannot set custom headers on a native WebSocket handshake.
-	// Query-token support is therefore available, but header authentication is
-	// preferred because URLs may be logged by intermediaries.
-	if token == "" {
-		token = request.URL.Query().Get("access_token")
-	}
-	if service.authorized(token) {
-		return true
-	}
-	writer.Header().Set("WWW-Authenticate", "Bearer")
-	writeHTTPJSON(writer, http.StatusUnauthorized, map[string]string{
-		"error": "authentication required",
-	})
-	return false
+	return authenticateHTTPRequest(writer, request, service)
 }
 
 // httpOriginAllowed prevents a browser on an unrelated site from driving the

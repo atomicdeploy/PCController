@@ -433,12 +433,29 @@ non-loopback bind is rejected. Remote access requires all of the following:
   clients;
 - the relevant `ipc.remote_policy` capability set to `true`.
 
-Raw JSON-RPC carries the token in the top-level `auth` member. HTTP accepts
-`Authorization: Bearer TOKEN` or `X-PCController-Token: TOKEN`. WebSocket
-handshake query `access_token=TOKEN` is available for browser APIs that cannot
-set a header, but headers are preferred because URLs may be logged. Token
-comparison is constant-time. Discovery advertisements never contain the
+Raw JSON-RPC carries the token in the top-level `auth` member. HTTP and native
+WebSocket clients accept `Authorization: Bearer TOKEN` or
+`X-PCController-Token: TOKEN`. Durable credentials are rejected in WebSocket
+upgrade URLs. A browser instead performs this bounded exchange on every
+connection or reconnect:
+
+1. `POST /api/v1/session/ticket` with the durable credential in an HTTP header,
+   an explicit allowed `Origin`, and `{"transport":"websocket"}` (or
+   `socket_io`);
+2. open the clean WebSocket URL while offering `pccontroller.v1` and
+   `pccontroller.ticket.TICKET` as subprotocols.
+
+The random ticket expires after 15 seconds, is consumed atomically once, and is
+bound to the issuing origin, peer, and transport. The server retains only its
+SHA-256 digest and negotiates only `pccontroller.v1`, so neither the URL nor the
+upgrade response discloses the one-use value. Ticket responses are non-cacheable.
+Token comparison is constant-time. Discovery advertisements never contain the
 token.
+
+An absent `Origin` has an explicit native-client meaning: loopback clients may
+omit it and still follow ordinary authentication, while a remote originless
+request must present a valid authentication header. Browser ticket issuance and
+redemption always require an allowed `Origin`.
 
 Authentication proves possession of the host token; authorization is separate.
 The default remote policy permits only `read` and `events`. Messages, board
@@ -449,7 +466,9 @@ opt-ins. Programming additionally requires connection control. A remote
 `controller.command.execute` request is classified before execution, so using the
 generic command surface cannot bypass the reset, programming, OS-action, or
 bridge-call gates. Authorized mutating attempts and denied attempts publish
-`security.remote.authorized` or `security.remote.denied` timeline events
+`security.remote.authorized` or `security.remote.denied` timeline events. Their
+structured metadata records the principal, transport, allowed origin,
+capability, decision, authentication mechanism, operation, and correlation ID
 without recording the token or request payload.
 
 Motion policies, door checks, relay sequencing, bounds, OS confirmation rules,
@@ -619,6 +638,7 @@ All JSON endpoints share the IPC listener:
 | `POST /api/v1/os/power` | confirmed lock, suspend, hibernate, restart, shutdown, or monitor-brightness request under `power_actions` |
 | `POST /api/v1/command` | `{"command":"..."}` through the ordinary command engine |
 | `POST /api/v1/messages` | typed message envelope |
+| `POST /api/v1/session/ticket` | 15-second one-use browser WebSocket or Socket.IO ticket |
 | `GET /api/v1/bridges` | configured peer names/protocols and live state |
 | `POST /api/v1/bridges/call` | `peer` plus a nested JSON-RPC `request` |
 | `GET /api/v1/artifacts/manifest` | artifact/default/current discovery and latest operation |
@@ -638,7 +658,10 @@ bootstrap apply host authentication. Bodies are limited to
 1 MiB. Unsupported methods are rejected, and the inbound webhook path is `404`
 when disabled. An inbound webhook is data, not an implicit shell command. To
 make it actionable, enable a narrow text mapping whose resulting command still
-passes the normal safety path.
+passes the normal safety path. Inbound event provenance never copies the raw
+request URI. Secret-shaped query keys, credentials, cookies, referrers,
+signatures, tickets, and arbitrary headers are dropped; only bounded safe trace
+headers and non-secret query metadata cross the event boundary.
 
 ### Peripheral names and authoritative PWM state
 
@@ -752,8 +775,11 @@ companion service cannot set cookies on the controller origin.
 
 ## Standard WebSocket
 
-Connect to the configured `ipc.websocket_path` (default `/ipc`). After the
-authenticated HTTP upgrade, send ordinary JSON-RPC request objects. Two
+Connect to the configured `ipc.websocket_path` (default `/ipc`). Native clients
+authenticate in upgrade headers. Browsers obtain a fresh one-use session ticket
+as described above and carry it in the WebSocket subprotocol list; an
+`access_token` query is rejected. After the authenticated HTTP upgrade, send
+ordinary JSON-RPC request objects. Two
 connection-local control methods manage push data:
 
 ```json
@@ -795,6 +821,9 @@ adapter is genuine Engine.IO v4 / Socket.IO framing over WebSocket:
 ```text
 ws://HOST:PORT/socket.io/?EIO=4&transport=websocket
 ```
+
+Browser clients request a ticket with `{"transport":"socket_io"}`. Tickets
+cannot cross between the standard WebSocket and Socket.IO transports.
 
 It sends an Engine.IO open packet, accepts Socket.IO connect/disconnect, and
 implements Engine.IO ping/pong. Socket.IO event packets use the usual

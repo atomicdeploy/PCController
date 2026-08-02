@@ -547,6 +547,15 @@ default permits read/event subscriptions only. Token possession alone does not
 grant board writes, reset, programming, shutdown, virtual keys, power actions,
 host-automation execution, or bridge calls.
 
+Browser WebSocket sessions never put that durable token in a URL. The Web UI
+uses authenticated `POST /api/v1/session/ticket` to obtain a 15-second,
+single-use, Origin/peer/transport-bound ticket for each connection and
+reconnect, offers it as a WebSocket subprotocol, and keeps REST command fallback
+available if the live stream cannot be established. Native clients retain
+header authentication. Inbound webhook events also drop credential-bearing
+query/header fields, cookies, referrers, tickets, signatures, and the raw request
+URI before publishing metadata.
+
 Configured `integrations.websocket_clients` can subscribe to another primary,
 forward loop-safe typed events, and issue correlated `bridge call` requests.
 Each host still has exactly one local serial owner and the target reapplies its

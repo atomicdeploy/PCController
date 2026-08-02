@@ -169,6 +169,7 @@ if (new Set(methods.map(({ name }) => name)).size !== methods.length) {
 const routes = [
   { path: "/healthz", methods: ["get"], public: true, capability: "public", summary: "Service liveness and API identity" },
   { path: "/api/v1/ui-config", methods: ["get"], public: true, capability: "public", summary: "Non-secret browser bootstrap" },
+  { path: "/api/v1/session/ticket", methods: ["post"], capability: "session", summary: "Exchange a header credential for a 15-second one-use browser WebSocket ticket" },
   { path: "/api/v1/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/v1/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
   { path: "/api/v1/peripherals", methods: ["get"], capability: "read", summary: "Peripheral descriptors and host-owned names" },
@@ -228,11 +229,22 @@ function operationFor(route, method) {
     },
   };
   if (route.public) operation.security = [];
+  if (route.path === "/api/v1/session/ticket") {
+    delete operation.responses["200"];
+    operation.responses["201"] = {
+      description: "One-use Origin-bound browser session ticket",
+      content: { "application/json": { schema: { $ref: "#/components/schemas/SessionTicket" } } },
+    };
+  }
   if (!["get", "head", "delete"].includes(method)) {
     operation.requestBody = {
       required: true,
       content: {
-        "application/json": { schema: route.path === "/api/v1/rpc" ? { $ref: "#/components/schemas/JSONRPCRequest" } : { type: "object", additionalProperties: true } },
+        "application/json": { schema: route.path === "/api/v1/rpc"
+          ? { $ref: "#/components/schemas/JSONRPCRequest" }
+          : route.path === "/api/v1/session/ticket"
+            ? { $ref: "#/components/schemas/SessionTicketRequest" }
+            : { type: "object", additionalProperties: true } },
       },
     };
   }
@@ -280,7 +292,7 @@ const openapi = {
   paths: openAPIPaths,
   components: {
     securitySchemes: {
-      bearerAuth: { type: "http", scheme: "bearer", description: "Host access credential. Never place durable credentials in URLs." },
+      bearerAuth: { type: "http", scheme: "bearer", description: "Durable host access credential for HTTP and non-browser WebSocket clients. Never place it in a URL." },
       tokenHeader: { type: "apiKey", in: "header", name: "X-PCController-Token", description: "Header-only compatibility credential." },
     },
     schemas: {
@@ -294,6 +306,23 @@ const openapi = {
           auth: { type: "string", writeOnly: true, description: "Raw NDJSON compatibility only; prefer authenticated transport setup." },
         },
         examples: [{ jsonrpc: "2.0", id: 1, method: "controller.status", params: {} }],
+      },
+      SessionTicketRequest: {
+        type: "object", required: ["transport"], additionalProperties: false,
+        properties: { transport: { type: "string", enum: ["websocket", "socket_io"] } },
+      },
+      SessionTicket: {
+        type: "object",
+        required: ["ticket", "protocol", "expires_at", "expires_in_ms", "principal", "correlation_id"],
+        additionalProperties: false,
+        properties: {
+          ticket: { type: "string", pattern: "^[a-f0-9]{64}$", writeOnly: true, description: "One-use ticket carried in Sec-WebSocket-Protocol, never in the URL." },
+          protocol: { type: "string", const: "pccontroller.v1" },
+          expires_at: { type: "string", format: "date-time" },
+          expires_in_ms: { type: "integer", const: 15000 },
+          principal: { type: "string" },
+          correlation_id: { type: "string" },
+        },
       },
       JSONRPCError: {
         type: "object", required: ["code", "message"], additionalProperties: false,
@@ -369,7 +398,10 @@ const asyncapi = {
     loopback: {
       host: "127.0.0.1:8787", protocol: "ws", pathname: "/ipc",
       description: "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
-      security: [{ $ref: "#/components/securitySchemes/session" }],
+      security: [
+        { $ref: "#/components/securitySchemes/durableHeader" },
+        { $ref: "#/components/securitySchemes/browserTicket" },
+      ],
     },
   },
   channels: {
@@ -396,7 +428,8 @@ const asyncapi = {
   },
   components: {
     securitySchemes: {
-      session: { type: "httpApiKey", in: "header", name: "Authorization", description: "Bearer credential or short-lived session authorization. Durable secrets must not appear in URLs." },
+      durableHeader: { type: "httpApiKey", in: "header", name: "Authorization", description: "Bearer credential for non-browser WebSocket and Socket.IO clients." },
+      browserTicket: { type: "httpApiKey", in: "header", name: "Sec-WebSocket-Protocol", description: "Browser clients first POST /api/v1/session/ticket with a header credential, then offer pccontroller.v1 and pccontroller.ticket.<ticket>. The 15-second one-use ticket is Origin, peer, transport, and expiry bound; no credential appears in the URL." },
     },
     messages: {
       JSONRPCRequest: { payload: { $ref: "./jsonrpc.schema.json#/$defs/request" } },
@@ -452,6 +485,7 @@ validateMethodCatalog({
 
 const routeSourceFiles = [
   "Tools/Controller/internal/ipcjson/ipc.go",
+  "Tools/Controller/internal/ipcjson/session_auth.go",
   "Tools/Controller/internal/ipcjson/artifacts_http.go",
   "Tools/Controller/internal/releaseplane/http.go",
 ];

@@ -90,6 +90,11 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(reference.includes(`<title>${expected.referenceTitle}</title>`), true);
   assert.equal(reference.includes(`<h1>${expected.referenceHeading}</h1>`), true);
   assert.equal(openapi.components.securitySchemes.tokenHeader.name, "X-PCController-Token");
+  assert.equal(openapi.paths["/api/v1/session/ticket"].post.responses["201"].description.includes("One-use"), true);
+  assert.equal(openapi.components.schemas.SessionTicket.properties.ticket.writeOnly, true);
+  assert.equal(openapi.components.schemas.SessionTicket.properties.expires_in_ms.const, 15000);
+  assert.equal(asyncapi.components.securitySchemes.browserTicket.name, "Sec-WebSocket-Protocol");
+  assert.equal(JSON.stringify(asyncapi).includes("access_token"), false);
 });
 
 test("--check is read-only and stable across repeated runs", () => {
@@ -104,5 +109,5 @@ test("--check is read-only and stable across repeated runs", () => {
   assert.equal(first.status, 0, first.stderr);
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.stdout, first.stdout);
-  assert.match(first.stdout, /^API reference is current: 107 RPC methods, 38 REST paths, digest [a-f0-9]{12}\.\n$/u);
+  assert.match(first.stdout, /^API reference is current: \d+ RPC methods, \d+ REST paths, digest [a-f0-9]{12}\.\n$/u);
 });

@@ -357,6 +357,7 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 		APIVersion    int    `json:"api_version"`
 		WebSocketPath string `json:"websocket_path"`
 		SocketIOPath  string `json:"socket_io_path"`
+		TicketPath    string `json:"session_ticket_path"`
 		AuthRequired  bool   `json:"auth_required"`
 		HostVersion   string `json:"host_version"`
 		SourceHash    string `json:"source_hash"`
@@ -367,7 +368,7 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 	}
 	if response.StatusCode != http.StatusOK || result.Name != "Controller Lab" ||
 		result.APIVersion != APIVersion || result.WebSocketPath != "/control" ||
-		result.SocketIOPath != "/engine.io/" || !result.AuthRequired ||
+		result.SocketIOPath != "/engine.io/" || result.TicketPath != SessionTicketPath || !result.AuthRequired ||
 		result.HostVersion != "1.2.3" || result.SourceHash != "0123456789abcdef" ||
 		result.BuildTime != "2026-08-02T00:00:00Z" {
 		t.Fatalf("UI config status=%d result=%+v", response.StatusCode, result)
@@ -468,6 +469,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 		!strings.Contains(string(uiConfigBody), `"name":"PCController"`) ||
 		!strings.Contains(string(uiConfigBody), `"websocket_path":"/ipc"`) ||
 		!strings.Contains(string(uiConfigBody), `"socket_io_path":"/socket.io/"`) ||
+		!strings.Contains(string(uiConfigBody), `"session_ticket_path":"/api/v1/session/ticket"`) ||
 		!strings.Contains(string(uiConfigBody), `"auth_required":true`) {
 		t.Fatalf("unauthenticated UI config status=%d body=%s err=%v", response.StatusCode, uiConfigBody, readErr)
 	}
