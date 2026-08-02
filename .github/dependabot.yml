@@ -14,7 +14,16 @@ updates:
       - "🏗️ tooling-build"
     groups:
       actions-minor-and-patch:
-        update-types: [minor, patch]
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      actions-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: gomod
     directory: /Tools/Controller
@@ -31,4 +40,41 @@ updates:
       - "🖥️ host"
     groups:
       go-minor-and-patch:
-        update-types: [minor, patch]
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      go-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directories:
+      - /Tools/Build
+      - /Tools/Firmware
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:30"
+      timezone: Asia/Tehran
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - "📦 dependencies"
+      - "🏗️ tooling-build"
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"

@@ -4,6 +4,7 @@
   <p>
     <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml"><img alt="Build" src="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml/badge.svg?branch=main"></a>
     <a href="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml"><img alt="Repository health" src="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml/badge.svg?branch=main"></a>
+    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/atomicdeploy/PCController/actions/workflows/codeql.yml/badge.svg?branch=main"></a>
     <a href="https://github.com/atomicdeploy/PCController/actions/workflows/dependencies.yml"><img alt="Dependency health" src="https://github.com/atomicdeploy/PCController/actions/workflows/dependencies.yml/badge.svg?branch=main"></a>
     <a href="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml"><img alt="Release" src="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml/badge.svg"></a>
     <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/atomicdeploy/PCController"></a>
@@ -12,6 +13,7 @@
   <p>
     <a href="https://github.com/atomicdeploy/PCController/releases">Download a release</a> ·
     <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml">Open Build</a> ·
+    <a href="https://github.com/atomicdeploy/PCController/security">Security</a> ·
     <a href="docs/README.md">Read the docs</a>
   </p>
 </div>
