@@ -370,6 +370,10 @@ macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID
 macro record start NAME [CATEGORY [COLOR]]|record status|record save|record discard
 macro play NAME_OR_ID|status|cancel [keep]
 automation list|run NAME
+board-automation list
+board-automation add EVENT EVENT_VALUE EVENT_MASK ACTION TARGET VALUE EXTRA [on|off]
+board-automation edit ID EVENT EVENT_VALUE EVENT_MASK ACTION TARGET VALUE EXTRA [on|off]
+board-automation remove ID|clear             # requires the advertised AVR capability
 rf send CODE BITS PROTOCOL [PULSE_US]  # protocol 1..12
 rf learn [indefinite|timer [DURATION]] # default indefinite + multi-code; timer aliases: single, one-shot
 rf cancel
@@ -384,6 +388,11 @@ rf map ID pwm 0..10 [press|toggle|momentary]
 i2c scan
 reset lines|app|bootloader
 ```
+
+The accepted 32 KiB firmware does not advertise board automation because the
+enabled profile exceeds the fixed application boundary by 2,448 bytes. The
+commands and typed APIs therefore fail closed on that image; they remain useful
+for native/Virtual Board validation and a future capacity-approved profile.
 
 The Web workbench and TUI RF page (`W`) wrap these commands in a guided
 A/B/C/D handset flow. Each step opens one bounded capture, stops learning after
