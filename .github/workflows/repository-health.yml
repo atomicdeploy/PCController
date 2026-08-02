@@ -21,7 +21,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: "📥 Check out exact source"
+      - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: "🟢 Install Node.js"
@@ -46,8 +46,10 @@ jobs:
 
       - name: "📦 Test CI, dependency, packaging, and release helpers"
         run: |
+          node --check .github/scripts/codebase-summary.mjs
           node --check .github/scripts/package-directory.mjs
           node --check .github/scripts/step-summary.mjs
+          node --test .github/scripts/codebase-summary.test.mjs
           node --test .github/scripts/package-directory.test.mjs
           node --test .github/scripts/dependency-report.test.mjs
           node --test .github/scripts/release-asset-collisions.test.mjs
@@ -66,7 +68,7 @@ jobs:
           {
             echo '# ✅ Repository health passed'
             echo
-            echo 'The source tree, licenses, documentation, project build tools, CI helpers, and every Actions workflow passed their policy gates.'
+            echo 'Repository checks passed.'
             echo
             echo '| Quality gate | Result |'
             echo '|---|---|'
@@ -76,6 +78,4 @@ jobs:
             echo '| Dependency/Release helper tests | ✅ passed |'
             echo '| GitHub Actions actionlint | ✅ passed |'
             echo '| Whitespace | ✅ clean |'
-            echo
-            echo '> Release creation remains gated on the complete AVR plus ten native package jobs; physical-board acceptance remains separately protected.'
           } >> "$GITHUB_STEP_SUMMARY"

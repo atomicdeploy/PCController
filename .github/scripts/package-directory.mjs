@@ -110,7 +110,7 @@ const packageReadme = (() => {
   const launch = /windows/iu.test(target)
     ? `.\\\\${executable} --help`
     : `chmod +x ./${executable} && ./${executable} --help`;
-  return `${header}## Run the Controller\n\n~~~text\n${launch}\n~~~\n\nThe package contains the native host controller and its platform resources for ${target}. Connect a supported board, then use \`${executable} ports\` and \`${executable} exec --port <PORT> status\`.\n${footer}`;
+  return `${header}## Run the Host\n\n~~~text\n${launch}\n~~~\n\nThe package contains the host application and its platform resources for ${target}. Connect a supported board, then use \`${executable} ports\` and \`${executable} exec --port <PORT> status\`.\n${footer}`;
 })();
 writeFileSync(join(packageRoot, "README.md"), packageReadme, "utf8");
 

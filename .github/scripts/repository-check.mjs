@@ -32,10 +32,13 @@ const requiredFiles = [
   ".github/workflows/virtual-board.yml",
   ".github/scripts/package-directory.mjs",
   ".github/scripts/package-directory.test.mjs",
+  ".github/scripts/codebase-summary.mjs",
+  ".github/scripts/codebase-summary.test.mjs",
   ".github/scripts/dependency-report.mjs",
   ".github/scripts/release-showcase.mjs",
   ".github/scripts/step-summary.mjs",
   ".github/scripts/step-summary.test.mjs",
+  ".github/scripts/usage-progress.mjs",
 ];
 
 function report(message) {

@@ -11,7 +11,7 @@
   <p>ATmega328P firmware, a production-oriented Go control surface, and a native<br>virtual board for the ControllerBoardMini ecosystem.</p>
   <p>
     <a href="https://github.com/atomicdeploy/PCController/releases">Download a release</a> ·
-    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml">Watch the flagship build</a> ·
+    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml">Open Build</a> ·
     <a href="docs/README.md">Read the docs</a>
   </p>
 </div>
@@ -28,24 +28,23 @@
 | I want to… | Download | Runs on / targets |
 |---|---|---|
 | Program the ControllerBoardMini | `PCController-Firmware-<version>-AVR-ATmega328P.tar.gz`, `PCController-<version>-ATmega328P-Application.hex`, or `PCController-<version>-ATmega328P-Full-Flash-Urboot.hex` | ATmega328P, MiniCore 3.1.2 |
-| Control a real board | `PCController-Controller-<version>-<platform>.tar.gz` | Linux x64/ARM64, Windows x64, macOS Intel/Apple Silicon |
+| Control the board | `PCController-Host-<version>-<platform>.tar.gz` | Linux x64/ARM64, Windows x64, macOS Intel/Apple Silicon |
 | Explore and test without hardware | `PCController-VirtualBoard-<version>-<platform>.tar.gz` | Linux x64/ARM64, Windows x64, macOS Intel/Apple Silicon |
 | Verify a release | `SHA256SUMS.txt`, release manifest, and GitHub attestations | Any SHA-256-capable system |
 
 Each archive expands into a versioned, product-named root rather than loose
-generic files. Actions artifacts use the friendly names
-`PCController-Firmware-ATmega328P`, `PCController-Controller-<platform>`, and
-`PCController-VirtualBoard-<platform>`; the flagship also publishes the same
-flat AVR payload under the exact inspiration alias `firmware`. Release assets
-add the version. In the
-patterns above, `<version>` includes the leading `v`.
+generic files. Actions artifacts use the names
+`PCController-Firmware-ATmega328P`, `PCController-Host-<platform>`, and
+`PCController-VirtualBoard-<platform>`; Build also uploads the AVR payload as
+`firmware`. Release assets add the version. In the patterns above, `<version>`
+includes the leading `v`.
 
 ## What ships
 
 | Layer | Highlights | Build evidence |
 |---|---|---|
-| AVR firmware | 15-page TM1637 menu, COBS/CRC UART, INA219 and DS18B20 telemetry, 16 PWM outputs, guarded dual-side motion, learned 433 MHz actions, EEPROM settings | Real MiniCore compile, strict Intel HEX validation, memory report, SHA-256 manifest |
-| Controller | Charm TUI, monitor and shell, JSON-RPC/REST/WebSocket surfaces, Go API, C ABI library, programmer launcher, configuration, histories, macros and automation | Go test/vet, native build, executable identity, C ABI smoke test |
+| AVR firmware | 15-page TM1637 menu, COBS/CRC UART, INA219 and DS18B20 telemetry, 16 PWM outputs, guarded dual-side motion, learned 433 MHz actions, EEPROM settings | MiniCore compile, strict Intel HEX validation, memory report, SHA-256 manifest |
+| Host | Charm TUI, monitor and shell, JSON-RPC/REST/WebSocket surfaces, Go API, C ABI library, programmer launcher, configuration, histories, macros and automation | Go test/vet, native build, executable identity, C ABI smoke test |
 | Virtual Board | Hardware-free protocol and behavior simulator for development and CI | Native CMake build and CTest on all five host targets |
 
 ### Current AVR footprint
@@ -58,7 +57,7 @@ patterns above, `<version>` includes the leading `v`.
 
 These figures describe the current pinned build profile, not every future
 commit. The memory tables and manifests attached to the latest successful
-[flagship build](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml)
+[Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml)
 are authoritative. Complete cap24 host-menu overlays remain in the Controller
 and Virtual Board; the space-constrained AVR keeps its exact cap19 front-panel
 push fallback.
@@ -75,7 +74,7 @@ build.cmd --all --clean --no-upx
 ./build.sh --all --clean --no-upx
 ```
 
-Or download the matching Controller and Virtual Board packages from the latest
+Or download the matching Host and Virtual Board packages from the latest
 [release](https://github.com/atomicdeploy/PCController/releases). For one
 archive, download its matching `.sha256` sidecar; Linux uses `sha256sum`, macOS
 uses `shasum -a 256`, and Windows PowerShell uses `Get-FileHash`. Linux and
@@ -88,9 +87,9 @@ for all three platforms. Then continue with
 flowchart LR
     S["PCController source"] --> B["Build"]
     B --> F["AVR firmware"]
-    B --> C["Controller · 5 targets"]
+    B --> C["Host · 5 targets"]
     B --> V["Virtual Board · 5 targets"]
-    F --> A["Friendly Actions artifacts"]
+    F --> A["Actions artifacts"]
     C --> A
     V --> A
     A --> R["Draft alpha release"]

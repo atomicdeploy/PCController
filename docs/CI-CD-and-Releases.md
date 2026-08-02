@@ -1,10 +1,8 @@
 # CI/CD and Releases
 
-PCController's GitHub automation builds the real AVR firmware, native
-Controller, and native Virtual Board from one exact source commit. The
-flagship run is designed to be useful before a log is opened: its summary is a
-download catalog, compatibility matrix, memory report, validation record, and
-release-readiness view.
+PCController's GitHub automation builds AVR firmware, the native Host, and the
+native Virtual Board from one source commit. Build provides a download catalog,
+compatibility matrix, memory report, and validation record.
 
 > [!IMPORTANT]
 > GitHub-hosted CI is hardware-free. A green firmware job proves compilation,
@@ -17,9 +15,9 @@ release-readiness view.
 
 | Workflow | Role | Triggers |
 |---|---|---|
-| `Build` (`build.yml`) | Flagship orchestrator and combined download catalog | pull request, `main`, manual dispatch |
+| `Build` (`build.yml`) | Build orchestrator and combined download catalog | pull request, `main`, manual dispatch |
 | `⚡ Firmware · AVR` (`firmware.yml`) | Reusable MiniCore compile, HEX validation, footprint and firmware package | called by Build and Release |
-| `🖥️ Controller · Cross-platform` (`host.yml`) | Reusable Go test/vet, identity, C ABI smoke test and five-target packaging | called by Build and Release |
+| `🖥️ Host · Cross-platform` (`host.yml`) | Reusable Go test/vet, identity, C ABI smoke test and five-target packaging | called by Build and Release |
 | `🧪 Virtual Board · Cross-platform` (`virtual-board.yml`) | Reusable native CMake/CTest and five-target packaging | called by Build and Release |
 | `🛡️ Quality · Repository Health` (`repository-health.yml`) | Source, license, docs, build-tool, workflow and whitespace audits | pull request, `main`, manual dispatch |
 | `🔭 Dependencies · AVR Supply Chain` (`dependencies.yml`) | Daily pinned-toolchain health report and verified update proposal | daily schedule, manual dispatch |
@@ -27,34 +25,34 @@ release-readiness view.
 | `🔌 Deploy · Protected AVR Hardware` (`deploy-avr.yml`) | Explicitly gated physical programming path | manual dispatch on approved self-hosted runner only |
 
 The three build workflows remain independently callable and reusable, while
-the flagship workflow presents them as one product:
+Build presents them as one product:
 
 ```mermaid
 flowchart TD
     T["PR, main, or manual ref"] --> B["Build"]
     B --> F["Firmware · ATmega328P"]
-    B --> H["Controller · 5 targets"]
+    B --> H["Host · 5 targets"]
     B --> V["Virtual Board · 5 targets"]
     F --> C["Combined build catalog"]
     H --> C
     V --> C
-    C --> A["Friendly Actions artifacts"]
+    C --> A["Actions artifacts"]
 ```
 
 ## Builds and Actions artifacts
 
 | Deliverable | Actions artifact | Validation |
 |---|---|---|
-| AVR firmware | `PCController-Firmware-ATmega328P` | Pinned MiniCore 3.1.2 and rc-switch 2.6.4, real compile, strict Intel HEX validation, flash/static/estimated-peak SRAM report, dependency inventory |
-| AVR inspiration-compatible alias | `firmware` | Identical flat AVR payload from flagship `Build`, preserving the ASA0002E `Build` / `build` / `firmware` contract |
-| Controller | `PCController-Controller-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Go tests and vet, executable identity, native package, C ABI library and smoke test |
+| AVR firmware | `PCController-Firmware-ATmega328P` | Pinned MiniCore 3.1.2 and rc-switch 2.6.4, compile, strict Intel HEX validation, flash/static/estimated-peak SRAM report, dependency inventory |
+| AVR alias | `firmware` | Flat AVR payload from `Build` |
+| Host | `PCController-Host-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Go tests and vet, executable identity, native package, C ABI library and smoke test |
 | Virtual Board | `PCController-VirtualBoard-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Native CMake build and CTest |
 
 Every archive carries a matching `.sha256` sidecar and expands into a
 versioned, product-specific root. For example:
 
 ```text
-PCController-Controller-v0.1.0-alpha.1-Linux-x64/
+PCController-Host-v0.1.0-alpha.1-Linux-x64/
 PCController-VirtualBoard-v0.1.0-alpha.1-Windows-x64/
 PCController-Firmware-v0.1.0-alpha.1-AVR-ATmega328P/
 ```
@@ -69,7 +67,7 @@ download. Use the platform-native command for the package you downloaded:
 **Linux**
 
 ```bash
-archive=PCController-Controller-v0.1.0-alpha.1-Linux-x64.tar.gz
+archive=PCController-Host-v0.1.0-alpha.1-Linux-x64.tar.gz
 sha256sum --check "${archive}.sha256"
 tar -xzf "$archive"
 ```
@@ -77,7 +75,7 @@ tar -xzf "$archive"
 **macOS**
 
 ```bash
-archive=PCController-Controller-v0.1.0-alpha.1-macOS-Apple-Silicon.tar.gz
+archive=PCController-Host-v0.1.0-alpha.1-macOS-Apple-Silicon.tar.gz
 shasum -a 256 -c "${archive}.sha256"
 tar -xzf "$archive"
 ```
@@ -85,7 +83,7 @@ tar -xzf "$archive"
 **Windows PowerShell**
 
 ```powershell
-$archive = "PCController-Controller-v0.1.0-alpha.1-Windows-x64.tar.gz"
+$archive = "PCController-Host-v0.1.0-alpha.1-Windows-x64.tar.gz"
 $expected = ((Get-Content -LiteralPath "$archive.sha256" -Raw) -split '\s+', 2)[0]
 $actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
 if ($actual.ToLowerInvariant() -ne $expected.ToLowerInvariant()) {
@@ -105,11 +103,12 @@ Artifact retention is deliberate:
 - GitHub release assets remain available with the release until a maintainer
   removes them.
 
-Each job writes a polished step summary with the source commit, target and
-toolchain, validation results, artifact link, file sizes and SHA-256 hashes.
-The AVR summary additionally shows visual and text flash/SRAM meters, exact
-free space, linked libraries, build configuration, and the stack-headroom
-estimate. The combined flagship summary is the authoritative platform chooser.
+Each codebase writes one summary. Host and Virtual Board show shared checks
+once, then list only platform-specific values in a target table; failed,
+cancelled, skipped, and missing targets remain visible. The AVR summary shows
+flash/SRAM meters, free space, libraries, build configuration, and stack
+headroom. Usage meters are green through 50%, orange above 50%, and red above
+80%. The combined Build summary links every package.
 
 ## Release integrity
 
@@ -145,14 +144,14 @@ operation.
 After the checksum succeeds, verify GitHub build provenance on Linux or macOS:
 
 ```bash
-gh attestation verify PCController-Controller-v0.1.0-alpha.1-Linux-x64.tar.gz \
+gh attestation verify PCController-Host-v0.1.0-alpha.1-Linux-x64.tar.gz \
   --repo atomicdeploy/PCController
 ```
 
 Or in PowerShell:
 
 ```powershell
-gh attestation verify .\PCController-Controller-v0.1.0-alpha.1-Windows-x64.tar.gz `
+gh attestation verify .\PCController-Host-v0.1.0-alpha.1-Windows-x64.tar.gz `
   --repo atomicdeploy/PCController
 ```
 
@@ -174,7 +173,7 @@ the same audit and proposal paths on demand.
 
 Dependabot independently checks GitHub Actions daily and Go modules weekly.
 Minor and patch updates may be grouped to reduce noise; major updates remain
-isolated for review. The complete flagship build exposes any resulting flash
+isolated for review. Build exposes any resulting flash
 or SRAM movement before an Arduino dependency proposal can be merged.
 
 ## Gated hardware deployment
