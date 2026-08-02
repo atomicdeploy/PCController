@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -52,6 +53,17 @@ func TestHTTPUploadListRangeDownloadAndExplicitUpdate(t *testing.T) {
 	}
 	if status := waitOperation(t, service, result.Operation.ID); status.State != "completed" {
 		t.Fatalf("status=%#v", status)
+	}
+	journalData, err := os.ReadFile(service.operationJournalPath(result.Operation.ID))
+	if err != nil {
+		t.Fatalf("completed operation journal is not durable: %v", err)
+	}
+	var journal operationJournal
+	if err := json.Unmarshal(journalData, &journal); err != nil {
+		t.Fatalf("decode completed operation journal: %v", err)
+	}
+	if journal.Status.State != "completed" {
+		t.Fatalf("completed operation was exposed before its journal: %#v", journal.Status)
 	}
 	repeat := httptest.NewRequest(http.MethodPost, "/api/v1/updates/firmware", bytes.NewReader(body))
 	repeat.Header.Set("Idempotency-Key", "browser-deploy-1")
