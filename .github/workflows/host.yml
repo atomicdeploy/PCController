@@ -62,16 +62,17 @@ jobs:
         if: matrix.windows
         shell: pwsh
         run: |
-          $mingwBin = "C:\msys64\mingw64\bin"
+          $mingwBin = Join-Path $env:ProgramFiles "Git\mingw64\bin"
           $gcc = Join-Path $mingwBin "gcc.exe"
           if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
-            throw "The GitHub Windows image is missing its MinGW compiler: $gcc"
+            throw "The GitHub Windows image is missing Git MinGW64: $gcc"
           }
           $target = (& $gcc -dumpmachine).Trim()
           if ($target -ne "x86_64-w64-mingw32") {
             throw "Expected x86_64-w64-mingw32 GCC, found $target"
           }
           $mingwBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "CC=gcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & $gcc --version
 
       - name: "🐹 Install Go from go.mod"
