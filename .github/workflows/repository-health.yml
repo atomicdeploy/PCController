@@ -38,6 +38,9 @@ jobs:
       - name: "🧭 Check repository structure and links"
         run: node .github/scripts/repository-check.mjs
 
+      - name: "🔐 Check Dependabot, CodeQL, and immutable action pins"
+        run: node .github/scripts/security-config-check.mjs
+
       - name: "🏗️ Check project-owned build tooling"
         run: npm run check --prefix Tools/Build
 
@@ -54,6 +57,7 @@ jobs:
           node --test .github/scripts/dependency-report.test.mjs
           node --test .github/scripts/release-asset-collisions.test.mjs
           node --test .github/scripts/release-showcase.test.mjs
+          node --test .github/scripts/security-config-check.test.mjs
           node --test .github/scripts/step-summary.test.mjs
 
       - name: "✅ Validate every GitHub Actions workflow"
@@ -76,6 +80,8 @@ jobs:
             echo '| Dual-license and REUSE metadata | ✅ verified |'
             echo '| Build/Firmware Node test suites | ✅ passed |'
             echo '| Dependency/Release helper tests | ✅ passed |'
+            echo '| Dependabot + CodeQL coverage | ✅ complete and regression-tested |'
+            echo '| External Actions | ✅ immutable SHA pins |'
             echo '| GitHub Actions actionlint | ✅ passed |'
             echo '| Whitespace | ✅ clean |'
           } >> "$GITHUB_STEP_SUMMARY"

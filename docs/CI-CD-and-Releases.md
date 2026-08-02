@@ -20,6 +20,7 @@ compatibility matrix, memory report, and validation record.
 | `🖥️ Host · Cross-platform` (`host.yml`) | Reusable Go test/vet, identity, C ABI smoke test and five-target packaging | called by Build and Release |
 | `🧪 Virtual Board · Cross-platform` (`virtual-board.yml`) | Reusable native CMake/CTest and five-target packaging | called by Build and Release |
 | `🛡️ Quality · Repository Health` (`repository-health.yml`) | Source, license, docs, build-tool, workflow and whitespace audits | pull request, `main`, manual dispatch |
+| `🛡️ Security · CodeQL` (`codeql.yml`) | Six-category security-extended scan across every supported repository language and platform-specific source branch | pull request, merge queue, `main`, weekly schedule, manual dispatch |
 | `🔭 Dependencies · AVR Supply Chain` (`dependencies.yml`) | Daily pinned-toolchain health report and verified update proposal | daily schedule, manual dispatch |
 | `✨ Release · Attested Packages` (`release.yml`) | Rebuild, attest, and create or update a deterministic release | `v*` tag, manual dispatch |
 | `🔌 Deploy · Protected AVR Hardware` (`deploy-avr.yml`) | Explicitly gated physical programming path | manual dispatch on approved self-hosted runner only |
@@ -171,10 +172,48 @@ reviewable pull request; it never merges or releases the change. An existing
 open proposal suppresses duplicates. Manual `check` and `apply` modes provide
 the same audit and proposal paths on demand.
 
-Dependabot independently checks GitHub Actions daily and Go modules weekly.
-Minor and patch updates may be grouped to reduce noise; major updates remain
-isolated for review. Build exposes any resulting flash
-or SRAM movement before an Arduino dependency proposal can be merged.
+Dependabot independently checks GitHub Actions daily, the Go Host module
+weekly, and both project-owned Node package roots weekly. Minor and patch
+version updates are grouped by ecosystem, security updates receive their own
+groups, and major updates remain isolated for review. The two Node tools do
+not currently declare third-party packages, but their roots are already
+covered so a future dependency cannot arrive outside update policy.
+
+Arduino CLI, MiniCore, and `rc-switch` do not have a native Dependabot package
+ecosystem. They remain covered by the checksum-verified AVR dependency radar
+rather than being presented as native Dependabot coverage. Build exposes any
+resulting flash or SRAM movement before an Arduino dependency proposal can be
+merged.
+
+Repository Health inventories every `go.mod` and `package.json`, validates the
+corresponding Dependabot roots, verifies the CodeQL language/platform matrix,
+and rejects mutable third-party Action references. Mutation tests prove those
+checks fail when an ecosystem, analyzer, safe trigger, or immutable pin is
+removed.
+
+## Code scanning
+
+CodeQL uses advanced setup with the `security-extended` query suite and six
+unique result categories. Unique categories preserve both platform analyses
+for languages with build-tagged or conditional source instead of allowing one
+upload to replace another.
+
+| Codebase | Analyzer | Build captured by CodeQL |
+|---|---|---|
+| GitHub Actions | `actions` | Every tracked workflow |
+| Project tooling | `javascript-typescript` | Build, Firmware, Audit, and CI scripts and tests |
+| Host | `go` | Linux and Windows tests, ignored icon generator, and tagged C ABI builds |
+| Firmware + Virtual Board | `c-cpp` | Real MiniCore AVR compile, Linux CMake build, Windows CMake build, and Windows C ABI smoke source |
+
+The workflow has no path filters, receives no repository secrets, checks out
+without persisted credentials, and uploads only SARIF results. Its final
+`🛡️ CodeQL · Entire repository` job is the stable branch-protection gate and
+publishes one consolidated codebase summary even when an analysis fails.
+
+Dependabot-authored updates should be merged with a merge commit. Squashing a
+Dependabot commit can cause the following `main` push to receive a read-only
+token, which prevents SARIF upload even though the pull-request analysis
+already passed.
 
 ## Gated hardware deployment
 

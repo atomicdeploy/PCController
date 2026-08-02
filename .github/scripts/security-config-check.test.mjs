@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import {
+  inventoryRepository,
+  validateActionPins,
+  validateCodeql,
+  validateDependabot,
+  validateSecurityConfiguration,
+} from "./security-config-check.mjs";
+
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const dependabot = readFileSync(resolve(root, ".github/dependabot.yml"), "utf8");
+const codeql = readFileSync(resolve(root, ".github/workflows/codeql.yml"), "utf8");
+const inventory = inventoryRepository([
+  ".github/workflows/build.yml",
+  ".github/scripts/example.mjs",
+  "Tools/Build/package.json",
+  "Tools/Firmware/package.json",
+  "Tools/Controller/go.mod",
+  "Tools/Controller/main.go",
+  "Tools/VirtualBoard/main.cpp",
+  "PCController.ino",
+]);
+
+test("the repository security configuration is complete", () => {
+  const result = validateSecurityConfiguration(root);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.stats.dependabotEcosystems, 3);
+  assert.equal(result.stats.codeqlCategories, 6);
+  assert.ok(result.stats.actionReferences > 0);
+});
+
+test("Dependabot validation rejects an uncovered Node package root", () => {
+  const mutated = dependabot.replace("      - /Tools/Firmware\n", "");
+  const errors = validateDependabot(mutated, inventory);
+  assert.ok(errors.some((error) => error.includes("npm coverage is missing /Tools/Firmware")));
+});
+
+test("CodeQL validation rejects a missing repository language", () => {
+  const mutated = codeql.replace(
+    /          - key: actions[\s\S]*?(?=          - key: javascript)/u,
+    "",
+  );
+  const errors = validateCodeql(mutated, inventory.languages);
+  assert.ok(errors.some((error) => error.includes("matrix is missing actions")));
+  assert.ok(errors.some((error) => error.includes("detected language actions")));
+});
+
+test("workflow pin validation rejects mutable action tags", () => {
+  const mutated = codeql.replace(
+    "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+    "actions/checkout@v7",
+  );
+  const result = validateActionPins(new Map([[".github/workflows/codeql.yml", mutated]]));
+  assert.ok(result.errors.some((error) => error.includes("non-immutable action reference")));
+});
+
+test("CodeQL validation rejects pull_request_target", () => {
+  const mutated = codeql.replace("  pull_request:\n", "  pull_request_target:\n");
+  const errors = validateCodeql(mutated, inventory.languages);
+  assert.ok(errors.some((error) => error.includes("pull requests targeting main")));
+  assert.ok(errors.some((error) => error.includes("privileged or path-filtered")));
+});
+
+test("CodeQL validation rejects path-filtered required checks", () => {
+  const mutated = codeql.replace(
+    "  pull_request:\n    branches: [main]\n",
+    "  pull_request:\n    branches: [main]\n    paths: ['Tools/**']\n",
+  );
+  const errors = validateCodeql(mutated, inventory.languages);
+  assert.ok(errors.some((error) => error.includes("privileged or path-filtered")));
+});
+
+test("CodeQL validation rejects a hollow manual-build category", () => {
+  const mutated = codeql.replace("          go test ./...\n", "");
+  const errors = validateCodeql(mutated, inventory.languages);
+  assert.ok(errors.some((error) => error.includes("go-linux build is missing go test ./...")));
+});
+
+test("CodeQL validation rejects a cosmetic gate that ignores failures", () => {
+  const mutated = codeql
+    .replace("    if: always()\n    needs: analyze\n", "    needs: analyze\n")
+    .replace(/^          \[\[ "\$ANALYSIS_RESULT" == "success" \]\]\s*$/mu, "");
+  const errors = validateCodeql(mutated, inventory.languages);
+  assert.ok(errors.some((error) => error.includes("must run even when analysis fails")));
+  assert.ok(errors.some((error) => error.includes("must fail for a non-success")));
+});
