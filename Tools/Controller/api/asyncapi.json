@@ -1,0 +1,238 @@
+{
+  "asyncapi": "3.0.0",
+  "info": {
+    "title": "PCController event and WebSocket API",
+    "version": "1",
+    "description": "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required."
+  },
+  "servers": {
+    "loopback": {
+      "host": "127.0.0.1:8787",
+      "protocol": "ws",
+      "pathname": "/ipc",
+      "description": "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
+      "security": [
+        {
+          "$ref": "#/components/securitySchemes/session"
+        }
+      ]
+    }
+  },
+  "channels": {
+    "rpc": {
+      "address": "/ipc",
+      "messages": {
+        "request": {
+          "$ref": "#/components/messages/JSONRPCRequest"
+        },
+        "response": {
+          "$ref": "#/components/messages/JSONRPCResponse"
+        },
+        "event": {
+          "$ref": "#/components/messages/Event"
+        },
+        "status": {
+          "$ref": "#/components/messages/Status"
+        },
+        "error": {
+          "$ref": "#/components/messages/Error"
+        }
+      }
+    },
+    "socketIO": {
+      "address": "/socket.io/?EIO=4&transport=websocket",
+      "description": "Bounded Engine.IO v4 / Socket.IO adapter. Long-polling, namespaces, rooms, binary attachments, and acknowledgement callbacks are intentionally unsupported.",
+      "messages": {
+        "packet": {
+          "$ref": "#/components/messages/SocketIOPacket"
+        }
+      }
+    }
+  },
+  "operations": {
+    "sendRPC": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/rpc"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/rpc/messages/request"
+        }
+      ]
+    },
+    "receiveRPC": {
+      "action": "receive",
+      "channel": {
+        "$ref": "#/channels/rpc"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/rpc/messages/response"
+        },
+        {
+          "$ref": "#/channels/rpc/messages/event"
+        },
+        {
+          "$ref": "#/channels/rpc/messages/status"
+        },
+        {
+          "$ref": "#/channels/rpc/messages/error"
+        }
+      ]
+    },
+    "exchangeSocketIO": {
+      "action": "send",
+      "channel": {
+        "$ref": "#/channels/socketIO"
+      },
+      "messages": [
+        {
+          "$ref": "#/channels/socketIO/messages/packet"
+        }
+      ]
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "session": {
+        "type": "httpApiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Bearer credential or short-lived session authorization. Durable secrets must not appear in URLs."
+      }
+    },
+    "messages": {
+      "JSONRPCRequest": {
+        "payload": {
+          "$ref": "./jsonrpc.schema.json#/$defs/request"
+        }
+      },
+      "JSONRPCResponse": {
+        "payload": {
+          "oneOf": [
+            {
+              "$ref": "./jsonrpc.schema.json#/$defs/success"
+            },
+            {
+              "$ref": "./jsonrpc.schema.json#/$defs/error"
+            }
+          ]
+        }
+      },
+      "Event": {
+        "payload": {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "controller.event"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "examples": [
+            {
+              "jsonrpc": "2.0",
+              "method": "controller.event",
+              "params": {
+                "id": 42,
+                "kind": "door",
+                "state": "open",
+                "source": "board"
+              }
+            }
+          ]
+        }
+      },
+      "Status": {
+        "payload": {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "controller.status"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "examples": [
+            {
+              "jsonrpc": "2.0",
+              "method": "controller.status",
+              "params": {
+                "uptime_ms": 1234
+              }
+            }
+          ]
+        }
+      },
+      "Error": {
+        "payload": {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "controller.error"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "SocketIOPacket": {
+        "payload": {
+          "type": "string",
+          "description": "Engine.IO v4 text packet carrying subscribe, unsubscribe, message, command, or rpc events."
+        }
+      }
+    }
+  },
+  "x-socket-io-events": {
+    "incoming": [
+      "subscribe",
+      "unsubscribe",
+      "message",
+      "command",
+      "rpc"
+    ],
+    "outgoing": [
+      "subscribed",
+      "unsubscribed",
+      "message.accepted",
+      "command.response",
+      "rpc.response",
+      "controller.event",
+      "controller.status",
+      "controller.error",
+      "error"
+    ]
+  }
+}

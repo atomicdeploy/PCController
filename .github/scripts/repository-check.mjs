@@ -54,6 +54,11 @@ const requiredFiles = [
   "Tools/Dependencies/resolved-tools-lock.json",
   "Tools/Controller/toolchain-profile.json",
   "Tools/Controller/toolchain-lock.json",
+  "Tools/Controller/api/openapi.json",
+  "Tools/Controller/api/asyncapi.json",
+  "Tools/Controller/api/jsonrpc.schema.json",
+  "Tools/Controller/api/reference.html",
+  "Tools/Audit/generate-api-reference.mjs",
   ".github/scripts/codebase-summary.mjs",
   ".github/scripts/codebase-summary.test.mjs",
   ".github/scripts/release-showcase.mjs",
@@ -163,6 +168,17 @@ try {
   repository = resolveRepository(process.env, { cwd: root });
 } catch (error) {
   report(error.message);
+}
+
+try {
+  execFileSync(process.execPath, ["Tools/Audit/generate-api-reference.mjs", "--check"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+} catch (error) {
+  const detail = String(error.stderr || error.message || error).trim();
+  report(`machine-readable API reference check failed: ${detail}`);
 }
 
 // These exact strings are positive/negative supply-chain policy fixtures. Keep

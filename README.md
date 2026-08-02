@@ -7,6 +7,7 @@
   <a href="#quick-start"><img alt="Quick start" src="https://img.shields.io/badge/Quick_start-8b5cf6?style=for-the-badge&logo=windows-terminal&logoColor=white"></a>
   <a href="Tools/Controller/README.md#embedded-web-control-center"><img alt="WebUI" src="https://img.shields.io/badge/WebUI-ec4899?style=for-the-badge&logo=react&logoColor=white"></a>
   <a href="Tools/Controller/docs/Protocol-and-Network-API.md"><img alt="Protocol and API reference" src="https://img.shields.io/badge/Protocol_%2B_API-f59e0b?style=for-the-badge&logoColor=17131f"></a>
+  <a href="Tools/Controller/api/reference.html"><img alt="Offline API contracts" src="https://img.shields.io/badge/API_contracts-6d4aff?style=for-the-badge&logo=openapiinitiative&logoColor=white"></a>
   <a href="docs/README.md"><img alt="Documentation" src="https://img.shields.io/badge/Documentation-33263f?style=for-the-badge&logo=readthedocs&logoColor=f8f4ff"></a>
   <br><br>
   <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml"><img alt="Build" src="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml/badge.svg?branch=main"></a>
@@ -301,6 +302,7 @@ Release archives add the version and include SHA-256 metadata. Follow
 | [Front Panel and Menus](docs/Front-Panel-and-Menus.md) | Physical controls, editors, display semantics, and hosted menus |
 | [Host Configuration and Integrations](docs/Host-Configuration-and-Integrations.md) | JSON configuration, hotkeys, notifications, discovery, local devices, webhooks, and bridges |
 | [Protocol and Network API](Tools/Controller/docs/Protocol-and-Network-API.md) | UART frames, commands, JSON-RPC, REST, WebSocket, authorization, and events |
+| [Machine-readable API contracts](Tools/Controller/api/reference.html) | Offline OpenAPI 3.1, AsyncAPI 3.0, JSON-RPC methods, errors, capabilities, and idempotency |
 | [Portable WebUI](Tools/Controller/docs/Portable-WebUI.md) | Deterministic export, separate-origin hosting, transport discovery, CORS, and tokens |
 | [C Library API](Tools/Controller/docs/C-Library-API.md) | Native ABI lifecycle, JSON ownership, callbacks, and integration examples |
 | [Control-Surface Matrix](Tools/Controller/docs/Control-Surface-Capability-Matrix.md) | Feature reachability across every user and API surface |
