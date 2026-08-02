@@ -12,11 +12,19 @@ constexpr int ResetJournalEepromAddress = EepromLayout::ResetJournalAddress;
 constexpr uint8_t ResetJournalSlots = EepromLayout::ResetJournalSlots;
 constexpr uint8_t ResetRecordMarker = 0xA7;
 
+#if defined(_MSC_VER)
+#pragma pack(push, 1)
+struct ResetRecord {
+#else
 struct __attribute__((packed)) ResetRecord {
+#endif
   uint32_t count;
   uint8_t checksum;
   uint8_t marker;
 };
+#if defined(_MSC_VER)
+#pragma pack(pop)
+#endif
 
 static_assert(sizeof(ResetRecord) == EepromLayout::ResetRecordBytes,
               "Reset record layout changed");
