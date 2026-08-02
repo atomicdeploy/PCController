@@ -150,6 +150,9 @@ test('scheduled updater validates every required candidate gate before PR creati
     'schedule:', '--apply --validate', 'steps.candidate.outcome == \'success\'',
     'body-path: .build/dependencies/dependency-pr.md', 'dependency-blocked',
     '📦 dependencies', '🏗️ tooling-build',
+    'actions: write', 'id: dependency-pr', 'pull-request-operation',
+    'gh workflow run build.yml', 'gh workflow run repository-health.yml',
+    'gh workflow run codeql.yml',
   ]) assert.ok(workflow.includes(expected), `workflow missing ${expected}`)
   assert.match(workflow, /peter-evans\/create-pull-request@[0-9a-f]{40}\s+# v8/u)
   for (const expected of [
