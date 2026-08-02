@@ -3,9 +3,9 @@
 This is the canonical public map from normalized project requirements to GitHub issues. Closely related requests are grouped into one verifiable requirement; raw conversation text, machine-local paths, and private audit data are intentionally excluded.
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
-- Normalized requirements: **65**
-- Open: **51**
-- Closed with current evidence: **14**
+- Normalized requirements: **66**
+- Open: **53**
+- Closed with current evidence: **13**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
@@ -78,7 +78,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#7 — PC host TUI, configuration, automation, and OS integration](https://github.com/atomicdeploy/PCController/issues/7)
 
-7 open / 0 closed / 7 total
+8 open / 0 closed / 8 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
@@ -89,16 +89,17 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `host-automation-hotkeys-os` | [#43](https://github.com/atomicdeploy/PCController/issues/43) | 🟡 open | Complete macros, melodies, automations, hotkeys, notifications, and guarded OS actions |
 | `host-macro-recording-playback-sync` | [#44](https://github.com/atomicdeploy/PCController/issues/44) | 🟡 open | Stream recorded macros into an MCU-timed queue with synchronized progress and safety |
 | `host-keyboard-bindings-output-state` | [#45](https://github.com/atomicdeploy/PCController/issues/45) | 🟡 open | Add configurable keyboard motion/output bindings with authoritative live-state reconciliation |
+| `embedded-webui-native-experience` | [#101](https://github.com/atomicdeploy/PCController/issues/101) | 🟡 open | Deliver the embedded responsive WebUI as a complete native-feeling controller client |
 
 ## [#8 — IPC, APIs, networking, discovery, and remote bridges](https://github.com/atomicdeploy/PCController/issues/8)
 
-2 open / 2 closed / 4 total
+3 open / 1 closed / 4 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
 | `ipc-websocket-api-suite` | [#46](https://github.com/atomicdeploy/PCController/issues/46) | ✅ closed | Provide versioned JSON-RPC, REST, and authenticated WebSocket command/event APIs |
 | `network-bridge-discovery` | [#47](https://github.com/atomicdeploy/PCController/issues/47) | 🟡 open | Bridge controller hosts over the network with mDNS/SSDP discovery |
-| `http-webhooks-socketio-messages` | [#48](https://github.com/atomicdeploy/PCController/issues/48) | ✅ closed | Add bidirectional HTTP, webhooks, WebSocket client/server, Socket.IO, and actionable messages |
+| `http-webhooks-socketio-messages` | [#48](https://github.com/atomicdeploy/PCController/issues/48) | 🟡 open | Add bidirectional HTTP, webhooks, WebSocket client/server, Socket.IO, and actionable messages |
 | `remote-control-security` | [#49](https://github.com/atomicdeploy/PCController/issues/49) | 🟡 open | Define security and policy gates for every remote and disruptive control path |
 
 ## [#9 — USB lifecycle, device selection, and single-owner IPC](https://github.com/atomicdeploy/PCController/issues/9)

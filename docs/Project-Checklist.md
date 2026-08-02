@@ -38,9 +38,10 @@ binary, checksum, or test run cannot satisfy a newer tree.
   external-project, and stale-origin gates scan tracked plus ordinary
   non-ignored untracked text while excluding ignored caches and generated/binary
   paths.
-- ✅ The current pre-freeze semantic audit covered all 123 private user turns,
-  found no additional distinct public requirement, and corrected missing detail
-  in existing normalized issues without publishing raw/private wording. The
+- ✅ The current pre-freeze semantic audit covered all 204 private user turns
+  from the two root product discussions (81 plus 123), identified the missing
+  public WebUI requirement, and corrected missing detail in existing normalized
+  issues without publishing raw/private wording. The
   separate final frozen-layout code/documentation audit remains open.
 - 🟣 Record source identity, WebUI distribution identity, executable identity,
   and package-manifest identity for the final candidate.
@@ -78,10 +79,11 @@ binary, checksum, or test run cannot satisfy a newer tree.
   artifact and require both the validated application and complete 1 KiB safe
   EEPROM defaults to be independently enabled in `host-manifest.json`.
 - ✅ Virtual Board builds use the native CMake test path on supported targets.
-- ✅ Canonical firmware source identity `800A5B70` links 32,232 of the stock
-  32,384-byte application range, emits 32,244 application HEX data bytes, and
-  uses 1,432 bytes static SRAM with a modeled 1,761-byte peak and 287 bytes
-  free.
+- ✅ Canonical firmware source identity `DB5C1EBA` links 32,206 of the stock
+  32,384-byte application range, emits 32,218 application HEX data bytes, and
+  uses 1,433 bytes static SRAM with a modeled 1,762-byte peak and 286 bytes
+  free. The fixed shared identity still has 38 immediately linkable bytes
+  before it; the 128 stock-only bytes after it are not common-layout headroom.
 - 🟣 Run the complete build from the exact final tree and preserve its manifest,
   package list, test counts, hashes, and any warnings. The final aggregate rerun
   after the optional-LCD warning-only patch is still pending and must supersede
@@ -134,6 +136,14 @@ binary, checksum, or test run cannot satisfy a newer tree.
 - ✅ Browser terminal output supports safe structured `console.*` rendering,
   `%s` substitution, `%c` style spans, and common log levels without evaluating
   or injecting HTML.
+- ✅ One typed, accessible data workspace now provides recursive structured
+  values, sorting, column control and resizing, selection, keyboard context
+  actions, all/filtered export, expandable event metadata, stable live-prepend
+  anchoring, and bounded large-result rendering without `[object Object]`.
+- ✅ Watched host appearance/UI preferences are authoritative for WebUI,
+  native/TUI surfaces, and cross-tab updates. Mutations use semantic ETags,
+  reject stale writes, suppress no-ops, and retain browser storage only as a
+  startup cache.
 
 ### Browser communication
 
@@ -252,6 +262,10 @@ binary, checksum, or test run cannot satisfy a newer tree.
   standalone renderer's 1328-byte flash and 49-byte SRAM cost is documented.
 - ✅ The TM1637 menu has stable Door page zero, persistent visibility/order,
   cached rendering, key gestures, editors, and save/discard feedback.
+- ✅ [#28](https://github.com/atomicdeploy/PCController/issues/28): local edit
+  transactions now include the discontiguous closed-door display option in
+  their snapshot, reapply the exact prior live settings on Discard or a host
+  page change, and reject default-page double-click escape from modal editors.
 - 🟣 Host-driven TM1637 scrolling is enabled by default for selected pages. On
   Door, an authenticated host scrolls `door is open` or `door is closed`, then
   yields immediately to warnings, edits, navigation, programming, and other
@@ -289,21 +303,23 @@ binary, checksum, or test run cannot satisfy a newer tree.
 
 ### Known source and design gaps
 
-- 🚧 [#25](https://github.com/atomicdeploy/PCController/issues/25): the
-  persisted four-mode motion-door policy is enforced by every start path and is
-  editable from every host surface, but the compact on-board policy editor is
-  still absent. A friendly local editor is estimated at 60-110 flash bytes with
-  no added EEPROM/static SRAM; the current shared Urboot layout has only 12
-  immediately linkable bytes. Replacing the local Ready-color editor is the
-  smallest measured-plan tradeoff, but that ownership change requires an
-  explicit user decision.
+- ✅ [#25](https://github.com/atomicdeploy/PCController/issues/25): Board
+  Settings now includes the compact `SAFE` editor for all four persisted motion
+  policies. It previews the common fail-safe gate immediately, preserves every
+  existing settings leaf, and participates in the corrected atomic
+  Save/Discard transaction. Physical loaded-motion acceptance remains separate.
 - 🚧 [#87](https://github.com/atomicdeploy/PCController/issues/87): host
   automations are complete, but the MCU still has no generic EEPROM-backed rule
   table, CRUD opcodes, or deterministic offline event executor for door, BT
-  Audio, host-loss, RF transmit, macro requests, and other bounded actions.
+  Audio, host-loss, RF transmit, macro requests, and other bounded actions. The
+  shared image has only 38 immediately linkable bytes, so this feature still
+  requires a measured migration/profile decision rather than using headroom.
 - 🚧 [#22](https://github.com/atomicdeploy/PCController/issues/22): MCU EEPROM
   stores Silent and door/relay cue enable flags, but each door-open, door-close,
   relay-on, and relay-off cue still uses fixed flash-resident notes and timing.
+  A four-descriptor candidate measured 33,318 program/1,442 static-SRAM bytes;
+  a compressed five-byte record still measured 33,032/1,442 and crossed the
+  fixed identity boundary by 788 bytes. Neither candidate is shippable.
 - 🚧 [#30](https://github.com/atomicdeploy/PCController/issues/30): the current
   physical HOST-menu path is push/capture. The AVR does not yet retain a menu
   directory, request nodes by ID, track generations, or render `----` plus
@@ -385,6 +401,10 @@ binary, checksum, or test run cannot satisfy a newer tree.
 
 ## Network and integration safety
 
+- ✅ OpenAPI 3.1, AsyncAPI 3.0, and JSON-RPC schemas plus a standalone offline
+  reference are generated from one catalog. The repository gate rejects RPC
+  dispatcher or REST route-family drift and records capability, idempotency,
+  error, transport, and intentionally unsupported behavior.
 - ✅ IPC listeners default to loopback.
 - ✅ Remote mode requires a long token, explicit non-wildcard origins, and a
   capability policy; read/event access does not imply board writes or OS actions.
@@ -398,6 +418,11 @@ binary, checksum, or test run cannot satisfy a newer tree.
   live, Close pauses reconnect, and a successful Open resumes it.
 - ✅ Outbound GET, POST, PUT, PATCH, and DELETE webhooks are delivered through
   real loopback HTTP requests with the documented query/body behavior.
+- ✅ Outbound webhook delivery is restart-durable and bounded, with atomic
+  persistence, per-attempt and stable idempotency identities, target timeouts,
+  jittered retry plus `Retry-After`, dead-letter inspect/replay/clear commands,
+  shutdown drain, lossless JSON templates, optional timestamp/nonce HMAC, and
+  redirect rejection so credentials and delivery headers cannot cross targets.
 - ✅ Bridge requests are correlated, loop-safe, and revalidated by the target's
   own policy and device safety guards.
 - ✅ Local integration targets are normalized and constrained to the intended
@@ -436,6 +461,12 @@ alone; its linked issue remains open until the physical observation is recorded.
   indefinite multi-code mode and a bounded `timer` mode. Every surface shows
   timer duration/remaining time and a definite ended/cancelled/full event;
   `single` and `one-shot` remain accepted/documented synonyms for `timer`.
+- ✅ Host source surfaces now provide one guided A/B/C/D step at a time, exact
+  stored-identity readback, explicit confirmation before semantic mapping,
+  stale/unmapped/duplicate review, guarded remove/clear, one-burst transmit,
+  cancellation, disconnect recovery, RTL/LTR layout, and keyboard operation.
+  The physical latency, gesture, range, and second-receiver observations remain
+  open in the hands-on acceptance queue above.
 
 - ⚠️ Authenticate the intended CH340/serial device after reconnect, USB renumber,
   sleep/resume, application reset, and bootloader programming.

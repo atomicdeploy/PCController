@@ -5,9 +5,68 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+/** Resolve the public API identity from the shared product manifest. */
+export function productIdentity(metadata) {
+  const productName = String(metadata.productName || metadata.name || "Controller").trim();
+  const productProtocol = String(metadata.productProtocol || "controller").trim().toLowerCase();
+  if (!productName || !/^[a-z][a-z0-9+.-]*$/u.test(productProtocol)) {
+    throw new Error("product metadata requires a display name and URI-safe protocol name");
+  }
+  return {
+    productName,
+    productProtocol,
+    httpTitle: `${productName} HTTP API`,
+    rpcSchemaID: `https://${productProtocol}.local/schemas/jsonrpc-v1.json`,
+    rpcTitle: `${productName} JSON-RPC 2.0`,
+    eventTitle: `${productName} event and WebSocket API`,
+    referenceTitle: `${productName} API Reference`,
+    referenceHeading: `${productName} API`,
+  };
+}
+
+/** Extract literal controller methods from one-line or wrapped Go case clauses. */
+export function extractGoCaseMethods(sources) {
+  const dispatched = new Set();
+  for (const source of sources) {
+    const lines = source.split(/\r?\n/u);
+    for (let index = 0; index < lines.length; index += 1) {
+      const trimmed = lines[index].trimStart();
+      if (!trimmed.startsWith("case ")) continue;
+      let clause = trimmed.slice(5);
+      while (!clause.includes(":") && index + 1 < lines.length) {
+        index += 1;
+        clause += ` ${lines[index].trim()}`;
+      }
+      const colon = clause.indexOf(":");
+      if (colon < 0) continue;
+      for (const literal of clause.slice(0, colon).matchAll(/"(controller\.[a-z0-9_.-]+)"/giu)) {
+        dispatched.add(literal[1]);
+      }
+    }
+  }
+  return dispatched;
+}
+
+/** Require exact agreement between the documented and dispatched RPC methods. */
+export function validateMethodCatalog({ catalogued, dispatched, required = [] }) {
+  const missing = [...dispatched].filter((name) => !catalogued.has(name)).sort();
+  if (missing.length > 0) {
+    throw new Error(`JSON-RPC catalog is missing dispatched methods: ${missing.join(", ")}`);
+  }
+  const stale = [...catalogued].filter((name) => !dispatched.has(name)).sort();
+  if (stale.length > 0) {
+    throw new Error(`JSON-RPC catalog contains methods absent from dispatch sources: ${stale.join(", ")}`);
+  }
+  for (const method of required) {
+    if (!catalogued.has(method)) throw new Error(`JSON-RPC catalog is missing WebSocket method ${method}`);
+  }
+}
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const outputDirectory = resolve(root, "Tools", "Controller", "api");
 const checkOnly = process.argv.includes("--check");
+const productMetadata = JSON.parse(readFileSync(resolve(root, "Tools", "Controller", "web", "package.json"), "utf8"));
+const product = productIdentity(productMetadata);
 
 const capabilityGroups = {
   events: [
@@ -211,7 +270,7 @@ const errorSchema = {
 const openapi = {
   openapi: "3.1.0",
   info: {
-    title: "PCController HTTP API",
+    title: product.httpTitle,
     version: "1",
     summary: "Versioned REST and JSON-RPC surface of the primary controller host.",
     description: "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS.",
@@ -256,8 +315,8 @@ const openapi = {
 
 const rpcSchema = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
-  $id: "https://pccontroller.local/schemas/jsonrpc-v1.json",
-  title: "PCController JSON-RPC 2.0",
+  $id: product.rpcSchemaID,
+  title: product.rpcTitle,
   oneOf: [
     { $ref: "#/$defs/request" }, { $ref: "#/$defs/success" }, { $ref: "#/$defs/error" }, { $ref: "#/$defs/notification" },
   ],
@@ -303,7 +362,7 @@ const rpcSchema = {
 const asyncapi = {
   asyncapi: "3.0.0",
   info: {
-    title: "PCController event and WebSocket API", version: "1",
+    title: product.eventTitle, version: "1",
     description: "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required.",
   },
   servers: {
@@ -366,9 +425,9 @@ const routeRows = routes.flatMap((route) => route.methods.map((method) => `<tr><
 const methodRows = methods.map((method) => `<tr><td><code>${method.name}</code></td><td>${escapeHTML(method.summary)}</td><td><span>${method.capability}</span></td><td>${method.idempotency}</td></tr>`).join("");
 const reference = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><title>PCController API Reference</title>
+<meta name="color-scheme" content="light dark"><title>${escapeHTML(product.referenceTitle)}</title>
 <style>:root{font-family:Inter,Segoe UI,system-ui,sans-serif;color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#172033;--muted:#647087;--line:#dfe3ec;--accent:#6d4aff}@media(prefers-color-scheme:dark){:root{--bg:#11131a;--panel:#191c25;--text:#edf0f7;--muted:#a8b0c2;--line:#303543;--accent:#a995ff}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{width:min(1180px,calc(100% - 32px));margin:auto;padding:48px 0 80px}header{display:grid;gap:12px;margin-bottom:34px}h1{font-size:clamp(2rem,5vw,4rem);letter-spacing:-.05em;margin:0}p{color:var(--muted);max-width:76ch;line-height:1.65}.pills{display:flex;flex-wrap:wrap;gap:8px}.pills a,.pills span,td span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--text);text-decoration:none;background:color-mix(in srgb,var(--panel) 88%,var(--accent) 12%)}section{margin-top:34px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 18px 55px color-mix(in srgb,var(--text) 8%,transparent)}section>div{padding:22px 24px 6px}h2{margin:0;font-size:1.25rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}code{font-family:Cascadia Code,ui-monospace,monospace;color:var(--accent);overflow-wrap:anywhere}@media(max-width:720px){main{width:min(100% - 20px,1180px);padding-top:26px}section{overflow:auto}table{min-width:760px}}</style></head>
-<body><main><header><span>OFFLINE CONTRACT · API v1</span><h1>PCController API</h1><p>The primary host exposes one versioned, safety-gated surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; every remote operation requires authentication and an explicit capability.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
+<body><main><header><span>OFFLINE CONTRACT · API v1</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one versioned, safety-gated surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; every remote operation requires authentication and an explicit capability.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
 <section><div><h2>HTTP operations</h2><p>Versionless <code>/api/</code> routes are deliberately unsupported. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
 <section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved; host extensions use -32001 for authentication, -32003 for capability denial, and -32000 for runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
 <p>Contract digest <code>${digest}</code>. Generated by <code>Tools/Audit/generate-api-reference.mjs</code>.</p></main></body></html>\n`;
@@ -379,19 +438,17 @@ const dispatcherFiles = [
   "Tools/Controller/internal/artifacts/service.go",
   "Tools/Controller/internal/releaseplane/service.go",
 ];
-const dispatched = new Set();
+const dispatcherSources = [];
 for (const file of dispatcherFiles) {
-  const source = readFileSync(resolve(root, file), "utf8");
-  for (const match of source.matchAll(/case\s+((?:"controller\.[a-z0-9_.-]+"\s*,?\s*)+):/giu)) {
-    for (const literal of match[1].matchAll(/"(controller\.[a-z0-9_.-]+)"/giu)) dispatched.add(literal[1]);
-  }
+  dispatcherSources.push(readFileSync(resolve(root, file), "utf8"));
 }
+const dispatched = extractGoCaseMethods(dispatcherSources);
 const catalogued = new Set(methods.map(({ name }) => name));
-const missingMethods = [...dispatched].filter((name) => !catalogued.has(name)).sort();
-if (missingMethods.length > 0) throw new Error(`JSON-RPC catalog is missing dispatched methods: ${missingMethods.join(", ")}`);
-for (const required of ["controller.subscribe", "controller.unsubscribe"]) {
-  if (!catalogued.has(required)) throw new Error(`JSON-RPC catalog is missing WebSocket method ${required}`);
-}
+validateMethodCatalog({
+  catalogued,
+  dispatched,
+  required: ["controller.subscribe", "controller.unsubscribe"],
+});
 
 const routeSourceFiles = [
   "Tools/Controller/internal/ipcjson/ipc.go",
@@ -423,16 +480,18 @@ function normalize(content) {
   return content.replaceAll("\r\n", "\n");
 }
 
-if (checkOnly) {
-  const stale = [];
-  for (const [name, content] of outputs) {
-    const path = resolve(outputDirectory, name);
-    if (!existsSync(path) || normalize(readFileSync(path, "utf8")) !== normalize(content)) stale.push(relative(root, path).replaceAll("\\", "/"));
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (checkOnly) {
+    const stale = [];
+    for (const [name, content] of outputs) {
+      const path = resolve(outputDirectory, name);
+      if (!existsSync(path) || normalize(readFileSync(path, "utf8")) !== normalize(content)) stale.push(relative(root, path).replaceAll("\\", "/"));
+    }
+    if (stale.length > 0) throw new Error(`generated API reference is missing or stale: ${stale.join(", ")}; run node Tools/Audit/generate-api-reference.mjs`);
+    process.stdout.write(`API reference is current: ${methods.length} RPC methods, ${Object.keys(openAPIPaths).length} REST paths, digest ${digest.slice(0, 12)}.\n`);
+  } else {
+    mkdirSync(outputDirectory, { recursive: true });
+    for (const [name, content] of outputs) writeFileSync(resolve(outputDirectory, name), content, "utf8");
+    process.stdout.write(`Generated ${outputs.size} API reference files with digest ${digest.slice(0, 12)}.\n`);
   }
-  if (stale.length > 0) throw new Error(`generated API reference is missing or stale: ${stale.join(", ")}; run node Tools/Audit/generate-api-reference.mjs`);
-  process.stdout.write(`API reference is current: ${methods.length} RPC methods, ${Object.keys(openAPIPaths).length} REST paths, digest ${digest.slice(0, 12)}.\n`);
-} else {
-  mkdirSync(outputDirectory, { recursive: true });
-  for (const [name, content] of outputs) writeFileSync(resolve(outputDirectory, name), content, "utf8");
-  process.stdout.write(`Generated ${outputs.size} API reference files with digest ${digest.slice(0, 12)}.\n`);
 }

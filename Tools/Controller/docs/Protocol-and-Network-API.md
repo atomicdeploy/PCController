@@ -4,6 +4,14 @@
 
 The application UART is 115200 baud, 8 data bits, no parity, one stop bit.
 
+Machine consumers can use the generated [OpenAPI 3.1](../api/openapi.json),
+[AsyncAPI 3.0](../api/asyncapi.json), and
+[JSON-RPC schema/catalog](../api/jsonrpc.schema.json). The standalone
+[offline API reference](../api/reference.html) renders the same contracts
+without a documentation server. Repository validation regenerates the
+contracts logically and rejects drift from the actual RPC dispatcher or REST
+route families.
+
 ## Framing
 
 Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
@@ -522,6 +530,10 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.rf.learn.start` | optional `mode`, optional `timeout_ms` | start indefinite multi-code learning (default) or bounded `timer` multi-code learning; `single` and `one-shot` are timer aliases |
 | `controller.rf.learn.status` | `{}` | current learn-session state |
 | `controller.rf.learn.cancel` | `{}` | stop learning and emit an explicit end event |
+| `controller.rf.map` | `id`, semantic `action`, optional `target` and `behavior` | validate and replace one learned mapping, then return the full board readback |
+| `controller.rf.remove` | learned-record `id` (`0..19`) | remove one record, then return the full board readback |
+| `controller.rf.clear` | exact `confirm: "CLEAR RF"` | clear all learned records and return an empty inventory |
+| `controller.rf.transmit` | `code`, `bits`, `protocol`, optional `pulse_us`, `repeats` | transmit a validated waveform; omitted repeats means one burst |
 | `controller.event.latest` | `{}` | latest monotonically increasing host event ID |
 | `controller.event.next` | `after_id`, optional `kind`, `timeout_ms` | long-poll the next event without status polling |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
@@ -555,6 +567,22 @@ multiple codes during that window. The accepted `single` and `one-shot` mode
 aliases normalize to `timer`; status and snapshots always return the canonical
 mode together with `configured_ms`, live `remaining_ms`, captured count, and an
 explicit end reason.
+
+`controller.rf.map` uses operator-readable values rather than exposing compact
+firmware enums. Actions are `none`, `key`, `menu`, `relay`, `side`, or `pwm`.
+Key targets are `1..4`; relay targets are the user relays `5..8`; PWM targets are
+`0..10`; menu targets are `prev`, `next`, `dec`, or `inc`; and side targets are
+`left`/`A` or `right`/`B`. Key, relay, and PWM behaviors are `press`, `toggle`,
+or `momentary`; side behavior is `up`, `down`, or `stop`. `none` accepts neither
+target nor behavior. These typed mutations require `board_commands`, while list
+and learn status remain `read` operations.
+
+The guided Web/TUI workflow starts a fresh 30-second timer for exactly one
+labeled A/B/C/D step. It reacts only to a new `rf.learn.mapping-required` event,
+cancels the capture window, reads the stored record back, shows its exact
+identity, and waits for explicit confirmation before mapping. Disconnect,
+timeout, cancellation, and full-storage events leave the step retryable; they do
+not synthesize a capture or optimistic mapping.
 
 Programming, macros, relays, PWM, RF transmit, settings, display, RGB, buzzer,
 and I2C operations remain available through `controller.command.execute`, so API
