@@ -898,6 +898,11 @@ void keyGesture(uint8_t bit, KeyEvent event, void *) {
   }
 
   appEvents.key(bit, static_cast<uint8_t>(event));
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  automationExecutor.dispatch(
+      AutomationEventKind::Key,
+      static_cast<uint8_t>((bit << 4) | static_cast<uint8_t>(event)), now);
+#endif
 }
 
 // Stops motion and exits after a configured single-key, opposing-pair, or
@@ -942,6 +947,10 @@ void serviceSystemInputs(uint32_t at) {
   bool value;
   if (systemInputs.consumeDoorChange(value)) {
     appEvents.door(value);
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    automationExecutor.dispatch(AutomationEventKind::Door,
+                                static_cast<uint8_t>(value), now);
+#endif
 #if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().doorAudioEnabled()) {
       audioCues.play(value ? AudioCue::DoorOpen : AudioCue::DoorClosed);
@@ -988,6 +997,10 @@ void serviceSystemInputs(uint32_t at) {
   } else if (reported != current) {
     reported = current;
     appEvents.bluetooth(static_cast<uint8_t>(current));
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    automationExecutor.dispatch(AutomationEventKind::Bluetooth,
+                                static_cast<uint8_t>(current), now);
+#endif
     statusLeds.playCue(StatusLedCue::Bluetooth, 600, at);
   }
 }

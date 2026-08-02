@@ -32,6 +32,18 @@ constexpr uint8_t ResetJournalSlots = 64;
 constexpr uint8_t ResetRecordBytes = 6;
 constexpr int ResetJournalEnd =
     ResetJournalAddress + ResetJournalSlots * ResetRecordBytes;
+// The opt-in board-automation profile reuses the EEPROM tail normally owned by
+// persistent RGB profiles. Two banks retain the previous committed generation
+// across a torn write. Eleven stable slots fit without crossing E2END.
+constexpr int AutomationBankAAddress = ResetJournalEnd;
+constexpr uint8_t AutomationHeaderBytes = 10;
+constexpr uint8_t AutomationCapacity = 11;
+constexpr uint8_t AutomationRecordBytes = 12;
+constexpr int AutomationBankBytes =
+    AutomationHeaderBytes + AutomationCapacity * AutomationRecordBytes;
+constexpr int AutomationBankBAddress =
+    AutomationBankAAddress + AutomationBankBytes;
+constexpr int AutomationEnd = AutomationBankBAddress + AutomationBankBytes;
 // Nineteen condition slots persist the exact 12-byte STATUS_EFFECT descriptor
 // plus a per-record CRC. The Go host provisions rich defaults; invalid or
 // unwritten slots use only the firmware's compact safety fallback.
@@ -74,6 +86,8 @@ static_assert(BootOpcodeAddress + BootOpcodeBytes <= SettingsAddress,
               "boot opcodes overlap settings");
 static_assert(ResetJournalEnd <= E2END + 1,
               "EEPROM layout exceeds ATmega328P EEPROM");
+static_assert(AutomationEnd <= E2END + 1,
+              "automation banks exceed ATmega328P EEPROM");
 static_assert(StatusProfileEnd <= E2END + 1,
               "status profiles exceed ATmega328P EEPROM");
 static_assert(MenuLabelsAddress == StatusProfileEnd,

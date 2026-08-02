@@ -65,6 +65,10 @@ enum Opcode : uint8_t {
   HostMenuContent = 0x43,
   HostMenuStateGet = 0x44,
   ProgramState = 0x45,
+  AutomationList = 0x46,
+  AutomationPut = 0x47,
+  AutomationRemove = 0x48,
+  AutomationClear = 0x49,
   Ack = 0x80,
   HelloResponse = 0x81,
   ErrorResponse = 0x82,
@@ -85,6 +89,8 @@ enum Opcode : uint8_t {
   StatusLedChanged = 0x9E,
   StatusProfileResponse = 0x9F,
   Event = 0xA0,
+  AutomationListResponse = 0xA1,
+  AutomationRecordResponse = 0xA2,
 };
 
 // Error is the compact failure code returned by ErrorResponse.

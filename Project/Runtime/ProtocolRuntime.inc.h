@@ -44,10 +44,26 @@ void sendHello(uint8_t sequence) {
       (1UL << 27) | // unsolicited buzzer frequency/duration frames
       (1UL << 28) | // MCU-owned procedural status LED effects
       (1UL << 29) | // unsolicited rendered status LED state frames
+#if !PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
       (1UL << 30) | // EEPROM-resident condition status profiles
+#endif
       (1UL << 31) | // checksum-backed operator board name (up to 8 ASCII chars)
       0;
   // HelloPayload is the fixed build identity and capability response.
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  struct __attribute__((packed)) HelloPayload {
+    uint8_t schema;
+    uint8_t boardKind;
+    uint32_t capabilities;
+    uint32_t buildHash;
+    uint32_t buildTimestamp;
+    uint8_t featureProfile;
+    uint8_t buildFeatures;
+  } payload = {4, 1, capabilities,
+               pgm_read_dword(&firmwareIdentity.sourceHash),
+               pgm_read_dword(&firmwareIdentity.packedTimestamp),
+               0, static_cast<uint8_t>(1U << 5)};
+#else
   struct __attribute__((packed)) HelloPayload {
     uint8_t schema;
     uint8_t boardKind;
@@ -57,6 +73,7 @@ void sendHello(uint8_t sequence) {
   } payload = {3, 1, capabilities,
                pgm_read_dword(&firmwareIdentity.sourceHash),
                pgm_read_dword(&firmwareIdentity.packedTimestamp)};
+#endif
   appProtocol.send(ControllerProtocol::HelloResponse, sequence,
                    reinterpret_cast<const uint8_t *>(&payload),
                    sizeof(payload));
@@ -389,6 +406,47 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
 }
 #endif
 
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+void sendAutomations(uint8_t sequence, uint8_t cursor) {
+  uint8_t payload[42] = {
+      AutomationStore::Schema,
+      static_cast<uint8_t>(boardAutomations.generation()),
+      static_cast<uint8_t>(boardAutomations.generation() >> 8),
+      boardAutomations.count(), 0xFF, 0};
+  uint8_t scan = cursor;
+  uint8_t index = 6;
+  AutomationRecord record;
+  while (scan < AutomationStore::Capacity && payload[5] < 3) {
+    if (boardAutomations.get(scan, record)) {
+      memcpy(payload + index, &record, sizeof(record));
+      index = static_cast<uint8_t>(index + sizeof(record));
+      ++payload[5];
+    }
+    ++scan;
+  }
+  while (scan < AutomationStore::Capacity) {
+    if (boardAutomations.get(scan, record)) {
+      payload[4] = scan;
+      break;
+    }
+    ++scan;
+  }
+  appProtocol.send(ControllerProtocol::AutomationListResponse, sequence,
+                   payload, index);
+}
+
+void sendAutomationRecord(uint8_t sequence,
+                          const AutomationRecord &record) {
+  uint8_t payload[3 + sizeof(record)] = {
+      AutomationStore::Schema,
+      static_cast<uint8_t>(boardAutomations.generation()),
+      static_cast<uint8_t>(boardAutomations.generation() >> 8)};
+  memcpy(payload + 3, &record, sizeof(record));
+  appProtocol.send(ControllerProtocol::AutomationRecordResponse, sequence,
+                   payload, sizeof(payload));
+}
+#endif
+
 // Applies the canonical settings prefix plus its exact optional board-name
 // tail; all other positional tails are rejected.
 bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
@@ -632,6 +690,41 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame,
       hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
       statusLeds.cancelEffect();
       goto acknowledged;
+
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    case AutomationList:
+      if (length != 1 || payload[0] >= AutomationStore::Capacity) {
+        goto badPayload;
+      }
+      sendAutomations(frame.sequence, payload[0]);
+      return;
+
+    case AutomationPut: {
+      if (length != sizeof(AutomationRecord)) {
+        goto badPayload;
+      }
+      AutomationRecord record;
+      memcpy(&record, payload, sizeof(record));
+      if (!boardAutomations.put(record)) {
+        goto badPayload;
+      }
+      sendAutomationRecord(frame.sequence, record);
+      return;
+    }
+
+    case AutomationRemove:
+      if (length != 1 || !boardAutomations.remove(payload[0])) {
+        goto badPayload;
+      }
+      goto acknowledged;
+
+    case AutomationClear:
+      if (length != 0) {
+        goto badPayload;
+      }
+      boardAutomations.clear();
+      goto acknowledged;
+#endif
 
     case PwmGet:
       sendPwmValues(frame.sequence);
