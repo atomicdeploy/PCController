@@ -104,5 +104,12 @@ test("--check is read-only and stable across repeated runs", () => {
   assert.equal(first.status, 0, first.stderr);
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.stdout, first.stdout);
-  assert.match(first.stdout, /^API reference is current: 107 RPC methods, 38 REST paths, digest [a-f0-9]{12}\.\n$/u);
+  const rpcSchema = JSON.parse(readFileSync(join(outputDirectory, "jsonrpc.schema.json"), "utf8"));
+  const openapi = JSON.parse(readFileSync(join(outputDirectory, "openapi.json"), "utf8"));
+  const methodCount = Object.keys(rpcSchema["x-methods"]).length;
+  const pathCount = Object.keys(openapi.paths).length;
+  assert.match(
+    first.stdout,
+    new RegExp(`^API reference is current: ${methodCount} RPC methods, ${pathCount} REST paths, digest [a-f0-9]{12}\\.\\n$`, "u"),
+  );
 });
