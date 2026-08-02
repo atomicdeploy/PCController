@@ -149,6 +149,7 @@ test('scheduled updater validates every required candidate gate before PR creati
   for (const expected of [
     'schedule:', '--apply --validate', 'steps.candidate.outcome == \'success\'',
     'body-path: .build/dependencies/dependency-pr.md', 'dependency-blocked',
+    '📦 dependencies', '🏗️ tooling-build',
   ]) assert.ok(workflow.includes(expected), `workflow missing ${expected}`)
   assert.match(workflow, /peter-evans\/create-pull-request@[0-9a-f]{40}\s+# v8/u)
   for (const expected of [

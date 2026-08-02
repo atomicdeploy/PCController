@@ -138,7 +138,7 @@ jobs:
             } else {
               await github.rest.issues.create({
                 ...context.repo, title, body,
-                labels: ['dependencies', 'dependency-blocked']
+                labels: ['📦 dependencies', 'dependency-blocked']
               });
             }
 
@@ -169,8 +169,8 @@ jobs:
           branch: automation/latest-compatible-dependencies
           delete-branch: true
           labels: |
-            dependencies
-            automated
+            📦 dependencies
+            🏗️ tooling-build
 
       - name: Fail the workflow after publishing diagnostics
         if: steps.candidate.outcome != 'success'
