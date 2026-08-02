@@ -148,8 +148,8 @@ custom size/address/metadata assertions. This separates reproduction-fixture
 hashes from the active latest-stable custom source.
 
 The last verified custom build used 510 of its 512 allocated bytes and imposed
-a 32,256-byte application ceiling. The current `B3F4CB11` linked sketch is
-32,216 bytes; its fixed 12-byte identity at `0x7DF4` leaves 28 immediately
+a 32,256-byte application ceiling. The current `800A5B70` linked sketch is
+32,232 bytes; its fixed 12-byte identity at `0x7DF4` leaves 12 immediately
 linkable bytes in the shared layout. That margin is not permanent: rebuild
 firmware and rerun the Urboot-Custom assertion immediately before an ISP
 installation.
@@ -321,17 +321,18 @@ TM1637/host presentation, exact reconnect, and recovery continue normally.
 ### Verified development recovery checkpoint
 
 The 2026-08-02 recovery pass completed against the Instance-ID-pinned COM18
-controller without using ISP. The board authenticated as `B3F4CB11`; its exact
+controller without using ISP. The board authenticated as `800A5B70`; its exact
 deployed application artifact SHA-256 is
-`6653daa48ccc00c8db80004d942fbcccdbd4e1408cb99bac963869e544ce2d6d`.
-A fresh read-only Urboot semantic verification covered 32,228 programmed bytes,
-resolved reset to `0x7E80`, and resolved vector 25 to `0x024E`.
+`bb928b7b680d6e393d842bd28412b6760340a2ff61ae40b21a926036358bb092`.
+The primary-owned Urclock transaction backed up, wrote, and verified 32,244
+programmed bytes, then reauthenticated the application before reporting
+success.
 
 The previously durable recovery marker is cleared. Current-schema EEPROM was
 intentionally reinitialized and read back with Silent off, illumination Off,
 all output-persistence bits off, relay restore mask zero, and motion break
 1 ms. After the pinned reconnect, the safe live snapshot showed 12.282 V, PWM
-available, no active relays, no framing/CRC protocol errors, and reset count 12.
+available, no active relays, no framing/CRC protocol errors, and reset count 22.
 The optional LCD was absent, so its presentation step produced a non-fatal
 capability warning; raw backup, programming verification, application return,
 and safe-state recovery did not depend on that optional peripheral.

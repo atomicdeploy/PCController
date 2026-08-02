@@ -39,6 +39,7 @@ function shared(): SharedViewProps {
     transport: { streamState: 'open', tabBusSupported: true, tabPeers: 0 },
     relayedTerminal: [],
     broadcastTerminal: vi.fn(),
+    boardSettingsReadState: 'idle',
   }
 }
 
@@ -124,6 +125,29 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Record shortcut')
     expect(markup).not.toContain('TM1637')
     expect(markup).not.toContain('Write controller settings')
+  })
+
+  it('never presents empty board settings as an authoritative EEPROM report', () => {
+    const connectedWithoutSettings = {
+      ...emptySnapshot,
+      connected: true,
+      connection_state: 'connected',
+      have_settings: false,
+    }
+    const markup = renderToStaticMarkup(<SettingsView
+      {...shared()}
+      snapshot={connectedWithoutSettings}
+      boardSettingsReadState="loading"
+      appearance={appearance}
+      onAppearance={vi.fn()}
+      token=""
+      onToken={vi.fn()}
+      onAppTitle={vi.fn(async (value: string) => value)}
+    />)
+    expect(markup).toContain('Reading board settings')
+    expect(markup).toContain('Waiting for the controller to return its live EEPROM settings')
+    expect(markup).not.toContain('EEPROM report')
+    expect(markup).not.toContain('Write board settings')
   })
 
   it('renders offline controls and settings copy in Persian', () => {

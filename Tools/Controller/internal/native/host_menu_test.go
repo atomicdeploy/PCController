@@ -28,6 +28,19 @@ func TestHostMenuDirectoryRoundTripAndGraphValidation(t *testing.T) {
 	}
 }
 
+func TestHostMenuDirectoryRejectsEntryCountOverflow(t *testing.T) {
+	entries := make([]HostMenuDirectoryEntry, HostMenuMaximumEntries+1)
+	if _, err := EncodeHostMenuDirectory(HostMenuDirectory{Entries: entries}); err == nil {
+		t.Fatal("oversize host-menu directory was encoded")
+	}
+	payload := make([]byte, 3+(HostMenuMaximumEntries+1)*3)
+	payload[0] = HostMenuSchema
+	payload[2] = HostMenuMaximumEntries + 1
+	if _, err := ParseHostMenuDirectory(payload); err == nil {
+		t.Fatal("oversize host-menu directory was parsed")
+	}
+}
+
 func TestHostMenuContentAndStateWireSchemas(t *testing.T) {
 	payload, err := EncodeHostMenuContent(HostMenuContent{
 		Generation: 4, ID: 0x80, Revision: 9,

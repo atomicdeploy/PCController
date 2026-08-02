@@ -11,6 +11,9 @@
   <br><br>
   <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml"><img alt="Build" src="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml"><img alt="Repository health" src="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/atomicdeploy/PCController/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/atomicdeploy/PCController/actions/workflows/codeql.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/atomicdeploy/PCController/actions/workflows/update-dependencies.yml"><img alt="Dependency updates" src="https://github.com/atomicdeploy/PCController/actions/workflows/update-dependencies.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml"><img alt="Release" src="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/atomicdeploy/PCController"></a>
   <br><br>
   <img alt="Firmware: ATmega328P" src="https://img.shields.io/badge/Firmware-ATmega328P-8b5cf6?style=flat-square">
@@ -66,7 +69,7 @@ everywhere through the same typed event stream.
 
 ```mermaid
 flowchart LR
-    B["ControllerBoardMini\nATmega328P firmware"] <-->|"COBS · CRC · UART"| P["Primary Controller host"]
+    B["ControllerBoardMini\nATmega328P firmware"] <-->|"COBS · CRC · UART"| P["Primary host"]
     P <--> W["Embedded WebUI"]
     P <--> T["TUI · CLI · shell"]
     P <--> A["REST · JSON-RPC · WebSocket"]
@@ -108,9 +111,10 @@ build.cmd --dry-run
 Build and test the Virtual Board independently:
 
 ```console
-cmake -S Tools/VirtualBoard -B .build/virtual-board -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build .build/virtual-board --config Release --parallel
-ctest --test-dir .build/virtual-board -C Release --output-on-failure
+cd Tools\VirtualBoard
+cmake --preset release
+cmake --build --preset release --parallel
+ctest --preset release
 ```
 
 See the [build guide](Tools/Build/README.md) and
@@ -282,7 +286,7 @@ or build from source. The repository publishes one clearly named artifact per
 deliverable and host target:
 
 - `PCController-Firmware-ATmega328P`
-- `PCController-Controller-<platform>`
+- `PCController-Host-<platform>`
 - `PCController-VirtualBoard-<platform>`
 
 Release archives add the version and include SHA-256 metadata. Follow

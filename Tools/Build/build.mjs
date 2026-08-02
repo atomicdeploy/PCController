@@ -862,6 +862,8 @@ function removeStaleHostOutputs(log) {
 			log.warning(`Deferred locked package cleanup ${relative(PROJECT_ROOT, path)}`)
 		}
 	}
+	assertGeneratedPath(PROJECT_ROOT, PACKAGE_ROOT)
+	pruneAbandonedPackageStages(log)
 }
 
 // A process can keep the previous package directory locked after the new
@@ -873,6 +875,74 @@ export function stalePackageTransactionPaths(hostRoot = HOST_ROOT) {
 	return readdirSync(hostRoot, { withFileTypes: true })
 		.filter(entry => entry.isDirectory() && /^\.bin-previous-\d+$/u.test(entry.name))
 		.map(entry => join(hostRoot, entry.name))
+}
+
+// A PID is considered live unless the operating system explicitly reports
+// that it no longer exists. Permission errors therefore preserve the stage.
+function packageStagePIDIsAlive(pid) {
+	try {
+		process.kill(pid, 0)
+		return true
+	} catch (error) {
+		return error.code !== 'ESRCH'
+	}
+}
+
+// Remove only abandoned, incomplete host package stages. Completed manifests
+// are durable audit artifacts, while live/current and ambiguous paths remain.
+export function pruneAbandonedPackageStages(log, options = {}) {
+	const packageRoot = resolve(options.packageRoot || PACKAGE_ROOT)
+	const currentPID = options.currentPID ?? process.pid
+	const isPIDAlive = options.isPIDAlive || packageStagePIDIsAlive
+	const remove = options.remove || removeGeneratedTree
+	const result = { removed: [], deferred: [] }
+	if (!existsSync(packageRoot)) return result
+
+	const rootStat = lstatSync(packageRoot)
+	if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+		throw new BuildError(`refusing package-stage cleanup through a non-directory root: ${packageRoot}`)
+	}
+
+	for (const entry of readdirSync(packageRoot, { withFileTypes: true })) {
+		const match = /^host-([1-9]\d*)$/u.exec(entry.name)
+		if (!match || !entry.isDirectory() || entry.isSymbolicLink()) continue
+		const pid = Number(match[1])
+		if (!Number.isSafeInteger(pid) || pid === currentPID || isPIDAlive(pid)) continue
+
+		const stage = resolve(packageRoot, entry.name)
+		if (dirname(stage) !== packageRoot || basename(stage) !== entry.name) continue
+		assertGeneratedPath(packageRoot, stage)
+		try {
+			const stageStat = lstatSync(stage)
+			if (!stageStat.isDirectory() || stageStat.isSymbolicLink()) continue
+		} catch (error) {
+			if (error.code === 'ENOENT') continue
+			if (!['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) throw error
+			result.deferred.push(stage)
+			log?.warning(`Deferred locked package-stage inspection ${relative(PROJECT_ROOT, stage)}`)
+			continue
+		}
+
+		// Preserve any manifest entry. Even a partially unreadable audit artifact
+		// is safer to retain than to classify destructively as incomplete.
+		try {
+			lstatSync(join(stage, 'host-manifest.json'))
+			continue
+		} catch (error) {
+			if (error.code !== 'ENOENT') continue
+		}
+
+		try {
+			remove(stage)
+			result.removed.push(stage)
+			log?.success(`Removed abandoned package stage ${relative(PROJECT_ROOT, stage)}`)
+		} catch (error) {
+			if (!['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) throw error
+			result.deferred.push(stage)
+			log?.warning(`Deferred locked package-stage cleanup ${relative(PROJECT_ROOT, stage)}`)
+		}
+	}
+	return result
 }
 
 function copyProjectNotices(destination) {

@@ -19,6 +19,7 @@ import {
 	isNativeWindowsGNUCompiler,
 	packBuildTimestamp,
 	parseArguments,
+	pruneAbandonedPackageStages,
 	refreshedEnvironment,
 	renderTable,
 	removeGeneratedWinResources,
@@ -238,6 +239,94 @@ test('stale package cleanup recognizes only exact rollback transaction directori
 	await mkdir(join(root, '.bin-unrelated-456'))
 
 	assert.deepEqual(stalePackageTransactionPaths(root), [join(root, '.bin-previous-123')])
+})
+
+test('package-stage pruning removes only dead incomplete stages', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-stages-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const abandoned = join(root, 'host-111')
+	await mkdir(abandoned)
+	await writeFile(join(abandoned, 'controller.exe'), 'abandoned')
+	const messages = []
+
+	const result = pruneAbandonedPackageStages({
+		success: message => messages.push(message),
+		warning: message => messages.push(message)
+	}, {
+		packageRoot: root,
+		currentPID: 999,
+		isPIDAlive: () => false
+	})
+
+	assert.deepEqual(result.removed, [abandoned])
+	assert.deepEqual(result.deferred, [])
+	assert.deepEqual(await readdir(root), [])
+	assert.match(messages[0], /Removed abandoned package stage/)
+})
+
+test('package-stage pruning preserves the current, live, and completed stages', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-preserve-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const current = join(root, 'host-222')
+	const live = join(root, 'host-333')
+	const completed = join(root, 'host-444')
+	await mkdir(current)
+	await mkdir(live)
+	await mkdir(completed)
+	await writeFile(join(completed, 'host-manifest.json'), '{}')
+
+	const result = pruneAbandonedPackageStages(null, {
+		packageRoot: root,
+		currentPID: 222,
+		isPIDAlive: pid => pid === 333
+	})
+
+	assert.deepEqual(result, { removed: [], deferred: [] })
+	assert.deepEqual(await readdir(root), ['host-222', 'host-333', 'host-444'])
+})
+
+test('package-stage pruning ignores foreign and nested directories', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-safety-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	await mkdir(join(root, 'host-current'))
+	await mkdir(join(root, 'host-0'))
+	await mkdir(join(root, 'unrelated-555'))
+	await mkdir(join(root, 'nested', 'host-666'), { recursive: true })
+
+	const result = pruneAbandonedPackageStages(null, {
+		packageRoot: root,
+		currentPID: 999,
+		isPIDAlive: () => false
+	})
+
+	assert.deepEqual(result, { removed: [], deferred: [] })
+	assert.deepEqual(await readdir(root), ['host-0', 'host-current', 'nested', 'unrelated-555'])
+	assert.deepEqual(await readdir(join(root, 'nested')), ['host-666'])
+})
+
+test('package-stage pruning defers locked abandoned stages', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-locked-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const locked = join(root, 'host-777')
+	await mkdir(locked)
+	const warnings = []
+	const lockError = new Error('stage is still locked')
+	lockError.code = 'EPERM'
+
+	const result = pruneAbandonedPackageStages({
+		success() {},
+		warning: message => warnings.push(message)
+	}, {
+		packageRoot: root,
+		currentPID: 999,
+		isPIDAlive: () => false,
+		remove() { throw lockError }
+	})
+
+	assert.deepEqual(result.removed, [])
+	assert.deepEqual(result.deferred, [locked])
+	assert.deepEqual(await readdir(root), ['host-777'])
+	assert.match(warnings[0], /Deferred locked package-stage cleanup/)
 })
 
 test('published packages tolerate a locked retired Windows directory', () => {

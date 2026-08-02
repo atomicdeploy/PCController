@@ -23,7 +23,7 @@ There are two independent persistence domains:
 | Owner | Stored data | Storage |
 |---|---|---|
 | AVR firmware | sound, display/light/PWM options, menu default, motion-door policy, RF records/mappings, and reset telemetry | ATmega328P EEPROM |
-| PC host | USB selection, TUI appearance, histories, network endpoints, hotkeys, notifications, webhooks, PC macros/scripts/automations, and programmer paths | JSON, YAML, or TOML file |
+| PC host | USB selection, peripheral display names, TUI appearance, histories, network endpoints, hotkeys, notifications, webhooks, PC macros/scripts/automations, and programmer paths | JSON, YAML, or TOML file |
 
 Editing the host file never silently copies its values into EEPROM. Board
 Settings explicitly reads or writes the MCU record; App Settings edits the PC
@@ -67,6 +67,8 @@ contains the full schema. Important safe defaults are:
   telemetry subscriber;
 - `safety.motion_door_policy` is `always`, matching the requested factory
   policy;
+- `ui.peripheral_names` is an optional host-only map of semantic peripheral
+  keys to operator-facing names;
 - Console-to-LCD mirroring is opt-in and debounced.
 
 ## USB selection, ownership, and reconnect
@@ -118,6 +120,43 @@ editor. Brightness uses 0–100% sliders where the underlying setting permits it
 Every status-LED state has its own effect, primary/alternate RGB, brightness,
 minimum, and period editor with a live terminal color preview. The fixed sensor
 role assignment is intentionally absent from daily settings.
+
+### Semantic peripheral names
+
+The host exposes one canonical registry of 34 physical or logical peripherals:
+eight relays, two motion sides, sixteen PWM channels, two displays, and six
+sensors. Every descriptor has a stable `key`, `kind`, `role`, `index`,
+`default_name`, and `control` hint. TUI and Web surfaces resolve labels from
+this registry so a custom name remains consistent across dashboards, controls,
+graphs, and settings rather than being copied into individual pages.
+
+Overrides are stored under `ui.peripheral_names`, for example:
+
+```json
+{
+  "ui": {
+    "peripheral_names": {
+      "relay.5": "Workbench lamp",
+      "sensor.power": "Cabinet load"
+    }
+  }
+}
+```
+
+These names belong only to the PC host. They do not consume EEPROM and never
+rename, reconfigure, or write a board peripheral. Through
+`controller.peripherals.set` or `PUT /api/v1/peripherals`, keys and names are
+trimmed and the complete update is validated before persistence. Supplying a
+blank name removes that override and restores the registry default. A blank
+value written directly into the configuration file is invalid; omit the key
+instead. Reads return both the current override map and the complete descriptor
+registry so clients do not need a duplicated peripheral list.
+
+PWM channels `0..10` are the generic user/commissioning outputs. Channels
+`11..15` remain visible in authoritative sixteen-channel readback but are
+role-specific: enclosure illumination, power indication, and status
+red/green/blue. UI controls must use those roles instead of presenting the five
+system channels as ordinary user sliders.
 
 Mouse and keyboard actions share the same command path. Remote key injection
 must include down/up/gesture semantics rather than merely changing a local
@@ -397,6 +436,13 @@ they cannot bypass a narrower gate.
 
 The exact methods, routes, frames, Socket.IO subset, and examples are in
 [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md).
+
+Peripheral-name reads use the `read` capability; writes use
+`host_configuration` because they change only the watched PC file. PWM reads
+use `read`, while `controller.pwm.set`, `controller.pwm.off`, `PUT
+/api/v1/pwm`, and `DELETE /api/v1/pwm` use `board_commands`. Each PWM mutation
+performs a board readback and returns all sixteen values, allowing WebSocket,
+REST, TUI, and hotkey clients to reconcile to one authoritative state.
 
 ## Discovery and remote bridges
 

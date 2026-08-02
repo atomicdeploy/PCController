@@ -20,8 +20,11 @@ import (
 
 const maxStageOperations = 64
 
+// EventSink publishes release-discovery progress into the host event stream.
 type EventSink func(kind, text string, metadata map[string]string)
 
+// Service discovers and stages verified release artifacts without programming
+// connected hardware.
 type Service struct {
 	client     *Client
 	artifacts  *artifacts.Service
@@ -37,6 +40,7 @@ type Service struct {
 	signatures map[string]string
 }
 
+// NewService constructs a release staging service around the shared artifact store.
 func NewService(client *Client, artifactService *artifacts.Service, events EventSink) (*Service, error) {
 	if artifactService == nil {
 		return nil, errors.New("release discovery requires the artifact service")
@@ -51,6 +55,7 @@ func NewService(client *Client, artifactService *artifacts.Service, events Event
 	}, nil
 }
 
+// Close cancels staging work and waits for active operations to finish.
 func (service *Service) Close() error {
 	service.mu.Lock()
 	if service.closed {
@@ -64,6 +69,7 @@ func (service *Service) Close() error {
 	return nil
 }
 
+// StartStage validates and asynchronously imports one immutable candidate.
 func (service *Service) StartStage(request StageRequest) (StageResult, error) {
 	if err := validateCandidate(request.Candidate); err != nil {
 		return StageResult{}, err
@@ -176,6 +182,7 @@ func (service *Service) runStage(id string, request StageRequest) {
 	})
 }
 
+// Status returns one staging operation, or the latest when ID is empty.
 func (service *Service) Status(id string) (StageStatus, error) {
 	service.mu.RLock()
 	defer service.mu.RUnlock()
@@ -225,6 +232,8 @@ func (service *Service) publish(status StageStatus) {
 	service.events("artifact.discovery."+status.State, status.Detail, metadata)
 }
 
+// DispatchRPC handles release-discovery methods and reports whether the method
+// belonged to this service.
 func (service *Service) DispatchRPC(ctx context.Context, method string, params json.RawMessage) (any, bool, error) {
 	switch strings.ToLower(strings.TrimSpace(method)) {
 	case "controller.discovery.github.workflow":

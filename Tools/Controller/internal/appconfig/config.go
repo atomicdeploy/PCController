@@ -23,10 +23,15 @@ import (
 )
 
 const (
-	SchemaVersion        = 1
+	// SchemaVersion identifies the current host configuration schema.
+	SchemaVersion = 1
+	// DefaultWatchInterval bounds the polling fallback when file notifications
+	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
 )
 
+// Config is the persistent host-side configuration root; it never mirrors or
+// replaces the MCU's EEPROM-owned settings.
 type Config struct {
 	Schema        int               `json:"schema"`
 	Connection    Connection        `json:"connection"`
@@ -46,6 +51,7 @@ type Config struct {
 	Automations   []Automation      `json:"automations,omitempty"`
 }
 
+// Connection configures serial discovery, handshake timing, and reconnect behavior.
 type Connection struct {
 	Port             string          `json:"port,omitempty"`
 	VID              string          `json:"vid,omitempty"`
@@ -59,6 +65,7 @@ type Connection struct {
 	LastDevice       *DeviceIdentity `json:"last_device,omitempty"`
 }
 
+// DeviceIdentity records the last successfully connected USB serial device.
 type DeviceIdentity struct {
 	Port         string    `json:"port,omitempty"`
 	VID          string    `json:"vid,omitempty"`
@@ -69,6 +76,7 @@ type DeviceIdentity struct {
 	LastSeen     time.Time `json:"last_seen,omitempty"`
 }
 
+// UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
 	AppTitle             string            `json:"app_title"`
 	SeparatePortButtons  bool              `json:"separate_port_buttons"`
@@ -101,6 +109,7 @@ type UI struct {
 	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
 }
 
+// IPC configures authenticated local and optional remote controller transports.
 type IPC struct {
 	Listen         string             `json:"listen"`
 	WebSocketPath  string             `json:"websocket_path"`
@@ -140,12 +149,14 @@ func DefaultRemoteAccessPolicy() RemoteAccessPolicy {
 	return RemoteAccessPolicy{Read: true, Events: true}
 }
 
+// Safety configures host-side guards applied before board control commands.
 type Safety struct {
 	// MotionDoorPolicy is a PC-side command guard, not an MCU EEPROM mirror.
 	// Values are always, open, closed, and never.
 	MotionDoorPolicy string `json:"motion_door_policy"`
 }
 
+// Paths locates project, script, firmware, and history resources used by the host.
 type Paths struct {
 	Project          string `json:"project,omitempty"`
 	ScriptsDirectory string `json:"scripts_directory,omitempty"`
@@ -153,6 +164,7 @@ type Paths struct {
 	HistoryFile      string `json:"history_file,omitempty"`
 }
 
+// Programming selects the host toolchain and default programming transport.
 type Programming struct {
 	Method       string `json:"method,omitempty"`
 	FQBN         string `json:"fqbn,omitempty"`
@@ -162,6 +174,7 @@ type Programming struct {
 	AvrdudeConf  string `json:"avrdude_conf,omitempty"`
 }
 
+// Macro defines a named, host-persisted sequence streamed to the MCU executor.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
@@ -174,6 +187,7 @@ type Macro struct {
 	Steps               []MacroStep `json:"steps"`
 }
 
+// MacroStep describes one precisely timed macro operation.
 type MacroStep struct {
 	// AtUS is the absolute offset from the MCU playback epoch.
 	AtUS uint32 `json:"at_us,omitempty"`
@@ -197,6 +211,7 @@ type MacroStep struct {
 	PayloadHex  string `json:"payload_hex,omitempty"`
 }
 
+// Automation binds matching host or board events to ordered host-side actions.
 type Automation struct {
 	Name       string             `json:"name"`
 	Enabled    bool               `json:"enabled"`
@@ -205,6 +220,7 @@ type Automation struct {
 	Actions    []AutomationAction `json:"actions"`
 }
 
+// AutomationMatch selects the event attributes that trigger an automation.
 type AutomationMatch struct {
 	Kind       string  `json:"kind"`
 	Lifecycle  string  `json:"lifecycle,omitempty"`
@@ -218,6 +234,7 @@ type AutomationMatch struct {
 	RFProtocol byte    `json:"rf_protocol,omitempty"`
 }
 
+// AutomationAction describes one command, macro, process, RF, key, or OS action.
 type AutomationAction struct {
 	Type       string      `json:"type"`
 	Command    string      `json:"command,omitempty"`
@@ -233,6 +250,7 @@ type AutomationAction struct {
 	Confirm    string      `json:"confirm,omitempty"`
 }
 
+// RFTransmit defines a host-configured 433 MHz transmission payload.
 type RFTransmit struct {
 	Code     uint32 `json:"code"`
 	Bits     byte   `json:"bits"`
@@ -241,6 +259,7 @@ type RFTransmit struct {
 	Repeats  byte   `json:"repeats,omitempty"`
 }
 
+// Defaults returns a complete safe host configuration for a new installation.
 func Defaults() Config {
 	return Config{
 		Schema: SchemaVersion,
@@ -326,6 +345,7 @@ func Defaults() Config {
 	}
 }
 
+// DefaultPath returns the canonical per-user host configuration path.
 func DefaultPath() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -334,6 +354,8 @@ func DefaultPath() (string, error) {
 	return filepath.Join(base, productidentity.ConfigDirectory, "config.json"), nil
 }
 
+// ResolvePath selects an explicit path, then the environment override, then
+// the canonical per-user path.
 func ResolvePath(explicit string) (string, error) {
 	if explicit == "" {
 		explicit = os.Getenv("PCCONTROLLER_CONFIG")
@@ -348,6 +370,8 @@ func ResolvePath(explicit string) (string, error) {
 	return absolute, nil
 }
 
+// Load decodes and validates a JSON, YAML, or TOML host configuration and
+// returns the exact source-content digest.
 func Load(path string) (Config, [sha256.Size]byte, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -368,6 +392,8 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	return value, sha256.Sum256(content), nil
 }
 
+// LoadOrCreate loads an existing configuration or writes validated defaults
+// when the target does not yet exist.
 func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 	value, digest, err := Load(path)
 	if err == nil {
@@ -383,6 +409,7 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 	return Load(path)
 }
 
+// Write validates and persists a host configuration with protected file permissions.
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
@@ -434,6 +461,7 @@ func Write(path string, value Config) error {
 	return nil
 }
 
+// Validate rejects unsafe, ambiguous, or unsupported host configuration values.
 func (value Config) Validate() error {
 	if value.Schema != SchemaVersion {
 		return fmt.Errorf("unsupported schema %d", value.Schema)
@@ -849,6 +877,7 @@ func printableText(value string) bool {
 	return true
 }
 
+// Store owns the current validated host configuration and its subscribers.
 type Store struct {
 	path           string
 	mu             sync.RWMutex
@@ -858,6 +887,8 @@ type Store struct {
 	nextSubscriber uint64
 }
 
+// Open resolves and loads a persistent configuration store, creating defaults
+// when required.
 func Open(path string) (*Store, error) {
 	resolved, err := ResolvePath(path)
 	if err != nil {
@@ -873,10 +904,12 @@ func Open(path string) (*Store, error) {
 	}, nil
 }
 
+// Path returns the resolved backing-file path.
 func (store *Store) Path() string {
 	return store.path
 }
 
+// Current returns an isolated copy of the active configuration.
 func (store *Store) Current() Config {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
@@ -949,6 +982,7 @@ func (store *Store) notifyLocked(value Config) {
 	}
 }
 
+// UpdateUI atomically replaces and persists the host UI section.
 func (store *Store) UpdateUI(value UI) (Config, error) {
 	return store.Update(func(config *Config) error {
 		config.UI = value
@@ -998,6 +1032,7 @@ func (store *Store) RememberDevice(identity DeviceIdentity) (bool, error) {
 	return true, nil
 }
 
+// Reload validates the backing file and publishes it only when its content changed.
 func (store *Store) Reload() (Config, bool, error) {
 	// Serialize the disk read with Update's write/load/commit transaction. If
 	// Reload reads before taking the mutex, an older fsnotify snapshot can wait
@@ -1017,6 +1052,8 @@ func (store *Store) Reload() (Config, bool, error) {
 	return clone(value), true, nil
 }
 
+// Watch applies validated filesystem changes, using polling only when native
+// notifications are unavailable or stop unexpectedly.
 func (store *Store) Watch(
 	ctx context.Context,
 	interval time.Duration,
@@ -1071,7 +1108,11 @@ func (store *Store) Watch(
 			onChange(value)
 		}
 	}
-	reload()
+	// Reconcile once after the same debounce used for filesystem events. This
+	// closes the gap between Open and watcher registration without racing an
+	// editor's atomic replacement or Windows fallback write while it still has
+	// the destination open with restrictive sharing flags.
+	schedule()
 
 	// A slow safety poll covers unusual network filesystems that acknowledge a
 	// directory watch but omit replacement events. Normal local edits apply

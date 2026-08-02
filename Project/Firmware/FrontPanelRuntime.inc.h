@@ -472,6 +472,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   // Menu actions can arrive between loop snapshots (UART, RF, or key event),
   // so capture their exact event time before entering modal state logic.
   const uint32_t now = millis();
+  ::now = now;
   if (modeManager.current() == MODE_BOOT ||
       modeManager.current() == MODE_FAULT) {
     menuFeedback(fromRemote);

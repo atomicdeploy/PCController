@@ -14,6 +14,8 @@ import { basename, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
 
+import { usageProgress } from "./usage-progress.mjs";
+
 const FORMAT = "pccontroller-release-manifest/v1";
 const PRODUCT_NAME = PRODUCT_METADATA.productName;
 const GENERATED_FILES = new Set([
@@ -240,7 +242,7 @@ function selectPackages(assets) {
       assets,
       (asset) =>
         asset.role === "controller-archive" && asset.target === target.id,
-      `${target.label} Controller archive`,
+      `${target.label} Host archive`,
     ),
     virtualBoard: uniqueAsset(
       assets,
@@ -405,7 +407,7 @@ function validationRows(selection) {
   ];
   for (const platform of selection.platforms) {
     rows.push({
-      component: "Controller",
+      component: "Host",
       target: platform.label,
       checks: "Native runner build · Go test/vet · packaged identity",
       evidence: platform.controller.file,
@@ -462,20 +464,22 @@ function releaseNotes({ tag, sourceSha, assets, selection, context, metrics }) {
     : "";
   const repository = context.repository || "OWNER/REPOSITORY";
 
+  const channelName = channel.toLowerCase();
+  const channelArticle = /^[aeiou]/u.test(channelName) ? "an" : "a";
   const channelLimitation = prerelease
-    ? `- This is a ${channel.toLowerCase()} build. Configuration and protocol compatibility can still change before a stable release.`
+    ? `- This is ${channelArticle} ${channelName} build. Configuration and protocol compatibility can still change before a stable release.`
     : "- This release remains subject to the physical-hardware acceptance boundary above.";
   const draftNotice = context.draft
     ? `\n> [!TIP]\n> This is a GitHub draft, whose final tag/download URLs do not exist yet. The chooser therefore names each file without a broken link; use the release page's **Assets** section. Published reruns activate direct links.\n`
     : "";
 
-  return `# 🚀 ${escapeMarkdown(PRODUCT_NAME)} ${escapeMarkdown(tag)} — ${channel} showcase
+  return `# 🚀 ${escapeMarkdown(PRODUCT_NAME)} ${escapeMarkdown(tag)} — ${channel}
 
 > [!IMPORTANT]
-> This is an evidence-backed ${prerelease ? "pre-release" : "release"}: AVR firmware plus native Controller and Virtual Board packages for five OS/architecture targets were built before this release was assembled.
+> AVR firmware, Host, and Virtual Board packages were built for five OS/architecture targets before release assembly.
 ${draftNotice}
 
-| Release identity | Evidence |
+| Release | Value |
 |---|---|
 | Version | ${code(tag)} |
 | Source commit | ${sourceLink(sourceSha, context)} |
@@ -486,30 +490,30 @@ ${draftNotice}
 
 | Layer | Highlights |
 |---|---|
-| ⚡ AVR firmware | COBS/CRC UART, telemetry, 16 PWM outputs, guarded motion, learned 433 MHz actions, persistent settings, and the exact MiniCore/Urboot memory gate |
-| 🖥️ Controller | Native Charm TUI and shell, REST/WebSocket/JSON-RPC surfaces, automation, safe programmer orchestration, and a smoke-tested C ABI library |
-| 🧪 Virtual Board | Hardware-free native protocol and behavior simulator, built and tested beside every Controller target |
+| ⚡ AVR firmware | COBS/CRC UART, telemetry, 16 PWM outputs, guarded motion, learned 433 MHz actions, persistent settings, and MiniCore/Urboot memory checks |
+| 🖥️ Host | Charm TUI and shell, REST/WebSocket/JSON-RPC, automation, programmer orchestration, and C ABI library |
+| 🧪 Virtual Board | Protocol and behavior simulator for every host target |
 
-## 🎯 Pick your build
+## 🎯 Downloads
 
-| Target | Controller application | Virtual Board | AVR firmware |
+| Target | Host application | Virtual Board | AVR firmware |
 |---|---|---|---|
 | ATmega328P / MiniCore | — | — | ${assetLink(selection.firmware.application, context)} · ${assetLink(selection.firmware.flashWithBootloader, context)} · ${assetLink(selection.firmware.archive, context)} |
 ${platformRows}
 
-The **Controller** package operates the physical board. The **Virtual Board** package is the native simulator/test companion. They are intentionally separate downloads.
+**Host** operates the board; **Virtual Board** is the simulator.
 
-## 🔥 Direct AVR firmware images
+## 🔥 AVR firmware
 
 | Image role | Use it when | Download | Size |
 |---|---|---|---:|
 | Application only | A compatible Urboot bootloader is already installed; this is the normal firmware-update image. | ${assetLink(selection.firmware.application, context)} | ${humanBytes(selection.firmware.application.bytes)} |
 | Flash + bootloader | A hardware programmer will replace the complete flash image, including the bootloader. | ${assetLink(selection.firmware.flashWithBootloader, context)} | ${humanBytes(selection.firmware.flashWithBootloader.bytes)} |
 ${eeprom}
-| Complete firmware bundle | You want the images, dependency inventory, and build manifest together. | ${assetLink(selection.firmware.archive, context)} | ${humanBytes(selection.firmware.archive.bytes)} |
+| Firmware bundle | Images, dependencies, and build manifest. | ${assetLink(selection.firmware.archive, context)} | ${humanBytes(selection.firmware.archive.bytes)} |
 
 > [!CAUTION]
-> Do not flash the bootloader or EEPROM image casually. Back up flash and EEPROM first, confirm the exact ATmega328P/MiniCore fuse and bootloader configuration, and use the application-only image for a normal bootloader upload.
+> Back up flash and EEPROM before ISP or EEPROM writes. Normal updates use the application image.
 
 ## ✅ Validation matrix
 
@@ -517,11 +521,11 @@ ${eeprom}
 |---|---|---|---|
 ${validations}
 
-Build success proves fresh native compilation, tests, packaging, and file integrity. It does **not** claim that this exact build was uploaded to or exercised on your physical controller board.
+CI does not validate a physical board.
 
 ## 🔐 Verify before running or flashing
 
-For one archive, download its sibling ${code(".sha256")} sidecar and use the platform-native command printed in that package's build summary. To validate the complete release set with the commands below, download ${code("SHA256SUMS.txt")} **and all 13 listed primary payloads** (eleven archives plus both direct firmware images) into the same directory first:
+Download ${code("SHA256SUMS.txt")} and the 13 primary payloads into one directory:
 
 **Linux**
 
@@ -555,10 +559,10 @@ Get-ChildItem -Filter 'PCController-*.tar.gz' | ForEach-Object {
 }
 \`\`\`
 
-GitHub build-provenance attestations cover every published release asset, including sidecars and manifests. SHA-256 covers every primary payload listed by ${code("SHA256SUMS.txt")}.
+All release assets are attested; ${code("SHA256SUMS.txt")} covers the 13 primary payloads.
 
 <details>
-<summary><strong>📦 Complete artifact inventory and SHA-256</strong></summary>
+<summary><strong>📦 Artifacts</strong></summary>
 
 | Asset | Role | Size | SHA-256 |
 |---|---|---:|---|
@@ -566,7 +570,7 @@ ${inventory}
 
 </details>
 
-## 🧪 ${channel} boundaries
+## 🧪 ${channel} limits
 
 - Physical AVR upload and on-device behavior still require hardware validation with the intended board, programmer/serial adapter, fuse settings, and peripherals.
 - The firmware target is the repository's pinned **ATmega328P + MiniCore/Urboot** profile; it is not a generic AVR image.
@@ -575,7 +579,7 @@ ${channelLimitation}
 
 ---
 
-Built from ${sourceLink(sourceSha, context)} · ${runLink(context)} · deterministic release notes (reruns replace this body instead of appending generated notes)
+Built from ${sourceLink(sourceSha, context)} · ${runLink(context)}
 `;
 }
 
@@ -587,34 +591,23 @@ function stepSummary({ tag, sourceSha, assets, selection, context, metrics }) {
         `| ${platform.label} | ${assetLink(platform.controller, context)} | ${assetLink(platform.virtualBoard, context)} |`,
     )
     .join("\n");
-  const flashPercent = Math.max(
-    0,
-    Math.min(100, Math.floor(Number(metrics?.flash?.usagePercent ?? 0))),
-  );
+  const flashPercent = Number(metrics?.flash?.usagePercent ?? 0);
   const peakSramPercent = metrics?.peakSram?.capacityBytes
-    ? Math.max(
-        0,
-        Math.min(
-          100,
-          Math.floor(
-            (Number(metrics.peakSram.usedBytes || 0) /
-              Number(metrics.peakSram.capacityBytes)) *
-              100,
-          ),
-        ),
-      )
+    ? (Number(metrics.peakSram.usedBytes || 0) /
+        Number(metrics.peakSram.capacityBytes)) *
+      100
     : 0;
   const sramBadge = metrics?.peakSram?.usedBytes != null
-    ? `\n![Estimated peak SRAM ${peakSramPercent}%](https://geps.dev/progress/${peakSramPercent})\n`
+    ? `\n${usageProgress(peakSramPercent, "Estimated peak SRAM")}\n`
     : "";
   const flashBlock = metrics?.flash
-    ? `\n## 🧠 AVR capacity evidence\n\n![Application flash ${flashPercent}%](https://geps.dev/progress/${flashPercent})\n${sramBadge}\n| Resource | Used | Capacity | Free |\n|---|---:|---:|---:|\n| Application flash | ${metrics.flash.usedBytes.toLocaleString("en-US")} B (${metrics.flash.usagePercent}%) | ${metrics.flash.capacityBytes.toLocaleString("en-US")} B | **${metrics.flash.freeBytes.toLocaleString("en-US")} B** |${metrics?.peakSram?.usedBytes != null ? `\n| Estimated peak SRAM | ${metrics.peakSram.usedBytes.toLocaleString("en-US")} B | ${metrics.peakSram.capacityBytes.toLocaleString("en-US")} B | **${metrics.peakSram.freeBytes.toLocaleString("en-US")} B** |` : ""}\n`
+    ? `\n## 🧠 AVR capacity evidence\n\n${usageProgress(flashPercent, "Application flash")}\n${sramBadge}\n| Resource | Used | Capacity | Free |\n|---|---:|---:|---:|\n| Application flash | ${metrics.flash.usedBytes.toLocaleString("en-US")} B (${metrics.flash.usagePercent}%) | ${metrics.flash.capacityBytes.toLocaleString("en-US")} B | **${metrics.flash.freeBytes.toLocaleString("en-US")} B** |${metrics?.peakSram?.usedBytes != null ? `\n| Estimated peak SRAM | ${metrics.peakSram.usedBytes.toLocaleString("en-US")} B | ${metrics.peakSram.capacityBytes.toLocaleString("en-US")} B | **${metrics.peakSram.freeBytes.toLocaleString("en-US")} B** |` : ""}\n`
     : "";
 
-  return `# 🚀 ${escapeMarkdown(PRODUCT_NAME)} ${escapeMarkdown(tag)} release showcase
+  return `# 🚀 ${escapeMarkdown(PRODUCT_NAME)} ${escapeMarkdown(tag)} release
 
 > [!TIP]
-> All **11 build targets** passed before release assembly: one AVR firmware package, five native Controller packages, and five native Virtual Board packages.
+> **11 build targets passed.**
 
 | Property | Result |
 |---|---|
@@ -622,11 +615,10 @@ function stepSummary({ tag, sourceSha, assets, selection, context, metrics }) {
 | Workflow | ${runLink(context)} |
 | Staged release inputs | **${assets.length} files** · **${humanBytes(totalBytes)}** |
 | Integrity | SHA-256 manifest + per-archive checksums + GitHub build provenance |
-| Release body | Deterministic; safe to rerun without duplicate generated notes |
 
-## 🎯 Download chooser
+## 🎯 Downloads
 
-| Platform | Controller | Virtual Board |
+| Platform | Host | Virtual Board |
 |---|---|---|
 ${chooser}
 
@@ -634,11 +626,11 @@ ${chooser}
 |---|---|
 | Application image | ${assetLink(selection.firmware.application, context)} |
 | Flash + bootloader image | ${assetLink(selection.firmware.flashWithBootloader, context)} |
-| Complete firmware package | ${assetLink(selection.firmware.archive, context)} |
+| Firmware package | ${assetLink(selection.firmware.archive, context)} |
 ${flashBlock}
-## ✅ Release gates
+## ✅ Validation
 
-- ✅ Five-platform Controller matrix completed on native GitHub runners
+- ✅ Five-platform Host matrix completed on native GitHub runners
 - ✅ Five-platform Virtual Board CMake/CTest matrix completed on native GitHub runners
 - ✅ AVR compiled for the pinned MiniCore target and Intel HEX was validated
 - ✅ Checksum sidecars were re-read and matched their assets

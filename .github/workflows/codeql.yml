@@ -1,0 +1,253 @@
+name: "🛡️ Security · CodeQL"
+run-name: "🛡️ CodeQL · ${{ github.ref_name }} · ${{ github.event_name }}"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  schedule:
+    - cron: "37 2 * * 4"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: "🔎 ${{ matrix.label }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: actions
+            label: Actions workflows
+            runner: ubuntu-24.04
+            language: actions
+            build_mode: none
+            category: /language:actions/scope:workflows
+          - key: javascript
+            label: JavaScript tooling
+            runner: ubuntu-24.04
+            language: javascript-typescript
+            build_mode: none
+            category: /language:javascript-typescript/scope:tooling
+          - key: go-linux
+            label: Go Host · Linux
+            runner: ubuntu-24.04
+            language: go
+            build_mode: manual
+            category: /language:go/platform:linux
+          - key: go-windows
+            label: Go Host · Windows
+            runner: windows-2025
+            language: go
+            build_mode: manual
+            category: /language:go/platform:windows
+          - key: cpp-avr-linux
+            label: C/C++ · AVR and Linux
+            runner: ubuntu-24.04
+            language: c-cpp
+            build_mode: manual
+            category: /language:c-cpp/platform:avr-linux
+          - key: cpp-windows
+            label: C/C++ · Windows
+            runner: windows-2025
+            language: c-cpp
+            build_mode: manual
+            category: /language:c-cpp/platform:windows
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      FORCE_COLOR: "1"
+      PCCONTROLLER_VERSION: 0.0.0-codeql.${{ github.run_number }}
+      TZ: UTC
+
+    steps:
+      - name: "📥 Check out source without persisted credentials"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: "🧰 Select native Windows C compiler"
+        if: matrix.key == 'go-windows' || matrix.key == 'cpp-windows'
+        shell: cmd
+        run: |
+          @echo off
+          set "MINGW_BIN=C:\mingw64\bin"
+          set "GCC=C:\mingw64\bin\gcc.exe"
+          if not exist "%GCC%" (
+            echo The GitHub Windows image is missing its standalone MinGW64 compiler: %GCC% 1>&2
+            exit /b 1
+          )
+          "%GCC%" -dumpmachine > "%RUNNER_TEMP%\codeql-gcc-target.txt"
+          findstr /x /c:"x86_64-w64-mingw32" "%RUNNER_TEMP%\codeql-gcc-target.txt" >nul
+          if errorlevel 1 (
+            echo Expected x86_64-w64-mingw32 GCC; detected: 1>&2
+            type "%RUNNER_TEMP%\codeql-gcc-target.txt" 1>&2
+            exit /b 1
+          )
+          >>"%GITHUB_PATH%" echo %MINGW_BIN%
+          >>"%GITHUB_ENV%" echo CC=gcc.exe
+          "%GCC%" --version
+
+      - name: "🐹 Install Go from go.mod"
+        if: startsWith(matrix.key, 'go-') || matrix.key == 'cpp-avr-linux'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: Tools/Controller/go.mod
+          cache-dependency-path: Tools/Controller/go.sum
+
+      - name: "🟢 Install Node.js"
+        if: matrix.key == 'cpp-avr-linux'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "📌 Read canonical AVR dependency pins"
+        if: matrix.key == 'cpp-avr-linux'
+        id: pins
+        run: node Tools/Dependencies/export-lock.mjs export
+
+      - name: "🔐 Install checksum-verified Arduino CLI"
+        if: matrix.key == 'cpp-avr-linux'
+        env:
+          ARDUINO_CLI_ASSET: ${{ steps.pins.outputs.arduino_cli_asset }}
+          ARDUINO_CLI_SHA256: ${{ steps.pins.outputs.arduino_cli_linux_64_sha256 }}
+          ARDUINO_CLI_URL: ${{ steps.pins.outputs.arduino_cli_download_url }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/$ARDUINO_CLI_ASSET"
+          install_dir="$RUNNER_TEMP/arduino-cli/bin"
+          curl --fail --location --retry 3 --output "$archive" "$ARDUINO_CLI_URL"
+          echo "$ARDUINO_CLI_SHA256  $archive" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xzf "$archive" -C "$install_dir" arduino-cli
+          echo "$install_dir" >> "$GITHUB_PATH"
+          "$install_dir/arduino-cli" version
+
+      - name: "🧩 Install pinned MiniCore and every Arduino library"
+        if: matrix.key == 'cpp-avr-linux'
+        env:
+          MINICORE_INDEX_URL: ${{ steps.pins.outputs.minicore_index_url }}
+          MINICORE_PACKAGE: ${{ steps.pins.outputs.minicore_package }}
+          MINICORE_VERSION: ${{ steps.pins.outputs.minicore_version }}
+          ARDUINO_LIBRARIES_JSON: ${{ steps.pins.outputs.arduino_libraries_json }}
+        run: |
+          set -euo pipefail
+          arduino-cli core update-index --additional-urls "$MINICORE_INDEX_URL"
+          arduino-cli core install "$MINICORE_PACKAGE@$MINICORE_VERSION" --additional-urls "$MINICORE_INDEX_URL"
+          node -e 'const { execFileSync } = require("node:child_process"); for (const library of JSON.parse(process.env.ARDUINO_LIBRARIES_JSON)) execFileSync("arduino-cli", ["lib", "install", library], { stdio: "inherit" });'
+
+      - name: "🛡️ Initialize CodeQL"
+        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build_mode }}
+          queries: security-extended
+
+      - name: "🐹 Build and test Go Host on Linux"
+        if: matrix.key == 'go-linux'
+        working-directory: Tools/Controller
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./...
+          go run ./winres/generate_icon.go "$RUNNER_TEMP/codeql-icon.png"
+          go build \
+            -buildvcs=false \
+            -trimpath \
+            -tags controllerlib \
+            -buildmode=c-shared \
+            -o "$RUNNER_TEMP/pccontroller.so" \
+            ./cmd/controllerlib
+
+      - name: "🐹 Build and test Go Host on Windows"
+        if: matrix.key == 'go-windows'
+        working-directory: Tools/Controller
+        shell: cmd
+        run: |
+          @echo off
+          node ../Build/go-tests.mjs --module . --output ../../.build/tests/go --go go
+          if errorlevel 1 exit /b 1
+          go run ./winres/generate_icon.go "%RUNNER_TEMP%\codeql-icon.png"
+          if errorlevel 1 exit /b 1
+          go build -buildvcs=false -trimpath -tags controllerlib -buildmode=c-shared -o "%RUNNER_TEMP%\pccontroller.dll" ./cmd/controllerlib
+          if errorlevel 1 exit /b 1
+
+      - name: "⚡ Build AVR firmware and Linux Virtual Board"
+        if: matrix.key == 'cpp-avr-linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build.sh --firmware-only --clean --version "$PCCONTROLLER_VERSION"
+          cmake \
+            -S Tools/VirtualBoard \
+            -B .build/codeql-virtual-board \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build .build/codeql-virtual-board --parallel
+          ctest --test-dir .build/codeql-virtual-board --output-on-failure
+
+      - name: "🪟 Build Windows Virtual Board and C ABI smoke source"
+        if: matrix.key == 'cpp-windows'
+        shell: cmd
+        run: |
+          @echo off
+          cmake -S Tools/VirtualBoard -B .build/codeql-virtual-board -DBUILD_TESTING=ON
+          if errorlevel 1 exit /b 1
+          cmake --build .build/codeql-virtual-board --config Release --parallel
+          if errorlevel 1 exit /b 1
+          ctest --test-dir .build/codeql-virtual-board -C Release --output-on-failure
+          if errorlevel 1 exit /b 1
+          gcc.exe Tools\Controller\examples\c_abi_smoke.c -o "%RUNNER_TEMP%\pccontroller-c-abi-smoke.exe"
+          if errorlevel 1 exit /b 1
+
+      - name: "🔬 Analyze and upload CodeQL results"
+        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+        with:
+          category: ${{ matrix.category }}
+
+  complete:
+    name: "🛡️ CodeQL · Entire repository"
+    if: always()
+    needs: analyze
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: "📋 Publish consolidated security summary"
+        env:
+          ANALYSIS_RESULT: ${{ needs.analyze.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$ANALYSIS_RESULT" == "success" ]]; then
+            icon='✅'
+            status='All six CodeQL categories passed'
+          else
+            icon='❌'
+            status="CodeQL matrix result: $ANALYSIS_RESULT"
+          fi
+          {
+            echo "# $icon PCController CodeQL"
+            echo
+            echo "$status."
+            echo
+            echo '| Codebase | Analyzer | Build coverage |'
+            echo '|---|---|---|'
+            echo '| Workflows | Actions | All tracked GitHub Actions workflows |'
+            echo '| Project tooling | JavaScript/TypeScript | Build, Firmware, Audit, and CI helpers |'
+            echo '| Host | Go | Native Linux and Windows, tests, generator, and tagged C ABI |'
+            echo '| Firmware + Virtual Board | C/C++ | MiniCore AVR, native Linux, and native Windows |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [[ "$ANALYSIS_RESULT" == "success" ]]

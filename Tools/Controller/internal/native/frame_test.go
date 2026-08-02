@@ -541,6 +541,15 @@ func TestTemperatureAndDeviceEventSchemas(t *testing.T) {
 	}
 }
 
+func TestTemperatureCountRejectsProtocolOverflow(t *testing.T) {
+	payload := make([]byte, MaxPayload)
+	payload[0] = TemperatureSchema
+	payload[1] = byte(temperatureMaximumEntries + 1)
+	if _, err := ParseTemperatures(payload); err == nil {
+		t.Fatal("temperature count beyond the protocol capacity was accepted")
+	}
+}
+
 func TestMenuListResponseSchema(t *testing.T) {
 	payload := []byte{
 		MenuListSchema, 14, 2, 2,
@@ -566,6 +575,15 @@ func TestMenuListResponseSchema(t *testing.T) {
 	}
 }
 
+func TestMenuListCountRejectsProtocolOverflow(t *testing.T) {
+	payload := make([]byte, MaxPayload)
+	payload[0] = MenuListSchema
+	payload[3] = byte(menuListMaximumEntries + 1)
+	if _, err := ParseMenuList(payload); err == nil {
+		t.Fatal("menu-list count beyond the protocol capacity was accepted")
+	}
+}
+
 func TestMenuLayoutSchemaRoundTripAndValidation(t *testing.T) {
 	order := []byte{0, 3, 4, 1, 2, 5, 6, 7, 11, 12, 13, 8, 9, 10}
 	payload, err := EncodeMenuLayout(MenuLayout{
@@ -583,6 +601,9 @@ func TestMenuLayoutSchemaRoundTripAndValidation(t *testing.T) {
 	}
 	if decoded.VisibleMask != 0x3FFF || len(decoded.Order) != 14 || decoded.Order[1] != 3 {
 		t.Fatalf("decoded MENU_LAYOUT=%#v", decoded)
+	}
+	if _, err := EncodeMenuLayout(MenuLayout{Order: make([]byte, 17)}); err == nil {
+		t.Fatal("MENU_LAYOUT with more than 16 entries was accepted")
 	}
 
 	tests := [][]byte{

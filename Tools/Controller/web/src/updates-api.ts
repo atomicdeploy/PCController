@@ -1,9 +1,13 @@
 import { getToken, responseErrorDetail, rpc } from './api'
 import { controllerHTTPURL } from './transport-config'
 
+/** Artifact classes accepted by the immutable host store. */
 export type ArtifactKind = 'firmware' | 'eeprom' | 'flash-backup' | 'host-executable'
+/** Explicit programming transports exposed to update clients. */
 export type ProgrammerMethod = 'urclock' | 'usbasp'
+/** Operations represented by the shared update-progress contract. */
 export type UpdateOperationKind = 'artifact-upload' | 'artifact-fetch' | 'device-capture' | 'firmware' | 'flash-restore' | 'eeprom' | 'host'
+/** Lifecycle states emitted by artifact and programming operations. */
 export type UpdateState =
   | 'queued'
   | 'downloading'
@@ -17,6 +21,7 @@ export type UpdateState =
   | 'completed'
   | 'failed'
 
+/** Content-addressed artifact metadata exposed by the controller. */
 export interface ArtifactDescriptor {
   kind: ArtifactKind
   name: string
@@ -36,6 +41,7 @@ export interface ArtifactDescriptor {
   metadata?: Record<string, string>
 }
 
+/** Durable progress telemetry for one artifact or programming operation. */
 export interface UpdateStatus {
   id: string
   kind: UpdateOperationKind
@@ -54,6 +60,7 @@ export interface UpdateStatus {
   isp_fallback_suggested?: boolean
 }
 
+/** Aggregate defaults, current artifacts, board identity, and update policy. */
 export interface ArtifactManifest {
   enabled: boolean
   defaults_enabled: boolean
@@ -80,16 +87,19 @@ export interface ArtifactManifest {
   update?: UpdateStatus
 }
 
+/** Artifact inventory returned by a filtered or unfiltered list request. */
 export interface ArtifactList {
   artifacts: ArtifactDescriptor[]
 }
 
+/** Operation telemetry plus any artifact produced or reused by the request. */
 export interface ArtifactOperationResult {
   operation: UpdateStatus
   artifact?: ArtifactDescriptor
   reused?: boolean
 }
 
+/** Remote download request with optional integrity and idempotency constraints. */
 export interface RemoteArtifactRequest {
   url: string
   kind: ArtifactKind
@@ -104,6 +114,7 @@ export interface RemoteArtifactRequest {
   idempotency_key?: string
 }
 
+/** Explicitly authorized flash and/or EEPROM readback request. */
 export interface ArtifactCaptureRequest {
   components: Array<'flash' | 'eeprom'>
   authorized: true
@@ -111,6 +122,7 @@ export interface ArtifactCaptureRequest {
   idempotency_key?: string
 }
 
+/** Explicitly authorized request to apply one stored artifact. */
 export interface ArtifactUpdateRequest {
   artifact_sha256: string
   authorized: true
@@ -140,42 +152,52 @@ async function decode<T>(response: Response): Promise<T> {
   return value as T
 }
 
+/** Fetches current/default artifact identities and update policy. */
 export function getArtifactManifest(signal?: AbortSignal): Promise<ArtifactManifest> {
   return rpc<ArtifactManifest>('controller.artifact.manifest', {}, signal)
 }
 
+/** Lists stored artifacts, optionally restricted to one kind. */
 export function listArtifacts(kind?: ArtifactKind, signal?: AbortSignal): Promise<ArtifactList> {
   return rpc<ArtifactList>('controller.artifact.list', kind ? { kind } : {}, signal)
 }
 
+/** Queues a verified remote artifact download. */
 export function fetchRemoteArtifact(request: RemoteArtifactRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
   return rpc<ArtifactOperationResult>('controller.artifact.fetch', request, signal)
 }
 
+/** Queues an authorized device flash and/or EEPROM readback. */
 export function captureDeviceArtifacts(request: ArtifactCaptureRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
   return rpc<ArtifactOperationResult>('controller.artifact.capture', request, signal)
 }
 
+/** Queues a guarded firmware update from a stored artifact. */
 export function startFirmwareUpdate(request: ArtifactUpdateRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
   return rpc<ArtifactOperationResult>('controller.update.firmware', request, signal)
 }
 
+/** Queues an exact captured-flash restore. */
 export function startFlashRestore(request: ArtifactUpdateRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
   return rpc<ArtifactOperationResult>('controller.restore.flash', request, signal)
 }
 
+/** Queues an authorized EEPROM update from a stored artifact. */
 export function startEEPROMUpdate(request: ArtifactUpdateRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
   return rpc<ArtifactOperationResult>('controller.update.eeprom', request, signal)
 }
 
+/** Queues staging of a verified host executable artifact. */
 export function startHostUpdate(request: ArtifactUpdateRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
   return rpc<ArtifactOperationResult>('controller.update.host', request, signal)
 }
 
+/** Fetches the most recent update-operation status. */
 export function getUpdateStatus(signal?: AbortSignal): Promise<UpdateStatus> {
   return rpc<UpdateStatus>('controller.update.status', {}, signal)
 }
 
+/** Uploads a bounded local file into the immutable artifact store. */
 export async function uploadArtifact(
   file: File,
   kind: ArtifactKind,
@@ -198,6 +220,7 @@ export async function uploadArtifact(
   return decode<ArtifactOperationResult>(response)
 }
 
+/** Downloads one immutable artifact using its verified content identity. */
 export async function downloadArtifact(artifact: ArtifactDescriptor, signal?: AbortSignal): Promise<void> {
   const url = controllerHTTPURL(`/api/v1/artifacts/${encodeURIComponent(artifact.kind)}/${encodeURIComponent(artifact.sha256)}`)
   const response = await fetch(url, { headers: authorizationHeaders(), signal })
@@ -214,11 +237,13 @@ export async function downloadArtifact(artifact: ArtifactDescriptor, signal?: Ab
   URL.revokeObjectURL(objectURL)
 }
 
+/** Computes a lowercase SHA-256 digest for a browser file or blob. */
 export async function sha256File(file: Blob): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
   return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('')
 }
 
+/** Compares hashes first, then build timestamps when identities differ. */
 export function compareBuildIdentity(
   current: Pick<ArtifactDescriptor, 'sha256' | 'build_timestamp'> | undefined,
   candidate: Pick<ArtifactDescriptor, 'sha256' | 'build_timestamp'> | undefined,

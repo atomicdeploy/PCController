@@ -21,10 +21,12 @@ interface PendingSocketRPC {
 
 const pendingSocketRPC = new Map<number, PendingSocketRPC>()
 
+/** Returns the session-scoped bearer token used by authenticated transports. */
 export function getToken(): string {
   return sessionStorage.getItem(tokenKey) ?? ''
 }
 
+/** Stores or clears the session-scoped bearer token. */
 export function setToken(value: string): void {
   const token = value.trim()
   if (token) sessionStorage.setItem(tokenKey, token)
@@ -39,6 +41,7 @@ function headers(json = false): HeadersInit {
   return result
 }
 
+/** Extracts a human-readable error from an HTTP response body. */
 export function responseErrorDetail(value: unknown, statusText: string, status: number): string {
   if (typeof value === 'object' && value && 'error' in value) {
     const error = (value as { error: unknown }).error
@@ -68,6 +71,7 @@ async function decode<T>(response: Response): Promise<T> {
   return value as T
 }
 
+/** Fetches the bootstrap UI configuration required before opening live transports. */
 export async function getUIConfig(signal?: AbortSignal): Promise<UIConfig> {
   const response = await fetch(controllerHTTPURL('/api/v1/ui-config'), { signal, cache: 'no-store' })
   const config = await decode<UIConfig>(response)
@@ -77,6 +81,7 @@ export async function getUIConfig(signal?: AbortSignal): Promise<UIConfig> {
   return config
 }
 
+/** Fetches the authenticated current controller snapshot. */
 export async function getSnapshot(signal?: AbortSignal): Promise<Snapshot> {
   const response = await fetch(controllerHTTPURL('/api/v1/snapshot'), {
     headers: headers(), signal, cache: 'no-store',
@@ -134,6 +139,7 @@ function socketRPC<T>(
   })
 }
 
+/** Invokes JSON-RPC over the live WebSocket, falling back to authenticated HTTP. */
 export function rpc<T>(method: string, params: unknown = {}, signal?: AbortSignal): Promise<T> {
   const request = { jsonrpc: '2.0' as const, id: nextID++, method, params }
   const socket = streamSocket
@@ -141,16 +147,19 @@ export function rpc<T>(method: string, params: unknown = {}, signal?: AbortSigna
   return restRPC<T>(request, signal)
 }
 
+/** Executes one canonical controller command through JSON-RPC. */
 export function execute(command: string, signal?: AbortSignal): Promise<CommandResult> {
 	return rpc<CommandResult>('controller.command.execute', { command }, signal)
 }
 
+/** Receives live status, event, and transport-lifecycle notifications. */
 export interface StreamHandlers {
   status: (value: StatusUpdate) => void
   event: (value: ControllerEvent) => void
   state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string) => void
 }
 
+/** Opens the reconnecting event stream and returns a function that closes it. */
 export function connectStream(config: UIConfig, handlers: StreamHandlers): () => void {
   let socket: WebSocket | null = null
   let stopped = false
@@ -235,6 +244,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
   }
 }
 
+/** Calls an authenticated HTTP endpoint owned by a configured integration. */
 export async function integrationFetch<T>(
   integration: 'datahub',
   path: string,
@@ -261,6 +271,7 @@ function safeDownloadName(response: Response, path: string): string {
   return candidate || 'controller-data.bin'
 }
 
+/** Downloads a file from an authenticated integration endpoint. */
 export async function downloadIntegration(
   integration: 'datahub',
   path: string,

@@ -109,6 +109,7 @@ import {
 import type { TerminalEntry as TabTerminalEntry } from './tab-channel'
 import type {
   Appearance,
+  BoardSettingsReadState,
   ControllerEvent,
   DialogState,
   HostUISettings,
@@ -139,6 +140,7 @@ export interface SharedViewProps {
   }
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
+  boardSettingsReadState: BoardSettingsReadState
 }
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
@@ -673,7 +675,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string> }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string> }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
     'Application title is required.': 'عنوان برنامه الزامی است.',
@@ -1064,7 +1066,14 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           />
         </Card>
 
-        {snapshot.connected && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح')} className="settings-card">
+        {snapshot.connected && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={snapshot.have_settings ? copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح') : boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Settings unavailable', 'تنظیمات در دسترس نیست')} className="settings-card">
+          {!snapshot.have_settings ? <EmptyState
+            icon={MemoryStick}
+            title={boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Board settings are unavailable', 'تنظیمات برد در دسترس نیست')}
+            detail={boardSettingsReadState === 'loading'
+              ? copy('Waiting for the controller to return its live EEPROM settings.', 'در انتظار دریافت تنظیمات زندهٔ EEPROM از برد.')
+              : copy('No EEPROM values are shown until the controller returns an authoritative settings report.', 'تا دریافت گزارش معتبر تنظیمات از برد، هیچ مقدار EEPROM نمایش داده نمی‌شود.')}
+          /> : <>
           <table className="settings-value-table">
             <thead><tr><th>{copy('Setting', 'تنظیم')}</th><th>{copy('EEPROM report', 'گزارش EEPROM')}</th><th>{copy('Live draft', 'پیش‌نویس زنده')}</th></tr></thead>
             <tbody>
@@ -1090,6 +1099,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           <Toggle checked={Boolean(outputPersistence & 4)} onChange={(enabled) => setPersistenceBit(4, enabled)} label={copy('Remember user PWM values', 'به‌خاطرسپاری مقادیر PWM کاربر')} detail={copy('Restore MOSFET/user PWM channel values after boot.', 'مقادیر کانال‌های MOSFET/PWM کاربر پس از راه‌اندازی بازیابی می‌شوند.')} />
           <Toggle checked={Boolean(outputPersistence & 8)} onChange={(enabled) => setPersistenceBit(8, enabled)} label={copy('Stop keeps direction relay', 'توقف، رلهٔ جهت را حفظ کند')} detail={outputPersistence & 8 ? copy('Motion stop releases only the output/enable relay.', 'توقف حرکت فقط رلهٔ خروجی/فعال‌سازی را آزاد می‌کند.') : copy('Motion stop releases both direction and output relays.', 'توقف حرکت هر دو رلهٔ جهت و خروجی را آزاد می‌کند.')} />
           <Button tone="primary" icon={MemoryStick} onClick={() => void command(settingsSetCommand(snapshot.settings, displayBrightness, displayClosedBrightness, statusBrightness, streamPeriod, motionExitHoldSeconds, outputPersistence, relayRestoreMask))}>{copy('Write board settings', 'نوشتن تنظیمات برد')}</Button>
+          </>}
         </Card>}
 
         <Card icon={snapshot.connected ? Usb : Cable} iconTone={snapshot.connected ? 'green' : 'amber'} title={t('connection')} eyebrow={snapshot.connected ? copy('Controller connected', 'کنترلر متصل است') : copy('Controller offline', 'کنترلر آفلاین است')} className="settings-card">

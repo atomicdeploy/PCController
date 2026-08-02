@@ -268,7 +268,18 @@ func (manager *Manager) UpdateSelectOptions(source string, options []appconfig.H
 func (manager *Manager) Directory() (native.HostMenuDirectory, error) {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	entries := make([]native.HostMenuDirectoryEntry, 0, len(manager.config.Menus)+len(manager.config.BuiltinOverrides))
+	menuCount := len(manager.config.Menus)
+	overrideCount := len(manager.config.BuiltinOverrides)
+	if menuCount > native.HostMenuMaximumEntries ||
+		overrideCount > native.HostMenuMaximumEntries-menuCount {
+		return native.HostMenuDirectory{}, fmt.Errorf(
+			"host-menu configuration has %d menus and %d overrides; maximum combined is %d",
+			menuCount,
+			overrideCount,
+			native.HostMenuMaximumEntries,
+		)
+	}
+	entries := make([]native.HostMenuDirectoryEntry, 0, native.HostMenuMaximumEntries)
 	byID := make(map[byte]appconfig.HostMenu, len(manager.config.Menus))
 	for _, menu := range manager.config.Menus {
 		byID[menu.NodeID] = menu
@@ -1274,7 +1285,18 @@ func RegisterCommands(engine *shell.Engine, manager *Manager) error {
 			switch strings.ToLower(args[0]) {
 			case "list":
 				config := manager.Config()
-				lines := make([]string, 0, len(config.Menus)+len(config.BuiltinOverrides)+1)
+				menuCount := len(config.Menus)
+				overrideCount := len(config.BuiltinOverrides)
+				if menuCount > native.HostMenuMaximumEntries ||
+					overrideCount > native.HostMenuMaximumEntries-menuCount {
+					return "", fmt.Errorf(
+						"host-menu configuration has %d menus and %d overrides; maximum combined is %d",
+						menuCount,
+						overrideCount,
+						native.HostMenuMaximumEntries,
+					)
+				}
+				lines := make([]string, 0, native.HostMenuMaximumEntries+1)
 				lines = append(lines, "TYPE     STABLE/HOST  ORDER  PARENT  7SEG  LCD NAME         KEY")
 				for _, override := range config.BuiltinOverrides {
 					lines = append(lines, fmt.Sprintf("builtin  0x%02X         %-5d  0x%02X    %-4s  %-16s builtin:%d", override.StableID, override.OrderID, override.ParentID, override.Label, override.Title, override.StableID))

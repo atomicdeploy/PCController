@@ -368,6 +368,13 @@ range `[44:48]` (bytes `44..47`).
 Readers require at least 48 bytes, always decode reset telemetry, and tolerate
 future appended fields after the canonical record.
 
+The UART record carries only the millisecond counter. Every JSON status shape
+(snapshot, history, RPC, REST, WebSocket, and scripting output) retains
+`uptime_ms` as that stable machine value and also includes a derived `uptime`
+string such as `1h13m12.21s`. Consumers should calculate with `uptime_ms` and
+may present `uptime` directly; the derived string is never written to the MCU
+or added to the compact UART payload.
+
 Status flag bit 13 reports the host-owned Running state, bit 14 reports that
 the firmware considers the host offline, and bit 15 reports its hot-temperature
 condition. The Go decoder exposes these as `program_running`, `host_offline`,
@@ -476,7 +483,7 @@ use the same request and response model:
 ```
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"uptime_ms":1234}}
+{"jsonrpc":"2.0","id":1,"result":{"uptime_ms":1234,"uptime":"1.234s"}}
 ```
 
 An omitted `id` is a notification and receives no direct response. Errors use
@@ -500,6 +507,11 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
 | `controller.status` | `{}` | fresh board status |
+| `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
+| `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
+| `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
+| `controller.pwm.set` | `channel` (`0..15`), `value` (`0..4095`) | write one channel, read back, and return the complete authoritative sixteen-channel snapshot; requires `board_commands` |
+| `controller.pwm.off` | `{}` | clear every PWM channel, read back, and return the complete authoritative snapshot; requires `board_commands` |
 | `controller.temperatures` | optional `rescan` | named temperatures and ROM identities |
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when advertised, otherwise the canonical capability-limited manifest |
 | `controller.menu.jump`, `controller.menu.page` | `page` ID or name | select a board menu page |
@@ -560,6 +572,11 @@ All JSON endpoints share the IPC listener:
 | `GET /api/v1/ui-config` | unauthenticated non-secret browser bootstrap contract |
 | `POST /api/v1/rpc` | one JSON-RPC request |
 | `GET /api/v1/snapshot` | cached controller snapshot |
+| `GET /api/v1/peripherals` | custom names and the canonical 34-entry descriptor registry; `read` capability |
+| `PUT /api/v1/peripherals` | replace custom names from `peripheral_names`; `host_configuration` capability |
+| `GET /api/v1/pwm` | authoritative availability, selected channel, and all sixteen values; `read` capability |
+| `PUT /api/v1/pwm` | write `channel` (`0..15`) and `value` (`0..4095`), then return all sixteen values; `board_commands` capability |
+| `DELETE /api/v1/pwm` | clear all sixteen channels and return their authoritative readback; `board_commands` capability |
 | `GET /api/v1/commands` | machine-readable shared command catalog |
 | `GET /api/v1/program-state` | current host-owned Idle/Running state |
 | `PUT` or `POST /api/v1/program-state` | update `owner`, `mode`, and optional `reason` |
@@ -594,6 +611,52 @@ bootstrap apply host authentication. Bodies are limited to
 when disabled. An inbound webhook is data, not an implicit shell command. To
 make it actionable, enable a narrow text mapping whose resulting command still
 passes the normal safety path.
+
+### Peripheral names and authoritative PWM state
+
+`controller.peripherals.get` and `GET /api/v1/peripherals` return this shape:
+
+```json
+{
+  "peripheral_names": {"relay.5": "Workbench lamp"},
+  "peripherals": [
+    {
+      "key": "relay.5",
+      "kind": "relay",
+      "role": "user-output",
+      "index": 5,
+      "default_name": "User Relay 5",
+      "control": "relay"
+    }
+  ]
+}
+```
+
+The complete registry always contains 34 descriptors: eight relays, two motion
+sides, sixteen PWM channels, two displays, and six sensors. Custom values are
+presentation names in `ui.peripheral_names`, not device settings. Set methods
+trim keys and names, reject invalid input atomically, and treat a blank name as
+a request to remove that override so the descriptor's `default_name` becomes
+visible again. No peripheral-name operation reads or writes MCU EEPROM.
+
+All PWM read and mutation methods return the native `PWM_VALUES` JSON shape:
+
+```json
+{
+  "available": true,
+  "selected_channel": 3,
+  "values": [0, 0, 0, 2048, 0, 0, 0, 0, 0, 0, 0, 0, 256, 0, 0, 0]
+}
+```
+
+The response is an authoritative board readback, not an optimistic echo of the
+requested value. Channels `0..10` are user/commissioning outputs and may be
+presented as generic PWM controls. Channels `11..15` are role-specific:
+enclosure illumination, power indication, and status red/green/blue. They stay
+in every sixteen-value snapshot, but user interfaces must represent them with
+their dedicated controls and semantics rather than another generic slider.
+`controller.pwm.off` and `DELETE /api/v1/pwm` deliberately clear all sixteen
+channels, including the role-specific outputs.
 
 ### Bounded Windows host facts
 

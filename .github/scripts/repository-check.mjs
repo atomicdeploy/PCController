@@ -32,6 +32,7 @@ const requiredFiles = [
   ".github/actionlint.yaml",
   ".github/workflows/build.yml",
   ".github/workflows/update-dependencies.yml",
+  ".github/workflows/codeql.yml",
   ".github/workflows/deploy-avr.yml",
   ".github/workflows/firmware.yml",
   ".github/workflows/host.yml",
@@ -53,9 +54,14 @@ const requiredFiles = [
   "Tools/Dependencies/resolved-tools-lock.json",
   "Tools/Controller/toolchain-profile.json",
   "Tools/Controller/toolchain-lock.json",
+  ".github/scripts/codebase-summary.mjs",
+  ".github/scripts/codebase-summary.test.mjs",
   ".github/scripts/release-showcase.mjs",
+  ".github/scripts/security-config-check.mjs",
+  ".github/scripts/security-config-check.test.mjs",
   ".github/scripts/step-summary.mjs",
   ".github/scripts/step-summary.test.mjs",
+  ".github/scripts/usage-progress.mjs",
 ];
 
 function report(message) {

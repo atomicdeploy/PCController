@@ -1,6 +1,8 @@
 import type { Appearance, ControllerEvent } from './types'
 
+/** Same-origin protocol name used to isolate controller tab messages. */
 export const TAB_CHANNEL_PROTOCOL = `${__PRODUCT_PROTOCOL__}.tab-sync`
+/** Wire schema version for same-origin tab synchronization. */
 export const TAB_CHANNEL_VERSION = 1 as const
 
 const localTabOrigin = `${__PRODUCT_PROTOCOL__}://local`
@@ -13,36 +15,44 @@ const maximumEventTextBytes = 4 * 1024
 const maximumMetadataEntries = 32
 const maximumSeenMessages = 512
 
+/** Visibility lifecycle advertised by a browser tab. */
 export type PresenceState = 'active' | 'hidden' | 'leaving'
+/** Terminal entry classes synchronized between browser tabs. */
 export type TerminalEntryKind = 'command' | 'output' | 'error' | 'system'
 
+/** Presence update shared with other same-origin controller tabs. */
 export interface PresencePayload {
   type: 'presence'
   state: PresenceState
   page?: string
 }
 
+/** Appearance fields permitted to synchronize between tabs. */
 export type AppearancePatch = Partial<Pick<
   Appearance,
   'theme' | 'locale' | 'direction' | 'reduceMotion' | 'compactNumbers' | 'audioMuted' | 'audioVolume'
 >>
 
+/** Validated appearance update shared between tabs. */
 export interface AppearancePayload {
   type: 'appearance'
   appearance: AppearancePatch
 }
 
+/** Bounded terminal record suitable for cross-tab synchronization. */
 export interface TerminalEntry {
   kind: TerminalEntryKind
   text: string
   at?: number
 }
 
+/** Terminal update shared between tabs. */
 export interface TerminalPayload {
   type: 'terminal'
   entry: TerminalEntry
 }
 
+/** Credential-free controller event fields allowed on the tab channel. */
 export type SharedControllerEvent = Pick<ControllerEvent, 'id' | 'time' | 'kind' | 'text'> &
   Partial<Pick<
     ControllerEvent,
@@ -51,17 +61,20 @@ export type SharedControllerEvent = Pick<ControllerEvent, 'id' | 'time' | 'kind'
     'metadata'
   >>
 
+/** Controller event update shared between tabs. */
 export interface ControllerEventPayload {
   type: 'controller-event'
   event: SharedControllerEvent
 }
 
+/** Payload variants accepted by the tab-channel wire contract. */
 export type TabChannelPayload =
   | PresencePayload
   | AppearancePayload
   | TerminalPayload
   | ControllerEventPayload
 
+/** Versioned and expiring envelope sent through BroadcastChannel. */
 export interface TabChannelEnvelope {
   protocol: typeof TAB_CHANNEL_PROTOCOL
   version: typeof TAB_CHANNEL_VERSION
@@ -73,9 +86,12 @@ export interface TabChannelEnvelope {
   payload: TabChannelPayload
 }
 
+/** Subscriber invoked for each validated, non-duplicate envelope. */
 export type TabChannelListener = (message: TabChannelEnvelope) => void
+/** Identifier namespace requested from a custom ID factory. */
 export type TabChannelIDKind = 'tab' | 'message'
 
+/** Minimal BroadcastChannel surface used by the transport and its tests. */
 export interface BroadcastChannelPort {
   postMessage(message: unknown): void
   addEventListener(type: 'message', listener: EventListener): void
@@ -83,8 +99,10 @@ export interface BroadcastChannelPort {
   close(): void
 }
 
+/** Constructor shape accepted for native or test BroadcastChannel adapters. */
 export type BroadcastChannelConstructor = new (name: string) => BroadcastChannelPort
 
+/** Optional transport, clock, identity, origin, and expiry dependencies. */
 export interface TabChannelOptions {
   origin?: string
   ttlMS?: number
@@ -93,6 +111,7 @@ export interface TabChannelOptions {
   idFactory?: (kind: TabChannelIDKind) => string
 }
 
+/** Validated same-origin channel for presence, appearance, terminal, and events. */
 export interface TabChannel {
   readonly channelName: string
   readonly origin: string
@@ -343,6 +362,7 @@ function envelopeSizeIsSafe(value: unknown): boolean {
   }
 }
 
+/** Creates an isolated, bounded, credential-filtering tab synchronization channel. */
 export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
   const origin = normalizeOrigin(options.origin ?? defaultOrigin())
   const now = options.now ?? Date.now

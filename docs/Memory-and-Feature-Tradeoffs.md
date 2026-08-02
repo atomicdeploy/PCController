@@ -29,15 +29,15 @@ byte-identical container merely because it has the same source identity.
 
 | Evidence | Current value |
 |---|---:|
-| Source/build identity | `B3F4CB11` |
-| Source SHA-256 | `b3f4cb113cd499a7f52a4bbfd3aa1d52892effb264b0920b4ec540486a21d4ba` |
-| Application HEX SHA-256 | `85c2aae5272986d7d95c74d3cba6c569d164a4a037076a3ef5a82a1fed00e544` |
-| ELF SHA-256 | `21af8e34fecd13da084fc6a5886de774f226385d686fb35142bfb803d9b385ce` |
-| `.text` | 31,990 bytes |
+| Source/build identity | `800A5B70` |
+| Source SHA-256 | `800a5b70865c5894f934638004ed152660225a29e3f54909912e6bb2064a666d` |
+| Application HEX SHA-256 | `bb928b7b680d6e393d842bd28412b6760340a2ff61ae40b21a926036358bb092` |
+| ELF SHA-256 | `639a73db6b6d5ef096a9fb8e9615537532877d81389180d69b08841fe1c4b95d` |
+| `.text` | 32,006 bytes |
 | Initialized `.data` image | 226 bytes |
-| Linker-reported program | 32,216 bytes (`.text + .data`) |
+| Linker-reported program | 32,232 bytes (`.text + .data`) |
 | Fixed firmware identity | 12 bytes at `0x7DF4..0x7DFF` |
-| Application HEX data | 32,228 bytes; highest address `0x7DFF` |
+| Application HEX data | 32,244 bytes; highest address `0x7DFF` |
 | Static SRAM | 1,432 bytes (`.data` 226 + `.bss` 1,205 + `.noinit` 1) |
 | Estimated peak SRAM | 1,761/2,048 bytes |
 | Estimated free SRAM | 287 bytes, against the enforced 96-byte minimum |
@@ -49,19 +49,19 @@ objects.
 
 ### Deployed-board checkpoint
 
-The recovered COM18 board authenticated as source identity `B3F4CB11`. Its
+The COM18 board authenticated as source identity `800A5B70`. Its
 exact deployed application artifact is SHA-256
-`6653daa48ccc00c8db80004d942fbcccdbd4e1408cb99bac963869e544ce2d6d`.
-A fresh read-only Urboot semantic verification covered 32,228 programmed bytes,
-confirmed the reset target at `0x7E80`, and confirmed vector 25 targets
-`0x024E`.
+`bb928b7b680d6e393d842bd28412b6760340a2ff61ae40b21a926036358bb092`.
+The primary-owned Urclock transaction backed up, wrote, semantically verified
+32,244 programmed bytes, and reauthenticated the application before reporting
+success.
 
 The host cleared the durable recovery marker only after reconnecting through
 the saved COM18 device Instance ID and completing development EEPROM
 reinitialization. The verified board defaults are Silent off, illumination Off,
 output persistence off, relay restore mask zero, and motion break 1 ms. The
 latest live safe-state sample reported 12.282 V, PWM available, zero active
-relays, zero framing/CRC protocol errors, and reset count 12. No optional LCD
+relays, zero framing/CRC protocol errors, and reset count 22. No optional LCD
 was detected; that is a warning-only capability absence rather than a firmware
 or recovery failure.
 
@@ -73,10 +73,10 @@ than the HEX data-byte count because the identity record has a fixed address:
 
 | Boot profile | Application range | Data-byte headroom | Immediately linkable headroom | Consequence |
 |---|---:|---:|---:|---|
-| Stock 384-byte Urboot | 0..32,383 | 156 bytes | 28 bytes before `0x7DF4` | The 128 erased bytes at `0x7E00..0x7E7F` are after the fixed identity. They become useful only in a stock-only layout that relocates the identity and gives up drop-in 512-byte compatibility. |
-| 512-byte Urboot-Custom | 0..32,255 | 28 bytes | 28 bytes before `0x7DF4` | The identity ends at the final application byte. There is no space after it. |
+| Stock 384-byte Urboot | 0..32,383 | 140 bytes | 12 bytes before `0x7DF4` | The 128 erased bytes at `0x7E00..0x7E7F` are after the fixed identity. They become useful only in a stock-only layout that relocates the identity and gives up drop-in 512-byte compatibility. |
+| 512-byte Urboot-Custom | 0..32,255 | 12 bytes | 12 bytes before `0x7DF4` | The identity ends at the final application byte. There is no space after it. |
 
-Thus the current common layout has 28 bytes of practical growth under either
+Thus the current common layout has 12 bytes of practical growth under either
 bootloader. Urboot-Custom itself occupies 510 meaningful bytes in a 512-byte
 allocation; its two erased bytes do not increase the application ceiling.
 
@@ -214,7 +214,7 @@ list: removing any of them would trade bytes for unsafe behavior.
 ### Minimum combinations
 
 For the **current feature set alone**, the minimum removal is **none** under
-both bootloaders. The image fits, but only 28 bytes can be added before the
+both bootloaders. The image fits, but only 12 bytes can be added before the
 fixed identity in the shared layout.
 
 For the missing features above, the smallest defensible planning combinations
@@ -222,9 +222,9 @@ are:
 
 | Goal | Estimated new flash | Minimum migration to measure first | Stock 384-byte consequence | 512-byte Urboot-Custom consequence |
 |---|---:|---|---|---|
-| Structured board-pull hosted menus only | 450-850 | Move the four output commissioning/edit pages (estimated 900-1,500) | Reclaim 422-822 bytes with the shared identity layout, or 294-694 after a stock-only identity relocation contributes 128 bytes. | Reclaim 422-822 bytes; no post-identity reserve exists. |
-| Board-pull menus plus compact configurable door/relay cues | 630-1,210 | Same output-editor migration; add the local RF-learning UI migration only if its A/B result is short | Reclaim 602-1,182 bytes shared, or 474-1,054 after stock-only identity relocation. | Reclaim 602-1,182 bytes because only 28 bytes precede the identity. |
-| Board-pull menus, compact cues, and generic EEPROM automation | 1,330-2,610 | Output editors + advanced settings fields + local RF-learning UI (combined estimate 1,320-2,360); measure, then add render-only measurement-page migration if still short | Reclaim 1,302-2,582 bytes shared, or 1,174-2,454 after stock-only identity relocation; the proposed migration is not guaranteed at the high estimate. | Reclaim 1,302-2,582 bytes; the full shortfall must come from firmware. |
+| Structured board-pull hosted menus only | 450-850 | Move the four output commissioning/edit pages (estimated 900-1,500) | Reclaim 438-838 bytes with the shared identity layout, or 310-710 after a stock-only identity relocation contributes 128 bytes. | Reclaim 438-838 bytes; no post-identity reserve exists. |
+| Board-pull menus plus compact configurable door/relay cues | 630-1,210 | Same output-editor migration; add the local RF-learning UI migration only if its A/B result is short | Reclaim 618-1,198 bytes shared, or 490-1,070 after stock-only identity relocation. | Reclaim 618-1,198 bytes because only 12 bytes precede the identity. |
+| Board-pull menus, compact cues, and generic EEPROM automation | 1,330-2,610 | Output editors + advanced settings fields + local RF-learning UI (combined estimate 1,320-2,360); measure, then add render-only measurement-page migration if still short | Reclaim 1,318-2,598 bytes shared, or 1,190-2,470 after stock-only identity relocation; the proposed migration is not guaranteed at the high estimate. | Reclaim 1,318-2,598 bytes; the full shortfall must come from firmware. |
 
 The last combination is only a **minimum experiment**, not a promise that it
 will link. If its isolated A/B result does not cover the chosen concrete rule

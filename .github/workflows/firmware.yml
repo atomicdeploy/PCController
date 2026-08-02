@@ -40,7 +40,7 @@ jobs:
       TZ: UTC
 
     steps:
-      - name: "📥 Check out exact source"
+      - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: "🟢 Install Node.js"
@@ -86,23 +86,15 @@ jobs:
           arduino-cli core update-index --additional-urls "$MINICORE_INDEX_URL"
           arduino-cli core install "$MINICORE_PACKAGE@$MINICORE_VERSION" --additional-urls "$MINICORE_INDEX_URL"
 
-      - name: "📚 Install all six locked firmware libraries"
+      - name: "📚 Install every pinned Arduino library"
         env:
-          PWM_LIBRARY_VERSION: ${{ steps.pins.outputs.adafruit_pwm_servo_driver_library_version }}
-          INA219_LIBRARY_VERSION: ${{ steps.pins.outputs.adafruit_ina219_version }}
-          RC_SWITCH_VERSION: ${{ steps.pins.outputs.rc_switch_version }}
-          TM1637_LIBRARY_VERSION: ${{ steps.pins.outputs.tm1637_tiny_display_version }}
-          DALLAS_LIBRARY_VERSION: ${{ steps.pins.outputs.dallas_temperature_version }}
-          ONEWIRE_LIBRARY_VERSION: ${{ steps.pins.outputs.one_wire_version }}
-        run: |
-          arduino-cli lib install "Adafruit PWM Servo Driver Library@$PWM_LIBRARY_VERSION"
-          arduino-cli lib install "Adafruit INA219@$INA219_LIBRARY_VERSION"
-          arduino-cli lib install "rc-switch@$RC_SWITCH_VERSION"
-          arduino-cli lib install "TM1637TinyDisplay@$TM1637_LIBRARY_VERSION"
-          arduino-cli lib install "DallasTemperature@$DALLAS_LIBRARY_VERSION"
-          arduino-cli lib install "OneWire@$ONEWIRE_LIBRARY_VERSION"
+          ARDUINO_LIBRARIES_JSON: ${{ steps.pins.outputs.arduino_libraries_json }}
+        run: >-
+          node -e 'const { execFileSync } = require("node:child_process");
+          for (const library of JSON.parse(process.env.ARDUINO_LIBRARIES_JSON))
+          execFileSync("arduino-cli", ["lib", "install", library], { stdio: "inherit" });'
 
-      - name: "🚀 Build and validate real AVR firmware"
+      - name: "🚀 Build and validate AVR firmware"
         run: >-
           ./build.sh
           --firmware-only
@@ -117,7 +109,7 @@ jobs:
       - name: "🔎 Recheck Intel HEX records and boundaries"
         run: ./firmware.sh check
 
-      - name: "📚 Record declared and resolved dependencies"
+      - name: "📚 Record dependencies"
         run: |
           arduino-cli version > .build/firmware/dependencies.txt
           arduino-cli core list >> .build/firmware/dependencies.txt
@@ -126,7 +118,7 @@ jobs:
           arduino-cli lib list --format json > .build/firmware/resolved-libraries.json
           cp Tools/Controller/toolchain-lock.json .build/firmware/declared-dependencies.json
 
-      - name: "📦 Create versioned firmware package"
+      - name: "📦 Create firmware package"
         id: package
         env:
           PRODUCT_SLUG: ${{ steps.pins.outputs.product_slug }}
@@ -136,7 +128,7 @@ jobs:
           "${PRODUCT_SLUG}-Firmware"
           AVR-ATmega328P
 
-      - name: "🎁 Stage the PCController firmware artifact"
+      - name: "🎁 Stage firmware artifact"
         shell: bash
         env:
           PACKAGE_ARCHIVE: ${{ steps.package.outputs.archive }}
@@ -156,7 +148,7 @@ jobs:
           test "$(find "${staging}" -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
           find "${staging}" -maxdepth 1 -type f -printf '%f\n' | sort
 
-      - name: "⬆️ Upload friendly firmware artifact"
+      - name: "⬆️ Upload firmware artifact"
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

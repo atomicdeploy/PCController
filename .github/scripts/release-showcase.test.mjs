@@ -23,7 +23,11 @@ const TARGETS = [
 ];
 const hash = (content) => createHash("sha256").update(content).digest("hex");
 
-function fixture({ includeBootloader = true, omitFromCombined = "" } = {}) {
+function fixture({
+  includeBootloader = true,
+  omitFromCombined = "",
+  usagePercent = 99.52,
+} = {}) {
   const directory = mkdtempSync(join(tmpdir(), "pccontroller-release-showcase-"));
   const files = new Map();
   const add = (name, content = `fixture:${name}\n`) => {
@@ -41,7 +45,7 @@ function fixture({ includeBootloader = true, omitFromCombined = "" } = {}) {
     );
   }
   for (const target of TARGETS) {
-    add(`PCController-Controller-${TAG}-${target}.tar.gz`);
+    add(`PCController-Host-${TAG}-${target}.tar.gz`);
     add(`PCController-VirtualBoard-${TAG}-${target}.tar.gz`);
   }
   add(
@@ -59,9 +63,9 @@ function fixture({ includeBootloader = true, omitFromCombined = "" } = {}) {
           role: "application",
           sha256: hash(":00000001FF\n"),
           dataBytes: 32228,
-          capacityBytes: 32256,
-          freeBytes: 28,
-          usagePercent: 99.91,
+          capacityBytes: 32384,
+          freeBytes: 156,
+          usagePercent,
         },
         {
           role: "flash+bootloader",
@@ -118,12 +122,14 @@ test("generates a deterministic chooser, release body, and release manifest", ()
     const firstManifest = readFileSync(first.manifestPath, "utf8");
 
     assert.match(firstNotes, /^# 🚀 PCController v0\.1\.0-alpha\.1/u);
+    assert.match(firstNotes, /This is an alpha build\./u);
+    assert.doesNotMatch(firstNotes, /This is a alpha build\./u);
     assert.match(firstNotes, /Linux x64/u);
     assert.match(firstNotes, /macOS Apple Silicon/u);
     assert.match(firstNotes, /Application only/u);
     assert.match(firstNotes, /Flash \+ bootloader/u);
     assert.match(firstNotes, /gh attestation verify/u);
-    assert.match(firstNotes, /physical controller board/u);
+    assert.match(firstNotes, /CI does not validate a physical board/u);
     assert.doesNotMatch(firstNotes, /What's Changed/u);
 
     const parsed = JSON.parse(firstManifest);
@@ -132,7 +138,7 @@ test("generates a deterministic chooser, release body, and release manifest", ()
     assert.equal(parsed.release.prerelease, true);
     assert.equal(parsed.chooser.platforms.length, 5);
     assert.equal(parsed.validation.length, 11);
-    assert.equal(parsed.firmware.flash.freeBytes, 28);
+    assert.equal(parsed.firmware.flash.freeBytes, 156);
     assert.deepEqual(parsed.firmware.peakSram, {
       usedBytes: 1764,
       capacityBytes: 2048,
@@ -141,7 +147,10 @@ test("generates a deterministic chooser, release body, and release manifest", ()
     assert.equal(parsed.integrity.validatedSidecars.length, 11);
     assert.ok(parsed.assets.every((asset) => /^[0-9a-f]{64}$/u.test(asset.sha256)));
     assert.ok(!parsed.assets.some((asset) => asset.file === "RELEASE-NOTES.md"));
-    assert.match(readFileSync(summaryPath, "utf8"), /geps\.dev\/progress\/99/u);
+    assert.match(
+      readFileSync(summaryPath, "utf8"),
+      /geps\.dev\/progress\/99\?dangerColor=dc3545&warningColor=dc3545&successColor=dc3545/u,
+    );
     assert.match(
       readFileSync(outputPath, "utf8"),
       /release_notes=.*RELEASE-NOTES\.md/u,
@@ -162,10 +171,43 @@ test("generates a deterministic chooser, release body, and release manifest", ()
   }
 });
 
+test("release summary uses raw usage values at color boundaries", () => {
+  for (const [usagePercent, color] of [
+    [50, "28a745"],
+    [50.01, "fd7e14"],
+    [80, "fd7e14"],
+    [80.01, "dc3545"],
+  ]) {
+    const directory = fixture({ usagePercent });
+    const summaryPath = `${directory}-step-summary.md`;
+    try {
+      buildReleasePresentation({
+        assetsDirectory: directory,
+        tag: TAG,
+        sourceSha: SOURCE_SHA,
+        environment: {
+          ...environment,
+          GITHUB_STEP_SUMMARY: summaryPath,
+        },
+      });
+      assert.match(
+        readFileSync(summaryPath, "utf8"),
+        new RegExp(
+          `Application flash ${Math.floor(usagePercent)}%.*dangerColor=${color}&warningColor=${color}&successColor=${color}`,
+          "u",
+        ),
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      rmSync(summaryPath, { force: true });
+    }
+  }
+});
+
 test("rejects a checksum sidecar that does not match its archive", () => {
   const directory = fixture();
   try {
-    const archive = `PCController-Controller-${TAG}-Linux-x64.tar.gz`;
+    const archive = `PCController-Host-${TAG}-Linux-x64.tar.gz`;
     writeFileSync(join(directory, archive), "corrupted\n");
     assert.throws(
       () =>

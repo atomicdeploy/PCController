@@ -28,8 +28,8 @@ jobs:
     with:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
 
-  controller:
-    name: "🖥️ Controller · Five native targets"
+  host:
+    name: "🖥️ Host · Five native targets"
     needs: firmware
     uses: ./.github/workflows/host.yml
     with:
@@ -43,12 +43,12 @@ jobs:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
 
   build:
-    needs: [firmware, controller, virtual-board]
+    needs: [firmware, host, virtual-board]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
-      - name: "📥 Check out exact source"
+      - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: "🟢 Install Node.js"
@@ -56,7 +56,7 @@ jobs:
         with:
           node-version: "24"
 
-      - name: "🔗 Capture direct artifact links"
+      - name: "🔗 Capture artifact links"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -65,19 +65,19 @@ jobs:
             "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
             > build-downloads/artifact-index.json
 
-      - name: "⬇️ Download all successful build artifacts"
+      - name: "⬇️ Download build artifacts"
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: PCController-*
           path: build-downloads
           merge-multiple: true
 
-      - name: "🔎 Require the complete eleven-package catalog"
+      - name: "🔎 Validate eleven-package catalog"
         run: |
           set -euo pipefail
           package_count="$(find build-downloads -type f -name '*.tar.gz' | wc -l | tr -d ' ')"
           test "$package_count" -eq 11
           find build-downloads -type f -name '*.tar.gz' -printf '%f\n' | sort
 
-      - name: "✨ Publish flagship cross-platform build catalog"
+      - name: "✨ Publish build summary"
         run: node .github/scripts/step-summary.mjs catalog build-downloads

@@ -69,9 +69,9 @@ func TestDashboardConsumesHostPeripheralNamesForSensorsDisplaysAndPWM(t *testing
 	model := readyModel(t, PageDashboard)
 	model.uiValue.PeripheralNames = map[string]string{
 		"sensor.supply-voltage": "Cabinet supply",
-		"display.segment":      "Front readout",
-		"display.lcd":          "Service LCD",
-		"pwm.2":                "Fan channel",
+		"display.segment":       "Front readout",
+		"display.lcd":           "Service LCD",
+		"pwm.2":                 "Fan channel",
 	}
 	snapshot := RichPreviewSnapshot()
 	snapshot.Status.PWMChannel = 2

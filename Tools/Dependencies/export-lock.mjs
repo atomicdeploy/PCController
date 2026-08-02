@@ -109,6 +109,11 @@ function currentOutputs(lock, product) {
     minicore_version: lock.firmware.core_version,
     minicore_package: lock.firmware.core_id,
     minicore_index_url: lock.firmware.package_indexes[0],
+    arduino_libraries_json: JSON.stringify(
+      lock.firmware.libraries.map(
+        (library) => `${library.name}@${library.version}`,
+      ),
+    ),
     toolchain_lock_path: 'Tools/Controller/toolchain-lock.json',
   }
   for (const [name, output] of requiredLibraries) outputs[output] = libraries.get(name)

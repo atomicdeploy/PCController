@@ -1,4 +1,4 @@
-name: "🖥️ Controller · Cross-platform"
+name: "🖥️ Host · Cross-platform"
 
 on:
   workflow_dispatch:
@@ -36,7 +36,7 @@ concurrency:
 
 jobs:
   test-build-package:
-    name: "🖥️ Controller · ${{ matrix.target }}"
+    name: "🖥️ Host · ${{ matrix.target }}"
     strategy:
       fail-fast: false
       matrix:
@@ -65,7 +65,7 @@ jobs:
       TZ: UTC
 
     steps:
-      - name: "📥 Check out exact source"
+      - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: "🔐 Read exact host dependency lock"
@@ -73,11 +73,27 @@ jobs:
         shell: bash
         run: node Tools/Dependencies/export-lock.mjs export-host --output "$GITHUB_OUTPUT"
 
-      - name: "🧰 Install native Windows C compiler"
+      - name: "🧰 Select native Windows C compiler"
         if: matrix.windows
-        uses: egor-tensin/setup-mingw@41b837e47d7f85214629d255b9c4bc3fcbe9fd63 # v3
-        with:
-          platform: x64
+        shell: cmd
+        run: |
+          @echo off
+          set "MINGW_BIN=C:\mingw64\bin"
+          set "GCC=C:\mingw64\bin\gcc.exe"
+          if not exist "%GCC%" (
+            echo The GitHub Windows image is missing its standalone MinGW64 compiler: %GCC% 1>&2
+            exit /b 1
+          )
+          "%GCC%" -dumpmachine > "%RUNNER_TEMP%\host-gcc-target.txt"
+          findstr /x /c:"x86_64-w64-mingw32" "%RUNNER_TEMP%\host-gcc-target.txt" >nul
+          if errorlevel 1 (
+            echo Expected x86_64-w64-mingw32 GCC; detected: 1>&2
+            type "%RUNNER_TEMP%\host-gcc-target.txt" 1>&2
+            exit /b 1
+          )
+          >>"%GITHUB_PATH%" echo %MINGW_BIN%
+          >>"%GITHUB_ENV%" echo CC=gcc.exe
+          "%GCC%" --version
 
       - name: "🐹 Install Go from go.mod"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -151,19 +167,19 @@ jobs:
           node .github/scripts/assert-host-defaults.mjs
           Tools/Controller/bin/host-manifest.json
 
-      - name: "📦 Create versioned Controller package"
+      - name: "📦 Create Host package"
         id: package
         run: >-
           node .github/scripts/package-directory.mjs
           Tools/Controller/bin
-          PCController-Controller
+          PCController-Host
           ${{ matrix.target }}
 
-      - name: "⬆️ Upload friendly Controller artifact"
+      - name: "⬆️ Upload Host artifact"
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: PCController-Controller-${{ matrix.target }}
+          name: PCController-Host-${{ matrix.target }}
           path: |
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.checksum }}
@@ -171,16 +187,59 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
           compression-level: 0
 
-      - name: "✨ Publish cross-platform Controller summary"
-        if: always() && steps.upload.outcome == 'success'
+  summary:
+    name: "📋 Host · Codebase summary"
+    if: ${{ always() }}
+    needs: test-build-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: "📥 Check out source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: "🔐 Read exact Host dependency lock"
+        id: summary-host-dependencies
+        shell: bash
+        run: node Tools/Dependencies/export-lock.mjs export-host --output "$GITHUB_OUTPUT"
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: ${{ steps.summary-host-dependencies.outputs.node_version }}
+
+      - name: "🔎 Capture Host results"
         env:
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-summary
+          printf '{"total_count":0,"jobs":[]}\n' > build-summary/jobs.json
+          printf '{"total_count":0,"artifacts":[]}\n' > build-summary/artifacts.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?filter=latest&per_page=100" \
+            > build-summary/jobs.response.json
+          mv build-summary/jobs.response.json build-summary/jobs.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            > build-summary/artifacts.response.json
+          mv build-summary/artifacts.response.json build-summary/artifacts.json
+
+      - name: "⬇️ Download available Host artifacts"
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: PCController-Host-*
+          path: build-summary/packages
+          merge-multiple: true
+
+      - name: "✨ Publish Host summary"
+        if: ${{ always() }}
         run: >-
-          node .github/scripts/step-summary.mjs
+          node .github/scripts/codebase-summary.mjs
           host
-          Tools/Controller/bin/host-manifest.json
-          "${{ steps.package.outputs.archive }}"
-          "${{ matrix.target }}"
-          "$ARTIFACT_URL"
-          "$ARTIFACT_DIGEST"
+          build-summary/jobs.json
+          build-summary/artifacts.json
+          build-summary/packages

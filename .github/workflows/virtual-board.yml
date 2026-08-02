@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: virtual-board-${{ github.workflow }}-${{ inputs.version || github.ref }}
@@ -58,7 +59,7 @@ jobs:
       TZ: UTC
 
     steps:
-      - name: "📥 Check out exact source"
+      - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: "🟢 Install Node.js"
@@ -82,7 +83,7 @@ jobs:
         shell: bash
         run: echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
 
-      - name: "📦 Create versioned Virtual Board package"
+      - name: "📦 Create Virtual Board package"
         id: package
         run: >-
           node .github/scripts/package-directory.mjs
@@ -90,7 +91,7 @@ jobs:
           PCController-VirtualBoard
           ${{ matrix.target }}
 
-      - name: "⬆️ Upload friendly Virtual Board artifact"
+      - name: "⬆️ Upload Virtual Board artifact"
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -102,16 +103,54 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
           compression-level: 0
 
-      - name: "✨ Publish cross-platform Virtual Board summary"
-        if: always() && steps.upload.outcome == 'success'
+  summary:
+    name: "📋 Virtual Board · Codebase summary"
+    if: ${{ always() }}
+    needs: build-test-package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: "📥 Check out source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "🔎 Capture Virtual Board results"
         env:
-          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
-          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build-summary
+          printf '{"total_count":0,"jobs":[]}\n' > build-summary/jobs.json
+          printf '{"total_count":0,"artifacts":[]}\n' > build-summary/artifacts.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?filter=latest&per_page=100" \
+            > build-summary/jobs.response.json
+          mv build-summary/jobs.response.json build-summary/jobs.json
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            > build-summary/artifacts.response.json
+          mv build-summary/artifacts.response.json build-summary/artifacts.json
+
+      - name: "⬇️ Download available Virtual Board artifacts"
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: PCController-VirtualBoard-*
+          path: build-summary/packages
+          merge-multiple: true
+
+      - name: "✨ Publish Virtual Board summary"
+        if: ${{ always() }}
         run: >-
-          node .github/scripts/step-summary.mjs
-          simulator
-          "${{ matrix.target }}"
-          "${{ matrix.binary }}"
-          "${{ steps.package.outputs.archive }}"
-          "$ARTIFACT_URL"
-          "$ARTIFACT_DIGEST"
+          node .github/scripts/codebase-summary.mjs
+          virtual-board
+          build-summary/jobs.json
+          build-summary/artifacts.json
+          build-summary/packages

@@ -36,6 +36,15 @@ func TestParseRFEntries(t *testing.T) {
 	}
 }
 
+func TestParseRFEntriesRejectsProtocolOverflow(t *testing.T) {
+	payload := make([]byte, MaxPayload)
+	payload[0] = RFEntriesSchema
+	payload[3] = byte(rfEntriesMaximumEntries + 1)
+	if _, err := ParseRFEntries(payload); err == nil {
+		t.Fatal("RF entry count beyond the protocol capacity was accepted")
+	}
+}
+
 func TestRFMappingPayloadValidation(t *testing.T) {
 	payload, err := RFMappingPayload(3, RFActionKey, 2, RFBehaviorPress)
 	if err != nil {

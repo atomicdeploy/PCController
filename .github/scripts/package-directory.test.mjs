@@ -49,6 +49,31 @@ function packageFirmware() {
   };
 }
 
+function packageHost() {
+  const result = spawnSync(
+    process.execPath,
+    [script, ".github/actionlint.yaml", "PCController-Host", "Linux-x64"],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PCCONTROLLER_VERSION: version,
+        SOURCE_DATE_EPOCH: "1700000000",
+        GITHUB_REPOSITORY: "atomicdeploy/PCController",
+        GITHUB_SHA: "0123456789abcdef0123456789abcdef01234567",
+      },
+    },
+  );
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  return resolve(
+    root,
+    ".build",
+    "release",
+    `PCController-Host-${version}-Linux-x64.tar.gz`,
+  );
+}
+
 test("package is reproducible and contains a self-contained target guide", () => {
   const first = packageFirmware();
   const second = packageFirmware();
@@ -79,6 +104,32 @@ test("package is reproducible and contains a self-contained target guide", () =>
     assert.equal(manifest.sourceRepository, "example-owner/example-project");
     assert.equal(manifest.packageRoot, `PCController-Firmware-${version}-AVR-ATmega328P`);
     assert.equal("workflowRun" in manifest, false);
+  } finally {
+    rmSync(extraction, { recursive: true, force: true });
+  }
+});
+
+test("Host package uses Host distribution naming and keeps the controller executable", () => {
+  const archive = packageHost();
+  const extraction = mkdtempSync(join(tmpdir(), "pccontroller-host-package-"));
+  try {
+    const extracted = spawnSync("tar", ["-xzf", archive, "-C", extraction], {
+      encoding: "utf8",
+    });
+    assert.equal(extracted.status, 0, extracted.stderr);
+    const packageRoot = resolve(
+      extraction,
+      `PCController-Host-${version}-Linux-x64`,
+    );
+    const readme = readFileSync(resolve(packageRoot, "README.md"), "utf8");
+    assert.match(readme, /^# PCController-Host /u);
+    assert.match(readme, /## Run the Host/u);
+    assert.match(readme, /\.\/controller --help/u);
+    const manifest = JSON.parse(
+      readFileSync(resolve(packageRoot, "PACKAGE-MANIFEST.json"), "utf8"),
+    );
+    assert.equal(manifest.product, "PCController-Host");
+    assert.equal(manifest.packageRoot, `PCController-Host-${version}-Linux-x64`);
   } finally {
     rmSync(extraction, { recursive: true, force: true });
   }

@@ -176,6 +176,8 @@ export interface HistorySample {
   [key: string]: unknown
 }
 
+export type BoardSettingsReadState = 'idle' | 'loading' | 'ready' | 'unavailable'
+
 export interface MetricSample {
   at: number
   supply: number

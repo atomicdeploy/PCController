@@ -20,6 +20,10 @@ test('canonical lock exports the complete six-library firmware set', () => {
   assert.equal(outputs.product_name, product.productName)
   assert.equal(outputs.minicore_package, lock.firmware.core_id)
   assert.match(outputs.arduino_cli_linux_64_sha256, /^[0-9a-f]{64}$/u)
+  assert.deepEqual(
+    JSON.parse(outputs.arduino_libraries_json),
+    lock.firmware.libraries.map((library) => `${library.name}@${library.version}`),
+  )
 })
 
 test('canonical export rejects a missing required library', () => {

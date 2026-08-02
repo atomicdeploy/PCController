@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -26,6 +27,16 @@ func testMenuConfig() appconfig.HostMenuConfig {
 				{ID: "danger", Label: "LOCK", Title: "Lock", Type: "action", WriteAction: "os.lock", Guarded: true},
 			}},
 		},
+	}
+}
+
+func TestDirectoryRejectsCombinedEntryCountOverflow(t *testing.T) {
+	config := appconfig.HostMenuConfig{
+		Menus:            make([]appconfig.HostMenu, native.HostMenuMaximumEntries),
+		BuiltinOverrides: []appconfig.BuiltinMenuOverride{{}},
+	}
+	if _, err := New(config, Callbacks{}).Directory(); err == nil {
+		t.Fatal("host-menu manager accepted more than the wire-directory capacity")
 	}
 }
 

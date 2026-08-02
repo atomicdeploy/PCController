@@ -65,7 +65,10 @@ const (
 	ErrorUnsafe
 )
 
-const TemperatureEntryPayloadSize = 11
+const (
+	TemperatureEntryPayloadSize = 11
+	temperatureMaximumEntries   = (MaxPayload - 2) / TemperatureEntryPayloadSize
+)
 
 type FrontPanel struct {
 	Schema            byte    `json:"schema"`
@@ -418,6 +421,13 @@ func ParseTemperatures(payload []byte) ([]TemperatureSensor, error) {
 		return nil, fmt.Errorf("unsupported temperature schema %d", payload[0])
 	}
 	count := int(payload[1])
+	if count > temperatureMaximumEntries {
+		return nil, fmt.Errorf(
+			"TEMPERATURES count %d exceeds protocol maximum %d",
+			count,
+			temperatureMaximumEntries,
+		)
+	}
 	needed := 2 + count*TemperatureEntryPayloadSize
 	if needed > MaxPayload || len(payload) < needed {
 		return nil, fmt.Errorf(
@@ -600,7 +610,10 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 	return event, nil
 }
 
-const MenuEntryPayloadSize = 6
+const (
+	MenuEntryPayloadSize   = 6
+	menuListMaximumEntries = (MaxPayload - 4) / MenuEntryPayloadSize
+)
 
 type MenuEntry struct {
 	ID    byte   `json:"id"`
@@ -629,6 +642,13 @@ func ParseMenuList(payload []byte) (MenuListPage, error) {
 		)
 	}
 	count := int(payload[3])
+	if count > menuListMaximumEntries {
+		return MenuListPage{}, fmt.Errorf(
+			"MENU_LIST count %d exceeds protocol maximum %d",
+			count,
+			menuListMaximumEntries,
+		)
+	}
 	needed := 4 + count*MenuEntryPayloadSize
 	if needed > MaxPayload || len(payload) < needed {
 		return MenuListPage{}, fmt.Errorf(
@@ -718,11 +738,13 @@ func ParseMenuLayout(payload []byte) (MenuLayout, error) {
 
 func EncodeMenuLayout(layout MenuLayout) ([]byte, error) {
 	count := len(layout.Order)
+	if count < 1 || count > 16 {
+		return nil, fmt.Errorf("MENU_LAYOUT count %d is outside 1..16", count)
+	}
 	payload := make([]byte, 4+(count+1)/2)
 	payload[0] = MenuLayoutSchema
 	payload[1] = byte(count)
-	payload[2] = byte(layout.VisibleMask)
-	payload[3] = byte(layout.VisibleMask >> 8)
+	binary.LittleEndian.PutUint16(payload[2:4], layout.VisibleMask)
 	for rank, id := range layout.Order {
 		index := 4 + rank/2
 		if rank&1 == 0 {
@@ -761,6 +783,8 @@ type RFEntriesPage struct {
 	Entries    []RFEntry `json:"entries"`
 }
 
+const rfEntriesMaximumEntries = (MaxPayload - 4) / RFEntryPayloadSize
+
 func ParseRFEntries(payload []byte) (RFEntriesPage, error) {
 	if len(payload) < 4 {
 		return RFEntriesPage{}, fmt.Errorf("RF_ENTRIES payload is %d bytes, need at least 4", len(payload))
@@ -769,8 +793,15 @@ func ParseRFEntries(payload []byte) (RFEntriesPage, error) {
 		return RFEntriesPage{}, fmt.Errorf("unsupported RF entries schema %d", payload[0])
 	}
 	count := int(payload[3])
+	if count > rfEntriesMaximumEntries {
+		return RFEntriesPage{}, fmt.Errorf(
+			"RF_ENTRIES count %d exceeds protocol maximum %d",
+			count,
+			rfEntriesMaximumEntries,
+		)
+	}
 	needed := 4 + count*RFEntryPayloadSize
-	if len(payload) < needed {
+	if needed > MaxPayload || len(payload) < needed {
 		return RFEntriesPage{}, fmt.Errorf(
 			"RF_ENTRIES count %d needs %d bytes, payload has %d",
 			count,

@@ -39,6 +39,7 @@ import {
 } from 'lucide-react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
+import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
 import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
 import {
@@ -69,6 +70,7 @@ import {
 import { controllerChannelOrigin } from './transport-config'
 import type {
   Appearance,
+  BoardSettingsReadState,
   ControllerEvent,
   DialogState,
   HostUISettings,
@@ -329,6 +331,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(demo ? demoSnapshot() : emptySnapshot)
   const [samples, setSamples] = useState<MetricSample[]>(() => demo ? Array.from({ length: 48 }, (_, index) => sampleFrom(demoSnapshot(Date.now() - (47 - index) * 1000), Date.now() - (47 - index) * 1000)) : [])
   const [events, setEvents] = useState<ControllerEvent[]>(() => demo ? Array.from({ length: 12 }, (_, index) => demoEvent(index + 1)) : [])
+  const [boardSettingsReadState, setBoardSettingsReadState] = useState<BoardSettingsReadState>(demo ? 'ready' : 'idle')
   const [uiConfig, setUIConfig] = useState<UIConfig | null>(null)
   const [streamState, setStreamState] = useState<'connecting' | 'open' | 'waiting' | 'closed'>(demo ? 'open' : 'connecting')
   const [streamDetail, setStreamDetail] = useState('')
@@ -356,6 +359,8 @@ export default function App() {
   const refreshAfterHostRestart = useRef(false)
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
+  const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
+  const boardSettingsRequestGeneration = useRef('')
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
@@ -527,6 +532,42 @@ export default function App() {
       notify('warning', 'Snapshot unavailable', cause instanceof Error ? cause.message : String(cause))
     }
   }, [demo, notify])
+
+  useEffect(() => {
+    const shouldRead = boardSettingsReadGate.current.shouldRead(snapshot, page === 'settings')
+    if (!snapshot.connected) {
+      boardSettingsRequestGeneration.current = ''
+      setBoardSettingsReadState('idle')
+      return
+    }
+    if (snapshot.have_settings) {
+      setBoardSettingsReadState('ready')
+      return
+    }
+    if (!shouldRead) return
+
+    setBoardSettingsReadState('loading')
+    const generation = boardSettingsGeneration(snapshot)
+    boardSettingsRequestGeneration.current = generation
+    void execute('settings')
+      .then(() => refresh())
+      .then(() => {
+        if (boardSettingsRequestGeneration.current === generation) setBoardSettingsReadState('unavailable')
+      })
+      .catch(() => {
+        if (boardSettingsRequestGeneration.current === generation) setBoardSettingsReadState('unavailable')
+      })
+  }, [
+    page,
+    refresh,
+    snapshot.connected,
+    snapshot.have_settings,
+    snapshot.hello.build_hash,
+    snapshot.hello.build_timestamp,
+    snapshot.port.instance_id,
+    snapshot.port.name,
+    snapshot.port.serial_number,
+  ])
 
   const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
     const safeCommand = redactSensitiveCommand(command)
@@ -942,6 +983,7 @@ export default function App() {
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
+    boardSettingsReadState,
     transport: { streamState, tabBusSupported, tabPeers },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },

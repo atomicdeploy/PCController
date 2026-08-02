@@ -44,6 +44,178 @@ const chalk = createChalk({
 const productTitle = resolveProductTitle(process.env)
 const productAgent = PRODUCT_METADATA.productName.replace(/[^0-9A-Za-z._-]+/gu, '-') || 'Controller'
 
+// Network and repository identities are code-reviewed here rather than taken
+// on trust from a mutable policy, registry response, or redirect field.
+const trustedRepositories = new Set([
+  'actions/attest-build-provenance',
+  'actions/checkout',
+  'actions/download-artifact',
+  'actions/github-script',
+  'actions/setup-go',
+  'actions/setup-node',
+  'actions/upload-artifact',
+  'arduino/arduino-cli',
+  'brechtsanders/winlibs_mingw',
+  'egor-tensin/setup-mingw',
+  'github/codeql-action',
+  'mcudude/minicore',
+  'microsoft/winget-pkgs',
+  'peter-evans/create-pull-request',
+  'softprops/action-gh-release',
+  'stefanrueger/urboot',
+  'tc-hib/go-winres',
+  'upx/upx',
+])
+
+const trustedArduinoLibraryPaths = new Map([
+  ['Adafruit PWM Servo Driver Library', '/libraries/github.com/adafruit/Adafruit_PWM_Servo_Driver_Library-'],
+  ['Adafruit INA219', '/libraries/github.com/adafruit/Adafruit_INA219-'],
+  ['rc-switch', '/libraries/github.com/sui77/rc_switch-'],
+  ['TM1637TinyDisplay', '/libraries/github.com/jasonacox/TM1637TinyDisplay-'],
+  ['DallasTemperature', '/libraries/github.com/milesburton/DallasTemperature-'],
+  ['OneWire', '/libraries/github.com/PaulStoffregen/OneWire-'],
+])
+
+function normalizeRepository(value) {
+  const repository = String(value ?? '').trim().replace(/\.git$/iu, '')
+  if (!/^[0-9A-Za-z_.-]+\/[0-9A-Za-z_.-]+$/u.test(repository)) return ''
+  return repository.toLowerCase()
+}
+
+function assertTrustedRepository(value, label = 'dependency repository') {
+  const repository = normalizeRepository(value)
+  if (!repository || !trustedRepositories.has(repository)) {
+    throw new Error(`${label} is not code-review allowlisted: ${value}`)
+  }
+  return repository
+}
+
+function githubRepositoryFromURL(value) {
+  const parsed = value instanceof URL ? value : new URL(value)
+  const host = parsed.hostname.toLowerCase()
+  const parts = parsed.pathname.split('/').filter(Boolean)
+  if (host === 'api.github.com' && parts[0]?.toLowerCase() === 'repos') {
+    return normalizeRepository(`${parts[1] ?? ''}/${parts[2] ?? ''}`)
+  }
+  if (host === 'github.com' || host === 'raw.githubusercontent.com') {
+    return normalizeRepository(`${parts[0] ?? ''}/${parts[1] ?? ''}`)
+  }
+  return ''
+}
+
+function assertTrustedDependencyURL(value, label = 'dependency source') {
+  let parsed
+  try {
+    parsed = new URL(String(value ?? ''))
+  } catch {
+    throw new Error(`${label} is not a valid URL: ${value}`)
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port) {
+    throw new Error(`${label} must use credential-free HTTPS on its default port: ${value}`)
+  }
+  const host = parsed.hostname.toLowerCase()
+  const path = parsed.pathname
+  let trusted = false
+  if (host === 'api.github.com' || host === 'github.com' || host === 'raw.githubusercontent.com') {
+    const repository = githubRepositoryFromURL(parsed)
+    trusted = Boolean(repository && trustedRepositories.has(repository))
+  } else if (host === 'downloads.arduino.cc') {
+    trusted = path === '/libraries/library_index.json.gz' || path.startsWith('/libraries/github.com/')
+  } else if (host === 'mcudude.github.io') {
+    trusted = path.startsWith('/MiniCore/')
+  } else if (host === 'nodejs.org') {
+    trusted = path === '/dist/index.json' || path.startsWith('/dist/v')
+  } else if (host === 'go.dev') {
+    trusted = path === '/VERSION'
+  }
+  if (!trusted) throw new Error(`${label} is outside the code-review source allowlist: ${value}`)
+  return parsed.href
+}
+
+function assertTrustedGitHubURL(value, repository, label = 'GitHub dependency source') {
+  const trustedURL = assertTrustedDependencyURL(value, label)
+  const expected = assertTrustedRepository(repository, `${label} repository`)
+  const actual = githubRepositoryFromURL(trustedURL)
+  if (actual !== expected) {
+    throw new Error(`${label} redirected to untrusted repository ${actual || '<missing>'}; expected ${expected}`)
+  }
+  return trustedURL
+}
+
+function validateToolchainSourcePolicy(value = readJSON(toolchainPolicyPath)) {
+  if (!value) throw new Error('toolchain source policy is missing')
+  const cliRepository = assertTrustedRepository(value.cli?.repository, 'firmware CLI repository')
+  if (cliRepository !== 'arduino/arduino-cli') throw new Error('firmware CLI repository must be arduino/arduino-cli')
+  assertTrustedGitHubURL(value.cli?.release_api, cliRepository, 'firmware CLI release API')
+  if (value.core?.id !== 'MiniCore:avr' ||
+      assertTrustedDependencyURL(value.core?.index_url, 'MiniCore package index') !==
+        'https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json') {
+    throw new Error('MiniCore must use its official package and package index')
+  }
+  if (assertTrustedDependencyURL(value.library_index, 'Arduino library index') !==
+      'https://downloads.arduino.cc/libraries/library_index.json.gz') {
+    throw new Error('Arduino libraries must use the official library index')
+  }
+  const bootloaderRepository = assertTrustedRepository(value.bootloader?.repository, 'bootloader repository')
+  if (bootloaderRepository !== 'stefanrueger/urboot') throw new Error('bootloader repository must be stefanrueger/urboot')
+  assertTrustedGitHubURL(value.bootloader?.tags_api, bootloaderRepository, 'bootloader tags API')
+  assertTrustedGitHubURL(value.bootloader?.commits_api, bootloaderRepository, 'bootloader commits API')
+  if (assertTrustedDependencyURL(value.go?.version_url, 'Go version source') !== 'https://go.dev/VERSION?m=text') {
+    throw new Error('Go versions must use the official version source')
+  }
+  return value
+}
+
+function validateToolchainLockSources(lock = readJSON(toolchainLockPath)) {
+  if (!lock) throw new Error('toolchain lock is missing')
+  for (const asset of lock.firmware?.cli?.assets ?? []) {
+    assertTrustedGitHubURL(asset.url, 'arduino/arduino-cli', `firmware CLI asset ${asset.goos ?? ''}/${asset.goarch ?? ''}`)
+  }
+  for (const source of lock.firmware?.package_indexes ?? []) {
+    if (assertTrustedDependencyURL(source, 'locked MiniCore package index') !==
+        'https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json') {
+      throw new Error('locked MiniCore package index is not official')
+    }
+  }
+  const coreURL = assertTrustedDependencyURL(lock.core_source?.url, 'locked MiniCore archive')
+  if (!coreURL.startsWith('https://mcudude.github.io/MiniCore/MiniCore-')) {
+    throw new Error('locked MiniCore archive is not official')
+  }
+  for (const library of lock.libraries ?? []) {
+    const expectedPath = trustedArduinoLibraryPaths.get(library.name)
+    const parsed = new URL(assertTrustedDependencyURL(library.url, `${library.name} archive`))
+    if (!expectedPath || !parsed.pathname.startsWith(expectedPath)) {
+      throw new Error(`${library.name} archive is not code-review allowlisted`)
+    }
+  }
+  const bootloader = assertTrustedRepository(lock.bootloader?.repository, 'locked bootloader repository')
+  if (bootloader !== 'stefanrueger/urboot') throw new Error('locked bootloader repository is not official')
+  return lock
+}
+
+function validateHostSourcePolicy(value = policy) {
+  if (assertTrustedDependencyURL(value.node?.index_url, 'Node.js release index') !== 'https://nodejs.org/dist/index.json') {
+    throw new Error('Node.js must use its official release index')
+  }
+  const checksumTemplate = String(value.node?.checksums_url_template ?? '').replace('{version}', '0.0.0')
+  assertTrustedDependencyURL(checksumTemplate, 'Node.js checksum source')
+  const upxRepository = assertTrustedRepository(value.upx?.repository, 'UPX repository')
+  if (upxRepository !== 'upx/upx') throw new Error('UPX repository must be upx/upx')
+  assertTrustedGitHubURL(value.upx?.release_api, upxRepository, 'UPX release API')
+  const compilerAPI = assertTrustedGitHubURL(
+    value.windows_c_compiler?.manifest_api,
+    'microsoft/winget-pkgs',
+    'WinGet compiler manifest API',
+  )
+  if (!new URL(compilerAPI).pathname.startsWith('/repos/microsoft/winget-pkgs/contents/manifests/')) {
+    throw new Error('WinGet compiler manifest must stay inside the reviewed manifest tree')
+  }
+  if (value.go_winres?.module !== 'github.com/tc-hib/go-winres') {
+    throw new Error('go-winres must use the official module repository')
+  }
+  return value
+}
+
 function parseArgs(argv) {
   const options = {
     mode: 'check', validate: false, requireCurrent: false,
@@ -128,7 +300,8 @@ function githubEnvironment() {
 }
 
 function curlJSON(url, directRetry = true) {
-  const parsed = new URL(url)
+  const trustedURL = assertTrustedDependencyURL(url)
+  const parsed = new URL(trustedURL)
   const authenticatedEnvironment = githubEnvironment()
   const haveToken = Boolean(authenticatedEnvironment.GITHUB_TOKEN || authenticatedEnvironment.GH_TOKEN)
   if (parsed.hostname.toLowerCase() === 'api.github.com' && haveToken) {
@@ -140,14 +313,16 @@ function curlJSON(url, directRetry = true) {
     })
     if (authenticated.status === 0) return JSON.parse(authenticated.stdout)
   }
-  return JSON.parse(curlText(url, directRetry, 'application/vnd.github+json, application/json'))
+  return JSON.parse(curlText(trustedURL, directRetry, 'application/vnd.github+json, application/json'))
 }
 
 function curlText(url, directRetry = true, accept = 'text/plain, application/octet-stream') {
+  const trustedURL = assertTrustedDependencyURL(url)
   const executable = platform() === 'win32' ? 'curl.exe' : 'curl'
   const base = ['--fail', '--silent', '--show-error', '--location',
+    '--proto', '=https', '--proto-redir', '=https',
     '--header', `Accept: ${accept}`,
-    '--header', `User-Agent: ${productAgent}-dependency-updater/1`, url]
+    '--header', `User-Agent: ${productAgent}-dependency-updater/1`, trustedURL]
   return withDirectFallback((environment, direct) => {
     const args = direct ? ['--noproxy', '*', ...base] : base
     const result = run(executable, args, { env: environment })
@@ -218,17 +393,28 @@ function resolveWindowsCCompiler(directRetry) {
     .filter((entry) => entry.type === 'dir' && /^\d+(?:\.\d+){2}-\d+(?:\.\d+){2}-r\d+$/u.test(entry.name))
     .sort((left, right) => compareCompositeVersions(right.name, left.name))
   if (!versions.length) throw new Error('WinGet registry has no stable native Windows C compiler release')
-  const files = curlJSON(versions[0].url, directRetry)
+  const filesURL = assertTrustedGitHubURL(
+    versions[0].url,
+    'microsoft/winget-pkgs',
+    'WinGet version directory API',
+  )
+  const files = curlJSON(filesURL, directRetry)
   const installer = files.find((entry) => entry.type === 'file' && /\.installer\.yaml$/u.test(entry.name))
   if (!installer?.download_url || !/^[0-9a-f]{40}$/u.test(installer.sha ?? '')) {
     throw new Error(`WinGet compiler ${versions[0].name} has no immutable installer manifest identity`)
   }
+  const manifestURL = assertTrustedGitHubURL(
+    installer.download_url,
+    'microsoft/winget-pkgs',
+    'WinGet compiler installer manifest',
+  )
   const resolved = parseWingetCompilerManifest(
-    curlText(installer.download_url, directRetry),
+    curlText(manifestURL, directRetry),
     compilerPolicy.architecture,
     compilerPolicy.target,
-    { url: installer.download_url, sha: installer.sha },
+    { url: manifestURL, sha: installer.sha },
   )
+  assertTrustedGitHubURL(resolved.installer_url, 'brechtsanders/winlibs_mingw', 'Windows compiler installer')
   if (resolved.package_id !== compilerPolicy.package_id ||
       compareVersions(resolved.compiler_version, compilerPolicy.minimum_compiler_version) < 0) {
     throw new Error(`WinGet compiler resolution returned incompatible ${resolved.package_id}@${resolved.package_version}`)
@@ -281,14 +467,17 @@ function validateHostToolsLock(lock) {
   }
   for (const asset of lock.node.assets) {
     if (!/^https:\/\//u.test(asset.url ?? '') || !/^[0-9a-f]{64}$/u.test(asset.sha256 ?? '')) throw new Error(`invalid Node.js asset identity ${asset.name ?? '<missing>'}`)
+    assertTrustedDependencyURL(asset.url, `Node.js asset ${asset.name ?? '<missing>'}`)
   }
   if (!stableParts(lock?.upx?.version) || !Array.isArray(lock.upx.assets) || !lock.upx.assets.length) throw new Error('host tool lock has no stable UPX identity')
   for (const asset of lock.upx.assets) {
     if (!/^https:\/\//u.test(asset.url ?? '') || !/^[0-9a-f]{64}$/u.test(asset.sha256 ?? '')) throw new Error(`invalid UPX asset identity ${asset.name ?? '<missing>'}`)
+    assertTrustedGitHubURL(asset.url, 'upx/upx', `UPX asset ${asset.name ?? '<missing>'}`)
   }
   if (!stableParts(lock?.go_winres?.version) || !String(lock.go_winres.sum ?? '').startsWith('h1:') || !String(lock.go_winres.go_mod_sum ?? '').startsWith('h1:')) {
     throw new Error('host tool lock has no checksum-complete go-winres identity')
   }
+  if (lock.go_winres.module !== 'github.com/tc-hib/go-winres') throw new Error('host tool lock uses an untrusted go-winres repository')
   const compiler = lock?.windows_c_compiler
   if (!compiler?.package_id || !compiler.package_version || !stableParts(compiler.compiler_version) ||
       !/^x86_64-.*(?:mingw(?:32|64)?|windows-gnu)$/iu.test(compiler.target ?? '') ||
@@ -297,6 +486,8 @@ function validateHostToolsLock(lock) {
       !/^https:\/\//u.test(compiler.installer_url ?? '') || !/^[0-9a-f]{64}$/u.test(compiler.installer_sha256 ?? '')) {
     throw new Error('host tool lock has no checksum-complete native Windows C compiler identity')
   }
+  assertTrustedGitHubURL(compiler.manifest_url, 'microsoft/winget-pkgs', 'locked Windows compiler manifest')
+  assertTrustedGitHubURL(compiler.installer_url, 'brechtsanders/winlibs_mingw', 'locked Windows compiler installer')
   if (!/^[0-9a-f]{64}$/u.test(lock?.web?.package_lock_sha256 ?? '') || !/^[0-9a-f]{64}$/u.test(lock?.build?.package_lock_sha256 ?? '')) {
     throw new Error('host tool lock has incomplete npm lock hashes')
   }
@@ -305,6 +496,7 @@ function validateHostToolsLock(lock) {
     if (!action.name || !/^[0-9a-f]{40}$/u.test(action.revision ?? '') || !/^v\d+/u.test(action.version ?? '')) {
       throw new Error(`invalid GitHub Action identity ${action.name ?? '<missing>'}`)
     }
+    assertTrustedRepository(action.name.split('/').slice(0, 2).join('/'), `GitHub Action ${action.name}`)
   }
   return lock
 }
@@ -346,6 +538,7 @@ function writeJSONAtomic(path, value) {
 }
 
 function resolveHostTools(directRetry) {
+  validateHostSourcePolicy()
   const nodeIndex = curlJSON(policy.node.index_url, directRetry)
   const lts = nodeIndex.find((entry) => entry.lts && stableParts(entry.version))
   if (!lts || compareVersions(lts.version, policy.node.minimum_version) < 0) {
@@ -374,7 +567,7 @@ function resolveHostTools(directRetry) {
     typeof asset.digest === 'string' && /^sha256:[0-9a-f]{64}$/i.test(asset.digest),
   ).map((asset) => ({
     name: asset.name,
-    url: asset.browser_download_url,
+    url: assertTrustedGitHubURL(asset.browser_download_url, 'upx/upx', `UPX asset ${asset.name}`),
     sha256: asset.digest.slice('sha256:'.length).toLowerCase(),
   })).sort((a, b) => a.name.localeCompare(b.name))
   if (!upxAssets.length) throw new Error(`UPX ${upxRelease.tag_name} publishes no hash-bearing assets`)
@@ -435,8 +628,11 @@ function controllerToolchain(action, extra = [], capture = true) {
 }
 
 function resolveToolchain(mode, directRetry) {
+  validateToolchainSourcePolicy()
+  validateToolchainLockSources()
   const action = mode === 'apply' ? 'update' : 'check'
   const result = resolvedToolchain(action, ['--include-canary', '--json', `--direct-retry=${directRetry}`])
+  validateToolchainLockSources()
   return JSON.parse(result.stdout)
 }
 
@@ -572,7 +768,9 @@ function installResolvedHostTools(lock, directRetry) {
   const archive = join(cache, asset.name)
   if (!existsSync(archive) || sha256File(archive) !== asset.sha256) {
     const curl = platform() === 'win32' ? 'curl.exe' : 'curl'
-    const downloadArgs = ['--fail', '--silent', '--show-error', '--location', asset.url, '--output', archive]
+    const trustedURL = assertTrustedGitHubURL(asset.url, 'upx/upx', `UPX asset ${asset.name}`)
+    const downloadArgs = ['--fail', '--silent', '--show-error', '--location',
+      '--proto', '=https', '--proto-redir', '=https', trustedURL, '--output', archive]
     withDirectFallback((environment, direct) => run(curl, direct ? ['--noproxy', '*', ...downloadArgs] : downloadArgs, {
       env: environment,
     }), { directRetry })
@@ -763,13 +961,19 @@ function main() {
 }
 
 export {
+  assertTrustedDependencyURL,
+  assertTrustedGitHubURL,
+  assertTrustedRepository,
   compareHostToolLocks,
   compareCompositeVersions,
   compareVersions,
   parseWingetCompilerManifest,
   sameSubstantive,
   stableParts,
+  validateHostSourcePolicy,
   validateHostToolsLock,
+  validateToolchainLockSources,
+  validateToolchainSourcePolicy,
   workflowActionInventory,
 }
 

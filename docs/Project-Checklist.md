@@ -78,8 +78,8 @@ binary, checksum, or test run cannot satisfy a newer tree.
   artifact and require both the validated application and complete 1 KiB safe
   EEPROM defaults to be independently enabled in `host-manifest.json`.
 - ✅ Virtual Board builds use the native CMake test path on supported targets.
-- ✅ Canonical firmware source identity `B3F4CB11` links 32,216 of the stock
-  32,384-byte application range, emits 32,228 application HEX data bytes, and
+- ✅ Canonical firmware source identity `800A5B70` links 32,232 of the stock
+  32,384-byte application range, emits 32,244 application HEX data bytes, and
   uses 1,432 bytes static SRAM with a modeled 1,761-byte peak and 287 bytes
   free.
 - 🟣 Run the complete build from the exact final tree and preserve its manifest,
@@ -347,14 +347,15 @@ binary, checksum, or test run cannot satisfy a newer tree.
   authenticated restore/reinitialization. Secondary clients delegate through
   IPC; direct programmer/serial bypass is not equivalent.
 - ✅ Live recovery completed on the Instance-ID-pinned COM18 controller. The
-  board authenticated as `B3F4CB11`; deployed application artifact SHA-256 is
-  `6653daa48ccc00c8db80004d942fbcccdbd4e1408cb99bac963869e544ce2d6d`.
-  Read-only Urboot semantic verification covered 32,228 bytes and confirmed
-  reset `0x7E80` plus vector 25 to `0x024E`; the recovery marker is cleared.
+  board authenticated as `800A5B70`; deployed application artifact SHA-256 is
+  `bb928b7b680d6e393d842bd28412b6760340a2ff61ae40b21a926036358bb092`.
+  The primary-owned Urclock transaction backed up, wrote, and verified 32,244
+  programmed bytes, reauthenticated the application, and cleared the recovery
+  marker only after reconnect.
 - ✅ Development EEPROM readback confirms Silent off, illumination Off, output
   persistence off, relay restore mask zero, and 1 ms motion break. The safe
   live sample reported 12.282 V, PWM available, zero active relays, zero
-  framing/CRC protocol errors, and reset count 12.
+  framing/CRC protocol errors, and reset count 22.
 - ⚠️ No optional LCD was detected during that pass. This is a warning-only
   capability absence; connected-LCD presentation remains a separate physical
   acceptance item and does not invalidate the recovered firmware or safe state.

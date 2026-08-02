@@ -3,6 +3,7 @@
 /.cache/
 **/.build/
 **/.build-*/
+**/.bin-previous-*/
 **/.cache/
 **/bin/
 **/CMakeFiles/

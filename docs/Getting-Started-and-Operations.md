@@ -58,6 +58,10 @@ ctest --preset release
 Pop-Location
 ```
 
+The checked-in Ninja presets are `debug`, `release`, and `relwithdebinfo`;
+configure, build, and test use the same name and write to
+`Tools/VirtualBoard/.build/<preset>/`.
+
 The default plan never discovers, opens, resets, or programs hardware. The
 root build writes firmware and host output to:
 
@@ -266,7 +270,8 @@ menu list
 Status reports available supply voltage, current, power, temperatures, door and
 Bluetooth inputs, relay/PWM state, displays, RF, menu, reset cause, and boot
 count. A missing sensor remains missing; the host does not invent a normal
-reading.
+reading. JSON status retains `uptime_ms` for calculation and adds a derived
+human-readable `uptime` string for direct presentation.
 
 Use the dashboard chart to select electrical, power, or thermal series and a
 time window. The accessible summary and table expose recent values without
@@ -299,6 +304,13 @@ PWM has no global operating state. Read all sixteen logical values with
 use it deliberately. Board output-persistence settings independently decide
 whether motion, user relays, and the eight EEPROM-backed user PWM values may be
 restored after a normal boot; programming mode always keeps them off.
+
+Web and API clients reconcile every mutation against a fresh sixteen-channel
+board readback. Generic sliders cover only user channels `0..10`; channels
+`11..15` remain visible but use dedicated illumination, power-indicator, and
+status-RGB controls. `controller.pwm.values`, `controller.pwm.set`, and
+`controller.pwm.off` provide the typed RPC surface; matching REST operations
+are `GET`, `PUT`, and `DELETE /api/v1/pwm`.
 
 ### Buzzer and effects
 
@@ -383,6 +395,11 @@ for the full schema and security boundaries.
 
 Web settings normalize text and endpoint input while editing, show current
 validation state, and block malformed or out-of-scope integration targets.
+The same host configuration owns `ui.peripheral_names` for the canonical
+34-peripheral registry. Blank names sent through the typed RPC or REST settings
+surface remove an override and reveal its default; the operation never touches
+MCU EEPROM. Use `controller.peripherals.get`/`.set` or `GET`/`PUT`
+`/api/v1/peripherals` when another host surface needs the same labels.
 
 ## 9. Monitor, scripts, and IPC
 

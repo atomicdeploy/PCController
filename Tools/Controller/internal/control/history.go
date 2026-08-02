@@ -26,6 +26,8 @@ type HistoryOptions struct {
 	StatusPath     string
 }
 
+const maximumTimelineEntries = 100_000
+
 type StatusSample struct {
 	Time   time.Time     `json:"time"`
 	Status native.Status `json:"status"`
@@ -97,7 +99,7 @@ func (runtime *Runtime) ConfigureHistory(options HistoryOptions) error {
 	if options.TimelineLimit == 0 {
 		options.TimelineLimit = 2000
 	}
-	if options.TimelineLimit < 50 || options.TimelineLimit > 100_000 {
+	if options.TimelineLimit < 50 || options.TimelineLimit > maximumTimelineEntries {
 		return errors.New("timeline limit must be 50..100000")
 	}
 	path, err := resolveHistoryPath(options.TimelinePath, "timeline")
@@ -199,7 +201,15 @@ func (runtime *Runtime) Timeline(since time.Time, limit int) []TimelineEntry {
 	if limit <= 0 || limit > runtime.timelineLimit {
 		limit = runtime.timelineLimit
 	}
-	result := make([]TimelineEntry, 0, limit)
+	if limit < 0 {
+		limit = 0
+	} else if limit > maximumTimelineEntries {
+		limit = maximumTimelineEntries
+	}
+	// Keep the JSON shape as [] for an empty result, but grow only for entries
+	// that actually exist. The caller-provided page size must never drive an
+	// eager allocation, even after it has been clamped.
+	result := make([]TimelineEntry, 0)
 	for _, entry := range runtime.timeline {
 		if since.IsZero() || !entry.Time.Before(since) {
 			result = append(result, cloneTimelineEntry(entry))

@@ -39,8 +39,17 @@ concurrency:
 jobs:
   prepare:
     name: "🛡️ Verify and prepare programming bundle"
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: avr-release-read
+    # GitHub exposes draft releases only to tokens with push access. This job
+    # performs no repository writes; the elevated contents capability is scoped
+    # only to preparation so a draft's attested assets can be read and checked.
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ inputs.release_tag }}
@@ -50,6 +59,10 @@ jobs:
     steps:
       - name: "📥 Check out deployment policy"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: "🟢 Install Node.js"
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -117,6 +130,19 @@ jobs:
           gh attestation verify "deployment-bundle/$full_flash" --repo "$GITHUB_REPOSITORY"
           gh attestation verify deployment-bundle/release-manifest.json --repo "$GITHUB_REPOSITORY"
 
+      - name: "🧬 Verify release target and protected-main ancestry"
+        env:
+          SOURCE_SHA: ${{ steps.verify.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          release_target="$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json targetCommitish \
+            --jq .targetCommitish)"
+          test "$release_target" = "$SOURCE_SHA"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+
       - name: "⬆️ Upload immutable programming bundle"
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -131,6 +157,7 @@ jobs:
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
           HARDWARE_ENABLED: ${{ vars.ENABLE_AVR_DEPLOY }}
+          SOURCE_SHA: ${{ steps.verify.outputs.source_sha }}
         run: |
           {
             echo '# ✅ AVR programming bundle verified'
@@ -142,6 +169,7 @@ jobs:
             echo '| Gate | Result |'
             echo '|---|---|'
             echo "| Release | \`${RELEASE_TAG}\` |"
+            echo "| Firmware source | \`${SOURCE_SHA}\` |"
             echo '| SHA-256 | ✅ both firmware images matched |'
             echo '| Release manifest | ✅ tag, exact source, chooser, and image hashes matched |'
             echo '| Build provenance | ✅ images and release manifest attested |'
@@ -167,15 +195,16 @@ jobs:
     environment: avr-hardware
     env:
       FORCE_COLOR: "1"
-      PCCONTROLLER_VERSION: ${{ inputs.release_tag }}
+      PCCONTROLLER_VERSION: 0.0.0-deploy.${{ github.run_number }}
       DEVICE_PORT: ${{ inputs.port }}
       PCCONTROLLER_DATA_DIR: ${{ github.workspace }}/deployment-evidence/controller-data
 
     steps:
-      - name: "📥 Check out deployment controller"
+      - name: "📥 Check out protected deployment controller"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.prepare.outputs.source-sha }}
+          ref: main
+          persist-credentials: false
 
       - name: "🐹 Install Go from go.mod"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -258,6 +287,7 @@ jobs:
           cp deployment-bundle/release-manifest.json deployment-evidence/
           cp deployment-bundle/SHA256SUMS.txt deployment-evidence/
           printf '%s\n' "$SOURCE_SHA" > deployment-evidence/source-sha.txt
+          git rev-parse HEAD > deployment-evidence/deployment-controller-sha.txt
           {
             arduino-cli version
             arduino-cli core list
