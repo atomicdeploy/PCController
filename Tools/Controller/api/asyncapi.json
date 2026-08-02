@@ -13,7 +13,10 @@
       "description": "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
       "security": [
         {
-          "$ref": "#/components/securitySchemes/session"
+          "$ref": "#/components/securitySchemes/durableHeader"
+        },
+        {
+          "$ref": "#/components/securitySchemes/browserTicket"
         }
       ]
     }
@@ -95,11 +98,17 @@
   },
   "components": {
     "securitySchemes": {
-      "session": {
+      "durableHeader": {
         "type": "httpApiKey",
         "in": "header",
         "name": "Authorization",
-        "description": "Bearer credential or short-lived session authorization. Durable secrets must not appear in URLs."
+        "description": "Bearer credential for non-browser WebSocket and Socket.IO clients."
+      },
+      "browserTicket": {
+        "type": "httpApiKey",
+        "in": "header",
+        "name": "Sec-WebSocket-Protocol",
+        "description": "Browser clients first POST /api/v1/session/ticket with a header credential, then offer pccontroller.v1 and pccontroller.ticket.<ticket>. The 15-second one-use ticket is Origin, peer, transport, and expiry bound; no credential appears in the URL."
       }
     },
     "messages": {

@@ -90,6 +90,11 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(reference.includes(`<title>${expected.referenceTitle}</title>`), true);
   assert.equal(reference.includes(`<h1>${expected.referenceHeading}</h1>`), true);
   assert.equal(openapi.components.securitySchemes.tokenHeader.name, "X-PCController-Token");
+  assert.equal(openapi.paths["/api/v1/session/ticket"].post.responses["201"].description.includes("One-use"), true);
+  assert.equal(openapi.components.schemas.SessionTicket.properties.ticket.writeOnly, true);
+  assert.equal(openapi.components.schemas.SessionTicket.properties.expires_in_ms.const, 15000);
+  assert.equal(asyncapi.components.securitySchemes.browserTicket.name, "Sec-WebSocket-Protocol");
+  assert.equal(JSON.stringify(asyncapi).includes("access_token"), false);
 });
 
 test("--check is read-only and stable across repeated runs", () => {

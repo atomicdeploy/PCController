@@ -9,6 +9,8 @@ import type {
 import { controllerHTTPURL, controllerWebSocketURL } from './transport-config'
 
 const tokenKey = 'pccontroller.session-token'
+const browserWebSocketProtocol = 'pccontroller.v1'
+const browserTicketPrefix = 'pccontroller.ticket.'
 let nextID = 1
 let streamSocket: WebSocket | null = null
 
@@ -163,20 +165,73 @@ export interface StreamHandlers {
   state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string) => void
 }
 
+interface SessionTicket {
+  ticket: string
+  protocol: string
+  expires_at: string
+  expires_in_ms: number
+  principal: string
+  correlation_id: string
+}
+
+async function websocketProtocols(config: UIConfig, signal?: AbortSignal): Promise<string[]> {
+  const response = await fetch(controllerHTTPURL(config.session_ticket_path || '/api/v1/session/ticket'), {
+    method: 'POST',
+    headers: headers(true),
+    body: JSON.stringify({ transport: 'websocket' }),
+    signal,
+    cache: 'no-store',
+  })
+  const ticket = await decode<SessionTicket>(response)
+  if (!/^[a-f0-9]{64}$/.test(ticket.ticket) ||
+      ticket.protocol !== browserWebSocketProtocol ||
+      !Number.isInteger(ticket.expires_in_ms) || ticket.expires_in_ms <= 0 ||
+      ticket.expires_in_ms > 15_000 || typeof ticket.correlation_id !== 'string' ||
+      ticket.correlation_id.length === 0) {
+    throw new Error('Controller returned an invalid WebSocket session ticket')
+  }
+  return [ticket.protocol, `${browserTicketPrefix}${ticket.ticket}`]
+}
+
 /** Opens the reconnecting event stream and returns a function that closes it. */
 export function connectStream(config: UIConfig, handlers: StreamHandlers): () => void {
   let socket: WebSocket | null = null
   let stopped = false
   let retry = 0
   let timer = 0
+  let attempt = 0
+  let ticketAbort: AbortController | null = null
+  let lastEventID = 0
 
-  const open = () => {
+  const scheduleRetry = (detail: string) => {
     if (stopped) return
+    retry += 1
+    const delay = Math.min(12_000, 500 * 2 ** Math.min(retry, 5)) + Math.floor(Math.random() * 250)
+    const fallback = detail
+      ? `Live stream unavailable; REST commands remain active. ${detail}`
+      : `Live stream unavailable; REST commands remain active. Retrying in ${Math.ceil(delay / 1000)}s.`
+    handlers.state('waiting', fallback)
+    timer = window.setTimeout(() => { void open() }, delay)
+  }
+
+  const open = async () => {
+    if (stopped) return
+    const currentAttempt = ++attempt
     handlers.state('connecting')
-    const url = new URL(controllerWebSocketURL(config.websocket_path || '/ipc'))
-    const token = getToken()
-    if (token) url.searchParams.set('access_token', token)
-    const activeSocket = new WebSocket(url)
+    ticketAbort?.abort()
+    const authorizationAbort = new AbortController()
+    ticketAbort = authorizationAbort
+    let protocols: string[]
+    try {
+      protocols = await websocketProtocols(config, authorizationAbort.signal)
+    } catch (cause) {
+      if (stopped || currentAttempt !== attempt || authorizationAbort.signal.aborted) return
+      scheduleRetry(cause instanceof Error ? cause.message : String(cause))
+      return
+    }
+    if (stopped || currentAttempt !== attempt) return
+    const url = controllerWebSocketURL(config.websocket_path || '/ipc')
+    const activeSocket = new WebSocket(url, protocols)
     socket = activeSocket
     activeSocket.addEventListener('open', () => {
       retry = 0
@@ -186,7 +241,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
         jsonrpc: '2.0',
         id: nextID++,
         method: 'controller.subscribe',
-        params: { topics: ['events', 'status'], interval_ms: 500, after_id: 0 },
+        params: { topics: ['events', 'status'], interval_ms: 500, after_id: lastEventID },
       }))
     })
     activeSocket.addEventListener('message', (message) => {
@@ -208,7 +263,13 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
           }
         }
         if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate)
-        if (value.method === 'controller.event') handlers.event(value.params as ControllerEvent)
+        if (value.method === 'controller.event') {
+          const event = value.params as ControllerEvent
+          if (typeof event?.id === 'number' && Number.isSafeInteger(event.id)) {
+            lastEventID = Math.max(lastEventID, event.id)
+          }
+          handlers.event(event)
+        }
         if (value.method === 'controller.error') {
           const detail = (value.params as { error?: string } | undefined)?.error
           handlers.state('open', detail)
@@ -226,17 +287,16 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
         handlers.state('closed')
         return
       }
-      retry += 1
-      const delay = Math.min(12_000, 500 * 2 ** Math.min(retry, 5)) + Math.floor(Math.random() * 250)
-      handlers.state('waiting', event.reason || `retrying in ${Math.ceil(delay / 1000)}s`)
-      timer = window.setTimeout(open, delay)
+      scheduleRetry(event.reason || 'WebSocket connection closed')
     })
     activeSocket.addEventListener('error', () => activeSocket.close())
   }
 
-  open()
+  void open()
   return () => {
     stopped = true
+    attempt += 1
+    ticketAbort?.abort()
     window.clearTimeout(timer)
     const closed = socket
     socket?.close(1000, 'view closed')

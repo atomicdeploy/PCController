@@ -212,6 +212,7 @@ export interface UIConfig {
   api_version: number
   websocket_path: string
   socket_io_path?: string
+  session_ticket_path?: string
   auth_required: boolean
   integrations?: {
     local_device: boolean
