@@ -34,6 +34,9 @@ void sendHello(uint8_t sequence) {
       (1UL << 23) | // persistent visible-mask and stable-ID rank permutation
 #endif
       (1UL << 24) | // host-owned Idle/Running application state (opcode 0x45)
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+      (1UL << 25) | // transactional board-owned offline automations
+#endif
       0;
   // HelloPayload is the fixed build identity and capability response.
   struct __attribute__((packed)) HelloPayload {
@@ -305,6 +308,49 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
                    payload, index);
 }
 
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+// Pages board-owned automation records in stable slot order. Generation lets
+// the Host reject a mixed snapshot if another writer commits between pages.
+void sendAutomations(uint8_t sequence, uint8_t cursor) {
+  uint8_t payload[42] = {
+      AutomationStore::Schema,
+      static_cast<uint8_t>(boardAutomations.generation()),
+      static_cast<uint8_t>(boardAutomations.generation() >> 8),
+      boardAutomations.count(), 0xFF, 0};
+  uint8_t scan = cursor;
+  uint8_t index = 6;
+  AutomationRecord record;
+  while (scan < AutomationStore::Capacity && payload[5] < 3) {
+    if (boardAutomations.get(scan, record)) {
+      memcpy(payload + index, &record, sizeof(record));
+      index = static_cast<uint8_t>(index + sizeof(record));
+      ++payload[5];
+    }
+    ++scan;
+  }
+  while (scan < AutomationStore::Capacity) {
+    if (boardAutomations.get(scan, record)) {
+      payload[4] = scan;
+      break;
+    }
+    ++scan;
+  }
+  appProtocol.send(ControllerProtocol::AutomationListResponse, sequence,
+                   payload, index);
+}
+
+void sendAutomationRecord(uint8_t sequence,
+                          const AutomationRecord &record) {
+  uint8_t payload[3 + sizeof(record)] = {
+      AutomationStore::Schema,
+      static_cast<uint8_t>(boardAutomations.generation()),
+      static_cast<uint8_t>(boardAutomations.generation() >> 8)};
+  memcpy(payload + 3, &record, sizeof(record));
+  appProtocol.send(ControllerProtocol::AutomationRecordResponse, sequence,
+                   payload, sizeof(payload));
+}
+#endif
+
 // Applies the one canonical settings wire shape; alternate shapes and
 // positional tails are rejected.
 bool applySettings(const uint8_t *payload, uint8_t length, uint32_t now) {
@@ -491,6 +537,41 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       }
       hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
       goto acknowledged;
+
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    case AutomationList:
+      if (length != 1 || payload[0] >= AutomationStore::Capacity) {
+        goto badPayload;
+      }
+      sendAutomations(frame.sequence, payload[0]);
+      return;
+
+    case AutomationPut: {
+      if (length != sizeof(AutomationRecord)) {
+        goto badPayload;
+      }
+      AutomationRecord record;
+      memcpy(&record, payload, sizeof(record));
+      if (!boardAutomations.put(record)) {
+        goto badPayload;
+      }
+      sendAutomationRecord(frame.sequence, record);
+      return;
+    }
+
+    case AutomationRemove:
+      if (length != 1 || !boardAutomations.remove(payload[0])) {
+        goto badPayload;
+      }
+      goto acknowledged;
+
+    case AutomationClear:
+      if (length != 0) {
+        goto badPayload;
+      }
+      boardAutomations.clear();
+      goto acknowledged;
+#endif
 
     case PwmGet:
       sendPwmValues(frame.sequence);

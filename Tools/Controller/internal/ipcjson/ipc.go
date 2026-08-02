@@ -606,6 +606,27 @@ func (service *Service) dispatch(
 		}
 	case "controller.rf.list":
 		result, err = service.Client.ListLearnedDetailed(ctx)
+	case "controller.board_automation.list":
+		result, err = service.Client.BoardAutomations(ctx)
+	case "controller.board_automation.put":
+		var record controller.BoardAutomationRecord
+		if err = decodeStrictParams(request.Params, &record); err == nil {
+			result, err = service.Client.PutBoardAutomation(ctx, record)
+		}
+	case "controller.board_automation.remove":
+		var params struct {
+			ID byte `json:"id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			err = service.Client.RemoveBoardAutomation(ctx, params.ID)
+			result = map[string]bool{"removed": err == nil}
+		}
+	case "controller.board_automation.clear":
+		var params struct{}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			err = service.Client.ClearBoardAutomations(ctx)
+			result = map[string]bool{"cleared": err == nil}
+		}
 	case "controller.rf.presentation":
 		result = map[string]any{
 			"config":  service.Client.RFPresentation(),
@@ -1260,7 +1281,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.command.catalog", "controller.program_state.get", "controller.program-state.get",
 		"controller.temperatures", "controller.menu.list", "controller.menu.current",
 		"controller.menu.layout.get", "controller.host_menu.state",
-		"controller.rf.list", "controller.rf.presentation",
+		"controller.rf.list", "controller.rf.presentation", "controller.board_automation.list",
 		"controller.rf.learn.status", "controller.history.status",
 		"controller.history.timeline", "controller.lcd.presentation.status",
 		"controller.ports", "controller.os.status", "controller.system.status",
@@ -1342,6 +1363,11 @@ func commandCapability(command string) string {
 			return capabilityRead
 		}
 		return capabilityAutomations
+	case "board-automation", "mcu-automation":
+		if len(words) >= 2 && words[1] == "list" {
+			return capabilityRead
+		}
+		return capabilityBoard
 	case "hotkeys":
 		if len(words) == 2 && words[1] == "status" {
 			return capabilityRead

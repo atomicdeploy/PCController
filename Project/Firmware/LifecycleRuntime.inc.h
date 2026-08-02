@@ -12,6 +12,10 @@ static inline __attribute__((always_inline)) void initializeController() {
   ::now = millis();
   appProtocol.begin(PCCONTROLLER_UART_BAUD, handleProtocolFrame);
   resetTelemetry.begin();
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  boardAutomations.begin();
+  automationExecutor.reset();
+#endif
   // Announce as soon as UART0 is ready. Opening a USB serial adapter often
   // resets the MCU; serving HELLO during initialization prevents the host's
   // first request from being lost behind sensor/LCD setup.
@@ -88,6 +92,9 @@ static inline __attribute__((always_inline)) void initializeController() {
   }
   firmwareReady = true;
   appEvents.reset(resetTelemetry.cause(), resetTelemetry.count());
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  automationExecutor.dispatch(AutomationEventKind::Boot, 0, now);
+#endif
   sendHello(0);
   sendTelemetry(0);
 }
@@ -115,6 +122,18 @@ static inline __attribute__((always_inline)) void serviceController() {
     safeStopMacroOutputs();
   }
   const bool hostOffline = hostUnavailable();
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  if (hostOffline != hostWasUnavailable) {
+    if (hostOffline) {
+      // Host-loss safety is unconditional and precedes any configured cue or
+      // notification rule. Host-triggered records cannot re-enable outputs.
+      safeStopMacroOutputs();
+    }
+    automationExecutor.dispatch(AutomationEventKind::Host,
+                                static_cast<uint8_t>(!hostOffline), now);
+    hostWasUnavailable = hostOffline;
+  }
+#endif
   if (hostOffline && (hostLcdFlags & HOST_LCD_OFFLINE) == 0) {
     if ((hostLcdFlags & HOST_PANEL_CAPTURED) != 0) {
       releaseHostPanel();
@@ -152,6 +171,14 @@ static inline __attribute__((always_inline)) void serviceController() {
   }
   if (hot != hotReported) {
     appEvents.alert(ControllerAlertKind::Hot, hot);
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    automationExecutor.dispatch(
+        AutomationEventKind::Alert,
+        static_cast<uint8_t>((static_cast<uint8_t>(ControllerAlertKind::Hot)
+                              << 1) |
+                             static_cast<uint8_t>(hot)),
+        now);
+#endif
   }
   hotReported = hot;
 
@@ -160,6 +187,14 @@ static inline __attribute__((always_inline)) void serviceController() {
   static bool faultReported = false;
   if (firmwareFault != faultReported) {
     appEvents.alert(ControllerAlertKind::Fault, firmwareFault);
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    automationExecutor.dispatch(
+        AutomationEventKind::Alert,
+        static_cast<uint8_t>((static_cast<uint8_t>(ControllerAlertKind::Fault)
+                              << 1) |
+                             static_cast<uint8_t>(firmwareFault)),
+        now);
+#endif
     faultReported = firmwareFault;
   }
 
@@ -200,6 +235,9 @@ static inline __attribute__((always_inline)) void serviceController() {
   const uint8_t relayMask = relays.activeRelayMask();
   if (relayMask != lastRelayMask) {
     appEvents.relay(relayMask);
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    automationExecutor.dispatch(AutomationEventKind::Relay, relayMask, now);
+#endif
     if (settingsStore.values().relayAudioEnabled() &&
         ((relayMask ^ lastRelayMask) & 0xFAU) != 0) {
       buzzer.beep(35, (relayMask & ~lastRelayMask) != 0 ? 1900 : 1250);

@@ -61,6 +61,15 @@
 #define PCCONTROLLER_MENU_LAYOUT_PROTOCOL 1
 #endif
 
+// The complete board-owned automation core is retained and native-tested, but
+// the current accepted ATmega328P image has only 140 application bytes free.
+// Enabling this implementation currently exceeds the immutable 0x7DF4
+// application ceiling by 2,448 bytes; keep it off until an explicit product
+// choice frees flash or selects a larger MCU. Host/offline tooling remains on.
+#ifndef PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+#define PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS 0
+#endif
+
 #if PCCONTROLLER_MENU_ORDERING && !PCCONTROLLER_MENU_VISIBILITY
 #error "Menu ordering requires persistent visibility"
 #endif

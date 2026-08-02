@@ -1,5 +1,6 @@
 // Project-layer implementation aggregator for the root-level Project folder.
 #include "Project/AddressableLeds.cpp"
+#include "Project/AutomationStore.cpp"
 #include "Project/BootMelody.cpp"
 #include "Project/CompactI2c.cpp"
 #include "Project/ControllerEvents.cpp"

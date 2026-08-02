@@ -252,6 +252,10 @@ void serviceRadio() {
                        learned ? remote.id : 0xFF);
   statusLeds.playCue(StatusLedCue::Radio, 240);
   if (learned) {
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    automationExecutor.dispatch(AutomationEventKind::LearnedRf, remote.id,
+                                now);
+#endif
     const RemoteBehavior behavior =
         static_cast<RemoteBehavior>(remote.behavior);
     const bool refreshable =
@@ -281,3 +285,65 @@ bool transmitRadio(uint32_t code, uint8_t bits, uint8_t protocol,
   radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
   return true;
 }
+
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+// Executes a persisted action exclusively through existing safety-owning
+// controller APIs. Silent mode remains owned by TonePlayer and motion starts
+// remain owned by RelayController; this engine can stop but never start motion.
+bool executeAutomationAction(const AutomationRecord &record, void *) {
+  bool accepted = false;
+  switch (static_cast<AutomationActionKind>(record.actionKind)) {
+    case AutomationActionKind::SafeStop:
+      safeStopMacroOutputs();
+      accepted = true;
+      break;
+    case AutomationActionKind::MotionStop:
+      if (record.actionTarget == 0xFF || record.actionTarget == 0) {
+        relays.stopSide(::RelaySide::A, now);
+      }
+      if (record.actionTarget == 0xFF || record.actionTarget == 1) {
+        relays.stopSide(::RelaySide::B, now);
+      }
+      accepted = true;
+      break;
+    case AutomationActionKind::Relay: {
+      const uint8_t bit = static_cast<uint8_t>(_BV(record.actionTarget));
+      const bool current = (relays.activeRelayMask() & bit) != 0;
+      const bool requested = record.value == 2 ? !current : record.value != 0;
+      accepted = relays.requestRelayForTest(
+          static_cast<uint8_t>(record.actionTarget + 1), requested, now);
+      break;
+    }
+    case AutomationActionKind::Pwm:
+      accepted = pwm.setLogical(record.actionTarget, record.value);
+      if (accepted) {
+        storeUserPwmValue(record.actionTarget, record.value);
+      }
+      break;
+    case AutomationActionKind::StatusCue:
+      statusLeds.playCue(static_cast<StatusLedCue>(record.actionTarget),
+                         record.value, now);
+      accepted = true;
+      break;
+    case AutomationActionKind::Buzzer:
+      accepted = buzzer.enqueue(record.value, record.extra);
+      break;
+    case AutomationActionKind::RfTransmit: {
+      LearnedRemote remote;
+      accepted = learnedRemotes.get(record.actionTarget, remote) &&
+                 transmitRadio(remote.code, remote.bits, remote.protocol,
+                               remote.pulseMicros);
+      break;
+    }
+    case AutomationActionKind::HostMacroRequest:
+      appEvents.automation(ControllerAutomationState::HostMacroRequested,
+                           record.id, record.actionKind,
+                           record.actionTarget);
+      return true;
+  }
+  appEvents.automation(accepted ? ControllerAutomationState::Executed
+                                : ControllerAutomationState::Rejected,
+                       record.id, record.actionKind, record.actionTarget);
+  return accepted;
+}
+#endif

@@ -529,6 +529,19 @@ func TestTemperatureAndDeviceEventSchemas(t *testing.T) {
 	if _, err := ParseDeviceEvent([]byte{EventAlert, AlertFault, 2}); err == nil {
 		t.Fatal("invalid alert state was accepted")
 	}
+	automation, err := ParseDeviceEvent([]byte{
+		EventAutomation, AutomationHostMacroRequested, 3,
+		AutomationActionHostMacroRequest, 7,
+	})
+	if err != nil || automation.AutomationRecordID != 3 ||
+		automation.AutomationActionTarget != 7 {
+		t.Fatalf("automation event=%#v err=%v", automation, err)
+	}
+	if _, err := ParseDeviceEvent([]byte{
+		EventAutomation, 0, 3, AutomationActionRelay, 4,
+	}); err == nil {
+		t.Fatal("invalid automation state was accepted")
+	}
 	reset, err := ParseDeviceEvent([]byte{
 		EventReset, 0x0A, 0x78, 0x56, 0x34, 0x12,
 	})

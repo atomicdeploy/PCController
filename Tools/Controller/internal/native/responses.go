@@ -10,14 +10,17 @@ import (
 )
 
 const (
-	BoardKindPCController byte = 1
-	SettingsShape         byte = 3
-	IdentitySchemaCompact byte = 3
-	RFEntriesSchema       byte = 1
-	MenuListSchema        byte = 1
-	TemperatureSchema     byte = 1
-	StatusPayloadSize          = 48
-	RFEntryPayloadSize         = 12
+	BoardKindPCController       byte = 1
+	SettingsShape               byte = 3
+	IdentitySchemaCompact       byte = 3
+	RFEntriesSchema             byte = 1
+	MenuListSchema              byte = 1
+	TemperatureSchema           byte = 1
+	StatusPayloadSize                = 48
+	RFEntryPayloadSize               = 12
+	AutomationSchema            byte = 1
+	AutomationRecordPayloadSize      = 12
+	AutomationCapacity               = 12
 )
 
 // HELLO capability bits are the authoritative guard for optional operations.
@@ -32,6 +35,7 @@ const (
 	CapabilityTimedMacroQueue    uint32 = 1 << 22
 	CapabilityMenuLayout         uint32 = 1 << 23
 	CapabilityProgramState       uint32 = 1 << 24
+	CapabilityBoardAutomation    uint32 = 1 << 25
 )
 
 const (
@@ -133,6 +137,13 @@ const (
 	EventRFLearning
 	EventRelay
 	EventAlert
+	EventAutomation
+)
+
+const (
+	AutomationExecuted byte = iota + 1
+	AutomationRejected
+	AutomationHostMacroRequested
 )
 
 const (
@@ -475,6 +486,10 @@ type DeviceEvent struct {
 	RelayMask               byte         `json:"relay_mask,omitempty"`
 	AlertKind               byte         `json:"alert_kind,omitempty"`
 	AlertActive             bool         `json:"alert_active,omitempty"`
+	AutomationState         byte         `json:"automation_state,omitempty"`
+	AutomationRecordID      byte         `json:"automation_record_id,omitempty"`
+	AutomationActionKind    byte         `json:"automation_action_kind,omitempty"`
+	AutomationActionTarget  byte         `json:"automation_action_target,omitempty"`
 	DeviceMicros            uint32       `json:"device_micros,omitempty"`
 	Timed                   bool         `json:"timed,omitempty"`
 	Macro                   *MacroStatus `json:"macro,omitempty"`
@@ -606,6 +621,19 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			return DeviceEvent{}, fmt.Errorf("invalid alert EVENT fields: % X", payload)
 		}
 		event.AlertKind, event.AlertActive = payload[1], payload[2] != 0
+	case EventAutomation:
+		if len(payload) != 5 {
+			return DeviceEvent{}, fmt.Errorf(
+				"automation EVENT is %d bytes, need exactly 5", len(payload),
+			)
+		}
+		if payload[1] < AutomationExecuted || payload[1] > AutomationHostMacroRequested ||
+			payload[2] >= AutomationCapacity || payload[3] < AutomationActionSafeStop ||
+			payload[3] > AutomationActionHostMacroRequest {
+			return DeviceEvent{}, fmt.Errorf("invalid automation EVENT fields: % X", payload)
+		}
+		event.AutomationState, event.AutomationRecordID = payload[1], payload[2]
+		event.AutomationActionKind, event.AutomationActionTarget = payload[3], payload[4]
 	}
 	return event, nil
 }

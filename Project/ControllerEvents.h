@@ -17,6 +17,13 @@ enum class ControllerEventType : uint8_t {
   RfLearning = 9,
   Relay = 10,
   Alert = 11,
+  Automation = 12,
+};
+
+enum class ControllerAutomationState : uint8_t {
+  Executed = 1,
+  Rejected = 2,
+  HostMacroRequested = 3,
 };
 
 // ControllerAlertKind classifies board-generated warning notifications.
@@ -57,6 +64,10 @@ public:
   void reset(uint8_t cause, uint32_t count);
   // Emits an immediate typed transition; measurements remain in STATUS.
   void alert(ControllerAlertKind kind, bool active);
+  // Reports one board-owned rule outcome; HostMacroRequested asks the Host to
+  // start the configured macro with actionTarget as its stable byte ID.
+  void automation(ControllerAutomationState state, uint8_t recordId,
+                  uint8_t actionKind, uint8_t actionTarget);
 
 private:
   // Prepends the event type and sends it as an unsolicited native Event frame.

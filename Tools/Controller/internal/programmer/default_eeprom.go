@@ -56,6 +56,22 @@ func GenerateDefaultEEPROMIntelHex() ([]byte, error) {
 		// Eleven zero value bytes have CRC-8 zero, so the twelfth remains zero.
 	}
 
+	// Automation writes are transactional across two banks. Bank 0 is the
+	// generation-1 committed empty baseline; bank 1 remains erased so the first
+	// mutation can be completed there before its commit marker is written.
+	automationBank := data[EEPROMAutomationBank0Address : EEPROMAutomationBank0Address+EEPROMAutomationBankBytes]
+	for index := range automationBank {
+		automationBank[index] = 0
+	}
+	binary.LittleEndian.PutUint16(automationBank[0:2], EEPROMAutomationMagic)
+	automationBank[2] = EEPROMAutomationSchema
+	automationBank[3] = byte(EEPROMAutomationRecordBytes)
+	automationBank[4] = EEPROMAutomationCapacity
+	automationBank[5] = 0
+	binary.LittleEndian.PutUint16(automationBank[6:8], 1)
+	automationBank[8] = avrCRC8(automationBank[:8])
+	automationBank[9] = EEPROMAutomationCommit
+
 	image := &IntelHexImage{data: make(map[uint32]byte, PCControllerEEPROMBytes)}
 	for address, value := range data {
 		image.data[uint32(address)] = value

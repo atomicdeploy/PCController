@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 const (
@@ -19,6 +21,16 @@ const (
 	EEPROMResetJournalAddress    uint32 = 320
 	EEPROMResetJournalSlots      byte   = 64
 	EEPROMResetJournalRecordSize uint32 = 6
+	EEPROMAutomationAddress      uint32 = 704
+	EEPROMAutomationBankBytes    uint32 = 154
+	EEPROMAutomationBank0Address uint32 = EEPROMAutomationAddress
+	EEPROMAutomationBank1Address uint32 = EEPROMAutomationAddress + EEPROMAutomationBankBytes
+	EEPROMAutomationHeaderBytes  uint32 = 10
+	EEPROMAutomationRecordBytes  uint32 = 12
+	EEPROMAutomationCapacity     byte   = 12
+	EEPROMAutomationMagic        uint16 = 0x4155
+	EEPROMAutomationSchema       byte   = 1
+	EEPROMAutomationCommit       byte   = 0xA5
 )
 
 type OfflineEEPROMDecode struct {
@@ -29,6 +41,7 @@ type OfflineEEPROMDecode struct {
 	Settings     OfflineSettingsDecode     `json:"settings"`
 	Remotes      OfflineRemoteStoreDecode  `json:"remotes"`
 	ResetJournal OfflineResetJournalDecode `json:"reset_journal"`
+	Automations  OfflineAutomationDecode   `json:"automations"`
 }
 
 // ControllerSettings is the current semantic 31-byte MCU settings layout. It
@@ -126,6 +139,58 @@ type OfflineResetJournalDecode struct {
 	Slots          []OfflineResetJournalRecord `json:"slots"`
 }
 
+type OfflineAutomationRecord struct {
+	ID               byte   `json:"id"`
+	Present          bool   `json:"present"`
+	Occupied         bool   `json:"occupied"`
+	Valid            bool   `json:"valid"`
+	Issue            string `json:"issue,omitempty"`
+	Flags            byte   `json:"flags"`
+	Enabled          bool   `json:"enabled"`
+	EventKind        byte   `json:"event_kind"`
+	EventValue       byte   `json:"event_value"`
+	EventMask        byte   `json:"event_mask"`
+	ActionKind       byte   `json:"action_kind"`
+	ActionTarget     byte   `json:"action_target"`
+	Value            uint16 `json:"value"`
+	Extra            uint16 `json:"extra"`
+	Options          byte   `json:"options"`
+	StoredChecksum   byte   `json:"stored_checksum"`
+	ComputedChecksum byte   `json:"computed_checksum"`
+}
+
+type OfflineAutomationBank struct {
+	Bank             byte                      `json:"bank"`
+	Address          uint32                    `json:"address"`
+	Present          bool                      `json:"present"`
+	HeaderValid      bool                      `json:"header_valid"`
+	Valid            bool                      `json:"valid"`
+	Issue            string                    `json:"issue,omitempty"`
+	Magic            uint16                    `json:"magic"`
+	Schema           byte                      `json:"schema"`
+	RecordBytes      byte                      `json:"record_bytes"`
+	Capacity         byte                      `json:"capacity"`
+	Reserved         byte                      `json:"reserved"`
+	Generation       uint16                    `json:"generation"`
+	StoredChecksum   byte                      `json:"stored_checksum"`
+	ComputedChecksum byte                      `json:"computed_checksum"`
+	Commit           byte                      `json:"commit"`
+	ValidRecords     byte                      `json:"valid_records"`
+	InvalidRecords   byte                      `json:"invalid_records"`
+	Records          []OfflineAutomationRecord `json:"records"`
+}
+
+type OfflineAutomationDecode struct {
+	Present          bool                      `json:"present"`
+	Valid            bool                      `json:"valid"`
+	Issue            string                    `json:"issue,omitempty"`
+	ActiveBank       *byte                     `json:"active_bank,omitempty"`
+	ActiveGeneration *uint16                   `json:"active_generation,omitempty"`
+	ValidCount       byte                      `json:"valid_count"`
+	Banks            []OfflineAutomationBank   `json:"banks"`
+	Records          []OfflineAutomationRecord `json:"records"`
+}
+
 // DecodeOfflineEEPROMHex explicitly decodes a file snapshot. It never queries
 // or mutates a live board, which keeps forensic restore data separate from the
 // native protocol's current settings response.
@@ -144,11 +209,12 @@ func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
 	decoded := OfflineEEPROMDecode{
 		SourceKind: "offline-eeprom-hex",
 		SourcePath: path, SourceSHA256: document.SourceSHA256,
-		Layout: "settings-unversioned-31/rf-record12-cap20/reset-journal-320",
+		Layout: "settings-unversioned-31/rf-record12-cap20/reset-journal-320/automation-v1-dual-bank-704",
 	}
 	decoded.Settings = decodeOfflineSettings(document.Image)
 	decoded.Remotes = decodeOfflineRemotes(document.Image)
 	decoded.ResetJournal = decodeOfflineResetJournal(document.Image)
+	decoded.Automations = decodeOfflineAutomations(document.Image)
 	return decoded, nil
 }
 
@@ -422,6 +488,170 @@ func decodeOfflineResetJournal(image *IntelHexImage) OfflineResetJournalDecode {
 	result.Complete = presentSlots == EEPROMResetJournalSlots
 	result.Valid = result.Complete && result.InvalidRecords == 0
 	return result
+}
+
+func decodeOfflineAutomations(image *IntelHexImage) OfflineAutomationDecode {
+	result := OfflineAutomationDecode{
+		Banks:   make([]OfflineAutomationBank, 0, 2),
+		Records: make([]OfflineAutomationRecord, 0, EEPROMAutomationCapacity),
+	}
+	addresses := [...]uint32{EEPROMAutomationBank0Address, EEPROMAutomationBank1Address}
+	active := -1
+	for bankID, address := range addresses {
+		bank := decodeOfflineAutomationBank(image, byte(bankID), address)
+		result.Present = result.Present || bank.Present
+		result.Banks = append(result.Banks, bank)
+		if !bank.Valid {
+			continue
+		}
+		if active < 0 || generationNewer(bank.Generation, result.Banks[active].Generation) {
+			active = bankID
+		}
+	}
+	if active < 0 {
+		result.Issue = "no valid committed automation bank"
+		return result
+	}
+	bank := result.Banks[active]
+	activeBank := bank.Bank
+	activeGeneration := bank.Generation
+	result.ActiveBank = &activeBank
+	result.ActiveGeneration = &activeGeneration
+	result.Valid = true
+	for _, record := range bank.Records {
+		if !record.Occupied {
+			continue
+		}
+		result.Records = append(result.Records, record)
+		if record.Valid {
+			result.ValidCount++
+		}
+	}
+	return result
+}
+
+func decodeOfflineAutomationBank(
+	image *IntelHexImage,
+	bankID byte,
+	address uint32,
+) OfflineAutomationBank {
+	result := OfflineAutomationBank{
+		Bank: bankID, Address: address,
+		Records: make([]OfflineAutomationRecord, 0, EEPROMAutomationCapacity),
+	}
+	raw, err := image.BytesAt(address, EEPROMAutomationBankBytes)
+	if err != nil {
+		for offset := uint32(0); offset < EEPROMAutomationBankBytes; offset++ {
+			if value, present := image.data[address+offset]; present && value != 0xFF {
+				result.Present = true
+				break
+			}
+		}
+		result.Issue = err.Error()
+		return result
+	}
+	for _, value := range raw {
+		if value != 0xFF {
+			result.Present = true
+			break
+		}
+	}
+	if !result.Present {
+		result.Issue = "erased"
+		return result
+	}
+	header := raw[:EEPROMAutomationHeaderBytes]
+	result.Magic = binary.LittleEndian.Uint16(header[0:2])
+	result.Schema = header[2]
+	result.RecordBytes = header[3]
+	result.Capacity = header[4]
+	result.Reserved = header[5]
+	result.Generation = binary.LittleEndian.Uint16(header[6:8])
+	result.StoredChecksum = header[8]
+	result.ComputedChecksum = avrCRC8(header[:8])
+	result.Commit = header[9]
+	var headerIssues []string
+	if result.Magic != EEPROMAutomationMagic {
+		headerIssues = append(headerIssues, fmt.Sprintf("magic=0x%04X, require 0x%04X", result.Magic, EEPROMAutomationMagic))
+	}
+	if result.Schema != EEPROMAutomationSchema {
+		headerIssues = append(headerIssues, fmt.Sprintf("schema=%d, require %d", result.Schema, EEPROMAutomationSchema))
+	}
+	if result.RecordBytes != byte(EEPROMAutomationRecordBytes) {
+		headerIssues = append(headerIssues, fmt.Sprintf("record_bytes=%d, require %d", result.RecordBytes, EEPROMAutomationRecordBytes))
+	}
+	if result.Capacity != EEPROMAutomationCapacity {
+		headerIssues = append(headerIssues, fmt.Sprintf("capacity=%d, require %d", result.Capacity, EEPROMAutomationCapacity))
+	}
+	if result.Reserved != 0 {
+		headerIssues = append(headerIssues, fmt.Sprintf("reserved=0x%02X, require 0", result.Reserved))
+	}
+	if result.StoredChecksum != result.ComputedChecksum {
+		headerIssues = append(headerIssues, "header CRC-8 mismatch")
+	}
+	if result.Commit != EEPROMAutomationCommit {
+		headerIssues = append(headerIssues, fmt.Sprintf("commit=0x%02X, require 0x%02X", result.Commit, EEPROMAutomationCommit))
+	}
+	result.HeaderValid = len(headerIssues) == 0
+
+	for id := byte(0); id < EEPROMAutomationCapacity; id++ {
+		offset := EEPROMAutomationHeaderBytes + uint32(id)*EEPROMAutomationRecordBytes
+		recordBytes := raw[offset : offset+EEPROMAutomationRecordBytes]
+		record := decodeOfflineAutomationRecord(id, recordBytes)
+		if record.Valid {
+			result.ValidRecords++
+		} else {
+			result.InvalidRecords++
+		}
+		result.Records = append(result.Records, record)
+	}
+	result.Valid = result.HeaderValid && result.InvalidRecords == 0
+	issues := append([]string(nil), headerIssues...)
+	if result.InvalidRecords != 0 {
+		issues = append(issues, fmt.Sprintf("%d automation record CRC/domain failures", result.InvalidRecords))
+	}
+	result.Issue = strings.Join(issues, "; ")
+	return result
+}
+
+func decodeOfflineAutomationRecord(id byte, raw []byte) OfflineAutomationRecord {
+	result := OfflineAutomationRecord{
+		ID: id, Present: true,
+		Flags: raw[0], EventKind: raw[1], EventValue: raw[2], EventMask: raw[3],
+		ActionKind: raw[4], ActionTarget: raw[5],
+		Value: binary.LittleEndian.Uint16(raw[6:8]),
+		Extra: binary.LittleEndian.Uint16(raw[8:10]), Options: raw[10],
+		StoredChecksum: raw[11], ComputedChecksum: avrCRC8(raw[:11]),
+	}
+	result.Enabled = result.Flags&native.AutomationEnabled != 0
+	for _, value := range raw[:11] {
+		if value != 0 {
+			result.Occupied = true
+			break
+		}
+	}
+	var issues []string
+	if result.StoredChecksum != result.ComputedChecksum {
+		issues = append(issues, "CRC-8 mismatch")
+	}
+	if result.Occupied {
+		record := native.AutomationRecord{
+			ID: id, Flags: result.Flags, EventKind: result.EventKind,
+			EventValue: result.EventValue, EventMask: result.EventMask,
+			ActionKind: result.ActionKind, ActionTarget: result.ActionTarget,
+			Value: result.Value, Extra: result.Extra, Options: result.Options,
+		}
+		if err := native.ValidateAutomationRecord(record); err != nil {
+			issues = append(issues, err.Error())
+		}
+	}
+	result.Valid = len(issues) == 0
+	result.Issue = strings.Join(issues, "; ")
+	return result
+}
+
+func generationNewer(candidate, current uint16) bool {
+	return int16(candidate-current) > 0
 }
 
 func decodeDecimalBits(value byte) byte {

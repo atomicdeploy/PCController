@@ -141,4 +141,22 @@ if(BUILD_TESTING)
     target_compile_options(firmware_tasks_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_tasks_unit COMMAND firmware_tasks_tests)
+
+  # Exercise the production dual-bank EEPROM automation table and its bounded,
+  # deterministic executor against the same byte-accurate EEPROM double.
+  add_executable(firmware_automation_store_tests
+    tests/automation_store_test.cpp
+    ../../Project/AutomationStore.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_automation_store_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  if(MSVC)
+    target_compile_options(firmware_automation_store_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_automation_store_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_automation_store_unit COMMAND firmware_automation_store_tests)
 endif()

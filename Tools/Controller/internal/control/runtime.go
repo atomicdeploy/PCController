@@ -964,6 +964,9 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					parsedDevice.Type == native.EventRFReceived {
 					runtime.observeRFGesture(*parsedDevice)
 				}
+				if parsedDevice != nil && parsedDevice.Type == native.EventAutomation {
+					runtime.dispatchBoardAutomation(*parsedDevice)
+				}
 				if hostMenuRequest != nil {
 					runtime.dispatchHostMenuRequest(*hostMenuRequest)
 				}
@@ -1248,9 +1251,43 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 			return "hot", "temperature alert " + state
 		}
 		return "fault", "firmware fault " + state
+	case native.EventAutomation:
+		state := map[byte]string{
+			native.AutomationExecuted:           "executed",
+			native.AutomationRejected:           "rejected",
+			native.AutomationHostMacroRequested: "host-macro-requested",
+		}[event.AutomationState]
+		return "board.automation", fmt.Sprintf(
+			"board automation %d %s action=%d target=%d",
+			event.AutomationRecordID, state,
+			event.AutomationActionKind, event.AutomationActionTarget,
+		)
 	default:
 		return "event", fmt.Sprintf("device event %d payload=% X", event.Type, event.Raw)
 	}
+}
+
+func (runtime *Runtime) dispatchBoardAutomation(event native.DeviceEvent) {
+	if event.AutomationState != native.AutomationHostMacroRequested ||
+		event.AutomationActionKind != native.AutomationActionHostMacroRequest {
+		return
+	}
+	runner := runtime.MacroRunner()
+	if runner == nil {
+		runtime.PublishHostEvent("board.automation.error", "host macro runner is unavailable")
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_, err := runner.Start(ctx, strconv.Itoa(int(event.AutomationActionTarget)))
+		if err != nil {
+			runtime.PublishHostEvent(
+				"board.automation.error",
+				fmt.Sprintf("board automation %d macro %d: %v", event.AutomationRecordID, event.AutomationActionTarget, err),
+			)
+		}
+	}()
 }
 
 func (runtime *Runtime) observeRFGesture(event native.DeviceEvent) {
