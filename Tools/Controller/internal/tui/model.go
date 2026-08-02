@@ -88,6 +88,17 @@ type Model struct {
 	rfCategoryCursor         int
 	rfEditMode               string
 	rfCategoryDraft          string
+	rfGuideActive            bool
+	rfGuideStep              int
+	rfGuidePhase             string
+	rfGuideCandidate         *native.RFEntry
+	rfGuideCandidateCaptured bool
+	rfGuideCaptures          [4]*native.RFEntry
+	rfGuideAwaitID           int
+	rfGuideMappingID         int
+	rfGuideRemoveArmed       bool
+	rfGuideClearArmed        bool
+	rfGuideTransmitArmed     bool
 	prefs                    Preferences
 	preview                  *control.Snapshot
 	pwmValues                [16]uint16
@@ -373,6 +384,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		rfConfig:             options.RFConfig, saveRF: options.SaveRF, rfValue: rfValue,
 		rfFetch: options.RFFetch, rfApplyOrder: options.RFApplyOrder,
 		rfReplaceSupport: options.RFReplaceSupport, rfProbeReplace: options.RFProbeReplace,
+		rfGuideAwaitID: -1, rfGuideMappingID: -1,
 		frontPanel: options.FrontPanel, frontPanelKey: options.FrontPanelKey,
 		mirrorLCD: options.MirrorLCD, lcdMirror: uiValue.MirrorPromptToLCD,
 		integrations: options.Integrations, notifier: options.Notifier,
@@ -590,6 +602,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runtimeEventMsg:
 		event := control.Event(message)
+		if command := model.observeRFGuidedEvent(event); command != nil {
+			commands = append(commands, command)
+		}
 		if command := model.hostMenuDeviceEventCommand(event); command != nil {
 			commands = append(commands, command)
 		}
@@ -614,6 +629,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		commands = append(commands, waitRuntimeEvent(model.runtime))
 
 	case commandResultMsg:
+		normalizedLine := strings.ToLower(strings.TrimSpace(message.line))
 		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") {
 			model.rebootPending = false
 		}
@@ -650,6 +666,43 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		model.consumeStructuredResult(message)
 		model.appendResult(message.line, message.output, message.err)
+		if model.rfGuideActive {
+			switch {
+			case strings.HasPrefix(normalizedLine, "rf learn ") && message.err != nil:
+				model.rfGuidePhase = "interrupted"
+				model.setNotice("Guided RF capture could not start: " + message.err.Error())
+			case model.rfGuideMappingID >= 0 && rfGuidedMappingCommandMatches(normalizedLine, model.rfGuideMappingID):
+				if message.err != nil {
+					model.rfGuidePhase = "identity"
+					model.setNotice("RF mapping was not saved: " + message.err.Error())
+					model.rfGuideMappingID = -1
+				} else {
+					model = model.completeRFGuidedMapping()
+				}
+			case strings.HasPrefix(normalizedLine, "rf remove ") && message.err == nil:
+				fields := strings.Fields(normalizedLine)
+				if len(fields) == 3 && fields[2] == "all" {
+					model.rfGuideCaptures = [4]*native.RFEntry{}
+					model.rfGuideCandidate = nil
+					model.rfGuidePhase = "idle"
+					model.setNotice("All learned RF records were cleared")
+				} else if len(fields) == 3 {
+					if removed, parseErr := strconv.Atoi(fields[2]); parseErr == nil {
+						for index, capture := range model.rfGuideCaptures {
+							if capture != nil && int(capture.ID) == removed {
+								model.rfGuideCaptures[index] = nil
+							}
+						}
+						if model.rfGuideCandidate != nil && int(model.rfGuideCandidate.ID) == removed {
+							model.rfGuideCandidate = nil
+							model.rfGuidePhase = "idle"
+						}
+						model.setNotice(fmt.Sprintf("RF entry %d removed; inventory refresh requested", removed))
+					}
+				}
+			}
+			model.clearRFGuideArms()
+		}
 		if message.err == nil && model.preview == nil && outputCommandNeedsReadback(message.line) {
 			if !model.statusPending {
 				model.statusPending = true
@@ -661,7 +714,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				commands = append(commands, execute(model.engine, "pwm get"))
 			}
 		}
-		if message.err == nil && strings.HasPrefix(strings.ToLower(message.line), "rf map ") && model.preview == nil && !model.rfPending {
+		if message.err == nil && (strings.HasPrefix(normalizedLine, "rf map ") || strings.HasPrefix(normalizedLine, "rf remove ")) && model.preview == nil && !model.rfPending {
 			model.rfPending = true
 			commands = append(commands, model.fetchRFEntriesCommand())
 		}
@@ -752,6 +805,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.resetRFStage(model.rfEntries)
 			}
 			model.setNotice(fmt.Sprintf("Loaded %d learned RF codes", len(model.rfEntries)))
+			model.resolveRFGuidedCandidate(model.rfEntries)
 		}
 
 	case rfOrderResultMsg:

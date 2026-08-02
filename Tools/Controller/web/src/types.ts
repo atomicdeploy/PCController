@@ -167,7 +167,22 @@ export interface ControllerEvent {
   rf_code?: number
   rf_bits?: number
   rf_protocol?: number
+  rf_pulse_us?: number
   metadata?: Record<string, string>
+}
+
+export interface RFLearnedEntry {
+  id: number
+  code: number
+  code_display: string
+  bits: number
+  protocol: number
+  pulse_us: number
+  action_kind: number
+  action_value: number
+  behavior: number
+  name?: string
+  category?: string
 }
 
 export interface HistorySample {
@@ -191,6 +206,8 @@ export interface MetricSample {
 export interface UIConfig {
   name: string
   setup_complete: boolean
+  appearance: Appearance
+  appearance_etag: string
   welcome_melody?: string
   api_version: number
   websocket_path: string
@@ -209,9 +226,15 @@ export interface HostUISettings {
   app_title: string
   setup_complete: boolean
   welcome_melody: string
+  appearance: Appearance
+  appearance_etag: string
   segment_scroll: SegmentScrollSettings
   peripheral_names: Record<string, string>
   peripherals: PeripheralDescriptor[]
+  changed?: boolean
+  changed_fields?: string[]
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
 }
 
 export interface PeripheralDescriptor {

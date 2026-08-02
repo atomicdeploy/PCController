@@ -114,7 +114,7 @@ describe('tab channel', () => {
     receiver.subscribe((message) => received.push(message))
 
     expect(sender.publishPresence('active', 'workbench')).toBeTruthy()
-    expect(sender.publishAppearance({ theme: 'dark', locale: 'fa', direction: 'rtl', audioVolume: 0.4 })).toBeTruthy()
+    expect(sender.publishAppearance({ theme: 'dark', locale: 'fa', direction: 'rtl', audioVolume: 0.4 }, 'a'.repeat(64))).toBeTruthy()
     expect(sender.publishTerminal({ kind: 'output', text: 'safe\u0000 output\u202e', at: now })).toBeTruthy()
     expect(sender.publishControllerEvent({
       id: 9,
@@ -139,6 +139,7 @@ describe('tab channel', () => {
       type: 'terminal',
       entry: { kind: 'output', text: 'safe output', at: now },
     })
+    expect(received[1].payload).toMatchObject({ type: 'appearance', etag: 'a'.repeat(64) })
     expect(received[3].payload).toMatchObject({
       event: { id: 9, metadata: { zone: 'front' } },
     })
@@ -166,6 +167,7 @@ describe('tab channel', () => {
       appearance: { theme: 'dark', accessToken: 'hidden' },
     } as never)).toBeNull()
     expect(channel.publishAppearance({ audioVolume: 2 })).toBeNull()
+    expect(channel.publishAppearance({ theme: 'dark' }, 'not-an-etag')).toBeNull()
     expect(channel.publishPresence('active', '../unsafe page')).toBeNull()
     expect(FakeBroadcastChannel.posted).toHaveLength(0)
 

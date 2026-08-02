@@ -1,7 +1,6 @@
 import { type CSSProperties, type FormEvent, useEffect, useRef, useState } from 'react'
 import {
   Activity,
-  Antenna,
   AudioLines,
   Binary,
   Bot,
@@ -19,7 +18,6 @@ import {
   Network,
   Palette,
   Play,
-  Radio,
   ScanSearch,
   Send,
   Settings2,
@@ -51,6 +49,7 @@ import {
   type ConsoleToken,
 } from './console-format'
 import { AdvancedWorkbench } from './advanced-workbench'
+import { RFGuidedWorkflow } from './rf-guided-workflow'
 import type { SharedViewProps } from './views'
 
 interface TextTerminalRow {
@@ -74,15 +73,6 @@ export function rfLearnCommand(mode: RFLearnMode, seconds: number): string {
   if (mode === 'indefinite') return 'rf learn indefinite'
   const bounded = Math.max(1, Math.min(120, Math.round(seconds)))
   return `rf learn timer ${bounded}s`
-}
-
-function rfLearnDuration(milliseconds: number): string {
-  if (!Number.isFinite(milliseconds) || milliseconds <= 0) return '0s'
-  const seconds = Math.ceil(milliseconds / 1000)
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const remainder = seconds % 60
-  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`
 }
 
 let terminalRowID = 0
@@ -145,13 +135,6 @@ export function WorkbenchView(props: SharedViewProps) {
   const [green, setGreen] = useState(210)
   const [blue, setBlue] = useState(220)
   const [stripBrightness, setStripBrightness] = useState(180)
-  const [rfLearnMode, setRFLearnMode] = useState<RFLearnMode>('indefinite')
-  const [rfSeconds, setRFSeconds] = useState(30)
-  const [rfCode, setRFCode] = useState('0x123456')
-  const [rfBits, setRFBits] = useState(24)
-  const [rfProtocol, setRFProtocol] = useState(1)
-  const [rfPulse, setRFPulse] = useState(350)
-  const [rfRepeats, setRFRepeats] = useState(5)
   const [macro, setMacro] = useState('')
   const [automation, setAutomation] = useState('')
   const [hostBrightness, setHostBrightness] = useState(60)
@@ -299,19 +282,7 @@ export function WorkbenchView(props: SharedViewProps) {
           <div className="inline-actions"><Button icon={Play} disabled={!melody.trim()} onClick={() => void run(`melody play ${shellArgument(melody.trim())}`)}>{copy('Play', 'پخش')}</Button><Button icon={StopCircle} onClick={() => void run('melody stop')}>{copy('Stop', 'توقف')}</Button><Button icon={List} onClick={() => void run('melody list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>}
 
-        {snapshot.connected && <Card icon={Radio} iconTone="violet" title={copy('433 MHz radio', 'رادیوی ۴۳۳ مگاهرتز')} eyebrow={copy('Learn · inspect · transmit', 'یادگیری · بررسی · ارسال')}>
-          <div className="setting-group"><label>{copy('Learn mode', 'حالت یادگیری')}</label><Segmented value={rfLearnMode} label={copy('RF learn mode', 'حالت یادگیری RF')} options={[{ value: 'indefinite', label: copy('Indefinite', 'نامحدود') }, { value: 'timer', label: copy('Timer', 'زمان‌دار') }]} onChange={setRFLearnMode} /></div>
-          {rfLearnMode === 'timer' && <RangeField label={copy('Timer duration', 'مدت زمان‌سنج')} value={rfSeconds} min={1} max={120} unit="s" onChange={setRFSeconds} />}
-          <div className="rf-learn-status" role="status" aria-live="polite">
-            {snapshot.rf_learning?.active
-              ? <><StatusBadge tone="good">{copy('LEARNING', 'در حال یادگیری')}</StatusBadge><span>{snapshot.rf_learning.mode === 'timer' ? `${copy('Timer', 'زمان‌سنج')} · ${copy('configured', 'تنظیم‌شده')} ${rfLearnDuration(snapshot.rf_learning.configured_ms)} · ${copy('remaining', 'باقی‌مانده')} ${rfLearnDuration(snapshot.rf_learning.remaining_ms)}` : copy('Indefinite · multi-code', 'نامحدود · چندکدی')} · {copy('captured', 'دریافت‌شده')} {snapshot.rf_learning.learned}</span></>
-              : <><StatusBadge tone="info">{copy('IDLE', 'آماده')}</StatusBadge><span>{snapshot.rf_learning?.reason ? `${copy('Ended', 'پایان')}: ${snapshot.rf_learning.reason} · ${copy('captured', 'دریافت‌شده')} ${snapshot.rf_learning.learned}` : copy('Default: indefinite, multi-code learning.', 'پیش‌فرض: یادگیری نامحدود و چندکدی.')}</span></>}
-          </div>
-          <small>{copy('Timer aliases accepted by CLI/API: single, one-shot.', 'نام‌های مستعار حالت زمان‌دار در CLI/API: single و one-shot.')}</small>
-          <div className="inline-actions">{!snapshot.rf_learning?.active && <Button icon={ScanSearch} onClick={() => void run(rfLearnCommand(rfLearnMode, rfSeconds))}>{copy('Learn', 'یادگیری')}</Button>}{snapshot.rf_learning?.active && <Button icon={StopCircle} onClick={() => void run('rf cancel')}>{copy('Cancel learning', 'لغو یادگیری')}</Button>}<Button icon={List} onClick={() => void run('rf list')}>{copy('View learned codes', 'مشاهده کدهای آموخته‌شده')}</Button></div>
-          <div className="compact-fields"><TextField label={copy('Code', 'کد')} dir="ltr" value={rfCode} onChange={(event) => setRFCode(event.target.value)} /><TextField label={copy('Bits', 'بیت‌ها')} type="number" min={1} max={32} value={rfBits} onChange={(event) => setRFBits(Number(event.target.value))} /><TextField label={copy('Protocol', 'پروتکل')} type="number" min={1} max={12} value={rfProtocol} onChange={(event) => setRFProtocol(Number(event.target.value))} /><TextField label={copy('Pulse µs', 'پالس µs')} type="number" min={0} max={65535} value={rfPulse} onChange={(event) => setRFPulse(Number(event.target.value))} /><TextField label={copy('Repeats', 'تکرار')} type="number" min={1} max={20} value={rfRepeats} onChange={(event) => setRFRepeats(Number(event.target.value))} /></div>
-          <Button tone="primary" icon={Antenna} disabled={!rfCode.trim()} onClick={() => void run(`rf send ${rfCode.trim()} ${rfBits} ${rfProtocol} ${rfPulse} ${rfRepeats}`)}>{copy('Transmit explicitly', 'ارسال با تأیید کاربر')}</Button>
-        </Card>}
+        <RFGuidedWorkflow snapshot={snapshot} events={events} locale={locale} openDialog={props.openDialog} />
 
         <Card icon={Workflow} iconTone="green" title={copy('Macros & automations', 'ماکروها و خودکارسازی')} eyebrow={snapshot.connected ? copy('Controller timing · host rules', 'زمان‌بندی برد · قواعد میزبان') : copy('Host rules', 'قواعد میزبان')}>
           {snapshot.connected && <><TextField label={copy('Macro name or ID', 'نام یا شناسه ماکرو')} value={macro} onChange={(event) => setMacro(event.target.value)} />

@@ -185,6 +185,18 @@ func startPrimaryIPCClaimed(
 		_ = claim.Close()
 		return nil, fmt.Errorf("register bridge command: %w", err)
 	}
+	if err := engine.Register(shell.Command{
+		Name: "webhook",
+		Usage: "webhook status | pending [LIMIT] | dead [LIMIT] | " +
+			"replay DELIVERY_ID|all CONFIRM | clear dead DELIVERY_ID|all CONFIRM",
+		Summary: "inspect and operate the durable outbound-webhook delivery queue",
+		Run:     manager.WebhookCommand,
+	}); err != nil {
+		manager.Close()
+		_ = server.Close()
+		_ = claim.Close()
+		return nil, fmt.Errorf("register outbound-webhook command: %w", err)
+	}
 	activeEndpoint := currentPrimaryEndpoint()
 	activeEndpoint.Listen, err = localHostDialAddress(server.listener.Addr().String())
 	if err != nil {

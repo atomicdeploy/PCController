@@ -37,6 +37,7 @@ export type AppearancePatch = Partial<Pick<
 export interface AppearancePayload {
   type: 'appearance'
   appearance: AppearancePatch
+  etag?: string
 }
 
 /** Bounded terminal record suitable for cross-tab synchronization. */
@@ -119,7 +120,7 @@ export interface TabChannel {
   readonly tabId: string
   publish(payload: TabChannelPayload, ttlMS?: number): string | null
   publishPresence(state: PresenceState, page?: string): string | null
-  publishAppearance(appearance: AppearancePatch): string | null
+  publishAppearance(appearance: AppearancePatch, etag?: string): string | null
   publishTerminal(entry: TerminalEntry): string | null
   publishControllerEvent(event: SharedControllerEvent): string | null
   subscribe(listener: TabChannelListener): () => void
@@ -241,7 +242,8 @@ function sanitizePresence(raw: RecordValue): PresencePayload | null {
 }
 
 function sanitizeAppearance(raw: RecordValue): AppearancePayload | null {
-  if (!hasOnlyKeys(raw, ['type', 'appearance']) || !isRecord(raw.appearance)) return null
+  if (!hasOnlyKeys(raw, ['type', 'appearance', 'etag']) || !isRecord(raw.appearance)) return null
+  if (raw.etag !== undefined && (typeof raw.etag !== 'string' || !/^[a-f0-9]{64}$/.test(raw.etag))) return null
   const value = raw.appearance
   const keys = ['theme', 'locale', 'direction', 'reduceMotion', 'compactNumbers', 'audioMuted', 'audioVolume'] as const
   if (!hasOnlyKeys(value, keys) || Object.keys(value).length === 0) return null
@@ -268,7 +270,7 @@ function sanitizeAppearance(raw: RecordValue): AppearancePayload | null {
     if (typeof value.audioVolume !== 'number' || !Number.isFinite(value.audioVolume) || value.audioVolume < 0 || value.audioVolume > 1) return null
     appearance.audioVolume = value.audioVolume
   }
-  return { type: 'appearance', appearance }
+  return { type: 'appearance', appearance, ...(raw.etag === undefined ? {} : { etag: raw.etag }) }
 }
 
 function sanitizeTerminal(raw: RecordValue): TerminalPayload | null {
@@ -484,7 +486,7 @@ export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
     tabId,
     publish,
     publishPresence: (state, page) => publish({ type: 'presence', state, ...(page === undefined ? {} : { page }) }),
-    publishAppearance: (appearance) => publish({ type: 'appearance', appearance }),
+    publishAppearance: (appearance, etag) => publish({ type: 'appearance', appearance, ...(etag === undefined ? {} : { etag }) }),
     publishTerminal: (entry) => publish({ type: 'terminal', entry }),
     publishControllerEvent: (event) => publish({ type: 'controller-event', event }),
     subscribe(listener) {

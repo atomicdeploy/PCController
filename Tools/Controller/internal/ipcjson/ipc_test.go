@@ -1242,6 +1242,11 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 		{"macro record save", capabilityHostConfig},
 		{"melody create notify C4:100", capabilityHostConfig},
 		{"automation run door-open", capabilityAutomations},
+		{"webhook status", capabilityRead},
+		{"webhook pending", capabilityRead},
+		{"webhook dead", capabilityRead},
+		{"webhook replay dead-id", capabilityIntegrations},
+		{"webhook clear dead", capabilityIntegrations},
 		{"hotkeys status", capabilityRead},
 		{"keyboard status", capabilityRead},
 		{"keyboard enable media", capabilityVirtualKeys},
@@ -1259,6 +1264,72 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 	for _, test := range tests {
 		if got := commandCapability(test.command); got != test.want {
 			t.Errorf("commandCapability(%q)=%q want %q", test.command, got, test.want)
+		}
+	}
+}
+
+func TestRFMapParamsNormalizeSemanticTargetsAndRejectUnsafeMappings(t *testing.T) {
+	id := func(value int) *int { return &value }
+	tests := []struct {
+		name     string
+		params   rfMapParams
+		action   controllerapi.RFAction
+		value    byte
+		behavior controllerapi.RFBehavior
+		wantErr  string
+	}{
+		{name: "guided key B", params: rfMapParams{ID: id(3), Action: "key", Target: "2", Behavior: "press"}, action: controllerapi.RFActionKey, value: 1, behavior: controllerapi.RFBehaviorPress},
+		{name: "user relay", params: rfMapParams{ID: id(4), Action: "relay", Target: "8", Behavior: "momentary"}, action: controllerapi.RFActionRelay, value: 7, behavior: controllerapi.RFBehaviorMomentary},
+		{name: "door gated motion", params: rfMapParams{ID: id(5), Action: "side", Target: "B", Behavior: "stop"}, action: controllerapi.RFActionSide, value: 1, behavior: controllerapi.RFBehaviorStop},
+		{name: "unmapped", params: rfMapParams{ID: id(6), Action: "none"}, action: controllerapi.RFActionNone, behavior: controllerapi.RFBehaviorPress},
+		{name: "protected relay", params: rfMapParams{ID: id(1), Action: "relay", Target: "4", Behavior: "toggle"}, wantErr: "5..8"},
+		{name: "invalid slot", params: rfMapParams{ID: id(20), Action: "none"}, wantErr: "0..19"},
+		{name: "ambiguous unmapped", params: rfMapParams{ID: id(1), Action: "none", Behavior: "press"}, wantErr: "do not accept"},
+		{name: "missing slot", params: rfMapParams{Action: "none"}, wantErr: "required"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mapping, err := test.params.mapping()
+			if test.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+					t.Fatalf("mapping=%#v err=%v want %q", mapping, err, test.wantErr)
+				}
+				return
+			}
+			if err != nil || mapping.Action != test.action || mapping.Value != test.value || mapping.Behavior != test.behavior {
+				t.Fatalf("mapping=%#v err=%v", mapping, err)
+			}
+		})
+	}
+}
+
+func TestRFGuidedRPCMutationsValidateBeforeBoardAccess(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	service := &Service{Client: client}
+
+	for _, test := range []struct {
+		method string
+		params string
+		want   string
+	}{
+		{method: "controller.rf.map", params: `{"id":1,"action":"relay","target":"2","behavior":"toggle"}`, want: "5..8"},
+		{method: "controller.rf.remove", params: `{"id":20}`, want: "0..19"},
+		{method: "controller.rf.clear", params: `{"confirm":"clear"}`, want: "CLEAR RF"},
+		{method: "controller.rf.transmit", params: `{"code":1234,"bits":33,"protocol":1}`, want: "1..32"},
+		{method: "controller.rf.transmit", params: `{"code":1234,"bits":24,"protocol":13}`, want: "1..12"},
+	} {
+		response := service.Dispatch(context.Background(), Request{
+			Method: test.method, Params: json.RawMessage(test.params),
+		})
+		if response.Error == nil || !strings.Contains(response.Error.Message, test.want) {
+			t.Errorf("%s response=%#v want %q", test.method, response, test.want)
+		}
+	}
+
+	for _, method := range []string{"controller.rf.map", "controller.rf.remove", "controller.rf.clear", "controller.rf.transmit"} {
+		if capability := requestCapability(method, nil); capability != capabilityBoard {
+			t.Errorf("%s capability=%q want %q", method, capability, capabilityBoard)
 		}
 	}
 }

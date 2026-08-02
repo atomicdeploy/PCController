@@ -386,6 +386,9 @@ func (model Model) rfPage() string {
 	if model.rfEditMode == "category-color" {
 		return model.rfCategoryColorPage()
 	}
+	if model.rfGuideActive {
+		return model.rfGuidedPage()
+	}
 	learnState := "idle"
 	if model.preview == nil {
 		state := model.runtime.RFLearnState()
@@ -431,7 +434,7 @@ func (model Model) rfPage() string {
 	lines := []string{
 		sectionHeader(model.width, "433 MHz RF", "receive INT0 · transmit INT1 · learning "+learnState),
 		lipgloss.JoinHorizontal(lipgloss.Top, intersperseStrings(primaryButtons, " ")...),
-		lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("A Search action"), " ", buttonStyle.Render("N Rename"), " ", buttonStyle.Render("K Category"), " ", buttonStyle.Render("Z View in "+strings.ToUpper(radix)), " ", buttonStyle.Render("[ / ] Move ID"), " ", buttonStyle.Render("V Review"), " ", buttonBadStyle.Render("G Apply"), " ", buttonStyle.Render("X Rollback")),
+		lipgloss.JoinHorizontal(lipgloss.Top, buttonGoodStyle.Render("W Guided A/B/C/D"), " ", buttonStyle.Render("A Search action"), " ", buttonStyle.Render("N Rename"), " ", buttonStyle.Render("K Category"), " ", buttonStyle.Render("Z View in "+strings.ToUpper(radix)), " ", buttonStyle.Render("[ / ] Move ID"), " ", buttonStyle.Render("V Review"), " ", buttonBadStyle.Render("G Apply"), " ", buttonStyle.Render("X Rollback")),
 		labelStyle.Render("Metadata (code, bits, protocol) follows each code when IDs are reordered."),
 		kv("Staged order", stageState),
 		kv("Apply transaction", applyState),

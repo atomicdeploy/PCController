@@ -102,6 +102,14 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			// Preserve the application's global clean-exit shortcut.
 		case "esc":
 			model.cancelRFModal()
+			if model.rfGuideActive && model.rfGuidePhase == "mapping" {
+				if model.rfGuideCandidateCaptured {
+					model.rfGuidePhase = "identity"
+				} else {
+					model.rfGuidePhase = "idle"
+				}
+				model.setNotice("RF mapping review closed without changing the controller")
+			}
 			return model, nil, true
 		case "up":
 			matches := model.filteredRFActions()
@@ -132,7 +140,12 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 				model.rfActionCursor = len(matches) - 1
 			}
 			selected := matches[model.rfActionCursor]
+			guidedMapping := model.rfGuideActive && model.rfGuidePhase == "mapping"
 			model.cancelRFModal()
+			if guidedMapping {
+				model.rfGuidePhase = "saving"
+				model.rfGuideMappingID = int(entry.ID)
+			}
 			return model.dispatchLine(fmt.Sprintf("rf map %d %s", entry.ID, selected.Args))
 		default:
 			if message.Type == tea.KeyRunes {
@@ -187,6 +200,11 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 		case "enter":
 			command, handled := model.finishRFEdit()
 			return model, command, handled
+		}
+	}
+	if model.page == PageRF && model.rfGuideActive {
+		if updated, command, handled := model.handleRFGuidedKey(message); handled {
+			return updated, command, true
 		}
 	}
 	if model.portPicker {
@@ -1164,6 +1182,9 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		}
 	case PageRF:
 		switch key {
+		case "w":
+			model = model.beginRFGuidedWorkflow()
+			return model, nil, true
 		case "l":
 			if model.preview == nil && model.runtime.RFLearnState().Active {
 				model.setNotice("RF learning is already active; cancel it before starting another session")

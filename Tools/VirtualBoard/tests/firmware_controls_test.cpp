@@ -9,6 +9,7 @@
 #include "Project/FrontPanelModel.h"
 #include "Project/MotionDoorPolicy.h"
 #include "Project/RelayController.h"
+#include "Project/SettingsStore.h"
 #include "Project/TemperatureRoles.h"
 #include "Project/TransitionMath.h"
 #include "Project/UartProtocol.h"
@@ -305,6 +306,28 @@ void testMotionDoorPolicyMatrixAndEntryPaths() {
   retained.service(6);
   require((retained.activeRelayMask() & (_BV(0) | _BV(1))) == 0,
           "full-off stop could not clear direction after policy revocation");
+
+  ControllerSettings editor{};
+  editor.flags = SettingsFlags::Silent | SettingsFlags::DoorAudioDisabled;
+  editor.adjustMotionDoorPolicy(true);
+  require(editor.motionDoorPolicy() == MotionDoorPolicy::ClosedOnly,
+          "policy editor skipped Closed Only");
+  editor.adjustMotionDoorPolicy(true);
+  require(editor.motionDoorPolicy() == MotionDoorPolicy::OpenOnly,
+          "policy editor skipped Open Only");
+  editor.adjustMotionDoorPolicy(true);
+  require(editor.motionDoorPolicy() == MotionDoorPolicy::Never,
+          "policy editor skipped Never");
+  editor.adjustMotionDoorPolicy(true);
+  require(editor.motionDoorPolicy() == MotionDoorPolicy::Always,
+          "policy editor did not wrap forward to Always");
+  editor.adjustMotionDoorPolicy(false);
+  require(editor.motionDoorPolicy() == MotionDoorPolicy::Never,
+          "policy editor did not wrap backward to Never");
+  require((editor.flags & ~SettingsFlags::MotionDoorPolicyMask) ==
+              (SettingsFlags::Silent | SettingsFlags::DoorAudioDisabled),
+          "policy editor corrupted adjacent settings flags");
+
 }
 
 void testTransitionsAndRollover() {

@@ -78,6 +78,10 @@ export async function getUIConfig(signal?: AbortSignal): Promise<UIConfig> {
   if (typeof config?.setup_complete !== 'boolean') {
     throw new Error('UI configuration is missing required setup_complete state')
   }
+  if (!config.appearance || typeof config.appearance !== 'object' ||
+      typeof config.appearance_etag !== 'string' || !/^[a-f0-9]{64}$/.test(config.appearance_etag)) {
+    throw new Error('UI configuration is missing host-authoritative appearance state')
+  }
   return config
 }
 

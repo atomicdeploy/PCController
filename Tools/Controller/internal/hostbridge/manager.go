@@ -3,13 +3,11 @@
 package hostbridge
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -43,6 +41,11 @@ type Status struct {
 	SegmentScroll            bool                            `json:"segment_scroll_active"`
 	SegmentText              string                          `json:"segment_scroll_text,omitempty"`
 	WebhooksActive           int                             `json:"webhooks_active"`
+	WebhookQueuePending      int                             `json:"webhook_queue_pending"`
+	WebhookDeadLetters       int                             `json:"webhook_dead_letters"`
+	WebhooksDelivered        uint64                          `json:"webhooks_delivered"`
+	WebhooksRetried          uint64                          `json:"webhooks_retried"`
+	WebhooksDropped          uint64                          `json:"webhooks_dropped"`
 	WSClientsActive          []string                        `json:"websocket_clients_active,omitempty"`
 	LastError                string                          `json:"last_error,omitempty"`
 	Desktop                  hostui.DesktopIntegrationStatus `json:"desktop"`
@@ -187,7 +190,7 @@ type Manager struct {
 	advertiser         *discovery.Advertiser
 	peers              map[string]*peerState
 	status             Status
-	webhookGate        chan struct{}
+	webhooks           *webhookDeliveryQueue
 	wait               sync.WaitGroup
 	actions            *hostui.ActionBroker
 	hotkeys            hostui.HotkeyRegistrar
@@ -217,7 +220,7 @@ func Start(
 	ctx, cancel := context.WithCancel(parent)
 	manager := &Manager{
 		client: client, store: store, ctx: ctx, cancel: cancel,
-		peers: make(map[string]*peerState), webhookGate: make(chan struct{}, 8),
+		peers:             make(map[string]*peerState),
 		keyboardLatches:   make(map[string]keyboardLatch),
 		actions:           actions,
 		hotkeys:           hostui.NewHotkeyRegistrar(),
@@ -225,6 +228,23 @@ func Start(
 		notificationQueue: newNotificationQueue(16, 3*time.Second, 500*time.Millisecond),
 		warningBeep:       hostui.WarningBeep,
 	}
+	webhooks, err := newWebhookDeliveryQueue(webhookQueueOptions{
+		Path: defaultWebhookQueuePath(store.Path()),
+		Resolve: func(name string) (appconfig.Webhook, bool) {
+			for _, candidate := range store.Current().Integrations.OutboundWebhooks {
+				if strings.EqualFold(strings.TrimSpace(candidate.Name), strings.TrimSpace(name)) {
+					return candidate, true
+				}
+			}
+			return appconfig.Webhook{}, false
+		},
+		Notice: manager.handleWebhookNotice,
+	})
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("open outbound webhook queue: %w", err)
+	}
+	manager.webhooks = webhooks
 	manager.statusLED = newStatusLEDArbiter(
 		ctx,
 		client,
@@ -290,7 +310,12 @@ func Start(
 	// published immediately after Start returns can land between the goroutine
 	// launch and its first LatestEventID call and be skipped forever.
 	afterID := client.LatestEventID()
-	manager.wait.Add(5)
+	manager.wait.Add(6)
+	manager.webhooks.Start()
+	go func() {
+		defer manager.wait.Done()
+		<-manager.webhooks.done
+	}()
 	go manager.reconcileLoop()
 	go manager.eventLoop(afterID)
 	go func() {
@@ -321,6 +346,9 @@ func (manager *Manager) Close() {
 	manager.advertiser, manager.hotkeys, manager.keyboard = nil, nil, nil
 	manager.peers = make(map[string]*peerState)
 	manager.mu.Unlock()
+	if manager.webhooks != nil {
+		manager.webhooks.BeginDrain()
+	}
 	// Release held motion/output actions while the runtime and callback context
 	// are still available, then stop every background integration.
 	if keyboard != nil {
@@ -337,6 +365,13 @@ func (manager *Manager) Close() {
 	scrollCancel()
 	manager.client.SetBeforeDisconnectHook(nil)
 	manager.cancel()
+	if manager.webhooks != nil {
+		webhookContext, webhookCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := manager.webhooks.Close(webhookContext); err != nil {
+			manager.setLastError("outbound webhook shutdown drain: " + err.Error())
+		}
+		webhookCancel()
+	}
 	if advertiser != nil {
 		advertiser.Close()
 	}
@@ -351,14 +386,22 @@ func (manager *Manager) Close() {
 
 func (manager *Manager) Status() Status {
 	manager.mu.RLock()
-	defer manager.mu.RUnlock()
 	result := manager.status
+	manager.mu.RUnlock()
 	if manager.notificationQueue != nil {
 		stats := manager.notificationQueue.stats()
 		result.NotificationQueuePending = stats.Pending
 		result.NotificationsDelivered = stats.Delivered
 		result.NotificationsCoalesced = stats.Coalesced
 		result.NotificationsDropped = stats.Dropped
+	}
+	if manager.webhooks != nil {
+		stats := manager.webhooks.Status()
+		result.WebhookQueuePending = stats.Pending
+		result.WebhookDeadLetters = stats.Dead
+		result.WebhooksDelivered = stats.Delivered
+		result.WebhooksRetried = stats.Retried
+		result.WebhooksDropped = stats.Dropped
 	}
 	result.WSClientsActive = append([]string(nil), result.WSClientsActive...)
 	return result
@@ -916,20 +959,25 @@ func (manager *Manager) dispatchWebhooks(
 	if strings.HasPrefix(event.Kind, "webhook.") {
 		return
 	}
+	manager.mu.RLock()
+	closing := manager.closing
+	manager.mu.RUnlock()
+	if closing {
+		return
+	}
 	for _, webhook := range config.Integrations.OutboundWebhooks {
 		if !webhook.Enabled || !eventKindMatches(webhook.EventKind, event.Kind) {
 			continue
 		}
-		select {
-		case manager.webhookGate <- struct{}{}:
-			manager.wait.Add(1)
-			go func(webhook appconfig.Webhook) {
-				defer manager.wait.Done()
-				defer func() { <-manager.webhookGate }()
-				manager.sendWebhook(webhook, event)
-			}(webhook)
-		default:
-			manager.recordError("outbound webhook queue saturated")
+		if manager.webhooks == nil {
+			continue
+		}
+		if _, _, err := manager.webhooks.Enqueue(webhook, event); err != nil {
+			manager.handleWebhookNotice(webhookNotice{
+				Kind: "webhook.queue.error",
+				Text: fmt.Sprintf("%s could not queue event %d (%s)", webhook.Name, event.ID, event.Kind),
+				Err:  err,
+			})
 		}
 	}
 }
@@ -944,72 +992,6 @@ func eventKindMatches(pattern, kind string) bool {
 		return strings.HasPrefix(kind, strings.TrimSuffix(pattern, "*"))
 	}
 	return pattern == kind
-}
-
-func (manager *Manager) sendWebhook(
-	config appconfig.Webhook,
-	event controller.Event,
-) {
-	method := strings.ToUpper(strings.TrimSpace(config.Method))
-	target := config.URL
-	var body io.Reader
-	if method == http.MethodGet || method == http.MethodDelete {
-		parsed, err := url.Parse(target)
-		if err != nil {
-			manager.recordError(config.Name + ": " + err.Error())
-			return
-		}
-		query := parsed.Query()
-		query.Set("kind", event.Kind)
-		query.Set("text", event.Text)
-		query.Set("id", strconv.FormatUint(event.ID, 10))
-		parsed.RawQuery = query.Encode()
-		target = parsed.String()
-	} else {
-		var encoded []byte
-		if strings.TrimSpace(config.BodyTemplate) == "" {
-			encoded, _ = json.Marshal(event)
-		} else {
-			template := strings.NewReplacer(
-				"{{id}}", strconv.FormatUint(event.ID, 10),
-				"{{kind}}", event.Kind,
-				"{{text}}", event.Text,
-				"{{source}}", event.Source,
-			).Replace(config.BodyTemplate)
-			encoded = []byte(template)
-		}
-		body = bytes.NewReader(encoded)
-	}
-	request, err := http.NewRequestWithContext(manager.ctx, method, target, body)
-	if err != nil {
-		manager.recordError(config.Name + ": " + err.Error())
-		return
-	}
-	for key, value := range config.Headers {
-		request.Header.Set(key, value)
-	}
-	if body != nil && request.Header.Get("Content-Type") == "" {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	timeout := time.Duration(config.TimeoutMS) * time.Millisecond
-	if timeout == 0 {
-		timeout = 5 * time.Second
-	}
-	client := &http.Client{Timeout: timeout}
-	response, err := client.Do(request)
-	if err != nil {
-		manager.recordError(config.Name + ": " + err.Error())
-		return
-	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
-	_ = response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		manager.recordError(fmt.Sprintf("%s: HTTP %d", config.Name, response.StatusCode))
-		return
-	}
-	manager.client.EmitHostEvent("webhook.sent", fmt.Sprintf(
-		"%s delivered event %d (%s)", config.Name, event.ID, event.Kind,
-	))
 }
 
 func (manager *Manager) dispatchTextMappings(

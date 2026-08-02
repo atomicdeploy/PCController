@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowDownToLine,
@@ -7,7 +7,6 @@ import {
   History,
   Network,
   PackageSearch,
-  Search,
   Send,
   ShieldCheck,
   SquareTerminal,
@@ -26,19 +25,24 @@ import {
 } from './components'
 import { downloadIntegration, integrationFetch } from './api'
 import { formatCompact } from './i18n'
+import { TypedCollection } from './typed-collection'
+import { structuredJSONStringify } from './typed-collection-model'
 import type { SharedViewProps } from './views'
 
 type DataWorkspaceTab = 'explore' | 'table' | 'transfer'
+const preferredRecordFields = ['id', 'code', 'name', 'title', 'category', 'state', 'value', 'updated_at'] as const
 
 function recordsFromPayload(payload: unknown): Record<string, unknown>[] {
   if (Array.isArray(payload)) {
-    return payload.filter((value): value is Record<string, unknown> =>
-      Boolean(value && typeof value === 'object' && !Array.isArray(value)))
+    return payload.map((value) => value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : { value })
   }
   if (payload && typeof payload === 'object') {
     const object = payload as Record<string, unknown>
     if (Array.isArray(object.records)) return recordsFromPayload(object.records)
     if (Array.isArray(object.data)) return recordsFromPayload(object.data)
+    return [object]
   }
   return []
 }
@@ -50,7 +54,6 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
   const [method, setMethod] = useState<'GET' | 'POST'>('GET')
   const [requestBody, setRequestBody] = useState('{\n  "query": ""\n}')
   const [records, setRecords] = useState<Record<string, unknown>[]>([])
-  const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
   const [response, setResponse] = useState<unknown>(null)
   const [history, setHistory] = useState<string[]>([])
@@ -72,7 +75,7 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
       setHistory((current) => [entry, ...current.filter((item) => item !== entry)].slice(0, 6))
       setError('')
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(cause instanceof Error ? cause.message : structuredJSONStringify(cause))
     } finally {
       setBusy(false)
     }
@@ -84,28 +87,11 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
       await downloadIntegration('datahub', relativePath)
       setError('')
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(cause instanceof Error ? cause.message : structuredJSONStringify(cause))
     } finally {
       setBusy(false)
     }
   }
-
-  const filtered = useMemo(() => {
-    const term = search.trim().toLocaleLowerCase(locale === 'fa' ? 'fa-IR' : 'en-US')
-    if (!term) return records.slice(0, 250)
-    return records.filter((record) => Object.values(record).some((value) =>
-      String(value ?? '').toLocaleLowerCase().includes(term))).slice(0, 250)
-  }, [records, search, locale])
-
-  const columns = useMemo(() => {
-    const preferred = ['id', 'code', 'name', 'title', 'category', 'state', 'value', 'updated_at']
-    const all = new Set<string>()
-    filtered.slice(0, 30).forEach((record) => Object.keys(record).forEach((key) => all.add(key)))
-    return [
-      ...preferred.filter((key) => all.has(key)),
-      ...[...all].filter((key) => !preferred.includes(key)),
-    ].slice(0, 8)
-  }, [filtered])
 
   const recall = (entry: string) => {
     const separator = entry.indexOf(' ')
@@ -153,7 +139,7 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
             <Button tone="primary" icon={Send} busy={busy} disabled={!relativePath.trim()} onClick={() => void runRequest()}>{copy('Send request', 'ارسال درخواست')}</Button>
           </Card>
           <Card icon={Braces} iconTone="accent" title={copy('Response', 'پاسخ')} eyebrow={response === null ? copy('No response', 'بدون پاسخ') : copy(`${records.length} projected records`, `${formatCompact(locale, records.length)} رکورد استخراج‌شده`)} className="operation-result">
-            <pre className="operation-output" dir="ltr">{response === null ? copy('Run a request to inspect the response.', 'برای بررسی پاسخ، یک درخواست اجرا کنید.') : typeof response === 'string' ? response : JSON.stringify(response, null, 2)}</pre>
+            <pre className="operation-output" dir="ltr">{response === null ? copy('Run a request to inspect the response.', 'برای بررسی پاسخ، یک درخواست اجرا کنید.') : typeof response === 'string' ? response : structuredJSONStringify(response, true)}</pre>
           </Card>
           <Card icon={History} iconTone="green" title={copy('Recent local requests', 'درخواست‌های محلی اخیر')} eyebrow={copy(`${history.length} in this tab`, `${formatCompact(locale, history.length)} مورد در این زبانه`)}>
             <div className="command-chips">{history.length ? history.map((entry) => <button key={entry} dir="ltr" onClick={() => recall(entry)}>{entry}</button>) : <p className="card-copy">{copy('No requests in this browser session.', 'در این نشست مرورگر هنوز درخواستی اجرا نشده است.')}</p>}</div>
@@ -162,11 +148,18 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
       )}
 
       {tab === 'table' && (
-        <Card icon={TableProperties} iconTone="violet" className="records-card" title={`${t('records')} · ${formatCompact(locale, records.length)}`} eyebrow={copy(`${filtered.length} visible`, `${formatCompact(locale, filtered.length)} مورد نمایان`)} action={<label className="table-search"><Search size={16} /><input value={search} placeholder={t('search')} onChange={(event) => setSearch(event.target.value)} /></label>}>
-          {!filtered.length ? <EmptyState icon={PackageSearch} title={copy('No tabular records', 'رکورد جدولی موجود نیست')} detail={copy('Run a request whose response is an array or contains a records/data array.', 'درخواستی اجرا کنید که پاسخ آن آرایه باشد یا آرایهٔ records/data داشته باشد.')} /> : (
-            <div className="data-table-wrap"><table className="data-table"><thead><tr><th>#</th>{columns.map((column) => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{filtered.map((record, index) => <tr key={String(record.id ?? record.code ?? index)}><td>{index + 1}</td>{columns.map((column) => <td key={column}>{String(record[column] ?? '—')}</td>)}</tr>)}</tbody></table></div>
-          )}
-          <footer className="table-footer"><span>{filtered.length} / {records.length}</span><span><ShieldCheck size={15} /> {copy('Credentials stripped', 'اطلاعات دسترسی حذف شده')}</span><span><ArrowDownToLine size={15} /> {t('rangeReady')}</span></footer>
+        <Card icon={TableProperties} iconTone="violet" className="records-card" title={`${t('records')} · ${formatCompact(locale, records.length)}`} eyebrow={copy('Typed local collection', 'مجموعهٔ محلی نوع‌دار')}>
+          <TypedCollection
+            records={records}
+            preferredFields={preferredRecordFields}
+            locale={locale}
+            direction={locale === 'fa' ? 'rtl' : 'ltr'}
+            ariaLabel={copy('Data workspace records', 'رکوردهای فضای داده')}
+            filename="data-workspace"
+            preserveViewportAnchor
+            empty={<EmptyState icon={PackageSearch} title={copy('No tabular records', 'رکورد جدولی موجود نیست')} detail={copy('Run a request to inspect a structured response as a typed collection.', 'یک درخواست اجرا کنید تا پاسخ ساخت‌یافته را به‌صورت مجموعهٔ نوع‌دار بررسی کنید.')} />}
+          />
+          <footer className="table-footer"><span>{records.length} {copy('records', 'رکورد')}</span><span><ShieldCheck size={15} /> {copy('Credentials stripped', 'اطلاعات دسترسی حذف شده')}</span><span><ArrowDownToLine size={15} /> {t('rangeReady')}</span></footer>
         </Card>
       )}
 
@@ -174,7 +167,7 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
         <section className="system-grid">
           <Card icon={Download} iconTone="accent" title={copy('Streaming download', 'دانلود جریانی')} eyebrow={relativePath.trim() ? `/${relativePath.replace(/^\/+/, '')}` : copy('No path selected', 'مسیری انتخاب نشده')}>{relativePath.trim() && <Button icon={Download} busy={busy} onClick={() => void downloadCurrent()}>{copy('Download current path', 'دانلود مسیر فعلی')}</Button>}</Card>
           <Card icon={ShieldCheck} iconTone="green" title={copy('Boundary status', 'وضعیت مرز امنیتی')} eyebrow={error ? copy('Request rejected', 'درخواست رد شد') : copy('Host mediated', 'با میانجی‌گری میزبان')}><div className="data-list"><DataRow label={copy('Upstream', 'بالادست')} value={copy('Configured loopback root', 'ریشهٔ محلی پیکربندی‌شده')} /><DataRow label={copy('Credentials', 'اطلاعات دسترسی')} value={copy('Removed before forwarding', 'پیش از ارسال حذف می‌شود')} tone="good" /><DataRow label={copy('Redirect selection', 'انتخاب تغییرمسیر')} value={copy('Host-owned', 'در اختیار میزبان')} /><DataRow label={copy('Range requests', 'درخواست‌های بازه‌ای')} value={copy('Preserved', 'حفظ می‌شوند')} tone="good" /></div></Card>
-          <Card icon={SquareTerminal} iconTone="violet" title={copy('Current response', 'پاسخ فعلی')} eyebrow={response === null ? copy('No response', 'بدون پاسخ') : typeof response === 'string' ? copy('Text', 'متن') : copy('Structured data', 'دادهٔ ساخت‌یافته')}>{response !== null && <pre className="operation-output" dir="ltr">{typeof response === 'string' ? response : JSON.stringify(response, null, 2)}</pre>}</Card>
+          <Card icon={SquareTerminal} iconTone="violet" title={copy('Current response', 'پاسخ فعلی')} eyebrow={response === null ? copy('No response', 'بدون پاسخ') : typeof response === 'string' ? copy('Text', 'متن') : copy('Structured data', 'دادهٔ ساخت‌یافته')}>{response !== null && <pre className="operation-output" dir="ltr">{typeof response === 'string' ? response : structuredJSONStringify(response, true)}</pre>}</Card>
         </section>
       )}
     </>

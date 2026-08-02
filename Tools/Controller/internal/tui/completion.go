@@ -8,9 +8,27 @@ import (
 )
 
 var nestedCompletions = map[string][]string{
-	"config":            {"get", "set"},
-	"config get":        {"ui.app_title"},
-	"config set":        {"ui.app_title"},
+	"config": {"get", "set"},
+	"config get": {
+		"ui.app_title",
+		"ui.appearance.theme",
+		"ui.appearance.locale",
+		"ui.appearance.direction",
+		"ui.appearance.reduce_motion",
+		"ui.appearance.compact_numbers",
+		"ui.appearance.audio_muted",
+		"ui.appearance.audio_volume",
+	},
+	"config set": {
+		"ui.app_title",
+		"ui.appearance.theme",
+		"ui.appearance.locale",
+		"ui.appearance.direction",
+		"ui.appearance.reduce_motion",
+		"ui.appearance.compact_numbers",
+		"ui.appearance.audio_muted",
+		"ui.appearance.audio_volume",
+	},
 	"silent":            {"status", "on", "off"},
 	"menu":              {"list", "prev", "next", "dec", "inc", "page"},
 	"menu page":         {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"},

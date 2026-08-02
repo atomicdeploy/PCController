@@ -50,7 +50,6 @@ import {
   Power,
   Radio,
   RefreshCw,
-  Search,
   Send,
   Settings2,
   ShieldCheck,
@@ -87,6 +86,7 @@ import {
 } from './components'
 import { execute, rpc } from './api'
 import { settingsSetCommand } from './command-line'
+import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
 import {
@@ -166,23 +166,6 @@ function eventTone(event: ControllerEvent): 'good' | 'warn' | 'bad' | 'info' {
   if (kind.includes('warning') || kind.includes('door') || kind.includes('disconnect')) return 'warn'
   if (kind.includes('connect') || kind.includes('ready') || kind.includes('complete')) return 'good'
   return 'info'
-}
-
-function EventList({ events, locale, t, limit = 6 }: { events: ControllerEvent[]; locale: Locale; t: SharedViewProps['t']; limit?: number }) {
-  const visible = events.slice(0, limit)
-  if (!visible.length) return <EmptyState icon={Activity} title={t('noEvents')} detail={t('eventStream')} />
-  return (
-    <div className="event-list">
-      {visible.map((event) => (
-        <article key={`${event.id}-${event.time}`} className="event-row">
-          <span className={`event-row__rail event-row__rail--${eventTone(event)}`} aria-hidden="true" />
-          <time dateTime={event.time}>{formatClock(locale, event.time)}</time>
-          <div><strong>{event.kind}</strong><p>{event.text || event.reason || event.state || '—'}</p></div>
-          {event.source && <span className="event-row__source">{event.source}</span>}
-        </article>
-      ))}
-    </div>
-  )
 }
 
 export function DashboardView(props: SharedViewProps) {
@@ -677,19 +660,14 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
 
 export function EventsView({ events, locale, t }: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
-  const [query, setQuery] = useState('')
   const [level, setLevel] = useState<'all' | 'good' | 'warn' | 'bad' | 'info'>('all')
-  const visible = events.filter((event) => {
-    if (level !== 'all' && eventTone(event) !== level) return false
-    const term = query.trim().toLowerCase()
-    return !term || `${event.kind} ${event.text} ${event.source ?? ''}`.toLowerCase().includes(term)
-  })
+  const visible = events.filter((event) => level === 'all' || eventTone(event) === level)
   return (
     <>
       <SectionTitle eyebrow={copy('Unified history', 'تاریخچهٔ یکپارچه')} title={t('events')} detail={copy('One timeline for controller lifecycle, RF, doors, macros, automations and integrated services.', 'یک خط زمانی برای چرخهٔ کنترلر، RF، درها، ماکروها، خودکارسازی‌ها و سرویس‌های یکپارچه.')} action={<StatusBadge tone="info">{events.length} {copy('retained', 'نگه‌داری‌شده')}</StatusBadge>} />
       <Card icon={Activity} iconTone="violet" className="events-page-card" title={copy('Event timeline', 'خط زمانی رویدادها')} eyebrow={copy(`${visible.length} visible`, `${visible.length} مورد نمایان`)}>
-        <div className="event-toolbar"><label className="table-search"><Search size={17} /><input value={query} placeholder={t('search')} onChange={(event) => setQuery(event.target.value)} /></label><Segmented value={level} label={copy('Event severity', 'شدت رویداد')} options={[{ value: 'all', label: copy('All', 'همه') }, { value: 'good', label: copy('Good', 'عادی') }, { value: 'warn', label: copy('Warn', 'هشدار') }, { value: 'bad', label: copy('Fault', 'خطا') }, { value: 'info', label: copy('Info', 'اطلاعات') }]} onChange={setLevel} /></div>
-        <EventList events={visible} locale={locale} t={t} limit={500} />
+        <div className="event-toolbar"><Segmented value={level} label={copy('Event severity', 'شدت رویداد')} options={[{ value: 'all', label: copy('All', 'همه') }, { value: 'good', label: copy('Good', 'عادی') }, { value: 'warn', label: copy('Warn', 'هشدار') }, { value: 'bad', label: copy('Fault', 'خطا') }, { value: 'info', label: copy('Info', 'اطلاعات') }]} onChange={setLevel} /></div>
+        <EventList events={visible} locale={locale} t={t} limit={visible.length} toolbar />
       </Card>
     </>
   )
