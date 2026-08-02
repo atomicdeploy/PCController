@@ -44,6 +44,7 @@ import {
 	parseToolchainPolicy,
 	programmingArtifact,
 	relativeCommandPlanPaths,
+	resolveCanonicalControllerInvocation,
 	sourceControllerInvocation
 } from '../CommandPlan/controller-command.mjs'
 
@@ -419,6 +420,20 @@ test('one canonical policy owns FQBN, board geometry, and artifact routes', asyn
 	assert.equal(programmingArtifact(absolute, 'usbasp'), absolute.completeFlash)
 })
 
+test('controller resolution accepts only the canonical platform artifact', () => {
+	const inspected = []
+	assert.throws(
+		() => resolveCanonicalControllerInvocation(PROJECT_ROOT, 'win32', path => {
+			inspected.push(path)
+			const error = new Error('not found')
+			error.code = 'ENOENT'
+			throw error
+		}),
+		error => error.exitCode === 4 && /Tools[\\/]Controller[\\/]bin[\\/]controller\.exe/.test(error.message)
+	)
+	assert.deepEqual(inspected, [commandPlanPaths(PROJECT_ROOT, 'win32').controller])
+})
+
 test('build plan and execution share exact Controller programming argv construction', () => {
 	const source = sourceControllerInvocation(PROJECT_ROOT)
 	const compile = createControllerProgramCommand({
@@ -573,6 +588,24 @@ test('root wrappers contain no PowerShell policy or invocation', async () => {
 		'utf8'
 	)
 	assert.doesNotMatch(firmwareSource, /powershell|pwsh|build\.ps1|arduino-cli[^\n]*upload/i)
+})
+
+test('all public launchers advertise the shared Node runtime floor', async () => {
+	const launchers = new Map()
+	for (const name of ['build.cmd', 'build.sh', 'firmware.cmd', 'firmware.sh']) {
+		const source = await readFile(join(PROJECT_ROOT, name), 'utf8')
+		launchers.set(name, source)
+		assert.match(source, /Node\.js 22\.12 or newer/, `${name} has a divergent Node requirement`)
+		assert.match(source, /Install Node\.js, then run this command again\./)
+	}
+	const npmFailure = 'npm was not found in PATH; it is required to install the locked build UI dependencies.'
+	assert.ok(launchers.get('build.cmd').includes(npmFailure))
+	assert.ok(launchers.get('build.sh').includes(npmFailure))
+	const firmwareSource = await readFile(
+		join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs'),
+		'utf8'
+	)
+	assert.match(firmwareSource, /MINIMUM_NODE = Object\.freeze\(\{ major: 22, minor: 12 \}\)/)
 })
 
 test('programming is explicit and unsupported direct dependency upload is rejected', () => {
@@ -915,5 +948,34 @@ test('CMD and Bash wrappers emit the same shared plan on Windows', {
 		'firmware.sh', 'upload', '--method', 'usbasp', '--plan-json'
 	], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true })
 	assert.equal(firmwareBash.status, 0, firmwareBash.stderr || firmwareBash.stdout)
-	assert.deepEqual(JSON.parse(firmwareCMD.stdout), JSON.parse(firmwareBash.stdout))
+        assert.deepEqual(JSON.parse(firmwareCMD.stdout), JSON.parse(firmwareBash.stdout))
+})
+
+test('CMD and Bash wrappers expose identical help and failure contracts on Windows', {
+        skip: process.platform !== 'win32'
+}, () => {
+        const env = { ...process.env, NO_COLOR: '1' }
+        const normalized = result => ({
+                status: result.status,
+                stdout: (result.stdout || '').replaceAll('\r\n', '\n'),
+                stderr: (result.stderr || '').replaceAll('\r\n', '\n')
+        })
+        const cases = [
+                { cmd: 'build.cmd', bash: 'build.sh', args: ['--help'], status: 0, text: 'project-owned build' },
+                { cmd: 'build.cmd', bash: 'build.sh', args: ['--invalid-entrypoint-test'], status: 2, text: 'unknown option' },
+                { cmd: 'firmware.cmd', bash: 'firmware.sh', args: ['--help'], status: 0, text: 'firmware studio' },
+                { cmd: 'firmware.cmd', bash: 'firmware.sh', args: ['--invalid-entrypoint-test'], status: 2, text: 'Unknown option' }
+        ]
+        for (const fixture of cases) {
+                const cmd = normalized(spawnSync('cmd.exe', [
+                        '/d', '/s', '/c', [fixture.cmd, ...fixture.args].join(' ')
+                ], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true }))
+                const bash = normalized(spawnSync('bash.exe', [
+                        fixture.bash, ...fixture.args
+                ], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true }))
+                assert.equal(cmd.status, fixture.status, cmd.stderr || cmd.stdout)
+                assert.equal(bash.status, fixture.status, bash.stderr || bash.stdout)
+                assert.deepEqual(cmd, bash, `${fixture.cmd} and ${fixture.bash} drifted`)
+                assert.match(`${cmd.stdout}\n${cmd.stderr}`, new RegExp(fixture.text, 'i'))
+        }
 })

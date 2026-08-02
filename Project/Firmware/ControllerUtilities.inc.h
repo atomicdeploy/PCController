@@ -4,15 +4,15 @@
 // -----------------------------------------------------------------------------
 
 // Tests a 32-bit deadline without breaking across millis() rollover.
-bool __attribute__((noinline)) timeReached(uint32_t now,
+bool __attribute__((noinline)) timeReached(uint32_t at,
                                            uint32_t deadline) {
-  return static_cast<int32_t>(now - deadline) >= 0;
+  return static_cast<int32_t>(at - deadline) >= 0;
 }
 
 // Expires the host's bounded cooperative I2C lease using its 16-bit deadline.
-bool i2cLeaseActive(uint32_t now) {
+bool i2cLeaseActive(uint32_t at) {
   if (i2cLeaseAddress != 0 &&
-      static_cast<int16_t>(static_cast<uint16_t>(now) - i2cLeaseUntil) >= 0) {
+      static_cast<int16_t>(static_cast<uint16_t>(at) - i2cLeaseUntil) >= 0) {
     i2cLeaseAddress = 0;
   }
   return i2cLeaseAddress != 0;
@@ -44,19 +44,19 @@ void loadIlluminationSettings() {
 }
 
 // Copies edited illumination values back to MCU-owned settings and marks them dirty.
-void markIlluminationSettingsChanged(uint32_t now) {
+void markIlluminationSettingsChanged(uint32_t at) {
   ControllerSettings &settings = settingsStore.values();
   settings.illuminationMode = static_cast<uint8_t>(illumination.mode());
   settings.illuminationOnBrightness = illumination.onBrightness();
   settings.illuminationOffBrightness = illumination.offBrightness();
   if (!editTransactionActive) {
-    settingsStore.markDirty(now);
+    settingsStore.markDirty(at);
   }
 }
 
 // Defers EEPROM writes during timing-sensitive RF learning and menu transactions.
-void serviceIlluminationSettings(uint32_t now) {
-  settingsStore.service(now, !learningActive && !editTransactionActive);
+void serviceIlluminationSettings(uint32_t at) {
+  settingsStore.service(at, !learningActive && !editTransactionActive);
 }
 
 // Releases a host overlay and restores the configured local default page.

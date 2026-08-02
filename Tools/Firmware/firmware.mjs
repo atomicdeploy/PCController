@@ -80,7 +80,7 @@ const SOURCE_ROOTS = Object.freeze([
 ])
 const DEFAULT_POLL_MS = 250
 const DEFAULT_DEBOUNCE_MS = 500
-const MINIMUM_NODE = Object.freeze({ major: 20, minor: 19 })
+const MINIMUM_NODE = Object.freeze({ major: 22, minor: 12 })
 
 class FirmwareToolError extends Error {
 	constructor(message, exitCode = EXIT.TOOL, options = {}) {
@@ -830,7 +830,7 @@ export async function sourceDigest(projectRoot) {
 
 async function discoverArtifacts(config, projectRoot) {
 	if (config.hexPath) return [resolveFromProject(config.hexPath, projectRoot)]
-	const output = join(projectRoot, '.build', 'firmware')
+	const output = commandPlanPaths(projectRoot).firmwareOutput
 	let entries
 	try {
 		entries = await fs.readdir(output, { withFileTypes: true })
@@ -876,7 +876,7 @@ async function inspectArtifacts(config, projectRoot, logger) {
 async function writeManifest(config, projectRoot, artifacts, source, logger) {
 	const path = resolveFromProject(
 		config.manifestPath ||
-			join('.build', 'firmware', 'firmware-manifest.json'),
+			commandPlanPaths(projectRoot).manifest,
 		projectRoot
 	)
 	let prior = null

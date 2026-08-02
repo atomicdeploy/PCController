@@ -18,6 +18,8 @@ Board identity, memory geometry, canonical artifact paths, and exact
 Controller argv construction come from the same shared command policy used by
 the root build. The Go host consumes the generated form of the same board
 profile, so FQBN and capacity changes cannot silently diverge by entry point.
+The thin CMD and Bash launchers require the same Node.js 22.12-or-newer runtime
+as the root build and return the underlying tool's exit status unchanged.
 
 ## Safe, offline operations
 

@@ -6,7 +6,7 @@
 Controller-command policy behind both `build.mjs` and the firmware studio.
 The root `build.cmd`/`build.sh` and `firmware.cmd`/`firmware.sh` launchers only
 bootstrap Node and forward argv unchanged, so Windows and Bash produce the
-same plans, canonical artifact routes, and explicit programming
+same plans, failures, canonical artifact routes, and explicit programming
 method selection. None of these launchers invokes PowerShell.
 
 The canonical `Tools/Controller/toolchain-profile.json` owns the FQBN, MCU,

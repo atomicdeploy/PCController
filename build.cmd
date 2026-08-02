@@ -32,8 +32,4 @@ if errorlevel 1 exit /b 1
 :run_build
 node.exe "%~dp0Tools\Build\build.mjs" %*
 set "RESULT=%ERRORLEVEL%"
-if not "%RESULT%"=="0" (
-    echo.
-    echo [ERROR] %PRODUCT_NAME% build exited with code %RESULT%.
-)
 exit /b %RESULT%

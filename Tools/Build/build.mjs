@@ -1698,7 +1698,7 @@ function executionControllerInvocation(controllerPath) {
 }
 
 function readFirmwareManifest() {
-	const path = join(FIRMWARE_OUTPUT, 'firmware-manifest.json')
+	const path = COMMAND_PATHS.manifest
 	if (!existsSync(path)) throw new BuildError(`Controller compile did not publish ${path}`)
 	let manifest
 	try { manifest = JSON.parse(readFileSync(path, 'utf8')) } catch (error) {
@@ -1784,7 +1784,7 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 			humanBytes(manifest.stackBudget.minimumFreeSramBytes)
 		]])
 	}
-	log.success(`Firmware manifest: ${relative(PROJECT_ROOT, join(FIRMWARE_OUTPUT, 'firmware-manifest.json'))}`)
+	log.success(`Firmware manifest: ${relative(PROJECT_ROOT, COMMAND_PATHS.manifest)}`)
 	return manifest
 }
 
@@ -1876,7 +1876,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 	if (options.firmware) manifest = compileFirmware(options, identity, refreshed, '', log)
 	let controllerPath = ''
 	if (options.host) {
-		if (!manifest && existsSync(join(FIRMWARE_OUTPUT, 'firmware-manifest.json'))) manifest = readFirmwareManifest()
+		if (!manifest && existsSync(COMMAND_PATHS.manifest)) manifest = readFirmwareManifest()
 		log.stage('📎', 'Staging the exact validated firmware and safe EEPROM pair for embedding')
 		const embeddedDefaults = stageEmbeddedDefaults(manifest, identity)
 		if (!embeddedDefaults.enabled) log.warning(`Embedded board defaults disabled: ${embeddedDefaults.reason}`)

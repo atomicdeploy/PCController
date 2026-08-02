@@ -168,20 +168,14 @@ export function resolveCanonicalControllerInvocation(
 	platform = process.platform,
 	inspect = statSync
 ) {
-	const preferred = canonicalControllerInvocation(projectRoot, platform)
-	const alternate = canonicalControllerInvocation(
-		projectRoot,
-		platform === 'win32' ? 'linux' : 'win32'
-	)
-	for (const candidate of [preferred, alternate]) {
-		try {
-			if (inspect(candidate.file).isFile()) return candidate
-		} catch {
-			// Only the canonical bin directory and the two platform suffixes are eligible.
-		}
+	const invocation = canonicalControllerInvocation(projectRoot, platform)
+	try {
+		if (inspect(invocation.file).isFile()) return invocation
+	} catch {
+		// Report the exact platform-specific package route below.
 	}
 	throw new CommandPlanError(
-		'Native controller executable was not found; run build.cmd --host-only first',
+		`Native controller executable was not found at ${invocation.file}; run build.cmd --host-only first`,
 		EXIT.TOOL
 	)
 }
