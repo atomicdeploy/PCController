@@ -75,7 +75,8 @@ func EncodeHostMenuDirectory(directory HostMenuDirectory) ([]byte, error) {
 	if err := ValidateHostMenuDirectory(directory); err != nil {
 		return nil, err
 	}
-	payload := make([]byte, 3+entryCount*3)
+	payload := make([]byte, 3+HostMenuMaximumEntries*3)
+	payload = payload[:3+entryCount*3]
 	payload[0], payload[1], payload[2] = directory.Schema, directory.Generation, byte(entryCount)
 	for index, entry := range directory.Entries {
 		offset := 3 + index*3
