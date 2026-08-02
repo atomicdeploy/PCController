@@ -25,25 +25,7 @@ func TestMenuCapabilityFallbackKeepsCanonicalCatalog(t *testing.T) {
 	}
 }
 
-func TestMenuFallbackUsesVerifiedVoltageFirstBuildIdentity(t *testing.T) {
-	pages := menuPagesForHello(native.Hello{
-		IdentitySchema: native.IdentitySchemaCompact,
-		BuildHash:      voltageFirstMenuBuildHash,
-	})
-	voltage, err := ResolveMenuPageIn(pages, "voltage")
-	if err != nil {
-		t.Fatal(err)
-	}
-	status, err := ResolveMenuPageIn(pages, "status")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if voltage.ID != 0 || status.ID != 14 || len(pages) != 15 {
-		t.Fatalf("voltage-first compatibility catalog voltage=%d status=%d pages=%d", voltage.ID, status.ID, len(pages))
-	}
-}
-
-func TestMenuFallbackKeepsUnknownBuildOnCurrentCatalog(t *testing.T) {
+func TestMenuFallbackKeepsEveryBuildOnCurrentSemanticCatalog(t *testing.T) {
 	pages := menuPagesForHello(native.Hello{
 		IdentitySchema: native.IdentitySchemaCompact,
 		BuildHash:      0x01020304,
@@ -53,28 +35,10 @@ func TestMenuFallbackKeepsUnknownBuildOnCurrentCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	if door.ID != 0 || len(pages) != 14 {
-		t.Fatalf("unknown-build fallback door=%d pages=%d", door.ID, len(pages))
+		t.Fatalf("semantic fallback door=%d pages=%d", door.ID, len(pages))
 	}
 	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
-		t.Fatal("unknown build inherited the historical Status page")
-	}
-}
-
-func TestMenuDirectoryCapabilityOverridesHistoricalBuildIdentity(t *testing.T) {
-	pages := menuPagesForHello(native.Hello{
-		IdentitySchema: native.IdentitySchemaCompact,
-		BuildHash:      voltageFirstMenuBuildHash,
-		Capabilities:   native.CapabilityMenuDirectory,
-	})
-	door, err := ResolveMenuPageIn(pages, "door")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if door.ID != 0 || len(pages) != 14 {
-		t.Fatalf("advertised current catalog door=%d pages=%d", door.ID, len(pages))
-	}
-	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
-		t.Fatal("advertised current catalog was replaced by historical IDs")
+		t.Fatal("semantic fallback resurrected the retired Status page")
 	}
 }
 
