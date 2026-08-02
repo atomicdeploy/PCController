@@ -1190,7 +1190,7 @@ export function compilerManifestIdentity(compiler, locked, binarySHA256) {
 	}
 	return {
 		...locked,
-		binary_name: basename(compiler.command),
+		binary_name: basename(String(compiler.command).replaceAll('\\', '/')),
 		binary_sha256: binarySHA256
 	}
 }
