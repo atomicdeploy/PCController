@@ -1,6 +1,8 @@
 package appconfig
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -8,8 +10,11 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/net/http/httpguts"
+
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/integrationproxy"
+	"pccontroller.local/controller/internal/netpolicy"
 )
 
 // Integrations contains PC-host integrations only. None of these values is
@@ -184,14 +189,18 @@ type Discovery struct {
 }
 
 type Webhook struct {
-	Name         string            `json:"name"`
-	Enabled      bool              `json:"enabled"`
-	EventKind    string            `json:"event_kind,omitempty"`
-	URL          string            `json:"url"`
-	Method       string            `json:"method"`
-	Headers      map[string]string `json:"headers,omitempty"`
-	BodyTemplate string            `json:"body_template,omitempty"`
-	TimeoutMS    int               `json:"timeout_ms,omitempty"`
+	Name           string            `json:"name"`
+	Enabled        bool              `json:"enabled"`
+	EventKind      string            `json:"event_kind,omitempty"`
+	URL            string            `json:"url"`
+	Method         string            `json:"method"`
+	Headers        map[string]string `json:"headers,omitempty"`
+	BodyTemplate   string            `json:"body_template,omitempty"`
+	TimeoutMS      int               `json:"timeout_ms,omitempty"`
+	MaxAttempts    int               `json:"max_attempts,omitempty"`
+	RetryInitialMS int               `json:"retry_initial_ms,omitempty"`
+	RetryMaximumMS int               `json:"retry_maximum_ms,omitempty"`
+	SigningSecret  string            `json:"signing_secret,omitempty"`
 }
 
 type WebSocketClient struct {
@@ -271,15 +280,26 @@ func (value Config) validateIntegrations() error {
 		return fmt.Errorf("network discovery requires ipc.allow_remote and authenticated remote access")
 	}
 	names := make(map[string]bool)
+	if len(value.Integrations.OutboundWebhooks) > 64 {
+		return fmt.Errorf("integrations.outbound_webhooks supports at most 64 targets")
+	}
 	for index, webhook := range value.Integrations.OutboundWebhooks {
 		name := strings.ToLower(strings.TrimSpace(webhook.Name))
 		if name == "" || names[name] {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].name is required and must be unique", index)
 		}
+		if webhook.Name != strings.TrimSpace(webhook.Name) || len(webhook.Name) > 96 {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].name must be trimmed and at most 96 characters", index)
+		}
 		names[name] = true
-		parsed, err := url.ParseRequestURI(webhook.URL)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-			return fmt.Errorf("integrations.outbound_webhooks[%d].url must be HTTP(S)", index)
+		if webhook.URL != strings.TrimSpace(webhook.URL) || len(webhook.URL) > 4096 {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].url must be trimmed and at most 4096 characters", index)
+		}
+		if _, err := netpolicy.ParseHTTPURL(webhook.URL, "outbound webhook URL"); err != nil {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].url: %w", index, err)
+		}
+		if webhook.Method != strings.TrimSpace(webhook.Method) {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].method must not contain surrounding whitespace", index)
 		}
 		switch strings.ToUpper(strings.TrimSpace(webhook.Method)) {
 		case "GET", "POST", "PUT", "PATCH", "DELETE":
@@ -288,6 +308,49 @@ func (value Config) validateIntegrations() error {
 		}
 		if webhook.TimeoutMS != 0 && (webhook.TimeoutMS < 100 || webhook.TimeoutMS > 60_000) {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].timeout_ms must be 100..60000", index)
+		}
+		if webhook.MaxAttempts != 0 && (webhook.MaxAttempts < 1 || webhook.MaxAttempts > 20) {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].max_attempts must be 1..20", index)
+		}
+		if webhook.RetryInitialMS != 0 && (webhook.RetryInitialMS < 50 || webhook.RetryInitialMS > 60_000) {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].retry_initial_ms must be 50..60000", index)
+		}
+		if webhook.RetryMaximumMS != 0 && (webhook.RetryMaximumMS < 100 || webhook.RetryMaximumMS > 86_400_000) {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].retry_maximum_ms must be 100..86400000", index)
+		}
+		initial := webhook.RetryInitialMS
+		if initial == 0 {
+			initial = 500
+		}
+		if webhook.RetryMaximumMS != 0 && webhook.RetryMaximumMS < initial {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].retry_maximum_ms must be at least retry_initial_ms", index)
+		}
+		if webhook.SigningSecret != "" && (len(webhook.SigningSecret) < 16 || len(webhook.SigningSecret) > 4096) {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].signing_secret must be 16..4096 bytes when configured", index)
+		}
+		if len(webhook.EventKind) > 128 || strings.ContainsAny(webhook.EventKind, "\r\n") {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].event_kind is invalid", index)
+		}
+		if len(webhook.BodyTemplate) > 256<<10 {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].body_template exceeds 262144 bytes", index)
+		}
+		if err := validateWebhookTemplatePlaceholders(webhook.BodyTemplate); err != nil {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].body_template: %w", index, err)
+		}
+		if err := validateWebhookJSONTemplate(webhook.BodyTemplate, webhook.Headers); err != nil {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].body_template: %w", index, err)
+		}
+		if len(webhook.Headers) > 32 {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].headers supports at most 32 fields", index)
+		}
+		for key, header := range webhook.Headers {
+			if len(key) > 128 || !httpguts.ValidHeaderFieldName(key) ||
+				len(header) > 8192 || !httpguts.ValidHeaderFieldValue(header) {
+				return fmt.Errorf("integrations.outbound_webhooks[%d].headers[%q] is invalid", index, key)
+			}
+			if reservedWebhookHeader(key) {
+				return fmt.Errorf("integrations.outbound_webhooks[%d].headers[%q] is managed by the delivery service", index, key)
+			}
 		}
 	}
 	names = make(map[string]bool)
@@ -553,6 +616,106 @@ func validateIPC(value IPC) error {
 		return fmt.Errorf("ipc.remote_policy.programming requires connection_control")
 	}
 	return nil
+}
+
+func validateWebhookTemplatePlaceholders(value string) error {
+	for cursor := 0; cursor < len(value); {
+		start := strings.Index(value[cursor:], "{{")
+		if start < 0 {
+			return nil
+		}
+		start += cursor
+		end := strings.Index(value[start+2:], "}}")
+		if end < 0 {
+			return errors.New("contains an unterminated placeholder")
+		}
+		end += start + 2
+		switch strings.TrimSpace(value[start+2 : end]) {
+		case "id", "kind", "text", "source", "time", "event", "metadata":
+		default:
+			return fmt.Errorf("contains unsupported placeholder %q", value[start+2:end])
+		}
+		cursor = end + 2
+	}
+	return nil
+}
+
+func validateWebhookJSONTemplate(value string, headers map[string]string) error {
+	if strings.TrimSpace(value) == "" || !webhookBodyDefaultsToJSON(headers) {
+		return nil
+	}
+	rawSamples := map[string][]byte{
+		"id": []byte("1"), "kind": []byte(`"event"`),
+		"text": []byte(`"text"`), "source": []byte(`"source"`),
+		"time":  []byte(`"2026-01-01T00:00:00Z"`),
+		"event": []byte(`{"id":1}`), "metadata": []byte(`{"key":"value"}`),
+	}
+	stringSamples := map[string]string{
+		"id": "1", "kind": "event", "text": "text", "source": "source",
+		"time": "2026-01-01T00:00:00Z", "event": `{"id":1}`,
+		"metadata": `{"key":"value"}`,
+	}
+	var rendered bytes.Buffer
+	inString, escaped := false, false
+	for cursor := 0; cursor < len(value); {
+		if value[cursor] == '{' && cursor+1 < len(value) && value[cursor+1] == '{' {
+			end := strings.Index(value[cursor+2:], "}}")
+			if end < 0 {
+				return errors.New("contains an unterminated placeholder")
+			}
+			end += cursor + 2
+			name := strings.TrimSpace(value[cursor+2 : end])
+			if inString {
+				quoted, _ := json.Marshal(stringSamples[name])
+				rendered.Write(quoted[1 : len(quoted)-1])
+			} else {
+				rendered.Write(rawSamples[name])
+			}
+			cursor = end + 2
+			continue
+		}
+		current := value[cursor]
+		rendered.WriteByte(current)
+		if inString {
+			if escaped {
+				escaped = false
+			} else if current == '\\' {
+				escaped = true
+			} else if current == '"' {
+				inString = false
+			}
+		} else if current == '"' {
+			inString = true
+		}
+		cursor++
+	}
+	if !json.Valid(rendered.Bytes()) {
+		return errors.New("must render as valid JSON for the configured content type")
+	}
+	return nil
+}
+
+func webhookBodyDefaultsToJSON(headers map[string]string) bool {
+	for key, value := range headers {
+		if strings.EqualFold(key, "Content-Type") {
+			return strings.Contains(strings.ToLower(value), "json")
+		}
+	}
+	return true
+}
+
+func reservedWebhookHeader(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "host", "content-length", "transfer-encoding", "connection", "trailer",
+		"upgrade", "proxy-connection", "idempotency-key",
+		"x-pccontroller-delivery-id", "x-pccontroller-correlation-id",
+		"x-pccontroller-attempt-id", "x-pccontroller-attempt",
+		"x-pccontroller-timestamp", "x-pccontroller-nonce",
+		"x-pccontroller-signature":
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneIntegrations(source Integrations) Integrations {
