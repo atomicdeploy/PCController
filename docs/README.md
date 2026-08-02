@@ -15,7 +15,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Build or run PCController for the first time | [Getting Started and Operations](Getting-Started-and-Operations.md) |
 | Understand the physical panel | [Front Panel and Menus](Front-Panel-and-Menus.md) |
 | Configure the host, WebUI, hotkeys, notifications, or integrations | [Host Configuration and Integrations](Host-Configuration-and-Integrations.md) |
-| Integrate through UART, JSON-RPC, REST, WebSocket, Go, or C | [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md) and [C Library API](../Tools/Controller/docs/C-Library-API.md) |
+| Integrate through UART, JSON-RPC, REST, WebSocket, Go, or C | [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md), [machine-readable contracts](../Tools/Controller/api/reference.html), and [C Library API](../Tools/Controller/docs/C-Library-API.md) |
 | Export or host the WebUI from a separate origin | [Portable WebUI](../Tools/Controller/docs/Portable-WebUI.md) |
 | Build, back up, program, or recover a board | [Toolchain and Safe Programming](Toolchain-and-Safe-Programming.md) |
 | Check wiring and electrical assumptions | [Hardware Initialization and Tuning](Hardware-Initialization-and-Tuning.md) |
@@ -36,11 +36,13 @@ host-owned JSON configuration are documented separately on purpose.
    order.
 5. [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md)
    — native framing, opcodes, JSON-RPC, REST, WebSocket, security, and events.
-6. [C Library API](../Tools/Controller/docs/C-Library-API.md) — ABI lifecycle,
+6. [Machine-readable API contracts](../Tools/Controller/api/reference.html) —
+   offline OpenAPI 3.1, AsyncAPI 3.0, and JSON-RPC method/error catalogs.
+7. [C Library API](../Tools/Controller/docs/C-Library-API.md) — ABI lifecycle,
    JSON payload ownership, callbacks, and examples.
-7. [Control-Surface Capability Matrix](../Tools/Controller/docs/Control-Surface-Capability-Matrix.md)
+8. [Control-Surface Capability Matrix](../Tools/Controller/docs/Control-Surface-Capability-Matrix.md)
    — feature reachability across firmware, WebUI, TUI, CLI, IPC, and libraries.
-8. [Portable WebUI](../Tools/Controller/docs/Portable-WebUI.md) — deterministic
+9. [Portable WebUI](../Tools/Controller/docs/Portable-WebUI.md) — deterministic
    export, controller-origin validation, CORS, tokens, and static-host rules.
 
 ## 🔐 Runtime ownership

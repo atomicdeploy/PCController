@@ -1,0 +1,792 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pccontroller.local/schemas/jsonrpc-v1.json",
+  "title": "PCController JSON-RPC 2.0",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/success"
+    },
+    {
+      "$ref": "#/$defs/error"
+    },
+    {
+      "$ref": "#/$defs/notification"
+    }
+  ],
+  "$defs": {
+    "id": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "jsonrpc",
+        "method"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "method": {
+          "enum": [
+            "controller.app.action",
+            "controller.app.page",
+            "controller.artifact.capture",
+            "controller.artifact.fetch",
+            "controller.artifact.list",
+            "controller.artifact.manifest",
+            "controller.artifact.upload",
+            "controller.bridge.call",
+            "controller.bridge.list",
+            "controller.close",
+            "controller.command.catalog",
+            "controller.command.execute",
+            "controller.connect",
+            "controller.device.action",
+            "controller.device.inspect",
+            "controller.device.status",
+            "controller.discovery.check",
+            "controller.discovery.github.release",
+            "controller.discovery.github.workflow",
+            "controller.discovery.local_manifest",
+            "controller.discovery.manifest",
+            "controller.discovery.scan",
+            "controller.discovery.stage",
+            "controller.discovery.status",
+            "controller.event.latest",
+            "controller.event.next",
+            "controller.exit",
+            "controller.front_panel",
+            "controller.front-panel",
+            "controller.history.status",
+            "controller.history.timeline",
+            "controller.host_menu.config",
+            "controller.host_menu.config.get",
+            "controller.host_menu.config.set",
+            "controller.host_menu.configure",
+            "controller.host_menu.content.push",
+            "controller.host_menu.directory.replace",
+            "controller.host_menu.state",
+            "controller.host.facts",
+            "controller.host.facts.catalog",
+            "controller.hotkeys.get",
+            "controller.hotkeys.set",
+            "controller.integrations.local.get",
+            "controller.integrations.local.set",
+            "controller.lcd.presentation.configure",
+            "controller.lcd.presentation.status",
+            "controller.lcd.priority",
+            "controller.lcd.prompt",
+            "controller.menu.current",
+            "controller.menu.jump",
+            "controller.menu.layout.get",
+            "controller.menu.layout.set",
+            "controller.menu.list",
+            "controller.menu.page",
+            "controller.message.send",
+            "controller.open",
+            "controller.os.configure",
+            "controller.os.facts",
+            "controller.os.facts.catalog",
+            "controller.os.key",
+            "controller.os.policy",
+            "controller.os.power",
+            "controller.os.status",
+            "controller.peripherals",
+            "controller.peripherals.get",
+            "controller.peripherals.set",
+            "controller.ping",
+            "controller.port.close",
+            "controller.port.open",
+            "controller.port.reset",
+            "controller.ports",
+            "controller.program_state.get",
+            "controller.program_state.set",
+            "controller.program-state.get",
+            "controller.program-state.set",
+            "controller.pwm.off",
+            "controller.pwm.set",
+            "controller.pwm.values",
+            "controller.quit",
+            "controller.reset",
+            "controller.reset.lines",
+            "controller.restore.flash",
+            "controller.rf.clear",
+            "controller.rf.learn.cancel",
+            "controller.rf.learn.start",
+            "controller.rf.learn.status",
+            "controller.rf.list",
+            "controller.rf.map",
+            "controller.rf.presentation",
+            "controller.rf.remove",
+            "controller.rf.transmit",
+            "controller.session.snapshot",
+            "controller.session.snapshot.last",
+            "controller.snapshot",
+            "controller.status",
+            "controller.subscribe",
+            "controller.system.status",
+            "controller.temperatures",
+            "controller.ui.config",
+            "controller.ui.config.get",
+            "controller.ui.config.set",
+            "controller.unsubscribe",
+            "controller.update.eeprom",
+            "controller.update.firmware",
+            "controller.update.host",
+            "controller.update.status",
+            "controller.virtual_key"
+          ]
+        },
+        "params": {
+          "type": [
+            "object",
+            "array",
+            "null"
+          ]
+        },
+        "auth": {
+          "type": "string",
+          "writeOnly": true
+        }
+      }
+    },
+    "success": {
+      "type": "object",
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "result": true
+      }
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "integer"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "notification": {
+      "type": "object",
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "method": {
+          "enum": [
+            "controller.event",
+            "controller.status",
+            "controller.error",
+            "controller.data"
+          ]
+        },
+        "params": true
+      }
+    }
+  },
+  "x-methods": {
+    "controller.app.action": {
+      "capability": "dynamic",
+      "summary": "app action",
+      "idempotency": "non-idempotent"
+    },
+    "controller.app.page": {
+      "capability": "host_configuration",
+      "summary": "app page",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.artifact.capture": {
+      "capability": "programming",
+      "summary": "artifact capture",
+      "idempotency": "non-idempotent"
+    },
+    "controller.artifact.fetch": {
+      "capability": "programming",
+      "summary": "artifact fetch",
+      "idempotency": "non-idempotent"
+    },
+    "controller.artifact.list": {
+      "capability": "read",
+      "summary": "artifact list",
+      "idempotency": "safe"
+    },
+    "controller.artifact.manifest": {
+      "capability": "read",
+      "summary": "artifact manifest",
+      "idempotency": "safe"
+    },
+    "controller.artifact.upload": {
+      "capability": "programming",
+      "summary": "artifact upload",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.bridge.call": {
+      "capability": "bridge_calls",
+      "summary": "bridge call",
+      "idempotency": "non-idempotent"
+    },
+    "controller.bridge.list": {
+      "capability": "read",
+      "summary": "bridge list",
+      "idempotency": "safe"
+    },
+    "controller.close": {
+      "capability": "connection_control",
+      "summary": "close",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.command.catalog": {
+      "capability": "read",
+      "summary": "Return the machine-readable shared command catalog.",
+      "idempotency": "safe"
+    },
+    "controller.command.execute": {
+      "capability": "dynamic",
+      "summary": "Run a shared command after semantic capability classification.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.connect": {
+      "capability": "connection_control",
+      "summary": "connect",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.device.action": {
+      "capability": "integrations",
+      "summary": "device action",
+      "idempotency": "non-idempotent"
+    },
+    "controller.device.inspect": {
+      "capability": "integrations",
+      "summary": "device inspect",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.device.status": {
+      "capability": "integrations",
+      "summary": "device status",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.discovery.check": {
+      "capability": "read",
+      "summary": "discovery check",
+      "idempotency": "safe"
+    },
+    "controller.discovery.github.release": {
+      "capability": "read",
+      "summary": "discovery github release",
+      "idempotency": "safe"
+    },
+    "controller.discovery.github.workflow": {
+      "capability": "read",
+      "summary": "discovery github workflow",
+      "idempotency": "safe"
+    },
+    "controller.discovery.local_manifest": {
+      "capability": "read",
+      "summary": "discovery local manifest",
+      "idempotency": "safe"
+    },
+    "controller.discovery.manifest": {
+      "capability": "read",
+      "summary": "discovery manifest",
+      "idempotency": "safe"
+    },
+    "controller.discovery.scan": {
+      "capability": "read",
+      "summary": "discovery scan",
+      "idempotency": "safe"
+    },
+    "controller.discovery.stage": {
+      "capability": "programming",
+      "summary": "discovery stage",
+      "idempotency": "non-idempotent"
+    },
+    "controller.discovery.status": {
+      "capability": "read",
+      "summary": "discovery status",
+      "idempotency": "safe"
+    },
+    "controller.event.latest": {
+      "capability": "events",
+      "summary": "event latest",
+      "idempotency": "safe"
+    },
+    "controller.event.next": {
+      "capability": "events",
+      "summary": "Long-poll the next retained event after an event ID.",
+      "idempotency": "safe"
+    },
+    "controller.exit": {
+      "capability": "shutdown",
+      "summary": "exit",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.front_panel": {
+      "capability": "read",
+      "summary": "front panel",
+      "idempotency": "safe"
+    },
+    "controller.front-panel": {
+      "capability": "read",
+      "summary": "front panel",
+      "idempotency": "safe"
+    },
+    "controller.history.status": {
+      "capability": "read",
+      "summary": "history status",
+      "idempotency": "safe"
+    },
+    "controller.history.timeline": {
+      "capability": "read",
+      "summary": "history timeline",
+      "idempotency": "safe"
+    },
+    "controller.host_menu.config": {
+      "capability": "read",
+      "summary": "host menu config",
+      "idempotency": "safe"
+    },
+    "controller.host_menu.config.get": {
+      "capability": "read",
+      "summary": "host menu config get",
+      "idempotency": "safe"
+    },
+    "controller.host_menu.config.set": {
+      "capability": "host_configuration",
+      "summary": "host menu config set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.host_menu.configure": {
+      "capability": "host_configuration",
+      "summary": "host menu configure",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.host_menu.content.push": {
+      "capability": "board_commands",
+      "summary": "host menu content push",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.host_menu.directory.replace": {
+      "capability": "board_commands",
+      "summary": "host menu directory replace",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.host_menu.state": {
+      "capability": "read",
+      "summary": "host menu state",
+      "idempotency": "safe"
+    },
+    "controller.host.facts": {
+      "capability": "read",
+      "summary": "host facts",
+      "idempotency": "safe"
+    },
+    "controller.host.facts.catalog": {
+      "capability": "read",
+      "summary": "host facts catalog",
+      "idempotency": "safe"
+    },
+    "controller.hotkeys.get": {
+      "capability": "read",
+      "summary": "hotkeys get",
+      "idempotency": "safe"
+    },
+    "controller.hotkeys.set": {
+      "capability": "host_configuration",
+      "summary": "hotkeys set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.integrations.local.get": {
+      "capability": "integrations",
+      "summary": "integrations local get",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.integrations.local.set": {
+      "capability": "integrations",
+      "summary": "integrations local set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.lcd.presentation.configure": {
+      "capability": "host_configuration",
+      "summary": "lcd presentation configure",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.lcd.presentation.status": {
+      "capability": "read",
+      "summary": "lcd presentation status",
+      "idempotency": "safe"
+    },
+    "controller.lcd.priority": {
+      "capability": "board_commands",
+      "summary": "lcd priority",
+      "idempotency": "non-idempotent"
+    },
+    "controller.lcd.prompt": {
+      "capability": "board_commands",
+      "summary": "lcd prompt",
+      "idempotency": "non-idempotent"
+    },
+    "controller.menu.current": {
+      "capability": "read",
+      "summary": "menu current",
+      "idempotency": "safe"
+    },
+    "controller.menu.jump": {
+      "capability": "board_commands",
+      "summary": "menu jump",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.menu.layout.get": {
+      "capability": "read",
+      "summary": "menu layout get",
+      "idempotency": "safe"
+    },
+    "controller.menu.layout.set": {
+      "capability": "board_commands",
+      "summary": "menu layout set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.menu.list": {
+      "capability": "read",
+      "summary": "menu list",
+      "idempotency": "safe"
+    },
+    "controller.menu.page": {
+      "capability": "board_commands",
+      "summary": "menu page",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.message.send": {
+      "capability": "messages",
+      "summary": "message send",
+      "idempotency": "non-idempotent"
+    },
+    "controller.open": {
+      "capability": "connection_control",
+      "summary": "open",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.os.configure": {
+      "capability": "host_configuration",
+      "summary": "os configure",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.os.facts": {
+      "capability": "read",
+      "summary": "os facts",
+      "idempotency": "safe"
+    },
+    "controller.os.facts.catalog": {
+      "capability": "read",
+      "summary": "os facts catalog",
+      "idempotency": "safe"
+    },
+    "controller.os.key": {
+      "capability": "virtual_keys",
+      "summary": "os key",
+      "idempotency": "non-idempotent"
+    },
+    "controller.os.policy": {
+      "capability": "read",
+      "summary": "os policy",
+      "idempotency": "safe"
+    },
+    "controller.os.power": {
+      "capability": "power_actions",
+      "summary": "os power",
+      "idempotency": "non-idempotent"
+    },
+    "controller.os.status": {
+      "capability": "read",
+      "summary": "os status",
+      "idempotency": "safe"
+    },
+    "controller.peripherals": {
+      "capability": "read",
+      "summary": "peripherals",
+      "idempotency": "safe"
+    },
+    "controller.peripherals.get": {
+      "capability": "read",
+      "summary": "peripherals get",
+      "idempotency": "safe"
+    },
+    "controller.peripherals.set": {
+      "capability": "host_configuration",
+      "summary": "peripherals set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.ping": {
+      "capability": "read",
+      "summary": "Return service health and protocol versions.",
+      "idempotency": "safe"
+    },
+    "controller.port.close": {
+      "capability": "connection_control",
+      "summary": "port close",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.port.open": {
+      "capability": "connection_control",
+      "summary": "port open",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.port.reset": {
+      "capability": "reset",
+      "summary": "port reset",
+      "idempotency": "non-idempotent"
+    },
+    "controller.ports": {
+      "capability": "read",
+      "summary": "ports",
+      "idempotency": "safe"
+    },
+    "controller.program_state.get": {
+      "capability": "read",
+      "summary": "program state get",
+      "idempotency": "safe"
+    },
+    "controller.program_state.set": {
+      "capability": "board_commands",
+      "summary": "program state set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.program-state.get": {
+      "capability": "read",
+      "summary": "program state get",
+      "idempotency": "safe"
+    },
+    "controller.program-state.set": {
+      "capability": "board_commands",
+      "summary": "program state set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.pwm.off": {
+      "capability": "board_commands",
+      "summary": "pwm off",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.pwm.set": {
+      "capability": "board_commands",
+      "summary": "pwm set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.pwm.values": {
+      "capability": "read",
+      "summary": "pwm values",
+      "idempotency": "safe"
+    },
+    "controller.quit": {
+      "capability": "shutdown",
+      "summary": "quit",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.reset": {
+      "capability": "reset",
+      "summary": "reset",
+      "idempotency": "non-idempotent"
+    },
+    "controller.reset.lines": {
+      "capability": "reset",
+      "summary": "reset lines",
+      "idempotency": "non-idempotent"
+    },
+    "controller.restore.flash": {
+      "capability": "programming",
+      "summary": "Restore a captured flash backup through the guarded restore path.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.rf.clear": {
+      "capability": "board_commands",
+      "summary": "rf clear",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.rf.learn.cancel": {
+      "capability": "board_commands",
+      "summary": "rf learn cancel",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.rf.learn.start": {
+      "capability": "board_commands",
+      "summary": "rf learn start",
+      "idempotency": "non-idempotent"
+    },
+    "controller.rf.learn.status": {
+      "capability": "read",
+      "summary": "rf learn status",
+      "idempotency": "safe"
+    },
+    "controller.rf.list": {
+      "capability": "read",
+      "summary": "rf list",
+      "idempotency": "safe"
+    },
+    "controller.rf.map": {
+      "capability": "board_commands",
+      "summary": "Replace one learned RF mapping and return board readback.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.rf.presentation": {
+      "capability": "read",
+      "summary": "rf presentation",
+      "idempotency": "safe"
+    },
+    "controller.rf.remove": {
+      "capability": "board_commands",
+      "summary": "rf remove",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.rf.transmit": {
+      "capability": "board_commands",
+      "summary": "Transmit one validated RF waveform request.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.session.snapshot": {
+      "capability": "read",
+      "summary": "session snapshot",
+      "idempotency": "safe"
+    },
+    "controller.session.snapshot.last": {
+      "capability": "read",
+      "summary": "session snapshot last",
+      "idempotency": "safe"
+    },
+    "controller.snapshot": {
+      "capability": "read",
+      "summary": "Return the authoritative cached controller snapshot.",
+      "idempotency": "safe"
+    },
+    "controller.status": {
+      "capability": "read",
+      "summary": "status",
+      "idempotency": "safe"
+    },
+    "controller.subscribe": {
+      "capability": "events",
+      "summary": "Subscribe this WebSocket connection to events and/or status.",
+      "idempotency": "safe"
+    },
+    "controller.system.status": {
+      "capability": "read",
+      "summary": "system status",
+      "idempotency": "safe"
+    },
+    "controller.temperatures": {
+      "capability": "read",
+      "summary": "temperatures",
+      "idempotency": "safe"
+    },
+    "controller.ui.config": {
+      "capability": "read",
+      "summary": "ui config",
+      "idempotency": "safe"
+    },
+    "controller.ui.config.get": {
+      "capability": "read",
+      "summary": "ui config get",
+      "idempotency": "safe"
+    },
+    "controller.ui.config.set": {
+      "capability": "host_configuration",
+      "summary": "ui config set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.unsubscribe": {
+      "capability": "events",
+      "summary": "Remove this WebSocket connection's active subscriptions.",
+      "idempotency": "safe"
+    },
+    "controller.update.eeprom": {
+      "capability": "programming",
+      "summary": "update eeprom",
+      "idempotency": "non-idempotent"
+    },
+    "controller.update.firmware": {
+      "capability": "programming",
+      "summary": "update firmware",
+      "idempotency": "non-idempotent"
+    },
+    "controller.update.host": {
+      "capability": "programming",
+      "summary": "update host",
+      "idempotency": "non-idempotent"
+    },
+    "controller.update.status": {
+      "capability": "read",
+      "summary": "update status",
+      "idempotency": "safe"
+    },
+    "controller.virtual_key": {
+      "capability": "virtual_keys",
+      "summary": "virtual key",
+      "idempotency": "idempotent-with-authoritative-readback"
+    }
+  },
+  "x-error-codes": {
+    "-32700": "parse error",
+    "-32600": "invalid request",
+    "-32601": "method not found",
+    "-32602": "invalid params",
+    "-32001": "authentication required",
+    "-32003": "remote capability denied",
+    "-32000": "runtime or device error"
+  }
+}
