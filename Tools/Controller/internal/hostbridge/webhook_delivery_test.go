@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
@@ -70,6 +71,16 @@ func TestWebhookTemplateRejectsExpandedBodiesAboveDeliveryLimit(t *testing.T) {
 		t.Fatal("placeholder expansion above the delivery limit was accepted")
 	} else if !strings.Contains(err.Error(), "rendered webhook body exceeds") {
 		t.Fatalf("unexpected expansion error: %v", err)
+	}
+}
+
+func TestWebhookErrorsAreBoundedAndRemainValidUTF8(t *testing.T) {
+	message := boundedWebhookError(errors.New(strings.Repeat("خطا", maxWebhookErrorBytes)))
+	if len(message) > maxWebhookErrorBytes {
+		t.Fatalf("bounded error length=%d", len(message))
+	}
+	if !utf8.ValidString(message) {
+		t.Fatal("bounded error split a UTF-8 code point")
 	}
 }
 
@@ -149,8 +160,13 @@ func TestWebhookAttemptRejectsRedirectWithoutForwardingSensitiveHeaders(t *testi
 		IdempotencyKey: "idempotency-redirect", Attempts: 1,
 		Event: controller.Event{ID: 9, Kind: "redirect", Text: "do not forward"},
 	}
+	var inheritedRedirectPolicyCalled atomic.Bool
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		inheritedRedirectPolicyCalled.Store(true)
+		return nil
+	}}
 	result := executeWebhookAttempt(
-		context.Background(), &http.Client{}, config, delivery,
+		context.Background(), client, config, delivery,
 		"attempt-redirect", "nonce-redirect", time.Now().UTC(),
 	)
 	if result.Status != http.StatusTemporaryRedirect || result.Retryable || result.Err == nil {
@@ -160,6 +176,31 @@ func TestWebhookAttemptRejectsRedirectWithoutForwardingSensitiveHeaders(t *testi
 	case headers := <-redirectDestinationCalled:
 		t.Fatalf("redirect destination received sensitive webhook headers: %#v", headers)
 	case <-time.After(150 * time.Millisecond):
+	}
+	if inheritedRedirectPolicyCalled.Load() {
+		t.Fatal("configured HTTP client redirect policy escaped the webhook no-redirect rule")
+	}
+}
+
+func TestWebhookAttemptDoesNotExposeTargetURLInTransportErrors(t *testing.T) {
+	const secret = "query-secret-must-not-be-persisted"
+	client := &http.Client{Transport: webhookRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection refused")
+	})}
+	config := appconfig.Webhook{
+		Name: "sanitized", Enabled: true,
+		URL: "https://example.test/hook?token=" + secret, Method: http.MethodPost,
+	}
+	result := executeWebhookAttempt(
+		context.Background(), client, config,
+		webhookDelivery{ID: "delivery-sanitized", IdempotencyKey: "key", Attempts: 1},
+		"attempt", "nonce", time.Now().UTC(),
+	)
+	if result.Err == nil || !result.Retryable {
+		t.Fatalf("transport result=%#v", result)
+	}
+	if strings.Contains(result.Err.Error(), secret) || strings.Contains(result.Err.Error(), config.URL) {
+		t.Fatalf("transport error exposed target URL: %v", result.Err)
 	}
 }
 

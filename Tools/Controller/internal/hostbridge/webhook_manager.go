@@ -12,7 +12,10 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/ipcjson"
 )
+
+var _ ipcjson.WebhookAdminService = (*Manager)(nil)
 
 func (manager *Manager) handleWebhookNotice(notice webhookNotice) {
 	if notice.Kind == "" {
@@ -69,6 +72,84 @@ func (manager *Manager) sendWebhook(config appconfig.Webhook, event controller.E
 	})
 }
 
+func (manager *Manager) WebhookStatus(ctx context.Context) (ipcjson.WebhookQueueStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return ipcjson.WebhookQueueStatus{}, err
+	}
+	if manager.webhooks == nil {
+		return ipcjson.WebhookQueueStatus{}, errors.New("outbound webhook delivery service is unavailable")
+	}
+	return manager.webhooks.Status(), nil
+}
+
+func (manager *Manager) WebhookPending(
+	ctx context.Context,
+	limit int,
+) (ipcjson.WebhookDeliveryList, error) {
+	if err := ctx.Err(); err != nil {
+		return ipcjson.WebhookDeliveryList{}, err
+	}
+	if manager.webhooks == nil {
+		return ipcjson.WebhookDeliveryList{}, errors.New("outbound webhook delivery service is unavailable")
+	}
+	return manager.webhooks.PendingSnapshot(limit), nil
+}
+
+func (manager *Manager) WebhookDead(
+	ctx context.Context,
+	limit int,
+) (ipcjson.WebhookDeliveryList, error) {
+	if err := ctx.Err(); err != nil {
+		return ipcjson.WebhookDeliveryList{}, err
+	}
+	if manager.webhooks == nil {
+		return ipcjson.WebhookDeliveryList{}, errors.New("outbound webhook delivery service is unavailable")
+	}
+	return manager.webhooks.DeadSnapshot(limit), nil
+}
+
+func (manager *Manager) WebhookReplay(
+	ctx context.Context,
+	selector string,
+) (ipcjson.WebhookReplayResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ipcjson.WebhookReplayResult{}, err
+	}
+	if manager.webhooks == nil {
+		return ipcjson.WebhookReplayResult{}, errors.New("outbound webhook delivery service is unavailable")
+	}
+	count, err := manager.webhooks.Replay(selector)
+	if err != nil {
+		return ipcjson.WebhookReplayResult{}, err
+	}
+	manager.handleWebhookNotice(webhookNotice{
+		Kind: "webhook.replayed",
+		Text: fmt.Sprintf("queued %d dead-letter delivery or deliveries for replay", count),
+	})
+	return ipcjson.WebhookReplayResult{Replayed: count, Status: manager.webhooks.Status()}, nil
+}
+
+func (manager *Manager) WebhookClearDead(
+	ctx context.Context,
+	selector string,
+) (ipcjson.WebhookClearResult, error) {
+	if err := ctx.Err(); err != nil {
+		return ipcjson.WebhookClearResult{}, err
+	}
+	if manager.webhooks == nil {
+		return ipcjson.WebhookClearResult{}, errors.New("outbound webhook delivery service is unavailable")
+	}
+	count, err := manager.webhooks.ClearDead(selector)
+	if err != nil {
+		return ipcjson.WebhookClearResult{}, err
+	}
+	manager.handleWebhookNotice(webhookNotice{
+		Kind: "webhook.dead.cleared",
+		Text: fmt.Sprintf("cleared %d dead-letter delivery or deliveries", count),
+	})
+	return ipcjson.WebhookClearResult{Cleared: count, Status: manager.webhooks.Status()}, nil
+}
+
 // WebhookCommand exposes non-secret queue operations to the command engine.
 // The existing controller.command transport makes this available to local CLI,
 // TUI, REST, WebSocket, and Socket.IO callers under their existing auth policy.
@@ -80,7 +161,11 @@ func (manager *Manager) WebhookCommand(ctx context.Context, args []string) (stri
 		return "", errors.New("outbound webhook delivery service is unavailable")
 	}
 	if len(args) == 0 || (len(args) == 1 && strings.EqualFold(args[0], "status")) {
-		return marshalWebhookCommandResult(manager.webhooks.Status())
+		result, err := manager.WebhookStatus(ctx)
+		if err != nil {
+			return "", err
+		}
+		return marshalWebhookCommandResult(result)
 	}
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
 	case "pending":
@@ -88,19 +173,21 @@ func (manager *Manager) WebhookCommand(ctx context.Context, args []string) (stri
 		if err != nil {
 			return "", err
 		}
-		return marshalWebhookCommandResult(map[string]any{
-			"deliveries": manager.webhooks.Pending(limit),
-			"status":     manager.webhooks.Status(),
-		})
+		result, err := manager.WebhookPending(ctx, limit)
+		if err != nil {
+			return "", err
+		}
+		return marshalWebhookCommandResult(result)
 	case "dead":
 		limit, err := webhookCommandLimit(args[1:])
 		if err != nil {
 			return "", err
 		}
-		return marshalWebhookCommandResult(map[string]any{
-			"deliveries": manager.webhooks.Dead(limit),
-			"status":     manager.webhooks.Status(),
-		})
+		result, err := manager.WebhookDead(ctx, limit)
+		if err != nil {
+			return "", err
+		}
+		return marshalWebhookCommandResult(result)
 	case "replay":
 		if len(args) < 2 || len(args) > 3 {
 			return "", errors.New("usage: webhook replay DELIVERY_ID | webhook replay all CONFIRM")
@@ -112,17 +199,11 @@ func (manager *Manager) WebhookCommand(ctx context.Context, args []string) (stri
 		if !strings.EqualFold(selector, "all") && len(args) != 2 {
 			return "", errors.New("a single dead-letter replay does not accept a confirmation argument")
 		}
-		count, err := manager.webhooks.Replay(selector)
+		result, err := manager.WebhookReplay(ctx, selector)
 		if err != nil {
 			return "", err
 		}
-		manager.handleWebhookNotice(webhookNotice{
-			Kind: "webhook.replayed",
-			Text: fmt.Sprintf("queued %d dead-letter delivery or deliveries for replay", count),
-		})
-		return marshalWebhookCommandResult(map[string]any{
-			"replayed": count, "status": manager.webhooks.Status(),
-		})
+		return marshalWebhookCommandResult(result)
 	case "clear":
 		if len(args) < 3 || len(args) > 4 || !strings.EqualFold(args[1], "dead") {
 			return "", errors.New("usage: webhook clear dead DELIVERY_ID | webhook clear dead all CONFIRM")
@@ -134,17 +215,11 @@ func (manager *Manager) WebhookCommand(ctx context.Context, args []string) (stri
 		if !strings.EqualFold(selector, "all") && len(args) != 3 {
 			return "", errors.New("a single dead-letter clear does not accept a confirmation argument")
 		}
-		count, err := manager.webhooks.ClearDead(selector)
+		result, err := manager.WebhookClearDead(ctx, selector)
 		if err != nil {
 			return "", err
 		}
-		manager.handleWebhookNotice(webhookNotice{
-			Kind: "webhook.dead.cleared",
-			Text: fmt.Sprintf("cleared %d dead-letter delivery or deliveries", count),
-		})
-		return marshalWebhookCommandResult(map[string]any{
-			"cleared": count, "status": manager.webhooks.Status(),
-		})
+		return marshalWebhookCommandResult(result)
 	default:
 		return "", errors.New("usage: webhook status | pending [LIMIT] | dead [LIMIT] | replay DELIVERY_ID|all CONFIRM | clear dead DELIVERY_ID|all CONFIRM")
 	}
