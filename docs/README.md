@@ -49,7 +49,7 @@ host-owned JSON configuration are documented separately on purpose.
 
 | Domain | Authoritative storage and owner |
 |---|---|
-| Board behavior | MCU EEPROM owns board settings, learned RF records and mappings, and reset telemetry; richer automations remain host-owned. |
+| Board behavior | MCU EEPROM owns board settings, learned RF records and mappings, reset telemetry, and a reserved transactional automation region. The accepted 32 KiB image keeps the measured board-automation profile disabled; active rich automations remain host-owned. |
 | Host behavior | The host configuration owns device-selection preferences, UI/network settings, hotkeys, notifications, webhooks, history, scripts, and host automation. |
 
 Changing host configuration does not rewrite MCU EEPROM unless an explicit

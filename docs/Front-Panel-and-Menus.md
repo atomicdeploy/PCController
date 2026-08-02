@@ -1008,18 +1008,21 @@ The current logical EEPROM map is:
 | 64-307 | 244 | RF header plus 20 learned records |
 | 308-319 | 12 | Unallocated |
 | 320-703 | 384 | 64-slot reset-count journal |
-| 704-1023 | 320 | Unallocated |
+| 704-857 | 154 | Board automation bank A (initialized in the safe-default image; runtime profile disabled by default) |
+| 858-1011 | 154 | Board automation bank B (transactional inactive bank; runtime profile disabled by default) |
+| 1012-1023 | 12 | Unallocated |
 
-That leaves 364 logically unallocated bytes. The generated safe-default EEPROM
+That leaves 56 logically unallocated bytes. The generated safe-default EEPROM
 image still covers all 1,024 bytes so a programming/restore operation is
-deterministic; that does not make the erased regions owned records.
+deterministic; it initializes bank A as an empty committed automation table even
+though the accepted firmware does not advertise or execute that profile.
 
 The following requested behavior is **not** EEPROM-backed in this candidate:
 
 | Area | What exists | What is still missing |
 |---|---|---|
 | Configurable audio cues | Global Silent plus door/relay enable bits; door and relay tones are fixed in flash | Persistent cue IDs or note/frequency/duration descriptors for door-open, door-close, relay-on, and relay-off |
-| Board automation | Twenty RF records map codes directly to Key, Menu, Relay, Side, or PWM actions; host automations can consume events | A generic board rule table for door, BT Audio, relay, host-loss, temperature, RF transmit, macro start, or other opcode actions |
+| Board automation | Twenty RF records map codes directly to Key, Menu, Relay, Side, or PWM actions; host automations can consume events; the capacity-gated firmware profile and host tools implement a transactional 12-rule table and bounded action executor | The accepted 32 KiB image disables the profile after its measured build exceeded the fixed application boundary by 2,448 bytes; physical persistence/execution and a front-panel editor remain unavailable |
 | Status RGB | One Ready color index and one global brightness are persistent; a host may send a volatile override | Independently persistent colors/effects/timing for door, BT Audio, RF, Running, warning, HOT, fault, and transitions |
 
 Structured host-menu pull is also not implemented by the AVR: the current

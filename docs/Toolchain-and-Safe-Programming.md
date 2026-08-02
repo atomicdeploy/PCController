@@ -372,7 +372,9 @@ are also SCK/MOSI.
 MCU EEPROM and PC host configuration remain separate:
 
 - the board owns its settings, learned RF records/mappings, and reset journal;
-  the current image has no generic EEPROM automation table;
+  the safe-default image also initializes the dual-bank automation region, but
+  the accepted 32 KiB firmware keeps the measured automation profile disabled
+  and does not advertise board CRUD/execution;
 - the host owns port preferences, UI/network configuration, histories,
   scripts, and tool paths;
 - a programming settings snapshot is a backup artifact, not a host setting,
