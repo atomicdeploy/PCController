@@ -96,3 +96,25 @@ func TestStoreRejectsInvalidAndMismatchedArtifacts(t *testing.T) {
 		t.Fatalf("credential-shaped metadata was accepted: %v", err)
 	}
 }
+
+func TestStoreRejectsTransportPathsOutsideItsOpenedRoot(t *testing.T) {
+	store := newTestStore(t)
+	descriptor, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindFirmware, Name: "safe.hex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Get(Kind("../firmware"), descriptor.SHA256); err == nil {
+		t.Fatal("traversing artifact kind accepted")
+	}
+	if _, err := store.Get(KindFirmware, "../"+descriptor.SHA256); err == nil {
+		t.Fatal("traversing artifact digest accepted")
+	}
+	if err := store.writeJSONAtomic("../escape.json", map[string]bool{"unsafe": true}); err == nil {
+		t.Fatal("metadata write outside opened store root accepted")
+	}
+	if _, err := os.Stat(filepath.Join(store.root, "..", "escape.json")); !os.IsNotExist(err) {
+		t.Fatalf("metadata escaped store root: %v", err)
+	}
+}

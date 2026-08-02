@@ -1,6 +1,7 @@
 package artifacts
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -29,11 +30,10 @@ const (
 var descriptorMetadataKey = regexp.MustCompile(`^[a-z][a-z0-9_.-]*$`)
 
 type Store struct {
-	root        string
-	blobs       string
-	metadata    string
-	currentPath string
-	mu          sync.Mutex
+	root     string
+	blobs    string
+	metadata string
+	mu       sync.Mutex
 }
 
 type storedMetadata struct {
@@ -54,7 +54,7 @@ func NewStore(root string) (*Store, error) {
 	}
 	store := &Store{
 		root: root, blobs: filepath.Join(root, "blobs", "sha256"),
-		metadata: filepath.Join(root, "metadata"), currentPath: filepath.Join(root, "current.json"),
+		metadata: filepath.Join(root, "metadata"),
 	}
 	for _, directory := range []string{store.root, store.blobs, store.metadata} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -219,14 +219,24 @@ func validateDescriptorMetadata(values map[string]string) (map[string]string, er
 }
 
 func (store *Store) Get(kind Kind, digest string) (Descriptor, error) {
-	if !ValidKind(kind) {
-		return Descriptor{}, fmt.Errorf("unsupported artifact kind %q", kind)
+	kind, err := canonicalStoreKind(kind)
+	if err != nil {
+		return Descriptor{}, err
 	}
 	normalized, err := normalizeSHA256(digest)
 	if err != nil {
 		return Descriptor{}, err
 	}
-	content, err := os.ReadFile(store.metadataPath(kind, normalized))
+	metadataPath, err := metadataRelativePath(kind, normalized)
+	if err != nil {
+		return Descriptor{}, err
+	}
+	root, err := os.OpenRoot(store.root)
+	if err != nil {
+		return Descriptor{}, err
+	}
+	defer root.Close()
+	content, err := root.ReadFile(metadataPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return Descriptor{}, os.ErrNotExist
@@ -267,18 +277,32 @@ func (store *Store) Open(kind Kind, digest string) (Descriptor, *os.File, error)
 func (store *Store) List(kind *Kind) ([]Descriptor, error) {
 	kinds := supportedKinds
 	if kind != nil {
-		if !ValidKind(*kind) {
-			return nil, fmt.Errorf("unsupported artifact kind %q", *kind)
+		canonical, err := canonicalStoreKind(*kind)
+		if err != nil {
+			return nil, err
 		}
-		kinds = []Kind{*kind}
+		kinds = []Kind{canonical}
 	}
+	root, err := os.OpenRoot(store.root)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
 	var result []Descriptor
 	for _, candidate := range kinds {
-		directory := filepath.Join(store.metadata, string(candidate))
-		entries, err := os.ReadDir(directory)
+		directory, pathErr := metadataRelativeDirectory(candidate)
+		if pathErr != nil {
+			return nil, pathErr
+		}
+		directoryFile, err := root.Open(directory)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
+		if err != nil {
+			return nil, err
+		}
+		entries, err := directoryFile.ReadDir(-1)
+		_ = directoryFile.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -314,7 +338,7 @@ func (store *Store) SetCurrent(kind Kind, digest string) error {
 	}
 	state.Schema = metadataSchema
 	state.Kinds[kind] = digest
-	return writeJSONAtomic(store.currentPath, state)
+	return store.writeJSONAtomic("current.json", state)
 }
 
 func (store *Store) Current(kind Kind) (*Descriptor, error) {
@@ -337,16 +361,32 @@ func (store *Store) Current(kind Kind) (*Descriptor, error) {
 }
 
 func (store *Store) writeMetadata(descriptor Descriptor, blob string) error {
-	directory := filepath.Join(store.metadata, string(descriptor.Kind))
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	kind, err := canonicalStoreKind(descriptor.Kind)
+	if err != nil {
+		return err
+	}
+	descriptor.Kind = kind
+	directory, err := metadataRelativeDirectory(kind)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(store.root)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if err := root.MkdirAll(directory, 0o700); err != nil {
 		return err
 	}
 	relative, err := filepath.Rel(store.root, blob)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return errors.New("artifact blob is outside the store")
 	}
-	path := store.metadataPath(descriptor.Kind, descriptor.SHA256)
-	if existing, readErr := os.ReadFile(path); readErr == nil {
+	path, err := metadataRelativePath(descriptor.Kind, descriptor.SHA256)
+	if err != nil {
+		return err
+	}
+	if existing, readErr := root.ReadFile(path); readErr == nil {
 		var metadata storedMetadata
 		if strictJSON(existing, &metadata) == nil && metadata.Descriptor.SHA256 == descriptor.SHA256 {
 			// Refresh descriptive metadata without creating another content blob.
@@ -366,11 +406,46 @@ func (store *Store) writeMetadata(descriptor Descriptor, blob string) error {
 		}
 	}
 	descriptor.LocalPath = ""
-	return writeJSONAtomic(path, storedMetadata{Schema: metadataSchema, Descriptor: descriptor, Blob: relative})
+	return store.writeJSONAtomic(path, storedMetadata{Schema: metadataSchema, Descriptor: descriptor, Blob: relative})
 }
 
-func (store *Store) metadataPath(kind Kind, digest string) string {
-	return filepath.Join(store.metadata, string(kind), digest+".json")
+func canonicalStoreKind(kind Kind) (Kind, error) {
+	switch kind {
+	case KindFirmware:
+		return KindFirmware, nil
+	case KindEEPROM:
+		return KindEEPROM, nil
+	case KindFlashBackup:
+		return KindFlashBackup, nil
+	case KindHostExecutable:
+		return KindHostExecutable, nil
+	default:
+		return "", fmt.Errorf("unsupported artifact kind %q", kind)
+	}
+}
+
+func metadataRelativeDirectory(kind Kind) (string, error) {
+	canonical, err := canonicalStoreKind(kind)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join("metadata", string(canonical)), nil
+}
+
+func metadataRelativePath(kind Kind, digest string) (string, error) {
+	directory, err := metadataRelativeDirectory(kind)
+	if err != nil {
+		return "", err
+	}
+	normalized, err := normalizeSHA256(digest)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(directory, normalized+".json")
+	if !filepath.IsLocal(path) {
+		return "", errors.New("artifact metadata path escapes the store")
+	}
+	return path, nil
 }
 
 func (store *Store) resolveBlob(relative string) (string, error) {
@@ -394,7 +469,12 @@ func (store *Store) isCurrent(kind Kind, digest string) bool {
 }
 
 func (store *Store) loadCurrentLocked() (currentState, error) {
-	content, err := os.ReadFile(store.currentPath)
+	root, err := os.OpenRoot(store.root)
+	if err != nil {
+		return currentState{}, err
+	}
+	defer root.Close()
+	content, err := root.ReadFile("current.json")
 	if errors.Is(err, os.ErrNotExist) {
 		return currentState{Schema: metadataSchema, Kinds: make(map[Kind]string)}, nil
 	}
@@ -524,9 +604,37 @@ func strictJSON(content []byte, destination any) error {
 	return nil
 }
 
+func (store *Store) writeJSONAtomic(path string, value any) error {
+	if !filepath.IsLocal(path) {
+		return errors.New("artifact metadata path escapes the store")
+	}
+	root, err := os.OpenRoot(store.root)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return writeRootJSONAtomic(root, path, value)
+}
+
+// writeJSONAtomic retains the package-level helper for trusted absolute state
+// files while constraining the final operation to an opened parent directory.
 func writeJSONAtomic(path string, value any) error {
+	path = filepath.Clean(path)
+	filename := filepath.Base(path)
+	if filename == "." || filename == string(filepath.Separator) {
+		return errors.New("JSON destination must name a file")
+	}
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return writeRootJSONAtomic(root, filename, value)
+}
+
+func writeRootJSONAtomic(root *os.Root, path string, value any) error {
 	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	if err := root.MkdirAll(directory, 0o700); err != nil {
 		return err
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
@@ -534,16 +642,11 @@ func writeJSONAtomic(path string, value any) error {
 		return err
 	}
 	content = append(content, '\n')
-	temporary, err := os.CreateTemp(directory, ".metadata-*.tmp")
+	temporaryPath, temporary, err := createRootTemp(root, directory)
 	if err != nil {
 		return err
 	}
-	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return err
-	}
+	defer root.Remove(temporaryPath)
 	if _, err := temporary.Write(content); err != nil {
 		_ = temporary.Close()
 		return err
@@ -555,13 +658,31 @@ func writeJSONAtomic(path string, value any) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		_ = os.Remove(path)
-		if retryErr := os.Rename(temporaryPath, path); retryErr != nil {
+	if err := root.Rename(temporaryPath, path); err != nil {
+		_ = root.Remove(path)
+		if retryErr := root.Rename(temporaryPath, path); retryErr != nil {
 			return retryErr
 		}
 	}
 	return nil
+}
+
+func createRootTemp(root *os.Root, directory string) (string, *os.File, error) {
+	for range 100 {
+		var nonce [16]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return "", nil, err
+		}
+		path := filepath.Join(directory, ".metadata-"+hex.EncodeToString(nonce[:])+".tmp")
+		file, err := root.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			return path, file, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return "", nil, err
+		}
+	}
+	return "", nil, errors.New("cannot allocate artifact metadata staging file")
 }
 
 func publicDescriptor(value Descriptor) Descriptor {

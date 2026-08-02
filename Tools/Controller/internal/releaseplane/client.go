@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"golang.org/x/net/http/httpproxy"
+	"pccontroller.local/controller/internal/netpolicy"
 )
 
 const (
@@ -59,10 +60,11 @@ func (client *Client) get(ctx context.Context, rawURL, token, accept string) (*h
 	if client == nil || client.http == nil {
 		return nil, errors.New("release discovery HTTP client is unavailable")
 	}
-	if err := validateRemoteURL(rawURL); err != nil {
+	parsed, err := netpolicy.ParseHTTPURL(rawURL, "update URL")
+	if err != nil {
 		return nil, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -106,17 +108,7 @@ func decodeSingleJSON(decoder *json.Decoder, destination any) error {
 }
 
 func validateRemoteURL(raw string) error {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return errors.New("update URL must be an absolute HTTP(S) URL")
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return errors.New("update URL must use HTTP or HTTPS")
-	}
-	if parsed.User != nil || parsed.Fragment != "" {
-		return errors.New("update URL cannot contain user information or a fragment")
-	}
-	return nil
+	return netpolicy.ValidateHTTPURL(raw, "update URL")
 }
 
 func safeURL(raw string) string {

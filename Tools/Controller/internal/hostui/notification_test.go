@@ -15,7 +15,7 @@ func TestToastXMLIsEscapedAndActionsAreProtocolActivated(t *testing.T) {
 		t.Fatal(err)
 	}
 	value := string(payload)
-	for _, expected := range []string{"Door &lt;OPEN&gt;", "R5 &amp; R6", `activationType="protocol"`, "pccontroller://page/outputs"} {
+	for _, expected := range []string{"Door &lt;OPEN&gt;", "R5 &amp; R6", `<toast launch="pccontroller://page/events" activationType="protocol">`, "pccontroller://page/outputs"} {
 		if !strings.Contains(value, expected) {
 			t.Errorf("toast XML missing %q: %s", expected, value)
 		}

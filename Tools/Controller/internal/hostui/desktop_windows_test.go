@@ -3,12 +3,11 @@
 package hostui
 
 import (
-	"encoding/base64"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-	"unicode/utf16"
 )
 
 type recordingRegistry map[string]string
@@ -106,56 +105,52 @@ func TestRemoveOwnedRegistryIntegrationIsIdempotentWhenAbsent(t *testing.T) {
 	}
 }
 
-func TestShortcutRemovalScriptChecksTargetArgumentsAndReparsePoints(t *testing.T) {
-	encoded := encodedShortcutRemovalScript(
-		`C:\Program Files\PCController\controller.exe`,
-		`X:\Fixture\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\PCController.lnk`,
-	)
-	data, err := base64.StdEncoding.DecodeString(encoded)
+func TestNativeShortcutRoundTripAndOwnership(t *testing.T) {
+	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data)%2 != 0 {
-		t.Fatalf("encoded script has odd UTF-16LE byte count %d", len(data))
+	shortcut := filepath.Join(t.TempDir(), "Controller Tests.lnk")
+	if err := createWindowsShortcut(executable, shortcut, "Tests.Controller", "Controller Tests"); err != nil {
+		t.Fatal(err)
 	}
-	units := make([]uint16, len(data)/2)
-	for index := range units {
-		units[index] = uint16(data[index*2]) | uint16(data[index*2+1])<<8
+	link, err := inspectWindowsShortcut(shortcut)
+	if err != nil {
+		t.Fatal(err)
 	}
-	script := string(utf16.Decode(units))
-	for _, guard := range []string{"ReparsePoint", "$link.TargetPath", "OrdinalIgnoreCase", ".Arguments", "-eq 'web'", "-eq 'tui'", "Remove-Item -LiteralPath"} {
-		if !strings.Contains(script, guard) {
-			t.Errorf("removal script does not contain ownership guard %q", guard)
-		}
+	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" {
+		t.Fatalf("shortcut=%+v executable=%q", link, executable)
 	}
-	if strings.Contains(script, "Remove-Item -Recurse") {
-		t.Fatal("removal script unexpectedly uses recursive deletion")
+	if !shortcutOwnedBy(executable, link) {
+		t.Fatalf("shortcut should be owned: %+v", link)
+	}
+	appID, err := shortcutAppUserModelID(shortcut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appID != "Tests.Controller" {
+		t.Fatalf("shortcut AppUserModelID=%q", appID)
+	}
+	if shortcutOwnedBy(`C:\Other\controller.exe`, link) {
+		t.Fatalf("foreign executable unexpectedly owns shortcut: %+v", link)
 	}
 }
 
-func TestShortcutStartsBrowserFirstHost(t *testing.T) {
-	encoded := encodedShortcutScript(
-		`C:\Program Files\PCController\controller.exe`,
-		`X:\Fixture\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\PCController.lnk`,
-		"Test.PCController",
-	)
-	data, err := base64.StdEncoding.DecodeString(encoded)
+func TestRemoveOwnedShortcutUsesNativeInspection(t *testing.T) {
+	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(data)%2 != 0 {
-		t.Fatalf("encoded script has odd UTF-16LE byte count %d", len(data))
+	shortcut := filepath.Join(t.TempDir(), "Controller Tests.lnk")
+	if err := createWindowsShortcut(executable, shortcut, "Tests.Controller", "Controller Tests"); err != nil {
+		t.Fatal(err)
 	}
-	units := make([]uint16, len(data)/2)
-	for index := range units {
-		units[index] = uint16(data[index*2]) | uint16(data[index*2+1])<<8
+	removed, preserved, err := removeOwnedShortcut(executable, shortcut)
+	if err != nil || !removed || preserved {
+		t.Fatalf("remove=(removed=%t preserved=%t error=%v)", removed, preserved, err)
 	}
-	script := string(utf16.Decode(units))
-	if !strings.Contains(script, "$link.Arguments='web'") {
-		t.Fatalf("shortcut does not start the Web host: %s", script)
-	}
-	if strings.Contains(script, "$link.Arguments='tui'") {
-		t.Fatal("new shortcut still starts the TUI")
+	if _, err := os.Stat(shortcut); !os.IsNotExist(err) {
+		t.Fatalf("shortcut remains after native removal: %v", err)
 	}
 }
 

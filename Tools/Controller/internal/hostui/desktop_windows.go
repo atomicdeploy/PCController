@@ -3,14 +3,12 @@
 package hostui
 
 import (
-	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
+	"syscall"
 
 	"golang.org/x/sys/windows/registry"
 
@@ -86,12 +84,7 @@ func ensurePlatformDesktopIntegration(
 		status.LastError = err.Error()
 		return status, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if err := runPowerShell(
-		ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
-		"-EncodedCommand", encodedShortcutScript(executable, shortcut, appID),
-	); err != nil {
+	if err := createWindowsShortcut(executable, shortcut, appID, displayName); err != nil {
 		status.Shortcut = shortcut
 		status.LastError = err.Error()
 		return status, err
@@ -211,16 +204,18 @@ func removeOwnedShortcut(executable, shortcut string) (removed, preserved bool, 
 	if statErr != nil {
 		return false, false, fmt.Errorf("inspect Start Menu shortcut: %w", statErr)
 	}
-	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 || isWindowsReparsePoint(info) {
 		return false, true, nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if runErr := runPowerShell(
-		ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
-		"-EncodedCommand", encodedShortcutRemovalScript(executable, shortcut),
-	); runErr != nil {
-		return false, false, fmt.Errorf("remove owned Start Menu shortcut: %w", runErr)
+	link, inspectErr := inspectWindowsShortcut(shortcut)
+	if inspectErr != nil {
+		return false, false, fmt.Errorf("inspect Start-menu shortcut ownership: %w", inspectErr)
+	}
+	if !shortcutOwnedBy(executable, link) {
+		return false, true, nil
+	}
+	if removeErr := os.Remove(shortcut); removeErr != nil {
+		return false, false, fmt.Errorf("remove owned Start-menu shortcut: %w", removeErr)
 	}
 	_, statErr = os.Lstat(shortcut)
 	if isNotExist(statErr) {
@@ -230,6 +225,11 @@ func removeOwnedShortcut(executable, shortcut string) (removed, preserved bool, 
 		return false, false, fmt.Errorf("verify Start Menu shortcut removal: %w", statErr)
 	}
 	return false, true, nil
+}
+
+func isWindowsReparsePoint(info os.FileInfo) bool {
+	attributes, ok := info.Sys().(*syscall.Win32FileAttributeData)
+	return ok && attributes.FileAttributes&syscall.FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
 func deleteCurrentUserRegistryTree(path string) error {
@@ -313,61 +313,4 @@ func protocolCommand(executable string) string {
 
 func quoteWindowsArgument(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
-}
-
-func encodedShortcutScript(executable, shortcut, appID string) string {
-	encode := func(value string) string {
-		return base64.StdEncoding.EncodeToString([]byte(value))
-	}
-	script := fmt.Sprintf(`
-$ErrorActionPreference='Stop'
-$exe=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))
-$shortcut=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))
-$appId=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))
-$shell=New-Object -ComObject WScript.Shell
-$link=$shell.CreateShortcut($shortcut)
-$link.TargetPath=$exe
-$link.Arguments='web'
-$link.WorkingDirectory=[IO.Path]::GetDirectoryName($exe)
-$link.IconLocation=$exe+',0'
-$link.Save()
-$code=@'
-using System;
-using System.Runtime.InteropServices;
-[StructLayout(LayoutKind.Sequential, Pack=4)] public struct PROPERTYKEY { public Guid fmtid; public uint pid; }
-[StructLayout(LayoutKind.Explicit)] public struct PROPVARIANT { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr pointerValue; }
-[ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-interface IPropertyStore { uint GetCount(out uint cProps); uint GetAt(uint iProp, out PROPERTYKEY pkey); uint GetValue(ref PROPERTYKEY key, out PROPVARIANT pv); uint SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv); uint Commit(); }
-public static class ShortcutAumid {
- [DllImport("shell32.dll", CharSet=CharSet.Unicode, PreserveSig=true)] static extern uint SHGetPropertyStoreFromParsingName(string path, IntPtr bind, uint flags, ref Guid iid, [Out, MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
- [DllImport("propsys.dll", CharSet=CharSet.Unicode)] static extern uint PSGetPropertyKeyFromName(string name, out PROPERTYKEY key);
- public static void Set(string path,string appId) { Guid iid=new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"); IPropertyStore store; if(SHGetPropertyStoreFromParsingName(path,IntPtr.Zero,2,ref iid,out store)!=0) throw new Exception("open shortcut property store"); PROPERTYKEY key; if(PSGetPropertyKeyFromName("System.AppUserModel.ID",out key)!=0) throw new Exception("resolve AppUserModelID property"); PROPVARIANT pv=new PROPVARIANT(); pv.vt=31; pv.pointerValue=Marshal.StringToCoTaskMemUni(appId); try { if(store.SetValue(ref key,ref pv)!=0 || store.Commit()!=0) throw new Exception("write shortcut AppUserModelID"); } finally { Marshal.FreeCoTaskMem(pv.pointerValue); Marshal.ReleaseComObject(store); } }
-}
-'@
-Add-Type -TypeDefinition $code
-[ShortcutAumid]::Set($shortcut,$appId)
-`, encode(executable), encode(shortcut), encode(appID))
-	return base64.StdEncoding.EncodeToString(utf16LE(script))
-}
-
-func encodedShortcutRemovalScript(executable, shortcut string) string {
-	encode := func(value string) string {
-		return base64.StdEncoding.EncodeToString([]byte(value))
-	}
-	script := fmt.Sprintf(`
-$ErrorActionPreference='Stop'
-$exe=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))
-$shortcut=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('%s'))
-if (-not (Test-Path -LiteralPath $shortcut -PathType Leaf)) { exit 0 }
-$item=Get-Item -LiteralPath $shortcut -Force
-if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 0 }
-$shell=New-Object -ComObject WScript.Shell
-$link=$shell.CreateShortcut($shortcut)
-$target=[IO.Path]::GetFullPath([string]$link.TargetPath)
-$expected=[IO.Path]::GetFullPath($exe)
-$arguments=([string]$link.Arguments).Trim()
-$owned=[String]::Equals($target,$expected,[StringComparison]::OrdinalIgnoreCase) -and ($arguments -eq 'web' -or $arguments -eq 'tui')
-if ($owned) { Remove-Item -LiteralPath $shortcut -Force }
-`, encode(executable), encode(shortcut))
-	return base64.StdEncoding.EncodeToString(utf16LE(script))
 }
