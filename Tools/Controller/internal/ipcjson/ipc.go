@@ -2450,10 +2450,11 @@ func serveInboundWebhook(
 		if json.Unmarshal(body, &typed) == nil &&
 			(typed.Text != "" || typed.Line1 != "" || typed.Line2 != "") {
 			message = typed
-			if message.Metadata == nil {
-				message.Metadata = make(map[string]string)
-			}
+			message.Metadata = sanitizeInboundWebhookMetadata(message.Metadata, 46)
 		}
+	}
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]string)
 	}
 	query := request.URL.Query()
 	for _, field := range []struct {
@@ -2471,25 +2472,12 @@ func serveInboundWebhook(
 	}
 	message.Metadata["http.method"] = request.Method
 	message.Metadata["http.path"] = request.URL.Path
-	metadataCount := 2
-	for key, values := range query {
-		if metadataCount >= 48 {
-			break
-		}
-		message.Metadata["query."+key] = truncateText(strings.Join(values, ","), 1024)
-		metadataCount++
-	}
-	for key, values := range request.Header {
-		if metadataCount >= 64 || strings.EqualFold(key, "Authorization") ||
-			strings.EqualFold(key, "X-PCController-Token") {
-			continue
-		}
-		message.Metadata["header."+strings.ToLower(key)] =
-			truncateText(strings.Join(values, ","), 1024)
-		metadataCount++
-	}
+	appendInboundWebhookQueryMetadata(message.Metadata, query, 48)
+	appendInboundWebhookHeaderMetadata(message.Metadata, request.Header, 64)
 	if message.Text == "" {
-		message.Text = request.Method + " " + request.URL.RequestURI()
+		// RequestURI includes the raw query string and can therefore contain
+		// credentials. The routed path is sufficient provenance.
+		message.Text = request.Method + " " + request.URL.Path
 	}
 	if strings.TrimSpace(message.Source) == "" {
 		message.Source = "webhook"
