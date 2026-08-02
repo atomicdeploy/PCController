@@ -21,9 +21,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/ipcjson"
 	"pccontroller.local/controller/internal/netpolicy"
 )
 
@@ -41,6 +43,7 @@ const (
 	maxWebhookDeliveryBytes     = 256 << 10
 	maxWebhookQueueStateBytes   = 16 << 20
 	maxWebhookResponseBodyBytes = 64 << 10
+	maxWebhookErrorBytes        = 2 << 10
 )
 
 var (
@@ -93,41 +96,8 @@ type webhookQueueState struct {
 	Counters  webhookQueueCounters       `json:"counters"`
 }
 
-// WebhookQueueStatus is safe to expose over the existing command/RPC surface.
-// It intentionally excludes endpoint URLs, headers, bodies, and secrets.
-type WebhookQueueStatus struct {
-	Pending       int        `json:"pending"`
-	Dead          int        `json:"dead"`
-	Completed     int        `json:"completed_dedupe_records"`
-	Enqueued      uint64     `json:"enqueued"`
-	Delivered     uint64     `json:"delivered"`
-	Retried       uint64     `json:"retried"`
-	DeadLettered  uint64     `json:"dead_lettered"`
-	Dropped       uint64     `json:"dropped"`
-	Duplicates    uint64     `json:"duplicates"`
-	DeadDiscarded uint64     `json:"dead_discarded"`
-	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
-	InFlight      int        `json:"in_flight"`
-	Closing       bool       `json:"closing"`
-}
-
-// WebhookDeliveryView is a bounded, non-secret inspection record.
-type WebhookDeliveryView struct {
-	ID             string     `json:"id"`
-	CorrelationID  string     `json:"correlation_id"`
-	IdempotencyKey string     `json:"idempotency_key"`
-	Target         string     `json:"target"`
-	EventID        uint64     `json:"event_id"`
-	EventKind      string     `json:"event_kind"`
-	CreatedAt      time.Time  `json:"created_at"`
-	NextAttemptAt  *time.Time `json:"next_attempt_at,omitempty"`
-	LastAttemptAt  *time.Time `json:"last_attempt_at,omitempty"`
-	LastAttemptID  string     `json:"last_attempt_id,omitempty"`
-	Attempts       int        `json:"attempts"`
-	MaxAttempts    int        `json:"max_attempts"`
-	LastStatus     int        `json:"last_status,omitempty"`
-	LastError      string     `json:"last_error,omitempty"`
-}
+type WebhookQueueStatus = ipcjson.WebhookQueueStatus
+type WebhookDeliveryView = ipcjson.WebhookDeliveryView
 
 type webhookNotice struct {
 	Kind string
@@ -337,6 +307,10 @@ func (queue *webhookDeliveryQueue) Enqueue(
 func (queue *webhookDeliveryQueue) Status() WebhookQueueStatus {
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
+	return queue.statusLocked()
+}
+
+func (queue *webhookDeliveryQueue) statusLocked() WebhookQueueStatus {
 	result := WebhookQueueStatus{
 		Pending: len(queue.state.Pending), Dead: len(queue.state.Dead),
 		Completed: len(queue.state.Completed), Enqueued: queue.state.Counters.Enqueued,
@@ -354,6 +328,24 @@ func (queue *webhookDeliveryQueue) Status() WebhookQueueStatus {
 		}
 	}
 	return result
+}
+
+func (queue *webhookDeliveryQueue) PendingSnapshot(limit int) ipcjson.WebhookDeliveryList {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	return ipcjson.WebhookDeliveryList{
+		Deliveries: webhookDeliveryViews(queue.state.Pending, limit, true),
+		Status:     queue.statusLocked(),
+	}
+}
+
+func (queue *webhookDeliveryQueue) DeadSnapshot(limit int) ipcjson.WebhookDeliveryList {
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	return ipcjson.WebhookDeliveryList{
+		Deliveries: webhookDeliveryViews(queue.state.Dead, limit, false),
+		Status:     queue.statusLocked(),
+	}
 }
 
 func (queue *webhookDeliveryQueue) Pending(limit int) []WebhookDeliveryView {
@@ -618,7 +610,8 @@ func (queue *webhookDeliveryQueue) finishAttempt(
 	delivery := queue.state.Pending[index]
 	delivery.LastStatus = result.Status
 	if result.Err != nil {
-		delivery.LastError = result.Err.Error()
+		delivery.LastError = boundedWebhookError(result.Err)
+		result.Err = errors.New(delivery.LastError)
 	}
 	notice := webhookNotice{}
 	if result.Err == nil && result.Status >= 200 && result.Status < 300 {
@@ -673,6 +666,25 @@ func (queue *webhookDeliveryQueue) finishAttempt(
 	queue.signal()
 }
 
+func boundedWebhookError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return boundedWebhookMessage(err.Error())
+}
+
+func boundedWebhookMessage(value string) string {
+	message := strings.ToValidUTF8(value, "?")
+	if len(message) > maxWebhookErrorBytes {
+		limit := maxWebhookErrorBytes
+		for limit > 0 && !utf8.RuneStart(message[limit]) {
+			limit--
+		}
+		message = message[:limit]
+	}
+	return message
+}
+
 func executeWebhookAttempt(
 	ctx context.Context,
 	client *http.Client,
@@ -715,9 +727,13 @@ func executeWebhookAttempt(
 	// must never inherit authentication, signature, correlation, attempt, or
 	// idempotency headers. Treat the first 3xx response as the target's final
 	// response; operators can configure the canonical destination explicitly.
-	redirectSafeClient := *client
-	redirectSafeClient.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
+	redirectSafeClient := &http.Client{
+		Transport: client.Transport,
+		Jar:       client.Jar,
+		Timeout:   client.Timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 	response, err := redirectSafeClient.Do(request)
 	if err != nil {
@@ -1042,7 +1058,7 @@ func webhookDeliveryViews(
 			EventID: delivery.Event.ID, EventKind: delivery.Event.Kind,
 			CreatedAt: delivery.CreatedAt, LastAttemptID: delivery.LastAttemptID,
 			Attempts: delivery.Attempts, MaxAttempts: delivery.MaxAttempts,
-			LastStatus: delivery.LastStatus, LastError: delivery.LastError,
+			LastStatus: delivery.LastStatus, LastError: boundedWebhookMessage(delivery.LastError),
 		}
 		if pending {
 			next := delivery.NextAttemptAt
@@ -1123,6 +1139,12 @@ func (queue *webhookDeliveryQueue) load() error {
 	if len(state.Pending) > queue.maxPending || len(state.Dead) > queue.maxDead ||
 		len(state.Completed) > queue.maxCompleted {
 		return errors.New("outbound webhook queue exceeds configured record bounds")
+	}
+	for index := range state.Pending {
+		state.Pending[index].LastError = boundedWebhookMessage(state.Pending[index].LastError)
+	}
+	for index := range state.Dead {
+		state.Dead[index].LastError = boundedWebhookMessage(state.Dead[index].LastError)
 	}
 	seenIDs := make(map[string]bool)
 	seenKeys := make(map[string]bool)
