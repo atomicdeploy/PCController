@@ -941,9 +941,11 @@ wrap after 255 and do not preserve pathological higher totals.
 Normal completion preserves the final outputs. Cancel defaults to a safe stop
 of all relays and PWM 0-10; a deliberate Keep Outputs flag is available for a
 host-requested cancel. If an active playback loses host traffic for more than
-five seconds, firmware cancels and safe-stops regardless. Macro name,
-elapsed-time, and step presentation remain host-owned; a macro may also include
-ordinary display steps.
+five seconds, firmware cancels and safe-stops regardless. The host mirrors the
+macro ID/name, current step, elapsed time, planned duration, and terminal state
+to TM1637 and the optional 2x16 LCD through a latest-only presentation queue.
+That queue cannot delay the authoritative MCU execution or refill loop; a macro
+may also include ordinary display steps.
 
 Exact flash/SRAM use comes from the final candidate manifest. Host workflow,
 physical display presentation, timing, and live behavior require
