@@ -6,9 +6,9 @@ import { resolveRepository } from "./repository-context.mjs";
 import {
   actionPinFindings,
   isGeneratedOrBinaryPath,
-  isOrdinaryTextFile,
   markdownAnchors,
   privacyFindings,
+  readOrdinaryTextFile,
 } from "./repository-policy.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -196,12 +196,12 @@ for (const relativePath of sourceFiles) {
   const absolutePath = resolve(root, relativePath);
   if (
     !existsSync(absolutePath) ||
-    isGeneratedOrBinaryPath(normalized) ||
-    !isOrdinaryTextFile(absolutePath)
+    isGeneratedOrBinaryPath(normalized)
   ) {
     continue;
   }
-  const content = readFileSync(absolutePath, "utf8");
+  const content = readOrdinaryTextFile(absolutePath);
+  if (content === null) continue;
   for (const finding of privacyFindings(normalized, content, { repository })) {
     if (
       finding.kind === "unreviewed repository reference" &&
