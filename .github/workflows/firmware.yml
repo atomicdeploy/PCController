@@ -109,6 +109,16 @@ jobs:
       - name: "🔎 Recheck Intel HEX records and boundaries"
         run: ./firmware.sh check
 
+      - name: "🧬 Prove early-init Urboot reset-cause capture"
+        shell: bash
+        run: |
+          set -euo pipefail
+          elf="$(find .build/firmware -maxdepth 1 -type f -name '*.elf' -print -quit)"
+          objdump="$(find "$HOME/.arduino15/packages" -type f -name 'avr-objdump' -print | sort -V | tail -n 1)"
+          test -n "$elf" && test -n "$objdump"
+          node .github/scripts/assert-avr-reset-capture.mjs \
+            "$elf" "$objdump" .build/firmware/reset-capture-disassembly.txt
+
       - name: "📚 Record dependencies"
         run: |
           arduino-cli version > .build/firmware/dependencies.txt
@@ -142,7 +152,7 @@ jobs:
           find .build/firmware -maxdepth 1 -type f \
             \( -name '*.hex' -o -name '*.eep' -o -name 'firmware-manifest.json' \
                -o -name 'dependencies.txt' -o -name '*-dependencies.json' \
-               -o -name 'resolved-*.json' \) \
+               -o -name 'resolved-*.json' -o -name 'reset-capture-disassembly.txt' \) \
             -exec cp '{}' "${staging}/" ';'
           test "$(find "${staging}" -maxdepth 1 -type f -name '*.hex' | wc -l)" -eq 3
           test "$(find "${staging}" -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
