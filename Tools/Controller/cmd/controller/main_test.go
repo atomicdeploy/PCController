@@ -24,23 +24,23 @@ import (
 func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
 	for _, test := range []struct {
 		name string
-		args func(string, string) []string
+		args func(string, string, string) []string
 	}{
 		{
 			name: "program compile",
-			args: func(project, output string) []string {
+			args: func(project, output, cli string) []string {
 				return []string{
 					"program", "--method", "compile", "--sketch", project,
-					"--output-dir", output, "--dry-run",
+					"--output-dir", output, "--toolchain-cli", cli, "--dry-run",
 				}
 			},
 		},
 		{
 			name: "toolchain compile alias",
-			args: func(project, output string) []string {
+			args: func(project, output, cli string) []string {
 				return []string{
 					"toolchain", "compile", project,
-					"--output-dir", output, "--dry-run",
+					"--output-dir", output, "--toolchain-cli", cli, "--dry-run",
 				}
 			},
 		},
@@ -51,7 +51,11 @@ func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
 			if err := os.WriteFile(path, invalid, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			args := append([]string{"--config", path}, test.args(findProjectRoot(), t.TempDir())...)
+			cli := filepath.Join(t.TempDir(), "arduino-cli")
+			if err := os.WriteFile(cli, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			args := append([]string{"--config", path}, test.args(findProjectRoot(), t.TempDir(), cli)...)
 			var stdout, stderr bytes.Buffer
 			err := run(args, &stdout, &stderr)
 			if err != nil {

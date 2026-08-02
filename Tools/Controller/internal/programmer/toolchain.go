@@ -225,7 +225,7 @@ func BootstrapToolchain(
 		}
 		cliPath = filepath.Join(
 			installRoot, profile.CLI.Dependency, profile.CLI.Version,
-			goos+"-"+goarch, executableName(profile.CLI.Dependency),
+			goos+"-"+goarch, toolchainExecutableName(profile.CLI.Dependency, goos),
 		)
 		if options.DryRun {
 			fmt.Fprintf(output, "dry-run: verify/download %s %s for %s/%s to %s\n",
@@ -583,7 +583,8 @@ func extractCLIExecutable(archivePath, format, destination string) error {
 		}
 		defer reader.Close()
 		for _, entry := range reader.File {
-			if strings.EqualFold(filepath.Base(entry.Name), executableName("arduino-cli")) && !entry.FileInfo().IsDir() {
+			name := filepath.Base(entry.Name)
+			if (strings.EqualFold(name, "arduino-cli") || strings.EqualFold(name, "arduino-cli.exe")) && !entry.FileInfo().IsDir() {
 				source, err := entry.Open()
 				if err != nil {
 					return err
@@ -621,6 +622,13 @@ func extractCLIExecutable(archivePath, format, destination string) error {
 		return fmt.Errorf("unsupported toolchain archive %q", format)
 	}
 	return errors.New("firmware CLI executable is absent from verified archive")
+}
+
+func toolchainExecutableName(name, goos string) string {
+	if strings.EqualFold(goos, "windows") && filepath.Ext(name) == "" {
+		return name + ".exe"
+	}
+	return name
 }
 
 func copyExecutable(source io.Reader, destination string) error {
