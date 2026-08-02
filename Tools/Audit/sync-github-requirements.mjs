@@ -165,7 +165,7 @@ const R = [
       'Apply the same decision to local keys, learned RF, host commands, macros, and automations.',
       'Keep stop/off available even when starts are denied, and enforce the final gate atomically in firmware.',
       'Expose the policy through board menus, host UI, CLI, APIs, and backup decoding.',
-    ], 'The persisted four-mode predicate now gates every firmware motion-start path atomically: physical menu, RF side/direct-relay mappings, UART side/direct-test commands, and buffered macros. The complete eight-case policy/door matrix, unconditional stops, unaffected R5-R8, retained-direction stop, and denied persistence restore are source-tested. Host settings/TUI/CLI/API/backup decoding exist; a compact on-board policy editor and physical load acceptance remain open.'),
+    ], 'The persisted four-mode predicate now gates every firmware motion-start path atomically: physical menu, RF side/direct-relay mappings, UART side/direct-test commands, and buffered macros. The complete eight-case policy/door matrix, unconditional stops, unaffected R5-R8, retained-direction stop, and denied persistence restore are source-tested. Board Settings now includes the compact SAFE editor with immediate fail-safe preview and atomic Save/Discard; host settings/TUI/CLI/API/backup decoding also exist. Physical loaded-motion acceptance remains open.'),
   requirement('relay-user-controls-break-setting', 3, 'Expose R5-R8 behaviors and configurable break timing across all control surfaces', 'open',
     ['🧩 firmware', '🖥️ host', '🛡️ safety', '🚧 in progress'], 'Relays and motion safety', [
       'Support R5-R8 toggle and momentary push behavior locally and remotely.',
