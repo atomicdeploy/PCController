@@ -1,5 +1,5 @@
 name: "✨ Release · Attested Packages"
-run-name: "✨ PCController ${{ inputs.tag || github.ref_name }} · exact source ${{ github.sha }}"
+run-name: "✨ PCController ${{ inputs.tag || github.ref_name }} · ${{ github.sha }}"
 
 on:
   push:
@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   preflight:
-    name: "🔒 Pin release tag to the exact source"
+    name: "🔒 Validate release source"
     runs-on: ubuntu-24.04
     timeout-minutes: 5
 
@@ -60,7 +60,7 @@ jobs:
               exit 1
             fi
           fi
-          echo "Release $RELEASE_TAG is pinned to exact source $GITHUB_SHA"
+          echo "Release $RELEASE_TAG uses source $GITHUB_SHA"
 
   firmware:
     name: "⚡ Release Firmware"
@@ -69,8 +69,8 @@ jobs:
     with:
       version: ${{ inputs.tag || github.ref_name }}
 
-  controller:
-    name: "🖥️ Release Controller · Five targets"
+  host:
+    name: "🖥️ Release Host · Five targets"
     needs: preflight
     uses: ./.github/workflows/host.yml
     with:
@@ -84,8 +84,8 @@ jobs:
       version: ${{ inputs.tag || github.ref_name }}
 
   draft-or-publish:
-    name: "🛡️ Attest · Curate · Release"
-    needs: [firmware, controller, virtual-board]
+    name: "🛡️ Attest · Package · Release"
+    needs: [firmware, host, virtual-board]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -94,7 +94,7 @@ jobs:
       PCCONTROLLER_RELEASE_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || github.event_name != 'workflow_dispatch' && contains(github.ref_name, '-') }}
 
     steps:
-      - name: "📥 Check out the exact built source"
+      - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: "🟢 Install Node.js"
@@ -102,14 +102,14 @@ jobs:
         with:
           node-version: "24"
 
-      - name: "⬇️ Download this run's eleven build artifacts"
+      - name: "⬇️ Download build artifacts"
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: PCController-*
           path: release-downloads
           merge-multiple: true
 
-      - name: "📦 Stage friendly release assets and direct firmware images"
+      - name: "📦 Stage release assets and firmware images"
         run: |
           set -euo pipefail
           mkdir -p release-assets
@@ -149,7 +149,7 @@ jobs:
           test "$archive_count" -eq 11
           test "$checksum_count" -eq 11
 
-      - name: "🔐 Build complete SHA-256 manifest"
+      - name: "🔐 Build SHA-256 manifest"
         run: |
           set -euo pipefail
           (
@@ -161,7 +161,7 @@ jobs:
           test "$(wc -l < release-assets/SHA256SUMS.txt | tr -d ' ')" -eq 13
           (cd release-assets && sha256sum --check --strict SHA256SUMS.txt)
 
-      - name: "✨ Generate deterministic release showcase"
+      - name: "✨ Generate release notes"
         id: showcase
         run: >-
           node .github/scripts/release-showcase.mjs
@@ -169,7 +169,7 @@ jobs:
           "$RELEASE_TAG"
           "$GITHUB_SHA"
 
-      - name: "🛡️ Attest every published release asset"
+      - name: "🛡️ Attest release assets"
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
         with:
           subject-path: |
@@ -181,7 +181,7 @@ jobs:
             release-assets/*-Dependencies.json
             release-assets/release-manifest.json
 
-      - name: "🧽 Resolve case-folded asset collisions on an existing draft"
+      - name: "🧽 Resolve draft asset collisions"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -229,7 +229,7 @@ jobs:
           done < case-folded-collisions.tsv
           echo "Removed ${removed} case-folded draft collision(s)."
 
-      - name: "🚀 Create or idempotently repair GitHub release"
+      - name: "🚀 Create or update GitHub release"
         id: release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
@@ -252,7 +252,7 @@ jobs:
             release-assets/*-Dependencies.json
             release-assets/release-manifest.json
 
-      - name: "🧹 Prune only superseded generated assets from the completed draft"
+      - name: "🧹 Prune old draft assets"
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_ID: ${{ steps.release.outputs.id }}
@@ -297,7 +297,7 @@ jobs:
             --paginate --jq '.[] | [.id, .name] | @tsv')
           echo "Removed ${removed} superseded generated asset(s) after the replacement set was safely uploaded."
 
-      - name: "✨ Publish final release link"
+      - name: "✨ Publish release link"
         run: |
           {
             echo

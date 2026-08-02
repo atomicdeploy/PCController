@@ -11,6 +11,8 @@ import {
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { usageProgress as progress } from "./usage-progress.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const [kind, ...arguments_] = process.argv.slice(2);
 
@@ -32,10 +34,6 @@ const bar = (value, width = 50) => {
   const bounded = Math.min(100, Math.max(0, Number(value || 0)));
   const filled = Math.round((bounded / 100) * width);
   return `${"█".repeat(filled)}${"░".repeat(width - filled)} ${bounded.toFixed(2)}%`;
-};
-const progress = (value, label) => {
-  const rounded = Math.min(100, Math.max(0, Math.floor(Number(value || 0))));
-  return `![${escape(label)} ${rounded}%](https://geps.dev/progress/${rounded}?dangerColor=dc3545&warningColor=ffc107&successColor=28a745)`;
 };
 const directoryBytes = (path) => {
   if (!existsSync(path)) return 0;
@@ -84,9 +82,9 @@ const emit = (markdown) => {
 const readJson = (path) => JSON.parse(readFileSync(absolute(path), "utf8"));
 const friendlyRole = (role) =>
   ({
-    application: "Application image (normal Urclock upload)",
+    application: "Application image",
     eeprom: "EEPROM image",
-    "flash+bootloader": "Full flash + Urboot (ISP recovery only)",
+    "flash+bootloader": "Full flash + Urboot",
   })[role] || role;
 const provenanceCommand = (archiveName) =>
   releaseBuild
@@ -157,21 +155,21 @@ if (kind === "firmware") {
   const headroom = Number(application?.freeBytes || 0);
   const aliasNote =
     String(process.env.PCCONTROLLER_SHOWCASE_ALIAS || "").toLowerCase() === "true"
-      ? `\n> Compatibility preserved: the flagship ${code("Build")} workflow also publishes this curated flat payload under the exact inspiration artifact name ${code("firmware")}.\n`
+      ? `\n> Also uploaded as ${code("firmware")}.\n`
       : "";
   const flashNotice = headroom < 256
-    ? `> [!WARNING]\n> **Only ${number(headroom)} application-flash bytes remain.** The build passed the exact ${number(application?.capacityBytes)}-byte Urboot boundary, but new AVR features require deliberate budget trade-offs.`
+    ? `> [!WARNING]\n> **${number(headroom)} application-flash bytes free.**`
     : `> [!NOTE]\n> ${number(headroom)} application-flash bytes remain.`;
 
   emit(`
-# ✅ PCController AVR build successful
+# ✅ AVR firmware built
 
-The real ATmega328P firmware compiled, its Intel HEX records and address boundaries were revalidated, the conservative SRAM/stack budget passed, and the downloadable package was hashed.
+ATmega328P firmware passed compilation, Intel HEX, flash, SRAM/stack, package, and SHA-256 validation.
 
 ${artifactCta(artifactUrl, "PCController Firmware · ATmega328P")}
 ${aliasNote}
 
-## 📦 Project information
+## 📦 Build
 
 | Property | Value |
 |---|---|
@@ -193,7 +191,7 @@ ${code(bar(flashPercent))}
 
 | Used | Capacity | Free | Result |
 |---:|---:|---:|---|
-| **${number(application?.dataBytes)} B** | ${number(application?.capacityBytes)} B | **${number(application?.freeBytes)} B** | ✅ exact Intel HEX boundary passed |
+| **${number(application?.dataBytes)} B** | ${number(application?.capacityBytes)} B | **${number(application?.freeBytes)} B** | ✅ Intel HEX check passed |
 
 ## 🧠 SRAM and stack headroom
 
@@ -208,7 +206,7 @@ SRAM  ${bar(peakPercent)}
 ~~~
 
 <details>
-<summary><strong>🔬 Detailed SRAM enforcement evidence</strong></summary>
+<summary><strong>🔬 SRAM details</strong></summary>
 
 The release gate reserves ${number(stack.rfInterruptAllowanceBytes)} B for the RF interrupt path and enforces at least ${number(stack.minimumFreeSramBytes)} B free at the modeled peak. Analyzer: ${code(stack.analyzer)}.
 
@@ -223,7 +221,7 @@ ${stackPath}
 </details>
 
 <details>
-<summary><strong>⚙️ Reproducible build configuration</strong></summary>
+<summary><strong>⚙️ Build configuration</strong></summary>
 
 | Setting | Resolved value |
 |---|---|
@@ -239,15 +237,13 @@ ${stackPath}
 </details>
 
 <details>
-<summary><strong>📚 Declared and resolved dependencies</strong></summary>
+<summary><strong>📚 Dependencies</strong></summary>
 
 | Dependency | Version | Resolution |
 |---|---:|---|
 | [Arduino CLI](https://github.com/arduino/arduino-cli/releases) | ${code(dependencies.arduinoCli?.version || "recorded in artifact")} | official archive, pinned SHA-256 |
 | [MiniCore](https://github.com/MCUdude/MiniCore) | ${code(dependencies.miniCore?.version || "recorded in artifact")} | canonical package index |
 ${libraries}
-
-The artifact also contains the raw core/library inventory so declared-versus-resolved drift is reviewable rather than hidden.
 
 </details>
 
@@ -257,19 +253,19 @@ The artifact also contains the raw core/library inventory so declared-versus-res
 |---|---|---:|---:|---:|---|
 ${artifacts}
 
-## 🗜️ Package compression
+## 🗜️ Package size
 
 ${progress(compressedPercent, "Archive size versus staged files")}
 
 The ${code(archive.name)} archive is ${bytes(archive.bytes)} versus ${bytes(rawBytes)} of staged build output (${compressedPercent.toFixed(2)}%). Its SHA-256 is ${code(archive.sha256)}.
 
-## ✅ Integrity and provenance
+## ✅ Integrity
 
 ${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
 
 ${verificationBlock("Linux", archive.name)}
 
-> Normal deployment uses the application image through guarded Urclock programming. The full-flash image is for explicit ISP recovery only; CI compilation is not physical-hardware acceptance.
+> Urclock uses the application image. ISP recovery uses the full-flash image. Hardware validation is separate.
 
 ---
 
@@ -283,11 +279,11 @@ Built by [PCController Actions](${runUrl}) · source [${shortCommit}](${commitUr
     .map((artifact) => `| ${code(artifact.path)} | ${bytes(artifact.bytes)} | ${code(artifact.sha256)} |`)
     .join("\n");
   emit(`
-# ✅ PCController Controller build successful
+# ✅ Host built
 
-Native tests, Go vet, executable identity checks, and the C ABI smoke test passed for **${escape(target)}**.
+Tests, Go vet, identity, and C ABI checks passed for **${escape(target)}**.
 
-${artifactCta(artifactUrl, `Controller · ${target}`)}
+${artifactCta(artifactUrl, `Host · ${target}`)}
 
 ## 🖥️ Package information
 
@@ -319,7 +315,7 @@ ${artifacts}
 
 </details>
 
-## ✅ Integrity and provenance
+## ✅ Integrity
 
 ${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
 
@@ -327,16 +323,16 @@ ${verificationBlock(target, archive.name)}
 
 ---
 
-[Download](${artifactUrl || runUrl}) · [source ${shortCommit}](${commitUrl}) · [Controller guide](${repositoryUrl}/blob/${commit}/Tools/Controller/README.md)
+[Download](${artifactUrl || runUrl}) · [source ${shortCommit}](${commitUrl}) · [Host guide](${repositoryUrl}/blob/${commit}/Tools/Controller/README.md)
 `);
 } else if (kind === "simulator") {
   const [target, binaryPath, archivePath, artifactUrl = "", artifactDigest = ""] = arguments_;
   const binary = absolute(binaryPath);
   const archive = archiveDetails(archivePath);
   emit(`
-# ✅ PCController Virtual Board build successful
+# ✅ Virtual Board built
 
-The native simulator compiled and its protocol, hardware-model, UART, and smoke tests passed for **${escape(target)}**.
+Protocol, hardware-model, UART, and smoke tests passed for **${escape(target)}**.
 
 ${artifactCta(artifactUrl, `Virtual Board · ${target}`)}
 
@@ -353,7 +349,7 @@ ${artifactCta(artifactUrl, `Virtual Board · ${target}`)}
 | Source | [${code(shortCommit)}](${commitUrl}) |
 | Workflow | [${escape(workflowName)}](${runUrl}) |
 
-## ✅ Integrity and provenance
+## ✅ Integrity
 
 ${artifactDigest ? `GitHub artifact digest: ${code(artifactDigest)}.` : "GitHub artifact digest is recorded by the upload step."}
 
@@ -390,7 +386,7 @@ ${verificationBlock(target, archive.name)}
         (item) => item.name === "PCController-Firmware-ATmega328P",
       );
     }
-    for (const product of ["Controller", "VirtualBoard"]) {
+    for (const product of ["Host", "VirtualBoard"]) {
       const prefix = `PCController-${product}-`;
       const match = uploadedArtifacts.find(
         (item) =>
@@ -423,9 +419,9 @@ ${verificationBlock(target, archive.name)}
     stack.sramCapacityBytes,
   );
   emit(`
-# ✅ PCController build successful
+# ✅ Build complete
 
-The AVR firmware plus every Controller and Virtual Board target completed in one flagship build. This is the cross-platform catalog for source [${code(shortCommit)}](${commitUrl}).
+Firmware, Host, and Virtual Board builds completed for source [${code(shortCommit)}](${commitUrl}).
 
 > [**⬇️ Open all ${files.length} downloadable packages**](${runUrl}#artifacts)
 
@@ -441,13 +437,13 @@ Flash ${bar(flashPercent)}
 SRAM  ${bar(peakPercent)}
 ~~~
 
-The AVR result is its own hardware target—not a Linux binary. Both normal-upload and full-flash recovery images, resolved dependencies, and the firmware manifest are in the flat ${code("PCController-Firmware-ATmega328P")} artifact. The identical flat payload is also published as ${code("firmware")}, preserving the ASA0002E inspiration's exact workflow/job/artifact naming contract: ${code("Build")} / ${code("build")} / ${code("firmware")}.
+Firmware: ${code("PCController-Firmware-ATmega328P")} (${code("firmware")} alias). Includes application and recovery images, dependencies, and manifest.
 
 ## 🌍 Native platform coverage
 
 | Product | Linux x64 | Linux ARM64 | Windows x64 | macOS Intel | macOS Apple Silicon |
 |---|:---:|:---:|:---:|:---:|:---:|
-| Controller | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Host | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Virtual Board | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## 📦 Build catalog
@@ -456,15 +452,15 @@ The AVR result is its own hardware target—not a Linux binary. Both normal-uplo
 |---|---:|---|
 ${rows}
 
-## 🛡️ What this run proved
+## 🛡️ Validation
 
-- ✅ Real MiniCore ATmega328P compilation and strict Intel HEX validation
+- ✅ MiniCore ATmega328P compilation and strict Intel HEX validation
 - ✅ Static and modeled peak-SRAM enforcement with stack-path evidence
 - ✅ Native Go tests, vet, C ABI smoke checks, and packaging on five targets
 - ✅ Native CMake/CTest Virtual Board validation on the same five targets
 - ✅ SHA-256 sidecars, canonical manifests, and direct Actions downloads
 
-Release runs additionally produce build-provenance attestations, a deterministic release manifest, direct firmware images, and a curated download chooser.
+Release runs add attestations, a release manifest, firmware images, and a download chooser.
 
 ---
 

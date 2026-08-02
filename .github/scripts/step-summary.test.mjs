@@ -11,6 +11,8 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { usageColor, usageProgress } from "./usage-progress.mjs";
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const script = resolve(root, ".github", "scripts", "step-summary.mjs");
 const commonEnvironment = {
@@ -21,6 +23,20 @@ const commonEnvironment = {
   GITHUB_SHA: "0123456789abcdef0123456789abcdef01234567",
   GITHUB_WORKFLOW: "Build",
 };
+
+test("usage bars are green through 50, orange above 50, and red above 80", () => {
+  assert.equal(usageColor(0), "28a745");
+  assert.equal(usageColor(50), "28a745");
+  assert.equal(usageColor(50.01), "fd7e14");
+  assert.equal(usageColor(80), "fd7e14");
+  assert.equal(usageColor(80.01), "dc3545");
+  assert.equal(usageColor(100), "dc3545");
+
+  assert.match(
+    usageProgress(99.52, "Application flash"),
+    /progress\/99\?dangerColor=dc3545&warningColor=dc3545&successColor=dc3545/u,
+  );
+});
 
 function runSummary(directory, arguments_) {
   const summary = resolve(directory, "summary.md");
@@ -36,7 +52,7 @@ function runSummary(directory, arguments_) {
 test("native summaries print target-correct checksum commands", () => {
   const directory = mkdtempSync(join(tmpdir(), "pccontroller-summary-"));
   try {
-    const archive = resolve(directory, "PCController-Controller-test-Windows-x64.tar.gz");
+    const archive = resolve(directory, "PCController-Host-test-Windows-x64.tar.gz");
     const manifest = resolve(directory, "controller-manifest.json");
     writeFileSync(archive, "controller archive", "utf8");
     writeFileSync(
@@ -77,7 +93,7 @@ test("native summaries print target-correct checksum commands", () => {
   }
 });
 
-test("flagship catalog presents AVR separately with live artifact links", () => {
+test("catalog presents AVR separately with live artifact links", () => {
   const directory = mkdtempSync(join(tmpdir(), "pccontroller-catalog-"));
   try {
     const targets = [
@@ -127,7 +143,7 @@ test("flagship catalog presents AVR separately with live artifact links", () => 
         artifacts: [
           { id: 42, name: "PCController-Firmware-ATmega328P" },
           ...targets.flatMap((target, index) => [
-            { id: 100 + index, name: `PCController-Controller-${target}` },
+            { id: 100 + index, name: `PCController-Host-${target}` },
             { id: 200 + index, name: `PCController-VirtualBoard-${target}` },
           ]),
         ],
@@ -137,7 +153,7 @@ test("flagship catalog presents AVR separately with live artifact links", () => 
     const catalog = runSummary(directory, ["catalog", directory]);
     assert.match(catalog, /## ⚡ AVR ATmega328P target/u);
     assert.match(catalog, /32,228 \/ 32,384 B/u);
-    assert.match(catalog, /`Build` \/ `build` \/ `firmware`/u);
+    assert.match(catalog, /`PCController-Firmware-ATmega328P` \(`firmware` alias\)/u);
     assert.match(
       catalog,
       /actions\/runs\/123\/artifacts\/42/u,

@@ -44,7 +44,7 @@ jobs:
       TZ: UTC
 
     steps:
-      - name: "📥 Check out exact source"
+      - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: "🟢 Install Node.js"
@@ -95,7 +95,7 @@ jobs:
           RC_SWITCH_VERSION: ${{ steps.pins.outputs.rc_switch_version }}
         run: arduino-cli lib install "rc-switch@$RC_SWITCH_VERSION"
 
-      - name: "🚀 Build and validate real AVR firmware"
+      - name: "🚀 Build and validate AVR firmware"
         run: >-
           ./build.sh
           --firmware-only
@@ -105,7 +105,7 @@ jobs:
       - name: "🔎 Recheck Intel HEX records and boundaries"
         run: ./firmware.sh check
 
-      - name: "📚 Record declared and resolved dependencies"
+      - name: "📚 Record dependencies"
         run: |
           arduino-cli version > .build/firmware/dependencies.txt
           arduino-cli core list >> .build/firmware/dependencies.txt
@@ -114,7 +114,7 @@ jobs:
           arduino-cli lib list --format json > .build/firmware/resolved-libraries.json
           cp .github/dependencies.json .build/firmware/declared-dependencies.json
 
-      - name: "📦 Create versioned firmware package"
+      - name: "📦 Create firmware package"
         id: package
         run: >-
           node .github/scripts/package-directory.mjs
@@ -122,7 +122,7 @@ jobs:
           PCController-Firmware
           AVR-ATmega328P
 
-      - name: "🎁 Stage a flat ESP-style firmware artifact"
+      - name: "🎁 Stage firmware artifact"
         shell: bash
         env:
           PACKAGE_ARCHIVE: ${{ steps.package.outputs.archive }}
@@ -142,7 +142,7 @@ jobs:
           test "$(find "${staging}" -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
           find "${staging}" -maxdepth 1 -type f -printf '%f\n' | sort
 
-      - name: "⬆️ Upload friendly firmware artifact"
+      - name: "⬆️ Upload firmware artifact"
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -152,7 +152,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
           compression-level: 9
 
-      - name: "⚡ Publish ESP-compatible artifact alias · firmware"
+      - name: "⚡ Upload firmware alias"
         if: ${{ inputs.showcase_alias }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -162,7 +162,7 @@ jobs:
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
           compression-level: 9
 
-      - name: "✨ Publish ASA-inspired AVR build story"
+      - name: "✨ Publish AVR build summary"
         if: always() && steps.upload.outcome == 'success'
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}

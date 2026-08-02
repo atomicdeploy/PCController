@@ -6,11 +6,11 @@ import { findCaseFoldCollisions } from "./release-asset-collisions.mjs";
 test("finds only differently-cased names that GitHub rejects as duplicates", () => {
   const desired = [
     "release-assets/PCController-Firmware-v0.1.0-alpha.1-AVR-ATmega328P.tar.gz",
-    "release-assets/PCController-Controller-v0.1.0-alpha.1-Linux-x64.tar.gz",
+    "release-assets/PCController-Host-v0.1.0-alpha.1-Linux-x64.tar.gz",
   ];
   const existing = [
     { id: 10, name: "pccontroller-firmware-v0.1.0-alpha.1-avr-atmega328p.tar.gz" },
-    { id: 11, name: "PCController-Controller-v0.1.0-alpha.1-Linux-x64.tar.gz" },
+    { id: 11, name: "PCController-Host-v0.1.0-alpha.1-Linux-x64.tar.gz" },
     { id: 12, name: "unrelated-user-asset.zip" },
   ];
 
