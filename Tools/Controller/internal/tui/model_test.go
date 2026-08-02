@@ -15,6 +15,7 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/shell"
 )
@@ -132,6 +133,70 @@ func TestRFActionPickerSearchesAndMapsSelectedID(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("mapping command missing from log: %#v", model.logs)
+	}
+}
+
+func TestGuidedRFWorkflowCapturesConfirmsAndMapsExactHandsetIdentity(t *testing.T) {
+	model := readyModel(t, PageRF)
+	model = model.beginRFGuidedWorkflow()
+	if !model.rfGuideActive || model.rfGuideStep != 0 || model.rfGuidePhase != "idle" {
+		t.Fatalf("guide did not start at A: %#v", model)
+	}
+
+	updated, _, handled := model.handleRFGuidedKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated
+	if !handled || model.rfGuidePhase != "capturing" {
+		t.Fatalf("guided capture did not start: phase=%q handled=%t", model.rfGuidePhase, handled)
+	}
+
+	command := model.observeRFGuidedEvent(control.Event{
+		Kind: "rf.learn.mapping-required", RFID: 0, HaveRFID: true,
+	})
+	if command == nil || model.rfGuidePhase != "resolving" || model.rfGuideAwaitID != 0 {
+		t.Fatalf("capture did not request authoritative readback: phase=%q id=%d command=%v", model.rfGuidePhase, model.rfGuideAwaitID, command)
+	}
+	model.rfPending = false
+	model.rfEntries = previewRFEntries()
+	model.resetRFStage(model.rfEntries)
+	model.resolveRFGuidedCandidate(model.rfEntries)
+	if model.rfGuidePhase != "identity" || model.rfGuideCandidate == nil ||
+		model.rfGuideCandidate.Code != 1_381_717 || model.rfGuideCandidate.Bits != 24 ||
+		model.rfGuideCandidate.Protocol != 1 || model.rfGuideCandidate.PulseUS != 350 {
+		t.Fatalf("exact identity was not presented: phase=%q candidate=%#v", model.rfGuidePhase, model.rfGuideCandidate)
+	}
+
+	updated, _, handled = model.handleRFGuidedKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated
+	if !handled || !model.rfActionPicker || model.rfGuidePhase != "mapping" {
+		t.Fatalf("identity confirmation did not open mapping review: phase=%q picker=%t", model.rfGuidePhase, model.rfActionPicker)
+	}
+	matches := model.filteredRFActions()
+	if len(matches) != 1 || matches[0].Args != "key 1 press" {
+		t.Fatalf("button A default mapping=%#v", matches)
+	}
+
+	updatedModel, executeCommand := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updatedModel.(Model)
+	if executeCommand == nil || model.rfGuidePhase != "saving" || model.rfGuideMappingID != 0 {
+		t.Fatalf("confirmed mapping was not dispatched: phase=%q id=%d command=%v", model.rfGuidePhase, model.rfGuideMappingID, executeCommand)
+	}
+	updatedModel, _ = model.Update(commandResultMsg{line: "rf map 0 key 1 press", output: "mapped"})
+	model = updatedModel.(Model)
+	if model.rfGuideCaptures[0] == nil || model.rfGuideStep != 1 || model.rfGuidePhase != "idle" {
+		t.Fatalf("guide did not advance from A to B: phase=%q step=%d captures=%#v", model.rfGuidePhase, model.rfGuideStep, model.rfGuideCaptures)
+	}
+}
+
+func TestGuidedRFReviewFlagsUnmappedAndDuplicateRecords(t *testing.T) {
+	entries := []native.RFEntry{
+		{ID: 0, Code: 10, Bits: 24, Protocol: 1, ActionKind: native.RFActionKey},
+		{ID: 1, Code: 10, Bits: 24, Protocol: 1, ActionKind: native.RFActionRelay},
+		{ID: 2, Code: 20, Bits: 24, Protocol: 1, ActionKind: native.RFActionNone},
+	}
+	if rfGuidedRecordNeedsReview(entries[0], entries) ||
+		!rfGuidedRecordNeedsReview(entries[1], entries) ||
+		!rfGuidedRecordNeedsReview(entries[2], entries) {
+		t.Fatalf("stale review classification is wrong: %#v", entries)
 	}
 }
 
@@ -512,6 +577,71 @@ func TestAppSettingsPersistThroughSaveHook(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("save hook was not called")
+	}
+}
+
+func TestAppearanceSettingsPersistThroughNativeEditor(t *testing.T) {
+	ui := appconfig.Defaults().UI
+	var saved []appconfig.UI
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		UIConfig: func() appconfig.UI { return ui },
+		SaveUI: func(value appconfig.UI) error {
+			saved = append(saved, value)
+			ui = value
+			return nil
+		},
+		Preview:        func() *control.Snapshot { value := RichPreviewSnapshot(); return &value }(),
+		DisableWelcome: true,
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 36})
+	model = updated.(Model)
+	model.page = PageAppSettings
+
+	open := func(key string) {
+		t.Helper()
+		for index, row := range model.appSettingRows() {
+			if row.Key == key {
+				model.cursor = index
+				var ok bool
+				model, ok = model.beginSettingEditor()
+				if !ok || model.settingEditor == nil {
+					t.Fatalf("editor %q did not open", key)
+				}
+				return
+			}
+		}
+		t.Fatalf("setting row %q is missing", key)
+	}
+
+	open("appearance.identity")
+	model.settingEditor.Fields[0].Value = 2 // dark
+	model.settingEditor.Fields[1].Value = 1 // Persian
+	model.settingEditor.Fields[2].Value = 2 // RTL
+	model, _, _ = model.commitAppSettingEditor()
+
+	open("appearance.accessibility")
+	model.settingEditor.Fields[0].Value = 1
+	model.settingEditor.Fields[1].Value = 1
+	model, _, _ = model.commitAppSettingEditor()
+
+	open("appearance.audio")
+	model.settingEditor.Fields[0].Value = 1
+	model.settingEditor.Fields[1].Value = 37
+	model, _, _ = model.commitAppSettingEditor()
+
+	appearance := model.uiValue.Appearance
+	if appearance.Theme != "dark" || appearance.Locale != "fa" || appearance.Direction != "rtl" ||
+		!appearance.ReduceMotion || !appearance.CompactNumbers || !appearance.AudioMuted || appearance.AudioVolume != 0.37 {
+		t.Fatalf("appearance=%#v", appearance)
+	}
+	if len(saved) != 3 {
+		t.Fatalf("save count=%d, want 3", len(saved))
+	}
+	rendered := ansi.Strip(model.appSettingsPage())
+	for _, expected := range []string{"Dark · Persian · RTL", "REDUCED · COMPACT", "MUTED · 37%"} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("appearance summary %q missing:\n%s", expected, rendered)
+		}
 	}
 }
 

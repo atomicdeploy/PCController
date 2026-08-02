@@ -72,9 +72,10 @@ export default defineConfig(() => {
     }
   },
   test: {
-    // Pure Node/SSR tests do not need child processes; threads avoid intermittent
-    // Windows fork termination stalls without weakening teardown diagnostics.
+    // Keep the heavy SSR import graph isolated without starting enough concurrent
+    // workers to make Windows thread teardown miss Vitest's diagnostic deadline.
     pool: 'threads',
+    maxWorkers: 4,
   }
   }
 })

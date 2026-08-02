@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -1023,43 +1024,120 @@ func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 }
 
 func hostConfigCommand(options CommandOptions, args []string) (string, error) {
+	const usage = "config get PATH | config set PATH VALUE; PATH is ui.app_title or ui.appearance.{theme,locale,direction,reduce_motion,compact_numbers,audio_muted,audio_volume}"
 	if len(args) < 2 {
-		return "", errors.New("usage: config get ui.app_title | config set ui.app_title VALUE")
+		return "", errors.New(usage)
 	}
 	action := strings.ToLower(strings.TrimSpace(args[0]))
 	path := strings.ToLower(strings.TrimSpace(args[1]))
-	if path != "ui.app_title" {
-		return "", fmt.Errorf("unsupported host setting %q", args[1])
-	}
 	switch action {
 	case "get":
 		if len(args) != 2 {
-			return "", errors.New("usage: config get ui.app_title")
+			return "", errors.New(usage)
 		}
 		if options.HostConfig == nil {
 			return "", errors.New("host configuration is unavailable")
 		}
-		return fmt.Sprintf("ui.app_title=%q", options.HostConfig().UI.AppTitle), nil
+		ui := options.HostConfig().UI
+		switch path {
+		case "ui.app_title":
+			return fmt.Sprintf("ui.app_title=%q", ui.AppTitle), nil
+		case "ui.appearance.theme":
+			return "ui.appearance.theme=" + ui.Appearance.Theme, nil
+		case "ui.appearance.locale":
+			return "ui.appearance.locale=" + ui.Appearance.Locale, nil
+		case "ui.appearance.direction":
+			return "ui.appearance.direction=" + ui.Appearance.Direction, nil
+		case "ui.appearance.reduce_motion":
+			return fmt.Sprintf("ui.appearance.reduce_motion=%t", ui.Appearance.ReduceMotion), nil
+		case "ui.appearance.compact_numbers":
+			return fmt.Sprintf("ui.appearance.compact_numbers=%t", ui.Appearance.CompactNumbers), nil
+		case "ui.appearance.audio_muted":
+			return fmt.Sprintf("ui.appearance.audio_muted=%t", ui.Appearance.AudioMuted), nil
+		case "ui.appearance.audio_volume":
+			return fmt.Sprintf("ui.appearance.audio_volume=%.0f%%", ui.Appearance.AudioVolume*100), nil
+		default:
+			return "", fmt.Errorf("unsupported host setting %q", args[1])
+		}
 	case "set":
 		if len(args) < 3 {
-			return "", errors.New("usage: config set ui.app_title VALUE")
+			return "", errors.New(usage)
+		}
+		if options.HostConfig == nil {
+			return "", errors.New("host configuration is unavailable")
 		}
 		if options.UpdateHostConfig == nil {
 			return "", errors.New("host configuration is read-only")
 		}
-		title := strings.TrimSpace(strings.Join(args[2:], " "))
-		if title == "" {
-			return "", errors.New("ui.app_title cannot be empty")
+		raw := strings.TrimSpace(strings.Join(args[2:], " "))
+		candidate := options.HostConfig()
+		before := candidate.UI
+		switch path {
+		case "ui.app_title":
+			if raw == "" {
+				return "", errors.New("ui.app_title cannot be empty")
+			}
+			candidate.UI.AppTitle = raw
+		case "ui.appearance.theme":
+			candidate.UI.Appearance.Theme = raw
+		case "ui.appearance.locale":
+			candidate.UI.Appearance.Locale = raw
+		case "ui.appearance.direction":
+			candidate.UI.Appearance.Direction = raw
+		case "ui.appearance.reduce_motion":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("ui.appearance.reduce_motion: %w", err)
+			}
+			candidate.UI.Appearance.ReduceMotion = value
+		case "ui.appearance.compact_numbers":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("ui.appearance.compact_numbers: %w", err)
+			}
+			candidate.UI.Appearance.CompactNumbers = value
+		case "ui.appearance.audio_muted":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("ui.appearance.audio_muted: %w", err)
+			}
+			candidate.UI.Appearance.AudioMuted = value
+		case "ui.appearance.audio_volume":
+			percent, err := strconv.ParseFloat(strings.TrimSuffix(raw, "%"), 64)
+			if err != nil || percent < 0 || percent > 100 {
+				return "", errors.New("ui.appearance.audio_volume must be 0..100 percent")
+			}
+			candidate.UI.Appearance.AudioVolume = percent / 100
+		default:
+			return "", fmt.Errorf("unsupported host setting %q", args[1])
+		}
+		candidate.UI.Appearance = appconfig.NormalizeAppearance(candidate.UI.Appearance)
+		if err := candidate.Validate(); err != nil {
+			return "", err
+		}
+		if reflect.DeepEqual(before, candidate.UI) {
+			return path + " unchanged", nil
 		}
 		if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
-			config.UI.AppTitle = title
-			return nil
+			config.UI = candidate.UI
+			return config.Validate()
 		}); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("ui.app_title=%q saved and hot-reload queued", title), nil
+		return path + " saved and hot-reload queued", nil
 	default:
-		return "", errors.New("usage: config get ui.app_title | config set ui.app_title VALUE")
+		return "", errors.New(usage)
+	}
+}
+
+func parseHostConfigBool(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "on", "yes", "1":
+		return true, nil
+	case "false", "off", "no", "0":
+		return false, nil
+	default:
+		return false, errors.New("value must be true/false or on/off")
 	}
 }
 

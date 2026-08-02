@@ -20,17 +20,23 @@ describe('API error details', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ name: 'Controller' }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
+        name: 'Controller', setup_complete: true, api_version: 1, websocket_path: '/ipc', auth_required: false,
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
         name: 'Controller',
         setup_complete: true,
         api_version: 1,
         websocket_path: '/ipc',
         auth_required: true,
+        appearance: { theme: 'dark', locale: 'fa', direction: 'rtl', reduceMotion: true, compactNumbers: false, audioMuted: true, audioVolume: 0 },
+        appearance_etag: 'b'.repeat(64),
         reset_on_reconnect: false,
         future_capability: 'accepted',
       }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(getUIConfig()).rejects.toThrow('missing required setup_complete')
+    await expect(getUIConfig()).rejects.toThrow('missing host-authoritative appearance')
     await expect(getUIConfig()).resolves.toMatchObject({ setup_complete: true, future_capability: 'accepted' })
   })
 })

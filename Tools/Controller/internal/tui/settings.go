@@ -103,9 +103,13 @@ func (model Model) boardSettingRows() []settingRow {
 
 func (model Model) appSettingRows() []settingRow {
 	ui := model.uiValue
+	appearance := appconfig.NormalizeAppearance(ui.Appearance)
 	status := model.hostIntegrationValue.StatusLED
 	rows := []settingRow{
 		{Key: "app.title", Group: "APPLICATION", Label: "Title", Value: model.prefs.AppTitle, Editable: true},
+		{Key: "appearance.identity", Group: "APPEARANCE", Label: "Theme · language · direction", Value: fmt.Sprintf("%s · %s · %s", appearanceThemeLabel(appearance.Theme), appearanceLocaleLabel(appearance.Locale), strings.ToUpper(appearance.Direction)), Editable: true},
+		{Key: "appearance.accessibility", Group: "", Label: "Motion · number density", Value: fmt.Sprintf("%s · %s", boolWord(appearance.ReduceMotion, "REDUCED", "FULL"), boolWord(appearance.CompactNumbers, "COMPACT", "DETAILED")), Editable: true},
+		{Key: "appearance.audio", Group: "", Label: "Interface audio", Value: fmt.Sprintf("%s · %.0f%%", boolWord(appearance.AudioMuted, "MUTED", "ON"), appearance.AudioVolume*100), Editable: true},
 		{Key: "layout.tables", Group: "", Label: "Table layout", Value: strings.ToUpper(ui.TableLayout), Editable: true},
 		{Key: "poll.active", Group: "MEASUREMENTS", Label: "Active polling", Value: model.prefs.PollInterval.String(), Editable: true},
 		{Key: "history.retention", Group: "", Label: "History retention", Value: model.prefs.HistoryWindow.String(), Editable: true},
@@ -292,6 +296,26 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 	case "app.title":
 		editor.IsText = true
 		editor.Text = ui.AppTitle
+	case "appearance.identity":
+		appearance := appconfig.NormalizeAppearance(ui.Appearance)
+		theme := map[string]int{"system": 0, "light": 1, "dark": 2}[appearance.Theme]
+		locale := map[string]int{"en": 0, "fa": 1}[appearance.Locale]
+		direction := map[string]int{"auto": 0, "ltr": 1, "rtl": 2}[appearance.Direction]
+		editor.Fields = []settingEditorField{
+			{Key: "theme", Label: "Theme", Value: theme, Options: []settingOption{{0, "Follow system"}, {1, "Light"}, {2, "Dark"}}},
+			{Key: "locale", Label: "Language", Value: locale, Options: []settingOption{{0, "English"}, {1, "Persian"}}},
+			{Key: "direction", Label: "Direction", Value: direction, Options: []settingOption{{0, "Automatic"}, {1, "Left to right"}, {2, "Right to left"}}},
+		}
+	case "appearance.accessibility":
+		editor.Fields = []settingEditorField{
+			boolean("reduced-motion", "Reduce motion", ui.Appearance.ReduceMotion),
+			boolean("compact-numbers", "Compact numbers", ui.Appearance.CompactNumbers),
+		}
+	case "appearance.audio":
+		editor.Fields = []settingEditorField{
+			boolean("muted", "Mute interface audio", ui.Appearance.AudioMuted),
+			rangeField("volume", "Interface volume", int(math.Round(ui.Appearance.AudioVolume*100)), 0, 100, 1, "%", true),
+		}
 	case "layout.tables":
 		layout := 0
 		if strings.EqualFold(ui.TableLayout, "expanded") {
@@ -349,6 +373,24 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			}
 		}
 	}
+}
+
+func appearanceThemeLabel(value string) string {
+	switch value {
+	case "light":
+		return "Light"
+	case "dark":
+		return "Dark"
+	default:
+		return "System"
+	}
+}
+
+func appearanceLocaleLabel(value string) string {
+	if value == "fa" {
+		return "Persian"
+	}
+	return "English"
 }
 
 func renderSettingEditor(editor *settingEditor, width int) string {

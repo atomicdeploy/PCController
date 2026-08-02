@@ -157,11 +157,26 @@ export function reloadForResourceMismatch(config: Pick<UIConfig, 'host_version' 
 function loadAppearance(): Appearance {
   try {
     const saved = JSON.parse(localStorage.getItem(appearanceStorageKey) ?? '{}') as Partial<Appearance>
-    const value = { ...defaultAppearance, ...saved }
-    value.audioVolume = Number.isFinite(value.audioVolume) ? Math.max(0, Math.min(1, value.audioVolume)) : defaultAppearance.audioVolume
-    value.audioMuted = Boolean(value.audioMuted)
-    return value
+    return normalizeAppearance(saved)
   } catch { return defaultAppearance }
+}
+
+export function normalizeAppearance(value: Partial<Appearance>, fallback: Appearance = defaultAppearance): Appearance {
+  return {
+    theme: value.theme === 'light' || value.theme === 'dark' || value.theme === 'system' ? value.theme : fallback.theme,
+    locale: value.locale === 'fa' || value.locale === 'en' ? value.locale : fallback.locale,
+    direction: value.direction === 'ltr' || value.direction === 'rtl' || value.direction === 'auto' ? value.direction : fallback.direction,
+    reduceMotion: typeof value.reduceMotion === 'boolean' ? value.reduceMotion : fallback.reduceMotion,
+    compactNumbers: typeof value.compactNumbers === 'boolean' ? value.compactNumbers : fallback.compactNumbers,
+    audioMuted: typeof value.audioMuted === 'boolean' ? value.audioMuted : fallback.audioMuted,
+    audioVolume: Number.isFinite(value.audioVolume) ? Math.max(0, Math.min(1, Number(value.audioVolume))) : fallback.audioVolume,
+  }
+}
+
+function sameAppearance(left: Appearance, right: Appearance): boolean {
+  return left.theme === right.theme && left.locale === right.locale && left.direction === right.direction &&
+    left.reduceMotion === right.reduceMotion && left.compactNumbers === right.compactNumbers &&
+    left.audioMuted === right.audioMuted && left.audioVolume === right.audioVolume
 }
 
 function applyAppearance(value: Appearance): void {
@@ -356,6 +371,9 @@ export default function App() {
   const audioRef = useRef<AudioEngine | null>(null)
   const previousAudioConnection = useRef<boolean | null>(null)
   const tabChannelRef = useRef<TabChannel | null>(null)
+  const appearanceETagRef = useRef('')
+  const appearanceDesiredRef = useRef(appearance)
+  const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
   const refreshAfterHostRestart = useRef(false)
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
@@ -368,6 +386,28 @@ export default function App() {
     ? appearance.locale === 'fa' ? 'rtl' : 'ltr'
     : appearance.direction
   const drawerClosedOffset = resolvedDirection === 'rtl' ? '18px' : '-18px'
+
+  const applyLocalAppearance = useCallback((value: Appearance) => {
+    setAppearance(value)
+    try { localStorage.setItem(appearanceStorageKey, JSON.stringify(value)) } catch { /* private storage may be unavailable */ }
+    applyAppearance(value)
+    audioRef.current?.setVolume(value.audioVolume)
+    audioRef.current?.setMuted(value.audioMuted)
+  }, [])
+
+  const adoptHostAppearance = useCallback((value: Appearance, etag: string) => {
+    const authoritative = normalizeAppearance(value)
+    appearanceETagRef.current = etag
+    appearanceDesiredRef.current = authoritative
+    applyLocalAppearance(authoritative)
+  }, [applyLocalAppearance])
+
+  const refreshHostAppearance = useCallback(async () => {
+    const config = await getUIConfig()
+    setUIConfig(config)
+    adoptHostAppearance(config.appearance, config.appearance_etag)
+    return config
+  }, [adoptHostAppearance])
 
   useEffect(() => {
     document.title = productTitle
@@ -449,14 +489,9 @@ export default function App() {
       peers.set(message.tabId, message.sentAt)
       updatePeers()
       if (payload.type === 'appearance') {
-        setAppearance((current) => {
-          const safeValue = { ...current, ...payload.appearance }
-          localStorage.setItem(appearanceStorageKey, JSON.stringify(safeValue))
-          applyAppearance(safeValue)
-          audioRef.current?.setVolume(safeValue.audioVolume)
-          audioRef.current?.setMuted(safeValue.audioMuted)
-          return safeValue
-        })
+        if (!payload.etag || payload.etag !== appearanceETagRef.current) {
+          void refreshHostAppearance().catch(() => undefined)
+        }
       }
       if (payload.type === 'terminal') {
         setRelayedTerminal((current) => [
@@ -482,7 +517,7 @@ export default function App() {
       channel.close()
       if (tabChannelRef.current === channel) tabChannelRef.current = null
     }
-  }, [])
+  }, [refreshHostAppearance])
 
   useEffect(() => {
     if (bootProgress >= bootTarget) return
@@ -641,24 +676,37 @@ export default function App() {
   }, [appearance.reduceMotion])
 
   const saveAppearance = useCallback((value: Appearance) => {
-    const safeValue = {
-      ...value,
-      audioMuted: Boolean(value.audioMuted),
-      audioVolume: Number.isFinite(value.audioVolume) ? Math.max(0, Math.min(1, value.audioVolume)) : defaultAppearance.audioVolume,
-    }
-    setAppearance(safeValue)
-    localStorage.setItem(appearanceStorageKey, JSON.stringify(safeValue))
-    applyAppearance(safeValue)
-    audioRef.current?.setVolume(safeValue.audioVolume)
-    audioRef.current?.setMuted(safeValue.audioMuted)
-    tabChannelRef.current?.publishAppearance(safeValue)
+    const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
+    appearanceDesiredRef.current = safeValue
+    applyLocalAppearance(safeValue)
     const engine = audioRef.current
     if (!safeValue.audioMuted && engine) {
       void engine.start({ muted: false }).then((started) => {
         if (started) engine.cue('select')
       })
     }
-  }, [])
+    if (demo) {
+      tabChannelRef.current?.publishAppearance(safeValue)
+      return
+    }
+    appearanceSaveChain.current = appearanceSaveChain.current.then(async () => {
+      const saved = await rpc<HostUISettings>('controller.ui.config.set', {
+        appearance: safeValue,
+        if_match: appearanceETagRef.current,
+      })
+      appearanceETagRef.current = saved.appearance_etag
+      setUIConfig((current) => current ? {
+        ...current, appearance: saved.appearance, appearance_etag: saved.appearance_etag,
+      } : current)
+      if (sameAppearance(appearanceDesiredRef.current, safeValue)) {
+        adoptHostAppearance(saved.appearance, saved.appearance_etag)
+      }
+      tabChannelRef.current?.publishAppearance(saved.appearance, saved.appearance_etag)
+    }).catch(async (cause) => {
+      try { await refreshHostAppearance() } catch { /* retain the last locally rendered value until the host is reachable */ }
+      notify('warning', appearance.locale === 'fa' ? 'تنظیم ظاهر ذخیره نشد' : 'Appearance was not saved', cause instanceof Error ? cause.message : String(cause))
+    })
+  }, [adoptHostAppearance, appearance.locale, applyLocalAppearance, demo, notify, refreshHostAppearance])
 
   const enterApp = useCallback((sound: boolean) => {
     const next = { ...appearance, audioMuted: !sound }
@@ -894,6 +942,7 @@ export default function App() {
         const config = await getUIConfig(abort.signal)
 		if (reloadForResourceMismatch(config)) return
         setUIConfig(config)
+        adoptHostAppearance(config.appearance, config.appearance_etag)
         const firstSetup = shouldOpenSetup(config)
         setBootOpen(firstSetup)
         setBootResolved(true)
@@ -948,9 +997,7 @@ export default function App() {
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
             }
-            if (/config/i.test(event.kind)) {
-              void getUIConfig().then(setUIConfig).catch(() => undefined)
-            }
+            if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
             if (/device|connection|settings/i.test(event.kind)) void refresh()
           },
           state: (state, detail) => {
@@ -979,7 +1026,7 @@ export default function App() {
       }
     })()
     return () => { abort.abort(); stopStream() }
-  }, [demo, navigate, notify, refresh, token])
+  }, [adoptHostAppearance, demo, navigate, notify, refresh, refreshHostAppearance, token])
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,

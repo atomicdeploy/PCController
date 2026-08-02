@@ -59,6 +59,8 @@ describe('Web IPC transport', () => {
 
     const stop = connectStream({
       name: 'PCController', setup_complete: false, api_version: 1, websocket_path: '/ipc', auth_required: false,
+      appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+      appearance_etag: 'a'.repeat(64),
     }, { status: () => undefined, event: () => undefined, state: () => undefined })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
@@ -82,6 +84,8 @@ describe('Web IPC transport', () => {
     vi.stubGlobal('window', { setTimeout, clearTimeout })
     const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       name: 'PCController', setup_complete: true, api_version: 1, websocket_path: '/ipc', auth_required: false,
+      appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+      appearance_etag: 'a'.repeat(64),
     }), { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
 
@@ -90,6 +94,8 @@ describe('Web IPC transport', () => {
 
     const stop = connectStream({
       name: 'PCController', setup_complete: true, api_version: 1, websocket_path: '/ipc', auth_required: false,
+      appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+      appearance_etag: 'a'.repeat(64),
     }, { status: () => undefined, event: () => undefined, state: () => undefined })
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(String(sockets[0]?.url)).toBe('ws://127.0.0.1:8787/ipc')

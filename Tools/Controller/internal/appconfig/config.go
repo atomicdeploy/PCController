@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,6 +80,7 @@ type DeviceIdentity struct {
 // UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
 	AppTitle             string            `json:"app_title"`
+	Appearance           Appearance        `json:"appearance"`
 	SeparatePortButtons  bool              `json:"separate_port_buttons"`
 	TableLayout          string            `json:"table_layout"`
 	PeripheralNames      map[string]string `json:"peripheral_names,omitempty"`
@@ -107,6 +109,32 @@ type UI struct {
 	LCDPromptDebounceMS  int               `json:"lcd_prompt_debounce_ms"`
 	LCDPriorityHoldMS    int               `json:"lcd_priority_hold_ms"`
 	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
+}
+
+// Appearance is the host-authoritative presentation preference shared by the
+// WebUI and native surfaces. Browser storage is only a startup cache; the
+// watched PC configuration remains authoritative.
+type Appearance struct {
+	Theme          string  `json:"theme"`
+	Locale         string  `json:"locale"`
+	Direction      string  `json:"direction"`
+	ReduceMotion   bool    `json:"reduce_motion"`
+	CompactNumbers bool    `json:"compact_numbers"`
+	AudioMuted     bool    `json:"audio_muted"`
+	AudioVolume    float64 `json:"audio_volume"`
+}
+
+// NormalizeAppearance canonicalizes textual preference values without
+// changing explicit false, zero, or empty values. Validation decides whether
+// the resulting values are supported.
+func NormalizeAppearance(value Appearance) Appearance {
+	value.Theme = strings.ToLower(strings.TrimSpace(value.Theme))
+	value.Locale = strings.ToLower(strings.TrimSpace(value.Locale))
+	value.Direction = strings.ToLower(strings.TrimSpace(value.Direction))
+	if value.AudioVolume == 0 {
+		value.AudioVolume = 0 // canonicalize negative zero for stable hashing.
+	}
+	return value
 }
 
 // IPC configures authenticated local and optional remote controller transports.
@@ -273,7 +301,10 @@ func Defaults() Config {
 			HelloAttempts:    3,
 		},
 		UI: UI{
-			AppTitle:             productidentity.DefaultTitle,
+			AppTitle: productidentity.DefaultTitle,
+			Appearance: Appearance{
+				Theme: "system", Locale: "en", Direction: "auto", AudioVolume: 0.42,
+			},
 			TableLayout:          "compact",
 			WelcomeMelody:        "notify",
 			StatusIntervalMS:     200,
@@ -386,6 +417,7 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	if err := value.Validate(); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: %w", path, err)
 	}
@@ -413,6 +445,7 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -482,6 +515,26 @@ func (value Config) Validate() error {
 	if title := strings.TrimSpace(value.UI.AppTitle); title == "" ||
 		utf8.RuneCountInString(title) > 64 || !printableText(title) {
 		return fmt.Errorf("ui.app_title must be 1..64 printable characters")
+	}
+	appearance := NormalizeAppearance(value.UI.Appearance)
+	switch appearance.Theme {
+	case "system", "light", "dark":
+	default:
+		return errors.New("ui.appearance.theme must be system, light, or dark")
+	}
+	switch appearance.Locale {
+	case "en", "fa":
+	default:
+		return errors.New("ui.appearance.locale must be en or fa")
+	}
+	switch appearance.Direction {
+	case "auto", "ltr", "rtl":
+	default:
+		return errors.New("ui.appearance.direction must be auto, ltr, or rtl")
+	}
+	if math.IsNaN(appearance.AudioVolume) || math.IsInf(appearance.AudioVolume, 0) ||
+		appearance.AudioVolume < 0 || appearance.AudioVolume > 1 {
+		return errors.New("ui.appearance.audio_volume must be a finite value from 0 to 1")
 	}
 	if len(value.UI.PeripheralNames) > MaxPeripheralNames {
 		return fmt.Errorf("ui.peripheral_names may contain at most %d entries", MaxPeripheralNames)

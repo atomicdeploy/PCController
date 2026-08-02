@@ -5,6 +5,7 @@ import {
   connectionTransitionCue,
   isCompletedHostUpdate,
   navigation,
+  normalizeAppearance,
   pageFromHash,
   pageViewFor,
   shouldOpenSetup,
@@ -71,5 +72,20 @@ describe('first-run setup selection', () => {
     expect(shouldOpenSetup({ setup_complete: true })).toBe(false)
     expect(shouldOpenSetup(null)).toBe(false)
     expect(shouldOpenSetup({ setup_complete: true }, true)).toBe(true)
+  })
+})
+
+describe('host-owned appearance normalization', () => {
+  it('preserves explicit false and zero while rejecting malformed cached enums', () => {
+    expect(normalizeAppearance({
+      theme: 'dark', locale: 'fa', direction: 'rtl', reduceMotion: false,
+      compactNumbers: false, audioMuted: false, audioVolume: 0,
+    })).toEqual({
+      theme: 'dark', locale: 'fa', direction: 'rtl', reduceMotion: false,
+      compactNumbers: false, audioMuted: false, audioVolume: 0,
+    })
+    expect(normalizeAppearance({
+      theme: 'neon' as 'dark', locale: 'de' as 'en', direction: 'sideways' as 'ltr', audioVolume: Number.NaN,
+    })).toMatchObject({ theme: 'system', locale: 'en', direction: 'auto', audioVolume: 0.42 })
   })
 })

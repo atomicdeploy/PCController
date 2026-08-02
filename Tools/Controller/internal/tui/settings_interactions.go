@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/native"
 )
 
@@ -258,8 +259,8 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	switch editor.Key {
 	case "app.title":
 		title := strings.TrimSpace(editor.Text)
-		if title == "" || len([]rune(title)) > 80 || strings.ContainsAny(title, "\r\n\t") {
-			model.setNotice("Application title must be 1..80 printable characters")
+		if title == "" || len([]rune(title)) > 64 || strings.ContainsAny(title, "\r\n\t") {
+			model.setNotice("Application title must be 1..64 printable characters")
 			return model, nil, true
 		}
 		ui.AppTitle = title
@@ -269,6 +270,19 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 			model.settingEditor = nil
 			return model.dispatchLine("config set ui.app_title " + title)
 		}
+	case "appearance.identity":
+		themes := []string{"system", "light", "dark"}
+		locales := []string{"en", "fa"}
+		directions := []string{"auto", "ltr", "rtl"}
+		ui.Appearance.Theme = themes[editorField(editor, "theme")]
+		ui.Appearance.Locale = locales[editorField(editor, "locale")]
+		ui.Appearance.Direction = directions[editorField(editor, "direction")]
+	case "appearance.accessibility":
+		ui.Appearance.ReduceMotion = editorField(editor, "reduced-motion") != 0
+		ui.Appearance.CompactNumbers = editorField(editor, "compact-numbers") != 0
+	case "appearance.audio":
+		ui.Appearance.AudioMuted = editorField(editor, "muted") != 0
+		ui.Appearance.AudioVolume = float64(editorField(editor, "volume")) / 100
 	case "layout.tables":
 		ui.TableLayout = "compact"
 		if editorField(editor, "layout") == 1 {
@@ -303,6 +317,7 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		model.setNotice("No host-setting editor is available")
 		return model, nil, true
 	}
+	ui.Appearance = appconfig.NormalizeAppearance(ui.Appearance)
 	ui.SetupComplete = true
 	if model.saveUI != nil {
 		if err := model.saveUI(ui); err != nil {

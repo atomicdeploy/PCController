@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +64,113 @@ type Response struct {
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+// rfMapParams is deliberately semantic: network callers name the target they
+// intend instead of depending on the firmware's compact enum layout.
+type rfMapParams struct {
+	ID       *int   `json:"id"`
+	Action   string `json:"action"`
+	Target   string `json:"target,omitempty"`
+	Behavior string `json:"behavior,omitempty"`
+}
+
+func (params rfMapParams) mapping() (controller.RFMapping, error) {
+	if params.ID == nil {
+		return controller.RFMapping{}, errors.New("RF learned entry id is required")
+	}
+	if *params.ID < 0 || *params.ID > 19 {
+		return controller.RFMapping{}, errors.New("RF learned entry id must be 0..19")
+	}
+	action := strings.ToLower(strings.TrimSpace(params.Action))
+	target := strings.ToLower(strings.TrimSpace(params.Target))
+	behavior := strings.ToLower(strings.TrimSpace(params.Behavior))
+	mapping := controller.RFMapping{
+		Action: controller.RFActionNone, Behavior: controller.RFBehaviorPress,
+	}
+	parseNumber := func(minimum, maximum int, label string) (int, error) {
+		value, err := strconv.Atoi(target)
+		if err != nil || value < minimum || value > maximum {
+			return 0, fmt.Errorf("RF %s target must be %d..%d", label, minimum, maximum)
+		}
+		return value, nil
+	}
+	parseBehavior := func() (controller.RFBehavior, error) {
+		switch behavior {
+		case "", "press":
+			return controller.RFBehaviorPress, nil
+		case "toggle":
+			return controller.RFBehaviorToggle, nil
+		case "momentary":
+			return controller.RFBehaviorMomentary, nil
+		default:
+			return 0, errors.New("RF behavior must be press, toggle, or momentary")
+		}
+	}
+
+	switch action {
+	case "none", "unmapped":
+		if target != "" || behavior != "" {
+			return controller.RFMapping{}, errors.New("unmapped RF entries do not accept target or behavior")
+		}
+		return mapping, nil
+	case "key":
+		value, err := parseNumber(1, 4, "key")
+		if err != nil {
+			return controller.RFMapping{}, err
+		}
+		mapping.Action, mapping.Value = controller.RFActionKey, byte(value-1)
+		mapping.Behavior, err = parseBehavior()
+		return mapping, err
+	case "menu":
+		values := map[string]byte{
+			"prev": native.MenuPrevious, "next": native.MenuNext,
+			"dec": native.MenuDecrease, "inc": native.MenuIncrease,
+		}
+		value, ok := values[target]
+		if !ok {
+			return controller.RFMapping{}, errors.New("RF menu target must be prev, next, dec, or inc")
+		}
+		if behavior != "" {
+			return controller.RFMapping{}, errors.New("RF menu mappings do not accept behavior")
+		}
+		mapping.Action, mapping.Value = controller.RFActionMenu, value
+		return mapping, nil
+	case "relay":
+		value, err := parseNumber(5, 8, "relay")
+		if err != nil {
+			return controller.RFMapping{}, err
+		}
+		mapping.Action, mapping.Value = controller.RFActionRelay, byte(value-1)
+		mapping.Behavior, err = parseBehavior()
+		return mapping, err
+	case "side":
+		sides := map[string]byte{"left": 0, "a": 0, "right": 1, "b": 1}
+		value, ok := sides[target]
+		if !ok {
+			return controller.RFMapping{}, errors.New("RF side target must be left/A or right/B")
+		}
+		motions := map[string]controller.RFBehavior{
+			"up": controller.RFBehaviorUp, "down": controller.RFBehaviorDown,
+			"stop": controller.RFBehaviorStop,
+		}
+		motion, ok := motions[behavior]
+		if !ok {
+			return controller.RFMapping{}, errors.New("RF side behavior must be up, down, or stop")
+		}
+		mapping.Action, mapping.Value, mapping.Behavior = controller.RFActionSide, value, motion
+		return mapping, nil
+	case "pwm":
+		value, err := parseNumber(0, 10, "PWM")
+		if err != nil {
+			return controller.RFMapping{}, err
+		}
+		mapping.Action, mapping.Value = controller.RFActionPWM, byte(value)
+		mapping.Behavior, err = parseBehavior()
+		return mapping, err
+	default:
+		return controller.RFMapping{}, errors.New("RF action must be none, key, menu, relay, side, or pwm")
+	}
 }
 
 func (rpcError *RPCError) Error() string {
@@ -131,9 +239,15 @@ type browserUISettings struct {
 	AppTitle        string                           `json:"app_title"`
 	SetupComplete   bool                             `json:"setup_complete"`
 	WelcomeMelody   string                           `json:"welcome_melody"`
+	Appearance      browserAppearance                `json:"appearance"`
+	AppearanceETag  string                           `json:"appearance_etag"`
 	SegmentScroll   appconfig.SegmentScroll          `json:"segment_scroll"`
 	PeripheralNames map[string]string                `json:"peripheral_names"`
 	Peripherals     []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Changed         *bool                            `json:"changed,omitempty"`
+	ChangedFields   []string                         `json:"changed_fields,omitempty"`
+	Before          map[string]any                   `json:"before,omitempty"`
+	After           map[string]any                   `json:"after,omitempty"`
 }
 
 type peripheralSettings struct {
@@ -358,50 +472,7 @@ func (service *Service) dispatch(
 			}
 		}
 	case "controller.ui.config.set":
-		var params struct {
-			AppTitle        *string                  `json:"app_title,omitempty"`
-			SetupComplete   *bool                    `json:"setup_complete,omitempty"`
-			SegmentScroll   *appconfig.SegmentScroll `json:"segment_scroll,omitempty"`
-			PeripheralNames *map[string]string       `json:"peripheral_names,omitempty"`
-		}
-		if err = decodeParams(request.Params, &params); err == nil {
-			if params.AppTitle == nil && params.SetupComplete == nil && params.SegmentScroll == nil && params.PeripheralNames == nil {
-				err = errors.New("app_title, setup_complete, segment_scroll, or peripheral_names is required")
-			} else if service.UpdateHostConfig == nil {
-				err = errors.New("persistent host configuration is unavailable")
-			} else {
-				var normalizedNames map[string]string
-				if params.PeripheralNames != nil {
-					normalizedNames, err = normalizePeripheralNames(*params.PeripheralNames)
-					if err == nil {
-						candidate := service.hostConfig()
-						candidate.UI.PeripheralNames = normalizedNames
-						err = candidate.Validate()
-					}
-				}
-				if err != nil {
-					break
-				}
-				err = service.UpdateHostConfig(func(value *appconfig.Config) error {
-					if params.AppTitle != nil {
-						value.UI.AppTitle = strings.TrimSpace(*params.AppTitle)
-					}
-					if params.SetupComplete != nil {
-						value.UI.SetupComplete = *params.SetupComplete
-					}
-					if params.SegmentScroll != nil {
-						value.UI.SegmentScroll = *params.SegmentScroll
-					}
-					if params.PeripheralNames != nil {
-						value.UI.PeripheralNames = clonePeripheralNames(normalizedNames)
-					}
-					return nil
-				})
-				if err == nil {
-					result = service.browserUISettings()
-				}
-			}
-		}
+		result, err = service.updateBrowserUISettings(request.Params)
 	case "controller.hotkeys.get":
 		result = service.hotkeySettings(false)
 	case "controller.hotkeys.set":
@@ -643,6 +714,106 @@ func (service *Service) dispatch(
 	case "controller.rf.learn.cancel":
 		err = service.Client.CancelRFLearn(ctx)
 		result = map[string]bool{"cancelled": err == nil}
+	case "controller.rf.map":
+		var params rfMapParams
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			var mapping controller.RFMapping
+			mapping, err = params.mapping()
+			if err == nil {
+				err = service.Client.MapLearnedRF(ctx, byte(*params.ID), mapping)
+			}
+			if err == nil {
+				result, err = service.Client.ListLearnedDetailed(ctx)
+			}
+		}
+	case "controller.rf.remove":
+		var params struct {
+			ID *int `json:"id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.ID == nil {
+				err = errors.New("RF learned entry id is required")
+			} else if *params.ID < 0 || *params.ID > 19 {
+				err = errors.New("RF learned entry id must be 0..19")
+			} else {
+				err = service.Client.RemoveLearnedRF(ctx, byte(*params.ID))
+			}
+			if err == nil {
+				var entries []controller.RFEntryView
+				entries, err = service.Client.ListLearnedDetailed(ctx)
+				if err == nil {
+					for _, entry := range entries {
+						if int(entry.ID) == *params.ID {
+							err = fmt.Errorf("RF entry %d remains after remove readback", *params.ID)
+							break
+						}
+					}
+				}
+				if err == nil {
+					result = entries
+				}
+			}
+		}
+	case "controller.rf.clear":
+		var params struct {
+			Confirm string `json:"confirm"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.Confirm != "CLEAR RF" {
+				err = errors.New("RF clear requires confirm=\"CLEAR RF\"")
+			} else {
+				err = service.Client.ClearLearnedRF(ctx)
+			}
+			if err == nil {
+				var entries []controller.RFEntryView
+				entries, err = service.Client.ListLearnedDetailed(ctx)
+				if err == nil && len(entries) != 0 {
+					err = fmt.Errorf("RF clear readback still contains %d record(s)", len(entries))
+				}
+				if err == nil {
+					result = entries
+				}
+			}
+		}
+	case "controller.rf.transmit":
+		var params struct {
+			Code     *uint32 `json:"code"`
+			Bits     *int    `json:"bits"`
+			Protocol *int    `json:"protocol"`
+			PulseUS  int     `json:"pulse_us,omitempty"`
+			Repeats  int     `json:"repeats,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.Code == nil || params.Bits == nil || params.Protocol == nil {
+				err = errors.New("RF transmit requires code, bits, and protocol")
+			} else if *params.Code == 0 {
+				err = errors.New("RF code must be nonzero")
+			} else if *params.Bits < 1 || *params.Bits > 32 {
+				err = errors.New("RF bits must be 1..32")
+			} else if *params.Protocol < 1 || *params.Protocol > 12 {
+				err = errors.New("RF protocol must be 1..12")
+			} else if params.PulseUS < 0 || params.PulseUS > 65535 {
+				err = errors.New("RF pulse_us must be 0..65535")
+			} else if params.Repeats < 0 || params.Repeats > 20 {
+				err = errors.New("RF repeats must be 1..20 when supplied")
+			} else {
+				err = service.Client.TransmitRF(
+					ctx, *params.Code, byte(*params.Bits), byte(*params.Protocol),
+					uint16(params.PulseUS), byte(params.Repeats),
+				)
+			}
+			if err == nil {
+				repeats := params.Repeats
+				if repeats == 0 {
+					repeats = 1
+				}
+				result = map[string]any{
+					"transmitted": true, "code": *params.Code,
+					"bits": *params.Bits, "protocol": *params.Protocol,
+					"pulse_us": params.PulseUS, "repeats": repeats,
+				}
+			}
+		}
 	case "controller.history.status":
 		var params struct {
 			Since string `json:"since,omitempty"`
@@ -885,6 +1056,8 @@ func (service *Service) browserUISettings() browserUISettings {
 		AppTitle:        productidentity.Title(ui.AppTitle),
 		SetupComplete:   ui.SetupComplete,
 		WelcomeMelody:   ui.WelcomeMelody,
+		Appearance:      browserAppearanceFromConfig(ui.Appearance),
+		AppearanceETag:  appearanceETag(ui.Appearance),
 		SegmentScroll:   ui.SegmentScroll,
 		PeripheralNames: clonePeripheralNames(ui.PeripheralNames),
 		Peripherals:     appconfig.PeripheralDescriptors(),
@@ -1342,6 +1515,11 @@ func commandCapability(command string) string {
 			return capabilityRead
 		}
 		return capabilityAutomations
+	case "webhook":
+		if len(words) >= 2 && (words[1] == "status" || words[1] == "pending" || words[1] == "dead") {
+			return capabilityRead
+		}
+		return capabilityIntegrations
 	case "hotkeys":
 		if len(words) == 2 && words[1] == "status" {
 			return capabilityRead
@@ -1660,18 +1838,20 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		config := service.hostConfig()
-		name := productidentity.Title(config.UI.AppTitle)
+		settings := service.browserUISettings()
 		writeHTTPJSON(writer, http.StatusOK, map[string]any{
-			"name":           name,
-			"host_version":   strings.TrimSpace(service.HostVersion),
-			"source_hash":    strings.TrimSpace(service.HostSourceHash),
-			"build_time":     strings.TrimSpace(service.HostBuildTime),
-			"setup_complete": config.UI.SetupComplete,
-			"welcome_melody": config.UI.WelcomeMelody,
-			"api_version":    APIVersion,
-			"websocket_path": webSocketPath,
-			"socket_io_path": socketIOPath,
-			"auth_required":  strings.TrimSpace(service.currentAuthToken()) != "",
+			"name":            settings.AppTitle,
+			"host_version":    strings.TrimSpace(service.HostVersion),
+			"source_hash":     strings.TrimSpace(service.HostSourceHash),
+			"build_time":      strings.TrimSpace(service.HostBuildTime),
+			"setup_complete":  config.UI.SetupComplete,
+			"welcome_melody":  config.UI.WelcomeMelody,
+			"appearance":      settings.Appearance,
+			"appearance_etag": settings.AppearanceETag,
+			"api_version":     APIVersion,
+			"websocket_path":  webSocketPath,
+			"socket_io_path":  socketIOPath,
+			"auth_required":   strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device": config.Integrations.LocalDevice.Enabled,
 				"data_hub":     config.Integrations.DataHub.Enabled,

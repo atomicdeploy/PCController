@@ -390,6 +390,70 @@ func TestHostConfigCommandUpdatesApplicationTitle(t *testing.T) {
 	}
 }
 
+func TestHostConfigCommandUpdatesAppearanceWithoutNoOpWrites(t *testing.T) {
+	runtime := New(Options{})
+	config := appconfig.Defaults()
+	writes := 0
+	engine := NewCommandEngine(runtime, CommandOptions{
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			config = candidate
+			writes++
+			return nil
+		},
+	})
+
+	for _, command := range []string{
+		"config set ui.appearance.theme dark",
+		"config set ui.appearance.locale fa",
+		"config set ui.appearance.direction rtl",
+		"config set ui.appearance.reduce_motion on",
+		"config set ui.appearance.compact_numbers true",
+		"config set ui.appearance.audio_muted yes",
+		"config set ui.appearance.audio_volume 37%",
+	} {
+		if output, err := engine.Execute(context.Background(), command); err != nil || !strings.Contains(output, "hot-reload queued") {
+			t.Fatalf("%q output=%q err=%v", command, output, err)
+		}
+	}
+	appearance := config.UI.Appearance
+	if appearance.Theme != "dark" || appearance.Locale != "fa" || appearance.Direction != "rtl" ||
+		!appearance.ReduceMotion || !appearance.CompactNumbers || !appearance.AudioMuted || appearance.AudioVolume != 0.37 {
+		t.Fatalf("appearance=%#v", appearance)
+	}
+	if output, err := engine.Execute(context.Background(), "config set ui.appearance.theme dark"); err != nil || output != "ui.appearance.theme unchanged" {
+		t.Fatalf("no-op output=%q err=%v", output, err)
+	}
+	if writes != 7 {
+		t.Fatalf("writes=%d, want 7", writes)
+	}
+	for _, command := range []string{
+		"config set ui.appearance.theme ultraviolet",
+		"config set ui.appearance.audio_volume 101",
+		"config set ui.appearance.reduce_motion perhaps",
+	} {
+		if _, err := engine.Execute(context.Background(), command); err == nil {
+			t.Fatalf("invalid command %q was accepted", command)
+		}
+	}
+	if writes != 7 {
+		t.Fatalf("invalid writes changed count to %d", writes)
+	}
+}
+
+func TestHostConfigSetRequiresReadableConfiguration(t *testing.T) {
+	engine := NewCommandEngine(New(Options{}), CommandOptions{
+		UpdateHostConfig: func(func(*appconfig.Config) error) error { return nil },
+	})
+	if _, err := engine.Execute(context.Background(), "config set ui.appearance.theme dark"); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("missing HostConfig err=%v", err)
+	}
+}
+
 func TestOSCommandsExposeStatusPolicyAndDenyExecutionByDefault(t *testing.T) {
 	runtime := New(Options{})
 	config := appconfig.Defaults()
