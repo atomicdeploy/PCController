@@ -73,27 +73,56 @@ jobs:
         shell: bash
         run: node Tools/Dependencies/export-lock.mjs export-host --output "$GITHUB_OUTPUT"
 
-      - name: "🧰 Select native Windows C compiler"
+      - name: "🧰 Install checksum-verified Windows C compiler"
         if: matrix.windows
-        shell: cmd
+        shell: pwsh
         run: |
-          @echo off
-          set "MINGW_BIN=C:\mingw64\bin"
-          set "GCC=C:\mingw64\bin\gcc.exe"
-          if not exist "%GCC%" (
-            echo The GitHub Windows image is missing its standalone MinGW64 compiler: %GCC% 1>&2
-            exit /b 1
-          )
-          "%GCC%" -dumpmachine > "%RUNNER_TEMP%\host-gcc-target.txt"
-          findstr /x /c:"x86_64-w64-mingw32" "%RUNNER_TEMP%\host-gcc-target.txt" >nul
-          if errorlevel 1 (
-            echo Expected x86_64-w64-mingw32 GCC; detected: 1>&2
-            type "%RUNNER_TEMP%\host-gcc-target.txt" 1>&2
-            exit /b 1
-          )
-          >>"%GITHUB_PATH%" echo %MINGW_BIN%
-          >>"%GITHUB_ENV%" echo CC=gcc.exe
-          "%GCC%" --version
+          $archive = Join-Path $env:RUNNER_TEMP 'pccontroller-winlibs.zip'
+          $destination = Join-Path $env:RUNNER_TEMP 'pccontroller-winlibs'
+          curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' `
+            '${{ steps.host-dependencies.outputs.windows_c_compiler_url }}' --output $archive
+          if ($LASTEXITCODE -ne 0) { throw "Windows compiler download failed with exit code $LASTEXITCODE" }
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedHash = '${{ steps.host-dependencies.outputs.windows_c_compiler_sha256 }}'
+          if ($actualHash -ne $expectedHash) { throw "Windows compiler SHA-256 mismatch: expected $expectedHash, found $actualHash" }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          $gcc = Get-ChildItem -LiteralPath $destination -Recurse -File -Filter gcc.exe |
+            Where-Object { $_.FullName -match '[\\/]mingw64[\\/]bin[\\/]gcc\.exe$' } |
+            Select-Object -First 1
+          if (-not $gcc) { throw 'Verified Windows compiler archive contains no mingw64/bin/gcc.exe' }
+          $target = (& $gcc.FullName -dumpmachine).Trim()
+          $version = (& $gcc.FullName -dumpfullversion -dumpversion).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Verified Windows compiler probe failed with exit code $LASTEXITCODE" }
+          $expectedTarget = '${{ steps.host-dependencies.outputs.windows_c_compiler_target }}'
+          $expectedVersion = '${{ steps.host-dependencies.outputs.windows_c_compiler_gcc_version }}'
+          if ($target -ne $expectedTarget) { throw "Windows compiler target mismatch: expected $expectedTarget, found $target" }
+          if ($version -ne $expectedVersion) { throw "Windows compiler version mismatch: expected $expectedVersion, found $version" }
+          $gcc.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "CC=$($gcc.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $gcc.FullName --version
+
+      - name: "📦 Install checksum-verified UPX"
+        if: matrix.windows
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'pccontroller-upx.zip'
+          $destination = Join-Path $env:RUNNER_TEMP 'pccontroller-upx'
+          curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' `
+            '${{ steps.host-dependencies.outputs.upx_windows_url }}' --output $archive
+          if ($LASTEXITCODE -ne 0) { throw "UPX download failed with exit code $LASTEXITCODE" }
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expectedHash = '${{ steps.host-dependencies.outputs.upx_windows_sha256 }}'
+          if ($actualHash -ne $expectedHash) { throw "UPX SHA-256 mismatch: expected $expectedHash, found $actualHash" }
+          Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+          $upx = Get-ChildItem -LiteralPath $destination -Recurse -File -Filter upx.exe | Select-Object -First 1
+          if (-not $upx) { throw 'Verified UPX archive contains no upx.exe' }
+          $version = (& $upx.FullName --version | Select-Object -First 1).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "Verified UPX probe failed with exit code $LASTEXITCODE" }
+          $expectedVersion = '${{ steps.host-dependencies.outputs.upx_version }}'
+          if ($version -notmatch "^upx $([regex]::Escape($expectedVersion))(?:\\s|$)") {
+            throw "UPX version mismatch: expected $expectedVersion, found $version"
+          }
+          $upx.DirectoryName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: "🐹 Install Go from go.mod"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -161,7 +190,7 @@ jobs:
       - name: "🚀 Build and validate complete Windows package"
         if: matrix.windows
         shell: cmd
-        run: build.cmd --host-only --no-upx --version %PCCONTROLLER_VERSION%
+        run: build.cmd --host-only --version %PCCONTROLLER_VERSION%
 
       - name: "🧷 Assert both defaults are embedded in the host manifest"
         if: inputs.firmware_artifact_name != ''

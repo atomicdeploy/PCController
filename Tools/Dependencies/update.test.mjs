@@ -205,6 +205,18 @@ test('host CI consumes exact Node.js and go-winres identities from the canonical
   assert.doesNotMatch(workflow, /node-version:\s*["']?24["']?\s*$/mu)
 })
 
+test('Windows host CI installs the locked compiler and UPX archives before full packaging', () => {
+  const workflow = readFileSync(join(repo, '.github', 'workflows', 'host.yml'), 'utf8')
+  assert.match(workflow, /windows_c_compiler_url/u)
+  assert.match(workflow, /windows_c_compiler_sha256/u)
+  assert.match(workflow, /windows_c_compiler_gcc_version/u)
+  assert.match(workflow, /upx_windows_url/u)
+  assert.match(workflow, /upx_windows_sha256/u)
+  assert.match(workflow, /Get-FileHash[^\n]+SHA256/u)
+  assert.doesNotMatch(workflow, /C:\\mingw64/u)
+  assert.doesNotMatch(workflow, /--host-only --no-upx/u)
+})
+
 test('dependency output uses the shared Chalk and Unicode table renderer', () => {
   const updater = readFileSync(join(here, 'update.mjs'), 'utf8')
   assert.match(updater, /createChalk, renderUnicodeTable/)

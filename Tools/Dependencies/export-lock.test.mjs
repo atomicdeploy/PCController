@@ -46,8 +46,13 @@ test('canonical host lock exports exact bootstrap versions and validates source 
   assert.equal(outputs.go_winres_sum, hostLock.go_winres.sum)
   assert.equal(outputs.upx_version, hostLock.upx.version)
   assert.equal(outputs.windows_c_compiler_version, hostLock.windows_c_compiler.package_version)
+  assert.equal(outputs.windows_c_compiler_gcc_version, hostLock.windows_c_compiler.compiler_version)
   assert.equal(outputs.windows_c_compiler_target, 'x86_64-w64-mingw32')
+  assert.equal(outputs.windows_c_compiler_url, hostLock.windows_c_compiler.installer_url)
   assert.equal(outputs.windows_c_compiler_sha256, hostLock.windows_c_compiler.installer_sha256)
+  const windowsUPX = hostLock.upx.assets.find((asset) => asset.name.endsWith('win64.zip'))
+  assert.equal(outputs.upx_windows_url, windowsUPX.url)
+  assert.equal(outputs.upx_windows_sha256, windowsUPX.sha256)
 })
 
 test('host lock replay rejects a changed npm integrity hash', () => {

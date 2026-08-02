@@ -73,6 +73,7 @@ function validateHostLock(lock) {
   invariant(/^\d+(?:\.\d+){2}$/u.test(lock?.windows_c_compiler?.compiler_version ?? ''), 'host-tool lock is missing an exact GCC version')
   invariant(/^x86_64-.*(?:mingw(?:32|64)?|windows-gnu)$/iu.test(lock?.windows_c_compiler?.target ?? ''), 'host-tool lock has an incompatible Windows C compiler target')
   invariant(/^[0-9a-f]{40}$/u.test(lock?.windows_c_compiler?.manifest_git_sha ?? ''), 'host-tool lock is missing the compiler manifest Git identity')
+  invariant(/^https:\/\//u.test(lock?.windows_c_compiler?.installer_url ?? ''), 'host-tool lock is missing the compiler archive URL')
   invariant(/^[0-9a-f]{64}$/u.test(lock?.windows_c_compiler?.installer_sha256 ?? ''), 'host-tool lock is missing the compiler archive SHA-256')
   invariant(Array.isArray(lock?.upx?.assets) && lock.upx.assets.length, 'host-tool lock is missing UPX assets')
   for (const asset of lock.upx.assets) {
@@ -122,6 +123,8 @@ function currentOutputs(lock, product) {
 
 function hostOutputs(lock) {
   validateHostLock(lock)
+  const windowsUPX = lock.upx.assets.find((asset) => asset.name.endsWith('win64.zip'))
+  invariant(windowsUPX, 'host-tool lock is missing the Windows x64 UPX asset')
   return {
     node_version: lock.node.version,
     go_winres_module: lock.go_winres.module,
@@ -130,9 +133,13 @@ function hostOutputs(lock) {
     go_winres_go_mod_sum: lock.go_winres.go_mod_sum,
     windows_c_compiler_package: lock.windows_c_compiler.package_id,
     windows_c_compiler_version: lock.windows_c_compiler.package_version,
+    windows_c_compiler_gcc_version: lock.windows_c_compiler.compiler_version,
     windows_c_compiler_target: lock.windows_c_compiler.target,
+    windows_c_compiler_url: lock.windows_c_compiler.installer_url,
     windows_c_compiler_sha256: lock.windows_c_compiler.installer_sha256,
     upx_version: lock.upx.version,
+    upx_windows_url: windowsUPX.url,
+    upx_windows_sha256: windowsUPX.sha256,
     host_tool_lock_path: 'Tools/Dependencies/resolved-tools-lock.json',
   }
 }
