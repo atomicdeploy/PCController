@@ -79,4 +79,3 @@ export function emitStartupConsoleIntroduction(
   target.debug('%cTransport%c %s', labelStyle, resetStyle, streamLabel(facts.streamState))
   target.groupEnd()
 }
-

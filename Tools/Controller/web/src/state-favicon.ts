@@ -44,4 +44,3 @@ export function updateRuntimeFavicon(state: ControllerFaviconState, root: Docume
   link.dataset.state = state
   link.href = controllerFaviconDataURL(state)
 }
-

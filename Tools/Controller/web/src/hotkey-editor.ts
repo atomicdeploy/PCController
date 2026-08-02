@@ -207,4 +207,3 @@ export function hotkeyConfigurationMatches(response: HotkeySettingsResponse): Re
   }
   return { state: 'active', detail: `${expected.length} global shortcut${expected.length === 1 ? '' : 's'} active.` }
 }
-

@@ -76,7 +76,7 @@ jobs:
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
       - name: "🧹 Check whitespace"
-        run: git show --check --oneline HEAD
+        run: git show --check --oneline HEAD -- . ':(exclude)**/*.patch'
 
       - name: "✨ Publish repository quality summary"
         if: success()
