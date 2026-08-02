@@ -46,6 +46,30 @@ var protocolMenuPages = []MenuPageInfo{
 	{13, "rf-learn", "LErn", "RF Learn", "Learn and map 433 MHz controls"},
 }
 
+const voltageFirstMenuBuildHash uint32 = 0x5DF10D05
+
+// voltageFirstMenuPages is the frozen directory for the verified pre-MENU_LIST
+// build above. Unknown builds must not inherit these historical numeric IDs:
+// without an exact identity match, the current catalog remains the safe host
+// fallback.
+var voltageFirstMenuPages = []MenuPageInfo{
+	{0, "voltage", "VOLT", "Voltage", "Supply and INA219 bus voltage"},
+	{1, "current", "CURR", "Current", "INA219 current and power"},
+	{2, "temperature-led", "tLED", "LED Temperature", "Illumination temperature sensor"},
+	{3, "temperature-bt", "t-bt", "BT Audio Temperature", "BT-5.0-Pro Audio temperature sensor"},
+	{4, "illumination", "LItE", "Illumination", "Enclosure illumination mode and levels"},
+	{5, "bt-audio", "bt", "BT Audio", "BT-5.0-Pro Audio indicator state"},
+	{6, "settings", "Snd", "Sound and Settings", "Sound, display, status color, and decimals"},
+	{7, "pwm-test", "PWM", "PWM Test", "PWM output test and channel selection"},
+	{8, "relay-test", "rELY", "Relay Test", "Individual relay output test"},
+	{9, "keys", "KEY", "Key Identification", "Identify K1 through K4"},
+	{10, "user-pwm", "uPWM", "User PWM", "Eight user MOSFET output values"},
+	{11, "user-relays", "r5-8", "User Relays", "R5 through R8 toggle or momentary control"},
+	{12, "motion", "MOVE", "Motion", "Side A and Side B direction/output control"},
+	{13, "rf-learn", "LErn", "RF Learn", "Learn and map 433 MHz controls"},
+	{14, "status", "STAT", "Status", "Incoming events and controller status"},
+}
+
 func MenuPages() []MenuPageInfo {
 	return append([]MenuPageInfo(nil), protocolMenuPages...)
 }
@@ -57,11 +81,18 @@ func MenuPagesForCapabilities(capabilities uint32) []MenuPageInfo {
 	return MenuPages()
 }
 
-// menuPagesForHello supplies the current semantic fallback when a controller
-// cannot advertise its own directory. Unpublished alpha layouts are not
-// carried as compatibility baggage.
+// menuPagesForHello selects a host fallback only when the board cannot
+// advertise its own directory. An advertised directory always identifies the
+// current generation; a historical layout is used only for an exact, stable
+// compact HELLO build identity.
 func menuPagesForHello(hello native.Hello) []MenuPageInfo {
-	_ = hello
+	if hello.Capabilities&native.CapabilityMenuDirectory != 0 {
+		return MenuPages()
+	}
+	if hello.IdentitySchema == native.IdentitySchemaCompact &&
+		hello.BuildHash == voltageFirstMenuBuildHash {
+		return append([]MenuPageInfo(nil), voltageFirstMenuPages...)
+	}
 	return MenuPages()
 }
 
@@ -119,6 +150,10 @@ func QueryMenuCatalog(ctx context.Context, runtime *Runtime) (MenuCatalog, error
 	} else {
 		pages := menuPagesForHello(snapshot.Hello)
 		source := "host current manifest (firmware has no MENU_LIST capability)"
+		if snapshot.Hello.IdentitySchema == native.IdentitySchemaCompact &&
+			snapshot.Hello.BuildHash == voltageFirstMenuBuildHash {
+			source = "host build-identity compatibility manifest (firmware has no MENU_LIST capability)"
+		}
 		catalog = MenuCatalog{
 			Source:       source,
 			LiveList:     false,
