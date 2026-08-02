@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
 const normalized = (path) => String(path).replaceAll("\\", "/");
 
@@ -90,10 +90,33 @@ export function isGeneratedOrBinaryPath(path) {
   return generatedPathPatterns.some((pattern) => pattern.test(value));
 }
 
+// Read a bounded text candidate from one opened descriptor. Returning the
+// content (instead of reopening by path after a sample) keeps the size,
+// binary check, and bytes passed to policy scanners on the same file object.
+export function readOrdinaryTextFile(path) {
+  if (isGeneratedOrBinaryPath(path)) return null;
+
+  const descriptor = openSync(path, "r");
+  try {
+    const size = fstatSync(descriptor).size;
+    if (size > 2 * 1024 * 1024) return null;
+    const content = Buffer.allocUnsafe(size);
+    let offset = 0;
+    while (offset < size) {
+      const bytesRead = readSync(descriptor, content, offset, size - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    const complete = content.subarray(0, offset);
+    if (complete.includes(0)) return null;
+    return complete.toString("utf8");
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 export function isOrdinaryTextFile(path) {
-  if (isGeneratedOrBinaryPath(path) || statSync(path).size > 2 * 1024 * 1024) return false;
-  const sample = readFileSync(path).subarray(0, 8192);
-  return !sample.includes(0);
+  return readOrdinaryTextFile(path) !== null;
 }
 
 export function privacyFindings(path, text, { repository = "" } = {}) {
@@ -146,16 +169,34 @@ export function actionPinFindings(path, text) {
   return findings;
 }
 
+// Strip rendered Markdown tags without a replace-and-rescan sanitizer. Angle
+// punctuation is immaterial to the resulting GitHub slug, so unmatched angle
+// brackets are discarded as well.
+function stripHeadingTags(value) {
+  let result = "";
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === "<") {
+      const closing = value.indexOf(">", index + 1);
+      if (closing >= 0) index = closing;
+      continue;
+    }
+    if (value[index] !== ">") result += value[index];
+  }
+  return result;
+}
+
 function markdownHeadingLabel(value) {
-  return value
+  const markdownLabel = value
     .replace(/!\[([^\]]*)\]\([^)]*\)/gu, "$1")
     .replace(/\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/<[^>]+>/gu, "")
-    .replace(/[`*_~]/gu, "")
+    .replace(/[`*_~]/gu, "");
+  return stripHeadingTags(markdownLabel)
     .replace(/&(?:amp|lt|gt|quot|#39);/gu, (entity) => ({
       "&amp;": "&",
-      "&lt;": "<",
-      "&gt;": ">",
+      // Angle punctuation is removed by githubHeadingSlug, so omitting it here
+      // preserves the slug without recreating markup after tag stripping.
+      "&lt;": "",
+      "&gt;": "",
       "&quot;": '"',
       "&#39;": "'",
     })[entity])

@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
   actionPinFindings,
   isGeneratedOrBinaryPath,
+  isOrdinaryTextFile,
   markdownAnchors,
   privacyFindings,
+  readOrdinaryTextFile,
 } from "./repository-policy.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -113,6 +116,26 @@ test("generated and ignored-equivalent paths are not text-scan candidates", () =
   assert.equal(isGeneratedOrBinaryPath("Project/Controller.cpp"), false);
 });
 
+test("ordinary text detection reads one opened file and rejects binary or oversized input", () => {
+  const directory = mkdtempSync(join(tmpdir(), "repository-policy-text-"));
+  try {
+    const textPath = join(directory, "plain.txt");
+    const binaryPath = join(directory, "binary.dat");
+    const oversizedPath = join(directory, "oversized.txt");
+    writeFileSync(textPath, "plain text\n", "utf8");
+    writeFileSync(binaryPath, Buffer.from([0x70, 0x00, 0x71]));
+    writeFileSync(oversizedPath, Buffer.alloc(2 * 1024 * 1024 + 1, 0x61));
+
+    assert.equal(isOrdinaryTextFile(textPath), true);
+    assert.equal(readOrdinaryTextFile(textPath), "plain text\n");
+    assert.equal(isOrdinaryTextFile(binaryPath), false);
+    assert.equal(readOrdinaryTextFile(binaryPath), null);
+    assert.equal(isOrdinaryTextFile(oversizedPath), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("Markdown heading anchors ignore examples and disambiguate duplicates", () => {
   const anchors = markdownAnchors(`
 # Getting Started
@@ -134,4 +157,13 @@ test("Markdown heading anchors ignore examples and disambiguate duplicates", () 
     "styled-section",
   ]);
   assert.equal(anchors.has("example-only"), false);
+});
+
+test("Markdown heading anchors cannot recreate markup while simplifying labels", () => {
+  const anchors = markdownAnchors(`
+# <kbd>Control</kbd>
+# [<scr](https://example.invalid)[ipt>](https://example.invalid) Visible
+# &lt;script&gt;Literal&lt;/script&gt;
+`);
+  assert.deepEqual([...anchors], ["control", "visible", "scriptliteralscript"]);
 });

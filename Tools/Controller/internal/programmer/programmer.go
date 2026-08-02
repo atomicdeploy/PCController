@@ -303,7 +303,7 @@ func ExecuteWithRunner(
 	options Options,
 	output io.Writer,
 	runner CommandRunner,
-) error {
+) (resultErr error) {
 	if runner == nil {
 		return errors.New("programmer operation requires a command runner")
 	}
@@ -329,6 +329,15 @@ func ExecuteWithRunner(
 		if err != nil {
 			return err
 		}
+		compileLock, err := acquireCompileExecutionLock(ctx, compileIdentity, output)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if releaseErr := compileLock.Release(); releaseErr != nil {
+				resultErr = errors.Join(resultErr, releaseErr)
+			}
+		}()
 		if err := clearCompileManifest(compileIdentity.OutputDir); err != nil {
 			return err
 		}
