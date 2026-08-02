@@ -596,10 +596,24 @@ func (service *Service) run(id string, operation func(context.Context, ProgressF
 		status.BootloaderOutcome = BootloaderSucceeded
 	}
 	status.UpdatedAt = time.Now().UTC()
+	if err := service.persistTerminalOperationLocked(id, status); err != nil {
+		status.State = "failed"
+		status.Detail = fmt.Sprintf("persist completed operation journal: %v", err)
+		status.ErrorCode = "operation_journal_failed"
+		status.UpdatedAt = time.Now().UTC()
+		_ = service.persistTerminalOperationLocked(id, status)
+	}
 	service.operations[id] = status
 	service.mu.Unlock()
-	_ = service.persistOperation(id)
 	service.publishStatus(status)
+}
+
+// persistTerminalOperationLocked makes the terminal journal durable before the
+// corresponding in-memory state becomes observable. The caller must hold mu.
+func (service *Service) persistTerminalOperationLocked(id string, status UpdateStatus) error {
+	journal := service.operationMeta[id]
+	journal.Status = status
+	return writeJSONAtomic(service.operationJournalPath(id), journal)
 }
 
 func (service *Service) runTransaction(id string, operation func(context.Context, ProgressFunc) (string, error)) {
@@ -800,9 +814,14 @@ func (service *Service) failOperation(id string, err error) {
 		}
 	}
 	status.UpdatedAt = time.Now().UTC()
+	if persistErr := service.persistTerminalOperationLocked(id, status); persistErr != nil {
+		status.Detail = fmt.Sprintf("%s; persist failed operation journal: %v", status.Detail, persistErr)
+		status.ErrorCode = "operation_journal_failed"
+		status.UpdatedAt = time.Now().UTC()
+		_ = service.persistTerminalOperationLocked(id, status)
+	}
 	service.operations[id] = status
 	service.mu.Unlock()
-	_ = service.persistOperation(id)
 	service.publishStatus(status)
 }
 
