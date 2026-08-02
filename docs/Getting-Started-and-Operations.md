@@ -337,10 +337,28 @@ and save/discard behavior.
 
 ### RF
 
-RF commands can list, learn, remove, clear, transmit, and map records. A new
-learned record is unassigned until reviewed. Direct learned mappings to the
-motion relay group are rejected; use the side-action path so reed and sequencing
-rules remain active.
+The Web workbench and TUI RF page provide a guided A/B/C/D handset workflow.
+Select one labeled button, begin the bounded capture, press only that handset
+button, and verify the read-back identity (slot, code, bit length, protocol, and
+pulse timing) before choosing an action. A fresh identity starts on **Unmapped**
+and no A/B/C/D label is inferred to mean physical K1/K2/K3/K4. If that exact
+board record already has an explicit saved action, the review preserves it.
+The next handset step opens only after the Unmapped choice or an explicit
+mapping is acknowledged.
+
+The same surface reviews the complete board inventory, marks unmapped and
+duplicate identities as needing attention, and exposes explicit remap, remove,
+clear, and one-burst verification actions. Removal and clear require a separate
+confirmation. Transmit is always a single reviewed burst in the guided UI;
+isolate actuators and observe the intended receiver before confirming it. If the
+controller disconnects, the workflow pauses and hides device actions. Escape
+cancels an in-progress capture. In the TUI press `W` on the RF page, then use
+`A`, `B`, `C`, or `D` to choose a handset label and `Enter` to capture/confirm.
+
+RF commands and typed RPC can also list, learn, remove, clear, transmit, and map
+records. A new learned record is unassigned until reviewed. Direct learned
+mappings to the motion relay group are rejected; use the side-action path so
+reed and sequencing rules remain active.
 
 Record the remote, code, bit length, protocol, mapping, physical result, and
 stop behavior during commissioning.

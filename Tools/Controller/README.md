@@ -385,6 +385,12 @@ i2c scan
 reset lines|app|bootloader
 ```
 
+The Web workbench and TUI RF page (`W`) wrap these commands in a guided
+A/B/C/D handset flow. Each step opens one bounded capture, stops learning after
+the new record event, reads the exact stored identity back, and requires an
+explicit mapping confirmation. Both surfaces also flag unmapped/duplicate
+records and guard remap, remove, clear, and one-burst verification actions.
+
 Raw RF receive packets also produce host `rf.gesture` events. A new burst emits
 `down`; a short release emits `up` followed by `click` after the 400 ms
 double-click decision window; a second short burst in that window emits
@@ -510,6 +516,8 @@ Start cross-platform JSON-RPC IPC on loopback:
 bin\controller.exe ipc serve --port COM18
 bin\controller.exe ipc call --method controller.snapshot
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rf list\"}"
+bin\controller.exe ipc call --method controller.rf.map --params "{\"id\":3,\"action\":\"key\",\"target\":\"2\",\"behavior\":\"press\"}"
+bin\controller.exe ipc call --method controller.rf.transmit --params "{\"code\":1193046,\"bits\":24,\"protocol\":1,\"pulse_us\":350,\"repeats\":1}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"melody play notify\"}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rgb effect play attention\"}"
 bin\controller.exe ipc call --method controller.bridge.list
