@@ -92,7 +92,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
       PCCONTROLLER_RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.draft }}
-      PCCONTROLLER_RELEASE_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || github.event_name != 'workflow_dispatch' && contains(github.ref_name, '-') }}
+      PCCONTROLLER_RELEASE_PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && (inputs.prerelease || startsWith(inputs.tag, 'v0.')) || github.event_name != 'workflow_dispatch' && (startsWith(github.ref_name, 'v0.') || contains(github.ref_name, '-')) }}
 
     steps:
       - name: "📥 Check out source"
@@ -238,7 +238,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: "⚡ ${{ github.event.repository.name }} ${{ inputs.tag || github.ref_name }} · AVR & Cross-platform Suite"
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft }}
-          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || github.event_name != 'workflow_dispatch' && contains(github.ref_name, '-') }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && (inputs.prerelease || startsWith(inputs.tag, 'v0.')) || github.event_name != 'workflow_dispatch' && (startsWith(github.ref_name, 'v0.') || contains(github.ref_name, '-')) }}
           body_path: ${{ steps.showcase.outputs.release_notes }}
           generate_release_notes: false
           make_latest: false

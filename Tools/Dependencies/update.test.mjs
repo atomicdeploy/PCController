@@ -217,6 +217,12 @@ test('Windows host CI installs the locked compiler and UPX archives before full 
   assert.doesNotMatch(workflow, /--host-only --no-upx/u)
 })
 
+test('release workflow keeps every pre-1.0 tag in prerelease status', () => {
+  const workflow = readFileSync(join(repo, '.github', 'workflows', 'release.yml'), 'utf8')
+  const v0Rules = workflow.match(/startsWith\([^\n]+['"]v0\.['"]/gu) ?? []
+  assert.equal(v0Rules.length, 2)
+})
+
 test('dependency output uses the shared Chalk and Unicode table renderer', () => {
   const updater = readFileSync(join(here, 'update.mjs'), 'utf8')
   assert.match(updater, /createChalk, renderUnicodeTable/)
