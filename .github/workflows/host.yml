@@ -62,10 +62,10 @@ jobs:
         if: matrix.windows
         shell: pwsh
         run: |
-          $mingwBin = Join-Path $env:ProgramFiles "Git\mingw64\bin"
+          $mingwBin = "C:\mingw64\bin"
           $gcc = Join-Path $mingwBin "gcc.exe"
           if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
-            throw "The GitHub Windows image is missing Git MinGW64: $gcc"
+            throw "The GitHub Windows image is missing its standalone MinGW64 compiler: $gcc"
           }
           $target = (& $gcc -dumpmachine).Trim()
           if ($target -ne "x86_64-w64-mingw32") {
