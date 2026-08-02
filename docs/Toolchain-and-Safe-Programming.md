@@ -392,20 +392,30 @@ tools\toolchain\downloads\           isolated download cache
 tools\toolchain\user\                isolated libraries/sketchbook
 ```
 
-No unpublished settings-version migration chain is retained in normal
-firmware. Offline settings tools operate on a complete, validated EEPROM backup
-and preserve RF, reset-journal, and unknown bytes outside the current settings
-record:
+No historical settings-version chain is retained in normal firmware. Offline
+settings tools operate on a complete, validated EEPROM backup and preserve RF,
+reset-journal, and unknown bytes outside the current settings record. The host
+also recognizes exactly two repository-backed historical profiles rather than
+guessing an unversioned layout:
 
 ```console
 controller eeprom inspect --backup-manifest BACKUP\manifest.json
 controller eeprom export --backup-manifest BACKUP\manifest.json --output SETTINGS.hex
 controller eeprom import --backup-manifest BACKUP\manifest.json --settings SETTINGS.hex --output EEPROM-RESTORE.hex
+controller eeprom migrate --backup-manifest BACKUP\manifest.json --from legacy-v1/unversioned-19+crc8 --expect-eeprom-sha256 SOURCE_EEPROM_SHA256 --output EEPROM-MIGRATED.hex
 controller eeprom restore --backup-manifest BACKUP\manifest.json --output EEPROM-ORIGINAL.hex
 ```
 
-Outputs are hashed and never overwritten. These file operations do not write a
-board.
+Migration requires a complete manifest, its hash-verified full EEPROM artifact,
+an explicit `legacy-v1/unversioned-19+crc8` or
+`development-v2/unversioned-29+crc8` selector, and the expected source EEPROM
+SHA-256 printed by `inspect`. The generated full restore candidate is hashed,
+never overwrites an existing file, is reopened and byte-compared, and succeeds
+only after the original backup validates again. These file operations do not
+open or write a board; an explicit
+`controller program --operation write-eeprom ... --confirm-eeprom-write`
+invocation and its independent programmer readback remain separate
+authorization and verification steps.
 
 ## Verification boundary
 

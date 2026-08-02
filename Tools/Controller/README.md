@@ -709,17 +709,22 @@ the native application was reachable before entering the bootloader. Firmware
 blobs are stored by SHA-256 and reused rather than duplicated. A partial read
 remains marked `incomplete`; it is never reported as a complete backup.
 
-### Offline current settings transfer
+### Offline settings transfer and historical migration
 
-No unpublished-build migration/version chain is retained. File-only commands
-understand the current semantic 31-value-byte plus CRC-8 settings record and
-report any other width/layout as unsupported:
+No migration code is carried by the AVR. File-only host commands understand
+the current semantic 31-value-byte plus CRC-8 settings record, plus two
+explicit historical migration profiles recovered from this repository's real
+development layouts:
+
+- `legacy-v1/unversioned-19+crc8`;
+- `development-v2/unversioned-29+crc8`.
 
 ```console
 bin\controller.exe eeprom inspect --input .\eeprom.hex
 bin\controller.exe eeprom inspect --backup-manifest .\backup\manifest.json
 bin\controller.exe eeprom export --backup-manifest .\backup\manifest.json --output .\settings.hex
 bin\controller.exe eeprom import --backup-manifest .\backup\manifest.json --settings .\settings.hex --output .\eeprom-restore.hex
+bin\controller.exe eeprom migrate --backup-manifest .\backup\manifest.json --from legacy-v1/unversioned-19+crc8 --expect-eeprom-sha256 SOURCE_EEPROM_SHA256 --output .\eeprom-migrated.hex
 bin\controller.exe eeprom restore --backup-manifest .\backup\manifest.json --output .\eeprom-original.hex
 ```
 
@@ -728,6 +733,23 @@ Import overlays only EEPROM addresses `0x0020..0x003E` and preserves every
 other byte from the full 1,024-byte backup. Outputs are canonical, hashed,
 created without overwrite, and never written to a device by these commands.
 An actual EEPROM write remains a separate explicitly confirmed operation.
+
+Migration is backup-first and deliberately refuses a loose `.eep`/`.hex`
+input. First run `eeprom inspect --backup-manifest`; copy its
+`source_sha256` into `--expect-eeprom-sha256`, and select the exact historical
+`--from` profile. The host validates the complete manifest schema/status and
+every artifact hash, compares that explicit EEPROM hash, authenticates the
+selected old record with CRC-8 and semantic bounds, and rejects a valid current
+record. It creates a full 1,024-byte restore candidate outside the immutable
+backup directory, preserves every byte outside `0x0020..0x003F`, reopens and
+byte-compares the persisted output, then revalidates the source backup.
+
+Retired fields are not reinterpreted as current live-output state: the old
+reserved/programming bit is cleared, PWM boot mode becomes output-persistence
+off, relay restore mask starts at zero, and the historical 1/100 ms break flag
+becomes an exact break value. Development-v2 menu order/visibility is retained
+after removing former page 14; legacy-v1 receives the current all-visible
+identity order. Every lossy/default decision is included in the JSON report.
 
 The application protocol and Urboot/AVRDUDE are mutually exclusive users of
 the same UART. Programming closes the application session before invoking the

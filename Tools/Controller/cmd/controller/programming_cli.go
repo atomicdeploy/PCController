@@ -481,7 +481,7 @@ func monitorPrimaryFirmwareUpdate(
 }
 
 func runEEPROM(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: controller eeprom inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
+	const usage = "usage: controller eeprom inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | migrate --backup-manifest MANIFEST.json --from FORMAT --expect-eeprom-sha256 HASH --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
@@ -554,6 +554,43 @@ func runEEPROM(args []string, stdout, stderr io.Writer) error {
 			*manifest, *settings, *output,
 		)
 		return writeEEPROMTransferResult(stdout, result, err)
+
+	case "migrate":
+		flags := flag.NewFlagSet("eeprom migrate", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		manifest := flags.String("backup-manifest", "", "validated complete backup manifest")
+		from := flags.String(
+			"from",
+			"",
+			"explicit legacy layout: "+programmer.EEPROMMigrationLegacyV1+" or "+programmer.EEPROMMigrationLegacyV2,
+		)
+		expectedEEPROMHash := flags.String(
+			"expect-eeprom-sha256",
+			"",
+			"expected EEPROM artifact SHA-256 printed by eeprom inspect",
+		)
+		output := flags.String("output", "", "new no-overwrite full current EEPROM restore image")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || strings.TrimSpace(*manifest) == "" ||
+			strings.TrimSpace(*from) == "" || strings.TrimSpace(*expectedEEPROMHash) == "" ||
+			strings.TrimSpace(*output) == "" {
+			return errors.New(usage)
+		}
+		result, err := programmer.MigrateLegacyEEPROMBackup(programmer.EEPROMMigrationOptions{
+			BackupManifest:     *manifest,
+			SourceFormat:       *from,
+			ExpectedEEPROMHash: *expectedEEPROMHash,
+			OutputPath:         *output,
+		})
+		if err != nil {
+			return err
+		}
+		encoded, _ := json.MarshalIndent(result, "", "  ")
+		fmt.Fprintln(stdout, string(encoded))
+		fmt.Fprintln(stdout, "Validated backup remained unchanged; persisted output readback passed; no serial port was opened and no board EEPROM was written.")
+		return nil
 	default:
 		return errors.New(usage)
 	}
