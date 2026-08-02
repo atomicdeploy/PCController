@@ -77,6 +77,8 @@ type MacroRunner struct {
 	cancel      context.CancelFunc
 	cancelKeep  bool
 	done        chan struct{}
+	presentOnce sync.Once
+	present     chan MacroState
 
 	recordMu      sync.RWMutex
 	recording     MacroRecordingState
@@ -729,6 +731,7 @@ func (runner *MacroRunner) recordEvidence(index int, delta int32, succeeded bool
 			"mcu_delta_us": strconv.FormatInt(int64(delta), 10),
 		},
 	})
+	runner.queueMacroPresentation(state)
 }
 
 func (runner *MacroRunner) finishPlayback(
@@ -805,6 +808,7 @@ func (runner *MacroRunner) publishLifecycle(lifecycle string, state MacroState, 
 			"dispatch_errors": strconv.Itoa(int(state.DispatchErrors)),
 		},
 	})
+	runner.queueMacroPresentation(state)
 }
 
 func compileMacro(macro appconfig.Macro) (compiledMacro, error) {
