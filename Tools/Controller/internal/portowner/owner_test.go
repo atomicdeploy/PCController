@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 )
 
 type fakeEnumerator struct {
@@ -78,75 +75,4 @@ func TestTerminationRequiresExactConfirmationAndProtectsController(t *testing.T)
 	if err := validateTermination(protected, "TERMINATE 99", 12, `C:\Apps\controller.exe`); err == nil {
 		t.Fatal("primary/controller executable was not protected")
 	}
-}
-
-func TestOwnerScanCoordinatorSingleflightsAndCaches(t *testing.T) {
-	coordinator := newOwnerScanCoordinator()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	var calls atomic.Int32
-	scan := func(context.Context, string) (Owner, bool, error) {
-		if calls.Add(1) == 1 {
-			close(started)
-		}
-		<-release
-		return Owner{PID: 41, Name: "terminal.exe"}, true, nil
-	}
-
-	const waiters = 12
-	results := make(chan ownerLookupResult, waiters)
-	var wait sync.WaitGroup
-	for index := 0; index < waiters; index++ {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
-			owner, found, err := coordinator.find(context.Background(), "com7", scan)
-			results <- ownerLookupResult{owner: owner, found: found, err: err}
-		}()
-	}
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("owner scan did not start")
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("concurrent native scans=%d", calls.Load())
-	}
-	close(release)
-	wait.Wait()
-	close(results)
-	for result := range results {
-		if result.err != nil || !result.found || result.owner.PID != 41 {
-			t.Fatalf("result=%#v", result)
-		}
-	}
-	owner, found, err := coordinator.find(context.Background(), `\\.\COM7`, scan)
-	if err != nil || !found || owner.PID != 41 || calls.Load() != 1 {
-		t.Fatalf("cached owner=%#v found=%t err=%v calls=%d", owner, found, err, calls.Load())
-	}
-}
-
-func TestOwnerScanCoordinatorDoesNotSpawnBehindStalledScan(t *testing.T) {
-	coordinator := newOwnerScanCoordinator()
-	release := make(chan struct{})
-	var calls atomic.Int32
-	scan := func(context.Context, string) (Owner, bool, error) {
-		calls.Add(1)
-		<-release
-		return Owner{}, false, nil
-	}
-	firstContext, firstCancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer firstCancel()
-	if _, _, err := coordinator.find(firstContext, "COM8", scan); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("first timeout=%v", err)
-	}
-	secondContext, secondCancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
-	defer secondCancel()
-	if _, _, err := coordinator.find(secondContext, "COM9", scan); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("second timeout=%v", err)
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("stalled native scans=%d; expected one", calls.Load())
-	}
-	close(release)
 }

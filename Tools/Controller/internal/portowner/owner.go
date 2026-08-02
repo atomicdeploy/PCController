@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 )
 
 // Window describes the best top-level window associated with a process.
@@ -22,10 +20,11 @@ type Window struct {
 
 // Owner is the best available identity for a process holding the serial handle.
 type Owner struct {
-	PID        uint32 `json:"pid"`
-	Name       string `json:"name,omitempty"`
-	Executable string `json:"executable,omitempty"`
-	Window     Window `json:"window,omitempty"`
+	PID              uint32 `json:"pid"`
+	Name             string `json:"name,omitempty"`
+	Executable       string `json:"executable,omitempty"`
+	ProcessStartTime uint64 `json:"process_start_time_100ns,omitempty"`
+	Window           Window `json:"window,omitempty"`
 }
 
 // Label returns a concise human-readable process identity.
@@ -62,124 +61,6 @@ func (owner Owner) Detail() string {
 // Enumerator resolves the process holding an exclusive serial-device handle.
 type Enumerator interface {
 	FindOwner(context.Context, string) (Owner, bool, error)
-}
-
-const (
-	ownerLookupHardTimeout = 2 * time.Second
-	ownerLookupCacheTTL    = 750 * time.Millisecond
-	ownerLookupErrorTTL    = 250 * time.Millisecond
-	maxOwnerCacheEntries   = 32
-)
-
-type ownerLookupResult struct {
-	owner Owner
-	found bool
-	err   error
-}
-
-type ownerLookupFunc func(context.Context, string) (Owner, bool, error)
-
-type ownerCacheEntry struct {
-	result  ownerLookupResult
-	expires time.Time
-}
-
-// ownerScanCoordinator keeps at most one native handle-table scan in flight.
-// Some NT object-name calls are not cancellable; retaining the worker slot when
-// one stalls prevents retries from leaking an unbounded number of OS threads.
-type ownerScanCoordinator struct {
-	mu       sync.Mutex
-	inFlight bool
-	ready    chan struct{}
-	cache    map[string]ownerCacheEntry
-	now      func() time.Time
-}
-
-func newOwnerScanCoordinator() *ownerScanCoordinator {
-	return &ownerScanCoordinator{
-		cache: make(map[string]ownerCacheEntry),
-		now:   time.Now,
-	}
-}
-
-func (coordinator *ownerScanCoordinator) find(
-	ctx context.Context,
-	port string,
-	scan ownerLookupFunc,
-) (Owner, bool, error) {
-	port = strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(port, `\\.\`)))
-	for {
-		coordinator.mu.Lock()
-		now := coordinator.now()
-		if cached, ok := coordinator.cache[port]; ok && now.Before(cached.expires) {
-			coordinator.mu.Unlock()
-			return cached.result.owner, cached.result.found, cached.result.err
-		}
-		delete(coordinator.cache, port)
-		if coordinator.inFlight {
-			ready := coordinator.ready
-			coordinator.mu.Unlock()
-			select {
-			case <-ready:
-				continue
-			case <-ctx.Done():
-				return Owner{}, false, ctx.Err()
-			}
-		}
-		coordinator.inFlight = true
-		coordinator.ready = make(chan struct{})
-		ready := coordinator.ready
-		coordinator.mu.Unlock()
-
-		go coordinator.run(port, scan, ready)
-		select {
-		case <-ready:
-			continue
-		case <-ctx.Done():
-			return Owner{}, false, ctx.Err()
-		}
-	}
-}
-
-func (coordinator *ownerScanCoordinator) run(
-	port string,
-	scan ownerLookupFunc,
-	ready chan struct{},
-) {
-	result := ownerLookupResult{}
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			result.err = fmt.Errorf("native serial-owner scan failed: %v", recovered)
-		}
-		coordinator.mu.Lock()
-		ttl := ownerLookupCacheTTL
-		if result.err != nil {
-			ttl = ownerLookupErrorTTL
-		}
-		if len(coordinator.cache) >= maxOwnerCacheEntries {
-			coordinator.pruneOldestLocked()
-		}
-		coordinator.cache[port] = ownerCacheEntry{
-			result: result, expires: coordinator.now().Add(ttl),
-		}
-		coordinator.inFlight = false
-		close(ready)
-		coordinator.mu.Unlock()
-	}()
-	ctx, cancel := context.WithTimeout(context.Background(), ownerLookupHardTimeout)
-	defer cancel()
-	result.owner, result.found, result.err = scan(ctx, port)
-}
-
-func (coordinator *ownerScanCoordinator) pruneOldestLocked() {
-	var oldestKey string
-	var oldest time.Time
-	for key, entry := range coordinator.cache {
-		if oldestKey == "" || entry.expires.Before(oldest) {
-			oldestKey, oldest = key, entry.expires
-		}
-	}
-	delete(coordinator.cache, oldestKey)
 }
 
 // Actions are intentionally operator-driven owner-window/process operations.
