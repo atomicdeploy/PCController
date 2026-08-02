@@ -33,6 +33,13 @@ type (
 	Status                    = native.Status
 	Settings                  = native.Settings
 	RFEntry                   = native.RFEntry
+	BoardAutomationRecord     = native.AutomationRecord
+	BoardAutomationReadback   = native.AutomationRecordReadback
+	BoardAutomationSnapshot   = control.BoardAutomationSnapshot
+	OfflineEEPROMDecode       = programmer.OfflineEEPROMDecode
+	OfflineAutomationDecode   = programmer.OfflineAutomationDecode
+	OfflineAutomationBank     = programmer.OfflineAutomationBank
+	OfflineAutomationRecord   = programmer.OfflineAutomationRecord
 	RFConfig                  = appconfig.RFConfig
 	RFCategory                = appconfig.RFCategory
 	RFCodeKey                 = appconfig.RFCodeKey
@@ -97,6 +104,18 @@ const (
 	RFLearnTimer      = control.RFLearnTimer
 )
 
+// ValidateBoardAutomation applies the exact firmware/wire safety bounds
+// without contacting a board.
+func ValidateBoardAutomation(record BoardAutomationRecord) error {
+	return native.ValidateAutomationRecord(record)
+}
+
+// DecodeOfflineEEPROMHex performs read-only forensic decoding of settings,
+// learned RF, reset history, and both transactional automation banks.
+func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
+	return programmer.DecodeOfflineEEPROMHex(path)
+}
+
 // ParseRFLearnMode accepts the canonical RF learning mode and documented aliases.
 func ParseRFLearnMode(value string) (RFLearnMode, error) {
 	return control.ParseRFLearnMode(value)
@@ -131,17 +150,35 @@ const (
 	RelayMotionUp   RelayMotion = 1
 	RelayMotionDown RelayMotion = 2
 
-	SettingsSaveLastPage       byte = native.SettingsSaveLastPage
-	SettingsStatusColorMask    byte = native.SettingsStatusColorMask
-	SettingsVoltageDecimalMask byte = native.SettingsVoltageDecimalMask
-	SettingsCurrentDecimalMask byte = native.SettingsCurrentDecimalMask
-	SettingsDefaultDecimals    byte = native.SettingsDefaultDecimals
-	MotionDoorAlways           byte = native.MotionDoorAlways
-	MotionDoorClosedOnly       byte = native.MotionDoorClosedOnly
-	MotionDoorOpenOnly         byte = native.MotionDoorOpenOnly
-	MotionDoorNever            byte = native.MotionDoorNever
-	ProgramIdle                     = control.ProgramIdle
-	ProgramRunning                  = control.ProgramRunning
+	SettingsSaveLastPage            byte = native.SettingsSaveLastPage
+	SettingsStatusColorMask         byte = native.SettingsStatusColorMask
+	SettingsVoltageDecimalMask      byte = native.SettingsVoltageDecimalMask
+	SettingsCurrentDecimalMask      byte = native.SettingsCurrentDecimalMask
+	SettingsDefaultDecimals         byte = native.SettingsDefaultDecimals
+	MotionDoorAlways                byte = native.MotionDoorAlways
+	MotionDoorClosedOnly            byte = native.MotionDoorClosedOnly
+	MotionDoorOpenOnly              byte = native.MotionDoorOpenOnly
+	MotionDoorNever                 byte = native.MotionDoorNever
+	ProgramIdle                          = control.ProgramIdle
+	ProgramRunning                       = control.ProgramRunning
+	BoardAutomationAllocateID            = native.AutomationAllocateID
+	BoardAutomationEnabled               = native.AutomationEnabled
+	BoardAutomationEventDoor             = native.AutomationEventDoor
+	BoardAutomationEventBluetooth        = native.AutomationEventBluetooth
+	BoardAutomationEventHost             = native.AutomationEventHost
+	BoardAutomationEventRelay            = native.AutomationEventRelay
+	BoardAutomationEventLearnedRF        = native.AutomationEventLearnedRF
+	BoardAutomationEventKey              = native.AutomationEventKey
+	BoardAutomationEventAlert            = native.AutomationEventAlert
+	BoardAutomationEventBoot             = native.AutomationEventBoot
+	BoardAutomationActionSafeStop        = native.AutomationActionSafeStop
+	BoardAutomationActionMotionStop      = native.AutomationActionMotionStop
+	BoardAutomationActionRelay           = native.AutomationActionRelay
+	BoardAutomationActionPWM             = native.AutomationActionPWM
+	BoardAutomationActionStatusCue       = native.AutomationActionStatusCue
+	BoardAutomationActionBuzzer          = native.AutomationActionBuzzer
+	BoardAutomationActionRFTransmit      = native.AutomationActionRFTransmit
+	BoardAutomationActionHostMacro       = native.AutomationActionHostMacroRequest
 )
 
 // RFMapping binds a learned record to one board action and behavior.
@@ -1442,6 +1479,28 @@ func (client *Client) RemoveLearnedRF(ctx context.Context, id byte) error {
 // ClearLearnedRF clears every EEPROM-backed learned RF record.
 func (client *Client) ClearLearnedRF(ctx context.Context) error {
 	return client.runtime.Command(ctx, native.OpRFLearnClear, nil)
+}
+
+// BoardAutomations reads one generation-consistent snapshot of the compact
+// board-owned offline rule table.
+func (client *Client) BoardAutomations(ctx context.Context) (BoardAutomationSnapshot, error) {
+	return control.NewBoardAutomationService(client.runtime).List(ctx)
+}
+
+// PutBoardAutomation transactionally adds (ID 0xFF) or edits one stable slot,
+// then verifies its exact paged readback.
+func (client *Client) PutBoardAutomation(ctx context.Context, record BoardAutomationRecord) (BoardAutomationReadback, error) {
+	return control.NewBoardAutomationService(client.runtime).Put(ctx, record)
+}
+
+// RemoveBoardAutomation transactionally removes one rule and verifies absence.
+func (client *Client) RemoveBoardAutomation(ctx context.Context, id byte) error {
+	return control.NewBoardAutomationService(client.runtime).Remove(ctx, id)
+}
+
+// ClearBoardAutomations clears the table and verifies an empty snapshot.
+func (client *Client) ClearBoardAutomations(ctx context.Context) error {
+	return control.NewBoardAutomationService(client.runtime).Clear(ctx)
 }
 
 // MapLearnedRF updates one learned slot while preserving motion safety rules.

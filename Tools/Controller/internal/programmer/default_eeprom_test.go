@@ -47,4 +47,11 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 	if !remotes.Valid || remotes.ValidCount != 0 || remotes.InvalidCount != 0 {
 		t.Fatalf("generated default RF store = %#v", remotes)
 	}
+	automations := decodeOfflineAutomations(image)
+	if !automations.Valid || automations.ActiveBank == nil || *automations.ActiveBank != 0 ||
+		automations.ActiveGeneration == nil || *automations.ActiveGeneration != 1 ||
+		automations.ValidCount != 0 || len(automations.Records) != 0 ||
+		!automations.Banks[0].Valid || automations.Banks[1].Present {
+		t.Fatalf("generated default automation store = %#v", automations)
+	}
 }

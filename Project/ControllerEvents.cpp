@@ -119,3 +119,12 @@ void ControllerEvents::alert(ControllerAlertKind kind, bool active) {
   };
   send(payload, sizeof(payload));
 }
+
+void ControllerEvents::automation(ControllerAutomationState state,
+                                  uint8_t recordId, uint8_t actionKind,
+                                  uint8_t actionTarget) {
+  const uint8_t payload[] = {
+      static_cast<uint8_t>(ControllerEventType::Automation),
+      static_cast<uint8_t>(state), recordId, actionKind, actionTarget};
+  send(payload, sizeof(payload));
+}

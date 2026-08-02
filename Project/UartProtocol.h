@@ -55,6 +55,10 @@ enum Opcode : uint8_t {
   MenuLayoutSet = 0x41,
   // Host-owned application state: payload prefix [0=Idle, 1=Running].
   ProgramState = 0x45,
+  AutomationList = 0x46,
+  AutomationPut = 0x47,
+  AutomationRemove = 0x48,
+  AutomationClear = 0x49,
 
   Ack = 0x80,
   HelloResponse = 0x81,
@@ -69,6 +73,8 @@ enum Opcode : uint8_t {
   MenuListResponse = 0x97,
   MacroStatusResponse = 0x98,
   MenuLayoutResponse = 0x99,
+  AutomationListResponse = 0x9C,
+  AutomationRecordResponse = 0x9D,
   Event = 0xA0,
 };
 

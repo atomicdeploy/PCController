@@ -53,6 +53,10 @@
             "controller.artifact.list",
             "controller.artifact.manifest",
             "controller.artifact.upload",
+            "controller.board_automation.clear",
+            "controller.board_automation.list",
+            "controller.board_automation.put",
+            "controller.board_automation.remove",
             "controller.bridge.call",
             "controller.bridge.list",
             "controller.close",
@@ -277,6 +281,26 @@
     "controller.artifact.upload": {
       "capability": "programming",
       "summary": "artifact upload",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.board_automation.clear": {
+      "capability": "board_commands",
+      "summary": "Clear the board automation table and verify the empty snapshot.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.board_automation.list": {
+      "capability": "read",
+      "summary": "Read one generation-consistent board automation snapshot.",
+      "idempotency": "safe"
+    },
+    "controller.board_automation.put": {
+      "capability": "board_commands",
+      "summary": "Transactionally add or edit one board automation and verify readback.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.board_automation.remove": {
+      "capability": "board_commands",
+      "summary": "Remove one board automation and verify its absence.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.bridge.call": {

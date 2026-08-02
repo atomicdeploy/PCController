@@ -880,6 +880,11 @@ void keyGesture(uint8_t bit, KeyEvent event, void *) {
   }
 
   appEvents.key(bit, static_cast<uint8_t>(event));
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+  automationExecutor.dispatch(
+      AutomationEventKind::Key,
+      static_cast<uint8_t>((bit << 4) | static_cast<uint8_t>(event)), now);
+#endif
 }
 
 // Stops motion and exits its modal page after either side's two-key hold.
@@ -917,6 +922,10 @@ void serviceSystemInputs(uint32_t now) {
   bool value;
   if (systemInputs.consumeDoorChange(value)) {
     appEvents.door(value);
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    automationExecutor.dispatch(AutomationEventKind::Door,
+                                static_cast<uint8_t>(value), now);
+#endif
     if (settingsStore.values().doorAudioEnabled()) {
       buzzer.beep(45, value ? 1700 : 1100);
     }
@@ -956,6 +965,10 @@ void serviceSystemInputs(uint32_t now) {
   } else if (reported != current) {
     reported = current;
     appEvents.bluetooth(static_cast<uint8_t>(current));
+#if PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
+    automationExecutor.dispatch(AutomationEventKind::Bluetooth,
+                                static_cast<uint8_t>(current), now);
+#endif
     statusLeds.playCue(StatusLedCue::Bluetooth, 600, now);
   }
 }

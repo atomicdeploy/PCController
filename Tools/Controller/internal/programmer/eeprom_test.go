@@ -59,7 +59,7 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.SourceKind != "offline-eeprom-hex" ||
-		decoded.Layout != "settings-unversioned-31/rf-record12-cap20/reset-journal-320" ||
+		decoded.Layout != "settings-unversioned-31/rf-record12-cap20/reset-journal-320/automation-v1-dual-bank-704" ||
 		!decoded.Settings.Supported || !decoded.Settings.Valid ||
 		decoded.Settings.Format != "current/unversioned-31+crc8" ||
 		decoded.Settings.ValueBytes != 31 {
@@ -92,6 +92,70 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		*decoded.ResetJournal.NewestCount != 41 || decoded.ResetJournal.NewestSlot == nil ||
 		*decoded.ResetJournal.NewestSlot != 4 {
 		t.Fatalf("unexpected reset journal: %#v", decoded.ResetJournal)
+	}
+}
+
+func TestDecodeOfflineEEPROMSelectsNewestCommittedAutomationBank(t *testing.T) {
+	path := writeEEPROMFixture(t, func(data []byte) {
+		writeAutomationBank(data, 0, 7, map[byte][]byte{
+			2: {1, 1, 1, 1, 3, 2, 2, 0, 0, 0, 0},
+		})
+		writeAutomationBank(data, 1, 8, map[byte][]byte{
+			5: {1, 3, 0, 0xFF, 1, 0, 0, 0, 0, 0, 0},
+		})
+	})
+	decoded, err := DecodeOfflineEEPROMHex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	automations := decoded.Automations
+	if !automations.Valid || automations.ActiveBank == nil || *automations.ActiveBank != 1 ||
+		automations.ActiveGeneration == nil || *automations.ActiveGeneration != 8 ||
+		automations.ValidCount != 1 || len(automations.Records) != 1 {
+		t.Fatalf("automation store = %#v", automations)
+	}
+	record := automations.Records[0]
+	if record.ID != 5 || !record.Enabled || record.EventKind != 3 ||
+		record.EventValue != 0 || record.ActionKind != 1 || !record.Valid {
+		t.Fatalf("automation record = %#v", record)
+	}
+	if !automations.Banks[0].Valid || !automations.Banks[1].Valid ||
+		automations.Banks[1].ValidRecords != EEPROMAutomationCapacity {
+		t.Fatalf("automation banks = %#v", automations.Banks)
+	}
+}
+
+func TestDecodeOfflineEEPROMFallsBackFromTornAutomationBank(t *testing.T) {
+	path := writeEEPROMFixture(t, func(data []byte) {
+		writeAutomationBank(data, 0, 10, map[byte][]byte{
+			1: {1, 8, 0, 0, 2, 1, 0, 0, 0, 0, 0},
+		})
+		writeAutomationBank(data, 1, 11, map[byte][]byte{
+			3: {1, 2, 2, 0xFF, 6, 0, 0x70, 0x03, 120, 0, 0},
+		})
+		data[EEPROMAutomationBank1Address+9] = 0 // Commit marker is written last.
+	})
+	decoded, err := DecodeOfflineEEPROMHex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	automations := decoded.Automations
+	if !automations.Valid || automations.ActiveBank == nil || *automations.ActiveBank != 0 ||
+		automations.ActiveGeneration == nil || *automations.ActiveGeneration != 10 ||
+		automations.Banks[1].Valid || !strings.Contains(automations.Banks[1].Issue, "commit") {
+		t.Fatalf("torn-bank fallback = %#v", automations)
+	}
+
+	path = writeEEPROMFixture(t, func(data []byte) {
+		writeAutomationBank(data, 0, 0xFFFF, nil)
+		writeAutomationBank(data, 1, 0, nil)
+	})
+	decoded, err = DecodeOfflineEEPROMHex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Automations.ActiveBank == nil || *decoded.Automations.ActiveBank != 1 {
+		t.Fatalf("generation wrap did not select bank 1: %#v", decoded.Automations)
 	}
 }
 
@@ -262,4 +326,32 @@ func writeResetRecord(data []byte, slot byte, count uint32) {
 	binary.LittleEndian.PutUint32(record[0:4], count)
 	record[4] = avrCRC8([]byte{0x1F, record[0], record[1], record[2], record[3]})
 	record[5] = 0xA7
+}
+
+func writeAutomationBank(data []byte, bank byte, generation uint16, records map[byte][]byte) {
+	address := EEPROMAutomationBank0Address
+	if bank == 1 {
+		address = EEPROMAutomationBank1Address
+	}
+	raw := data[address : address+EEPROMAutomationBankBytes]
+	for index := range raw {
+		raw[index] = 0
+	}
+	binary.LittleEndian.PutUint16(raw[0:2], EEPROMAutomationMagic)
+	raw[2] = EEPROMAutomationSchema
+	raw[3] = byte(EEPROMAutomationRecordBytes)
+	raw[4] = EEPROMAutomationCapacity
+	raw[5] = 0
+	binary.LittleEndian.PutUint16(raw[6:8], generation)
+	raw[8] = avrCRC8(raw[:8])
+	raw[9] = EEPROMAutomationCommit
+	for id, semantic := range records {
+		if id >= EEPROMAutomationCapacity || len(semantic) != int(EEPROMAutomationRecordBytes-1) {
+			panic("invalid automation fixture")
+		}
+		start := EEPROMAutomationHeaderBytes + uint32(id)*EEPROMAutomationRecordBytes
+		record := raw[start : start+EEPROMAutomationRecordBytes]
+		copy(record[:EEPROMAutomationRecordBytes-1], semantic)
+		record[EEPROMAutomationRecordBytes-1] = avrCRC8(record[:EEPROMAutomationRecordBytes-1])
+	}
 }

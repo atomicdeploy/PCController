@@ -47,24 +47,30 @@ const (
 	OpHostMenuStateGet  byte = 0x44
 	// OpProgramState carries the semantic prefix [0=Idle, 1=Running]. Firmware
 	// deliberately ignores any future tail it does not understand.
-	OpProgramState byte = 0x45
+	OpProgramState     byte = 0x45
+	OpAutomationList   byte = 0x46
+	OpAutomationPut    byte = 0x47
+	OpAutomationRemove byte = 0x48
+	OpAutomationClear  byte = 0x49
 
-	OpACK             byte = 0x80
-	OpHelloResp       byte = 0x81
-	OpError           byte = 0x82
-	OpStatus          byte = 0x90
-	OpSettings        byte = 0x91
-	OpPWMValues       byte = 0x92
-	OpI2CTransferResp byte = 0x93
-	OpRFEntries       byte = 0x94
-	OpTemperatures    byte = 0x95
-	OpFrontPanel      byte = 0x96
-	OpMenuListResp    byte = 0x97
-	OpMacroStatus     byte = 0x98
-	OpMenuLayoutResp  byte = 0x99
-	OpHostMenuRequest byte = 0x9A
-	OpHostMenuState   byte = 0x9B
-	OpEvent           byte = 0xA0
+	OpACK                byte = 0x80
+	OpHelloResp          byte = 0x81
+	OpError              byte = 0x82
+	OpStatus             byte = 0x90
+	OpSettings           byte = 0x91
+	OpPWMValues          byte = 0x92
+	OpI2CTransferResp    byte = 0x93
+	OpRFEntries          byte = 0x94
+	OpTemperatures       byte = 0x95
+	OpFrontPanel         byte = 0x96
+	OpMenuListResp       byte = 0x97
+	OpMacroStatus        byte = 0x98
+	OpMenuLayoutResp     byte = 0x99
+	OpHostMenuRequest    byte = 0x9A
+	OpHostMenuState      byte = 0x9B
+	OpAutomationListResp byte = 0x9C
+	OpAutomationRecord   byte = 0x9D
+	OpEvent              byte = 0xA0
 )
 
 const (
@@ -104,8 +110,10 @@ var opcodeNames = map[byte]string{
 	OpRFLearnReplace: "RF_LEARN_REPLACE", OpMenuLayoutGet: "MENU_LAYOUT_GET",
 	OpMenuLayoutSet: "MENU_LAYOUT_SET", OpHostMenuDirectory: "HOST_MENU_DIRECTORY",
 	OpHostMenuContent: "HOST_MENU_CONTENT", OpHostMenuStateGet: "HOST_MENU_STATE_GET",
-	OpProgramState: "PROGRAM_STATE",
-	OpACK:          "ACK", OpHelloResp: "HELLO", OpError: "ERROR", OpStatus: "STATUS",
+	OpProgramState: "PROGRAM_STATE", OpAutomationList: "AUTOMATION_LIST",
+	OpAutomationPut: "AUTOMATION_PUT", OpAutomationRemove: "AUTOMATION_REMOVE",
+	OpAutomationClear: "AUTOMATION_CLEAR",
+	OpACK:             "ACK", OpHelloResp: "HELLO", OpError: "ERROR", OpStatus: "STATUS",
 	OpSettings: "SETTINGS", OpPWMValues: "PWM_VALUES",
 	OpI2CTransferResp: "I2C_TRANSFER", OpRFEntries: "RF_ENTRIES",
 	OpTemperatures: "TEMPERATURES", OpFrontPanel: "FRONT_PANEL",
@@ -113,6 +121,7 @@ var opcodeNames = map[byte]string{
 	OpMacroStatus:     "MACRO_STATUS",
 	OpMenuLayoutResp:  "MENU_LAYOUT",
 	OpHostMenuRequest: "HOST_MENU_REQUEST", OpHostMenuState: "HOST_MENU_STATE",
+	OpAutomationListResp: "AUTOMATION_LIST", OpAutomationRecord: "AUTOMATION_RECORD",
 	OpEvent: "EVENT",
 }
 

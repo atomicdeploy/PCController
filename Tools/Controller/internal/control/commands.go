@@ -814,6 +814,14 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name: "board-automation", Aliases: []string{"mcu-automation"},
+		Usage:   boardAutomationUsage,
+		Summary: "list or transactionally manage board-owned offline rules",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			return boardAutomationCommand(ctx, runtime, args)
+		},
+	})
+	mustRegister(shell.Command{
 		Name:    "rf",
 		Usage:   "rf send ... | learn [SEC] | cancel | list | remove ID|all | map ID ACTION ...",
 		Summary: "send, learn, list, remove, and map 433 MHz controls",

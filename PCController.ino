@@ -14,6 +14,7 @@
 #include "LocalLib/Tasks.h"
 #include "LocalLib/TonePlayer.h"
 #include "Project/AddressableLeds.h"
+#include "Project/AutomationStore.h"
 #include "Project/BootMelody.h"
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"
