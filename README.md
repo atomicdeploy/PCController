@@ -523,10 +523,10 @@ are now clean.
 The daily dependency radar governs Arduino CLI, MiniCore, and every declared
 firmware library from one checksum-bearing manifest. Core/library archive
 metadata is reconciled with official indexes, release-note links stay bounded
-to upstream pages, and a proposed update must compile the real ATmega328P
-firmware and pass Intel HEX validation before the automation may open a pull
-request. Firmware include inventory prevents a new third-party header from
-silently bypassing that policy. See
+to code-allowlisted upstream pages, and a proposed update must compile the real
+ATmega328P firmware and pass Intel HEX validation before the automation may
+open a pull request. Firmware include inventory prevents a new third-party
+header from silently bypassing that policy. See
 [CI/CD and releases](docs/CI-CD-and-Releases.md#dependency-automation).
 
 ## License

@@ -42,12 +42,23 @@ test("validation rejects an untrusted board-manager index and mismatched asset",
   invalid.miniCore.packageIndex = "https://example.invalid/package.json";
   invalid.arduinoCli.linux64.asset = "latest.tar.gz";
   invalid.libraries["rc-switch"].archive.url = "https://example.invalid/rc-switch.zip";
+  invalid.libraries["rc-switch"].repository = "example/rc-switch";
   invalid.libraries["bad$(name)"] = structuredClone(invalid.libraries["rc-switch"]);
   const errors = validateConfig(invalid);
   assert.ok(errors.some((error) => error.includes("official MiniCore")));
   assert.ok(errors.some((error) => error.includes("must match the pinned version")));
   assert.ok(errors.some((error) => error.includes("official Arduino library CDN")));
   assert.ok(errors.some((error) => error.includes("invalid Arduino Library Manager name")));
+  assert.ok(errors.some((error) => error.includes("code-reviewed release-source allowlist")));
+});
+
+test("outbound release-note sources are code allowlisted rather than manifest-derived", () => {
+  const source = fs.readFileSync(SCRIPT, "utf8");
+  assert.match(source, /case "rc-switch":\s*return "sui77\/rc-switch"/u);
+  assert.match(source, /repos\/arduino\/arduino-cli\/releases\?per_page/u);
+  assert.match(source, /releaseEvidence\("MCUdude\/MiniCore", version\)/u);
+  assert.doesNotMatch(source, /repos\/\$\{config\./u);
+  assert.doesNotMatch(source, /releaseEvidence\(config\./u);
 });
 
 test("export exposes every build pin through stable GitHub output names", () => {
