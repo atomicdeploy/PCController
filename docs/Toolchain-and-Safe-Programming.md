@@ -191,7 +191,7 @@ uploaded with the same evidence and used verbatim as the validated PR body.
 A failed candidate uploads its report/evidence and creates or updates one
 actionable blocked-update issue rather than proposing broken source. A later
 passing run closes that issue. The workflow definition and local source checks
-have been validated, but a real hosted scheduled/manual run has **not yet been
+have been validated, but a hosted scheduled/manual run has **not yet been
 observed**. Hosted artifact publication, issue lifecycle, and dependency-PR
 creation therefore remain explicit live-CI acceptance items.
 

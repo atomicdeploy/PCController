@@ -234,7 +234,7 @@ void runTcpServer(VirtualBoard &board, const TcpServerOptions &options,
       timeval timeout{};
       timeout.tv_sec = 0;
       // One-millisecond service cadence keeps the native mock useful for
-      // validating the real firmware's microsecond-timestamped macro deltas.
+      // validating the firmware's microsecond-timestamped macro deltas.
       timeout.tv_usec = 1000;
 #ifdef _WIN32
       const int ready = select(0, &readable, nullptr, nullptr, &timeout);
