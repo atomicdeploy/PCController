@@ -25,6 +25,7 @@ import (
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/programmer"
@@ -39,6 +40,13 @@ var (
 )
 
 func main() {
+	if portowner.IsHelperInvocation(os.Args[1:]) {
+		if err := portowner.RunHelperInvocation(context.Background(), os.Args[1:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "serial-owner helper:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if artifacts.IsSelfUpdateHelperInvocation(os.Args[1:]) {
 		if err := artifacts.RunSelfUpdateHelper(context.Background(), os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, "self-update helper:", err)
