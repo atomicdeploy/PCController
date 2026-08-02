@@ -98,7 +98,7 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 func TestDecodeOfflineEEPROMSelectsNewestCommittedAutomationBank(t *testing.T) {
 	path := writeEEPROMFixture(t, func(data []byte) {
 		writeAutomationBank(data, 0, 7, map[byte][]byte{
-			2: {1, 1, 1, 1, 3, 2, 2, 0, 0, 0, 0},
+			2: {1, 1, 1, 1, 3, 4, 2, 0, 0, 0, 0},
 		})
 		writeAutomationBank(data, 1, 8, map[byte][]byte{
 			5: {1, 3, 0, 0xFF, 1, 0, 0, 0, 0, 0, 0},

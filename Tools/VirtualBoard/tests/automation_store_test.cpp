@@ -95,7 +95,8 @@ void testDeterministicMatchingAndBounds() {
         relayRule(AutomationStore::NewRecord,
                   static_cast<std::uint8_t>(index == 5 ? 0 : 1),
                   index == 4 ? 0 : 0xFF);
-    record.actionTarget = index;
+    record.actionTarget = static_cast<std::uint8_t>(
+        AutomationRelayTarget::FirstGeneral + index % 4);
     require(store.put(record), "executor fixture add failed");
   }
 
@@ -118,6 +119,20 @@ void testDeterministicMatchingAndBounds() {
 }
 
 void testUnsafeRecordsAreRejected() {
+  AutomationRecord relay = relayRule(AutomationStore::NewRecord, 1);
+  for (std::uint8_t target = 0;
+       target < AutomationRelayTarget::FirstGeneral; ++target) {
+    relay.actionTarget = target;
+    require(!AutomationStore::valid(relay),
+            "offline rule accepted motion relay R1-R4");
+  }
+  for (std::uint8_t target = AutomationRelayTarget::FirstGeneral;
+       target <= AutomationRelayTarget::LastGeneral; ++target) {
+    relay.actionTarget = target;
+    require(AutomationStore::valid(relay),
+            "offline rule rejected general relay R5-R8");
+  }
+
   AutomationRecord hostRelay = relayRule(AutomationStore::NewRecord, 0);
   hostRelay.eventKind = static_cast<std::uint8_t>(AutomationEventKind::Host);
   require(!AutomationStore::valid(hostRelay),

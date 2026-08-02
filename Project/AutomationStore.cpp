@@ -165,7 +165,9 @@ bool AutomationStore::valid(const AutomationRecord &record) {
       return (record.actionTarget <= 1 || record.actionTarget == 0xFF) &&
              record.value == 0 && record.extra == 0;
     case AutomationActionKind::Relay:
-      return record.actionTarget < 8 && record.value <= 2 &&
+      return record.actionTarget >= AutomationRelayTarget::FirstGeneral &&
+             record.actionTarget <= AutomationRelayTarget::LastGeneral &&
+             record.value <= 2 &&
              record.extra == 0;
     case AutomationActionKind::Pwm:
       return record.actionTarget < 11 && record.value <= 4095 &&

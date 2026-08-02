@@ -48,6 +48,13 @@ const (
 	AutomationRelayToggle
 )
 
+const (
+	// Relay targets are zero-based. R1-R4 are motion direction/enable outputs;
+	// offline rules may address only the general-purpose R5-R8 outputs.
+	AutomationFirstGeneralRelayTarget byte = 4
+	AutomationLastGeneralRelayTarget  byte = 7
+)
+
 // AutomationRecord is both the host API model and the semantic portion of one
 // EEPROM record. The wire format prepends ID and omits the EEPROM-only CRC-8:
 // id, flags, event kind/value/mask, action kind/target, value LE16, extra LE16,
@@ -127,8 +134,10 @@ func ValidateAutomationRecord(record AutomationRecord) error {
 			return fmt.Errorf("automation motion-stop requires side 0..1 or 0xFF for all, and zero value/extra")
 		}
 	case AutomationActionRelay:
-		if record.ActionTarget > 7 || record.Value > uint16(AutomationRelayToggle) || record.Extra != 0 {
-			return fmt.Errorf("automation relay requires target 0..7, value 0..2, and zero extra")
+		if record.ActionTarget < AutomationFirstGeneralRelayTarget ||
+			record.ActionTarget > AutomationLastGeneralRelayTarget ||
+			record.Value > uint16(AutomationRelayToggle) || record.Extra != 0 {
+			return fmt.Errorf("automation relay requires target 4..7 (general relays R5..R8), value 0..2, and zero extra")
 		}
 	case AutomationActionPWM:
 		if record.ActionTarget > 10 || record.Value > 4095 || record.Extra != 0 {

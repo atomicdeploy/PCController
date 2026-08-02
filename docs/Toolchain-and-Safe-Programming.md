@@ -148,9 +148,10 @@ custom size/address/metadata assertions. This separates reproduction-fixture
 hashes from the active latest-stable custom source.
 
 The last verified custom build used 510 of its 512 allocated bytes and imposed
-a 32,256-byte application ceiling. The current `800A5B70` linked sketch is
-32,232 bytes; its fixed 12-byte identity at `0x7DF4` leaves 12 immediately
-linkable bytes in the shared layout. That margin is not permanent: rebuild
+a 32,256-byte application ceiling. The current `885CC7D1` linked sketch is
+32,206 bytes; its fixed 12-byte identity starts at the 32,244-byte (`0x7DF4`)
+boundary, leaving exactly 38 immediately linkable bytes in the shared layout.
+That margin is not permanent: rebuild
 firmware and rerun the Urboot-Custom assertion immediately before an ISP
 installation.
 See `Tools/Bootloader/Urboot-Custom/README.md` for hashes, retained features,

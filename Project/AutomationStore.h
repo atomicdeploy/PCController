@@ -31,6 +31,14 @@ constexpr uint8_t Enabled = 1U << 0;
 constexpr uint8_t Allowed = Enabled;
 } // namespace AutomationFlags
 
+namespace AutomationRelayTarget {
+// Relay action targets use zero-based protocol indexes. R1-R4 are the two
+// motion direction/enable pairs and must only be addressed through the
+// safety-owning side-motion path. Offline rules may drive only R5-R8.
+constexpr uint8_t FirstGeneral = 4;
+constexpr uint8_t LastGeneral = 7;
+} // namespace AutomationRelayTarget
+
 // AutomationRecord is the stable twelve-byte UART representation. EEPROM
 // replaces the slot ID with a per-record CRC-8, retaining eleven semantic
 // bytes per rule.

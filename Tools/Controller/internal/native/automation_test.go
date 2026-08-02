@@ -37,7 +37,7 @@ func TestAutomationPayloadAndReadbackRoundTrip(t *testing.T) {
 
 func TestParseAutomationListPage(t *testing.T) {
 	records := []AutomationRecord{
-		{ID: 0, Flags: AutomationEnabled, EventKind: AutomationEventDoor, EventValue: 1, EventMask: 1, ActionKind: AutomationActionRelay, ActionTarget: 2, Value: uint16(AutomationRelayToggle)},
+		{ID: 0, Flags: AutomationEnabled, EventKind: AutomationEventDoor, EventValue: 1, EventMask: 1, ActionKind: AutomationActionRelay, ActionTarget: 4, Value: uint16(AutomationRelayToggle)},
 		{ID: 4, Flags: AutomationEnabled, EventKind: AutomationEventBluetooth, EventValue: 2, EventMask: 0xFF, ActionKind: AutomationActionBuzzer, Value: 880, Extra: 120},
 		{ID: 9, EventKind: AutomationEventLearnedRF, EventValue: 19, EventMask: 0xFF, ActionKind: AutomationActionHostMacroRequest, ActionTarget: 7},
 	}
@@ -130,5 +130,21 @@ func TestValidateAutomationRecordSafetyBounds(t *testing.T) {
 	motionAll.Value = 0
 	if err := ValidateAutomationRecord(motionAll); err != nil {
 		t.Fatalf("all-motion stop was rejected: %v", err)
+	}
+
+	relay := base
+	relay.ActionKind = AutomationActionRelay
+	relay.Value = uint16(AutomationRelayToggle)
+	for target := byte(0); target < AutomationFirstGeneralRelayTarget; target++ {
+		relay.ActionTarget = target
+		if err := ValidateAutomationRecord(relay); err == nil {
+			t.Fatalf("motion relay R%d was accepted as an offline relay target", target+1)
+		}
+	}
+	for target := AutomationFirstGeneralRelayTarget; target <= AutomationLastGeneralRelayTarget; target++ {
+		relay.ActionTarget = target
+		if err := ValidateAutomationRecord(relay); err != nil {
+			t.Fatalf("general relay R%d was rejected: %v", target+1, err)
+		}
 	}
 }

@@ -167,6 +167,7 @@ type Runtime struct {
 	programState               *ProgramStateManager
 	programStateSyncMu         sync.Mutex
 	programmingMu              sync.Mutex
+	boardAutomationMu          sync.Mutex
 	programStateSent           bool
 	programStateSentGeneration uint64
 	programStateSentRevision   uint64

@@ -390,9 +390,22 @@ reset lines|app|bootloader
 ```
 
 The accepted 32 KiB firmware does not advertise board automation because the
-enabled profile exceeds the fixed application boundary by 2,448 bytes. The
-commands and typed APIs therefore fail closed on that image; they remain useful
-for native/Virtual Board validation and a future capacity-approved profile.
+pre-safety enabled profile measured 34,668 `.text` bytes, 2,424 bytes beyond
+the fixed 32,244-byte identity boundary; rejecting R1-R4 adds two bytes, making
+the current safety-fixed profile 34,670 bytes and 2,426 bytes over. The
+32,206-byte default has exactly 38 bytes before that boundary and keeps
+`PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS=0`.
+Commands and typed APIs therefore fail closed on the accepted image. The
+hardware-free C++ target exercises the production EEPROM store and bounded
+executor, but the `VirtualBoard` executable itself neither advertises the board
+automation capability nor handles its opcodes.
+
+Board relay-action targets are zero-based and accept only `4..7`, meaning
+general relays R5-R8. Targets `0..3` (motion relays R1-R4) are rejected in both
+host and firmware validation; board automation has stop-only motion actions.
+Each mutation is serialized by the shared controller runtime and succeeds only
+when the board response and a fresh list readback semantically match the
+request (apart from replacing the `0xFF` allocation sentinel with its new ID).
 
 The Web workbench and TUI RF page (`W`) wrap these commands in a guided
 A/B/C/D handset flow. Each step opens one bounded capture, stops learning after

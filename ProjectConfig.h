@@ -62,10 +62,11 @@
 #endif
 
 // The complete board-owned automation core is retained and native-tested, but
-// the current accepted ATmega328P image has only 140 application bytes free.
-// Enabling this implementation currently exceeds the immutable 0x7DF4
-// application ceiling by 2,448 bytes; keep it off until an explicit product
-// choice frees flash or selects a larger MCU. Host/offline tooling remains on.
+// the accepted 32,206-byte program has only 38 bytes before the immutable
+// 32,244-byte (0x7DF4) identity boundary. The pre-safety enabled baseline was
+// 34,668 bytes (+2,424); rejecting R1-R4 relay targets adds two bytes, making
+// current enabled .text 34,670 bytes (+2,426). Keep it off until an explicit
+// product choice frees flash or selects a larger MCU. Host tooling remains on.
 #ifndef PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS
 #define PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS 0
 #endif

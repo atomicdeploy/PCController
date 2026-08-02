@@ -32,6 +32,13 @@ The emulator is split behind injectable hardware interfaces:
 interfaces in its constructor, so tests or future firmware-facing adapters can
 replace any emulated peripheral independently.
 
+The adjacent `firmware_automation_store_tests` target is deliberately narrower
+than the `VirtualBoard` executable: it compiles the production dual-bank EEPROM
+store and bounded executor against the byte-accurate EEPROM double. It does not
+claim full virtual-device integration. The executable does not advertise the
+capacity-gated board-automation capability, accept its CRUD opcodes, or execute
+persisted rules while the production firmware profile remains disabled.
+
 ## Build
 
 Requirements available from `PATH`:

@@ -26,6 +26,18 @@ test('safe default EEPROM has a distinct bounded manifest role', () => {
         assert.equal(artifactRole('PCController.ino.hex'), 'application')
 })
 
+test('board automation stays disabled with current safety-fixed capacity evidence', async () => {
+	const config = await readFile(
+		join(import.meta.dirname, '..', '..', 'ProjectConfig.h'),
+		'utf8'
+	)
+	assert.match(config, /#define PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS 0/u)
+	assert.match(config, /accepted 32,206-byte program has only 38 bytes/u)
+	assert.match(config, /32,244-byte \(0x7DF4\) identity boundary/u)
+	assert.match(config, /pre-safety enabled baseline was\s*\/\/ 34,668 bytes \(\+2,424\)/u)
+	assert.match(config, /current enabled \.text 34,670 bytes \(\+2,426\)/u)
+})
+
 test('build timestamp uses the exact compact date and time bit layout', () => {
 	const value = new Date(2026, 7, 1, 19, 42, 58)
 	assert.equal(packBuildTimestamp(value), 0x35019D5D)

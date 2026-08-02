@@ -4,14 +4,16 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"strings"
 	"testing"
 
 	"pccontroller.local/controller/internal/native"
 )
 
 type fakeBoardAutomationTransport struct {
-	generation uint16
-	records    map[byte]native.AutomationRecord
+	generation   uint16
+	records      map[byte]native.AutomationRecord
+	putTransform func(native.AutomationRecord) native.AutomationRecord
 }
 
 func (fake *fakeBoardAutomationTransport) Request(_ context.Context, opcode byte, payload []byte, _ ...byte) (native.Frame, error) {
@@ -42,6 +44,9 @@ func (fake *fakeBoardAutomationTransport) Request(_ context.Context, opcode byte
 					break
 				}
 			}
+		}
+		if fake.putTransform != nil {
+			record = fake.putTransform(record)
 		}
 		fake.generation++
 		fake.records[record.ID] = record
@@ -117,6 +122,30 @@ func TestBoardAutomationServiceRequiresAdvertisedCapability(t *testing.T) {
 	}
 	if _, err := service.List(context.Background()); err != ErrBoardAutomationsUnsupported {
 		t.Fatalf("List error = %v", err)
+	}
+}
+
+func TestBoardAutomationServicesShareRuntimeMutationLock(t *testing.T) {
+	runtime := &Runtime{}
+	first := NewBoardAutomationService(runtime)
+	second := NewBoardAutomationService(runtime)
+	if first.operationMu == nil || first.operationMu != second.operationMu ||
+		first.operationMu != &runtime.boardAutomationMu {
+		t.Fatal("runtime-backed board automation services do not share one mutation lock")
+	}
+}
+
+func TestBoardAutomationPutRejectsSemanticReadbackMutation(t *testing.T) {
+	fake := &fakeBoardAutomationTransport{
+		records: make(map[byte]native.AutomationRecord),
+		putTransform: func(record native.AutomationRecord) native.AutomationRecord {
+			record.Value = uint16(native.AutomationRelayToggle)
+			return record
+		},
+	}
+	service := &BoardAutomationService{transport: fake}
+	if _, err := service.Put(context.Background(), boardAutomationFixture(native.AutomationAllocateID)); err == nil || !strings.Contains(err.Error(), "differs from requested record") {
+		t.Fatalf("semantic mutation error = %v", err)
 	}
 }
 

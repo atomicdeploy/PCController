@@ -27,20 +27,32 @@ type boardAutomationTransport interface {
 // board-authoritative readback. Pagination restarts if a concurrent generation
 // change would otherwise produce a mixed snapshot.
 type BoardAutomationService struct {
-	transport boardAutomationTransport
-	support   func() bool
-	mu        sync.Mutex
+	transport   boardAutomationTransport
+	support     func() bool
+	localMu     sync.Mutex
+	operationMu *sync.Mutex
 }
 
 func NewBoardAutomationService(runtime *Runtime) *BoardAutomationService {
 	return &BoardAutomationService{
-		transport: runtime,
+		transport:   runtime,
+		operationMu: &runtime.boardAutomationMu,
 		support: func() bool {
 			snapshot := runtime.Snapshot()
 			return snapshot.Connected &&
 				snapshot.Hello.Capabilities&native.CapabilityBoardAutomation != 0
 		},
 	}
+}
+
+func (service *BoardAutomationService) mutationLock() *sync.Mutex {
+	if service.operationMu != nil {
+		return service.operationMu
+	}
+	// Tests and specialized transports may construct a service directly. A
+	// runtime-backed service always uses Runtime.boardAutomationMu so separate
+	// RPC/REST/CLI service instances cannot interleave board mutations.
+	return &service.localMu
 }
 
 func (service *BoardAutomationService) requireSupport() error {
@@ -51,8 +63,6 @@ func (service *BoardAutomationService) requireSupport() error {
 }
 
 func (service *BoardAutomationService) List(ctx context.Context) (BoardAutomationSnapshot, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
 	if err := service.requireSupport(); err != nil {
 		return BoardAutomationSnapshot{}, err
 	}
@@ -97,8 +107,9 @@ func (service *BoardAutomationService) fetch(ctx context.Context) (BoardAutomati
 }
 
 func (service *BoardAutomationService) Put(ctx context.Context, record native.AutomationRecord) (native.AutomationRecordReadback, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	mutationLock := service.mutationLock()
+	mutationLock.Lock()
+	defer mutationLock.Unlock()
 	if err := service.requireSupport(); err != nil {
 		return native.AutomationRecordReadback{}, err
 	}
@@ -113,6 +124,15 @@ func (service *BoardAutomationService) Put(ctx context.Context, record native.Au
 	readback, err := native.ParseAutomationRecord(frame.Payload)
 	if err != nil {
 		return native.AutomationRecordReadback{}, err
+	}
+	expected := record
+	if expected.ID == native.AutomationAllocateID {
+		expected.ID = readback.Record.ID
+	}
+	if readback.Record != expected {
+		return native.AutomationRecordReadback{}, fmt.Errorf(
+			"automation %d readback differs from requested record", readback.Record.ID,
+		)
 	}
 	snapshot, err := service.fetch(ctx)
 	if err != nil {
@@ -130,8 +150,9 @@ func (service *BoardAutomationService) Put(ctx context.Context, record native.Au
 }
 
 func (service *BoardAutomationService) Remove(ctx context.Context, id byte) error {
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	mutationLock := service.mutationLock()
+	mutationLock.Lock()
+	defer mutationLock.Unlock()
 	if err := service.requireSupport(); err != nil {
 		return err
 	}
@@ -155,8 +176,9 @@ func (service *BoardAutomationService) Remove(ctx context.Context, id byte) erro
 }
 
 func (service *BoardAutomationService) Clear(ctx context.Context) error {
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	mutationLock := service.mutationLock()
+	mutationLock.Lock()
+	defer mutationLock.Unlock()
 	if err := service.requireSupport(); err != nil {
 		return err
 	}

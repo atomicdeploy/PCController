@@ -33,7 +33,7 @@ func GenerateDefaultEEPROMIntelHex() ([]byte, error) {
 	for index := 9; index < 17; index++ {
 		values[index] = 0 // eight safe, off user-PWM defaults
 	}
-	values[17] = 0 // Status is the deterministic default page
+	values[17] = 0 // Door is the deterministic default page (persistent ID 0)
 	values[18] = 0 // no last-page save; default colors/decimals
 	binary.LittleEndian.PutUint16(values[19:21], DefaultVisibleMenuMask)
 	copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})

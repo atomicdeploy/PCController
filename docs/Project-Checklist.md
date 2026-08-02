@@ -79,7 +79,7 @@ binary, checksum, or test run cannot satisfy a newer tree.
   artifact and require both the validated application and complete 1 KiB safe
   EEPROM defaults to be independently enabled in `host-manifest.json`.
 - ✅ Virtual Board builds use the native CMake test path on supported targets.
-- ✅ Canonical firmware source identity `DB5C1EBA` links 32,206 of the stock
+- ✅ Canonical firmware source identity `885CC7D1` links 32,206 of the stock
   32,384-byte application range, emits 32,218 application HEX data bytes, and
   uses 1,433 bytes static SRAM with a modeled 1,762-byte peak and 286 bytes
   free. The fixed shared identity still has 38 immediately linkable bytes
@@ -308,12 +308,16 @@ binary, checksum, or test run cannot satisfy a newer tree.
   policies. It previews the common fail-safe gate immediately, preserves every
   existing settings leaf, and participates in the corrected atomic
   Save/Discard transaction. Physical loaded-motion acceptance remains separate.
-- 🚧 [#87](https://github.com/atomicdeploy/PCController/issues/87): host
-  automations are complete, but the MCU still has no generic EEPROM-backed rule
-  table, CRUD opcodes, or deterministic offline event executor for door, BT
-  Audio, host-loss, RF transmit, macro requests, and other bounded actions. The
-  shared image has only 38 immediately linkable bytes, so this feature still
-  requires a measured migration/profile decision rather than using headroom.
+- 🚧 [#87](https://github.com/atomicdeploy/PCController/issues/87): the
+  capacity-gated MCU profile now has a transactional dual-bank 12-rule table,
+  CRUD/readback opcodes, bounded execution, host tooling, and explicit safety
+  validation: relay rules can address only R5-R8 and motion is stop-only. The
+  accepted build keeps `PCCONTROLLER_ENABLE_BOARD_AUTOMATIONS=0`: default
+  program is 32,206 bytes with 38 bytes before the 32,244-byte identity, while
+  the pre-safety enabled baseline was 34,668 bytes (+2,424) and current
+  safety-fixed `.text` is 34,670 bytes (+2,426).
+  C++ coverage exercises the production store/executor only; the VirtualBoard
+  executable and physical board do not advertise or run the gated profile.
 - 🚧 [#22](https://github.com/atomicdeploy/PCController/issues/22): MCU EEPROM
   stores Silent and door/relay cue enable flags, but each door-open, door-close,
   relay-on, and relay-off cue still uses fixed flash-resident notes and timing.
