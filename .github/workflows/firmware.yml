@@ -90,10 +90,13 @@ jobs:
           arduino-cli core update-index --additional-urls "$MINICORE_INDEX_URL"
           arduino-cli core install "$MINICORE_PACKAGE@$MINICORE_VERSION" --additional-urls "$MINICORE_INDEX_URL"
 
-      - name: "📻 Install pinned Arduino library"
+      - name: "📚 Install every pinned Arduino library"
         env:
-          RC_SWITCH_VERSION: ${{ steps.pins.outputs.rc_switch_version }}
-        run: arduino-cli lib install "rc-switch@$RC_SWITCH_VERSION"
+          ARDUINO_LIBRARIES_JSON: ${{ steps.pins.outputs.arduino_libraries_json }}
+        run: >-
+          node -e 'const { execFileSync } = require("node:child_process");
+          for (const library of JSON.parse(process.env.ARDUINO_LIBRARIES_JSON))
+          execFileSync("arduino-cli", ["lib", "install", library], { stdio: "inherit" });'
 
       - name: "🚀 Build and validate AVR firmware"
         run: >-

@@ -130,18 +130,18 @@ jobs:
           echo "$install_dir" >> "$GITHUB_PATH"
           "$install_dir/arduino-cli" version
 
-      - name: "🧩 Install pinned MiniCore and Arduino library"
+      - name: "🧩 Install pinned MiniCore and every Arduino library"
         if: matrix.key == 'cpp-avr-linux'
         env:
           MINICORE_INDEX_URL: ${{ steps.pins.outputs.minicore_index_url }}
           MINICORE_PACKAGE: ${{ steps.pins.outputs.minicore_package }}
           MINICORE_VERSION: ${{ steps.pins.outputs.minicore_version }}
-          RC_SWITCH_VERSION: ${{ steps.pins.outputs.rc_switch_version }}
+          ARDUINO_LIBRARIES_JSON: ${{ steps.pins.outputs.arduino_libraries_json }}
         run: |
           set -euo pipefail
           arduino-cli core update-index --additional-urls "$MINICORE_INDEX_URL"
           arduino-cli core install "$MINICORE_PACKAGE@$MINICORE_VERSION" --additional-urls "$MINICORE_INDEX_URL"
-          arduino-cli lib install "rc-switch@$RC_SWITCH_VERSION"
+          node -e 'const { execFileSync } = require("node:child_process"); for (const library of JSON.parse(process.env.ARDUINO_LIBRARIES_JSON)) execFileSync("arduino-cli", ["lib", "install", library], { stdio: "inherit" });'
 
       - name: "🛡️ Initialize CodeQL"
         uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
