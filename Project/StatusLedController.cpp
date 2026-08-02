@@ -36,9 +36,18 @@ const uint8_t StatusPalette[][3] PROGMEM = {
     {255, 48, 0},    // Graceful reset
 };
 
-// User order: red, blue, violet, green, white. Reuse cue/mode palette rows
-// rather than duplicating RGB triples in flash.
-const uint8_t ReadyPalette[] PROGMEM = {5, 3, 14, 11, 2};
+// User order: red, blue, violet, green, white. Reuse named mode rows rather
+// than duplicating RGB triples or relying on unrelated numeric palette slots.
+constexpr uint8_t PaletteRed = static_cast<uint8_t>(StatusLedMode::Fault);
+constexpr uint8_t PaletteBlue =
+    static_cast<uint8_t>(StatusLedMode::Connected);
+constexpr uint8_t PaletteViolet =
+    static_cast<uint8_t>(StatusLedMode::Learning);
+constexpr uint8_t PaletteGreen =
+    static_cast<uint8_t>(StatusLedMode::Disconnected);
+constexpr uint8_t PaletteWhite = static_cast<uint8_t>(StatusLedMode::Ready);
+const uint8_t ReadyPalette[] PROGMEM = {
+    PaletteRed, PaletteBlue, PaletteViolet, PaletteGreen, PaletteWhite};
 
 } // namespace
 

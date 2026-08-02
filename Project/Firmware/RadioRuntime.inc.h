@@ -93,18 +93,18 @@ void serviceLearningTimer(uint32_t at) {
 }
 
 // Deactivates the output held by the current RF momentary mapping.
-void stopRemoteMomentary(uint32_t now) {
+void stopRemoteMomentary(uint32_t at) {
   switch (remoteMomentaryKind) {
     case RemoteActionKind::Relay:
       relays.requestRelayForTest(
-          static_cast<uint8_t>(remoteMomentaryValue + 1), false, now);
+          static_cast<uint8_t>(remoteMomentaryValue + 1), false, at);
       break;
     case RemoteActionKind::Side:
-      relays.stopSide(static_cast<::RelaySide>(remoteMomentaryValue), now);
+      relays.stopSide(static_cast<::RelaySide>(remoteMomentaryValue), at);
       break;
     case RemoteActionKind::Pwm:
-      pwm.setChannel(remoteMomentaryValue, now);
-      pwm.setValue(0, now);
+      pwm.setChannel(remoteMomentaryValue, at);
+      pwm.setValue(0, at);
       storeUserPwmValue(remoteMomentaryValue, 0);
       break;
     default:
@@ -115,15 +115,15 @@ void stopRemoteMomentary(uint32_t now) {
 }
 
 // Expires momentary RF outputs locally if their repeat stream stops.
-void serviceRemoteMomentary(uint32_t now) {
+void serviceRemoteMomentary(uint32_t at) {
   if (remoteMomentaryKind != RemoteActionKind::None &&
-      timeReached(now, remoteMomentaryEndsAt)) {
-    stopRemoteMomentary(now);
+      timeReached(at, remoteMomentaryEndsAt)) {
+    stopRemoteMomentary(at);
   }
 }
 
 // Applies one persisted mapping through the same safe relay/PWM/menu APIs.
-void executeLearnedRemote(const LearnedRemote &remote, uint32_t now) {
+void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
   const RemoteActionKind kind =
       static_cast<RemoteActionKind>(remote.actionKind);
   const RemoteBehavior behavior =
@@ -131,7 +131,7 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t now) {
   if (remoteMomentaryKind != RemoteActionKind::None &&
       (remoteMomentaryKind != kind ||
        remoteMomentaryValue != remote.actionValue)) {
-    stopRemoteMomentary(now);
+    stopRemoteMomentary(at);
   }
   switch (kind) {
     case RemoteActionKind::Key:
@@ -151,11 +151,11 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t now) {
                             ? !active
                             : true;
       const bool accepted = relays.requestRelayForTest(
-          static_cast<uint8_t>(remote.actionValue + 1), next, now);
+          static_cast<uint8_t>(remote.actionValue + 1), next, at);
       if (accepted && behavior == RemoteBehavior::Momentary) {
         remoteMomentaryKind = kind;
         remoteMomentaryValue = remote.actionValue;
-        remoteMomentaryEndsAt = now + 350;
+        remoteMomentaryEndsAt = at + 350;
       }
       return;
     }
@@ -165,31 +165,31 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t now) {
         return;
       }
       if (behavior == RemoteBehavior::Stop) {
-        relays.stopSide(static_cast<::RelaySide>(remote.actionValue), now);
+        relays.stopSide(static_cast<::RelaySide>(remote.actionValue), at);
       } else {
         const RelayDirection direction =
             behavior == RemoteBehavior::Down ? RelayDirection::Reverse
                                                : RelayDirection::Forward;
         if (relays.requestSide(static_cast<::RelaySide>(remote.actionValue),
-                               direction, true, now)) {
+                               direction, true, at)) {
           remoteMomentaryKind = kind;
           remoteMomentaryValue = remote.actionValue;
-          remoteMomentaryEndsAt = now + 350;
+          remoteMomentaryEndsAt = at + 350;
         }
       }
       return;
     case RemoteActionKind::Pwm: {
-      pwm.setChannel(remote.actionValue, now);
+      pwm.setChannel(remote.actionValue, at);
       const bool active = pwm.logicalValue(remote.actionValue) != 0;
       const uint16_t value = behavior == RemoteBehavior::Momentary
                                  ? 4095
                                  : (active ? 0 : 4095);
-      pwm.setValue(value, now);
+      pwm.setValue(value, at);
       storeUserPwmValue(remote.actionValue, value);
       if (behavior == RemoteBehavior::Momentary) {
         remoteMomentaryKind = kind;
         remoteMomentaryValue = remote.actionValue;
-        remoteMomentaryEndsAt = now + 350;
+        remoteMomentaryEndsAt = at + 350;
       }
       return;
     }
@@ -237,7 +237,7 @@ void serviceRadio() {
     }
     appEvents.rfReceived(code, bits, protocol, pulseLength,
                          learned ? learnedId : 0xFF);
-    statusLeds.playCue(StatusLedCue::Radio, 320);
+    statusLeds.playCue(StatusLedCue::Radio, 320, now);
     if (!learned) {
       endLearning(2, -1);
     } else if (learnedRemotes.count() >= RemoteLearningStore::Capacity) {
@@ -250,7 +250,7 @@ void serviceRadio() {
   const bool learned = learnedRemotes.find(code, bits, protocol, remote);
   appEvents.rfReceived(code, bits, protocol, pulseLength,
                        learned ? remote.id : 0xFF);
-  statusLeds.playCue(StatusLedCue::Radio, 240);
+  statusLeds.playCue(StatusLedCue::Radio, 240, now);
   if (learned) {
     const RemoteBehavior behavior =
         static_cast<RemoteBehavior>(remote.behavior);

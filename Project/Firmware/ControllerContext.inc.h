@@ -162,11 +162,10 @@ uint8_t hostLcdAddress = 0;
 uint16_t hostPanelMeta = 0;
 uint16_t i2cLeaseUntil = 0;
 uint8_t i2cLeaseAddress = 0;
-// One wrap-safe application clock snapshot is refreshed at setup/loop and at
-// asynchronous UART entry. Ordinary services consume it without repeatedly
-// passing four timestamp bytes through the AVR call graph; ISRs use their own
-// edge timing and never depend on this value.
-uint32_t now = 0;
+// One wrap-safe application clock is refreshed at setup/loop and asynchronous
+// UART or key entry. AVR-hot paths cache this value in registers before calling
+// reusable drivers; ISRs keep independent edge timing and never depend on it.
+static uint32_t now = 0;
 // Host state bits are intentionally sparse to preserve the existing wire value.
 constexpr uint8_t HOST_SEEN = 1U << 0;
 constexpr uint8_t HOST_LCD_OFFLINE = 1U << 1;
@@ -183,8 +182,8 @@ void handleMenuAction(uint8_t action, bool fromRemote = false);
 void setMenuPage(uint8_t page);
 void sendTelemetry(uint8_t sequence);
 void endLearning(uint8_t state, int8_t feedback);
-void programService(uint32_t now);
-void serviceSystemInputs(uint32_t now);
-void serviceIlluminationSettings(uint32_t now);
+void programService(uint32_t at);
+void serviceSystemInputs(uint32_t at);
+void serviceIlluminationSettings(uint32_t at);
 void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *);
 void releaseHostPanel();

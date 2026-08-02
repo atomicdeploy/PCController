@@ -71,15 +71,15 @@ smoothInaValue(int32_t previous, int32_t sample, bool currentOrPower) {
 }
 
 // Samples and filters INA219 at the door-dependent cadence.
-void sampleIna219(uint32_t now) {
+void sampleIna219(uint32_t at) {
   const uint16_t samplePeriod =
       systemInputs.doorOpen() ? INA219_DOOR_OPEN_SAMPLE_MS
                               : INA219_SAMPLE_MS;
   if (!ina219Available ||
-      static_cast<uint32_t>(now - lastIna219SampleAt) < samplePeriod) {
+      static_cast<uint32_t>(at - lastIna219SampleAt) < samplePeriod) {
     return;
   }
-  lastIna219SampleAt = now;
+  lastIna219SampleAt = at;
   Ina219Reading reading;
   if (!ina219.read(reading)) {
     ina219Available = false;
@@ -133,13 +133,13 @@ uint8_t temperatureRole(uint8_t addressIndex) {
 }
 
 // Starts a nonblocking conversion unless RF learning owns interrupt timing.
-void requestTemperatures(uint32_t now) {
+void requestTemperatures(uint32_t at) {
   if (temperatureAddressCount == 0 || learningActive) {
     return;
   }
   temperatureBus.requestTemperatures();
   temperatureConversionPending = true;
-  lastTemperatureRequestAt = now;
+  lastTemperatureRequestAt = at;
 }
 
 // Prepares cached four-character tLED/tBT text outside the display hot path.
@@ -157,7 +157,7 @@ void formatTemperatureSegmentText(uint8_t index, int16_t centiC) {
 }
 
 // Completes ready conversions and schedules the next door-dependent request.
-void serviceTemperatures(uint32_t now) {
+void serviceTemperatures(uint32_t at) {
   // OneWire briefly masks interrupts. Keep it idle during RF learning so
   // receiver pulse timing is not disturbed.
   if (learningActive || temperatureAddressCount == 0) {
@@ -165,7 +165,7 @@ void serviceTemperatures(uint32_t now) {
   }
 
   if (temperatureConversionPending) {
-    if (static_cast<uint32_t>(now - lastTemperatureRequestAt) <
+    if (static_cast<uint32_t>(at - lastTemperatureRequestAt) <
         TEMPERATURE_CONVERSION_MS) {
       return;
     }
@@ -188,8 +188,8 @@ void serviceTemperatures(uint32_t now) {
   const uint16_t samplePeriod =
       systemInputs.doorOpen() ? TEMPERATURE_DOOR_OPEN_PERIOD_MS
                               : TEMPERATURE_PERIOD_MS;
-  if (static_cast<uint32_t>(now - lastTemperatureRequestAt) >=
+  if (static_cast<uint32_t>(at - lastTemperatureRequestAt) >=
       samplePeriod) {
-    requestTemperatures(now);
+    requestTemperatures(at);
   }
 }

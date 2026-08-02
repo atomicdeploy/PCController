@@ -4,10 +4,10 @@
 // -----------------------------------------------------------------------------
 
 // Shows one packed four-character label for a short dwell.
-void showPackedLabel(const char *labels, uint8_t index, uint32_t now) {
+void showPackedLabel(const char *labels, uint8_t index, uint32_t at) {
   display.showText(reinterpret_cast<const __FlashStringHelper *>(
       labels + static_cast<uint8_t>(index << 2)));
-  menuLabelEndsAt = now + 650;
+  menuLabelEndsAt = at + 650;
 }
 
 // Distinguishes ordinary page modes from modal editors and transient states.
@@ -115,16 +115,16 @@ uint8_t firstConfiguredMenuPage(uint8_t category) {
 }
 
 // Renders the representative four-character label for the selected category.
-void showMenuCategory(uint32_t now) {
+void showMenuCategory(uint32_t at) {
   static const uint8_t labelPages[] PROGMEM = {
       PAGE_DOOR, PAGE_ILLUMINATION, PAGE_PWM, PAGE_KEYS};
   const uint8_t category = menuTreeState & 0x03U;
   const uint8_t labelPage = pgm_read_byte(labelPages + category);
-  showPackedLabel(MenuLabels, labelPage, now);
+  showPackedLabel(MenuLabels, labelPage, at);
 }
 
 // Rolls category selection while skipping categories with no visible children.
-void moveMenuCategory(bool forward, uint32_t now) {
+void moveMenuCategory(bool forward, uint32_t at) {
   uint8_t category = menuTreeState & 0x03U;
   for (uint8_t checked = 0; checked < MenuCategoryCount; ++checked) {
     category = forward
@@ -132,7 +132,7 @@ void moveMenuCategory(bool forward, uint32_t now) {
                    : (category == 0 ? MenuCategoryCount - 1U : category - 1U);
     if (firstConfiguredMenuPage(category) != 0xFF) {
       menuTreeState = static_cast<uint8_t>(MenuCategorySelector | category);
-      showMenuCategory(now);
+      showMenuCategory(at);
       return;
     }
   }
@@ -159,21 +159,21 @@ void setMenuPage(uint8_t page) {
 }
 
 // Runs mode entry actions and time-based exits for transient/modal states.
-void programService(uint32_t now) {
+void programService(uint32_t at) {
   ProgramMode previous;
   ProgramMode current;
   if (modeManager.consumeTransition(previous, current)) {
     (void)previous;
-    modeEnteredAt = now;
+    modeEnteredAt = at;
 
     if (isMenuMode(current)) {
       menuPage = modeToPage(current);
-      showPackedLabel(MenuLabels, menuPage, now);
+      showPackedLabel(MenuLabels, menuPage, at);
       return;
     }
 
     if (current == MODE_SOUND_EDIT) {
-      showPackedLabel(SettingsLabels, settingsMenuItem, now);
+      showPackedLabel(SettingsLabels, settingsMenuItem, at);
       return;
     }
 
@@ -183,7 +183,7 @@ void programService(uint32_t now) {
     if (editLabel < EditLabelCount) {
       display.showText(reinterpret_cast<const __FlashStringHelper *>(
           EditLabels + static_cast<uint8_t>(editLabel << 2)));
-      menuLabelEndsAt = now + 650;
+      menuLabelEndsAt = at + 650;
       return;
     }
 
@@ -195,12 +195,12 @@ void programService(uint32_t now) {
         break;
       case MODE_USER_RELAY_CONTROL:
         display.showText(commonText(TextUserRelays));
-        menuLabelEndsAt = now + 450;
+        menuLabelEndsAt = at + 450;
         break;
       case MODE_MOTION_CONTROL:
-        relays.allOff(now);
+        relays.allOff(at);
         display.showText(commonText(TextGo));
-        menuLabelEndsAt = now + 450;
+        menuLabelEndsAt = at + 450;
         break;
       case MODE_SAVE_PROMPT:
         display.showText(commonText(TextSave));
@@ -223,7 +223,7 @@ void programService(uint32_t now) {
   switch (modeManager.current()) {
     case MODE_BOOT:
       if (!settingsStore.values().programmingMode() &&
-          static_cast<uint32_t>(now - modeEnteredAt) >= 650) {
+          static_cast<uint32_t>(at - modeEnteredAt) >= 650) {
         setMenuPage(settingsStore.values().defaultMenuPage);
       }
       break;
@@ -232,19 +232,19 @@ void programService(uint32_t now) {
       if (!learningActive) {
         modeManager.transitionTo(modeBeforeLearning);
       } else {
-        serviceLearningTimer(now);
+        serviceLearningTimer(at);
       }
       break;
 
     case MODE_MOTION_CONTROL:
       if (!relays.motionAllowed()) {
-        relays.allOff(now);
+        relays.allOff(at);
         modeManager.transitionTo(MODE_MOTION);
       }
       break;
 
     case MODE_FLASH_MESSAGE:
-      if (timeReached(now, flashMessageEndsAt)) {
+      if (timeReached(at, flashMessageEndsAt)) {
         modeManager.transitionTo(editReturnMode);
       }
       break;
@@ -287,7 +287,7 @@ void programService(uint32_t now) {
 void menuFeedback(bool fromRemote) {
   statusLeds.playCue(fromRemote ? StatusLedCue::Radio
                                 : StatusLedCue::Menu,
-                     260);
+                     260, now);
   buzzer.beep();
 }
 
@@ -297,7 +297,7 @@ uint8_t adjustedBrightness(uint8_t value, bool increase) {
 }
 
 // Rolls Off/Auto/On and mirrors the result to the edit transaction.
-void adjustIlluminationMode(bool increase, uint32_t now) {
+void adjustIlluminationMode(bool increase, uint32_t at) {
   int8_t mode = static_cast<int8_t>(illumination.mode());
   mode += increase ? 1 : -1;
   if (mode < static_cast<int8_t>(IlluminationMode::Off)) {
@@ -306,7 +306,7 @@ void adjustIlluminationMode(bool increase, uint32_t now) {
     mode = static_cast<int8_t>(IlluminationMode::Off);
   }
   illumination.setMode(static_cast<IlluminationMode>(mode));
-  markIlluminationSettingsChanged(now);
+  markIlluminationSettingsChanged(at);
 }
 
 // Tests the currently selected R1..R8 relay against the live output mask.
@@ -315,9 +315,9 @@ bool selectedRelayActive() {
 }
 
 // Applies the selected R1..R8 test relay through safety sequencing.
-void setSelectedRelay(bool active, uint32_t now) {
+void setSelectedRelay(bool active, uint32_t at) {
   relays.requestRelayForTest(static_cast<uint8_t>(relayMenuIndex + 1), active,
-                             now);
+                             at);
 }
 
 // Tests the selected general-purpose relay R5..R8.
@@ -327,16 +327,16 @@ bool selectedUserRelayActive() {
 }
 
 // Applies the selected general-purpose relay R5..R8.
-void setSelectedUserRelay(bool active, uint32_t now) {
+void setSelectedUserRelay(bool active, uint32_t at) {
   relays.requestRelayForTest(
-      static_cast<uint8_t>(userRelayMenuIndex + 5), active, now);
+      static_cast<uint8_t>(userRelayMenuIndex + 5), active, at);
 }
 
 // Updates EEPROM-owned silent state and the live Timer1 tone player.
-void setSilentMode(bool silent, uint32_t now) {
+void setSilentMode(bool silent, uint32_t at) {
   settingsStore.values().setSilent(silent);
   if (!editTransactionActive) {
-    settingsStore.markDirty(now);
+    settingsStore.markDirty(at);
   }
   buzzer.setMuted(silent);
 }
@@ -348,7 +348,7 @@ uint16_t userPwm12(uint8_t value) {
 }
 
 // Applies all persisted live settings without changing their EEPROM ownership.
-void applyStoredSettings(uint32_t now) {
+void applyStoredSettings(uint32_t at) {
   const ControllerSettings &settings = settingsStore.values();
   streamPeriodMs = settings.streamPeriodMs;
   relays.setBreakBeforeDirectionMs(settings.motionBreakBeforeDirectionMs());
@@ -356,8 +356,8 @@ void applyStoredSettings(uint32_t now) {
   if (settings.programmingMode()) {
     buzzer.stop();
     buzzer.setMuted(true);
-    relays.setMotionAllowed(false, now);
-    relays.allOff(now);
+    relays.setMotionAllowed(false, at);
+    relays.allOff(at);
     pwm.tryAllOff();
     display.setBrightness(settings.displayBrightness);
     display.showText(commonText(TextProgram));
@@ -375,11 +375,11 @@ void applyStoredSettings(uint32_t now) {
   statusLeds.setBrightness(settings.statusBrightness);
   statusLeds.setReadyColor(settings.statusColor());
   statusLeds.setPowerSignal(true);
-  relays.setMotionAllowed(motionPolicyAllows(), now);
+  relays.setMotionAllowed(motionPolicyAllows(), at);
 }
 
 // Restores only explicitly enabled output domains after a normal cold start.
-void restoreStoredOutputs(uint32_t now) {
+void restoreStoredOutputs(uint32_t at) {
   const ControllerSettings &settings = settingsStore.values();
   if (settings.programmingMode()) {
     return;
@@ -391,14 +391,14 @@ void restoreStoredOutputs(uint32_t now) {
             ? RelayDirection::Reverse
             : RelayDirection::Forward,
         (settings.relayRestoreMask & _BV(RelayOutputs::R2SideAEnable)) != 0,
-        now);
+        at);
     relays.requestSide(
         RelaySide::B,
         (settings.relayRestoreMask & _BV(RelayOutputs::R3SideBDirection)) != 0
             ? RelayDirection::Reverse
             : RelayDirection::Forward,
         (settings.relayRestoreMask & _BV(RelayOutputs::R4SideBEnable)) != 0,
-        now);
+        at);
   }
   if (settings.rememberUserRelays()) {
     for (uint8_t general = 0; general < RelayOutputs::GeneralCount; ++general) {
@@ -428,30 +428,30 @@ void beginEditTransaction(ProgramMode returnMode) {
 
 // Restores the exact domain captured on entry. Menu visibility/order and live
 // relay state are deliberately outside these local transactions.
-void restoreEditTransaction(uint32_t now) {
+void restoreEditTransaction(uint32_t at) {
   ControllerSettings &settings = settingsStore.values();
   memcpy(&settings, editSnapshot, sizeof(editSnapshot));
   settings.displayOptions = editDisplayOptionsSnapshot;
-  applyStoredSettings(now);
+  applyStoredSettings(at);
 }
 
 // Commits or restores an edit and enters the flashing result state.
-void finishEditTransaction(bool save, uint32_t now) {
+void finishEditTransaction(bool save, uint32_t at) {
   if (save) {
-    settingsStore.markDirty(now);
+    settingsStore.markDirty(at);
     settingsStore.saveNow();
   } else {
-    restoreEditTransaction(now);
+    restoreEditTransaction(at);
   }
   editTransactionActive = false;
   flashMessageSaved = save;
-  flashMessageEndsAt = now + 900;
+  flashMessageEndsAt = at + 900;
   if (save) {
     buzzer.success();
-    statusLeds.playCue(StatusLedCue::Save, 900, now);
+    statusLeds.playCue(StatusLedCue::Save, 900, at);
   } else {
     buzzer.error();
-    statusLeds.playCue(StatusLedCue::Discard, 900, now);
+    statusLeds.playCue(StatusLedCue::Discard, 900, at);
   }
   modeManager.transitionTo(MODE_FLASH_MESSAGE);
 }
@@ -472,8 +472,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 
   // Menu actions can arrive between loop snapshots (UART, RF, or key event),
   // so capture their exact event time before entering modal state logic.
-  const uint32_t now = millis();
-  ::now = now;
+  now = millis();
+  const uint32_t actionNow = now;
   if (modeManager.current() == MODE_BOOT ||
       modeManager.current() == MODE_FAULT) {
     menuFeedback(fromRemote);
@@ -484,16 +484,16 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   if (menuCategorySelected() && isMenuMode(modeManager.current())) {
     const uint8_t category = menuTreeState & 0x03U;
     if (action == MENU_PREVIOUS || action == MENU_NEXT) {
-      moveMenuCategory(action == MENU_NEXT, now);
+      moveMenuCategory(action == MENU_NEXT, actionNow);
     } else if (action == MENU_INCREASE) {
       const uint8_t page = firstConfiguredMenuPage(category);
       if (page != 0xFF) {
         setMenuPage(page);
-        showPackedLabel(MenuLabels, menuPage, now);
+        showPackedLabel(MenuLabels, menuPage, actionNow);
       }
     } else {
       menuTreeState = menuCategory(menuPage);
-      showPackedLabel(MenuLabels, menuPage, now);
+      showPackedLabel(MenuLabels, menuPage, actionNow);
     }
     menuFeedback(fromRemote);
     return;
@@ -505,7 +505,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   // leaf hierarchy considers K3 as Back.
   if (modeManager.current() == MODE_KEYS) {
     identifiedKey = static_cast<uint8_t>(action + 1);
-    identifiedKeyEndsAt = now + 900;
+    identifiedKeyEndsAt = actionNow + 900;
     menuFeedback(fromRemote);
     return;
   }
@@ -517,7 +517,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (action == MENU_NEXT) {
         modeManager.transitionTo(MODE_ILLUMINATION_ON_EDIT);
       } else {
-        adjustIlluminationMode(action == MENU_INCREASE, now);
+        adjustIlluminationMode(action == MENU_INCREASE, actionNow);
       }
       menuFeedback(fromRemote);
       return;
@@ -530,7 +530,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         illumination.setOnBrightness(adjustedBrightness(
             illumination.onBrightness(), action == MENU_INCREASE));
-        markIlluminationSettingsChanged(now);
+        markIlluminationSettingsChanged(actionNow);
       }
       menuFeedback(fromRemote);
       return;
@@ -543,7 +543,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         illumination.setOffBrightness(adjustedBrightness(
             illumination.offBrightness(), action == MENU_INCREASE));
-        markIlluminationSettingsChanged(now);
+        markIlluminationSettingsChanged(actionNow);
       }
       menuFeedback(fromRemote);
       return;
@@ -554,21 +554,21 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
           modeManager.transitionTo(MODE_SAVE_PROMPT);
         } else {
           --settingsMenuItem;
-          showPackedLabel(SettingsLabels, settingsMenuItem, now);
+          showPackedLabel(SettingsLabels, settingsMenuItem, actionNow);
         }
       } else if (action == MENU_NEXT) {
         if (++settingsMenuItem >= SettingsItemCount) {
           settingsMenuItem = static_cast<uint8_t>(SettingsItemCount - 1);
           modeManager.transitionTo(MODE_SAVE_PROMPT);
         } else {
-          showPackedLabel(SettingsLabels, settingsMenuItem, now);
+          showPackedLabel(SettingsLabels, settingsMenuItem, actionNow);
         }
       } else {
         const bool increase = action == MENU_INCREASE;
         ControllerSettings &settings = settingsStore.values();
         switch (settingsMenuItem) {
           case 0:
-            setSilentMode(!increase, now);
+            setSilentMode(!increase, actionNow);
             break;
           case 1:
             settings.displayBrightness = static_cast<uint8_t>(
@@ -602,7 +602,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
             break;
           case SettingsPolicyItem:
             settings.adjustMotionDoorPolicy(increase);
-            applyStoredSettings(now);
+            applyStoredSettings(actionNow);
             break;
         }
       }
@@ -615,7 +615,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (action == MENU_NEXT) {
         modeManager.transitionTo(MODE_PWM_VALUE_EDIT);
       } else {
-        pwm.adjustChannel(action == MENU_INCREASE ? 1 : -1, now);
+        pwm.adjustChannel(action == MENU_INCREASE ? 1 : -1, actionNow);
       }
       menuFeedback(fromRemote);
       return;
@@ -628,7 +628,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         pwm.adjustValue(action == MENU_INCREASE ? PWM_MENU_STEP
                                                     : -PWM_MENU_STEP,
-                            now);
+                            actionNow);
       }
       menuFeedback(fromRemote);
       return;
@@ -695,17 +695,17 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 
     case MODE_USER_RELAY_CONTROL:
       if (action == MENU_PREVIOUS) {
-        setSelectedUserRelay(false, now);
+        setSelectedUserRelay(false, actionNow);
         modeManager.transitionTo(MODE_USER_RELAY_BEHAVIOR_EDIT);
       } else if (action == MENU_NEXT) {
-        setSelectedUserRelay(false, now);
+        setSelectedUserRelay(false, actionNow);
         modeManager.transitionTo(MODE_USER_RELAYS);
       } else if (action == MENU_DECREASE) {
-        setSelectedUserRelay(false, now);
+        setSelectedUserRelay(false, actionNow);
       } else if (userRelayBehavior == 0) {
-        setSelectedUserRelay(!selectedUserRelayActive(), now);
+        setSelectedUserRelay(!selectedUserRelayActive(), actionNow);
       } else {
-        setSelectedUserRelay(true, now);
+        setSelectedUserRelay(true, actionNow);
       }
       menuFeedback(fromRemote);
       return;
@@ -717,11 +717,11 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       const bool accepted = relays.requestSide(
           static_cast<::RelaySide>(side),
           reverse ? RelayDirection::Reverse : RelayDirection::Forward, true,
-          now);
+          actionNow);
       if (accepted && fromRemote) {
         remoteMomentaryKind = RemoteActionKind::Side;
         remoteMomentaryValue = side;
-        remoteMomentaryEndsAt = now + 350;
+        remoteMomentaryEndsAt = actionNow + 350;
       }
       menuFeedback(fromRemote);
       return;
@@ -730,7 +730,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
     case MODE_SAVE_PROMPT:
       finishEditTransaction(action == MENU_NEXT ||
                                 action == MENU_INCREASE,
-                            now);
+                            actionNow);
       return;
 
     case MODE_FLASH_MESSAGE:
@@ -756,7 +756,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (action == MENU_NEXT) {
         modeManager.transitionTo(MODE_RELAY);
       } else {
-        setSelectedRelay(action == MENU_INCREASE, now);
+        setSelectedRelay(action == MENU_INCREASE, actionNow);
       }
       menuFeedback(fromRemote);
       return;
@@ -795,12 +795,12 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       // handled above, while rELY is All-Off. Other leaves open their parent.
       if (leafDecreaseAction(modeManager.current()) ==
           LeafDecreaseAction::AllRelaysOff) {
-        relays.allOff(now);
+        relays.allOff(actionNow);
 #if PCCONTROLLER_MENU_HIERARCHY
       } else {
         menuTreeState = static_cast<uint8_t>(
             MenuCategorySelector | menuCategory(menuPage));
-        showMenuCategory(now);
+        showMenuCategory(actionNow);
 #endif
       }
       break;
@@ -816,7 +816,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         beginEditTransaction(MODE_PWM);
         modeManager.transitionTo(MODE_PWM_CHANNEL_EDIT);
       } else if (menuPage == PAGE_RELAY) {
-        relays.allOff(now);
+        relays.allOff(actionNow);
         modeManager.transitionTo(MODE_RELAY_CHANNEL_EDIT);
       } else if (menuPage == PAGE_USER_PWM) {
         beginEditTransaction(MODE_USER_PWM);
@@ -838,8 +838,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         beginLearning(RF_LEARN_INDEFINITE, 0);
       } else {
         display.showText(commonText(TextError));
-        menuLabelEndsAt = now + 650;
-        statusLeds.playCue(StatusLedCue::Discard, 650, now);
+        menuLabelEndsAt = actionNow + 650;
+        statusLeds.playCue(StatusLedCue::Discard, 650, actionNow);
         buzzer.error();
         return;
       }
@@ -859,13 +859,14 @@ void applyKeyGesture(uint8_t bit, KeyEvent event) {
     if (event == KeyEvent::Down) {
       handleMenuAction(bit);
     } else if (event == KeyEvent::Up) {
-      const uint32_t releasedAt = millis();
+      now = millis();
+      const uint32_t releaseNow = now;
       if (mode == MODE_MOTION_CONTROL) {
         relays.stopSide(
             static_cast<::RelaySide>(bit <= BoardPins::KeyNext ? 0 : 1),
-            releasedAt);
+            releaseNow);
       } else {
-        setSelectedUserRelay(false, releasedAt);
+        setSelectedUserRelay(false, releaseNow);
       }
     }
   } else if (event == KeyEvent::Click || event == KeyEvent::HoldStart ||
@@ -889,7 +890,7 @@ void keyGesture(uint8_t bit, KeyEvent event, void *) {
 }
 
 // Stops motion and exits its modal page after either side's two-key hold.
-void serviceMotionExit(uint32_t now) {
+void serviceMotionExit(uint32_t at) {
   const bool motionControl = modeManager.current() == MODE_MOTION_CONTROL;
   const bool sideAExit =
       menuKeys[0].isPressed() && menuKeys[1].isPressed();
@@ -900,14 +901,14 @@ void serviceMotionExit(uint32_t now) {
     return;
   }
   if (motionControl) {
-    relays.allOff(now);
+    relays.allOff(at);
   }
   if (motionExitStartedAt == 0xFFFFFFFFUL) {
     return;
   }
   if (motionExitStartedAt == 0) {
-    motionExitStartedAt = now;
-  } else if (static_cast<uint32_t>(now - motionExitStartedAt) >=
+    motionExitStartedAt = at;
+  } else if (static_cast<uint32_t>(at - motionExitStartedAt) >=
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
     setMenuPage(PAGE_MOTION);
@@ -917,8 +918,8 @@ void serviceMotionExit(uint32_t now) {
 }
 
 // Debounces door/BT states, emits edges, and enforces door-dependent motion policy.
-void serviceSystemInputs(uint32_t now) {
-  systemInputs.update(shiftRegisters.rawInputs(), now);
+void serviceSystemInputs(uint32_t at) {
+  systemInputs.update(shiftRegisters.rawInputs(), at);
 
   bool value;
   if (systemInputs.consumeDoorChange(value)) {
@@ -928,8 +929,8 @@ void serviceSystemInputs(uint32_t now) {
     }
     statusLeds.playCue(value ? StatusLedCue::DoorOpen
                              : StatusLedCue::DoorClosed,
-                       720, now);
-    relays.setMotionAllowed(motionPolicyAllows(), now);
+                       720, at);
+    relays.setMotionAllowed(motionPolicyAllows(), at);
     if (!relays.motionAllowed()) {
       if (modeManager.current() == MODE_MOTION_CONTROL) {
         modeManager.transitionTo(MODE_MOTION);
@@ -939,7 +940,7 @@ void serviceSystemInputs(uint32_t now) {
         modeManager.current() != MODE_BOOT &&
         modeManager.current() != MODE_FAULT) {
       if (modeManager.current() == MODE_MOTION_CONTROL) {
-        relays.allOff(now);
+        relays.allOff(at);
       }
       setMenuPage(settingsStore.values().defaultMenuPage);
       if (settingsStore.values().saveLastMenuPage()) {
@@ -955,29 +956,29 @@ void serviceSystemInputs(uint32_t now) {
 
   static bool initialized = false;
   static BluetoothIndicatorState reported = BluetoothIndicatorState::Off;
-  const BluetoothIndicatorState current = systemInputs.bluetoothState(now);
+  const BluetoothIndicatorState current = systemInputs.bluetoothState(at);
   if (!initialized) {
     initialized = true;
     reported = current;
   } else if (reported != current) {
     reported = current;
     appEvents.bluetooth(static_cast<uint8_t>(current));
-    statusLeds.playCue(StatusLedCue::Bluetooth, 600, now);
+    statusLeds.playCue(StatusLedCue::Bluetooth, 600, at);
   }
 }
 
 // Polls both shift registers, then advances keys and motion-exit detection.
-void serviceShiftRegisterAndKeys(uint32_t now) {
-  if (static_cast<uint32_t>(now - lastShiftPollAt) < SHIFT_POLL_MS) {
+void serviceShiftRegisterAndKeys(uint32_t at) {
+  if (static_cast<uint32_t>(at - lastShiftPollAt) < SHIFT_POLL_MS) {
     return;
   }
-  lastShiftPollAt = now;
+  lastShiftPollAt = at;
   shiftRegisters.service();
-  serviceSystemInputs(now);
+  serviceSystemInputs(at);
   for (Key &key : menuKeys) {
-    key.update(now);
+    key.update(at);
   }
-  serviceMotionExit(now);
+  serviceMotionExit(at);
 }
 
 // Renders the current illumination mode from the packed flash text table.
@@ -1000,13 +1001,13 @@ void showPwmChannel() {
 }
 
 // Alternates timer total/remaining while indefinite learning keeps LErn.
-void showLearningProgress(uint32_t now) {
+void showLearningProgress(uint32_t at) {
   if (learningMode != RF_LEARN_TIMER) {
     display.showText(commonText(TextLearn));
     return;
   }
-  const bool remaining = ((now / 1000UL) & 1U) != 0;
-  const uint8_t seconds = remaining ? learningRemainingSeconds(now)
+  const bool remaining = ((at / 1000UL) & 1U) != 0;
+  const uint8_t seconds = remaining ? learningRemainingSeconds(at)
                                     : learningTotalSeconds;
   char text[5] = {
       remaining ? 'r' : 't',
@@ -1019,16 +1020,16 @@ void showLearningProgress(uint32_t now) {
 }
 
 // Advances one cached four-character window of a host-owned Door-page scroll.
-void showHostSegmentText(uint32_t now) {
+void showHostSegmentText(uint32_t at) {
   if (hostSegmentTextLength <= 4) {
     display.showText(hostSegmentText);
     return;
   }
-  if (timeReached(now, hostSegmentTextEndsAt)) {
+  if (timeReached(at, hostSegmentTextEndsAt)) {
     if (++hostSegmentScrollIndex >= hostSegmentTextLength) {
       hostSegmentScrollIndex = 0;
     }
-    hostSegmentTextEndsAt = now + hostSegmentStepMs;
+    hostSegmentTextEndsAt = at + hostSegmentStepMs;
   }
   char window[5];
   for (uint8_t index = 0; index < 4; ++index) {
@@ -1043,23 +1044,23 @@ void showHostSegmentText(uint32_t now) {
 }
 
 // Refreshes only changed front-panel content at a smooth 20 ms service cadence.
-void serviceDisplay(uint32_t now) {
-  if (static_cast<uint32_t>(now - lastDisplayRefreshAt) <
+void serviceDisplay(uint32_t at) {
+  if (static_cast<uint32_t>(at - lastDisplayRefreshAt) <
       DISPLAY_REFRESH_MS) {
     return;
   }
-  lastDisplayRefreshAt = now;
+  lastDisplayRefreshAt = at;
 
   const ProgramMode currentMode = modeManager.current();
   if (currentMode == MODE_BOOT || currentMode == MODE_FAULT) {
     return;
   }
   if (learningActive) {
-    showLearningProgress(now);
+    showLearningProgress(at);
     return;
   }
   if (currentMode == MODE_FLASH_MESSAGE) {
-    if (((now / 150U) & 1U) != 0) {
+    if (((at / 150U) & 1U) != 0) {
       display.showText(commonText(flashMessageSaved ? TextSave
                                                    : TextDiscard));
     } else {
@@ -1068,34 +1069,34 @@ void serviceDisplay(uint32_t now) {
     return;
   }
   if (currentMode == MODE_SAVE_PROMPT) {
-    display.showText(commonText(((now / 600U) & 1U) != 0
+    display.showText(commonText(((at / 600U) & 1U) != 0
                                     ? TextSave
                                     : TextDiscard));
     return;
   }
 #if PCCONTROLLER_MENU_HIERARCHY
   if (menuCategorySelected() && isMenuMode(currentMode)) {
-    showMenuCategory(now);
+    showMenuCategory(at);
     return;
   }
 #endif
-  if (!timeReached(now, menuLabelEndsAt)) {
+  if (!timeReached(at, menuLabelEndsAt)) {
     return;
   }
   if (hostSegmentTextActive && hostSegmentTextLength <= 4 &&
-      hostSegmentTextEndsAt != 0 && timeReached(now, hostSegmentTextEndsAt)) {
+      hostSegmentTextEndsAt != 0 && timeReached(at, hostSegmentTextEndsAt)) {
     hostSegmentTextActive = false;
   }
   // Host text overlays ordinary pages only. A long message is intentionally
   // scoped to Door; all editors, warnings, learning, and programming win.
   if (hostSegmentTextActive && isMenuMode(currentMode) &&
       (hostSegmentTextLength <= 4 || currentMode == MODE_DOOR)) {
-    showHostSegmentText(now);
+    showHostSegmentText(at);
     return;
   }
   if (currentMode >= MODE_ILLUMINATION_MODE_EDIT &&
       currentMode <= MODE_USER_RELAY_BEHAVIOR_EDIT &&
-      ((now / 300U) & 1U) == 0) {
+      ((at / 300U) & 1U) == 0) {
     display.clear();
     return;
   }
@@ -1148,7 +1149,7 @@ void serviceDisplay(uint32_t now) {
   if (currentMode == MODE_PWM) {
     if (!pwm.available()) {
       display.showUnavailable();
-    } else if (((now / 900UL) & 1U) == 0) {
+    } else if (((at / 900UL) & 1U) == 0) {
       showPwmChannel();
     } else {
       display.showInteger(pwm.value());
@@ -1156,7 +1157,7 @@ void serviceDisplay(uint32_t now) {
     return;
   }
   if (currentMode == MODE_RELAY) {
-    if (((now / 900UL) & 1U) == 0) {
+    if (((at / 900UL) & 1U) == 0) {
       const char relayLabel[4] = {
           'r',
           '-',
@@ -1170,7 +1171,7 @@ void serviceDisplay(uint32_t now) {
     return;
   }
   if (currentMode == MODE_KEYS) {
-    if (!timeReached(now, identifiedKeyEndsAt) && identifiedKey != 0) {
+    if (!timeReached(at, identifiedKeyEndsAt) && identifiedKey != 0) {
       display.showInteger(identifiedKey);
     } else {
       display.showText(commonText(TextKey));
@@ -1178,7 +1179,7 @@ void serviceDisplay(uint32_t now) {
     return;
   }
   if (currentMode == MODE_USER_PWM) {
-    if (((now / 900UL) & 1U) == 0) {
+    if (((at / 900UL) & 1U) == 0) {
       display.showInteger(static_cast<int32_t>(userPwmMenuIndex + 1));
     } else {
       display.showInteger(settingsStore.values().userPwm[userPwmMenuIndex]);

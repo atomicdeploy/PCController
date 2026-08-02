@@ -9,7 +9,7 @@ static inline __attribute__((always_inline)) void initializeController() {
   // compact master, startup bus recovery, and this watchdog bound every path.
   wdt_enable(WDTO_2S);
   wdt_reset();
-  ::now = millis();
+  now = millis();
   appProtocol.begin(PCCONTROLLER_UART_BAUD, handleProtocolFrame);
   resetTelemetry.begin();
   // Announce as soon as UART0 is ready. Opening a USB serial adapter often
@@ -18,11 +18,11 @@ static inline __attribute__((always_inline)) void initializeController() {
   sendHello(0);
   appProtocol.service();
   wdt_reset();
-  const uint32_t now = millis();
-  ::now = now;
+  now = millis();
+  const uint32_t startupNow = now;
   shiftRegisters.begin();
-  relays.begin(now);
-  systemInputs.begin(shiftRegisters.rawInputs(), now);
+  relays.begin(startupNow);
+  systemInputs.begin(shiftRegisters.rawInputs(), startupNow);
   buzzer.begin();
   AddressableLeds::begin();
   loadIlluminationSettings();
@@ -57,24 +57,24 @@ static inline __attribute__((always_inline)) void initializeController() {
 
     ina219Available = ina219.begin();
   }
-  pwm.begin(pwmAvailable, now);
+  pwm.begin(pwmAvailable, startupNow);
   if (programming) {
     // A durable programming latch must not briefly restore an On/Auto light
     // between PWM initialization and the normal all-off latch enforcement.
     illumination.setMode(IlluminationMode::Off);
     illumination.setOffBrightness(0);
   }
-  illumination.begin(pwm, systemInputs.doorOpen(), now);
-  statusLeds.begin(pwm, programming ? 0 : settings.statusBrightness, now,
+  illumination.begin(pwm, systemInputs.doorOpen(), startupNow);
+  statusLeds.begin(pwm, programming ? 0 : settings.statusBrightness, startupNow,
                    !programming);
-  applyStoredSettings(now);
-  restoreStoredOutputs(now);
+  applyStoredSettings(startupNow);
+  restoreStoredOutputs(startupNow);
   appProtocol.service();
   wdt_reset();
 
   temperatureBus.begin();
   discoverTemperatureSensors();
-  requestTemperatures(now);
+  requestTemperatures(startupNow);
   appProtocol.service();
   wdt_reset();
 
@@ -94,9 +94,11 @@ static inline __attribute__((always_inline)) void initializeController() {
 
 // Advances every cooperative domain without blocking UART or safety deadlines.
 static inline __attribute__((always_inline)) void serviceController() {
-  const uint32_t now = millis();
-  ::now = now;
-  const bool i2cReserved = i2cLeaseActive(now);
+  now = millis();
+  // Keep the shared snapshot in registers across driver calls. Re-reading the
+  // file-scope value grows this byte-tight AVR image past its identity boundary.
+  const uint32_t loopNow = now;
+  const bool i2cReserved = i2cLeaseActive(loopNow);
   wdt_reset();
 
   appProtocol.service();
@@ -132,13 +134,13 @@ static inline __attribute__((always_inline)) void serviceController() {
       safeStopMacroOutputs();
     }
   }
-  serviceShiftRegisterAndKeys(now);
-  serviceRemoteMomentary(now);
-  serviceTemperatures(now);
+  serviceShiftRegisterAndKeys(loopNow);
+  serviceRemoteMomentary(loopNow);
+  serviceTemperatures(loopNow);
   if (!i2cReserved) {
-    sampleIna219(now);
+    sampleIna219(loopNow);
   }
-  programService(now);
+  programService(loopNow);
 
   // Edge state suppresses duplicate events while a cadence allows repeated
   // local HOT alarms during a sustained unsafe condition.
@@ -146,9 +148,9 @@ static inline __attribute__((always_inline)) void serviceController() {
   static bool hotReported = false;
   static uint32_t lastHotAlertAt = 0;
   if (hot && (!hotReported ||
-              static_cast<uint32_t>(now - lastHotAlertAt) >= 10000UL)) {
+              static_cast<uint32_t>(loopNow - lastHotAlertAt) >= 10000UL)) {
     buzzer.error();
-    lastHotAlertAt = now;
+    lastHotAlertAt = loopNow;
   }
   if (hot != hotReported) {
     appEvents.alert(ControllerAlertKind::Hot, hot);
@@ -181,7 +183,7 @@ static inline __attribute__((always_inline)) void serviceController() {
   } else if ((hostLcdFlags & HOST_PROGRAM_RUNNING) != 0) {
     desiredLedMode = StatusLedMode::Running;
   } else {
-    const BluetoothIndicatorState btState = systemInputs.bluetoothState(now);
+    const BluetoothIndicatorState btState = systemInputs.bluetoothState(loopNow);
     // A blinking indicator means powered but waiting for connection; keep it
     // distinct from the deliberate green/red powered-off indication.
     desiredLedMode = btState == BluetoothIndicatorState::On
@@ -191,12 +193,12 @@ static inline __attribute__((always_inline)) void serviceController() {
                                 : StatusLedMode::Disconnected);
   }
   if (statusLeds.mode() != desiredLedMode) {
-    statusLeds.setMode(desiredLedMode, now);
+    statusLeds.setMode(desiredLedMode, loopNow);
   }
 
-  illumination.service(systemInputs.doorOpen(), !i2cReserved, now);
-  serviceIlluminationSettings(now);
-  relays.service(now);
+  illumination.service(systemInputs.doorOpen(), !i2cReserved, loopNow);
+  serviceIlluminationSettings(loopNow);
+  relays.service(loopNow);
   const uint8_t relayMask = relays.activeRelayMask();
   if (relayMask != lastRelayMask) {
     appEvents.relay(relayMask);
@@ -205,26 +207,26 @@ static inline __attribute__((always_inline)) void serviceController() {
       buzzer.beep(35, (relayMask & ~lastRelayMask) != 0 ? 1900 : 1250);
     }
     settingsStore.values().relayRestoreMask = relayMask;
-    settingsStore.markDirty(now);
+    settingsStore.markDirty(loopNow);
     lastRelayMask = relayMask;
   }
   const ControllerSettings &displaySettings = settingsStore.values();
   display.serviceBrightness(systemInputs.doorOpen()
                                 ? displaySettings.displayBrightness
                                 : displaySettings.displayClosedBrightness(),
-                            now);
-  serviceDisplay(now);
+                            loopNow);
+  serviceDisplay(loopNow);
   if (!i2cReserved) {
-    statusLeds.service(now);
+    statusLeds.service(loopNow);
   }
-  taskManager.update(now);
-  buzzer.update(now);
+  taskManager.update(loopNow);
+  buzzer.update(loopNow);
 
   if (streamPeriodMs != 0 &&
-      static_cast<uint32_t>(now - lastTelemetryAt) >= streamPeriodMs) {
-    lastTelemetryAt = now;
+      static_cast<uint32_t>(loopNow - lastTelemetryAt) >= streamPeriodMs) {
+    lastTelemetryAt = loopNow;
     sendTelemetry(0);
   }
 
-  safeReset.service(relays, pwm, now);
+  safeReset.service(relays, pwm, loopNow);
 }

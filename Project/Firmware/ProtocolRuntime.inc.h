@@ -197,7 +197,7 @@ void sendMenuLayout(uint8_t sequence) {
 }
 
 // Validates the canonical schema-2 prefix and ignores appended extension data.
-bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t now) {
+bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t at) {
   if (length < static_cast<uint8_t>(4 + PersistentMenuOrderWireBytes) ||
       payload[0] != 2 ||
       payload[1] != PAGE_COUNT) {
@@ -217,11 +217,11 @@ bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t now) {
   }
   if (!settings.menuPageVisible(menuPage)) {
     if (modeManager.current() == MODE_MOTION_CONTROL) {
-      relays.allOff(now);
+      relays.allOff(at);
     }
     setMenuPage(firstVisible);
   }
-  settingsStore.markDirty(now);
+  settingsStore.markDirty(at);
   return true;
 }
 #endif
@@ -230,7 +230,7 @@ bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t now) {
 // pauses firmware-owned polling while the PC reads or writes any bus address.
 // Executes write, read, or repeated-start transfer and returns byte-level status.
 void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
-                 uint32_t now) {
+                 uint32_t at) {
   if (length < 4) {
     appProtocol.sendError(sequence, ControllerProtocol::I2cTransfer,
                           ControllerProtocol::BadPayload);
@@ -254,7 +254,7 @@ void transferI2c(uint8_t sequence, const uint8_t *request, uint8_t length,
   if (leaseSeconds != 0) {
     i2cLeaseAddress = address;
     i2cLeaseUntil = static_cast<uint16_t>(
-        now + static_cast<uint16_t>(leaseSeconds) * 1000U);
+        at + static_cast<uint16_t>(leaseSeconds) * 1000U);
   }
 
   uint8_t response[19];
@@ -307,7 +307,7 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
 
 // Applies the one canonical settings wire shape; alternate shapes and
 // positional tails are rejected.
-bool applySettings(const uint8_t *payload, uint8_t length, uint32_t now) {
+bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
   if (length != 15 || payload[0] != 3 || payload[2] > 2 || payload[5] > 7 ||
       payload[14] == 0 ||
       (payload[7] & ~OutputPersistence::AllowedMask) != 0
@@ -340,9 +340,9 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t now) {
   settings.relayRestoreMask = payload[13];
   settings.motionBreakMs = payload[14];
 
-  applyStoredSettings(now);
+  applyStoredSettings(at);
   if (wasProgramming && !settings.programmingMode()) {
-    restoreStoredOutputs(now);
+    restoreStoredOutputs(at);
   }
   settingsStore.saveNow();
   return true;
@@ -353,9 +353,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
   using namespace ControllerProtocol;
   const uint8_t *payload = frame.payload;
   const uint8_t length = frame.payloadLength;
-  const uint32_t now = millis();
-  ::now = now;
-  lastHostActivityAt = now;
+  now = millis();
+  const uint32_t frameNow = now;
+  lastHostActivityAt = frameNow;
   hostLcdFlags = static_cast<uint8_t>(
       (hostLcdFlags | HOST_SEEN) & ~HOST_LCD_OFFLINE);
 
@@ -387,7 +387,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       }
       streamPeriodMs = period;
       settingsStore.values().streamPeriodMs = streamPeriodMs;
-      settingsStore.markDirty(now);
+      settingsStore.markDirty(frameNow);
       goto acknowledged;
     }
 
@@ -396,7 +396,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       return;
 
     case SetSettings:
-      if (!applySettings(payload, length, now)) {
+      if (!applySettings(payload, length, frameNow)) {
         goto badPayload;
       }
       goto acknowledged;
@@ -430,7 +430,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 
     case MenuLayoutSet:
 #if PCCONTROLLER_MENU_LAYOUT_PROTOCOL
-      if (!applyMenuLayout(payload, length, now)) {
+      if (!applyMenuLayout(payload, length, frameNow)) {
         goto badPayload;
       }
       goto acknowledged;
@@ -439,7 +439,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 #endif
 
     case I2cTransfer:
-      transferI2c(frame.sequence, payload, length, now);
+      transferI2c(frame.sequence, payload, length, frameNow);
       return;
 
     case Buzzer:
@@ -586,10 +586,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         goto badPayload;
       }
       if (modeManager.current() == MODE_MOTION_CONTROL) {
-        relays.allOff(now);
+        relays.allOff(frameNow);
       }
       if (editTransactionActive) {
-        restoreEditTransaction(now);
+        restoreEditTransaction(frameNow);
         editTransactionActive = false;
       }
       setMenuPage(payload[0]);
@@ -629,11 +629,11 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         if (scrolling) {
           hostSegmentStepMs = duration == 0 ? 260 :
               (duration < 80 ? 80 : duration);
-          hostSegmentTextEndsAt = now + hostSegmentStepMs;
+          hostSegmentTextEndsAt = frameNow + hostSegmentStepMs;
         } else {
           hostSegmentTextEndsAt = target == 3 || duration == 0
                                       ? 0
-                                      : now + duration;
+                                      : frameNow + duration;
         }
       }
       if (target == 1 || target == 2 || target == 3) {
@@ -662,7 +662,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         goto badPayload;
       }
       if (!relays.requestRelayForTest(static_cast<uint8_t>(payload[0] + 1),
-                                      payload[1] != 0, now)) {
+                                      payload[1] != 0, frameNow)) {
         goto unsafe;
       }
       goto acknowledged;
@@ -672,20 +672,20 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         goto badPayload;
       }
       if (payload[1] == 0) {
-        relays.stopSide(static_cast<::RelaySide>(payload[0]), now);
+        relays.stopSide(static_cast<::RelaySide>(payload[0]), frameNow);
       } else {
         if (!relays.requestSide(
                 static_cast<::RelaySide>(payload[0]),
                 payload[1] == 1 ? RelayDirection::Forward
                                 : RelayDirection::Reverse,
-                true, now)) {
+                true, frameNow)) {
           goto unsafe;
         }
       }
       goto acknowledged;
 
     case RelayAllOff:
-      relays.allOff(now);
+      relays.allOff(frameNow);
       goto acknowledged;
 
     case Reset:
@@ -693,9 +693,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         goto badPayload;
       }
       endLearning(1, 0);
-      stopRemoteMomentary(now);
+      stopRemoteMomentary(frameNow);
       buzzer.stop();
-      safeReset.request(relays, pwm, statusLeds, now);
+      safeReset.request(relays, pwm, statusLeds, frameNow);
       goto acknowledged;
 
     default:

@@ -31,7 +31,7 @@ public:
 };
 #endif
 
-// OneWire ROM and DS18B20 function commands used by the compact bus driver.
+// OneWire ROM and DS18B20 function commands used by the bounded bus driver.
 constexpr uint8_t SearchRomCommand = 0xF0;
 constexpr uint8_t MatchRomCommand = 0x55;
 constexpr uint8_t SkipRomCommand = 0xCC;
