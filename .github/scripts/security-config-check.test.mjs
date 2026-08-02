@@ -89,7 +89,7 @@ test("CodeQL Windows validation requires stable tests and rejects PowerShell", (
     "go test ./...",
   );
   const directTestErrors = validateCodeql(directTests, inventory.languages);
-  assert.ok(directTestErrors.some((error) => error.includes("go-windows build is missing ../Build/go-tests.mjs")));
+  assert.ok(directTestErrors.some((error) => error.includes("go-windows build is missing ../Build/go-tests.mjs --module . --output ../../.build/tests/go")));
 
   const powershell = codeql.replace("        shell: cmd\n", "        shell: pwsh\n");
   const powershellErrors = validateCodeql(powershell, inventory.languages);

@@ -283,7 +283,7 @@ export function validateCodeql(source, sourceLanguages) {
       "./cmd/controllerlib",
     ]],
     ["go-windows", [
-      "../Build/go-tests.mjs",
+      "../Build/go-tests.mjs --module . --output ../../.build/tests/go",
       "go run ./winres/generate_icon.go",
       "-buildmode=c-shared",
       "./cmd/controllerlib",
