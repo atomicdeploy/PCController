@@ -306,7 +306,7 @@ test("binds direct firmware images to the canonical firmware manifest", () => {
   }
 });
 
-test("draft mode emits no broken tag downloads and honors explicit release flags", () => {
+test("draft mode emits no broken tag downloads and keeps v0 in the prerelease channel", () => {
   const directory = fixture();
   try {
     const result = buildReleasePresentation({
@@ -322,7 +322,7 @@ test("draft mode emits no broken tag downloads and honors explicit release flags
     assert.doesNotMatch(result.notes, /\/releases\/download\/v0\.1\.0-alpha\.1/u);
     assert.match(result.notes, /This is a GitHub draft/u);
     assert.equal(result.manifest.release.draft, true);
-    assert.equal(result.manifest.release.prerelease, false);
+    assert.equal(result.manifest.release.prerelease, true);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

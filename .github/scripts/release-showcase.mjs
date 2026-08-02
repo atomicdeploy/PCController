@@ -318,9 +318,9 @@ function repositoryContext(environment, tag, sourceSha) {
   const runId = environment.GITHUB_RUN_ID || "";
   const draft = String(environment.PCCONTROLLER_RELEASE_DRAFT || "").toLowerCase() === "true";
   const explicitPrerelease = environment.PCCONTROLLER_RELEASE_PRERELEASE;
-  const prerelease = explicitPrerelease == null || explicitPrerelease === ""
+  const prerelease = tag.startsWith("v0.") || (explicitPrerelease == null || explicitPrerelease === ""
     ? tag.includes("-")
-    : String(explicitPrerelease).toLowerCase() === "true";
+    : String(explicitPrerelease).toLowerCase() === "true");
   const runUrl = repositoryUrl && runId ? `${repositoryUrl}/actions/runs/${runId}` : "";
   return {
     repository,
