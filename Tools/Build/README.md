@@ -2,10 +2,18 @@
 
 # Project-owned build and packaging
 
-`build.mjs` is the single policy implementation behind the root `build.cmd`
-and `build.sh` launchers. Both wrappers forward their argv unchanged to the
-same Node process, so Windows and Bash produce the same command plan. Neither
-launcher invokes PowerShell.
+`Tools/CommandPlan/controller-command.mjs` is the shared board, artifact, and
+Controller-command policy behind both `build.mjs` and the firmware studio.
+The root `build.cmd`/`build.sh` and `firmware.cmd`/`firmware.sh` launchers only
+bootstrap Node and forward argv unchanged, so Windows and Bash produce the
+same plans, failures, canonical artifact routes, and explicit programming
+method selection. None of these launchers invokes PowerShell.
+
+The canonical `Tools/Controller/toolchain-profile.json` owns the FQBN, MCU,
+clock, programmer baud, bootloader description, and flash/EEPROM geometry.
+Its generator embeds the same policy and compile-time capacities in the Go
+Controller. Build dry-runs and real execution both call the same command
+builder; neither reconstructs USBasp or Urclock argv independently.
 
 Interactive output uses Chalk-managed VT-100 color, clear emoji-labelled
 stages, elapsed timing, and `cli-table3` Unicode tables with centered headers
@@ -118,7 +126,16 @@ application lifecycle selector and is never sent to ISP. The advanced
 
 Use `--dry-run` to inspect the full ordered plan without starting a
 subprocess, changing a file, or opening a device. `--plan-json` is intended
-for wrapper parity and automation tests.
+for wrapper parity and automation tests. The firmware studio exposes the same
+machine-readable boundary, for example:
+
+```console
+firmware.cmd upload --method usbasp --plan-json
+```
+
+Plan JSON includes the canonical target/FQBN, Controller path, application,
+complete-flash, default-EEPROM, and manifest paths. Emitting a plan never
+requires a device to be opened or a Controller subprocess to be started.
 
 ## Bootstrap requirements
 
@@ -160,6 +177,7 @@ execute this same Node plan.
 ```console
 node --check Tools/Build/build.mjs
 node --check Tools/Build/go-tests.mjs
+node --check Tools/CommandPlan/controller-command.mjs
 node --test Tools/Build/build.test.mjs
 node --test Tools/Firmware/firmware.test.mjs
 npm --prefix Tools/Controller/web ci --no-audit --no-fund
@@ -169,10 +187,10 @@ build.cmd --dry-run --no-color
 bash.exe build.sh --dry-run --no-color
 ```
 
-The integration suite freezes identity values and asserts that CMD and Bash
-emit byte-equivalent JSON plans, compile/program through Controller, preserve
-the explicit USBasp method-selection boundary, and never introduce a PowerShell or direct
-Arduino upload action.
+The integration suite freezes identity values and asserts that both CMD/Bash
+launcher pairs emit byte-equivalent JSON plans, compile/program through
+Controller, preserve the explicit USBasp method-selection boundary, and never
+introduce a PowerShell or direct dependency-upload action.
 
 Go tests are compiled to stable names under `.build/tests/go/` and then run
 from those project-owned paths. A content/toolchain identity reuses an existing

@@ -24,6 +24,18 @@ import { basename, delimiter, dirname, extname, isAbsolute, join, relative, reso
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createChalk, renderUnicodeBanner, renderUnicodeTable } from './presentation.mjs'
 import { PRODUCT_METADATA, resolveProductTitle } from './product-metadata.mjs'
+import {
+	BOARD,
+	PROGRAMMING_METHODS,
+	PROGRAMMING_OPERATIONS,
+	canonicalControllerInvocation,
+	commandPlanPaths,
+	controllerCommand as createControllerCommand,
+	createControllerProgramCommand,
+	programmingArtifact,
+	relativeCommandPlanPaths,
+	sourceControllerInvocation
+} from '../CommandPlan/controller-command.mjs'
 
 export { resolveProductTitle } from './product-metadata.mjs'
 
@@ -34,7 +46,8 @@ const WEB_ROOT = join(HOST_ROOT, 'web')
 const WEB_DIST = join(HOST_ROOT, 'internal', 'webui', 'dist')
 const WEB_LOCK = join(WEB_ROOT, 'package-lock.json')
 const BUILD_ROOT = join(PROJECT_ROOT, '.build')
-const FIRMWARE_OUTPUT = join(BUILD_ROOT, 'firmware')
+const COMMAND_PATHS = commandPlanPaths(PROJECT_ROOT)
+const FIRMWARE_OUTPUT = COMMAND_PATHS.firmwareOutput
 const PACKAGE_ROOT = join(BUILD_ROOT, 'package')
 const STABLE_GO_TEST_ROOT = join(BUILD_ROOT, 'tests', 'go')
 const STABLE_GO_TEST_RUNNER = join(PROJECT_ROOT, 'Tools', 'Build', 'go-tests.mjs')
@@ -44,10 +57,10 @@ const DEFAULT_ASSET_ROOT = join(HOST_ROOT, 'internal', 'defaultassets', 'assets'
 const DEFAULT_FIRMWARE = join(DEFAULT_ASSET_ROOT, 'default-firmware.hex')
 const DEFAULT_EEPROM = join(DEFAULT_ASSET_ROOT, 'default-eeprom.hex')
 const DEFAULT_METADATA = join(DEFAULT_ASSET_ROOT, 'default-metadata.json')
-const SAFE_DEFAULT_EEPROM = join(FIRMWARE_OUTPUT, 'safe-default-eeprom.hex')
+const SAFE_DEFAULT_EEPROM = COMMAND_PATHS.defaultEEPROM
 const FIRMWARE_TOOL = join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs')
 const HOST_TOOLS_LOCK = join(PROJECT_ROOT, 'Tools', 'Dependencies', 'resolved-tools-lock.json')
-export const CANONICAL_HOST_OUTPUT = join(HOST_ROOT, 'bin')
+export const CANONICAL_HOST_OUTPUT = COMMAND_PATHS.controllerBin
 const STALE_HOST_OUTPUTS = [
 	join(BUILD_ROOT, 'host'),
 	join(HOST_ROOT, '.build-test-bin'),
@@ -241,7 +254,7 @@ export function parseArguments(argv, env = process.env) {
 		}
 	}
 	if (options.help) return options
-	if (!['urclock', 'usbasp'].includes(options.method)) {
+	if (!PROGRAMMING_METHODS.includes(options.method)) {
 		throw new BuildError('--method must be urclock or usbasp; direct dependency upload is intentionally disabled', 2)
 	}
 	if ((options.upload || options.installBootloader) && options.selection === 'host') {
@@ -267,16 +280,6 @@ export function parseArguments(argv, env = process.env) {
 	return options
 }
 
-function controllerInvocation(options) {
-	const binary = join(CANONICAL_HOST_OUTPUT, process.platform === 'win32' ? 'controller.exe' : 'controller')
-	if (options.host) return { file: binary, prefix: [], cwd: PROJECT_ROOT }
-	return {
-		file: 'go',
-		prefix: ['run', '-buildvcs=false', './cmd/controller'],
-		cwd: HOST_ROOT
-	}
-}
-
 function commandAction(id, stage, file, args, cwd, hardware = false) {
 	return { id, stage, command: { file, args, cwd }, hardware }
 }
@@ -290,27 +293,33 @@ export function createPlan(options, identity, platform = process.platform) {
 		hardware: false
 	})
 	if (!options.cleanOnly && options.toolchainSync) {
-		const controller = { file: 'go', prefix: ['run', '-buildvcs=false', './cmd/controller'], cwd: HOST_ROOT }
-		const args = [...controller.prefix, 'toolchain', 'sync']
+		const controller = sourceControllerInvocation(PROJECT_ROOT)
+		const args = ['toolchain', 'sync']
 		if (options.toolchainCLI) args.push('--cli', options.toolchainCLI)
+		const command = createControllerCommand(controller, args)
 		const action = commandAction(
 			'toolchain-sync',
 			'Explicitly synchronize firmware indexes, cores, and libraries through current Controller source',
-			controller.file,
-			args,
-			controller.cwd
+			command.file,
+			command.args,
+			command.cwd
 		)
 		action.externalMutation = true
 		actions.push(action)
 	}
 	if (!options.cleanOnly && options.firmware) {
-		const controller = { file: 'go', prefix: ['run', '-buildvcs=false', './cmd/controller'], cwd: HOST_ROOT }
+		const command = createControllerProgramCommand({
+			invocation: sourceControllerInvocation(PROJECT_ROOT),
+			method: 'compile',
+			sketch: PROJECT_ROOT,
+			outputDir: FIRMWARE_OUTPUT
+		})
 		actions.push(commandAction(
 			'firmware-compile',
 			'Compile AVR firmware through current Controller source',
-			controller.file,
-			[...controller.prefix, 'program', '--method', 'compile', '--sketch', PROJECT_ROOT, '--output-dir', FIRMWARE_OUTPUT],
-			controller.cwd
+			command.file,
+			command.args,
+			command.cwd
 		))
 		actions.push(commandAction(
 			'default-eeprom',
@@ -376,28 +385,40 @@ export function createPlan(options, identity, platform = process.platform) {
 		actions.push({ id: 'host-manifest', stage: 'Publish canonical host package and manifest', hardware: false })
 	}
 	if (!options.cleanOnly && options.installBootloader) {
-		const controller = controllerInvocation({ ...options, host: true })
-		const args = [
-			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'install-bootloader'
-		]
-		if (options.programmer) args.push('--programmer', options.programmer)
-		actions.push(commandAction('install-bootloader', 'Provision Urboot/fuses through Controller', controller.file, args, controller.cwd, true))
+		const command = createControllerProgramCommand({
+			invocation: canonicalControllerInvocation(PROJECT_ROOT, platform),
+			method: 'usbasp',
+			operation: PROGRAMMING_OPERATIONS.installBootloader,
+			programmer: options.programmer
+		})
+		actions.push(commandAction('install-bootloader', 'Provision Urboot/fuses through Controller', command.file, command.args, command.cwd, true))
 	}
 	if (!options.cleanOnly && options.upload) {
-		const controller = controllerInvocation({ ...options, host: true })
-		const args = [...controller.prefix, 'program', '--method', options.method, '--operation', 'write-flash', '--hex', `<${options.method === 'usbasp' ? 'flash+bootloader' : 'application'} artifact>`]
-		if (options.method === 'urclock') args.push('--device', options.device)
-		if (options.method === 'usbasp') {
-			if (options.device) args.push('--app-device', options.device)
-			if (options.programmer) args.push('--programmer', options.programmer)
-		}
-		if (options.allowIncompleteBackup) args.push('--allow-incomplete-backup')
-		actions.push(commandAction('program', `Explicit ${options.method} programming through Controller`, controller.file, args, controller.cwd, true))
+		const paths = commandPlanPaths(PROJECT_ROOT, platform)
+		const command = createControllerProgramCommand({
+			invocation: canonicalControllerInvocation(PROJECT_ROOT, platform),
+			method: options.method,
+			operation: PROGRAMMING_OPERATIONS.upload,
+			device: options.device,
+			appDevice: options.device,
+			programmer: options.programmer,
+			hex: programmingArtifact(paths, options.method),
+			allowIncompleteBackup: options.allowIncompleteBackup
+		})
+		actions.push(commandAction('program', `Explicit ${options.method} programming through Controller`, command.file, command.args, command.cwd, true))
 	}
+	const paths = relativeCommandPlanPaths(PROJECT_ROOT, platform)
 	return {
 		format: 'pccontroller-build-plan/v1',
-		canonicalController: relative(PROJECT_ROOT, join(CANONICAL_HOST_OUTPUT, platform === 'win32' ? 'controller.exe' : 'controller')).replaceAll('\\', '/'),
-		firmwareOutput: relative(PROJECT_ROOT, FIRMWARE_OUTPUT).replaceAll('\\', '/'),
+		canonicalController: paths.controller,
+		firmwareOutput: paths.firmwareOutput,
+		target: BOARD,
+		artifacts: {
+			application: paths.application,
+			completeFlash: paths.completeFlash,
+			defaultEEPROM: paths.defaultEEPROM,
+			manifest: paths.manifest
+		},
 		identity: { version: identity.version, hostBuildTime: identity.hostBuildTime, packedTimestamp: identity.packedTimestamp },
 		actions
 	}
@@ -1671,14 +1692,13 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	return join(CANONICAL_HOST_OUTPUT, executableName)
 }
 
-function controllerCommand(options, controllerPath) {
+function executionControllerInvocation(controllerPath) {
 	if (controllerPath) return { file: controllerPath, prefix: [], cwd: PROJECT_ROOT }
-	const go = 'go'
-	return { file: go, prefix: ['run', '-buildvcs=false', './cmd/controller'], cwd: HOST_ROOT }
+	return sourceControllerInvocation(PROJECT_ROOT)
 }
 
 function readFirmwareManifest() {
-	const path = join(FIRMWARE_OUTPUT, 'firmware-manifest.json')
+	const path = COMMAND_PATHS.manifest
 	if (!existsSync(path)) throw new BuildError(`Controller compile did not publish ${path}`)
 	let manifest
 	try { manifest = JSON.parse(readFileSync(path, 'utf8')) } catch (error) {
@@ -1703,13 +1723,13 @@ function firmwareArtifact(manifest, role) {
 
 function compileFirmware(options, identity, env, controllerPath, log) {
 	log.stage('🔧', 'Compiling AVR firmware through the Controller interface')
-	const controller = controllerCommand(options, controllerPath)
-	const args = [
-		...controller.prefix,
-		'program', '--method', 'compile', '--sketch', PROJECT_ROOT,
-		'--output-dir', FIRMWARE_OUTPUT
-	]
-	run(controller.file, args, { cwd: controller.cwd, env, verbose: options.verbose })
+	const command = createControllerProgramCommand({
+		invocation: executionControllerInvocation(controllerPath),
+		method: 'compile',
+		sketch: PROJECT_ROOT,
+		outputDir: FIRMWARE_OUTPUT
+	})
+	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	log.stage('💾', 'Generating and validating the complete safe default EEPROM image')
 	const go = requireTool('go', env)
 	run(go, [
@@ -1764,44 +1784,46 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 			humanBytes(manifest.stackBudget.minimumFreeSramBytes)
 		]])
 	}
-	log.success(`Firmware manifest: ${relative(PROJECT_ROOT, join(FIRMWARE_OUTPUT, 'firmware-manifest.json'))}`)
+	log.success(`Firmware manifest: ${relative(PROJECT_ROOT, COMMAND_PATHS.manifest)}`)
 	return manifest
 }
 
 function syncToolchain(options, env, controllerPath, log) {
 	log.stage('🌐', 'Synchronizing firmware indexes, cores, and libraries through Controller')
-	const controller = controllerCommand(options, controllerPath)
 	const args = ['toolchain', 'sync']
 	if (options.toolchainCLI) args.push('--cli', options.toolchainCLI)
-	run(controller.file, [...controller.prefix, ...args], { cwd: controller.cwd, env, verbose: options.verbose })
+	const command = createControllerCommand(executionControllerInvocation(controllerPath), args)
+	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	log.success('Controller-owned toolchain sync completed.')
 }
 
 function executeProgramming(options, env, controllerPath, manifest, log) {
-	const controller = controllerCommand({ ...options, host: true }, controllerPath)
+	const invocation = executionControllerInvocation(controllerPath)
 	if (options.installBootloader) {
 		log.stage('🔥', `Explicit Urboot/fuse provisioning through ${options.programmer || 'the host-selected ISP backend'}`)
-		const args = [
-			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'install-bootloader',
-		]
-		if (options.programmer) args.push('--programmer', options.programmer)
-		run(controller.file, args, { cwd: controller.cwd, env, verbose: options.verbose })
+		const command = createControllerProgramCommand({
+			invocation,
+			method: 'usbasp',
+			operation: PROGRAMMING_OPERATIONS.installBootloader,
+			programmer: options.programmer
+		})
+		run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	}
 	if (!options.upload) return
 	const role = options.method === 'usbasp' ? 'flash+bootloader' : 'application'
 	const artifact = firmwareArtifact(manifest, role)
 	log.stage('⚡', `Explicit guarded ${options.method} programming`)
-	const args = [
-		...controller.prefix, 'program', '--method', options.method, '--operation', 'write-flash',
-		'--hex', artifact.absolutePath
-	]
-	if (options.method === 'urclock') args.push('--device', options.device)
-	else {
-		if (options.device) args.push('--app-device', options.device)
-		if (options.programmer) args.push('--programmer', options.programmer)
-	}
-	if (options.allowIncompleteBackup) args.push('--allow-incomplete-backup')
-	run(controller.file, args, { cwd: controller.cwd, env, verbose: options.verbose })
+	const command = createControllerProgramCommand({
+		invocation,
+		method: options.method,
+		operation: PROGRAMMING_OPERATIONS.upload,
+		device: options.device,
+		appDevice: options.device,
+		programmer: options.programmer,
+		hex: artifact.absolutePath,
+		allowIncompleteBackup: options.allowIncompleteBackup
+	})
+	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 }
 
 function printDryRun(plan, options, log) {
@@ -1854,7 +1876,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 	if (options.firmware) manifest = compileFirmware(options, identity, refreshed, '', log)
 	let controllerPath = ''
 	if (options.host) {
-		if (!manifest && existsSync(join(FIRMWARE_OUTPUT, 'firmware-manifest.json'))) manifest = readFirmwareManifest()
+		if (!manifest && existsSync(COMMAND_PATHS.manifest)) manifest = readFirmwareManifest()
 		log.stage('📎', 'Staging the exact validated firmware and safe EEPROM pair for embedding')
 		const embeddedDefaults = stageEmbeddedDefaults(manifest, identity)
 		if (!embeddedDefaults.enabled) log.warning(`Embedded board defaults disabled: ${embeddedDefaults.reason}`)

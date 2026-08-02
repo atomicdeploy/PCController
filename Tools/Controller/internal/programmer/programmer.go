@@ -111,10 +111,10 @@ func Build(options Options) (Command, error) {
 		options.FQBN = DefaultFQBN()
 	}
 	if options.MCU == "" {
-		options.MCU = "atmega328p"
+		options.MCU = generatedBoardMCU
 	}
 	if options.BaudRate == 0 {
-		options.BaudRate = 115200
+		options.BaudRate = generatedBoardBaud
 	}
 	if options.Operation == "" {
 		options.Operation = OperationWriteFlash
@@ -689,7 +689,7 @@ func BackupWithRunner(
 	}
 	root := strings.TrimSpace(options.OutputPath)
 	if options.MCU == "" {
-		options.MCU = "atmega328p"
+		options.MCU = generatedBoardMCU
 	}
 	operationRoot := filepath.Join(root, "operations")
 	directory, err := createBackupDirectory(operationRoot, time.Now())
@@ -989,7 +989,7 @@ func verifyEESAVEWithRunner(
 	}
 	mcu := options.MCU
 	if mcu == "" {
-		mcu = "atmega328p"
+		mcu = generatedBoardMCU
 	}
 	preflight := Command{
 		Name: executable,

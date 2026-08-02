@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	ATmega328PFlashSize                  uint32 = 32 * 1024
+	ATmega328PFlashSize                  uint32 = generatedBoardFlashBytes
 	ATmega328PConservativeBootloaderBase uint32 = 30 * 1024
 )
 

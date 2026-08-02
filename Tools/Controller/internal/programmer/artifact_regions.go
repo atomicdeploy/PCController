@@ -109,7 +109,7 @@ func InspectManifestRegions(manifestPath string) (ManifestRegionInspection, erro
 		manifest.Target.EEPROMBytes != atmega328PEEPROMCapacity {
 		return report, errors.New("firmware manifest memory bounds do not match the current ATmega328P/Urboot target")
 	}
-	if !strings.EqualFold(strings.TrimSpace(manifest.Target.MCU), "atmega328p") {
+	if !strings.EqualFold(strings.TrimSpace(manifest.Target.MCU), generatedBoardMCU) {
 		return report, fmt.Errorf("firmware manifest targets unsupported MCU %q", manifest.Target.MCU)
 	}
 	if _, err := normalizeRequiredSHA256(manifest.Source.SHA256); err != nil {

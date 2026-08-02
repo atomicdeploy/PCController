@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	PCControllerEEPROMBytes      uint32 = 1024
+	PCControllerEEPROMBytes      uint32 = generatedBoardEEPROMBytes
 	EEPROMSettingsAddress        uint32 = 32
 	EEPROMSettingsValueBytes     uint32 = 31
 	EEPROMSettingsRecordBytes    uint32 = EEPROMSettingsValueBytes + 1

@@ -85,12 +85,25 @@ type ToolchainGoPolicy struct {
 	Constraint ToolchainConstraint `json:"constraint"`
 }
 
+// ToolchainTargetPolicy is the board geometry shared by compile planning,
+// artifact validation, manifests, and the public Node command surfaces.
+type ToolchainTargetPolicy struct {
+	MCU                   string `json:"mcu"`
+	ClockHz               uint32 `json:"clock_hz"`
+	Bootloader            string `json:"bootloader"`
+	Baud                  int    `json:"baud"`
+	ApplicationLimitBytes uint32 `json:"application_limit_bytes"`
+	FlashBytes            uint32 `json:"flash_bytes"`
+	EEPROMBytes           uint32 `json:"eeprom_bytes"`
+}
+
 // ToolchainPolicy is the latest-compatible, source-controlled dependency
 // policy. Resolution produces an exact, hash-bearing ToolchainLock.
 type ToolchainPolicy struct {
 	Format       string                    `json:"format"`
 	Name         string                    `json:"name"`
 	FQBN         string                    `json:"fqbn"`
+	Target       ToolchainTargetPolicy     `json:"target"`
 	LibraryIndex string                    `json:"library_index"`
 	CLI          ToolchainCLIPolicy        `json:"cli"`
 	Core         ToolchainCorePolicy       `json:"core"`
@@ -194,6 +207,12 @@ func DefaultFQBN() string {
 	return DefaultToolchainPolicy().FQBN
 }
 
+// DefaultBoardTarget returns the board geometry generated from the canonical
+// toolchain policy. Callers must not author a second target definition.
+func DefaultBoardTarget() ToolchainTargetPolicy {
+	return DefaultToolchainPolicy().Target
+}
+
 func LoadToolchainPolicy(path string) (ToolchainPolicy, error) {
 	if strings.TrimSpace(path) == "" {
 		policy := DefaultToolchainPolicy()
@@ -216,6 +235,14 @@ func (policy ToolchainPolicy) Validate() error {
 	}
 	if strings.TrimSpace(policy.Name) == "" || strings.TrimSpace(policy.FQBN) == "" {
 		return errors.New("toolchain policy requires name and FQBN")
+	}
+	if strings.TrimSpace(policy.Target.MCU) == "" ||
+		strings.TrimSpace(policy.Target.Bootloader) == "" ||
+		policy.Target.ClockHz == 0 || policy.Target.Baud <= 0 ||
+		policy.Target.ApplicationLimitBytes == 0 || policy.Target.FlashBytes == 0 ||
+		policy.Target.EEPROMBytes == 0 ||
+		policy.Target.ApplicationLimitBytes >= policy.Target.FlashBytes {
+		return errors.New("toolchain policy requires a valid board target and memory geometry")
 	}
 	if policy.CLI.Dependency == "" || policy.CLI.Repository == "" || policy.CLI.ReleaseAPI == "" || len(policy.CLI.Assets) == 0 {
 		return errors.New("toolchain policy requires CLI repository, release API, and assets")

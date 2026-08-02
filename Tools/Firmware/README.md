@@ -5,13 +5,21 @@
 `firmware.mjs` is PCController's dependency-free AVR build and deployment
 interface. It provides polished VT-100/emoji output, stable watch mode,
 coalescing, byte-identical skip, strict artifact validation, hashes, atomic
-manifests, graceful interruption, and explicit exit codes.
+manifests, graceful interruption, explicit exit codes, and machine-readable
+`--plan-json` output.
 
 It delegates compile to `Tools/Build/build.mjs` and every programmer action to
 the canonical native Controller instead of duplicating MiniCore, Arduino CLI,
 or AVRDUDE discovery. Paths are resolved from the script location and `PATH`;
 no machine- or user-specific path is embedded and no PowerShell process is
 used.
+
+Board identity, memory geometry, canonical artifact paths, and exact
+Controller argv construction come from the same shared command policy used by
+the root build. The Go host consumes the generated form of the same board
+profile, so FQBN and capacity changes cannot silently diverge by entry point.
+The thin CMD and Bash launchers require the same Node.js 22.12-or-newer runtime
+as the root build and return the underlying tool's exit status unchanged.
 
 ## Safe, offline operations
 
@@ -20,6 +28,7 @@ firmware.cmd build
 firmware.cmd check
 firmware.cmd manifest
 firmware.cmd upload --port COM18 --dry-run
+firmware.cmd upload --method usbasp --plan-json
 firmware.cmd watch --once --dry-run
 ```
 

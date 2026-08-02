@@ -35,6 +35,18 @@ import {
 } from './build.mjs'
 import { createStableTestPlan, goTestSourceIdentity, stableTestBinaryName } from './go-tests.mjs'
 import { PRODUCT_METADATA } from './product-metadata.mjs'
+import {
+	BOARD,
+	PROGRAMMING_OPERATIONS,
+	canonicalControllerInvocation,
+	commandPlanPaths,
+	createControllerProgramCommand,
+	parseToolchainPolicy,
+	programmingArtifact,
+	relativeCommandPlanPaths,
+	resolveCanonicalControllerInvocation,
+	sourceControllerInvocation
+} from '../CommandPlan/controller-command.mjs'
 
 test('verbose command formatting obeys NO_COLOR byte-for-byte', () => {
 	const plain = verboseCommandText('go', ['test', './...'], { NO_COLOR: '' }, true)
@@ -389,6 +401,101 @@ test('generated runtime toolchain policy is current with the canonical profile',
 	assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
 })
 
+test('one canonical policy owns FQBN, board geometry, and artifact routes', async () => {
+	const policyPath = join(PROJECT_ROOT, 'Tools', 'Controller', 'toolchain-profile.json')
+	const policy = parseToolchainPolicy(await readFile(policyPath, 'utf8'), policyPath)
+	assert.equal(BOARD.profile, policy.name)
+	assert.equal(BOARD.fqbn, policy.fqbn)
+	assert.equal(BOARD.mcu, policy.target.mcu)
+	assert.equal(BOARD.applicationLimitBytes, policy.target.applicationLimitBytes)
+	assert.equal(BOARD.flashBytes, policy.target.flashBytes)
+	assert.equal(BOARD.eepromBytes, policy.target.eepromBytes)
+
+	const absolute = commandPlanPaths(PROJECT_ROOT, 'win32')
+	const portable = relativeCommandPlanPaths(PROJECT_ROOT, 'win32')
+	assert.equal(portable.controller, 'Tools/Controller/bin/controller.exe')
+	assert.equal(portable.application, '.build/firmware/PCController.ino.hex')
+	assert.equal(portable.completeFlash, '.build/firmware/PCController.ino.with_bootloader.hex')
+	assert.equal(programmingArtifact(absolute, 'urclock'), absolute.application)
+	assert.equal(programmingArtifact(absolute, 'usbasp'), absolute.completeFlash)
+})
+
+test('controller resolution accepts only the canonical platform artifact', () => {
+	const inspected = []
+	assert.throws(
+		() => resolveCanonicalControllerInvocation(PROJECT_ROOT, 'win32', path => {
+			inspected.push(path)
+			const error = new Error('not found')
+			error.code = 'ENOENT'
+			throw error
+		}),
+		error => error.exitCode === 4 && /Tools[\\/]Controller[\\/]bin[\\/]controller\.exe/.test(error.message)
+	)
+	assert.deepEqual(inspected, [commandPlanPaths(PROJECT_ROOT, 'win32').controller])
+})
+
+test('build plan and execution share exact Controller programming argv construction', () => {
+	const source = sourceControllerInvocation(PROJECT_ROOT)
+	const compile = createControllerProgramCommand({
+		invocation: source,
+		method: 'compile',
+		sketch: PROJECT_ROOT,
+		outputDir: commandPlanPaths(PROJECT_ROOT).firmwareOutput
+	})
+	assert.deepEqual(compile.args.slice(0, 7), [
+		'run', '-buildvcs=false', './cmd/controller', 'program', '--method', 'compile', '--sketch'
+	])
+	assert.equal(compile.args.at(-2), '--output-dir')
+
+	const packaged = canonicalControllerInvocation(PROJECT_ROOT, 'win32')
+	const usbasp = createControllerProgramCommand({
+		invocation: packaged,
+		method: 'usbasp',
+		operation: PROGRAMMING_OPERATIONS.upload,
+		appDevice: 'DO_NOT_OPEN',
+		programmer: 'atmelice_isp',
+		hex: commandPlanPaths(PROJECT_ROOT).completeFlash,
+		allowIncompleteBackup: true
+	})
+	assert.deepEqual(usbasp.args.slice(0, 8), [
+		'program', '--method', 'usbasp', '--app-device', 'DO_NOT_OPEN',
+		'--programmer', 'atmelice_isp', '--operation'
+	])
+	assert.equal(usbasp.args.at(-1), '--allow-incomplete-backup')
+	assert.throws(
+		() => createControllerProgramCommand({
+			invocation: packaged,
+			method: 'urclock',
+			operation: PROGRAMMING_OPERATIONS.upload,
+			hex: 'firmware.hex'
+		}),
+		/serial device is required/
+	)
+})
+
+test('firmware plan publishes the same target, artifacts, and explicit USBasp route', () => {
+	const result = spawnSync(process.execPath, [
+		join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs'),
+		'upload', '--method', 'usbasp', '--plan-json'
+	], {
+		cwd: PROJECT_ROOT,
+		env: { ...process.env, PCCONTROLLER_BUILD_TIMESTAMP: '0x35019D5D', NO_COLOR: '1' },
+		encoding: 'utf8',
+		windowsHide: true
+	})
+	assert.equal(result.status, 0, result.stderr || result.stdout)
+	const plan = JSON.parse(result.stdout)
+	assert.equal(plan.format, 'pccontroller-firmware-plan/v1')
+	assert.deepEqual(plan.target, BOARD)
+	assert.equal(plan.artifacts.application, '.build/firmware/PCController.ino.hex')
+	assert.equal(plan.artifacts.completeFlash, '.build/firmware/PCController.ino.with_bootloader.hex')
+	const program = plan.actions.find(action => action.id === 'program')
+	assert.equal(program.hardware, true)
+	assert.match(program.command.args.join(' '), /--method usbasp --operation write-flash/)
+	assert.ok(program.command.args.includes(resolve(PROJECT_ROOT, plan.artifacts.completeFlash)))
+	assert.doesNotMatch(JSON.stringify(plan), /powershell|pwsh|arduino-cli.*upload/i)
+})
+
 test('embedded web package has a lock matching every declared dependency', async () => {
 	const web = join(PROJECT_ROOT, 'Tools', 'Controller', 'web')
 	const declared = JSON.parse(await readFile(join(web, 'package.json'), 'utf8'))
@@ -481,6 +588,24 @@ test('root wrappers contain no PowerShell policy or invocation', async () => {
 		'utf8'
 	)
 	assert.doesNotMatch(firmwareSource, /powershell|pwsh|build\.ps1|arduino-cli[^\n]*upload/i)
+})
+
+test('all public launchers advertise the shared Node runtime floor', async () => {
+	const launchers = new Map()
+	for (const name of ['build.cmd', 'build.sh', 'firmware.cmd', 'firmware.sh']) {
+		const source = await readFile(join(PROJECT_ROOT, name), 'utf8')
+		launchers.set(name, source)
+		assert.match(source, /Node\.js 22\.12 or newer/, `${name} has a divergent Node requirement`)
+		assert.match(source, /Install Node\.js, then run this command again\./)
+	}
+	const npmFailure = 'npm was not found in PATH; it is required to install the locked build UI dependencies.'
+	assert.ok(launchers.get('build.cmd').includes(npmFailure))
+	assert.ok(launchers.get('build.sh').includes(npmFailure))
+	const firmwareSource = await readFile(
+		join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs'),
+		'utf8'
+	)
+	assert.match(firmwareSource, /MINIMUM_NODE = Object\.freeze\(\{ major: 22, minor: 12 \}\)/)
 })
 
 test('programming is explicit and unsupported direct dependency upload is rejected', () => {
@@ -814,4 +939,43 @@ test('CMD and Bash wrappers emit the same shared plan on Windows', {
 	], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true })
 	assert.equal(bash.status, 0, bash.stderr || bash.stdout)
 	assert.deepEqual(JSON.parse(cmd.stdout), JSON.parse(bash.stdout))
+
+	const firmwareCMD = spawnSync('cmd.exe', [
+		'/d', '/s', '/c', 'firmware.cmd upload --method usbasp --plan-json'
+	], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true })
+	assert.equal(firmwareCMD.status, 0, firmwareCMD.stderr || firmwareCMD.stdout)
+	const firmwareBash = spawnSync('bash.exe', [
+		'firmware.sh', 'upload', '--method', 'usbasp', '--plan-json'
+	], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true })
+	assert.equal(firmwareBash.status, 0, firmwareBash.stderr || firmwareBash.stdout)
+        assert.deepEqual(JSON.parse(firmwareCMD.stdout), JSON.parse(firmwareBash.stdout))
+})
+
+test('CMD and Bash wrappers expose identical help and failure contracts on Windows', {
+        skip: process.platform !== 'win32'
+}, () => {
+        const env = { ...process.env, NO_COLOR: '1' }
+        const normalized = result => ({
+                status: result.status,
+                stdout: (result.stdout || '').replaceAll('\r\n', '\n'),
+                stderr: (result.stderr || '').replaceAll('\r\n', '\n')
+        })
+        const cases = [
+                { cmd: 'build.cmd', bash: 'build.sh', args: ['--help'], status: 0, text: 'project-owned build' },
+                { cmd: 'build.cmd', bash: 'build.sh', args: ['--invalid-entrypoint-test'], status: 2, text: 'unknown option' },
+                { cmd: 'firmware.cmd', bash: 'firmware.sh', args: ['--help'], status: 0, text: 'firmware studio' },
+                { cmd: 'firmware.cmd', bash: 'firmware.sh', args: ['--invalid-entrypoint-test'], status: 2, text: 'Unknown option' }
+        ]
+        for (const fixture of cases) {
+                const cmd = normalized(spawnSync('cmd.exe', [
+                        '/d', '/s', '/c', [fixture.cmd, ...fixture.args].join(' ')
+                ], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true }))
+                const bash = normalized(spawnSync('bash.exe', [
+                        fixture.bash, ...fixture.args
+                ], { cwd: PROJECT_ROOT, env, encoding: 'utf8', windowsHide: true }))
+                assert.equal(cmd.status, fixture.status, cmd.stderr || cmd.stdout)
+                assert.equal(bash.status, fixture.status, bash.stderr || bash.stdout)
+                assert.deepEqual(cmd, bash, `${fixture.cmd} and ${fixture.bash} drifted`)
+                assert.match(`${cmd.stdout}\n${cmd.stderr}`, new RegExp(fixture.text, 'i'))
+        }
 })

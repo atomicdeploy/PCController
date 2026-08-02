@@ -6,7 +6,8 @@ title AVR firmware studio
 
 where node >nul 2>nul
 if errorlevel 1 (
-    echo [ERROR] Node.js 20.19 or newer was not found in PATH.
+    echo [ERROR] Node.js 22.12 or newer was not found in PATH.
+    echo         Install Node.js, then run this command again.
     exit /b 1
 )
 
@@ -16,8 +17,4 @@ title %PRODUCT_NAME% AVR firmware studio
 
 node "%~dp0Tools\Firmware\firmware.mjs" %*
 set "RESULT=%ERRORLEVEL%"
-if not "%RESULT%"=="0" (
-    echo.
-    echo [ERROR] Firmware utility exited with code %RESULT%.
-)
 exit /b %RESULT%

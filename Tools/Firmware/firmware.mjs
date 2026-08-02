@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { promises as fs, readFileSync } from 'node:fs'
+import { promises as fs } from 'node:fs'
 import {
 	basename,
 	dirname,
@@ -19,74 +19,22 @@ import {
         renderUnicodeBanner
 } from '../Build/presentation.mjs'
 import { resolveProductTitle } from '../Build/product-metadata.mjs'
+import {
+	BOARD,
+	EXIT,
+	PROGRAMMING_METHODS,
+	PROGRAMMING_OPERATIONS,
+	canonicalControllerInvocation,
+	commandPlanPaths,
+	createControllerProgramCommand,
+	loadToolchainPolicy,
+	parseToolchainPolicy,
+	programmingArtifact,
+	relativeCommandPlanPaths,
+	resolveCanonicalControllerInvocation
+} from '../CommandPlan/controller-command.mjs'
 
-export const EXIT = Object.freeze({
-	OK: 0,
-	USAGE: 2,
-	VALIDATION: 3,
-	TOOL: 4,
-	IO: 5,
-	INTERRUPTED: 130
-})
-
-const TOOLCHAIN_POLICY_FORMAT = 'pccontroller-toolchain-policy/v1'
-const TOOLCHAIN_POLICY_URL = new URL(
-	'../Controller/toolchain-profile.json',
-	import.meta.url
-)
-
-export function parseToolchainPolicy(contents, source = 'toolchain policy') {
-	let policy
-	try {
-		policy = JSON.parse(contents)
-	} catch (error) {
-		throw new Error(
-			`Invalid JSON in toolchain policy ${source}: ${error.message}`,
-			{ cause: error }
-		)
-	}
-	if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
-		throw new Error(`Toolchain policy ${source} must be a JSON object`)
-	}
-	if (policy.format !== TOOLCHAIN_POLICY_FORMAT) {
-		throw new Error(
-			`Toolchain policy ${source} uses unsupported format ${JSON.stringify(policy.format)}`
-		)
-	}
-	if (typeof policy.fqbn !== 'string' || !policy.fqbn.trim()) {
-		throw new Error(
-			`Toolchain policy ${source} requires a non-empty fqbn string`
-		)
-	}
-	return Object.freeze({ ...policy, fqbn: policy.fqbn.trim() })
-}
-
-export function loadToolchainPolicy(source = TOOLCHAIN_POLICY_URL) {
-	const label = source instanceof URL ? fileURLToPath(source) : String(source)
-	let contents
-	try {
-		contents = readFileSync(source, 'utf8')
-	} catch (error) {
-		throw new Error(
-			`Unable to read toolchain policy ${label}: ${error.message}`,
-			{ cause: error }
-		)
-	}
-	return parseToolchainPolicy(contents, label)
-}
-
-const TOOLCHAIN_POLICY = loadToolchainPolicy()
-
-export const BOARD = Object.freeze({
-	fqbn: TOOLCHAIN_POLICY.fqbn,
-	mcu: 'atmega328p',
-	clockHz: 16_000_000,
-	bootloader: 'UART0 Urboot/urclock',
-	baud: 115_200,
-	applicationLimitBytes: 32_384,
-	flashBytes: 32_768,
-	eepromBytes: 1_024
-})
+export { BOARD, EXIT, loadToolchainPolicy, parseToolchainPolicy }
 
 // Packs local civil time as date<<16|time with two-second resolution.
 export function packBuildTimestamp(value = new Date()) {
@@ -132,7 +80,7 @@ const SOURCE_ROOTS = Object.freeze([
 ])
 const DEFAULT_POLL_MS = 250
 const DEFAULT_DEBOUNCE_MS = 500
-const MINIMUM_NODE = Object.freeze({ major: 20, minor: 19 })
+const MINIMUM_NODE = Object.freeze({ major: 22, minor: 12 })
 
 class FirmwareToolError extends Error {
 	constructor(message, exitCode = EXIT.TOOL, options = {}) {
@@ -189,6 +137,7 @@ export function parseArguments(argv, env = process.env) {
 		quiet: false,
 		noColor: Boolean(env.NO_COLOR),
 		dryRun: false,
+		planJSON: false,
 		uploadOnChange: false,
 		once: false,
 		pollMs: DEFAULT_POLL_MS,
@@ -284,6 +233,10 @@ export function parseArguments(argv, env = process.env) {
 			case '--dry-run':
 				config.dryRun = true
 				break
+			case '--plan-json':
+				config.planJSON = true
+				config.noColor = true
+				break
 			case '--upload':
 				config.uploadOnChange = true
 				break
@@ -313,7 +266,7 @@ export function parseArguments(argv, env = process.env) {
 	}
 	if (config.help) return config
 	config.method ||= 'urclock'
-	if (!['urclock', 'usbasp'].includes(config.method)) {
+	if (!PROGRAMMING_METHODS.includes(config.method)) {
 		throw new FirmwareToolError(
 			'--method must be urclock or usbasp; direct Arduino upload is disabled',
 			EXIT.USAGE
@@ -396,6 +349,7 @@ ${chalk.bold.yellowBright('Options')}
   --clean           Clean before building
   --verbose         Show commands and verbose compiler output
   --dry-run         Print the exact action without executing it or opening a port
+  --plan-json       Emit the exact shared command plan as JSON and exit
   --no-color        Disable VT-100 styling
   --quiet           Suppress informational output
   -h, --help        Show this help
@@ -406,8 +360,9 @@ ${chalk.bold.yellowBright('Watch options')}
   --poll MS         Content scan interval (default: ${DEFAULT_POLL_MS})
   --debounce MS     Stable-source window (default: ${DEFAULT_DEBOUNCE_MS})
 
-${chalk.dim(`Target: MiniCore 3.1.2+, ATmega328P, external 16 MHz, EEPROM retained,
-BOD 2.7 V, UART0 Urboot/urclock at 115200 baud. Default command is build.
+${chalk.dim(`Target: ${BOARD.mcu}, ${BOARD.clockHz.toLocaleString('en-US')} Hz, ${BOARD.bootloader},
+${BOARD.baud} baud, ${BOARD.applicationLimitBytes}/${BOARD.flashBytes} application/flash bytes.
+Default command is build.
 Exit codes: 0 success, 2 usage, 3 validation, 4 build/program, 5 local I/O,
 130 interrupted.`)}`
 }
@@ -467,71 +422,103 @@ export async function createBuildPlan(config, projectRoot) {
 	return { file, args, cwd: projectRoot, env }
 }
 
-async function findController(projectRoot) {
-	const names = process.platform === 'win32'
-		? ['controller.exe', 'controller']
-		: ['controller', 'controller.exe']
-	const directories = [join(projectRoot, 'Tools', 'Controller', 'bin')]
-	for (const directory of directories) {
-		for (const name of names) {
-			const candidate = join(directory, name)
-			try {
-				const stat = await fs.stat(candidate)
-				if (stat.isFile()) return candidate
-			} catch {
-				// Continue through executable suffixes in the canonical package.
-			}
-		}
+export async function createProgramPlan(config, projectRoot, artifactPath, outputPath = '') {
+	const operation = PROGRAMMING_OPERATIONS[config.command]
+	if (!operation) {
+		throw new FirmwareToolError(`Unsupported programmer action: ${config.command}`, EXIT.USAGE)
 	}
-	throw new FirmwareToolError(
-		'Native controller executable was not found; run build.cmd --host-only first',
-		EXIT.TOOL
-	)
+	return createControllerProgramCommand({
+		invocation: resolveCanonicalControllerInvocation(projectRoot),
+		method: config.method,
+		operation,
+		device: config.port,
+		appDevice: config.port,
+		programmer: config.programmer,
+		hex: artifactPath,
+		output: outputPath || config.outputPath,
+		dryRun: config.dryRun
+	})
 }
 
-export async function createProgramPlan(config, projectRoot, artifactPath, outputPath = '') {
-	const controller = await findController(projectRoot)
-	const args = ['program', '--method', config.method]
-	if (config.method === 'urclock') args.push('--device', config.port)
-	if (config.method === 'usbasp') {
-		if (config.port.trim()) args.push('--app-device', config.port)
-		if (config.programmer.trim()) args.push('--programmer', config.programmer)
+function plannedProgramCommand(config, projectRoot, artifactPath = '', outputPath = '') {
+	const operation = PROGRAMMING_OPERATIONS[config.command]
+	if (!operation) {
+		throw new FirmwareToolError(`Unsupported programmer action: ${config.command}`, EXIT.USAGE)
 	}
-	switch (config.command) {
-		case 'backup':
-			args.push('--operation', 'read-flash', '--output', outputPath || config.outputPath)
-			break
-		case 'upload':
-			args.push('--operation', 'write-flash', '--hex', artifactPath)
-			break
-		case 'verify':
-			args.push('--operation', 'verify-flash', '--hex', artifactPath)
-			break
-		case 'probe':
-			args.push('--operation', 'probe')
-			break
-		case 'metadata':
-			args.push('--operation', 'metadata')
-			break
-		default:
-			throw new FirmwareToolError(
-				`Unsupported programmer action: ${config.command}`,
-				EXIT.USAGE
-			)
+	return createControllerProgramCommand({
+		invocation: canonicalControllerInvocation(projectRoot),
+		method: config.method,
+		operation,
+		device: config.port,
+		appDevice: config.port,
+		programmer: config.programmer,
+		hex: artifactPath,
+		output: outputPath || config.outputPath
+	})
+}
+
+export async function createCommandPlan(config, projectRoot) {
+	const absolute = commandPlanPaths(projectRoot)
+	const paths = relativeCommandPlanPaths(projectRoot)
+	const actions = []
+	const addValidation = writeManifest => actions.push({
+		id: writeManifest ? 'validate-manifest' : 'validate',
+		stage: writeManifest
+			? 'Validate canonical artifacts and atomically publish their manifest'
+			: 'Validate Intel HEX checksums, boundaries, roles, and hashes',
+		hardware: false
+	})
+
+	if (['build', 'upload', 'watch'].includes(config.command)) {
+		actions.push({
+			id: 'build',
+			stage: 'Compile firmware through the shared project build plan',
+			hardware: false,
+			command: await createBuildPlan(config, projectRoot)
+		})
+		addValidation(true)
+		if (config.command === 'upload' || (config.command === 'watch' && config.uploadOnChange)) {
+			actions.push({
+				id: 'program',
+				stage: `Program the validated ${config.method} image through Controller`,
+				hardware: true,
+				command: plannedProgramCommand(
+					{ ...config, command: 'upload' },
+					projectRoot,
+					programmingArtifact(absolute, config.method)
+				)
+			})
+		}
+	} else if (config.command === 'check' || config.command === 'manifest') {
+		addValidation(config.command === 'manifest')
+	} else {
+		const artifact = resolveFromProject(config.hexPath || absolute.application, projectRoot)
+		actions.push({
+			id: config.command,
+			stage: `Run ${config.command} through Controller`,
+			hardware: true,
+			command: plannedProgramCommand(config, projectRoot, artifact, config.outputPath)
+		})
 	}
-	if (config.dryRun) args.push('--dry-run')
-	return { file: controller, args, cwd: projectRoot }
+
+	return {
+		format: 'pccontroller-firmware-plan/v1',
+		canonicalController: paths.controller,
+		firmwareOutput: paths.firmwareOutput,
+		target: BOARD,
+		artifacts: {
+			application: paths.application,
+			completeFlash: paths.completeFlash,
+			defaultEEPROM: paths.defaultEEPROM,
+			manifest: paths.manifest
+		},
+		repeatOnStableChange: config.command === 'watch' && !config.once,
+		actions
+	}
 }
 
 async function createUploadPlan(config, projectRoot) {
-	const artifact = config.method === 'usbasp'
-		? join(
-			projectRoot,
-			'.build',
-			'firmware',
-			'PCController.ino.with_bootloader.hex'
-		)
-		: defaultApplicationHex(projectRoot)
+	const artifact = programmingArtifact(commandPlanPaths(projectRoot), config.method)
 	return await createProgramPlan(
 		{ ...config, command: 'upload' },
 		projectRoot,
@@ -582,7 +569,7 @@ function resolveFromProject(path, projectRoot) {
 }
 
 function defaultApplicationHex(projectRoot) {
-	return join(projectRoot, '.build', 'firmware', 'PCController.ino.hex')
+	return commandPlanPaths(projectRoot).application
 }
 
 function addRange(ranges, start, length) {
@@ -843,7 +830,7 @@ export async function sourceDigest(projectRoot) {
 
 async function discoverArtifacts(config, projectRoot) {
 	if (config.hexPath) return [resolveFromProject(config.hexPath, projectRoot)]
-	const output = join(projectRoot, '.build', 'firmware')
+	const output = commandPlanPaths(projectRoot).firmwareOutput
 	let entries
 	try {
 		entries = await fs.readdir(output, { withFileTypes: true })
@@ -889,7 +876,7 @@ async function inspectArtifacts(config, projectRoot, logger) {
 async function writeManifest(config, projectRoot, artifacts, source, logger) {
 	const path = resolveFromProject(
 		config.manifestPath ||
-			join('.build', 'firmware', 'firmware-manifest.json'),
+			commandPlanPaths(projectRoot).manifest,
 		projectRoot
 	)
 	let prior = null
@@ -1228,6 +1215,15 @@ export async function main(
                 console.log(usage(!config.noColor && process.stdout.isTTY, productTitle))
                 return EXIT.OK
         }
+	if (config.planJSON) {
+		try {
+			console.log(JSON.stringify(await createCommandPlan(config, projectRoot), null, 2))
+			return EXIT.OK
+		} catch (error) {
+			console.error(error.message || String(error))
+			return error.exitCode || EXIT.TOOL
+		}
+	}
 
         const logger = createLogger(config, productTitle)
 	logger.banner()

@@ -15,8 +15,8 @@ import (
 
 const (
 	firmwareManifestName      = "firmware-manifest.json"
-	urbootApplicationCapacity = uint32(32_384)
-	atmega328PEEPROMCapacity  = uint32(1_024)
+	urbootApplicationCapacity = generatedBoardApplicationBytes
+	atmega328PEEPROMCapacity  = generatedBoardEEPROMBytes
 	firmwareManifestFormat    = "pccontroller-avr-firmware-manifest/v1"
 )
 
@@ -162,8 +162,8 @@ func writeCompileManifest(
 	manifest := compileManifest{
 		Format: firmwareManifestFormat, GeneratedUTC: time.Now().UTC(),
 		Target: compileManifestTarget{
-			FQBN: options.FQBN, MCU: "atmega328p", ClockHz: 16_000_000,
-			Bootloader: "UART0 Urboot/urclock", Baud: 115200,
+			FQBN: options.FQBN, MCU: generatedBoardMCU, ClockHz: generatedBoardClockHz,
+			Bootloader: generatedBoardBootloader, Baud: generatedBoardBaud,
 			ApplicationLimitBytes: urbootApplicationCapacity,
 			FlashBytes:            ATmega328PFlashSize, EEPROMBytes: atmega328PEEPROMCapacity,
 		},

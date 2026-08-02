@@ -238,11 +238,67 @@ test('toolchain policy validation identifies a missing FQBN and its source', () 
 })
 
 test('board profile keeps Urboot and EEPROM-retention contract', () => {
-	assert.match(BOARD.fqbn, /bootloader=uart0/)
-	assert.match(BOARD.fqbn, /eeprom=keep/)
-	assert.match(BOARD.fqbn, /BOD=2v7/)
-	assert.equal(BOARD.applicationLimitBytes, 32_384)
-	assert.equal(BOARD.eepromBytes, 1_024)
+        assert.match(BOARD.fqbn, /bootloader=uart0/)
+        assert.match(BOARD.fqbn, /eeprom=keep/)
+        assert.match(BOARD.fqbn, /BOD=2v7/)
+        assert.equal(BOARD.applicationLimitBytes, 32_384)
+        assert.equal(BOARD.eepromBytes, 1_024)
+})
+
+test('persistent Ready colors retain the documented user-visible order', async () => {
+        const source = await readFile(
+                new URL('../../Project/StatusLedController.cpp', import.meta.url),
+                'utf8'
+        )
+        assert.match(
+                source,
+                /ReadyPalette\[\][^=]*=\s*\{\s*PaletteRed,\s*PaletteBlue,\s*PaletteViolet,\s*PaletteGreen,\s*PaletteWhite\s*\}/u
+        )
+})
+
+test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
+        const runtimeFiles = [
+                'ControllerContext.inc.h',
+                'LifecycleRuntime.inc.h',
+                'ProtocolRuntime.inc.h',
+                'FrontPanelRuntime.inc.h'
+        ]
+        const sources = await Promise.all(runtimeFiles.map(file => readFile(
+                new URL(`../../Project/Firmware/${file}`, import.meta.url),
+                'utf8'
+        )))
+        const helperSources = await Promise.all([
+                'ControllerUtilities.inc.h',
+                'RadioRuntime.inc.h',
+                'SensorRuntime.inc.h'
+        ].map(file => readFile(
+                new URL(`../../Project/Firmware/${file}`, import.meta.url),
+                'utf8'
+        )))
+        assert.match(sources[0], /static uint32_t now = 0;/u)
+        assert.doesNotMatch(sources.join('\n'), /const uint32_t now = millis\(\);/u)
+        assert.doesNotMatch(sources.join('\n'), /::now = now;/u)
+        assert.doesNotMatch(
+                [...sources.slice(1), ...helperSources].join('\n'),
+                /\buint32_t now\b/u
+        )
+        assert.equal(
+                sources.join('\n').match(/\bnow = millis\(\);/gu)?.length,
+                6
+        )
+        assert.match(
+                sources[1],
+                /serviceController\(\) \{\s*now = millis\(\);[^]*?const uint32_t loopNow = now;/u
+        )
+        assert.match(
+                sources[2],
+                /handleProtocolFrame[^]*?\{[^]*?now = millis\(\);\s*const uint32_t frameNow = now;/u
+        )
+        assert.match(
+                sources[3],
+                /handleMenuAction[^]*?\{[^]*?now = millis\(\);\s*const uint32_t actionNow = now;/u
+        )
+        assert.match(sources[3], /const uint32_t releaseNow = now;/u)
 })
 
 test('studio validation preserves matching Controller compile identity', async () => {
