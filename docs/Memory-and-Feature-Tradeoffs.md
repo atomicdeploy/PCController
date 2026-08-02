@@ -29,21 +29,21 @@ byte-identical container merely because it has the same source identity.
 
 | Evidence | Current value |
 |---|---:|
-| Source/build identity | `800A5B70` |
-| Source SHA-256 | `800a5b70865c5894f934638004ed152660225a29e3f54909912e6bb2064a666d` |
-| Application HEX SHA-256 | `bb928b7b680d6e393d842bd28412b6760340a2ff61ae40b21a926036358bb092` |
-| ELF SHA-256 | `639a73db6b6d5ef096a9fb8e9615537532877d81389180d69b08841fe1c4b95d` |
-| `.text` | 32,006 bytes |
+| Source/build identity | `DB5C1EBA` |
+| Source SHA-256 | `db5c1eba179243267c94b769cb0deeed18e4b1c56dcea5459636eb28ff4fe1c7` |
+| Application HEX SHA-256 | `723e57bc1697ffdad205c024046cfa672f9b4c7b0770bf846160f8a7fb343f39` |
+| ELF SHA-256 | `37b860ef3b6e44030e7200395a9b2d4df72641879e7f131e8968482a6c93780b` |
+| `.text` | 31,980 bytes |
 | Initialized `.data` image | 226 bytes |
-| Linker-reported program | 32,232 bytes (`.text + .data`) |
+| Linker-reported program | 32,206 bytes (`.text + .data`) |
 | Fixed firmware identity | 12 bytes at `0x7DF4..0x7DFF` |
-| Application HEX data | 32,244 bytes; highest address `0x7DFF` |
-| Static SRAM | 1,432 bytes (`.data` 226 + `.bss` 1,205 + `.noinit` 1) |
-| Estimated peak SRAM | 1,761/2,048 bytes |
-| Estimated free SRAM | 287 bytes, against the enforced 96-byte minimum |
+| Application HEX data | 32,218 bytes; highest address `0x7DFF` |
+| Static SRAM | 1,433 bytes (`.data` 226 + `.bss` 1,206 + `.noinit` 1) |
+| Estimated peak SRAM | 1,762/2,048 bytes |
+| Estimated free SRAM | 286 bytes, against the enforced 96-byte minimum |
 
 The peak estimate includes a measured 269-byte serial response path and a
-60-byte concurrent INT0/RF allowance. The 616-byte difference between static
+60-byte concurrent INT0/RF allowance. The 615-byte difference between static
 allocation and the top of SRAM is therefore not all available for new global
 objects.
 
@@ -73,10 +73,10 @@ than the HEX data-byte count because the identity record has a fixed address:
 
 | Boot profile | Application range | Data-byte headroom | Immediately linkable headroom | Consequence |
 |---|---:|---:|---:|---|
-| Stock 384-byte Urboot | 0..32,383 | 140 bytes | 12 bytes before `0x7DF4` | The 128 erased bytes at `0x7E00..0x7E7F` are after the fixed identity. They become useful only in a stock-only layout that relocates the identity and gives up drop-in 512-byte compatibility. |
-| 512-byte Urboot-Custom | 0..32,255 | 12 bytes | 12 bytes before `0x7DF4` | The identity ends at the final application byte. There is no space after it. |
+| Stock 384-byte Urboot | 0..32,383 | 166 bytes | 38 bytes before `0x7DF4` | The 128 erased bytes at `0x7E00..0x7E7F` are after the fixed identity. They become useful only in a stock-only layout that relocates the identity and gives up drop-in 512-byte compatibility. |
+| 512-byte Urboot-Custom | 0..32,255 | 38 bytes | 38 bytes before `0x7DF4` | The identity ends at the final application byte. There is no space after it. |
 
-Thus the current common layout has 12 bytes of practical growth under either
+Thus the current common layout has 38 bytes of practical growth under either
 bootloader. Urboot-Custom itself occupies 510 meaningful bytes in a 512-byte
 allocation; its two erased bytes do not increase the application ceiling.
 
@@ -105,11 +105,11 @@ removal saving. The current ELF nevertheless gives useful, reproducible bounds:
 
 | Current linked area | Measured bytes | Interpretation |
 |---|---:|---|
-| `handleMenuAction` | 1,902 flash | All leaf navigation and modal edit behavior; individual pages are inlined into this shared function |
-| `serviceDisplay` | 1,444 flash | All ordinary-page and modal rendering; individual page removal cannot claim this whole value |
-| Named menu labels/helpers around those two functions | 863 flash | Exact sum of the packed label tables plus named visibility/order/category helpers |
-| Total named local-menu envelope | 4,209 flash | Scale only; removing the menu would also remove essential offline control and does not necessarily recover the sum |
-| Visibility/order/category named helpers | 424 flash | Lower-bound symbol envelope; their inline dispatcher portions remain unseparated |
+| `handleMenuAction` | 1,956 flash | All leaf navigation and modal edit behavior; individual pages are inlined into this shared function |
+| `serviceDisplay` | 1,468 flash | All ordinary-page and modal rendering; individual page removal cannot claim this whole value |
+| Named menu labels/helpers around those two functions | 741 flash | Exact sum of the packed label tables plus named visibility/order/category helpers |
+| Total named local-menu envelope | 4,165 flash | Scale only; removing the menu would also remove essential offline control and does not necessarily recover the sum |
+| Visibility/order/category named helpers | 370 flash | Lower-bound symbol envelope; their inline dispatcher portions remain unseparated |
 | Menu visibility/order fields | 9 SRAM and 9 EEPROM bytes | Exact difference between the current 31-byte settings record and the 22-byte no-layout record |
 | MCU macro playback object | 157 static-SRAM bytes | Exact object allocation; flash dispatcher paths are shared |
 | Addressable-pixel buffer | 33 static-SRAM bytes | Exact 11-pixel RGB buffer |
@@ -176,11 +176,19 @@ do not silently weaken the invariant.
 These are implementation gaps in the current AVR candidate, not merely absent
 TUI labels:
 
-| Requested board capability | What exists now | Exact missing portion | Planning estimate, not an A/B measurement |
+The compact on-board motion-door policy editor is no longer a gap. Board
+Settings item `SAFE` rolls through numeric values 0 Always, 1 Closed only,
+2 Open only, and 3 Never, previews the fail-safe gate immediately, and uses the
+same atomic Save/Discard transaction as the other local settings. Folding the
+previously duplicated category-label renderer into the shared packed-label
+path more than paid for it: compared with candidate `800A5B70`, application
+and full-flash data both fell by 26 bytes, static SRAM rose by one byte, and the
+EEPROM layout did not change.
+
+| Requested board capability | What exists now | Exact missing portion | Cost/evidence |
 |---|---|---|---:|
-| On-board motion-door policy editor | The four-mode `always` / `closed` / `open` / `never` value is already persisted in settings bits 3-4, transported, restored, and enforced atomically by every motion-start source. Host settings, CLI, TUI, API, and backup decoding can edit it. | The `bEEP` front-panel editor has no leaf for choosing the four policies. Existing save/discard snapshots and settings application already cover the value once edited. | 60-110 flash for friendly `ALL` / `CLSd` / `OPEN` / `nEVr` labels, or 44-80 for numeric 0-3; 0 EEPROM and 0 static SRAM, with 1-3 transient stack bytes. |
 | Board-pull hosted menus | The host has six file-watched menu definitions. The AVR supports pushed `DisplayText` capture/release, forwards physical keys, and releases capture after host loss. | AVR opcodes `0x42..0x44` and events `0x9A..0x9B`, the eight-entry RAM directory, generation/state, content request on selection, retry timing, `----`, and terminal failure presentation are not in `ControllerProtocol::Opcode` and no capability advertises them. | 450-850 flash, 30-40 SRAM. The directory alone is exactly 24 bytes for eight `{id,parent,flags}` entries; existing 4+32 display buffers can be reused. |
-| EEPROM-configurable audio cues | Door and relay cue families have EEPROM enable bits, but their tones are fixed: door open/closed are 1,700/1,100 Hz for 45 ms; relay on/off are 1,900/1,250 Hz for 35 ms. | Persistent selectable cue IDs or note/frequency/duration definitions for door-open, door-close, relay-on, and relay-off, plus settings/protocol/menu fields. | 180-360 flash, 3-6 transient SRAM, and 13 EEPROM bytes for four compact single-note descriptors plus CRC. Arbitrary multi-note EEPROM melodies cost more. |
+| EEPROM-configurable audio cues | Door and relay cue families have EEPROM enable bits, but their tones are fixed: door open/closed are 1,700/1,100 Hz for 45 ms; relay on/off are 1,900/1,250 Hz for 35 ms. | Persistent selectable cue IDs or note/frequency/duration definitions for door-open, door-close, relay-on, and relay-off, plus settings/protocol/menu fields. | A measured four-descriptor candidate used 33,318 program bytes, 1,442 static-SRAM bytes, and 13 EEPROM bytes. Even a five-byte choice-table record used 33,032 program bytes and 1,442 static-SRAM bytes: 788 bytes beyond the fixed identity boundary. Neither candidate is shippable in the shared image layout. |
 | Board EEPROM automation | Twenty learned RF records can directly map one code to Key/Menu/Relay/Side/PWM behavior. Host automations can react to all events. | There is no generic EEPROM event-to-action rule table for door, BT Audio, relay, host loss, temperature, or other events; no board rule can invoke RF transmit or a macro on those events. Host-loss handling is fixed, not programmable. | 700-1,400 flash, 16-24 SRAM, and about 108 EEPROM bytes for eight compact rules plus an atomic header and CRC that reuse ordinary opcode validation. |
 | Per-state persistent RGB/cue configuration | EEPROM stores one Ready palette index and one global RGB brightness; the host can set a volatile custom RGB value. | Door, BT Audio, RF, Running, warning, hot, fault, and transition colors/effects are fixed in flash rather than independently configurable in board EEPROM. | Colors only: 220-380 flash, 4-8 SRAM, 52 EEPROM. Colors plus selectable effects/timing: 320-620 flash, 8-16 SRAM, 57-66 EEPROM. |
 
@@ -189,8 +197,8 @@ automation records. Flash, not EEPROM, is the limiting resource.
 
 ## Menu migration candidates and exact losses
 
-The estimates below are based on the current 4,209-byte named menu envelope
-and source branches in the shared 1,902-byte action and 1,444-byte render
+The estimates below are based on the current 4,165-byte named menu envelope
+and source branches in the shared 1,956-byte action and 1,468-byte render
 functions. They are deliberately ranges: none has a current isolated A/B
 build, and ranges must not be added to a release manifest as measured bytes.
 
@@ -200,7 +208,7 @@ build, and ranges must not be added to a release manifest as measured bytes.
 | Advanced fields in the `bEEP` settings editor, retaining a small Mute/Beep action | 300-600 | 1-4 bytes | No local adjustment of open/closed segment brightness, status brightness/Ready color, or voltage/current decimals; stored values still apply and remain host-editable. Removing the whole page also loses offline Silent control. |
 | Local RF learning page/UI, retaining RX/TX and stored mappings | 120-260 | 0-6 bytes | The front panel cannot start learning or show learned count/progress; a host is required to learn/cancel. Previously stored mappings still execute locally. |
 | Voltage/current/tLED/tBT render pages only | 160-320 | Approximately 0 | Sensors, HOT handling, and telemetry remain, but measurements cannot be read from the four-digit display while the host is absent. |
-| Persistent visibility, order, hierarchy, and layout protocol | 500-850 | Exactly 9 static bytes | Loses EEPROM show/hide and reordering, four nested categories, and host `MENU_LAYOUT` read/write. Stable dense pages could still exist in fixed order. The named current lower-bound envelope is 424 flash bytes. |
+| Persistent visibility, order, hierarchy, and layout protocol | 500-850 | Exactly 9 static bytes | Loses EEPROM show/hide and reordering, four nested categories, and host `MENU_LAYOUT` read/write. Stable dense pages could still exist in fixed order. The named current lower-bound envelope is 370 flash bytes. |
 | Board `MenuList` directory | 80-180 | Approximately 0 | The host must hard-code local IDs/modes/labels and can silently drift from the firmware. Not recommended. |
 | Addressable D6 strip | 200-350 | Exactly 33 bytes | Loses all 11 WS2811/WS2812 pixels, fill/per-pixel commands, and future strip effects. Current `show()` alone is 158 linked bytes, so 158 is a lower bound, not the net saving. |
 | Smooth status RGB animations/cues, retaining static status colors | 200-420 | 3-10 bytes | Loses eased door/BT/RF/menu/save/discard/reset transitions and breathing/flashing distinctions. Hard warning indications can remain. |
@@ -215,7 +223,7 @@ list: removing any of them would trade bytes for unsafe behavior.
 ### Minimum combinations
 
 For the **current feature set alone**, the minimum removal is **none** under
-both bootloaders. The image fits, but only 12 bytes can be added before the
+both bootloaders. The image fits, but only 38 bytes can be added before the
 fixed identity in the shared layout.
 
 For the missing features above, the smallest defensible planning combinations
@@ -223,10 +231,9 @@ are:
 
 | Goal | Estimated new flash | Minimum migration to measure first | Stock 384-byte consequence | 512-byte Urboot-Custom consequence |
 |---|---:|---|---|---|
-| Friendly on-board motion-door policy editor only | 60-110 | Replace the local `CoLr` Ready-color leaf with `dPOL`, reusing the seven-item editor and numeric adjustment/render path; estimated net 0-24 bytes | A stock-only identity relocation supplies 128 additional bytes and fits both editors, but loses the shared image layout | With the shared layout, Ready color remains EEPROM-persistent and host-editable but is no longer locally adjustable if the leaf is exchanged |
-| Structured board-pull hosted menus only | 450-850 | Move the four output commissioning/edit pages (estimated 900-1,500) | Reclaim 438-838 bytes with the shared identity layout, or 310-710 after a stock-only identity relocation contributes 128 bytes. | Reclaim 438-838 bytes; no post-identity reserve exists. |
-| Board-pull menus plus compact configurable door/relay cues | 630-1,210 | Same output-editor migration; add the local RF-learning UI migration only if its A/B result is short | Reclaim 618-1,198 bytes shared, or 490-1,070 after stock-only identity relocation. | Reclaim 618-1,198 bytes because only 12 bytes precede the identity. |
-| Board-pull menus, compact cues, and generic EEPROM automation | 1,330-2,610 | Output editors + advanced settings fields + local RF-learning UI (combined estimate 1,320-2,360); measure, then add render-only measurement-page migration if still short | Reclaim 1,318-2,598 bytes shared, or 1,190-2,470 after stock-only identity relocation; the proposed migration is not guaranteed at the high estimate. | Reclaim 1,318-2,598 bytes; the full shortfall must come from firmware. |
+| Structured board-pull hosted menus only | 450-850 | Move the four output commissioning/edit pages (estimated 900-1,500) | Reclaim 412-812 bytes with the shared identity layout, or 284-684 after a stock-only identity relocation contributes 128 bytes. | Reclaim 412-812 bytes; no post-identity reserve exists. |
+| Board-pull menus plus compact configurable door/relay cues | 630-1,210 | Same output-editor migration; add the local RF-learning UI migration only if its A/B result is short | Reclaim 592-1,172 bytes shared, or 464-1,044 after stock-only identity relocation. | Reclaim 592-1,172 bytes because only 38 bytes precede the identity. |
+| Board-pull menus, compact cues, and generic EEPROM automation | 1,330-2,610 | Output editors + advanced settings fields + local RF-learning UI (combined estimate 1,320-2,360); measure, then add render-only measurement-page migration if still short | Reclaim 1,292-2,572 bytes shared, or 1,164-2,444 after stock-only identity relocation; the proposed migration is not guaranteed at the high estimate. | Reclaim 1,292-2,572 bytes; the full shortfall must come from firmware. |
 
 The last combination is only a **minimum experiment**, not a promise that it
 will link. If its isolated A/B result does not cover the chosen concrete rule

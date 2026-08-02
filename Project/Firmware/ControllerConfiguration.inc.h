@@ -63,8 +63,9 @@ const char MenuLabels[] PROGMEM =
 const char EditLabels[] PROGMEM =
     "L-MdL-onL-oFS-MdP-ChP-u r-Chr-onuP-CuP-uur-Cur-M";
 constexpr uint8_t EditLabelCount = 12;
-const char SettingsLabels[] PROGMEM = "bEEPdiSPdCLSStBrCoLrV-dPA-dP";
-constexpr uint8_t SettingsItemCount = 7;
+const char SettingsLabels[] PROGMEM = "bEEPdiSPdCLSStBrCoLrV-dPA-dPSAFE";
+constexpr uint8_t SettingsPolicyItem = 7;
+constexpr uint8_t SettingsItemCount = 8;
 const char CommonTexts[] PROGMEM =
     "oFF  on AutoSAVEOPENMutebEEPLErnBOOTdiSC"
     "r5-8Go  Err KEY CLSdtoGLPuSHProg";

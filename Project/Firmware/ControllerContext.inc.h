@@ -108,13 +108,14 @@ uint32_t modeEnteredAt = 0;
 uint32_t identifiedKeyEndsAt = 0;
 uint32_t motionExitStartedAt = 0;
 uint32_t flashMessageEndsAt = 0;
-// Menu edits snapshot only the locally editable settings prefix. Presentation
-// visibility/order is configured independently over UART and must neither be
-// duplicated in SRAM nor rolled back by an unrelated front-panel edit.
+// Presentation visibility/order is configured independently over UART and is
+// not rolled back by a local edit. The late display-options byte is captured
+// separately because it owns the locally editable closed-door brightness.
 constexpr size_t MenuEditSnapshotSize =
     offsetof(ControllerSettings, menuFlags) +
     sizeof(ControllerSettings::menuFlags);
 uint8_t editSnapshot[MenuEditSnapshotSize]{};
+uint8_t editDisplayOptionsSnapshot = 0;
 ProgramMode editReturnMode = MODE_DOOR;
 bool editTransactionActive = false;
 bool flashMessageSaved = false;

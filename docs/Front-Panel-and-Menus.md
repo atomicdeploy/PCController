@@ -549,7 +549,7 @@ modal editors deterministic:
 | 0 | Boot | Shows `BOOT`, initializes hardware, then enters the EEPROM default page |
 | 1-14 | Door through RF | One mode for each stable leaf page ID 0-13; mode ID is page ID + 1 |
 | 15-17 | Illumination Mode/On/Off Edit | Three-field illumination transaction |
-| 18 | Sound/Board Settings Edit | Seven-item board-settings submenu |
+| 18 | Sound/Board Settings Edit | Eight-item board-settings submenu |
 | 19-20 | PWM Channel/Value Edit | Direct per-channel `0..4095` control |
 | 21-22 | Relay Channel/Value Edit | Live R1-R8 commissioning |
 | 23-24 | User PWM Channel/Value Edit | EEPROM PWM 0-7 transaction |
@@ -592,12 +592,17 @@ local UI has to a settings submenu:
 | 5 | `CoLr` | Ready color 0-4: red, blue, violet, green, white | Decrease/increase with rollover |
 | 6 | `V-dP` | Voltage decimals 0-2 | Decrease/increase with rollover |
 | 7 | `A-dP` | Current decimals 0-2 | Decrease/increase with rollover |
+| 8 | `SAFE` | Motion policy: 0 Always, 1 Closed only, 2 Open only, 3 Never | Decrease/increase with rollover |
 
 Each field label is shown for about 650 ms and its value then blinks at about
-300 ms. Sound, door-open display brightness, and RGB settings preview during editing;
-Discard restores the entire snapshot. EEPROM stores the compact numeric Ready
-color index; the five names above are its fixed local order. Host-side named
-categories and their independently assigned colors remain PC configuration.
+300 ms. Sound, both display brightness targets, RGB settings, and the motion
+gate preview during editing. Selecting a policy that denies the current door
+state immediately revokes motion through the ordinary fail-safe relay path.
+Save persists the compact two-bit policy; Discard restores the exact locally
+editable snapshot and reapplies the prior gate. EEPROM stores the compact
+numeric Ready color index; the five names above are its fixed local order.
+Host-side named categories and their independently assigned colors remain PC
+configuration.
 
 The reed input selects the two EEPROM-backed TM1637 targets. The display walks
 one intensity step every 70 ms toward the open or closed target without slowing
@@ -670,9 +675,10 @@ Enter from `MOVE` with K4 when the EEPROM motion-door policy allows it:
 
 Release stops that side. Hold K1+K2 or K3+K4 together for 600 ms to stop all
 relays and exit. A door-close edge exits a local motion session and returns to
-the default page. The host-configurable policy is Always, Closed only, Open
-only, or Never; the erased/factory default is Always. Host/API motion that is
-not running through the local MOVE page follows the selected policy.
+the default page. The locally and host-configurable policy is Always, Closed
+only, Open only, or Never; the erased/factory default is Always. Edit it as
+item 8 (`SAFE`) in Board Settings. Host/API motion that is not running through
+the local MOVE page follows the same selected policy.
 
 ### Save and discard
 
@@ -681,6 +687,8 @@ entry. At the confirmation display:
 
 - K2 or K4 saves to CRC-checked EEPROM.
 - K1 or K3 discards and restores the snapshot.
+- A default-page double-click is accepted only on an ordinary leaf, so it
+  cannot bypass an active editor or its Save/Discard decision.
 - `SAVE` or `diSC` flashes for about 900 ms.
 - Save uses a rising audio/RGB cue; Discard uses an error/descending cue.
 - Silent mode mutes the audio but not the visual cue.

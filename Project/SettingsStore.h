@@ -163,6 +163,15 @@ struct ControllerSettings {
         (static_cast<uint8_t>(value) <<
          SettingsFlags::MotionDoorPolicyShift));
   }
+  // Rolls the two-bit policy without disturbing adjacent audio/settings flags.
+  void adjustMotionDoorPolicy(bool increase) {
+    flags = static_cast<uint8_t>(
+        (flags & ~SettingsFlags::MotionDoorPolicyMask) |
+        ((flags +
+          (increase ? (1U << SettingsFlags::MotionDoorPolicyShift)
+                    : (3U << SettingsFlags::MotionDoorPolicyShift))) &
+         SettingsFlags::MotionDoorPolicyMask));
+  }
   bool doorAudioEnabled() const {
     return (flags & SettingsFlags::DoorAudioDisabled) == 0;
   }
@@ -237,6 +246,10 @@ struct ControllerSettings {
 // prefix. Keep the shared semantic prefix explicit while allowing later
 // payloads to append independently discoverable fields.
 constexpr uint8_t ControllerSettingsPrefixSize = 7;
+#if defined(__AVR__)
+// AVR byte alignment defines the EEPROM/wire record. Desktop test compilers
+// may align uint16_t differently, so production-layout assertions belong to
+// the target that serializes this structure.
 static_assert(offsetof(ControllerSettings, streamPeriodMs) ==
                   ControllerSettingsPrefixSize,
               "Controller settings prefix layout changed");
@@ -249,6 +262,7 @@ static_assert(sizeof(ControllerSettings) == 24,
 #else
 static_assert(sizeof(ControllerSettings) == 22,
               "Controller settings AVR layout changed");
+#endif
 #endif
 
 // Owns the MCU EEPROM settings record, defaults, checksum, and delayed writes.

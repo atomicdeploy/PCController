@@ -589,9 +589,8 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         relays.allOff(now);
       }
       if (editTransactionActive) {
-        memcpy(&settingsStore.values(), editSnapshot, sizeof(editSnapshot));
+        restoreEditTransaction(now);
         editTransactionActive = false;
-        applyStoredSettings(now);
       }
       setMenuPage(payload[0]);
       goto acknowledged;

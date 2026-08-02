@@ -3,17 +3,10 @@
 // Menu, keys, display, and buzzer
 // -----------------------------------------------------------------------------
 
-// Shows the active page's packed four-character label for a short dwell.
-void showMenuLabel(uint32_t now) {
+// Shows one packed four-character label for a short dwell.
+void showPackedLabel(const char *labels, uint8_t index, uint32_t now) {
   display.showText(reinterpret_cast<const __FlashStringHelper *>(
-      MenuLabels + static_cast<uint8_t>(menuPage << 2)));
-  menuLabelEndsAt = now + 650;
-}
-
-// Shows the selected settings field label before rendering its value.
-void showSettingsLabel(uint32_t now) {
-  display.showText(reinterpret_cast<const __FlashStringHelper *>(
-      SettingsLabels + static_cast<uint8_t>(settingsMenuItem << 2)));
+      labels + static_cast<uint8_t>(index << 2)));
   menuLabelEndsAt = now + 650;
 }
 
@@ -127,9 +120,7 @@ void showMenuCategory(uint32_t now) {
       PAGE_DOOR, PAGE_ILLUMINATION, PAGE_PWM, PAGE_KEYS};
   const uint8_t category = menuTreeState & 0x03U;
   const uint8_t labelPage = pgm_read_byte(labelPages + category);
-  display.showText(reinterpret_cast<const __FlashStringHelper *>(
-      MenuLabels + static_cast<uint8_t>(labelPage << 2)));
-  menuLabelEndsAt = now + 650;
+  showPackedLabel(MenuLabels, labelPage, now);
 }
 
 // Rolls category selection while skipping categories with no visible children.
@@ -177,12 +168,12 @@ void programService(uint32_t now) {
 
     if (isMenuMode(current)) {
       menuPage = modeToPage(current);
-      showMenuLabel(now);
+      showPackedLabel(MenuLabels, menuPage, now);
       return;
     }
 
     if (current == MODE_SOUND_EDIT) {
-      showSettingsLabel(now);
+      showPackedLabel(SettingsLabels, settingsMenuItem, now);
       return;
     }
 
@@ -424,23 +415,33 @@ void restoreStoredOutputs(uint32_t now) {
   }
 }
 
-// Snapshots editable settings so the user can later discard atomically.
+// Snapshots the locally editable settings so discard remains atomic.
 void beginEditTransaction(ProgramMode returnMode) {
   if (!editTransactionActive) {
-    memcpy(editSnapshot, &settingsStore.values(), sizeof(editSnapshot));
+    ControllerSettings &settings = settingsStore.values();
+    memcpy(editSnapshot, &settings, sizeof(editSnapshot));
+    editDisplayOptionsSnapshot = settings.displayOptions;
     editTransactionActive = true;
   }
   editReturnMode = returnMode;
 }
 
+// Restores the exact domain captured on entry. Menu visibility/order and live
+// relay state are deliberately outside these local transactions.
+void restoreEditTransaction(uint32_t now) {
+  ControllerSettings &settings = settingsStore.values();
+  memcpy(&settings, editSnapshot, sizeof(editSnapshot));
+  settings.displayOptions = editDisplayOptionsSnapshot;
+  applyStoredSettings(now);
+}
+
 // Commits or restores an edit and enters the flashing result state.
 void finishEditTransaction(bool save, uint32_t now) {
-  if (!save) {
-    memcpy(&settingsStore.values(), editSnapshot, sizeof(editSnapshot));
-    applyStoredSettings(now);
-  } else {
+  if (save) {
     settingsStore.markDirty(now);
     settingsStore.saveNow();
+  } else {
+    restoreEditTransaction(now);
   }
   editTransactionActive = false;
   flashMessageSaved = save;
@@ -488,11 +489,11 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       const uint8_t page = firstConfiguredMenuPage(category);
       if (page != 0xFF) {
         setMenuPage(page);
-        showMenuLabel(now);
+        showPackedLabel(MenuLabels, menuPage, now);
       }
     } else {
       menuTreeState = menuCategory(menuPage);
-      showMenuLabel(now);
+      showPackedLabel(MenuLabels, menuPage, now);
     }
     menuFeedback(fromRemote);
     return;
@@ -553,14 +554,14 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
           modeManager.transitionTo(MODE_SAVE_PROMPT);
         } else {
           --settingsMenuItem;
-          showSettingsLabel(now);
+          showPackedLabel(SettingsLabels, settingsMenuItem, now);
         }
       } else if (action == MENU_NEXT) {
         if (++settingsMenuItem >= SettingsItemCount) {
           settingsMenuItem = static_cast<uint8_t>(SettingsItemCount - 1);
           modeManager.transitionTo(MODE_SAVE_PROMPT);
         } else {
-          showSettingsLabel(now);
+          showPackedLabel(SettingsLabels, settingsMenuItem, now);
         }
       } else {
         const bool increase = action == MENU_INCREASE;
@@ -598,6 +599,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
           case 6:
             settings.setCurrentDecimals(static_cast<uint8_t>(
                 (settings.currentDecimals() + (increase ? 1U : 2U)) % 3U));
+            break;
+          case SettingsPolicyItem:
+            settings.adjustMotionDoorPolicy(increase);
+            applyStoredSettings(now);
             break;
         }
       }
@@ -867,7 +872,8 @@ void applyKeyGesture(uint8_t bit, KeyEvent event) {
              (event == KeyEvent::HoldRepeat && mode != MODE_KEYS)) {
     // HoldStart supplies the one action suppressed by the absent Click.
     handleMenuAction(bit);
-  } else if (event == KeyEvent::DoubleClick && bit == BoardPins::KeyPrevious) {
+  } else if (event == KeyEvent::DoubleClick &&
+             bit == BoardPins::KeyPrevious && isMenuMode(mode)) {
     setMenuPage(settingsStore.values().defaultMenuPage);
   }
 }
@@ -1232,8 +1238,11 @@ void serviceDisplay(uint32_t now) {
           case 5:
             value = settings.voltageDecimals();
             break;
-          default:
+          case 6:
             value = settings.currentDecimals();
+            break;
+          default:
+            value = static_cast<uint8_t>(settings.motionDoorPolicy());
             break;
         }
         display.showInteger(value);
