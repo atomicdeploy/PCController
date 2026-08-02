@@ -42,7 +42,7 @@ func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *te
 		EstimatedPeakSRAMBytes: 1640, EstimatedFreeSRAMBytes: 408,
 		MinimumFreeSRAMBytes: 96,
 	}
-	written, err := writeCompileManifest(Options{FQBN: DefaultFQBN}, identity, stackBudget)
+	written, err := writeCompileManifest(Options{FQBN: DefaultFQBN()}, identity, stackBudget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestInspectManifestRegionsValidatesAllNamedMemoryDomains(t *testing.T) {
 		}
 	}
 	manifestPath, err := writeCompileManifest(
-		Options{FQBN: DefaultFQBN}, identity,
+		Options{FQBN: DefaultFQBN()}, identity,
 		compileManifestStackBudget{Analyzer: "fixture", SRAMCapacityBytes: 2048},
 	)
 	if err != nil {

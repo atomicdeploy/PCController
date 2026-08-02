@@ -341,8 +341,13 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return model, command, true
 		}
 	}
-	if inputEmpty && key == "f2" && model.page == PageOutputs {
-		return model.beginPeripheralRename()
+	if inputEmpty && key == "f2" {
+		switch model.page {
+		case PageOutputs:
+			return model.beginPeripheralRename()
+		case PageAppSettings:
+			return model.beginSelectedPeripheralRename()
+		}
 	}
 
 	if inputEmpty && len(key) == 1 {
@@ -560,7 +565,6 @@ func (model *Model) switchPage(page Page) {
 	model.terminalVisible = false
 	model.terminalHidden = false
 	model.renameTarget = ""
-	model.renameDefault = ""
 	model.input.Prompt = "❯ "
 	model.input.SetValue("")
 	model.macroSearchEditing = false
@@ -705,22 +709,32 @@ func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 	return model, nil, true
 }
 
-func outputPeripheralDescriptor(cursor int) (string, string, bool) {
-	key := ""
-	switch {
-	case cursor >= 0 && cursor < 8:
-		key = fmt.Sprintf("relay.%d", cursor+1)
-	case cursor >= 9 && cursor <= 11:
-		key = "motion.a"
-	case cursor >= 12 && cursor <= 14:
-		key = "motion.b"
-	case cursor >= 15 && cursor <= 25:
-		key = fmt.Sprintf("pwm.%d", cursor-15)
-	default:
-		return "", "", false
+func outputPeripheralDescriptor(cursor int) (appconfig.PeripheralDescriptor, bool) {
+	rows := make([]appconfig.PeripheralDescriptor, 0, 27)
+	descriptors := appconfig.PeripheralDescriptors()
+	for _, descriptor := range descriptors {
+		if descriptor.Kind == "relay" {
+			rows = append(rows, descriptor)
+		}
 	}
-	fallback, ok := appconfig.PeripheralDefaultName(key)
-	return key, fallback, ok
+	rows = append(rows, appconfig.PeripheralDescriptor{}) // All relays.
+	for _, descriptor := range descriptors {
+		if descriptor.Kind == "motion" {
+			for range 3 { // Up, stop, and down share one presentation name.
+				rows = append(rows, descriptor)
+			}
+		}
+	}
+	for _, descriptor := range descriptors {
+		if descriptor.Control == "pwm-user" {
+			rows = append(rows, descriptor)
+		}
+	}
+	rows = append(rows, appconfig.PeripheralDescriptor{}) // All user PWM.
+	if cursor < 0 || cursor >= len(rows) || rows[cursor].Key == "" {
+		return appconfig.PeripheralDescriptor{}, false
+	}
+	return rows[cursor], true
 }
 
 func (model Model) peripheralName(key, fallback string) string {
@@ -731,26 +745,41 @@ func (model Model) peripheralName(key, fallback string) string {
 }
 
 func (model Model) beginPeripheralRename() (Model, tea.Cmd, bool) {
-	key, fallback, ok := outputPeripheralDescriptor(model.cursor)
+	descriptor, ok := outputPeripheralDescriptor(model.cursor)
 	if !ok {
 		model.setNotice("Select a relay, motion side, or PWM channel before renaming")
 		return model, nil, true
 	}
-	model.renameTarget = key
-	model.renameDefault = fallback
+	return model.beginPeripheralRenameDescriptor(descriptor)
+}
+
+func (model Model) beginSelectedPeripheralRename() (Model, tea.Cmd, bool) {
+	row, ok := model.selectedSettingRow()
+	if !ok {
+		return model, nil, false
+	}
+	descriptor, ok := peripheralDescriptorForSettingKey(row.Key)
+	if !ok {
+		model.setNotice("Select a peripheral-name row before using F2")
+		return model, nil, true
+	}
+	return model.beginPeripheralRenameDescriptor(descriptor)
+}
+
+func (model Model) beginPeripheralRenameDescriptor(descriptor appconfig.PeripheralDescriptor) (Model, tea.Cmd, bool) {
+	model.renameTarget = descriptor.Key
 	model.renameTerminalWasVisible = model.terminalIsVisible()
-	model.input.Prompt = "F2 Rename " + key + " › "
-	model.input.SetValue(model.peripheralName(key, fallback))
+	model.input.Prompt = "F2 Rename " + descriptor.Key + " › "
+	model.input.SetValue(model.peripheralName(descriptor.Key, descriptor.DefaultName))
 	model.input.CursorEnd()
 	model.revealTerminal()
-	model.setNotice("Enter saves the host-side name · Esc cancels · blank restores the default")
+	model.setNotice("Enter saves the host-side name · Esc cancels · Ctrl+U then Enter restores the default")
 	return model, nil, true
 }
 
 func (model *Model) cancelPeripheralRename() {
 	wasVisible := model.renameTerminalWasVisible
 	model.renameTarget = ""
-	model.renameDefault = ""
 	model.renameTerminalWasVisible = false
 	model.input.Prompt = "❯ "
 	model.input.SetValue("")
@@ -761,40 +790,64 @@ func (model *Model) cancelPeripheralRename() {
 }
 
 func (model Model) finishPeripheralRename() (Model, tea.Cmd, bool) {
-	name := strings.TrimSpace(model.input.Value())
-	if len([]rune(name)) > 64 || strings.ContainsAny(name, "\r\n\t") {
-		model.setNotice("Peripheral name must be at most 64 printable characters")
+	descriptor, ok := peripheralDescriptorByKey(model.renameTarget)
+	if !ok {
+		model.setNotice("Peripheral rename target is no longer in the host registry")
 		return model, nil, true
 	}
+	target := descriptor.Key
+	updated, name, restored, err := model.savePeripheralName(descriptor, model.input.Value())
+	if err != nil {
+		model.appendLog("error", "save peripheral name: "+err.Error())
+		model.setNotice("Rename was not saved: " + err.Error())
+		return model, nil, true
+	}
+	updated.cancelPeripheralRename()
+	action := "renamed"
+	if restored {
+		action = "restored"
+	}
+	if updated.saveUI == nil {
+		updated.setNotice(fmt.Sprintf("%s %s to %q for this session", target, action, name))
+	} else {
+		updated.setNotice(fmt.Sprintf("%s %s to %q and saved", target, action, name))
+	}
+	return updated, nil, true
+}
+
+func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor, value string) (Model, string, bool, error) {
+	name := strings.TrimSpace(value)
+	if len([]rune(name)) > 64 {
+		return model, "", false, fmt.Errorf("peripheral name must be at most 64 printable characters")
+	}
+	for _, character := range name {
+		if character < 0x20 || character == 0x7f {
+			return model, "", false, fmt.Errorf("peripheral name must be at most 64 printable characters")
+		}
+	}
+
 	ui := model.uiValue
 	names := make(map[string]string, len(ui.PeripheralNames)+1)
-	for key, value := range ui.PeripheralNames {
-		names[key] = value
+	for key, current := range ui.PeripheralNames {
+		names[key] = current
 	}
-	if name == "" || name == model.renameDefault {
-		delete(names, model.renameTarget)
-		name = model.renameDefault
+	restored := name == "" || name == descriptor.DefaultName
+	if restored {
+		delete(names, descriptor.Key)
+		name = descriptor.DefaultName
 	} else {
-		names[model.renameTarget] = name
+		names[descriptor.Key] = name
 	}
 	ui.PeripheralNames = names
 	ui.SetupComplete = true
 	if model.saveUI != nil {
 		if err := model.saveUI(ui); err != nil {
-			model.appendLog("error", "save peripheral name: "+err.Error())
-			model.setNotice("Rename was not saved: " + err.Error())
-			return model, nil, true
+			return model, "", false, err
 		}
 	}
 	model.uiValue = ui
-	target := model.renameTarget
-	model.cancelPeripheralRename()
-	if model.saveUI == nil {
-		model.setNotice(fmt.Sprintf("%s renamed to %q for this session", target, name))
-	} else {
-		model.setNotice(fmt.Sprintf("%s renamed to %q and saved", target, name))
-	}
-	return model, nil, true
+	model.prefs = preferencesFromUI(ui)
+	return model, name, restored, nil
 }
 
 func (model Model) setSelectedPWM(value uint16) (Model, tea.Cmd, bool) {

@@ -357,7 +357,7 @@ func (model Model) appSettingsPage() string {
 	}
 	return strings.Join([]string{
 		sectionHeader(model.width, "HOST SETTINGS", "saved in host JSON · never board EEPROM"),
-		labelStyle.Render("↑/↓ select · Enter opens a modal editor · changes save and hot-apply only after confirmation"),
+		labelStyle.Render("↑/↓ select · Enter edits · F2 quick-renames peripheral rows · Ctrl+U restores their default"),
 		model.centeredDataTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, settingsTableColumns(tableWidth), tableRows),
 	}, "\n")
 }

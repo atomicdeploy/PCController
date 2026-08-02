@@ -25,11 +25,15 @@ Markdown as the canonical source. Repository identity is resolved from
 locally; the publisher and issue synchronizer contain no checkout-specific
 owner/repository fallback.
 
-`extract-user-turns.mjs` reads one or more Codex rollout JSONL files, merges
-them chronologically, de-duplicates repeated turn IDs, and extracts only
-human-authored user messages. Generated environment-context messages are
-excluded by default. Supplying every continuation file is important when one
-long project conversation spans multiple rollouts.
+`extract-user-turns.mjs` reads one or more Codex rollout JSONL files and merges
+the extracted human-authored user messages chronologically. It removes exact
+text duplicated across continuation files belonging to the same root session,
+while preserving repeated human turns within one source or between distinct
+root discussions as separate timeline events. Generated
+`<environment_context>` and `<codex_delegation>` user envelopes are excluded by
+default. Supplying every continuation file is important when one long project
+conversation spans multiple rollouts. Use `--include-generated` only when an
+audit intentionally needs those generated envelopes.
 
 Keep generated transcripts under the repository's ignored `.cache` directory;
 they can contain local paths or other private conversation context and must not

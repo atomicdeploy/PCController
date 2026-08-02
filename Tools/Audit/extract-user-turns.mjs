@@ -15,18 +15,19 @@ function usage() {
     'Options:',
     '  --json FILE       write structured user turns',
     '  --markdown FILE   write a local readable transcript',
-    '  --include-context include generated <environment_context> turns',
+    '  --include-generated include generated context and delegation envelopes',
+    '  --include-context   legacy alias for --include-generated',
   ].join('\n');
 }
 
 function parseArguments(values) {
-  const result = { inputs: [], json: '', markdown: '', includeContext: false, help: false };
+  const result = { inputs: [], json: '', markdown: '', includeGenerated: false, help: false };
   for (let index = 0; index < values.length; index += 1) {
     const value = values[index];
     if (value === '--help' || value === '-h') {
       result.help = true;
-    } else if (value === '--include-context') {
-      result.includeContext = true;
+    } else if (value === '--include-generated' || value === '--include-context') {
+      result.includeGenerated = true;
     } else if (value === '--json' || value === '--markdown') {
       const output = values[index + 1];
       if (!output) throw new Error(`${value} requires a file path`);
@@ -53,28 +54,52 @@ function messageText(message) {
     .trim();
 }
 
-function isGeneratedContext(text) {
-  return /^<environment_context>[\s\S]*<\/environment_context>$/.test(text);
+function isGeneratedEnvelope(text) {
+  return /^(?:<environment_context>[\s\S]*<\/environment_context>|<codex_delegation>[\s\S]*<\/codex_delegation>)$/.test(text);
 }
 
-async function extract(input, includeContext) {
+async function extract(input, includeGenerated) {
   const turns = [];
+  let sessionID = '';
+  let physicalLine = 0;
+  let pending = '';
+  let pendingStartLine = 0;
   const lines = createInterface({
     input: createReadStream(input, { encoding: 'utf8' }),
     crlfDelay: Infinity,
   });
   for await (const line of lines) {
-    if (!line.trim()) continue;
+    physicalLine += 1;
+    if (!pending && !line.trim()) continue;
+    const candidate = pending ? pending + line : line;
     let record;
     try {
-      record = JSON.parse(line);
+      record = JSON.parse(candidate);
     } catch (error) {
-      throw new Error(`invalid JSONL near line ${turns.length + 1}: ${error.message}`);
+      // Older Codex exports can split one otherwise valid JSON record across
+      // physical lines inside a large tool result. The continuation begins
+      // with an escaped newline, so joining without introducing another byte
+      // reconstructs the original record exactly.
+      if (!pending && /Unexpected end of JSON input|Unterminated string/.test(error.message)) {
+        pending = line;
+        pendingStartLine = physicalLine;
+        continue;
+      }
+      if (pending && candidate.length <= 64 * 1024 * 1024) {
+        pending = candidate;
+        continue;
+      }
+      throw new Error(`invalid JSONL near physical line ${pendingStartLine || physicalLine}: ${error.message}`);
+    }
+    pending = '';
+    pendingStartLine = 0;
+    if (record?.type === 'session_meta') {
+      sessionID = String(record.payload?.session_id ?? record.payload?.id ?? sessionID);
     }
     const message = record?.type === 'response_item' ? record.payload : null;
     if (message?.type !== 'message' || message.role !== 'user') continue;
     const text = messageText(message);
-    if (!text || (!includeContext && isGeneratedContext(text))) continue;
+    if (!text || (!includeGenerated && isGeneratedEnvelope(text))) continue;
     turns.push({
       timestamp: record.timestamp ?? '',
       turn_id: message.internal_chat_message_metadata_passthrough?.turn_id ?? '',
@@ -82,7 +107,10 @@ async function extract(input, includeContext) {
       text,
     });
   }
-  return turns;
+  if (pending) {
+    throw new Error(`truncated JSONL record beginning at physical line ${pendingStartLine}`);
+  }
+  return { sessionID: sessionID || input, turns };
 }
 
 function mergeTurns(groups) {
@@ -90,20 +118,26 @@ function mergeTurns(groups) {
   // while changing its synthetic timestamps and coarse turn IDs. Prefer the
   // most complete source, then discard only exact text duplicated by another
   // source. Repeated messages inside one source remain valid timeline events.
-  const ordered = groups
-    .map((turns, order) => ({ turns, order }))
-    .sort((left, right) => right.turns.length - left.turns.length || left.order - right.order);
-  const seenFromEarlierSources = new Set();
   const turns = [];
-  for (const group of ordered) {
-    const sourceTexts = new Set();
-    for (const turn of group.turns) {
-      if (seenFromEarlierSources.has(turn.text)) continue;
-      turns.push(turn);
-      sourceTexts.add(turn.text);
-    }
-    for (const text of sourceTexts) {
-      seenFromEarlierSources.add(text);
+  const sessions = new Map();
+  for (const [order, group] of groups.entries()) {
+    const session = sessions.get(group.sessionID) ?? [];
+    session.push({ turns: group.turns, order });
+    sessions.set(group.sessionID, session);
+  }
+  for (const session of sessions.values()) {
+    const ordered = session.sort(
+      (left, right) => right.turns.length - left.turns.length || left.order - right.order,
+    );
+    const seenFromEarlierSources = new Set();
+    for (const group of ordered) {
+      const sourceTexts = new Set();
+      for (const turn of group.turns) {
+        if (seenFromEarlierSources.has(turn.text)) continue;
+        turns.push(turn);
+        sourceTexts.add(turn.text);
+      }
+      for (const text of sourceTexts) seenFromEarlierSources.add(text);
     }
   }
   turns.sort((left, right) => left.timestamp.localeCompare(right.timestamp));
@@ -142,7 +176,7 @@ async function main() {
   }
   const inputs = options.inputs.map((input) => resolve(input));
   const turns = mergeTurns(await Promise.all(
-    inputs.map((input) => extract(input, options.includeContext)),
+    inputs.map((input) => extract(input, options.includeGenerated)),
   ));
   if (options.json) {
     await fs.writeFile(resolve(options.json), `${JSON.stringify({ sources: inputs, turns }, null, 2)}\n`);

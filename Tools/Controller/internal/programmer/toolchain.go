@@ -62,7 +62,7 @@ type ToolchainProfile struct {
 func DefaultToolchainProfile() ToolchainProfile {
 	return ToolchainProfile{
 		Name:           "controllerboardmini-atmega328p",
-		FQBN:           DefaultFQBN,
+		FQBN:           DefaultFQBN(),
 		PackageIndexes: []string{MiniCorePackageIndexURL},
 		CLI: ToolchainCLI{
 			Dependency: "arduino-cli", Version: "1.5.1",
@@ -225,7 +225,7 @@ func BootstrapToolchain(
 		}
 		cliPath = filepath.Join(
 			installRoot, profile.CLI.Dependency, profile.CLI.Version,
-			goos+"-"+goarch, executableName(profile.CLI.Dependency),
+			goos+"-"+goarch, executableNameForOS(profile.CLI.Dependency, goos),
 		)
 		if options.DryRun {
 			fmt.Fprintf(output, "dry-run: verify/download %s %s for %s/%s to %s\n",
@@ -575,6 +575,7 @@ func downloadVerified(
 }
 
 func extractCLIExecutable(archivePath, format, destination string) error {
+	wantedExecutable := filepath.Base(destination)
 	switch format {
 	case "zip":
 		reader, err := zip.OpenReader(archivePath)
@@ -583,7 +584,7 @@ func extractCLIExecutable(archivePath, format, destination string) error {
 		}
 		defer reader.Close()
 		for _, entry := range reader.File {
-			if strings.EqualFold(filepath.Base(entry.Name), executableName("arduino-cli")) && !entry.FileInfo().IsDir() {
+			if strings.EqualFold(filepath.Base(entry.Name), wantedExecutable) && !entry.FileInfo().IsDir() {
 				source, err := entry.Open()
 				if err != nil {
 					return err
@@ -613,7 +614,7 @@ func extractCLIExecutable(archivePath, format, destination string) error {
 			if err != nil {
 				return err
 			}
-			if filepath.Base(header.Name) == "arduino-cli" && header.Typeflag == tar.TypeReg {
+			if strings.EqualFold(filepath.Base(header.Name), wantedExecutable) && header.Typeflag == tar.TypeReg {
 				return copyExecutable(io.LimitReader(reader, header.Size), destination)
 			}
 		}

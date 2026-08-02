@@ -53,6 +53,28 @@ type settingEditor struct {
 	NumberText    string
 }
 
+const peripheralNameSettingPrefix = "peripheral.name:"
+
+func peripheralNameSettingKey(key string) string {
+	return peripheralNameSettingPrefix + key
+}
+
+func peripheralDescriptorByKey(key string) (appconfig.PeripheralDescriptor, bool) {
+	for _, descriptor := range appconfig.PeripheralDescriptors() {
+		if descriptor.Key == key {
+			return descriptor, true
+		}
+	}
+	return appconfig.PeripheralDescriptor{}, false
+}
+
+func peripheralDescriptorForSettingKey(key string) (appconfig.PeripheralDescriptor, bool) {
+	if !strings.HasPrefix(key, peripheralNameSettingPrefix) {
+		return appconfig.PeripheralDescriptor{}, false
+	}
+	return peripheralDescriptorByKey(strings.TrimPrefix(key, peripheralNameSettingPrefix))
+}
+
 func (model Model) boardSettingRows() []settingRow {
 	settings := model.snapshot().Settings
 	return []settingRow{
@@ -119,6 +141,34 @@ func (model Model) appSettingRows() []settingRow {
 			Value: visualSummary(item.visual), Editable: true,
 		})
 	}
+	rows = append(rows, model.peripheralNameSettingRows()...)
+	return rows
+}
+
+func (model Model) peripheralNameSettingRows() []settingRow {
+	descriptors := appconfig.PeripheralDescriptors()
+	rows := make([]settingRow, 0, len(descriptors))
+	previousKind := ""
+	for _, descriptor := range descriptors {
+		group := ""
+		if descriptor.Kind != previousKind {
+			group = map[string]string{
+				"relay": "NAMES · RELAY", "motion": "MOTION", "pwm": "PWM",
+				"display": "DISPLAYS", "sensor": "SENSORS",
+			}[descriptor.Kind]
+			previousKind = descriptor.Kind
+		}
+		name := model.peripheralName(descriptor.Key, descriptor.DefaultName)
+		qualifier := "default"
+		if custom := strings.TrimSpace(model.uiValue.PeripheralNames[descriptor.Key]); custom != "" && custom != descriptor.DefaultName {
+			qualifier = "custom"
+		}
+		rows = append(rows, settingRow{
+			Key: peripheralNameSettingKey(descriptor.Key), Group: group,
+			Label: fmt.Sprintf("%s · %s", descriptor.Key, descriptor.DefaultName),
+			Value: fmt.Sprintf("%s · %s", name, qualifier), Editable: true,
+		})
+	}
 	return rows
 }
 
@@ -158,7 +208,11 @@ func (model Model) beginSettingEditor() (Model, bool) {
 		return model, true
 	}
 	model.settingEditor = editor
-	model.setNotice("Edit draft · Enter saves · Esc discards")
+	if _, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
+		model.setNotice("Host-only name · Enter saves · Ctrl+U then Enter restores default · Esc discards")
+	} else {
+		model.setNotice("Edit draft · Enter saves · Esc discards")
+	}
 	return model, true
 }
 
@@ -226,6 +280,11 @@ func (model Model) buildBoardSettingEditor(editor *settingEditor) {
 func (model Model) buildAppSettingEditor(editor *settingEditor) {
 	ui := model.uiValue
 	status := model.hostIntegrationValue.StatusLED
+	if descriptor, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
+		editor.IsText = true
+		editor.Text = model.peripheralName(descriptor.Key, descriptor.DefaultName)
+		return
+	}
 	boolean := func(key, label string, value bool) settingEditorField {
 		return settingEditorField{Key: key, Label: label, Value: boolInt(value), Options: onOffOptions()}
 	}

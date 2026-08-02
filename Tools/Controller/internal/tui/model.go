@@ -53,7 +53,6 @@ type Model struct {
 	terminalVisible          bool
 	terminalHidden           bool
 	renameTarget             string
-	renameDefault            string
 	renameTerminalWasVisible bool
 	settingEditor            *settingEditor
 	eventsExpanded           bool

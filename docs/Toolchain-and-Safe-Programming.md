@@ -95,7 +95,7 @@ At the time of this documentation update, the exact lock resolves:
 | --- | --- |
 | Firmware dependency CLI | 1.5.1, per-platform archives SHA-256 verified |
 | Board core | `MiniCore:avr@3.1.2` |
-| FQBN | `MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external` |
+| FQBN | Canonical `fqbn` in [`toolchain-profile.json`](../Tools/Controller/toolchain-profile.json); copied only into generated lock/runtime artifacts |
 | Urboot | `u8.0.1`, commit `bd52751acaa5923163e938a6e35051c22317da68` |
 | Go | 1.26.5 |
 | PWM library | Adafruit PWM Servo Driver Library 3.0.3 |

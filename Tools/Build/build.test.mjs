@@ -357,14 +357,17 @@ test('host plan reproducibly builds the web application before Go embedding', ()
 	], {})
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
         assert.equal(plan.actions[0].id, 'embedded-defaults')
-        assert.deepEqual(plan.actions.slice(1, 7).map(action => action.id), [
-                'web-install', 'web-typecheck', 'web-test', 'web-build',
-                'product-identity-check', 'go-mod-download'
-        ])
+	assert.deepEqual(plan.actions.slice(1, 8).map(action => action.id), [
+		'web-install', 'web-typecheck', 'web-test', 'web-build',
+		'toolchain-policy-check', 'product-identity-check', 'go-mod-download'
+	])
         assert.deepEqual(plan.actions[1].command.args, ['ci', '--no-audit', '--no-fund'])
         assert.equal(plan.actions[1].command.cwd, join(PROJECT_ROOT, 'Tools', 'Controller', 'web'))
 	assert.ok(plan.actions.findIndex(action => action.id === 'web-build') <
 		plan.actions.findIndex(action => action.id === 'go-test'))
+	assert.deepEqual(plan.actions.find(action => action.id === 'toolchain-policy-check').command.args, [
+		'Tools/Controller/internal/programmer/generate-toolchain-policy.mjs', '--check'
+	])
 	assert.deepEqual(plan.actions.find(action => action.id === 'product-identity-check').command.args, [
 		'Tools/Controller/internal/productidentity/generate.mjs', '--check'
 	])
@@ -376,6 +379,14 @@ test('host plan reproducibly builds the web application before Go embedding', ()
 	)
 	assert.ok(!skipped.actions.some(action => action.id === 'web-test'))
 	assert.ok(skipped.actions.some(action => action.id === 'web-typecheck'))
+})
+
+test('generated runtime toolchain policy is current with the canonical profile', () => {
+	const result = spawnSync(process.execPath, [
+		join(PROJECT_ROOT, 'Tools', 'Controller', 'internal', 'programmer', 'generate-toolchain-policy.mjs'),
+		'--check'
+	], { cwd: PROJECT_ROOT, windowsHide: true, encoding: 'utf8' })
+	assert.equal(result.status, 0, `${result.stdout}${result.stderr}`)
 })
 
 test('embedded web package has a lock matching every declared dependency', async () => {

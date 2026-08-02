@@ -289,6 +289,14 @@ binary, checksum, or test run cannot satisfy a newer tree.
 
 ### Known source and design gaps
 
+- 🚧 [#25](https://github.com/atomicdeploy/PCController/issues/25): the
+  persisted four-mode motion-door policy is enforced by every start path and is
+  editable from every host surface, but the compact on-board policy editor is
+  still absent. A friendly local editor is estimated at 60-110 flash bytes with
+  no added EEPROM/static SRAM; the current shared Urboot layout has only 12
+  immediately linkable bytes. Replacing the local Ready-color editor is the
+  smallest measured-plan tradeoff, but that ownership change requires an
+  explicit user decision.
 - 🚧 [#87](https://github.com/atomicdeploy/PCController/issues/87): host
   automations are complete, but the MCU still has no generic EEPROM-backed rule
   table, CRUD opcodes, or deterministic offline event executor for door, BT

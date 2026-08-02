@@ -403,7 +403,7 @@ func New(options Options) *Client {
 	}
 	fqbn := options.FQBN
 	if fqbn == "" {
-		fqbn = programmer.DefaultFQBN
+		fqbn = programmer.DefaultFQBN()
 	}
 	runtime := control.New(control.Options{
 		Filter: ports.Filter{
@@ -537,7 +537,7 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 	client.hostMu.Unlock()
 	fqbn := options.FQBN
 	if fqbn == "" {
-		fqbn = programmer.DefaultFQBN
+		fqbn = programmer.DefaultFQBN()
 	}
 	client.optionsMu.Lock()
 	client.commandOptions = control.CommandOptions{

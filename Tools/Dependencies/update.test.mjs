@@ -5,13 +5,19 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
+  assertTrustedDependencyURL,
+  assertTrustedGitHubURL,
+  assertTrustedRepository,
   compareHostToolLocks,
   compareCompositeVersions,
   compareVersions,
   parseWingetCompilerManifest,
   sameSubstantive,
   stableParts,
+  validateHostSourcePolicy,
   validateHostToolsLock,
+  validateToolchainLockSources,
+  validateToolchainSourcePolicy,
   workflowActionInventory,
 } from './update.mjs'
 
@@ -22,6 +28,68 @@ test('stable comparison is semantic and rejects prereleases', () => {
   assert.equal(compareVersions('1.10.0', '1.9.9'), 1)
   assert.equal(compareVersions('u8.0', '8.0.0'), 0)
   assert.equal(stableParts('1.5.2-rc.1'), null)
+})
+
+test('dependency network sources are code allowlisted with exact GitHub repository identities', () => {
+  for (const url of [
+    'https://api.github.com/repos/arduino/arduino-cli/releases?per_page=100',
+    'https://github.com/arduino/arduino-cli/releases/download/v1.5.1/arduino-cli.zip',
+    'https://raw.githubusercontent.com/microsoft/winget-pkgs/master/manifests/example.yaml',
+    'https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json',
+    'https://downloads.arduino.cc/libraries/library_index.json.gz',
+    'https://downloads.arduino.cc/libraries/github.com/sui77/rc_switch-2.6.4.zip',
+    'https://nodejs.org/dist/index.json',
+    'https://go.dev/VERSION?m=text',
+  ]) assert.equal(assertTrustedDependencyURL(url), url)
+
+  assert.equal(assertTrustedRepository('MCUdude/MiniCore'), 'mcudude/minicore')
+  assert.equal(
+    assertTrustedGitHubURL(
+      'https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/example',
+      'microsoft/winget-pkgs',
+    ),
+    'https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/example',
+  )
+
+  for (const url of [
+    'http://nodejs.org/dist/index.json',
+    'https://user@nodejs.org/dist/index.json',
+    'https://api.github.com.evil.invalid/repos/arduino/arduino-cli/releases',
+    'https://api.github.com@evil.invalid/repos/arduino/arduino-cli/releases',
+    'https://github.com/example/arduino-cli/releases',
+    'https://example.invalid/downloads.arduino.cc/libraries/library_index.json.gz',
+  ]) assert.throws(() => assertTrustedDependencyURL(url), /allowlist|credential-free HTTPS/u)
+  assert.throws(() => assertTrustedRepository('example/arduino-cli'), /not code-review allowlisted/u)
+  assert.throws(
+    () => assertTrustedGitHubURL('https://api.github.com/repos/upx/upx/releases', 'arduino/arduino-cli'),
+    /redirected to untrusted repository/u,
+  )
+})
+
+test('canonical dependency policies and locks reject manifest-derived source substitutions', () => {
+  const toolchainPolicy = JSON.parse(readFileSync(join(repo, 'Tools', 'Controller', 'toolchain-profile.json'), 'utf8'))
+  const toolchainLock = JSON.parse(readFileSync(join(repo, 'Tools', 'Controller', 'toolchain-lock.json'), 'utf8'))
+  const hostPolicy = JSON.parse(readFileSync(join(repo, 'Tools', 'Dependencies', 'dependency-policy.json'), 'utf8'))
+
+  validateToolchainSourcePolicy(toolchainPolicy)
+  validateToolchainLockSources(toolchainLock)
+  validateHostSourcePolicy(hostPolicy)
+
+  const redirectedCLI = structuredClone(toolchainPolicy)
+  redirectedCLI.cli.release_api = 'https://api.github.com/repos/upx/upx/releases'
+  assert.throws(() => validateToolchainSourcePolicy(redirectedCLI), /redirected to untrusted repository/u)
+
+  const redirectedLibrary = structuredClone(toolchainLock)
+  redirectedLibrary.libraries[0].url = 'https://downloads.arduino.cc/libraries/github.com/sui77/rc_switch-3.0.3.zip'
+  assert.throws(() => validateToolchainLockSources(redirectedLibrary), /archive is not code-review allowlisted/u)
+
+  const redirectedCompiler = structuredClone(hostPolicy)
+  redirectedCompiler.windows_c_compiler.manifest_api = 'https://api.github.com/repos/arduino/arduino-cli/releases'
+  assert.throws(() => validateHostSourcePolicy(redirectedCompiler), /redirected to untrusted repository/u)
+
+  const unexpectedChecksums = structuredClone(hostPolicy)
+  unexpectedChecksums.node.checksums_url_template = 'https://example.invalid/dist/v{version}/SHASUMS256.txt'
+  assert.throws(() => validateHostSourcePolicy(unexpectedChecksums), /outside the code-review source allowlist/u)
 })
 
 test('WinGet compiler manifest parsing selects exact x64 integrity and composite latest order', () => {

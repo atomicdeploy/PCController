@@ -38,6 +38,7 @@ const FIRMWARE_OUTPUT = join(BUILD_ROOT, 'firmware')
 const PACKAGE_ROOT = join(BUILD_ROOT, 'package')
 const STABLE_GO_TEST_ROOT = join(BUILD_ROOT, 'tests', 'go')
 const STABLE_GO_TEST_RUNNER = join(PROJECT_ROOT, 'Tools', 'Build', 'go-tests.mjs')
+const TOOLCHAIN_POLICY_GENERATOR = join(HOST_ROOT, 'internal', 'programmer', 'generate-toolchain-policy.mjs')
 const PRODUCT_IDENTITY_GENERATOR = join(HOST_ROOT, 'internal', 'productidentity', 'generate.mjs')
 const DEFAULT_ASSET_ROOT = join(HOST_ROOT, 'internal', 'defaultassets', 'assets')
 const DEFAULT_FIRMWARE = join(DEFAULT_ASSET_ROOT, 'default-firmware.hex')
@@ -332,6 +333,13 @@ export function createPlan(options, identity, platform = process.platform) {
 		actions.push(commandAction('web-typecheck', 'Type-check embedded web application', 'npm', ['run', 'typecheck'], WEB_ROOT))
 		if (options.tests) actions.push(commandAction('web-test', 'Run embedded web tests', 'npm', ['run', 'test', '--', '--passWithNoTests'], WEB_ROOT))
 		actions.push(commandAction('web-build', 'Build embedded web application', 'npm', ['run', 'build'], WEB_ROOT))
+		actions.push(commandAction(
+			'toolchain-policy-check',
+			'Check runtime toolchain policy generated from the canonical profile',
+			'node',
+			[relative(PROJECT_ROOT, TOOLCHAIN_POLICY_GENERATOR).replaceAll('\\', '/'), '--check'],
+			PROJECT_ROOT
+		))
 		actions.push(commandAction(
 			'product-identity-check',
 			'Check generated product identity and Win32 metadata',
@@ -1521,6 +1529,10 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	removeGeneratedTree(stage)
 	mkdirSync(stage, { recursive: true })
 	const webUI = buildWebUI(options, env, log)
+	log.stage('🎯', 'Checking runtime toolchain policy generated from the canonical profile')
+	run(process.execPath, [TOOLCHAIN_POLICY_GENERATOR, '--check'], {
+		cwd: PROJECT_ROOT, env, verbose: options.verbose
+	})
 	log.stage('🪪', 'Checking package-derived product identity and Win32 metadata')
 	run(process.execPath, [PRODUCT_IDENTITY_GENERATOR, '--check'], {
 		cwd: PROJECT_ROOT, env, verbose: options.verbose

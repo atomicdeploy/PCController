@@ -31,7 +31,9 @@ func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
 			args: func(project, output string) []string {
 				return []string{
 					"program", "--method", "compile", "--sketch", project,
-					"--output-dir", output, "--dry-run",
+					"--output-dir", output,
+					"--toolchain-cli", filepath.Join(output, "arduino-cli"),
+					"--dry-run",
 				}
 			},
 		},
@@ -40,12 +42,16 @@ func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
 			args: func(project, output string) []string {
 				return []string{
 					"toolchain", "compile", project,
-					"--output-dir", output, "--dry-run",
+					"--output-dir", output,
+					"--toolchain-cli", filepath.Join(output, "arduino-cli"),
+					"--dry-run",
 				}
 			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			// Compile planning must not depend on a machine-installed dependency.
+			t.Setenv("PATH", t.TempDir())
 			path := filepath.Join(t.TempDir(), "config.json")
 			invalid := []byte(`{"schema":1,"host_menus":{"request_gesture":"status-hold-k4"}}`)
 			if err := os.WriteFile(path, invalid, 0o600); err != nil {
@@ -68,6 +74,26 @@ func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
 				t.Fatalf("compile-only command mutated runtime config:\n%s", after)
 			}
 		})
+	}
+}
+
+func TestCompileDryRunDoesNotRequireToolchainOnPATH(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--dry-run",
+		},
+		&stdout,
+		&stderr,
+		appconfig.Defaults(),
+	)
+	if err != nil {
+		t.Fatalf("compile dry-run probed the host toolchain: %v\nstderr: %s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "compile") {
+		t.Fatalf("compile plan missing from output: %q", stdout.String())
 	}
 }
 

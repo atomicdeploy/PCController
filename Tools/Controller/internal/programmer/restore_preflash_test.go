@@ -306,7 +306,10 @@ func TestAutomaticBackupThenFlashAcceptsExplicitUSBaspMethod(t *testing.T) {
 	result, err := AutomaticBackupThenFlash(
 		context.Background(), AutomaticPreflashOptions{
 			FirmwarePath: firmware,
-			Backup:       Options{Method: MethodUSBasp, OutputPath: filepath.Join(root, "backup")},
+			Backup: Options{
+				Method: MethodUSBasp, OutputPath: filepath.Join(root, "backup"),
+				Avrdude: "fake-avrdude", AvrdudeConf: "fake-avrdude.conf",
+			},
 		}, runner, func(context.Context, string, io.Writer) error { return nil }, io.Discard,
 	)
 	if err != nil || !result.BackupComplete || !result.Flashed {

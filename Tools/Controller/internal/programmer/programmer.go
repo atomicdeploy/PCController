@@ -27,7 +27,6 @@ const (
 	MethodUrclock Method = "urclock"
 	MethodUSBasp  Method = "usbasp"
 	MethodAvrdude Method = "avrdude"
-	DefaultFQBN          = "MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external"
 )
 
 const (
@@ -109,7 +108,7 @@ type Command struct {
 
 func Build(options Options) (Command, error) {
 	if options.FQBN == "" {
-		options.FQBN = DefaultFQBN
+		options.FQBN = DefaultFQBN()
 	}
 	if options.MCU == "" {
 		options.MCU = "atmega328p"
@@ -324,7 +323,7 @@ func ExecuteWithRunner(
 	if options.Method == MethodCompile {
 		var err error
 		if options.FQBN == "" {
-			options.FQBN = DefaultFQBN
+			options.FQBN = DefaultFQBN()
 		}
 		options, compileIdentity, err = PlanCompile(options)
 		if err != nil {
@@ -1166,7 +1165,11 @@ func findExecutable(explicit, fallback string) (string, error) {
 }
 
 func executableName(name string) string {
-	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
+	return executableNameForOS(name, runtime.GOOS)
+}
+
+func executableNameForOS(name, goos string) string {
+	if goos == "windows" && filepath.Ext(name) == "" {
 		return name + ".exe"
 	}
 	return name

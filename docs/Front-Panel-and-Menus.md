@@ -421,12 +421,10 @@ Canonical sources: [AddressableLeds.cpp](../Project/AddressableLeds.cpp),
 
 ### UART application link and Urboot/urclock profile
 
-The MiniCore target is:
-
-```text
-MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,
-variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external
-```
+The MiniCore target is the `fqbn` field in the canonical
+[toolchain profile](../Tools/Controller/toolchain-profile.json). Build,
+programming, host defaults, and documentation validation derive from that one
+authored value; the exact toolchain lock retains only its generated copy.
 
 UART0 is always enabled at 115200 baud and is the primary application link,
 not a debug-text console. Application frames use zero-delimited COBS, magic

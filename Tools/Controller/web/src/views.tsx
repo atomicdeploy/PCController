@@ -89,7 +89,15 @@ import { execute, rpc } from './api'
 import { settingsSetCommand } from './command-line'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
-import { normalizePWMValues, pwmPercent, pwmValue, PWMMutationScheduler, USER_PWM_CHANNELS } from './pwm-authority'
+import {
+  normalizePWMValues,
+  pwmPercent,
+  pwmValue,
+  PWMMutationScheduler,
+  PWMOperationQueue,
+  PWMReconciler,
+  USER_PWM_CHANNELS,
+} from './pwm-authority'
 import { formatClock, formatCompact, formatDuration, formatNumber, type MessageKey } from './i18n'
 const TelemetryChart = lazy(() => import('./telemetry-chart').then((module) => ({ default: module.TelemetryChart })))
 import {
@@ -330,7 +338,11 @@ export function ControlsView(props: SharedViewProps) {
   const [blue, setBlue] = useState(220)
   const configurationEventID = props.events.find((event) => event.kind === 'config')?.id ?? 0
   const pwmReportedRef = useRef(pwmReported)
+  const pwmAllBusyRef = useRef(pwmAllBusy)
+  const pwmOperationsRef = useRef<PWMOperationQueue | null>(null)
   const pwmSchedulerRef = useRef<PWMMutationScheduler | null>(null)
+
+  if (!pwmOperationsRef.current) pwmOperationsRef.current = new PWMOperationQueue()
 
   const applyAuthoritativePWM = (response: PWMValues, acknowledgedChannel: number | null = null) => {
     const authoritative = normalizePWMValues(response)
@@ -341,11 +353,13 @@ export function ControlsView(props: SharedViewProps) {
       if (pwmSchedulerRef.current?.pendingChannels().includes(channel)) return value
       return authoritative.values[channel]
     }))
+    setPWMError('')
     setPWMLoaded(true)
   }
 
   if (!pwmSchedulerRef.current) {
     pwmSchedulerRef.current = new PWMMutationScheduler({
+      operations: pwmOperationsRef.current,
       commit: (channel, value) => rpc<PWMValues>('controller.pwm.set', { channel, value }),
       onDraft: (channel, value) => {
         setPWMError('')
@@ -375,12 +389,16 @@ export function ControlsView(props: SharedViewProps) {
       setPWMLoaded(false)
       return
     }
-    let active = true
     setPWMError('')
-    void rpc<PWMValues>('controller.pwm.values')
-      .then((value) => { if (active) applyAuthoritativePWM(value) })
-      .catch((cause) => { if (active) setPWMError(cause instanceof Error ? cause.message : String(cause)) })
-    return () => { active = false }
+    const reconciler = new PWMReconciler({
+      operations: pwmOperationsRef.current!,
+      canRead: () => !pwmAllBusyRef.current && (pwmSchedulerRef.current?.pendingChannels().length ?? 0) === 0,
+      read: (signal) => rpc<PWMValues>('controller.pwm.values', {}, signal),
+      onAuthoritative: (value) => applyAuthoritativePWM(value),
+      onError: (cause) => setPWMError(cause.message),
+    })
+    reconciler.start()
+    return () => reconciler.stop()
   }, [snapshot.connected, snapshot.status.pwm_available])
 
   useEffect(() => {
@@ -413,13 +431,15 @@ export function ControlsView(props: SharedViewProps) {
   }
   const clearPWM = async () => {
     if (pwmPending.length) return
+    pwmAllBusyRef.current = true
     setPWMAllBusy(true)
     setPWMError('')
     try {
-      applyAuthoritativePWM(await rpc<PWMValues>('controller.pwm.off'))
+      applyAuthoritativePWM(await pwmOperationsRef.current!.run(() => rpc<PWMValues>('controller.pwm.off')))
     } catch (cause) {
       setPWMError(cause instanceof Error ? cause.message : String(cause))
     } finally {
+      pwmAllBusyRef.current = false
       setPWMAllBusy(false)
     }
   }

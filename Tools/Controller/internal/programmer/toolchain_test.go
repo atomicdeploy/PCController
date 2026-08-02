@@ -17,17 +17,17 @@ import (
 	"testing"
 )
 
-func TestPublicToolchainPolicyMatchesCompiledDefaultExactly(t *testing.T) {
+func TestGeneratedToolchainPolicyMatchesCanonicalProfile(t *testing.T) {
 	profile, err := LoadToolchainPolicy(filepath.Join("..", "..", "toolchain-profile.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.FQBN != DefaultFQBN {
-		t.Fatalf("public profile FQBN=%q want compiled fallback %q", profile.FQBN, DefaultFQBN)
+	if profile.FQBN != DefaultFQBN() {
+		t.Fatalf("public profile FQBN=%q want generated fallback %q", profile.FQBN, DefaultFQBN())
 	}
 	want := DefaultToolchainPolicy()
 	if !reflect.DeepEqual(profile, want) {
-		t.Fatalf("public profile drifted from compiled default:\nfile=%#v\ndefault=%#v", profile, want)
+		t.Fatalf("generated runtime policy drifted from canonical profile:\nfile=%#v\ngenerated=%#v", profile, want)
 	}
 }
 
@@ -171,6 +171,15 @@ func testEnvironmentValue(environment []string, wanted string) string {
 		}
 	}
 	return ""
+}
+
+func TestManagedCLINameUsesRequestedTargetOS(t *testing.T) {
+	if got := executableNameForOS("arduino-cli", "windows"); got != "arduino-cli.exe" {
+		t.Fatalf("Windows managed CLI name=%q want arduino-cli.exe", got)
+	}
+	if got := executableNameForOS("arduino-cli", "linux"); got != "arduino-cli" {
+		t.Fatalf("Linux managed CLI name=%q want arduino-cli", got)
+	}
 }
 
 func TestVerifiedToolDownloadAndZipExtraction(t *testing.T) {

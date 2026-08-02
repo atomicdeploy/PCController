@@ -36,8 +36,131 @@ interface DesiredPWMValue {
   revision: number
 }
 
+type QueuedPWMOperation = () => void
+
+// PWM endpoints return the complete 16-channel snapshot. Serializing every
+// read and write prevents an older response from racing a newer mutation and
+// replacing authoritative values out of order.
+export class PWMOperationQueue {
+  private readonly queued: QueuedPWMOperation[] = []
+  private active = false
+
+  run<T>(operation: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.queued.push(() => {
+        let result: Promise<T>
+        try {
+          result = operation()
+        } catch (cause) {
+          reject(cause)
+          this.advance()
+          return
+        }
+        void result.then(
+          (value) => {
+            resolve(value)
+            this.advance()
+          },
+          (cause) => {
+            reject(cause)
+            this.advance()
+          },
+        )
+      })
+      this.drain()
+    })
+  }
+
+  private drain(): void {
+    if (this.active) return
+    const operation = this.queued.shift()
+    if (!operation) return
+    this.active = true
+    operation()
+  }
+
+  private advance(): void {
+    this.active = false
+    this.drain()
+  }
+}
+
+export const PWM_RECONCILIATION_INTERVAL_MS = 1_500
+
+export interface PWMReconcilerOptions {
+  intervalMS?: number
+  operations: PWMOperationQueue
+  canRead: () => boolean
+  read: (signal: AbortSignal) => Promise<PWMValues>
+  onAuthoritative: (values: PWMValues) => void
+  onError: (cause: Error) => void
+}
+
+// PWMReconciler uses a chained timeout rather than setInterval, so a slow
+// controller can never accumulate overlapping reads. Demand is checked before
+// every request; stop() also invalidates an in-flight response.
+export class PWMReconciler {
+  private readonly intervalMS: number
+  private readonly options: PWMReconcilerOptions
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private readAbort: AbortController | null = null
+  private generation = 0
+  private running = false
+
+  constructor(options: PWMReconcilerOptions) {
+    this.options = options
+    this.intervalMS = Math.max(250, Math.min(30_000, Math.round(options.intervalMS ?? PWM_RECONCILIATION_INTERVAL_MS)))
+  }
+
+  start(): void {
+    if (this.running) return
+    this.running = true
+    const generation = ++this.generation
+    this.schedule(0, generation)
+  }
+
+  stop(): void {
+    this.running = false
+    this.generation++
+    if (this.timer !== null) clearTimeout(this.timer)
+    this.timer = null
+    this.readAbort?.abort()
+    this.readAbort = null
+  }
+
+  private schedule(delayMS: number, generation: number): void {
+    if (!this.running || generation !== this.generation) return
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.tick(generation)
+    }, delayMS)
+  }
+
+  private async tick(generation: number): Promise<void> {
+    if (!this.running || generation !== this.generation) return
+    if (!this.options.canRead()) {
+      this.schedule(this.intervalMS, generation)
+      return
+    }
+    const readAbort = new AbortController()
+    this.readAbort = readAbort
+    try {
+      const response = normalizePWMValues(await this.options.operations.run(() => this.options.read(readAbort.signal)))
+      if (this.running && generation === this.generation) this.options.onAuthoritative(response)
+    } catch (cause) {
+      if (this.running && generation === this.generation) {
+        this.options.onError(cause instanceof Error ? cause : new Error(String(cause)))
+      }
+    } finally {
+      if (this.readAbort === readAbort) this.readAbort = null
+      this.schedule(this.intervalMS, generation)
+    }
+  }
+}
+
 export interface PWMMutationSchedulerOptions {
   delayMS?: number
+  operations?: PWMOperationQueue
   commit: (channel: number, value: number) => Promise<PWMValues>
   onDraft: (channel: number, value: number) => void
   onAuthoritative: (values: PWMValues, acknowledgedChannel: number | null) => void
@@ -51,6 +174,7 @@ export interface PWMMutationSchedulerOptions {
 export class PWMMutationScheduler {
   private readonly delayMS: number
   private readonly options: PWMMutationSchedulerOptions
+  private readonly operations: PWMOperationQueue
   private readonly desired = new Map<number, DesiredPWMValue>()
   private readonly inFlight = new Set<number>()
   private readonly timers = new Map<number, ReturnType<typeof setTimeout>>()
@@ -59,6 +183,7 @@ export class PWMMutationScheduler {
 
   constructor(options: PWMMutationSchedulerOptions) {
     this.options = options
+    this.operations = options.operations ?? new PWMOperationQueue()
     this.delayMS = Math.max(0, Math.round(options.delayMS ?? 140))
   }
 
@@ -103,7 +228,7 @@ export class PWMMutationScheduler {
     this.inFlight.add(channel)
     this.notifyPending()
     try {
-      const response = normalizePWMValues(await this.options.commit(channel, requested.value))
+      const response = normalizePWMValues(await this.operations.run(() => this.options.commit(channel, requested.value)))
       if (this.disposed) return
       const latest = this.desired.get(channel)
       const acknowledged = latest?.revision === requested.revision

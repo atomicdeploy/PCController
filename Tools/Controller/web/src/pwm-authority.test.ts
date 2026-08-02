@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { normalizePWMValues, PWMMutationScheduler, USER_PWM_CHANNELS } from './pwm-authority'
+import {
+  normalizePWMValues,
+  PWMMutationScheduler,
+  PWMOperationQueue,
+  PWMReconciler,
+  USER_PWM_CHANNELS,
+} from './pwm-authority'
 import type { PWMValues } from './types'
 
 function values(channel: number, value: number): PWMValues {
@@ -65,5 +71,133 @@ describe('authoritative PWM contract', () => {
     await Promise.resolve()
     expect(commits).toEqual([500, 700])
     scheduler.dispose()
+  })
+
+  it('serializes writes across channels because acknowledgements are complete snapshots', async () => {
+    let release: ((snapshot: PWMValues) => void) | undefined
+    const commits: Array<[number, number]> = []
+    const scheduler = new PWMMutationScheduler({
+      delayMS: 0,
+      commit: (channel, value) => {
+        commits.push([channel, value])
+        if (commits.length === 1) return new Promise((resolve) => { release = resolve })
+        return Promise.resolve(values(channel, value))
+      },
+      onDraft: vi.fn(), onAuthoritative: vi.fn(), onPending: vi.fn(), onError: vi.fn(),
+    })
+
+    scheduler.schedule(1, 400, true)
+    scheduler.schedule(7, 800, true)
+    expect(commits).toEqual([[1, 400]])
+    release?.(values(1, 400))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(commits).toEqual([[1, 400], [7, 800]])
+    scheduler.dispose()
+  })
+
+  it('reconciles an externally changed unselected channel from complete snapshots', async () => {
+    vi.useFakeTimers()
+    const operations = new PWMOperationQueue()
+    let board = values(2, 600)
+    let displayed = Array(16).fill(0)
+    const read = vi.fn(async () => ({ ...board, values: [...board.values] }))
+    const reconciler = new PWMReconciler({
+      intervalMS: 250,
+      operations,
+      canRead: () => true,
+      read,
+      onAuthoritative: (snapshot) => { displayed = snapshot.values },
+      onError: vi.fn(),
+    })
+
+    reconciler.start()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(displayed[2]).toBe(600)
+    board = { ...board, values: board.values.map((value, channel) => channel === 8 ? 2800 : value) }
+    await vi.advanceTimersByTimeAsync(250)
+
+    expect(read).toHaveBeenCalledTimes(2)
+    expect(board.selected_channel).toBe(2)
+    expect(displayed[8]).toBe(2800)
+    reconciler.stop()
+  })
+
+  it('skips reads without demand and stops scheduling when the view goes offline', async () => {
+    vi.useFakeTimers()
+    let online = false
+    const read = vi.fn(async () => values(1, 100))
+    const reconciler = new PWMReconciler({
+      intervalMS: 250,
+      operations: new PWMOperationQueue(),
+      canRead: () => online,
+      read,
+      onAuthoritative: vi.fn(),
+      onError: vi.fn(),
+    })
+
+    reconciler.start()
+    await vi.advanceTimersByTimeAsync(750)
+    expect(read).not.toHaveBeenCalled()
+    online = true
+    await vi.advanceTimersByTimeAsync(250)
+    expect(read).toHaveBeenCalledTimes(1)
+    online = false
+    reconciler.stop()
+    expect(vi.getTimerCount()).toBe(0)
+    online = true
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(read).toHaveBeenCalledTimes(1)
+  })
+
+  it('suppresses an in-flight reconciliation result after unmount', async () => {
+    vi.useFakeTimers()
+    let release: ((snapshot: PWMValues) => void) | undefined
+    let readSignal: AbortSignal | undefined
+    const onAuthoritative = vi.fn()
+    const reconciler = new PWMReconciler({
+      intervalMS: 250,
+      operations: new PWMOperationQueue(),
+      canRead: () => true,
+      read: (signal) => {
+        readSignal = signal
+        return new Promise((resolve) => { release = resolve })
+      },
+      onAuthoritative,
+      onError: vi.fn(),
+    })
+
+    reconciler.start()
+    await vi.advanceTimersByTimeAsync(0)
+    reconciler.stop()
+    expect(readSignal?.aborted).toBe(true)
+    release?.(values(5, 900))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(onAuthoritative).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('serializes reconciliation reads with writes on the shared operation queue', async () => {
+    const operations = new PWMOperationQueue()
+    let active = 0
+    let peak = 0
+    let releaseFirst: (() => void) | undefined
+    const operation = (hold = false) => operations.run(async () => {
+      active++
+      peak = Math.max(peak, active)
+      if (hold) await new Promise<void>((resolve) => { releaseFirst = resolve })
+      active--
+      return values(0, 0)
+    })
+
+    const first = operation(true)
+    const second = operation()
+    expect(active).toBe(1)
+    releaseFirst?.()
+    await Promise.all([first, second])
+
+    expect(peak).toBe(1)
   })
 })

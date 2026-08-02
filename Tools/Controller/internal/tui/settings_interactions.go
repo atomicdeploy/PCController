@@ -236,6 +236,21 @@ func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 
 func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	editor := model.settingEditor
+	if descriptor, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
+		updated, name, restored, err := model.savePeripheralName(descriptor, editor.Text)
+		if err != nil {
+			model.appendLog("error", "save peripheral name: "+err.Error())
+			model.setNotice("Peripheral name was not saved: " + err.Error())
+			return model, nil, true
+		}
+		updated.settingEditor = nil
+		if restored {
+			updated.setNotice(fmt.Sprintf("%s restored to %q in host settings", descriptor.Key, name))
+		} else {
+			updated.setNotice(fmt.Sprintf("%s renamed to %q in host settings", descriptor.Key, name))
+		}
+		return updated, nil, true
+	}
 	if strings.HasPrefix(editor.Key, "led.") {
 		return model.commitStatusLEDSettingEditor()
 	}

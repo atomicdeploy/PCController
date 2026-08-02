@@ -1,5 +1,7 @@
 package programmer
 
+//go:generate node generate-toolchain-policy.mjs
+
 import (
 	"bytes"
 	"compress/gzip"
@@ -25,8 +27,6 @@ import (
 const (
 	ToolchainPolicyFormat = "pccontroller-toolchain-policy/v1"
 	ToolchainLockFormat   = "pccontroller-toolchain-lock/v1"
-	defaultLibraryIndex   = "https://downloads.arduino.cc/libraries/library_index.json.gz"
-	defaultGoVersionURL   = "https://go.dev/VERSION?m=text"
 )
 
 // ToolchainConstraint selects the newest stable release that is not older than
@@ -178,49 +178,20 @@ type ToolchainResolveOptions struct {
 }
 
 func DefaultToolchainPolicy() ToolchainPolicy {
-	return ToolchainPolicy{
-		Format:       ToolchainPolicyFormat,
-		Name:         "controllerboardmini-atmega328p",
-		FQBN:         DefaultFQBN,
-		LibraryIndex: defaultLibraryIndex,
-		CLI: ToolchainCLIPolicy{
-			Dependency: "arduino-cli",
-			Repository: "arduino/arduino-cli",
-			ReleaseAPI: "https://api.github.com/repos/arduino/arduino-cli/releases?per_page=100",
-			Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "1.5.1"},
-			Assets: []ToolchainCLIAssetPolicy{
-				{GOOS: "windows", GOARCH: "amd64", Suffix: "_Windows_64bit.zip", Archive: "zip"},
-				{GOOS: "windows", GOARCH: "386", Suffix: "_Windows_32bit.zip", Archive: "zip"},
-				{GOOS: "linux", GOARCH: "amd64", Suffix: "_Linux_64bit.tar.gz", Archive: "tar.gz"},
-				{GOOS: "linux", GOARCH: "arm64", Suffix: "_Linux_ARM64.tar.gz", Archive: "tar.gz"},
-				{GOOS: "darwin", GOARCH: "amd64", Suffix: "_macOS_64bit.tar.gz", Archive: "tar.gz"},
-				{GOOS: "darwin", GOARCH: "arm64", Suffix: "_macOS_ARM64.tar.gz", Archive: "tar.gz"},
-			},
-		},
-		Core: ToolchainCorePolicy{
-			ID: "MiniCore:avr", IndexURL: MiniCorePackageIndexURL,
-			Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "3.1.2"},
-		},
-		Libraries: []ToolchainLibraryPolicy{
-			{Name: "Adafruit PWM Servo Driver Library", Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "3.0.3"}},
-			{Name: "Adafruit INA219", Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "1.2.3"}},
-			{Name: "rc-switch", Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "2.6.4"}},
-			{Name: "TM1637TinyDisplay", Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "1.12.2"}},
-			{Name: "DallasTemperature", Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "4.0.6"}},
-			{Name: "OneWire", Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "2.3.8"}},
-		},
-		Bootloader: ToolchainBootloaderPolicy{
-			Repository: "stefanrueger/urboot", TagPrefix: "u",
-			TagsAPI:    "https://api.github.com/repos/stefanrueger/urboot/tags?per_page=100",
-			CommitsAPI: "https://api.github.com/repos/stefanrueger/urboot/commits",
-			CanaryRef:  "main",
-			Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "8.0"},
-		},
-		Go: ToolchainGoPolicy{
-			VersionURL: defaultGoVersionURL,
-			Constraint: ToolchainConstraint{Channel: "stable", MinimumVersion: "1.25.0"},
-		},
+	var policy ToolchainPolicy
+	if err := json.Unmarshal([]byte(generatedToolchainPolicyJSON), &policy); err != nil {
+		panic(fmt.Sprintf("decode generated toolchain policy: %v", err))
 	}
+	if err := policy.Validate(); err != nil {
+		panic(fmt.Sprintf("validate generated toolchain policy: %v", err))
+	}
+	return policy
+}
+
+// DefaultFQBN returns the board target generated from toolchain-profile.json.
+// Keeping this as a function prevents another authored compile-time definition.
+func DefaultFQBN() string {
+	return DefaultToolchainPolicy().FQBN
 }
 
 func LoadToolchainPolicy(path string) (ToolchainPolicy, error) {

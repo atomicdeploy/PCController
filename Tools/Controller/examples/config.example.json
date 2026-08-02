@@ -844,7 +844,6 @@
   "paths": {},
   "programming": {
     "method": "urclock",
-    "fqbn": "MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external",
     "programmer": "usbasp"
   },
   "scripts": {
