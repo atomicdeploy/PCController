@@ -342,6 +342,12 @@ binary, checksum, or test run cannot satisfy a newer tree.
   recovery method and does not inherit a serial selector as its programmer ID.
 - ✅ Content-addressed storage deduplicates identical firmware and preserves
   raw logs, manifests, hashes, completeness, and source identity.
+- ✅ The file-only EEPROM migrator requires a complete validated backup, an
+  explicit repository-backed 19+CRC8 or 29+CRC8 source profile, and the expected
+  source EEPROM SHA-256. It preserves non-settings bytes, emits a full current
+  restore candidate without overwrite, verifies persisted readback byte for
+  byte, revalidates the backup, and never opens a device or changes MCU EEPROM
+  ownership.
 - ✅ The explicit development-only `--reinitialize-eeprom` path records an
   incompatible settings-query error, preserves the untouched raw EEPROM in the
   mandatory backup, routes through a primary bridge, never restores old

@@ -567,10 +567,10 @@ None of these PC files is the MCU's active configuration. The board continues
 to own EEPROM, and a settings change reaches it only through a specific native
 command or a deliberate programmer write.
 
-No unpublished-build migration/version chain is retained in firmware or host
-code. The file-only tools accept the current unversioned semantic settings
-record, require a complete validated raw-backup manifest, and reject every
-other width/layout explicitly:
+No migration/version chain is retained in firmware. The host has a narrow,
+explicitly versioned off-device converter for the two historical settings
+layouts present in repository history; it is not a generic best-effort decoder.
+All other widths/layouts are rejected.
 
 For a connected unpublished development board whose settings response has an
 obsolete width, `controller program flash ... --reinitialize-eeprom` first
@@ -585,6 +585,7 @@ for the exact command and recovery behavior.
 Tools\Controller\bin\controller.exe eeprom inspect --backup-manifest BACKUP\manifest.json
 Tools\Controller\bin\controller.exe eeprom export --backup-manifest BACKUP\manifest.json --output SETTINGS.hex
 Tools\Controller\bin\controller.exe eeprom import --backup-manifest BACKUP\manifest.json --settings SETTINGS.hex --output EEPROM-RESTORE.hex
+Tools\Controller\bin\controller.exe eeprom migrate --backup-manifest BACKUP\manifest.json --from legacy-v1/unversioned-19+crc8 --expect-eeprom-sha256 SOURCE_EEPROM_SHA256 --output EEPROM-MIGRATED.hex
 Tools\Controller\bin\controller.exe eeprom restore --backup-manifest BACKUP\manifest.json --output EEPROM-ORIGINAL.hex
 ```
 
@@ -595,6 +596,16 @@ and every unknown byte remain unchanged; restore reproduces the original full
 EEPROM image. Outputs are hashed and never overwritten. These commands do not
 open serial or write a device; an actual EEPROM write and readback remain
 separate, explicit programming operations.
+
+`migrate` accepts only `legacy-v1/unversioned-19+crc8` or
+`development-v2/unversioned-29+crc8`. It requires the expected source EEPROM
+SHA-256 reported by `inspect`, validates the complete backup manifest and old
+record CRC/semantics, preserves all bytes outside the settings record, and
+emits a full current-layout restore candidate. The output is created outside
+the immutable backup directory without overwrite, reopened and byte-compared,
+and the backup is revalidated before success is reported. It never opens the
+serial port or changes MCU ownership; applying the result remains a separate
+authorized write plus programmer readback.
 
 ## Measurement demand and history
 

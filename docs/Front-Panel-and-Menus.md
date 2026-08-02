@@ -984,10 +984,12 @@ the EEPROM source of truth.
 The current firmware has no on-board EEPROM migration handler. Menu validation
 accepts only the dense IDs 0-13 and a 14-bit visibility mask; an older record
 that is not already semantically valid is rejected and factory defaults are
-written through the normal settings path. The host may explicitly back up,
-erase, or rewrite development EEPROM after flashing. The physical record and
-schema-2 UART layout both use exactly seven menu-order bytes for the 14 packed
-IDs; there is no spare order byte.
+written through the normal settings path. A host-only, backup-first converter
+can migrate the repository's explicit 19+CRC8 and 29+CRC8 development layouts
+to a verified current restore candidate without opening the board. Applying
+that candidate remains a separate authorized programmer write/readback. The
+physical record and schema-2 UART layout both use exactly seven menu-order bytes
+for the 14 packed IDs; there is no spare order byte.
 
 The current logical EEPROM map is:
 
