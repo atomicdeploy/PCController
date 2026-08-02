@@ -1182,7 +1182,7 @@ wire::Frame VirtualBoard::remotesFrame(std::uint8_t sequence,
           remotes_.begin(), remotes_.end(),
           [](const RemoteEntry &entry) { return entry.used; }));
   std::vector<std::uint8_t> payload{1, total, 0xFF, 0};
-  std::uint8_t scan = cursor;
+  std::size_t scan = cursor;
   while (scan < remotes_.size() && payload[3] < 3) {
     const RemoteEntry &entry = remotes_[scan];
     if (entry.used) {
@@ -1200,7 +1200,7 @@ wire::Frame VirtualBoard::remotesFrame(std::uint8_t sequence,
   }
   while (scan < remotes_.size()) {
     if (remotes_[scan].used) {
-      payload[2] = scan;
+      payload[2] = static_cast<std::uint8_t>(scan);
       break;
     }
     ++scan;

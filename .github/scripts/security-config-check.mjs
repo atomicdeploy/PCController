@@ -404,6 +404,56 @@ export function validateActionPins(workflows) {
   return { errors, references };
 }
 
+export function validateProtectedDeployment(source) {
+  const errors = [];
+  const triggerBlock = source.match(/^on:\s*\r?\n([\s\S]*?)^permissions:/mu)?.[1] ?? "";
+  if (!/^  workflow_dispatch:\s*$/mu.test(triggerBlock) || /pull_request|push:|schedule:/u.test(triggerBlock)) {
+    errors.push("protected AVR deployment must remain manual-dispatch only");
+  }
+  if (!/^    if:\s*github\.ref == ['"]refs\/heads\/main['"]\s*$/mu.test(source)) {
+    errors.push("AVR bundle preparation must be restricted to a main-branch dispatch");
+  }
+  if (!/^    environment:\s*avr-release-read\s*$/mu.test(source)) {
+    errors.push("AVR bundle preparation must use the main-restricted release environment");
+  }
+  if (/ref:\s*\$\{\{\s*needs\.prepare\.outputs\.source-sha/u.test(source)) {
+    errors.push("the self-hosted deployment runner must not execute release-selected source");
+  }
+
+  const stepStarts = [...source.matchAll(/^      - name:\s*(.+?)\s*$/gmu)];
+  const steps = stepStarts.map((match, index) =>
+    source.slice(match.index, stepStarts[index + 1]?.index ?? source.length));
+  const checkouts = steps.filter((step) => step.includes("uses: actions/checkout@"));
+  if (checkouts.length !== 2) {
+    errors.push("protected AVR deployment must have exactly two explicit checkouts");
+  }
+  for (const checkout of checkouts) {
+    if (!/^          ref:\s*main\s*$/mu.test(checkout)) {
+      errors.push("every protected AVR deployment checkout must use protected main");
+    }
+    if (!/^          persist-credentials:\s*false\s*$/mu.test(checkout)) {
+      errors.push("protected AVR deployment checkouts must not persist credentials");
+    }
+  }
+  if (checkouts[0] && !/^          fetch-depth:\s*0\s*$/mu.test(checkouts[0])) {
+    errors.push("AVR bundle preparation must fetch protected main history for ancestry validation");
+  }
+  if (!/source-sha\.txt/u.test(source) || !/deployment-controller-sha\.txt/u.test(source)) {
+    errors.push("deployment evidence must preserve firmware and controller source identities");
+  }
+  if (!/--json targetCommitish/u.test(source) || !/test "\$release_target" = "\$SOURCE_SHA"/u.test(source)) {
+    errors.push("the release target must equal the attested firmware source SHA");
+  }
+  if (!/git cat-file -e "\$\{SOURCE_SHA\}\^\{commit\}"/u.test(source) ||
+      !/git merge-base --is-ancestor "\$SOURCE_SHA" HEAD/u.test(source)) {
+    errors.push("the firmware source must be a commit in protected main history");
+  }
+  if (/PCCONTROLLER_VERSION:\s*\$\{\{\s*inputs\.release_tag\s*\}\}/u.test(source)) {
+    errors.push("the protected-main programmer must not claim the firmware release identity");
+  }
+  return errors;
+}
+
 export function validateSecurityConfiguration(root = defaultRoot) {
   const errors = [];
   const requiredFiles = [
@@ -426,12 +476,14 @@ export function validateSecurityConfiguration(root = defaultRoot) {
   const inventory = inventoryRepository(files);
   const dependabot = readFileSync(resolve(root, ".github/dependabot.yml"), "utf8");
   const codeql = readFileSync(resolve(root, ".github/workflows/codeql.yml"), "utf8");
+  const deployment = readFileSync(resolve(root, ".github/workflows/deploy-avr.yml"), "utf8");
   const workflowPaths = files.filter((path) => /^\.github\/workflows\/[^/]+\.ya?ml$/u.test(path));
   const workflows = new Map(
     workflowPaths.map((path) => [path, readFileSync(resolve(root, path), "utf8")]),
   );
   errors.push(...validateDependabot(dependabot, inventory));
   errors.push(...validateCodeql(codeql, inventory.languages));
+  errors.push(...validateProtectedDeployment(deployment));
   const actionPins = validateActionPins(workflows);
   errors.push(...actionPins.errors);
   return {

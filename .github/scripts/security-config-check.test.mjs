@@ -9,12 +9,14 @@ import {
   validateActionPins,
   validateCodeql,
   validateDependabot,
+  validateProtectedDeployment,
   validateSecurityConfiguration,
 } from "./security-config-check.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const dependabot = readFileSync(resolve(root, ".github/dependabot.yml"), "utf8");
 const codeql = readFileSync(resolve(root, ".github/workflows/codeql.yml"), "utf8");
+const deployment = readFileSync(resolve(root, ".github/workflows/deploy-avr.yml"), "utf8");
 const inventory = inventoryRepository([
   ".github/workflows/build.yml",
   ".github/scripts/example.mjs",
@@ -88,4 +90,35 @@ test("CodeQL validation rejects a cosmetic gate that ignores failures", () => {
   const errors = validateCodeql(mutated, inventory.languages);
   assert.ok(errors.some((error) => error.includes("must run even when analysis fails")));
   assert.ok(errors.some((error) => error.includes("must fail for a non-success")));
+});
+
+test("deployment validation rejects release-selected code on the self-hosted runner", () => {
+  const mutated = deployment.replace(
+    '      - name: "📥 Check out protected deployment controller"\n' +
+      "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n" +
+      "        with:\n" +
+      "          ref: main\n",
+    '      - name: "📥 Check out protected deployment controller"\n' +
+      "        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7\n" +
+      "        with:\n" +
+      "          ref: ${{ needs.prepare.outputs.source-sha }}\n",
+  );
+  const errors = validateProtectedDeployment(mutated);
+  assert.ok(errors.some((error) => error.includes("must not execute release-selected source")));
+  assert.ok(errors.some((error) => error.includes("must use protected main")));
+});
+
+test("deployment validation rejects an untrusted release source lineage", () => {
+  const mutated = deployment
+    .replace('    if: github.ref == \'refs/heads/main\'\n', "")
+    .replace("    environment: avr-release-read\n", "")
+    .replace("          fetch-depth: 0\n", "")
+    .replace('          test "$release_target" = "$SOURCE_SHA"\n', "")
+    .replace('          git merge-base --is-ancestor "$SOURCE_SHA" HEAD\n', "");
+  const errors = validateProtectedDeployment(mutated);
+  assert.ok(errors.some((error) => error.includes("main-branch dispatch")));
+  assert.ok(errors.some((error) => error.includes("main-restricted release environment")));
+  assert.ok(errors.some((error) => error.includes("fetch protected main history")));
+  assert.ok(errors.some((error) => error.includes("release target")));
+  assert.ok(errors.some((error) => error.includes("protected main history")));
 });

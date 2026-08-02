@@ -195,8 +195,11 @@ async function latestArduinoCli(config) {
   };
 }
 
-async function latestMiniCore(config) {
-  const index = await fetchJson(config.miniCore.packageIndex);
+async function latestMiniCore() {
+  // The config value is validated against this constant before any report is
+  // generated. Fetch the allowlisted source directly so repository data can
+  // never redirect the dependency radar to a different network location.
+  const index = await fetchJson(OFFICIAL_SOURCES.miniCoreIndex);
   const platforms = (index.packages ?? []).flatMap((entry) => entry.platforms ?? []);
   const matching = platforms.filter((platform) => platform.architecture === "avr" && /minicore/i.test(platform.name ?? ""));
   return {
@@ -253,7 +256,7 @@ function dependencyItem(key, label, current, latestResult) {
 export async function auditDependencies(config) {
   const [arduinoCli, miniCore, rcSwitch] = await Promise.allSettled([
     latestArduinoCli(config),
-    latestMiniCore(config),
+    latestMiniCore(),
     latestRcSwitch(),
   ]);
   const dependencies = [
@@ -351,12 +354,39 @@ export function synchronizeDependencyDocumentation(
   const changed = [];
   for (const relativePath of CURATED_DEPENDENCY_DOCUMENTS) {
     const documentPath = path.join(repositoryRoot, relativePath);
-    if (!fs.existsSync(documentPath) || !fs.statSync(documentPath).isFile()) continue;
-    const before = fs.readFileSync(documentPath, "utf8");
-    const after = synchronizeDependencyMentions(before, currentConfig, nextConfig);
-    if (after === before) continue;
-    fs.writeFileSync(documentPath, after, "utf8");
-    changed.push(relativePath);
+    let descriptor;
+    try {
+      descriptor = fs.openSync(documentPath, "r+");
+    } catch (error) {
+      if (error && typeof error === "object" && ["ENOENT", "ENOTDIR"].includes(error.code)) {
+        continue;
+      }
+      throw error;
+    }
+    try {
+      if (!fs.fstatSync(descriptor).isFile()) continue;
+      const before = fs.readFileSync(descriptor, "utf8");
+      const after = synchronizeDependencyMentions(before, currentConfig, nextConfig);
+      if (after === before) continue;
+      const bytes = Buffer.from(after, "utf8");
+      let written = 0;
+      while (written < bytes.length) {
+        const count = fs.writeSync(
+          descriptor,
+          bytes,
+          written,
+          bytes.length - written,
+          written,
+        );
+        if (count <= 0) throw new Error(`Could not update ${relativePath}`);
+        written += count;
+      }
+      fs.ftruncateSync(descriptor, bytes.length);
+      fs.fsyncSync(descriptor);
+      changed.push(relativePath);
+    } finally {
+      fs.closeSync(descriptor);
+    }
   }
   return changed;
 }
