@@ -507,13 +507,38 @@ func ApplyIntelHexPatchPlan(
 	if err := atomicCreateFile(outputAbsolute, canonical, 0o600); err != nil {
 		return result, fmt.Errorf("write patched Intel HEX: %w", err)
 	}
+	readback, err := verifyPatchedIntelHexOutput(outputAbsolute, canonical)
+	if err != nil {
+		return result, err
+	}
 	return IntelHexPatchResult{
 		SourcePath: sourceAbsolute, OutputPath: outputAbsolute,
-		SourceSHA256: document.SourceSHA256, OutputSHA256: sha256Hex(canonical),
+		SourceSHA256: document.SourceSHA256, OutputSHA256: readback.SourceSHA256,
 		BeforeImageSHA256: document.Inspection.CanonicalSHA256,
-		AfterImageSHA256:  sha256Hex(canonical),
+		AfterImageSHA256:  readback.Inspection.CanonicalSHA256,
 		Patches:           applied,
 	}, nil
+}
+
+func verifyPatchedIntelHexOutput(path string, expectedCanonical []byte) (*IntelHexDocument, error) {
+	readback, err := LoadIntelHex(path)
+	if err != nil {
+		return nil, fmt.Errorf("read back patched Intel HEX: %w", err)
+	}
+	expectedSHA256 := sha256Hex(expectedCanonical)
+	if readback.SourceSHA256 != expectedSHA256 {
+		return nil, fmt.Errorf(
+			"read back patched Intel HEX bytes differ: expected SHA-256 %s, found %s",
+			expectedSHA256, readback.SourceSHA256,
+		)
+	}
+	if readback.Inspection.CanonicalSHA256 != expectedSHA256 {
+		return nil, fmt.Errorf(
+			"read back patched Intel HEX image differs: expected SHA-256 %s, found %s",
+			expectedSHA256, readback.Inspection.CanonicalSHA256,
+		)
+	}
+	return readback, nil
 }
 
 func validateNamedRegions(

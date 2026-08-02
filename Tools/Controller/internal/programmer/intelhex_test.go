@@ -120,6 +120,10 @@ func TestApplyIntelHexPatchPlanGuardsAndHashes(t *testing.T) {
 	if err != nil || !bytes.Equal(actual, []byte{0x10, 0xAA, 0xBB, 0x40}) {
 		t.Fatalf("patched bytes=%X err=%v", actual, err)
 	}
+	if result.OutputSHA256 != patched.SourceSHA256 ||
+		result.AfterImageSHA256 != patched.Inspection.CanonicalSHA256 {
+		t.Fatalf("patch result did not use persisted readback identity: %#v %#v", result, patched)
+	}
 	if _, err := ApplyIntelHexPatchPlan(
 		source, output, DefaultATmega328PFlashLayout(), plan,
 	); err == nil || !strings.Contains(err.Error(), "already exists") {
@@ -128,6 +132,24 @@ func TestApplyIntelHexPatchPlanGuardsAndHashes(t *testing.T) {
 	leftovers, err := filepath.Glob(filepath.Join(directory, ".pccontroller-*.tmp"))
 	if err != nil || len(leftovers) != 0 {
 		t.Fatalf("atomic writer left temporary files: %v %v", leftovers, err)
+	}
+}
+
+func TestPatchedIntelHexReadbackRejectsPersistedByteChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "patched.hex")
+	image := &IntelHexImage{data: map[uint32]byte{0x100: 0x10}}
+	expected, err := image.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := append([]byte(nil), expected...)
+	changed[1] = '1'
+	if err := os.WriteFile(path, changed, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := verifyPatchedIntelHexOutput(path, expected); err == nil ||
+		!strings.Contains(err.Error(), "read back patched Intel HEX") {
+		t.Fatalf("expected persisted readback rejection, got %v", err)
 	}
 }
 
