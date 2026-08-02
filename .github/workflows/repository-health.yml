@@ -24,10 +24,18 @@ jobs:
       - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: "🔐 Read exact Host dependency lock"
+        id: host-dependencies
+        shell: bash
+        run: node Tools/Dependencies/export-lock.mjs export-host --output "$GITHUB_OUTPUT"
+
       - name: "🟢 Install Node.js"
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.host-dependencies.outputs.node_version }}
+
+      - name: "📦 Restore locked build-tool dependencies"
+        run: npm ci --prefix Tools/Build --ignore-scripts
 
       - name: "🐹 Install Go from go.mod"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
