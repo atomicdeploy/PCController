@@ -120,7 +120,10 @@ func (runtime *Runtime) Timeline(since time.Time, limit int) []TimelineEntry {
 	} else if limit > maximumTimelineEntries {
 		limit = maximumTimelineEntries
 	}
-	result := make([]TimelineEntry, 0, limit)
+	// Keep the JSON shape as [] for an empty result, but grow only for entries
+	// that actually exist. The caller-provided page size must never drive an
+	// eager allocation, even after it has been clamped.
+	result := make([]TimelineEntry, 0)
 	for _, entry := range runtime.timeline {
 		if since.IsZero() || !entry.Time.Before(since) {
 			result = append(result, cloneTimelineEntry(entry))
