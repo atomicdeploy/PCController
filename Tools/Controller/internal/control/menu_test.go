@@ -6,54 +6,122 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
-func TestMenuGenerationFallbacksKeepStatusAtCorrectID(t *testing.T) {
-	legacy := MenuPagesForCapabilities(0)
+func TestMenuCapabilityFallbackKeepsCanonicalCatalog(t *testing.T) {
+	fallback := MenuPagesForCapabilities(0)
 	current := MenuPagesForCapabilities(native.CapabilityMenuDirectory)
-	legacyStatus, err := ResolveMenuPageIn(legacy, "status")
+	fallbackDoor, err := ResolveMenuPageIn(fallback, "door")
 	if err != nil {
 		t.Fatal(err)
 	}
-	currentStatus, err := ResolveMenuPageIn(current, "status")
+	currentDoor, err := ResolveMenuPageIn(current, "door")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if legacyStatus.ID != 14 || currentStatus.ID != 0 {
-		t.Fatalf("status IDs legacy=%d current=%d", legacyStatus.ID, currentStatus.ID)
+	if fallbackDoor.ID != 0 || currentDoor.ID != 0 {
+		t.Fatalf("door IDs fallback=%d current=%d", fallbackDoor.ID, currentDoor.ID)
+	}
+	if _, err := ResolveMenuPageIn(current, "status"); err == nil {
+		t.Fatal("retired status page alias was accepted by the current-only catalog")
 	}
 }
 
-func TestLiveMenuDescriptionUsesLabelInsteadOfHistoricalID(t *testing.T) {
-	page, ok := describeLiveMenuEntry(native.MenuEntry{ID: 0, Label: "STAT"})
-	if !ok {
-		t.Fatal("current STAT label was not described")
-	}
-	if page.Key != "status" {
-		t.Fatalf("page 0 STAT described as %q", page.Key)
-	}
-	page, ok = describeLiveMenuEntry(native.MenuEntry{ID: 0, Label: "VOLT"})
-	if !ok {
-		t.Fatal("legacy VOLT label was not described")
-	}
-	if page.Key != "voltage" {
-		t.Fatalf("page 0 VOLT described as %q", page.Key)
-	}
-}
-
-func TestResolveMenuPageInRejectsIDFromDifferentGeneration(t *testing.T) {
-	legacy := MenuPagesForCapabilities(0)
-	page, err := ResolveMenuPageIn(legacy, "0")
+func TestMenuFallbackUsesVerifiedVoltageFirstBuildIdentity(t *testing.T) {
+	pages := menuPagesForHello(native.Hello{
+		IdentitySchema: native.IdentitySchemaCompact,
+		BuildHash:      voltageFirstMenuBuildHash,
+	})
+	voltage, err := ResolveMenuPageIn(pages, "voltage")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page.Key != "voltage" {
-		t.Fatalf("legacy page 0 resolved as %q", page.Key)
+	status, err := ResolveMenuPageIn(pages, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if voltage.ID != 0 || status.ID != 14 || len(pages) != 15 {
+		t.Fatalf("voltage-first compatibility catalog voltage=%d status=%d pages=%d", voltage.ID, status.ID, len(pages))
+	}
+}
+
+func TestMenuFallbackKeepsUnknownBuildOnCurrentCatalog(t *testing.T) {
+	pages := menuPagesForHello(native.Hello{
+		IdentitySchema: native.IdentitySchemaCompact,
+		BuildHash:      0x01020304,
+	})
+	door, err := ResolveMenuPageIn(pages, "door")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if door.ID != 0 || len(pages) != 14 {
+		t.Fatalf("unknown-build fallback door=%d pages=%d", door.ID, len(pages))
+	}
+	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
+		t.Fatal("unknown build inherited the historical Status page")
+	}
+}
+
+func TestMenuDirectoryCapabilityOverridesHistoricalBuildIdentity(t *testing.T) {
+	pages := menuPagesForHello(native.Hello{
+		IdentitySchema: native.IdentitySchemaCompact,
+		BuildHash:      voltageFirstMenuBuildHash,
+		Capabilities:   native.CapabilityMenuDirectory,
+	})
+	door, err := ResolveMenuPageIn(pages, "door")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if door.ID != 0 || len(pages) != 14 {
+		t.Fatalf("advertised current catalog door=%d pages=%d", door.ID, len(pages))
+	}
+	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
+		t.Fatal("advertised current catalog was replaced by historical IDs")
+	}
+}
+
+func TestLiveMenuDescriptionUsesCurrentLabelInsteadOfNumericID(t *testing.T) {
+	page, ok := describeLiveMenuEntry(native.MenuEntry{ID: 0, Label: "door"})
+	if !ok {
+		t.Fatal("current door label was not described")
+	}
+	if page.Key != "door" {
+		t.Fatalf("page 0 door described as %q", page.Key)
+	}
+	if _, ok := describeLiveMenuEntry(native.MenuEntry{ID: 0, Label: "STAT"}); ok {
+		t.Fatal("retired STAT label was described by the current-only catalog")
+	}
+}
+
+func TestResolveMenuPageInUsesCurrentStableID(t *testing.T) {
+	fallback := MenuPagesForCapabilities(0)
+	page, err := ResolveMenuPageIn(fallback, "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Key != "door" {
+		t.Fatalf("fallback page 0 resolved as %q", page.Key)
 	}
 	page, err = ResolveMenuPageIn(MenuPages(), "0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page.Key != "status" {
+	if page.Key != "door" {
 		t.Fatalf("current page 0 resolved as %q", page.Key)
+	}
+}
+
+func TestCurrentCatalogRemovesStandaloneBluetoothPage(t *testing.T) {
+	current := MenuPages()
+	page, err := ResolveMenuPageIn(current, "6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Key != "settings" || len(current) != 14 {
+		t.Fatalf("dense current page 6=%#v catalog=%#v", page, current)
+	}
+	for _, candidate := range current {
+		if candidate.Key == "bt-audio" {
+			t.Fatalf("current catalog still contains standalone BT page %#v", candidate)
+		}
 	}
 }
 
@@ -63,12 +131,12 @@ func TestMenuLayoutRequiresPermutationAndAtLeastOneVisiblePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if layout.VisibleMask != 0x7FFF || len(layout.Order) != 15 {
+	if layout.VisibleMask != 0x3FFF || len(layout.Order) != 14 {
 		t.Fatalf("default layout=%#v", layout)
 	}
 
-	moved, err := MoveMenuPage(pages, layout, 14, 1)
-	if err != nil || moved.Order[1] != 14 || moved.Order[14] != 13 {
+	moved, err := MoveMenuPage(pages, layout, 13, 1)
+	if err != nil || moved.Order[1] != 13 || moved.Order[13] != 12 {
 		t.Fatalf("moved layout=%#v err=%v", moved, err)
 	}
 	hidden, err := SetMenuPageVisible(pages, moved, 8, false)
@@ -77,7 +145,7 @@ func TestMenuLayoutRequiresPermutationAndAtLeastOneVisiblePage(t *testing.T) {
 	}
 	hidden, err = SetMenuPageVisible(pages, hidden, 0, false)
 	if err != nil || hidden.Visible(0) {
-		t.Fatalf("Status is a factory default, not a mandatory visible page: %#v err=%v", hidden, err)
+		t.Fatalf("Door is a factory default, not a mandatory visible page: %#v err=%v", hidden, err)
 	}
 	none := hidden
 	none.VisibleMask = 0

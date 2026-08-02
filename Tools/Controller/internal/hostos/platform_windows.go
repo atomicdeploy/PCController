@@ -129,6 +129,21 @@ func platformPowerAction(ctx context.Context, action string) error {
 }
 
 func platformMonitorBrightness(ctx context.Context) (BrightnessStatus, error) {
+	status, ddcErr := ddcMonitorBrightness(ctx)
+	if ddcErr == nil {
+		return status, nil
+	}
+	status, wmiErr := wmiMonitorBrightness(ctx)
+	if wmiErr == nil {
+		return status, nil
+	}
+	return BrightnessStatus{}, fmt.Errorf(
+		"primary display brightness is unavailable through DDC/CI and laptop-panel WMI: %w",
+		errors.Join(ddcErr, wmiErr),
+	)
+}
+
+func ddcMonitorBrightness(ctx context.Context) (BrightnessStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return BrightnessStatus{}, err
 	}
@@ -155,6 +170,21 @@ func platformSetMonitorBrightness(ctx context.Context, percent int) (BrightnessS
 	if percent < 0 || percent > 100 {
 		return BrightnessStatus{}, fmt.Errorf("monitor brightness %d is outside 0..100", percent)
 	}
+	status, ddcErr := ddcSetMonitorBrightness(ctx, percent)
+	if ddcErr == nil {
+		return status, nil
+	}
+	status, wmiErr := wmiSetMonitorBrightness(ctx, percent)
+	if wmiErr == nil {
+		return status, nil
+	}
+	return BrightnessStatus{}, fmt.Errorf(
+		"primary display brightness is unavailable through DDC/CI and laptop-panel WMI: %w",
+		errors.Join(ddcErr, wmiErr),
+	)
+}
+
+func ddcSetMonitorBrightness(ctx context.Context, percent int) (BrightnessStatus, error) {
 	if err := ctx.Err(); err != nil {
 		return BrightnessStatus{}, err
 	}
@@ -253,7 +283,7 @@ func readPhysicalBrightness(monitor *physicalMonitor) (BrightnessStatus, error) 
 		uint64(maximum-minimum))
 	return BrightnessStatus{
 		Percent: percent, RawMinimum: minimum, RawCurrent: current,
-		RawMaximum: maximum, Display: name,
+		RawMaximum: maximum, Display: name, Backend: "ddc-ci",
 	}, nil
 }
 

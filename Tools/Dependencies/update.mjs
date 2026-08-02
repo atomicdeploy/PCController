@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 
 import { createChalk, renderUnicodeTable } from '../Build/presentation.mjs'
 import { PRODUCT_METADATA, resolveProductTitle } from '../Build/product-metadata.mjs'
+import { configuredProxyNames, withDirectFallback } from './network.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, '..', '..')
@@ -31,6 +32,7 @@ const toolsLockPath = join(here, 'resolved-tools-lock.json')
 const toolchainPolicyPath = join(controller, 'toolchain-profile.json')
 const toolchainLockPath = join(controller, 'toolchain-lock.json')
 const buildReportDir = join(repo, '.build', 'dependencies')
+const workflowsDirectory = join(repo, '.github', 'workflows')
 const defaultReportPath = join(buildReportDir, 'update-report.json')
 const policy = JSON.parse(readFileSync(policyPath, 'utf8'))
 let cachedGitHubEnvironment
@@ -102,6 +104,13 @@ function run(file, args, options = {}) {
   return { status: result.status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' }
 }
 
+function runNetwork(file, args, options = {}, directRetry = true) {
+  return withDirectFallback((environment) => run(file, args, { ...options, env: environment }), {
+    environment: options.env ?? process.env,
+    directRetry,
+  }).value
+}
+
 function githubEnvironment() {
   if (cachedGitHubEnvironment) return cachedGitHubEnvironment
   if (process.env.GITHUB_TOKEN || process.env.GH_TOKEN) {
@@ -131,16 +140,19 @@ function curlJSON(url, directRetry = true) {
     })
     if (authenticated.status === 0) return JSON.parse(authenticated.stdout)
   }
+  return JSON.parse(curlText(url, directRetry, 'application/vnd.github+json, application/json'))
+}
+
+function curlText(url, directRetry = true, accept = 'text/plain, application/octet-stream') {
   const executable = platform() === 'win32' ? 'curl.exe' : 'curl'
   const base = ['--fail', '--silent', '--show-error', '--location',
-    '--header', 'Accept: application/vnd.github+json, application/json',
+    '--header', `Accept: ${accept}`,
     '--header', `User-Agent: ${productAgent}-dependency-updater/1`, url]
-  let result = spawnSync(executable, base, { encoding: 'utf8', windowsHide: true, env: process.env })
-  if (result.status !== 0 && directRetry) {
-    result = spawnSync(executable, ['--noproxy', '*', ...base], { encoding: 'utf8', windowsHide: true, env: process.env })
-  }
-  if (result.status !== 0) throw new Error(`registry request failed for ${url}: ${(result.stderr ?? '').trim()}`)
-  return JSON.parse(result.stdout)
+  return withDirectFallback((environment, direct) => {
+    const args = direct ? ['--noproxy', '*', ...base] : base
+    const result = run(executable, args, { env: environment })
+    return result.stdout
+  }, { directRetry }).value
 }
 
 function sha256File(path) {
@@ -164,6 +176,66 @@ function compareVersions(left, right) {
   return 0
 }
 
+function compareCompositeVersions(left, right) {
+  const a = String(left).match(/\d+/gu)?.map(Number) ?? []
+  const b = String(right).match(/\d+/gu)?.map(Number) ?? []
+  for (let index = 0; index < Math.max(a.length, b.length); index++) {
+    const delta = (a[index] ?? 0) - (b[index] ?? 0)
+    if (delta) return Math.sign(delta)
+  }
+  return String(left).localeCompare(String(right))
+}
+
+function parseWingetCompilerManifest(text, architecture, target, manifest = {}) {
+  const packageID = text.match(/^PackageIdentifier:\s*(\S+)\s*$/mu)?.[1] ?? ''
+  const packageVersion = text.match(/^PackageVersion:\s*(\S+)\s*$/mu)?.[1] ?? ''
+  const blocks = text.split(/^[ \t]*- Architecture:[ \t]*/gmu).slice(1)
+  const block = blocks.find((value) => value.split(/\r?\n/u, 1)[0].trim() === architecture)
+  const installerURL = block?.match(/^[ \t]*InstallerUrl:[ \t]*(https:\/\/\S+)[ \t]*$/mu)?.[1] ?? ''
+  const installerSHA256 = block?.match(/^[ \t]*InstallerSha256:[ \t]*([0-9A-Fa-f]{64})[ \t]*$/mu)?.[1]?.toLowerCase() ?? ''
+  const compilerVersion = packageVersion.match(/^\d+(?:\.\d+){2}/u)?.[0] ?? ''
+  if (!packageID || !packageVersion || !compilerVersion || !installerURL || !installerSHA256) {
+    throw new Error(`WinGet compiler manifest is incomplete for architecture ${architecture}`)
+  }
+  return {
+    package_id: packageID,
+    package_version: packageVersion,
+    compiler: 'gcc',
+    compiler_version: compilerVersion,
+    architecture,
+    target,
+    provenance: 'winget-community-manifest',
+    manifest_url: manifest.url ?? '',
+    manifest_git_sha: manifest.sha ?? '',
+    installer_url: installerURL,
+    installer_sha256: installerSHA256,
+  }
+}
+
+function resolveWindowsCCompiler(directRetry) {
+  const compilerPolicy = policy.windows_c_compiler
+  const versions = curlJSON(compilerPolicy.manifest_api, directRetry)
+    .filter((entry) => entry.type === 'dir' && /^\d+(?:\.\d+){2}-\d+(?:\.\d+){2}-r\d+$/u.test(entry.name))
+    .sort((left, right) => compareCompositeVersions(right.name, left.name))
+  if (!versions.length) throw new Error('WinGet registry has no stable native Windows C compiler release')
+  const files = curlJSON(versions[0].url, directRetry)
+  const installer = files.find((entry) => entry.type === 'file' && /\.installer\.yaml$/u.test(entry.name))
+  if (!installer?.download_url || !/^[0-9a-f]{40}$/u.test(installer.sha ?? '')) {
+    throw new Error(`WinGet compiler ${versions[0].name} has no immutable installer manifest identity`)
+  }
+  const resolved = parseWingetCompilerManifest(
+    curlText(installer.download_url, directRetry),
+    compilerPolicy.architecture,
+    compilerPolicy.target,
+    { url: installer.download_url, sha: installer.sha },
+  )
+  if (resolved.package_id !== compilerPolicy.package_id ||
+      compareVersions(resolved.compiler_version, compilerPolicy.minimum_compiler_version) < 0) {
+    throw new Error(`WinGet compiler resolution returned incompatible ${resolved.package_id}@${resolved.package_version}`)
+  }
+  return resolved
+}
+
 function substantive(value) {
   const copy = structuredClone(value)
   delete copy.resolved_at_utc
@@ -176,6 +248,94 @@ function sameSubstantive(left, right) {
 
 function readJSON(path, fallback = null) {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : fallback
+}
+
+function workflowActionInventory() {
+  const actions = new Map()
+  for (const file of readdirSync(workflowsDirectory).filter((name) => /\.ya?ml$/iu.test(name)).sort()) {
+    const content = readFileSync(join(workflowsDirectory, file), 'utf8')
+    for (const match of content.matchAll(/^\s*uses:\s*([^@\s]+)@([^\s#]+)(?:\s*#\s*(.+))?$/gmu)) {
+      const name = match[1]
+      if (name.startsWith('./')) continue
+      const revision = match[2]
+      const version = String(match[3] ?? '').trim()
+      if (!/^[0-9a-f]{40}$/iu.test(revision)) throw new Error(`${file}: ${name} must use an immutable 40-character revision`)
+      if (!/^v\d+(?:\b|\.)/u.test(version)) throw new Error(`${file}: ${name}@${revision} needs a readable major-version comment`)
+      const existing = actions.get(name)
+      if (existing && existing.revision !== revision) {
+        throw new Error(`${name} uses conflicting immutable revisions ${existing.revision} and ${revision}`)
+      }
+      const value = existing ?? { name, revision: revision.toLowerCase(), version, workflows: [] }
+      if (!value.workflows.includes(file)) value.workflows.push(file)
+      actions.set(name, value)
+    }
+  }
+  return [...actions.values()].sort((left, right) => left.name.localeCompare(right.name))
+}
+
+function validateHostToolsLock(lock) {
+  if (lock?.format !== 'pccontroller-host-tool-lock/v1') throw new Error('unsupported host tool lock format')
+  if (!stableParts(lock?.node?.version) || !String(lock.node.lts ?? '').trim()) throw new Error('host tool lock has no stable Node.js LTS identity')
+  if (!/^https:\/\//u.test(lock.node.source ?? '') || !/^[0-9a-f]{64}$/u.test(lock.node.checksums_sha256 ?? '') || !Array.isArray(lock.node.assets) || !lock.node.assets.length) {
+    throw new Error('host tool lock has no checksum-complete Node.js distribution identity')
+  }
+  for (const asset of lock.node.assets) {
+    if (!/^https:\/\//u.test(asset.url ?? '') || !/^[0-9a-f]{64}$/u.test(asset.sha256 ?? '')) throw new Error(`invalid Node.js asset identity ${asset.name ?? '<missing>'}`)
+  }
+  if (!stableParts(lock?.upx?.version) || !Array.isArray(lock.upx.assets) || !lock.upx.assets.length) throw new Error('host tool lock has no stable UPX identity')
+  for (const asset of lock.upx.assets) {
+    if (!/^https:\/\//u.test(asset.url ?? '') || !/^[0-9a-f]{64}$/u.test(asset.sha256 ?? '')) throw new Error(`invalid UPX asset identity ${asset.name ?? '<missing>'}`)
+  }
+  if (!stableParts(lock?.go_winres?.version) || !String(lock.go_winres.sum ?? '').startsWith('h1:') || !String(lock.go_winres.go_mod_sum ?? '').startsWith('h1:')) {
+    throw new Error('host tool lock has no checksum-complete go-winres identity')
+  }
+  const compiler = lock?.windows_c_compiler
+  if (!compiler?.package_id || !compiler.package_version || !stableParts(compiler.compiler_version) ||
+      !/^x86_64-.*(?:mingw(?:32|64)?|windows-gnu)$/iu.test(compiler.target ?? '') ||
+      compiler.provenance !== 'winget-community-manifest' ||
+      !/^https:\/\//u.test(compiler.manifest_url ?? '') || !/^[0-9a-f]{40}$/u.test(compiler.manifest_git_sha ?? '') ||
+      !/^https:\/\//u.test(compiler.installer_url ?? '') || !/^[0-9a-f]{64}$/u.test(compiler.installer_sha256 ?? '')) {
+    throw new Error('host tool lock has no checksum-complete native Windows C compiler identity')
+  }
+  if (!/^[0-9a-f]{64}$/u.test(lock?.web?.package_lock_sha256 ?? '') || !/^[0-9a-f]{64}$/u.test(lock?.build?.package_lock_sha256 ?? '')) {
+    throw new Error('host tool lock has incomplete npm lock hashes')
+  }
+  if (!Array.isArray(lock?.github_actions?.actions) || !lock.github_actions.actions.length) throw new Error('host tool lock has no immutable GitHub Action inventory')
+  for (const action of lock.github_actions.actions) {
+    if (!action.name || !/^[0-9a-f]{40}$/u.test(action.revision ?? '') || !/^v\d+/u.test(action.version ?? '')) {
+      throw new Error(`invalid GitHub Action identity ${action.name ?? '<missing>'}`)
+    }
+  }
+  return lock
+}
+
+function compareHostToolLocks(current, resolved) {
+  if (!current) return [
+    { area: 'host-tools', name: 'host tool lock', current: '<missing>', resolved: 'latest stable identities' },
+  ]
+  const changes = []
+  const fingerprint = (value) => createHash('sha256').update(JSON.stringify(value ?? null)).digest('hex')
+  const compare = (name, currentValue, resolvedValue, area = 'host-tools') => {
+    if (JSON.stringify(currentValue) !== JSON.stringify(resolvedValue)) {
+      changes.push({ area, name, current: String(currentValue ?? '<missing>'), resolved: String(resolvedValue ?? '<missing>') })
+    }
+  }
+  compare('Node.js LTS', current.node?.version, resolved.node.version)
+  compare('Node.js LTS channel', current.node?.lts, resolved.node.lts)
+  compare('Node.js distribution inventory', fingerprint([current.node?.source, current.node?.checksums_sha256, current.node?.assets]), fingerprint([resolved.node.source, resolved.node.checksums_sha256, resolved.node.assets]))
+  compare('UPX', current.upx?.version, resolved.upx.version)
+  compare('UPX release tag', current.upx?.tag, resolved.upx.tag)
+  compare('UPX asset inventory', fingerprint(current.upx?.assets), fingerprint(resolved.upx.assets))
+  compare('go-winres', current.go_winres?.version, resolved.go_winres.version)
+  compare('go-winres module', current.go_winres?.module, resolved.go_winres.module)
+  compare('go-winres checksums', fingerprint([current.go_winres?.sum, current.go_winres?.go_mod_sum]), fingerprint([resolved.go_winres.sum, resolved.go_winres.go_mod_sum]))
+  compare('Windows C compiler package', current.windows_c_compiler?.package_version, resolved.windows_c_compiler.package_version)
+  compare('Windows C compiler identity', fingerprint(current.windows_c_compiler), fingerprint(resolved.windows_c_compiler))
+  compare('web package lock', current.web?.package_lock_sha256, resolved.web.package_lock_sha256, 'host-lock')
+  compare('build package lock', current.build?.package_lock_sha256, resolved.build.package_lock_sha256, 'host-lock')
+  compare('GitHub Actions', fingerprint(current.github_actions?.actions), fingerprint(resolved.github_actions.actions), 'github-actions')
+  compare('GitHub Actions updater', current.github_actions?.managed_by, resolved.github_actions.managed_by, 'github-actions')
+  return changes
 }
 
 function writeJSONAtomic(path, value) {
@@ -191,6 +351,19 @@ function resolveHostTools(directRetry) {
   if (!lts || compareVersions(lts.version, policy.node.minimum_version) < 0) {
     throw new Error('Node registry has no compatible current LTS release')
   }
+  const nodeVersion = lts.version.replace(/^v/u, '')
+  const nodeChecksumsURL = policy.node.checksums_url_template.replace('{version}', nodeVersion)
+  const nodeChecksums = curlText(nodeChecksumsURL, directRetry)
+  const nodeChecksumEntries = new Map(nodeChecksums.split(/\r?\n/u).map((line) => {
+    const match = line.match(/^([0-9a-f]{64})\s+(.+)$/u)
+    return match ? [match[2], match[1]] : null
+  }).filter(Boolean))
+  const nodeAssets = policy.node.asset_suffixes.map((suffix) => {
+    const name = `node-v${nodeVersion}-${suffix}`
+    const sha256 = nodeChecksumEntries.get(name)
+    if (!sha256) throw new Error(`Node.js ${lts.version} checksum list has no ${name}`)
+    return { name, url: `https://nodejs.org/dist/v${nodeVersion}/${name}`, sha256 }
+  })
 
   const upxRelease = curlJSON(policy.upx.release_api, directRetry)
   const upxVersion = String(upxRelease.tag_name ?? '').replace(/^v/, '')
@@ -206,31 +379,45 @@ function resolveHostTools(directRetry) {
   })).sort((a, b) => a.name.localeCompare(b.name))
   if (!upxAssets.length) throw new Error(`UPX ${upxRelease.tag_name} publishes no hash-bearing assets`)
 
-  const goWinres = JSON.parse(run('go', ['list', '-m', '-json', `${policy.go_winres.module}@latest`], { cwd: controller }).stdout)
+  const goWinres = JSON.parse(runNetwork('go', ['list', '-m', '-json', `${policy.go_winres.module}@latest`], { cwd: controller }, directRetry).stdout)
   if (!stableParts(goWinres.Version) || compareVersions(goWinres.Version, policy.go_winres.minimum_version) < 0) {
     throw new Error(`go-winres latest response is incomplete: ${goWinres.Version ?? '<missing>'}`)
   }
-  const goWinresDownload = JSON.parse(run('go', ['mod', 'download', '-json', `${policy.go_winres.module}@${goWinres.Version}`], { cwd: controller }).stdout)
+  const goWinresDownload = JSON.parse(runNetwork('go', ['mod', 'download', '-json', `${policy.go_winres.module}@${goWinres.Version}`], { cwd: controller }, directRetry).stdout)
   if (!goWinresDownload.Sum || !goWinresDownload.GoModSum) throw new Error('go-winres module download omitted checksum identities')
+  const windowsCCompiler = resolveWindowsCCompiler(directRetry)
 
-  return {
+  const resolved = {
     format: 'pccontroller-host-tool-lock/v1',
     policy_name: policy.name,
     resolved_at_utc: new Date().toISOString(),
-    node: { version: lts.version.replace(/^v/, ''), lts: lts.lts },
+    node: {
+      version: nodeVersion,
+      lts: lts.lts,
+      source: `https://nodejs.org/dist/v${nodeVersion}/`,
+      checksums_url: nodeChecksumsURL,
+      checksums_sha256: createHash('sha256').update(nodeChecksums).digest('hex'),
+      assets: nodeAssets,
+    },
     upx: { version: upxVersion, tag: upxRelease.tag_name, assets: upxAssets },
     go_winres: {
       module: policy.go_winres.module, version: goWinres.Version,
       sum: goWinresDownload.Sum, go_mod_sum: goWinresDownload.GoModSum,
     },
+    windows_c_compiler: windowsCCompiler,
     web: {
       package_lock_sha256: sha256File(join(repo, policy.web.lock_file)),
     },
     build: {
       package_lock_sha256: sha256File(join(repo, policy.build.lock_file)),
     },
-    github_actions: { managed_by: policy.github_actions.managed_by },
+    github_actions: {
+      managed_by: policy.github_actions.managed_by,
+      actions: workflowActionInventory(),
+    },
   }
+  validateHostToolsLock(resolved)
+  return resolved
 }
 
 function resolvedToolchain(action, extra = [], capture = true) {
@@ -247,19 +434,19 @@ function controllerToolchain(action, extra = [], capture = true) {
   })
 }
 
-function resolveToolchain(mode) {
+function resolveToolchain(mode, directRetry) {
   const action = mode === 'apply' ? 'update' : 'check'
-  const result = resolvedToolchain(action, ['--include-canary', '--json'])
+  const result = resolvedToolchain(action, ['--include-canary', '--json', `--direct-retry=${directRetry}`])
   return JSON.parse(result.stdout)
 }
 
-function goModuleUpdates() {
+function goModuleUpdates(directRetry) {
   const goMod = readFileSync(join(controller, 'go.mod'), 'utf8')
   const explicitlyLocked = new Set(
     [...goMod.matchAll(/^\s*([^\s()]+)\s+v[^\s]+(?:\s+\/\/\s+indirect)?\s*$/gm)].map((match) => match[1]),
   )
   const template = '{{if .Update}}{{.Path}}|{{.Version}}|{{.Update.Version}}{{end}}'
-  const output = run('go', ['list', '-m', '-u', '-f', template, 'all'], { cwd: controller }).stdout
+  const output = runNetwork('go', ['list', '-m', '-u', '-f', template, 'all'], { cwd: controller }, directRetry).stdout
   return output.split(/\r?\n/).filter(Boolean).map((line) => {
     const [name, current, resolved] = line.split('|')
     return { name, current, resolved }
@@ -277,15 +464,33 @@ function npmRun(args, options = {}) {
   return run(process.execPath, [cli, ...args], options)
 }
 
-function npmUpdates(directory, project) {
-  const result = npmRun(['outdated', '--json'], {
+function npmNetworkRun(args, options = {}, directRetry = true) {
+  return withDirectFallback((environment) => npmRun(args, { ...options, env: environment }), {
+    environment: options.env ?? process.env,
+    directRetry,
+  }).value
+}
+
+function npmUpdates(directory, project, directRetry) {
+  const result = npmNetworkRun(['outdated', '--json'], {
     cwd: directory, accept: [0, 1],
-  })
+  }, directRetry)
   const values = result.stdout.trim() ? JSON.parse(result.stdout) : {}
   return Object.entries(values).map(([name, value]) => ({
     project, name, current: value.current, compatible: value.wanted, latest: value.latest,
     update_available: value.current !== value.wanted,
   })).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function npmAudit(directory, project, directRetry) {
+  return withDirectFallback((environment) => {
+    const result = npmRun(['audit', '--package-lock-only', '--ignore-scripts', '--json'], {
+      cwd: directory, accept: [0, 1], env: environment,
+    })
+    const audit = JSON.parse(result.stdout)
+    if (!audit?.metadata?.vulnerabilities) throw new Error(`${project} npm audit returned no vulnerability summary`)
+    return { project, vulnerabilities: audit.metadata.vulnerabilities }
+  }, { directRetry }).value
 }
 
 function currentGoDirective() {
@@ -305,22 +510,22 @@ function refreshToolchainHostHashes() {
   return true
 }
 
-function updateSourceDependencies(moduleUpdates, npmObservations) {
+function updateSourceDependencies(moduleUpdates, npmObservations, directRetry) {
   const goVersion = readJSON(toolchainLockPath).go.version
   log('⬆', 'Go', `updating language directive to ${goVersion} and modules`, chalk.yellow)
   run('go', ['mod', 'edit', '-go', goVersion], { cwd: controller, capture: false })
   if (moduleUpdates.length) {
-    run('go', ['get', ...moduleUpdates.map((item) => `${item.name}@${item.resolved}`)], { cwd: controller, capture: false })
+    runNetwork('go', ['get', ...moduleUpdates.map((item) => `${item.name}@${item.resolved}`)], { cwd: controller, capture: false }, directRetry)
   }
-  run('go', ['mod', 'tidy'], { cwd: controller, capture: false })
+  runNetwork('go', ['mod', 'tidy'], { cwd: controller, capture: false }, directRetry)
   for (const project of [
     { name: 'Web', directory: web, key: 'web' },
     { name: 'Build', directory: build, key: 'build' },
   ]) {
     if (!npmObservations.some((item) => item.project === project.key && item.update_available)) continue
     log('⬆', project.name, 'updating packages within declared compatibility ranges and refreshing exact lock', chalk.yellow)
-    npmRun(['update', '--package-lock-only', '--ignore-scripts'], { cwd: project.directory, capture: false })
-    npmRun(['install', '--package-lock-only', '--ignore-scripts'], { cwd: project.directory, capture: false })
+    npmNetworkRun(['update', '--package-lock-only', '--ignore-scripts'], { cwd: project.directory, capture: false }, directRetry)
+    npmNetworkRun(['install', '--package-lock-only', '--ignore-scripts'], { cwd: project.directory, capture: false }, directRetry)
   }
   refreshToolchainHostHashes()
 }
@@ -344,11 +549,12 @@ function findNamed(root, wanted) {
 }
 
 function installResolvedHostTools(lock, directRetry) {
+  validateHostToolsLock(lock)
   const goBin = join(buildReportDir, 'tools', 'go', 'bin')
   mkdirSync(goBin, { recursive: true })
-  run('go', ['install', `${lock.go_winres.module}@${lock.go_winres.version}`], {
+  runNetwork('go', ['install', `${lock.go_winres.module}@${lock.go_winres.version}`], {
     cwd: controller, capture: false, env: { ...process.env, GOBIN: goBin },
-  })
+  }, directRetry)
   process.env.PATH = `${goBin}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`
 
   const key = targetKey()
@@ -367,11 +573,9 @@ function installResolvedHostTools(lock, directRetry) {
   if (!existsSync(archive) || sha256File(archive) !== asset.sha256) {
     const curl = platform() === 'win32' ? 'curl.exe' : 'curl'
     const downloadArgs = ['--fail', '--silent', '--show-error', '--location', asset.url, '--output', archive]
-    let fetched = spawnSync(curl, downloadArgs, { encoding: 'utf8', windowsHide: true, env: process.env })
-    if (fetched.status !== 0 && directRetry) {
-      fetched = spawnSync(curl, ['--noproxy', '*', ...downloadArgs], { encoding: 'utf8', windowsHide: true, env: process.env })
-    }
-    if (fetched.status !== 0) throw new Error(`download UPX ${lock.upx.tag}: ${(fetched.stderr ?? '').trim()}`)
+    withDirectFallback((environment, direct) => run(curl, direct ? ['--noproxy', '*', ...downloadArgs] : downloadArgs, {
+      env: environment,
+    }), { directRetry })
   }
   if (sha256File(archive) !== asset.sha256) throw new Error(`UPX ${asset.name} SHA-256 mismatch`)
   run('tar', ['-xf', archive, '-C', extracted], { capture: false })
@@ -395,6 +599,10 @@ function validateEverything(hostTools, directRetry) {
     validations.push({ name, status: 'passed' })
     log('✅', name, 'passed', chalk.green)
   }
+  const rootBuild = platform() === 'win32' ? 'build.cmd' : './build.sh'
+  // Clean before provisioning managed tools: the root cleaner owns .build,
+  // including the dependency-tool staging directory used below.
+  step('Clean generated build outputs', () => run(rootBuild, ['--clean'], { capture: false }))
   installResolvedHostTools(hostTools, directRetry)
   step('Exact toolchain bootstrap', () => controllerToolchain('bootstrap', ['--locked'], false))
   step('Generated product identity', () => run('node', [
@@ -402,15 +610,14 @@ function validateEverything(hostTools, directRetry) {
   ], { capture: false }))
   step('Go tests from stable paths', () => run('node', ['Tools/Build/go-tests.mjs'], { capture: false }))
   step('Go vet', () => run('go', ['vet', './...'], { cwd: controller, capture: false }))
-  step('Build dependencies clean install', () => npmRun(['ci', '--no-audit', '--no-fund'], { cwd: build, capture: false }))
-  step('Web clean install', () => npmRun(['ci'], { cwd: web, capture: false }))
+  step('Build dependencies clean install', () => npmNetworkRun(['ci', '--no-audit', '--no-fund'], { cwd: build, capture: false }, directRetry))
+  step('Web clean install', () => npmNetworkRun(['ci'], { cwd: web, capture: false }, directRetry))
   step('Web typecheck', () => npmRun(['run', 'typecheck'], { cwd: web, capture: false }))
   step('Web tests', () => npmRun(['test'], { cwd: web, capture: false }))
   step('Web production build', () => npmRun(['run', 'build'], { cwd: web, capture: false }))
   step('Build-system tests', () => run('node', ['--test',
     'Tools/Build/build.test.mjs', 'Tools/Audit/extract-user-turns.test.mjs'], { capture: false }))
-  const rootBuild = platform() === 'win32' ? 'build.cmd' : './build.sh'
-  step('Firmware and host build', () => run(rootBuild, ['--all', '--clean'], { capture: false }))
+  step('Firmware and host build', () => run(rootBuild, ['--all'], { capture: false }))
   const bootBuild = platform() === 'win32'
     ? join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.cmd')
     : join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.sh')
@@ -430,8 +637,9 @@ function validateEverything(hostTools, directRetry) {
       bootManifest?.custom?.meaningfulBytes > 512 || bootManifest?.custom?.applicationMaximumBytes !== 32256) {
     throw new Error('Urboot-Custom manifest does not match the resolved stable source or 512-byte/32256-byte ceilings')
   }
+  let hostManifest = null
   if (platform() === 'win32') {
-    const hostManifest = readJSON(join(controller, 'bin', 'host-manifest.json'))
+    hostManifest = readJSON(join(controller, 'bin', 'host-manifest.json'))
     if (hostManifest?.validation?.windowsResources !== 'verified' ||
         !hostManifest?.validation?.upx?.enabled || !hostManifest?.validation?.upx?.tested) {
       throw new Error('Windows host package did not verify resources and UPX compression')
@@ -444,6 +652,15 @@ function validateEverything(hostTools, directRetry) {
     urboot_custom_bytes: bootManifest.custom.meaningfulBytes,
     urboot_custom_allocated_bytes: 512,
   })
+  if (hostManifest) {
+    const executable = hostManifest.artifacts?.find((artifact) => /\.exe$/iu.test(artifact.path ?? ''))
+    if (!Number.isInteger(executable?.bytes) || executable.bytes <= 0) throw new Error('Windows host package manifest has no executable size')
+    validations.push({
+      name: 'Host package size', status: 'passed',
+      host_executable_bytes: executable.bytes,
+      upx_version: hostManifest.validation.upx.version,
+    })
+  }
   return validations
 }
 
@@ -462,12 +679,6 @@ function printChangeTable(rows) {
   ]), { chalk }))
 }
 
-function proxyNames() {
-  return Object.keys(process.env).filter((name) =>
-    /^(?:HTTP|HTTPS|ALL|FTP|NO)_PROXY$/i.test(name) || /^ARDUINO_NETWORK_PROXY$/i.test(name),
-  ).filter((name) => String(process.env[name] ?? '').trim()).sort()
-}
-
 function main() {
   const options = parseArgs(process.argv.slice(2))
   mkdirSync(buildReportDir, { recursive: true })
@@ -475,7 +686,7 @@ function main() {
     format: 'pccontroller-dependency-update-report/v1',
     mode: options.mode,
     started_at_utc: new Date().toISOString(),
-    proxy_variables: proxyNames(),
+    proxy_variables: configuredProxyNames(),
     updates_available: false,
     updates_applied: false,
     changes: [],
@@ -484,16 +695,16 @@ function main() {
   }
   try {
     log('🔎', 'Dependencies', `resolving stable channels (${report.proxy_variables.length ? `proxy variables: ${report.proxy_variables.join(', ')}` : 'direct network'})`)
-    const toolchain = resolveToolchain(options.mode)
+    const toolchain = resolveToolchain(options.mode, options.directRetry)
     report.canary = toolchain.canary
     const toolchainChanges = toolchain.changes ?? []
     report.changes.push(...toolchainChanges)
 
     let hostTools = resolveHostTools(options.directRetry)
     const currentTools = readJSON(toolsLockPath)
-    if (!currentTools || !sameSubstantive(currentTools, hostTools)) {
-      report.changes.push({ area: 'host-tools', name: 'resolved tool lock', current: currentTools?.resolved_at_utc ? 'previous' : '', resolved: 'latest stable' })
-    } else {
+    const hostToolChanges = compareHostToolLocks(currentTools, hostTools)
+    if (hostToolChanges.length) report.changes.push(...hostToolChanges)
+    else {
       hostTools.resolved_at_utc = currentTools.resolved_at_utc
     }
 
@@ -502,11 +713,11 @@ function main() {
     if (goDirective !== resolvedGoVersion) {
       report.changes.push({ area: 'go-toolchain', name: 'go directive', current: goDirective, resolved: resolvedGoVersion })
     }
-    const moduleUpdates = goModuleUpdates()
+    const moduleUpdates = goModuleUpdates(options.directRetry)
     report.changes.push(...moduleUpdates.map((change) => ({ area: 'go-module', ...change })))
     const npm = [
-      ...npmUpdates(web, 'web'),
-      ...npmUpdates(build, 'build'),
+      ...npmUpdates(web, 'web', options.directRetry),
+      ...npmUpdates(build, 'build', options.directRetry),
     ]
     report.npm_observations = npm
     report.changes.push(...npm.filter((item) => item.update_available).map((item) => ({
@@ -519,12 +730,17 @@ function main() {
     if (options.mode === 'apply') {
       if (!currentTools || !sameSubstantive(currentTools, hostTools)) writeJSONAtomic(toolsLockPath, hostTools)
       if (goDirective !== resolvedGoVersion || moduleUpdates.length || npm.some((item) => item.update_available)) {
-        updateSourceDependencies(moduleUpdates, npm)
+        updateSourceDependencies(moduleUpdates, npm, options.directRetry)
       }
       hostTools = resolveHostTools(options.directRetry)
       const afterTools = readJSON(toolsLockPath)
       if (!afterTools || !sameSubstantive(afterTools, hostTools)) writeJSONAtomic(toolsLockPath, hostTools)
       report.updates_applied = report.updates_available
+    }
+
+    report.security = {
+      npm: [npmAudit(web, 'web', options.directRetry), npmAudit(build, 'build', options.directRetry)],
+      scope: 'candidate npm package locks; non-npm changes retain explicit reviewer confirmation in the generated PR plan',
     }
 
     if (options.validate) report.validation = validateEverything(readJSON(toolsLockPath) ?? hostTools, options.directRetry)
@@ -546,6 +762,15 @@ function main() {
   }
 }
 
-export { compareVersions, sameSubstantive, stableParts }
+export {
+  compareHostToolLocks,
+  compareCompositeVersions,
+  compareVersions,
+  parseWingetCompilerManifest,
+  sameSubstantive,
+  stableParts,
+  validateHostToolsLock,
+  workflowActionInventory,
+}
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()

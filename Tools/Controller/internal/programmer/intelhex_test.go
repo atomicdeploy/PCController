@@ -45,6 +45,21 @@ func TestIntelHexParseInspectAndCanonicalRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLoadIntelHexCountsNonEmptyRecordsForManifestMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "firmware.hex")
+	content := []byte("\n:0100000001FE\r\n\r\n:00000001FF\n")
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	document, err := LoadIntelHex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document.Records != 2 {
+		t.Fatalf("record count=%d, want 2", document.Records)
+	}
+}
+
 func TestIntelHexParserRejectsCorruptionAndAmbiguity(t *testing.T) {
 	tests := []struct {
 		name, input, want string

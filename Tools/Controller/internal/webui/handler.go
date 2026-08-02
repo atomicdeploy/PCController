@@ -139,6 +139,18 @@ func (handler *staticHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 	if name == "" {
 		name = "index.html"
 	}
+	// Development bundles may omit the generated ICO. Production bundles contain
+	// the real multi-resolution icon and take this path directly; SVG is only a
+	// compatibility fallback for incomplete development filesystems.
+	if name == "favicon.ico" {
+		if _, exists := handler.assets[name]; !exists {
+			if _, svgExists := handler.assets["favicon.svg"]; !svgExists {
+				http.NotFound(writer, request)
+				return
+			}
+			name = "favicon.svg"
+		}
+	}
 	if _, exists := handler.assets[name]; exists {
 		handler.serveAsset(writer, request, name)
 		return
@@ -283,6 +295,8 @@ func contentType(name string) string {
 		return "application/manifest+json"
 	case ".svg":
 		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
 	case ".wasm":
 		return "application/wasm"
 	case ".woff":
@@ -331,6 +345,7 @@ func setSecurityHeaders(header http.Header) {
 		"style-src-elem 'self'",
 		"style-src-attr 'unsafe-inline'",
 		"script-src 'self'",
+		"worker-src 'self'",
 		"connect-src 'self'",
 		"manifest-src 'self'",
 	}, "; "))

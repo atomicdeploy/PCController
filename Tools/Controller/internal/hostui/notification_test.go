@@ -32,7 +32,7 @@ func TestToastRejectsUntrustedActionSchemes(t *testing.T) {
 }
 
 func TestImportantEventMappingSuppressesTelemetryAndAddsSafetyAction(t *testing.T) {
-	t.Setenv("PCCONTROLLER_APP_TITLE", "")
+	t.Setenv("APP_TITLE", "")
 	if _, ok := NotificationForImportantEvent(ImportantEvent{Kind: "telemetry", Message: "status"}); ok {
 		t.Fatal("routine telemetry generated a notification")
 	}

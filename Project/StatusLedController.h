@@ -4,6 +4,7 @@
 
 class PwmController;
 
+// StatusLedMode selects the persistent operational RGB presentation.
 enum class StatusLedMode : uint8_t {
   Off = 0,
   Boot,
@@ -14,9 +15,11 @@ enum class StatusLedMode : uint8_t {
   Custom,
   Connected,
   Disconnected,
+  Waiting,
   Running,
 };
 
+// StatusLedCue selects a temporary informational or warning overlay.
 enum class StatusLedCue : uint8_t {
   None = 0,
   DoorOpen,
@@ -29,12 +32,12 @@ enum class StatusLedCue : uint8_t {
   Reset,
 };
 
-// Composes base state and transient cues onto PCA9685 RGB channels 13..15.
+// Composes base state and transient cues onto PWM RGB channels 13..15.
 class StatusLedController {
 public:
   // Claims PWM output plus Power/On signal and starts the boot animation.
   void begin(PwmController &pwm, uint8_t brightness,
-             uint32_t now = millis());
+             uint32_t now = millis(), bool powerSignal = true);
   // Advances breathing/easing without blocking other services.
   void service(uint32_t now = millis());
 
@@ -67,4 +70,5 @@ private:
   StatusLedCue cue_ = StatusLedCue::None;
 };
 
+// statusLeds is the board-wide RGB state and cue compositor.
 extern StatusLedController statusLeds;

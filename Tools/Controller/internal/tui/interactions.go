@@ -1,12 +1,14 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
@@ -17,7 +19,21 @@ import (
 
 func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	key := message.String()
-	inputEmpty := strings.TrimSpace(model.input.Value()) == ""
+	if model.settingEditor != nil {
+		return model.handleSettingEditorKey(message)
+	}
+	inputEmpty := !model.terminalIsVisible() || strings.TrimSpace(model.input.Value()) == ""
+	if model.renameTarget != "" {
+		switch key {
+		case "esc":
+			model.cancelPeripheralRename()
+			return model, nil, true
+		case "enter":
+			return model.finishPeripheralRename()
+		}
+		// The focused text input owns every other key while the rename editor is open.
+		return model, nil, false
+	}
 	if model.macroSearchEditing {
 		switch key {
 		case "ctrl+c":
@@ -210,6 +226,16 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return model.frontPanelGesture(gesture.key, gesture.phase)
 		}
 	}
+	if inputEmpty {
+		switch key {
+		case "ctrl+f":
+			return model.bringPortOwnerToForeground()
+		case "ctrl+w":
+			return model.requestPortOwnerClose()
+		case "ctrl+t":
+			return model.terminatePortOwner()
+		}
+	}
 
 	switch key {
 	case "ctrl+c":
@@ -225,9 +251,13 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return model.closePort()
 	case "ctrl+r":
 		return model.dispatchLine("reset app")
+	case "~", "`":
+		model.toggleTerminal()
+		return model, nil, true
 	case "esc":
 		model.input.SetValue("")
 		model.completion = nil
+		model.completionIndex = -1
 		return model, nil, true
 	case "enter":
 		line := strings.TrimSpace(model.input.Value())
@@ -254,7 +284,7 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			model.acceptRecommendedCompletion()
 			return model, nil, true
 		}
-		if model.input.Value() == "" && model.page == PageConsole {
+		if model.input.Value() == "" && model.terminalIsVisible() {
 			history := model.engine.History()
 			if len(history) != 0 {
 				model.input.SetValue(history[len(history)-1])
@@ -310,6 +340,9 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			model.viewport, command = model.viewport.Update(message)
 			return model, command, true
 		}
+	}
+	if inputEmpty && key == "f2" && model.page == PageOutputs {
+		return model.beginPeripheralRename()
 	}
 
 	if inputEmpty && len(key) == 1 {
@@ -369,6 +402,10 @@ func (model Model) dispatchLine(line string) (Model, tea.Cmd, bool) {
 	model.historyPos = -1
 	model.historyBuf = ""
 	model.updateInputPlaceholder()
+	if strings.EqualFold(line, "reset app") {
+		model.rebootPending = true
+		model.setNotice("Rebooting controller…")
+	}
 	if model.preview != nil {
 		return model.simulateCommand(line)
 	}
@@ -430,7 +467,7 @@ func (model Model) simulateCommand(line string) (Model, tea.Cmd, bool) {
 			model.previewPanel.Segments = selected.Short
 		}
 	} else if line == "pwm get" {
-		output = fmt.Sprintf("PWM mode=%d selected=%d values=%v", model.preview.Status.PWMMode, model.preview.Status.PWMChannel, model.pwmValues)
+		output = fmt.Sprintf("PWM available=%t selected=%d values=%v", model.preview.Status.PWMAvailable, model.preview.Status.PWMChannel, model.pwmValues)
 	}
 	return model, func() tea.Msg { return commandResultMsg{line: line, output: output} }, true
 }
@@ -458,6 +495,58 @@ func (model Model) closePort() (Model, tea.Cmd, bool) {
 	return model, nil, true
 }
 
+func (model Model) bringPortOwnerToForeground() (Model, tea.Cmd, bool) {
+	if model.portOwner == nil {
+		model.setNotice("No diagnosed serial owner is available")
+		return model, nil, true
+	}
+	owner := *model.portOwner
+	return model, ownerActionCommand("Bring serial owner to foreground", func(ctx context.Context) error {
+		return model.portOwnerActions.BringToForeground(ctx, owner)
+	}), true
+}
+
+func (model Model) requestPortOwnerClose() (Model, tea.Cmd, bool) {
+	if model.portOwner == nil {
+		model.setNotice("No diagnosed serial owner is available")
+		return model, nil, true
+	}
+	owner := *model.portOwner
+	return model, ownerActionCommand("Request graceful owner close", func(ctx context.Context) error {
+		return model.portOwnerActions.RequestGracefulClose(ctx, owner)
+	}), true
+}
+
+func (model Model) terminatePortOwner() (Model, tea.Cmd, bool) {
+	if model.portOwner == nil {
+		model.setNotice("No diagnosed serial owner is available")
+		return model, nil, true
+	}
+	owner := *model.portOwner
+	now := time.Now()
+	if model.ownerTerminateArmedUntil.IsZero() || now.After(model.ownerTerminateArmedUntil) {
+		model.ownerTerminateArmedUntil = now.Add(5 * time.Second)
+		model.setNotice(fmt.Sprintf(
+			"Confirm terminate %s: press Ctrl+T/click Terminate again within 5 seconds",
+			owner.Label(),
+		))
+		return model, nil, true
+	}
+	model.ownerTerminateArmedUntil = time.Time{}
+	confirmation := model.portOwnerActions.TerminateConfirmation(owner)
+	return model, ownerActionCommand("Terminate serial owner", func(ctx context.Context) error {
+		return model.portOwnerActions.Terminate(ctx, owner, confirmation)
+	}), true
+}
+
+func ownerActionCommand(label string, action func(context.Context) error) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return ownerActionResultMsg{action: label, err: action(ctx)}
+	}
+}
+
 func (model *Model) switchPage(page Page) {
 	for page < 0 {
 		page += pageCount
@@ -467,9 +556,35 @@ func (model *Model) switchPage(page Page) {
 	model.cursor = 0
 	model.pageOffset = 0
 	model.completion = nil
+	model.completionIndex = -1
+	model.terminalVisible = false
+	model.terminalHidden = false
+	model.renameTarget = ""
+	model.renameDefault = ""
+	model.input.Prompt = "❯ "
+	model.input.SetValue("")
 	model.macroSearchEditing = false
 	model.macroDeleteArmed = false
 	model.macroDeleteReference = ""
+}
+
+func (model *Model) toggleTerminal() {
+	if model.page == PageConsole {
+		model.terminalHidden = !model.terminalHidden
+	} else {
+		model.terminalVisible = !model.terminalVisible
+		model.terminalHidden = false
+	}
+	if !model.terminalIsVisible() {
+		model.completion = nil
+		model.completionIndex = -1
+	}
+}
+
+func (model *Model) revealTerminal() {
+	model.terminalVisible = true
+	model.terminalHidden = false
+	model.input.Focus()
 }
 
 func pageForKey(value string) (Page, bool) {
@@ -492,13 +607,13 @@ func (model *Model) moveCursor(delta int) {
 func (model Model) selectionCount() int {
 	switch model.page {
 	case PageOutputs:
-		return 28
+		return 27
 	case PageMenus:
 		return len(model.menuConfigurationEntries())
 	case PageBoardSettings:
-		return 18
+		return len(model.boardSettingRows())
 	case PageAppSettings:
-		return 32
+		return len(model.appSettingRows())
 	case PageRF:
 		return len(model.rfStaged)
 	case PageAutomations:
@@ -519,9 +634,11 @@ func (model Model) activateSelection() (Model, tea.Cmd, bool) {
 		}
 		return model.dispatchLine(fmt.Sprintf("menu page %d", entry.Page.ID))
 	case PageBoardSettings:
-		return model.adjustBoardSetting(0, true)
+		updated, handled := model.beginSettingEditor()
+		return updated, nil, handled
 	case PageAppSettings:
-		return model.adjustAppSetting(0, true)
+		updated, handled := model.beginSettingEditor()
+		return updated, nil, handled
 	case PageRF:
 		model.beginRFActionPicker()
 		return model, nil, true
@@ -545,10 +662,6 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 			}
 			return model.setSelectedPWM(uint16(value))
 		}
-		if model.cursor == 27 {
-			mode := (int(model.snapshot().Status.PWMMode) + delta + 3) % 3
-			return model.dispatchLine(fmt.Sprintf("pwm mode %d", mode))
-		}
 	case PageMenus:
 		entry, ok := model.selectedMenuConfiguration()
 		if !ok {
@@ -556,9 +669,9 @@ func (model Model) adjustSelection(delta int) (Model, tea.Cmd, bool) {
 		}
 		return model.moveSelectedMenuToRank(wrapInt(entry.Rank, delta, len(model.activeMenuPages())))
 	case PageBoardSettings:
-		return model.adjustBoardSetting(delta, false)
+		return model.quickAdjustSelectedSetting(delta)
 	case PageAppSettings:
-		return model.adjustAppSetting(delta, false)
+		return model.quickAdjustSelectedSetting(delta)
 	case PageRF:
 		model.moveRFStage(delta)
 		return model, nil, true
@@ -588,9 +701,98 @@ func (model Model) activateOutput() (Model, tea.Cmd, bool) {
 		return model.setSelectedPWM(value)
 	case model.cursor == 26:
 		return model.dispatchLine("pwm off")
-	case model.cursor == 27:
-		mode := (model.snapshot().Status.PWMMode + 1) % 3
-		return model.dispatchLine(fmt.Sprintf("pwm mode %d", mode))
+	}
+	return model, nil, true
+}
+
+func outputPeripheralDescriptor(cursor int) (string, string, bool) {
+	key := ""
+	switch {
+	case cursor >= 0 && cursor < 8:
+		key = fmt.Sprintf("relay.%d", cursor+1)
+	case cursor >= 9 && cursor <= 11:
+		key = "motion.a"
+	case cursor >= 12 && cursor <= 14:
+		key = "motion.b"
+	case cursor >= 15 && cursor <= 25:
+		key = fmt.Sprintf("pwm.%d", cursor-15)
+	default:
+		return "", "", false
+	}
+	fallback, ok := appconfig.PeripheralDefaultName(key)
+	return key, fallback, ok
+}
+
+func (model Model) peripheralName(key, fallback string) string {
+	if name := strings.TrimSpace(model.uiValue.PeripheralNames[key]); name != "" {
+		return name
+	}
+	return fallback
+}
+
+func (model Model) beginPeripheralRename() (Model, tea.Cmd, bool) {
+	key, fallback, ok := outputPeripheralDescriptor(model.cursor)
+	if !ok {
+		model.setNotice("Select a relay, motion side, or PWM channel before renaming")
+		return model, nil, true
+	}
+	model.renameTarget = key
+	model.renameDefault = fallback
+	model.renameTerminalWasVisible = model.terminalIsVisible()
+	model.input.Prompt = "F2 Rename " + key + " › "
+	model.input.SetValue(model.peripheralName(key, fallback))
+	model.input.CursorEnd()
+	model.revealTerminal()
+	model.setNotice("Enter saves the host-side name · Esc cancels · blank restores the default")
+	return model, nil, true
+}
+
+func (model *Model) cancelPeripheralRename() {
+	wasVisible := model.renameTerminalWasVisible
+	model.renameTarget = ""
+	model.renameDefault = ""
+	model.renameTerminalWasVisible = false
+	model.input.Prompt = "❯ "
+	model.input.SetValue("")
+	model.completion = nil
+	model.completionIndex = -1
+	model.terminalVisible = wasVisible && model.page != PageConsole
+	model.terminalHidden = false
+}
+
+func (model Model) finishPeripheralRename() (Model, tea.Cmd, bool) {
+	name := strings.TrimSpace(model.input.Value())
+	if len([]rune(name)) > 64 || strings.ContainsAny(name, "\r\n\t") {
+		model.setNotice("Peripheral name must be at most 64 printable characters")
+		return model, nil, true
+	}
+	ui := model.uiValue
+	names := make(map[string]string, len(ui.PeripheralNames)+1)
+	for key, value := range ui.PeripheralNames {
+		names[key] = value
+	}
+	if name == "" || name == model.renameDefault {
+		delete(names, model.renameTarget)
+		name = model.renameDefault
+	} else {
+		names[model.renameTarget] = name
+	}
+	ui.PeripheralNames = names
+	ui.SetupComplete = true
+	if model.saveUI != nil {
+		if err := model.saveUI(ui); err != nil {
+			model.appendLog("error", "save peripheral name: "+err.Error())
+			model.setNotice("Rename was not saved: " + err.Error())
+			return model, nil, true
+		}
+	}
+	model.uiValue = ui
+	target := model.renameTarget
+	model.cancelPeripheralRename()
+	if model.saveUI == nil {
+		model.setNotice(fmt.Sprintf("%s renamed to %q for this session", target, name))
+	} else {
+		model.setNotice(fmt.Sprintf("%s renamed to %q and saved", target, name))
 	}
 	return model, nil, true
 }
@@ -618,9 +820,8 @@ func (model Model) adjustBoardSetting(delta int, activate bool) (Model, tea.Cmd,
 			settings.Flags ^= native.SettingsSilent
 		}
 	case 1:
-		if toggle {
-			settings.Flags ^= native.SettingsLCDEnabled
-		}
+		// Programming mode is a recovery latch, never a direct user toggle.
+		return model, nil, true
 	case 2:
 		if toggle {
 			settings.Flags ^= native.SettingsSwapTemperatureRoles
@@ -634,13 +835,18 @@ func (model Model) adjustBoardSetting(delta int, activate bool) (Model, tea.Cmd,
 	case 6:
 		settings.DisplayBrightness = wrapByte(settings.DisplayBrightness, deltaOrOne(delta), 8)
 	case 7:
-		settings.StatusBrightness = wrapByte(settings.StatusBrightness, deltaOrOne(delta)*16, 256)
+		settings.DisplayClosedBrightness = wrapByte(settings.DisplayClosedBrightness, deltaOrOne(delta), 8)
 	case 8:
-		settings.PWMBootMode = wrapByte(settings.PWMBootMode, deltaOrOne(delta), 3)
+		settings.StatusBrightness = wrapByte(settings.StatusBrightness, deltaOrOne(delta)*16, 256)
 	case 9:
+		settings.OutputPersistence = wrapByte(
+			settings.OutputPersistence, deltaOrOne(delta),
+			int(native.OutputPersistenceMask)+1,
+		)
+	case 10:
 		periods := []uint16{0, 100, 125, 200, 250, 500, 1000, 2000, 5000}
 		settings.StreamPeriodMS = cycleUint16(periods, settings.StreamPeriodMS, deltaOrOne(delta))
-	case 10:
+	case 11:
 		visible := model.visibleMenuPages()
 		if len(visible) != 0 {
 			index := 0
@@ -652,37 +858,54 @@ func (model Model) adjustBoardSetting(delta int, activate bool) (Model, tea.Cmd,
 			}
 			settings.DefaultPage = visible[wrapInt(index, deltaOrOne(delta), len(visible))].ID
 		}
-	case 11:
+	case 12:
 		if toggle {
 			settings.SetSaveLastPage(!settings.SaveLastPage())
 		}
-	case 12:
-		_ = settings.SetStatusColor(wrapByte(settings.StatusColor(), deltaOrOne(delta), 8))
 	case 13:
-		_ = settings.SetVoltageDecimals(wrapByte(settings.VoltageDecimals(), deltaOrOne(delta), 3))
+		_ = settings.SetStatusColor(wrapByte(settings.StatusColor(), deltaOrOne(delta), 8))
 	case 14:
-		_ = settings.SetCurrentDecimals(wrapByte(settings.CurrentDecimals(), deltaOrOne(delta), 3))
+		_ = settings.SetVoltageDecimals(wrapByte(settings.VoltageDecimals(), deltaOrOne(delta), 3))
 	case 15:
-		_ = settings.SetMotionDoorPolicy(wrapByte(settings.MotionDoorPolicy(), deltaOrOne(delta), 4))
+		_ = settings.SetCurrentDecimals(wrapByte(settings.CurrentDecimals(), deltaOrOne(delta), 3))
 	case 16:
+		_ = settings.SetMotionDoorPolicy(wrapByte(settings.MotionDoorPolicy(), deltaOrOne(delta), 4))
+	case 17:
 		if toggle {
 			settings.SetDoorAudioEnabled(!settings.DoorAudioEnabled())
 		}
-	case 17:
+	case 18:
 		if toggle {
 			settings.SetRelayAudioEnabled(!settings.RelayAudioEnabled())
 		}
+	case 19:
+		current := settings.MotionExitHoldSeconds
+		if current == 0 {
+			current = native.SettingsDefaultMotionExitHoldSeconds
+		}
+		settings.MotionExitHoldSeconds = byte(
+			wrapInt(int(current)-1, deltaOrOne(delta),
+				int(native.SettingsMaximumMotionExitHoldSeconds)) + 1,
+		)
+	case 20:
+		settings.RelayRestoreMask = wrapByte(
+			settings.RelayRestoreMask, deltaOrOne(delta), 256,
+		)
 	}
 	if model.preview != nil {
 		model.preview.Settings = settings
 		model.preview.HaveSettings = true
 	}
 	line := fmt.Sprintf(
-		"settings set %d %d %d %d %d %d %d %d %d %t %d %d %d",
+		"settings set %d %d %d %d %d %d %d %d %d %d %t %d %d %d %d %d %d",
 		settings.Flags, settings.LightMode, settings.OnBrightness, settings.OffBrightness,
-		settings.DisplayBrightness, settings.StatusBrightness, settings.PWMBootMode,
+		settings.DisplayBrightness, settings.DisplayClosedBrightness,
+		settings.StatusBrightness, settings.OutputPersistence,
 		settings.StreamPeriodMS, settings.DefaultPage, settings.SaveLastPage(),
 		settings.StatusColor(), settings.VoltageDecimals(), settings.CurrentDecimals(),
+		settings.MotionExitHoldSeconds,
+		settings.MotionBreakMS(),
+		settings.RelayRestoreMask,
 	)
 	return model.dispatchLine(line)
 }
@@ -699,6 +922,7 @@ func (model Model) adjustAppSetting(delta int, activate bool) (Model, tea.Cmd, b
 		// accidentally erase it. The command bar gives the exact operation.
 		model.input.SetValue("config set ui.app_title ")
 		model.input.CursorEnd()
+		model.revealTerminal()
 		return model, nil, true
 	case 1:
 		values := []int{100, 125, 200, 250, 500, 1000, 2000, 5000}
@@ -767,10 +991,10 @@ func (model Model) adjustAppSetting(delta int, activate bool) (Model, tea.Cmd, b
 	model.prefs = preferencesFromUI(ui)
 	if model.saveUI != nil {
 		if err := model.saveUI(ui); err != nil {
-			model.appendLog("error", "save PC host settings: "+err.Error())
+			model.appendLog("error", "save HOST settings: "+err.Error())
 			return model, nil, true
 		}
-		model.setNotice("PC host setting saved and hot-applied")
+		model.setNotice("HOST setting saved and hot-applied")
 	} else {
 		model.setNotice("Setting applied for this session; persistent config hook unavailable")
 	}
@@ -888,8 +1112,22 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 	case PageRF:
 		switch key {
 		case "l":
-			return model.dispatchLine("rf learn indefinite multi")
+			if model.preview == nil && model.runtime.RFLearnState().Active {
+				model.setNotice("RF learning is already active; cancel it before starting another session")
+				return model, nil, true
+			}
+			return model.dispatchLine("rf learn indefinite")
+		case "y":
+			if model.preview == nil && model.runtime.RFLearnState().Active {
+				model.setNotice("RF learning is already active; cancel it before starting another session")
+				return model, nil, true
+			}
+			return model.dispatchLine("rf learn timer 30s")
 		case "c":
+			if model.preview == nil && !model.runtime.RFLearnState().Active {
+				model.setNotice("RF learning is idle")
+				return model, nil, true
+			}
 			return model.dispatchLine("rf cancel")
 		case "r":
 			if model.preview != nil {
@@ -905,6 +1143,7 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		case "t":
 			model.input.SetValue("rf send ")
 			model.input.CursorEnd()
+			model.revealTerminal()
 			return model, nil, true
 		case "a":
 			model.beginRFActionPicker()
@@ -962,6 +1201,12 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 			model.setNotice("Staged RF ID changes rolled back locally")
 			return model, nil, true
 		}
+	case PageEvents:
+		if key == "e" {
+			model.eventsExpanded = !model.eventsExpanded
+			model.setNotice(boolWord(model.eventsExpanded, "Graphs expanded", "Graphs compacted"))
+			return model, nil, true
+		}
 	case PageProgramming:
 		switch key {
 		case "p":
@@ -977,10 +1222,7 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		case "u":
 			model.input.SetValue("program flash ")
 			model.input.CursorEnd()
-			return model, nil, true
-		case "a":
-			model.input.SetValue("program flash  --usbasp-troubleshooting")
-			model.input.SetCursor(len("program flash "))
+			model.revealTerminal()
 			return model, nil, true
 		}
 	case PageAutomations:
@@ -1083,6 +1325,7 @@ func (model Model) beginHostMenuDefinitionEdit() (Model, tea.Cmd, bool) {
 	if active.Active {
 		model.input.SetValue(shell.Join([]string{"host-menu", "set", active.MenuID}) + " ")
 		model.input.CursorEnd()
+		model.revealTerminal()
 		model.setNotice("Complete FIELD VALUE; fields include label, title, content, parent_id, node_id, read_only, brightness, edit_visual")
 		return model, nil, true
 	}
@@ -1094,6 +1337,7 @@ func (model Model) beginHostMenuDefinitionEdit() (Model, tea.Cmd, bool) {
 		if override.StableID == entry.Page.ID {
 			model.input.SetValue(fmt.Sprintf("host-menu set builtin:%d ", entry.Page.ID))
 			model.input.CursorEnd()
+			model.revealTerminal()
 			model.setNotice("Editing online label override; stable/wire ID remains immutable")
 			return model, nil, true
 		}
@@ -1112,6 +1356,7 @@ func (model Model) beginHostMenuDefinitionEdit() (Model, tea.Cmd, bool) {
 		entry.Page.Name, fmt.Sprintf("0x%02X", parent),
 	}))
 	model.input.CursorEnd()
+	model.revealTerminal()
 	model.setNotice("Press Enter to create this built-in online label override, then E again to edit fields")
 	return model, nil, true
 }
@@ -1224,7 +1469,11 @@ func (model *Model) applyCompletion(reverse bool) {
 	candidates := completionCandidates(model.engine, model.input.Value())
 	if len(candidates) == 0 {
 		model.completion = nil
+		model.completionIndex = -1
 		return
+	}
+	if !sameCompletionCandidates(model.completion, candidates) {
+		model.completionIndex = -1
 	}
 	model.completion = candidates
 	if reverse {
@@ -1239,6 +1488,7 @@ func (model *Model) applyCompletion(reverse bool) {
 		model.input.SetValue(candidates[0] + " ")
 		model.input.CursorEnd()
 		model.completion = nil
+		model.completionIndex = -1
 		return
 	}
 	common := commonCompletionPrefix(candidates)
@@ -1260,12 +1510,41 @@ func (model *Model) acceptRecommendedCompletion() {
 	model.input.SetValue(candidates[index] + " ")
 	model.input.CursorEnd()
 	model.completion = nil
+	model.completionIndex = -1
+}
+
+func sameCompletionCandidates(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if model.settingEditor != nil {
+		switch message.Button {
+		case tea.MouseButtonWheelUp:
+			model.adjustSettingEditor(-1)
+			return model, nil
+		case tea.MouseButtonWheelDown:
+			model.adjustSettingEditor(1)
+			return model, nil
+		}
+		return model, nil
+	}
 	if message.Action == tea.MouseActionRelease && model.page == PageMenus && !model.portPicker {
 		contentY := 4 + strings.Count(model.tabBar(), "\n") + 1
-		return model.handleFrontPanelMouse(message.Y-contentY, message.X, "release")
+		geometry := model.menuInteractionGeometry()
+		row := message.Y - contentY
+		if row >= geometry.frontPanelStart && row < geometry.frontPanelEnd {
+			return model.handleFrontPanelMouse(row, message.X, "release")
+		}
+		return model, nil
 	}
 	if message.Action != tea.MouseActionPress {
 		return model, nil
@@ -1299,23 +1578,40 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 func (model Model) handleActionBarClick(x int) (tea.Model, tea.Cmd) {
-	buttons := []struct {
-		width int
-		run   func() (Model, tea.Cmd, bool)
-	}{
-		{13, model.showPortPicker},
-		{10, model.openPort},
-		{11, model.closePort},
-		{16, func() (Model, tea.Cmd, bool) { return model.dispatchLine("reset app") }},
-		{13, func() (Model, tea.Cmd, bool) { return model.dispatchLine("status") }},
-	}
 	position := 0
-	for _, button := range buttons {
-		if x >= position && x < position+button.width {
-			updated, command, _ := button.run()
-			return updated, command
+	for _, item := range model.actionBarItems(model.snapshot()) {
+		width := lipgloss.Width(item.render())
+		if x >= position && x < position+width {
+			switch item.action {
+			case "ports":
+				updated, command, _ := model.showPortPicker()
+				return updated, command
+			case "open":
+				updated, command, _ := model.openPort()
+				return updated, command
+			case "close":
+				updated, command, _ := model.closePort()
+				return updated, command
+			case "reboot":
+				updated, command, _ := model.dispatchLine("reset app")
+				return updated, command
+			case "refresh":
+				updated, command, _ := model.dispatchLine("status")
+				return updated, command
+			case "owner":
+				updated, command, _ := model.bringPortOwnerToForeground()
+				return updated, command
+			case "owner-close":
+				updated, command, _ := model.requestPortOwnerClose()
+				return updated, command
+			case "owner-terminate":
+				updated, command, _ := model.terminatePortOwner()
+				return updated, command
+			default:
+				return model, nil
+			}
 		}
-		position += button.width + 1
+		position += width + 1
 	}
 	return model, nil
 }
@@ -1357,51 +1653,85 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 	}
 	switch model.page {
 	case PageOutputs:
-		index := row - 2
+		start, _ := tableWindow(model.selectionCount(), tableBodyRows(model.contentHeight()), model.cursor)
+		index := start + row - 4
 		if index >= 0 && index < model.selectionCount() {
 			model.cursor = index
-			if index >= 15 && index <= 25 && x > 28 {
-				value := (x - 28) * 4095 / 26
-				if value < 0 {
-					value = 0
-				}
-				if value > 4095 {
-					value = 4095
-				}
-				updated, command, _ := model.setSelectedPWM(uint16(value))
+			if index >= 15 && index <= 25 {
+				tableWidth := model.presentationTableWidth(118)
+				columns := outputTableColumns(tableWidth)
+				tableStart := max(0, (model.width-tableWidth)/2)
+				valueStart := tableStart + 2 + columns[0].Width + columns[1].Width
+				percent := (x - valueStart) * 100 / max(1, columns[2].Width)
+				percent = min(100, max(0, percent))
+				updated, command, _ := model.setSelectedPWM(uint16(percent * 4095 / 100))
 				return updated, command
 			}
 			updated, command, _ := model.activateSelection()
 			return updated, command
 		}
 	case PageMenus:
-		if row >= 9 && row <= 11 {
+		geometry := model.menuInteractionGeometry()
+		if row >= geometry.frontPanelStart && row < geometry.frontPanelEnd {
 			return model.handleFrontPanelMouse(row, x, "press")
 		}
-		index := row - 14
-		if index >= 0 && index < len(model.activeMenuPages()) {
+		index := row - geometry.entriesStart
+		if index >= 0 && index < len(model.menuConfigurationEntries()) {
 			model.cursor = index
 			updated, command, _ := model.activateSelection()
 			return updated, command
 		}
 	case PageBoardSettings, PageAppSettings:
-		index := row - 2
+		start, _ := tableWindow(model.selectionCount(), tableBodyRows(model.contentHeight()), model.cursor)
+		index := start + row - 4
 		if index >= 0 && index < model.selectionCount() {
 			model.cursor = index
+			updated, handled := model.beginSettingEditor()
+			if handled {
+				return updated, nil
+			}
+			return model, nil
+		}
+	case PageEvents:
+		if row >= 1 && row <= 9 {
+			model.eventsExpanded = !model.eventsExpanded
 			return model, nil
 		}
 	case PageRF:
 		if row == 1 {
-			switch {
-			case x < 32:
-				updated, command, _ := model.dispatchLine("rf learn indefinite multi")
-				return updated, command
-			case x < 46:
-				updated, command, _ := model.dispatchLine("rf cancel")
-				return updated, command
-			case x < 67:
-				updated, command, _ := model.dispatchLine("rf list")
-				return updated, command
+			position := 0
+			for _, item := range model.rfPrimaryItems() {
+				width := lipgloss.Width(item.render())
+				if x >= position && x < position+width {
+					switch item.action {
+					case "rf-learn":
+						updated, command, _ := model.dispatchLine("rf learn indefinite")
+						return updated, command
+					case "rf-timer":
+						updated, command, _ := model.dispatchLine("rf learn timer 30s")
+						return updated, command
+					case "rf-cancel":
+						updated, command, _ := model.dispatchLine("rf cancel")
+						return updated, command
+					case "rf-refresh":
+						if model.preview != nil {
+							model.resetRFStage(model.rfEntries)
+							model.setNotice("Preview RF list refreshed")
+							return model, nil
+						}
+						if !model.rfPending {
+							model.rfPending = true
+							return model, model.fetchRFEntriesCommand()
+						}
+						return model, nil
+					case "rf-transmit":
+						model.input.SetValue("rf send ")
+						model.input.CursorEnd()
+						model.revealTerminal()
+						return model, nil
+					}
+				}
+				position += width + 1
 			}
 		}
 	case PageAutomations:
@@ -1433,12 +1763,13 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 }
 
 func (model Model) handleFrontPanelMouse(row, x int, phase string) (tea.Model, tea.Cmd) {
-	if row < 9 || row > 11 {
+	geometry := model.menuInteractionGeometry()
+	if row < geometry.frontPanelStart || row >= geometry.frontPanelEnd {
 		return model, nil
 	}
-	widths := []int{17, 13, 17, 17}
 	position := 0
-	for index, width := range widths {
+	for index, label := range frontPanelButtonLabels {
+		width := lipgloss.Width(buttonStyle.Render(label))
 		if x >= position && x < position+width {
 			updated, command, _ := model.frontPanelGesture(index+1, phase)
 			return updated, command
@@ -1446,6 +1777,11 @@ func (model Model) handleFrontPanelMouse(row, x int, phase string) (tea.Model, t
 		position += width + 1
 	}
 	return model, nil
+}
+
+func (model Model) menuInteractionGeometry() menuPageGeometry {
+	_, geometry := model.menuPagePrefix(model.snapshot())
+	return geometry
 }
 
 func wrapByte(value byte, delta int, count int) byte {

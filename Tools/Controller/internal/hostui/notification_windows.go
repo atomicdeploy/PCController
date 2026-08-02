@@ -20,6 +20,7 @@ type windowsNotifier struct {
 	appID  string
 	status NotificationStatus
 	run    func(context.Context, string, ...string) error
+	gate   chan struct{}
 }
 
 func newPlatformNotifier(options NotifierOptions) Notifier {
@@ -31,10 +32,17 @@ func newPlatformNotifier(options NotifierOptions) Notifier {
 		appID:  appID,
 		status: NotificationStatus{Supported: true, Available: true},
 		run:    runPowerShell,
+		gate:   make(chan struct{}, 1),
 	}
 }
 
 func (notifier *windowsNotifier) Notify(ctx context.Context, notification Notification) error {
+	select {
+	case notifier.gate <- struct{}{}:
+		defer func() { <-notifier.gate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	payload, err := buildToastXML(notification)
 	if err != nil {
 		return err
@@ -64,7 +72,7 @@ func runPowerShell(ctx context.Context, executable string, arguments ...string) 
 	command := exec.CommandContext(ctx, executable, arguments...)
 	output, err := command.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("Windows toast: %w: %s", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("run PowerShell: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }

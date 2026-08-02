@@ -1,3 +1,5 @@
+<div align="center"><a href="../../README.md"><img src="../../docs/assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Requirement audit helper
 
 ## GitHub wiki publisher
@@ -18,7 +20,10 @@ node Tools\Audit\publish-wiki.mjs --apply
 
 The publisher uses a verified temporary directory, generates `Home.md` and
 `_Sidebar.md`, commits only when content changed, and leaves repository
-Markdown as the canonical source.
+Markdown as the canonical source. Repository identity is resolved from
+`GITHUB_REPOSITORY` in automation or the authenticated `gh repo view` result
+locally; the publisher and issue synchronizer contain no checkout-specific
+owner/repository fallback.
 
 `extract-user-turns.mjs` reads one or more Codex rollout JSONL files, merges
 them chronologically, de-duplicates repeated turn IDs, and extracts only

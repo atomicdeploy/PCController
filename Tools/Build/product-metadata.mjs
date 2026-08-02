@@ -9,6 +9,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 export const PRODUCT_METADATA_PATH = resolve(here, '..', 'Controller', 'web', 'package.json')
 
 const requiredFields = [
+	'version',
 	'productName',
 	'productShortName',
 	'productTagline',
@@ -39,10 +40,8 @@ function environmentValue(environment, wanted) {
 
 // Resolve the process-visible title while keeping stable technical IDs unchanged.
 export function resolveProductTitle(environment = process.env, metadata = PRODUCT_METADATA) {
-	for (const name of ['APP_TITLE', 'PCCONTROLLER_APP_TITLE']) {
-		const value = environmentValue(environment, name)
-		if (value) return value
-	}
+	const value = environmentValue(environment, 'APP_TITLE')
+	if (value) return value
 	const configured = String(metadata.productName || metadata.displayName || '').trim()
 	if (configured) return configured
 	return String(metadata.name || 'Controller').replace(/^@[^/]+\//, '').replace(/[-_]+/g, ' ')

@@ -17,6 +17,7 @@
   },
   "ui": {
     "app_title": "PCController",
+    "table_layout": "compact",
     "setup_complete": false,
     "welcome_melody": "notify",
     "status_interval_ms": 250,
@@ -40,7 +41,15 @@
     "lcd_service_enabled": true,
     "mirror_prompt_to_lcd": false,
     "lcd_prompt_debounce_ms": 120,
-    "lcd_priority_hold_ms": 2000
+    "lcd_priority_hold_ms": 2000,
+    "segment_scroll": {
+      "enabled": true,
+      "pages": ["door"],
+      "door_open_text": "door is open",
+      "door_closed_text": "door is closed",
+      "speed_ms": 220,
+      "gap_cells": 3
+    }
   },
   "ipc": {
     "listen": "127.0.0.1:8787",
@@ -292,6 +301,11 @@
         }
       ]
     },
+    "lifecycle_safety": {
+      "session_lock": "stop-motion",
+      "suspend": "stop-motion",
+      "refresh_on_resume": true
+    },
     "notifications": {
       "enabled": true,
       "door_running_beep": true,
@@ -522,7 +536,7 @@
   },
   "host_menus": {
     "default_menu": "host",
-    "request_gesture": "status-hold-k4",
+    "request_gesture": "door-hold-k4",
     "display_duration_ms": 1500,
     "session_timeout_ms": 120000,
     "menus": [
@@ -556,6 +570,20 @@
             "read_action": "device.status"
           },
           {
+            "id": "date",
+            "label": "DATE",
+            "title": "Current date",
+            "type": "readonly",
+            "read_action": "host.date"
+          },
+          {
+            "id": "time",
+            "label": "TIME",
+            "title": "Current time",
+            "type": "readonly",
+            "read_action": "host.time"
+          },
+          {
             "id": "ip",
             "label": "IP",
             "title": "Host IP",
@@ -570,9 +598,16 @@
             "read_action": "api.status"
           },
           {
+            "id": "macros",
+            "label": "MACR",
+            "title": "Macros",
+            "type": "submenu",
+            "submenu": "macro-library"
+          },
+          {
             "id": "settings",
             "label": "CFG",
-            "title": "PC settings",
+            "title": "HOST settings",
             "type": "submenu",
             "submenu": "pc-settings"
           },
@@ -591,7 +626,7 @@
         "parent_id": 128,
         "order_id": 129,
         "label": "CFG",
-        "title": "PC Settings",
+        "title": "HOST Settings",
         "content": "Configuration",
         "brightness": 5,
         "edit_visual": "blink",
@@ -624,7 +659,7 @@
           {
             "id": "lcd-service",
             "label": "I2C",
-            "title": "PC LCD service",
+            "title": "HOST LCD service",
             "type": "bool",
             "value": "true",
             "read_action": "pc.ui.lcd_service_enabled",
@@ -713,11 +748,65 @@
           {
             "id": "shutdown",
             "label": "OFF",
-            "title": "Shut down PC",
+            "title": "Shut down host",
             "type": "action",
             "write_action": "os.shutdown",
             "guarded": true
           }
+        ]
+      },
+      {
+        "id": "macro-library",
+        "node_id": 131,
+        "parent_id": 128,
+        "order_id": 131,
+        "label": "MACR",
+        "title": "Macro Library",
+        "content": "Select and run",
+        "brightness": 5,
+        "edit_visual": "blink",
+        "flags": {"visible": true, "selectable": true, "editable": true},
+        "items": [
+          {"id": "selected", "label": "MACR", "title": "Macro", "type": "select", "options_source": "macro.library", "read_action": "host.macro.selection", "write_action": "host.macro.selection"},
+          {"id": "details", "label": "INFO", "title": "Selected", "type": "readonly", "read_action": "host.macro.selected"},
+          {"id": "play", "label": "PLAY", "title": "Play selected", "type": "action", "write_action": "host.macro.play", "guarded": true},
+          {"id": "record", "label": "REC", "title": "Record macro", "type": "submenu", "submenu": "macro-recording"},
+          {"id": "status", "label": "RUN", "title": "Playback", "type": "submenu", "submenu": "macro-playback"}
+        ]
+      },
+      {
+        "id": "macro-recording",
+        "node_id": 132,
+        "parent_id": 131,
+        "order_id": 132,
+        "label": "REC",
+        "title": "Macro Recording",
+        "content": "MCU timed deltas",
+        "brightness": 5,
+        "edit_visual": "alternate",
+        "flags": {"visible": true, "selectable": true, "action": true},
+        "items": [
+          {"id": "status", "label": "STAT", "title": "Record", "type": "readonly", "read_action": "host.macro.recording"},
+          {"id": "start", "label": "REC", "title": "Start recording", "type": "action", "write_action": "host.macro.record.start"},
+          {"id": "save", "label": "SAVE", "title": "Save recording", "type": "action", "write_action": "host.macro.record.save"},
+          {"id": "discard", "label": "DISC", "title": "Discard recording", "type": "action", "write_action": "host.macro.record.discard", "guarded": true}
+        ]
+      },
+      {
+        "id": "macro-playback",
+        "node_id": 133,
+        "parent_id": 131,
+        "order_id": 133,
+        "label": "RUN",
+        "title": "Macro Playback",
+        "content": "Progress / stop",
+        "brightness": 5,
+        "edit_visual": "alternate",
+        "flags": {"visible": true, "selectable": true, "action": true},
+        "items": [
+          {"id": "status", "label": "STAT", "title": "Playback", "type": "readonly", "read_action": "host.macro.playback"},
+          {"id": "cancel", "label": "STOP", "title": "Cancel safely", "type": "action", "write_action": "host.macro.cancel"},
+          {"id": "keep", "label": "KEEP", "title": "Cancel keep output", "type": "action", "write_action": "host.macro.cancel.keep", "guarded": true}
         ]
       }
     ]
@@ -759,7 +848,7 @@
     "programmer": "usbasp"
   },
   "scripts": {
-    "door-log": "scripts/door-log.ps1"
+    "door-log": "scripts/door-log.cmd"
   },
   "macros": [
     {
@@ -777,22 +866,22 @@
           "value": 1
         },
         {
-          "at_ms": 250,
+          "at_us": 250000,
           "kind": "pwm",
           "value": 1024
         },
         {
-          "at_ms": 750,
+          "at_us": 750000,
           "kind": "pwm",
           "value": 3072
         },
         {
-          "at_ms": 1250,
+          "at_us": 1250000,
           "kind": "relay",
           "target": 4
         },
         {
-          "at_ms": 1500,
+          "at_us": 1500000,
           "kind": "pwm"
         }
       ]
@@ -815,6 +904,45 @@
         {
           "frequency_hz": 1568,
           "duration_ms": 150
+        }
+      ]
+    },
+    {
+      "name": "power-down",
+      "notes": [
+        {
+          "frequency_hz": 784,
+          "duration_ms": 80,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 659,
+          "duration_ms": 90,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 523,
+          "duration_ms": 140
+        }
+      ]
+    },
+    {
+      "name": "programming-ready",
+      "notes": [
+        {
+          "frequency_hz": 1032,
+          "duration_ms": 70,
+          "gap_ms": 60
+        },
+        {
+          "frequency_hz": 2010,
+          "duration_ms": 70,
+          "gap_ms": 60
+        },
+        {
+          "frequency_hz": 2400,
+          "duration_ms": 120,
+          "gap_ms": 150
         }
       ]
     }

@@ -62,14 +62,14 @@ func ValidateBackupManifest(manifestPath string) (ValidatedBackup, error) {
 		return ValidatedBackup{}, errors.New("complete backup manifest contains errors")
 	}
 	if manifest.ApplicationPackedTimestamp != "" {
-		if !packedIdentitySchema(manifest.ApplicationIdentitySchema) {
-			return ValidatedBackup{}, errors.New("packed firmware timestamp requires identity schema 2 or 3")
+		if !currentIdentitySchema(manifest.ApplicationIdentitySchema) {
+			return ValidatedBackup{}, errors.New("packed firmware timestamp requires compact identity schema 3")
 		}
 		packed, parseErr := strconv.ParseUint(manifest.ApplicationPackedTimestamp, 16, 32)
 		if parseErr != nil || len(manifest.ApplicationPackedTimestamp) != 8 {
 			return ValidatedBackup{}, errors.New("packed firmware timestamp must be eight hexadecimal digits")
 		}
-		decoded, decodeErr := DecodeFirmwareTimestampSchema2(uint32(packed))
+		decoded, decodeErr := DecodeFirmwareTimestamp(uint32(packed))
 		if decodeErr != nil {
 			return ValidatedBackup{}, decodeErr
 		}
@@ -205,15 +205,14 @@ const (
 )
 
 type RestorePlanOptions struct {
-	Method                     Method
-	Port                       string
-	Programmer                 string
-	MCU                        string
-	Components                 []RestoreComponent
-	AllowUSBaspTroubleshooting bool
-	Avrdude                    string
-	AvrdudeConf                string
-	ArduinoCLI                 string
+	Method      Method
+	Port        string
+	Programmer  string
+	MCU         string
+	Components  []RestoreComponent
+	Avrdude     string
+	AvrdudeConf string
+	ArduinoCLI  string
 }
 
 type RestoreStep struct {
@@ -255,13 +254,9 @@ func PlanSafeRestore(manifestPath string, options RestorePlanOptions) (RestorePl
 			return RestorePlan{}, errors.New("Urclock restore requires a serial port")
 		}
 	case MethodUSBasp:
-		if !options.AllowUSBaspTroubleshooting {
-			return RestorePlan{}, errors.New(
-				"USBasp restore is a hidden troubleshooting path; explicit authorization is required",
-			)
-		}
+		// Explicit MethodUSBasp selection chooses the advanced recovery path.
 	default:
-		return RestorePlan{}, fmt.Errorf("safe restore supports Urclock or explicitly authorized USBasp, got %q", options.Method)
+		return RestorePlan{}, fmt.Errorf("safe restore supports Urclock or USBasp, got %q", options.Method)
 	}
 	components := options.Components
 	if len(components) == 0 {

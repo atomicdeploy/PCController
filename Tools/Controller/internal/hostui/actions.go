@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type AppAction struct {
@@ -17,16 +19,27 @@ type AppAction struct {
 }
 
 type ActionBroker struct {
-	events chan AppAction
-	mu     sync.RWMutex
-	watch  func(AppAction)
+	events     chan AppAction
+	mu         sync.RWMutex
+	subscribed bool
+	watch      func(AppAction)
 }
 
 func NewActionBroker() *ActionBroker {
 	return &ActionBroker{events: make(chan AppAction, 64)}
 }
 
-func (broker *ActionBroker) Events() <-chan AppAction { return broker.events }
+// Events enables the optional bounded queue used by the interactive TUI. Web,
+// tray, service, and one-shot hosts intentionally rely on the observer-backed
+// runtime event stream and never subscribe, so those surfaces cannot fill an
+// unread TUI queue.
+func (broker *ActionBroker) Events() <-chan AppAction {
+	broker.mu.Lock()
+	broker.subscribed = true
+	events := broker.events
+	broker.mu.Unlock()
+	return events
+}
 
 // SetObserver installs a single delivery observer without changing the
 // broker's original bounded TUI queue. The observer is used by the primary
@@ -64,7 +77,14 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 	}
 	broker.mu.RLock()
 	observer := broker.watch
+	subscribed := broker.subscribed
 	broker.mu.RUnlock()
+	if !subscribed {
+		if observer != nil {
+			observer(action)
+		}
+		return nil
+	}
 	select {
 	case broker.events <- action:
 		if observer != nil {
@@ -110,8 +130,8 @@ func ParseAction(value, source string) (AppAction, error) {
 
 func ParseActionURI(value string) (AppAction, error) {
 	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || !strings.EqualFold(parsed.Scheme, "pccontroller") {
-		return AppAction{}, errors.New("action URI must use pccontroller://")
+	if err != nil || !strings.EqualFold(parsed.Scheme, productidentity.ProtocolScheme) {
+		return AppAction{}, fmt.Errorf("action URI must use %s://", productidentity.ProtocolScheme)
 	}
 	host := strings.ToLower(parsed.Host)
 	path, err := url.PathUnescape(strings.TrimPrefix(parsed.EscapedPath(), "/"))
@@ -128,7 +148,7 @@ func ParseActionURI(value string) (AppAction, error) {
 	case "port":
 		return ParseAction("app "+path, "uri")
 	default:
-		return AppAction{}, fmt.Errorf("unsupported pccontroller URI host %q", parsed.Host)
+		return AppAction{}, fmt.Errorf("unsupported %s URI host %q", productidentity.ProtocolScheme, parsed.Host)
 	}
 }
 
@@ -138,18 +158,18 @@ func ActionURI(action AppAction) (string, error) {
 		if strings.TrimSpace(action.Value) == "" {
 			return "", errors.New("app.page requires a page")
 		}
-		return "pccontroller://page/" + url.PathEscape(action.Value), nil
+		return productidentity.ProtocolScheme + "://page/" + url.PathEscape(action.Value), nil
 	case "command":
 		if strings.TrimSpace(action.Value) == "" {
 			return "", errors.New("command requires a value")
 		}
-		return "pccontroller://command/" + url.PathEscape(action.Value), nil
+		return productidentity.ProtocolScheme + "://command/" + url.PathEscape(action.Value), nil
 	case "app.quit":
-		return "pccontroller://app/quit", nil
+		return productidentity.ProtocolScheme + "://app/quit", nil
 	case "app.port.open":
-		return "pccontroller://port/open", nil
+		return productidentity.ProtocolScheme + "://port/open", nil
 	case "app.port.close":
-		return "pccontroller://port/close", nil
+		return productidentity.ProtocolScheme + "://port/close", nil
 	default:
 		return "", fmt.Errorf("unsupported action URI kind %q", action.Kind)
 	}

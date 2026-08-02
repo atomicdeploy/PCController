@@ -1,3 +1,5 @@
+<div align="center"><a href="../README.md"><img src="assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Hardware Initialization and Tuning
 
 This is the canonical, source-backed record of how the ControllerBoardMini
@@ -25,14 +27,14 @@ power-indicator, and status-RGB state is applied.
 | Native UART | 115200 baud, normal AVR 8N1; COBS frames with opcode/CRC; always enabled | Responsive control and telemetry without using UART as a debug console | Lower baud only for a demonstrated electrical integrity problem; DTR reset is a separate host setting and is off by default |
 | I2C/TWI | Compact master, 100 kHz, prescaler 1, `TWBR=72`, 25,000 us wait timeout with peripheral reset, repeated START, 16-byte host read/write cap | Stable INA/PWM traffic and bounded faults with much lower flash/SRAM than generic Wire | 400 kHz is possible only after validating every device, cable, pull-up, generic host transfer, and LCD operation |
 | INA219 | Address `0x40`; config `0x3F7F`; calibration `4096`; continuous shunt+bus conversion | Correct 32 V range for a 12 V system and strong hardware averaging, especially for current | See the detailed INA219 section before changing range, averaging, or shunt calibration |
-| PWM/PCA9685 | Address `0x41`; requested 1000 Hz; prescale `5`; MODE2 `0x04`; active-high logical outputs | Separates it from INA219 and moves lighting PWM well above visibly flickery rates | Frequency 24..1526 Hz is supported; polarity is a compile-time electrical choice, not a display preference |
+| PWM expander | Address `0x41`; requested 1000 Hz; prescale `5`; MODE2 `0x04`; active-high logical outputs | Separates it from INA219 and moves lighting PWM well above visibly flickery rates | Frequency 24..1526 Hz is supported; polarity is a compile-time electrical choice, not a display preference |
 | DS18B20 pair | D10/CS 1-Wire bus; external 4.7 kOhm pull-up; externally powered; at most two family-`0x28` ROMs; 11-bit; asynchronous 375 ms conversion | Responsive temperatures without blocking UART/RF; bounded search survives a missing pull-up | 9/10-bit are faster and coarser; 12-bit gives 0.0625 C resolution but requires 750 ms |
 | TM1637 | D13/SCK clock, D11/MOSI data, 3 us bit timing; 20 ms render service; cached four-segment writes; EEPROM brightness 0..7, factory 5 | Fast menu response while avoiding repeated writes of unchanged segments | Brightness and voltage/current decimal places are EEPROM settings |
 | 433 MHz | RX D2/INT0 on CHANGE, TX D3/INT1 pin; rc-switch 2.6.4; 70% receive tolerance; TX defaults to protocol 1, 350 us pulse, 10 repeats | Broad compatibility with the observed low-cost remote family | Lower tolerance reduces false matches; protocol/pulse can be supplied per transmit command |
 | Shift I/O | 74HC165 input and 74HC595 active-low output; 5 ms scan; first four input bits are keys; outputs start `0xFF`/off | Deterministic safe relay state and responsive keys | Electrical polarity constants must change only after a raw-input/output test |
 | Buzzer | D9/PB1/OC1A; Timer1 CTC hardware toggle; no audio-rate ISR | Removes the former timer/interrupt jitter and leaves Timer0 timing intact | Do not combine with Servo or `analogWrite()` on D9/D10 |
-| Addressable LEDs | D6/PD6, 11 pixels, 800 kHz, WS2811 BRG order, cleared at startup | Preserves the inherited strip without heap-heavy libraries | Set `PCCONTROLLER_USE_WS2812B=1` for a confirmed WS2812B/GRB strip |
-| PC-owned LCD | Firmware HD44780 renderer disabled; host scans common PCF8574 addresses `0x27` and `0x3F` and uses generic I2C transfers | Saves AVR flash while retaining richer text whenever the host is connected | An MCU LCD renderer can be restored at a measurable flash cost |
+| Addressable LEDs | D6/PD6, 11 pixels, 800 kHz, WS2811 BRG order, cleared at startup | Matches the installed strip without heap-heavy libraries | Set `PCCONTROLLER_USE_WS2812B=1` for a confirmed WS2812B/GRB strip |
+| HOST LCD | Firmware HD44780 renderer disabled; the host scans common PCF8574 addresses `0x27` and `0x3F` and uses generic I2C transfers | Saves AVR flash while retaining richer text whenever the host is connected | An MCU LCD renderer can be restored at a measurable flash cost |
 
 ## I2C bus initialization
 
@@ -126,8 +128,8 @@ Initialization performs the following operations:
    alternative active-low build writes `0x05`.
 5. Force all 16 channels off, retrying one failed all-off pass. Three
    consecutive write errors mark PWM unavailable rather than claiming success.
-6. Apply EEPROM PWM mode/user values, enclosure illumination, the power signal,
-   and status RGB.
+6. Apply illumination, display, status, and relay timing settings, then restore
+   only the relay/PWM domains explicitly enabled by the EEPROM output policy.
 
 Logical values are always `0..4095`, where 0 is electrically inactive and
 4095 is fully active. This build has `PCCONTROLLER_PWM_ACTIVE_LOW=0`; zero uses
@@ -141,11 +143,15 @@ the PCA9685 FULL_OFF bit and 4095 uses FULL_ON.
 | 12 | Power/on signal light |
 | 13, 14, 15 | Status RGB red, green, blue |
 
-An erased/invalid EEPROM selects Auto test at boot. Auto test is limited to
-channels 0..10, increments by 128 every 20 ms, reaches 4095, fades back to zero,
-then advances to the next selected channel. A saved EEPROM mode overrides the
-factory choice. Status/power/illumination channels are never included in this
-identification sweep.
+There is no autonomous sweep or global operating state. Every channel is set
+directly to a logical `0..4095` value through the front panel or the native
+`PWM_SET` command; repeatable demonstrations belong in host macros or
+automations. Channels 0..7 mirror their last value into the compact EEPROM
+array when changed by the native command/RF paths; the dedicated `uPWM` editor
+updates the same stored values. The direct all-channel front-panel editor is
+live-only. On a normal cold start those eight values are restored only when
+output persistence bit 2 is enabled. Channels 8..15 are not restored from that
+array.
 
 One kilohertz was chosen to remove visible lighting flicker while staying well
 inside the PCA9685 range. A different frequency can be requested from 24 to
@@ -211,7 +217,7 @@ on-level 128/255 and off-level 0/255. Its linear transition advances 4/255 every
 after a delayed loop. Opening the door selects the on level; closing selects the
 off level. Both levels and Off/Auto/On mode are EEPROM settings.
 
-The optional 16x2 LCD is PC-owned. The host discovers common backpacks,
+The optional 16x2 LCD is host-driven. The host discovers common backpacks,
 renders richer menu/event/prompt text, and can preload `PC offline` / `Connect
 USB to PC` behavior. The AVR retains only compact transfer/offline support.
 
@@ -266,10 +272,10 @@ Relay outputs are active-low and start off:
 | R4 | Side B enable/output |
 | R5..R8 | Independent general outputs |
 
-A reversal is sequenced as enable off, configurable break, direction change,
-50 ms settle, then enable. The EEPROM default break is 1 ms; the compact
-alternate setting is 100 ms. Direction changes between the two sides are
-separated by at least 5 ms. Factory motion-door policy is `always`; `closed`,
+A reversal is sequenced as enable off, the configured break, direction change,
+then enable. The EEPROM setting accepts 1..255 ms and defaults to 1 ms; no
+hidden settling delay is added. Direction changes
+between the two sides are separated by at least 5 ms. Factory motion-door policy is `always`; `closed`,
 `open`, and `never` are the other persistent policies.
 
 ## Buzzer, RGB, and addressable LEDs
@@ -284,7 +290,7 @@ factory status brightness is 128/255. Animation service runs every 20 ms with a
 step of 4/255. The user-ready palette order is red, blue, violet, green, white;
 status modes and transient event cues can override the ready color.
 
-The addressable output is 11 pixels on D6 at 800 kHz. The inherited hardware
+The addressable output is 11 pixels on D6 at 800 kHz. The installed hardware
 default is WS2811 BRG byte order. The startup frame is black/off. The current
 compact driver reports full brightness and its compatibility brightness setter
 does not scale pixels; brightness-sensitive effects should scale RGB values or
@@ -301,12 +307,13 @@ particular board.
 | Silent | off / audible |
 | Illumination mode | Auto |
 | Illumination on / off | 128 / 0 |
-| TM1637 brightness | 5 of 7 |
+| TM1637 brightness, door open / closed | 5 / 0 (closed 0 is display off) |
 | Status brightness | 128 of 255 |
-| PWM boot mode | Auto test |
+| Output persistence | restore user relays and stored user PWM; do not restore motion; full direction-off on stop |
+| Relay restore mask | `0x00` |
 | Telemetry stream | 500 ms |
 | User PWM 0..7 | all zero |
-| Default menu page | 0, Status |
+| Default menu page | 0, Door |
 | Save last page as default | off |
 | Voltage / current decimals | 2 / 2 |
 | Motion door policy | Always |

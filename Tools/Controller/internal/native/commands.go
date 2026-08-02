@@ -36,13 +36,14 @@ const (
 
 const (
 	SettingsSilent byte = 1 << iota
-	SettingsLCDEnabled
+	// SettingsProgrammingMode is the durable programming safety latch. While
+	// set, firmware keeps motion, relays, PWM, and illumination inactive.
+	SettingsProgrammingMode
 	SettingsSwapTemperatureRoles
 	SettingsMotionDoorPolicy0
 	SettingsMotionDoorPolicy1
 	SettingsDoorAudioDisabled
 	SettingsRelayAudioDisabled
-	SettingsReserved7
 )
 
 const SettingsMotionDoorPolicyMask = SettingsMotionDoorPolicy0 | SettingsMotionDoorPolicy1
@@ -53,6 +54,27 @@ const (
 	MotionDoorOpenOnly
 	MotionDoorNever
 )
+
+const (
+	KeyEventClick byte = iota
+	KeyEventDoubleClick
+	KeyEventHoldStart
+	KeyEventHoldRepeat
+	KeyEventHoldRelease
+	KeyEventDown
+	KeyEventUp
+)
+
+// RemoteKeyGesturePayload injects one canonical front-panel action and gesture.
+func RemoteKeyGesturePayload(action, event byte) ([]byte, error) {
+	if action > MenuIncrease {
+		return nil, fmt.Errorf("remote key action %d is outside 0..3", action)
+	}
+	if event > KeyEventUp {
+		return nil, fmt.Errorf("remote key event %d is outside 0..6", event)
+	}
+	return []byte{action, event}, nil
+}
 
 func U16(value uint16) []byte {
 	return []byte{byte(value), byte(value >> 8)}
@@ -265,17 +287,28 @@ const (
 	RFBehaviorStop
 )
 
-func RFLearnStartPayload(timeoutSeconds byte) ([]byte, error) {
+// RFLearnStartPayload selects one of the two current learning modes. The
+// indefinite multi-code mode has no timeout; timer mode is bounded on the MCU.
+func RFLearnStartPayload(mode, timeoutSeconds byte) ([]byte, error) {
+	if mode > RFLearnModeTimer {
+		return nil, fmt.Errorf("RF learn mode %d is outside 0..1", mode)
+	}
+	if mode == RFLearnModeIndefinite {
+		if timeoutSeconds != 0 {
+			return nil, fmt.Errorf("indefinite RF learning does not accept a timeout")
+		}
+		return []byte{mode, 0}, nil
+	}
 	if timeoutSeconds == 0 || timeoutSeconds > MaxRFLearnSeconds {
 		return nil, fmt.Errorf(
-			"RF learn timeout must be 1..%d seconds",
+			"RF learn timer must be 1..%d seconds",
 			MaxRFLearnSeconds,
 		)
 	}
-	return []byte{timeoutSeconds}, nil
+	return []byte{mode, timeoutSeconds}, nil
 }
 
-func RFMapPayload(id, actionKind, actionValue, behavior byte) ([]byte, error) {
+func RFMappingPayload(id, actionKind, actionValue, behavior byte) ([]byte, error) {
 	if actionKind > RFActionPWM {
 		return nil, fmt.Errorf("RF action kind %d is unknown", actionKind)
 	}
@@ -309,7 +342,7 @@ func RFReplacePayload(entry RFEntry) ([]byte, error) {
 		entry.Protocol == 0 {
 		return nil, fmt.Errorf("invalid learned RF record id=%d code=%d bits=%d protocol=%d", entry.ID, entry.Code, entry.Bits, entry.Protocol)
 	}
-	if _, err := RFMapPayload(entry.ID, entry.ActionKind, entry.ActionValue, entry.Behavior); err != nil {
+	if _, err := RFMappingPayload(entry.ID, entry.ActionKind, entry.ActionValue, entry.Behavior); err != nil {
 		return nil, err
 	}
 	payload := make([]byte, RFEntryPayloadSize)
@@ -325,16 +358,73 @@ func RFReplacePayload(entry RFEntry) ([]byte, error) {
 }
 
 type Settings struct {
-	Flags             byte   `json:"flags"`
-	LightMode         byte   `json:"light_mode"`
-	OnBrightness      byte   `json:"on_brightness"`
-	OffBrightness     byte   `json:"off_brightness"`
-	DisplayBrightness byte   `json:"display_brightness"`
-	StatusBrightness  byte   `json:"status_brightness"`
-	PWMBootMode       byte   `json:"pwm_boot_mode"`
-	StreamPeriodMS    uint16 `json:"stream_period_ms"`
-	DefaultPage       byte   `json:"default_page"`
-	ExtendedFlags     byte   `json:"extended_flags"`
+	Flags                   byte   `json:"flags"`
+	LightMode               byte   `json:"light_mode"`
+	OnBrightness            byte   `json:"on_brightness"`
+	OffBrightness           byte   `json:"off_brightness"`
+	DisplayBrightness       byte   `json:"display_brightness"`
+	StatusBrightness        byte   `json:"status_brightness"`
+	OutputPersistence       byte   `json:"output_persistence"`
+	StreamPeriodMS          uint16 `json:"stream_period_ms"`
+	DefaultPage             byte   `json:"default_page"`
+	ExtendedFlags           byte   `json:"extended_flags"`
+	DisplayClosedBrightness byte   `json:"display_closed_brightness"`
+	MotionExitHoldSeconds   byte   `json:"motion_exit_hold_seconds"`
+	RelayRestoreMask        byte   `json:"relay_restore_mask"`
+	MotionBreakMSValue      byte   `json:"-"`
+}
+
+const (
+	settingsDisplayClosedBrightnessMask  byte = 0x07
+	settingsMotionExitHoldShift               = 3
+	SettingsDefaultMotionExitHoldSeconds byte = 2
+	SettingsMaximumMotionExitHoldSeconds byte = 31
+)
+
+const (
+	OutputPersistMotionDefault byte = 1 << iota
+	OutputPersistUserRelays
+	OutputPersistUserPWM
+	OutputPersistDirectionOnly
+	OutputPersistenceMask = OutputPersistMotionDefault |
+		OutputPersistUserRelays | OutputPersistUserPWM | OutputPersistDirectionOnly
+)
+
+// displayOptions packs two current EEPROM settings into the final SETTINGS
+// byte: closed brightness in bits 0..2 and motion-menu exit hold in bits 3..7.
+func (settings Settings) displayOptions() (byte, error) {
+	if settings.DisplayClosedBrightness > settingsDisplayClosedBrightnessMask {
+		return 0, fmt.Errorf(
+			"closed display brightness %d is outside 0..7",
+			settings.DisplayClosedBrightness,
+		)
+	}
+	holdSeconds := settings.MotionExitHoldSeconds
+	if holdSeconds == 0 {
+		holdSeconds = SettingsDefaultMotionExitHoldSeconds
+	}
+	if holdSeconds > SettingsMaximumMotionExitHoldSeconds {
+		return 0, fmt.Errorf(
+			"motion exit hold %d seconds is outside 1..%d",
+			holdSeconds,
+			SettingsMaximumMotionExitHoldSeconds,
+		)
+	}
+	encodedHold := holdSeconds
+	if holdSeconds == SettingsDefaultMotionExitHoldSeconds {
+		encodedHold = 0
+	}
+	return settings.DisplayClosedBrightness |
+		(encodedHold << settingsMotionExitHoldShift), nil
+}
+
+func decodeDisplayOptions(value byte) (closedBrightness, holdSeconds byte) {
+	closedBrightness = value & settingsDisplayClosedBrightnessMask
+	holdSeconds = value >> settingsMotionExitHoldShift
+	if holdSeconds == 0 {
+		holdSeconds = SettingsDefaultMotionExitHoldSeconds
+	}
+	return closedBrightness, holdSeconds
 }
 
 func (settings Settings) MotionDoorPolicy() byte {
@@ -375,9 +465,6 @@ func (settings *Settings) SetRelayAudioEnabled(value bool) {
 }
 
 const (
-	// SettingsMotionBreak100MS selects the conservative 100 ms direction dead-time;
-	// a clear bit keeps the space-efficient/default 1 ms motion break.
-	SettingsMotionBreak100MS   byte = 1 << 7
 	SettingsSaveLastPage       byte = 1 << 0
 	SettingsStatusColorMask    byte = 0x0E
 	SettingsVoltageDecimalMask byte = 0x30
@@ -386,32 +473,48 @@ const (
 )
 
 func (settings Settings) MotionBreakMS() uint16 {
-	if settings.Flags&SettingsMotionBreak100MS != 0 {
-		return 100
-	}
-	return 1
+	return uint16(settings.MotionBreakMSValue)
 }
 
 func (settings *Settings) SetMotionBreakMS(milliseconds uint16) error {
-	switch milliseconds {
-	case 1:
-		settings.Flags &^= SettingsMotionBreak100MS
-	case 100:
-		settings.Flags |= SettingsMotionBreak100MS
-	default:
-		return fmt.Errorf("motion break %d ms must be 1 or 100", milliseconds)
+	if milliseconds < 1 || milliseconds > 255 {
+		return fmt.Errorf("motion break %d ms must be 1..255", milliseconds)
 	}
+	settings.MotionBreakMSValue = byte(milliseconds)
 	return nil
 }
 
-// MarshalJSON keeps the compact EEPROM flag authoritative while publishing
-// its human-readable motion dead-time alongside the raw protocol bytes.
+// MarshalJSON publishes the exact motion dead-time alongside the raw protocol
+// fields while keeping its byte-sized wire representation internal.
 func (settings Settings) MarshalJSON() ([]byte, error) {
 	type wireSettings Settings
 	return json.Marshal(struct {
 		wireSettings
 		MotionBreakMS uint16 `json:"motion_break_ms"`
 	}{wireSettings: wireSettings(settings), MotionBreakMS: settings.MotionBreakMS()})
+}
+
+// UnmarshalJSON is the inverse of MarshalJSON. MotionBreakMSValue is hidden
+// from the raw wire representation, so recovery artifacts must explicitly
+// restore the published semantic field instead of silently accepting zero.
+func (settings *Settings) UnmarshalJSON(content []byte) error {
+	type wireSettings Settings
+	decoded := struct {
+		wireSettings
+		MotionBreakMS *uint16 `json:"motion_break_ms"`
+	}{}
+	if err := json.Unmarshal(content, &decoded); err != nil {
+		return err
+	}
+	if decoded.MotionBreakMS == nil {
+		return fmt.Errorf("motion_break_ms is required")
+	}
+	value := Settings(decoded.wireSettings)
+	if err := value.SetMotionBreakMS(*decoded.MotionBreakMS); err != nil {
+		return err
+	}
+	*settings = value
+	return nil
 }
 
 func (settings Settings) SaveLastPage() bool {
@@ -475,9 +578,7 @@ func (settings *Settings) SetCurrentDecimals(value byte) error {
 	)
 }
 
-// An encoded value of zero is deliberately reserved for the two-decimal
-// default. Existing schema-2 EEPROM records predate these fields and therefore
-// decode safely without a migration or an EEPROM record-size change.
+// Zero canonically encodes two decimals; values 1..3 encode decimal counts 0..2.
 func decodeDecimalSetting(flags, mask byte, shift uint) byte {
 	encoded := (flags & mask) >> shift
 	if encoded == 0 {
@@ -508,11 +609,21 @@ func (settings Settings) Payload() ([]byte, error) {
 			settings.DisplayBrightness,
 		)
 	}
+	displayOptions, err := settings.displayOptions()
+	if err != nil {
+		return nil, err
+	}
 	if settings.LightMode > 2 {
 		return nil, fmt.Errorf("light mode %d is outside 0..2", settings.LightMode)
 	}
-	if settings.PWMBootMode > PWMAuto {
-		return nil, fmt.Errorf("PWM boot mode %d is outside 0..2", settings.PWMBootMode)
+	if settings.OutputPersistence&^OutputPersistenceMask != 0 {
+		return nil, fmt.Errorf(
+			"output persistence flags 0x%02X exceed mask 0x%02X",
+			settings.OutputPersistence, OutputPersistenceMask,
+		)
+	}
+	if settings.MotionBreakMSValue == 0 {
+		return nil, fmt.Errorf("motion break must be 1..255 ms")
 	}
 	if _, err := StreamPeriodPayload(settings.StreamPeriodMS); err != nil {
 		return nil, err
@@ -525,11 +636,14 @@ func (settings Settings) Payload() ([]byte, error) {
 		settings.OffBrightness,
 		settings.DisplayBrightness,
 		settings.StatusBrightness,
-		settings.PWMBootMode,
+		settings.OutputPersistence,
 		0,
 		0,
 		settings.DefaultPage,
 		settings.ExtendedFlags,
+		displayOptions,
+		settings.RelayRestoreMask,
+		settings.MotionBreakMSValue,
 	}
 	binary.LittleEndian.PutUint16(payload[8:10], settings.StreamPeriodMS)
 	return payload, nil

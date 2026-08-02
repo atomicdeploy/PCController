@@ -12,19 +12,22 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 	path := writeEEPROMFixture(t, func(data []byte) {
 		settings := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsRecordBytes]
 		values := settings[:EEPROMSettingsValueBytes]
-		values[0] = 0x20 | 0x80 // Door audio disabled, 100 ms motion break.
+		values[0] = 0x20 // Door audio disabled.
 		values[1] = 1
 		values[2] = 180
 		values[3] = 7
 		values[4] = 5
 		values[5] = 123
-		values[6] = 2
+		values[6] = 0x06
 		binary.LittleEndian.PutUint16(values[7:9], 250)
 		copy(values[9:17], []byte{1, 2, 3, 4, 5, 6, 7, 8})
-		values[17] = 14
+		values[17] = 13
 		values[18] = 0x01 | 0x06 | 0x10 | 0xC0
-		binary.LittleEndian.PutUint16(values[19:21], 0x7FFF)
-		copy(values[21:29], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE})
+		binary.LittleEndian.PutUint16(values[19:21], 0x3FFF)
+		copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})
+		values[28] = (9 << 3) | 2
+		values[29] = 0xF0
+		values[30] = 100
 		settings[EEPROMSettingsValueBytes] = avrCRC8(values)
 
 		header := data[EEPROMRemoteHeaderAddress : EEPROMRemoteHeaderAddress+4]
@@ -56,23 +59,25 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.SourceKind != "offline-eeprom-hex" ||
-		decoded.Layout != "settings-unversioned-29/rf-record12-cap20/reset-journal-320" ||
+		decoded.Layout != "settings-unversioned-31/rf-record12-cap20/reset-journal-320" ||
 		!decoded.Settings.Supported || !decoded.Settings.Valid ||
-		decoded.Settings.Format != "current/unversioned-29+crc8" ||
-		decoded.Settings.ValueBytes != 29 {
+		decoded.Settings.Format != "current/unversioned-31+crc8" ||
+		decoded.Settings.ValueBytes != 31 {
 		t.Fatalf("settings decode invalid: %#v", decoded.Settings)
 	}
 	settings := decoded.Settings.Values
-	if settings.Silent || settings.Reserved1 || settings.DoorAudioEnabled ||
+	if settings.Silent || settings.ProgrammingMode || settings.DoorAudioEnabled ||
 		!settings.RelayAudioEnabled || settings.StreamPeriodMS != 250 ||
-		settings.UserPWM[7] != 8 || settings.DefaultMenuPage != 14 ||
+		settings.UserPWM[7] != 8 || settings.DefaultMenuPage != 13 ||
 		settings.VoltageDecimals != 0 || settings.CurrentDecimals != 2 ||
 		settings.StatusColor != 3 || !settings.SaveLastMenuPage ||
-		settings.VisibleMenuMask != 0x7FFF || settings.MenuOrder[7] != 0xFE {
+		settings.VisibleMenuMask != 0x3FFF || settings.MenuOrder[6] != 0xDC ||
+		settings.DisplayClosedBrightness != 2 || settings.MotionExitHoldSeconds != 9 ||
+		settings.OutputPersistence != 0x06 || settings.RelayRestoreMask != 0xF0 {
 		t.Fatalf("unexpected decoded settings: %#v", settings)
 	}
 	if settings.MotionBreakMS != 100 {
-		t.Fatalf("motion break selector was not named/decoded: %#v", settings)
+		t.Fatalf("exact motion break was not decoded: %#v", settings)
 	}
 	if !decoded.Remotes.Valid || decoded.Remotes.ValidCount != 1 ||
 		decoded.Remotes.InvalidCount != 0 || len(decoded.Remotes.Slots) != 20 {
@@ -97,8 +102,10 @@ func TestDecodeOfflineEEPROMReportsCRCAndHeaderDamage(t *testing.T) {
 		values[1] = 1
 		values[4] = 5
 		binary.LittleEndian.PutUint16(values[7:9], 500)
-		binary.LittleEndian.PutUint16(values[19:21], 0x7FFF)
-		copy(values[21:29], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE})
+		binary.LittleEndian.PutUint16(values[19:21], 0x3FFF)
+		copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})
+		values[28] = 0
+		values[30] = 1
 		settings[EEPROMSettingsValueBytes] = 0x99
 		header := data[EEPROMRemoteHeaderAddress : EEPROMRemoteHeaderAddress+4]
 		binary.LittleEndian.PutUint16(header[0:2], 0x4C52)
@@ -172,18 +179,18 @@ func TestDecodeOfflineEEPROMRejectsInvalidCurrentMenuLayout(t *testing.T) {
 	for _, test := range []struct {
 		name  string
 		mask  uint16
-		order [8]byte
+		order [7]byte
 		issue string
 	}{
 		{
 			name:  "empty-visible-mask",
-			order: [8]byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE},
+			order: [7]byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC},
 			issue: "visible menu mask",
 		},
 		{
 			name:  "duplicate-order",
-			mask:  0x7FFF,
-			order: [8]byte{0x00, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE},
+			mask:  0x3FFF,
+			order: [7]byte{0x00, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC},
 			issue: "duplicated",
 		},
 	} {
@@ -197,7 +204,9 @@ func TestDecodeOfflineEEPROMRejectsInvalidCurrentMenuLayout(t *testing.T) {
 				values[6] = 2
 				binary.LittleEndian.PutUint16(values[7:9], 500)
 				binary.LittleEndian.PutUint16(values[19:21], test.mask)
-				copy(values[21:29], test.order[:])
+				copy(values[21:28], test.order[:])
+				values[28] = 0
+				values[30] = 1
 				record[EEPROMSettingsValueBytes] = avrCRC8(values)
 			})
 			decoded, err := DecodeOfflineEEPROMHex(path)

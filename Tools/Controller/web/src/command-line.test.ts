@@ -8,11 +8,15 @@ const settings: ControllerSettings = {
   on_brightness: 220,
   off_brightness: 18,
   display_brightness: 5,
+  display_closed_brightness: 0,
+  motion_exit_hold_seconds: 2,
   status_brightness: 160,
-  pwm_boot_mode: 1,
+  output_persistence: 6,
+  relay_restore_mask: 240,
   stream_period_ms: 200,
   default_page: 4,
   extended_flags: 1,
+  motion_break_ms: 1,
 }
 
 describe('shared command builders', () => {
@@ -25,9 +29,9 @@ describe('shared command builders', () => {
   })
 
   it('uses the supported settings form with default-page and save-last together', () => {
-    const command = settingsSetCommand(settings, 6, 170, 500)
-    expect(command).toBe('settings set 2 1 220 18 6 170 1 500 4 1')
-    expect(command.split(' ')).toHaveLength(12)
+    const command = settingsSetCommand(settings, 6, 1, 170, 500, 9, 7, 160)
+    expect(command).toBe('settings set 2 1 220 18 6 1 170 7 500 4 1 0 2 2 9 160')
+    expect(command.split(' ')).toHaveLength(18)
   })
 
   it('redacts host power confirmation tokens without hiding ordinary commands', () => {

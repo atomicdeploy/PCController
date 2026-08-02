@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowDownToLine,
+  Braces,
   Download,
+  History,
   Network,
   PackageSearch,
   Search,
@@ -21,7 +24,7 @@ import {
   StatusBadge,
   TextField,
 } from './components'
-import { downloadURL, integrationFetch } from './api'
+import { downloadIntegration, integrationFetch } from './api'
 import { formatCompact } from './i18n'
 import type { SharedViewProps } from './views'
 
@@ -41,6 +44,7 @@ function recordsFromPayload(payload: unknown): Record<string, unknown>[] {
 }
 
 export function DataWorkspaceView({ locale, t }: SharedViewProps) {
+  const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const [tab, setTab] = useState<DataWorkspaceTab>('explore')
   const [relativePath, setRelativePath] = useState('v1/status')
   const [method, setMethod] = useState<'GET' | 'POST'>('GET')
@@ -66,6 +70,18 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
       const normalizedPath = relativePath.replace(/^\/+/, '')
       const entry = `${method} /${normalizedPath}`
       setHistory((current) => [entry, ...current.filter((item) => item !== entry)].slice(0, 6))
+      setError('')
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const downloadCurrent = async () => {
+    setBusy(true)
+    try {
+      await downloadIntegration('datahub', relativePath)
       setError('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -100,55 +116,65 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
   return (
     <>
       <SectionTitle
-        eyebrow="LOCAL DATA / STREAMING BRIDGE"
+        eyebrow={copy('Local data and streaming', 'داده و جریان محلی')}
         title={t('data')}
-        detail="A loopback-only workbench for deliberate data exchange; no service-specific routes or credentials are embedded."
-        action={<StatusBadge tone={error ? 'warn' : response ? 'good' : 'info'}>{response ? 'RESPONSE READY' : 'IDLE'}</StatusBadge>}
+        detail={copy('A loopback-only workbench for deliberate data exchange; no service-specific routes or credentials are embedded.', 'میزکاری محدود به شبکهٔ محلی برای تبادل آگاهانهٔ داده؛ هیچ مسیر اختصاصی سرویس یا اطلاعات دسترسی در رابط تعبیه نشده است.')}
+        action={<StatusBadge tone={error ? 'warn' : response ? 'good' : 'info'}>{response ? copy('RESPONSE READY', 'پاسخ آماده') : copy('IDLE', 'آماده')}</StatusBadge>}
       />
-      <nav className="subnav" aria-label="Data workspace sections">
+      <nav className="subnav" aria-label={copy('Data workspace sections', 'بخش‌های فضای داده')}>
         {([
-          ['explore', SquareTerminal, 'Request'],
+          ['explore', SquareTerminal, copy('Request', 'درخواست')],
           ['table', TableProperties, `${t('records')} · ${formatCompact(locale, records.length)}`],
-          ['transfer', ArrowDownToLine, 'Transfer'],
+          ['transfer', ArrowDownToLine, copy('Transfer', 'انتقال')],
         ] as const).map(([value, icon, label]) => (
           <button key={value} className={tab === value ? 'is-active' : ''} onClick={() => setTab(value)}>
             <Icon icon={icon} size={17} />{label}
           </button>
         ))}
       </nav>
-      {error && <div className="integration-banner"><Network size={19} /><div><strong>{t('unavailable')}</strong><p>{error}</p></div></div>}
+      <AnimatePresence initial={false}>
+        {error && <motion.div
+          key="data-workspace-error"
+          className="integration-banner"
+          role="alert"
+          initial={{ height: 0, marginBottom: 0, opacity: 0, clipPath: 'inset(0 0 100% 0)', filter: 'blur(5px)' }}
+          animate={{ height: 'auto', marginBottom: 14, opacity: 1, clipPath: 'inset(0 0 0% 0)', filter: 'blur(0px)' }}
+          exit={{ height: 0, marginBottom: 0, opacity: 0, clipPath: 'inset(0 0 100% 0)', filter: 'blur(4px)' }}
+          transition={{ duration: .28, ease: [0.22, 1, 0.36, 1] }}
+        ><Network size={19} /><div><strong>{t('unavailable')}</strong><p>{error}</p></div></motion.div>}
+      </AnimatePresence>
 
       {tab === 'explore' && (
         <section className="operations-grid">
-          <Card title="Request composer" eyebrow="SAME-ORIGIN / AUTHENTICATED">
-            <div className="setting-group"><label>Method</label><Segmented value={method} label="HTTP method" options={[{ value: 'GET', label: 'GET' }, { value: 'POST', label: 'POST' }]} onChange={setMethod} /></div>
-            <TextField label="Relative data path" dir="ltr" spellCheck={false} value={relativePath} placeholder="v1/status" onChange={(event) => setRelativePath(event.target.value)} hint="The upstream origin comes only from persistent host configuration." />
-            {method === 'POST' && <label className="payload-field"><span>JSON body</span><textarea dir="ltr" spellCheck={false} value={requestBody} onChange={(event) => setRequestBody(event.target.value)} /></label>}
-            <Button tone="primary" icon={Send} busy={busy} disabled={!relativePath.trim()} onClick={() => void runRequest()}>Send request</Button>
+          <Card icon={Send} iconTone="violet" title={copy('Request composer', 'ساخت درخواست')} eyebrow={copy('Authenticated host route', 'مسیر معتبر میزبان')}>
+            <div className="setting-group"><label>{copy('Method', 'روش')}</label><Segmented value={method} label={copy('HTTP method', 'روش HTTP')} options={[{ value: 'GET', label: 'GET' }, { value: 'POST', label: 'POST' }]} onChange={setMethod} /></div>
+            <TextField label={copy('Relative data path', 'مسیر نسبی داده')} dir="ltr" spellCheck={false} value={relativePath} placeholder="v1/status" onChange={(event) => setRelativePath(event.target.value)} hint={copy('The upstream origin comes only from persistent host configuration.', 'مبدأ بالادستی فقط از پیکربندی ماندگار میزبان خوانده می‌شود.')} />
+            {method === 'POST' && <label className="payload-field"><span>{copy('JSON body', 'بدنهٔ JSON')}</span><textarea dir="ltr" spellCheck={false} value={requestBody} onChange={(event) => setRequestBody(event.target.value)} /></label>}
+            <Button tone="primary" icon={Send} busy={busy} disabled={!relativePath.trim()} onClick={() => void runRequest()}>{copy('Send request', 'ارسال درخواست')}</Button>
           </Card>
-          <Card title="Response" eyebrow="BOUNDED JSON / TEXT" className="operation-result">
-            <pre className="operation-output" dir="ltr">{response === null ? 'Run a request to inspect the response.' : typeof response === 'string' ? response : JSON.stringify(response, null, 2)}</pre>
+          <Card icon={Braces} iconTone="accent" title={copy('Response', 'پاسخ')} eyebrow={response === null ? copy('No response', 'بدون پاسخ') : copy(`${records.length} projected records`, `${formatCompact(locale, records.length)} رکورد استخراج‌شده`)} className="operation-result">
+            <pre className="operation-output" dir="ltr">{response === null ? copy('Run a request to inspect the response.', 'برای بررسی پاسخ، یک درخواست اجرا کنید.') : typeof response === 'string' ? response : JSON.stringify(response, null, 2)}</pre>
           </Card>
-          <Card title="Recent local requests" eyebrow="SESSION MEMORY">
-            <div className="command-chips">{history.length ? history.map((entry) => <button key={entry} dir="ltr" onClick={() => recall(entry)}>{entry}</button>) : <p className="card-copy">No requests in this browser session.</p>}</div>
+          <Card icon={History} iconTone="green" title={copy('Recent local requests', 'درخواست‌های محلی اخیر')} eyebrow={copy(`${history.length} in this tab`, `${formatCompact(locale, history.length)} مورد در این زبانه`)}>
+            <div className="command-chips">{history.length ? history.map((entry) => <button key={entry} dir="ltr" onClick={() => recall(entry)}>{entry}</button>) : <p className="card-copy">{copy('No requests in this browser session.', 'در این نشست مرورگر هنوز درخواستی اجرا نشده است.')}</p>}</div>
           </Card>
         </section>
       )}
 
       {tab === 'table' && (
-        <Card className="records-card" title={`${t('records')} · ${formatCompact(locale, records.length)}`} eyebrow="SCHEMA-FREE PROJECTION" action={<label className="table-search"><Search size={16} /><input value={search} placeholder={t('search')} onChange={(event) => setSearch(event.target.value)} /></label>}>
-          {!filtered.length ? <EmptyState icon={PackageSearch} title="No tabular records" detail="Run a request whose response is an array or contains a records/data array." /> : (
+        <Card icon={TableProperties} iconTone="violet" className="records-card" title={`${t('records')} · ${formatCompact(locale, records.length)}`} eyebrow={copy(`${filtered.length} visible`, `${formatCompact(locale, filtered.length)} مورد نمایان`)} action={<label className="table-search"><Search size={16} /><input value={search} placeholder={t('search')} onChange={(event) => setSearch(event.target.value)} /></label>}>
+          {!filtered.length ? <EmptyState icon={PackageSearch} title={copy('No tabular records', 'رکورد جدولی موجود نیست')} detail={copy('Run a request whose response is an array or contains a records/data array.', 'درخواستی اجرا کنید که پاسخ آن آرایه باشد یا آرایهٔ records/data داشته باشد.')} /> : (
             <div className="data-table-wrap"><table className="data-table"><thead><tr><th>#</th>{columns.map((column) => <th key={column}>{column.replaceAll('_', ' ')}</th>)}</tr></thead><tbody>{filtered.map((record, index) => <tr key={String(record.id ?? record.code ?? index)}><td>{index + 1}</td>{columns.map((column) => <td key={column}>{String(record[column] ?? '—')}</td>)}</tr>)}</tbody></table></div>
           )}
-          <footer className="table-footer"><span>{filtered.length} / {records.length}</span><span><ShieldCheck size={15} /> Credentials stripped</span><span><ArrowDownToLine size={15} /> {t('rangeReady')}</span></footer>
+          <footer className="table-footer"><span>{filtered.length} / {records.length}</span><span><ShieldCheck size={15} /> {copy('Credentials stripped', 'اطلاعات دسترسی حذف شده')}</span><span><ArrowDownToLine size={15} /> {t('rangeReady')}</span></footer>
         </Card>
       )}
 
       {tab === 'transfer' && (
         <section className="system-grid">
-          <Card title="Streaming download" eyebrow="HEAD / RANGE / ETAG"><p className="card-copy">Download the current relative path through the authenticated bridge. The host preserves byte ranges and validators without buffering the payload.</p><a className={`button button--secondary${relativePath.trim() ? '' : ' is-disabled'}`} href={relativePath.trim() ? downloadURL('datahub', relativePath) : undefined}><span className="button__wash" /><Download size={17} />Download current path</a></Card>
-          <Card title="Boundary guarantees" eyebrow="FAIL CLOSED"><div className="data-list"><DataRow label="Upstream" value="Configured loopback root" /><DataRow label="Credentials" value="Removed before forwarding" tone="good" /><DataRow label="Redirect selection" value="Host-owned" /><DataRow label="Range requests" value="Preserved" tone="good" /></div></Card>
-          <Card title="Current response" eyebrow="SOURCE-BACKED"><pre className="operation-output" dir="ltr">{response === null ? 'No response loaded.' : typeof response === 'string' ? response : JSON.stringify(response, null, 2)}</pre></Card>
+          <Card icon={Download} iconTone="accent" title={copy('Streaming download', 'دانلود جریانی')} eyebrow={relativePath.trim() ? `/${relativePath.replace(/^\/+/, '')}` : copy('No path selected', 'مسیری انتخاب نشده')}>{relativePath.trim() && <Button icon={Download} busy={busy} onClick={() => void downloadCurrent()}>{copy('Download current path', 'دانلود مسیر فعلی')}</Button>}</Card>
+          <Card icon={ShieldCheck} iconTone="green" title={copy('Boundary status', 'وضعیت مرز امنیتی')} eyebrow={error ? copy('Request rejected', 'درخواست رد شد') : copy('Host mediated', 'با میانجی‌گری میزبان')}><div className="data-list"><DataRow label={copy('Upstream', 'بالادست')} value={copy('Configured loopback root', 'ریشهٔ محلی پیکربندی‌شده')} /><DataRow label={copy('Credentials', 'اطلاعات دسترسی')} value={copy('Removed before forwarding', 'پیش از ارسال حذف می‌شود')} tone="good" /><DataRow label={copy('Redirect selection', 'انتخاب تغییرمسیر')} value={copy('Host-owned', 'در اختیار میزبان')} /><DataRow label={copy('Range requests', 'درخواست‌های بازه‌ای')} value={copy('Preserved', 'حفظ می‌شوند')} tone="good" /></div></Card>
+          <Card icon={SquareTerminal} iconTone="violet" title={copy('Current response', 'پاسخ فعلی')} eyebrow={response === null ? copy('No response', 'بدون پاسخ') : typeof response === 'string' ? copy('Text', 'متن') : copy('Structured data', 'دادهٔ ساخت‌یافته')}>{response !== null && <pre className="operation-output" dir="ltr">{typeof response === 'string' ? response : JSON.stringify(response, null, 2)}</pre>}</Card>
         </section>
       )}
     </>

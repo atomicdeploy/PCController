@@ -1,3 +1,5 @@
+<div align="center"><a href="../../README.md"><img src="../../docs/assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Reproducible Dependency Maintenance
 
 PCController follows a **latest stable, exactly locked** dependency policy.
@@ -14,7 +16,7 @@ reset a board, start the TUI, write EEPROM, or invoke a programmer.
 | Area | Selection policy | Reproducible evidence |
 | --- | --- | --- |
 | Firmware CLI, MiniCore, firmware libraries, Urboot, Go | Stable channel at or above the declared minimum in `Tools/Controller/toolchain-profile.json` | Exact `Tools/Controller/toolchain-lock.json`, including archive/source hashes and the Urboot commit/tree |
-| Node.js, UPX, go-winres, and GitHub Actions | Stable/LTS policy in `Tools/Dependencies/dependency-policy.json` | Exact `Tools/Dependencies/resolved-tools-lock.json`; Actions revisions are maintained by Dependabot |
+| Node.js, UPX, go-winres, native Windows GCC, and GitHub Actions | Stable/LTS policy in `Tools/Dependencies/dependency-policy.json` | Exact `Tools/Dependencies/resolved-tools-lock.json`, including the compiler package/target/archive integrity and every immutable Action revision with its workflow consumers; revisions are maintained by the updater and Dependabot |
 | Go modules | Latest compatible source requirements | `Tools/Controller/go.mod` and `go.sum` |
 | Build-output npm packages | Compatible ranges, Node.js 22.12 or newer | `Tools/Build/package-lock.json` |
 | Web npm packages | Compatible ranges | `Tools/Controller/web/package-lock.json` |
@@ -59,6 +61,11 @@ When a stable Urboot tag changes, validation must fetch the immutable source,
 verify every source hash, reapply the Urboot-Custom unified diff, reproduce the
 historical stock fixture, and rebuild the 512-byte custom image. A failed rebase
 blocks the candidate rather than dropping the customization.
+
+Every third-party Action is referenced by a 40-character commit revision with
+a readable major-version comment. The updater rejects floating tags, records
+the complete Action inventory in the host-tool lock, and leaves discovery of
+new compatible revisions to Dependabot.
 
 ## Commands
 
@@ -132,6 +139,12 @@ areas still work together:
 - VirtualBoard configure, compile, and CTest execution;
 - generated firmware, bootloader, and host manifests.
 
+The candidate report also contains npm audit severity totals. A deterministic
+PR plan turns the report into release-note links, explicit license/security/size
+review statements, memory headroom, compressed host size, and reviewer
+checkboxes. Non-npm security and license changes remain deliberately visible
+review items rather than being presented as automatically proven safe.
+
 UPX and go-winres are provisioned into managed build locations from the exact
 resolved release identities. No developer-specific absolute path is stored in
 the policy, lock, or build output.
@@ -155,6 +168,17 @@ issue with the run, commit, error, and artifact location; it does not open a
 known-broken PR. The issue is closed after a later candidate passes. Dependabot
 separately maintains stable GitHub Actions, Go modules, and the two npm lock
 domains.
+
+Before opening a dependency PR, the workflow generates
+`.build/dependencies/dependency-pr-plan.json` and `dependency-pr.md` from the
+same report that passed validation. This makes the PR description repeatable
+and prevents a hand-maintained body from drifting away from the tested
+candidate.
+
+Focused tests cover stable version selection, timestamp-free idempotence,
+exact lock replay, Action pin inventory, deterministic PR planning, partial
+network failure, case-insensitive proxy inheritance, and the single bounded
+direct fallback. Full candidate validation covers the integrated build matrix.
 
 The workflow definition, local resolver checks, and source-level tests have
 been validated in this workspace. A real scheduled/manual GitHub Actions run

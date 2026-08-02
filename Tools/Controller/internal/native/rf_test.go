@@ -36,15 +36,15 @@ func TestParseRFEntries(t *testing.T) {
 	}
 }
 
-func TestRFMapPayloadValidation(t *testing.T) {
-	payload, err := RFMapPayload(3, RFActionKey, 2, RFBehaviorPress)
+func TestRFMappingPayloadValidation(t *testing.T) {
+	payload, err := RFMappingPayload(3, RFActionKey, 2, RFBehaviorPress)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(payload) != string([]byte{3, RFActionKey, 2, RFBehaviorPress}) {
 		t.Fatalf("payload = % X", payload)
 	}
-	if _, err := RFMapPayload(3, RFActionRelay, 8, RFBehaviorToggle); err == nil {
+	if _, err := RFMappingPayload(3, RFActionRelay, 8, RFBehaviorToggle); err == nil {
 		t.Fatal("expected invalid relay value")
 	}
 }

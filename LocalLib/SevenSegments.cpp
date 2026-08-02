@@ -11,8 +11,10 @@
 
 namespace {
 
+// TM1637 command bytes and segment masks used by the bit-banged transport.
 constexpr uint8_t DataCommand = 0x40;
 constexpr uint8_t AddressCommand = 0xC0;
+constexpr uint8_t DisplayOffCommand = 0x80;
 constexpr uint8_t DisplayOnCommand = 0x88;
 constexpr uint8_t DecimalPoint = 0x80;
 constexpr uint8_t MinusSegment = 0x40;
@@ -180,8 +182,26 @@ void SevenSegments::setBrightness(uint8_t brightness) {
   }
   brightness_ = brightness;
   if (begun_) {
-    sendCommand(static_cast<uint8_t>(DisplayOnCommand | brightness_));
+    // Zero is a true display-off level; values 1..7 retain their prior TM1637
+    // intensity mapping so existing nonzero EEPROM settings do not get dimmer.
+    sendCommand(brightness_ == 0
+                    ? DisplayOffCommand
+                    : static_cast<uint8_t>(DisplayOnCommand | brightness_));
   }
+}
+
+void SevenSegments::serviceBrightness(uint8_t target, uint32_t now) {
+  if (target > 7) {
+    target = 7;
+  }
+  const uint16_t tick = static_cast<uint16_t>(now);
+  if (brightness_ == target ||
+      static_cast<uint16_t>(tick - brightnessChangedAt_) < 70U) {
+    return;
+  }
+  brightnessChangedAt_ = tick;
+  setBrightness(static_cast<uint8_t>(brightness_ +
+                                     (brightness_ < target ? 1 : -1)));
 }
 
 uint8_t SevenSegments::encodeCharacter(char value) {

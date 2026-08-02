@@ -25,7 +25,7 @@ type StatusLEDVisual struct {
 }
 
 // StatusLEDPolicy maps live host/board state to the shared PWM RGB indicator.
-// It belongs to PC configuration; it is deliberately not stored in MCU EEPROM.
+// It belongs to HOST configuration; it is deliberately not stored in MCU EEPROM.
 type StatusLEDPolicy struct {
 	Enabled                 bool            `json:"enabled"`
 	TransitionMS            int             `json:"transition_ms"`

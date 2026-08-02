@@ -22,6 +22,8 @@ func testHandler(t *testing.T, additionalReserved ...string) http.Handler {
 	modified := time.Date(2026, time.August, 2, 8, 30, 0, 0, time.UTC)
 	files := fstest.MapFS{
 		"index.html":                {Data: []byte("<!doctype html><title>PCController</title><main>app shell</main>"), ModTime: modified},
+		"favicon.ico":               {Data: []byte{0, 0, 1, 0, 1, 0, 16, 16}, ModTime: modified},
+		"favicon.svg":               {Data: []byte("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"), ModTime: modified},
 		"assets/chunk-abcdef12.bin": {Data: append([]byte(nil), testAsset...), ModTime: modified},
 		"assets/app-abcdef12.js":    {Data: []byte("export const ready = true\n"), ModTime: modified},
 		"assets/app-abcdef12.css":   {Data: []byte(":root { color-scheme: dark }\n"), ModTime: modified},
@@ -29,6 +31,7 @@ func testHandler(t *testing.T, additionalReserved ...string) http.Handler {
 		"assets/ui-abcdef12.woff2":  {Data: []byte("test-font-data"), ModTime: modified},
 		"assets/plain.js":           {Data: []byte("export {}\n"), ModTime: modified},
 		"manifest.webmanifest":      {Data: []byte(`{"name":"PCController"}`), ModTime: modified},
+		"service-worker.js":         {Data: []byte("self.addEventListener('fetch', () => {})\n"), ModTime: modified},
 	}
 	handler, err := NewHandler(files, additionalReserved...)
 	if err != nil {
@@ -217,12 +220,15 @@ func TestMIMEAndCachePolicies(t *testing.T) {
 		cache       string
 	}{
 		{path: "/index.html", contentType: "text/html; charset=utf-8", cache: "no-cache"},
+		{path: "/favicon.svg", contentType: "image/svg+xml", cache: "no-cache"},
+		{path: "/favicon.ico", contentType: "image/x-icon", cache: "no-cache"},
 		{path: "/assets/app-abcdef12.js", contentType: "text/javascript; charset=utf-8", cache: "public, max-age=31536000, immutable"},
 		{path: "/assets/app-abcdef12.css", contentType: "text/css; charset=utf-8", cache: "public, max-age=31536000, immutable"},
 		{path: "/assets/icon-abcdef12.svg", contentType: "image/svg+xml", cache: "public, max-age=31536000, immutable"},
 		{path: "/assets/ui-abcdef12.woff2", contentType: "font/woff2", cache: "public, max-age=31536000, immutable"},
 		{path: "/assets/plain.js", contentType: "text/javascript; charset=utf-8", cache: "no-cache"},
 		{path: "/manifest.webmanifest", contentType: "application/manifest+json", cache: "no-cache"},
+		{path: "/service-worker.js", contentType: "text/javascript; charset=utf-8", cache: "no-cache"},
 	}
 	for _, test := range tests {
 		t.Run(test.path, func(t *testing.T) {
@@ -315,5 +321,8 @@ func assertSecurityHeaders(t *testing.T, header http.Header) {
 	}
 	if !strings.Contains(csp, "style-src-attr 'unsafe-inline'") {
 		t.Fatalf("CSP must allow Motion's runtime style attributes: %q", csp)
+	}
+	if !strings.Contains(csp, "worker-src 'self'") {
+		t.Fatalf("CSP must keep installability workers same-origin: %q", csp)
 	}
 }

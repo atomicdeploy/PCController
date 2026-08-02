@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { promises as fs } from 'node:fs'
+import { promises as fs, readFileSync } from 'node:fs'
 import {
 	basename,
 	dirname,
@@ -29,8 +29,56 @@ export const EXIT = Object.freeze({
 	INTERRUPTED: 130
 })
 
+const TOOLCHAIN_POLICY_FORMAT = 'pccontroller-toolchain-policy/v1'
+const TOOLCHAIN_POLICY_URL = new URL(
+	'../Controller/toolchain-profile.json',
+	import.meta.url
+)
+
+export function parseToolchainPolicy(contents, source = 'toolchain policy') {
+	let policy
+	try {
+		policy = JSON.parse(contents)
+	} catch (error) {
+		throw new Error(
+			`Invalid JSON in toolchain policy ${source}: ${error.message}`,
+			{ cause: error }
+		)
+	}
+	if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
+		throw new Error(`Toolchain policy ${source} must be a JSON object`)
+	}
+	if (policy.format !== TOOLCHAIN_POLICY_FORMAT) {
+		throw new Error(
+			`Toolchain policy ${source} uses unsupported format ${JSON.stringify(policy.format)}`
+		)
+	}
+	if (typeof policy.fqbn !== 'string' || !policy.fqbn.trim()) {
+		throw new Error(
+			`Toolchain policy ${source} requires a non-empty fqbn string`
+		)
+	}
+	return Object.freeze({ ...policy, fqbn: policy.fqbn.trim() })
+}
+
+export function loadToolchainPolicy(source = TOOLCHAIN_POLICY_URL) {
+	const label = source instanceof URL ? fileURLToPath(source) : String(source)
+	let contents
+	try {
+		contents = readFileSync(source, 'utf8')
+	} catch (error) {
+		throw new Error(
+			`Unable to read toolchain policy ${label}: ${error.message}`,
+			{ cause: error }
+		)
+	}
+	return parseToolchainPolicy(contents, label)
+}
+
+const TOOLCHAIN_POLICY = loadToolchainPolicy()
+
 export const BOARD = Object.freeze({
-	fqbn: 'MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external',
+	fqbn: TOOLCHAIN_POLICY.fqbn,
 	mcu: 'atmega328p',
 	clockHz: 16_000_000,
 	bootloader: 'UART0 Urboot/urclock',
@@ -132,8 +180,7 @@ export function parseArguments(argv, env = process.env) {
 		command: null,
 		port: env.PCCONTROLLER_PORT || '',
 		method: '',
-		programmer: env.PCCONTROLLER_PROGRAMMER || 'usbasp',
-		usbaspTroubleshooting: false,
+		programmer: env.PCCONTROLLER_PROGRAMMER || '',
 		hexPath: '',
 		outputPath: '',
 		manifestPath: '',
@@ -192,9 +239,6 @@ export function parseArguments(argv, env = process.env) {
 				index = next
 				break
 			}
-			case '--usbasp-troubleshooting':
-				config.usbaspTroubleshooting = true
-				break
 			case '--hex': {
 				const [value, next] = optionValue(argv, index, inlineValue, name)
 				config.hexPath = value
@@ -298,13 +342,6 @@ export function parseArguments(argv, env = process.env) {
 			EXIT.USAGE
 		)
 	}
-	if ((hardwareAction || (config.command === 'watch' && config.uploadOnChange)) &&
-		config.method === 'usbasp' && !config.usbaspTroubleshooting) {
-		throw new FirmwareToolError(
-			'USBasp is hidden troubleshooting only; pass --usbasp-troubleshooting explicitly',
-			EXIT.USAGE
-		)
-	}
 	if (config.command === 'metadata' && config.method !== 'urclock') {
 		throw new FirmwareToolError(
 			'metadata is an Urclock-only operation',
@@ -350,11 +387,9 @@ ${chalk.bold.yellowBright('Commands')}
   metadata    Request Urboot/Urclock metadata
 
 ${chalk.bold.yellowBright('Options')}
-  --port PORT       Explicit serial port; required for every UART hardware action
-  --method METHOD   urclock (default) or guarded usbasp; Arduino upload is disabled
-  --programmer ID   ISP programmer ID used by the canonical build (default: usbasp)
-  --usbasp-troubleshooting
-                    Explicitly authorize hidden ISP diagnostics/programming
+  --port PORT       Urclock transport or separate USBasp app-lifecycle UART
+  --method METHOD   urclock (default) or explicit usbasp recovery method
+  --programmer ID   Optional ISP backend-ID override; host default when omitted
   --hex FILE        Override the application Intel HEX file
   --output FILE     Backup destination (backup only)
   --manifest FILE   Override manifest output
@@ -459,10 +494,8 @@ export async function createProgramPlan(config, projectRoot, artifactPath, outpu
 	const args = ['program', '--method', config.method]
 	if (config.method === 'urclock') args.push('--device', config.port)
 	if (config.method === 'usbasp') {
-		args.push(
-			'--programmer', config.programmer,
-			'--usbasp-troubleshooting'
-		)
+		if (config.port.trim()) args.push('--app-device', config.port)
+		if (config.programmer.trim()) args.push('--programmer', config.programmer)
 	}
 	switch (config.command) {
 		case 'backup':
@@ -695,9 +728,10 @@ async function sha256File(path) {
 	}
 }
 
-function artifactRole(path) {
+export function artifactRole(path) {
 	const name = basename(path).toLowerCase()
 	if (name.endsWith('.eep')) return 'eeprom'
+	if (name === 'safe-default-eeprom.hex') return 'default-eeprom'
 	if (name.includes('with_bootloader')) return 'flash+bootloader'
 	return 'application'
 }
@@ -728,6 +762,14 @@ async function inspectArtifact(path, projectRoot) {
 		intelHex.endAddress >= BOARD.flashBytes) {
 		throw new FirmwareToolError(
 			`${basename(path)} exceeds the ATmega328P flash range`,
+			EXIT.VALIDATION
+		)
+	}
+	if ((role === 'eeprom' || role === 'default-eeprom') &&
+		intelHex.endAddress !== null &&
+		intelHex.endAddress >= BOARD.eepromBytes) {
+		throw new FirmwareToolError(
+			`${basename(path)} exceeds the ATmega328P EEPROM range`,
 			EXIT.VALIDATION
 		)
 	}
@@ -873,6 +915,12 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 		// these are exactly the same bytes. The studio adds validation; it must
 		// not replace the compiler-owned deterministic identity with wall time.
 		source: identityMatches ? { ...source, ...prior.source } : source,
+		...(identityMatches && prior.stackBudget
+			? { stackBudget: prior.stackBudget }
+			: {}),
+		...(identityMatches && Array.isArray(prior.patchRegions)
+			? { patchRegions: prior.patchRegions }
+			: {}),
 		artifacts
 	}
 	await fs.mkdir(dirname(path), { recursive: true })

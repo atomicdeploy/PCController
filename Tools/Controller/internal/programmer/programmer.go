@@ -63,8 +63,6 @@ type Options struct {
 	OutputPath                 string
 	ConfirmEEPROMWrite         bool
 	ApplicationHash            uint32
-	ApplicationDate            string
-	ApplicationTime            string
 	ApplicationIdentitySchema  byte
 	ApplicationPackedTimestamp uint32
 	CompileSourceRoot          string
@@ -95,8 +93,6 @@ type BackupManifest struct {
 	MCU                        string       `json:"mcu"`
 	Programmer                 string       `json:"programmer"`
 	ApplicationHash            string       `json:"application_hash,omitempty"`
-	ApplicationDate            string       `json:"application_date,omitempty"`
-	ApplicationTime            string       `json:"application_time,omitempty"`
 	ApplicationIdentitySchema  byte         `json:"application_identity_schema,omitempty"`
 	ApplicationPackedTimestamp string       `json:"application_packed_timestamp,omitempty"`
 	ApplicationTimestamp       string       `json:"application_timestamp,omitempty"`
@@ -149,7 +145,8 @@ func Build(options Options) (Command, error) {
 				options.FirmwareBuildTimestamp,
 			),
 			"--build-property",
-			"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax",
+			"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax "+
+				"-Wl,--section-start=.firmware_identity=0x7DF4",
 			"--warnings", "all",
 			"--jobs", "1",
 			"--build-path", options.BuildPath,
@@ -238,11 +235,11 @@ func Build(options Options) (Command, error) {
 			if options.HexPath == "" {
 				return Command{}, errors.New("write-flash requires an Intel HEX input")
 			}
+			if options.NoVerify {
+				return Command{}, errors.New("flash readback verification is mandatory and cannot be disabled")
+			}
 			if programmer == "urclock" {
 				args = append(args, "-D", "-xnometadata")
-			}
-			if options.NoVerify {
-				args = append(args, "-V")
 			}
 			args = append(args, "-Uflash:w:"+options.HexPath+":i")
 		case OperationReadFlash:
@@ -259,7 +256,7 @@ func Build(options Options) (Command, error) {
 			if options.OutputPath == "" {
 				return Command{}, errors.New("read-eeprom requires --output")
 			}
-			args = append(args, "-Ueeprom:r:"+options.OutputPath+":i")
+			args = append(args, "-A", "-Ueeprom:r:"+options.OutputPath+":i")
 		case OperationWriteEEPROM:
 			if options.HexPath == "" {
 				return Command{}, errors.New("write-eeprom requires an Intel HEX input")
@@ -296,12 +293,32 @@ func Build(options Options) (Command, error) {
 // Execute performs an operation with safety preflights that cannot be
 // represented by a single command line.
 func Execute(ctx context.Context, options Options, output io.Writer) error {
+	return ExecuteWithRunner(ctx, options, output, CommandRunnerFunc(Run))
+}
+
+// ExecuteWithRunner exposes the exact guarded operation flow to stable offline
+// tests. Every flash/EEPROM write is followed by an independent programmer
+// readback and byte comparison; callers cannot opt out of that evidence.
+func ExecuteWithRunner(
+	ctx context.Context,
+	options Options,
+	output io.Writer,
+	runner CommandRunner,
+) error {
+	if runner == nil {
+		return errors.New("programmer operation requires a command runner")
+	}
 	if options.Operation == "" {
 		options.Operation = OperationWriteFlash
 	}
 	if options.Operation == OperationBackup {
-		_, err := Backup(ctx, options, output)
+		_, err := BackupWithRunner(ctx, options, output, runner)
 		return err
+	}
+	if options.Method != MethodCompile {
+		if err := validateMandatoryWriteReadback(options); err != nil {
+			return err
+		}
 	}
 	var compileIdentity CompileIdentity
 	if options.Method == MethodCompile {
@@ -323,7 +340,7 @@ func Execute(ctx context.Context, options Options, output io.Writer) error {
 	}
 	if options.Method == MethodUSBasp &&
 		options.Operation == OperationWriteFlash {
-		if err := verifyEESAVE(ctx, options, output); err != nil {
+		if err := verifyEESAVEWithRunner(ctx, options, output, runner); err != nil {
 			return err
 		}
 	}
@@ -340,8 +357,14 @@ func Execute(ctx context.Context, options Options, output io.Writer) error {
 			fmt.Fprintf(output, "Removed %d stale GCC stack-usage sidecar(s).\n", purged)
 		}
 	}
-	if err := Run(ctx, command, output); err != nil {
+	if err := runner.Run(ctx, command, output); err != nil {
 		return err
+	}
+	if options.Method != MethodCompile &&
+		(options.Operation == OperationWriteFlash || options.Operation == OperationWriteEEPROM) {
+		if err := verifyMandatoryProgrammerReadback(ctx, options, output, runner); err != nil {
+			return err
+		}
 	}
 	if options.Method == MethodCompile {
 		stackBudget, err := inspectFirmwareStackBudget(compileIdentity)
@@ -358,6 +381,272 @@ func Execute(ctx context.Context, options Options, output io.Writer) error {
 		}
 	}
 	return nil
+}
+
+func validateMandatoryWriteReadback(options Options) error {
+	if options.Operation != OperationWriteFlash && options.Operation != OperationWriteEEPROM {
+		return nil
+	}
+	if options.NoVerify {
+		return errors.New("programmer readback verification is mandatory and cannot be disabled")
+	}
+	switch options.Method {
+	case MethodUrclock, MethodUSBasp, MethodAvrdude:
+	default:
+		return fmt.Errorf("%s through %q cannot provide mandatory programmer readback", options.Operation, options.Method)
+	}
+	capacity := ATmega328PFlashSize
+	memory := "flash"
+	if options.Operation == OperationWriteEEPROM {
+		capacity = atmega328PEEPROMCapacity
+		memory = "EEPROM"
+	}
+	document, err := LoadIntelHex(options.HexPath)
+	if err != nil {
+		return fmt.Errorf("validate %s write input: %w", memory, err)
+	}
+	if !document.Inspection.HasData {
+		return fmt.Errorf("refusing empty %s write image", memory)
+	}
+	if document.Inspection.MaximumAddress >= capacity {
+		return fmt.Errorf("%s write image exceeds %d-byte device capacity", memory, capacity)
+	}
+	return nil
+}
+
+func verifyMandatoryProgrammerReadback(
+	ctx context.Context,
+	options Options,
+	output io.Writer,
+	runner CommandRunner,
+) error {
+	temporary, err := os.CreateTemp("", "pccontroller-write-readback-*.hex")
+	if err != nil {
+		return fmt.Errorf("reserve programmer readback artifact: %w", err)
+	}
+	readbackPath := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(readbackPath)
+		return err
+	}
+	if err := os.Remove(readbackPath); err != nil {
+		return fmt.Errorf("prepare programmer readback artifact: %w", err)
+	}
+	defer os.Remove(readbackPath)
+
+	readOptions := options
+	readOptions.HexPath = ""
+	readOptions.OutputPath = readbackPath
+	readOptions.NoVerify = false
+	memory := "flash"
+	capacity := ATmega328PFlashSize
+	readOptions.Operation = OperationReadFlash
+	if options.Operation == OperationWriteEEPROM {
+		memory = "EEPROM"
+		capacity = atmega328PEEPROMCapacity
+		readOptions.Operation = OperationReadEEPROM
+	}
+	command, err := Build(readOptions)
+	if err != nil {
+		return fmt.Errorf("build mandatory %s readback: %w", memory, err)
+	}
+	if output != nil {
+		fmt.Fprintln(output, "Mandatory programmer readback:", command.String())
+	}
+	if err := runner.Run(ctx, command, output); err != nil {
+		return fmt.Errorf("read back written %s: %w", memory, err)
+	}
+	written, err := LoadIntelHex(options.HexPath)
+	if err != nil {
+		return fmt.Errorf("reload written %s image: %w", memory, err)
+	}
+	readback, err := LoadIntelHex(readbackPath)
+	if err != nil {
+		return fmt.Errorf("load %s programmer readback: %w", memory, err)
+	}
+	if readback.Inspection.HasData && readback.Inspection.MaximumAddress >= capacity {
+		return fmt.Errorf("%s programmer readback exceeds %d-byte device capacity", memory, capacity)
+	}
+	redirect, err := verifyWrittenProgrammerBytes(options, memory, written.Image, readback.Image)
+	if err != nil {
+		return err
+	}
+	if output != nil && redirect != nil {
+		fmt.Fprintf(
+			output,
+			"Urboot vector redirection verified: reset -> 0x%04X, vector %d -> application 0x%04X; all other written bytes are exact.\n",
+			redirect.BootloaderAddress,
+			redirect.Vector,
+			redirect.ApplicationAddress,
+		)
+	}
+	if output != nil {
+		fmt.Fprintf(
+			output,
+			"Mandatory %s readback verified %d written byte(s); input SHA-256 %s, readback SHA-256 %s.\n",
+			memory, written.Inspection.DataBytes, written.SourceSHA256, readback.SourceSHA256,
+		)
+	}
+	return nil
+}
+
+// VerifyFlashReadback performs a fresh independent flash read and compares it
+// with the requested application image without issuing any write operation.
+func VerifyFlashReadback(
+	ctx context.Context,
+	options Options,
+	output io.Writer,
+) error {
+	return VerifyFlashReadbackWithRunner(
+		ctx, options, output, CommandRunnerFunc(Run),
+	)
+}
+
+// VerifyFlashReadbackWithRunner is the injectable recovery form used after a
+// prior write succeeded but its mandatory readback was interpreted as failed.
+func VerifyFlashReadbackWithRunner(
+	ctx context.Context,
+	options Options,
+	output io.Writer,
+	runner CommandRunner,
+) error {
+	if runner == nil {
+		return errors.New("fresh flash verification requires a command runner")
+	}
+	if options.Method != MethodUrclock && options.Method != MethodUSBasp && options.Method != MethodAvrdude {
+		return fmt.Errorf("fresh flash verification does not support method %q", options.Method)
+	}
+	if strings.TrimSpace(options.HexPath) == "" {
+		return errors.New("fresh flash verification requires an Intel HEX application image")
+	}
+	if _, err := LoadIntelHex(options.HexPath); err != nil {
+		return fmt.Errorf("inspect fresh flash verification target: %w", err)
+	}
+	options.Operation = OperationWriteFlash
+	options.NoVerify = false
+	return verifyMandatoryProgrammerReadback(ctx, options, output, runner)
+}
+
+type urbootVectorRedirect struct {
+	Vector             int
+	BootloaderAddress  uint32
+	ApplicationAddress uint32
+}
+
+// verifyWrittenProgrammerBytes keeps independent readback byte-exact, except
+// for Urboot's documented reset-vector redirection on application flash writes.
+func verifyWrittenProgrammerBytes(
+	options Options,
+	memory string,
+	written *IntelHexImage,
+	readback *IntelHexImage,
+) (*urbootVectorRedirect, error) {
+	mismatches := make([]uint32, 0, 8)
+	for address, expected := range written.data {
+		actual, present := readback.Byte(address)
+		if !present {
+			return nil, fmt.Errorf("%s programmer readback has no byte at 0x%04X", memory, address)
+		}
+		if actual != expected {
+			mismatches = append(mismatches, address)
+		}
+	}
+	if len(mismatches) == 0 {
+		return nil, nil
+	}
+	sort.Slice(mismatches, func(left, right int) bool { return mismatches[left] < mismatches[right] })
+	if options.Method == MethodUrclock && options.Operation == OperationWriteFlash {
+		if redirect, ok := recognizeUrbootVectorRedirect(written, readback, mismatches); ok {
+			return redirect, nil
+		}
+	}
+	address := mismatches[0]
+	expected, _ := written.Byte(address)
+	actual, _ := readback.Byte(address)
+	return nil, fmt.Errorf(
+		"%s programmer readback mismatch at 0x%04X: got 0x%02X require 0x%02X",
+		memory, address, actual, expected,
+	)
+}
+
+// recognizeUrbootVectorRedirect proves the two AVR instructions Urboot writes:
+// reset RJMPs to the bootloader and one interrupt vector JMPs to the app entry.
+func recognizeUrbootVectorRedirect(
+	written *IntelHexImage,
+	readback *IntelHexImage,
+	mismatches []uint32,
+) (*urbootVectorRedirect, bool) {
+	const (
+		urbootFlashPageBytes        = uint32(128)
+		urbootMetadataPagesAddress  = uint32(0x7FFA)
+		urbootMetadataVectorAddress = uint32(0x7FFB)
+	)
+	expectedReset, ok := imageWord(written, 0)
+	if !ok || expectedReset&0xF000 != 0xC000 {
+		return nil, false
+	}
+	actualReset, ok := imageWord(readback, 0)
+	if !ok {
+		return nil, false
+	}
+	bootPages, pagesOK := readback.Byte(urbootMetadataPagesAddress)
+	vectorByte, vectorOK := readback.Byte(urbootMetadataVectorAddress)
+	if !pagesOK || !vectorOK || bootPages == 0 || bootPages > 16 || vectorByte == 0 || vectorByte > 25 {
+		return nil, false
+	}
+	bootloaderAddress := ATmega328PFlashSize - uint32(bootPages)*urbootFlashPageBytes
+	for address := range written.data {
+		if address >= bootloaderAddress {
+			return nil, false
+		}
+	}
+	bootloaderWord := bootloaderAddress / 2
+	expectedBootRJMP := uint16(0xC000 | ((bootloaderWord - 1) & 0x0FFF))
+	if actualReset != expectedBootRJMP {
+		return nil, false
+	}
+
+	wordCapacity := int32(ATmega328PFlashSize / 2)
+	relative := int32(expectedReset & 0x0FFF)
+	if relative&0x0800 != 0 {
+		relative -= 0x1000
+	}
+	applicationWord := (1 + relative + wordCapacity) % wordCapacity
+
+	vector := int(vectorByte)
+	vectorStart := uint32(vector * 4)
+	jumpOpcode, opcodeOK := imageWord(readback, vectorStart)
+	jumpTarget, targetOK := imageWord(readback, vectorStart+2)
+	if !opcodeOK || !targetOK || jumpOpcode != 0x940C || uint32(jumpTarget) != uint32(applicationWord) {
+		return nil, false
+	}
+	hasChangedVectorByte := false
+	for _, address := range mismatches {
+		if address >= vectorStart && address < vectorStart+4 {
+			hasChangedVectorByte = true
+		}
+		if address <= 1 || (address >= vectorStart && address < vectorStart+4) {
+			continue
+		}
+		return nil, false
+	}
+	if !hasChangedVectorByte {
+		return nil, false
+	}
+	return &urbootVectorRedirect{
+		Vector:             vector,
+		BootloaderAddress:  bootloaderAddress,
+		ApplicationAddress: uint32(applicationWord) * 2,
+	}, true
+}
+
+func imageWord(image *IntelHexImage, address uint32) (uint16, bool) {
+	low, lowOK := image.Byte(address)
+	high, highOK := image.Byte(address + 1)
+	if !lowOK || !highOK {
+		return 0, false
+	}
+	return uint16(low) | uint16(high)<<8, true
 }
 
 // Backup obtains programmer/bootloader metadata and independently reads flash
@@ -407,14 +696,12 @@ func BackupWithRunner(
 		Port:                      options.Port,
 		MCU:                       options.MCU,
 		Programmer:                effectiveProgrammer(options),
-		ApplicationDate:           strings.TrimSpace(options.ApplicationDate),
-		ApplicationTime:           strings.TrimSpace(options.ApplicationTime),
 		ApplicationIdentitySchema: options.ApplicationIdentitySchema,
 	}
-	if packedIdentitySchema(options.ApplicationIdentitySchema) &&
+	if currentIdentitySchema(options.ApplicationIdentitySchema) &&
 		options.ApplicationPackedTimestamp != 0 {
 		manifest.ApplicationPackedTimestamp = fmt.Sprintf("%08X", options.ApplicationPackedTimestamp)
-		if timestamp, timestampErr := DecodeFirmwareTimestampSchema2(options.ApplicationPackedTimestamp); timestampErr == nil {
+		if timestamp, timestampErr := DecodeFirmwareTimestamp(options.ApplicationPackedTimestamp); timestampErr == nil {
 			manifest.ApplicationTimestamp = timestamp.Compact
 		}
 	}
@@ -566,17 +853,17 @@ func ValidateBackup(options Options) error {
 		return errors.New("avrdude backup requires --programmer")
 	}
 	if options.ApplicationPackedTimestamp != 0 {
-		if !packedIdentitySchema(options.ApplicationIdentitySchema) {
-			return errors.New("packed firmware timestamp requires identity schema 2 or 3")
+		if !currentIdentitySchema(options.ApplicationIdentitySchema) {
+			return errors.New("packed firmware timestamp requires compact identity schema 3")
 		}
-		if _, err := DecodeFirmwareTimestampSchema2(options.ApplicationPackedTimestamp); err != nil {
+		if _, err := DecodeFirmwareTimestamp(options.ApplicationPackedTimestamp); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func packedIdentitySchema(schema byte) bool { return schema == 2 || schema == 3 }
+func currentIdentitySchema(schema byte) bool { return schema == 3 }
 
 func createBackupDirectory(root string, timestamp time.Time) (string, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -662,6 +949,18 @@ func verifyEESAVE(
 	options Options,
 	output io.Writer,
 ) error {
+	return verifyEESAVEWithRunner(ctx, options, output, CommandRunnerFunc(Run))
+}
+
+func verifyEESAVEWithRunner(
+	ctx context.Context,
+	options Options,
+	output io.Writer,
+	runner CommandRunner,
+) error {
+	if runner == nil {
+		return errors.New("USBasp EEPROM-preservation preflight requires a command runner")
+	}
 	temporary, err := os.CreateTemp("", "pccontroller-hfuse-*.txt")
 	if err != nil {
 		return fmt.Errorf("create high-fuse preflight file: %w", err)
@@ -694,7 +993,7 @@ func verifyEESAVE(
 	if output != nil {
 		fmt.Fprintln(output, "USBasp EEPROM-preservation preflight:", preflight.String())
 	}
-	if err := Run(ctx, preflight, output); err != nil {
+	if err := runner.Run(ctx, preflight, output); err != nil {
 		return fmt.Errorf("read high fuse before USBasp erase: %w", err)
 	}
 	content, err := os.ReadFile(path)

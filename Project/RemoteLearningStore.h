@@ -4,6 +4,7 @@
 
 #include "EepromLayout.h"
 
+// RemoteActionKind selects the domain controlled by a learned RF record.
 enum class RemoteActionKind : uint8_t {
   None = 0,
   Key = 1,
@@ -13,6 +14,7 @@ enum class RemoteActionKind : uint8_t {
   Pwm = 5,
 };
 
+// RemoteBehavior selects press, toggle, momentary, or motion semantics.
 enum class RemoteBehavior : uint8_t {
   Press = 0,
   Toggle = 1,
@@ -36,6 +38,7 @@ struct __attribute__((packed)) LearnedRemote {
 static_assert(sizeof(LearnedRemote) == 12,
               "Native learned-remote entry must remain 12 bytes");
 
+// RemoteLearningStore validates and persists the fixed-capacity learned RF table.
 class RemoteLearningStore {
 public:
   static constexpr uint8_t Capacity = EepromLayout::RemoteCapacity;
@@ -55,13 +58,11 @@ public:
   // Atomically replaces one slot at record granularity. The existing paged
   // list response is the read-back for host-staged reordering/import.
   bool replace(const LearnedRemote &remote);
-  bool map(uint8_t id, RemoteActionKind kind, uint8_t value,
-           RemoteBehavior behavior);
-
 private:
   static constexpr int HeaderAddress = EepromLayout::RemoteHeaderAddress;
   static constexpr int EntriesAddress = EepromLayout::RemoteEntriesAddress;
 
+  // Record adds validity and checksum bytes around one learned entry.
   struct __attribute__((packed)) Record {
     uint32_t code;
     uint8_t bits;
@@ -85,4 +86,5 @@ private:
                            RemoteBehavior behavior);
 };
 
+// learnedRemotes is the single MCU-owned learned RF table.
 extern RemoteLearningStore learnedRemotes;

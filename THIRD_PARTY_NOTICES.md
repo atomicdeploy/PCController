@@ -93,6 +93,7 @@ The resolved module graph was audited in these license groups:
   `github.com/clipperhouse/uax29/v2`,
   `github.com/dustin/go-humanize`,
   `github.com/erikgeiser/coninput`,
+  `github.com/go-ole/go-ole`,
   `github.com/grandcat/zeroconf`,
   `github.com/lucasb-eyer/go-colorful`,
   `github.com/mattn/go-isatty`,
@@ -125,8 +126,9 @@ The Go standard library is distributed under its upstream BSD-style license.
 ## Embedded web application dependencies
 
 The production web bundle compiled into the Go executable contains code from
-React and React DOM (MIT), Motion (MIT), and Lucide React (ISC). Exact runtime
-and development versions are locked by `Tools/Controller/web/package-lock.json`.
+React and React DOM (MIT), Motion (MIT), Recharts (MIT), and Lucide React
+(ISC). Exact runtime and development versions are locked by
+`Tools/Controller/web/package-lock.json`.
 Vite and its React plugin (MIT), Vitest (MIT), TypeScript (Apache-2.0), and the
 React type declarations (MIT) are build/test dependencies and are not served
 at runtime. Their upstream license files remain authoritative and must be
@@ -143,10 +145,3 @@ The project-owned Node build presentation resolves Chalk (MIT) and
 `Tools/Build/package-lock.json`. They are build-time dependencies rather than
 host-runtime code and are not embedded in `controller.exe`. Their upstream
 license files are installed with `npm ci` and remain authoritative.
-
-## Behavioral references with no copied source
-
-`Tools/Controller/docs/Upstream-Source-Audit.md` records the local and network projects that
-were inspected for behavior or workflow ideas. It also records their known
-license status. Their source was not copied into PCController and they are not
-relicensed here.

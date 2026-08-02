@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fsnotify/fsnotify"
 
@@ -69,31 +70,35 @@ type DeviceIdentity struct {
 }
 
 type UI struct {
-	AppTitle             string `json:"app_title"`
-	SetupComplete        bool   `json:"setup_complete"`
-	WelcomeMelody        string `json:"welcome_melody"`
-	StatusIntervalMS     int    `json:"status_interval_ms"`
-	IdleStatusIntervalMS int    `json:"idle_status_interval_ms"`
-	EventLogLimit        int    `json:"event_log_limit"`
-	HistoryHours         int    `json:"history_hours"`
-	HistorySampleMS      int    `json:"history_sample_ms"`
-	VoltageDecimals      int    `json:"voltage_decimals"`
-	CurrentDecimals      int    `json:"current_decimals"`
-	PowerDecimals        int    `json:"power_decimals"`
-	TemperatureDecimals  int    `json:"temperature_decimals"`
-	ShowSupplyVoltage    bool   `json:"show_supply_voltage"`
-	ShowBusVoltage       bool   `json:"show_bus_voltage"`
-	ShowCurrent          bool   `json:"show_current"`
-	ShowPower            bool   `json:"show_power"`
-	ShowTemperatureLED   bool   `json:"show_temperature_led"`
-	ShowTemperatureBT    bool   `json:"show_temperature_bt"`
-	ShowIO               bool   `json:"show_io"`
-	ShowDiagnostics      bool   `json:"show_diagnostics"`
-	ShowGraphs           bool   `json:"show_graphs"`
-	LCDServiceEnabled    bool   `json:"lcd_service_enabled"`
-	MirrorPromptToLCD    bool   `json:"mirror_prompt_to_lcd"`
-	LCDPromptDebounceMS  int    `json:"lcd_prompt_debounce_ms"`
-	LCDPriorityHoldMS    int    `json:"lcd_priority_hold_ms"`
+	AppTitle             string            `json:"app_title"`
+	SeparatePortButtons  bool              `json:"separate_port_buttons"`
+	TableLayout          string            `json:"table_layout"`
+	PeripheralNames      map[string]string `json:"peripheral_names,omitempty"`
+	SetupComplete        bool              `json:"setup_complete"`
+	WelcomeMelody        string            `json:"welcome_melody"`
+	StatusIntervalMS     int               `json:"status_interval_ms"`
+	IdleStatusIntervalMS int               `json:"idle_status_interval_ms"`
+	EventLogLimit        int               `json:"event_log_limit"`
+	HistoryHours         int               `json:"history_hours"`
+	HistorySampleMS      int               `json:"history_sample_ms"`
+	VoltageDecimals      int               `json:"voltage_decimals"`
+	CurrentDecimals      int               `json:"current_decimals"`
+	PowerDecimals        int               `json:"power_decimals"`
+	TemperatureDecimals  int               `json:"temperature_decimals"`
+	ShowSupplyVoltage    bool              `json:"show_supply_voltage"`
+	ShowBusVoltage       bool              `json:"show_bus_voltage"`
+	ShowCurrent          bool              `json:"show_current"`
+	ShowPower            bool              `json:"show_power"`
+	ShowTemperatureLED   bool              `json:"show_temperature_led"`
+	ShowTemperatureBT    bool              `json:"show_temperature_bt"`
+	ShowIO               bool              `json:"show_io"`
+	ShowDiagnostics      bool              `json:"show_diagnostics"`
+	ShowGraphs           bool              `json:"show_graphs"`
+	LCDServiceEnabled    bool              `json:"lcd_service_enabled"`
+	MirrorPromptToLCD    bool              `json:"mirror_prompt_to_lcd"`
+	LCDPromptDebounceMS  int               `json:"lcd_prompt_debounce_ms"`
+	LCDPriorityHoldMS    int               `json:"lcd_priority_hold_ms"`
+	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
 }
 
 type IPC struct {
@@ -170,10 +175,8 @@ type Macro struct {
 }
 
 type MacroStep struct {
-	// AtUS is the canonical absolute offset from the MCU playback epoch. AtMS
-	// remains accepted for readable/legacy configuration files.
+	// AtUS is the absolute offset from the MCU playback epoch.
 	AtUS uint32 `json:"at_us,omitempty"`
-	AtMS int    `json:"at_ms,omitempty"`
 	Kind string `json:"kind"`
 
 	Target      byte   `json:"target,omitempty"`
@@ -252,6 +255,7 @@ func Defaults() Config {
 		},
 		UI: UI{
 			AppTitle:             productidentity.DefaultTitle,
+			TableLayout:          "compact",
 			WelcomeMelody:        "notify",
 			StatusIntervalMS:     200,
 			IdleStatusIntervalMS: 0,
@@ -275,6 +279,7 @@ func Defaults() Config {
 			MirrorPromptToLCD:    false,
 			LCDPromptDebounceMS:  120,
 			LCDPriorityHoldMS:    2000,
+			SegmentScroll:        DefaultSegmentScroll(),
 		},
 		IPC: IPC{
 			Listen:         "127.0.0.1:8787",
@@ -289,8 +294,14 @@ func Defaults() Config {
 		OSActions: hostos.DefaultPolicy(),
 		Integrations: Integrations{
 			Keyboard:  DefaultKeyboardControl(),
+			Lifecycle: DefaultLifecycleSafety(),
 			StatusLED: DefaultStatusLEDPolicy(),
 			Hotkeys: []Hotkey{
+				{Name: "open-dashboard", Enabled: true, Chord: "F13", Command: "app page dashboard"},
+				{Name: "open-controls", Enabled: true, Chord: "F14", Command: "app page controls"},
+				{Name: "open-workbench", Enabled: true, Chord: "F15", Command: "app page workbench"},
+				{Name: "open-updates", Enabled: true, Chord: "F16", Command: "app page updates"},
+				{Name: "open-settings", Enabled: true, Chord: "F17", Command: "app page settings"},
 				{Name: "open-events", Enabled: true, Chord: "Ctrl+Alt+P", Command: "app page events"},
 				{Name: "emergency-outputs-off", Enabled: true, Chord: "Ctrl+Alt+Shift+S", Command: "relay off"},
 			},
@@ -350,7 +361,7 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
-	value.HostMenus = canonicalizeHostMenus(value.HostMenus)
+	value.HostMenus = normalizeHostMenus(value.HostMenus)
 	if err := value.Validate(); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: %w", path, err)
 	}
@@ -374,7 +385,7 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
-	value.HostMenus = canonicalizeHostMenus(value.HostMenus)
+	value.HostMenus = normalizeHostMenus(value.HostMenus)
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -441,8 +452,26 @@ func (value Config) Validate() error {
 		return fmt.Errorf("connection.hello_attempts must be 1..10")
 	}
 	if title := strings.TrimSpace(value.UI.AppTitle); title == "" ||
-		len(title) > 64 || !printableText(title) {
+		utf8.RuneCountInString(title) > 64 || !printableText(title) {
 		return fmt.Errorf("ui.app_title must be 1..64 printable characters")
+	}
+	if len(value.UI.PeripheralNames) > MaxPeripheralNames {
+		return fmt.Errorf("ui.peripheral_names may contain at most %d entries", MaxPeripheralNames)
+	}
+	switch strings.ToLower(strings.TrimSpace(value.UI.TableLayout)) {
+	case "compact", "expanded":
+	default:
+		return errors.New("ui.table_layout must be compact or expanded")
+	}
+	for key, name := range value.UI.PeripheralNames {
+		key = strings.TrimSpace(key)
+		name = strings.TrimSpace(name)
+		if key == "" || len(key) > 32 || !printableASCII(key) {
+			return fmt.Errorf("ui.peripheral_names key %q must be 1..32 printable ASCII bytes", key)
+		}
+		if name == "" || utf8.RuneCountInString(name) > 64 || !printableText(name) {
+			return fmt.Errorf("ui.peripheral_names[%q] must be 1..64 printable characters", key)
+		}
 	}
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {
 		return errors.New("ui.welcome_melody must contain 1..64 characters")
@@ -468,6 +497,9 @@ func (value Config) Validate() error {
 	}
 	if value.UI.LCDPriorityHoldMS < 250 || value.UI.LCDPriorityHoldMS > 60_000 {
 		return fmt.Errorf("ui.lcd_priority_hold_ms must be 250..60000")
+	}
+	if err := validateSegmentScroll(value.UI.SegmentScroll); err != nil {
+		return err
 	}
 	for name, decimals := range map[string]int{
 		"voltage":     value.UI.VoltageDecimals,
@@ -538,16 +570,7 @@ func (value Config) Validate() error {
 		}
 		var previous uint32
 		for stepIndex, step := range macro.Steps {
-			if step.AtMS < 0 || (step.AtUS != 0 && step.AtMS != 0) {
-				return fmt.Errorf("macros[%d].steps[%d] must use one nonnegative at_us or at_ms offset", index, stepIndex)
-			}
 			due := step.AtUS
-			if step.AtUS == 0 && step.AtMS != 0 {
-				if step.AtMS > 2_147_483 {
-					return fmt.Errorf("macros[%d].steps[%d].at_ms exceeds the MCU timing window", index, stepIndex)
-				}
-				due = uint32(step.AtMS) * 1000
-			}
 			if due > 0x7FFFFFFF || (stepIndex != 0 && due < previous) {
 				return fmt.Errorf("macros[%d].steps[%d] offset must be ordered within 0..2147483647 us", index, stepIndex)
 			}
@@ -1022,6 +1045,7 @@ func (store *Store) Watch(
 	const debounce = 60 * time.Millisecond
 	var timer *time.Timer
 	var timerChannel <-chan time.Time
+	lastReloadError := ""
 	schedule := func() {
 		if timer == nil {
 			timer = time.NewTimer(debounce)
@@ -1039,11 +1063,10 @@ func (store *Store) Watch(
 	reload := func() {
 		value, changed, reloadErr := store.Reload()
 		if reloadErr != nil {
-			if onError != nil {
-				onError(reloadErr)
-			}
+			reportDistinctReloadError(&lastReloadError, reloadErr, onError)
 			return
 		}
+		lastReloadError = ""
 		if changed && onChange != nil {
 			onChange(value)
 		}
@@ -1097,6 +1120,7 @@ func (store *Store) watchPolling(
 ) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	lastReloadError := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -1104,15 +1128,31 @@ func (store *Store) watchPolling(
 		case <-ticker.C:
 			value, changed, err := store.Reload()
 			if err != nil {
-				if onError != nil {
-					onError(err)
-				}
+				reportDistinctReloadError(&lastReloadError, err, onError)
 				continue
 			}
+			lastReloadError = ""
 			if changed && onChange != nil {
 				onChange(value)
 			}
 		}
+	}
+}
+
+// reportDistinctReloadError emits a rejected file state once, then stays
+// quiet until either the error changes or a valid configuration is loaded.
+func reportDistinctReloadError(last *string, err error, onError func(error)) {
+	if err == nil {
+		*last = ""
+		return
+	}
+	message := err.Error()
+	if message == *last {
+		return
+	}
+	*last = message
+	if onError != nil {
+		onError(err)
 	}
 }
 

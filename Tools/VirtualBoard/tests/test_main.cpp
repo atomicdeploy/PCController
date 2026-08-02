@@ -3,10 +3,12 @@
 #include "virtual_board/virtual_board.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -39,6 +41,40 @@ std::filesystem::path temporaryEeprom() {
       std::chrono::steady_clock::now().time_since_epoch().count();
   return std::filesystem::temp_directory_path() /
          ("pccontroller-virtual-board-" + std::to_string(nonce) + ".bin");
+}
+
+void writeVirtualResetRecord(pccontroller::virtual_board::FileEeprom &eeprom,
+                             std::uint8_t slot, std::uint32_t count,
+                             std::uint8_t marker = 0xA7,
+                             bool corruptChecksum = false) {
+  constexpr std::size_t kJournalAddress = 320;
+  constexpr std::size_t kRecordBytes = 6;
+  const std::size_t address =
+      kJournalAddress + static_cast<std::size_t>(slot) * kRecordBytes;
+  const std::uint8_t bytes[] = {
+      static_cast<std::uint8_t>(count),
+      static_cast<std::uint8_t>(count >> 8U),
+      static_cast<std::uint8_t>(count >> 16U),
+      static_cast<std::uint8_t>(count >> 24U),
+  };
+  for (std::size_t index = 0; index < sizeof(bytes); ++index) {
+    eeprom.update(address + index, bytes[index]);
+  }
+  eeprom.update(address + 4U,
+                static_cast<std::uint8_t>(
+                    pccontroller::wire::crc8(bytes, sizeof(bytes)) ^
+                    (corruptChecksum ? 0x5AU : 0U)));
+  eeprom.update(address + 5U, marker);
+}
+
+std::uint32_t virtualResetCount(
+    pccontroller::virtual_board::VirtualBoard &board) {
+  const auto status =
+      board.handle({pccontroller::wire::GetStatus, 0, {}});
+  return static_cast<std::uint32_t>(status[0].payload[44]) |
+         (static_cast<std::uint32_t>(status[0].payload[45]) << 8U) |
+         (static_cast<std::uint32_t>(status[0].payload[46]) << 16U) |
+         (static_cast<std::uint32_t>(status[0].payload[47]) << 24U);
 }
 
 void testProtocolRoundTrip() {
@@ -108,14 +144,13 @@ void testBoardAndPersistence() {
     response = board.handle({pccontroller::wire::MenuLayoutGet, 43, {}});
     require(response.size() == 1 &&
                 response[0].opcode == pccontroller::wire::MenuLayoutResponse &&
-                response[0].payload.size() == 12 &&
+                response[0].payload.size() == 11 &&
                 response[0].payload[0] == 2 &&
                 response[0].payload[4] == 0x10 &&
-                response[0].payload[11] == 0xFE,
+                response[0].payload[10] == 0xDC,
             "MENU_LAYOUT GET is not packed schema 2");
     const std::vector<std::uint8_t> packedLayout{
-        2, 15, 0xFE, 0x7F, 0x30, 0x14, 0x52, 0x76, 0xCB, 0x8D, 0xA9,
-        0xFE};
+        2, 14, 0xFE, 0x3F, 0x30, 0x14, 0x52, 0x76, 0xCB, 0x8D, 0xA9};
     response = board.handle(
         {pccontroller::wire::MenuLayoutSet, 44, packedLayout});
     require(response.size() == 1 && response[0].opcode == pccontroller::wire::Ack,
@@ -124,8 +159,8 @@ void testBoardAndPersistence() {
     require(response[0].payload == packedLayout,
             "packed MENU_LAYOUT did not round-trip exactly");
     const std::vector<std::uint8_t> legacyLayout{
-        1, 15, 0xFF, 0x7F, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-        13, 14};
+        1, 14, 0xFF, 0x3F, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+        13};
     response = board.handle(
         {pccontroller::wire::MenuLayoutSet, 46, legacyLayout});
     require(response[0].opcode == pccontroller::wire::ErrorResponse,
@@ -141,25 +176,37 @@ void testBoardAndPersistence() {
     require(response[0].opcode == pccontroller::wire::MenuListResponse &&
                 response[0].payload.size() == 46 &&
                 response[0].payload[0] == 1 &&
-                response[0].payload[1] == 15 &&
+                response[0].payload[1] == 14 &&
                 response[0].payload[2] == 7 &&
                 response[0].payload[3] == 7,
             "MENU_LIST does not match the paged production schema");
 
     std::vector<std::uint8_t> capture{3, 0xBC, 0x2A, 36,
-                                      'H', 'O', 'S', 'T'};
+                                      'T', 'I', 'M', 'E'};
     const auto appendFixed = [&capture](const std::string &value,
                                        std::size_t width) {
       capture.insert(capture.end(), value.begin(), value.end());
       capture.insert(capture.end(), width - value.size(), ' ');
     };
-    appendFixed("Host controls", 16);
-    appendFixed("Ready", 16);
+    appendFixed("Current time", 16);
+    appendFixed("15:04:05", 16);
     response = board.handle(
         {pccontroller::wire::DisplayText, 49, capture});
     require(response[0].opcode == pccontroller::wire::Ack &&
-                displays.state().segments == "HOST",
-            "host front-panel capture was not applied");
+                displays.state().segments == "TIME" &&
+                displays.state().lcdLine1 == "Current time    " &&
+                displays.state().lcdLine2 == "15:04:05        ",
+            "host time and short label were not applied to the front panel");
+    capture.assign({3, 0xBC, 0x2A, 36, 'D', 'A', 'T', 'E'});
+    appendFixed("Current date", 16);
+    appendFixed("2026-08-02", 16);
+    response = board.handle(
+        {pccontroller::wire::DisplayText, 49, capture});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                displays.state().segments == "DATE" &&
+                displays.state().lcdLine1 == "Current date    " &&
+                displays.state().lcdLine2 == "2026-08-02      ",
+            "host date and short label were not applied to the front panel");
     response = board.handle(
         {pccontroller::wire::FrontPanelGet, 50, {0xAA}});
     require(response[0].opcode == pccontroller::wire::FrontPanelResponse &&
@@ -232,12 +279,61 @@ void testBoardAndPersistence() {
             "initial reset telemetry is not the 48-byte firmware shape");
 
     const std::vector<std::uint8_t> settings{
-        2, 0x02, 1, 200, 7, 6, 140, 1, 250, 0, 5, 1};
+        3, 0x04, 1, 200, 7, 6, 140, 0x0E, 250, 0, 5, 1, 0x4D,
+        0xF0, 37};
     response =
         board.handle({pccontroller::wire::SetSettings, 9, settings});
     require(response.size() == 1 &&
                 response[0].opcode == pccontroller::wire::Ack,
             "SET_SETTINGS was not acknowledged");
+    std::array<std::uint8_t, 31> storedSettings{};
+    for (std::size_t index = 0; index < storedSettings.size(); ++index) {
+      storedSettings[index] = eeprom.read(32U + index);
+    }
+    require(storedSettings[6] == 0x0E && storedSettings[28] == 0x4D &&
+                storedSettings[29] == 0xF0 && storedSettings[30] == 37 &&
+                eeprom.read(63) == pccontroller::wire::crc8(
+                                       storedSettings.data(),
+                                       storedSettings.size()),
+            "virtual EEPROM is not the current 31-value settings record");
+
+    auto invalidSettings = settings;
+    invalidSettings.pop_back();
+    response = board.handle(
+        {pccontroller::wire::SetSettings, 90, invalidSettings});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "truncated SETTINGS payload was accepted");
+    invalidSettings = settings;
+    invalidSettings[7] = 0x10;
+    response = board.handle(
+        {pccontroller::wire::SetSettings, 91, invalidSettings});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "reserved output-persistence bits were accepted");
+    invalidSettings = settings;
+    invalidSettings[0] = 2;
+    response = board.handle(
+        {pccontroller::wire::SetSettings, 92, invalidSettings});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "alternate SETTINGS shape was accepted");
+    invalidSettings = settings;
+    invalidSettings[14] = 0;
+    response = board.handle(
+        {pccontroller::wire::SetSettings, 92, invalidSettings});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "zero motion break was accepted");
+
+    response = board.handle(
+        {pccontroller::wire::PwmSet, 93, {0, 0x00, 0x08}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "direct PWM channel control was not acknowledged");
+    response = board.handle({pccontroller::wire::PwmGet, 94, {}});
+    require(response[0].opcode == pccontroller::wire::PwmValuesResponse &&
+                response[0].payload.size() == 34 &&
+                response[0].payload[0] == 1 &&
+                response[0].payload[1] == 0 &&
+                response[0].payload[2] == 0x00 &&
+                response[0].payload[3] == 0x08,
+            "PWM_VALUES does not report availability and direct values");
 
     response = board.handle(
         {pccontroller::wire::RelaySet, 10, {4, 1}});
@@ -350,13 +446,33 @@ void testBoardAndPersistence() {
             "key-up did not clear the active-key status mask");
 
     response =
-        board.handle({pccontroller::wire::RadioLearnStart, 19, {10, 0}});
+        board.handle({pccontroller::wire::RadioLearnStart, 19, {1}});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "obsolete one-byte RF learn request was accepted");
+    response =
+        board.handle({pccontroller::wire::RadioLearnStart, 19, {1, 10}});
     require(response[0].opcode == pccontroller::wire::Ack,
-            "RF learning did not start");
+            "timed multi-code RF learning did not start");
+    const auto learningStartedEvents = board.tick();
+    require(std::any_of(learningStartedEvents.begin(),
+                        learningStartedEvents.end(), [](const auto &event) {
+              return timedEventEquals(event, {9, 3, 0, 1, 10, 10});
+            }),
+            "timed RF learning did not emit its exact start lifecycle event");
     require(board.console("rflearn 0x11223344 24 1 350")
                     .message.find("entry 0") != std::string::npos,
             "virtual RF entry was not learned");
     static_cast<void>(board.tick());
+    response = board.handle(
+        {pccontroller::wire::RadioLearnCancel, 20, {}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "timed RF learning did not cancel after capture");
+    const auto learningCanceledEvents = board.tick();
+    require(std::any_of(learningCanceledEvents.begin(),
+                        learningCanceledEvents.end(), [](const auto &event) {
+              return timedEventEquals(event, {9, 1, 1, 1, 10, 10});
+            }),
+            "timed RF learning did not emit its exact cancel lifecycle event");
 
     require(board.console("rfrecv 0x11223344 24 1 350")
                     .message.find("learned_id=0") != std::string::npos,
@@ -394,9 +510,10 @@ void testBoardAndPersistence() {
                 response[0].payload[15] == 0,
             "new learned RF entry was not left deliberately unmapped");
     response = board.handle(
-        {pccontroller::wire::RadioLearnMap, 190, {0, 3, 4, 1}});
+        {pccontroller::wire::RadioLearnReplace, 190,
+         {0, 0x44, 0x33, 0x22, 0x11, 24, 1, 0x5E, 0x01, 3, 4, 1}});
     require(response[0].opcode == pccontroller::wire::Ack,
-            "RF relay mapping was not acknowledged");
+            "complete RF relay-record replacement was not acknowledged");
     static_cast<void>(board.console("rfrecv 0x11223344 24 1 350"));
     static_cast<void>(board.tick());
     require((relays.mask() & (1U << 4U)) != 0,
@@ -407,9 +524,10 @@ void testBoardAndPersistence() {
             "repeated RF frame retriggered a non-refreshable mapping");
 
     response = board.handle(
-        {pccontroller::wire::RadioLearnMap, 190, {0, 3, 5, 2}});
+        {pccontroller::wire::RadioLearnReplace, 190,
+         {0, 0x44, 0x33, 0x22, 0x11, 24, 1, 0x5E, 0x01, 3, 5, 2}});
     require(response[0].opcode == pccontroller::wire::Ack,
-            "RF momentary mapping was not acknowledged");
+            "complete RF momentary record replacement was not acknowledged");
     static_cast<void>(board.console("rfrecv 0x11223344 24 1 350"));
     static_cast<void>(board.tick());
     require((relays.mask() & (1U << 5U)) != 0,
@@ -420,9 +538,13 @@ void testBoardAndPersistence() {
             "mapped RF momentary action did not expire locally");
 
     response = board.handle(
-        {pccontroller::wire::RadioLearnStart, 191, {0, 3, 0xAA}});
+        {pccontroller::wire::RadioLearnStart, 191, {0, 0}});
     require(response[0].opcode == pccontroller::wire::Ack,
-            "multi/indefinite RF-learning prefix was not accepted");
+            "indefinite multi-code RF learning was not accepted");
+    response = board.handle(
+        {pccontroller::wire::RadioLearnStart, 191, {0, 0, 0xAA}});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "obsolete RF-learning positional tail was accepted");
     for (std::uint8_t id = 1; id < 20; ++id) {
       const std::uint32_t code = 0x12000000U + id;
       const auto learned = board.console(
@@ -435,7 +557,8 @@ void testBoardAndPersistence() {
     const auto fullRfEvents = board.tick();
     require(std::any_of(fullRfEvents.begin(), fullRfEvents.end(),
                         [](const auto &event) {
-                          return timedEventEquals(event, {9, 2, 20});
+                          return timedEventEquals(event,
+                                                  {9, 2, 20, 0, 0, 0});
                         }),
             "RF learning did not emit a clear full/end event at 20 entries");
     response = board.handle(
@@ -502,11 +625,17 @@ void testBoardAndPersistence() {
     require(response.size() == 1 &&
                 response[0].opcode == pccontroller::wire::SettingsResponse,
             "GET_SETTINGS did not return settings");
-    require(response[0].payload.size() == 12 &&
+    require(response[0].payload.size() == 15 &&
                 response[0].payload[3] == 200 &&
                 response[0].payload[10] == 5 &&
-                response[0].payload[11] == 1,
+                response[0].payload[11] == 1 &&
+                response[0].payload[12] == 0x4D &&
+                response[0].payload[13] == relays.mask() &&
+                response[0].payload[14] == 37,
             "virtual MCU EEPROM did not retain settings");
+    require((relays.mask() & (1U << 4U)) != 0 &&
+                pwm.value(0) == 2056,
+            "output-persistence policies did not restore relay/PWM state");
 
     const auto status =
         board.handle({pccontroller::wire::GetStatus, 15, {}});
@@ -527,8 +656,8 @@ void testBoardAndPersistence() {
     const auto layout =
         board.handle({pccontroller::wire::MenuLayoutGet, 17, {}});
     require(layout[0].payload == std::vector<std::uint8_t>(
-                                     {2, 15, 0xFE, 0x7F, 0x30, 0x14,
-                                      0x52, 0x76, 0xCB, 0x8D, 0xA9, 0xFE}),
+                                     {2, 14, 0xFE, 0x3F, 0x30, 0x14,
+                                      0x52, 0x76, 0xCB, 0x8D, 0xA9}),
             "MCU-owned menu visibility/order did not persist in EEPROM");
     const auto remotes =
         board.handle({pccontroller::wire::RadioLearnList, 18, {19}});
@@ -541,12 +670,225 @@ void testBoardAndPersistence() {
   std::filesystem::remove(path, ignored);
 }
 
+void testPwmAvailabilityReporting() {
+  const auto path = temporaryEeprom();
+  std::error_code ignored;
+  std::filesystem::remove(path, ignored);
+  {
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm(false);
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+
+    auto response = board.handle({pccontroller::wire::GetStatus, 1, {}});
+    const std::uint16_t flags = static_cast<std::uint16_t>(
+        response[0].payload[24] |
+        (static_cast<std::uint16_t>(response[0].payload[25]) << 8U));
+    require((flags & (1U << 1U)) == 0 && response[0].payload[33] == 0,
+            "STATUS claimed an unavailable PWM controller");
+    response = board.handle({pccontroller::wire::PwmGet, 2, {}});
+    require(response[0].payload.size() == 34 &&
+                response[0].payload[0] == 0,
+            "PWM_VALUES did not publish unavailable state");
+    response = board.handle(
+        {pccontroller::wire::PwmSet, 3, {0, 1, 0}});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse &&
+                response[0].payload[1] ==
+                    pccontroller::wire::HardwareUnavailable,
+            "direct PWM write did not report unavailable hardware");
+  }
+  std::filesystem::remove(path, ignored);
+}
+
+void testMotionDoorPolicyAcrossVirtualCommandSources() {
+  struct PolicyCase {
+    std::uint8_t policy;
+    bool doorOpen;
+    bool allowed;
+  };
+  const PolicyCase cases[] = {
+      {0, false, true}, {0, true, true},  {1, false, true},
+      {1, true, false}, {2, false, false}, {2, true, true},
+      {3, false, false}, {3, true, false},
+  };
+
+  for (const PolicyCase &policyCase : cases) {
+    const auto path = temporaryEeprom();
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    {
+      pccontroller::virtual_board::SensorBank sensors;
+      sensors.setDoorOpen(policyCase.doorOpen);
+      pccontroller::virtual_board::RelayBank relays;
+      pccontroller::virtual_board::PwmBank pwm;
+      pccontroller::virtual_board::AddressableLedBank addressableLeds;
+      pccontroller::virtual_board::DisplayBank displays;
+      pccontroller::virtual_board::FileEeprom eeprom(path);
+      pccontroller::virtual_board::VirtualBoard board(
+          sensors, relays, pwm, addressableLeds, displays, eeprom);
+
+      const std::vector<std::uint8_t> settings{
+          3, static_cast<std::uint8_t>(policyCase.policy << 3U),
+          1, 200, 0, 5, 140, 0, 250, 0, 0, 0, 0, 0, 1};
+      auto response = board.handle(
+          {pccontroller::wire::SetSettings, 1, settings});
+      require(response[0].opcode == pccontroller::wire::Ack,
+              "virtual motion-policy fixture rejected valid settings");
+
+      const auto expectMotionResponse = [&](const pccontroller::wire::Frame &frame,
+                                            const std::string &source) {
+        const auto result = board.handle(frame);
+        const bool accepted = result[0].opcode == pccontroller::wire::Ack;
+        require(accepted == policyCase.allowed,
+                source + " disagreed with the four-mode door policy");
+        require(((relays.mask() & (1U << 1U)) != 0) == policyCase.allowed,
+                source + " left the wrong Side A enable state");
+        const auto stopped = board.handle(
+            {pccontroller::wire::RelaySide, 99, {0, 0}});
+        require(stopped[0].opcode == pccontroller::wire::Ack &&
+                    (relays.mask() & (1U << 1U)) == 0,
+                source + " prevented an unconditional motion stop");
+      };
+
+      expectMotionResponse(
+          {pccontroller::wire::RelaySide, 2, {0, 1}}, "host side command");
+      expectMotionResponse(
+          {pccontroller::wire::RelaySet, 3, {1, 1}}, "host relay-test command");
+
+      const auto console = board.console("relay 2 on");
+      require((console.message.rfind("error:", 0) != 0) == policyCase.allowed &&
+                  ((relays.mask() & (1U << 1U)) != 0) == policyCase.allowed,
+              "interactive direct-relay path disagreed with door policy");
+      static_cast<void>(board.handle(
+          {pccontroller::wire::RelaySide, 98, {0, 0}}));
+
+      response = board.handle(
+          {pccontroller::wire::RadioLearnReplace, 4,
+           {0, 0x44, 0x33, 0x22, 0x11, 24, 1, 0x5E, 0x01,
+            4, 0, 3}});
+      require(response[0].opcode == pccontroller::wire::Ack,
+              "RF side-policy fixture could not install its mapping");
+      static_cast<void>(board.console("rfrecv 0x11223344 24 1 350"));
+      static_cast<void>(board.tick());
+      require(((relays.mask() & (1U << 1U)) != 0) == policyCase.allowed,
+              "RF side mapping disagreed with the four-mode door policy");
+      static_cast<void>(board.handle(
+          {pccontroller::wire::RelaySide, 97, {0, 0}}));
+
+      response = board.handle(
+          {pccontroller::wire::MacroStart, 5, {2, 1, 0, 1, 0}});
+      require(response[0].opcode == pccontroller::wire::Ack,
+              "motion-policy macro fixture did not start");
+      response = board.handle(
+          {pccontroller::wire::MacroStep, 6,
+           {0, 0, 0, 1, 0,
+            0, 0, 0, 0, pccontroller::wire::RelaySide, 2, 0, 1}});
+      require(response[0].opcode == pccontroller::wire::Ack,
+              "motion-policy macro fixture did not buffer its step");
+      response = board.handle(
+          {pccontroller::wire::MacroStep, 7, {1}});
+      require(response[0].opcode == pccontroller::wire::Ack,
+              "motion-policy macro fixture did not enter playback");
+      const auto macroEvents = board.tick();
+      require(((relays.mask() & (1U << 1U)) != 0) == policyCase.allowed,
+              "buffered macro motion disagreed with the door policy");
+      require(std::any_of(
+                  macroEvents.begin(), macroEvents.end(),
+                  [&](const auto &event) {
+                    return event.sequence == 0xFEU &&
+                           event.opcode ==
+                               (policyCase.allowed
+                                    ? pccontroller::wire::Ack
+                                    : pccontroller::wire::ErrorResponse);
+                  }),
+              "macro playback did not report its policy decision");
+      static_cast<void>(board.handle(
+          {pccontroller::wire::RelayAllOff, 96, {}}));
+
+      response = board.handle(
+          {pccontroller::wire::RelaySet, 8, {4, 1}});
+      require(response[0].opcode == pccontroller::wire::Ack &&
+                  (relays.mask() & (1U << 4U)) != 0,
+              "motion policy incorrectly blocked general relay R5");
+    }
+    std::filesystem::remove(path, ignored);
+  }
+}
+
+void testVirtualResetJournalRecoveryAndRollover() {
+  const auto corruptPath = temporaryEeprom();
+  std::error_code ignored;
+  std::filesystem::remove(corruptPath, ignored);
+  {
+    pccontroller::virtual_board::FileEeprom eeprom(corruptPath);
+    eeprom.fill(0xFF);
+    writeVirtualResetRecord(eeprom, 5, 41);
+    writeVirtualResetRecord(eeprom, 6, 42, 0xA7, true);
+    writeVirtualResetRecord(eeprom, 7, 43, 0);
+    eeprom.flush();
+
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    require(virtualResetCount(board) == 42,
+            "virtual board did not ignore corrupt/torn reset slots");
+  }
+  std::filesystem::remove(corruptPath, ignored);
+
+  const auto wrapPath = temporaryEeprom();
+  std::filesystem::remove(wrapPath, ignored);
+  {
+    pccontroller::virtual_board::FileEeprom eeprom(wrapPath);
+    eeprom.fill(0xFF);
+    writeVirtualResetRecord(
+        eeprom, 62, std::numeric_limits<std::uint32_t>::max() - 1U);
+    eeprom.flush();
+  }
+  {
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(wrapPath);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    require(virtualResetCount(board) ==
+                std::numeric_limits<std::uint32_t>::max(),
+            "virtual reset journal did not retain UINT32_MAX");
+  }
+  {
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(wrapPath);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    require(virtualResetCount(board) == 1,
+            "virtual reset journal did not wrap UINT32_MAX to 1");
+  }
+  std::filesystem::remove(wrapPath, ignored);
+}
+
 } // namespace
 
 int main() {
   try {
     testProtocolRoundTrip();
     testBoardAndPersistence();
+    testPwmAvailabilityReporting();
+    testMotionDoorPolicyAcrossVirtualCommandSources();
+    testVirtualResetJournalRecoveryAndRollover();
     std::cout << "virtual_board_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {

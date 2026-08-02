@@ -7,6 +7,12 @@
 
 using std::size_t;
 
+class __FlashStringHelper;
+
+inline std::uint8_t pgm_read_byte(const void *address) {
+  return *static_cast<const std::uint8_t *>(address);
+}
+
 #ifndef _BV
 #define _BV(bit) (1U << (bit))
 #endif

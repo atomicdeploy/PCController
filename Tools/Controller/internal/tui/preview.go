@@ -30,7 +30,7 @@ func RichPreviewSnapshot() control.Snapshot {
 			Name: "PCController", BoardKind: native.BoardKindPCController,
 			Capabilities: native.CapabilityFrontPanelSnapshot | native.CapabilityMenuDirectory | native.CapabilityRFLearnReplace |
 				native.CapabilityHostFrontPanel | native.CapabilityBuzzerBusy | native.CapabilityMenuLayout | native.CapabilityTimedMacroQueue,
-			IdentitySchema: native.IdentitySchema, BuildHash: 0x5DF10D05,
+			IdentitySchema: native.IdentitySchemaCompact, BuildHash: 0x5DF10D05,
 			BuildTimestamp: 0x3501645C, BuildStamp: "260801123456",
 		},
 		Status: native.Status{
@@ -38,14 +38,16 @@ func RichPreviewSnapshot() control.Snapshot {
 			CurrentMA: 286, PowerMW: 3492, TLEDCenti: 2812, TBTCenti: 2637,
 			ActiveKeys: 0x01, ActiveRelays: 0x50, MenuPage: 0,
 			ProgramMode: 1, DoorOpen: true, BluetoothState: 2,
-			PWMMode: 1, PWMChannel: 3, PWMValue: 2816, LCDAddress: 0x27,
+			PWMAvailable: true, PWMChannel: 3, PWMValue: 2816, LCDAddress: 0x27,
 			ResetCause: 0, ResetCount: 2075,
 		},
 		Settings: native.Settings{
-			Flags: native.SettingsLCDEnabled, LightMode: 2,
+			Flags: 0, LightMode: 2,
 			OnBrightness: 224, OffBrightness: 8, DisplayBrightness: 5,
-			StatusBrightness: 160, PWMBootMode: native.PWMAuto,
+			DisplayClosedBrightness: 0, MotionExitHoldSeconds: 2,
+			StatusBrightness: 160, OutputPersistence: native.OutputPersistUserPWM,
 			StreamPeriodMS: 200, DefaultPage: 0, ExtendedFlags: 0xF0,
+			MotionBreakMSValue: 1,
 		},
 		HaveStatus: true, HaveSettings: true, StatusUpdated: now,
 		ConnectionState: "connected", ConnectionUpdated: now,
@@ -103,6 +105,17 @@ func RichPreviewModel(welcome bool) Model {
 			},
 		},
 		{ID: 3, Name: "draft-scene", Category: "Lighting", Color: "blue", Label: "drAF"},
+	}
+	macroOptions := make([]appconfig.HostMenuOption, 0, len(model.previewMacros))
+	for _, macro := range model.previewMacros {
+		label := fmt.Sprintf("%d %s", macro.ID, macro.Name)
+		if len(label) > 16 {
+			label = label[:16]
+		}
+		macroOptions = append(macroOptions, appconfig.HostMenuOption{Label: label, Value: fmt.Sprint(macro.ID)})
+	}
+	if model.hostMenus != nil {
+		_ = model.hostMenus.UpdateSelectOptions("macro.library", macroOptions)
 	}
 	model.previewMacroState = control.MacroState{
 		Running: true, ID: 1, Name: "output-demo", Category: "Demo", Color: "violet",

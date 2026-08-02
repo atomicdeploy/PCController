@@ -415,12 +415,52 @@ func (manager *Manager) observeKeyboardStatus(
 		case "relay":
 			matches = (status.ActiveRelays&(1<<(operation.relay-1)) != 0) == operation.active
 		case "pwm":
-			// Full PWM state requires a PWM_VALUES query; telemetry only carries
-			// the currently selected channel, so it cannot safely relinquish a
-			// different channel's latch.
-			continue
+			if !status.PWMAvailable || status.PWMChannel != operation.channel {
+				continue
+			}
+			matches = status.PWMValue == operation.value
 		}
 		if !matches {
+			delete(manager.keyboardLatches, resource)
+		}
+	}
+}
+
+// keyboardPWMQueryDue requests the full 16-channel state only while a mature
+// latch exists outside STATUS's selected channel. This closes the external
+// ownership gap without doubling every normal telemetry poll.
+func (manager *Manager) keyboardPWMQueryDue(status controller.Status, now time.Time) bool {
+	const interval = 750 * time.Millisecond
+	const settle = 500 * time.Millisecond
+	manager.keyboardLatchMu.Lock()
+	defer manager.keyboardLatchMu.Unlock()
+	if !manager.lastPWMReconcile.IsZero() && now.Sub(manager.lastPWMReconcile) < interval {
+		return false
+	}
+	for _, latch := range manager.keyboardLatches {
+		operation := latch.operation
+		if operation.kind != "pwm" || now.Sub(latch.started) < settle {
+			continue
+		}
+		if status.PWMAvailable && status.PWMChannel == operation.channel {
+			continue
+		}
+		manager.lastPWMReconcile = now
+		return true
+	}
+	return false
+}
+
+func (manager *Manager) observeKeyboardPWMValues(values controller.PWMValues, now time.Time) {
+	const settle = 500 * time.Millisecond
+	manager.keyboardLatchMu.Lock()
+	defer manager.keyboardLatchMu.Unlock()
+	for resource, latch := range manager.keyboardLatches {
+		operation := latch.operation
+		if operation.kind != "pwm" || now.Sub(latch.started) < settle {
+			continue
+		}
+		if !values.Available || values.Values[operation.channel] != operation.value {
 			delete(manager.keyboardLatches, resource)
 		}
 	}

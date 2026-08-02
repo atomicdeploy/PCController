@@ -9,3 +9,11 @@ func ensurePlatformDesktopIntegration(
 		Supported: false, LastError: ErrUnsupported.Error(),
 	}, ErrUnsupported
 }
+
+func removePlatformDesktopIntegration(
+	DesktopIntegrationOptions,
+) (DesktopIntegrationCleanupStatus, error) {
+	return DesktopIntegrationCleanupStatus{
+		Supported: false, LastError: ErrUnsupported.Error(),
+	}, ErrUnsupported
+}

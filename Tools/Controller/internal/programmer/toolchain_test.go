@@ -22,9 +22,20 @@ func TestPublicToolchainPolicyMatchesCompiledDefaultExactly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if profile.FQBN != DefaultFQBN {
+		t.Fatalf("public profile FQBN=%q want compiled fallback %q", profile.FQBN, DefaultFQBN)
+	}
 	want := DefaultToolchainPolicy()
 	if !reflect.DeepEqual(profile, want) {
 		t.Fatalf("public profile drifted from compiled default:\nfile=%#v\ndefault=%#v", profile, want)
+	}
+}
+
+func TestToolchainPolicyRejectsMissingFQBN(t *testing.T) {
+	policy := DefaultToolchainPolicy()
+	policy.FQBN = "   "
+	if err := policy.Validate(); err == nil || !strings.Contains(err.Error(), "name and FQBN") {
+		t.Fatalf("missing FQBN returned unhelpful validation error: %v", err)
 	}
 }
 

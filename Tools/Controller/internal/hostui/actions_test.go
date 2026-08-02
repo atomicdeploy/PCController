@@ -18,12 +18,13 @@ func TestParseActionURIRoutesPagesAndCommands(t *testing.T) {
 
 func TestActionBrokerValidatesAndDelivers(t *testing.T) {
 	broker := NewActionBroker()
+	events := broker.Events()
 	observed := make(chan AppAction, 1)
 	broker.SetObserver(func(action AppAction) { observed <- action })
 	if err := broker.Publish(AppAction{Kind: "app.page", Value: "events"}); err != nil {
 		t.Fatal(err)
 	}
-	if action := <-broker.Events(); action.Kind != "app.page" || action.Value != "events" {
+	if action := <-events; action.Kind != "app.page" || action.Value != "events" {
 		t.Fatalf("action=%#v", action)
 	}
 	if action := <-observed; action.Kind != "app.page" || action.Value != "events" || action.At.IsZero() {
@@ -41,6 +42,7 @@ func TestActionBrokerValidatesAndDelivers(t *testing.T) {
 
 func TestActionBrokerObserverOutlivesBoundedTUIQueue(t *testing.T) {
 	broker := NewActionBroker()
+	events := broker.Events()
 	var mu sync.Mutex
 	observed := make([]AppAction, 0, cap(broker.events)+1)
 	broker.SetObserver(func(action AppAction) {
@@ -49,7 +51,7 @@ func TestActionBrokerObserverOutlivesBoundedTUIQueue(t *testing.T) {
 		mu.Unlock()
 	})
 
-	for index := 0; index < cap(broker.events); index++ {
+	for index := 0; index < cap(events); index++ {
 		if err := broker.Publish(AppAction{Kind: "app.page", Value: "events"}); err != nil {
 			t.Fatalf("fill queue at %d: %v", index, err)
 		}
@@ -61,11 +63,29 @@ func TestActionBrokerObserverOutlivesBoundedTUIQueue(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(observed) != cap(broker.events)+1 {
-		t.Fatalf("observer deliveries=%d want=%d", len(observed), cap(broker.events)+1)
+	if len(observed) != cap(events)+1 {
+		t.Fatalf("observer deliveries=%d want=%d", len(observed), cap(events)+1)
 	}
 	last := observed[len(observed)-1]
 	if last.Kind != "app.page" || last.Value != "settings" || last.Source != "global-hotkey" {
 		t.Fatalf("overflow observer action=%#v", last)
+	}
+}
+
+func TestActionBrokerHeadlessObserverDoesNotAccumulateTUIActions(t *testing.T) {
+	broker := NewActionBroker()
+	var observed int
+	broker.SetObserver(func(AppAction) { observed++ })
+
+	for index := 0; index < cap(broker.events)*2; index++ {
+		if err := broker.Publish(AppAction{Kind: "app.page", Value: "events"}); err != nil {
+			t.Fatalf("headless publish %d: %v", index, err)
+		}
+	}
+	if observed != cap(broker.events)*2 {
+		t.Fatalf("observer deliveries=%d want=%d", observed, cap(broker.events)*2)
+	}
+	if got := len(broker.events); got != 0 {
+		t.Fatalf("unsubscribed TUI queue contains %d actions", got)
 	}
 }

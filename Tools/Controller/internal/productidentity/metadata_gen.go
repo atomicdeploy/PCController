@@ -3,6 +3,7 @@
 package productidentity
 
 const (
+	Version         = "0.0.0-development"
 	DefaultTitle    = "PCController"
 	ShortName       = "PC"
 	Tagline         = "CONTROL CENTER"

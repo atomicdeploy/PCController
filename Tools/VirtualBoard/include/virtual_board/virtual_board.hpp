@@ -20,14 +20,17 @@ struct Settings {
   std::uint8_t illuminationOffBrightness = 0;
   std::uint8_t displayBrightness = 5;
   std::uint8_t statusBrightness = 128;
-  std::uint8_t pwmBootMode = 2;
+  std::uint8_t outputPersistence = 0x06;
   std::uint16_t streamPeriodMs = 500;
   std::array<std::uint8_t, 8> userPwm{};
   std::uint8_t defaultMenuPage = 0;
   std::uint8_t menuFlags = 0;
-  std::uint16_t visibleMenuMask = 0x7FFF;
-  std::array<std::uint8_t, 8> menuOrder{
-      {0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE}};
+  std::uint16_t visibleMenuMask = 0x3FFF;
+  std::array<std::uint8_t, 7> menuOrder{
+      {0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC}};
+  std::uint8_t displayOptions = 0x10;
+  std::uint8_t relayRestoreMask = 0;
+  std::uint8_t motionBreakMs = 1;
 };
 
 struct ConsoleResult {
@@ -96,6 +99,11 @@ private:
   void stopRemoteMomentary(TimePoint now);
   bool motionAllowed() const;
   void stopMotion();
+  void applyStoredSettings();
+  void restoreStoredOutputs();
+  void storeUserPwmValue(std::uint8_t channel, std::uint16_t value);
+  void captureRelayState();
+  std::uint8_t learningRemainingSeconds(TimePoint now) const;
   void endLearning(std::uint8_t state);
   void releaseHostPanel();
   void loadSettings();
@@ -131,7 +139,6 @@ private:
   Settings settings_;
   TimePoint startedAt_;
   TimePoint lastStreamAt_;
-  TimePoint lastPwmStepAt_;
   TimePoint lastFadeAt_;
   TimePoint lastRelayTestAt_;
   TimePoint lastHostActivityAt_;
@@ -154,9 +161,10 @@ private:
   std::uint8_t relayTestIndex_ = 0;
   std::uint16_t relayTestPeriodMs_ = 0;
   bool relayTestOn_ = false;
-  bool pwmRising_ = true;
   bool learningActive_ = false;
-  std::uint8_t learningOptions_ = 0;
+  std::uint8_t learningMode_ = 0;
+  std::uint8_t learningTotalSeconds_ = 0;
+  std::uint8_t learningReportedRemaining_ = 0;
   std::uint32_t lastRadioCode_ = 0;
   std::uint32_t lastRemoteActionCode_ = 0;
   std::uint8_t remoteMomentaryKind_ = 0;
@@ -182,9 +190,9 @@ private:
   std::vector<std::uint8_t> macroQueue_;
   std::uint8_t enclosureBrightness_ = 0;
 
-  std::uint16_t menuVisibleMask_ = 0x7FFF;
-  std::array<std::uint8_t, 15> menuOrder_{{0, 1, 2, 3, 4, 5, 6, 7,
-                                           8, 9, 10, 11, 12, 13, 14}};
+  std::uint16_t menuVisibleMask_ = 0x3FFF;
+  std::array<std::uint8_t, 14> menuOrder_{{0, 1, 2, 3, 4, 5, 6,
+                                           7, 8, 9, 10, 11, 12, 13}};
   bool segmentDeadlineActive_ = false;
   bool buzzerDeadlineActive_ = false;
   std::uint8_t i2cLeaseAddress_ = 0;

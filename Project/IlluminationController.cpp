@@ -5,6 +5,7 @@
 
 namespace {
 
+// One fade step is applied at this cooperative frame interval.
 constexpr uint16_t FadeIntervalMs = 20;
 
 } // namespace

@@ -15,7 +15,6 @@ type AutomaticPreflashOptions struct {
 	FirmwarePath                string
 	Backup                      Options
 	DataPaths                   HostDataPaths
-	AllowUSBaspTroubleshooting  bool
 	AllowFlashWithoutFullBackup bool
 }
 
@@ -33,8 +32,8 @@ type AutomaticPreflashResult struct {
 // AutomaticBackupThenFlash is the mandatory safety gate for host-managed
 // firmware writes. It backs up metadata, flash, and EEPROM through Urclock by
 // default, verifies the completed manifest, and only then invokes the caller's
-// flash operation. USBasp and incomplete-backup bypasses require independent,
-// explicit troubleshooting decisions.
+// flash operation. USBasp remains an explicit method choice; bypassing a
+// complete backup is a separate, explicit recovery decision.
 func AutomaticBackupThenFlash(
 	ctx context.Context,
 	options AutomaticPreflashOptions,
@@ -71,14 +70,10 @@ func AutomaticBackupThenFlash(
 			return result, errors.New("automatic Urclock backup requires a serial port")
 		}
 	case MethodUSBasp:
-		if !options.AllowUSBaspTroubleshooting {
-			return result, errors.New(
-				"USBasp automatic backup is hidden troubleshooting functionality and requires explicit authorization",
-			)
-		}
+		// Explicit MethodUSBasp selection chooses the advanced recovery path.
 	default:
 		return result, fmt.Errorf(
-			"automatic pre-flash backup supports Urclock or explicitly authorized USBasp, got %q",
+			"automatic pre-flash backup supports Urclock or USBasp, got %q",
 			backupOptions.Method,
 		)
 	}

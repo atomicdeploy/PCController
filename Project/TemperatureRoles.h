@@ -4,6 +4,7 @@
 
 namespace TemperatureRoles {
 
+// Stable telemetry role indexes for the two sorted DS18B20 identities.
 constexpr uint8_t Led = 0;
 constexpr uint8_t BluetoothAudio = 1;
 

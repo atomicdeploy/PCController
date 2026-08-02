@@ -18,7 +18,7 @@ func TestCurrentEEPROMExportImportAndRestoreRequireValidatedBackup(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exportResult.Action != "export" || exportResult.SettingsFormat != "current/unversioned-29+crc8" {
+	if exportResult.Action != "export" || exportResult.SettingsFormat != "current/unversioned-31+crc8" {
 		t.Fatalf("unexpected export result: %+v", exportResult)
 	}
 	exportDocument, exportDecoded, err := loadCurrentSettingsArtifact(exported)
@@ -119,8 +119,9 @@ func currentEEPROMBackupManifest(t *testing.T) string {
 	binary.LittleEndian.PutUint16(values[7:9], 500)
 	values[17] = 0
 	values[18] = 0
-	binary.LittleEndian.PutUint16(values[19:21], 0x7FFF)
-	copy(values[21:29], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE})
+	binary.LittleEndian.PutUint16(values[19:21], 0x3FFF)
+	copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})
+	values[28] = 0
 	data[EEPROMSettingsAddress+EEPROMSettingsValueBytes] = avrCRC8(values)
 	data[500] = 0xA5
 	image := &IntelHexImage{data: make(map[uint32]byte, len(data))}

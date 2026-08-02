@@ -92,7 +92,7 @@ function fixture({ includeBootloader = true, omitFromCombined = "" } = {}) {
 }
 
 const environment = {
-  GITHUB_REPOSITORY: "atomicdeploy/PCController",
+  GITHUB_REPOSITORY: "example-owner/example-project",
   GITHUB_SERVER_URL: "https://github.com",
   GITHUB_RUN_ID: "30718662898",
   GITHUB_RUN_ATTEMPT: "2",

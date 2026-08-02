@@ -46,6 +46,7 @@ type IntelHexDocument struct {
 	Path         string
 	SourceBytes  int64
 	SourceSHA256 string
+	Records      uint32
 	Image        *IntelHexImage
 	Inspection   IntelHexInspection
 }
@@ -190,9 +191,20 @@ func LoadIntelHex(path string) (*IntelHexDocument, error) {
 		Path:         path,
 		SourceBytes:  int64(len(content)),
 		SourceSHA256: sha256Hex(content),
+		Records:      countIntelHexRecords(content),
 		Image:        image,
 		Inspection:   inspection,
 	}, nil
+}
+
+func countIntelHexRecords(content []byte) uint32 {
+	var records uint32
+	for _, line := range bytes.Split(content, []byte{'\n'}) {
+		if len(bytes.TrimSpace(line)) != 0 {
+			records++
+		}
+	}
+	return records
 }
 
 func (image *IntelHexImage) Byte(address uint32) (byte, bool) {

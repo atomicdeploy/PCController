@@ -1,5 +1,5 @@
 /*
- * Optional PCController TM1637 progress backend for Urboot u8.0.
+ * Optional TM1637 progress backend for the active Urboot-Custom source.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  *

@@ -42,7 +42,11 @@ func (runner *fakeAVRRunner) Run(
 		return os.WriteFile(path, runner.eepromHEX, 0o600)
 	}
 	if strings.Contains(joined, "-xshowall") ||
-		(!strings.Contains(joined, "-U") && strings.Contains(joined, "-c")) {
+		(!strings.Contains(joined, "-U") && strings.Contains(joined, "-c")) ||
+		(strings.Contains(joined, "-Ulfuse:r:-:h") &&
+			strings.Contains(joined, "-Uhfuse:r:-:h") &&
+			strings.Contains(joined, "-Uefuse:r:-:h") &&
+			strings.Contains(joined, "-Ulock:r:-:h")) {
 		if runner.failMetadata {
 			return errors.New("simulated metadata failure")
 		}
@@ -102,36 +106,31 @@ func TestBackupManifestContentAddressingValidationAndRestorePlan(t *testing.T) {
 	if err := VerifyRestorePlan(plan); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PlanSafeRestore(manifestPath, RestorePlanOptions{
-		Method: MethodUSBasp,
-	}); err == nil || !strings.Contains(err.Error(), "explicit") {
-		t.Fatalf("USBasp restore was not guarded: %v", err)
-	}
 	usbPlan, err := PlanSafeRestore(manifestPath, RestorePlanOptions{
-		Method: MethodUSBasp, AllowUSBaspTroubleshooting: true,
+		Method:     MethodUSBasp,
 		Components: []RestoreComponent{RestoreFlash},
 	})
 	if err != nil || len(usbPlan.Steps) != 1 {
-		t.Fatalf("authorized USBasp restore plan=%#v err=%v", usbPlan, err)
+		t.Fatalf("method-selected USBasp restore plan=%#v err=%v", usbPlan, err)
 	}
 }
 
-func TestValidateBackupAcceptsPackedIdentitySchemasTwoAndThree(t *testing.T) {
+func TestValidateBackupAcceptsCurrentPackedIdentitySchema(t *testing.T) {
 	date := uint32((2026-2000)<<9 | 8<<5 | 1)
 	clock := uint32(19<<11 | 42<<5 | 58>>1)
-	for _, schema := range []byte{2, 3} {
+	options := fakeBackupOptions(t.TempDir())
+	options.ApplicationIdentitySchema = 3
+	options.ApplicationPackedTimestamp = date<<16 | clock
+	if err := ValidateBackup(options); err != nil {
+		t.Fatalf("schema 3: %v", err)
+	}
+	for _, schema := range []byte{1, 2} {
 		options := fakeBackupOptions(t.TempDir())
 		options.ApplicationIdentitySchema = schema
 		options.ApplicationPackedTimestamp = date<<16 | clock
-		if err := ValidateBackup(options); err != nil {
-			t.Fatalf("schema %d: %v", schema, err)
+		if err := ValidateBackup(options); err == nil {
+			t.Fatalf("obsolete schema %d packed timestamp was accepted", schema)
 		}
-	}
-	options := fakeBackupOptions(t.TempDir())
-	options.ApplicationIdentitySchema = 1
-	options.ApplicationPackedTimestamp = date<<16 | clock
-	if err := ValidateBackup(options); err == nil {
-		t.Fatal("legacy identity accepted a packed timestamp")
 	}
 }
 
@@ -295,7 +294,7 @@ func TestAutomaticBackupThenFlashRequiresCompleteBackup(t *testing.T) {
 	}
 }
 
-func TestAutomaticBackupThenFlashDefaultsUrclockAndGuardsUSBasp(t *testing.T) {
+func TestAutomaticBackupThenFlashAcceptsExplicitUSBaspMethod(t *testing.T) {
 	root := t.TempDir()
 	firmware := filepath.Join(root, "new.hex")
 	image := &IntelHexImage{data: map[uint32]byte{0: 1}}
@@ -304,17 +303,17 @@ func TestAutomaticBackupThenFlashDefaultsUrclockAndGuardsUSBasp(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := newFakeAVRRunner(t)
-	_, err := AutomaticBackupThenFlash(
+	result, err := AutomaticBackupThenFlash(
 		context.Background(), AutomaticPreflashOptions{
 			FirmwarePath: firmware,
 			Backup:       Options{Method: MethodUSBasp, OutputPath: filepath.Join(root, "backup")},
 		}, runner, func(context.Context, string, io.Writer) error { return nil }, io.Discard,
 	)
-	if err == nil || !strings.Contains(err.Error(), "troubleshooting") {
-		t.Fatalf("USBasp automatic path was not guarded: %v", err)
+	if err != nil || !result.BackupComplete || !result.Flashed {
+		t.Fatalf("method-selected USBasp result=%#v err=%v", result, err)
 	}
-	if len(runner.calls) != 0 {
-		t.Fatalf("guarded USBasp touched runner: %v", runner.calls)
+	if len(runner.calls) == 0 {
+		t.Fatal("method-selected USBasp did not invoke the programmer runner")
 	}
 }
 
@@ -373,7 +372,6 @@ func fakeBackupOptions(root string) Options {
 		Port: "COM18", OutputPath: root,
 		Avrdude: "fake-avrdude", AvrdudeConf: "fake-avrdude.conf",
 		MCU: "atmega328p", ApplicationHash: 0x1234ABCD,
-		ApplicationDate: "2026-08-01", ApplicationTime: "19:42:58",
 	}
 }
 

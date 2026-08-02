@@ -175,7 +175,7 @@ void testMacroScratchCannotCorruptSplitSerialFrame() {
   // synchronous command while UART retains an unrelated partial COBS frame.
   auto *macroPayload = protocol.framePayloadScratch();
   std::fill(macroPayload, macroPayload + ControllerProtocol::MaximumPayload,
-            0xA7);
+            static_cast<std::uint8_t>(0xA7));
 
   serial.feed(std::vector<std::uint8_t>(encoded.begin() + split,
                                         encoded.end()));

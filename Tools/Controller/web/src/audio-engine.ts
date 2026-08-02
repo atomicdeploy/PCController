@@ -1,11 +1,27 @@
 /**
- * Gesture-gated procedural UI cues, adapted from Digitalogic's production
- * viewer. Construction is side-effect free: an AudioContext is created only
+ * Gesture-gated procedural UI cues for the controller interface. Construction
+ * is side-effect free: an AudioContext is created only
  * by start(), which the app calls from an explicit user gesture.
  */
 
 export type AudioStatus = 'idle' | 'starting' | 'running' | 'paused' | 'unsupported' | 'disposed'
-export type AudioCue = 'focus' | 'select' | 'navigation' | 'warning' | 'success'
+/**
+ * Stable semantic cue vocabulary shared with native host feedback.  These are
+ * intent names rather than filenames so each platform can use its most
+ * respectful output (short Web Audio envelopes here, system sounds natively).
+ */
+export const audioCueNames = [
+  'focus',
+  'select',
+  'navigation',
+  'success',
+  'warning',
+  'error',
+  'connect',
+  'disconnect',
+] as const
+
+export type AudioCue = typeof audioCueNames[number]
 export type NavigationDirection = 'forward' | 'backward' | 'left' | 'right' | 'up' | 'down' | 'neutral'
 
 type AudioContextConstructor = new (options?: AudioContextOptions) => AudioContext
@@ -35,6 +51,23 @@ const floorGain = 0.0001
 
 export function clampVolume(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0
+}
+
+export function isAudioCue(value: unknown): value is AudioCue {
+  return typeof value === 'string' && (audioCueNames as readonly string[]).includes(value)
+}
+
+export function audioCueCooldown(name: AudioCue): number {
+  switch (name) {
+    case 'navigation': return 0.065
+    case 'focus': return 0.11
+    case 'select': return 0.16
+    case 'success': return 0.24
+    case 'warning': return 0.3
+    case 'error': return 0.34
+    case 'connect':
+    case 'disconnect': return 0.5
+  }
 }
 
 function audioContextConstructor(): AudioContextConstructor | null {
@@ -104,6 +137,7 @@ class ProceduralAudioEngine implements AudioEngine {
   cue(name: AudioCue, direction: NavigationDirection = 'neutral'): boolean {
     const context = this.playableContext(name)
     if (!context || !this.master) return false
+    vibrateCue(name)
     const now = context.currentTime + 0.005
     switch (name) {
       case 'focus':
@@ -126,6 +160,18 @@ class ProceduralAudioEngine implements AudioEngine {
       case 'success':
         this.tone(context, now, 0.26, 329.63, 493.88, 0.021, -0.08, 'sine')
         this.tone(context, now + 0.06, 0.32, 493.88, 659.25, 0.017, 0.08, 'triangle')
+        break
+      case 'error':
+        this.tone(context, now, 0.28, 196, 146.83, 0.026, -0.08, 'triangle')
+        this.tone(context, now + 0.075, 0.3, 164.81, 123.47, 0.02, 0.08, 'sine')
+        break
+      case 'connect':
+        this.tone(context, now, 0.24, 293.66, 392, 0.018, -0.08, 'sine')
+        this.tone(context, now + 0.055, 0.3, 440, 587.33, 0.014, 0.08, 'triangle')
+        break
+      case 'disconnect':
+        this.tone(context, now, 0.24, 392, 293.66, 0.018, -0.08, 'triangle')
+        this.tone(context, now + 0.055, 0.3, 261.63, 196, 0.014, 0.08, 'sine')
         break
     }
     return true
@@ -228,7 +274,7 @@ class ProceduralAudioEngine implements AudioEngine {
   private playableContext(name: AudioCue): AudioContext | null {
     const context = this.context
     if (!context || this.state !== 'running' || this.isMuted || this.masterVolume <= 0) return null
-    const cooldown = name === 'focus' ? 0.075 : name === 'navigation' ? 0.055 : 0.14
+    const cooldown = audioCueCooldown(name)
     const previous = this.lastCueAt.get(name) ?? -Infinity
     if (context.currentTime - previous < cooldown) return null
     this.lastCueAt.set(name, context.currentTime)
@@ -321,6 +367,17 @@ class ProceduralAudioEngine implements AudioEngine {
       }).catch(() => { this.state = 'paused' })
     }
   }
+}
+
+function vibrateCue(name: AudioCue): void {
+  if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
+  if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
+  if (name === 'select') navigator.vibrate(8)
+  else if (name === 'success') navigator.vibrate([10, 22, 14])
+  else if (name === 'warning') navigator.vibrate([18, 32, 18])
+  else if (name === 'error') navigator.vibrate([22, 28, 22])
+  else if (name === 'connect') navigator.vibrate(10)
+  else if (name === 'disconnect') navigator.vibrate([12, 24, 10])
 }
 
 function navigationTone(direction: NavigationDirection): { start: number; end: number; pan: number } {

@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 
-// Minimal PCA9685 register driver; logical ownership remains in PwmController.
+// Minimal PWM-expander register driver; logical ownership stays in PwmController.
 class PwmExpanderDriver {
 public:
   explicit PwmExpanderDriver(uint8_t address) : address_(address) {}
@@ -18,5 +18,5 @@ private:
   bool write8(uint8_t reg, uint8_t value);
   bool read8(uint8_t reg, uint8_t &value);
 
-  uint8_t address_; // Seven-bit I2C address; production hardware uses 0x41.
+  uint8_t address_; // PWM uses 0x41 while the INA219 remains at 0x40.
 };

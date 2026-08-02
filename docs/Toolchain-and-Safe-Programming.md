@@ -1,3 +1,5 @@
+<div align="center"><a href="../README.md"><img src="assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Toolchain Bootstrap and Safe Programming
 
 PCController exposes one generic firmware toolchain interface. MiniCore, the
@@ -142,13 +144,15 @@ Urboot `u8.0`, MiniCore 3.1.2, AVR GCC 7.3.0, and Binutils 2.26.20160125 are
 retained only as a stock-hash fixture. The build must first reproduce both old
 MiniCore images exactly, then verify the active `u8.0.1` source hashes, apply
 the diff, derive the exported-page-writer jump from the ELF, and enforce the
-custom size/address/metadata assertions. This separates proof of the historical
+custom size/address/metadata assertions. This separates reproduction-fixture
 hashes from the active latest-stable custom source.
 
 The last verified custom build used 510 of its 512 allocated bytes and imposed
-a 32,256-byte application ceiling. Its contemporaneous firmware manifest was
-32,240 bytes, leaving 16 bytes. That margin is not permanent: rebuild firmware
-and rerun the Urboot-Custom assertion immediately before an ISP installation.
+a 32,256-byte application ceiling. The current `B3F4CB11` linked sketch is
+32,216 bytes; its fixed 12-byte identity at `0x7DF4` leaves 28 immediately
+linkable bytes in the shared layout. That margin is not permanent: rebuild
+firmware and rerun the Urboot-Custom assertion immediately before an ISP
+installation.
 See `Tools/Bootloader/Urboot-Custom/README.md` for hashes, retained features,
 optional size tradeoffs, and the installation procedure.
 
@@ -174,6 +178,15 @@ a pull request. Validation covers firmware and its 32,256-byte ceiling,
 Urboot-Custom source/diff/hash/512-byte checks, Go and host packaging, Win32
 resources and UPX, both npm domains and the web production build, plus the
 VirtualBoard build/tests. Prerelease and `main` observations remain canary-only.
+All external Actions use immutable commit revisions with readable major-version
+comments; their exact revisions and workflow consumers are included in the
+host-tool lock. Normal host CI reads its exact Node.js and go-winres versions
+from that lock instead of duplicating them in workflow source.
+
+The candidate report includes npm security totals. Its deterministic PR plan
+adds upstream release-note links, explicit license/security review, firmware and
+bootloader headroom, compressed-host size, and reviewer checkboxes. This plan is
+uploaded with the same evidence and used verbatim as the validated PR body.
 
 A failed candidate uploads its report/evidence and creates or updates one
 actionable blocked-update issue rather than proposing broken source. A later
@@ -197,29 +210,133 @@ Before releasing the application UART, Controller performs this sequence:
 2. authenticate the running PCController application;
 3. query board-owned MCU settings and store a separate semantic snapshot;
 4. create a durable recovery marker before making a temporary board change;
-5. show `Prog` on TM1637 and `Programming...` / `Do not disconnect` on the
+5. cancel any macro and command every relay and PWM channel off;
+6. persist a temporary reset-safe MCU image: Silent, illumination zero/off,
+   output persistence and relay restore mask cleared, status light off, and
+   programming-visible TM1637;
+7. show `Prog` on TM1637 and `Programming...` / `Do not disconnect` on the
    host-owned front panel and physical LCD where supported;
-6. if sound was enabled, set temporary Silent and wait beyond the firmware's
-   deferred EEPROM-write window;
-7. close the application UART;
-8. read and verify full flash, EEPROM, and programmer-metadata backup;
-9. write and verify the selected firmware image;
-10. reconnect to a fresh application HELLO, restore the exact original MCU
-    settings, wait for persistence, query them back, and compare;
-11. release the programming panel, show `Programming done` / `Device ready`,
+8. wait beyond the firmware's deferred EEPROM-write window and verify the
+   temporary settings by querying them back;
+9. close the application UART;
+10. read and verify full flash, EEPROM, and programmer-metadata backup;
+11. write and verify the selected firmware image;
+12. durably mark the host programming outcome, reconnect to a fresh
+    application HELLO, restore exact original MCU settings, wait, query and
+    compare;
+13. release the programming panel, show `Programming done` / `Device ready`,
     and remove the recovery marker only after successful readback.
 
 If the board was already silent, it remains silent. If it was audible, it is
 made audible again only by restoring the captured MCU settings. Unsupported
-display, LCD, or settings operations are capability warnings so a reduced but
-protocol-compatible board can still use mandatory raw EEPROM backup. A failed
-flash still attempts reconnection and restoration.
+display and LCD operations are capability warnings so a reduced board can still
+use mandatory raw EEPROM backup. Failure to force safe outputs or persist safe
+settings is fatal while retaining the recovery marker. A normally returned
+failed flash still records its final host outcome, then attempts reconnection
+and exact restoration.
 
-An interrupted operation leaves a marker under the host `state` directory. The
-primary TUI scans matching markers after the next authenticated connection and
-retries restoration before presenting the normal host menu.
+An interrupted operation leaves a marker under the host `state` directory. On
+every authenticated reboot before host completion is recorded, the primary
+reasserts relay/PWM-off, the safe EEPROM image, and `Prog`; it deliberately does
+not resume illumination or audio. Once the programmer has recorded its final
+outcome, the next connection finishes exact restoration and clears the marker.
 
-## Hidden USBasp recovery
+### Development EEPROM reinitialization
+
+`--reinitialize-eeprom` is a deliberately destructive, host-tool-only escape
+hatch for an unpublished development board whose `GET_SETTINGS` payload no
+longer matches the current host schema. It does **not** add an old settings
+decoder, migration table, or compatibility branch to the firmware. Use it only
+when losing the board's previous semantic settings is acceptable:
+
+```console
+controller program flash .build\firmware\PCController.ino.hex COM18 ^
+  --method urclock --reinitialize-eeprom
+```
+
+If another Controller instance owns the UART, the secondary uploads the exact
+firmware artifact and this flag to the primary through the typed
+`controller.update.firmware` request, then follows that operation to its final
+result. The primary remains the only process that opens the port.
+
+The exception still requires a complete verified flash, raw EEPROM, and
+programmer-metadata backup before the firmware write. It cannot be combined
+with `--allow-incomplete-backup`. Before releasing UART ownership, the host
+persists the settings-query failure and any live state it could capture,
+cancels macros, releases all relays, fades PWM when possible (otherwise forces
+it off), shows the programming cues, and plays the power-down melody. It does
+not rewrite the incompatible EEPROM before that raw backup.
+
+After verified flashing and a new authenticated `HELLO`, the host accepts only
+the new firmware's current settings response. It never maps or restores the old
+semantic values or live outputs. It commits that current schema with Silent
+off, illumination mode Off, output persistence disabled, and relay restore mask
+zero; it commands macro/relay/PWM outputs off again, verifies exact settings
+readback, and only then clears the recovery marker. The original raw EEPROM is
+still recoverable from the pre-flash backup, but restoring it would deliberately
+reintroduce the incompatible development state.
+
+Because the durable programming latch suppresses the MCU's ordinary boot tune
+during intermediate resets, the host waits until settings/output verification
+and front-panel restoration are complete, then streams the configurable rising
+`programming-ready` melody. A normal restore skips that cue when the captured
+MCU Silent setting was enabled; explicit development reinitialization ends with
+Silent disabled and therefore plays it. This keeps audible completion aligned
+with the host's ready state instead of sounding during the first reboot.
+
+### Read-only recovery of an already-written image
+
+Use the following only when a guarded write transaction ended as failed but the
+selected image may already be present:
+
+```console
+controller program recover firmware.hex [PORT]
+```
+
+The command is owned by the authenticated primary runtime. A secondary CLI,
+shell, TUI, or IPC client delegates it to that primary; no second process opens
+the port. The optional `PORT` is an assertion that must match the primary's
+already-authenticated device, including its stable physical identity. It is not
+a fallback selector and cannot move a pending transaction to another board.
+
+Recovery loads and validates the HEX, matches its SHA-256 plus device
+fingerprint to one durable failed programming session, and reasserts that
+session's safe relay/PWM/audio/display state. It then releases the application
+UART and asks Urclock for a fresh, read-only flash verification. The semantic
+verifier checks the programmed bytes and critical vector/reset behavior; this
+command never writes or patches flash.
+
+Only a verified result can complete the programmer outcome. The host then
+reconnects to the exact saved device, authenticates application HELLO, performs
+the recorded normal restore or development EEPROM reinitialization, verifies
+settings and safe outputs, and clears the recovery marker. Any verification,
+identity, reconnect, or restore failure keeps the marker and programming-safe
+state. Direct dependency-tool, raw serial, or ISP invocation is deliberately
+not accepted as a bypass.
+
+An absent optional LCD is a warning-only capability result. The host records
+that no physical LCD message was shown, while mandatory backup/readback,
+TM1637/host presentation, exact reconnect, and recovery continue normally.
+
+### Verified development recovery checkpoint
+
+The 2026-08-02 recovery pass completed against the Instance-ID-pinned COM18
+controller without using ISP. The board authenticated as `B3F4CB11`; its exact
+deployed application artifact SHA-256 is
+`6653daa48ccc00c8db80004d942fbcccdbd4e1408cb99bac963869e544ce2d6d`.
+A fresh read-only Urboot semantic verification covered 32,228 programmed bytes,
+resolved reset to `0x7E80`, and resolved vector 25 to `0x024E`.
+
+The previously durable recovery marker is cleared. Current-schema EEPROM was
+intentionally reinitialized and read back with Silent off, illumination Off,
+all output-persistence bits off, relay restore mask zero, and motion break
+1 ms. After the pinned reconnect, the safe live snapshot showed 12.282 V, PWM
+available, no active relays, no framing/CRC protocol errors, and reset count 12.
+The optional LCD was absent, so its presentation step produced a non-fatal
+capability warning; raw backup, programming verification, application return,
+and safe-state recovery did not depend on that optional peripheral.
+
+## Advanced USBasp recovery
 
 USBasp is an explicit troubleshooting fallback. Its ISP transport must never
 receive a COM or friendly-name selector. Supply the application connection
@@ -227,8 +344,11 @@ separately so the same settings, display, and audio lifecycle runs around ISP:
 
 ```console
 controller program flash firmware.with_bootloader.hex ^
-  --usbasp-troubleshooting --app-device "USB-SERIAL CH340"
+  --method usbasp --app-device "USB-SERIAL CH340"
 ```
+
+Selecting `--method usbasp` is sufficient; `--programmer` is needed only to
+override the host's configured ISP backend for different hardware.
 
 `--app-device` accepts the same COM, friendly-name, VID:PID, serial, and
 instance selectors as the ordinary connection layer. The resolved application
@@ -250,8 +370,8 @@ are also SCK/MOSI.
 
 MCU EEPROM and PC host configuration remain separate:
 
-- the board owns its settings, learned RF records, reset journal, and any
-  board-resident automation;
+- the board owns its settings, learned RF records/mappings, and reset journal;
+  the current image has no generic EEPROM automation table;
 - the host owns port preferences, UI/network configuration, histories,
   scripts, and tool paths;
 - a programming settings snapshot is a backup artifact, not a host setting,

@@ -4,8 +4,8 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
 - Normalized requirements: **65**
-- Open: **53**
-- Closed with current evidence: **12**
+- Open: **51**
+- Closed with current evidence: **14**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
@@ -22,7 +22,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#2 — Board peripherals, sensors, displays, lighting, and audio](https://github.com/atomicdeploy/PCController/issues/2)
 
-5 open / 0 closed / 5 total
+4 open / 1 closed / 5 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
@@ -30,7 +30,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `measurement-sensors-i2c` | [#20](https://github.com/atomicdeploy/PCController/issues/20) | 🟡 open | Deliver stable INA219 and dual-DS18B20 measurements with conflict-free I2C discovery |
 | `pwm-lighting-rgb-strip` | [#21](https://github.com/atomicdeploy/PCController/issues/21) | 🟡 open | Complete PWM ownership, enclosure fade, status RGB, power light, and addressable strip behavior |
 | `displays-audio` | [#22](https://github.com/atomicdeploy/PCController/issues/22) | 🟡 open | Finish smooth TM1637, optional LCD, buzzer, melody, and configurable cue behavior |
-| `cooperative-host-i2c-profile` | [#23](https://github.com/atomicdeploy/PCController/issues/23) | 🟡 open | Measure and implement the cooperative host-driven I2C/LCD profile |
+| `cooperative-host-i2c-profile` | [#23](https://github.com/atomicdeploy/PCController/issues/23) | ✅ closed | Measure and implement the cooperative host-driven I2C/LCD profile |
 
 ## [#3 — Relay and motion-control safety](https://github.com/atomicdeploy/PCController/issues/3)
 
@@ -52,7 +52,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `board-menu-hierarchy-settings` | [#28](https://github.com/atomicdeploy/PCController/issues/28) | 🟡 open | Finish nested board menus, editors, save/discard, and persistent default-page behavior |
 | `first-run-board-synchronization` | [#29](https://github.com/atomicdeploy/PCController/issues/29) | 🟡 open | Synchronize first-run setup, board initialization, and welcome melody |
 | `frontpanel-snapshot-remote-menus` | [#30](https://github.com/atomicdeploy/PCController/issues/30) | 🟡 open | Mirror the live front panel and support remote keys plus PC-defined board menus |
-| `lcd-console-status-events` | [#31](https://github.com/atomicdeploy/PCController/issues/31) | 🟡 open | Mirror console context to LCD and make Status the event-aware default page |
+| `lcd-console-status-events` | [#31](https://github.com/atomicdeploy/PCController/issues/31) | 🟡 open | Mirror console context to LCD and make Door the event-aware default page |
 
 ## [#5 — 433 MHz RF learning, mappings, and actions](https://github.com/atomicdeploy/PCController/issues/5)
 
@@ -78,11 +78,11 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#7 — PC host TUI, configuration, automation, and OS integration](https://github.com/atomicdeploy/PCController/issues/7)
 
-6 open / 1 closed / 7 total
+7 open / 0 closed / 7 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `host-foundation-config-library` | [#39](https://github.com/atomicdeploy/PCController/issues/39) | ✅ closed | Provide the Go host, Charm TUI foundation, separate hot-reloaded config, and reusable APIs |
+| `host-foundation-config-library` | [#39](https://github.com/atomicdeploy/PCController/issues/39) | 🟡 open | Provide the Go host, Charm TUI foundation, separate hot-reloaded config, and reusable APIs |
 | `tui-pages-controls` | [#40](https://github.com/atomicdeploy/PCController/issues/40) | 🟡 open | Build polished multipage TUI controls for board, settings, RF, programming, and automation |
 | `monitoring-format-history` | [#41](https://github.com/atomicdeploy/PCController/issues/41) | 🟡 open | Improve monitoring presentation, adaptive units, subscriptions, graphs, and timeline |
 | `console-command-ux` | [#42](https://github.com/atomicdeploy/PCController/issues/42) | 🟡 open | Finish console history, nested completion, command organization, and clean output |
@@ -92,13 +92,13 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#8 — IPC, APIs, networking, discovery, and remote bridges](https://github.com/atomicdeploy/PCController/issues/8)
 
-4 open / 0 closed / 4 total
+2 open / 2 closed / 4 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `ipc-websocket-api-suite` | [#46](https://github.com/atomicdeploy/PCController/issues/46) | 🟡 open | Provide versioned JSON-RPC, REST, and authenticated WebSocket command/event APIs |
+| `ipc-websocket-api-suite` | [#46](https://github.com/atomicdeploy/PCController/issues/46) | ✅ closed | Provide versioned JSON-RPC, REST, and authenticated WebSocket command/event APIs |
 | `network-bridge-discovery` | [#47](https://github.com/atomicdeploy/PCController/issues/47) | 🟡 open | Bridge controller hosts over the network with mDNS/SSDP discovery |
-| `http-webhooks-socketio-messages` | [#48](https://github.com/atomicdeploy/PCController/issues/48) | 🟡 open | Add bidirectional HTTP, webhooks, WebSocket client/server, Socket.IO, and actionable messages |
+| `http-webhooks-socketio-messages` | [#48](https://github.com/atomicdeploy/PCController/issues/48) | ✅ closed | Add bidirectional HTTP, webhooks, WebSocket client/server, Socket.IO, and actionable messages |
 | `remote-control-security` | [#49](https://github.com/atomicdeploy/PCController/issues/49) | 🟡 open | Define security and policy gates for every remote and disruptive control path |
 
 ## [#9 — USB lifecycle, device selection, and single-owner IPC](https://github.com/atomicdeploy/PCController/issues/9)
@@ -109,8 +109,8 @@ This is the canonical public map from normalized project requirements to GitHub 
 |---|---:|:---:|---|
 | `stable-device-selection` | [#50](https://github.com/atomicdeploy/PCController/issues/50) | ✅ closed | Select the controller by stable identity, friendly name, COM name, or VID/PID |
 | `usb-reconnect-notifications` | [#51](https://github.com/atomicdeploy/PCController/issues/51) | 🟡 open | Validate event-driven USB reconnect and opt-in DTR reset semantics |
-| `primary-serial-owner-ipc` | [#52](https://github.com/atomicdeploy/PCController/issues/52) | ✅ closed | Enforce one serial owner and route secondary processes through IPC |
-| `controller-discovery-authority` | [#53](https://github.com/atomicdeploy/PCController/issues/53) | 🟡 open | Make controller-owned discovery authoritative and explain Win32 versus WMI/CIM drift |
+| `primary-serial-owner-ipc` | [#52](https://github.com/atomicdeploy/PCController/issues/52) | 🟡 open | Enforce one serial owner and route secondary processes through IPC |
+| `controller-discovery-authority` | [#53](https://github.com/atomicdeploy/PCController/issues/53) | ✅ closed | Make controller-owned discovery authoritative and explain platform inventory drift |
 | `serial-lifecycle-contract` | [#54](https://github.com/atomicdeploy/PCController/issues/54) | 🟡 open | Keep the serial protocol connected independently of telemetry subscriptions |
 
 ## [#10 — Urboot/Urclock programming, backup, patch, and restore](https://github.com/atomicdeploy/PCController/issues/10)

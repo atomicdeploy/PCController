@@ -59,9 +59,9 @@ func (model Model) menuPageByID(id byte) menuPage {
 	}
 }
 
-func (model Model) statusMenuID() (byte, bool) {
+func (model Model) doorMenuID() (byte, bool) {
 	for _, page := range model.activeMenuPages() {
-		if page.Key == "status" {
+		if page.Key == "door" {
 			return page.ID, true
 		}
 	}

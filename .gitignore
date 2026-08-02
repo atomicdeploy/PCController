@@ -17,6 +17,7 @@
 *.bin
 *.map
 *.lst
+/Tools/Controller/internal/defaultassets/assets/default-metadata.json
 
 # Native/Go build artifacts
 *.exe

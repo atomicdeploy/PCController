@@ -7,13 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 )
 
 type fakeRFReplaceTransport struct {
 	records         map[byte]native.RFEntry
-	probeCode       byte
 	replaceCommands int
 	corruptReadback bool
 }
@@ -21,9 +19,6 @@ type fakeRFReplaceTransport struct {
 func (fake *fakeRFReplaceTransport) Command(_ context.Context, opcode byte, payload []byte) error {
 	switch opcode {
 	case native.OpRFLearnReplace:
-		if len(payload) == 0 {
-			return &link.RemoteError{RequestOpcode: opcode, Code: fake.probeCode}
-		}
 		if len(payload) != native.RFEntryPayloadSize {
 			return errors.New("bad fake replace payload")
 		}
@@ -95,26 +90,20 @@ func newTestRFService(fake *fakeRFReplaceTransport, capabilities uint32) *RFRepl
 	}
 }
 
-func TestRFReplaceProbeIsNonMutatingAndCapabilityGated(t *testing.T) {
-	fake := &fakeRFReplaceTransport{records: map[byte]native.RFEntry{}, probeCode: native.ErrorBadPayload}
+func TestRFReplaceCapabilityCheckIsReadOnlyAndCapabilityGated(t *testing.T) {
+	fake := &fakeRFReplaceTransport{records: map[byte]native.RFEntry{}}
 	service := newTestRFService(fake, 0)
-	if support := service.Support(); support.Known || support.Supported {
-		t.Fatalf("support before probe = %+v", support)
+	if support := service.Support(); !support.Known || support.Supported {
+		t.Fatalf("unsupported capability result = %+v", support)
 	}
 	support, err := service.Probe(context.Background())
-	if err != nil || !support.Supported || len(fake.records) != 0 || fake.replaceCommands != 0 {
-		t.Fatalf("safe probe support=%+v err=%v fake=%+v", support, err, fake)
+	if err == nil || support.Supported || len(fake.records) != 0 || fake.replaceCommands != 0 {
+		t.Fatalf("read-only capability check support=%+v err=%v fake=%+v", support, err, fake)
 	}
-	if !service.Support().Supported {
-		t.Fatal("successful probe was not cached for connected firmware identity")
-	}
-
-	unsupported := newTestRFService(&fakeRFReplaceTransport{
-		records: map[byte]native.RFEntry{}, probeCode: native.ErrorUnsupported,
-	}, 0)
-	support, err = unsupported.Probe(context.Background())
-	if err != nil || !support.Known || support.Supported {
-		t.Fatalf("unsupported probe support=%+v err=%v", support, err)
+	supported := newTestRFService(fake, native.CapabilityRFLearnReplace)
+	support, err = supported.Probe(context.Background())
+	if err != nil || !support.Supported || fake.replaceCommands != 0 {
+		t.Fatalf("advertised capability support=%+v err=%v fake=%+v", support, err, fake)
 	}
 }
 
@@ -156,5 +145,32 @@ func TestRFReplaceMismatchAutomaticallyRollsBack(t *testing.T) {
 	readback, fetchErr := service.Fetch(context.Background())
 	if fetchErr != nil || !equalRFRecords(readback, original) {
 		t.Fatalf("rollback readback=%+v err=%v original=%+v", readback, fetchErr, original)
+	}
+}
+
+func TestRFMappingUpdateUsesVerifiedFullRecordTransaction(t *testing.T) {
+	original := testRFRecords()
+	fake := &fakeRFReplaceTransport{
+		records: map[byte]native.RFEntry{2: original[0], 7: original[1]},
+	}
+	service := newTestRFService(fake, native.CapabilityRFLearnReplace)
+	if err := service.UpdateMapping(
+		context.Background(), 7,
+		native.RFActionSide, 1, native.RFBehaviorDown,
+	); err != nil {
+		t.Fatal(err)
+	}
+	readback, err := service.Fetch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(readback) != 2 || readback[1].ID != 7 ||
+		readback[1].ActionKind != native.RFActionSide ||
+		readback[1].ActionValue != 1 ||
+		readback[1].Behavior != native.RFBehaviorDown {
+		t.Fatalf("full-record mapping readback=%+v", readback)
+	}
+	if fake.replaceCommands != len(original) {
+		t.Fatalf("mapping wrote %d records, want full snapshot of %d", fake.replaceCommands, len(original))
 	}
 }

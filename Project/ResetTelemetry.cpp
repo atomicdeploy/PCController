@@ -7,6 +7,7 @@
 #include "UartProtocol.h"
 
 namespace {
+// Wear-levelled reset-journal geometry and committed-record marker.
 constexpr int ResetJournalEepromAddress = EepromLayout::ResetJournalAddress;
 constexpr uint8_t ResetJournalSlots = EepromLayout::ResetJournalSlots;
 constexpr uint8_t ResetRecordMarker = 0xA7;
@@ -28,16 +29,26 @@ static_assert(
         E2END + 1,
     "Reset journal exceeds ATmega328P EEPROM");
 
+#if defined(PCCONTROLLER_NATIVE_TEST)
+uint8_t capturedResetCause = 0;
+#else
 uint8_t capturedResetCause __attribute__((section(".noinit")));
 
 void captureResetCause()
     __attribute__((naked, used, section(".init3")));
 
 void captureResetCause() {
-  capturedResetCause = MCUSR;
+  uint8_t cause = MCUSR;
+  if (cause == 0) {
+    // Urboot preserves the pre-clear MCUSR byte in r2 across its app jump.
+    register uint8_t urbootCause asm("r2");
+    cause = urbootCause;
+  }
+  capturedResetCause = cause;
   MCUSR = 0;
   wdt_disable();
 }
+#endif
 
 uint8_t resetRecordChecksum(uint32_t count) {
   return ControllerProtocol::UartProtocol::crc8(
@@ -46,7 +57,6 @@ uint8_t resetRecordChecksum(uint32_t count) {
 
 bool validResetRecord(const ResetRecord &record) {
   return record.marker == ResetRecordMarker && record.count != 0 &&
-         record.count != UINT32_MAX &&
          record.checksum == resetRecordChecksum(record.count);
 }
 
@@ -66,7 +76,7 @@ void ResetTelemetry::begin() {
   for (uint8_t slot = 0; slot < ResetJournalSlots; ++slot) {
     EEPROM.get(
         ResetJournalEepromAddress +
-            static_cast<int>(slot) * sizeof(ResetRecord),
+            static_cast<int>(slot) * EepromLayout::ResetRecordBytes,
         record);
     if (validResetRecord(record) &&
         (!found || countIsNewer(record.count, count_))) {
@@ -82,7 +92,7 @@ void ResetTelemetry::begin() {
       found ? static_cast<uint8_t>((newestSlot + 1) % ResetJournalSlots) : 0;
   const int address =
       ResetJournalEepromAddress +
-      static_cast<int>(nextSlot) * sizeof(ResetRecord);
+      static_cast<int>(nextSlot) * EepromLayout::ResetRecordBytes;
   const uint8_t checksum = resetRecordChecksum(count_);
 
   // Invalidate first and publish the marker last. A power loss can therefore

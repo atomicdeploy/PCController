@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Export immutable CI inputs from the canonical toolchain lock without network access.
+// Export immutable CI inputs from canonical dependency locks without network access.
 
+import { createHash } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const repository = resolve(here, '..', '..')
 const defaultLockPath = join(repository, 'Tools', 'Controller', 'toolchain-lock.json')
+const defaultHostLockPath = join(repository, 'Tools', 'Dependencies', 'resolved-tools-lock.json')
 const defaultProductPath = join(repository, 'Tools', 'Controller', 'web', 'package.json')
 const requiredLibraries = [
   ['Adafruit PWM Servo Driver Library', 'adafruit_pwm_servo_driver_library_version'],
@@ -50,6 +52,43 @@ function validateLock(lock) {
   return linux
 }
 
+function sha256(path) {
+  return createHash('sha256').update(readFileSync(path)).digest('hex')
+}
+
+function validateHostLock(lock) {
+  invariant(lock?.format === 'pccontroller-host-tool-lock/v1', 'unsupported canonical host-tool lock format')
+  invariant(/^\d+\.\d+\.\d+$/u.test(lock?.node?.version ?? ''), 'host-tool lock is missing an exact Node.js version')
+  invariant(/^https:\/\//u.test(lock?.node?.source ?? ''), 'host-tool lock is missing the Node.js release source')
+  invariant(/^[0-9a-f]{64}$/u.test(lock?.node?.checksums_sha256 ?? ''), 'host-tool lock is missing the Node.js checksum-list identity')
+  invariant(Array.isArray(lock?.node?.assets) && lock.node.assets.length, 'host-tool lock is missing Node.js distribution assets')
+  for (const asset of lock.node.assets) {
+    invariant(/^https:\/\//u.test(asset.url ?? ''), `${asset.name ?? 'Node.js asset'} URL must use HTTPS`)
+    invariant(/^[0-9a-f]{64}$/u.test(asset.sha256 ?? ''), `${asset.name ?? 'Node.js asset'} must have a lowercase SHA-256`)
+  }
+  invariant(/^v?\d+\.\d+\.\d+$/u.test(lock?.go_winres?.version ?? ''), 'host-tool lock is missing an exact go-winres version')
+  invariant(String(lock?.go_winres?.sum ?? '').startsWith('h1:'), 'host-tool lock is missing the go-winres module checksum')
+  invariant(String(lock?.go_winres?.go_mod_sum ?? '').startsWith('h1:'), 'host-tool lock is missing the go-winres go.mod checksum')
+  invariant(/^\d+(?:\.\d+){2}-\d+(?:\.\d+){2}-r\d+$/u.test(lock?.windows_c_compiler?.package_version ?? ''), 'host-tool lock is missing an exact Windows C compiler package version')
+  invariant(/^\d+(?:\.\d+){2}$/u.test(lock?.windows_c_compiler?.compiler_version ?? ''), 'host-tool lock is missing an exact GCC version')
+  invariant(/^x86_64-.*(?:mingw(?:32|64)?|windows-gnu)$/iu.test(lock?.windows_c_compiler?.target ?? ''), 'host-tool lock has an incompatible Windows C compiler target')
+  invariant(/^[0-9a-f]{40}$/u.test(lock?.windows_c_compiler?.manifest_git_sha ?? ''), 'host-tool lock is missing the compiler manifest Git identity')
+  invariant(/^[0-9a-f]{64}$/u.test(lock?.windows_c_compiler?.installer_sha256 ?? ''), 'host-tool lock is missing the compiler archive SHA-256')
+  invariant(Array.isArray(lock?.upx?.assets) && lock.upx.assets.length, 'host-tool lock is missing UPX assets')
+  for (const asset of lock.upx.assets) {
+    invariant(/^https:\/\//u.test(asset.url ?? ''), `${asset.name ?? 'UPX asset'} URL must use HTTPS`)
+    invariant(/^[0-9a-f]{64}$/u.test(asset.sha256 ?? ''), `${asset.name ?? 'UPX asset'} must have a lowercase SHA-256`)
+  }
+  invariant(Array.isArray(lock?.github_actions?.actions) && lock.github_actions.actions.length, 'host-tool lock is missing immutable GitHub Actions')
+  for (const action of lock.github_actions.actions) {
+    invariant(/^[0-9a-f]{40}$/u.test(action.revision ?? ''), `${action.name ?? 'GitHub Action'} revision is not immutable`)
+    invariant(/^v\d+/u.test(action.version ?? ''), `${action.name ?? 'GitHub Action'} is missing its readable version`)
+  }
+  invariant(lock.web?.package_lock_sha256 === sha256(join(repository, 'Tools', 'Controller', 'web', 'package-lock.json')), 'web package lock hash differs from the host-tool lock')
+  invariant(lock.build?.package_lock_sha256 === sha256(join(repository, 'Tools', 'Build', 'package-lock.json')), 'build package lock hash differs from the host-tool lock')
+  return lock
+}
+
 function productIdentity(manifest) {
   const name = String(manifest?.productName || manifest?.name || 'Controller').replace(/[\r\n]+/gu, ' ').trim()
   const slug = name.replace(/[^0-9A-Za-z._-]+/gu, '-').replace(/^-+|-+$/gu, '') || 'Controller'
@@ -76,6 +115,23 @@ function currentOutputs(lock, product) {
   return outputs
 }
 
+function hostOutputs(lock) {
+  validateHostLock(lock)
+  return {
+    node_version: lock.node.version,
+    go_winres_module: lock.go_winres.module,
+    go_winres_version: lock.go_winres.version,
+    go_winres_sum: lock.go_winres.sum,
+    go_winres_go_mod_sum: lock.go_winres.go_mod_sum,
+    windows_c_compiler_package: lock.windows_c_compiler.package_id,
+    windows_c_compiler_version: lock.windows_c_compiler.package_version,
+    windows_c_compiler_target: lock.windows_c_compiler.target,
+    windows_c_compiler_sha256: lock.windows_c_compiler.installer_sha256,
+    upx_version: lock.upx.version,
+    host_tool_lock_path: 'Tools/Dependencies/resolved-tools-lock.json',
+  }
+}
+
 function writeOutputs(outputs, path) {
   const body = `${Object.entries(outputs).map(([key, value]) => `${key}=${value}`).join('\n')}\n`
   if (path) appendFileSync(path, body)
@@ -83,12 +139,16 @@ function writeOutputs(outputs, path) {
 }
 
 function parseArguments(argv) {
-  const options = { command: argv[0] ?? '', lock: defaultLockPath, product: defaultProductPath, output: process.env.GITHUB_OUTPUT ?? '' }
+  const options = {
+    command: argv[0] ?? '', lock: defaultLockPath, hostLock: defaultHostLockPath,
+    product: defaultProductPath, output: process.env.GITHUB_OUTPUT ?? '',
+  }
   for (let index = 1; index < argv.length; index++) {
     const argument = argv[index]
-    if (argument === '--lock' || argument === '--product' || argument === '--output') {
+    if (argument === '--lock' || argument === '--host-lock' || argument === '--product' || argument === '--output') {
       if (!argv[index + 1]) throw new Error(`${argument} requires a path`)
-      options[argument.slice(2)] = resolve(repository, argv[++index])
+      const key = argument === '--host-lock' ? 'hostLock' : argument.slice(2)
+      options[key] = resolve(repository, argv[++index])
     } else {
       throw new Error(`unknown option ${argument}`)
     }
@@ -98,8 +158,14 @@ function parseArguments(argv) {
 
 function main(argv = process.argv.slice(2)) {
   const options = parseArguments(argv)
-  if (options.command !== 'export' && options.command !== 'validate') {
-    throw new Error('usage: export-lock.mjs export|validate [--lock FILE] [--product FILE] [--output FILE]')
+  if (!['export', 'validate', 'export-host', 'validate-host'].includes(options.command)) {
+    throw new Error('usage: export-lock.mjs export|validate|export-host|validate-host [--lock FILE] [--host-lock FILE] [--product FILE] [--output FILE]')
+  }
+  if (options.command === 'export-host' || options.command === 'validate-host') {
+    const outputs = hostOutputs(readJSON(options.hostLock))
+    if (options.command === 'export-host') writeOutputs(outputs, options.output)
+    else process.stdout.write(`Canonical host-tool lock is valid: Node.js ${outputs.node_version}, go-winres ${outputs.go_winres_version}, UPX ${outputs.upx_version}, Windows GCC ${outputs.windows_c_compiler_version}.\n`)
+    return
   }
   const lock = readJSON(options.lock)
   const product = readJSON(options.product)
@@ -108,7 +174,7 @@ function main(argv = process.argv.slice(2)) {
   else process.stdout.write(`Canonical dependency lock is valid for ${outputs.product_name}: six firmware libraries verified.\n`)
 }
 
-export { currentOutputs, productIdentity, requiredLibraries, validateLock }
+export { currentOutputs, hostOutputs, productIdentity, requiredLibraries, validateHostLock, validateLock }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {

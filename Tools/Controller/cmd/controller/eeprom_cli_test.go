@@ -30,7 +30,7 @@ func TestEEPROMInspectCLIIsConfigAndDeviceIndependent(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"supported": true`, `"valid": true`,
-		`"format": "current/unversioned-29+crc8"`, `"visible_menu_mask": 32767`,
+		`"format": "current/unversioned-31+crc8"`, `"visible_menu_mask": 16383`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("inspection output missing %q:\n%s", want, stdout.String())
@@ -72,15 +72,18 @@ func TestEEPROMCLIExposesOnlyCurrentSemanticOperations(t *testing.T) {
 }
 
 func currentSettingsFixture() []byte {
-	values := make([]byte, 29)
+	values := make([]byte, 31)
 	values[1] = 1
 	values[2] = 180
 	values[4] = 5
 	values[5] = 128
-	values[6] = 2
+	values[6] = 0x06
 	binary.LittleEndian.PutUint16(values[7:9], 500)
-	binary.LittleEndian.PutUint16(values[19:21], 0x7FFF)
-	copy(values[21:29], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE})
+	binary.LittleEndian.PutUint16(values[19:21], 0x3FFF)
+	copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})
+	values[28] = 2
+	values[29] = 0
+	values[30] = 1
 	return values
 }
 

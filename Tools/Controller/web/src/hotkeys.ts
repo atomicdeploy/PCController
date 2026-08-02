@@ -4,6 +4,7 @@ export const pageOrder = [
   'workbench',
   'device',
   'data',
+  'updates',
   'events',
   'settings',
 ] as const
@@ -70,6 +71,8 @@ export function pageFromAppAction(value: string | undefined): PageID | null {
     device: 'device',
     devices: 'device',
     export: 'data',
+    firmware: 'updates',
+    flash: 'updates',
     history: 'events',
     home: 'dashboard',
     'local-device': 'device',
@@ -80,14 +83,17 @@ export function pageFromAppAction(value: string | undefined): PageID | null {
     output: 'controls',
     outputs: 'controls',
     records: 'data',
-    program: 'controls',
-    programming: 'controls',
+    recovery: 'updates',
+    program: 'updates',
+    programming: 'updates',
     peripherals: 'workbench',
     rf: 'workbench',
     settings: 'settings',
     timeline: 'events',
     terminal: 'workbench',
     workbench: 'workbench',
+    update: 'updates',
+    updates: 'updates',
   }
   return aliases[page] ?? null
 }
@@ -124,6 +130,7 @@ export function pageFromGoChord(key: string): PageID | null {
     e: 'events',
     v: 'device',
     w: 'data',
+    u: 'updates',
     s: 'settings',
   }
   return pages[key.toLowerCase()] ?? null

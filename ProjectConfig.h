@@ -5,7 +5,7 @@
 #define PCCONTROLLER_UART_BAUD 115200UL
 #endif
 
-// The inherited board used 11 WS2811 pixels in BRG order on D6. Set this to 1
+// The configured board uses 11 WS2811 pixels in BRG order on D6. Set this to 1
 // for a WS2812B/GRB strip when the final hardware is confirmed.
 #ifndef PCCONTROLLER_USE_WS2812B
 #define PCCONTROLLER_USE_WS2812B 0

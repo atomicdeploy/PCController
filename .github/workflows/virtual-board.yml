@@ -33,23 +33,23 @@ jobs:
           - runner: ubuntu-24.04
             target: Linux-x64
             windows: false
-            binary: .build/virtual-board/bin/virtual_board
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board
           - runner: ubuntu-24.04-arm
             target: Linux-ARM64
             windows: false
-            binary: .build/virtual-board/bin/virtual_board
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board
           - runner: windows-2025
             target: Windows-x64
             windows: true
-            binary: .build/virtual-board/bin/Release/virtual_board.exe
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board.exe
           - runner: macos-15-intel
             target: macOS-Intel
             windows: false
-            binary: .build/virtual-board/bin/virtual_board
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board
           - runner: macos-15
             target: macOS-Apple-Silicon
             windows: false
-            binary: .build/virtual-board/bin/virtual_board
+            binary: Tools/VirtualBoard/.build/release/bin/virtual_board
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     env:
@@ -67,18 +67,16 @@ jobs:
           node-version: "24"
 
       - name: "⚙️ Configure native simulator"
-        run: >-
-          cmake
-          -S Tools/VirtualBoard
-          -B .build/virtual-board
-          -DBUILD_TESTING=ON
-          -DCMAKE_BUILD_TYPE=Release
+        working-directory: Tools/VirtualBoard
+        run: cmake --preset release
 
       - name: "🔨 Build simulator and tests"
-        run: cmake --build .build/virtual-board --config Release --parallel
+        working-directory: Tools/VirtualBoard
+        run: cmake --build --preset release --parallel
 
       - name: "🧪 Run native CTest suite"
-        run: ctest --test-dir .build/virtual-board -C Release --output-on-failure
+        working-directory: Tools/VirtualBoard
+        run: ctest --preset release
 
       - name: "🕰️ Freeze reproducible package time"
         shell: bash

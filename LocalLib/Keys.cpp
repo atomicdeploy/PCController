@@ -43,16 +43,6 @@ bool Key::isHeld() const { return holdActive_; }
 
 uint8_t Key::inputBit() const { return bit_; }
 
-void Key::setPressCallback(KeyCallback callback, void *context) {
-  pressCallback_ = callback;
-  pressContext_ = context;
-}
-
-void Key::setReleaseCallback(KeyCallback callback, void *context) {
-  releaseCallback_ = callback;
-  releaseContext_ = context;
-}
-
 void Key::setEventCallback(KeyEventCallback callback, void *context) {
   eventCallback_ = callback;
   eventContext_ = context;
@@ -72,16 +62,9 @@ void Key::handlePressed(uint16_t now) {
   lastRepeatAt_ = now;
   holdActive_ = false;
   emitEvent(KeyEvent::Down);
-
-  if (pressCallback_ != nullptr) {
-    pressCallback_(bit_, pressContext_);
-  }
 }
 
 void Key::handleReleased(uint16_t now) {
-  if (releaseCallback_ != nullptr) {
-    releaseCallback_(bit_, releaseContext_);
-  }
   emitEvent(KeyEvent::Up);
 
   if (holdActive_) {

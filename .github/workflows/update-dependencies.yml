@@ -33,16 +33,16 @@ jobs:
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install current stable Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: stable
           cache-dependency-path: Tools/Controller/go.sum
 
       - name: Install current Node.js LTS
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: lts/*
           cache: npm
@@ -70,9 +70,16 @@ jobs:
         shell: cmd
         run: node Tools\Dependencies\workflow-summary.mjs .build\dependencies\update-report.json
 
+      - name: Generate deterministic dependency PR review plan
+        if: always()
+        shell: cmd
+        env:
+          DEPENDENCY_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node Tools\Dependencies\pr-plan.mjs .build\dependencies\update-report.json .build\dependencies\dependency-pr-plan.json .build\dependencies\dependency-pr.md
+
       - name: Upload resolution, hash, and validation evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dependency-resolution-${{ github.run_id }}
           path: |
@@ -93,7 +100,7 @@ jobs:
 
       - name: Create or update one actionable blocked-update issue
         if: steps.candidate.outcome != 'success'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
           REPORT_PATH: .build/dependencies/update-report.json
         with:
@@ -137,7 +144,7 @@ jobs:
 
       - name: Close resolved blocked-update issue
         if: steps.candidate.outcome == 'success' && env.CHECK_ONLY != 'true'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
           script: |
             const title = '🚨 Automated dependency update blocked';
@@ -154,25 +161,11 @@ jobs:
 
       - name: Create or refresh the validated dependency PR
         if: steps.candidate.outcome == 'success' && env.CHECK_ONLY != 'true'
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           commit-message: "chore(deps): refresh resolved dependencies"
           title: "⬆️ Refresh latest-compatible dependencies"
-          body: |
-            ## ✅ Candidate validated before PR creation
-
-            This automated change resolves stable dependencies from primary registries, refreshes exact hash-bearing locks, and has already passed:
-
-            - AVR firmware compile and the **32,256-byte Urboot-Custom application ceiling**
-            - Urboot stable-source hash verification, patch application, stock fixture hashes, and 512-byte custom build
-            - Go tests/vet and host packaging
-            - Win32 resources and latest resolved UPX compression
-            - web clean install, typecheck, tests, production build, and exact npm lock
-            - build-output lint/tests and exact Chalk/cli-table3 npm lock
-            - canonical product-identity generation check before host compilation
-            - VirtualBoard configure/build/CTest
-
-            Prerelease CLI and Urboot `main` are observation-only canaries and are never silently selected.
+          body-path: .build/dependencies/dependency-pr.md
           branch: automation/latest-compatible-dependencies
           delete-branch: true
           labels: |

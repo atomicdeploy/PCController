@@ -8,6 +8,11 @@ on:
         required: false
         default: ""
         type: string
+      firmware_artifact_name:
+        description: Optional same-run firmware artifact to embed in every host target
+        required: false
+        default: ""
+        type: string
   workflow_call:
     inputs:
       version:
@@ -15,9 +20,15 @@ on:
         required: false
         default: ""
         type: string
+      firmware_artifact_name:
+        description: Exact same-run firmware artifact to embed in every host target
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: controller-${{ github.workflow }}-${{ inputs.version || github.ref }}
@@ -57,6 +68,11 @@ jobs:
       - name: "📥 Check out exact source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: "🔐 Read exact host dependency lock"
+        id: host-dependencies
+        shell: bash
+        run: node Tools/Dependencies/export-lock.mjs export-host --output "$GITHUB_OUTPUT"
+
       - name: "🧰 Install native Windows C compiler"
         if: matrix.windows
         uses: egor-tensin/setup-mingw@41b837e47d7f85214629d255b9c4bc3fcbe9fd63 # v3
@@ -80,7 +96,25 @@ jobs:
       - name: "🟢 Install Node.js"
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.host-dependencies.outputs.node_version }}
+
+      - name: "🧹 Clean generated host output before accepting firmware"
+        shell: bash
+        run: node Tools/Build/build.mjs --clean --no-color
+
+      - name: "⬇️ Download the exact validated firmware defaults"
+        if: inputs.firmware_artifact_name != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.firmware_artifact_name }}
+          path: .build/firmware
+
+      - name: "🔎 Validate the downloaded firmware and EEPROM pair"
+        if: inputs.firmware_artifact_name != ''
+        shell: bash
+        run: >-
+          node .github/scripts/assert-firmware-defaults.mjs
+          .build/firmware/firmware-manifest.json
 
       - name: "🕰️ Freeze reproducible build time"
         shell: bash
@@ -98,17 +132,24 @@ jobs:
             printf 'Expected Go %s from go.mod, found %s\n' "$required_go" "$actual_go" >&2
             exit 1
           }
-          go install github.com/tc-hib/go-winres@v0.3.3
+          go install "${{ steps.host-dependencies.outputs.go_winres_module }}@${{ steps.host-dependencies.outputs.go_winres_version }}"
 
       - name: "🚀 Build and validate complete Unix package"
         if: ${{ !matrix.windows }}
         shell: bash
-        run: ./build.sh --host-only --clean --version "$PCCONTROLLER_VERSION"
+        run: ./build.sh --host-only --version "$PCCONTROLLER_VERSION"
 
       - name: "🚀 Build and validate complete Windows package"
         if: matrix.windows
         shell: cmd
-        run: build.cmd --host-only --clean --no-upx --version %PCCONTROLLER_VERSION%
+        run: build.cmd --host-only --no-upx --version %PCCONTROLLER_VERSION%
+
+      - name: "🧷 Assert both defaults are embedded in the host manifest"
+        if: inputs.firmware_artifact_name != ''
+        shell: bash
+        run: >-
+          node .github/scripts/assert-host-defaults.mjs
+          Tools/Controller/bin/host-manifest.json
 
       - name: "📦 Create versioned Controller package"
         id: package

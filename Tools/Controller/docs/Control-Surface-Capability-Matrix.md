@@ -1,3 +1,5 @@
+<div align="center"><a href="../../../README.md"><img src="../../../docs/assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Control-Surface Capability Matrix
 
 This is the durable reachability contract for the PC host. It answers two
@@ -16,7 +18,7 @@ programming, or safety behavior:
 | Direct CLI or a secondary CLI process | `help` | command arguments are forwarded to the primary serial owner |
 | Go library | `Client.CommandCatalog()` | `Client.Execute(ctx, command)` |
 | C-compatible shared library | `{"operation":"commands"}` | `{"operation":"execute","command":"..."}` |
-| NDJSON/HTTP/WebSocket JSON-RPC | `controller.command.catalog` | `controller.command.execute` or compatibility alias `controller.execute` |
+| NDJSON/HTTP/WebSocket JSON-RPC | `controller.command.catalog` | `controller.command.execute` |
 | REST | `GET /api/v1/commands` | `POST /api/v1/command` |
 | Socket.IO WebSocket subset | `rpc` event with `controller.command.catalog` | `command` event or `rpc` event |
 | Host-to-host bridge | nested `controller.command.catalog` | nested `controller.command.execute` |
@@ -36,7 +38,7 @@ additional convenience that still ends in the same runtime/native protocol.
 | Menu and physical front panel | `menu`, `display` | `SetMenuPage`, `SetMenuPageByName`, `MenuCatalog`, `MenuLayout`, `SetMenuLayout` | `controller.menu.*`; `/api/v1/menu/catalog`; `/api/v1/menu/layout` | status/front-panel snapshots and key/menu events | query: `read`; navigation/layout/display: `board_commands` |
 | PC-hosted menu configuration | TUI configuration page; generic menu/display interaction | `ReplaceHostMenuDirectory`, `PushHostMenuContent`, `HostMenuState` when firmware advertises support | `controller.host_menu.*`; `/api/v1/host-menus` | host config reload plus front-panel events | query: `read`; config write: `host_configuration`; board overlay: `board_commands` |
 | Relays R1–R8 and side motion | `relay` | `SetRelay`, `ToggleRelay`, `SetMotionSide`, `AllRelaysOff` | Generic command | relay event and `active_relays` status mask | `board_commands` |
-| PWM/MOSFET and illumination | `pwm` | `SetPWMChannel`, `AllPWMOff`, `SetPWMMode`, `PWMValues` | Generic command | PWM values/status and PWM-channel event | query: `read`; mutation: `board_commands` |
+| PWM/MOSFET and illumination | `pwm` | `SetPWMChannel`, `AllPWMOff`, `PWMValues` | Generic command | PWM availability/values and PWM-channel event | query: `read`; mutation: `board_commands` |
 | Status RGB and WS addressable LEDs | `rgb`, `strip` | `SetStatusRGB`, `SetStatusRGBBase`, status-effect scheduler; `strip` remains generic | Generic command | output scheduler state plus board status/events | effect query: `read`; mutation: `board_commands` |
 | Buzzer, silence, and melodies | `buzzer`, `silent`, `melody` | `PlayTone`, `StartMelody`, configured melody scheduler, stop/status methods | Generic command | output scheduler state and buzzer-busy telemetry when advertised | query: `read`; play/stop: `board_commands`; create/delete: `host_configuration` |
 | 433 MHz receive, learn, map, and transmit | `rf` | `TransmitRF`, learn start/status/cancel, list/remove/clear/map methods | `controller.rf.*` for list/learn lifecycle; generic for send/map/remove | immediate RF receive/gesture/learn lifecycle events | list/status: `read`; mutation/transmit: `board_commands` |
@@ -44,9 +46,10 @@ additional convenience that still ends in the same runtime/native protocol.
 | INA219, DS18B20, status telemetry | `status`, `temp` | `Status`, `Temperatures`, `SubscribeStatus`, history/timeline methods | `controller.status`, `controller.temperatures`, history RPCs; snapshot REST | WebSocket/Socket.IO status subscription and asynchronous events | `read` / `events` |
 | Cooperative I2C and LCD | `i2c`, `display` | `I2CTransfer`, `ScanI2C`, `RescanLCD`, LCD prompt/priority methods | `controller.lcd.*`; generic I2C command | LCD presentation state and device events | LCD config: `host_configuration`; bus/display operations: `board_commands` |
 | Reset and serial lifecycle | `ports`, `open`, `close`, `reconnect`, `reset` | `ListPorts`, `Connect`, `Open`, `Close`, `PulseResetFor` | port/reset RPCs and snapshot | connection lifecycle events | `connection_control` or `reset` |
-| Build, bootloader, backup, restore, flash | `toolchain`, `boot`, `program` | toolchain bootstrap/sync conveniences; complete operations remain Generic | Generic command | programming lifecycle, backup manifest, and fresh authenticated `HELLO` | `programming` **and** `connection_control` |
+| Build, bootloader, backup, restore, flash | `toolchain`, `boot`, `program` | toolchain bootstrap/sync conveniences; complete operations remain Generic | artifact/update RPCs plus dedicated `controller.restore.flash`; `/api/v1/restores/flash`; Generic command | programming lifecycle, backup manifest, verified write, and fresh authenticated `HELLO` | `programming` **and** `connection_control` |
 | Idle/Running application state | `program-state` (`run-state`) | `ProgramState`, `SetProgramState`, `AcquireProgramState` | `controller.program_state.get/set`; `GET/PUT /api/v1/program-state` | `program.state` and `program.state.sync`; telemetry `program_running` | query: `read`; mutation: `board_commands` |
-| Host/OS status, virtual keys, power, monitor brightness | `os` | `HostSystemStatus`, `PressVirtualKey`, `RequestPowerAction` | `controller.os.*`; `/api/v1/os/status`, `/key`, `/power` | audited OS action/timeline events | `read`, `virtual_keys`, or `power_actions` |
+| Host/OS status, virtual keys, power, monitor brightness | `os` | `HostSystemStatus`, `PressVirtualKey`, `RequestPowerAction` | `controller.os.*`; `/api/v1/os/status`; `/api/v1/os/key`; `/api/v1/os/power` | audited OS action/timeline events | `read`, `virtual_keys`, or `power_actions` |
+| Read-only Windows host facts | `os facts [system\|computer\|firmware\|storage\|serial\|list]` | shared fixed-catalog provider through Generic command | `controller.os.facts*` and `controller.host.facts*`; `GET /api/v1/os/facts` | bounded snapshot with profile/class/columns/rows/truncation/source/time | `read`; no arbitrary query or write surface |
 | Typed text and LCD messages | message API rather than free-form shell text | `SendTextMessage` | `controller.message.send`; `/api/v1/messages`; webhooks/Socket.IO | source-tagged message/event and optional LCD presentation | `messages` |
 
 PWM channel names are stable logical aliases: `user1..user11` map to channels
@@ -56,8 +59,8 @@ accepted.
 
 ## Important boundaries
 
-- MCU settings remain MCU-owned and CRC-checked in EEPROM. PC host JSON/YAML/
-  TOML configuration remains PC-owned; neither silently replaces the other.
+- MCU settings remain MCU-owned and CRC-checked in EEPROM. Host JSON/YAML/TOML
+  configuration remains host-owned; neither silently replaces the other.
 - Capability bit 24 now means `PROGRAM_STATE`. It is not a host-menu-overlay
   bit. The current firmware does not advertise the anticipatory volatile
   host-menu directory/content protocol, so those typed calls return a clear

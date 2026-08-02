@@ -4,7 +4,7 @@
 
 using TaskCallback = void (*)(void *context);
 
-// Tiny fixed-capacity one-shot scheduler retained for inherited project logic.
+// Tiny fixed-capacity scheduler for cooperative one-shot callbacks.
 class Tasks {
 public:
   Tasks();
@@ -32,6 +32,8 @@ private:
   uint8_t itemCount_ = 0;
 };
 
+// taskManager is the single board-wide cooperative callback scheduler.
 extern Tasks taskManager;
 
+// Services the shared scheduler using the current Arduino millisecond clock.
 void serviceTasks();

@@ -88,6 +88,7 @@ if(BUILD_TESTING)
     tests/firmware_controls_test.cpp
     ../../LocalLib/DallasTemperatureBus.cpp
     ../../LocalLib/Keys.cpp
+    ../../LocalLib/SevenSegments.cpp
     ../../LocalLib/ShiftRegisters.cpp
     ../../LocalLib/TonePlayer.cpp
     ../../Project/RelayController.cpp
@@ -102,4 +103,25 @@ if(BUILD_TESTING)
     target_compile_options(firmware_controls_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_controls_unit COMMAND firmware_controls_tests)
+
+  # Compile the production EEPROM reset journal against a byte-accurate mock.
+  # This covers corrupt/torn slots and both physical/count rollover boundaries.
+  add_executable(firmware_reset_telemetry_tests
+    tests/reset_telemetry_test.cpp
+    ../../Project/ResetTelemetry.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_reset_telemetry_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_reset_telemetry_tests PRIVATE
+    PCCONTROLLER_NATIVE_TEST=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_reset_telemetry_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_reset_telemetry_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_reset_telemetry_unit COMMAND firmware_reset_telemetry_tests)
 endif()

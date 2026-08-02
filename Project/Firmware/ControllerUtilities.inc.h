@@ -20,13 +20,8 @@ bool i2cLeaseActive(uint32_t now) {
 
 // Evaluates the EEPROM door policy against the current debounced reed input.
 bool motionPolicyAllows() {
-  const uint8_t policy = static_cast<uint8_t>(
-      settingsStore.values().motionDoorPolicy());
-  return policy == static_cast<uint8_t>(MotionDoorPolicy::Always) ||
-         (policy == static_cast<uint8_t>(MotionDoorPolicy::ClosedOnly) &&
-          !systemInputs.doorOpen()) ||
-         (policy == static_cast<uint8_t>(MotionDoorPolicy::OpenOnly) &&
-          systemInputs.doorOpen());
+  return motionDoorPolicyAllows(settingsStore.values().motionDoorPolicy(),
+                                systemInputs.doorOpen());
 }
 
 // Rounds milli-units into the configured 0..2 decimal fixed-point value.
@@ -69,6 +64,8 @@ void releaseHostPanel() {
   hostLcdFlags &= static_cast<uint8_t>(~HOST_PANEL_CAPTURED);
   hostPanelMeta = 0;
   hostSegmentTextActive = false;
+  hostSegmentTextLength = 0;
+  hostSegmentScrollIndex = 0;
   setMenuPage(settingsStore.values().defaultMenuPage);
 }
 
@@ -79,6 +76,9 @@ void showHostOfflineOnLcd() {
   if (hostLcdAddress == 0) {
     return;
   }
+  // Two HD44780 command nibbles expanded into PCF8574 enable-low/high/low
+  // pulses. This stays in RAM because CompactI2c's bulk write dereferences an
+  // SRAM pointer; moving it to PROGMEM requires a flash-aware write path.
   static const uint8_t shiftCommand[] = {
       0x18, 0x1C, 0x18, 0x88, 0x8C, 0x88,
   };

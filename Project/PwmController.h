@@ -12,6 +12,7 @@
 
 namespace PwmChannels {
 
+// Logical ownership map for the board's sixteen PWM-expander channels.
 constexpr uint8_t UserLightFirst = 0;
 constexpr uint8_t UserLightCount = 8;
 constexpr uint8_t UserPwmFirst = 8;
@@ -28,6 +29,7 @@ constexpr uint16_t AllMask = 0xFFFFU;
 
 } // namespace PwmChannels
 
+// PwmChannelRole records the logical ownership of one 16-channel output.
 enum class PwmChannelRole : uint8_t {
   UserLight,
   UserPwm,
@@ -39,12 +41,6 @@ enum class PwmChannelRole : uint8_t {
   Invalid,
 };
 
-enum class PwmTestMode : uint8_t {
-  Off = 0,
-  Manual,
-  Auto,
-};
-
 // Logical values always use 0 = electrically inactive and 4095 = fully
 // active. The optional polarity mapping keeps callers independent of register
 // FULL_ON/FULL_OFF details if a later board revision inverts the stages.
@@ -53,11 +49,8 @@ public:
   explicit PwmController(PwmExpanderDriver &driver);
 
   void begin(bool available, uint32_t now = millis());
-  void service(uint32_t now = millis());
 
   // Front-panel commissioning controls.
-  void setMode(PwmTestMode mode, uint32_t now = millis());
-  PwmTestMode mode() const;
   void setChannel(uint8_t channel, uint32_t now = millis());
   void adjustChannel(int8_t delta, uint32_t now = millis());
   uint8_t channel() const;
@@ -65,9 +58,7 @@ public:
   void adjustValue(int16_t delta, uint32_t now = millis());
   uint16_t value() const;
   bool available() const;
-  bool rising() const;
   uint8_t errorCount() const;
-  bool consumeAutoChannelChange(uint8_t &channel);
 
   // Result-bearing hardware API for new integrations.
   bool tryAllOff();
@@ -84,9 +75,6 @@ public:
   bool setPowerSignal(bool active);
   bool setStatusRgb12(uint16_t red, uint16_t green, uint16_t blue);
   bool setStatusRgb8(uint8_t red, uint8_t green, uint8_t blue);
-
-  void setAutoTestMask(uint16_t channelMask, uint32_t now = millis());
-  uint16_t autoTestMask() const;
 
   // PWM is at 0x41 while INA219 stays at 0x40, avoiding an I2C collision.
   static constexpr uint8_t PwmI2cAddress = 0x41;
@@ -106,26 +94,17 @@ public:
 
 private:
   bool writeLogical(uint8_t channel, uint16_t value, bool force = false);
-  bool prepareManual(uint32_t now);
-  bool stopTestOutput();
   void tripUnavailable();
-  uint8_t firstAutoChannel() const;
-  uint8_t nextAutoChannel(uint8_t current) const;
   static uint16_t from8Bit(uint8_t value);
 
   PwmExpanderDriver &driver_;
   uint16_t cachedValues_[PwmChannels::Count] = {};
   uint16_t cacheValidMask_ = 0;
-  uint16_t autoTestMask_ = PwmChannels::UserTestMask;
-  PwmTestMode mode_ = PwmTestMode::Off;
   uint8_t channel_ = 0;
   uint16_t value_ = 0;
-  uint32_t lastStepAt_ = 0;
   uint8_t errorCount_ = 0;
   uint8_t consecutiveWriteErrors_ = 0;
   bool available_ = false;
-  bool rising_ = true;
-  bool autoChannelChanged_ = false;
 };
 
 static_assert(BoardPins::PwmAddress == PwmController::PwmI2cAddress,

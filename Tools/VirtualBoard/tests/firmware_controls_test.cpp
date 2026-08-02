@@ -3,8 +3,11 @@
 
 #include "LocalLib/DallasTemperatureBus.h"
 #include "LocalLib/Keys.h"
+#include "LocalLib/SevenSegments.h"
 #include "LocalLib/ShiftRegisters.h"
 #include "LocalLib/TonePlayer.h"
+#include "Project/FrontPanelModel.h"
+#include "Project/MotionDoorPolicy.h"
 #include "Project/RelayController.h"
 #include "Project/TemperatureRoles.h"
 #include "Project/TransitionMath.h"
@@ -27,25 +30,13 @@ void require(bool condition, const std::string &message) {
 
 struct KeyTrace {
   std::vector<KeyEvent> events;
-  unsigned presses = 0;
-  unsigned releases = 0;
 };
-
-void pressed(std::uint8_t, void *context) {
-  ++static_cast<KeyTrace *>(context)->presses;
-}
-
-void released(std::uint8_t, void *context) {
-  ++static_cast<KeyTrace *>(context)->releases;
-}
 
 void gestured(std::uint8_t, KeyEvent event, void *context) {
   static_cast<KeyTrace *>(context)->events.push_back(event);
 }
 
 void bind(Key &key, KeyTrace &trace) {
-  key.setPressCallback(pressed, &trace);
-  key.setReleaseCallback(released, &trace);
   key.setEventCallback(gestured, &trace);
 }
 
@@ -64,8 +55,6 @@ void testKeyGestures() {
     key.update(100);
     key.update(150);
     key.update(451);
-    require(trace.presses == 1 && trace.releases == 1,
-            "debounced click did not invoke one press/release");
     require(trace.events == std::vector<KeyEvent>({KeyEvent::Down,
                                                    KeyEvent::Up,
                                                    KeyEvent::Click}),
@@ -89,8 +78,6 @@ void testKeyGestures() {
     shiftRegisters.setVirtualInput(1, false);
     key.update(1350);
     key.update(1400);
-    require(trace.presses == 2 && trace.releases == 2,
-            "double-click did not retain two immediate press actions");
     require(trace.events.back() == KeyEvent::DoubleClick &&
                 std::find(trace.events.begin(), trace.events.end(),
                           KeyEvent::Click) == trace.events.end(),
@@ -112,8 +99,6 @@ void testKeyGestures() {
     shiftRegisters.setVirtualInput(2, false);
     key.update(3900);
     key.update(3950);
-    require(trace.presses == 1 && trace.releases == 1,
-            "hold invoked an extra immediate press");
     require(std::count(trace.events.begin(), trace.events.end(),
                        KeyEvent::HoldStart) == 1 &&
                 std::count(trace.events.begin(), trace.events.end(),
@@ -133,7 +118,7 @@ void testKeyGestures() {
     shiftRegisters.setVirtualInput(3, true);
     key.update(65530UL);
     key.update(65580UL);
-    require(trace.presses == 1 && trace.events.front() == KeyEvent::Down,
+    require(trace.events.size() == 1 && trace.events.front() == KeyEvent::Down,
             "16-bit key debounce failed across millis rollover");
   }
 
@@ -159,16 +144,22 @@ void testRelayInterlocks() {
   require((controller.activeRelayMask() & (_BV(0) | _BV(1))) == 0,
           "Side A enable did not break before direction");
   controller.service(11);
-  require((controller.activeRelayMask() & _BV(0)) != 0 &&
-              (controller.activeRelayMask() & _BV(1)) == 0,
-          "R1 direction changed before R2 output remained safely off");
-  controller.service(60);
-  require((controller.activeRelayMask() & _BV(1)) == 0,
-          "Side A enabled before its 50 ms direction settle");
-  controller.service(61);
   require((controller.activeRelayMask() & (_BV(0) | _BV(1))) ==
               (_BV(0) | _BV(1)),
-          "Side A did not enable after direction settling");
+          "Side A did not enable immediately after its configured break");
+
+  controller.setRetainDirectionOnStop(true);
+  controller.stopSide(RelaySide::A, 20);
+  require((controller.activeRelayMask() & (_BV(0) | _BV(1))) == _BV(0),
+          "output-only stop did not retain the Side A direction relay");
+  controller.setRetainDirectionOnStop(false);
+  controller.stopSide(RelaySide::A, 21);
+  require((controller.activeRelayMask() & (_BV(0) | _BV(1))) == 0,
+          "full-off stop did not clear the Side A direction relay");
+  require(controller.requestSide(RelaySide::A, RelayDirection::Reverse, true,
+                                 22),
+          "Side A could not restart after a full-off stop");
+  controller.service(26);
 
   require(controller.requestSide(RelaySide::B, RelayDirection::Forward, true,
                                  70),
@@ -184,9 +175,12 @@ void testRelayInterlocks() {
   require((controller.activeRelayMask() & _BV(0)) == 0 &&
               (controller.activeRelayMask() & _BV(2)) == 0,
           "two direction relays changed in the same service window");
+  controller.service(102);
+  require((controller.activeRelayMask() & _BV(2)) == 0,
+          "cross-side direction interlock ended before 5 ms");
   controller.service(106);
   require((controller.activeRelayMask() & _BV(2)) != 0,
-          "R3 did not become Side B direction after cross-side stagger");
+          "R3 did not change after the cross-side interlock");
 
   controller.setMotionAllowed(false, 120);
   require((controller.activeRelayMask() & (_BV(1) | _BV(3))) == 0,
@@ -202,6 +196,115 @@ void testRelayInterlocks() {
   controller.allOff(130);
   require(controller.activeRelayMask() == 0,
           "safe reset relay primitive did not leave every output off");
+
+  ShiftRegisters preciseRegisters;
+  RelayController preciseController(preciseRegisters);
+  preciseController.begin(0);
+  preciseController.setBreakBeforeDirectionMs(37);
+  require(preciseController.requestSide(
+              RelaySide::A, RelayDirection::Forward, true, 1),
+          "exact-break fixture could not start Side A");
+  require(preciseController.requestSide(
+              RelaySide::A, RelayDirection::Reverse, true, 2),
+          "exact-break fixture rejected reversal");
+  preciseController.service(38);
+  require((preciseController.activeRelayMask() & (_BV(0) | _BV(1))) == 0,
+          "configured 37 ms break ended one millisecond early");
+  preciseController.service(39);
+  require((preciseController.activeRelayMask() & (_BV(0) | _BV(1))) ==
+              (_BV(0) | _BV(1)),
+          "configured 37 ms break did not apply exactly");
+}
+
+void testMotionDoorPolicyMatrixAndEntryPaths() {
+  struct PolicyCase {
+    MotionDoorPolicy policy;
+    bool doorOpen;
+    bool allowed;
+  };
+  const PolicyCase cases[] = {
+      {MotionDoorPolicy::Always, false, true},
+      {MotionDoorPolicy::Always, true, true},
+      {MotionDoorPolicy::ClosedOnly, false, true},
+      {MotionDoorPolicy::ClosedOnly, true, false},
+      {MotionDoorPolicy::OpenOnly, false, false},
+      {MotionDoorPolicy::OpenOnly, true, true},
+      {MotionDoorPolicy::Never, false, false},
+      {MotionDoorPolicy::Never, true, false},
+  };
+
+  enum class EntryPath : std::uint8_t {
+    PhysicalMotionMenu,
+    RadioSideMapping,
+    RadioRelayMapping,
+    HostSideCommand,
+    HostRelayTest,
+    BufferedMacroCommand,
+  };
+  const EntryPath paths[] = {
+      EntryPath::PhysicalMotionMenu, EntryPath::RadioSideMapping,
+      EntryPath::RadioRelayMapping,  EntryPath::HostSideCommand,
+      EntryPath::HostRelayTest,      EntryPath::BufferedMacroCommand,
+  };
+
+  for (const PolicyCase &policyCase : cases) {
+    require(motionDoorPolicyAllows(policyCase.policy,
+                                   policyCase.doorOpen) ==
+                policyCase.allowed,
+            "four-mode motion-door policy matrix drifted");
+
+    for (EntryPath path : paths) {
+      ShiftRegisters registers;
+      RelayController controller(registers);
+      controller.begin(0);
+      controller.setBreakBeforeDirectionMs(1);
+      controller.setMotionAllowed(policyCase.allowed, 1);
+
+      bool accepted = false;
+      switch (path) {
+        // These deliberately mirror the exact two RelayController APIs used by
+        // the physical menu, RF dispatcher, UART dispatcher, and macro replay.
+        case EntryPath::PhysicalMotionMenu:
+        case EntryPath::RadioSideMapping:
+        case EntryPath::HostSideCommand:
+          accepted = controller.requestSide(
+              RelaySide::A, RelayDirection::Forward, true, 2);
+          break;
+        case EntryPath::RadioRelayMapping:
+        case EntryPath::HostRelayTest:
+        case EntryPath::BufferedMacroCommand:
+          accepted = controller.requestRelayForTest(2, true, 2);
+          break;
+      }
+      require(accepted == policyCase.allowed,
+              "a firmware motion entry path bypassed the common door policy");
+      require(((controller.activeRelayMask() & _BV(1)) != 0) ==
+                  policyCase.allowed,
+              "motion enable state disagreed with its policy decision");
+      controller.stopSide(RelaySide::A, 3);
+      require((controller.activeRelayMask() & _BV(1)) == 0,
+              "stop was blocked by a denied motion-door policy");
+      require(controller.setGeneral(0, true),
+              "motion-door policy leaked into general relay control");
+    }
+  }
+
+  ShiftRegisters retainedRegisters;
+  RelayController retained(retainedRegisters);
+  retained.begin(0);
+  retained.setBreakBeforeDirectionMs(1);
+  require(retained.requestSide(
+              RelaySide::A, RelayDirection::Reverse, true, 1),
+          "policy-revocation stop fixture could not start motion");
+  retained.setRetainDirectionOnStop(true);
+  retained.setMotionAllowed(false, 2);
+  require((retained.activeRelayMask() & (_BV(0) | _BV(1))) == _BV(0),
+          "policy revocation did not preserve output-only stop semantics");
+  retained.setRetainDirectionOnStop(false);
+  retained.stopSide(RelaySide::A, 3);
+  retained.service(6);
+  require((retained.activeRelayMask() & (_BV(0) | _BV(1))) == 0,
+          "full-off stop could not clear direction after policy revocation");
 }
 
 void testTransitionsAndRollover() {
@@ -253,6 +356,24 @@ void testTransitionsAndRollover() {
           "current/power 1/8 EMA is not symmetric and noise-stable");
 }
 
+void testDisplayBrightnessFade() {
+  SevenSegments segments;
+  segments.begin(5);
+  segments.serviceBrightness(0, 69);
+  require(segments.brightness() == 5,
+          "TM1637 brightness moved before its quiet fade interval");
+  for (std::uint32_t tick = 70; tick <= 350; tick += 70) {
+    segments.serviceBrightness(0, tick);
+  }
+  require(segments.brightness() == 0,
+          "door-close TM1637 fade did not reach display-off");
+  for (std::uint32_t tick = 420; tick <= 910; tick += 70) {
+    segments.serviceBrightness(9, tick);
+  }
+  require(segments.brightness() == 7,
+          "door-open TM1637 fade did not clamp/reach full brightness");
+}
+
 void testSemanticProtocolAndTemperatureRoles() {
   require(ControllerProtocol::ProgramState == 0x45,
           "semantic PROGRAM_STATE opcode moved");
@@ -266,6 +387,22 @@ void testSemanticProtocolAndTemperatureRoles() {
               TemperatureRoles::fromSortedIndex(1, true) ==
                   TemperatureRoles::Led,
           "EEPROM temperature swap did not reverse both roles");
+}
+
+void testFrontPanelLeafDecreaseDispatch() {
+  for (std::uint8_t mode = MODE_DOOR; mode <= MODE_RF; ++mode) {
+    const auto current = static_cast<ProgramMode>(mode);
+    const LeafDecreaseAction expected =
+        current == MODE_KEYS
+            ? LeafDecreaseAction::IdentifyKey3
+            : (current == MODE_RELAY
+                   ? LeafDecreaseAction::AllRelaysOff
+                   : LeafDecreaseAction::ParentCategory);
+    require(leafDecreaseAction(current) == expected,
+            "leaf K3 dispatch no longer matches its page context");
+  }
+  require(static_cast<std::uint8_t>(MENU_DECREASE) + 1U == 3U,
+          "KEY-page K3 identification no longer resolves to key 3");
 }
 
 void testDallasAbsentPullupBound() {
@@ -317,8 +454,11 @@ int main() {
   try {
     testKeyGestures();
     testRelayInterlocks();
+    testMotionDoorPolicyMatrixAndEntryPaths();
     testTransitionsAndRollover();
+    testDisplayBrightnessFade();
     testSemanticProtocolAndTemperatureRoles();
+    testFrontPanelLeafDecreaseDispatch();
     testDallasAbsentPullupBound();
     testBuzzerTimerAndQueue();
     std::cout << "firmware_controls_tests: all checks passed\n";

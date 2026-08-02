@@ -4,6 +4,7 @@
 
 class PwmController;
 
+// IlluminationMode selects forced-off, forced-on, or door-driven brightness.
 enum class IlluminationMode : uint8_t {
   Off = 0,
   Auto,
@@ -40,4 +41,5 @@ private:
   bool initialized_ = false;
 };
 
+// illumination is the single enclosure-light transition controller.
 extern IlluminationController illumination;

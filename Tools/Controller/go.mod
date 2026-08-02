@@ -9,6 +9,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/coder/websocket v1.8.15
 	github.com/fsnotify/fsnotify v1.10.1
+	github.com/go-ole/go-ole v1.3.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/pelletier/go-toml/v2 v2.4.3
 	go.bug.st/serial v1.8.0

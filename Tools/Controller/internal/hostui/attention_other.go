@@ -2,5 +2,6 @@
 
 package hostui
 
-// WarningBeep is a quiet no-op where no native desktop warning sound exists.
-func WarningBeep() error { return nil }
+// Desktop sounds are a quiet no-op on platforms where the host does not yet
+// have a native, user-theme-aware cue backend.
+func playSystemAudioCue(AudioCue) error { return nil }

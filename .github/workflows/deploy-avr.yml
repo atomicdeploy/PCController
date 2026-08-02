@@ -268,7 +268,7 @@ jobs:
               --method usbasp \
               --operation write-flash \
               --hex "$image" \
-              --usbasp-troubleshooting \
+              --app-device "$DEVICE_PORT_REAL" \
               --app-reconnect=false 2>&1 | tee deployment-evidence/programming.log
           else
             image="deployment-bundle/PCController-${RELEASE_TAG}-ATmega328P-Application.hex"

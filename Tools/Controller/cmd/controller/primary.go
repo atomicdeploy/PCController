@@ -15,6 +15,7 @@ import (
 
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostbridge"
 	"pccontroller.local/controller/internal/hostui"
@@ -72,15 +73,22 @@ func currentPrimaryEndpoint() primaryEndpointConfig {
 }
 
 type primaryIPC struct {
-	cancel       context.CancelFunc
-	listener     net.Listener
-	done         chan error
-	quit         chan struct{}
-	quitOnce     sync.Once
-	client       *controllerapi.Client
-	integrations atomic.Pointer[hostbridge.Manager]
-	localDevice  *localDeviceHost
-	actions      *hostui.ActionBroker
+	cancel           context.CancelFunc
+	listener         net.Listener
+	done             chan error
+	quit             chan struct{}
+	quitOnce         sync.Once
+	closeOnce        sync.Once
+	closeErr         error
+	client           *controllerapi.Client
+	runtime          *control.Runtime
+	sessionSnapshot  *hostSessionRecorder
+	integrations     atomic.Pointer[hostbridge.Manager]
+	localDevice      *localDeviceHost
+	actions          *hostui.ActionBroker
+	artifacts        *artifacts.Service
+	releaseDiscovery io.Closer
+	instanceClaim    *hostInstanceClaim
 }
 
 type primaryExecutor struct{}
@@ -98,19 +106,44 @@ func startPrimaryIPC(
 	engine *shell.Engine,
 	store *appconfig.Store,
 ) (*primaryIPC, error) {
-	server, err := startPrimaryIPCAt(
+	claimContext, claimCancel := context.WithTimeout(parent, 3*time.Second)
+	defer claimCancel()
+	claim, existing, err := claimOrResolveHostInstance(claimContext, "host")
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, errPrimaryAlreadyRunning
+	}
+	return startPrimaryIPCClaimed(parent, runtime, engine, store, claim)
+}
+
+func startPrimaryIPCClaimed(
+	parent context.Context,
+	runtime *control.Runtime,
+	engine *shell.Engine,
+	store *appconfig.Store,
+	claim *hostInstanceClaim,
+) (*primaryIPC, error) {
+	if claim == nil {
+		return nil, errors.New("primary controller host requires a per-user ownership claim")
+	}
+	server, err := startPrimaryIPCAtWithIdentity(
 		parent,
 		currentPrimaryEndpoint().Listen,
 		runtime,
 		engine,
+		claim.identity,
 		store,
 	)
 	if err != nil {
+		_ = claim.Close()
 		return nil, err
 	}
 	manager, err := hostbridge.Start(parent, server.client, store, server.actions)
 	if err != nil {
 		_ = server.Close()
+		_ = claim.Close()
 		return nil, fmt.Errorf("start host integrations: %w", err)
 	}
 	server.integrations.Store(manager)
@@ -128,6 +161,7 @@ func startPrimaryIPC(
 	}); err != nil {
 		manager.Close()
 		_ = server.Close()
+		_ = claim.Close()
 		return nil, fmt.Errorf("register global-hotkey status command: %w", err)
 	}
 	if err := engine.Register(shell.Command{
@@ -137,6 +171,7 @@ func startPrimaryIPC(
 	}); err != nil {
 		manager.Close()
 		_ = server.Close()
+		_ = claim.Close()
 		return nil, fmt.Errorf("register keyboard-control command: %w", err)
 	}
 	if err := engine.Register(shell.Command{
@@ -147,8 +182,25 @@ func startPrimaryIPC(
 	}); err != nil {
 		manager.Close()
 		_ = server.Close()
+		_ = claim.Close()
 		return nil, fmt.Errorf("register bridge command: %w", err)
 	}
+	activeEndpoint := currentPrimaryEndpoint()
+	activeEndpoint.Listen, err = localHostDialAddress(server.listener.Addr().String())
+	if err != nil {
+		manager.Close()
+		_ = server.Close()
+		_ = claim.Close()
+		return nil, fmt.Errorf("resolve primary controller endpoint: %w", err)
+	}
+	if err := claim.publish(server.listener, activeEndpoint); err != nil {
+		manager.Close()
+		_ = server.Close()
+		_ = claim.Close()
+		return nil, fmt.Errorf("publish primary controller host: %w", err)
+	}
+	primaryEndpoint.Store(activeEndpoint)
+	server.instanceClaim = claim
 	return server, nil
 }
 
@@ -157,6 +209,19 @@ func startPrimaryIPCAt(
 	address string,
 	runtime *control.Runtime,
 	engine *shell.Engine,
+	stores ...*appconfig.Store,
+) (*primaryIPC, error) {
+	return startPrimaryIPCAtWithIdentity(
+		parent, address, runtime, engine, hostInstanceIdentity{}, stores...,
+	)
+}
+
+func startPrimaryIPCAtWithIdentity(
+	parent context.Context,
+	address string,
+	runtime *control.Runtime,
+	engine *shell.Engine,
+	identity hostInstanceIdentity,
 	stores ...*appconfig.Store,
 ) (*primaryIPC, error) {
 	listener, err := ipcjson.ListenWithRemote(
@@ -174,7 +239,7 @@ func startPrimaryIPCAt(
 	ctx, cancel := context.WithCancel(parent)
 	server := &primaryIPC{
 		cancel: cancel, listener: listener, done: make(chan error, 1),
-		quit: make(chan struct{}),
+		quit: make(chan struct{}), runtime: runtime,
 	}
 	server.actions = hostui.NewActionBroker()
 	server.actions.SetObserver(func(action hostui.AppAction) {
@@ -185,14 +250,21 @@ func startPrimaryIPCAt(
 	sharedClient := controllerapi.AttachSharedRuntime(runtime, engine)
 	server.client = sharedClient
 	service := &ipcjson.Service{
-		Client:          sharedClient,
-		WebSocketPath:   currentPrimaryEndpoint().WebSocketPath,
-		SocketIOPath:    currentPrimaryEndpoint().SocketIOPath,
-		WebUI:           webui.Handler(currentPrimaryEndpoint().WebSocketPath),
-		AuthToken:       currentPrimaryEndpoint().AuthToken,
-		AllowedOrigins:  append([]string(nil), currentPrimaryEndpoint().AllowedOrigins...),
-		InboundWebhooks: currentPrimaryEndpoint().InboundWebhooks,
-		AppAction:       server.actions.Publish,
+		Client:            sharedClient,
+		WebSocketPath:     currentPrimaryEndpoint().WebSocketPath,
+		SocketIOPath:      currentPrimaryEndpoint().SocketIOPath,
+		WebUI:             webui.Handler(currentPrimaryEndpoint().WebSocketPath),
+		AuthToken:         currentPrimaryEndpoint().AuthToken,
+		AllowedOrigins:    append([]string(nil), currentPrimaryEndpoint().AllowedOrigins...),
+		InboundWebhooks:   currentPrimaryEndpoint().InboundWebhooks,
+		HostVersion:       version,
+		HostSourceHash:    sourceHash,
+		HostBuildTime:     buildTime,
+		HostInstanceID:    identity.ID,
+		HostInstanceToken: identity.Token,
+		HostProcessID:     identity.PID,
+		HostSurface:       identity.Surface,
+		AppAction:         server.actions.Publish,
 		Shutdown: func() {
 			server.quitOnce.Do(func() { close(server.quit) })
 			if integrations := server.integrations.Load(); integrations != nil {
@@ -207,6 +279,12 @@ func startPrimaryIPCAt(
 			}
 			return []hostbridge.PeerInfo{}
 		},
+		HotkeyStatus: func() any {
+			if integrations := server.integrations.Load(); integrations != nil {
+				return integrations.HotkeyStatus()
+			}
+			return hostui.HotkeyStatus{}
+		},
 		BridgeCall: func(
 			ctx context.Context,
 			peer string,
@@ -220,6 +298,8 @@ func startPrimaryIPCAt(
 	}
 	if len(stores) > 0 && stores[0] != nil {
 		store := stores[0]
+		server.sessionSnapshot = newHostSessionRecorder(sharedClient, store)
+		service.LastSessionSnapshot = server.sessionSnapshot.read
 		proxy, proxyErr := newIntegrationProxy(store)
 		if proxyErr != nil {
 			_ = listener.Close()
@@ -234,6 +314,26 @@ func startPrimaryIPCAt(
 			_, err := store.Update(change)
 			return err
 		}
+		artifactService, artifactErr := newArtifactHostService(sharedClient, store, service.Shutdown)
+		if artifactErr != nil {
+			server.localDevice.Close()
+			_ = listener.Close()
+			cancel()
+			return nil, fmt.Errorf("configure artifact/update service: %w", artifactErr)
+		}
+		server.artifacts = artifactService
+		service.Artifacts = artifactService
+		server.sessionSnapshot.attachArtifactContext(artifactService)
+		releaseDiscovery, discoveryErr := newReleaseHostService(sharedClient, artifactService)
+		if discoveryErr != nil {
+			artifactService.Close()
+			server.localDevice.Close()
+			_ = listener.Close()
+			cancel()
+			return nil, fmt.Errorf("configure release discovery: %w", discoveryErr)
+		}
+		server.releaseDiscovery = releaseDiscovery
+		service.ReleaseDiscovery = releaseDiscovery
 	}
 	go func() {
 		server.done <- ipcjson.Serve(ctx, listener, service)
@@ -320,9 +420,34 @@ func (server *primaryIPC) KeyboardStatus() hostui.KeyboardStatus {
 	return integrations.KeyboardStatus()
 }
 
+func (server *primaryIPC) HandleHostLifecycle(
+	ctx context.Context,
+	kind string,
+) error {
+	if server == nil {
+		return errors.New("primary controller service is unavailable")
+	}
+	integrations := server.integrations.Load()
+	if integrations == nil {
+		return errors.New("host integrations are unavailable")
+	}
+	return integrations.HandleLifecycle(ctx, kind)
+}
+
 func (server *primaryIPC) Close() error {
 	if server == nil {
 		return nil
+	}
+	server.closeOnce.Do(func() {
+		server.closeErr = server.close()
+	})
+	return server.closeErr
+}
+
+func (server *primaryIPC) close() error {
+	var snapshotErr error
+	if server.sessionSnapshot != nil {
+		snapshotErr = server.sessionSnapshot.persistAndPublish(server.runtime)
 	}
 	if integrations := server.integrations.Swap(nil); integrations != nil {
 		integrations.Close()
@@ -330,14 +455,33 @@ func (server *primaryIPC) Close() error {
 	if server.localDevice != nil {
 		server.localDevice.Close()
 	}
+	if server.releaseDiscovery != nil {
+		_ = server.releaseDiscovery.Close()
+	}
+	if server.artifacts != nil {
+		server.artifacts.Close()
+	}
 	server.cancel()
 	_ = server.listener.Close()
 	select {
 	case err := <-server.done:
-		return err
+		return errors.Join(snapshotErr, err, server.closeInstanceClaim())
 	case <-time.After(time.Second):
-		return errors.New("primary IPC server did not stop within one second")
+		return errors.Join(
+			snapshotErr,
+			server.closeInstanceClaim(),
+			errors.New("primary IPC server did not stop within one second"),
+		)
 	}
+}
+
+func (server *primaryIPC) closeInstanceClaim() error {
+	if server == nil || server.instanceClaim == nil {
+		return nil
+	}
+	err := server.instanceClaim.Close()
+	server.instanceClaim = nil
+	return err
 }
 
 func primaryAvailable(ctx context.Context) bool {
@@ -378,14 +522,23 @@ func callPrimaryAt(
 	params any,
 	target any,
 ) error {
-	encoded, err := json.Marshal(params)
-	if err != nil {
-		return err
-	}
 	auth := ""
 	configured := currentPrimaryEndpoint()
 	if strings.EqualFold(strings.TrimSpace(address), strings.TrimSpace(configured.Listen)) {
 		auth = configured.AuthToken
+	}
+	return callPrimaryAtAuthenticated(ctx, address, auth, method, params, target)
+}
+
+func callPrimaryAtAuthenticated(
+	ctx context.Context,
+	address, auth, method string,
+	params any,
+	target any,
+) error {
+	encoded, err := json.Marshal(params)
+	if err != nil {
+		return err
 	}
 	response, err := ipcjson.Call(ctx, address, ipcjson.Request{
 		Method: method,
@@ -426,7 +579,7 @@ func executeThroughPrimaryAt(
 	err := callPrimaryAt(
 		ctx,
 		address,
-		"controller.execute",
+		"controller.command.execute",
 		map[string]string{"command": command},
 		&result,
 	)

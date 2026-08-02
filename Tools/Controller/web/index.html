@@ -3,11 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#071117" />
+    <meta name="theme-color" content="#0b0a0e" />
     <meta name="color-scheme" content="dark light" />
+    <meta name="application-name" content="%PRODUCT_NAME%" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="%PRODUCT_DESCRIPTION%" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 24x24 32x32 48x48 64x64 128x128 256x256" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" sizes="any" />
+    <link rel="apple-touch-icon" href="/favicon.ico" />
     <title>%PRODUCT_NAME%</title>
     <script src="/theme-init.js"></script>
+    <script src="/controller-config.js"></script>
   </head>
   <body>
     <div id="root" data-pccontroller-shell></div>

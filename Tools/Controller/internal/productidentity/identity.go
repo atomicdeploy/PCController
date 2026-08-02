@@ -12,7 +12,7 @@ import (
 
 // RuntimeTitleEnvironment overrides the persisted title for one process. The
 // package metadata remains the fallback and ui.app_title remains persistent.
-const RuntimeTitleEnvironment = "PCCONTROLLER_APP_TITLE"
+const RuntimeTitleEnvironment = "APP_TITLE"
 
 // Title resolves the effective user-facing product title. A process-local
 // environment override wins over the persisted PC-side configuration.

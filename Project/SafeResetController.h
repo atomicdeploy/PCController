@@ -22,4 +22,5 @@ private:
   uint32_t resetAt_ = 0;
 };
 
+// safeReset is the single acknowledged reboot coordinator.
 extern SafeResetController safeReset;

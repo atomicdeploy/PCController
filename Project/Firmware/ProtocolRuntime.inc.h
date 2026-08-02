@@ -28,13 +28,14 @@ void sendHello(uint8_t sequence) {
       (1UL << 18) | // host-staged learned-RF record replacement (opcode 0x3F)
       (1UL << 19) | // host-captured front-panel session (DisplayText targets 3/4)
       (1UL << 20) | // status bit 12 means buzzer queue/voice is busy
-      (1UL << 21) | // EEPROM-selectable 1/100 ms motion break time
+      (1UL << 21) | // EEPROM-selectable 1..255 ms motion break time
       (1UL << 22) | // MCU-timed events/ACKs and queued macro schema 2
 #if PCCONTROLLER_MENU_LAYOUT_PROTOCOL
       (1UL << 23) | // persistent visible-mask and stable-ID rank permutation
 #endif
       (1UL << 24) | // host-owned Idle/Running application state (opcode 0x45)
       0;
+  // HelloPayload is the fixed build identity and capability response.
   struct __attribute__((packed)) HelloPayload {
     uint8_t schema;
     uint8_t boardKind;
@@ -42,8 +43,8 @@ void sendHello(uint8_t sequence) {
     uint32_t buildHash;
     uint32_t buildTimestamp;
   } payload = {3, 1, capabilities,
-               static_cast<uint32_t>(PCCONTROLLER_BUILD_HASH),
-               static_cast<uint32_t>(PCCONTROLLER_BUILD_TIMESTAMP)};
+               pgm_read_dword(&firmwareIdentity.sourceHash),
+               pgm_read_dword(&firmwareIdentity.packedTimestamp)};
   appProtocol.send(ControllerProtocol::HelloResponse, sequence,
                    reinterpret_cast<const uint8_t *>(&payload),
                    sizeof(payload));
@@ -64,10 +65,10 @@ void sendTelemetry(uint8_t sequence) {
   payload.doorOpen = systemInputs.doorOpen();
   payload.bluetoothState =
       static_cast<uint8_t>(systemInputs.bluetoothState(payload.uptimeMs));
-  payload.pwmMode = static_cast<uint8_t>(pwm.mode());
+  payload.pwmAvailable = pwm.available() ? 1 : 0;
   payload.pwmChannel = pwm.channel();
   payload.pwmValue = pwm.value();
-  payload.lcdAddress = 0; // The host publishes its PC-owned LCD address.
+  payload.lcdAddress = 0; // The host publishes its active LCD address.
   payload.pwmErrors = pwm.errorCount();
   payload.framingErrors = appProtocol.framingErrors();
   payload.crcErrors = appProtocol.crcErrors();
@@ -81,22 +82,25 @@ void sendTelemetry(uint8_t sequence) {
 // Reports the MCU-owned EEPROM settings representation.
 void sendSettings(uint8_t sequence) {
   const ControllerSettings &settings = settingsStore.values();
-  uint8_t payload[12];
-  payload[0] = 2;
+  uint8_t payload[15];
+  payload[0] = 3;
   memcpy(payload + 1, &settings, ControllerSettingsPrefixSize);
   payload[8] = static_cast<uint8_t>(settings.streamPeriodMs);
   payload[9] = static_cast<uint8_t>(settings.streamPeriodMs >> 8);
   payload[10] = settings.defaultMenuPage;
   payload[11] = settings.menuFlags;
+  payload[12] = settings.displayOptions;
+  payload[13] = settings.relayRestoreMask;
+  payload[14] = settings.motionBreakMs;
   appProtocol.send(ControllerProtocol::SettingsResponse, sequence, payload,
                    sizeof(payload));
 }
 
-// Reports all logical PWM values plus controller mode/health.
+// Reports all logical PWM values plus controller availability and selection.
 void sendPwmValues(uint8_t sequence) {
   uint8_t payload[34];
   uint8_t index = 0;
-  payload[index++] = static_cast<uint8_t>(pwm.mode());
+  payload[index++] = pwm.available() ? 1 : 0;
   payload[index++] = pwm.channel();
   for (uint8_t channel = 0; channel < PwmChannels::Count; ++channel) {
     appendU16(payload, index, pwm.logicalValue(channel));
@@ -184,17 +188,18 @@ void sendMenuList(uint8_t sequence, uint8_t cursor) {
 // Reports the compact schema-2 visibility mask and packed presentation order.
 void sendMenuLayout(uint8_t sequence) {
   const ControllerSettings &settings = settingsStore.values();
-  uint8_t payload[12] = {
+  uint8_t payload[4 + PersistentMenuOrderWireBytes] = {
       2, PAGE_COUNT, static_cast<uint8_t>(settings.visibleMenuMask),
       static_cast<uint8_t>(settings.visibleMenuMask >> 8)};
-  memcpy(payload + 4, settings.menuOrder, sizeof(settings.menuOrder));
+  memcpy(payload + 4, settings.menuOrder, PersistentMenuOrderWireBytes);
   appProtocol.send(ControllerProtocol::MenuLayoutResponse, sequence, payload,
                    sizeof(payload));
 }
 
 // Validates the canonical schema-2 prefix and ignores appended extension data.
 bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t now) {
-  if (length < 12 || payload[0] != 2 ||
+  if (length < static_cast<uint8_t>(4 + PersistentMenuOrderWireBytes) ||
+      payload[0] != 2 ||
       payload[1] != PAGE_COUNT) {
     return false;
   }
@@ -204,10 +209,9 @@ bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t now) {
   if (firstVisible == 0xFF) {
     return false;
   }
-
   ControllerSettings &settings = settingsStore.values();
   settings.visibleMenuMask = visibleMask;
-  memcpy(settings.menuOrder, payload + 4, sizeof(settings.menuOrder));
+  memcpy(settings.menuOrder, payload + 4, PersistentMenuOrderWireBytes);
   if (!settings.menuPageVisible(settings.defaultMenuPage)) {
     settings.defaultMenuPage = firstVisible;
   }
@@ -301,14 +305,16 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
                    payload, index);
 }
 
-// Applies every semantically present settings field. The first ten bytes are
-// the common core; default-page/menu presentation fields are optional tails.
+// Applies the one canonical settings wire shape; alternate shapes and
+// positional tails are rejected.
 bool applySettings(const uint8_t *payload, uint8_t length, uint32_t now) {
-  if (length < 10 || payload[2] > 2 || payload[5] > 7 || payload[7] > 2
+  if (length != 15 || payload[0] != 3 || payload[2] > 2 || payload[5] > 7 ||
+      payload[14] == 0 ||
+      (payload[7] & ~OutputPersistence::AllowedMask) != 0
 #if PCCONTROLLER_MENU_VISIBILITY
-      || (length >= 11 && !settingsStore.values().menuPageVisible(payload[10]))
+      || !settingsStore.values().menuPageVisible(payload[10])
 #endif
-      || (length >= 11 && payload[10] >= PAGE_COUNT)
+      || payload[10] >= PAGE_COUNT
       ) {
     return false;
   }
@@ -318,23 +324,27 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t now) {
   }
 
   ControllerSettings &settings = settingsStore.values();
-  const uint8_t defaultMenuPage =
-      length >= 11 ? payload[10] : settings.defaultMenuPage;
-  const uint8_t menuFlags = length >= 12 ? payload[11] : settings.menuFlags;
+  const bool wasProgramming = settings.programmingMode();
   memcpy(&settings, payload + 1, ControllerSettingsPrefixSize);
   settings.flags &=
       SettingsFlags::Silent |
+      SettingsFlags::ProgrammingMode |
       SettingsFlags::SwapTemperatureSensors |
       SettingsFlags::MotionDoorPolicyMask |
       SettingsFlags::DoorAudioDisabled |
-      SettingsFlags::RelayAudioDisabled |
-      SettingsFlags::ExtendedMotionBreak;
+      SettingsFlags::RelayAudioDisabled;
   settings.streamPeriodMs = newStreamPeriod;
-  settings.defaultMenuPage = defaultMenuPage;
-  settings.menuFlags = menuFlags;
+  settings.defaultMenuPage = payload[10];
+  settings.menuFlags = payload[11];
+  settings.displayOptions = payload[12];
+  settings.relayRestoreMask = payload[13];
+  settings.motionBreakMs = payload[14];
 
   applyStoredSettings(now);
-  settingsStore.markDirty(now);
+  if (wasProgramming && !settings.programmingMode()) {
+    restoreStoredOutputs(now);
+  }
+  settingsStore.saveNow();
   return true;
 }
 
@@ -358,8 +368,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 #if PCCONTROLLER_MENU_LAYOUT_PROTOCOL
        frame.opcode == MenuLayoutSet ||
 #endif
-       frame.opcode == PwmSet ||
-       frame.opcode == PwmMode)) {
+       frame.opcode == PwmSet)) {
     goto busy;
   }
   switch (frame.opcode) {
@@ -445,18 +454,11 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       if (length < 3 || payload[0] >= PwmChannels::Count || value > 4095) {
         goto badPayload;
       }
-      if (payload[0] < 11 && pwm.mode() == PwmTestMode::Auto) {
-        pwm.setMode(PwmTestMode::Manual, now);
-      }
       if (!pwm.setLogical(payload[0], value)) {
         goto hardwareUnavailable;
       }
       if (payload[0] < 8) {
-        settingsStore.values().userPwm[payload[0]] =
-            static_cast<uint8_t>(value >= 4080 ? 255 : (value + 8) / 16);
-        settingsStore.values().pwmBootMode =
-            static_cast<uint8_t>(PwmTestMode::Manual);
-        settingsStore.markDirty(now);
+        storeUserPwmValue(payload[0], value);
       }
       goto acknowledged;
     }
@@ -465,15 +467,6 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       if (!pwm.tryAllOff()) {
         goto hardwareUnavailable;
       }
-      goto acknowledged;
-
-    case PwmMode:
-      if (length < 1 || payload[0] > 2) {
-        goto badPayload;
-      }
-      pwm.setMode(static_cast<PwmTestMode>(payload[0]), now);
-      settingsStore.values().pwmBootMode = payload[0];
-      settingsStore.markDirty(now);
       goto acknowledged;
 
     case StatusRgb:
@@ -529,7 +522,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case RadioLearnStart:
-      if (length < 2) {
+      if (length != 2 || payload[0] > RF_LEARN_TIMER ||
+          (payload[0] == RF_LEARN_INDEFINITE && payload[1] != 0) ||
+          (payload[0] == RF_LEARN_TIMER &&
+           (payload[1] == 0 || payload[1] > MAX_LEARNING_SECONDS))) {
         goto badPayload;
       }
       beginLearning(payload[0], payload[1]);
@@ -553,15 +549,6 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 
     case RadioLearnRemove:
       if (length < 1 || !learnedRemotes.remove(payload[0])) {
-        goto badPayload;
-      }
-      goto acknowledged;
-
-    case RadioLearnMap:
-      if (length < 4 ||
-          !learnedRemotes.map(
-              payload[0], static_cast<RemoteActionKind>(payload[1]),
-              payload[2], static_cast<RemoteBehavior>(payload[3]))) {
         goto badPayload;
       }
       goto acknowledged;
@@ -590,15 +577,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
           payload[1] > static_cast<uint8_t>(KeyEvent::Up)) {
         goto badPayload;
       }
-      if (payload[1] == static_cast<uint8_t>(KeyEvent::Down) ||
-          payload[1] == static_cast<uint8_t>(KeyEvent::HoldRepeat)) {
-        handleMenuAction(payload[0], true);
-      } else if (payload[1] == static_cast<uint8_t>(KeyEvent::Up)) {
-        keyReleased(payload[0], nullptr);
-      } else if (payload[1] == static_cast<uint8_t>(KeyEvent::DoubleClick) &&
-                 payload[0] == MENU_PREVIOUS) {
-        setMenuPage(settingsStore.values().defaultMenuPage);
-      }
+      applyKeyGesture(payload[0], static_cast<KeyEvent>(payload[1]));
       appEvents.key(payload[0], payload[1], InputEventSource::Host);
       goto acknowledged;
 
@@ -635,16 +614,28 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         hostLcdFlags |= HOST_PANEL_CAPTURED;
         hostPanelMeta = duration; // high nibble=state, low 12 bits=value
       }
-      const uint32_t endsAt = duration == 0 ? 0 : now + duration;
       if (target == 0 || target == 2 || target == 3) {
         hostSegmentTextActive = textLength != 0;
-        memset(hostSegmentText, ' ', 4);
-        hostSegmentText[4] = '\0';
-        const uint8_t copyLength = textLength > 4 ? 4 : textLength;
+        hostSegmentScrollIndex = 0;
+        const bool scrolling = target == 0 && textLength > 4;
+        const uint8_t copyLength = scrolling
+                                       ? textLength
+                                       : (textLength > 4 ? 4 : textLength);
+        hostSegmentTextLength = copyLength;
+        memset(hostSegmentText, scrolling ? 0 : ' ',
+               sizeof(hostSegmentText));
         if (copyLength != 0) {
           memcpy(hostSegmentText, payload + 4, copyLength);
         }
-        hostSegmentTextEndsAt = target == 3 ? 0 : endsAt;
+        if (scrolling) {
+          hostSegmentStepMs = duration == 0 ? 260 :
+              (duration < 80 ? 80 : duration);
+          hostSegmentTextEndsAt = now + hostSegmentStepMs;
+        } else {
+          hostSegmentTextEndsAt = target == 3 || duration == 0
+                                      ? 0
+                                      : now + duration;
+        }
       }
       if (target == 1 || target == 2 || target == 3) {
         memset(hostLcdText, ' ', sizeof(hostLcdText));

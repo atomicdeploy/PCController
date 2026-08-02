@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+// Ina219Reading stores one coherent sample in integer electrical units.
 struct Ina219Reading {
   // Integer telemetry units avoid floating point on the ATmega328P.
   int32_t supplyMilliVolts;

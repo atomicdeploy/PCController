@@ -1,3 +1,5 @@
+<div align="center"><a href="../../README.md"><img src="../../docs/assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Project-owned build and packaging
 
 `build.mjs` is the single policy implementation behind the root `build.cmd`
@@ -5,26 +7,30 @@ and `build.sh` launchers. Both wrappers forward their argv unchanged to the
 same Node process, so Windows and Bash produce the same command plan. Neither
 launcher invokes PowerShell.
 
-The interactive output carries forward the best presentation ideas from the
-ASA0002E tooling: Chalk-managed VT-100 color, clear emoji-labelled stages,
-elapsed timing, and real `cli-table3` Unicode tables with centered headers and
-correct width-aware alignment. Compact utilization gauges and visible hashes
-come from validated host and firmware manifests, so the attractive summary is
-also an auditable account of the exact artifacts that were built. No table
-border, column padding, or ANSI sequence is assembled by an ad-hoc renderer.
+Interactive output uses Chalk-managed VT-100 color, clear emoji-labelled
+stages, elapsed timing, and `cli-table3` Unicode tables with centered headers
+and width-aware alignment. Compact utilization gauges and visible hashes come
+from validated host and firmware manifests, so the summary is an auditable
+account of the exact artifacts that were built. No table border, column
+padding, or ANSI sequence is assembled by an ad-hoc renderer.
 Define `NO_COLOR` (even with an empty value) or pass `--no-color` for plain
 logs and automation. Define `FORCE_COLOR` to retain VT-100 styling in a
 non-interactive CI stream; `NO_COLOR` always wins when both are present.
 The visible product label comes from
 `Tools/Controller/web/package.json` (`productName`) rather than a build-script
-literal. `APP_TITLE` or the compatibility `PCCONTROLLER_APP_TITLE` environment
-setting may override it for one build invocation.
+literal. `APP_TITLE` may override it for one build invocation.
 
-The default is hardware-free: it installs the exact web dependency lock with
-`npm ci`, type-checks/tests/builds the embedded web application, then tests,
-vets, resource-stamps, packages, and UPX-tests the native host. Finally it asks
-the current Controller implementation to compile the AVR firmware. It never
+The default is hardware-free: the current Controller source first compiles and
+validates AVR firmware, the packager stages that exact application image plus
+the same validated full default EEPROM image, then it installs the exact web dependency
+lock with `npm ci`, type-checks/tests/builds the embedded web application, and
+tests, vets, resource-stamps, packages, and UPX-tests the native host. It never
 selects or opens a serial/USB device.
+
+Before the WebUI input identity is frozen, the build regenerates the canonical
+256 px product mark and its seven-size ICO from the same project-owned source.
+The native Windows resource and embedded browser therefore cannot silently
+drift to different icons.
 
 ## Common commands
 
@@ -46,7 +52,23 @@ Generated outputs have one canonical location per product:
 - `.build/firmware/` contains Controller-validated AVR images and
   `firmware-manifest.json`.
 
-After a host package passes validation, the publisher removes known legacy
+When a validated application/default-EEPROM pair exists, the host executable
+embeds both exact Intel HEX files from the firmware manifest. The EEPROM gate
+requires all 1,024 addressable bytes, and `host-manifest.json` records separate
+enabled flags, SHA-256 values, container sizes, and EEPROM data bytes. A
+host-only build reuses an existing validated firmware manifest when present;
+otherwise the embedded recovery feature is disabled. It never substitutes the
+compiler's empty `.eep` file and never grants an automatic device write.
+
+Reusable CI cleans generated host output before downloading the same-run
+firmware artifact into `.build/firmware`. It then builds without a second
+cleanup and independently asserts that both embedded-default flags are true.
+
+`--firmware-only --clean` intentionally removes only `.build/firmware`; it
+does not touch a running canonical host in `Tools/Controller/bin`. A bare
+`--clean` remains the explicit full generated-output cleanup.
+
+After a host package passes validation, the publisher removes known stale
 host output directories and loose `Tools/Controller/controller[.exe]`
 artifacts so they cannot shadow or be mistaken for the canonical package.
 
@@ -82,14 +104,16 @@ canonical Controller command. Direct `arduino-cli upload` is disabled.
 
 ```console
 build.cmd --upload --port COM18
-build.cmd --usbasp-flash
-build.cmd --install-bootloader --usbasp-troubleshooting
+build.cmd --upload --method usbasp --port COM18
+build.cmd --install-bootloader --method usbasp
 ```
 
-Urclock programming requires a device selector. USBasp is a hidden recovery
-path and requires `--usbasp-troubleshooting` (the `--usbasp-flash` alias adds
-that authorization). Controller owns pre-flash backup, artifact validation,
-write/verify, and application reauthentication. The advanced
+Urclock programming requires a device selector. USBasp is an advanced recovery
+path selected explicitly through `--method usbasp`; `--programmer` is only an
+optional backend-ID override for different ISP hardware. Controller owns
+pre-flash backup, artifact validation, write/verify, and application
+reauthentication. On standalone USBasp writes, `--port` supplies the separate
+application lifecycle selector and is never sent to ISP. The advanced
 `--allow-incomplete-backup` override is never implied.
 
 Use `--dry-run` to inspect the full ordered plan without starting a
@@ -111,7 +135,16 @@ for wrapper parity and automation tests.
 - Windows host packaging requires `go-winres` unless
   `--skip-resources` is explicit, and UPX unless `--no-upx` is explicit.
 - The C ABI package requires a native target-matching C compiler unless
-  `--no-shared-library` is explicit. MSYS-only compiler targets are rejected.
+  `--no-shared-library` is explicit. On Windows the resolver inspects both the
+  target triple and predefined macros, rejects Cygwin/MSYS impostors, and picks
+  the newest compatible MinGW-w64 compiler it can discover. If none exists, it
+  installs the exact latest-resolved user-scoped toolchain from
+  `Tools/Dependencies/resolved-tools-lock.json` through Windows Package
+  Manager; the scheduled dependency resolver advances that lock to the latest
+  stable release. `--no-compiler-bootstrap` changes installation to a clear failure.
+  `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` remain in the child environment,
+  and the selected proxy is also supplied through the package manager's native
+  proxy option without logging its value.
 
 On Windows, the Node tool merges current process PATH with the machine and
 user PATH read through `reg.exe`. This picks up newly installed UPX and build
@@ -138,7 +171,7 @@ bash.exe build.sh --dry-run --no-color
 
 The integration suite freezes identity values and asserts that CMD and Bash
 emit byte-equivalent JSON plans, compile/program through Controller, preserve
-the USBasp authorization gate, and never introduce a PowerShell or direct
+the explicit USBasp method-selection boundary, and never introduce a PowerShell or direct
 Arduino upload action.
 
 Go tests are compiled to stable names under `.build/tests/go/` and then run

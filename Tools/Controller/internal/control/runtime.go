@@ -41,6 +41,7 @@ type Snapshot struct {
 	HaveFrontPanel    bool
 	FrontPanelUpdated time.Time
 	ProgramState      ProgramStateSnapshot
+	RFLearning        RFLearnState
 }
 
 type Event struct {
@@ -145,25 +146,32 @@ type Runtime struct {
 	rfGestures  map[rfGestureKey]*rfGestureState
 	rfClicks    map[rfGestureKey]*rfClickState
 
-	rfLearnMu         sync.RWMutex
-	rfLearnGeneration uint64
-	rfLearnCancel     context.CancelFunc
-	rfLearnState      RFLearnState
+	rfLearnMu    sync.RWMutex
+	rfLearnState RFLearnState
 
-	historyMu          sync.RWMutex
-	historyRetention   time.Duration
-	historySampleEvery time.Duration
-	historyLastSample  time.Time
-	statusHistory      []StatusSample
-	timeline           []TimelineEntry
-	timelineLimit      int
-	timelinePath       string
-	historyWriteOnce   sync.Once
-	historyWrites      chan TimelineEntry
-	lcdPresenter       *LCDPresenter
-	programState       *ProgramStateManager
-	programStateSyncMu sync.Mutex
-	macroRunner        *MacroRunner
+	historyConfigureMu         sync.Mutex
+	historyMu                  sync.RWMutex
+	historyRetention           time.Duration
+	historySampleEvery         time.Duration
+	historyLastSample          time.Time
+	statusHistory              []StatusSample
+	timeline                   []TimelineEntry
+	timelineLimit              int
+	timelinePath               string
+	historyWriteOnce           sync.Once
+	historyWrites              chan TimelineEntry
+	statusHistoryPath          string
+	statusHistoryWriteOnce     sync.Once
+	statusHistoryWrites        chan measurementWrite
+	lcdPresenter               *LCDPresenter
+	programState               *ProgramStateManager
+	programStateSyncMu         sync.Mutex
+	programmingMu              sync.Mutex
+	programStateSent           bool
+	programStateSentGeneration uint64
+	programStateSentRevision   uint64
+	programStateSentMode       ProgramMode
+	macroRunner                *MacroRunner
 
 	commandObserverMu      sync.RWMutex
 	commandObservers       map[uint64]func(CommandEvidence)
@@ -336,6 +344,7 @@ func eventKindMatches(requested, actual string) bool {
 
 func (runtime *Runtime) Snapshot() Snapshot {
 	programState := runtime.ProgramState()
+	rfLearning := runtime.RFLearnState()
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
 	return Snapshot{
@@ -354,6 +363,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		FrontPanel:        runtime.frontPanel, HaveFrontPanel: runtime.haveFrontPanel,
 		FrontPanelUpdated: runtime.frontPanelUpdated,
 		ProgramState:      programState,
+		RFLearning:        rfLearning,
 	}
 }
 
@@ -526,12 +536,26 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 		if runtime.currentSession() != nil {
 			runtime.detachReason(false, "port changed by host")
 		}
+		runtime.mu.Lock()
+		runtime.paused = false
+		runtime.mu.Unlock()
 		runtime.attach(result)
 		return nil
 	}
 	selector, err := ports.ParseSelector(name)
 	if err != nil {
 		return err
+	}
+	// Opening the device already owned by this primary is an idempotent select,
+	// not a second serial open. Secondary programmer clients use this path to
+	// confirm an explicit COM/friendly-name/VID:PID selector before delegating.
+	current := runtime.Snapshot()
+	if current.Connected &&
+		len(ports.Candidates([]ports.Info{current.Port}, selector)) == 1 {
+		runtime.mu.Lock()
+		runtime.paused = false
+		runtime.mu.Unlock()
+		return nil
 	}
 	all, err := ports.List()
 	if err != nil {
@@ -743,14 +767,22 @@ func (runtime *Runtime) syncProgramState(snapshot ProgramStateSnapshot, lifecycl
 	if current.Revision != snapshot.Revision {
 		snapshot = current
 	}
-	live := runtime.Snapshot()
-	if !live.Connected || live.Hello.Capabilities&native.CapabilityProgramState == 0 {
+	runtime.mu.RLock()
+	connected := runtime.session != nil
+	capabilities := runtime.hello.Capabilities
+	generation := runtime.generation
+	timeout := runtime.options.RequestTimeout
+	runtime.mu.RUnlock()
+	if !connected || capabilities&native.CapabilityProgramState == 0 {
+		return
+	}
+	if lifecycle != "heartbeat" && runtime.programStateSent &&
+		runtime.programStateSentGeneration == generation &&
+		runtime.programStateSentRevision == snapshot.Revision &&
+		runtime.programStateSentMode == snapshot.Mode {
 		return
 	}
 	payload := native.ProgramStatePayload(snapshot.Mode == ProgramRunning)
-	runtime.mu.RLock()
-	timeout := runtime.options.RequestTimeout
-	runtime.mu.RUnlock()
 	if timeout <= 0 {
 		timeout = 1200 * time.Millisecond
 	}
@@ -765,6 +797,10 @@ func (runtime *Runtime) syncProgramState(snapshot ProgramStateSnapshot, lifecycl
 		})
 		return
 	}
+	runtime.programStateSent = true
+	runtime.programStateSentGeneration = generation
+	runtime.programStateSentRevision = snapshot.Revision
+	runtime.programStateSentMode = snapshot.Mode
 	if lifecycle != "heartbeat" {
 		runtime.publishEvent(Event{
 			Kind: "program.state.sync", Lifecycle: lifecycle,
@@ -850,6 +886,8 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					event.Frame.Payload,
 				)
 				var parsedDevice *native.DeviceEvent
+				var rfMappingRequired bool
+				var rfCaptured uint32
 				var hostMenuRequest *native.HostMenuContentRequest
 				var hostMenuState *native.HostMenuState
 				if event.Frame.Opcode == native.OpStatus {
@@ -864,6 +902,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					event.Frame.Payload = nil
 				} else if event.Frame.Opcode == native.OpEvent {
 					if parsed, err := native.ParseDeviceEvent(event.Frame.Payload); err == nil {
+						rfMappingRequired, rfCaptured = runtime.observeRFLearningEvent(parsed)
 						kind, text = describeDeviceEvent(parsed)
 						parsedDevice = &parsed
 					} else {
@@ -910,8 +949,16 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 							"revision":   strconv.Itoa(int(hostMenuState.Revision)),
 						},
 					})
+				} else if parsedDevice != nil {
+					runtime.publishEvent(Event{
+						Kind: kind, Text: text, Frame: event.Frame,
+						Source: "board", Target: "host", MessageType: "event",
+					})
 				} else {
 					runtime.publish(kind, text, event.Frame)
+				}
+				if rfMappingRequired && parsedDevice != nil {
+					runtime.publishRFMappingRequired(*parsedDevice, rfCaptured)
 				}
 				if parsedDevice != nil &&
 					parsedDevice.Type == native.EventRFReceived {
@@ -940,6 +987,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			}
 			runtime.mu.Unlock()
 			if owned {
+				runtime.markRFLearningDisconnected("device disconnected")
 				runtime.publishConnection("disconnect", port, disconnectReason)
 				runtime.publishConnection("reconnecting", port, disconnectReason)
 				go runtime.autoReconnect(epoch)
@@ -1067,6 +1115,11 @@ func (runtime *Runtime) observe(frame native.Frame) {
 			case native.EventRelay:
 				runtime.status.ActiveRelays = event.RelayMask
 				runtime.statusUpdated = time.Now()
+			case native.EventAlert:
+				if event.AlertKind == native.AlertHot {
+					runtime.status.Hot = event.AlertActive
+					runtime.statusUpdated = time.Now()
+				}
 			}
 		}
 	}
@@ -1108,7 +1161,7 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 	case native.EventPWMChannel:
 		return "pwm", fmt.Sprintf("automatic PWM channel changed to %d", event.PWMChannel)
 	case native.EventRFLearned:
-		return "rf.learn", fmt.Sprintf("RF learned entry %d", event.RFID)
+		return "rf.learn.capture", fmt.Sprintf("RF learned entry %d; mapping=unmapped", event.RFID)
 	case native.EventMacro:
 		if event.Macro != nil {
 			state := map[byte]string{
@@ -1159,25 +1212,42 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 			learned,
 		)
 	case native.EventRFLearning:
-		state := map[byte]string{
-			native.RFLearningEnded:     "ended",
-			native.RFLearningCancelled: "cancelled",
-			native.RFLearningFull:      "storage full",
-			native.RFLearningStarted:   "started",
-		}[event.RFLearnState]
-		if state == "" {
-			state = fmt.Sprintf("state-%d", event.RFLearnState)
+		state, kind := "unknown", "rf.learn"
+		switch event.RFLearnState {
+		case native.RFLearningEnded:
+			state, kind = "ended", "rf.learn.ended"
+		case native.RFLearningCancelled:
+			state, kind = "cancelled", "rf.learn.cancelled"
+		case native.RFLearningFull:
+			state, kind = "storage full", "rf.learn.full"
+		case native.RFLearningStarted:
+			state, kind = "started", "rf.learn.started"
+		case native.RFLearningProgress:
+			state, kind = "progress", "rf.learn.progress"
 		}
-		return "rf.learn", fmt.Sprintf(
-			"RF learning %s; learned count=%d",
-			state,
-			event.RFLearnCount,
+		mode := "indefinite"
+		if event.RFLearnMode == native.RFLearnModeTimer {
+			mode = "timer"
+		}
+		return kind, fmt.Sprintf(
+			"RF learning %s mode=%s stored=%d configured=%ds remaining=%ds",
+			state, mode, event.RFLearnCount,
+			event.RFLearnTotalSeconds, event.RFLearnRemainingSeconds,
 		)
 	case native.EventRelay:
 		return "relay", fmt.Sprintf(
 			"relay outputs changed; active mask=0x%02X",
 			event.RelayMask,
 		)
+	case native.EventAlert:
+		state := "cleared"
+		if event.AlertActive {
+			state = "active"
+		}
+		if event.AlertKind == native.AlertHot {
+			return "hot", "temperature alert " + state
+		}
+		return "fault", "firmware fault " + state
 	default:
 		return "event", fmt.Sprintf("device event %d payload=% X", event.Type, event.Raw)
 	}
@@ -1331,6 +1401,14 @@ func (runtime *Runtime) publishRFGesture(
 
 func (runtime *Runtime) publish(kind, text string, frame native.Frame) {
 	event := Event{Kind: kind, Text: text, Frame: frame}
+	// Frames reaching this helper came from the device-facing serial pump. Keep
+	// that provenance in every normalized event envelope, not only in the
+	// special host-menu branches, so REST/RPC/WebSocket consumers can distinguish
+	// board activity from host-generated notices.
+	if frame.Opcode != 0 {
+		event.Source = "board"
+		event.Target = "host"
+	}
 	if frame.Opcode == native.OpEvent {
 		if parsed, err := native.ParseDeviceEvent(frame.Payload); err == nil &&
 			parsed.Type == native.EventReset {

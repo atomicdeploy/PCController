@@ -23,7 +23,7 @@ import {
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createChalk, renderUnicodeBanner, renderUnicodeTable } from './presentation.mjs'
-import { resolveProductTitle } from './product-metadata.mjs'
+import { PRODUCT_METADATA, resolveProductTitle } from './product-metadata.mjs'
 
 export { resolveProductTitle } from './product-metadata.mjs'
 
@@ -39,8 +39,15 @@ const PACKAGE_ROOT = join(BUILD_ROOT, 'package')
 const STABLE_GO_TEST_ROOT = join(BUILD_ROOT, 'tests', 'go')
 const STABLE_GO_TEST_RUNNER = join(PROJECT_ROOT, 'Tools', 'Build', 'go-tests.mjs')
 const PRODUCT_IDENTITY_GENERATOR = join(HOST_ROOT, 'internal', 'productidentity', 'generate.mjs')
+const DEFAULT_ASSET_ROOT = join(HOST_ROOT, 'internal', 'defaultassets', 'assets')
+const DEFAULT_FIRMWARE = join(DEFAULT_ASSET_ROOT, 'default-firmware.hex')
+const DEFAULT_EEPROM = join(DEFAULT_ASSET_ROOT, 'default-eeprom.hex')
+const DEFAULT_METADATA = join(DEFAULT_ASSET_ROOT, 'default-metadata.json')
+const SAFE_DEFAULT_EEPROM = join(FIRMWARE_OUTPUT, 'safe-default-eeprom.hex')
+const FIRMWARE_TOOL = join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs')
+const HOST_TOOLS_LOCK = join(PROJECT_ROOT, 'Tools', 'Dependencies', 'resolved-tools-lock.json')
 export const CANONICAL_HOST_OUTPUT = join(HOST_ROOT, 'bin')
-const LEGACY_HOST_OUTPUTS = [
+const STALE_HOST_OUTPUTS = [
 	join(BUILD_ROOT, 'host'),
 	join(HOST_ROOT, '.build-test-bin'),
 	join(HOST_ROOT, '.build-upx-bin'),
@@ -50,6 +57,7 @@ const LEGACY_HOST_OUTPUTS = [
 ]
 const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest/v1'
 const FIRMWARE_MANIFEST_FORMAT = 'pccontroller-avr-firmware-manifest/v1'
+const WINDOWS_GNU_PACKAGE_ID = 'BrechtSanders.WinLibs.POSIX.UCRT'
 const MINIMUM_NODE = [22, 12, 0]
 const MINIMUM_WEB_NODE = [22, 12, 0]
 
@@ -117,7 +125,7 @@ export function resolveBuildIdentity(options, env = process.env, now = new Date(
 	const packed = normalizeHexTimestamp(
 		options.buildTimestamp || env.PCCONTROLLER_BUILD_TIMESTAMP || packBuildTimestamp(instant)
 	)
-	const version = options.version || env.PCCONTROLLER_VERSION || 'development'
+	const version = options.version || env.PCCONTROLLER_VERSION || PRODUCT_METADATA.version
 	if (!/^[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(version)) {
 		throw new BuildError('version may contain only letters, digits, dot, underscore, plus, and hyphen', 2)
 	}
@@ -146,6 +154,7 @@ export function parseArguments(argv, env = process.env) {
 		resources: true,
 		upx: true,
 		sharedLibrary: true,
+		compilerBootstrap: true,
 		verbose: false,
 		noColor: hasEnvironmentName(env, 'NO_COLOR'),
 		forceColor: hasEnvironmentName(env, 'FORCE_COLOR'),
@@ -155,8 +164,7 @@ export function parseArguments(argv, env = process.env) {
 		upload: false,
 		method: 'urclock',
 		device: env.PCCONTROLLER_DEVICE || env.PCCONTROLLER_PORT || '',
-		programmer: env.PCCONTROLLER_PROGRAMMER || 'usbasp',
-		usbaspTroubleshooting: false,
+		programmer: env.PCCONTROLLER_PROGRAMMER || '',
 		allowIncompleteBackup: false,
 		installBootloader: false,
 		toolchainSync: false,
@@ -189,15 +197,13 @@ export function parseArguments(argv, env = process.env) {
 			case '--no-resources': options.resources = false; break
 			case '--no-upx': options.upx = false; break
 			case '--no-shared-library': options.sharedLibrary = false; break
+			case '--no-compiler-bootstrap': options.compilerBootstrap = false; break
 			case '--verbose': options.verbose = true; break
 			case '--no-color': options.noColor = true; break
 			case '--force-color': options.forceColor = true; break
 			case '--dry-run': options.dryRun = true; break
 			case '--plan-json': options.planJSON = true; options.noColor = true; break
 			case '--upload': options.upload = true; substantive = true; break
-			case '--usbasp-flash':
-				options.upload = true; options.method = 'usbasp'; options.usbaspTroubleshooting = true; substantive = true; break
-			case '--usbasp-troubleshooting': options.usbaspTroubleshooting = true; break
 			case '--allow-incomplete-backup': options.allowIncompleteBackup = true; break
 			case '--install-bootloader': options.installBootloader = true; substantive = true; break
 			case '--toolchain-sync': options.toolchainSync = true; options.host = true; substantive = true; break
@@ -246,14 +252,11 @@ export function parseArguments(argv, env = process.env) {
 		if (options.method === 'urclock' && !options.device.trim()) {
 			throw new BuildError('--upload through urclock requires --port/--device or PCCONTROLLER_PORT', 2)
 		}
-		if (options.method === 'usbasp' && !options.usbaspTroubleshooting) {
-			throw new BuildError('USBasp is hidden troubleshooting only; pass --usbasp-troubleshooting', 2)
-		}
 	}
 	if (options.installBootloader) {
 		options.host = true
-		if (!options.usbaspTroubleshooting) {
-			throw new BuildError('bootloader provisioning requires --usbasp-troubleshooting', 2)
+		if (options.method !== 'usbasp') {
+			throw new BuildError('--install-bootloader requires explicit --method usbasp', 2)
 		}
 	}
 	if (options.toolchainCLI && !options.toolchainSync) {
@@ -282,10 +285,49 @@ export function createPlan(options, identity, platform = process.platform) {
 	if (options.clean) actions.push({
 		id: 'clean',
 		stage: 'Clean generated build outputs',
-		paths: [BUILD_ROOT, CANONICAL_HOST_OUTPUT, ...LEGACY_HOST_OUTPUTS],
+		paths: generatedCleanTargets(options),
 		hardware: false
 	})
+	if (!options.cleanOnly && options.toolchainSync) {
+		const controller = { file: 'go', prefix: ['run', '-buildvcs=false', './cmd/controller'], cwd: HOST_ROOT }
+		const args = [...controller.prefix, 'toolchain', 'sync']
+		if (options.toolchainCLI) args.push('--cli', options.toolchainCLI)
+		const action = commandAction(
+			'toolchain-sync',
+			'Explicitly synchronize firmware indexes, cores, and libraries through current Controller source',
+			controller.file,
+			args,
+			controller.cwd
+		)
+		action.externalMutation = true
+		actions.push(action)
+	}
+	if (!options.cleanOnly && options.firmware) {
+		const controller = { file: 'go', prefix: ['run', '-buildvcs=false', './cmd/controller'], cwd: HOST_ROOT }
+		actions.push(commandAction(
+			'firmware-compile',
+			'Compile AVR firmware through current Controller source',
+			controller.file,
+			[...controller.prefix, 'program', '--method', 'compile', '--sketch', PROJECT_ROOT, '--output-dir', FIRMWARE_OUTPUT],
+			controller.cwd
+		))
+		actions.push(commandAction(
+			'default-eeprom',
+			'Generate the complete safe default EEPROM image',
+			'go',
+			['run', '-buildvcs=false', './cmd/default-assets', '--output', SAFE_DEFAULT_EEPROM],
+			HOST_ROOT
+		))
+		actions.push(commandAction(
+			'firmware-manifest',
+			'Refresh the firmware manifest with the validated default EEPROM',
+			process.execPath,
+			[relative(PROJECT_ROOT, FIRMWARE_TOOL).replaceAll('\\', '/'), 'manifest', '--quiet', '--no-color'],
+			PROJECT_ROOT
+		))
+	}
 	if (!options.cleanOnly && options.host) {
+		actions.push({ id: 'embedded-defaults', stage: 'Stage the exact validated firmware and safe EEPROM pair for host embedding', hardware: false })
 		actions.push(commandAction('web-install', 'Install locked web dependencies', 'npm', ['ci', '--no-audit', '--no-fund'], WEB_ROOT))
 		actions.push(commandAction('web-typecheck', 'Type-check embedded web application', 'npm', ['run', 'typecheck'], WEB_ROOT))
 		if (options.tests) actions.push(commandAction('web-test', 'Run embedded web tests', 'npm', ['run', 'test', '--', '--passWithNoTests'], WEB_ROOT))
@@ -312,7 +354,11 @@ export function createPlan(options, identity, platform = process.platform) {
 		))
 		if (options.vet) actions.push(commandAction('go-vet', 'Run Go vet', 'go', ['vet', './...'], HOST_ROOT))
 		actions.push(commandAction('host-build', 'Build controller host', 'go', ['build', '-buildvcs=false', '-trimpath', '-ldflags', `<identity ${identity.version} ${identity.hostBuildTime}>`, '-o', '<staging>/controller', './cmd/controller'], HOST_ROOT))
-		if (platform === 'win32' && options.resources) actions.push(commandAction('winres', 'Apply Win32 resources', 'go-winres', ['patch', '--in', 'winres/winres.json', '--delete', '--no-backup', '<staging>/controller.exe'], HOST_ROOT))
+		if (platform === 'win32' && options.resources) actions.push(commandAction('winres', 'Apply Win32 resources', 'go-winres', [
+			'patch', '--in', 'winres/winres.json', '--delete', '--no-backup',
+			'--product-version', identity.version, '--file-version', identity.version,
+			'<staging>/controller.exe'
+		], HOST_ROOT))
 		if (platform === 'win32' && options.upx) {
 			actions.push(commandAction('upx-pack', 'Compress controller host', 'upx', ['--best', '--lzma', '<staging>/controller.exe'], HOST_ROOT))
 			actions.push(commandAction('upx-test', 'Test compressed controller host', 'upx', ['-t', '<staging>/controller.exe'], HOST_ROOT))
@@ -321,41 +367,22 @@ export function createPlan(options, identity, platform = process.platform) {
 		actions.push({ id: 'licenses', stage: 'Collect project and Go-module notices', hardware: false })
 		actions.push({ id: 'host-manifest', stage: 'Publish canonical host package and manifest', hardware: false })
 	}
-	if (!options.cleanOnly && options.toolchainSync) {
-		const controller = controllerInvocation({ ...options, host: true })
-		const args = [...controller.prefix, 'toolchain', 'sync']
-		if (options.toolchainCLI) args.push('--cli', options.toolchainCLI)
-		const action = commandAction(
-			'toolchain-sync',
-			'Explicitly synchronize firmware indexes, cores, and libraries through Controller',
-			controller.file,
-			args,
-			controller.cwd
-		)
-		action.externalMutation = true
-		actions.push(action)
-	}
-	if (!options.cleanOnly && options.firmware) {
-		const controller = controllerInvocation(options)
-		actions.push(commandAction(
-			'firmware-compile',
-			'Compile AVR firmware through Controller',
-			controller.file,
-			[...controller.prefix, 'program', '--method', 'compile', '--sketch', PROJECT_ROOT, '--output-dir', FIRMWARE_OUTPUT],
-			controller.cwd
-		))
-	}
 	if (!options.cleanOnly && options.installBootloader) {
 		const controller = controllerInvocation({ ...options, host: true })
-		actions.push(commandAction('install-bootloader', 'Provision Urboot/fuses through Controller', controller.file, [
-			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'install-bootloader', '--programmer', options.programmer, '--usbasp-troubleshooting'
-		], controller.cwd, true))
+		const args = [
+			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'install-bootloader'
+		]
+		if (options.programmer) args.push('--programmer', options.programmer)
+		actions.push(commandAction('install-bootloader', 'Provision Urboot/fuses through Controller', controller.file, args, controller.cwd, true))
 	}
 	if (!options.cleanOnly && options.upload) {
 		const controller = controllerInvocation({ ...options, host: true })
 		const args = [...controller.prefix, 'program', '--method', options.method, '--operation', 'write-flash', '--hex', `<${options.method === 'usbasp' ? 'flash+bootloader' : 'application'} artifact>`]
 		if (options.method === 'urclock') args.push('--device', options.device)
-		if (options.method === 'usbasp') args.push('--programmer', options.programmer, '--usbasp-troubleshooting')
+		if (options.method === 'usbasp') {
+			if (options.device) args.push('--app-device', options.device)
+			if (options.programmer) args.push('--programmer', options.programmer)
+		}
 		if (options.allowIncompleteBackup) args.push('--allow-incomplete-backup')
 		actions.push(commandAction('program', `Explicit ${options.method} programming through Controller`, controller.file, args, controller.cwd, true))
 	}
@@ -386,7 +413,8 @@ Safe build options:
   --skip-resources          Build Windows host without regenerated resources
   --no-upx                  Leave Windows controller executable unpacked
   --no-shared-library       Skip C ABI library/header/smoke test
-  --version VALUE           Host version identity (default: development)
+  --no-compiler-bootstrap   Do not install a missing native Windows C compiler
+  --version VALUE           Host version identity (default: product metadata)
   --build-time ISO          Freeze host build time for reproducible packaging
   --build-timestamp HEX     Freeze packed firmware timestamp
   --toolchain-sync          Explicitly synchronize firmware dependencies
@@ -399,11 +427,12 @@ Safe build options:
 
 Explicit programming only:
   --upload --port DEVICE    Build, backup, flash, verify via Urclock
-  --usbasp-flash            Explicit hidden USBasp troubleshooting alias
-  --method urclock|usbasp   Select guarded Controller programmer
-  --usbasp-troubleshooting  Required for direct ISP/bootloader access
-  --install-bootloader      Explicitly provision Urboot/fuses via Controller
-  --programmer ID           ISP programmer ID (default: usbasp)
+  --upload --method usbasp [--port DEVICE]
+                             Select ISP; DEVICE is the separate app lifecycle
+  --method urclock|usbasp   Select the guarded Controller programming method
+  --install-bootloader --method usbasp
+                             Explicitly provision Urboot/fuses through ISP
+  --programmer ID           Optional ISP backend-ID override
   --allow-incomplete-backup Advanced logged override; never the default
 
 No programming action is implied by a normal build. Direct dependency upload
@@ -597,6 +626,7 @@ function buildWebUI(options, env, log) {
 		throw new BuildError('embedded web build requires Tools/Controller/web/package-lock.json; regenerate and review the lockfile')
 	}
 	const npm = npmInvocation(env)
+	const go = requireTool('go', env)
 	const npmEnv = {
 		...env,
 		CI: '1',
@@ -609,6 +639,13 @@ function buildWebUI(options, env, log) {
 		env: npmEnv,
 		verbose: options.verbose
 	})
+	log.stage('🎨', 'Regenerating the canonical native and browser product mark')
+	run(go, ['run', './winres/generate_icon.go', './winres/icon.png', './winres/icon.ico'], {
+		cwd: HOST_ROOT,
+		env,
+		verbose: options.verbose
+	})
+	copyFileSync(join(HOST_ROOT, 'winres', 'icon.ico'), join(WEB_ROOT, 'public', 'favicon.ico'))
 	const inputsBefore = directoryIdentity(WEB_ROOT, true)
 	log.stage('🔒', 'Installing locked web dependencies')
 	invoke(['ci', '--no-audit', '--no-fund'])
@@ -794,24 +831,48 @@ export function removeGeneratedWinResources(controllerSource = join(HOST_ROOT, '
 	}
 }
 
-function cleanGenerated(log) {
-	for (const path of [BUILD_ROOT, CANONICAL_HOST_OUTPUT, ...LEGACY_HOST_OUTPUTS]) {
+export function generatedCleanTargets(options) {
+	if (options.firmware && !options.host && !options.cleanOnly) return [FIRMWARE_OUTPUT]
+	return [BUILD_ROOT, CANONICAL_HOST_OUTPUT, ...STALE_HOST_OUTPUTS, DEFAULT_FIRMWARE, DEFAULT_EEPROM, DEFAULT_METADATA]
+}
+
+function cleanGenerated(log, options) {
+	for (const path of generatedCleanTargets(options)) {
 		assertGeneratedPath(PROJECT_ROOT, path)
 		if (existsSync(path)) {
 			removeGeneratedTree(path)
 			log.success(`Removed ${relative(PROJECT_ROOT, path)}`)
 		}
 	}
-	removeGeneratedWinResources()
+	if (options.host || options.cleanOnly) removeGeneratedWinResources()
 }
 
-function removeLegacyHostOutputs(log) {
-	for (const path of LEGACY_HOST_OUTPUTS) {
+function removeStaleHostOutputs(log) {
+	for (const path of STALE_HOST_OUTPUTS) {
 		assertGeneratedPath(PROJECT_ROOT, path)
 		if (!existsSync(path)) continue
 		removeGeneratedTree(path)
-		log.success(`Removed legacy host artifact ${relative(PROJECT_ROOT, path)}`)
+		log.success(`Removed stale host artifact ${relative(PROJECT_ROOT, path)}`)
 	}
+	for (const path of stalePackageTransactionPaths()) {
+		assertGeneratedPath(PROJECT_ROOT, path)
+		if (retirePreviousPackage(path)) {
+			log.success(`Removed stale package transaction ${relative(PROJECT_ROOT, path)}`)
+		} else {
+			log.warning(`Deferred locked package cleanup ${relative(PROJECT_ROOT, path)}`)
+		}
+	}
+}
+
+// A process can keep the previous package directory locked after the new
+// package has already been published on Windows. Keep these rollback folders
+// narrowly identifiable so a later successful build can clean them without
+// ever sweeping an unrelated hidden directory.
+export function stalePackageTransactionPaths(hostRoot = HOST_ROOT) {
+	if (!existsSync(hostRoot)) return []
+	return readdirSync(hostRoot, { withFileTypes: true })
+		.filter(entry => entry.isDirectory() && /^\.bin-previous-\d+$/u.test(entry.name))
+		.map(entry => join(hostRoot, entry.name))
 }
 
 function copyProjectNotices(destination) {
@@ -840,26 +901,40 @@ export function collectWebNotices(destination, webRoot = WEB_ROOT) {
 		if (segments.includes('..')) throw new BuildError(`unsafe package path in embedded web lock: ${packagePath}`)
 		const directory = join(webRoot, ...segments)
 		if (!existsSync(directory)) throw new BuildError(`locked web dependency is not installed: ${packagePath}`)
-		const notices = readdirSync(directory, { withFileTypes: true }).filter(entry =>
-			entry.isFile() && /^(LICENSE|COPYING|NOTICE)/i.test(entry.name)
-		)
-		if (notices.length === 0) throw new BuildError(`bundled web dependency has no package notice: ${packagePath}`)
 		const packageJSON = join(directory, 'package.json')
 		let packageName = packagePath.slice('node_modules/'.length)
 		let version = metadata?.version || 'locked'
+		let declaredLicense = metadata?.license || ''
 		if (existsSync(packageJSON)) {
 			try {
 				const value = JSON.parse(readFileSync(packageJSON, 'utf8'))
 				packageName = value.name || packageName
 				version = value.version || version
+				declaredLicense = value.license || declaredLicense
 			} catch (error) {
 				throw new BuildError(`decode ${packagePath}/package.json for notices: ${error.message}`)
 			}
 		}
+		const notices = readdirSync(directory, { withFileTypes: true })
+			.filter(entry => entry.isFile() && /^(LICEN[CS]E|COPYING|NOTICE)/i.test(entry.name))
+			.map(entry => ({ source: join(directory, entry.name), name: entry.name }))
+		if (notices.length === 0) {
+			const noticeKey = packageName.replace(/[\\/:*?"<>|]/g, '_')
+			const supplemental = join(webRoot, 'third-party-notices', `${noticeKey}.txt`)
+			if (!declaredLicense || !existsSync(supplemental)) {
+				throw new BuildError(`bundled web dependency has no package notice or reviewed supplement: ${packagePath}`)
+			}
+			const content = readFileSync(supplemental, 'utf8').replaceAll('\r\n', '\n')
+			const expectedHeader = `Package: ${packageName}\nDeclared license: ${declaredLicense}\n`
+			if (!content.startsWith(expectedHeader)) {
+				throw new BuildError(`reviewed web notice header does not match ${packageName}@${version}`)
+			}
+			notices.push({ source: supplemental, name: 'LICENSE-SUPPLEMENT.txt' })
+		}
 		const safe = `${packageName}@${version}`.replace(/[\\/:*?"<>|]/g, '_')
 		const target = join(destination, 'web', safe)
 		mkdirSync(target, { recursive: true })
-		for (const notice of notices) copyFileSync(join(directory, notice.name), join(target, notice.name))
+		for (const notice of notices) copyFileSync(notice.source, join(target, notice.name))
 		packages += 1
 	}
 	return packages
@@ -879,7 +954,7 @@ function collectModuleNotices(go, stage, env, options) {
 		const [modulePath, version, directory] = line.split('|')
 		if (!modulePath || !directory || !existsSync(directory)) continue
 		const notices = readdirSync(directory, { withFileTypes: true }).filter(entry =>
-			entry.isFile() && /^(LICENSE|COPYING|NOTICE)/i.test(entry.name)
+			entry.isFile() && /^(LICEN[CS]E|COPYING|NOTICE)/i.test(entry.name)
 		)
 		if (notices.length === 0) continue
 		const safe = `${modulePath}@${version || 'local'}`.replace(/[\\/:*?"<>|]/g, '_')
@@ -896,50 +971,158 @@ function compilerVersion(text) {
 	return match ? match[0] : '0.0'
 }
 
-function selectCCompiler(env, goArch, options) {
-	if (env.CC) return { command: env.CC, env }
-	if (process.platform !== 'win32') {
-		for (const name of ['cc', 'gcc', 'clang']) {
-			const candidates = allExecutables(name, env)
-			if (candidates.length) return { command: candidates[0], env: { ...env, CC: candidates[0] } }
-		}
-		throw new BuildError('no C compiler was found for the requested C ABI package')
-	}
-	const targetPattern = goArch === 'amd64'
+function windowsCompilerTargetPattern(goArch) {
+	return goArch === 'amd64'
 		? /^x86_64-.*(mingw|windows-gnu)/i
 		: goArch === '386'
 			? /^i[3-6]86-.*(mingw|windows-gnu)/i
 			: goArch === 'arm64'
 				? /^(aarch64|arm64)-.*(mingw|windows-gnu)/i
 				: /(mingw|windows-gnu)/i
+}
+
+// A Windows-GNU target must also expose native MinGW macros. This rejects the
+// deceptively named gcc.exe shipped in Git/MSYS/Cygwin environments.
+export function isNativeWindowsGNUCompiler(target, macros, goArch) {
+	if (!windowsCompilerTargetPattern(goArch).test(String(target).trim())) return false
+	if (/\b__(?:CYGWIN|MSYS)__\b/.test(macros)) return false
+	return /\b__MINGW(?:32|64)__\b/.test(macros) || /windows-gnu/i.test(target)
+}
+
+function compilerProbe(candidate, env, goArch) {
+	const common = { encoding: 'utf8', env, shell: false, windowsHide: true, timeout: 5000 }
+	const target = spawnSync(candidate, ['-dumpmachine'], common)
+	if (target.status !== 0) return null
+	const macros = spawnSync(candidate, ['-dM', '-E', '-x', 'c', '-'], { ...common, input: '' })
+	if (macros.status !== 0 || !isNativeWindowsGNUCompiler(target.stdout, macros.stdout, goArch)) return null
+	const version = spawnSync(candidate, ['-dumpfullversion'], common)
+	return {
+		candidate,
+		target: target.stdout.trim(),
+		version: compilerVersion(version.stdout || '')
+	}
+}
+
+function installedWindowsCompilerCandidates(env, goArch) {
 	const names = goArch === 'amd64'
 		? ['x86_64-w64-mingw32-gcc', 'gcc', 'clang', 'cc']
 		: goArch === '386'
 			? ['i686-w64-mingw32-gcc', 'gcc', 'clang', 'cc']
 			: ['gcc', 'clang', 'cc']
-	const compatible = []
-	for (const name of names) {
-		for (const candidate of allExecutables(name, env)) {
-			const target = spawnSync(candidate, ['-dumpmachine'], { encoding: 'utf8', env, shell: false, windowsHide: true, timeout: 2500 })
-			if (target.status !== 0 || !targetPattern.test((target.stdout || '').trim())) continue
-			const version = spawnSync(candidate, ['-dumpfullversion'], { encoding: 'utf8', env, shell: false, windowsHide: true, timeout: 2500 })
-			compatible.push({ candidate, version: compilerVersion(version.stdout || '') })
+	const candidates = names.flatMap(name => allExecutables(name, env))
+	const localAppData = environmentValue(env, 'LOCALAPPDATA')
+	const packageRoot = localAppData && join(localAppData, 'Microsoft', 'WinGet', 'Packages')
+	if (packageRoot && existsSync(packageRoot)) {
+		for (const entry of readdirSync(packageRoot, { withFileTypes: true })) {
+			if (!entry.isDirectory() || !entry.name.startsWith(`${WINDOWS_GNU_PACKAGE_ID}_`)) continue
+			const architecture = goArch === '386' ? 'mingw32' : 'mingw64'
+			candidates.push(join(packageRoot, entry.name, architecture, 'bin', 'gcc.exe'))
 		}
 	}
-	compatible.sort((left, right) => compareVersion(right.version, left.version))
-	if (compatible.length === 0) {
-		throw new BuildError(`no native Windows ${goArch} MinGW-w64 compiler was found; Git/MSYS-target compilers are intentionally rejected`)
+	return [...new Set(candidates.map(candidate => resolve(candidate)))].filter(candidate => existsSync(candidate))
+}
+
+export function windowsCompilerProvisionArguments(env, goArch, packageVersion = '') {
+	const architecture = goArch === 'amd64' ? 'x64' : goArch === '386' ? 'x86' : goArch
+	const args = [
+		'install', '--id', WINDOWS_GNU_PACKAGE_ID, '--exact', '--source', 'winget',
+		'--scope', 'user', '--architecture', architecture, '--silent',
+		'--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity'
+	]
+	if (packageVersion) args.push('--version', packageVersion)
+	const proxy = environmentValue(env, 'HTTPS_PROXY') || environmentValue(env, 'HTTP_PROXY') ||
+		environmentValue(env, 'ALL_PROXY')
+	if (proxy) args.push('--proxy', proxy)
+	return args
+}
+
+function provisionWindowsCCompiler(env, goArch, options) {
+	if (goArch !== 'amd64') {
+		throw new BuildError(`automatic native Windows C compiler provisioning does not support GOARCH=${goArch}; set CC explicitly`)
 	}
-	const selected = compatible[0].candidate
+	if (options.compilerBootstrap === false) {
+		throw new BuildError(`no native Windows ${goArch} MinGW-w64 compiler was found and automatic provisioning is disabled`)
+	}
+	const winget = allExecutables('winget', env)[0]
+	if (!winget) {
+		throw new BuildError(`no native Windows ${goArch} MinGW-w64 compiler was found and Windows Package Manager is unavailable`)
+	}
+	const locked = JSON.parse(readFileSync(HOST_TOOLS_LOCK, 'utf8')).windows_c_compiler
+	if (locked?.package_id !== WINDOWS_GNU_PACKAGE_ID || !locked.package_version) {
+		throw new BuildError('resolved host-tool lock has no native Windows C compiler package identity')
+	}
+	process.stdout.write(`Native Windows C compiler not found; provisioning resolved package ${locked.package_version}.\n`)
+	// Keep the proxy value out of verbose command rendering while still passing
+	// the complete caller environment and winget's explicit proxy option.
+	run(winget, windowsCompilerProvisionArguments(env, goArch, locked.package_version), { env, verbose: false })
+	return refreshedEnvironment(env)
+}
+
+export function selectCCompiler(env, goArch, options = {}) {
+	if (process.platform !== 'win32') {
+		if (env.CC) return { command: env.CC, env }
+		for (const name of ['cc', 'gcc', 'clang']) {
+			const candidates = allExecutables(name, env)
+			if (candidates.length) return { command: candidates[0], env: { ...env, CC: candidates[0] } }
+		}
+		throw new BuildError('no C compiler was found for the requested C ABI package')
+	}
+	const explicitCC = environmentValue(env, 'CC')
+	const normalized = { ...env }
+	for (const key of Object.keys(normalized)) {
+		if (key.toLowerCase() === 'path' || key.toLowerCase() === 'cc') delete normalized[key]
+	}
+	env = { ...normalized, PATH: environmentValue(env, 'PATH') }
+	if (explicitCC) {
+		const explicit = allExecutables(explicitCC, env)[0] || (existsSync(explicitCC) ? resolve(explicitCC) : '')
+		const probe = explicit && compilerProbe(explicit, env, goArch)
+		if (!probe) {
+			throw new BuildError(`CC=${explicitCC} is not a native Windows ${goArch} MinGW-w64 compiler; MSYS/Cygwin targets are unsupported`)
+		}
+		return { command: probe.candidate, env: { ...env, CC: probe.candidate }, ...probe }
+	}
+	const locked = JSON.parse(readFileSync(HOST_TOOLS_LOCK, 'utf8')).windows_c_compiler
+	if (!locked?.compiler_version || !locked.target) {
+		throw new BuildError('resolved host-tool lock has no native Windows C compiler identity')
+	}
+	let resolvedEnv = env
+	let compatible = installedWindowsCompilerCandidates(resolvedEnv, goArch)
+		.map(candidate => compilerProbe(candidate, resolvedEnv, goArch)).filter(Boolean)
+	let lockedCompatible = compatible.filter(candidate =>
+		candidate.version === locked.compiler_version && candidate.target === locked.target)
+	if (lockedCompatible.length === 0) {
+		resolvedEnv = provisionWindowsCCompiler(resolvedEnv, goArch, options)
+		compatible = installedWindowsCompilerCandidates(resolvedEnv, goArch)
+			.map(candidate => compilerProbe(candidate, resolvedEnv, goArch)).filter(Boolean)
+		lockedCompatible = compatible.filter(candidate =>
+			candidate.version === locked.compiler_version && candidate.target === locked.target)
+	}
+	lockedCompatible.sort((left, right) => compareVersion(right.version, left.version))
+	if (lockedCompatible.length === 0) {
+		throw new BuildError(`resolved native Windows compiler ${locked.compiler_version} / ${locked.target} was not discoverable after provisioning`)
+	}
+	const selectedCompiler = lockedCompatible[0]
+	const selected = selectedCompiler.candidate
 	const selectedEnv = {
-		...env,
-		PATH: `${dirname(selected)}${delimiter}${env.PATH || ''}`,
+		...resolvedEnv,
+		PATH: `${dirname(selected)}${delimiter}${resolvedEnv.PATH || ''}`,
 		// Go invokes CC itself. Keep the selected directory first on PATH so a
 		// compiler installed below a path containing spaces stays one argv item.
 		CC: basename(selected)
 	}
-	if (options.verbose) process.stdout.write(`C compiler: ${selected} (${compatible[0].version})\n`)
-	return { command: selected, env: selectedEnv }
+	if (options.verbose) process.stdout.write(`C compiler: ${selected} (${selectedCompiler.version}, ${selectedCompiler.target})\n`)
+	return { command: selected, env: selectedEnv, target: selectedCompiler.target, version: selectedCompiler.version }
+}
+
+export function compilerManifestIdentity(compiler, locked, binarySHA256) {
+	if (!locked || compiler.version !== locked.compiler_version || compiler.target !== locked.target) {
+		throw new BuildError(`selected C compiler ${compiler.version || '?'} / ${compiler.target || '?'} does not match the resolved host-tool lock`)
+	}
+	return {
+		...locked,
+		binary_name: basename(compiler.command),
+		binary_sha256: binarySHA256
+	}
 }
 
 export function windowsSmokeSource() {
@@ -1030,6 +1213,19 @@ function buildSharedLibrary(go, stage, env, goArch, options, log) {
 	const output = join(stage, `pccontroller${extension}`)
 	const compiler = selectCCompiler(env, goArch, options)
 	log.detail(`C compiler: ${compiler.command}`)
+	let compilerIdentity = {
+		compiler: basename(compiler.command),
+		compiler_version: compiler.version || '',
+		target: compiler.target || '',
+		binary_sha256: sha256File(compiler.command)
+	}
+	if (process.platform === 'win32') {
+		const locked = JSON.parse(readFileSync(HOST_TOOLS_LOCK, 'utf8')).windows_c_compiler
+		compilerIdentity = {
+			...compilerManifestIdentity(compiler, locked, sha256File(compiler.command)),
+			lock_path: relative(PROJECT_ROOT, HOST_TOOLS_LOCK).replaceAll('\\', '/')
+		}
+	}
 	run(go, [
 		'build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib',
 		'-buildmode=c-shared', '-o', output, './cmd/controllerlib'
@@ -1059,7 +1255,7 @@ function buildSharedLibrary(go, stage, env, goArch, options, log) {
 		rmSync(smokeSource, { force: true })
 		rmSync(smoke, { force: true })
 	}
-	return [output, header]
+	return { paths: [output, header], compiler: compilerIdentity }
 }
 
 function peSectionNames(path) {
@@ -1079,13 +1275,16 @@ function peSectionNames(path) {
 	return names
 }
 
-function verifyWindowsResources(executable) {
+function verifyWindowsResources(executable, version) {
 	if (!peSectionNames(executable).includes('.rsrc')) throw new BuildError('controller.exe does not contain a Win32 .rsrc section')
 	const binary = readFileSync(executable)
 	const resources = JSON.parse(readFileSync(join(HOST_ROOT, 'winres', 'winres.json'), 'utf8'))
 	const info = resources.RT_VERSION?.['#1']?.['0409']?.info?.['0409'] || {}
 	for (const value of [info.ProductName, info.CompanyName].filter(Boolean)) {
 		if (binary.indexOf(Buffer.from(value, 'utf16le')) < 0) throw new BuildError(`controller.exe resource data is missing ${value}`)
+	}
+	if (binary.indexOf(Buffer.from(version, 'utf16le')) < 0) {
+		throw new BuildError(`controller.exe resource data is missing build version ${version}`)
 	}
 }
 
@@ -1144,7 +1343,21 @@ function installPackageEntries(stage, canonical, previous, rename) {
                 throw new BuildError(`entry-wise package transaction: ${error.message}${suffix}`)
         }
         removeGeneratedTree(stage)
-        removeGeneratedTree(previous)
+        retirePreviousPackage(previous)
+}
+
+// Once the new canonical directory is complete, an old executable that is
+// still mapped by Windows is no longer a publication failure. Leave only the
+// narrowly named rollback directory for a later cleanup pass; every other
+// removal error remains fatal.
+export function retirePreviousPackage(target, remove = removeGeneratedTree) {
+	try {
+		remove(target)
+		return true
+	} catch (error) {
+		if (!['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) throw error
+		return false
+	}
 }
 
 export function installPackage(stage, options = {}) {
@@ -1174,10 +1387,65 @@ export function installPackage(stage, options = {}) {
                 }
                 throw new BuildError(`atomically publish canonical host package: ${error.message}`)
         }
-	removeGeneratedTree(previous)
+	retirePreviousPackage(previous)
 }
 
-function buildHost(options, identity, env, log) {
+function clearEmbeddedDefaults() {
+	for (const path of [DEFAULT_FIRMWARE, DEFAULT_EEPROM, DEFAULT_METADATA]) rmSync(path, { force: true })
+}
+
+export function stageEmbeddedDefaults(manifest, identity) {
+	clearEmbeddedDefaults()
+	if (!manifest) {
+		return {
+			enabled: false,
+			firmwareEnabled: false,
+			eepromEnabled: false,
+			reason: 'no validated firmware manifest was available'
+		}
+	}
+	mkdirSync(DEFAULT_ASSET_ROOT, { recursive: true })
+	const firmware = firmwareArtifact(manifest, 'application')
+	const eeprom = firmwareArtifact(manifest, 'default-eeprom')
+	if (Number(eeprom.capacityBytes) !== 1024 || Number(eeprom.dataBytes) !== 1024 ||
+		Number(eeprom.startAddress) !== 0 || Number(eeprom.endAddress) !== 1023) {
+		throw new BuildError('safe default EEPROM must cover exactly 1,024 validated bytes at addresses 0..1023')
+	}
+	copyFileSync(firmware.absolutePath, DEFAULT_FIRMWARE)
+	copyFileSync(eeprom.absolutePath, DEFAULT_EEPROM)
+	const firmwareRecord = {
+		kind: 'firmware', name: 'default-firmware.hex', file: basename(DEFAULT_FIRMWARE),
+		sha256: sha256File(DEFAULT_FIRMWARE), bytes: statSync(DEFAULT_FIRMWARE).size,
+		build_hash: String(manifest.source?.buildHash || ''),
+		build_timestamp: String(manifest.source?.buildTimestamp || manifest.source?.packedTimestamp || identity.packedTimestamp || '')
+	}
+	const eepromRecord = {
+		kind: 'eeprom', name: 'default-eeprom.hex', file: basename(DEFAULT_EEPROM),
+		sha256: sha256File(DEFAULT_EEPROM), bytes: statSync(DEFAULT_EEPROM).size,
+		data_bytes: Number(eeprom.dataBytes), source_path: String(eeprom.path || '')
+	}
+	const metadata = {
+		format: 'controller-embedded-defaults/v1',
+		generated_utc: identity.hostBuildTime,
+		firmware: firmwareRecord,
+		eeprom: eepromRecord
+	}
+	atomicWriteJSON(DEFAULT_METADATA, metadata)
+	return {
+		enabled: true,
+		firmwareEnabled: true,
+		eepromEnabled: true,
+		firmwareSHA256: firmwareRecord.sha256,
+		firmwareBytes: firmwareRecord.bytes,
+		eepromSHA256: eepromRecord.sha256,
+		eepromBytes: eepromRecord.bytes,
+		eepromDataBytes: eepromRecord.data_bytes,
+		buildHash: firmwareRecord.build_hash,
+		buildTimestamp: firmwareRecord.build_timestamp
+	}
+}
+
+function buildHost(options, identity, env, log, embeddedDefaults = { enabled: false }) {
 	const stage = join(PACKAGE_ROOT, `host-${process.pid}`)
 	assertGeneratedPath(PROJECT_ROOT, stage)
 	removeGeneratedTree(stage)
@@ -1215,7 +1483,6 @@ function buildHost(options, identity, env, log) {
 	if (process.platform === 'win32' && options.resources) {
 		log.stage('🎨', 'Preparing Win32 icon, manifest, and version resources')
 		winres = requireTool('go-winres', env)
-		run(go, ['run', './winres/generate_icon.go', './winres/icon.png'], { cwd: HOST_ROOT, env: goEnv, verbose: options.verbose })
 	} else if (process.platform === 'win32') log.warning('Win32 resource regeneration was explicitly skipped.')
 
 	const before = hostSourceIdentity()
@@ -1233,7 +1500,11 @@ function buildHost(options, identity, env, log) {
 	if (after.sha256 !== before.sha256) throw new BuildError('Controller source changed during packaging; retry from a stable tree')
 	if (process.platform === 'win32' && options.resources) {
 		log.stage('🎨', 'Applying Win32 icon, manifest, and version resources')
-		run(winres, ['patch', '--in', 'winres/winres.json', '--delete', '--no-backup', executable], {
+		run(winres, [
+			'patch', '--in', 'winres/winres.json', '--delete', '--no-backup',
+			'--product-version', identity.version, '--file-version', identity.version,
+			executable
+		], {
 			cwd: HOST_ROOT, env: goEnv, verbose: options.verbose
 		})
 		resourceGenerated = true
@@ -1243,7 +1514,7 @@ function buildHost(options, identity, env, log) {
 	for (const expected of expectedIdentity) {
 		if (!versionOutput.includes(expected)) throw new BuildError(`controller identity check is missing ${expected}`)
 	}
-	if (process.platform === 'win32' && options.resources) verifyWindowsResources(executable)
+	if (process.platform === 'win32' && options.resources) verifyWindowsResources(executable, identity.version)
 
 	let upx = { enabled: false, tested: false, version: '' }
 	if (process.platform === 'win32' && options.upx) {
@@ -1259,7 +1530,7 @@ function buildHost(options, identity, env, log) {
 		upx = { enabled: true, tested: true, version }
 	} else if (process.platform === 'win32') log.warning('UPX packaging was explicitly skipped.')
 
-	let shared = []
+	let shared = { paths: [], compiler: null }
 	if (options.sharedLibrary) {
 		log.stage('🧩', 'Building and smoke-testing the C ABI library')
 		shared = buildSharedLibrary(go, stage, goEnv, goArch, options, log)
@@ -1267,7 +1538,7 @@ function buildHost(options, identity, env, log) {
 
 	log.stage('📜', 'Collecting project and dependency notices')
 	const notices = collectModuleNotices(go, stage, goEnv, options)
-	const artifacts = [executable, ...shared].map(path => artifactRecord(path, stage))
+	const artifacts = [executable, ...shared.paths].map(path => artifactRecord(path, stage))
 	const manifest = {
 		format: HOST_MANIFEST_FORMAT,
 		generatedUtc: identity.hostBuildTime,
@@ -1279,8 +1550,10 @@ function buildHost(options, identity, env, log) {
 			buildTime: identity.hostBuildTime,
 			packedFirmwareTimestamp: identity.packedTimestamp
 		},
+		toolchains: options.sharedLibrary ? { cCompiler: shared.compiler } : {},
 		validation: {
 			webUI,
+			embeddedDefaults,
 			notices,
 			tests: options.tests ? 'passed' : 'skipped',
 			vet: options.vet ? 'passed' : 'skipped',
@@ -1294,7 +1567,7 @@ function buildHost(options, identity, env, log) {
 	log.stage('📤', 'Publishing the canonical host package')
 	installPackage(stage)
 	removeGeneratedTree(stage)
-	removeLegacyHostOutputs(log)
+	removeStaleHostOutputs(log)
 	log.table('📦 Host package', [
 		{ label: 'Artifact' },
 		{ label: 'Size', align: 'right' },
@@ -1307,6 +1580,7 @@ function buildHost(options, identity, env, log) {
 		['Version', identity.version],
 		['Source SHA-256', before.sha256],
 		['Build time', identity.hostBuildTime],
+		['Embedded board defaults', embeddedDefaults.enabled ? `${shortHash(embeddedDefaults.firmwareSHA256)} + EEPROM ${shortHash(embeddedDefaults.eepromSHA256)}` : 'not packaged'],
 		['Win32 resources', manifest.validation.windowsResources],
 		['UPX', upx.enabled ? `${upx.version} / ${upx.tested ? 'tested' : 'not tested'}` : 'disabled'],
 		['C ABI', manifest.validation.sharedLibrary]
@@ -1354,6 +1628,14 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 		'--output-dir', FIRMWARE_OUTPUT
 	]
 	run(controller.file, args, { cwd: controller.cwd, env, verbose: options.verbose })
+	log.stage('💾', 'Generating and validating the complete safe default EEPROM image')
+	const go = requireTool('go', env)
+	run(go, [
+		'run', '-buildvcs=false', './cmd/default-assets', '--output', SAFE_DEFAULT_EEPROM
+	], { cwd: HOST_ROOT, env, verbose: options.verbose })
+	run(process.execPath, [FIRMWARE_TOOL, 'manifest', '--quiet', '--no-color'], {
+		cwd: PROJECT_ROOT, env, verbose: options.verbose
+	})
 	const manifest = readFirmwareManifest()
 	if (String(manifest.source?.packedTimestamp).toUpperCase() !== identity.packedTimestamp) {
 		throw new BuildError('firmware manifest packed timestamp differs from the frozen build plan')
@@ -1405,22 +1687,23 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 }
 
 function syncToolchain(options, env, controllerPath, log) {
-	if (!controllerPath) throw new BuildError('Toolchain sync requires the freshly packaged Controller')
 	log.stage('🌐', 'Synchronizing firmware indexes, cores, and libraries through Controller')
+	const controller = controllerCommand(options, controllerPath)
 	const args = ['toolchain', 'sync']
 	if (options.toolchainCLI) args.push('--cli', options.toolchainCLI)
-	run(controllerPath, args, { cwd: PROJECT_ROOT, env, verbose: options.verbose })
+	run(controller.file, [...controller.prefix, ...args], { cwd: controller.cwd, env, verbose: options.verbose })
 	log.success('Controller-owned toolchain sync completed.')
 }
 
 function executeProgramming(options, env, controllerPath, manifest, log) {
 	const controller = controllerCommand({ ...options, host: true }, controllerPath)
 	if (options.installBootloader) {
-		log.stage('🔥', `Explicit Urboot/fuse provisioning through ${options.programmer}`)
-		run(controller.file, [
+		log.stage('🔥', `Explicit Urboot/fuse provisioning through ${options.programmer || 'the host-selected ISP backend'}`)
+		const args = [
 			...controller.prefix, 'program', '--method', 'usbasp', '--operation', 'install-bootloader',
-			'--programmer', options.programmer, '--usbasp-troubleshooting'
-		], { cwd: controller.cwd, env, verbose: options.verbose })
+		]
+		if (options.programmer) args.push('--programmer', options.programmer)
+		run(controller.file, args, { cwd: controller.cwd, env, verbose: options.verbose })
 	}
 	if (!options.upload) return
 	const role = options.method === 'usbasp' ? 'flash+bootloader' : 'application'
@@ -1431,7 +1714,10 @@ function executeProgramming(options, env, controllerPath, manifest, log) {
 		'--hex', artifact.absolutePath
 	]
 	if (options.method === 'urclock') args.push('--device', options.device)
-	else args.push('--programmer', options.programmer, '--usbasp-troubleshooting')
+	else {
+		if (options.device) args.push('--app-device', options.device)
+		if (options.programmer) args.push('--programmer', options.programmer)
+	}
 	if (options.allowIncompleteBackup) args.push('--allow-incomplete-backup')
 	run(controller.file, args, { cwd: controller.cwd, env, verbose: options.verbose })
 }
@@ -1478,14 +1764,20 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 	log.detail(`identity: version=${identity.version} host-time=${identity.hostBuildTime} firmware-stamp=0x${identity.packedTimestamp}`)
 	if (options.clean) {
 		log.stage('🧹', 'Cleaning generated output')
-		cleanGenerated(log)
+		cleanGenerated(log, options)
 		if (options.cleanOnly) return 0
 	}
-	let controllerPath = ''
-	if (options.host) controllerPath = buildHost(options, identity, refreshed, log)
-	if (options.toolchainSync) syncToolchain(options, refreshed, controllerPath, log)
 	let manifest = null
-	if (options.firmware) manifest = compileFirmware(options, identity, refreshed, controllerPath, log)
+	if (options.toolchainSync) syncToolchain(options, refreshed, '', log)
+	if (options.firmware) manifest = compileFirmware(options, identity, refreshed, '', log)
+	let controllerPath = ''
+	if (options.host) {
+		if (!manifest && existsSync(join(FIRMWARE_OUTPUT, 'firmware-manifest.json'))) manifest = readFirmwareManifest()
+		log.stage('📎', 'Staging the exact validated firmware and safe EEPROM pair for embedding')
+		const embeddedDefaults = stageEmbeddedDefaults(manifest, identity)
+		if (!embeddedDefaults.enabled) log.warning(`Embedded board defaults disabled: ${embeddedDefaults.reason}`)
+		controllerPath = buildHost(options, identity, refreshed, log, embeddedDefaults)
+	}
 	if (options.installBootloader || options.upload) executeProgramming(options, refreshed, controllerPath, manifest, log)
 	log.success(`All selected operations completed in ${((Date.now() - started) / 1000).toFixed(1)}s.`)
 	return 0

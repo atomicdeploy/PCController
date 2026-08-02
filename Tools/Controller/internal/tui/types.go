@@ -9,6 +9,7 @@ import (
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -36,10 +37,10 @@ type pageDefinition struct {
 
 var pageDefinitions = [...]pageDefinition{
 	{"1", "Dashboard", "Dashboard & Live Measurements"},
-	{"2", "Outputs", "Relays, Motion & PWM Outputs"},
+	{"2", "Control", "Relays, Motion & PWM Control"},
 	{"3", "Menus", "Board Display Menus"},
 	{"4", "Board", "Board EEPROM Settings"},
-	{"5", "App", "PC Host Settings"},
+	{"5", "App", "HOST Settings"},
 	{"6", "RF", "433 MHz Learn & Mapping"},
 	{"7", "Program", "Programming & Urboot/Urclock"},
 	{"8", "Automate", "Automations & Macros"},
@@ -176,5 +177,6 @@ type Options struct {
 	DisableWelcome   bool
 	MarkWelcomed     func()
 	WelcomeMelody    func(context.Context) error
+	PortOwnerActions portowner.Actions
 	Debug            bool
 }

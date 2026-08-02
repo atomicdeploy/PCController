@@ -1,7 +1,7 @@
 // Package shell provides the controller's host-side command shell.
 //
 // The line-oriented command model, history, completion hooks, and VT-friendly
-// interaction are inspired by Ardush and atomicdeploy/portable-shell. This is
+// interaction follow conventional VT-100 shell behavior. This is
 // an original Go implementation and does not copy their parser or editor.
 package shell
 

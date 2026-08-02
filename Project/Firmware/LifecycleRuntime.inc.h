@@ -27,15 +27,16 @@ static inline __attribute__((always_inline)) void initializeController() {
   AddressableLeds::begin();
   loadIlluminationSettings();
   const ControllerSettings &settings = settingsStore.values();
+  const bool programming = settings.programmingMode();
   menuPage = settings.defaultMenuPage;
-  buzzer.setMuted(settings.silent());
+  buzzer.setMuted(settings.silent() || programming);
   streamPeriodMs = settings.streamPeriodMs;
-  display.begin(settings.displayBrightness);
-  display.showText(commonText(TextBoot));
+  display.begin(programming || systemInputs.doorOpen()
+                    ? settings.displayBrightness
+                    : settings.displayClosedBrightness());
+  display.showText(commonText(programming ? TextProgram : TextBoot));
 
   for (Key &key : menuKeys) {
-    key.setPressCallback(keyPressed);
-    key.setReleaseCallback(keyReleased);
     key.setEventCallback(keyGesture);
   }
   appProtocol.service();
@@ -57,9 +58,17 @@ static inline __attribute__((always_inline)) void initializeController() {
     ina219Available = ina219.begin();
   }
   pwm.begin(pwmAvailable, now);
+  if (programming) {
+    // A durable programming latch must not briefly restore an On/Auto light
+    // between PWM initialization and the normal all-off latch enforcement.
+    illumination.setMode(IlluminationMode::Off);
+    illumination.setOffBrightness(0);
+  }
   illumination.begin(pwm, systemInputs.doorOpen(), now);
-  statusLeds.begin(pwm, settings.statusBrightness, now);
+  statusLeds.begin(pwm, programming ? 0 : settings.statusBrightness, now,
+                   !programming);
   applyStoredSettings(now);
+  restoreStoredOutputs(now);
   appProtocol.service();
   wdt_reset();
 
@@ -74,7 +83,9 @@ static inline __attribute__((always_inline)) void initializeController() {
   radioReceiver.setReceiveTolerance(70);
   radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
 
-  playBootMelody();
+  if (!programming) {
+    playBootMelody();
+  }
   firmwareReady = true;
   appEvents.reset(resetTelemetry.cause(), resetTelemetry.count());
   sendHello(0);
@@ -88,8 +99,11 @@ static inline __attribute__((always_inline)) void serviceController() {
   const bool i2cReserved = i2cLeaseActive(now);
   wdt_reset();
 
-  serviceRadio();
   appProtocol.service();
+  if (settingsStore.values().programmingMode()) {
+    return;
+  }
+  serviceRadio();
   ControllerProtocol::Frame queuedMacroFrame;
   while (macroPlayback.dequeueDue(queuedMacroFrame)) {
     const uint16_t errors = appProtocol.responseErrors();
@@ -104,6 +118,9 @@ static inline __attribute__((always_inline)) void serviceController() {
   if (hostOffline && (hostLcdFlags & HOST_LCD_OFFLINE) == 0) {
     if ((hostLcdFlags & HOST_PANEL_CAPTURED) != 0) {
       releaseHostPanel();
+    } else {
+      hostSegmentTextActive = false;
+      hostSegmentTextLength = 0;
     }
     showHostOfflineOnLcd();
     hostLcdFlags |= HOST_LCD_OFFLINE;
@@ -123,6 +140,8 @@ static inline __attribute__((always_inline)) void serviceController() {
   }
   programService(now);
 
+  // Edge state suppresses duplicate events while a cadence allows repeated
+  // local HOT alarms during a sustained unsafe condition.
   const bool hot = temperatureHot();
   static bool hotReported = false;
   static uint32_t lastHotAlertAt = 0;
@@ -131,10 +150,21 @@ static inline __attribute__((always_inline)) void serviceController() {
     buzzer.error();
     lastHotAlertAt = now;
   }
+  if (hot != hotReported) {
+    appEvents.alert(ControllerAlertKind::Hot, hot);
+  }
   hotReported = hot;
 
+  // Report fault entry and recovery exactly once per transition.
+  const bool firmwareFault = modeManager.current() == MODE_FAULT;
+  static bool faultReported = false;
+  if (firmwareFault != faultReported) {
+    appEvents.alert(ControllerAlertKind::Fault, firmwareFault);
+    faultReported = firmwareFault;
+  }
+
   // Critical local safety conditions dominate host overrides and transient
-  // informational cues. Base operational state remains PC-owned.
+  // informational cues. Base operational state remains host-owned.
   StatusLedMode desiredLedMode;
   if (modeManager.current() == MODE_BOOT) {
     desiredLedMode = StatusLedMode::Boot;
@@ -150,26 +180,22 @@ static inline __attribute__((always_inline)) void serviceController() {
     desiredLedMode = StatusLedMode::Custom;
   } else if ((hostLcdFlags & HOST_PROGRAM_RUNNING) != 0) {
     desiredLedMode = StatusLedMode::Running;
-  } else if (systemInputs.bluetoothState(now) ==
-             BluetoothIndicatorState::On) {
-    desiredLedMode = StatusLedMode::Connected;
   } else {
-    desiredLedMode = StatusLedMode::Disconnected;
+    const BluetoothIndicatorState btState = systemInputs.bluetoothState(now);
+    // A blinking indicator means powered but waiting for connection; keep it
+    // distinct from the deliberate green/red powered-off indication.
+    desiredLedMode = btState == BluetoothIndicatorState::On
+                         ? StatusLedMode::Connected
+                         : (btState == BluetoothIndicatorState::Blinking
+                                ? StatusLedMode::Waiting
+                                : StatusLedMode::Disconnected);
   }
   if (statusLeds.mode() != desiredLedMode) {
     statusLeds.setMode(desiredLedMode, now);
   }
 
-  illumination.service(systemInputs.doorOpen(),
-                       !i2cReserved && !learningActive, now);
+  illumination.service(systemInputs.doorOpen(), !i2cReserved, now);
   serviceIlluminationSettings(now);
-  if (!i2cReserved && modeManager.current() != MODE_BOOT) {
-    pwm.service(now);
-  }
-  uint8_t pwmChannel;
-  if (pwm.consumeAutoChannelChange(pwmChannel)) {
-    appEvents.pwmChannel(pwmChannel);
-  }
   relays.service(now);
   const uint8_t relayMask = relays.activeRelayMask();
   if (relayMask != lastRelayMask) {
@@ -178,8 +204,15 @@ static inline __attribute__((always_inline)) void serviceController() {
         ((relayMask ^ lastRelayMask) & 0xFAU) != 0) {
       buzzer.beep(35, (relayMask & ~lastRelayMask) != 0 ? 1900 : 1250);
     }
+    settingsStore.values().relayRestoreMask = relayMask;
+    settingsStore.markDirty(now);
     lastRelayMask = relayMask;
   }
+  const ControllerSettings &displaySettings = settingsStore.values();
+  display.serviceBrightness(systemInputs.doorOpen()
+                                ? displaySettings.displayBrightness
+                                : displaySettings.displayClosedBrightness(),
+                            now);
   serviceDisplay(now);
   if (!i2cReserved) {
     statusLeds.service(now);

@@ -6,8 +6,10 @@ import (
 )
 
 const (
-	MaxOutputDefinitions = 32
-	MaxMelodyNotes       = 64
+	MaxOutputDefinitions       = 32
+	MaxMelodyNotes             = 64
+	PowerDownMelodyName        = "power-down"
+	ProgrammingReadyMelodyName = "programming-ready"
 )
 
 // Melody is PC-side configuration. The host streams one note at a time over
@@ -56,6 +58,34 @@ func DefaultMelodies() []Melody {
 				{FrequencyHz: 880, DurationMS: 180},
 			},
 		},
+		DefaultPowerDownMelody(),
+		DefaultProgrammingReadyMelody(),
+	}
+}
+
+// DefaultPowerDownMelody is the deterministic short PC-streamed cue used by
+// guarded programming when the watched host configuration omits its override.
+func DefaultPowerDownMelody() Melody {
+	return Melody{
+		Name: PowerDownMelodyName,
+		Notes: []MelodyNote{
+			{FrequencyHz: 784, DurationMS: 80, GapMS: 25},
+			{FrequencyHz: 659, DurationMS: 90, GapMS: 25},
+			{FrequencyHz: 523, DurationMS: 140},
+		},
+	}
+}
+
+// DefaultProgrammingReadyMelody mirrors the board's short rising startup cue
+// after a programming latch intentionally suppressed the MCU boot melody.
+func DefaultProgrammingReadyMelody() Melody {
+	return Melody{
+		Name: ProgrammingReadyMelodyName,
+		Notes: []MelodyNote{
+			{FrequencyHz: 1032, DurationMS: 70, GapMS: 60},
+			{FrequencyHz: 2010, DurationMS: 70, GapMS: 60},
+			{FrequencyHz: 2400, DurationMS: 120, GapMS: 150},
+		},
 	}
 }
 
@@ -75,20 +105,13 @@ func DefaultStatusLEDEffects() []StatusLEDEffect {
 	}
 }
 
-// Effective* provides useful built-ins for old configuration files that
-// predate these optional fields. A non-empty configured list replaces the
-// built-ins, so a file-watcher reload takes effect on the next play command.
+// Effective* returns the watched configuration exactly. Defaults are written
+// when a new configuration is created; an empty list is an intentional choice.
 func EffectiveMelodies(config Config) []Melody {
-	if len(config.Melodies) == 0 {
-		return DefaultMelodies()
-	}
 	return cloneMelodies(config.Melodies)
 }
 
 func EffectiveStatusLEDEffects(config Config) []StatusLEDEffect {
-	if len(config.StatusEffects) == 0 {
-		return DefaultStatusLEDEffects()
-	}
 	return append([]StatusLEDEffect(nil), config.StatusEffects...)
 }
 

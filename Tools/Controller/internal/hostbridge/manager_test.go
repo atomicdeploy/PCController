@@ -286,9 +286,11 @@ func TestOutboundBridgeCanCallRemoteJSONRPCService(t *testing.T) {
 
 func TestOutboundWebhooksSupportConfiguredHTTPMethods(t *testing.T) {
 	type observedRequest struct {
-		method string
-		body   string
-		kind   string
+		method      string
+		body        string
+		kind        string
+		testHeader  string
+		contentType string
 	}
 	observed := make(chan observedRequest, 5)
 	server := httptest.NewServer(http.HandlerFunc(func(
@@ -299,7 +301,9 @@ func TestOutboundWebhooksSupportConfiguredHTTPMethods(t *testing.T) {
 		_ = request.Body.Close()
 		observed <- observedRequest{
 			method: request.Method, body: string(payload),
-			kind: request.URL.Query().Get("kind"),
+			kind:        request.URL.Query().Get("kind"),
+			testHeader:  request.Header.Get("X-Wire-Test"),
+			contentType: request.Header.Get("Content-Type"),
 		}
 		writer.WriteHeader(http.StatusNoContent)
 	}))
@@ -312,19 +316,31 @@ func TestOutboundWebhooksSupportConfiguredHTTPMethods(t *testing.T) {
 		http.MethodGet, http.MethodPost, http.MethodPut,
 		http.MethodPatch, http.MethodDelete,
 	} {
-		manager.sendWebhook(appconfig.Webhook{
+		webhook := appconfig.Webhook{
 			Name: "test-" + method, URL: server.URL, Method: method,
-		}, event)
+			Headers: map[string]string{"X-Wire-Test": "multi-method"},
+		}
+		if method == http.MethodPatch {
+			webhook.BodyTemplate = `{"event":"{{kind}}","origin":"{{source}}"}`
+		}
+		manager.sendWebhook(webhook, event)
 		select {
 		case request := <-observed:
 			if request.method != method {
 				t.Fatalf("method=%s want=%s", request.method, method)
 			}
+			if request.testHeader != "multi-method" {
+				t.Fatalf("configured header was not delivered: %#v", request)
+			}
 			if method == http.MethodGet || method == http.MethodDelete {
 				if request.kind != "door" || request.body != "" {
 					t.Fatalf("query webhook=%#v", request)
 				}
-			} else if !strings.Contains(request.body, `"kind":"door"`) {
+			} else if request.contentType != "application/json" {
+				t.Fatalf("body webhook content type=%#v", request)
+			} else if method == http.MethodPatch && request.body != `{"event":"door","origin":"board"}` {
+				t.Fatalf("templated webhook=%#v", request)
+			} else if method != http.MethodPatch && !strings.Contains(request.body, `"kind":"door"`) {
 				t.Fatalf("body webhook=%#v", request)
 			}
 		case <-time.After(time.Second):

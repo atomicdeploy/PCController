@@ -1,3 +1,5 @@
+<div align="center"><a href="../README.md"><img src="assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Host Configuration and Integrations
 
 The Go host is the serial owner, user interface, automation engine, programmer
@@ -20,7 +22,7 @@ There are two independent persistence domains:
 
 | Owner | Stored data | Storage |
 |---|---|---|
-| AVR firmware | sound, display/light/PWM options, menu default, motion-door policy, RF records, reset telemetry, and supported board automations | ATmega328P EEPROM |
+| AVR firmware | sound, display/light/PWM options, menu default, motion-door policy, RF records/mappings, and reset telemetry | ATmega328P EEPROM |
 | PC host | USB selection, TUI appearance, histories, network endpoints, hotkeys, notifications, webhooks, PC macros/scripts/automations, and programmer paths | JSON, YAML, or TOML file |
 
 Editing the host file never silently copies its values into EEPROM. Board
@@ -101,6 +103,22 @@ The TUI is organized by task instead of hiding everything in one prompt:
 - Board and App Settings for the two persistence domains;
 - RF, Programming, Automation, Events/Graphs, and Console pages.
 
+Control, Board Settings, App Settings, and history use the Charm table widget
+with rounded borders, terminal-cell-aware padding, and centered column headers.
+PWM levels are presented as percentages; the raw 12-bit transport value is not
+part of the operator-facing control table. Press `E` on Events/Graphs (or click
+the graph card) to switch between compact and full-width history.
+
+Board and App rows are bound to stable semantic keys rather than duplicated
+numeric indexes. `Enter` opens an isolated modal draft, `Up`/`Down` selects a
+field, `Left`/`Right` changes it with rollover, `Home`/`End` selects a range
+boundary, `Enter` confirms, and `Esc` discards without writing. Decimal
+precision and related visibility options are grouped into one multi-field
+editor. Brightness uses 0–100% sliders where the underlying setting permits it.
+Every status-LED state has its own effect, primary/alternate RGB, brightness,
+minimum, and period editor with a live terminal color preview. The fixed sensor
+role assignment is intentionally absent from daily settings.
+
 Mouse and keyboard actions share the same command path. Remote key injection
 must include down/up/gesture semantics rather than merely changing a local
 preview. The firmware snapshot capability determines whether raw segment bytes
@@ -130,6 +148,32 @@ automations, host menus, global hotkeys, notifications, integration managers,
 and the same guarded command dispatcher. `--no-open` keeps that process and
 HTTP service running without opening a browser.
 
+On Windows, that primary-owning process starts a native tray menu unless
+`--no-tray` is supplied. It shows authoritative connected, reconnecting,
+paused, or offline state. Dashboard, Controls, Workbench, Updates, and Settings
+links are present only for an authenticated controller; Connect/Reconnect and
+Exit remain available otherwise. State is checked again at dispatch, so a
+disconnect while the menu is open cannot launch a stale page.
+
+The same hidden native window receives Windows session lock/unlock and power
+suspend/resume notifications. A bounded network-state monitor emits only real
+interface/address signature changes. These become typed
+`host.session.*`, `host.power.*`, and `host.network.changed` runtime events,
+so the WebSocket event stream, Activity page, tab channel, and ordinary event
+automation rules observe one shared transition rather than polling UI state.
+Network metadata contains only a one-way state signature and aggregate counts,
+not adapter names, addresses, or hardware identifiers.
+
+Lock and suspend are hardware safety transitions, not status-only notices. The
+host first applies the validated `integrations.lifecycle_safety` policy under a
+bounded deadline, then clears ordinary-key presses and keyboard-owned latches.
+The safe default is `stop-motion` for both transitions; `all-off` uses the
+firmware's atomic all-relays-off command, while `leave` still releases held
+keyboard ownership. `refresh_on_resume` refreshes live telemetry or re-arms
+discovery after unlock, resume, and network change, but never cancels a manual
+connection pause. The same settings are editable on the responsive Settings
+page and persisted through the authenticated host-config RPC.
+
 The embedded responsive app includes the live dashboard and graphs, direct
 relay/motion/PWM controls, an advanced peripheral workbench, Activity history,
 local-device and loopback-data workspaces, and PC/board settings. Commands from
@@ -138,6 +182,12 @@ board, host, and global page-action events return over the persistent
 WebSocket. Incoming event lines also appear in the bounded terminal transcript,
 so command and event traffic remain visible together without losing the full
 filterable timeline.
+
+Supported browsers may install this same URL as a standalone desktop or mobile
+app. The manifest includes shortcuts to Overview, Workbench, Activity, and
+Settings. The worker is intentionally network-only and stores no offline
+responses; it must expose host shutdown or loss of the loopback service rather
+than presenting stale controls.
 
 System-wide hotkeys remain registered in web-only mode. A validated
 `app.page` action is delivered to the TUI queue when one exists and independently
@@ -176,6 +226,15 @@ MCU acknowledgement timestamps, not variable USB/network arrival time. Macro
 definitions remain PC configuration; only the active timing queue occupies AVR
 RAM. The deterministic preview contains a safe representative library for UI
 inspection and never opens serial.
+
+The same library is now available as the default HOST-presented physical
+`MACR` submenu. Its selector is rebuilt from the watched macro array and sorted
+by ID without copying macro definitions into EEPROM or AVR flash. Nested `REC`
+and `RUN` pages expose recording start/status/save/discard, playback
+status/progress, safe cancel, and a guarded keep-output cancel. The TUI Menus
+page and embedded web workbench open and drive this exact shared menu manager,
+so their four virtual keys preview the same TM1637/LCD text and actions as the
+physical keys.
 
 ## Global hotkeys
 
@@ -231,7 +290,7 @@ The bundled Persian UI uses the unmodified Vazirmatn font under OFL-1.1.
 
 ## Guarded system actions and monitor brightness
 
-The PC-owned `SYS` front-panel submenu exposes Monitor Brightness (`BRIT`),
+The HOST `SYS` front-panel submenu exposes Monitor Brightness (`BRIT`),
 Lock, Suspend, Hibernate, Restart, and Shut down. No firmware bytes or MCU
 EEPROM are used for these items. Power requests require the two-step/hold menu
 guard, `os_actions.power.enabled`, an allow-listed action, and the configured
@@ -239,7 +298,10 @@ confirmation token. The power policy is disabled by default; its default
 allow-list is only Lock, Suspend/Sleep, and Hibernate, so enabling the policy
 does not silently permit Restart or Shut down.
 
-Brightness uses the Win32 DDC/CI physical-monitor APIs on the primary display.
+Brightness first uses the Win32 DDC/CI physical-monitor APIs for an external
+primary display, then falls back to native `root\\WMI` laptop-panel methods.
+Responses identify `ddc-ci` versus `wmi-laptop` and whether the selected panel
+is integrated. No PowerShell process is involved.
 Reads are harmless and always permitted; writes require
 `os_actions.brightness.enabled` and the configured `min_percent..max_percent`
 range, which defaults to 0..100. Laptop panels, docks, adapters, and monitor
@@ -261,6 +323,41 @@ All accepted/denied brightness and power attempts publish host events. Because
 the manager reads the current Store value on every action, JSON/YAML/TOML file
 watcher changes apply immediately to CLI, TUI/front-panel, IPC, and WebSocket
 callers. The default remains deny-safe.
+
+### Read-only Windows host facts
+
+Windows builds also provide a fixed diagnostic catalog through `os facts`.
+Profiles are limited to `system`, `computer`, `firmware`, `storage`, and
+`serial`; `os facts list` returns their descriptors. JSON-RPC exposes the same
+provider as `controller.os.facts` and `controller.host.facts`, and REST exposes
+`GET /api/v1/os/facts?profile=...` under the ordinary `read` capability.
+
+This is not a general query console. Callers cannot supply WQL, choose an
+arbitrary class/column, invoke a method, or write system state. The provider
+uses fixed columns and row limits, 512-byte cells, a 64 KiB response ceiling,
+100–5000 ms RPC deadlines, one serialized worker, and a five-second private
+cache. Unsupported platforms return an explicit unavailable result. Serial
+facts are diagnostic context only; Controller's native port discovery and
+HELLO authentication remain authoritative for device selection.
+
+### Windows serial inventory drift
+
+The shipped host enumerates the live Windows **Ports** device class through
+SetupAPI with `DIGCF_PRESENT`, then enriches each result from the Plug-and-Play
+registry and validates its instance through Configuration Manager. It does not
+use `Win32_SerialPort` as its device authority. On the current development
+machine, the legacy WMI class returns only the built-in `COM1`, while this
+present-device path returns both CH340 adapters on `COM18` and `COM19` with
+VID `1A86`, PID `7523`, friendly name, and PnP instance IDs. That difference is
+a provider-coverage limitation, not evidence that the USB serial ports are
+absent.
+
+Use `controller ports` for deployment decisions. A WMI/CIM inventory may still
+be shown as diagnostic context, but it must never veto a port found by the
+native enumerator. Selection then applies the configured COM/friendly-name,
+VID/PID, serial-number, or instance-ID filters and authenticates the application
+with `HELLO` before treating it as a controller. Regression coverage preserves
+USB entries even when a secondary WMI-shaped inventory contains only `COM1`.
 
 ## Desktop notifications
 
@@ -295,7 +392,7 @@ messages, board commands, host configuration, port control, reset,
 programming, shutdown, virtual keys, power/display actions, bridge calls, and
 configured host-automation execution are independently opt-in. Remote
 programming also requires connection-control permission. Every denied or authorized mutating attempt is source-tagged in
-the host timeline, and generic `controller.execute` commands are classified so
+the host timeline, and generic `controller.command.execute` commands are classified so
 they cannot bypass a narrower gate.
 
 The exact methods, routes, frames, Socket.IO subset, and examples are in
@@ -340,6 +437,14 @@ packets, and Socket.IO events for `subscribe`, `unsubscribe`, `message`,
 `command`, and `rpc`. Long-polling, namespaces, rooms, binary attachments, and
 the broader Socket.IO ecosystem API are outside this bounded adapter.
 
+Loopback interoperability tests use package-independent raw RFC 6455 clients
+and servers rather than the production WebSocket library on both ends. They
+exercise standard and Socket.IO server/client roles, authentication, frame
+masking, correlation, subscriptions, typed message provenance, and Engine.IO
+open/connect/ping/pong. Outbound webhook tests deliver every supported method
+to an independent HTTP server. Cross-machine firewall/TLS commissioning and
+physical-device programming remain explicit deployment checks.
+
 ## Typed, actionable text messages
 
 The common envelope is:
@@ -380,26 +485,31 @@ as its key. Names such as “Side A Up”, categories, colors, notes, and search
 tags belong to PC configuration; the MCU retains only the compact learned
 record and action mapping it needs offline.
 
-The required RF editor will use one host display-format option for hexadecimal
-or decimal values everywhere and a searchable action picker. Reordering must
-be an explicit read/propose/write/read-back transaction that preserves tuple-
-keyed metadata. At this documentation checkpoint these presentation, search,
-and reorder tools remain acceptance work; the current learn/list/map/remove
-commands are the fallback. See the RF section of the
-[Project Checklist](Project-Checklist.md) before relying on record-ID order.
+The host uses one `rf.display_radix` compatibility key for hexadecimal or
+decimal presentation; user interfaces label it **View In**. The native
+organizer provides tuple-aware search and a
+searchable action picker. Reordering is an explicit
+read/propose/write/read-back transaction, is capability-gated, and attempts to
+restore the original snapshot if verification fails. CLI and browser workbench
+learn/list/map/remove commands remain available without relying on record-ID
+order. See [Project Acceptance](Project-Checklist.md) before using reordered
+records on physical outputs.
 
 ## Programming data, backups, and current settings transfer
 
-The existing host can coordinate Arduino CLI, AVRDUDE/Urclock, USBasp recovery,
-and explicit flash/EEPROM backups. The final durable workflow has stricter
-acceptance requirements that are not yet all complete:
+The host coordinates firmware compile, Urboot/Urclock programming, explicitly
+selected ISP recovery, host self-update, and flash/EEPROM artifacts through
+one guarded lifecycle:
 
 - every ordinary compile/flash operation is initiated by the host UI/API;
-- before a write, Urclock captures flash and EEPROM into the host data
-  directory; a hidden advanced USBasp fallback is used only when bootloader
-  access cannot work;
+- before a write, the primary captures flash and EEPROM into the host data
+  directory; ISP is offered only after the ordinary bootloader route is
+  unavailable and the operator selects it explicitly;
 - a failed backup blocks programming unless the operator gives an explicit,
   logged override;
+- an explicit `reinitialize_eeprom` firmware-update request is forwarded from
+  a secondary client to the primary and is mutually exclusive with that backup
+  override; it is a development data-loss exception, not migration;
 - live settings export is distinct from parsing an offline EEPROM image;
 - named Intel HEX regions can be inspected and boundedly patched with checksum,
   address, before/after SHA-256, retained-original, and read-back verification;
@@ -416,6 +526,15 @@ code. The file-only tools accept the current unversioned semantic settings
 record, require a complete validated raw-backup manifest, and reject every
 other width/layout explicitly:
 
+For a connected unpublished development board whose settings response has an
+obsolete width, `controller program flash ... --reinitialize-eeprom` first
+retains the untouched raw EEPROM in the mandatory backup, then accepts only the
+new firmware's current response. The primary reports the old query error,
+leaves outputs off, makes the new settings audible, verifies them, and does not
+restore old semantic values. See
+[Toolchain and Safe Programming](Toolchain-and-Safe-Programming.md#development-eeprom-reinitialization)
+for the exact command and recovery behavior.
+
 ```console
 Tools\Controller\bin\controller.exe eeprom inspect --backup-manifest BACKUP\manifest.json
 Tools\Controller\bin\controller.exe eeprom export --backup-manifest BACKUP\manifest.json --output SETTINGS.hex
@@ -423,8 +542,8 @@ Tools\Controller\bin\controller.exe eeprom import --backup-manifest BACKUP\manif
 Tools\Controller\bin\controller.exe eeprom restore --backup-manifest BACKUP\manifest.json --output EEPROM-ORIGINAL.hex
 ```
 
-The current settings artifact is exactly 29 value bytes plus CRC-8 at EEPROM
-addresses `0x0020..0x003D`. Export emits only that sparse region. Import
+The current settings artifact is exactly 31 value bytes plus CRC-8 at EEPROM
+addresses `0x0020..0x003E`. Export emits only that sparse region. Import
 overlays it on the validated 1,024-byte backup so RF records, reset journal,
 and every unknown byte remain unchanged; restore reproduces the original full
 EEPROM image. Outputs are hashed and never overwritten. These commands do not
@@ -441,8 +560,15 @@ subscriber leaves, polling stops without closing UART.
 
 Display visibility and precision are PC settings. Values use adaptive SI units,
 and age text is hidden for samples newer than 500 ms to avoid a distracting
-`0/100/200 ms` cycle. Status history defaults to 24 hours; important events are
-also written to a bounded timeline file for review after the TUI restarts.
+`0/100/200 ms` cycle. Status history defaults to one sample per second retained
+for 24 hours. Samples survive host restarts in the private, compact
+`measurements.jsonl` file in the host data directory; startup removes expired,
+duplicate, and incomplete-tail records before the existing history APIs serve
+them. The file contains timestamps and board measurements only, uses owner-only
+permissions, is atomically compacted, and cannot grow past 32 MiB. A shorter
+retention can be selected with `ui.history_hours`; `0` disables and clears
+measurement retention. Important events remain separate in the bounded
+`timeline.jsonl` file so telemetry volume cannot obscure the event timeline.
 
 ## Commissioning boundaries
 
@@ -451,4 +577,4 @@ mock TUI rendering, and network framing. They cannot prove that Windows toast
 registration survived installation, multicast crosses the current network,
 COM18 reconnects without an adapter-specific reset, or a real LCD/RF/relay load
 behaves correctly. Keep those items as hardware/platform validation in the
-[Project Checklist](Project-Checklist.md) until observed on the target system.
+[Project Acceptance](Project-Checklist.md) until observed on the target system.

@@ -146,22 +146,6 @@ bool RemoteLearningStore::replace(const LearnedRemote &remote) {
   return true;
 }
 
-bool RemoteLearningStore::map(uint8_t id, RemoteActionKind kind,
-                              uint8_t value, RemoteBehavior behavior) {
-  if (!validMapping(kind, value, behavior)) {
-    return false;
-  }
-  Record record;
-  if (!readRecord(id, record)) {
-    return false;
-  }
-  record.actionKind = static_cast<uint8_t>(kind);
-  record.actionValue = value;
-  record.behavior = static_cast<uint8_t>(behavior);
-  writeRecord(id, record);
-  return true;
-}
-
 bool RemoteLearningStore::readRecord(uint8_t id, Record &record) const {
   if (id >= Capacity) {
     return false;
@@ -188,6 +172,8 @@ void RemoteLearningStore::writeRecord(uint8_t id, Record &record) {
 bool RemoteLearningStore::validMapping(RemoteActionKind kind,
                                        uint8_t value,
                                        RemoteBehavior behavior) {
+  // Exclusive limits indexed by RemoteActionKind: None, Key, Menu, Relay,
+  // Side, and Pwm. None is accepted separately below and does not use its zero.
   static const uint8_t ValueLimits[] = {0, 4, 4, 8, 2, 11};
   const uint8_t kindValue = static_cast<uint8_t>(kind);
   if (kindValue > static_cast<uint8_t>(RemoteActionKind::Pwm) ||

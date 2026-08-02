@@ -5,8 +5,12 @@
 
 #include "../ProjectConfig.h"
 #include "EepromLayout.h"
+#include "MotionDoorPolicy.h"
 
-constexpr uint8_t PersistentMenuPageCount = 15;
+// Persistent built-in menu geometry; stable page IDs are packed two per byte.
+constexpr uint8_t PersistentMenuPageCount = 14;
+constexpr uint8_t PersistentMenuOrderWireBytes =
+    (PersistentMenuPageCount + 1U) / 2U;
 constexpr uint16_t PersistentMenuAllPagesMask =
     static_cast<uint16_t>((1UL << PersistentMenuPageCount) - 1UL);
 
@@ -17,16 +21,11 @@ uint8_t firstVisiblePersistentMenuPage(uint16_t visibleMask,
                                        const uint8_t *packedOrder);
 #endif
 
-enum class MotionDoorPolicy : uint8_t {
-  Always = 0,
-  ClosedOnly,
-  OpenOnly,
-  Never,
-};
-
 namespace SettingsFlags {
 constexpr uint8_t Silent = 1U << 0;
-constexpr uint8_t Reserved1 = 1U << 1;
+// Host-managed programming latch: survives every reset in the current EEPROM
+// record without changing the user's persistent Silent preference.
+constexpr uint8_t ProgrammingMode = 1U << 1;
 constexpr uint8_t SwapTemperatureSensors = 1U << 2;
 constexpr uint8_t MotionDoorPolicyMask = 3U << 3;
 constexpr uint8_t MotionDoorPolicyShift = 3;
@@ -34,9 +33,6 @@ constexpr uint8_t MotionDoorPolicyShift = 3;
 // still allowing each cue family to be independently muted.
 constexpr uint8_t DoorAudioDisabled = 1U << 5;
 constexpr uint8_t RelayAudioDisabled = 1U << 6;
-// Clear selects the compact 1 ms default; set selects a conservative 100 ms.
-// Direction settling and cross-side interlock timings remain independent.
-constexpr uint8_t ExtendedMotionBreak = 1U << 7;
 } // namespace SettingsFlags
 
 namespace MenuSettingsFlags {
@@ -59,6 +55,23 @@ inline uint8_t encodeDecimals(uint8_t value) {
 }
 } // namespace MenuSettingsFlags
 
+namespace DisplayOptions {
+constexpr uint8_t ClosedBrightnessMask = 0x07U;
+constexpr uint8_t MotionExitSecondsShift = 3;
+constexpr uint8_t DefaultMotionExitSeconds = 2;
+} // namespace DisplayOptions
+
+namespace OutputPersistence {
+constexpr uint8_t RememberMotion = 1U << 0;
+constexpr uint8_t RememberUserRelays = 1U << 1;
+constexpr uint8_t RememberUserPwm = 1U << 2;
+constexpr uint8_t RetainDirectionOnStop = 1U << 3;
+constexpr uint8_t AllowedMask = RememberMotion | RememberUserRelays |
+                                RememberUserPwm | RetainDirectionOnStop;
+constexpr uint8_t Defaults = RememberUserRelays | RememberUserPwm;
+} // namespace OutputPersistence
+
+// ControllerSettings is the packed MCU-owned EEPROM and native settings record.
 struct ControllerSettings {
   // Core flags and illumination/display boot values use their native 8-bit units.
   uint8_t flags;
@@ -67,7 +80,8 @@ struct ControllerSettings {
   uint8_t illuminationOffBrightness;
   uint8_t displayBrightness;
   uint8_t statusBrightness;
-  uint8_t pwmBootMode;
+  // Independent restore/stop policies replace the removed PWM demo mode.
+  uint8_t outputPersistence;
   // Periodic native telemetry interval in milliseconds; zero disables streaming.
   uint16_t streamPeriodMs;
   // Persistent channels 0..7 use 0..255 and expand to 12-bit PWM at runtime.
@@ -81,8 +95,15 @@ struct ControllerSettings {
 #endif
 #if PCCONTROLLER_MENU_ORDERING
   // Two stable page IDs per byte, low nibble first; rank is the wire order.
-  uint8_t menuOrder[8];
+  uint8_t menuOrder[PersistentMenuOrderWireBytes];
 #endif
+  // Low three bits are the closed-door TM1637 target; high five bits persist
+  // the motion-page two-key exit hold in seconds (zero encodes the 2 s default).
+  uint8_t displayOptions;
+  // Last applied R1..R8 mask; restore flags decide which domains may use it.
+  uint8_t relayRestoreMask;
+  // Exact 1..255 ms disable-to-direction interval; factory value is 1 ms.
+  uint8_t motionBreakMs;
 
   bool silent() const { return (flags & SettingsFlags::Silent) != 0; }
   void setSilent(bool value) {
@@ -91,6 +112,34 @@ struct ControllerSettings {
     } else {
       flags &= static_cast<uint8_t>(~SettingsFlags::Silent);
     }
+  }
+  bool programmingMode() const {
+    return (flags & SettingsFlags::ProgrammingMode) != 0;
+  }
+  uint8_t displayClosedBrightness() const {
+    return displayOptions & DisplayOptions::ClosedBrightnessMask;
+  }
+  void setDisplayClosedBrightness(uint8_t value) {
+    displayOptions = static_cast<uint8_t>(
+        (displayOptions & ~DisplayOptions::ClosedBrightnessMask) |
+        (value & DisplayOptions::ClosedBrightnessMask));
+  }
+  uint8_t motionExitHoldSeconds() const {
+    const uint8_t encoded = displayOptions >>
+                            DisplayOptions::MotionExitSecondsShift;
+    return encoded == 0 ? DisplayOptions::DefaultMotionExitSeconds : encoded;
+  }
+  bool rememberMotion() const {
+    return (outputPersistence & OutputPersistence::RememberMotion) != 0;
+  }
+  bool rememberUserRelays() const {
+    return (outputPersistence & OutputPersistence::RememberUserRelays) != 0;
+  }
+  bool rememberUserPwm() const {
+    return (outputPersistence & OutputPersistence::RememberUserPwm) != 0;
+  }
+  bool retainDirectionOnStop() const {
+    return (outputPersistence & OutputPersistence::RetainDirectionOnStop) != 0;
   }
   bool swapTemperatureSensors() const {
     return (flags & SettingsFlags::SwapTemperatureSensors) != 0;
@@ -121,14 +170,10 @@ struct ControllerSettings {
     return (flags & SettingsFlags::RelayAudioDisabled) == 0;
   }
   uint8_t motionBreakBeforeDirectionMs() const {
-    return (flags & SettingsFlags::ExtendedMotionBreak) != 0 ? 100 : 1;
+    return motionBreakMs;
   }
-  void setExtendedMotionBreak(bool value) {
-    if (value) {
-      flags |= SettingsFlags::ExtendedMotionBreak;
-    } else {
-      flags &= static_cast<uint8_t>(~SettingsFlags::ExtendedMotionBreak);
-    }
+  void setMotionBreakBeforeDirectionMs(uint8_t value) {
+    motionBreakMs = value;
   }
   bool saveLastMenuPage() const {
     return (menuFlags & MenuSettingsFlags::SaveLastPage) != 0;
@@ -196,13 +241,13 @@ static_assert(offsetof(ControllerSettings, streamPeriodMs) ==
                   ControllerSettingsPrefixSize,
               "Controller settings prefix layout changed");
 #if PCCONTROLLER_MENU_ORDERING
-static_assert(sizeof(ControllerSettings) == 29,
+static_assert(sizeof(ControllerSettings) == 31,
               "Packed menu order changed AVR EEPROM/RAM layout");
 #elif PCCONTROLLER_MENU_VISIBILITY
-static_assert(sizeof(ControllerSettings) == 21,
+static_assert(sizeof(ControllerSettings) == 24,
               "Visible menu mask changed AVR EEPROM/RAM layout");
 #else
-static_assert(sizeof(ControllerSettings) == 19,
+static_assert(sizeof(ControllerSettings) == 22,
               "Controller settings AVR layout changed");
 #endif
 
@@ -234,4 +279,5 @@ private:
   bool dirty_ = false;
 };
 
+// settingsStore is the single MCU EEPROM settings owner.
 extern SettingsStore settingsStore;

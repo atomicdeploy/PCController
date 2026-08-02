@@ -33,10 +33,12 @@ type StreamOperation struct {
 }
 
 type OutputStreamState struct {
-	MelodyID   uint64
-	MelodyName string
-	EffectID   uint64
-	EffectName string
+	MelodyID       uint64  `json:"melody_id,omitempty"`
+	MelodyName     string  `json:"melody_name,omitempty"`
+	EffectID       uint64  `json:"effect_id,omitempty"`
+	EffectName     string  `json:"effect_name,omitempty"`
+	StatusBase     [4]byte `json:"status_base"`
+	HaveStatusBase bool    `json:"have_status_base"`
 }
 
 type runningOutput struct {
@@ -98,6 +100,8 @@ func (scheduler *OutputScheduler) State() OutputStreamState {
 		state.EffectID = scheduler.effect.id
 		state.EffectName = scheduler.effect.name
 	}
+	state.StatusBase = scheduler.statusBase
+	state.HaveStatusBase = scheduler.haveStatusBase
 	return state
 }
 
@@ -147,9 +151,9 @@ func (scheduler *OutputScheduler) StartMelody(
 	if err := appconfig.ValidateMelody(melody); err != nil {
 		return StreamOperation{}, err
 	}
-	if repeats < 1 || repeats > maxMelodyRepeats {
+	if repeats < 0 || repeats > maxMelodyRepeats {
 		return StreamOperation{}, fmt.Errorf(
-			"melody repeats must be 1..%d",
+			"melody repeats must be 0 (until stopped) or 1..%d",
 			maxMelodyRepeats,
 		)
 	}
@@ -393,7 +397,7 @@ func (scheduler *OutputScheduler) streamMelody(
 	melody appconfig.Melody,
 	repeats int,
 ) error {
-	for repeat := 0; repeat < repeats; repeat++ {
+	for repeat := 0; repeats == 0 || repeat < repeats; repeat++ {
 		for _, note := range melody.Notes {
 			if err := scheduler.send(
 				ctx,

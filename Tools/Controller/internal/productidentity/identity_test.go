@@ -13,6 +13,7 @@ func TestGeneratedIdentityMatchesCanonicalPackageMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	var metadata struct {
+		Version                string `json:"version"`
 		ProductName            string `json:"productName"`
 		ProductShortName       string `json:"productShortName"`
 		ProductTagline         string `json:"productTagline"`
@@ -25,11 +26,13 @@ func TestGeneratedIdentityMatchesCanonicalPackageMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		metadata.Version,
 		metadata.ProductName, metadata.ProductShortName, metadata.ProductTagline,
 		metadata.Description, metadata.ProductAppID, metadata.ProductProtocol,
 		metadata.ProductConfigDirectory,
 	}
 	got := []string{
+		Version,
 		DefaultTitle, ShortName, Tagline, Description, StableAppID,
 		ProtocolScheme, ConfigDirectory,
 	}
@@ -47,6 +50,7 @@ func TestWin32ResourcesMatchCanonicalPackageMetadata(t *testing.T) {
 	}
 	var metadata struct {
 		ProductName string `json:"productName"`
+		Version     string `json:"version"`
 	}
 	if err := json.Unmarshal(content, &metadata); err != nil {
 		t.Fatal(err)
@@ -70,7 +74,9 @@ func TestWin32ResourcesMatchCanonicalPackageMetadata(t *testing.T) {
 	info := resources.Version["#1"]["0409"].Info["0409"]
 	if manifest != metadata.ProductName+" host utility" ||
 		info["FileDescription"] != metadata.ProductName+" Host" ||
-		info["ProductName"] != metadata.ProductName {
+		info["ProductName"] != metadata.ProductName ||
+		info["FileVersion"] != metadata.Version ||
+		info["ProductVersion"] != metadata.Version {
 		t.Fatalf("Win32 resources drifted: manifest=%q info=%#v", manifest, info)
 	}
 }

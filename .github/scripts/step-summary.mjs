@@ -11,6 +11,7 @@ import {
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
+import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const productName = PRODUCT_METADATA.productName;
@@ -56,9 +57,8 @@ const archiveDetails = (path) => {
     sha256: hashFile(resolved),
   };
 };
-const repositoryUrl = process.env.GITHUB_REPOSITORY
-  ? `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${process.env.GITHUB_REPOSITORY}`
-  : "https://github.com/atomicdeploy/PCController";
+const repository = resolveRepository(process.env, { cwd: root });
+const repositoryUrl = repositoryWebUrl(repository, process.env);
 const runUrl = process.env.GITHUB_RUN_ID
   ? `${repositoryUrl}/actions/runs/${process.env.GITHUB_RUN_ID}`
   : repositoryUrl;
@@ -88,11 +88,12 @@ const friendlyRole = (role) =>
   ({
     application: "Application image (normal Urclock upload)",
     eeprom: "EEPROM image",
+    "default-eeprom": "Safe default EEPROM (1 KiB)",
     "flash+bootloader": "Full flash + Urboot (ISP recovery only)",
   })[role] || role;
 const provenanceCommand = (archiveName) =>
   releaseBuild
-    ? `gh attestation verify ${archiveName} --repo ${process.env.GITHUB_REPOSITORY || "atomicdeploy/PCController"}`
+    ? `gh attestation verify ${archiveName} --repo ${repository}`
     : "# GitHub provenance is attached only when this package is promoted by the Release workflow.";
 const verificationBlock = (target, archiveName) => {
   const provenance = provenanceCommand(archiveName);
@@ -157,10 +158,6 @@ if (kind === "firmware") {
     .map((item) => `| ${escape(item.name)} | ${code(item.function)} | ${number(item.bytes)} B | ${escape(item.qualifier)} |`)
     .join("\n");
   const headroom = Number(application?.freeBytes || 0);
-  const aliasNote =
-    String(process.env.PCCONTROLLER_SHOWCASE_ALIAS || "").toLowerCase() === "true"
-      ? `\n> Compatibility preserved: the flagship ${code("Build")} workflow also publishes this curated flat payload under the exact inspiration artifact name ${code("firmware")}.\n`
-      : "";
   const flashNotice = headroom < 256
     ? `> [!WARNING]\n> **Only ${number(headroom)} application-flash bytes remain.** The build passed the exact ${number(application?.capacityBytes)}-byte Urboot boundary, but new AVR features require deliberate budget trade-offs.`
     : `> [!NOTE]\n> ${number(headroom)} application-flash bytes remain.`;
@@ -171,7 +168,6 @@ if (kind === "firmware") {
 The real ATmega328P firmware compiled, its Intel HEX records and address boundaries were revalidated, the conservative SRAM/stack budget passed, and the downloadable package was hashed.
 
 ${artifactCta(artifactUrl, `${productName} Firmware · ATmega328P`)}
-${aliasNote}
 
 ## 📦 Project information
 
@@ -284,6 +280,13 @@ Built by [${escape(productName)} Actions](${runUrl}) · source [${shortCommit}](
   const artifacts = (manifest.artifacts || [])
     .map((artifact) => `| ${code(artifact.path)} | ${bytes(artifact.bytes)} | ${code(artifact.sha256)} |`)
     .join("\n");
+  const defaults = manifest.validation?.embeddedDefaults || {};
+  const firmwareDefault = defaults.firmwareEnabled === true
+    ? `✅ enabled · ${code(defaults.firmwareSHA256)}`
+    : "❌ disabled";
+  const eepromDefault = defaults.eepromEnabled === true
+    ? `✅ enabled · ${number(defaults.eepromDataBytes)} B · ${code(defaults.eepromSHA256)}`
+    : "❌ disabled";
   emit(`
 # ✅ ${escape(productName)} Controller build successful
 
@@ -311,6 +314,8 @@ ${artifactCta(artifactUrl, `Controller · ${target}`)}
 | Go vet | ✅ ${escape(manifest.validation?.vet)} |
 | C ABI shared library | ✅ ${escape(manifest.validation?.sharedLibrary)} |
 | Native resources | ✅ ${escape(manifest.validation?.windowsResources || "not applicable")} |
+| Embedded firmware default | ${firmwareDefault} |
+| Embedded EEPROM default | ${eepromDefault} |
 
 <details>
 <summary><strong>📦 Packaged files and hashes</strong></summary>
@@ -443,7 +448,7 @@ Flash ${bar(flashPercent)}
 SRAM  ${bar(peakPercent)}
 ~~~
 
-The AVR result is its own hardware target—not a Linux binary. Both normal-upload and full-flash recovery images, resolved dependencies, and the firmware manifest are in the flat ${code("PCController-Firmware-ATmega328P")} artifact. The identical flat payload is also published as ${code("firmware")}, preserving the ASA0002E inspiration's exact workflow/job/artifact naming contract: ${code("Build")} / ${code("build")} / ${code("firmware")}.
+The AVR result is its own hardware target—not a Linux binary. Both normal-upload and full-flash recovery images, resolved dependencies, and the firmware manifest are in the ${code("PCController-Firmware-ATmega328P")} artifact.
 
 ## 🌍 Native platform coverage
 

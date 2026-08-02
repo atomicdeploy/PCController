@@ -8,8 +8,23 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/native"
 )
+
+type fixedHostFactsProvider struct {
+	profile string
+}
+
+func (provider *fixedHostFactsProvider) Query(_ context.Context, profile string) (hostfacts.Result, error) {
+	provider.profile = profile
+	return hostfacts.Result{
+		Profile: "system", Class: "Win32_OperatingSystem", Source: "wmi",
+		Columns:     []string{"Caption", "BuildNumber"},
+		Rows:        []map[string]any{{"Caption": "Windows", "BuildNumber": "26100"}},
+		CollectedAt: time.Unix(1, 0).UTC(), DurationMS: 7,
+	}, nil
+}
 
 func TestDecodeHexAndStatusFormatting(t *testing.T) {
 	decoded, err := decodeHex("A5:01-00_ff")
@@ -70,64 +85,44 @@ func TestParseBool(t *testing.T) {
 	}
 }
 
-func TestSettingsSetFormsPreserveAndReplaceExtendedFields(t *testing.T) {
-	current := native.Settings{
-		DefaultPage:   4,
-		ExtendedFlags: 0xDB,
-	}
-	compact, err := settingsFromSetArgs(current, []string{
-		"set", "1", "2", "255", "0", "7", "80", "2", "250",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if compact.DefaultPage != current.DefaultPage ||
-		compact.ExtendedFlags != current.ExtendedFlags {
-		t.Fatalf(
-			"compact set erased extended fields: got %#v want page=%d flags=0x%02X",
-			compact,
-			current.DefaultPage,
-			current.ExtendedFlags,
-		)
-	}
-
-	previousExtended, err := settingsFromSetArgs(current, []string{
-		"set", "1", "2", "255", "0", "7", "80", "2", "250",
-		"9", "false",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if previousExtended.DefaultPage != 9 ||
-		previousExtended.ExtendedFlags != current.ExtendedFlags&^1 {
-		t.Fatalf(
-			"11-argument set did not preserve bits 1..7: %#v",
-			previousExtended,
-		)
-	}
-
-	full, err := settingsFromSetArgs(current, []string{
-		"set", "1", "2", "255", "0", "7", "80", "2", "250",
-		"9", "true", "3", "1", "0",
+func TestSettingsSetAcceptsOnlyCurrentCompleteForm(t *testing.T) {
+	full, err := settingsFromSetArgs([]string{
+		"set", "1", "2", "255", "0", "7", "0", "80", "2", "250",
+		"9", "true", "3", "1", "0", "9", "37", "240",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if full.DefaultPage != 9 || !full.SaveLastPage() ||
+		full.DisplayBrightness != 7 || full.DisplayClosedBrightness != 0 ||
 		full.StatusColor() != 3 || full.VoltageDecimals() != 1 ||
-		full.CurrentDecimals() != 0 || full.ExtendedFlags != 0x67 {
+		full.CurrentDecimals() != 0 || full.MotionExitHoldSeconds != 9 ||
+		full.MotionBreakMS() != 37 ||
+		full.OutputPersistence != 2 || full.RelayRestoreMask != 0xF0 ||
+		full.ExtendedFlags != 0x67 {
 		t.Fatalf("full extended set = %#v", full)
 	}
-	if _, err := settingsFromSetArgs(current, []string{
-		"set", "1", "2", "255", "0", "7", "80", "2", "250",
-		"9", "true", "3", "1", "3",
+	if _, err := settingsFromSetArgs([]string{
+		"set", "1", "2", "255", "0", "7", "0", "80", "2", "250",
+		"9", "true", "3", "1", "3", "9", "37", "240",
 	}); err == nil {
 		t.Fatal("expected out-of-range current decimals error")
+	}
+	if _, err := settingsFromSetArgs([]string{
+		"set", "1", "2", "255", "0", "7", "80", "2", "250",
+	}); err == nil {
+		t.Fatal("retired partial settings form was accepted")
 	}
 }
 
 func TestFormatSettingsIncludesDecodedExtendedFields(t *testing.T) {
-	settings := native.Settings{ExtendedFlags: native.SettingsSaveLastPage}
+	settings := native.Settings{
+		ExtendedFlags:         native.SettingsSaveLastPage,
+		MotionExitHoldSeconds: 9,
+		OutputPersistence:     native.OutputPersistUserPWM,
+		RelayRestoreMask:      0xF0,
+		MotionBreakMSValue:    37,
+	}
 	if err := settings.SetStatusColor(4); err != nil {
 		t.Fatal(err)
 	}
@@ -139,14 +134,40 @@ func TestFormatSettingsIncludesDecodedExtendedFields(t *testing.T) {
 	}
 	formatted := formatSettings(settings)
 	for _, expected := range []string{
+		"display_closed=0",
 		"save_last=true",
 		"status_color=4",
 		"voltage_decimals=0",
 		"current_decimals=1",
+		"motion_exit_hold=9s",
+		"motion_break=37ms",
+		"programming_latch=false",
+		"output_persistence=0x04",
+		"relay_restore_mask=0xF0",
 		"extended=0x99",
 	} {
 		if !strings.Contains(formatted, expected) {
 			t.Fatalf("missing %q in %q", expected, formatted)
+		}
+	}
+}
+
+func TestLiveSettingsExportIsExplicitlyLiveAndComplete(t *testing.T) {
+	settings := native.Settings{
+		Flags: 1, LightMode: 2, OnBrightness: 180, DisplayBrightness: 5,
+		MotionBreakMSValue: 37,
+	}
+	encoded, err := encodeLiveSettingsExport(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`"format": "controller-mcu-settings/v1"`,
+		`"source": "live-opcode"`,
+		`"motion_break_ms": 37`,
+	} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("live settings export missing %s: %s", expected, encoded)
 		}
 	}
 }
@@ -227,6 +248,16 @@ func TestBootProgramArguments(t *testing.T) {
 		if _, err := bootProgramArguments(input); err == nil {
 			t.Fatalf("%v: expected usage error", input)
 		}
+	}
+}
+
+func TestDevelopmentEEPROMReinitializationRequiresCompleteBackup(t *testing.T) {
+	_, err := safeFlashCommand(
+		context.Background(), nil, CommandOptions{},
+		[]string{"candidate.hex", "--reinitialize-eeprom", "--allow-incomplete-backup"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw flash") {
+		t.Fatalf("unsafe EEPROM reinitialization override was accepted: %v", err)
 	}
 }
 
@@ -329,6 +360,36 @@ func TestConfiguredMelodyAndStatusEffectCommands(t *testing.T) {
 	}
 }
 
+func TestHostConfigCommandUpdatesApplicationTitle(t *testing.T) {
+	runtime := New(Options{})
+	config := appconfig.Defaults()
+	engine := NewCommandEngine(runtime, CommandOptions{
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	})
+	output, err := engine.Execute(context.Background(), "config set ui.app_title Workshop Control Desk")
+	if err != nil || config.UI.AppTitle != "Workshop Control Desk" || !strings.Contains(output, "hot-reload queued") {
+		t.Fatalf("config set output=%q title=%q err=%v", output, config.UI.AppTitle, err)
+	}
+	output, err = engine.Execute(context.Background(), "config get ui.app_title")
+	if err != nil || !strings.Contains(output, `"Workshop Control Desk"`) {
+		t.Fatalf("config get output=%q err=%v", output, err)
+	}
+	if _, err := engine.Execute(context.Background(), "config set ui.unknown value"); err == nil {
+		t.Fatal("unsupported config path was accepted")
+	}
+}
+
 func TestOSCommandsExposeStatusPolicyAndDenyExecutionByDefault(t *testing.T) {
 	runtime := New(Options{})
 	config := appconfig.Defaults()
@@ -412,5 +473,30 @@ func TestOSCommandsExposeStatusPolicyAndDenyExecutionByDefault(t *testing.T) {
 	updated, err = engine.Execute(context.Background(), "os brightness-policy enable")
 	if err != nil || !strings.Contains(updated, "brightness enabled=true") {
 		t.Fatalf("brightness enable=%q err=%v", updated, err)
+	}
+}
+
+func TestOSFactsUsesBoundedProviderAndCatalog(t *testing.T) {
+	runtime := New(Options{})
+	provider := &fixedHostFactsProvider{}
+	engine := NewCommandEngine(runtime, CommandOptions{HostFacts: provider})
+	output, err := engine.Execute(context.Background(), "os facts system")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"profile=system", "class=Win32_OperatingSystem", "source=wmi",
+		`Caption="Windows"`, `BuildNumber="26100"`,
+	} {
+		if !strings.Contains(output, expected) {
+			t.Fatalf("host facts missing %q: %s", expected, output)
+		}
+	}
+	if provider.profile != "system" {
+		t.Fatalf("profile=%q", provider.profile)
+	}
+	catalog, err := engine.Execute(context.Background(), "os facts list")
+	if err != nil || !strings.Contains(catalog, `"profile": "serial"`) || strings.Contains(catalog, "SELECT ") {
+		t.Fatalf("catalog=%q err=%v", catalog, err)
 	}
 }

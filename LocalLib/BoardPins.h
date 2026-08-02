@@ -27,8 +27,8 @@ constexpr uint8_t RcTransmit = PIN_PD3;         // D3 / INT1, 433 MHz transmitte
 constexpr uint8_t Tm1637Clock = PIN_PB5;       // D13 / SCK
 constexpr uint8_t RcReceive = PIN_PD2;          // D2 / INT0, 433 MHz receiver
 
-// D12 remains available for future expansion. The inherited addressable LED
-// output owns D6 (PD6).
+// D12 remains available for future expansion. The addressable LED output owns
+// D6 (PD6).
 constexpr uint8_t SparePin = PIN_PB4;
 constexpr uint8_t AddressableLed = PIN_PD6;     // D6, WS2811 / WS2812B data
 

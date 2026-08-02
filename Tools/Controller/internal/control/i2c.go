@@ -65,15 +65,8 @@ func ScanI2C(ctx context.Context, runtime *Runtime) ([]byte, error) {
 	if runtime == nil {
 		return nil, fmt.Errorf("I2C runtime is unavailable")
 	}
-	// Opcode 0x36 was a one-shot scan before capability 16 introduced the
-	// bounded transfer schema. Preserve that wire contract for older boards and
-	// API consumers, while current boards perform the scan from the PC.
 	if runtime.Snapshot().Hello.Capabilities&native.CapabilityI2CTransfer == 0 {
-		frame, err := runtime.Request(ctx, native.OpI2CScan, nil, native.OpI2CResult)
-		if err != nil {
-			return nil, err
-		}
-		return native.ParseI2CResult(frame.Payload)
+		return nil, fmt.Errorf("firmware does not advertise generic I2C transfers")
 	}
 	addresses := make([]byte, 0, 8)
 	for address := byte(0x08); address <= 0x77; address++ {

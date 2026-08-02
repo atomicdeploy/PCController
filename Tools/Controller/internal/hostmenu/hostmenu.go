@@ -1,4 +1,4 @@
-// Package hostmenu implements PC-owned front-panel menus whose definitions live
+// Package hostmenu implements HOST-owned front-panel menus whose definitions live
 // in the host JSON/YAML/TOML configuration, never in the controller EEPROM.
 package hostmenu
 
@@ -26,6 +26,7 @@ type Callbacks struct {
 	SaveConfig        func(appconfig.HostMenuConfig) error
 	DefinitionChanged func(DefinitionChange)
 	Interaction       func(InteractionEvent)
+	PanelChanged      func(Snapshot)
 }
 
 // Panel is the exact host-owned content mirrored to the physical and virtual
@@ -96,6 +97,7 @@ type Manager struct {
 	mu         sync.Mutex
 	config     appconfig.HostMenuConfig
 	callbacks  Callbacks
+	options    map[string][]appconfig.HostMenuOption
 	stack      []sessionFrame
 	values     map[string]string
 	guard      string
@@ -106,12 +108,24 @@ type Manager struct {
 }
 
 func New(config appconfig.HostMenuConfig, callbacks Callbacks) *Manager {
-	return &Manager{config: cloneConfig(config), callbacks: callbacks, values: make(map[string]string), generation: 1}
+	return &Manager{
+		config: cloneConfig(config), callbacks: callbacks,
+		options: make(map[string][]appconfig.HostMenuOption),
+		values:  make(map[string]string), generation: 1,
+	}
 }
 
 func (manager *Manager) SetDefinitionChanged(callback func(DefinitionChange)) {
 	manager.mu.Lock()
 	manager.callbacks.DefinitionChanged = callback
+	manager.mu.Unlock()
+}
+
+// SetPanelChanged observes session presentation changes. Headless primaries
+// use it to push the same snapshot that an interactive TUI would render.
+func (manager *Manager) SetPanelChanged(callback func(Snapshot)) {
+	manager.mu.Lock()
+	manager.callbacks.PanelChanged = callback
 	manager.mu.Unlock()
 }
 
@@ -163,7 +177,90 @@ func (manager *Manager) UpdateConfig(config appconfig.HostMenuConfig) {
 func (manager *Manager) Config() appconfig.HostMenuConfig {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
-	return cloneConfig(manager.config)
+	config := cloneConfig(manager.config)
+	for menuIndex := range config.Menus {
+		for itemIndex := range config.Menus[menuIndex].Items {
+			item := &config.Menus[menuIndex].Items[itemIndex]
+			if item.OptionsSource != "" {
+				item.Options = cloneOptions(manager.options[item.OptionsSource])
+			}
+		}
+	}
+	return config
+}
+
+// UpdateSelectOptions replaces one runtime option catalog without writing it
+// back into the watched menu definition. Macro names, IDs, and similar live
+// libraries therefore remain single-sourced in their own host config domain.
+func (manager *Manager) UpdateSelectOptions(source string, options []appconfig.HostMenuOption) error {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return errors.New("host-menu option source is required")
+	}
+	if len(options) > 256 {
+		return fmt.Errorf("host-menu option source %q has %d entries, maximum is 256", source, len(options))
+	}
+	seen := make(map[string]bool, len(options))
+	for index, option := range options {
+		if len(option.Label) == 0 || len(option.Label) > 16 || !printableOptionASCII(option.Label) {
+			return fmt.Errorf("host-menu option source %q label %d must be 1..16 printable ASCII bytes", source, index)
+		}
+		if option.Value == "" || len(option.Value) > 64 || strings.ContainsAny(option.Value, "\r\n") || seen[option.Value] {
+			return fmt.Errorf("host-menu option source %q value %d is empty, duplicated, or invalid", source, index)
+		}
+		seen[option.Value] = true
+	}
+
+	manager.mu.Lock()
+	if equalOptions(manager.options[source], options) {
+		manager.mu.Unlock()
+		return nil
+	}
+	manager.options[source] = cloneOptions(options)
+	affected := make([]DefinitionChange, 0)
+	for _, menu := range manager.config.Menus {
+		changed := false
+		for _, item := range menu.Items {
+			if item.OptionsSource != source {
+				continue
+			}
+			path := menu.ID + "/" + item.ID
+			value := manager.values[path]
+			if value == "" {
+				value = item.Value
+			}
+			if !seen[value] {
+				if len(options) == 0 {
+					delete(manager.values, path)
+				} else {
+					manager.values[path] = options[0].Value
+				}
+			}
+			changed = true
+		}
+		if changed {
+			affected = append(affected, DefinitionChange{
+				Kind: "menu.options.changed", MenuID: menu.ID, NodeID: menu.NodeID,
+				Fields: []string{"options"}, Generation: manager.generation,
+			})
+		}
+	}
+	manager.revision++
+	snapshot := manager.snapshotLocked()
+	for index := range affected {
+		affected[index].Active = snapshot.Active && affected[index].NodeID == snapshot.NodeID
+		if affected[index].Active {
+			affected[index].Snapshot = snapshot
+		}
+	}
+	callback := manager.callbacks.DefinitionChanged
+	manager.mu.Unlock()
+	if callback != nil {
+		for _, change := range affected {
+			callback(change)
+		}
+	}
+	return nil
 }
 
 // Directory returns one fully validated replace-all generation for firmware or
@@ -219,7 +316,7 @@ func (manager *Manager) Generation() byte {
 	return manager.generation
 }
 
-// SaveConfig persists one PC-owned definition edit. The appconfig Store owns
+// SaveConfig persists one HOST-owned definition edit. The appconfig Store owns
 // atomic JSON/YAML/TOML writes and validation; its watcher calls UpdateConfig,
 // which then emits normalized changes and refreshes active previews.
 func (manager *Manager) SaveConfig(change func(*appconfig.HostMenuConfig) error) error {
@@ -547,11 +644,11 @@ func builtinCategory(stableID byte) byte {
 
 func (manager *Manager) Open(menuID string) error {
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
 	if strings.TrimSpace(menuID) == "" {
 		menuID = manager.config.DefaultMenu
 	}
 	if _, ok := manager.menuLocked(menuID); !ok {
+		manager.mu.Unlock()
 		return fmt.Errorf("host menu %q does not exist", menuID)
 	}
 	manager.stack = []sessionFrame{{menuID: menuID}}
@@ -559,16 +656,27 @@ func (manager *Manager) Open(menuID string) error {
 	manager.status = "Host menu active"
 	manager.lastInput = time.Now()
 	manager.revision++
+	snapshot := manager.snapshotLocked()
+	callback := manager.callbacks.PanelChanged
+	manager.mu.Unlock()
+	if callback != nil {
+		callback(snapshot)
+	}
 	return nil
 }
 
 func (manager *Manager) Close(reason string) {
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
 	manager.stack = nil
 	manager.guard = ""
 	manager.status = strings.TrimSpace(reason)
 	manager.revision++
+	snapshot := manager.snapshotLocked()
+	callback := manager.callbacks.PanelChanged
+	manager.mu.Unlock()
+	if callback != nil {
+		callback(snapshot)
+	}
 }
 
 // Snapshot expires idle sessions and returns the exact shared representation.
@@ -582,7 +690,8 @@ func (manager *Manager) Snapshot() Snapshot {
 // HandleKey applies a physical or virtual K1..K4 gesture. K1/K2 navigate,
 // K3/K4 decrease/increase editable values, K4 enters pages/actions, holding K3
 // backs out, and a guarded action requires a second K4 hold.
-func (manager *Manager) HandleKey(ctx context.Context, key int, phase string) (Snapshot, error) {
+func (manager *Manager) HandleKey(ctx context.Context, key int, phase string) (result Snapshot, resultErr error) {
+	defer func() { manager.emitPanelChanged(result) }()
 	phase = strings.ToLower(strings.TrimSpace(phase))
 	if key < 1 || key > 4 {
 		return manager.Snapshot(), fmt.Errorf("host-menu key %d is outside K1..K4", key)
@@ -725,7 +834,7 @@ func (manager *Manager) HandleKey(ctx context.Context, key int, phase string) (S
 		manager.status = "Running " + item.Title
 		manager.revision++
 		manager.mu.Unlock()
-		return manager.finishExecute(ctx, action)
+		return manager.finishExecute(ctx, path, action)
 	default:
 		result := manager.snapshotLocked()
 		manager.mu.Unlock()
@@ -733,7 +842,8 @@ func (manager *Manager) HandleKey(ctx context.Context, key int, phase string) (S
 	}
 }
 
-func (manager *Manager) Refresh(ctx context.Context) (Snapshot, error) {
+func (manager *Manager) Refresh(ctx context.Context) (result Snapshot, resultErr error) {
+	defer func() { manager.emitPanelChanged(result) }()
 	manager.mu.Lock()
 	_, item, path, ok := manager.selectionLocked()
 	if !ok || item.ReadAction == "" {
@@ -744,6 +854,15 @@ func (manager *Manager) Refresh(ctx context.Context) (Snapshot, error) {
 	action := item.ReadAction
 	manager.mu.Unlock()
 	return manager.finishRead(ctx, path, action)
+}
+
+func (manager *Manager) emitPanelChanged(snapshot Snapshot) {
+	manager.mu.Lock()
+	callback := manager.callbacks.PanelChanged
+	manager.mu.Unlock()
+	if callback != nil {
+		callback(snapshot)
+	}
 }
 
 func (manager *Manager) finishRead(ctx context.Context, path, action string) (Snapshot, error) {
@@ -789,7 +908,7 @@ func (manager *Manager) finishWrite(ctx context.Context, action, value string) (
 	return manager.snapshotLocked(), err
 }
 
-func (manager *Manager) finishExecute(ctx context.Context, action string) (Snapshot, error) {
+func (manager *Manager) finishExecute(ctx context.Context, path, action string) (Snapshot, error) {
 	if manager.callbacks.Execute == nil {
 		return manager.Snapshot(), errors.New("host-menu action callback is unavailable")
 	}
@@ -798,10 +917,13 @@ func (manager *Manager) finishExecute(ctx context.Context, action string) (Snaps
 	defer manager.mu.Unlock()
 	if err != nil {
 		manager.status = err.Error()
+		manager.values[path] = "ERROR"
 	} else if strings.TrimSpace(output) != "" {
 		manager.status = strings.TrimSpace(output)
+		manager.values[path] = strings.TrimSpace(output)
 	} else {
 		manager.status = "Complete"
+		manager.values[path] = "DONE"
 	}
 	manager.revision++
 	return manager.snapshotLocked(), err
@@ -826,6 +948,9 @@ func (manager *Manager) adjustLocked(item appconfig.HostMenuItem, path string, d
 		}
 		value = strconv.FormatFloat(parsed, 'f', decimalPlaces(item.Step), 64)
 	case "select":
+		if len(item.Options) == 0 {
+			return "", fmt.Errorf("host-menu item %q has no available options", item.ID)
+		}
 		index := 0
 		for candidate, option := range item.Options {
 			if option.Value == value {
@@ -848,9 +973,19 @@ func (manager *Manager) snapshotLocked() Snapshot {
 		return Snapshot{Status: manager.status, Revision: manager.revision}
 	}
 	value := manager.valueLocked(item, path)
+	line1 := menu.Title
 	line2 := item.Title
 	if value != "" {
-		line2 += ": " + displayValue(item, value)
+		if item.Type == "readonly" {
+			// Read-only host facts use both LCD rows so values such as the full
+			// current date/time are visible instead of being truncated after a label.
+			line1 = item.Title
+			line2 = displayValue(item, value)
+		} else if item.Type == "action" {
+			line2 = value
+		} else {
+			line2 += ": " + displayValue(item, value)
+		}
 	}
 	return Snapshot{
 		Active: true, MenuID: menu.ID, NodeID: menu.NodeID, MenuTitle: menu.Title,
@@ -860,7 +995,7 @@ func (manager *Manager) snapshotLocked() Snapshot {
 		GuardPending: manager.guard == path, Status: manager.status,
 		Revision: manager.revision,
 		Panel: Panel{
-			Segments: fit(item.Label, 4), LCDLine1: fit(menu.Title, 16), LCDLine2: fit(line2, 16),
+			Segments: fit(item.Label, 4), LCDLine1: fit(line1, 16), LCDLine2: fit(line2, 16),
 			Blink: manager.guard == path || menu.EditVisual == "blink", Brightness: menu.Brightness,
 			EditVisual: menu.EditVisual,
 		},
@@ -877,8 +1012,15 @@ func (manager *Manager) selectionLocked() (appconfig.HostMenu, appconfig.HostMen
 		return appconfig.HostMenu{}, appconfig.HostMenuItem{}, "", false
 	}
 	frame.cursor = wrap(frame.cursor, len(menu.Items))
-	item := menu.Items[frame.cursor]
+	item := manager.effectiveItemLocked(menu.Items[frame.cursor])
 	return menu, item, menu.ID + "/" + item.ID, true
+}
+
+func (manager *Manager) effectiveItemLocked(item appconfig.HostMenuItem) appconfig.HostMenuItem {
+	if item.OptionsSource != "" {
+		item.Options = cloneOptions(manager.options[item.OptionsSource])
+	}
+	return item
 }
 
 func (manager *Manager) menuLocked(id string) (appconfig.HostMenu, bool) {
@@ -959,6 +1101,31 @@ func fit(value string, maximum int) string {
 		runes = runes[:maximum]
 	}
 	return string(runes)
+}
+
+func cloneOptions(source []appconfig.HostMenuOption) []appconfig.HostMenuOption {
+	return append([]appconfig.HostMenuOption(nil), source...)
+}
+
+func equalOptions(left, right []appconfig.HostMenuOption) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func printableOptionASCII(value string) bool {
+	for _, char := range []byte(value) {
+		if char < 0x20 || char > 0x7E {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneConfig(config appconfig.HostMenuConfig) appconfig.HostMenuConfig {
@@ -1099,7 +1266,7 @@ func changedBuiltinFields(left, right appconfig.BuiltinMenuOverride) []string {
 func RegisterCommands(engine *shell.Engine, manager *Manager) error {
 	return engine.Register(shell.Command{
 		Name: "host-menu", Usage: "host-menu list|directory|content NODE|set REF FIELD VALUE|add NODE ID LABEL TITLE [PARENT]|override STABLE LABEL TITLE [PARENT]|remove REF|open [ID]|status|key K1..K4 PHASE|refresh|close",
-		Summary: "control PC-owned front-panel menus",
+		Summary: "control HOST-owned front-panel menus",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) == 0 {
 				return "", errors.New("usage: host-menu list|directory|content NODE|set REF FIELD VALUE|add NODE ID LABEL TITLE [PARENT]|override STABLE LABEL TITLE [PARENT]|remove REF|open [ID]|status|key K1..K4 PHASE|refresh|close")
@@ -1204,7 +1371,8 @@ func RegisterCommands(engine *shell.Engine, manager *Manager) error {
 				if err := manager.Open(id); err != nil {
 					return "", err
 				}
-				return formatSnapshot(manager.Snapshot()), nil
+				snapshot, err := manager.Refresh(ctx)
+				return formatSnapshot(snapshot), err
 			case "status":
 				return formatSnapshot(manager.Snapshot()), nil
 			case "refresh":

@@ -29,8 +29,7 @@ SettingsStore settingsStore;
 uint8_t firstVisiblePersistentMenuPage(uint16_t visibleMask,
                                        const uint8_t *packedOrder) {
   if (visibleMask == 0 ||
-      (visibleMask & ~PersistentMenuAllPagesMask) != 0 ||
-      (packedOrder[7] & 0xF0U) != 0xF0U) {
+      (visibleMask & ~PersistentMenuAllPagesMask) != 0) {
     return 0xFF;
   }
   uint16_t seen = 0;
@@ -121,21 +120,25 @@ void SettingsStore::setDefaults() {
   settings_.illuminationOffBrightness = 0;
   settings_.displayBrightness = 5;
   settings_.statusBrightness = 128;
-  settings_.pwmBootMode = 2; // Auto test
+  settings_.outputPersistence = OutputPersistence::Defaults;
   settings_.streamPeriodMs = 500;
   memset(settings_.userPwm, 0, sizeof(settings_.userPwm));
   settings_.defaultMenuPage = 0;
-  settings_.menuFlags = 0; // Keep Status as the deterministic factory page.
+  settings_.menuFlags = 0; // Keep Door as the deterministic factory page.
 #if PCCONTROLLER_MENU_VISIBILITY
   settings_.visibleMenuMask = PersistentMenuAllPagesMask;
 #endif
 #if PCCONTROLLER_MENU_ORDERING
-  for (uint8_t pair = 0; pair < 8; ++pair) {
+  for (uint8_t pair = 0; pair < sizeof(settings_.menuOrder); ++pair) {
     const uint8_t first = static_cast<uint8_t>(pair << 1);
     settings_.menuOrder[pair] =
         static_cast<uint8_t>(first | ((first + 1U) << 4));
   }
 #endif
+  // Zero compactly selects both display-off while closed and the 2 s hold.
+  settings_.displayOptions = 0;
+  settings_.relayRestoreMask = 0;
+  settings_.motionBreakMs = 1;
 }
 
 bool SettingsStore::loadCurrent() {
@@ -147,8 +150,9 @@ bool SettingsStore::loadCurrent() {
   }
   if (record.settings.illuminationMode > 2 ||
       record.settings.displayBrightness > 7 ||
-      record.settings.pwmBootMode > 2 ||
+      (record.settings.outputPersistence & ~OutputPersistence::AllowedMask) != 0 ||
       record.settings.defaultMenuPage >= PersistentMenuPageCount ||
+      record.settings.motionBreakMs == 0 ||
       (record.settings.streamPeriodMs != 0 &&
        record.settings.streamPeriodMs < 100)) {
     return false;

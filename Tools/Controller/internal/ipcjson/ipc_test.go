@@ -17,11 +17,28 @@ import (
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/webui"
 )
+
+type ipcHostFactsProvider struct {
+	profile string
+	calls   int
+}
+
+func (provider *ipcHostFactsProvider) Query(_ context.Context, profile string) (hostfacts.Result, error) {
+	provider.profile = profile
+	provider.calls++
+	return hostfacts.Result{
+		Profile: profile, Class: "Win32_SerialPort", Source: "wmi",
+		Columns:     []string{"DeviceID", "Status"},
+		Rows:        []map[string]any{{"DeviceID": "COM18", "Status": "OK"}},
+		CollectedAt: time.Unix(1, 0).UTC(),
+	}, nil
+}
 
 func TestListenRejectsNonLoopback(t *testing.T) {
 	if listener, err := Listen("0.0.0.0:8787"); err == nil {
@@ -34,6 +51,7 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
 	broker := hostui.NewActionBroker()
+	actions := broker.Events()
 	service := Service{Client: client, AppAction: broker.Publish}
 	params, _ := json.Marshal(map[string]string{"page": "events"})
 	response := service.Dispatch(context.Background(), Request{
@@ -43,7 +61,7 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 		t.Fatal(response.Error)
 	}
 	select {
-	case action := <-broker.Events():
+	case action := <-actions:
 		if action.Kind != "app.page" || action.Value != "events" || action.Source != "ipc" {
 			t.Fatalf("action=%#v", action)
 		}
@@ -56,21 +74,22 @@ func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
 	broker := hostui.NewActionBroker()
+	actions := broker.Events()
 	service := Service{Client: client, AppAction: broker.Publish}
 	params, _ := json.Marshal(map[string]string{"command": "app page settings"})
 	response := service.Dispatch(context.Background(), Request{
-		Method: "controller.execute", Params: params,
+		Method: "controller.command.execute", Params: params,
 	})
 	if response.Error != nil || !strings.Contains(fmt.Sprint(response.Result), "accepted") {
 		t.Fatalf("execute app page response=%#v", response)
 	}
 	select {
-	case action := <-broker.Events():
+	case action := <-actions:
 		if action.Kind != "app.page" || action.Value != "settings" || action.Source != "ipc-command" {
 			t.Fatalf("action=%#v", action)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("controller.execute app page did not reach action broker")
+		t.Fatal("controller.command.execute app page did not reach action broker")
 	}
 }
 
@@ -115,6 +134,139 @@ func TestOSRPCSurfacesAreAuditedAndDisabledByDefault(t *testing.T) {
 	})
 	if configured.Error != nil || len(config.OSActions.VirtualKeys.Allowed) != 6 {
 		t.Fatalf("OS policy configure=%#v config=%#v", configured, config.OSActions)
+	}
+}
+
+func TestHostFactsRPCAndRESTUseTypedReadOnlyProvider(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	provider := &ipcHostFactsProvider{}
+	service := &Service{Client: client, HostFacts: provider}
+	params, _ := json.Marshal(map[string]any{"profile": "serial", "timeout_ms": 500})
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.host.facts", Params: params,
+	})
+	if response.Error != nil || provider.profile != "serial" || provider.calls != 1 {
+		t.Fatalf("response=%#v profile=%q calls=%d", response, provider.profile, provider.calls)
+	}
+	catalog := service.Dispatch(context.Background(), Request{Method: "controller.os.facts.catalog"})
+	if catalog.Error != nil || !strings.Contains(fmt.Sprint(catalog.Result), "Win32_OperatingSystem") || provider.calls != 1 {
+		t.Fatalf("catalog=%#v calls=%d", catalog, provider.calls)
+	}
+	invalidParams, _ := json.Marshal(map[string]any{"profile": "system", "timeout_ms": 50})
+	invalid := service.Dispatch(context.Background(), Request{
+		Method: "controller.os.facts", Params: invalidParams,
+	})
+	if invalid.Error == nil || !strings.Contains(invalid.Error.Message, "100..5000") || provider.calls != 1 {
+		t.Fatalf("invalid=%#v calls=%d", invalid, provider.calls)
+	}
+	arbitrary := service.Dispatch(context.Background(), Request{
+		Method: "controller.os.facts",
+		Params: json.RawMessage(`{"query":"SELECT * FROM Win32_Process"}`),
+	})
+	if arbitrary.Error == nil || arbitrary.Error.Code != -32602 ||
+		!strings.Contains(arbitrary.Error.Message, "unknown field") || provider.calls != 1 {
+		t.Fatalf("arbitrary query=%#v calls=%d", arbitrary, provider.calls)
+	}
+
+	server := httptest.NewServer(websocketMux(context.Background(), service))
+	defer server.Close()
+	rejectedResponse, err := http.Get(server.URL + "/api/v1/os/facts?query=SELECT+*+FROM+Win32_Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejectedBody, _ := io.ReadAll(rejectedResponse.Body)
+	_ = rejectedResponse.Body.Close()
+	if rejectedResponse.StatusCode != http.StatusBadRequest || provider.calls != 1 {
+		t.Fatalf("arbitrary REST query status=%d body=%s calls=%d", rejectedResponse.StatusCode, rejectedBody, provider.calls)
+	}
+	httpResponse, err := http.Get(server.URL + "/api/v1/os/facts?profile=serial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer httpResponse.Body.Close()
+	body, _ := io.ReadAll(httpResponse.Body)
+	if httpResponse.StatusCode != http.StatusOK ||
+		!strings.Contains(string(body), `"DeviceID":"COM18"`) ||
+		httpResponse.Header.Get("Cache-Control") != "private, max-age=5" {
+		t.Fatalf("HTTP status=%d headers=%v body=%s", httpResponse.StatusCode, httpResponse.Header, body)
+	}
+}
+
+func TestHotkeyRPCMutatesOneValidatedBindingAtATime(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	config := appconfig.Defaults()
+	service := &Service{
+		Client: client,
+		HotkeyStatus: func() any {
+			return map[string]any{"supported": true, "running": true}
+		},
+		HostConfig: func() appconfig.Config {
+			return config
+		},
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			candidate.Integrations.Hotkeys = append([]appconfig.Hotkey(nil), config.Integrations.Hotkeys...)
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	}
+	get := service.Dispatch(context.Background(), Request{Method: "controller.hotkeys.get"})
+	if get.Error != nil || !strings.Contains(fmt.Sprint(get.Result), "open-dashboard") ||
+		!strings.Contains(fmt.Sprint(get.Result), "running:true") {
+		t.Fatalf("get=%#v", get)
+	}
+	upsertParams, _ := json.Marshal(map[string]any{
+		"operation": "upsert", "name": "diagnostics", "enabled": true,
+		"chord": "control + option + d", "command": "os facts system",
+	})
+	upsert := service.Dispatch(context.Background(), Request{
+		Method: "controller.hotkeys.set", Params: upsertParams,
+	})
+	if upsert.Error != nil {
+		t.Fatalf("upsert=%#v", upsert)
+	}
+	if !strings.Contains(fmt.Sprint(upsert.Result), "apply_pending:true") {
+		t.Fatalf("upsert did not report asynchronous registrar apply: %#v", upsert.Result)
+	}
+	last := config.Integrations.Hotkeys[len(config.Integrations.Hotkeys)-1]
+	if last.Name != "diagnostics" || last.Chord != "Ctrl+Alt+D" || last.Command != "os facts system" {
+		t.Fatalf("normalized binding=%#v", last)
+	}
+	duplicateParams, _ := json.Marshal(map[string]any{
+		"operation": "upsert", "name": "diagnostics", "chord": "F13",
+	})
+	duplicate := service.Dispatch(context.Background(), Request{
+		Method: "controller.hotkeys.set", Params: duplicateParams,
+	})
+	if duplicate.Error == nil || !strings.Contains(duplicate.Error.Message, "duplicates accelerator") ||
+		config.Integrations.Hotkeys[len(config.Integrations.Hotkeys)-1].Chord != "Ctrl+Alt+D" {
+		t.Fatalf("duplicate=%#v config=%#v", duplicate, config.Integrations.Hotkeys)
+	}
+	unknown := service.Dispatch(context.Background(), Request{
+		Method: "controller.hotkeys.set",
+		Params: json.RawMessage(`{"operation":"remove","name":"diagnostics","bindings":[]}`),
+	})
+	if unknown.Error == nil || unknown.Error.Code != -32602 || !strings.Contains(unknown.Error.Message, "unknown field") {
+		t.Fatalf("unknown mutation=%#v", unknown)
+	}
+	removeParams, _ := json.Marshal(map[string]any{"operation": "remove", "name": "diagnostics"})
+	removed := service.Dispatch(context.Background(), Request{
+		Method: "controller.hotkeys.set", Params: removeParams,
+	})
+	if removed.Error != nil || len(config.Integrations.Hotkeys) != len(appconfig.Defaults().Integrations.Hotkeys) {
+		t.Fatalf("remove=%#v bindings=%#v", removed, config.Integrations.Hotkeys)
+	}
+	if requestCapability("controller.hotkeys.get", nil) != capabilityRead ||
+		requestCapability("controller.hotkeys.set", nil) != capabilityHostConfig {
+		t.Fatal("hotkey RPC capabilities are not read/configuration separated")
 	}
 }
 
@@ -174,12 +326,11 @@ func TestHostMenuConfigRPCAndRESTUsePersistentHostConfig(t *testing.T) {
 	}
 }
 
-func TestListenAllowsExplicitRemoteBind(t *testing.T) {
-	listener, err := ListenWithRemote("0.0.0.0:0", true)
-	if err != nil {
-		t.Fatal(err)
+func TestListenPolicyAllowsExplicitRemoteBindWithoutOpeningSocket(t *testing.T) {
+	address, err := validateListenAddress("0.0.0.0:8787", true)
+	if err != nil || address != "0.0.0.0:8787" {
+		t.Fatalf("remote listen policy address=%q err=%v", address, err)
 	}
-	_ = listener.Close()
 }
 
 func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) {
@@ -190,6 +341,7 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
 	service := &Service{
 		Client: client, WebSocketPath: "/control", SocketIOPath: "/engine.io/",
+		HostVersion: "1.2.3", HostSourceHash: "0123456789abcdef", HostBuildTime: "2026-08-02T00:00:00Z",
 		HostConfig: func() appconfig.Config { return config },
 	}
 	server := httptest.NewServer(websocketMux(context.Background(), service))
@@ -206,13 +358,18 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 		WebSocketPath string `json:"websocket_path"`
 		SocketIOPath  string `json:"socket_io_path"`
 		AuthRequired  bool   `json:"auth_required"`
+		HostVersion   string `json:"host_version"`
+		SourceHash    string `json:"source_hash"`
+		BuildTime     string `json:"build_time"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
 	if response.StatusCode != http.StatusOK || result.Name != "Controller Lab" ||
 		result.APIVersion != APIVersion || result.WebSocketPath != "/control" ||
-		result.SocketIOPath != "/engine.io/" || !result.AuthRequired {
+		result.SocketIOPath != "/engine.io/" || !result.AuthRequired ||
+		result.HostVersion != "1.2.3" || result.SourceHash != "0123456789abcdef" ||
+		result.BuildTime != "2026-08-02T00:00:00Z" {
 		t.Fatalf("UI config status=%d result=%+v", response.StatusCode, result)
 	}
 
@@ -409,6 +566,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Content-Type", "application/json")
 	response, err = http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -708,7 +866,7 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 	// The browser terminal can send a correlated dispatcher command over the
 	// same full-duplex WebSocket that just delivered the asynchronous event.
 	writeRPC(map[string]any{
-		"jsonrpc": "2.0", "id": 3, "method": "controller.execute",
+		"jsonrpc": "2.0", "id": 3, "method": "controller.command.execute",
 		"params": map[string]any{"command": "echo duplex-ready"},
 	})
 	for {
@@ -763,6 +921,26 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("multiplexed IPC server did not stop")
+	}
+}
+
+func TestStreamableEventKindSeparatesTimelineFromStatusTraffic(t *testing.T) {
+	tests := []struct {
+		kind string
+		want bool
+	}{
+		{kind: "door", want: true},
+		{kind: "rf.received", want: true},
+		{kind: "macro.completed", want: true},
+		{kind: " telemetry ", want: false},
+		{kind: "RX", want: false},
+		{kind: "tx", want: false},
+		{kind: "", want: false},
+	}
+	for _, test := range tests {
+		if got := streamableEventKind(test.kind); got != test.want {
+			t.Errorf("streamableEventKind(%q)=%v want %v", test.kind, got, test.want)
+		}
 	}
 }
 
@@ -1070,6 +1248,7 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 		{"bridge list", capabilityRead},
 		{"bridge call lab controller.status", capabilityBridgeCalls},
 		{"os status", capabilityRead},
+		{"os facts serial", capabilityRead},
 		{"os key F13", capabilityVirtualKeys},
 		{"program flash image.hex", capabilityProgramming},
 		{"toolchain profile", capabilityRead},

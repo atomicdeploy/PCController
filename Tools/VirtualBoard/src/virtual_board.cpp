@@ -14,7 +14,8 @@ namespace pccontroller::virtual_board {
 namespace {
 
 constexpr std::size_t kSettingsAddress = 32;
-constexpr std::size_t kSettingsRecordSize = 30;
+constexpr std::size_t kSettingsValuesSize = 31;
+constexpr std::size_t kSettingsRecordSize = kSettingsValuesSize + 1;
 constexpr std::size_t kRemoteHeaderAddress = 64;
 constexpr std::size_t kRemoteEntriesAddress = 68;
 constexpr std::size_t kRemoteRecordSize = 12;
@@ -25,21 +26,28 @@ constexpr std::uint8_t kResetRecordMarker = 0xA7;
 constexpr std::uint8_t kPowerOnResetCause = 1U << 0U;
 constexpr std::uint8_t kWatchdogResetCause = 1U << 3U;
 constexpr std::uint8_t kResetEventType = 7;
-constexpr std::uint8_t kMenuPageCount = 15;
+constexpr std::uint8_t kMenuPageCount = 14;
+constexpr std::uint16_t kMenuAllPagesMask = 0x3FFFU;
 constexpr std::uint8_t kSettingsSilent = 1U << 0U;
+constexpr std::uint8_t kSettingsProgramming = 1U << 1U;
 constexpr std::uint8_t kSettingsSwapTemperature = 1U << 2U;
 constexpr std::uint8_t kSettingsMotionPolicy = 3U << 3U;
 constexpr std::uint8_t kSettingsDoorAudioDisabled = 1U << 5U;
 constexpr std::uint8_t kSettingsRelayAudioDisabled = 1U << 6U;
-constexpr std::uint8_t kSettingsExtendedMotionBreak = 1U << 7U;
 constexpr std::uint8_t kSettingsAllowed =
-    kSettingsSilent | kSettingsSwapTemperature | kSettingsMotionPolicy |
-    kSettingsDoorAudioDisabled | kSettingsRelayAudioDisabled |
-    kSettingsExtendedMotionBreak;
+    kSettingsSilent | kSettingsProgramming | kSettingsSwapTemperature |
+    kSettingsMotionPolicy | kSettingsDoorAudioDisabled |
+    kSettingsRelayAudioDisabled;
+constexpr std::uint8_t kPersistMotion = 1U << 0U;
+constexpr std::uint8_t kPersistUserRelays = 1U << 1U;
+constexpr std::uint8_t kPersistUserPwm = 1U << 2U;
+constexpr std::uint8_t kRetainDirectionOnStop = 1U << 3U;
+constexpr std::uint8_t kOutputPersistenceAllowed =
+    kPersistMotion | kPersistUserRelays | kPersistUserPwm |
+    kRetainDirectionOnStop;
 constexpr std::uint8_t kSaveLastPage = 1U << 0U;
-constexpr std::uint8_t kLearnMulti = 1U << 0U;
-constexpr std::uint8_t kLearnIndefinite = 1U << 1U;
-constexpr std::uint8_t kDefaultLearningSeconds = 15;
+constexpr std::uint8_t kLearnModeIndefinite = 0;
+constexpr std::uint8_t kLearnModeTimer = 1;
 constexpr std::uint8_t kMaximumLearningSeconds = 120;
 constexpr std::chrono::milliseconds kHostOfflineAfter{5000};
 constexpr std::int16_t kHotTemperatureCentiC = 5000;
@@ -279,9 +287,8 @@ std::uint8_t encodeSegment(char value) {
 
 bool validPackedMenuOrder(
     std::uint16_t visibleMask,
-    const std::array<std::uint8_t, 8> &packedOrder) {
-  if (visibleMask == 0 || (visibleMask & ~0x7FFFU) != 0 ||
-      (packedOrder.back() & 0xF0U) != 0xF0U) {
+    const std::array<std::uint8_t, 7> &packedOrder) {
+  if (visibleMask == 0 || (visibleMask & ~kMenuAllPagesMask) != 0) {
     return false;
   }
   std::uint16_t seen = 0;
@@ -296,7 +303,7 @@ bool validPackedMenuOrder(
     }
     seen |= bit;
   }
-  return seen == 0x7FFFU;
+  return seen == kMenuAllPagesMask;
 }
 
 std::size_t i2cDeviceIndex(std::uint8_t address) {
@@ -317,7 +324,6 @@ VirtualBoard::VirtualBoard(ISensors &sensors, IRelays &relays, IPwm &pwm,
   const TimePoint now = Clock::now();
   startedAt_ = now;
   lastStreamAt_ = now;
-  lastPwmStepAt_ = now;
   lastFadeAt_ = now;
   lastRelayTestAt_ = now;
   lastHostActivityAt_ = now;
@@ -334,18 +340,14 @@ VirtualBoard::VirtualBoard(ISensors &sensors, IRelays &relays, IPwm &pwm,
     menuOrder_[rank] = (rank & 1U) == 0 ? packed & 0x0FU : packed >> 4U;
   }
   menuPage_ = settings_.defaultMenuPage;
-  pwm_.setMode(settings_.pwmBootMode);
-  pwm_.allOff();
-  if (settings_.pwmBootMode == 1) {
-    for (std::uint8_t channel = 0; channel < settings_.userPwm.size();
-         ++channel) {
-      pwm_.set(channel, scale8(settings_.userPwm[channel]));
-    }
-  }
-  pwm_.set(12, 4095);
-  pwm_.set(14, scale8(settings_.statusBrightness));
+  applyStoredSettings();
+  restoreStoredOutputs();
   enclosureBrightness_ = settings_.illuminationOffBrightness;
-  pwm_.set(11, scale8(enclosureBrightness_));
+  if ((settings_.flags & kSettingsProgramming) == 0) {
+    pwm_.set(12, 4095);
+    pwm_.set(14, scale8(settings_.statusBrightness));
+    pwm_.set(11, scale8(enclosureBrightness_));
+  }
   updateMenuDisplay();
 }
 
@@ -417,29 +419,19 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
         readU16(payload, 1) > 4095) {
       return bad();
     }
-    if (payload[0] < 11 && pwm_.mode() == 2) {
-      pwm_.setMode(1);
-    }
     pwm_.select(payload[0]);
-    pwm_.set(payload[0], readU16(payload, 1));
-    if (payload[0] < settings_.userPwm.size()) {
-      const std::uint16_t value = readU16(payload, 1);
-      settings_.userPwm[payload[0]] = static_cast<std::uint8_t>(
-          value >= 4080 ? 255 : (value + 8U) / 16U);
-      settings_.pwmBootMode = 1;
-      saveSettings();
+    if (!pwm_.set(payload[0], readU16(payload, 1))) {
+      return {errorFrame(request.sequence, request.opcode,
+                         wire::HardwareUnavailable, now)};
     }
+    storeUserPwmValue(payload[0], readU16(payload, 1));
     return ack();
   case wire::PwmAllOff:
-    pwm_.allOff();
-    return ack();
-  case wire::PwmMode:
-    if (payload.empty() || payload[0] > 2) {
-      return bad();
+    if (!pwm_.available()) {
+      return {errorFrame(request.sequence, request.opcode,
+                         wire::HardwareUnavailable, now)};
     }
-    pwm_.setMode(payload[0]);
-    settings_.pwmBootMode = payload[0];
-    saveSettings();
+    pwm_.allOff();
     return ack();
   case wire::StatusRgb:
     if (payload.size() < 4) {
@@ -485,23 +477,26 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     }
     return ack();
   case wire::RadioLearnStart:
-    if (payload.size() < 2) {
+    if (payload.size() != 2 || payload[0] > kLearnModeTimer ||
+        (payload[0] == kLearnModeIndefinite && payload[1] != 0) ||
+        (payload[0] == kLearnModeTimer &&
+         (payload[1] == 0 || payload[1] > kMaximumLearningSeconds))) {
       return bad();
     }
-    {
-      const std::uint8_t seconds =
-          std::min<std::uint8_t>(
-              payload[0] == 0 ? kDefaultLearningSeconds : payload[0],
-              kMaximumLearningSeconds);
-      learningOptions_ = payload[1] & (kLearnMulti | kLearnIndefinite);
-      learningDeadline_ = now + std::chrono::seconds(seconds);
-    }
     learningActive_ = true;
+    learningMode_ = payload[0];
+    learningTotalSeconds_ = payload[1];
+    learningReportedRemaining_ = payload[1];
+    if (learningMode_ == kLearnModeTimer) {
+      learningDeadline_ = now + std::chrono::seconds(payload[1]);
+    }
     queueEvent({9, 3, static_cast<std::uint8_t>(std::count_if(
                           remotes_.begin(), remotes_.end(),
                           [](const RemoteEntry &entry) {
                             return entry.used;
-                          }))});
+                          })),
+                learningMode_, learningTotalSeconds_,
+                learningReportedRemaining_});
     return ack();
   case wire::RadioLearnCancel:
     endLearning(1);
@@ -520,17 +515,6 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
       return bad();
     }
     remotes_[payload[0]] = RemoteEntry{};
-    saveRemote(payload[0]);
-    return ack();
-  case wire::RadioLearnMap:
-    if (payload.size() < 4 || payload[0] >= remotes_.size() ||
-        !remotes_[payload[0]].used ||
-        !validRemoteMapping(payload[1], payload[2], payload[3])) {
-      return bad();
-    }
-    remotes_[payload[0]].actionKind = payload[1];
-    remotes_[payload[0]].actionValue = payload[2];
-    remotes_[payload[0]].behavior = payload[3];
     saveRemote(payload[0]);
     return ack();
   case wire::RadioLearnReplace:
@@ -584,6 +568,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
       relays_.set(payload[0], payload[1] != 0);
     }
     queueEvent({10, relays_.mask()});
+    captureRelayState();
     return ack();
   case wire::RelaySide:
     if (payload.size() < 2 || payload[0] > 1 || payload[1] > 2) {
@@ -596,11 +581,13 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     relays_.setSide(payload[0], payload[1]);
     relayTestPeriodMs_ = 0;
     queueEvent({10, relays_.mask()});
+    captureRelayState();
     return ack();
   case wire::RelayAllOff:
     relayTestPeriodMs_ = 0;
     relays_.allOff();
     queueEvent({10, relays_.mask()});
+    captureRelayState();
     return ack();
   case wire::RelayTest:
     return {wire::makeError(request.sequence, request.opcode,
@@ -779,7 +766,7 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
           "relay 1..8 on|off | "
           "pwm 0..15 0..4095 | strip pixel N R G B [BRIGHTNESS] | "
           "strip fill R G B [BRIGHTNESS] | strip clear | "
-          "menu 0..14 | segments TEXT | lcd TEXT | "
+          "menu 0..13 | segments TEXT | lcd TEXT | "
           "reset [CAUSE] | rflearn CODE BITS PROTOCOL PULSE_US | "
           "rfrecv CODE BITS PROTOCOL PULSE_US | "
           "eeprom path|flush|reset | quit"};
@@ -929,8 +916,17 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
           value != "0") {
         throw std::invalid_argument("usage: relay 1..8 on|off");
       }
-      relays_.set(static_cast<std::uint8_t>(relay - 1),
-                  value == "on" || value == "1");
+      const bool active = value == "on" || value == "1";
+      if (!executeQueuedCommand(
+              wire::RelaySet,
+              {static_cast<std::uint8_t>(relay - 1),
+               static_cast<std::uint8_t>(active)},
+              Clock::now())) {
+        throw std::runtime_error(
+            relay <= 4 && active
+                ? "motion relay denied by the enclosure-door policy"
+                : "relay command was rejected");
+      }
       return {"relay mask updated"};
     }
     if (command == "pwm") {
@@ -941,9 +937,11 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
           static_cast<std::uint8_t>(parseUnsigned(args[1], 15));
       const auto value =
           static_cast<std::uint16_t>(parseUnsigned(args[2], 4095));
-      pwm_.setMode(1);
       pwm_.select(channel);
-      pwm_.set(channel, value);
+      if (!pwm_.set(channel, value)) {
+        throw std::runtime_error("PWM controller is unavailable");
+      }
+      storeUserPwmValue(channel, value);
       return {"PWM value updated"};
     }
     if (command == "strip") {
@@ -1107,8 +1105,6 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
           [](const RemoteEntry &entry) { return entry.used; }));
       if (count >= remotes_.size()) {
         endLearning(2);
-      } else if ((learningOptions_ & kLearnMulti) == 0) {
-        endLearning(0);
       }
       return {"learned virtual RF entry " + std::to_string(id)};
     }
@@ -1253,7 +1249,7 @@ wire::Frame VirtualBoard::macroStatusFrame(std::uint8_t opcode,
 }
 
 wire::Frame VirtualBoard::menuLayoutFrame(std::uint8_t sequence) const {
-  // Schema 2 packs two stable page IDs per byte; the unused odd tail is 0xF.
+  // Schema 2 packs the 14 stable page IDs into exactly seven bytes.
   std::vector<std::uint8_t> payload{
       2, kMenuPageCount, static_cast<std::uint8_t>(menuVisibleMask_),
       static_cast<std::uint8_t>(menuVisibleMask_ >> 8U)};
@@ -1267,7 +1263,6 @@ wire::Frame VirtualBoard::menuLayoutFrame(std::uint8_t sequence) const {
           payload[index] | static_cast<std::uint8_t>(menuOrder_[rank] << 4U));
     }
   }
-  payload.back() = static_cast<std::uint8_t>(payload.back() | 0xF0U);
   return {wire::MenuLayoutResponse, sequence, std::move(payload)};
 }
 
@@ -1283,8 +1278,10 @@ wire::Frame VirtualBoard::helloFrame(std::uint8_t sequence) const {
 wire::Frame VirtualBoard::statusFrame(std::uint8_t sequence,
                                       TimePoint now) const {
   const SensorReadings sensors = sensors_.readings();
-  std::uint16_t flags =
-      kStatusIna219 | kStatusPwm | kStatusTLed | kStatusTBt;
+  std::uint16_t flags = kStatusIna219 | kStatusTLed | kStatusTBt;
+  if (pwm_.available()) {
+    flags |= kStatusPwm;
+  }
   if (std::any_of(remotes_.begin(), remotes_.end(),
                   [](const RemoteEntry &entry) { return entry.used; })) {
     flags |= kStatusRfLearned;
@@ -1349,10 +1346,10 @@ wire::Frame VirtualBoard::statusFrame(std::uint8_t sequence,
   payload.push_back(static_cast<std::uint8_t>(menuPage_ + 1U));
   payload.push_back(static_cast<std::uint8_t>(sensors.doorOpen));
   payload.push_back(sensors.bluetoothState);
-  payload.push_back(pwm_.mode());
+  payload.push_back(static_cast<std::uint8_t>(pwm_.available()));
   payload.push_back(pwm_.selected());
   appendU16(payload, pwm_.value(pwm_.selected()));
-  payload.push_back(0); // The LCD is PC-owned, matching the physical firmware.
+  payload.push_back(0); // The LCD is host-driven, matching physical firmware.
   payload.push_back(pwmErrors_);
   appendU16(payload, framingErrors_);
   appendU16(payload, crcErrors_);
@@ -1363,23 +1360,27 @@ wire::Frame VirtualBoard::statusFrame(std::uint8_t sequence,
 
 wire::Frame VirtualBoard::settingsFrame(std::uint8_t sequence) const {
   std::vector<std::uint8_t> payload{
-      2,
+      3,
       settings_.flags,
       settings_.illuminationMode,
       settings_.illuminationOnBrightness,
       settings_.illuminationOffBrightness,
       settings_.displayBrightness,
       settings_.statusBrightness,
-      settings_.pwmBootMode,
+      settings_.outputPersistence,
   };
   appendU16(payload, settings_.streamPeriodMs);
   payload.push_back(settings_.defaultMenuPage);
   payload.push_back(settings_.menuFlags);
+  payload.push_back(settings_.displayOptions);
+  payload.push_back(settings_.relayRestoreMask);
+  payload.push_back(settings_.motionBreakMs);
   return {wire::SettingsResponse, sequence, std::move(payload)};
 }
 
 wire::Frame VirtualBoard::pwmFrame(std::uint8_t sequence) const {
-  std::vector<std::uint8_t> payload{pwm_.mode(), pwm_.selected()};
+  std::vector<std::uint8_t> payload{
+      static_cast<std::uint8_t>(pwm_.available()), pwm_.selected()};
   for (const std::uint16_t value : pwm_.values()) {
     appendU16(payload, value);
   }
@@ -1430,9 +1431,8 @@ wire::Frame VirtualBoard::frontPanelFrame(std::uint8_t sequence) const {
 wire::Frame VirtualBoard::menuListFrame(std::uint8_t sequence,
                                         std::uint8_t cursor) const {
   static constexpr std::array<const char *, kMenuPageCount> labels{
-      "STAT", "VOLT", "CURR", "tLED", "t-bt", "LItE", "bt  ",
-      "Snd ", "PWM ", "rELY", "KEY ", "uPWM", "r5-8", "MOVE",
-      "LErn"};
+      "door", "VOLT", "CURR", "tLED", "t-bt", "LItE", "bEEP",
+      "PWM ", "rELY", "KEY ", "uPWM", "r5-8", "MOVE", "LErn"};
   std::vector<std::uint8_t> payload{1, kMenuPageCount, 0xFF, 0};
   while (cursor < kMenuPageCount && payload[3] < 7) {
     payload.push_back(cursor);
@@ -1513,17 +1513,17 @@ wire::Frame VirtualBoard::remotesFrame(std::uint8_t sequence,
 
 bool VirtualBoard::applySettings(
     const std::vector<std::uint8_t> &payload) {
-  if (payload.size() < 10 || payload[2] > 2 || payload[5] > 7 ||
-      payload[7] > 2) {
+  if (payload.size() != 15 || payload[0] != 3 || payload[2] > 2 ||
+      payload[5] > 7 ||
+      (payload[7] & ~kOutputPersistenceAllowed) != 0 || payload[14] == 0) {
     return false;
   }
   const std::uint16_t stream = readU16(payload, 8);
   if (stream != 0 && stream < 100) {
     return false;
   }
-  if (payload.size() >= 11 &&
-      (payload[10] >= kMenuPageCount ||
-       (menuVisibleMask_ & (std::uint16_t{1} << payload[10])) == 0)) {
+  if (payload[10] >= kMenuPageCount ||
+      (menuVisibleMask_ & (std::uint16_t{1} << payload[10])) == 0) {
     return false;
   }
 
@@ -1533,40 +1533,31 @@ bool VirtualBoard::applySettings(
   settings_.illuminationOffBrightness = payload[4];
   settings_.displayBrightness = payload[5];
   settings_.statusBrightness = payload[6];
-  settings_.pwmBootMode = payload[7];
+  settings_.outputPersistence = payload[7];
   settings_.streamPeriodMs = stream;
-  if (payload.size() >= 11) {
-    settings_.defaultMenuPage = payload[10];
-  }
-  if (payload.size() >= 12) {
-    settings_.menuFlags = payload[11];
-  }
-  pwm_.setMode(settings_.pwmBootMode);
-  if (settings_.pwmBootMode == 1) {
-    for (std::uint8_t channel = 0; channel < settings_.userPwm.size();
-         ++channel) {
-      pwm_.set(channel, scale8(settings_.userPwm[channel]));
-    }
-  }
-  if ((settings_.flags & kSettingsSilent) != 0) {
-    const DisplayState display = displays_.state();
-    displays_.setBuzzer(0, display.buzzerDurationMs);
-  }
-  if (!motionAllowed()) {
-    stopMotion();
-  }
+  settings_.defaultMenuPage = payload[10];
+  settings_.menuFlags = payload[11];
+  settings_.displayOptions = payload[12];
+  settings_.relayRestoreMask = payload[13];
+  settings_.motionBreakMs = payload[14];
+  applyStoredSettings();
   return true;
 }
 
 bool VirtualBoard::applyMenuLayout(
     const std::vector<std::uint8_t> &payload) {
-  if (payload.size() < 12U || payload[0] != 2 ||
+  constexpr std::size_t kMenuLayoutPayloadSize =
+      4U + (kMenuPageCount + 1U) / 2U;
+  if (payload.size() < kMenuLayoutPayloadSize || payload[0] != 2 ||
       payload[1] != kMenuPageCount) {
     return false;
   }
   const std::uint16_t mask = readU16(payload, 2);
-  std::array<std::uint8_t, 8> packed{};
-  std::copy(payload.begin() + 4, payload.begin() + 12, packed.begin());
+  std::array<std::uint8_t, 7> packed{};
+  std::copy(payload.begin() + 4,
+            payload.begin() + static_cast<std::ptrdiff_t>(
+                                    kMenuLayoutPayloadSize),
+            packed.begin());
   if (!validPackedMenuOrder(mask, packed)) {
     return false;
   }
@@ -1697,9 +1688,6 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
     return;
   }
   case 5: { // PWM: Momentary goes full-on; other behaviors toggle 0/4095.
-    if (pwm_.mode() == 2) {
-      pwm_.setMode(1);
-    }
     const bool active = pwm_.value(remote.actionValue) != 0;
     const std::uint16_t value =
         remote.behavior == 2 ? 4095 : (active ? 0 : 4095);
@@ -1750,18 +1738,99 @@ bool VirtualBoard::motionAllowed() const {
 void VirtualBoard::stopMotion() {
   relays_.setSide(0, 0);
   relays_.setSide(1, 0);
+  captureRelayState();
+}
+
+void VirtualBoard::applyStoredSettings() {
+  relays_.setRetainDirectionOnStop(
+      (settings_.outputPersistence & kRetainDirectionOnStop) != 0);
+  if ((settings_.flags & kSettingsProgramming) != 0) {
+    buzzerDeadlineActive_ = false;
+    displays_.setBuzzer(0, 0);
+    relayTestPeriodMs_ = 0;
+    relays_.allOff();
+    pwm_.allOff();
+    captureRelayState();
+    return;
+  }
+  if ((settings_.flags & kSettingsSilent) != 0) {
+    const DisplayState display = displays_.state();
+    displays_.setBuzzer(0, display.buzzerDurationMs);
+  }
+  if (!motionAllowed()) {
+    stopMotion();
+  }
+  pwm_.set(14, scale8(settings_.statusBrightness));
+}
+
+void VirtualBoard::restoreStoredOutputs() {
+  relays_.allOff();
+  pwm_.allOff();
+  if ((settings_.flags & kSettingsProgramming) != 0) {
+    return;
+  }
+  if ((settings_.outputPersistence & kPersistMotion) != 0 &&
+      motionAllowed()) {
+    for (std::uint8_t index = 0; index < 4; ++index) {
+      relays_.set(index,
+                  (settings_.relayRestoreMask & (1U << index)) != 0);
+    }
+  }
+  if ((settings_.outputPersistence & kPersistUserRelays) != 0) {
+    for (std::uint8_t index = 4; index < 8; ++index) {
+      relays_.set(index,
+                  (settings_.relayRestoreMask & (1U << index)) != 0);
+    }
+  }
+  if ((settings_.outputPersistence & kPersistUserPwm) != 0) {
+    for (std::uint8_t channel = 0; channel < settings_.userPwm.size();
+         ++channel) {
+      pwm_.set(channel, scale8(settings_.userPwm[channel]));
+    }
+  }
+}
+
+void VirtualBoard::storeUserPwmValue(std::uint8_t channel,
+                                     std::uint16_t value) {
+  if (channel >= settings_.userPwm.size()) {
+    return;
+  }
+  const std::uint8_t stored = static_cast<std::uint8_t>(
+      value >= 4080 ? 255 : (value + 8U) / 16U);
+  if (settings_.userPwm[channel] != stored) {
+    settings_.userPwm[channel] = stored;
+    saveSettings();
+  }
+}
+
+void VirtualBoard::captureRelayState() {
+  const std::uint8_t mask = relays_.mask();
+  if (settings_.relayRestoreMask != mask) {
+    settings_.relayRestoreMask = mask;
+    saveSettings();
+  }
+}
+
+std::uint8_t VirtualBoard::learningRemainingSeconds(TimePoint now) const {
+  if (learningMode_ != kLearnModeTimer || now >= learningDeadline_) {
+    return 0;
+  }
+  const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+      learningDeadline_ - now);
+  return static_cast<std::uint8_t>((remaining.count() + 999) / 1000);
 }
 
 void VirtualBoard::endLearning(std::uint8_t state) {
   if (!learningActive_) {
     return;
   }
+  const std::uint8_t remaining = learningRemainingSeconds(Clock::now());
   learningActive_ = false;
-  learningOptions_ = 0;
   const std::uint8_t count = static_cast<std::uint8_t>(std::count_if(
       remotes_.begin(), remotes_.end(),
       [](const RemoteEntry &entry) { return entry.used; }));
-  queueEvent({9, state, count});
+  queueEvent({9, state, count, learningMode_, learningTotalSeconds_,
+              remaining});
 }
 
 void VirtualBoard::releaseHostPanel() {
@@ -1791,7 +1860,7 @@ void VirtualBoard::loadSettings() {
   loaded.illuminationOffBrightness = record[3];
   loaded.displayBrightness = record[4];
   loaded.statusBrightness = record[5];
-  loaded.pwmBootMode = record[6];
+  loaded.outputPersistence = record[6];
   loaded.streamPeriodMs = static_cast<std::uint16_t>(
       record[7] | (static_cast<std::uint16_t>(record[8]) << 8U));
   std::copy(record.begin() + 9, record.begin() + 17,
@@ -1800,10 +1869,14 @@ void VirtualBoard::loadSettings() {
   loaded.menuFlags = record[18];
   loaded.visibleMenuMask = static_cast<std::uint16_t>(
       record[19] | (static_cast<std::uint16_t>(record[20]) << 8U));
-  std::copy(record.begin() + 21, record.begin() + 29,
+  std::copy(record.begin() + 21, record.begin() + 28,
             loaded.menuOrder.begin());
+  loaded.displayOptions = record[28];
+  loaded.relayRestoreMask = record[29];
+  loaded.motionBreakMs = record[30];
   if (loaded.illuminationMode > 2 || loaded.displayBrightness > 7 ||
-      loaded.pwmBootMode > 2 ||
+      (loaded.outputPersistence & ~kOutputPersistenceAllowed) != 0 ||
+      loaded.motionBreakMs == 0 ||
       (loaded.streamPeriodMs != 0 && loaded.streamPeriodMs < 100) ||
       loaded.defaultMenuPage >= kMenuPageCount ||
       !validPackedMenuOrder(loaded.visibleMenuMask, loaded.menuOrder) ||
@@ -1824,7 +1897,7 @@ void VirtualBoard::saveSettings() {
   record[3] = settings_.illuminationOffBrightness;
   record[4] = settings_.displayBrightness;
   record[5] = settings_.statusBrightness;
-  record[6] = settings_.pwmBootMode;
+  record[6] = settings_.outputPersistence;
   record[7] = static_cast<std::uint8_t>(settings_.streamPeriodMs);
   record[8] = static_cast<std::uint8_t>(settings_.streamPeriodMs >> 8U);
   std::copy(settings_.userPwm.begin(), settings_.userPwm.end(),
@@ -1835,6 +1908,9 @@ void VirtualBoard::saveSettings() {
   record[20] = static_cast<std::uint8_t>(settings_.visibleMenuMask >> 8U);
   std::copy(settings_.menuOrder.begin(), settings_.menuOrder.end(),
             record.begin() + 21);
+  record[28] = settings_.displayOptions;
+  record[29] = settings_.relayRestoreMask;
+  record[30] = settings_.motionBreakMs;
   record.back() = wire::crc8(record.data(), record.size() - 1U);
   for (std::size_t index = 0; index < record.size(); ++index) {
     eeprom_.update(kSettingsAddress + index, record[index]);
@@ -1965,10 +2041,8 @@ void VirtualBoard::recordReset(std::uint8_t cause, bool emitEvent) {
     const std::uint32_t count = readCount(address);
     const std::uint8_t checksum = eeprom_.read(address + 4U);
     const std::uint8_t marker = eeprom_.read(address + 5U);
-    const bool valid =
-        marker == kResetRecordMarker && count != 0 &&
-        count != std::numeric_limits<std::uint32_t>::max() &&
-        checksum == recordChecksum(count);
+    const bool valid = marker == kResetRecordMarker && count != 0 &&
+                       checksum == recordChecksum(count);
     const std::uint32_t difference = count - resetCount_;
     if (valid &&
         (!found ||
@@ -2016,16 +2090,17 @@ void VirtualBoard::recordReset(std::uint8_t cause, bool emitEvent) {
 void VirtualBoard::resetRuntime(TimePoint now) {
   relays_.allOff();
   pwm_.allOff();
-  pwm_.setMode(settings_.pwmBootMode);
-  if (settings_.pwmBootMode == 1) {
-    for (std::uint8_t channel = 0; channel < settings_.userPwm.size();
-         ++channel) {
-      pwm_.set(channel, scale8(settings_.userPwm[channel]));
-    }
+  applyStoredSettings();
+  restoreStoredOutputs();
+  if ((settings_.flags & kSettingsProgramming) == 0) {
+    pwm_.set(12, 4095);
+    pwm_.set(14, scale8(settings_.statusBrightness));
+    pwm_.set(11, scale8(settings_.illuminationOffBrightness));
   }
-  pwm_.set(12, 4095);
   learningActive_ = false;
-  learningOptions_ = 0;
+  learningMode_ = kLearnModeIndefinite;
+  learningTotalSeconds_ = 0;
+  learningReportedRemaining_ = 0;
   relayTestPeriodMs_ = 0;
   macroState_ = 0;
   macroQueue_.clear();
@@ -2035,7 +2110,6 @@ void VirtualBoard::resetRuntime(TimePoint now) {
   menuPage_ = settings_.defaultMenuPage;
   startedAt_ = now;
   lastStreamAt_ = now;
-  lastPwmStepAt_ = now;
   lastFadeAt_ = now;
   segmentDeadlineActive_ = false;
   buzzerDeadlineActive_ = false;
@@ -2066,9 +2140,8 @@ void VirtualBoard::setMenuPage(std::uint8_t page) {
 
 void VirtualBoard::updateMenuDisplay() {
   static constexpr std::array<const char *, kMenuPageCount> labels{
-      "STAT", "VOLT", "CURR", "tLED", "t-bt", "LItE", "bt  ",
-      "Snd ", "PWM ", "rELY", "KEY ", "uPWM", "r5-8", "Go  ",
-      "LErn"};
+      "door", "VOLT", "CURR", "tLED", "t-bt", "LItE", "bEEP",
+      "PWM ", "rELY", "KEY ", "uPWM", "r5-8", "MOVE", "LErn"};
   displays_.setSegments(labels[menuPage_]);
 }
 
@@ -2081,6 +2154,7 @@ void VirtualBoard::cancelMacro(bool keepOutputs, bool emitEvent) {
     for (std::uint8_t channel = 0; channel < 11; ++channel) {
       pwm_.set(channel, 0);
     }
+    captureRelayState();
     queueEvent({10, relays_.mask()});
   }
   macroState_ = 3;
@@ -2121,22 +2195,19 @@ bool VirtualBoard::executeQueuedCommand(
         readU16(payload, 1) > 4095) {
       return false;
     }
-    if (payload[0] < 11) {
-      pwm_.setMode(1);
-    }
     pwm_.select(payload[0]);
-    pwm_.set(payload[0], readU16(payload, 1));
+    if (!pwm_.set(payload[0], readU16(payload, 1))) {
+      return false;
+    }
+    storeUserPwmValue(payload[0], readU16(payload, 1));
     return true;
   case wire::PwmAllOff:
+    if (!pwm_.available()) {
+      return false;
+    }
     for (std::uint8_t channel = 0; channel < 11; ++channel) {
       pwm_.set(channel, 0);
     }
-    return true;
-  case wire::PwmMode:
-    if (payload.empty() || payload[0] > 2) {
-      return false;
-    }
-    pwm_.setMode(payload[0]);
     return true;
   case wire::StatusRgb:
     if (payload.size() < 4) {
@@ -2208,6 +2279,7 @@ bool VirtualBoard::executeQueuedCommand(
       relays_.set(payload[0], payload[1] != 0);
     }
     queueEvent({10, relays_.mask()});
+    captureRelayState();
     return true;
   case wire::RelaySide: {
     if (payload.size() < 2 || payload[0] > 1 || payload[1] > 2 ||
@@ -2216,11 +2288,13 @@ bool VirtualBoard::executeQueuedCommand(
     }
     relays_.setSide(payload[0], payload[1]);
     queueEvent({10, relays_.mask()});
+    captureRelayState();
     return true;
   }
   case wire::RelayAllOff:
     relays_.allOff();
     queueEvent({10, relays_.mask()});
+    captureRelayState();
     return true;
   case wire::MenuSetPage:
     if (payload.empty() || payload[0] >= kMenuPageCount) {
@@ -2275,6 +2349,7 @@ void VirtualBoard::serviceMacro(TimePoint now,
         for (std::uint8_t channel = 0; channel < 11; ++channel) {
           pwm_.set(channel, 0);
         }
+        captureRelayState();
       }
       macroQueue_.clear();
       queueMacroEvent();
@@ -2299,9 +2374,18 @@ void VirtualBoard::queueEvent(std::vector<std::uint8_t> payload) {
 }
 
 void VirtualBoard::serviceAutomation(TimePoint now) {
-  if (learningActive_ && (learningOptions_ & kLearnIndefinite) == 0 &&
-      now >= learningDeadline_) {
-    endLearning(0);
+  if (learningActive_ && learningMode_ == kLearnModeTimer) {
+    const std::uint8_t remaining = learningRemainingSeconds(now);
+    if (remaining == 0) {
+      endLearning(0);
+    } else if (remaining != learningReportedRemaining_) {
+      learningReportedRemaining_ = remaining;
+      const std::uint8_t count = static_cast<std::uint8_t>(std::count_if(
+          remotes_.begin(), remotes_.end(),
+          [](const RemoteEntry &entry) { return entry.used; }));
+      queueEvent({9, 4, count, learningMode_, learningTotalSeconds_,
+                  remaining});
+    }
   }
   if (segmentDeadlineActive_ && now >= segmentDeadline_) {
     segmentDeadlineActive_ = false;
@@ -2332,36 +2416,11 @@ void VirtualBoard::serviceAutomation(TimePoint now) {
       relays_.set(relayTestIndex_, true);
       relayTestOn_ = true;
     }
+    captureRelayState();
   }
 
-  if (pwm_.mode() == 2 &&
-      now - lastPwmStepAt_ >= std::chrono::milliseconds(20)) {
-    lastPwmStepAt_ = now;
-    constexpr std::uint16_t step = 128;
-    const std::uint8_t channel = pwm_.selected() > 10 ? 0 : pwm_.selected();
-    pwm_.select(channel);
-    const std::uint16_t current = pwm_.value(channel);
-    if (pwmRising_) {
-      const std::uint16_t next =
-          static_cast<std::uint16_t>(std::min<unsigned>(4095, current + step));
-      pwm_.set(channel, next);
-      if (next == 4095) {
-        pwmRising_ = false;
-      }
-    } else {
-      const std::uint16_t next = current > step ? current - step : 0;
-      pwm_.set(channel, next);
-      if (next == 0) {
-        const std::uint8_t nextChannel =
-            static_cast<std::uint8_t>((channel + 1U) % 11U);
-        pwm_.select(nextChannel);
-        pwmRising_ = true;
-        queueEvent({4, nextChannel});
-      }
-    }
-  }
-
-  if (now - lastFadeAt_ >= std::chrono::milliseconds(20)) {
+  if ((settings_.flags & kSettingsProgramming) == 0 &&
+      now - lastFadeAt_ >= std::chrono::milliseconds(20)) {
     lastFadeAt_ = now;
     const SensorReadings sensor = sensors_.readings();
     std::uint8_t target = settings_.illuminationOffBrightness;
@@ -2372,7 +2431,9 @@ void VirtualBoard::serviceAutomation(TimePoint now) {
     enclosureBrightness_ = easedByte(enclosureBrightness_, target);
     pwm_.set(11, scale8(enclosureBrightness_));
   }
-  pwm_.set(12, 4095);
+  if ((settings_.flags & kSettingsProgramming) == 0) {
+    pwm_.set(12, 4095);
+  }
 }
 
 std::string VirtualBoard::describeLocked() const {

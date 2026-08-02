@@ -6,23 +6,25 @@
 #include "TransitionMath.h"
 
 namespace {
+// Cooperative breathing cadence, intensity step, and base-mode row count.
 constexpr uint16_t PulseIntervalMs = 20;
 constexpr uint8_t PulseStep = 4;
-constexpr uint8_t StatusModePaletteCount = 10;
+constexpr uint8_t StatusModePaletteCount = 11;
 
 // Data-driven palette keeps every cue visually distinct while using less
-// flash than a large branch tree. Rows 0..9 are StatusLedMode values; the
+// flash than a large branch tree. Rows 0..10 are StatusLedMode values; the
 // remaining rows are StatusLedCue values 1..8.
 const uint8_t StatusPalette[][3] PROGMEM = {
     {0, 0, 0},       // Off
     {255, 72, 0},    // Boot
     {255, 255, 255}, // Ready palette: white
-    {0, 0, 255},     // Learning
+    {190, 0, 255},   // 433 MHz learning
     {255, 96, 0},    // Warning / hot
     {255, 0, 0},     // Fault
     {0, 0, 0},       // Custom (supplied at runtime)
     {16, 72, 255},   // BT Audio connected
     {0, 255, 80},    // BT Audio unavailable phase A (phase B is Fault red)
+    {16, 72, 255},   // BT Audio powered but waiting for a connection
     {255, 144, 0},   // Running, enclosure closed
     {255, 120, 12},  // Door open
     {0, 255, 80},    // Door closed
@@ -43,10 +45,10 @@ const uint8_t ReadyPalette[] PROGMEM = {5, 3, 14, 11, 2};
 StatusLedController statusLeds;
 
 void StatusLedController::begin(PwmController &pwm, uint8_t brightness,
-                                uint32_t now) {
+                                uint32_t now, bool powerSignal) {
   pwm_ = &pwm;
   brightness_ = brightness;
-  pwm_->setPowerSignal(true);
+  pwm_->setPowerSignal(powerSignal);
   setMode(StatusLedMode::Boot, now);
 }
 
@@ -80,7 +82,8 @@ void StatusLedController::service(uint32_t now) {
 
   const bool breathing = mode_ == StatusLedMode::Learning ||
                          mode_ == StatusLedMode::Warning ||
-                         mode_ == StatusLedMode::Disconnected;
+                         mode_ == StatusLedMode::Disconnected ||
+                         mode_ == StatusLedMode::Waiting;
   if (!breathing) {
     render(brightness_, true); // Continue a smooth post-cue restore.
     return;

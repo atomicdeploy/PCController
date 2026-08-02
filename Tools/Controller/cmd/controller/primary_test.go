@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/sessionsnapshot"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -68,6 +71,66 @@ func TestPrimaryIPCClaimsOwnershipAndRoutesCommands(t *testing.T) {
 	}
 }
 
+func TestPrimaryClosePersistsAndPublishesDiagnosticSnapshotOnce(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	engine := shell.New(4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := startPrimaryIPCAt(ctx, "127.0.0.1:0", runtime, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "state", "last-session.json")
+	server.sessionSnapshot = newHostSessionRecorderAt(
+		path,
+		server.client,
+		func() sessionsnapshot.HostIdentity {
+			return sessionsnapshot.HostIdentity{
+				Title: "Controller", Role: "primary-host", SourceHash: "test-source",
+			}
+		},
+	)
+	afterID := runtime.LatestEventID()
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	firstContent, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := sessionsnapshot.Read(path)
+	if err != nil || !stored.Exists || stored.Snapshot == nil {
+		t.Fatalf("stored=%#v err=%v", stored, err)
+	}
+	if stored.Snapshot.Host.SourceHash != "test-source" || stored.Snapshot.Complete ||
+		len(stored.Snapshot.Errors) != 3 {
+		t.Fatalf("unexpected offline diagnostic snapshot: %#v", stored.Snapshot)
+	}
+	waitContext, waitCancel := context.WithTimeout(context.Background(), time.Second)
+	defer waitCancel()
+	event, err := runtime.WaitEvent(waitContext, afterID, "diagnostic.snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Lifecycle != "saved" || event.State != "partial" ||
+		event.Metadata["path"] != path || event.Metadata["complete"] != "false" ||
+		event.Metadata["sha256"] == "" {
+		t.Fatalf("snapshot event=%#v", event)
+	}
+	eventID := runtime.LatestEventID()
+	if err := server.Close(); err != nil {
+		t.Fatal(err)
+	}
+	secondContent, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(firstContent) != string(secondContent) || runtime.LatestEventID() != eventID {
+		t.Fatal("duplicate Close rewrote or republished the session snapshot")
+	}
+}
+
 func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) {
 	runtime := control.New(control.Options{})
 	engine := shell.New(4)
@@ -79,6 +142,7 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	}
 	defer server.Close()
 
+	actions := server.AppActions()
 	afterID := runtime.LatestEventID()
 	if err := server.actions.Publish(hostui.AppAction{
 		Kind: "app.page", Value: "events", Source: "global-hotkey",
@@ -86,7 +150,7 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 		t.Fatal(err)
 	}
 	select {
-	case action := <-server.AppActions():
+	case action := <-actions:
 		if action.Kind != "app.page" || action.Value != "events" {
 			t.Fatalf("TUI action=%#v", action)
 		}
@@ -111,10 +175,9 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 		}
 	}
 
-	// The headless web command does not drain AppActions. Filling that optional
-	// TUI queue must retain its bounded error semantics without interrupting the
+	// A subscribed TUI queue remains bounded without interrupting the
 	// observer-backed browser event stream.
-	for index := 0; index < cap(server.AppActions()); index++ {
+	for index := 0; index < cap(actions); index++ {
 		if err := server.actions.Publish(hostui.AppAction{
 			Kind: "app.page", Value: "events", Source: "global-hotkey",
 		}); err != nil {

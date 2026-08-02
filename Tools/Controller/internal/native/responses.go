@@ -1,24 +1,23 @@
 package native
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 )
 
 const (
-	BoardKindPCController   byte = 1
-	SettingsShape           byte = 2
-	IdentitySchemaLegacy    byte = 1
-	IdentitySchema          byte = 2
-	IdentitySchemaCompact   byte = 3
-	RFEntriesSchema         byte = 1
-	MenuListSchema          byte = 1
-	TemperatureSchema       byte = 1
-	StatusPayloadSizeLegacy      = 43
-	StatusPayloadSize            = 48
-	RFEntryPayloadSize           = 12
+	BoardKindPCController byte = 1
+	SettingsShape         byte = 3
+	IdentitySchemaCompact byte = 3
+	RFEntriesSchema       byte = 1
+	MenuListSchema        byte = 1
+	TemperatureSchema     byte = 1
+	StatusPayloadSize          = 48
+	RFEntryPayloadSize         = 12
 )
 
 // HELLO capability bits are the authoritative guard for optional operations.
@@ -130,13 +129,12 @@ const (
 	EventRFReceived
 	EventRFLearning
 	EventRelay
+	EventAlert
 )
 
-// EventBoot and EventFault are compatibility names for the reset telemetry
-// event. Firmware wire type 7 is [type, MCUSR cause, reset count LE u32].
 const (
-	EventBoot  = EventReset
-	EventFault = EventReset
+	AlertFault byte = iota + 1
+	AlertHot
 )
 
 const (
@@ -157,105 +155,48 @@ const (
 	RFLearningCancelled
 	RFLearningFull
 	RFLearningStarted
+	RFLearningProgress
+)
+
+const (
+	RFLearnModeIndefinite byte = iota
+	RFLearnModeTimer
 )
 
 type Hello struct {
-	FirmwareMajor  byte   `json:"firmware_major"`
-	FirmwareMinor  byte   `json:"firmware_minor"`
-	FirmwarePatch  byte   `json:"firmware_patch"`
 	BoardKind      byte   `json:"board_kind"`
 	Capabilities   uint32 `json:"capabilities"`
 	Name           string `json:"name"`
 	IdentitySchema byte   `json:"identity_schema"`
 	BuildHash      uint32 `json:"build_hash"`
-	BuildDate      string `json:"build_date,omitempty"`
-	BuildTime      string `json:"build_time,omitempty"`
 	BuildTimestamp uint32 `json:"build_timestamp_packed,omitempty"`
 	BuildStamp     string `json:"build_timestamp,omitempty"`
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	// Schema 3 is the current flash-compact identity: it intentionally drops
-	// semantic firmware versions and the repeated name in favor of hash/time.
-	if len(payload) == 14 && payload[0] == IdentitySchemaCompact {
-		hello := Hello{
-			BoardKind:      payload[1],
-			Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
-			Name:           "PCController",
-			IdentitySchema: IdentitySchemaCompact,
-			BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
-			BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
-		}
-		stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
-		if err != nil {
-			return Hello{}, err
-		}
-		hello.BuildStamp = stamp
-		return hello, nil
+	if len(payload) != 14 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14", len(payload))
 	}
-	if len(payload) < 9 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need at least 9", len(payload))
-	}
-	nameLength := int(payload[8])
-	if len(payload) < 9+nameLength {
-		return Hello{}, fmt.Errorf(
-			"HELLO name length is %d but payload has %d bytes",
-			nameLength,
-			len(payload),
-		)
+	if payload[0] != IdentitySchemaCompact {
+		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
 	}
 	hello := Hello{
-		FirmwareMajor: payload[0],
-		FirmwareMinor: payload[1],
-		FirmwarePatch: payload[2],
-		BoardKind:     payload[3],
-		Capabilities:  binary.LittleEndian.Uint32(payload[4:8]),
-		Name:          string(payload[9 : 9+nameLength]),
+		BoardKind:      payload[1],
+		Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
+		Name:           "PCController",
+		IdentitySchema: IdentitySchemaCompact,
+		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
+		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
 	}
-	extension := payload[9+nameLength:]
-	if len(extension) == 0 {
-		return hello, nil
+	stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
+	if err != nil {
+		return Hello{}, err
 	}
-	hello.IdentitySchema = extension[0]
-	switch hello.IdentitySchema {
-	case IdentitySchemaLegacy:
-		const legacyPayloadSize = 1 + 4 + 11 + 8
-		if len(extension) < legacyPayloadSize {
-			return Hello{}, fmt.Errorf(
-				"HELLO schema-1 identity extension is %d bytes, need %d",
-				len(extension),
-				legacyPayloadSize,
-			)
-		}
-		hello.BuildHash = binary.LittleEndian.Uint32(extension[1:5])
-		hello.BuildDate = string(extension[5:16])
-		hello.BuildTime = string(extension[16:24])
-	case IdentitySchema:
-		const packedPayloadSize = 1 + 4 + 4
-		if len(extension) < packedPayloadSize {
-			return Hello{}, fmt.Errorf(
-				"HELLO schema-2 identity extension is %d bytes, need %d",
-				len(extension),
-				packedPayloadSize,
-			)
-		}
-		hello.BuildHash = binary.LittleEndian.Uint32(extension[1:5])
-		hello.BuildTimestamp = binary.LittleEndian.Uint32(extension[5:9])
-		stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
-		if err != nil {
-			return Hello{}, err
-		}
-		hello.BuildStamp = stamp
-	default:
-		return Hello{}, fmt.Errorf(
-			"unsupported HELLO identity schema %d",
-			hello.IdentitySchema,
-		)
-	}
+	hello.BuildStamp = stamp
 	return hello, nil
 }
 
-// FormatBuildTimestamp decodes the schema-2 date<<16|time value as YYMMDDHHMMSS.
+// FormatBuildTimestamp decodes the packed date<<16|time value as YYMMDDHHMMSS.
 func FormatBuildTimestamp(packed uint32) (string, error) {
 	if packed == 0 {
 		return "", nil
@@ -267,11 +208,11 @@ func FormatBuildTimestamp(packed uint32) (string, error) {
 	minute := int((packed >> 5) & 0x3F)
 	second := int(packed&0x1F) * 2
 	if month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59 {
-		return "", fmt.Errorf("invalid schema-2 build timestamp 0x%08X", packed)
+		return "", fmt.Errorf("invalid packed build timestamp 0x%08X", packed)
 	}
 	value := time.Date(year, month, day, hour, minute, second, 0, time.UTC)
 	if value.Year() != year || value.Month() != month || value.Day() != day {
-		return "", fmt.Errorf("invalid schema-2 build calendar date 0x%08X", packed)
+		return "", fmt.Errorf("invalid packed build calendar date 0x%08X", packed)
 	}
 	return value.Format("060102150405"), nil
 }
@@ -281,26 +222,28 @@ func (hello Hello) IsPCController() bool {
 }
 
 func ParseSettings(payload []byte) (Settings, error) {
-	if len(payload) < 10 {
-		return Settings{}, fmt.Errorf("SETTINGS payload is %d bytes, need 10", len(payload))
+	if len(payload) != 15 {
+		return Settings{}, fmt.Errorf("SETTINGS payload is %d bytes, need exactly 15", len(payload))
 	}
-	// Byte zero is an advisory shape marker. The recognized semantic prefix is
-	// authoritative, and newer peers may append fields without breaking us.
+	if payload[0] != SettingsShape {
+		return Settings{}, fmt.Errorf("unsupported SETTINGS shape %d", payload[0])
+	}
+	closedBrightness, holdSeconds := decodeDisplayOptions(payload[12])
 	settings := Settings{
-		Flags:             payload[1],
-		LightMode:         payload[2],
-		OnBrightness:      payload[3],
-		OffBrightness:     payload[4],
-		DisplayBrightness: payload[5],
-		StatusBrightness:  payload[6],
-		PWMBootMode:       payload[7],
-		StreamPeriodMS:    binary.LittleEndian.Uint16(payload[8:10]),
-	}
-	if len(payload) >= 11 {
-		settings.DefaultPage = payload[10]
-	}
-	if len(payload) >= 12 {
-		settings.ExtendedFlags = payload[11]
+		Flags:                   payload[1],
+		LightMode:               payload[2],
+		OnBrightness:            payload[3],
+		OffBrightness:           payload[4],
+		DisplayBrightness:       payload[5],
+		StatusBrightness:        payload[6],
+		OutputPersistence:       payload[7],
+		StreamPeriodMS:          binary.LittleEndian.Uint16(payload[8:10]),
+		DefaultPage:             payload[10],
+		ExtendedFlags:           payload[11],
+		DisplayClosedBrightness: closedBrightness,
+		MotionExitHoldSeconds:   holdSeconds,
+		RelayRestoreMask:        payload[13],
+		MotionBreakMSValue:      payload[14],
 	}
 	if _, err := settings.Payload(); err != nil {
 		return Settings{}, err
@@ -327,7 +270,7 @@ type Status struct {
 	ProgramMode    byte   `json:"program_mode"`
 	DoorOpen       bool   `json:"door_open"`
 	BluetoothState byte   `json:"bluetooth_audio_state"`
-	PWMMode        byte   `json:"pwm_mode"`
+	PWMAvailable   bool   `json:"pwm_available"`
 	PWMChannel     byte   `json:"pwm_channel"`
 	PWMValue       uint16 `json:"pwm_value"`
 	LCDAddress     byte   `json:"lcd_address"`
@@ -338,19 +281,48 @@ type Status struct {
 	ResetCount     uint32 `json:"reset_count"`
 }
 
+func (status Status) UptimeDuration() time.Duration {
+	return time.Duration(status.UptimeMS) * time.Millisecond
+}
+
+func (status Status) ReadableUptime() string {
+	return status.UptimeDuration().String()
+}
+
+// MarshalJSON keeps uptime_ms as the stable machine value and adds a derived
+// human-readable value to every snapshot, history, REST, RPC, and scripting
+// JSON surface. The derived field never enters the compact UART payload.
+func (status Status) MarshalJSON() ([]byte, error) {
+	type StatusFields Status
+	return json.Marshal(struct {
+		StatusFields
+		Uptime string `json:"uptime"`
+	}{
+		StatusFields: StatusFields(status),
+		Uptime:       status.ReadableUptime(),
+	})
+}
+
+func (status *Status) UnmarshalJSON(data []byte) error {
+	type StatusFields Status
+	decoded := struct {
+		StatusFields
+		Uptime string `json:"uptime"`
+	}{}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*status = Status(decoded.StatusFields)
+	return nil
+}
+
 func ParseStatus(payload []byte) (Status, error) {
-	if len(payload) < StatusPayloadSizeLegacy {
+	if len(payload) < StatusPayloadSize {
 		return Status{}, fmt.Errorf(
 			"STATUS payload is %d bytes, need at least %d",
 			len(payload),
-			StatusPayloadSizeLegacy,
-		)
-	}
-	if len(payload) > StatusPayloadSizeLegacy && len(payload) < StatusPayloadSize {
-		return Status{}, fmt.Errorf(
-			"STATUS payload is %d bytes, need legacy %d or current %d",
-			len(payload),
-			StatusPayloadSizeLegacy,
 			StatusPayloadSize,
 		)
 	}
@@ -370,7 +342,7 @@ func ParseStatus(payload []byte) (Status, error) {
 		ProgramMode:    payload[30],
 		DoorOpen:       payload[31] != 0,
 		BluetoothState: payload[32],
-		PWMMode:        payload[33],
+		PWMAvailable:   payload[33] != 0,
 		PWMChannel:     payload[34],
 		PWMValue:       binary.LittleEndian.Uint16(payload[35:37]),
 		LCDAddress:     payload[37],
@@ -381,15 +353,13 @@ func ParseStatus(payload []byte) (Status, error) {
 	status.ProgramRunning = status.Flags&StatusProgramRunning != 0
 	status.HostOffline = status.Flags&StatusHostOffline != 0
 	status.Hot = status.Flags&StatusHot != 0
-	if len(payload) >= StatusPayloadSize {
-		status.ResetCause = payload[43]
-		status.ResetCount = binary.LittleEndian.Uint32(payload[44:48])
-	}
+	status.ResetCause = payload[43]
+	status.ResetCount = binary.LittleEndian.Uint32(payload[44:48])
 	return status, nil
 }
 
 type PWMValues struct {
-	Mode            byte       `json:"mode"`
+	Available       bool       `json:"available"`
 	SelectedChannel byte       `json:"selected_channel"`
 	Values          [16]uint16 `json:"values"`
 }
@@ -398,7 +368,10 @@ func ParsePWMValues(payload []byte) (PWMValues, error) {
 	if len(payload) < 34 {
 		return PWMValues{}, fmt.Errorf("PWM_VALUES payload is %d bytes, need 34", len(payload))
 	}
-	result := PWMValues{Mode: payload[0], SelectedChannel: payload[1]}
+	if payload[0] > 1 {
+		return PWMValues{}, fmt.Errorf("PWM availability %d is outside 0..1", payload[0])
+	}
+	result := PWMValues{Available: payload[0] != 0, SelectedChannel: payload[1]}
 	for index := range result.Values {
 		offset := 2 + index*2
 		result.Values[index] = binary.LittleEndian.Uint16(payload[offset : offset+2])
@@ -466,31 +439,36 @@ func ParseTemperatures(payload []byte) ([]TemperatureSensor, error) {
 }
 
 type DeviceEvent struct {
-	Type         byte         `json:"type"`
-	Key          byte         `json:"key,omitempty"`
-	Gesture      byte         `json:"gesture,omitempty"`
-	Source       byte         `json:"source,omitempty"`
-	SourceID     byte         `json:"source_id,omitempty"`
-	DoorOpen     bool         `json:"door_open,omitempty"`
-	Bluetooth    byte         `json:"bluetooth,omitempty"`
-	PWMChannel   byte         `json:"pwm_channel,omitempty"`
-	RFID         byte         `json:"rf_id,omitempty"`
-	MacroState   byte         `json:"macro_state,omitempty"`
-	MacroID      byte         `json:"macro_id,omitempty"`
-	ResetCause   byte         `json:"reset_cause,omitempty"`
-	ResetCount   uint32       `json:"reset_count,omitempty"`
-	RFCode       uint32       `json:"rf_code,omitempty"`
-	RFBits       byte         `json:"rf_bits,omitempty"`
-	RFProtocol   byte         `json:"rf_protocol,omitempty"`
-	RFPulseUS    uint16       `json:"rf_pulse_us,omitempty"`
-	RFLearnedID  byte         `json:"rf_learned_id,omitempty"`
-	RFLearnState byte         `json:"rf_learning_state,omitempty"`
-	RFLearnCount byte         `json:"rf_learning_count,omitempty"`
-	RelayMask    byte         `json:"relay_mask,omitempty"`
-	DeviceMicros uint32       `json:"device_micros,omitempty"`
-	Timed        bool         `json:"timed,omitempty"`
-	Macro        *MacroStatus `json:"macro,omitempty"`
-	Raw          []byte       `json:"raw,omitempty"`
+	Type                    byte         `json:"type"`
+	Key                     byte         `json:"key,omitempty"`
+	Gesture                 byte         `json:"gesture,omitempty"`
+	Source                  byte         `json:"source,omitempty"`
+	SourceID                byte         `json:"source_id,omitempty"`
+	DoorOpen                bool         `json:"door_open,omitempty"`
+	Bluetooth               byte         `json:"bluetooth,omitempty"`
+	PWMChannel              byte         `json:"pwm_channel,omitempty"`
+	RFID                    byte         `json:"rf_id,omitempty"`
+	MacroState              byte         `json:"macro_state,omitempty"`
+	MacroID                 byte         `json:"macro_id,omitempty"`
+	ResetCause              byte         `json:"reset_cause,omitempty"`
+	ResetCount              uint32       `json:"reset_count,omitempty"`
+	RFCode                  uint32       `json:"rf_code,omitempty"`
+	RFBits                  byte         `json:"rf_bits,omitempty"`
+	RFProtocol              byte         `json:"rf_protocol,omitempty"`
+	RFPulseUS               uint16       `json:"rf_pulse_us,omitempty"`
+	RFLearnedID             byte         `json:"rf_learned_id,omitempty"`
+	RFLearnState            byte         `json:"rf_learning_state,omitempty"`
+	RFLearnCount            byte         `json:"rf_learning_count,omitempty"`
+	RFLearnMode             byte         `json:"rf_learning_mode,omitempty"`
+	RFLearnTotalSeconds     byte         `json:"rf_learning_total_seconds,omitempty"`
+	RFLearnRemainingSeconds byte         `json:"rf_learning_remaining_seconds,omitempty"`
+	RelayMask               byte         `json:"relay_mask,omitempty"`
+	AlertKind               byte         `json:"alert_kind,omitempty"`
+	AlertActive             bool         `json:"alert_active,omitempty"`
+	DeviceMicros            uint32       `json:"device_micros,omitempty"`
+	Timed                   bool         `json:"timed,omitempty"`
+	Macro                   *MacroStatus `json:"macro,omitempty"`
+	Raw                     []byte       `json:"raw,omitempty"`
 }
 
 func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
@@ -584,13 +562,21 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 		event.RFPulseUS = binary.LittleEndian.Uint16(payload[7:9])
 		event.RFLearnedID = payload[9]
 	case EventRFLearning:
-		if len(payload) != 3 {
+		if len(payload) != 6 {
 			return DeviceEvent{}, fmt.Errorf(
-				"RF learning EVENT is %d bytes, need exactly 3",
+				"RF learning EVENT is %d bytes, need exactly 6",
 				len(payload),
 			)
 		}
+		if payload[1] > RFLearningProgress || payload[3] > RFLearnModeTimer ||
+			(payload[3] == RFLearnModeIndefinite && (payload[4] != 0 || payload[5] != 0)) ||
+			payload[5] > payload[4] {
+			return DeviceEvent{}, fmt.Errorf("invalid RF learning EVENT fields: % X", payload)
+		}
 		event.RFLearnState, event.RFLearnCount = payload[1], payload[2]
+		event.RFLearnMode = payload[3]
+		event.RFLearnTotalSeconds = payload[4]
+		event.RFLearnRemainingSeconds = payload[5]
 	case EventRelay:
 		if len(payload) != 2 {
 			return DeviceEvent{}, fmt.Errorf(
@@ -599,6 +585,17 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			)
 		}
 		event.RelayMask = payload[1]
+	case EventAlert:
+		if len(payload) != 3 {
+			return DeviceEvent{}, fmt.Errorf(
+				"alert EVENT is %d bytes, need exactly 3",
+				len(payload),
+			)
+		}
+		if payload[1] < AlertFault || payload[1] > AlertHot || payload[2] > 1 {
+			return DeviceEvent{}, fmt.Errorf("invalid alert EVENT fields: % X", payload)
+		}
+		event.AlertKind, event.AlertActive = payload[1], payload[2] != 0
 	}
 	return event, nil
 }
@@ -655,10 +652,7 @@ func ParseMenuList(payload []byte) (MenuListPage, error) {
 	return page, nil
 }
 
-const (
-	MenuLayoutLegacySchema byte = 1
-	MenuLayoutSchema       byte = 2
-)
+const MenuLayoutSchema byte = 2
 
 // MenuLayout is the compact board-owned menu visibility and rank record. Rank
 // is the index in Order; VisibleMask bits are keyed by stable page ID.
@@ -675,17 +669,14 @@ func ParseMenuLayout(payload []byte) (MenuLayout, error) {
 	if len(payload) < 5 {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT payload is %d bytes, need at least 5", len(payload))
 	}
-	if payload[0] != MenuLayoutLegacySchema && payload[0] != MenuLayoutSchema {
+	if payload[0] != MenuLayoutSchema {
 		return MenuLayout{}, fmt.Errorf("unsupported menu-layout schema %d", payload[0])
 	}
 	count := int(payload[1])
 	if count < 1 || count > 16 {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT count %d is outside 1..16", count)
 	}
-	expectedLength := 4 + count
-	if payload[0] == MenuLayoutSchema {
-		expectedLength = 4 + (count+1)/2
-	}
+	expectedLength := 4 + (count+1)/2
 	if len(payload) != expectedLength {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT schema %d count %d requires exactly %d bytes, payload has %d", payload[0], count, expectedLength, len(payload))
 	}
@@ -701,20 +692,16 @@ func ParseMenuLayout(payload []byte) (MenuLayout, error) {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT must keep at least one page visible")
 	}
 	order := make([]byte, count)
-	if payload[0] == MenuLayoutLegacySchema {
-		copy(order, payload[4:])
-	} else {
-		for rank := range order {
-			packed := payload[4+rank/2]
-			if rank&1 == 0 {
-				order[rank] = packed & 0x0F
-			} else {
-				order[rank] = packed >> 4
-			}
+	for rank := range order {
+		packed := payload[4+rank/2]
+		if rank&1 == 0 {
+			order[rank] = packed & 0x0F
+		} else {
+			order[rank] = packed >> 4
 		}
-		if count&1 != 0 && payload[len(payload)-1]>>4 != 0x0F {
-			return MenuLayout{}, fmt.Errorf("MENU_LAYOUT odd-count padding nibble must be 0xF")
-		}
+	}
+	if count&1 != 0 && payload[len(payload)-1]>>4 != 0x0F {
+		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT odd-count padding nibble must be 0xF")
 	}
 	seen := make([]bool, count)
 	for rank, id := range order {

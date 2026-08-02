@@ -124,11 +124,11 @@ func TestFirmwareBlobIsContentAddressedDeduplicatedAndRaceSafe(t *testing.T) {
 	}
 }
 
-func TestFirmwareTimestampSchema2ExactASAEncoding(t *testing.T) {
+func TestFirmwareTimestampExactPackedEncoding(t *testing.T) {
 	date := uint32((2026-2000)<<9 | 8<<5 | 1)
 	timeBits := uint32(19<<11 | 42<<5 | 58>>1)
 	packed := date<<16 | timeBits
-	decoded, err := DecodeFirmwareTimestampSchema2(packed)
+	decoded, err := DecodeFirmwareTimestamp(packed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,15 +136,15 @@ func TestFirmwareTimestampSchema2ExactASAEncoding(t *testing.T) {
 		t.Fatalf("packed=%08X decode=%#v", packed, decoded)
 	}
 	invalidDate := uint32((2026-2000)<<25 | 2<<21 | 31<<16)
-	if _, err := DecodeFirmwareTimestampSchema2(invalidDate); err == nil {
+	if _, err := DecodeFirmwareTimestamp(invalidDate); err == nil {
 		t.Fatal("invalid packed calendar date was accepted")
 	}
 }
 
-func ExampleDecodeFirmwareTimestampSchema2() {
+func ExampleDecodeFirmwareTimestamp() {
 	date := uint32((2026-2000)<<9 | 8<<5 | 1)
 	clock := uint32(19<<11 | 42<<5 | 58>>1)
-	decoded, _ := DecodeFirmwareTimestampSchema2(date<<16 | clock)
+	decoded, _ := DecodeFirmwareTimestamp(date<<16 | clock)
 	fmt.Println(decoded.Compact)
 	// Output: 260801194258
 }

@@ -9,7 +9,7 @@ import (
 const (
 	PCControllerEEPROMBytes      uint32 = 1024
 	EEPROMSettingsAddress        uint32 = 32
-	EEPROMSettingsValueBytes     uint32 = 29
+	EEPROMSettingsValueBytes     uint32 = 31
 	EEPROMSettingsRecordBytes    uint32 = EEPROMSettingsValueBytes + 1
 	EEPROMRemoteHeaderAddress    uint32 = 64
 	EEPROMRemoteEntriesAddress   uint32 = 68
@@ -31,12 +31,12 @@ type OfflineEEPROMDecode struct {
 	ResetJournal OfflineResetJournalDecode `json:"reset_journal"`
 }
 
-// ControllerSettings is the current semantic 29-byte MCU settings layout. It
-// has no build-version prefix; its thirtieth byte is the CRC-8 over the values.
+// ControllerSettings is the current semantic 31-byte MCU settings layout. It
+// has no build-version prefix; the thirty-second record byte is its CRC-8.
 type ControllerSettings struct {
 	Flags                     byte    `json:"flags"`
 	Silent                    bool    `json:"silent"`
-	Reserved1                 bool    `json:"reserved_1"`
+	ProgrammingMode           bool    `json:"programming_mode"`
 	SwapTemperatureSensors    bool    `json:"swap_temperature_sensors"`
 	MotionDoorPolicy          byte    `json:"motion_door_policy"`
 	DoorAudioEnabled          bool    `json:"door_audio_enabled"`
@@ -47,7 +47,7 @@ type ControllerSettings struct {
 	IlluminationOffBrightness byte    `json:"illumination_off_brightness"`
 	DisplayBrightness         byte    `json:"display_brightness"`
 	StatusBrightness          byte    `json:"status_brightness"`
-	PWMBootMode               byte    `json:"pwm_boot_mode"`
+	OutputPersistence         byte    `json:"output_persistence"`
 	StreamPeriodMS            uint16  `json:"stream_period_ms"`
 	UserPWM                   [8]byte `json:"user_pwm"`
 	DefaultMenuPage           byte    `json:"default_menu_page"`
@@ -57,7 +57,10 @@ type ControllerSettings struct {
 	VoltageDecimals           byte    `json:"voltage_decimals"`
 	CurrentDecimals           byte    `json:"current_decimals"`
 	VisibleMenuMask           uint16  `json:"visible_menu_mask"`
-	MenuOrder                 [8]byte `json:"menu_order_packed"`
+	MenuOrder                 [7]byte `json:"menu_order_packed"`
+	DisplayClosedBrightness   byte    `json:"display_closed_brightness"`
+	MotionExitHoldSeconds     byte    `json:"motion_exit_hold_seconds"`
+	RelayRestoreMask          byte    `json:"relay_restore_mask"`
 }
 
 type OfflineSettingsDecode struct {
@@ -141,7 +144,7 @@ func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
 	decoded := OfflineEEPROMDecode{
 		SourceKind: "offline-eeprom-hex",
 		SourcePath: path, SourceSHA256: document.SourceSHA256,
-		Layout: "settings-unversioned-29/rf-record12-cap20/reset-journal-320",
+		Layout: "settings-unversioned-31/rf-record12-cap20/reset-journal-320",
 	}
 	decoded.Settings = decodeOfflineSettings(document.Image)
 	decoded.Remotes = decodeOfflineRemotes(document.Image)
@@ -158,9 +161,9 @@ func decodeOfflineSettings(image *IntelHexImage) OfflineSettingsDecode {
 		_, present := image.data[EEPROMSettingsAddress]
 		return OfflineSettingsDecode{
 			Present: present,
-			Format:  "current/unversioned-29+crc8",
+			Format:  "current/unversioned-31+crc8",
 			Issue: fmt.Sprintf(
-				"unsupported settings layout: require 29 value bytes plus CRC-8 at EEPROM 0x%04X..0x%04X: %v",
+				"unsupported settings layout: require 31 value bytes plus CRC-8 at EEPROM 0x%04X..0x%04X: %v",
 				EEPROMSettingsAddress,
 				EEPROMSettingsAddress+EEPROMSettingsRecordBytes-1,
 				err,
@@ -174,7 +177,7 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 	result := OfflineSettingsDecode{
 		Present:          true,
 		Supported:        true,
-		Format:           "current/unversioned-29+crc8",
+		Format:           "current/unversioned-31+crc8",
 		ValueBytes:       EEPROMSettingsValueBytes,
 		StoredChecksum:   record[len(record)-1],
 		ComputedChecksum: avrCRC8(record[:len(record)-1]),
@@ -186,28 +189,31 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 		IlluminationOnBrightness:  settings[2],
 		IlluminationOffBrightness: settings[3],
 		DisplayBrightness:         settings[4], StatusBrightness: settings[5],
-		PWMBootMode:     settings[6],
-		StreamPeriodMS:  binary.LittleEndian.Uint16(settings[7:9]),
-		DefaultMenuPage: settings[17], MenuFlags: settings[18],
+		OutputPersistence: settings[6],
+		StreamPeriodMS:    binary.LittleEndian.Uint16(settings[7:9]),
+		DefaultMenuPage:   settings[17], MenuFlags: settings[18],
 	}
 	copy(values.UserPWM[:], settings[9:17])
 	values.Silent = values.Flags&0x01 != 0
-	values.Reserved1 = values.Flags&0x02 != 0
+	values.ProgrammingMode = values.Flags&0x02 != 0
 	values.SwapTemperatureSensors = values.Flags&0x04 != 0
 	values.MotionDoorPolicy = (values.Flags >> 3) & 0x03
 	values.DoorAudioEnabled = values.Flags&0x20 == 0
 	values.RelayAudioEnabled = values.Flags&0x40 == 0
-	if values.Flags&0x80 != 0 {
-		values.MotionBreakMS = 100
-	} else {
-		values.MotionBreakMS = 1
-	}
+	values.MotionBreakMS = uint16(settings[30])
 	values.SaveLastMenuPage = values.MenuFlags&0x01 != 0
 	values.StatusColor = (values.MenuFlags >> 1) & 0x07
 	values.VoltageDecimals = decodeDecimalBits((values.MenuFlags >> 4) & 0x03)
 	values.CurrentDecimals = decodeDecimalBits((values.MenuFlags >> 6) & 0x03)
 	values.VisibleMenuMask = binary.LittleEndian.Uint16(settings[19:21])
-	copy(values.MenuOrder[:], settings[21:29])
+	copy(values.MenuOrder[:], settings[21:28])
+	displayOptions := settings[28]
+	values.DisplayClosedBrightness = displayOptions & 0x07
+	values.MotionExitHoldSeconds = displayOptions >> 3
+	if values.MotionExitHoldSeconds == 0 {
+		values.MotionExitHoldSeconds = 2
+	}
+	values.RelayRestoreMask = settings[29]
 	result.Values = values
 
 	var issues []string
@@ -220,14 +226,17 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 	if values.DisplayBrightness > 7 {
 		issues = append(issues, "display brightness exceeds 7")
 	}
-	if values.PWMBootMode > 2 {
-		issues = append(issues, "PWM boot mode exceeds 2")
+	if values.OutputPersistence&^0x0F != 0 {
+		issues = append(issues, "output persistence flags exceed 0x0F")
 	}
-	if values.DefaultMenuPage >= 15 {
-		issues = append(issues, "default menu page exceeds 14")
+	if values.DefaultMenuPage >= 14 {
+		issues = append(issues, "default menu page exceeds 13")
 	}
 	if values.StreamPeriodMS != 0 && values.StreamPeriodMS < 100 {
 		issues = append(issues, "non-zero stream period is below 100 ms")
+	}
+	if values.MotionBreakMS == 0 {
+		issues = append(issues, "motion break is outside 1..255 ms")
 	}
 	issues = append(issues, validateOfflineMenuLayout(values)...)
 	result.Valid = len(issues) == 0
@@ -236,24 +245,21 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 }
 
 func validateOfflineMenuLayout(values ControllerSettings) []string {
-	const allPages uint16 = 0x7FFF
+	const allPages uint16 = 0x3FFF
 	var issues []string
 	if values.VisibleMenuMask == 0 || values.VisibleMenuMask&^allPages != 0 {
-		issues = append(issues, "visible menu mask is empty or exceeds pages 0..14")
+		issues = append(issues, "visible menu mask is empty or exceeds pages 0..13")
 	} else if values.VisibleMenuMask&(uint16(1)<<values.DefaultMenuPage) == 0 {
 		issues = append(issues, "default menu page is hidden")
 	}
-	if values.MenuOrder[7]&0xF0 != 0xF0 {
-		issues = append(issues, "unused high menu-order nibble is not 0xF")
-	}
 	var seen uint16
-	for rank := byte(0); rank < 15; rank++ {
+	for rank := byte(0); rank < 14; rank++ {
 		packed := values.MenuOrder[rank>>1]
 		page := packed & 0x0F
 		if rank&1 != 0 {
 			page = packed >> 4
 		}
-		if page >= 15 {
+		if page >= 14 {
 			issues = append(issues, fmt.Sprintf("menu-order rank %d has invalid page %d", rank, page))
 			continue
 		}
@@ -265,7 +271,7 @@ func validateOfflineMenuLayout(values ControllerSettings) []string {
 		seen |= bit
 	}
 	if seen != allPages {
-		issues = append(issues, "menu order is not a permutation of pages 0..14")
+		issues = append(issues, "menu order is not a permutation of pages 0..13")
 	}
 	return issues
 }

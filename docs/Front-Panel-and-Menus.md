@@ -1,39 +1,14 @@
+<div align="center"><a href="../README.md"><img src="assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Board Features, Front Panel, and Menus
 
-This is the starter guide to what the ATmega328P firmware actually owns. It
-also separates the firmware currently running on the physical board from the
-newer source tree, because those are not the same image yet.
-
-## Which menu is on the board right now?
-
-The latest recorded guarded upload/readback checkpoint on COM18 is
-`4C980157`. It reports the 15-page directory whose stable page 0 is `STAT` and
-retained all 15 EEPROM menu pages in identity order. The latest explicit
-physical-key checkpoint remains `2FD9F81C`: reset returned to Status, and
-Previous/Next/Decrease/Increase left reset count 9 unchanged. Seeing `STAT`
-and then `OPEN`/`CLSd` is therefore expected on both checkpoints.
-
-The current pinned source/CI profile keeps that same 15-page layout and builds
-at 32,228/32,384 application-flash bytes, with 1,444/2,048 static SRAM and a
-conservative 1,764/2,048 estimated peak. That source profile is newer than the
-recorded hardware checkpoints; a successful CI build is not a claim that its
-exact HEX has completed physical upload and acceptance. The earlier
-`5DF10D05` image had a 14-page menu whose page 0 was `VOLT`; it explains the
-old VOLT observation but is historical.
-
-| Image | Root page 0 | Root pages | Status |
-|---|---|---:|---|
-| Current pinned source/CI profile | `STAT` | 15 | 32,228/32,384 application flash; 1,444 static and 1,764 estimated-peak SRAM; physical acceptance pending |
-| Guarded upload/readback checkpoint `4C980157` | `STAT` | 15 | 32,226/32,384 application flash; uploaded and independently flash-verified on COM18; final human button/RF/load-safe pass pending |
-| Physical-key checkpoint `2FD9F81C` | `STAT` | 15 | UART-uploaded and flash-verified on COM18; four menu keys did not reset it |
-| Historical `5DF10D05` | `VOLT` | 14 | Superseded accepted evidence; no longer the current source or hardware checkpoint |
-
-The previous 5DF order was:
-
-```text
-VOLT -> CURR -> tLED -> t-bt -> LItE -> bt -> Snd -> PWM
-     -> rELY -> KEY -> uPWM -> r5-8 -> MOVE -> LErn -> VOLT
-```
+This is the starter guide to the ATmega328P-owned controls and state. The
+current firmware exposes 14 stable leaf pages beneath four fixed categories;
+stable page 0 is `door`. Visibility and ordering are EEPROM-backed while each
+page's category is compiled into the firmware. Exact flash/SRAM figures and
+build identity belong to the firmware manifest produced from the source being
+deployed, while physical acceptance belongs to that same image after upload
+and readback.
 
 ## Physical connections and ownership
 
@@ -89,20 +64,18 @@ direction; R2 and R4 enable power:
 | A | R1 | R2 | R5-R8 are independent user outputs |
 | B | R3 | R4 | |
 
-Changing direction while enabled is sequenced as disable, configurable 1 ms
-or 100 ms break, direction change, 50 ms settling, then enable. The two
+Changing direction while enabled is sequenced as disable, the configured
+1..255 ms break, direction change, then enable. The two
 direction relays are separated by at least 5 ms. Reset and All Off disable the
 enable relays before changing directions or other outputs.
 
 ## Peripheral initialization profile
 
-This section is the canonical hardware-configuration reference for the
-**current working source**. It is not proof that every value below is already
-running on COM18: `4C980157` is the latest recorded guarded upload/readback
-checkpoint, `2FD9F81C` is the latest explicit physical-key checkpoint, and the
-current 32,228-byte source profile still needs its own hardware acceptance.
-Values marked EEPROM default apply after an erased or invalid settings record;
-a valid board-owned EEPROM record overrides them.
+This section is the canonical hardware-configuration reference for the current
+source. Exact build identity and resource use come from the candidate's
+firmware manifest; physical behavior must be accepted after that same image is
+uploaded and read back. Values marked EEPROM default apply after an erased or
+invalid settings record; a valid board-owned EEPROM record overrides them.
 
 The production target is an ATmega328P at 16 MHz with a 2 s watchdog. UART0 is
 started first so the host can receive an early `HELLO`; relay outputs are made
@@ -114,7 +87,7 @@ addressable LEDs, EEPROM/display, recovered I2C plus PWM/INA219, temperatures,
 | Peripheral | Wiring/address | Active initialization | Startup state |
 |---|---|---|---|
 | INA219 | I2C `0x40`, A4/A5 | 32 V, gain /8, 64-sample bus and 128-sample shunt averaging, continuous conversion | Probed after I2C recovery; unavailable if probe/configuration fails |
-| 16-channel PWM (PCA9685 hardware) | I2C `0x41`, A4/A5 | 1 kHz, auto-increment, active-high logical mapping | Every channel is forced off with one retry before EEPROM mode is applied; factory mode is Auto on channels 0-10 |
+| 16-channel PWM (PCA9685 hardware) | I2C `0x41`, A4/A5 | 1 kHz, auto-increment, active-high logical mapping | Every channel is forced off with one retry before only explicitly enabled stored outputs are restored |
 | Two DS18B20 probes | D10/PB2/CS, shared 1-Wire | Externally powered, 11-bit, asynchronous conversion, maximum two valid ROMs | Scan, sort ROMs, request first conversion; no blocking wait |
 | TM1637 | D13/PB5 clock, D11/PB3 data | Fixed-pin open-drain-style sender, 3 us half-cycle, brightness 0-7 | Clear, EEPROM brightness (factory 5), show `boot`; changed segments only thereafter |
 | 74HC165/74HC595 | A0-A3, D4, D5, D7, D8 | Active-low inputs and outputs, 5 ms service interval | `/OE` held inactive until an all-off frame has been latched |
@@ -138,9 +111,11 @@ reset.
 
 The firmware reads every 100 ms while the door is open and every 500 ms while
 closed. This deliberately favors a responsive open-enclosure display while
-giving current the strongest hardware filtering. There is no second firmware
-EMA over the INA219 values, so the displayed value is the newest completed
-hardware-averaged result.
+giving current the strongest hardware filtering. Completed INA219 samples
+also pass through a software EMA without another history buffer: voltage and
+bus voltage use 1/4 of the new delta with a one-unit deadband, while current
+and power use 1/8 with a two-unit deadband. The first valid reading is applied
+immediately.
 
 Safe changes:
 
@@ -175,20 +150,21 @@ wrong address or wiring fault.
 
 At startup the controller writes logical zero to all 16 channels, with one
 forced retry per failed channel. Three consecutive later write failures mark
-PWM unavailable. The EEPROM factory mode is Auto: channels 0-10 only fade one
-at a time in steps of 128 every 20 ms. Channels 11-15 are excluded because
-they are owned by enclosure illumination, Power/On, and status RGB. Changed
-values are cached, preventing redundant I2C writes and visible jitter.
+PWM unavailable. It then applies direct stored values only for the eight
+EEPROM-backed user channels when output-persistence bit 2 is enabled. Channels
+11-15 remain owned by enclosure illumination, Power/On, and status RGB.
+Changed values are cached, preventing redundant I2C writes and visible jitter.
 
 Safe changes:
 
-- Use Off or Manual as the saved boot mode after hardware commissioning. Auto
-  is intentionally conspicuous and changes user outputs 0-10 after every
-  reset.
+- Set each channel directly and use a named host macro or automation for a
+  repeatable commissioning sweep. Do not encode autonomous test behavior in
+  board settings.
 - Frequency can be changed within 24-1526 Hz, but it affects MOSFET lighting,
   illumination, Power/On, and RGB together. Revalidate flicker, switching
   losses, and attached-module input limits.
-- Never add channels 11-15 to the automatic test mask during normal use.
+- Do not drive channels 11-15 from a generic pattern while their system owner
+  is active.
 - Change active polarity only for a verified inverted output stage, then test
   the all-off frame before connecting loads.
 
@@ -280,8 +256,10 @@ library default of ten repeats unless that library setting is changed.
 Received codes carry code, bit count, protocol, and pulse length. Identical
 codes within 400 ms are treated as repeats: ordinary toggle actions are
 suppressed, while Momentary, Up, and Down mappings refresh their active window.
-Learning suppresses duplicate repeats, supports single, multiple, timed, and
-indefinite sessions, and stores at most 20 learned entries in board EEPROM.
+Learning suppresses duplicate repeats and stores at most 20 learned entries in
+board EEPROM. The default **Learn** session is indefinite and accepts multiple
+codes. The bounded **timer** session exposes its configured/remaining duration;
+`single` and `one-shot` remain accepted names for that same timer mode.
 
 Safe changes:
 
@@ -295,9 +273,9 @@ Safe changes:
 
 Canonical sources: the radio service and `transmitRadio()` in
 [PCController.ino](../PCController.ino), [BoardPins.h](../LocalLib/BoardPins.h),
-and the pinned dependency record in [Project Checklist](Project-Checklist.md).
+and the pinned dependency record in [Project Acceptance](Project-Checklist.md).
 
-### Cooperative I2C and PC-owned LCD profile
+### Cooperative I2C and HOST LCD profile
 
 The firmware uses its fixed-hardware `CompactI2c` master rather than MiniCore
 `Wire`. At 16 MHz it selects prescaler 1 and `TWBR=72`, giving an explicit
@@ -332,9 +310,11 @@ Safe changes:
   same address.
 - A faster I2C clock may work, but validate every installed module, cable
   length, pull-up, and the host-driven LCD before changing it.
-- Re-enabling the AVR LCD renderer restores standalone rich LCD text but costs
-  the measured 1328 flash bytes and 49 SRAM bytes documented in
-  [Firmware Size, Feature Cost, and Removal Tradeoffs](Memory-and-Feature-Tradeoffs.md#avr-lcd-renderer-disabled-standalone-physical-lcd-lost).
+- Re-enabling the AVR LCD renderer restores standalone rich LCD text but spends
+  scarce flash and SRAM. Treat it as an explicit
+  [feature tradeoff](Memory-and-Feature-Tradeoffs.md#best-offload-candidates) and
+  remeasure it with the current locked toolchain before changing the release
+  profile.
 
 Canonical sources: the compact master in
 [CompactI2c.cpp](../Project/CompactI2c.cpp), I2C leasing/offline-shift logic in
@@ -356,8 +336,8 @@ not be introduced.
 
 All relay stages are active-low behind the 74HC595. Startup and All Off first
 commit R2/R4 disabled, then clear directions and R5-R8. A reversal while
-enabled is sequenced as Enable off, EEPROM-selectable 1 ms (factory) or 100 ms
-break, direction relay change, 50 ms mechanical settle, then Enable on. The A
+enabled is sequenced as Enable off, EEPROM-selectable 1..255 ms break (1 ms
+factory), direction relay change, then Enable on, with no hidden settling delay. The A
 and B direction relays cannot change in the same service pass and are separated
 by at least 5 ms. Motion door policy is an EEPROM setting: Always (factory),
 Closed Only, Open Only, or Never. R5-R8 are independent general outputs.
@@ -369,18 +349,34 @@ accounts for delayed service without wrapping, preventing the previously seen
 fade jitter. Off and On modes select the same stored endpoints directly.
 
 The Power/On indicator is PWM channel 12 and turns on when status control
-starts. Status RGB is channels 13-15. EEPROM factory brightness is 128; Ready
-color choices are red, blue, violet, green, and white. Boot is amber, Learning
-breathes blue, HOT/Warning breathes orange, Fault breathes red, and short cues
-cover door, BT Audio, menu, radio, save, discard, and graceful reset. Animated
-levels change by four every 20 ms.
+starts. Status RGB is channels 13-15. EEPROM factory brightness is 128.
+Animated levels change by four every 20 ms, and informational transitions ease
+toward their new color instead of inserting a black or unrelated frame.
+
+| Priority/state | RGB behavior |
+|---|---|
+| Programming latch | Power indicator and RGB remain off until the host completes verify/reconnect/restore |
+| Fault, host offline, or Running with door open | Immediate hard red flash |
+| HOT | Orange/red breathing plus the configured audio warning |
+| RF learning | Violet breathing; received RF activity overlays a smooth violet cue |
+| Host status override | Host-supplied color/effect |
+| Running with door closed | Orange/yellow |
+| BT Audio connected (solid indicator) | Blue |
+| BT Audio waiting/not connected (blinking indicator) | Calm blue breathing |
+| BT Audio powered off | Green/red breathing |
+
+Door open/closed, menu, BT Audio, radio, save, discard, and Reboot are bounded
+cues layered over the base state. Informational cues restore smoothly; critical
+warnings intentionally do not fade slowly. Individual status colors remain a
+host/TUI configuration acceptance item and must not be described as already
+persisted in EEPROM until that final settings layout is implemented.
 
 Safe changes:
 
 - Melody notes/durations, cue enable flags, display/status brightness, Ready
-  palette choice, illumination mode/endpoints, motion policy, and 1/100 ms
+  palette choice, illumination mode/endpoints, motion policy, and 1..255 ms
   break are safe EEPROM/host settings.
-- Keep the 50 ms direction settle and 5 ms cross-side interlock unless relay
+- Keep the configured break and 5 ms cross-side interlock unless relay
   hardware has been measured. Removing them changes physical safety behavior,
   not just UI feel.
 - Never use Timer1, D9, or D10 for Servo/Arduino PWM while the buzzer driver is
@@ -400,7 +396,7 @@ The separate addressable strip owns D6/PD6 and has a fixed count of 11 pixels.
 At 16 MHz the compact sender emits an 800 kHz frame with interrupts masked for
 approximately 330 us for 33 color bytes, restores interrupts, then waits 80 us
 for the latch. The current `PCCONTROLLER_USE_WS2812B=0` profile sends BRG order
-for the inherited WS2811 hardware; setting it to 1 builds GRB order for
+for the installed WS2811 strip; setting it to 1 builds GRB order for
 WS2812B. Startup drives D6 low, clears the 33-byte pixel buffer, and sends an
 all-black frame.
 
@@ -463,73 +459,83 @@ Safe changes:
 
 Canonical sources: [ProjectConfig.h](../ProjectConfig.h),
 [UartProtocol.h](../Project/UartProtocol.h),
-[UartProtocol.cpp](../Project/UartProtocol.cpp), the latest checkpoint
-[firmware-manifest.json](../.build/firmware/firmware-manifest.json), and the
-host serial mode in [session.go](../Tools/Controller/internal/link/session.go).
+[UartProtocol.cpp](../Project/UartProtocol.cpp), the generated
+`firmware-manifest.json`, and the host serial mode in
+[session.go](../Tools/Controller/internal/link/session.go).
 
 ## Key gestures
 
-The staged key engine debounces for 50 ms. A physical down edge performs the
-first action immediately and emits an event to the host. It then recognizes:
+The key engine debounces for 50 ms and emits raw Down/Up events immediately.
+For ordinary menu input it waits until the gesture is known, so a hold never
+performs an accidental short action first:
 
 | Gesture | Timing and effect |
 |---|---|
-| Press | One menu action immediately after debounce; a brief beep unless Silent is enabled |
+| Short press | One Click action after the 300 ms double-click window; a brief beep unless Silent is enabled |
 | Double click | Second release within 300 ms; double-click K1 returns to the configured default page |
-| Hold start | 600 ms after press |
+| Hold start | One long-press action 600 ms after press; no Click is emitted |
 | Hold repeat | Every 150 ms, then every 60 ms after 1.8 s |
 | Hold release | Emitted when a held key is released |
 | Raw Down/Up | Emitted for host automation and faithful virtual-key mirroring |
 
 Motion and Push-relay control use true down/up behavior rather than repeated
-menu actions. The KEY identification page suppresses ordinary hold repeat;
-holding K1 or K2 leaves it in the corresponding direction.
+menu actions, so their output starts immediately after debounce and stops on
+release. The KEY identification page reports one classified press and
+suppresses ordinary hold repeat.
 
-The requested alternative gesture policy—defer the single action until the
-hold threshold, then invoke a distinct long-hold action—is **not** the current
-firmware behavior. The current behavior remains immediate press plus later
-hold/repeat events.
+## Local menu directory
 
-## Staged local menu directory
+The current hierarchy has four category parents. On an ordinary leaf, K1/K2
+move through visible pages in that category, K3 goes Back, and K4 enters the
+page's editor/action. `KEY` owns all four keys for identification and `rELY`
+owns K3 as immediate All Off. On a category parent, K1/K2 move among non-empty
+categories, K4 enters the first visible child in EEPROM order, and K3 returns
+to the previously active leaf. Navigation wraps. A page/category label is
+shown for about 650 ms before the live value.
 
-On every ordinary root page, K1 goes to the previous page, K2 to the next, K3
-is Decrease/Off, and K4 is Increase/On/Enter unless the page overrides it.
-Page navigation wraps at both ends. A page label is shown for about 650 ms,
-then the live value is rendered.
+Category parents are compact views represented by an existing leaf label, not
+additional stable page IDs:
+
+| Category | Parent label | Stable leaf pages |
+|---|---|---|
+| Monitoring | `door` | 0 `door`, 1 `VOLT`, 2 `CURR`, 3 `tLED`, 4 `tBT` |
+| Environment | `LItE` | 5 `LItE`, 6 `bEEP` |
+| Outputs | `PWM` | 7 `PWM`, 8 `rELY`, 10 `uPWM`, 11 `r5-8`, 12 `MOVE` |
+| Inputs/RF | `KEY` | 9 `KEY`, 13 `LErn` |
 
 | ID | Label | What the display shows | K3/K4 behavior |
 |---:|---|---|---|
-| 0 | `STAT` | Door `OPEN` or `CLSd` | Read-only |
-| 1 | `VOLT` | INA219 supply voltage using 0-2 configured decimals | Read-only |
-| 2 | `CURR` | INA219 current using 0-2 configured decimals | Read-only |
-| 3 | `tLED` | Enclosure-light sensor as `LxxC` | Read-only |
-| 4 | `t-bt` | BT Audio sensor as `bxxC` | Read-only |
-| 5 | `LItE` | Illumination `oFF`, `Auto`, or `on` | K4 opens Illumination editor |
-| 6 | `bt` | BT Audio `boFF`, `b-on`, or `bLnk` | Read-only |
-| 7 | `Snd` | `Mute` or `Snd` | K4 opens Board Settings editor |
-| 8 | `PWM` | Alternates mode/channel (`A-00`, `M-00`, `O-00`) and value | K4 opens all-channel commissioning editor |
-| 9 | `rELY` | Alternates selected R1-R8 and Off/On | K3 All Off; K4 opens relay commissioning |
-| 10 | `KEY` | `KEY`, then 1-4 for about 900 ms | Any key identifies itself; hold K1/K2 to leave |
-| 11 | `uPWM` | Alternates user channel 1-8 and its stored 8-bit value | K4 opens persistent user-PWM editor |
-| 12 | `r5-8` | Active R5-R8 mask as 0-15 | K4 opens general-relay control |
-| 13 | `MOVE` | Door `OPEN` or `CLSd` | K4 enters motion if the configured door policy permits it |
-| 14 | `LErn` | Learned RF count, or unavailable dashes | K4 starts one-code 15-second learning |
+| 0 | `door` | Door `OPEN` or `CLSd` | K3 Back; K4 currently gives the common read-only error cue |
+| 1 | `VOLT` | INA219 supply voltage using 0-2 configured decimals | K3 Back; K4 read-only error cue |
+| 2 | `CURR` | INA219 current using 0-2 configured decimals | K3 Back; K4 read-only error cue |
+| 3 | `tLED` | Enclosure-light sensor as `LxxC` | K3 Back; K4 read-only error cue |
+| 4 | `tBT` | BT Audio sensor as `bxxC` | K3 Back; K4 read-only error cue |
+| 5 | `LItE` | Illumination `oFF`, `Auto`, or `on` | K3 Back; K4 opens Illumination editor |
+| 6 | `bEEP` | `Mute` or `bEEP` | K3 Back; K4 opens Board Settings editor |
+| 7 | `PWM` | Alternates channel (`P-00`..`P-15`) and current 0-4095 value | K3 Back; K4 opens all-channel commissioning editor |
+| 8 | `rELY` | Alternates selected R1-R8 and Off/On | K3 immediately turns all relays off; K4 first turns all relays off, then opens commissioning |
+| 9 | `KEY` | `KEY`, then the identified number for about 900 ms | K1-K4 identify 1-4; double-click K1 returns to the configured default page |
+| 10 | `uPWM` | Alternates user channel 1-8 and its stored 8-bit value | K3 Back; K4 opens persistent user-PWM editor |
+| 11 | `r5-8` | Active R5-R8 mask as 0-15 | K3 Back; K4 opens general-relay control |
+| 12 | `MOVE` | Door `OPEN` or `CLSd` | K3 Back; K4 enters motion if the configured door policy permits it |
+| 13 | `LErn` | Learned RF count, or unavailable dashes | K3 Back; K4 starts the default indefinite, multi-code learning session |
 
-The board-authoritative `MenuList` opcode returns these IDs, program-mode IDs,
-and four-character labels in pages. New host code must use that response rather
-than assuming the older 5DF order.
+The board-authoritative `MenuList` opcode returns these 14 dense IDs,
+program-mode IDs, and four-character labels in pages. Category membership is
+the fixed mapping above and is not part of that six-byte entry. BT input sensing,
+telemetry/events, automations, host monitoring, and RGB status remain active;
+only the redundant four-digit BT page and its strings/renderer were removed.
 
-The current `STAT` renderer is a door-status home page. It does not yet
-automatically replace the four digits with every relay/RF/BT/macro event as
-originally requested. The host can inject temporary segment text, and events
-already arrive over UART, but the automatic local event-overlay UX remains an
-acceptance item.
+The current `door` renderer is the door-status home page. It does not
+automatically replace the four digits with every relay/RF/BT/macro event. The
+host can inject temporary segment text and events arrive over UART; automatic
+local event overlays remain an explicit capability gap.
 
 The TM1637 service itself runs every 20 ms and writes only changed segments.
 INA219 conversions are hardware-filtered with 64x bus and 128x shunt/current
 averaging; the firmware reads them every 100 ms while the enclosure is open
-and every 500 ms while closed. There is no second voltage/current software EMA,
-so the display is responsive but holds the last averaged sample between reads.
+and every 500 ms while closed. Voltage/bus voltage then use a 1/4 software EMA;
+current/power use 1/8, preserving fast display service while damping samples.
 Temperatures use asynchronous 11-bit conversions, 450/1,000 ms open/closed
 request periods, and a 50/50 EMA after the first valid sample; HOT readings are
 not delayed by that EMA.
@@ -537,24 +543,24 @@ not delayed by that EMA.
 ### Program state-machine modes
 
 Telemetry and `FrontPanelGet` expose the active `ProgramMode`, not just the
-root page. This is the restored mode manager used to keep menu transitions and
+active leaf page. This is the restored mode manager used to keep menu transitions and
 modal editors deterministic:
 
 | Mode ID(s) | State(s) | Purpose |
 |---:|---|---|
 | 0 | Boot | Shows `BOOT`, initializes hardware, then enters the EEPROM default page |
-| 1-15 | Status through RF | One mode for each root page ID 0-14; mode ID is page ID + 1 |
-| 16-18 | Illumination Mode/On/Off Edit | Three-field illumination transaction |
-| 19 | Sound/Board Settings Edit | Six-item board-settings submenu |
-| 20-22 | PWM Mode/Channel/Value Edit | All-channel commissioning transaction |
-| 23-24 | Relay Channel/Value Edit | Live R1-R8 commissioning |
-| 25-26 | User PWM Channel/Value Edit | EEPROM PWM 0-7 transaction |
-| 27-29 | User Relay Channel/Behavior/Control | R5-R8 Toggle/Push control |
-| 30 | Motion Control | Held Side A/B motion keys and combined-key exit |
-| 31 | Save Prompt | Alternates `SAVE`/`diSC` until the user confirms |
-| 32 | Flash Message | About 900 ms of flashing saved/discarded feedback |
-| 33 | RF Learning | Timed, multi-code, or indefinite learning lifecycle |
-| 34 | Fault | Reserved `Err`/audio/RGB terminal state; no current source path enters it automatically |
+| 1-14 | Door through RF | One mode for each stable leaf page ID 0-13; mode ID is page ID + 1 |
+| 15-17 | Illumination Mode/On/Off Edit | Three-field illumination transaction |
+| 18 | Sound/Board Settings Edit | Seven-item board-settings submenu |
+| 19-20 | PWM Channel/Value Edit | Direct per-channel `0..4095` control |
+| 21-22 | Relay Channel/Value Edit | Live R1-R8 commissioning |
+| 23-24 | User PWM Channel/Value Edit | EEPROM PWM 0-7 transaction |
+| 25-27 | User Relay Channel/Behavior/Control | R5-R8 Toggle/Push control |
+| 28 | Motion Control | Held Side A/B motion keys and combined-key exit |
+| 29 | Save Prompt | Alternates `SAVE`/`diSC` until the user confirms |
+| 30 | Flash Message | About 900 ms of flashing saved/discarded feedback |
+| 31 | RF Learning | Timed, multi-code, or indefinite learning lifecycle |
+| 32 | Fault | Reserved `Err`/audio/RGB terminal state; no current source path enters it automatically |
 | 255 | Undefined | Sentinel only; never a normal display state |
 
 Host-panel capture is a separate flag layered over these modes. It forwards
@@ -576,50 +582,53 @@ four-count steps every 20 ms toward the target; it is not supposed to jump.
 
 ### Board Settings editor
 
-Enter from `Snd` with K4. This modal sequence is the closest thing the staged
+Enter from `bEEP` with K4. This modal sequence is the closest thing the current
 local UI has to a settings submenu:
 
 | Item | Label | Values | K3/K4 |
 |---:|---|---|---|
-| 1 | `Snd` | Mute or Sound | K3 Mute, K4 Sound |
-| 2 | `diSP` | TM1637 brightness 0-7 | Decrease/increase with rollover |
-| 3 | `StBr` | Status RGB brightness 0-255 | Nominal step 16 with rollover |
-| 4 | `CoLr` | Ready color 0-4: red, blue, violet, green, white | Decrease/increase with rollover |
-| 5 | `V-dP` | Voltage decimals 0-2 | Decrease/increase with rollover |
-| 6 | `A-dP` | Current decimals 0-2 | Decrease/increase with rollover |
+| 1 | `bEEP` | Mute or Beep | K3 Mute, K4 Beep |
+| 2 | `diSP` | TM1637 door-open brightness 0-7 | Decrease/increase with rollover |
+| 3 | `dCLS` | TM1637 door-closed brightness 0-7; factory 0/off | Decrease/increase with rollover |
+| 4 | `StBr` | Status RGB brightness 0-255 | Nominal step 16 with rollover |
+| 5 | `CoLr` | Ready color 0-4: red, blue, violet, green, white | Decrease/increase with rollover |
+| 6 | `V-dP` | Voltage decimals 0-2 | Decrease/increase with rollover |
+| 7 | `A-dP` | Current decimals 0-2 | Decrease/increase with rollover |
 
 Each field label is shown for about 650 ms and its value then blinks at about
-300 ms. Sound, display brightness, and RGB settings preview during editing;
+300 ms. Sound, door-open display brightness, and RGB settings preview during editing;
 Discard restores the entire snapshot. EEPROM stores the compact numeric Ready
 color index; the five names above are its fixed local order. Host-side named
 categories and their independently assigned colors remain PC configuration.
 
-### All-channel PWM commissioning
+The reed input selects the two EEPROM-backed TM1637 targets. The display walks
+one intensity step every 70 ms toward the open or closed target without slowing
+the 20 ms content refresh. Brightness 0 sends the TM1637 display-off command;
+factory values are 5 while open and 0 while closed.
+
+### Direct PWM control
 
 Enter from `PWM` with K4:
 
-1. `P-Md`: Off, Manual, or Auto.
-2. `P-Ch`: channel 0-15, when Manual is selected.
-3. `P-u`: logical value 0-4095, adjusted in 256-count steps with rollover.
-4. Save/Discard.
+1. `P-Ch`: select channel 0-15.
+2. `P-u`: set its logical value 0-4095 in 256-count steps with rollover.
+3. Finish the live transaction and return to the page.
 
-Auto fades one channel up and down in 128-count steps every 20 ms and advances
-through channels 0-10. It deliberately excludes system-owned channels 11-15.
-Manual can select all 16 channels, but the enclosure/status controllers may
-overwrite their owned channels 11 and 13-15 during normal service. Off clears
-the commissioning mask 0-10, not the system-owned outputs.
-
-Factory settings currently select Auto at boot. That is useful for identifying
-MOSFET wiring but should be changed to Off or Manual once commissioning ends.
+There is no global state or autonomous sweep. Values are applied directly;
+repeatable patterns belong in host macros or automations. The enclosure,
+power, and status controllers may subsequently update their owned channels
+11-15 during normal service. This live editor does not define boot behavior;
+use the EEPROM user-output editor for restorable channels 0-7.
 
 ### Relay commissioning
 
-On `rELY`, K3 immediately requests All Off. K4 opens:
+On the `rELY` leaf, K3 immediately requests All Off. K4 first requests All Off,
+then opens:
 
 1. `r-Ch`: select R1-R8.
 2. `r-on`: K3 Off, K4 On.
 
-K1 returns to channel selection and K2 returns to the root page. This editor
+K1 returns to channel selection and K2 returns to the `rELY` leaf. This editor
 changes live outputs and has no EEPROM Save prompt. For R1/R3, Off/On means
 Forward/Reverse direction request; for R2/R4 it means Disable/Enable. R5-R8
 are direct general outputs. The motion door policy is still enforced for
@@ -633,7 +642,7 @@ Enter from `uPWM` with K4:
 2. `uP-u`: edit its 8-bit value, 0-255, in nominal 16-count steps.
 3. Save/Discard.
 
-Entering selects Manual mode and applies all eight stored values to PWM 0-7.
+Entering applies all eight stored values directly to PWM 0-7.
 The firmware expands each 8-bit setting to the 12-bit hardware range. This
 page does not persist channels 8-10; use the host/direct PWM API for them.
 
@@ -669,8 +678,8 @@ not running through the local MOVE page follows the selected policy.
 
 ### Save and discard
 
-Illumination, Board Settings, PWM mode, and user-PWM editors snapshot their
-settings on entry. At the confirmation display:
+Illumination, Board Settings, and user-PWM editors snapshot their settings on
+entry. At the confirmation display:
 
 - K2 or K4 saves to CRC-checked EEPROM.
 - K1 or K3 discards and restores the snapshot.
@@ -680,12 +689,19 @@ settings on entry. At the confirmation display:
 
 ### 433 MHz learning and mappings
 
-K4 on `LErn` starts a 15-second, one-new-code learning session. `LErn` remains
-on the display. K3 cancels; timeout, cancel, full storage, and successful end
-are sent as distinct events. Unlike the old guide, K3 on the idle RF root does
-**not** clear all records.
+K4 on `LErn` starts the default indefinite, multi-code learning session.
+`LErn` remains on the display and each distinct received code can be stored
+until the host cancels, storage fills, or another lifecycle command ends the
+session. The timer/single/one-shot mode is host-started with an explicit 1-255
+second timeout; its display alternates total (`tNNN`) and remaining (`rNNN`)
+seconds. Start, progress, timeout/end, cancel, full storage, and learned-code
+events are distinct on the UART.
 
-The staged EEPROM holds 20 records. Each record stores ID, code, bit count,
+On the idle RF leaf K3 is hierarchy Back. Once learning mode is active there
+is no dedicated physical Cancel branch, so cancellation is a host operation in
+this candidate. K3 on the idle RF leaf does **not** clear all records.
+
+EEPROM holds 20 records. Each record stores ID, code, bit count,
 protocol, pulse length, action kind/value, behavior, and checksum. Newly
 learned codes are deliberately unmapped; the user or host must choose an
 action. The host can also start multi-code or indefinite sessions, reorder and
@@ -712,74 +728,72 @@ There are two intentionally different menu systems:
 |---|---|---|
 | Definition lives in | Firmware flash | Host JSON/YAML/TOML configuration |
 | Available without PC | Yes | No |
-| Capacity | 15 fixed root pages plus modal editors | Up to 32 menus, 32 items each in current host validation |
-| Nesting | Only the fixed editors above | Read-only, text, number, bool, select, submenu, and action items |
+| Capacity | 14 stable leaves, four fixed categories, and modal editors | Up to eight host nodes/overrides, with 32 items per host node |
+| Nesting | Four compiled categories plus the fixed editors above | Read-only, text, number, bool, select, submenu, and action items |
 | Physical keys | Handled by AVR | Forwarded as events to host while captured |
-| TM1637/LCD content | Rendered/staged by AVR | Host pushes an exact shared front-panel representation |
+| TM1637/LCD content | Retained by AVR | Host pushes an exact shared front-panel representation |
 | Persistence | Board EEPROM | Host configuration/data files |
 
 ### Current PC-hosted menu inventory
 
-The host's built-in configuration currently defines three hosted menus. These
+The host's built-in configuration currently defines six hosted menus. These
 are not additional AVR page IDs and do not consume board EEPROM:
 
 | Hosted menu | Current items | Availability |
 |---|---|---|
-| `host` / `HOST` | Host status, device status, host IP, API/link status, PC Settings submenu, System Actions submenu | Implemented in host configuration |
+| `host` / `HOST` | Host/device status, date/time, host IP, API/link status, Macro Library, PC Settings, and System Actions submenus | Implemented in host configuration |
 | `pc-settings` / `CFG` | Application title, poll interval, PC LCD service, LCD prompt mirroring, DTR reset-on-reconnect | Implemented; writes the PC configuration, not MCU EEPROM |
-| `system-actions` / `SYS` | Lock, sleep, and shut down Windows | Present but guarded and disabled by default |
+| `system-actions` / `SYS` | Monitor brightness, lock, suspend, hibernate, restart, and shutdown | All are guarded. Default policy allows brightness plus confirmed lock/sleep/hibernate; restart/shutdown need an explicit allow-list change. |
+| `macro-library` / `MACR` | File-watched, ID-sorted macro selector, selected definition, guarded play, Recording and Playback submenus | Implemented through the shared MacroRunner |
+| `macro-recording` / `REC` | Recording status, start with an automatically unique panel name, save, and guarded discard | MCU acknowledgement timestamps remain authoritative |
+| `macro-playback` / `RUN` | Live step/elapsed status, safe cancel, and guarded cancel-while-keeping-outputs | Uses the same commands as TUI, CLI, IPC, and WebUI |
 
-A hosted Macro library/record/playback page, RF organizer, richer MCU-settings
-page, and other PC/OS panels are requested migration targets; they are not
-part of the three built-in defaults above yet. Custom definitions can add up
-to 32 menus with 32 items each, but a configured definition is not proof that
-its read/write/action callback is implemented.
+An RF organizer, richer MCU-settings page, and other PC/OS panels remain
+possible migration targets. Custom definitions can add items within the
+eight-node volatile directory limit, but a configured definition is not proof
+that its read/write/action callback is implemented.
+
+### Current physical-hosted-menu boundary
+
+The six definitions above are usable on the current AVR through the fallback
+host-push path. `DisplayText` target 3 captures the panel and carries one exact
+four-character/32-character representation; physical key events go to the
+host; target 4 releases capture. Definition changes and selection changes make
+the host push a new representation, and five seconds without host traffic
+releases the panel.
+
+The richer board-pull protocol is **not implemented in this AVR image**.
+Host and Virtual Board source reserve `HOST_MENU_DIRECTORY`/`CONTENT`/`STATE`
+operations (`0x42..0x44`, `0x9A..0x9B`), but current firmware does not declare
+those opcodes or a capability for them; the host's semantic support probe is
+deliberately false. Consequently the physical AVR does not currently:
+
+- retain the eight `{id,parent,flags}` descriptors in RAM;
+- request a selected node's content from the host;
+- track directory generation/revision and loading/ready/failed phases; or
+- display `----`, retry a failed fetch, then report an unable-to-open state.
+
+Those are genuine remaining firmware features, not documentation-only work.
+The fallback still provides synchronized physical/remote interaction, but it
+is host-pushed rather than board-pulled.
 
 The `lcd_service_enabled` PC setting defaults to true; prompt mirroring remains
 independently false. New/default configurations get both `CFG` items. Existing
 user-customized `host_menus` arrays are not silently rewritten, so users may
 add the service item explicitly if they want it on an older custom panel.
 
-### Menu-placement decision matrix
-
-No local page is migrated by this document. The following table makes each
-choice explicit so a flash cut can be approved with its offline loss visible.
-Per-page flash/SRAM deltas are **not isolated**: the archived whole local-menu
-area was about 1,570 named flash bytes plus about 722 bytes for TM1637, and
-labels, render paths, editors, and shared state overlap. “Unmeasured” therefore
-means an A/B compile is required; it does not mean zero.
-
-| AVR page | Proposed placement | Why keep or move | What is lost offline if moved | Required host/protocol path | Size or host-side gain |
-|---|---|---|---|---|---|
-| 0 `STAT` | **Keep local** | Safe home page, door state, and hosted-menu request point | No standalone door/default status and no simple front-panel host-menu entry | Door/status events, `FrontPanelGet`, capture/release, `DisplayText` | Flash/SRAM unmeasured; host can add history but cannot replace the offline home |
-| 1 `VOLT` | Keep local; optional cut only by choice | The user explicitly uses the segment display to validate the 12 V supply | No supply-voltage reading without a connected host | `Status`/telemetry plus host-rendered display | Likely small render/label saving, unmeasured; sensor driver remains |
-| 2 `CURR` | Keep local; optional cut only by choice | Immediate current diagnosis is useful at the enclosure | No standalone current view | `Status`/telemetry plus host-rendered display | Likely small render/label saving, unmeasured; host gains richer SI formatting/graphs |
-| 3 `tLED` | **Keep local** | Confirms the illumination sensor and HOT behavior | No standalone enclosure-light temperature view | `TemperatureList` or telemetry plus hosted display | Small display-path saving only unless the sensor feature is also removed |
-| 4 `t-bt` | Keep local; medium-priority optional move | Identifies the BT Audio sensor independently of the PC | No standalone BT-module temperature view | `TemperatureList` or telemetry plus hosted display | Small display-path saving, unmeasured; host gains ROM/name/detail presentation |
-| 5 `LItE` + editor | **Keep controller local; editor is splittable** | Door Auto behavior and brightness must continue without a PC | If the editor moves, stored lighting still works but cannot be changed locally | `GetSettings`/`SetSettings`, door events, hosted number/select items | Editor delta unmeasured; host gains precise sliders, names, and validation |
-| 6 `bt` | **Keep local** | Gives direct BT Audio Off/On/Blinking diagnosis | No standalone BT Audio connection indication | Status plus immediate BT event | Small render/label saving, unmeasured; host gains event history and automations |
-| 7 `Snd` + Board Settings | Split candidate: keep quick Silent control, move advanced fields if space is needed | Silent must remain reachable; detailed display/RGB/decimal settings are easier in a host table | Moved fields retain EEPROM values but cannot be changed from the panel | `GetSettings`/`SetSettings` and hosted bool/number/select items | Good host UX gain; marginal flash/SRAM requires A/B because Save/Discard is shared |
-| 8 `PWM` commissioning | **Best local-to-host candidate** | Auto channel identification is development tooling, while direct PWM remains | No offline Off/Manual/Auto channel test or local fade demo | `PwmGet`, `PwmSet`, `PwmMode`, macro playback, output-state events | Delta unmeasured; host gains 16 sliders, labels, graphs, and repeatable tests |
-| 9 `rELY` commissioning | Good move candidate after retaining an obvious All Off | Relay-by-relay tests fit the host better; interlocks stay in firmware | No offline selected-relay test; K3 All Off on this page disappears unless relocated | Relay/motion commands and relay events | Delta unmeasured; host gains labeled buttons and live source attribution |
-| 10 `KEY` | **Keep local** | Tiny, valuable wiring/identity test that does not require a working UART | No offline way to identify K1-K4 | Raw key events and front-panel capture could emulate it | Likely small, unmeasured saving; little host gain beyond event logging |
-| 11 `uPWM` editor | Good move candidate | Host sliders are more precise and can retain named presets/macros | PWM 0-7 values still run from EEPROM but cannot be edited/saved locally | `PwmGet`/`PwmSet`, settings read/write or an explicit stored-values opcode | Delta unmeasured; host gains names, exact 0-4095 values, presets, and macros |
-| 12 `r5-8` | Keep unless PC-always-connected operation is accepted | It is the requested standalone general-output control | No local Toggle/Push control of R5-R8 | Relay commands, key capture, relay events | Delta unmeasured; host gains keyboard/mouse/hotkey bindings and state attribution |
-| 13 `MOVE` | **Keep local** | Direct motion should not depend on Windows, USB, or a network bridge | No front-panel Side A/B held motion when the PC is absent | Motion commands/events plus continued MCU interlock and door policy | Safety/availability cost dominates any unmeasured saving |
-| 14 `LErn` | Move only after host learning UX is physically accepted | Rich naming, categories, reordering, multi/indefinite learn belong on the PC | Existing RF mappings still run, but new learning/cancel/count needs a PC | Learn start/cancel/list/replace/map opcodes and RF events | Delta unmeasured; substantial host UX gain and richer strings |
-| Shared Save/Discard UI | Keep while any local EEPROM editor remains | Gives atomic preview, confirmation, audio, and flashing feedback | Removing it makes local edits immediate or host-only | Settings ACK/readback if hosted | Shared-code delta unmeasured; cannot claim the whole saving for one removed editor |
-| `MenuList` directory | **Keep** | Prevents host/firmware ID drift and describes the actual image | Host must hard-code labels/order and can navigate the wrong page | Paginated `MenuList` response | Likely small saving, unmeasured; removing it creates a protocol compatibility risk |
-
-Recommended decision order is: keep the safe/status/measurement/motion core;
-first A/B-test moving `PWM`, then `rELY`, `uPWM`, and finally `LErn`; consider
-splitting advanced `Snd` settings after those. Preserve local `STAT`, `LItE`,
-`KEY`, `r5-8`, and `MOVE` unless the user explicitly accepts their stated
-offline losses.
+Local `door`, measurements, lighting, key identification, user relays, motion,
+and RF learning remain available without a PC. The host adds richer labels,
+search, graphs, exact numeric controls, and automation without replacing the
+firmware's offline safety behavior. Future size tradeoffs must follow
+[Firmware Size and Feature Tradeoffs](Memory-and-Feature-Tradeoffs.md) and
+measure the complete image rather than relying on per-page estimates.
 
 The host opens a captured session with `DisplayText` target 3 and releases it
 with target 4. While captured, the board does not execute local key actions;
 it sends the key gestures to the host. If host traffic disappears for more
 than five seconds, the board releases capture and returns to its configured
-default page. Holding K4 on `STAT` can request the configured hosted menu when
+default page. Holding K4 on `door` can request the configured hosted menu when
 the host enables that gesture.
 
 Typical commands are:
@@ -787,6 +801,7 @@ Typical commands are:
 ```text
 host-menu list
 host-menu open host
+host-menu open macro-library
 host-menu status
 host-menu key K2 press
 host-menu key K4 press
@@ -796,7 +811,7 @@ host-menu close
 See [Hosted Front-Panel Menus](../Tools/Controller/docs/Hosted-Front-Panel-Menus.md)
 for the host schema and command/API equivalents.
 
-### PC-owned operational state
+### Host-owned operational state
 
 `ProgramState` is a PC-host concept with the values Idle and Running. It is
 not the reed-switch state, not a local AVR menu mode, and not an MCU EEPROM
@@ -811,17 +826,16 @@ event, beep, and actionable desktop toast. That host warning complements, but
 does not replace, the firmware's relay sequencing, motion-door policy, or
 door-close local-session stop.
 
-## LCD ownership in the staged profile
+## Host-owned LCD presentation
 
 The full AVR HD44780/PCF8574 renderer is disabled in `ProjectConfig.h` to make
 room for the timed macro queue. The generic cooperative I2C transaction opcode
 remains enabled, and firmware-owned PWM/INA polling pauses during a bounded
 host lease.
 
-`DisplayText` still retains 32 characters of desired LCD text so the TUI,
-front-panel snapshot, bridge, and hosted menus share one logical state. In the
-current source snapshot, however, that alone does not make characters appear
-on the physical LCD. The PC host needs to:
+`DisplayText` retains 32 characters of desired LCD text so the TUI,
+front-panel snapshot, bridge, and hosted menus share one logical state. That
+alone does not make characters appear on the physical LCD. The PC host:
 
 1. scan the expected PCF8574 addresses (normally `0x27` and `0x3F`);
 2. initialize the HD44780 in 4-bit, two-line mode;
@@ -830,7 +844,7 @@ on the physical LCD. The PC host needs to:
 4. cache rows so unchanged text is not constantly rewritten;
 5. best-effort render the offline page before a planned host disconnect.
 
-The latest source adds a compact fallback without restoring the 1.3 KiB AVR
+Firmware includes a compact fallback without restoring the full AVR
 renderer. After the host finds and initializes the backpack, it can preload
 hidden HD44780 DDRAM with exactly `PC offline      ` and
 `Connect USB toPC`. Successful generic writes to `0x27` or `0x3F` let the MCU
@@ -840,23 +854,22 @@ reveal the preloaded page. A returning heartbeat lets the host restore the
 normal home position. The missing space in `Connect USB toPC` is the explicit
 16-column compaction of the requested 17-character phrase.
 
-This fallback is **staged, not physically accepted**. It works only if the PC
+This fallback works only if the PC
 successfully initialized and preloaded that exact LCD first; otherwise an
 unknown hidden area is shifted into view, or no write occurs when the MCU has
 not learned an address. The logical 32-byte `FrontPanelGet` LCD mirror retains
 the last text on abrupt loss; the compact MCU path shifts physical DDRAM and
 does not synthesize new rich LCD text.
 
-Host integration now separates `lcd_service_enabled` (default true) from
+Host integration separates `lcd_service_enabled` (default true) from
 `mirror_prompt_to_lcd` (default false). Captured hosted menus are routed to the
 physical presenter, and runtime detach calls `PrepareDisconnect` best-effort
-with a 350 ms bound before removing the serial session. Those are implemented
-source paths, not hardware acceptance: reconnect/preload/detach tests are still
-being finalized, and the 2x16 display has not been observed through the full
-loss/recovery sequence. The TM1637 and all local menu behavior remain
-standalone.
+with a 350 ms bound before removing the serial session. Source tests cover the
+bounded presenter contracts; the actual 2×16 backpack still requires the full
+loss/recovery observation in Project Acceptance. The TM1637 and all local menu
+behavior remain standalone.
 
-## Other staged board features
+## Other board features
 
 The local menu exposes only the most useful commissioning functions. These
 additional firmware features are controlled or observed through the opcode
@@ -877,7 +890,7 @@ protocol and host:
 - exact TM1637 segment/front-panel snapshot and host-injected key gestures;
 - direct PWM, relay, side motion, RGB status, WS2811/WS2812, buzzer, RF send,
   display, menu, reset, and generic I2C commands;
-- safe reset sequence that stops the buzzer, RF momentary action, motion,
+- graceful reboot sequence that stops the buzzer, RF momentary action, motion,
   relays, and user PWM outputs while playing the Reset RGB cue;
 - boot melody and boot/status RGB indication; door, BT Audio, RF, navigation,
   save/discard, warning/hot, fault, and reset RGB cues;
@@ -892,7 +905,7 @@ protocol and host:
   failures, and the MCU start timestamp. Timed reserved-sequence responses
   provide exact board-clock execution deltas.
 
-### Staged macro-queue behavior
+### Macro-queue behavior
 
 Macro schema 2 uses a 128-byte circular byte array with 127 usable bytes.
 BEGIN carries schema, macro ID, cancel flags, and total step count. Variable
@@ -930,21 +943,14 @@ wrap after 255 and do not preserve pathological higher totals.
 Normal completion preserves the final outputs. Cancel defaults to a safe stop
 of all relays and PWM 0-10; a deliberate Keep Outputs flag is available for a
 host-requested cancel. If an active playback loses host traffic for more than
-five seconds, firmware cancels and safe-stops regardless. Automatic macro
-name/elapsed/step presentation on the physical displays is not yet proven;
-the host can include ordinary display steps, and the requested hosted Macro
-menu remains part of final integration acceptance.
+five seconds, firmware cancels and safe-stops regardless. Macro name,
+elapsed-time, and step presentation remain host-owned; a macro may also include
+ordinary display steps.
 
-The latest compiled fitting, non-live checkpoint is `0E5FE035`,
-32,382/32,384
-application bytes with 2 bytes free and 1,543/2,048 static-SRAM bytes. It
-supersedes fitting checkpoint `6DCF6A68` (32,372 bytes) and followed a
-106-byte-over diagnostic that was correctly rejected. Current source is newer
-than that manifest and may move again before the final build. Host workflow,
-physical display presentation, exact timing acceptance, and live behavior
-still require the final COM18
-upload/read-back and harmless macro test. Do not treat those items as proven
-merely because this checkpoint fits.
+Exact flash/SRAM use comes from the final candidate manifest. Host workflow,
+physical display presentation, timing, and live behavior require
+upload/readback plus a harmless physical macro test; a fitting compile does not
+prove those behaviors.
 
 ## EEPROM settings owned by the MCU
 
@@ -952,18 +958,21 @@ The board, not the PC config file, owns these settings in EEPROM:
 
 - Silent mode;
 - Off/Auto/On illumination plus On and Off brightness;
-- TM1637 brightness and status RGB brightness/color index;
-- PWM boot mode and eight stored user-PWM values;
+- TM1637 door-open/door-closed brightness and status RGB brightness/color index;
+- output-persistence policy, last R1-R8 restore mask, and eight stored user-PWM
+  values;
 - telemetry period (0 disables periodic streaming; otherwise at least 100 ms);
 - default menu page and Save Last Page option;
+- the 14-bit menu-visibility mask and seven-byte packed order for all 14 stable
+  leaf IDs;
 - voltage/current decimal count, 0-2;
 - tLED/tBT role swap;
-- motion door policy and 1/100 ms break-before-direction choice;
+- motion door policy and exact 1..255 ms break-before-direction interval;
 - door and relay audio enable flags;
 - 20 learned RF records/mappings;
 - reset-count journal.
 
-When Save Last Page is enabled, navigating to a root page updates the default
+When Save Last Page is enabled, navigating to a stable leaf page updates the default
 page and a door close is a forced commit point. When it is disabled, reset and
 door-close-without-an-active-edit return to the explicitly configured default.
 
@@ -971,3 +980,41 @@ The PC host persists only PC-side preferences, names, colors, automations,
 macros, hotkeys, integration endpoints, and device-selection policy. It may
 query or write the MCU settings, but it must not confuse its config file with
 the EEPROM source of truth.
+
+The current firmware has no on-board EEPROM migration handler. Menu validation
+accepts only the dense IDs 0-13 and a 14-bit visibility mask; an older record
+that is not already semantically valid is rejected and factory defaults are
+written through the normal settings path. The host may explicitly back up,
+erase, or rewrite development EEPROM after flashing. The physical record and
+schema-2 UART layout both use exactly seven menu-order bytes for the 14 packed
+IDs; there is no spare order byte.
+
+The current logical EEPROM map is:
+
+| Range | Bytes | Owner |
+|---:|---:|---|
+| 0-31 | 32 | Unallocated |
+| 32-63 | 32 | Packed settings plus checksum |
+| 64-307 | 244 | RF header plus 20 learned records |
+| 308-319 | 12 | Unallocated |
+| 320-703 | 384 | 64-slot reset-count journal |
+| 704-1023 | 320 | Unallocated |
+
+That leaves 364 logically unallocated bytes. The generated safe-default EEPROM
+image still covers all 1,024 bytes so a programming/restore operation is
+deterministic; that does not make the erased regions owned records.
+
+The following requested behavior is **not** EEPROM-backed in this candidate:
+
+| Area | What exists | What is still missing |
+|---|---|---|
+| Configurable audio cues | Global Silent plus door/relay enable bits; door and relay tones are fixed in flash | Persistent cue IDs or note/frequency/duration descriptors for door-open, door-close, relay-on, and relay-off |
+| Board automation | Twenty RF records map codes directly to Key, Menu, Relay, Side, or PWM actions; host automations can consume events | A generic board rule table for door, BT Audio, relay, host-loss, temperature, RF transmit, macro start, or other opcode actions |
+| Status RGB | One Ready color index and one global brightness are persistent; a host may send a volatile override | Independently persistent colors/effects/timing for door, BT Audio, RF, Running, warning, HOT, fault, and transitions |
+
+Structured host-menu pull is also not implemented by the AVR: the current
+physical-board path is the documented display-capture fallback. The AVR does
+not retain the proposed eight-node RAM directory, request content by menu ID,
+track a host-menu generation, or render loading/retry/failure states. Those are
+wire/RAM/flash additions rather than EEPROM settings and must not be inferred
+from the host/Virtual Board implementation.

@@ -62,7 +62,7 @@ type ToolchainProfile struct {
 func DefaultToolchainProfile() ToolchainProfile {
 	return ToolchainProfile{
 		Name:           "controllerboardmini-atmega328p",
-		FQBN:           "MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external",
+		FQBN:           DefaultFQBN,
 		PackageIndexes: []string{MiniCorePackageIndexURL},
 		CLI: ToolchainCLI{
 			Dependency: "arduino-cli", Version: "1.5.1",

@@ -47,8 +47,12 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 		state = model.previewPanel
 	} else {
 		page := model.menuPageByID(snapshot.Status.MenuPage)
+		brightness := snapshot.Settings.DisplayBrightness
+		if !snapshot.Status.DoorOpen {
+			brightness = snapshot.Settings.DisplayClosedBrightness
+		}
 		state = FrontPanelState{
-			Segments: page.Short, Brightness: snapshot.Settings.DisplayBrightness,
+			Segments: page.Short, Brightness: brightness,
 			LCDBacklight: snapshot.Settings.Flags&2 != 0,
 			MenuID:       snapshot.Status.MenuPage, MenuName: page.Name,
 			Submode:     model.programModeName(snapshot.Status.ProgramMode),
@@ -74,10 +78,10 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 			state.LCDLine1 = lcdPresentation.PhysicalLine1
 			state.LCDLine2 = lcdPresentation.PhysicalLine2
 			state.LCDBacklight = true
-			state.InputSource += fmt.Sprintf(" · PC-owned LCD 0x%02X", lcdPresentation.Address)
+			state.InputSource += fmt.Sprintf(" · LCD 0x%02X", lcdPresentation.Address)
 		} else {
 			state.LCDBacklight = false
-			state.InputSource += " · LCD target only; physical backpack unconfirmed"
+			state.InputSource += " · LCD not detected"
 		}
 	}
 	if model.lcdMirror {

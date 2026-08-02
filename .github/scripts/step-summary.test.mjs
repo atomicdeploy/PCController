@@ -15,7 +15,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const script = resolve(root, ".github", "scripts", "step-summary.mjs");
 const commonEnvironment = {
   ...process.env,
-  GITHUB_REPOSITORY: "atomicdeploy/PCController",
+  GITHUB_REPOSITORY: "example-org/example-controller",
   GITHUB_SERVER_URL: "https://github.com",
   GITHUB_RUN_ID: "123",
   GITHUB_SHA: "0123456789abcdef0123456789abcdef01234567",
@@ -44,7 +44,19 @@ test("native summaries print target-correct checksum commands", () => {
       JSON.stringify({
         identity: { version: "test", sourceSHA256: "abc" },
         target: { platform: "windows", architecture: "amd64" },
-        validation: { tests: "passed", vet: "passed", sharedLibrary: "passed" },
+        validation: {
+          tests: "passed",
+          vet: "passed",
+          sharedLibrary: "passed",
+          embeddedDefaults: {
+            enabled: true,
+            firmwareEnabled: true,
+            eepromEnabled: true,
+            firmwareSHA256: "a".repeat(64),
+            eepromSHA256: "b".repeat(64),
+            eepromDataBytes: 1024,
+          },
+        },
         artifacts: [],
       }),
       "utf8",
@@ -57,6 +69,8 @@ test("native summaries print target-correct checksum commands", () => {
     ]);
     assert.match(windows, /~~~powershell[\s\S]*Get-FileHash/u);
     assert.doesNotMatch(windows, /sha256sum -c/u);
+    assert.match(windows, /Embedded firmware default \| ✅ enabled/u);
+    assert.match(windows, /Embedded EEPROM default \| ✅ enabled · 1,024 B/u);
 
     const binary = resolve(directory, "virtual_board");
     const simulatorArchive = resolve(
@@ -137,7 +151,8 @@ test("flagship catalog presents AVR separately with live artifact links", () => 
     const catalog = runSummary(directory, ["catalog", directory]);
     assert.match(catalog, /## ⚡ AVR ATmega328P target/u);
     assert.match(catalog, /32,228 \/ 32,256 B/u);
-    assert.match(catalog, /`Build` \/ `build` \/ `firmware`/u);
+    assert.match(catalog, /`PCController-Firmware-ATmega328P` artifact/u);
+    assert.doesNotMatch(catalog, /compatibility|artifact alias/iu);
     assert.match(
       catalog,
       /actions\/runs\/123\/artifacts\/42/u,

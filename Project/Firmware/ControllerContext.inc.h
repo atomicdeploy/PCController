@@ -33,7 +33,7 @@ struct __attribute__((packed)) TelemetryPayload {
   uint8_t mode;
   uint8_t doorOpen;
   uint8_t bluetoothState;
-  uint8_t pwmMode;
+  uint8_t pwmAvailable;
   uint8_t pwmChannel;
   uint16_t pwmValue;
   uint8_t lcdAddress;
@@ -86,11 +86,13 @@ bool pwmAvailable = false;
 uint8_t temperatureAddressCount = 0;
 bool temperatureConversionPending = false;
 bool learningActive = false;
-uint8_t learningOptions = 0;
+uint8_t learningMode = RF_LEARN_INDEFINITE;
+uint8_t learningTotalSeconds = 0;
+uint8_t learningReportedRemaining = 0;
 uint32_t learningEndsAt = 0;
 
 // Active page, modal editor selection, and transient front-panel deadlines.
-uint8_t menuPage = PAGE_STATUS;
+uint8_t menuPage = PAGE_DOOR;
 #if PCCONTROLLER_MENU_HIERARCHY
 // Low bits are a category ID; bit 7 selects the category-list parent level.
 uint8_t menuTreeState = 0;
@@ -113,7 +115,7 @@ constexpr size_t MenuEditSnapshotSize =
     offsetof(ControllerSettings, menuFlags) +
     sizeof(ControllerSettings::menuFlags);
 uint8_t editSnapshot[MenuEditSnapshotSize]{};
-ProgramMode editReturnMode = MODE_STATUS;
+ProgramMode editReturnMode = MODE_DOOR;
 bool editTransactionActive = false;
 bool flashMessageSaved = false;
 
@@ -141,11 +143,16 @@ bool firmwareReady = false;
 
 // Host-captured panel text, LCD fallback metadata, and cooperative I2C lease.
 bool hostSegmentTextActive = false;
-char hostSegmentText[5] = {};
+// DISPLAY_TEXT reuses one 40-byte buffer for static text or a Door-page scroll.
+char hostSegmentText[41] = {};
+uint8_t hostSegmentTextLength = 0;
+uint8_t hostSegmentScrollIndex = 0;
+uint16_t hostSegmentStepMs = 260;
 char temperatureSegmentText[2][4] = {
     {'L', '-', '-', 'C'},
     {'b', '-', '-', 'C'},
 };
+// Static text uses this as an expiry; scrolling text uses it as the next step.
 uint32_t hostSegmentTextEndsAt = 0;
 uint32_t lastHostActivityAt = 0;
 char hostLcdText[32] = {};

@@ -277,7 +277,7 @@ func (model *Model) beginRFNameEdit() {
 	model.input.Prompt = "RF name › "
 	model.input.SetValue(metadata.Name)
 	model.input.CursorEnd()
-	model.input.Focus()
+	model.revealTerminal()
 }
 
 func (model *Model) beginRFCategoryPicker() {
@@ -294,7 +294,7 @@ func (model *Model) beginRFCategoryCreate() {
 	model.rfEditMode = "category-name"
 	model.input.Prompt = "Category name › "
 	model.input.SetValue("")
-	model.input.Focus()
+	model.revealTerminal()
 }
 
 func (model *Model) finishRFEdit() (tea.Cmd, bool) {
@@ -383,7 +383,7 @@ func (model *Model) toggleRFRadix() {
 	} else {
 		model.rfValue.DisplayRadix = "decimal"
 	}
-	model.persistRFConfig("RF display radix changed to " + model.rfValue.DisplayRadix)
+	model.persistRFConfig("RF code view changed to " + strings.ToUpper(model.rfValue.DisplayRadix))
 }
 
 func (model *Model) persistRFConfig(success string) {
@@ -406,6 +406,7 @@ func (model *Model) cancelRFModal() {
 	model.input.Prompt = "❯ "
 	model.input.SetValue("")
 	model.input.Focus()
+	model.terminalVisible = false
 }
 
 func (model Model) rfActionPickerPage() string {

@@ -13,14 +13,23 @@ export function redactSensitiveCommand(value: string): string {
 export function settingsSetCommand(
   current: ControllerSettings,
   displayBrightness: number,
+  displayClosedBrightness: number,
   statusBrightness: number,
   streamPeriodMS: number,
+  motionExitHoldSeconds: number,
+  outputPersistence = current.output_persistence,
+  relayRestoreMask = current.relay_restore_mask,
 ): string {
   const saveLastPage = (current.extended_flags & 1) !== 0 ? 1 : 0
+  const decodeDecimals = (encoded: number) => encoded === 0 ? 2 : encoded - 1
+  const statusColor = (current.extended_flags >> 1) & 0x07
+  const voltageDecimals = decodeDecimals((current.extended_flags >> 4) & 0x03)
+  const currentDecimals = decodeDecimals((current.extended_flags >> 6) & 0x03)
   return [
     'settings', 'set', current.flags, current.light_mode,
     current.on_brightness, current.off_brightness, displayBrightness,
-    statusBrightness, current.pwm_boot_mode, streamPeriodMS,
-    current.default_page, saveLastPage,
+    displayClosedBrightness, statusBrightness, outputPersistence,
+    streamPeriodMS, current.default_page, saveLastPage, statusColor,
+    voltageDecimals, currentDecimals, motionExitHoldSeconds, relayRestoreMask,
   ].join(' ')
 }

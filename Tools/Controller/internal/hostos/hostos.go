@@ -62,14 +62,16 @@ type ActionResult struct {
 	At     time.Time `json:"at"`
 }
 
-// BrightnessStatus is the primary display's DDC/CI brightness normalized to
-// 0..100 while retaining the monitor's native range for diagnostics.
+// BrightnessStatus is the primary display brightness normalized to 0..100.
+// Backend distinguishes external DDC/CI monitors from integrated WMI panels.
 type BrightnessStatus struct {
 	Percent    int    `json:"percent"`
 	RawMinimum uint32 `json:"raw_minimum"`
 	RawCurrent uint32 `json:"raw_current"`
 	RawMaximum uint32 `json:"raw_maximum"`
 	Display    string `json:"display,omitempty"`
+	Backend    string `json:"backend,omitempty"`
+	Integrated bool   `json:"integrated_panel,omitempty"`
 }
 
 // BrightnessResult is suitable for the CLI, event bus, IPC, and API layers.
@@ -81,7 +83,7 @@ type BrightnessResult struct {
 
 // BrightnessBackend makes platform brightness access injectable without
 // weakening the production policy gate. Tests use a deterministic fake while
-// Windows uses the DDC/CI physical-monitor APIs.
+// Windows uses DDC/CI for external monitors and native WMI for laptop panels.
 type BrightnessBackend interface {
 	Brightness(context.Context) (BrightnessStatus, error)
 	SetBrightness(context.Context, int) (BrightnessStatus, error)
@@ -450,9 +452,8 @@ func (executor *Executor) Power(
 	}, nil
 }
 
-// MonitorBrightness reads the primary physical monitor without requiring the
-// write policy to be enabled. Unsupported internal panels or display drivers
-// return a descriptive platform error.
+// MonitorBrightness reads the primary display without requiring the write
+// policy to be enabled. Windows supports DDC/CI and integrated WMI panels.
 func (executor *Executor) MonitorBrightness(ctx context.Context) (BrightnessResult, error) {
 	if err := ctx.Err(); err != nil {
 		return BrightnessResult{}, err

@@ -39,6 +39,7 @@ export interface Hello {
 
 export interface ControllerStatus {
   uptime_ms: number
+  uptime?: string
   supply_mv: number
   bus_mv: number
   current_ma: number
@@ -56,7 +57,7 @@ export interface ControllerStatus {
   program_mode: number
   door_open: boolean
   bluetooth_audio_state: number
-  pwm_mode: number
+  pwm_available: boolean
   pwm_channel: number
   pwm_value: number
   lcd_address: number
@@ -73,12 +74,15 @@ export interface ControllerSettings {
   on_brightness: number
   off_brightness: number
   display_brightness: number
+  display_closed_brightness: number
+  motion_exit_hold_seconds: number
   status_brightness: number
-  pwm_boot_mode: number
+  output_persistence: number
+  relay_restore_mask: number
   stream_period_ms: number
   default_page: number
   extended_flags: number
-  motion_break_ms?: number
+  motion_break_ms: number
 }
 
 export interface ProgramState {
@@ -86,6 +90,37 @@ export interface ProgramState {
   owner?: string
   reason?: string
   updated_at?: string
+}
+
+export interface RFLearnState {
+  active: boolean
+  mode: 'indefinite' | 'timer'
+  configured_ms: number
+  remaining_ms: number
+  started_at?: string
+  ends_at?: string
+  learned: number
+  reason?: string
+}
+
+export interface FrontPanelState {
+  schema: number
+  raw_segments: [number, number, number, number]
+  brightness: number
+  blink: boolean
+  segments_active: boolean
+  category_selector: boolean
+  lcd_address: number
+  lcd_available: boolean
+  lcd_backlight: boolean
+  lcd_line_1: string
+  lcd_line_2: string
+  pressed_keys: number
+  menu_page: number
+  program_mode: number
+  host_captured: boolean
+  host_state: number
+  host_editable_value: number
 }
 
 export interface Snapshot {
@@ -102,6 +137,10 @@ export interface Snapshot {
   connection_reason?: string
   connection_updated?: string
   program_state?: ProgramState
+  rf_learning?: RFLearnState
+  front_panel?: FrontPanelState
+  have_front_panel?: boolean
+  front_panel_updated?: string
 }
 
 export interface StatusUpdate {
@@ -149,6 +188,8 @@ export interface MetricSample {
 
 export interface UIConfig {
   name: string
+  setup_complete: boolean
+  welcome_melody?: string
   api_version: number
   websocket_path: string
   socket_io_path?: string
@@ -158,6 +199,46 @@ export interface UIConfig {
     data_hub: boolean
   }
   host_version?: string
+  source_hash?: string
+  build_time?: string
+}
+
+export interface HostUISettings {
+  app_title: string
+  setup_complete: boolean
+  welcome_melody: string
+  segment_scroll: SegmentScrollSettings
+  peripheral_names: Record<string, string>
+  peripherals: PeripheralDescriptor[]
+}
+
+export interface PeripheralDescriptor {
+  key: string
+  kind: 'relay' | 'motion' | 'pwm' | 'display' | 'sensor'
+  role: string
+  index: number
+  default_name: string
+  control: 'relay' | 'motion' | 'pwm-user' | 'role-specific' | 'read-only'
+}
+
+export interface PeripheralSettings {
+  peripheral_names: Record<string, string>
+  peripherals: PeripheralDescriptor[]
+}
+
+export interface PWMValues {
+  available: boolean
+  selected_channel: number
+  values: number[]
+}
+
+export interface SegmentScrollSettings {
+  enabled: boolean
+  pages: string[]
+  door_open_text: string
+  door_closed_text: string
+  speed_ms: number
+  gap_cells: number
 }
 
 export interface LocalIntegrationSettings {
@@ -169,6 +250,45 @@ export interface LocalIntegrationSettings {
     enabled: boolean
     base_url?: string
   }
+  lifecycle_safety: {
+    session_lock: LifecycleSafetyAction
+    suspend: LifecycleSafetyAction
+    refresh_on_resume: boolean
+  }
+}
+
+export type LifecycleSafetyAction = 'leave' | 'stop-motion' | 'all-off'
+
+export interface HostHotkeyBinding {
+  name: string
+  enabled: boolean
+  chord: string
+  command: string
+}
+
+export interface ActiveHostHotkeyBinding {
+  name: string
+  accelerator: string
+  command: string
+}
+
+export interface HotkeyRegistrarStatus {
+  supported: boolean
+  running: boolean
+  bindings?: ActiveHostHotkeyBinding[]
+  last_error?: string
+  last_event?: {
+    binding: ActiveHostHotkeyBinding
+    at: string
+  }
+}
+
+export interface HotkeySettingsResponse {
+  bindings: HostHotkeyBinding[]
+  apply_pending: boolean
+  operation?: 'upsert' | 'remove'
+  name?: string
+  status?: HotkeyRegistrarStatus
 }
 
 export interface RPCResponse<T> {
@@ -231,7 +351,7 @@ export const emptyStatus: ControllerStatus = {
   program_mode: 0,
   door_open: false,
   bluetooth_audio_state: 0,
-  pwm_mode: 0,
+  pwm_available: false,
   pwm_channel: 0,
   pwm_value: 0,
   lcd_address: 0,
@@ -254,13 +374,37 @@ export const emptySnapshot: Snapshot = {
     on_brightness: 0,
     off_brightness: 0,
     display_brightness: 0,
+    display_closed_brightness: 0,
+    motion_exit_hold_seconds: 2,
     status_brightness: 0,
-    pwm_boot_mode: 0,
+    output_persistence: 0,
+    relay_restore_mask: 0,
     stream_period_ms: 200,
     default_page: 0,
     extended_flags: 0,
+    motion_break_ms: 1,
   },
   have_status: false,
   have_settings: false,
+  front_panel: {
+    schema: 0,
+    raw_segments: [0, 0, 0, 0],
+    brightness: 0,
+    blink: false,
+    segments_active: false,
+    category_selector: false,
+    lcd_address: 0,
+    lcd_available: false,
+    lcd_backlight: false,
+    lcd_line_1: '',
+    lcd_line_2: '',
+    pressed_keys: 0,
+    menu_page: 0,
+    program_mode: 0,
+    host_captured: false,
+    host_state: 0,
+    host_editable_value: 0,
+  },
+  have_front_panel: false,
   connection_state: 'offline',
 }

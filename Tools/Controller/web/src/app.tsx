@@ -1,5 +1,8 @@
 import {
   type ComponentType,
+  type LazyExoticComponent,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -11,7 +14,6 @@ import {
   Bell,
   Box,
   Boxes,
-  Cable,
   Check,
   ChevronDown,
   Command,
@@ -25,6 +27,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  PackageOpen,
   Search,
   Settings,
   ShieldCheck,
@@ -35,9 +38,9 @@ import {
   X,
 } from 'lucide-react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
-import { createAudioEngine, type AudioEngine } from './audio-engine'
-import { BootGate, Button, HotkeyHelp, Icon, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getToken, getUIConfig, setToken as storeToken } from './api'
+import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
+import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
+import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -47,46 +50,77 @@ import {
   pageFromNumberHotkey,
   type PageID,
 } from './hotkeys'
-import { translator, type MessageKey } from './i18n'
-import { redactSensitiveCommand } from './command-line'
+import { formatClock, localizeDigits, translator, type MessageKey } from './i18n'
+import { redactSensitiveCommand, shellArgument } from './command-line'
 import { effectiveProductTitle, productMark } from './product-identity'
+import { controllerFaviconState, updateRuntimeFavicon } from './state-favicon'
+import {
+  isSignificantControllerEvent,
+  prependSignificantControllerEvent,
+  significantControllerEvents,
+} from './significant-events'
+import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
+import { emitStartupConsoleIntroduction } from './startup-console'
+import {
+  createTabChannel,
+  type TabChannel,
+  type TerminalEntry as TabTerminalEntry,
+} from './tab-channel'
+import { controllerChannelOrigin } from './transport-config'
 import type {
   Appearance,
   ControllerEvent,
   DialogState,
+  HostUISettings,
+  HistorySample,
   MetricSample,
   Snapshot,
   ToastMessage,
   UIConfig,
 } from './types'
 import { emptySnapshot } from './types'
-import { DataWorkspaceView } from './data-workspace'
-import { WorkbenchView } from './workbench'
-import {
-  ControlsView,
-  DashboardView,
-  EventsView,
-  LocalDeviceView,
-  SettingsView,
-  type SharedViewProps,
-} from './views'
+import type { SharedViewProps } from './views'
+
+const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
+const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
+const LocalDevicePage = lazy(() => import('./views').then(({ LocalDeviceView }) => ({ default: LocalDeviceView })))
+const EventsPage = lazy(() => import('./views').then(({ EventsView }) => ({ default: EventsView })))
+const SettingsPage = lazy(() => import('./views').then(({ SettingsView }) => ({ default: SettingsView })))
+const WorkbenchPage = lazy(() => import('./workbench').then(({ WorkbenchView }) => ({ default: WorkbenchView })))
+const DataWorkspacePage = lazy(() => import('./data-workspace').then(({ DataWorkspaceView }) => ({ default: DataWorkspaceView })))
+const UpdatesPage = lazy(() => import('./updates-view').then(({ UpdatesView }) => ({ default: UpdatesView })))
 
 interface NavDefinition {
   id: PageID
   label: MessageKey
   icon: typeof LayoutDashboard
+  view: LazyExoticComponent<ComponentType<any>>
   group?: 'core' | 'integrations' | 'system'
 }
 
-const navigation: NavDefinition[] = [
-  { id: 'dashboard', label: 'dashboard', icon: LayoutDashboard, group: 'core' },
-  { id: 'controls', label: 'controls', icon: Gauge, group: 'core' },
-  { id: 'workbench', label: 'workbench', icon: Wrench, group: 'core' },
-  { id: 'device', label: 'device', icon: Lightbulb, group: 'integrations' },
-  { id: 'data', label: 'data', icon: Boxes, group: 'integrations' },
-  { id: 'events', label: 'events', icon: Activity, group: 'system' },
-  { id: 'settings', label: 'settings', icon: Settings, group: 'system' },
+export interface RelayedTerminalEntry extends TabTerminalEntry {
+  id: string
+  tabId: string
+}
+
+export const navigation: NavDefinition[] = [
+  { id: 'dashboard', label: 'dashboard', icon: LayoutDashboard, view: DashboardPage, group: 'core' },
+  { id: 'controls', label: 'controls', icon: Gauge, view: ControlsPage, group: 'core' },
+  { id: 'workbench', label: 'workbench', icon: Wrench, view: WorkbenchPage, group: 'core' },
+  { id: 'device', label: 'device', icon: Lightbulb, view: LocalDevicePage, group: 'integrations' },
+  { id: 'data', label: 'data', icon: Boxes, view: DataWorkspacePage, group: 'integrations' },
+  { id: 'updates', label: 'updates', icon: PackageOpen, view: UpdatesPage, group: 'system' },
+  { id: 'events', label: 'events', icon: Activity, view: EventsPage, group: 'system' },
+  { id: 'settings', label: 'settings', icon: Settings, view: SettingsPage, group: 'system' },
 ]
+
+export function pageViewFor(page: PageID): LazyExoticComponent<ComponentType<any>> {
+  return navigation.find((item) => item.id === page)?.view ?? DashboardPage
+}
+
+export function shouldOpenSetup(config: Pick<UIConfig, 'setup_complete'> | null, demo = false): boolean {
+  return demo || (config !== null && !config.setup_complete)
+}
 
 const defaultAppearance: Appearance = {
   theme: 'system',
@@ -98,9 +132,29 @@ const defaultAppearance: Appearance = {
   audioVolume: 0.42,
 }
 
+const appearanceStorageKey = `${__PRODUCT_PROTOCOL__}.appearance`
+const resourceReloadStorageKey = `${__PRODUCT_PROTOCOL__}.resource-reload`
+
+export function reloadForResourceMismatch(config: Pick<UIConfig, 'host_version' | 'build_time'>): boolean {
+  const identity = hostResourceIdentity(config)
+  if (!embeddedResourcesMismatch(config)) {
+    try { sessionStorage.removeItem(resourceReloadStorageKey) } catch { /* storage may be disabled */ }
+    return false
+  }
+  try {
+    if (sessionStorage.getItem(resourceReloadStorageKey) === identity) return false
+    sessionStorage.setItem(resourceReloadStorageKey, identity)
+  } catch {
+    // Never risk an unbounded reload loop when private storage is unavailable.
+    return false
+  }
+  window.location.reload()
+  return true
+}
+
 function loadAppearance(): Appearance {
   try {
-    const saved = JSON.parse(localStorage.getItem('pccontroller.appearance') ?? '{}') as Partial<Appearance>
+    const saved = JSON.parse(localStorage.getItem(appearanceStorageKey) ?? '{}') as Partial<Appearance>
     const value = { ...defaultAppearance, ...saved }
     value.audioVolume = Number.isFinite(value.audioVolume) ? Math.max(0, Math.min(1, value.audioVolume)) : defaultAppearance.audioVolume
     value.audioMuted = Boolean(value.audioMuted)
@@ -118,12 +172,24 @@ function applyAppearance(value: Appearance): void {
   document.documentElement.dir = direction
   document.documentElement.classList.toggle('reduce-motion', value.reduceMotion)
   document.documentElement.classList.toggle('compact-numbers', value.compactNumbers)
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#071117' : '#edf5f6')
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0b0a0e' : '#f5f3f6')
+}
+
+export function pageFromHash(hash: string): PageID {
+  const value = hash.replace(/^#\/?/, '').split(/[/?#]/)[0] as PageID
+  return navigation.some((item) => item.id === value) ? value : 'dashboard'
+}
+
+export function canonicalPageHash(page: PageID): string {
+  return `#/${page}`
+}
+
+export function canonicalPageURL(page: PageID, pathname = location.pathname, search = location.search): string {
+  return `${pathname}${search}${canonicalPageHash(page)}`
 }
 
 function pageFromLocation(): PageID {
-  const value = location.hash.replace(/^#\/?/, '').split('/')[0] as PageID
-  return navigation.some((item) => item.id === value) ? value : 'dashboard'
+  return pageFromHash(location.hash)
 }
 
 function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
@@ -137,6 +203,17 @@ function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
     ledTemp: status.temperature_led_centi_c / 100,
     btTemp: status.temperature_bt_audio_centi_c / 100,
   }
+}
+
+function samplesFromHistory(history: HistorySample[]): MetricSample[] {
+  return history
+    .filter((sample): sample is HistorySample & { status: Snapshot['status'] } => Boolean(sample.status))
+    .map((sample) => sampleFrom(
+      { ...emptySnapshot, status: sample.status },
+      sample.time ? new Date(sample.time).getTime() : Date.now(),
+    ))
+    .filter((sample) => Number.isFinite(sample.at))
+    .slice(-360)
 }
 
 function demoSnapshot(now = Date.now()): Snapshot {
@@ -163,7 +240,7 @@ function demoSnapshot(now = Date.now()): Snapshot {
       active_relays: 0b00110000,
       door_open: false,
       bluetooth_audio_state: 2,
-      pwm_mode: 1,
+      pwm_available: true,
       pwm_channel: 5,
       pwm_value: 2740,
       lcd_address: 0x27,
@@ -216,6 +293,33 @@ export function commandWarning(command: string, locale: Appearance['locale']): C
   return null
 }
 
+export function snapshotAfterTransportLoss(
+  current: Snapshot,
+  state: 'connecting' | 'waiting' | 'closed',
+  detail = '',
+): Snapshot {
+  return {
+    ...current,
+    connected: false,
+    connection_state: current.paused ? 'paused' : state === 'connecting' ? 'connecting' : 'disconnected',
+    connection_reason: detail || (state === 'connecting' ? 'Re-establishing the host event stream' : 'Host event stream unavailable'),
+  }
+}
+
+export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'metadata'>): boolean {
+  return event.kind.toLowerCase() === 'update.completed' && event.metadata?.kind === 'host'
+}
+
+export function connectionTransitionCue(
+  previous: boolean | null,
+  connected: boolean,
+  startupResolved = true,
+  demonstration = false,
+): AudioCue | null {
+  if (demonstration || !startupResolved || previous === null || previous === connected) return null
+  return connected ? 'connect' : 'disconnect'
+}
+
 export default function App() {
   const demo = new URLSearchParams(location.search).get('demo') === '1'
   const [appearance, setAppearance] = useState(loadAppearance)
@@ -235,26 +339,53 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
-  const [bootOpen, setBootOpen] = useState(true)
+  const [bootOpen, setBootOpen] = useState(demo)
+  const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
   const [bootTarget, setBootTarget] = useState(demo ? 100 : 24)
+  const [startupProbeResolved, setStartupProbeResolved] = useState(demo)
   const [token, setTokenState] = useState(getToken)
+  const [tabBusSupported, setTabBusSupported] = useState(false)
+  const [tabPeers, setTabPeers] = useState(0)
+  const [relayedTerminal, setRelayedTerminal] = useState<RelayedTerminalEntry[]>([])
   const toastID = useRef(0)
   const goChordUntil = useRef(0)
   const audioRef = useRef<AudioEngine | null>(null)
+  const previousAudioConnection = useRef<boolean | null>(null)
+  const tabChannelRef = useRef<TabChannel | null>(null)
+  const refreshAfterHostRestart = useRef(false)
+  const startupConsoleShown = useRef(false)
+  const pageRef = useRef(page)
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
   const resolvedDirection = appearance.direction === 'auto'
     ? appearance.locale === 'fa' ? 'rtl' : 'ltr'
     : appearance.direction
-  const drawerClosedClip = resolvedDirection === 'rtl'
-    ? 'inset(0 0 0 100%)'
-    : 'inset(0 100% 0 0)'
+  const drawerClosedOffset = resolvedDirection === 'rtl' ? '18px' : '-18px'
 
   useEffect(() => {
     document.title = productTitle
   }, [productTitle])
+
+  useEffect(() => {
+    updateRuntimeFavicon(demo ? 'offline' : controllerFaviconState(snapshot))
+  }, [demo, snapshot.connected, snapshot.connection_reason, snapshot.connection_state, snapshot.have_status, snapshot.status.hot])
+
+  useEffect(() => {
+    if (!startupProbeResolved || startupConsoleShown.current) return
+    startupConsoleShown.current = true
+    emitStartupConsoleIntroduction({
+      productTitle,
+      config: uiConfig,
+      boardConnected: !demo && snapshot.connected,
+      port: snapshot.port.name,
+      streamState,
+      demonstration: demo,
+    })
+  }, [demo, productTitle, snapshot.connected, snapshot.port.name, startupProbeResolved, streamState, uiConfig])
+
+  useEffect(() => { pageRef.current = page }, [page])
 
   useEffect(() => {
     const engine = createAudioEngine({
@@ -263,12 +394,89 @@ export default function App() {
       pauseWhenHidden: true,
     })
     audioRef.current = engine
+    // Returning users do not see the first-run gate. Unlock Web Audio on their
+    // first real gesture without playing anything merely because the page
+    // loaded; the gesture's eventual action supplies the first cue.
+    const unlock = () => { void engine.start() }
+    window.addEventListener('pointerdown', unlock, { capture: true, once: true })
+    window.addEventListener('keydown', unlock, { capture: true, once: true })
     return () => {
+      window.removeEventListener('pointerdown', unlock, { capture: true })
+      window.removeEventListener('keydown', unlock, { capture: true })
       if (audioRef.current === engine) audioRef.current = null
       void engine.dispose()
     }
     // AudioContext creation remains gesture-gated inside engine.start().
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (demo || !startupProbeResolved) return
+    const previous = previousAudioConnection.current
+    previousAudioConnection.current = snapshot.connected
+    // Establishing the initial truth is intentionally silent. Only a later,
+    // real connection transition receives feedback, and cue() remains muted
+    // until the user has explicitly unlocked audio.
+    const cue = connectionTransitionCue(previous, snapshot.connected, startupProbeResolved, demo)
+    if (cue) audioRef.current?.cue(cue)
+  }, [demo, snapshot.connected, startupProbeResolved])
+
+  useEffect(() => {
+    const channel = createTabChannel({ origin: controllerChannelOrigin() })
+    const peers = new Map<string, number>()
+    tabChannelRef.current = channel
+    setTabBusSupported(channel.supported)
+
+    const updatePeers = () => {
+      const cutoff = Date.now() - 40_000
+      for (const [tabID, seenAt] of peers) if (seenAt < cutoff) peers.delete(tabID)
+      setTabPeers(peers.size)
+    }
+    const unsubscribe = channel.subscribe((message) => {
+      const payload = message.payload
+      if (payload.type === 'presence') {
+        if (payload.state === 'leaving') peers.delete(message.tabId)
+        else peers.set(message.tabId, message.sentAt)
+        updatePeers()
+        return
+      }
+
+      peers.set(message.tabId, message.sentAt)
+      updatePeers()
+      if (payload.type === 'appearance') {
+        setAppearance((current) => {
+          const safeValue = { ...current, ...payload.appearance }
+          localStorage.setItem(appearanceStorageKey, JSON.stringify(safeValue))
+          applyAppearance(safeValue)
+          audioRef.current?.setVolume(safeValue.audioVolume)
+          audioRef.current?.setMuted(safeValue.audioMuted)
+          return safeValue
+        })
+      }
+      if (payload.type === 'terminal') {
+        setRelayedTerminal((current) => [
+          ...current.filter((entry) => entry.id !== message.messageId).slice(-119),
+          { id: message.messageId, tabId: message.tabId, ...payload.entry },
+        ])
+      }
+      if (payload.type === 'controller-event') {
+        const event = payload.event as ControllerEvent
+        setEvents((current) => prependSignificantControllerEvent(current, event))
+      }
+    })
+    const announce = () => channel.publishPresence(document.hidden ? 'hidden' : 'active', pageRef.current)
+    const onVisibility = () => announce()
+    announce()
+    document.addEventListener('visibilitychange', onVisibility)
+    const heartbeat = window.setInterval(() => { announce(); updatePeers() }, 12_000)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(heartbeat)
+      channel.publishPresence('leaving', pageRef.current)
+      unsubscribe()
+      channel.close()
+      if (tabChannelRef.current === channel) tabChannelRef.current = null
+    }
   }, [])
 
   useEffect(() => {
@@ -288,10 +496,21 @@ export default function App() {
     toastID.current += 1
     const id = toastID.current
     setToasts((current) => [...current.slice(-3), { id, tone, title, detail }])
-    if (tone === 'danger' || tone === 'warning') audioRef.current?.cue('warning')
+    if (tone === 'danger') audioRef.current?.cue('error')
+    if (tone === 'warning') audioRef.current?.cue('warning')
     if (tone === 'success') audioRef.current?.cue('success')
     window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
   }, [])
+
+  useEffect(() => {
+    const testFeedback = () => {
+      const engine = audioRef.current
+      notify('success', appearance.locale === 'fa' ? 'اعلان آزمایشی' : 'Test notification', appearance.locale === 'fa' ? 'صدا، لرزش و اعلان آماده‌اند.' : 'Audio, haptics, and notifications are ready.')
+      if (engine) void engine.start().then((started) => { if (started) engine.cue('success') })
+    }
+    window.addEventListener('pccontroller:test-feedback', testFeedback)
+    return () => window.removeEventListener('pccontroller:test-feedback', testFeedback)
+  }, [appearance.locale, notify])
 
   const refresh = useCallback(async () => {
     if (demo) {
@@ -310,19 +529,24 @@ export default function App() {
   }, [demo, notify])
 
   const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
+    const safeCommand = redactSensitiveCommand(command)
+    tabChannelRef.current?.publishTerminal({ kind: 'command', text: `pc› ${safeCommand}`, at: Date.now() })
     if (demo) {
-      const output = `[demo] ${redactSensitiveCommand(command)}`
+      const output = `[demo] ${safeCommand}`
+      tabChannelRef.current?.publishTerminal({ kind: 'output', text: output, at: Date.now() })
       notify('info', success || 'Demonstration command', output)
       return output
     }
     try {
       const result = await execute(command)
       const output = result.output ?? ''
-      notify('success', success || 'Command completed', output || redactSensitiveCommand(command))
+      tabChannelRef.current?.publishTerminal({ kind: 'output', text: output || '✓ accepted', at: Date.now() })
+      notify('success', success || 'Command completed', output || safeCommand)
       void refresh()
       return output
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause)
+      tabChannelRef.current?.publishTerminal({ kind: 'error', text: `! ${detail}`, at: Date.now() })
       notify('danger', 'Command failed', detail)
       throw cause
     }
@@ -364,9 +588,14 @@ export default function App() {
   }, [])
 
   const navigate = useCallback((value: PageID) => {
+    const nextHash = canonicalPageHash(value)
+    if (pageRef.current !== value || location.hash !== nextHash) {
+      history.pushState({ page: value }, '', canonicalPageURL(value))
+    }
+    pageRef.current = value
     setPage(value)
     setMobileNav(false)
-    history.replaceState(null, '', `${location.pathname}${location.search}#/${value}`)
+    tabChannelRef.current?.publishPresence(document.hidden ? 'hidden' : 'active', value)
     document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
 
@@ -377,10 +606,11 @@ export default function App() {
       audioVolume: Number.isFinite(value.audioVolume) ? Math.max(0, Math.min(1, value.audioVolume)) : defaultAppearance.audioVolume,
     }
     setAppearance(safeValue)
-    localStorage.setItem('pccontroller.appearance', JSON.stringify(safeValue))
+    localStorage.setItem(appearanceStorageKey, JSON.stringify(safeValue))
     applyAppearance(safeValue)
     audioRef.current?.setVolume(safeValue.audioVolume)
     audioRef.current?.setMuted(safeValue.audioMuted)
+    tabChannelRef.current?.publishAppearance(safeValue)
     const engine = audioRef.current
     if (!safeValue.audioMuted && engine) {
       void engine.start({ muted: false }).then((started) => {
@@ -399,8 +629,38 @@ export default function App() {
         if (started && sound) engine.cue('success')
       })
     }
-    setBootOpen(false)
-  }, [appearance, saveAppearance])
+    if (demo || uiConfig?.setup_complete) {
+      setBootOpen(false)
+      return
+    }
+    if (!uiConfig) {
+      notify('warning', 'Setup state is unavailable', 'The current host configuration has not loaded yet.')
+      return
+    }
+    void rpc<HostUISettings>('controller.ui.config.set', { setup_complete: true })
+      .then((saved) => {
+        setUIConfig((current) => current ? {
+          ...current,
+          name: saved.app_title,
+          setup_complete: saved.setup_complete,
+          welcome_melody: saved.welcome_melody,
+        } : current)
+      })
+      .catch((cause) => notify('warning', 'Setup state was not saved', cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setBootOpen(false))
+  }, [appearance, demo, notify, saveAppearance, uiConfig?.setup_complete])
+
+  const saveAppTitle = useCallback(async (value: string): Promise<string> => {
+    const saved = await rpc<HostUISettings>('controller.ui.config.set', { app_title: value.trim() })
+    setUIConfig((current) => current ? {
+      ...current,
+      name: saved.app_title,
+      setup_complete: saved.setup_complete,
+      welcome_melody: saved.welcome_melody,
+    } : current)
+    notify('success', 'Application title saved', saved.app_title)
+    return saved.app_title
+  }, [notify])
 
   const toggleAudio = useCallback(() => {
     saveAppearance({ ...appearance, audioMuted: !appearance.audioMuted })
@@ -422,9 +682,22 @@ export default function App() {
   }, [appearance])
 
   useEffect(() => {
-    const onHash = () => setPage(pageFromLocation())
-    window.addEventListener('hashchange', onHash)
-    return () => window.removeEventListener('hashchange', onHash)
+    const initialPage = pageFromLocation()
+    if (location.hash !== canonicalPageHash(initialPage)) {
+      history.replaceState(history.state, '', canonicalPageURL(initialPage))
+    }
+    const syncFromHistory = () => {
+      const next = pageFromLocation()
+      pageRef.current = next
+      setPage(next)
+      setMobileNav(false)
+    }
+    window.addEventListener('hashchange', syncFromHistory)
+    window.addEventListener('popstate', syncFromHistory)
+    return () => {
+      window.removeEventListener('hashchange', syncFromHistory)
+      window.removeEventListener('popstate', syncFromHistory)
+    }
   }, [])
 
   useEffect(() => {
@@ -578,20 +851,51 @@ export default function App() {
       try {
         setBootTarget(42)
         const config = await getUIConfig(abort.signal)
+		if (reloadForResourceMismatch(config)) return
         setUIConfig(config)
+        const firstSetup = shouldOpenSetup(config)
+        setBootOpen(firstSetup)
+        setBootResolved(true)
         setBootTarget(70)
         const value = await getSnapshot(abort.signal)
         setSnapshot(value)
+        setStartupProbeResolved(true)
         if (value.have_status) setSamples([sampleFrom(value)])
+        const since = new Date(Date.now() - 60 * 60_000).toISOString()
+        const [statusHistory, eventHistory] = await Promise.allSettled([
+          rpc<HistorySample[]>('controller.history.status', { since }, abort.signal),
+          rpc<ControllerEvent[]>('controller.history.timeline', { since, limit: 500 }, abort.signal),
+        ])
+        if (statusHistory.status === 'fulfilled') {
+          const historical = samplesFromHistory(statusHistory.value)
+          setSamples((current) => [...historical, ...current].slice(-360))
+        }
+        if (eventHistory.status === 'fulfilled') {
+          setEvents(significantControllerEvents(eventHistory.value).slice(-500).reverse())
+        }
         setBootTarget(92)
+        if (firstSetup && value.connected && config.welcome_melody?.trim()) {
+          try {
+            await execute(`melody wait ${shellArgument(config.welcome_melody.trim())}`, abort.signal)
+          } catch (cause) {
+            setStreamDetail(`Welcome melody unavailable: ${cause instanceof Error ? cause.message : String(cause)}`)
+          }
+        }
         stopStream = connectStream(config, {
           status: (update) => {
             if (update.error) { setStreamDetail(update.error); return }
+            // A successful sample supersedes any transient controller error.
+            // Keeping the old detail made the live badge expose stale offline
+            // text through its tooltip after the transport had recovered.
+            setStreamDetail('')
             setSnapshot((current) => ({ ...current, connected: true, have_status: true, status: update.status, status_updated: update.time }))
             setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, status: update.status }, new Date(update.time).getTime())])
           },
           event: (event) => {
-            setEvents((current) => [event, ...current.filter((item) => item.id !== event.id)].slice(0, 500))
+            if (isSignificantControllerEvent(event)) {
+              setEvents((current) => prependSignificantControllerEvent(current, event))
+              tabChannelRef.current?.publishControllerEvent(event)
+            }
             if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time)) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
               if (destination) {
@@ -600,15 +904,34 @@ export default function App() {
               }
             }
             if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
+            if (isCompletedHostUpdate(event)) {
+              refreshAfterHostRestart.current = true
+            }
             if (/config/i.test(event.kind)) {
               void getUIConfig().then(setUIConfig).catch(() => undefined)
             }
             if (/device|connection|settings/i.test(event.kind)) void refresh()
           },
-          state: (state, detail) => { setStreamState(state); setStreamDetail(detail ?? '') },
+          state: (state, detail) => {
+            setStreamState(state)
+            setStreamDetail(detail ?? '')
+            if (state === 'open') {
+              if (refreshAfterHostRestart.current) {
+                refreshAfterHostRestart.current = false
+                window.location.reload()
+                return
+              }
+              void refresh()
+            } else {
+              setSnapshot((current) => snapshotAfterTransportLoss(current, state, detail))
+            }
+          },
         })
         setBootTarget(100)
       } catch (cause) {
+        setStartupProbeResolved(true)
+        setBootOpen(false)
+        setBootResolved(true)
         setStreamState('waiting')
         setStreamDetail(cause instanceof Error ? cause.message : String(cause))
         setBootTarget(100)
@@ -619,19 +942,19 @@ export default function App() {
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
+    transport: { streamState, tabBusSupported, tabPeers },
+    relayedTerminal,
+    broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
   }
 
-  const view = (() => {
-    switch (page) {
-      case 'controls': return <ControlsView {...shared} />
-      case 'workbench': return <WorkbenchView {...shared} />
-      case 'device': return <LocalDeviceView {...shared} />
-      case 'data': return <DataWorkspaceView {...shared} />
-      case 'events': return <EventsView {...shared} />
-      case 'settings': return <SettingsView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} />
-      default: return <DashboardView {...shared} />
-    }
-  })()
+  const PageView = pageViewFor(page)
+  const view = (
+    <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
+      {page === 'settings'
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} />
+        : <PageView {...shared} />}
+    </Suspense>
+  )
 
   const current = navigation.find((item) => item.id === page) ?? navigation[0]
   const filteredPalette = navigation.filter((item) => t(item.label).toLowerCase().includes(paletteQuery.toLowerCase()))
@@ -650,18 +973,50 @@ export default function App() {
     finally { setDialogBusy(false) }
   }
 
+  const transportTone = snapshot.connected && streamState === 'open'
+    ? 'good'
+    : streamState === 'connecting'
+      ? 'info'
+      : streamState === 'open'
+        ? 'neutral'
+        : 'warn'
+  const transportLabel = snapshot.connected
+    ? streamState === 'open' ? t('live') : streamState
+    : streamState === 'open'
+      ? appearance.locale === 'fa' ? 'میزبان آماده' : 'Host ready'
+      : t('offline')
+  const quickCommands = snapshot.connected
+    ? [
+        ['status', `${snapshot.port.name || (appearance.locale === 'fa' ? 'کنترلر' : 'Controller')} · ${snapshot.status_updated ? formatClock(appearance.locale, snapshot.status_updated) : t('online')}`],
+        ['relay off', snapshot.status.active_relays
+          ? appearance.locale === 'fa'
+            ? `${snapshot.status.active_relays.toString(2).replace(/0/g, '').length} خروجی فعال`
+            : `${snapshot.status.active_relays.toString(2).replace(/0/g, '').length} active outputs`
+          : appearance.locale === 'fa' ? 'همهٔ خروجی‌ها آزادند' : 'All outputs released'],
+        ['rf list', appearance.locale === 'fa' ? 'فهرست رادیویی کنترلر' : 'Controller radio inventory'],
+        ['macro list', appearance.locale === 'fa' ? 'فهرست ماکروهای کنترلر' : 'Controller macro inventory'],
+      ]
+    : [
+        ['ports', snapshot.connection_reason || (appearance.locale === 'fa' ? 'جستجوی درگاه‌های سریال موجود' : 'Discover available serial ports')],
+        ['hotkeys status', appearance.locale === 'fa' ? 'سرویس میان‌برهای سراسری' : 'Global shortcut service'],
+        ['os status', appearance.locale === 'fa' ? 'وضعیت سیستم‌عامل میزبان' : 'Host operating-system state'],
+      ]
+  const footerTransport = appearance.locale === 'fa'
+    ? `WS ${streamState === 'open' ? 'باز' : streamState === 'connecting' ? 'در حال اتصال' : streamState === 'closed' ? 'بسته' : streamState} · ${localizeDigits('fa', tabPeers + 1)} زبانه`
+    : `WS ${streamState} · ${tabPeers + 1} ${tabPeers === 0 ? 'tab' : 'tabs'}`
+
   return (
     <MotionConfig reducedMotion={appearance.reduceMotion ? 'always' : 'user'}>
     <div
-      className={`app-shell${sidebarOpen ? '' : ' is-sidebar-compact'}`}
-      inert={bootOpen || hotkeyHelp ? true : undefined}
-      aria-hidden={bootOpen || hotkeyHelp ? true : undefined}
+      className={`app-shell${sidebarOpen ? '' : ' is-sidebar-compact'}${bootResolved ? '' : ' is-bootstrap-pending'}`}
+      inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
+      aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
     >
-      <aside className="sidebar" aria-label="Primary navigation">
+      <aside className="sidebar" aria-label={t('primaryNavigation')}>
         <div className="brand">
-          <div className="brand__mark" aria-hidden="true"><span>{productShortName}</span><i /><i /></div>
-          <div className="brand__copy"><strong>{productTitle}</strong><span>{__PRODUCT_TAGLINE__}</span></div>
-          <button className="sidebar-toggle" aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
+          <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><span aria-hidden="true">{productShortName}</span><i /><i /></a>
+          <a className="brand__copy" href="#/dashboard"><strong>{productTitle}</strong><span>{__PRODUCT_TAGLINE__}</span></a>
+          <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
 
         <div className="sidebar__status">
@@ -673,51 +1028,50 @@ export default function App() {
         <nav className="sidebar__nav">
           {(['core', 'integrations', 'system'] as const).map((group) => (
             <div className="nav-group" key={group}>
-              <span className="nav-group__label">{group === 'core' ? 'SYSTEM' : group === 'integrations' ? t('integrations').toUpperCase() : 'OPERATIONS'}</span>
+              <span className="nav-group__label">{t(group === 'core' ? 'system' : group === 'integrations' ? 'integrations' : 'operations').toUpperCase()}</span>
               {navigation.filter((item) => item.group === group).map((item) => <NavButton key={item.id} icon={item.icon} label={t(item.label)} active={page === item.id} badge={item.id === 'events' && events.length ? String(Math.min(events.length, 99)) : undefined} onClick={() => navigate(item.id)} />)}
             </div>
           ))}
         </nav>
 
-        <div className="sidebar__footer"><ShieldCheck size={17} /><div><strong>Primary owner</strong><span>Authenticated IPC</span></div></div>
+        <div className="sidebar__footer"><ShieldCheck size={17} /><div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد متصل' : 'Controller connected') : (appearance.locale === 'fa' ? 'میزبان آماده' : 'Host ready')}</strong><span>{footerTransport}</span></div></div>
       </aside>
 
       <header className="topbar">
-        <button className="mobile-menu" aria-label="Open navigation" onClick={() => setMobileNav(true)}><Menu size={20} /></button>
+        <button className="mobile-menu" aria-label={t('openNavigation')} onClick={() => setMobileNav(true)}><Menu size={20} /></button>
         <div className="breadcrumbs"><span>{productShortName}</span><i>/</i><strong>{t(current.label)}</strong></div>
-        <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('search')} commands and pages</span><kbd>Ctrl K</kbd></button>
+        <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[["Ctrl", "⌘"], "K"]} /></button>
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
-          <StatusBadge tone={streamState === 'open' ? 'good' : streamState === 'connecting' ? 'info' : 'warn'} pulse={streamState === 'connecting'}>{streamState === 'open' ? t('live') : streamState}</StatusBadge>
-          <button className="topbar-icon" aria-label="Toggle theme" onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
-          <button className="topbar-icon" aria-label="Switch language" onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>
-          <button className="topbar-icon topbar-audio" aria-label={appearance.audioMuted ? 'Enable interaction audio' : 'Mute interaction audio'} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
-          <button className="topbar-icon topbar-hotkeys" aria-label="Keyboard shortcuts" aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
-          <button className="topbar-icon" aria-label="Notifications" onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
+          <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>
+          <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
+          <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>
+          <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
+          <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
+          <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
         </div>
       </header>
 
       <main className="app-main">
-        {streamDetail && streamState !== 'open' && <div className="stream-notice"><Cable size={17} /><span>{streamDetail}</span><Button compact icon={Settings} onClick={() => navigate('settings')}>{t('settings')}</Button></div>}
         <PageTransition pageKey={page}>{view}</PageTransition>
       </main>
 
-      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+      <nav className="mobile-bottom-nav" aria-label={t('mobileNavigation')}>
         {navigation.slice(0, 5).map((item) => <button key={item.id} className={page === item.id ? 'is-active' : ''} onClick={() => navigate(item.id)}><Icon icon={item.icon} size={20} /><span>{t(item.label)}</span></button>)}
       </nav>
 
       <AnimatePresence>
         {mobileNav && (
           <motion.div className="mobile-drawer-layer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <button className="mobile-drawer-backdrop" aria-label="Close navigation" onClick={() => setMobileNav(false)} />
+            <button className="mobile-drawer-backdrop" aria-label={t('dismissNavigation')} onClick={() => setMobileNav(false)} />
             <motion.aside
               className="mobile-drawer"
-              initial={{ clipPath: drawerClosedClip, filter: 'blur(7px)' }}
-              animate={{ clipPath: 'inset(0 0% 0 0)', filter: 'blur(0)' }}
-              exit={{ clipPath: drawerClosedClip, filter: 'blur(7px)' }}
+              initial={{ x: drawerClosedOffset, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: drawerClosedOffset, opacity: 0 }}
               transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
             >
-              <header><div className="brand__mark"><span>{productShortName}</span><i /><i /></div><strong>{productTitle}</strong><button onClick={() => setMobileNav(false)}><X size={19} /></button></header>
+              <header><div className="brand__mark"><span>{productShortName}</span><i /><i /></div><strong>{productTitle}</strong><button type="button" aria-label={t('closeNavigation')} onClick={() => setMobileNav(false)}><X size={19} /></button></header>
               {navigation.map((item) => <NavButton key={item.id} icon={item.icon} label={t(item.label)} active={page === item.id} onClick={() => navigate(item.id)} />)}
             </motion.aside>
           </motion.div>
@@ -727,16 +1081,16 @@ export default function App() {
       <AnimatePresence>
         {palette && (
           <motion.div className="palette-layer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <button className="palette-backdrop" aria-label="Close command palette" onClick={() => { setPalette(false); setPaletteQuery('') }} />
-            <motion.section className="palette" role="dialog" aria-modal="true" aria-label="Command palette" initial={{ opacity: 0, scale: .97, filter: 'blur(12px)', clipPath: 'inset(10% 5% 10% 5%)' }} animate={{ opacity: 1, scale: 1, filter: 'blur(0)', clipPath: 'inset(0% 0% 0% 0%)' }} exit={{ opacity: 0, scale: .98, filter: 'blur(8px)', clipPath: 'inset(8% 4% 8% 4%)' }} transition={{ type: 'spring', stiffness: 440, damping: 38 }}>
-              <header><Command size={19} /><input autoFocus value={paletteQuery} placeholder="Navigate or run a safe command…" aria-controls="palette-results" aria-activedescendant={filteredPalette[paletteIndex] ? `palette-page-${filteredPalette[paletteIndex].id}` : undefined} onChange={(event) => setPaletteQuery(event.target.value)} /><kbd>ESC</kbd></header>
-              <div className="palette__results" id="palette-results" role="listbox" aria-label="Matching pages">
-                <span className="palette__label">PAGES</span>
-                {filteredPalette.map((item, index) => <button id={`palette-page-${item.id}`} role="option" aria-selected={index === paletteIndex} className={index === paletteIndex ? 'is-highlighted' : ''} key={item.id} onPointerMove={() => setPaletteIndex(index)} onClick={() => { navigate(item.id); setPalette(false); setPaletteQuery('') }}><Icon icon={item.icon} size={18} /><div><strong>{t(item.label)}</strong><small>Open {item.id}</small></div><Check className={page === item.id ? 'is-visible' : ''} size={16} /></button>)}
-                <span className="palette__label">QUICK COMMANDS</span>
-                {[['status', 'Read fresh controller status'], ['relay off', 'Safely stop all relays'], ['rf list', 'List learned remotes'], ['macro list', 'List configured macros']].filter(([value, label]) => `${value} ${label}`.includes(paletteQuery.toLowerCase())).map(([value, label]) => <button role="option" aria-selected="false" key={value} onClick={() => { void runCommand(value); setPalette(false) }}><Box size={18} /><div><strong dir="ltr">{value}</strong><small>{label}</small></div></button>)}
+            <button className="palette-backdrop" aria-label={t('closeCommandPalette')} onClick={() => { setPalette(false); setPaletteQuery('') }} />
+            <motion.section className="palette" role="dialog" aria-modal="true" aria-label={t('commandPalette')} initial={{ opacity: 0, scale: .985 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: .99 }} transition={{ duration: .2, ease: 'easeOut' }}>
+              <header><Command size={19} /><input autoFocus value={paletteQuery} placeholder={t('commandPalettePlaceholder')} aria-controls="palette-results" aria-activedescendant={filteredPalette[paletteIndex] ? `palette-page-${filteredPalette[paletteIndex].id}` : undefined} onChange={(event) => setPaletteQuery(event.target.value)} /><KeyCombo keys={["Esc"]} /></header>
+              <div className="palette__results" id="palette-results" role="listbox" aria-label={t('matchingPages')}>
+                <span className="palette__label">{t('pagesLabel').toUpperCase()}</span>
+                {filteredPalette.map((item, index) => <button id={`palette-page-${item.id}`} role="option" aria-selected={index === paletteIndex} className={index === paletteIndex ? 'is-highlighted' : ''} key={item.id} onPointerMove={() => setPaletteIndex(index)} onClick={() => { navigate(item.id); setPalette(false); setPaletteQuery('') }}><Icon icon={item.icon} size={18} /><div><strong>{t(item.label)}</strong><small>{page === item.id ? (appearance.locale === 'fa' ? 'صفحه فعلی' : 'Current page') : (appearance.locale === 'fa' ? 'باز کردن' : 'Open')}</small></div><Check className={page === item.id ? 'is-visible' : ''} size={16} /></button>)}
+                <span className="palette__label">{t('quickCommandsLabel').toUpperCase()}</span>
+                {quickCommands.filter(([value, label]) => `${value} ${label}`.toLowerCase().includes(paletteQuery.toLowerCase())).map(([value, label]) => <button role="option" aria-selected="false" key={value} onClick={() => { void runCommand(value); setPalette(false) }}><Box size={18} /><div><strong dir="ltr">{value}</strong><small>{label}</small></div></button>)}
               </div>
-              <footer><span><kbd>↑↓</kbd> Navigate</span><span><kbd>↵</kbd> Select</span><span>All commands use the primary dispatcher</span></footer>
+              <footer><span><KeyCombo keys={[["↑", "↓"]]} /> {t('navigate')}</span><span><KeyCombo keys={["Enter"]} /> {t('select')}</span><span>{filteredPalette.length + quickCommands.length} {t('actions')} · WS {streamState}</span></footer>
             </motion.section>
           </motion.div>
         )}
@@ -745,7 +1099,7 @@ export default function App() {
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
       <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </div>
-    <BootGate open={bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={__PRODUCT_TAGLINE__} onEnter={enterApp} />
+    <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={__PRODUCT_TAGLINE__} onEnter={enterApp} />
     <HotkeyHelp open={hotkeyHelp} locale={appearance.locale} onClose={() => setHotkeyHelp(false)} />
     </MotionConfig>
   )

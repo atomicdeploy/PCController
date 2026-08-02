@@ -49,7 +49,10 @@ jobs:
           node --check .github/scripts/package-directory.mjs
           node --check .github/scripts/step-summary.mjs
           node Tools/Dependencies/export-lock.mjs validate
+          node --test .github/scripts/assert-defaults.test.mjs
           node --test .github/scripts/package-directory.test.mjs
+          node --test .github/scripts/repository-context.test.mjs
+          node --test .github/scripts/repository-policy.test.mjs
           node --test Tools/Dependencies/export-lock.test.mjs
           node --test .github/scripts/release-showcase.test.mjs
           node --test .github/scripts/step-summary.test.mjs

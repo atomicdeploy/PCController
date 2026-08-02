@@ -27,13 +27,14 @@ jobs:
     uses: ./.github/workflows/firmware.yml
     with:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
-      showcase_alias: true
 
   controller:
     name: "🖥️ Controller · Five native targets"
+    needs: firmware
     uses: ./.github/workflows/host.yml
     with:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+      firmware_artifact_name: ${{ needs.firmware.outputs.artifact_name }}
 
   virtual-board:
     name: "🧪 Virtual Board · Five native targets"

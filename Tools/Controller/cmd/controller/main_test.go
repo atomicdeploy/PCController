@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -12,10 +14,94 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/programmer"
 )
+
+func TestCompileOnlyCommandDoesNotLoadOrMutateRuntimeConfig(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args func(string, string) []string
+	}{
+		{
+			name: "program compile",
+			args: func(project, output string) []string {
+				return []string{
+					"program", "--method", "compile", "--sketch", project,
+					"--output-dir", output, "--dry-run",
+				}
+			},
+		},
+		{
+			name: "toolchain compile alias",
+			args: func(project, output string) []string {
+				return []string{
+					"toolchain", "compile", project,
+					"--output-dir", output, "--dry-run",
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			invalid := []byte(`{"schema":1,"host_menus":{"request_gesture":"status-hold-k4"}}`)
+			if err := os.WriteFile(path, invalid, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			args := append([]string{"--config", path}, test.args(findProjectRoot(), t.TempDir())...)
+			var stdout, stderr bytes.Buffer
+			err := run(args, &stdout, &stderr)
+			if err != nil {
+				t.Fatalf("compile-only command depended on runtime config: %v\nstderr: %s", err, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "compile") {
+				t.Fatalf("compile plan missing from output: %q", stdout.String())
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, invalid) {
+				t.Fatalf("compile-only command mutated runtime config:\n%s", after)
+			}
+		})
+	}
+}
+
+func TestRuntimeCommandStillValidatesRuntimeConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"schema":1,"host_menus":{"request_gesture":"status-hold-k4"}}`),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name string
+		args []string
+	}{
+		{name: "runtime port discovery", args: []string{"ports"}},
+		{
+			name: "device programming",
+			args: []string{
+				"program", "--method", "urclock", "--operation", "probe", "--dry-run",
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			args := append([]string{"--config", path}, test.args...)
+			err := run(args, &stdout, &stderr)
+			if err == nil || !strings.Contains(err.Error(), "request_gesture") {
+				t.Fatalf("runtime config validation error=%v", err)
+			}
+		})
+	}
+}
 
 func TestBrowserURLUsesReachableLoopbackAddress(t *testing.T) {
 	for input, expected := range map[string]string{
@@ -32,6 +118,27 @@ func TestBrowserURLUsesReachableLoopbackAddress(t *testing.T) {
 	}
 	if _, err := browserURL("missing-port"); err == nil {
 		t.Fatal("invalid listen address should fail")
+	}
+}
+
+func TestWebBrowserAutoOpenRequiresConnectedController(t *testing.T) {
+	tests := []struct {
+		name      string
+		noOpen    bool
+		connected bool
+		want      bool
+	}{
+		{name: "connected default", connected: true, want: true},
+		{name: "disconnected default", connected: false, want: false},
+		{name: "connected explicit no-open", noOpen: true, connected: true, want: false},
+		{name: "disconnected explicit no-open", noOpen: true, connected: false, want: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := webBrowserAutoOpenAllowed(test.noOpen, test.connected); got != test.want {
+				t.Fatalf("webBrowserAutoOpenAllowed(%v, %v)=%v; want %v", test.noOpen, test.connected, got, test.want)
+			}
+		})
 	}
 }
 
@@ -146,7 +253,7 @@ func TestHelpAndVersion(t *testing.T) {
 		want string
 	}{
 		{[]string{"help"}, "controller ws serve"},
-		{[]string{"version"}, "development source-hash=unknown built=unknown"},
+		{[]string{"version"}, productidentity.Version + " source-hash=unknown built=unknown"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if err := run(test.args, &stdout, &stderr); err != nil {
@@ -160,7 +267,7 @@ func TestHelpAndVersion(t *testing.T) {
 }
 
 func TestPersistedProductTitleAppearsInHelpAndVersion(t *testing.T) {
-	t.Setenv("PCCONTROLLER_APP_TITLE", "")
+	t.Setenv("APP_TITLE", "")
 	path := filepath.Join(t.TempDir(), "config.json")
 	value := appconfig.Defaults()
 	value.UI.AppTitle = "Workshop Controller"
@@ -224,7 +331,7 @@ func TestWatchedHostMenusAcrossFormatsRoutePreviewAndRelease(t *testing.T) {
 			routeErrors := make(chan error, 4)
 			manager.SetDefinitionChanged(func(change hostmenu.DefinitionChange) {
 				changes <- change
-				if routeErr := syncLegacyHostMenuOverlay(manager, bridge, &change); routeErr != nil {
+				if routeErr := syncFallbackHostMenuOverlay(manager, bridge, &change); routeErr != nil {
 					routeErrors <- routeErr
 				}
 			})
@@ -444,23 +551,31 @@ func TestBootAndToolchainCLIArguments(t *testing.T) {
 func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	got, err := normalizeProgramCLIArgs([]string{
 		"flash", "firmware image.hex", "COM18", "--allow-incomplete-backup",
+		"--reinitialize-eeprom",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
 		"--operation", "write-flash", "--method", "urclock",
-		"--hex", "firmware image.hex", "--allow-incomplete-backup", "--port", "COM18",
+		"--hex", "firmware image.hex", "--allow-incomplete-backup",
+		"--reinitialize-eeprom", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalized=%#v want=%#v", got, want)
 	}
 	usb, err := normalizeProgramCLIArgs([]string{
-		"flash", "firmware.hex", "USB-SERIAL CH340", "--usbasp-troubleshooting",
+		"flash", "firmware.hex", "USB-SERIAL CH340", "--method", "usbasp",
 	})
-	if err != nil || !strings.Contains(strings.Join(usb, " "), "--method usbasp --usbasp-troubleshooting") ||
+	if err != nil || !strings.Contains(strings.Join(usb, " "), "--method usbasp") ||
 		!strings.Contains(strings.Join(usb, " "), "--app-device USB-SERIAL CH340") {
 		t.Fatalf("USBasp normalized=%#v err=%v", usb, err)
+	}
+	prefixedUSBasp, err := normalizeProgramCLIArgs([]string{
+		"--method", "usbasp", "flash", "firmware.hex", "USB-SERIAL CH340",
+	})
+	if err != nil || !reflect.DeepEqual(prefixedUSBasp, usb) {
+		t.Fatalf("prefixed USBasp normalized=%#v want=%#v err=%v", prefixedUSBasp, usb, err)
 	}
 	before, err := normalizeProgramCLIArgs([]string{
 		"--allow-incomplete-backup", "--app-reconnect=false", "flash",
@@ -483,6 +598,35 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 }
 
+func TestProgramCLIRejectsEEPROMReinitializationWithoutCompleteBackup(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := runProgramWithConfig([]string{
+		"flash", "candidate.hex", "COM18",
+		"--reinitialize-eeprom", "--allow-incomplete-backup",
+	}, &stdout, &stderr, appconfig.Defaults())
+	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw flash") {
+		t.Fatalf("unsafe development EEPROM reinitialization was accepted: %v", err)
+	}
+}
+
+func TestProgramWithoutOperationShowsUsageWithoutOpeningHardware(t *testing.T) {
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "controller.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err = runProgram(nil, &stdout, &stderr, store)
+	if err == nil || !strings.Contains(err.Error(), "program flash HEX") {
+		t.Fatalf("missing safe program usage: %v", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf(
+			"usage-only program command produced output: stdout=%q stderr=%q",
+			stdout.String(), stderr.String(),
+		)
+	}
+}
+
 func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing.T) {
 	t.Setenv("PCCONTROLLER_DEVICE", "")
 	t.Setenv("PCCONTROLLER_PORT", "")
@@ -492,7 +636,7 @@ func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing
 	}
 	base := []string{
 		"--method", "usbasp", "--operation", "write-flash",
-		"--hex", "firmware.hex", "--usbasp-troubleshooting", "--dry-run",
+		"--hex", "firmware.hex", "--dry-run",
 	}
 	var stdout, stderr bytes.Buffer
 	err = runProgram(base, &stdout, &stderr, store)
@@ -551,22 +695,27 @@ func TestProgramShellWordsRouteFlashThroughGuard(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("guarded flash words=%#v want=%#v", got, want)
 	}
+	usbasp := programShellWords(programmer.Options{
+		Method: programmer.MethodUSBasp, Operation: programmer.OperationWriteFlash,
+		HexPath: `C:\build output\full.hex`,
+	})
+	wantUSBasp := []string{
+		"program", "flash", `C:\build output\full.hex`, "--method", "usbasp",
+	}
+	if !reflect.DeepEqual(usbasp, wantUSBasp) {
+		t.Fatalf("USBasp guarded flash words=%#v want=%#v", usbasp, wantUSBasp)
+	}
 }
 
-func TestWSClientRejectsUnsafeProgrammersBeforeNetwork(t *testing.T) {
+func TestWSClientProgrammerMethodValidation(t *testing.T) {
+	if method, err := validatedWSFlashMethod("usbasp"); err != nil || method != programmer.MethodUSBasp {
+		t.Fatalf("canonical USBasp method rejected: method=%q err=%v", method, err)
+	}
 	store, err := appconfig.Open(filepath.Join(t.TempDir(), "controller.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if err := runWS(
-		[]string{"client", "--method", "usbasp"},
-		&stdout,
-		&stderr,
-		store,
-	); err == nil || !strings.Contains(err.Error(), "--usbasp-troubleshooting") {
-		t.Fatalf("unguarded USBasp was not rejected: %v", err)
-	}
 	if err := runWS(
 		[]string{"client", "--method", "avrdude"},
 		&stdout,
@@ -574,6 +723,96 @@ func TestWSClientRejectsUnsafeProgrammersBeforeNetwork(t *testing.T) {
 		store,
 	); err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("direct avrdude WS flashing was not rejected: %v", err)
+	}
+}
+
+func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testing.T) {
+	firmware := filepath.Join(t.TempDir(), "candidate.hex")
+	content := []byte(":020000000102FB\n:00000001FF\n")
+	if err := os.WriteFile(firmware, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statusCalls := 0
+	call := func(_ context.Context, method string, params, target any) error {
+		switch method {
+		case "controller.artifact.upload":
+			request := params.(artifacts.UploadRequest)
+			if request.Kind != artifacts.KindFirmware || request.SHA256 != document.SourceSHA256 ||
+				!bytes.Equal(request.Data, content) {
+				t.Fatalf("upload request=%+v", request)
+			}
+			*target.(*artifacts.OperationResult) = artifacts.OperationResult{
+				Artifact: &artifacts.Descriptor{Kind: artifacts.KindFirmware, SHA256: document.SourceSHA256},
+			}
+		case "controller.snapshot":
+			// Device identity is optional enrichment for the deterministic key.
+		case "controller.update.firmware":
+			request := params.(artifacts.UpdateRequest)
+			if !request.Authorized || request.Method != "urclock" ||
+				!request.AllowIncompleteBackup || !request.ReinitializeEEPROM ||
+				request.IdempotencyKey == "" ||
+				request.ArtifactSHA256 != document.SourceSHA256 {
+				t.Fatalf("update request=%+v", request)
+			}
+			*target.(*artifacts.OperationResult) = artifacts.OperationResult{
+				Operation: artifacts.UpdateStatus{ID: "op-primary", State: "queued"},
+			}
+		case "controller.update.status":
+			statusCalls++
+			status := artifacts.UpdateStatus{
+				ID: "op-primary", State: "programming", ProgressPercent: 40,
+				Detail: "guarded transaction", ProgrammingMethod: artifacts.ProgrammingMethodUrclock,
+				BootloaderOutcome: artifacts.BootloaderNotAttempted,
+			}
+			if statusCalls > 1 {
+				status.State, status.ProgressPercent, status.Detail = "completed", 100, "operation completed"
+				status.ArtifactSHA256 = document.SourceSHA256
+				status.BootloaderOutcome = artifacts.BootloaderSucceeded
+			}
+			*target.(*artifacts.UpdateStatus) = status
+		default:
+			t.Fatalf("unexpected primary method %q", method)
+		}
+		return nil
+	}
+	var output bytes.Buffer
+	if err := delegatePrimaryFirmwareUpdate(
+		context.Background(), firmware, "urclock", "", true, true, &output, call,
+	); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"delegated firmware SHA-256", "primary operation op-primary",
+		"programming 40%", "completed 100%", "bootloader=succeeded",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("progress output missing %q:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestPrimaryFirmwareProgressReportsTypedISPFallback(t *testing.T) {
+	call := func(_ context.Context, method string, _ any, target any) error {
+		if method != "controller.update.status" {
+			t.Fatalf("unexpected method %q", method)
+		}
+		*target.(*artifacts.UpdateStatus) = artifacts.UpdateStatus{
+			ID: "failed-op", State: "failed", Detail: "bootloader did not answer",
+			ErrorCode: "bootloader_timeout", ProgrammingMethod: artifacts.ProgrammingMethodUrclock,
+			BootloaderOutcome: artifacts.BootloaderTimedOut, ISPFallbackSuggested: true,
+		}
+		return nil
+	}
+	err := monitorPrimaryFirmwareUpdate(
+		context.Background(), "failed-op", io.Discard, call,
+	)
+	if err == nil || !strings.Contains(err.Error(), "bootloader=timed_out") ||
+		!strings.Contains(err.Error(), "ISP fallback suggested") {
+		t.Fatalf("typed failure=%v", err)
 	}
 }
 

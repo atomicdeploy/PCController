@@ -30,16 +30,22 @@ import (
 )
 
 type Status struct {
-	DiscoveryActive bool                            `json:"discovery_active"`
-	HotkeysActive   int                             `json:"hotkeys_active"`
-	KeyboardActive  int                             `json:"keyboard_control_active"`
-	Notifications   bool                            `json:"notifications_active"`
-	DoorWarning     bool                            `json:"door_open_running_warning"`
-	StatusLEDState  string                          `json:"status_led_state,omitempty"`
-	WebhooksActive  int                             `json:"webhooks_active"`
-	WSClientsActive []string                        `json:"websocket_clients_active,omitempty"`
-	LastError       string                          `json:"last_error,omitempty"`
-	Desktop         hostui.DesktopIntegrationStatus `json:"desktop"`
+	DiscoveryActive          bool                            `json:"discovery_active"`
+	HotkeysActive            int                             `json:"hotkeys_active"`
+	KeyboardActive           int                             `json:"keyboard_control_active"`
+	Notifications            bool                            `json:"notifications_active"`
+	NotificationQueuePending int                             `json:"notification_queue_pending"`
+	NotificationsDelivered   uint64                          `json:"notifications_delivered"`
+	NotificationsCoalesced   uint64                          `json:"notifications_coalesced"`
+	NotificationsDropped     uint64                          `json:"notifications_dropped"`
+	DoorWarning              bool                            `json:"door_open_running_warning"`
+	StatusLEDState           string                          `json:"status_led_state,omitempty"`
+	SegmentScroll            bool                            `json:"segment_scroll_active"`
+	SegmentText              string                          `json:"segment_scroll_text,omitempty"`
+	WebhooksActive           int                             `json:"webhooks_active"`
+	WSClientsActive          []string                        `json:"websocket_clients_active,omitempty"`
+	LastError                string                          `json:"last_error,omitempty"`
+	Desktop                  hostui.DesktopIntegrationStatus `json:"desktop"`
 }
 
 type peerState struct {
@@ -188,11 +194,15 @@ type Manager struct {
 	keyboard           hostui.KeyboardRegistrar
 	keyboardLatchMu    sync.Mutex
 	keyboardLatches    map[string]keyboardLatch
+	lastPWMReconcile   time.Time
 	keyboardActuator   func(context.Context, keyboardOperation) error
+	lifecycleActuator  func(context.Context, string) error
 	notifier           hostui.Notifier
+	notificationQueue  *notificationQueue
 	warningBeep        func() error
 	runningDoorWarning bool
 	statusLED          *statusLEDArbiter
+	segmentScroll      *segmentScrollPresenter
 }
 
 func Start(
@@ -208,11 +218,12 @@ func Start(
 	manager := &Manager{
 		client: client, store: store, ctx: ctx, cancel: cancel,
 		peers: make(map[string]*peerState), webhookGate: make(chan struct{}, 8),
-		keyboardLatches: make(map[string]keyboardLatch),
-		actions:         actions,
-		hotkeys:         hostui.NewHotkeyRegistrar(),
-		notifier:        hostui.NewNotifier(hostui.NotifierOptions{AppID: productidentity.StableAppID}),
-		warningBeep:     hostui.WarningBeep,
+		keyboardLatches:   make(map[string]keyboardLatch),
+		actions:           actions,
+		hotkeys:           hostui.NewHotkeyRegistrar(),
+		notifier:          hostui.NewNotifier(hostui.NotifierOptions{AppID: productidentity.StableAppID}),
+		notificationQueue: newNotificationQueue(16, 3*time.Second, 500*time.Millisecond),
+		warningBeep:       hostui.WarningBeep,
 	}
 	manager.statusLED = newStatusLEDArbiter(
 		ctx,
@@ -225,8 +236,33 @@ func Start(
 		},
 		func(err error) { manager.recordError("status LED: " + err.Error()) },
 	)
+	manager.segmentScroll = newSegmentScrollPresenter(
+		ctx,
+		client,
+		func(target segmentScrollTarget) {
+			manager.mu.Lock()
+			manager.status.SegmentScroll = target.active
+			manager.status.SegmentText = strings.TrimRight(target.text, " ")
+			manager.mu.Unlock()
+			state, text := "stopped", "HOST segment scroll released"
+			if target.active {
+				state, text = "active", fmt.Sprintf(
+					"HOST segment scroll active on page %d: %s",
+					target.page, strings.TrimRight(target.text, " "),
+				)
+			}
+			client.EmitHostActionEvent(
+				"display.segment.scroll", text, "host", "present",
+				map[string]string{"state": state},
+			)
+		},
+		func(err error) { manager.recordError(err.Error()) },
+	)
 	client.SetBeforeDisconnectHook(func(reason string) {
 		_ = manager.ReleaseKeyboard("port-close: " + reason)
+		scrollContext, scrollCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		_ = manager.segmentScroll.PrepareDisconnect(scrollContext)
+		scrollCancel()
 		requestContext, requestCancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
 		_ = manager.statusLED.PrepareDisconnect(requestContext)
 		requestCancel()
@@ -254,13 +290,18 @@ func Start(
 	// published immediately after Start returns can land between the goroutine
 	// launch and its first LatestEventID call and be skipped forever.
 	afterID := client.LatestEventID()
-	manager.wait.Add(3)
+	manager.wait.Add(5)
 	go manager.reconcileLoop()
 	go manager.eventLoop(afterID)
 	go func() {
 		defer manager.wait.Done()
 		manager.statusLED.Run()
 	}()
+	go func() {
+		defer manager.wait.Done()
+		manager.segmentScroll.Run()
+	}()
+	go manager.notificationLoop()
 	return manager, nil
 }
 
@@ -291,6 +332,9 @@ func (manager *Manager) Close() {
 	statusContext, statusCancel := context.WithTimeout(manager.ctx, 400*time.Millisecond)
 	_ = manager.statusLED.PrepareDisconnect(statusContext)
 	statusCancel()
+	scrollContext, scrollCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	_ = manager.segmentScroll.PrepareDisconnect(scrollContext)
+	scrollCancel()
 	manager.client.SetBeforeDisconnectHook(nil)
 	manager.cancel()
 	if advertiser != nil {
@@ -309,6 +353,13 @@ func (manager *Manager) Status() Status {
 	manager.mu.RLock()
 	defer manager.mu.RUnlock()
 	result := manager.status
+	if manager.notificationQueue != nil {
+		stats := manager.notificationQueue.stats()
+		result.NotificationQueuePending = stats.Pending
+		result.NotificationsDelivered = stats.Delivered
+		result.NotificationsCoalesced = stats.Coalesced
+		result.NotificationsDropped = stats.Dropped
+	}
 	result.WSClientsActive = append([]string(nil), result.WSClientsActive...)
 	return result
 }
@@ -429,6 +480,17 @@ func (manager *Manager) KeyboardStatus() hostui.KeyboardStatus {
 // ReleaseKeyboard synchronously converts every held key into its configured
 // release action before a caller closes the serial runtime.
 func (manager *Manager) ReleaseKeyboard(reason string) error {
+	ctx, cancel := context.WithTimeout(manager.ctx, 5*time.Second)
+	defer cancel()
+	return manager.ReleaseKeyboardContext(ctx, reason)
+}
+
+// ReleaseKeyboardContext relinquishes ordinary-key presses and configured
+// latches while sharing the caller's lifecycle deadline.
+func (manager *Manager) ReleaseKeyboardContext(ctx context.Context, reason string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	manager.mu.RLock()
 	registrar := manager.keyboard
 	manager.mu.RUnlock()
@@ -436,12 +498,7 @@ func (manager *Manager) ReleaseKeyboard(reason string) error {
 	if registrar != nil {
 		releaseErr = registrar.ReleaseAll(reason)
 	}
-	ctx, cancel := context.WithTimeout(manager.ctx, 5*time.Second)
-	defer cancel()
-	return errors.Join(
-		releaseErr,
-		manager.releaseKeyboardLatches(ctx, reason),
-	)
+	return errors.Join(releaseErr, manager.releaseKeyboardLatches(ctx, reason))
 }
 
 func (manager *Manager) NotificationStatus() hostui.NotificationStatus {
@@ -471,6 +528,7 @@ func integrationDigest(config appconfig.Config) [sha256.Size]byte {
 
 func (manager *Manager) reconcile(config appconfig.Config) error {
 	manager.client.ConfigureRFPresentation(config.RF)
+	manager.segmentScroll.Observe(config.UI.SegmentScroll, manager.client.Snapshot())
 	digest := integrationDigest(config)
 	manager.mu.RLock()
 	closing := manager.closing
@@ -487,6 +545,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		manager.advertiser, manager.hotkeys, manager.keyboard, manager.peers
 	desktopStatus := manager.status.Desktop
 	statusLEDState := manager.status.StatusLEDState
+	segmentScrollActive := manager.status.SegmentScroll
+	segmentScrollText := manager.status.SegmentText
 	doorWarning := manager.runningDoorWarning
 	manager.advertiser, manager.hotkeys, manager.keyboard = nil, nil, nil
 	manager.peers = make(map[string]*peerState)
@@ -508,6 +568,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		Notifications:  config.Integrations.Notifications.Enabled,
 		Desktop:        desktopStatus,
 		StatusLEDState: statusLEDState,
+		SegmentScroll:  segmentScrollActive,
+		SegmentText:    segmentScrollText,
 		DoorWarning:    doorWarning,
 	}
 	hotkeys := hostui.NewHotkeyRegistrar()
@@ -638,7 +700,16 @@ func (manager *Manager) eventLoop(afterID uint64) {
 		if event.Kind == "telemetry" {
 			snapshot := manager.client.Snapshot()
 			if snapshot.HaveStatus {
-				manager.observeKeyboardStatus(snapshot.Status, time.Now())
+				now := time.Now()
+				manager.observeKeyboardStatus(snapshot.Status, now)
+				if manager.keyboardPWMQueryDue(snapshot.Status, now) {
+					queryContext, cancel := context.WithTimeout(manager.ctx, 750*time.Millisecond)
+					values, queryErr := manager.client.PWMValues(queryContext)
+					cancel()
+					if queryErr == nil {
+						manager.observeKeyboardPWMValues(values, now)
+					}
+				}
 			}
 		}
 		if event.Kind == "connection" &&
@@ -658,6 +729,7 @@ func (manager *Manager) eventLoop(afterID uint64) {
 		}
 		config := manager.store.Current()
 		manager.observeRunningDoor(config)
+		manager.segmentScroll.Observe(config.UI.SegmentScroll, manager.client.Snapshot())
 		manager.statusLED.Observe(
 			config.Integrations.StatusLED,
 			manager.client.Snapshot(),
@@ -690,7 +762,7 @@ func bridgeEventForwardable(event controller.Event) bool {
 			!strings.EqualFold(event.Source, "websocket"))
 }
 
-// observeRunningDoor combines the explicit PC-owned Running state with the
+// observeRunningDoor combines the explicit HOST-owned Running state with the
 // live reed input. The door never changes ProgramState; it only raises/clears
 // this host warning and its configurable desktop sound/toast presentation.
 func (manager *Manager) observeRunningDoor(config appconfig.Config) {
@@ -793,13 +865,27 @@ func (manager *Manager) dispatchNotification(
 		}
 		notification = configured
 	}
-	go func() {
+	manager.notificationQueue.enqueue(notificationJob{
+		key: event.Kind, notification: notification,
+		priority: notificationPriority(event.Kind),
+	})
+}
+
+func (manager *Manager) notificationLoop() {
+	defer manager.wait.Done()
+	for {
+		job, ok := manager.notificationQueue.next(manager.ctx)
+		if !ok {
+			return
+		}
 		ctx, cancel := context.WithTimeout(manager.ctx, 10*time.Second)
-		defer cancel()
-		if err := manager.notifier.Notify(ctx, notification); err != nil {
+		err := manager.notifier.Notify(ctx, job.notification)
+		cancel()
+		manager.notificationQueue.complete(job.key)
+		if err != nil && manager.ctx.Err() == nil {
 			manager.recordError("notification: " + err.Error())
 		}
-	}()
+	}
 }
 
 func configuredNotificationActions(
@@ -1306,7 +1392,7 @@ func (manager *Manager) socketIOPeerSession(
 			service := manager.remotePeerService()
 			response := service.DispatchRemote(ctx, ipcjson.Request{
 				JSONRPC: ipcjson.Version, ID: json.RawMessage("1"),
-				Method: "controller.execute", Params: encoded,
+				Method: "controller.command.execute", Params: encoded,
 			}, "bridge")
 			_ = writeEvent("command.response", response)
 		case "rpc":

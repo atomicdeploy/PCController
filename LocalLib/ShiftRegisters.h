@@ -4,6 +4,7 @@
 
 #include "BoardPins.h"
 
+// ShiftInput names the eight active-low positions sampled from the 74HC165.
 enum ShiftInput : uint8_t {
   IN_1 = 0,
   IN_2,
@@ -15,6 +16,7 @@ enum ShiftInput : uint8_t {
   IN_8
 };
 
+// ShiftOutput names the eight active-low positions driven through the 74HC595.
 enum ShiftOutput : uint8_t {
   OUT_1 = 0,
   OUT_2,
@@ -26,6 +28,7 @@ enum ShiftOutput : uint8_t {
   OUT_8
 };
 
+// ShiftRegisters owns the shared-clock 74HC165/74HC595 input-output chain.
 class ShiftRegisters {
 public:
   void begin();
@@ -39,8 +42,8 @@ public:
   void allOutputsOff();
   uint8_t activeOutputs() const;
 
-  // Clearing a virtual bit simulates an active-low physical input. This keeps
-  // the useful test/remote-input behavior from the inherited projects.
+  // Clearing a virtual bit simulates an active-low physical input for tests or
+  // remote input injection.
   void setVirtualInput(uint8_t bit, bool active);
   void clearVirtualInputs();
 
@@ -50,4 +53,5 @@ private:
   uint8_t virtualInputs_ = 0xFF;
 };
 
+// shiftRegisters is the single board-wide shift-register service.
 extern ShiftRegisters shiftRegisters;

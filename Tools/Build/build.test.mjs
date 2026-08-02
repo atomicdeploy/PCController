@@ -11,21 +11,29 @@ import {
 	PROJECT_ROOT,
 	assertGeneratedPath,
 	collectWebNotices,
-	createPlan,
+	compilerManifestIdentity,
+        createPlan,
+        generatedCleanTargets,
         hostSourceIdentity,
-        installPackage,
+	installPackage,
+	isNativeWindowsGNUCompiler,
 	packBuildTimestamp,
 	parseArguments,
 	refreshedEnvironment,
 	renderTable,
 	removeGeneratedWinResources,
+	retirePreviousPackage,
 	resolveBuildIdentity,
 	resolveProductTitle,
+	selectCCompiler,
+	stalePackageTransactionPaths,
 	unixSmokeSource,
 	verboseCommandText,
+	windowsCompilerProvisionArguments,
 	windowsSmokeSource
 } from './build.mjs'
 import { createStableTestPlan, goTestSourceIdentity, stableTestBinaryName } from './go-tests.mjs'
+import { PRODUCT_METADATA } from './product-metadata.mjs'
 
 test('verbose command formatting obeys NO_COLOR byte-for-byte', () => {
 	const plain = verboseCommandText('go', ['test', './...'], { NO_COLOR: '' }, true)
@@ -71,6 +79,66 @@ test('refreshed Windows PATH preserves invoking shell precedence and one canonic
 	const refreshed = refreshedEnvironment(windowsEnvironment, 'win32')
 	assert.deepEqual(refreshed.PATH.split(delimiter).slice(0, 2), [selected, session])
 	assert.deepEqual(Object.keys(refreshed).filter(key => key.toLowerCase() === 'path'), ['PATH'])
+})
+
+test('Windows C compiler validation rejects MSYS/Cygwin even when gcc is on PATH', () => {
+	assert.equal(
+		isNativeWindowsGNUCompiler('x86_64-w64-mingw32', '#define __MINGW32__ 1\n#define __MINGW64__ 1\n', 'amd64'),
+		true
+	)
+	assert.equal(
+		isNativeWindowsGNUCompiler('x86_64-pc-msys', '#define __MSYS__ 1\n', 'amd64'),
+		false
+	)
+	assert.equal(
+		isNativeWindowsGNUCompiler('x86_64-w64-mingw32', '#define __CYGWIN__ 1\n#define __MINGW32__ 1\n', 'amd64'),
+		false
+	)
+	assert.equal(
+		isNativeWindowsGNUCompiler('i686-w64-mingw32', '#define __MINGW32__ 1\n', 'amd64'),
+		false
+	)
+})
+
+test('Windows C compiler bootstrap requests resolved user-scoped package and forwards proxy', () => {
+	const args = windowsCompilerProvisionArguments(
+		{ https_proxy: 'http://proxy.invalid:8080' }, 'amd64', '16.1.0-14.0.0-r3'
+	)
+	assert.deepEqual(args.slice(0, 7), [
+		'install', '--id', 'BrechtSanders.WinLibs.POSIX.UCRT', '--exact', '--source', 'winget', '--scope'
+	])
+	assert.match(args.join(' '), /--scope user --architecture x64/)
+	assert.match(args.join(' '), /--proxy http:\/\/proxy\.invalid:8080/)
+	assert.match(args.join(' '), /--version 16\.1\.0-14\.0\.0-r3/)
+})
+
+test('current Windows resolver selects a native compiler without accepting the first PATH gcc', {
+	skip: process.platform !== 'win32'
+}, () => {
+	const environment = { ...process.env }
+	for (const key of Object.keys(environment)) if (key.toLowerCase() === 'cc') delete environment[key]
+	const selected = selectCCompiler(environment, 'amd64', { compilerBootstrap: false })
+	assert.match(selected.target, /^x86_64-.*(?:mingw|windows-gnu)/i)
+	assert.match(selected.version, /^\d+(?:\.\d+)+$/)
+	assert.ok(selected.command.toLowerCase().endsWith(selected.env.CC.toLowerCase()))
+})
+
+test('host manifest compiler identity is locked and carries local binary integrity', () => {
+	const locked = {
+		package_id: 'BrechtSanders.WinLibs.POSIX.UCRT',
+		package_version: '16.1.0-14.0.0-r3',
+		compiler_version: '16.1.0',
+		target: 'x86_64-w64-mingw32',
+		installer_sha256: 'a'.repeat(64)
+	}
+	assert.deepEqual(compilerManifestIdentity({
+		command: 'C:\\toolchain\\gcc.exe', version: '16.1.0', target: 'x86_64-w64-mingw32'
+	}, locked, 'b'.repeat(64)), {
+		...locked, binary_name: 'gcc.exe', binary_sha256: 'b'.repeat(64)
+	})
+	assert.throws(() => compilerManifestIdentity({
+		command: 'gcc.exe', version: '15.1.0', target: 'x86_64-w64-mingw32'
+	}, locked, 'b'.repeat(64)), /does not match the resolved host-tool lock/)
 })
 
 test('build tables center headers and align numeric values', () => {
@@ -162,6 +230,29 @@ test('package publishing tolerates a shell holding the canonical directory', asy
         assert.deepEqual(await readdir(canonical), ['controller.exe', 'licenses'])
 })
 
+test('stale package cleanup recognizes only exact rollback transaction directories', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-transactions-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	await mkdir(join(root, '.bin-previous-123'))
+	await mkdir(join(root, '.bin-previous-current'))
+	await mkdir(join(root, '.bin-unrelated-456'))
+
+	assert.deepEqual(stalePackageTransactionPaths(root), [join(root, '.bin-previous-123')])
+})
+
+test('published packages tolerate a locked retired Windows directory', () => {
+	const locked = new Error('executable is still mapped')
+	locked.code = 'EPERM'
+	assert.equal(retirePreviousPackage('ignored', () => { throw locked }), false)
+
+	const unexpected = new Error('invalid target')
+	unexpected.code = 'EINVAL'
+	assert.throws(
+		() => retirePreviousPackage('ignored', () => { throw unexpected }),
+		(error) => error === unexpected,
+	)
+})
+
 test('safe default builds both targets without touching hardware', () => {
 	const options = parseArguments([], {})
 	assert.equal(options.host, true)
@@ -176,12 +267,13 @@ test('host plan reproducibly builds the web application before Go embedding', ()
 		'--build-timestamp', '35019D5D'
 	], {})
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
-	assert.deepEqual(plan.actions.slice(0, 6).map(action => action.id), [
-		'web-install', 'web-typecheck', 'web-test', 'web-build',
-		'product-identity-check', 'go-mod-download'
-	])
-	assert.deepEqual(plan.actions[0].command.args, ['ci', '--no-audit', '--no-fund'])
-	assert.equal(plan.actions[0].command.cwd, join(PROJECT_ROOT, 'Tools', 'Controller', 'web'))
+        assert.equal(plan.actions[0].id, 'embedded-defaults')
+        assert.deepEqual(plan.actions.slice(1, 7).map(action => action.id), [
+                'web-install', 'web-typecheck', 'web-test', 'web-build',
+                'product-identity-check', 'go-mod-download'
+        ])
+        assert.deepEqual(plan.actions[1].command.args, ['ci', '--no-audit', '--no-fund'])
+        assert.equal(plan.actions[1].command.cwd, join(PROJECT_ROOT, 'Tools', 'Controller', 'web'))
 	assert.ok(plan.actions.findIndex(action => action.id === 'web-build') <
 		plan.actions.findIndex(action => action.id === 'go-test'))
 	assert.deepEqual(plan.actions.find(action => action.id === 'product-identity-check').command.args, [
@@ -240,13 +332,42 @@ test('packaging collects runtime web licenses and excludes build-only dependenci
 		}
 	}))
 	await writeFile(join(web, 'node_modules', 'runtime-package', 'package.json'), '{"name":"runtime-package","version":"1.2.3"}')
-	await writeFile(join(web, 'node_modules', 'runtime-package', 'LICENSE'), 'runtime license')
+	await writeFile(join(web, 'node_modules', 'runtime-package', 'LICENCE.md'), 'runtime license')
 	await writeFile(join(web, 'node_modules', 'build-package', 'package.json'), '{"name":"build-package","version":"4.5.6"}')
 	await writeFile(join(web, 'node_modules', 'build-package', 'LICENSE'), 'build license')
 
 	assert.equal(collectWebNotices(destination, web), 1)
-	assert.equal(await readFile(join(destination, 'web', 'runtime-package@1.2.3', 'LICENSE'), 'utf8'), 'runtime license')
+	assert.equal(await readFile(join(destination, 'web', 'runtime-package@1.2.3', 'LICENCE.md'), 'utf8'), 'runtime license')
 	assert.deepEqual(await readdir(join(destination, 'web')), ['runtime-package@1.2.3'])
+})
+
+test('packaging requires an exact reviewed supplement when a runtime package omits notice files', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-web-supplement-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const web = join(root, 'web')
+	const destination = join(root, 'licenses')
+	await mkdir(join(web, 'node_modules', 'runtime-package'), { recursive: true })
+	await mkdir(join(web, 'third-party-notices'), { recursive: true })
+	await writeFile(join(web, 'package-lock.json'), JSON.stringify({
+		lockfileVersion: 3,
+		packages: {
+			'': {},
+			'node_modules/runtime-package': { version: '1.2.3', license: 'MIT AND ISC' }
+		}
+	}))
+	await writeFile(join(web, 'node_modules', 'runtime-package', 'package.json'),
+		'{"name":"runtime-package","version":"1.2.3","license":"MIT AND ISC"}')
+
+	assert.throws(() => collectWebNotices(destination, web), /no package notice or reviewed supplement/)
+	await writeFile(join(web, 'third-party-notices', 'runtime-package.txt'), 'Package: wrong\nDeclared license: MIT\n')
+	assert.throws(() => collectWebNotices(destination, web), /header does not match/)
+	await writeFile(join(web, 'third-party-notices', 'runtime-package.txt'),
+		'Package: runtime-package\nDeclared license: MIT AND ISC\n\nReviewed license text.\n')
+	assert.equal(collectWebNotices(destination, web), 1)
+	assert.equal(
+		await readFile(join(destination, 'web', 'runtime-package@1.2.3', 'LICENSE-SUPPLEMENT.txt'), 'utf8'),
+		'Package: runtime-package\nDeclared license: MIT AND ISC\n\nReviewed license text.\n'
+	)
 })
 
 test('root wrappers contain no PowerShell policy or invocation', async () => {
@@ -276,19 +397,29 @@ test('programming is explicit and unsupported direct dependency upload is reject
 	assert.equal(serial.device, 'DO_NOT_OPEN')
 })
 
-test('USBasp and bootloader paths require the troubleshooting guard', () => {
-	assert.throws(
-		() => parseArguments(['--upload', '--method', 'usbasp'], {}),
-		error => /USBasp is hidden troubleshooting only/.test(error.message)
-	)
+test('USBasp and bootloader paths use the canonical method without alpha aliases', () => {
+	const usbasp = parseArguments(['--upload', '--method', 'usbasp'], {})
+	assert.equal(usbasp.upload, true)
+	assert.equal(usbasp.method, 'usbasp')
+	assert.equal(usbasp.programmer, '')
 	assert.throws(
 		() => parseArguments(['--install-bootloader'], {}),
-		error => /requires --usbasp-troubleshooting/.test(error.message)
+		error => /requires explicit --method usbasp/.test(error.message)
 	)
-	const guarded = parseArguments(['--usbasp-flash'], {})
-	assert.equal(guarded.upload, true)
-	assert.equal(guarded.method, 'usbasp')
-	assert.equal(guarded.usbaspTroubleshooting, true)
+	const bootloader = parseArguments(['--install-bootloader', '--method', 'usbasp'], {})
+	const plan = createPlan(bootloader, resolveBuildIdentity(bootloader, {}), 'win32')
+	const command = plan.actions.find(action => action.id === 'install-bootloader').command.args
+	assert.match(command.join(' '), /--method usbasp --operation install-bootloader/)
+	assert.doesNotMatch(command.join(' '), /--programmer|troubleshooting/)
+	const alternate = parseArguments([
+		'--upload', '--method', 'usbasp', '--port', 'DO_NOT_OPEN',
+		'--programmer', 'atmelice_isp'
+	], {})
+	const alternatePlan = createPlan(alternate, resolveBuildIdentity(alternate, {}), 'win32')
+	const program = alternatePlan.actions.find(action => action.id === 'program').command.args
+	assert.match(program.join(' '), /--method usbasp/)
+	assert.match(program.join(' '), /--app-device DO_NOT_OPEN/)
+	assert.match(program.join(' '), /--programmer atmelice_isp/)
 })
 
 test('toolchain synchronization is explicit and owned by Controller', () => {
@@ -335,6 +466,7 @@ test('Windows resources are patched after link and before UPX', () => {
 	assert.ok(resourceIndex < upxIndex)
 	assert.deepEqual(plan.actions[resourceIndex].command.args, [
 		'patch', '--in', 'winres/winres.json', '--delete', '--no-backup',
+		'--product-version', PRODUCT_METADATA.version, '--file-version', PRODUCT_METADATA.version,
 		'<staging>/controller.exe'
 	])
 	assert.doesNotMatch(JSON.stringify(plan.actions), /go-winres[^}]*make|\.syso/i)
@@ -346,11 +478,64 @@ test('Win32 resource configuration retains icon, manifest, and version data', as
 		'utf8'
 	)
 	const resources = JSON.parse(source)
-	assert.equal(resources.RT_GROUP_ICON.APP['0000'], 'icon.png')
+	assert.equal(resources.RT_GROUP_ICON.APP['0000'], 'icon.ico')
+	assert.deepEqual(
+		Object.fromEntries(Object.entries(resources.RT_GROUP_ICON).map(([name, entry]) => [name, entry['0000']])),
+		{
+			APP: 'icon.ico',
+			TRAY_CONNECTED: 'icon-connected.ico',
+			TRAY_RECONNECTING: 'icon-reconnecting.ico',
+			TRAY_PAUSED: 'icon-paused.ico',
+			TRAY_OFFLINE: 'icon-offline.ico',
+		}
+	)
 	assert.ok(resources.RT_MANIFEST['#1']['0409'])
 	assert.equal(
 		resources.RT_VERSION['#1']['0409'].info['0409'].OriginalFilename,
 		'controller.exe'
+	)
+	const fixedVersion = `${PRODUCT_METADATA.version.match(/^\d+\.\d+\.\d+/)?.[0]}.0`
+	assert.equal(resources.RT_VERSION['#1']['0409'].fixed.file_version, fixedVersion)
+	assert.equal(resources.RT_VERSION['#1']['0409'].fixed.product_version, fixedVersion)
+	assert.equal(resources.RT_VERSION['#1']['0409'].info['0409'].FileVersion, PRODUCT_METADATA.version)
+	assert.equal(resources.RT_VERSION['#1']['0409'].info['0409'].ProductVersion, PRODUCT_METADATA.version)
+})
+
+test('browser ICO is the exact seven-size native executable icon', async () => {
+	const ico = await readFile(join(
+		PROJECT_ROOT, 'Tools', 'Controller', 'web', 'public', 'favicon.ico'
+	))
+	const nativeICO = await readFile(join(
+		PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'icon.ico'
+	))
+	assert.deepEqual(ico, nativeICO)
+	assert.equal(ico.readUInt16LE(0), 0)
+	assert.equal(ico.readUInt16LE(2), 1)
+	assert.equal(ico.readUInt16LE(4), 7)
+	assert.deepEqual(
+		Array.from({ length: 7 }, (_, index) => ico[6 + index * 16]),
+		[0, 128, 64, 48, 32, 24, 16]
+	)
+	for (let index = 0; index < 7; index += 1) {
+		const entry = 6 + index * 16
+		const bytes = ico.readUInt32LE(entry + 8)
+		const offset = ico.readUInt32LE(entry + 12)
+		assert.ok(bytes > 0 && offset + bytes <= ico.length)
+		assert.deepEqual(ico.subarray(offset, offset + 8), Buffer.from([
+			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
+		]))
+	}
+	const buildSource = await readFile(
+		join(PROJECT_ROOT, 'Tools', 'Build', 'build.mjs'),
+		'utf8'
+	)
+	assert.match(
+		buildSource,
+		/generate_icon\.go', '\.\/winres\/icon\.png', '\.\/winres\/icon\.ico'/u
+	)
+	assert.match(
+		buildSource,
+		/copyFileSync\(join\(HOST_ROOT, 'winres', 'icon\.ico'\), join\(WEB_ROOT, 'public', 'favicon\.ico'\)\)/u
 	)
 })
 
@@ -385,10 +570,15 @@ test('firmware-only plan uses current Controller source and remains hardware-fre
 		'--build-timestamp', '35019D5D'
 	], {})
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), process.platform)
-	assert.deepEqual(plan.actions.map(action => action.id), ['firmware-compile'])
+        assert.deepEqual(plan.actions.map(action => action.id), [
+                'firmware-compile', 'default-eeprom', 'firmware-manifest'
+        ])
 	assert.equal(plan.actions[0].command.file, 'go')
 	assert.match(plan.actions[0].command.args.join(' '), /run.*cmd\/controller.*program.*compile/)
-	assert.equal(plan.actions[0].hardware, false)
+        assert.equal(plan.actions[0].hardware, false)
+        assert.match(plan.actions[1].command.args.join(' '), /default-assets.*safe-default-eeprom\.hex/)
+        assert.match(plan.actions[2].command.args.join(' '), /firmware\.mjs manifest/)
+        assert.ok(plan.actions.every(action => action.hardware === false))
 })
 
 test('generated path guard refuses the project root and outside paths', () => {
@@ -403,7 +593,7 @@ test('generated path guard refuses the project root and outside paths', () => {
 	)
 })
 
-test('clean plan includes canonical and audited legacy host outputs', () => {
+test('clean plan includes canonical and audited stale host outputs', () => {
 	const options = parseArguments(['--clean'], {})
 	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
 	assert.equal(plan.actions.length, 1)
@@ -411,6 +601,19 @@ test('clean plan includes canonical and audited legacy host outputs', () => {
 	assert.ok(paths.some(path => path.endsWith('/Tools/Controller/bin')))
 	assert.ok(paths.some(path => path.endsWith('/Tools/Controller/controller.exe')))
 	assert.ok(paths.some(path => path.endsWith('/Tools/Controller/.cache/identity-build')))
+})
+
+test('firmware-only clean never targets a running packaged host', () => {
+        const options = parseArguments(['--firmware-only', '--clean'], {})
+        const targets = generatedCleanTargets(options).map(path => path.replaceAll('\\', '/'))
+        assert.equal(targets.length, 1)
+        assert.match(targets[0], /\/\.build\/firmware$/)
+        assert.ok(!targets.some(path => /\/Tools\/Controller\/bin(?:\/|$)/.test(path)))
+        const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+        assert.deepEqual(plan.actions.map(action => action.id), [
+                'clean', 'firmware-compile', 'default-eeprom', 'firmware-manifest'
+        ])
+        assert.deepEqual(plan.actions[0].paths, generatedCleanTargets(options))
 })
 
 test('host source identity is content-stable and changes with source bytes', async () => {

@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -40,7 +41,7 @@ func TestLCDPromptChangedDuringPriorityRestoresNewestPrompt(t *testing.T) {
 }
 
 func TestLCDDisconnectClearsOnlyConfirmedTransportState(t *testing.T) {
-	lcd := newPCOwnedLCD(func(
+	lcd := newHostOwnedLCD(func(
 		_ context.Context, address, _ byte, _ []byte, _ byte,
 	) (native.I2CTransferResult, error) {
 		return native.I2CTransferResult{Status: 0, Address: address}, nil
@@ -80,6 +81,23 @@ func TestLCDOperationalStateIsExplicitEvent(t *testing.T) {
 	if state.PriorityKind != "operational" || state.ActiveLine1 != lcdLine("OPERATION") ||
 		state.ActiveLine2 != lcdLine("RUNNING - MACRO ") {
 		t.Fatalf("operational presentation=%+v", state)
+	}
+}
+
+func TestLCDPhysicalErrorReportsOnlyStateChanges(t *testing.T) {
+	presenter := NewLCDPresenter(nil)
+	missing := errors.New("not detected at 0x27 or 0x3F")
+	if !presenter.ReportPhysicalError("LCD", missing) {
+		t.Fatal("first missing-LCD state was suppressed")
+	}
+	if presenter.ReportPhysicalError("LCD", missing) {
+		t.Fatal("identical missing-LCD state was repeatedly reported")
+	}
+	if !presenter.ReportPhysicalError("LCD", nil) {
+		t.Fatal("successful recovery did not clear the error state")
+	}
+	if !presenter.ReportPhysicalError("LCD", missing) {
+		t.Fatal("failure after recovery was not reported")
 	}
 }
 

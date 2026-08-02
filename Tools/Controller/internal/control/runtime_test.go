@@ -112,6 +112,26 @@ func TestResetEventUpdatesSnapshotAndWakesWaiters(t *testing.T) {
 	}
 }
 
+func TestAlertEventUpdatesHotSnapshotAndDescription(t *testing.T) {
+	runtime := New(Options{})
+	frame := native.Frame{
+		Opcode:  native.OpEvent,
+		Payload: []byte{native.EventAlert, native.AlertHot, 1},
+	}
+	runtime.observe(frame)
+	if !runtime.Snapshot().Status.Hot {
+		t.Fatal("HOT alert did not update the live snapshot")
+	}
+	parsed, err := native.ParseDeviceEvent(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind, text := describeDeviceEvent(parsed)
+	if kind != "hot" || text != "temperature alert active" {
+		t.Fatalf("alert description=%q %q", kind, text)
+	}
+}
+
 func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 	runtime := New(Options{
 		Filter:           ports.Filter{Port: "TEST-NOT-A-REAL-PORT"},
@@ -223,6 +243,28 @@ func TestRememberedPreferredDeviceChangeDoesNotDropLiveConnection(t *testing.T) 
 	}
 	if !runtime.Snapshot().Connected {
 		t.Fatal("preferred-device persistence dropped the live transport")
+	}
+	_ = runtime.Close()
+}
+
+func TestOpenAlreadyConnectedSelectorIsIdempotent(t *testing.T) {
+	runtime := New(Options{})
+	port := newReconnectTestPort()
+	session := link.NewForPort("COM18", port)
+	info := ports.Info{
+		Name: "COM18", VID: "1A86", PID: "7523",
+		FriendlyName: "USB-SERIAL CH340",
+	}
+	runtime.attach(link.OpenResult{
+		Session: session, Port: info,
+		Hello: native.Hello{Name: "PCController"},
+	})
+	if err := runtime.Open(context.Background(), "COM18"); err != nil {
+		t.Fatalf("idempotent open attempted a second serial handle: %v", err)
+	}
+	snapshot := runtime.Snapshot()
+	if !snapshot.Connected || snapshot.Port.Name != "COM18" {
+		t.Fatalf("idempotent open changed the live device: %#v", snapshot)
 	}
 	_ = runtime.Close()
 }

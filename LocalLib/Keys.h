@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+// Front-key debounce, multi-click, and accelerated-hold timing in milliseconds.
 constexpr uint16_t KEY_DEBOUNCE_MS = 50;
 constexpr uint16_t KEY_DOUBLE_CLICK_MS = 300;
 constexpr uint16_t KEY_HOLD_START_MS = 600;
@@ -9,8 +10,7 @@ constexpr uint16_t KEY_HOLD_REPEAT_MS = 150;
 constexpr uint16_t KEY_HOLD_FAST_AFTER_MS = 1800;
 constexpr uint16_t KEY_HOLD_REPEAT_FAST_MS = 60;
 
-using KeyCallback = void (*)(uint8_t bit, void *context);
-
+// KeyEvent is the debounced, classified lifecycle emitted for one front key.
 enum class KeyEvent : uint8_t {
   Click = 0,
   DoubleClick,
@@ -24,6 +24,7 @@ enum class KeyEvent : uint8_t {
 using KeyEventCallback =
     void (*)(uint8_t bit, KeyEvent event, void *context);
 
+// Key classifies active-low samples into click, double-click, and hold events.
 class Key {
 public:
   explicit Key(uint8_t bit);
@@ -34,10 +35,8 @@ public:
   bool isHeld() const;
   uint8_t inputBit() const;
 
-  // Press/release callbacks retain immediate debounced behavior. Click events
-  // are delayed briefly so a second click does not also emit a single click.
-  void setPressCallback(KeyCallback callback, void *context = nullptr);
-  void setReleaseCallback(KeyCallback callback, void *context = nullptr);
+  // Down/Up remain immediate after debounce; Click is deferred until the
+  // double-click window closes and a hold never leaks a Click action.
   void setEventCallback(KeyEventCallback callback, void *context = nullptr);
 
   explicit operator bool() const { return isPressed(); }
@@ -60,10 +59,6 @@ private:
   uint8_t stableState_ : 1;
   uint8_t holdActive_ : 1;
   uint8_t clickPending_ : 1;
-  KeyCallback pressCallback_ = nullptr;
-  KeyCallback releaseCallback_ = nullptr;
   KeyEventCallback eventCallback_ = nullptr;
-  void *pressContext_ = nullptr;
-  void *releaseContext_ = nullptr;
   void *eventContext_ = nullptr;
 };

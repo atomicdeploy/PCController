@@ -1,10 +1,12 @@
 package appconfig
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
+	"unicode"
 
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/integrationproxy"
@@ -15,6 +17,7 @@ import (
 type Integrations struct {
 	Hotkeys                []Hotkey          `json:"hotkeys,omitempty"`
 	Keyboard               KeyboardControl   `json:"keyboard_control"`
+	Lifecycle              LifecycleSafety   `json:"lifecycle_safety"`
 	Notifications          Notifications     `json:"notifications"`
 	StatusLED              StatusLEDPolicy   `json:"status_led"`
 	Discovery              Discovery         `json:"discovery"`
@@ -24,6 +27,30 @@ type Integrations struct {
 	TextMappings           []TextMapping     `json:"text_mappings,omitempty"`
 	LocalDevice            LocalDevice       `json:"local_device"`
 	DataHub                DataHub           `json:"data_hub"`
+}
+
+const (
+	LifecycleActionLeave      = "leave"
+	LifecycleActionStopMotion = "stop-motion"
+	LifecycleActionAllOff     = "all-off"
+)
+
+// LifecycleSafety defines the bounded hardware action applied when Windows
+// locks the interactive session or suspends. Stop-motion is deliberately the
+// default: it fails safe for momentary movement without unexpectedly clearing
+// unrelated latched outputs.
+type LifecycleSafety struct {
+	SessionLock     string `json:"session_lock"`
+	Suspend         string `json:"suspend"`
+	RefreshOnResume bool   `json:"refresh_on_resume"`
+}
+
+func DefaultLifecycleSafety() LifecycleSafety {
+	return LifecycleSafety{
+		SessionLock:     LifecycleActionStopMotion,
+		Suspend:         LifecycleActionStopMotion,
+		RefreshOnResume: true,
+	}
 }
 
 // LocalDevice configures an optional LAN companion that implements the
@@ -195,18 +222,13 @@ func (value Config) validateIntegrations() error {
 	if err := validateIPC(value.IPC); err != nil {
 		return err
 	}
-	names := make(map[string]bool)
-	for index, hotkey := range value.Integrations.Hotkeys {
-		name := strings.ToLower(strings.TrimSpace(hotkey.Name))
-		if name == "" || names[name] {
-			return fmt.Errorf("integrations.hotkeys[%d].name is required and must be unique", index)
-		}
-		names[name] = true
-		if strings.TrimSpace(hotkey.Chord) == "" || strings.TrimSpace(hotkey.Command) == "" {
-			return fmt.Errorf("integrations.hotkeys[%d] requires chord and command", index)
-		}
+	if err := ValidateHotkeys(value.Integrations.Hotkeys); err != nil {
+		return err
 	}
 	if err := validateKeyboardControl(value.Integrations.Keyboard); err != nil {
+		return err
+	}
+	if err := validateLifecycleSafety(value.Integrations.Lifecycle); err != nil {
 		return err
 	}
 	if err := validateStatusLEDPolicy(value.Integrations.StatusLED); err != nil {
@@ -248,7 +270,7 @@ func (value Config) validateIntegrations() error {
 		value.Integrations.Discovery.SSDPEnabled) && !value.IPC.AllowRemote {
 		return fmt.Errorf("network discovery requires ipc.allow_remote and authenticated remote access")
 	}
-	names = make(map[string]bool)
+	names := make(map[string]bool)
 	for index, webhook := range value.Integrations.OutboundWebhooks {
 		name := strings.ToLower(strings.TrimSpace(webhook.Name))
 		if name == "" || names[name] {
@@ -325,6 +347,76 @@ func (value Config) validateIntegrations() error {
 		}
 	}
 	return nil
+}
+
+func validateLifecycleSafety(value LifecycleSafety) error {
+	for name, action := range map[string]string{
+		"session_lock": value.SessionLock,
+		"suspend":      value.Suspend,
+	} {
+		switch action {
+		case LifecycleActionLeave, LifecycleActionStopMotion, LifecycleActionAllOff:
+		default:
+			return fmt.Errorf(
+				"integrations.lifecycle_safety.%s must be leave, stop-motion, or all-off",
+				name,
+			)
+		}
+	}
+	return nil
+}
+
+// ValidateHotkeys applies the same server-authoritative rules to file, CLI,
+// and IPC updates. Accelerator aliases are compared canonically so two
+// spellings cannot register the same Windows chord.
+func ValidateHotkeys(values []Hotkey) error {
+	if len(values) > 64 {
+		return errors.New("integrations.hotkeys supports at most 64 bindings")
+	}
+	names := make(map[string]bool, len(values))
+	accelerators := make(map[string]bool, len(values))
+	for index, hotkey := range values {
+		name := strings.TrimSpace(hotkey.Name)
+		nameKey := strings.ToLower(name)
+		if name == "" || name != hotkey.Name || len(name) > 64 ||
+			containsControl(name) || names[nameKey] {
+			return fmt.Errorf(
+				"integrations.hotkeys[%d].name must be a unique, trimmed 1..64 byte value without control characters",
+				index,
+			)
+		}
+		names[nameKey] = true
+		command := strings.TrimSpace(hotkey.Command)
+		if command == "" || command != hotkey.Command || len(command) > 512 || containsControl(command) {
+			return fmt.Errorf(
+				"integrations.hotkeys[%d].command must be a trimmed 1..512 byte single line",
+				index,
+			)
+		}
+		accelerator, err := hostui.ParseAccelerator(hotkey.Chord)
+		if err != nil {
+			return fmt.Errorf("integrations.hotkeys[%d].chord: %w", index, err)
+		}
+		key := strings.ToLower(accelerator.Canonical)
+		if accelerators[key] {
+			return fmt.Errorf(
+				"integrations.hotkeys[%d].chord duplicates accelerator %s",
+				index,
+				accelerator.Canonical,
+			)
+		}
+		accelerators[key] = true
+	}
+	return nil
+}
+
+func containsControl(value string) bool {
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateKeyboardControl(value KeyboardControl) error {

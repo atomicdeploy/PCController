@@ -11,6 +11,22 @@
 #define PCCONTROLLER_BUILD_TIMESTAMP 0UL
 #endif
 
+// Fixed final-application record patched only by the guarded host workflow.
+// "PCI1" identifies schema 1: little-endian source hash and packed timestamp.
+constexpr uint16_t FirmwareIdentityAddress = 0x7DF4U;
+// FirmwareIdentityRecord occupies the guarded fixed-location patch region.
+struct __attribute__((packed)) FirmwareIdentityRecord {
+  uint32_t magic;
+  uint32_t sourceHash;
+  uint32_t packedTimestamp;
+};
+const FirmwareIdentityRecord firmwareIdentity
+    __attribute__((section(".firmware_identity"), used)) = {
+        0x31494350UL, static_cast<uint32_t>(PCCONTROLLER_BUILD_HASH),
+        static_cast<uint32_t>(PCCONTROLLER_BUILD_TIMESTAMP)};
+static_assert(sizeof(FirmwareIdentityRecord) == 12,
+              "Firmware identity patch record changed shape");
+
 // Cooperative service periods are milliseconds; all comparisons are rollover-safe.
 constexpr uint16_t SHIFT_POLL_MS = 5;
 constexpr uint16_t DISPLAY_REFRESH_MS = 20;
@@ -21,12 +37,15 @@ constexpr uint16_t TEMPERATURE_DOOR_OPEN_PERIOD_MS = 450;
 constexpr uint16_t TEMPERATURE_CONVERSION_MS = 375;
 constexpr uint16_t HOST_OFFLINE_MS = 5000;
 
-// RF learning limits/options and front-panel adjustment steps.
+// RF learning has one default indefinite/multi mode and one bounded timer mode.
 constexpr uint8_t DEFAULT_LEARNING_SECONDS = 15;
 constexpr uint8_t MAX_LEARNING_SECONDS = 120;
 constexpr uint8_t MAX_RC_PROTOCOL = 12;
-constexpr uint8_t LEARN_MULTI = 1U << 0;
-constexpr uint8_t LEARN_INDEFINITE = 1U << 1;
+// RfLearningMode distinguishes indefinite multi-code and bounded timer sessions.
+enum RfLearningMode : uint8_t {
+  RF_LEARN_INDEFINITE = 0,
+  RF_LEARN_TIMER = 1,
+};
 constexpr uint16_t PWM_MENU_STEP = 256;
 constexpr uint8_t ILLUMINATION_MENU_STEP = 16;
 constexpr int16_t HOT_TEMPERATURE_CENTI_C = 5000;
@@ -35,87 +54,21 @@ constexpr int16_t HOT_TEMPERATURE_CENTI_C = 5000;
 constexpr int32_t INVALID_I32 = (-2147483647L - 1L);
 constexpr int16_t INVALID_I16 = (-32767 - 1);
 
-// Physical, RF, and host keys share these stable four action IDs.
-enum MenuAction : uint8_t {
-  MENU_PREVIOUS = 0,
-  MENU_NEXT = 1,
-  MENU_DECREASE = 2,
-  MENU_INCREASE = 3
-};
-
-// Stable EEPROM/protocol page IDs; presentation order is stored separately.
-enum MenuPage : uint8_t {
-  PAGE_STATUS = 0,
-  PAGE_VOLTAGE,
-  PAGE_CURRENT,
-  PAGE_TLED,
-  PAGE_TBT,
-  PAGE_ILLUMINATION,
-  PAGE_BLUETOOTH,
-  PAGE_SOUND,
-  PAGE_PWM,
-  PAGE_RELAY,
-  PAGE_KEYS,
-  PAGE_USER_PWM,
-  PAGE_USER_RELAYS,
-  PAGE_MOTION,
-  PAGE_RF,
-  PAGE_COUNT
-};
 static_assert(PAGE_COUNT == PersistentMenuPageCount,
               "Persistent menu catalog no longer matches stable page IDs");
 
-// Top-level pages and modal editors consumed by ModeManager.
-enum ProgramMode : uint8_t {
-  MODE_BOOT = 0,
-  MODE_STATUS,
-  MODE_VOLTAGE,
-  MODE_CURRENT,
-  MODE_TLED,
-  MODE_TBT,
-  MODE_ILLUMINATION,
-  MODE_BLUETOOTH,
-  MODE_SOUND,
-  MODE_PWM,
-  MODE_RELAY,
-  MODE_KEYS,
-  MODE_USER_PWM,
-  MODE_USER_RELAYS,
-  MODE_MOTION,
-  MODE_RF,
-  MODE_ILLUMINATION_MODE_EDIT,
-  MODE_ILLUMINATION_ON_EDIT,
-  MODE_ILLUMINATION_OFF_EDIT,
-  MODE_SOUND_EDIT,
-  MODE_PWM_MODE_EDIT,
-  MODE_PWM_CHANNEL_EDIT,
-  MODE_PWM_VALUE_EDIT,
-  MODE_RELAY_CHANNEL_EDIT,
-  MODE_RELAY_VALUE_EDIT,
-  MODE_USER_PWM_CHANNEL_EDIT,
-  MODE_USER_PWM_VALUE_EDIT,
-  MODE_USER_RELAY_CHANNEL_EDIT,
-  MODE_USER_RELAY_BEHAVIOR_EDIT,
-  MODE_USER_RELAY_CONTROL,
-  MODE_MOTION_CONTROL,
-  MODE_SAVE_PROMPT,
-  MODE_FLASH_MESSAGE,
-  MODE_RF_LEARNING,
-  MODE_FAULT,
-  MODE_UNDEFINED = 0xFF
-};
-
 // Four-character labels are packed contiguously to avoid pointer tables in SRAM.
 const char MenuLabels[] PROGMEM =
-    "STATVOLTCURRtLEDt-btLItEbt  Snd PWM rELYKEY uPWMr5-8MOVELErn";
+    "doorVOLTCURRtLEDtBT LItEbEEPPWM rELYKEY uPWMr5-8MOVELErn";
 const char EditLabels[] PROGMEM =
-    "L-MdL-onL-oFS-MdP-MdP-ChP-u r-Chr-onuP-CuP-uur-Cur-M";
-constexpr uint8_t EditLabelCount = 13;
-const char SettingsLabels[] PROGMEM = "Snd diSPStBrCoLrV-dPA-dP";
-constexpr uint8_t SettingsItemCount = 6;
+    "L-MdL-onL-oFS-MdP-ChP-u r-Chr-onuP-CuP-uur-Cur-M";
+constexpr uint8_t EditLabelCount = 12;
+const char SettingsLabels[] PROGMEM = "bEEPdiSPdCLSStBrCoLrV-dPA-dP";
+constexpr uint8_t SettingsItemCount = 7;
 const char CommonTexts[] PROGMEM =
-    "oFF  on AutoSAVEOPENMuteSnd LErnBOOTdiSC"
-    "r5-8Go  Err Man boFFb-onbLnkKEY CLSdtoGLPuSH";
+    "oFF  on AutoSAVEOPENMutebEEPLErnBOOTdiSC"
+    "r5-8Go  Err KEY CLSdtoGLPuSHProg";
+// CommonTextOffset names four-byte cells within the packed CommonTexts table.
 enum CommonTextOffset : uint8_t {
   TextOff = 0,
   TextOn = 4,
@@ -123,30 +76,31 @@ enum CommonTextOffset : uint8_t {
   TextSave = 12,
   TextOpen = 16,
   TextMute = 20,
-  TextSound = 24,
+  TextBeep = 24,
   TextLearn = 28,
   TextBoot = 32,
   TextDiscard = 36,
   TextUserRelays = 40,
   TextGo = 44,
   TextError = 48,
-  TextManual = 52,
-  TextBluetoothOff = 56,
-  TextBluetoothOn = 60,
-  TextBluetoothBlink = 64,
-  TextKey = 68,
-  TextClosed = 72,
-  TextToggle = 76,
-  TextPush = 80,
+  TextKey = 52,
+  TextClosed = 56,
+  TextToggle = 60,
+  TextPush = 64,
+  TextProgram = 68,
 };
 
-// Returns a flash-string view at a known four-byte CommonTexts offset.
+// Returns a flash-string view at a known four-byte CommonTexts offset. These
+// packed cells are fixed-width and are not individually NUL-terminated: pass
+// them only to readers bounded to four bytes (such as SevenSegments::showText),
+// never to longer or unbounded readers such as I2cLcd::showLine.
 const __FlashStringHelper *commonText(uint8_t offset) {
   return reinterpret_cast<const __FlashStringHelper *>(CommonTexts + offset);
 }
 
+// Maps persisted illumination modes Off/Auto/On to packed display labels.
 const uint8_t ModeTextOffsets[] PROGMEM = {
-    TextOff, TextAuto, TextOn, TextOff, TextManual, TextAuto};
+    TextOff, TextAuto, TextOn};
 
 // Telemetry availability/activity bits shared with the native host decoder.
 enum StatusFlag : uint16_t {

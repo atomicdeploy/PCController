@@ -211,9 +211,9 @@ type FirmwareTimestamp struct {
 	Compact   string    `json:"compact"`
 }
 
-// DecodeFirmwareTimestampSchema2 decodes the firmware identity's packed local
+// DecodeFirmwareTimestamp decodes the firmware identity's packed local
 // build date/time: Y(7), M(4), D(5), h(5), m(6), seconds/2(5).
-func DecodeFirmwareTimestampSchema2(packed uint32) (FirmwareTimestamp, error) {
+func DecodeFirmwareTimestamp(packed uint32) (FirmwareTimestamp, error) {
 	year := 2000 + int((packed>>25)&0x7F)
 	month := time.Month((packed >> 21) & 0x0F)
 	day := int((packed >> 16) & 0x1F)
@@ -221,11 +221,11 @@ func DecodeFirmwareTimestampSchema2(packed uint32) (FirmwareTimestamp, error) {
 	minute := int((packed >> 5) & 0x3F)
 	second := int(packed&0x1F) * 2
 	if month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59 {
-		return FirmwareTimestamp{}, fmt.Errorf("invalid schema-2 firmware timestamp 0x%08X", packed)
+		return FirmwareTimestamp{}, fmt.Errorf("invalid packed firmware timestamp 0x%08X", packed)
 	}
 	value := time.Date(year, month, day, hour, minute, second, 0, time.UTC)
 	if value.Year() != year || value.Month() != month || value.Day() != day {
-		return FirmwareTimestamp{}, fmt.Errorf("invalid schema-2 firmware calendar date 0x%08X", packed)
+		return FirmwareTimestamp{}, fmt.Errorf("invalid packed firmware calendar date 0x%08X", packed)
 	}
 	return FirmwareTimestamp{
 		Packed: packed, BuildTime: value, Compact: value.Format("060102150405"),

@@ -1,3 +1,5 @@
+<div align="center"><a href="../../../README.md"><img src="../../../docs/assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # C Library API
 
 The normal reusable API is the Go package at the module root:
@@ -24,10 +26,14 @@ build.cmd --host-only
 Go emits both `bin/pccontroller.dll` and `bin/pccontroller.h` on Windows
 (`.so` on Linux and `.dylib` on macOS). This requires `CGO_ENABLED=1` and a C
 compiler compatible with the target Go toolchain. On Windows the build script
-searches `gcc`, `clang`, and `cc` on `PATH`, checks the compiler target against
-`go env GOARCH`, and requires a native MinGW-w64/Windows-GNU target. Set `CC`
-explicitly when automatic selection is not appropriate; an MSYS-target
-compiler cannot link this native Windows shared library.
+checks candidates from `PATH` and the user-scoped package store against
+`go env GOARCH`, their target triple, and their predefined macros. It rejects
+Cygwin/MSYS compilers even when they are the first `gcc.exe` on `PATH`, selects
+the newest native MinGW-w64/Windows-GNU candidate, and provisions the exact
+latest-resolved package from the host-tool lock when none is installed. Set `CC` explicitly to a valid
+native compiler when automatic selection is not appropriate, or pass
+`--no-compiler-bootstrap` to prohibit installation. Standard HTTP proxy
+environment variables are preserved for the package manager.
 
 Every call returns allocated UTF-8 JSON. Copy or parse it, then call
 `PCControllerFree` exactly once. The response envelope is:
@@ -106,3 +112,26 @@ exports, invokes the port-list operation, and releases the returned string.
 Build it with any compatible MinGW-w64 compiler. Treat the Go shared runtime
 as process-lifetime state: keep the DLL loaded and let normal process shutdown
 unload it instead of calling `FreeLibrary` while Go runtime threads are active.
+
+### AutoHotkey and VBA
+
+The same stable C exports are directly usable by desktop automation tools; no
+shell process, temporary file, or command-line quoting is required. An
+AutoHotkey v2 call is:
+
+```ahk
+dll := A_ScriptDir "\pccontroller.dll"
+json := '{"operation":"ports"}'
+request := Buffer(StrPut(json, "UTF-8"))
+StrPut(json, request, "UTF-8")
+resultPtr := DllCall(dll "\PCControllerInvoke", "Ptr", request.Ptr, "CDecl Ptr")
+try response := StrGet(resultPtr, "UTF-8")
+finally DllCall(dll "\PCControllerFree", "Ptr", resultPtr, "CDecl")
+```
+
+Office VBA can declare the same pointer ABI with `PtrSafe`/`LongPtr`, pass a
+null-terminated UTF-8 byte buffer to `PCControllerInvoke`, copy the returned
+UTF-8 JSON, and release it with `PCControllerFree`. Match the Office and DLL
+architectures. This explicit process-lifetime ABI is the supported automation
+surface; the portable package does not silently register a machine-wide COM
+class or require administrator access.

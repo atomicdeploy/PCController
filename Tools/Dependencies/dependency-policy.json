@@ -4,7 +4,15 @@
   "node": {
     "channel": "lts",
     "minimum_version": "24.0.0",
-    "index_url": "https://nodejs.org/dist/index.json"
+    "index_url": "https://nodejs.org/dist/index.json",
+    "checksums_url_template": "https://nodejs.org/dist/v{version}/SHASUMS256.txt",
+    "asset_suffixes": [
+      "win-x64.zip",
+      "linux-x64.tar.xz",
+      "linux-arm64.tar.xz",
+      "darwin-x64.tar.gz",
+      "darwin-arm64.tar.gz"
+    ]
   },
   "upx": {
     "channel": "stable",
@@ -21,6 +29,14 @@
     "channel": "latest-stable",
     "minimum_version": "0.3.3",
     "module": "github.com/tc-hib/go-winres"
+  },
+  "windows_c_compiler": {
+    "channel": "latest-stable",
+    "package_id": "BrechtSanders.WinLibs.POSIX.UCRT",
+    "architecture": "x64",
+    "target": "x86_64-w64-mingw32",
+    "minimum_compiler_version": "15.0.0",
+    "manifest_api": "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/b/BrechtSanders/WinLibs/POSIX/UCRT"
   },
   "web": {
     "channel": "latest-compatible",

@@ -1,3 +1,5 @@
+<div align="center"><a href="../../README.md"><img src="../../docs/assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # Host Controller Tool
 
 `controller` is the PC-side utility for ControllerBoardMini. It combines an
@@ -32,6 +34,8 @@ optional C-compatible library, and firmware WebSocket relay in one codebase.
 - Importable Go API and optional `c-shared` JSON ABI
 - Persistent JSON host configuration, `fsnotify` hot reload, macros,
   event-driven automations, a typed local-device contract, and loopback data-hub integration
+- A fixed, read-only Windows host-facts catalog for system, computer, firmware,
+  storage, and serial diagnostics; callers cannot submit arbitrary queries
 - DTR and RTS reset pulse
 - Controller-owned Arduino CLI compile/update, MiniCore `urclock`, and guarded
   USBasp/AVRDUDE recovery workflows; direct Arduino upload is disabled
@@ -71,14 +75,15 @@ source hash, and the UTC build time injected by the build script. Windows
 resources intentionally use numeric `0.0.0.0` and the string `development`;
 there is no fabricated release version or tag.
 
-The historical local PowerShell build scripts were removed to prevent policy
-drift; `build.cmd` and `build.sh` share one Node/Controller plan. See the
+`build.cmd` and `build.sh` share one Node/Controller plan. See the
 [project-owned build guide](../Build/README.md) for deterministic identity,
 bootstrap requirements, and dry-run/plan commands.
 
 Windows development, deployment, discovery, and programming examples use
-`cmd.exe`, the project-owned Controller executable, and native Win32 device
-notifications/SetupAPI. They do not invoke PowerShell, WMI, or CIM.
+the project-owned Controller executable and platform adapters for device
+notifications, discovery, diagnostics, and desktop actions. Optional OS
+enrichment stays behind those adapters and an unavailable capability is
+reported explicitly.
 
 Run the current source without a separate package build:
 
@@ -116,6 +121,8 @@ Launch the full primary host lifecycle and open the same-origin app:
 ```console
 .\bin\controller.exe web
 .\bin\controller.exe web --no-open
+.\bin\controller.exe web --no-tray
+.\bin\controller.exe web export --output pccontroller-webui.zip
 ```
 
 The production bundle is compiled into the Go executable. The listener serves
@@ -135,14 +142,73 @@ pushes status, board events, host events, and global page actions. Those event
 lines are interleaved in the bounded terminal transcript and remain available
 in the filterable Activity page.
 
+On Windows, a primary-owning `web` process also provides a native tray menu by
+default; `--no-tray` disables it. Its tooltip and status row use the
+authenticated controller state, not merely an open HTTP/WebSocket listener.
+Dashboard, Controls, Workbench, Updates, and Settings actions exist only while
+the board is connected. Connect/Reconnect and Exit remain available while
+offline, and a late disconnect is checked again before any page can open.
+The native popup is created and themed before first use, cached between opens,
+keyboard-accessible, and refreshed only when its authoritative state changes.
+Session lock and system suspend synchronously release held keyboard ownership
+and apply the configured `stop-motion`, `all-off`, or release-only policy under
+a bounded deadline. Unlock, resume, and network changes reconcile telemetry or
+device discovery without overriding a deliberately paused connection. These
+policies are validated and editable from the Web Settings page.
+
+Per-user URI and Start-menu integration is opt-in and can be removed
+idempotently. Cleanup verifies ownership before deleting anything and preserves
+foreign registrations or shortcuts:
+
+```console
+.\bin\controller.exe desktop ensure
+.\bin\controller.exe desktop uninstall
+```
+
 The UI includes live electrical/thermal graphs, relay and PWM controls, a
 peripheral workbench for displays, addressable LEDs, sound, RF, macros, I2C,
 host actions and recovery diagnostics, a typed local-device surface, a
 service-neutral data workspace, dialogs/toasts, command palette, procedural
-audio, and guarded command confirmation. Its first-launch Fuji-inspired gate,
+audio, and guarded command confirmation. Its cinematic first-launch gate,
 clip/filter/spring transitions, glass layers, semantic colors, responsive
 mobile navigation, RTL geometry, and dark/light themes are code-native and do
 not require remote assets.
+
+The bundled manifest lets supported desktop and mobile browsers install the
+same-origin UI in standalone presentation and provides shortcuts to Overview,
+Workbench, Activity, and Settings. Its service worker always uses the network
+and stores no offline response cache. Closing the Controller host therefore
+becomes visible immediately instead of leaving an obsolete control panel. When
+optional interaction cues are enabled, supported visible-page mobile clients
+may also use restrained vibration for select, success, and warning feedback;
+no workflow depends on haptics.
+
+The exact embedded distribution also has a deterministic, secret-free ZIP
+export contract for trusted static hosting. See
+[Portable WebUI bundle](docs/Portable-WebUI.md) for archive guarantees,
+controller-target validation, and the required origin policy. `web export`
+fails if its destination already exists and prints file/byte counts plus the
+archive SHA-256.
+
+### Bounded Windows host facts
+
+The shared `os facts` command exposes five read-only diagnostic profiles:
+`system`, `computer`, `firmware`, `storage`, and `serial`. `os facts list`
+returns their descriptions, selected class, columns, and maximum row counts.
+The same fixed catalog is available through JSON-RPC and REST:
+
+```console
+bin\controller.exe exec os facts system
+bin\controller.exe ipc call --method controller.os.facts.catalog
+bin\controller.exe ipc call --method controller.os.facts --params "{\"profile\":\"serial\",\"timeout_ms\":2500}"
+```
+
+The Windows adapter uses a bounded native management provider internally. It
+accepts only catalog profile names: no shell command, arbitrary query text,
+write, method invocation, or caller-selected class/column is exposed. Results
+have fixed row/byte/cell limits, a short private cache, and a deadline no longer
+than five seconds. Other platforms report this optional capability as
+unavailable.
 
 ## Terminal UI
 
@@ -180,6 +246,9 @@ Keys:
 Ctrl+O    resume authenticated auto-connect
 Ctrl+X    explicitly close and pause reconnect
 Ctrl+R    pulse DTR and RTS
+Ctrl+F    bring a diagnosed serial-port owner window to the foreground
+Ctrl+W    ask a diagnosed serial-port owner window to close gracefully
+Ctrl+T    press twice within five seconds to terminate a diagnosed owner
 Ctrl+C    exit
 Up/Down  shell history
 Tab       command completion
@@ -206,11 +275,23 @@ and programming invocations use its JSON-RPC command/event stream instead of
 opening COM18 a second time. A second interactive TUI intentionally falls back
 to the IPC-backed secondary console. `hello` should report the
 `PCController` identity, and
-`status` should print the 48-byte telemetry record as named values, including
-the captured reset cause and persistent boot count. Its first 43 bytes remain
-the legacy telemetry prefix. The stream command enables one periodic status
+`status` should print the complete 48-byte telemetry record as named values,
+including the captured reset cause and persistent boot count. The stream
+command enables one periodic status
 frame per second. Non-PCController programs that bypass this IPC ownership
 must still not open the same COM port concurrently.
+
+On Windows, a direct local-COM access-denied or sharing-violation error is
+enriched through native handle and window inspection. Where process
+permissions allow, the error and TUI show the owner's
+process name, PID, executable path, and top-level window. Wide TUI layouts also
+show **Owner**, **Ask Close**, and **Terminate** buttons. Foreground and
+graceful `WM_CLOSE` actions are safe first choices. Termination is never
+automatic: it requires the second action within five seconds, and the host
+rejects its current PID or another process using the same controller
+executable. Protected/elevated processes may yield only an unresolved-owner
+diagnostic; use the primary IPC path whenever the existing owner is another
+controller instance.
 
 The TUI refreshes its live cards at the configured interval (250 ms by
 default) and also redraws immediately for streamed status events. Telemetry
@@ -242,20 +323,21 @@ stream PERIOD_MS                       # 0 disables; otherwise >= 100
 settings
 settings decimals VOLTAGE CURRENT      # each 0..2; EEPROM read-modify-write
 settings color INDEX                   # persistent ready-color preset 0..7
-settings set FLAGS LIGHT ON OFF DISPLAY STATUS PWMBOOT STREAM
-  [DEFAULT_PAGE SAVE_LAST [STATUS_COLOR VOLTAGE_DECIMALS CURRENT_DECIMALS]]
+settings motion-exit-hold SECONDS       # persistent 1..31-second menu exit hold
+settings set FLAGS LIGHT ON OFF DISPLAY_OPEN DISPLAY_CLOSED STATUS OUTPUT_PERSISTENCE
+  STREAM DEFAULT_PAGE SAVE_LAST STATUS_COLOR VOLTAGE_DECIMALS
+  CURRENT_DECIMALS MOTION_EXIT_HOLD_SECONDS RELAY_RESTORE_MASK
 event latest
 event wait [KIND] [TIMEOUT]
 query OPCODE RESPONSE_OPCODE [PAYLOAD_HEX]
 write HEX_BYTES
 ```
 
-`settings` reports the decoded `status_color`, `voltage_decimals`, and
-`current_decimals` fields as well as the raw `extended` byte. All update forms
-first read the board's current record and replace only the requested fields, so
-an older compact `settings set` command cannot erase newer EEPROM options.
-Decimal precision zero through two is supported; legacy records whose decimal
-bits are all zero intentionally decode as the two-decimal default.
+`settings` reports decoded status color, decimal precision, motion exit hold,
+the host-owned programming latch, and the raw extended byte. Focused update
+forms first read the board's current record and replace only their own fields.
+Decimal precision zero through two is supported; an all-zero decimal encoding
+means the configured two-decimal default.
 
 Menu, relays, PWM, feedback, and RF:
 
@@ -268,8 +350,7 @@ relay off
 relay test [MS]                        # default 250; 0 stops
 pwm get
 pwm off                                # emergency clear of all 16 channels
-pwm mode off|manual|auto
-pwm set CHANNEL VALUE
+pwm set CHANNEL VALUE                  # channel 0..15, logical value 0..4095
 rgb R G B [BRIGHTNESS]
 rgb effect list
 rgb effect play NAME                  # background; TUI/shell/IPC stay responsive
@@ -280,7 +361,7 @@ strip fill R G B [BRIGHTNESS]
 strip clear
 buzzer FREQUENCY_HZ DURATION_MS
 melody list
-melody play NAME [REPEATS]            # background; 1..20 repeats
+melody play NAME [REPEATS]            # background; 0=until stopped, otherwise 1..20
 melody wait NAME [REPEATS]            # wait until all notes are acknowledged/played
 melody stop|status
 silent status|on|off
@@ -290,7 +371,7 @@ macro record start NAME [CATEGORY [COLOR]]|record status|record save|record disc
 macro play NAME_OR_ID|status|cancel [keep]
 automation list|run NAME
 rf send CODE BITS PROTOCOL [PULSE_US]  # protocol 1..12
-rf learn [SECONDS]                     # 1..120
+rf learn [indefinite|timer [DURATION]] # default indefinite + multi-code; timer aliases: single, one-shot
 rf cancel
 rf list
 rf remove ID|all
@@ -316,7 +397,7 @@ remotes with slower repeat packets may need future timing configuration.
 
 Direct relay writes use human labels `1..8`, converted to protocol indices
 `0..7`. R1-R4 requests are routed through the same
-disable/break/direction/settle sequencer. Use `relay side ...` for motion
+disable/break/direction/enable sequencer. Use `relay side ...` for motion
 because it states the intended side and direction explicitly. Before a host
 start command for R1-R4—including each host macro step—the host queries fresh
 status and applies `safety.motion_door_policy`: `always` permits both door
@@ -330,12 +411,24 @@ relay layer.
 Learned RF records are deliberately prevented from mapping directly to
 R1-R4. Use `rf map ID side left|right up|down|stop`; that firmware path is
 reed-gated and retains the direction/enable interlock. Direct learned mappings
-remain available for user relays R5-R8. Existing legacy R1-R4 mappings can
+remain available for user relays R5-R8. Existing direct R1-R4 mappings can
 still be listed and should be removed or remapped.
 
-Use `pwm mode off` to stop the user-channel commissioning owner. `pwm off`
-clears all 16 channels, including enclosure, power, and status RGB, and is
-intended as an emergency all-output clear.
+PWM is direct and per-channel; there is no global operating mode or autonomous
+demonstration state. `pwm get` returns controller availability, the selected
+channel, and all sixteen logical values. `pwm set` accepts channel `0..15`
+(including the documented user/enclosure/power/status aliases) and value
+`0..4095`. `pwm off` clears every channel, including enclosure, power, and
+status RGB, and is intended as an emergency all-output clear.
+
+The current settings record separates output policy from live values.
+`OUTPUT_PERSISTENCE` is a bit mask: bit 0 restores motion, bit 1 restores user
+relays, bit 2 restores the eight EEPROM-backed user PWM values, and bit 3 keeps
+the selected motion direction relay when a side stops. `RELAY_RESTORE_MASK`
+holds the last R1..R8 state; only the domains enabled by the persistence mask
+may consume it after a normal boot. Programming mode clears both fields in its
+temporary safe settings image and restores the exact captured record only
+after verified reconnect.
 
 Named melodies and status effects come from the watched PC JSON configuration.
 `melody` sends one acknowledged tone at a time and waits for its duration and
@@ -348,6 +441,11 @@ cannot silence a tone already sounding because the current firmware has no
 buzzer-stop opcode; that one tone may finish (at most five seconds by config).
 The board's EEPROM `silent` setting still wins, so use `silent off` before an
 audible host notification.
+
+The reusable hands-on attention sequence is `display both 0 WAIT`, `melody
+play attention 0`, and `rgb effect play attention`. Acknowledgement stops both
+streams with `melody stop` plus `rgb effect stop`; `display both 1200 ok` then
+shows the completion handoff and yields back to the normal front panel.
 
 These are host-streamed effects: the host must remain connected and running.
 Use `play` from the persistent TUI, shell, or IPC server. A one-shot
@@ -411,9 +509,9 @@ Start cross-platform JSON-RPC IPC on loopback:
 ```console
 bin\controller.exe ipc serve --port COM18
 bin\controller.exe ipc call --method controller.snapshot
-bin\controller.exe ipc call --method controller.execute --params "{\"command\":\"rf list\"}"
-bin\controller.exe ipc call --method controller.execute --params "{\"command\":\"melody play notify\"}"
-bin\controller.exe ipc call --method controller.execute --params "{\"command\":\"rgb effect play attention\"}"
+bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rf list\"}"
+bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"melody play notify\"}"
+bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rgb effect play attention\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
 ```
@@ -424,6 +522,15 @@ snapshots/status/history, menus, RF, messages, events, OS-policy operations,
 and correlated host-bridge calls; see
 [Protocol and Network API](docs/Protocol-and-Network-API.md) for the canonical
 method and REST route table.
+
+`controller.history.status` reads the same retained measurement series before
+and after a host restart. The default host configuration samples once per
+second for 24 hours. Compact samples live in `measurements.jsonl` in the host
+data directory, separately from important-event `timeline.jsonl`; startup
+prunes expired, duplicate, and corrupt-tail records. Owner-only permissions,
+atomic compaction, and a 32 MiB hard ceiling keep that local telemetry store
+bounded. Setting `ui.history_hours` to `0` clears and disables measurement
+retention without disabling the important-event timeline.
 
 The TCP listener rejects non-loopback addresses by default. Remote mode
 requires `ipc.allow_remote`, a token of at least 24 characters, a non-wildcard
@@ -495,10 +602,10 @@ User-visible default identity is owned by
 `productTagline`, and `description`. The normal build verifies that the
 generated Go constants and Win32 resources still match that source. Set
 `ui.app_title` in the watched host configuration for a persistent title, or
-set `PCCONTROLLER_APP_TITLE` for a one-process override; TUI, CLI help/version,
-web navigation and browser title, desktop notifications, host-defined menus,
-and service display names all consume the effective value. `APP_TITLE` may
-also replace the web bundle's build-time fallback.
+set `APP_TITLE` for a one-process override; TUI, CLI help/version, web
+navigation and browser title, desktop notifications, host-defined menus, and
+service display names all consume the effective value. The same variable may
+replace the web bundle's build-time fallback.
 
 Wire HELLO identity, URI/header names, C ABI symbols, module names, firmware
 artifact names, and the default config directory remain stable technical
@@ -557,7 +664,8 @@ From `Tools\Controller`:
 ```console
 bin\controller.exe toolchain compile ..\.. --output-dir ..\..\.build\firmware
 bin\controller.exe program flash ..\..\.build\firmware\PCController.ino.hex 1A86:7523
-bin\controller.exe program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --usbasp-troubleshooting --app-device "USB-SERIAL CH340"
+bin\controller.exe program recover ..\..\.build\firmware\PCController.ino.hex [PORT]
+bin\controller.exe program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --method usbasp --app-device "USB-SERIAL CH340"
 bin\controller.exe boot backup .\backups --device "USB-SERIAL CH340"
 ```
 
@@ -566,9 +674,18 @@ settings separately from PC configuration, prepares the displays, temporarily
 mutes an audible board, waits for deferred EEPROM persistence, completes a
 verified flash/EEPROM/metadata backup, writes and verifies, reconnects, restores
 the exact settings, and verifies their semantic readback. A durable recovery
-marker survives host/programmer interruption. USBasp remains an explicitly
-authorized troubleshooting path and its `--app-device` selector is never sent
-to ISP.
+marker survives host/programmer interruption. USBasp remains an advanced path
+selected explicitly with `--method usbasp`, and its `--app-device` selector is
+never sent to ISP. `--programmer` is only an optional backend-ID override.
+
+`program recover HEX [PORT]` is a primary-owned completion path for a durable
+failed programming session whose image may already be written. It matches the
+HEX hash and exact authenticated device, performs a fresh read-only Urboot
+semantic verification, reconnects only to that saved device, and completes the
+recorded restore/reinitialization without rewriting flash. Secondary instances
+delegate it through IPC. Verification or identity failure retains safe outputs
+and the recovery marker; an absent optional LCD is only a presentation warning.
+Do not substitute a direct programmer invocation or another COM port.
 
 The direct USBasp workflow writes only the selected flash image. It does not
 invent a sibling `.eep` filename and does not use the unsafe
@@ -579,7 +696,8 @@ Inside the TUI/shell, the compact equivalent is:
 
 ```text
 program flash ..\..\.build\firmware\PCController.ino.hex COM18
-program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --usbasp-troubleshooting
+program recover ..\..\.build\firmware\PCController.ino.hex [PORT]
+program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --method usbasp
 boot backup .\backups
 ```
 
@@ -594,7 +712,7 @@ remains marked `incomplete`; it is never reported as a complete backup.
 ### Offline current settings transfer
 
 No unpublished-build migration/version chain is retained. File-only commands
-understand the current semantic 29-value-byte plus CRC-8 settings record and
+understand the current semantic 31-value-byte plus CRC-8 settings record and
 report any other width/layout as unsupported:
 
 ```console
@@ -606,7 +724,7 @@ bin\controller.exe eeprom restore --backup-manifest .\backup\manifest.json --out
 ```
 
 Export, import, and restore require a complete validated backup manifest.
-Import overlays only EEPROM addresses `0x0020..0x003D` and preserves every
+Import overlays only EEPROM addresses `0x0020..0x003E` and preserves every
 other byte from the full 1,024-byte backup. Outputs are canonical, hashed,
 created without overwrite, and never written to a device by these commands.
 An actual EEPROM write remains a separate explicitly confirmed operation.
@@ -620,11 +738,80 @@ AVRDUDE `urclock` implementation; the host coordinates boot mode and exclusive
 port ownership rather than maintaining a second, potentially drifting
 bootloader-protocol implementation.
 
+### Browser and bridge update workspace
+
+The embedded browser has a dedicated **Firmware & updates** page. It is a
+host-mediated remote programmer, not MCU-native OTA: a browser or secondary
+instance sends authenticated artifact/update requests to the primary host,
+and only that primary process may take the serial/programming path.
+
+The page can:
+
+- select a local firmware, EEPROM Intel HEX, readback, or host executable;
+  calculate SHA-256 in the browser; then upload and stage it without writing;
+- download and verify an HTTP(S) or peer-host artifact, with optional expected
+  SHA-256, while the Go transport honors the process proxy environment;
+- discover the newest successful GitHub Actions artifact, latest/tagged GitHub
+  release, or a product-neutral HTTP manifest before downloading; retain
+  release/run/source metadata, provider digests, build hash/time, packed
+  two-second timestamp, and target platform;
+- safely select firmware/EEPROM/host content from ZIP releases, rejecting path
+  traversal, links/devices, ambiguous matches, and expansion-limit violations;
+- inventory and download content-addressed firmware, flash readbacks, EEPROM
+  backups, and host packages without duplicating identical firmware bytes;
+- explicitly request a fresh flash+EEPROM capture, board-firmware update,
+  dedicated captured-flash restore, current-layout EEPROM restore, or
+  recoverable host self-update; and
+- show transfer bytes, progress, state, build hash, packed date/time comparison,
+  digest, verification, and the same update events received over WebSocket.
+
+Selection, download, and staging are deliberately inert. A separate review
+dialog is the authorization boundary for every board write or host replacement.
+The ordinary path probes Urboot/Urclock first; an ISP option is shown only
+after that probe reports no bootloader route. Connecting ISP hardware does not
+itself authorize a write.
+
+A `flash-backup` never enters the firmware-update RPC. Its review action calls
+the dedicated `controller.restore.flash` contract (or
+`POST /api/v1/restores/flash`). The primary process then runs the guarded
+backup-before-write programmer transaction, verifies the restored bytes,
+reconnects application `HELLO`, and restores the saved lifecycle state. UART
+Urclock is the default; USBasp is accepted only as an explicitly selected ISP
+fallback.
+
+Full host releases can embed `default-firmware.hex` plus a generated, complete
+1,024-byte Intel HEX EEPROM image. The EEPROM contains current development
+defaults, a valid CRC, dense menu IDs 0..13, safe-zero PWM values, and an empty
+20-record learned-RF store; an empty compiler `.eep` is never substituted.
+The recovery offer is enabled when the validated pair exists and disabled when
+the firmware artifact is absent, but first-board programming still needs the
+operator's explicit grant. The host manifest records both embedded SHA-256
+values.
+
+“Build-only” and “watch-only” mean exactly that: they compile and validate but
+do not unexpectedly open hardware. To deliver watched changes, start watch with
+its explicit upload option, or let an authenticated primary-host update request
+run the guarded backup → quiet outputs → program → verify → restore sequence.
+This separation prevents CI or a background source watcher from flashing a
+connected board without an operator-selected deployment policy.
+
+The discovery card is the deployment source side of that policy. It can stage
+an update and stream `artifact.discovery.*` progress to every subscribed local
+or remote UI. The subsequent programming review uses the existing guarded
+update RPC. In other words, a deployment watcher can download and then request
+programming, while a command explicitly named build/watch-only remains unable
+to open COM or ISP hardware. Provider/peer bearer tokens are transient; proxy
+variables are inherited by the Go HTTP client and its dependencies.
+
+An authenticated peer can consume `GET /api/v1/discovery/manifest`, whose
+relative artifact links point at this host's immutable SHA-256 download routes.
+The same schema can be returned through `controller.discovery.local_manifest`;
+no local filesystem path or credential is published.
+
 ## WebSocket firmware relay
 
-The local PuzzleBoard `Server.js` and `Client.js` tools formed a Socket.IO file watcher
-that transferred an ASCII HEX file and invoked urclock on the receiver. This
-tool implements the same workflow as original Go code:
+The Controller includes a project-native WebSocket path for transferring a
+validated ASCII Intel HEX image to a trusted programming host:
 
 ```console
 bin\controller.exe ws serve --file ..\..\.build\firmware\PCController.ino.hex --listen 127.0.0.1:3000
@@ -636,9 +823,8 @@ SHA-256, and base64 firmware bytes. The client limits message/file size,
 rejects unsafe names or checksum mismatches, writes a temporary `.hex`, runs
 the selected programmer, and removes the temporary file.
 
-This is standard WebSocket, not Socket.IO, and is intentionally not
-wire-compatible with the old JavaScript event framing. Use the Go server and
-Go client together. The default listener is loopback-only; a non-loopback
+This is standard WebSocket, not Socket.IO. Use the Controller server and client
+together. The default listener is loopback-only; a non-loopback
 listener should be used only on a trusted network because this phase does not
 add authentication or TLS.
 
@@ -653,8 +839,9 @@ Direct Go dependencies:
 | `github.com/charmbracelet/lipgloss` | 1.1.0 | MIT | terminal layout/style |
 | `github.com/coder/websocket` | 1.8.15 | ISC | firmware relay |
 | `github.com/fsnotify/fsnotify` | 1.10.1 | BSD-3-Clause | host-config file watching |
+| `github.com/go-ole/go-ole` | 1.3.0 | MIT | optional Windows system-profile adapter |
 | `go.bug.st/serial` | 1.8.0 | BSD-3-Clause | serial I/O and USB enumeration |
+| `golang.org/x/net` | 0.57.0 | BSD-3-Clause | standards-based proxy environment resolution |
 
-Complete transitive versions are locked in `go.sum`. Detailed reference,
-licensing, and non-copying decisions are recorded in
-[Upstream Source Audit](docs/Upstream-Source-Audit.md).
+Complete transitive versions are locked in `go.sum`; redistributed terms are
+collected in the repository [third-party notices](../../THIRD_PARTY_NOTICES.md).

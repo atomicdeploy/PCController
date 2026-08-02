@@ -69,9 +69,9 @@ func (model Model) hostMenuDeviceEventCommand(event control.Event) tea.Cmd {
 	session := model.hostMenus.Snapshot()
 	if !session.Active {
 		config := model.hostMenus.Config()
-		statusPage, haveStatusPage := model.statusMenuID()
-		if config.RequestGesture == "status-hold-k4" && device.Key == 3 &&
-			gesture == "hold" && haveStatusPage && model.snapshot().Status.MenuPage == statusPage {
+		doorPage, haveDoorPage := model.doorMenuID()
+		if config.RequestGesture == "door-hold-k4" && device.Key == 3 &&
+			gesture == "hold" && haveDoorPage && model.snapshot().Status.MenuPage == doorPage {
 			return model.openHostMenuCommand(config.DefaultMenu)
 		}
 		return nil
@@ -138,7 +138,7 @@ func renderHostMenuDirectory(manager *hostmenu.Manager, width int) string {
 	}
 	config := manager.Config()
 	active := manager.Snapshot()
-	lines := []string{sectionHeader(width, "PC-OWNED MENUS", "watched config · E edits selected/active definition · H opens/closes")}
+	lines := []string{sectionHeader(width, "HOST MENUS", "watched config · E edits selected/active definition · H opens/closes")}
 	if active.Active {
 		lines = append(lines,
 			valueStyle.Render(fmt.Sprintf("ACTIVE · %s / %s · %d of %d", active.MenuTitle, active.ItemTitle, active.Cursor+1, active.Count)),

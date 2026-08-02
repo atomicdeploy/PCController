@@ -2,8 +2,7 @@
 
 namespace {
 
-constexpr uint16_t AutoStepIntervalMs = 20;
-constexpr uint16_t AutoStep = 128;
+// Repeated transport failures mark the shared PWM expander unavailable.
 constexpr uint8_t MaximumConsecutiveWriteErrors = 3;
 
 bool channelInMask(uint16_t mask, uint8_t channel) {
@@ -16,16 +15,13 @@ PwmController::PwmController(PwmExpanderDriver &driver)
     : driver_(driver) {}
 
 void PwmController::begin(bool available, uint32_t now) {
+  (void)now;
   available_ = available;
-  mode_ = available ? PwmTestMode::Auto : PwmTestMode::Off;
-  channel_ = firstAutoChannel();
+  channel_ = 0;
   value_ = 0;
-  rising_ = true;
   errorCount_ = 0;
   consecutiveWriteErrors_ = 0;
   cacheValidMask_ = 0;
-  lastStepAt_ = now;
-  autoChannelChanged_ = false;
 
   for (uint8_t channel = 0; channel < PwmChannels::Count; ++channel) {
     cachedValues_[channel] = 0;
@@ -36,54 +32,7 @@ void PwmController::begin(bool available, uint32_t now) {
   }
   if (!tryAllOff()) {
     tripUnavailable();
-    return;
   }
-
-  mode_ = PwmTestMode::Auto;
-  autoChannelChanged_ = true;
-}
-
-void PwmController::service(uint32_t now) {
-  if (!available_ || mode_ != PwmTestMode::Auto ||
-      autoTestMask_ == 0 ||
-      static_cast<uint32_t>(now - lastStepAt_) < AutoStepIntervalMs) {
-    return;
-  }
-  lastStepAt_ = now;
-
-  if (!channelInMask(autoTestMask_, channel_)) {
-    channel_ = firstAutoChannel();
-    value_ = 0;
-    rising_ = true;
-    autoChannelChanged_ = true;
-  }
-
-  if (rising_) {
-    const uint16_t sum = static_cast<uint16_t>(value_ + AutoStep);
-    const uint16_t next = sum >= 4095 ? 4095 : sum;
-    if (!writeLogical(channel_, next)) {
-      return;
-    }
-    value_ = next;
-    if (value_ == 4095) {
-      rising_ = false;
-    }
-    return;
-  }
-
-  const uint16_t next =
-      value_ > AutoStep ? static_cast<uint16_t>(value_ - AutoStep) : 0;
-  if (!writeLogical(channel_, next)) {
-    return;
-  }
-  value_ = next;
-  if (value_ != 0) {
-    return;
-  }
-
-  channel_ = nextAutoChannel(channel_);
-  rising_ = true;
-  autoChannelChanged_ = true;
 }
 
 bool PwmController::tryAllOff() {
@@ -126,47 +75,10 @@ bool PwmController::stopUserOutputs() {
   return clearMask(PwmChannels::UserTestMask);
 }
 
-void PwmController::setMode(PwmTestMode mode, uint32_t now) {
-  if (mode == PwmTestMode::Off) {
-    (void)clearMask(autoTestMask_);
-    mode_ = PwmTestMode::Off;
-    value_ = logicalValue(channel_);
-    rising_ = true;
-    autoChannelChanged_ = false;
-    return;
-  }
-  if (!available_ || mode_ == mode) {
-    return;
-  }
-  if (!clearMask(autoTestMask_)) {
-    return;
-  }
-  mode_ = mode;
-  value_ = 0;
-  rising_ = true;
-  lastStepAt_ = now;
-  if (mode_ == PwmTestMode::Auto) {
-    channel_ = firstAutoChannel();
-    autoChannelChanged_ = true;
-  } else {
-    autoChannelChanged_ = false;
-  }
-}
-
-PwmTestMode PwmController::mode() const { return mode_; }
-
 void PwmController::setChannel(uint8_t channel, uint32_t now) {
+  (void)now;
   if (channel >= PwmChannels::Count) {
     channel = PwmChannels::Count - 1;
-  }
-  if (mode_ == PwmTestMode::Manual && channel != channel_ && value_ != 0) {
-    if (!writeLogical(channel_, 0)) {
-      return;
-    }
-    value_ = 0;
-  }
-  if (!prepareManual(now)) {
-    return;
   }
   channel_ = channel;
   value_ = logicalValue(channel_);
@@ -185,10 +97,11 @@ void PwmController::adjustChannel(int8_t delta, uint32_t now) {
 uint8_t PwmController::channel() const { return channel_; }
 
 void PwmController::setValue(uint16_t value, uint32_t now) {
+  (void)now;
   if (value > 4095) {
     value = 4095;
   }
-  if (!prepareManual(now) || !writeLogical(channel_, value)) {
+  if (!writeLogical(channel_, value)) {
     return;
   }
   value_ = value;
@@ -208,21 +121,18 @@ uint16_t PwmController::value() const { return value_; }
 
 bool PwmController::available() const { return available_; }
 
-bool PwmController::rising() const { return rising_; }
-
 uint8_t PwmController::errorCount() const { return errorCount_; }
 
-bool PwmController::consumeAutoChannelChange(uint8_t &channelValue) {
-  if (!autoChannelChanged_) {
+bool PwmController::setLogical(uint8_t channel, uint16_t value) {
+  if (channel >= PwmChannels::Count) {
     return false;
   }
-  autoChannelChanged_ = false;
-  channelValue = channel_;
-  return true;
-}
-
-bool PwmController::setLogical(uint8_t channel, uint16_t value) {
-  return writeLogical(channel, value);
+  channel_ = channel;
+  const bool success = writeLogical(channel, value);
+  if (success) {
+    value_ = value > 4095 ? 4095 : value;
+  }
+  return success;
 }
 
 uint16_t PwmController::logicalValue(uint8_t channel) const {
@@ -265,9 +175,6 @@ bool PwmController::setUserLight(uint8_t lightIndex, uint16_t value) {
   if (lightIndex >= PwmChannels::UserLightCount) {
     return false;
   }
-  if (mode_ == PwmTestMode::Auto && !prepareManual(millis())) {
-    return false;
-  }
   channel_ = static_cast<uint8_t>(PwmChannels::UserLightFirst + lightIndex);
   const bool success = writeLogical(channel_, value);
   if (success) {
@@ -278,9 +185,6 @@ bool PwmController::setUserLight(uint8_t lightIndex, uint16_t value) {
 
 bool PwmController::setUserPwm(uint8_t pwmIndex, uint16_t value) {
   if (pwmIndex >= PwmChannels::UserPwmCount) {
-    return false;
-  }
-  if (mode_ == PwmTestMode::Auto && !prepareManual(millis())) {
     return false;
   }
   channel_ = static_cast<uint8_t>(PwmChannels::UserPwmFirst + pwmIndex);
@@ -318,26 +222,6 @@ bool PwmController::setStatusRgb8(uint8_t red, uint8_t green, uint8_t blue) {
   return setStatusRgb12(from8Bit(red), from8Bit(green), from8Bit(blue));
 }
 
-void PwmController::setAutoTestMask(uint16_t channelMask, uint32_t now) {
-  if (channelMask == autoTestMask_) {
-    return;
-  }
-  const uint16_t previousMask = autoTestMask_;
-  (void)clearMask(previousMask);
-  autoTestMask_ = channelMask;
-  channel_ = firstAutoChannel();
-  value_ = 0;
-  rising_ = true;
-  lastStepAt_ = now;
-  autoChannelChanged_ =
-      available_ && mode_ == PwmTestMode::Auto && autoTestMask_ != 0;
-  if (autoTestMask_ == 0 && mode_ == PwmTestMode::Auto) {
-    mode_ = PwmTestMode::Off;
-  }
-}
-
-uint16_t PwmController::autoTestMask() const { return autoTestMask_; }
-
 bool PwmController::writeLogical(uint8_t channel, uint16_t value, bool force) {
   if (!available_ || channel >= PwmChannels::Count) {
     return false;
@@ -374,6 +258,9 @@ bool PwmController::writeLogical(uint8_t channel, uint16_t value, bool force) {
   if (driver_.setPWM(channel, on, off) == 0) {
     cachedValues_[channel] = value;
     cacheValidMask_ |= _BV(channel);
+    if (channel == channel_) {
+      value_ = value;
+    }
     consecutiveWriteErrors_ = 0;
     return true;
   }
@@ -391,62 +278,10 @@ bool PwmController::writeLogical(uint8_t channel, uint16_t value, bool force) {
   return false;
 }
 
-bool PwmController::prepareManual(uint32_t now) {
-  if (!available_) {
-    return false;
-  }
-  if (mode_ != PwmTestMode::Manual) {
-    if (!stopTestOutput()) {
-      return false;
-    }
-    mode_ = PwmTestMode::Manual;
-    value_ = 0;
-    rising_ = true;
-    lastStepAt_ = now;
-    autoChannelChanged_ = false;
-  }
-  return true;
-}
-
-bool PwmController::stopTestOutput() {
-  if (!available_) {
-    value_ = 0;
-    return false;
-  }
-  if (!writeLogical(channel_, 0)) {
-    return false;
-  }
-  value_ = 0;
-  return true;
-}
-
 void PwmController::tripUnavailable() {
   available_ = false;
-  mode_ = PwmTestMode::Off;
   value_ = 0;
-  rising_ = true;
-  autoChannelChanged_ = false;
   cacheValidMask_ = 0;
-}
-
-uint8_t PwmController::firstAutoChannel() const {
-  for (uint8_t channel = 0; channel < PwmChannels::Count; ++channel) {
-    if (channelInMask(autoTestMask_, channel)) {
-      return channel;
-    }
-  }
-  return 0;
-}
-
-uint8_t PwmController::nextAutoChannel(uint8_t current) const {
-  for (uint8_t offset = 1; offset <= PwmChannels::Count; ++offset) {
-    const uint8_t candidate =
-        static_cast<uint8_t>((current + offset) % PwmChannels::Count);
-    if (channelInMask(autoTestMask_, candidate)) {
-      return candidate;
-    }
-  }
-  return current;
 }
 
 uint16_t PwmController::from8Bit(uint8_t value) {

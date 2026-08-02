@@ -30,27 +30,29 @@ type MenuCatalog struct {
 }
 
 var protocolMenuPages = []MenuPageInfo{
-	{0, "status", "STAT", "Status", "Incoming events and controller status"},
+	{0, "door", "door", "Door", "Enclosure reed-switch state: OPEN or CLSd"},
 	{1, "voltage", "VOLT", "Voltage", "Supply and INA219 bus voltage"},
 	{2, "current", "CURR", "Current", "INA219 current and power"},
 	{3, "temperature-led", "tLED", "LED Temperature", "Illumination temperature sensor"},
 	{4, "temperature-bt", "t-bt", "BT Audio Temperature", "BT-5.0-Pro Audio temperature sensor"},
 	{5, "illumination", "LItE", "Illumination", "Enclosure illumination mode and levels"},
-	{6, "bt-audio", "bt", "BT Audio", "BT-5.0-Pro Audio indicator state"},
-	{7, "settings", "Snd", "Sound and Settings", "Sound, display, status color, and decimals"},
-	{8, "pwm-test", "PWM", "PWM Test", "PWM output test and channel selection"},
-	{9, "relay-test", "rELY", "Relay Test", "Individual relay output test"},
-	{10, "keys", "KEY", "Key Identification", "Identify K1 through K4"},
-	{11, "user-pwm", "uPWM", "User PWM", "Eight user MOSFET output values"},
-	{12, "user-relays", "r5-8", "User Relays", "R5 through R8 toggle or momentary control"},
-	{13, "motion", "MOVE", "Motion", "Side A and Side B direction/output control"},
-	{14, "rf-learn", "LErn", "RF Learn", "Learn and map 433 MHz controls"},
+	{6, "settings", "bEEP", "Beep and Settings", "Beep, display, status color, and decimals"},
+	{7, "pwm-test", "PWM", "PWM Test", "PWM output test and channel selection"},
+	{8, "relay-test", "rELY", "Relay Test", "Individual relay output test"},
+	{9, "keys", "KEY", "Key Identification", "Identify K1 through K4"},
+	{10, "user-pwm", "uPWM", "User PWM", "Eight user MOSFET output values"},
+	{11, "user-relays", "r5-8", "User Relays", "R5 through R8 toggle or momentary control"},
+	{12, "motion", "MOVE", "Motion", "Side A and Side B direction/output control"},
+	{13, "rf-learn", "LErn", "RF Learn", "Learn and map 433 MHz controls"},
 }
 
-// legacyMenuPages describes pre-MENU_LIST firmware such as live build
-// 5DF10D05. Keep it separate so old boards remain truthful without making the
-// current page numbers depend on a historical layout.
-var legacyMenuPages = []MenuPageInfo{
+const voltageFirstMenuBuildHash uint32 = 0x5DF10D05
+
+// voltageFirstMenuPages is the frozen directory for the verified pre-MENU_LIST
+// build above. Unknown builds must not inherit these historical numeric IDs:
+// without an exact identity match, the current catalog remains the safe host
+// fallback.
+var voltageFirstMenuPages = []MenuPageInfo{
 	{0, "voltage", "VOLT", "Voltage", "Supply and INA219 bus voltage"},
 	{1, "current", "CURR", "Current", "INA219 current and power"},
 	{2, "temperature-led", "tLED", "LED Temperature", "Illumination temperature sensor"},
@@ -72,13 +74,26 @@ func MenuPages() []MenuPageInfo {
 	return append([]MenuPageInfo(nil), protocolMenuPages...)
 }
 
-// MenuPagesForCapabilities selects the only honest fallback: current ordering
-// for firmware advertising MENU_LIST, and the frozen legacy ordering otherwise.
+// MenuPagesForCapabilities returns the canonical current catalog. Capability
+// differences may remove live discovery, but never resurrect retired pages.
 func MenuPagesForCapabilities(capabilities uint32) []MenuPageInfo {
-	if capabilities&native.CapabilityMenuDirectory != 0 {
+	_ = capabilities
+	return MenuPages()
+}
+
+// menuPagesForHello selects a host fallback only when the board cannot
+// advertise its own directory. An advertised directory always identifies the
+// current generation; a historical layout is used only for an exact, stable
+// compact HELLO build identity.
+func menuPagesForHello(hello native.Hello) []MenuPageInfo {
+	if hello.Capabilities&native.CapabilityMenuDirectory != 0 {
 		return MenuPages()
 	}
-	return append([]MenuPageInfo(nil), legacyMenuPages...)
+	if hello.IdentitySchema == native.IdentitySchemaCompact &&
+		hello.BuildHash == voltageFirstMenuBuildHash {
+		return append([]MenuPageInfo(nil), voltageFirstMenuPages...)
+	}
+	return MenuPages()
 }
 
 func ResolveMenuPage(reference string) (MenuPageInfo, error) {
@@ -133,13 +148,19 @@ func QueryMenuCatalog(ctx context.Context, runtime *Runtime) (MenuCatalog, error
 	if capabilities&native.CapabilityMenuDirectory != 0 {
 		catalog, err = queryLiveMenuCatalog(ctx, runtime, status)
 	} else {
+		pages := menuPagesForHello(snapshot.Hello)
+		source := "host current manifest (firmware has no MENU_LIST capability)"
+		if snapshot.Hello.IdentitySchema == native.IdentitySchemaCompact &&
+			snapshot.Hello.BuildHash == voltageFirstMenuBuildHash {
+			source = "host build-identity compatibility manifest (firmware has no MENU_LIST capability)"
+		}
 		catalog = MenuCatalog{
-			Source:       "host legacy manifest (firmware has no MENU_LIST capability)",
+			Source:       source,
 			LiveList:     false,
 			FirmwareHash: snapshot.Hello.BuildHash,
 			CurrentPage:  status.MenuPage,
 			ProgramMode:  status.ProgramMode,
-			Pages:        MenuPagesForCapabilities(capabilities),
+			Pages:        pages,
 		}
 	}
 	if err != nil {

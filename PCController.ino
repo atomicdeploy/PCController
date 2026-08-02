@@ -17,6 +17,7 @@
 #include "Project/BootMelody.h"
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"
+#include "Project/FrontPanelModel.h"
 #include "Project/IlluminationController.h"
 #include "Project/Ina219Sensor.h"
 #include "Project/MacroQueue.h"

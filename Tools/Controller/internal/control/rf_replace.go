@@ -7,7 +7,6 @@ import (
 	"sort"
 	"sync"
 
-	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 )
 
@@ -29,9 +28,7 @@ type RFReplaceService struct {
 	transport    rfReplaceTransport
 	capabilities func() (string, uint32, bool)
 
-	mu       sync.Mutex
-	probeKey string
-	probeOK  bool
+	mu sync.Mutex
 }
 
 // NewRFReplaceService binds transactional RF management to the live runtime.
@@ -47,58 +44,29 @@ func NewRFReplaceService(runtime *Runtime) *RFReplaceService {
 	}
 }
 
-// Support reports capability-advertised or safely-probed support for this exact
-// connected firmware identity.
+// Support reports the current firmware's advertised full-record capability.
 func (service *RFReplaceService) Support() RFReplaceSupport {
-	key, capabilities, connected := service.capabilities()
+	_, capabilities, connected := service.capabilities()
 	if !connected {
-		return RFReplaceSupport{Reason: "device is offline"}
+		return RFReplaceSupport{Known: true, Reason: "device is offline"}
 	}
 	if capabilities&native.CapabilityRFLearnReplace != 0 {
 		return RFReplaceSupport{Known: true, Supported: true, Reason: "advertised by HELLO"}
 	}
-	service.mu.Lock()
-	defer service.mu.Unlock()
-	if service.probeKey != key {
-		return RFReplaceSupport{Reason: "safe opcode probe required"}
-	}
-	if service.probeOK {
-		return RFReplaceSupport{Known: true, Supported: true, Reason: "confirmed by safe opcode probe"}
-	}
-	return RFReplaceSupport{Known: true, Reason: "firmware rejected the optional opcode"}
+	return RFReplaceSupport{Known: true, Reason: "firmware does not advertise full-record RF replacement"}
 }
 
-// Probe sends an intentionally invalid zero-length request. Supporting firmware
-// answers BadPayload; older firmware answers Unsupported. Neither response can
-// modify EEPROM.
+// Probe is a read-only capability check retained for the TUI action surface; it
+// never sends an invalid replacement request to current firmware.
 func (service *RFReplaceService) Probe(ctx context.Context) (RFReplaceSupport, error) {
-	key, capabilities, connected := service.capabilities()
-	if !connected {
-		return RFReplaceSupport{Reason: "device is offline"}, errors.New("device is not connected")
+	if err := ctx.Err(); err != nil {
+		return RFReplaceSupport{}, err
 	}
-	if capabilities&native.CapabilityRFLearnReplace != 0 {
-		return RFReplaceSupport{Known: true, Supported: true, Reason: "advertised by HELLO"}, nil
+	support := service.Support()
+	if !support.Supported {
+		return support, errors.New(support.Reason)
 	}
-	err := service.transport.Command(ctx, native.OpRFLearnReplace, nil)
-	var remote *link.RemoteError
-	if !errors.As(err, &remote) || remote.RequestOpcode != native.OpRFLearnReplace {
-		if err == nil {
-			err = errors.New("unsafe probe response: empty RF record was acknowledged")
-		}
-		return RFReplaceSupport{Reason: "safe opcode probe was inconclusive"}, err
-	}
-	service.mu.Lock()
-	service.probeKey = key
-	service.probeOK = remote.Code == native.ErrorBadPayload
-	service.mu.Unlock()
-	switch remote.Code {
-	case native.ErrorBadPayload:
-		return RFReplaceSupport{Known: true, Supported: true, Reason: "confirmed by safe opcode probe"}, nil
-	case native.ErrorUnsupported:
-		return RFReplaceSupport{Known: true, Reason: "firmware does not implement RF record replacement"}, nil
-	default:
-		return RFReplaceSupport{Reason: "safe opcode probe was inconclusive"}, err
-	}
+	return support, nil
 }
 
 // Fetch returns the complete board-authoritative learned-remote snapshot.
@@ -128,23 +96,73 @@ func (service *RFReplaceService) Fetch(ctx context.Context) ([]native.RFEntry, e
 }
 
 // Replace atomically from the user's perspective: it snapshots the board,
-// validates a pure reorder, writes all records, verifies readback, and restores
-// the original snapshot automatically after any failure or mismatch.
+// validates every complete record, writes the desired snapshot, verifies
+// readback, and restores the original snapshot after any failure or mismatch.
 func (service *RFReplaceService) Replace(ctx context.Context, desired []native.RFEntry) error {
 	service.mu.Lock()
 	defer service.mu.Unlock()
+	return service.replaceLocked(ctx, desired)
+}
 
-	support := service.supportLocked()
-	if !support.Supported {
-		return fmt.Errorf("RF reorder unavailable: %s", support.Reason)
+// UpdateMapping changes one learned record through the same verified full-list
+// transaction used by reorder/import. Opcode 0x26 is intentionally never used.
+func (service *RFReplaceService) UpdateMapping(
+	ctx context.Context,
+	id, actionKind, actionValue, behavior byte,
+) error {
+	if _, err := native.RFMappingPayload(id, actionKind, actionValue, behavior); err != nil {
+		return err
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if support := service.supportLocked(); !support.Supported {
+		return fmt.Errorf("RF full-record update unavailable: %s", support.Reason)
 	}
 	original, err := service.Fetch(ctx)
 	if err != nil {
 		return fmt.Errorf("snapshot learned remotes: %w", err)
 	}
+	desired := append([]native.RFEntry(nil), original...)
+	found := false
+	for index := range desired {
+		if desired[index].ID != id {
+			continue
+		}
+		desired[index].ActionKind = actionKind
+		desired[index].ActionValue = actionValue
+		desired[index].Behavior = behavior
+		found = true
+		break
+	}
+	if !found {
+		return fmt.Errorf("learned RF entry %d does not exist", id)
+	}
+	return service.replaceSnapshotLocked(ctx, original, desired)
+}
+
+func (service *RFReplaceService) replaceLocked(
+	ctx context.Context,
+	desired []native.RFEntry,
+) error {
+
+	support := service.supportLocked()
+	if !support.Supported {
+		return fmt.Errorf("RF full-record update unavailable: %s", support.Reason)
+	}
+	original, err := service.Fetch(ctx)
+	if err != nil {
+		return fmt.Errorf("snapshot learned remotes: %w", err)
+	}
+	return service.replaceSnapshotLocked(ctx, original, desired)
+}
+
+func (service *RFReplaceService) replaceSnapshotLocked(
+	ctx context.Context,
+	original, desired []native.RFEntry,
+) error {
 	desired = append([]native.RFEntry(nil), desired...)
 	sortRFRecords(desired)
-	if err := validatePureRFReorder(original, desired); err != nil {
+	if err := validateRFRecords(desired); err != nil {
 		return err
 	}
 	if err := service.writeSnapshot(ctx, original, desired); err == nil {
@@ -164,17 +182,14 @@ func (service *RFReplaceService) Replace(ctx context.Context, desired []native.R
 }
 
 func (service *RFReplaceService) supportLocked() RFReplaceSupport {
-	key, capabilities, connected := service.capabilities()
+	_, capabilities, connected := service.capabilities()
 	if !connected {
 		return RFReplaceSupport{Reason: "device is offline"}
 	}
 	if capabilities&native.CapabilityRFLearnReplace != 0 {
 		return RFReplaceSupport{Known: true, Supported: true, Reason: "advertised by HELLO"}
 	}
-	if service.probeKey == key && service.probeOK {
-		return RFReplaceSupport{Known: true, Supported: true, Reason: "confirmed by safe opcode probe"}
-	}
-	return RFReplaceSupport{Reason: "safe opcode probe has not confirmed support"}
+	return RFReplaceSupport{Known: true, Reason: "firmware does not advertise full-record RF replacement"}
 }
 
 func (service *RFReplaceService) writeSnapshot(ctx context.Context, previous, next []native.RFEntry) error {
@@ -216,33 +231,25 @@ func (service *RFReplaceService) rollback(ctx context.Context, current, original
 	return fmt.Errorf("%w; original learned-remote snapshot restored", cause)
 }
 
-func validatePureRFReorder(original, desired []native.RFEntry) error {
-	if len(original) != len(desired) {
-		return fmt.Errorf("staged RF list has %d records; board snapshot has %d", len(desired), len(original))
+func validateRFRecords(desired []native.RFEntry) error {
+	if len(desired) > 20 {
+		return fmt.Errorf("staged RF list has %d records; capacity is 20", len(desired))
 	}
-	originalByTuple := make(map[string]native.RFEntry, len(original))
 	ids := make(map[byte]struct{}, len(desired))
-	for _, entry := range original {
-		key := rfStableTuple(entry)
-		if _, duplicate := originalByTuple[key]; duplicate {
-			return fmt.Errorf("board contains duplicate stable RF tuple %s", key)
-		}
-		originalByTuple[key] = entry
-	}
+	tuples := make(map[string]struct{}, len(desired))
 	for _, entry := range desired {
+		if _, err := native.RFReplacePayload(entry); err != nil {
+			return err
+		}
 		if _, duplicate := ids[entry.ID]; duplicate {
 			return fmt.Errorf("staged RF ID %d is duplicated", entry.ID)
 		}
 		ids[entry.ID] = struct{}{}
-		originalEntry, found := originalByTuple[rfStableTuple(entry)]
-		if !found {
-			return fmt.Errorf("staged RF record %s is not in the board snapshot", rfStableTuple(entry))
+		tuple := rfStableTuple(entry)
+		if _, duplicate := tuples[tuple]; duplicate {
+			return fmt.Errorf("staged RF code tuple %s is duplicated", tuple)
 		}
-		originalEntry.ID = entry.ID
-		if originalEntry != entry {
-			return fmt.Errorf("staged RF record %s changes data other than its ID", rfStableTuple(entry))
-		}
-		delete(originalByTuple, rfStableTuple(entry))
+		tuples[tuple] = struct{}{}
 	}
 	return nil
 }

@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,6 +29,7 @@ import (
 
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostos"
@@ -44,7 +47,7 @@ import (
 )
 
 var (
-	version    = "development"
+	version    = productidentity.Version
 	sourceHash = "unknown"
 	buildTime  = "unknown"
 )
@@ -65,6 +68,16 @@ type connectionFlags struct {
 }
 
 func main() {
+	if artifacts.IsSelfUpdateHelperInvocation(os.Args[1:]) {
+		if err := artifacts.RunSelfUpdateHelper(context.Background(), os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, "self-update helper:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	// A replacement must survive normal config/IPC/device startup long enough
+	// to prove it is not an immediate crash loop before the helper commits it.
+	artifacts.ScheduleSelfUpdateHealthAcknowledgement(10 * time.Second)
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
@@ -103,6 +116,27 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// Offline EEPROM inspection/transfer is dispatched before config or
 		// device setup and therefore cannot open a serial port.
 		return runEEPROM(args[1:], stdout, stderr)
+	case "firmware":
+		// Artifact identity inspection and guarded patching are also entirely
+		// offline and must not depend on host configuration or serial hardware.
+		return runFirmwareArtifact(args[1:], stdout, stderr)
+	}
+	if configIndependentProgramCompile(args) {
+		// Compilation is a repository build operation. It must remain usable
+		// when a user's runtime configuration is absent, stale, or invalid and
+		// must never create or rewrite that configuration as a side effect.
+		return runProgramWithConfig(
+			args[1:], stdout, stderr, appconfig.Defaults(),
+		)
+	}
+	if configIndependentToolchainCompile(args) {
+		translated, translateErr := toolchainCLIArguments(args[1:])
+		if translateErr != nil {
+			return translateErr
+		}
+		return runProgramWithConfig(
+			translated, stdout, stderr, appconfig.Defaults(),
+		)
 	}
 	store, err := appconfig.Open(configPath)
 	if err != nil {
@@ -152,20 +186,30 @@ func runDesktop(
 	stdout io.Writer,
 	store *appconfig.Store,
 ) error {
-	if len(args) > 1 || (len(args) == 1 &&
-		!strings.EqualFold(args[0], "install") &&
-		!strings.EqualFold(args[0], "ensure")) {
-		return errors.New("usage: desktop install")
+	if len(args) > 1 {
+		return errors.New("usage: desktop install|ensure|uninstall|remove")
 	}
-	status, err := hostui.EnsureDesktopIntegration(
-		hostui.DesktopIntegrationOptions{
-			AppID:       productidentity.StableAppID,
-			DisplayName: productidentity.Title(store.Current().UI.AppTitle),
-		},
-	)
+	action := "ensure"
+	if len(args) == 1 {
+		action = strings.ToLower(strings.TrimSpace(args[0]))
+	}
+	options := hostui.DesktopIntegrationOptions{
+		AppID:       productidentity.StableAppID,
+		DisplayName: productidentity.Title(store.Current().UI.AppTitle),
+	}
+	var status any
+	var integrationErr error
+	switch action {
+	case "install", "ensure":
+		status, integrationErr = hostui.EnsureDesktopIntegration(options)
+	case "uninstall", "remove":
+		status, integrationErr = hostui.RemoveDesktopIntegration(options)
+	default:
+		return errors.New("usage: desktop install|ensure|uninstall|remove")
+	}
 	encoded, _ := json.MarshalIndent(status, "", "  ")
 	fmt.Fprintln(stdout, string(encoded))
-	return err
+	return integrationErr
 }
 
 func runURIAction(
@@ -180,57 +224,113 @@ func runURIAction(
 	if err != nil {
 		return err
 	}
-	probeContext, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
-	havePrimary := primaryAvailable(probeContext)
-	cancel()
-	if havePrimary {
-		if action.Kind == "command" {
-			output, err := executeThroughPrimary(context.Background(), action.Value)
-			if output != "" {
-				fmt.Fprintln(stdout, output)
-			}
-			return err
+	if action.Kind == "app.quit" {
+		probeContext, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		claim, existing, resolveErr := claimOrResolveHostInstance(probeContext, "web")
+		cancel()
+		if claim != nil {
+			_ = claim.Close()
+			return nil
 		}
-		return callPrimary(
-			context.Background(), "controller.app.action", action, nil,
-		)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if existing == nil {
+			return nil
+		}
+		return deliverExistingAppAction(context.Background(), action, stdout)
 	}
-	// Opening a notification while the app is closed starts the normal TUI and
-	// injects the validated action after it becomes the primary process.
-	return runTUIWithInitialAction(nil, stdout, stderr, store, action)
+	// Desktop/protocol activation is a graphical entry point. A live primary
+	// receives the action through its authenticated IPC endpoint; a cold
+	// activation starts the browser-first host and preserves the requested page.
+	return runWebWithInitialAction(nil, stdout, stderr, store, action)
 }
 
 func runTUI(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	return runTUIWithInitialAction(args, stdout, stderr, store, hostui.AppAction{})
 }
 
+func preparePrimaryMode(surface string) (*hostInstanceClaim, bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	claim, existing, err := claimOrResolveHostInstance(ctx, surface)
+	return claim, existing != nil, err
+}
+
 func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
+	return runWebWithInitialAction(args, stdout, stderr, store, hostui.AppAction{})
+}
+
+func runWebWithInitialAction(
+	args []string,
+	stdout, stderr io.Writer,
+	store *appconfig.Store,
+	initial hostui.AppAction,
+) error {
+	if len(args) != 0 && strings.EqualFold(args[0], "export") {
+		if initial.Kind != "" {
+			return errors.New("a desktop action cannot be combined with web export")
+		}
+		return runWebExport(args[1:], stdout, stderr)
+	}
 	flags := flag.NewFlagSet("web", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
 	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
+	noTray := flags.Bool("no-tray", false, "serve the web app without a native system-tray menu")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller web [--no-open] [--no-auto] [connection flags]")
+		return errors.New("usage: controller web [--no-open] [--no-tray] [--no-auto] [connection flags]")
 	}
 	connection.captureOverrides(flags)
+	claimContext, claimCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	claim, existing, err := claimOrResolveHostInstance(claimContext, "web")
+	claimCancel()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if claim != nil {
+			_ = claim.Close()
+		}
+	}()
 	appURL, err := browserURL(store.Current().IPC.Listen)
 	if err != nil {
 		return err
 	}
-
-	probeContext, probeCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	havePrimary := primaryAvailable(probeContext)
-	probeCancel()
-	if havePrimary {
+	if existing != nil {
+		appURL, err = browserURL(existing.Listen)
+		if err != nil {
+			return err
+		}
+		appURL, err = webURLForAppAction(appURL, initial)
+		if err != nil {
+			return err
+		}
 		fmt.Fprintln(stdout, productidentity.ServiceName(store.Current().UI.AppTitle, "web app:"), appURL)
+		if initial.Kind != "" {
+			if err := deliverExistingAppAction(context.Background(), initial, stdout); err != nil {
+				return err
+			}
+		}
 		if *noOpen {
 			return nil
 		}
+		connectionContext, connectionCancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+		connected := primaryControllerConnected(connectionContext)
+		connectionCancel()
+		if !webBrowserAutoOpenAllowed(*noOpen, connected) {
+			fmt.Fprintln(stdout, "controller offline; browser not opened")
+			return nil
+		}
 		return openBrowser(appURL)
+	}
+	appURL, err = webURLForAppAction(appURL, initial)
+	if err != nil {
+		return err
 	}
 
 	ctx, cancel := signalContext()
@@ -241,13 +341,19 @@ func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		_ = runtime.Close()
 	}
 	project := findProjectRoot()
-	engine := control.NewCommandEngine(runtime, commandOptions(store, project))
+	outputs := control.NewOutputScheduler(runtime)
+	commandConfiguration := commandOptions(store, project)
+	commandConfiguration.Outputs = outputs
+	engine := control.NewCommandEngine(runtime, commandConfiguration)
 	hostMenus := newHostMenuManager(store, runtime, engine)
 	if err := hostmenu.RegisterCommands(engine, hostMenus); err != nil {
 		_ = runtime.Close()
 		return err
 	}
 	hostPanel := &hostFrontPanelBridge{runtime: runtime}
+	hostMenus.SetPanelChanged(func(_ hostmenu.Snapshot) {
+		go syncHostMenuOverlay(runtime, hostMenus, hostPanel, nil)
+	})
 	hostMenus.SetDefinitionChanged(func(change hostmenu.DefinitionChange) {
 		publishHostMenuDefinitionChange(runtime, change)
 		go syncHostMenuOverlay(runtime, hostMenus, hostPanel, &change)
@@ -260,13 +366,39 @@ func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		_ = runtime.Close()
 		return err
 	}
+	lifecycleOptions := control.ProgrammingLifecycleOptions{
+		DataPaths: programDataPaths, Outputs: outputs, HostConfig: store.Current,
+	}
+	primaryReady := make(chan struct{})
+	var primaryReadyOnce sync.Once
+	var browserOpenOnce sync.Once
+	openWhenConnected := func() {
+		if *noOpen {
+			return
+		}
+		go func() {
+			select {
+			case <-ctx.Done():
+				return
+			case <-primaryReady:
+			}
+			if !webBrowserAutoOpenAllowed(*noOpen, runtime.Snapshot().Connected) {
+				return
+			}
+			browserOpenOnce.Do(func() {
+				if openErr := openBrowser(appURL); openErr != nil {
+					fmt.Fprintln(stderr, "open browser:", openErr)
+				}
+			})
+		}()
+	}
 	runtime.SetConnectionReadyHandler(func(_ ports.Info, hello native.Hello) {
 		recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 8*time.Second)
 		var recoveryOutput bytes.Buffer
 		recoveryErr := control.RecoverPendingProgrammingSessions(
 			recoveryContext,
 			runtime,
-			control.ProgrammingLifecycleOptions{DataPaths: programDataPaths},
+			lifecycleOptions,
 			&recoveryOutput,
 		)
 		recoveryCancel()
@@ -284,36 +416,76 @@ func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			hello.Capabilities&native.CapabilityHostFrontPanel != 0 {
 			syncHostMenuOverlay(runtime, hostMenus, hostPanel, nil)
 		}
+		openWhenConnected()
 	})
 
-	primary, err := startPrimaryIPC(ctx, runtime, engine, store)
+	primary, err := startPrimaryIPCClaimed(ctx, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
-		fmt.Fprintln(stdout, productidentity.ServiceName(store.Current().UI.AppTitle, "web app:"), appURL)
-		if *noOpen {
-			return nil
-		}
-		return openBrowser(appURL)
+		return errors.New("per-user host ownership changed before the web service started")
 	}
 	if err != nil {
 		_ = runtime.Close()
 		return err
 	}
+	claim = nil
+	appURL, err = browserURL(currentPrimaryEndpoint().Listen)
+	if err != nil {
+		_ = primary.Close()
+		_ = runtime.Close()
+		return err
+	}
+	appURL, err = webURLForAppAction(appURL, initial)
+	if err != nil {
+		_ = primary.Close()
+		_ = runtime.Close()
+		return err
+	}
 	defer primary.Close()
 	defer runtime.Close()
+	if !*noAuto {
+		// The Web host owns the same controller runtime as the TUI and CLI, so
+		// it must initiate the first authenticated connection itself. Reconnect
+		// also arms the bounded device watcher after an initial failure; the
+		// HTTP UI remains available meanwhile and the browser-open gate below
+		// continues to require a truthfully connected snapshot.
+		connectContext, connectCancel := context.WithTimeout(ctx, 15*time.Second)
+		connectErr := runtime.Reconnect(connectContext, "web host initial automatic connection")
+		connectCancel()
+		if connectErr != nil {
+			runtime.PublishHostEvent("connection.auto.error", "initial Web connection: "+connectErr.Error())
+			fmt.Fprintln(stderr, "auto-connect:", connectErr)
+		}
+	}
+	if initial.Kind != "" {
+		applyInitialWebAction(ctx, primary, runtime, engine, initial)
+	}
+	if !*noTray {
+		nativeShell, shellErr := startNativeWebShell(ctx, cancel, appURL, runtime, store, primary)
+		if shellErr != nil {
+			fmt.Fprintln(stderr, "native web shell:", shellErr)
+		} else {
+			defer func() {
+				if closeErr := nativeShell.Close(); closeErr != nil {
+					fmt.Fprintln(stderr, "close native web shell:", closeErr)
+				}
+			}()
+		}
+	}
+	primaryReadyOnce.Do(func() { close(primaryReady) })
 	go watchConfiguration(ctx, store, runtime, connection)
 	go func() {
 		for value := range store.Subscribe(ctx) {
-			hostMenus.UpdateConfig(value.HostMenus)
+			updateHostMenuManager(hostMenus, value, runtime)
 		}
 	}()
 	go control.RunAutomations(ctx, runtime, engine, store.Current)
 
 	fmt.Fprintln(stdout, productidentity.ServiceName(store.Current().UI.AppTitle, "web app:"), appURL)
-	if !*noOpen {
-		if err := openBrowser(appURL); err != nil {
-			fmt.Fprintln(stderr, "open browser:", err)
-		}
+	if webBrowserAutoOpenAllowed(*noOpen, runtime.Snapshot().Connected) {
+		openWhenConnected()
+	} else if !*noOpen {
+		fmt.Fprintln(stdout, "controller offline; browser will open after an authenticated connection")
 	}
 	select {
 	case <-ctx.Done():
@@ -321,6 +493,126 @@ func runWeb(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 	case <-primary.QuitRequested():
 		return nil
 	}
+}
+
+func webBrowserAutoOpenAllowed(noOpen, controllerConnected bool) bool {
+	return !noOpen && controllerConnected
+}
+
+func primaryControllerConnected(ctx context.Context) bool {
+	var snapshot control.Snapshot
+	return callPrimary(
+		ctx,
+		"controller.snapshot",
+		map[string]any{},
+		&snapshot,
+	) == nil && snapshot.Connected
+}
+
+func webURLForAppAction(value string, action hostui.AppAction) (string, error) {
+	if action.Kind == "" || action.Kind != "app.page" {
+		return value, nil
+	}
+	page := strings.ToLower(strings.TrimSpace(action.Value))
+	switch page {
+	case "dashboard", "controls", "workbench", "device", "data", "updates", "events", "settings":
+	default:
+		return "", fmt.Errorf("web page action %q is not recognized", action.Value)
+	}
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", errors.New("web app action requires an absolute HTTP(S) URL")
+	}
+	parsed.Fragment = "/" + page
+	return parsed.String(), nil
+}
+
+func deliverExistingAppAction(
+	parent context.Context,
+	action hostui.AppAction,
+	stdout io.Writer,
+) error {
+	ctx := parent
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+	switch action.Kind {
+	case "command":
+		output, err := executeThroughPrimary(ctx, action.Value)
+		if output != "" && stdout != nil {
+			fmt.Fprintln(stdout, output)
+		}
+		return err
+	case "app.port.open":
+		output, err := executeThroughPrimary(ctx, "open")
+		if output != "" && stdout != nil {
+			fmt.Fprintln(stdout, output)
+		}
+		return err
+	case "app.port.close":
+		output, err := executeThroughPrimary(ctx, "close")
+		if output != "" && stdout != nil {
+			fmt.Fprintln(stdout, output)
+		}
+		return err
+	case "app.quit":
+		return callPrimary(ctx, "controller.quit", map[string]any{}, nil)
+	default:
+		return callPrimary(ctx, "controller.app.action", action, nil)
+	}
+}
+
+func applyInitialWebAction(
+	parent context.Context,
+	primary *primaryIPC,
+	runtime *control.Runtime,
+	engine *shell.Engine,
+	action hostui.AppAction,
+) {
+	if primary == nil || runtime == nil || engine == nil {
+		return
+	}
+	if action.Kind == "app.page" {
+		if err := primary.actions.Publish(action); err != nil {
+			runtime.PublishHostEvent("host.activation.error", err.Error())
+		}
+		return
+	}
+	command := ""
+	switch action.Kind {
+	case "command":
+		command = strings.TrimSpace(action.Value)
+	case "app.port.open":
+		command = "open"
+	case "app.port.close":
+		command = "close"
+	default:
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(parent, 30*time.Second)
+		defer cancel()
+		if action.Kind == "command" {
+			connectContext, connectCancel := context.WithTimeout(ctx, 15*time.Second)
+			connectErr := runtime.EnsureConnected(connectContext)
+			connectCancel()
+			if connectErr != nil {
+				runtime.PublishHostEvent("host.activation.error", "cold command connection: "+connectErr.Error())
+				return
+			}
+		}
+		output, err := engine.Execute(ctx, command)
+		if err != nil {
+			runtime.PublishHostEvent("host.activation.error", err.Error())
+			return
+		}
+		runtime.PublishHostEvent("host.activation", firstDeviceName(output, "desktop action completed"))
+	}()
 }
 
 func browserURL(address string) (string, error) {
@@ -370,15 +662,21 @@ func runTUIWithInitialAction(
 		return err
 	}
 	connection.captureOverrides(flags)
-	probeContext, probeCancel := context.WithTimeout(
-		context.Background(),
-		400*time.Millisecond,
-	)
-	havePrimary := primaryAvailable(probeContext)
-	probeCancel()
+	claim, havePrimary, err := preparePrimaryMode("tui")
+	if err != nil {
+		return err
+	}
 	if havePrimary {
+		if initial.Kind != "" {
+			return deliverExistingAppAction(context.Background(), initial, stdout)
+		}
 		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 	}
+	defer func() {
+		if claim != nil {
+			_ = claim.Close()
+		}
+	}()
 	if err := selectInteractiveDevice(
 		connection,
 		os.Stdin,
@@ -394,7 +692,10 @@ func runTUIWithInitialAction(
 		_ = runtime.Close()
 	}
 	project := findProjectRoot()
-	engine := control.NewCommandEngine(runtime, commandOptions(store, project))
+	outputs := control.NewOutputScheduler(runtime)
+	commandConfiguration := commandOptions(store, project)
+	commandConfiguration.Outputs = outputs
+	engine := control.NewCommandEngine(runtime, commandConfiguration)
 	hostMenus := newHostMenuManager(store, runtime, engine)
 	if err := hostmenu.RegisterCommands(engine, hostMenus); err != nil {
 		_ = runtime.Close()
@@ -413,13 +714,16 @@ func runTUIWithInitialAction(
 		_ = runtime.Close()
 		return err
 	}
+	lifecycleOptions := control.ProgrammingLifecycleOptions{
+		DataPaths: programDataPaths, Outputs: outputs, HostConfig: store.Current,
+	}
 	runtime.SetConnectionReadyHandler(func(_ ports.Info, hello native.Hello) {
 		recoveryContext, recoveryCancel := context.WithTimeout(context.Background(), 8*time.Second)
 		var recoveryOutput bytes.Buffer
 		recoveryErr := control.RecoverPendingProgrammingSessions(
 			recoveryContext,
 			runtime,
-			control.ProgrammingLifecycleOptions{DataPaths: programDataPaths},
+			lifecycleOptions,
 			&recoveryOutput,
 		)
 		recoveryCancel()
@@ -439,7 +743,7 @@ func runTUIWithInitialAction(
 	})
 	watchContext, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
-	primary, err := startPrimaryIPC(watchContext, runtime, engine, store)
+	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
 		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
@@ -448,7 +752,9 @@ func runTUIWithInitialAction(
 		_ = runtime.Close()
 		return err
 	}
+	claim = nil
 	defer primary.Close()
+	appActions := primary.AppActions()
 	if initial.Kind != "" {
 		if err := primary.actions.Publish(initial); err != nil {
 			return err
@@ -457,7 +763,7 @@ func runTUIWithInitialAction(
 	go watchConfiguration(watchContext, store, runtime, connection)
 	go func() {
 		for value := range store.Subscribe(watchContext) {
-			hostMenus.UpdateConfig(value.HostMenus)
+			updateHostMenuManager(hostMenus, value, runtime)
 		}
 	}()
 	go control.RunAutomations(watchContext, runtime, engine, store.Current)
@@ -501,7 +807,7 @@ func runTUIWithInitialAction(
 			Integrations: func() hostui.IntegrationStatus {
 				return primaryHostUIStatus(primary, store.Current())
 			},
-			AppActions: primary.AppActions(),
+			AppActions: appActions,
 		}),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
@@ -565,6 +871,7 @@ func newHostMenuManager(
 	runtime *control.Runtime,
 	engine *shell.Engine,
 ) *hostmenu.Manager {
+	macroMenus := newHostMacroMenuActions(store, runtime, engine)
 	read := func(ctx context.Context, action string) (string, error) {
 		config := store.Current()
 		snapshot := runtime.Snapshot()
@@ -576,6 +883,10 @@ func newHostMenuManager(
 				return "Offline", nil
 			}
 			return fmt.Sprintf("%s · uptime %s", snapshot.Port.Name, time.Duration(snapshot.Status.UptimeMS)*time.Millisecond), nil
+		case "host.date":
+			return time.Now().Format("2006-01-02"), nil
+		case "host.time":
+			return time.Now().Format("15:04:05"), nil
 		case "host.ip":
 			return preferredHostAddress(), nil
 		case "api.status":
@@ -599,6 +910,9 @@ func newHostMenuManager(
 			runtime.PublishHostEvent("os.brightness", fmt.Sprintf("host-menu brightness read %d%%", result.Status.Percent))
 			return strconv.Itoa(result.Status.Percent), nil
 		default:
+			if output, handled, err := macroMenus.Read(action); handled {
+				return output, err
+			}
 			if line, ok := hostMenuShellAction(action); ok {
 				return engine.Execute(ctx, line)
 			}
@@ -608,6 +922,9 @@ func newHostMenuManager(
 	write := func(ctx context.Context, action, value string) (string, error) {
 		rawAction := strings.TrimSpace(action)
 		action = strings.ToLower(rawAction)
+		if output, handled, err := macroMenus.Write(action, value); handled {
+			return output, err
+		}
 		if action == "os.brightness" {
 			return engine.Execute(ctx, shell.Join([]string{"os", "brightness", "set", value}))
 		}
@@ -656,6 +973,9 @@ func newHostMenuManager(
 	}
 	execute := func(ctx context.Context, action string) (string, error) {
 		normalized := strings.ToLower(strings.TrimSpace(action))
+		if output, handled, err := macroMenus.Execute(ctx, action); handled {
+			return output, err
+		}
 		if strings.HasPrefix(normalized, "os.") {
 			operation := strings.TrimPrefix(normalized, "os.")
 			config := store.Current()
@@ -673,12 +993,27 @@ func newHostMenuManager(
 		})
 		return err
 	}
-	return hostmenu.New(store.Current().HostMenus, hostmenu.Callbacks{
+	manager := hostmenu.New(store.Current().HostMenus, hostmenu.Callbacks{
 		Read: read, Write: write, Execute: execute, SaveConfig: saveConfig,
 		Interaction: func(event hostmenu.InteractionEvent) {
 			publishHostMenuInteraction(runtime, event)
 		},
 	})
+	if err := macroMenus.Sync(manager, store.Current().Macros); err != nil {
+		runtime.PublishHostEvent("menu.options.error", err.Error())
+	}
+	return manager
+}
+
+func updateHostMenuManager(
+	manager *hostmenu.Manager,
+	config appconfig.Config,
+	runtime *control.Runtime,
+) {
+	manager.UpdateConfig(config.HostMenus)
+	if err := manager.UpdateSelectOptions(macroHostMenuOptionsSource, macroHostMenuOptions(config.Macros)); err != nil {
+		runtime.PublishHostEvent("menu.options.error", err.Error())
+	}
 }
 
 func hostMenuShellAction(action string) (string, bool) {
@@ -718,7 +1053,7 @@ type hostFrontPanelBridge struct {
 	runtime   *control.Runtime
 	mu        sync.Mutex
 	captured  bool
-	animation *legacyPanelAnimator
+	animation *panelFallbackAnimator
 }
 
 func (bridge *hostFrontPanelBridge) Push(snapshot hostmenu.Snapshot) error {
@@ -731,11 +1066,11 @@ func (bridge *hostFrontPanelBridge) Push(snapshot hostmenu.Snapshot) error {
 	return nil
 }
 
-func (bridge *hostFrontPanelBridge) animator() *legacyPanelAnimator {
+func (bridge *hostFrontPanelBridge) animator() *panelFallbackAnimator {
 	bridge.mu.Lock()
 	defer bridge.mu.Unlock()
 	if bridge.animation == nil {
-		bridge.animation = newLegacyPanelAnimator(func(snapshot hostmenu.Snapshot) error {
+		bridge.animation = newPanelFallbackAnimator(func(snapshot hostmenu.Snapshot) error {
 			return bridge.pushSnapshot(snapshot, false)
 		})
 	}
@@ -784,13 +1119,13 @@ func (bridge *hostFrontPanelBridge) pushSnapshot(snapshot hostmenu.Snapshot, ren
 		return err
 	}
 	if renderLCD && live.Hello.Capabilities&native.CapabilityI2CTransfer != 0 {
-		if err := bridge.runtime.LCDPresenter().RenderPhysical(
+		presenter := bridge.runtime.LCDPresenter()
+		err := presenter.RenderPhysical(
 			ctx, snapshot.Panel.LCDLine1, snapshot.Panel.LCDLine2,
-		); err != nil {
-			// The front-panel capture and TM1637 remain useful when no LCD
-			// backpack is connected; expose physical-LCD failure separately.
-			bridge.runtime.PublishHostEvent("lcd.error", "host-menu LCD: "+err.Error())
-		}
+		)
+		// The front-panel capture and TM1637 remain useful when no LCD
+		// backpack is connected; publish only physical-LCD state changes.
+		presenter.ReportPhysicalError("host-menu LCD", err)
 	}
 	bridge.captured = true
 	return nil
@@ -873,12 +1208,13 @@ type hostMenuPanelBridge interface {
 	Release() error
 }
 
-// syncLegacyHostMenuOverlay is the single routing rule for watched menu
-// definitions on cap19 firmware. Active edits refresh both display surfaces
+// syncFallbackHostMenuOverlay is the single routing rule for watched menu
+// definitions on firmware with front-panel capture but no overlay directory.
+// Active edits refresh both display surfaces
 // through Push, unrelated edits emit their normalized event only, and removal
 // or hiding of the active page releases front-panel capture immediately.
-func syncLegacyHostMenuOverlay(manager *hostmenu.Manager, legacy hostMenuPanelBridge, change *hostmenu.DefinitionChange) error {
-	if legacy == nil {
+func syncFallbackHostMenuOverlay(manager *hostmenu.Manager, fallback hostMenuPanelBridge, change *hostmenu.DefinitionChange) error {
+	if fallback == nil {
 		return nil
 	}
 	snapshot := manager.Snapshot()
@@ -888,23 +1224,23 @@ func syncLegacyHostMenuOverlay(manager *hostmenu.Manager, legacy hostMenuPanelBr
 		// and could leave the TM1637/LCD showing stale per-menu presentation.
 		snapshot = change.Snapshot
 	}
-	if snapshot.Active && (change == nil || change.Active) {
-		return legacy.Push(snapshot)
+	if !snapshot.Active {
+		return fallback.Release()
 	}
-	if change != nil && !snapshot.Active {
-		return legacy.Release()
+	if change == nil || change.Active {
+		return fallback.Push(snapshot)
 	}
 	return nil
 }
 
-func syncHostMenuOverlay(runtime *control.Runtime, manager *hostmenu.Manager, legacy hostMenuPanelBridge, change *hostmenu.DefinitionChange) {
+func syncHostMenuOverlay(runtime *control.Runtime, manager *hostmenu.Manager, fallback hostMenuPanelBridge, change *hostmenu.DefinitionChange) {
 	live := runtime.Snapshot()
 	if !live.Connected {
 		return
 	}
 	if !native.SupportsHostMenuOverlay(live.Hello) {
 		if live.Hello.Capabilities&native.CapabilityHostFrontPanel != 0 {
-			if err := syncLegacyHostMenuOverlay(manager, legacy, change); err != nil {
+			if err := syncFallbackHostMenuOverlay(manager, fallback, change); err != nil {
 				runtime.PublishHostEvent("menu.preview.error", err.Error())
 			}
 		}
@@ -991,15 +1327,18 @@ func runShell(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 		return err
 	}
 	connection.captureOverrides(flags)
-	probeContext, probeCancel := context.WithTimeout(
-		context.Background(),
-		400*time.Millisecond,
-	)
-	havePrimary := primaryAvailable(probeContext)
-	probeCancel()
+	claim, havePrimary, err := preparePrimaryMode("shell")
+	if err != nil {
+		return err
+	}
 	if havePrimary {
 		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 	}
+	defer func() {
+		if claim != nil {
+			_ = claim.Close()
+		}
+	}()
 	if err := selectInteractiveDevice(
 		connection,
 		os.Stdin,
@@ -1017,13 +1356,14 @@ func runShell(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	if err := hostmenu.RegisterCommands(engine, newHostMenuManager(store, runtime, engine)); err != nil {
 		return err
 	}
-	primary, err := startPrimaryIPC(watchContext, runtime, engine, store)
+	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 	}
 	if err != nil {
 		return err
 	}
+	claim = nil
 	defer primary.Close()
 	go control.RunAutomations(watchContext, runtime, engine, store.Current)
 	if *noConnect {
@@ -1073,12 +1413,10 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 		return errors.New("exec requires a controller shell command")
 	}
 	commandText := joinControllerCommand(flags.Args())
-	probeContext, probeCancel := context.WithTimeout(
-		context.Background(),
-		400*time.Millisecond,
-	)
-	havePrimary := primaryAvailable(probeContext)
-	probeCancel()
+	claim, havePrimary, err := preparePrimaryMode("exec")
+	if err != nil {
+		return err
+	}
 	if havePrimary {
 		ctx, cancel := context.WithTimeout(
 			context.Background(),
@@ -1091,6 +1429,11 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 		}
 		return err
 	}
+	defer func() {
+		if claim != nil {
+			_ = claim.Close()
+		}
+	}()
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	defer runtime.Close()
@@ -1100,7 +1443,7 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 	}
 	ownerContext, stopOwner := context.WithCancel(context.Background())
 	defer stopOwner()
-	primary, err := startPrimaryIPC(ownerContext, runtime, engine, store)
+	primary, err := startPrimaryIPCClaimed(ownerContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		ctx, cancel := context.WithTimeout(
 			context.Background(),
@@ -1116,6 +1459,7 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 	if err != nil {
 		return err
 	}
+	claim = nil
 	defer primary.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	if err := runtime.EnsureConnected(ctx); err != nil {
@@ -1174,12 +1518,18 @@ func runBatch(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	}
 	ctx, cancel := signalContext()
 	defer cancel()
-	probeContext, probeCancel := context.WithTimeout(ctx, 400*time.Millisecond)
-	havePrimary := primaryAvailable(probeContext)
-	probeCancel()
+	claim, havePrimary, err := preparePrimaryMode("batch")
+	if err != nil {
+		return err
+	}
 	if havePrimary {
 		return script.Run(ctx, input, primaryExecutor{}, scriptOptions)
 	}
+	defer func() {
+		if claim != nil {
+			_ = claim.Close()
+		}
+	}()
 
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
@@ -1191,13 +1541,14 @@ func runBatch(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	if err := hostmenu.RegisterCommands(engine, newHostMenuManager(store, runtime, engine)); err != nil {
 		return err
 	}
-	primary, err := startPrimaryIPC(watchContext, runtime, engine, store)
+	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		return script.Run(ctx, input, primaryExecutor{}, scriptOptions)
 	}
 	if err != nil {
 		return err
 	}
+	claim = nil
 	defer primary.Close()
 	go control.RunAutomations(watchContext, runtime, engine, store.Current)
 	if !*noConnect {
@@ -1236,9 +1587,10 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	}
 	ctx, cancel := signalContext()
 	defer cancel()
-	probeContext, probeCancel := context.WithTimeout(ctx, 400*time.Millisecond)
-	havePrimary := primaryAvailable(probeContext)
-	probeCancel()
+	claim, havePrimary, err := preparePrimaryMode("monitor")
+	if err != nil {
+		return err
+	}
 	if havePrimary {
 		return runRemoteMonitor(
 			ctx,
@@ -1249,6 +1601,11 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			stderr,
 		)
 	}
+	defer func() {
+		if claim != nil {
+			_ = claim.Close()
+		}
+	}()
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	defer runtime.Close()
@@ -1257,7 +1614,7 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	if err := hostmenu.RegisterCommands(engine, newHostMenuManager(store, runtime, engine)); err != nil {
 		return err
 	}
-	primary, err := startPrimaryIPC(ctx, runtime, engine, store)
+	primary, err := startPrimaryIPCClaimed(ctx, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		return runRemoteMonitor(
 			ctx,
@@ -1271,6 +1628,7 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	if err != nil {
 		return err
 	}
+	claim = nil
 	defer primary.Close()
 	go control.RunAutomations(ctx, runtime, engine, store.Current)
 	if err := connectWithTimeout(ctx, runtime); err != nil {
@@ -1492,6 +1850,8 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		}
 		bindClientDevicePersistence(client, store)
 		defer client.Shutdown()
+		sessionSnapshot := newHostSessionRecorder(client, store)
+		defer sessionSnapshot.logOnExit(stderr)
 		ctx, cancel := signalContext()
 		defer cancel()
 		go store.Watch(
@@ -1526,20 +1886,37 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		defer localDevice.Close()
 		service := &ipcjson.Service{
 			Client: client, WebSocketPath: *websocketPath,
-			SocketIOPath:     serverConfig.IPC.SocketIOPath,
-			WebUI:            webui.Handler(*websocketPath),
-			IntegrationProxy: integrationProxy,
-			LocalDevice:      localDevice,
-			AuthToken:        serverConfig.IPC.AuthToken,
-			AllowedOrigins:   append([]string(nil), serverConfig.IPC.AllowedOrigins...),
-			InboundWebhooks:  serverConfig.Integrations.InboundWebhooksEnabled,
-			Shutdown:         cancel,
-			HostConfig:       store.Current,
+			SocketIOPath:        serverConfig.IPC.SocketIOPath,
+			WebUI:               webui.Handler(*websocketPath),
+			IntegrationProxy:    integrationProxy,
+			LocalDevice:         localDevice,
+			AuthToken:           serverConfig.IPC.AuthToken,
+			AllowedOrigins:      append([]string(nil), serverConfig.IPC.AllowedOrigins...),
+			InboundWebhooks:     serverConfig.Integrations.InboundWebhooksEnabled,
+			HostVersion:         version,
+			HostSourceHash:      sourceHash,
+			HostBuildTime:       buildTime,
+			Shutdown:            cancel,
+			LastSessionSnapshot: sessionSnapshot.read,
+			HostConfig:          store.Current,
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err
 			},
 		}
+		artifactService, err := newArtifactHostService(client, store, service.Shutdown)
+		if err != nil {
+			return fmt.Errorf("configure artifact/update service: %w", err)
+		}
+		defer artifactService.Close()
+		service.Artifacts = artifactService
+		sessionSnapshot.attachArtifactContext(artifactService)
+		releaseDiscovery, err := newReleaseHostService(client, artifactService)
+		if err != nil {
+			return fmt.Errorf("configure release discovery: %w", err)
+		}
+		defer releaseDiscovery.Close()
+		service.ReleaseDiscovery = releaseDiscovery
 		if *stdio {
 			return ipcjson.ServeStreams(ctx, os.Stdin, stdout, service)
 		}
@@ -1605,12 +1982,10 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	if *duration < time.Millisecond {
 		return errors.New("pulse duration must be at least 1ms")
 	}
-	probeContext, probeCancel := context.WithTimeout(
-		context.Background(),
-		400*time.Millisecond,
-	)
-	havePrimary := primaryAvailable(probeContext)
-	probeCancel()
+	claim, havePrimary, err := preparePrimaryMode("reset")
+	if err != nil {
+		return err
+	}
 	if havePrimary {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -1628,6 +2003,11 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 		)
 		return nil
 	}
+	defer func() {
+		if claim != nil {
+			_ = claim.Close()
+		}
+	}()
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	defer runtime.Close()
@@ -1637,7 +2017,7 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	}
 	ownerContext, stopOwner := context.WithCancel(context.Background())
 	defer stopOwner()
-	primary, err := startPrimaryIPC(ownerContext, runtime, engine, store)
+	primary, err := startPrimaryIPCClaimed(ownerContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -1658,6 +2038,7 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	if err != nil {
 		return err
 	}
+	claim = nil
 	defer primary.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -1675,12 +2056,29 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 }
 
 func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
+	if len(args) == 0 {
+		return errors.New("usage: controller program flash HEX [PORT] | recover HEX [PORT] | --operation DIAGNOSTIC [program flags]")
+	}
+	if len(args) != 0 && strings.EqualFold(args[0], "recover") {
+		command := append([]string{"program"}, args...)
+		return runExec(command, stdout, stderr, store)
+	}
+	return runProgramWithConfig(args, stdout, stderr, store.Current())
+}
+
+// runProgramWithConfig executes an already-selected programming command using
+// the supplied defaults. Runtime callers pass their validated Store snapshot;
+// the compile-only build path passes immutable application defaults instead.
+func runProgramWithConfig(
+	args []string,
+	stdout, stderr io.Writer,
+	config appconfig.Config,
+) error {
 	var normalizeErr error
 	args, normalizeErr = normalizeProgramCLIArgs(args)
 	if normalizeErr != nil {
 		return normalizeErr
 	}
-	config := store.Current()
 	flags := flag.NewFlagSet("program", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	defaultMethod := config.Programming.Method
@@ -1702,7 +2100,7 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	appDevice := flags.String(
 		"app-device",
 		"",
-		"application UART selector used only before/after hidden USBasp programming",
+		"application UART selector used only before/after advanced USBasp programming",
 	)
 	hexPath := flags.String("hex", config.Paths.FirmwareHex, "Intel HEX file for avrdude workflows")
 	sketch := flags.String("sketch", configuredProject(config, findProjectRoot()), "Arduino sketch directory")
@@ -1719,16 +2117,15 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	toolchainCLI := flags.String("toolchain-cli", config.Programming.ToolchainCLI, "firmware dependency CLI executable")
 	avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
-	noVerify := flags.Bool("no-verify", false, "skip avrdude flash verification")
-	allowUSBasp := flags.Bool(
-		"usbasp-troubleshooting",
-		false,
-		"explicitly authorize hidden USBasp backup/flash troubleshooting",
-	)
 	allowIncompleteBackup := flags.Bool(
 		"allow-incomplete-backup",
 		false,
 		"advanced override: flash even if the automatic full backup fails",
+	)
+	reinitializeEEPROM := flags.Bool(
+		"reinitialize-eeprom",
+		false,
+		"development only: retain raw EEPROM backup but discard incompatible semantic settings",
 	)
 	confirmEEPROM := flags.Bool(
 		"confirm-eeprom-write",
@@ -1743,6 +2140,9 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	)
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if *reinitializeEEPROM && *allowIncompleteBackup {
+		return errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
 	}
 	explicitDevice := false
 	explicitProgrammerPort := false
@@ -1766,7 +2166,7 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		OutputDir: *outputDir, OutputPath: *outputPath,
 		FQBN: *fqbn, Programmer: *programmerName,
 		MCU: *mcu, BaudRate: *baud, ArduinoCLI: *toolchainCLI,
-		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf, NoVerify: *noVerify,
+		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf,
 		ConfirmEEPROMWrite: *confirmEEPROM,
 	}
 	safeFlash := options.Operation == programmer.OperationWriteFlash &&
@@ -1775,12 +2175,9 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		switch options.Method {
 		case programmer.MethodUrclock:
 			if strings.TrimSpace(*appDevice) != "" {
-				return errors.New("--app-device is only valid with hidden USBasp programming")
+				return errors.New("--app-device is only valid with --method usbasp")
 			}
 		case programmer.MethodUSBasp:
-			if !*allowUSBasp {
-				return errors.New("USBasp flash is hidden troubleshooting functionality; pass --usbasp-troubleshooting explicitly")
-			}
 			if explicitProgrammerPort {
 				return errors.New("USBasp does not accept --port/--device; use --app-device only for the separate application UART lifecycle")
 			}
@@ -1788,7 +2185,7 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		case programmer.MethodArduino:
 			return errors.New("direct dependency upload is disabled; compile to Intel HEX, then use program flash HEX [PORT]")
 		default:
-			return fmt.Errorf("guarded flash supports Urclock or explicitly authorized USBasp, got %q", options.Method)
+			return fmt.Errorf("guarded flash supports Urclock or USBasp, got %q", options.Method)
 		}
 	}
 	deviceOperation := options.Method != programmer.MethodCompile &&
@@ -1817,6 +2214,13 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 				if err != nil {
 					return fmt.Errorf("select primary device: %w", err)
 				}
+			}
+			if safeFlash {
+				return delegatePrimaryFirmwareUpdate(
+					ctx, options.HexPath, string(options.Method), "",
+					*allowIncompleteBackup, *reinitializeEEPROM,
+					stdout, callPrimary,
+				)
 			}
 			remoteOptions := options
 			remoteOptions.Port = ""
@@ -1902,8 +2306,6 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			)
 		} else {
 			options.ApplicationHash = hello.BuildHash
-			options.ApplicationDate = hello.BuildDate
-			options.ApplicationTime = hello.BuildTime
 			options.ApplicationIdentitySchema = hello.IdentitySchema
 			options.ApplicationPackedTimestamp = hello.BuildTimestamp
 		}
@@ -1926,6 +2328,9 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			if *allowIncompleteBackup {
 				fmt.Fprintln(stdout, "dry-run WARNING: explicit incomplete-backup override enabled")
 			}
+			if *reinitializeEEPROM {
+				fmt.Fprintln(stdout, "dry-run DATA LOSS: current semantic MCU settings will not be restored; the mandatory raw EEPROM backup remains available")
+			}
 			if applicationPort != "" {
 				fmt.Fprintf(stdout, "dry-run: application lifecycle selector=%s (never passed to ISP)\n", applicationPort)
 			}
@@ -1935,7 +2340,7 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		defer cancel()
 		return executeGuardedCLIFlash(
 			ctx, options, applicationPort, config.Connection,
-			*allowUSBasp, *allowIncompleteBackup, *appReconnect,
+			*allowIncompleteBackup, *reinitializeEEPROM, *appReconnect,
 			stdout,
 		)
 	}
@@ -1974,6 +2379,129 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		stdout,
 	)
 	return errors.Join(programErr, reconnectErr)
+}
+
+type primaryCallFunc func(context.Context, string, any, any) error
+
+// delegatePrimaryFirmwareUpdate transfers an immutable candidate to the
+// already-running primary, starts one idempotent update operation there, and
+// follows its durable typed status instead of opening the serial port locally.
+func delegatePrimaryFirmwareUpdate(
+	ctx context.Context,
+	firmwarePath, method, port string,
+	allowIncompleteBackup, reinitializeEEPROM bool,
+	output io.Writer,
+	call primaryCallFunc,
+) error {
+	document, err := programmer.LoadIntelHex(firmwarePath)
+	if err != nil {
+		return fmt.Errorf("validate delegated firmware: %w", err)
+	}
+	content, err := os.ReadFile(firmwarePath)
+	if err != nil {
+		return fmt.Errorf("read delegated firmware: %w", err)
+	}
+	uploadRequest := artifacts.UploadRequest{
+		Kind: artifacts.KindFirmware, Name: filepath.Base(firmwarePath),
+		Data: content, SHA256: document.SourceSHA256, Bytes: int64(len(content)),
+	}
+	var upload artifacts.OperationResult
+	if err := call(ctx, "controller.artifact.upload", uploadRequest, &upload); err != nil {
+		return fmt.Errorf("upload firmware to primary: %w", err)
+	}
+	if upload.Artifact == nil ||
+		!strings.EqualFold(upload.Artifact.SHA256, document.SourceSHA256) {
+		return errors.New("primary did not acknowledge the exact uploaded firmware hash")
+	}
+
+	var primarySnapshot controllerapi.Snapshot
+	_ = call(ctx, "controller.snapshot", map[string]any{}, &primarySnapshot)
+	idempotencyDocument, _ := json.Marshal(struct {
+		Firmware           string `json:"firmware"`
+		Method             string `json:"method"`
+		Port               string `json:"port"`
+		Serial             string `json:"serial"`
+		Instance           string `json:"instance"`
+		ReinitializeEEPROM bool   `json:"reinitialize_eeprom"`
+	}{
+		Firmware: upload.Artifact.SHA256, Method: method, Port: port,
+		Serial: primarySnapshot.Port.SerialNumber, Instance: primarySnapshot.Port.InstanceID,
+		ReinitializeEEPROM: reinitializeEEPROM,
+	})
+	idempotencyDigest := sha256.Sum256(idempotencyDocument)
+	updateRequest := artifacts.UpdateRequest{
+		ArtifactSHA256: upload.Artifact.SHA256,
+		Authorized:     true, Method: method, Port: port,
+		AllowIncompleteBackup: allowIncompleteBackup,
+		ReinitializeEEPROM:    reinitializeEEPROM,
+		IdempotencyKey:        "firmware:" + hex.EncodeToString(idempotencyDigest[:]),
+	}
+	var operation artifacts.OperationResult
+	if err := call(ctx, "controller.update.firmware", updateRequest, &operation); err != nil {
+		return fmt.Errorf("start primary firmware update: %w", err)
+	}
+	if operation.Operation.ID == "" {
+		return errors.New("primary returned a firmware update without an operation ID")
+	}
+	if output != nil {
+		fmt.Fprintf(
+			output,
+			"delegated firmware SHA-256 %s to primary operation %s (reused=%t)\n",
+			upload.Artifact.SHA256, operation.Operation.ID, operation.Reused,
+		)
+	}
+	return monitorPrimaryFirmwareUpdate(ctx, operation.Operation.ID, output, call)
+}
+
+func monitorPrimaryFirmwareUpdate(
+	ctx context.Context,
+	operationID string,
+	output io.Writer,
+	call primaryCallFunc,
+) error {
+	ticker := time.NewTicker(150 * time.Millisecond)
+	defer ticker.Stop()
+	last := ""
+	for {
+		var status artifacts.UpdateStatus
+		if err := call(
+			ctx, "controller.update.status",
+			map[string]string{"id": operationID}, &status,
+		); err != nil {
+			return fmt.Errorf("follow primary firmware update %s: %w", operationID, err)
+		}
+		line := fmt.Sprintf("%s %d%% %s", status.State, status.ProgressPercent, status.Detail)
+		if line != last && output != nil {
+			fmt.Fprintf(output, "primary firmware update: %s\n", line)
+			last = line
+		}
+		switch status.State {
+		case "completed":
+			if output != nil {
+				fmt.Fprintf(
+					output,
+					"primary firmware update complete: method=%s bootloader=%s sha256=%s\n",
+					status.ProgrammingMethod, status.BootloaderOutcome, status.ArtifactSHA256,
+				)
+			}
+			return nil
+		case "failed", "cancelled":
+			suggestion := ""
+			if status.ISPFallbackSuggested {
+				suggestion = "; ISP fallback suggested"
+			}
+			return fmt.Errorf(
+				"primary firmware update %s: %s (code=%s method=%s bootloader=%s%s)",
+				status.State, status.Detail, status.ErrorCode,
+				status.ProgrammingMethod, status.BootloaderOutcome, suggestion,
+			)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func runEEPROM(args []string, stdout, stderr io.Writer) error {
@@ -2070,6 +2598,7 @@ func writeEEPROMTransferResult(
 }
 
 func normalizeProgramCLIArgs(args []string) ([]string, error) {
+	const usage = "usage: controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--allow-incomplete-backup] [--reinitialize-eeprom]"
 	shortcut := 0
 	for shortcut < len(args) {
 		argument := args[shortcut]
@@ -2087,29 +2616,37 @@ func normalizeProgramCLIArgs(args []string) ([]string, error) {
 		return args, nil
 	}
 	if shortcut+1 >= len(args) {
-		return nil, errors.New("usage: controller program flash HEX [PORT] [--usbasp-troubleshooting] [--app-device SELECTOR] [--allow-incomplete-backup]")
+		return nil, errors.New(usage)
 	}
 	arguments := append([]string(nil), args[:shortcut]...)
 	arguments = append(arguments, args[shortcut+1:]...)
 	positionals := make([]string, 0, 2)
 	flags := make([]string, 0, len(arguments))
-	usbasp := false
+	selectedMethod := programmer.MethodUrclock
 	for index := 0; index < len(arguments); index++ {
 		argument := arguments[index]
 		if guardedFlashBooleanFlag(argument) {
 			flags = append(flags, argument)
-			usbasp = usbasp || strings.EqualFold(argument, "--usbasp-troubleshooting")
 			continue
 		}
 		if guardedFlashInlineValueFlag(argument) {
-			flags = append(flags, argument)
+			lower := strings.ToLower(argument)
+			if strings.HasPrefix(lower, "--method=") {
+				selectedMethod = programmer.Method(strings.TrimPrefix(lower, "--method="))
+			} else {
+				flags = append(flags, argument)
+			}
 			continue
 		}
 		if guardedFlashValueFlag(argument) {
 			if index+1 >= len(arguments) || strings.HasPrefix(arguments[index+1], "-") {
 				return nil, fmt.Errorf("guarded flash flag %s requires a value", argument)
 			}
-			flags = append(flags, argument, arguments[index+1])
+			if strings.EqualFold(argument, "--method") {
+				selectedMethod = programmer.Method(strings.ToLower(arguments[index+1]))
+			} else {
+				flags = append(flags, argument, arguments[index+1])
+			}
 			index++
 			continue
 		}
@@ -2119,20 +2656,17 @@ func normalizeProgramCLIArgs(args []string) ([]string, error) {
 		positionals = append(positionals, argument)
 	}
 	if len(positionals) < 1 || len(positionals) > 2 {
-		return nil, errors.New("usage: controller program flash HEX [PORT] [--usbasp-troubleshooting] [--app-device SELECTOR] [--allow-incomplete-backup]")
+		return nil, errors.New(usage)
 	}
 	result := []string{
 		"--operation", string(programmer.OperationWriteFlash),
-		"--method", string(programmer.MethodUrclock),
+		"--method", string(selectedMethod),
 		"--hex", positionals[0],
-	}
-	if usbasp {
-		result = append(result, "--method", string(programmer.MethodUSBasp))
 	}
 	result = append(result, flags...)
 	if len(positionals) == 2 {
 		selectorFlag := "--port"
-		if usbasp {
+		if selectedMethod == programmer.MethodUSBasp {
 			selectorFlag = "--app-device"
 		}
 		result = append(result, selectorFlag, positionals[1])
@@ -2140,20 +2674,63 @@ func normalizeProgramCLIArgs(args []string) ([]string, error) {
 	return result, nil
 }
 
+// configIndependentProgramCompile recognizes only an explicitly selected
+// compile method. Every operation that could use a device, IPC, or persisted
+// host preference continues through appconfig.Open and its full validation.
+func configIndependentProgramCompile(args []string) bool {
+	if len(args) < 2 || !strings.EqualFold(args[0], "program") {
+		return false
+	}
+	normalized, err := normalizeProgramCLIArgs(args[1:])
+	if err != nil {
+		return false
+	}
+	method := ""
+	explicit := false
+	for index := 0; index < len(normalized); index++ {
+		argument := normalized[index]
+		lower := strings.ToLower(argument)
+		switch {
+		case lower == "--":
+			return explicit && strings.EqualFold(method, string(programmer.MethodCompile))
+		case lower == "--method":
+			if index+1 >= len(normalized) {
+				return false
+			}
+			index++
+			method = normalized[index]
+			explicit = true
+		case strings.HasPrefix(lower, "--method="):
+			method = strings.TrimSpace(argument[len("--method="):])
+			explicit = true
+		}
+	}
+	return explicit && strings.EqualFold(method, string(programmer.MethodCompile))
+}
+
+func configIndependentToolchainCompile(args []string) bool {
+	return len(args) >= 2 &&
+		strings.EqualFold(args[0], "toolchain") &&
+		strings.EqualFold(args[1], "compile")
+}
+
 func guardedFlashBooleanFlag(argument string) bool {
 	lower := strings.ToLower(argument)
-	if lower == "--usbasp-troubleshooting" || lower == "--allow-incomplete-backup" || lower == "--dry-run" {
+	if lower == "--allow-incomplete-backup" || lower == "--reinitialize-eeprom" || lower == "--dry-run" {
 		return true
 	}
 	return lower == "--app-reconnect" || strings.HasPrefix(lower, "--app-reconnect=")
 }
 
 func guardedFlashValueFlag(argument string) bool {
-	return strings.EqualFold(argument, "--app-device")
+	return strings.EqualFold(argument, "--app-device") ||
+		strings.EqualFold(argument, "--method")
 }
 
 func guardedFlashInlineValueFlag(argument string) bool {
-	return strings.HasPrefix(strings.ToLower(argument), "--app-device=")
+	lower := strings.ToLower(argument)
+	return strings.HasPrefix(lower, "--app-device=") ||
+		strings.HasPrefix(lower, "--method=")
 }
 
 func executeGuardedCLIFlash(
@@ -2161,7 +2738,7 @@ func executeGuardedCLIFlash(
 	options programmer.Options,
 	applicationPort string,
 	connection appconfig.Connection,
-	allowUSBasp, allowIncompleteBackup, appReconnect bool,
+	allowIncompleteBackup, reinitializeEEPROM, appReconnect bool,
 	output io.Writer,
 ) error {
 	paths, err := programmer.DefaultHostDataPaths()
@@ -2173,6 +2750,9 @@ func executeGuardedCLIFlash(
 	}
 	var application *control.Runtime
 	var programmingSession *control.ProgrammingSession
+	lifecycleOptions := control.ProgrammingLifecycleOptions{
+		DataPaths: paths, ReinitializeEEPROM: reinitializeEEPROM,
+	}
 	if applicationPort != "" {
 		candidate := control.New(control.Options{
 			Filter:         ports.Filter{Port: applicationPort},
@@ -2196,13 +2776,14 @@ func executeGuardedCLIFlash(
 			)
 		} else {
 			application = candidate
+			lifecycleOptions.Outputs = control.NewOutputScheduler(application)
 			defer application.Close()
 			var prepareErr error
 			programmingSession, prepareErr = control.PrepareProgrammingSession(
 				ctx,
 				application,
 				options.HexPath,
-				control.ProgrammingLifecycleOptions{DataPaths: paths},
+				lifecycleOptions,
 				output,
 			)
 			if prepareErr != nil {
@@ -2233,7 +2814,6 @@ func executeGuardedCLIFlash(
 		programmer.AutomaticPreflashOptions{
 			FirmwarePath: options.HexPath,
 			Backup:       backup, DataPaths: paths,
-			AllowUSBaspTroubleshooting:  allowUSBasp,
 			AllowFlashWithoutFullBackup: allowIncompleteBackup,
 		},
 		programmer.CommandRunnerFunc(programmer.Run),
@@ -2256,6 +2836,17 @@ func executeGuardedCLIFlash(
 	if result.Flashed {
 		fmt.Fprintln(output, "guarded firmware flash completed")
 	}
+	verifiedProgram := flashErr == nil && result.Flashed
+	if programmingSession != nil {
+		if markerErr := control.MarkProgrammingSessionComplete(
+			programmingSession, verifiedProgram,
+		); markerErr != nil {
+			flashErr = errors.Join(flashErr, fmt.Errorf(
+				"persist host programming completion (safe-state marker retained): %w", markerErr,
+			))
+			verifiedProgram = false
+		}
+	}
 	var reconnectErr error
 	var restoreErr error
 	if application != nil {
@@ -2270,7 +2861,7 @@ func executeGuardedCLIFlash(
 				"application HELLO reconnect failed; settings recovery marker retained: %w",
 				reconnectErr,
 			)
-		} else {
+		} else if verifiedProgram {
 			restoreContext, restoreCancel := context.WithTimeout(
 				context.WithoutCancel(ctx), 8*time.Second,
 			)
@@ -2278,7 +2869,7 @@ func executeGuardedCLIFlash(
 				restoreContext,
 				application,
 				programmingSession,
-				control.ProgrammingLifecycleOptions{DataPaths: paths},
+				lifecycleOptions,
 				output,
 			)
 			restoreCancel()
@@ -2297,6 +2888,9 @@ func executeGuardedCLIFlash(
 					),
 				)
 			}
+		} else if programmingSession != nil {
+			fmt.Fprintln(output,
+				"programmer result was not verified successful; programming latch and recovery marker retained")
 		}
 	} else if appReconnect && applicationPort != "" {
 		reconnectErr = reconnectApplicationAfterProgramming(
@@ -2394,7 +2988,7 @@ func programShellWords(options programmer.Options) []string {
 			words = append(words, options.Port)
 		}
 		if options.Method == programmer.MethodUSBasp {
-			words = append(words, "--usbasp-troubleshooting")
+			words = append(words, "--method", string(programmer.MethodUSBasp))
 		}
 		return words
 	}
@@ -2898,6 +3492,14 @@ func reconnectApplicationAfterProgramming(
 	return nil
 }
 
+func validatedWSFlashMethod(value string) (programmer.Method, error) {
+	method := programmer.Method(strings.ToLower(strings.TrimSpace(value)))
+	if method != programmer.MethodUrclock && method != programmer.MethodUSBasp {
+		return "", fmt.Errorf("ws client method %q is unsupported; use urclock or usbasp", value)
+	}
+	return method, nil
+}
+
 func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	config := store.Current()
 	if len(args) == 0 {
@@ -2935,26 +3537,26 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 		appDevice := flags.String(
 			"app-device",
 			"",
-			"application UART selector used only before/after hidden USBasp programming",
+			"application UART selector used only before/after advanced USBasp programming",
 		)
 		programmerName := flags.String("programmer", "", "custom avrdude programmer")
 		mcu := flags.String("mcu", "atmega328p", "avrdude MCU")
 		baud := flags.Int("baud", 115200, "urclock baud rate")
 		avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 		avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
-		allowUSBasp := flags.Bool("usbasp-troubleshooting", false, "explicitly allow hidden USBasp fallback")
 		allowIncomplete := flags.Bool("allow-incomplete-backup", false, "explicitly allow flashing without a complete verified backup")
+		reinitializeEEPROM := flags.Bool("reinitialize-eeprom", false, "development only: retain raw EEPROM backup but discard incompatible semantic settings")
 		reconnect := flags.Duration("reconnect", 2*time.Second, "reconnect delay")
 		maxSize := flags.Int64("max-size", wsrelay.DefaultMaxSize, "maximum firmware bytes")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		flashMethod := programmer.Method(strings.ToLower(strings.TrimSpace(*method)))
-		if flashMethod != programmer.MethodUrclock && flashMethod != programmer.MethodUSBasp {
-			return fmt.Errorf("ws client method %q is unsupported; use urclock or explicit USBasp troubleshooting", *method)
+		if *reinitializeEEPROM && *allowIncomplete {
+			return errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
 		}
-		if flashMethod == programmer.MethodUSBasp && !*allowUSBasp {
-			return errors.New("USBasp is hidden troubleshooting only; pass --usbasp-troubleshooting explicitly")
+		flashMethod, methodErr := validatedWSFlashMethod(*method)
+		if methodErr != nil {
+			return methodErr
 		}
 		logger := log.New(stdout, "ws-client: ", log.LstdFlags)
 		ctx, cancel := signalContext()
@@ -2975,17 +3577,26 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 				havePrimary := primaryAvailable(probeContext)
 				probeCancel()
 				if havePrimary {
-					words := []string{"program", "flash", tempPath}
+					if flashMethod == programmer.MethodUSBasp && strings.TrimSpace(*appDevice) != "" {
+						openContext, openCancel := context.WithTimeout(ctx, 15*time.Second)
+						_, openErr := executeThroughPrimary(
+							openContext,
+							joinControllerCommand([]string{"open", strings.TrimSpace(*appDevice)}),
+						)
+						openCancel()
+						if openErr != nil {
+							return fmt.Errorf("select relay programming application device: %w", openErr)
+						}
+					}
+					words := []string{"program", "flash", tempPath, "--method", string(flashMethod)}
 					if flashMethod == programmer.MethodUrclock && strings.TrimSpace(*port) != "" {
 						words = append(words, *port)
-					} else if flashMethod == programmer.MethodUSBasp && strings.TrimSpace(*appDevice) != "" {
-						words = append(words, *appDevice)
-					}
-					if *allowUSBasp {
-						words = append(words, "--usbasp-troubleshooting")
 					}
 					if *allowIncomplete {
 						words = append(words, "--allow-incomplete-backup")
+					}
+					if *reinitializeEEPROM {
+						words = append(words, "--reinitialize-eeprom")
 					}
 					output, routeErr := executeThroughPrimary(
 						ctx,
@@ -3034,7 +3645,7 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 				logger.Print("guarded preflight: ", command.String())
 				return executeGuardedCLIFlash(
 					ctx, flashOptions, applicationPort, config.Connection,
-					*allowUSBasp, *allowIncomplete, true, stdout,
+					*allowIncomplete, *reinitializeEEPROM, true, stdout,
 				)
 			},
 		})
@@ -3161,17 +3772,19 @@ func configureRuntimeHistory(
 
 func configuredHistoryOptions(store *appconfig.Store) control.HistoryOptions {
 	config := store.Current()
+	dataDirectory := filepath.Dir(store.Path())
 	path := strings.TrimSpace(config.Paths.HistoryFile)
 	if path == "" {
-		path = filepath.Join(filepath.Dir(store.Path()), "timeline.jsonl")
+		path = filepath.Join(dataDirectory, "timeline.jsonl")
 	} else if !filepath.IsAbs(path) {
-		path = filepath.Join(filepath.Dir(store.Path()), path)
+		path = filepath.Join(dataDirectory, path)
 	}
 	return control.HistoryOptions{
 		Retention:      time.Duration(config.UI.HistoryHours) * time.Hour,
 		SampleInterval: time.Duration(config.UI.HistorySampleMS) * time.Millisecond,
 		TimelineLimit:  config.UI.EventLogLimit,
 		TimelinePath:   path,
+		StatusPath:     filepath.Join(dataDirectory, "measurements.jsonl"),
 	}
 }
 
@@ -3306,7 +3919,7 @@ func apiMacros(source []appconfig.Macro) []controllerapi.Macro {
 		}
 		for stepIndex, step := range macro.Steps {
 			result[index].Steps[stepIndex] = controllerapi.MacroStep{
-				AtUS: step.AtUS, AtMS: step.AtMS, Kind: step.Kind,
+				AtUS: step.AtUS, Kind: step.Kind,
 				Target: step.Target, Value: step.Value,
 				DurationMS: step.DurationMS, FrequencyHz: step.FrequencyHz,
 				Text: step.Text, Destination: step.Destination,
@@ -3597,7 +4210,8 @@ func printUsage(output io.Writer, configuredTitle ...string) {
 Interactive control:
   controller                         launch the Charm TUI
   controller tui [connection flags]
-  controller web [--no-open] [--no-auto] [connection flags]
+  controller web [--no-open] [--no-tray] [--no-auto] [connection flags]
+  controller web export --output FILE.zip
   controller ports [connection flags]
   controller shell [connection flags]
   controller exec [connection flags] COMMAND...
@@ -3612,15 +4226,17 @@ Automation, monitoring and bridges:
 
 Device, firmware and recovery:
   controller reset [connection flags]
-  controller eeprom inspect|export|import|restore [file-only backup flags]
-  controller program flash HEX [PORT] [--usbasp-troubleshooting] [--app-device SELECTOR] [--allow-incomplete-backup]
-  controller program [non-write diagnostic flags]
+	controller eeprom inspect|export|import|restore [file-only backup flags]
+	controller firmware inspect|identity|patch-identity [artifact flags]
+	controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--allow-incomplete-backup] [--reinitialize-eeprom]
+	controller program recover HEX [PORT]  fresh readback + durable restore; never rewrites flash
+	controller program --operation DIAGNOSTIC [program flags]
   controller boot probe|info|metadata|backup|read|write|verify|start [flags]
   controller toolchain check|update|bootstrap|lock|sync|profile|compile|core-info|install-bootloader [flags]
 
 Host configuration and integration:
   controller config [path|show|validate]
-  controller desktop [install|ensure]
+  controller desktop [install|ensure|uninstall|remove]
   controller uri {{SCHEME}}://ACTION
   controller version
 

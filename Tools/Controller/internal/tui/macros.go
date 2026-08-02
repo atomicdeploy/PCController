@@ -64,7 +64,7 @@ func (model Model) automationsPage() string {
 	if model.macroSearchEditing {
 		search = "✎ " + search + "▏"
 	}
-	searchLine := labelStyle.Render("/ search · Ctrl+U clear · ↑/↓ select · Enter/P play · source is watched PC configuration") + "  " + valueStyle.Render(search)
+	searchLine := labelStyle.Render("/ search · Ctrl+U clear · ↑/↓ select · Enter/P play · source is watched HOST configuration") + "  " + valueStyle.Render(search)
 	if model.macroDeleteArmed {
 		searchLine = errorStyle.Copy().Bold(true).Render("DELETE ARMED · press X again to delete macro " + model.macroDeleteReference + " · any other action cancels")
 	}
@@ -254,6 +254,7 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 		id := model.nextMacroID()
 		model.input.SetValue(fmt.Sprintf("macro create %d ", id))
 		model.input.CursorEnd()
+		model.revealTerminal()
 		model.setNotice("Complete NAME [CATEGORY [COLOR]]; colors: red, blue, violet, green, white")
 		return model, nil, true
 	case "r":
@@ -263,6 +264,7 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 		}
 		model.input.SetValue("macro record start ")
 		model.input.CursorEnd()
+		model.revealTerminal()
 		model.setNotice("Complete NAME [CATEGORY [COLOR]], then operate relays/PWM/etc.; MCU ACK deltas set timing")
 		return model, nil, true
 	case "s":
@@ -327,7 +329,7 @@ func (model Model) deleteSelectedMacro() (Model, tea.Cmd, bool) {
 	if !model.macroDeleteArmed || model.macroDeleteReference != reference {
 		model.macroDeleteArmed = true
 		model.macroDeleteReference = reference
-		model.setNotice("Press X again to permanently delete PC-side macro " + reference)
+		model.setNotice("Press X again to permanently delete HOST macro " + reference)
 		return model, nil, true
 	}
 	model.macroDeleteArmed = false
@@ -516,9 +518,6 @@ func macroDefinitionDuration(macro appconfig.Macro) time.Duration {
 	var maximum uint32
 	for _, step := range macro.Steps {
 		due := step.AtUS
-		if due == 0 && step.AtMS > 0 {
-			due = uint32(step.AtMS) * 1000
-		}
 		if due > maximum {
 			maximum = due
 		}

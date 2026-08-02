@@ -4,7 +4,16 @@ import test from 'node:test'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { compareVersions, sameSubstantive, stableParts } from './update.mjs'
+import {
+  compareHostToolLocks,
+  compareCompositeVersions,
+  compareVersions,
+  parseWingetCompilerManifest,
+  sameSubstantive,
+  stableParts,
+  validateHostToolsLock,
+  workflowActionInventory,
+} from './update.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, '..', '..')
@@ -13,6 +22,37 @@ test('stable comparison is semantic and rejects prereleases', () => {
   assert.equal(compareVersions('1.10.0', '1.9.9'), 1)
   assert.equal(compareVersions('u8.0', '8.0.0'), 0)
   assert.equal(stableParts('1.5.2-rc.1'), null)
+})
+
+test('WinGet compiler manifest parsing selects exact x64 integrity and composite latest order', () => {
+  assert.equal(compareCompositeVersions('16.1.0-14.0.0-r3', '16.1.0-14.0.0-r2'), 1)
+  const resolved = parseWingetCompilerManifest(`
+PackageIdentifier: BrechtSanders.WinLibs.POSIX.UCRT
+PackageVersion: 16.1.0-14.0.0-r3
+Installers:
+- Architecture: x86
+  InstallerUrl: https://example.invalid/x86.zip
+  InstallerSha256: ${'1'.repeat(64)}
+- Architecture: x64
+  InstallerUrl: https://example.invalid/x64.zip
+  InstallerSha256: ${'A'.repeat(64)}
+`, 'x64', 'x86_64-w64-mingw32', {
+    url: 'https://example.invalid/manifest.yaml',
+    sha: 'b'.repeat(40),
+  })
+  assert.deepEqual(resolved, {
+    package_id: 'BrechtSanders.WinLibs.POSIX.UCRT',
+    package_version: '16.1.0-14.0.0-r3',
+    compiler: 'gcc',
+    compiler_version: '16.1.0',
+    architecture: 'x64',
+    target: 'x86_64-w64-mingw32',
+    provenance: 'winget-community-manifest',
+    manifest_url: 'https://example.invalid/manifest.yaml',
+    manifest_git_sha: 'b'.repeat(40),
+    installer_url: 'https://example.invalid/x64.zip',
+    installer_sha256: 'a'.repeat(64),
+  })
 })
 
 test('resolved tool lock comparison ignores timestamp-only churn', () => {
@@ -40,13 +80,39 @@ test('scheduled updater validates every required candidate gate before PR creati
   const updater = readFileSync(join(here, 'update.mjs'), 'utf8')
   for (const expected of [
     'schedule:', '--apply --validate', 'steps.candidate.outcome == \'success\'',
-    'create-pull-request@v8', 'dependency-blocked',
+    'body-path: .build/dependencies/dependency-pr.md', 'dependency-blocked',
   ]) assert.ok(workflow.includes(expected), `workflow missing ${expected}`)
+  assert.match(workflow, /peter-evans\/create-pull-request@[0-9a-f]{40}\s+# v8/u)
   for (const expected of [
     '32256', 'Urboot-Custom', 'VirtualBoard tests', 'Generated product identity',
     'Go tests from stable paths', 'Web tests',
-    'windowsResources', 'upx', 'function resolveToolchain(mode)',
+    'windowsResources', 'upx', 'function resolveToolchain(mode, directRetry)',
   ]) assert.ok(updater.includes(expected), `updater missing ${expected}`)
+  assert.ok(
+    updater.indexOf("step('Clean generated build outputs'") < updater.indexOf('installResolvedHostTools(hostTools'),
+    'managed host tools must be provisioned after the root clean step',
+  )
+})
+
+test('every external workflow action is immutable and included in the resolved inventory', () => {
+  const inventory = workflowActionInventory()
+  assert.ok(inventory.length >= 8)
+  for (const action of inventory) {
+    assert.match(action.revision, /^[0-9a-f]{40}$/u)
+    assert.match(action.version, /^v\d+/u)
+    assert.ok(action.workflows.length > 0)
+  }
+})
+
+test('host tool lock replay validates hashes and comparison is idempotent', () => {
+  const lock = JSON.parse(readFileSync(join(repo, 'Tools', 'Dependencies', 'resolved-tools-lock.json'), 'utf8'))
+  validateHostToolsLock(lock)
+  assert.deepEqual(compareHostToolLocks(lock, structuredClone(lock)), [])
+  const changed = structuredClone(lock)
+  changed.node.version = '99.0.0'
+  assert.deepEqual(compareHostToolLocks(lock, changed).map((item) => item.name), ['Node.js LTS'])
+  changed.upx.assets[0].sha256 = '0'.repeat(64)
+  assert.ok(compareHostToolLocks(lock, changed).some((item) => item.name === 'UPX asset inventory'))
 })
 
 test('one canonical scheduled updater owns dependency resolution', () => {
@@ -56,6 +122,15 @@ test('one canonical scheduled updater owns dependency resolution', () => {
   assert.match(exporter, /Tools[^\n]+Controller[^\n]+toolchain-lock\.json/u)
   assert.equal(requiredWorkflowAbsent(join(repo, '.github', 'workflows', 'dependencies.yml')), true)
   assert.equal(requiredWorkflowAbsent(join(repo, '.github', 'dependencies.json')), true)
+})
+
+test('host CI consumes exact Node.js and go-winres identities from the canonical host lock', () => {
+  const workflow = readFileSync(join(repo, '.github', 'workflows', 'host.yml'), 'utf8')
+  assert.match(workflow, /export-lock\.mjs export-host/u)
+  assert.match(workflow, /steps\.host-dependencies\.outputs\.node_version/u)
+  assert.match(workflow, /steps\.host-dependencies\.outputs\.go_winres_version/u)
+  assert.doesNotMatch(workflow, /go install github\.com\/tc-hib\/go-winres@v\d/u)
+  assert.doesNotMatch(workflow, /node-version:\s*["']?24["']?\s*$/mu)
 })
 
 test('dependency output uses the shared Chalk and Unicode table renderer', () => {

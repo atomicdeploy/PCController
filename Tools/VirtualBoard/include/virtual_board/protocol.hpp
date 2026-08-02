@@ -25,7 +25,6 @@ enum Opcode : std::uint8_t {
   Buzzer = 0x10,
   PwmSet = 0x11,
   PwmAllOff = 0x12,
-  PwmMode = 0x13,
   StatusRgb = 0x14,
   PwmGet = 0x15,
   AddressableLed = 0x16,
@@ -36,7 +35,6 @@ enum Opcode : std::uint8_t {
   RadioLearnClear = 0x23,
   RadioLearnList = 0x24,
   RadioLearnRemove = 0x25,
-  RadioLearnMap = 0x26,
 
   MenuAction = 0x30,
   RelaySet = 0x31,

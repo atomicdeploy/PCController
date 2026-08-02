@@ -50,6 +50,7 @@ private:
 class IRelays {
 public:
   virtual ~IRelays() = default;
+  virtual void setRetainDirectionOnStop(bool retain) = 0;
   virtual bool set(std::uint8_t index, bool active) = 0;
   virtual bool setSide(std::uint8_t side, std::uint8_t motion) = 0;
   virtual void allOff() = 0;
@@ -58,6 +59,7 @@ public:
 
 class RelayBank final : public IRelays {
 public:
+  void setRetainDirectionOnStop(bool retain) override;
   bool set(std::uint8_t index, bool active) override;
   bool setSide(std::uint8_t side, std::uint8_t motion) override;
   void allOff() override;
@@ -65,36 +67,36 @@ public:
 
 private:
   std::uint8_t mask_ = 0;
+  bool retainDirectionOnStop_ = false;
 };
 
 class IPwm {
 public:
   virtual ~IPwm() = default;
+  virtual bool available() const = 0;
   virtual bool set(std::uint8_t channel, std::uint16_t value) = 0;
   virtual void allOff() = 0;
   virtual std::array<std::uint16_t, 16> values() const = 0;
   virtual std::uint16_t value(std::uint8_t channel) const = 0;
-  virtual void setMode(std::uint8_t mode) = 0;
-  virtual std::uint8_t mode() const = 0;
   virtual void select(std::uint8_t channel) = 0;
   virtual std::uint8_t selected() const = 0;
 };
 
 class PwmBank final : public IPwm {
 public:
+  explicit PwmBank(bool available = true) : available_(available) {}
+  bool available() const override;
   bool set(std::uint8_t channel, std::uint16_t value) override;
   void allOff() override;
   std::array<std::uint16_t, 16> values() const override;
   std::uint16_t value(std::uint8_t channel) const override;
-  void setMode(std::uint8_t mode) override;
-  std::uint8_t mode() const override;
   void select(std::uint8_t channel) override;
   std::uint8_t selected() const override;
 
 private:
   std::array<std::uint16_t, 16> values_{};
-  std::uint8_t mode_ = 2;
   std::uint8_t selected_ = 0;
+  bool available_ = true;
 };
 
 constexpr std::size_t kAddressableLedPixelCount = 11;

@@ -67,6 +67,22 @@
     "backend": "tm1637",
     "coreDefine": "URBOOT_PROGRESS_ENABLED=1",
     "backendDefine": "URBOOT_PROGRESS_TM1637=1",
+    "inputs": {
+      "patch": {
+        "path": "patches/0001-optional-progress-backend-hook.patch",
+        "sha256": "7d17596cbc5c34bfa3311d1f2979ac52ef2d270014a76d9c716010044e8cebc3"
+      },
+      "backend": {
+        "path": "backends/tm1637_progress.S",
+        "sha256": "c8b64c7ba4650141aeacc9dd67f37b276ce6301f8c5c8115c60ba8f90495f7e9"
+      }
+    },
+    "expected": {
+      "meaningfulBytes": 510,
+      "hexSha256": "27a053dcf384818a4b18b806a1eb0f4020ebce1051d422afee8017dd48c615e0",
+      "binarySha256": "8e826f33e61bb87ce738deee1bf8045c2b6e14ae86892bab8e6dc6e676d6f8db",
+      "metadataHex": "041995cfe740"
+    },
     "pins": {
       "clock": "D13/PB5",
       "data": "D11/PB3"
