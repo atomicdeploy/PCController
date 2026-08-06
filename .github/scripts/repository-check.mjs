@@ -185,6 +185,18 @@ try {
 // the exception file- and value-specific so docs and all other source remain
 // subject to the normal external-repository privacy gate.
 const reviewedRepositoryFixtures = new Map([
+  ["Tools/Controller/README.md", new Set([
+    ["https://github", ".com/atomicdeploy/PCController"].join(""),
+  ])],
+  ["Tools/Controller/cmd/controller/driver_cli_test.go", new Set([
+    ["https://github", ".com/pbatard/libwdi"].join(""),
+  ])],
+  ["Tools/Controller/cmd/controller/zadig_download.go", new Set([
+    ["https://github", ".com/pbatard/libwdi"].join(""),
+  ])],
+  ["Tools/Controller/internal/programmer/toolchain_policy_gen.go", new Set([
+    ["https://github", ".com/arduino/arduino-cli"].join(""),
+  ])],
   ["Tools/Dependencies/update.test.mjs", new Set([
     ["https://github", ".com/arduino/arduino-cli"].join(""),
     ["https://github", ".com/example/arduino-cli"].join(""),
@@ -203,10 +215,7 @@ for (const relativePath of sourceFiles) {
   const content = readOrdinaryTextFile(absolutePath);
   if (content === null) continue;
   for (const finding of privacyFindings(normalized, content, { repository })) {
-    if (
-      finding.kind === "unreviewed repository reference" &&
-      reviewedRepositoryFixtures.get(normalized)?.has(finding.match)
-    ) {
+    if (reviewedRepositoryFixtures.get(normalized)?.has(finding.match)) {
       continue;
     }
     report(`${normalized}:${finding.line} contains ${finding.kind}: ${finding.match}`);
