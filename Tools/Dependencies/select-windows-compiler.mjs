@@ -107,4 +107,3 @@ try {
   console.error(`Windows compiler selection failed: ${error.message}`)
   process.exitCode = 1
 }
-
