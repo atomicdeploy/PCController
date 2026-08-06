@@ -423,8 +423,17 @@ func TestOutboundWebSocketClientsInteroperateWithRawRFC6455Servers(t *testing.T)
 		}
 
 		peer.writeText(t, "2")
-		if packet := peer.readText(t); packet != "3" {
-			t.Fatalf("Socket.IO Engine.IO pong=%q", packet)
+		for attempts := 0; ; attempts++ {
+			packet := peer.readText(t)
+			if packet == "3" {
+				break
+			}
+			// Host events are asynchronous Socket.IO messages and may already be
+			// queued when the Engine.IO ping is sent. They do not violate pong
+			// semantics, but a bounded loop still catches a missing response.
+			if attempts >= 15 || !strings.HasPrefix(packet, "42") {
+				t.Fatalf("Socket.IO Engine.IO pong not received; last packet=%q", packet)
+			}
 		}
 	})
 }
