@@ -2,6 +2,8 @@ package programmer
 
 import (
 	"bytes"
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -70,6 +72,36 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 	}
 }
 
+func TestGenerateProgrammingEEPROMIntelHexArmsQuietVisibleLatch(t *testing.T) {
+	content, err := GenerateProgrammingEEPROMIntelHex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	image, err := ParseIntelHex(bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record[EEPROMSettingsValueBytes] != avrCRC8(record[:EEPROMSettingsValueBytes]) {
+		t.Fatal("programming settings CRC does not match")
+	}
+	wantFlags := native.SettingsSilent | native.SettingsProgrammingMode
+	if record[0]&wantFlags != wantFlags || record[1] != 0 || record[2] != 0 ||
+		record[3] != 0 || record[5] != 0 || record[6] != 0 || record[29] != 0 {
+		t.Fatalf("programming image is not latched/off: % X", record)
+	}
+	if record[4] == 0 || record[28]&0x07 != record[4] {
+		t.Fatalf("Prog must remain visible with door closed: open=%d closed=%d", record[4], record[28]&0x07)
+	}
+	decoded := decodeOfflineSettings(image)
+	if !decoded.Valid || decoded.Values.Flags&wantFlags != wantFlags {
+		t.Fatalf("programming settings did not decode: %#v", decoded)
+	}
+}
+
 func TestWriteDefaultEEPROMIntelHexDoesNotOverwrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "factory.hex")
 	if err := WriteDefaultEEPROMIntelHex(path); err != nil {
@@ -85,5 +117,51 @@ func TestWriteDefaultEEPROMIntelHexDoesNotOverwrite(t *testing.T) {
 	after, _ := os.ReadFile(path)
 	if !bytes.Equal(after, original) {
 		t.Fatal("existing factory image changed after rejected overwrite")
+	}
+}
+
+func TestProgramLatchedFactoryEEPROMUsesGuardedCompleteImage(t *testing.T) {
+	paths, err := HostDataPathsFor(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureHostDataPaths(paths); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	err = ProgramLatchedFactoryEEPROM(
+		context.Background(), paths,
+		Options{Method: MethodUrclock, Port: "COM18"},
+		func(_ context.Context, options Options, _ io.Writer) error {
+			calls++
+			if options.Operation != OperationWriteEEPROM || !options.ConfirmEEPROMWrite ||
+				options.OutputPath != "" {
+				t.Fatalf("unsafe programming options: %#v", options)
+			}
+			content, readErr := os.ReadFile(options.HexPath)
+			if readErr != nil {
+				return readErr
+			}
+			image, parseErr := ParseIntelHex(bytes.NewReader(content))
+			if parseErr != nil {
+				return parseErr
+			}
+			inspection, inspectErr := image.Inspect()
+			if inspectErr != nil {
+				return inspectErr
+			}
+			record, recordErr := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
+			if recordErr != nil {
+				return recordErr
+			}
+			wantFlags := native.SettingsSilent | native.SettingsProgrammingMode
+			if inspection.DataBytes != PCControllerEEPROMBytes || record[0]&wantFlags != wantFlags {
+				t.Fatalf("executor did not receive complete latched image: inspection=%#v flags=0x%02X", inspection, record[0])
+			}
+			return nil
+		}, io.Discard,
+	)
+	if err != nil || calls != 1 {
+		t.Fatalf("latched factory programming calls=%d err=%v", calls, err)
 	}
 }

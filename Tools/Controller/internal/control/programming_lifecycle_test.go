@@ -535,6 +535,75 @@ func TestProgrammingLifecycleDevelopmentEEPROMReinitializationCapturesErrorAndKe
 	}
 }
 
+func TestDevelopmentReinitializationArmsDurableLatchOnlyAfterRawBackup(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	original := native.Settings{
+		LightMode: 2, OnBrightness: 190, OffBrightness: 12,
+		DisplayBrightness: 6, StatusBrightness: 128,
+		OutputPersistence: native.OutputPersistenceMask,
+		RelayRestoreMask:  0xFF, MotionBreakMSValue: 1,
+	}
+	device := &fakeProgrammingDevice{
+		snapshot: connectedProgrammingSnapshot(native.CapabilityHostFrontPanel),
+		settings: original,
+	}
+	options := ProgrammingLifecycleOptions{
+		DataPaths: paths, Wait: noProgrammingWait, ReinitializeEEPROM: true,
+	}
+	session, err := prepareProgrammingSession(
+		context.Background(), device, firmware, options, io.Discard,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(device.stores) != 0 || session.Phase != "development-reinitialize-safe" {
+		t.Fatalf("raw-backup preparation changed EEPROM: session=%+v stores=%v", session, device.stores)
+	}
+	if err := armProgrammingSessionAfterBackup(
+		context.Background(), device, session, options, io.Discard,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(device.stores) != 1 ||
+		device.stores[0].Flags&(native.SettingsSilent|native.SettingsProgrammingMode) !=
+			(native.SettingsSilent|native.SettingsProgrammingMode) ||
+		device.stores[0].LightMode != 0 || device.stores[0].OnBrightness != 0 ||
+		device.stores[0].StatusBrightness != 0 || device.stores[0].OutputPersistence != 0 ||
+		device.stores[0].RelayRestoreMask != 0 ||
+		device.stores[0].DisplayClosedBrightness != original.DisplayBrightness ||
+		session.Phase != "latched-safe" || !session.SafeStateApplied ||
+		!session.TemporarySilent || device.panelShown != 2 {
+		t.Fatalf("post-backup latch was not durable/visible: session=%+v device=%+v", session, device)
+	}
+}
+
+func TestDevelopmentReinitializationDefersUnsupportedLatchToNewFactoryImage(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	device := &fakeProgrammingDevice{
+		snapshot: connectedProgrammingSnapshot(0),
+		queryErr: errors.New("obsolete settings schema"),
+	}
+	options := ProgrammingLifecycleOptions{
+		DataPaths: paths, Wait: noProgrammingWait, ReinitializeEEPROM: true,
+	}
+	session, err := prepareProgrammingSession(
+		context.Background(), device, firmware, options, io.Discard,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	if err := armProgrammingSessionAfterBackup(
+		context.Background(), device, session, options, &output,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(device.stores) != 0 || len(session.Warnings) == 0 ||
+		!strings.Contains(output.String(), "factory EEPROM will arm Prog") {
+		t.Fatalf("unsupported latch fallback was not explicit: session=%+v output=%q", session, output.String())
+	}
+}
+
 func TestFindRetryableProgrammingSessionRequiresExactFailedTransaction(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	document, err := programmer.LoadIntelHex(firmware)

@@ -3830,6 +3830,9 @@ func safeFlashCommand(
 		return "", fmt.Errorf("inspect firmware before releasing UART: %w", err)
 	}
 	snapshot := runtime.Snapshot()
+	if reinitializeEEPROM && !snapshot.Connected {
+		return "", errors.New("--reinitialize-eeprom requires an authenticated application connection so the post-backup Prog latch can be armed and the final settings can be verified")
+	}
 	if method == programmer.MethodUrclock {
 		if port == "" {
 			port = snapshot.Port.Name
@@ -3947,12 +3950,47 @@ func safeFlashCommand(
 	}
 	fmt.Fprintln(&output, "application UART released; guarded programmer transaction has exclusive ownership")
 	fmt.Fprintf(&output, "pre-flash method=%s firmware=%s\n", method, firmwarePath)
+	var afterBackup programmer.PostBackupOperation
+	if serialWasOpen && programmingSession != nil && reinitializeEEPROM {
+		afterBackup = func(
+			backupContext context.Context,
+			_ programmer.AutomaticPreflashResult,
+			writer io.Writer,
+		) error {
+			reconnectContext, reconnectCancel := context.WithTimeout(
+				context.WithoutCancel(backupContext), 12*time.Second,
+			)
+			reconnectErr := reconnectProgrammingDevice(
+				reconnectContext, runtime, snapshot.Port,
+			)
+			reconnectCancel()
+			if reconnectErr != nil {
+				return fmt.Errorf("reconnect application after untouched raw backup: %w", reconnectErr)
+			}
+			armContext, armCancel := context.WithTimeout(
+				context.WithoutCancel(backupContext), 8*time.Second,
+			)
+			armErr := ArmProgrammingSessionAfterBackup(
+				armContext, runtime, programmingSession, lifecycleOptions, writer,
+			)
+			armCancel()
+			closeErr := runtime.Close()
+			if armErr != nil {
+				return errors.Join(armErr, closeErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("release application UART after arming programming latch: %w", closeErr)
+			}
+			return nil
+		}
+	}
 	result, flashErr := programmer.AutomaticBackupThenFlash(
 		ctx,
 		programmer.AutomaticPreflashOptions{
 			FirmwarePath: firmwarePath,
 			Backup:       backup, DataPaths: dataPaths,
 			AllowFlashWithoutFullBackup: allowIncomplete,
+			AfterBackup:                 afterBackup,
 		},
 		runner,
 		func(flashContext context.Context, path string, writer io.Writer) error {
@@ -3975,6 +4013,19 @@ func safeFlashCommand(
 		fmt.Fprintln(&output, "guarded firmware flash completed")
 	}
 	verifiedProgram := flashErr == nil && result.Flashed
+	if verifiedProgram && reinitializeEEPROM {
+		factoryErr := programmer.ProgramLatchedFactoryEEPROM(
+			context.WithoutCancel(ctx), dataPaths, writeOptions,
+			programmer.EEPROMProgramOperation(execute), &output,
+		)
+		if factoryErr != nil {
+			flashErr = errors.Join(flashErr, factoryErr)
+			verifiedProgram = false
+		} else {
+			fmt.Fprintln(&output,
+				"host-owned Silent/Prog factory EEPROM programmed and independently read back")
+		}
+	}
 	if programmingSession != nil {
 		if markerErr := MarkProgrammingSessionComplete(
 			programmingSession, verifiedProgram,

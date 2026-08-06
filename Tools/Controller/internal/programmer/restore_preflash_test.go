@@ -320,6 +320,51 @@ func TestAutomaticBackupThenFlashAcceptsExplicitUSBaspMethod(t *testing.T) {
 	}
 }
 
+func TestAutomaticBackupThenFlashRunsPostBackupGateBeforeFlash(t *testing.T) {
+	root := t.TempDir()
+	firmware := filepath.Join(root, "new.hex")
+	content, _ := (&IntelHexImage{data: map[uint32]byte{0: 1}}).Canonical()
+	if err := os.WriteFile(firmware, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	order := make([]string, 0, 2)
+	result, err := AutomaticBackupThenFlash(
+		context.Background(), AutomaticPreflashOptions{
+			FirmwarePath: firmware,
+			Backup:       fakeBackupOptions(filepath.Join(root, "backups")),
+			AfterBackup: func(_ context.Context, backup AutomaticPreflashResult, _ io.Writer) error {
+				if !backup.BackupComplete || backup.BackupReference == "" {
+					t.Fatalf("post-backup gate received incomplete result: %#v", backup)
+				}
+				order = append(order, "latched")
+				return nil
+			},
+		}, newFakeAVRRunner(t),
+		func(context.Context, string, io.Writer) error {
+			order = append(order, "flashed")
+			return nil
+		}, io.Discard,
+	)
+	if err != nil || !result.Flashed || strings.Join(order, ",") != "latched,flashed" {
+		t.Fatalf("post-backup order=%v result=%#v err=%v", order, result, err)
+	}
+
+	flashed := false
+	_, err = AutomaticBackupThenFlash(
+		context.Background(), AutomaticPreflashOptions{
+			FirmwarePath: firmware,
+			Backup:       fakeBackupOptions(filepath.Join(root, "second-backup")),
+			AfterBackup: func(context.Context, AutomaticPreflashResult, io.Writer) error {
+				return errors.New("cannot arm latch")
+			},
+		}, newFakeAVRRunner(t),
+		func(context.Context, string, io.Writer) error { flashed = true; return nil }, io.Discard,
+	)
+	if err == nil || !strings.Contains(err.Error(), "cannot arm latch") || flashed {
+		t.Fatalf("failed post-backup gate flashed=%t err=%v", flashed, err)
+	}
+}
+
 func TestAutomaticBackupThenFlashRejectsFirmwareChangedDuringBackup(t *testing.T) {
 	root := t.TempDir()
 	firmware := filepath.Join(root, "new.hex")

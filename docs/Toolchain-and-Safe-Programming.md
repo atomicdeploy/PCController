@@ -284,16 +284,27 @@ cancels macros, releases all relays, fades PWM when possible (otherwise forces
 it off), shows the programming cues, and plays the power-down melody. It does
 not rewrite the incompatible EEPROM before that raw backup.
 
+Immediately after the untouched raw backup, Controller reconnects to a
+current-schema application when available, persists and reads back the durable
+Silent/Programming flags, restores `Prog`, and releases UART again before the
+firmware write. This post-backup boundary is part of the flash gate: failure to
+arm a supported latch prevents flashing. If the old settings schema is
+genuinely unsupported, Controller cannot safely patch unknown EEPROM bytes and
+reports that limitation; the newly written transaction image becomes the
+first safe latch point.
+
 After verified flashing, and before clearing the lifecycle marker, the host
-programs the complete generated 1,024-byte factory EEPROM image and performs an
-independent programmer readback. That image contains the canonical Go-owned
-settings, empty RF store, and rich status-LED condition profiles. After the new
-authenticated `HELLO`, the host queries the current schema only to prove it is
-operational, commits/verifies its canonical settings with Silent off and all
-relay/PWM persistence disabled, and never maps or restores the old semantic
-values or live outputs. The original raw EEPROM remains recoverable from the
-pre-flash backup, but restoring it would deliberately reintroduce the
-incompatible development state.
+programs and independently reads back a complete generated 1,024-byte
+**transaction** EEPROM image. It contains the canonical Go-owned settings,
+empty RF store, rich status-LED profiles, and an armed Silent/Programming latch
+with visible `Prog`. Every verification/reconnect reset after this write
+therefore remains quiet and output-safe. Only after the new authenticated
+`HELLO` does the host query the current schema, commit and verify ordinary
+canonical settings with Silent and Programming cleared and all relay/PWM
+persistence disabled, then play the single configurable ready cue. It never
+maps or restores old semantic values or live outputs. The original raw EEPROM
+remains recoverable from the pre-flash backup, but restoring it would
+deliberately reintroduce the incompatible development state.
 
 ### Alpha version and feature-profile policy
 
@@ -317,6 +328,12 @@ and front-panel restoration are complete, then streams the configurable rising
 MCU Silent setting was enabled; explicit development reinitialization ends with
 Silent disabled and therefore plays it. This keeps audible completion aligned
 with the host's ready state instead of sounding during the first reboot.
+
+Regression acceptance must record the reset count and observe the complete
+guarded transaction: once the post-backup latch is armed, no ordinary startup
+melody may occur and TM1637 must retain `Prog` across every flash,
+EEPROM-readback, and application-authentication reset. Repeated startup notes
+are a lifecycle failure even when programming ultimately succeeds.
 
 ### Read-only recovery of an already-written image
 

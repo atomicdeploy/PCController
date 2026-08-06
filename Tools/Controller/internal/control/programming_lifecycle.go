@@ -615,6 +615,94 @@ func prepareProgrammingSession(
 	return session, nil
 }
 
+// ArmProgrammingSessionAfterBackup persists the durable MCU programming latch
+// at the first safe boundary after an untouched raw EEPROM backup. Ordinary
+// updates already arm the latch during preparation; development
+// reinitialization defers this write so its mandatory backup remains the exact
+// pre-operation image.
+func ArmProgrammingSessionAfterBackup(
+	ctx context.Context,
+	runtime *Runtime,
+	session *ProgrammingSession,
+	options ProgrammingLifecycleOptions,
+	output io.Writer,
+) error {
+	if runtime == nil {
+		return errors.New("post-backup programming latch requires an application runtime")
+	}
+	return armProgrammingSessionAfterBackup(
+		ctx, runtimeProgrammingDevice{runtime: runtime, options: options},
+		session, options, output,
+	)
+}
+
+func armProgrammingSessionAfterBackup(
+	ctx context.Context,
+	device programmingDevice,
+	session *ProgrammingSession,
+	options ProgrammingLifecycleOptions,
+	output io.Writer,
+) error {
+	if session == nil || !session.ReinitializeEEPROM {
+		return nil
+	}
+	options, err := normalizeProgrammingLifecycleOptions(options)
+	if err != nil {
+		return err
+	}
+	if session.OriginalSettings == nil {
+		warning := "the pre-update firmware settings schema is unsupported, so its EEPROM latch cannot be safely rewritten; the newly programmed factory EEPROM will arm Prog before further verification resets"
+		session.Warnings = append(session.Warnings, warning)
+		if err := rewriteProgrammingMarker(session); err != nil {
+			return fmt.Errorf("persist unsupported pre-update latch warning: %w", err)
+		}
+		if output != nil {
+			fmt.Fprintln(output, "WARNING:", warning)
+		}
+		return nil
+	}
+	if err := device.EnterSafeProgrammingState(ctx); err != nil {
+		return fmt.Errorf("reassert safe outputs after raw backup: %w", err)
+	}
+	if err := device.SetProgrammingCue(ctx); err != nil {
+		return fmt.Errorf("reassert programming RGB cue after raw backup: %w", err)
+	}
+	latched := programmingSafeSettings(*session.OriginalSettings)
+	if err := storeAndVerifyProgrammingSettings(
+		ctx, device, latched, options,
+		"arm durable programming latch after untouched raw EEPROM backup",
+	); err != nil {
+		return err
+	}
+	session.TemporarySilent = session.OriginalSettings.Flags&native.SettingsSilent == 0
+	session.SafeStateApplied = true
+	live := device.Snapshot()
+	if live.Hello.Capabilities&native.CapabilityHostFrontPanel != 0 {
+		if err := device.ShowProgrammingPanel(ctx); err != nil {
+			session.Warnings = append(session.Warnings,
+				"front-panel programming message unavailable after backup: "+err.Error())
+		} else {
+			session.DisplayPrepared = true
+		}
+	}
+	if live.Hello.Capabilities&native.CapabilityI2CTransfer != 0 {
+		if err := device.RenderProgrammingLCD(
+			ctx, "Programming...", "Do not disconnect",
+		); err != nil {
+			session.Warnings = append(session.Warnings,
+				"physical LCD programming message unavailable after backup: "+err.Error())
+		}
+	}
+	if err := advanceProgrammingSessionPhase(device, session, "latched-safe"); err != nil {
+		return err
+	}
+	if output != nil {
+		fmt.Fprintln(output,
+			"raw EEPROM backup complete; durable Silent/Prog latch armed and verified before firmware write")
+	}
+	return nil
+}
+
 // RestoreProgrammingSession restores exactly the MCU settings captured before
 // programming. It waits out SettingsStore's deferred write and verifies the
 // semantic settings response before deleting the crash-recovery marker.

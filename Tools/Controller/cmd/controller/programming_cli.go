@@ -812,12 +812,46 @@ func executeGuardedCLIFlash(
 	backup.OutputPath = ""
 	write := options
 	write.Operation = programmer.OperationWriteFlash
+	var afterBackup programmer.PostBackupOperation
+	if application != nil && programmingSession != nil && reinitializeEEPROM {
+		afterBackup = func(
+			backupContext context.Context,
+			_ programmer.AutomaticPreflashResult,
+			writer io.Writer,
+		) error {
+			application.ResumeAuto()
+			reconnectContext, reconnectCancel := context.WithTimeout(
+				context.WithoutCancel(backupContext), 12*time.Second,
+			)
+			reconnectErr := application.EnsureConnected(reconnectContext)
+			reconnectCancel()
+			if reconnectErr != nil {
+				return fmt.Errorf("reconnect application after untouched raw backup: %w", reconnectErr)
+			}
+			armContext, armCancel := context.WithTimeout(
+				context.WithoutCancel(backupContext), 8*time.Second,
+			)
+			armErr := control.ArmProgrammingSessionAfterBackup(
+				armContext, application, programmingSession, lifecycleOptions, writer,
+			)
+			armCancel()
+			closeErr := application.Close()
+			if armErr != nil {
+				return errors.Join(armErr, closeErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("release application UART after arming programming latch: %w", closeErr)
+			}
+			return nil
+		}
+	}
 	result, flashErr := programmer.AutomaticBackupThenFlash(
 		ctx,
 		programmer.AutomaticPreflashOptions{
 			FirmwarePath: options.HexPath,
 			Backup:       backup, DataPaths: paths,
 			AllowFlashWithoutFullBackup: allowIncompleteBackup,
+			AfterBackup:                 afterBackup,
 		},
 		programmer.CommandRunnerFunc(programmer.Run),
 		func(flashContext context.Context, path string, writer io.Writer) error {
@@ -847,7 +881,7 @@ func executeGuardedCLIFlash(
 			flashErr = errors.Join(flashErr, factoryErr)
 			verifiedProgram = false
 		} else {
-			fmt.Fprintln(output, "host-owned factory EEPROM programmed and independently read back")
+			fmt.Fprintln(output, "host-owned Silent/Prog factory EEPROM programmed and independently read back")
 		}
 	}
 	if programmingSession != nil {
@@ -919,31 +953,9 @@ func programFactoryEEPROM(
 	base programmer.Options,
 	output io.Writer,
 ) error {
-	temporary, err := os.CreateTemp(paths.StateDir, "factory-eeprom-*.hex")
-	if err != nil {
-		return fmt.Errorf("reserve host-owned factory EEPROM image: %w", err)
-	}
-	path := temporary.Name()
-	if err := temporary.Close(); err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("prepare host-owned factory EEPROM image: %w", err)
-	}
-	defer os.Remove(path)
-	if err := programmer.WriteDefaultEEPROMIntelHex(path); err != nil {
-		return err
-	}
-	write := base
-	write.Operation = programmer.OperationWriteEEPROM
-	write.HexPath = path
-	write.OutputPath = ""
-	write.ConfirmEEPROMWrite = true
-	if err := programmer.Execute(ctx, write, output); err != nil {
-		return fmt.Errorf("program host-owned factory EEPROM: %w", err)
-	}
-	return nil
+	return programmer.ProgramLatchedFactoryEEPROM(
+		ctx, paths, base, programmer.Execute, output,
+	)
 }
 
 func readApplicationIdentityBeforeProgramming(

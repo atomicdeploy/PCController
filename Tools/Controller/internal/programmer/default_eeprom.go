@@ -1,8 +1,10 @@
 package programmer
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -15,17 +17,40 @@ const (
 	defaultEEPROMCompileArtifact   = "safe-default-eeprom.hex"
 )
 
+type EEPROMProgramOperation func(context.Context, Options, io.Writer) error
+
 // GenerateDefaultEEPROMIntelHex returns a complete, immediately usable
 // ATmega328P EEPROM image. Its deployment baseline keeps heat-producing and
 // user-facing outputs off while initializing every current settings field.
 func GenerateDefaultEEPROMIntelHex() ([]byte, error) {
+	return generateEEPROMIntelHex(native.DefaultSettings())
+}
+
+// GenerateProgrammingEEPROMIntelHex returns the same complete factory image
+// with its transient programming latch armed. It is used only inside a
+// guarded reinitialization transaction: every boot remains silent, outputs
+// remain off, and the TM1637 reads Prog until the host verifies the new image
+// and commits ordinary factory settings as the final lifecycle step.
+func GenerateProgrammingEEPROMIntelHex() ([]byte, error) {
+	factory := native.DefaultSettings()
+	factory.Flags |= native.SettingsSilent | native.SettingsProgrammingMode
+	factory.LightMode = 0
+	factory.OnBrightness = 0
+	factory.OffBrightness = 0
+	factory.StatusBrightness = 0
+	factory.OutputPersistence = 0
+	factory.RelayRestoreMask = 0
+	factory.DisplayClosedBrightness = factory.DisplayBrightness
+	return generateEEPROMIntelHex(factory)
+}
+
+func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 	data := make([]byte, PCControllerEEPROMBytes)
 	for index := range data {
 		data[index] = 0xFF
 	}
 	settings := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsRecordBytes]
 	values := settings[:EEPROMSettingsValueBytes]
-	factory := native.DefaultSettings()
 	values[0] = factory.Flags
 	values[1] = factory.LightMode
 	values[2] = factory.OnBrightness
@@ -92,6 +117,20 @@ func WriteDefaultEEPROMIntelHex(outputPath string) error {
 	if err != nil {
 		return err
 	}
+	return writeEEPROMIntelHexExclusive(outputPath, content)
+}
+
+// WriteProgrammingEEPROMIntelHex publishes the transaction-only latched
+// factory image without overwriting an existing artifact or backup.
+func WriteProgrammingEEPROMIntelHex(outputPath string) error {
+	content, err := GenerateProgrammingEEPROMIntelHex()
+	if err != nil {
+		return err
+	}
+	return writeEEPROMIntelHexExclusive(outputPath, content)
+}
+
+func writeEEPROMIntelHexExclusive(outputPath string, content []byte) error {
 	file, err := os.OpenFile(outputPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create factory EEPROM image: %w", err)
@@ -113,6 +152,47 @@ func WriteDefaultEEPROMIntelHex(outputPath string) error {
 		return fmt.Errorf("close factory EEPROM image: %w", err)
 	}
 	remove = false
+	return nil
+}
+
+// ProgramLatchedFactoryEEPROM writes and independently verifies the complete
+// transaction-only factory image through the selected guarded programmer.
+// The temporary artifact lives under Controller's state directory and is
+// removed after the programmer has consumed it.
+func ProgramLatchedFactoryEEPROM(
+	ctx context.Context,
+	paths HostDataPaths,
+	base Options,
+	execute EEPROMProgramOperation,
+	output io.Writer,
+) error {
+	if execute == nil {
+		return fmt.Errorf("latched factory EEPROM programming requires an executor")
+	}
+	temporary, err := os.CreateTemp(paths.StateDir, "programming-eeprom-*.hex")
+	if err != nil {
+		return fmt.Errorf("reserve latched factory EEPROM image: %w", err)
+	}
+	path := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("prepare latched factory EEPROM image: %w", err)
+	}
+	defer os.Remove(path)
+	if err := WriteProgrammingEEPROMIntelHex(path); err != nil {
+		return err
+	}
+	write := base
+	write.Operation = OperationWriteEEPROM
+	write.HexPath = path
+	write.OutputPath = ""
+	write.ConfirmEEPROMWrite = true
+	if err := execute(ctx, write, output); err != nil {
+		return fmt.Errorf("program latched factory EEPROM: %w", err)
+	}
 	return nil
 }
 

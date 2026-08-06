@@ -10,12 +10,18 @@ import (
 )
 
 type FlashOperation func(context.Context, string, io.Writer) error
+type PostBackupOperation func(context.Context, AutomaticPreflashResult, io.Writer) error
 
 type AutomaticPreflashOptions struct {
 	FirmwarePath                string
 	Backup                      Options
 	DataPaths                   HostDataPaths
 	AllowFlashWithoutFullBackup bool
+	// AfterBackup runs only after the raw backup is complete (or an explicit
+	// incomplete-backup override was accepted) and before firmware is
+	// reinspected or written. Controller uses this boundary to arm durable
+	// board-side programming state without contaminating the original backup.
+	AfterBackup PostBackupOperation
 }
 
 type AutomaticPreflashResult struct {
@@ -121,6 +127,14 @@ func AutomaticBackupThenFlash(
 	}
 	if err := ctx.Err(); err != nil {
 		return result, fmt.Errorf("pre-flash operation canceled after backup: %w", err)
+	}
+	if options.AfterBackup != nil {
+		if err := options.AfterBackup(ctx, result, output); err != nil {
+			return result, fmt.Errorf("post-backup programming preparation: %w", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return result, fmt.Errorf("pre-flash operation canceled after post-backup preparation: %w", err)
 	}
 	finalDocument, err := LoadIntelHex(options.FirmwarePath)
 	if err != nil {
