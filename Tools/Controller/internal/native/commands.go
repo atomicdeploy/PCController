@@ -567,7 +567,10 @@ const (
 )
 
 func (settings Settings) MotionBreakMS() uint16 {
-	return uint16(settings.MotionBreakMSValue)
+	// Decode the byte-sized wire field explicitly instead of relying on an
+	// integer conversion that static analysis cannot connect to its JSON guard.
+	encoded := [2]byte{settings.MotionBreakMSValue, 0}
+	return binary.LittleEndian.Uint16(encoded[:])
 }
 
 func (settings *Settings) SetMotionBreakMS(milliseconds uint16) error {

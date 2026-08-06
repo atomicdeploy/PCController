@@ -1379,6 +1379,7 @@ func TestRFMapParamsNormalizeSemanticTargetsAndRejectUnsafeMappings(t *testing.T
 		{name: "door gated motion", params: rfMapParams{ID: id(5), Action: "side", Target: "B", Behavior: "stop"}, action: controllerapi.RFActionSide, value: 1, behavior: controllerapi.RFBehaviorStop},
 		{name: "unmapped", params: rfMapParams{ID: id(6), Action: "none"}, action: controllerapi.RFActionNone, behavior: controllerapi.RFBehaviorPress},
 		{name: "protected relay", params: rfMapParams{ID: id(1), Action: "relay", Target: "4", Behavior: "toggle"}, wantErr: "5..8"},
+		{name: "overflow PWM", params: rfMapParams{ID: id(1), Action: "pwm", Target: "256", Behavior: "press"}, wantErr: "0..10"},
 		{name: "invalid slot", params: rfMapParams{ID: id(20), Action: "none"}, wantErr: "0..19"},
 		{name: "ambiguous unmapped", params: rfMapParams{ID: id(1), Action: "none", Behavior: "press"}, wantErr: "do not accept"},
 		{name: "missing slot", params: rfMapParams{Action: "none"}, wantErr: "required"},

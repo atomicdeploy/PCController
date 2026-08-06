@@ -1890,9 +1890,10 @@ void VirtualBoard::restoreStoredOutputs() {
     }
   }
   if ((settings_.outputPersistence & kPersistUserPwm) != 0) {
-    for (std::uint8_t channel = 0; channel < settings_.userPwm.size();
+    for (std::size_t channel = 0; channel < settings_.userPwm.size();
          ++channel) {
-      pwm_.set(channel, scale8(settings_.userPwm[channel]));
+      pwm_.set(static_cast<std::uint8_t>(channel),
+               scale8(settings_.userPwm[channel]));
     }
   }
 }
@@ -2046,10 +2047,10 @@ void VirtualBoard::loadRemotes() {
     return;
   }
   remotes_.fill(RemoteEntry{});
-  for (std::uint8_t id = 0; id < remotes_.size(); ++id) {
+  for (std::size_t id = 0; id < remotes_.size(); ++id) {
     std::array<std::uint8_t, kRemoteRecordSize> record{};
     const std::size_t address =
-        kRemoteEntriesAddress + static_cast<std::size_t>(id) * record.size();
+        kRemoteEntriesAddress + id * record.size();
     for (std::size_t index = 0; index < record.size(); ++index) {
       record[index] = eeprom_.read(address + index);
     }
@@ -2064,7 +2065,7 @@ void VirtualBoard::loadRemotes() {
     }
     remotes_[id] = RemoteEntry{
         true,
-        id,
+        static_cast<std::uint8_t>(id),
         code,
         record[4],
         record[5],

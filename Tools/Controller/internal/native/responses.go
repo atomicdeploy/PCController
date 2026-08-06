@@ -262,7 +262,7 @@ func ParseFrontPanel(payload []byte) (FrontPanel, error) {
 	if panel.Schema == 2 {
 		panel.HostCaptured = payload[44]&0x80 != 0
 		panel.HostState = payload[44] & 0x0F
-		panel.HostEditableValue = uint16(payload[45]) | uint16(payload[46]&0x0F)<<8
+		panel.HostEditableValue = binary.LittleEndian.Uint16(payload[45:47]) & 0x0FFF
 	}
 	return panel, nil
 }
@@ -889,7 +889,7 @@ func ParseMenuLayout(payload []byte) (MenuLayout, error) {
 	if len(payload) != expectedLength {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT schema %d count %d requires exactly %d bytes, payload has %d", payload[0], count, expectedLength, len(payload))
 	}
-	mask := uint16(payload[2]) | uint16(payload[3])<<8
+	mask := binary.LittleEndian.Uint16(payload[2:4])
 	allowedMask := uint16(0xFFFF)
 	if count < 16 {
 		allowedMask = uint16(1<<count) - 1

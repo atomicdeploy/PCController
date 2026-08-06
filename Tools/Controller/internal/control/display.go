@@ -103,6 +103,13 @@ func displayRepeatCode(value DisplayRepeat) byte {
 	}
 }
 
+func checkedDisplayUint16(value int, name string) (uint16, error) {
+	if value < 0 || value > 65535 {
+		return 0, fmt.Errorf("display %s %d is outside 0..65535", name, value)
+	}
+	return uint16(value), nil
+}
+
 // PresentDisplay replaces the current host presentation for the selected
 // display. Segment timing is MCU-owned; LCD once/interval clearing is retained
 // by the host because the legacy LCD payload has no repeat fields.
@@ -126,9 +133,17 @@ func (runtime *Runtime) PresentDisplay(
 		if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityScheduledSegments == 0 {
 			return DisplayResult{}, errors.New("connected firmware does not support scheduled segment messages; flash the current firmware first")
 		}
+		speedMS, conversionErr := checkedDisplayUint16(request.SpeedMS, "speed_ms")
+		if conversionErr != nil {
+			return DisplayResult{}, conversionErr
+		}
+		holdMS, conversionErr := checkedDisplayUint16(request.DurationMS, "duration_ms")
+		if conversionErr != nil {
+			return DisplayResult{}, conversionErr
+		}
 		payload, payloadErr := native.ScheduledSegmentPayload(
 			native.ScheduledSegmentOptions{
-				SpeedMS: uint16(request.SpeedMS), HoldMS: uint16(request.DurationMS),
+				SpeedMS: speedMS, HoldMS: holdMS,
 				IntervalSecond: byte(request.IntervalMS / 1000),
 				Repeat:         displayRepeatCode(request.Repeat), ForceScroll: request.Scroll,
 			},

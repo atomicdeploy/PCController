@@ -126,12 +126,12 @@ func (params rfMapParams) mapping() (controller.RFMapping, error) {
 	mapping := controller.RFMapping{
 		Action: controller.RFActionNone, Behavior: controller.RFBehaviorPress,
 	}
-	parseNumber := func(minimum, maximum int, label string) (int, error) {
-		value, err := strconv.Atoi(target)
-		if err != nil || value < minimum || value > maximum {
+	parseNumber := func(minimum, maximum byte, label string) (byte, error) {
+		value, err := strconv.ParseUint(target, 10, 8)
+		if err != nil || value < uint64(minimum) || value > uint64(maximum) {
 			return 0, fmt.Errorf("RF %s target must be %d..%d", label, minimum, maximum)
 		}
-		return value, nil
+		return byte(value), nil
 	}
 	parseBehavior := func() (controller.RFBehavior, error) {
 		switch behavior {
@@ -157,7 +157,7 @@ func (params rfMapParams) mapping() (controller.RFMapping, error) {
 		if err != nil {
 			return controller.RFMapping{}, err
 		}
-		mapping.Action, mapping.Value = controller.RFActionKey, byte(value-1)
+		mapping.Action, mapping.Value = controller.RFActionKey, value-1
 		mapping.Behavior, err = parseBehavior()
 		return mapping, err
 	case "menu":
@@ -179,7 +179,7 @@ func (params rfMapParams) mapping() (controller.RFMapping, error) {
 		if err != nil {
 			return controller.RFMapping{}, err
 		}
-		mapping.Action, mapping.Value = controller.RFActionRelay, byte(value-1)
+		mapping.Action, mapping.Value = controller.RFActionRelay, value-1
 		mapping.Behavior, err = parseBehavior()
 		return mapping, err
 	case "side":
@@ -203,7 +203,7 @@ func (params rfMapParams) mapping() (controller.RFMapping, error) {
 		if err != nil {
 			return controller.RFMapping{}, err
 		}
-		mapping.Action, mapping.Value = controller.RFActionPWM, byte(value)
+		mapping.Action, mapping.Value = controller.RFActionPWM, value
 		mapping.Behavior, err = parseBehavior()
 		return mapping, err
 	default:

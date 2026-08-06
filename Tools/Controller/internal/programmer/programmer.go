@@ -1211,7 +1211,9 @@ func hasBitClock(command Command) bool {
 }
 
 func withUSBaspBitClock(command Command, microseconds float64) Command {
-	result := Command{Name: command.Name, Args: make([]string, 0, len(command.Args)+1)}
+	// Avoid a len+1 capacity computation for caller-owned argument slices; the
+	// append growth path performs its own checked allocation.
+	result := Command{Name: command.Name}
 	inserted := false
 	for _, argument := range command.Args {
 		result.Args = append(result.Args, argument)
