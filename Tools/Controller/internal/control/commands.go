@@ -41,6 +41,7 @@ type CommandOptions struct {
 	FQBN             string
 	Macros           func() []appconfig.Macro
 	ArduinoCLI       string
+	ArduinoConfig    string
 	Avrdude          string
 	AvrdudeConf      string
 	Programmer       string
@@ -52,6 +53,107 @@ type CommandOptions struct {
 	ProgramRunner    programmer.CommandRunner
 	ProgramExecute   func(context.Context, programmer.Options, io.Writer) error
 	ProgramDataPaths programmer.HostDataPaths
+	InitializeBoard  func(context.Context, *Runtime, []string, io.Writer) error
+	BlankBoard       func(context.Context, *Runtime, []string, io.Writer) error
+	USBaspDriver     func(context.Context, []string, io.Writer) error
+}
+
+func parseDisplayCommand(args []string) (DisplayRequest, error) {
+	if len(args) < 1 {
+		return DisplayRequest{}, errors.New("usage: display segments|lcd|both [options] [--] [TEXT]")
+	}
+	request := DisplayRequest{Target: args[0]}
+	// Preserve the original compact form. For long segment text the historical
+	// duration value was the step speed; for static/LCD text it was the hold.
+	if len(args) >= 2 && !strings.HasPrefix(args[1], "--") {
+		if legacy, err := strconv.ParseUint(args[1], 0, 16); err == nil {
+			request.SpeedMS = int(legacy)
+			request.DurationMS = int(legacy)
+			request.Text = strings.Join(args[2:], " ")
+			return request, nil
+		}
+	}
+	for index := 1; index < len(args); index++ {
+		argument := args[index]
+		if argument == "--" {
+			request.Text = strings.Join(args[index+1:], " ")
+			return request, nil
+		}
+		name, inline, hasInline := strings.Cut(argument, "=")
+		nextValue := func() (string, error) {
+			if hasInline {
+				return inline, nil
+			}
+			if index+1 >= len(args) {
+				return "", fmt.Errorf("%s requires a value", name)
+			}
+			index++
+			return args[index], nil
+		}
+		switch strings.ToLower(name) {
+		case "--speed", "--speed-ms":
+			value, err := nextValue()
+			if err != nil {
+				return DisplayRequest{}, err
+			}
+			request.SpeedMS, err = parseDisplayMilliseconds(value)
+			if err != nil {
+				return DisplayRequest{}, fmt.Errorf("invalid display speed %q: %w", value, err)
+			}
+		case "--duration", "--duration-ms", "--hold":
+			value, err := nextValue()
+			if err != nil {
+				return DisplayRequest{}, err
+			}
+			request.DurationMS, err = parseDisplayMilliseconds(value)
+			if err != nil {
+				return DisplayRequest{}, fmt.Errorf("invalid display duration %q: %w", value, err)
+			}
+		case "--repeat":
+			value, err := nextValue()
+			if err != nil {
+				return DisplayRequest{}, err
+			}
+			request.Repeat = DisplayRepeat(value)
+		case "--interval", "--interval-ms", "--wait":
+			value, err := nextValue()
+			if err != nil {
+				return DisplayRequest{}, err
+			}
+			request.IntervalMS, err = parseDisplayMilliseconds(value)
+			if err != nil {
+				return DisplayRequest{}, fmt.Errorf("invalid display interval %q: %w", value, err)
+			}
+		case "--scroll", "--marquee":
+			if hasInline {
+				return DisplayRequest{}, fmt.Errorf("%s does not take a value", name)
+			}
+			request.Scroll = true
+		case "--no-scroll":
+			if hasInline {
+				return DisplayRequest{}, fmt.Errorf("%s does not take a value", name)
+			}
+			request.Scroll = false
+		default:
+			if strings.HasPrefix(argument, "--") {
+				return DisplayRequest{}, fmt.Errorf("unknown display option %q", argument)
+			}
+			request.Text = strings.Join(args[index:], " ")
+			return request, nil
+		}
+	}
+	return request, nil
+}
+
+func parseDisplayMilliseconds(value string) (int, error) {
+	if milliseconds, err := strconv.ParseUint(value, 0, 31); err == nil {
+		return int(milliseconds), nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 || duration%time.Millisecond != 0 {
+		return 0, errors.New("use milliseconds or a positive duration such as 220ms or 30s")
+	}
+	return int(duration / time.Millisecond), nil
 }
 
 func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
@@ -446,7 +548,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				case "relay", "relays":
 					settings.SetRelayAudioEnabled(enabled)
 				default:
-					return "", fmt.Errorf("audio cue group must be door or relay")
+					return "", fmt.Errorf("buzzer cue group must be door or relay")
 				}
 				if err := storeSettings(ctx, runtime, settings); err != nil {
 					return "", err
@@ -641,8 +743,11 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS", Summary: "play a buzzer tone",
+		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS | buzzer status | buzzer path board|host|both|none", Summary: "play a tone or select board/PC buzzer routing",
 		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) >= 1 && (strings.EqualFold(args[0], "status") || strings.EqualFold(args[0], "path")) {
+				return buzzerRoutingCommand(ctx, runtime, options, args)
+			}
 			values, err := exactUintArgs(args, 2, 16, "buzzer FREQUENCY_HZ DURATION_MS")
 			if err != nil {
 				return "", err
@@ -677,98 +782,33 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "silent", Usage: "silent status|on|off",
-		Summary: "query or persist the EEPROM-backed buzzer silent flag",
+		Name: "silent", Usage: "silent status|on|off | silent board|host|both status|on|off",
+		Summary: "control independent board and host buzzer silence",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			if len(args) != 1 {
-				return "", fmt.Errorf("usage: silent status|on|off")
-			}
-			frame, err := request(ctx, runtime, native.OpGetSettings, nil, native.OpSettings)
-			if err != nil {
-				return "", err
-			}
-			settings, err := native.ParseSettings(frame.Payload)
-			if err != nil {
-				return "", err
-			}
-			switch strings.ToLower(args[0]) {
-			case "status":
-				return fmt.Sprintf(
-					"silent=%t",
-					settings.Flags&native.SettingsSilent != 0,
-				), nil
-			case "on":
-				settings.Flags |= native.SettingsSilent
-			case "off":
-				settings.Flags &^= native.SettingsSilent
-			default:
-				return "", fmt.Errorf("usage: silent status|on|off")
-			}
-			payload, err := settings.Payload()
-			if err != nil {
-				return "", err
-			}
-			if err := command(ctx, runtime, native.OpSetSettings, payload); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf(
-				"silent=%t saved to board EEPROM",
-				settings.Flags&native.SettingsSilent != 0,
-			), nil
+			return silentCommand(ctx, runtime, options, args)
 		},
 	})
 	mustRegister(shell.Command{
 		Name:    "display",
-		Usage:   "display segments|lcd|both DURATION_MS [TEXT]",
-		Summary: "show or clear bounded ASCII text on the board displays",
+		Usage:   "display segments|lcd|both [--speed 220ms] [--duration 5s] [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]",
+		Summary: "send arbitrary timed text; long segment messages marquee automatically",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			if len(args) < 2 {
-				return "", fmt.Errorf("usage: display segments|lcd|both DURATION_MS [TEXT]")
-			}
-			targets := map[string]byte{
-				"segments": native.DisplaySegments, "segment": native.DisplaySegments,
-				"seg": native.DisplaySegments, "lcd": native.DisplayLCD,
-				"both": native.DisplayBoth,
-			}
-			target, ok := targets[strings.ToLower(args[0])]
-			if !ok {
-				return "", fmt.Errorf("display target must be segments, lcd, or both")
-			}
-			duration, err := strconv.ParseUint(args[1], 0, 16)
-			if err != nil {
-				return "", fmt.Errorf("invalid display duration %q", args[1])
-			}
-			text := strings.Join(args[2:], " ")
-			payload, err := native.DisplayTextPayload(target, uint16(duration), text)
+			request, err := parseDisplayCommand(args)
 			if err != nil {
 				return "", err
 			}
-			if err := command(ctx, runtime, native.OpDisplayText, payload); err != nil {
+			result, err := runtime.PresentDisplay(ctx, request)
+			if err != nil {
 				return "", err
 			}
-			if target == native.DisplayLCD || target == native.DisplayBoth {
-				line1, line2 := text, ""
-				if len(line1) > 16 {
-					line2 = line1[16:]
-					line1 = line1[:16]
-				}
-				if err := runtime.LCDPresenter().RenderPhysical(
-					ctx,
-					lcdLine(line1),
-					lcdLine(line2),
-				); err != nil {
-					// The native display command remains successful when the
-					// optional HOST-controlled backpack is absent or temporarily busy.
-					runtime.PublishStructuredEvent(Event{
-						Kind: "lcd.error", Lifecycle: "render", State: "degraded",
-						Text: "direct LCD render: " + err.Error(),
-					})
-				}
-			}
-			if text == "" {
+			if result.Text == "" {
 				return "display override cleared", nil
 			}
-			return fmt.Sprintf("display text accepted for %d ms", duration), nil
+			return fmt.Sprintf(
+				"display text accepted target=%s scroll=%t repeat=%s speed=%dms duration=%dms interval=%dms",
+				result.Target, result.Scrolling, result.Repeat, result.SpeedMS,
+				result.DurationMS, result.IntervalMS,
+			), nil
 		},
 	})
 	mustRegister(shell.Command{
@@ -906,6 +946,53 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name:    "opcode",
+		Usage:   "opcode OPCODE [PAYLOAD_HEX] [--expect RESPONSE_OPCODE]",
+		Summary: "exchange an opaque versionless opcode (ACK expected by default)",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) == 0 {
+				return "", fmt.Errorf("usage: opcode OPCODE [PAYLOAD_HEX] [--expect RESPONSE_OPCODE]")
+			}
+			opcode, err := parseByte(args[0])
+			if err != nil || opcode == 0 {
+				return "", fmt.Errorf("opcode must be 1..255")
+			}
+			expected := byte(native.OpACK)
+			var payload []byte
+			for index := 1; index < len(args); index++ {
+				if strings.EqualFold(args[index], "--expect") {
+					if index+1 >= len(args) {
+						return "", errors.New("--expect requires a response opcode")
+					}
+					expected, err = parseByte(args[index+1])
+					if err != nil || expected == 0 {
+						return "", errors.New("response opcode must be 1..255")
+					}
+					index++
+					continue
+				}
+				if payload != nil {
+					return "", errors.New("only one hexadecimal payload is allowed")
+				}
+				payload, err = decodeHex(args[index])
+				if err != nil {
+					return "", err
+				}
+			}
+			if len(payload) > native.MaxPayload {
+				return "", native.ErrPayloadTooLong
+			}
+			frame, err := request(ctx, runtime, opcode, payload, expected)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(
+				"opcode=0x%02X name=%s seq=%d payload=% X",
+				frame.Opcode, native.OpcodeName(frame.Opcode), frame.Seq, frame.Payload,
+			), nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "write", Usage: "write HEX_BYTES", Summary: "write raw serial bytes",
 		Run: func(_ context.Context, args []string) (string, error) {
 			if len(args) == 0 {
@@ -919,6 +1006,68 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "", err
 			}
 			return fmt.Sprintf("wrote %d raw bytes", len(data)), nil
+		},
+	})
+	mustRegister(shell.Command{
+		Name:    "board",
+		Usage:   "board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]",
+		Summary: "provision, securely blank, or name a board",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) == 0 {
+				return "", errors.New("usage: board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
+			}
+			if strings.EqualFold(args[0], "initialize") {
+				if options.InitializeBoard == nil {
+					return "", errors.New("board initialization is unavailable")
+				}
+				var output bytes.Buffer
+				err := options.InitializeBoard(ctx, runtime, args[1:], &output)
+				return strings.TrimSpace(output.String()), err
+			}
+			if strings.EqualFold(args[0], "blank") {
+				if options.BlankBoard == nil {
+					return "", errors.New("board blanking is unavailable")
+				}
+				var output bytes.Buffer
+				err := options.BlankBoard(ctx, runtime, args[1:], &output)
+				return strings.TrimSpace(output.String()), err
+			}
+			if !strings.EqualFold(args[0], "name") {
+				return "", errors.New("usage: board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
+			}
+			if len(args) == 1 || (len(args) == 2 && strings.EqualFold(args[1], "get")) {
+				value, err := runtime.BoardName(ctx)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("name=%q persisted=%t", value.Name, value.Persisted), nil
+			}
+			name := ""
+			switch {
+			case len(args) == 2 && strings.EqualFold(args[1], "clear"):
+			case len(args) == 3 && strings.EqualFold(args[1], "set"):
+				name = args[2]
+			default:
+				return "", errors.New("usage: board name [get|set NAME|clear]")
+			}
+			value, err := runtime.SetBoardName(ctx, name)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("name=%q persisted=%t", value.Name, value.Persisted), nil
+		},
+	})
+	mustRegister(shell.Command{
+		Name:    "driver",
+		Usage:   "driver usbasp status|ensure|zadig",
+		Summary: "inspect or repair the Windows USBasp driver",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if options.USBaspDriver == nil {
+				return "", errors.New("USBasp driver management is unavailable")
+			}
+			var output bytes.Buffer
+			err := options.USBaspDriver(ctx, args, &output)
+			return strings.TrimSpace(output.String()), err
 		},
 	})
 	mustRegister(shell.Command{
@@ -1024,7 +1173,7 @@ func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 }
 
 func hostConfigCommand(options CommandOptions, args []string) (string, error) {
-	const usage = "config get PATH | config set PATH VALUE; PATH is ui.app_title or ui.appearance.{theme,locale,direction,reduce_motion,compact_numbers,audio_muted,audio_volume}"
+	const usage = "config get PATH | config set PATH VALUE; PATH is ui.app_title, ui.tagline, ui.appearance.*, or integrations.buzzer_mirror.{enabled,native_enabled,web_audio_enabled,driver_directory}"
 	if len(args) < 2 {
 		return "", errors.New(usage)
 	}
@@ -1038,10 +1187,14 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 		if options.HostConfig == nil {
 			return "", errors.New("host configuration is unavailable")
 		}
-		ui := options.HostConfig().UI
+		config := options.HostConfig()
+		ui := config.UI
+		buzzer := config.Integrations.BuzzerMirror
 		switch path {
 		case "ui.app_title":
 			return fmt.Sprintf("ui.app_title=%q", ui.AppTitle), nil
+		case "ui.tagline":
+			return fmt.Sprintf("ui.tagline=%q", ui.Tagline), nil
 		case "ui.appearance.theme":
 			return "ui.appearance.theme=" + ui.Appearance.Theme, nil
 		case "ui.appearance.locale":
@@ -1056,6 +1209,14 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 			return fmt.Sprintf("ui.appearance.audio_muted=%t", ui.Appearance.AudioMuted), nil
 		case "ui.appearance.audio_volume":
 			return fmt.Sprintf("ui.appearance.audio_volume=%.0f%%", ui.Appearance.AudioVolume*100), nil
+		case "integrations.buzzer_mirror.enabled":
+			return fmt.Sprintf("integrations.buzzer_mirror.enabled=%t", buzzer.Enabled), nil
+		case "integrations.buzzer_mirror.native_enabled":
+			return fmt.Sprintf("integrations.buzzer_mirror.native_enabled=%t", buzzer.NativeEnabled), nil
+		case "integrations.buzzer_mirror.web_audio_enabled":
+			return fmt.Sprintf("integrations.buzzer_mirror.web_audio_enabled=%t", buzzer.WebAudioEnabled), nil
+		case "integrations.buzzer_mirror.driver_directory":
+			return fmt.Sprintf("integrations.buzzer_mirror.driver_directory=%q", buzzer.DriverDirectory), nil
 		default:
 			return "", fmt.Errorf("unsupported host setting %q", args[1])
 		}
@@ -1071,13 +1232,19 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 		}
 		raw := strings.TrimSpace(strings.Join(args[2:], " "))
 		candidate := options.HostConfig()
-		before := candidate.UI
+		beforeUI := candidate.UI
+		beforeBuzzer := candidate.Integrations.BuzzerMirror
 		switch path {
 		case "ui.app_title":
 			if raw == "" {
 				return "", errors.New("ui.app_title cannot be empty")
 			}
 			candidate.UI.AppTitle = raw
+		case "ui.tagline":
+			if raw == "" {
+				return "", errors.New("ui.tagline cannot be empty")
+			}
+			candidate.UI.Tagline = raw
 		case "ui.appearance.theme":
 			candidate.UI.Appearance.Theme = raw
 		case "ui.appearance.locale":
@@ -1108,6 +1275,26 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 				return "", errors.New("ui.appearance.audio_volume must be 0..100 percent")
 			}
 			candidate.UI.Appearance.AudioVolume = percent / 100
+		case "integrations.buzzer_mirror.enabled":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("integrations.buzzer_mirror.enabled: %w", err)
+			}
+			candidate.Integrations.BuzzerMirror.Enabled = value
+		case "integrations.buzzer_mirror.native_enabled":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("integrations.buzzer_mirror.native_enabled: %w", err)
+			}
+			candidate.Integrations.BuzzerMirror.NativeEnabled = value
+		case "integrations.buzzer_mirror.web_audio_enabled":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("integrations.buzzer_mirror.web_audio_enabled: %w", err)
+			}
+			candidate.Integrations.BuzzerMirror.WebAudioEnabled = value
+		case "integrations.buzzer_mirror.driver_directory":
+			candidate.Integrations.BuzzerMirror.DriverDirectory = raw
 		default:
 			return "", fmt.Errorf("unsupported host setting %q", args[1])
 		}
@@ -1115,11 +1302,13 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 		if err := candidate.Validate(); err != nil {
 			return "", err
 		}
-		if reflect.DeepEqual(before, candidate.UI) {
+		if reflect.DeepEqual(beforeUI, candidate.UI) &&
+			reflect.DeepEqual(beforeBuzzer, candidate.Integrations.BuzzerMirror) {
 			return path + " unchanged", nil
 		}
 		if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
 			config.UI = candidate.UI
+			config.Integrations.BuzzerMirror = candidate.Integrations.BuzzerMirror
 			return config.Validate()
 		}); err != nil {
 			return "", err
@@ -1784,6 +1973,185 @@ func metricCommand(
 	}
 }
 
+func buzzerRoutingCommand(
+	ctx context.Context,
+	runtime *Runtime,
+	options CommandOptions,
+	args []string,
+) (string, error) {
+	if len(args) == 0 {
+		args = []string{"status"}
+	}
+	if len(args) != 1 && !(len(args) == 2 && strings.EqualFold(args[0], "path")) {
+		return "", errors.New("usage: buzzer status | buzzer path board|host|both|none")
+	}
+	if options.HostConfig == nil {
+		return "", errors.New("host buzzer configuration is unavailable")
+	}
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return "", err
+	}
+	config := options.HostConfig()
+	if len(args) == 1 {
+		if !strings.EqualFold(args[0], "status") {
+			return "", errors.New("usage: buzzer status | buzzer path board|host|both|none")
+		}
+		return formatBuzzerRouting(settings, config), nil
+	}
+
+	desiredPath := strings.ToLower(strings.TrimSpace(args[1]))
+	var boardSilent, hostEnabled bool
+	switch desiredPath {
+	case "board":
+		boardSilent, hostEnabled = false, false
+	case "host":
+		boardSilent, hostEnabled = true, true
+	case "both":
+		boardSilent, hostEnabled = false, true
+	case "none":
+		boardSilent, hostEnabled = true, false
+	default:
+		return "", errors.New("buzzer path must be board, host, both, or none")
+	}
+
+	beforeMirror := config.Integrations.BuzzerMirror
+	hostChanged := beforeMirror.Enabled != hostEnabled
+	if hostChanged {
+		if options.UpdateHostConfig == nil {
+			return "", errors.New("host buzzer configuration is read-only")
+		}
+		if err := options.UpdateHostConfig(func(value *appconfig.Config) error {
+			value.Integrations.BuzzerMirror.Enabled = hostEnabled
+			return value.Validate()
+		}); err != nil {
+			return "", fmt.Errorf("set host buzzer path: %w", err)
+		}
+	}
+
+	boardChanged := settings.Flags&native.SettingsSilent != 0 != boardSilent
+	if boardChanged {
+		if boardSilent {
+			settings.Flags |= native.SettingsSilent
+		} else {
+			settings.Flags &^= native.SettingsSilent
+		}
+		if err := storeSettings(ctx, runtime, settings); err != nil {
+			if hostChanged {
+				_ = options.UpdateHostConfig(func(value *appconfig.Config) error {
+					value.Integrations.BuzzerMirror = beforeMirror
+					return value.Validate()
+				})
+			}
+			return "", fmt.Errorf("set board silent state: %w", err)
+		}
+	}
+
+	verified, err := querySettings(ctx, runtime)
+	if err != nil {
+		return "", fmt.Errorf("verify board silent state: %w", err)
+	}
+	if (verified.Flags&native.SettingsSilent != 0) != boardSilent {
+		return "", errors.New("board silent-state readback did not match the requested buzzer path")
+	}
+	return formatBuzzerRouting(verified, options.HostConfig()) + " applied live", nil
+}
+
+func formatBuzzerRouting(settings native.Settings, config appconfig.Config) string {
+	boardSilent := settings.Flags&native.SettingsSilent != 0
+	hostEnabled := config.Integrations.BuzzerMirror.Enabled
+	path := "none"
+	switch {
+	case !boardSilent && hostEnabled:
+		path = "both"
+	case !boardSilent:
+		path = "board"
+	case hostEnabled:
+		path = "host"
+	}
+	return fmt.Sprintf(
+		"buzzer_path=%s board_silent=%t host_silent=%t native=%t web_audio=%t",
+		path, boardSilent, !hostEnabled,
+		hostEnabled && config.Integrations.BuzzerMirror.NativeEnabled,
+		hostEnabled && config.Integrations.BuzzerMirror.WebAudioEnabled,
+	)
+}
+
+func silentCommand(
+	ctx context.Context,
+	runtime *Runtime,
+	options CommandOptions,
+	args []string,
+) (string, error) {
+	const usage = "usage: silent status|on|off | silent board|host|both status|on|off"
+	if len(args) == 2 {
+		target := strings.ToLower(strings.TrimSpace(args[0]))
+		action := strings.ToLower(strings.TrimSpace(args[1]))
+		if action != "status" && action != "on" && action != "off" {
+			return "", errors.New(usage)
+		}
+		switch target {
+		case "board":
+			args = []string{action}
+		case "host":
+			if options.HostConfig == nil {
+				return "", errors.New("host buzzer configuration is unavailable")
+			}
+			config := options.HostConfig()
+			if action == "status" {
+				return fmt.Sprintf("host_silent=%t", !config.Integrations.BuzzerMirror.Enabled), nil
+			}
+			if options.UpdateHostConfig == nil {
+				return "", errors.New("host buzzer configuration is read-only")
+			}
+			silent := action == "on"
+			if err := options.UpdateHostConfig(func(value *appconfig.Config) error {
+				value.Integrations.BuzzerMirror.Enabled = !silent
+				return value.Validate()
+			}); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("host_silent=%t applied live", silent), nil
+		case "both":
+			if action == "status" {
+				return buzzerRoutingCommand(ctx, runtime, options, []string{"status"})
+			}
+			path := "both"
+			if action == "on" {
+				path = "none"
+			}
+			return buzzerRoutingCommand(ctx, runtime, options, []string{"path", path})
+		default:
+			return "", errors.New(usage)
+		}
+	}
+	if len(args) != 1 {
+		return "", errors.New(usage)
+	}
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return "", err
+	}
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "status":
+		return fmt.Sprintf("silent=%t board_silent=%t", settings.Flags&native.SettingsSilent != 0, settings.Flags&native.SettingsSilent != 0), nil
+	case "on":
+		settings.Flags |= native.SettingsSilent
+	case "off":
+		settings.Flags &^= native.SettingsSilent
+	default:
+		return "", errors.New(usage)
+	}
+	if err := storeSettings(ctx, runtime, settings); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"silent=%t board_silent=%t saved to board EEPROM and applied live",
+		settings.Flags&native.SettingsSilent != 0,
+		settings.Flags&native.SettingsSilent != 0,
+	), nil
+}
+
 func refresh(ctx context.Context, runtime *Runtime) (native.Status, error) {
 	requestContext, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
@@ -2173,25 +2541,37 @@ func rgbCommand(
 	args []string,
 ) (string, error) {
 	if len(args) != 0 && strings.EqualFold(args[0], "effect") {
-		return statusEffectCommand(ctx, outputs, configProvider, args[1:])
+		return statusEffectCommand(ctx, runtime, outputs, configProvider, args[1:])
 	}
-	if len(args) != 3 && len(args) != 4 {
+	if len(args) != 0 && strings.EqualFold(args[0], "profile") {
+		return statusProfileCommand(ctx, runtime, args[1:])
+	}
+	if len(args) != 0 && strings.EqualFold(args[0], "color") {
+		args = args[1:]
+	}
+	color, consumed, err := parseStatusColor(args)
+	if err != nil {
 		return "", fmt.Errorf(
-			"usage: rgb R G B [BRIGHTNESS] | rgb effect list|play NAME|wait NAME|stop|status",
+			"usage: rgb [color] '#RRGGBB' [BRIGHTNESS] | rgb [color] R G B [BRIGHTNESS] | rgb effect ...: %w",
+			err,
 		)
 	}
-	values, err := uintArgs(args, 8)
-	if err != nil {
-		return "", err
+	if len(args) != consumed && len(args) != consumed+1 {
+		return "", fmt.Errorf(
+			"usage: rgb [color] '#RRGGBB' [BRIGHTNESS] | rgb [color] R G B [BRIGHTNESS] | rgb effect ...",
+		)
 	}
 	brightness := uint64(255)
-	if len(values) == 4 {
-		brightness = values[3]
+	if len(args) == consumed+1 {
+		brightness, err = strconv.ParseUint(args[consumed], 10, 8)
+		if err != nil {
+			return "", fmt.Errorf("invalid brightness %q", args[consumed])
+		}
 	}
 	payload := native.StatusRGBPayload(
-		byte(values[0]),
-		byte(values[1]),
-		byte(values[2]),
+		color.Red,
+		color.Green,
+		color.Blue,
 		byte(brightness),
 	)
 	outputs.OverrideStatusEffect()
@@ -2200,15 +2580,16 @@ func rgbCommand(
 	}
 	return fmt.Sprintf(
 		"status RGB=%d,%d,%d brightness=%d",
-		values[0],
-		values[1],
-		values[2],
+		color.Red,
+		color.Green,
+		color.Blue,
 		brightness,
 	), nil
 }
 
 func statusEffectCommand(
 	ctx context.Context,
+	runtime *Runtime,
 	outputs *OutputScheduler,
 	configProvider func() appconfig.Config,
 	args []string,
@@ -2245,6 +2626,12 @@ func statusEffectCommand(
 			if outputs.StopStatusEffect() {
 				return "status LED effect stop requested", nil
 			}
+			if runtime.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects != 0 {
+				if err := command(ctx, runtime, native.OpStatusEffect, native.StatusEffectReleasePayload()); err != nil {
+					return "", err
+				}
+				return "status LED effect released to firmware ownership", nil
+			}
 			return "no status LED effect is playing", nil
 		case "status":
 			state := outputs.State()
@@ -2255,6 +2642,25 @@ func statusEffectCommand(
 				"status LED effect playing id=%d name=%q",
 				state.EffectID,
 				state.EffectName,
+			), nil
+		}
+	}
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "breathe", "flash", "cycle", "transition":
+			effect, err := parseAdHocStatusEffect(args)
+			if err != nil {
+				return "", err
+			}
+			operation, err := outputs.StartStatusEffect(ctx, effect)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(
+				"status LED %s started id=%d rgb=#%02X%02X%02X to=#%02X%02X%02X period=%dms repeats=%s",
+				effect.Kind, operation.ID, effect.Red, effect.Green, effect.Blue,
+				effect.AlternateRed, effect.AlternateGreen, effect.AlternateBlue,
+				effect.PeriodMS, statusEffectRepeatLabel(effect.Repeats),
 			), nil
 		}
 	}
@@ -2298,6 +2704,255 @@ func statusEffectCommand(
 		effect.Name,
 		operation.ID,
 	), nil
+}
+
+func parseStatusColor(args []string) (appconfig.RGBColor, int, error) {
+	if len(args) == 0 {
+		return appconfig.RGBColor{}, 0, errors.New("color is required")
+	}
+	if strings.HasPrefix(args[0], "#") {
+		value := strings.TrimPrefix(args[0], "#")
+		if len(value) == 3 {
+			value = strings.Repeat(value[0:1], 2) +
+				strings.Repeat(value[1:2], 2) +
+				strings.Repeat(value[2:3], 2)
+		}
+		if len(value) != 6 {
+			return appconfig.RGBColor{}, 0, fmt.Errorf("hex color %q must be #RGB or #RRGGBB", args[0])
+		}
+		parsed, err := strconv.ParseUint(value, 16, 24)
+		if err != nil {
+			return appconfig.RGBColor{}, 0, fmt.Errorf("invalid hex color %q", args[0])
+		}
+		return appconfig.RGBColor{
+			Red: byte(parsed >> 16), Green: byte(parsed >> 8), Blue: byte(parsed),
+		}, 1, nil
+	}
+	if len(args) < 3 {
+		return appconfig.RGBColor{}, 0, errors.New("decimal color requires R G B")
+	}
+	values := [3]byte{}
+	for index := range values {
+		parsed, err := strconv.ParseUint(args[index], 10, 8)
+		if err != nil {
+			return appconfig.RGBColor{}, 0,
+				fmt.Errorf("invalid decimal color channel %q", args[index])
+		}
+		values[index] = byte(parsed)
+	}
+	return appconfig.RGBColor{Red: values[0], Green: values[1], Blue: values[2]}, 3, nil
+}
+
+func parseAdHocStatusEffect(args []string) (appconfig.StatusLEDEffect, error) {
+	kind := strings.ToLower(args[0])
+	effect := appconfig.StatusLEDEffect{
+		Name: "manual-" + kind, Kind: kind, Brightness: 255, PeriodMS: 1000,
+	}
+	index := 1
+	color, consumed, err := parseStatusColor(args[index:])
+	if err != nil {
+		return effect, fmt.Errorf("rgb effect %s: %w", kind, err)
+	}
+	effect.Red, effect.Green, effect.Blue = color.Red, color.Green, color.Blue
+	index += consumed
+	haveAlternate := false
+	for index < len(args) {
+		option := strings.ToLower(args[index])
+		index++
+		switch option {
+		case "--to", "--alternate":
+			color, consumed, err := parseStatusColor(args[index:])
+			if err != nil {
+				return effect, fmt.Errorf("%s: %w", option, err)
+			}
+			effect.AlternateRed, effect.AlternateGreen, effect.AlternateBlue =
+				color.Red, color.Green, color.Blue
+			index += consumed
+			haveAlternate = true
+		case "--period", "--speed":
+			if index >= len(args) {
+				return effect, fmt.Errorf("%s requires a duration", option)
+			}
+			duration, err := time.ParseDuration(args[index])
+			if err != nil {
+				milliseconds, numberErr := strconv.ParseUint(args[index], 10, 16)
+				if numberErr != nil {
+					return effect, fmt.Errorf("invalid effect period %q", args[index])
+				}
+				duration = time.Duration(milliseconds) * time.Millisecond
+			}
+			effect.PeriodMS = int(duration / time.Millisecond)
+			index++
+		case "--brightness", "--minimum", "--min", "--repeat", "--repeats":
+			if index >= len(args) {
+				return effect, fmt.Errorf("%s requires a value", option)
+			}
+			value := strings.ToLower(args[index])
+			index++
+			if option == "--repeat" || option == "--repeats" {
+				switch value {
+				case "loop", "forever", "infinite":
+					effect.Repeats = 0
+				case "once":
+					effect.Repeats = 1
+				default:
+					parsed, err := strconv.ParseUint(value, 10, 8)
+					if err != nil || parsed == 0 {
+						return effect, fmt.Errorf("repeat must be once, loop, or 1..255")
+					}
+					effect.Repeats = byte(parsed)
+				}
+				continue
+			}
+			parsed, err := strconv.ParseUint(value, 10, 8)
+			if err != nil {
+				return effect, fmt.Errorf("%s must be 0..255", option)
+			}
+			if option == "--brightness" {
+				effect.Brightness = byte(parsed)
+			} else {
+				effect.MinBrightness = byte(parsed)
+			}
+		default:
+			return effect, fmt.Errorf("unknown status effect option %q", option)
+		}
+	}
+	if (kind == "cycle" || kind == "transition") && !haveAlternate {
+		return effect, fmt.Errorf("rgb effect %s requires --to COLOR", kind)
+	}
+	if err := appconfig.ValidateStatusLEDEffect(effect); err != nil {
+		return effect, err
+	}
+	return effect, nil
+}
+
+func statusEffectRepeatLabel(repeats byte) string {
+	if repeats == 0 {
+		return "loop"
+	}
+	return strconv.Itoa(int(repeats))
+}
+
+var statusProfileNames = [...]string{
+	"off", "boot", "ready", "learning", "hot", "fault", "custom",
+	"bluetooth-connected", "bluetooth-off", "bluetooth-waiting", "running",
+	"door-open", "door-closed", "bluetooth", "menu", "radio", "save",
+	"discard", "reset",
+}
+
+func statusProfileCondition(value string) (byte, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for index, name := range statusProfileNames {
+		if normalized == name {
+			return byte(index), nil
+		}
+	}
+	if normalized == "warning" {
+		return 4, nil
+	}
+	parsed, err := strconv.ParseUint(normalized, 10, 8)
+	if err == nil && parsed < uint64(len(statusProfileNames)) {
+		return byte(parsed), nil
+	}
+	return 0, fmt.Errorf("unknown status profile condition %q", value)
+}
+
+func statusProfileCommand(ctx context.Context, runtime *Runtime, args []string) (string, error) {
+	if len(args) == 1 && strings.EqualFold(args[0], "list") {
+		lines := make([]string, 0, len(statusProfileNames))
+		for condition, name := range statusProfileNames {
+			profile, err := readStatusProfile(ctx, runtime, byte(condition))
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, formatStatusProfile(name, profile.Effect))
+		}
+		return strings.Join(lines, "\n"), nil
+	}
+	if len(args) == 2 && strings.EqualFold(args[0], "get") {
+		condition, err := statusProfileCondition(args[1])
+		if err != nil {
+			return "", err
+		}
+		profile, err := readStatusProfile(ctx, runtime, condition)
+		if err != nil {
+			return "", err
+		}
+		return formatStatusProfile(statusProfileNames[condition], profile.Effect), nil
+	}
+	if len(args) >= 4 && strings.EqualFold(args[0], "set") {
+		condition, err := statusProfileCondition(args[1])
+		if err != nil {
+			return "", err
+		}
+		var options native.StatusEffectOptions
+		if strings.EqualFold(args[2], "color") || strings.EqualFold(args[2], "steady") {
+			color, consumed, err := parseStatusColor(args[3:])
+			if err != nil {
+				return "", err
+			}
+			brightness := byte(255)
+			if len(args) > 3+consumed {
+				if len(args) != 4+consumed {
+					return "", errors.New("steady profile accepts only an optional brightness")
+				}
+				parsed, err := strconv.ParseUint(args[3+consumed], 10, 8)
+				if err != nil {
+					return "", fmt.Errorf("invalid brightness %q", args[3+consumed])
+				}
+				brightness = byte(parsed)
+			}
+			options = native.StatusEffectOptions{
+				Kind: native.StatusEffectNone, Red: color.Red, Green: color.Green,
+				Blue: color.Blue, Brightness: brightness,
+			}
+		} else {
+			effect, err := parseAdHocStatusEffect(args[2:])
+			if err != nil {
+				return "", err
+			}
+			options, _, err = nativeStatusEffect(effect)
+			if err != nil {
+				return "", err
+			}
+		}
+		payload, err := native.StatusProfileSetPayload(condition, options)
+		if err != nil {
+			return "", err
+		}
+		if err := command(ctx, runtime, native.OpStatusProfileSet, payload); err != nil {
+			return "", err
+		}
+		return "EEPROM status profile saved: " + formatStatusProfile(statusProfileNames[condition], options), nil
+	}
+	return "", errors.New("usage: rgb profile list|get CONDITION|set CONDITION color COLOR [BRIGHTNESS]|set CONDITION EFFECT COLOR [options]")
+}
+
+func readStatusProfile(ctx context.Context, runtime *Runtime, condition byte) (native.StatusProfile, error) {
+	payload, err := native.StatusProfileGetPayload(condition)
+	if err != nil {
+		return native.StatusProfile{}, err
+	}
+	frame, err := runtime.Request(ctx, native.OpStatusProfileGet, payload, native.OpStatusProfile)
+	if err != nil {
+		return native.StatusProfile{}, err
+	}
+	return native.ParseStatusProfile(frame.Payload)
+}
+
+func formatStatusProfile(name string, effect native.StatusEffectOptions) string {
+	kinds := [...]string{"color", "breathe", "flash", "cycle", "transition"}
+	kind := "unknown"
+	if int(effect.Kind) < len(kinds) {
+		kind = kinds[effect.Kind]
+	}
+	return fmt.Sprintf(
+		"%s effect=%s color=#%02X%02X%02X alternate=#%02X%02X%02X brightness=%d minimum=%d period=%dms repeats=%s",
+		name, kind, effect.Red, effect.Green, effect.Blue,
+		effect.AlternateRed, effect.AlternateGreen, effect.AlternateBlue,
+		effect.Brightness, effect.MinimumBrightness, effect.PeriodMS,
+		statusEffectRepeatLabel(effect.Repeats),
+	)
 }
 
 func findMelody(
@@ -2960,9 +3615,10 @@ func programCommand(
 	method := programmer.Method(strings.ToLower(args[methodIndex]))
 	programOptions := programmer.Options{
 		Method: method, Operation: operation, FQBN: options.FQBN,
-		ArduinoCLI: options.ArduinoCLI,
-		Avrdude:    options.Avrdude, AvrdudeConf: options.AvrdudeConf,
-		Programmer: options.Programmer,
+		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig,
+		Avrdude: options.Avrdude, AvrdudeConf: options.AvrdudeConf,
+		Programmer:     options.Programmer,
+		USBaspAutoSlow: true,
 	}
 	pathIndex := methodIndex + 1
 	needsPath := operation != programmer.OperationMetadata &&
@@ -3220,8 +3876,9 @@ func safeFlashCommand(
 	backup := programmer.Options{
 		Method: method, Port: port, Operation: programmer.OperationBackup,
 		FQBN: options.FQBN, Programmer: options.Programmer,
-		ArduinoCLI: options.ArduinoCLI, Avrdude: options.Avrdude,
+		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig, Avrdude: options.Avrdude,
 		AvrdudeConf:               options.AvrdudeConf,
+		USBaspAutoSlow:            true,
 		ApplicationHash:           snapshot.Hello.BuildHash,
 		ApplicationIdentitySchema: snapshot.Hello.IdentitySchema,
 	}
@@ -3453,8 +4110,9 @@ func recoverProgrammingCommand(
 	verifyOptions := programmer.Options{
 		Method: programmer.MethodUrclock, Port: snapshot.Port.Name,
 		HexPath: firmwarePath, FQBN: options.FQBN,
-		Programmer: options.Programmer, ArduinoCLI: options.ArduinoCLI,
+		Programmer: options.Programmer, ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig,
 		Avrdude: options.Avrdude, AvrdudeConf: options.AvrdudeConf,
+		USBaspAutoSlow: true,
 	}
 	verifyErr := programmer.VerifyFlashReadbackWithRunner(
 		ctx, verifyOptions, &output, runner,

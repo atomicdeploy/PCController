@@ -75,6 +75,31 @@ func TestSelfUpdateHealthAcknowledgementUsesUnforgeableToken(t *testing.T) {
 	}
 }
 
+func TestReplaceExecutablePublishesIntoAnExistingCanonicalPath(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "controller.new")
+	destination := filepath.Join(directory, "controller.exe")
+	if err := os.WriteFile(source, []byte("replacement"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(destination, []byte("current"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceExecutable(source, destination); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "replacement" {
+		t.Fatalf("destination content=%q", content)
+	}
+	if _, err := os.Stat(source); !os.IsNotExist(err) {
+		t.Fatalf("source still exists: %v", err)
+	}
+}
+
 func copyTestExecutable(source, destination string, trailer []byte) error {
 	input, err := os.Open(source)
 	if err != nil {

@@ -128,7 +128,7 @@ func TestUIBootstrapPublishesHostAuthoritativeAppearance(t *testing.T) {
 	server := httptest.NewServer(websocketMux(context.Background(), service))
 	defer server.Close()
 
-	response, err := http.Get(server.URL + "/api/v1/ui-config")
+	response, err := http.Get(server.URL + "/api/ui-config")
 	if err != nil {
 		t.Fatalf("bootstrap GET: %v", err)
 	}

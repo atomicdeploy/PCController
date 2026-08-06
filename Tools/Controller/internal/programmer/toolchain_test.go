@@ -182,6 +182,16 @@ func TestManagedCLINameUsesRequestedTargetOS(t *testing.T) {
 	}
 }
 
+func TestExplicitToolchainConfigWorksForGlobalCLI(t *testing.T) {
+	globalCLI := filepath.Join(t.TempDir(), "Program Files", "arduino-cli.exe")
+	managedConfig := filepath.Join(t.TempDir(), "firmware-cli.yaml")
+	arguments := toolchainCLIArguments(globalCLI, managedConfig, "compile", "project")
+	want := []string{"--config-file", managedConfig, "compile", "project"}
+	if !reflect.DeepEqual(arguments, want) {
+		t.Fatalf("explicit managed config arguments=%q want %q", arguments, want)
+	}
+}
+
 func TestVerifiedToolDownloadAndZipExtraction(t *testing.T) {
 	var archive bytes.Buffer
 	writer := zip.NewWriter(&archive)
@@ -208,7 +218,7 @@ func TestVerifiedToolDownloadAndZipExtraction(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	destination := filepath.Join(t.TempDir(), "arduino-cli.exe")
+	destination := filepath.Join(t.TempDir(), "arduino-cli.exe.tmp")
 	if err := extractCLIExecutable(archivePath, "zip", destination); err != nil {
 		t.Fatal(err)
 	}

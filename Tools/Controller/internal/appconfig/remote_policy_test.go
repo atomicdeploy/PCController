@@ -48,6 +48,23 @@ func TestRemoteAccessRejectsMissingOrWildcardBrowserOrigins(t *testing.T) {
 	}
 }
 
+func TestRemotePrincipalIsStableAndMachineSafe(t *testing.T) {
+	config := Defaults()
+	if config.IPC.RemotePrincipal != "remote-operator" {
+		t.Fatalf("default remote principal=%q", config.IPC.RemotePrincipal)
+	}
+	for _, invalid := range []string{"", " leading", "two words", "name=value", "line\nbreak"} {
+		config.IPC.RemotePrincipal = invalid
+		if err := config.Validate(); err == nil {
+			t.Fatalf("remote principal %q unexpectedly validated", invalid)
+		}
+	}
+	config.IPC.RemotePrincipal = "maintenance-console"
+	if err := config.Validate(); err != nil {
+		t.Fatalf("named remote principal rejected: %v", err)
+	}
+}
+
 func TestRemoteBridgeEventForwardingRequiresCredentials(t *testing.T) {
 	config := Defaults()
 	config.Integrations.WebSocketClients = []WebSocketClient{{
@@ -68,6 +85,21 @@ func TestRemoteBridgeEventForwardingRequiresCredentials(t *testing.T) {
 	config.Integrations.WebSocketClients[0].Topics = []string{"status", "telemetry"}
 	if err := config.Validate(); err == nil {
 		t.Fatal("expected duplicate normalized bridge topic to be rejected")
+	}
+}
+
+func TestRemoteBridgeRejectsURLCredentialsAndAcceptsSecretReference(t *testing.T) {
+	config := Defaults()
+	config.Integrations.WebSocketClients = []WebSocketClient{{
+		Name: "remote", Enabled: true, URL: "wss://example.test/ipc?access_token=secret",
+		AuthTokenRef: "os:bridges/remote", ForwardEvents: true,
+	}}
+	if err := config.Validate(); err == nil {
+		t.Fatal("credential-shaped query was accepted")
+	}
+	config.Integrations.WebSocketClients[0].URL = "wss://example.test/ipc"
+	if err := config.Validate(); err != nil {
+		t.Fatalf("secret-backed bridge rejected: %v", err)
 	}
 }
 

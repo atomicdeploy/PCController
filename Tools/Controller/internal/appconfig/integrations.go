@@ -15,6 +15,7 @@ import (
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/integrationproxy"
 	"pccontroller.local/controller/internal/netpolicy"
+	"pccontroller.local/controller/internal/secretstore"
 )
 
 // Integrations contains PC-host integrations only. None of these values is
@@ -25,6 +26,7 @@ type Integrations struct {
 	Lifecycle              LifecycleSafety   `json:"lifecycle_safety"`
 	Notifications          Notifications     `json:"notifications"`
 	StatusLED              StatusLEDPolicy   `json:"status_led"`
+	BuzzerMirror           BuzzerMirror      `json:"buzzer_mirror"`
 	Discovery              Discovery         `json:"discovery"`
 	InboundWebhooksEnabled bool              `json:"inbound_webhooks_enabled"`
 	OutboundWebhooks       []Webhook         `json:"outbound_webhooks,omitempty"`
@@ -32,6 +34,21 @@ type Integrations struct {
 	TextMappings           []TextMapping     `json:"text_mappings,omitempty"`
 	LocalDevice            LocalDevice       `json:"local_device"`
 	DataHub                DataHub           `json:"data_hub"`
+}
+
+// BuzzerMirror controls optional host playback of board-generated tones. The
+// board event is always forwarded; these switches affect presentation only.
+type BuzzerMirror struct {
+	Enabled         bool   `json:"enabled"`
+	NativeEnabled   bool   `json:"native_enabled"`
+	WebAudioEnabled bool   `json:"web_audio_enabled"`
+	DriverDirectory string `json:"driver_directory"`
+}
+
+func DefaultBuzzerMirror() BuzzerMirror {
+	return BuzzerMirror{
+		WebAudioEnabled: true,
+	}
 }
 
 const (
@@ -59,7 +76,7 @@ func DefaultLifecycleSafety() LifecycleSafety {
 }
 
 // LocalDevice configures an optional LAN companion that implements the
-// PCController Local Device v1 capability contract. Browser code never talks
+// PCController Local Device living capability contract. Browser code never talks
 // to the target directly.
 type LocalDevice struct {
 	Enabled bool   `json:"enabled"`
@@ -189,18 +206,20 @@ type Discovery struct {
 }
 
 type Webhook struct {
-	Name           string            `json:"name"`
-	Enabled        bool              `json:"enabled"`
-	EventKind      string            `json:"event_kind,omitempty"`
-	URL            string            `json:"url"`
-	Method         string            `json:"method"`
-	Headers        map[string]string `json:"headers,omitempty"`
-	BodyTemplate   string            `json:"body_template,omitempty"`
-	TimeoutMS      int               `json:"timeout_ms,omitempty"`
-	MaxAttempts    int               `json:"max_attempts,omitempty"`
-	RetryInitialMS int               `json:"retry_initial_ms,omitempty"`
-	RetryMaximumMS int               `json:"retry_maximum_ms,omitempty"`
-	SigningSecret  string            `json:"signing_secret,omitempty"`
+	Name             string            `json:"name"`
+	Enabled          bool              `json:"enabled"`
+	EventKind        string            `json:"event_kind,omitempty"`
+	URL              string            `json:"url"`
+	Method           string            `json:"method"`
+	Headers          map[string]string `json:"headers,omitempty"`
+	SecretHeaders    map[string]string `json:"secret_headers,omitempty"`
+	BodyTemplate     string            `json:"body_template,omitempty"`
+	TimeoutMS        int               `json:"timeout_ms,omitempty"`
+	MaxAttempts      int               `json:"max_attempts,omitempty"`
+	RetryInitialMS   int               `json:"retry_initial_ms,omitempty"`
+	RetryMaximumMS   int               `json:"retry_maximum_ms,omitempty"`
+	SigningSecret    string            `json:"signing_secret,omitempty"`
+	SigningSecretRef string            `json:"signing_secret_ref,omitempty"`
 }
 
 type WebSocketClient struct {
@@ -209,6 +228,7 @@ type WebSocketClient struct {
 	URL           string   `json:"url"`
 	Protocol      string   `json:"protocol,omitempty"`
 	AuthToken     string   `json:"auth_token,omitempty"`
+	AuthTokenRef  string   `json:"auth_token_ref,omitempty"`
 	Topics        []string `json:"topics,omitempty"`
 	ForwardEvents bool     `json:"forward_events"`
 	AllowCommands bool     `json:"allow_commands"`
@@ -241,6 +261,9 @@ func (value Config) validateIntegrations() error {
 		return err
 	}
 	if err := validateStatusLEDPolicy(value.Integrations.StatusLED); err != nil {
+		return err
+	}
+	if err := validateBuzzerMirror(value.Integrations.BuzzerMirror); err != nil {
 		return err
 	}
 	if baseURL := strings.TrimSpace(value.Integrations.LocalDevice.BaseURL); baseURL != "" {
@@ -295,8 +318,12 @@ func (value Config) validateIntegrations() error {
 		if webhook.URL != strings.TrimSpace(webhook.URL) || len(webhook.URL) > 4096 {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].url must be trimmed and at most 4096 characters", index)
 		}
-		if _, err := netpolicy.ParseHTTPURL(webhook.URL, "outbound webhook URL"); err != nil {
+		parsedWebhookURL, err := netpolicy.ParseHTTPURL(webhook.URL, "outbound webhook URL")
+		if err != nil {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].url: %w", index, err)
+		}
+		if key := credentialQueryKey(parsedWebhookURL); key != "" {
+			return fmt.Errorf("integrations.outbound_webhooks[%d].url query %q may contain a credential; use a secret-backed header", index, key)
 		}
 		if webhook.Method != strings.TrimSpace(webhook.Method) {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].method must not contain surrounding whitespace", index)
@@ -325,6 +352,12 @@ func (value Config) validateIntegrations() error {
 		if webhook.RetryMaximumMS != 0 && webhook.RetryMaximumMS < initial {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].retry_maximum_ms must be at least retry_initial_ms", index)
 		}
+		if err := validateSecretChoice(
+			fmt.Sprintf("integrations.outbound_webhooks[%d].signing_secret", index),
+			webhook.SigningSecret, webhook.SigningSecretRef,
+		); err != nil {
+			return err
+		}
 		if webhook.SigningSecret != "" && (len(webhook.SigningSecret) < 16 || len(webhook.SigningSecret) > 4096) {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].signing_secret must be 16..4096 bytes when configured", index)
 		}
@@ -340,9 +373,10 @@ func (value Config) validateIntegrations() error {
 		if err := validateWebhookJSONTemplate(webhook.BodyTemplate, webhook.Headers); err != nil {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].body_template: %w", index, err)
 		}
-		if len(webhook.Headers) > 32 {
+		if len(webhook.Headers)+len(webhook.SecretHeaders) > 32 {
 			return fmt.Errorf("integrations.outbound_webhooks[%d].headers supports at most 32 fields", index)
 		}
+		headerNames := make(map[string]bool, len(webhook.Headers)+len(webhook.SecretHeaders))
 		for key, header := range webhook.Headers {
 			if len(key) > 128 || !httpguts.ValidHeaderFieldName(key) ||
 				len(header) > 8192 || !httpguts.ValidHeaderFieldValue(header) {
@@ -351,6 +385,19 @@ func (value Config) validateIntegrations() error {
 			if reservedWebhookHeader(key) {
 				return fmt.Errorf("integrations.outbound_webhooks[%d].headers[%q] is managed by the delivery service", index, key)
 			}
+			headerNames[strings.ToLower(key)] = true
+		}
+		for key, reference := range webhook.SecretHeaders {
+			if len(key) > 128 || !httpguts.ValidHeaderFieldName(key) || reservedWebhookHeader(key) {
+				return fmt.Errorf("integrations.outbound_webhooks[%d].secret_headers[%q] is invalid or managed by the delivery service", index, key)
+			}
+			if headerNames[strings.ToLower(key)] {
+				return fmt.Errorf("integrations.outbound_webhooks[%d] header %q cannot be both plaintext and secret-backed", index, key)
+			}
+			if err := secretstore.ValidateReference(reference); err != nil {
+				return fmt.Errorf("integrations.outbound_webhooks[%d].secret_headers[%q]: %w", index, key, err)
+			}
+			headerNames[strings.ToLower(key)] = true
 		}
 	}
 	names = make(map[string]bool)
@@ -361,15 +408,25 @@ func (value Config) validateIntegrations() error {
 		}
 		names[name] = true
 		parsed, err := url.Parse(peer.URL)
-		if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Host == "" {
-			return fmt.Errorf("integrations.websocket_clients[%d].url must be WS(S)", index)
+		if err != nil || (parsed.Scheme != "ws" && parsed.Scheme != "wss") || parsed.Host == "" ||
+			parsed.User != nil || parsed.Fragment != "" {
+			return fmt.Errorf("integrations.websocket_clients[%d].url must be WS(S) without credentials or a fragment", index)
+		}
+		if key := credentialQueryKey(parsed); key != "" {
+			return fmt.Errorf("integrations.websocket_clients[%d].url query %q may contain a credential; use auth_token_ref", index, key)
 		}
 		switch strings.ToLower(strings.TrimSpace(peer.Protocol)) {
 		case "", "jsonrpc", "socketio":
 		default:
 			return fmt.Errorf("integrations.websocket_clients[%d].protocol must be jsonrpc or socketio", index)
 		}
-		if peer.AllowCommands && strings.TrimSpace(peer.AuthToken) == "" {
+		if err := validateSecretChoice(
+			fmt.Sprintf("integrations.websocket_clients[%d].auth_token", index),
+			peer.AuthToken, peer.AuthTokenRef,
+		); err != nil {
+			return err
+		}
+		if peer.AllowCommands && !secretConfigured(peer.AuthToken, peer.AuthTokenRef) {
 			return fmt.Errorf("integrations.websocket_clients[%d] allowing commands requires auth_token", index)
 		}
 		host := strings.Trim(parsed.Hostname(), "[]")
@@ -377,7 +434,7 @@ func (value Config) validateIntegrations() error {
 		if address := net.ParseIP(host); address != nil {
 			loopback = address.IsLoopback()
 		}
-		if peer.ForwardEvents && !loopback && strings.TrimSpace(peer.AuthToken) == "" {
+		if peer.ForwardEvents && !loopback && !secretConfigured(peer.AuthToken, peer.AuthTokenRef) {
 			return fmt.Errorf("integrations.websocket_clients[%d] forwarding events remotely requires auth_token", index)
 		}
 		topics := make(map[string]bool)
@@ -408,6 +465,21 @@ func (value Config) validateIntegrations() error {
 		if mapping.Source == "" && mapping.Target == "" && mapping.Type == "" && mapping.Contains == "" {
 			return fmt.Errorf("integrations.text_mappings[%d] must specify at least one match", index)
 		}
+	}
+	return nil
+}
+
+func validateBuzzerMirror(value BuzzerMirror) error {
+	if value.Enabled && !value.NativeEnabled && !value.WebAudioEnabled {
+		return fmt.Errorf("integrations.buzzer_mirror enables the host buzzer path but selects no native or WebAudio output")
+	}
+	if value.DriverDirectory != strings.TrimSpace(value.DriverDirectory) ||
+		len(value.DriverDirectory) > 1024 ||
+		strings.ContainsAny(value.DriverDirectory, "\r\n\"") {
+		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is invalid")
+	}
+	if value.NativeEnabled && value.DriverDirectory == "" {
+		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is required when native playback is enabled")
 	}
 	return nil
 }
@@ -584,11 +656,22 @@ func validateIPC(value IPC) error {
 	if !loopback && !value.AllowRemote {
 		return fmt.Errorf("ipc.listen is non-loopback; set ipc.allow_remote deliberately")
 	}
-	if value.AllowRemote && len(strings.TrimSpace(value.AuthToken)) < 24 {
+	if err := validateSecretChoice("ipc.auth_token", value.AuthToken, value.AuthTokenRef); err != nil {
+		return err
+	}
+	if value.AllowRemote && !secretConfigured(value.AuthToken, value.AuthTokenRef) {
+		return fmt.Errorf("ipc.auth_token or ipc.auth_token_ref is required when remote access is enabled")
+	}
+	if value.AllowRemote && value.AuthTokenRef == "" && len(strings.TrimSpace(value.AuthToken)) < 24 {
 		return fmt.Errorf("ipc.auth_token must contain at least 24 characters when remote access is enabled")
 	}
 	if len(value.AuthToken) > 512 || !printableText(value.AuthToken) {
 		return fmt.Errorf("ipc.auth_token must be at most 512 printable characters")
+	}
+	principal := strings.TrimSpace(value.RemotePrincipal)
+	if principal == "" || principal != value.RemotePrincipal || len(principal) > 64 ||
+		!printableASCII(principal) || strings.ContainsAny(principal, " =\t") {
+		return fmt.Errorf("ipc.remote_principal must be a trimmed 1..64 byte printable identifier without spaces or equals signs")
 	}
 	if value.AllowRemote && len(value.AllowedOrigins) == 0 {
 		return fmt.Errorf("ipc.allowed_origins is required when remote access is enabled")
@@ -614,6 +697,37 @@ func validateIPC(value IPC) error {
 	}
 	if value.RemotePolicy.Programming && !value.RemotePolicy.ConnectionControl {
 		return fmt.Errorf("ipc.remote_policy.programming requires connection_control")
+	}
+	return nil
+}
+
+func secretConfigured(value, reference string) bool {
+	return strings.TrimSpace(value) != "" || strings.TrimSpace(reference) != ""
+}
+
+func credentialQueryKey(value *url.URL) string {
+	if value == nil {
+		return ""
+	}
+	for key := range value.Query() {
+		normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(key), "_", "-"))
+		for _, marker := range []string{"token", "secret", "password", "credential", "api-key", "apikey", "authorization"} {
+			if strings.Contains(normalized, marker) {
+				return key
+			}
+		}
+	}
+	return ""
+}
+
+func validateSecretChoice(path, value, reference string) error {
+	if value != "" && reference != "" {
+		return fmt.Errorf("%s and %s_ref are mutually exclusive", path, path)
+	}
+	if reference != "" {
+		if err := secretstore.ValidateReference(reference); err != nil {
+			return fmt.Errorf("%s_ref: %w", path, err)
+		}
 	}
 	return nil
 }
@@ -744,6 +858,10 @@ func cloneIntegrations(source Integrations) Integrations {
 		result.OutboundWebhooks[index].Headers = make(map[string]string, len(value.Headers))
 		for key, header := range value.Headers {
 			result.OutboundWebhooks[index].Headers[key] = header
+		}
+		result.OutboundWebhooks[index].SecretHeaders = make(map[string]string, len(value.SecretHeaders))
+		for key, reference := range value.SecretHeaders {
+			result.OutboundWebhooks[index].SecretHeaders[key] = reference
 		}
 	}
 	result.WebSocketClients = make([]WebSocketClient, len(source.WebSocketClients))

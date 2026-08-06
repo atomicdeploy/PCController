@@ -293,7 +293,7 @@ func TestHelpAndVersion(t *testing.T) {
 }
 
 func TestPersistedProductTitleAppearsInHelpAndVersion(t *testing.T) {
-	t.Setenv("APP_TITLE", "")
+	t.Setenv("APP_NAME", "")
 	path := filepath.Join(t.TempDir(), "config.json")
 	value := appconfig.Defaults()
 	value.UI.AppTitle = "Workshop Controller"
@@ -307,6 +307,32 @@ func TestPersistedProductTitleAppearsInHelpAndVersion(t *testing.T) {
 		}
 		if !strings.Contains(stdout.String(), "Workshop Controller") {
 			t.Fatalf("%s did not use persisted product title: %q", command, stdout.String())
+		}
+	}
+}
+
+func TestApplicationNamePrecedenceIsConfigThenEnvironmentThenFlag(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := appconfig.Defaults()
+	value.UI.AppTitle = "Configured Name"
+	if err := appconfig.Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("APP_NAME", "Environment Name")
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--config", path, "version"}, "Environment Name"},
+		{[]string{"--config", path, "--app-name", "Flag Name", "version"}, "Flag Name"},
+		{[]string{"version", "--config=" + path, "--app-name=Inline Flag"}, "Inline Flag"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if err := run(test.args, &stdout, &stderr); err != nil {
+			t.Fatalf("%v: %v", test.args, err)
+		}
+		if !strings.Contains(stdout.String(), test.want) {
+			t.Fatalf("%v output %q missing %q", test.args, stdout.String(), test.want)
 		}
 	}
 }

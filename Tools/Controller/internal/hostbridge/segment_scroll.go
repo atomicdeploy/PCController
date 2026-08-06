@@ -13,15 +13,18 @@ import (
 )
 
 type segmentScrollTarget struct {
-	active bool
-	page   byte
-	text   string
-	dwell  time.Duration
+	active   bool
+	page     byte
+	text     string
+	dwell    time.Duration
+	repeat   controller.DisplayRepeat
+	interval time.Duration
 }
 
 func (left segmentScrollTarget) equal(right segmentScrollTarget) bool {
 	return left.active == right.active && left.page == right.page &&
-		left.text == right.text && left.dwell == right.dwell
+		left.text == right.text && left.dwell == right.dwell &&
+		left.repeat == right.repeat && left.interval == right.interval
 }
 
 // segmentScrollPresenter coalesces watched configuration and high-rate STATUS
@@ -115,16 +118,15 @@ func (presenter *segmentScrollPresenter) apply(target segmentScrollTarget) error
 	defer presenter.sendMu.Unlock()
 	requestContext, cancel := context.WithTimeout(presenter.ctx, 3*time.Second)
 	defer cancel()
-	text, dwell := "", time.Duration(0)
+	request := controller.DisplayRequest{Target: "segments", Text: ""}
 	if target.active {
-		text, dwell = target.text, target.dwell
+		request.Text = target.text
+		request.SpeedMS = int(target.dwell / time.Millisecond)
+		request.Repeat = target.repeat
+		request.IntervalMS = int(target.interval / time.Millisecond)
 	}
-	if err := presenter.client.SetSegmentText(requestContext, text, dwell); err != nil {
+	if _, err := presenter.client.PresentDisplay(requestContext, request); err != nil {
 		return fmt.Errorf("HOST segment scroll: %w", err)
-	}
-	if _, err := presenter.client.RefreshFrontPanel(requestContext); err != nil &&
-		presenter.onError != nil {
-		presenter.onError(fmt.Errorf("HOST segment preview refresh: %w", err))
 	}
 	return nil
 }
@@ -142,7 +144,9 @@ func (presenter *segmentScrollPresenter) PrepareDisconnect(ctx context.Context) 
 	}
 	presenter.sendMu.Lock()
 	defer presenter.sendMu.Unlock()
-	err := presenter.client.SetSegmentText(ctx, "", 0)
+	_, err := presenter.client.PresentDisplay(ctx, controller.DisplayRequest{
+		Target: "segments", Text: "",
+	})
 	if err == nil {
 		presenter.mu.Lock()
 		presenter.applied = segmentScrollTarget{}
@@ -170,7 +174,9 @@ func segmentScrollTargetFor(
 	text += strings.Repeat(" ", config.GapCells)
 	return segmentScrollTarget{
 		active: true, page: snapshot.Status.MenuPage, text: text,
-		dwell: time.Duration(config.SpeedMS) * time.Millisecond,
+		dwell:    time.Duration(config.SpeedMS) * time.Millisecond,
+		repeat:   controller.DisplayRepeat(config.Repeat),
+		interval: time.Duration(config.IntervalSeconds) * time.Second,
 	}
 }
 

@@ -15,7 +15,7 @@ const (
 
 var ErrInvalidEvent = errors.New("invalid local device event")
 
-// EventType is one JSON event in the fixed Local Device v1 vocabulary.
+// EventType is one JSON event in the fixed Local Device living vocabulary.
 type EventType string
 
 const (
@@ -45,7 +45,7 @@ func ParseEvent(payload []byte) (Event, error) {
 	if err := decodeStrictJSON(payload, &event); err != nil {
 		return Event{}, fmt.Errorf("%w: %v", ErrInvalidEvent, err)
 	}
-	if event.Contract != ContractVersion || event.Sequence == 0 || event.At.IsZero() {
+	if event.Contract != ContractID || event.Sequence == 0 || event.At.IsZero() {
 		return Event{}, fmt.Errorf("%w: event identity", ErrInvalidEvent)
 	}
 	switch event.Type {
@@ -62,7 +62,7 @@ func ParseEvent(payload []byte) (Event, error) {
 		if event.Result == nil || event.Snapshot != nil || event.Notice != "" {
 			return Event{}, fmt.Errorf("%w: action payload shape", ErrInvalidEvent)
 		}
-		if event.Result.Contract != ContractVersion || !event.Result.Accepted ||
+		if event.Result.Contract != ContractID || !event.Result.Accepted ||
 			!isKnownAction(event.Result.Action) || event.Result.CompletedAt.IsZero() {
 			return Event{}, fmt.Errorf("%w: action result", ErrInvalidEvent)
 		}

@@ -26,9 +26,11 @@ optional C-compatible library, and firmware WebSocket relay in one codebase.
 - Continuous text or newline-delimited JSON monitoring for logging
 - Host-side command shell with history, completion, quoting, and raw protocol
   access
+- Versionless opaque opcode exchange and filtered opcode subscriptions across
+  CLI/TUI, IPC, REST, WebSocket, Socket.IO, and permitted bridge peers
 - Repeatable batch scripts with variables, sleeps, repeats, and fail-fast or
   continue-on-error behavior
-- Cross-platform NDJSON JSON-RPC 2.0, REST v1, authenticated standard
+- Cross-platform NDJSON JSON-RPC 2.0, an unversioned living REST API, authenticated standard
   WebSocket, and bounded Engine.IO-v4/Socket.IO-over-WebSocket service; the
   first TUI/shell process owns serial and later clients route through it
 - Importable Go API and optional `c-shared` JSON ABI
@@ -84,6 +86,20 @@ the project-owned Controller executable and platform adapters for device
 notifications, discovery, diagnostics, and desktop actions. Optional OS
 enrichment stays behind those adapters and an unavailable capability is
 reported explicitly.
+
+Optional mDNS and SSDP advertise the embedded WebUI/API locations, safe app
+presentation values, and bounded current board values. Metadata refreshes are
+coalesced from pushed events and never poll the board; secret-like TXT/header
+keys are discarded before either multicast protocol is updated.
+
+Windows desktop integration has no internal PowerShell dependency. Toasts use
+the WinRT notification ABI directly; Start-menu shortcuts and their
+AppUserModelID use Shell COM; URI registration uses the per-user Registry API.
+If an unpackaged WinRT toast cannot be delivered, the host uses an eight-second
+native TaskDialog fallback with the same validated action URIs and reports
+`backend: task-dialog`, `degraded: true`, and the WinRT reason in integration
+status. User-configured `.ps1` automation remains supported as an explicit
+script action and is independent of these internal adapters.
 
 Run the current source without a separate package build:
 
@@ -330,6 +346,7 @@ settings set FLAGS LIGHT ON OFF DISPLAY_OPEN DISPLAY_CLOSED STATUS OUTPUT_PERSIS
 event latest
 event wait [KIND] [TIMEOUT]
 query OPCODE RESPONSE_OPCODE [PAYLOAD_HEX]
+opcode OPCODE [PAYLOAD_HEX] [--expect RESPONSE_OPCODE]
 write HEX_BYTES
 ```
 
@@ -351,21 +368,32 @@ relay test [MS]                        # default 250; 0 stops
 pwm get
 pwm off                                # emergency clear of all 16 channels
 pwm set CHANNEL VALUE                  # channel 0..15, logical value 0..4095
-rgb R G B [BRIGHTNESS]
+rgb [color] #RGB|#RRGGBB [BRIGHTNESS]
+rgb [color] R G B [BRIGHTNESS]
 rgb effect list
 rgb effect play NAME                  # background; TUI/shell/IPC stay responsive
 rgb effect wait NAME                  # foreground; useful with one-shot exec
+rgb effect breathe|flash COLOR [--period 1s] [--brightness 255] [--minimum 0] [--repeat once|loop|N]
+rgb effect cycle|transition COLOR --to COLOR [--period 1s] [--brightness 255] [--repeat once|loop|N]
 rgb effect stop|status
+rgb profile list|get CONDITION
+rgb profile set CONDITION color COLOR [BRIGHTNESS]
+rgb profile set CONDITION EFFECT COLOR [effect options]
 strip pixel N R G B [BRIGHTNESS]
 strip fill R G B [BRIGHTNESS]
 strip clear
 buzzer FREQUENCY_HZ DURATION_MS
+buzzer status
+buzzer path board|host|both|none
 melody list
+melody create NAME FREQ:DURATION_MS[:GAP_MS] ...
 melody play NAME [REPEATS]            # background; 0=until stopped, otherwise 1..20
 melody wait NAME [REPEATS]            # wait until all notes are acknowledged/played
 melody stop|status
-silent status|on|off
-display segments|lcd|both DURATION_MS [TEXT]
+silent status|on|off                  # legacy alias for board silent
+silent board|host|both status|on|off
+display segments|lcd|both [--speed 220ms] [--duration 5s]
+  [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]
 macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID
 macro record start NAME [CATEGORY [COLOR]]|record status|record save|record discard
 macro play NAME_OR_ID|status|cancel [keep]
@@ -439,22 +467,58 @@ after verified reconnect.
 Named melodies and status effects come from the watched PC JSON configuration.
 `melody` sends one acknowledged tone at a time and waits for its duration and
 gap before sending the next, avoiding the MCU's ten-entry tone-queue limit.
-`rgb effect` supports `flash` and smooth `breathe` definitions and is capped at
-20 native requests per second. Starting a new item replaces the old item on
-that output; disconnect/cancellation stops future frames. Stopping an LED
-effect leaves its base color at full configured brightness. Stopping a melody
-cannot silence a tone already sounding because the current firmware has no
-buzzer-stop opcode; that one tone may finish (at most five seconds by config).
-The board's EEPROM `silent` setting still wins, so use `silent off` before an
-audible host notification.
+Current firmware receives one compact descriptor for `flash`, `breathe`,
+`cycle`, or `transition` and renders it locally. Effect and color are separate:
+every effect accepts decimal RGB or `#RGB`/`#RRGGBB`, plus independent timing,
+brightness, alternate-color, and repeat values. Older firmware uses a bounded
+host-streaming fallback. Starting a new item replaces the old item on that
+output; stopping an LED effect leaves its base color at full configured
+brightness. `rgb profile` reads/writes compact EEPROM condition descriptors so
+boot, ready, fault, door, Bluetooth, and menu cues can reuse the same effect
+model without storing descriptive defaults in AVR flash.
 
-The reusable hands-on attention sequence is `display both 0 WAIT`, `melody
+The checked-in JSON example includes the hardware-tested `edge-ready` user
+melody. It can be copied with the surrounding `melodies` array from
+[`examples/config.example.json`](examples/config.example.json), or created
+interactively with:
+
+```text
+melody create edge-ready 523:100:25 659:100:25 784:120:30 1047:180:60 988:90:20 1175:90:20 1319:110:25 1568:260
+melody wait edge-ready
+```
+
+Segment text longer than four characters scrolls automatically. `--scroll`
+forces the marquee for short text. Every marquee includes one completely blank
+terminal frame, then follows `--repeat`: `once` stops, `loop` restarts, and
+`interval` yields to the local page before the next run. The default automatic
+door presentation uses a 30-second interval rather than looping continuously.
+
+Board `BUZZER_CHANGED` frames are always available to event subscribers. When
+`integrations.buzzer_mirror.enabled` is true, the WebUI can play the reported
+frequency/duration with Web Audio and Windows can play it through WinRing0. The
+native implementation is inside the Go controller: it opens the
+`WinRing0x64.sys` device and drives PIT channel 2 directly; it loads no wrapper
+DLL and never launches the old `beep.exe`, SSH, or a UAC prompt. Elevated SSH
+is an operator-only test harness, not an application transport. `buzzer path`
+independently selects the board, host, both, or neither; board silent and host
+silent remain distinct.
+
+WinRing0 is an optional, best-effort adapter rather than a host dependency.
+Missing drivers, unsupported port `0x61`, insufficient access, or a machine
+that produces only clicks must not prevent the bridge, updates, board buzzer,
+or Web Audio from running. Native playback is disabled independently, exposes
+one retained state/error transition instead of one log entry per note, and can
+be replaced by another platform renderer without changing the versionless
+buzzer event contract.
+
+The reusable hands-on attention sequence is `display both --duration 5s WAIT`, `melody
 play attention 0`, and `rgb effect play attention`. Acknowledgement stops both
-streams with `melody stop` plus `rgb effect stop`; `display both 1200 ok` then
+streams with `melody stop` plus `rgb effect stop`; `display both --duration 1200ms ok` then
 shows the completion handoff and yields back to the normal front panel.
 
-These are host-streamed effects: the host must remain connected and running.
-Use `play` from the persistent TUI, shell, or IPC server. A one-shot
+Melodies remain host-sequenced; current boards render each status animation
+from one native descriptor while the host retains start/stop ownership. Use
+`play` from the persistent TUI, shell, or IPC server. A one-shot
 `controller.exe exec` exits after a background start, so use `melody wait ...`
 or a finite `rgb effect wait ...` there.
 
@@ -484,7 +548,14 @@ not an encrypted or authenticated network tunnel.
 
 ## Monitoring, scripts, and IPC
 
-Continuously monitor a controller as human-readable rows or JSON records:
+Ordinary TUI, WebUI, and secondary-console activity logs retain only one-shot
+human events. Changed display/status-light/buzzer frames use the independent
+`state` stream, measurements use `status`/`telemetry`, and raw traffic uses the
+explicit `debug`/`opcodes` paths. This keeps continuous data from spamming or
+evicting useful activity while live previews still update immediately.
+
+`monitor` is an explicit diagnostic command and therefore may be noisy. Use it
+to continuously inspect a controller as human-readable rows or JSON records:
 
 ```console
 bin\controller.exe monitor --port COM18 --interval 500ms
@@ -520,9 +591,33 @@ bin\controller.exe ipc call --method controller.rf.map --params "{\"id\":3,\"act
 bin\controller.exe ipc call --method controller.rf.transmit --params "{\"code\":1193046,\"bits\":24,\"protocol\":1,\"pulse_us\":350,\"repeats\":1}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"melody play notify\"}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rgb effect play attention\"}"
+bin\controller.exe ipc call --method controller.app.instances
+bin\controller.exe ipc call --method controller.app.bridge
+bin\controller.exe ipc call --method controller.app.instance.get --params "{\"id\":\"webui:EXAMPLE\"}"
+bin\controller.exe ipc call --method controller.app.navigate --params "{\"page\":\"settings\",\"target\":\"webui\"}"
+bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"tui\"}"
+bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.progress\",\"value\":\"normal 42\",\"target\":\"tui\"}"
+bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.osc\",\"value\":\"9;4;4;73\",\"target\":\"tui\"}"
+bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"app title auto\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
 ```
+
+Enable an authenticated edge host on a trusted LAN with explicit browser
+origins, then use a vault reference from another machine without placing the
+bearer token on its command line:
+
+```console
+bin\controller.exe network edge-enable --origin David-PC:* --origin 192.168.100.130:*
+bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --method controller.ping
+bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc --secret-ref os:edge/cafe-pc
+bin\controller.exe network probe --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --origin http://David-PC:8787
+```
+
+The edge command enables mDNS/SSDP and the selected IPC, REST, WebSocket,
+Socket.IO, programming, and bridge capabilities. Shutdown, virtual-key, and
+host power-action access remain disabled. A LocalSubnet-only firewall rule is
+still an operating-system deployment step.
 
 Use `ipc serve --stdio` for a parent process that wants newline-delimited
 JSON-RPC over pipes. The API includes connection/reset/programming ownership,
@@ -542,10 +637,21 @@ retention without disabling the important-event timeline.
 
 The TCP listener rejects non-loopback addresses by default. Remote mode
 requires `ipc.allow_remote`, a token of at least 24 characters, a non-wildcard
-browser origin list, and explicit `ipc.remote_policy` capabilities. Its safe
-default permits read/event subscriptions only. Token possession alone does not
-grant board writes, reset, programming, shutdown, virtual keys, power actions,
-host-automation execution, or bridge calls.
+browser origin list, a stable `ipc.remote_principal` name, and explicit
+`ipc.remote_policy` capabilities. Its safe default permits read/event
+subscriptions only. Token possession alone does not grant board writes, reset,
+programming, shutdown, virtual keys, power actions, host-automation execution,
+or bridge calls.
+
+HTTP and native socket clients authenticate with a Bearer or compatibility
+header. The Web UI exchanges that header credential at
+`POST /api/session/ticket` for a 30-second, one-use, Origin/peer/transport-
+bound WebSocket subprotocol ticket. Durable tokens are rejected in URLs, and
+unauthorized standard WebSocket or Socket.IO handshakes emit no application
+frames. Durable host and integration credentials can be referenced from the
+current Windows user's Credential Manager with `os:NAME`; `env:NAME` keeps a
+credential transient in the launching process. Browser storage holds only the
+one-use ticket, never the durable token.
 
 Configured `integrations.websocket_clients` can subscribe to another primary,
 forward loop-safe typed events, and issue correlated `bridge call` requests.
@@ -599,9 +705,42 @@ commands are:
 
 ```console
 bin\controller.exe config path
+bin\controller.exe config path data
+bin\controller.exe config open
+bin\controller.exe config open data
 bin\controller.exe config show
 bin\controller.exe --config lab.json config validate
+bin\controller.exe config secrets status
+bin\controller.exe config secrets set os:ipc/remote --from-env HOST_REMOTE_TOKEN
+type token.txt | bin\controller.exe config secrets set os:ipc/remote --stdin
+bin\controller.exe config secrets clear os:unused
+bin\controller.exe config clear --confirm
 ```
+
+The global `--open-user-data` / `--open-config-dir` flags provide Explorer
+shortcuts. The explicit clear command removes the host config and only the
+OS-vault values referenced by it; it preserves toolchains, backups, and other
+host data.
+
+`config show`, secret status, logs, session snapshots, and exports omit
+plaintext credentials. Secret values are deliberately rejected as command-line
+arguments, where shell history and process inspection could expose them. The
+configuration fields `ipc.auth_token_ref`, WebSocket-client `auth_token_ref`,
+outbound-webhook `signing_secret_ref`, and webhook `secret_headers` select an
+`os:` or `env:` reference. Plaintext fields remain readable for an explicitly
+authored development config, but the host never silently migrates, overwrites,
+or deletes them; secret status identifies their presence without printing the
+value. Remove a reference from the watched config before clearing its durable
+credential.
+
+On Windows, `os:` uses the native per-user Credential Manager directly, with
+no helper process. Other platforms currently report the OS vault as
+unavailable and reject `os:` references; `env:` remains portable. A watched
+config replacement is accepted only after all references resolve, preserving
+the last-known-good runtime otherwise. IPC authentication resolves the current
+vault value per request and webhook delivery does so per attempt. An external
+vault edit does not itself generate a filesystem event; restart the host or
+make a validated config edit to rebuild a long-lived outbound WebSocket peer.
 
 ### Product identity
 
@@ -609,11 +748,14 @@ User-visible default identity is owned by
 [`web/package.json`](web/package.json): `productName`, `productShortName`,
 `productTagline`, and `description`. The normal build verifies that the
 generated Go constants and Win32 resources still match that source. Set
-`ui.app_title` in the watched host configuration for a persistent title, or
-set `APP_TITLE` for a one-process override; TUI, CLI help/version, web
-navigation and browser title, desktop notifications, host-defined menus, and
-service display names all consume the effective value. The same variable may
-replace the web bundle's build-time fallback.
+`ui.app_title` and `ui.tagline` in the watched host configuration for the
+persistent application name and first-run line. Runtime precedence is
+defaults < watched config < `APP_NAME`/`APP_TAGLINE` < global
+`--app-name`/`--tagline` flags. Runtime overrides never rewrite the config.
+TUI, CLI help/version, WebUI navigation/first-run gate, browser title, desktop
+notifications, host-defined menus, and service display names consume the
+effective values. `APP_TITLE` remains a build-time web/package metadata input;
+it is not the Go runtime override.
 
 Wire HELLO identity, URI/header names, C ABI symbols, module names, firmware
 artifact names, and the default config directory remain stable technical
@@ -677,6 +819,60 @@ bin\controller.exe program flash ..\..\.build\firmware\PCController.ino.with_boo
 bin\controller.exe boot backup .\backups --device "USB-SERIAL CH340"
 ```
 
+For a blank ATmega328P board connected by USBasp, use the end-to-end
+initializer instead of composing fuse and flash commands manually:
+
+```console
+bin\controller.exe board initialize --uart auto
+bin\controller.exe board initialize --uart none --bootloader-only
+bin\controller.exe board initialize --portable-cli --uart COM4
+bin\controller.exe board initialize --name EDGE-01 --uart auto
+bin\controller.exe board blank --confirm EDGE-01 --uart auto
+```
+
+It installs or repairs the selected FQBN's exact toolchain, compiles before
+touching the MCU, validates the ISP signature, captures a complete backup,
+burns the stock core-provided bootloader/fuse/lock policy, and retries the first
+failed USBasp exchange at `-B32`. With UART it then programs with mandatory
+readback, authenticates the first application HELLO, persists factory settings,
+and probes available peripherals. Missing INA219, PCA9685, DS18B20, or LCD
+hardware is reported as a warning rather than preventing the present hardware
+from being commissioned. Without UART, bootloader installation succeeds and
+the serial/application phase is explicitly skipped.
+
+The optional board name is at most eight printable ASCII characters with no
+surrounding whitespace. It is committed and read back after the first native
+HELLO. Later use `board name get`, `board name set EDGE-01`, or `board name
+clear` from the CLI, shell, or TUI command entry. The native CRC-backed EEPROM
+record is authoritative; Urboot/Urclock filename/title metadata is upload-time
+flash metadata and is not used as board identity.
+
+`board blank` is the guarded return-to-shelf operation. With UART present it
+authenticates the application and requires `--confirm` to exactly match the
+stored board name. Without UART, only the literal `--confirm ERASE-BOARD` is
+accepted. It then takes a fresh complete USBasp backup, chip-erases application
+and bootloader flash, writes `0xFF` across the EESAVE-preserved EEPROM, reads
+every flash/EEPROM byte back, and proves the fuse bytes did not change. Raw
+chip erase is intentionally unavailable through the generic programming CLI.
+
+The TUI exposes initialization on the **Programming** page with `I`, USBasp
+driver repair with `Z`, and a non-executing blank-command prompt with `X` so
+the exact board name must still be typed. An
+existing global firmware CLI can be passed with `--cli`; its generated managed
+configuration path is persisted separately so later compile and programming
+commands continue to use the installed core and libraries. `--portable-cli`
+forces a fresh verified host-data-local copy.
+
+On Windows, `driver usbasp ensure` checks the connected VID/PID and launches
+Zadig only when the device has no started driver. `driver usbasp zadig
+--latest` resolves the current stable official libwdi GitHub release at run
+time, downloads it under the canonical host data directory, validates the PE
+header and Windows Authenticode trust, and launches the visible GUI. Add
+`--download-only` to cache/verify without launching. Standard proxy environment
+variables are honored; no proxy address is embedded. A pre-generated package
+can still be installed with `driver usbasp install --package DIR`; its INF is
+validated against USBasp VID/PID before PnPUtil runs.
+
 Direct dependency upload is disabled. Controller snapshots board-owned
 settings separately from PC configuration, prepares the displays, temporarily
 mutes an audible board, waits for deferred EEPROM persistence, completes a
@@ -719,20 +915,28 @@ remains marked `incomplete`; it is never reported as a complete backup.
 
 ### Offline current settings transfer
 
-No unpublished-build migration/version chain is retained. File-only commands
-understand the current semantic 31-value-byte plus CRC-8 settings record and
-report any other width/layout as unsupported:
+No unpublished alpha-build migration/version chain is retained. File-only
+commands understand the current semantic 40-value-byte settings/name record
+plus CRC-8 and report any other width/layout as unsupported:
+
+During alpha, version builds may replace unpublished layouts and use the raw
+backup plus explicit `--reinitialize-eeprom` path. Compatibility/preservation
+code is reserved for profile or feature builds that are intentionally supported
+at the same time; it is not added between successive alpha version builds.
 
 ```console
 bin\controller.exe eeprom inspect --input .\eeprom.hex
+bin\controller.exe eeprom factory-defaults --output .\eeprom-factory.hex
 bin\controller.exe eeprom inspect --backup-manifest .\backup\manifest.json
 bin\controller.exe eeprom export --backup-manifest .\backup\manifest.json --output .\settings.hex
 bin\controller.exe eeprom import --backup-manifest .\backup\manifest.json --settings .\settings.hex --output .\eeprom-restore.hex
 bin\controller.exe eeprom restore --backup-manifest .\backup\manifest.json --output .\eeprom-original.hex
+bin\controller.exe program --operation read-eeprom --method urclock --port COM18 --output .\eeprom-live.hex
+bin\controller.exe program --operation write-eeprom --method urclock --port COM18 --hex .\eeprom-factory.hex --confirm-eeprom-write
 ```
 
 Export, import, and restore require a complete validated backup manifest.
-Import overlays only EEPROM addresses `0x0020..0x003E` and preserves every
+Import overlays only EEPROM addresses `0x0020..0x0048` and preserves every
 other byte from the full 1,024-byte backup. Outputs are canonical, hashed,
 created without overwrite, and never written to a device by these commands.
 An actual EEPROM write remains a separate explicitly confirmed operation.
@@ -779,9 +983,19 @@ The ordinary path probes Urboot/Urclock first; an ISP option is shown only
 after that probe reports no bootloader route. Connecting ISP hardware does not
 itself authorize a write.
 
+An authorized host self-update pushes `update.staged` so secondary shells exit
+without polling, requests graceful primary shutdown under a bounded deadline,
+and then lets a detached helper publish the exact verified executable. Windows
+liveness checks the process exit code even when another handle remains open;
+replacement can move a mapped canonical image to a same-directory tombstone and
+roll it back on failure. A durable journal records recovery/commit, and the
+self-update-only fail-safe cannot affect ordinary shutdown. Regression and
+restart-recovery acceptance remain tracked in
+[GitHub issue #110](https://github.com/atomicdeploy/PCController/issues/110).
+
 A `flash-backup` never enters the firmware-update RPC. Its review action calls
 the dedicated `controller.restore.flash` contract (or
-`POST /api/v1/restores/flash`). The primary process then runs the guarded
+`POST /api/restores/flash`). The primary process then runs the guarded
 backup-before-write programmer transaction, verifies the restored bytes,
 reconnects application `HELLO`, and restores the saved lifecycle state. UART
 Urclock is the default; USBasp is accepted only as an explicitly selected ISP
@@ -811,7 +1025,7 @@ programming, while a command explicitly named build/watch-only remains unable
 to open COM or ISP hardware. Provider/peer bearer tokens are transient; proxy
 variables are inherited by the Go HTTP client and its dependencies.
 
-An authenticated peer can consume `GET /api/v1/discovery/manifest`, whose
+An authenticated peer can consume `GET /api/discovery/manifest`, whose
 relative artifact links point at this host's immutable SHA-256 download routes.
 The same schema can be returned through `controller.discovery.local_manifest`;
 no local filesystem path or credential is published.
@@ -826,7 +1040,7 @@ bin\controller.exe ws serve --file ..\..\.build\firmware\PCController.ino.hex --
 bin\controller.exe ws client --url ws://BUILD-PC:3000/firmware --method urclock --port COM18
 ```
 
-Each versioned JSON message contains the base filename, modification time,
+Each JSON message contains the base filename, modification time,
 SHA-256, and base64 firmware bytes. The client limits message/file size,
 rejects unsafe names or checksum mismatches, writes a temporary `.hex`, runs
 the selected programmer, and removes the temporary file.

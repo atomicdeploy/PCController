@@ -50,7 +50,7 @@ func TestReleaseDiscoveryRPCAndRemotePolicy(t *testing.T) {
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
 	service.HostConfig = func() appconfig.Config { return config }
 	handler := websocketMux(context.Background(), service)
-	request := httptest.NewRequest(http.MethodPost, "http://controller.example/api/v1/discovery/manifest", strings.NewReader(`{"url":"`+manifestServer.URL+`/manifest.json"}`))
+	request := httptest.NewRequest(http.MethodPost, "http://controller.example/api/discovery/manifest", strings.NewReader(`{"url":"`+manifestServer.URL+`/manifest.json"}`))
 	request.RemoteAddr = "198.51.100.10:43100"
 	request.Header.Set("Authorization", "Bearer "+config.IPC.AuthToken)
 	recorder := httptest.NewRecorder()
@@ -59,7 +59,7 @@ func TestReleaseDiscoveryRPCAndRemotePolicy(t *testing.T) {
 		t.Fatalf("remote discovery status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
-	request = httptest.NewRequest(http.MethodPost, "http://controller.example/api/v1/discovery/stage", strings.NewReader(`{"candidate":{"source":"manifest","kind":"firmware","name":"board.hex","url":"`+manifestServer.URL+`/board.hex"}}`))
+	request = httptest.NewRequest(http.MethodPost, "http://controller.example/api/discovery/stage", strings.NewReader(`{"candidate":{"source":"manifest","kind":"firmware","name":"board.hex","url":"`+manifestServer.URL+`/board.hex"}}`))
 	request.RemoteAddr = "198.51.100.10:43100"
 	request.Header.Set("Authorization", "Bearer "+config.IPC.AuthToken)
 	recorder = httptest.NewRecorder()

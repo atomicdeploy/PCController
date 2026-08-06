@@ -19,13 +19,23 @@ programming, or safety behavior:
 | Go library | `Client.CommandCatalog()` | `Client.Execute(ctx, command)` |
 | C-compatible shared library | `{"operation":"commands"}` | `{"operation":"execute","command":"..."}` |
 | NDJSON/HTTP/WebSocket JSON-RPC | `controller.command.catalog` | `controller.command.execute` |
-| REST | `GET /api/v1/commands` | `POST /api/v1/command` |
+| REST | `GET /api/commands` | `POST /api/command` |
 | Socket.IO WebSocket subset | `rpc` event with `controller.command.catalog` | `command` event or `rpc` event |
 | Host-to-host bridge | nested `controller.command.catalog` | nested `controller.command.execute` |
 
 Standard WebSocket accepts every JSON-RPC method after authentication. Its
-`controller.subscribe` method independently streams `events` and/or `status`;
-subscription is observation, not a second command implementation.
+`controller.subscribe` independently streams human `events`, continuous
+changed-only `state`, explicit `debug`, raw `opcodes`, and/or paced `status`.
+Ordinary UI activity feeds subscribe to `events`; live previews additionally
+consume `state`, so frame/measurement traffic cannot spam or evict one-shot
+activity. Subscription is observation, not a second command implementation.
+
+Native HTTP/WebSocket clients retain Bearer and `X-PCController-Token`
+authentication. Browser WebSocket and Socket.IO clients exchange that durable
+header credential at `POST /api/session/ticket`, then use the returned
+short-lived one-use `Sec-WebSocket-Protocol` ticket on a credential-free URL.
+Every subsequent capability decision retains the authenticated principal and
+transport in the security audit context.
 
 ## Device and host domains
 
@@ -35,8 +45,8 @@ additional convenience that still ends in the same runtime/native protocol.
 | Domain | Shared shell/CLI command | Go library convenience | Typed JSON-RPC / REST | Live result or event path | Default remote capability |
 |---|---|---|---|---|---|
 | MCU EEPROM settings | `settings`, `silent`, `stream` | Generic; decoded `Settings` is present in `Snapshot` | Generic command | refreshed settings/status; no PC config is written | read-only query: `read`; mutation: `board_commands` |
-| Menu and physical front panel | `menu`, `display` | `SetMenuPage`, `SetMenuPageByName`, `MenuCatalog`, `MenuLayout`, `SetMenuLayout` | `controller.menu.*`; `/api/v1/menu/catalog`; `/api/v1/menu/layout` | status/front-panel snapshots and key/menu events | query: `read`; navigation/layout/display: `board_commands` |
-| PC-hosted menu configuration | TUI configuration page; generic menu/display interaction | `ReplaceHostMenuDirectory`, `PushHostMenuContent`, `HostMenuState` when firmware advertises support | `controller.host_menu.*`; `/api/v1/host-menus` | host config reload plus front-panel events | query: `read`; config write: `host_configuration`; board overlay: `board_commands` |
+| Menu and physical front panel | `menu`, `display` | `SetMenuPage`, `SetMenuPageByName`, `MenuCatalog`, `MenuLayout`, `SetMenuLayout` | `controller.menu.*`; `/api/menu/catalog`; `/api/menu/layout` | changed-only segment events update the shared cache and every channel immediately; snapshot reads are initial/manual/recovery only | query: `read`; navigation/layout/display: `board_commands` |
+| PC-hosted menu configuration | TUI configuration page; generic menu/display interaction | `ReplaceHostMenuDirectory`, `PushHostMenuContent`, `HostMenuState` when firmware advertises support | `controller.host_menu.*`; `/api/host-menus` | host config reload plus front-panel events | query: `read`; config write: `host_configuration`; board overlay: `board_commands` |
 | Relays R1–R8 and side motion | `relay` | `SetRelay`, `ToggleRelay`, `SetMotionSide`, `AllRelaysOff` | Generic command | relay event and `active_relays` status mask | `board_commands` |
 | PWM/MOSFET and illumination | `pwm` | `SetPWMChannel`, `AllPWMOff`, `PWMValues` | Generic command | PWM availability/values and PWM-channel event | query: `read`; mutation: `board_commands` |
 | Status RGB and WS addressable LEDs | `rgb`, `strip` | `SetStatusRGB`, `SetStatusRGBBase`, status-effect scheduler; `strip` remains generic | Generic command | output scheduler state plus board status/events | effect query: `read`; mutation: `board_commands` |
@@ -46,11 +56,11 @@ additional convenience that still ends in the same runtime/native protocol.
 | INA219, DS18B20, status telemetry | `status`, `temp` | `Status`, `Temperatures`, `SubscribeStatus`, history/timeline methods | `controller.status`, `controller.temperatures`, history RPCs; snapshot REST | WebSocket/Socket.IO status subscription and asynchronous events | `read` / `events` |
 | Cooperative I2C and LCD | `i2c`, `display` | `I2CTransfer`, `ScanI2C`, `RescanLCD`, LCD prompt/priority methods | `controller.lcd.*`; generic I2C command | LCD presentation state and device events | LCD config: `host_configuration`; bus/display operations: `board_commands` |
 | Reset and serial lifecycle | `ports`, `open`, `close`, `reconnect`, `reset` | `ListPorts`, `Connect`, `Open`, `Close`, `PulseResetFor` | port/reset RPCs and snapshot | connection lifecycle events | `connection_control` or `reset` |
-| Build, bootloader, backup, restore, flash | `toolchain`, `boot`, `program` | toolchain bootstrap/sync conveniences; complete operations remain Generic | artifact/update RPCs plus dedicated `controller.restore.flash`; `/api/v1/restores/flash`; Generic command | programming lifecycle, backup manifest, verified write, and fresh authenticated `HELLO` | `programming` **and** `connection_control` |
-| Idle/Running application state | `program-state` (`run-state`) | `ProgramState`, `SetProgramState`, `AcquireProgramState` | `controller.program_state.get/set`; `GET/PUT /api/v1/program-state` | `program.state` and `program.state.sync`; telemetry `program_running` | query: `read`; mutation: `board_commands` |
-| Host/OS status, virtual keys, power, monitor brightness | `os` | `HostSystemStatus`, `PressVirtualKey`, `RequestPowerAction` | `controller.os.*`; `/api/v1/os/status`; `/api/v1/os/key`; `/api/v1/os/power` | audited OS action/timeline events | `read`, `virtual_keys`, or `power_actions` |
-| Read-only Windows host facts | `os facts [system\|computer\|firmware\|storage\|serial\|list]` | shared fixed-catalog provider through Generic command | `controller.os.facts*` and `controller.host.facts*`; `GET /api/v1/os/facts` | bounded snapshot with profile/class/columns/rows/truncation/source/time | `read`; no arbitrary query or write surface |
-| Typed text and LCD messages | message API rather than free-form shell text | `SendTextMessage` | `controller.message.send`; `/api/v1/messages`; webhooks/Socket.IO | source-tagged message/event and optional LCD presentation | `messages` |
+| Build, bootloader, backup, restore, flash | `toolchain`, `boot`, `program` | toolchain bootstrap/sync conveniences; complete operations remain Generic | artifact/update RPCs plus dedicated `controller.restore.flash`; `/api/restores/flash`; Generic command | programming lifecycle, backup manifest, verified write, and fresh authenticated `HELLO` | `programming` **and** `connection_control` |
+| Idle/Running application state | `program-state` (`run-state`) | `ProgramState`, `SetProgramState`, `AcquireProgramState` | `controller.program_state.get/set`; `GET/PUT /api/program-state` | `program.state` and `program.state.sync`; telemetry `program_running` | query: `read`; mutation: `board_commands` |
+| Host/OS status, virtual keys, power, monitor brightness | `os` | `HostSystemStatus`, `PressVirtualKey`, `RequestPowerAction` | `controller.os.*`; `/api/os/status`; `/api/os/key`; `/api/os/power` | audited OS action/timeline events | `read`, `virtual_keys`, or `power_actions` |
+| Read-only Windows host facts | `os facts [system\|computer\|firmware\|storage\|serial\|list]` | shared fixed-catalog provider through Generic command | `controller.os.facts*` and `controller.host.facts*`; `GET /api/os/facts` | bounded snapshot with profile/class/columns/rows/truncation/source/time | `read`; no arbitrary query or write surface |
+| Typed text and LCD messages | message API rather than free-form shell text | `SendTextMessage` | `controller.message.send`; `/api/messages`; webhooks/Socket.IO | source-tagged message/event and optional LCD presentation | `messages` |
 
 PWM channel names are stable logical aliases: `user1..user11` map to channels
 0..10, `enclosure`/`illumination` to 11, `power` to 12, and

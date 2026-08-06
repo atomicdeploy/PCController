@@ -15,6 +15,7 @@ type AppAction struct {
 	Kind   string    `json:"kind"`
 	Value  string    `json:"value,omitempty"`
 	Source string    `json:"source,omitempty"`
+	Target string    `json:"target,omitempty"`
 	At     time.Time `json:"at"`
 }
 
@@ -43,7 +44,7 @@ func (broker *ActionBroker) Events() <-chan AppAction {
 
 // SetObserver installs a single delivery observer without changing the
 // broker's original bounded TUI queue. The observer is used by the primary
-// process to mirror valid app.page actions into the typed runtime event
+// process to mirror valid application actions into the typed runtime event
 // history, whose subscribers are independently cursor-based. Observer
 // delivery remains independent when a headless process does not drain the
 // optional TUI queue.
@@ -56,6 +57,10 @@ func (broker *ActionBroker) SetObserver(observer func(AppAction)) {
 func (broker *ActionBroker) Publish(action AppAction) error {
 	action.Kind = strings.ToLower(strings.TrimSpace(action.Kind))
 	action.Value = strings.TrimSpace(action.Value)
+	action.Target = strings.TrimSpace(action.Target)
+	if action.Target != "" && action.Target != "*" && !instanceIDPattern.MatchString(action.Target) {
+		return errors.New("app action target must be *, or a valid instance id or surface")
+	}
 	if action.At.IsZero() {
 		action.At = time.Now()
 	}
@@ -63,6 +68,24 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 	case "app.page":
 		if action.Value == "" {
 			return errors.New("app.page requires a page name")
+		}
+	case "app.title":
+		if !strings.EqualFold(action.Value, "auto") {
+			var err error
+			action.Value, err = ValidateTerminalTitle(action.Value)
+			if err != nil {
+				return err
+			}
+		}
+	case "app.osc":
+		var err error
+		action.Value, err = ValidateOSCPayload(action.Value)
+		if err != nil {
+			return err
+		}
+	case "app.progress":
+		if _, err := ParseTerminalProgress(action.Value); err != nil {
+			return err
 		}
 	case "app.quit", "app.port.open", "app.port.close":
 		if action.Value != "" {
@@ -113,6 +136,12 @@ func ParseAction(value, source string) (AppAction, error) {
 				return AppAction{}, errors.New("usage: app page NAME")
 			}
 			action.Kind, action.Value = "app.page", words[2]
+		case "title", "osc", "progress":
+			if len(words) < 3 {
+				return AppAction{}, fmt.Errorf("usage: app %s VALUE", strings.ToLower(words[1]))
+			}
+			action.Kind = "app." + strings.ToLower(words[1])
+			action.Value = strings.Join(words[2:], " ")
 		case "quit", "exit":
 			action.Kind = "app.quit"
 		case "open":
@@ -145,6 +174,8 @@ func ParseActionURI(value string) (AppAction, error) {
 		return AppAction{Kind: "command", Value: path, Source: "uri", At: time.Now()}, nil
 	case "app":
 		return ParseAction("app "+strings.ReplaceAll(path, "/", " "), "uri")
+	case "title", "osc", "progress":
+		return ParseAction("app "+host+" "+path, "uri")
 	case "port":
 		return ParseAction("app "+path, "uri")
 	default:
@@ -164,6 +195,9 @@ func ActionURI(action AppAction) (string, error) {
 			return "", errors.New("command requires a value")
 		}
 		return productidentity.ProtocolScheme + "://command/" + url.PathEscape(action.Value), nil
+	case "app.title", "app.osc", "app.progress":
+		value := strings.TrimPrefix(action.Kind, "app.")
+		return productidentity.ProtocolScheme + "://" + value + "/" + url.PathEscape(action.Value), nil
 	case "app.quit":
 		return productidentity.ProtocolScheme + "://app/quit", nil
 	case "app.port.open":

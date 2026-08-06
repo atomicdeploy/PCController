@@ -594,10 +594,10 @@ func prepareProgrammingSession(
 		session.TemporarySilent = snapshot.Settings.Flags&native.SettingsSilent == 0
 	} else if snapshot.Settings == nil {
 		session.Warnings = append(session.Warnings,
-			"pre-flash EEPROM mute/latch was unavailable because the old settings payload is intentionally unsupported; outputs are live-safe and the completed power-down melody will not be followed by host audio")
+			"pre-flash EEPROM mute/latch was unavailable because the old settings payload is intentionally unsupported; outputs are live-safe and the completed power-down melody will not be followed by the host buzzer")
 	} else {
 		session.Warnings = append(session.Warnings,
-			"pre-flash EEPROM was deliberately left byte-for-byte untouched so the mandatory raw backup preserves the original development settings; live outputs are safe and host audio has stopped")
+			"pre-flash EEPROM was deliberately left byte-for-byte untouched so the mandatory raw backup preserves the original development settings; live outputs are safe and the host buzzer has stopped")
 	}
 	session.SafeStateApplied = true
 	finalPreparationPhase := "latched-safe"
@@ -744,9 +744,10 @@ func restoreProgrammingSession(
 	return nil
 }
 
-// finalizeDevelopmentEEPROMReinitialization accepts only the newly flashed
-// firmware's current settings schema. It intentionally does not decode, map,
-// or restore superseded semantic settings captured in the raw EEPROM image.
+// finalizeDevelopmentEEPROMReinitialization validates the newly flashed
+// firmware's current settings schema, then commits the host-owned canonical
+// defaults. It never imports rich defaults from AVR flash and intentionally
+// does not decode or restore superseded semantic settings from the raw backup.
 func finalizeDevelopmentEEPROMReinitialization(
 	ctx context.Context,
 	device programmingDevice,
@@ -771,10 +772,11 @@ func finalizeDevelopmentEEPROMReinitialization(
 		return err
 	}
 
-	// Preserve the new firmware's current-layout defaults while applying the
-	// explicit post-development safety policy: audible, no automatic enclosure
-	// light, no output persistence, and no relays restored.
-	finalSettings := queried
+	// The Go host is the canonical factory-default owner. The AVR value queried
+	// above proves only that the new schema is operational; it is not used as a
+	// source of descriptive defaults.
+	finalSettings := native.DefaultSettings()
+	finalSettings.Persisted = true
 	finalSettings.Flags &^= native.SettingsSilent | native.SettingsProgrammingMode
 	finalSettings.LightMode = 0
 	finalSettings.OutputPersistence = 0
@@ -786,7 +788,7 @@ func finalizeDevelopmentEEPROMReinitialization(
 	}
 	if err := storeAndVerifyProgrammingSettings(
 		ctx, device, finalSettings, options,
-		"commit current-schema development defaults with Silent off and outputs disabled",
+		"commit host-owned current-schema defaults with Silent off and outputs disabled",
 	); err != nil {
 		return retainProgrammingSafeState(ctx, device, session, options, err)
 	}

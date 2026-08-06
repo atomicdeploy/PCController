@@ -61,6 +61,9 @@ func TestStoreContentAddressesAndDeduplicatesFirmware(t *testing.T) {
 		list[0].Metadata["workflow_run_id"] != "12345" {
 		t.Fatalf("artifact provenance metadata was not retained: %#v", list[0].Metadata)
 	}
+	if list[0].Name != "first.hex" || list[0].Source != "test" || second.Name != "first.hex" {
+		t.Fatalf("duplicate redefined canonical artifact identity: list=%#v second=%#v", list[0], second)
+	}
 	_, file, err := store.Open(KindFirmware, first.SHA256)
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +72,30 @@ func TestStoreContentAddressesAndDeduplicatesFirmware(t *testing.T) {
 	_ = file.Close()
 	if !bytes.Equal(content, []byte(validIntelHEX)) {
 		t.Fatalf("content=%q", content)
+	}
+}
+
+func TestStoreEmbeddedDefaultIdentitySurvivesDuplicateUpload(t *testing.T) {
+	store := newTestStore(t)
+	embedded, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindEEPROM, Name: "default-eeprom.hex", Source: "embedded", Embedded: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uploaded, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindEEPROM, Name: "temporary-test.hex", Source: "browser-upload",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.Get(KindEEPROM, embedded.SHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uploaded.Name != "default-eeprom.hex" || stored.Name != "default-eeprom.hex" ||
+		stored.Source != "embedded" || !stored.Embedded {
+		t.Fatalf("embedded default identity drifted: uploaded=%#v stored=%#v", uploaded, stored)
 	}
 }
 

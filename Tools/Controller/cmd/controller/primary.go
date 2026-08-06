@@ -73,22 +73,25 @@ func currentPrimaryEndpoint() primaryEndpointConfig {
 }
 
 type primaryIPC struct {
-	cancel           context.CancelFunc
-	listener         net.Listener
-	done             chan error
-	quit             chan struct{}
-	quitOnce         sync.Once
-	closeOnce        sync.Once
-	closeErr         error
-	client           *controllerapi.Client
-	runtime          *control.Runtime
-	sessionSnapshot  *hostSessionRecorder
-	integrations     atomic.Pointer[hostbridge.Manager]
-	localDevice      *localDeviceHost
-	actions          *hostui.ActionBroker
-	artifacts        *artifacts.Service
-	releaseDiscovery io.Closer
-	instanceClaim    *hostInstanceClaim
+	cancel                context.CancelFunc
+	listener              net.Listener
+	done                  chan error
+	quit                  chan struct{}
+	quitOnce              sync.Once
+	closeOnce             sync.Once
+	closeErr              error
+	client                *controllerapi.Client
+	runtime               *control.Runtime
+	sessionSnapshot       *hostSessionRecorder
+	integrations          atomic.Pointer[hostbridge.Manager]
+	localDevice           *localDeviceHost
+	actions               *hostui.ActionBroker
+	instances             *hostui.InstanceRegistry
+	artifacts             *artifacts.Service
+	releaseDiscovery      io.Closer
+	instanceClaim         *hostInstanceClaim
+	hostInstanceID        string
+	coordinatorInstanceID string
 }
 
 type primaryExecutor struct{}
@@ -212,6 +215,15 @@ func startPrimaryIPCClaimed(
 		return nil, fmt.Errorf("publish primary controller host: %w", err)
 	}
 	primaryEndpoint.Store(activeEndpoint)
+	go func() {
+		for config := range store.SubscribeRuntime(parent) {
+			endpoint := currentPrimaryEndpoint()
+			// The listener and protocol paths are fixed for this process, but
+			// loopback delegates must immediately follow a rotated vault token.
+			endpoint.AuthToken = config.IPC.AuthToken
+			primaryEndpoint.Store(endpoint)
+		}
+	}()
 	server.instanceClaim = claim
 	return server, nil
 }
@@ -236,9 +248,19 @@ func startPrimaryIPCAtWithIdentity(
 	identity hostInstanceIdentity,
 	stores ...*appconfig.Store,
 ) (*primaryIPC, error) {
+	endpoint := currentPrimaryEndpoint()
+	// Explicit in-process servers without a configuration store are test/tool
+	// fixtures, not the configured primary endpoint. Keep them loopback and
+	// unauthenticated so prior run() calls cannot leak machine configuration
+	// through the package-global endpoint into an unrelated fixture.
+	if len(stores) == 0 {
+		endpoint = primaryEndpointConfig{
+			Listen: address, WebSocketPath: "/ipc", SocketIOPath: "/socket.io/",
+		}
+	}
 	listener, err := ipcjson.ListenWithRemote(
 		address,
-		currentPrimaryEndpoint().AllowRemote,
+		endpoint.AllowRemote,
 	)
 	if err != nil {
 		probeContext, cancel := context.WithTimeout(parent, 400*time.Millisecond)
@@ -251,32 +273,68 @@ func startPrimaryIPCAtWithIdentity(
 	ctx, cancel := context.WithCancel(parent)
 	server := &primaryIPC{
 		cancel: cancel, listener: listener, done: make(chan error, 1),
-		quit: make(chan struct{}), runtime: runtime,
+		quit: make(chan struct{}), runtime: runtime, hostInstanceID: identity.ID,
 	}
 	server.actions = hostui.NewActionBroker()
+	server.instances = hostui.NewInstanceRegistry()
+	server.instances.SetObserver(func(change hostui.InstanceChange) {
+		runtime.PublishStructuredEvent(control.Event{
+			Kind: "app.instance.changed", Text: change.Kind + " app instance " + change.Instance.ID,
+			Source: "host", Target: "app.clients", MessageType: "event",
+			Metadata: map[string]string{
+				"change": change.Kind, "id": change.Instance.ID,
+				"surface": change.Instance.Surface, "page": change.Instance.Page,
+				"state": change.Instance.State,
+			},
+		})
+	})
 	server.actions.SetObserver(func(action hostui.AppAction) {
 		if event, ok := browserAppActionEvent(action); ok {
 			runtime.PublishStructuredEvent(event)
 		}
 	})
+	if strings.TrimSpace(identity.ID) != "" {
+		server.coordinatorInstanceID = identity.ID + ":bridge"
+		process := hostui.CurrentProcessSelf(identity.StartedAt)
+		if identity.PID > 0 {
+			process.ProcessID = identity.PID
+		}
+		if _, registerErr := server.instances.Upsert(hostui.AppInstance{
+			ID: server.coordinatorInstanceID, Surface: "bridge", State: "background",
+			Values: map[string]string{
+				"role": "coordinator", "version": version,
+				"source_hash":    sourceHash,
+				"listen":         listener.Addr().String(),
+				"websocket_path": endpoint.WebSocketPath,
+				"socketio_path":  endpoint.SocketIOPath,
+			},
+			Self: &process,
+		}); registerErr != nil {
+			_ = listener.Close()
+			cancel()
+			return nil, fmt.Errorf("register coordinator app instance: %w", registerErr)
+		}
+	}
 	sharedClient := controllerapi.AttachSharedRuntime(runtime, engine)
 	server.client = sharedClient
 	service := &ipcjson.Service{
-		Client:            sharedClient,
-		WebSocketPath:     currentPrimaryEndpoint().WebSocketPath,
-		SocketIOPath:      currentPrimaryEndpoint().SocketIOPath,
-		WebUI:             webui.Handler(currentPrimaryEndpoint().WebSocketPath),
-		AuthToken:         currentPrimaryEndpoint().AuthToken,
-		AllowedOrigins:    append([]string(nil), currentPrimaryEndpoint().AllowedOrigins...),
-		InboundWebhooks:   currentPrimaryEndpoint().InboundWebhooks,
-		HostVersion:       version,
-		HostSourceHash:    sourceHash,
-		HostBuildTime:     buildTime,
-		HostInstanceID:    identity.ID,
-		HostInstanceToken: identity.Token,
-		HostProcessID:     identity.PID,
-		HostSurface:       identity.Surface,
-		AppAction:         server.actions.Publish,
+		Client:                sharedClient,
+		WebSocketPath:         endpoint.WebSocketPath,
+		SocketIOPath:          endpoint.SocketIOPath,
+		WebUI:                 webui.Handler(endpoint.WebSocketPath),
+		AuthToken:             endpoint.AuthToken,
+		AllowedOrigins:        append([]string(nil), endpoint.AllowedOrigins...),
+		InboundWebhooks:       endpoint.InboundWebhooks,
+		HostVersion:           version,
+		HostSourceHash:        sourceHash,
+		HostBuildTime:         buildTime,
+		HostInstanceID:        identity.ID,
+		HostInstanceToken:     identity.Token,
+		HostProcessID:         identity.PID,
+		HostSurface:           identity.Surface,
+		CoordinatorInstanceID: server.coordinatorInstanceID,
+		AppAction:             server.actions.Publish,
+		AppInstances:          server.instances,
 		Shutdown: func() {
 			server.quitOnce.Do(func() { close(server.quit) })
 			if integrations := server.integrations.Load(); integrations != nil {
@@ -290,6 +348,12 @@ func startPrimaryIPCAtWithIdentity(
 				return integrations.BridgePeers()
 			}
 			return []hostbridge.PeerInfo{}
+		},
+		WebhookAdmin: func() ipcjson.WebhookAdminService {
+			if integrations := server.integrations.Load(); integrations != nil {
+				return integrations
+			}
+			return nil
 		},
 		HotkeyStatus: func() any {
 			if integrations := server.integrations.Load(); integrations != nil {
@@ -321,7 +385,7 @@ func startPrimaryIPCAtWithIdentity(
 		service.IntegrationProxy = proxy
 		server.localDevice = startLocalDeviceHost(ctx, sharedClient, store)
 		service.LocalDevice = server.localDevice
-		service.HostConfig = store.Current
+		service.HostConfig = store.CurrentRuntime
 		service.UpdateHostConfig = func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err
@@ -355,20 +419,36 @@ func startPrimaryIPCAtWithIdentity(
 }
 
 func browserAppActionEvent(action hostui.AppAction) (control.Event, bool) {
-	page := strings.TrimSpace(action.Value)
-	if action.Kind != "app.page" || page == "" {
+	kind := strings.ToLower(strings.TrimSpace(action.Kind))
+	value := strings.TrimSpace(action.Value)
+	if !strings.HasPrefix(kind, "app.") {
 		return control.Event{}, false
 	}
+	target := strings.TrimSpace(action.Target)
+	if target == "" {
+		target = "*"
+	}
+	verb := strings.TrimPrefix(kind, "app.")
+	text := verb
+	if value != "" {
+		text += " " + value
+	}
+	metadata := map[string]string{
+		"value": value, "target_instance": target,
+	}
+	actionName := verb
+	if kind == "app.page" {
+		metadata["page"] = value
+		actionName = "navigate"
+		text = "Open page " + value
+	}
 	return control.Event{
-		Kind:   "app.page",
-		Text:   "Open page " + page,
-		Source: action.Source,
-		Target: "app.clients",
-		Action: "navigate",
-		Metadata: map[string]string{
-			"page":  page,
-			"value": page,
-		},
+		Kind:     kind,
+		Text:     text,
+		Source:   action.Source,
+		Target:   "app.clients",
+		Action:   actionName,
+		Metadata: metadata,
 	}, true
 }
 
@@ -621,18 +701,37 @@ func runSecondaryConsole(
 		productidentity.ServiceName(configuredTitle, "secondary console (IPC).")+
 			" The primary process retains exclusive serial ownership.",
 	)
-	go streamPrimaryEvents(ctx, stdout, &outputMu)
+	hostRestart := make(chan struct{}, 1)
+	go streamPrimaryEvents(ctx, stdout, &outputMu, hostRestart)
 
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 1024), 64*1024)
+	lines := make(chan string)
+	scanDone := make(chan error, 1)
+	go func() {
+		for scanner.Scan() {
+			select {
+			case lines <- scanner.Text():
+			case <-ctx.Done():
+				return
+			}
+		}
+		scanDone <- scanner.Err()
+	}()
 	for {
 		outputMu.Lock()
 		fmt.Fprint(stdout, "pc[ipc]> ")
 		outputMu.Unlock()
-		if !scanner.Scan() {
-			break
+		var scanned string
+		select {
+		case <-hostRestart:
+			writeLine(stdout, "Host update is ready; closing this secondary console so the verified coordinator replacement can proceed.")
+			return nil
+		case err := <-scanDone:
+			return err
+		case scanned = <-lines:
 		}
-		line := strings.TrimSpace(scanner.Text())
+		line := strings.TrimSpace(scanned)
 		if strings.EqualFold(line, "exit") ||
 			strings.EqualFold(line, "quit") {
 			break
@@ -653,13 +752,14 @@ func runSecondaryConsole(
 			writeLine(stderr, "error:", err)
 		}
 	}
-	return scanner.Err()
+	return nil
 }
 
 func streamPrimaryEvents(
 	ctx context.Context,
 	output io.Writer,
 	outputMu *sync.Mutex,
+	hostRestart chan<- struct{},
 ) {
 	var latest struct {
 		ID uint64 `json:"id"`
@@ -687,6 +787,7 @@ func streamPrimaryEvents(
 			"controller.event.next",
 			map[string]any{
 				"after_id":   cursor,
+				"stream":     "activity",
 				"timeout_ms": 2000,
 			},
 			&event,
@@ -699,6 +800,13 @@ func streamPrimaryEvents(
 			continue
 		}
 		cursor = event.ID
+		if eventRequestsSecondaryExit(event) {
+			select {
+			case hostRestart <- struct{}{}:
+			default:
+			}
+			return
+		}
 		outputMu.Lock()
 		fmt.Fprintf(
 			output,
@@ -709,6 +817,11 @@ func streamPrimaryEvents(
 		)
 		outputMu.Unlock()
 	}
+}
+
+func eventRequestsSecondaryExit(event controllerapi.Event) bool {
+	return strings.EqualFold(strings.TrimSpace(event.Kind), "update.staged") &&
+		strings.EqualFold(strings.TrimSpace(event.Metadata["kind"]), "host")
 }
 
 func runRemoteMonitor(

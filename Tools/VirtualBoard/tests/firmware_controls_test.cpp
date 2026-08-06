@@ -44,6 +44,14 @@ void bind(Key &key, KeyTrace &trace) {
 void testKeyGestures() {
   shiftRegisters.clearVirtualInputs();
 
+  require(KEY_DEBOUNCE_MS <= 25,
+          "front-key debounce exceeds the immediate-response budget");
+  require(keyEventRunsPrimaryAction(KeyEvent::Down) &&
+              keyEventRunsPrimaryAction(KeyEvent::HoldRepeat) &&
+              !keyEventRunsPrimaryAction(KeyEvent::Click) &&
+              !keyEventRunsPrimaryAction(KeyEvent::HoldStart),
+          "primary actions must run on Down/repeat, never deferred Click");
+
   {
     Key key(0);
     KeyTrace trace;
@@ -51,11 +59,15 @@ void testKeyGestures() {
     key.update(0);
     shiftRegisters.setVirtualInput(0, true);
     key.update(1);
-    key.update(51);
+    key.update(1 + KEY_DEBOUNCE_MS - 1);
+    require(trace.events.empty(), "key acted before debounce completed");
+    key.update(1 + KEY_DEBOUNCE_MS);
+    require(trace.events == std::vector<KeyEvent>({KeyEvent::Down}),
+            "key Down was not emitted at the debounce deadline");
     shiftRegisters.setVirtualInput(0, false);
     key.update(100);
-    key.update(150);
-    key.update(451);
+    key.update(100 + KEY_DEBOUNCE_MS);
+    key.update(100 + KEY_DEBOUNCE_MS + KEY_DOUBLE_CLICK_MS + 1);
     require(trace.events == std::vector<KeyEvent>({KeyEvent::Down,
                                                    KeyEvent::Up,
                                                    KeyEvent::Click}),

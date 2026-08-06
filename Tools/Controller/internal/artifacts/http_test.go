@@ -18,7 +18,7 @@ func TestHTTPUploadListRangeDownloadAndExplicitUpdate(t *testing.T) {
 	}
 	defer service.Close()
 	handler := service.Handler()
-	upload := httptest.NewRequest(http.MethodPost, "/api/v1/artifacts/upload?kind=firmware&name=browser.hex", strings.NewReader(validIntelHEX))
+	upload := httptest.NewRequest(http.MethodPost, "/api/artifacts/upload?kind=firmware&name=browser.hex", strings.NewReader(validIntelHEX))
 	uploadResponse := httptest.NewRecorder()
 	handler.ServeHTTP(uploadResponse, upload)
 	if uploadResponse.Code != http.StatusCreated {
@@ -29,7 +29,7 @@ func TestHTTPUploadListRangeDownloadAndExplicitUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	descriptor := *uploadResult.Artifact
-	if !strings.HasPrefix(descriptor.DownloadURL, "/api/v1/artifacts/") {
+	if !strings.HasPrefix(descriptor.DownloadURL, "/api/artifacts/") {
 		t.Fatalf("non-canonical download URL %q", descriptor.DownloadURL)
 	}
 	download := httptest.NewRequest(http.MethodGet, descriptor.DownloadURL, nil)
@@ -40,7 +40,7 @@ func TestHTTPUploadListRangeDownloadAndExplicitUpdate(t *testing.T) {
 		t.Fatalf("download status=%d headers=%v", downloadResponse.Code, downloadResponse.Header())
 	}
 	body, _ := json.Marshal(UpdateRequest{ArtifactSHA256: descriptor.SHA256, Authorized: true})
-	update := httptest.NewRequest(http.MethodPost, "/api/v1/updates/firmware", bytes.NewReader(body))
+	update := httptest.NewRequest(http.MethodPost, "/api/updates/firmware", bytes.NewReader(body))
 	update.Header.Set("Idempotency-Key", "browser-deploy-1")
 	updateResponse := httptest.NewRecorder()
 	handler.ServeHTTP(updateResponse, update)
@@ -65,7 +65,7 @@ func TestHTTPUploadListRangeDownloadAndExplicitUpdate(t *testing.T) {
 	if journal.Status.State != "completed" {
 		t.Fatalf("completed operation was exposed before its journal: %#v", journal.Status)
 	}
-	repeat := httptest.NewRequest(http.MethodPost, "/api/v1/updates/firmware", bytes.NewReader(body))
+	repeat := httptest.NewRequest(http.MethodPost, "/api/updates/firmware", bytes.NewReader(body))
 	repeat.Header.Set("Idempotency-Key", "browser-deploy-1")
 	repeatResponse := httptest.NewRecorder()
 	handler.ServeHTTP(repeatResponse, repeat)
@@ -82,7 +82,7 @@ func TestHTTPCurrentFlashRequiresVerifiedCapture(t *testing.T) {
 	service, _ := NewService(Options{Store: newTestStore(t)})
 	defer service.Close()
 	response := httptest.NewRecorder()
-	service.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/artifacts/current/flash", nil))
+	service.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/artifacts/current/flash", nil))
 	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "capture") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -105,7 +105,7 @@ func TestHTTPFlashRestoreUsesDedicatedRoute(t *testing.T) {
 	defer service.Close()
 	body, _ := json.Marshal(UpdateRequest{ArtifactSHA256: readback.SHA256, Authorized: true})
 	response := httptest.NewRecorder()
-	service.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/restores/flash", bytes.NewReader(body)))
+	service.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/restores/flash", bytes.NewReader(body)))
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("restore status=%d body=%s", response.Code, response.Body.String())
 	}

@@ -588,6 +588,14 @@ func (model *Model) switchPage(page Page) {
 	model.macroSearchEditing = false
 	model.macroDeleteArmed = false
 	model.macroDeleteReference = ""
+	model.terminalTitleDirty = true
+}
+
+func pageInstanceName(page Page) string {
+	return [...]string{
+		"dashboard", "controls", "menus", "board", "settings", "rf",
+		"updates", "automations", "events", "console",
+	}[page]
 }
 
 func (model *Model) toggleTerminal() {
@@ -1283,6 +1291,8 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		}
 	case PageProgramming:
 		switch key {
+		case "i":
+			return model.dispatchLine("board initialize")
 		case "p":
 			return model.dispatchLine("boot probe")
 		case "m":
@@ -1297,6 +1307,14 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 			model.input.SetValue("program flash ")
 			model.input.CursorEnd()
 			model.revealTerminal()
+			return model, nil, true
+		case "z":
+			return model.dispatchLine("driver usbasp ensure")
+		case "x":
+			model.input.SetValue("board blank --confirm ")
+			model.input.CursorEnd()
+			model.revealTerminal()
+			model.setNotice("Type the exact board name; blanking will not begin until you press Enter")
 			return model, nil, true
 		}
 	case PageAutomations:

@@ -70,6 +70,76 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	}
 }
 
+func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	broker := hostui.NewActionBroker()
+	actions := broker.Events()
+	registry := hostui.NewInstanceRegistry()
+	service := Service{Client: client, AppAction: broker.Publish, AppInstances: registry}
+
+	report, _ := json.Marshal(hostui.AppInstance{
+		ID: "web:tab-1", Surface: "webui", Page: "controls", State: "active", LeaseSeconds: 45,
+	})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.app.instance.report", Params: report})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	response = service.Dispatch(context.Background(), Request{Method: "controller.app.instances", Params: json.RawMessage(`{}`)})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	instances, ok := response.Result.([]hostui.AppInstance)
+	if !ok || len(instances) != 1 || instances[0].Page != "controls" {
+		t.Fatalf("instances=%#v", response.Result)
+	}
+
+	navigate, _ := json.Marshal(map[string]string{"target": "web:tab-1", "page": "settings"})
+	response = service.Dispatch(context.Background(), Request{Method: "controller.app.navigate", Params: navigate})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	select {
+	case action := <-actions:
+		if action.Kind != "app.page" || action.Value != "settings" || action.Target != "web:tab-1" {
+			t.Fatalf("action=%#v", action)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("targeted app navigation did not reach the action broker")
+	}
+}
+
+func TestAppBridgeReturnsCoordinatorSelfInformation(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	registry := hostui.NewInstanceRegistry()
+	coordinatorID := "primary:bridge"
+	_, err := registry.Upsert(hostui.AppInstance{
+		ID: coordinatorID, Surface: "bridge", State: "background",
+		Self: &hostui.InstanceSelf{
+			Kind: "process", ProcessID: 36152,
+			ImagePath: `C:\Tools\Controller\controller.exe`,
+			Vars:      map[string]string{"processor_architecture": "AMD64"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{
+		Client: client, AppInstances: registry, CoordinatorInstanceID: coordinatorID,
+	}
+	response := service.Dispatch(context.Background(), Request{Method: "controller.app.bridge"})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	instance, ok := response.Result.(hostui.AppInstance)
+	if !ok || instance.ID != coordinatorID || instance.Self == nil ||
+		instance.Self.ProcessID != 36152 || instance.Self.ImagePath == "" ||
+		instance.Self.Vars["processor_architecture"] != "AMD64" {
+		t.Fatalf("bridge instance=%#v", response.Result)
+	}
+}
+
 func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
@@ -171,7 +241,7 @@ func TestHostFactsRPCAndRESTUseTypedReadOnlyProvider(t *testing.T) {
 
 	server := httptest.NewServer(websocketMux(context.Background(), service))
 	defer server.Close()
-	rejectedResponse, err := http.Get(server.URL + "/api/v1/os/facts?query=SELECT+*+FROM+Win32_Process")
+	rejectedResponse, err := http.Get(server.URL + "/api/os/facts?query=SELECT+*+FROM+Win32_Process")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +250,7 @@ func TestHostFactsRPCAndRESTUseTypedReadOnlyProvider(t *testing.T) {
 	if rejectedResponse.StatusCode != http.StatusBadRequest || provider.calls != 1 {
 		t.Fatalf("arbitrary REST query status=%d body=%s calls=%d", rejectedResponse.StatusCode, rejectedBody, provider.calls)
 	}
-	httpResponse, err := http.Get(server.URL + "/api/v1/os/facts?profile=serial")
+	httpResponse, err := http.Get(server.URL + "/api/os/facts?profile=serial")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +372,7 @@ func TestHostMenuConfigRPCAndRESTUsePersistentHostConfig(t *testing.T) {
 
 	server := httptest.NewServer(websocketMux(context.Background(), service))
 	defer server.Close()
-	response, err := http.Get(server.URL + "/api/v1/host-menus")
+	response, err := http.Get(server.URL + "/api/host-menus")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +383,7 @@ func TestHostMenuConfigRPCAndRESTUsePersistentHostConfig(t *testing.T) {
 	}
 	updated.Menus[0].Content = "REST applied"
 	payload, _ := json.Marshal(updated)
-	request, _ := http.NewRequest(http.MethodPut, server.URL+"/api/v1/host-menus", strings.NewReader(string(payload)))
+	request, _ := http.NewRequest(http.MethodPut, server.URL+"/api/host-menus", strings.NewReader(string(payload)))
 	request.Header.Set("Content-Type", "application/json")
 	response, err = http.DefaultClient.Do(request)
 	if err != nil {
@@ -347,16 +417,16 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 	server := httptest.NewServer(websocketMux(context.Background(), service))
 	defer server.Close()
 
-	response, err := http.Get(server.URL + "/api/v1/ui-config")
+	response, err := http.Get(server.URL + "/api/ui-config")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
 	var result struct {
 		Name          string `json:"name"`
-		APIVersion    int    `json:"api_version"`
 		WebSocketPath string `json:"websocket_path"`
 		SocketIOPath  string `json:"socket_io_path"`
+		TicketPath    string `json:"session_ticket_path"`
 		AuthRequired  bool   `json:"auth_required"`
 		HostVersion   string `json:"host_version"`
 		SourceHash    string `json:"source_hash"`
@@ -366,14 +436,14 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 		t.Fatal(err)
 	}
 	if response.StatusCode != http.StatusOK || result.Name != "Controller Lab" ||
-		result.APIVersion != APIVersion || result.WebSocketPath != "/control" ||
-		result.SocketIOPath != "/engine.io/" || !result.AuthRequired ||
+		result.WebSocketPath != "/control" ||
+		result.SocketIOPath != "/engine.io/" || result.TicketPath != SessionTicketPath || !result.AuthRequired ||
 		result.HostVersion != "1.2.3" || result.SourceHash != "0123456789abcdef" ||
 		result.BuildTime != "2026-08-02T00:00:00Z" {
 		t.Fatalf("UI config status=%d result=%+v", response.StatusCode, result)
 	}
 
-	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/ui-config", nil)
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/ui-config", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +470,7 @@ func TestIntegrationProxyUsesAuthenticatedReservedRoute(t *testing.T) {
 	}))
 	defer server.Close()
 
-	response, err := http.Get(server.URL + "/api/v1/integrations/datahub/v1/records?limit=5")
+	response, err := http.Get(server.URL + "/api/integrations/datahub/v1/records?limit=5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +481,7 @@ func TestIntegrationProxyUsesAuthenticatedReservedRoute(t *testing.T) {
 
 	request, err := http.NewRequest(
 		http.MethodGet,
-		server.URL+"/api/v1/integrations/datahub/v1/records?limit=5",
+		server.URL+"/api/integrations/datahub/v1/records?limit=5",
 		nil,
 	)
 	if err != nil {
@@ -425,7 +495,7 @@ func TestIntegrationProxyUsesAuthenticatedReservedRoute(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusAccepted ||
 		response.Header.Get("X-Integration-Path") !=
-			"/api/v1/integrations/datahub/v1/records?limit=5" {
+			"/api/integrations/datahub/v1/records?limit=5" {
 		t.Fatalf("authenticated integration status=%d path=%q", response.StatusCode, response.Header.Get("X-Integration-Path"))
 	}
 
@@ -458,7 +528,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	}()
 
 	base := "http://" + listener.Addr().String()
-	response, err := http.Get(base + "/api/v1/ui-config")
+	response, err := http.Get(base + "/api/ui-config")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -482,7 +552,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 		t.Fatalf("unauthenticated app shell status=%d body=%s err=%v", response.StatusCode, appShell, readErr)
 	}
 
-	response, err = http.Get(base + "/api/v1/snapshot")
+	response, err = http.Get(base + "/api/snapshot")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +562,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	}
 
 	snapshotRequest, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, base+"/api/v1/snapshot", nil,
+		ctx, http.MethodGet, base+"/api/snapshot", nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -514,7 +584,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	}
 
 	osStatusRequest, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, base+"/api/v1/os/status", nil,
+		ctx, http.MethodGet, base+"/api/os/status", nil,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -533,8 +603,8 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	}
 
 	for path, body := range map[string]string{
-		"/api/v1/os/key":   `{"key":"F13"}`,
-		"/api/v1/os/power": `{"action":"lock","confirmation":"CONFIRM"}`,
+		"/api/os/key":   `{"key":"F13"}`,
+		"/api/os/power": `{"action":"lock","confirmation":"CONFIRM"}`,
 	} {
 		osRequest, requestErr := http.NewRequestWithContext(
 			ctx, http.MethodPost, base+path, strings.NewReader(body),
@@ -559,7 +629,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	request, err := http.NewRequestWithContext(
 		ctx,
 		http.MethodPost,
-		base+"/api/v1/rpc",
+		base+"/api/rpc",
 		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"controller.ping"}`),
 	)
 	if err != nil {
@@ -590,7 +660,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	} {
 		request, err := http.NewRequestWithContext(
 			ctx, method,
-			base+"/api/v1/webhooks/inbound?text=door+event&type=automation",
+			base+"/api/webhooks/inbound?text=door+event&type=automation",
 			strings.NewReader(`{"value":1}`),
 		)
 		if err != nil {
@@ -744,8 +814,8 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 		path, contains string
 	}{
 		{path: "/healthz", contains: `"ok":true`},
-		{path: "/api/v1/ui-config", contains: `"auth_required":false`},
-		{path: "/api/v1/snapshot", contains: `"uptime_ms":0`},
+		{path: "/api/ui-config", contains: `"auth_required":false`},
+		{path: "/api/snapshot", contains: `"uptime_ms":0`},
 		{path: "/", contains: "data-pccontroller-shell"},
 	} {
 		response, requestErr := http.Get(base + check.path)
@@ -814,7 +884,7 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 	}
 	writeRPC(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "controller.subscribe",
-		"params": map[string]any{"topics": []string{"events"}},
+		"params": map[string]any{"topics": []string{"events", "state"}},
 	})
 
 	// The legacy NDJSON client remains usable while the WebSocket is active on
@@ -859,6 +929,29 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 			t.Fatal(err)
 		}
 		if message.Method == "controller.event" && message.Params.Kind == "door" {
+			break
+		}
+	}
+	runtime.PublishHostEvent("status_led.changed", "#12AB34")
+	for {
+		_, data, readErr := connection.Read(websocketContext)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		var message struct {
+			Method string `json:"method"`
+			Params struct {
+				Kind   string `json:"kind"`
+				Stream string `json:"stream"`
+			} `json:"params"`
+		}
+		if err := json.Unmarshal(data, &message); err != nil {
+			t.Fatal(err)
+		}
+		if message.Method == "controller.state" && message.Params.Kind == "status_led.changed" {
+			if message.Params.Stream != "state" {
+				t.Fatalf("state notification stream=%q", message.Params.Stream)
+			}
 			break
 		}
 	}
@@ -935,6 +1028,9 @@ func TestStreamableEventKindSeparatesTimelineFromStatusTraffic(t *testing.T) {
 		{kind: " telemetry ", want: false},
 		{kind: "RX", want: false},
 		{kind: "tx", want: false},
+		{kind: "front_panel.segment", want: false},
+		{kind: "status_led.changed", want: false},
+		{kind: "buzzer.note", want: false},
 		{kind: "", want: false},
 	}
 	for _, test := range tests {
@@ -1058,7 +1154,7 @@ func TestRemoteRESTPolicyBlocksDisruptiveCommand(t *testing.T) {
 
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"http://controller.example/api/v1/command",
+		"http://controller.example/api/command",
 		strings.NewReader(`{"command":"program flash candidate.hex"}`),
 	)
 	request.RemoteAddr = "198.51.100.10:43210"
@@ -1072,7 +1168,7 @@ func TestRemoteRESTPolicyBlocksDisruptiveCommand(t *testing.T) {
 
 	request = httptest.NewRequest(
 		http.MethodGet,
-		"http://controller.example/api/v1/snapshot",
+		"http://controller.example/api/snapshot",
 		nil,
 	)
 	request.RemoteAddr = "198.51.100.10:43210"
@@ -1178,7 +1274,7 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 
 	server := httptest.NewServer(websocketMux(context.Background(), service))
 	defer server.Close()
-	for _, path := range []string{"/api/v1/commands", "/api/v1/program-state"} {
+	for _, path := range []string{"/api/commands", "/api/program-state"} {
 		response, err := http.Get(server.URL + path)
 		if err != nil {
 			t.Fatal(err)
@@ -1190,7 +1286,7 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 		}
 	}
 	restRequest, _ := http.NewRequest(
-		http.MethodPut, server.URL+"/api/v1/program-state",
+		http.MethodPut, server.URL+"/api/program-state",
 		strings.NewReader(`{"owner":"test","mode":"idle"}`),
 	)
 	restRequest.Header.Set("Content-Type", "application/json")

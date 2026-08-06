@@ -52,7 +52,7 @@ func (resolver configuredIntegrationResolver) ResolveIntegrationTarget(
 
 func newIntegrationProxy(store *appconfig.Store) (http.Handler, error) {
 	return integrationproxy.NewHandler(
-		"/api/v1/integrations",
+		"/api/integrations",
 		configuredIntegrationResolver{store: store},
 	)
 }

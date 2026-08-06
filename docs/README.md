@@ -88,5 +88,9 @@ device identity or interface settings.
   maintained documentation.
 - When behavior changes, update the implementation, tests, capability matrix,
   and relevant operating guide together.
+- Physical board-output mirrors are push-first. Do not introduce steady-state
+  polling as an implementation shortcut when an unsolicited change opcode is
+  available. Snapshot reads are only for connection sync, explicit refresh,
+  detected-gap recovery, or a visible bounded fallback for legacy firmware.
 
 <p align="center"><a href="../README.md">← Return to the PCController main page</a></p>

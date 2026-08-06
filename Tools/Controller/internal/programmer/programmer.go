@@ -41,6 +41,7 @@ const (
 	OperationCoreInfo    Operation = "core-info"
 	OperationBurnBoot    Operation = "install-bootloader"
 	OperationBackup      Operation = "backup"
+	OperationChipErase   Operation = "chip-erase"
 )
 
 type Options struct {
@@ -55,6 +56,7 @@ type Options struct {
 	MCU                        string
 	BaudRate                   int
 	ArduinoCLI                 string
+	ArduinoConfig              string
 	Avrdude                    string
 	AvrdudeConf                string
 	NoVerify                   bool
@@ -71,6 +73,11 @@ type Options struct {
 	FirmwareBuildTimestamp     uint32
 	compilePlanned             bool
 	compileStaged              bool
+	// USBaspBitClockUS forces AVRDUDE's -B bit-clock period. USBaspAutoSlow
+	// retries the first failed USBasp exchange at MiniCore's conservative
+	// 32-microsecond period and keeps that period for the rest of the operation.
+	USBaspBitClockUS float64
+	USBaspAutoSlow   bool
 }
 
 type BackupFile struct {
@@ -137,15 +144,20 @@ func Build(options Options) (Command, error) {
 			"--build-property",
 			fmt.Sprintf(
 				"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x%08XUL "+
-					"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL -mcall-prologues "+
+					"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL "+
+					"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
 					"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
 					"-fipa-pta -fstack-usage",
 				options.FirmwareSourceHash,
 				options.FirmwareBuildTimestamp,
+				FirmwareIdentityAddress,
 			),
 			"--build-property",
-			"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax "+
-				"-Wl,--section-start=.firmware_identity=0x7DF4",
+			fmt.Sprintf(
+				"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax "+
+					"-Wl,--section-start=.firmware_identity=0x%X",
+				FirmwareIdentityAddress,
+			),
 			"--warnings", "all",
 			"--jobs", "1",
 			"--build-path", options.BuildPath,
@@ -154,7 +166,7 @@ func Build(options Options) (Command, error) {
 			args = append(args, "--output-dir", options.OutputDir)
 		}
 		args = append(args, options.SketchPath)
-		return Command{Name: executable, Args: managedToolchainCLIArguments(executable, args...)}, nil
+		return Command{Name: executable, Args: toolchainCLIArguments(executable, options.ArduinoConfig, args...)}, nil
 
 	case MethodArduino:
 		executable, err := findExecutable(options.ArduinoCLI, "arduino-cli")
@@ -169,12 +181,12 @@ func Build(options Options) (Command, error) {
 			if options.SketchPath == "" {
 				return Command{}, errors.New("dependency CLI upload requires a project path")
 			}
-			return Command{Name: executable, Args: managedToolchainCLIArguments(executable,
+			return Command{Name: executable, Args: toolchainCLIArguments(executable, options.ArduinoConfig,
 				"upload", "--port", options.Port, "--fqbn", options.FQBN,
 				options.SketchPath,
 			)}, nil
 		case OperationCoreInfo:
-			return Command{Name: executable, Args: managedToolchainCLIArguments(executable,
+			return Command{Name: executable, Args: toolchainCLIArguments(executable, options.ArduinoConfig,
 				"board", "details", "--fqbn", options.FQBN,
 				"--full", "--list-programmers",
 			)}, nil
@@ -186,12 +198,12 @@ func Build(options Options) (Command, error) {
 			}
 			args := []string{
 				"burn-bootloader", "--fqbn", options.FQBN,
-				"--programmer", options.Programmer,
+				"--programmer", options.Programmer, "--verify",
 			}
 			if options.Port != "" {
 				args = append(args, "--port", options.Port)
 			}
-			return Command{Name: executable, Args: managedToolchainCLIArguments(executable, args...)}, nil
+			return Command{Name: executable, Args: toolchainCLIArguments(executable, options.ArduinoConfig, args...)}, nil
 		default:
 			return Command{}, fmt.Errorf(
 				"toolchain dependency does not support operation %s",
@@ -200,10 +212,11 @@ func Build(options Options) (Command, error) {
 		}
 
 	case MethodUrclock, MethodUSBasp, MethodAvrdude:
-		executable, configuration, err := FindAvrdudeWithCLI(
+		executable, configuration, err := FindAvrdudeWithCLIConfig(
 			options.Avrdude,
 			options.AvrdudeConf,
 			options.ArduinoCLI,
+			options.ArduinoConfig,
 		)
 		if err != nil {
 			return Command{}, err
@@ -223,6 +236,9 @@ func Build(options Options) (Command, error) {
 			}
 		}
 		args := []string{"-C" + configuration, "-v", "-p" + options.MCU, "-c" + programmer}
+		if programmer == "usbasp" && options.USBaspBitClockUS > 0 {
+			args = append(args, "-B"+strconv.FormatFloat(options.USBaspBitClockUS, 'f', -1, 64))
+		}
 		if options.Port != "" && programmer != "usbasp" {
 			args = append(args, "-P"+options.Port)
 		}
@@ -280,6 +296,11 @@ func Build(options Options) (Command, error) {
 			// Enter Urboot, query it, then let normal programmer shutdown hand
 			// control back to the application.
 			args = append(args, "-xshowversion")
+		case OperationChipErase:
+			if programmer == "urclock" {
+				return Command{}, errors.New("chip-erase requires ISP and cannot preserve a serial bootloader")
+			}
+			args = append(args, "-e")
 		default:
 			return Command{}, fmt.Errorf("unknown programmer operation %q", options.Operation)
 		}
@@ -306,6 +327,9 @@ func ExecuteWithRunner(
 ) (resultErr error) {
 	if runner == nil {
 		return errors.New("programmer operation requires a command runner")
+	}
+	if options.Method == MethodUSBasp && options.USBaspAutoSlow && options.USBaspBitClockUS <= 0 {
+		runner = &usbaspSlowFallbackRunner{inner: runner, output: output}
 	}
 	if options.Operation == "" {
 		options.Operation = OperationWriteFlash
@@ -366,7 +390,26 @@ func ExecuteWithRunner(
 		}
 	}
 	if err := runner.Run(ctx, command, output); err != nil {
-		return err
+		if options.Method == MethodArduino && options.Operation == OperationBurnBoot &&
+			options.USBaspAutoSlow && strings.EqualFold(options.Programmer, "usbasp") {
+			slow := options
+			slow.Programmer = "usbasp_slow"
+			slowCommand, buildErr := Build(slow)
+			if buildErr != nil {
+				return errors.Join(err, fmt.Errorf("build slow USBasp bootloader retry: %w", buildErr))
+			}
+			if output != nil {
+				fmt.Fprintln(output, "USBasp bootloader attempt failed; retrying with the core-provided usbasp_slow programmer (-B32).")
+			}
+			if slowErr := runner.Run(ctx, slowCommand, output); slowErr != nil {
+				return errors.Join(
+					fmt.Errorf("USBasp bootloader attempt: %w", err),
+					fmt.Errorf("slow USBasp bootloader retry: %w", slowErr),
+				)
+			}
+		} else {
+			return err
+		}
 	}
 	if options.Method != MethodCompile &&
 		(options.Operation == OperationWriteFlash || options.Operation == OperationWriteEEPROM) {
@@ -979,10 +1022,11 @@ func verifyEESAVEWithRunner(
 		return err
 	}
 	defer os.Remove(path)
-	executable, configuration, err := FindAvrdudeWithCLI(
+	executable, configuration, err := FindAvrdudeWithCLIConfig(
 		options.Avrdude,
 		options.AvrdudeConf,
 		options.ArduinoCLI,
+		options.ArduinoConfig,
 	)
 	if err != nil {
 		return err
@@ -997,6 +1041,12 @@ func verifyEESAVEWithRunner(
 			"-C" + configuration, "-q", "-p" + mcu, "-cusbasp",
 			"-Uhfuse:r:" + path + ":h",
 		},
+	}
+	if options.USBaspBitClockUS > 0 {
+		preflight.Args = append(
+			preflight.Args[:4],
+			append([]string{"-B" + strconv.FormatFloat(options.USBaspBitClockUS, 'f', -1, 64)}, preflight.Args[4:]...)...,
+		)
 	}
 	if output != nil {
 		fmt.Fprintln(output, "USBasp EEPROM-preservation preflight:", preflight.String())
@@ -1040,6 +1090,84 @@ func Run(ctx context.Context, command Command, output io.Writer) error {
 	return nil
 }
 
+const defaultUSBaspSlowBitClockUS = 32.0
+
+type usbaspSlowFallbackRunner struct {
+	inner  CommandRunner
+	output io.Writer
+	slow   bool
+}
+
+func (runner *usbaspSlowFallbackRunner) Run(
+	ctx context.Context,
+	command Command,
+	output io.Writer,
+) error {
+	if runner == nil || runner.inner == nil {
+		return errors.New("USBasp slow fallback requires a command runner")
+	}
+	if !isUSBaspCommand(command) || hasBitClock(command) {
+		return runner.inner.Run(ctx, command, output)
+	}
+	if runner.slow {
+		return runner.inner.Run(ctx, withUSBaspBitClock(command, defaultUSBaspSlowBitClockUS), output)
+	}
+	err := runner.inner.Run(ctx, command, output)
+	if err == nil {
+		return nil
+	}
+	runner.slow = true
+	writer := output
+	if writer == nil {
+		writer = runner.output
+	}
+	if writer != nil {
+		fmt.Fprintln(writer, "USBasp exchange failed; retrying at slow SCK (-B32) and retaining slow mode for this operation.")
+	}
+	slowErr := runner.inner.Run(ctx, withUSBaspBitClock(command, defaultUSBaspSlowBitClockUS), output)
+	if slowErr == nil {
+		return nil
+	}
+	return errors.Join(
+		fmt.Errorf("USBasp default-speed attempt: %w", err),
+		fmt.Errorf("USBasp slow-SCK retry: %w", slowErr),
+	)
+}
+
+func isUSBaspCommand(command Command) bool {
+	for _, argument := range command.Args {
+		if strings.EqualFold(argument, "-cusbasp") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBitClock(command Command) bool {
+	for _, argument := range command.Args {
+		if argument == "-B" || strings.HasPrefix(strings.ToUpper(argument), "-B") {
+			return true
+		}
+	}
+	return false
+}
+
+func withUSBaspBitClock(command Command, microseconds float64) Command {
+	result := Command{Name: command.Name, Args: make([]string, 0, len(command.Args)+1)}
+	inserted := false
+	for _, argument := range command.Args {
+		result.Args = append(result.Args, argument)
+		if !inserted && strings.EqualFold(argument, "-cusbasp") {
+			result.Args = append(result.Args, "-B"+strconv.FormatFloat(microseconds, 'f', -1, 64))
+			inserted = true
+		}
+	}
+	if !inserted {
+		result.Args = append(result.Args, "-B"+strconv.FormatFloat(microseconds, 'f', -1, 64))
+	}
+	return result
+}
+
 func (command Command) String() string {
 	parts := []string{quote(command.Name)}
 	for _, argument := range command.Args {
@@ -1056,6 +1184,15 @@ func FindAvrdudeWithCLI(
 	executable,
 	configuration,
 	arduinoCLI string,
+) (string, string, error) {
+	return FindAvrdudeWithCLIConfig(executable, configuration, arduinoCLI, "")
+}
+
+func FindAvrdudeWithCLIConfig(
+	executable,
+	configuration,
+	arduinoCLI,
+	arduinoConfig string,
 ) (string, string, error) {
 	if executable != "" {
 		if configuration == "" {
@@ -1079,8 +1216,8 @@ func FindAvrdudeWithCLI(
 	if err == nil {
 		queryContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		command := exec.CommandContext(queryContext, cli, managedToolchainCLIArguments(
-			cli, "config", "get", "directories.data",
+		command := exec.CommandContext(queryContext, cli, toolchainCLIArguments(
+			cli, arduinoConfig, "config", "get", "directories.data",
 		)...)
 		output, commandErr := command.Output()
 		if commandErr == nil {

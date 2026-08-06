@@ -34,10 +34,10 @@ func registerArtifactHTTP(mux *http.ServeMux, service *Service) {
 		}
 		service.Artifacts.Handler().ServeHTTP(writer, request)
 	})
-	mux.Handle("/api/v1/artifacts", handler)
-	mux.Handle("/api/v1/artifacts/", handler)
-	mux.Handle("/api/v1/updates", handler)
-	mux.Handle("/api/v1/updates/", handler)
-	mux.Handle("/api/v1/restores", handler)
-	mux.Handle("/api/v1/restores/", handler)
+	mux.Handle("/api/artifacts", handler)
+	mux.Handle("/api/artifacts/", handler)
+	mux.Handle("/api/updates", handler)
+	mux.Handle("/api/updates/", handler)
+	mux.Handle("/api/restores", handler)
+	mux.Handle("/api/restores/", handler)
 }

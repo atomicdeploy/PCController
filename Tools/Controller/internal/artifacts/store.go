@@ -180,7 +180,11 @@ func (store *Store) Put(input io.Reader, options PutOptions) (Descriptor, error)
 			return Descriptor{}, err
 		}
 	}
-	return publicDescriptor(descriptor), nil
+	stored, err := store.Get(descriptor.Kind, descriptor.SHA256)
+	if err != nil {
+		return Descriptor{}, err
+	}
+	return publicDescriptor(stored), nil
 }
 
 func validateDescriptorMetadata(values map[string]string) (map[string]string, error) {
@@ -389,13 +393,23 @@ func (store *Store) writeMetadata(descriptor Descriptor, blob string) error {
 	if existing, readErr := root.ReadFile(path); readErr == nil {
 		var metadata storedMetadata
 		if strictJSON(existing, &metadata) == nil && metadata.Descriptor.SHA256 == descriptor.SHA256 {
-			// Refresh descriptive metadata without creating another content blob.
+			// A content-addressed duplicate must not silently rename or redefine
+			// an existing recovery default. Bundled embedded identity wins over
+			// upload provenance; otherwise the first stored identity remains
+			// canonical and later writes only enrich bounded metadata.
+			incoming := descriptor
+			descriptor = metadata.Descriptor
+			if incoming.Embedded && !descriptor.Embedded {
+				descriptor = incoming
+			}
 			descriptor.CreatedAt = metadata.Descriptor.CreatedAt
+			descriptor.Embedded = descriptor.Embedded || incoming.Embedded
+			descriptor.VerifiedReadback = descriptor.VerifiedReadback || incoming.VerifiedReadback
 			merged := make(map[string]string, len(metadata.Descriptor.Metadata)+len(descriptor.Metadata))
 			for key, value := range metadata.Descriptor.Metadata {
 				merged[key] = value
 			}
-			for key, value := range descriptor.Metadata {
+			for key, value := range incoming.Metadata {
 				merged[key] = value
 			}
 			var mergeErr error

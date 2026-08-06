@@ -25,6 +25,10 @@ type outputCommander interface {
 	PublishHostEvent(string, string)
 }
 
+type outputCapabilityReporter interface {
+	Snapshot() Snapshot
+}
+
 type StreamOperation struct {
 	ID   uint64
 	Kind string
@@ -330,13 +334,12 @@ func (scheduler *OutputScheduler) finish(
 		slot = &scheduler.effect
 	}
 	isCurrent := *slot == operation
-	closed := scheduler.closed
 	// Never let an older canceled animation overwrite the first frame of its
 	// replacement. On explicit stop or natural completion, leave a useful
 	// steady base color instead of a dim breath/blank flash frame. The restore
 	// and slot clear are serialized with replace/override so a new effect
 	// cannot start in the small gap between those operations.
-	if isCurrent && !closed && restore != nil {
+	if isCurrent && restore != nil {
 		restore()
 	}
 	if isCurrent {
@@ -421,6 +424,28 @@ func (scheduler *OutputScheduler) streamStatusEffect(
 	ctx context.Context,
 	effect appconfig.StatusLEDEffect,
 ) error {
+	if reporter, ok := scheduler.target.(outputCapabilityReporter); ok &&
+		reporter.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects != 0 {
+		options, duration, err := nativeStatusEffect(effect)
+		if err != nil {
+			return err
+		}
+		payload, err := native.StatusEffectPayload(options)
+		if err != nil {
+			return err
+		}
+		if err := scheduler.send(ctx, native.OpStatusEffect, payload); err != nil {
+			return err
+		}
+		if duration == 0 {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return waitOutput(ctx, duration)
+	}
+
+	// Compatibility path for older firmware. Current boards advertise the
+	// compact effect opcode and receive only one descriptor per animation.
 	started := time.Now()
 	period := time.Duration(effect.PeriodMS) * time.Millisecond
 	var step time.Duration
@@ -479,6 +504,54 @@ func (scheduler *OutputScheduler) streamStatusEffect(
 			return err
 		}
 	}
+}
+
+func nativeStatusEffect(effect appconfig.StatusLEDEffect) (
+	native.StatusEffectOptions,
+	time.Duration,
+	error,
+) {
+	kind := byte(0)
+	switch strings.ToLower(strings.TrimSpace(effect.Kind)) {
+	case "breathe":
+		kind = native.StatusEffectBreathe
+	case "flash":
+		kind = native.StatusEffectFlash
+	case "cycle":
+		kind = native.StatusEffectCycle
+	case "transition":
+		kind = native.StatusEffectTransition
+	default:
+		return native.StatusEffectOptions{}, 0,
+			fmt.Errorf("unknown status effect kind %q", effect.Kind)
+	}
+	repeats := effect.Repeats
+	duration := time.Duration(0)
+	if repeats != 0 {
+		duration = time.Duration(effect.PeriodMS) * time.Millisecond *
+			time.Duration(repeats)
+	} else if effect.DurationMS > 0 {
+		cycles := (effect.DurationMS + effect.PeriodMS - 1) / effect.PeriodMS
+		if cycles > 255 {
+			return native.StatusEffectOptions{}, 0,
+				fmt.Errorf("status effect duration needs %d cycles; maximum is 255", cycles)
+		}
+		repeats = byte(cycles)
+		// Wait for the same whole-cycle duration encoded for the MCU. Restoring
+		// the base color at the requested partial duration would truncate its
+		// last procedurally generated cycle.
+		duration = time.Duration(cycles*effect.PeriodMS) * time.Millisecond
+	}
+	return native.StatusEffectOptions{
+		Kind: kind,
+		Red:  effect.Red, Green: effect.Green, Blue: effect.Blue,
+		AlternateRed:      effect.AlternateRed,
+		AlternateGreen:    effect.AlternateGreen,
+		AlternateBlue:     effect.AlternateBlue,
+		Brightness:        effect.Brightness,
+		MinimumBrightness: effect.MinBrightness,
+		PeriodMS:          uint16(effect.PeriodMS), Repeats: repeats,
+	}, duration, nil
 }
 
 func (scheduler *OutputScheduler) send(

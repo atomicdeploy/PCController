@@ -14,14 +14,19 @@ namespace pccontroller::virtual_board {
 namespace {
 
 constexpr std::size_t kSettingsAddress = 32;
-constexpr std::size_t kSettingsValuesSize = 31;
+constexpr std::size_t kSettingsValuesSize = 40;
 constexpr std::size_t kSettingsRecordSize = kSettingsValuesSize + 1;
-constexpr std::size_t kRemoteHeaderAddress = 64;
-constexpr std::size_t kRemoteEntriesAddress = 68;
+constexpr std::size_t kRemoteHeaderAddress = 80;
+constexpr std::size_t kRemoteEntriesAddress = 84;
 constexpr std::size_t kRemoteRecordSize = 12;
-constexpr std::size_t kResetJournalAddress = 320;
+constexpr std::size_t kResetJournalAddress = 336;
 constexpr std::size_t kResetJournalSlots = 64;
 constexpr std::size_t kResetRecordSize = 6;
+constexpr std::size_t kStatusProfileAddress =
+    kResetJournalAddress + kResetJournalSlots * kResetRecordSize;
+constexpr std::size_t kStatusProfileCount = 19;
+constexpr std::size_t kStatusProfilePayloadSize = 12;
+constexpr std::size_t kStatusProfileRecordSize = 13;
 constexpr std::uint8_t kResetRecordMarker = 0xA7;
 constexpr std::uint8_t kPowerOnResetCause = 1U << 0U;
 constexpr std::uint8_t kWatchdogResetCause = 1U << 3U;
@@ -49,6 +54,9 @@ constexpr std::uint8_t kSaveLastPage = 1U << 0U;
 constexpr std::uint8_t kLearnModeIndefinite = 0;
 constexpr std::uint8_t kLearnModeTimer = 1;
 constexpr std::uint8_t kMaximumLearningSeconds = 120;
+constexpr std::uint8_t kSegmentRepeatMask = 0x03U;
+constexpr std::uint8_t kSegmentIntervalWaiting = 0x40U;
+constexpr std::uint8_t kSegmentForceScroll = 0x80U;
 constexpr std::chrono::milliseconds kHostOfflineAfter{5000};
 constexpr std::int16_t kHotTemperatureCentiC = 5000;
 constexpr std::array<std::uint8_t, 4> kI2cAddresses{0x27, 0x3F, 0x40,
@@ -325,6 +333,7 @@ VirtualBoard::VirtualBoard(ISensors &sensors, IRelays &relays, IPwm &pwm,
   startedAt_ = now;
   lastStreamAt_ = now;
   lastFadeAt_ = now;
+  lastStatusEffectAt_ = now;
   lastRelayTestAt_ = now;
   lastHostActivityAt_ = now;
   buzzerDeadline_ = now;
@@ -343,12 +352,26 @@ VirtualBoard::VirtualBoard(ISensors &sensors, IRelays &relays, IPwm &pwm,
   applyStoredSettings();
   restoreStoredOutputs();
   enclosureBrightness_ = settings_.illuminationOffBrightness;
+  statusEffectBrightness_ = settings_.statusBrightness;
   if ((settings_.flags & kSettingsProgramming) == 0) {
     pwm_.set(12, 4095);
     pwm_.set(14, scale8(settings_.statusBrightness));
     pwm_.set(11, scale8(enclosureBrightness_));
   }
   updateMenuDisplay();
+  const DisplayState display = displays_.state();
+  for (std::size_t index = 0; index < lastPushedSegments_.size(); ++index) {
+    lastPushedSegments_[index] = encodeSegment(display.segments[index]);
+  }
+  lastPushedSegmentBrightness_ = settings_.displayBrightness;
+  lastPushedBuzzerFrequencyHz_ = display.buzzerFrequencyHz;
+  lastPushedBuzzerDurationMs_ = display.buzzerDurationMs;
+  lastPushedBuzzerMuted_ = (settings_.flags & kSettingsSilent) != 0;
+  lastPushedStatusLed_ = {
+      static_cast<std::uint8_t>(pwm_.value(13) >> 4U),
+      static_cast<std::uint8_t>(pwm_.value(14) >> 4U),
+      static_cast<std::uint8_t>(pwm_.value(15) >> 4U),
+      settings_.statusBrightness, 0, statusCondition_};
 }
 
 std::vector<wire::Frame> VirtualBoard::connectedFrames() {
@@ -413,6 +436,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
                         readU16(payload));
     buzzerDeadlineActive_ = readU16(payload) != 0;
     buzzerDeadline_ = now + std::chrono::milliseconds(readU16(payload));
+    queueMirrorChanges();
     return ack();
   case wire::PwmSet:
     if (payload.size() < 3 || payload[0] >= 16 ||
@@ -437,13 +461,33 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     if (payload.size() < 4) {
       return bad();
     }
-    pwm_.set(13, static_cast<std::uint16_t>(
-                     scale8(payload[0]) * payload[3] / 255U));
-    pwm_.set(14, static_cast<std::uint16_t>(
-                     scale8(payload[1]) * payload[3] / 255U));
-    pwm_.set(15, static_cast<std::uint16_t>(
-                     scale8(payload[2]) * payload[3] / 255U));
+    setStatusRgb(payload[0], payload[1], payload[2], payload[3]);
     statusOverride_ = true;
+    statusEffect_ = 0;
+    statusCondition_ = 0xFF;
+    return ack();
+  case wire::StatusEffect:
+    if (!applyStatusEffect(payload, now)) {
+      return bad();
+    }
+    return ack();
+  case wire::StatusProfileGet: {
+    if (payload.empty() || payload[0] >= kStatusProfileCount) {
+      return bad();
+    }
+    std::array<std::uint8_t, kStatusProfilePayloadSize> profile{};
+    const bool persisted = statusProfile(payload[0], profile);
+    std::vector<std::uint8_t> response{payload[0]};
+    response.insert(response.end(), profile.begin(), profile.end());
+    response.push_back(persisted ? 1U : 0U);
+    return {{wire::StatusProfileResponse, request.sequence,
+             std::move(response)}};
+  }
+  case wire::StatusProfileSet:
+    if (payload.size() < 1 + kStatusProfilePayloadSize ||
+        !setStatusProfile(payload[0], payload.data() + 1, now)) {
+      return bad();
+    }
     return ack();
   case wire::ProgramState:
     if (payload.empty() || payload[0] > 1) {
@@ -451,6 +495,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     }
     programRunning_ = payload[0] != 0;
     statusOverride_ = false;
+    statusEffect_ = 0;
     return ack();
   case wire::PwmGet:
     return {pwmFrame(request.sequence)};
@@ -620,6 +665,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     if (!applyDisplayText(payload, now)) {
       return bad();
     }
+    queueMirrorChanges();
     return ack();
   }
   case wire::MacroStart:
@@ -740,6 +786,7 @@ std::vector<wire::Frame> VirtualBoard::tick() {
   serviceAutomation(now);
   std::vector<wire::Frame> output;
   serviceMacro(now, pendingEvents_);
+  queueMirrorChanges();
   output.swap(pendingEvents_);
   if (settings_.streamPeriodMs != 0 &&
       now - lastStreamAt_ >=
@@ -1267,7 +1314,9 @@ wire::Frame VirtualBoard::menuLayoutFrame(std::uint8_t sequence) const {
 }
 
 wire::Frame VirtualBoard::helloFrame(std::uint8_t sequence) const {
-  constexpr std::uint32_t capabilities = 0x01FFF7FFU;
+  constexpr std::uint32_t capabilities =
+      0x01FFF7FFU | (1UL << 25U) | (1UL << 26U) | (1UL << 27U) |
+      (1UL << 28U) | (1UL << 29U) | (1UL << 30U) | (1UL << 31U);
   std::vector<std::uint8_t> payload{3, 1};
   appendU32(payload, capabilities);
   appendU32(payload, buildHash());
@@ -1375,6 +1424,10 @@ wire::Frame VirtualBoard::settingsFrame(std::uint8_t sequence) const {
   payload.push_back(settings_.displayOptions);
   payload.push_back(settings_.relayRestoreMask);
   payload.push_back(settings_.motionBreakMs);
+  payload.push_back(1); // Virtual EEPROM settings are initialized/persisted.
+  payload.push_back(1); // Board name shares the persisted settings record.
+  payload.push_back(static_cast<std::uint8_t>(settings_.boardName.size()));
+  payload.insert(payload.end(), settings_.boardName.begin(), settings_.boardName.end());
   return {wire::SettingsResponse, sequence, std::move(payload)};
 }
 
@@ -1513,7 +1566,10 @@ wire::Frame VirtualBoard::remotesFrame(std::uint8_t sequence,
 
 bool VirtualBoard::applySettings(
     const std::vector<std::uint8_t> &payload) {
-  if (payload.size() != 15 || payload[0] != 3 || payload[2] > 2 ||
+  const bool hasBoardName = payload.size() != 15;
+  if ((hasBoardName &&
+       (payload.size() < 16 || payload.size() != 16U + payload[15])) ||
+      payload[0] != 3 || payload[2] > 2 ||
       payload[5] > 7 ||
       (payload[7] & ~kOutputPersistenceAllowed) != 0 || payload[14] == 0) {
     return false;
@@ -1525,6 +1581,18 @@ bool VirtualBoard::applySettings(
   if (payload[10] >= kMenuPageCount ||
       (menuVisibleMask_ & (std::uint16_t{1} << payload[10])) == 0) {
     return false;
+  }
+  std::string boardName = settings_.boardName;
+  if (hasBoardName) {
+    boardName.assign(payload.begin() + 16, payload.end());
+    if (boardName.size() > 8U ||
+        std::any_of(boardName.begin(), boardName.end(), [](unsigned char value) {
+          return value < 0x20U || value > 0x7EU;
+        }) ||
+        (!boardName.empty() &&
+         (boardName.front() == ' ' || boardName.back() == ' '))) {
+      return false;
+    }
   }
 
   settings_.flags = payload[1] & kSettingsAllowed;
@@ -1540,6 +1608,7 @@ bool VirtualBoard::applySettings(
   settings_.displayOptions = payload[12];
   settings_.relayRestoreMask = payload[13];
   settings_.motionBreakMs = payload[14];
+  settings_.boardName = std::move(boardName);
   applyStoredSettings();
   return true;
 }
@@ -1594,8 +1663,13 @@ bool VirtualBoard::applyMenuLayout(
 
 bool VirtualBoard::applyDisplayText(
     const std::vector<std::uint8_t> &payload, TimePoint now) {
-  if (payload.size() < 4 || payload[0] > 4 || payload[3] > 40 ||
-      payload.size() < 4U + payload[3] ||
+  if (payload.size() < 4 || payload[0] > 5 || payload[3] > 40 ||
+      (payload[0] != 5 && payload.size() < 4U + payload[3]) ||
+      (payload[0] == 5 &&
+       (payload.size() < 8 || payload.size() < 8U + payload[3] ||
+        (payload[4] & kSegmentRepeatMask) > 2 ||
+        (payload[4] & 0x7CU) != 0 ||
+        ((payload[4] & kSegmentRepeatMask) == 2 && payload[7] == 0))) ||
       (payload[0] == 3 && (payload[3] < 4 || payload[3] > 36)) ||
       (payload[0] == 4 && payload[3] != 0)) {
     return false;
@@ -1607,6 +1681,39 @@ bool VirtualBoard::applyDisplayText(
     releaseHostPanel();
     return true;
   }
+  if (target == 5) {
+    clearScheduledSegments(false);
+    if (textLength == 0) {
+      updateMenuDisplay();
+      return true;
+    }
+    scheduledSegmentText_.assign(payload.begin() + 8,
+                                 payload.begin() + 8 + textLength);
+    scheduledSegmentOptions_ = payload[4];
+    scheduledSegmentHoldMs_ = readU16(payload, 5);
+    scheduledSegmentIntervalSeconds_ = payload[7];
+    scheduledSegmentStepMs_ = duration == 0
+                                  ? 260
+                                  : std::max<std::uint16_t>(80, duration);
+    scheduledSegmentIndex_ = 0;
+    scheduledSegmentActive_ = true;
+    scheduledSegmentWaiting_ = false;
+    showScheduledSegmentWindow();
+    const bool scrolling = scheduledSegmentText_.size() > 4 ||
+                           (scheduledSegmentOptions_ &
+                            kSegmentForceScroll) != 0;
+    const std::uint8_t repeat =
+        scheduledSegmentOptions_ & kSegmentRepeatMask;
+    segmentDeadlineActive_ = scrolling ||
+                             (scheduledSegmentHoldMs_ != 0 && repeat != 1);
+    if (segmentDeadlineActive_) {
+      segmentDeadline_ = now + std::chrono::milliseconds(
+                                   scrolling ? scheduledSegmentStepMs_
+                                             : scheduledSegmentHoldMs_);
+    }
+    return true;
+  }
+  clearScheduledSegments(false);
   if (target == 3) {
     hostPanelCaptured_ = true;
     hostPanelMeta_ = duration;
@@ -1836,7 +1943,7 @@ void VirtualBoard::endLearning(std::uint8_t state) {
 void VirtualBoard::releaseHostPanel() {
   hostPanelCaptured_ = false;
   hostPanelMeta_ = 0;
-  segmentDeadlineActive_ = false;
+  clearScheduledSegments(false);
   setMenuPage(settings_.defaultMenuPage);
 }
 
@@ -1874,11 +1981,12 @@ void VirtualBoard::loadSettings() {
   loaded.displayOptions = record[28];
   loaded.relayRestoreMask = record[29];
   loaded.motionBreakMs = record[30];
+  const std::uint8_t boardNameLength = record[31];
   if (loaded.illuminationMode > 2 || loaded.displayBrightness > 7 ||
       (loaded.outputPersistence & ~kOutputPersistenceAllowed) != 0 ||
       loaded.motionBreakMs == 0 ||
       (loaded.streamPeriodMs != 0 && loaded.streamPeriodMs < 100) ||
-      loaded.defaultMenuPage >= kMenuPageCount ||
+      boardNameLength > 8U || loaded.defaultMenuPage >= kMenuPageCount ||
       !validPackedMenuOrder(loaded.visibleMenuMask, loaded.menuOrder) ||
       (loaded.visibleMenuMask &
        (std::uint16_t{1} << loaded.defaultMenuPage)) == 0) {
@@ -1887,6 +1995,8 @@ void VirtualBoard::loadSettings() {
     return;
   }
   settings_ = loaded;
+  settings_.boardName.assign(record.begin() + 32,
+                             record.begin() + 32 + boardNameLength);
 }
 
 void VirtualBoard::saveSettings() {
@@ -1911,6 +2021,9 @@ void VirtualBoard::saveSettings() {
   record[28] = settings_.displayOptions;
   record[29] = settings_.relayRestoreMask;
   record[30] = settings_.motionBreakMs;
+  record[31] = static_cast<std::uint8_t>(settings_.boardName.size());
+  std::copy(settings_.boardName.begin(), settings_.boardName.end(),
+            record.begin() + 32);
   record.back() = wire::crc8(record.data(), record.size() - 1U);
   for (std::size_t index = 0; index < record.size(); ++index) {
     eeprom_.update(kSettingsAddress + index, record[index]);
@@ -2111,8 +2224,11 @@ void VirtualBoard::resetRuntime(TimePoint now) {
   startedAt_ = now;
   lastStreamAt_ = now;
   lastFadeAt_ = now;
-  segmentDeadlineActive_ = false;
+  lastStatusEffectAt_ = now;
+  clearScheduledSegments(false);
   buzzerDeadlineActive_ = false;
+  statusEffect_ = 0;
+  statusEffectBrightness_ = settings_.statusBrightness;
   displays_.setBuzzer(0, 0);
   i2cLeaseAddress_ = 0;
   activeKeys_ = 0;
@@ -2133,12 +2249,16 @@ void VirtualBoard::setMenuPage(std::uint8_t page) {
     settings_.defaultMenuPage = menuPage_;
     saveSettings();
   }
-  if (macroState_ != 1 && macroState_ != 2 && !segmentDeadlineActive_) {
+  if (macroState_ != 1 && macroState_ != 2 && !segmentDeadlineActive_ &&
+      (!scheduledSegmentActive_ || scheduledSegmentWaiting_)) {
     updateMenuDisplay();
   }
 }
 
 void VirtualBoard::updateMenuDisplay() {
+  if (scheduledSegmentActive_ && !scheduledSegmentWaiting_) {
+    return;
+  }
   static constexpr std::array<const char *, kMenuPageCount> labels{
       "door", "VOLT", "CURR", "tLED", "t-bt", "LItE", "bEEP",
       "PWM ", "rELY", "KEY ", "uPWM", "r5-8", "MOVE", "LErn"};
@@ -2213,20 +2333,23 @@ bool VirtualBoard::executeQueuedCommand(
     if (payload.size() < 4) {
       return false;
     }
-    pwm_.set(13, static_cast<std::uint16_t>(
-                     scale8(payload[0]) * payload[3] / 255U));
-    pwm_.set(14, static_cast<std::uint16_t>(
-                     scale8(payload[1]) * payload[3] / 255U));
-    pwm_.set(15, static_cast<std::uint16_t>(
-                     scale8(payload[2]) * payload[3] / 255U));
+    setStatusRgb(payload[0], payload[1], payload[2], payload[3]);
     statusOverride_ = true;
+    statusEffect_ = 0;
+    statusCondition_ = 0xFF;
     return true;
+  case wire::StatusEffect:
+    return applyStatusEffect(payload, now);
+  case wire::StatusProfileSet:
+    return payload.size() >= 1 + kStatusProfilePayloadSize &&
+           setStatusProfile(payload[0], payload.data() + 1, now);
   case wire::ProgramState:
     if (payload.empty() || payload[0] > 1) {
       return false;
     }
     programRunning_ = payload[0] != 0;
     statusOverride_ = false;
+    statusEffect_ = 0;
     return true;
   case wire::AddressableLed: {
     if (payload.size() < 5 ||
@@ -2373,7 +2496,253 @@ void VirtualBoard::queueEvent(std::vector<std::uint8_t> payload) {
   pendingEvents_.push_back({wire::Event, 0, std::move(payload)});
 }
 
+void VirtualBoard::queueMirrorChanges() {
+  const DisplayState display = displays_.state();
+  std::array<std::uint8_t, 4> segments{};
+  for (std::size_t index = 0; index < segments.size(); ++index) {
+    segments[index] = encodeSegment(display.segments[index]);
+  }
+  if (segments != lastPushedSegments_ ||
+      settings_.displayBrightness != lastPushedSegmentBrightness_) {
+    std::vector<std::uint8_t> payload(segments.begin(), segments.end());
+    payload.push_back(settings_.displayBrightness);
+    pendingEvents_.push_back({wire::SegmentChanged, 0, std::move(payload)});
+    lastPushedSegments_ = segments;
+    lastPushedSegmentBrightness_ = settings_.displayBrightness;
+  }
+
+  const bool muted = (settings_.flags & kSettingsSilent) != 0;
+  if (display.buzzerFrequencyHz != lastPushedBuzzerFrequencyHz_ ||
+      display.buzzerDurationMs != lastPushedBuzzerDurationMs_ ||
+      muted != lastPushedBuzzerMuted_) {
+    std::vector<std::uint8_t> payload;
+    appendU16(payload, display.buzzerFrequencyHz);
+    appendU16(payload, display.buzzerDurationMs);
+    payload.push_back(static_cast<std::uint8_t>(muted));
+    pendingEvents_.push_back({wire::BuzzerChanged, 0, std::move(payload)});
+    lastPushedBuzzerFrequencyHz_ = display.buzzerFrequencyHz;
+    lastPushedBuzzerDurationMs_ = display.buzzerDurationMs;
+    lastPushedBuzzerMuted_ = muted;
+  }
+
+  const std::array<std::uint8_t, 6> statusLed{{
+      static_cast<std::uint8_t>(pwm_.value(13) >> 4U),
+      static_cast<std::uint8_t>(pwm_.value(14) >> 4U),
+      static_cast<std::uint8_t>(pwm_.value(15) >> 4U),
+      statusEffectBrightness_, statusEffect_, statusCondition_}};
+  if (statusLed != lastPushedStatusLed_) {
+    pendingEvents_.push_back(
+        {wire::StatusLedChanged, 0,
+         std::vector<std::uint8_t>(statusLed.begin(), statusLed.end())});
+    lastPushedStatusLed_ = statusLed;
+  }
+}
+
+void VirtualBoard::setStatusRgb(std::uint8_t red, std::uint8_t green,
+                                std::uint8_t blue,
+                                std::uint8_t brightness) {
+  pwm_.set(13, static_cast<std::uint16_t>(scale8(red) * brightness / 255U));
+  pwm_.set(14, static_cast<std::uint16_t>(scale8(green) * brightness / 255U));
+  pwm_.set(15, static_cast<std::uint16_t>(scale8(blue) * brightness / 255U));
+  statusEffectBrightness_ = brightness;
+}
+
+bool VirtualBoard::applyStatusEffect(
+    const std::vector<std::uint8_t> &payload, TimePoint now) {
+  if (payload.size() == 1 && payload[0] == 0) {
+    statusEffect_ = 0;
+    statusOverride_ = false;
+    statusCondition_ = 0;
+    setStatusRgb(0, 255, 0, settings_.statusBrightness);
+    return true;
+  }
+  if (payload.size() < 12 || payload[0] == 0 || payload[0] > 4 ||
+      payload[8] > payload[7] || readU16(payload, 9) < 640) {
+    return false;
+  }
+  statusEffect_ = payload[0];
+  statusCondition_ = 0xFF;
+  std::copy_n(payload.begin() + 1, 3, statusEffectColor_.begin());
+  std::copy_n(payload.begin() + 4, 3, statusEffectAlternate_.begin());
+  statusEffectBrightness_ = payload[7];
+  statusEffectMinimum_ = payload[8];
+  statusEffectPhase_ = 0;
+  statusEffectRepeats_ = payload[11];
+  const std::uint16_t period = readU16(payload, 9);
+  statusEffectStepMs_ = static_cast<std::uint16_t>(period >> 5U);
+  lastStatusEffectAt_ = now;
+  statusOverride_ = true;
+  renderStatusEffect();
+  return true;
+}
+
+bool VirtualBoard::statusProfile(
+    std::uint8_t condition,
+    std::array<std::uint8_t, kStatusProfilePayloadSize> &payload) const {
+  if (condition >= kStatusProfileCount) {
+    return false;
+  }
+  const std::size_t address =
+      kStatusProfileAddress + condition * kStatusProfileRecordSize;
+  for (std::size_t index = 0; index < payload.size(); ++index) {
+    payload[index] = eeprom_.read(address + index);
+  }
+  const std::uint16_t period = readU16(
+      std::vector<std::uint8_t>(payload.begin(), payload.end()), 9);
+  const bool valid =
+      eeprom_.read(address + payload.size()) ==
+          wire::crc8(payload.data(), payload.size()) &&
+      payload[0] <= 4 && payload[8] <= payload[7] &&
+      (payload[0] == 0 || period >= 640);
+  if (valid) {
+    return true;
+  }
+  payload.fill(0);
+  payload[7] = settings_.statusBrightness;
+  if (condition == 0 || condition == 6) {
+    return false;
+  }
+  if (condition == 4 || condition == 5) {
+    payload[1] = 255;
+  } else {
+    payload[3] = 255;
+  }
+  return false;
+}
+
+bool VirtualBoard::setStatusProfile(std::uint8_t condition,
+                                    const std::uint8_t *payload,
+                                    TimePoint now) {
+  if (condition >= kStatusProfileCount || payload == nullptr ||
+      payload[0] > 4 || payload[8] > payload[7]) {
+    return false;
+  }
+  const std::uint16_t period = static_cast<std::uint16_t>(payload[9]) |
+                               static_cast<std::uint16_t>(payload[10]) << 8U;
+  if (payload[0] != 0 && period < 640) {
+    return false;
+  }
+  const std::size_t address =
+      kStatusProfileAddress + condition * kStatusProfileRecordSize;
+  for (std::size_t index = 0; index < kStatusProfilePayloadSize; ++index) {
+    eeprom_.update(address + index, payload[index]);
+  }
+  eeprom_.update(address + kStatusProfilePayloadSize,
+                 wire::crc8(payload, kStatusProfilePayloadSize));
+  eeprom_.flush();
+  if (statusCondition_ == condition) {
+    std::vector<std::uint8_t> effect(payload,
+                                     payload + kStatusProfilePayloadSize);
+    if (effect[0] == 0) {
+      setStatusRgb(effect[1], effect[2], effect[3], effect[7]);
+      statusEffect_ = 0;
+    } else {
+      applyStatusEffect(effect, now);
+      statusCondition_ = condition;
+    }
+  }
+  return true;
+}
+
+void VirtualBoard::renderStatusEffect() {
+  std::array<std::uint8_t, 3> color = statusEffectColor_;
+  std::uint8_t brightness = statusEffectBrightness_;
+  const auto interpolate = [this](std::size_t channel) {
+    const int delta = static_cast<int>(statusEffectAlternate_[channel]) -
+                      statusEffectColor_[channel];
+    return static_cast<std::uint8_t>(
+        static_cast<int>(statusEffectColor_[channel]) +
+        delta * statusEffectPhase_ / 255);
+  };
+  if (statusEffect_ == 1) {
+    const std::uint8_t triangle =
+        statusEffectPhase_ < 128
+            ? static_cast<std::uint8_t>(statusEffectPhase_ * 2U)
+            : static_cast<std::uint8_t>((255U - statusEffectPhase_) * 2U);
+    brightness = static_cast<std::uint8_t>(
+        statusEffectMinimum_ +
+        (static_cast<unsigned>(statusEffectBrightness_ - statusEffectMinimum_) *
+         triangle) /
+            255U);
+  } else if (statusEffect_ == 2 && statusEffectPhase_ >= 128) {
+    color = statusEffectAlternate_;
+  } else if (statusEffect_ == 3) {
+    const std::uint8_t triangle =
+        statusEffectPhase_ < 128
+            ? static_cast<std::uint8_t>(statusEffectPhase_ * 2U)
+            : static_cast<std::uint8_t>((255U - statusEffectPhase_) * 2U);
+    const std::uint8_t savedPhase = statusEffectPhase_;
+    statusEffectPhase_ = triangle;
+    color = {{interpolate(0), interpolate(1), interpolate(2)}};
+    statusEffectPhase_ = savedPhase;
+  } else if (statusEffect_ == 4) {
+    color = {{interpolate(0), interpolate(1), interpolate(2)}};
+  }
+  setStatusRgb(color[0], color[1], color[2], brightness);
+}
+
+void VirtualBoard::finishStatusEffect() {
+  if (statusEffect_ == 4) {
+    statusEffectColor_ = statusEffectAlternate_;
+  }
+  statusEffect_ = 0;
+  setStatusRgb(statusEffectColor_[0], statusEffectColor_[1],
+               statusEffectColor_[2], statusEffectBrightness_);
+}
+
+void VirtualBoard::serviceStatusEffect(TimePoint now) {
+  if (statusEffect_ == 0 ||
+      now - lastStatusEffectAt_ <
+          std::chrono::milliseconds(statusEffectStepMs_)) {
+    return;
+  }
+  lastStatusEffectAt_ = now;
+  const std::uint8_t next =
+      static_cast<std::uint8_t>(statusEffectPhase_ + 8U);
+  if (next < statusEffectPhase_ && statusEffectRepeats_ != 0 &&
+      --statusEffectRepeats_ == 0) {
+    finishStatusEffect();
+    return;
+  }
+  statusEffectPhase_ = next;
+  renderStatusEffect();
+}
+
+void VirtualBoard::showScheduledSegmentWindow() {
+  if (!scheduledSegmentActive_ || scheduledSegmentWaiting_) {
+    return;
+  }
+  const bool scrolling = scheduledSegmentText_.size() > 4 ||
+                         (scheduledSegmentOptions_ &
+                          kSegmentForceScroll) != 0;
+  if (!scrolling) {
+    displays_.setSegments(scheduledSegmentText_);
+    return;
+  }
+  std::string window(4, ' ');
+  for (std::size_t index = 0; index < window.size(); ++index) {
+    const std::size_t source = scheduledSegmentIndex_ + index;
+    if (source < scheduledSegmentText_.size()) {
+      window[index] = scheduledSegmentText_[source];
+    }
+  }
+  displays_.setSegments(window);
+}
+
+void VirtualBoard::clearScheduledSegments(bool restoreMenu) {
+  scheduledSegmentText_.clear();
+  scheduledSegmentIndex_ = 0;
+  scheduledSegmentOptions_ = 0;
+  scheduledSegmentActive_ = false;
+  scheduledSegmentWaiting_ = false;
+  segmentDeadlineActive_ = false;
+  if (restoreMenu && macroState_ != 1 && macroState_ != 2) {
+    updateMenuDisplay();
+  }
+}
+
 void VirtualBoard::serviceAutomation(TimePoint now) {
+  serviceStatusEffect(now);
   if (learningActive_ && learningMode_ == kLearnModeTimer) {
     const std::uint8_t remaining = learningRemainingSeconds(now);
     if (remaining == 0) {
@@ -2387,7 +2756,55 @@ void VirtualBoard::serviceAutomation(TimePoint now) {
                   remaining});
     }
   }
-  if (segmentDeadlineActive_ && now >= segmentDeadline_) {
+  if (scheduledSegmentActive_ && segmentDeadlineActive_ &&
+      now >= segmentDeadline_) {
+    const bool scrolling = scheduledSegmentText_.size() > 4 ||
+                           (scheduledSegmentOptions_ &
+                            kSegmentForceScroll) != 0;
+    const std::uint8_t repeat =
+        scheduledSegmentOptions_ & kSegmentRepeatMask;
+    if (scheduledSegmentWaiting_) {
+      scheduledSegmentWaiting_ = false;
+      scheduledSegmentOptions_ &=
+          static_cast<std::uint8_t>(~kSegmentIntervalWaiting);
+      scheduledSegmentIndex_ = 0;
+      showScheduledSegmentWindow();
+      segmentDeadlineActive_ = scrolling || scheduledSegmentHoldMs_ != 0;
+      if (segmentDeadlineActive_) {
+        segmentDeadline_ = now + std::chrono::milliseconds(
+                                     scrolling ? scheduledSegmentStepMs_
+                                               : scheduledSegmentHoldMs_);
+      }
+    } else if (scrolling) {
+      if (scheduledSegmentIndex_ < scheduledSegmentText_.size()) {
+        ++scheduledSegmentIndex_;
+        showScheduledSegmentWindow();
+        segmentDeadline_ =
+            now + std::chrono::milliseconds(scheduledSegmentStepMs_);
+      } else if (repeat == 1) {
+        scheduledSegmentIndex_ = 0;
+        showScheduledSegmentWindow();
+        segmentDeadline_ =
+            now + std::chrono::milliseconds(scheduledSegmentStepMs_);
+      } else if (repeat == 2) {
+        scheduledSegmentWaiting_ = true;
+        scheduledSegmentOptions_ |= kSegmentIntervalWaiting;
+        updateMenuDisplay();
+        segmentDeadline_ =
+            now + std::chrono::seconds(scheduledSegmentIntervalSeconds_);
+      } else {
+        clearScheduledSegments(true);
+      }
+    } else if (repeat == 2) {
+      scheduledSegmentWaiting_ = true;
+      scheduledSegmentOptions_ |= kSegmentIntervalWaiting;
+      updateMenuDisplay();
+      segmentDeadline_ =
+          now + std::chrono::seconds(scheduledSegmentIntervalSeconds_);
+    } else {
+      clearScheduledSegments(true);
+    }
+  } else if (segmentDeadlineActive_ && now >= segmentDeadline_) {
     segmentDeadlineActive_ = false;
     if (macroState_ != 1 && macroState_ != 2) {
       updateMenuDisplay();

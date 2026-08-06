@@ -38,27 +38,33 @@
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
 
-// Kept by default: the host asks the board for its exact local page IDs.
+// Rich catalog/layout presentation is host-owned. Stable page IDs and the
+// fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
+// ordering, hierarchy, or layout-protocol implementations in release builds.
 #ifndef PCCONTROLLER_ENABLE_MENU_DIRECTORY
-#define PCCONTROLLER_ENABLE_MENU_DIRECTORY 1
+#define PCCONTROLLER_ENABLE_MENU_DIRECTORY 0
+#endif
+
+#ifndef PCCONTROLLER_MENU_LAYOUT_STORAGE
+#define PCCONTROLLER_MENU_LAYOUT_STORAGE 1
 #endif
 
 // AVR-owned persistent front-panel catalog. Stable page IDs remain protocol
 // identities while EEPROM stores a separate visibility mask and packed rank.
 #ifndef PCCONTROLLER_MENU_VISIBILITY
-#define PCCONTROLLER_MENU_VISIBILITY 1
+#define PCCONTROLLER_MENU_VISIBILITY 0
 #endif
 
 #ifndef PCCONTROLLER_MENU_ORDERING
-#define PCCONTROLLER_MENU_ORDERING 1
+#define PCCONTROLLER_MENU_ORDERING 0
 #endif
 
 #ifndef PCCONTROLLER_MENU_HIERARCHY
-#define PCCONTROLLER_MENU_HIERARCHY 1
+#define PCCONTROLLER_MENU_HIERARCHY 0
 #endif
 
 #ifndef PCCONTROLLER_MENU_LAYOUT_PROTOCOL
-#define PCCONTROLLER_MENU_LAYOUT_PROTOCOL 1
+#define PCCONTROLLER_MENU_LAYOUT_PROTOCOL 0
 #endif
 
 #if PCCONTROLLER_MENU_ORDERING && !PCCONTROLLER_MENU_VISIBILITY

@@ -514,18 +514,18 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	if status := rawWebSocketUpgradeStatus(t, address, "/ipc"); status != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated WebSocket upgrade status=%d", status)
 	}
-	status, body := rawHTTPRequest(t, address, http.MethodGet, "/api/v1/snapshot", token, "")
+	status, body := rawHTTPRequest(t, address, http.MethodGet, "/api/snapshot", token, "")
 	if status != http.StatusOK || !strings.Contains(string(body), `"connected":false`) {
-		t.Fatalf("REST v1 snapshot status=%d body=%s", status, body)
+		t.Fatalf("living REST snapshot status=%d body=%s", status, body)
 	}
-	status, _ = rawHTTPRequest(t, address, http.MethodGet, "/api/snapshot", token, "")
+	status, _ = rawHTTPRequest(t, address, http.MethodGet, "/api/v1/snapshot", token, "")
 	if status != http.StatusNotFound {
-		t.Fatalf("versionless REST route status=%d", status)
+		t.Fatalf("versioned REST route status=%d", status)
 	}
 	rpcBody := `{"jsonrpc":"2.0","id":"rest-1","method":"controller.ping"}`
-	status, body = rawHTTPRequest(t, address, http.MethodPost, "/api/v1/rpc", token, rpcBody)
+	status, body = rawHTTPRequest(t, address, http.MethodPost, "/api/rpc", token, rpcBody)
 	if status != http.StatusOK || !strings.Contains(string(body), `"id":"rest-1"`) ||
-		!strings.Contains(string(body), `"api_version":1`) {
+		!strings.Contains(string(body), `"ok":true`) || strings.Contains(string(body), `api_version`) {
 		t.Fatalf("REST JSON-RPC status=%d body=%s", status, body)
 	}
 
@@ -553,7 +553,7 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	standard := dialRawWebSocket(t, address, "/ipc", token)
 	defer standard.close()
 	ping := rawRPC(t, standard, 1, "controller.ping", nil)
-	if !strings.Contains(string(ping["result"]), `"api_version":1`) {
+	if !strings.Contains(string(ping["result"]), `"ok":true`) || strings.Contains(string(ping["result"]), `api_version`) {
 		t.Fatalf("standard WebSocket ping=%s", ping["result"])
 	}
 	if err = standard.writeText(`{"jsonrpc":"1.0","id":100,"method":"controller.ping"}`); err != nil {
@@ -681,14 +681,14 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	}
 	socketResponse := readRawSocketIOEvent(t, socketIO, "rpc.response")
 	if !strings.Contains(string(socketResponse), `"id":201`) ||
-		!strings.Contains(string(socketResponse), `"api_version":1`) {
+		!strings.Contains(string(socketResponse), `"ok":true`) || strings.Contains(string(socketResponse), `api_version`) {
 		t.Fatalf("Socket.IO RPC response=%s", socketResponse)
 	}
 	if err = socketIO.writeText(`42["message",{"source":"client","target":"host","type":"notice","text":"raw Socket.IO"}]`); err != nil {
 		t.Fatal(err)
 	}
 	accepted := readRawSocketIOEvent(t, socketIO, "message.accepted")
-	if !strings.Contains(string(accepted), `"source":"websocket"`) ||
+	if !strings.Contains(string(accepted), `"source":"socket_io"`) ||
 		!strings.Contains(string(accepted), `"claimed_source":"client"`) {
 		t.Fatalf("Socket.IO typed message=%s", accepted)
 	}

@@ -930,7 +930,8 @@ func macroQueueableOpcode(opcode byte) bool {
 	switch opcode {
 	case native.OpSetStream, native.OpSetSettings,
 		native.OpBuzzer, native.OpPWMSet, native.OpPWMAllOff,
-		native.OpStatusRGB, native.OpAddressableLED, native.OpRFTx,
+		native.OpStatusRGB, native.OpStatusEffect, native.OpStatusProfileSet,
+		native.OpAddressableLED, native.OpRFTx,
 		native.OpRFLearnStart, native.OpRFLearnCancel, native.OpRFLearnClear,
 		native.OpRFLearnRemove, native.OpRFLearnReplace,
 		native.OpMenuAction, native.OpRelaySet, native.OpRelaySide,

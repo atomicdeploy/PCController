@@ -6,15 +6,22 @@ import {
 } from './significant-events'
 import type { ControllerEvent } from './types'
 
-function event(id: number, kind: string): ControllerEvent {
-  return { id, kind, text: kind, time: `2026-08-02T00:00:0${id}Z` }
+function event(id: number, kind: string, stream?: ControllerEvent['stream']): ControllerEvent {
+	return { id, kind, stream, text: kind, time: `2026-08-02T00:00:0${id}Z` }
 }
 
 describe('significant controller events', () => {
-  it.each(['telemetry', ' TELEMETRY ', 'rx', ' Rx\t', 'TX', '\ttx '])(
+	it.each(['telemetry', ' TELEMETRY ', 'rx', ' Rx\t', 'TX', '\ttx ', 'front_panel.segment', 'status_led.changed', 'buzzer.note'])(
     'keeps routine %j transport activity out of human-facing feeds',
     (kind) => expect(isSignificantControllerEvent(event(1, kind))).toBe(false),
-  )
+	)
+
+	it('uses the host stream classification and keeps explicit debug opt-in separate', () => {
+		expect(isSignificantControllerEvent(event(1, 'future.frame', 'state'))).toBe(false)
+		expect(isSignificantControllerEvent(event(2, 'future.event', 'telemetry'))).toBe(false)
+		expect(isSignificantControllerEvent(event(3, 'future.event', 'debug'))).toBe(false)
+		expect(isSignificantControllerEvent(event(4, 'future.event', 'activity'))).toBe(true)
+	})
 
   it.each(['door', 'rf.received', 'macro.completed', 'connection', 'warning', 'app.page'])(
     'retains significant %s activity',

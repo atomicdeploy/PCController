@@ -18,16 +18,16 @@ func TestParseEventAcceptsTypedJSONOnly(t *testing.T) {
 		{
 			name: "snapshot",
 			event: Event{
-				Contract: ContractVersion, Type: EventSnapshotUpdated, Sequence: 8, At: now,
+				Contract: ContractID, Type: EventSnapshotUpdated, Sequence: 8, At: now,
 				Snapshot: snapshotPointer(testSnapshot(8, PowerOn, now)),
 			},
 		},
 		{
 			name: "action",
 			event: Event{
-				Contract: ContractVersion, Type: EventActionCompleted, Sequence: 9, At: now,
+				Contract: ContractID, Type: EventActionCompleted, Sequence: 9, At: now,
 				Result: &ActionResult{
-					Contract: ContractVersion, Accepted: true, Action: ActionPowerOff,
+					Contract: ContractID, Accepted: true, Action: ActionPowerOff,
 					CompletedAt: now,
 				},
 			},
@@ -35,7 +35,7 @@ func TestParseEventAcceptsTypedJSONOnly(t *testing.T) {
 		{
 			name: "notice",
 			event: Event{
-				Contract: ContractVersion, Type: EventDeviceNotice, Sequence: 10, At: now,
+				Contract: ContractID, Type: EventDeviceNotice, Sequence: 10, At: now,
 				Notice: "maintenance window",
 			},
 		},
@@ -61,13 +61,13 @@ func TestParseEventRejectsAmbiguousOrUnboundedDocuments(t *testing.T) {
 	invalid := [][]byte{
 		nil,
 		[]byte("not-json"),
-		[]byte(`{"contract":"pccontroller.local-device/v1","type":"device.notice","sequence":1,"at":"` + now + `","notice":"ok","unknown":true}`),
-		[]byte(`{"contract":"pccontroller.local-device/v1","type":"device.notice","sequence":0,"at":"` + now + `","notice":"ok"}`),
-		[]byte(`{"contract":"pccontroller.local-device/v1","type":"device.notice","sequence":1,"at":"` + now + `","notice":""}`),
-		[]byte(`{"contract":"pccontroller.local-device/v1","type":"snapshot.updated","sequence":1,"at":"` + now + `","notice":"wrong"}`),
-		[]byte(`{"contract":"pccontroller.local-device/v1","type":"action.completed","sequence":1,"at":"` + now + `","result":{"contract":"pccontroller.local-device/v1","accepted":false,"action":"power.on","completed_at":"` + now + `"}}`),
+		[]byte(`{"contract":"pccontroller.local-device","type":"device.notice","sequence":1,"at":"` + now + `","notice":"ok","unknown":true}`),
+		[]byte(`{"contract":"pccontroller.local-device","type":"device.notice","sequence":0,"at":"` + now + `","notice":"ok"}`),
+		[]byte(`{"contract":"pccontroller.local-device","type":"device.notice","sequence":1,"at":"` + now + `","notice":""}`),
+		[]byte(`{"contract":"pccontroller.local-device","type":"snapshot.updated","sequence":1,"at":"` + now + `","notice":"wrong"}`),
+		[]byte(`{"contract":"pccontroller.local-device","type":"action.completed","sequence":1,"at":"` + now + `","result":{"contract":"pccontroller.local-device","accepted":false,"action":"power.on","completed_at":"` + now + `"}}`),
 		[]byte(`{"contract":"wrong","type":"device.notice","sequence":1,"at":"` + now + `","notice":"ok"}`),
-		[]byte(`{"contract":"pccontroller.local-device/v1","type":"device.notice","sequence":1,"at":"` + now + `","notice":"bad\u0000value"}`),
+		[]byte(`{"contract":"pccontroller.local-device","type":"device.notice","sequence":1,"at":"` + now + `","notice":"bad\u0000value"}`),
 		[]byte(strings.Repeat("x", maxEventBytes+1)),
 	}
 	for index, encoded := range invalid {

@@ -15,13 +15,13 @@ describe('startup browser console', () => {
     const sink = target()
     emitStartupConsoleIntroduction({
       productTitle: 'PCController',
-      config: { host_version: '1.2.3', api_version: 1 },
+		config: { host_version: '1.2.3' },
       boardConnected: false,
       streamState: 'open',
     }, sink)
 
     expect(sink.groupCollapsed).toHaveBeenCalledWith(expect.stringContaining('%c%s%c'), expect.any(String), 'PCController', expect.any(String))
-    expect(sink.info).toHaveBeenCalledWith('%cHost%c version %s · API %s', expect.any(String), expect.any(String), '1.2.3', '1')
+		expect(sink.info).toHaveBeenCalledWith('%cHost%c version %s · living API', expect.any(String), expect.any(String), '1.2.3')
     expect(sink.info).toHaveBeenCalledWith('%cController%c offline · no authenticated board', expect.any(String), expect.any(String))
     expect(sink.debug).toHaveBeenCalledWith('%cTransport%c %s', expect.any(String), expect.any(String), 'Host event stream connected')
     expect(sink.info.mock.calls.flat().join(' ')).not.toContain('Live')
@@ -32,7 +32,7 @@ describe('startup browser console', () => {
     const sink = target()
     emitStartupConsoleIntroduction({
       productTitle: '%c hostile\nname',
-      config: { host_version: '%c 9.0', api_version: 2 },
+		config: { host_version: '%c 9.0' },
       boardConnected: true,
       port: '%c COM18',
       streamState: 'connecting',

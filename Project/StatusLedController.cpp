@@ -1,53 +1,17 @@
 #include "StatusLedController.h"
 
-#include <avr/pgmspace.h>
+#include <EEPROM.h>
+#include <string.h>
 
+#include "EepromLayout.h"
 #include "PwmController.h"
-#include "TransitionMath.h"
+#include "UartProtocol.h"
 
 namespace {
-// Cooperative breathing cadence, intensity step, and base-mode row count.
-constexpr uint16_t PulseIntervalMs = 20;
-constexpr uint8_t PulseStep = 4;
+// One cooperative cadence and the compact condition numbering shared with Go.
+constexpr uint16_t MinimumEffectPeriodMs = 640;
+constexpr uint8_t EffectPhaseStep = 8;
 constexpr uint8_t StatusModePaletteCount = 11;
-
-// Data-driven palette keeps every cue visually distinct while using less
-// flash than a large branch tree. Rows 0..10 are StatusLedMode values; the
-// remaining rows are StatusLedCue values 1..8.
-const uint8_t StatusPalette[][3] PROGMEM = {
-    {0, 0, 0},       // Off
-    {255, 72, 0},    // Boot
-    {255, 255, 255}, // Ready palette: white
-    {190, 0, 255},   // 433 MHz learning
-    {255, 96, 0},    // Warning / hot
-    {255, 0, 0},     // Fault
-    {0, 0, 0},       // Custom (supplied at runtime)
-    {16, 72, 255},   // BT Audio connected
-    {0, 255, 80},    // BT Audio unavailable phase A (phase B is Fault red)
-    {16, 72, 255},   // BT Audio powered but waiting for a connection
-    {255, 144, 0},   // Running, enclosure closed
-    {255, 120, 12},  // Door open
-    {0, 255, 80},    // Door closed
-    {16, 72, 255},   // Bluetooth
-    {0, 180, 255},   // Menu navigation
-    {190, 0, 255},   // 433 MHz activity
-    {0, 255, 24},    // Saved
-    {255, 12, 0},    // Discarded
-    {255, 48, 0},    // Graceful reset
-};
-
-// User order: red, blue, violet, green, white. Reuse named mode rows rather
-// than duplicating RGB triples or relying on unrelated numeric palette slots.
-constexpr uint8_t PaletteRed = static_cast<uint8_t>(StatusLedMode::Fault);
-constexpr uint8_t PaletteBlue =
-    static_cast<uint8_t>(StatusLedMode::Connected);
-constexpr uint8_t PaletteViolet =
-    static_cast<uint8_t>(StatusLedMode::Learning);
-constexpr uint8_t PaletteGreen =
-    static_cast<uint8_t>(StatusLedMode::Disconnected);
-constexpr uint8_t PaletteWhite = static_cast<uint8_t>(StatusLedMode::Ready);
-const uint8_t ReadyPalette[] PROGMEM = {
-    PaletteRed, PaletteBlue, PaletteViolet, PaletteGreen, PaletteWhite};
 
 } // namespace
 
@@ -62,94 +26,105 @@ void StatusLedController::begin(PwmController &pwm, uint8_t brightness,
 }
 
 void StatusLedController::service(uint32_t now) {
-  if (pwm_ == nullptr ||
-      static_cast<uint32_t>(now - lastStepAt_) < PulseIntervalMs) {
+  if (pwm_ == nullptr) {
     return;
   }
-  lastStepAt_ = now;
 
   if (cue_ != StatusLedCue::None &&
       static_cast<int32_t>(now - cueEndsAt_) >= 0) {
     cue_ = StatusLedCue::None;
+    loadProfile(static_cast<uint8_t>(mode_), now);
   }
 
-  // Informational overlays converge directly toward their cue color and,
-  // after expiry, toward the underlying mode color. This gives door/RF/BT/
-  // menu events a damped hue transition instead of black-frame jumps.
-  if (cue_ != StatusLedCue::None) {
-    render(brightness_, true);
-    return;
-  }
-
-  if (mode_ == StatusLedMode::Fault) {
-    // Critical/offline/running-door warnings intentionally hard-flash; all
-    // informational states and cues retain damped transitions.
-    pulse_ = ((now / 250U) & 1U) != 0 ? brightness_ : 0;
-    render(pulse_, false);
-    return;
-  }
-
-  const bool breathing = mode_ == StatusLedMode::Learning ||
-                         mode_ == StatusLedMode::Warning ||
-                         mode_ == StatusLedMode::Disconnected ||
-                         mode_ == StatusLedMode::Waiting;
-  if (!breathing) {
-    render(brightness_, true); // Continue a smooth post-cue restore.
-    return;
-  }
-  if (pulseRising_) {
-    const uint16_t next = static_cast<uint16_t>(pulse_) + PulseStep;
-    pulse_ = static_cast<uint8_t>(next >= brightness_ ? brightness_ : next);
-    if (pulse_ == brightness_) {
-      pulseRising_ = false;
+  if (effect_ != StatusLedEffect::None) {
+    if (static_cast<uint32_t>(now - lastEffectStepAt_) < effectStepMs_) {
+      return;
     }
-  } else {
-    pulse_ = pulse_ > PulseStep ? static_cast<uint8_t>(pulse_ - PulseStep) : 0;
-    if (pulse_ == 0) {
-      pulseRising_ = true;
+    lastEffectStepAt_ = now;
+    const uint8_t next =
+        static_cast<uint8_t>(effectPhase_ + EffectPhaseStep);
+    if (next < effectPhase_ && effectRepeats_ != 0 && --effectRepeats_ == 0) {
+      finishEffect();
+      return;
     }
+    effectPhase_ = next;
+    renderEffect();
   }
-  render(pulse_, true);
 }
 
 void StatusLedController::setMode(StatusLedMode mode, uint32_t now) {
   mode_ = mode;
-  pulse_ = brightness_;
-  pulseRising_ = false;
-  lastStepAt_ = now;
-  const bool immediate = mode == StatusLedMode::Boot ||
-                         mode == StatusLedMode::Fault;
-  if (immediate) {
+  if (mode == StatusLedMode::Boot || mode == StatusLedMode::Fault) {
     cue_ = StatusLedCue::None;
   }
-  render(brightness_, !immediate);
+  loadProfile(static_cast<uint8_t>(mode), now);
 }
 
 StatusLedMode StatusLedController::mode() const { return mode_; }
 
 void StatusLedController::setBrightness(uint8_t brightness) {
   brightness_ = brightness;
-  render(brightness_, true);
+  if (effect_ != StatusLedEffect::None) {
+    renderEffect();
+  } else {
+    renderColor(customRed_, customGreen_, customBlue_, brightness_);
+  }
 }
 
 uint8_t StatusLedController::brightness() const { return brightness_; }
 
-void StatusLedController::setReadyColor(uint8_t color) {
-  if (color > 4) {
-    color = 0;
-  }
-  readyPalette_ = pgm_read_byte(ReadyPalette + color);
-  if (mode_ == StatusLedMode::Ready) {
-    render(brightness_, true);
-  }
-}
-
 void StatusLedController::setCustom(uint8_t red, uint8_t green, uint8_t blue) {
+  effect_ = StatusLedEffect::None;
   customRed_ = red;
   customGreen_ = green;
   customBlue_ = blue;
-  setMode(StatusLedMode::Custom);
+  mode_ = StatusLedMode::Custom;
+  cue_ = StatusLedCue::None;
+  condition_ = ManualCondition;
+  renderColor(red, green, blue, brightness_);
 }
+
+bool StatusLedController::setEffect(
+    StatusLedEffect effect, uint8_t red, uint8_t green, uint8_t blue,
+    uint8_t alternateRed, uint8_t alternateGreen, uint8_t alternateBlue,
+    uint8_t brightness, uint8_t minimumBrightness, uint16_t periodMs,
+    uint8_t repeats, uint32_t now) {
+  if (effect == StatusLedEffect::None ||
+      effect > StatusLedEffect::Transition ||
+      periodMs < MinimumEffectPeriodMs ||
+      minimumBrightness > brightness) {
+    return false;
+  }
+  cue_ = StatusLedCue::None;
+  condition_ = ManualCondition;
+  effect_ = effect;
+  customRed_ = red;
+  customGreen_ = green;
+  customBlue_ = blue;
+  alternateRed_ = alternateRed;
+  alternateGreen_ = alternateGreen;
+  alternateBlue_ = alternateBlue;
+  brightness_ = brightness;
+  minimumBrightness_ = minimumBrightness;
+  effectRepeats_ = repeats;
+  effectPhase_ = 0;
+  effectStepMs_ = static_cast<uint16_t>(periodMs >> 5);
+  lastEffectStepAt_ = now;
+  renderEffect();
+  return true;
+}
+
+void StatusLedController::cancelEffect() {
+  effect_ = StatusLedEffect::None;
+  loadProfile(static_cast<uint8_t>(mode_), millis());
+}
+
+StatusLedEffect StatusLedController::effect() const { return effect_; }
+
+uint8_t StatusLedController::renderedRed() const { return renderedRed_; }
+uint8_t StatusLedController::renderedGreen() const { return renderedGreen_; }
+uint8_t StatusLedController::renderedBlue() const { return renderedBlue_; }
+uint8_t StatusLedController::condition() const { return condition_; }
 
 void StatusLedController::setPowerSignal(bool active) {
   if (pwm_ != nullptr) {
@@ -165,62 +140,173 @@ void StatusLedController::playCue(StatusLedCue cue, uint16_t durationMs,
   }
   cue_ = cue;
   cueEndsAt_ = now + durationMs;
-  lastStepAt_ = now - PulseIntervalMs;
-  render(brightness_, true);
+  loadProfile(static_cast<uint8_t>(StatusModePaletteCount - 1U +
+                                   static_cast<uint8_t>(cue)), now);
 }
 
-void StatusLedController::render(uint8_t level, bool eased) {
-  if (pwm_ == nullptr) {
+bool StatusLedController::profile(uint8_t condition, uint8_t *payload) const {
+  if (condition >= ProfileCount || payload == nullptr) {
+    return false;
+  }
+  const int address = EepromLayout::StatusProfileAddress +
+                      condition * EepromLayout::StatusProfileRecordBytes;
+  for (uint8_t index = 0; index < ProfilePayloadBytes; ++index) {
+    payload[index] = EEPROM.read(address + index);
+  }
+  const uint8_t storedCrc = EEPROM.read(address + ProfilePayloadBytes);
+  const bool stored =
+      storedCrc == ControllerProtocol::UartProtocol::crc8(
+                       payload, ProfilePayloadBytes) &&
+      validProfile(payload);
+  if (!stored) {
+    defaultProfile(condition, payload);
+  }
+  return stored;
+}
+
+bool StatusLedController::setProfile(uint8_t condition,
+                                     const uint8_t *payload,
+                                     uint32_t now) {
+  if (condition >= ProfileCount || !validProfile(payload)) {
+    return false;
+  }
+  const int address = EepromLayout::StatusProfileAddress +
+                      condition * EepromLayout::StatusProfileRecordBytes;
+  for (uint8_t index = 0; index < ProfilePayloadBytes; ++index) {
+    EEPROM.update(address + index, payload[index]);
+  }
+  EEPROM.update(address + ProfilePayloadBytes,
+                ControllerProtocol::UartProtocol::crc8(
+                    payload, ProfilePayloadBytes));
+  if (condition_ == condition) {
+    applyProfile(condition, payload, now);
+  }
+  return true;
+}
+
+void StatusLedController::loadProfile(uint8_t condition, uint32_t now) {
+  uint8_t payload[ProfilePayloadBytes];
+  profile(condition, payload);
+  applyProfile(condition, payload, now);
+}
+
+void StatusLedController::applyProfile(uint8_t condition,
+                                       const uint8_t *payload, uint32_t now) {
+  condition_ = condition;
+  customRed_ = payload[1];
+  customGreen_ = payload[2];
+  customBlue_ = payload[3];
+  alternateRed_ = payload[4];
+  alternateGreen_ = payload[5];
+  alternateBlue_ = payload[6];
+  brightness_ = payload[7];
+  minimumBrightness_ = payload[8];
+  effect_ = static_cast<StatusLedEffect>(payload[0]);
+  effectRepeats_ = payload[11];
+  effectPhase_ = 0;
+  if (effect_ == StatusLedEffect::None) {
+    renderColor(customRed_, customGreen_, customBlue_, brightness_);
     return;
   }
+  const uint16_t periodMs = static_cast<uint16_t>(payload[9]) |
+                            static_cast<uint16_t>(payload[10]) << 8;
+  effectStepMs_ = static_cast<uint16_t>(periodMs >> 5);
+  lastEffectStepAt_ = now;
+  renderEffect();
+}
 
-  uint8_t red = 0;
-  uint8_t green = 0;
-  uint8_t blue = 0;
-  if (cue_ == StatusLedCue::None && mode_ == StatusLedMode::Custom) {
-    red = customRed_;
-    green = customGreen_;
-    blue = customBlue_;
-  } else {
-    uint8_t paletteIndex =
-        cue_ == StatusLedCue::None
-            ? (mode_ == StatusLedMode::Ready
-                   ? readyPalette_
-                   : static_cast<uint8_t>(mode_))
-            : static_cast<uint8_t>(StatusModePaletteCount - 1U +
-                                   static_cast<uint8_t>(cue_));
-    if (cue_ == StatusLedCue::None &&
-        mode_ == StatusLedMode::Disconnected && !pulseRising_) {
-      paletteIndex = static_cast<uint8_t>(StatusLedMode::Fault);
-    }
-    const uint8_t *color = StatusPalette[paletteIndex];
-    red = pgm_read_byte(color);
-    green = pgm_read_byte(color + 1);
-    blue = pgm_read_byte(color + 2);
+bool StatusLedController::validProfile(const uint8_t *payload) {
+  if (payload == nullptr || payload[0] >
+                                static_cast<uint8_t>(StatusLedEffect::Transition) ||
+      payload[8] > payload[7]) {
+    return false;
   }
+  const uint16_t periodMs = static_cast<uint16_t>(payload[9]) |
+                            static_cast<uint16_t>(payload[10]) << 8;
+  return payload[0] == 0 || periodMs >= MinimumEffectPeriodMs;
+}
+
+void StatusLedController::defaultProfile(uint8_t condition,
+                                         uint8_t *payload) const {
+  // The Go tooling owns and provisions the full factory profile table. The
+  // firmware retains only a tiny safe fallback for corrupt/blank EEPROM: off
+  // stays dark, hot/fault stays red, and other states remain visible blue.
+  memset(payload, 0, ProfilePayloadBytes);
+  payload[7] = brightness_;
+  if (condition != static_cast<uint8_t>(StatusLedMode::Off) &&
+      condition != static_cast<uint8_t>(StatusLedMode::Custom)) {
+    const uint8_t channel =
+        condition == static_cast<uint8_t>(StatusLedMode::Warning) ||
+                condition == static_cast<uint8_t>(StatusLedMode::Fault)
+            ? 1U
+            : 3U;
+    payload[channel] = 255;
+  }
+}
+
+void StatusLedController::renderColor(uint8_t red, uint8_t green,
+                                      uint8_t blue, uint8_t level) {
   const uint8_t red8 = scale(red, level);
   const uint8_t green8 = scale(green, level);
   const uint8_t blue8 = scale(blue, level);
-  const uint16_t targetRed =
-      static_cast<uint16_t>(red8) * 16U + red8 / 16U;
-  const uint16_t targetGreen =
-      static_cast<uint16_t>(green8) * 16U + green8 / 16U;
-  const uint16_t targetBlue =
-      static_cast<uint16_t>(blue8) * 16U + blue8 / 16U;
-  if (!eased) {
-    pwm_->setStatusRgb12(targetRed, targetGreen, targetBlue);
-    return;
+  pwm_->setStatusRgb8(red8, green8, blue8);
+  renderedRed_ = red8;
+  renderedGreen_ = green8;
+  renderedBlue_ = blue8;
+}
+
+void StatusLedController::renderEffect() {
+  uint8_t red = customRed_;
+  uint8_t green = customGreen_;
+  uint8_t blue = customBlue_;
+  uint8_t level = brightness_;
+  const uint8_t triangle = effectPhase_ < 128U
+                               ? static_cast<uint8_t>(effectPhase_ << 1)
+                               : static_cast<uint8_t>((255U - effectPhase_) << 1);
+  if (effect_ == StatusLedEffect::Flash) {
+    if (effectPhase_ >= 128U) {
+      red = alternateRed_;
+      green = alternateGreen_;
+      blue = alternateBlue_;
+    }
+  } else if (effect_ == StatusLedEffect::Breathe) {
+    level = static_cast<uint8_t>(
+        minimumBrightness_ +
+        scale(static_cast<uint8_t>(brightness_ - minimumBrightness_), triangle));
+  } else if (effect_ == StatusLedEffect::Transition) {
+    red = interpolate(customRed_, alternateRed_, effectPhase_);
+    green = interpolate(customGreen_, alternateGreen_, effectPhase_);
+    blue = interpolate(customBlue_, alternateBlue_, effectPhase_);
+  } else if (effect_ == StatusLedEffect::Cycle) {
+    red = interpolate(customRed_, alternateRed_, triangle);
+    green = interpolate(customGreen_, alternateGreen_, triangle);
+    blue = interpolate(customBlue_, alternateBlue_, triangle);
   }
-  pwm_->setStatusRgb12(
-      TransitionMath::easedChannel(
-          pwm_->logicalValue(PwmChannels::StatusRed), targetRed),
-      TransitionMath::easedChannel(
-          pwm_->logicalValue(PwmChannels::StatusGreen), targetGreen),
-      TransitionMath::easedChannel(
-          pwm_->logicalValue(PwmChannels::StatusBlue), targetBlue));
+  renderColor(red, green, blue, level);
+}
+
+void StatusLedController::finishEffect() {
+  const bool transition = effect_ == StatusLedEffect::Transition;
+  effect_ = StatusLedEffect::None;
+  if (transition) {
+    customRed_ = alternateRed_;
+    customGreen_ = alternateGreen_;
+    customBlue_ = alternateBlue_;
+  }
+  renderColor(customRed_, customGreen_, customBlue_, brightness_);
+}
+
+uint8_t StatusLedController::interpolate(uint8_t from, uint8_t to,
+                                         uint8_t phase) {
+  const int16_t delta = static_cast<int16_t>(to) - from;
+  return static_cast<uint8_t>(
+      static_cast<int16_t>(from) + (delta * phase) / 256);
 }
 
 uint8_t StatusLedController::scale(uint8_t value, uint8_t level) {
+  // The +1 expansion keeps both endpoints exact while compiling to a multiply
+  // and byte select on AVR instead of pulling in a 16-bit divide helper.
   return static_cast<uint8_t>(
-      (static_cast<uint16_t>(value) * level + 127U) / 255U);
+      (static_cast<uint16_t>(value) * (static_cast<uint16_t>(level) + 1U)) >>
+      8);
 }

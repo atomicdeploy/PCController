@@ -30,7 +30,7 @@ func TestEEPROMInspectCLIIsConfigAndDeviceIndependent(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"supported": true`, `"valid": true`,
-		`"format": "current/unversioned-31+crc8"`, `"visible_menu_mask": 16383`,
+		`"format": "current/unversioned-40+crc8"`, `"visible_menu_mask": 16383`,
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("inspection output missing %q:\n%s", want, stdout.String())
@@ -64,15 +64,32 @@ func TestEEPROMCLIExposesOnlyCurrentSemanticOperations(t *testing.T) {
 	} {
 		var stdout, stderr bytes.Buffer
 		err := run(args, &stdout, &stderr)
-		if err == nil || !strings.Contains(err.Error(), "eeprom inspect") ||
+		if err == nil || !strings.Contains(err.Error(), "eeprom factory-defaults") ||
 			strings.Contains(err.Error(), "migrate") {
 			t.Fatalf("args=%v expected current semantic usage, got %v", args, err)
 		}
 	}
 }
 
+func TestEEPROMFactoryDefaultsCLIWritesCompleteImageWithoutBoard(t *testing.T) {
+	output := filepath.Join(t.TempDir(), "factory.hex")
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"eeprom", "factory-defaults", "--output", output}, &stdout, &stderr); err != nil {
+		t.Fatalf("factory defaults failed: %v\nstderr=%s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "host-owned status LED profiles") {
+		t.Fatalf("factory output missing ownership evidence: %s", stdout.String())
+	}
+	if _, err := os.Stat(output); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"eeprom", "factory-defaults", "--output", output}, &stdout, &stderr); err == nil {
+		t.Fatal("factory defaults unexpectedly overwrote existing output")
+	}
+}
+
 func currentSettingsFixture() []byte {
-	values := make([]byte, 31)
+	values := make([]byte, 40)
 	values[1] = 1
 	values[2] = 180
 	values[4] = 5
@@ -84,6 +101,7 @@ func currentSettingsFixture() []byte {
 	values[28] = 2
 	values[29] = 0
 	values[30] = 1
+	values[31] = 0
 	return values
 }
 

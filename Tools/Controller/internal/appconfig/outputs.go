@@ -3,6 +3,8 @@ package appconfig
 import (
 	"fmt"
 	"strings"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 const (
@@ -25,19 +27,23 @@ type MelodyNote struct {
 	GapMS       uint16 `json:"gap_ms,omitempty"`
 }
 
-// StatusLEDEffect describes a host-streamed animation for the board's status
-// RGB output. Kind is "flash" or "breathe"; DurationMS zero means run until
-// explicitly stopped.
+// StatusLEDEffect describes one compact MCU-owned status RGB animation. Repeats
+// zero means loop until explicitly stopped; DurationMS remains a compatibility
+// input and is converted to a bounded cycle count when Repeats is omitted.
 type StatusLEDEffect struct {
-	Name          string `json:"name"`
-	Kind          string `json:"kind"`
-	Red           byte   `json:"red"`
-	Green         byte   `json:"green"`
-	Blue          byte   `json:"blue"`
-	Brightness    byte   `json:"brightness"`
-	MinBrightness byte   `json:"min_brightness,omitempty"`
-	PeriodMS      int    `json:"period_ms"`
-	DurationMS    int    `json:"duration_ms,omitempty"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	Red            byte   `json:"red"`
+	Green          byte   `json:"green"`
+	Blue           byte   `json:"blue"`
+	AlternateRed   byte   `json:"alternate_red,omitempty"`
+	AlternateGreen byte   `json:"alternate_green,omitempty"`
+	AlternateBlue  byte   `json:"alternate_blue,omitempty"`
+	Brightness     byte   `json:"brightness"`
+	MinBrightness  byte   `json:"min_brightness,omitempty"`
+	PeriodMS       int    `json:"period_ms"`
+	DurationMS     int    `json:"duration_ms,omitempty"`
+	Repeats        byte   `json:"repeats,omitempty"`
 }
 
 func DefaultMelodies() []Melody {
@@ -94,6 +100,7 @@ func DefaultStatusLEDEffects() []StatusLEDEffect {
 		{
 			Name: "attention", Kind: "flash",
 			Red: 255, Green: 96, Blue: 0, Brightness: 220,
+			AlternateRed: 0, AlternateGreen: 0, AlternateBlue: 0,
 			PeriodMS: 700, DurationMS: 0,
 		},
 		{
@@ -203,23 +210,18 @@ func validateOutputDefinitions(
 		names[name] = true
 		kind := strings.ToLower(strings.TrimSpace(effect.Kind))
 		switch kind {
-		case "flash":
-			if effect.PeriodMS < 200 || effect.PeriodMS > 60000 {
+		case "flash", "breathe", "cycle", "transition":
+			if effect.PeriodMS < int(native.StatusEffectMinimumPeriodMS) ||
+				effect.PeriodMS > int(native.StatusEffectMaximumPeriodMS) {
 				return fmt.Errorf(
-					"status_effects[%d].period_ms for flash must be 200..60000",
-					index,
-				)
-			}
-		case "breathe":
-			if effect.PeriodMS < 400 || effect.PeriodMS > 60000 {
-				return fmt.Errorf(
-					"status_effects[%d].period_ms for breathe must be 400..60000",
-					index,
+					"status_effects[%d].period_ms must be %d..%d",
+					index, native.StatusEffectMinimumPeriodMS,
+					native.StatusEffectMaximumPeriodMS,
 				)
 			}
 		default:
 			return fmt.Errorf(
-				"status_effects[%d].kind must be flash or breathe",
+				"status_effects[%d].kind must be flash, breathe, cycle, or transition",
 				index,
 			)
 		}

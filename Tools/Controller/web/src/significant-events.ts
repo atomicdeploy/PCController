@@ -1,9 +1,12 @@
 import type { ControllerEvent } from './types'
 
 // Transport chatter belongs to the status sample/chart path, not the human activity timeline.
-const routineEventKinds = new Set(['telemetry', 'rx', 'tx'])
+const routineEventKinds = new Set([
+  'telemetry', 'rx', 'tx', 'front_panel.segment', 'status_led.changed', 'buzzer.note',
+])
 
-export function isSignificantControllerEvent(event: Pick<ControllerEvent, 'kind'>): boolean {
+export function isSignificantControllerEvent(event: Pick<ControllerEvent, 'kind' | 'stream'>): boolean {
+  if (event.stream) return event.stream === 'activity'
   return !routineEventKinds.has(event.kind.trim().toLowerCase())
 }
 

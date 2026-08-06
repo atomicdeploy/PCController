@@ -21,12 +21,19 @@ func TestOutboundWebhookReliabilityConfigurationValidation(t *testing.T) {
 		"attempt limit":        func(value *Webhook) { value.MaxAttempts = 21 },
 		"inverted backoff":     func(value *Webhook) { value.RetryInitialMS, value.RetryMaximumMS = 1000, 500 },
 		"link-local target":    func(value *Webhook) { value.URL = "http://169.254.169.254/latest/meta-data/" },
+		"credential query":     func(value *Webhook) { value.URL = "https://example.test/hook?access_token=secret" },
 		"short signing secret": func(value *Webhook) { value.SigningSecret = "short" },
-		"header injection":     func(value *Webhook) { value.Headers = map[string]string{"X-Test": "ok\r\nInjected: yes"} },
-		"managed header":       func(value *Webhook) { value.Headers = map[string]string{"Idempotency-Key": "override"} },
-		"unknown placeholder":  func(value *Webhook) { value.BodyTemplate = `{"x":"{{unknown}}"}` },
-		"unterminated token":   func(value *Webhook) { value.BodyTemplate = `{"x":"{{text"}` },
-		"malformed JSON":       func(value *Webhook) { value.BodyTemplate = `{"x":"{{text}}"` },
+		"ambiguous secret": func(value *Webhook) {
+			value.SigningSecretRef = "os:webhook/signing"
+		},
+		"header injection": func(value *Webhook) { value.Headers = map[string]string{"X-Test": "ok\r\nInjected: yes"} },
+		"duplicated secret header": func(value *Webhook) {
+			value.SecretHeaders = map[string]string{"X-Site": "os:webhook/header"}
+		},
+		"managed header":      func(value *Webhook) { value.Headers = map[string]string{"Idempotency-Key": "override"} },
+		"unknown placeholder": func(value *Webhook) { value.BodyTemplate = `{"x":"{{unknown}}"}` },
+		"unterminated token":  func(value *Webhook) { value.BodyTemplate = `{"x":"{{text"}` },
+		"malformed JSON":      func(value *Webhook) { value.BodyTemplate = `{"x":"{{text}}"` },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {

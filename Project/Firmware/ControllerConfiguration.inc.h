@@ -11,9 +11,15 @@
 #define PCCONTROLLER_BUILD_TIMESTAMP 0UL
 #endif
 
-// Fixed final-application record patched only by the guarded host workflow.
+#ifndef PCCONTROLLER_IDENTITY_ADDRESS
+#define PCCONTROLLER_IDENTITY_ADDRESS 0x7E74UL
+#endif
+
+// Final-application record patched only by the guarded host workflow. The Go
+// compiler places it in the last 12 bytes below the selected core bootloader.
 // "PCI1" identifies schema 1: little-endian source hash and packed timestamp.
-constexpr uint16_t FirmwareIdentityAddress = 0x7DF4U;
+constexpr uint16_t FirmwareIdentityAddress =
+    static_cast<uint16_t>(PCCONTROLLER_IDENTITY_ADDRESS);
 // FirmwareIdentityRecord occupies the guarded fixed-location patch region.
 struct __attribute__((packed)) FirmwareIdentityRecord {
   uint32_t magic;
@@ -63,9 +69,9 @@ const char MenuLabels[] PROGMEM =
 const char EditLabels[] PROGMEM =
     "L-MdL-onL-oFS-MdP-ChP-u r-Chr-onuP-CuP-uur-Cur-M";
 constexpr uint8_t EditLabelCount = 12;
-const char SettingsLabels[] PROGMEM = "bEEPdiSPdCLSStBrCoLrV-dPA-dPSAFE";
-constexpr uint8_t SettingsPolicyItem = 7;
-constexpr uint8_t SettingsItemCount = 8;
+const char SettingsLabels[] PROGMEM = "bEEPdiSPdCLSStBrV-dPA-dPSAFE";
+constexpr uint8_t SettingsPolicyItem = 6;
+constexpr uint8_t SettingsItemCount = 7;
 const char CommonTexts[] PROGMEM =
     "oFF  on AutoSAVEOPENMutebEEPLErnBOOTdiSC"
     "r5-8Go  Err KEY CLSdtoGLPuSHProg";

@@ -36,6 +36,15 @@ bool timedEventEquals(const pccontroller::wire::Frame &event,
   return std::equal(expected.begin() + 1, expected.end(), actual + 1);
 }
 
+const pccontroller::wire::Frame *findOpcode(
+    const std::vector<pccontroller::wire::Frame> &frames,
+    std::uint8_t opcode) {
+  const auto found = std::find_if(
+      frames.begin(), frames.end(),
+      [opcode](const auto &frame) { return frame.opcode == opcode; });
+  return found == frames.end() ? nullptr : &*found;
+}
+
 std::filesystem::path temporaryEeprom() {
   const auto nonce =
       std::chrono::steady_clock::now().time_since_epoch().count();
@@ -47,7 +56,7 @@ void writeVirtualResetRecord(pccontroller::virtual_board::FileEeprom &eeprom,
                              std::uint8_t slot, std::uint32_t count,
                              std::uint8_t marker = 0xA7,
                              bool corruptChecksum = false) {
-  constexpr std::size_t kJournalAddress = 320;
+  constexpr std::size_t kJournalAddress = 336;
   constexpr std::size_t kRecordBytes = 6;
   const std::size_t address =
       kJournalAddress + static_cast<std::size_t>(slot) * kRecordBytes;
@@ -89,6 +98,20 @@ void testProtocolRoundTrip() {
           "sequence changed in transit");
   require(decoded.frame.payload == source.payload,
           "payload changed in transit");
+
+  std::vector<std::uint8_t> advisoryRaw;
+  require(pccontroller::wire::cobsDecode(
+              encoded.data(), encoded.size() - 1U, advisoryRaw),
+          "could not decode advisory-revision fixture");
+  advisoryRaw[1] = 0x7F;
+  advisoryRaw.back() = pccontroller::wire::crc8(
+      advisoryRaw.data(), advisoryRaw.size() - 1U);
+  auto advisoryEncoded = pccontroller::wire::cobsEncode(
+      advisoryRaw.data(), advisoryRaw.size());
+  advisoryEncoded.push_back(0);
+  require(static_cast<bool>(pccontroller::wire::decode(
+              advisoryEncoded.data(), advisoryEncoded.size())),
+          "advisory envelope revision was treated as a protocol version");
 
   pccontroller::wire::Frame maximum;
   maximum.opcode = pccontroller::wire::GetStatus;
@@ -140,6 +163,15 @@ void testBoardAndPersistence() {
                             response[0].payload.end(),
                             [](std::uint8_t value) { return value != 0; }),
             "HELLO compact schema-3 identity is not production-shaped");
+    const std::uint32_t capabilities =
+        static_cast<std::uint32_t>(response[0].payload[2]) |
+        (static_cast<std::uint32_t>(response[0].payload[3]) << 8U) |
+        (static_cast<std::uint32_t>(response[0].payload[4]) << 16U) |
+        (static_cast<std::uint32_t>(response[0].payload[5]) << 24U);
+    require((capabilities & (1UL << 25U)) != 0 &&
+                (capabilities & (1UL << 26U)) != 0 &&
+                (capabilities & (1UL << 27U)) != 0,
+            "HELLO omitted scheduled-display and mirror-push capabilities");
 
     response = board.handle({pccontroller::wire::MenuLayoutGet, 43, {}});
     require(response.size() == 1 &&
@@ -231,25 +263,77 @@ void testBoardAndPersistence() {
                 displays.state().lcdLine2 == std::string(16, 'X'),
             "oversized LCD text was not safely truncated to 2x16");
 
+    const std::vector<std::uint8_t> scheduledOnce{
+        5, 80, 0, 5, 0, 50, 0, 0, 'H', 'E', 'L', 'L', 'O'};
     response = board.handle(
-        {pccontroller::wire::I2cTransfer, 53,
+        {pccontroller::wire::DisplayText, 53, scheduledOnce});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                displays.state().segments == "HELL",
+            "scheduled marquee did not show its first window");
+    auto pushed = board.tick();
+    const auto *segmentPush =
+        findOpcode(pushed, pccontroller::wire::SegmentChanged);
+    require(segmentPush != nullptr && segmentPush->sequence == 0 &&
+                segmentPush->payload.size() == 5 &&
+                std::any_of(segmentPush->payload.begin(),
+                            segmentPush->payload.begin() + 4,
+                            [](std::uint8_t value) { return value != 0; }),
+            "changed segment state was not pushed without polling");
+    for (std::size_t step = 0; step < 5; ++step) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(85));
+      pushed = board.tick();
+    }
+    segmentPush = findOpcode(pushed, pccontroller::wire::SegmentChanged);
+    require(displays.state().segments == "    " && segmentPush != nullptr &&
+                segmentPush->payload.size() == 5 &&
+                std::all_of(segmentPush->payload.begin(),
+                            segmentPush->payload.begin() + 4,
+                            [](std::uint8_t value) { return value == 0; }),
+            "marquee omitted the complete terminal blank frame");
+    std::this_thread::sleep_for(std::chrono::milliseconds(85));
+    pushed = board.tick();
+    require(displays.state().segments == "tLED" &&
+                findOpcode(pushed, pccontroller::wire::SegmentChanged) !=
+                    nullptr,
+            "once marquee did not release the local page after its blank frame");
+
+    response = board.handle(
+        {pccontroller::wire::DisplayText, 54,
+         {5, 80, 0, 1, 4, 50, 0, 0, 'X'}});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "scheduled marquee accepted reserved option bits");
+
+    response = board.handle(
+        {pccontroller::wire::Buzzer, 55, {40, 0, 0xB8, 0x01}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "buzzer note was not acknowledged");
+    pushed = board.tick();
+    const auto *buzzerPush =
+        findOpcode(pushed, pccontroller::wire::BuzzerChanged);
+    require(buzzerPush != nullptr &&
+                buzzerPush->payload ==
+                    std::vector<std::uint8_t>({0xB8, 0x01, 40, 0, 0}),
+            "buzzer frequency and duration were not pushed to the host");
+
+    response = board.handle(
+        {pccontroller::wire::I2cTransfer, 56,
          {0x41, 2, 3, 0, 0x10, 0xAB, 0xCD}});
     require(response[0].opcode == pccontroller::wire::I2cTransferResponse &&
                 response[0].payload ==
                     std::vector<std::uint8_t>({0, 0x41, 0}),
             "cooperative I2C write response is invalid");
     response = board.handle(
-        {pccontroller::wire::I2cTransfer, 54, {0x41, 0, 1, 2, 0x10}});
+        {pccontroller::wire::I2cTransfer, 57, {0x41, 0, 1, 2, 0x10}});
     require(response[0].payload ==
                 std::vector<std::uint8_t>({0, 0x41, 2, 0xAB, 0xCD}),
             "cooperative I2C repeated-start read did not preserve bytes");
     response = board.handle(
-        {pccontroller::wire::I2cTransfer, 55, {0x55, 0, 0, 1}});
+        {pccontroller::wire::I2cTransfer, 58, {0x55, 0, 0, 1}});
     require(response[0].payload ==
                 std::vector<std::uint8_t>({2, 0x55, 0}),
             "unconnected I2C address did not return address-NACK status");
     response = board.handle(
-        {pccontroller::wire::I2cTransfer, 56, {0, 0, 0, 0}});
+        {pccontroller::wire::I2cTransfer, 59, {0, 0, 0, 0}});
     require(response[0].opcode == pccontroller::wire::Ack,
             "I2C lease release was not acknowledged");
 
@@ -286,16 +370,37 @@ void testBoardAndPersistence() {
     require(response.size() == 1 &&
                 response[0].opcode == pccontroller::wire::Ack,
             "SET_SETTINGS was not acknowledged");
-    std::array<std::uint8_t, 31> storedSettings{};
+    std::array<std::uint8_t, 40> storedSettings{};
     for (std::size_t index = 0; index < storedSettings.size(); ++index) {
       storedSettings[index] = eeprom.read(32U + index);
     }
     require(storedSettings[6] == 0x0E && storedSettings[28] == 0x4D &&
                 storedSettings[29] == 0xF0 && storedSettings[30] == 37 &&
-                eeprom.read(63) == pccontroller::wire::crc8(
+                storedSettings[31] == 0 &&
+                eeprom.read(72) == pccontroller::wire::crc8(
                                        storedSettings.data(),
                                        storedSettings.size()),
-            "virtual EEPROM is not the current 31-value settings record");
+            "virtual EEPROM is not the current 40-value settings/name record");
+
+    auto namedSettings = settings;
+    namedSettings.push_back(7);
+    namedSettings.insert(namedSettings.end(), {'E', 'D', 'G', 'E', '-', '0', '1'});
+    response = board.handle(
+        {pccontroller::wire::SetSettings, 10, namedSettings});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "SET_SETTINGS did not persist the board name");
+    response = board.handle(
+        {pccontroller::wire::SetSettings, 11, settings});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "ordinary settings update after board name failed");
+    response = board.handle(
+        {pccontroller::wire::GetSettings, 12, {}});
+    require(response[0].payload.size() == 25 &&
+                response[0].payload[16] == 1 &&
+                response[0].payload[17] == 7 &&
+                std::equal(response[0].payload.begin() + 18,
+                           response[0].payload.end(), "EDGE-01"),
+            "board name did not survive an ordinary settings update");
 
     auto invalidSettings = settings;
     invalidSettings.pop_back();
@@ -625,13 +730,18 @@ void testBoardAndPersistence() {
     require(response.size() == 1 &&
                 response[0].opcode == pccontroller::wire::SettingsResponse,
             "GET_SETTINGS did not return settings");
-    require(response[0].payload.size() == 15 &&
+    require(response[0].payload.size() == 25 &&
                 response[0].payload[3] == 200 &&
                 response[0].payload[10] == 5 &&
                 response[0].payload[11] == 1 &&
                 response[0].payload[12] == 0x4D &&
                 response[0].payload[13] == relays.mask() &&
-                response[0].payload[14] == 37,
+                response[0].payload[14] == 37 &&
+                response[0].payload[15] == 1 &&
+                response[0].payload[16] == 1 &&
+                response[0].payload[17] == 7 &&
+                std::equal(response[0].payload.begin() + 18,
+                           response[0].payload.end(), "EDGE-01"),
             "virtual MCU EEPROM did not retain settings");
     require((relays.mask() & (1U << 4U)) != 0 &&
                 pwm.value(0) == 2056,

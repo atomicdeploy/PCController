@@ -24,10 +24,10 @@ func (service *Service) Handler() http.Handler {
 func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Request) {
 	path := strings.TrimSuffix(request.URL.Path, "/")
 	switch {
-	case path == "/api/v1/artifacts/manifest" && request.Method == http.MethodGet:
+	case path == "/api/artifacts/manifest" && request.Method == http.MethodGet:
 		manifest, err := service.Manifest()
 		writeHTTPResult(writer, manifest, err)
-	case path == "/api/v1/artifacts" && request.Method == http.MethodGet:
+	case path == "/api/artifacts" && request.Method == http.MethodGet:
 		var kind *Kind
 		if raw := strings.TrimSpace(request.URL.Query().Get("kind")); raw != "" {
 			parsed, err := ParseKind(raw)
@@ -39,9 +39,9 @@ func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Requ
 		}
 		list, err := service.List(kind)
 		writeHTTPResult(writer, list, err)
-	case path == "/api/v1/artifacts/upload" && request.Method == http.MethodPost:
+	case path == "/api/artifacts/upload" && request.Method == http.MethodPost:
 		service.serveUpload(writer, request)
-	case path == "/api/v1/artifacts/fetch" && request.Method == http.MethodPost:
+	case path == "/api/artifacts/fetch" && request.Method == http.MethodPost:
 		var value FetchRequest
 		if !decodeHTTPJSON(writer, request, &value) {
 			return
@@ -49,7 +49,7 @@ func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Requ
 		applyIdempotencyHeader(request, &value.IdempotencyKey)
 		result, err := service.StartFetch(value)
 		writeHTTPAccepted(writer, result, err)
-	case path == "/api/v1/artifacts/capture" && request.Method == http.MethodPost:
+	case path == "/api/artifacts/capture" && request.Method == http.MethodPost:
 		var value CaptureRequest
 		if !decodeHTTPJSON(writer, request, &value) {
 			return
@@ -57,7 +57,7 @@ func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Requ
 		applyIdempotencyHeader(request, &value.IdempotencyKey)
 		result, err := service.StartCapture(value)
 		writeHTTPAccepted(writer, result, err)
-	case path == "/api/v1/artifacts/current/flash" && (request.Method == http.MethodGet || request.Method == http.MethodHead):
+	case path == "/api/artifacts/current/flash" && (request.Method == http.MethodGet || request.Method == http.MethodHead):
 		descriptor, err := service.store.Current(KindFlashBackup)
 		if err != nil {
 			writeHTTPError(writer, http.StatusInternalServerError, err)
@@ -68,7 +68,7 @@ func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		service.serveDownload(writer, request, descriptor.Kind, descriptor.SHA256)
-	case path == "/api/v1/artifacts/current/eeprom" && (request.Method == http.MethodGet || request.Method == http.MethodHead):
+	case path == "/api/artifacts/current/eeprom" && (request.Method == http.MethodGet || request.Method == http.MethodHead):
 		descriptor, err := service.store.Current(KindEEPROM)
 		if err != nil {
 			writeHTTPError(writer, http.StatusInternalServerError, err)
@@ -79,8 +79,8 @@ func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		service.serveDownload(writer, request, descriptor.Kind, descriptor.SHA256)
-	case strings.HasPrefix(path, "/api/v1/artifacts/") && (request.Method == http.MethodGet || request.Method == http.MethodHead):
-		parts := strings.Split(strings.TrimPrefix(path, "/api/v1/artifacts/"), "/")
+	case strings.HasPrefix(path, "/api/artifacts/") && (request.Method == http.MethodGet || request.Method == http.MethodHead):
+		parts := strings.Split(strings.TrimPrefix(path, "/api/artifacts/"), "/")
 		if len(parts) != 2 {
 			writeHTTPError(writer, http.StatusNotFound, os.ErrNotExist)
 			return
@@ -91,16 +91,16 @@ func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Requ
 			return
 		}
 		service.serveDownload(writer, request, kind, parts[1])
-	case path == "/api/v1/updates/firmware" && request.Method == http.MethodPost:
+	case path == "/api/updates/firmware" && request.Method == http.MethodPost:
 		service.serveUpdate(writer, request, service.StartFirmwareUpdate)
-	case path == "/api/v1/restores/flash" && request.Method == http.MethodPost:
+	case path == "/api/restores/flash" && request.Method == http.MethodPost:
 		service.serveUpdate(writer, request, service.StartFlashRestore)
-	case path == "/api/v1/updates/eeprom" && request.Method == http.MethodPost:
+	case path == "/api/updates/eeprom" && request.Method == http.MethodPost:
 		service.serveUpdate(writer, request, service.StartEEPROMUpdate)
-	case path == "/api/v1/updates/host" && request.Method == http.MethodPost:
+	case path == "/api/updates/host" && request.Method == http.MethodPost:
 		service.serveUpdate(writer, request, service.StartHostUpdate)
-	case strings.HasPrefix(path, "/api/v1/updates/status") && request.Method == http.MethodGet:
-		id := strings.TrimPrefix(path, "/api/v1/updates/status")
+	case strings.HasPrefix(path, "/api/updates/status") && request.Method == http.MethodGet:
+		id := strings.TrimPrefix(path, "/api/updates/status")
 		id = strings.TrimPrefix(id, "/")
 		status, err := service.Status(id)
 		writeHTTPResult(writer, status, err)

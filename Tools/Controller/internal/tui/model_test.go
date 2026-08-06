@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
@@ -487,6 +488,88 @@ func TestExternalAppPageActionSelectsTUIPage(t *testing.T) {
 	}
 }
 
+func TestTargetedAndBoardAppPageActionsSelectOnlyTheIntendedTUI(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.instanceID = "host:tui"
+
+	updated, _ := model.Update(appActionMsg(hostui.AppAction{
+		Kind: "app.page", Value: "events", Target: "webui",
+	}))
+	model = updated.(Model)
+	if model.page != PageDashboard {
+		t.Fatalf("WebUI-targeted action changed TUI page to %v", model.page)
+	}
+
+	updated, _ = model.Update(runtimeEventMsg(control.Event{
+		Kind: "app.page", Source: "board",
+		Metadata: map[string]string{"page": "settings", "target_instance": "tui"},
+	}))
+	model = updated.(Model)
+	if model.page != PageAppSettings {
+		t.Fatalf("board TUI navigation selected %v", model.page)
+	}
+}
+
+func TestTUITerminalTitleAndOSCAppActions(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var payloads []string
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "host:tui",
+		WriteOSC: func(payload string) error {
+			payloads = append(payloads, payload)
+			return nil
+		},
+	})
+	updated, _ := model.Update(appActionMsg(hostui.AppAction{
+		Kind: "app.title", Value: "Bench controller", Target: "tui",
+	}))
+	model = updated.(Model)
+	if got := model.terminalTitle(); got != "Bench controller" {
+		t.Fatalf("terminal title=%q", got)
+	}
+	updated, command := model.Update(appActionMsg(hostui.AppAction{
+		Kind: "app.progress", Value: "warning 73", Target: "host:tui",
+	}))
+	model = updated.(Model)
+	if command == nil {
+		t.Fatal("terminal progress did not emit a command")
+	}
+	message := command()
+	if _, ok := message.(terminalOSCResultMsg); !ok {
+		t.Fatalf("terminal progress command returned %T", message)
+	}
+	if len(payloads) != 1 || payloads[0] != "9;4;4;73" {
+		t.Fatalf("terminal OSC payloads=%#v", payloads)
+	}
+}
+
+func TestUpdateEventsOpenProgrammingPageAndTrackVisibleProgress(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.writeOSC = func(string) error { return nil }
+	updated, command := model.Update(runtimeEventMsg(control.Event{
+		Kind: "update.programming", Text: "verified write in progress", Time: time.Now(),
+		Metadata: map[string]string{
+			"operation_id": "op-test", "kind": "firmware", "state": "programming", "progress_percent": "40",
+		},
+	}))
+	model = updated.(Model)
+	if model.page != PageProgramming || model.update.Progress != 40 || model.update.OperationID != "op-test" {
+		t.Fatalf("update presentation page=%v state=%#v", model.page, model.update)
+	}
+	if command == nil {
+		t.Fatal("update event did not emit terminal presentation commands")
+	}
+	rendered := ansi.Strip(model.programmingPage(model.snapshot()))
+	for _, expected := range []string{"op-test", "PROGRAMMING", "40%", "verified write in progress"} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("programming page missing %q:\n%s", expected, rendered)
+		}
+	}
+	if strings.Contains(rendered, "Progress and hashes appear in Console") {
+		t.Fatal("programming page retained the obsolete static progress hint")
+	}
+}
+
 func TestStableCrossSurfacePageNamesSelectTUIPage(t *testing.T) {
 	tests := map[string]Page{
 		"dashboard": PageDashboard,
@@ -919,6 +1002,25 @@ func TestFrontPanelRawSegmentsOverrideTextGlyphs(t *testing.T) {
 	}
 }
 
+func TestFrontPanelRendersPushedStatusLEDInTrueColor(t *testing.T) {
+	priorProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(priorProfile) })
+	state := FrontPanelState{
+		Segments: "1234", LCDLine1: "one", LCDLine2: "two", Exact: true,
+		HaveStatusLED: true,
+		StatusLED:     native.StatusLEDState{Red: 18, Green: 52, Blue: 86, Brightness: 200, Effect: native.StatusEffectCycle, Condition: 8},
+	}
+	rendered := renderFrontPanel(state)
+	plain := ansi.Strip(rendered)
+	if !strings.Contains(plain, "#123456 · cycle · condition 8") {
+		t.Fatalf("status LED preview missing:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "38;2;18;52;86") {
+		t.Fatalf("status LED preview is not truecolor ANSI:\n%q", rendered)
+	}
+}
+
 func TestPreviewHeaderAndFrontPanelFit160Columns(t *testing.T) {
 	for _, page := range []Page{PageDashboard, PageMenus, PageAppSettings, PageRF, PageProgramming} {
 		rendered := PreviewFrame(page, 160, 46)
@@ -1015,7 +1117,7 @@ func TestTableColumnsUseVisibleCellPadding(t *testing.T) {
 
 func TestBoardPageShowsSafetyAndAudioCueSettings(t *testing.T) {
 	rendered := PreviewFrame(PageBoardSettings, 132, 42)
-	for _, expected := range []string{"Motion allowed by door state", "Door open/close audio cues", "Relay on/off audio cues"} {
+	for _, expected := range []string{"Motion allowed by door state", "Door open/close buzzer cues", "Relay on/off buzzer cues"} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("board settings missing %q:\n%s", expected, rendered)
 		}
@@ -1424,6 +1526,34 @@ func TestFrontPanelPressAndHoldUseBackendCallback(t *testing.T) {
 	_ = hold()
 	if got := strings.Join(gestures, ","); got != "K1:press,K1:hold" {
 		t.Fatalf("front panel gestures=%q", got)
+	}
+}
+
+func TestVirtualFrontPanelPressDispatchesWithoutReleaseOrClickDelay(t *testing.T) {
+	engine := shell.New(10)
+	var calls []string
+	if err := engine.Register(shell.Command{
+		Name: "menu", Usage: "menu ACTION", Summary: "test",
+		Run: func(_ context.Context, args []string) (string, error) {
+			calls = append(calls, strings.Join(args, " "))
+			return "ok", nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	model := NewWithOptions(control.New(control.Options{}), engine, Options{DisableWelcome: true})
+	model.page = PageMenus
+	_, press, _ := model.frontPanelGesture(1, "press")
+	if press == nil {
+		t.Fatal("virtual front-panel press did not dispatch immediately")
+	}
+	_ = press()
+	_, release, _ := model.frontPanelGesture(1, "release")
+	if release != nil {
+		t.Fatal("stateless virtual front-panel release dispatched a second action")
+	}
+	if got := strings.Join(calls, ","); got != "prev" {
+		t.Fatalf("virtual front-panel calls=%q, want one immediate prev", got)
 	}
 }
 

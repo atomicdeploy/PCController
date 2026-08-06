@@ -25,6 +25,8 @@ import (
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/netpolicy"
+	"pccontroller.local/controller/internal/pcspeaker"
 	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
@@ -40,6 +42,17 @@ var (
 )
 
 func main() {
+	if err := netpolicy.EnsureProcessLocalNetworkNoProxy(); err != nil {
+		fmt.Fprintln(os.Stderr, "network proxy bypass policy:", err)
+		os.Exit(1)
+	}
+	if pcspeaker.IsHelperInvocation(os.Args[1:]) {
+		if err := pcspeaker.RunHelperInvocation(context.Background(), os.Args[2:], os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "pc-speaker helper:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if portowner.IsHelperInvocation(os.Args[1:]) {
 		if err := portowner.RunHelperInvocation(context.Background(), os.Args[1:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "serial-owner helper:", err)
@@ -48,6 +61,10 @@ func main() {
 		return
 	}
 	if artifacts.IsSelfUpdateHelperInvocation(os.Args[1:]) {
+		if err := artifacts.PrepareSelfUpdateHelperProcess(); err != nil {
+			fmt.Fprintln(os.Stderr, "self-update helper:", err)
+			os.Exit(1)
+		}
 		if err := artifacts.RunSelfUpdateHelper(context.Background(), os.Args[2]); err != nil {
 			fmt.Fprintln(os.Stderr, "self-update helper:", err)
 			os.Exit(1)
@@ -64,7 +81,7 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
-	cleanArgs, configPath, err := extractConfigArgument(args)
+	cleanArgs, configPath, presentation, err := extractGlobalArguments(args)
 	if err != nil {
 		return err
 	}
@@ -74,7 +91,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if openErr != nil {
 			return openErr
 		}
-		configurePrimaryIPC(store.Current())
+		if overrideErr := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); overrideErr != nil {
+			return overrideErr
+		}
+		runtimeConfig, runtimeErr := store.Runtime()
+		if runtimeErr != nil {
+			return runtimeErr
+		}
+		configurePrimaryIPC(runtimeConfig)
 		return runTUI(nil, stdout, stderr, store)
 	}
 	switch strings.ToLower(args[0]) {
@@ -82,14 +106,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(
 			stdout,
 			"%s %s source-hash=%s built=%s\n",
-			configuredProductTitle(configPath),
+			configuredProductTitle(configPath, presentation.AppName),
 			version,
 			sourceHash,
 			buildTime,
 		)
 		return nil
 	case "help", "--help", "-h":
-		printUsage(stdout, configuredProductTitle(configPath))
+		printUsage(stdout, configuredProductTitle(configPath, presentation.AppName))
 		return nil
 	case "eeprom":
 		// Offline EEPROM inspection/transfer is dispatched before config or
@@ -99,6 +123,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// Artifact identity inspection and guarded patching are also entirely
 		// offline and must not depend on host configuration or serial hardware.
 		return runFirmwareArtifact(args[1:], stdout, stderr)
+	case "driver":
+		return runDriver(args[1:], stdout, stderr)
+	}
+	if isConfigMaintenance(args) {
+		return runConfigMaintenance(args, configPath, stdout)
 	}
 	if configIndependentProgramCompile(args) {
 		// Compilation is a repository build operation. It must remain usable
@@ -121,7 +150,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	configurePrimaryIPC(store.Current())
+	if err := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); err != nil {
+		return err
+	}
+	runtimeConfig, runtimeErr := store.Runtime()
+	if runtimeErr != nil {
+		return runtimeErr
+	}
+	configurePrimaryIPC(runtimeConfig)
 	switch strings.ToLower(args[0]) {
 	case "tui":
 		return runTUI(args[1:], stdout, stderr, store)
@@ -147,10 +183,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runBoot(args[1:], stdout, stderr, store)
 	case "toolchain":
 		return runToolchain(args[1:], stdout, stderr, store)
+	case "board":
+		return runBoard(args[1:], stdout, stderr, store)
 	case "ws":
 		return runWS(args[1:], stdout, stderr, store)
 	case "config":
 		return runConfig(args[1:], stdout, store)
+	case "network":
+		return runNetwork(args[1:], stdout, stderr, store)
 	case "desktop":
 		return runDesktop(args[1:], stdout, store)
 	case "uri", "action":
@@ -734,6 +774,13 @@ func runTUIWithInitialAction(
 	claim = nil
 	defer primary.Close()
 	appActions := primary.AppActions()
+	tuiInstanceID := primary.hostInstanceID + ":tui"
+	processStartedAt := time.Time{}
+	if primary.instanceClaim != nil {
+		processStartedAt = primary.instanceClaim.startedAt
+	}
+	tuiSelf := hostui.CurrentProcessSelf(processStartedAt)
+	defer primary.instances.Remove(tuiInstanceID)
 	if initial.Kind != "" {
 		if err := primary.actions.Publish(initial); err != nil {
 			return err
@@ -787,6 +834,25 @@ func runTUIWithInitialAction(
 				return primaryHostUIStatus(primary, store.Current())
 			},
 			AppActions: appActions,
+			InstanceID: tuiInstanceID,
+			WriteOSC: func(payload string) error {
+				return hostui.WriteOSC(stdout, payload)
+			},
+			ReportTerminal: func(page, title string) error {
+				ui := store.Current().UI
+				_, err := primary.instances.Upsert(hostui.AppInstance{
+					ID: tuiInstanceID, Surface: "tui", Page: page, State: "active",
+					Self: &tuiSelf,
+					Values: map[string]string{
+						"color_mode":        ui.Appearance.Theme,
+						"locale":            ui.Appearance.Locale,
+						"terminal_title":    title,
+						"terminal_osc":      "enabled",
+						"terminal_progress": "osc-9-4",
+					},
+				})
+				return err
+			},
 		}),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
@@ -799,6 +865,7 @@ func runTUIWithInitialAction(
 		}
 	}()
 	_, err = program.Run()
+	_ = hostui.WriteOSC(stdout, "9;4;0;0")
 	_ = primary.Close()
 	_ = runtime.Close()
 	return err

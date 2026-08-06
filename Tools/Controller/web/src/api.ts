@@ -9,6 +9,7 @@ import type {
 import { controllerHTTPURL, controllerWebSocketURL } from './transport-config'
 
 const tokenKey = 'pccontroller.session-token'
+const browserTicketPrefix = 'pccontroller.ticket.'
 let nextID = 1
 let streamSocket: WebSocket | null = null
 
@@ -73,7 +74,7 @@ async function decode<T>(response: Response): Promise<T> {
 
 /** Fetches the bootstrap UI configuration required before opening live transports. */
 export async function getUIConfig(signal?: AbortSignal): Promise<UIConfig> {
-  const response = await fetch(controllerHTTPURL('/api/v1/ui-config'), { signal, cache: 'no-store' })
+  const response = await fetch(controllerHTTPURL('/api/ui-config'), { signal, cache: 'no-store' })
   const config = await decode<UIConfig>(response)
   if (typeof config?.setup_complete !== 'boolean') {
     throw new Error('UI configuration is missing required setup_complete state')
@@ -82,19 +83,24 @@ export async function getUIConfig(signal?: AbortSignal): Promise<UIConfig> {
       typeof config.appearance_etag !== 'string' || !/^[a-f0-9]{64}$/.test(config.appearance_etag)) {
     throw new Error('UI configuration is missing host-authoritative appearance state')
   }
+  if (typeof config.session_ticket_path !== 'string' ||
+      config.session_ticket_path.startsWith('//') ||
+      !/^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$/.test(config.session_ticket_path)) {
+    throw new Error('UI configuration is missing a safe session-ticket path')
+  }
   return config
 }
 
 /** Fetches the authenticated current controller snapshot. */
 export async function getSnapshot(signal?: AbortSignal): Promise<Snapshot> {
-  const response = await fetch(controllerHTTPURL('/api/v1/snapshot'), {
+  const response = await fetch(controllerHTTPURL('/api/snapshot'), {
     headers: headers(), signal, cache: 'no-store',
   })
   return decode<Snapshot>(response)
 }
 
 async function restRPC<T>(request: { jsonrpc: '2.0'; id: number; method: string; params: unknown }, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(controllerHTTPURL('/api/v1/rpc'), {
+  const response = await fetch(controllerHTTPURL('/api/rpc'), {
     method: 'POST',
     headers: headers(true),
     body: JSON.stringify(request),
@@ -163,20 +169,78 @@ export interface StreamHandlers {
   state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string) => void
 }
 
+interface SessionTicket {
+  ticket: string
+  protocol: string
+  expires_at: string
+  expires_in_ms: number
+  principal: string
+}
+
+async function websocketProtocols(config: UIConfig, signal?: AbortSignal): Promise<string[]> {
+  const token = getToken()
+  if (!config.auth_required && !token) return []
+  const response = await fetch(controllerHTTPURL(config.session_ticket_path), {
+    method: 'POST',
+    headers: headers(true),
+    body: JSON.stringify({ transport: 'websocket' }),
+    signal,
+    cache: 'no-store',
+  })
+  const ticket = await decode<SessionTicket>(response)
+  if (!/^[a-f0-9]{64}$/.test(ticket.ticket) || ticket.protocol !== 'pccontroller' ||
+      !Number.isFinite(ticket.expires_in_ms) || ticket.expires_in_ms <= 0 || ticket.expires_in_ms > 30_000 ||
+      Number.isNaN(Date.parse(ticket.expires_at)) || typeof ticket.principal !== 'string' || !ticket.principal.trim()) {
+    throw new Error('Controller returned an invalid WebSocket session ticket')
+  }
+  return [ticket.protocol, `${browserTicketPrefix}${ticket.ticket}`]
+}
+
 /** Opens the reconnecting event stream and returns a function that closes it. */
 export function connectStream(config: UIConfig, handlers: StreamHandlers): () => void {
   let socket: WebSocket | null = null
   let stopped = false
   let retry = 0
   let timer = 0
+  let attempt = 0
+  let ticketAbort: AbortController | null = null
 
-  const open = () => {
+  const scheduleRetry = (detail: string) => {
     if (stopped) return
+    retry += 1
+    const delay = Math.min(12_000, 500 * 2 ** Math.min(retry, 5)) + Math.floor(Math.random() * 250)
+    handlers.state('waiting', detail || `retrying in ${Math.ceil(delay / 1000)}s`)
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => { void open() }, delay)
+  }
+
+  const open = async () => {
+    if (stopped) return
+    const currentAttempt = ++attempt
     handlers.state('connecting')
-    const url = new URL(controllerWebSocketURL(config.websocket_path || '/ipc'))
-    const token = getToken()
-    if (token) url.searchParams.set('access_token', token)
-    const activeSocket = new WebSocket(url)
+    ticketAbort?.abort()
+    const authorizationAbort = new AbortController()
+    ticketAbort = authorizationAbort
+    let protocols: string[]
+    try {
+      protocols = await websocketProtocols(config, authorizationAbort.signal)
+    } catch (cause) {
+      if (stopped || currentAttempt !== attempt || authorizationAbort.signal.aborted) return
+      scheduleRetry(cause instanceof Error ? cause.message : String(cause))
+      return
+    } finally {
+      if (ticketAbort === authorizationAbort) ticketAbort = null
+    }
+    if (stopped || currentAttempt !== attempt) return
+
+    let activeSocket: WebSocket
+    try {
+      const url = controllerWebSocketURL(config.websocket_path)
+      activeSocket = protocols.length > 0 ? new WebSocket(url, protocols) : new WebSocket(url)
+    } catch (cause) {
+      scheduleRetry(cause instanceof Error ? cause.message : String(cause))
+      return
+    }
     socket = activeSocket
     activeSocket.addEventListener('open', () => {
       retry = 0
@@ -186,7 +250,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
         jsonrpc: '2.0',
         id: nextID++,
         method: 'controller.subscribe',
-        params: { topics: ['events', 'status'], interval_ms: 500, after_id: 0 },
+		params: { topics: ['events', 'state', 'status'], interval_ms: 500, after_id: 0 },
       }))
     })
     activeSocket.addEventListener('message', (message) => {
@@ -208,7 +272,9 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
           }
         }
         if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate)
-        if (value.method === 'controller.event') handlers.event(value.params as ControllerEvent)
+		if (value.method === 'controller.event' || value.method === 'controller.state') {
+			handlers.event(value.params as ControllerEvent)
+		}
         if (value.method === 'controller.error') {
           const detail = (value.params as { error?: string } | undefined)?.error
           handlers.state('open', detail)
@@ -226,17 +292,16 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
         handlers.state('closed')
         return
       }
-      retry += 1
-      const delay = Math.min(12_000, 500 * 2 ** Math.min(retry, 5)) + Math.floor(Math.random() * 250)
-      handlers.state('waiting', event.reason || `retrying in ${Math.ceil(delay / 1000)}s`)
-      timer = window.setTimeout(open, delay)
+      scheduleRetry(event.reason || 'WebSocket connection closed')
     })
     activeSocket.addEventListener('error', () => activeSocket.close())
   }
 
-  open()
+  void open()
   return () => {
     stopped = true
+    attempt += 1
+    ticketAbort?.abort()
     window.clearTimeout(timer)
     const closed = socket
     socket?.close(1000, 'view closed')
@@ -255,7 +320,7 @@ export async function integrationFetch<T>(
   init: RequestInit = {},
 ): Promise<T> {
   const safePath = path.startsWith('/') ? path.slice(1) : path
-  const response = await fetch(controllerHTTPURL(`/api/v1/integrations/${integration}/${safePath}`), {
+  const response = await fetch(controllerHTTPURL(`/api/integrations/${integration}/${safePath}`), {
     ...init,
     headers: { ...headers(Boolean(init.body)), ...(init.headers ?? {}) },
   })
@@ -282,7 +347,7 @@ export async function downloadIntegration(
   signal?: AbortSignal,
 ): Promise<void> {
   const safePath = path.startsWith('/') ? path.slice(1) : path
-  const target = controllerHTTPURL(`/api/v1/integrations/${integration}/${safePath}`)
+  const target = controllerHTTPURL(`/api/integrations/${integration}/${safePath}`)
   const response = await fetch(target, { headers: headers(), signal })
   if (!response.ok) await decode(response)
   const blob = await response.blob()

@@ -83,6 +83,7 @@ export interface ControllerSettings {
   default_page: number
   extended_flags: number
   motion_break_ms: number
+	persisted?: boolean
 }
 
 export interface ProgramState {
@@ -123,6 +124,15 @@ export interface FrontPanelState {
   host_editable_value: number
 }
 
+export interface StatusLEDState {
+  red: number
+  green: number
+  blue: number
+  brightness: number
+  effect: number
+  condition: number
+}
+
 export interface Snapshot {
   connected: boolean
   paused: boolean
@@ -141,6 +151,9 @@ export interface Snapshot {
   front_panel?: FrontPanelState
   have_front_panel?: boolean
   front_panel_updated?: string
+	status_led?: StatusLEDState
+	have_status_led?: boolean
+	status_led_updated?: string
 }
 
 export interface StatusUpdate {
@@ -153,6 +166,7 @@ export interface ControllerEvent {
   id: number
   time: string
   kind: string
+  stream?: 'activity' | 'state' | 'telemetry' | 'debug'
   text: string
   state?: string
   lifecycle?: string
@@ -205,17 +219,21 @@ export interface MetricSample {
 
 export interface UIConfig {
   name: string
+	tagline?: string
   setup_complete: boolean
   appearance: Appearance
   appearance_etag: string
   welcome_melody?: string
-  api_version: number
-  websocket_path: string
+	websocket_path: string
   socket_io_path?: string
+  session_ticket_path: string
   auth_required: boolean
   integrations?: {
     local_device: boolean
     data_hub: boolean
+		buzzer_host_enabled: boolean
+		buzzer_native_enabled: boolean
+		buzzer_web_audio: boolean
   }
   host_version?: string
   source_hash?: string
@@ -224,6 +242,7 @@ export interface UIConfig {
 
 export interface HostUISettings {
   app_title: string
+	tagline: string
   setup_complete: boolean
   welcome_melody: string
   appearance: Appearance
@@ -408,6 +427,7 @@ export const emptySnapshot: Snapshot = {
     default_page: 0,
     extended_flags: 0,
     motion_break_ms: 1,
+	persisted: false,
   },
   have_status: false,
   have_settings: false,

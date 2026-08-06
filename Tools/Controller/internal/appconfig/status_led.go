@@ -3,6 +3,8 @@ package appconfig
 import (
 	"fmt"
 	"strings"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 // RGBColor is a host-owned status-light color. The board still owns the
@@ -79,7 +81,7 @@ func DefaultStatusLEDPolicy() StatusLEDPolicy {
 		},
 		RunningDoorOpen: StatusLEDVisual{
 			Effect: "flash", Color: RGBColor{Red: 255},
-			Brightness: 255, PeriodMS: 400,
+			Brightness: 255, PeriodMS: 640,
 		},
 		PCOffline: steadyVisual(RGBColor{Red: 255}, 180),
 	}
@@ -139,12 +141,12 @@ func validateStatusLEDVisual(visual StatusLEDVisual) error {
 			return fmt.Errorf("steady period_ms must be zero")
 		}
 	case "flash":
-		if visual.PeriodMS < 200 || visual.PeriodMS > 60_000 {
-			return fmt.Errorf("flash period_ms must be 200..60000")
+		if visual.PeriodMS < int(native.StatusEffectMinimumPeriodMS) || visual.PeriodMS > int(native.StatusEffectMaximumPeriodMS) {
+			return fmt.Errorf("flash period_ms must be %d..%d", native.StatusEffectMinimumPeriodMS, native.StatusEffectMaximumPeriodMS)
 		}
 	case "breathe", "crossfade":
-		if visual.PeriodMS < 400 || visual.PeriodMS > 60_000 {
-			return fmt.Errorf("%s period_ms must be 400..60000", visual.Effect)
+		if visual.PeriodMS < int(native.StatusEffectMinimumPeriodMS) || visual.PeriodMS > int(native.StatusEffectMaximumPeriodMS) {
+			return fmt.Errorf("%s period_ms must be %d..%d", visual.Effect, native.StatusEffectMinimumPeriodMS, native.StatusEffectMaximumPeriodMS)
 		}
 	default:
 		return fmt.Errorf("effect must be steady, flash, breathe, or crossfade")

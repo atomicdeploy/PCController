@@ -8,7 +8,7 @@
 namespace pccontroller::wire {
 
 constexpr std::uint8_t kMagic = 0xA5;
-constexpr std::uint8_t kVersion = 1;
+constexpr std::uint8_t kEnvelopeRevision = 1;
 constexpr std::size_t kMaximumPayload = 48;
 constexpr std::size_t kRawOverhead = 6;
 constexpr std::size_t kMaximumRaw = kMaximumPayload + kRawOverhead;
@@ -28,6 +28,9 @@ enum Opcode : std::uint8_t {
   StatusRgb = 0x14,
   PwmGet = 0x15,
   AddressableLed = 0x16,
+  StatusEffect = 0x17,
+  StatusProfileGet = 0x18,
+  StatusProfileSet = 0x19,
 
   RadioTransmit = 0x20,
   RadioLearnStart = 0x21,
@@ -74,6 +77,10 @@ enum Opcode : std::uint8_t {
   MenuLayoutResponse = 0x99,
   HostMenuContentRequest = 0x9A,
   HostMenuStateResponse = 0x9B,
+  SegmentChanged = 0x9C,
+  BuzzerChanged = 0x9D,
+  StatusLedChanged = 0x9E,
+  StatusProfileResponse = 0x9F,
   Event = 0xA0,
 };
 

@@ -29,10 +29,11 @@ type hostInstancePaths struct {
 }
 
 type hostInstanceIdentity struct {
-	ID      string
-	Token   string
-	PID     int
-	Surface string
+	ID        string
+	Token     string
+	PID       int
+	Surface   string
+	StartedAt time.Time
 }
 
 type hostInstanceRecord struct {
@@ -107,12 +108,14 @@ func claimHostInstance(paths hostInstancePaths, surface string) (*hostInstanceCl
 		_ = lock.Close()
 		return nil, err
 	}
+	startedAt := time.Now().UTC()
 	return &hostInstanceClaim{
 		paths: paths,
 		identity: hostInstanceIdentity{
 			ID: id, Token: token, PID: os.Getpid(), Surface: normalizeHostSurface(surface),
+			StartedAt: startedAt,
 		},
-		startedAt: time.Now().UTC(),
+		startedAt: startedAt,
 		lock:      lock,
 	}, nil
 }

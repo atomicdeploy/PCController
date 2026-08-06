@@ -98,10 +98,10 @@ describe('portable controller transport', () => {
     vi.stubGlobal('localStorage', storage)
     vi.stubGlobal('PCControllerWebConfig', undefined)
 
-    expect(controllerHTTPURL('/api/v1/ui-config')).toBe('http://127.0.0.1:8787/api/v1/ui-config')
+    expect(controllerHTTPURL('/api/ui-config')).toBe('http://127.0.0.1:8787/api/ui-config')
     expect(controllerWebSocketURL('/ipc')).toBe('ws://127.0.0.1:8787/ipc')
     expect(controllerChannelOrigin()).toBe('http://127.0.0.1:8787')
-    expect(controllerHTTPURL('/api/v1/ui-config')).toContain('/api/v1/')
+    expect(controllerHTTPURL('/api/ui-config')).toContain('/api/')
   })
 
   it('supports deliberate local-setting updates without storing secrets', () => {

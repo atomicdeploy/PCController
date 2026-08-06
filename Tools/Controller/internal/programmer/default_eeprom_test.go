@@ -2,7 +2,11 @@ package programmer
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
@@ -30,7 +34,7 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 		t.Fatal("default settings CRC does not match")
 	}
 	wantOrder := []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC}
-	if !bytes.Equal(record[21:28], wantOrder) || record[28] != 0 {
+	if !bytes.Equal(record[21:28], wantOrder) || record[28]&0x07 != 0 {
 		t.Fatalf("dense menu order / closed brightness = % X / %d", record[21:28], record[28])
 	}
 	if record[1] != 0 || record[6] != 0 {
@@ -46,5 +50,40 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 	remotes := decodeOfflineRemotes(image)
 	if !remotes.Valid || remotes.ValidCount != 0 || remotes.InvalidCount != 0 {
 		t.Fatalf("generated default RF store = %#v", remotes)
+	}
+	profiles := native.DefaultStatusProfiles(native.FactoryStatusBrightness)
+	for condition, want := range profiles {
+		record, err := image.BytesAt(
+			EEPROMStatusProfileAddress+uint32(condition)*EEPROMStatusProfileRecordBytes,
+			EEPROMStatusProfileRecordBytes,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if record[EEPROMStatusProfileBytes] != avrCRC8(record[:EEPROMStatusProfileBytes]) {
+			t.Fatalf("status profile %d CRC does not match", condition)
+		}
+		encoded, err := native.StatusProfileSetPayload(byte(condition), want)
+		if err != nil || !bytes.Equal(record[:EEPROMStatusProfileBytes], encoded[1:]) {
+			t.Fatalf("status profile %d = % X, want % X (err=%v)", condition, record[:EEPROMStatusProfileBytes], encoded[1:], err)
+		}
+	}
+}
+
+func TestWriteDefaultEEPROMIntelHexDoesNotOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "factory.hex")
+	if err := WriteDefaultEEPROMIntelHex(path); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteDefaultEEPROMIntelHex(path); err == nil {
+		t.Fatal("second factory image write unexpectedly overwrote the file")
+	}
+	after, _ := os.ReadFile(path)
+	if !bytes.Equal(after, original) {
+		t.Fatal("existing factory image changed after rejected overwrite")
 	}
 }

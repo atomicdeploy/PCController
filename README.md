@@ -60,6 +60,8 @@ everywhere through the same typed event stream.
 |---|---|
 | 🔒 One serial authority | A primary host owns the authenticated controller connection; secondary clients use local IPC instead of racing for the COM port. |
 | ↔️ Full-duplex control | Board status, telemetry, lifecycle events, commands, terminal traffic, and page actions share the JSON-RPC, REST, and WebSocket control plane. |
+| ⚡ Push-first physical mirrors | Changed display, buzzer, and status-light output is emitted by the board and fanned out immediately. Repeating snapshot polling is forbidden when the firmware advertises push support; reads are reserved for initial sync, explicit refresh, gap recovery, and bounded legacy fallback. |
+| 🧭 Signal-aware event paths | Human activity, continuous output state, telemetry, and explicit debug traces travel independently, so frame and measurement streams update every UI without flooding consoles or evicting one-shot events. |
 | 🎨 Native-quality WebUI | Responsive desktop/mobile layouts, installable standalone presentation where supported, RTL/LTR, Persian typography, light/dark themes, semantic color, real telemetry charts, keyboard navigation, optional audio/haptic cues, dialogs, notifications, and tab-to-tab synchronization. |
 | 🎛️ Complete device workbench | Relays, PWM, lighting, RGB/status output, addressable strip, buzzer, displays, I²C, RF learning/transmit, macros, menus, settings, backups, and guarded programming. |
 | 🪟 Host integration | Global hotkeys, desktop notifications, local-device diagnostics, bounded read-only WMI/COM facts, native Microsoft display and shell adapters, discovery, webhooks, host bridges, scripts, automation, and platform-specific port-owner diagnostics. |
@@ -83,6 +85,12 @@ The embedded web bundle and Persian font ship inside the native executable.
 `controller web` is a headless primary mode: it owns discovery, serial I/O,
 automations, hotkeys, integrations, IPC, and browser events without creating a
 terminal interface.
+
+Physical-output mirroring is deliberately event driven. The native UART event
+updates one authoritative host snapshot, which is then distributed over every
+client channel. Adding a convenient repeating read timer is an architecture
+regression, not an acceptable shortcut; see the
+[push-first protocol rule](Tools/Controller/docs/Protocol-and-Network-API.md#push-first-state-rule).
 
 <a id="quick-start"></a>
 

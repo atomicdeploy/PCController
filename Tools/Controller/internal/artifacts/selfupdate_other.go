@@ -13,6 +13,10 @@ import (
 
 type platformHelperLauncher struct{}
 
+func PrepareSelfUpdateHelperProcess() error { return nil }
+
+func platformStartReplacementProcess(command *exec.Cmd) error { return command.Start() }
+
 func (platformHelperLauncher) Launch(_ context.Context, helperPath, journalPath string) error {
 	command := exec.Command(helperPath, selfUpdateHelperCommand, journalPath)
 	command.Env = withoutSelfUpdateEnvironment(os.Environ())

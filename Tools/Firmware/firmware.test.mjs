@@ -245,15 +245,38 @@ test('board profile keeps Urboot and EEPROM-retention contract', () => {
         assert.equal(BOARD.eepromBytes, 1_024)
 })
 
-test('persistent Ready colors retain the documented user-visible order', async () => {
-        const source = await readFile(
-                new URL('../../Project/StatusLedController.cpp', import.meta.url),
-                'utf8'
-        )
-        assert.match(
-                source,
-                /ReadyPalette\[\][^=]*=\s*\{\s*PaletteRed,\s*PaletteBlue,\s*PaletteViolet,\s*PaletteGreen,\s*PaletteWhite\s*\}/u
-        )
+test('persistent Ready profile remains host-owned with a compact firmware fallback', async () => {
+        const [hostProfiles, firmware] = await Promise.all([
+                readFile(new URL('../Controller/internal/native/status_profiles.go', import.meta.url), 'utf8'),
+                readFile(new URL('../../Project/StatusLedController.cpp', import.meta.url), 'utf8')
+        ])
+        assert.match(hostProfiles, /StatusConditionReady:\s+static\(255, 255, 255\)/u)
+        assert.match(firmware, /Go tooling owns and provisions the full factory profile table/u)
+        assert.doesNotMatch(firmware, /ReadyPalette/u)
+})
+
+test('physical, injected, and RF key actions retain the immediate dispatch contract', async () => {
+	const [keys, frontPanel, protocol, radio] = await Promise.all([
+		readFile(new URL('../../LocalLib/Keys.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Firmware/FrontPanelRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Firmware/ProtocolRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Firmware/RadioRuntime.inc.h', import.meta.url), 'utf8')
+	])
+	assert.match(keys, /KEY_DEBOUNCE_MS = 20;/u)
+	assert.match(
+		keys,
+		/return event == KeyEvent::Down \|\| event == KeyEvent::HoldRepeat;/u
+	)
+	assert.match(frontPanel, /keyEventRunsPrimaryAction\(event\)/u)
+	assert.doesNotMatch(frontPanel, /event == KeyEvent::Click \|\| event == KeyEvent::HoldStart/u)
+	assert.match(
+		protocol,
+		/case RemoteKeyGesture:[^]*?applyKeyGesture\(payload\[0\], static_cast<KeyEvent>\(payload\[1\]\)\);/u
+	)
+	assert.match(
+		radio,
+		/case RemoteActionKind::Key:[^]*?handleMenuAction\(remote\.actionValue, true\);/u
+	)
 })
 
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
@@ -321,7 +344,7 @@ test('studio validation preserves matching Controller compile identity', async (
 	controllerManifest.source.buildTimestamp = '2026-08-01 19:42:58'
 	controllerManifest.stackBudget = { estimatedFreeSRAMBytes: 287 }
 	controllerManifest.patchRegions = [{
-		name: 'firmware-identity', start: 0x7DF4, length: 12,
+		name: 'firmware-identity', start: 0x7E74, length: 12,
 		schema: 1, magic: 'PCI1'
 	}]
 	await writeFile(manifestPath, `${JSON.stringify(controllerManifest, null, 2)}\n`)

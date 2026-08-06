@@ -134,6 +134,17 @@ React type declarations (MIT) are build/test dependencies and are not served
 at runtime. Their upstream license files remain authoritative and must be
 included beside redistributed release artifacts by the packaging pipeline.
 
+## Optional PC speaker support
+
+The optional Windows motherboard-speaker mirror uses the PIT/channel-2 I/O
+sequence from `cocafe/pc-beeper` (MIT, Copyright (c) 2018
+cocafehj@gmail.com), translated to Go. Its full MIT terms are in
+`LICENSES/MIT.txt`. The separately supplied `WinRing0x64.sys` driver is an
+OpenLibSys/WinRing0 component under its upstream modified BSD terms. The Go
+host calls its published device-control interface directly; no OpenLibSys DLL
+or external buzzer executable is loaded. The driver is not committed to or
+redistributed by this repository.
+
 ## Build/runtime tools (not vendored)
 
 Node.js, CMake, Ninja, GCC/MinGW-w64, Go, `go-winres`, UPX, Git, and GitHub CLI

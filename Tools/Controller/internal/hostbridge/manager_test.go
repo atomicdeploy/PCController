@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +21,18 @@ import (
 	"pccontroller.local/controller/internal/ipcjson"
 	"pccontroller.local/controller/internal/shell"
 )
+
+func TestWaitForIntegrationShutdownIsBounded(t *testing.T) {
+	var completed sync.WaitGroup
+	completed.Add(1)
+	if waitForIntegrationShutdown(&completed, 15*time.Millisecond) {
+		t.Fatal("unfinished integration workers were reported as stopped")
+	}
+	completed.Done()
+	if !waitForIntegrationShutdown(&completed, time.Second) {
+		t.Fatal("completed integration workers timed out")
+	}
+}
 
 func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
 	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))

@@ -21,11 +21,12 @@ import (
 )
 
 type primaryArtifactExecutor struct {
-	client   *controllerapi.Client
-	store    *appconfig.Store
-	paths    programmer.HostDataPaths
-	shutdown func()
-	execute  func(context.Context, string) (string, error)
+	client    *controllerapi.Client
+	store     *appconfig.Store
+	paths     programmer.HostDataPaths
+	shutdown  func()
+	forceExit func(int)
+	execute   func(context.Context, string) (string, error)
 }
 
 func newArtifactHostService(
@@ -47,7 +48,10 @@ func newArtifactHostService(
 	if err != nil {
 		return nil, err
 	}
-	executor := &primaryArtifactExecutor{client: client, store: store, paths: dataPaths, shutdown: shutdown}
+	executor := &primaryArtifactExecutor{
+		client: client, store: store, paths: dataPaths, shutdown: shutdown,
+		forceExit: os.Exit,
+	}
 	service, err := artifacts.NewService(artifacts.Options{
 		Store: artifactStore, Executor: executor,
 		Events: func(kind, text string, metadata map[string]string) {
@@ -324,13 +328,25 @@ func (executor *primaryArtifactExecutor) StageHostUpdate(
 		return err
 	}
 	progress("staged", 95, "host replacement staged; primary will restart")
-	if executor.shutdown != nil {
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			executor.shutdown()
-		}()
-	}
+	executor.scheduleHostUpdateShutdown(500*time.Millisecond, 12*time.Second)
 	return nil
+}
+
+func (executor *primaryArtifactExecutor) scheduleHostUpdateShutdown(gracefulDelay, forceDelay time.Duration) {
+	if executor == nil || executor.shutdown == nil {
+		return
+	}
+	go func() {
+		time.Sleep(gracefulDelay)
+		executor.shutdown()
+		// A terminal UI can remain blocked in an OS input read after IPC,
+		// serial, and integrations are closed. The verified external helper
+		// owns rollback now, so bound how long the outgoing image can delay it.
+		if executor.forceExit != nil {
+			time.Sleep(forceDelay)
+			executor.forceExit(0)
+		}
+	}()
 }
 
 func (executor *primaryArtifactExecutor) method(value string) (string, error) {

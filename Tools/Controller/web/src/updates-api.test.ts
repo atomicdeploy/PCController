@@ -21,7 +21,7 @@ describe('firmware artifact adapter', () => {
     const file = new File(['hex'], 'board.hex', { type: 'application/octet-stream' })
     await uploadArtifact(file, 'firmware', 'a'.repeat(64))
     const [url, init] = fetchMock.mock.calls[0]
-    expect(String(url)).toContain('/api/v1/artifacts/upload?')
+    expect(String(url)).toContain('/api/artifacts/upload?')
     expect(String(url)).toContain('kind=firmware')
     expect(String(url)).toContain(`sha256=${'a'.repeat(64)}`)
     expect(String(url)).toContain('bytes=3')

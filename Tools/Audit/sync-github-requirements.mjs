@@ -378,13 +378,13 @@ const R = [
       'Run packaged Browser acceptance across widths, locales, themes, keyboard-only and reduced-motion flows, two-tab synchronization, disconnect/reconnect, terminal/event duplex, and console/network cleanliness.',
     ], 'The embedded application, portable export, localization/theme system, connection and capability gating, telemetry charts, device workbench, validated settings, accessible shortcuts/dialogs/context actions, optional feedback, safe console renderer, WebSocket/REST/BroadcastChannel transport, favicon, complete range-serving contract, typed data/event workspace, and host-authoritative ETag-guarded appearance synchronization have source tests. Final packaged Browser acceptance across live connection, responsive, locale/theme, two-tab, terminal/event, and console/network flows remains open.'),
 
-  requirement('ipc-websocket-api-suite', 8, 'Provide versioned JSON-RPC, REST, and authenticated WebSocket command/event APIs', 'closed',
+  requirement('ipc-websocket-api-suite', 8, 'Provide unversioned living IPC, REST, JSON-RPC, WebSocket, and bridge APIs', 'open',
     ['🔌 protocol-api', '🌐 networking', '🔒 security', '⚡ priority: high', '✅ verified'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
-      'Keep durable versioned JSON-RPC and REST request/response contracts with correlated errors/results.',
+      'Keep one living JSON-RPC and REST surface with correlated errors/results and no selectable product API versions.',
       'Run an authenticated or safely local WebSocket server alongside IPC for commands and typed subscriptions.',
       'Cover status, USB, RF, door, BT, keys, outputs, programming, reset, automation, and shutdown.',
       'Allow open, close, reconnect, reset, quit, programming, and every ordinary controller command.',
-    ], 'One authenticated listener serves correlated NDJSON JSON-RPC 2.0, REST v1, standard WebSocket commands/subscriptions, lifecycle methods, and typed event streams. A package-independent raw RFC 6455 client now verifies the HTTP upgrade, Bearer denial/success, masking, correlated RPC/errors, demand-counted subscriptions, unsolicited board events, open/close/reopen/reset/quit routing, and shared-listener NDJSON/REST coexistence. Cross-machine discovery/firewall commissioning is tracked separately.'),
+    ], 'Removal of /api/v1, product api_version fields, and versioned WebSocket product labels is in progress. JSON-RPC 2.0 remains as a standards-required wire marker. The same pass repairs dispatcher concurrency and extends typed display/buzzer events across every transport.'),
   requirement('network-bridge-discovery', 8, 'Bridge controller hosts over the network with mDNS/SSDP discovery', 'open',
     ['🖥️ host', '🔌 protocol-api', '🌐 networking', '🔒 security'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'Bridge one host through another for programming, monitoring, configuration, commands, queries, and events.',
@@ -556,7 +556,7 @@ const R = [
       'Use CMake presets for the virtual board rather than duplicated platform pipelines.',
       'Use the project controller tool for development/deployment discovery and programming.',
       'Compile and run Go test executables from stable project-owned paths; ordinary tests must not bind wildcard interfaces or create changing temporary ipcjson executables that repeatedly trigger Windows Firewall prompts.',
-    ], 'Root CMD/Bash entry points are source-tested PowerShell-free, stable-path Go test execution prevents randomized firewall identities, and firmware wrappers share Node. The remaining host/root command-plan, FQBN, help/failure, and canonical-artifact routes are not yet fully unified.'),
+    ], 'The canonical toolchain profile now owns FQBN plus board identity and memory geometry; generated Go constants and the shared Node command-policy module consume it. Build planning, real execution, and the firmware studio use the same Controller argv/artifact builder for compile, Urclock, and explicit USBasp routes. Both CMD/Bash launcher pairs emit equivalent JSON plans with canonical target and artifact paths, VirtualBoard CI uses CMake presets, and stable-path Go test execution avoids randomized firewall identities. The remaining acceptance boundary is a final packaged/hardware lifecycle pass and deciding whether non-command host packaging stages should become a separately replayable serialized plan.'),
   requirement('canonical-host-artifact-packaging', 11, 'Produce one current source-identified controller artifact with verified packaging', 'open',
     ['🏗️ tooling-build', '🖥️ host', '🐛 regression', '⚡ priority: high'], 'Tooling entry-point consolidation audit', [
       'Choose one generated controller executable location and make every launcher resolve exactly it.',

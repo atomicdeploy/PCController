@@ -4,7 +4,7 @@ export type StartupStreamState = 'connecting' | 'open' | 'waiting' | 'closed'
 
 export interface StartupConsoleFacts {
   productTitle: string
-  config: Pick<UIConfig, 'api_version' | 'host_version'> | null
+	config: Pick<UIConfig, 'host_version'> | null
   boardConnected: boolean
   port?: string
   streamState: StartupStreamState
@@ -66,11 +66,10 @@ export function emitStartupConsoleIntroduction(
   const version = facts.demonstration
     ? 'demonstration'
     : boundedConsoleValue(facts.config?.host_version, 'not reported')
-  const api = Number.isFinite(facts.config?.api_version) ? String(facts.config?.api_version) : 'not reported'
   const port = facts.boardConnected ? boundedConsoleValue(facts.port, 'authenticated port') : ''
 
   target.groupCollapsed('%c%s%c · browser control center', titleStyle, title, resetStyle)
-  target.info('%cHost%c version %s · API %s', labelStyle, resetStyle, version, api)
+	target.info('%cHost%c version %s · living API', labelStyle, resetStyle, version)
   if (facts.boardConnected) {
     target.info('%cController%c connected · %s', connectedStyle, resetStyle, port)
   } else {

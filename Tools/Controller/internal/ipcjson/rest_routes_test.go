@@ -68,6 +68,9 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 	config.Integrations.InboundWebhooksEnabled = true
 	service := &Service{
 		Client: client,
+		WebhookAdmin: func() WebhookAdminService {
+			return &fakeWebhookAdmin{}
+		},
 		HostConfig: func() appconfig.Config {
 			return config
 		},
@@ -95,46 +98,53 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 	routes := []struct {
 		name, method, path, body string
 	}{
-		{name: "browser bootstrap", method: http.MethodGet, path: "/api/v1/ui-config"},
-		{name: "JSON-RPC", method: http.MethodPost, path: "/api/v1/rpc", body: `{"jsonrpc":"2.0","id":1,"method":"controller.ping"}`},
-		{name: "snapshot", method: http.MethodGet, path: "/api/v1/snapshot"},
-		{name: "peripheral catalog", method: http.MethodGet, path: "/api/v1/peripherals"},
-		{name: "peripheral names", method: http.MethodPut, path: "/api/v1/peripherals", body: `{"peripheral_names":{"relay.5":"Inventory relay"}}`},
-		{name: "PWM values", method: http.MethodGet, path: "/api/v1/pwm"},
-		{name: "PWM mutation", method: http.MethodPut, path: "/api/v1/pwm", body: `{"channel":0,"value":0}`},
-		{name: "command catalog", method: http.MethodGet, path: "/api/v1/commands"},
-		{name: "program state", method: http.MethodGet, path: "/api/v1/program-state"},
-		{name: "menu catalog", method: http.MethodGet, path: "/api/v1/menu/catalog"},
-		{name: "menu layout", method: http.MethodGet, path: "/api/v1/menu/layout"},
-		{name: "host menus", method: http.MethodGet, path: "/api/v1/host-menus"},
-		{name: "OS status", method: http.MethodGet, path: "/api/v1/os/status"},
-		{name: "OS facts", method: http.MethodGet, path: "/api/v1/os/facts?profile=list"},
-		{name: "virtual key", method: http.MethodPost, path: "/api/v1/os/key", body: `{}`},
-		{name: "power action", method: http.MethodPost, path: "/api/v1/os/power", body: `{}`},
-		{name: "command", method: http.MethodPost, path: "/api/v1/command", body: `{"command":"status"}`},
-		{name: "message", method: http.MethodPost, path: "/api/v1/messages", body: `{"source":"client","target":"host","type":"operator.notice","text":"inventory"}`},
-		{name: "bridge list", method: http.MethodGet, path: "/api/v1/bridges"},
-		{name: "bridge call", method: http.MethodPost, path: "/api/v1/bridges/call", body: `{}`},
-		{name: "webhook", method: http.MethodPost, path: "/api/v1/webhooks/inbound", body: `{"source":"client","target":"host","type":"operator.notice","text":"inventory"}`},
-		{name: "integration proxy", method: http.MethodGet, path: "/api/v1/integrations/datahub/v1/status"},
-		{name: "artifact manifest", method: http.MethodGet, path: "/api/v1/artifacts/manifest"},
-		{name: "artifact list", method: http.MethodGet, path: "/api/v1/artifacts"},
-		{name: "artifact upload", method: http.MethodPost, path: "/api/v1/artifacts/upload", body: ""},
-		{name: "artifact fetch", method: http.MethodPost, path: "/api/v1/artifacts/fetch", body: `{}`},
-		{name: "artifact capture", method: http.MethodPost, path: "/api/v1/artifacts/capture", body: `{}`},
+		{name: "browser bootstrap", method: http.MethodGet, path: "/api/ui-config"},
+		{name: "JSON-RPC", method: http.MethodPost, path: "/api/rpc", body: `{"jsonrpc":"2.0","id":1,"method":"controller.ping"}`},
+		{name: "snapshot", method: http.MethodGet, path: "/api/snapshot"},
+		{name: "peripheral catalog", method: http.MethodGet, path: "/api/peripherals"},
+		{name: "peripheral names", method: http.MethodPut, path: "/api/peripherals", body: `{"peripheral_names":{"relay.5":"Inventory relay"}}`},
+		{name: "PWM values", method: http.MethodGet, path: "/api/pwm"},
+		{name: "PWM mutation", method: http.MethodPut, path: "/api/pwm", body: `{"channel":0,"value":0}`},
+		{name: "command catalog", method: http.MethodGet, path: "/api/commands"},
+		{name: "program state", method: http.MethodGet, path: "/api/program-state"},
+		{name: "menu catalog", method: http.MethodGet, path: "/api/menu/catalog"},
+		{name: "menu layout", method: http.MethodGet, path: "/api/menu/layout"},
+		{name: "host menus", method: http.MethodGet, path: "/api/host-menus"},
+		{name: "OS status", method: http.MethodGet, path: "/api/os/status"},
+		{name: "OS facts", method: http.MethodGet, path: "/api/os/facts?profile=list"},
+		{name: "virtual key", method: http.MethodPost, path: "/api/os/key", body: `{}`},
+		{name: "power action", method: http.MethodPost, path: "/api/os/power", body: `{}`},
+		{name: "command", method: http.MethodPost, path: "/api/command", body: `{"command":"status"}`},
+		{name: "message", method: http.MethodPost, path: "/api/messages", body: `{"source":"client","target":"host","type":"operator.notice","text":"inventory"}`},
+		{name: "display", method: http.MethodPost, path: "/api/display", body: `{"target":"segments","text":"TEST","repeat":"once"}`},
+		{name: "app action", method: http.MethodPost, path: "/api/app/action", body: `{"kind":"app.progress","value":"normal 42","target":"tui"}`},
+		{name: "bridge list", method: http.MethodGet, path: "/api/bridges"},
+		{name: "bridge call", method: http.MethodPost, path: "/api/bridges/call", body: `{}`},
+		{name: "outbound webhook status", method: http.MethodGet, path: "/api/webhooks/outbound/status"},
+		{name: "outbound webhook pending", method: http.MethodGet, path: "/api/webhooks/outbound/pending"},
+		{name: "outbound webhook dead", method: http.MethodGet, path: "/api/webhooks/outbound/dead"},
+		{name: "outbound webhook replay", method: http.MethodPost, path: "/api/webhooks/outbound/replay", body: `{"delivery_id":"inventory"}`},
+		{name: "outbound webhook clear", method: http.MethodPost, path: "/api/webhooks/outbound/clear", body: `{"delivery_id":"inventory"}`},
+		{name: "webhook", method: http.MethodPost, path: "/api/webhooks/inbound", body: `{"source":"client","target":"host","type":"operator.notice","text":"inventory"}`},
+		{name: "integration proxy", method: http.MethodGet, path: "/api/integrations/datahub/v1/status"},
+		{name: "artifact manifest", method: http.MethodGet, path: "/api/artifacts/manifest"},
+		{name: "artifact list", method: http.MethodGet, path: "/api/artifacts"},
+		{name: "artifact upload", method: http.MethodPost, path: "/api/artifacts/upload", body: ""},
+		{name: "artifact fetch", method: http.MethodPost, path: "/api/artifacts/fetch", body: `{}`},
+		{name: "artifact capture", method: http.MethodPost, path: "/api/artifacts/capture", body: `{}`},
 		{name: "artifact download", method: http.MethodGet, path: upload.Artifact.DownloadURL},
-		{name: "firmware update", method: http.MethodPost, path: "/api/v1/updates/firmware", body: `{}`},
-		{name: "EEPROM update", method: http.MethodPost, path: "/api/v1/updates/eeprom", body: `{}`},
-		{name: "host update", method: http.MethodPost, path: "/api/v1/updates/host", body: `{}`},
-		{name: "flash restore", method: http.MethodPost, path: "/api/v1/restores/flash", body: `{}`},
-		{name: "update status", method: http.MethodGet, path: "/api/v1/updates/status/" + upload.Operation.ID},
-		{name: "workflow discovery", method: http.MethodPost, path: "/api/v1/discovery/github/workflow", body: `{}`},
-		{name: "release discovery", method: http.MethodPost, path: "/api/v1/discovery/github/release", body: `{}`},
-		{name: "local manifest", method: http.MethodGet, path: "/api/v1/discovery/manifest"},
-		{name: "remote manifest", method: http.MethodPost, path: "/api/v1/discovery/manifest", body: `{}`},
-		{name: "update comparison", method: http.MethodPost, path: "/api/v1/discovery/check", body: `{}`},
-		{name: "artifact staging", method: http.MethodPost, path: "/api/v1/discovery/stage", body: `{}`},
-		{name: "discovery status", method: http.MethodGet, path: "/api/v1/discovery/status/" + stage.Operation.ID},
+		{name: "firmware update", method: http.MethodPost, path: "/api/updates/firmware", body: `{}`},
+		{name: "EEPROM update", method: http.MethodPost, path: "/api/updates/eeprom", body: `{}`},
+		{name: "host update", method: http.MethodPost, path: "/api/updates/host", body: `{}`},
+		{name: "flash restore", method: http.MethodPost, path: "/api/restores/flash", body: `{}`},
+		{name: "update status", method: http.MethodGet, path: "/api/updates/status/" + upload.Operation.ID},
+		{name: "workflow discovery", method: http.MethodPost, path: "/api/discovery/github/workflow", body: `{}`},
+		{name: "release discovery", method: http.MethodPost, path: "/api/discovery/github/release", body: `{}`},
+		{name: "local manifest", method: http.MethodGet, path: "/api/discovery/manifest"},
+		{name: "remote manifest", method: http.MethodPost, path: "/api/discovery/manifest", body: `{}`},
+		{name: "update comparison", method: http.MethodPost, path: "/api/discovery/check", body: `{}`},
+		{name: "artifact staging", method: http.MethodPost, path: "/api/discovery/stage", body: `{}`},
+		{name: "discovery status", method: http.MethodGet, path: "/api/discovery/status/" + stage.Operation.ID},
 	}
 
 	for _, route := range routes {
@@ -150,31 +160,31 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 	}
 
 	for _, route := range routes {
-		if !strings.HasPrefix(route.path, "/api/v1/") {
+		if !strings.HasPrefix(route.path, "/api/") {
 			continue
 		}
-		t.Run("reject versionless "+route.name, func(t *testing.T) {
-			alias := "/api/" + strings.TrimPrefix(route.path, "/api/v1/")
+		t.Run("reject versioned "+route.name, func(t *testing.T) {
+			alias := "/api/v1/" + strings.TrimPrefix(route.path, "/api/")
 			request := httptest.NewRequest(route.method, alias, strings.NewReader(route.body))
 			request.RemoteAddr = "127.0.0.1:43210"
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			if (response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed) ||
 				response.Header().Get("Location") != "" {
-				t.Fatalf("versionless alias %s %s status=%d location=%q body=%s", route.method, alias, response.Code, response.Header().Get("Location"), response.Body.String())
+				t.Fatalf("versioned alias %s %s status=%d location=%q body=%s", route.method, alias, response.Code, response.Header().Get("Location"), response.Body.String())
 			}
 		})
 	}
 }
 
-func TestVersionlessRESTPreflightIsRejected(t *testing.T) {
+func TestVersionedRESTPreflightIsRejected(t *testing.T) {
 	runtime := control.New(control.Options{})
 	handler := websocketMux(context.Background(), &Service{
 		Client:         controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
 		AllowedOrigins: []string{"console.example:*"},
 		WebUI:          webui.Handler("/ipc"),
 	})
-	request := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:8787/api/rpc", nil)
+	request := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:8787/api/v1/rpc", nil)
 	request.RemoteAddr = "127.0.0.1:43210"
 	request.Header.Set("Origin", "https://console.example:9443")
 	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
@@ -182,6 +192,6 @@ func TestVersionlessRESTPreflightIsRejected(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if (response.Code != http.StatusNotFound && response.Code != http.StatusMethodNotAllowed) ||
 		response.Header().Get("Access-Control-Allow-Origin") != "" {
-		t.Fatalf("versionless preflight status=%d origin=%q body=%s", response.Code, response.Header().Get("Access-Control-Allow-Origin"), response.Body.String())
+		t.Fatalf("versioned preflight status=%d origin=%q body=%s", response.Code, response.Header().Get("Access-Control-Allow-Origin"), response.Body.String())
 	}
 }

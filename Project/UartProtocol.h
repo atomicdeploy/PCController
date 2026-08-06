@@ -27,6 +27,9 @@ enum Opcode : uint8_t {
   StatusRgb = 0x14,
   PwmGet = 0x15,
   AddressableLed = 0x16,
+  StatusEffect = 0x17,
+  StatusProfileGet = 0x18,
+  StatusProfileSet = 0x19,
 
   RadioTransmit = 0x20,
   RadioLearnStart = 0x21,
@@ -69,6 +72,10 @@ enum Opcode : uint8_t {
   MenuListResponse = 0x97,
   MacroStatusResponse = 0x98,
   MenuLayoutResponse = 0x99,
+  SegmentChanged = 0x9C,
+  BuzzerChanged = 0x9D,
+  StatusLedChanged = 0x9E,
+  StatusProfileResponse = 0x9F,
   Event = 0xA0,
 };
 

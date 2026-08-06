@@ -1,4 +1,4 @@
-// Package localdevice implements the PCController Local Device v1 contract.
+// Package localdevice implements the PCController Local Device living contract.
 // It contains bounded local-network transport and typed protocol values only;
 // application configuration and UI wiring live outside this package.
 package localdevice
@@ -20,11 +20,11 @@ import (
 )
 
 const (
-	ContractVersion  = "pccontroller.local-device/v1"
-	CapabilitiesPath = "/pccontroller/device/v1/capabilities"
-	SnapshotPath     = "/pccontroller/device/v1/snapshot"
-	ActionsPath      = "/pccontroller/device/v1/actions"
-	EventsPath       = "/pccontroller/device/v1/events"
+	ContractID       = "pccontroller.local-device"
+	CapabilitiesPath = "/pccontroller/device/capabilities"
+	SnapshotPath     = "/pccontroller/device/snapshot"
+	ActionsPath      = "/pccontroller/device/actions"
+	EventsPath       = "/pccontroller/device/events"
 
 	defaultRequestTimeout = 5 * time.Second
 	defaultBodyLimit      = int64(1 << 20)
@@ -42,7 +42,7 @@ var (
 	ErrUnsupportedTransport = errors.New("local device client requires an HTTP transport")
 )
 
-// ActionType is one operation in the fixed Local Device v1 action vocabulary.
+// ActionType is one operation in the fixed Local Device living action vocabulary.
 type ActionType string
 
 const (
@@ -317,7 +317,7 @@ func (client *Client) BaseURL() string { return client.base.String() }
 // CloseIdleConnections releases pooled HTTP connections.
 func (client *Client) CloseIdleConnections() { client.http.CloseIdleConnections() }
 
-// EventsURL returns the corresponding ws or wss Local Device v1 event URL.
+// EventsURL returns the corresponding ws or wss Local Device living event URL.
 func (client *Client) EventsURL() string {
 	result := *client.base
 	if result.Scheme == "https" {
@@ -353,7 +353,7 @@ func (client *Client) Snapshot(ctx context.Context) (Snapshot, error) {
 	return result, nil
 }
 
-// Action validates and posts one typed Local Device v1 action.
+// Action validates and posts one typed Local Device living action.
 func (client *Client) Action(ctx context.Context, action Action) (ActionResult, error) {
 	if err := action.Validate(); err != nil {
 		return ActionResult{}, err
@@ -362,7 +362,7 @@ func (client *Client) Action(ctx context.Context, action Action) (ActionResult, 
 	if err := client.doJSON(ctx, http.MethodPost, ActionsPath, action, &result); err != nil {
 		return ActionResult{}, err
 	}
-	if result.Contract != ContractVersion || result.Action != action.Type {
+	if result.Contract != ContractID || result.Action != action.Type {
 		return ActionResult{}, fmt.Errorf("%w: action result identity", ErrInvalidResponse)
 	}
 	if !result.Accepted {
@@ -478,7 +478,7 @@ func decodeStrictJSON(encoded []byte, target any) error {
 }
 
 func validateCapabilities(value Capabilities) error {
-	if value.Contract != ContractVersion || !validIdentity(value.DeviceID, true) ||
+	if value.Contract != ContractID || !validIdentity(value.DeviceID, true) ||
 		!validIdentity(value.Name, false) || !validIdentity(value.Model, false) ||
 		!validIdentity(value.Firmware, false) {
 		return fmt.Errorf("%w: capability identity", ErrInvalidResponse)
@@ -507,7 +507,7 @@ func validateCapabilities(value Capabilities) error {
 }
 
 func validateSnapshot(value Snapshot) error {
-	if value.Contract != ContractVersion || !validIdentity(value.DeviceID, true) || value.UpdatedAt.IsZero() {
+	if value.Contract != ContractID || !validIdentity(value.DeviceID, true) || value.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: snapshot identity", ErrInvalidResponse)
 	}
 	if value.Power != PowerUnknown && value.Power != PowerOn && value.Power != PowerOff {

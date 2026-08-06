@@ -69,6 +69,12 @@ stable policy, then:
    resolved MiniCore package;
 8. records the managed firmware-CLI path in PC-side host configuration.
 
+The generated CLI configuration path is recorded independently from the
+executable path. This keeps an explicit global `--cli` usable even though its
+core/library installation lives under the machine-specific PCController data
+root. Omitting `--cli` installs the verified portable executable there too;
+`board initialize --portable-cli` deliberately forces that portable choice.
+
 To reproduce the checked-in lock without registry resolution, use:
 
 ```console
@@ -122,6 +128,14 @@ complete parent environment. They recognize upper- and lower-case
 `ARDUINO_NETWORK_PROXY` for the present firmware backend. Child processes
 receive the same environment. Proxy values are neither printed nor persisted.
 
+Controller never invents or hardcodes a proxy endpoint. The caller supplies
+it through standard proxy environment variables. Every Go host process also
+preserves the caller's `NO_PROXY` entries and appends loopback, `.local`, IPv4
+private/CGNAT/link-local networks, and IPv6 loopback/ULA/link-local networks;
+both upper- and lower-case forms are passed to children. Local IPC, API,
+WebSocket, discovery, and bridge traffic therefore bypasses an Internet proxy
+by default while external dependency downloads can still use it.
+
 When a backend needs its own proxy key, Controller derives it process-locally
 from `HTTPS_PROXY`, then `HTTP_PROXY`, `ALL_PROXY`, or `FTP_PROXY`. This avoids
 putting credentials in `firmware-cli.yaml`.
@@ -147,12 +161,15 @@ the diff, derive the exported-page-writer jump from the ELF, and enforce the
 custom size/address/metadata assertions. This separates reproduction-fixture
 hashes from the active latest-stable custom source.
 
-The last verified custom build used 510 of its 512 allocated bytes and imposed
-a 32,256-byte application ceiling. The current `800A5B70` linked sketch is
-32,232 bytes; its fixed 12-byte identity at `0x7DF4` leaves 12 immediately
-linkable bytes in the shared layout. That margin is not permanent: rebuild
-firmware and rerun the Urboot-Custom assertion immediately before an ISP
-installation.
+The last verified custom build used 510 of its 512 allocated bytes and imposes
+a 32,256-byte application ceiling. The current stock-core profile instead
+links a 32,344-byte sketch and derives its 12-byte identity footer from that
+profile's 32,384-byte application limit (`0x7E74..0x7E7F`). It therefore does
+not claim drop-in compatibility with the custom 512-byte bootloader. A future
+Urboot-Custom feature profile must select its own 32,256-byte ceiling and
+identity address, then remove or reconfigure enough application features to
+fit. Rebuild firmware and rerun the selected bootloader assertion immediately
+before any ISP installation.
 See `Tools/Bootloader/Urboot-Custom/README.md` for hashes, retained features,
 optional size tradeoffs, and the installation procedure.
 
@@ -267,14 +284,31 @@ cancels macros, releases all relays, fades PWM when possible (otherwise forces
 it off), shows the programming cues, and plays the power-down melody. It does
 not rewrite the incompatible EEPROM before that raw backup.
 
-After verified flashing and a new authenticated `HELLO`, the host accepts only
-the new firmware's current settings response. It never maps or restores the old
-semantic values or live outputs. It commits that current schema with Silent
-off, illumination mode Off, output persistence disabled, and relay restore mask
-zero; it commands macro/relay/PWM outputs off again, verifies exact settings
-readback, and only then clears the recovery marker. The original raw EEPROM is
-still recoverable from the pre-flash backup, but restoring it would deliberately
-reintroduce the incompatible development state.
+After verified flashing, and before clearing the lifecycle marker, the host
+programs the complete generated 1,024-byte factory EEPROM image and performs an
+independent programmer readback. That image contains the canonical Go-owned
+settings, empty RF store, and rich status-LED condition profiles. After the new
+authenticated `HELLO`, the host queries the current schema only to prove it is
+operational, commits/verifies its canonical settings with Silent off and all
+relay/PWM persistence disabled, and never maps or restores the old semantic
+values or live outputs. The original raw EEPROM remains recoverable from the
+pre-flash backup, but restoring it would deliberately reintroduce the
+incompatible development state.
+
+### Alpha version and feature-profile policy
+
+During alpha, a newer **version build** may replace the current wire, flash, or
+EEPROM layout directly. Do not add dual readers, migrations, compatibility
+aliases, or preservation logic merely to accept an earlier alpha version. Keep
+the mandatory raw backup, reject the obsolete semantic layout, and use the
+explicit reinitialization transaction when the old values are intentionally
+discarded.
+
+Compatibility and preservation are required only when distinct
+**profile/feature builds are intentionally supported at the same time**. Each
+such profile must declare its capabilities, application limit, identity
+address, and persistence layout; host routing and tests must select the profile
+rather than guessing from a version number.
 
 Because the durable programming latch suppresses the MCU's ordinary boot tune
 during intermediate resets, the host waits until settings/output verification
@@ -339,9 +373,54 @@ and safe-state recovery did not depend on that optional peripheral.
 
 ## Advanced USBasp recovery
 
+### Blank-board initialization
+
+Use one ownership-aware transaction for a new board:
+
+```console
+controller board initialize --uart auto
+controller board initialize --uart none --bootloader-only
+controller board initialize --portable-cli --uart COM4
+controller board initialize --name EDGE-01 --uart auto
+```
+
+The initializer compiles the application before any device write, validates
+the USBasp target signature, backs up flash, EEPROM, signature, fuses, and lock
+bits, then invokes the selected FQBN's stock core `burn-bootloader` recipe with
+verification. It does not install PCController's custom Urboot experiment.
+The first failed default-speed USBasp exchange is retried with a 32 microsecond
+bit-clock period and the slower speed remains active for that transaction;
+the core burn similarly falls back to its `usbasp_slow` programmer definition.
+
+When UART is connected, the host releases ISP, writes the compiled application
+through Urclock, reads it back, requires a native HELLO, confirms factory
+settings persistence, and probes I2C and 1-Wire peripherals. INA219, PCA9685,
+DS18B20, and LCD absence is non-fatal so a partially populated board can still
+be initialized and verified. If no UART is detected, the host clearly reports
+that the bootloader-only phase is complete and skips all serial assertions.
+
+`--name` accepts at most eight printable ASCII characters with no surrounding
+whitespace. After the first authenticated application boot, Controller writes
+the name through the native SETTINGS exchange, commits the combined
+settings/name EEPROM record with CRC-8, and verifies readback. Use `controller
+board name get`, `set NAME`, or `clear` afterward. A requested name requires
+UART; bootloader-only initialization cannot store it.
+
+The native application record is authoritative, not Urboot user metadata.
+MiniCore disables Urclock metadata for ordinary uploads, and Urclock's title is
+upload-time flash metadata that requires a bootloader reset and consumes scarce
+top-of-flash space. The native record is mutable while the application runs,
+survives normal firmware uploads because the selected core retains EEPROM, and
+works through the same local or remote Controller owner. A future profile may
+mirror the name into Urboot metadata for provisioning audit, but that mirror
+must never become the source of truth.
+
+The Programming page in the TUI runs the same transaction with `I`; the CLI
+remains useful for logs and automation.
+
 USBasp is an explicit troubleshooting fallback. Its ISP transport must never
 receive a COM or friendly-name selector. Supply the application connection
-separately so the same settings, display, and audio lifecycle runs around ISP:
+separately so the same settings, display, and buzzer lifecycle runs around ISP:
 
 ```console
 controller program flash firmware.with_bootloader.hex ^
@@ -367,11 +446,30 @@ updates can use UART/Urclock afterward. The first ISP write cannot render
 TM1637 progress because the MCU is held under ISP control and the display pins
 are also SCK/MOSI.
 
+On Windows, `controller driver usbasp status` identifies the exact USBasp
+instance. `driver usbasp install --package DIR` validates a pre-generated
+VID/PID-specific INF and invokes PnPUtil for a noninteractive elevated install.
+`driver usbasp ensure` does nothing for a healthy started driver and downloads
+and launches Zadig only when a connected USBasp lacks one. `driver usbasp zadig
+--latest [--download-only]` resolves the stable official libwdi GitHub release
+dynamically, stores it below the canonical per-user host data root, and requires
+Windows Authenticode trust before launch. Go's standard HTTP proxy environment
+is authoritative; no proxy endpoint is hardcoded. Zadig remains a visible
+fallback because it exposes no supported silent driver-install interface.
+
+Return an initialized test board to shelf state with `controller board blank
+--confirm BOARDNAME --uart auto`. The operation authenticates that exact name,
+takes a new complete backup, erases application and bootloader flash, explicitly
+clears EESAVE-preserved EEPROM, verifies every byte as `0xFF`, and proves the
+fuse bytes remained unchanged. When UART identity is genuinely unavailable,
+the deliberately conspicuous fallback is `--uart none --confirm ERASE-BOARD`.
+
 ## Persistence ownership and artifacts
 
 MCU EEPROM and PC host configuration remain separate:
 
-- the board owns its settings, learned RF records/mappings, and reset journal;
+- the board owns its settings, eight-byte operator name, learned RF
+  records/mappings, and reset journal;
   the current image has no generic EEPROM automation table;
 - the host owns port preferences, UI/network configuration, histories,
   scripts, and tool paths;
@@ -390,12 +488,13 @@ tools\toolchain\firmware-cli.yaml   managed dependency configuration
 tools\toolchain\data\                isolated cores and compiler/programmer tools
 tools\toolchain\downloads\           isolated download cache
 tools\toolchain\user\                isolated libraries/sketchbook
+tools\zadig\TAG\                     cached Authenticode-verified Zadig release
 ```
 
-No unpublished settings-version migration chain is retained in normal
-firmware. Offline settings tools operate on a complete, validated EEPROM backup
-and preserve RF, reset-journal, and unknown bytes outside the current settings
-record:
+No unpublished alpha-version migration chain is retained in normal firmware.
+Offline settings tools operate on a complete, validated EEPROM backup and
+preserve RF, reset-journal, and unknown bytes outside the current profile's
+settings/name record:
 
 ```console
 controller eeprom inspect --backup-manifest BACKUP\manifest.json

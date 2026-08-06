@@ -14,46 +14,46 @@ func (service *Service) Handler() http.Handler { return http.HandlerFunc(service
 func (service *Service) serveHTTP(writer http.ResponseWriter, request *http.Request) {
 	path := strings.TrimSuffix(request.URL.Path, "/")
 	switch {
-	case path == "/api/v1/discovery/github/workflow" && request.Method == http.MethodPost:
+	case path == "/api/discovery/github/workflow" && request.Method == http.MethodPost:
 		var value GitHubWorkflowRequest
 		if !decodeHTTP(writer, request, &value) {
 			return
 		}
 		result, err := service.client.DiscoverWorkflow(request.Context(), value)
 		writeResult(writer, http.StatusOK, result, err)
-	case path == "/api/v1/discovery/github/release" && request.Method == http.MethodPost:
+	case path == "/api/discovery/github/release" && request.Method == http.MethodPost:
 		var value GitHubReleaseRequest
 		if !decodeHTTP(writer, request, &value) {
 			return
 		}
 		result, err := service.client.DiscoverRelease(request.Context(), value)
 		writeResult(writer, http.StatusOK, result, err)
-	case path == "/api/v1/discovery/manifest" && request.Method == http.MethodPost:
+	case path == "/api/discovery/manifest" && request.Method == http.MethodPost:
 		var value ManifestRequest
 		if !decodeHTTP(writer, request, &value) {
 			return
 		}
 		result, err := service.client.DiscoverManifest(request.Context(), value)
 		writeResult(writer, http.StatusOK, result, err)
-	case path == "/api/v1/discovery/manifest" && request.Method == http.MethodGet:
+	case path == "/api/discovery/manifest" && request.Method == http.MethodGet:
 		result, err := service.LocalManifest()
 		writeResult(writer, http.StatusOK, result, err)
-	case path == "/api/v1/discovery/check" && request.Method == http.MethodPost:
+	case path == "/api/discovery/check" && request.Method == http.MethodPost:
 		var value CheckRequest
 		if !decodeHTTP(writer, request, &value) {
 			return
 		}
 		result, err := CheckForUpdate(value)
 		writeResult(writer, http.StatusOK, result, err)
-	case path == "/api/v1/discovery/stage" && request.Method == http.MethodPost:
+	case path == "/api/discovery/stage" && request.Method == http.MethodPost:
 		var value StageRequest
 		if !decodeHTTP(writer, request, &value) {
 			return
 		}
 		result, err := service.StartStage(value)
 		writeResult(writer, http.StatusAccepted, result, err)
-	case strings.HasPrefix(path, "/api/v1/discovery/status") && request.Method == http.MethodGet:
-		id := strings.TrimPrefix(strings.TrimPrefix(path, "/api/v1/discovery/status"), "/")
+	case strings.HasPrefix(path, "/api/discovery/status") && request.Method == http.MethodGet:
+		id := strings.TrimPrefix(strings.TrimPrefix(path, "/api/discovery/status"), "/")
 		result, err := service.Status(id)
 		status := http.StatusOK
 		if errors.Is(err, os.ErrNotExist) {
@@ -104,7 +104,7 @@ func writeHTTPJSON(writer http.ResponseWriter, status int, value any) {
 }
 
 func discoveryAllowedMethods(path string) string {
-	if strings.TrimSuffix(path, "/") == "/api/v1/discovery/manifest" {
+	if strings.TrimSuffix(path, "/") == "/api/discovery/manifest" {
 		return http.MethodGet + ", " + http.MethodPost
 	}
 	if strings.Contains(path, "/status") {

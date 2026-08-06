@@ -186,7 +186,7 @@ func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 			Name: "test", Kind: "breathe",
 			Red: 10, Green: 20, Blue: 30,
 			Brightness: 100, MinBrightness: 10,
-			PeriodMS: 400, DurationMS: 220,
+			PeriodMS: 640, DurationMS: 220,
 		},
 	)
 	if err != nil {
@@ -230,7 +230,7 @@ func TestStatusEffectRestoresNewestPolicyBase(t *testing.T) {
 			Name: "overlay", Kind: "breathe",
 			Red: 90, Green: 20, Blue: 200,
 			Brightness: 180, MinBrightness: 10,
-			PeriodMS: 400, DurationMS: 220,
+			PeriodMS: 640, DurationMS: 220,
 		},
 	)
 	if err != nil {
@@ -298,7 +298,7 @@ func TestSteadyRGBOverrideCannotBeUndoneByCanceledEffectCleanup(t *testing.T) {
 			Name: "continuous", Kind: "breathe",
 			Red: 1, Green: 2, Blue: 3,
 			Brightness: 100, MinBrightness: 5,
-			PeriodMS: 400,
+			PeriodMS: 640,
 		},
 	)
 	if err != nil {

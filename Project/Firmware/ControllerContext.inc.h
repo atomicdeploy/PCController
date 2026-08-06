@@ -124,7 +124,7 @@ ModeManager<ProgramMode> modeManager(MODE_BOOT);
 ProgramMode modeBeforeLearning = MODE_RF;
 
 // Zero disables periodic telemetry; the live EEPROM default is 500 ms.
-uint16_t streamPeriodMs = 500;
+uint16_t streamPeriodMs = 0;
 
 // Cooperative task timestamps; each service owns one cadence/deadline.
 uint32_t lastShiftPollAt = 0;
@@ -141,14 +141,23 @@ uint32_t lastRemoteActionAt = 0;
 uint32_t lastRemoteActionCode = 0;
 uint8_t lastRelayMask = 0;
 bool firmwareReady = false;
+uint8_t lastPushedSegments[4] = {};
+uint8_t lastPushedSegmentBrightness = 0;
+uint8_t lastPushedBuzzerRevision = 0;
+uint8_t lastPushedStatusLed[6] = {};
 
 // Host-captured panel text, LCD fallback metadata, and cooperative I2C lease.
 bool hostSegmentTextActive = false;
-// DISPLAY_TEXT reuses one 40-byte buffer for static text or a Door-page scroll.
+// DISPLAY_TEXT reuses one 40-byte buffer for static text or a scheduled scroll.
 char hostSegmentText[41] = {};
 uint8_t hostSegmentTextLength = 0;
 uint8_t hostSegmentScrollIndex = 0;
-uint16_t hostSegmentStepMs = 260;
+uint16_t hostSegmentStepMs = 0;
+// Low two bits select once/loop/interval, bit 6 marks the interval wait, and
+// bit 7 forces a marquee even when the text fits the four-cell display.
+uint8_t hostSegmentOptions = 0;
+uint16_t hostSegmentHoldMs = 0;
+uint8_t hostSegmentIntervalSeconds = 0;
 char temperatureSegmentText[2][4] = {
     {'L', '-', '-', 'C'},
     {'b', '-', '-', 'C'},

@@ -21,6 +21,7 @@ import (
 
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/productidentity"
+	"pccontroller.local/controller/internal/secretstore"
 )
 
 const (
@@ -80,6 +81,7 @@ type DeviceIdentity struct {
 // UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
 	AppTitle             string            `json:"app_title"`
+	Tagline              string            `json:"tagline"`
 	Appearance           Appearance        `json:"appearance"`
 	SeparatePortButtons  bool              `json:"separate_port_buttons"`
 	TableLayout          string            `json:"table_layout"`
@@ -139,12 +141,14 @@ func NormalizeAppearance(value Appearance) Appearance {
 
 // IPC configures authenticated local and optional remote controller transports.
 type IPC struct {
-	Listen         string             `json:"listen"`
-	WebSocketPath  string             `json:"websocket_path"`
-	AllowRemote    bool               `json:"allow_remote"`
-	AuthToken      string             `json:"auth_token,omitempty"`
-	AllowedOrigins []string           `json:"allowed_origins,omitempty"`
-	RemotePolicy   RemoteAccessPolicy `json:"remote_policy"`
+	Listen          string             `json:"listen"`
+	WebSocketPath   string             `json:"websocket_path"`
+	AllowRemote     bool               `json:"allow_remote"`
+	AuthToken       string             `json:"auth_token,omitempty"`
+	AuthTokenRef    string             `json:"auth_token_ref,omitempty"`
+	RemotePrincipal string             `json:"remote_principal"`
+	AllowedOrigins  []string           `json:"allowed_origins,omitempty"`
+	RemotePolicy    RemoteAccessPolicy `json:"remote_policy"`
 	// Socket.IO is a distinct protocol and is never advertised by the plain
 	// WebSocket endpoint. This path is reserved for an explicit adapter.
 	SocketIOPath string `json:"socket_io_path"`
@@ -194,12 +198,13 @@ type Paths struct {
 
 // Programming selects the host toolchain and default programming transport.
 type Programming struct {
-	Method       string `json:"method,omitempty"`
-	FQBN         string `json:"fqbn,omitempty"`
-	Programmer   string `json:"programmer,omitempty"`
-	ToolchainCLI string `json:"toolchain_cli,omitempty"`
-	Avrdude      string `json:"avrdude,omitempty"`
-	AvrdudeConf  string `json:"avrdude_conf,omitempty"`
+	Method          string `json:"method,omitempty"`
+	FQBN            string `json:"fqbn,omitempty"`
+	Programmer      string `json:"programmer,omitempty"`
+	ToolchainCLI    string `json:"toolchain_cli,omitempty"`
+	ToolchainConfig string `json:"toolchain_config,omitempty"`
+	Avrdude         string `json:"avrdude,omitempty"`
+	AvrdudeConf     string `json:"avrdude_conf,omitempty"`
 }
 
 // Macro defines a named, host-persisted sequence streamed to the MCU executor.
@@ -302,6 +307,7 @@ func Defaults() Config {
 		},
 		UI: UI{
 			AppTitle: productidentity.DefaultTitle,
+			Tagline:  productidentity.FirstRunTagline,
 			Appearance: Appearance{
 				Theme: "system", Locale: "en", Direction: "auto", AudioVolume: 0.42,
 			},
@@ -332,20 +338,22 @@ func Defaults() Config {
 			SegmentScroll:        DefaultSegmentScroll(),
 		},
 		IPC: IPC{
-			Listen:         "127.0.0.1:8787",
-			WebSocketPath:  "/ipc",
-			AllowedOrigins: []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
-			SocketIOPath:   "/socket.io/",
-			RemotePolicy:   DefaultRemoteAccessPolicy(),
+			Listen:          "127.0.0.1:8787",
+			WebSocketPath:   "/ipc",
+			RemotePrincipal: "remote-operator",
+			AllowedOrigins:  []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
+			SocketIOPath:    "/socket.io/",
+			RemotePolicy:    DefaultRemoteAccessPolicy(),
 		},
 		Safety:    Safety{MotionDoorPolicy: "always"},
 		RF:        DefaultRFConfig(),
 		HostMenus: DefaultHostMenus(),
 		OSActions: hostos.DefaultPolicy(),
 		Integrations: Integrations{
-			Keyboard:  DefaultKeyboardControl(),
-			Lifecycle: DefaultLifecycleSafety(),
-			StatusLED: DefaultStatusLEDPolicy(),
+			Keyboard:     DefaultKeyboardControl(),
+			Lifecycle:    DefaultLifecycleSafety(),
+			StatusLED:    DefaultStatusLEDPolicy(),
+			BuzzerMirror: DefaultBuzzerMirror(),
 			Hotkeys: []Hotkey{
 				{Name: "open-dashboard", Enabled: true, Chord: "F13", Command: "app page dashboard"},
 				{Name: "open-controls", Enabled: true, Chord: "F14", Command: "app page controls"},
@@ -515,6 +523,10 @@ func (value Config) Validate() error {
 	if title := strings.TrimSpace(value.UI.AppTitle); title == "" ||
 		utf8.RuneCountInString(title) > 64 || !printableText(title) {
 		return fmt.Errorf("ui.app_title must be 1..64 printable characters")
+	}
+	if tagline := strings.TrimSpace(value.UI.Tagline); tagline == "" ||
+		utf8.RuneCountInString(tagline) > 96 || !printableText(tagline) {
+		return fmt.Errorf("ui.tagline must be 1..96 printable characters")
 	}
 	appearance := NormalizeAppearance(value.UI.Appearance)
 	switch appearance.Theme {
@@ -932,17 +944,25 @@ func printableText(value string) bool {
 
 // Store owns the current validated host configuration and its subscribers.
 type Store struct {
-	path           string
-	mu             sync.RWMutex
-	value          Config
-	digest         [sha256.Size]byte
-	subscribers    map[uint64]chan Config
-	nextSubscriber uint64
+	path               string
+	mu                 sync.RWMutex
+	value              Config
+	digest             [sha256.Size]byte
+	subscribers        map[uint64]chan Config
+	runtimeSubscribers map[uint64]chan Config
+	nextSubscriber     uint64
+	secrets            *secretstore.Resolver
+	appTitleOverride   string
+	taglineOverride    string
 }
 
 // Open resolves and loads a persistent configuration store, creating defaults
 // when required.
 func Open(path string) (*Store, error) {
+	return openWithSecrets(path, secretstore.New(productidentity.StableAppID))
+}
+
+func openWithSecrets(path string, secrets *secretstore.Resolver) (*Store, error) {
 	resolved, err := ResolvePath(path)
 	if err != nil {
 		return nil, err
@@ -951,10 +971,16 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{
+	store := &Store{
 		path: resolved, value: clone(value), digest: digest,
-		subscribers: make(map[uint64]chan Config),
-	}, nil
+		subscribers:        make(map[uint64]chan Config),
+		runtimeSubscribers: make(map[uint64]chan Config),
+		secrets:            secrets,
+	}
+	if _, err := store.Runtime(); err != nil {
+		return nil, fmt.Errorf("resolve configuration secrets: %w", err)
+	}
+	return store, nil
 }
 
 // Path returns the resolved backing-file path.
@@ -966,7 +992,44 @@ func (store *Store) Path() string {
 func (store *Store) Current() Config {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return clone(store.value)
+	return store.effectiveLocked()
+}
+
+// SetPresentationOverrides applies process-lifetime branding without writing
+// it to the watched configuration. Empty values leave the corresponding
+// configuration value authoritative. Callers resolve precedence before this
+// method, so command-line flags can override environment variables cleanly.
+func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
+	appTitle = strings.TrimSpace(appTitle)
+	tagline = strings.TrimSpace(tagline)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	candidate := clone(store.value)
+	if appTitle != "" {
+		candidate.UI.AppTitle = appTitle
+	}
+	if tagline != "" {
+		candidate.UI.Tagline = tagline
+	}
+	if err := candidate.Validate(); err != nil {
+		return fmt.Errorf("presentation override: %w", err)
+	}
+	store.appTitleOverride = appTitle
+	store.taglineOverride = tagline
+	store.notifyLocked(store.value)
+	store.notifyRuntimeLocked(store.value)
+	return nil
+}
+
+func (store *Store) effectiveLocked() Config {
+	value := clone(store.value)
+	if store.appTitleOverride != "" {
+		value.UI.AppTitle = store.appTitleOverride
+	}
+	if store.taglineOverride != "" {
+		value.UI.Tagline = store.taglineOverride
+	}
+	return value
 }
 
 // Update applies one atomic PC-side configuration mutation and persists it.
@@ -981,6 +1044,9 @@ func (store *Store) Update(change func(*Config) error) (Config, error) {
 	if err := change(&value); err != nil {
 		return clone(store.value), err
 	}
+	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
+		return clone(store.value), fmt.Errorf("resolve configuration secrets: %w", err)
+	}
 	if err := Write(store.path, value); err != nil {
 		return clone(store.value), err
 	}
@@ -991,7 +1057,8 @@ func (store *Store) Update(change func(*Config) error) (Config, error) {
 	store.value = clone(loaded)
 	store.digest = digest
 	store.notifyLocked(loaded)
-	return clone(store.value), nil
+	store.notifyRuntimeLocked(loaded)
+	return store.effectiveLocked(), nil
 }
 
 // Subscribe receives the current PC-side configuration immediately and every
@@ -1003,7 +1070,7 @@ func (store *Store) Subscribe(ctx context.Context) <-chan Config {
 	store.nextSubscriber++
 	id := store.nextSubscriber
 	store.subscribers[id] = channel
-	channel <- clone(store.value)
+	channel <- store.effectiveLocked()
 	store.mu.Unlock()
 	go func() {
 		<-ctx.Done()
@@ -1017,7 +1084,36 @@ func (store *Store) Subscribe(ctx context.Context) <-chan Config {
 	return channel
 }
 
+// SubscribeRuntime receives configurations with every secret reference
+// resolved in memory. Persistent snapshots and ordinary subscribers retain
+// references and never receive the resolved values.
+func (store *Store) SubscribeRuntime(ctx context.Context) <-chan Config {
+	channel := make(chan Config, 1)
+	store.mu.Lock()
+	store.nextSubscriber++
+	id := store.nextSubscriber
+	store.runtimeSubscribers[id] = channel
+	channel <- store.runtimeLocked()
+	store.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		store.mu.Lock()
+		if current, ok := store.runtimeSubscribers[id]; ok {
+			delete(store.runtimeSubscribers, id)
+			close(current)
+		}
+		store.mu.Unlock()
+	}()
+	return channel
+}
+
 func (store *Store) notifyLocked(value Config) {
+	if store.appTitleOverride != "" {
+		value.UI.AppTitle = store.appTitleOverride
+	}
+	if store.taglineOverride != "" {
+		value.UI.Tagline = store.taglineOverride
+	}
 	for _, subscriber := range store.subscribers {
 		copyValue := clone(value)
 		select {
@@ -1035,8 +1131,53 @@ func (store *Store) notifyLocked(value Config) {
 	}
 }
 
+func (store *Store) notifyRuntimeLocked(value Config) {
+	if store.appTitleOverride != "" {
+		value.UI.AppTitle = store.appTitleOverride
+	}
+	if store.taglineOverride != "" {
+		value.UI.Tagline = store.taglineOverride
+	}
+	runtime, err := resolveConfigSecrets(value, store.secrets)
+	if err != nil {
+		runtime = failClosedRuntime(value)
+	}
+	for _, subscriber := range store.runtimeSubscribers {
+		copyValue := clone(runtime)
+		select {
+		case subscriber <- copyValue:
+		default:
+			select {
+			case <-subscriber:
+			default:
+			}
+			select {
+			case subscriber <- copyValue:
+			default:
+			}
+		}
+	}
+}
+
+func (store *Store) runtimeLocked() Config {
+	effective := store.effectiveLocked()
+	runtime, err := resolveConfigSecrets(effective, store.secrets)
+	if err != nil {
+		return failClosedRuntime(effective)
+	}
+	return runtime
+}
+
 // UpdateUI atomically replaces and persists the host UI section.
 func (store *Store) UpdateUI(value UI) (Config, error) {
+	store.mu.RLock()
+	if store.appTitleOverride != "" {
+		value.AppTitle = store.value.UI.AppTitle
+	}
+	if store.taglineOverride != "" {
+		value.Tagline = store.value.UI.Tagline
+	}
+	store.mu.RUnlock()
 	return store.Update(func(config *Config) error {
 		config.UI = value
 		return nil
@@ -1072,6 +1213,9 @@ func (store *Store) RememberDevice(identity DeviceIdentity) (bool, error) {
 	}
 	value := clone(store.value)
 	value.Connection.LastDevice = &identity
+	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
+		return false, fmt.Errorf("resolve configuration secrets: %w", err)
+	}
 	if err := Write(store.path, value); err != nil {
 		return false, err
 	}
@@ -1082,6 +1226,7 @@ func (store *Store) RememberDevice(identity DeviceIdentity) (bool, error) {
 	store.value = clone(loaded)
 	store.digest = digest
 	store.notifyLocked(loaded)
+	store.notifyRuntimeLocked(loaded)
 	return true, nil
 }
 
@@ -1097,12 +1242,16 @@ func (store *Store) Reload() (Config, bool, error) {
 		return Config{}, false, err
 	}
 	if digest == store.digest {
-		return clone(store.value), false, nil
+		return store.effectiveLocked(), false, nil
+	}
+	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
+		return Config{}, false, fmt.Errorf("resolve configuration secrets: %w", err)
 	}
 	store.value = clone(value)
 	store.digest = digest
 	store.notifyLocked(value)
-	return clone(value), true, nil
+	store.notifyRuntimeLocked(value)
+	return store.effectiveLocked(), true, nil
 }
 
 // Watch applies validated filesystem changes, using polling only when native

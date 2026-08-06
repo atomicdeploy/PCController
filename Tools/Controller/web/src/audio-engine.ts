@@ -42,6 +42,7 @@ export interface AudioEngine {
   toggleMuted(): boolean
   setVolume(value: number): void
   cue(name: AudioCue, direction?: NavigationDirection): boolean
+	playTone(frequencyHz: number, durationMS: number): boolean
   suspend(): Promise<void>
   resume(): Promise<boolean>
   dispose(): Promise<void>
@@ -176,6 +177,15 @@ class ProceduralAudioEngine implements AudioEngine {
     }
     return true
   }
+
+	playTone(frequencyHz: number, durationMS: number): boolean {
+		const context = this.context
+		if (!context || !this.master || this.state !== 'running' || this.isMuted || this.masterVolume <= 0 ||
+			!Number.isFinite(frequencyHz) || frequencyHz < 20 || frequencyHz > 20_000 ||
+			!Number.isFinite(durationMS) || durationMS < 1 || durationMS > 60_000) return false
+		this.tone(context, context.currentTime + 0.003, durationMS / 1000, frequencyHz, frequencyHz, 0.024, 0, 'square')
+		return true
+	}
 
   async suspend(): Promise<void> {
     const context = this.context

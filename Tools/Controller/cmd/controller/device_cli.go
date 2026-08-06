@@ -16,7 +16,9 @@ import (
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/hostbridge"
 	"pccontroller.local/controller/internal/hostmenu"
+	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
@@ -191,9 +193,11 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 	claim = nil
 	defer primary.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	if err := runtime.EnsureConnected(ctx); err != nil {
-		cancel()
-		return err
+	if !commandAllowsDisconnected(commandText) {
+		if err := runtime.EnsureConnected(ctx); err != nil {
+			cancel()
+			return err
+		}
 	}
 	cancel()
 	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Minute)
@@ -203,6 +207,11 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 		fmt.Fprintln(stdout, output)
 	}
 	return err
+}
+
+func commandAllowsDisconnected(command string) bool {
+	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+	return len(words) >= 2 && words[0] == "board" && words[1] == "initialize"
 }
 
 func runBatch(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
@@ -534,7 +543,10 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		serverConfig := store.Current()
+		serverConfig, runtimeConfigErr := store.Runtime()
+		if runtimeConfigErr != nil {
+			return runtimeConfigErr
+		}
 		serverConfig.IPC.Listen = *listen
 		serverConfig.IPC.WebSocketPath = *websocketPath
 		if err := serverConfig.Validate(); err != nil {
@@ -613,6 +625,12 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		}
 		localDevice := startLocalDeviceHost(ctx, client, store)
 		defer localDevice.Close()
+		actions := hostui.NewActionBroker()
+		integrations, err := hostbridge.Start(ctx, client, store, actions)
+		if err != nil {
+			return fmt.Errorf("start headless host integrations: %w", err)
+		}
+		defer integrations.Close()
 		service := &ipcjson.Service{
 			Client: client, WebSocketPath: *websocketPath,
 			SocketIOPath:        serverConfig.IPC.SocketIOPath,
@@ -625,13 +643,20 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			HostVersion:         version,
 			HostSourceHash:      sourceHash,
 			HostBuildTime:       buildTime,
+			AppAction:           actions.Publish,
 			Shutdown:            cancel,
 			LastSessionSnapshot: sessionSnapshot.read,
-			HostConfig:          store.Current,
+			HostConfig:          store.CurrentRuntime,
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err
 			},
+			BridgeList: func() any { return integrations.BridgePeers() },
+			BridgeCall: integrations.CallBridge,
+			WebhookAdmin: func() ipcjson.WebhookAdminService {
+				return integrations
+			},
+			HotkeyStatus: func() any { return integrations.HotkeyStatus() },
 		}
 		artifactService, err := newArtifactHostService(client, store, service.Shutdown)
 		if err != nil {
@@ -662,7 +687,8 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		flags := flag.NewFlagSet("ipc call", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		address := flags.String("addr", store.Current().IPC.Listen, "IPC server address")
-		token := flags.String("token", store.Current().IPC.AuthToken, "IPC bearer token")
+		token := flags.String("token", store.CurrentRuntime().IPC.AuthToken, "IPC bearer token")
+		tokenReference := flags.String("token-ref", "", "resolve the IPC bearer token from an OS-vault or environment reference")
 		method := flags.String("method", "", "JSON-RPC method")
 		params := flags.String("params", "{}", "JSON object with method parameters")
 		timeout := flags.Duration("timeout", 15*time.Second, "call timeout")
@@ -674,6 +700,20 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		}
 		if *method == "" {
 			return errors.New("ipc call requires --method")
+		}
+		if strings.TrimSpace(*tokenReference) != "" {
+			tokenWasSet := false
+			flags.Visit(func(value *flag.Flag) {
+				tokenWasSet = tokenWasSet || value.Name == "token"
+			})
+			if tokenWasSet {
+				return errors.New("--token and --token-ref are mutually exclusive")
+			}
+			resolved, err := store.ResolveSecret(*tokenReference)
+			if err != nil {
+				return fmt.Errorf("resolve IPC bearer token: %w", err)
+			}
+			*token = resolved
 		}
 		rawParams := json.RawMessage(*params)
 		if !json.Valid(rawParams) {

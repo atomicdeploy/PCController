@@ -4,21 +4,27 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 const (
-	PCControllerEEPROMBytes      uint32 = generatedBoardEEPROMBytes
-	EEPROMSettingsAddress        uint32 = 32
-	EEPROMSettingsValueBytes     uint32 = 31
-	EEPROMSettingsRecordBytes    uint32 = EEPROMSettingsValueBytes + 1
-	EEPROMRemoteHeaderAddress    uint32 = 64
-	EEPROMRemoteEntriesAddress   uint32 = 68
-	EEPROMRemoteRecordSize       byte   = 12
-	EEPROMRemoteCapacity         byte   = 20
-	EEPROMRemoteRecordBytes      uint32 = 12
-	EEPROMResetJournalAddress    uint32 = 320
-	EEPROMResetJournalSlots      byte   = 64
-	EEPROMResetJournalRecordSize uint32 = 6
+	PCControllerEEPROMBytes        uint32 = generatedBoardEEPROMBytes
+	EEPROMSettingsAddress          uint32 = 32
+	EEPROMSettingsValueBytes       uint32 = 40
+	EEPROMSettingsRecordBytes      uint32 = EEPROMSettingsValueBytes + 1
+	EEPROMRemoteHeaderAddress      uint32 = 80
+	EEPROMRemoteEntriesAddress     uint32 = 84
+	EEPROMRemoteRecordSize         byte   = 12
+	EEPROMRemoteCapacity           byte   = 20
+	EEPROMRemoteRecordBytes        uint32 = 12
+	EEPROMResetJournalAddress      uint32 = 336
+	EEPROMResetJournalSlots        byte   = 64
+	EEPROMResetJournalRecordSize   uint32 = 6
+	EEPROMStatusProfileAddress     uint32 = EEPROMResetJournalAddress + uint32(EEPROMResetJournalSlots)*EEPROMResetJournalRecordSize
+	EEPROMStatusProfileCount       byte   = 19
+	EEPROMStatusProfileBytes       uint32 = 12
+	EEPROMStatusProfileRecordBytes uint32 = EEPROMStatusProfileBytes + 1
 )
 
 type OfflineEEPROMDecode struct {
@@ -31,8 +37,8 @@ type OfflineEEPROMDecode struct {
 	ResetJournal OfflineResetJournalDecode `json:"reset_journal"`
 }
 
-// ControllerSettings is the current semantic 31-byte MCU settings layout. It
-// has no build-version prefix; the thirty-second record byte is its CRC-8.
+// ControllerSettings is the current semantic MCU settings/name layout. Alpha
+// versions replace this profile directly instead of carrying migrations.
 type ControllerSettings struct {
 	Flags                     byte    `json:"flags"`
 	Silent                    bool    `json:"silent"`
@@ -61,6 +67,7 @@ type ControllerSettings struct {
 	DisplayClosedBrightness   byte    `json:"display_closed_brightness"`
 	MotionExitHoldSeconds     byte    `json:"motion_exit_hold_seconds"`
 	RelayRestoreMask          byte    `json:"relay_restore_mask"`
+	BoardName                 string  `json:"board_name"`
 }
 
 type OfflineSettingsDecode struct {
@@ -144,7 +151,7 @@ func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
 	decoded := OfflineEEPROMDecode{
 		SourceKind: "offline-eeprom-hex",
 		SourcePath: path, SourceSHA256: document.SourceSHA256,
-		Layout: "settings-unversioned-31/rf-record12-cap20/reset-journal-320",
+		Layout: "settings-name-unversioned-40/rf-record12-cap20/reset-journal-336",
 	}
 	decoded.Settings = decodeOfflineSettings(document.Image)
 	decoded.Remotes = decodeOfflineRemotes(document.Image)
@@ -161,9 +168,9 @@ func decodeOfflineSettings(image *IntelHexImage) OfflineSettingsDecode {
 		_, present := image.data[EEPROMSettingsAddress]
 		return OfflineSettingsDecode{
 			Present: present,
-			Format:  "current/unversioned-31+crc8",
+			Format:  "current/unversioned-40+crc8",
 			Issue: fmt.Sprintf(
-				"unsupported settings layout: require 31 value bytes plus CRC-8 at EEPROM 0x%04X..0x%04X: %v",
+				"unsupported settings layout: require 40 value bytes plus CRC-8 at EEPROM 0x%04X..0x%04X: %v",
 				EEPROMSettingsAddress,
 				EEPROMSettingsAddress+EEPROMSettingsRecordBytes-1,
 				err,
@@ -177,7 +184,7 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 	result := OfflineSettingsDecode{
 		Present:          true,
 		Supported:        true,
-		Format:           "current/unversioned-31+crc8",
+		Format:           "current/unversioned-40+crc8",
 		ValueBytes:       EEPROMSettingsValueBytes,
 		StoredChecksum:   record[len(record)-1],
 		ComputedChecksum: avrCRC8(record[:len(record)-1]),
@@ -214,6 +221,10 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 		values.MotionExitHoldSeconds = 2
 	}
 	values.RelayRestoreMask = settings[29]
+	nameLength := settings[31]
+	if nameLength <= native.MaximumBoardNameLength {
+		values.BoardName = string(settings[32 : 32+nameLength])
+	}
 	result.Values = values
 
 	var issues []string
@@ -237,6 +248,11 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 	}
 	if values.MotionBreakMS == 0 {
 		issues = append(issues, "motion break is outside 1..255 ms")
+	}
+	if nameLength > native.MaximumBoardNameLength {
+		issues = append(issues, "board name exceeds 8 bytes")
+	} else if err := native.ValidateBoardName(values.BoardName); err != nil {
+		issues = append(issues, err.Error())
 	}
 	issues = append(issues, validateOfflineMenuLayout(values)...)
 	result.Valid = len(issues) == 0

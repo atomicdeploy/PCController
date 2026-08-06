@@ -11,7 +11,7 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
-func TestPrimaryPingBypassesSerializedDeviceOperation(t *testing.T) {
+func TestPrimaryPingBypassesSerializedShellCommand(t *testing.T) {
 	service := &Service{
 		Client: controllerapi.AttachSharedRuntime(
 			control.New(control.Options{}),
@@ -21,7 +21,7 @@ func TestPrimaryPingBypassesSerializedDeviceOperation(t *testing.T) {
 		HostProcessID:  36152,
 		HostSurface:    "web",
 	}
-	service.mu.Lock()
+	service.commandMu.Lock()
 	responses := make(chan Response, 1)
 	go func() {
 		responses <- service.Dispatch(context.Background(), Request{
@@ -33,7 +33,7 @@ func TestPrimaryPingBypassesSerializedDeviceOperation(t *testing.T) {
 
 	select {
 	case response := <-responses:
-		service.mu.Unlock()
+		service.commandMu.Unlock()
 		if response.Error != nil {
 			t.Fatalf("ping error=%v", response.Error)
 		}
@@ -53,8 +53,8 @@ func TestPrimaryPingBypassesSerializedDeviceOperation(t *testing.T) {
 			t.Fatalf("ping result=%+v", result)
 		}
 	case <-time.After(100 * time.Millisecond):
-		service.mu.Unlock()
+		service.commandMu.Unlock()
 		<-responses
-		t.Fatal("primary ping waited behind the serialized operation lock")
+		t.Fatal("primary ping waited behind the serialized shell-command lock")
 	}
 }

@@ -80,6 +80,23 @@ func TestDecodeRejectsCRCAndLength(t *testing.T) {
 	}
 }
 
+func TestDecodeAcceptsAdvisoryEnvelopeRevision(t *testing.T) {
+	encoded, err := Encode(Frame{Opcode: OpHello, Seq: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := COBSDecode(encoded[:len(encoded)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[1] = 0x7F
+	raw[len(raw)-1] = CRC8(raw[:len(raw)-1])
+	decoded, err := Decode(append(COBSEncode(raw), 0))
+	if err != nil || decoded.Opcode != OpHello || decoded.Seq != 9 {
+		t.Fatalf("advisory envelope revision was rejected: frame=%#v err=%v", decoded, err)
+	}
+}
+
 func TestStreamingDecoderRecoversAfterMalformedFrame(t *testing.T) {
 	first, _ := Encode(Frame{Opcode: OpHello, Seq: 1})
 	second, _ := Encode(Frame{Opcode: OpGetStatus, Seq: 2})
@@ -163,6 +180,22 @@ func TestPayloadBuildersValidateRanges(t *testing.T) {
 	if _, err := DisplayTextPayload(DisplayLCD, 1000, string(bytes.Repeat([]byte{'x'}, 41))); err == nil {
 		t.Fatal("expected oversized display text error")
 	}
+	scheduled, err := ScheduledSegmentPayload(ScheduledSegmentOptions{
+		SpeedMS: 220, HoldMS: 5000, IntervalSecond: 30,
+		Repeat: SegmentRepeatInterval, ForceScroll: true,
+	}, "door is open")
+	if err != nil || len(scheduled) != 20 || scheduled[0] != DisplayScheduledSegments ||
+		binary.LittleEndian.Uint16(scheduled[1:3]) != 220 || scheduled[3] != 12 ||
+		scheduled[4] != SegmentForceScroll|SegmentRepeatInterval ||
+		binary.LittleEndian.Uint16(scheduled[5:7]) != 5000 || scheduled[7] != 30 ||
+		string(scheduled[8:]) != "door is open" {
+		t.Fatalf("scheduled segment payload=% X err=%v", scheduled, err)
+	}
+	if _, err := ScheduledSegmentPayload(ScheduledSegmentOptions{
+		SpeedMS: 220, Repeat: SegmentRepeatInterval,
+	}, "message"); err == nil {
+		t.Fatal("expected zero interval to be rejected")
+	}
 	if _, err := MacroStepPayload(MacroPWM, 11, 1); err == nil {
 		t.Fatal("expected macro PWM channel error")
 	}
@@ -227,6 +260,7 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	settings.Persisted = true // legacy 15-byte response is conservatively persisted
 	if decodedSettings != settings {
 		t.Fatalf("settings got %#v want %#v", decodedSettings, settings)
 	}
@@ -392,6 +426,7 @@ func TestSettingsExtendedFlagAccessorsPreserveAdjacentFields(t *testing.T) {
 		)
 	}
 	settings.MotionExitHoldSeconds = SettingsDefaultMotionExitHoldSeconds
+	settings.Persisted = true
 	settings.MotionBreakMSValue = 1
 	payload, err := settings.Payload()
 	if err != nil {
@@ -541,6 +576,27 @@ func TestTemperatureAndDeviceEventSchemas(t *testing.T) {
 	}
 }
 
+func TestAppNavigationDeviceEventIsVersionlessAndTargeted(t *testing.T) {
+	event, err := ParseDeviceEvent(append(
+		[]byte{EventAppNavigation, AppNavigationWebUI}, []byte("settings")...,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != EventAppNavigation || event.AppTarget != "webui" || event.AppPage != "settings" {
+		t.Fatalf("event=%#v", event)
+	}
+	for _, payload := range [][]byte{
+		{EventAppNavigation, AppNavigationAll},
+		{EventAppNavigation, 9, 'e'},
+		{EventAppNavigation, AppNavigationTUI, 'b', 'a', 'd', ' '},
+	} {
+		if _, err := ParseDeviceEvent(payload); err == nil {
+			t.Fatalf("invalid navigation payload accepted: % X", payload)
+		}
+	}
+}
+
 func TestTemperatureCountRejectsProtocolOverflow(t *testing.T) {
 	payload := make([]byte, MaxPayload)
 	payload[0] = TemperatureSchema
@@ -626,5 +682,86 @@ func TestMenuLayoutSchemaRoundTripAndValidation(t *testing.T) {
 	obsolete := []byte{1, 15, 0xFF, 0x7F, 0, 3, 4, 1, 2, 5, 6, 7, 11, 12, 13, 8, 9, 10, 14}
 	if _, err := ParseMenuLayout(obsolete); err == nil {
 		t.Fatal("obsolete schema-1 MENU_LAYOUT was accepted")
+	}
+}
+
+func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
+	segments, err := ParseSegmentState([]byte{0x06, 0x5B, 0x4F, 0x66, 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if segments.RawSegments != [4]byte{0x06, 0x5B, 0x4F, 0x66} ||
+		segments.Brightness != 7 {
+		t.Fatalf("segments=%#v", segments)
+	}
+	if _, err := ParseSegmentState([]byte{1, 2, 3, 4}); err == nil {
+		t.Fatal("truncated SEGMENT_CHANGED payload was accepted")
+	}
+
+	buzzer, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if buzzer.FrequencyHz != 440 || buzzer.DurationMS != 220 || buzzer.Muted {
+		t.Fatalf("buzzer=%#v", buzzer)
+	}
+	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 2}); err == nil {
+		t.Fatal("invalid BUZZER_CHANGED muted flag was accepted")
+	}
+}
+
+func TestStatusProfilePayloadPreservesLivingPrefixAndPersistenceSuffix(t *testing.T) {
+	want := DefaultStatusProfiles(173)[StatusConditionBluetoothOff]
+	payload, err := StatusProfileSetPayload(StatusConditionBluetoothOff, want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := append(append([]byte(nil), payload...), 0)
+	parsed, err := ParseStatusProfile(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Condition != StatusConditionBluetoothOff || parsed.Persisted || parsed.Effect != want {
+		t.Fatalf("parsed status profile = %#v, want missing %#v", parsed, want)
+	}
+	legacy, err := ParseStatusProfile(payload)
+	if err != nil || !legacy.Persisted || legacy.Effect != want {
+		t.Fatalf("legacy status profile = %#v, err=%v", legacy, err)
+	}
+}
+
+func TestBoardNamePayloadRoundTrip(t *testing.T) {
+	for _, name := range []string{"", "EDGE-01", "A B"} {
+		setPayload, err := SettingsWithBoardNamePayload(DefaultSettings(), name)
+		if err != nil {
+			t.Fatalf("name %q: %v", name, err)
+		}
+		if len(setPayload) != 16+len(name) || setPayload[15] != byte(len(name)) {
+			t.Fatalf("name %q set payload = %v", name, setPayload)
+		}
+		response := append([]byte{}, setPayload[:15]...)
+		response = append(response, 1, 1, byte(len(name)))
+		response = append(response, name...)
+		if _, err := ParseSettings(response); err != nil {
+			t.Fatalf("name %q extended settings: %v", name, err)
+		}
+		decoded, err := ParseBoardNameFromSettings(response)
+		if err != nil || decoded.Name != name || !decoded.Persisted {
+			t.Fatalf("name %q decoded=%#v err=%v", name, decoded, err)
+		}
+	}
+	for _, invalid := range []string{"123456789", " leading", "trailing ", "café"} {
+		if _, err := SettingsWithBoardNamePayload(DefaultSettings(), invalid); err == nil {
+			t.Fatalf("invalid board name %q was accepted", invalid)
+		}
+	}
+	base, err := DefaultSettings().Payload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	truncated := append([]byte{}, base...)
+	truncated = append(truncated, 1, 1, 2, 'A')
+	if _, err := ParseBoardNameFromSettings(truncated); err == nil {
+		t.Fatal("truncated board-name response was accepted")
 	}
 }

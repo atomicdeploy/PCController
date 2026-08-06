@@ -23,6 +23,10 @@ public:
   void stop();
   void setMuted(bool muted);
   bool isBusy() const;
+  uint8_t revision() const { return revision_; }
+  uint16_t activeFrequencyHz() const { return activeFrequencyHz_; }
+  uint16_t activeDurationMs() const { return activeDurationMs_; }
+  bool muted() const { return muted_; }
 
 private:
   // ToneStep is one queued tone or silent pause and its duration.
@@ -50,6 +54,9 @@ private:
   uint32_t stepEndsAt_ = 0;
   bool stepActive_ = false;
   bool muted_ = false;
+  uint8_t revision_ = 0;
+  uint16_t activeFrequencyHz_ = 0;
+  uint16_t activeDurationMs_ = 0;
 };
 
 // buzzer is the single board-wide feedback player.

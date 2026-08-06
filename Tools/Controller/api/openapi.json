@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "PCController HTTP API",
-    "version": "1",
-    "summary": "Versioned REST and JSON-RPC surface of the primary controller host.",
+    "version": "unversioned",
+    "summary": "Unversioned living REST and JSON-RPC surface of the primary controller host.",
     "description": "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS."
   },
   "servers": [
@@ -58,12 +58,12 @@
         "security": []
       }
     },
-    "/api/v1/ui-config": {
+    "/api/ui-config": {
       "get": {
-        "operationId": "get_api_v1_ui_config",
+        "operationId": "get_api_ui_config",
         "summary": "Non-secret browser bootstrap",
         "tags": [
-          "ui-config"
+          "service"
         ],
         "x-required-capability": "public",
         "x-idempotency": "safe",
@@ -95,12 +95,57 @@
         "security": []
       }
     },
-    "/api/v1/rpc": {
+    "/api/session/ticket": {
       "post": {
-        "operationId": "post_api_v1_rpc",
+        "operationId": "post_api_session_ticket",
+        "summary": "Exchange a header credential for a short-lived one-use browser WebSocket ticket",
+        "tags": [
+          "ticket"
+        ],
+        "x-required-capability": "session",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "201": {
+            "description": "One-use Origin-bound browser session ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionTicketRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rpc": {
+      "post": {
+        "operationId": "post_api_rpc",
         "summary": "JSON-RPC 2.0 request",
         "tags": [
-          "rpc"
+          "service"
         ],
         "x-required-capability": "dynamic",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -141,12 +186,12 @@
         }
       }
     },
-    "/api/v1/snapshot": {
+    "/api/snapshot": {
       "get": {
-        "operationId": "get_api_v1_snapshot",
+        "operationId": "get_api_snapshot",
         "summary": "Authoritative cached controller snapshot",
         "tags": [
-          "snapshot"
+          "service"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -177,12 +222,12 @@
         }
       }
     },
-    "/api/v1/peripherals": {
+    "/api/peripherals": {
       "get": {
-        "operationId": "get_api_v1_peripherals",
+        "operationId": "get_api_peripherals",
         "summary": "Peripheral descriptors and host-owned names",
         "tags": [
-          "peripherals"
+          "service"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -213,10 +258,10 @@
         }
       },
       "put": {
-        "operationId": "put_api_v1_peripherals",
+        "operationId": "put_api_peripherals",
         "summary": "Replace host-owned peripheral names",
         "tags": [
-          "peripherals"
+          "service"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -258,12 +303,12 @@
         }
       }
     },
-    "/api/v1/pwm": {
+    "/api/pwm": {
       "get": {
-        "operationId": "get_api_v1_pwm",
+        "operationId": "get_api_pwm",
         "summary": "Authoritative PWM state",
         "tags": [
-          "pwm"
+          "service"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -294,10 +339,10 @@
         }
       },
       "put": {
-        "operationId": "put_api_v1_pwm",
+        "operationId": "put_api_pwm",
         "summary": "Mutate PWM state with board readback",
         "tags": [
-          "pwm"
+          "service"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -339,10 +384,10 @@
         }
       },
       "delete": {
-        "operationId": "delete_api_v1_pwm",
+        "operationId": "delete_api_pwm",
         "summary": "Mutate PWM state with board readback",
         "tags": [
-          "pwm"
+          "service"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -373,12 +418,12 @@
         }
       }
     },
-    "/api/v1/commands": {
+    "/api/commands": {
       "get": {
-        "operationId": "get_api_v1_commands",
+        "operationId": "get_api_commands",
         "summary": "Shared command catalog",
         "tags": [
-          "commands"
+          "service"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -409,12 +454,12 @@
         }
       }
     },
-    "/api/v1/program-state": {
+    "/api/program-state": {
       "get": {
-        "operationId": "get_api_v1_program_state",
+        "operationId": "get_api_program_state",
         "summary": "Host-owned program state",
         "tags": [
-          "program-state"
+          "service"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -445,10 +490,10 @@
         }
       },
       "put": {
-        "operationId": "put_api_v1_program_state",
+        "operationId": "put_api_program_state",
         "summary": "Update host-owned program state",
         "tags": [
-          "program-state"
+          "service"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -490,10 +535,10 @@
         }
       },
       "post": {
-        "operationId": "post_api_v1_program_state",
+        "operationId": "post_api_program_state",
         "summary": "Update host-owned program state",
         "tags": [
-          "program-state"
+          "service"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -535,12 +580,12 @@
         }
       }
     },
-    "/api/v1/menu/catalog": {
+    "/api/menu/catalog": {
       "get": {
-        "operationId": "get_api_v1_menu_catalog",
+        "operationId": "get_api_menu_catalog",
         "summary": "Live board menu catalog",
         "tags": [
-          "menu"
+          "catalog"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -571,12 +616,12 @@
         }
       }
     },
-    "/api/v1/menu/layout": {
+    "/api/menu/layout": {
       "get": {
-        "operationId": "get_api_v1_menu_layout",
+        "operationId": "get_api_menu_layout",
         "summary": "Live board menu layout",
         "tags": [
-          "menu"
+          "layout"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -607,10 +652,10 @@
         }
       },
       "put": {
-        "operationId": "put_api_v1_menu_layout",
+        "operationId": "put_api_menu_layout",
         "summary": "Persist a validated board menu layout",
         "tags": [
-          "menu"
+          "layout"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -652,10 +697,10 @@
         }
       },
       "post": {
-        "operationId": "post_api_v1_menu_layout",
+        "operationId": "post_api_menu_layout",
         "summary": "Persist a validated board menu layout",
         "tags": [
-          "menu"
+          "layout"
         ],
         "x-required-capability": "board_commands",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -697,12 +742,12 @@
         }
       }
     },
-    "/api/v1/host-menus": {
+    "/api/host-menus": {
       "get": {
-        "operationId": "get_api_v1_host_menus",
+        "operationId": "get_api_host_menus",
         "summary": "Host-presented menu directory",
         "tags": [
-          "host-menus"
+          "service"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -733,10 +778,10 @@
         }
       },
       "put": {
-        "operationId": "put_api_v1_host_menus",
+        "operationId": "put_api_host_menus",
         "summary": "Replace the host-presented menu directory",
         "tags": [
-          "host-menus"
+          "service"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -778,10 +823,10 @@
         }
       },
       "post": {
-        "operationId": "post_api_v1_host_menus",
+        "operationId": "post_api_host_menus",
         "summary": "Replace the host-presented menu directory",
         "tags": [
-          "host-menus"
+          "service"
         ],
         "x-required-capability": "host_configuration",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -823,12 +868,12 @@
         }
       }
     },
-    "/api/v1/os/status": {
+    "/api/os/status": {
       "get": {
-        "operationId": "get_api_v1_os_status",
+        "operationId": "get_api_os_status",
         "summary": "Host status and policy",
         "tags": [
-          "os"
+          "status"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -859,12 +904,12 @@
         }
       }
     },
-    "/api/v1/os/facts": {
+    "/api/os/facts": {
       "get": {
-        "operationId": "get_api_v1_os_facts",
+        "operationId": "get_api_os_facts",
         "summary": "Bounded read-only host facts",
         "tags": [
-          "os"
+          "facts"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -895,12 +940,12 @@
         }
       }
     },
-    "/api/v1/os/key": {
+    "/api/os/key": {
       "post": {
-        "operationId": "post_api_v1_os_key",
+        "operationId": "post_api_os_key",
         "summary": "Validated virtual-key action",
         "tags": [
-          "os"
+          "key"
         ],
         "x-required-capability": "virtual_keys",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -942,12 +987,12 @@
         }
       }
     },
-    "/api/v1/os/power": {
+    "/api/os/power": {
       "post": {
-        "operationId": "post_api_v1_os_power",
+        "operationId": "post_api_os_power",
         "summary": "Confirmed system or display action",
         "tags": [
-          "os"
+          "power"
         ],
         "x-required-capability": "power_actions",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -989,12 +1034,12 @@
         }
       }
     },
-    "/api/v1/command": {
+    "/api/command": {
       "post": {
-        "operationId": "post_api_v1_command",
+        "operationId": "post_api_command",
         "summary": "Shared command dispatcher",
         "tags": [
-          "command"
+          "service"
         ],
         "x-required-capability": "dynamic",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1036,12 +1081,12 @@
         }
       }
     },
-    "/api/v1/messages": {
+    "/api/messages": {
       "post": {
-        "operationId": "post_api_v1_messages",
+        "operationId": "post_api_messages",
         "summary": "Typed source-tagged message",
         "tags": [
-          "messages"
+          "service"
         ],
         "x-required-capability": "messages",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1083,12 +1128,376 @@
         }
       }
     },
-    "/api/v1/bridges": {
+    "/api/display": {
+      "post": {
+        "operationId": "post_api_display",
+        "summary": "Present arbitrary seven-segment or LCD text with scroll and repeat timing",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/opcode": {
+      "post": {
+        "operationId": "post_api_opcode",
+        "summary": "Exchange an opaque versionless UART opcode",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Opaque UART response frame",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpcodeFrame"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpcodeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/app/bridge": {
       "get": {
-        "operationId": "get_api_v1_bridges",
+        "operationId": "get_api_app_bridge",
+        "summary": "Original coordinator bridge instance and process identity",
+        "tags": [
+          "bridge"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Original coordinator bridge instance with bounded process self-information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInstance"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/app/instances": {
+      "get": {
+        "operationId": "get_api_app_instances",
+        "summary": "List or query live application instances",
+        "tags": [
+          "instances"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "One exact instance when id is supplied, otherwise all live instances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AppInstance"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AppInstance"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_app_instances",
+        "summary": "Report or remove one live application instance",
+        "tags": [
+          "instances"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Normalized live instance report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInstance"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppInstanceReport"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_app_instances",
+        "summary": "Report or remove one live application instance",
+        "tags": [
+          "instances"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/app/action": {
+      "post": {
+        "operationId": "post_api_app_action",
+        "summary": "Route a validated action to all, one surface, or one live application instance",
+        "tags": [
+          "action"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/app/navigate": {
+      "post": {
+        "operationId": "post_api_app_navigate",
+        "summary": "Navigate all, one surface, or one exact application instance",
+        "tags": [
+          "navigate"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppNavigation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bridges": {
+      "get": {
+        "operationId": "get_api_bridges",
         "summary": "Configured bridge state",
         "tags": [
-          "bridges"
+          "service"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1119,12 +1528,12 @@
         }
       }
     },
-    "/api/v1/bridges/call": {
+    "/api/bridges/call": {
       "post": {
-        "operationId": "post_api_v1_bridges_call",
+        "operationId": "post_api_bridges_call",
         "summary": "Correlated bridge call",
         "tags": [
-          "bridges"
+          "call"
         ],
         "x-required-capability": "bridge_calls",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1166,12 +1575,12 @@
         }
       }
     },
-    "/api/v1/artifacts/manifest": {
+    "/api/artifacts/manifest": {
       "get": {
-        "operationId": "get_api_v1_artifacts_manifest",
+        "operationId": "get_api_artifacts_manifest",
         "summary": "Artifact/default/current manifest",
         "tags": [
-          "artifacts"
+          "manifest"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1202,12 +1611,12 @@
         }
       }
     },
-    "/api/v1/artifacts": {
+    "/api/artifacts": {
       "get": {
-        "operationId": "get_api_v1_artifacts",
+        "operationId": "get_api_artifacts",
         "summary": "Content-addressed artifact catalog",
         "tags": [
-          "artifacts"
+          "service"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1238,12 +1647,12 @@
         }
       }
     },
-    "/api/v1/artifacts/upload": {
+    "/api/artifacts/upload": {
       "post": {
-        "operationId": "post_api_v1_artifacts_upload",
+        "operationId": "post_api_artifacts_upload",
         "summary": "Import a verified artifact",
         "tags": [
-          "artifacts"
+          "upload"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1285,12 +1694,12 @@
         }
       }
     },
-    "/api/v1/artifacts/fetch": {
+    "/api/artifacts/fetch": {
       "post": {
-        "operationId": "post_api_v1_artifacts_fetch",
+        "operationId": "post_api_artifacts_fetch",
         "summary": "Queue a bounded remote artifact fetch",
         "tags": [
-          "artifacts"
+          "fetch"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1332,12 +1741,12 @@
         }
       }
     },
-    "/api/v1/artifacts/capture": {
+    "/api/artifacts/capture": {
       "post": {
-        "operationId": "post_api_v1_artifacts_capture",
+        "operationId": "post_api_artifacts_capture",
         "summary": "Capture flash or EEPROM explicitly",
         "tags": [
-          "artifacts"
+          "capture"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1379,12 +1788,12 @@
         }
       }
     },
-    "/api/v1/artifacts/{kind}/{sha256}": {
+    "/api/artifacts/{kind}/{sha256}": {
       "get": {
-        "operationId": "get_api_v1_artifacts_kind_sha256",
+        "operationId": "get_api_artifacts_kind_sha256",
         "summary": "Immutable ranged artifact download",
         "tags": [
-          "artifacts"
+          "{kind}"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1435,10 +1844,10 @@
         ]
       },
       "head": {
-        "operationId": "head_api_v1_artifacts_kind_sha256",
+        "operationId": "head_api_artifacts_kind_sha256",
         "summary": "Immutable ranged artifact download",
         "tags": [
-          "artifacts"
+          "{kind}"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1489,12 +1898,12 @@
         ]
       }
     },
-    "/api/v1/artifacts/current/{kind}": {
+    "/api/artifacts/current/{kind}": {
       "get": {
-        "operationId": "get_api_v1_artifacts_current_kind",
+        "operationId": "get_api_artifacts_current_kind",
         "summary": "Latest explicitly captured artifact",
         "tags": [
-          "artifacts"
+          "current"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1536,10 +1945,10 @@
         ]
       },
       "head": {
-        "operationId": "head_api_v1_artifacts_current_kind",
+        "operationId": "head_api_artifacts_current_kind",
         "summary": "Latest explicitly captured artifact",
         "tags": [
-          "artifacts"
+          "current"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1581,12 +1990,12 @@
         ]
       }
     },
-    "/api/v1/updates/{kind}": {
+    "/api/updates/{kind}": {
       "post": {
-        "operationId": "post_api_v1_updates_kind",
+        "operationId": "post_api_updates_kind",
         "summary": "Queue an explicitly authorized update",
         "tags": [
-          "updates"
+          "{kind}"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1639,12 +2048,12 @@
         ]
       }
     },
-    "/api/v1/restores/flash": {
+    "/api/restores/flash": {
       "post": {
-        "operationId": "post_api_v1_restores_flash",
+        "operationId": "post_api_restores_flash",
         "summary": "Queue an explicitly authorized flash restore",
         "tags": [
-          "restores"
+          "flash"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1686,12 +2095,12 @@
         }
       }
     },
-    "/api/v1/updates/status/{id}": {
+    "/api/updates/status/{id}": {
       "get": {
-        "operationId": "get_api_v1_updates_status_id",
+        "operationId": "get_api_updates_status_id",
         "summary": "Update operation progress",
         "tags": [
-          "updates"
+          "status"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1733,12 +2142,12 @@
         ]
       }
     },
-    "/api/v1/discovery/github/workflow": {
+    "/api/discovery/github/workflow": {
       "post": {
-        "operationId": "post_api_v1_discovery_github_workflow",
+        "operationId": "post_api_discovery_github_workflow",
         "summary": "Discover workflow artifacts",
         "tags": [
-          "discovery"
+          "github"
         ],
         "x-required-capability": "read",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1780,12 +2189,12 @@
         }
       }
     },
-    "/api/v1/discovery/github/release": {
+    "/api/discovery/github/release": {
       "post": {
-        "operationId": "post_api_v1_discovery_github_release",
+        "operationId": "post_api_discovery_github_release",
         "summary": "Discover release assets",
         "tags": [
-          "discovery"
+          "github"
         ],
         "x-required-capability": "read",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1827,12 +2236,12 @@
         }
       }
     },
-    "/api/v1/discovery/manifest": {
+    "/api/discovery/manifest": {
       "get": {
-        "operationId": "get_api_v1_discovery_manifest",
+        "operationId": "get_api_discovery_manifest",
         "summary": "Serve or validate an update manifest",
         "tags": [
-          "discovery"
+          "manifest"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -1863,10 +2272,10 @@
         }
       },
       "post": {
-        "operationId": "post_api_v1_discovery_manifest",
+        "operationId": "post_api_discovery_manifest",
         "summary": "Serve or validate an update manifest",
         "tags": [
-          "discovery"
+          "manifest"
         ],
         "x-required-capability": "read",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1908,12 +2317,12 @@
         }
       }
     },
-    "/api/v1/discovery/check": {
+    "/api/discovery/check": {
       "post": {
-        "operationId": "post_api_v1_discovery_check",
+        "operationId": "post_api_discovery_check",
         "summary": "Compare candidate and installed identities",
         "tags": [
-          "discovery"
+          "check"
         ],
         "x-required-capability": "read",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -1955,12 +2364,12 @@
         }
       }
     },
-    "/api/v1/discovery/stage": {
+    "/api/discovery/stage": {
       "post": {
-        "operationId": "post_api_v1_discovery_stage",
+        "operationId": "post_api_discovery_stage",
         "summary": "Stage a verified candidate without programming",
         "tags": [
-          "discovery"
+          "stage"
         ],
         "x-required-capability": "programming",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2002,12 +2411,12 @@
         }
       }
     },
-    "/api/v1/discovery/status/{id}": {
+    "/api/discovery/status/{id}": {
       "get": {
-        "operationId": "get_api_v1_discovery_status_id",
+        "operationId": "get_api_discovery_status_id",
         "summary": "Discovery or staging progress",
         "tags": [
-          "discovery"
+          "status"
         ],
         "x-required-capability": "read",
         "x-idempotency": "safe",
@@ -2049,12 +2458,12 @@
         ]
       }
     },
-    "/api/v1/webhooks/inbound": {
+    "/api/webhooks/inbound": {
       "post": {
-        "operationId": "post_api_v1_webhooks_inbound",
+        "operationId": "post_api_webhooks_inbound",
         "summary": "Optional inbound typed webhook",
         "tags": [
-          "webhooks"
+          "inbound"
         ],
         "x-required-capability": "messages",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2096,12 +2505,214 @@
         }
       }
     },
-    "/api/v1/integrations/datahub/{path}": {
+    "/api/webhooks/outbound/status": {
       "get": {
-        "operationId": "get_api_v1_integrations_datahub_path",
+        "operationId": "get_api_webhooks_outbound_status",
+        "summary": "Outbound delivery queue and dead-letter status",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/pending": {
+      "get": {
+        "operationId": "get_api_webhooks_outbound_pending",
+        "summary": "Bounded non-secret pending delivery list",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/dead": {
+      "get": {
+        "operationId": "get_api_webhooks_outbound_dead",
+        "summary": "Bounded non-secret dead-letter list",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/replay": {
+      "post": {
+        "operationId": "post_api_webhooks_outbound_replay",
+        "summary": "Replay explicitly selected dead-letter deliveries",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/clear": {
+      "post": {
+        "operationId": "post_api_webhooks_outbound_clear",
+        "summary": "Clear explicitly selected dead-letter deliveries",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/datahub/{path}": {
+      "get": {
+        "operationId": "get_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
         "tags": [
-          "integrations"
+          "datahub"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "safe",
@@ -2143,10 +2754,10 @@
         ]
       },
       "head": {
-        "operationId": "head_api_v1_integrations_datahub_path",
+        "operationId": "head_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
         "tags": [
-          "integrations"
+          "datahub"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "safe",
@@ -2188,10 +2799,10 @@
         ]
       },
       "post": {
-        "operationId": "post_api_v1_integrations_datahub_path",
+        "operationId": "post_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
         "tags": [
-          "integrations"
+          "datahub"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2244,10 +2855,10 @@
         ]
       },
       "put": {
-        "operationId": "put_api_v1_integrations_datahub_path",
+        "operationId": "put_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
         "tags": [
-          "integrations"
+          "datahub"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2300,10 +2911,10 @@
         ]
       },
       "patch": {
-        "operationId": "patch_api_v1_integrations_datahub_path",
+        "operationId": "patch_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
         "tags": [
-          "integrations"
+          "datahub"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2356,10 +2967,10 @@
         ]
       },
       "delete": {
-        "operationId": "delete_api_v1_integrations_datahub_path",
+        "operationId": "delete_api_integrations_datahub_path",
         "summary": "Sanitized loopback data-service proxy",
         "tags": [
-          "integrations"
+          "datahub"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2401,12 +3012,12 @@
         ]
       }
     },
-    "/api/v1/integrations/device/{path}": {
+    "/api/integrations/device/{path}": {
       "get": {
-        "operationId": "get_api_v1_integrations_device_path",
+        "operationId": "get_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
         "tags": [
-          "integrations"
+          "device"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "safe",
@@ -2448,10 +3059,10 @@
         ]
       },
       "head": {
-        "operationId": "head_api_v1_integrations_device_path",
+        "operationId": "head_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
         "tags": [
-          "integrations"
+          "device"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "safe",
@@ -2493,10 +3104,10 @@
         ]
       },
       "post": {
-        "operationId": "post_api_v1_integrations_device_path",
+        "operationId": "post_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
         "tags": [
-          "integrations"
+          "device"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2549,10 +3160,10 @@
         ]
       },
       "put": {
-        "operationId": "put_api_v1_integrations_device_path",
+        "operationId": "put_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
         "tags": [
-          "integrations"
+          "device"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2605,10 +3216,10 @@
         ]
       },
       "patch": {
-        "operationId": "patch_api_v1_integrations_device_path",
+        "operationId": "patch_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
         "tags": [
-          "integrations"
+          "device"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2661,10 +3272,10 @@
         ]
       },
       "delete": {
-        "operationId": "delete_api_v1_integrations_device_path",
+        "operationId": "delete_api_integrations_device_path",
         "summary": "Fail-closed device route; use typed RPC",
         "tags": [
-          "integrations"
+          "device"
         ],
         "x-required-capability": "integrations",
         "x-idempotency": "see operation semantics and idempotency keys",
@@ -2712,7 +3323,7 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Host access credential. Never place durable credentials in URLs."
+        "description": "Durable host access credential for HTTP and non-browser WebSocket clients. Never place it in a URL."
       },
       "tokenHeader": {
         "type": "apiKey",
@@ -2753,6 +3364,12 @@
             "type": "string",
             "enum": [
               "controller.app.action",
+              "controller.app.bridge",
+              "controller.app.instance.get",
+              "controller.app.instance.remove",
+              "controller.app.instance.report",
+              "controller.app.instances",
+              "controller.app.navigate",
               "controller.app.page",
               "controller.artifact.capture",
               "controller.artifact.fetch",
@@ -2776,6 +3393,7 @@
               "controller.discovery.scan",
               "controller.discovery.stage",
               "controller.discovery.status",
+              "controller.display.send",
               "controller.event.latest",
               "controller.event.next",
               "controller.exit",
@@ -2807,6 +3425,9 @@
               "controller.menu.list",
               "controller.menu.page",
               "controller.message.send",
+              "controller.opcode.exchange",
+              "controller.opcode.request",
+              "controller.opcode.send",
               "controller.open",
               "controller.os.configure",
               "controller.os.facts",
@@ -2858,7 +3479,12 @@
               "controller.update.firmware",
               "controller.update.host",
               "controller.update.status",
-              "controller.virtual_key"
+              "controller.virtual_key",
+              "controller.webhooks.clear",
+              "controller.webhooks.dead",
+              "controller.webhooks.pending",
+              "controller.webhooks.replay",
+              "controller.webhooks.status"
             ]
           },
           "params": {
@@ -2882,6 +3508,258 @@
             "params": {}
           }
         ]
+      },
+      "SessionTicketRequest": {
+        "type": "object",
+        "required": [
+          "transport"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "transport": {
+            "type": "string",
+            "enum": [
+              "websocket",
+              "socket_io"
+            ]
+          }
+        }
+      },
+      "SessionTicket": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "protocol",
+          "expires_at",
+          "expires_in_ms",
+          "principal"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "writeOnly": true,
+            "description": "One-use ticket carried in Sec-WebSocket-Protocol, never in the URL."
+          },
+          "protocol": {
+            "type": "string",
+            "const": "pccontroller"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_in_ms": {
+            "type": "integer",
+            "const": 30000
+          },
+          "principal": {
+            "type": "string"
+          }
+        }
+      },
+      "OpcodeRequest": {
+        "type": "object",
+        "required": [
+          "opcode"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "opcode": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          },
+          "expect_opcode": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255,
+            "default": 128
+          },
+          "payload": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 64
+          },
+          "payload_hex": {
+            "type": "string",
+            "pattern": "^(?:0x)?(?:[0-9a-fA-F][0-9a-fA-F][ _:-]?){0,48}$"
+          }
+        },
+        "not": {
+          "required": [
+            "payload",
+            "payload_hex"
+          ]
+        }
+      },
+      "OpcodeFrame": {
+        "type": "object",
+        "required": [
+          "opcode",
+          "name",
+          "sequence"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "opcode": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          },
+          "name": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "payload": {
+            "type": "string",
+            "contentEncoding": "base64"
+          },
+          "payload_hex": {
+            "type": "string",
+            "pattern": "^[0-9A-F]*$"
+          }
+        }
+      },
+      "AppInstanceReport": {
+        "type": "object",
+        "required": [
+          "id",
+          "surface"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "surface": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "page": {
+            "type": "string",
+            "maxLength": 96
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "hidden",
+              "background",
+              "leaving"
+            ]
+          },
+          "lease_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 300,
+            "default": 45
+          },
+          "values": {
+            "type": "object",
+            "maxProperties": 32,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "self": {
+            "$ref": "#/components/schemas/InstanceSelf"
+          }
+        }
+      },
+      "InstanceSelf": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "pid": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parent_pid": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "image_path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "working_directory": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "vars": {
+            "type": "object",
+            "maxProperties": 32,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          }
+        }
+      },
+      "AppInstance": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AppInstanceReport"
+          },
+          {
+            "type": "object",
+            "required": [
+              "registered_at",
+              "updated_at"
+            ],
+            "properties": {
+              "registered_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "AppNavigation": {
+        "type": "object",
+        "required": [
+          "page"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._/-]{1,96}$"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+            "default": "*"
+          }
+        }
       },
       "JSONRPCError": {
         "type": "object",
@@ -3030,7 +3908,7 @@
   },
   "x-body-limit-bytes": 1048576,
   "x-unsupported-transports": [
-    "versionless /api paths",
+    "versioned /api/v* paths",
     "built-in TLS termination",
     "Socket.IO long-polling",
     "Socket.IO namespaces",

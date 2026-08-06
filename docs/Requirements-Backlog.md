@@ -3,14 +3,14 @@
 This is the canonical public map from normalized project requirements to GitHub issues. Closely related requests are grouped into one verifiable requirement; raw conversation text, machine-local paths, and private audit data are intentionally excluded.
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
-- Normalized requirements: **66**
-- Open: **53**
+- Normalized requirements: **67**
+- Open: **54**
 - Closed with current evidence: **13**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
 
-3 open / 2 closed / 5 total
+4 open / 2 closed / 6 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
@@ -97,7 +97,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `ipc-websocket-api-suite` | [#46](https://github.com/atomicdeploy/PCController/issues/46) | ✅ closed | Provide versioned JSON-RPC, REST, and authenticated WebSocket command/event APIs |
+| `ipc-websocket-api-suite` | [#46](https://github.com/atomicdeploy/PCController/issues/46) | 🚧 in progress | Provide unversioned living IPC, REST, JSON-RPC, WebSocket, and bridge APIs |
 | `network-bridge-discovery` | [#47](https://github.com/atomicdeploy/PCController/issues/47) | 🟡 open | Bridge controller hosts over the network with mDNS/SSDP discovery |
 | `http-webhooks-socketio-messages` | [#48](https://github.com/atomicdeploy/PCController/issues/48) | 🟡 open | Add bidirectional HTTP, webhooks, WebSocket client/server, Socket.IO, and actionable messages |
 | `remote-control-security` | [#49](https://github.com/atomicdeploy/PCController/issues/49) | 🟡 open | Define security and policy gates for every remote and disruptive control path |
@@ -113,6 +113,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `primary-serial-owner-ipc` | [#52](https://github.com/atomicdeploy/PCController/issues/52) | 🟡 open | Enforce one serial owner and route secondary processes through IPC |
 | `controller-discovery-authority` | [#53](https://github.com/atomicdeploy/PCController/issues/53) | ✅ closed | Make controller-owned discovery authoritative and explain platform inventory drift |
 | `serial-lifecycle-contract` | [#54](https://github.com/atomicdeploy/PCController/issues/54) | 🟡 open | Keep the serial protocol connected independently of telemetry subscriptions |
+| `native-usbasp-driver-provisioning` | [#112](https://github.com/atomicdeploy/PCController/issues/112) | 🟡 open | Replace the Zadig GUI fallback with native libwdi-backed USBasp driver provisioning |
 
 ## [#10 — Urboot/Urclock programming, backup, patch, and restore](https://github.com/atomicdeploy/PCController/issues/10)
 
@@ -157,7 +158,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `hardware-frontpanel-audio` | [#69](https://github.com/atomicdeploy/PCController/issues/69) | 🟡 open | Validate final-image buttons, menus, reset stability, and audio cues on hardware |
+| `hardware-frontpanel-audio` | [#69](https://github.com/atomicdeploy/PCController/issues/69) | 🟡 open | Validate final-image buttons, menus, reset stability, and buzzer cues on hardware |
 | `hardware-door-bt-temperature` | [#70](https://github.com/atomicdeploy/PCController/issues/70) | 🟡 open | Validate enclosure, BT Audio, and temperature-role transitions on hardware |
 | `hardware-pwm-displays-lighting` | [#71](https://github.com/atomicdeploy/PCController/issues/71) | 🟡 open | Visually validate TM1637, PWM, enclosure fade, power/RGB, and D6 strip |
 | `hardware-relay-motion` | [#72](https://github.com/atomicdeploy/PCController/issues/72) | 🟡 open | Load-test relay identification, motion directions, interlocks, and door policy safely |

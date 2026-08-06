@@ -261,7 +261,7 @@ func TestSPAFallbackReservedPathsMethodsAndTraversal(t *testing.T) {
 		{name: "xhtml route", method: http.MethodHead, target: "/fa/dashboard", accept: "application/xhtml+xml", wantStatus: http.StatusOK},
 		{name: "non navigation", method: http.MethodGet, target: "/settings/network", accept: "application/json", wantStatus: http.StatusNotFound},
 		{name: "missing asset", method: http.MethodGet, target: "/assets/missing.js", accept: "text/html", wantStatus: http.StatusNotFound},
-		{name: "api", method: http.MethodGet, target: "/api/v1/unknown", accept: "text/html", wantStatus: http.StatusNotFound},
+		{name: "api", method: http.MethodGet, target: "/api/unknown", accept: "text/html", wantStatus: http.StatusNotFound},
 		{name: "health", method: http.MethodGet, target: "/healthz/more", accept: "text/html", wantStatus: http.StatusNotFound},
 		{name: "ipc", method: http.MethodGet, target: "/ipc/other", accept: "text/html", wantStatus: http.StatusNotFound},
 		{name: "socket io", method: http.MethodGet, target: "/socket.io/other", accept: "text/html", wantStatus: http.StatusNotFound},

@@ -116,6 +116,8 @@ describe('offline and settings UI contracts', () => {
       token=""
       onToken={vi.fn()}
       onAppTitle={vi.fn(async (value: string) => value)}
+			uiConfig={null}
+			onBuzzerPath={vi.fn(async () => undefined)}
     />)
     expect(markup).toContain('text-field__control')
     expect(markup).toContain('text-field__action')
@@ -143,6 +145,8 @@ describe('offline and settings UI contracts', () => {
       token=""
       onToken={vi.fn()}
       onAppTitle={vi.fn(async (value: string) => value)}
+			uiConfig={null}
+			onBuzzerPath={vi.fn(async () => undefined)}
     />)
     expect(markup).toContain('Reading board settings')
     expect(markup).toContain('Waiting for the controller to return its live EEPROM settings')
@@ -161,6 +165,8 @@ describe('offline and settings UI contracts', () => {
       token=""
       onToken={vi.fn()}
       onAppTitle={vi.fn(async (value: string) => value)}
+			uiConfig={null}
+			onBuzzerPath={vi.fn(async () => undefined)}
     />)
     expect(controls).toContain('کنترل‌های برد در دسترس نیست')
     expect(settings).toContain('هویت میزبان رایانه')

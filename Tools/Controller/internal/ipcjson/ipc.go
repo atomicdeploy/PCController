@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -41,7 +40,6 @@ import (
 
 const (
 	Version       = "2.0"
-	APIVersion    = 1
 	DefaultListen = "127.0.0.1:8787"
 	maxMessage    = 1024 * 1024
 )
@@ -64,6 +62,46 @@ type Response struct {
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+type opcodeExchangeParams struct {
+	Opcode       *int   `json:"opcode"`
+	ExpectOpcode *int   `json:"expect_opcode,omitempty"`
+	Payload      []byte `json:"payload,omitempty"`
+	PayloadHex   string `json:"payload_hex,omitempty"`
+}
+
+func (params opcodeExchangeParams) values() (byte, []byte, byte, error) {
+	if params.Opcode == nil || *params.Opcode < 1 || *params.Opcode > 255 {
+		return 0, nil, 0, errors.New("opcode is required and must be 1..255; 0 is reserved")
+	}
+	expected := int(native.OpACK)
+	if params.ExpectOpcode != nil {
+		expected = *params.ExpectOpcode
+	}
+	if expected < 1 || expected > 255 {
+		return 0, nil, 0, errors.New("expect_opcode must be 1..255; 0 is reserved")
+	}
+	if len(params.Payload) != 0 && strings.TrimSpace(params.PayloadHex) != "" {
+		return 0, nil, 0, errors.New("supply payload or payload_hex, not both")
+	}
+	payload := append([]byte(nil), params.Payload...)
+	if value := strings.TrimSpace(params.PayloadHex); value != "" {
+		value = strings.NewReplacer(" ", "", ":", "", "-", "", "_", "").Replace(value)
+		value = strings.TrimPrefix(strings.ToLower(value), "0x")
+		if len(value)%2 != 0 {
+			return 0, nil, 0, errors.New("payload_hex must contain complete bytes")
+		}
+		var err error
+		payload, err = hex.DecodeString(value)
+		if err != nil {
+			return 0, nil, 0, fmt.Errorf("decode payload_hex: %w", err)
+		}
+	}
+	if len(payload) > native.MaxPayload {
+		return 0, nil, 0, native.ErrPayloadTooLong
+	}
+	return byte(*params.Opcode), payload, byte(expected), nil
 }
 
 // rfMapParams is deliberately semantic: network callers name the target they
@@ -180,9 +218,11 @@ func (rpcError *RPCError) Error() string {
 // Access records transport provenance for authorization and message tagging.
 // Remote means a non-loopback network peer, not merely a WebSocket client.
 type Access struct {
-	Remote        bool
-	Transport     string
-	authenticated bool
+	Remote         bool
+	Transport      string
+	Principal      string
+	Authentication string
+	authenticated  bool
 }
 
 const (
@@ -203,40 +243,48 @@ const (
 )
 
 type Service struct {
-	Client              *controller.Client
-	WebSocketPath       string
-	SocketIOPath        string
-	WebUI               http.Handler
-	IntegrationProxy    http.Handler
-	LocalDevice         LocalDeviceService
-	HostFacts           hostfacts.Provider
-	Artifacts           *artifacts.Service
-	ReleaseDiscovery    ReleaseDiscoveryService
-	AuthToken           string
-	AllowedOrigins      []string
-	InboundWebhooks     bool
-	HostVersion         string
-	HostSourceHash      string
-	HostBuildTime       string
-	HostInstanceID      string
-	HostInstanceToken   string
-	HostProcessID       int
-	HostSurface         string
-	AppAction           func(hostui.AppAction) error
-	Shutdown            func()
-	HostConfig          func() appconfig.Config
-	UpdateHostConfig    func(func(*appconfig.Config) error) error
-	BridgeList          func() any
-	BridgeCall          func(context.Context, string, Request) (Response, error)
-	HotkeyStatus        func() any
-	LastSessionSnapshot func() (any, error)
-	mu                  sync.Mutex
+	Client                *controller.Client
+	WebSocketPath         string
+	SocketIOPath          string
+	WebUI                 http.Handler
+	IntegrationProxy      http.Handler
+	LocalDevice           LocalDeviceService
+	HostFacts             hostfacts.Provider
+	Artifacts             *artifacts.Service
+	ReleaseDiscovery      ReleaseDiscoveryService
+	AuthToken             string
+	RemotePrincipal       string
+	AllowedOrigins        []string
+	InboundWebhooks       bool
+	HostVersion           string
+	HostSourceHash        string
+	HostBuildTime         string
+	HostInstanceID        string
+	HostInstanceToken     string
+	HostProcessID         int
+	HostSurface           string
+	CoordinatorInstanceID string
+	AppAction             func(hostui.AppAction) error
+	AppInstances          *hostui.InstanceRegistry
+	Shutdown              func()
+	HostConfig            func() appconfig.Config
+	UpdateHostConfig      func(func(*appconfig.Config) error) error
+	BridgeList            func() any
+	BridgeCall            func(context.Context, string, Request) (Response, error)
+	WebhookAdmin          func() WebhookAdminService
+	HotkeyStatus          func() any
+	LastSessionSnapshot   func() (any, error)
+	commandMu             sync.Mutex
+	sessionMu             sync.Mutex
+	sessionTickets        map[string]sessionTicket
+	sessionClock          func() time.Time
 }
 
 // browserUISettings is the narrow persistent host-owned subset exposed to the
 // browser. Board EEPROM settings remain on the independent board command path.
 type browserUISettings struct {
 	AppTitle        string                           `json:"app_title"`
+	Tagline         string                           `json:"tagline"`
 	SetupComplete   bool                             `json:"setup_complete"`
 	WelcomeMelody   string                           `json:"welcome_melody"`
 	Appearance      browserAppearance                `json:"appearance"`
@@ -277,6 +325,77 @@ type LocalDeviceService interface {
 	Inspect(context.Context, string) (any, error)
 }
 
+// WebhookQueueStatus is the non-secret operational state of the durable
+// outbound-webhook queue. Endpoint URLs, headers, request bodies, and signing
+// secrets are deliberately absent from this transport contract.
+type WebhookQueueStatus struct {
+	Pending       int        `json:"pending"`
+	Dead          int        `json:"dead"`
+	Completed     int        `json:"completed_dedupe_records"`
+	Enqueued      uint64     `json:"enqueued"`
+	Delivered     uint64     `json:"delivered"`
+	Retried       uint64     `json:"retried"`
+	DeadLettered  uint64     `json:"dead_lettered"`
+	Dropped       uint64     `json:"dropped"`
+	Duplicates    uint64     `json:"duplicates"`
+	DeadDiscarded uint64     `json:"dead_discarded"`
+	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
+	InFlight      int        `json:"in_flight"`
+	Closing       bool       `json:"closing"`
+}
+
+// WebhookDeliveryView is a bounded delivery record safe for administrative
+// clients. It identifies the configured target by name without revealing its
+// URL, headers, request body, or signing secret.
+type WebhookDeliveryView struct {
+	ID             string     `json:"id"`
+	CorrelationID  string     `json:"correlation_id"`
+	IdempotencyKey string     `json:"idempotency_key"`
+	Target         string     `json:"target"`
+	EventID        uint64     `json:"event_id"`
+	EventKind      string     `json:"event_kind"`
+	CreatedAt      time.Time  `json:"created_at"`
+	NextAttemptAt  *time.Time `json:"next_attempt_at,omitempty"`
+	LastAttemptAt  *time.Time `json:"last_attempt_at,omitempty"`
+	LastAttemptID  string     `json:"last_attempt_id,omitempty"`
+	Attempts       int        `json:"attempts"`
+	MaxAttempts    int        `json:"max_attempts"`
+	LastStatus     int        `json:"last_status,omitempty"`
+	LastError      string     `json:"last_error,omitempty"`
+}
+
+type WebhookDeliveryList struct {
+	Deliveries []WebhookDeliveryView `json:"deliveries"`
+	Status     WebhookQueueStatus    `json:"status"`
+}
+
+type WebhookReplayResult struct {
+	Replayed int                `json:"replayed"`
+	Status   WebhookQueueStatus `json:"status"`
+}
+
+type WebhookClearResult struct {
+	Cleared int                `json:"cleared"`
+	Status  WebhookQueueStatus `json:"status"`
+}
+
+// WebhookAdminService keeps durable-queue ownership in hostbridge while
+// exposing one structured contract consistently to IPC, HTTP, WebSocket, and
+// remote bridge callers.
+type WebhookAdminService interface {
+	WebhookStatus(context.Context) (WebhookQueueStatus, error)
+	WebhookPending(context.Context, int) (WebhookDeliveryList, error)
+	WebhookDead(context.Context, int) (WebhookDeliveryList, error)
+	WebhookReplay(context.Context, string) (WebhookReplayResult, error)
+	WebhookClearDead(context.Context, string) (WebhookClearResult, error)
+}
+
+type webhookSelectorParams struct {
+	DeliveryID string `json:"delivery_id,omitempty"`
+	All        bool   `json:"all,omitempty"`
+	ConfirmAll bool   `json:"confirm_all,omitempty"`
+}
+
 func (service *Service) Dispatch(ctx context.Context, request Request) Response {
 	return service.dispatch(ctx, request, Access{Transport: "ipc"})
 }
@@ -289,9 +408,11 @@ func (service *Service) DispatchRemote(
 	request Request,
 	transport string,
 ) Response {
-	return service.dispatch(ctx, request, Access{
-		Remote: true, Transport: transport, authenticated: true,
+	access := service.normalizeAccess(Access{
+		Remote: true, Transport: transport, Principal: "bridge-peer",
+		Authentication: "bridge-session", authenticated: true,
 	})
+	return service.dispatch(ctx, request, access)
 }
 
 func (service *Service) dispatch(
@@ -308,10 +429,19 @@ func (service *Service) dispatch(
 		response.Error = &RPCError{Code: -32603, Message: "controller client is unavailable"}
 		return response
 	}
-	if !access.authenticated && !service.authorized(request.Auth) {
-		response.Error = &RPCError{Code: -32001, Message: "authentication required"}
-		return response
+	if !access.authenticated {
+		var authenticated bool
+		access, authenticated = service.authenticateAccess(access, request.Auth, "json-rpc-auth")
+		if !authenticated {
+			service.auditAccess(Access{
+				Remote: access.Remote, Transport: access.Transport,
+				Principal: "unauthenticated", Authentication: "json-rpc-auth",
+			}, request.Method, "authentication", false)
+			response.Error = &RPCError{Code: -32001, Message: "authentication required"}
+			return response
+		}
 	}
+	access = service.normalizeAccess(access)
 	if err := service.authorizeAccess(access, request.Method, request.Params); err != nil {
 		response.Error = &RPCError{Code: -32003, Message: err.Error()}
 		return response
@@ -327,6 +457,8 @@ func (service *Service) dispatch(
 		var params struct {
 			AfterID   uint64 `json:"after_id"`
 			Kind      string `json:"kind,omitempty"`
+			Stream    string `json:"stream,omitempty"`
+			Opcode    *int   `json:"opcode,omitempty"`
 			TimeoutMS int    `json:"timeout_ms,omitempty"`
 		}
 		if err := decodeParams(request.Params, &params); err != nil {
@@ -343,9 +475,24 @@ func (service *Service) dispatch(
 		}
 		waitContext, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
-		event, err := service.Client.NextEvent(waitContext, params.AfterID, params.Kind)
-		if err != nil {
-			response.Error = &RPCError{Code: -32000, Message: err.Error()}
+		var opcode *byte
+		if params.Opcode != nil {
+			if *params.Opcode < 1 || *params.Opcode > 255 {
+				response.Error = &RPCError{Code: -32602, Message: "opcode must be 1..255; 0 is reserved"}
+				return response
+			}
+			value := byte(*params.Opcode)
+			opcode = &value
+		}
+		var event controller.Event
+		var waitErr error
+		if opcode != nil {
+			event, waitErr = service.Client.NextOpcodeEvent(waitContext, params.AfterID, params.Kind, opcode)
+		} else {
+			event, waitErr = service.Client.NextEventStream(waitContext, params.AfterID, params.Kind, params.Stream)
+		}
+		if waitErr != nil {
+			response.Error = &RPCError{Code: -32000, Message: waitErr.Error()}
 		} else {
 			response.Result = event
 		}
@@ -376,12 +523,20 @@ func (service *Service) dispatch(
 		}
 		return response
 	}
-
-	// The shell engine tracks history, and device operations share one serial
-	// request stream. Serialize RPC calls while allowing snapshot reads to
-	// complete independently in future versions.
-	service.mu.Lock()
-	defer service.mu.Unlock()
+	if strings.HasPrefix(request.Method, "controller.webhooks.") {
+		result, err := service.dispatchWebhookAdmin(ctx, request.Method, request.Params)
+		if err != nil {
+			var rpcError *RPCError
+			if errors.As(err, &rpcError) {
+				response.Error = rpcError
+			} else {
+				response.Error = &RPCError{Code: -32000, Message: err.Error()}
+			}
+		} else {
+			response.Result = result
+		}
+		return response
+	}
 
 	var result any
 	var err error
@@ -669,7 +824,9 @@ func (service *Service) dispatch(
 				}
 			} else {
 				var output string
+				service.commandMu.Lock()
 				output, err = service.Client.Execute(ctx, command)
+				service.commandMu.Unlock()
 				if err == nil {
 					result = map[string]string{"output": output}
 				}
@@ -880,10 +1037,25 @@ func (service *Service) dispatch(
 			)
 			result = map[string]bool{"accepted": accepted}
 		}
+	case "controller.display.send":
+		var params controller.DisplayRequest
+		if err = decodeParams(request.Params, &params); err == nil {
+			result, err = service.Client.PresentDisplay(ctx, params)
+		}
+	case "controller.opcode.send", "controller.opcode.exchange", "controller.opcode.request":
+		var params opcodeExchangeParams
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			var opcode, expected byte
+			var payload []byte
+			opcode, payload, expected, err = params.values()
+			if err == nil {
+				result, err = service.Client.ExchangeOpcode(ctx, opcode, payload, expected)
+			}
+		}
 	case "controller.message.send":
 		var message controller.TextMessage
 		if err = decodeParams(request.Params, &message); err == nil {
-			message = tagInboundMessage(message, access.Transport)
+			message = tagInboundAccess(message, access)
 			result, err = service.Client.SendTextMessage(ctx, message)
 		}
 	case "controller.bridge.list":
@@ -928,16 +1100,85 @@ func (service *Service) dispatch(
 		}
 	case "controller.app.page":
 		var params struct {
-			Page string `json:"page"`
+			Page   string `json:"page"`
+			Target string `json:"target,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
 			if service.AppAction == nil {
 				err = errors.New("primary app page routing is unavailable")
 			} else {
 				err = service.AppAction(hostui.AppAction{
-					Kind: "app.page", Value: params.Page, Source: "ipc",
+					Kind: "app.page", Value: params.Page, Source: "ipc", Target: params.Target,
 				})
 				result = map[string]bool{"accepted": err == nil}
+			}
+		}
+	case "controller.app.navigate":
+		var params struct {
+			Page   string `json:"page"`
+			Target string `json:"target,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppAction == nil {
+				err = errors.New("primary app navigation routing is unavailable")
+			} else {
+				target := strings.TrimSpace(params.Target)
+				if target == "" {
+					target = "*"
+				}
+				err = service.AppAction(hostui.AppAction{
+					Kind: "app.page", Value: params.Page, Source: "ipc", Target: target,
+				})
+				result = map[string]bool{"accepted": err == nil}
+			}
+		}
+	case "controller.app.instances":
+		if service.AppInstances == nil {
+			err = errors.New("app instance registry is unavailable")
+		} else {
+			result = service.AppInstances.List()
+		}
+	case "controller.app.bridge":
+		if service.AppInstances == nil {
+			err = errors.New("app instance registry is unavailable")
+		} else if strings.TrimSpace(service.CoordinatorInstanceID) == "" {
+			err = errors.New("coordinator bridge instance is unavailable")
+		} else if instance, ok := service.AppInstances.Get(service.CoordinatorInstanceID); !ok {
+			err = errors.New("coordinator bridge instance is not registered")
+		} else {
+			result = instance
+		}
+	case "controller.app.instance.get":
+		var params struct {
+			ID string `json:"id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else if instance, ok := service.AppInstances.Get(params.ID); !ok {
+				err = fmt.Errorf("app instance %q is not registered", strings.TrimSpace(params.ID))
+			} else {
+				result = instance
+			}
+		}
+	case "controller.app.instance.report":
+		var params hostui.AppInstance
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else {
+				result, err = service.AppInstances.Upsert(params)
+			}
+		}
+	case "controller.app.instance.remove":
+		var params struct {
+			ID string `json:"id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppInstances == nil {
+				err = errors.New("app instance registry is unavailable")
+			} else {
+				result = map[string]bool{"removed": service.AppInstances.Remove(params.ID)}
 			}
 		}
 	case "controller.ports":
@@ -1036,10 +1277,11 @@ func (service *Service) dispatch(
 
 func (service *Service) primaryPingResult() map[string]any {
 	return map[string]any{
-		"ok": true, "jsonrpc": Version, "api_version": APIVersion,
-		"instance_id": strings.TrimSpace(service.HostInstanceID),
-		"process_id":  service.HostProcessID,
-		"surface":     strings.TrimSpace(service.HostSurface),
+		"ok": true, "jsonrpc": Version,
+		"instance_id":             strings.TrimSpace(service.HostInstanceID),
+		"coordinator_instance_id": strings.TrimSpace(service.CoordinatorInstanceID),
+		"process_id":              service.HostProcessID,
+		"surface":                 strings.TrimSpace(service.HostSurface),
 	}
 }
 
@@ -1054,6 +1296,7 @@ func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
 	return browserUISettings{
 		AppTitle:        productidentity.Title(ui.AppTitle),
+		Tagline:         ui.Tagline,
 		SetupComplete:   ui.SetupComplete,
 		WelcomeMelody:   ui.WelcomeMelody,
 		Appearance:      browserAppearanceFromConfig(ui.Appearance),
@@ -1281,25 +1524,29 @@ func (service *Service) authorizeCapability(
 	access Access,
 	operation, capability string,
 ) error {
+	access = service.normalizeAccess(access)
 	if !access.Remote {
+		if capability != capabilityRead && capability != capabilityEvents {
+			service.auditAccess(access, operation, capability, true)
+		}
 		return nil
 	}
 	config := service.hostConfig()
 	if !config.IPC.AllowRemote {
-		service.auditRemote(access, operation, capability, false)
+		service.auditAccess(access, operation, capability, false)
 		return errors.New("remote network access is disabled")
 	}
 	if !remoteCapabilityAllowed(config.IPC.RemotePolicy, capability) {
-		service.auditRemote(access, operation, capability, false)
+		service.auditAccess(access, operation, capability, false)
 		return fmt.Errorf("remote capability %s is disabled", capability)
 	}
 	if capability != capabilityRead && capability != capabilityEvents {
-		service.auditRemote(access, operation, capability, true)
+		service.auditAccess(access, operation, capability, true)
 	}
 	return nil
 }
 
-func (service *Service) auditRemote(
+func (service *Service) auditAccess(
 	access Access,
 	method, capability string,
 	allowed bool,
@@ -1311,13 +1558,18 @@ func (service *Service) auditRemote(
 	if allowed {
 		decision = "authorized"
 	}
-	transport := strings.ToLower(strings.TrimSpace(access.Transport))
-	if transport == "" {
-		transport = "network"
+	access = service.normalizeAccess(access)
+	scope := "local"
+	if access.Remote {
+		scope = "remote"
 	}
 	service.Client.EmitHostEvent(
-		"security.remote."+decision,
-		fmt.Sprintf("%s %s capability=%s method=%s", transport, decision, capability, method),
+		"security."+scope+"."+decision,
+		fmt.Sprintf(
+			"principal=%s transport=%s authentication=%s remote=%t decision=%s capability=%s operation=%s",
+			access.Principal, access.Transport, access.Authentication, access.Remote,
+			decision, capability, method,
+		),
 	)
 }
 
@@ -1384,19 +1636,26 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityShutdown
 	case "controller.message.send":
 		return capabilityMessages
+	case "controller.display.send", "controller.opcode.send",
+		"controller.opcode.exchange", "controller.opcode.request":
+		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",
 		"controller.peripherals", "controller.peripherals.get",
 		"controller.os.policy", "controller.os.facts.catalog",
 		"controller.host.facts.catalog", "controller.hotkeys.get",
-		"controller.bridge.list":
+		"controller.bridge.list", "controller.app.instances", "controller.app.instance.get",
+		"controller.app.bridge",
+		"controller.webhooks.status",
+		"controller.webhooks.pending", "controller.webhooks.dead":
 		return capabilityRead
 	case "controller.host_menu.configure", "controller.host_menu.config.set",
 		"controller.ui.config.set",
 		"controller.peripherals.set",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
-		"controller.app.page":
+		"controller.app.page", "controller.app.navigate",
+		"controller.app.instance.report", "controller.app.instance.remove":
 		return capabilityHostConfig
 	case "controller.os.key", "controller.virtual_key":
 		return capabilityVirtualKeys
@@ -1404,6 +1663,8 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityPowerActions
 	case "controller.bridge.call":
 		return capabilityBridgeCalls
+	case "controller.webhooks.replay", "controller.webhooks.clear":
+		return capabilityIntegrations
 	case "controller.device.status", "controller.device.action",
 		"controller.device.inspect", "controller.integrations.local.get",
 		"controller.integrations.local.set":
@@ -1539,7 +1800,7 @@ func commandCapability(command string) string {
 			return capabilityRead
 		}
 		return capabilityProgramming
-	case "boot", "program", "programmer", "firmware", "flash", "upload",
+	case "board", "boot", "program", "programmer", "firmware", "flash", "upload",
 		"restore", "query", "write":
 		return capabilityProgramming
 	case "bridge":
@@ -1587,6 +1848,22 @@ func tagInboundMessage(message controller.TextMessage, transport string) control
 		}
 	}
 	message.Source = transport
+	return message
+}
+
+func tagInboundAccess(message controller.TextMessage, access Access) controller.TextMessage {
+	message = tagInboundMessage(message, access.Transport)
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]string)
+	}
+	if principal := strings.TrimSpace(access.Principal); principal != "" &&
+		(len(message.Metadata) < 64 || message.Metadata["principal"] != "") {
+		message.Metadata["principal"] = truncateText(principal, 96)
+	}
+	if authentication := strings.TrimSpace(access.Authentication); authentication != "" &&
+		(len(message.Metadata) < 64 || message.Metadata["authentication"] != "") {
+		message.Metadata["authentication"] = truncateText(authentication, 48)
+	}
 	return message
 }
 
@@ -1726,10 +2003,7 @@ func accessFromAddress(address net.Addr, transport string) Access {
 }
 
 func accessFromHTTPRequest(request *http.Request, transport string) Access {
-	if request == nil {
-		return Access{Remote: true, Transport: transport}
-	}
-	return accessFromAddress(stringAddress(request.RemoteAddr), transport)
+	return authenticatedHTTPRequestAccess(request, transport)
 }
 
 type stringAddress string
@@ -1801,19 +2075,14 @@ type wsNotification struct {
 
 type wsSubscription struct {
 	Topics     []string `json:"topics"`
+	Opcodes    []int    `json:"opcodes,omitempty"`
 	IntervalMS int      `json:"interval_ms,omitempty"`
 	AfterID    uint64   `json:"after_id,omitempty"`
 }
 
 func websocketMux(serverContext context.Context, service *Service) http.Handler {
-	webSocketPath := strings.TrimSpace(service.WebSocketPath)
-	if webSocketPath == "" {
-		webSocketPath = "/ipc"
-	}
-	socketIOPath := strings.TrimSpace(service.SocketIOPath)
-	if socketIOPath == "" {
-		socketIOPath = "/socket.io/"
-	}
+	webSocketPath := service.currentWebSocketPath()
+	socketIOPath := service.currentSocketIOPath()
 	mux := http.NewServeMux()
 	mux.HandleFunc(webSocketPath, func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
@@ -1831,7 +2100,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			accessFromHTTPRequest(request, "websocket"),
 		)
 	})
-	mux.HandleFunc("/api/v1/ui-config", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/ui-config", func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet {
 			writer.Header().Set("Allow", http.MethodGet)
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
@@ -1840,31 +2109,38 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		config := service.hostConfig()
 		settings := service.browserUISettings()
 		writeHTTPJSON(writer, http.StatusOK, map[string]any{
-			"name":            settings.AppTitle,
-			"host_version":    strings.TrimSpace(service.HostVersion),
-			"source_hash":     strings.TrimSpace(service.HostSourceHash),
-			"build_time":      strings.TrimSpace(service.HostBuildTime),
-			"setup_complete":  config.UI.SetupComplete,
-			"welcome_melody":  config.UI.WelcomeMelody,
-			"appearance":      settings.Appearance,
-			"appearance_etag": settings.AppearanceETag,
-			"api_version":     APIVersion,
-			"websocket_path":  webSocketPath,
-			"socket_io_path":  socketIOPath,
-			"auth_required":   strings.TrimSpace(service.currentAuthToken()) != "",
+			"name":                settings.AppTitle,
+			"tagline":             settings.Tagline,
+			"host_version":        strings.TrimSpace(service.HostVersion),
+			"source_hash":         strings.TrimSpace(service.HostSourceHash),
+			"build_time":          strings.TrimSpace(service.HostBuildTime),
+			"setup_complete":      config.UI.SetupComplete,
+			"welcome_melody":      config.UI.WelcomeMelody,
+			"appearance":          settings.Appearance,
+			"appearance_etag":     settings.AppearanceETag,
+			"websocket_path":      webSocketPath,
+			"socket_io_path":      socketIOPath,
+			"session_ticket_path": SessionTicketPath,
+			"auth_required":       strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
-				"local_device": config.Integrations.LocalDevice.Enabled,
-				"data_hub":     config.Integrations.DataHub.Enabled,
+				"local_device":          config.Integrations.LocalDevice.Enabled,
+				"data_hub":              config.Integrations.DataHub.Enabled,
+				"buzzer_host_enabled":   config.Integrations.BuzzerMirror.Enabled,
+				"buzzer_native_enabled": config.Integrations.BuzzerMirror.Enabled && config.Integrations.BuzzerMirror.NativeEnabled,
+				"buzzer_web_audio":      config.Integrations.BuzzerMirror.Enabled && config.Integrations.BuzzerMirror.WebAudioEnabled,
 			},
 		})
 	})
-	mux.HandleFunc("/api/v1/rpc", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc(SessionTicketPath, func(writer http.ResponseWriter, request *http.Request) {
+		serveSessionTicket(writer, request, service)
+	})
+	mux.HandleFunc("/api/rpc", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
 		serveHTTPRPC(writer, request, service, accessFromHTTPRequest(request, "rest"))
 	})
-	mux.HandleFunc("/api/v1/snapshot", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/snapshot", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -1877,7 +2153,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.Client.Snapshot())
 	})
-	mux.HandleFunc("/api/v1/peripherals", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/peripherals", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -1914,7 +2190,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.peripheralSettings())
 	})
-	mux.HandleFunc("/api/v1/pwm", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/pwm", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -1968,7 +2244,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, values)
 	})
-	mux.HandleFunc("/api/v1/commands", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/commands", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -1981,7 +2257,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.Client.CommandCatalog())
 	})
-	mux.HandleFunc("/api/v1/program-state", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/program-state", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2025,7 +2301,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, state)
 	})
-	mux.HandleFunc("/api/v1/menu/catalog", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/menu/catalog", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2043,7 +2319,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, catalog)
 	})
-	mux.HandleFunc("/api/v1/menu/layout", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/menu/layout", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2084,7 +2360,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, layout)
 	})
-	mux.HandleFunc("/api/v1/host-menus", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/host-menus", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2122,7 +2398,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.hostConfig().HostMenus)
 	})
-	mux.HandleFunc("/api/v1/os/status", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/os/status", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2140,7 +2416,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, status)
 	})
-	mux.HandleFunc("/api/v1/os/facts", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/os/facts", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2178,7 +2454,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		writer.Header().Set("Cache-Control", "private, max-age=5")
 		writeHTTPJSON(writer, http.StatusOK, result)
 	})
-	mux.HandleFunc("/api/v1/os/key", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/os/key", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2202,7 +2478,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusAccepted, result)
 	})
-	mux.HandleFunc("/api/v1/os/power", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/os/power", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2227,7 +2503,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusAccepted, result)
 	})
-	mux.HandleFunc("/api/v1/command", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/command", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2261,7 +2537,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, map[string]string{"output": output})
 	})
-	mux.HandleFunc("/api/v1/messages", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/messages", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2278,7 +2554,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		message = tagInboundMessage(message, "ipc")
+		message = tagInboundAccess(message, accessFromHTTPRequest(request, "rest"))
 		event, err := service.Client.SendTextMessage(request.Context(), message)
 		if err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -2286,7 +2562,206 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusAccepted, event)
 	})
-	mux.HandleFunc("/api/v1/bridges", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/display", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		var params controller.DisplayRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		result, err := service.Client.PresentDisplay(request.Context(), params)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, result)
+	})
+	mux.HandleFunc("/api/opcode", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		var params opcodeExchangeParams
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		opcode, payload, expected, err := params.values()
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		result, err := service.Client.ExchangeOpcode(request.Context(), opcode, payload, expected)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, result)
+	})
+	mux.HandleFunc("/api/app/instances", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if service.AppInstances == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "app instance registry is unavailable"})
+			return
+		}
+		switch request.Method {
+		case http.MethodGet:
+			if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+				return
+			}
+			if id := strings.TrimSpace(request.URL.Query().Get("id")); id != "" {
+				instance, ok := service.AppInstances.Get(id)
+				if !ok {
+					writeHTTPJSON(writer, http.StatusNotFound, map[string]string{"error": "app instance is not registered"})
+					return
+				}
+				writeHTTPJSON(writer, http.StatusOK, instance)
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.AppInstances.List())
+		case http.MethodPost:
+			if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+				return
+			}
+			var instance hostui.AppInstance
+			decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&instance); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			stored, err := service.AppInstances.Upsert(instance)
+			if err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, stored)
+		case http.MethodDelete:
+			if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+				return
+			}
+			id := strings.TrimSpace(request.URL.Query().Get("id"))
+			if id == "" {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "id query parameter is required"})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, map[string]bool{"removed": service.AppInstances.Remove(id)})
+		default:
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPost+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/app/bridge", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+			return
+		}
+		if service.AppInstances == nil || strings.TrimSpace(service.CoordinatorInstanceID) == "" {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "coordinator bridge instance is unavailable"})
+			return
+		}
+		instance, ok := service.AppInstances.Get(service.CoordinatorInstanceID)
+		if !ok {
+			writeHTTPJSON(writer, http.StatusNotFound, map[string]string{"error": "coordinator bridge instance is not registered"})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, instance)
+	})
+	mux.HandleFunc("/api/app/navigate", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		if service.AppAction == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app navigation routing is unavailable"})
+			return
+		}
+		var params struct {
+			Page   string `json:"page"`
+			Target string `json:"target,omitempty"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		target := strings.TrimSpace(params.Target)
+		if target == "" {
+			target = "*"
+		}
+		if err := service.AppAction(hostui.AppAction{Kind: "app.page", Value: params.Page, Source: "rest", Target: target}); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusAccepted, map[string]bool{"accepted": true})
+	})
+	mux.HandleFunc("/api/app/action", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		if service.AppAction == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
+			return
+		}
+		var action hostui.AppAction
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&action); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		action.Source = "rest"
+		if err := service.AppAction(action); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusAccepted, map[string]bool{"accepted": true})
+	})
+	mux.HandleFunc("/api/bridges", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2305,7 +2780,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.BridgeList())
 	})
-	mux.HandleFunc("/api/v1/bridges/call", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/api/bridges/call", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
 		}
@@ -2348,7 +2823,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"peer": params.Peer, "response": response,
 		})
 	})
-	mux.HandleFunc("/api/v1/webhooks/inbound", func(writer http.ResponseWriter, request *http.Request) {
+	registerWebhookAdminHTTP(mux, service)
+	mux.HandleFunc("/api/webhooks/inbound", func(writer http.ResponseWriter, request *http.Request) {
 		if !service.inboundWebhooksEnabled() {
 			http.NotFound(writer, request)
 			return
@@ -2370,7 +2846,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			writer,
 			request,
 			service,
-			accessFromHTTPRequest(request, "websocket"),
+			accessFromHTTPRequest(request, "socket_io"),
 		)
 	})
 	mux.HandleFunc("/healthz", func(writer http.ResponseWriter, _ *http.Request) {
@@ -2380,11 +2856,10 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 				service.hostConfig().UI.AppTitle,
 				"IPC",
 			),
-			"api_version": APIVersion,
 		})
 	})
 	if service.IntegrationProxy != nil {
-		mux.Handle("/api/v1/integrations/", http.HandlerFunc(func(
+		mux.Handle("/api/integrations/", http.HandlerFunc(func(
 			writer http.ResponseWriter,
 			request *http.Request,
 		) {
@@ -2408,11 +2883,136 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		mux.Handle("/", service.WebUI)
 	}
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1" || strings.HasPrefix(request.URL.Path, "/api/v1/") {
+			http.NotFound(writer, request)
+			return
+		}
 		if serveBrowserCORS(writer, request, service, webSocketPath) {
 			return
 		}
 		mux.ServeHTTP(writer, request)
 	})
+}
+
+func registerWebhookAdminHTTP(mux *http.ServeMux, service *Service) {
+	mux.HandleFunc("/api/webhooks/outbound/status", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+			return
+		}
+		admin, err := service.webhookAdminService()
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
+		status, err := admin.WebhookStatus(request.Context())
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, status)
+	})
+
+	list := func(dead bool) http.HandlerFunc {
+		return func(writer http.ResponseWriter, request *http.Request) {
+			if !authorizeHTTPRequest(writer, request, service) {
+				return
+			}
+			if request.Method != http.MethodGet {
+				writer.Header().Set("Allow", http.MethodGet)
+				http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+				return
+			}
+			limit := 0
+			if raw := strings.TrimSpace(request.URL.Query().Get("limit")); raw != "" {
+				parsed, err := strconv.Atoi(raw)
+				if err != nil {
+					writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "delivery limit must be 1..100"})
+					return
+				}
+				limit = parsed
+			}
+			limit, err := normalizeWebhookListLimit(limit)
+			if err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			admin, err := service.webhookAdminService()
+			if err != nil {
+				writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+				return
+			}
+			var result WebhookDeliveryList
+			if dead {
+				result, err = admin.WebhookDead(request.Context(), limit)
+			} else {
+				result, err = admin.WebhookPending(request.Context(), limit)
+			}
+			if err != nil {
+				writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, result)
+		}
+	}
+	mux.HandleFunc("/api/webhooks/outbound/pending", list(false))
+	mux.HandleFunc("/api/webhooks/outbound/dead", list(true))
+
+	mutate := func(replay bool) http.HandlerFunc {
+		return func(writer http.ResponseWriter, request *http.Request) {
+			if !authorizeHTTPRequest(writer, request, service) {
+				return
+			}
+			if request.Method != http.MethodPost {
+				writer.Header().Set("Allow", http.MethodPost)
+				http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			if !authorizeHTTPCapability(writer, request, service, capabilityIntegrations) {
+				return
+			}
+			var params webhookSelectorParams
+			decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			selector, err := normalizeWebhookSelector(params)
+			if err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			admin, err := service.webhookAdminService()
+			if err != nil {
+				writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+				return
+			}
+			var result any
+			if replay {
+				result, err = admin.WebhookReplay(request.Context(), selector)
+			} else {
+				result, err = admin.WebhookClearDead(request.Context(), selector)
+			}
+			if err != nil {
+				writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, result)
+		}
+	}
+	mux.HandleFunc("/api/webhooks/outbound/replay", mutate(true))
+	mux.HandleFunc("/api/webhooks/outbound/clear", mutate(false))
 }
 
 func serveInboundWebhook(
@@ -2500,7 +3100,7 @@ func serveInboundWebhook(
 	if strings.TrimSpace(message.Type) == "" {
 		message.Type = "http." + strings.ToLower(request.Method)
 	}
-	message = tagInboundMessage(message, "webhook")
+	message = tagInboundAccess(message, accessFromHTTPRequest(request, "webhook"))
 	event, err := service.Client.SendTextMessage(request.Context(), message)
 	if err != nil {
 		writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -2542,9 +3142,9 @@ func serveHTTPRPC(
 		})
 		return
 	}
-	// The HTTP layer has already authenticated the request without copying the
-	// secret into its JSON body.
-	rpcRequest.Auth = service.currentAuthToken()
+	// The HTTP layer has already authenticated the request. Never copy its
+	// durable credential into the decoded application envelope.
+	rpcRequest.Auth = ""
 	response := service.dispatch(request.Context(), rpcRequest, access)
 	status := http.StatusOK
 	if response.Error != nil {
@@ -2573,7 +3173,10 @@ func serveWebSocket(
 	connection, err := websocket.Accept(
 		writer,
 		request,
-		&websocket.AcceptOptions{OriginPatterns: origins},
+		&websocket.AcceptOptions{
+			OriginPatterns: origins,
+			Subprotocols:   []string{browserWebSocketProtocol},
+		},
 	)
 	if err != nil {
 		return
@@ -2619,7 +3222,7 @@ func serveWebSocket(
 			})
 			continue
 		}
-		rpcRequest.Auth = service.currentAuthToken()
+		rpcRequest.Auth = ""
 		if rpcRequest.Method == "controller.subscribe" {
 			var subscription wsSubscription
 			response := Response{JSONRPC: Version, ID: rpcRequest.ID}
@@ -2640,8 +3243,10 @@ func serveWebSocket(
 				response.Result = map[string]any{
 					"subscribed":  true,
 					"topics":      normalized.Topics,
+					"opcodes":     normalized.Opcodes,
 					"interval_ms": normalized.IntervalMS,
 					"latest_id":   service.Client.LatestEventID(),
+					"principal":   access.Principal,
 				}
 				startWebSocketSubscription(
 					subscriptionContext,
@@ -2705,6 +3310,7 @@ func serveSocketIO(
 	}
 	connection, err := websocket.Accept(writer, request, &websocket.AcceptOptions{
 		OriginPatterns: origins,
+		Subprotocols:   []string{browserWebSocketProtocol},
 	})
 	if err != nil {
 		return
@@ -2833,8 +3439,10 @@ func serveSocketIO(
 					},
 				)
 				_ = writeEvent("subscribed", map[string]any{
-					"topics": normalized.Topics, "interval_ms": normalized.IntervalMS,
-					"latest_id": service.Client.LatestEventID(),
+					"topics": normalized.Topics, "opcodes": normalized.Opcodes,
+					"interval_ms": normalized.IntervalMS,
+					"latest_id":   service.Client.LatestEventID(),
+					"principal":   access.Principal,
 				})
 			case "unsubscribe":
 				if stopSubscription != nil {
@@ -2854,7 +3462,7 @@ func serveSocketIO(
 					_ = writeEvent("error", map[string]string{"error": err.Error()})
 					continue
 				}
-				message = tagInboundMessage(message, "websocket")
+				message = tagInboundAccess(message, access)
 				event, err := service.Client.SendTextMessage(ctx, message)
 				if err != nil {
 					_ = writeEvent("error", map[string]string{"error": err.Error()})
@@ -2872,7 +3480,7 @@ func serveSocketIO(
 				encoded, _ := json.Marshal(params)
 				response := service.dispatch(ctx, Request{
 					JSONRPC: Version, Method: "controller.command.execute",
-					Params: encoded, Auth: service.currentAuthToken(),
+					Params: encoded,
 				}, access)
 				_ = writeEvent("command.response", response)
 			case "rpc":
@@ -2881,7 +3489,7 @@ func serveSocketIO(
 					_ = writeEvent("error", map[string]string{"error": err.Error()})
 					continue
 				}
-				rpcRequest.Auth = service.currentAuthToken()
+				rpcRequest.Auth = ""
 				_ = writeEvent("rpc.response", service.dispatch(ctx, rpcRequest, access))
 			default:
 				_ = writeEvent("error", map[string]string{
@@ -2905,21 +3513,6 @@ func decodeSocketIOEvent(payload string) (string, json.RawMessage, error) {
 		return "", nil, errors.New("Socket.IO event name is required")
 	}
 	return name, values[1], nil
-}
-
-func (service *Service) authorized(token string) bool {
-	expected := strings.TrimSpace(service.currentAuthToken())
-	if expected == "" {
-		return true
-	}
-	provided := strings.TrimSpace(token)
-	if len(expected) == len(provided) &&
-		subtle.ConstantTimeCompare([]byte(expected), []byte(provided)) == 1 {
-		return true
-	}
-	delegation := strings.TrimSpace(service.HostInstanceToken)
-	return delegation != "" && len(delegation) == len(provided) &&
-		subtle.ConstantTimeCompare([]byte(delegation), []byte(provided)) == 1
 }
 
 func (service *Service) currentAuthToken() string {
@@ -2948,41 +3541,13 @@ func authorizeHTTPRequest(
 	request *http.Request,
 	service *Service,
 ) bool {
-	if !httpOriginAllowed(request, service.currentAllowedOrigins()) {
-		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{
-			"error": "request origin is not allowed",
-		})
-		return false
-	}
-	if strings.TrimSpace(service.currentAuthToken()) == "" {
-		return true
-	}
-	token := strings.TrimSpace(request.Header.Get("X-PCController-Token"))
-	if token == "" {
-		authorization := strings.TrimSpace(request.Header.Get("Authorization"))
-		if len(authorization) > 7 && strings.EqualFold(authorization[:7], "Bearer ") {
-			token = strings.TrimSpace(authorization[7:])
-		}
-	}
-	// Web browsers cannot set custom headers on a native WebSocket handshake.
-	// Query-token support is therefore available, but header authentication is
-	// preferred because URLs may be logged by intermediaries.
-	if token == "" {
-		token = request.URL.Query().Get("access_token")
-	}
-	if service.authorized(token) {
-		return true
-	}
-	writer.Header().Set("WWW-Authenticate", "Bearer")
-	writeHTTPJSON(writer, http.StatusUnauthorized, map[string]string{
-		"error": "authentication required",
-	})
-	return false
+	return service.authorizeHTTPRequest(writer, request)
 }
 
 // httpOriginAllowed prevents a browser on an unrelated site from driving the
-// loopback control plane. Native IPC clients normally omit Origin and continue
-// to authenticate through their transport or bearer token.
+// loopback control plane. Missing-Origin policy is explicit in the caller:
+// loopback native clients are allowed, while remote native clients must supply
+// a durable header credential and browser tickets remain Origin-bound.
 func httpOriginAllowed(request *http.Request, allowedPatterns []string) bool {
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
@@ -3061,7 +3626,7 @@ func serveBrowserCORS(
 
 	header := writer.Header()
 	header.Set("Access-Control-Allow-Origin", origin)
-	header.Set("Access-Control-Expose-Headers", "Accept-Ranges, Content-Disposition, Content-Length, Content-Range, ETag")
+	header.Set("Access-Control-Expose-Headers", "Accept-Ranges, Content-Disposition, Content-Length, Content-Range, ETag, X-PCController-Authentication, X-PCController-Principal")
 	header.Add("Vary", "Origin")
 	if request.Method != http.MethodOptions {
 		return false
@@ -3100,7 +3665,7 @@ func serveBrowserCORS(
 }
 
 func corsControlPath(requestPath, webSocketPath string) bool {
-	return requestPath == "/api/v1" || strings.HasPrefix(requestPath, "/api/v1/") ||
+	return requestPath == "/api" || strings.HasPrefix(requestPath, "/api/") ||
 		requestPath == webSocketPath
 }
 
@@ -3124,7 +3689,11 @@ func authorizeHTTPCapability(
 
 func normalizeSubscription(value wsSubscription) (wsSubscription, error) {
 	if len(value.Topics) == 0 {
-		value.Topics = []string{"events"}
+		if len(value.Opcodes) != 0 {
+			value.Topics = []string{"opcodes"}
+		} else {
+			value.Topics = []string{"events"}
+		}
 	}
 	seen := make(map[string]bool)
 	result := make([]string, 0, len(value.Topics))
@@ -3133,7 +3702,11 @@ func normalizeSubscription(value wsSubscription) (wsSubscription, error) {
 		if topic == "telemetry" {
 			topic = "status"
 		}
-		if topic != "events" && topic != "status" {
+		if topic == "opcode" {
+			topic = "opcodes"
+		}
+		if topic != "events" && topic != "state" && topic != "debug" &&
+			topic != "status" && topic != "opcodes" {
 			return wsSubscription{}, fmt.Errorf("unknown subscription topic %q", topic)
 		}
 		if !seen[topic] {
@@ -3142,6 +3715,21 @@ func normalizeSubscription(value wsSubscription) (wsSubscription, error) {
 		}
 	}
 	value.Topics = result
+	seenOpcodes := make(map[int]bool)
+	opcodes := make([]int, 0, len(value.Opcodes))
+	for _, opcode := range value.Opcodes {
+		if opcode < 1 || opcode > 255 {
+			return wsSubscription{}, errors.New("subscription opcodes must be 1..255; 0 is reserved")
+		}
+		if !seenOpcodes[opcode] {
+			seenOpcodes[opcode] = true
+			opcodes = append(opcodes, opcode)
+		}
+	}
+	value.Opcodes = opcodes
+	if len(value.Opcodes) != 0 && !seen["opcodes"] {
+		return wsSubscription{}, errors.New("opcode filters require the opcodes topic")
+	}
 	if seen["status"] {
 		if value.IntervalMS == 0 {
 			value.IntervalMS = 200
@@ -3171,7 +3759,27 @@ func startWebSocketSubscription(
 				// be skipped while this goroutine is still being scheduled.
 				afterID = client.LatestEventID()
 			}
-			go streamWebSocketEvents(ctx, client, afterID, write)
+			go streamWebSocketEventStream(ctx, client, afterID, "activity", "controller.event", write)
+		case "state":
+			afterID := subscription.AfterID
+			if afterID == 0 {
+				afterID = client.LatestEventID()
+			}
+			go streamWebSocketEventStream(ctx, client, afterID, "state", "controller.state", write)
+		case "debug":
+			afterID := subscription.AfterID
+			if afterID == 0 {
+				afterID = client.LatestEventID()
+			}
+			go streamWebSocketEventStream(ctx, client, afterID, "debug", "controller.debug", write)
+		case "opcodes":
+			afterID := subscription.AfterID
+			if afterID == 0 {
+				afterID = client.LatestEventID()
+			}
+			go streamWebSocketOpcodes(
+				ctx, client, afterID, subscription.Opcodes, write,
+			)
 		case "status":
 			go streamWebSocketStatus(
 				ctx,
@@ -3183,24 +3791,32 @@ func startWebSocketSubscription(
 	}
 }
 
-func streamWebSocketEvents(
+func streamWebSocketOpcodes(
 	ctx context.Context,
 	client *controller.Client,
 	afterID uint64,
+	opcodes []int,
 	write func(any) error,
 ) {
+	allowed := make(map[byte]bool, len(opcodes))
+	for _, opcode := range opcodes {
+		allowed[byte(opcode)] = true
+	}
 	for ctx.Err() == nil {
-		event, err := client.NextEvent(ctx, afterID, "")
+		event, err := client.NextOpcodeEvent(ctx, afterID, "", nil)
 		if err != nil {
 			return
 		}
 		afterID = event.ID
-		if !streamableEventKind(event.Kind) {
+		if event.Opcode == 0 {
+			continue
+		}
+		if len(allowed) != 0 && !allowed[event.Opcode] {
 			continue
 		}
 		if err := write(wsNotification{
 			JSONRPC: Version,
-			Method:  "controller.event",
+			Method:  "controller.opcode",
 			Params:  event,
 		}); err != nil {
 			return
@@ -3208,11 +3824,35 @@ func streamWebSocketEvents(
 	}
 }
 
-// streamableEventKind keeps the event topic focused on actionable timeline
-// entries. High-rate status data has its own independently subscribed topic.
+func streamWebSocketEventStream(
+	ctx context.Context,
+	client *controller.Client,
+	afterID uint64,
+	stream string,
+	method string,
+	write func(any) error,
+) {
+	for ctx.Err() == nil {
+		event, err := client.NextEventStream(ctx, afterID, "", stream)
+		if err != nil {
+			return
+		}
+		afterID = event.ID
+		if err := write(wsNotification{
+			JSONRPC: Version,
+			Method:  method,
+			Params:  event,
+		}); err != nil {
+			return
+		}
+	}
+}
+
+// streamableEventKind remains the compatibility classifier for callers that
+// have not yet received an explicit stream field.
 func streamableEventKind(kind string) bool {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "", "telemetry", "rx", "tx":
+	case "", "telemetry", "rx", "tx", "front_panel.segment", "status_led.changed", "buzzer.note":
 		return false
 	default:
 		return true
@@ -3382,6 +4022,99 @@ func decodeParams(raw json.RawMessage, target any) error {
 		return &RPCError{Code: -32602, Message: "invalid params: " + err.Error()}
 	}
 	return nil
+}
+
+func (service *Service) dispatchWebhookAdmin(
+	ctx context.Context,
+	method string,
+	raw json.RawMessage,
+) (any, error) {
+	admin, err := service.webhookAdminService()
+	if err != nil {
+		return nil, err
+	}
+	switch method {
+	case "controller.webhooks.status":
+		var params struct{}
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		return admin.WebhookStatus(ctx)
+	case "controller.webhooks.pending", "controller.webhooks.dead":
+		var params struct {
+			Limit int `json:"limit,omitempty"`
+		}
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		limit, err := normalizeWebhookListLimit(params.Limit)
+		if err != nil {
+			return nil, &RPCError{Code: -32602, Message: err.Error()}
+		}
+		if method == "controller.webhooks.pending" {
+			return admin.WebhookPending(ctx, limit)
+		}
+		return admin.WebhookDead(ctx, limit)
+	case "controller.webhooks.replay", "controller.webhooks.clear":
+		var params webhookSelectorParams
+		if err := decodeParams(raw, &params); err != nil {
+			return nil, err
+		}
+		selector, err := normalizeWebhookSelector(params)
+		if err != nil {
+			return nil, &RPCError{Code: -32602, Message: err.Error()}
+		}
+		if method == "controller.webhooks.replay" {
+			return admin.WebhookReplay(ctx, selector)
+		}
+		return admin.WebhookClearDead(ctx, selector)
+	default:
+		return nil, &RPCError{Code: -32601, Message: "method not found"}
+	}
+}
+
+func (service *Service) webhookAdminService() (WebhookAdminService, error) {
+	if service.WebhookAdmin == nil {
+		return nil, errors.New("outbound webhook delivery service is unavailable")
+	}
+	admin := service.WebhookAdmin()
+	if admin == nil {
+		return nil, errors.New("outbound webhook delivery service is unavailable")
+	}
+	return admin, nil
+}
+
+func normalizeWebhookListLimit(limit int) (int, error) {
+	if limit == 0 {
+		return 25, nil
+	}
+	if limit < 1 || limit > 100 {
+		return 0, errors.New("delivery limit must be 1..100")
+	}
+	return limit, nil
+}
+
+func normalizeWebhookSelector(params webhookSelectorParams) (string, error) {
+	deliveryID := strings.TrimSpace(params.DeliveryID)
+	if params.All {
+		if deliveryID != "" {
+			return "", errors.New("delivery_id and all are mutually exclusive")
+		}
+		if !params.ConfirmAll {
+			return "", errors.New("bulk operation requires all=true and confirm_all=true")
+		}
+		return "all", nil
+	}
+	if params.ConfirmAll {
+		return "", errors.New("confirm_all is valid only when all=true")
+	}
+	if deliveryID == "" {
+		return "", errors.New("delivery_id is required unless all=true")
+	}
+	if len(deliveryID) > 128 || strings.ContainsAny(deliveryID, "\r\n\t") || strings.EqualFold(deliveryID, "all") {
+		return "", errors.New("delivery_id is invalid")
+	}
+	return deliveryID, nil
 }
 
 func parseOptionalTime(value string) (time.Time, error) {

@@ -9,6 +9,7 @@ import {
   pageFromHash,
   pageViewFor,
   shouldOpenSetup,
+	shouldNavigateToUpdates,
   snapshotAfterTransportLoss,
 } from './app'
 import { pageOrder } from './hotkeys'
@@ -55,6 +56,14 @@ describe('transport truth', () => {
     expect(isCompletedHostUpdate({ kind: 'update.completed', metadata: { kind: 'firmware' } })).toBe(false)
     expect(isCompletedHostUpdate({ kind: 'update.failed', metadata: { kind: 'host' } })).toBe(false)
   })
+
+	it('opens the updates page only for fresh pushed update lifecycle events', () => {
+		const now = Date.parse('2026-08-03T00:00:10.000Z')
+		expect(shouldNavigateToUpdates({ kind: 'update.programming', time: '2026-08-03T00:00:09.000Z' }, 'dashboard', now)).toBe(true)
+		expect(shouldNavigateToUpdates({ kind: 'update.programming', time: '2026-08-03T00:00:09.000Z' }, 'updates', now)).toBe(false)
+		expect(shouldNavigateToUpdates({ kind: 'update.completed', time: '2026-08-02T23:59:00.000Z' }, 'dashboard', now)).toBe(false)
+		expect(shouldNavigateToUpdates({ kind: 'status', time: '2026-08-03T00:00:09.000Z' }, 'dashboard', now)).toBe(false)
+	})
 
   it('keeps initial connection truth silent and cues only real later transitions', () => {
     expect(connectionTransitionCue(null, true)).toBeNull()

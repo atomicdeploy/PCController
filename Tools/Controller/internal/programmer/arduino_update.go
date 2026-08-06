@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+
+	"pccontroller.local/controller/internal/netpolicy"
 )
 
 const (
@@ -127,6 +129,7 @@ func SyncToolchainWithRunner(
 	} else {
 		environment = append([]string(nil), environment...)
 	}
+	environment = netpolicy.WithLocalNetworkNoProxy(environment)
 	proxyNames := proxyEnvironmentNames(environment)
 	environment = withDependencyProxyEnvironment(environment)
 	report := ToolchainSyncReport{ProxyVariables: proxyNames}

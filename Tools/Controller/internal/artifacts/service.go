@@ -729,7 +729,7 @@ func decorateDescriptor(value *Descriptor) {
 	if value == nil {
 		return
 	}
-	value.DownloadURL = "/api/v1/artifacts/" + string(value.Kind) + "/" + value.SHA256
+	value.DownloadURL = "/api/artifacts/" + string(value.Kind) + "/" + value.SHA256
 }
 
 func decorateManifest(value *Manifest) {

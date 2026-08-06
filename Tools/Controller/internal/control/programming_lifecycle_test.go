@@ -517,6 +517,9 @@ func TestProgrammingLifecycleDevelopmentEEPROMReinitializationCapturesErrorAndKe
 		device.settings.Flags&native.SettingsProgrammingMode != 0 ||
 		device.settings.LightMode != 0 || device.settings.OutputPersistence != 0 ||
 		device.settings.RelayRestoreMask != 0 || device.safeCalls != 3 ||
+		device.settings.OnBrightness != native.DefaultSettings().OnBrightness ||
+		device.settings.DisplayBrightness != native.DefaultSettings().DisplayBrightness ||
+		device.settings.StatusBrightness != native.DefaultSettings().StatusBrightness ||
 		strings.Join(device.melodies, ",") != "power-down,programming-ready" {
 		t.Fatalf("post-flash development settings were not safe and audible: %+v", device)
 	}

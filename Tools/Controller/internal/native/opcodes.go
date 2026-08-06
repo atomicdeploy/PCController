@@ -12,9 +12,12 @@ const (
 	OpPWMSet    byte = 0x11
 	OpPWMAllOff byte = 0x12
 	// 0x13 is reserved; the current firmware has no PWM mode/auto-demo state.
-	OpStatusRGB      byte = 0x14
-	OpPWMGet         byte = 0x15
-	OpAddressableLED byte = 0x16
+	OpStatusRGB        byte = 0x14
+	OpPWMGet           byte = 0x15
+	OpAddressableLED   byte = 0x16
+	OpStatusEffect     byte = 0x17
+	OpStatusProfileGet byte = 0x18
+	OpStatusProfileSet byte = 0x19
 
 	OpRFTx          byte = 0x20
 	OpRFLearnStart  byte = 0x21
@@ -49,22 +52,26 @@ const (
 	// deliberately ignores any future tail it does not understand.
 	OpProgramState byte = 0x45
 
-	OpACK             byte = 0x80
-	OpHelloResp       byte = 0x81
-	OpError           byte = 0x82
-	OpStatus          byte = 0x90
-	OpSettings        byte = 0x91
-	OpPWMValues       byte = 0x92
-	OpI2CTransferResp byte = 0x93
-	OpRFEntries       byte = 0x94
-	OpTemperatures    byte = 0x95
-	OpFrontPanel      byte = 0x96
-	OpMenuListResp    byte = 0x97
-	OpMacroStatus     byte = 0x98
-	OpMenuLayoutResp  byte = 0x99
-	OpHostMenuRequest byte = 0x9A
-	OpHostMenuState   byte = 0x9B
-	OpEvent           byte = 0xA0
+	OpACK              byte = 0x80
+	OpHelloResp        byte = 0x81
+	OpError            byte = 0x82
+	OpStatus           byte = 0x90
+	OpSettings         byte = 0x91
+	OpPWMValues        byte = 0x92
+	OpI2CTransferResp  byte = 0x93
+	OpRFEntries        byte = 0x94
+	OpTemperatures     byte = 0x95
+	OpFrontPanel       byte = 0x96
+	OpMenuListResp     byte = 0x97
+	OpMacroStatus      byte = 0x98
+	OpMenuLayoutResp   byte = 0x99
+	OpHostMenuRequest  byte = 0x9A
+	OpHostMenuState    byte = 0x9B
+	OpSegmentChanged   byte = 0x9C
+	OpBuzzerChanged    byte = 0x9D
+	OpStatusLEDChanged byte = 0x9E
+	OpStatusProfile    byte = 0x9F
+	OpEvent            byte = 0xA0
 )
 
 const (
@@ -90,8 +97,9 @@ var opcodeNames = map[byte]string{
 	OpTemperatureList: "TEMPERATURE_LIST",
 	OpBuzzer:          "BUZZER", OpPWMSet: "PWM_SET", OpPWMAllOff: "PWM_ALL_OFF",
 	OpStatusRGB: "STATUS_RGB", OpPWMGet: "PWM_GET",
-	OpAddressableLED: "ADDRESSABLE_LED",
-	OpRFTx:           "RF_TX", OpRFLearnStart: "RF_LEARN_START", OpRFLearnCancel: "RF_LEARN_CANCEL",
+	OpAddressableLED: "ADDRESSABLE_LED", OpStatusEffect: "STATUS_EFFECT",
+	OpStatusProfileGet: "STATUS_PROFILE_GET", OpStatusProfileSet: "STATUS_PROFILE_SET",
+	OpRFTx: "RF_TX", OpRFLearnStart: "RF_LEARN_START", OpRFLearnCancel: "RF_LEARN_CANCEL",
 	OpRFLearnClear: "RF_LEARN_CLEAR", OpRFLearnList: "RF_LEARN_LIST",
 	OpRFLearnRemove: "RF_LEARN_REMOVE",
 	OpMenuAction:    "MENU_ACTION", OpRelaySet: "RELAY_SET",
@@ -113,7 +121,10 @@ var opcodeNames = map[byte]string{
 	OpMacroStatus:     "MACRO_STATUS",
 	OpMenuLayoutResp:  "MENU_LAYOUT",
 	OpHostMenuRequest: "HOST_MENU_REQUEST", OpHostMenuState: "HOST_MENU_STATE",
-	OpEvent: "EVENT",
+	OpSegmentChanged: "SEGMENT_CHANGED", OpBuzzerChanged: "BUZZER_CHANGED",
+	OpStatusLEDChanged: "STATUS_LED_CHANGED",
+	OpStatusProfile:    "STATUS_PROFILE",
+	OpEvent:            "EVENT",
 }
 
 func OpcodeName(opcode byte) string {

@@ -51,6 +51,11 @@ binary, checksum, or test run cannot satisfy a newer tree.
 - ✅ Root CMD and Bash launchers share the project-owned Node build policy.
 - ✅ Public build/deployment entry points are PowerShell-free; Node and the
   canonical host own behavior while CMD/Bash remain thin launchers.
+- ✅ One shared command-plan module owns the FQBN/board geometry, canonical host
+  and firmware artifact routes, Controller compile/program argv, and explicit
+  Urclock/USBasp selection. Both CMD/Bash launcher pairs have byte-equivalent
+  plan JSON, help, failure text, and exit-status tests; all require Node 22.12+
+  and ordinary Go tests use stable project-owned executable paths.
 - ✅ A default build is hardware-free and cannot discover, open, reset, or
   program a serial/USB target.
 - ✅ Firmware builds use the resolved dependency profile, real MiniCore compile,
@@ -180,19 +185,32 @@ binary, checksum, or test run cannot satisfy a newer tree.
   cached, and reconciled only on state changes; `--no-tray` disables it.
 - ✅ Per-user desktop/URI registration is opt-in and has an ownership-checked,
   idempotent uninstall path that preserves foreign keys and shortcuts.
+- ✅ Windows notifications, URI registration, and Start-menu shortcut
+  create/read/remove paths are native WinRT/Registry/Shell COM calls with no
+  internal PowerShell process. A bounded TaskDialog preserves validated action
+  buttons when unpackaged toast delivery is unavailable and exposes the
+  degraded backend/reason in status; explicit user-authored `.ps1` automation
+  remains available.
 - ✅ The Windows native shell receives and deduplicates session lock/unlock,
   suspend/resume, and network-state changes as typed runtime/WebSocket events.
 - ✅ Settings windows/dialogs retain stable geometry and avoid flicker, broken
   non-client borders, and duplicate processes.
 - ✅ Platform integration is isolated behind tested adapters; unsupported
   capabilities report unavailable rather than silently succeeding.
+- ✅ Windows COM-owner diagnosis now uses target-scoped Restart Manager first,
+  then a context-killable same-executable helper only when device association is
+  unsupported. The hidden child performs one bounded legacy scan and returns one
+  strict JSON record; it starts no UI/config/network/serial path, never uses a
+  temporary executable, and cannot strand native-query workers in the primary.
+  PID/start-time/executable/window guards and exact terminate confirmation remain.
 - ✅ Measurement history survives host restarts in a separate compact data file,
   prunes expired/duplicate/corrupt-tail records on startup, and remains bounded
   by both configured retention and a 32 MiB storage ceiling; important-event
   timeline persistence stays independent.
 - ⚠️ Validate global hotkeys, notifications, tray/context actions, window
-  activation, theme changes, owner diagnosis, and guarded owner close/terminate
-  on each packaged target OS.
+  activation, theme changes, and guarded owner close/terminate on each packaged
+  target OS. Validate exact external COM-owner association separately for each
+  Windows serial driver; automated fallback tests do not replace that observation.
 
 ### Native TUI acceptance
 
@@ -240,6 +258,11 @@ binary, checksum, or test run cannot satisfy a newer tree.
   the corresponding modal rather than an interfering inline terminal.
 - 🟣 The four-digit preview receives changed frames immediately, preserves
   decimal-point bits, and never waits for the slower general telemetry poll.
+- 🟣 Push-capable physical output mirrors never use repeating read timers in
+  CLI, TUI, WebUI, IPC, WebSocket, Socket.IO, webhook, or bridge adapters.
+  Snapshot reads are limited to connection sync, explicit refresh, detected-gap
+  recovery, and labelled bounded legacy fallback; tests must reject accidental
+  steady-state polling regressions.
 - 🟣 The Build page explains dependency/profile resolution, source and artifact
   identity, compile/package progress, content-addressed backup, reviewed upload,
   verify, reconnect, restore, release staging, and delegated-operation progress.
@@ -325,20 +348,25 @@ binary, checksum, or test run cannot satisfy a newer tree.
   directory, request nodes by ID, track generations, or render `----` plus
   bounded retry/failure states. Implement that profile or record an explicit,
   measured decision to retain the smaller capture fallback.
-- 🚧 [#21](https://github.com/atomicdeploy/PCController/issues/21) and
-  [#40](https://github.com/atomicdeploy/PCController/issues/40): MCU EEPROM owns
-  one Ready color and global RGB brightness. Individually editable per-state
-  colors/effects are host-configured, file-watched, and sent as live overrides;
-  they are not independently persistent MCU settings. Keep that ownership
-  explicit in the UI and final menu/flash tradeoff decision.
+- 🚧 [#107](https://github.com/atomicdeploy/PCController/issues/107): nineteen
+  MCU EEPROM condition records now persist independently editable colors,
+  effects, timing, brightness, alternate colors, and repeats. Go owns the rich
+  factory table and the AVR retains only a compact safety fallback. CLI/TUI/Web
+  controls and push mirrors are source/test complete; physical color/effect and
+  final flash-budget verification remain open before approval.
 
 ## Programming and update safety
 
 - ✅ Artifact selection, URL download, staging, and inventory are inert.
 - ✅ Every board write or host replacement has a separate review/authorization
   boundary and explicit target.
+- 🚧 Host self-update tells secondary instances to exit through pushed events,
+  bounds graceful primary shutdown, validates Windows exit state, publishes via
+  a rollback-safe tombstone transaction, and journals recovery. Keep the
+  restart/interruption regression gate open under
+  [#110](https://github.com/atomicdeploy/PCController/issues/110).
 - ✅ The primary process coordinates authenticated snapshot, quiet outputs,
-  settings/audio preservation, flash+EEPROM backup, write, verify/readback,
+  settings/buzzer preservation, flash+EEPROM backup, write, verify/readback,
   reconnect, restoration, and durable interruption recovery.
 - 🟣 Before latching programming mode, capture the live relay/PWM/settings and
   host-owned visual state; cancel macros; release every relay; smoothly ramp
@@ -360,7 +388,8 @@ binary, checksum, or test run cannot satisfy a newer tree.
   raw logs, manifests, hashes, completeness, and source identity.
 - ✅ The explicit development-only `--reinitialize-eeprom` path records an
   incompatible settings-query error, preserves the untouched raw EEPROM in the
-  mandatory backup, routes through a primary bridge, never restores old
+  mandatory backup, routes through a primary bridge, programs and independently
+  reads back the complete Go-owned factory EEPROM image, never restores old
   semantics/live outputs, and clears its marker only after current-schema
   settings are audible, output-safe, and verified. It cannot be combined with
   the incomplete-backup override and adds no firmware compatibility baggage.
@@ -408,6 +437,22 @@ binary, checksum, or test run cannot satisfy a newer tree.
 - ✅ IPC listeners default to loopback.
 - ✅ Remote mode requires a long token, explicit non-wildcard origins, and a
   capability policy; read/event access does not imply board writes or OS actions.
+  Each installation also supplies a stable, machine-safe remote principal name.
+- ✅ Browser WebSocket and Socket.IO clients exchange their durable header
+  credential for a 30-second, one-use ticket carried in
+  `Sec-WebSocket-Protocol`. Tickets are bound to Origin, peer, transport, and
+  expiry; durable URL credentials, replay, and any application frame before
+  authentication are rejected. Native clients retain Bearer and
+  `X-PCController-Token` header support.
+- ✅ Missing-Origin behavior is explicit and fail-closed: unauthenticated native
+  access is loopback-only, a non-loopback native client must present a durable
+  header credential, and browser tickets always require the same allowed Origin
+  at exchange and upgrade. Ambiguous/conflicting credentials are rejected.
+- ✅ Capability decisions carry a stable principal, transport, authentication
+  mechanism, remote scope, capability, operation, and allow/deny outcome in the
+  security audit stream across HTTP, WebSocket, Socket.IO, local IPC, and bridge
+  dispatch. Bridge traffic currently uses the stable generic `bridge-peer`
+  principal because the dispatcher does not yet receive a configured peer name.
 - ✅ WebSocket events are typed, bounded, demand-counted, and share the primary
   runtime state.
 - ✅ Independent raw RFC 6455 clients and servers verify authenticated standard
@@ -430,6 +475,9 @@ binary, checksum, or test run cannot satisfy a newer tree.
   rejected.
 - ⛔ Remote token possession alone must not grant reset, programming, shutdown,
   virtual keys, power actions, host automation, or bridge calls.
+- ⚠️ Durable host/peer tokens remain protected by process and file permissions;
+  migration to Windows Credential Manager or another OS credential vault is a
+  separate commissioning hardening item.
 - ⚠️ Commission remote access, discovery, webhook receivers, proxy behavior,
   and cross-host bridges only in an isolated test network before deployment.
 
@@ -448,7 +496,7 @@ while Do Not Disturb/Silent is active.
 | State | Hands-on action still required | Tracking |
 |:---:|---|---:|
 | ⏳ | Press and identify every physical key; exercise click, double-click, delayed single-click, hold/repeat, editor roll-over, nested-menu enter/back, motion exit chords, and verify reset count does not change. | [#69](https://github.com/atomicdeploy/PCController/issues/69) |
-| ⏳ | Open/close the enclosure and operate BT Audio while observing reed polarity, display/enclosure-light brightness fades, RGB easing/priority, audio cues, immediate events, and the tLED/tBT thermal roles. | [#70](https://github.com/atomicdeploy/PCController/issues/70), [#71](https://github.com/atomicdeploy/PCController/issues/71) |
+| ⏳ | Open/close the enclosure and operate BT Audio while observing reed polarity, display/enclosure-light brightness fades, RGB easing/priority, buzzer cues, immediate events, and the tLED/tBT thermal roles. | [#70](https://github.com/atomicdeploy/PCController/issues/70), [#71](https://github.com/atomicdeploy/PCController/issues/71) |
 | ⏳ | Identify every PWM/MOSFET and relay channel on safe loads, then verify both motion sides, 1 ms break-before-direction, hold-to-run/release-to-stop, interlocks, policy modes, and emergency stop. | [#71](https://github.com/atomicdeploy/PCController/issues/71), [#72](https://github.com/atomicdeploy/PCController/issues/72) |
 | ⏳ | Resume guided RF learning for handset buttons B, C, and D after reviewing A; confirm explicit mappings, click/hold/repeat/release latency, CRUD/reorder, and an INT1 transmit observed by another receiver. | [#73](https://github.com/atomicdeploy/PCController/issues/73) |
 | ⏳ | Connect/confirm the optional LCD, perform a real USB disconnect/reconnect cycle, and run/cancel the prepared harmless synchronized macro while checking board/host timing and state. | [#74](https://github.com/atomicdeploy/PCController/issues/74) |
@@ -462,7 +510,8 @@ alone; its linked issue remains open until the physical observation is recorded.
   timer duration/remaining time and a definite ended/cancelled/full event;
   `single` and `one-shot` remain accepted/documented synonyms for `timer`.
 - ✅ Host source surfaces now provide one guided A/B/C/D step at a time, exact
-  stored-identity readback, explicit confirmation before semantic mapping,
+  stored-identity readback, an Unmapped-first review with no A/B/C/D-to-K1/K2/K3/K4
+  inference, preservation only of an explicit mapping read back from the board,
   stale/unmapped/duplicate review, guarded remove/clear, one-burst transmit,
   cancellation, disconnect recovery, RTL/LTR layout, and keyboard operation.
   The physical latency, gesture, range, and second-receiver observations remain

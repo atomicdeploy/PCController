@@ -135,6 +135,8 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
   }
   switch (kind) {
     case RemoteActionKind::Key:
+      // RF mappings execute in this receive-service pass. Click names the
+      // completed wireless press for telemetry; it is not a delayed trigger.
       appEvents.key(remote.actionValue,
                     static_cast<uint8_t>(KeyEvent::Click),
                     InputEventSource::Radio, remote.id);

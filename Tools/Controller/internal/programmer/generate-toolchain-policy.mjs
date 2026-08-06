@@ -28,11 +28,14 @@ if (lock?.format !== 'pccontroller-toolchain-lock/v1' ||
 }
 
 const canonicalPolicy = `${JSON.stringify(policy, null, 2)}\n`
+const canonicalLock = `${JSON.stringify(lock, null, 2)}\n`
 const source = `// Code generated from ../../toolchain-profile.json by generate-toolchain-policy.mjs; DO NOT EDIT.
 
 package programmer
 
 const generatedToolchainPolicyJSON = ${JSON.stringify(canonicalPolicy)}
+
+const generatedToolchainLockJSON = ${JSON.stringify(canonicalLock)}
 
 const (
 	generatedBoardMCU                     = ${JSON.stringify(target.mcu)}

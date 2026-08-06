@@ -89,11 +89,9 @@ struct ControllerSettings {
   // Stable boot page ID plus packed save/color/decimal presentation options.
   uint8_t defaultMenuPage;
   uint8_t menuFlags;
-#if PCCONTROLLER_MENU_VISIBILITY
+#if PCCONTROLLER_MENU_LAYOUT_STORAGE
   // Stable page IDs remain unchanged; the mask only controls local browsing.
   uint16_t visibleMenuMask;
-#endif
-#if PCCONTROLLER_MENU_ORDERING
   // Two stable page IDs per byte, low nibble first; rank is the wire order.
   uint8_t menuOrder[PersistentMenuOrderWireBytes];
 #endif
@@ -253,12 +251,9 @@ constexpr uint8_t ControllerSettingsPrefixSize = 7;
 static_assert(offsetof(ControllerSettings, streamPeriodMs) ==
                   ControllerSettingsPrefixSize,
               "Controller settings prefix layout changed");
-#if PCCONTROLLER_MENU_ORDERING
+#if PCCONTROLLER_MENU_LAYOUT_STORAGE
 static_assert(sizeof(ControllerSettings) == 31,
-              "Packed menu order changed AVR EEPROM/RAM layout");
-#elif PCCONTROLLER_MENU_VISIBILITY
-static_assert(sizeof(ControllerSettings) == 24,
-              "Visible menu mask changed AVR EEPROM/RAM layout");
+              "Host-owned packed menu storage changed AVR EEPROM/RAM layout");
 #else
 static_assert(sizeof(ControllerSettings) == 22,
               "Controller settings AVR layout changed");
@@ -270,6 +265,7 @@ class SettingsStore {
 public:
   static constexpr int EepromAddress = EepromLayout::SettingsAddress;
   static constexpr uint16_t SaveDelayMs = 1500;
+  static constexpr uint8_t MaximumBoardNameLength = 8;
 
   // Loads a valid EEPROM record or installs development defaults in RAM.
   bool begin(uint32_t now = millis());
@@ -283,14 +279,22 @@ public:
   // Writes the checksum-backed record immediately with EEPROM.update wear reduction.
   bool saveNow();
   bool dirty() const;
+  bool persisted() const;
+
+  // Reads the compact length/name record into the SETTINGS response tail.
+  bool boardName(uint8_t *record) const;
+  bool setBoardName(const uint8_t *name, uint8_t length);
 
 private:
   void setDefaults();
   bool loadCurrent();
 
   ControllerSettings settings_{}; // Live MCU settings; never host-config storage.
+  uint8_t boardNameLength_ = 0;
+  uint8_t boardName_[MaximumBoardNameLength]{};
   uint32_t changedAt_ = 0;
   bool dirty_ = false;
+  bool persisted_ = false;
 };
 
 // settingsStore is the single MCU EEPROM settings owner.

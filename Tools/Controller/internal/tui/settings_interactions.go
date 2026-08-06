@@ -255,6 +255,16 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	if strings.HasPrefix(editor.Key, "led.") {
 		return model.commitStatusLEDSettingEditor()
 	}
+	if editor.Key == "buzzer.path" {
+		paths := []string{"board", "host", "both", "none"}
+		selected := editorField(editor, "path")
+		if selected < 0 || selected >= len(paths) {
+			model.setNotice("Unknown buzzer path")
+			return model, nil, true
+		}
+		model.settingEditor = nil
+		return model.dispatchLine("buzzer path " + paths[selected])
+	}
 	ui := model.uiValue
 	switch editor.Key {
 	case "app.title":
@@ -269,6 +279,19 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 			model.prefs = preferencesFromUI(ui)
 			model.settingEditor = nil
 			return model.dispatchLine("config set ui.app_title " + title)
+		}
+	case "app.tagline":
+		tagline := strings.TrimSpace(editor.Text)
+		if tagline == "" || len([]rune(tagline)) > 96 || strings.ContainsAny(tagline, "\r\n\t") {
+			model.setNotice("Tagline must be 1..96 printable characters")
+			return model, nil, true
+		}
+		ui.Tagline = tagline
+		if model.saveUI == nil {
+			model.uiValue = ui
+			model.prefs = preferencesFromUI(ui)
+			model.settingEditor = nil
+			return model.dispatchLine("config set ui.tagline " + tagline)
 		}
 	case "appearance.identity":
 		themes := []string{"system", "light", "dark"}
@@ -380,11 +403,11 @@ func (model Model) commitStatusLEDSettingEditor() (Model, tea.Cmd, bool) {
 		case "steady":
 			visual.PeriodMS = 0
 		case "flash":
-			if visual.PeriodMS < 200 {
-				visual.PeriodMS = 400
+			if visual.PeriodMS < int(native.StatusEffectMinimumPeriodMS) {
+				visual.PeriodMS = int(native.StatusEffectMinimumPeriodMS)
 			}
 		default:
-			if visual.PeriodMS < 400 {
+			if visual.PeriodMS < int(native.StatusEffectMinimumPeriodMS) {
 				visual.PeriodMS = 1000
 			}
 		}

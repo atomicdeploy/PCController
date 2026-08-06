@@ -40,6 +40,9 @@ type Status struct {
 	StatusLEDState           string                          `json:"status_led_state,omitempty"`
 	SegmentScroll            bool                            `json:"segment_scroll_active"`
 	SegmentText              string                          `json:"segment_scroll_text,omitempty"`
+	BuzzerMirror             bool                            `json:"buzzer_mirror_active"`
+	BuzzerNativeState        string                          `json:"buzzer_native_state,omitempty"`
+	BuzzerNativeLastError    string                          `json:"buzzer_native_last_error,omitempty"`
 	WebhooksActive           int                             `json:"webhooks_active"`
 	WebhookQueuePending      int                             `json:"webhook_queue_pending"`
 	WebhookDeadLetters       int                             `json:"webhook_dead_letters"`
@@ -60,6 +63,7 @@ type peerState struct {
 	events        chan controller.Event
 	mu            sync.RWMutex
 	session       *peerRPCSession
+	lastError     string
 }
 
 // PeerInfo is the non-secret, live state exposed by bridge list APIs.
@@ -69,6 +73,7 @@ type PeerInfo struct {
 	Connected     bool   `json:"connected"`
 	AllowCommands bool   `json:"allow_commands"`
 	ForwardEvents bool   `json:"forward_events"`
+	LastError     string `json:"last_error,omitempty"`
 }
 
 type peerRPCSession struct {
@@ -167,6 +172,7 @@ func (session *peerRPCSession) Close(err error) {
 func (peer *peerState) attach(session *peerRPCSession) func() {
 	peer.mu.Lock()
 	peer.session = session
+	peer.lastError = ""
 	peer.mu.Unlock()
 	return func() {
 		peer.mu.Lock()
@@ -206,7 +212,11 @@ type Manager struct {
 	runningDoorWarning bool
 	statusLED          *statusLEDArbiter
 	segmentScroll      *segmentScrollPresenter
+	buzzerJobs         chan buzzerMirrorJob
+	discoveryRefresh   chan struct{}
 }
+
+const integrationShutdownTimeout = 8 * time.Second
 
 func Start(
 	parent context.Context,
@@ -216,6 +226,10 @@ func Start(
 ) (*Manager, error) {
 	if client == nil || store == nil {
 		return nil, fmt.Errorf("host bridge requires controller client and configuration store")
+	}
+	runtimeConfig, err := store.Runtime()
+	if err != nil {
+		return nil, fmt.Errorf("resolve host integration secrets: %w", err)
 	}
 	ctx, cancel := context.WithCancel(parent)
 	manager := &Manager{
@@ -227,11 +241,13 @@ func Start(
 		notifier:          hostui.NewNotifier(hostui.NotifierOptions{AppID: productidentity.StableAppID}),
 		notificationQueue: newNotificationQueue(16, 3*time.Second, 500*time.Millisecond),
 		warningBeep:       hostui.WarningBeep,
+		buzzerJobs:        make(chan buzzerMirrorJob, 32),
+		discoveryRefresh:  make(chan struct{}, 1),
 	}
 	webhooks, err := newWebhookDeliveryQueue(webhookQueueOptions{
 		Path: defaultWebhookQueuePath(store.Path()),
 		Resolve: func(name string) (appconfig.Webhook, bool) {
-			for _, candidate := range store.Current().Integrations.OutboundWebhooks {
+			for _, candidate := range store.CurrentRuntime().Integrations.OutboundWebhooks {
 				if strings.EqualFold(strings.TrimSpace(candidate.Name), strings.TrimSpace(name)) {
 					return candidate, true
 				}
@@ -287,7 +303,7 @@ func Start(
 		_ = manager.statusLED.PrepareDisconnect(requestContext)
 		requestCancel()
 	})
-	if err := manager.reconcile(store.Current()); err != nil {
+	if err := manager.reconcile(runtimeConfig); err != nil {
 		client.SetBeforeDisconnectHook(nil)
 		cancel()
 		return nil, err
@@ -310,7 +326,7 @@ func Start(
 	// published immediately after Start returns can land between the goroutine
 	// launch and its first LatestEventID call and be skipped forever.
 	afterID := client.LatestEventID()
-	manager.wait.Add(6)
+	manager.wait.Add(8)
 	manager.webhooks.Start()
 	go func() {
 		defer manager.wait.Done()
@@ -327,6 +343,8 @@ func Start(
 		manager.segmentScroll.Run()
 	}()
 	go manager.notificationLoop()
+	go manager.buzzerMirrorLoop()
+	go manager.discoveryMetadataLoop()
 	return manager, nil
 }
 
@@ -381,7 +399,30 @@ func (manager *Manager) Close() {
 	for _, peer := range peers {
 		peer.cancel()
 	}
-	manager.wait.Wait()
+	if !waitForIntegrationShutdown(&manager.wait, integrationShutdownTimeout) {
+		manager.setLastError("host integration shutdown exceeded 8 seconds; remaining workers were abandoned for process exit")
+	}
+}
+
+func waitForIntegrationShutdown(wait *sync.WaitGroup, timeout time.Duration) bool {
+	if wait == nil {
+		return true
+	}
+	done := make(chan struct{})
+	go func() {
+		wait.Wait()
+		close(done)
+	}()
+	if timeout <= 0 {
+		<-done
+		return true
+	}
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 func (manager *Manager) Status() Status {
@@ -423,6 +464,7 @@ func (manager *Manager) BridgePeers() []PeerInfo {
 			Name: peer.name, Protocol: peer.protocol,
 			Connected: peer.session != nil, AllowCommands: peer.allowCommands,
 			ForwardEvents: peer.forwardEvents,
+			LastError:     peer.lastError,
 		})
 		peer.mu.RUnlock()
 	}
@@ -432,7 +474,7 @@ func (manager *Manager) BridgePeers() []PeerInfo {
 	return result
 }
 
-// CallBridge invokes one versioned JSON-RPC method through an already
+// CallBridge invokes one JSON-RPC method through an already
 // authenticated outbound peer connection. The remote host applies its own
 // remote capability policy before touching its serial owner.
 func (manager *Manager) CallBridge(
@@ -553,7 +595,7 @@ func (manager *Manager) NotificationStatus() hostui.NotificationStatus {
 
 func (manager *Manager) reconcileLoop() {
 	defer manager.wait.Done()
-	updates := manager.store.Subscribe(manager.ctx)
+	updates := manager.store.SubscribeRuntime(manager.ctx)
 	for config := range updates {
 		if err := manager.reconcile(config); err != nil {
 			manager.recordError("integration reload: " + err.Error())
@@ -590,6 +632,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	statusLEDState := manager.status.StatusLEDState
 	segmentScrollActive := manager.status.SegmentScroll
 	segmentScrollText := manager.status.SegmentText
+	buzzerNativeState := manager.status.BuzzerNativeState
+	buzzerNativeLastError := manager.status.BuzzerNativeLastError
 	doorWarning := manager.runningDoorWarning
 	manager.advertiser, manager.hotkeys, manager.keyboard = nil, nil, nil
 	manager.peers = make(map[string]*peerState)
@@ -608,12 +652,21 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	}
 
 	status := Status{
-		Notifications:  config.Integrations.Notifications.Enabled,
-		Desktop:        desktopStatus,
-		StatusLEDState: statusLEDState,
-		SegmentScroll:  segmentScrollActive,
-		SegmentText:    segmentScrollText,
-		DoorWarning:    doorWarning,
+		Notifications:         config.Integrations.Notifications.Enabled,
+		BuzzerMirror:          config.Integrations.BuzzerMirror.Enabled,
+		BuzzerNativeState:     buzzerNativeState,
+		BuzzerNativeLastError: buzzerNativeLastError,
+		Desktop:               desktopStatus,
+		StatusLEDState:        statusLEDState,
+		SegmentScroll:         segmentScrollActive,
+		SegmentText:           segmentScrollText,
+		DoorWarning:           doorWarning,
+	}
+	if !config.Integrations.BuzzerMirror.Enabled || !config.Integrations.BuzzerMirror.NativeEnabled {
+		status.BuzzerNativeState = "disabled"
+		status.BuzzerNativeLastError = ""
+	} else if status.BuzzerNativeState == "" || status.BuzzerNativeState == "disabled" {
+		status.BuzzerNativeState = "untested"
 	}
 	hotkeys := hostui.NewHotkeyRegistrar()
 	var hotkeyBindings []hostui.HotkeyBinding
@@ -670,11 +723,7 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		created, err := discovery.Advertise(
 			manager.ctx, name, port,
 			discoveryConfig.MDNSEnabled, discoveryConfig.SSDPEnabled,
-			[]string{
-				"ws=" + config.IPC.WebSocketPath,
-				"socketio=" + config.IPC.SocketIOPath,
-				"auth=required",
-			},
+			discoveryMetadata(config, manager.client.Snapshot()),
 		)
 		if err != nil {
 			_ = hotkeys.Stop()
@@ -781,6 +830,8 @@ func (manager *Manager) eventLoop(afterID uint64) {
 		manager.dispatchWebhooks(config, event)
 		manager.dispatchTextMappings(config, event)
 		manager.dispatchNotification(config, event)
+		manager.dispatchBuzzerMirror(config, event)
+		manager.requestDiscoveryMetadataRefresh()
 		if bridgeEventForwardable(event) {
 			manager.mu.RLock()
 			for _, peer := range manager.peers {
@@ -1052,7 +1103,11 @@ func (manager *Manager) runWebSocketPeer(
 		if ctx.Err() != nil {
 			return
 		}
-		manager.recordError("WebSocket " + config.Name + ": " + err.Error())
+		message := "WebSocket " + config.Name + ": " + err.Error()
+		peer.mu.Lock()
+		peer.lastError = err.Error()
+		peer.mu.Unlock()
+		manager.recordError(message)
 		select {
 		case <-ctx.Done():
 			return

@@ -74,7 +74,7 @@ func TestClientUsesFixedRoutesAndStrictJSONActions(t *testing.T) {
 			received = append(received, action)
 			mu.Unlock()
 			_ = json.NewEncoder(writer).Encode(ActionResult{
-				Contract: ContractVersion, Accepted: true, Action: action.Type,
+				Contract: ContractID, Accepted: true, Action: action.Type,
 				CompletedAt: now, Snapshot: snapshotPointer(testSnapshot(5, PowerOff, now)),
 			})
 		default:
@@ -92,7 +92,7 @@ func TestClientUsesFixedRoutesAndStrictJSONActions(t *testing.T) {
 		t.Fatalf("client transport was not hardened: %#v", client.http.Transport)
 	}
 	capabilities, err := client.Capabilities(context.Background())
-	if err != nil || capabilities.Contract != ContractVersion || capabilities.DeviceID != "pc-unit-7" {
+	if err != nil || capabilities.Contract != ContractID || capabilities.DeviceID != "pc-unit-7" {
 		t.Fatalf("capabilities=%#v err=%v", capabilities, err)
 	}
 	snapshot, err := client.Snapshot(context.Background())
@@ -149,7 +149,7 @@ func TestClientRefusesRedirectsUnknownFieldsAndOversizedBodies(t *testing.T) {
 		case CapabilitiesPath:
 			http.Redirect(writer, request, SnapshotPath, http.StatusTemporaryRedirect)
 		case SnapshotPath:
-			_, _ = io.WriteString(writer, `{"contract":"pccontroller.local-device/v1","device_id":"pc-unit-7","sequence":1,"power":"on","updated_at":"2026-08-02T11:12:13Z","secret":"blocked"}`)
+			_, _ = io.WriteString(writer, `{"contract":"pccontroller.local-device","device_id":"pc-unit-7","sequence":1,"power":"on","updated_at":"2026-08-02T11:12:13Z","secret":"blocked"}`)
 		}
 	}))
 	defer server.Close()
@@ -200,7 +200,7 @@ func TestClientRejectsTransportThatCannotBeHardened(t *testing.T) {
 
 func testCapabilities() Capabilities {
 	return Capabilities{
-		Contract: ContractVersion,
+		Contract: ContractID,
 		DeviceID: "pc-unit-7",
 		Name:     "PCController local device",
 		Model:    "LD-1",
@@ -215,7 +215,7 @@ func testCapabilities() Capabilities {
 
 func testSnapshot(sequence uint64, power PowerState, updatedAt time.Time) Snapshot {
 	return Snapshot{
-		Contract: ContractVersion, DeviceID: "pc-unit-7", Sequence: sequence,
+		Contract: ContractID, DeviceID: "pc-unit-7", Sequence: sequence,
 		Power: power, DisplayMessage: "private display text", AlertPulses: 2,
 		UpdatedAt: updatedAt,
 	}

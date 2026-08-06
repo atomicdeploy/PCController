@@ -85,8 +85,11 @@ func runProgramWithConfig(
 	mcu := flags.String("mcu", "atmega328p", "avrdude MCU")
 	baud := flags.Int("baud", 115200, "urclock baud rate")
 	toolchainCLI := flags.String("toolchain-cli", config.Programming.ToolchainCLI, "firmware dependency CLI executable")
+	toolchainConfig := flags.String("toolchain-config", config.Programming.ToolchainConfig, "firmware dependency CLI configuration file")
 	avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
+	usbaspBitClock := flags.Float64("usbasp-bitclock-us", 0, "force USBasp AVRDUDE -B bit-clock period in microseconds")
+	usbaspAutoSlow := flags.Bool("usbasp-auto-slow", true, "retry the first failed USBasp exchange at the conservative -B32 period")
 	allowIncompleteBackup := flags.Bool(
 		"allow-incomplete-backup",
 		false,
@@ -135,9 +138,16 @@ func runProgramWithConfig(
 		Port:      *port, HexPath: *hexPath, SketchPath: *sketch,
 		OutputDir: *outputDir, OutputPath: *outputPath,
 		FQBN: *fqbn, Programmer: *programmerName,
-		MCU: *mcu, BaudRate: *baud, ArduinoCLI: *toolchainCLI,
+		MCU: *mcu, BaudRate: *baud, ArduinoCLI: *toolchainCLI, ArduinoConfig: *toolchainConfig,
 		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf,
 		ConfirmEEPROMWrite: *confirmEEPROM,
+		USBaspBitClockUS:   *usbaspBitClock, USBaspAutoSlow: *usbaspAutoSlow,
+	}
+	if options.Operation == programmer.OperationChipErase {
+		return errors.New("raw chip erase is disabled; use 'controller board blank' for mandatory backup, EEPROM clearing, and full readback")
+	}
+	if options.USBaspBitClockUS < 0 {
+		return errors.New("--usbasp-bitclock-us must be zero or positive")
 	}
 	// A dry-run describes the dependency command without probing the machine;
 	// real execution still resolves and validates the configured executable.
@@ -481,11 +491,28 @@ func monitorPrimaryFirmwareUpdate(
 }
 
 func runEEPROM(args []string, stdout, stderr io.Writer) error {
-	const usage = "usage: controller eeprom inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
+	const usage = "usage: controller eeprom factory-defaults --output EEPROM.hex | inspect (--input IMAGE.hex | --backup-manifest MANIFEST.json) | export --backup-manifest MANIFEST.json --output SETTINGS.hex | import --backup-manifest MANIFEST.json --settings SETTINGS.hex --output EEPROM.hex | restore --backup-manifest MANIFEST.json --output EEPROM.hex"
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
 	switch strings.ToLower(args[0]) {
+	case "factory-defaults":
+		flags := flag.NewFlagSet("eeprom factory-defaults", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		output := flags.String("output", "", "new no-overwrite host-owned factory EEPROM Intel HEX image")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || strings.TrimSpace(*output) == "" {
+			return errors.New(usage)
+		}
+		if err := programmer.WriteDefaultEEPROMIntelHex(*output); err != nil {
+			return err
+		}
+		fmt.Fprintln(stdout, "factory EEPROM image:", *output)
+		fmt.Fprintln(stdout, "Includes current settings, empty RF storage, reset journal space, and host-owned status LED profiles; no board was written.")
+		return nil
+
 	case "inspect":
 		flags := flag.NewFlagSet("eeprom inspect", flag.ContinueOnError)
 		flags.SetOutput(stderr)
@@ -813,6 +840,16 @@ func executeGuardedCLIFlash(
 		fmt.Fprintln(output, "guarded firmware flash completed")
 	}
 	verifiedProgram := flashErr == nil && result.Flashed
+	if verifiedProgram && reinitializeEEPROM {
+		if factoryErr := programFactoryEEPROM(
+			context.WithoutCancel(ctx), paths, options, output,
+		); factoryErr != nil {
+			flashErr = errors.Join(flashErr, factoryErr)
+			verifiedProgram = false
+		} else {
+			fmt.Fprintln(output, "host-owned factory EEPROM programmed and independently read back")
+		}
+	}
 	if programmingSession != nil {
 		if markerErr := control.MarkProgrammingSessionComplete(
 			programmingSession, verifiedProgram,
@@ -874,6 +911,39 @@ func executeGuardedCLIFlash(
 		)
 	}
 	return errors.Join(flashErr, reconnectErr, restoreErr)
+}
+
+func programFactoryEEPROM(
+	ctx context.Context,
+	paths programmer.HostDataPaths,
+	base programmer.Options,
+	output io.Writer,
+) error {
+	temporary, err := os.CreateTemp(paths.StateDir, "factory-eeprom-*.hex")
+	if err != nil {
+		return fmt.Errorf("reserve host-owned factory EEPROM image: %w", err)
+	}
+	path := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("prepare host-owned factory EEPROM image: %w", err)
+	}
+	defer os.Remove(path)
+	if err := programmer.WriteDefaultEEPROMIntelHex(path); err != nil {
+		return err
+	}
+	write := base
+	write.Operation = programmer.OperationWriteEEPROM
+	write.HexPath = path
+	write.OutputPath = ""
+	write.ConfirmEEPROMWrite = true
+	if err := programmer.Execute(ctx, write, output); err != nil {
+		return fmt.Errorf("program host-owned factory EEPROM: %w", err)
+	}
+	return nil
 }
 
 func readApplicationIdentityBeforeProgramming(
@@ -1200,6 +1270,7 @@ func runToolchainBootstrap(
 	if bootstrapErr == nil && !*dryRun && *saveCLI {
 		_, saveErr := store.Update(func(config *appconfig.Config) error {
 			config.Programming.ToolchainCLI = report.CLIPath
+			config.Programming.ToolchainConfig = report.ConfigPath
 			return nil
 		})
 		if saveErr != nil {

@@ -205,14 +205,15 @@ const (
 )
 
 type RestorePlanOptions struct {
-	Method      Method
-	Port        string
-	Programmer  string
-	MCU         string
-	Components  []RestoreComponent
-	Avrdude     string
-	AvrdudeConf string
-	ArduinoCLI  string
+	Method        Method
+	Port          string
+	Programmer    string
+	MCU           string
+	Components    []RestoreComponent
+	Avrdude       string
+	AvrdudeConf   string
+	ArduinoCLI    string
+	ArduinoConfig string
 }
 
 type RestoreStep struct {
@@ -281,7 +282,8 @@ func PlanSafeRestore(manifestPath string, options RestorePlanOptions) (RestorePl
 			Method: options.Method, Port: options.Port, Programmer: options.Programmer,
 			MCU: options.MCU, Avrdude: options.Avrdude,
 			AvrdudeConf: options.AvrdudeConf, ArduinoCLI: options.ArduinoCLI,
-			HexPath: file.Path,
+			ArduinoConfig: options.ArduinoConfig,
+			HexPath:       file.Path,
 		}
 		switch component {
 		case RestoreFlash:

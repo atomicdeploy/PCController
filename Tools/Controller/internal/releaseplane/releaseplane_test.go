@@ -310,7 +310,7 @@ func TestLocalManifestServesContentAddressedInventory(t *testing.T) {
 	}
 	defer service.Close()
 
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/discovery/manifest", nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/discovery/manifest", nil)
 	response := httptest.NewRecorder()
 	service.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -324,7 +324,7 @@ func TestLocalManifestServesContentAddressedInventory(t *testing.T) {
 		t.Fatalf("manifest=%#v", manifest)
 	}
 	item := manifest.Artifacts[0]
-	if item.SHA256 != descriptor.SHA256 || item.URL != "/api/v1/artifacts/firmware/"+descriptor.SHA256 ||
+	if item.SHA256 != descriptor.SHA256 || item.URL != "/api/artifacts/firmware/"+descriptor.SHA256 ||
 		item.BuildHash != "FEEDBEEF" || item.PackedTimestamp != 0x01020304 ||
 		item.Metadata["provider"] != "github-release" || item.Metadata["release_id"] != "55" {
 		t.Fatalf("published artifact=%#v", item)

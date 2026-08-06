@@ -34,7 +34,7 @@ worker permanently.
 
 The embedded interface keeps its ordinary relative routes:
 
-- REST and RPC use canonical `/api/v1/...` URLs;
+- REST and RPC use canonical `/api/...` URLs;
 - events and full-duplex RPC use the configured `/ipc` WebSocket path; and
 - no target override is stored for normal executable-hosted use.
 

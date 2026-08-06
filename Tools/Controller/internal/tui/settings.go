@@ -78,7 +78,7 @@ func peripheralDescriptorForSettingKey(key string) (appconfig.PeripheralDescript
 func (model Model) boardSettingRows() []settingRow {
 	settings := model.snapshot().Settings
 	return []settingRow{
-		{Key: "sound.silent", Group: "AUDIO", Label: "Silent mode", Value: boolWord(settings.Flags&native.SettingsSilent != 0, "ON", "OFF"), Editable: true},
+		{Key: "sound.silent", Group: "BUZZER", Label: "Board silent mode", Value: boolWord(settings.Flags&native.SettingsSilent != 0, "ON", "OFF"), Editable: true},
 		{Key: "programming.lock", Group: "", Label: "Programming lock", Value: boolWord(settings.Flags&native.SettingsProgrammingMode != 0, "ACTIVE", "CLEAR")},
 		{Key: "illumination.mode", Group: "LIGHTING", Label: "Enclosure illumination", Value: lightModeName(settings.LightMode), Editable: true},
 		{Key: "illumination.on", Group: "", Label: "Door-open brightness", Value: formatPercent(bytePercent(settings.OnBrightness)), Editable: true},
@@ -96,8 +96,8 @@ func (model Model) boardSettingRows() []settingRow {
 		{Key: "motion.door", Group: "MOTION", Label: "Motion allowed by door state", Value: motionDoorPolicyName(settings.MotionDoorPolicy()), Editable: true},
 		{Key: "motion.exit", Group: "", Label: "Menu exit hold", Value: fmt.Sprintf("%d s", settings.MotionExitHoldSeconds), Editable: true},
 		{Key: "motion.break", Group: "", Label: "Direction dead-time", Value: fmt.Sprintf("%d ms", settings.MotionBreakMS()), Editable: true},
-		{Key: "audio.door", Group: "CUES", Label: "Door open/close audio cues", Value: boolWord(settings.DoorAudioEnabled(), "ENABLED", "DISABLED"), Editable: true},
-		{Key: "audio.relay", Group: "", Label: "Relay on/off audio cues", Value: boolWord(settings.RelayAudioEnabled(), "ENABLED", "DISABLED"), Editable: true},
+		{Key: "audio.door", Group: "CUES", Label: "Door open/close buzzer cues", Value: boolWord(settings.DoorAudioEnabled(), "ENABLED", "DISABLED"), Editable: true},
+		{Key: "audio.relay", Group: "", Label: "Relay on/off buzzer cues", Value: boolWord(settings.RelayAudioEnabled(), "ENABLED", "DISABLED"), Editable: true},
 	}
 }
 
@@ -105,8 +105,11 @@ func (model Model) appSettingRows() []settingRow {
 	ui := model.uiValue
 	appearance := appconfig.NormalizeAppearance(ui.Appearance)
 	status := model.hostIntegrationValue.StatusLED
+	buzzerPath := tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
 	rows := []settingRow{
 		{Key: "app.title", Group: "APPLICATION", Label: "Title", Value: model.prefs.AppTitle, Editable: true},
+		{Key: "app.tagline", Group: "", Label: "First-run tagline", Value: model.prefs.Tagline, Editable: true},
+		{Key: "buzzer.path", Group: "BUZZER", Label: "Playback path", Value: strings.ToUpper(buzzerPath), Editable: true},
 		{Key: "appearance.identity", Group: "APPEARANCE", Label: "Theme · language · direction", Value: fmt.Sprintf("%s · %s · %s", appearanceThemeLabel(appearance.Theme), appearanceLocaleLabel(appearance.Locale), strings.ToUpper(appearance.Direction)), Editable: true},
 		{Key: "appearance.accessibility", Group: "", Label: "Motion · number density", Value: fmt.Sprintf("%s · %s", boolWord(appearance.ReduceMotion, "REDUCED", "FULL"), boolWord(appearance.CompactNumbers, "COMPACT", "DETAILED")), Editable: true},
 		{Key: "appearance.audio", Group: "", Label: "Interface audio", Value: fmt.Sprintf("%s · %.0f%%", boolWord(appearance.AudioMuted, "MUTED", "ON"), appearance.AudioVolume*100), Editable: true},
@@ -296,6 +299,15 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 	case "app.title":
 		editor.IsText = true
 		editor.Text = ui.AppTitle
+	case "app.tagline":
+		editor.IsText = true
+		editor.Text = ui.Tagline
+	case "buzzer.path":
+		path := tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
+		editor.Fields = []settingEditorField{{
+			Key: "path", Label: "Buzzer path", Value: map[string]int{"board": 0, "host": 1, "both": 2, "none": 3}[path],
+			Options: []settingOption{{0, "Board"}, {1, "PC host"}, {2, "Both"}, {3, "None"}},
+		}}
 	case "appearance.identity":
 		appearance := appconfig.NormalizeAppearance(ui.Appearance)
 		theme := map[string]int{"system": 0, "light": 1, "dark": 2}[appearance.Theme]
@@ -373,6 +385,19 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			}
 		}
 	}
+}
+
+func tuiBuzzerPath(boardSilent, hostSilent bool) string {
+	if !boardSilent && !hostSilent {
+		return "both"
+	}
+	if !boardSilent {
+		return "board"
+	}
+	if !hostSilent {
+		return "host"
+	}
+	return "none"
 }
 
 func appearanceThemeLabel(value string) string {

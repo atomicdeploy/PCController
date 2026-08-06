@@ -82,15 +82,16 @@ func TestWin32ResourcesMatchCanonicalPackageMetadata(t *testing.T) {
 }
 
 func TestTitlePrecedence(t *testing.T) {
-	t.Setenv(RuntimeTitleEnvironment, "")
 	if got := Title("Workshop Controller"); got != "Workshop Controller" {
 		t.Fatalf("configured title=%q", got)
 	}
 	if got := Title(""); got != DefaultTitle {
 		t.Fatalf("default title=%q", got)
 	}
-	t.Setenv(RuntimeTitleEnvironment, "Temporary Lab")
-	if got := Title("Workshop Controller"); got != "Temporary Lab" {
+	if got := ResolveTitle("Workshop Controller", "Temporary Lab", "Flag Lab"); got != "Flag Lab" {
+		t.Fatalf("flag title=%q", got)
+	}
+	if got := ResolveTitle("Workshop Controller", "Temporary Lab", ""); got != "Temporary Lab" {
 		t.Fatalf("environment title=%q", got)
 	}
 }

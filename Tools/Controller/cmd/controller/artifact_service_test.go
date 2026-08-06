@@ -6,12 +6,36 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/defaultassets"
 )
+
+func TestHostUpdateShutdownHasBoundedForceExitFallback(t *testing.T) {
+	graceful := make(chan struct{}, 1)
+	forced := make(chan int, 1)
+	executor := &primaryArtifactExecutor{
+		shutdown:  func() { graceful <- struct{}{} },
+		forceExit: func(code int) { forced <- code },
+	}
+	executor.scheduleHostUpdateShutdown(time.Millisecond, time.Millisecond)
+	select {
+	case <-graceful:
+	case <-time.After(time.Second):
+		t.Fatal("graceful host shutdown was not requested")
+	}
+	select {
+	case code := <-forced:
+		if code != 0 {
+			t.Fatalf("force-exit code=%d", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("bounded host force-exit fallback was not armed")
+	}
+}
 
 func TestBackupManifestPathUsesValidatedAbsoluteResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "operations", "manifest.json")

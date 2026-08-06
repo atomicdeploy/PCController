@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	"pccontroller.local/controller/internal/netpolicy"
+
 	"golang.org/x/net/http/httpproxy"
 )
 
@@ -192,6 +194,7 @@ func BootstrapToolchain(
 	} else {
 		environment = append([]string(nil), environment...)
 	}
+	environment = netpolicy.WithLocalNetworkNoProxy(environment)
 	goos, goarch := options.GOOS, options.GOARCH
 	if goos == "" {
 		goos = runtime.GOOS
@@ -411,6 +414,16 @@ func managedToolchainCLIArguments(executable string, arguments ...string) []stri
 	return append([]string(nil), arguments...)
 }
 
+// toolchainCLIArguments prefers the persisted config returned by bootstrap.
+// This is required when an existing global arduino-cli lives outside the
+// managed data tree; portable CLIs can still discover their adjacent config.
+func toolchainCLIArguments(executable, configuration string, arguments ...string) []string {
+	if strings.TrimSpace(configuration) != "" {
+		return append([]string{"--config-file", configuration}, arguments...)
+	}
+	return managedToolchainCLIArguments(executable, arguments...)
+}
+
 func (profile ToolchainProfile) cliAsset(goos, goarch string) (ToolchainAsset, error) {
 	for _, asset := range profile.CLI.Assets {
 		if asset.GOOS == goos && asset.GOARCH == goarch {
@@ -576,7 +589,10 @@ func downloadVerified(
 }
 
 func extractCLIExecutable(archivePath, format, destination string) error {
-	wantedExecutable := filepath.Base(destination)
+	// Downloads are extracted to an adjacent .tmp path and atomically renamed.
+	// Match the final executable name inside the upstream archive, not the
+	// transaction suffix on the local destination.
+	wantedExecutable := strings.TrimSuffix(filepath.Base(destination), ".tmp")
 	switch format {
 	case "zip":
 		reader, err := zip.OpenReader(archivePath)

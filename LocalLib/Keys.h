@@ -3,7 +3,9 @@
 #include <Arduino.h>
 
 // Front-key debounce, multi-click, and accelerated-hold timing in milliseconds.
-constexpr uint16_t KEY_DEBOUNCE_MS = 50;
+// Keep debounce short: the primary action runs on the debounced Down edge and
+// must remain perceptibly immediate even though Click classification is later.
+constexpr uint16_t KEY_DEBOUNCE_MS = 20;
 constexpr uint16_t KEY_DOUBLE_CLICK_MS = 300;
 constexpr uint16_t KEY_HOLD_START_MS = 600;
 constexpr uint16_t KEY_HOLD_REPEAT_MS = 150;
@@ -21,6 +23,14 @@ enum class KeyEvent : uint8_t {
   Up,
 };
 
+// Local and injected key lifecycles share one latency contract: the initial
+// action belongs to Down, repeats belong to HoldRepeat, and Click/HoldStart are
+// classification/telemetry only. This prevents the double-click window from
+// ever becoming input latency.
+constexpr bool keyEventRunsPrimaryAction(KeyEvent event) {
+  return event == KeyEvent::Down || event == KeyEvent::HoldRepeat;
+}
+
 using KeyEventCallback =
     void (*)(uint8_t bit, KeyEvent event, void *context);
 
@@ -35,8 +45,8 @@ public:
   bool isHeld() const;
   uint8_t inputBit() const;
 
-  // Down/Up remain immediate after debounce; Click is deferred until the
-  // double-click window closes and a hold never leaks a Click action.
+  // Down/Up remain immediate after debounce; Click is deferred for telemetry
+  // until the double-click window closes and a hold never leaks a Click event.
   void setEventCallback(KeyEventCallback callback, void *context = nullptr);
 
   explicit operator bool() const { return isPressed(); }

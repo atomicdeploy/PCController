@@ -19,7 +19,7 @@ void sendHello(uint8_t sequence) {
       (1UL << 10) | // named temperature identities
       (1UL << 12) | // host display text and asynchronous events
       (1UL << 13) | // exact front-panel snapshot
-      (1UL << 14) | // host-injected key gestures
+      (1UL << 14) | // host-injected key lifecycle; Down acts immediately
       (1UL << 15) | // multi/indefinite RF learning
       (1UL << 16) | // bounded generic I2C transaction lease
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
@@ -34,6 +34,13 @@ void sendHello(uint8_t sequence) {
       (1UL << 23) | // persistent visible-mask and stable-ID rank permutation
 #endif
       (1UL << 24) | // host-owned Idle/Running application state (opcode 0x45)
+      (1UL << 25) | // scheduled segment once/loop/interval presentation
+      (1UL << 26) | // unsolicited changed-only TM1637 state frames
+      (1UL << 27) | // unsolicited buzzer frequency/duration frames
+      (1UL << 28) | // MCU-owned procedural status LED effects
+      (1UL << 29) | // unsolicited rendered status LED state frames
+      (1UL << 30) | // EEPROM-resident condition status profiles
+      (1UL << 31) | // checksum-backed operator board name (up to 8 ASCII chars)
       0;
   // HelloPayload is the fixed build identity and capability response.
   struct __attribute__((packed)) HelloPayload {
@@ -82,7 +89,7 @@ void sendTelemetry(uint8_t sequence) {
 // Reports the MCU-owned EEPROM settings representation.
 void sendSettings(uint8_t sequence) {
   const ControllerSettings &settings = settingsStore.values();
-  uint8_t payload[15];
+  uint8_t payload[26];
   payload[0] = 3;
   memcpy(payload + 1, &settings, ControllerSettingsPrefixSize);
   payload[8] = static_cast<uint8_t>(settings.streamPeriodMs);
@@ -92,8 +99,12 @@ void sendSettings(uint8_t sequence) {
   payload[12] = settings.displayOptions;
   payload[13] = settings.relayRestoreMask;
   payload[14] = settings.motionBreakMs;
+  payload[15] = settingsStore.persisted() ? 1U : 0U;
+  // The EEPROM length/name record maps directly onto payload bytes 17..25;
+  // byte 16 is the public persisted marker.
+  payload[16] = settingsStore.boardName(payload + 17) ? 1U : 0U;
   appProtocol.send(ControllerProtocol::SettingsResponse, sequence, payload,
-                   sizeof(payload));
+                    static_cast<uint8_t>(18 + payload[17]));
 }
 
 // Reports all logical PWM values plus controller availability and selection.
@@ -158,6 +169,57 @@ void sendFrontPanel(uint8_t sequence) {
   payload[45] = static_cast<uint8_t>(hostPanelMeta);
   payload[46] = static_cast<uint8_t>((hostPanelMeta >> 8) & 0x0FU);
   appProtocol.send(ControllerProtocol::FrontPanelResponse, sequence, payload,
+                   sizeof(payload));
+}
+
+// Pushes only the changed TM1637 state. The full front-panel request remains
+// available for initial synchronization and explicit refreshes.
+void serviceSegmentPush() {
+  const uint8_t *segments = display.rawSegments();
+  const uint8_t brightness = display.brightness();
+  if (brightness == lastPushedSegmentBrightness &&
+      memcmp(segments, lastPushedSegments, 4) == 0) {
+    return;
+  }
+  uint8_t payload[5];
+  memcpy(payload, segments, 4);
+  payload[4] = brightness;
+  memcpy(lastPushedSegments, segments, 4);
+  lastPushedSegmentBrightness = brightness;
+  appProtocol.send(ControllerProtocol::SegmentChanged, 0, payload,
+                   sizeof(payload));
+}
+
+// Mirrors the exact note/pause dequeued by Timer1 playback. This event never
+// drives local audio and therefore cannot add jitter to the hardware waveform.
+void serviceBuzzerPush() {
+  const uint8_t revision = buzzer.revision();
+  if (revision == lastPushedBuzzerRevision) {
+    return;
+  }
+  lastPushedBuzzerRevision = revision;
+  uint8_t payload[5];
+  payload[0] = static_cast<uint8_t>(buzzer.activeFrequencyHz());
+  payload[1] = static_cast<uint8_t>(buzzer.activeFrequencyHz() >> 8);
+  payload[2] = static_cast<uint8_t>(buzzer.activeDurationMs());
+  payload[3] = static_cast<uint8_t>(buzzer.activeDurationMs() >> 8);
+  payload[4] = buzzer.muted() ? 1U : 0U;
+  appProtocol.send(ControllerProtocol::BuzzerChanged, 0, payload,
+                   sizeof(payload));
+}
+
+// Mirrors the physical PWM RGB result after the board compositor has applied
+// local safety priority, cues, brightness, and a host-requested effect.
+void serviceStatusLedPush() {
+  uint8_t payload[6] = {
+      statusLeds.renderedRed(), statusLeds.renderedGreen(),
+      statusLeds.renderedBlue(), statusLeds.brightness(),
+      static_cast<uint8_t>(statusLeds.effect()), statusLeds.condition()};
+  if (memcmp(payload, lastPushedStatusLed, sizeof(payload)) == 0) {
+    return;
+  }
+  memcpy(lastPushedStatusLed, payload, sizeof(payload));
+  appProtocol.send(ControllerProtocol::StatusLedChanged, 0, payload,
                    sizeof(payload));
 }
 
@@ -305,10 +367,13 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
                    payload, index);
 }
 
-// Applies the one canonical settings wire shape; alternate shapes and
-// positional tails are rejected.
+// Applies the canonical settings prefix plus its exact optional board-name
+// tail; all other positional tails are rejected.
 bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
-  if (length != 15 || payload[0] != 3 || payload[2] > 2 || payload[5] > 7 ||
+  const bool hasBoardName = length != 15;
+  if ((hasBoardName &&
+       (length < 16 || length != static_cast<uint8_t>(16 + payload[15]))) ||
+      payload[0] != 3 || payload[2] > 2 || payload[5] > 7 ||
       payload[14] == 0 ||
       (payload[7] & ~OutputPersistence::AllowedMask) != 0
 #if PCCONTROLLER_MENU_VISIBILITY
@@ -320,6 +385,10 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
   }
   const uint16_t newStreamPeriod = readU16(payload + 8);
   if (newStreamPeriod != 0 && newStreamPeriod < 100) {
+    return false;
+  }
+  if (hasBoardName &&
+      !settingsStore.setBoardName(payload + 16, payload[15])) {
     return false;
   }
 
@@ -478,6 +547,44 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       statusLeds.setCustom(payload[0], payload[1], payload[2]);
       goto acknowledged;
 
+    case StatusEffect:
+      // [kind][RGB A][RGB B][brightness][minimum brightness][period u16]
+      // [repeats]. Repeats zero loops; 1..255 are MCU-counted cycles.
+      if (length == 1 && payload[0] == 0) {
+        hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
+        statusLeds.cancelEffect();
+        goto acknowledged;
+      }
+      if (length < 12 || payload[0] == 0 || payload[0] > 4 ||
+          !statusLeds.setEffect(
+              static_cast<StatusLedEffect>(payload[0]), payload[1], payload[2],
+              payload[3], payload[4], payload[5], payload[6], payload[7],
+              payload[8], readU16(payload + 9), payload[11], frameNow)) {
+        goto badPayload;
+      }
+      hostLcdFlags |= HOST_STATUS_OVERRIDE;
+      goto acknowledged;
+
+    case StatusProfileGet: {
+      if (length < 1 || payload[0] >= StatusLedController::ProfileCount) {
+        goto badPayload;
+      }
+      uint8_t response[2 + StatusLedController::ProfilePayloadBytes];
+      response[0] = payload[0];
+      response[1 + StatusLedController::ProfilePayloadBytes] =
+          statusLeds.profile(payload[0], response + 1) ? 1U : 0U;
+      appProtocol.send(ControllerProtocol::StatusProfileResponse,
+                       frame.sequence, response, sizeof(response));
+      return;
+    }
+
+    case StatusProfileSet:
+      if (length < 1 + StatusLedController::ProfilePayloadBytes ||
+          !statusLeds.setProfile(payload[0], payload + 1, frameNow)) {
+        goto badPayload;
+      }
+      goto acknowledged;
+
     case ProgramState:
       // Only the semantic one-byte prefix is required; future appended state
       // metadata is deliberately ignored by this small MCU implementation.
@@ -490,6 +597,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         hostLcdFlags |= HOST_PROGRAM_RUNNING;
       }
       hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
+      statusLeds.cancelEffect();
       goto acknowledged;
 
     case PwmGet:
@@ -596,8 +704,15 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case DisplayText: {
-      if (length < 4 || payload[0] > 4 || payload[3] > 40 ||
-          length < static_cast<uint8_t>(4 + payload[3]) ||
+      if (length < 4 || payload[0] > 5 || payload[3] > 40 ||
+          (payload[0] != 5 &&
+           length < static_cast<uint8_t>(4 + payload[3])) ||
+          (payload[0] == 5 &&
+           (length < 8 ||
+            length < static_cast<uint8_t>(8 + payload[3]) ||
+            (payload[4] & 0x03U) > 2 ||
+            (payload[4] & 0x7CU) != 0 ||
+            ((payload[4] & 0x03U) == 2 && payload[7] == 0))) ||
           (payload[0] == 3 && (payload[3] < 4 || payload[3] > 36)) ||
           (payload[0] == 4 && payload[3] != 0)) {
         goto badPayload;
@@ -605,6 +720,8 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       const uint8_t target = payload[0];
       const uint16_t duration = readU16(payload + 1);
       const uint8_t textLength = payload[3];
+      const bool scheduledSegments = target == 5;
+      const uint8_t textOffset = scheduledSegments ? 8 : 4;
       if (target == 4) {
         releaseHostPanel();
         goto acknowledged;
@@ -613,10 +730,19 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         hostLcdFlags |= HOST_PANEL_CAPTURED;
         hostPanelMeta = duration; // high nibble=state, low 12 bits=value
       }
-      if (target == 0 || target == 2 || target == 3) {
+      if (target == 0 || target == 2 || target == 3 || scheduledSegments) {
         hostSegmentTextActive = textLength != 0;
         hostSegmentScrollIndex = 0;
-        const bool scrolling = target == 0 && textLength > 4;
+        hostSegmentOptions = scheduledSegments ? payload[4] : 0;
+        hostSegmentHoldMs = scheduledSegments ? readU16(payload + 5) : duration;
+        hostSegmentIntervalSeconds = scheduledSegments ? payload[7] : 0;
+        const bool scrolling =
+            (scheduledSegments && ((hostSegmentOptions & 0x80U) != 0 ||
+                                   textLength > 4)) ||
+            (!scheduledSegments && target == 0 && textLength > 4);
+        if (!scheduledSegments && scrolling) {
+          hostSegmentOptions = 1; // legacy long text remains an explicit loop
+        }
         const uint8_t copyLength = scrolling
                                        ? textLength
                                        : (textLength > 4 ? 4 : textLength);
@@ -624,16 +750,18 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         memset(hostSegmentText, scrolling ? 0 : ' ',
                sizeof(hostSegmentText));
         if (copyLength != 0) {
-          memcpy(hostSegmentText, payload + 4, copyLength);
+          memcpy(hostSegmentText, payload + textOffset, copyLength);
         }
         if (scrolling) {
           hostSegmentStepMs = duration == 0 ? 260 :
               (duration < 80 ? 80 : duration);
           hostSegmentTextEndsAt = frameNow + hostSegmentStepMs;
         } else {
-          hostSegmentTextEndsAt = target == 3 || duration == 0
+          const uint16_t hold = scheduledSegments ? hostSegmentHoldMs : duration;
+          hostSegmentTextEndsAt = target == 3 || hold == 0 ||
+                                          (hostSegmentOptions & 0x03U) == 1
                                       ? 0
-                                      : frameNow + duration;
+                                      : frameNow + hold;
         }
       }
       if (target == 1 || target == 2 || target == 3) {

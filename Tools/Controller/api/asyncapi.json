@@ -2,7 +2,7 @@
   "asyncapi": "3.0.0",
   "info": {
     "title": "PCController event and WebSocket API",
-    "version": "1",
+    "version": "unversioned",
     "description": "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required."
   },
   "servers": {
@@ -13,7 +13,10 @@
       "description": "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
       "security": [
         {
-          "$ref": "#/components/securitySchemes/session"
+          "$ref": "#/components/securitySchemes/durableHeader"
+        },
+        {
+          "$ref": "#/components/securitySchemes/browserTicket"
         }
       ]
     }
@@ -30,6 +33,15 @@
         },
         "event": {
           "$ref": "#/components/messages/Event"
+        },
+        "state": {
+          "$ref": "#/components/messages/State"
+        },
+        "debug": {
+          "$ref": "#/components/messages/Debug"
+        },
+        "opcode": {
+          "$ref": "#/components/messages/Opcode"
         },
         "status": {
           "$ref": "#/components/messages/Status"
@@ -74,6 +86,15 @@
           "$ref": "#/channels/rpc/messages/event"
         },
         {
+          "$ref": "#/channels/rpc/messages/state"
+        },
+        {
+          "$ref": "#/channels/rpc/messages/debug"
+        },
+        {
+          "$ref": "#/channels/rpc/messages/opcode"
+        },
+        {
           "$ref": "#/channels/rpc/messages/status"
         },
         {
@@ -95,11 +116,17 @@
   },
   "components": {
     "securitySchemes": {
-      "session": {
+      "durableHeader": {
         "type": "httpApiKey",
         "in": "header",
         "name": "Authorization",
-        "description": "Bearer credential or short-lived session authorization. Durable secrets must not appear in URLs."
+        "description": "Bearer credential for non-browser WebSocket and Socket.IO clients."
+      },
+      "browserTicket": {
+        "type": "httpApiKey",
+        "in": "header",
+        "name": "Sec-WebSocket-Protocol",
+        "description": "Browser clients first POST /api/session/ticket with a header credential, then offer pccontroller and pccontroller.ticket.<ticket>. The one-use ticket is Origin, peer, transport, and expiry bound; no credential appears in the URL."
       }
     },
     "messages": {
@@ -149,6 +176,112 @@
                 "kind": "door",
                 "state": "open",
                 "source": "board"
+              }
+            }
+          ]
+        }
+      },
+      "State": {
+        "payload": {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "controller.state"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "examples": [
+            {
+              "jsonrpc": "2.0",
+              "method": "controller.state",
+              "params": {
+                "id": 43,
+                "kind": "status_led.changed",
+                "stream": "state",
+                "source": "board"
+              }
+            }
+          ]
+        }
+      },
+      "Debug": {
+        "payload": {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "controller.debug"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "examples": [
+            {
+              "jsonrpc": "2.0",
+              "method": "controller.debug",
+              "params": {
+                "id": 44,
+                "kind": "rx",
+                "stream": "debug",
+                "source": "board"
+              }
+            }
+          ]
+        }
+      },
+      "Opcode": {
+        "payload": {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "controller.opcode"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "id",
+                "opcode"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "examples": [
+            {
+              "jsonrpc": "2.0",
+              "method": "controller.opcode",
+              "params": {
+                "id": 43,
+                "kind": "rx",
+                "opcode": 225,
+                "payload": "qrs="
               }
             }
           ]
@@ -230,6 +363,9 @@
       "command.response",
       "rpc.response",
       "controller.event",
+      "controller.state",
+      "controller.debug",
+      "controller.opcode",
       "controller.status",
       "controller.error",
       "error"

@@ -145,7 +145,7 @@ Overrides are stored under `ui.peripheral_names`, for example:
 
 These names belong only to the PC host. They do not consume EEPROM and never
 rename, reconfigure, or write a board peripheral. Through
-`controller.peripherals.set` or `PUT /api/v1/peripherals`, keys and names are
+`controller.peripherals.set` or `PUT /api/peripherals`, keys and names are
 trimmed and the complete update is validated before persistence. Supplying a
 blank name removes that override and restores the registry default. A blank
 value written directly into the configuration file is invalid; omit the key
@@ -177,6 +177,59 @@ CONNECT USB
 
 `CONNECT USB TO PC` is 17 characters and may be scrolled slowly instead of
 being written as a single 16-cell row.
+
+Seven-segment host messages are scheduled by the firmware. Text longer than
+four cells scrolls automatically; a caller can force a short marquee. The
+firmware renders one fully blank frame after the last character before it
+stops, loops, or waits. The default automatic host presentation is bounded to
+roughly twice per minute:
+
+```json
+{
+  "ui": {
+    "segment_scroll": {
+      "enabled": true,
+      "speed_ms": 220,
+      "repeat": "interval",
+      "interval_seconds": 30
+    }
+  }
+}
+```
+
+Physical segment and buzzer changes arrive as unsolicited UART opcodes and fan
+out through the event, WebSocket, Socket.IO, webhook, and bridge paths. Native
+and browser buzzer playback is opt-in presentation configuration:
+
+The same push-first rule applies to every physical-output mirror. Front-end
+code must consume the runtime snapshot plus changed-only events; it must not
+poll a convenient read endpoint on a timer. Reads are for initial sync,
+explicit Refresh, recovery from a detected gap, or a bounded legacy fallback
+whose use is visible and which disables itself when the board advertises push
+support. This is an architectural latency and UART-load requirement, not a UI
+implementation preference.
+
+```json
+{
+  "integrations": {
+    "buzzer_mirror": {
+      "enabled": false,
+      "native_enabled": false,
+      "web_audio_enabled": true,
+      "driver_directory": ""
+    }
+  }
+}
+```
+
+The optional Windows native path calls the controller's Go WinRing0
+implementation directly and uses an explicitly configured directory containing
+`WinRing0x64.sys`; no
+wrapper DLL or external `beep.exe` is loaded. The application never invokes
+SSH or requests UAC. Elevated SSH may be used manually as a test harness, but
+it is not a configured runtime transport. Native playback is disabled by
+default and is never required for the bridge, update path, board buzzer, or Web
+Audio renderer.
 
 ## Embedded web control center
 
@@ -316,7 +369,7 @@ Both companion applications are disabled by default and are host-side only:
 
 The local device accepts only HTTP(S) roots on loopback, private, or link-local
 networks and explicitly local hostnames. Its manager implements PCController's
-own fixed Local Device v1 capability, snapshot, action, and event-stream
+own fixed Local Device living capability, snapshot, action, and event-stream
 contract. Requests are bounded, redirects and environment proxies are disabled,
 and only sanitized capability/snapshot inspection is exposed to browser clients.
 
@@ -369,7 +422,7 @@ Windows builds also provide a fixed diagnostic catalog through `os facts`.
 Profiles are limited to `system`, `computer`, `firmware`, `storage`, and
 `serial`; `os facts list` returns their descriptors. JSON-RPC exposes the same
 provider as `controller.os.facts` and `controller.host.facts`, and REST exposes
-`GET /api/v1/os/facts?profile=...` under the ordinary `read` capability.
+`GET /api/os/facts?profile=...` under the ordinary `read` capability.
 
 This is not a general query console. Callers cannot supply WQL, choose an
 arbitrary class/column, invoke a method, or write system state. The provider
@@ -421,9 +474,20 @@ The default service is `127.0.0.1:8787`. One listener multiplexes:
 
 Use loopback without a token only for the same PC. A non-loopback listener is
 accepted only with deliberate remote enablement, an authentication token of at
-least 24 characters, and an origin allow-list. Query-string tokens exist for
-browser WebSocket clients that cannot set a header, but the Bearer or
-`X-PCController-Token` header is preferred because URLs may be logged.
+least 24 characters, a stable `ipc.remote_principal`, and an explicit
+non-wildcard origin allow-list. Native clients authenticate with a Bearer or
+`X-PCController-Token` header. Browser clients first send that header to
+`POST /api/session/ticket`, then offer the returned 30-second one-use ticket
+in `Sec-WebSocket-Protocol` while opening a clean WebSocket URL. The ticket is
+bound to the requesting Origin, peer, and WebSocket transport, and the server
+selects only the non-secret `pccontroller` protocol. Query-string
+credentials, ticket replay, an Origin mismatch, and application frames before
+successful authentication are rejected.
+
+Origin-less native traffic is trusted without a token only on loopback. A
+non-loopback native client without `Origin` must present the durable header;
+browser ticket exchange and upgrade always require the same allowed Origin.
+Conflicting Bearer and `X-PCController-Token` values fail closed.
 
 Authentication and authorization are separate. The default
 `ipc.remote_policy` permits authenticated read/event subscriptions only;
@@ -432,7 +496,13 @@ programming, shutdown, virtual keys, power/display actions, bridge calls, and
 configured host-automation execution are independently opt-in. Remote
 programming also requires connection-control permission. Every denied or authorized mutating attempt is source-tagged in
 the host timeline, and generic `controller.command.execute` commands are classified so
-they cannot bypass a narrower gate.
+they cannot bypass a narrower gate. Audit events identify the stable principal,
+transport, authentication mechanism, remote scope, decision, capability, and
+operation without recording the credential. Local no-token IPC uses
+`local-operator`, the primary-instance credential uses its instance identity,
+remote HTTP/WebSocket/Socket.IO use `ipc.remote_principal`, and generic bridge
+dispatch currently uses `bridge-peer` because that boundary does not yet carry
+a configured peer name.
 
 The exact methods, routes, frames, Socket.IO subset, and examples are in
 [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md).
@@ -440,7 +510,7 @@ The exact methods, routes, frames, Socket.IO subset, and examples are in
 Peripheral-name reads use the `read` capability; writes use
 `host_configuration` because they change only the watched PC file. PWM reads
 use `read`, while `controller.pwm.set`, `controller.pwm.off`, `PUT
-/api/v1/pwm`, and `DELETE /api/v1/pwm` use `board_commands`. Each PWM mutation
+/api/pwm`, and `DELETE /api/pwm` use `board_commands`. Each PWM mutation
 performs a board readback and returns all sixteen values, allowing WebSocket,
 REST, TUI, and hotkey clients to reconcile to one authoritative state.
 
@@ -449,13 +519,19 @@ REST, TUI, and hotkey clients to reconcile to one authoritative state.
 Optional mDNS/DNS-SD announces `_pccontroller._tcp.local.`. Optional SSDP uses
 `urn:pccontroller-org:service:bridge:1`, answers `M-SEARCH`, sends alive/byebye
 notifications, and points to `/healthz`. Advertisements expose the instance
-name, endpoint paths, and the fact that authentication is required—never the
-token. Multicast discovery only finds a service; it grants no control rights.
+name, WebUI/API/snapshot paths, relevant app presentation values, and a bounded
+set of non-secret current board identity/status/settings values. The bridge
+updates those records from pushed runtime state at a coalesced maximum cadence;
+discovery never starts recurring board polling. SSDP uses repeated metadata
+headers and mDNS uses equivalent TXT entries, including a freshness timestamp.
+Credentials, authorization values, token-like keys, and raw environment data
+are rejected. Multicast discovery only finds a service; it grants no control
+rights.
 Firewall, VLAN, multicast, and corporate-network policy can still prevent
 discovery even when the service is healthy.
 
 Configured WebSocket clients let one host subscribe to another host and make
-correlated calls through `controller.bridge.call`, `/api/v1/bridges/call`, or
+correlated calls through `controller.bridge.call`, `/api/bridges/call`, or
 the `bridge call` shell command. They retry with bounded backoff and preserve
 the rule that exactly one local primary owns the attached serial port. The
 target host independently checks its remote policy and ordinary safety guards;
@@ -507,15 +583,17 @@ The common envelope is:
 }
 ```
 
-Allowed sources identify client, server, bridge, board, LCD, host, IPC,
-webhook, or WebSocket origin. Targets are client, server, bridge, board, LCD,
-host, or all. The type is a short machine-readable label; text and optional LCD
-rows remain human-readable. Sending to board/LCD uses the bounded native
-display command and emits the same source-tagged host event.
+Allowed sources identify client, server, bridge, board, LCD, host, IPC, REST,
+webhook, WebSocket, or Socket.IO origin. Targets are client, server, bridge,
+board, LCD, host, or all. The type is a short machine-readable label; text and
+optional LCD rows remain human-readable. Sending to board/LCD uses the bounded
+native display command and emits the same source-tagged host event.
 
-Network routes assign the authoritative source (`ipc`, `websocket`, `bridge`,
-or `webhook`) instead of trusting a caller-supplied `board`/`host` identity. A
-different claimed source is retained as bounded metadata for diagnostics.
+Network routes assign the authoritative source (`ipc`, `rest`, `websocket`,
+`socket_io`, `bridge`, or `webhook`) instead of trusting a caller-supplied
+`board`/`host` identity. A different claimed source is retained as bounded
+metadata for diagnostics. Authenticated messages also carry the principal and
+authentication mechanism as bounded metadata.
 
 `action` is descriptive and is never executed merely because it appeared in a
 message. An enabled host text mapping may turn a matching source/target/type/
@@ -575,21 +653,26 @@ other width/layout explicitly:
 For a connected unpublished development board whose settings response has an
 obsolete width, `controller program flash ... --reinitialize-eeprom` first
 retains the untouched raw EEPROM in the mandatory backup, then accepts only the
-new firmware's current response. The primary reports the old query error,
-leaves outputs off, makes the new settings audible, verifies them, and does not
-restore old semantic values. See
+new firmware's current response. It programs and independently reads back the
+complete Go-owned factory EEPROM image before reconnect, reports the old query
+error, leaves outputs off, makes the new settings audible, verifies them, and
+does not restore old semantic values. See
 [Toolchain and Safe Programming](Toolchain-and-Safe-Programming.md#development-eeprom-reinitialization)
 for the exact command and recovery behavior.
 
 ```console
 Tools\Controller\bin\controller.exe eeprom inspect --backup-manifest BACKUP\manifest.json
+Tools\Controller\bin\controller.exe eeprom factory-defaults --output EEPROM-FACTORY.hex
 Tools\Controller\bin\controller.exe eeprom export --backup-manifest BACKUP\manifest.json --output SETTINGS.hex
 Tools\Controller\bin\controller.exe eeprom import --backup-manifest BACKUP\manifest.json --settings SETTINGS.hex --output EEPROM-RESTORE.hex
 Tools\Controller\bin\controller.exe eeprom restore --backup-manifest BACKUP\manifest.json --output EEPROM-ORIGINAL.hex
+Tools\Controller\bin\controller.exe program --operation read-eeprom --method urclock --port COM18 --output EEPROM-LIVE.hex
+Tools\Controller\bin\controller.exe program --operation write-eeprom --method urclock --port COM18 --hex EEPROM-FACTORY.hex --confirm-eeprom-write
 ```
 
-The current settings artifact is exactly 31 value bytes plus CRC-8 at EEPROM
-addresses `0x0020..0x003E`. Export emits only that sparse region. Import
+The current settings artifact is exactly 40 settings/name value bytes plus
+CRC-8 at EEPROM addresses `0x0020..0x0048`. Export emits only that sparse
+region. Import
 overlays it on the validated 1,024-byte backup so RF records, reset journal,
 and every unknown byte remain unchanged; restore reproduces the original full
 EEPROM image. Outputs are hashed and never overwritten. These commands do not

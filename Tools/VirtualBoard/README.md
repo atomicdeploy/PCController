@@ -12,7 +12,7 @@ tcp://127.0.0.1:8765
 
 It is intentionally isolated from the PC host configuration. Board settings
 are stored in a separate 1 KiB virtual MCU EEPROM image
-(`virtual-mcu-eeprom.bin` by default). The current 31-byte settings value plus
+(`virtual-mcu-eeprom.bin` by default). The current 40-byte settings/name value plus
 its CRC byte, 20 learned-RF records, and wear-levelled reset journal use the
 same canonical addresses, checksums, and no-version migration policy as the
 physical MCU.
@@ -144,9 +144,9 @@ Use `--no-stdin` for unattended test runs.
   captured reset cause and bytes 44..47 are the persistent reset count in
   little-endian order; RF-received, buzzer-busy, Running, host-offline, and
   hot-temperature flags have the production meanings in bits 7 and 12..15
-- exact 15-byte schema-3 GET/SET_SETTINGS, including output-persistence,
-  packed display/motion-hold options, and relay-restore state, persisted as
-  the current 31-byte MCU value plus CRC
+- exact schema-3 GET/SET_SETTINGS, including output-persistence, packed
+  display/motion-hold options, relay-restore state, and the optional eight-byte
+  operator name, persisted as the current 40-byte MCU value plus CRC
 - tLED/tBT temperature identities and values
 - direct PWM set/get/all-off and RGB; STATUS/PWM_VALUES report hardware
   availability, and the removed mode opcode `0x13` remains reserved

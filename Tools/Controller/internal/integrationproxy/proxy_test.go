@@ -18,7 +18,7 @@ import (
 	"github.com/coder/websocket"
 )
 
-const testMountPrefix = "/api/v1/integrations"
+const testMountPrefix = "/api/integrations"
 
 func TestProxyRewritesPathAndStripsClientCredentials(t *testing.T) {
 	type observation struct {
@@ -439,10 +439,10 @@ func TestProxyRejectsTraversalAndPrefixConfusion(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, route := range []string{
-		"/api/v1/integrations-extra/datahub/api/status",
-		"/api/v1/integrations/datahub/%2e%2e/admin",
-		"/api/v1/integrations/datahub//example.com/admin",
-		"/api/v1/integrations/DATAHUB/api/status",
+		"/api/integrations-extra/datahub/api/status",
+		"/api/integrations/datahub/%2e%2e/admin",
+		"/api/integrations/datahub//example.com/admin",
+		"/api/integrations/DATAHUB/api/status",
 	} {
 		request := httptest.NewRequest(http.MethodGet, route, nil)
 		response := httptest.NewRecorder()
@@ -508,7 +508,7 @@ func TestNormalizeMountPrefix(t *testing.T) {
 		value, want string
 		valid       bool
 	}{
-		{value: "/api/v1/integrations/", want: "/api/v1/integrations", valid: true},
+		{value: "/api/integrations/", want: "/api/integrations", valid: true},
 		{value: "api/v1/integrations", valid: false},
 		{value: "/", valid: false},
 		{value: "/api//integrations", valid: false},

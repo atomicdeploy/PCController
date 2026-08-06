@@ -494,22 +494,25 @@ func (model Model) rfPage() string {
 }
 
 func (model Model) programmingPage(snapshot control.Snapshot) string {
-	firstButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("P Urclock probe"), " ", buttonStyle.Render("M Metadata"), " ", buttonStyle.Render("B Backup"))
+	firstButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonGoodStyle.Render("I Initialize board"), " ", buttonStyle.Render("P Urclock probe"), " ", buttonStyle.Render("M Metadata"), " ", buttonStyle.Render("B Backup"))
 	secondButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("R Reboot"), " ", buttonStyle.Render("D DTR/RTS reset"), " ", buttonGoodStyle.Render("U Flash"))
-	return strings.Join([]string{
+	thirdButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("Z USBasp driver"), " ", buttonStyle.Render("X Blank…"))
+	lines := []string{
 		sectionHeader(model.width, "PROGRAMMING", "application opcodes and bootloader operations are mutually exclusive"),
 		firstButtons,
 		secondButtons,
+		thirdButtons,
 		"",
 		kv("Application protocol", boolWord(snapshot.Connected, "authenticated and available", "not connected")),
 		kv("Boot protocol", "Urboot/Urclock via the installed MiniCore AVRDUDE backend"),
 		kv("Current firmware", firmwareIdentity(snapshot)),
 		kv("Normal flash gate", "inspect HEX → backup flash + EEPROM + metadata → verify manifest → flash → HELLO"),
 		kv("Backup storage", "content-addressed SHA-256 blobs; identical firmware is never duplicated"),
+		kv("Blank-board flow", "toolchain → ISP signature/backup → core bootloader/fuses → optional UART flash/health"),
 		"",
-		warnStyle.Render("Normal writes use `program flash HEX [PORT]` and refuse to proceed without a complete verified backup. Progress and hashes appear in Console."),
-		labelStyle.Render("Commands: program flash · boot probe|metadata|backup|read|verify · toolchain bootstrap|sync|compile|core-info|install-bootloader"),
-	}, "\n")
+	}
+	lines = append(lines, model.updateProgressLines()...)
+	return strings.Join(lines, "\n")
 }
 
 func (model Model) integrationStatusLines() []string {
@@ -661,7 +664,7 @@ func (model Model) welcomeView() string {
 	if status == "" {
 		status = "Waiting for controller"
 	}
-	action := labelStyle.Render("Setup remains here until the board and audio path are ready")
+	action := ""
 	if model.welcomeCanContinue {
 		action = buttonStyle.Render("Enter / click to continue with the warning")
 	}
@@ -673,7 +676,7 @@ func (model Model) welcomeView() string {
 		lipgloss.Center,
 		titleStyle.Copy().Bold(true).Render(icon+"  "+model.prefs.AppTitle+"  "+icon),
 		"",
-		valueStyle.Render("One host. Every board surface."),
+		valueStyle.Render(model.prefs.Tagline),
 		labelStyle.Render("Native opcodes · Urboot/Urclock · RF · motion · PWM · telemetry"),
 		"",
 		lipgloss.NewStyle().Foreground(colorAccent2).Render(bar),

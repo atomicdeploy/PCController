@@ -21,7 +21,7 @@ func TestHTTPControlPlaneRejectsCrossOriginBrowserRequests(t *testing.T) {
 
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"http://127.0.0.1:8787/api/v1/rpc",
+		"http://127.0.0.1:8787/api/rpc",
 		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"controller.ping"}`),
 	)
 	request.Header.Set("Origin", "https://hostile.example")
@@ -61,7 +61,7 @@ func TestHTTPJSONRPCRequiresJSONContentType(t *testing.T) {
 
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"http://127.0.0.1:8787/api/v1/rpc",
+		"http://127.0.0.1:8787/api/rpc",
 		strings.NewReader(body),
 	)
 	request.Header.Set("Origin", "http://127.0.0.1:8787")
@@ -75,7 +75,7 @@ func TestHTTPJSONRPCRequiresJSONContentType(t *testing.T) {
 
 	request = httptest.NewRequest(
 		http.MethodPost,
-		"http://127.0.0.1:8787/api/v1/rpc",
+		"http://127.0.0.1:8787/api/rpc",
 		strings.NewReader(body),
 	)
 	request.Header.Set("Origin", "http://127.0.0.1:8787")
@@ -99,7 +99,7 @@ func TestHTTPControlPlaneAllowsConfiguredOriginAndNativeClient(t *testing.T) {
 	for _, origin := range []string{"https://console.example:9443", ""} {
 		request := httptest.NewRequest(
 			http.MethodPost,
-			"http://127.0.0.1:8787/api/v1/rpc",
+			"http://127.0.0.1:8787/api/rpc",
 			strings.NewReader(body),
 		)
 		request.Header.Set("Content-Type", "application/json")
@@ -124,7 +124,7 @@ func TestHTTPControlPlaneCORSUsesConfiguredOriginWithoutCredentials(t *testing.T
 
 	preflight := httptest.NewRequest(
 		http.MethodOptions,
-		"http://127.0.0.1:8787/api/v1/rpc",
+		"http://127.0.0.1:8787/api/rpc",
 		nil,
 	)
 	preflight.Header.Set("Origin", "https://console.example:9443")
@@ -148,7 +148,7 @@ func TestHTTPControlPlaneCORSUsesConfiguredOriginWithoutCredentials(t *testing.T
 
 	configRequest := httptest.NewRequest(
 		http.MethodGet,
-		"http://127.0.0.1:8787/api/v1/ui-config",
+		"http://127.0.0.1:8787/api/ui-config",
 		nil,
 	)
 	configRequest.Header.Set("Origin", "https://console.example:9443")
@@ -176,7 +176,7 @@ func TestHTTPControlPlaneCORSRejectsUntrustedOriginAndHeaders(t *testing.T) {
 		{name: "header", origin: "https://console.example:9443", headers: "x-forwarded-user"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:8787/api/v1/rpc", nil)
+			request := httptest.NewRequest(http.MethodOptions, "http://127.0.0.1:8787/api/rpc", nil)
 			request.Header.Set("Origin", test.origin)
 			request.Header.Set("Access-Control-Request-Method", http.MethodPost)
 			request.Header.Set("Access-Control-Request-Headers", test.headers)

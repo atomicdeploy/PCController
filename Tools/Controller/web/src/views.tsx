@@ -129,7 +129,9 @@ import type {
   PWMValues,
   Snapshot,
   SegmentScrollSettings,
+  UIConfig,
 } from './types'
+import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 
 export interface SharedViewProps {
   appTitle: string
@@ -319,11 +321,30 @@ export function ControlsView(props: SharedViewProps) {
   const [red, setRed] = useState(25)
   const [green, setGreen] = useState(130)
   const [blue, setBlue] = useState(220)
+	const [statusBrightness, setStatusBrightness] = useState(190)
+	const [alternateColor, setAlternateColor] = useState('#000000')
+	const [statusEffect, setStatusEffect] = useState<'color' | 'breathe' | 'flash' | 'cycle' | 'transition'>('color')
+	const [statusPeriod, setStatusPeriod] = useState(1600)
+	const [statusMinimum, setStatusMinimum] = useState(8)
+	const [statusRepeat, setStatusRepeat] = useState<'once' | 'loop'>('loop')
+	const [statusProfile, setStatusProfile] = useState('ready')
   const configurationEventID = props.events.find((event) => event.kind === 'config')?.id ?? 0
   const pwmReportedRef = useRef(pwmReported)
   const pwmAllBusyRef = useRef(pwmAllBusy)
   const pwmOperationsRef = useRef<PWMOperationQueue | null>(null)
   const pwmSchedulerRef = useRef<PWMMutationScheduler | null>(null)
+	const chosenHex = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, '0')).join('')}`.toUpperCase()
+	const liveLED = snapshot.have_status_led ? snapshot.status_led : undefined
+	const liveHex = liveLED
+		? `#${[liveLED.red, liveLED.green, liveLED.blue].map((value) => value.toString(16).padStart(2, '0')).join('')}`.toUpperCase()
+		: '#000000'
+	const effectOptions = `${statusEffect === 'color' ? '' : ` --period ${statusPeriod} --minimum ${statusMinimum} --repeat ${statusRepeat}`}${statusEffect === 'flash' || statusEffect === 'cycle' || statusEffect === 'transition' ? ` --to "${alternateColor}"` : ''}`
+	const statusCommand = statusEffect === 'color'
+		? `rgb color "${chosenHex}" ${statusBrightness}`
+		: `rgb effect ${statusEffect} "${chosenHex}" --brightness ${statusBrightness}${effectOptions}`
+	const profileCommand = statusEffect === 'color'
+		? `rgb profile set ${statusProfile} color "${chosenHex}" ${statusBrightness}`
+		: `rgb profile set ${statusProfile} ${statusEffect} "${chosenHex}" --brightness ${statusBrightness}${effectOptions}`
 
   if (!pwmOperationsRef.current) pwmOperationsRef.current = new PWMOperationQueue()
 
@@ -502,12 +523,37 @@ export function ControlsView(props: SharedViewProps) {
         </Card>}
 
         <Card icon={Lightbulb} iconTone="amber" eyebrow={copy('Color and effects', 'رنگ و افکت‌ها')} title={copy('Status lighting', 'نور وضعیت')} className="rgb-card">
-          <div className="color-preview" style={{ '--preview': `rgb(${red} ${green} ${blue})` } as React.CSSProperties}><span /><strong>RGB {red} · {green} · {blue}</strong></div>
+          <div className="status-led-previews">
+			<div className="color-preview" style={{ '--preview': chosenHex } as React.CSSProperties}>
+				<span />
+				<strong>{copy('Selected', 'انتخاب‌شده')} · {chosenHex} · RGB {red} {green} {blue}</strong>
+			</div>
+			<div className="status-led-live" style={{ '--preview': liveHex } as React.CSSProperties}>
+				<i aria-hidden="true" />
+				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? `${liveHex} · effect ${liveLED.effect} · condition ${liveLED.condition}` : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
+			</div>
+		  </div>
+          <label className="native-color-field">
+			<span>{copy('Color picker', 'انتخاب‌گر رنگ')}</span>
+			<input type="color" value={chosenHex} aria-label={copy('Status LED color', 'رنگ LED وضعیت')} onChange={(event) => {
+				const value = event.target.value
+				setRed(Number.parseInt(value.slice(1, 3), 16)); setGreen(Number.parseInt(value.slice(3, 5), 16)); setBlue(Number.parseInt(value.slice(5, 7), 16))
+			}} />
+			<code>{chosenHex}</code>
+		  </label>
           {pwmLoaded && <div className="rgb-board-state"><span>{copy('Board-reported PWM', 'PWM گزارش‌شدهٔ برد')}</span><strong dir="ltr">{pwmReported[13]} · {pwmReported[14]} · {pwmReported[15]}</strong></div>}
           <RangeField label={copy('Red', 'قرمز')} value={red} min={0} max={255} onChange={setRed} />
           <RangeField label={copy('Green', 'سبز')} value={green} min={0} max={255} onChange={setGreen} />
           <RangeField label={copy('Blue', 'آبی')} value={blue} min={0} max={255} onChange={setBlue} />
-          <div className="inline-actions"><Button tone="primary" icon={Sparkles} onClick={() => void command(`rgb ${red} ${green} ${blue} 190`)}>{copy('Apply color', 'اعمال رنگ')}</Button><Button onClick={() => void command('rgb effect play breathe')}>{copy('Breathe', 'تنفس')}</Button></div>
+		  <RangeField label={copy('Brightness', 'روشنایی')} value={statusBrightness} min={0} max={255} onChange={(value) => { setStatusBrightness(value); setStatusMinimum((current) => Math.min(current, value)) }} />
+		  <div className="rgb-effect-fields">
+			<label><span>{copy('Presentation', 'نحوه نمایش')}</span><select value={statusEffect} onChange={(event) => setStatusEffect(event.target.value as typeof statusEffect)}><option value="color">{copy('Steady color', 'رنگ ثابت')}</option><option value="breathe">{copy('Breathe', 'تنفس')}</option><option value="flash">{copy('Flash', 'چشمک')}</option><option value="cycle">{copy('Two-color cycle', 'چرخه دو رنگ')}</option><option value="transition">{copy('Transition', 'گذار')}</option></select></label>
+			{statusEffect !== 'color' && <><label><span>{copy('Period', 'دوره')}</span><input type="number" min={640} max={60000} value={statusPeriod} onChange={(event) => setStatusPeriod(Math.max(640, Math.min(60000, Number(event.target.value))))} /><small>ms</small></label><label><span>{copy('Repeat', 'تکرار')}</span><select value={statusRepeat} onChange={(event) => setStatusRepeat(event.target.value as typeof statusRepeat)}><option value="once">{copy('Once', 'یک‌بار')}</option><option value="loop">{copy('Loop', 'پیوسته')}</option></select></label></>}
+			{statusEffect === 'breathe' && <label><span>{copy('Minimum brightness', 'حداقل روشنایی')}</span><input type="number" min={0} max={statusBrightness} value={statusMinimum} onChange={(event) => setStatusMinimum(Math.max(0, Math.min(statusBrightness, Number(event.target.value))))} /></label>}
+			{(statusEffect === 'flash' || statusEffect === 'cycle' || statusEffect === 'transition') && <label className="native-color-field native-color-field--compact"><span>{copy('Second color', 'رنگ دوم')}</span><input type="color" value={alternateColor} onChange={(event) => setAlternateColor(event.target.value.toUpperCase())} /><code>{alternateColor}</code></label>}
+		  </div>
+		  <div className="inline-actions"><Button tone="primary" icon={Sparkles} disabled={!snapshot.connected} onClick={() => void command(statusCommand)}>{copy('Apply live', 'اعمال زنده')}</Button><Button disabled={!snapshot.connected} onClick={() => void command('rgb effect stop')}>{copy('Stop effect', 'توقف افکت')}</Button></div>
+		  <div className="rgb-profile-row"><label><span>{copy('EEPROM condition', 'شرط EEPROM')}</span><select value={statusProfile} onChange={(event) => setStatusProfile(event.target.value)}>{['off', 'boot', 'ready', 'learning', 'hot', 'fault', 'custom', 'bluetooth-connected', 'bluetooth-off', 'bluetooth-waiting', 'running', 'door-open', 'door-closed', 'bluetooth', 'menu', 'radio', 'save', 'discard', 'reset'].map((condition) => <option key={condition} value={condition}>{condition}</option>)}</select></label><Button icon={MemoryStick} disabled={!snapshot.connected} onClick={() => void command(profileCommand)}>{copy('Save profile (live when active)', 'ذخیره پروفایل (هنگام فعال‌شدن زنده)')}</Button></div>
         </Card>
 
       </section>
@@ -673,7 +719,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string> }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
     'Application title is required.': 'عنوان برنامه الزامی است.',
@@ -698,6 +744,8 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [draftAppTitle, setDraftAppTitle] = useState(appTitle)
   const [titleBusy, setTitleBusy] = useState(false)
   const [titleNotice, setTitleNotice] = useState('')
+	const [buzzerPathBusy, setBuzzerPathBusy] = useState(false)
+	const [buzzerPathNotice, setBuzzerPathNotice] = useState('')
   const [displayBrightness, setDisplayBrightness] = useState(snapshot.settings.display_brightness)
   const [displayClosedBrightness, setDisplayClosedBrightness] = useState(snapshot.settings.display_closed_brightness)
   const [motionExitHoldSeconds, setMotionExitHoldSeconds] = useState(snapshot.settings.motion_exit_hold_seconds || 2)
@@ -734,6 +782,21 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const updateAppearance = <K extends keyof Appearance>(key: K, value: Appearance[K]) => onAppearance({ ...appearance, [key]: value })
   const titleValidation = useMemo(() => validateAppTitle(draftAppTitle), [draftAppTitle])
   const normalizedToken = useMemo(() => normalizeSessionToken(draftToken), [draftToken])
+	const boardSilent = (snapshot.settings.flags & 0x01) !== 0
+	const hostSilent = !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
+	const buzzerPath = buzzerPathFromState(boardSilent, hostSilent)
+	const applyBuzzerPath = async (value: BuzzerPath) => {
+		setBuzzerPathBusy(true)
+		setBuzzerPathNotice('')
+		try {
+			await onBuzzerPath(value)
+			setBuzzerPathNotice(copy('Applied immediately to board and host.', 'فوراً روی برد و میزبان اعمال شد.'))
+		} catch (cause) {
+			setBuzzerPathNotice(cause instanceof Error ? cause.message : String(cause))
+		} finally {
+			setBuzzerPathBusy(false)
+		}
+	}
   const localDeviceValidation = useMemo(
     () => validateLocalDeviceURL(localIntegrations.local_device.base_url ?? '', localIntegrations.local_device.enabled),
     [localIntegrations.local_device.base_url, localIntegrations.local_device.enabled],
@@ -1033,6 +1096,24 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
             </div>
           </form>
         </Card>
+
+		<Card icon={Volume2} iconTone="green" title={copy('Buzzer routing', 'مسیر بیزر')} eyebrow={buzzerPath.toUpperCase()} className="settings-card settings-card--wide">
+			<div className="setting-group">
+				<label>{copy('Playback path', 'مسیر پخش')}</label>
+				<Segmented value={buzzerPath} label={copy('Buzzer playback path', 'مسیر پخش بیزر')} options={[
+					{ value: 'board', label: copy('Board', 'برد') },
+					{ value: 'host', label: copy('PC', 'رایانه') },
+					{ value: 'both', label: copy('Both', 'هر دو') },
+					{ value: 'none', label: copy('None', 'هیچ‌کدام') },
+				]} onChange={(value) => void applyBuzzerPath(value as BuzzerPath)} />
+			</div>
+			<div className="settings-inline-status">
+				<StatusBadge tone={boardSilent ? 'neutral' : 'good'}>{copy(`Board ${boardSilent ? 'silent' : 'active'}`, `برد ${boardSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
+				<StatusBadge tone={hostSilent ? 'neutral' : 'good'}>{copy(`PC ${hostSilent ? 'silent' : 'active'}`, `رایانه ${hostSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
+				{buzzerPathBusy && <StatusBadge tone="warn">{copy('Applying…', 'در حال اعمال…')}</StatusBadge>}
+			</div>
+			{buzzerPathNotice && <p className="settings-action-feedback" role="status">{buzzerPathNotice}</p>}
+		</Card>
 
         <Card icon={PanelTop} iconTone="accent" title={t('appearance')} eyebrow={`${appearanceThemeLabel} · ${appearanceDirectionLabel}`} className="settings-card settings-card--wide" menu={[
           { label: copy('Follow system appearance', 'پیروی از ظاهر سیستم'), icon: PanelTop, onSelect: () => onAppearance({ ...appearance, theme: 'system', direction: 'auto' }) },

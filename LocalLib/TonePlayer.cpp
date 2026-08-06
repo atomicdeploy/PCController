@@ -64,6 +64,10 @@ void TonePlayer::update(uint32_t now) {
   head_ = static_cast<uint8_t>((head_ + 1) % MAX_TONES);
   --count_;
 
+  activeFrequencyHz_ = step.frequencyHz;
+  activeDurationMs_ = step.durationMs;
+  ++revision_;
+
   if (!muted_ && step.frequencyHz != 0) {
     startHardwareTone(step.frequencyHz);
   } else {
@@ -80,6 +84,11 @@ void TonePlayer::stop() {
   count_ = 0;
   stepEndsAt_ = 0;
   stepActive_ = false;
+  if (activeFrequencyHz_ != 0 || activeDurationMs_ != 0) {
+    activeFrequencyHz_ = 0;
+    activeDurationMs_ = 0;
+    ++revision_;
+  }
 }
 
 void TonePlayer::setMuted(bool muted) {

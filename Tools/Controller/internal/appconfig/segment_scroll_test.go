@@ -11,7 +11,9 @@ func TestDefaultSegmentScrollIsValidAndDoorFocused(t *testing.T) {
 	if err := validateSegmentScroll(value); err != nil {
 		t.Fatal(err)
 	}
-	if !value.Enabled || len(value.Pages) != 1 || value.Pages[0] != "door" {
+	if !value.Enabled || len(value.Pages) != 1 || value.Pages[0] != "door" ||
+		value.SpeedMS != 220 || value.GapCells != 0 || value.Repeat != "interval" ||
+		value.IntervalSeconds != 30 {
 		t.Fatalf("defaults=%+v", value)
 	}
 }
@@ -24,6 +26,7 @@ func TestSegmentScrollRejectsDuplicatePagesAndOversizedTextWithGap(t *testing.T)
 	}
 	overflow := DefaultSegmentScroll()
 	overflow.DoorOpenText = "1234567890123456789012345678901234567890"
+	overflow.GapCells = 1
 	if err := validateSegmentScroll(overflow); err == nil {
 		t.Fatal("text plus gap beyond native payload was accepted")
 	}

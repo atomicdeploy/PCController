@@ -355,6 +355,41 @@ func TestUpdateUIPersistsAtomically(t *testing.T) {
 	}
 }
 
+func TestPresentationOverridesRemainRuntimeOnlyAndSurviveUIUpdates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := Defaults()
+	value.UI.AppTitle = "Configured Name"
+	value.UI.Tagline = "Configured tagline"
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPresentationOverrides("Environment Name", "Flag tagline"); err != nil {
+		t.Fatal(err)
+	}
+	effective := store.Current()
+	if effective.UI.AppTitle != "Environment Name" || effective.UI.Tagline != "Flag tagline" {
+		t.Fatalf("runtime presentation=%#v", effective.UI)
+	}
+	effective.UI.ShowGraphs = false
+	if _, err := store.UpdateUI(effective.UI); err != nil {
+		t.Fatal(err)
+	}
+	persisted, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.UI.AppTitle != "Configured Name" || persisted.UI.Tagline != "Configured tagline" || persisted.UI.ShowGraphs {
+		t.Fatalf("persisted configuration absorbed runtime overrides: %#v", persisted.UI)
+	}
+	if current := store.Current(); current.UI.AppTitle != "Environment Name" || current.UI.Tagline != "Flag tagline" || current.UI.ShowGraphs {
+		t.Fatalf("effective configuration lost override/update: %#v", current.UI)
+	}
+}
+
 func TestSubscribePushesValidatedUpdatesWithoutPolling(t *testing.T) {
 	store, err := Open(filepath.Join(t.TempDir(), "config.json"))
 	if err != nil {

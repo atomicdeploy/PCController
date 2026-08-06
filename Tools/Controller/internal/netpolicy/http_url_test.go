@@ -5,8 +5,8 @@ import "testing"
 func TestParseHTTPURLAcceptsExplicitLocalAndRemotePeers(t *testing.T) {
 	for _, target := range []string{
 		"https://updates.example.com/releases/board.hex?channel=stable",
-		"http://127.0.0.1:8787/api/v1/discovery/manifest",
-		"http://[::1]:8787/api/v1/artifacts",
+		"http://127.0.0.1:8787/api/discovery/manifest",
+		"http://[::1]:8787/api/artifacts",
 		"https://controller.lan./firmware/latest.hex",
 	} {
 		parsed, err := ParseHTTPURL(target, "update URL")

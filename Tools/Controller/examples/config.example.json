@@ -17,6 +17,7 @@
   },
   "ui": {
     "app_title": "PCController",
+	"tagline": "One host. Every board surface.",
     "table_layout": "compact",
     "setup_complete": false,
     "welcome_melody": "notify",
@@ -48,13 +49,16 @@
       "door_open_text": "door is open",
       "door_closed_text": "door is closed",
       "speed_ms": 220,
-      "gap_cells": 3
+      "gap_cells": 0,
+      "repeat": "interval",
+      "interval_seconds": 30
     }
   },
   "ipc": {
     "listen": "127.0.0.1:8787",
     "websocket_path": "/ipc",
     "allow_remote": false,
+    "remote_principal": "remote-operator",
     "remote_policy": {
       "read": true,
       "events": true,
@@ -79,6 +83,12 @@
     "socket_io_path": "/socket.io/"
   },
   "integrations": {
+    "buzzer_mirror": {
+      "enabled": false,
+      "native_enabled": false,
+      "web_audio_enabled": true,
+      "driver_directory": ""
+    },
     "hotkeys": [
       {
         "name": "open-events",
@@ -496,7 +506,7 @@
         },
         "brightness": 255,
         "minimum_brightness": 0,
-        "period_ms": 400
+        "period_ms": 640
       },
       "pc_offline": {
         "effect": "steady",
@@ -903,6 +913,50 @@
         {
           "frequency_hz": 1568,
           "duration_ms": 150
+        }
+      ]
+    },
+    {
+      "name": "edge-ready",
+      "notes": [
+        {
+          "frequency_hz": 523,
+          "duration_ms": 100,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 659,
+          "duration_ms": 100,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 784,
+          "duration_ms": 120,
+          "gap_ms": 30
+        },
+        {
+          "frequency_hz": 1047,
+          "duration_ms": 180,
+          "gap_ms": 60
+        },
+        {
+          "frequency_hz": 988,
+          "duration_ms": 90,
+          "gap_ms": 20
+        },
+        {
+          "frequency_hz": 1175,
+          "duration_ms": 90,
+          "gap_ms": 20
+        },
+        {
+          "frequency_hz": 1319,
+          "duration_ms": 110,
+          "gap_ms": 25
+        },
+        {
+          "frequency_hz": 1568,
+          "duration_ms": 260
         }
       ]
     },

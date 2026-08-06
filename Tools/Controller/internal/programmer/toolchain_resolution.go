@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"pccontroller.local/controller/internal/netpolicy"
 )
 
 const (
@@ -278,7 +280,11 @@ func (policy ToolchainPolicy) Validate() error {
 
 func LoadToolchainLock(path string) (ToolchainLock, error) {
 	if strings.TrimSpace(path) == "" {
-		return ToolchainLock{}, errors.New("toolchain lock path is required")
+		var lock ToolchainLock
+		if err := json.Unmarshal([]byte(generatedToolchainLockJSON), &lock); err != nil {
+			return ToolchainLock{}, fmt.Errorf("decode embedded toolchain lock: %w", err)
+		}
+		return lock, lock.Validate()
 	}
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -344,6 +350,7 @@ func ResolveToolchainPolicy(ctx context.Context, policy ToolchainPolicy, options
 	if environment == nil {
 		environment = os.Environ()
 	}
+	environment = netpolicy.WithLocalNetworkNoProxy(environment)
 	fetcher := newToolchainFetcher(options.HTTPClient, environment, options.DirectRetry)
 	cli, cliCanary, err := resolveCLI(ctx, fetcher, policy.CLI)
 	if err != nil {

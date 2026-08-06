@@ -38,7 +38,7 @@ func TestManagerOwnsPassiveRefreshTypedActionsAndJSONEvents(t *testing.T) {
 			}
 			sequence := snapshotSequence.Add(1)
 			_ = json.NewEncoder(writer).Encode(ActionResult{
-				Contract: ContractVersion, Accepted: true, Action: action.Type,
+				Contract: ContractID, Accepted: true, Action: action.Type,
 				CompletedAt: now.Add(time.Duration(sequence) * time.Second),
 				Snapshot:    snapshotPointer(testSnapshot(sequence, PowerOn, now.Add(time.Duration(sequence)*time.Second))),
 			})
@@ -52,7 +52,7 @@ func TestManagerOwnsPassiveRefreshTypedActionsAndJSONEvents(t *testing.T) {
 			connectionIndex := eventConnections.Add(1)
 			sequence := uint64(100 + connectionIndex)
 			event := Event{
-				Contract: ContractVersion, Type: EventSnapshotUpdated, Sequence: sequence,
+				Contract: ContractID, Type: EventSnapshotUpdated, Sequence: sequence,
 				At:       now.Add(time.Duration(sequence) * time.Second),
 				Snapshot: snapshotPointer(testSnapshot(sequence, PowerOn, now.Add(time.Duration(sequence)*time.Second))),
 			}
@@ -163,7 +163,7 @@ func TestManagerRejectsResultsFromSupersededGeneration(t *testing.T) {
 			value := testSnapshot(21, PowerOn, now.Add(time.Minute))
 			value.DeviceID = "pc-unit-new"
 			_ = json.NewEncoder(writer).Encode(ActionResult{
-				Contract: ContractVersion, Accepted: true, Action: action.Type,
+				Contract: ContractID, Accepted: true, Action: action.Type,
 				CompletedAt: now.Add(time.Minute), Snapshot: &value,
 			})
 		default:
@@ -225,7 +225,7 @@ func TestManagerDropsOutOfOrderEvents(t *testing.T) {
 			defer connection.CloseNow()
 			for _, sequence := range []uint64{20, 19} {
 				event := Event{
-					Contract: ContractVersion, Type: EventDeviceNotice,
+					Contract: ContractID, Type: EventDeviceNotice,
 					Sequence: sequence, At: now.Add(time.Duration(sequence) * time.Second), Notice: "ordered",
 				}
 				encoded, _ := json.Marshal(event)

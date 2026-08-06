@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
@@ -50,6 +51,7 @@ var pageDefinitions = [...]pageDefinition{
 
 type Preferences struct {
 	AppTitle            string
+	Tagline             string
 	PollInterval        time.Duration
 	EventLogLimit       int
 	HistoryWindow       time.Duration
@@ -63,6 +65,7 @@ type Preferences struct {
 func defaultPreferences() Preferences {
 	return Preferences{
 		AppTitle:            productidentity.Title(""),
+		Tagline:             productidentity.FirstRunTagline,
 		PollInterval:        250 * time.Millisecond,
 		EventLogLimit:       2000,
 		HistoryWindow:       24 * time.Hour,
@@ -81,6 +84,10 @@ func defaultPreferences() Preferences {
 func preferencesFromUI(value appconfig.UI) Preferences {
 	result := defaultPreferences()
 	result.AppTitle = productidentity.Title(value.AppTitle)
+	result.Tagline = strings.TrimSpace(value.Tagline)
+	if result.Tagline == "" {
+		result.Tagline = productidentity.FirstRunTagline
+	}
 	if value.StatusIntervalMS >= 100 {
 		result.PollInterval = time.Duration(value.StatusIntervalMS) * time.Millisecond
 	}
@@ -150,6 +157,8 @@ type FrontPanelState struct {
 	PressedKeys      byte
 	InputSource      string
 	Exact            bool
+	StatusLED        native.StatusLEDState
+	HaveStatusLED    bool
 }
 
 type Options struct {
@@ -172,6 +181,10 @@ type Options struct {
 	Integrations     func() hostui.IntegrationStatus
 	Notifier         hostui.Notifier
 	AppActions       <-chan hostui.AppAction
+	InstanceID       string
+	ReportPage       func(string) error
+	ReportTerminal   func(page, title string) error
+	WriteOSC         func(payload string) error
 	Preview          *control.Snapshot
 	ForceWelcome     bool
 	DisableWelcome   bool

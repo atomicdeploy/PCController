@@ -65,7 +65,7 @@ test("derives public API titles and schema ID from product metadata", () => {
     productName: "Nimbus Console",
     productProtocol: "nimbus-link",
     httpTitle: "Nimbus Console HTTP API",
-    rpcSchemaID: "https://nimbus-link.local/schemas/jsonrpc-v1.json",
+		rpcSchemaID: "https://nimbus-link.local/schemas/jsonrpc.json",
     rpcTitle: "Nimbus Console JSON-RPC 2.0",
     eventTitle: "Nimbus Console event and WebSocket API",
     referenceTitle: "Nimbus Console API Reference",
@@ -90,6 +90,14 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(reference.includes(`<title>${expected.referenceTitle}</title>`), true);
   assert.equal(reference.includes(`<h1>${expected.referenceHeading}</h1>`), true);
   assert.equal(openapi.components.securitySchemes.tokenHeader.name, "X-PCController-Token");
+  assert.equal(openapi.paths["/api/session/ticket"].post.responses["201"].description.includes("One-use"), true);
+  assert.equal(openapi.components.schemas.SessionTicket.properties.ticket.writeOnly, true);
+  assert.equal(openapi.components.schemas.OpcodeRequest.properties.opcode.maximum, 255);
+  assert.equal(openapi.components.schemas.AppInstanceReport.properties.lease_seconds.maximum, 300);
+  assert.equal(openapi.paths["/api/app/instances"].delete.parameters[0].required, true);
+  assert.equal(openapi.paths["/api/app/navigate"].post.requestBody.content["application/json"].schema.$ref, "#/components/schemas/AppNavigation");
+  assert.equal(asyncapi.components.securitySchemes.browserTicket.name, "Sec-WebSocket-Protocol");
+  assert.equal(JSON.stringify(asyncapi).includes("access_token"), false);
 });
 
 test("--check is read-only and stable across repeated runs", () => {
@@ -104,5 +112,12 @@ test("--check is read-only and stable across repeated runs", () => {
   assert.equal(first.status, 0, first.stderr);
   assert.equal(second.status, 0, second.stderr);
   assert.equal(second.stdout, first.stdout);
-  assert.match(first.stdout, /^API reference is current: 107 RPC methods, 38 REST paths, digest [a-f0-9]{12}\.\n$/u);
+  const rpcSchema = JSON.parse(readFileSync(join(outputDirectory, "jsonrpc.schema.json"), "utf8"));
+  const openapi = JSON.parse(readFileSync(join(outputDirectory, "openapi.json"), "utf8"));
+  const methodCount = Object.keys(rpcSchema["x-methods"]).length;
+  const pathCount = Object.keys(openapi.paths).length;
+  assert.match(
+    first.stdout,
+    new RegExp(`^API reference is current: ${methodCount} RPC methods, ${pathCount} REST paths, digest [a-f0-9]{12}\\.\\n$`, "u"),
+  );
 });

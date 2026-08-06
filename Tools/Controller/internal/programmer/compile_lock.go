@@ -59,8 +59,29 @@ func acquireCompileExecutionLock(
 	}
 
 	waitingReported := false
+	reportWaiting := func() {
+		if waitingReported || output == nil {
+			return
+		}
+		waitingReported = true
+		if owner, ok := readCompileLockOwner(lockPath); ok {
+			fmt.Fprintf(
+				output,
+				"Another firmware compile is active (%s); waiting for exclusive staging ownership.\n",
+				formatCompileLockOwner(owner),
+			)
+		} else {
+			fmt.Fprintln(output, "Another firmware compile is active; waiting for exclusive staging ownership.")
+		}
+	}
 	for {
 		if err := ctx.Err(); err != nil {
+			// A very short deadline can expire between opening the reusable
+			// lock file and the first non-blocking kernel attempt. Preserve the
+			// existing owner's actionable diagnostic in that case as well.
+			if _, ok := readCompileLockOwner(lockPath); ok {
+				reportWaiting()
+			}
 			_ = file.Close()
 			return nil, fmt.Errorf("wait for firmware compile lock %s: %w", lockPath, err)
 		}
@@ -98,20 +119,7 @@ func acquireCompileExecutionLock(
 			return &compileExecutionLock{file: file, path: lockPath}, nil
 		}
 
-		if !waitingReported {
-			waitingReported = true
-			if output != nil {
-				if owner, ok := readCompileLockOwner(lockPath); ok {
-					fmt.Fprintf(
-						output,
-						"Another firmware compile is active (%s); waiting for exclusive staging ownership.\n",
-						formatCompileLockOwner(owner),
-					)
-				} else {
-					fmt.Fprintln(output, "Another firmware compile is active; waiting for exclusive staging ownership.")
-				}
-			}
-		}
+		reportWaiting()
 
 		timer := time.NewTimer(compileLockRetryInterval)
 		select {

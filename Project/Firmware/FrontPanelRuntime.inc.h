@@ -373,7 +373,6 @@ void applyStoredSettings(uint32_t at) {
                             ? settings.displayBrightness
                             : settings.displayClosedBrightness());
   statusLeds.setBrightness(settings.statusBrightness);
-  statusLeds.setReadyColor(settings.statusColor());
   statusLeds.setPowerSignal(true);
   relays.setMotionAllowed(motionPolicyAllows(), at);
 }
@@ -588,15 +587,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
             statusLeds.setBrightness(settings.statusBrightness);
             break;
           case 4:
-            settings.setStatusColor(static_cast<uint8_t>(
-                (settings.statusColor() + (increase ? 1U : 4U)) % 5U));
-            statusLeds.setReadyColor(settings.statusColor());
-            break;
-          case 5:
             settings.setVoltageDecimals(static_cast<uint8_t>(
                 (settings.voltageDecimals() + (increase ? 1U : 2U)) % 3U));
             break;
-          case 6:
+          case 5:
             settings.setCurrentDecimals(static_cast<uint8_t>(
                 (settings.currentDecimals() + (increase ? 1U : 2U)) % 3U));
             break;
@@ -848,8 +842,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   menuFeedback(fromRemote);
 }
 
-// Applies one classified physical or remote gesture without duplicating the
-// local safety path in protocol dispatch.
+// Applies one physical or injected lifecycle without duplicating the local
+// safety path in protocol dispatch. Primary actions run on Down; Click remains
+// deferred classification only and must never sit on the control path.
 void applyKeyGesture(uint8_t bit, KeyEvent event) {
   const ProgramMode mode = modeManager.current();
   const bool momentary = mode == MODE_MOTION_CONTROL ||
@@ -869,9 +864,8 @@ void applyKeyGesture(uint8_t bit, KeyEvent event) {
         setSelectedUserRelay(false, releaseNow);
       }
     }
-  } else if (event == KeyEvent::Click || event == KeyEvent::HoldStart ||
-             (event == KeyEvent::HoldRepeat && mode != MODE_KEYS)) {
-    // HoldStart supplies the one action suppressed by the absent Click.
+  } else if (keyEventRunsPrimaryAction(event) &&
+             (event != KeyEvent::HoldRepeat || mode != MODE_KEYS)) {
     handleMenuAction(bit);
   } else if (event == KeyEvent::DoubleClick &&
              bit == BoardPins::KeyPrevious && isMenuMode(mode)) {
@@ -879,8 +873,8 @@ void applyKeyGesture(uint8_t bit, KeyEvent event) {
   }
 }
 
-// Keeps raw momentary outputs immediate while deferring normal menu actions
-// until a click or hold classification is known.
+// Physical keys use the same immediate-Down contract as UART virtual keys.
+// Feedback, display work, and later gesture classification never gate input.
 void keyGesture(uint8_t bit, KeyEvent event, void *) {
   if ((hostLcdFlags & HOST_PANEL_CAPTURED) == 0) {
     applyKeyGesture(bit, event);
@@ -1019,28 +1013,67 @@ void showLearningProgress(uint32_t at) {
   display.showText(text);
 }
 
-// Advances one cached four-character window of a host-owned Door-page scroll.
-void showHostSegmentText(uint32_t at) {
-  if (hostSegmentTextLength <= 4) {
+// Advances a host-owned presentation. Every marquee walks beyond the last
+// character and renders one completely empty frame before it stops, waits, or
+// explicitly loops. Interval waits return ownership to the local menu page.
+bool showHostSegmentText(uint32_t at) {
+  constexpr uint8_t RepeatMask = 0x03U;
+  constexpr uint8_t IntervalWaiting = 0x40U;
+  constexpr uint8_t ForceScroll = 0x80U;
+  const uint8_t repeat = hostSegmentOptions & RepeatMask;
+  const bool scrolling = hostSegmentTextLength > 4 ||
+                         (hostSegmentOptions & ForceScroll) != 0;
+  if ((hostSegmentOptions & IntervalWaiting) != 0) {
+    if (!timeReached(at, hostSegmentTextEndsAt)) {
+      return false;
+    }
+    hostSegmentOptions &= static_cast<uint8_t>(~IntervalWaiting);
+    hostSegmentScrollIndex = 0;
+    hostSegmentTextEndsAt = at + (scrolling ? hostSegmentStepMs
+                                            : hostSegmentHoldMs);
+  }
+  if (!scrolling) {
+    if (hostSegmentTextEndsAt != 0 && timeReached(at, hostSegmentTextEndsAt)) {
+      if (repeat == 2) {
+        hostSegmentOptions |= IntervalWaiting;
+        hostSegmentTextEndsAt =
+            at + static_cast<uint32_t>(hostSegmentIntervalSeconds) * 1000UL;
+      } else {
+        clearHostSegmentText();
+      }
+      return false;
+    }
     display.showText(hostSegmentText);
-    return;
+    return true;
   }
   if (timeReached(at, hostSegmentTextEndsAt)) {
-    if (++hostSegmentScrollIndex >= hostSegmentTextLength) {
+    if (hostSegmentScrollIndex < hostSegmentTextLength) {
+      ++hostSegmentScrollIndex;
+      hostSegmentTextEndsAt = at + hostSegmentStepMs;
+    } else if (repeat == 1) {
       hostSegmentScrollIndex = 0;
+      hostSegmentTextEndsAt = at + hostSegmentStepMs;
+    } else if (repeat == 2) {
+      hostSegmentOptions |= IntervalWaiting;
+      hostSegmentTextEndsAt =
+          at + static_cast<uint32_t>(hostSegmentIntervalSeconds) * 1000UL;
+      return false;
+    } else {
+      clearHostSegmentText();
+      return false;
     }
-    hostSegmentTextEndsAt = at + hostSegmentStepMs;
   }
   char window[5];
   for (uint8_t index = 0; index < 4; ++index) {
-    uint8_t source = static_cast<uint8_t>(hostSegmentScrollIndex + index);
-    if (source >= hostSegmentTextLength) {
-      source = static_cast<uint8_t>(source - hostSegmentTextLength);
-    }
-    window[index] = hostSegmentText[source];
+    const uint8_t source =
+        static_cast<uint8_t>(hostSegmentScrollIndex + index);
+    window[index] = source < hostSegmentTextLength
+                        ? hostSegmentText[source]
+                        : ' ';
   }
   window[4] = '\0';
   display.showText(window);
+  return true;
 }
 
 // Refreshes only changed front-panel content at a smooth 20 ms service cadence.
@@ -1083,16 +1116,12 @@ void serviceDisplay(uint32_t at) {
   if (!timeReached(at, menuLabelEndsAt)) {
     return;
   }
-  if (hostSegmentTextActive && hostSegmentTextLength <= 4 &&
-      hostSegmentTextEndsAt != 0 && timeReached(at, hostSegmentTextEndsAt)) {
-    hostSegmentTextActive = false;
-  }
-  // Host text overlays ordinary pages only. A long message is intentionally
-  // scoped to Door; all editors, warnings, learning, and programming win.
-  if (hostSegmentTextActive && isMenuMode(currentMode) &&
-      (hostSegmentTextLength <= 4 || currentMode == MODE_DOOR)) {
-    showHostSegmentText(at);
-    return;
+  // Host text overlays ordinary pages only; editors, warnings, learning, and
+  // programming remain higher priority. Interval waits reveal the local page.
+  if (hostSegmentTextActive && isMenuMode(currentMode)) {
+    if (showHostSegmentText(at)) {
+      return;
+    }
   }
   if (currentMode >= MODE_ILLUMINATION_MODE_EDIT &&
       currentMode <= MODE_USER_RELAY_BEHAVIOR_EDIT &&
@@ -1234,12 +1263,9 @@ void serviceDisplay(uint32_t at) {
             value = settings.statusBrightness;
             break;
           case 4:
-            value = settings.statusColor();
-            break;
-          case 5:
             value = settings.voltageDecimals();
             break;
-          case 6:
+          case 5:
             value = settings.currentDecimals();
             break;
           default:

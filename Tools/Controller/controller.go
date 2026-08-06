@@ -8,6 +8,7 @@ package controller
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +33,7 @@ type (
 	Hello                     = native.Hello
 	Status                    = native.Status
 	Settings                  = native.Settings
+	BoardName                 = native.BoardName
 	RFEntry                   = native.RFEntry
 	RFConfig                  = appconfig.RFConfig
 	RFCategory                = appconfig.RFCategory
@@ -44,6 +46,9 @@ type (
 	Melody                    = appconfig.Melody
 	MelodyNote                = appconfig.MelodyNote
 	StatusLEDEffect           = appconfig.StatusLEDEffect
+	StatusLEDState            = native.StatusLEDState
+	StatusProfile             = native.StatusProfile
+	StatusEffectOptions       = native.StatusEffectOptions
 	StatusLEDPolicy           = appconfig.StatusLEDPolicy
 	StatusLEDVisual           = appconfig.StatusLEDVisual
 	RGBColor                  = appconfig.RGBColor
@@ -65,6 +70,9 @@ type (
 	I2CTransferResult         = native.I2CTransferResult
 	LCDPresentationOptions    = control.LCDPresentationOptions
 	LCDPresentationState      = control.LCDPresentationState
+	DisplayRepeat             = control.DisplayRepeat
+	DisplayRequest            = control.DisplayRequest
+	DisplayResult             = control.DisplayResult
 	OSPolicy                  = hostos.Policy
 	VirtualKeyPolicy          = hostos.VirtualKeyPolicy
 	PowerPolicy               = hostos.PowerPolicy
@@ -95,6 +103,12 @@ type (
 const (
 	RFLearnIndefinite = control.RFLearnIndefinite
 	RFLearnTimer      = control.RFLearnTimer
+)
+
+const (
+	DisplayRepeatOnce     = control.DisplayRepeatOnce
+	DisplayRepeatLoop     = control.DisplayRepeatLoop
+	DisplayRepeatInterval = control.DisplayRepeatInterval
 )
 
 // ParseRFLearnMode accepts the canonical RF learning mode and documented aliases.
@@ -324,6 +338,9 @@ type Snapshot struct {
 	FrontPanel        FrontPanel           `json:"front_panel"`
 	HaveFrontPanel    bool                 `json:"have_front_panel"`
 	FrontPanelUpdated time.Time            `json:"front_panel_updated,omitempty"`
+	StatusLED         StatusLEDState       `json:"status_led"`
+	HaveStatusLED     bool                 `json:"have_status_led"`
+	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -331,6 +348,7 @@ type Event struct {
 	ID          uint64            `json:"id"`
 	Time        time.Time         `json:"time"`
 	Kind        string            `json:"kind"`
+	Stream      string            `json:"stream"`
 	Text        string            `json:"text"`
 	Opcode      byte              `json:"opcode,omitempty"`
 	Seq         byte              `json:"seq,omitempty"`
@@ -355,6 +373,17 @@ type Event struct {
 	RFPulseUS   uint16            `json:"rf_pulse_us,omitempty"`
 	ResetCause  byte              `json:"reset_cause,omitempty"`
 	ResetCount  uint32            `json:"reset_count,omitempty"`
+}
+
+// OpcodeFrame is the raw, versionless UART exchange result. Payload is kept
+// opaque so clients can query firmware additions before the host understands
+// their schema.
+type OpcodeFrame struct {
+	Opcode     byte   `json:"opcode"`
+	Name       string `json:"name"`
+	Sequence   byte   `json:"sequence"`
+	Payload    []byte `json:"payload,omitempty"`
+	PayloadHex string `json:"payload_hex,omitempty"`
 }
 
 // TextMessage is a typed envelope shared by IPC, WebSocket, webhooks, the host
@@ -1025,6 +1054,17 @@ func (client *Client) SetMenuPage(ctx context.Context, page byte) error {
 	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page})
 }
 
+// BoardName reads the operator-assigned MCU EEPROM name.
+func (client *Client) BoardName(ctx context.Context) (BoardName, error) {
+	return client.runtime.BoardName(ctx)
+}
+
+// SetBoardName persists and verifies up to eight printable ASCII characters.
+// Passing an empty string clears the name.
+func (client *Client) SetBoardName(ctx context.Context, name string) (BoardName, error) {
+	return client.runtime.SetBoardName(ctx, name)
+}
+
 // SetMenuPageByName resolves a live catalog name or ID before navigating.
 func (client *Client) SetMenuPageByName(
 	ctx context.Context,
@@ -1500,6 +1540,9 @@ func (client *Client) Snapshot() Snapshot {
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,
 		FrontPanelUpdated: snapshot.FrontPanelUpdated,
+		StatusLED:         snapshot.StatusLED,
+		HaveStatusLED:     snapshot.HaveStatusLED,
+		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
 	}
 }
 
@@ -1523,6 +1566,16 @@ func (client *Client) SetSegmentText(
 		return err
 	}
 	return client.runtime.Command(ctx, native.OpDisplayText, payload)
+}
+
+// PresentDisplay sends an arbitrary segment/LCD message through the shared
+// primary runtime. Long segment text scrolls automatically; callers can force
+// a marquee and select once, explicit loop, or interval scheduling.
+func (client *Client) PresentDisplay(
+	ctx context.Context,
+	request DisplayRequest,
+) (DisplayResult, error) {
+	return client.runtime.PresentDisplay(ctx, request)
 }
 
 // RefreshFrontPanel returns the board's exact cached display/LCD/key state and
@@ -1549,6 +1602,60 @@ func (client *Client) NextEvent(
 	return publicEvent(event), nil
 }
 
+// NextEventStream waits on activity, state, telemetry, or debug without
+// allowing a high-rate stream to displace retained activity events.
+func (client *Client) NextEventStream(
+	ctx context.Context,
+	afterID uint64,
+	kind string,
+	stream string,
+) (Event, error) {
+	event, err := client.runtime.WaitEventStreamFilter(ctx, afterID, kind, nil, stream)
+	if err != nil {
+		return Event{}, err
+	}
+	return publicEvent(event), nil
+}
+
+// NextOpcodeEvent waits for an unsolicited raw frame, optionally filtered by
+// exact opcode. It is the long-polling counterpart to WebSocket/Socket.IO's
+// `opcodes` subscription topic.
+func (client *Client) NextOpcodeEvent(
+	ctx context.Context,
+	afterID uint64,
+	kind string,
+	opcode *byte,
+) (Event, error) {
+	event, err := client.runtime.WaitEventFilter(ctx, afterID, kind, opcode)
+	if err != nil {
+		return Event{}, err
+	}
+	return publicEvent(event), nil
+}
+
+// ExchangeOpcode sends one opaque UART request and waits for the caller's
+// expected opcode. The default expectation is ACK, but experimental queries
+// can name any response opcode without a host update.
+func (client *Client) ExchangeOpcode(
+	ctx context.Context,
+	opcode byte,
+	payload []byte,
+	expectedOpcode byte,
+) (OpcodeFrame, error) {
+	if len(payload) > native.MaxPayload {
+		return OpcodeFrame{}, native.ErrPayloadTooLong
+	}
+	frame, err := client.runtime.Request(ctx, opcode, payload, expectedOpcode)
+	if err != nil {
+		return OpcodeFrame{}, err
+	}
+	return OpcodeFrame{
+		Opcode: frame.Opcode, Name: native.OpcodeName(frame.Opcode),
+		Sequence: frame.Seq, Payload: append([]byte(nil), frame.Payload...),
+		PayloadHex: strings.ToUpper(hex.EncodeToString(frame.Payload)),
+	}, nil
+}
+
 // SendTextMessage validates and routes a typed host, bridge, board, or LCD message.
 func (client *Client) SendTextMessage(
 	ctx context.Context,
@@ -1559,7 +1666,7 @@ func (client *Client) SendTextMessage(
 	message.Type = strings.ToLower(strings.TrimSpace(message.Type))
 	message.Text = strings.TrimSpace(message.Text)
 	message.Action = strings.TrimSpace(message.Action)
-	if !oneOf(message.Source, "client", "server", "bridge", "board", "lcd", "host", "ipc", "webhook", "websocket") {
+	if !oneOf(message.Source, "client", "server", "bridge", "board", "lcd", "host", "ipc", "rest", "webhook", "websocket", "socket_io") {
 		return Event{}, fmt.Errorf("unsupported message source %q", message.Source)
 	}
 	if !oneOf(message.Target, "client", "server", "bridge", "board", "lcd", "host", "all") {
@@ -1910,7 +2017,7 @@ func (client *Client) forwardEvents() {
 func publicEvent(event control.Event) Event {
 	forwarded := Event{
 		ID: event.ID, Time: event.Time,
-		Kind: event.Kind, Text: event.Text,
+		Kind: event.Kind, Stream: event.Stream, Text: event.Text,
 		Opcode: event.Frame.Opcode, Seq: event.Frame.Seq,
 		Payload:   append([]byte(nil), event.Frame.Payload...),
 		Lifecycle: event.Lifecycle,

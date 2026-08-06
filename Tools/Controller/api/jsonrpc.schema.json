@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://pccontroller.local/schemas/jsonrpc-v1.json",
+  "$id": "https://pccontroller.local/schemas/jsonrpc.json",
   "title": "PCController JSON-RPC 2.0",
   "oneOf": [
     {
@@ -47,6 +47,12 @@
         "method": {
           "enum": [
             "controller.app.action",
+            "controller.app.bridge",
+            "controller.app.instance.get",
+            "controller.app.instance.remove",
+            "controller.app.instance.report",
+            "controller.app.instances",
+            "controller.app.navigate",
             "controller.app.page",
             "controller.artifact.capture",
             "controller.artifact.fetch",
@@ -70,6 +76,7 @@
             "controller.discovery.scan",
             "controller.discovery.stage",
             "controller.discovery.status",
+            "controller.display.send",
             "controller.event.latest",
             "controller.event.next",
             "controller.exit",
@@ -101,6 +108,9 @@
             "controller.menu.list",
             "controller.menu.page",
             "controller.message.send",
+            "controller.opcode.exchange",
+            "controller.opcode.request",
+            "controller.opcode.send",
             "controller.open",
             "controller.os.configure",
             "controller.os.facts",
@@ -152,7 +162,12 @@
             "controller.update.firmware",
             "controller.update.host",
             "controller.update.status",
-            "controller.virtual_key"
+            "controller.virtual_key",
+            "controller.webhooks.clear",
+            "controller.webhooks.dead",
+            "controller.webhooks.pending",
+            "controller.webhooks.replay",
+            "controller.webhooks.status"
           ]
         },
         "params": {
@@ -234,6 +249,9 @@
         "method": {
           "enum": [
             "controller.event",
+            "controller.state",
+            "controller.debug",
+            "controller.opcode",
             "controller.status",
             "controller.error",
             "controller.data"
@@ -246,13 +264,43 @@
   "x-methods": {
     "controller.app.action": {
       "capability": "dynamic",
-      "summary": "app action",
+      "summary": "Route a validated page, title, OSC progress, raw OSC, port, command, or lifecycle action to live application instances.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.app.bridge": {
+      "capability": "read",
+      "summary": "Return the original coordinator bridge instance and its bounded process self-information.",
+      "idempotency": "safe"
+    },
+    "controller.app.instance.get": {
+      "capability": "read",
+      "summary": "Read one live application instance by ID.",
+      "idempotency": "safe"
+    },
+    "controller.app.instance.remove": {
+      "capability": "host_configuration",
+      "summary": "Remove one application instance from the live registry.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.app.instance.report": {
+      "capability": "host_configuration",
+      "summary": "Create or refresh one leased application-instance report.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.app.instances": {
+      "capability": "read",
+      "summary": "List live application instances and their bounded non-secret state.",
+      "idempotency": "safe"
+    },
+    "controller.app.navigate": {
+      "capability": "host_configuration",
+      "summary": "Navigate all, one surface, or one exact live application instance.",
       "idempotency": "non-idempotent"
     },
     "controller.app.page": {
       "capability": "host_configuration",
       "summary": "app page",
-      "idempotency": "idempotent-with-authoritative-readback"
+      "idempotency": "non-idempotent"
     },
     "controller.artifact.capture": {
       "capability": "programming",
@@ -364,6 +412,11 @@
       "summary": "discovery status",
       "idempotency": "safe"
     },
+    "controller.display.send": {
+      "capability": "board_commands",
+      "summary": "display send",
+      "idempotency": "non-idempotent"
+    },
     "controller.event.latest": {
       "capability": "events",
       "summary": "event latest",
@@ -371,7 +424,7 @@
     },
     "controller.event.next": {
       "capability": "events",
-      "summary": "Long-poll the next retained event after an event ID.",
+      "summary": "Long-poll the next retained event after an event ID, optionally selecting activity, state, telemetry, or debug.",
       "idempotency": "safe"
     },
     "controller.exit": {
@@ -519,6 +572,21 @@
       "summary": "message send",
       "idempotency": "non-idempotent"
     },
+    "controller.opcode.exchange": {
+      "capability": "board_commands",
+      "summary": "Exchange an opaque versionless UART opcode and caller-selected response opcode.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.opcode.request": {
+      "capability": "board_commands",
+      "summary": "Alias for an opaque versionless UART opcode exchange.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.opcode.send": {
+      "capability": "board_commands",
+      "summary": "Send an opaque versionless UART opcode; ACK is expected by default.",
+      "idempotency": "non-idempotent"
+    },
     "controller.open": {
       "capability": "connection_control",
       "summary": "open",
@@ -576,7 +644,7 @@
     },
     "controller.ping": {
       "capability": "read",
-      "summary": "Return service health and protocol versions.",
+      "summary": "Return service health and protocol identity.",
       "idempotency": "safe"
     },
     "controller.port.close": {
@@ -721,7 +789,7 @@
     },
     "controller.subscribe": {
       "capability": "events",
-      "summary": "Subscribe this WebSocket connection to events and/or status.",
+      "summary": "Subscribe this WebSocket connection to activity events, changed state, explicit debug, raw opcodes, and/or status.",
       "idempotency": "safe"
     },
     "controller.system.status": {
@@ -778,6 +846,31 @@
       "capability": "virtual_keys",
       "summary": "virtual key",
       "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.webhooks.clear": {
+      "capability": "integrations",
+      "summary": "Clear explicitly selected dead-letter deliveries.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.webhooks.dead": {
+      "capability": "read",
+      "summary": "List bounded non-secret dead-letter deliveries.",
+      "idempotency": "safe"
+    },
+    "controller.webhooks.pending": {
+      "capability": "read",
+      "summary": "List bounded non-secret pending outbound deliveries.",
+      "idempotency": "safe"
+    },
+    "controller.webhooks.replay": {
+      "capability": "integrations",
+      "summary": "Replay explicitly selected dead-letter deliveries.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.webhooks.status": {
+      "capability": "read",
+      "summary": "Return bounded outbound queue and dead-letter counters.",
+      "idempotency": "safe"
     }
   },
   "x-error-codes": {

@@ -36,7 +36,7 @@ func TestLocalDeviceHostTracksConfigAndExposesOnlyV1Operations(t *testing.T) {
 		switch {
 		case request.Method == http.MethodGet && request.URL.Path == localdevice.CapabilitiesPath:
 			_ = json.NewEncoder(writer).Encode(localdevice.Capabilities{
-				Contract: localdevice.ContractVersion, DeviceID: "host-test-1",
+				Contract: localdevice.ContractID, DeviceID: "host-test-1",
 				Name: "PCController companion", Model: "LD-1", Firmware: "2026.08",
 				Actions: []localdevice.ActionType{
 					localdevice.ActionPowerOn, localdevice.ActionPowerOff,
@@ -48,7 +48,7 @@ func TestLocalDeviceHostTracksConfigAndExposesOnlyV1Operations(t *testing.T) {
 		case request.Method == http.MethodGet && request.URL.Path == localdevice.SnapshotPath:
 			sequence := uint64(snapshotReads.Add(1))
 			_ = json.NewEncoder(writer).Encode(localdevice.Snapshot{
-				Contract: localdevice.ContractVersion, DeviceID: "host-test-1",
+				Contract: localdevice.ContractID, DeviceID: "host-test-1",
 				Sequence: sequence, Power: localdevice.PowerOff,
 				DisplayMessage: "must stay out of status and inspection", UpdatedAt: now.Add(time.Duration(sequence) * time.Second),
 			})
@@ -64,10 +64,10 @@ func TestLocalDeviceHostTracksConfigAndExposesOnlyV1Operations(t *testing.T) {
 			lastAction = action
 			mu.Unlock()
 			_ = json.NewEncoder(writer).Encode(localdevice.ActionResult{
-				Contract: localdevice.ContractVersion, Accepted: true, Action: action.Type,
+				Contract: localdevice.ContractID, Accepted: true, Action: action.Type,
 				CompletedAt: now.Add(time.Minute),
 				Snapshot: &localdevice.Snapshot{
-					Contract: localdevice.ContractVersion, DeviceID: "host-test-1",
+					Contract: localdevice.ContractID, DeviceID: "host-test-1",
 					Sequence: 50, Power: localdevice.PowerOn, UpdatedAt: now.Add(time.Minute),
 				},
 			})

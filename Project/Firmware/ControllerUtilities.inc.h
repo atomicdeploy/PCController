@@ -59,13 +59,21 @@ void serviceIlluminationSettings(uint32_t at) {
   settingsStore.service(at, !learningActive && !editTransactionActive);
 }
 
+// Clears every scheduled segment state so a later message always starts at
+// its first frame instead of inheriting an interval wait or repeat mode.
+void clearHostSegmentText() {
+  hostSegmentTextActive = false;
+  hostSegmentTextLength = 0;
+  hostSegmentScrollIndex = 0;
+  hostSegmentOptions = 0;
+  hostSegmentTextEndsAt = 0;
+}
+
 // Releases a host overlay and restores the configured local default page.
 void releaseHostPanel() {
   hostLcdFlags &= static_cast<uint8_t>(~HOST_PANEL_CAPTURED);
   hostPanelMeta = 0;
-  hostSegmentTextActive = false;
-  hostSegmentTextLength = 0;
-  hostSegmentScrollIndex = 0;
+  clearHostSegmentText();
   setMenuPage(settingsStore.values().defaultMenuPage);
 }
 
@@ -122,6 +130,8 @@ uint32_t readU32(const uint8_t *buffer) {
 void safeStopMacroOutputs() {
   relays.allOff(now);
   pwm.clearMask(PwmChannels::UserTestMask);
+  hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
+  statusLeds.cancelEffect();
 }
 
 // Treats a never-seen or timed-out PC as unavailable after firmware startup.

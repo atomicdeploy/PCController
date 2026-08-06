@@ -28,6 +28,8 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		values[28] = (9 << 3) | 2
 		values[29] = 0xF0
 		values[30] = 100
+		values[31] = 7
+		copy(values[32:40], []byte("EDGE-01"))
 		settings[EEPROMSettingsValueBytes] = avrCRC8(values)
 
 		header := data[EEPROMRemoteHeaderAddress : EEPROMRemoteHeaderAddress+4]
@@ -59,10 +61,10 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.SourceKind != "offline-eeprom-hex" ||
-		decoded.Layout != "settings-unversioned-31/rf-record12-cap20/reset-journal-320" ||
+		decoded.Layout != "settings-name-unversioned-40/rf-record12-cap20/reset-journal-336" ||
 		!decoded.Settings.Supported || !decoded.Settings.Valid ||
-		decoded.Settings.Format != "current/unversioned-31+crc8" ||
-		decoded.Settings.ValueBytes != 31 {
+		decoded.Settings.Format != "current/unversioned-40+crc8" ||
+		decoded.Settings.ValueBytes != 40 {
 		t.Fatalf("settings decode invalid: %#v", decoded.Settings)
 	}
 	settings := decoded.Settings.Values
@@ -73,7 +75,8 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		settings.StatusColor != 3 || !settings.SaveLastMenuPage ||
 		settings.VisibleMenuMask != 0x3FFF || settings.MenuOrder[6] != 0xDC ||
 		settings.DisplayClosedBrightness != 2 || settings.MotionExitHoldSeconds != 9 ||
-		settings.OutputPersistence != 0x06 || settings.RelayRestoreMask != 0xF0 {
+		settings.OutputPersistence != 0x06 || settings.RelayRestoreMask != 0xF0 ||
+		settings.BoardName != "EDGE-01" {
 		t.Fatalf("unexpected decoded settings: %#v", settings)
 	}
 	if settings.MotionBreakMS != 100 {
@@ -207,6 +210,9 @@ func TestDecodeOfflineEEPROMRejectsInvalidCurrentMenuLayout(t *testing.T) {
 				copy(values[21:28], test.order[:])
 				values[28] = 0
 				values[30] = 1
+				for index := 31; index < int(EEPROMSettingsValueBytes); index++ {
+					values[index] = 0
+				}
 				record[EEPROMSettingsValueBytes] = avrCRC8(values)
 			})
 			decoded, err := DecodeOfflineEEPROMHex(path)

@@ -204,7 +204,7 @@ export async function uploadArtifact(
   sha256: string,
   signal?: AbortSignal,
 ): Promise<ArtifactOperationResult> {
-  const url = new URL(controllerHTTPURL('/api/v1/artifacts/upload'), location.href)
+  const url = new URL(controllerHTTPURL('/api/artifacts/upload'), location.href)
   url.searchParams.set('kind', kind)
   url.searchParams.set('name', file.name)
   url.searchParams.set('sha256', sha256)
@@ -222,7 +222,7 @@ export async function uploadArtifact(
 
 /** Downloads one immutable artifact using its verified content identity. */
 export async function downloadArtifact(artifact: ArtifactDescriptor, signal?: AbortSignal): Promise<void> {
-  const url = controllerHTTPURL(`/api/v1/artifacts/${encodeURIComponent(artifact.kind)}/${encodeURIComponent(artifact.sha256)}`)
+  const url = controllerHTTPURL(`/api/artifacts/${encodeURIComponent(artifact.kind)}/${encodeURIComponent(artifact.sha256)}`)
   const response = await fetch(url, { headers: authorizationHeaders(), signal })
   if (!response.ok) await decode(response)
   const blob = await response.blob()

@@ -31,6 +31,7 @@ struct Settings {
   std::uint8_t displayOptions = 0x10;
   std::uint8_t relayRestoreMask = 0;
   std::uint8_t motionBreakMs = 1;
+  std::string boardName;
 };
 
 struct ConsoleResult {
@@ -125,6 +126,20 @@ private:
   void queueMacroEvent();
   void queueEvent(std::initializer_list<std::uint8_t> payload);
   void queueEvent(std::vector<std::uint8_t> payload);
+  void queueMirrorChanges();
+  bool applyStatusEffect(const std::vector<std::uint8_t> &payload,
+                         TimePoint now);
+  void renderStatusEffect();
+  void finishStatusEffect();
+  void serviceStatusEffect(TimePoint now);
+  void setStatusRgb(std::uint8_t red, std::uint8_t green,
+                    std::uint8_t blue, std::uint8_t brightness);
+  bool statusProfile(std::uint8_t condition,
+                     std::array<std::uint8_t, 12> &payload) const;
+  bool setStatusProfile(std::uint8_t condition,
+                        const std::uint8_t *payload, TimePoint now);
+  void showScheduledSegmentWindow();
+  void clearScheduledSegments(bool restoreMenu);
   void serviceAutomation(TimePoint now);
   std::string describeLocked() const;
 
@@ -140,6 +155,7 @@ private:
   TimePoint startedAt_;
   TimePoint lastStreamAt_;
   TimePoint lastFadeAt_;
+  TimePoint lastStatusEffectAt_;
   TimePoint lastRelayTestAt_;
   TimePoint lastHostActivityAt_;
   TimePoint learningDeadline_;
@@ -173,6 +189,15 @@ private:
   bool hostSeen_ = false;
   bool programRunning_ = false;
   bool statusOverride_ = false;
+  std::uint8_t statusEffect_ = 0;
+  std::uint8_t statusCondition_ = 0;
+  std::array<std::uint8_t, 3> statusEffectColor_{};
+  std::array<std::uint8_t, 3> statusEffectAlternate_{};
+  std::uint8_t statusEffectBrightness_ = 0;
+  std::uint8_t statusEffectMinimum_ = 0;
+  std::uint8_t statusEffectPhase_ = 0;
+  std::uint8_t statusEffectRepeats_ = 0;
+  std::uint16_t statusEffectStepMs_ = 20;
   bool hostPanelCaptured_ = false;
   std::uint16_t hostPanelMeta_ = 0;
   std::uint8_t macroState_ = 0;
@@ -193,8 +218,22 @@ private:
   std::uint16_t menuVisibleMask_ = 0x3FFF;
   std::array<std::uint8_t, 14> menuOrder_{{0, 1, 2, 3, 4, 5, 6,
                                            7, 8, 9, 10, 11, 12, 13}};
+  std::string scheduledSegmentText_;
+  std::size_t scheduledSegmentIndex_ = 0;
+  std::uint16_t scheduledSegmentStepMs_ = 260;
+  std::uint16_t scheduledSegmentHoldMs_ = 5000;
+  std::uint8_t scheduledSegmentOptions_ = 0;
+  std::uint8_t scheduledSegmentIntervalSeconds_ = 30;
+  bool scheduledSegmentActive_ = false;
+  bool scheduledSegmentWaiting_ = false;
   bool segmentDeadlineActive_ = false;
   bool buzzerDeadlineActive_ = false;
+  std::array<std::uint8_t, 4> lastPushedSegments_{{0, 0, 0, 0}};
+  std::uint8_t lastPushedSegmentBrightness_ = 0;
+  std::uint16_t lastPushedBuzzerFrequencyHz_ = 0;
+  std::uint16_t lastPushedBuzzerDurationMs_ = 0;
+  bool lastPushedBuzzerMuted_ = false;
+  std::array<std::uint8_t, 6> lastPushedStatusLed_{{0, 0, 0, 0, 0, 0}};
   std::uint8_t i2cLeaseAddress_ = 0;
   std::array<std::uint8_t, 4> i2cRegisterPointers_{};
   std::array<std::array<std::uint8_t, 256>, 4> i2cRegisters_{};

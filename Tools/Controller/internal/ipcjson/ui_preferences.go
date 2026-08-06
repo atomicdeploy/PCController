@@ -33,6 +33,7 @@ type browserAppearancePatch struct {
 
 type browserUIConfigMutation struct {
 	AppTitle        *string                  `json:"app_title,omitempty"`
+	Tagline         *string                  `json:"tagline,omitempty"`
 	SetupComplete   *bool                    `json:"setup_complete,omitempty"`
 	SegmentScroll   *appconfig.SegmentScroll `json:"segment_scroll,omitempty"`
 	PeripheralNames *map[string]string       `json:"peripheral_names,omitempty"`
@@ -86,7 +87,7 @@ func (patch browserAppearancePatch) apply(value appconfig.Appearance) appconfig.
 }
 
 func (params browserUIConfigMutation) empty() bool {
-	return params.AppTitle == nil && params.SetupComplete == nil &&
+	return params.AppTitle == nil && params.Tagline == nil && params.SetupComplete == nil &&
 		params.SegmentScroll == nil && params.PeripheralNames == nil &&
 		params.Appearance == nil
 }
@@ -94,6 +95,9 @@ func (params browserUIConfigMutation) empty() bool {
 func (params browserUIConfigMutation) apply(value *appconfig.Config) error {
 	if params.AppTitle != nil {
 		value.UI.AppTitle = strings.TrimSpace(*params.AppTitle)
+	}
+	if params.Tagline != nil {
+		value.UI.Tagline = strings.TrimSpace(*params.Tagline)
 	}
 	if params.SetupComplete != nil {
 		value.UI.SetupComplete = *params.SetupComplete
@@ -126,6 +130,7 @@ func browserUIConfigDiff(before, after appconfig.Config) ([]string, map[string]a
 		oldValues[name], newValues[name] = oldValue, newValue
 	}
 	add("app_title", before.UI.AppTitle, after.UI.AppTitle)
+	add("tagline", before.UI.Tagline, after.UI.Tagline)
 	add("setup_complete", before.UI.SetupComplete, after.UI.SetupComplete)
 	add("segment_scroll", before.UI.SegmentScroll, after.UI.SegmentScroll)
 	add("peripheral_names", before.UI.PeripheralNames, after.UI.PeripheralNames)
@@ -146,8 +151,19 @@ func (service *Service) updateBrowserUISettings(raw json.RawMessage) (any, error
 	if err := decodeStrictParams(raw, &params); err != nil {
 		return nil, &RPCError{Code: -32602, Message: err.Error()}
 	}
+	if params.SegmentScroll != nil {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return nil, &RPCError{Code: -32602, Message: err.Error()}
+		}
+		merged := service.hostConfig().UI.SegmentScroll
+		if err := json.Unmarshal(fields["segment_scroll"], &merged); err != nil {
+			return nil, &RPCError{Code: -32602, Message: err.Error()}
+		}
+		params.SegmentScroll = &merged
+	}
 	if params.empty() {
-		return nil, errors.New("app_title, setup_complete, segment_scroll, peripheral_names, or appearance is required")
+		return nil, errors.New("app_title, tagline, setup_complete, segment_scroll, peripheral_names, or appearance is required")
 	}
 	if service.UpdateHostConfig == nil {
 		return nil, errors.New("persistent host configuration is unavailable")

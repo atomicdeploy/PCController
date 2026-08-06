@@ -121,8 +121,7 @@ static inline __attribute__((always_inline)) void serviceController() {
     if ((hostLcdFlags & HOST_PANEL_CAPTURED) != 0) {
       releaseHostPanel();
     } else {
-      hostSegmentTextActive = false;
-      hostSegmentTextLength = 0;
+      clearHostSegmentText();
     }
     showHostOfflineOnLcd();
     hostLcdFlags |= HOST_LCD_OFFLINE;
@@ -216,11 +215,14 @@ static inline __attribute__((always_inline)) void serviceController() {
                                 : displaySettings.displayClosedBrightness(),
                             loopNow);
   serviceDisplay(loopNow);
+  serviceSegmentPush();
   if (!i2cReserved) {
     statusLeds.service(loopNow);
   }
+  serviceStatusLedPush();
   taskManager.update(loopNow);
   buzzer.update(loopNow);
+  serviceBuzzerPush();
 
   if (streamPeriodMs != 0 &&
       static_cast<uint32_t>(loopNow - lastTelemetryAt) >= streamPeriodMs) {

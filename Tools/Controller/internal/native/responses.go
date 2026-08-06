@@ -32,7 +32,67 @@ const (
 	CapabilityTimedMacroQueue    uint32 = 1 << 22
 	CapabilityMenuLayout         uint32 = 1 << 23
 	CapabilityProgramState       uint32 = 1 << 24
+	CapabilityScheduledSegments  uint32 = 1 << 25
+	CapabilitySegmentPush        uint32 = 1 << 26
+	CapabilityBuzzerPush         uint32 = 1 << 27
+	CapabilityStatusEffects      uint32 = 1 << 28
+	CapabilityStatusLEDPush      uint32 = 1 << 29
+	CapabilityStatusProfiles     uint32 = 1 << 30
+	CapabilityBoardName          uint32 = 1 << 31
 )
+
+const MaximumBoardNameLength = 8
+
+type BoardName struct {
+	Name      string `json:"name"`
+	Persisted bool   `json:"persisted"`
+}
+
+func ValidateBoardName(name string) error {
+	if len(name) > MaximumBoardNameLength {
+		return fmt.Errorf("board name is %d bytes; maximum is %d", len(name), MaximumBoardNameLength)
+	}
+	if strings.TrimSpace(name) != name {
+		return fmt.Errorf("board name must not have leading or trailing whitespace")
+	}
+	for index := 0; index < len(name); index++ {
+		if name[index] < 0x20 || name[index] > 0x7E {
+			return fmt.Errorf("board name must contain printable ASCII characters only")
+		}
+	}
+	return nil
+}
+
+// SettingsWithBoardNamePayload extends the canonical 15-byte settings command
+// with a name length and name. An unextended settings write deliberately keeps
+// the name so ordinary settings changes do not erase the board's identity.
+func SettingsWithBoardNamePayload(settings Settings, name string) ([]byte, error) {
+	if err := ValidateBoardName(name); err != nil {
+		return nil, err
+	}
+	payload, err := settings.Payload()
+	if err != nil {
+		return nil, err
+	}
+	payload = append(payload, byte(len(name)))
+	payload = append(payload, name...)
+	return payload, nil
+}
+
+// ParseBoardNameFromSettings reads the optional extension of SETTINGS. Keeping
+// identity in that existing exchange saves flash and protocol slots on AVR.
+func ParseBoardNameFromSettings(payload []byte) (BoardName, error) {
+	if len(payload) < 18 || len(payload) > 18+MaximumBoardNameLength || payload[16] > 1 ||
+		int(payload[17]) > MaximumBoardNameLength || len(payload) != 18+int(payload[17]) ||
+		(payload[16] == 0 && payload[17] != 0) {
+		return BoardName{}, fmt.Errorf("invalid SETTINGS board-name extension")
+	}
+	name := string(payload[18:])
+	if err := ValidateBoardName(name); err != nil {
+		return BoardName{}, err
+	}
+	return BoardName{Name: name, Persisted: payload[16] != 0}, nil
+}
 
 const (
 	StatusBuzzerBusy     uint16 = 1 << 12
@@ -90,6 +150,92 @@ type FrontPanel struct {
 	HostEditableValue uint16  `json:"host_editable_value"`
 }
 
+// SegmentState is the changed-only display frame pushed by the board. It is
+// intentionally smaller than FrontPanel: hosts use FRONT_PANEL_GET for an
+// initial/explicit refresh and this event for low-latency live mirroring.
+type SegmentState struct {
+	RawSegments [4]byte `json:"raw_segments"`
+	Brightness  byte    `json:"brightness"`
+}
+
+func ParseSegmentState(payload []byte) (SegmentState, error) {
+	if len(payload) != 5 {
+		return SegmentState{}, fmt.Errorf("SEGMENT_CHANGED payload is %d bytes, need exactly 5", len(payload))
+	}
+	state := SegmentState{Brightness: payload[4]}
+	copy(state.RawSegments[:], payload[:4])
+	return state, nil
+}
+
+// BuzzerState describes the tone most recently started by firmware. Duration
+// lets every host surface stop its local mirror without a second board event.
+type BuzzerState struct {
+	FrequencyHz uint16 `json:"frequency_hz"`
+	DurationMS  uint16 `json:"duration_ms"`
+	Muted       bool   `json:"muted"`
+}
+
+func ParseBuzzerState(payload []byte) (BuzzerState, error) {
+	if len(payload) != 5 {
+		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED payload is %d bytes, need exactly 5", len(payload))
+	}
+	if payload[4] > 1 {
+		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED muted flag is %d, need 0 or 1", payload[4])
+	}
+	return BuzzerState{
+		FrequencyHz: binary.LittleEndian.Uint16(payload[:2]),
+		DurationMS:  binary.LittleEndian.Uint16(payload[2:4]),
+		Muted:       payload[4] != 0,
+	}, nil
+}
+
+// StatusLEDState is the changed-only physical RGB result pushed after the MCU
+// compositor applies local safety priority, brightness, and procedural effects.
+type StatusLEDState struct {
+	Red        byte `json:"red"`
+	Green      byte `json:"green"`
+	Blue       byte `json:"blue"`
+	Brightness byte `json:"brightness"`
+	Effect     byte `json:"effect"`
+	Condition  byte `json:"condition"`
+}
+
+func ParseStatusLEDState(payload []byte) (StatusLEDState, error) {
+	if len(payload) != 6 {
+		return StatusLEDState{}, fmt.Errorf("STATUS_LED_CHANGED payload is %d bytes, need exactly 6", len(payload))
+	}
+	if payload[4] > StatusEffectTransition {
+		return StatusLEDState{}, fmt.Errorf("STATUS_LED_CHANGED effect %d is outside 0..%d", payload[4], StatusEffectTransition)
+	}
+	return StatusLEDState{
+		Red: payload[0], Green: payload[1], Blue: payload[2],
+		Brightness: payload[3], Effect: payload[4], Condition: payload[5],
+	}, nil
+}
+
+type StatusProfile struct {
+	Condition byte                `json:"condition"`
+	Persisted bool                `json:"persisted"`
+	Effect    StatusEffectOptions `json:"effect"`
+}
+
+func ParseStatusProfile(payload []byte) (StatusProfile, error) {
+	if len(payload) != 13 && len(payload) != 14 {
+		return StatusProfile{}, fmt.Errorf("STATUS_PROFILE payload is %d bytes, need 13 or 14", len(payload))
+	}
+	if payload[0] >= StatusProfileCount {
+		return StatusProfile{}, fmt.Errorf("status profile condition %d is outside 0..%d", payload[0], StatusProfileCount-1)
+	}
+	effect, err := parseStatusEffectPayload(payload[1:13])
+	if err != nil {
+		return StatusProfile{}, err
+	}
+	// Thirteen-byte responses predate the appended persistence flag. Treat
+	// them as authoritative so a newer host never overwrites unknown firmware.
+	persisted := len(payload) == 13 || payload[13] != 0
+	return StatusProfile{Condition: payload[0], Persisted: persisted, Effect: effect}, nil
+}
+
 func ParseFrontPanel(payload []byte) (FrontPanel, error) {
 	if len(payload) < 44 {
 		return FrontPanel{}, fmt.Errorf("FRONT_PANEL payload is %d bytes, need at least 44", len(payload))
@@ -133,6 +279,13 @@ const (
 	EventRFLearning
 	EventRelay
 	EventAlert
+	EventAppNavigation
+)
+
+const (
+	AppNavigationAll byte = iota
+	AppNavigationWebUI
+	AppNavigationTUI
 )
 
 const (
@@ -225,11 +378,17 @@ func (hello Hello) IsPCController() bool {
 }
 
 func ParseSettings(payload []byte) (Settings, error) {
-	if len(payload) != 15 {
-		return Settings{}, fmt.Errorf("SETTINGS payload is %d bytes, need exactly 15", len(payload))
+	extended := len(payload) >= 18 && len(payload) <= 18+MaximumBoardNameLength
+	if len(payload) != 15 && len(payload) != 16 && !extended {
+		return Settings{}, fmt.Errorf("SETTINGS payload is %d bytes, need 15, 16, or 18..%d", len(payload), 18+MaximumBoardNameLength)
 	}
 	if payload[0] != SettingsShape {
 		return Settings{}, fmt.Errorf("unsupported SETTINGS shape %d", payload[0])
+	}
+	if extended {
+		if _, err := ParseBoardNameFromSettings(payload); err != nil {
+			return Settings{}, err
+		}
 	}
 	closedBrightness, holdSeconds := decodeDisplayOptions(payload[12])
 	settings := Settings{
@@ -247,6 +406,7 @@ func ParseSettings(payload []byte) (Settings, error) {
 		MotionExitHoldSeconds:   holdSeconds,
 		RelayRestoreMask:        payload[13],
 		MotionBreakMSValue:      payload[14],
+		Persisted:               len(payload) == 15 || payload[15] != 0,
 	}
 	if _, err := settings.Payload(); err != nil {
 		return Settings{}, err
@@ -475,6 +635,8 @@ type DeviceEvent struct {
 	RelayMask               byte         `json:"relay_mask,omitempty"`
 	AlertKind               byte         `json:"alert_kind,omitempty"`
 	AlertActive             bool         `json:"alert_active,omitempty"`
+	AppTarget               string       `json:"app_target,omitempty"`
+	AppPage                 string       `json:"app_page,omitempty"`
 	DeviceMicros            uint32       `json:"device_micros,omitempty"`
 	Timed                   bool         `json:"timed,omitempty"`
 	Macro                   *MacroStatus `json:"macro,omitempty"`
@@ -606,6 +768,33 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			return DeviceEvent{}, fmt.Errorf("invalid alert EVENT fields: % X", payload)
 		}
 		event.AlertKind, event.AlertActive = payload[1], payload[2] != 0
+	case EventAppNavigation:
+		if len(payload) < 3 {
+			return DeviceEvent{}, fmt.Errorf(
+				"app navigation EVENT is %d bytes, need a target and page",
+				len(payload),
+			)
+		}
+		if payload[1] > AppNavigationTUI {
+			return DeviceEvent{}, fmt.Errorf("invalid app navigation target %d", payload[1])
+		}
+		rawPage := string(payload[2:])
+		page := strings.TrimSpace(rawPage)
+		if page == "" || len(page) > 96 || page != rawPage {
+			return DeviceEvent{}, fmt.Errorf("app navigation page is empty or too long")
+		}
+		for index := 0; index < len(page); index++ {
+			value := page[index]
+			if (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+				(value >= '0' && value <= '9') || strings.ContainsRune("._/-", rune(value)) {
+				continue
+			}
+			return DeviceEvent{}, fmt.Errorf("app navigation page contains an invalid byte")
+		}
+		event.AppTarget = map[byte]string{
+			AppNavigationAll: "*", AppNavigationWebUI: "webui", AppNavigationTUI: "tui",
+		}[payload[1]]
+		event.AppPage = strings.ToLower(page)
 	}
 	return event, nil
 }

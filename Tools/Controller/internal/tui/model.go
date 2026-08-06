@@ -127,6 +127,13 @@ type Model struct {
 	integrations             func() hostui.IntegrationStatus
 	notifier                 hostui.Notifier
 	appActions               <-chan hostui.AppAction
+	instanceID               string
+	reportPage               func(string) error
+	reportTerminal           func(page, title string) error
+	writeOSC                 func(string) error
+	terminalTitleOverride    string
+	terminalTitleDirty       bool
+	update                   updatePresentation
 	hostMenus                *hostmenu.Manager
 	pushHostPanel            func(hostmenu.Snapshot) error
 	releaseHostPanel         func() error
@@ -388,24 +395,24 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		frontPanel: options.FrontPanel, frontPanelKey: options.FrontPanelKey,
 		mirrorLCD: options.MirrorLCD, lcdMirror: uiValue.MirrorPromptToLCD,
 		integrations: options.Integrations, notifier: options.Notifier,
-		appActions: options.AppActions,
-		hostMenus:  options.HostMenus, pushHostPanel: options.PushHostPanel,
+		appActions: options.AppActions, instanceID: options.InstanceID,
+		reportPage: options.ReportPage, reportTerminal: options.ReportTerminal,
+		writeOSC:  options.WriteOSC,
+		hostMenus: options.HostMenus, pushHostPanel: options.PushHostPanel,
 		releaseHostPanel: options.ReleaseHostPanel,
 		prefs:            prefs, preview: options.Preview, welcome: welcome,
 		portOwnerActions: ownerActions,
 		welcomeStarted:   welcomeStarted, welcomeDeadline: welcomeStarted.Add(30 * time.Second),
 		welcomePhase: "Waiting for USB and application HELLO", welcomeMelody: options.WelcomeMelody,
 		markWelcomed: marker, debug: debug,
-		logs: []string{
-			productidentity.ServiceName(prefs.AppTitle, "command console ready"),
-			"Use the tabs or type help. UI controls use the same validated command paths as CLI and IPC.",
-		},
+		logs: []string{productidentity.ServiceName(prefs.AppTitle, "command console ready")},
 	}
 	capabilities := uint32(0)
 	if options.Preview != nil {
 		capabilities = options.Preview.Hello.Capabilities
 	}
 	model.menuPages = menuPagesForCapabilities(capabilities)
+	model.reportInstance()
 	model.menuCatalogSource = "host generation fallback"
 	menuInfo := control.MenuPagesForCapabilities(capabilities)
 	model.menuLayout, _ = control.DefaultMenuLayout(menuInfo)
@@ -447,7 +454,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 }
 
 func (model Model) Init() tea.Cmd {
-	commands := []tea.Cmd{model.spinner.Tick, tick(model.statusInterval())}
+	commands := []tea.Cmd{model.spinner.Tick, tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
 	if model.appActions != nil {
 		commands = append(commands, waitAppAction(model.appActions))
 	}
@@ -467,6 +474,12 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case appActionMsg:
 		action := hostui.AppAction(message)
+		if !hostui.TargetsInstance(action.Target, model.instanceID, "tui") {
+			if model.appActions != nil {
+				commands = append(commands, waitAppAction(model.appActions))
+			}
+			break
+		}
 		switch action.Kind {
 		case "app.page":
 			if page, ok := pageForName(action.Value); ok {
@@ -477,6 +490,25 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "app.quit":
 			return model, tea.Quit
+		case "app.title":
+			if strings.EqualFold(action.Value, "auto") {
+				model.terminalTitleOverride = ""
+			} else {
+				model.terminalTitleOverride = action.Value
+			}
+			model.terminalTitleDirty = true
+			model.setNotice("Terminal title updated")
+		case "app.osc":
+			commands = append(commands, terminalOSCCommand(model.writeOSC, action.Value, "OSC"))
+		case "app.progress":
+			progress, err := hostui.ParseTerminalProgress(action.Value)
+			if err != nil {
+				model.appendLog("warn", "terminal progress: "+err.Error())
+			} else if payload, payloadErr := progress.OSCPayload(); payloadErr != nil {
+				model.appendLog("warn", "terminal progress: "+payloadErr.Error())
+			} else {
+				commands = append(commands, terminalOSCCommand(model.writeOSC, payload, "terminal progress"))
+			}
 		case "app.port.open":
 			commands = append(commands, execute(model.engine, "port open"))
 		case "app.port.close":
@@ -602,6 +634,16 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runtimeEventMsg:
 		event := control.Event(message)
+		if command := model.observeUpdateEvent(event); command != nil {
+			commands = append(commands, command)
+		}
+		if event.Source == "board" && strings.EqualFold(event.Kind, "app.page") &&
+			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
+			if page, ok := pageForName(event.Metadata["page"]); ok {
+				model.switchPage(page)
+				model.setNotice("Board opened " + pageDefinitions[page].Title)
+			}
+		}
 		if command := model.observeRFGuidedEvent(event); command != nil {
 			commands = append(commands, command)
 		}
@@ -617,9 +659,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				commands = append(commands, notifyImportant(model.notifier, notification))
 			}
 		}
-		// Telemetry updates redraw cards without flooding the transcript. HELLO
-		// payload bytes are diagnostic-only and stay hidden unless debug is on.
-		show := event.Kind != "telemetry"
+		// Continuous frames and measurements redraw live previews without
+		// flooding the operator transcript. Debug mode explicitly opts back in.
+		show := model.debug || control.IsActivityEvent(event)
 		if !model.debug && event.Frame.Opcode == native.OpHelloResp {
 			show = false
 		}
@@ -633,6 +675,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") {
 			model.rebootPending = false
 		}
+
 		if errors.Is(message.err, shell.ErrExit) {
 			if model.preview == nil {
 				_ = model.runtime.Close()
@@ -717,6 +760,13 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err == nil && (strings.HasPrefix(normalizedLine, "rf map ") || strings.HasPrefix(normalizedLine, "rf remove ")) && model.preview == nil && !model.rfPending {
 			model.rfPending = true
 			commands = append(commands, model.fetchRFEntriesCommand())
+		}
+
+	case terminalOSCResultMsg:
+		if message.err != nil {
+			model.appendLog("warn", message.kind+": "+message.err.Error())
+		} else {
+			model.setNotice(message.kind + " emitted")
 		}
 
 	case connectResultMsg:
@@ -878,6 +928,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			state := model.currentFrontPanel(model.snapshot())
 			commands = append(commands, mirrorLCDCommand(model.mirrorLCD, state.LCDLine1, state.LCDLine2, "mirror LCD prompt"))
 		}
+	}
+	if model.terminalTitleDirty {
+		model.terminalTitleDirty = false
+		commands = append(commands, tea.SetWindowTitle(model.terminalTitle()))
+		model.reportInstance()
 	}
 	return model, tea.Batch(commands...)
 }
@@ -1071,9 +1126,13 @@ func (model *Model) advanceWelcome(now time.Time) tea.Cmd {
 }
 
 func (model *Model) syncUIConfig(value appconfig.UI) {
+	previousTitle := model.prefs.AppTitle
 	model.uiValue = value
 	model.prefs = preferencesFromUI(value)
 	model.lcdMirror = value.MirrorPromptToLCD
+	if previousTitle != model.prefs.AppTitle && model.terminalTitleOverride == "" {
+		model.terminalTitleDirty = true
+	}
 }
 
 func (model *Model) recordSample(status native.Status, at time.Time) {
@@ -1105,7 +1164,7 @@ func (model *Model) recordSample(status native.Status, at time.Time) {
 }
 
 func (model *Model) recordTimeline(event control.Event) {
-	if event.Kind == "telemetry" || event.Text == "" {
+	if (!model.debug && !control.IsActivityEvent(event)) || event.Text == "" {
 		return
 	}
 	important := event.Kind == "door" || event.Kind == "bluetooth" ||

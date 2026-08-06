@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -231,13 +234,14 @@ func (options *connectionFlags) fromConfig(
 func commandOptions(store *appconfig.Store, fallbackProject string) control.CommandOptions {
 	config := store.Current()
 	options := control.CommandOptions{
-		ProjectPath: configuredProject(config, fallbackProject),
-		FQBN:        configuredFQBN(config),
-		ArduinoCLI:  config.Programming.ToolchainCLI,
-		Avrdude:     config.Programming.Avrdude,
-		AvrdudeConf: config.Programming.AvrdudeConf,
-		Programmer:  configuredProgrammer(config),
-		HostConfig:  store.Current,
+		ProjectPath:   configuredProject(config, fallbackProject),
+		FQBN:          configuredFQBN(config),
+		ArduinoCLI:    config.Programming.ToolchainCLI,
+		ArduinoConfig: config.Programming.ToolchainConfig,
+		Avrdude:       config.Programming.Avrdude,
+		AvrdudeConf:   config.Programming.AvrdudeConf,
+		Programmer:    configuredProgrammer(config),
+		HostConfig:    store.Current,
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err
@@ -246,18 +250,41 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 			return store.Current().Macros
 		},
 	}
+	options.InitializeBoard = func(
+		ctx context.Context,
+		runtime *control.Runtime,
+		args []string,
+		output io.Writer,
+	) error {
+		return initializeBoard(ctx, runtime, args, store, fallbackProject, output)
+	}
+	options.BlankBoard = func(
+		ctx context.Context,
+		runtime *control.Runtime,
+		args []string,
+		output io.Writer,
+	) error {
+		return blankBoard(ctx, runtime, args, store, output)
+	}
+	options.USBaspDriver = func(_ context.Context, args []string, output io.Writer) error {
+		return runDriver(args, output, output)
+	}
 	options.Resolve = func() control.CommandOptions {
 		current := store.Current()
 		return control.CommandOptions{
 			ProjectPath:      configuredProject(current, fallbackProject),
 			FQBN:             configuredFQBN(current),
 			ArduinoCLI:       current.Programming.ToolchainCLI,
+			ArduinoConfig:    current.Programming.ToolchainConfig,
 			Avrdude:          current.Programming.Avrdude,
 			AvrdudeConf:      current.Programming.AvrdudeConf,
 			Programmer:       configuredProgrammer(current),
 			HostConfig:       store.Current,
 			UpdateHostConfig: options.UpdateHostConfig,
 			Macros:           options.Macros,
+			InitializeBoard:  options.InitializeBoard,
+			BlankBoard:       options.BlankBoard,
+			USBaspDriver:     options.USBaspDriver,
 		}
 	}
 	return options
@@ -480,14 +507,23 @@ func firstDeviceName(values ...string) string {
 	return ""
 }
 
-func extractConfigArgument(args []string) ([]string, string, error) {
+type presentationOverrides struct {
+	AppName string
+	Tagline string
+}
+
+func extractGlobalArguments(args []string) ([]string, string, presentationOverrides, error) {
 	result := make([]string, 0, len(args))
 	var path string
+	overrides := presentationOverrides{
+		AppName: strings.TrimSpace(os.Getenv("APP_NAME")),
+		Tagline: strings.TrimSpace(os.Getenv("APP_TAGLINE")),
+	}
 	for index := 0; index < len(args); index++ {
 		argument := args[index]
 		if argument == "--config" {
 			if index+1 >= len(args) {
-				return nil, "", errors.New("--config requires a JSON file path")
+				return nil, "", presentationOverrides{}, errors.New("--config requires a JSON file path")
 			}
 			path = args[index+1]
 			index++
@@ -496,11 +532,51 @@ func extractConfigArgument(args []string) ([]string, string, error) {
 		if strings.HasPrefix(argument, "--config=") {
 			path = strings.TrimPrefix(argument, "--config=")
 			if path == "" {
-				return nil, "", errors.New("--config requires a JSON file path")
+				return nil, "", presentationOverrides{}, errors.New("--config requires a JSON file path")
+			}
+			continue
+		}
+		name, inline, recognized := globalPresentationFlag(argument)
+		if recognized {
+			value := inline
+			if value == "" && !strings.Contains(argument, "=") {
+				if index+1 >= len(args) {
+					return nil, "", presentationOverrides{}, fmt.Errorf("--%s requires a value", name)
+				}
+				value = args[index+1]
+				index++
+			}
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return nil, "", presentationOverrides{}, fmt.Errorf("--%s requires a non-empty value", name)
+			}
+			if name == "app-name" {
+				overrides.AppName = value
+			} else {
+				overrides.Tagline = value
 			}
 			continue
 		}
 		result = append(result, argument)
 	}
-	return result, path, nil
+	return result, path, overrides, nil
+}
+
+func globalPresentationFlag(argument string) (name, value string, recognized bool) {
+	for _, candidate := range []string{"app-name", "tagline", "app-tagline"} {
+		flagName := "--" + candidate
+		if argument == flagName {
+			if candidate == "app-tagline" {
+				candidate = "tagline"
+			}
+			return candidate, "", true
+		}
+		if strings.HasPrefix(argument, flagName+"=") {
+			if candidate == "app-tagline" {
+				candidate = "tagline"
+			}
+			return candidate, strings.TrimPrefix(argument, flagName+"="), true
+		}
+	}
+	return "", "", false
 }

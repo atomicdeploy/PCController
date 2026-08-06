@@ -6,9 +6,10 @@ import (
 )
 
 const (
-	// FirmwareIdentityAddress is a fixed application-owned patch point directly
-	// below the optional 512-byte Urboot-Custom image at 0x7E00.
-	FirmwareIdentityAddress uint32 = 0x7DF4
+	// FirmwareIdentityAddress occupies the final record below the selected
+	// stock-core application ceiling. A different generated target policy can
+	// therefore move both the linker section and guarded patch region together.
+	FirmwareIdentityAddress uint32 = urbootApplicationCapacity - FirmwareIdentityLength
 	FirmwareIdentityLength  uint32 = 12
 	FirmwareIdentityMagic   uint32 = 0x31494350
 	FirmwareIdentitySchema  uint8  = 1
@@ -84,7 +85,7 @@ func PatchFirmwareIdentity(
 	binary.LittleEndian.PutUint32(replacement[8:12], packedTimestamp)
 	return ApplyIntelHexPatchPlan(
 		sourcePath, outputPath,
-		FlashLayout{FlashSize: ATmega328PFlashSize, BootloaderBase: 0x7E00},
+		FlashLayout{FlashSize: ATmega328PFlashSize, BootloaderBase: urbootApplicationCapacity},
 		IntelHexPatchPlan{
 			SourceSHA256: sourceSHA256,
 			Regions: []NamedPatchRegion{{

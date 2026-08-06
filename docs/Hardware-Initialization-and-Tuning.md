@@ -26,7 +26,7 @@ power-indicator, and status-RGB state is applied.
 | CPU/watchdog | MiniCore ATmega328P at 16 MHz; 2 s watchdog | Bounds a genuinely stalled peripheral path while leaving startup headroom | Change only with a complete timing/build/upload verification because I2C, UART, TM1637, WS2811, and tone timing depend on it |
 | Native UART | 115200 baud, normal AVR 8N1; COBS frames with opcode/CRC; always enabled | Responsive control and telemetry without using UART as a debug console | Lower baud only for a demonstrated electrical integrity problem; DTR reset is a separate host setting and is off by default |
 | I2C/TWI | Compact master, 100 kHz, prescaler 1, `TWBR=72`, 25,000 us wait timeout with peripheral reset, repeated START, 16-byte host read/write cap | Stable INA/PWM traffic and bounded faults with much lower flash/SRAM than generic Wire | 400 kHz is possible only after validating every device, cable, pull-up, generic host transfer, and LCD operation |
-| INA219 | Address `0x40`; config `0x3F7F`; calibration `4096`; continuous shunt+bus conversion | Correct 32 V range for a 12 V system and strong hardware averaging, especially for current | See the detailed INA219 section before changing range, averaging, or shunt calibration |
+| INA219 | Address `0x40`; config `0x3F7F`; calibration `4096`; continuous shunt+bus conversion; voltage/bus EMA 1/4 and current/power EMA 1/8 | Correct 32 V range for a 12 V system and stronger hardware/software smoothing for the noisier current path | See the detailed INA219 section before changing range, averaging, software filtering, or shunt calibration |
 | PWM expander | Address `0x41`; requested 1000 Hz; prescale `5`; MODE2 `0x04`; active-high logical outputs | Separates it from INA219 and moves lighting PWM well above visibly flickery rates | Frequency 24..1526 Hz is supported; polarity is a compile-time electrical choice, not a display preference |
 | DS18B20 pair | D10/CS 1-Wire bus; external 4.7 kOhm pull-up; externally powered; at most two family-`0x28` ROMs; 11-bit; asynchronous 375 ms conversion | Responsive temperatures without blocking UART/RF; bounded search survives a missing pull-up | 9/10-bit are faster and coarser; 12-bit gives 0.0625 C resolution but requires 750 ms |
 | TM1637 | D13/SCK clock, D11/MOSI data, 3 us bit timing; 20 ms render service; cached four-segment writes; EEPROM brightness 0..7, factory 5 | Fast menu response while avoiding repeated writes of unchanged segments | Brightness and voltage/current decimal places are EEPROM settings |
@@ -97,8 +97,13 @@ Calibration `4096` assumes the board's common `0.1 ohm` shunt and selects a
 
 This is a deliberate smoothing/speed balance: current receives 128-sample
 hardware averaging because it was the noisier value, while bus voltage uses
-64 samples. The firmware does not add another INA EMA, so host graphing can
-apply presentation-only smoothing without delaying MCU safety/event logic.
+64 samples. Each completed reading then passes through an integer software EMA:
+supply and bus voltage apply one quarter of the new delta with a 1 mV deadband;
+current and power apply one eighth with a two-unit deadband (2 mA or 2 mW in
+their stored units). The first valid reading is applied immediately, and a
+failed read marks the module unavailable rather than smoothing stale data.
+Host graphing may add presentation-only smoothing, but it must not be mistaken
+for the board's source-of-truth filter or used to delay MCU safety/event logic.
 
 Before modifying INA settings:
 
@@ -182,8 +187,8 @@ Valid temperature samples use a 50/50 EMA. A first sample, a disconnected
 sample, or a sample at/above the 50.00 C HOT threshold bypasses the EMA so a
 fault or warning is not hidden by smoothing.
 
-For the current harness, the lexicographically first ROM is mapped to
-`Temperature BT` and the second to `Temperature LED`. The persistent
+The factory role mapping assigns lexicographically sorted ROM 0 to
+`Temperature LED` (`tLED`) and ROM 1 to `Temperature BT` (`tBT`). The persistent
 `swapTemperatureSensors` flag reverses that assignment if a probe is replaced
 or the harness changes. The host reports each full 64-bit ROM so identity can
 be confirmed electrically rather than inferred only from heat response.
@@ -250,11 +255,19 @@ outputs. It polls every 5 ms.
 
 Keys occupy 74HC165 bits 0..3 and use:
 
-- 50 ms debounce;
+- 20 ms debounce, with the primary action on the first debounced Down edge;
 - 300 ms double-click window;
 - hold start at 600 ms;
 - held repeat every 150 ms;
 - acceleration after 1800 ms to one repeat every 60 ms.
+
+The double-click window classifies telemetry and the optional K1 shortcut; it
+must never delay the initial action. UART virtual-key Down events act in their
+receive pass, and learned RF key/menu mappings act in their RF service pass.
+Do not place EEPROM writes, network round trips, sound cues, display rendering,
+or sleeps ahead of these dispatch points. Any timing change must retain the
+25 ms physical debounce ceiling and rerun latency tests plus physical/UART/RF
+acceptance.
 
 Bits 4 and 5 are reserved senses. Bit 6 is the active-low BT Audio LED input;
 bit 7 is door-open-active-high. Both are debounced for 40 ms. BT transitions
@@ -287,8 +300,9 @@ tones without changing command acknowledgement.
 
 PWM channel 12 is the power indicator, and channels 13..15 are status RGB. The
 factory status brightness is 128/255. Animation service runs every 20 ms with a
-step of 4/255. The user-ready palette order is red, blue, violet, green, white;
-status modes and transient event cues can override the ready color.
+step of 4/255. The Go-owned factory profile makes Ready white; all nineteen
+persistent condition profiles can be changed by the host, while the AVR keeps
+only a compact blue/red safety fallback for blank or corrupt records.
 
 The addressable output is 11 pixels on D6 at 800 kHz. The installed hardware
 default is WS2811 BRG byte order. The startup frame is black/off. The current
@@ -318,8 +332,8 @@ particular board.
 | Voltage / current decimals | 2 / 2 |
 | Motion door policy | Always |
 | Break before direction | 1 ms |
-| Door / relay audio cues | enabled |
-| Temperature identity swap | off; sorted ROM 0 is BT, ROM 1 is LED |
+| Door / relay buzzer cues | enabled |
+| Temperature identity swap | off; sorted ROM 0 is tLED, ROM 1 is tBT |
 
 ## What to verify before tuning
 

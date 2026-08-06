@@ -428,7 +428,7 @@ authored value; the exact toolchain lock retains only its generated copy.
 
 UART0 is always enabled at 115200 baud and is the primary application link,
 not a debug-text console. Application frames use zero-delimited COBS, magic
-`0xA5`, protocol version 1, CRC-8, sequence IDs, opcodes, and a maximum 48-byte
+`0xA5`, an advisory envelope-revision byte, CRC-8, sequence IDs, opcodes, and a maximum 48-byte
 payload. Timed events and ACKs append the MCU `micros()` timestamp so the host
 can distinguish device execution time from USB/network arrival time. Firmware
 starts UART and emits an early `HELLO` before slower peripheral initialization,
@@ -463,23 +463,35 @@ Canonical sources: [ProjectConfig.h](../ProjectConfig.h),
 
 ## Key gestures
 
-The key engine debounces for 50 ms and emits raw Down/Up events immediately.
-For ordinary menu input it waits until the gesture is known, so a hold never
-performs an accidental short action first:
+The key engine debounces physical edges for 20 ms. The first debounced `Down`
+runs the primary action immediately; it never waits for release, click
+classification, audio feedback, a display update, UART, or the 300 ms
+double-click window. PC-injected lifecycle input follows the same rule, while
+the stateless `MENU_ACTION` command and a learned RF mapping execute in the
+same service pass in which they are received.
 
 | Gesture | Timing and effect |
 |---|---|
-| Short press | One Click action after the 300 ms double-click window; a brief beep unless Silent is enabled |
-| Double click | Second release within 300 ms; double-click K1 returns to the configured default page |
-| Hold start | One long-press action 600 ms after press; no Click is emitted |
-| Hold repeat | Every 150 ms, then every 60 ms after 1.8 s |
+| Down | Primary action at the 20 ms physical debounce deadline, or immediately for injected input |
+| Short press | Later Click classification after the 300 ms double-click window; telemetry only |
+| Double click | Second release within 300 ms; double-click K1 returns to the configured default page without delaying either Down action |
+| Hold start | Classification 600 ms after press; no second primary action and no Click is emitted |
+| Hold repeat | Repeats the action every 150 ms, then every 60 ms after 1.8 s |
 | Hold release | Emitted when a held key is released |
-| Raw Down/Up | Emitted for host automation and faithful virtual-key mirroring |
+| Up | Stops momentary motion/push-relay output and is emitted for telemetry/mirroring |
 
 Motion and Push-relay control use true down/up behavior rather than repeated
 menu actions, so their output starts immediately after debounce and stops on
 release. The KEY identification page reports one classified press and
 suppresses ordinary hold repeat.
+
+This is a non-negotiable responsiveness invariant. Future work must not move
+the initial action back to `Click`/`HoldStart`, debounce it twice, wait for a
+double-click decision, perform EEPROM or network work before dispatch, or let
+buzzer/display/overlay feedback block input service. Hardware-free tests cap
+physical debounce at 25 ms and assert that only `Down` and `HoldRepeat` drive
+primary actions; physical acceptance must additionally verify all four panel
+keys, PC virtual buttons, and learned RF keys against the exact flashed image.
 
 ## Local menu directory
 
@@ -520,9 +532,11 @@ additional stable page IDs:
 
 The board-authoritative `MenuList` opcode returns these 14 dense IDs,
 program-mode IDs, and four-character labels in pages. Category membership is
-the fixed mapping above and is not part of that six-byte entry. BT input sensing,
-telemetry/events, automations, host monitoring, and RGB status remain active;
-only the redundant four-digit BT page and its strings/renderer were removed.
+the fixed mapping above and is not part of that six-byte entry. The retired
+`bt` page was the redundant BT Audio **connection-state** page and remains
+removed: BT input sensing, telemetry/events, automations, host monitoring, and
+RGB status convey that state. The distinct `tBT` page above is intentionally
+retained because it displays the BT-module temperature probe.
 
 The current `door` renderer is the door-status home page. It does not
 automatically replace the four digits with every relay/RF/BT/macro event. The
@@ -589,20 +603,17 @@ local UI has to a settings submenu:
 | 2 | `diSP` | TM1637 door-open brightness 0-7 | Decrease/increase with rollover |
 | 3 | `dCLS` | TM1637 door-closed brightness 0-7; factory 0/off | Decrease/increase with rollover |
 | 4 | `StBr` | Status RGB brightness 0-255 | Nominal step 16 with rollover |
-| 5 | `CoLr` | Ready color 0-4: red, blue, violet, green, white | Decrease/increase with rollover |
-| 6 | `V-dP` | Voltage decimals 0-2 | Decrease/increase with rollover |
-| 7 | `A-dP` | Current decimals 0-2 | Decrease/increase with rollover |
-| 8 | `SAFE` | Motion policy: 0 Always, 1 Closed only, 2 Open only, 3 Never | Decrease/increase with rollover |
+| 5 | `V-dP` | Voltage decimals 0-2 | Decrease/increase with rollover |
+| 6 | `A-dP` | Current decimals 0-2 | Decrease/increase with rollover |
+| 7 | `SAFE` | Motion policy: 0 Always, 1 Closed only, 2 Open only, 3 Never | Decrease/increase with rollover |
 
 Each field label is shown for about 650 ms and its value then blinks at about
-300 ms. Sound, both display brightness targets, RGB settings, and the motion
+300 ms. Sound, both display brightness targets, RGB brightness, and the motion
 gate preview during editing. Selecting a policy that denies the current door
 state immediately revokes motion through the ordinary fail-safe relay path.
 Save persists the compact two-bit policy; Discard restores the exact locally
-editable snapshot and reapplies the prior gate. EEPROM stores the compact
-numeric Ready color index; the five names above are its fixed local order.
-Host-side named categories and their independently assigned colors remain PC
-configuration.
+editable snapshot and reapplies the prior gate. Ready and event colors are
+host-owned persistent status profiles rather than a fixed local color index.
 
 The reed input selects the two EEPROM-backed TM1637 targets. The display walks
 one intensity step every 70 ms toward the open or closed target without slowing
@@ -991,11 +1002,12 @@ the EEPROM source of truth.
 
 The current firmware has no on-board EEPROM migration handler. Menu validation
 accepts only the dense IDs 0-13 and a 14-bit visibility mask; an older record
-that is not already semantically valid is rejected and factory defaults are
-written through the normal settings path. The host may explicitly back up,
-erase, or rewrite development EEPROM after flashing. The physical record and
-schema-2 UART layout both use exactly seven menu-order bytes for the 14 packed
-IDs; there is no spare order byte.
+that is not already semantically valid is rejected. The Go host provisions its
+canonical settings and status-profile defaults through current opcodes, while
+explicit development reinitialization programs and independently reads back
+the complete generated EEPROM image. The physical settings record and UART
+layout both use exactly seven menu-order bytes for the 14 packed IDs; there is
+no spare order byte.
 
 The current logical EEPROM map is:
 
@@ -1006,9 +1018,10 @@ The current logical EEPROM map is:
 | 64-307 | 244 | RF header plus 20 learned records |
 | 308-319 | 12 | Unallocated |
 | 320-703 | 384 | 64-slot reset-count journal |
-| 704-1023 | 320 | Unallocated |
+| 704-950 | 247 | Nineteen status-effect condition descriptors plus CRCs |
+| 951-1023 | 73 | Unallocated |
 
-That leaves 364 logically unallocated bytes. The generated safe-default EEPROM
+That leaves 117 logically unallocated bytes. The generated safe-default EEPROM
 image still covers all 1,024 bytes so a programming/restore operation is
 deterministic; that does not make the erased regions owned records.
 
@@ -1016,9 +1029,8 @@ The following requested behavior is **not** EEPROM-backed in this candidate:
 
 | Area | What exists | What is still missing |
 |---|---|---|
-| Configurable audio cues | Global Silent plus door/relay enable bits; door and relay tones are fixed in flash | Persistent cue IDs or note/frequency/duration descriptors for door-open, door-close, relay-on, and relay-off |
+| Configurable buzzer cues | Global Silent plus door/relay enable bits; door and relay tones are fixed in flash | Persistent cue IDs or note/frequency/duration descriptors for door-open, door-close, relay-on, and relay-off |
 | Board automation | Twenty RF records map codes directly to Key, Menu, Relay, Side, or PWM actions; host automations can consume events | A generic board rule table for door, BT Audio, relay, host-loss, temperature, RF transmit, macro start, or other opcode actions |
-| Status RGB | One Ready color index and one global brightness are persistent; a host may send a volatile override | Independently persistent colors/effects/timing for door, BT Audio, RF, Running, warning, HOT, fault, and transitions |
 
 Structured host-menu pull is also not implemented by the AVR: the current
 physical-board path is the documented display-capture fallback. The AVR does

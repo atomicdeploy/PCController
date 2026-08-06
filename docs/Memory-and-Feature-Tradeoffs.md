@@ -21,29 +21,33 @@ Neither alone proves the loaded peripherals are safe or behaving correctly.
 
 ## Current candidate measurement
 
-This audit describes the exact canonical source candidate in
-`.build/firmware`. Its manifest source digest was independently recalculated
-over the same 70 firmware files and matches the candidate. The separately
-identified deployed image is recorded below rather than being treated as a
-byte-identical container merely because it has the same source identity.
+This audit describes the current **pre-final aggregate candidate** in
+`.build/firmware`. It is exact build evidence for the source aggregation at the
+time shown, but it is not yet the frozen release or proof of what is deployed
+on the board. A later frozen build timestamp changes the 12-byte identity record
+and can therefore change the application artifact SHA-256 even when the linked
+sketch size is unchanged. The separately identified deployed image is recorded
+below rather than being treated as byte-identical merely because it is related
+to the same source tree.
 
 | Evidence | Current value |
 |---|---:|
-| Source/build identity | `DB5C1EBA` |
-| Source SHA-256 | `db5c1eba179243267c94b769cb0deeed18e4b1c56dcea5459636eb28ff4fe1c7` |
-| Application HEX SHA-256 | `723e57bc1697ffdad205c024046cfa672f9b4c7b0770bf846160f8a7fb343f39` |
-| ELF SHA-256 | `37b860ef3b6e44030e7200395a9b2d4df72641879e7f131e8968482a6c93780b` |
-| `.text` | 31,980 bytes |
-| Initialized `.data` image | 226 bytes |
-| Linker-reported program | 32,206 bytes (`.text + .data`) |
-| Fixed firmware identity | 12 bytes at `0x7DF4..0x7DFF` |
-| Application HEX data | 32,218 bytes; highest address `0x7DFF` |
-| Static SRAM | 1,433 bytes (`.data` 226 + `.bss` 1,206 + `.noinit` 1) |
-| Estimated peak SRAM | 1,762/2,048 bytes |
-| Estimated free SRAM | 286 bytes, against the enforced 96-byte minimum |
+| Embedded build identity | `6B075495` |
+| Independently aggregated source SHA-256 | `6b075495cb0d270ca8e5b65b86354fda18e66fd5605d765e9960abf5c2c0ac13` |
+| Application HEX SHA-256 | `7fc43de5c342cd02a9c0d604e84972c4a3614d8192da85fc25f62dd922487cbd` |
+| `.text` | 32,140 bytes |
+| Initialized `.data` image | 204 bytes |
+| Linker-reported sketch program | 32,344 bytes (`.text + .data`) |
+| Profile-derived firmware identity | 12 bytes at `0x7E74..0x7E7F` |
+| Application HEX data | 32,356 bytes; highest address `0x7E7F` |
+| Stock 32,384-byte application-range free | 28 bytes |
+| Immediately linkable before identity | 28 bytes |
+| Static SRAM | 1,474 bytes (`.data` 204 + `.bss` 1,269 + `.noinit` 1) |
+| Estimated peak SRAM | 1,779/2,048 bytes |
+| Estimated free SRAM | 269 bytes, against the enforced 96-byte minimum |
 
-The peak estimate includes a measured 269-byte serial response path and a
-60-byte concurrent INT0/RF allowance. The 615-byte difference between static
+The peak estimate includes a measured 245-byte serial response path and a
+60-byte concurrent INT0/RF allowance. The 574-byte difference between static
 allocation and the top of SRAM is therefore not all available for new global
 objects.
 
@@ -65,20 +69,21 @@ relays, zero framing/CRC protocol errors, and reset count 22. No optional LCD
 was detected; that is a warning-only capability absence rather than a firmware
 or recovery failure.
 
-### Bootloader ceilings and the fixed identity gap
+### Bootloader ceilings and profile-derived identity
 
-The application image already fits both supported boot allocations; no feature
-must be removed merely to flash this candidate. Growth headroom is more subtle
-than the HEX data-byte count because the identity record has a fixed address:
+The application image fits the selected stock-core boot allocation. The
+identity footer is computed from that profile's generated application limit;
+it is not a universal address shared with every bootloader profile:
 
 | Boot profile | Application range | Data-byte headroom | Immediately linkable headroom | Consequence |
 |---|---:|---:|---:|---|
-| Stock 384-byte Urboot | 0..32,383 | 166 bytes | 38 bytes before `0x7DF4` | The 128 erased bytes at `0x7E00..0x7E7F` are after the fixed identity. They become useful only in a stock-only layout that relocates the identity and gives up drop-in 512-byte compatibility. |
-| 512-byte Urboot-Custom | 0..32,255 | 38 bytes | 38 bytes before `0x7DF4` | The identity ends at the final application byte. There is no space after it. |
+| Stock 384-byte Urboot | 0..32,383 | 28 bytes | 28 bytes before `0x7E74` | Current selected profile; the identity occupies the final 12 application bytes. |
+| 512-byte Urboot-Custom | 0..32,255 | Does not fit | At least 100 bytes must be reclaimed | A custom feature profile must link at or below 32,244 bytes so its own 12-byte identity can occupy `0x7DF4..0x7DFF`. |
 
-Thus the current common layout has 38 bytes of practical growth under either
-bootloader. Urboot-Custom itself occupies 510 meaningful bytes in a 512-byte
-allocation; its two erased bytes do not increase the application ceiling.
+Thus the stock profile has 28 bytes of practical growth. Urboot-Custom itself
+occupies 510 meaningful bytes in a 512-byte allocation; its two erased bytes do
+not increase the application ceiling. It remains a separate feature profile,
+not a compatibility promise for this alpha version build.
 
 ### Current EEPROM allocation
 
@@ -88,13 +93,15 @@ bytes, but the firmware does not semantically own every byte:
 | EEPROM range | Bytes | Current owner |
 |---|---:|---|
 | `0..31` | 32 | Unallocated |
-| `32..63` | 32 | 31-byte `ControllerSettings` plus CRC |
-| `64..307` | 244 | Four-byte RF header plus 20 checksummed 12-byte learned-code records |
-| `308..319` | 12 | Unallocated alignment gap |
-| `320..703` | 384 | 64-slot, six-byte reset-count journal |
-| `704..1023` | 320 | Unallocated |
+| `32..72` | 41 | 31-byte `ControllerSettings`, one name length, eight name bytes, and CRC |
+| `73..79` | 7 | Unallocated alignment gap |
+| `80..323` | 244 | Four-byte RF header plus 20 checksummed 12-byte learned-code records |
+| `324..335` | 12 | Unallocated alignment gap |
+| `336..719` | 384 | 64-slot, six-byte reset-count journal |
+| `720..966` | 247 | Nineteen 12-byte status-effect condition descriptors, each with CRC |
+| `967..1023` | 57 | Unallocated |
 
-There are therefore 364 logically unallocated EEPROM bytes. Reducing RF or
+There are therefore 108 logically unallocated EEPROM bytes. Reducing RF or
 reset-journal capacity would free EEPROM only; it would not materially solve
 the application-flash ceiling.
 
@@ -111,6 +118,7 @@ removal saving. The current ELF nevertheless gives useful, reproducible bounds:
 | Total named local-menu envelope | 4,165 flash | Scale only; removing the menu would also remove essential offline control and does not necessarily recover the sum |
 | Visibility/order/category named helpers | 370 flash | Lower-bound symbol envelope; their inline dispatcher portions remain unseparated |
 | Menu visibility/order fields | 9 SRAM and 9 EEPROM bytes | Exact difference between the current 31-byte settings record and the 22-byte no-layout record |
+| Operator board name | 9 SRAM and 9 EEPROM bytes | One length byte plus eight printable ASCII bytes inside the current profile's CRC-backed settings record |
 | MCU macro playback object | 157 static-SRAM bytes | Exact object allocation; flash dispatcher paths are shared |
 | Addressable-pixel buffer | 33 static-SRAM bytes | Exact 11-pixel RGB buffer |
 | rc-switch receive timings | 134 static-SRAM bytes | Exact pulse-timing array, before receiver/transmitter state |
@@ -188,11 +196,10 @@ EEPROM layout did not change.
 | Requested board capability | What exists now | Exact missing portion | Cost/evidence |
 |---|---|---|---:|
 | Board-pull hosted menus | The host has six file-watched menu definitions. The AVR supports pushed `DisplayText` capture/release, forwards physical keys, and releases capture after host loss. | AVR opcodes `0x42..0x44` and events `0x9A..0x9B`, the eight-entry RAM directory, generation/state, content request on selection, retry timing, `----`, and terminal failure presentation are not in `ControllerProtocol::Opcode` and no capability advertises them. | 450-850 flash, 30-40 SRAM. The directory alone is exactly 24 bytes for eight `{id,parent,flags}` entries; existing 4+32 display buffers can be reused. |
-| EEPROM-configurable audio cues | Door and relay cue families have EEPROM enable bits, but their tones are fixed: door open/closed are 1,700/1,100 Hz for 45 ms; relay on/off are 1,900/1,250 Hz for 35 ms. | Persistent selectable cue IDs or note/frequency/duration definitions for door-open, door-close, relay-on, and relay-off, plus settings/protocol/menu fields. | A measured four-descriptor candidate used 33,318 program bytes, 1,442 static-SRAM bytes, and 13 EEPROM bytes. Even a five-byte choice-table record used 33,032 program bytes and 1,442 static-SRAM bytes: 788 bytes beyond the fixed identity boundary. Neither candidate is shippable in the shared image layout. |
+| EEPROM-configurable buzzer cues | Door and relay cue families have EEPROM enable bits, but their tones are fixed: door open/closed are 1,700/1,100 Hz for 45 ms; relay on/off are 1,900/1,250 Hz for 35 ms. | Persistent selectable cue IDs or note/frequency/duration definitions for door-open, door-close, relay-on, and relay-off, plus settings/protocol/menu fields. | Two retained A/B measurements bound the choice: the compact five-byte choice-table candidate used 33,032 program, 1,442 static-SRAM, and 5 EEPROM bytes; the full four-descriptor candidate used 33,238 program, 1,455 static-SRAM, and 13 EEPROM bytes. Against the current 32,244-byte fixed-identity boundary, they exceed it by 788 and 994 bytes respectively. Neither candidate is shippable in the shared image layout. |
 | Board EEPROM automation | Twenty learned RF records can directly map one code to Key/Menu/Relay/Side/PWM behavior. Host automations can react to all events. | There is no generic EEPROM event-to-action rule table for door, BT Audio, relay, host loss, temperature, or other events; no board rule can invoke RF transmit or a macro on those events. Host-loss handling is fixed, not programmable. | 700-1,400 flash, 16-24 SRAM, and about 108 EEPROM bytes for eight compact rules plus an atomic header and CRC that reuse ordinary opcode validation. |
-| Per-state persistent RGB/cue configuration | EEPROM stores one Ready palette index and one global RGB brightness; the host can set a volatile custom RGB value. | Door, BT Audio, RF, Running, warning, hot, fault, and transition colors/effects are fixed in flash rather than independently configurable in board EEPROM. | Colors only: 220-380 flash, 4-8 SRAM, 52 EEPROM. Colors plus selectable effects/timing: 320-620 flash, 8-16 SRAM, 57-66 EEPROM. |
 
-The current 364-byte unallocated EEPROM area can hold compact cue and
+The current 117-byte unallocated EEPROM area can hold compact cue and
 automation records. Flash, not EEPROM, is the limiting resource.
 
 ## Menu migration candidates and exact losses
@@ -222,18 +229,19 @@ list: removing any of them would trade bytes for unsafe behavior.
 
 ### Minimum combinations
 
-For the **current feature set alone**, the minimum removal is **none** under
-both bootloaders. The image fits, but only 38 bytes can be added before the
-fixed identity in the shared layout.
+For the **current stock-core feature profile**, the minimum removal is
+**none**. It has 28 bytes before its derived identity footer. The current image
+does not fit the 512-byte Urboot-Custom profile; that separate profile needs at
+least 100 bytes reclaimed before it can reserve its own footer.
 
 For the missing features above, the smallest defensible planning combinations
 are:
 
 | Goal | Estimated new flash | Minimum migration to measure first | Stock 384-byte consequence | 512-byte Urboot-Custom consequence |
 |---|---:|---|---|---|
-| Structured board-pull hosted menus only | 450-850 | Move the four output commissioning/edit pages (estimated 900-1,500) | Reclaim 412-812 bytes with the shared identity layout, or 284-684 after a stock-only identity relocation contributes 128 bytes. | Reclaim 412-812 bytes; no post-identity reserve exists. |
-| Board-pull menus plus compact configurable door/relay cues | 630-1,210 | Same output-editor migration; add the local RF-learning UI migration only if its A/B result is short | Reclaim 592-1,172 bytes shared, or 464-1,044 after stock-only identity relocation. | Reclaim 592-1,172 bytes because only 38 bytes precede the identity. |
-| Board-pull menus, compact cues, and generic EEPROM automation | 1,330-2,610 | Output editors + advanced settings fields + local RF-learning UI (combined estimate 1,320-2,360); measure, then add render-only measurement-page migration if still short | Reclaim 1,292-2,572 bytes shared, or 1,164-2,444 after stock-only identity relocation; the proposed migration is not guaranteed at the high estimate. | Reclaim 1,292-2,572 bytes; the full shortfall must come from firmware. |
+| Structured board-pull hosted menus only | 450-850 | Move the four output commissioning/edit pages (estimated 900-1,500) | Reclaim about 424-824 bytes beyond the current 26-byte reserve. | Reclaim about 552-952 bytes including the custom profile's existing 102-byte deficit. |
+| Board-pull menus plus compact configurable door/relay cues | 630-1,210 | Same output-editor migration; add the local RF-learning UI migration only if its A/B result is short | Reclaim about 604-1,184 bytes beyond the current reserve. | Reclaim about 732-1,312 bytes including the profile deficit. |
+| Board-pull menus, compact cues, and generic EEPROM automation | 1,330-2,610 | Output editors + advanced settings fields + local RF-learning UI (combined estimate 1,320-2,360); measure, then add render-only measurement-page migration if still short | Reclaim about 1,304-2,584 bytes beyond the current reserve. | Reclaim about 1,432-2,712 bytes including the profile deficit; the proposed migration is not guaranteed at the high estimate. |
 
 The last combination is only a **minimum experiment**, not a promise that it
 will link. If its isolated A/B result does not cover the chosen concrete rule
@@ -293,7 +301,16 @@ Avoid large automatic arrays, recursive flows, `String`, unbounded formatting,
 and duplicate frame buffers. Prefer fixed-size structures, explicit maximums,
 streaming, and one shared ownership path.
 
-## Protocol compatibility rules
+## Alpha version and feature-profile compatibility rules
+
+- A new alpha **version build** may directly replace an unpublished protocol,
+  flash, or EEPROM layout. Do not add a migration chain, dual decoder,
+  compatibility alias, or preservation branch solely for an earlier alpha
+  version; retain the raw backup and reinitialize explicitly.
+- Compatibility/preservation is implemented only for distinct
+  **profile/feature builds that remain supported concurrently**. Those profiles
+  advertise capabilities and declare their application limit, identity address,
+  and persistence layout independently.
 
 - Stable opcodes and known payload semantics are not removable UI aliases.
 - Unknown operations fail explicitly.

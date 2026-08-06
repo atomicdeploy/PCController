@@ -13,13 +13,57 @@ const (
 	MinimumRelayTestPeriodMS uint16 = 250
 )
 
+const StatusProfileCount byte = 19
+
 const (
 	DisplaySegments byte = iota
 	DisplayLCD
 	DisplayBoth
 	DisplayHostPanel
 	DisplayReleaseHostPanel
+	DisplayScheduledSegments
 )
+
+const (
+	SegmentRepeatOnce byte = iota
+	SegmentRepeatLoop
+	SegmentRepeatInterval
+)
+
+const SegmentForceScroll byte = 0x80
+
+const (
+	StatusEffectNone byte = iota
+	StatusEffectBreathe
+	StatusEffectFlash
+	StatusEffectCycle
+	StatusEffectTransition
+)
+
+type StatusEffectOptions struct {
+	Kind              byte
+	Red               byte
+	Green             byte
+	Blue              byte
+	AlternateRed      byte
+	AlternateGreen    byte
+	AlternateBlue     byte
+	Brightness        byte
+	MinimumBrightness byte
+	PeriodMS          uint16
+	Repeats           byte
+}
+
+// ScheduledSegmentOptions is the compact host-to-MCU presentation contract.
+// Interval is encoded in whole seconds so the full 40-byte text limit still
+// fits the native protocol's 48-byte maximum payload.
+type ScheduledSegmentOptions struct {
+	SpeedMS        uint16
+	HoldMS         uint16
+	IntervalSecond byte
+	Repeat         byte
+	ForceScroll    bool
+}
 
 const (
 	MacroRelay byte = iota
@@ -65,7 +109,10 @@ const (
 	KeyEventUp
 )
 
-// RemoteKeyGesturePayload injects one canonical front-panel action and gesture.
+// RemoteKeyGesturePayload injects one canonical front-panel key lifecycle.
+// Down performs the initial action immediately; HoldRepeat repeats it and
+// Click/HoldStart are classification-only. Use OpMenuAction for a stateless
+// one-shot action.
 func RemoteKeyGesturePayload(action, event byte) ([]byte, error) {
 	if action > MenuIncrease {
 		return nil, fmt.Errorf("remote key action %d is outside 0..3", action)
@@ -111,7 +158,7 @@ func RelayTestPayload(periodMS uint16) ([]byte, error) {
 
 func DisplayTextPayload(target byte, durationMS uint16, value string) ([]byte, error) {
 	if target > DisplayReleaseHostPanel {
-		return nil, fmt.Errorf("display target %d is outside 0..4", target)
+		return nil, fmt.Errorf("legacy display target %d is outside 0..4", target)
 	}
 	if len(value) > 40 {
 		return nil, fmt.Errorf("display text is %d bytes, maximum is 40", len(value))
@@ -126,6 +173,39 @@ func DisplayTextPayload(target byte, durationMS uint16, value string) ([]byte, e
 	binary.LittleEndian.PutUint16(payload[1:3], durationMS)
 	payload[3] = byte(len(value))
 	copy(payload[4:], value)
+	return payload, nil
+}
+
+func ScheduledSegmentPayload(options ScheduledSegmentOptions, value string) ([]byte, error) {
+	if options.Repeat > SegmentRepeatInterval {
+		return nil, fmt.Errorf("segment repeat mode %d is outside 0..2", options.Repeat)
+	}
+	if options.SpeedMS < 80 || options.SpeedMS > 5000 {
+		return nil, fmt.Errorf("segment speed must be 80..5000 ms")
+	}
+	if options.Repeat == SegmentRepeatInterval && options.IntervalSecond == 0 {
+		return nil, fmt.Errorf("segment interval mode requires 1..255 seconds")
+	}
+	if len(value) > 40 {
+		return nil, fmt.Errorf("display text is %d bytes, maximum is 40", len(value))
+	}
+	for _, char := range []byte(value) {
+		if char < 0x20 || char > 0x7E {
+			return nil, fmt.Errorf("display text must contain printable ASCII")
+		}
+	}
+	flags := options.Repeat
+	if options.ForceScroll {
+		flags |= SegmentForceScroll
+	}
+	payload := make([]byte, 8+len(value))
+	payload[0] = DisplayScheduledSegments
+	binary.LittleEndian.PutUint16(payload[1:3], options.SpeedMS)
+	payload[3] = byte(len(value))
+	payload[4] = flags
+	binary.LittleEndian.PutUint16(payload[5:7], options.HoldMS)
+	payload[7] = options.IntervalSecond
+	copy(payload[8:], value)
 	return payload, nil
 }
 
@@ -372,6 +452,20 @@ type Settings struct {
 	MotionExitHoldSeconds   byte   `json:"motion_exit_hold_seconds"`
 	RelayRestoreMask        byte   `json:"relay_restore_mask"`
 	MotionBreakMSValue      byte   `json:"-"`
+	Persisted               bool   `json:"persisted"`
+}
+
+// DefaultSettings is the canonical host-owned factory configuration. AVR
+// keeps only a volatile safe fallback for operation before provisioning.
+func DefaultSettings() Settings {
+	return Settings{
+		Flags: 0, LightMode: 0, OnBrightness: 128, OffBrightness: 0,
+		DisplayBrightness: 5, StatusBrightness: FactoryStatusBrightness,
+		OutputPersistence: 0, StreamPeriodMS: 500, DefaultPage: 0,
+		ExtendedFlags: 0, DisplayClosedBrightness: 0,
+		MotionExitHoldSeconds: SettingsDefaultMotionExitHoldSeconds,
+		RelayRestoreMask:      0, MotionBreakMSValue: 1,
+	}
 }
 
 const (
@@ -651,6 +745,78 @@ func (settings Settings) Payload() ([]byte, error) {
 
 func StatusRGBPayload(red, green, blue, brightness byte) []byte {
 	return []byte{red, green, blue, brightness}
+}
+
+const (
+	StatusEffectMinimumPeriodMS uint16 = 640
+	StatusEffectMaximumPeriodMS uint16 = 60000
+)
+
+func StatusEffectPayload(options StatusEffectOptions) ([]byte, error) {
+	if options.Kind < StatusEffectBreathe || options.Kind > StatusEffectTransition {
+		return nil, fmt.Errorf("status effect kind %d is outside 1..4", options.Kind)
+	}
+	if options.PeriodMS < StatusEffectMinimumPeriodMS || options.PeriodMS > StatusEffectMaximumPeriodMS {
+		return nil, fmt.Errorf("status effect period must be %d..%d ms", StatusEffectMinimumPeriodMS, StatusEffectMaximumPeriodMS)
+	}
+	if options.MinimumBrightness > options.Brightness {
+		return nil, fmt.Errorf("status effect minimum brightness exceeds brightness")
+	}
+	return statusEffectDescriptor(options), nil
+}
+
+func statusEffectDescriptor(options StatusEffectOptions) []byte {
+	payload := []byte{
+		options.Kind,
+		options.Red, options.Green, options.Blue,
+		options.AlternateRed, options.AlternateGreen, options.AlternateBlue,
+		options.Brightness, options.MinimumBrightness,
+		0, 0, options.Repeats,
+	}
+	binary.LittleEndian.PutUint16(payload[9:11], options.PeriodMS)
+	return payload
+}
+
+func StatusEffectReleasePayload() []byte { return []byte{StatusEffectNone} }
+
+func StatusProfileGetPayload(condition byte) ([]byte, error) {
+	if condition >= StatusProfileCount {
+		return nil, fmt.Errorf("status profile condition %d is outside 0..%d", condition, StatusProfileCount-1)
+	}
+	return []byte{condition}, nil
+}
+
+func StatusProfileSetPayload(condition byte, options StatusEffectOptions) ([]byte, error) {
+	if condition >= StatusProfileCount {
+		return nil, fmt.Errorf("status profile condition %d is outside 0..%d", condition, StatusProfileCount-1)
+	}
+	if options.Kind > StatusEffectTransition {
+		return nil, fmt.Errorf("status profile effect kind %d is outside 0..4", options.Kind)
+	}
+	if options.MinimumBrightness > options.Brightness {
+		return nil, fmt.Errorf("status effect minimum brightness exceeds brightness")
+	}
+	if options.Kind != StatusEffectNone &&
+		(options.PeriodMS < StatusEffectMinimumPeriodMS || options.PeriodMS > StatusEffectMaximumPeriodMS) {
+		return nil, fmt.Errorf("status effect period must be %d..%d ms", StatusEffectMinimumPeriodMS, StatusEffectMaximumPeriodMS)
+	}
+	return append([]byte{condition}, statusEffectDescriptor(options)...), nil
+}
+
+func parseStatusEffectPayload(payload []byte) (StatusEffectOptions, error) {
+	if len(payload) != 12 {
+		return StatusEffectOptions{}, fmt.Errorf("status effect descriptor is %d bytes, need exactly 12", len(payload))
+	}
+	options := StatusEffectOptions{
+		Kind: payload[0], Red: payload[1], Green: payload[2], Blue: payload[3],
+		AlternateRed: payload[4], AlternateGreen: payload[5], AlternateBlue: payload[6],
+		Brightness: payload[7], MinimumBrightness: payload[8],
+		PeriodMS: binary.LittleEndian.Uint16(payload[9:11]), Repeats: payload[11],
+	}
+	if _, err := StatusProfileSetPayload(0, options); err != nil {
+		return StatusEffectOptions{}, err
+	}
+	return options, nil
 }
 
 func boolByte(value bool) byte {

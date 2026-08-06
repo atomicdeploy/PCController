@@ -160,7 +160,7 @@ Tools\Controller\bin\controller.exe monitor --port COM18 --json
 ```
 
 Use the shell for repeated work and `exec` for one acknowledged operation. A
-one-shot process is not the right owner for a long-running host-streamed effect.
+one-shot process is not the right owner for a long-running scheduled output.
 
 ## 4. Connect to the intended controller
 
@@ -310,19 +310,26 @@ board readback. Generic sliders cover only user channels `0..10`; channels
 `11..15` remain visible but use dedicated illumination, power-indicator, and
 status-RGB controls. `controller.pwm.values`, `controller.pwm.set`, and
 `controller.pwm.off` provide the typed RPC surface; matching REST operations
-are `GET`, `PUT`, and `DELETE /api/v1/pwm`.
+are `GET`, `PUT`, and `DELETE /api/pwm`.
 
 ### Buzzer and effects
 
-The board setting for silent mode is authoritative. Host melodies and status
-effects are streamed in bounded operations; the host must remain connected.
-Stopping a melody prevents future notes, but a tone already accepted by the
-firmware may finish.
+`buzzer path board|host|both|none` selects the two independent renderers.
+`silent board ...` changes the EEPROM-backed board mute while `silent host ...`
+changes PC playback; neither silently overwrites the other. A board-silent
+planned tone is still pushed to the host and may play there when the host path
+is enabled. Stopping a melody prevents future notes, but a tone already
+accepted by a renderer may finish.
 
-For the standard hands-on attention cue, use `display both 0 WAIT`, `melody
+Current boards render status effects from one compact descriptor. Use any
+decimal or hex RGB color with `breathe`, `flash`, `cycle`, or `transition`;
+effect names do not imply colors. Reusable `rgb profile` condition descriptors
+live in EEPROM and apply immediately after a verified write.
+
+For the standard hands-on attention cue, use `display both --duration 5s WAIT`, `melody
 play attention 0`, and `rgb effect play attention`. Repeat count zero is the
 explicit until-stopped mode. On acknowledgement, run `melody stop`, `rgb
-effect stop`, then `display both 1200 ok`; normal display/status ownership
+effect stop`, then `display both --duration 1200ms ok`; normal display/status ownership
 resumes after the bounded `ok` message.
 
 ### Displays and menus
@@ -331,6 +338,14 @@ The TM1637 front panel is firmware-owned. Optional LCD and hosted menu overlays
 are host-owned. The WebUI and TUI may preview or write supported display/menu
 state, but board EEPROM remains the source of truth for local layout and
 brightness settings.
+
+Use `display segments|lcd|both` for arbitrary text. Segment messages longer
+than four cells marquee automatically; `--scroll` forces the same effect for a
+short message. `--repeat once|loop|interval`, `--speed`, `--duration`, and
+`--interval` control the sequence. A marquee always renders a fully blank final
+frame before stopping or restarting. The automatic door message defaults to
+interval scheduling at about two presentations per minute, not an endless
+loop.
 
 See [Front Panel and Menus](Front-Panel-and-Menus.md) for all pages, gestures,
 and save/discard behavior.
@@ -417,7 +432,7 @@ The same host configuration owns `ui.peripheral_names` for the canonical
 34-peripheral registry. Blank names sent through the typed RPC or REST settings
 surface remove an override and reveal its default; the operation never touches
 MCU EEPROM. Use `controller.peripherals.get`/`.set` or `GET`/`PUT`
-`/api/v1/peripherals` when another host surface needs the same labels.
+`/api/peripherals` when another host surface needs the same labels.
 
 ## 9. Monitor, scripts, and IPC
 
@@ -562,6 +577,43 @@ First check whether another Controller primary already owns it; use that
 primary's IPC. If another program owns the port, use the reported owner details
 and safe bring-forward/ask-close actions. Never terminate a process simply
 because its PID appears in an error.
+
+On Windows, owner diagnosis first makes a two-second, target-scoped Restart
+Manager query over the selected COM alias and its `QueryDosDevice` targets. A
+cancelled lookup requests the native
+[`RmCancelCurrentTask`](https://learn.microsoft.com/en-us/windows/win32/api/restartmanager/nf-restartmanager-rmcancelcurrenttask)
+path and no background native-query worker survives the call. `RmGetList`
+documents a cancelled result, but Windows does not guarantee that every native
+call or driver returns at the context deadline. The primary does not run
+WMI/CIM, shell out, or sweep the machine-wide NT handle table.
+
+Restart Manager's documented
+[`RmRegisterResources`](https://learn.microsoft.com/en-us/windows/win32/api/restartmanager/nf-restartmanager-rmregisterresources)
+contract accepts full file paths and does not promise COM device-path
+association. Some serial drivers reject `RmGetList` for a COM resource. On that
+specific result, the primary starts the same canonical Controller executable in
+a hidden, read-only helper mode. The child performs one bounded NT handle scan,
+writes one size-limited strict JSON result, and starts no configuration, UI,
+serial session, network listener, or shell. The parent owns its hard context,
+kills it on timeout, waits for termination, and briefly caches the result so no
+stalled native worker or temporary executable survives a retry.
+
+Returned actions are guarded by PID, process start time, executable identity,
+and current window ownership; termination also requires the exact confirmation
+shown by the app. If both native paths fail, the app preserves the original
+serial-open error, reports the attribution limitation, and offers no process
+action. Maintainers can validate a specific already-owned port through the
+canonical executable without opening or configuring that port:
+
+```console
+bin\controller.exe --internal-port-owner-diagnose COM18
+```
+
+Run that command from `Tools/Controller` while a labeled external application
+already owns the selected port. A successful record has `found:true` plus the
+expected PID, executable, process start time, and optional window metadata. A
+`found:false` or `error` record is an honest driver/permission limitation and
+must not enable bring-forward, close, or terminate controls.
 
 ### Board reconnects repeatedly
 

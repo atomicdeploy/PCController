@@ -357,8 +357,7 @@ func (runtime *Runtime) deduplicateStatusHistoryLocked() {
 }
 
 func importantTimelineKind(kind string) bool {
-	kind = strings.ToLower(strings.TrimSpace(kind))
-	return kind != "" && kind != "telemetry" && kind != "rx" && kind != "tx"
+	return strings.TrimSpace(kind) != "" && EventStreamForKind(kind) == EventStreamActivity
 }
 
 func (runtime *Runtime) writeTimeline() {

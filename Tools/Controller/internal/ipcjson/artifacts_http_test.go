@@ -73,7 +73,7 @@ func TestArtifactHTTPRequiresRemoteAuthenticationAndProgrammingPolicy(t *testing
 	}
 	handler := websocketMux(context.Background(), service)
 
-	request := httptest.NewRequest(http.MethodGet, "http://controller.example/api/v1/artifacts/manifest", nil)
+	request := httptest.NewRequest(http.MethodGet, "http://controller.example/api/artifacts/manifest", nil)
 	request.RemoteAddr = "198.51.100.10:43100"
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -82,7 +82,7 @@ func TestArtifactHTTPRequiresRemoteAuthenticationAndProgrammingPolicy(t *testing
 	}
 
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
-	request = httptest.NewRequest(http.MethodGet, "http://controller.example/api/v1/artifacts/manifest", nil)
+	request = httptest.NewRequest(http.MethodGet, "http://controller.example/api/artifacts/manifest", nil)
 	request.RemoteAddr = "198.51.100.10:43100"
 	request.Header.Set("Authorization", "Bearer "+config.IPC.AuthToken)
 	response = httptest.NewRecorder()
@@ -92,7 +92,7 @@ func TestArtifactHTTPRequiresRemoteAuthenticationAndProgrammingPolicy(t *testing
 	}
 
 	request = httptest.NewRequest(
-		http.MethodPost, "http://controller.example/api/v1/artifacts/capture",
+		http.MethodPost, "http://controller.example/api/artifacts/capture",
 		strings.NewReader(`{"components":["flash","eeprom"],"authorized":true}`),
 	)
 	request.RemoteAddr = "198.51.100.10:43100"
@@ -104,7 +104,7 @@ func TestArtifactHTTPRequiresRemoteAuthenticationAndProgrammingPolicy(t *testing
 	}
 
 	request = httptest.NewRequest(
-		http.MethodPost, "http://controller.example/api/v1/restores/flash",
+		http.MethodPost, "http://controller.example/api/restores/flash",
 		strings.NewReader(`{"artifact_sha256":"`+strings.Repeat("a", 64)+`","authorized":true}`),
 	)
 	request.RemoteAddr = "198.51.100.10:43100"

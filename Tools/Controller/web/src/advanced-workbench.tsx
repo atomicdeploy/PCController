@@ -69,7 +69,7 @@ import {
 } from './components'
 import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
-import type { FrontPanelState, HostUISettings } from './types'
+import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
 
 interface AdvancedWorkbenchProps extends SharedViewProps {
@@ -280,31 +280,6 @@ export function AdvancedWorkbench({
   useEffect(() => {
     if (snapshot.have_front_panel && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
   }, [snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
-
-  useEffect(() => {
-    if (!online) return
-    let stopped = false
-    let timer = 0
-    let dwell = 220
-    const poll = async () => {
-      try {
-        const panel = await rpc<FrontPanelState>('controller.front_panel')
-        if (!stopped) setFrontPanel(panel)
-      } catch {
-        // Connection telemetry owns user-facing error presentation.
-      }
-      if (!stopped) timer = window.setTimeout(poll, dwell)
-    }
-    void rpc<HostUISettings>('controller.ui.config.get')
-      .then((settings) => {
-        dwell = Math.max(60, Math.min(5000, settings.segment_scroll?.speed_ms ?? dwell))
-      })
-      .finally(() => { if (!stopped) void poll() })
-    return () => {
-      stopped = true
-      window.clearTimeout(timer)
-    }
-  }, [online])
 
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -523,7 +498,7 @@ export function AdvancedWorkbench({
         <AdvancedPanel
           icon={AudioLines}
           eyebrow={copy('EEPROM-BACKED', 'ذخیره‌شده در EEPROM')}
-          title={copy('Silent mode & firmware audio cues', 'حالت بی‌صدا و اعلان‌های صوتی')}
+          title={copy('Silent mode & firmware buzzer cues', 'حالت بی‌صدا و اعلان‌های بیزر')}
           detail={copy('Inspect the authoritative board settings, choose desired audio policy, then apply explicitly.', 'تنظیمات معتبر برد را ببینید، سیاست صوتی دلخواه را انتخاب و صریحاً اعمال کنید.')}
           status={snapshot.have_settings ? copy('settings synced', 'تنظیمات همگام') : copy('not read', 'خوانده نشده')}
           tone={snapshot.have_settings ? 'good' : 'neutral'}
@@ -556,10 +531,11 @@ export function AdvancedWorkbench({
             <div>
               <strong>{copy('Live physical display', 'نمایش زنده پنل')}</strong>
               <span>{frontPanel ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7` : copy('Awaiting exact front-panel state', 'در انتظار وضعیت دقیق پنل')}</span>
-              <small>{copy('Polling runs only while this workbench is open and follows the configured scroll speed.', 'نمونه‌برداری فقط هنگام باز بودن این صفحه و با سرعت پیمایش تنظیم‌شده انجام می‌شود.')}</small>
+			  <small>{copy('Changed-only board opcodes update this preview immediately; refresh is explicit.', 'اپ‌کدهای تغییرمحور برد این پیش‌نمایش را فوری به‌روز می‌کنند؛ تازه‌سازی صریح است.')}</small>
             </div>
           </div>
           <div className="advanced-actions">
+			<Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>
             <Button icon={BookOpen} disabled={!online} busy={busy === 'menu list'} onClick={() => void run('menu list')}>{copy('Firmware catalog', 'کاتالوگ میان‌افزار')}</Button>
             <Button icon={LayoutDashboard} disabled={!online} busy={busy === 'menu current'} onClick={() => void run('menu current')}>{copy('Current page', 'صفحه فعلی')}</Button>
             <Button icon={LayoutPanelTop} disabled={!online} busy={busy === 'menu layout'} onClick={() => void run('menu layout')}>{copy('Stored layout', 'چیدمان ذخیره‌شده')}</Button>

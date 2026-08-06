@@ -5,25 +5,38 @@ package productidentity
 //go:generate node generate.mjs
 
 import (
-	"os"
 	"strings"
 	"unicode"
 )
 
-// RuntimeTitleEnvironment overrides the persisted title for one process. The
-// package metadata remains the fallback and ui.app_title remains persistent.
-const RuntimeTitleEnvironment = "APP_TITLE"
+const (
+	// RuntimeTitleEnvironment is read by the executable's global option layer.
+	// Keeping environment resolution out of Title lets an explicit flag retain
+	// the documented highest precedence.
+	RuntimeTitleEnvironment = "APP_NAME"
+	// FirstRunTagline is the configurable default shown by first-run surfaces;
+	// Tagline remains the shorter build-time product badge.
+	FirstRunTagline = "One host. Every board surface."
+)
 
-// Title resolves the effective user-facing product title. A process-local
-// environment override wins over the persisted PC-side configuration.
+// Title normalizes a title already resolved by the executable's precedence
+// layer and falls back to immutable product metadata.
 func Title(configured string) string {
-	if override := strings.TrimSpace(os.Getenv(RuntimeTitleEnvironment)); override != "" {
-		return override
-	}
 	if configured = strings.TrimSpace(configured); configured != "" {
 		return configured
 	}
 	return DefaultTitle
+}
+
+// ResolveTitle applies config < environment < flag precedence.
+func ResolveTitle(configured, environment, commandLine string) string {
+	if commandLine = strings.TrimSpace(commandLine); commandLine != "" {
+		return commandLine
+	}
+	if environment = strings.TrimSpace(environment); environment != "" {
+		return environment
+	}
+	return Title(configured)
 }
 
 // ServiceName adds a role suffix to the effective title without duplicating

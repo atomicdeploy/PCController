@@ -40,6 +40,6 @@ func registerReleaseDiscoveryHTTP(mux *http.ServeMux, service *Service) {
 		}
 		service.ReleaseDiscovery.Handler().ServeHTTP(writer, request)
 	})
-	mux.Handle("/api/v1/discovery", handler)
-	mux.Handle("/api/v1/discovery/", handler)
+	mux.Handle("/api/discovery", handler)
+	mux.Handle("/api/discovery/", handler)
 }

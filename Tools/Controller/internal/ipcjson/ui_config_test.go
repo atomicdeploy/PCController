@@ -58,6 +58,7 @@ func TestBrowserUIConfigRPCPersistsOnlyRequestedHostFields(t *testing.T) {
 
 	params, _ := json.Marshal(map[string]any{
 		"app_title":      "Control Room",
+		"tagline":        "ONE HOST · EVERY BOARD",
 		"setup_complete": true,
 		"segment_scroll": map[string]any{
 			"enabled":          true,
@@ -72,10 +73,10 @@ func TestBrowserUIConfigRPCPersistsOnlyRequestedHostFields(t *testing.T) {
 		Method: "controller.ui.config.set", Params: params,
 	})
 	updated, ok := set.Result.(browserUISettings)
-	if set.Error != nil || !ok || updated.AppTitle != "Control Room" || !updated.SetupComplete {
+	if set.Error != nil || !ok || updated.AppTitle != "Control Room" || updated.Tagline != "ONE HOST · EVERY BOARD" || !updated.SetupComplete {
 		t.Fatalf("updated UI config=%#v error=%v", set.Result, set.Error)
 	}
-	if config.UI.AppTitle != "Control Room" || !config.UI.SetupComplete {
+	if config.UI.AppTitle != "Control Room" || config.UI.Tagline != "ONE HOST · EVERY BOARD" || !config.UI.SetupComplete {
 		t.Fatalf("persistent UI config=%+v", config.UI)
 	}
 	if config.UI.SegmentScroll.SpeedMS != 180 || config.UI.SegmentScroll.DoorOpenText != "enclosure open" ||
@@ -138,7 +139,7 @@ func TestPeripheralNamesRESTUsesTheSameTypedContract(t *testing.T) {
 	defer server.Close()
 
 	body := strings.NewReader(`{"peripheral_names":{"display.lcd":"Cabinet LCD"}}`)
-	request, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/peripherals", body)
+	request, err := http.NewRequest(http.MethodPut, server.URL+"/api/peripherals", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,13 +178,14 @@ func TestBootstrapUIConfigReportsPersistentFirstRunState(t *testing.T) {
 	server := httptest.NewServer(websocketMux(context.Background(), service))
 	defer server.Close()
 
-	response, err := http.Get(server.URL + "/api/v1/ui-config")
+	response, err := http.Get(server.URL + "/api/ui-config")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer response.Body.Close()
 	var result struct {
 		Name             string `json:"name"`
+		Tagline          string `json:"tagline"`
 		SetupComplete    bool   `json:"setup_complete"`
 		WelcomeMelody    string `json:"welcome_melody"`
 		ResetOnReconnect *bool  `json:"reset_on_reconnect,omitempty"`
@@ -191,7 +193,7 @@ func TestBootstrapUIConfigReportsPersistentFirstRunState(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || result.Name != "Workshop Controller" ||
+	if response.StatusCode != http.StatusOK || result.Name != "Workshop Controller" || result.Tagline == "" ||
 		result.SetupComplete || result.WelcomeMelody == "" {
 		t.Fatalf("bootstrap UI config status=%d result=%+v", response.StatusCode, result)
 	}

@@ -217,7 +217,7 @@ func (host *localDeviceHost) Status() any {
 	return result
 }
 
-// Action dispatches only the fixed Local Device v1 action vocabulary. Passive
+// Action dispatches only the fixed Local Device living action vocabulary. Passive
 // refresh is a GET and is never translated into an upstream action.
 func (host *localDeviceHost) Action(
 	ctx context.Context,

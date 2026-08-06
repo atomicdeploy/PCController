@@ -309,7 +309,7 @@ func TestConfiguredMelodyAndStatusEffectCommands(t *testing.T) {
 	config.StatusEffects = []appconfig.StatusLEDEffect{{
 		Name: "signal", Kind: "flash",
 		Red: 1, Green: 2, Blue: 3, Brightness: 100,
-		PeriodMS: 200, DurationMS: 210,
+		PeriodMS: 640, DurationMS: 210,
 	}}
 	provider := func() appconfig.Config { return config }
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -442,6 +442,38 @@ func TestHostConfigCommandUpdatesAppearanceWithoutNoOpWrites(t *testing.T) {
 	}
 	if writes != 7 {
 		t.Fatalf("invalid writes changed count to %d", writes)
+	}
+}
+
+func TestHostConfigCommandControlsBuzzerMirror(t *testing.T) {
+	runtime := New(Options{})
+	config := appconfig.Defaults()
+	engine := NewCommandEngine(runtime, CommandOptions{
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			if err := change(&config); err != nil {
+				return err
+			}
+			return config.Validate()
+		},
+	})
+	for _, command := range []string{
+		`config set integrations.buzzer_mirror.driver_directory C:\optional\winring0`,
+		"config set integrations.buzzer_mirror.native_enabled on",
+		"config set integrations.buzzer_mirror.enabled on",
+		"config set integrations.buzzer_mirror.web_audio_enabled off",
+	} {
+		if _, err := engine.Execute(context.Background(), command); err != nil {
+			t.Fatalf("%q: %v", command, err)
+		}
+	}
+	buzzer := config.Integrations.BuzzerMirror
+	if !buzzer.Enabled || !buzzer.NativeEnabled || buzzer.WebAudioEnabled {
+		t.Fatalf("buzzer mirror=%+v", buzzer)
+	}
+	output, err := engine.Execute(context.Background(), "config get integrations.buzzer_mirror.enabled")
+	if err != nil || output != "integrations.buzzer_mirror.enabled=true" {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }
 

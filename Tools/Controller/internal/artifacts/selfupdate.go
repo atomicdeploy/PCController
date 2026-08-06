@@ -238,7 +238,7 @@ func RunSelfUpdateHelper(ctx context.Context, journalPath string) error {
 	child := exec.Command(journal.CurrentPath, journal.Arguments...)
 	child.Dir = journal.WorkingDirectory
 	child.Env = selfUpdateEnvironment(os.Environ(), journal)
-	if err := child.Start(); err != nil {
+	if err := platformStartReplacementProcess(child); err != nil {
 		_ = rollbackSelfUpdate(&journal)
 		return updateJournalFailure(&journal, "candidate-start-failed", err)
 	}

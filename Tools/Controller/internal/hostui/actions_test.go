@@ -16,15 +16,39 @@ func TestParseActionURIRoutesPagesAndCommands(t *testing.T) {
 	}
 }
 
+func TestParseAndValidateTerminalActions(t *testing.T) {
+	progress, err := ParseAction("app progress normal 42", "test")
+	if err != nil || progress.Kind != "app.progress" || progress.Value != "normal 42" {
+		t.Fatalf("progress=%#v err=%v", progress, err)
+	}
+	title, err := ParseActionURI("pccontroller://title/Bench%20controller")
+	if err != nil || title.Kind != "app.title" || title.Value != "Bench controller" {
+		t.Fatalf("title=%#v err=%v", title, err)
+	}
+	broker := NewActionBroker()
+	for _, action := range []AppAction{
+		{Kind: "app.title", Value: "Bench controller", Target: "tui"},
+		{Kind: "app.osc", Value: "9;4;1;42", Target: "tui"},
+		{Kind: "app.progress", Value: "warning 73", Target: "tui"},
+	} {
+		if err := broker.Publish(action); err != nil {
+			t.Fatalf("Publish(%#v): %v", action, err)
+		}
+	}
+	if err := broker.Publish(AppAction{Kind: "app.osc", Value: "2;bad\x07"}); err == nil {
+		t.Fatal("control-bearing OSC action was accepted")
+	}
+}
+
 func TestActionBrokerValidatesAndDelivers(t *testing.T) {
 	broker := NewActionBroker()
 	events := broker.Events()
 	observed := make(chan AppAction, 1)
 	broker.SetObserver(func(action AppAction) { observed <- action })
-	if err := broker.Publish(AppAction{Kind: "app.page", Value: "events"}); err != nil {
+	if err := broker.Publish(AppAction{Kind: "app.page", Value: "events", Target: "webui"}); err != nil {
 		t.Fatal(err)
 	}
-	if action := <-events; action.Kind != "app.page" || action.Value != "events" {
+	if action := <-events; action.Kind != "app.page" || action.Value != "events" || action.Target != "webui" {
 		t.Fatalf("action=%#v", action)
 	}
 	if action := <-observed; action.Kind != "app.page" || action.Value != "events" || action.At.IsZero() {
@@ -32,6 +56,9 @@ func TestActionBrokerValidatesAndDelivers(t *testing.T) {
 	}
 	if err := broker.Publish(AppAction{Kind: "app.page"}); err == nil {
 		t.Fatal("expected missing page validation")
+	}
+	if err := broker.Publish(AppAction{Kind: "app.page", Value: "events", Target: "bad target"}); err == nil {
+		t.Fatal("expected invalid target validation")
 	}
 	select {
 	case action := <-observed:

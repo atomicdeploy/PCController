@@ -17,6 +17,9 @@ enum class ControllerEventType : uint8_t {
   RfLearning = 9,
   Relay = 10,
   Alert = 11,
+  // Host-routed page navigation: [type, target, ASCII page...]. Target is
+  // 0=all, 1=WebUI, 2=TUI. Firmware may emit it without knowing host UI APIs.
+  AppNavigation = 12,
 };
 
 // ControllerAlertKind classifies board-generated warning notifications.

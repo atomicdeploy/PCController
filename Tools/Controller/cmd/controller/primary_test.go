@@ -8,11 +8,29 @@ import (
 	"testing"
 	"time"
 
+	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/sessionsnapshot"
 	"pccontroller.local/controller/internal/shell"
 )
+
+func TestHostUpdateEventRequestsSecondaryConsoleExit(t *testing.T) {
+	if !eventRequestsSecondaryExit(controllerapi.Event{
+		Kind: "update.staged", Metadata: map[string]string{"kind": "host"},
+	}) {
+		t.Fatal("host update did not request secondary console exit")
+	}
+	for _, event := range []controllerapi.Event{
+		{Kind: "update.staged", Metadata: map[string]string{"kind": "firmware"}},
+		{Kind: "update.completed", Metadata: map[string]string{"kind": "host"}},
+		{Kind: "status_led.changed", Metadata: map[string]string{"kind": "host"}},
+	} {
+		if eventRequestsSecondaryExit(event) {
+			t.Fatalf("unrelated event requested secondary exit: %#v", event)
+		}
+	}
+}
 
 func TestPrimaryIPCClaimsOwnershipAndRoutesCommands(t *testing.T) {
 	runtime := control.New(control.Options{})
@@ -145,13 +163,13 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	actions := server.AppActions()
 	afterID := runtime.LatestEventID()
 	if err := server.actions.Publish(hostui.AppAction{
-		Kind: "app.page", Value: "events", Source: "global-hotkey",
+		Kind: "app.page", Value: "events", Source: "global-hotkey", Target: "webui",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case action := <-actions:
-		if action.Kind != "app.page" || action.Value != "events" {
+		if action.Kind != "app.page" || action.Value != "events" || action.Target != "webui" {
 			t.Fatalf("TUI action=%#v", action)
 		}
 	case <-time.After(time.Second):
@@ -170,7 +188,8 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	}
 	for index, event := range []control.Event{first, second} {
 		if event.ID == 0 || event.Action != "navigate" || event.Source != "global-hotkey" ||
-			event.Metadata["page"] != "events" || event.Metadata["value"] != "events" {
+			event.Metadata["page"] != "events" || event.Metadata["value"] != "events" ||
+			event.Metadata["target_instance"] != "webui" {
 			t.Fatalf("subscriber %d event=%#v", index+1, event)
 		}
 	}
@@ -196,5 +215,34 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	}
 	if overflowEvent.Metadata["page"] != "settings" || overflowEvent.Action != "navigate" {
 		t.Fatalf("overflow browser event=%#v", overflowEvent)
+	}
+}
+
+func TestTerminalAppActionFansOutWithoutInterpretingOSC(t *testing.T) {
+	runtime := control.New(control.Options{})
+	engine := shell.New(4)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := startPrimaryIPCAt(ctx, "127.0.0.1:0", runtime, engine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	_ = server.AppActions()
+	afterID := runtime.LatestEventID()
+	if err := server.actions.Publish(hostui.AppAction{
+		Kind: "app.progress", Value: "normal 42", Source: "ipc", Target: "tui",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitContext, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	event, err := runtime.WaitEvent(waitContext, afterID, "app.progress")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Action != "progress" || event.Metadata["value"] != "normal 42" ||
+		event.Metadata["target_instance"] != "tui" {
+		t.Fatalf("terminal app event=%#v", event)
 	}
 }

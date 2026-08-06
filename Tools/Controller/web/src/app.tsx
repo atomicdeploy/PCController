@@ -68,6 +68,7 @@ import {
   type TerminalEntry as TabTerminalEntry,
 } from './tab-channel'
 import { controllerChannelOrigin } from './transport-config'
+import { matchesAppTarget } from './instance-routing'
 import type {
   Appearance,
   BoardSettingsReadState,
@@ -80,6 +81,8 @@ import type {
   ToastMessage,
   UIConfig,
 } from './types'
+import { applyPushedOutputEvent } from './status-led-event'
+import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 
@@ -327,6 +330,15 @@ export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'met
   return event.kind.toLowerCase() === 'update.completed' && event.metadata?.kind === 'host'
 }
 
+export function shouldNavigateToUpdates(
+  event: Pick<ControllerEvent, 'kind' | 'time'>,
+  currentPage: PageID,
+  now = Date.now(),
+): boolean {
+  return currentPage !== 'updates' && event.kind.toLowerCase().startsWith('update.') &&
+    isFreshAppAction(event.time, now)
+}
+
 export function connectionTransitionCue(
   previous: boolean | null,
   connected: boolean,
@@ -365,6 +377,7 @@ export default function App() {
   const [token, setTokenState] = useState(getToken)
   const [tabBusSupported, setTabBusSupported] = useState(false)
   const [tabPeers, setTabPeers] = useState(0)
+  const [appInstanceID, setAppInstanceID] = useState('')
   const [relayedTerminal, setRelayedTerminal] = useState<RelayedTerminalEntry[]>([])
   const toastID = useRef(0)
   const goChordUntil = useRef(0)
@@ -382,6 +395,7 @@ export default function App() {
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
+	const productTagline = uiConfig?.tagline?.trim() || __PRODUCT_TAGLINE__
   const resolvedDirection = appearance.direction === 'auto'
     ? appearance.locale === 'fa' ? 'rtl' : 'ltr'
     : appearance.direction
@@ -410,8 +424,9 @@ export default function App() {
   }, [adoptHostAppearance])
 
   useEffect(() => {
-    document.title = productTitle
-  }, [productTitle])
+	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
+	document.title = `${productTitle} — ${pageTitle}`
+	}, [page, productTitle, t])
 
   useEffect(() => {
     updateRuntimeFavicon(demo ? 'offline' : controllerFaviconState(snapshot))
@@ -470,6 +485,7 @@ export default function App() {
     const channel = createTabChannel({ origin: controllerChannelOrigin() })
     const peers = new Map<string, number>()
     tabChannelRef.current = channel
+    setAppInstanceID(channel.tabId)
     setTabBusSupported(channel.supported)
 
     const updatePeers = () => {
@@ -516,8 +532,54 @@ export default function App() {
       unsubscribe()
       channel.close()
       if (tabChannelRef.current === channel) tabChannelRef.current = null
+      setAppInstanceID((current) => current === channel.tabId ? '' : current)
     }
   }, [refreshHostAppearance])
+
+  useEffect(() => {
+    if (demo || !startupProbeResolved || !appInstanceID) return
+    const report = (state = document.hidden ? 'hidden' : 'active') => {
+      void rpc('controller.app.instance.report', {
+        id: appInstanceID,
+        surface: 'webui',
+        page,
+        state,
+        lease_seconds: 45,
+        self: {
+          kind: 'browser',
+          vars: {
+            origin: window.location.origin,
+            platform: navigator.platform || 'unknown',
+            language: navigator.language || 'unknown',
+            user_agent: navigator.userAgent,
+          },
+        },
+        values: {
+          color_mode: appearance.theme,
+          locale: appearance.locale,
+          direction: resolvedDirection,
+        },
+      }).catch(() => undefined)
+    }
+    const onVisibility = () => report()
+    report()
+    document.addEventListener('visibilitychange', onVisibility)
+    // This is a bounded presence lease, not board-state polling. Board and UI
+    // state continue to arrive through pushed events.
+    const leaseRefresh = window.setInterval(() => report(), 30_000)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.clearInterval(leaseRefresh)
+    }
+  }, [appInstanceID, appearance.locale, appearance.theme, demo, page, resolvedDirection, startupProbeResolved, token])
+
+  useEffect(() => () => {
+    if (!appInstanceID) return
+    void rpc('controller.app.instance.report', {
+      id: appInstanceID, surface: 'webui', page: pageRef.current,
+      state: 'leaving', lease_seconds: 45,
+    }).catch(() => undefined)
+  }, [appInstanceID])
 
   useEffect(() => {
     if (bootProgress >= bootTarget) return
@@ -731,6 +793,7 @@ export default function App() {
         setUIConfig((current) => current ? {
           ...current,
           name: saved.app_title,
+		  tagline: saved.tagline,
           setup_complete: saved.setup_complete,
           welcome_melody: saved.welcome_melody,
         } : current)
@@ -744,12 +807,18 @@ export default function App() {
     setUIConfig((current) => current ? {
       ...current,
       name: saved.app_title,
+	  tagline: saved.tagline,
       setup_complete: saved.setup_complete,
       welcome_melody: saved.welcome_melody,
     } : current)
     notify('success', 'Application title saved', saved.app_title)
     return saved.app_title
   }, [notify])
+
+  const setBuzzerPath = useCallback(async (value: BuzzerPath) => {
+    await runCommand(`buzzer path ${value}`, 'Buzzer routing updated')
+    await refreshHostAppearance()
+  }, [refreshHostAppearance, runCommand])
 
   const toggleAudio = useCallback(() => {
     saveAppearance({ ...appearance, audioMuted: !appearance.audioMuted })
@@ -982,17 +1051,31 @@ export default function App() {
             setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, status: update.status }, new Date(update.time).getTime())])
           },
           event: (event) => {
+			const eventKind = event.kind.toLowerCase()
+			if (event.kind.toLowerCase() === 'status_led.changed' || event.kind.toLowerCase() === 'front_panel.segment') {
+				setSnapshot((current) => applyPushedOutputEvent(current, event))
+			}
+						if (config.integrations?.buzzer_web_audio && event.kind.toLowerCase() === 'buzzer.note') {
+							const frequencyHz = Number(event.metadata?.frequency_hz)
+							const durationMS = Number(event.metadata?.duration_ms)
+							audioRef.current?.playTone(frequencyHz, durationMS)
+						}
             if (isSignificantControllerEvent(event)) {
               setEvents((current) => prependSignificantControllerEvent(current, event))
               tabChannelRef.current?.publishControllerEvent(event)
             }
-            if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time)) {
+            if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
+                matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
               if (destination) {
                 navigate(destination)
                 audioRef.current?.cue('navigation', 'forward')
               }
             }
+			if (shouldNavigateToUpdates(event, pageRef.current)) {
+				navigate('updates')
+				audioRef.current?.cue('navigation', 'forward')
+			}
             if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
@@ -1026,7 +1109,7 @@ export default function App() {
       }
     })()
     return () => { abort.abort(); stopStream() }
-  }, [adoptHostAppearance, demo, navigate, notify, refresh, refreshHostAppearance, token])
+  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance, token])
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
@@ -1040,7 +1123,7 @@ export default function App() {
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} />
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
         : <PageView {...shared} />}
     </Suspense>
   )
@@ -1104,7 +1187,7 @@ export default function App() {
       <aside className="sidebar" aria-label={t('primaryNavigation')}>
         <div className="brand">
           <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><span aria-hidden="true">{productShortName}</span><i /><i /></a>
-          <a className="brand__copy" href="#/dashboard"><strong>{productTitle}</strong><span>{__PRODUCT_TAGLINE__}</span></a>
+          <a className="brand__copy" href="#/dashboard"><strong>{productTitle}</strong><span>{productTagline}</span></a>
           <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
 
@@ -1188,7 +1271,7 @@ export default function App() {
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
       <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </div>
-    <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={__PRODUCT_TAGLINE__} onEnter={enterApp} />
+    <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />
     <HotkeyHelp open={hotkeyHelp} locale={appearance.locale} onClose={() => setHotkeyHelp(false)} />
     </MotionConfig>
   )

@@ -20,12 +20,13 @@ func authenticatedDoorSnapshot(open bool) controller.Snapshot {
 func TestSegmentScrollTargetTracksDoorStateAndConfiguredGap(t *testing.T) {
 	config := appconfig.DefaultSegmentScroll()
 	open := segmentScrollTargetFor(config, authenticatedDoorSnapshot(true))
-	if !open.active || open.page != 0 || open.text != "door is open   " ||
-		open.dwell != 220*time.Millisecond {
+	if !open.active || open.page != 0 || open.text != "door is open" ||
+		open.dwell != 220*time.Millisecond ||
+		open.repeat != controller.DisplayRepeatInterval || open.interval != 30*time.Second {
 		t.Fatalf("open target=%+v", open)
 	}
 	closed := segmentScrollTargetFor(config, authenticatedDoorSnapshot(false))
-	if !closed.active || closed.text != "door is closed   " {
+	if !closed.active || closed.text != "door is closed" {
 		t.Fatalf("closed target=%+v", closed)
 	}
 }
