@@ -2,14 +2,14 @@
 {"id":2,"time":"2026-08-01T18:42:16.4105901+03:30","kind":"identity","text":"application HELLO received"}
 {"id":5,"time":"2026-08-01T18:42:16.4105901+03:30","kind":"pwm","text":"automatic PWM channel changed to 4"}
 {"id":8,"time":"2026-08-01T18:42:16.4111444+03:30","kind":"pwm","text":"automatic PWM channel changed to 5"}
-{"id":10,"time":"2026-08-01T18:42:16.4111444+03:30","kind":"config","text":"reloaded C:\\Users\\David\\Desktop\\Projects\\ControllerBoardMini\\PCController\\Tools\\Controller\\examples\\config.example.json (PC-side settings only)"}
+{"id":10,"time":"2026-08-01T18:42:16.4111444+03:30","kind":"config","text":"reloaded <project-root>\\Tools\\Controller\\examples\\config.example.json (host settings only)"}
 {"id":11,"time":"2026-08-01T18:42:16.4111444+03:30","kind":"program.state","text":"program state Running: playing macro output-demo","lifecycle":"changed","state":"Running","reason":"playing macro output-demo"}
 {"id":12,"time":"2026-08-01T18:42:16.4116584+03:30","kind":"error","text":"unsupported MACRO_STATUS envelope 134/schema 2"}
 {"id":13,"time":"2026-08-01T18:42:16.4121987+03:30","kind":"macro","text":"macro 1/output-demo started","lifecycle":"started","state":"started","metadata":{"category":"","color":"","dispatch_errors":"0","faithful":"false","macro_id":"1","macro_name":"output-demo","step":"0","steps":"5","timing_error_us":"0","underruns":"0"}}
 {"id":14,"time":"2026-08-01T18:42:16.4121987+03:30","kind":"error","text":"unsupported MACRO_STATUS envelope 134/schema 2"}
 {"id":15,"time":"2026-08-01T18:42:16.4121987+03:30","kind":"relay","text":"relay outputs changed; active mask=0x10"}
 {"id":17,"time":"2026-08-01T18:42:16.4121987+03:30","kind":"macro.step","text":"macro 1/output-demo step 1/5 delta=47us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"47","step":"1","steps":"5"}}
-{"id":18,"time":"2026-08-01T18:42:16.4725261+03:30","kind":"config","text":"reloaded C:\\Users\\David\\Desktop\\Projects\\ControllerBoardMini\\PCController\\Tools\\Controller\\examples\\config.example.json (PC-side settings only)"}
+{"id":18,"time":"2026-08-01T18:42:16.4725261+03:30","kind":"config","text":"reloaded <project-root>\\Tools\\Controller\\examples\\config.example.json (host settings only)"}
 {"id":20,"time":"2026-08-01T18:42:16.6716939+03:30","kind":"macro.step","text":"macro 1/output-demo step 2/5 delta=9459us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"9459","step":"2","steps":"5"}}
 {"id":23,"time":"2026-08-01T18:42:17.1775107+03:30","kind":"macro.step","text":"macro 1/output-demo step 3/5 delta=15309us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"15309","step":"3","steps":"5"}}
 {"id":25,"time":"2026-08-01T18:42:17.6679595+03:30","kind":"relay","text":"relay outputs changed; active mask=0x00"}
@@ -32,3 +32,34 @@
 {"id":25,"time":"2026-08-01T18:43:23.889979+03:30","kind":"macro.step","text":"macro 1/output-demo step 5/5 delta=7037us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"7037","step":"5","steps":"5"}}
 {"id":26,"time":"2026-08-01T18:43:23.889979+03:30","kind":"error","text":"unsupported MACRO_STATUS envelope 134/schema 2"}
 {"id":27,"time":"2026-08-01T18:43:23.9907155+03:30","kind":"macro","text":"macro 1/output-demo completed","lifecycle":"completed","state":"completed","metadata":{"category":"lighting","color":"violet","dispatch_errors":"0","faithful":"true","macro_id":"1","macro_name":"output-demo","step":"5","steps":"5","timing_error_us":"10574","underruns":"0"}}
+{"id":1,"time":"2026-08-01T23:35:24.1609128+03:30","kind":"status-led.state","text":"pc-offline"}
+{"id":2,"time":"2026-08-01T23:35:25.3863857+03:30","kind":"connection","text":"connect tcp://127.0.0.1:8899","lifecycle":"connect","state":"connected","port":"tcp://127.0.0.1:8899"}
+{"id":3,"time":"2026-08-01T23:35:25.386906+03:30","kind":"identity","text":"application HELLO received"}
+{"id":1,"time":"2026-08-01T23:35:32.4695147+03:30","kind":"status-led.state","text":"pc-offline"}
+{"id":2,"time":"2026-08-01T23:35:33.670762+03:30","kind":"connection","text":"connect tcp://127.0.0.1:8899","lifecycle":"connect","state":"connected","port":"tcp://127.0.0.1:8899"}
+{"id":3,"time":"2026-08-01T23:35:33.670762+03:30","kind":"program.state","text":"program state Running: playing macro output-demo","lifecycle":"changed","state":"Running","reason":"playing macro output-demo"}
+{"id":4,"time":"2026-08-01T23:35:33.670762+03:30","kind":"identity","text":"application HELLO received"}
+{"id":7,"time":"2026-08-01T23:35:33.670762+03:30","kind":"pwm","text":"automatic PWM channel changed to 8"}
+{"id":10,"time":"2026-08-01T23:35:33.670762+03:30","kind":"status-led.state","text":"running"}
+{"id":1,"time":"2026-08-01T23:35:39.2313506+03:30","kind":"status-led.state","text":"pc-offline"}
+{"id":2,"time":"2026-08-01T23:35:40.4329921+03:30","kind":"connection","text":"connect tcp://127.0.0.1:8899","lifecycle":"connect","state":"connected","port":"tcp://127.0.0.1:8899"}
+{"id":3,"time":"2026-08-01T23:35:40.4329921+03:30","kind":"identity","text":"application HELLO received"}
+{"id":1,"time":"2026-08-01T23:36:02.8008687+03:30","kind":"status-led.state","text":"pc-offline"}
+{"id":2,"time":"2026-08-01T23:36:04.0015848+03:30","kind":"connection","text":"connect tcp://127.0.0.1:8899","lifecycle":"connect","state":"connected","port":"tcp://127.0.0.1:8899"}
+{"id":3,"time":"2026-08-01T23:36:04.0015848+03:30","kind":"program.state","text":"program state Running: playing macro output-demo","lifecycle":"changed","state":"Running","reason":"playing macro output-demo"}
+{"id":4,"time":"2026-08-01T23:36:04.0015848+03:30","kind":"identity","text":"application HELLO received"}
+{"id":8,"time":"2026-08-01T23:36:04.0015848+03:30","kind":"status-led.state","text":"running"}
+{"id":9,"time":"2026-08-01T23:36:04.0015848+03:30","kind":"macro","text":"macro 1 buffering steps=0/5 buffer=0B underruns=0 errors=0"}
+{"id":10,"time":"2026-08-01T23:36:04.0022069+03:30","kind":"macro","text":"macro 1 playing steps=0/5 buffer=43B underruns=0 errors=0"}
+{"id":11,"time":"2026-08-01T23:36:04.0022069+03:30","kind":"macro","text":"macro 1/output-demo started","lifecycle":"started","state":"started","metadata":{"category":"lighting","color":"violet","dispatch_errors":"0","faithful":"false","macro_id":"1","macro_name":"output-demo","step":"0","steps":"5","timing_error_us":"0","underruns":"0"}}
+{"id":12,"time":"2026-08-01T23:36:04.0022069+03:30","kind":"relay","text":"relay outputs changed; active mask=0x10"}
+{"id":14,"time":"2026-08-01T23:36:04.0022069+03:30","kind":"macro.step","text":"macro 1/output-demo step 1/5 delta=16us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"16","step":"1","steps":"5"}}
+{"id":17,"time":"2026-08-01T23:36:04.2618685+03:30","kind":"macro.step","text":"macro 1/output-demo step 2/5 delta=9790us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"9790","step":"2","steps":"5"}}
+{"id":20,"time":"2026-08-01T23:36:04.7566237+03:30","kind":"macro.step","text":"macro 1/output-demo step 3/5 delta=4429us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"4429","step":"3","steps":"5"}}
+{"id":21,"time":"2026-08-01T23:36:05.2555292+03:30","kind":"relay","text":"relay outputs changed; active mask=0x00"}
+{"id":23,"time":"2026-08-01T23:36:05.2555292+03:30","kind":"macro.step","text":"macro 1/output-demo step 4/5 delta=3326us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"3326","step":"4","steps":"5"}}
+{"id":26,"time":"2026-08-01T23:36:05.5048812+03:30","kind":"macro","text":"macro 1 completed steps=5/5 buffer=0B underruns=0 errors=0"}
+{"id":27,"time":"2026-08-01T23:36:05.5048812+03:30","kind":"macro.step","text":"macro 1/output-demo step 5/5 delta=2670us","lifecycle":"executed","state":"acknowledged","metadata":{"macro_id":"1","macro_name":"output-demo","mcu_delta_us":"2670","step":"5","steps":"5"}}
+{"id":28,"time":"2026-08-01T23:36:05.5048812+03:30","kind":"macro","text":"macro 1/output-demo completed","lifecycle":"completed","state":"completed","metadata":{"category":"lighting","color":"violet","dispatch_errors":"0","faithful":"true","macro_id":"1","macro_name":"output-demo","step":"5","steps":"5","timing_error_us":"9790","underruns":"0"}}
+{"id":29,"time":"2026-08-01T23:36:05.5048812+03:30","kind":"program.state","text":"program state Idle: ","lifecycle":"changed","state":"Idle"}
+{"id":30,"time":"2026-08-01T23:36:05.5048812+03:30","kind":"status-led.state","text":"bluetooth-audio-off"}

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// HostMenuConfig defines PC-owned front-panel pages. These values never enter
+// HostMenuConfig defines HOST-owned front-panel pages. These values never enter
 // MCU EEPROM; the host renders them through the display protocol while a
 // session is active.
 type HostMenuConfig struct {
@@ -65,20 +65,21 @@ const (
 )
 
 type HostMenuItem struct {
-	ID          string           `json:"id"`
-	Label       string           `json:"label"`
-	Title       string           `json:"title"`
-	Type        string           `json:"type"`
-	Value       string           `json:"value,omitempty"`
-	Min         float64          `json:"min,omitempty"`
-	Max         float64          `json:"max,omitempty"`
-	Step        float64          `json:"step,omitempty"`
-	Options     []HostMenuOption `json:"options,omitempty"`
-	ReadAction  string           `json:"read_action,omitempty"`
-	WriteAction string           `json:"write_action,omitempty"`
-	Submenu     string           `json:"submenu,omitempty"`
-	Guarded     bool             `json:"guarded,omitempty"`
-	Disabled    bool             `json:"disabled,omitempty"`
+	ID            string           `json:"id"`
+	Label         string           `json:"label"`
+	Title         string           `json:"title"`
+	Type          string           `json:"type"`
+	Value         string           `json:"value,omitempty"`
+	Min           float64          `json:"min,omitempty"`
+	Max           float64          `json:"max,omitempty"`
+	Step          float64          `json:"step,omitempty"`
+	Options       []HostMenuOption `json:"options,omitempty"`
+	OptionsSource string           `json:"options_source,omitempty"`
+	ReadAction    string           `json:"read_action,omitempty"`
+	WriteAction   string           `json:"write_action,omitempty"`
+	Submenu       string           `json:"submenu,omitempty"`
+	Guarded       bool             `json:"guarded,omitempty"`
+	Disabled      bool             `json:"disabled,omitempty"`
 }
 
 type HostMenuOption struct {
@@ -88,25 +89,28 @@ type HostMenuOption struct {
 
 func DefaultHostMenus() HostMenuConfig {
 	return HostMenuConfig{
-		DefaultMenu: "host", RequestGesture: "status-hold-k4",
+		DefaultMenu: "host", RequestGesture: "door-hold-k4",
 		DisplayDurationMS: 1500, SessionTimeoutMS: 120000,
 		Menus: []HostMenu{
 			{ID: "host", NodeID: 0x80, ParentID: HostMenuRoot, OrderID: 0x80,
-				Label: "HOST", Title: "PC Host", Content: "Controls ready", Brightness: 5,
+				Label: "HOST", Title: "HOST", Content: "Controls ready", Brightness: 5,
 				EditVisual: "blink", Flags: HostMenuFlags{Visible: true, Selectable: true}, Items: []HostMenuItem{
 					{ID: "host-status", Label: "PC", Title: "Host status", Type: "readonly", ReadAction: "host.status"},
 					{ID: "device-status", Label: "DEV", Title: "Device status", Type: "readonly", ReadAction: "device.status"},
+					{ID: "date", Label: "DATE", Title: "Current date", Type: "readonly", ReadAction: "host.date"},
+					{ID: "time", Label: "TIME", Title: "Current time", Type: "readonly", ReadAction: "host.time"},
 					{ID: "ip", Label: "IP", Title: "Host IP", Type: "readonly", ReadAction: "host.ip"},
 					{ID: "api", Label: "API", Title: "API and links", Type: "readonly", ReadAction: "api.status"},
-					{ID: "settings", Label: "CFG", Title: "PC settings", Type: "submenu", Submenu: "pc-settings"},
+					{ID: "macros", Label: "MACR", Title: "Macros", Type: "submenu", Submenu: "macro-library"},
+					{ID: "settings", Label: "CFG", Title: "HOST settings", Type: "submenu", Submenu: "pc-settings"},
 					{ID: "system", Label: "SYS", Title: "System actions", Type: "submenu", Submenu: "system-actions"},
 				}},
 			{ID: "pc-settings", NodeID: 0x81, ParentID: 0x80, OrderID: 0x81,
-				Label: "CFG", Title: "PC Settings", Content: "Configuration", Brightness: 5,
+				Label: "CFG", Title: "HOST Settings", Content: "Configuration", Brightness: 5,
 				EditVisual: "blink", Flags: HostMenuFlags{Visible: true, Selectable: true, Editable: true}, Items: []HostMenuItem{
 					{ID: "app-title", Label: "NAME", Title: "Application title", Type: "text", ReadAction: "pc.ui.app_title", WriteAction: "pc.ui.app_title"},
 					{ID: "poll", Label: "POLL", Title: "Polling ms", Type: "number", Value: "200", Min: 100, Max: 5000, Step: 50, ReadAction: "pc.ui.status_interval_ms", WriteAction: "pc.ui.status_interval_ms"},
-					{ID: "lcd-service", Label: "I2C", Title: "PC LCD service", Type: "bool", Value: "true", ReadAction: "pc.ui.lcd_service_enabled", WriteAction: "pc.ui.lcd_service_enabled"},
+					{ID: "lcd-service", Label: "I2C", Title: "HOST LCD service", Type: "bool", Value: "true", ReadAction: "pc.ui.lcd_service_enabled", WriteAction: "pc.ui.lcd_service_enabled"},
 					{ID: "lcd-mirror", Label: "LCD", Title: "Prompt mirror", Type: "bool", Value: "false", ReadAction: "pc.ui.mirror_prompt_to_lcd", WriteAction: "pc.ui.mirror_prompt_to_lcd"},
 					{ID: "dtr", Label: "DTR", Title: "Reset reconnect", Type: "bool", Value: "false", ReadAction: "pc.connection.reset_on_reconnect", WriteAction: "pc.connection.reset_on_reconnect"},
 				}},
@@ -118,7 +122,31 @@ func DefaultHostMenus() HostMenuConfig {
 					{ID: "suspend", Label: "SUSP", Title: "Suspend Windows", Type: "action", WriteAction: "os.sleep", Guarded: true},
 					{ID: "hibernate", Label: "HIBR", Title: "Hibernate Windows", Type: "action", WriteAction: "os.hibernate", Guarded: true},
 					{ID: "restart", Label: "RSTR", Title: "Restart Windows", Type: "action", WriteAction: "os.restart", Guarded: true},
-					{ID: "shutdown", Label: "OFF", Title: "Shut down PC", Type: "action", WriteAction: "os.shutdown", Guarded: true},
+					{ID: "shutdown", Label: "OFF", Title: "Shut down host", Type: "action", WriteAction: "os.shutdown", Guarded: true},
+				}},
+			{ID: "macro-library", NodeID: 0x83, ParentID: 0x80, OrderID: 0x83,
+				Label: "MACR", Title: "Macro Library", Content: "Select and run", Brightness: 5,
+				EditVisual: "blink", Flags: HostMenuFlags{Visible: true, Selectable: true, Editable: true}, Items: []HostMenuItem{
+					{ID: "selected", Label: "MACR", Title: "Macro", Type: "select", OptionsSource: "macro.library", ReadAction: "host.macro.selection", WriteAction: "host.macro.selection"},
+					{ID: "details", Label: "INFO", Title: "Selected", Type: "readonly", ReadAction: "host.macro.selected"},
+					{ID: "play", Label: "PLAY", Title: "Play selected", Type: "action", WriteAction: "host.macro.play", Guarded: true},
+					{ID: "record", Label: "REC", Title: "Record macro", Type: "submenu", Submenu: "macro-recording"},
+					{ID: "status", Label: "RUN", Title: "Playback", Type: "submenu", Submenu: "macro-playback"},
+				}},
+			{ID: "macro-recording", NodeID: 0x84, ParentID: 0x83, OrderID: 0x84,
+				Label: "REC", Title: "Macro Recording", Content: "MCU timed deltas", Brightness: 5,
+				EditVisual: "alternate", Flags: HostMenuFlags{Visible: true, Selectable: true, Action: true}, Items: []HostMenuItem{
+					{ID: "status", Label: "STAT", Title: "Record", Type: "readonly", ReadAction: "host.macro.recording"},
+					{ID: "start", Label: "REC", Title: "Start recording", Type: "action", WriteAction: "host.macro.record.start"},
+					{ID: "save", Label: "SAVE", Title: "Save recording", Type: "action", WriteAction: "host.macro.record.save"},
+					{ID: "discard", Label: "DISC", Title: "Discard recording", Type: "action", WriteAction: "host.macro.record.discard", Guarded: true},
+				}},
+			{ID: "macro-playback", NodeID: 0x85, ParentID: 0x83, OrderID: 0x85,
+				Label: "RUN", Title: "Macro Playback", Content: "Progress / stop", Brightness: 5,
+				EditVisual: "alternate", Flags: HostMenuFlags{Visible: true, Selectable: true, Action: true}, Items: []HostMenuItem{
+					{ID: "status", Label: "STAT", Title: "Playback", Type: "readonly", ReadAction: "host.macro.playback"},
+					{ID: "cancel", Label: "STOP", Title: "Cancel safely", Type: "action", WriteAction: "host.macro.cancel"},
+					{ID: "keep", Label: "KEEP", Title: "Cancel keep output", Type: "action", WriteAction: "host.macro.cancel.keep", Guarded: true},
 				}},
 		},
 	}
@@ -133,8 +161,8 @@ func validateHostMenus(config HostMenuConfig) error {
 	if config.SessionTimeoutMS < 5000 || config.SessionTimeoutMS > 3600000 {
 		return fmt.Errorf("host_menus.session_timeout_ms must be 5000..3600000")
 	}
-	if config.RequestGesture != "status-hold-k4" && config.RequestGesture != "disabled" {
-		return fmt.Errorf("host_menus.request_gesture must be status-hold-k4 or disabled")
+	if config.RequestGesture != "door-hold-k4" && config.RequestGesture != "disabled" {
+		return fmt.Errorf("host_menus.request_gesture must be door-hold-k4 or disabled")
 	}
 	if len(config.Menus) == 0 || len(config.Menus)+len(config.BuiltinOverrides) > 8 {
 		return fmt.Errorf("host_menus runtime overlay must contain 1..8 host nodes and built-in overrides combined")
@@ -196,8 +224,11 @@ func validateHostMenus(config HostMenuConfig) error {
 					}
 				}
 			case "select":
-				if len(item.Options) == 0 || len(item.Options) > 16 {
-					return fmt.Errorf("%s.options must contain 1..16 values", path)
+				if item.OptionsSource == "" && (len(item.Options) == 0 || len(item.Options) > 16) {
+					return fmt.Errorf("%s.options must contain 1..16 values or declare options_source", path)
+				}
+				if item.OptionsSource != "" && !hostMenuIDPattern.MatchString(item.OptionsSource) {
+					return fmt.Errorf("%s.options_source is invalid", path)
 				}
 				seen := make(map[string]bool)
 				for optionIndex, option := range item.Options {
@@ -217,7 +248,7 @@ func validateHostMenus(config HostMenuConfig) error {
 			default:
 				return fmt.Errorf("%s.type %q is unknown", path, item.Type)
 			}
-			for _, action := range []string{item.ReadAction, item.WriteAction} {
+			for _, action := range []string{item.ReadAction, item.WriteAction, item.OptionsSource} {
 				if len(action) > 256 || strings.ContainsAny(action, "\r\n") {
 					return fmt.Errorf("%s action is invalid", path)
 				}
@@ -338,21 +369,14 @@ func cloneHostMenus(source HostMenuConfig) HostMenuConfig {
 	return result
 }
 
-// canonicalizeHostMenus upgrades pre-directory development configurations in
-// memory. It preserves human string IDs/actions while assigning compact host
-// IDs and inferred parent relations; the next explicit save writes the fields.
-func canonicalizeHostMenus(source HostMenuConfig) HostMenuConfig {
+// normalizeHostMenus applies defaults for optional presentation fields. Stable
+// node and parent IDs are required explicitly; unpublished layouts are not
+// inferred or migrated.
+func normalizeHostMenus(source HostMenuConfig) HostMenuConfig {
 	result := cloneHostMenus(source)
-	stringToNode := make(map[string]byte, len(result.Menus))
-	legacy := make([]bool, len(result.Menus))
 	for index := range result.Menus {
 		menu := &result.Menus[index]
-		if menu.NodeID < HostMenuNodeFirst || menu.NodeID > HostMenuNodeLast {
-			legacy[index] = true
-			menu.NodeID = HostMenuNodeFirst + byte(index)
-		}
 		menu.OrderID = menu.NodeID
-		stringToNode[menu.ID] = menu.NodeID
 		if menu.EditVisual == "" {
 			menu.EditVisual = "blink"
 			if menu.Brightness == 0 {
@@ -364,21 +388,6 @@ func canonicalizeHostMenus(source HostMenuConfig) HostMenuConfig {
 		}
 		if menu.Content == "" {
 			menu.Content = menu.Title
-		}
-		if legacy[index] {
-			menu.ParentID = HostMenuRoot
-		}
-	}
-	for _, parent := range result.Menus {
-		for _, item := range parent.Items {
-			if item.Type != "submenu" {
-				continue
-			}
-			for index := range result.Menus {
-				if legacy[index] && result.Menus[index].ID == item.Submenu {
-					result.Menus[index].ParentID = stringToNode[parent.ID]
-				}
-			}
 		}
 	}
 	for index := range result.BuiltinOverrides {

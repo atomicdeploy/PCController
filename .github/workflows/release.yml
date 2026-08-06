@@ -1,5 +1,5 @@
 name: "✨ Release · Attested Packages"
-run-name: "✨ PCController ${{ inputs.tag || github.ref_name }} · ${{ github.sha }}"
+run-name: "✨ ${{ github.event.repository.name }} ${{ inputs.tag || github.ref_name }} · exact source ${{ github.sha }}"
 
 on:
   push:
@@ -71,10 +71,11 @@ jobs:
 
   host:
     name: "🖥️ Release Host · Five targets"
-    needs: preflight
+    needs: [preflight, firmware]
     uses: ./.github/workflows/host.yml
     with:
       version: ${{ inputs.tag || github.ref_name }}
+      firmware_artifact_name: ${{ needs.firmware.outputs.artifact_name }}
 
   virtual-board:
     name: "🧪 Release Virtual Board · Five targets"
@@ -235,7 +236,7 @@ jobs:
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
-          name: "⚡ PCController ${{ inputs.tag || github.ref_name }} · AVR & Cross-platform Suite"
+          name: "⚡ ${{ github.event.repository.name }} ${{ inputs.tag || github.ref_name }} · AVR & Cross-platform Suite"
           draft: ${{ github.event_name == 'workflow_dispatch' && inputs.draft }}
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || github.event_name != 'workflow_dispatch' && contains(github.ref_name, '-') }}
           body_path: ${{ steps.showcase.outputs.release_notes }}

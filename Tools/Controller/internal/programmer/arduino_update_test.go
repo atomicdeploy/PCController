@@ -10,13 +10,13 @@ import (
 
 func TestArduinoUpdatePlansAllUpgradesAndRequiredDependencies(t *testing.T) {
 	var commands []Command
-	_, err := UpdateArduinoWithRunner(
+	_, err := SyncToolchainWithRunner(
 		context.Background(),
-		ArduinoUpdateOptions{
-			ArduinoCLI: "arduino-cli", Environment: []string{"PATH=test"},
+		ToolchainSyncOptions{
+			ToolchainCLI: "arduino-cli", Environment: []string{"PATH=test"},
 		},
 		io.Discard,
-		ArduinoEnvironmentRunnerFunc(func(
+		DependencyEnvironmentRunnerFunc(func(
 			_ context.Context, command Command, _ []string, _ io.Writer,
 		) error {
 			commands = append(commands, command)
@@ -51,15 +51,16 @@ func TestArduinoUpdatePlansAllUpgradesAndRequiredDependencies(t *testing.T) {
 func TestArduinoUpdateRetriesWithoutProxyWithoutMutatingParentValues(t *testing.T) {
 	environment := []string{
 		"PATH=test", "HTTPS_PROXY=http://secret-proxy", "http_proxy=http://other-secret",
+		"NO_PROXY=localhost,127.0.0.1",
 	}
 	var attempts [][]string
-	report, err := UpdateArduinoWithRunner(
+	report, err := SyncToolchainWithRunner(
 		context.Background(),
-		ArduinoUpdateOptions{
-			ArduinoCLI: "arduino-cli", Environment: environment, DirectRetry: true,
+		ToolchainSyncOptions{
+			ToolchainCLI: "arduino-cli", Environment: environment, DirectRetry: true,
 		},
 		io.Discard,
-		ArduinoEnvironmentRunnerFunc(func(
+		DependencyEnvironmentRunnerFunc(func(
 			_ context.Context, _ Command, childEnvironment []string, _ io.Writer,
 		) error {
 			attempts = append(attempts, append([]string(nil), childEnvironment...))
@@ -72,15 +73,18 @@ func TestArduinoUpdateRetriesWithoutProxyWithoutMutatingParentValues(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(attempts) < 2 || len(report.ProxyVariables) != 2 ||
+	if len(attempts) < 2 || len(report.ProxyVariables) != 3 ||
 		!report.Steps[0].RetriedDirect || !report.Steps[0].Succeeded {
 		t.Fatalf("attempts=%d report=%+v", len(attempts), report)
 	}
 	if active := proxyEnvironmentNames(attempts[1]); len(active) != 0 {
 		t.Fatalf("direct retry retained active proxy variables %v: %#v", active, attempts[1])
 	}
-	if !containsExact(attempts[1], arduinoNetworkProxyEnvKey+"=") {
-		t.Fatalf("direct retry did not disable persisted Arduino proxy: %#v", attempts[1])
+	if got := testEnvironmentValue(attempts[0], arduinoNetworkProxyEnvKey); got != "http://secret-proxy" {
+		t.Fatalf("configured attempt did not translate HTTPS_PROXY: %q in %#v", got, attempts[0])
+	}
+	if got := testEnvironmentValue(attempts[1], arduinoNetworkProxyEnvKey); got != "" {
+		t.Fatalf("direct retry retained dependency proxy %q: %#v", got, attempts[1])
 	}
 	if environment[1] != "HTTPS_PROXY=http://secret-proxy" ||
 		environment[2] != "http_proxy=http://other-secret" {
@@ -88,15 +92,15 @@ func TestArduinoUpdateRetriesWithoutProxyWithoutMutatingParentValues(t *testing.
 	}
 }
 
-func TestArduinoUpdateRetriesDirectWhenOnlyPersistedArduinoProxyMayExist(t *testing.T) {
+func TestArduinoUpdateRetriesDirectWithNoProxyConfigured(t *testing.T) {
 	var attempts [][]string
-	report, err := UpdateArduinoWithRunner(
+	report, err := SyncToolchainWithRunner(
 		context.Background(),
-		ArduinoUpdateOptions{
-			ArduinoCLI: "arduino-cli", Environment: []string{"PATH=test"}, DirectRetry: true,
+		ToolchainSyncOptions{
+			ToolchainCLI: "arduino-cli", Environment: []string{"PATH=test"}, DirectRetry: true,
 		},
 		io.Discard,
-		ArduinoEnvironmentRunnerFunc(func(
+		DependencyEnvironmentRunnerFunc(func(
 			_ context.Context, _ Command, childEnvironment []string, _ io.Writer,
 		) error {
 			attempts = append(attempts, append([]string(nil), childEnvironment...))
@@ -112,8 +116,8 @@ func TestArduinoUpdateRetriesDirectWhenOnlyPersistedArduinoProxyMayExist(t *test
 	if len(attempts) < 2 || !report.Steps[0].RetriedDirect || !report.Steps[0].Succeeded {
 		t.Fatalf("attempts=%d report=%+v", len(attempts), report)
 	}
-	if !containsExact(attempts[1], arduinoNetworkProxyEnvKey+"=") {
-		t.Fatalf("direct retry did not disable persisted Arduino proxy: %#v", attempts[1])
+	if got := testEnvironmentValue(attempts[1], arduinoNetworkProxyEnvKey); got != "" {
+		t.Fatalf("direct retry unexpectedly configured dependency proxy: %#v", attempts[1])
 	}
 }
 
@@ -126,26 +130,17 @@ func TestProxyEnvironmentNamesIgnoreEmptyOverrides(t *testing.T) {
 	}
 }
 
-func containsExact(values []string, wanted string) bool {
-	for _, value := range values {
-		if value == wanted {
-			return true
-		}
-	}
-	return false
-}
-
 func TestArduinoUpdateOutputNeverLeaksProxyValue(t *testing.T) {
 	var output strings.Builder
-	_, err := UpdateArduinoWithRunner(
+	_, err := SyncToolchainWithRunner(
 		context.Background(),
-		ArduinoUpdateOptions{
-			ArduinoCLI:  "arduino-cli",
-			Environment: []string{"PATH=test", "ALL_PROXY=socks5://top-secret"},
-			DryRun:      true,
+		ToolchainSyncOptions{
+			ToolchainCLI: "arduino-cli",
+			Environment:  []string{"PATH=test", "ALL_PROXY=socks5://top-secret"},
+			DryRun:       true,
 		},
 		&output,
-		ArduinoEnvironmentRunnerFunc(func(
+		DependencyEnvironmentRunnerFunc(func(
 			context.Context, Command, []string, io.Writer,
 		) error {
 			t.Fatal("dry-run executed a command")

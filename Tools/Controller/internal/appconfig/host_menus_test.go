@@ -1,9 +1,76 @@
 package appconfig
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestUnpublishedStatusGestureIsRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "controller.json")
+	if err := os.WriteFile(path, []byte(`{"schema":1,"host_menus":{"request_gesture":"status-hold-k4"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(path); err == nil {
+		t.Fatal("unpublished gesture spelling was accepted")
+	}
+}
+
+func TestDefaultHostMenuExposesCurrentDateAndTime(t *testing.T) {
+	items := Defaults().HostMenus.Menus[0].Items
+	want := map[string]string{"date": "host.date", "time": "host.time"}
+	for _, item := range items {
+		if action, ok := want[item.ID]; ok {
+			if item.Type != "readonly" || item.ReadAction != action {
+				t.Fatalf("default %s item=%+v", item.ID, item)
+			}
+			delete(want, item.ID)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing date/time host-menu items: %v", want)
+	}
+}
+
+func TestDefaultHostMenusExposeMacroLibraryRecordPlaybackAndCancel(t *testing.T) {
+	config := Defaults().HostMenus
+	menus := make(map[string]HostMenu, len(config.Menus))
+	for _, menu := range config.Menus {
+		menus[menu.ID] = menu
+	}
+	if len(config.Menus) > 8 {
+		t.Fatalf("default overlay has %d nodes; firmware directory maximum is 8", len(config.Menus))
+	}
+	library, ok := menus["macro-library"]
+	if !ok || library.ParentID != 0x80 || len(library.Items) < 5 {
+		t.Fatalf("macro library menu=%+v", library)
+	}
+	selected := library.Items[0]
+	if selected.Type != "select" || selected.OptionsSource != "macro.library" ||
+		selected.ReadAction != "host.macro.selection" || selected.WriteAction != "host.macro.selection" {
+		t.Fatalf("macro selector=%+v", selected)
+	}
+	wantActions := map[string]bool{
+		"host.macro.play":           false,
+		"host.macro.record.start":   false,
+		"host.macro.record.save":    false,
+		"host.macro.record.discard": false,
+		"host.macro.cancel":         false,
+		"host.macro.cancel.keep":    false,
+	}
+	for _, menuID := range []string{"macro-library", "macro-recording", "macro-playback"} {
+		for _, item := range menus[menuID].Items {
+			if _, tracked := wantActions[item.WriteAction]; tracked {
+				wantActions[item.WriteAction] = true
+			}
+		}
+	}
+	for action, present := range wantActions {
+		if !present {
+			t.Errorf("default host Macro menus omit %s", action)
+		}
+	}
+}
 
 func TestHostMenusRoundTripJSONYAMLTOML(t *testing.T) {
 	for _, extension := range []string{".json", ".yaml", ".toml"} {

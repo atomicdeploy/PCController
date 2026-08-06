@@ -5,7 +5,7 @@
 #define PCCONTROLLER_UART_BAUD 115200UL
 #endif
 
-// The inherited board used 11 WS2811 pixels in BRG order on D6. Set this to 1
+// The configured board uses 11 WS2811 pixels in BRG order on D6. Set this to 1
 // for a WS2812B/GRB strip when the final hardware is confirmed.
 #ifndef PCCONTROLLER_USE_WS2812B
 #define PCCONTROLLER_USE_WS2812B 0
@@ -38,33 +38,33 @@
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
 
-// Kept by default: the host asks the board for its exact local page IDs.
+// Rich catalog/layout presentation is host-owned. Stable page IDs and the
+// fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
+// ordering, hierarchy, or layout-protocol implementations in release builds.
 #ifndef PCCONTROLLER_ENABLE_MENU_DIRECTORY
-#define PCCONTROLLER_ENABLE_MENU_DIRECTORY 1
+#define PCCONTROLLER_ENABLE_MENU_DIRECTORY 0
+#endif
+
+#ifndef PCCONTROLLER_MENU_LAYOUT_STORAGE
+#define PCCONTROLLER_MENU_LAYOUT_STORAGE 1
 #endif
 
 // AVR-owned persistent front-panel catalog. Stable page IDs remain protocol
 // identities while EEPROM stores a separate visibility mask and packed rank.
 #ifndef PCCONTROLLER_MENU_VISIBILITY
-#define PCCONTROLLER_MENU_VISIBILITY 1
+#define PCCONTROLLER_MENU_VISIBILITY 0
 #endif
 
 #ifndef PCCONTROLLER_MENU_ORDERING
-#define PCCONTROLLER_MENU_ORDERING 1
+#define PCCONTROLLER_MENU_ORDERING 0
 #endif
 
 #ifndef PCCONTROLLER_MENU_HIERARCHY
-#define PCCONTROLLER_MENU_HIERARCHY 1
+#define PCCONTROLLER_MENU_HIERARCHY 0
 #endif
 
 #ifndef PCCONTROLLER_MENU_LAYOUT_PROTOCOL
-#define PCCONTROLLER_MENU_LAYOUT_PROTOCOL 1
-#endif
-
-// One-shot recovery build: seed a rejected/old EEPROM record with all PWM
-// outputs disabled; normal firmware keeps the requested Auto factory defaults.
-#ifndef PCCONTROLLER_SAFE_EEPROM_MIGRATION
-#define PCCONTROLLER_SAFE_EEPROM_MIGRATION 0
+#define PCCONTROLLER_MENU_LAYOUT_PROTOCOL 0
 #endif
 
 #if PCCONTROLLER_MENU_ORDERING && !PCCONTROLLER_MENU_VISIBILITY

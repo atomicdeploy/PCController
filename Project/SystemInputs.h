@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+// BluetoothIndicatorState classifies the BT Audio indicator's steady/blink signal.
 enum class BluetoothIndicatorState : uint8_t {
   Off = 0,
   On,
@@ -54,4 +55,5 @@ private:
   uint32_t lastBluetoothOffMs_ = 0;
 };
 
+// systemInputs is the single debounced door and BT Audio input service.
 extern SystemInputs systemInputs;

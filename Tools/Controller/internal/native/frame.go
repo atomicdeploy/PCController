@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	Magic       byte = 0xA5
-	Version     byte = 0x01
+	Magic            byte = 0xA5
+	EnvelopeRevision byte = 0x01
 	MaxPayload       = 48
 	MaxRawFrame      = 5 + MaxPayload + 1
 )
@@ -17,7 +17,6 @@ var (
 	ErrMalformedCOBS   = errors.New("malformed COBS frame")
 	ErrFrameTooLong    = errors.New("frame exceeds protocol limit")
 	ErrBadMagic        = errors.New("invalid frame magic")
-	ErrBadVersion      = errors.New("unsupported protocol version")
 	ErrBadLength       = errors.New("payload length does not match frame")
 	ErrBadCRC          = errors.New("frame CRC mismatch")
 	ErrPayloadTooLong  = errors.New("payload exceeds 48 bytes")
@@ -36,7 +35,7 @@ func Encode(frame Frame) ([]byte, error) {
 	}
 
 	raw := make([]byte, 0, 6+len(frame.Payload))
-	raw = append(raw, Magic, Version, frame.Opcode, frame.Seq, byte(len(frame.Payload)))
+	raw = append(raw, Magic, EnvelopeRevision, frame.Opcode, frame.Seq, byte(len(frame.Payload)))
 	raw = append(raw, frame.Payload...)
 	raw = append(raw, CRC8(raw))
 
@@ -65,10 +64,6 @@ func Decode(encoded []byte) (Frame, error) {
 	if raw[0] != Magic {
 		return Frame{}, fmt.Errorf("%w: got 0x%02X", ErrBadMagic, raw[0])
 	}
-	if raw[1] != Version {
-		return Frame{}, fmt.Errorf("%w: got %d", ErrBadVersion, raw[1])
-	}
-
 	payloadLength := int(raw[4])
 	if payloadLength > MaxPayload || len(raw) != 6+payloadLength {
 		return Frame{}, fmt.Errorf(

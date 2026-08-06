@@ -24,20 +24,20 @@ type lcdTransferFunc func(
 	context.Context, byte, byte, []byte, byte,
 ) (native.I2CTransferResult, error)
 
-type pcOwnedLCDState struct {
+type hostOwnedLCDState struct {
 	Available bool
 	Address   byte
 	Lines     [2]string
 	LastError string
 }
 
-// pcOwnedLCD drives the fixed 2x16 HD44780/PCF8574 backpack. The firmware does
+// hostOwnedLCD drives the fixed 2x16 HD44780/PCF8574 backpack. The firmware does
 // not access the LCD address, so each atomic Wire transaction uses lease zero
 // and does not pause unrelated INA219/PWM service.
-type pcOwnedLCD struct {
+type hostOwnedLCD struct {
 	opMu      sync.Mutex
 	stateMu   sync.RWMutex
-	reported  pcOwnedLCDState
+	reported  hostOwnedLCDState
 	transfer  lcdTransferFunc
 	sleep     func(time.Duration)
 	device    string
@@ -47,11 +47,11 @@ type pcOwnedLCD struct {
 	lastError string
 }
 
-func newPCOwnedLCD(transfer lcdTransferFunc) *pcOwnedLCD {
-	return &pcOwnedLCD{transfer: transfer, sleep: time.Sleep}
+func newHostOwnedLCD(transfer lcdTransferFunc) *hostOwnedLCD {
+	return &hostOwnedLCD{transfer: transfer, sleep: time.Sleep}
 }
 
-func (lcd *pcOwnedLCD) state() pcOwnedLCDState {
+func (lcd *hostOwnedLCD) state() hostOwnedLCDState {
 	lcd.stateMu.RLock()
 	defer lcd.stateMu.RUnlock()
 	return lcd.reported
@@ -59,8 +59,8 @@ func (lcd *pcOwnedLCD) state() pcOwnedLCDState {
 
 // publishState snapshots operation-owned fields without making UI/status
 // readers wait for a multi-frame UART render to finish.
-func (lcd *pcOwnedLCD) publishState() {
-	state := pcOwnedLCDState{
+func (lcd *hostOwnedLCD) publishState() {
+	state := hostOwnedLCDState{
 		Available: lcd.address != 0 && lcd.lastError == "",
 		Address:   lcd.address, Lines: lcd.lines, LastError: lcd.lastError,
 	}
@@ -69,7 +69,7 @@ func (lcd *pcOwnedLCD) publishState() {
 	lcd.stateMu.Unlock()
 }
 
-func (lcd *pcOwnedLCD) reset() {
+func (lcd *hostOwnedLCD) reset() {
 	lcd.opMu.Lock()
 	defer lcd.opMu.Unlock()
 	lcd.device = ""
@@ -80,12 +80,12 @@ func (lcd *pcOwnedLCD) reset() {
 	lcd.publishState()
 }
 
-func (lcd *pcOwnedLCD) render(ctx context.Context, device, line1, line2 string) error {
+func (lcd *hostOwnedLCD) render(ctx context.Context, device, line1, line2 string) error {
 	lcd.opMu.Lock()
 	defer lcd.opMu.Unlock()
 	defer lcd.publishState()
 	if lcd.transfer == nil {
-		lcd.lastError = "PC-owned LCD transfer is unavailable"
+		lcd.lastError = "HOST-controlled LCD transfer is unavailable"
 		return fmt.Errorf("%s", lcd.lastError)
 	}
 	if lcd.device != device {
@@ -97,7 +97,7 @@ func (lcd *pcOwnedLCD) render(ctx context.Context, device, line1, line2 string) 
 	initialized := false
 	if lcd.address == 0 {
 		if !lcd.nextProbe.IsZero() && time.Now().Before(lcd.nextProbe) {
-			return fmt.Errorf("PC-owned LCD not detected at 0x27 or 0x3F")
+			return fmt.Errorf("HOST-controlled LCD not detected at 0x27 or 0x3F")
 		}
 		if err := lcd.discoverAndInitialize(ctx); err != nil {
 			lcd.address = 0
@@ -134,7 +134,7 @@ func (lcd *pcOwnedLCD) render(ctx context.Context, device, line1, line2 string) 
 	return nil
 }
 
-func (lcd *pcOwnedLCD) discoverAndInitialize(ctx context.Context) error {
+func (lcd *hostOwnedLCD) discoverAndInitialize(ctx context.Context) error {
 	for _, address := range []byte{0x27, 0x3F} {
 		result, err := lcd.transfer(ctx, address, 0, nil, 0)
 		if err != nil {
@@ -146,7 +146,7 @@ func (lcd *pcOwnedLCD) discoverAndInitialize(ctx context.Context) error {
 		}
 	}
 	if lcd.address == 0 {
-		return fmt.Errorf("PC-owned LCD not detected at 0x27 or 0x3F")
+		return fmt.Errorf("HOST-controlled LCD not detected at 0x27 or 0x3F")
 	}
 	lcd.sleep(50 * time.Millisecond)
 	for _, delay := range []time.Duration{5 * time.Millisecond, 5 * time.Millisecond, time.Millisecond} {
@@ -182,7 +182,7 @@ func (lcd *pcOwnedLCD) discoverAndInitialize(ctx context.Context) error {
 	return nil
 }
 
-func (lcd *pcOwnedLCD) returnHome(ctx context.Context) error {
+func (lcd *hostOwnedLCD) returnHome(ctx context.Context) error {
 	if err := lcd.writeSequence(ctx, appendLCDByte(nil, 0x02, false)); err != nil {
 		return err
 	}
@@ -190,7 +190,7 @@ func (lcd *pcOwnedLCD) returnHome(ctx context.Context) error {
 	return nil
 }
 
-func (lcd *pcOwnedLCD) ensureHome(ctx context.Context, device string) error {
+func (lcd *hostOwnedLCD) ensureHome(ctx context.Context, device string) error {
 	lcd.opMu.Lock()
 	defer lcd.opMu.Unlock()
 	if lcd.address == 0 || lcd.device != device || lcd.lastError != "" {
@@ -204,7 +204,7 @@ func (lcd *pcOwnedLCD) ensureHome(ctx context.Context, device string) error {
 	return nil
 }
 
-func (lcd *pcOwnedLCD) preloadOfflinePage(ctx context.Context) error {
+func (lcd *hostOwnedLCD) preloadOfflinePage(ctx context.Context) error {
 	for row, line := range []string{lcdOfflineLine1, lcdOfflineLine2} {
 		sequence := appendLCDByte(nil, 0x90+byte(row)*0x40, false)
 		for index := 0; index < 16; index++ {
@@ -217,7 +217,7 @@ func (lcd *pcOwnedLCD) preloadOfflinePage(ctx context.Context) error {
 	return nil
 }
 
-func (lcd *pcOwnedLCD) writeSequence(ctx context.Context, sequence []byte) error {
+func (lcd *hostOwnedLCD) writeSequence(ctx context.Context, sequence []byte) error {
 	// Three PCF8574 writes form one stable low/high/low enable pulse. Chunk on
 	// that boundary so separate UART requests cannot strand E high.
 	if len(sequence)%3 != 0 {

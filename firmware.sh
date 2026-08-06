@@ -4,7 +4,8 @@ set -Eeuo pipefail
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 if ! command -v node >/dev/null 2>&1; then
-    printf '\033[1;91m❌  Node.js 20.19 or newer was not found in PATH.\033[0m\n' >&2
+    printf '%s\n' '[ERROR] Node.js 22.12 or newer was not found in PATH.' >&2
+    printf '%s\n' '        Install Node.js, then run this command again.' >&2
     exit 1
 fi
 

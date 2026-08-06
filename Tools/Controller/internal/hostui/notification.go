@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type NotificationAction struct {
@@ -25,11 +27,14 @@ type Notification struct {
 }
 
 type NotificationStatus struct {
-	Supported bool      `json:"supported"`
-	Available bool      `json:"available"`
-	Accepted  uint64    `json:"accepted"`
-	LastAt    time.Time `json:"last_at,omitempty"`
-	LastError string    `json:"last_error,omitempty"`
+	Supported    bool      `json:"supported"`
+	Available    bool      `json:"available"`
+	Accepted     uint64    `json:"accepted"`
+	Backend      string    `json:"backend,omitempty"`
+	Degraded     bool      `json:"degraded,omitempty"`
+	LastFallback string    `json:"last_fallback,omitempty"`
+	LastAt       time.Time `json:"last_at,omitempty"`
+	LastError    string    `json:"last_error,omitempty"`
 }
 
 type Notifier interface {
@@ -44,10 +49,11 @@ type NotifierOptions struct {
 func NewNotifier(options NotifierOptions) Notifier { return newPlatformNotifier(options) }
 
 type toastXML struct {
-	XMLName xml.Name      `xml:"toast"`
-	Launch  string        `xml:"launch,attr,omitempty"`
-	Visual  toastVisual   `xml:"visual"`
-	Actions *toastActions `xml:"actions,omitempty"`
+	XMLName        xml.Name      `xml:"toast"`
+	Launch         string        `xml:"launch,attr,omitempty"`
+	ActivationType string        `xml:"activationType,attr,omitempty"`
+	Visual         toastVisual   `xml:"visual"`
+	Actions        *toastActions `xml:"actions,omitempty"`
 }
 type toastVisual struct {
 	Binding toastBinding `xml:"binding"`
@@ -83,6 +89,7 @@ func buildToastXML(notification Notification) ([]byte, error) {
 		if err := validateActionURI(notification.LaunchURI); err != nil {
 			return nil, fmt.Errorf("launch URI: %w", err)
 		}
+		value.ActivationType = "protocol"
 	}
 	if len(notification.Actions) != 0 {
 		value.Actions = &toastActions{Actions: make([]toastAction, 0, len(notification.Actions))}
@@ -105,7 +112,7 @@ func validateActionURI(value string) error {
 		return fmt.Errorf("action URI must be absolute")
 	}
 	switch strings.ToLower(parsed.Scheme) {
-	case "pccontroller", "http", "https":
+	case productidentity.ProtocolScheme, "http", "https":
 		return nil
 	default:
 		return fmt.Errorf("action URI scheme %q is not allowed", parsed.Scheme)
@@ -113,9 +120,10 @@ func validateActionURI(value string) error {
 }
 
 type ImportantEvent struct {
-	Kind    string
-	Title   string
-	Message string
+	Kind     string
+	Title    string
+	Message  string
+	AppTitle string
 }
 
 // NotificationForImportantEvent maps only actionable/high-signal events.
@@ -130,10 +138,11 @@ func NotificationForImportantEvent(event ImportantEvent) (Notification, bool) {
 	}
 	title := strings.TrimSpace(event.Title)
 	if title == "" {
+		application := productidentity.Title(event.AppTitle)
 		if runningDoorWarning {
-			title = "PCController · Door open during operation"
+			title = application + " · Door open during operation"
 		} else {
-			title = "PCController · " + strings.ToUpper(kind)
+			title = application + " · " + strings.ToUpper(kind)
 		}
 	}
 	page := "events"
@@ -143,14 +152,15 @@ func NotificationForImportantEvent(event ImportantEvent) (Notification, bool) {
 	if strings.HasPrefix(kind, "rf") {
 		page = "rf"
 	}
-	actions := []NotificationAction{{Label: "Open " + titleWord(page), URI: "pccontroller://page/" + page}}
+	actionPrefix := productidentity.ProtocolScheme + "://"
+	actions := []NotificationAction{{Label: "Open " + titleWord(page), URI: actionPrefix + "page/" + page}}
 	if strings.Contains(kind, "motion") || strings.Contains(kind, "hot") ||
 		kind == "error" || runningDoorWarning {
-		actions = append(actions, NotificationAction{Label: "Stop outputs", URI: "pccontroller://command/relay%20off"})
+		actions = append(actions, NotificationAction{Label: "Stop outputs", URI: actionPrefix + "command/relay%20off"})
 	}
 	return Notification{
 		ID: fmt.Sprintf("%s-%d", kind, time.Now().UnixNano()), Title: title,
-		Body: event.Message, Severity: kind, LaunchURI: "pccontroller://page/" + page,
+		Body: event.Message, Severity: kind, LaunchURI: actionPrefix + "page/" + page,
 		Actions: actions,
 	}, true
 }

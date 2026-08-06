@@ -100,8 +100,9 @@ type listingFunctionSpec struct {
 }
 
 type responseBranchSpec struct {
-	Name   string
-	Stages []listingFunctionSpec
+	Name     string
+	Optional bool
+	Stages   []listingFunctionSpec
 }
 
 var responseBranches = []responseBranchSpec{
@@ -111,8 +112,8 @@ var responseBranches = []responseBranchSpec{
 	{Name: "PWM values", Stages: []listingFunctionSpec{{Name: "PWM response", Match: "sendPwmValues(", InlineLabel: "sendPwmValues"}}},
 	{Name: "temperature list", Stages: []listingFunctionSpec{{Name: "temperature-list response", Match: "sendTemperatureList(", InlineLabel: "sendTemperatureList"}}},
 	{Name: "front panel", Stages: []listingFunctionSpec{{Name: "front-panel response", Match: "sendFrontPanel(", InlineLabel: "sendFrontPanel"}}},
-	{Name: "menu list", Stages: []listingFunctionSpec{{Name: "menu-list response", Match: "sendMenuList(", InlineLabel: "sendMenuList"}}},
-	{Name: "menu layout", Stages: []listingFunctionSpec{{Name: "menu-layout response", Match: "sendMenuLayout(", InlineLabel: "sendMenuLayout"}}},
+	{Name: "menu list", Optional: true, Stages: []listingFunctionSpec{{Name: "menu-list response", Match: "sendMenuList(", InlineLabel: "sendMenuList"}}},
+	{Name: "menu layout", Optional: true, Stages: []listingFunctionSpec{{Name: "menu-layout response", Match: "sendMenuLayout(", InlineLabel: "sendMenuLayout"}}},
 	{Name: "I2C transfer", Stages: []listingFunctionSpec{{Name: "I2C transfer response", Match: "transferI2c(", InlineLabel: "transferI2c"}}},
 	{Name: "learned remotes", Stages: []listingFunctionSpec{{Name: "learned-remotes response", Match: "sendLearnedRemotes(", InlineLabel: "sendLearnedRemotes"}}},
 	{Name: "ACK", Stages: []listingFunctionSpec{{Name: "ACK response", Match: "ControllerProtocol::UartProtocol::sendAck("}}},
@@ -322,6 +323,9 @@ func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, str
 	selectedBytes := uint32(0)
 	selectedActive := 0
 	for _, branch := range responseBranches {
+		if branch.Optional && !responseBranchPresent(listing, handlerStage.Function, branch) {
+			continue
+		}
 		branchStages, active, branchErr := resolveResponseBranch(listing, handlerStage.Function, sendStage.Function, branch)
 		if branchErr != nil {
 			return nil, "", 0, branchErr
@@ -349,6 +353,22 @@ func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, str
 		manifest = append(manifest, stage.Manifest)
 	}
 	return manifest, selectedName, selectedActive, nil
+}
+
+func responseBranchPresent(listing *avrListing, parent *avrListingFunction, spec responseBranchSpec) bool {
+	if len(spec.Stages) == 0 {
+		return false
+	}
+	stage := spec.Stages[0]
+	if len(matchingListingFunctions(listing, stage)) != 0 {
+		return true
+	}
+	for _, label := range append([]string{stage.InlineLabel}, stage.InlineLabelAliases...) {
+		if label != "" && functionHasSourceLabel(parent, label) {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveResponseBranch(

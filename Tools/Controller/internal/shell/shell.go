@@ -1,7 +1,7 @@
 // Package shell provides the controller's host-side command shell.
 //
 // The line-oriented command model, history, completion hooks, and VT-friendly
-// interaction are inspired by Ardush and atomicdeploy/portable-shell. This is
+// interaction follow conventional VT-100 shell behavior. This is
 // an original Go implementation and does not copy their parser or editor.
 package shell
 
@@ -27,6 +27,17 @@ type Command struct {
 	// Group places the command in a task-oriented help section.
 	Group string
 	Run   Handler
+}
+
+// CommandDescriptor is the immutable, JSON-safe command contract exposed to
+// IPC, network clients, and library consumers. Handlers are intentionally not
+// included, so every surface continues to execute through Engine.Execute.
+type CommandDescriptor struct {
+	Name    string   `json:"name"`
+	Aliases []string `json:"aliases,omitempty"`
+	Usage   string   `json:"usage"`
+	Summary string   `json:"summary"`
+	Group   string   `json:"group"`
 }
 
 type Engine struct {
@@ -102,6 +113,19 @@ func (engine *Engine) Help() string {
 // HelpANSI returns the same command reference with selective VT-100 styling.
 func (engine *Engine) HelpANSI() string {
 	return engine.renderHelp(true)
+}
+
+// Catalog returns a detached command catalog in registration order.
+func (engine *Engine) Catalog() []CommandDescriptor {
+	result := make([]CommandDescriptor, 0, len(engine.ordered))
+	for _, command := range engine.ordered {
+		result = append(result, CommandDescriptor{
+			Name: command.Name, Aliases: append([]string(nil), command.Aliases...),
+			Usage: command.Usage, Summary: command.Summary,
+			Group: commandHelpGroup(command),
+		})
+	}
+	return result
 }
 
 func (engine *Engine) renderHelp(color bool) string {
@@ -183,11 +207,11 @@ func commandHelpGroup(command *Command) string {
 		return "Outputs and front panel"
 	case "rf", "macro", "automation":
 		return "RF, macros and automation"
-	case "os", "state":
+	case "os", "state", "program-state", "keyboard", "bridge":
 		return "PC and operating system"
 	case "reset", "query", "write":
 		return "Protocol and diagnostics"
-	case "arduino", "boot", "program":
+	case "toolchain", "boot", "program":
 		return "Firmware and bootloader"
 	case "clear", "quit":
 		return "Console"

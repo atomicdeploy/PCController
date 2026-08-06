@@ -2,9 +2,8 @@
 
 #include "../LocalLib/TonePlayer.h"
 
-// Reusable feedback cues retained from the inherited ControllerBoardMini
-// project layer. All functions replace the current queue and return
-// immediately; TonePlayer::update() performs playback in the main loop.
+// Reusable controller feedback cues. Each function replaces the current queue
+// and returns immediately; TonePlayer::update() performs cooperative playback.
 void finishMelody(TonePlayer &player = buzzer);
 void lostMelody(TonePlayer &player = buzzer);
 void incorrectBeep(TonePlayer &player = buzzer);

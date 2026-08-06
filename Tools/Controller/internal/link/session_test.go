@@ -2,6 +2,7 @@ package link
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"testing"
@@ -12,6 +13,16 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 )
+
+func currentHelloPayload(capabilities uint32) []byte {
+	payload := make([]byte, 14)
+	payload[0] = native.IdentitySchemaCompact
+	payload[1] = native.BoardKindPCController
+	binary.LittleEndian.PutUint32(payload[2:6], capabilities)
+	binary.LittleEndian.PutUint32(payload[6:10], 0x2FD9F81C)
+	binary.LittleEndian.PutUint32(payload[10:14], 0x35019D5D)
+	return payload
+}
 
 type fakePort struct {
 	mu      sync.Mutex
@@ -80,9 +91,7 @@ func TestAuthenticateRequiresPCControllerIdentity(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 			return
 		}
-		name := []byte("PCController")
-		payload := []byte{1, 2, 3, native.BoardKindPCController, 1, 0, 0, 0, byte(len(name))}
-		payload = append(payload, name...)
+		payload := currentHelloPayload(1)
 		response, err := native.Encode(native.Frame{
 			Opcode:  native.OpHelloResp,
 			Seq:     request.Seq,
@@ -103,7 +112,7 @@ func TestAuthenticateRequiresPCControllerIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hello.Name != "PCController" || hello.FirmwareMinor != 2 {
+	if hello.Name != "PCController" || hello.BuildHash != 0x2FD9F81C {
 		t.Fatalf("unexpected identity: %#v", hello)
 	}
 }
@@ -170,9 +179,7 @@ func TestAuthenticateRetryAcceptsDelayedUnsolicitedBootHello(t *testing.T) {
 
 	go func() {
 		time.Sleep(35 * time.Millisecond)
-		name := []byte("PCController")
-		payload := []byte{0, 0, 0, native.BoardKindPCController, 1, 0, 0, 0, byte(len(name))}
-		payload = append(payload, name...)
+		payload := currentHelloPayload(1)
 		response, err := native.Encode(native.Frame{
 			Opcode:  native.OpHelloResp,
 			Seq:     0,
@@ -207,9 +214,7 @@ func TestAuthenticateRetryResendsAfterBootloaderDropsFirstRequest(t *testing.T) 
 			t.Errorf("decode request: %v", err)
 			return
 		}
-		name := []byte("PCController")
-		payload := []byte{0, 0, 0, native.BoardKindPCController, 1, 0, 0, 0, byte(len(name))}
-		payload = append(payload, name...)
+		payload := currentHelloPayload(1)
 		response, _ := native.Encode(native.Frame{
 			Opcode:  native.OpHelloResp,
 			Seq:     request.Seq,
@@ -253,9 +258,7 @@ func TestReconnectResetIsOneShotAndHelloRetriesDoNotRepulse(t *testing.T) {
 				t.Errorf("decode request: %v", err)
 				return
 			}
-			name := []byte("PCController")
-			payload := []byte{0, 0, 0, native.BoardKindPCController, 1, 0, 0, 0, byte(len(name))}
-			payload = append(payload, name...)
+			payload := currentHelloPayload(1)
 			response, _ := native.Encode(native.Frame{
 				Opcode: native.OpHelloResp, Seq: request.Seq, Payload: payload,
 			})
@@ -318,7 +321,7 @@ func TestPulseResetUsesOnlyDTRAndLeavesItInactive(t *testing.T) {
 		t.Fatalf("DTR sequence: %#v", port.dtr)
 	}
 	if len(port.rts) != 0 {
-		t.Fatalf("CH340-safe reset unexpectedly touched RTS: %#v", port.rts)
+		t.Fatalf("CH340 DTR reboot pulse unexpectedly touched RTS: %#v", port.rts)
 	}
 }
 

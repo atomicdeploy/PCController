@@ -17,6 +17,7 @@
 #include "Project/BootMelody.h"
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"
+#include "Project/FrontPanelModel.h"
 #include "Project/IlluminationController.h"
 #include "Project/Ina219Sensor.h"
 #include "Project/MacroQueue.h"
@@ -29,6 +30,8 @@
 #include "Project/SettingsStore.h"
 #include "Project/StatusLedController.h"
 #include "Project/SystemInputs.h"
+#include "Project/TemperatureRoles.h"
+#include "Project/TransitionMath.h"
 #include "Project/UartProtocol.h"
 #include "LocalLib/I2cLcd.h"
 

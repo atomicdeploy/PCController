@@ -10,10 +10,13 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
+import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";
 
 import { usageProgress as progress } from "./usage-progress.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const productName = PRODUCT_METADATA.productName;
 const [kind, ...arguments_] = process.argv.slice(2);
 
 const escape = (value) => String(value ?? "").replaceAll("|", "\\|");
@@ -52,9 +55,8 @@ const archiveDetails = (path) => {
     sha256: hashFile(resolved),
   };
 };
-const repositoryUrl = process.env.GITHUB_REPOSITORY
-  ? `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${process.env.GITHUB_REPOSITORY}`
-  : "https://github.com/atomicdeploy/PCController";
+const repository = resolveRepository(process.env, { cwd: root });
+const repositoryUrl = repositoryWebUrl(repository, process.env);
 const runUrl = process.env.GITHUB_RUN_ID
   ? `${repositoryUrl}/actions/runs/${process.env.GITHUB_RUN_ID}`
   : repositoryUrl;
@@ -84,11 +86,12 @@ const friendlyRole = (role) =>
   ({
     application: "Application image",
     eeprom: "EEPROM image",
-    "flash+bootloader": "Full flash + Urboot",
+    "default-eeprom": "Safe default EEPROM (1 KiB)",
+    "flash+bootloader": "Full flash + Urboot (ISP recovery only)",
   })[role] || role;
 const provenanceCommand = (archiveName) =>
   releaseBuild
-    ? `gh attestation verify ${archiveName} --repo ${process.env.GITHUB_REPOSITORY || "atomicdeploy/PCController"}`
+    ? `gh attestation verify ${archiveName} --repo ${repository}`
     : "# GitHub provenance is attached only when this package is promoted by the Release workflow.";
 const verificationBlock = (target, archiveName) => {
   const provenance = provenanceCommand(archiveName);
@@ -115,7 +118,7 @@ if (kind === "firmware") {
     archivePath,
     artifactUrl = "",
     artifactDigest = "",
-    dependenciesPath = ".github/dependencies.json",
+    dependenciesPath = "Tools/Controller/toolchain-lock.json",
     packageRootPath = ".build/firmware",
   ] = arguments_;
   const manifest = readJson(manifestPath);
@@ -153,21 +156,16 @@ if (kind === "firmware") {
     .map((item) => `| ${escape(item.name)} | ${code(item.function)} | ${number(item.bytes)} B | ${escape(item.qualifier)} |`)
     .join("\n");
   const headroom = Number(application?.freeBytes || 0);
-  const aliasNote =
-    String(process.env.PCCONTROLLER_SHOWCASE_ALIAS || "").toLowerCase() === "true"
-      ? `\n> Also uploaded as ${code("firmware")}.\n`
-      : "";
   const flashNotice = headroom < 256
     ? `> [!WARNING]\n> **${number(headroom)} application-flash bytes free.**`
     : `> [!NOTE]\n> ${number(headroom)} application-flash bytes remain.`;
 
   emit(`
-# ✅ AVR firmware built
+# ✅ ${escape(productName)} firmware built
 
 ATmega328P firmware passed compilation, Intel HEX, flash, SRAM/stack, package, and SHA-256 validation.
 
-${artifactCta(artifactUrl, "PCController Firmware · ATmega328P")}
-${aliasNote}
+${artifactCta(artifactUrl, `${productName} Firmware · ATmega328P`)}
 
 ## 📦 Build
 
@@ -269,7 +267,7 @@ ${verificationBlock("Linux", archive.name)}
 
 ---
 
-Built by [PCController Actions](${runUrl}) · source [${shortCommit}](${commitUrl}) · [CI/CD guide](${repositoryUrl}/blob/${commit}/docs/CI-CD-and-Releases.md)
+Built by [${escape(productName)} Actions](${runUrl}) · source [${shortCommit}](${commitUrl}) · [CI/CD guide](${repositoryUrl}/blob/${commit}/docs/CI-CD-and-Releases.md)
 `);
 } else if (kind === "host") {
   const [manifestPath, archivePath, target, artifactUrl = "", artifactDigest = ""] = arguments_;
@@ -278,8 +276,15 @@ Built by [PCController Actions](${runUrl}) · source [${shortCommit}](${commitUr
   const artifacts = (manifest.artifacts || [])
     .map((artifact) => `| ${code(artifact.path)} | ${bytes(artifact.bytes)} | ${code(artifact.sha256)} |`)
     .join("\n");
+  const defaults = manifest.validation?.embeddedDefaults || {};
+  const firmwareDefault = defaults.firmwareEnabled === true
+    ? `✅ enabled · ${code(defaults.firmwareSHA256)}`
+    : "❌ disabled";
+  const eepromDefault = defaults.eepromEnabled === true
+    ? `✅ enabled · ${number(defaults.eepromDataBytes)} B · ${code(defaults.eepromSHA256)}`
+    : "❌ disabled";
   emit(`
-# ✅ Host built
+# ✅ ${escape(productName)} Host built
 
 Tests, Go vet, identity, and C ABI checks passed for **${escape(target)}**.
 
@@ -305,6 +310,8 @@ ${artifactCta(artifactUrl, `Host · ${target}`)}
 | Go vet | ✅ ${escape(manifest.validation?.vet)} |
 | C ABI shared library | ✅ ${escape(manifest.validation?.sharedLibrary)} |
 | Native resources | ✅ ${escape(manifest.validation?.windowsResources || "not applicable")} |
+| Embedded firmware default | ${firmwareDefault} |
+| Embedded EEPROM default | ${eepromDefault} |
 
 <details>
 <summary><strong>📦 Packaged files and hashes</strong></summary>
@@ -330,7 +337,7 @@ ${verificationBlock(target, archive.name)}
   const binary = absolute(binaryPath);
   const archive = archiveDetails(archivePath);
   emit(`
-# ✅ Virtual Board built
+# ✅ ${escape(productName)} Virtual Board built
 
 Protocol, hardware-model, UART, and smoke tests passed for **${escape(target)}**.
 
@@ -419,7 +426,7 @@ ${verificationBlock(target, archive.name)}
     stack.sramCapacityBytes,
   );
   emit(`
-# ✅ Build complete
+# ✅ ${escape(productName)} build complete
 
 Firmware, Host, and Virtual Board builds completed for source [${code(shortCommit)}](${commitUrl}).
 
@@ -437,7 +444,7 @@ Flash ${bar(flashPercent)}
 SRAM  ${bar(peakPercent)}
 ~~~
 
-Firmware: ${code("PCController-Firmware-ATmega328P")} (${code("firmware")} alias). Includes application and recovery images, dependencies, and manifest.
+Firmware: ${code("PCController-Firmware-ATmega328P")}. Includes application and recovery images, dependencies, and manifest.
 
 ## 🌍 Native platform coverage
 

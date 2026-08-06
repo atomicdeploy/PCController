@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/grandcat/zeroconf"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 const (
@@ -40,9 +42,17 @@ type Instance struct {
 }
 
 type Advertiser struct {
-	cancel context.CancelFunc
+	cancel  context.CancelFunc
+	done    chan struct{}
+	refresh chan struct{}
+	name    string
+	port    int
+	ssdp    bool
+
+	mu     sync.RWMutex
+	closed bool
 	mdns   *zeroconf.Server
-	done   chan struct{}
+	txt    []string
 }
 
 func Advertise(
@@ -57,10 +67,14 @@ func Advertise(
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = "PCController"
+		name = productidentity.DefaultTitle
 	}
+	txt = normalizeTXT(txt)
 	ctx, cancel := context.WithCancel(parent)
-	result := &Advertiser{cancel: cancel, done: make(chan struct{})}
+	result := &Advertiser{
+		cancel: cancel, done: make(chan struct{}), refresh: make(chan struct{}, 1),
+		name: name, port: port, ssdp: ssdpEnabled, txt: append([]string(nil), txt...),
+	}
 	if mdnsEnabled {
 		server, err := zeroconf.Register(name, MDNSService, MDNSDomain, port, txt, nil)
 		if err != nil {
@@ -72,7 +86,7 @@ func Advertise(
 	go func() {
 		defer close(result.done)
 		if ssdpEnabled {
-			runSSDPAdvertiser(ctx, name, port)
+			runSSDPAdvertiser(ctx, result)
 			return
 		}
 		<-ctx.Done()
@@ -84,14 +98,105 @@ func (advertiser *Advertiser) Close() {
 	if advertiser == nil {
 		return
 	}
+	advertiser.mu.Lock()
+	if advertiser.closed {
+		advertiser.mu.Unlock()
+		return
+	}
+	advertiser.closed = true
+	mdns := advertiser.mdns
+	advertiser.mdns = nil
+	advertiser.mu.Unlock()
 	advertiser.cancel()
-	if advertiser.mdns != nil {
-		advertiser.mdns.Shutdown()
+	if mdns != nil {
+		mdns.Shutdown()
 	}
 	select {
 	case <-advertiser.done:
 	case <-time.After(time.Second):
 	}
+}
+
+// UpdateText publishes a changed, bounded set of non-secret discovery values.
+// mDNS announces the new TXT record immediately and SSDP sends one changed-only
+// alive packet; callers therefore update from pushed state rather than polling.
+func (advertiser *Advertiser) UpdateText(txt []string) {
+	if advertiser == nil {
+		return
+	}
+	txt = normalizeTXT(txt)
+	advertiser.mu.Lock()
+	if advertiser.closed || equalText(advertiser.txt, txt) {
+		advertiser.mu.Unlock()
+		return
+	}
+	advertiser.txt = append(advertiser.txt[:0], txt...)
+	mdns := advertiser.mdns
+	ssdp := advertiser.ssdp
+	advertiser.mu.Unlock()
+	if mdns != nil {
+		mdns.SetText(txt)
+	}
+	if ssdp {
+		select {
+		case advertiser.refresh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (advertiser *Advertiser) text() []string {
+	advertiser.mu.RLock()
+	defer advertiser.mu.RUnlock()
+	return append([]string(nil), advertiser.txt...)
+}
+
+func equalText(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeTXT(values []string) []string {
+	const maximumRecords = 48
+	result := make([]string, 0, min(len(values), maximumRecords))
+	for _, raw := range values {
+		value := strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(raw))
+		if value == "" {
+			continue
+		}
+		key := value
+		if index := strings.IndexByte(key, '='); index >= 0 {
+			key = key[:index]
+		}
+		key = strings.ToLower(strings.TrimSpace(key))
+		if discoverySecretKey(key) {
+			continue
+		}
+		if len(value) > 255 {
+			value = value[:255]
+		}
+		result = append(result, value)
+		if len(result) == maximumRecords {
+			break
+		}
+	}
+	return result
+}
+
+func discoverySecretKey(key string) bool {
+	for _, fragment := range []string{"authorization", "credential", "password", "secret", "token"} {
+		if strings.Contains(key, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func Discover(ctx context.Context, useMDNS, useSSDP bool) ([]Instance, error) {
@@ -182,7 +287,7 @@ func browseMDNS(ctx context.Context, add func(Instance)) error {
 	return nil
 }
 
-func runSSDPAdvertiser(ctx context.Context, name string, port int) {
+func runSSDPAdvertiser(ctx context.Context, advertiser *Advertiser) {
 	group, _ := net.ResolveUDPAddr("udp4", ssdpAddress)
 	listener, _ := net.ListenMulticastUDP("udp4", nil, group)
 	if listener != nil {
@@ -191,18 +296,20 @@ func runSSDPAdvertiser(ctx context.Context, name string, port int) {
 			<-ctx.Done()
 			_ = listener.Close()
 		}()
-		go respondSSDP(ctx, listener, name, port)
+		go respondSSDP(ctx, listener, advertiser)
 	}
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
-	sendSSDPNotify(name, port, "ssdp:alive")
-	defer sendSSDPNotify(name, port, "ssdp:byebye")
+	sendSSDPNotify(advertiser, "ssdp:alive")
+	defer sendSSDPNotify(advertiser, "ssdp:byebye")
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-advertiser.refresh:
+			sendSSDPNotify(advertiser, "ssdp:alive")
 		case <-ticker.C:
-			sendSSDPNotify(name, port, "ssdp:alive")
+			sendSSDPNotify(advertiser, "ssdp:alive")
 		}
 	}
 }
@@ -210,8 +317,7 @@ func runSSDPAdvertiser(ctx context.Context, name string, port int) {
 func respondSSDP(
 	ctx context.Context,
 	connection *net.UDPConn,
-	name string,
-	port int,
+	advertiser *Advertiser,
 ) {
 	buffer := make([]byte, 8192)
 	for ctx.Err() == nil {
@@ -225,18 +331,21 @@ func respondSSDP(
 				!strings.Contains(request, "ST: SSDP:ALL")) {
 			continue
 		}
+		name, port := advertiser.name, advertiser.port
 		locationHost := localAddressFor(source)
-		response := strings.Join([]string{
+		lines := []string{
 			"HTTP/1.1 200 OK",
 			"CACHE-CONTROL: max-age=60",
 			"EXT:",
 			"LOCATION: http://" + net.JoinHostPort(locationHost, strconv.Itoa(port)) + "/healthz",
-			"SERVER: PCController/1 UPnP/1.1",
+			"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
 			"ST: " + SSDPType,
 			"USN: " + ssdpUSN(name, port) + "::" + SSDPType,
 			"X-PCController-Name: " + sanitizeHeader(name),
-			"", "",
-		}, "\r\n")
+		}
+		lines = append(lines, ssdpMetadataHeaders(advertiser.text())...)
+		lines = append(lines, "", "")
+		response := strings.Join(lines, "\r\n")
 		_, _ = connection.WriteToUDP([]byte(response), source)
 	}
 }
@@ -252,7 +361,7 @@ func localAddressFor(remote *net.UDPAddr) string {
 	return "127.0.0.1"
 }
 
-func sendSSDPNotify(name string, port int, nts string) {
+func sendSSDPNotify(advertiser *Advertiser, nts string) {
 	address, err := net.ResolveUDPAddr("udp4", ssdpAddress)
 	if err != nil {
 		return
@@ -262,27 +371,44 @@ func sendSSDPNotify(name string, port int, nts string) {
 		return
 	}
 	defer connection.Close()
-	_, _ = connection.Write([]byte(ssdpNotify(name, port, nts)))
+	_, _ = connection.Write([]byte(ssdpNotifyWithText(
+		advertiser.name, advertiser.port, nts, advertiser.text(),
+	)))
 }
 
 func ssdpNotify(name string, port int, nts string) string {
+	return ssdpNotifyWithText(name, port, nts, nil)
+}
+
+func ssdpNotifyWithText(name string, port int, nts string, txt []string) string {
 	usn := ssdpUSN(name, port)
 	hostname, _ := os.Hostname()
 	if strings.TrimSpace(hostname) == "" {
 		hostname = "127.0.0.1"
 	}
-	return strings.Join([]string{
+	lines := []string{
 		"NOTIFY * HTTP/1.1",
 		"HOST: " + ssdpAddress,
 		"CACHE-CONTROL: max-age=60",
 		"LOCATION: http://" + net.JoinHostPort(hostname, strconv.Itoa(port)) + "/healthz",
 		"NT: " + SSDPType,
 		"NTS: " + nts,
-		"SERVER: PCController/1 UPnP/1.1",
+		"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
 		"USN: " + usn + "::" + SSDPType,
 		"X-PCController-Name: " + sanitizeHeader(name),
-		"", "",
-	}, "\r\n")
+	}
+	lines = append(lines, ssdpMetadataHeaders(txt)...)
+	lines = append(lines, "", "")
+	return strings.Join(lines, "\r\n")
+}
+
+func ssdpMetadataHeaders(txt []string) []string {
+	values := normalizeTXT(txt)
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, "X-PCController-Meta: "+sanitizeHeader(value))
+	}
+	return result
 }
 
 func ssdpUSN(name string, port int) string {
@@ -357,7 +483,8 @@ func parseSSDPResponse(data []byte, source *net.UDPAddr) (Instance, bool) {
 	return Instance{
 		Protocol: "ssdp", Name: request.Header.Get("X-PCController-Name"),
 		Host: host, Port: port, Location: request.Header.Get("Location"),
-		USN: request.Header.Get("USN"), SeenAt: time.Now(),
+		USN: request.Header.Get("USN"),
+		TXT: normalizeTXT(request.Header.Values("X-PCController-Meta")), SeenAt: time.Now(),
 	}, true
 }
 

@@ -3,6 +3,7 @@
 #include "CompactI2c.h"
 
 namespace {
+// PWM-expander register addresses and MODE1 control bits used by the driver.
 constexpr uint8_t Mode1Register = 0x00;
 constexpr uint8_t FirstChannelRegister = 0x06;
 constexpr uint8_t PrescaleRegister = 0xFE;

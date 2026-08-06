@@ -64,6 +64,10 @@ void TonePlayer::update(uint32_t now) {
   head_ = static_cast<uint8_t>((head_ + 1) % MAX_TONES);
   --count_;
 
+  activeFrequencyHz_ = step.frequencyHz;
+  activeDurationMs_ = step.durationMs;
+  ++revision_;
+
   if (!muted_ && step.frequencyHz != 0) {
     startHardwareTone(step.frequencyHz);
   } else {
@@ -80,6 +84,11 @@ void TonePlayer::stop() {
   count_ = 0;
   stepEndsAt_ = 0;
   stepActive_ = false;
+  if (activeFrequencyHz_ != 0 || activeDurationMs_ != 0) {
+    activeFrequencyHz_ = 0;
+    activeDurationMs_ = 0;
+    ++revision_;
+  }
 }
 
 void TonePlayer::setMuted(bool muted) {
@@ -162,8 +171,9 @@ bool TonePlayer::timerSettingForPrescaler(uint16_t frequencyHz,
                                           uint16_t &top,
                                           uint8_t &clockBits) {
   const uint32_t denominator =
-      2UL * divisor * static_cast<uint32_t>(frequencyHz);
-  uint32_t ticks = (F_CPU + denominator / 2UL) / denominator;
+      2U * static_cast<uint32_t>(divisor) * frequencyHz;
+  uint32_t ticks =
+      (static_cast<uint32_t>(F_CPU) + denominator / 2U) / denominator;
   if (ticks == 0) {
     ticks = 1;
   }
@@ -174,14 +184,3 @@ bool TonePlayer::timerSettingForPrescaler(uint16_t frequencyHz,
   clockBits = candidateClockBits;
   return true;
 }
-
-void setupBuzzer() { buzzer.begin(); }
-
-void addTone(unsigned int frequency, unsigned int duration) {
-  buzzer.enqueue(static_cast<uint16_t>(frequency),
-                 static_cast<uint16_t>(duration));
-}
-
-void resetTone() { buzzer.stop(); }
-void playToneSequence() { buzzer.update(); }
-bool isPlayingTones() { return buzzer.isBusy(); }

@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+// RgbColor stores one unscaled addressable-LED pixel in RGB byte order.
 struct RgbColor {
   uint8_t red;
   uint8_t green;
@@ -16,6 +17,7 @@ using CRGB = RgbColor;
 
 namespace AddressableLeds {
 
+// Number of addressable status pixels wired to the controller strip.
 constexpr uint8_t PixelCount = 11;
 
 // Initialize the configured strip at full brightness, clear its RAM buffer,
@@ -36,6 +38,3 @@ RgbColor *buffer();
 uint8_t count();
 
 } // namespace AddressableLeds
-
-// Compatibility entry point used by the inherited project layer.
-void setupWS2811();

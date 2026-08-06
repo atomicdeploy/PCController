@@ -1,7 +1,19 @@
 {
   "RT_GROUP_ICON": {
     "APP": {
-      "0000": "icon.png"
+      "0000": "icon.ico"
+    },
+    "TRAY_CONNECTED": {
+      "0000": "icon-connected.ico"
+    },
+    "TRAY_RECONNECTING": {
+      "0000": "icon-reconnecting.ico"
+    },
+    "TRAY_PAUSED": {
+      "0000": "icon-paused.ico"
+    },
+    "TRAY_OFFLINE": {
+      "0000": "icon-offline.ico"
     }
   },
   "RT_MANIFEST": {
@@ -26,11 +38,11 @@
           "0409": {
             "CompanyName": "DRSDavidSoft",
             "FileDescription": "PCController Host",
-            "FileVersion": "development",
+            "FileVersion": "0.0.0-development",
             "InternalName": "controller",
             "OriginalFilename": "controller.exe",
-            "ProductName": "PCController Tool",
-            "ProductVersion": "development"
+            "ProductName": "PCController",
+            "ProductVersion": "0.0.0-development"
           }
         }
       }

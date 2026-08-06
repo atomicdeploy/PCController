@@ -15,7 +15,7 @@ func TestToastXMLIsEscapedAndActionsAreProtocolActivated(t *testing.T) {
 		t.Fatal(err)
 	}
 	value := string(payload)
-	for _, expected := range []string{"Door &lt;OPEN&gt;", "R5 &amp; R6", `activationType="protocol"`, "pccontroller://page/outputs"} {
+	for _, expected := range []string{"Door &lt;OPEN&gt;", "R5 &amp; R6", `<toast launch="pccontroller://page/events" activationType="protocol">`, "pccontroller://page/outputs"} {
 		if !strings.Contains(value, expected) {
 			t.Errorf("toast XML missing %q: %s", expected, value)
 		}
@@ -32,6 +32,7 @@ func TestToastRejectsUntrustedActionSchemes(t *testing.T) {
 }
 
 func TestImportantEventMappingSuppressesTelemetryAndAddsSafetyAction(t *testing.T) {
+	t.Setenv("APP_TITLE", "")
 	if _, ok := NotificationForImportantEvent(ImportantEvent{Kind: "telemetry", Message: "status"}); ok {
 		t.Fatal("routine telemetry generated a notification")
 	}
@@ -45,5 +46,11 @@ func TestImportantEventMappingSuppressesTelemetryAndAddsSafetyAction(t *testing.
 	if !ok || warning.Title != "PCController · Door open during operation" ||
 		len(warning.Actions) != 2 || warning.Actions[1].Label != "Stop outputs" {
 		t.Fatalf("door-running notification=%#v ok=%t", warning, ok)
+	}
+	custom, ok := NotificationForImportantEvent(ImportantEvent{
+		Kind: "motion.fault", Message: "Side B timeout", AppTitle: "Workshop Controller",
+	})
+	if !ok || custom.Title != "Workshop Controller · MOTION.FAULT" {
+		t.Fatalf("custom-title notification=%#v ok=%t", custom, ok)
 	}
 }

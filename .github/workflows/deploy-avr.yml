@@ -219,7 +219,7 @@ jobs:
 
       - name: "📌 Read canonical deployment tool pins"
         id: pins
-        run: node .github/scripts/dependency-report.mjs export
+        run: node Tools/Dependencies/export-lock.mjs export
 
       - name: "🔐 Install checksum-verified Arduino CLI"
         env:
@@ -298,7 +298,7 @@ jobs:
               --method usbasp \
               --operation write-flash \
               --hex "$image" \
-              --usbasp-troubleshooting \
+              --app-device "$DEVICE_PORT_REAL" \
               --app-reconnect=false 2>&1 | tee deployment-evidence/programming.log
           else
             image="deployment-bundle/PCController-${RELEASE_TAG}-ATmega328P-Application.hex"

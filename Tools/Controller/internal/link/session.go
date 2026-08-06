@@ -14,6 +14,7 @@ import (
 	"go.bug.st/serial"
 
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/portowner"
 )
 
 const (
@@ -79,7 +80,7 @@ func OpenContext(ctx context.Context, name string, baudRate int) (*Session, erro
 	}
 	port, err := serial.Open(name, serialMode(baudRate))
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", name, err)
+		return nil, portowner.EnrichOpenError(ctx, name, err)
 	}
 	if err := port.SetReadTimeout(DefaultReadTimeout); err != nil {
 		_ = port.Close()

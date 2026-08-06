@@ -51,7 +51,8 @@ type LCDPresenter struct {
 	debounceTimer  *time.Timer
 	priorityTimer  *time.Timer
 	runOnce        sync.Once
-	physical       *pcOwnedLCD
+	physical       *hostOwnedLCD
+	physicalError  string
 }
 
 func NewLCDPresenter(runtime *Runtime) *LCDPresenter {
@@ -61,7 +62,7 @@ func NewLCDPresenter(runtime *Runtime) *LCDPresenter {
 			Debounce: 120 * time.Millisecond, PriorityHold: 2 * time.Second,
 		},
 	}
-	presenter.physical = newPCOwnedLCD(func(
+	presenter.physical = newHostOwnedLCD(func(
 		ctx context.Context,
 		address, leaseSeconds byte,
 		write []byte,
@@ -141,6 +142,7 @@ func (presenter *LCDPresenter) Configure(options LCDPresentationOptions) error {
 		presenter.send(version, prompt[0], prompt[1])
 	} else if presenter.physical != nil {
 		presenter.physical.reset()
+		presenter.ReportPhysicalError("HOST-controlled LCD", nil)
 	}
 	return nil
 }
@@ -169,11 +171,31 @@ func (presenter *LCDPresenter) State() LCDPresentationState {
 	return state
 }
 
+// ReportPhysicalError publishes only state changes. A missing optional LCD is
+// kept visible in LCDPresentationState while background probes stay quiet.
+func (presenter *LCDPresenter) ReportPhysicalError(scope string, err error) bool {
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	presenter.mu.Lock()
+	if message == presenter.physicalError {
+		presenter.mu.Unlock()
+		return false
+	}
+	presenter.physicalError = message
+	presenter.mu.Unlock()
+	if message != "" && presenter.runtime != nil {
+		presenter.runtime.PublishHostEvent("lcd.error", scope+": "+message)
+	}
+	return true
+}
+
 // RescanPhysical forgets the cached backpack address and immediately probes
 // the two supported PCF8574 addresses using the current prompt contents.
 func (presenter *LCDPresenter) RescanPhysical(ctx context.Context) (byte, error) {
 	if presenter.runtime == nil || presenter.physical == nil {
-		return 0, fmt.Errorf("PC-owned LCD renderer is unavailable")
+		return 0, fmt.Errorf("HOST-controlled LCD renderer is unavailable")
 	}
 	snapshot := presenter.runtime.Snapshot()
 	if !snapshot.Connected {
@@ -297,7 +319,7 @@ func (presenter *LCDPresenter) ObserveEvent(event Event) {
 	case "bluetooth":
 		presenter.ShowPriority("bluetooth", "BT AUDIO", event.Text, 0)
 	case "operational", "operation.state", "program.state":
-		// Idle/Running is an explicit PC-owned state. It is never inferred from
+		// Idle/Running is an explicit HOST-owned state. It is never inferred from
 		// the enclosure input; the host state manager publishes this event.
 		state := strings.TrimSpace(event.State)
 		if state == "" {
@@ -330,7 +352,7 @@ func (presenter *LCDPresenter) ensurePhysicalHome() {
 	}
 	defer presenter.releaseSend()
 	if err := presenter.physical.ensureHome(ctx, lcdDeviceKey(snapshot)); err != nil {
-		presenter.runtime.PublishHostEvent("lcd.error", "PC-owned LCD home: "+err.Error())
+		presenter.runtime.PublishHostEvent("lcd.error", "HOST-controlled LCD home: "+err.Error())
 	}
 }
 
@@ -355,6 +377,7 @@ func (presenter *LCDPresenter) clearConnectionState() {
 	presenter.mu.Lock()
 	presenter.firmwareLines = [2]string{}
 	presenter.firmwareDevice = ""
+	presenter.physicalError = ""
 	presenter.mu.Unlock()
 	if presenter.physical != nil {
 		presenter.physical.reset()
@@ -420,17 +443,15 @@ func (presenter *LCDPresenter) send(version uint64, line1, line2 string) {
 	}
 	if snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 && presenter.physical != nil {
 		err = presenter.physical.render(ctx, device, line1, line2)
-		if err != nil {
-			presenter.runtime.PublishHostEvent("lcd.error", "PC-owned LCD: "+err.Error())
-		}
+		presenter.ReportPhysicalError("HOST-controlled LCD", err)
 	}
 }
 
 // RenderPhysical writes lines already mirrored through another display opcode
-// (for example a captured host menu) to the cap16 PC-owned backpack.
+// (for example a captured host menu) to the cap16 HOST-controlled backpack.
 func (presenter *LCDPresenter) RenderPhysical(ctx context.Context, line1, line2 string) error {
 	if presenter.runtime == nil || presenter.physical == nil {
-		return fmt.Errorf("PC-owned LCD renderer is unavailable")
+		return fmt.Errorf("HOST-controlled LCD renderer is unavailable")
 	}
 	presenter.mu.RLock()
 	enabled := presenter.options.Enabled
@@ -444,7 +465,7 @@ func (presenter *LCDPresenter) RenderPhysical(ctx context.Context, line1, line2 
 	defer presenter.releaseSend()
 	snapshot := presenter.runtime.Snapshot()
 	if !snapshot.Connected || snapshot.Hello.Capabilities&native.CapabilityI2CTransfer == 0 {
-		return fmt.Errorf("connected firmware does not expose the PC-owned LCD transport")
+		return fmt.Errorf("connected firmware does not expose the HOST-controlled LCD transport")
 	}
 	return presenter.physical.render(ctx, lcdDeviceKey(snapshot), line1, line2)
 }
@@ -484,7 +505,7 @@ func (presenter *LCDPresenter) PrepareDisconnect(ctx context.Context) error {
 	}
 	if snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 {
 		if presenter.physical == nil {
-			return fmt.Errorf("PC-owned LCD renderer is unavailable")
+			return fmt.Errorf("HOST-controlled LCD renderer is unavailable")
 		}
 		if err = presenter.physical.render(ctx, lcdDeviceKey(snapshot), line1, line2); err != nil {
 			return err

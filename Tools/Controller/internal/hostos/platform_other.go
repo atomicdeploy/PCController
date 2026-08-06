@@ -20,11 +20,11 @@ func platformPowerAction(context.Context, string) error {
 }
 
 func platformMonitorBrightness(context.Context) (BrightnessStatus, error) {
-	return BrightnessStatus{}, errors.New("DDC/CI monitor brightness is currently implemented only on Windows")
+	return BrightnessStatus{}, errors.New("monitor brightness is currently implemented on Windows through DDC/CI and laptop-panel WMI")
 }
 
 func platformSetMonitorBrightness(context.Context, int) (BrightnessStatus, error) {
-	return BrightnessStatus{}, errors.New("DDC/CI monitor brightness is currently implemented only on Windows")
+	return BrightnessStatus{}, errors.New("monitor brightness is currently implemented on Windows through DDC/CI and laptop-panel WMI")
 }
 
 func platformUptimeMS() uint64 { return 0 }

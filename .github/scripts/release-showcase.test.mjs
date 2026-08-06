@@ -70,10 +70,10 @@ function fixture({
         {
           role: "flash+bootloader",
           sha256: hash(":00000001FF\n"),
-          dataBytes: 32612,
+          dataBytes: 32738,
           capacityBytes: 32768,
-          freeBytes: 156,
-          usagePercent,
+          freeBytes: 30,
+          usagePercent: 99.91,
         },
       ],
     }, null, 2)}\n`,
@@ -96,7 +96,7 @@ function fixture({
 }
 
 const environment = {
-  GITHUB_REPOSITORY: "atomicdeploy/PCController",
+  GITHUB_REPOSITORY: "example-owner/example-project",
   GITHUB_SERVER_URL: "https://github.com",
   GITHUB_RUN_ID: "30718662898",
   GITHUB_RUN_ATTEMPT: "2",

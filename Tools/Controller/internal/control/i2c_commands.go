@@ -119,7 +119,7 @@ func i2cCommand(ctx context.Context, runtime *Runtime, args []string) (string, e
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("PC-owned LCD initialized at 0x%02X", address), nil
+			return fmt.Sprintf("HOST-controlled LCD initialized at 0x%02X", address), nil
 		default:
 			return "", fmt.Errorf("usage: i2c lcd status|rescan")
 		}

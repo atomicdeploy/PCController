@@ -12,6 +12,7 @@ import (
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type Options struct {
@@ -39,13 +40,18 @@ type Snapshot struct {
 	FrontPanel        native.FrontPanel
 	HaveFrontPanel    bool
 	FrontPanelUpdated time.Time
+	StatusLED         native.StatusLEDState
+	HaveStatusLED     bool
+	StatusLEDUpdated  time.Time
 	ProgramState      ProgramStateSnapshot
+	RFLearning        RFLearnState
 }
 
 type Event struct {
 	ID          uint64
 	Time        time.Time
 	Kind        string
+	Stream      string
 	Text        string
 	Frame       native.Frame
 	Lifecycle   string
@@ -121,6 +127,9 @@ type Runtime struct {
 	frontPanel             native.FrontPanel
 	haveFrontPanel         bool
 	frontPanelUpdated      time.Time
+	statusLED              native.StatusLEDState
+	haveStatusLED          bool
+	statusLEDUpdated       time.Time
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
@@ -138,29 +147,41 @@ type Runtime struct {
 
 	eventMu     sync.Mutex
 	eventLog    []Event
+	activityLog []Event
 	nextEventID uint64
 	eventNotify chan struct{}
 	rfMu        sync.Mutex
 	rfGestures  map[rfGestureKey]*rfGestureState
 	rfClicks    map[rfGestureKey]*rfClickState
 
-	rfLearnMu         sync.RWMutex
-	rfLearnGeneration uint64
-	rfLearnCancel     context.CancelFunc
-	rfLearnState      RFLearnState
+	rfLearnMu    sync.RWMutex
+	rfLearnState RFLearnState
 
-	historyMu          sync.RWMutex
-	historyRetention   time.Duration
-	historySampleEvery time.Duration
-	historyLastSample  time.Time
-	statusHistory      []StatusSample
-	timeline           []TimelineEntry
-	timelineLimit      int
-	timelinePath       string
-	historyWriteOnce   sync.Once
-	historyWrites      chan TimelineEntry
-	lcdPresenter       *LCDPresenter
-	programState       *ProgramStateManager
+	historyConfigureMu         sync.Mutex
+	historyMu                  sync.RWMutex
+	historyRetention           time.Duration
+	historySampleEvery         time.Duration
+	historyLastSample          time.Time
+	statusHistory              []StatusSample
+	timeline                   []TimelineEntry
+	timelineLimit              int
+	timelinePath               string
+	historyWriteOnce           sync.Once
+	historyWrites              chan TimelineEntry
+	statusHistoryPath          string
+	statusHistoryWriteOnce     sync.Once
+	statusHistoryWrites        chan measurementWrite
+	lcdPresenter               *LCDPresenter
+	programState               *ProgramStateManager
+	programStateSyncMu         sync.Mutex
+	programmingMu              sync.Mutex
+	programStateSent           bool
+	programStateSentGeneration uint64
+	programStateSentRevision   uint64
+	programStateSentMode       ProgramMode
+	macroRunner                *MacroRunner
+	displayMu                  sync.Mutex
+	lcdMessageCancel           context.CancelFunc
 
 	commandObserverMu      sync.RWMutex
 	commandObservers       map[uint64]func(CommandEvidence)
@@ -168,6 +189,8 @@ type Runtime struct {
 	hostMenuRequestMu      sync.RWMutex
 	hostMenuRequestHandler func(native.HostMenuContentRequest)
 }
+
+const programStateHeartbeatPeriod = 2 * time.Second
 
 func New(options Options) *Runtime {
 	options = normalizedOptions(options)
@@ -186,6 +209,7 @@ func New(options Options) *Runtime {
 			State: string(state.Mode), Reason: state.Reason,
 			Text: fmt.Sprintf("program state %s: %s", state.Mode, state.Reason),
 		})
+		go runtime.syncProgramState(state, "changed")
 	})
 	runtime.lcdPresenter = NewLCDPresenter(runtime)
 	return runtime
@@ -197,6 +221,20 @@ func (runtime *Runtime) LCDPresenter() *LCDPresenter {
 
 func (runtime *Runtime) ProgramState() ProgramStateSnapshot {
 	return runtime.programState.Snapshot()
+}
+
+// MacroRunner returns the single runner registered by the command engine so
+// interactive views observe the same library, recorder, and playback state.
+func (runtime *Runtime) MacroRunner() *MacroRunner {
+	runtime.mu.RLock()
+	defer runtime.mu.RUnlock()
+	return runtime.macroRunner
+}
+
+func (runtime *Runtime) setMacroRunner(runner *MacroRunner) {
+	runtime.mu.Lock()
+	runtime.macroRunner = runner
+	runtime.mu.Unlock()
 }
 
 func (runtime *Runtime) SetProgramState(owner string, mode ProgramMode, reason string) (ProgramStateSnapshot, error) {
@@ -259,7 +297,7 @@ func (runtime *Runtime) PublishStructuredEvent(event Event) Event {
 	return runtime.publishEvent(event)
 }
 
-// SetHostMenuRequestHandler installs the capability-24 content responder. It
+// SetHostMenuRequestHandler installs the optional host-menu content responder. It
 // receives only validated unsolicited schema-1 requests and never runs on the
 // serial pump goroutine.
 func (runtime *Runtime) SetHostMenuRequestHandler(handler func(native.HostMenuContentRequest)) {
@@ -288,11 +326,47 @@ func (runtime *Runtime) WaitEvent(
 	afterID uint64,
 	kind string,
 ) (Event, error) {
+	return runtime.WaitEventFilter(ctx, afterID, kind, nil)
+}
+
+// WaitEventFilter supports the versionless opcode explorer path without
+// teaching the host about each experimental opcode. A nil opcode accepts any
+// frame; an exact opcode also matches currently unknown unsolicited frames.
+func (runtime *Runtime) WaitEventFilter(
+	ctx context.Context,
+	afterID uint64,
+	kind string,
+	opcode *byte,
+) (Event, error) {
+	return runtime.WaitEventStreamFilter(ctx, afterID, kind, opcode, "")
+}
+
+// WaitEventStreamFilter selects an independent semantic stream. The activity
+// ring is retained separately so animation frames and measurements cannot
+// evict useful one-shot events before a UI or bridge consumer receives them.
+func (runtime *Runtime) WaitEventStreamFilter(
+	ctx context.Context,
+	afterID uint64,
+	kind string,
+	opcode *byte,
+	stream string,
+) (Event, error) {
+	stream = strings.ToLower(strings.TrimSpace(stream))
+	if stream != "" && stream != EventStreamActivity && stream != EventStreamState &&
+		stream != EventStreamTelemetry && stream != EventStreamDebug {
+		return Event{}, fmt.Errorf("unknown event stream %q", stream)
+	}
 	for {
 		runtime.eventMu.Lock()
-		for _, event := range runtime.eventLog {
+		events := runtime.eventLog
+		if stream == EventStreamActivity {
+			events = runtime.activityLog
+		}
+		for _, event := range events {
 			if event.ID > afterID &&
-				(kind == "" || eventKindMatches(kind, event.Kind)) {
+				(kind == "" || eventKindMatches(kind, event.Kind)) &&
+				(stream == "" || event.Stream == stream) &&
+				(opcode == nil || event.Frame.Opcode == *opcode) {
 				runtime.eventMu.Unlock()
 				return event, nil
 			}
@@ -307,6 +381,44 @@ func (runtime *Runtime) WaitEvent(
 	}
 }
 
+const (
+	EventStreamActivity  = "activity"
+	EventStreamState     = "state"
+	EventStreamTelemetry = "telemetry"
+	EventStreamDebug     = "debug"
+)
+
+// EventStreamForKind is the canonical cross-UI classification. Continuous
+// streams still update live state immediately, but stay out of human activity
+// feeds unless a caller explicitly subscribes to state/telemetry/debug.
+func EventStreamForKind(kind string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	switch kind {
+	case "telemetry":
+		return EventStreamTelemetry
+	case "rx", "tx", "opcode":
+		return EventStreamDebug
+	case "front_panel.segment", "status_led.changed", "buzzer.note":
+		return EventStreamState
+	}
+	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
+		strings.HasSuffix(kind, ".sample") {
+		return EventStreamTelemetry
+	}
+	if strings.HasSuffix(kind, ".frame") {
+		return EventStreamState
+	}
+	return EventStreamActivity
+}
+
+func IsActivityEvent(event Event) bool {
+	stream := strings.ToLower(strings.TrimSpace(event.Stream))
+	if stream == "" {
+		stream = EventStreamForKind(event.Kind)
+	}
+	return stream == EventStreamActivity
+}
+
 func eventKindMatches(requested, actual string) bool {
 	requested = strings.ToLower(strings.TrimSpace(requested))
 	actual = strings.ToLower(strings.TrimSpace(actual))
@@ -316,6 +428,7 @@ func eventKindMatches(requested, actual string) bool {
 
 func (runtime *Runtime) Snapshot() Snapshot {
 	programState := runtime.ProgramState()
+	rfLearning := runtime.RFLearnState()
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
 	return Snapshot{
@@ -333,7 +446,10 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		ConnectionUpdated: runtime.connectionUpdated,
 		FrontPanel:        runtime.frontPanel, HaveFrontPanel: runtime.haveFrontPanel,
 		FrontPanelUpdated: runtime.frontPanelUpdated,
-		ProgramState:      programState,
+		StatusLED:         runtime.statusLED, HaveStatusLED: runtime.haveStatusLED,
+		StatusLEDUpdated: runtime.statusLEDUpdated,
+		ProgramState:     programState,
+		RFLearning:       rfLearning,
 	}
 }
 
@@ -492,7 +608,7 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 		runtime.mu.RUnlock()
 		result, err := link.OpenAuthenticated(
 			ctx,
-			ports.Info{Name: name, Product: "PCController Virtual Board"},
+			ports.Info{Name: name, Product: productidentity.DefaultTitle + " Virtual Board"},
 			link.DiscoveryOptions{
 				BaudRate: options.BaudRate, StartupWait: options.StartupWait,
 				RequestTimeout: options.RequestTimeout,
@@ -506,12 +622,26 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 		if runtime.currentSession() != nil {
 			runtime.detachReason(false, "port changed by host")
 		}
+		runtime.mu.Lock()
+		runtime.paused = false
+		runtime.mu.Unlock()
 		runtime.attach(result)
 		return nil
 	}
 	selector, err := ports.ParseSelector(name)
 	if err != nil {
 		return err
+	}
+	// Opening the device already owned by this primary is an idempotent select,
+	// not a second serial open. Secondary programmer clients use this path to
+	// confirm an explicit COM/friendly-name/VID:PID selector before delegating.
+	current := runtime.Snapshot()
+	if current.Connected &&
+		len(ports.Candidates([]ports.Info{current.Port}, selector)) == 1 {
+		runtime.mu.Lock()
+		runtime.paused = false
+		runtime.mu.Unlock()
+		return nil
 	}
 	all, err := ports.List()
 	if err != nil {
@@ -550,6 +680,7 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 }
 
 func (runtime *Runtime) Close() error {
+	runtime.cancelDisplaySchedules()
 	return runtime.detach(true)
 }
 
@@ -696,6 +827,10 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	if ready != nil {
 		go ready(result.Port, result.Hello)
 	}
+	go runtime.pump(result.Session, generation)
+	go runtime.syncProgramState(runtime.ProgramState(), "connected")
+	go runtime.provisionDefaultStatusProfiles(generation)
+	go runtime.programStateHeartbeat(generation)
 
 	lifecycle := "connect"
 	if reconnected {
@@ -706,7 +841,245 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 		result.Port,
 		"",
 	)
-	go runtime.pump(result.Session, generation)
+}
+
+// provisionDefaultStatusProfiles installs the Go-owned factory table only
+// into missing/corrupt EEPROM slots. Existing user profiles are never
+// overwritten, and older firmware simply omits the capability.
+func (runtime *Runtime) provisionDefaultStatusProfiles(generation uint64) {
+	runtime.mu.RLock()
+	connected := runtime.session != nil && runtime.generation == generation
+	capabilities := runtime.hello.Capabilities
+	timeout := runtime.options.RequestTimeout
+	runtime.mu.RUnlock()
+	if !connected || capabilities&native.CapabilityStatusProfiles == 0 {
+		return
+	}
+	if timeout <= 0 {
+		timeout = 1200 * time.Millisecond
+	}
+	if !runtime.provisionDefaultSettings(generation, timeout) {
+		return
+	}
+	profiles := native.DefaultStatusProfiles(native.FactoryStatusBrightness)
+	written := 0
+	for condition, factory := range profiles {
+		runtime.mu.RLock()
+		current := runtime.session != nil && runtime.generation == generation
+		runtime.mu.RUnlock()
+		if !current {
+			return
+		}
+		payload, _ := native.StatusProfileGetPayload(byte(condition))
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		frame, err := runtime.Request(ctx, native.OpStatusProfileGet, payload, native.OpStatusProfile)
+		cancel()
+		if err != nil {
+			runtime.publishEvent(Event{Kind: "status_led.profile.provision", Lifecycle: "failed", Reason: err.Error(), Text: "factory status profile query failed: " + err.Error()})
+			return
+		}
+		profile, err := native.ParseStatusProfile(frame.Payload)
+		if err != nil {
+			runtime.publishEvent(Event{Kind: "status_led.profile.provision", Lifecycle: "failed", Reason: err.Error(), Text: "factory status profile response failed validation: " + err.Error()})
+			return
+		}
+		if profile.Persisted {
+			continue
+		}
+		setPayload, err := native.StatusProfileSetPayload(byte(condition), factory)
+		if err != nil {
+			return
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), timeout)
+		err = runtime.Command(ctx, native.OpStatusProfileSet, setPayload)
+		cancel()
+		if err != nil {
+			runtime.publishEvent(Event{Kind: "status_led.profile.provision", Lifecycle: "failed", Reason: err.Error(), Text: fmt.Sprintf("factory status profile %d write failed: %v", condition, err)})
+			return
+		}
+		written++
+	}
+	if written != 0 {
+		runtime.publishEvent(Event{
+			Kind: "status_led.profile.provision", Lifecycle: "complete",
+			Text:     fmt.Sprintf("installed %d missing host-owned factory status profiles", written),
+			Metadata: map[string]string{"written": strconv.Itoa(written)},
+		})
+	}
+}
+
+func (runtime *Runtime) provisionDefaultSettings(generation uint64, timeout time.Duration) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	frame, err := runtime.Request(ctx, native.OpGetSettings, nil, native.OpSettings)
+	cancel()
+	if err != nil {
+		runtime.publishEvent(Event{Kind: "settings.factory.provision", Lifecycle: "failed", Reason: err.Error(), Text: "factory settings query failed: " + err.Error()})
+		return false
+	}
+	settings, err := native.ParseSettings(frame.Payload)
+	if err != nil {
+		runtime.publishEvent(Event{Kind: "settings.factory.provision", Lifecycle: "failed", Reason: err.Error(), Text: "factory settings response failed validation: " + err.Error()})
+		return false
+	}
+	if settings.Persisted {
+		return true
+	}
+	runtime.mu.RLock()
+	current := runtime.session != nil && runtime.generation == generation
+	runtime.mu.RUnlock()
+	if !current {
+		return false
+	}
+	factory := native.DefaultSettings()
+	payload, err := factory.Payload()
+	if err != nil {
+		return false
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	err = runtime.Command(ctx, native.OpSetSettings, payload)
+	cancel()
+	if err != nil {
+		runtime.publishEvent(Event{Kind: "settings.factory.provision", Lifecycle: "failed", Reason: err.Error(), Text: "factory settings write failed: " + err.Error()})
+		return false
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), timeout)
+	frame, err = runtime.Request(ctx, native.OpGetSettings, nil, native.OpSettings)
+	cancel()
+	if err != nil {
+		return false
+	}
+	confirmed, err := native.ParseSettings(frame.Payload)
+	factory.Persisted = true
+	if err != nil || !confirmed.Persisted || confirmed != factory {
+		reason := "read-back did not match canonical host defaults"
+		if err != nil {
+			reason = err.Error()
+		}
+		runtime.publishEvent(Event{Kind: "settings.factory.provision", Lifecycle: "failed", Reason: reason, Text: "factory settings verification failed: " + reason})
+		return false
+	}
+	runtime.publishEvent(Event{Kind: "settings.factory.provision", Lifecycle: "complete", Text: "installed and verified missing host-owned factory settings"})
+	return true
+}
+
+// BoardName reads the operator name from the CRC-backed settings exchange.
+func (runtime *Runtime) BoardName(ctx context.Context) (native.BoardName, error) {
+	snapshot := runtime.Snapshot()
+	if !snapshot.Connected || snapshot.Hello.Capabilities&native.CapabilityBoardName == 0 {
+		return native.BoardName{}, errors.New("connected firmware does not support persistent board names")
+	}
+	frame, err := runtime.Request(ctx, native.OpGetSettings, nil, native.OpSettings)
+	if err != nil {
+		return native.BoardName{}, err
+	}
+	return native.ParseBoardNameFromSettings(frame.Payload)
+}
+
+// SetBoardName writes and independently reads back the operator name.
+// Empty names deliberately clear the value while retaining a valid record.
+func (runtime *Runtime) SetBoardName(ctx context.Context, name string) (native.BoardName, error) {
+	if err := native.ValidateBoardName(name); err != nil {
+		return native.BoardName{}, err
+	}
+	snapshot := runtime.Snapshot()
+	if !snapshot.Connected || snapshot.Hello.Capabilities&native.CapabilityBoardName == 0 {
+		return native.BoardName{}, errors.New("connected firmware does not support persistent board names")
+	}
+	frame, err := runtime.Request(ctx, native.OpGetSettings, nil, native.OpSettings)
+	if err != nil {
+		return native.BoardName{}, fmt.Errorf("read settings before board-name write: %w", err)
+	}
+	settings, err := native.ParseSettings(frame.Payload)
+	if err != nil {
+		return native.BoardName{}, fmt.Errorf("validate settings before board-name write: %w", err)
+	}
+	payload, err := native.SettingsWithBoardNamePayload(settings, name)
+	if err != nil {
+		return native.BoardName{}, err
+	}
+	if err := runtime.Command(ctx, native.OpSetSettings, payload); err != nil {
+		return native.BoardName{}, err
+	}
+	confirmed, err := runtime.BoardName(ctx)
+	if err != nil {
+		return native.BoardName{}, fmt.Errorf("read back board name: %w", err)
+	}
+	if !confirmed.Persisted || confirmed.Name != name {
+		return native.BoardName{}, fmt.Errorf("board name readback=%q persisted=%t; wanted %q", confirmed.Name, confirmed.Persisted, name)
+	}
+	return confirmed, nil
+}
+
+// syncProgramState mirrors the latest host-owned semantic state after HELLO
+// and after every state change. Serialization prevents stale concurrent state
+// changes from becoming the board's final value; older firmware simply omits
+// the capability and continues to interoperate.
+func (runtime *Runtime) syncProgramState(snapshot ProgramStateSnapshot, lifecycle string) {
+	runtime.programStateSyncMu.Lock()
+	defer runtime.programStateSyncMu.Unlock()
+
+	current := runtime.ProgramState()
+	if current.Revision != snapshot.Revision {
+		snapshot = current
+	}
+	runtime.mu.RLock()
+	connected := runtime.session != nil
+	capabilities := runtime.hello.Capabilities
+	generation := runtime.generation
+	timeout := runtime.options.RequestTimeout
+	runtime.mu.RUnlock()
+	if !connected || capabilities&native.CapabilityProgramState == 0 {
+		return
+	}
+	if lifecycle != "heartbeat" && runtime.programStateSent &&
+		runtime.programStateSentGeneration == generation &&
+		runtime.programStateSentRevision == snapshot.Revision &&
+		runtime.programStateSentMode == snapshot.Mode {
+		return
+	}
+	payload := native.ProgramStatePayload(snapshot.Mode == ProgramRunning)
+	if timeout <= 0 {
+		timeout = 1200 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	err := runtime.Command(ctx, native.OpProgramState, payload)
+	cancel()
+	if err != nil {
+		runtime.publishEvent(Event{
+			Kind: "program.state.sync", Lifecycle: "failed",
+			State: string(snapshot.Mode), Reason: err.Error(),
+			Text: fmt.Sprintf("program state %s sync failed: %v", snapshot.Mode, err),
+		})
+		return
+	}
+	runtime.programStateSent = true
+	runtime.programStateSentGeneration = generation
+	runtime.programStateSentRevision = snapshot.Revision
+	runtime.programStateSentMode = snapshot.Mode
+	if lifecycle != "heartbeat" {
+		runtime.publishEvent(Event{
+			Kind: "program.state.sync", Lifecycle: lifecycle,
+			State: string(snapshot.Mode),
+			Text:  fmt.Sprintf("program state %s sent to board", snapshot.Mode),
+		})
+	}
+}
+
+// programStateHeartbeat keeps firmware's host-presence watchdog truthful even
+// when no telemetry consumer is subscribed. It sends no status query and ends
+// automatically when this authenticated connection generation changes.
+func (runtime *Runtime) programStateHeartbeat(generation uint64) {
+	ticker := time.NewTicker(programStateHeartbeatPeriod)
+	defer ticker.Stop()
+	for range ticker.C {
+		runtime.mu.RLock()
+		active := runtime.generation == generation && runtime.session != nil
+		runtime.mu.RUnlock()
+		if !active {
+			return
+		}
+		runtime.syncProgramState(runtime.ProgramState(), "heartbeat")
+	}
 }
 
 func (runtime *Runtime) detach(pause bool) error {
@@ -768,6 +1141,11 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					event.Frame.Payload,
 				)
 				var parsedDevice *native.DeviceEvent
+				var parsedSegments *native.SegmentState
+				var parsedBuzzer *native.BuzzerState
+				var parsedStatusLED *native.StatusLEDState
+				var rfMappingRequired bool
+				var rfCaptured uint32
 				var hostMenuRequest *native.HostMenuContentRequest
 				var hostMenuState *native.HostMenuState
 				if event.Frame.Opcode == native.OpStatus {
@@ -782,11 +1160,36 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					event.Frame.Payload = nil
 				} else if event.Frame.Opcode == native.OpEvent {
 					if parsed, err := native.ParseDeviceEvent(event.Frame.Payload); err == nil {
+						rfMappingRequired, rfCaptured = runtime.observeRFLearningEvent(parsed)
 						kind, text = describeDeviceEvent(parsed)
 						parsedDevice = &parsed
 					} else {
 						kind = "error"
 						text = err.Error()
+					}
+				} else if event.Frame.Opcode == native.OpSegmentChanged {
+					if state, err := native.ParseSegmentState(event.Frame.Payload); err == nil {
+						kind = "front_panel.segment"
+						text = "seven-segment display changed"
+						parsedSegments = &state
+					} else {
+						kind, text = "error", err.Error()
+					}
+				} else if event.Frame.Opcode == native.OpBuzzerChanged {
+					if state, err := native.ParseBuzzerState(event.Frame.Payload); err == nil {
+						kind = "buzzer.note"
+						text = fmt.Sprintf("buzzer note %d Hz for %d ms", state.FrequencyHz, state.DurationMS)
+						parsedBuzzer = &state
+					} else {
+						kind, text = "error", err.Error()
+					}
+				} else if event.Frame.Opcode == native.OpStatusLEDChanged {
+					if state, err := native.ParseStatusLEDState(event.Frame.Payload); err == nil {
+						kind = "status_led.changed"
+						text = fmt.Sprintf("status LED changed to #%02X%02X%02X", state.Red, state.Green, state.Blue)
+						parsedStatusLED = &state
+					} else {
+						kind, text = "error", err.Error()
 					}
 				} else if event.Frame.Opcode == native.OpHostMenuRequest {
 					if request, err := native.ParseHostMenuContentRequest(event.Frame.Payload); err == nil {
@@ -828,8 +1231,58 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 							"revision":   strconv.Itoa(int(hostMenuState.Revision)),
 						},
 					})
+				} else if parsedSegments != nil {
+					runtime.publishEvent(Event{
+						Kind: kind, Text: text, Frame: event.Frame,
+						Source: "board", Target: "host", MessageType: "event",
+						Metadata: map[string]string{
+							"raw_segments": fmt.Sprintf("%02X%02X%02X%02X", parsedSegments.RawSegments[0], parsedSegments.RawSegments[1], parsedSegments.RawSegments[2], parsedSegments.RawSegments[3]),
+							"brightness":   strconv.Itoa(int(parsedSegments.Brightness)),
+						},
+					})
+				} else if parsedBuzzer != nil {
+					runtime.publishEvent(Event{
+						Kind: kind, Text: text, Frame: event.Frame,
+						Source: "board", Target: "host", MessageType: "event",
+						Metadata: map[string]string{
+							"frequency_hz": strconv.Itoa(int(parsedBuzzer.FrequencyHz)),
+							"duration_ms":  strconv.Itoa(int(parsedBuzzer.DurationMS)),
+							"muted":        strconv.FormatBool(parsedBuzzer.Muted),
+						},
+					})
+				} else if parsedStatusLED != nil {
+					runtime.publishEvent(Event{
+						Kind: kind, Text: text, Frame: event.Frame,
+						Source: "board", Target: "host", MessageType: "event",
+						Metadata: map[string]string{
+							"red":        strconv.Itoa(int(parsedStatusLED.Red)),
+							"green":      strconv.Itoa(int(parsedStatusLED.Green)),
+							"blue":       strconv.Itoa(int(parsedStatusLED.Blue)),
+							"hex":        fmt.Sprintf("#%02X%02X%02X", parsedStatusLED.Red, parsedStatusLED.Green, parsedStatusLED.Blue),
+							"brightness": strconv.Itoa(int(parsedStatusLED.Brightness)),
+							"effect":     strconv.Itoa(int(parsedStatusLED.Effect)),
+							"condition":  strconv.Itoa(int(parsedStatusLED.Condition)),
+						},
+					})
+				} else if parsedDevice != nil {
+					deviceEvent := Event{
+						Kind: kind, Text: text, Frame: event.Frame,
+						Source: "board", Target: "host", MessageType: "event",
+					}
+					if parsedDevice.Type == native.EventAppNavigation {
+						deviceEvent.Target = "app.clients"
+						deviceEvent.Action = "navigate"
+						deviceEvent.Metadata = map[string]string{
+							"page": parsedDevice.AppPage, "value": parsedDevice.AppPage,
+							"target_instance": parsedDevice.AppTarget,
+						}
+					}
+					runtime.publishEvent(deviceEvent)
 				} else {
 					runtime.publish(kind, text, event.Frame)
+				}
+				if rfMappingRequired && parsedDevice != nil {
+					runtime.publishRFMappingRequired(*parsedDevice, rfCaptured)
 				}
 				if parsedDevice != nil &&
 					parsedDevice.Type == native.EventRFReceived {
@@ -858,6 +1311,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			}
 			runtime.mu.Unlock()
 			if owned {
+				runtime.markRFLearningDisconnected("device disconnected")
 				runtime.publishConnection("disconnect", port, disconnectReason)
 				runtime.publishConnection("reconnecting", port, disconnectReason)
 				go runtime.autoReconnect(epoch)
@@ -966,6 +1420,23 @@ func (runtime *Runtime) observe(frame native.Frame) {
 			runtime.haveFrontPanel = true
 			runtime.frontPanelUpdated = time.Now()
 		}
+	case native.OpSegmentChanged:
+		if state, err := native.ParseSegmentState(frame.Payload); err == nil {
+			if runtime.frontPanel.Schema == 0 {
+				runtime.frontPanel.Schema = 2
+			}
+			runtime.frontPanel.RawSegments = state.RawSegments
+			runtime.frontPanel.Brightness = state.Brightness
+			runtime.frontPanel.SegmentsActive = true
+			runtime.haveFrontPanel = true
+			runtime.frontPanelUpdated = time.Now()
+		}
+	case native.OpStatusLEDChanged:
+		if state, err := native.ParseStatusLEDState(frame.Payload); err == nil {
+			runtime.statusLED = state
+			runtime.haveStatusLED = true
+			runtime.statusLEDUpdated = time.Now()
+		}
 	case native.OpEvent:
 		if event, err := native.ParseDeviceEvent(frame.Payload); err == nil {
 			switch event.Type {
@@ -985,6 +1456,11 @@ func (runtime *Runtime) observe(frame native.Frame) {
 			case native.EventRelay:
 				runtime.status.ActiveRelays = event.RelayMask
 				runtime.statusUpdated = time.Now()
+			case native.EventAlert:
+				if event.AlertKind == native.AlertHot {
+					runtime.status.Hot = event.AlertActive
+					runtime.statusUpdated = time.Now()
+				}
 			}
 		}
 	}
@@ -1026,7 +1502,7 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 	case native.EventPWMChannel:
 		return "pwm", fmt.Sprintf("automatic PWM channel changed to %d", event.PWMChannel)
 	case native.EventRFLearned:
-		return "rf.learn", fmt.Sprintf("RF learned entry %d", event.RFID)
+		return "rf.learn.capture", fmt.Sprintf("RF learned entry %d; mapping=unmapped", event.RFID)
 	case native.EventMacro:
 		if event.Macro != nil {
 			state := map[byte]string{
@@ -1077,24 +1553,47 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 			learned,
 		)
 	case native.EventRFLearning:
-		state := map[byte]string{
-			native.RFLearningEnded:     "ended",
-			native.RFLearningCancelled: "cancelled",
-			native.RFLearningFull:      "storage full",
-			native.RFLearningStarted:   "started",
-		}[event.RFLearnState]
-		if state == "" {
-			state = fmt.Sprintf("state-%d", event.RFLearnState)
+		state, kind := "unknown", "rf.learn"
+		switch event.RFLearnState {
+		case native.RFLearningEnded:
+			state, kind = "ended", "rf.learn.ended"
+		case native.RFLearningCancelled:
+			state, kind = "cancelled", "rf.learn.cancelled"
+		case native.RFLearningFull:
+			state, kind = "storage full", "rf.learn.full"
+		case native.RFLearningStarted:
+			state, kind = "started", "rf.learn.started"
+		case native.RFLearningProgress:
+			state, kind = "progress", "rf.learn.progress"
 		}
-		return "rf.learn", fmt.Sprintf(
-			"RF learning %s; learned count=%d",
-			state,
-			event.RFLearnCount,
+		mode := "indefinite"
+		if event.RFLearnMode == native.RFLearnModeTimer {
+			mode = "timer"
+		}
+		return kind, fmt.Sprintf(
+			"RF learning %s mode=%s stored=%d configured=%ds remaining=%ds",
+			state, mode, event.RFLearnCount,
+			event.RFLearnTotalSeconds, event.RFLearnRemainingSeconds,
 		)
 	case native.EventRelay:
 		return "relay", fmt.Sprintf(
 			"relay outputs changed; active mask=0x%02X",
 			event.RelayMask,
+		)
+	case native.EventAlert:
+		state := "cleared"
+		if event.AlertActive {
+			state = "active"
+		}
+		if event.AlertKind == native.AlertHot {
+			return "hot", "temperature alert " + state
+		}
+		return "fault", "firmware fault " + state
+	case native.EventAppNavigation:
+		return "app.page", fmt.Sprintf(
+			"board requested page %s for %s",
+			event.AppPage,
+			event.AppTarget,
 		)
 	default:
 		return "event", fmt.Sprintf("device event %d payload=% X", event.Type, event.Raw)
@@ -1249,6 +1748,14 @@ func (runtime *Runtime) publishRFGesture(
 
 func (runtime *Runtime) publish(kind, text string, frame native.Frame) {
 	event := Event{Kind: kind, Text: text, Frame: frame}
+	// Frames reaching this helper came from the device-facing serial pump. Keep
+	// that provenance in every normalized event envelope, not only in the
+	// special host-menu branches, so REST/RPC/WebSocket consumers can distinguish
+	// board activity from host-generated notices.
+	if frame.Opcode != 0 {
+		event.Source = "board"
+		event.Target = "host"
+	}
 	if frame.Opcode == native.OpEvent {
 		if parsed, err := native.ParseDeviceEvent(frame.Payload); err == nil &&
 			parsed.Type == native.EventReset {
@@ -1280,6 +1787,10 @@ func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, rea
 }
 
 func (runtime *Runtime) publishEvent(event Event) Event {
+	event.Stream = strings.ToLower(strings.TrimSpace(event.Stream))
+	if event.Stream == "" {
+		event.Stream = EventStreamForKind(event.Kind)
+	}
 	if event.Metadata != nil {
 		metadata := make(map[string]string, len(event.Metadata))
 		for key, value := range event.Metadata {
@@ -1294,6 +1805,12 @@ func (runtime *Runtime) publishEvent(event Event) Event {
 	runtime.eventLog = append(runtime.eventLog, event)
 	if len(runtime.eventLog) > 512 {
 		runtime.eventLog = append([]Event(nil), runtime.eventLog[len(runtime.eventLog)-512:]...)
+	}
+	if event.Stream == EventStreamActivity {
+		runtime.activityLog = append(runtime.activityLog, event)
+		if len(runtime.activityLog) > 512 {
+			runtime.activityLog = append([]Event(nil), runtime.activityLog[len(runtime.activityLog)-512:]...)
+		}
 	}
 	close(runtime.eventNotify)
 	runtime.eventNotify = make(chan struct{})

@@ -199,10 +199,12 @@ func TestFinalListingBudgetRejectsMissingCriticalTopology(t *testing.T) {
 		t.Fatalf("missing RF timestamp edge was not rejected: %v", err)
 	}
 
-	missingMenuLayout := strings.Replace(completeAVRListingFixture(), "sendMenuLayout():\n", "", 1)
-	if _, err := estimateFirmwareStackBudget(parseListingFixture(t, missingMenuLayout), 1500); err == nil ||
-		!strings.Contains(err.Error(), "menu-layout response") {
-		t.Fatalf("missing response branch was not rejected: %v", err)
+	withoutOptionalMenus := strings.NewReplacer(
+		"sendMenuList():\n", "",
+		"sendMenuLayout():\n", "",
+	).Replace(completeAVRListingFixture())
+	if _, err := estimateFirmwareStackBudget(parseListingFixture(t, withoutOptionalMenus), 1500); err != nil {
+		t.Fatalf("feature-disabled optional response branches were rejected: %v", err)
 	}
 }
 

@@ -3,6 +3,7 @@
 #include "CompactI2c.h"
 
 namespace {
+// INA219 register addresses used by the fixed-profile integer driver.
 constexpr uint8_t ConfigRegister = 0x00;
 constexpr uint8_t ShuntRegister = 0x01;
 constexpr uint8_t BusRegister = 0x02;

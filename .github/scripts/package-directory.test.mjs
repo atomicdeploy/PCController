@@ -31,7 +31,7 @@ function packageFirmware() {
         ...process.env,
         PCCONTROLLER_VERSION: version,
         SOURCE_DATE_EPOCH: "1700000000",
-        GITHUB_REPOSITORY: "atomicdeploy/PCController",
+        GITHUB_REPOSITORY: "example-owner/example-project",
         GITHUB_SHA: "0123456789abcdef0123456789abcdef01234567",
       },
     },
@@ -94,12 +94,14 @@ test("package is reproducible and contains a self-contained target guide", () =>
     const readme = readFileSync(resolve(packageRoot, "README.md"), "utf8");
     assert.match(readme, /PCController\.ino\.hex/u);
     assert.match(readme, /PCController\.ino\.with_bootloader\.hex/u);
+    assert.match(readme, /safe-default-eeprom\.hex/u);
     assert.doesNotMatch(readme, /\]\((?:docs|Tools)\//u);
 
     const manifest = JSON.parse(
       readFileSync(resolve(packageRoot, "PACKAGE-MANIFEST.json"), "utf8"),
     );
     assert.equal(manifest.sourceCommit, "0123456789abcdef0123456789abcdef01234567");
+    assert.equal(manifest.sourceRepository, "example-owner/example-project");
     assert.equal(manifest.packageRoot, `PCController-Firmware-${version}-AVR-ATmega328P`);
     assert.equal("workflowRun" in manifest, false);
   } finally {

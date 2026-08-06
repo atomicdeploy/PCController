@@ -53,7 +53,7 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
   }
 
   raw_[0] = Magic;
-  raw_[1] = Version;
+  raw_[1] = EnvelopeRevision;
   raw_[2] = opcode;
   raw_[3] = sequence;
   raw_[4] = static_cast<uint8_t>(payloadLength + (timed ? 4 : 0));
@@ -170,8 +170,12 @@ void UartProtocol::processEncodedFrame() {
   // in RX storage leaves raw_ available for nested ACK/error/response writes.
   const uint8_t rawLength =
       cobsDecode(receive_, receiveLength_, receive_, sizeof(receive_));
+  // The revision byte is advisory: magic, bounded shape, CRC, and each known
+  // opcode's semantic validation decide whether a frame is understandable.
+  // This lets reduced/newer feature sets interoperate without build-specific
+  // branches; unknown operations still receive Unsupported from the handler.
   if (rawLength < RawOverhead || receive_[0] != Magic ||
-      receive_[1] != Version || receive_[4] > MaximumPayload ||
+      receive_[4] > MaximumPayload ||
       rawLength != static_cast<uint8_t>(receive_[4] + RawOverhead)) {
     if (framingErrors_ != UINT16_MAX) {
       ++framingErrors_;

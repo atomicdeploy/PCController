@@ -20,7 +20,9 @@ import (
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/ports"
+	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -44,12 +46,19 @@ type Model struct {
 	samples    []measurementSample
 	lastSample time.Time
 
-	historyPos      int
-	historyBuf      string
-	completion      []string
-	completionIndex int
+	historyPos               int
+	historyBuf               string
+	completion               []string
+	completionIndex          int
+	terminalVisible          bool
+	terminalHidden           bool
+	renameTarget             string
+	renameTerminalWasVisible bool
+	settingEditor            *settingEditor
+	eventsExpanded           bool
 
 	connectPending           bool
+	rebootPending            bool
 	statusPending            bool
 	uiConfig                 func() appconfig.UI
 	saveUI                   func(appconfig.UI) error
@@ -79,6 +88,17 @@ type Model struct {
 	rfCategoryCursor         int
 	rfEditMode               string
 	rfCategoryDraft          string
+	rfGuideActive            bool
+	rfGuideStep              int
+	rfGuidePhase             string
+	rfGuideCandidate         *native.RFEntry
+	rfGuideCandidateCaptured bool
+	rfGuideCaptures          [4]*native.RFEntry
+	rfGuideAwaitID           int
+	rfGuideMappingID         int
+	rfGuideRemoveArmed       bool
+	rfGuideClearArmed        bool
+	rfGuideTransmitArmed     bool
 	prefs                    Preferences
 	preview                  *control.Snapshot
 	pwmValues                [16]uint16
@@ -90,6 +110,9 @@ type Model struct {
 	portCandidates           []ports.Info
 	portCursor               int
 	portError                string
+	portOwner                *portowner.Owner
+	portOwnerActions         portowner.Actions
+	ownerTerminateArmedUntil time.Time
 	frontPanel               func() FrontPanelState
 	frontPanelPending        bool
 	frontPanelLastRefresh    time.Time
@@ -104,6 +127,13 @@ type Model struct {
 	integrations             func() hostui.IntegrationStatus
 	notifier                 hostui.Notifier
 	appActions               <-chan hostui.AppAction
+	instanceID               string
+	reportPage               func(string) error
+	reportTerminal           func(page, title string) error
+	writeOSC                 func(string) error
+	terminalTitleOverride    string
+	terminalTitleDirty       bool
+	update                   updatePresentation
 	hostMenus                *hostmenu.Manager
 	pushHostPanel            func(hostmenu.Snapshot) error
 	releaseHostPanel         func() error
@@ -125,6 +155,13 @@ type Model struct {
 	menuLayoutSearchEditing  bool
 	menuLayoutSort           string
 	menuLayoutError          string
+	macroSearch              string
+	macroSearchEditing       bool
+	macroDeleteArmed         bool
+	macroDeleteReference     string
+	previewMacros            []appconfig.Macro
+	previewMacroState        control.MacroState
+	previewMacroRecording    control.MacroRecordingState
 
 	welcome              bool
 	welcomeFrame         int
@@ -154,6 +191,10 @@ type commandResultMsg struct {
 	err    error
 }
 type connectResultMsg struct{ err error }
+type ownerActionResultMsg struct {
+	action string
+	err    error
+}
 type statusResultMsg struct {
 	status native.Status
 	err    error
@@ -274,8 +315,16 @@ func NewPreview(engine *shell.Engine, snapshot control.Snapshot, welcome bool) M
 			values := map[string]string{
 				"host.status": "PC online", "device.status": "Connected",
 				"host.ip": "192.168.1.42", "api.status": "IPC + WS ready",
+				"host.macro.selection": "1", "host.macro.selected": "1 output-demo 5st",
+				"host.macro.playback": "2/5 1.3s", "host.macro.recording": "Idle",
 			}
 			return values[action], nil
+		},
+		Write: func(_ context.Context, action, value string) (string, error) {
+			return "Preview " + action + "=" + value, nil
+		},
+		Execute: func(_ context.Context, action string) (string, error) {
+			return "Preview " + action, nil
 		},
 	})
 	if snapshot.Connected {
@@ -328,9 +377,13 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 	}
 	debug := options.Debug || strings.EqualFold(os.Getenv("PCCONTROLLER_DEBUG"), "1") ||
 		strings.EqualFold(os.Getenv("PCCONTROLLER_DEBUG"), "true")
+	ownerActions := options.PortOwnerActions
+	if ownerActions == nil {
+		ownerActions = portowner.DefaultActions()
+	}
 	model := Model{
 		runtime: runtime, engine: engine, input: input, spinner: progress,
-		page: PageDashboard, historyPos: -1, uiConfig: options.UIConfig,
+		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
 		saveUI: options.SaveUI, uiValue: uiValue,
 		hostIntegrations:     options.HostIntegrations,
 		saveHostIntegrations: options.SaveIntegrations,
@@ -338,26 +391,28 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		rfConfig:             options.RFConfig, saveRF: options.SaveRF, rfValue: rfValue,
 		rfFetch: options.RFFetch, rfApplyOrder: options.RFApplyOrder,
 		rfReplaceSupport: options.RFReplaceSupport, rfProbeReplace: options.RFProbeReplace,
+		rfGuideAwaitID: -1, rfGuideMappingID: -1,
 		frontPanel: options.FrontPanel, frontPanelKey: options.FrontPanelKey,
 		mirrorLCD: options.MirrorLCD, lcdMirror: uiValue.MirrorPromptToLCD,
 		integrations: options.Integrations, notifier: options.Notifier,
-		appActions: options.AppActions,
-		hostMenus:  options.HostMenus, pushHostPanel: options.PushHostPanel,
+		appActions: options.AppActions, instanceID: options.InstanceID,
+		reportPage: options.ReportPage, reportTerminal: options.ReportTerminal,
+		writeOSC:  options.WriteOSC,
+		hostMenus: options.HostMenus, pushHostPanel: options.PushHostPanel,
 		releaseHostPanel: options.ReleaseHostPanel,
 		prefs:            prefs, preview: options.Preview, welcome: welcome,
-		welcomeStarted: welcomeStarted, welcomeDeadline: welcomeStarted.Add(30 * time.Second),
+		portOwnerActions: ownerActions,
+		welcomeStarted:   welcomeStarted, welcomeDeadline: welcomeStarted.Add(30 * time.Second),
 		welcomePhase: "Waiting for USB and application HELLO", welcomeMelody: options.WelcomeMelody,
 		markWelcomed: marker, debug: debug,
-		logs: []string{
-			"PCController command console ready",
-			"Use the tabs or type help. UI controls use the same validated command paths as CLI and IPC.",
-		},
+		logs: []string{productidentity.ServiceName(prefs.AppTitle, "command console ready")},
 	}
 	capabilities := uint32(0)
 	if options.Preview != nil {
 		capabilities = options.Preview.Hello.Capabilities
 	}
 	model.menuPages = menuPagesForCapabilities(capabilities)
+	model.reportInstance()
 	model.menuCatalogSource = "host generation fallback"
 	menuInfo := control.MenuPagesForCapabilities(capabilities)
 	model.menuLayout, _ = control.DefaultMenuLayout(menuInfo)
@@ -382,7 +437,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 				segD | segE | segF | segG,
 			},
 			HasRawSegments: true,
-			LCDLine1:       "PCController", LCDLine2: "Door OPEN · R5",
+			LCDLine1:       truncateText(prefs.AppTitle, 16), LCDLine2: "Door OPEN · R5",
 			LCDBacklight: true, MenuID: options.Preview.Status.MenuPage,
 			MenuName:    model.menuPageByID(options.Preview.Status.MenuPage).Name,
 			Submode:     model.programModeName(options.Preview.Status.ProgramMode),
@@ -399,7 +454,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 }
 
 func (model Model) Init() tea.Cmd {
-	commands := []tea.Cmd{model.spinner.Tick, tick(model.statusInterval())}
+	commands := []tea.Cmd{model.spinner.Tick, tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
 	if model.appActions != nil {
 		commands = append(commands, waitAppAction(model.appActions))
 	}
@@ -419,6 +474,12 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch message := message.(type) {
 	case appActionMsg:
 		action := hostui.AppAction(message)
+		if !hostui.TargetsInstance(action.Target, model.instanceID, "tui") {
+			if model.appActions != nil {
+				commands = append(commands, waitAppAction(model.appActions))
+			}
+			break
+		}
 		switch action.Kind {
 		case "app.page":
 			if page, ok := pageForName(action.Value); ok {
@@ -429,11 +490,34 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "app.quit":
 			return model, tea.Quit
+		case "app.title":
+			if strings.EqualFold(action.Value, "auto") {
+				model.terminalTitleOverride = ""
+			} else {
+				model.terminalTitleOverride = action.Value
+			}
+			model.terminalTitleDirty = true
+			model.setNotice("Terminal title updated")
+		case "app.osc":
+			commands = append(commands, terminalOSCCommand(model.writeOSC, action.Value, "OSC"))
+		case "app.progress":
+			progress, err := hostui.ParseTerminalProgress(action.Value)
+			if err != nil {
+				model.appendLog("warn", "terminal progress: "+err.Error())
+			} else if payload, payloadErr := progress.OSCPayload(); payloadErr != nil {
+				model.appendLog("warn", "terminal progress: "+payloadErr.Error())
+			} else {
+				commands = append(commands, terminalOSCCommand(model.writeOSC, payload, "terminal progress"))
+			}
 		case "app.port.open":
 			commands = append(commands, execute(model.engine, "port open"))
 		case "app.port.close":
 			commands = append(commands, execute(model.engine, "port close"))
 		case "command":
+			if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") {
+				model.rebootPending = true
+				model.setNotice("Rebooting controller…")
+			}
 			commands = append(commands, execute(model.engine, action.Value))
 		}
 		if model.appActions != nil {
@@ -550,6 +634,19 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runtimeEventMsg:
 		event := control.Event(message)
+		if command := model.observeUpdateEvent(event); command != nil {
+			commands = append(commands, command)
+		}
+		if event.Source == "board" && strings.EqualFold(event.Kind, "app.page") &&
+			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
+			if page, ok := pageForName(event.Metadata["page"]); ok {
+				model.switchPage(page)
+				model.setNotice("Board opened " + pageDefinitions[page].Title)
+			}
+		}
+		if command := model.observeRFGuidedEvent(event); command != nil {
+			commands = append(commands, command)
+		}
 		if command := model.hostMenuDeviceEventCommand(event); command != nil {
 			commands = append(commands, command)
 		}
@@ -562,9 +659,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				commands = append(commands, notifyImportant(model.notifier, notification))
 			}
 		}
-		// Telemetry updates redraw cards without flooding the transcript. HELLO
-		// payload bytes are diagnostic-only and stay hidden unless debug is on.
-		show := event.Kind != "telemetry"
+		// Continuous frames and measurements redraw live previews without
+		// flooding the operator transcript. Debug mode explicitly opts back in.
+		show := model.debug || control.IsActivityEvent(event)
 		if !model.debug && event.Frame.Opcode == native.OpHelloResp {
 			show = false
 		}
@@ -574,6 +671,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		commands = append(commands, waitRuntimeEvent(model.runtime))
 
 	case commandResultMsg:
+		normalizedLine := strings.ToLower(strings.TrimSpace(message.line))
+		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") {
+			model.rebootPending = false
+		}
+
 		if errors.Is(message.err, shell.ErrExit) {
 			if model.preview == nil {
 				_ = model.runtime.Close()
@@ -607,6 +709,43 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		model.consumeStructuredResult(message)
 		model.appendResult(message.line, message.output, message.err)
+		if model.rfGuideActive {
+			switch {
+			case strings.HasPrefix(normalizedLine, "rf learn ") && message.err != nil:
+				model.rfGuidePhase = "interrupted"
+				model.setNotice("Guided RF capture could not start: " + message.err.Error())
+			case model.rfGuideMappingID >= 0 && rfGuidedMappingCommandMatches(normalizedLine, model.rfGuideMappingID):
+				if message.err != nil {
+					model.rfGuidePhase = "identity"
+					model.setNotice("RF mapping was not saved: " + message.err.Error())
+					model.rfGuideMappingID = -1
+				} else {
+					model = model.completeRFGuidedMapping()
+				}
+			case strings.HasPrefix(normalizedLine, "rf remove ") && message.err == nil:
+				fields := strings.Fields(normalizedLine)
+				if len(fields) == 3 && fields[2] == "all" {
+					model.rfGuideCaptures = [4]*native.RFEntry{}
+					model.rfGuideCandidate = nil
+					model.rfGuidePhase = "idle"
+					model.setNotice("All learned RF records were cleared")
+				} else if len(fields) == 3 {
+					if removed, parseErr := strconv.Atoi(fields[2]); parseErr == nil {
+						for index, capture := range model.rfGuideCaptures {
+							if capture != nil && int(capture.ID) == removed {
+								model.rfGuideCaptures[index] = nil
+							}
+						}
+						if model.rfGuideCandidate != nil && int(model.rfGuideCandidate.ID) == removed {
+							model.rfGuideCandidate = nil
+							model.rfGuidePhase = "idle"
+						}
+						model.setNotice(fmt.Sprintf("RF entry %d removed; inventory refresh requested", removed))
+					}
+				}
+			}
+			model.clearRFGuideArms()
+		}
 		if message.err == nil && model.preview == nil && outputCommandNeedsReadback(message.line) {
 			if !model.statusPending {
 				model.statusPending = true
@@ -618,17 +757,45 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				commands = append(commands, execute(model.engine, "pwm get"))
 			}
 		}
-		if message.err == nil && strings.HasPrefix(strings.ToLower(message.line), "rf map ") && model.preview == nil && !model.rfPending {
+		if message.err == nil && (strings.HasPrefix(normalizedLine, "rf map ") || strings.HasPrefix(normalizedLine, "rf remove ")) && model.preview == nil && !model.rfPending {
 			model.rfPending = true
 			commands = append(commands, model.fetchRFEntriesCommand())
+		}
+
+	case terminalOSCResultMsg:
+		if message.err != nil {
+			model.appendLog("warn", message.kind+": "+message.err.Error())
+		} else {
+			model.setNotice(message.kind + " emitted")
 		}
 
 	case connectResultMsg:
 		model.connectPending = false
 		if message.err != nil {
+			model.portOwner = nil
+			var busy *portowner.BusyError
+			if errors.As(message.err, &busy) && busy.Owner != nil {
+				owner := *busy.Owner
+				model.portOwner = &owner
+				model.ownerTerminateArmedUntil = time.Time{}
+			}
 			model.appendLog("warn", "auto-connect: "+message.err.Error())
 		} else {
+			model.portOwner = nil
+			model.ownerTerminateArmedUntil = time.Time{}
 			model.setNotice("Port opened and application protocol authenticated")
+		}
+
+	case ownerActionResultMsg:
+		if message.err != nil {
+			model.appendLog("error", message.action+": "+message.err.Error())
+			model.setNotice("Owner action failed: " + message.err.Error())
+		} else {
+			model.appendLog("info", message.action+": completed")
+			model.setNotice(message.action + " completed")
+			if message.action == "Terminate serial owner" {
+				model.portOwner = nil
+			}
 		}
 
 	case statusResultMsg:
@@ -688,6 +855,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.resetRFStage(model.rfEntries)
 			}
 			model.setNotice(fmt.Sprintf("Loaded %d learned RF codes", len(model.rfEntries)))
+			model.resolveRFGuidedCandidate(model.rfEntries)
 		}
 
 	case rfOrderResultMsg:
@@ -748,12 +916,23 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		commands = append(commands, command)
 	}
 
-	var inputCommand tea.Cmd
-	model.input, inputCommand = model.input.Update(message)
-	commands = append(commands, inputCommand)
-	if inputBefore != model.input.Value() && model.lcdMirror && model.mirrorLCD != nil {
-		state := model.currentFrontPanel(model.snapshot())
-		commands = append(commands, mirrorLCDCommand(model.mirrorLCD, state.LCDLine1, state.LCDLine2, "mirror LCD prompt"))
+	if model.terminalIsVisible() {
+		var inputCommand tea.Cmd
+		model.input, inputCommand = model.input.Update(message)
+		commands = append(commands, inputCommand)
+		if inputBefore != model.input.Value() {
+			model.completion = nil
+			model.completionIndex = -1
+		}
+		if inputBefore != model.input.Value() && model.lcdMirror && model.mirrorLCD != nil {
+			state := model.currentFrontPanel(model.snapshot())
+			commands = append(commands, mirrorLCDCommand(model.mirrorLCD, state.LCDLine1, state.LCDLine2, "mirror LCD prompt"))
+		}
+	}
+	if model.terminalTitleDirty {
+		model.terminalTitleDirty = false
+		commands = append(commands, tea.SetWindowTitle(model.terminalTitle()))
+		model.reportInstance()
 	}
 	return model, tea.Batch(commands...)
 }
@@ -770,6 +949,19 @@ func waitAppAction(actions <-chan hostui.AppAction) tea.Cmd {
 
 func pageForName(value string) (Page, bool) {
 	value = strings.ToLower(strings.TrimSpace(value))
+	// Web, URI, notification, and global-hotkey actions use the stable product
+	// page names below. Keep those names independent from the compact labels in
+	// pageDefinitions so every surface routes the same action deterministically.
+	aliases := map[string]Page{
+		"controls":  PageOutputs,
+		"outputs":   PageOutputs,
+		"workbench": PageOutputs,
+		"updates":   PageProgramming,
+		"settings":  PageAppSettings,
+	}
+	if page, ok := aliases[value]; ok {
+		return page, true
+	}
 	for index, definition := range pageDefinitions {
 		if value == strings.ToLower(definition.Key) ||
 			value == strings.ToLower(definition.Short) ||
@@ -782,7 +974,7 @@ func pageForName(value string) (Page, bool) {
 
 func (model Model) View() string {
 	if !model.ready {
-		return "Starting PCController…"
+		return "Starting " + model.prefs.AppTitle + "…"
 	}
 	if model.welcome {
 		return model.welcomeView()
@@ -792,20 +984,18 @@ func (model Model) View() string {
 	actions := model.actionBar(snapshot)
 	tabs := model.tabBar()
 	content := model.pageView(snapshot)
-	completion := model.completionView()
-	commandBar := model.commandBar()
 	footer := model.footer()
-	view := lipgloss.JoinVertical(
-		lipgloss.Left,
-		header,
-		actions,
-		tabs,
-		content,
-		completion,
-		commandBar,
-		footer,
-	)
+	parts := []string{header, actions, tabs, content}
+	if model.terminalIsVisible() {
+		parts = append(parts, model.completionView(), model.commandBar())
+	}
+	parts = append(parts, footer)
+	view := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return lipgloss.NewStyle().MaxWidth(model.width).Render(view)
+}
+
+func (model Model) terminalIsVisible() bool {
+	return !model.terminalHidden && (model.page == PageConsole || model.terminalVisible)
 }
 
 func (model *Model) resize() {
@@ -908,7 +1098,7 @@ func (model *Model) advanceWelcome(now time.Time) tea.Cmd {
 	grace := 500 * time.Millisecond
 	if !known {
 		grace = 1200 * time.Millisecond
-		model.welcomePhase = "Legacy buzzer telemetry · applying safe ready grace"
+		model.welcomePhase = "Buzzer state unavailable · applying ready grace"
 	} else {
 		model.welcomePhase = "Controller ready · buzzer idle"
 	}
@@ -936,9 +1126,13 @@ func (model *Model) advanceWelcome(now time.Time) tea.Cmd {
 }
 
 func (model *Model) syncUIConfig(value appconfig.UI) {
+	previousTitle := model.prefs.AppTitle
 	model.uiValue = value
 	model.prefs = preferencesFromUI(value)
 	model.lcdMirror = value.MirrorPromptToLCD
+	if previousTitle != model.prefs.AppTitle && model.terminalTitleOverride == "" {
+		model.terminalTitleDirty = true
+	}
 }
 
 func (model *Model) recordSample(status native.Status, at time.Time) {
@@ -970,7 +1164,7 @@ func (model *Model) recordSample(status native.Status, at time.Time) {
 }
 
 func (model *Model) recordTimeline(event control.Event) {
-	if event.Kind == "telemetry" || event.Text == "" {
+	if (!model.debug && !control.IsActivityEvent(event)) || event.Text == "" {
 		return
 	}
 	important := event.Kind == "door" || event.Kind == "bluetooth" ||
@@ -1014,17 +1208,11 @@ func (model Model) header(snapshot control.Snapshot) string {
 	} else if snapshot.Connected {
 		status = "CONNECTED"
 		style = lipgloss.NewStyle().Foreground(colorGood).Bold(true)
-		if snapshot.Hello.IdentitySchema == native.IdentitySchema {
+		if snapshot.Hello.IdentitySchema == native.IdentitySchemaCompact {
 			detail = fmt.Sprintf(
 				"%s · %s build %08X · %s",
 				snapshot.Port.Name, snapshot.Hello.Name, snapshot.Hello.BuildHash,
 				snapshot.Hello.BuildStamp,
-			)
-		} else if snapshot.Hello.IdentitySchema == native.IdentitySchemaLegacy {
-			detail = fmt.Sprintf(
-				"%s · %s build %08X · %s %s",
-				snapshot.Port.Name, snapshot.Hello.Name, snapshot.Hello.BuildHash,
-				strings.TrimSpace(snapshot.Hello.BuildDate), strings.TrimSpace(snapshot.Hello.BuildTime),
 			)
 		} else {
 			detail = snapshot.Port.Name + " · " + snapshot.Hello.Name
@@ -1058,12 +1246,54 @@ func (model Model) header(snapshot control.Snapshot) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
+type actionBarItem struct {
+	label  string
+	action string
+	style  lipgloss.Style
+}
+
+func (item actionBarItem) render() string {
+	return item.style.Render(item.label)
+}
+
+func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
+	items := []actionBarItem{{label: "P Ports ▼", action: "ports", style: buttonStyle}}
+	if model.uiValue.SeparatePortButtons {
+		items = append(items,
+			actionBarItem{label: "O Open", action: "open", style: buttonGoodStyle},
+			actionBarItem{label: "X Close", action: "close", style: buttonStyle},
+		)
+	} else if snapshot.Connected {
+		items = append(items, actionBarItem{label: "X Close", action: "close", style: buttonStyle})
+	} else {
+		items = append(items, actionBarItem{label: "O Open", action: "open", style: buttonGoodStyle})
+	}
+	rebootLabel := "R Reboot"
+	rebootAction := "reboot"
+	if model.rebootPending {
+		rebootLabel = model.spinner.View() + " Rebooting"
+		rebootAction = ""
+	}
+	items = append(items,
+		actionBarItem{label: rebootLabel, action: rebootAction, style: buttonStyle},
+		actionBarItem{label: "↻ Refresh", action: "refresh", style: buttonStyle},
+	)
+	if model.portOwner != nil && model.width >= 150 {
+		items = append(items,
+			actionBarItem{label: "^F Owner", action: "owner", style: buttonStyle},
+			actionBarItem{label: "^W Ask Close", action: "owner-close", style: buttonBadStyle},
+			actionBarItem{label: "^T Terminate", action: "owner-terminate", style: buttonBadStyle},
+		)
+	}
+	return items
+}
+
 func (model Model) actionBar(snapshot control.Snapshot) string {
-	open := buttonGoodStyle.Render("O Open")
-	portsButton := buttonStyle.Render("P Ports ▼")
-	closeButton := buttonStyle.Render("X Close")
-	reset := buttonBadStyle.Render("R Safe Reset")
-	refresh := buttonStyle.Render("↻ Refresh")
+	items := model.actionBarItems(snapshot)
+	buttons := make([]string, 0, len(items))
+	for _, item := range items {
+		buttons = append(buttons, item.render())
+	}
 	connectionText := "No port owned"
 	connectionStyle := labelStyle
 	if snapshot.Connected {
@@ -1078,8 +1308,11 @@ func (model Model) actionBar(snapshot control.Snapshot) string {
 	} else if snapshot.Paused {
 		connectionText = "Closed by user"
 		connectionStyle = warnStyle
+	} else if model.portOwner != nil {
+		connectionText = "BUSY · " + model.portOwner.Detail()
+		connectionStyle = errorStyle
 	}
-	controls := lipgloss.JoinHorizontal(lipgloss.Center, portsButton, " ", open, " ", closeButton, " ", reset, " ", refresh)
+	controls := lipgloss.JoinHorizontal(lipgloss.Center, intersperseStrings(buttons, " ")...)
 	available := model.width - lipgloss.Width(controls) - 3
 	connectionText = truncateText(connectionText, available)
 	return lipgloss.JoinHorizontal(lipgloss.Center, controls, "   ", connectionStyle.Render(connectionText))
@@ -1133,7 +1366,7 @@ func (model Model) completionView() string {
 	if len(model.completion) == 0 {
 		return ""
 	}
-	values := model.completion
+	values := append([]string(nil), model.completion...)
 	if len(values) > 6 {
 		values = values[:6]
 	}
@@ -1148,11 +1381,31 @@ func (model Model) completionView() string {
 }
 
 func (model Model) footer() string {
-	left := "←/→ tabs or value  ↑/↓ navigate  Enter activate  Tab/→ complete  Ctrl+C quit  Mouse enabled"
+	left := "←/→ tabs or value  ↑/↓ navigate  Enter activate  ~ terminal  Ctrl+C quit  Mouse enabled"
+	if model.terminalIsVisible() {
+		left = "Terminal visible · ~ hide  Tab/→ complete  Ctrl+C quit  Mouse enabled"
+	}
+	if model.portOwner != nil {
+		left = "Serial busy · Ctrl+F show owner · Ctrl+W ask close · Ctrl+T twice to terminate · primary controller protected"
+	}
 	if model.notice != "" && time.Now().Before(model.noticeUntil) {
 		left = model.notice
 	}
 	return labelStyle.Render(left)
+}
+
+func intersperseStrings(values []string, separator string) []string {
+	if len(values) < 2 {
+		return values
+	}
+	result := make([]string, 0, len(values)*2-1)
+	for index, value := range values {
+		if index != 0 {
+			result = append(result, separator)
+		}
+		result = append(result, value)
+	}
+	return result
 }
 
 func (model *Model) setNotice(value string) {
@@ -1322,7 +1575,7 @@ func (model *Model) updateInputPlaceholder() {
 }
 
 func (model *Model) consumeStructuredResult(message commandResultMsg) {
-	if message.err != nil || !strings.HasPrefix(message.output, "PWM mode=") {
+	if message.err != nil || !strings.HasPrefix(message.output, "PWM available=") {
 		return
 	}
 	start := strings.Index(message.output, "values=[")

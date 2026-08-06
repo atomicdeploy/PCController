@@ -5,6 +5,7 @@
 
 namespace {
 
+// Input debounce and BT Audio blink-retention windows in milliseconds.
 constexpr uint16_t SenseDebounceMs = 40;
 constexpr uint16_t BluetoothBlinkHoldMs = 2500;
 

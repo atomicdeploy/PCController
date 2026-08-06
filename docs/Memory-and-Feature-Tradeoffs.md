@@ -1,552 +1,349 @@
-# Firmware Size, Feature Cost, and Removal Tradeoffs
+<div align="center"><a href="../README.md"><img src="assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
 
-Use this document before removing a feature from the ATmega328P image. It
-separates exact whole-image measurements from symbol estimates and, most
-importantly, states what a person will no longer be able to do after each cut.
+# Firmware size and feature tradeoffs
 
-## Decision summary
+PCController intentionally keeps the ATmega328P image close to its application
+ceiling while moving presentation, orchestration, history, and integrations to
+the host. Use this guide before adding or removing firmware behavior.
 
-- The physical COM18 board now runs interim pre-macro `32FAAD86` with
-  capabilities `0x003FF7FF` and Status page 0. It is not the staged macro
-  image.
-- That live interim uses 32,382 of the 32,384 application bytes. It left only
-  2 bytes and cannot represent the current source after the macro/LCD changes.
-- A rejected macro-integration checkpoint measured 32,490 application bytes
-  and 1,545 static-SRAM bytes, 106 flash bytes over the Urboot limit. The
-  latest fitting non-live checkpoint is `0E5FE035`: 32,382 flash bytes and
-  1,543 static-SRAM bytes. It leaves 2 application bytes, but is not live-board
-  evidence until upload/read-back succeeds.
-- The staged profile now compiles the full AVR LCD renderer out and keeps
-  generic cooperative I2C access. This is the largest measured offloadable
-  cut: 1,328 flash bytes and 49 static-SRAM bytes in the archived A/B build.
-- The latest fitting checkpoint has exact section sizes and content hashes.
-  Current source may still change, so the final identity remains pending.
-  Marginal A/B cost for the macro queue and several optional UI cuts remains
-  unmeasured. Do not use the live interim's 2-byte figure to decide staged
-  space.
-- Do not remove relay sequencing, motion policy enforcement, safe reset,
-  protocol bounds/CRC, EEPROM checksums, watchdog, or startup I2C recovery for
-  space. Those protect hardware or stored state.
+## Evidence rule
 
-## Image identities and evidence level
+Never copy a flash or SRAM number from documentation into a release claim. The
+only authoritative values are those produced by the exact candidate build:
 
-### Live board: interim `32FAAD86`
+- `.build/firmware/firmware-manifest.json` for image identity and flash usage;
+- the generated stack-budget section for static and estimated peak SRAM;
+- strict Intel HEX bounds validation for application and full-flash images;
+- authenticated HELLO plus readback for the physical image actually installed.
 
-The controller-owned build and current HELLO evidence are:
+A source compile is software evidence. A board identity is deployment evidence.
+Neither alone proves the loaded peripherals are safe or behaving correctly.
 
-```text
-Build/source hash: 32FAAD86
-Capabilities:      0x003FF7FF
-Generated:         2026-08-01T13:06:08Z
-Packed date/time:  0x35018451 (260801163434)
-Flash:             32,382 / 32,384 bytes (2 bytes free)
-.text:             32,148 bytes
-.data:             234 bytes
-.bss:              1,187 bytes
-.noinit:           1 byte
-Static SRAM:       1,422 / 2,048 bytes (626 bytes before stack/interrupt use)
-Application SHA:   C159D01492A5616C077D1ACEF63E8833B586EBB370BAE48E2DBF5A019A7FF57E
-Merged SHA:        E6A5C11A1F38AE246CA45F645107E065B2818054BF026BEA954FFB06F3178C00
-```
+## Current candidate measurement
 
-COM18 now authenticates this hash and reports Status page 0. This proves the
-interim application is running; it does not prove the newer macro queue or its
-offloaded-LCD profile.
+This audit describes the current **pre-final aggregate candidate** in
+`.build/firmware`. It is exact build evidence for the source aggregation at the
+time shown, but it is not yet the frozen release or proof of what is deployed
+on the board. A later frozen build timestamp changes the 12-byte identity record
+and can therefore change the application artifact SHA-256 even when the linked
+sketch size is unchanged. The separately identified deployed image is recorded
+below rather than being treated as byte-identical merely because it is related
+to the same source tree.
 
-### Previous live board: `5DF10D05`
-
-The following is the last accepted 5DF artifact record. It explains the
-earlier `VOLT` observation and remains useful historical evidence, but COM18
-has since been updated to interim `32FAAD86`. These sizes/hashes come from its
-earlier source-keyed build.
-
-```text
-Flash: 32,374 bytes = .text 32,120 + initialized .data image 254
-SRAM:   1,455 bytes = .data 254 + .bss 1,200 + .noinit 1
-Free:      10 application-flash bytes; 593 static-SRAM bytes
-Hash:   5DF10D05
-Source: 6416EB92A694C4CBEE7FFFFD66BA757033E3DE0FFBADAA44F044A46306BB7783
-HEX:    8BF7AE02FDCD6B10FF6B335FF49EEB55CCF59E4EE417CD27C3CE5AA5430FBC49
-Merged: E9AFF099A95862E36512BA4D1343487D219E6E68F58A1F589A7E5416C8327EBE
-EEPROM: 788E5FFC44AE4EE912FE01F495951F96B0ACCD5705E184DCAEA197D8B64856A6
-```
-
-Earlier 5DF validation covered its 14 root pages with reset count stable,
-relays off, PWM Off, and no UART framing/CRC errors. It does **not** validate
-the new Status page, menu directory, host panel capture, 20 RF slots, 1 ms
-motion break, macro queue, or offloaded LCD architecture.
-
-### Proven rollback: `E2DCE296`
-
-```text
-Flash: 32,382 bytes = .text 32,130 + initialized .data image 252
-SRAM:   1,452 bytes = .data 252 + .bss 1,199 + .noinit 1
-Free:       2 application-flash bytes; 596 static-SRAM bytes
-Hash:   E2DCE296
-HEX:    30E79054D5DF1BA359217066CBCE0E0138DAB6A74EFCE14E8898247EACCBF7A4
-Merged: 588A2DBEB37723C064324432C8D48C5F270BDFDADA80D3CB88A09EA44FFF140E
-```
-
-E2 remains historical physical-button/reset evidence only. It is not a
-feature-complete rollback for the new protocol.
-
-### Final source/live acceptance: pending
-
-```text
-Final source/build hash: PENDING FINAL CLEAN COMPILE
-Final flash/SRAM:        PENDING FINAL CLEAN COMPILE
-Final artifact hashes:   PENDING FINAL CLEAN COMPILE
-COM18 upload/read-back:  PENDING FINAL HARDWARE ACCEPTANCE
-```
-
-Do not replace these fields with a checkpoint identity. The final values must
-come from one atomic controller-tool build and the same image's COM18 HELLO and
-read-back evidence.
-
-### Latest compiled fitting non-live macro checkpoint
-
-```text
-Build/source hash: 0E5FE035
-Source SHA:        0E5FE035CEB55760257EB1EE86D4561009A1DD9B8A334FCFDA5EED4DD49D3335
-Packed date/time:  0x35019038 (260801180148)
-Flash:             32,382 / 32,384 bytes (2 bytes free)
-.text:             32,144 bytes
-.data:             238 bytes
-.bss:              1,304 bytes
-.noinit:           1 byte
-Static SRAM:       1,543 / 2,048 bytes (505 bytes before stack/interrupt use)
-Application SHA:   8E4405B5EDFAA62E2FE294D828825E7243566968334A909DC1D7017846E68907
-Merged SHA:        B8C6BA61A7DAA42FE077A38AC81D6BBFF0A4AAF33E3F9265A58F112514063416
-Live read-back:    NOT YET UPLOADED OR VERIFIED
-```
-
-The current source has changed since this manifest; these numbers remain the
-latest compiled checkpoint, not a claim about final HEAD.
-
-The earlier rejected diagnostic was 32,490/32,384 flash and 1,545/2,048 static
-SRAM. Earlier fitting checkpoint `6DCF6A68` reached 32,372 flash and 1,541
-static-SRAM bytes before the compact offline-LCD fallback and subsequent fit
-work. The latest checkpoint is a net 108 flash bytes and two static-SRAM bytes
-below the rejected diagnostic while retaining the 128-byte/127-usable byte
-ring. The final report must still give a new compiler manifest and live
-read-back evidence, and must treat the 505-byte static remainder as
-stack/interrupt headroom, not spare feature RAM.
-
-## Current compile profile
-
-This table describes non-live checkpoint `0E5FE035`, not live interim
-`32FAAD86`. The live
-interim was built before the macro/LCD-offload fit work and must not be used as
-evidence for the staged physical-LCD or macro behavior.
-
-| Setting | Staged value | User-visible consequence |
-|---|---|---|
-| Target | ATmega328P, 16 MHz, MiniCore 3.1.2 | 32 KiB flash, 2 KiB SRAM |
-| Application limit | 32,384 bytes | Retains the UART Urboot/Urclock bootloader |
-| UART | 115200 baud | Native COBS/opcode link is always enabled; Firmata/debug strings are absent |
-| LTO | Enabled | Cross-file dead-code removal/inlining |
-| `-mcall-prologues` | Enabled | Shares function entry/exit sequences; small deterministic call-cycle cost |
-| Linker relaxation | Enabled | Shortens eligible calls/jumps; no feature loss |
-| MiniCore `WIRE_TIMEOUT` | Disabled | No 25 ms TWI-only reset; startup recovery plus 2 s watchdog remain |
-| AVR LCD renderer | Disabled | Physical 2x16 LCD requires the PC host's generic-I2C renderer |
-| Generic I2C lease | Enabled | Host may cooperatively read/write other addresses, up to 16 bytes per transfer |
-| Menu directory | Enabled | Host can query exact staged menu IDs/labels instead of assuming them |
-| Addressable order | WS2811/BRG | Change compile flag for WS2812B/GRB hardware |
-| PWM polarity | Active-high logical outputs | Logical 0 is Off; 4095 is fully On |
-| PWM/INA addresses | `0x41` / `0x40` | The former collision is removed |
-
-The development EEPROM layout intentionally has no whole-project migration
-history yet. A clean EEPROM initialization is authorized during development.
-This saves migration code but means an EEPROM written by an older build need
-not load in the staged firmware.
-
-## Hardware configuration versus code size
-
-The exact address, pin, rate, averaging, resolution, polarity, startup state,
-rationale, safe alternatives, and canonical source for every board peripheral
-are documented in
-[Peripheral initialization profile](Front-Panel-and-Menus.md#peripheral-initialization-profile).
-Those values are part of the feature contract, not unexplained magic numbers.
-
-Changing an EEPROM value or a constant usually changes behavior without
-recovering meaningful flash. Space is recovered only when the associated
-driver, menu, protocol path, strings, state, and callers become unreachable
-and a clean linked A/B build proves the delta.
-
-| Configuration choice | Why it is the staged default | What a cheaper alternative loses | Space evidence |
-|---|---|---|---|
-| INA219 64x bus/128x shunt averaging | Smooth current at the desired open-door 100 ms cadence | Lower averaging is faster/noisier; removing INA loses voltage, current, power, supply correction, and host graphs | Constant-only changes are negligible; whole archived INA/Wire ownership overlaps and needs A/B |
-| PWM at `0x41`, 1 kHz, active-high | Avoids INA collision and visible MOSFET flicker while serving all 16 roles | Removing the Auto/menu layer loses offline channel identification; removing PWM loses eleven user outputs, illumination, Power/On, and status RGB | Controller/driver archived named lower bound about 1,172 bytes; marginal delta unknown |
-| Two asynchronous 11-bit DS18B20s | 0.125 C resolution without blocking UART; HOT bypass remains prompt | A lower resolution is coarser but not smaller; whole removal loses both named temperatures, ROM identities, and HOT logic | Archived named area about 792 flash bytes; marginal delta unknown |
-| Changed-only TM1637 at 20 ms | Fast front-panel feedback without redundant bus traffic or flicker | Host-only display loses offline Status, measurements, editors, commissioning, RF learn, and safety feedback | Archived local menu plus TM area exceeds 2 KiB conceptually, but is heavily shared; A/B required |
-| Safe active-low shift startup | Prevents relay energization before the first known output frame | Removing `/OE` sequencing, polarity translation, or all-off ordering is unsafe and is not an optimization candidate | Protected; no saving is offered |
-| rc-switch receive tolerance 70%, ten TX repeats | Accepts the observed remote family and provides reliable sends | Whole removal loses RX/TX, learning, 20 mappings, repeats, RF events, and RF-driven actions/macros | At least 1,010 named flash and about 184 static SRAM; true LTO delta requires A/B |
-| PC-owned LCD plus generic I2C | Retains rich connected text and cooperative future devices without a second renderer | Offline rich 16x2 rendering is lost; only the preloaded compact offline page remains | Measured saving: 1,328 flash and 49 SRAM |
-| Timer1 hardware-toggle buzzer | Fixes glitch/timer contention without starving RF interrupts | Whole removal loses boot proof, key/door/relay/save/error cues, host melodies, and Silent's purpose | About 324 archived named flash plus callers; marginal delta unknown |
-| Relay sequencing: 1 ms break, 50 ms settle, 5 ms cross-side gap | Keeps direction and enable roles correct while remaining responsive | Removing interlocks risks powered reversal or simultaneous mechanical switching | Protected; no saving is offered |
-| PWM status RGB and fixed D6 addressable sender | Gives local state/cues with small fixed drivers and no heap | Static-only status loses animation cues; strip removal loses 11-pixel effects and opcode/macro control | RGB about 332 named flash; strip about 219 flash/34 SRAM lower bound |
-| UART0 Urboot/urclock profile | One connector supports application control, programming, backup, and recovery | No-bootloader mode makes ISP mandatory and removes boot-mode integration | Exactly 384 additional application bytes, with the stated programming/recovery loss |
-
-The fixed drivers save space by deliberately omitting generic portability:
-arbitrary TM1637 pin selection, arbitrary LED pixel counts/order at runtime,
-generic Dallas device counts/parasite power, a full AVR LCD renderer, and the
-large Adafruit INA/PWM/NeoPixel abstractions. Restoring those conveniences is
-valid for another board profile, but it must be budgeted as new functionality
-rather than treated as a free configuration change.
-
-## What is actually linked
-
-| Library | Version at last dependency audit | Purpose in application |
-|---|---:|---|
-| Wire | MiniCore 1.1 | INA219, PWM, and generic host I2C transactions |
-| EEPROM | MiniCore 2.0 | Board settings, 20 RF records, reset-count journal |
-| rc-switch | 2.6.4 | 433 MHz receive and transmit |
-
-The installed Adafruit INA219, Adafruit PWM Servo Driver, Adafruit BusIO,
-DallasTemperature, OneWire, TM1637 libraries, and Adafruit NeoPixel are not
-linked into the AVR image. Fixed-hardware project drivers implement only this
-board's required paths. Uninstalling an unused package frees PC disk space,
-not one byte of MCU flash or SRAM.
-
-`rc-switch` is therefore the heaviest linked third-party feature library.
-Wire is a larger shared platform area, but it serves several peripherals at
-once and is not an independently removable feature.
-
-## Board-feature inventory by code area
-
-The following named-symbol sizes come from archived `E5109CA1`, before the
-macro queue and the current offload profile. LTO moves/inlines code across
-files, so rows overlap conceptually and are **not** additive or exact current
-removal savings.
-
-| Area | Archived named flash bytes | Current staged responsibility |
-|---|---:|---|
-| Native UART dispatcher/events | 944 plus a 3,682-byte dispatcher | HELLO hash/time, settings, telemetry, outputs, menus, RF, I2C, front panel, events, macro dispatch |
-| Local menu/display state machine | 1,570 action handler plus 722 TM1637 | 15 root pages, modal editors, blink/save feedback, 20 ms cached display |
-| Wire/TWI | 1,284 | Shared PWM `0x41`, INA219 `0x40`, cooperative generic I2C |
-| PWM driver/controller | 1,172 | Sixteen cached channels, roles, polarity, Off/Manual/Auto commissioning |
-| Relay controller | 946 | R1/R2 and R3/R4 sequencing/interlocks, R5-R8, All Off/tests |
-| rc-switch | 1,010+ lower bound | INT0 receive, INT1 transmit, repeat behavior, learning/action execution |
-| DS18B20 | 792 | Bounded two-ROM scan, identities, role swap, async 11-bit conversion |
-| I2C LCD | 712 named renderer; 1,328 whole-feature A/B | **Disabled in staged AVR profile**; generic I2C remains |
-| RF EEPROM records | 476 | Twenty checksummed records, list/remove/map/replace |
-| Status RGB | 332 | Power signal, ready/custom state, hot/fault/learn/event animations |
-| Timer1 buzzer | 324 | Queued tones, boot/key/door/relay/save/error feedback, Silent |
-| Addressable strip | 218 named | Fixed D6, 11 pixels, fill/per-pixel/brightness |
-| Reset telemetry/safe reset | Not independently measured | Reset cause/count journal, safe output shutdown, reset cue |
-| Macro queue | Final marginal A/B pending | 128-byte/127-usable ring, MCU scheduling, compact lifecycle/timing status |
-
-Archived important static allocations were:
-
-| Area | Approximate static SRAM bytes |
+| Evidence | Current value |
 |---|---:|
-| HardwareSerial object and buffers | 157 |
-| Two rc-switch instances and timing buffer | 184 |
-| Wire/TWI objects and buffers | about 186 |
-| Four advanced key objects | 88 |
-| Fixed task manager | 73 |
-| Native UART receive/decoder | 68 |
-| PWM cache/controller | 51 |
-| Timer1 buzzer queue/state | 50 |
-| AVR LCD cache/state | 43; absent when renderer is disabled |
-| System-input debounce/history | 39 |
-| Addressable LED pixel buffer | 33, with no heap duplicate |
-| Macro byte ring | 128 plus compact report/state; final total pending map |
+| Embedded build identity | `6B075495` |
+| Independently aggregated source SHA-256 | `6b075495cb0d270ca8e5b65b86354fda18e66fd5605d765e9960abf5c2c0ac13` |
+| Application HEX SHA-256 | `7fc43de5c342cd02a9c0d604e84972c4a3614d8192da85fc25f62dd922487cbd` |
+| `.text` | 32,140 bytes |
+| Initialized `.data` image | 204 bytes |
+| Linker-reported sketch program | 32,344 bytes (`.text + .data`) |
+| Profile-derived firmware identity | 12 bytes at `0x7E74..0x7E7F` |
+| Application HEX data | 32,356 bytes; highest address `0x7E7F` |
+| Stock 32,384-byte application-range free | 28 bytes |
+| Immediately linkable before identity | 28 bytes |
+| Static SRAM | 1,474 bytes (`.data` 204 + `.bss` 1,269 + `.noinit` 1) |
+| Estimated peak SRAM | 1,779/2,048 bytes |
+| Estimated free SRAM | 269 bytes, against the enforced 96-byte minimum |
 
-Protocol sends also use bounded local buffers on the stack. Static free SRAM is
-not the usable stack guarantee; RF and TWI interrupt nesting, COBS frames,
-macro dispatch payloads, and call depth all need margin.
+The peak estimate includes a measured 245-byte serial response path and a
+60-byte concurrent INT0/RF allowance. The 574-byte difference between static
+allocation and the top of SRAM is therefore not all available for new global
+objects.
 
-## Space already recovered and exactly what was lost
+### Deployed-board checkpoint
 
-### Compiler/linker savings: no feature loss
+The COM18 board authenticated as source identity `800A5B70`. Its
+exact deployed application artifact is SHA-256
+`bb928b7b680d6e393d842bd28412b6760340a2ff61ae40b21a926036358bb092`.
+The primary-owned Urclock transaction backed up, wrote, semantically verified
+32,244 programmed bytes, and reauthenticated the application before reporting
+success.
 
-The controlled archived sequence was:
+The host cleared the durable recovery marker only after reconnecting through
+the saved COM18 device Instance ID and completing development EEPROM
+reinitialization. The verified board defaults are Silent off, illumination Off,
+output persistence off, relay restore mask zero, and motion break 1 ms. The
+latest live safe-state sample reported 12.282 V, PWM available, zero active
+relays, zero framing/CRC protocol errors, and reset count 22. No optional LCD
+was detected; that is a warning-only capability absence rather than a firmware
+or recovery failure.
 
-| Experiment | Flash bytes | Change at that step | User-visible loss |
+### Bootloader ceilings and profile-derived identity
+
+The application image fits the selected stock-core boot allocation. The
+identity footer is computed from that profile's generated application limit;
+it is not a universal address shared with every bootloader profile:
+
+| Boot profile | Application range | Data-byte headroom | Immediately linkable headroom | Consequence |
+|---|---:|---:|---:|---|
+| Stock 384-byte Urboot | 0..32,383 | 28 bytes | 28 bytes before `0x7E74` | Current selected profile; the identity occupies the final 12 application bytes. |
+| 512-byte Urboot-Custom | 0..32,255 | Does not fit | At least 100 bytes must be reclaimed | A custom feature profile must link at or below 32,244 bytes so its own 12-byte identity can occupy `0x7DF4..0x7DFF`. |
+
+Thus the stock profile has 28 bytes of practical growth. Urboot-Custom itself
+occupies 510 meaningful bytes in a 512-byte allocation; its two erased bytes do
+not increase the application ceiling. It remains a separate feature profile,
+not a compatibility promise for this alpha version build.
+
+### Current EEPROM allocation
+
+The generated safe-default EEPROM artifact deliberately covers all 1,024
+bytes, but the firmware does not semantically own every byte:
+
+| EEPROM range | Bytes | Current owner |
+|---|---:|---|
+| `0..31` | 32 | Unallocated |
+| `32..72` | 41 | 31-byte `ControllerSettings`, one name length, eight name bytes, and CRC |
+| `73..79` | 7 | Unallocated alignment gap |
+| `80..323` | 244 | Four-byte RF header plus 20 checksummed 12-byte learned-code records |
+| `324..335` | 12 | Unallocated alignment gap |
+| `336..719` | 384 | 64-slot, six-byte reset-count journal |
+| `720..966` | 247 | Nineteen 12-byte status-effect condition descriptors, each with CRC |
+| `967..1023` | 57 | Unallocated |
+
+There are therefore 108 logically unallocated EEPROM bytes. Reducing RF or
+reset-journal capacity would free EEPROM only; it would not materially solve
+the application-flash ceiling.
+
+## Current measured symbol envelope
+
+AVR LTO folds and inlines page branches, so symbol size is not the same as
+removal saving. The current ELF nevertheless gives useful, reproducible bounds:
+
+| Current linked area | Measured bytes | Interpretation |
+|---|---:|---|
+| `handleMenuAction` | 1,956 flash | All leaf navigation and modal edit behavior; individual pages are inlined into this shared function |
+| `serviceDisplay` | 1,468 flash | All ordinary-page and modal rendering; individual page removal cannot claim this whole value |
+| Named menu labels/helpers around those two functions | 741 flash | Exact sum of the packed label tables plus named visibility/order/category helpers |
+| Total named local-menu envelope | 4,165 flash | Scale only; removing the menu would also remove essential offline control and does not necessarily recover the sum |
+| Visibility/order/category named helpers | 370 flash | Lower-bound symbol envelope; their inline dispatcher portions remain unseparated |
+| Menu visibility/order fields | 9 SRAM and 9 EEPROM bytes | Exact difference between the current 31-byte settings record and the 22-byte no-layout record |
+| Operator board name | 9 SRAM and 9 EEPROM bytes | One length byte plus eight printable ASCII bytes inside the current profile's CRC-backed settings record |
+| MCU macro playback object | 157 static-SRAM bytes | Exact object allocation; flash dispatcher paths are shared |
+| Addressable-pixel buffer | 33 static-SRAM bytes | Exact 11-pixel RGB buffer |
+| rc-switch receive timings | 134 static-SRAM bytes | Exact pulse-timing array, before receiver/transmitter state |
+
+Only a clean feature-on/feature-off build can convert these envelopes into a
+net saving. The table below labels every non-isolated value as an estimate.
+
+## Ownership principle
+
+Firmware owns behavior that must remain safe or useful when the host is absent:
+
+- protocol framing, CRC, bounds, sequencing, and watchdog service;
+- input sampling, debouncing, hold/repeat, and emergency stop;
+- relay break-before-make and reed interlocks;
+- sensor acquisition and essential telemetry;
+- persistent board settings and their CRC;
+- minimal front-panel status, navigation, and save/discard editing;
+- RF receive/transmit and guarded learned-action execution;
+- safe output defaults and reset behavior.
+
+The host owns behavior that benefits from memory, a filesystem, networking, or
+richer presentation:
+
+- responsive WebUI/TUI rendering, graphs, histories, search, and localization;
+- names, categories, icons, color themes, audio arrangements, and help text;
+- scripts, macros, automations, global hotkeys, notifications, and bridges;
+- optional LCD composition and hosted menu overlays;
+- toolchain management, artifacts, backups, programming, and recovery records;
+- discovery enrichment, desktop integration, and remote authorization policy.
+
+Moving a feature to the host must not move its hardware safety invariant out of
+firmware.
+
+## Features that must not be removed for space
+
+| Area | Required invariant |
+|---|---|
+| Native protocol | COBS delimiter, CRC-8, sequence correlation, payload bounds, supported-opcode validation |
+| Relays and motion | Disable/break/direction/enable sequencing, stop availability, local reed gating |
+| Settings | CRC validation, canonical defaults, bounded decode, deferred writes |
+| Reset | Safe output initialization, reset-cause capture, watchdog behavior |
+| I²C | Startup recovery, bounded transactions, cooperative ownership |
+| RF | Record bounds/CRC and no unsafe direct motion mapping |
+| Programming | Authenticated handoff state and deterministic boot/application identity |
+
+If one of these no longer fits, reduce optional capability or change the target;
+do not silently weaken the invariant.
+
+## Best offload candidates
+
+| Candidate | Firmware responsibility retained | Host responsibility |
+|---|---|---|
+| Rich LCD pages | Generic bounded I²C transfer and essential status | Text layout, caching, menus, localization |
+| Long melodies/effects | One bounded tone/frame operation and silent setting | Sequencing, names, cancellation, timing |
+| Telemetry history/graphs | Current samples and timestampable events | Storage, aggregation, charts, export |
+| Macro libraries | Safe individual operations and small deterministic queue where needed | Names, long sequences, branching, scheduling |
+| Menu metadata | Stable page IDs and minimal local labels | Full titles, descriptions, categories, icons |
+| RF catalog UX | Learn/list/map opcodes and guarded execution | Search, formatting, bulk editing, audit history |
+| Update workflow | Boot/application identity and protocol handoff | Download, hashing, backup, programmer, verify, recovery |
+
+## Board features that are still genuinely missing
+
+These are implementation gaps in the current AVR candidate, not merely absent
+TUI labels:
+
+The compact on-board motion-door policy editor is no longer a gap. Board
+Settings item `SAFE` rolls through numeric values 0 Always, 1 Closed only,
+2 Open only, and 3 Never, previews the fail-safe gate immediately, and uses the
+same atomic Save/Discard transaction as the other local settings. Folding the
+previously duplicated category-label renderer into the shared packed-label
+path more than paid for it: compared with candidate `800A5B70`, application
+and full-flash data both fell by 26 bytes, static SRAM rose by one byte, and the
+EEPROM layout did not change.
+
+| Requested board capability | What exists now | Exact missing portion | Cost/evidence |
+|---|---|---|---:|
+| Board-pull hosted menus | The host has six file-watched menu definitions. The AVR supports pushed `DisplayText` capture/release, forwards physical keys, and releases capture after host loss. | AVR opcodes `0x42..0x44` and events `0x9A..0x9B`, the eight-entry RAM directory, generation/state, content request on selection, retry timing, `----`, and terminal failure presentation are not in `ControllerProtocol::Opcode` and no capability advertises them. | 450-850 flash, 30-40 SRAM. The directory alone is exactly 24 bytes for eight `{id,parent,flags}` entries; existing 4+32 display buffers can be reused. |
+| EEPROM-configurable buzzer cues | Door and relay cue families have EEPROM enable bits, but their tones are fixed: door open/closed are 1,700/1,100 Hz for 45 ms; relay on/off are 1,900/1,250 Hz for 35 ms. | Persistent selectable cue IDs or note/frequency/duration definitions for door-open, door-close, relay-on, and relay-off, plus settings/protocol/menu fields. | Two retained A/B measurements bound the choice: the compact five-byte choice-table candidate used 33,032 program, 1,442 static-SRAM, and 5 EEPROM bytes; the full four-descriptor candidate used 33,238 program, 1,455 static-SRAM, and 13 EEPROM bytes. Against the current 32,244-byte fixed-identity boundary, they exceed it by 788 and 994 bytes respectively. Neither candidate is shippable in the shared image layout. |
+| Board EEPROM automation | Twenty learned RF records can directly map one code to Key/Menu/Relay/Side/PWM behavior. Host automations can react to all events. | There is no generic EEPROM event-to-action rule table for door, BT Audio, relay, host loss, temperature, or other events; no board rule can invoke RF transmit or a macro on those events. Host-loss handling is fixed, not programmable. | 700-1,400 flash, 16-24 SRAM, and about 108 EEPROM bytes for eight compact rules plus an atomic header and CRC that reuse ordinary opcode validation. |
+
+The current 117-byte unallocated EEPROM area can hold compact cue and
+automation records. Flash, not EEPROM, is the limiting resource.
+
+## Menu migration candidates and exact losses
+
+The estimates below are based on the current 4,165-byte named menu envelope
+and source branches in the shared 1,956-byte action and 1,468-byte render
+functions. They are deliberately ranges: none has a current isolated A/B
+build, and ranges must not be added to a release manifest as measured bytes.
+
+| Candidate moved to the host | Estimated net flash | SRAM effect | Functionality and improvement lost on the board |
 |---|---:|---:|---|
-| LTO baseline, no Wire timeout | 32,920 | Baseline | None |
-| Add linker `--relax` | 32,496 | -424 | None |
-| Add `-mcall-prologues` | 31,682 | -814 | None; a few more cycles on some calls |
-| Add `WIRE_TIMEOUT` | 32,378 | +696 | Added recovery feature, but live behavior was unstable |
+| `PWM`, `rELY`, `uPWM`, and `r5-8` commissioning/editors as one group | 900-1,500 | 4-10 bytes | No offline channel-by-channel PWM test, relay commissioning, local EEPROM user-PWM editing, or local R5-R8 Toggle/Push control. Direct opcodes, host sliders, macros, output persistence, relay interlocks, and `MOVE` can remain. |
+| Advanced fields in the `bEEP` settings editor, retaining a small Mute/Beep action | 300-600 | 1-4 bytes | No local adjustment of open/closed segment brightness, status brightness/Ready color, or voltage/current decimals; stored values still apply and remain host-editable. Removing the whole page also loses offline Silent control. |
+| Local RF learning page/UI, retaining RX/TX and stored mappings | 120-260 | 0-6 bytes | The front panel cannot start learning or show learned count/progress; a host is required to learn/cancel. Previously stored mappings still execute locally. |
+| Voltage/current/tLED/tBT render pages only | 160-320 | Approximately 0 | Sensors, HOT handling, and telemetry remain, but measurements cannot be read from the four-digit display while the host is absent. |
+| Persistent visibility, order, hierarchy, and layout protocol | 500-850 | Exactly 9 static bytes | Loses EEPROM show/hide and reordering, four nested categories, and host `MENU_LAYOUT` read/write. Stable dense pages could still exist in fixed order. The named current lower-bound envelope is 370 flash bytes. |
+| Board `MenuList` directory | 80-180 | Approximately 0 | The host must hard-code local IDs/modes/labels and can silently drift from the firmware. Not recommended. |
+| Addressable D6 strip | 200-350 | Exactly 33 bytes | Loses all 11 WS2811/WS2812 pixels, fill/per-pixel commands, and future strip effects. Current `show()` alone is 158 linked bytes, so 158 is a lower bound, not the net saving. |
+| Smooth status RGB animations/cues, retaining static status colors | 200-420 | 3-10 bytes | Loses eased door/BT/RF/menu/save/discard/reset transitions and breathing/flashing distinctions. Hard warning indications can remain. |
+| Buzzer and melodies | 300-550 | About 50 bytes | Loses boot health melody, key feedback, door/relay/save/discard/error cues, host-streamed tones, and the purpose of Silent mode. |
+| MCU macro timing queue | 500-900 | Exactly 157 bytes for the playback object | Loses board-clock scheduling, USB-jitter buffering, precise execution deltas, queue/fidelity metrics, synchronized cancellation, and host-loss safe-stop. |
+| rc-switch receive/transmit/learning | At least 900 | About 180 bytes | Loses all 433 MHz RX/TX, repeat recognition, learning, 20 mappings, RF events, and RF-driven actions. The 632-byte interrupt handler plus visible support symbols already exceed 900 linked bytes. |
 
-Because optimizations interact, removing one option from the final combination
-gave 442 bytes for relaxation and 856 bytes for shared prologues. Do not add
-those values together with the sequential table as though they were
-independent.
+Relay interlocks, stop paths, protocol bounds/CRC, settings CRC, watchdog,
+startup I2C recovery, and reset-safe output ordering are excluded from this
+list: removing any of them would trade bytes for unsafe behavior.
 
-Source-level serializer sharing recovered 214 bytes in 5DF: 162 bytes by
-copying fixed telemetry blocks and 52 by sharing the settings prefix. EEPROM
-output remained byte-identical and static SRAM stayed 1,455 bytes. No protocol
-field or menu function was lost.
+### Minimum combinations
 
-The current combined fit series is a net 108 flash bytes and two static-SRAM
-bytes below rejected checkpoint 32,490/1,545, producing non-live checkpoint
-32,382/1,543. An intermediate checkpoint reached 32,372/1,541 before compact
-offline-LCD support and later fit edits. Because features and optimizations
-changed together, the following losses must not be assigned invented per-edit
-byte values:
+For the **current stock-core feature profile**, the minimum removal is
+**none**. It has 28 bytes before its derived identity footer. The current image
+does not fit the 512-byte Urboot-Custom profile; that separate profile needs at
+least 100 bytes reclaimed before it can reserve its own footer.
 
-- planned macro duration is host-owned rather than duplicated in the AVR
-  report; the board cannot independently calculate percent complete or show a
-  planned duration when the host does not provide that metadata;
-- underrun and dispatch-error counters are 8-bit; more than 255 of one error
-  type in a playback cannot be represented faithfully;
-- late-step count and maximum timing error were removed from the AVR report;
-  instead, the report carries the RUN `startedAtUs`, and reserved-sequence
-  `0xFE` ACK/error responses carry the AVR `deviceMicros`. The host computes
-  exact signed board-clock deltas as `deviceMicros - (startedAtUs + dueOffset)`
-  and owns the aggregates. The loss is standalone on-board aggregates, not
-  precise timing evidence;
-- queue free space and overall fidelity are derived by the host from fill,
-  lifecycle, counters, and ACK/error evidence instead of occupying explicit
-  AVR report fields;
-- full status is sent for lifecycle/query, not every step; observers get exact
-  reserved-sequence ACK/error result and timestamp evidence but not a large
-  per-step status snapshot;
-- the supported host rejects empty macros, while the AVR omits a duplicate
-  empty-RUN guard; a raw third-party client can start a zero-step session that
-  requires Cancel or the five-second host-loss timeout to clear;
-- read-only HELLO, Status, Settings, Temperature List, Front Panel, and PWM
-  query handlers ignore surplus payload bytes instead of returning BadPayload.
-  Valid requests and their responses are unchanged, but malformed read-only
-  queries receive data rather than a strict payload error;
-- addressable-strip brightness is pre-scaled by the supported host when a
-  pixel/fill command is created. The AVR accepts the legacy fifth brightness
-  byte but does not rescale its buffer, reports brightness 255, and cannot
-  later change global brightness without the host resending source colors.
-  Raw/older clients that send unscaled RGB plus a non-255 brightness value will
-  therefore produce brighter output than requested;
-- timed schema-2 responses append a four-byte MCU clock to ACK frames and set
-  the high bit of timestamped Event types. A host parser that assumes the old
-  two-byte ACK or untagged event type is incompatible unless it implements the
-  dual-schema decoder.
+For the missing features above, the smallest defensible planning combinations
+are:
 
-Most are diagnostics/compatibility tradeoffs rather than removed output
-functions; board-side addressable global re-scaling is the direct output UX
-loss. Relay/PWM safety validation, native payload bounds, COBS/CRC,
-cancellation, host-loss safe-stop, variable macro payloads, and MCU-clock
-scheduling remain.
+| Goal | Estimated new flash | Minimum migration to measure first | Stock 384-byte consequence | 512-byte Urboot-Custom consequence |
+|---|---:|---|---|---|
+| Structured board-pull hosted menus only | 450-850 | Move the four output commissioning/edit pages (estimated 900-1,500) | Reclaim about 424-824 bytes beyond the current 26-byte reserve. | Reclaim about 552-952 bytes including the custom profile's existing 102-byte deficit. |
+| Board-pull menus plus compact configurable door/relay cues | 630-1,210 | Same output-editor migration; add the local RF-learning UI migration only if its A/B result is short | Reclaim about 604-1,184 bytes beyond the current reserve. | Reclaim about 732-1,312 bytes including the profile deficit. |
+| Board-pull menus, compact cues, and generic EEPROM automation | 1,330-2,610 | Output editors + advanced settings fields + local RF-learning UI (combined estimate 1,320-2,360); measure, then add render-only measurement-page migration if still short | Reclaim about 1,304-2,584 bytes beyond the current reserve. | Reclaim about 1,432-2,712 bytes including the profile deficit; the proposed migration is not guaranteed at the high estimate. |
 
-### `WIRE_TIMEOUT` disabled: one robustness feature lost
+The last combination is only a **minimum experiment**, not a promise that it
+will link. If its isolated A/B result does not cover the chosen concrete rule
+schema, removing persistent nested-menu layout would probably close the gap but
+would directly undo a requested feature. Prefer a commissioning/production
+profile split or a larger-flash MCU over sacrificing motion safety, the macro
+queue, RF, buzzer, addressable LEDs, or persistent nested-menu behavior.
 
-Disabling MiniCore's timeout path saved about 696 bytes relative to enabling
-it. The loss is precise: a wedged runtime TWI transaction no longer gets a
-25 ms TWI-only reset. Startup SDA/SCL recovery and the 2-second watchdog remain,
-so the fallback may reset the whole MCU and lose volatile state. The timeout
-was removed only after its enabled image produced repeatable live resets.
+## Optional cuts, in preferred order
 
-### AVR LCD renderer disabled: standalone physical LCD lost
+When the candidate exceeds its budget, measure each change independently. The
+usual order is:
 
-The archived A/B build recovered exactly 1,328 flash bytes and 49 static SRAM
-bytes by disabling the full PCF8574/HD44780 scan, initialization, cache, and
-two-line writer. Re-measure the marginal delta on the final macro source.
+1. remove duplicate strings and diagnostics already available from the host;
+2. simplify optional local animations while preserving clear state feedback;
+3. move rich display composition to the host-owned LCD path;
+4. reduce optional convenience aliases, not canonical protocol operations;
+5. reduce rarely used local editors only after the setting remains safely
+   reachable and visible through a maintained host surface;
+6. reconsider the bootloader progress backend or application ceiling only with
+   a complete recovery plan.
 
-User-visible losses in the staged profile are:
+Do not estimate savings from source line count. AVR linker relaxation, shared
+templates, constant folding, vtables, and library selection make intuition
+unreliable.
 
-- the MCU cannot discover or initialize the backpack by itself;
-- local menu/status text does not appear on the physical LCD without the PC;
-- the MCU cannot render arbitrary new offline text after the host disappears;
-- a legacy `DisplayText LCD` command only updates the logical 32-character
-  mirror unless the host also performs physical generic-I2C writes.
+## Measurement procedure
 
-Still retained:
+For every proposed tradeoff:
 
-- the TM1637 and its complete standalone menu;
-- host-visible desired LCD text in the exact front-panel snapshot;
-- cooperative generic I2C reads/writes to any 7-bit device address;
-- the ability for the PC host to scan `0x27`/`0x3F`, initialize the LCD, cache
-  rows, and drive it physically through those generic transactions;
-- a small staged fallback: after a host has preloaded hidden DDRAM with
-  `PC offline      ` / `Connect USB toPC` and taught the MCU the address, five
-  seconds of heartbeat loss makes the MCU issue sixteen display-left shifts
-  to reveal that prepared page.
+1. Start from a clean candidate source identity.
+2. Build with the same locked toolchain, flags, bootloader ceiling, and feature
+   profile used for delivery.
+3. Record full-image flash, `.data`, `.bss`, `.noinit`, estimated peak SRAM,
+   artifact SHA-256, and toolchain identity.
+4. Change one feature boundary.
+5. Rebuild cleanly and compare manifests, not console recollection.
+6. Run the focused protocol/settings/menu/output tests affected by the change.
+7. Run the full firmware, host, and Virtual Board compatibility gate.
+8. Update the capability matrix and user-facing documentation.
+9. If the image will ship, upload that exact image, authenticate it, read it
+   back, and perform the applicable physical checks.
 
-The host-side physical renderer and fallback need physical test evidence before
-this can be called feature-equivalent. The compact MCU helper cannot initialize
-the backpack or verify the hidden contents; without successful host preload it
-either shifts unknown DDRAM or does nothing when no address was learned. The
-logical 32-byte mirror retains its last text during abrupt loss; only physical
-DDRAM is shifted.
+## SRAM rules
 
-Host integration now separates `lcd_service_enabled` (default true) from
-`mirror_prompt_to_lcd` (default false), routes captured hosted-menu LCD rows to
-the physical presenter, and calls `PrepareDisconnect` best-effort with a
-350 ms bound during runtime detach. The remaining gap is proof, not the basic
-source path: pass host tests and observe preload, abrupt loss, planned detach,
-and reconnect on the physical display before claiming feature equivalence.
+Flash headroom alone is not enough. Reserve space for:
 
-### Generic libraries replaced by fixed drivers: portability lost
+- the deepest normal call chain;
+- interrupt entry and nested library calls;
+- UART/native frame buffers;
+- Wire/TWI buffers and sensor library state;
+- RF receive activity;
+- local menu/editor snapshots;
+- stack variation during reset, settings, and programming handoff.
 
-The compact drivers keep this board's required operations but intentionally
-lose unused generic APIs:
+Avoid large automatic arrays, recursive flows, `String`, unbounded formatting,
+and duplicate frame buffers. Prefer fixed-size structures, explicit maximums,
+streaming, and one shared ownership path.
 
-- DS18B20: no parasite-power strong pull-up, alarms, scratchpad save/recall,
-  arbitrary family/device count, or broad OneWire helpers;
-- INA219: no alternate calibrations, arbitrary Wire instance, power-save/reset
-  convenience API;
-- PWM: no servo-microsecond helpers, external oscillator calibration,
-  arbitrary bus, or generic sleep/output-mode API;
-- WS LEDs: no arbitrary pin/count/chipset, gamma/palette framework, runtime
-  pixel type, or heap-managed buffer;
-- TM1637: no arbitrary display abstraction or generic animation library.
+## Alpha version and feature-profile compatibility rules
 
-The current requested fixed pins, addresses, two temperatures, measurements,
-16 PWM outputs, and 11 addressable pixels remain.
+- A new alpha **version build** may directly replace an unpublished protocol,
+  flash, or EEPROM layout. Do not add a migration chain, dual decoder,
+  compatibility alias, or preservation branch solely for an earlier alpha
+  version; retain the raw backup and reinitialize explicitly.
+- Compatibility/preservation is implemented only for distinct
+  **profile/feature builds that remain supported concurrently**. Those profiles
+  advertise capabilities and declare their application limit, identity address,
+  and persistence layout independently.
 
-### Firmata and text-debug protocol removed: ecosystem compatibility lost
+- Stable opcodes and known payload semantics are not removable UI aliases.
+- Unknown operations fail explicitly.
+- Supported trailing extensions may be ignored only where the protocol says so.
+- Exact-shape settings/menu records remain exact; do not invent migration from
+  an unsupported EEPROM layout.
+- The host and Virtual Board must be updated and tested in the same change as a
+  firmware contract change.
+- User-editable branding must never alter wire identity.
 
-Firmata and the old newline/string command/debug channel are not linked. The
-exact marginal saving was not preserved as an isolated A/B build. The loss is
-support for generic Firmata clients and convenient human-readable serial
-sessions. The gain is one always-enabled 115200-baud UART dedicated to the
-bounded COBS/CRC opcode protocol, bootloader handoff, precise events, and host
-bridge. Restoring Firmata would also reintroduce UART ownership ambiguity and
-is not a space-neutral compatibility switch.
+## Decision record template
 
-### Development EEPROM migrations removed: old EEPROM compatibility lost
-
-The staged layout validates only its current checksummed settings and records.
-Removing project-history migration means an old development EEPROM may fall
-back to defaults and its old RF/settings bytes are not imported in place. It
-does not remove current settings or the PC host's ability to back up/restore
-the EEPROM.
-
-### Changes that do not solve the flash limit
-
-- Reducing learned RF capacity from 20 back to 8 would free 144 EEPROM bytes,
-  but essentially no application flash or static SRAM; it would simply lose
-  twelve remote-code slots.
-- Shortening the reset journal likewise frees EEPROM endurance/storage, not
-  the application flash that caused the earlier 106-byte-over diagnostic.
-- Selecting Silent, PWM Off, or hiding a menu at runtime does not remove its
-  compiled implementation.
-- Uninstalling unused Arduino libraries frees PC disk only.
-- UPX compresses the Windows host executable and has no effect on AVR flash.
-
-## Local-versus-host menu placement options
-
-The complete per-page decision matrix, including offline behavior and protocol
-dependencies, is in
-[Board Features, Front Panel, and Menus](Front-Panel-and-Menus.md#menu-placement-decision-matrix).
-This size-oriented summary does not authorize a migration. No page should move
-silently: select it, perform an isolated A/B build, and accept the offline loss
-first.
-
-| Page/candidate | Default decision | Offline impact if host-only | Protocol dependency | Measured/estimated result |
-|---|---|---|---|---|
-| `STAT` | Keep | Loses standalone home/door state and hosted-menu request point | Status/events, front-panel capture/display | Unmeasured; small likely cut, high availability cost |
-| `VOLT` | Keep | Loses standalone supply diagnosis | Telemetry/status | Unmeasured render-only cut; INA stays |
-| `CURR` | Keep | Loses standalone current diagnosis | Telemetry/status | Unmeasured render-only cut; INA stays; host gains SI formatting/graphs |
-| `tLED` | Keep | Loses local illumination-temperature/HOT view | Temperature list/telemetry | Unmeasured render-only cut unless DS18B20 is also removed |
-| `t-bt` | Optional move | Loses local BT-module temperature | Temperature list/telemetry | Unmeasured small cut; host gains ROM/name presentation |
-| `LItE` editor | Keep controller; optionally move editor | Lighting still runs, but mode/on/off brightness cannot be changed locally | Settings read/write and hosted fields | Unmeasured; host gains exact sliders/validation |
-| `bt` | Keep | Loses local Off/On/Blinking diagnosis | BT status/event | Unmeasured small cut; host gains history/automation |
-| `Snd`/Board Settings | Split: keep Silent, consider moving advanced fields | Moved EEPROM values still apply but cannot be edited locally | Settings read/write | Unmeasured shared editor; strong host table/color UX gain |
-| `PWM` commissioning | Move first if bytes are needed | Loses offline fade/channel identification and local Off/Manual/Auto | PWM get/set/mode and macro engine | Best candidate; delta requires A/B; host gains sliders/names/repeatable tests |
-| `rELY` commissioning | Move after relocating an obvious All Off | Loses local per-relay test | Relay/motion commands and events | Good candidate; delta unmeasured; host gains labeled live controls |
-| `KEY` | Keep | Loses UART-independent key/wiring identification | Key events/capture | Likely small unmeasured saving, little gain |
-| `uPWM` editor | Move after commissioning pages | Stored values run but cannot be edited/saved locally | PWM and stored-settings path | Delta unmeasured; host gains precision/presets/macros |
-| `r5-8` | Keep unless PC-only output control is accepted | Loses local Toggle/Push general outputs | Relay commands/events and capture | Delta unmeasured; host gains hotkeys/source attribution |
-| `MOVE` | Keep | Loses Windows/USB-independent held motion | Motion commands/events; MCU interlock still mandatory | Unmeasured; availability/safety cost is too high |
-| `LErn` | Move only after host RF UX acceptance | Learned mappings still run; new learning/count/cancel needs PC | Learn/list/replace/map and RF events | Delta unmeasured; major host naming/category/reorder gain |
-| Shared Save/Discard | Keep while any local editor remains | Local writes become immediate or unavailable | Settings ACK/readback | Shared delta; cannot assign to one page |
-| `MenuList` | Keep | Host must hard-code page IDs/labels and can drift | Paginated menu directory | Likely small unmeasured cut; compatibility cost is high |
-
-Current built-in PC-hosted menus are `host`, `pc-settings`, and
-`system-actions`. Macro/RF-library and richer board-settings hosted menus are
-still acceptance work, so their planned UX must not be used as proof that a
-local page is already replaceable.
-
-## Prioritized optional removal table
-
-“Unknown” means an A/B build has not isolated the marginal delta. A named
-symbol lower bound is useful for scale but must never be promised as recovered
-space. Rows marked **protected** should not be used as routine flash cuts.
-
-| Priority | Candidate | Current evidence | Exact user-visible loss if removed | Recommendation |
-|---:|---|---|---|---|
-| 1 | Keep AVR LCD renderer off | Archived A/B: **1,328 flash, 49 SRAM** | No standalone discovery/init or arbitrary LCD rendering; only a host-preloaded compact offline page can be shifted after loss | Already applied; physically test host preload, detach, loss, and reconnect |
-| 2 | Move all-channel PWM commissioning/Auto demo to host macros | Delta unknown; PWM/menu code overlaps | No offline channel-identification fade or local Off/Manual/Auto editor; direct PWM, saved 0-7 values, illumination/status remain if carefully split | Best next A/B cut after macro compiles |
-| 3 | Move R1-R8 commissioning page to host | Delta unknown | No offline relay-by-relay test page or local K3 All Off from that page; host direct relay/motion and safe sequencer remain | Good offload candidate; retain a global safe-stop gesture |
-| 4 | Remove local `uPWM` editor | Delta unknown | Front-panel cannot edit/save PWM 0-7; host/API can still do it and EEPROM can retain values | Reasonable if PC is normally attached |
-| 5 | Remove local RF learning root | Delta unknown | Cannot start/cancel learning or see count without host; RF receive/transmit/mappings may remain | Reasonable only after host learning UX is accepted |
-| 6 | Remove board MenuList directory | Delta unknown | Host loses authoritative IDs/labels and can drift back to wrong Status/Voltage numbering | Small likely saving; strongly discouraged |
-| 7 | Remove addressable strip support | Named lower bound **219 flash, 34 SRAM** | No D6 WS2811/WS2812 pixels, fill, brightness, custom colors, or future strip effects | Remove only if the strip is physically unused |
-| 8 | Simplify status RGB animations to static state | Archived area about **332 named flash**; marginal unknown | Loses breathing/flashing and distinct door/BT/RF/menu/save/discard/hot/fault/reset cues; static power/ready could be retained | High UX cost; A/B before deciding |
-| 9 | Remove buzzer/melodies | Archived area about **324 named flash** plus inlined callers; marginal unknown | Loses boot health confirmation, key beep, door/relay cues, save/discard/error sound, streamed tones, and Silent's purpose | Not recommended; user explicitly relies on boot melody |
-| 10 | Remove reset telemetry journal | Delta unknown | No persistent reset count and reduced cause diagnostics; safe reset can remain separately | Poor trade during hardware debugging |
-| 11 | Remove DS18B20 support | Archived area about **792 named flash** | Loses Temperature LED/BT, ROM identification, host readings, hot warning, and illumination thermal test | Large functional loss |
-| 12 | Remove the MCU macro timing queue | Final A/B delta pending | Host could still send individual commands, but precise MCU-clock playback, USB-jitter buffering, queue/fidelity metrics, synchronized cancel, and safe host-loss handling are lost | Do not remove; it is a current core requirement |
-| 13 | Remove rc-switch completely | Named lower bound **1,010 flash, 184 SRAM**; true LTO delta larger | Loses 433 MHz RX, TX, learning, 20 mappings, repeats, RF events, and RF-triggered actions/macros | Biggest third-party cut, but contradicts core requirements |
-| 14 | Remove front-panel snapshot/host capture | Delta unknown | No exact remote 7-seg/LCD preview, remote physical-equivalent keys, or PC-hosted menus | Do not remove; core PC integration |
-| 15 | Use no-bootloader memory profile | Exactly **384 additional application bytes** | Loses normal UART Urboot/Urclock programming, backup, and recovery path; ISP becomes necessary | Do not use for this project |
-| 16 | Remove relay interlocks, CRC/bounds, EEPROM validation, watchdog, startup I2C recovery, or safe reset | Not offered | Can energize unsafe outputs, accept corrupt commands/settings, hang, or reset unsafely | **Protected: never a flash optimization** |
-
-If the first five offloads are insufficient, prefer a commissioning/production
-profile split or a flash-larger MCU revision. A profile split keeps every
-feature in source but means one flashed image cannot use features compiled only
-into the other profile. A larger MCU is the only path that preserves all local
-UI, richer animations, the macro engine, and future protocol growth without
-continually trading them against one another.
-
-## What can be removed without changing current behavior?
-
-Only compiler/linker dead code and redundant representations are truly free.
-The remaining useful approaches are:
-
-- remove duplicated old inbound wire schemas after confirming the new host is
-  the only writer; the loss is compatibility with older host executables, not
-  a current board feature;
-- consolidate repeated labels/serializers and let LTO share helpers;
-- keep fixed hardware drivers instead of generic APIs;
-- keep menus and macro steps data-driven rather than duplicating dispatch;
-- reuse ordinary opcode validation for macro playback instead of adding a
-  second board allowlist or policy tree;
-- offload rich strings, categories, histories, graphs, and custom menus to the
-  PC while retaining compact IDs/events on the MCU.
-
-Every such source change still needs a clean A/B build because AVR LTO and
-layout-sensitive menu code can make an apparently small edit grow or move
-other functions.
-
-## Finalization-only architecture work
-
-These are maintainability requirements, not byte-removal options, and are
-deliberately deferred until the protocol and EEPROM layouts stop moving:
-
-1. Add concise, human-readable one-line or short multi-line documentation to
-   otherwise unexplained functions, variables, and domain state.
-2. Keep `PCController.ino` as a high-level lifecycle/composition file by
-   moving remaining domain variables and functions into focused classes and
-   custom logic files.
-
-Neither item is complete merely because several controllers already live in
-`Project/`. The finalization audit must inspect the master sketch again and
-must not claim completion until the final behavior/size build still passes.
-
-## Reproducing the final audit
-
-Use the project controller's compile command so source hash, packed build time,
-HEX, merged image, and manifest are regenerated atomically. Do not hard-code a
-machine-specific Arduino package path.
+Use this compact record in a pull request when a memory tradeoff is made:
 
 ```text
-Tools\Controller\bin\controller.exe arduino compile
-avr-size.exe -A .build\firmware\PCController.ino.elf
-avr-nm.exe -S -l --size-sort --radix=d -C .build\firmware\PCController.ino.elf
+Candidate source:
+Toolchain/feature profile:
+Before flash / static SRAM / peak estimate:
+After flash / static SRAM / peak estimate:
+User-visible capability changed:
+Firmware safety invariant retained:
+Host or UI replacement surface:
+Focused tests:
+Full build manifest:
+Physical acceptance required:
 ```
 
-Report `.text + .data` as application flash and
-`.data + .bss + .noinit` as static SRAM. The filesystem length of Intel HEX is
-ASCII transport size, not bytes occupied in MCU flash.
+## Release boundary
 
-For a proposed feature cut:
+An image is not release-ready merely because it fits. It must also preserve the
+safety invariants above, pass exact-source automated validation, authenticate on
+the target, survive backup/program/verify/restore, and complete the relevant
+physical peripheral and loaded-output checks in
+[Project Acceptance](Project-Checklist.md).
 
-1. compile the exact final source with the feature enabled;
-2. compile the same source with only that feature disabled;
-3. record both flash and static SRAM totals;
-4. run host/protocol tests for retained paths;
-5. if hardware-facing, upload only through the guarded backup-first path and
-   verify HELLO hash plus physical behavior;
-6. add the exact delta and observed losses to this table.
+<p align="center"><a href="../README.md">← Return to the PCController main page</a></p>

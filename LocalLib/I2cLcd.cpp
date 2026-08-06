@@ -6,6 +6,7 @@
 #include <string.h>
 
 namespace {
+// Common PCF8574 LCD addresses, backpack pin bits, and probe pacing.
 constexpr uint8_t CandidateAddresses[] = {0x27, 0x3F};
 constexpr uint8_t BacklightBit = 0x08;
 constexpr uint8_t EnableBit = 0x04;

@@ -79,21 +79,9 @@ jobs:
           persist-credentials: false
 
       - name: "🧰 Select native Windows C compiler"
-        if: matrix.key == 'go-windows'
-        shell: pwsh
-        run: |
-          $mingwBin = "C:\mingw64\bin"
-          $gcc = Join-Path $mingwBin "gcc.exe"
-          if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
-            throw "The GitHub Windows image is missing its standalone MinGW64 compiler: $gcc"
-          }
-          $target = (& $gcc -dumpmachine).Trim()
-          if ($target -ne "x86_64-w64-mingw32") {
-            throw "Expected x86_64-w64-mingw32 GCC, found $target"
-          }
-          $mingwBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "CC=gcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          & $gcc --version
+        if: matrix.key == 'go-windows' || matrix.key == 'cpp-windows'
+        shell: cmd
+        run: node Tools\Dependencies\select-windows-compiler.mjs
 
       - name: "🐹 Install Go from go.mod"
         if: startsWith(matrix.key, 'go-') || matrix.key == 'cpp-avr-linux'
@@ -111,7 +99,7 @@ jobs:
       - name: "📌 Read canonical AVR dependency pins"
         if: matrix.key == 'cpp-avr-linux'
         id: pins
-        run: node .github/scripts/dependency-report.mjs export
+        run: node Tools/Dependencies/export-lock.mjs export
 
       - name: "🔐 Install checksum-verified Arduino CLI"
         if: matrix.key == 'cpp-avr-linux'
@@ -163,26 +151,21 @@ jobs:
             -trimpath \
             -tags controllerlib \
             -buildmode=c-shared \
-            -o "$RUNNER_TEMP/pccontroller.so" \
+            -o "$RUNNER_TEMP/host-codeql.so" \
             ./cmd/controllerlib
 
       - name: "🐹 Build and test Go Host on Windows"
         if: matrix.key == 'go-windows'
         working-directory: Tools/Controller
-        shell: pwsh
+        shell: cmd
         run: |
-          go test ./...
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go run ./winres/generate_icon.go "$env:RUNNER_TEMP\codeql-icon.png"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          go build `
-            -buildvcs=false `
-            -trimpath `
-            -tags controllerlib `
-            -buildmode=c-shared `
-            -o "$env:RUNNER_TEMP\pccontroller.dll" `
-            ./cmd/controllerlib
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @echo off
+          node ../Build/go-tests.mjs --module . --output ../../.build/tests/go --go go
+          if errorlevel 1 exit /b 1
+          go run ./winres/generate_icon.go "%RUNNER_TEMP%\codeql-icon.png"
+          if errorlevel 1 exit /b 1
+          go build -buildvcs=false -trimpath -tags controllerlib -buildmode=c-shared -o "%RUNNER_TEMP%\host-codeql.dll" ./cmd/controllerlib
+          if errorlevel 1 exit /b 1
 
       - name: "⚡ Build AVR firmware and Linux Virtual Board"
         if: matrix.key == 'cpp-avr-linux'
@@ -200,24 +183,17 @@ jobs:
 
       - name: "🪟 Build Windows Virtual Board and C ABI smoke source"
         if: matrix.key == 'cpp-windows'
-        shell: pwsh
+        shell: cmd
         run: |
-          cmake `
-            -S Tools/VirtualBoard `
-            -B .build/codeql-virtual-board `
-            -DBUILD_TESTING=ON
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          @echo off
+          cmake -S Tools/VirtualBoard -B .build/codeql-virtual-board -DBUILD_TESTING=ON
+          if errorlevel 1 exit /b 1
           cmake --build .build/codeql-virtual-board --config Release --parallel
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if errorlevel 1 exit /b 1
           ctest --test-dir .build/codeql-virtual-board -C Release --output-on-failure
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $gcc = "C:\mingw64\bin\gcc.exe"
-          if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
-            throw "The GitHub Windows image is missing its standalone MinGW64 compiler: $gcc"
-          }
-          & $gcc "Tools\Controller\examples\c_abi_smoke.c" `
-            -o "$env:RUNNER_TEMP\pccontroller-c-abi-smoke.exe"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if errorlevel 1 exit /b 1
+          gcc.exe Tools\Controller\examples\c_abi_smoke.c -o "%RUNNER_TEMP%\host-c-abi-smoke.exe"
+          if errorlevel 1 exit /b 1
 
       - name: "🔬 Analyze and upload CodeQL results"
         uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
@@ -238,6 +214,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          product="${GITHUB_REPOSITORY#*/}"
           if [[ "$ANALYSIS_RESULT" == "success" ]]; then
             icon='✅'
             status='All six CodeQL categories passed'
@@ -246,7 +223,7 @@ jobs:
             status="CodeQL matrix result: $ANALYSIS_RESULT"
           fi
           {
-            echo "# $icon PCController CodeQL"
+            echo "# $icon ${product} CodeQL"
             echo
             echo "$status."
             echo

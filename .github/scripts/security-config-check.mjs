@@ -6,6 +6,7 @@ const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultRoot = resolve(scriptDirectory, "..", "..");
 const ignoredDirectories = new Set([
   ".build",
+  ".cache",
   ".ci",
   ".git",
   "bin",
@@ -261,6 +262,9 @@ export function validateCodeql(source, sourceLanguages) {
   if (/\$\{\{\s*secrets\./u.test(source)) {
     errors.push("CodeQL builds must not receive repository secrets");
   }
+  if (/^\s+shell:\s*(?:pwsh|powershell)\s*$/imu.test(source)) {
+    errors.push("CodeQL Windows builds must use project-owned cmd tooling, not PowerShell");
+  }
   if (!/persist-credentials:\s*false/u.test(source)) {
     errors.push("CodeQL checkout must not persist GitHub credentials");
   }
@@ -279,7 +283,7 @@ export function validateCodeql(source, sourceLanguages) {
       "./cmd/controllerlib",
     ]],
     ["go-windows", [
-      "go test ./...",
+      "../Build/go-tests.mjs --module . --output ../../.build/tests/go",
       "go run ./winres/generate_icon.go",
       "-buildmode=c-shared",
       "./cmd/controllerlib",
@@ -458,10 +462,11 @@ export function validateSecurityConfiguration(root = defaultRoot) {
   const errors = [];
   const requiredFiles = [
     ".github/dependabot.yml",
-    ".github/dependencies.json",
-    ".github/scripts/dependency-report.mjs",
     ".github/workflows/codeql.yml",
-    ".github/workflows/dependencies.yml",
+    ".github/workflows/update-dependencies.yml",
+    "Tools/Dependencies/dependency-policy.json",
+    "Tools/Dependencies/resolved-tools-lock.json",
+    "Tools/Dependencies/export-lock.mjs",
   ];
   for (const path of requiredFiles) {
     if (!existsSync(resolve(root, path))) {

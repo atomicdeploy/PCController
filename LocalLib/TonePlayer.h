@@ -5,6 +5,7 @@
 #include "BoardPins.h"
 #include "pitches.h"
 
+// TonePlayer queues nonblocking tones on the board's Timer1 buzzer output.
 class TonePlayer {
 public:
   // ATmega328P implementation owns Timer1 and the PB1/OC1A pin. It uses
@@ -22,8 +23,13 @@ public:
   void stop();
   void setMuted(bool muted);
   bool isBusy() const;
+  uint8_t revision() const { return revision_; }
+  uint16_t activeFrequencyHz() const { return activeFrequencyHz_; }
+  uint16_t activeDurationMs() const { return activeDurationMs_; }
+  bool muted() const { return muted_; }
 
 private:
+  // ToneStep is one queued tone or silent pause and its duration.
   struct ToneStep {
     uint16_t frequencyHz;
     uint16_t durationMs;
@@ -48,13 +54,10 @@ private:
   uint32_t stepEndsAt_ = 0;
   bool stepActive_ = false;
   bool muted_ = false;
+  uint8_t revision_ = 0;
+  uint16_t activeFrequencyHz_ = 0;
+  uint16_t activeDurationMs_ = 0;
 };
 
+// buzzer is the single board-wide feedback player.
 extern TonePlayer buzzer;
-
-// Compatibility wrappers retained for reusable inherited code.
-void setupBuzzer();
-void addTone(unsigned int frequency, unsigned int duration);
-void resetTone();
-void playToneSequence();
-bool isPlayingTones();

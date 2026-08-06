@@ -42,6 +42,14 @@ void RelayController::service(uint32_t now) {
   serviceSide(RelaySide::B, now, directionChangedThisService);
 }
 
+void RelayController::setMotionAllowed(bool allowed, uint32_t now) {
+  motionAllowed_ = allowed;
+  if (!allowed) {
+    stopSide(RelaySide::A, now);
+    stopSide(RelaySide::B, now);
+  }
+}
+
 bool RelayController::requestSide(RelaySide side, RelayDirection direction,
                                   bool enabled, uint32_t now) {
   if ((side != RelaySide::A && side != RelaySide::B) ||
@@ -63,6 +71,9 @@ void RelayController::stopSide(RelaySide side, uint32_t now) {
   }
   SideState &state = sides_[sideIndex(side)];
   state.requestedEnabled = false;
+  if (!retainDirectionOnStop_) {
+    state.requestedDirection = RelayDirection::Forward;
+  }
   bool directionChangedThisService = false;
   serviceSide(side, now, directionChangedThisService);
 }
@@ -162,22 +173,7 @@ void RelayController::serviceSide(RelaySide side, uint32_t now,
 
   switch (state.phase) {
     case RelaySequencePhase::BreakBeforeDirection:
-    case RelaySequencePhase::DirectionSettling:
       if (!timeReached(now, state.phaseDeadline)) {
-        return;
-      }
-      if (state.requestedDirection != state.appliedDirection) {
-        if (directionChangedThisService ||
-            !timeReached(now, nextDirectionChangeAt_)) {
-          return;
-        }
-        setRelay(directionBit(side),
-                 state.requestedDirection == RelayDirection::Reverse);
-        commit();
-        state.appliedDirection = state.requestedDirection;
-        directionChangedThisService = true;
-        nextDirectionChangeAt_ = now + DirectionInterlockMs;
-        state.phaseDeadline = now + DirectionSettleMs;
         return;
       }
       state.phase = RelaySequencePhase::Idle;
@@ -211,9 +207,6 @@ void RelayController::serviceSide(RelaySide side, uint32_t now,
     state.appliedDirection = state.requestedDirection;
     directionChangedThisService = true;
     nextDirectionChangeAt_ = now + DirectionInterlockMs;
-    state.phase = RelaySequencePhase::DirectionSettling;
-    state.phaseDeadline = now + DirectionSettleMs;
-    return;
   }
 
   if (!state.appliedEnabled && state.requestedEnabled &&

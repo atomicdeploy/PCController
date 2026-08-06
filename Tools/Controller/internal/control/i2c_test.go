@@ -45,7 +45,7 @@ func (port *i2cProtocolPort) Write(data []byte) (int, error) {
 	request := frames[0]
 	response := native.Frame{Seq: request.Seq}
 	if !port.cap16 {
-		response.Opcode = native.OpI2CResult
+		response.Opcode = native.OpI2CTransferResp
 		response.Payload = []byte{3, 0x27, 0x40, 0x41}
 	} else if len(request.Payload) >= 4 && request.Payload[0] == 0 {
 		response.Opcode = native.OpACK
@@ -111,19 +111,22 @@ func i2cTestRuntime(t *testing.T, cap16 bool) (*Runtime, *i2cProtocolPort) {
 	return runtime, port
 }
 
-func TestScanI2CPreservesLegacyAndCap16Contracts(t *testing.T) {
-	for _, cap16 := range []bool{false, true} {
-		runtime, _ := i2cTestRuntime(t, cap16)
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		addresses, err := ScanI2C(ctx, runtime)
-		cancel()
-		if err != nil {
-			t.Fatalf("cap16=%t: %v", cap16, err)
-		}
-		want := []byte{0x27, 0x40, 0x41}
-		if string(addresses) != string(want) {
-			t.Fatalf("cap16=%t addresses=% X want=% X", cap16, addresses, want)
-		}
+func TestScanI2CRequiresGenericTransferCapability(t *testing.T) {
+	runtime, _ := i2cTestRuntime(t, false)
+	if _, err := ScanI2C(context.Background(), runtime); err == nil {
+		t.Fatal("scan accepted firmware without generic I2C transfer capability")
+	}
+
+	runtime, _ = i2cTestRuntime(t, true)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	addresses, err := ScanI2C(ctx, runtime)
+	cancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{0x27, 0x40, 0x41}
+	if string(addresses) != string(want) {
+		t.Fatalf("addresses=% X want=% X", addresses, want)
 	}
 }
 

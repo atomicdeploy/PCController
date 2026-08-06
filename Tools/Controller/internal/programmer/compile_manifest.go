@@ -1,6 +1,7 @@
 package programmer
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,18 +15,35 @@ import (
 
 const (
 	firmwareManifestName      = "firmware-manifest.json"
-	urbootApplicationCapacity = uint32(32_384)
-	atmega328PEEPROMCapacity  = uint32(1_024)
+	urbootApplicationCapacity = generatedBoardApplicationBytes
+	atmega328PEEPROMCapacity  = generatedBoardEEPROMBytes
 	firmwareManifestFormat    = "pccontroller-avr-firmware-manifest/v1"
 )
 
 type compileManifest struct {
-	Format       string                     `json:"format"`
-	GeneratedUTC time.Time                  `json:"generatedUtc"`
-	Target       compileManifestTarget      `json:"target"`
-	Source       compileManifestSource      `json:"source"`
-	StackBudget  compileManifestStackBudget `json:"stackBudget"`
-	Artifacts    []compileManifestArtifact  `json:"artifacts"`
+	Format       string                       `json:"format"`
+	GeneratedUTC time.Time                    `json:"generatedUtc"`
+	Target       compileManifestTarget        `json:"target"`
+	Source       compileManifestSource        `json:"source"`
+	StackBudget  compileManifestStackBudget   `json:"stackBudget"`
+	PatchRegions []compileManifestPatchRegion `json:"patchRegions"`
+	Artifacts    []compileManifestArtifact    `json:"artifacts"`
+}
+
+type compileManifestPatchRegion struct {
+	Name   string                      `json:"name"`
+	Start  uint32                      `json:"start"`
+	Length uint32                      `json:"length"`
+	Schema uint8                       `json:"schema"`
+	Magic  string                      `json:"magic"`
+	Fields []compileManifestPatchField `json:"fields"`
+}
+
+type compileManifestPatchField struct {
+	Name     string `json:"name"`
+	Offset   uint32 `json:"offset"`
+	Length   uint32 `json:"length"`
+	Encoding string `json:"encoding"`
 }
 
 type compileManifestTarget struct {
@@ -60,6 +78,7 @@ type compileManifestArtifact struct {
 	CapacityBytes  uint32                 `json:"capacityBytes"`
 	FreeBytes      uint32                 `json:"freeBytes"`
 	UsagePercent   float64                `json:"usagePercent"`
+	Records        uint32                 `json:"records"`
 	DataBytes      uint32                 `json:"dataBytes"`
 	Ranges         []compileManifestRange `json:"ranges"`
 	StartAddress   *uint32                `json:"startAddress"`
@@ -83,6 +102,9 @@ func writeCompileManifest(
 	identity CompileIdentity,
 	stackBudget compileManifestStackBudget,
 ) (string, error) {
+	if _, err := stageDefaultEEPROMCompileArtifact(identity.OutputDir); err != nil {
+		return "", err
+	}
 	entries, err := os.ReadDir(identity.OutputDir)
 	if err != nil {
 		return "", fmt.Errorf("read firmware output directory: %w", err)
@@ -104,6 +126,7 @@ func writeCompileManifest(
 
 	artifacts := make([]compileManifestArtifact, 0, len(paths))
 	haveApplication := false
+	applicationPath := ""
 	for _, path := range paths {
 		artifact, inspectErr := inspectCompileArtifact(path, identity.SourceRoot)
 		if inspectErr != nil {
@@ -111,22 +134,36 @@ func writeCompileManifest(
 		}
 		if artifact.Role == "application" {
 			haveApplication = true
+			applicationPath = path
 		}
 		artifacts = append(artifacts, artifact)
 	}
 	if !haveApplication {
 		return "", errors.New("successful Arduino compile produced no application HEX")
 	}
+	identityBytes, err := readFirmwareIdentityBytes(applicationPath)
+	if err != nil {
+		return "", err
+	}
+	if got := binary.LittleEndian.Uint32(identityBytes[0:4]); got != FirmwareIdentityMagic {
+		return "", fmt.Errorf("firmware identity magic at 0x%X is 0x%08X, require 0x%08X", FirmwareIdentityAddress, got, FirmwareIdentityMagic)
+	}
+	if got := binary.LittleEndian.Uint32(identityBytes[4:8]); got != identity.SourceHash {
+		return "", fmt.Errorf("firmware identity source hash is 0x%08X, require 0x%08X", got, identity.SourceHash)
+	}
+	if got := binary.LittleEndian.Uint32(identityBytes[8:12]); got != identity.PackedTimestamp {
+		return "", fmt.Errorf("firmware identity timestamp is 0x%08X, require 0x%08X", got, identity.PackedTimestamp)
+	}
 
 	buildTimestamp := ""
-	if decoded, decodeErr := DecodeFirmwareTimestampSchema2(identity.PackedTimestamp); decodeErr == nil {
+	if decoded, decodeErr := DecodeFirmwareTimestamp(identity.PackedTimestamp); decodeErr == nil {
 		buildTimestamp = decoded.Compact
 	}
 	manifest := compileManifest{
 		Format: firmwareManifestFormat, GeneratedUTC: time.Now().UTC(),
 		Target: compileManifestTarget{
-			FQBN: options.FQBN, MCU: "atmega328p", ClockHz: 16_000_000,
-			Bootloader: "UART0 Urboot/urclock", Baud: 115200,
+			FQBN: options.FQBN, MCU: generatedBoardMCU, ClockHz: generatedBoardClockHz,
+			Bootloader: generatedBoardBootloader, Baud: generatedBoardBaud,
 			ApplicationLimitBytes: urbootApplicationCapacity,
 			FlashBytes:            ATmega328PFlashSize, EEPROMBytes: atmega328PEEPROMCapacity,
 		},
@@ -136,8 +173,9 @@ func writeCompileManifest(
 			PackedTimestamp: fmt.Sprintf("%08X", identity.PackedTimestamp),
 			BuildTimestamp:  buildTimestamp,
 		},
-		StackBudget: stackBudget,
-		Artifacts:   artifacts,
+		StackBudget:  stackBudget,
+		PatchRegions: firmwareIdentityManifestRegions(),
+		Artifacts:    artifacts,
 	}
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -151,15 +189,42 @@ func writeCompileManifest(
 	return path, nil
 }
 
+func readFirmwareIdentityBytes(path string) ([]byte, error) {
+	document, err := LoadIntelHex(path)
+	if err != nil {
+		return nil, err
+	}
+	value, err := document.Image.BytesAt(FirmwareIdentityAddress, FirmwareIdentityLength)
+	if err != nil {
+		return nil, fmt.Errorf("read declared firmware identity region: %w", err)
+	}
+	return value, nil
+}
+
+func firmwareIdentityManifestRegions() []compileManifestPatchRegion {
+	return []compileManifestPatchRegion{{
+		Name: "firmware-identity", Start: FirmwareIdentityAddress,
+		Length: FirmwareIdentityLength, Schema: FirmwareIdentitySchema,
+		Magic: "PCI1",
+		Fields: []compileManifestPatchField{
+			{Name: "magic", Offset: 0, Length: 4, Encoding: "ascii-little-endian"},
+			{Name: "source_hash", Offset: 4, Length: 4, Encoding: "uint32-little-endian"},
+			{Name: "packed_timestamp", Offset: 8, Length: 4, Encoding: "uint32-little-endian"},
+		},
+	}}
+}
+
 func inspectCompileArtifact(path, sourceRoot string) (compileManifestArtifact, error) {
+	name := strings.ToLower(filepath.Base(path))
 	document, err := LoadIntelHex(path)
 	if err != nil {
 		return compileManifestArtifact{}, err
 	}
-	name := strings.ToLower(filepath.Base(path))
 	role := "application"
 	capacity := urbootApplicationCapacity
 	switch {
+	case name == defaultEEPROMCompileArtifact:
+		role, capacity = "default-eeprom", atmega328PEEPROMCapacity
 	case strings.HasSuffix(name, ".eep"):
 		role, capacity = "eeprom", atmega328PEEPROMCapacity
 	case strings.Contains(name, "with_bootloader"):
@@ -195,7 +260,7 @@ func inspectCompileArtifact(path, sourceRoot string) (compileManifestArtifact, e
 		Path: displayPath, Role: role, ContainerBytes: document.SourceBytes,
 		SHA256: document.SourceSHA256, CapacityBytes: capacity,
 		FreeBytes: capacity - inspection.DataBytes, UsagePercent: usage,
-		DataBytes: inspection.DataBytes, Ranges: ranges,
+		Records: document.Records, DataBytes: inspection.DataBytes, Ranges: ranges,
 		StartAddress: startAddress, EndAddress: endAddress,
 	}, nil
 }

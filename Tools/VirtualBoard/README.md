@@ -1,3 +1,5 @@
+<div align="center"><a href="../../README.md"><img src="../../docs/assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # PCController native virtual board
 
 This directory contains a native C++17 substitute for the ATmega328P
@@ -10,8 +12,10 @@ tcp://127.0.0.1:8765
 
 It is intentionally isolated from the PC host configuration. Board settings
 are stored in a separate 1 KiB virtual MCU EEPROM image
-(`virtual-mcu-eeprom.bin` by default), using the same conceptual ownership as
-the physical controller's EEPROM.
+(`virtual-mcu-eeprom.bin` by default). The current 40-byte settings/name value plus
+its CRC byte, 20 learned-RF records, and wear-levelled reset journal use the
+same canonical addresses, checksums, and no-version migration policy as the
+physical MCU.
 
 ## Architecture
 
@@ -19,7 +23,7 @@ The emulator is split behind injectable hardware interfaces:
 
 - `ISensors`: INA-like supply/current values, tLED, tBT, door, and Bluetooth
 - `IRelays`: R1-R8 plus the two direction/enable side mappings
-- `IPwm`: all 16 logical 0-4095 PWM channels and Off/Manual/Auto modes
+- `IPwm`: availability, selection, and all 16 logical 0-4095 PWM channels
 - `IAddressableLeds`: 11 WS2811/WS2812 pixels plus global brightness
 - `IDisplays`: TM1637 text, 16x2 LCD text, and buzzer state
 - `IEeprom`: byte-addressable persistent MCU EEPROM
@@ -43,21 +47,29 @@ chmod +x ./build.sh
 ./build.sh
 ```
 
-The script configures, compiles, and runs tests. It discovers tools from
-`PATH` (or `CXX`) and contains no machine-specific toolchain paths.
+The script selects the matching project-owned CMake configure, build, and test
+presets, then discovers tools from `PATH` (or `CXX`). It contains no
+machine-specific toolchain paths. The same presets can be used directly:
+
+```sh
+cd Tools/VirtualBoard
+cmake --preset release
+cmake --build --preset release --parallel
+ctest --preset release
+```
 
 ## Run and connect
 
 Start the board:
 
 ```sh
-./.build/bin/virtual_board.exe
+./.build/release/bin/virtual_board.exe
 ```
 
 Choose another EEPROM image or endpoint if desired:
 
 ```sh
-./.build/bin/virtual_board.exe \
+./.build/release/bin/virtual_board.exe \
   --eeprom ./state/test-board.eeprom \
   --bind 127.0.0.1 \
   --port 8765
@@ -130,20 +142,33 @@ Use `--no-stdin` for unattended test runs.
 - HELLO with build hash/date/time identity
 - fixed 48-byte live STATUS and configurable streaming; byte 43 is the
   captured reset cause and bytes 44..47 are the persistent reset count in
-  little-endian order
-- schema-2 GET/SET_SETTINGS persisted to virtual MCU EEPROM
+  little-endian order; RF-received, buzzer-busy, Running, host-offline, and
+  hot-temperature flags have the production meanings in bits 7 and 12..15
+- exact schema-3 GET/SET_SETTINGS, including output-persistence, packed
+  display/motion-hold options, relay-restore state, and the optional eight-byte
+  operator name, persisted as the current 40-byte MCU value plus CRC
 - tLED/tBT temperature identities and values
-- PWM set/get/all-off/mode/RGB plus automatic channel demo
+- direct PWM set/get/all-off and RGB; STATUS/PWM_VALUES report hardware
+  availability, and the removed mode opcode `0x13` remains reserved
 - addressable LED opcode `0x16`, including per-pixel/fill RGB and brightness
-- safe side relay mapping, direct relays, all-off, and relay test
-- menu actions/direct page selection and save-last-page behavior
-- TM1637/LCD text overrides and buzzer commands
+- safe side relay mapping, direct relays, and all-off; the firmware's local
+  front-panel relay commissioning page is represented through menu state,
+  while unadvertised opcode `0x34` remains unsupported
+- the current 14-page board menu directory, schema-2 visibility/order, direct
+  page selection, and save-last-page behavior
+- exact front-panel snapshot plus TM1637/LCD text overrides; DisplayText
+  targets 3/4 capture and release the PC-presented panel just like the MCU
+- host-owned Idle/Running application state through opcode `0x45`
 - schema-2 MCU-timed macro begin/append/run/query/cancel over a 127-byte
   circular queue; queued records reuse ordinary peripheral opcodes
 - macro buffer/status events plus reserved sequence `0xFE` dispatch evidence,
   letting the host refill ahead and verify each device-side execution time
-- I2C scan (`0x27`, `0x40`, `0x41`)
-- RF transmit/learn/list/remove/map simulation
+- bounded cooperative I2C write/read/repeated-start transactions and leases;
+  simulated devices answer at `0x27`, `0x3F`, `0x40`, and `0x41`
+- RF transmit plus single, multi, indefinite, list/remove/replace learning
+  over all 20 persistent MCU slots; new codes remain unmapped, while assigned
+  key/menu/relay/side/PWM actions use production repeat and 350 ms momentary
+  semantics; removed partial-map opcode `0x26` remains reserved
 - key events including gestures 5=down and 6=up
 - timestamped door, Bluetooth, PWM-channel, RF-learn, macro, and reset events;
   the high bit marks the appended device-microsecond timestamp
@@ -153,8 +178,17 @@ Use `--no-stdin` for unattended test runs.
 - application/bootloader reset requests as a persistent-EEPROM soft reset;
   each request advances the MCU-owned reset journal and emits reset event 7
 
-The emulator models observable behavior, not AVR instruction timing or actual
-electrical faults.
+The emulator deliberately does not claim AVR-cycle or electrical fidelity:
+
+- wall-clock scheduling substitutes for AVR timers and interrupt latency;
+- connected I2C devices use deterministic register bytes, not analog/bus-fault
+  models or a PCF8574/INA219/PWM electrical implementation;
+- relay direction/enable semantics and policy are preserved, but native tests
+  (not the virtual relay bank) verify the configured 1..255 ms break and 5 ms
+  cross-side direction interlock;
+- host-menu directory opcodes `0x42..0x44` are unsupported because the current
+  production firmware does not advertise them; PC-presented menus use the
+  production DisplayText capture/release path instead.
 
 Every acknowledgement carries
 `[requestOpcode, error, deviceMicros LE u32]`. Macro timing is therefore
@@ -164,8 +198,12 @@ scripted, TUI, API, and bridge requests share cancellation and timing rules.
 
 ## Verification
 
-Unit tests cover framing/CRC, maximum payloads, HELLO shape, STATUS and
-temperature schemas, macro cancellation, events, and EEPROM persistence:
+Unit tests cover framing/CRC, maximum payloads, HELLO capabilities, STATUS,
+temperature/front-panel/menu/I2C schemas, semantic extension tails, all 20 RF
+slots, mapped-action execution/repeat suppression/momentary expiry, macro
+cancellation, events, and canonical EEPROM persistence. A second
+native target compiles the production key, relay, buzzer, shift-register, and
+DS18B20 sources against an Arduino mock.
 
 ```sh
 ./build.sh
@@ -174,7 +212,7 @@ temperature schemas, macro cancellation, events, and EEPROM persistence:
 For a real TCP protocol smoke test, run the server and then:
 
 ```sh
-./.build/bin/virtual_board_smoke.exe 127.0.0.1 8765
+./.build/release/bin/virtual_board_smoke.exe 127.0.0.1 8765
 ```
 
 A successful exchange prints the authenticated `PCController` identity,

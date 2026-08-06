@@ -47,8 +47,12 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 		state = model.previewPanel
 	} else {
 		page := model.menuPageByID(snapshot.Status.MenuPage)
+		brightness := snapshot.Settings.DisplayBrightness
+		if !snapshot.Status.DoorOpen {
+			brightness = snapshot.Settings.DisplayClosedBrightness
+		}
 		state = FrontPanelState{
-			Segments: page.Short, Brightness: snapshot.Settings.DisplayBrightness,
+			Segments: page.Short, Brightness: brightness,
 			LCDBacklight: snapshot.Settings.Flags&2 != 0,
 			MenuID:       snapshot.Status.MenuPage, MenuName: page.Name,
 			Submode:     model.programModeName(snapshot.Status.ProgramMode),
@@ -74,10 +78,10 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 			state.LCDLine1 = lcdPresentation.PhysicalLine1
 			state.LCDLine2 = lcdPresentation.PhysicalLine2
 			state.LCDBacklight = true
-			state.InputSource += fmt.Sprintf(" · PC-owned LCD 0x%02X", lcdPresentation.Address)
+			state.InputSource += fmt.Sprintf(" · LCD 0x%02X", lcdPresentation.Address)
 		} else {
 			state.LCDBacklight = false
-			state.InputSource += " · LCD target only; physical backpack unconfirmed"
+			state.InputSource += " · LCD not detected"
 		}
 	}
 	if model.lcdMirror {
@@ -110,6 +114,10 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 	if time.Now().Before(model.frontOverlayUntil) {
 		state.LCDLine1, state.LCDLine2 = model.frontOverlay1, model.frontOverlay2
 	}
+	if snapshot.HaveStatusLED {
+		state.StatusLED = snapshot.StatusLED
+		state.HaveStatusLED = true
+	}
 	state.Segments = padCells(state.Segments, 4)
 	state.LCDLine1 = padCells(state.LCDLine1, 16)
 	state.LCDLine2 = padCells(state.LCDLine2, 16)
@@ -128,6 +136,11 @@ func renderFrontPanel(state FrontPanelState) string {
 		boolWord(state.Blink, "ON", "OFF"), boolWord(state.CategorySelector, "SELECT", "page"),
 		state.InputSource, state.PressedKeys,
 	)
+	if state.HaveStatusLED {
+		hex := fmt.Sprintf("#%02X%02X%02X", state.StatusLED.Red, state.StatusLED.Green, state.StatusLED.Blue)
+		dot := lipgloss.NewStyle().Foreground(lipgloss.Color(hex)).Render("●")
+		detail += fmt.Sprintf("\nstatus %s %s · %s · condition %d", dot, hex, statusEffectName(state.StatusLED.Effect), state.StatusLED.Condition)
+	}
 	if !state.Exact {
 		detail += "\n" + warnStyle.Render("approximate STATUS fallback · exact display-state opcode unavailable")
 	}
@@ -139,6 +152,21 @@ func renderFrontPanel(state FrontPanelState) string {
 		" ",
 		cardStyle.Copy().Render(titleStyle.Render("FRONT PANEL STATE")+"\n"+detail),
 	)
+}
+
+func statusEffectName(effect byte) string {
+	switch effect {
+	case native.StatusEffectBreathe:
+		return "breathe"
+	case native.StatusEffectFlash:
+		return "flash"
+	case native.StatusEffectCycle:
+		return "cycle"
+	case native.StatusEffectTransition:
+		return "transition"
+	default:
+		return "steady"
+	}
 }
 
 func renderSevenSegments(

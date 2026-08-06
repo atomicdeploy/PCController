@@ -3,10 +3,15 @@ package appconfig
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 func TestLoadOrCreateAndReload(t *testing.T) {
@@ -31,6 +36,78 @@ func TestLoadOrCreateAndReload(t *testing.T) {
 	if !changed || reloaded.Connection.Port != "COM18" ||
 		!reloaded.Connection.ResetOnReconnect {
 		t.Fatalf("reload got changed=%t config=%#v", changed, reloaded)
+	}
+}
+
+func TestUIPeripheralNamesAreValidatedAndRemainFileBacked(t *testing.T) {
+	value := Defaults()
+	value.UI.SeparatePortButtons = true
+	value.UI.PeripheralNames = map[string]string{
+		"relay.5": "Workbench lamp",
+		"pwm.0":   "Cabinet strip",
+	}
+	if err := value.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded := store.Current().UI
+	if !loaded.SeparatePortButtons || loaded.PeripheralNames["relay.5"] != "Workbench lamp" {
+		t.Fatalf("UI naming/action-bar config did not round-trip: %#v", loaded)
+	}
+
+	value.UI.PeripheralNames["relay.6"] = strings.Repeat("x", 65)
+	if err := value.Validate(); err == nil {
+		t.Fatal("expected overlong peripheral name rejection")
+	}
+}
+
+func TestPeripheralRegistryCoversEveryCoreRoleAndNamingCapacity(t *testing.T) {
+	descriptors := PeripheralDescriptors()
+	if len(descriptors) != 34 {
+		t.Fatalf("core peripheral descriptor count=%d, want 34", len(descriptors))
+	}
+	seen := make(map[string]bool, len(descriptors))
+	counts := make(map[string]int)
+	for _, descriptor := range descriptors {
+		if descriptor.Key == "" || descriptor.DefaultName == "" || descriptor.Control == "" {
+			t.Fatalf("incomplete descriptor: %+v", descriptor)
+		}
+		if seen[descriptor.Key] {
+			t.Fatalf("duplicate peripheral key %q", descriptor.Key)
+		}
+		seen[descriptor.Key] = true
+		counts[descriptor.Kind]++
+	}
+	for kind, want := range map[string]int{
+		"relay": 8, "motion": 2, "pwm": 16, "display": 2, "sensor": 6,
+	} {
+		if counts[kind] != want {
+			t.Fatalf("%s descriptor count=%d, want %d", kind, counts[kind], want)
+		}
+	}
+	if MaxPeripheralNames < len(descriptors) {
+		t.Fatalf("peripheral naming capacity %d is below core catalog %d", MaxPeripheralNames, len(descriptors))
+	}
+	config := Defaults()
+	config.UI.PeripheralNames = make(map[string]string, len(descriptors))
+	for _, descriptor := range descriptors {
+		config.UI.PeripheralNames[descriptor.Key] = "Named " + descriptor.DefaultName
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatalf("complete 34-peripheral naming catalog was rejected: %v", err)
+	}
+
+	copyOfCatalog := PeripheralDescriptors()
+	copyOfCatalog[0].DefaultName = "mutated"
+	if name, _ := PeripheralDefaultName("relay.1"); name == "mutated" {
+		t.Fatal("callers can mutate the canonical peripheral registry")
 	}
 }
 
@@ -84,11 +161,30 @@ func TestWatcherAppliesValidChange(t *testing.T) {
 	}
 }
 
+func TestReloadErrorReportingSuppressesOnlyIdenticalConsecutiveFailures(t *testing.T) {
+	var last string
+	var reported []string
+	report := func(err error) { reported = append(reported, err.Error()) }
+	first := errors.New("invalid JSON")
+	second := errors.New("invalid baud rate")
+
+	reportDistinctReloadError(&last, first, report)
+	reportDistinctReloadError(&last, first, report)
+	reportDistinctReloadError(&last, second, report)
+	reportDistinctReloadError(&last, nil, report)
+	reportDistinctReloadError(&last, first, report)
+
+	want := []string{"invalid JSON", "invalid baud rate", "invalid JSON"}
+	if !reflect.DeepEqual(reported, want) {
+		t.Fatalf("reported reload errors = %q, want %q", reported, want)
+	}
+}
+
 func TestMacroValidation(t *testing.T) {
 	value := Defaults()
 	value.Macros = []Macro{{
 		ID: 1, Name: "demo", Label: "dEMO",
-		Steps: []MacroStep{{AtMS: 0, Kind: "relay", Target: 7, Value: 1}},
+		Steps: []MacroStep{{AtUS: 0, Kind: "relay", Target: 7, Value: 1}},
 	}}
 	if err := value.Validate(); err != nil {
 		t.Fatal(err)
@@ -96,6 +192,18 @@ func TestMacroValidation(t *testing.T) {
 	value.Macros[0].Steps[0].Target = 8
 	if err := value.Validate(); err == nil {
 		t.Fatal("expected invalid relay target")
+	}
+}
+
+func TestUIAppTitleCountsUnicodeCharacters(t *testing.T) {
+	value := Defaults()
+	value.UI.AppTitle = "مرکز کنترل رایانه"
+	if err := value.Validate(); err != nil {
+		t.Fatalf("Persian title should be valid: %v", err)
+	}
+	value.UI.AppTitle = strings.Repeat("ر", 65)
+	if err := value.Validate(); err == nil {
+		t.Fatal("expected a title longer than 64 Unicode characters to fail")
 	}
 }
 
@@ -211,7 +319,7 @@ func TestLoadMergesNewUIDefaultsWithoutOverridingExplicitFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.UI.AppTitle != "PCController" || value.UI.HistoryHours != 24 ||
+	if value.UI.AppTitle != productidentity.DefaultTitle || value.UI.TableLayout != "compact" || value.UI.HistoryHours != 24 ||
 		!value.UI.ShowCurrent || value.UI.ShowPower ||
 		!value.UI.LCDServiceEnabled || value.UI.MirrorPromptToLCD {
 		t.Fatalf("merged UI defaults=%#v", value.UI)
@@ -244,6 +352,41 @@ func TestUpdateUIPersistsAtomically(t *testing.T) {
 	}
 	if reloaded.UI.AppTitle != ui.AppTitle || reloaded.UI.ShowBusVoltage {
 		t.Fatalf("persisted UI=%#v", reloaded.UI)
+	}
+}
+
+func TestPresentationOverridesRemainRuntimeOnlyAndSurviveUIUpdates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := Defaults()
+	value.UI.AppTitle = "Configured Name"
+	value.UI.Tagline = "Configured tagline"
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetPresentationOverrides("Environment Name", "Flag tagline"); err != nil {
+		t.Fatal(err)
+	}
+	effective := store.Current()
+	if effective.UI.AppTitle != "Environment Name" || effective.UI.Tagline != "Flag tagline" {
+		t.Fatalf("runtime presentation=%#v", effective.UI)
+	}
+	effective.UI.ShowGraphs = false
+	if _, err := store.UpdateUI(effective.UI); err != nil {
+		t.Fatal(err)
+	}
+	persisted, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.UI.AppTitle != "Configured Name" || persisted.UI.Tagline != "Configured tagline" || persisted.UI.ShowGraphs {
+		t.Fatalf("persisted configuration absorbed runtime overrides: %#v", persisted.UI)
+	}
+	if current := store.Current(); current.UI.AppTitle != "Environment Name" || current.UI.Tagline != "Flag tagline" || current.UI.ShowGraphs {
+		t.Fatalf("effective configuration lost override/update: %#v", current.UI)
 	}
 }
 
@@ -328,6 +471,56 @@ func TestJSONYAMLAndTOMLRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWritePersistsOnlyUserOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Write(path, Defaults()); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var defaultsDocument map[string]any
+	if err := json.Unmarshal(content, &defaultsDocument); err != nil {
+		t.Fatal(err)
+	}
+	if len(defaultsDocument) != 1 || defaultsDocument["schema"] != float64(SchemaVersion) {
+		t.Fatalf("default configuration was expanded on disk: %s", content)
+	}
+
+	value := Defaults()
+	value.UI.AppTitle = "Workshop Controller"
+	value.UI.ShowGraphs = false
+	value.Integrations.Hotkeys = []Hotkey{}
+	value.Melodies = []Melody{}
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	content, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(content, &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, expanded := document["connection"]; expanded {
+		t.Fatalf("unchanged connection defaults leaked into sparse file: %s", content)
+	}
+	ui, ok := document["ui"].(map[string]any)
+	if !ok || len(ui) != 2 || ui["app_title"] != value.UI.AppTitle || ui["show_graphs"] != false {
+		t.Fatalf("explicit UI overrides were not preserved: %#v", document["ui"])
+	}
+	loaded, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.UI.AppTitle != value.UI.AppTitle || loaded.UI.ShowGraphs ||
+		len(loaded.Integrations.Hotkeys) != 0 || len(loaded.Melodies) != 0 {
+		t.Fatalf("sparse configuration round trip lost explicit values: %#v", loaded)
+	}
+}
+
 func maxInt(left, right int) int {
 	if left > right {
 		return left
@@ -374,16 +567,55 @@ func TestYAMLAndTOMLWatcherApplyChanges(t *testing.T) {
 	}
 }
 
-func TestUnsupportedConfigExtensionAndUnknownFieldsAreRejected(t *testing.T) {
+func TestUnsupportedConfigExtensionIsRejected(t *testing.T) {
 	value := Defaults()
 	if err := Write(filepath.Join(t.TempDir(), "config.ini"), value); err == nil {
 		t.Fatal("expected unsupported configuration extension error")
 	}
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("schema: 1\nunknown_field: true\n"), 0o600); err != nil {
-		t.Fatal(err)
+}
+
+func TestFutureConfigFieldsAreIgnoredButKnownTypesRemainStrict(t *testing.T) {
+	tests := []struct {
+		name       string
+		extension  string
+		compatible string
+		badKnown   string
+	}{
+		{
+			name: "JSON", extension: ".json",
+			compatible: `{"schema":1,"future_root":{"enabled":true},"ipc":{"future_policy":{"mode":"observe"}},"programming":{"future_toolchain_cli":"next-cli"}}`,
+			badKnown:   `{"schema":1,"connection":{"baud_rate":"fast"},"future_root":true}`,
+		},
+		{
+			name: "YAML", extension: ".yaml",
+			compatible: "schema: 1\nfuture_root:\n  enabled: true\nipc:\n  future_policy:\n    mode: observe\nprogramming:\n  future_toolchain_cli: next-cli\n",
+			badKnown:   "schema: 1\nconnection:\n  baud_rate: fast\nfuture_root: true\n",
+		},
+		{
+			name: "TOML", extension: ".toml",
+			compatible: "schema = 1\n[future_root]\nenabled = true\n[ipc.future_policy]\nmode = 'observe'\n[programming]\nfuture_toolchain_cli = 'next-cli'\n",
+			badKnown:   "schema = 1\nfuture_root = true\n[connection]\nbaud_rate = 'fast'\n",
+		},
 	}
-	if _, _, err := Load(path); err == nil {
-		t.Fatal("expected strict unknown YAML field rejection")
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config"+test.extension)
+			if err := os.WriteFile(path, []byte(test.compatible), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			loaded, _, err := Load(path)
+			if err != nil {
+				t.Fatalf("future fields rejected: %v", err)
+			}
+			if loaded.Schema != SchemaVersion || loaded.Connection.BaudRate != Defaults().Connection.BaudRate {
+				t.Fatalf("known/default fields changed: %#v", loaded.Connection)
+			}
+			if err := os.WriteFile(path, []byte(test.badKnown), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := Load(path); err == nil {
+				t.Fatal("known field with wrong type was accepted")
+			}
+		})
 	}
 }

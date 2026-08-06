@@ -1,7 +1,7 @@
 #pragma once
 
-// Small deterministic state manager modeled after the inherited
-// `mode`/`lastMode` pattern. Transitions are requested first and consumed by
+// Small deterministic `mode`/`lastMode` state manager. Transitions are
+// requested first and consumed by
 // programService(), keeping entry logic separate from steady-state service.
 template <typename Mode>
 class ModeManager {

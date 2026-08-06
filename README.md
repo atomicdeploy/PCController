@@ -1,72 +1,105 @@
 <div align="center">
-  <h1>⚡ PCController</h1>
-  <p><strong>One controller. Three first-class deliverables. Five native host targets.</strong></p>
-  <p>
-    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml"><img alt="Build" src="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml/badge.svg?branch=main"></a>
-    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml"><img alt="Repository health" src="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml/badge.svg?branch=main"></a>
-    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/atomicdeploy/PCController/actions/workflows/codeql.yml/badge.svg?branch=main"></a>
-    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/dependencies.yml"><img alt="Dependency health" src="https://github.com/atomicdeploy/PCController/actions/workflows/dependencies.yml/badge.svg?branch=main"></a>
-    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml"><img alt="Release" src="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml/badge.svg"></a>
-    <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/atomicdeploy/PCController"></a>
-  </p>
-  <p>ATmega328P firmware, a production-oriented Go control surface, and a native<br>virtual board for the ControllerBoardMini ecosystem.</p>
-  <p>
-    <a href="https://github.com/atomicdeploy/PCController/releases">Download a release</a> ·
-    <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml">Open Build</a> ·
-    <a href="https://github.com/atomicdeploy/PCController/security">Security</a> ·
-    <a href="docs/README.md">Read the docs</a>
-  </p>
+  <a href="https://github.com/atomicdeploy/PCController">
+    <img src="docs/assets/pccontroller-hero.svg" width="100%" alt="PCController — Unified hardware and integration control center">
+  </a>
+  <br><br>
+  <a href="https://github.com/atomicdeploy/PCController"><img alt="Main repository" src="https://img.shields.io/badge/Main_repository-17131f?style=for-the-badge&logo=github&logoColor=f8f4ff"></a>
+  <a href="#quick-start"><img alt="Quick start" src="https://img.shields.io/badge/Quick_start-8b5cf6?style=for-the-badge&logo=windows-terminal&logoColor=white"></a>
+  <a href="Tools/Controller/README.md#embedded-web-control-center"><img alt="WebUI" src="https://img.shields.io/badge/WebUI-ec4899?style=for-the-badge&logo=react&logoColor=white"></a>
+  <a href="Tools/Controller/docs/Protocol-and-Network-API.md"><img alt="Protocol and API reference" src="https://img.shields.io/badge/Protocol_%2B_API-f59e0b?style=for-the-badge&logoColor=17131f"></a>
+  <a href="Tools/Controller/api/reference.html"><img alt="Offline API contracts" src="https://img.shields.io/badge/API_contracts-6d4aff?style=for-the-badge&logo=openapiinitiative&logoColor=white"></a>
+  <a href="docs/README.md"><img alt="Documentation" src="https://img.shields.io/badge/Documentation-33263f?style=for-the-badge&logo=readthedocs&logoColor=f8f4ff"></a>
+  <br><br>
+  <a href="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml"><img alt="Build" src="https://github.com/atomicdeploy/PCController/actions/workflows/build.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml"><img alt="Repository health" src="https://github.com/atomicdeploy/PCController/actions/workflows/repository-health.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/atomicdeploy/PCController/actions/workflows/codeql.yml"><img alt="CodeQL" src="https://github.com/atomicdeploy/PCController/actions/workflows/codeql.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/atomicdeploy/PCController/actions/workflows/update-dependencies.yml"><img alt="Dependency updates" src="https://github.com/atomicdeploy/PCController/actions/workflows/update-dependencies.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml"><img alt="Release" src="https://github.com/atomicdeploy/PCController/actions/workflows/release.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/atomicdeploy/PCController"></a>
+  <br><br>
+  <img alt="Firmware: ATmega328P" src="https://img.shields.io/badge/Firmware-ATmega328P-8b5cf6?style=flat-square">
+  <img alt="Host: Go" src="https://img.shields.io/badge/Host-Go-a78bfa?style=flat-square&logo=go&logoColor=17131f">
+  <img alt="Interface: React and TypeScript" src="https://img.shields.io/badge/Interface-React_%2B_TypeScript-ec4899?style=flat-square&logo=react&logoColor=white">
+  <img alt="Protocol: COBS and CRC-8" src="https://img.shields.io/badge/Protocol-COBS_%2B_CRC--8-f59e0b?style=flat-square">
+  <img alt="Transport: WebSocket and JSON-RPC" src="https://img.shields.io/badge/Transport-WebSocket_%2B_JSON--RPC-fb7185?style=flat-square">
 </div>
 
 > [!IMPORTANT]
-> The current release line is **alpha**. Host executables are not platform
-> code-signed, and a successful GitHub build or provenance attestation is not a
-> physical-device acceptance test. AVR programming requires an explicitly
-> approved, self-hosted runner with the target attached; ordinary CI never
-> opens a serial port or programmer.
+> PCController is in active pre-release development and **has no stable release
+> yet**. CI artifacts are unsigned engineering builds. Build provenance proves
+> where an artifact came from; it does not prove safe operation on a physical
+> controller, attached load, or mechanism.
 
-## Choose your download
+PCController is the complete control plane for ControllerBoardMini: compact
+ATmega328P firmware, a native Go host, a responsive embedded WebUI, and a
+hardware-free virtual board. The browser, terminal UI, CLI, automation engine,
+and network APIs all use the same command dispatcher, safety rules, connection
+owner, and event stream.
 
-| I want to… | Download | Runs on / targets |
-|---|---|---|
-| Program the ControllerBoardMini | `PCController-Firmware-<version>-AVR-ATmega328P.tar.gz`, `PCController-<version>-ATmega328P-Application.hex`, or `PCController-<version>-ATmega328P-Full-Flash-Urboot.hex` | ATmega328P, MiniCore 3.1.2 |
-| Control the board | `PCController-Host-<version>-<platform>.tar.gz` | Linux x64/ARM64, Windows x64, macOS Intel/Apple Silicon |
-| Explore and test without hardware | `PCController-VirtualBoard-<version>-<platform>.tar.gz` | Linux x64/ARM64, Windows x64, macOS Intel/Apple Silicon |
-| Verify a release | `SHA256SUMS.txt`, release manifest, and GitHub attestations | Any SHA-256-capable system |
+<p align="center">
+  <img alt="Real-time board control" src="https://img.shields.io/badge/Real--time-board_control-8b5cf6?style=flat-square">
+  <img alt="Recoverable programming" src="https://img.shields.io/badge/Recoverable-programming-ec4899?style=flat-square">
+  <img alt="Live telemetry" src="https://img.shields.io/badge/Live-telemetry-f59e0b?style=flat-square">
+  <img alt="Physical and remote panel" src="https://img.shields.io/badge/Physical_%2B_remote-panel-a78bfa?style=flat-square">
+  <img alt="Extensible API" src="https://img.shields.io/badge/Extensible-API-fb7185?style=flat-square">
+</p>
 
-Each archive expands into a versioned, product-named root rather than loose
-generic files. Actions artifacts use the names
-`PCController-Firmware-ATmega328P`, `PCController-Host-<platform>`, and
-`PCController-VirtualBoard-<platform>`; Build also uploads the AVR payload as
-`firmware`. Release assets add the version. In the patterns above, `<version>`
-includes the leading `v`.
+## ✨ One controller, every surface
 
-## What ships
+| ⚙️ Device firmware | 🖥️ Native host | 🌐 Embedded WebUI | 🔌 Integration plane |
+|:---|:---|:---|:---|
+| Deterministic AVR control, local safety, menus, sensing, outputs, RF and EEPROM | One serial owner, TUI, CLI, automation, backup, programming and OS adapters | Responsive dashboards, graphs, controls, settings, terminal and update review | Go and C libraries, IPC, JSON-RPC, REST, WebSocket, events, webhooks and bridges |
 
-| Layer | Highlights | Build evidence |
-|---|---|---|
-| AVR firmware | 15-page TM1637 menu, COBS/CRC UART, INA219 and DS18B20 telemetry, 16 PWM outputs, guarded dual-side motion, learned 433 MHz actions, EEPROM settings | MiniCore compile, strict Intel HEX validation, memory report, SHA-256 manifest |
-| Host | Charm TUI, monitor and shell, JSON-RPC/REST/WebSocket surfaces, Go API, C ABI library, programmer launcher, configuration, histories, macros and automation | Go test/vet, native build, executable identity, C ABI smoke test |
-| Virtual Board | Hardware-free protocol and behavior simulator for development and CI | Native CMake build and CTest on all five host targets |
+The physical front panel and every remote client observe the same authoritative
+state. A relay changed by a key, RF handset, macro, API, or another host appears
+everywhere through the same typed event stream.
 
-### Current AVR footprint
+## 💎 Why it is different
 
-| Region | Used | Free | Utilization |
-|---|---:|---:|---:|
-| Application flash | 32,228 / 32,384 bytes | 156 bytes | 99.52% |
-| Static SRAM | 1,444 / 2,048 bytes | 604 bytes | 70.51% |
-| Estimated peak SRAM | 1,764 / 2,048 bytes | 284 bytes | 86.13% |
+| Capability | What PCController provides |
+|---|---|
+| 🔒 One serial authority | A primary host owns the authenticated controller connection; secondary clients use local IPC instead of racing for the COM port. |
+| ↔️ Full-duplex control | Board status, telemetry, lifecycle events, commands, terminal traffic, and page actions share the JSON-RPC, REST, and WebSocket control plane. |
+| ⚡ Push-first physical mirrors | Changed display, buzzer, and status-light output is emitted by the board and fanned out immediately. Repeating snapshot polling is forbidden when the firmware advertises push support; reads are reserved for initial sync, explicit refresh, gap recovery, and bounded legacy fallback. |
+| 🧭 Signal-aware event paths | Human activity, continuous output state, telemetry, and explicit debug traces travel independently, so frame and measurement streams update every UI without flooding consoles or evicting one-shot events. |
+| 🎨 Native-quality WebUI | Responsive desktop/mobile layouts, installable standalone presentation where supported, RTL/LTR, Persian typography, light/dark themes, semantic color, real telemetry charts, keyboard navigation, optional audio/haptic cues, dialogs, notifications, and tab-to-tab synchronization. |
+| 🎛️ Complete device workbench | Relays, PWM, lighting, RGB/status output, addressable strip, buzzer, displays, I²C, RF learning/transmit, macros, menus, settings, backups, and guarded programming. |
+| 🪟 Host integration | Global hotkeys, desktop notifications, local-device diagnostics, bounded read-only WMI/COM facts, native Microsoft display and shell adapters, discovery, webhooks, host bridges, scripts, automation, and platform-specific port-owner diagnostics. |
+| ♻️ Recoverable updates | Content-addressed artifacts, SHA-256 verification, pre-flash backup, explicit review, write/verify, reconnect, settings restoration, and recovery markers. |
+| 🧪 Test without hardware | A native virtual board exercises protocol and host behavior over the same authenticated transport contract. |
 
-These figures describe the current pinned build profile, not every future
-commit. The memory tables and manifests attached to the latest successful
-[Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml)
-are authoritative. Complete cap24 host-menu overlays remain in the Controller
-and Virtual Board; the space-constrained AVR keeps its exact cap19 front-panel
-push fallback.
+## 🧭 System architecture
 
-## Quick start
+```mermaid
+flowchart LR
+    B["ControllerBoardMini\nATmega328P firmware"] <-->|"COBS · CRC · UART"| P["Primary host"]
+    P <--> W["Embedded WebUI"]
+    P <--> T["TUI · CLI · shell"]
+    P <--> A["REST · JSON-RPC · WebSocket"]
+    P <--> O["OS adapters · automations · bridges"]
+    V["Virtual Board"] <-->|"same native protocol"| P
+    W <-.->|"BroadcastChannel"| W2["Other browser tabs"]
+```
 
-Build everything without touching hardware:
+The embedded web bundle and Persian font ship inside the native executable.
+`controller web` is a headless primary mode: it owns discovery, serial I/O,
+automations, hotkeys, integrations, IPC, and browser events without creating a
+terminal interface.
+
+Physical-output mirroring is deliberately event driven. The native UART event
+updates one authoritative host snapshot, which is then distributed over every
+client channel. Adding a convenient repeating read timer is an architecture
+regression, not an acceptable shortcut; see the
+[push-first protocol rule](Tools/Controller/docs/Protocol-and-Network-API.md#push-first-state-rule).
+
+<a id="quick-start"></a>
+
+## 🚀 Quick start
+
+### Build firmware and the host
+
+The default root build is hardware-free. It compiles and validates firmware,
+builds the WebUI, and tests, vets, and packages the Go host.
 
 ```console
 build.cmd --all --clean --no-upx
@@ -76,464 +109,222 @@ build.cmd --all --clean --no-upx
 ./build.sh --all --clean --no-upx
 ```
 
-Or download the matching Host and Virtual Board packages from the latest
-[release](https://github.com/atomicdeploy/PCController/releases). For one
-archive, download its matching `.sha256` sidecar; Linux uses `sha256sum`, macOS
-uses `shasum -a 256`, and Windows PowerShell uses `Get-FileHash`. Linux and
-macOS extract with `tar -xzf`; current Windows includes `tar.exe -xzf`. The
-[CI/CD and releases guide](docs/CI-CD-and-Releases.md) gives copy-ready commands
-for all three platforms. Then continue with
-[Getting Started and Operations](docs/Getting-Started-and-Operations.md).
-
-```mermaid
-flowchart LR
-    S["PCController source"] --> B["Build"]
-    B --> F["AVR firmware"]
-    B --> C["Host · 5 targets"]
-    B --> V["Virtual Board · 5 targets"]
-    F --> A["Actions artifacts"]
-    C --> A
-    V --> A
-    A --> R["Draft alpha release"]
-    R --> I["SHA-256 · manifest · attestations"]
-```
-
-## Firmware and host capabilities
-
-The hash/timestamp-identified firmware provides:
-
-- a mode-driven, 15-page TM1637 menu with persistent visibility, ordering,
-  categories, cached flicker-free updates, and Status as stable page 0;
-- native COBS/CRC UART commands and telemetry at 115200 8N1;
-- INA219 voltage/current/power and two DS18B20 temperatures;
-- 16 PWM outputs, safe dual-side relay motion, and R5-R8 user control;
-- enclosure-light automation, power indication, PWM RGB status, and an
-  11-pixel WS2811/WS2812 layer ready for future effects;
-- 433 MHz receive/transmit, learning of 20 remote buttons, and persistent
-  action mappings;
-- a Timer1 hardware buzzer, advanced button gestures, host-owned 16x2 I2C LCD,
-  and CRC-checked EEPROM settings and reset telemetry.
-
-The companion under [Tools/Controller](Tools/Controller/README.md) adds a
-ten-page Charm TUI, continuous monitor, CLI/shell, scripts, JSON-RPC/REST,
-standard WebSocket and bounded Socket.IO service, Go API, C-compatible dynamic
-library, programmer launcher, and WebSocket firmware relay. Stable USB
-identity, event-driven reconnect, an ambiguity picker, and primary-instance
-IPC keep one serial owner; DTR reset is independently controlled and disabled
-by default.
-
-Exact wire formats and opcodes are in the
-[protocol and network API reference](Tools/Controller/docs/Protocol-and-Network-API.md).
-The [documentation index](docs/README.md) links the starter guide, focused
-[host configuration guide](docs/Host-Configuration-and-Integrations.md), and
-[hardware initialization reference](docs/Hardware-Initialization-and-Tuning.md).
-
-## Hardware map
-
-| Function | ATmega328P port | Arduino pin |
-|---|---:|---:|
-| Native application UART / Urboot upload | PD0/PD1 | D0/D1 |
-| 433 MHz receive | PD2/INT0 | D2 |
-| 433 MHz transmit | PD3/INT1 | D3 |
-| Shift input load | PD4 | D4 |
-| Shift master reset | PD5 | D5 |
-| WS2811/WS2812 data | PD6 | D6 |
-| Shift clock enable | PD7 | D7 |
-| Shift output enable | PB0 | D8 |
-| Buzzer/Timer1 OC1A | PB1 | D9 |
-| Two-sensor OneWire bus | PB2/SS | D10/CS |
-| TM1637 data | PB3/MOSI | D11 |
-| Spare | PB4/MISO | D12 |
-| TM1637 clock | PB5/SCK | D13 |
-| Shift serial input | PC0 | A0 |
-| Shift output latch | PC1 | A1 |
-| Shared shift clock | PC2 | A2 |
-| Shift serial output | PC3 | A3 |
-| I2C SDA/SCL | PC4/PC5 | A4/A5 |
-
-The DS18B20 data line needs an external pull-up, normally 4.7 kΩ to the
-sensor logic supply. The buzzer owns Timer1; do not use Servo or
-`analogWrite()` on D9/D10 at the same time.
-
-### I2C addresses
-
-| Device | Address | Notes |
-|---|---:|---|
-| INA219 | `0x40` | voltage/current monitor |
-| 16-channel PWM expander | `0x41` | A0 strapped so it cannot collide with INA219 |
-| Optional PCF8574 LCD backpack | `0x27` or `0x3F` | both are probed |
-
-There is no expected I2C conflict with this map. TM1637 and the two
-temperature sensors are not I2C devices. The LCD driver assumes the common
-PCF8574-to-HD44780 backpack mapping; a differently wired backpack needs a
-driver adjustment. Run `i2c scan` from the host to see every live address.
-
-### Shift-register assignments
-
-The first four active-low 74HC165 inputs are the controls:
-
-| Input bit / key | Normal menu action |
-|---:|---|
-| 0 / Key 1 | Previous |
-| 1 / Key 2 | Next |
-| 2 / Key 3 | Decrease |
-| 3 / Key 4 | Increase / Enter |
-| 4 | Reserved system sense 1 |
-| 5 | Reserved system sense 2 |
-| 6 | Bluetooth audio-module LED sense |
-| 7 | Door reed switch |
-
-Bluetooth defaults active-low and door-open defaults active-high. If the
-board's buffers invert either signal, change
-`PCCONTROLLER_BT_LED_ON_RAW_HIGH` or
-`PCCONTROLLER_DOOR_OPEN_RAW_HIGH` in `ProjectConfig.h`.
-
-The active-low 74HC595 relay outputs are:
-
-| Relay | Assignment |
-|---:|---|
-| R1 | Side A direction |
-| R2 | Side A enable |
-| R3 | Side B direction |
-| R4 | Side B enable |
-| R5-R8 | General-purpose user outputs 1-4 |
-
-Direction changes are sequenced nonblockingly: disable, an EEPROM-selected
-1 ms factory break or conservative 100 ms break, change direction, 50 ms
-settle, then enable. Use a side-motion command instead of
-direct R1-R4 writes whenever possible. The PC host performs a fresh
-fail-closed door check before R1-R4/side/macro starts, but that serial
-query-plus-command is not atomic; local MOVE and learned RF Side actions also
-apply firmware reed interlocks.
-
-### PWM channel assignments
-
-Logical `0` is off and `4095` is fully active. The current MOSFET stages are
-active-high and the expander runs at 1 kHz.
-
-| Channels | Assignment |
-|---:|---|
-| 0-7 | Eight persistent user lighting outputs |
-| 8-10 | Three additional user outputs |
-| 11 | Enclosure illumination |
-| 12 | Power/On indicator |
-| 13-15 | Status RGB: red, green, blue |
-
-The automatic identification demo cycles only channels 0-10. It never takes
-over enclosure, power, or status channels. Make connected loads safe before
-using Auto mode.
-
-Channel 11 follows the saved Off/Auto/On enclosure mode and fades between the
-saved Off and On brightness levels. Auto follows the door reed. Channels
-13-15 show boot, ready, learning, warning, and fault states. The separate D6
-addressable strip starts black and is retained for later effects.
-
-## Sensors
-
-The voltage display uses INA219 supply voltage (`bus + shunt`) rather than the
-bus register alone. On a nominal 12 V supply it should be close to a meter
-reading between INA219 VIN+ and ground. If it remains near 10 V, check VIN+,
-shunt orientation, the shared ground, and the voltage at the module; the
-firmware does not add an arbitrary correction.
-
-DS18B20 ROM addresses are sorted for repeatable startup ordering, and the host
-reports each 64-bit ROM. `tLED` is the illumination sensor and `tBT` is the
-Bluetooth-module sensor. On this harness the lower ROM is tBT and the higher
-ROM is tLED; settings flag bit 2 can reverse that assignment after a probe is
-replaced. Turn the enclosure light on: tLED should rise from roughly 26 °C
-toward 28 °C while tBT stays cool.
-
-## Menu and controls
-
-The four controls are Key 1 Previous, Key 2 Next, Key 3 Decrease, and Key 4
-Increase/Enter. A press responds immediately; a hold begins after 600 ms,
-repeats every 150 ms, and accelerates to 60 ms after 1.8 seconds where
-repetition is meaningful. Double-clicking Key 1 returns to the configured
-default page. Every gesture is also emitted as a UART event.
-
-The root pages are:
-
-| # | Display | Purpose | Key 3 / Key 4 at the root |
-|---:|---|---|---|
-| 0 | `STAT` | door `OPEN` or `CLSd` home page | read-only |
-| 1 | `VOLT` | supply voltage | read-only |
-| 2 | `CURR` | current in mA | read-only |
-| 3 | `tLED` | illumination temperature (`tLED`) | read-only |
-| 4 | `t-bt` | Bluetooth temperature (`tBT`) | read-only |
-| 5 | `LItE` | enclosure Off/Auto/On and brightness | Key 4 enters editor |
-| 6 | `bt` | Bluetooth LED Off/On/Blink state | read-only |
-| 7 | `Snd` | sound, display/status, and reading precision | Key 4 enters six-item settings submenu |
-| 8 | `PWM` | all-channel Off/Manual/Auto test | Key 4 enters editor |
-| 9 | `rELY` | relay identification/test | Key 3 All Off; Key 4 enters editor |
-| 10 | `KEY` | key identification | any pressed key shows `1`-`4` |
-| 11 | `uPWM` | saved 8-bit values for PWM 0-7 | Key 4 enters editor |
-| 12 | `r5-8` | user-relay toggle/momentary control | Key 4 enters control |
-| 13 | `MOVE` | two-side Up/Down control | Key 4 enters if the configured door policy permits it |
-| 14 | `LErn` | learned 433 MHz buttons | Key 4 starts one-code learning |
-
-The `Snd` submenu steps through `Snd`, `diSP`, `StBr`, `CoLr`, `V-dP`, and
-`A-dP` before Save/Discard. It controls sound, TM1637 brightness, status
-brightness and Ready color, and voltage/current decimal precision.
-
-Detailed editor/control behavior is in
-[Front Panel and Menus](docs/Front-Panel-and-Menus.md). Important safety behavior:
-
-- MOVE maps keys 1/2 to Side A forward/reverse and keys 3/4 to Side B
-  forward/reverse; releasing a key stops that side.
-- Hold both direction keys of either side for 600 ms to stop everything and
-  leave MOVE.
-- Closing the enclosure door immediately stops both sides and exits MOVE.
-- R5-R8 can be selected independently and operated as Toggle or momentary
-  Push.
-- EEPROM-backed editors end at a save prompt. Key 2 or 4 saves; Key 1 or 3
-  discards. `SAVE` or `diSC` then flashes for 900 ms with distinct audio cues.
-
-TM1637 output is cached at the segment level. The 20 ms display service is
-only a decision interval; unchanged segments are not retransmitted, which
-removes the former visible refresh flicker. The optional LCD also caches both
-16-character rows.
-
-## Learned 433 MHz remotes
-
-The firmware stores up to 20 learned remote-button records. A newly learned
-code remains unassigned until the user chooses its mapping. From the host,
-records can be
-listed, learned, removed individually, cleared, or mapped to:
-
-- Key 1-4 or Previous/Next/Decrease/Increase;
-- relay R1-R8 with press, toggle, or momentary behavior;
-- Side A/B Up, Down, or Stop;
-- PWM user channel 0-10 with press, toggle, or momentary behavior;
-- no action.
-
-The firmware deliberately uses **learn** terminology to distinguish the
-433 MHz function from Bluetooth. RF receive is D2/INT0 and transmit is
-D3/INT1.
-
-## Persistent settings
-
-The development cap23 layout stores an unversioned packed 29-byte settings
-value plus one CRC-8 byte at EEPROM address 32 and uses `EEPROM.update()`.
-Deferred writes wait 1.5 seconds to reduce wear. It stores:
-
-- sound/mute, door/relay audio, tLED/tBT assignment, motion-door policy, and
-  the 1/100 ms direction-break choice;
-- enclosure mode and its two brightness levels;
-- TM1637/status-light brightness and persistent Ready-state color;
-- voltage/current decimal precision from zero through two places;
-- PWM boot mode and user PWM 0-7 levels;
-- telemetry stream period;
-- default/save-last menu page plus cap23 menu visibility and ordering.
-
-Sound defaults **on**, LCD ownership is host-side, save-last-page defaults off,
-motion is allowed regardless of door state, the short motion break defaults to
-1 ms, and PWM Auto is the factory boot mode. Existing valid EEPROM overrides
-defaults because the build profile retains EEPROM during uploads. During this
-authorized development phase there is no settings magic/version or automatic
-firmware migration: an invalid settings CRC loads defaults and is rewritten.
-Learned RF records have a separate versioned, CRC-checked 20-slot EEPROM area.
-
-## Native UART
-
-UART is the primary application interface and bootloader upload path. Native
-application frames use COBS with a `0x00` delimiter, CRC-8/ATM, one-byte
-opcodes, sequence IDs, and payloads up to 48 bytes. Commands cover settings,
-menu navigation/page selection, relays, all PWM channels, status RGB, the
-addressable strip, buzzer, TM1637/LCD text, RF, macros, temperature identities,
-application/bootloader reset, and I2C scan.
-
-The board emits unsolicited boot `HELLO`, periodic or requested `STATUS`, and
-asynchronous `EVENT` messages. Unsolicited frames use sequence 0; direct
-responses echo the host's nonzero request sequence.
-
-Automatic detection accepts COM ID, friendly name, VID/PID, USB serial, or
-Windows PnP instance selectors, but a candidate is accepted only after it
-returns the `PCController` identity. A successful HELLO remembers the stable
-identity in host JSON, and an interactive chooser resolves ambiguity. The
-first long-running host is the serial owner; later host processes route through
-its loopback IPC rather than opening COM18 again.
-
-Common commands after building the host:
+Useful focused builds:
 
 ```console
-Tools\Controller\bin\controller.exe ports
-Tools\Controller\bin\controller.exe exec --port COM18 hello
-Tools\Controller\bin\controller.exe exec --port COM18 status
-Tools\Controller\bin\controller.exe exec --port COM18 settings
-Tools\Controller\bin\controller.exe monitor --port COM18
-Tools\Controller\bin\controller.exe tui --port COM18
-Tools\Controller\bin\controller.exe tui --device "USB-SERIAL CH340"
-```
-
-The TUI and monitor continuously update voltage, current, power,
-temperatures, keys, door, Bluetooth, relays, menu/mode, and PWM state. The
-same functions are available to batch scripts, JSON-RPC clients, an
-importable Go package, and the generated `pccontroller.dll` JSON ABI. See the
-[host guide](Tools/Controller/README.md) for shell, IPC, library, programming,
-and WebSocket examples.
-
-## Build and programming
-
-The target is MiniCore 3.1.2 with its UART0 Urboot loader:
-
-```text
-MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external
-```
-
-`build.cmd` and `build.sh` are thin launchers for one project-owned Node build
-and packaging implementation. It keeps the colored VT-100/emoji stages,
-tests and vet, Win32 resources, deterministic identity, SHA-256 manifests,
-C ABI smoke test, and UPX pack/test aligned without invoking PowerShell.
-The default build is hardware-free.
-
-```bat
-build.cmd --dry-run
 build.cmd --host-only
 build.cmd --firmware-only
-build.cmd --upload --port COM18
-build.cmd --usbasp-flash
+build.cmd --dry-run
 ```
 
-```bash
-./build.sh
-./build.sh --upload --port COM18
-```
-
-Host packaging publishes only to `Tools/Controller/bin`; firmware compile
-publishes only to `.build/firmware`. Firmware compile, Arduino dependency
-updates (`--arduino-update`), Urclock programming, and guarded USBasp recovery
-all route through the Controller interface. Direct Arduino upload is disabled,
-and USBasp requires explicit troubleshooting authorization. The duplicated
-PowerShell build scripts were removed; CMD and Bash now share the same Node
-plan instead of carrying divergent policy.
-See the [build-tool guide](Tools/Build/README.md).
-
-GitHub Actions runs the same safety gates for AVR firmware and complete native
-host packages on Linux x64/ARM64, Windows x64, and macOS Intel/ARM64. The
-virtual board is compiled and tested on the same five targets. Every downloadable
-package is a versioned archive with deterministic build identities, a SHA-256
-sidecar, and a job summary; tag and manual release builds also receive GitHub
-build-provenance attestations. See
-[CI/CD and releases](docs/CI-CD-and-Releases.md).
-
-The ASA0002E-style Node firmware studio adds content-watched builds, serialized
-and debounced programming, byte-identical edit suppression, strict Intel HEX
-checksum/address/size validation, SHA-256 manifests, atomic flash backups, and
-safe dry-runs. It is a dependency-free single script exposed by aligned CMD
-and Bash wrappers:
+Build and test the Virtual Board independently:
 
 ```console
-firmware.cmd build
-firmware.cmd check
-firmware.cmd watch
-firmware.cmd watch --upload --method urclock --port COM18
-firmware.cmd upload --method usbasp --programmer usbasp --usbasp-troubleshooting --dry-run
+cd Tools\VirtualBoard
+cmake --preset release
+cmake --build --preset release --parallel
+ctest --preset release
 ```
 
-```bash
-./firmware.sh build
-./firmware.sh watch
-./firmware.sh upload --port /dev/ttyUSB0
-```
+See the [build guide](Tools/Build/README.md) and
+[toolchain safety guide](docs/Toolchain-and-Safe-Programming.md) before the
+first physical deployment.
 
-`build` and build-only `watch` never open hardware. Every UART operation
-requires an explicit `--port` (or `PCCONTROLLER_PORT`), while ISP requires an
-explicit `--method usbasp --usbasp-troubleshooting`. All programming methods
-perform a hardware-free build and strict HEX/SHA-256 validation before
-Controller starts Urclock or USBasp. The USBasp path requires the complete
-merged application + Urboot image and retains the Controller's EESAVE
-preflight. See
-[Firmware studio](Tools/Firmware/README.md).
-
-The default build never programs hardware. `--upload` uses the
-UART bootloader and `urclock` path on COM18. USBasp is needed only to provision
-Urboot/fuses or recover an unbootable controller. Never run serial upload and
-ISP programming together; disconnect USBasp before testing bootloader reset
-and automatic UART reconnect.
-
-The host can also capture flash, EEPROM, programmer output, and build metadata
-into a timestamped, SHA-256-manifested backup:
+### Launch the control surface
 
 ```console
-Tools\Controller\bin\controller.exe boot backup .\backups --device "USB-SERIAL CH340"
+Tools\Controller\bin\controller.exe web --port COM18
+Tools\Controller\bin\controller.exe tui --port COM18
+Tools\Controller\bin\controller.exe shell --port COM18
 ```
 
-The backup workflow is unit-tested but has not yet been exercised against this
-live board/AVRDUDE.
+The WebUI listens on <http://127.0.0.1:8787/> by default. The host does not open
+a browser until a controller is authenticated; the URL remains available for
+host-only settings and diagnostics while the board is offline.
 
-## Libraries and footprint
+Supported desktop and mobile browsers can install the WebUI as a standalone
+app. Its manifest exposes shortcuts to Overview, Workbench, Activity, and
+Settings. The service worker is deliberately network-only: it keeps no offline
+cache, so stopping the host is visible immediately instead of leaving a stale
+control surface on screen.
 
-Only these Arduino libraries are linked by the current firmware:
+On Windows, a primary-owning `controller web` process adds a native tray menu
+unless `--no-tray` is supplied. It reports authenticated controller state,
+offers page links only while connected, and keeps Connect/Reconnect and Exit
+available while offline. Neither automatic launch nor a tray page action opens
+the browser for a disconnected controller.
 
-| Library | Installed version | Current use |
-|---|---:|---|
-| EEPROM | MiniCore 2.0 | CRC-checked MCU settings and learned RF records |
-| rc-switch | 2.6.4 | 433 MHz receive and transmit |
+Connection labels and available actions follow the authenticated runtime state:
 
-I2C is provided by the project's fixed-hardware `CompactI2c` master, not by
-MiniCore Wire.
+| Runtime state | What the user sees |
+|---|---|
+| Host ready, board offline | Host-only settings and diagnostics remain available; device controls and tray page links are unavailable, and the UI never claims `Live`. |
+| Discovering or authenticating | A connecting/reconnecting state with its current reason; commands remain guarded until native `HELLO` succeeds. |
+| Controller connected | `Live` appears only after authentication, full-duplex events start, and device workbench actions become available. |
+| Programming or recovering | Conflicting controls are guarded while backup, write/verify, reconnect, and restoration progress is reported. |
 
-The installed, well-supported alternatives remain available:
-TM1637TinyDisplay 1.12.2, OneWire 2.3.8, DallasTemperature 4.0.6, Adafruit
-INA219 1.2.3, and Adafruit PWM Servo Driver 3.0.3. They are intentionally not
-linked here: small fixed-hardware TM1637, DS18B20, INA219, PWM-expander, and
-LCD drivers, including the custom D6 WS2811/WS2812 sender, save substantial
-ATmega328P flash. Adafruit NeoPixel remains installed but is not linked.
+Desktop protocol/Start-menu registration remains explicit and reversible:
 
-The current linked-size audit and prioritized removal options are in
-[Memory and Feature Tradeoffs](docs/Memory-and-Feature-Tradeoffs.md). The full
-LocalLib comparison is in [Local Library Merge History](docs/Local-Library-Merge-History.md).
+```console
+Tools\Controller\bin\controller.exe desktop ensure
+Tools\Controller\bin\controller.exe desktop uninstall
+```
 
-## Hardware smoke test
+To audit or host the exact embedded interface from a separate static origin,
+export a deterministic archive without replacing an existing file:
 
-1. Make all PWM loads and mechanisms safe.
-2. Reset the board and confirm the three-note melody. Sound is on by default;
-   valid retained EEPROM may override it.
-3. Press input bits 0, 1, 2, and 3. They should navigate or edit and produce
-   one clean short beep. On the KEY page they must show 1, 2, 3, and 4.
-4. Query `hello`, `status`, `i2c scan`, and `settings` on COM18.
-5. Expect `0x40` and `0x41`, plus `0x27` or `0x3F` if the LCD is present.
-6. Compare reported supply voltage with a meter at INA219 VIN+.
-7. Open/close the door and verify input bit 7 plus channel-11 fading.
-8. Turn illumination on and verify tLED warms while tBT stays cool; swap the
-   temperature flag if the labels are reversed.
-9. Exercise the Bluetooth module and verify input bit 6 reports Off/On/Blink.
-10. With the mechanism safe and door open, test MOVE one direction at a time,
-    release-to-stop, the two-key exit gesture, and door-close emergency exit.
-11. Learn a remote button, list it from the PC, map it to a harmless menu
-    action, and then verify explicit 433 MHz transmit.
+```console
+Tools\Controller\bin\controller.exe web export --output pccontroller-webui.zip
+```
 
-## Why the buzzer glitch stopped
+See the [portable WebUI contract](Tools/Controller/docs/Portable-WebUI.md) for
+controller-origin validation, CORS, token, and static-host requirements.
 
-The inherited implementation used Arduino `tone()`, whose AVR implementation
-generates the waveform from a timer compare interrupt. That audio-rate ISR
-competed with the 433 MHz edge interrupt and was delayed whenever timing
-critical sensor code briefly masked interrupts, so edges could arrive late
-and the audible period became uneven.
+The stable selector can be a COM name, friendly name, VID/PID, USB serial, or
+Windows device instance. A candidate is accepted only after native HELLO
+authentication returns the `PCController` identity.
 
-The current player uses D9's Timer1 OC1A hardware compare output directly.
-Once configured, the AVR toggles the buzzer pin without an audio-rate ISR,
-even while application interrupts are briefly busy. Tone changes remain
-nonblocking in the main loop, and stop/start register changes are atomic.
-That timer-contention removal is the reason the startup tune and key beeps
-are now clean.
+### Try it without a board
 
-## Verified AVR dependency lane
+Start the packaged Virtual Board and connect explicitly to its loopback TCP
+endpoint:
 
-The daily dependency radar governs Arduino CLI, MiniCore, and every declared
-firmware library from one checksum-bearing manifest. Core/library archive
-metadata is reconciled with official indexes, release-note links stay bounded
-to code-allowlisted upstream pages, and a proposed update must compile the real
-ATmega328P firmware and pass Intel HEX validation before the automation may
-open a pull request. Firmware include inventory prevents a new third-party
-header from silently bypassing that policy. See
-[CI/CD and releases](docs/CI-CD-and-Releases.md#dependency-automation).
+```console
+Tools\Controller\bin\controller.exe tui --port tcp://127.0.0.1:8765
+Tools\Controller\bin\controller.exe exec --port tcp://127.0.0.1:8765 hello
+```
 
-## License
+TCP targets are development transports and are never discovered as serial
+devices.
 
-Original PCController code and documentation are available under your choice
-of `MIT OR BSD-2-Clause`; see [LICENSE](LICENSE). Third-party components keep
-their upstream terms. In particular, the adapted AVR WS281x timing loop is
-`LGPL-3.0-or-later`, while the OneWire/Dallas-derived ROM-search and CRC code
-is `MIT`. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the complete
-dependency and provenance audit.
+## 🪄 Product surfaces
+
+| Surface | Best for | Availability |
+|---|---|---|
+| Embedded WebUI | Visual monitoring, graphs, peripheral controls, settings, terminal, artifact/update review, and supported-browser installation | `controller web` or the Web page opened from the primary host |
+| Native TUI | Keyboard-first local operation, monitoring, menus, RF, scripts, diagnostics | `controller tui` |
+| CLI and shell | Automation, commissioning, support scripts, one-shot commands | `controller exec`, `shell`, `monitor`, `batch` |
+| APIs and local IPC | Secondary processes, browser clients, automation, and desktop integrations | NDJSON JSON-RPC, REST, standard WebSocket |
+| Libraries | Native application integration | Go module and C-compatible JSON ABI |
+| Virtual Board | CI, protocol development, demos without physical I/O | Five native host targets |
+
+### Browser communication model
+
+- WebSocket is the preferred full-duplex RPC and event channel.
+- REST provides explicit request/response routes and a controlled fallback.
+- JSON-RPC preserves correlated request IDs through the primary dispatcher.
+- `BroadcastChannel` synchronizes trusted state between tabs without executing
+  arbitrary messages.
+- The terminal supports structured `console.*` output, including `%s` and safe
+  `%c` styling, while keeping text and style data separate from HTML.
+
+Exact methods, routes, authorization policy, event envelopes, range semantics,
+and wire formats are documented in the
+[Protocol and Network API](Tools/Controller/docs/Protocol-and-Network-API.md).
+
+## ⚙️ Firmware capabilities
+
+The current firmware provides:
+
+- a 14-page TM1637 front panel with cached, flicker-resistant rendering,
+  persistent layout, save/discard editors, and accelerated key gestures;
+- INA219 voltage/current/power telemetry and two DS18B20 temperature channels;
+- sixteen PWM-expander channels, enclosure automation, status RGB, and an
+  eleven-pixel addressable output;
+- active-low relay control, four user relays, and interlocked dual-side motion;
+- 433 MHz receive/transmit, twenty learned records, and guarded action mapping;
+- Timer1 buzzer cues, optional host-owned 16×2 I²C LCD, I²C scan/transfer, and
+  CRC-checked EEPROM settings;
+- asynchronous boot, status, reset, input, RF, output, menu, and lifecycle
+  events over COBS-framed UART.
+
+### Hardware map
+
+| Function | ATmega328P / Arduino pin |
+|---|---|
+| Native UART / Urboot | PD0/PD1 · D0/D1 |
+| 433 MHz RX / TX | PD2/D2 · PD3/D3 |
+| Shift-register control | PD4–PD5, PD7, PB0, PC0–PC3 |
+| Timer1 buzzer | PB1 · D9 |
+| OneWire sensors | PB2 · D10 |
+| TM1637 data / clock | PB3/D11 · PB5/D13 |
+| Addressable strip | PD6 · D6 |
+| I²C SDA / SCL | PC4/A4 · PC5/A5 |
+
+I²C defaults are `0x40` for INA219, `0x41` for the PWM expander, and `0x27`
+or `0x3F` for an optional LCD backpack. The OneWire bus needs an external
+pull-up, normally 4.7 kΩ. Timer1 belongs to the buzzer; do not combine it with
+Servo or PWM use on D9/D10.
+
+See [Hardware Initialization and Tuning](docs/Hardware-Initialization-and-Tuning.md)
+for electrical assumptions, mappings, and safe alternatives.
+
+## 🛡️ Safety model
+
+| Boundary | Enforced behavior |
+|---|---|
+| Connection | Device controls are available only after authenticated board connection; host-only tools remain usable offline. |
+| Motion | Host starts perform a fresh door-policy check; firmware retains reed gating and break-before-make sequencing. Stop/off operations remain reachable. |
+| Programming | Selection and download are inert. A separate review authorizes each write, backup failure blocks by default, and the primary process owns the programming lifecycle. |
+| Remote access | Loopback is the default. Remote mode requires a long token, explicit origins, and capability policy; token possession does not imply write, reset, programming, power, or bridge authority. |
+| Artifacts | Intel HEX bounds, identity, SHA-256, backup manifests, and post-write readback are validated before success is reported. |
+| Process ownership | Secondary instances route through IPC. Desktop owner actions are explicit, guarded, and never terminate a process automatically. |
+
+Never commission loaded relays, motion outputs, ISP programming, or mains-adjacent
+hardware from CI evidence alone.
+
+## ✅ Validation status
+
+| Area | Automated gate | Physical acceptance |
+|---|---|---|
+| Firmware | Real MiniCore compile, Intel HEX validation, flash/SRAM budgets, protocol and settings tests | Upload, sensors, RF range, sound, displays, loaded outputs, and mechanisms remain board-specific |
+| Host | Go tests, vet, native packaging, resource identity, C ABI smoke, deterministic build checks | Real busy-port diagnostics and OS policy actions require target-machine observation |
+| WebUI | Type checking, component/unit tests, production bundle, HTTP cache/range tests, responsive/RTL/theme interaction sweep | Final color, audio, motion, keyboard, and peripheral behavior should be accepted with the packaged executable |
+| Virtual Board | Native build, unit tests, CTest, protocol smoke | Behavioral simulator; not evidence of electrical timing or load safety |
+| Release | Package manifests, SHA-256 sidecars, dependency inventory, optional provenance | No stable or code-signed release is currently claimed |
+
+Current pass/fail evidence belongs to the exact CI run or local build manifest;
+the table describes the required gate, not a permanent claim that every future
+commit has passed it.
+
+## 📦 Downloads and releases
+
+Until a stable release exists, use the artifacts from the current
+[Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml)
+or build from source. The repository publishes one clearly named artifact per
+deliverable and host target:
+
+- `PCController-Firmware-ATmega328P`
+- `PCController-Host-<platform>`
+- `PCController-VirtualBoard-<platform>`
+
+Release archives add the version and include SHA-256 metadata. Follow
+[CI/CD and Releases](docs/CI-CD-and-Releases.md) for verification and extraction.
+
+## 📚 Documentation
+
+| Guide | Use it for |
+|---|---|
+| [Documentation hub](docs/README.md) | Reading order and all maintained references |
+| [Getting Started and Operations](docs/Getting-Started-and-Operations.md) | First connection, WebUI/TUI/CLI operation, RF, automation, and troubleshooting |
+| [Front Panel and Menus](docs/Front-Panel-and-Menus.md) | Physical controls, editors, display semantics, and hosted menus |
+| [Host Configuration and Integrations](docs/Host-Configuration-and-Integrations.md) | JSON configuration, hotkeys, notifications, discovery, local devices, webhooks, and bridges |
+| [Protocol and Network API](Tools/Controller/docs/Protocol-and-Network-API.md) | UART frames, commands, JSON-RPC, REST, WebSocket, authorization, and events |
+| [Machine-readable API contracts](Tools/Controller/api/reference.html) | Offline OpenAPI 3.1, AsyncAPI 3.0, JSON-RPC methods, errors, capabilities, and idempotency |
+| [Portable WebUI](Tools/Controller/docs/Portable-WebUI.md) | Deterministic export, separate-origin hosting, transport discovery, CORS, and tokens |
+| [C Library API](Tools/Controller/docs/C-Library-API.md) | Native ABI lifecycle, JSON ownership, callbacks, and integration examples |
+| [Control-Surface Matrix](Tools/Controller/docs/Control-Surface-Capability-Matrix.md) | Feature reachability across every user and API surface |
+| [Hardware Initialization and Tuning](docs/Hardware-Initialization-and-Tuning.md) | Addresses, pins, timing, calibration, smoothing, and module startup parameters |
+| [Toolchain and Safe Programming](docs/Toolchain-and-Safe-Programming.md) | Reproducible setup, backup, flash, recovery, and evidence |
+| [Project Acceptance](docs/Project-Checklist.md) | Current acceptance gates and intentionally unverified hardware work |
+
+## 🤝 Contributing
+
+Keep changes inside the shared architecture: one device protocol, one command
+dispatcher, one product identity, and one safety policy. A new feature should
+include the smallest relevant firmware/host/WebUI tests, update its capability
+matrix, and state whether physical validation is still required.
+
+Third-party licenses and notices are collected in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Source is licensed under the
+terms in [LICENSE](LICENSE).

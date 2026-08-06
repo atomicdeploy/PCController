@@ -112,6 +112,35 @@ func TestResetEventUpdatesSnapshotAndWakesWaiters(t *testing.T) {
 	}
 }
 
+func TestAlertEventUpdatesHotSnapshotAndDescription(t *testing.T) {
+	runtime := New(Options{})
+	frame := native.Frame{
+		Opcode:  native.OpEvent,
+		Payload: []byte{native.EventAlert, native.AlertHot, 1},
+	}
+	runtime.observe(frame)
+	if !runtime.Snapshot().Status.Hot {
+		t.Fatal("HOT alert did not update the live snapshot")
+	}
+	parsed, err := native.ParseDeviceEvent(frame.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kind, text := describeDeviceEvent(parsed)
+	if kind != "hot" || text != "temperature alert active" {
+		t.Fatalf("alert description=%q %q", kind, text)
+	}
+}
+
+func TestAppNavigationEventDescription(t *testing.T) {
+	kind, text := describeDeviceEvent(native.DeviceEvent{
+		Type: native.EventAppNavigation, AppTarget: "tui", AppPage: "events",
+	})
+	if kind != "app.page" || text != "board requested page events for tui" {
+		t.Fatalf("navigation description=%q %q", kind, text)
+	}
+}
+
 func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 	runtime := New(Options{
 		Filter:           ports.Filter{Port: "TEST-NOT-A-REAL-PORT"},
@@ -223,6 +252,28 @@ func TestRememberedPreferredDeviceChangeDoesNotDropLiveConnection(t *testing.T) 
 	}
 	if !runtime.Snapshot().Connected {
 		t.Fatal("preferred-device persistence dropped the live transport")
+	}
+	_ = runtime.Close()
+}
+
+func TestOpenAlreadyConnectedSelectorIsIdempotent(t *testing.T) {
+	runtime := New(Options{})
+	port := newReconnectTestPort()
+	session := link.NewForPort("COM18", port)
+	info := ports.Info{
+		Name: "COM18", VID: "1A86", PID: "7523",
+		FriendlyName: "USB-SERIAL CH340",
+	}
+	runtime.attach(link.OpenResult{
+		Session: session, Port: info,
+		Hello: native.Hello{Name: "PCController"},
+	})
+	if err := runtime.Open(context.Background(), "COM18"); err != nil {
+		t.Fatalf("idempotent open attempted a second serial handle: %v", err)
+	}
+	snapshot := runtime.Snapshot()
+	if !snapshot.Connected || snapshot.Port.Name != "COM18" {
+		t.Fatalf("idempotent open changed the live device: %#v", snapshot)
 	}
 	_ = runtime.Close()
 }
@@ -356,6 +407,52 @@ func TestRFHoldSuppressesSingleClick(t *testing.T) {
 	defer cancel()
 	if extra, err := runtime.WaitEvent(ctx, up.ID, "rf.gesture"); err == nil {
 		t.Fatalf("hold emitted unexpected post-release event: %#v", extra)
+	}
+}
+
+func TestActivityStreamIsRetainedSeparatelyFromContinuousFrames(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	after := runtime.LatestEventID()
+	for index := 0; index < 600; index++ {
+		runtime.PublishStructuredEvent(Event{Kind: "status_led.changed", Text: "frame"})
+	}
+	activity := runtime.PublishStructuredEvent(Event{Kind: "door", Text: "door opened"})
+	for index := 0; index < 600; index++ {
+		runtime.PublishStructuredEvent(Event{Kind: "front_panel.segment", Text: "frame"})
+	}
+	if activity.Stream != EventStreamActivity {
+		t.Fatalf("activity stream=%q", activity.Stream)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	retained, err := runtime.WaitEventStreamFilter(ctx, after, "", nil, EventStreamActivity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retained.ID != activity.ID || retained.Kind != "door" {
+		t.Fatalf("retained activity=%#v want=%#v", retained, activity)
+	}
+	state, err := runtime.WaitEventStreamFilter(ctx, activity.ID, "", nil, EventStreamState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Kind != "front_panel.segment" || state.Stream != EventStreamState {
+		t.Fatalf("state event=%#v", state)
+	}
+}
+
+func TestEventStreamClassification(t *testing.T) {
+	tests := map[string]string{
+		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
+		"rx": EventStreamDebug, "front_panel.segment": EventStreamState,
+		"status_led.changed": EventStreamState, "buzzer.note": EventStreamState,
+		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
+	}
+	for kind, expected := range tests {
+		if got := EventStreamForKind(kind); got != expected {
+			t.Errorf("EventStreamForKind(%q)=%q want %q", kind, got, expected)
+		}
 	}
 }
 

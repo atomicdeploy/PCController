@@ -1,5 +1,5 @@
 name: Build
-run-name: "🚀 PCController · ${{ github.ref_name }} · ${{ github.event_name }}"
+run-name: "🚀 ${{ github.event.repository.name }} · ${{ github.ref_name }} · ${{ github.event_name }}"
 
 on:
   push:
@@ -27,13 +27,14 @@ jobs:
     uses: ./.github/workflows/firmware.yml
     with:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
-      showcase_alias: true
 
   host:
     name: "🖥️ Host · Five native targets"
+    needs: firmware
     uses: ./.github/workflows/host.yml
     with:
       version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+      firmware_artifact_name: ${{ needs.firmware.outputs.artifact_name }}
 
   virtual-board:
     name: "🧪 Virtual Board · Five native targets"

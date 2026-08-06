@@ -24,7 +24,7 @@ const job = (id, codebase, target, conclusion = "success") => ({
   name: `Build / ${codebase} · ${target}`,
   status: "completed",
   conclusion,
-  html_url: `https://github.com/atomicdeploy/PCController/actions/runs/12345/job/${id}`,
+  html_url: `${context.serverUrl}/${context.repository}/actions/runs/12345/job/${id}`,
 });
 
 const artifact = (id, prefix, target, extra = {}) => ({

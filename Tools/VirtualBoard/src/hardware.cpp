@@ -40,6 +40,10 @@ void SensorBank::updatePower() {
       1000);
 }
 
+void RelayBank::setRetainDirectionOnStop(bool retain) {
+  retainDirectionOnStop_ = retain;
+}
+
 bool RelayBank::set(std::uint8_t index, bool active) {
   if (index >= 8) {
     return false;
@@ -61,6 +65,9 @@ bool RelayBank::setSide(std::uint8_t side, std::uint8_t motion) {
   const std::uint8_t enable = static_cast<std::uint8_t>(direction + 1U);
   set(enable, false);
   if (motion == 0) {
+    if (!retainDirectionOnStop_) {
+      set(direction, false);
+    }
     return true;
   }
   set(direction, motion == 2);
@@ -72,15 +79,21 @@ void RelayBank::allOff() { mask_ = 0; }
 
 std::uint8_t RelayBank::mask() const { return mask_; }
 
+bool PwmBank::available() const { return available_; }
+
 bool PwmBank::set(std::uint8_t channel, std::uint16_t value) {
-  if (channel >= values_.size() || value > 4095) {
+  if (!available_ || channel >= values_.size() || value > 4095) {
     return false;
   }
   values_[channel] = value;
   return true;
 }
 
-void PwmBank::allOff() { values_.fill(0); }
+void PwmBank::allOff() {
+  if (available_) {
+    values_.fill(0);
+  }
+}
 
 std::array<std::uint16_t, 16> PwmBank::values() const { return values_; }
 
@@ -88,16 +101,8 @@ std::uint16_t PwmBank::value(std::uint8_t channel) const {
   return channel < values_.size() ? values_[channel] : 0;
 }
 
-void PwmBank::setMode(std::uint8_t mode) {
-  if (mode <= 2) {
-    mode_ = mode;
-  }
-}
-
-std::uint8_t PwmBank::mode() const { return mode_; }
-
 void PwmBank::select(std::uint8_t channel) {
-  if (channel < values_.size()) {
+  if (available_ && channel < values_.size()) {
     selected_ = channel;
   }
 }

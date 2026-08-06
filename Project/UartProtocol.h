@@ -4,10 +4,15 @@
 
 namespace ControllerProtocol {
 
+// Native frame marker and bounded payload capacity for the AVR transport.
 constexpr uint8_t Magic = 0xA5;
-constexpr uint8_t Version = 1;
+// Sent as an advisory envelope revision. Receivers validate the canonical
+// magic/length/CRC shape and opcode payload semantics instead of rejecting an
+// otherwise understandable peer solely because this byte differs.
+constexpr uint8_t EnvelopeRevision = 1;
 constexpr uint8_t MaximumPayload = 48;
 
+// Opcode is the stable native request, response, and event operation registry.
 enum Opcode : uint8_t {
   Hello = 0x01,
   GetStatus = 0x02,
@@ -19,10 +24,12 @@ enum Opcode : uint8_t {
   Buzzer = 0x10,
   PwmSet = 0x11,
   PwmAllOff = 0x12,
-  PwmMode = 0x13,
   StatusRgb = 0x14,
   PwmGet = 0x15,
   AddressableLed = 0x16,
+  StatusEffect = 0x17,
+  StatusProfileGet = 0x18,
+  StatusProfileSet = 0x19,
 
   RadioTransmit = 0x20,
   RadioLearnStart = 0x21,
@@ -30,7 +37,6 @@ enum Opcode : uint8_t {
   RadioLearnClear = 0x23,
   RadioLearnList = 0x24,
   RadioLearnRemove = 0x25,
-  RadioLearnMap = 0x26,
 
   MenuAction = 0x30,
   RelaySet = 0x31,
@@ -50,6 +56,8 @@ enum Opcode : uint8_t {
   RadioLearnReplace = 0x3F,
   MenuLayoutGet = 0x40,
   MenuLayoutSet = 0x41,
+  // Host-owned application state: payload prefix [0=Idle, 1=Running].
+  ProgramState = 0x45,
 
   Ack = 0x80,
   HelloResponse = 0x81,
@@ -64,9 +72,14 @@ enum Opcode : uint8_t {
   MenuListResponse = 0x97,
   MacroStatusResponse = 0x98,
   MenuLayoutResponse = 0x99,
+  SegmentChanged = 0x9C,
+  BuzzerChanged = 0x9D,
+  StatusLedChanged = 0x9E,
+  StatusProfileResponse = 0x9F,
   Event = 0xA0,
 };
 
+// Error is the compact protocol failure code returned by ErrorResponse.
 enum Error : uint8_t {
   NoError = 0,
   BadEnvelope = 1,
@@ -77,6 +90,7 @@ enum Error : uint8_t {
   Unsafe = 6,
 };
 
+// Frame is a validated zero-copy view of one decoded native packet.
 struct Frame {
   uint8_t opcode;
   uint8_t sequence;
@@ -93,6 +107,7 @@ static_assert(sizeof(Frame) == 5,
 
 using FrameHandler = void (*)(const Frame &frame, void *context);
 
+// UartProtocol incrementally decodes COBS frames and owns bounded RX/TX scratch.
 class UartProtocol {
 public:
   explicit UartProtocol(HardwareSerial &serial);

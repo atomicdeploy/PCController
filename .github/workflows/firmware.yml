@@ -8,11 +8,6 @@ on:
         required: false
         default: ""
         type: string
-      showcase_alias:
-        description: Also publish the ESP-compatible flat artifact named firmware
-        required: false
-        default: false
-        type: boolean
   workflow_call:
     inputs:
       version:
@@ -20,11 +15,10 @@ on:
         required: false
         default: ""
         type: string
-      showcase_alias:
-        description: Also publish the ESP-compatible flat artifact named firmware
-        required: false
-        default: false
-        type: boolean
+    outputs:
+      artifact_name:
+        description: Exact Actions artifact containing the validated firmware and safe EEPROM pair
+        value: ${{ jobs.compile-validate-package.outputs.artifact_name }}
 
 permissions:
   contents: read
@@ -38,6 +32,8 @@ jobs:
     name: "⚡ AVR Firmware · ATmega328P"
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      artifact_name: ${{ steps.pins.outputs.product_slug }}-Firmware-ATmega328P
     env:
       FORCE_COLOR: "1"
       PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
@@ -54,7 +50,7 @@ jobs:
 
       - name: "📌 Read canonical dependency pins"
         id: pins
-        run: node .github/scripts/dependency-report.mjs export
+        run: node Tools/Dependencies/export-lock.mjs export
 
       - name: "🔐 Install checksum-verified Arduino CLI"
         env:
@@ -105,6 +101,11 @@ jobs:
           --clean
           --version "$PCCONTROLLER_VERSION"
 
+      - name: "💾 Assert the safe 1 KiB default EEPROM image"
+        run: >-
+          node .github/scripts/assert-firmware-defaults.mjs
+          .build/firmware/firmware-manifest.json
+
       - name: "🔎 Recheck Intel HEX records and boundaries"
         run: ./firmware.sh check
 
@@ -115,14 +116,16 @@ jobs:
           arduino-cli lib list >> .build/firmware/dependencies.txt
           arduino-cli core list --format json > .build/firmware/resolved-cores.json
           arduino-cli lib list --format json > .build/firmware/resolved-libraries.json
-          cp .github/dependencies.json .build/firmware/declared-dependencies.json
+          cp Tools/Controller/toolchain-lock.json .build/firmware/declared-dependencies.json
 
       - name: "📦 Create firmware package"
         id: package
+        env:
+          PRODUCT_SLUG: ${{ steps.pins.outputs.product_slug }}
         run: >-
           node .github/scripts/package-directory.mjs
           .build/firmware
-          PCController-Firmware
+          "${PRODUCT_SLUG}-Firmware"
           AVR-ATmega328P
 
       - name: "🎁 Stage firmware artifact"
@@ -141,7 +144,7 @@ jobs:
                -o -name 'dependencies.txt' -o -name '*-dependencies.json' \
                -o -name 'resolved-*.json' \) \
             -exec cp '{}' "${staging}/" ';'
-          test "$(find "${staging}" -maxdepth 1 -type f -name '*.hex' | wc -l)" -eq 2
+          test "$(find "${staging}" -maxdepth 1 -type f -name '*.hex' | wc -l)" -eq 3
           test "$(find "${staging}" -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 1
           find "${staging}" -maxdepth 1 -type f -printf '%f\n' | sort
 
@@ -149,17 +152,7 @@ jobs:
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: PCController-Firmware-ATmega328P
-          path: .build/actions-artifact/*
-          if-no-files-found: error
-          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
-          compression-level: 9
-
-      - name: "⚡ Upload firmware alias"
-        if: ${{ inputs.showcase_alias }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: firmware
+          name: ${{ steps.pins.outputs.product_slug }}-Firmware-ATmega328P
           path: .build/actions-artifact/*
           if-no-files-found: error
           retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
@@ -170,7 +163,6 @@ jobs:
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
-          PCCONTROLLER_SHOWCASE_ALIAS: ${{ inputs.showcase_alias }}
         run: >-
           node .github/scripts/step-summary.mjs
           firmware
@@ -178,5 +170,5 @@ jobs:
           "${{ steps.package.outputs.archive }}"
           "$ARTIFACT_URL"
           "$ARTIFACT_DIGEST"
-          .github/dependencies.json
+          Tools/Controller/toolchain-lock.json
           "${{ steps.package.outputs.package-root }}"

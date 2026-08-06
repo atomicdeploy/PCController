@@ -52,9 +52,17 @@ void ControllerEvents::rfLearned(uint8_t id) {
   send(payload, sizeof(payload));
 }
 
-void ControllerEvents::rfLearning(uint8_t state, uint8_t count) {
+void ControllerEvents::rfLearning(uint8_t state, uint8_t count, uint8_t mode,
+                                  uint8_t totalSeconds,
+                                  uint8_t remainingSeconds) {
   const uint8_t payload[] = {
-      static_cast<uint8_t>(ControllerEventType::RfLearning), state, count};
+      static_cast<uint8_t>(ControllerEventType::RfLearning),
+      state,
+      count,
+      mode,
+      totalSeconds,
+      remainingSeconds,
+  };
   send(payload, sizeof(payload));
 }
 
@@ -99,6 +107,15 @@ void ControllerEvents::reset(uint8_t cause, uint32_t count) {
       static_cast<uint8_t>(count >> 8),
       static_cast<uint8_t>(count >> 16),
       static_cast<uint8_t>(count >> 24),
+  };
+  send(payload, sizeof(payload));
+}
+
+void ControllerEvents::alert(ControllerAlertKind kind, bool active) {
+  const uint8_t payload[] = {
+      static_cast<uint8_t>(ControllerEventType::Alert),
+      static_cast<uint8_t>(kind),
+      static_cast<uint8_t>(active),
   };
   send(payload, sizeof(payload));
 }

@@ -1,0 +1,3918 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "PCController HTTP API",
+    "version": "unversioned",
+    "summary": "Unversioned living REST and JSON-RPC surface of the primary controller host.",
+    "description": "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:8787",
+      "description": "Default loopback primary"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    },
+    {
+      "tokenHeader": []
+    }
+  ],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "operationId": "get_healthz",
+        "summary": "Service liveness and API identity",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "public",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/ui-config": {
+      "get": {
+        "operationId": "get_api_ui_config",
+        "summary": "Non-secret browser bootstrap",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "public",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/session/ticket": {
+      "post": {
+        "operationId": "post_api_session_ticket",
+        "summary": "Exchange a header credential for a short-lived one-use browser WebSocket ticket",
+        "tags": [
+          "ticket"
+        ],
+        "x-required-capability": "session",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "201": {
+            "description": "One-use Origin-bound browser session ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionTicketRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/rpc": {
+      "post": {
+        "operationId": "post_api_rpc",
+        "summary": "JSON-RPC 2.0 request",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "dynamic",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JSONRPCRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/snapshot": {
+      "get": {
+        "operationId": "get_api_snapshot",
+        "summary": "Authoritative cached controller snapshot",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/peripherals": {
+      "get": {
+        "operationId": "get_api_peripherals",
+        "summary": "Peripheral descriptors and host-owned names",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_peripherals",
+        "summary": "Replace host-owned peripheral names",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/pwm": {
+      "get": {
+        "operationId": "get_api_pwm",
+        "summary": "Authoritative PWM state",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_pwm",
+        "summary": "Mutate PWM state with board readback",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_pwm",
+        "summary": "Mutate PWM state with board readback",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/commands": {
+      "get": {
+        "operationId": "get_api_commands",
+        "summary": "Shared command catalog",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/program-state": {
+      "get": {
+        "operationId": "get_api_program_state",
+        "summary": "Host-owned program state",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_program_state",
+        "summary": "Update host-owned program state",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_program_state",
+        "summary": "Update host-owned program state",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/menu/catalog": {
+      "get": {
+        "operationId": "get_api_menu_catalog",
+        "summary": "Live board menu catalog",
+        "tags": [
+          "catalog"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/menu/layout": {
+      "get": {
+        "operationId": "get_api_menu_layout",
+        "summary": "Live board menu layout",
+        "tags": [
+          "layout"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_menu_layout",
+        "summary": "Persist a validated board menu layout",
+        "tags": [
+          "layout"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_menu_layout",
+        "summary": "Persist a validated board menu layout",
+        "tags": [
+          "layout"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/host-menus": {
+      "get": {
+        "operationId": "get_api_host_menus",
+        "summary": "Host-presented menu directory",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_host_menus",
+        "summary": "Replace the host-presented menu directory",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_host_menus",
+        "summary": "Replace the host-presented menu directory",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/os/status": {
+      "get": {
+        "operationId": "get_api_os_status",
+        "summary": "Host status and policy",
+        "tags": [
+          "status"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/os/facts": {
+      "get": {
+        "operationId": "get_api_os_facts",
+        "summary": "Bounded read-only host facts",
+        "tags": [
+          "facts"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/os/key": {
+      "post": {
+        "operationId": "post_api_os_key",
+        "summary": "Validated virtual-key action",
+        "tags": [
+          "key"
+        ],
+        "x-required-capability": "virtual_keys",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/os/power": {
+      "post": {
+        "operationId": "post_api_os_power",
+        "summary": "Confirmed system or display action",
+        "tags": [
+          "power"
+        ],
+        "x-required-capability": "power_actions",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/command": {
+      "post": {
+        "operationId": "post_api_command",
+        "summary": "Shared command dispatcher",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "dynamic",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/messages": {
+      "post": {
+        "operationId": "post_api_messages",
+        "summary": "Typed source-tagged message",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "messages",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/display": {
+      "post": {
+        "operationId": "post_api_display",
+        "summary": "Present arbitrary seven-segment or LCD text with scroll and repeat timing",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/opcode": {
+      "post": {
+        "operationId": "post_api_opcode",
+        "summary": "Exchange an opaque versionless UART opcode",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Opaque UART response frame",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OpcodeFrame"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpcodeRequest"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/app/bridge": {
+      "get": {
+        "operationId": "get_api_app_bridge",
+        "summary": "Original coordinator bridge instance and process identity",
+        "tags": [
+          "bridge"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Original coordinator bridge instance with bounded process self-information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInstance"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/app/instances": {
+      "get": {
+        "operationId": "get_api_app_instances",
+        "summary": "List or query live application instances",
+        "tags": [
+          "instances"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "One exact instance when id is supplied, otherwise all live instances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AppInstance"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AppInstance"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_app_instances",
+        "summary": "Report or remove one live application instance",
+        "tags": [
+          "instances"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Normalized live instance report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppInstance"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppInstanceReport"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_app_instances",
+        "summary": "Report or remove one live application instance",
+        "tags": [
+          "instances"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/app/action": {
+      "post": {
+        "operationId": "post_api_app_action",
+        "summary": "Route a validated action to all, one surface, or one live application instance",
+        "tags": [
+          "action"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/app/navigate": {
+      "post": {
+        "operationId": "post_api_app_navigate",
+        "summary": "Navigate all, one surface, or one exact application instance",
+        "tags": [
+          "navigate"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppNavigation"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/bridges": {
+      "get": {
+        "operationId": "get_api_bridges",
+        "summary": "Configured bridge state",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/bridges/call": {
+      "post": {
+        "operationId": "post_api_bridges_call",
+        "summary": "Correlated bridge call",
+        "tags": [
+          "call"
+        ],
+        "x-required-capability": "bridge_calls",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/manifest": {
+      "get": {
+        "operationId": "get_api_artifacts_manifest",
+        "summary": "Artifact/default/current manifest",
+        "tags": [
+          "manifest"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/artifacts": {
+      "get": {
+        "operationId": "get_api_artifacts",
+        "summary": "Content-addressed artifact catalog",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/artifacts/upload": {
+      "post": {
+        "operationId": "post_api_artifacts_upload",
+        "summary": "Import a verified artifact",
+        "tags": [
+          "upload"
+        ],
+        "x-required-capability": "programming",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/fetch": {
+      "post": {
+        "operationId": "post_api_artifacts_fetch",
+        "summary": "Queue a bounded remote artifact fetch",
+        "tags": [
+          "fetch"
+        ],
+        "x-required-capability": "programming",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/capture": {
+      "post": {
+        "operationId": "post_api_artifacts_capture",
+        "summary": "Capture flash or EEPROM explicitly",
+        "tags": [
+          "capture"
+        ],
+        "x-required-capability": "programming",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/artifacts/{kind}/{sha256}": {
+      "get": {
+        "operationId": "get_api_artifacts_kind_sha256",
+        "summary": "Immutable ranged artifact download",
+        "tags": [
+          "{kind}"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "sha256",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{64}$"
+            }
+          }
+        ]
+      },
+      "head": {
+        "operationId": "head_api_artifacts_kind_sha256",
+        "summary": "Immutable ranged artifact download",
+        "tags": [
+          "{kind}"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "sha256",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-fA-F0-9]{64}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/artifacts/current/{kind}": {
+      "get": {
+        "operationId": "get_api_artifacts_current_kind",
+        "summary": "Latest explicitly captured artifact",
+        "tags": [
+          "current"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "head": {
+        "operationId": "head_api_artifacts_current_kind",
+        "summary": "Latest explicitly captured artifact",
+        "tags": [
+          "current"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/updates/{kind}": {
+      "post": {
+        "operationId": "post_api_updates_kind",
+        "summary": "Queue an explicitly authorized update",
+        "tags": [
+          "{kind}"
+        ],
+        "x-required-capability": "programming",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/restores/flash": {
+      "post": {
+        "operationId": "post_api_restores_flash",
+        "summary": "Queue an explicitly authorized flash restore",
+        "tags": [
+          "flash"
+        ],
+        "x-required-capability": "programming",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/updates/status/{id}": {
+      "get": {
+        "operationId": "get_api_updates_status_id",
+        "summary": "Update operation progress",
+        "tags": [
+          "status"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/discovery/github/workflow": {
+      "post": {
+        "operationId": "post_api_discovery_github_workflow",
+        "summary": "Discover workflow artifacts",
+        "tags": [
+          "github"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/discovery/github/release": {
+      "post": {
+        "operationId": "post_api_discovery_github_release",
+        "summary": "Discover release assets",
+        "tags": [
+          "github"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/discovery/manifest": {
+      "get": {
+        "operationId": "get_api_discovery_manifest",
+        "summary": "Serve or validate an update manifest",
+        "tags": [
+          "manifest"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_discovery_manifest",
+        "summary": "Serve or validate an update manifest",
+        "tags": [
+          "manifest"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/discovery/check": {
+      "post": {
+        "operationId": "post_api_discovery_check",
+        "summary": "Compare candidate and installed identities",
+        "tags": [
+          "check"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/discovery/stage": {
+      "post": {
+        "operationId": "post_api_discovery_stage",
+        "summary": "Stage a verified candidate without programming",
+        "tags": [
+          "stage"
+        ],
+        "x-required-capability": "programming",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/discovery/status/{id}": {
+      "get": {
+        "operationId": "get_api_discovery_status_id",
+        "summary": "Discovery or staging progress",
+        "tags": [
+          "status"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/webhooks/inbound": {
+      "post": {
+        "operationId": "post_api_webhooks_inbound",
+        "summary": "Optional inbound typed webhook",
+        "tags": [
+          "inbound"
+        ],
+        "x-required-capability": "messages",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/status": {
+      "get": {
+        "operationId": "get_api_webhooks_outbound_status",
+        "summary": "Outbound delivery queue and dead-letter status",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/pending": {
+      "get": {
+        "operationId": "get_api_webhooks_outbound_pending",
+        "summary": "Bounded non-secret pending delivery list",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/dead": {
+      "get": {
+        "operationId": "get_api_webhooks_outbound_dead",
+        "summary": "Bounded non-secret dead-letter list",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/replay": {
+      "post": {
+        "operationId": "post_api_webhooks_outbound_replay",
+        "summary": "Replay explicitly selected dead-letter deliveries",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/outbound/clear": {
+      "post": {
+        "operationId": "post_api_webhooks_outbound_clear",
+        "summary": "Clear explicitly selected dead-letter deliveries",
+        "tags": [
+          "outbound"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/datahub/{path}": {
+      "get": {
+        "operationId": "get_api_integrations_datahub_path",
+        "summary": "Sanitized loopback data-service proxy",
+        "tags": [
+          "datahub"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "head": {
+        "operationId": "head_api_integrations_datahub_path",
+        "summary": "Sanitized loopback data-service proxy",
+        "tags": [
+          "datahub"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_integrations_datahub_path",
+        "summary": "Sanitized loopback data-service proxy",
+        "tags": [
+          "datahub"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_integrations_datahub_path",
+        "summary": "Sanitized loopback data-service proxy",
+        "tags": [
+          "datahub"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "patch_api_integrations_datahub_path",
+        "summary": "Sanitized loopback data-service proxy",
+        "tags": [
+          "datahub"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_api_integrations_datahub_path",
+        "summary": "Sanitized loopback data-service proxy",
+        "tags": [
+          "datahub"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    },
+    "/api/integrations/device/{path}": {
+      "get": {
+        "operationId": "get_api_integrations_device_path",
+        "summary": "Fail-closed device route; use typed RPC",
+        "tags": [
+          "device"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "head": {
+        "operationId": "head_api_integrations_device_path",
+        "summary": "Fail-closed device route; use typed RPC",
+        "tags": [
+          "device"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "post": {
+        "operationId": "post_api_integrations_device_path",
+        "summary": "Fail-closed device route; use typed RPC",
+        "tags": [
+          "device"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "put": {
+        "operationId": "put_api_integrations_device_path",
+        "summary": "Fail-closed device route; use typed RPC",
+        "tags": [
+          "device"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "patch_api_integrations_device_path",
+        "summary": "Fail-closed device route; use typed RPC",
+        "tags": [
+          "device"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_api_integrations_device_path",
+        "summary": "Fail-closed device route; use typed RPC",
+        "tags": [
+          "device"
+        ],
+        "x-required-capability": "integrations",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Durable host access credential for HTTP and non-browser WebSocket clients. Never place it in a URL."
+      },
+      "tokenHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-PCController-Token",
+        "description": "Header-only compatibility credential."
+      }
+    },
+    "schemas": {
+      "JSONRPCID": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "JSONRPCRequest": {
+        "type": "object",
+        "required": [
+          "jsonrpc",
+          "method"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "jsonrpc": {
+            "const": "2.0"
+          },
+          "id": {
+            "$ref": "#/components/schemas/JSONRPCID"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "controller.app.action",
+              "controller.app.bridge",
+              "controller.app.instance.get",
+              "controller.app.instance.remove",
+              "controller.app.instance.report",
+              "controller.app.instances",
+              "controller.app.navigate",
+              "controller.app.page",
+              "controller.artifact.capture",
+              "controller.artifact.fetch",
+              "controller.artifact.list",
+              "controller.artifact.manifest",
+              "controller.artifact.upload",
+              "controller.bridge.call",
+              "controller.bridge.list",
+              "controller.close",
+              "controller.command.catalog",
+              "controller.command.execute",
+              "controller.connect",
+              "controller.device.action",
+              "controller.device.inspect",
+              "controller.device.status",
+              "controller.discovery.check",
+              "controller.discovery.github.release",
+              "controller.discovery.github.workflow",
+              "controller.discovery.local_manifest",
+              "controller.discovery.manifest",
+              "controller.discovery.scan",
+              "controller.discovery.stage",
+              "controller.discovery.status",
+              "controller.display.send",
+              "controller.event.latest",
+              "controller.event.next",
+              "controller.exit",
+              "controller.front_panel",
+              "controller.front-panel",
+              "controller.history.status",
+              "controller.history.timeline",
+              "controller.host_menu.config",
+              "controller.host_menu.config.get",
+              "controller.host_menu.config.set",
+              "controller.host_menu.configure",
+              "controller.host_menu.content.push",
+              "controller.host_menu.directory.replace",
+              "controller.host_menu.state",
+              "controller.host.facts",
+              "controller.host.facts.catalog",
+              "controller.hotkeys.get",
+              "controller.hotkeys.set",
+              "controller.integrations.local.get",
+              "controller.integrations.local.set",
+              "controller.lcd.presentation.configure",
+              "controller.lcd.presentation.status",
+              "controller.lcd.priority",
+              "controller.lcd.prompt",
+              "controller.menu.current",
+              "controller.menu.jump",
+              "controller.menu.layout.get",
+              "controller.menu.layout.set",
+              "controller.menu.list",
+              "controller.menu.page",
+              "controller.message.send",
+              "controller.opcode.exchange",
+              "controller.opcode.request",
+              "controller.opcode.send",
+              "controller.open",
+              "controller.os.configure",
+              "controller.os.facts",
+              "controller.os.facts.catalog",
+              "controller.os.key",
+              "controller.os.policy",
+              "controller.os.power",
+              "controller.os.status",
+              "controller.peripherals",
+              "controller.peripherals.get",
+              "controller.peripherals.set",
+              "controller.ping",
+              "controller.port.close",
+              "controller.port.open",
+              "controller.port.reset",
+              "controller.ports",
+              "controller.program_state.get",
+              "controller.program_state.set",
+              "controller.program-state.get",
+              "controller.program-state.set",
+              "controller.pwm.off",
+              "controller.pwm.set",
+              "controller.pwm.values",
+              "controller.quit",
+              "controller.reset",
+              "controller.reset.lines",
+              "controller.restore.flash",
+              "controller.rf.clear",
+              "controller.rf.learn.cancel",
+              "controller.rf.learn.start",
+              "controller.rf.learn.status",
+              "controller.rf.list",
+              "controller.rf.map",
+              "controller.rf.presentation",
+              "controller.rf.remove",
+              "controller.rf.transmit",
+              "controller.session.snapshot",
+              "controller.session.snapshot.last",
+              "controller.snapshot",
+              "controller.status",
+              "controller.subscribe",
+              "controller.system.status",
+              "controller.temperatures",
+              "controller.ui.config",
+              "controller.ui.config.get",
+              "controller.ui.config.set",
+              "controller.unsubscribe",
+              "controller.update.eeprom",
+              "controller.update.firmware",
+              "controller.update.host",
+              "controller.update.status",
+              "controller.virtual_key",
+              "controller.webhooks.clear",
+              "controller.webhooks.dead",
+              "controller.webhooks.pending",
+              "controller.webhooks.replay",
+              "controller.webhooks.status"
+            ]
+          },
+          "params": {
+            "type": [
+              "object",
+              "array",
+              "null"
+            ]
+          },
+          "auth": {
+            "type": "string",
+            "writeOnly": true,
+            "description": "Raw NDJSON compatibility only; prefer authenticated transport setup."
+          }
+        },
+        "examples": [
+          {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "controller.status",
+            "params": {}
+          }
+        ]
+      },
+      "SessionTicketRequest": {
+        "type": "object",
+        "required": [
+          "transport"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "transport": {
+            "type": "string",
+            "enum": [
+              "websocket",
+              "socket_io"
+            ]
+          }
+        }
+      },
+      "SessionTicket": {
+        "type": "object",
+        "required": [
+          "ticket",
+          "protocol",
+          "expires_at",
+          "expires_in_ms",
+          "principal"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "writeOnly": true,
+            "description": "One-use ticket carried in Sec-WebSocket-Protocol, never in the URL."
+          },
+          "protocol": {
+            "type": "string",
+            "const": "pccontroller"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_in_ms": {
+            "type": "integer",
+            "const": 30000
+          },
+          "principal": {
+            "type": "string"
+          }
+        }
+      },
+      "OpcodeRequest": {
+        "type": "object",
+        "required": [
+          "opcode"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "opcode": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          },
+          "expect_opcode": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255,
+            "default": 128
+          },
+          "payload": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 64
+          },
+          "payload_hex": {
+            "type": "string",
+            "pattern": "^(?:0x)?(?:[0-9a-fA-F][0-9a-fA-F][ _:-]?){0,48}$"
+          }
+        },
+        "not": {
+          "required": [
+            "payload",
+            "payload_hex"
+          ]
+        }
+      },
+      "OpcodeFrame": {
+        "type": "object",
+        "required": [
+          "opcode",
+          "name",
+          "sequence"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "opcode": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 255
+          },
+          "name": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "payload": {
+            "type": "string",
+            "contentEncoding": "base64"
+          },
+          "payload_hex": {
+            "type": "string",
+            "pattern": "^[0-9A-F]*$"
+          }
+        }
+      },
+      "AppInstanceReport": {
+        "type": "object",
+        "required": [
+          "id",
+          "surface"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "surface": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "page": {
+            "type": "string",
+            "maxLength": 96
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "hidden",
+              "background",
+              "leaving"
+            ]
+          },
+          "lease_seconds": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 300,
+            "default": 45
+          },
+          "values": {
+            "type": "object",
+            "maxProperties": 32,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "self": {
+            "$ref": "#/components/schemas/InstanceSelf"
+          }
+        }
+      },
+      "InstanceSelf": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "pid": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parent_pid": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "image_path": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "working_directory": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "vars": {
+            "type": "object",
+            "maxProperties": 32,
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          }
+        }
+      },
+      "AppInstance": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AppInstanceReport"
+          },
+          {
+            "type": "object",
+            "required": [
+              "registered_at",
+              "updated_at"
+            ],
+            "properties": {
+              "registered_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "expires_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        ]
+      },
+      "AppNavigation": {
+        "type": "object",
+        "required": [
+          "page"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "page": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._/-]{1,96}$"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+            "default": "*"
+          }
+        }
+      },
+      "JSONRPCError": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "integer",
+            "enum": [
+              -32700,
+              -32600,
+              -32601,
+              -32602,
+              -32003,
+              -32001,
+              -32000
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "examples": [
+          {
+            "code": -32003,
+            "message": "remote capability board_commands is disabled"
+          }
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "correlation_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request or parameters",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "correlation_id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Authentication required",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "correlation_id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Capability or safety policy denied",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "correlation_id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      },
+      "MethodNotAllowed": {
+        "description": "Unsupported method",
+        "headers": {
+          "Allow": {
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "type": "string"
+                },
+                "correlation_id": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": true
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-body-limit-bytes": 1048576,
+  "x-unsupported-transports": [
+    "versioned /api/v* paths",
+    "built-in TLS termination",
+    "Socket.IO long-polling",
+    "Socket.IO namespaces",
+    "Socket.IO rooms",
+    "binary Socket.IO attachments"
+  ]
+}

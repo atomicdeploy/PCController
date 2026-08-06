@@ -14,26 +14,27 @@ import {
 } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import {
+        createChalk,
+        renderUnicodeBanner
+} from '../Build/presentation.mjs'
+import { resolveProductTitle } from '../Build/product-metadata.mjs'
+import {
+	BOARD,
+	EXIT,
+	PROGRAMMING_METHODS,
+	PROGRAMMING_OPERATIONS,
+	canonicalControllerInvocation,
+	commandPlanPaths,
+	createControllerProgramCommand,
+	loadToolchainPolicy,
+	parseToolchainPolicy,
+	programmingArtifact,
+	relativeCommandPlanPaths,
+	resolveCanonicalControllerInvocation
+} from '../CommandPlan/controller-command.mjs'
 
-export const EXIT = Object.freeze({
-	OK: 0,
-	USAGE: 2,
-	VALIDATION: 3,
-	TOOL: 4,
-	IO: 5,
-	INTERRUPTED: 130
-})
-
-export const BOARD = Object.freeze({
-	fqbn: 'MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external',
-	mcu: 'atmega328p',
-	clockHz: 16_000_000,
-	bootloader: 'UART0 Urboot/urclock',
-	baud: 115_200,
-	applicationLimitBytes: 32_384,
-	flashBytes: 32_768,
-	eepromBytes: 1_024
-})
+export { BOARD, EXIT, loadToolchainPolicy, parseToolchainPolicy }
 
 // Packs local civil time as date<<16|time with two-second resolution.
 export function packBuildTimestamp(value = new Date()) {
@@ -79,7 +80,7 @@ const SOURCE_ROOTS = Object.freeze([
 ])
 const DEFAULT_POLL_MS = 250
 const DEFAULT_DEBOUNCE_MS = 500
-const MINIMUM_NODE = Object.freeze({ major: 20, minor: 19 })
+const MINIMUM_NODE = Object.freeze({ major: 22, minor: 12 })
 
 class FirmwareToolError extends Error {
 	constructor(message, exitCode = EXIT.TOOL, options = {}) {
@@ -127,8 +128,7 @@ export function parseArguments(argv, env = process.env) {
 		command: null,
 		port: env.PCCONTROLLER_PORT || '',
 		method: '',
-		programmer: env.PCCONTROLLER_PROGRAMMER || 'usbasp',
-		usbaspTroubleshooting: false,
+		programmer: env.PCCONTROLLER_PROGRAMMER || '',
 		hexPath: '',
 		outputPath: '',
 		manifestPath: '',
@@ -137,6 +137,7 @@ export function parseArguments(argv, env = process.env) {
 		quiet: false,
 		noColor: Boolean(env.NO_COLOR),
 		dryRun: false,
+		planJSON: false,
 		uploadOnChange: false,
 		once: false,
 		pollMs: DEFAULT_POLL_MS,
@@ -187,9 +188,6 @@ export function parseArguments(argv, env = process.env) {
 				index = next
 				break
 			}
-			case '--usbasp-troubleshooting':
-				config.usbaspTroubleshooting = true
-				break
 			case '--hex': {
 				const [value, next] = optionValue(argv, index, inlineValue, name)
 				config.hexPath = value
@@ -235,6 +233,10 @@ export function parseArguments(argv, env = process.env) {
 			case '--dry-run':
 				config.dryRun = true
 				break
+			case '--plan-json':
+				config.planJSON = true
+				config.noColor = true
+				break
 			case '--upload':
 				config.uploadOnChange = true
 				break
@@ -264,7 +266,7 @@ export function parseArguments(argv, env = process.env) {
 	}
 	if (config.help) return config
 	config.method ||= 'urclock'
-	if (!['urclock', 'usbasp'].includes(config.method)) {
+	if (!PROGRAMMING_METHODS.includes(config.method)) {
 		throw new FirmwareToolError(
 			'--method must be urclock or usbasp; direct Arduino upload is disabled',
 			EXIT.USAGE
@@ -293,13 +295,6 @@ export function parseArguments(argv, env = process.env) {
 			EXIT.USAGE
 		)
 	}
-	if ((hardwareAction || (config.command === 'watch' && config.uploadOnChange)) &&
-		config.method === 'usbasp' && !config.usbaspTroubleshooting) {
-		throw new FirmwareToolError(
-			'USBasp is hidden troubleshooting only; pass --usbasp-troubleshooting explicitly',
-			EXIT.USAGE
-		)
-	}
 	if (config.command === 'metadata' && config.method !== 'urclock') {
 		throw new FirmwareToolError(
 			'metadata is an Urclock-only operation',
@@ -324,23 +319,16 @@ export function parseArguments(argv, env = process.env) {
 	return config
 }
 
-function usage(color = true) {
-	const style = color
-		? {
-				title: '\u001b[1;96m',
-				heading: '\u001b[1;93m',
-				dim: '\u001b[90m',
-				reset: '\u001b[0m'
-			}
-		: { title: '', heading: '', dim: '', reset: '' }
-	return `${style.title}PCController AVR firmware studio${style.reset}
+function usage(color = true, productTitle = resolveProductTitle()) {
+        const chalk = createChalk({ noColor: !color, forceColor: color }, color)
+        return `${chalk.bold.cyanBright(`${productTitle} AVR firmware studio`)}
 
-${style.heading}Usage${style.reset}
+${chalk.bold.yellowBright('Usage')}
   node Tools/Firmware/firmware.mjs [command] [options]
   firmware.cmd [command] [options]
   ./firmware.sh [command] [options]
 
-${style.heading}Commands${style.reset}
+${chalk.bold.yellowBright('Commands')}
   build       Build AVR firmware, validate Intel HEX, and write a SHA-256 manifest
   upload      Build, upload, and verify through MiniCore Urboot/urclock
   watch       Watch firmware sources and run stable, coalesced builds
@@ -351,73 +339,62 @@ ${style.heading}Commands${style.reset}
   probe       Probe the AVR signature through Urclock
   metadata    Request Urboot/Urclock metadata
 
-${style.heading}Options${style.reset}
-  --port PORT       Explicit serial port; required for every UART hardware action
-  --method METHOD   urclock (default) or guarded usbasp; Arduino upload is disabled
-  --programmer ID   ISP programmer ID used by the canonical build (default: usbasp)
-  --usbasp-troubleshooting
-                    Explicitly authorize hidden ISP diagnostics/programming
+${chalk.bold.yellowBright('Options')}
+  --port PORT       Urclock transport or separate USBasp app-lifecycle UART
+  --method METHOD   urclock (default) or explicit usbasp recovery method
+  --programmer ID   Optional ISP backend-ID override; host default when omitted
   --hex FILE        Override the application Intel HEX file
   --output FILE     Backup destination (backup only)
   --manifest FILE   Override manifest output
   --clean           Clean before building
   --verbose         Show commands and verbose compiler output
   --dry-run         Print the exact action without executing it or opening a port
+  --plan-json       Emit the exact shared command plan as JSON and exit
   --no-color        Disable VT-100 styling
   --quiet           Suppress informational output
   -h, --help        Show this help
 
-${style.heading}Watch options${style.reset}
+${chalk.bold.yellowBright('Watch options')}
   --upload          Program after each successful watched build (never implicit)
   --once            Run the initial watched action and exit
   --poll MS         Content scan interval (default: ${DEFAULT_POLL_MS})
   --debounce MS     Stable-source window (default: ${DEFAULT_DEBOUNCE_MS})
 
-${style.dim}Target: MiniCore 3.1.2+, ATmega328P, external 16 MHz, EEPROM retained,
-BOD 2.7 V, UART0 Urboot/urclock at 115200 baud. Default command is build.
+${chalk.dim(`Target: ${BOARD.mcu}, ${BOARD.clockHz.toLocaleString('en-US')} Hz, ${BOARD.bootloader},
+${BOARD.baud} baud, ${BOARD.applicationLimitBytes}/${BOARD.flashBytes} application/flash bytes.
+Default command is build.
 Exit codes: 0 success, 2 usage, 3 validation, 4 build/program, 5 local I/O,
-130 interrupted.${style.reset}`
+130 interrupted.`)}`
 }
 
-function createLogger(config) {
-	const forceColor = ['1', 'true', 'always'].includes(String(process.env.FORCE_COLOR || '').toLowerCase()) || process.env.GITHUB_ACTIONS === 'true'
-	const color = !config.noColor && (process.stdout.isTTY || forceColor)
-	const code = color
-		? {
-				cyan: '\u001b[1;96m',
-				green: '\u001b[1;92m',
-				yellow: '\u001b[1;93m',
-				red: '\u001b[1;91m',
-				magenta: '\u001b[1;95m',
-				dim: '\u001b[90m',
-				reset: '\u001b[0m'
-			}
-		: { cyan: '', green: '', yellow: '', red: '', magenta: '', dim: '', reset: '' }
+function createLogger(config, productTitle = resolveProductTitle()) {
+	const chalk = createChalk(config, process.stdout.isTTY)
 	return {
 		banner() {
 			if (config.quiet) return
-			console.log('')
-			console.log(`${code.magenta}╔══════════════════════════════════════════╗${code.reset}`)
-			console.log(`${code.magenta}║  ⚡ PCController AVR firmware studio     ║${code.reset}`)
-			console.log(`${code.magenta}╚══════════════════════════════════════════╝${code.reset}`)
+                        console.log('')
+                        console.log(renderUnicodeBanner(
+                                [chalk.bold(`⚡ ${productTitle} AVR firmware studio`)],
+				{ chalk, width: 44, borderColor: 'magentaBright' }
+			))
 		},
 		stage(icon, message) {
-			if (!config.quiet) console.log(`\n${code.cyan}${icon}  ${message}${code.reset}`)
+			if (!config.quiet) console.log(`\n${chalk.bold.cyanBright(`${icon}  ${message}`)}`)
 		},
 		info(message) {
 			if (!config.quiet) console.log(message)
 		},
 		detail(message) {
-			if (!config.quiet) console.log(`${code.dim}${message}${code.reset}`)
+			if (!config.quiet) console.log(chalk.dim(message))
 		},
 		success(message) {
-			if (!config.quiet) console.log(`${code.green}✅  ${message}${code.reset}`)
+			if (!config.quiet) console.log(chalk.bold.greenBright(`✅  ${message}`))
 		},
 		warn(message) {
-			if (!config.quiet) console.warn(`${code.yellow}⚠️  ${message}${code.reset}`)
+			if (!config.quiet) console.warn(chalk.bold.yellowBright(`⚠️  ${message}`))
 		},
 		error(message) {
-			console.error(`${code.red}❌  ${message}${code.reset}`)
+			console.error(chalk.bold.redBright(`❌  ${message}`))
 		}
 	}
 }
@@ -445,73 +422,103 @@ export async function createBuildPlan(config, projectRoot) {
 	return { file, args, cwd: projectRoot, env }
 }
 
-async function findController(projectRoot) {
-	const names = process.platform === 'win32'
-		? ['controller.exe', 'controller']
-		: ['controller', 'controller.exe']
-	const directories = [join(projectRoot, 'Tools', 'Controller', 'bin')]
-	for (const directory of directories) {
-		for (const name of names) {
-			const candidate = join(directory, name)
-			try {
-				const stat = await fs.stat(candidate)
-				if (stat.isFile()) return candidate
-			} catch {
-				// Continue through executable suffixes in the canonical package.
-			}
-		}
+export async function createProgramPlan(config, projectRoot, artifactPath, outputPath = '') {
+	const operation = PROGRAMMING_OPERATIONS[config.command]
+	if (!operation) {
+		throw new FirmwareToolError(`Unsupported programmer action: ${config.command}`, EXIT.USAGE)
 	}
-	throw new FirmwareToolError(
-		'Native controller executable was not found; run build.cmd --host-only first',
-		EXIT.TOOL
-	)
+	return createControllerProgramCommand({
+		invocation: resolveCanonicalControllerInvocation(projectRoot),
+		method: config.method,
+		operation,
+		device: config.port,
+		appDevice: config.port,
+		programmer: config.programmer,
+		hex: artifactPath,
+		output: outputPath || config.outputPath,
+		dryRun: config.dryRun
+	})
 }
 
-export async function createProgramPlan(config, projectRoot, artifactPath, outputPath = '') {
-	const controller = await findController(projectRoot)
-	const args = ['program', '--method', config.method]
-	if (config.method === 'urclock') args.push('--device', config.port)
-	if (config.method === 'usbasp') {
-		args.push(
-			'--programmer', config.programmer,
-			'--usbasp-troubleshooting'
-		)
+function plannedProgramCommand(config, projectRoot, artifactPath = '', outputPath = '') {
+	const operation = PROGRAMMING_OPERATIONS[config.command]
+	if (!operation) {
+		throw new FirmwareToolError(`Unsupported programmer action: ${config.command}`, EXIT.USAGE)
 	}
-	switch (config.command) {
-		case 'backup':
-			args.push('--operation', 'read-flash', '--output', outputPath || config.outputPath)
-			break
-		case 'upload':
-			args.push('--operation', 'write-flash', '--hex', artifactPath)
-			break
-		case 'verify':
-			args.push('--operation', 'verify-flash', '--hex', artifactPath)
-			break
-		case 'probe':
-			args.push('--operation', 'probe')
-			break
-		case 'metadata':
-			args.push('--operation', 'metadata')
-			break
-		default:
-			throw new FirmwareToolError(
-				`Unsupported programmer action: ${config.command}`,
-				EXIT.USAGE
-			)
+	return createControllerProgramCommand({
+		invocation: canonicalControllerInvocation(projectRoot),
+		method: config.method,
+		operation,
+		device: config.port,
+		appDevice: config.port,
+		programmer: config.programmer,
+		hex: artifactPath,
+		output: outputPath || config.outputPath
+	})
+}
+
+export async function createCommandPlan(config, projectRoot) {
+	const absolute = commandPlanPaths(projectRoot)
+	const paths = relativeCommandPlanPaths(projectRoot)
+	const actions = []
+	const addValidation = writeManifest => actions.push({
+		id: writeManifest ? 'validate-manifest' : 'validate',
+		stage: writeManifest
+			? 'Validate canonical artifacts and atomically publish their manifest'
+			: 'Validate Intel HEX checksums, boundaries, roles, and hashes',
+		hardware: false
+	})
+
+	if (['build', 'upload', 'watch'].includes(config.command)) {
+		actions.push({
+			id: 'build',
+			stage: 'Compile firmware through the shared project build plan',
+			hardware: false,
+			command: await createBuildPlan(config, projectRoot)
+		})
+		addValidation(true)
+		if (config.command === 'upload' || (config.command === 'watch' && config.uploadOnChange)) {
+			actions.push({
+				id: 'program',
+				stage: `Program the validated ${config.method} image through Controller`,
+				hardware: true,
+				command: plannedProgramCommand(
+					{ ...config, command: 'upload' },
+					projectRoot,
+					programmingArtifact(absolute, config.method)
+				)
+			})
+		}
+	} else if (config.command === 'check' || config.command === 'manifest') {
+		addValidation(config.command === 'manifest')
+	} else {
+		const artifact = resolveFromProject(config.hexPath || absolute.application, projectRoot)
+		actions.push({
+			id: config.command,
+			stage: `Run ${config.command} through Controller`,
+			hardware: true,
+			command: plannedProgramCommand(config, projectRoot, artifact, config.outputPath)
+		})
 	}
-	if (config.dryRun) args.push('--dry-run')
-	return { file: controller, args, cwd: projectRoot }
+
+	return {
+		format: 'pccontroller-firmware-plan/v1',
+		canonicalController: paths.controller,
+		firmwareOutput: paths.firmwareOutput,
+		target: BOARD,
+		artifacts: {
+			application: paths.application,
+			completeFlash: paths.completeFlash,
+			defaultEEPROM: paths.defaultEEPROM,
+			manifest: paths.manifest
+		},
+		repeatOnStableChange: config.command === 'watch' && !config.once,
+		actions
+	}
 }
 
 async function createUploadPlan(config, projectRoot) {
-	const artifact = config.method === 'usbasp'
-		? join(
-			projectRoot,
-			'.build',
-			'firmware',
-			'PCController.ino.with_bootloader.hex'
-		)
-		: defaultApplicationHex(projectRoot)
+	const artifact = programmingArtifact(commandPlanPaths(projectRoot), config.method)
 	return await createProgramPlan(
 		{ ...config, command: 'upload' },
 		projectRoot,
@@ -562,7 +569,7 @@ function resolveFromProject(path, projectRoot) {
 }
 
 function defaultApplicationHex(projectRoot) {
-	return join(projectRoot, '.build', 'firmware', 'PCController.ino.hex')
+	return commandPlanPaths(projectRoot).application
 }
 
 function addRange(ranges, start, length) {
@@ -708,9 +715,10 @@ async function sha256File(path) {
 	}
 }
 
-function artifactRole(path) {
+export function artifactRole(path) {
 	const name = basename(path).toLowerCase()
 	if (name.endsWith('.eep')) return 'eeprom'
+	if (name === 'safe-default-eeprom.hex') return 'default-eeprom'
 	if (name.includes('with_bootloader')) return 'flash+bootloader'
 	return 'application'
 }
@@ -741,6 +749,14 @@ async function inspectArtifact(path, projectRoot) {
 		intelHex.endAddress >= BOARD.flashBytes) {
 		throw new FirmwareToolError(
 			`${basename(path)} exceeds the ATmega328P flash range`,
+			EXIT.VALIDATION
+		)
+	}
+	if ((role === 'eeprom' || role === 'default-eeprom') &&
+		intelHex.endAddress !== null &&
+		intelHex.endAddress >= BOARD.eepromBytes) {
+		throw new FirmwareToolError(
+			`${basename(path)} exceeds the ATmega328P EEPROM range`,
 			EXIT.VALIDATION
 		)
 	}
@@ -814,7 +830,7 @@ export async function sourceDigest(projectRoot) {
 
 async function discoverArtifacts(config, projectRoot) {
 	if (config.hexPath) return [resolveFromProject(config.hexPath, projectRoot)]
-	const output = join(projectRoot, '.build', 'firmware')
+	const output = commandPlanPaths(projectRoot).firmwareOutput
 	let entries
 	try {
 		entries = await fs.readdir(output, { withFileTypes: true })
@@ -860,7 +876,7 @@ async function inspectArtifacts(config, projectRoot, logger) {
 async function writeManifest(config, projectRoot, artifacts, source, logger) {
 	const path = resolveFromProject(
 		config.manifestPath ||
-			join('.build', 'firmware', 'firmware-manifest.json'),
+			commandPlanPaths(projectRoot).manifest,
 		projectRoot
 	)
 	let prior = null
@@ -886,6 +902,12 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 		// these are exactly the same bytes. The studio adds validation; it must
 		// not replace the compiler-owned deterministic identity with wall time.
 		source: identityMatches ? { ...source, ...prior.source } : source,
+		...(identityMatches && prior.stackBudget
+			? { stackBudget: prior.stackBudget }
+			: {}),
+		...(identityMatches && Array.isArray(prior.patchRegions)
+			? { patchRegions: prior.patchRegions }
+			: {}),
 		artifacts
 	}
 	await fs.mkdir(dirname(path), { recursive: true })
@@ -1175,23 +1197,35 @@ export async function main(
 	env = process.env,
 	projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 ) {
-	let config
+        const productTitle = resolveProductTitle(env)
+        let config
 	try {
 		assertNodeVersion()
 		config = parseArguments(argv, env)
 	} catch (error) {
-		const fallback = createLogger({ quiet: false, noColor: Boolean(env.NO_COLOR) })
+                const fallback = createLogger(
+                        { quiet: false, noColor: Boolean(env.NO_COLOR) },
+                        productTitle
+                )
 		fallback.error(error.message || String(error))
 		console.error('Run firmware.cmd --help for usage.')
 		return error.exitCode || EXIT.USAGE
-	}
-	if (config.help) {
-		const forceColor = ['1', 'true', 'always'].includes(String(env.FORCE_COLOR || '').toLowerCase()) || env.GITHUB_ACTIONS === 'true'
-		console.log(usage(!config.noColor && (process.stdout.isTTY || forceColor)))
-		return EXIT.OK
+        }
+        if (config.help) {
+                console.log(usage(!config.noColor && process.stdout.isTTY, productTitle))
+                return EXIT.OK
+        }
+	if (config.planJSON) {
+		try {
+			console.log(JSON.stringify(await createCommandPlan(config, projectRoot), null, 2))
+			return EXIT.OK
+		} catch (error) {
+			console.error(error.message || String(error))
+			return error.exitCode || EXIT.TOOL
+		}
 	}
 
-	const logger = createLogger(config)
+        const logger = createLogger(config, productTitle)
 	logger.banner()
 	const started = process.hrtime.bigint()
 	try {

@@ -7,6 +7,7 @@
 #include "StatusLedController.h"
 
 namespace {
+// Reset cue duration and the mask covering every non-status PWM output.
 constexpr uint16_t ResetCueMs = 240;
 constexpr uint16_t NonStatusPwmMask = 0x1FFFU; // PWM channels 0..12.
 }
@@ -18,7 +19,6 @@ void SafeResetController::request(RelayController &relays,
                                   StatusLedController &statusLeds,
                                   uint32_t now) {
   relays.allOff(now);
-  pwm.setMode(PwmTestMode::Off, now);
   (void)pwm.clearMask(NonStatusPwmMask);
   statusLeds.playCue(StatusLedCue::Reset, ResetCueMs, now);
   resetAt_ = now + ResetCueMs;

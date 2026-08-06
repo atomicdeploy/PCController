@@ -9,8 +9,13 @@ namespace {
 
 struct __attribute__((packed)) StoredSettings {
   ControllerSettings settings;
+  uint8_t boardNameLength;
+  char name[SettingsStore::MaximumBoardNameLength];
   uint8_t checksum;
 };
+
+static_assert(sizeof(StoredSettings) == 41,
+              "settings/name EEPROM record layout changed");
 
 static_assert(SettingsStore::EepromAddress + sizeof(StoredSettings) <=
                   EepromLayout::RemoteHeaderAddress,
@@ -29,8 +34,7 @@ SettingsStore settingsStore;
 uint8_t firstVisiblePersistentMenuPage(uint16_t visibleMask,
                                        const uint8_t *packedOrder) {
   if (visibleMask == 0 ||
-      (visibleMask & ~PersistentMenuAllPagesMask) != 0 ||
-      (packedOrder[7] & 0xF0U) != 0xF0U) {
+      (visibleMask & ~PersistentMenuAllPagesMask) != 0) {
     return 0xFF;
   }
   uint16_t seen = 0;
@@ -56,6 +60,7 @@ uint8_t firstVisiblePersistentMenuPage(uint16_t visibleMask,
 bool SettingsStore::begin(uint32_t now) {
   setDefaults();
   if (loadCurrent()) {
+    persisted_ = true;
 #if PCCONTROLLER_MENU_VISIBILITY
     if (!settings_.menuPageVisible(settings_.defaultMenuPage)) {
       for (uint8_t rank = 0; rank < PersistentMenuPageCount; ++rank) {
@@ -75,8 +80,12 @@ bool SettingsStore::begin(uint32_t now) {
     return true;
   }
 
-  dirty_ = true;
-  changedAt_ = now - SaveDelayMs;
+  // A blank/corrupt board runs on the volatile safe fallback until the Go
+  // host writes its canonical factory settings. Do not persist the AVR
+  // fallback and make it indistinguishable from an initialized board.
+  dirty_ = false;
+  persisted_ = false;
+  changedAt_ = now;
   return false;
 }
 
@@ -100,6 +109,8 @@ bool SettingsStore::service(uint32_t now, bool allowWrite) {
 bool SettingsStore::saveNow() {
   StoredSettings record{};
   record.settings = settings_;
+  record.boardNameLength = boardNameLength_;
+  memcpy(record.name, boardName_, boardNameLength_);
   record.checksum =
       checksum(&record, static_cast<uint8_t>(sizeof(record) - 1));
 
@@ -108,42 +119,42 @@ bool SettingsStore::saveNow() {
     EEPROM.update(EepromAddress + index, bytes[index]);
   }
   dirty_ = false;
+  persisted_ = true;
   return true;
 }
 
 bool SettingsStore::dirty() const { return dirty_; }
 
+bool SettingsStore::persisted() const { return persisted_; }
+
+bool SettingsStore::setBoardName(const uint8_t *name, uint8_t length) {
+  // The Go API owns printable-ASCII/whitespace policy. The MCU still enforces
+  // the hard storage bound; the full settings/name record is CRC-protected.
+  if (length > MaximumBoardNameLength) {
+    return false;
+  }
+  boardNameLength_ = length;
+  memcpy(boardName_, name, length);
+  return true;
+}
+
+bool SettingsStore::boardName(uint8_t *recordBytes) const {
+  recordBytes[0] = boardNameLength_;
+  memcpy(recordBytes + 1, boardName_, boardNameLength_);
+  return persisted_;
+}
+
 void SettingsStore::setDefaults() {
-  // MotionDoorPolicy::Always is the zero encoding in the cleared policy bits.
-  settings_.flags = SettingsFlags::SwapTemperatureSensors;
-#if PCCONTROLLER_SAFE_EEPROM_MIGRATION
-  settings_.illuminationMode = 0; // Off during one-shot EEPROM migration.
-#else
-  settings_.illuminationMode = 1; // Auto
-#endif
+  // The singleton's static storage supplies every zero-valued safe default at
+  // boot. Only non-zero fallback fields need AVR instructions here; the Go
+  // tooling owns and provisions the complete canonical factory record.
   settings_.illuminationOnBrightness = 128;
-  settings_.illuminationOffBrightness = 0;
   settings_.displayBrightness = 5;
   settings_.statusBrightness = 128;
-#if PCCONTROLLER_SAFE_EEPROM_MIGRATION
-  settings_.pwmBootMode = 0; // Off during one-shot EEPROM migration.
-#else
-  settings_.pwmBootMode = 2; // Auto test
-#endif
   settings_.streamPeriodMs = 500;
-  memset(settings_.userPwm, 0, sizeof(settings_.userPwm));
-  settings_.defaultMenuPage = 0;
-  settings_.menuFlags = 0; // Keep Status as the deterministic factory page.
-#if PCCONTROLLER_MENU_VISIBILITY
-  settings_.visibleMenuMask = PersistentMenuAllPagesMask;
-#endif
-#if PCCONTROLLER_MENU_ORDERING
-  for (uint8_t pair = 0; pair < 8; ++pair) {
-    const uint8_t first = static_cast<uint8_t>(pair << 1);
-    settings_.menuOrder[pair] =
-        static_cast<uint8_t>(first | ((first + 1U) << 4));
-  }
-#endif
+  // Host-owned factory provisioning supplies the legacy packed menu bytes.
+  // They intentionally stay zero in the volatile blank-EEPROM fallback.
+  settings_.motionBreakMs = 1;
 }
 
 bool SettingsStore::loadCurrent() {
@@ -153,10 +164,12 @@ bool SettingsStore::loadCurrent() {
           checksum(&record, static_cast<uint8_t>(sizeof(record) - 1))) {
     return false;
   }
-  if (record.settings.illuminationMode > 2 ||
+  if (record.boardNameLength > MaximumBoardNameLength ||
+      record.settings.illuminationMode > 2 ||
       record.settings.displayBrightness > 7 ||
-      record.settings.pwmBootMode > 2 ||
+      (record.settings.outputPersistence & ~OutputPersistence::AllowedMask) != 0 ||
       record.settings.defaultMenuPage >= PersistentMenuPageCount ||
+      record.settings.motionBreakMs == 0 ||
       (record.settings.streamPeriodMs != 0 &&
        record.settings.streamPeriodMs < 100)) {
     return false;
@@ -175,5 +188,7 @@ bool SettingsStore::loadCurrent() {
   }
 #endif
   settings_ = record.settings;
+  boardNameLength_ = record.boardNameLength;
+  memcpy(boardName_, record.name, boardNameLength_);
   return true;
 }

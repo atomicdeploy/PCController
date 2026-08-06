@@ -2,7 +2,6 @@
 set -euo pipefail
 
 source_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-build_root="${source_root}/.build"
 configuration=Release
 clean=0
 skip_tests=0
@@ -42,6 +41,17 @@ case "$configuration" in
     *) printf 'Unsupported configuration: %s\n' "$configuration" >&2; exit 2 ;;
 esac
 
+case "$configuration" in
+    Debug) preset=debug ;;
+    Release) preset=release ;;
+    RelWithDebInfo) preset=relwithdebinfo ;;
+esac
+build_root="${source_root}/.build/${preset}"
+
+# Preset discovery is rooted in the current directory on some CMake builds.
+# Enter the script directory so this command behaves identically from any caller.
+cd -- "$source_root"
+
 command -v cmake >/dev/null || { printf 'cmake is required in PATH\n' >&2; exit 1; }
 command -v ninja >/dev/null || { printf 'ninja is required in PATH\n' >&2; exit 1; }
 cxx=${CXX:-g++}
@@ -72,17 +82,15 @@ if ((clean)) && [[ -d "$build_root" ]]; then
 fi
 
 printf '%s⚙️  Configuring CMake%s\n' "$cyan" "$reset"
-cmake -S "$source_root" -B "$build_root" -G Ninja \
-    "-DCMAKE_BUILD_TYPE=${configuration}" \
-    "-DCMAKE_CXX_COMPILER=${compiler_path}" \
-    -DBUILD_TESTING=ON
+cmake --preset "$preset" -S "$source_root" \
+    "-DCMAKE_CXX_COMPILER=${compiler_path}"
 
 printf '%s🔨 Building C++17 virtual hardware%s\n' "$cyan" "$reset"
-cmake --build "$build_root" --parallel
+cmake --build --preset "$preset" --parallel
 
 if ((skip_tests == 0)); then
     printf '%s🧪 Running protocol and EEPROM tests%s\n' "$cyan" "$reset"
-    ctest --test-dir "$build_root" --output-on-failure
+    ctest --preset "$preset" --test-dir "$source_root"
 fi
 
 printf '%s✅ Virtual board build passed.%s\n' "$green" "$reset"

@@ -38,6 +38,18 @@ The file carries its own SPDX identifier and is distributed under the MIT
 terms required by that incorporated code, rather than the project's general
 dual-license choice.
 
+### Vazirmatn Persian web font
+
+`Tools/Controller/web/src/assets/vazirmatn.woff2` is the unmodified
+Vazirmatn 33.0.3 web font used by the embedded RTL/LTR control center. It is
+copyright 2015 The Vazirmatn Project Authors.
+
+- License: `OFL-1.1`
+- Local license text: `LICENSES/Vazirmatn-OFL-1.1.txt`
+- Upstream project: <https://github.com/rastikerdar/vazirmatn>
+- Vendored font SHA-256:
+  `4E3FA217D38FDAFC1FEA4414CEB58CA5E662CF0AB5FA735A8C8C20E8B42CAD92`
+
 ## AVR build dependencies (not vendored)
 
 The firmware resolves these through Arduino CLI/MiniCore rather than copying
@@ -81,6 +93,7 @@ The resolved module graph was audited in these license groups:
   `github.com/clipperhouse/uax29/v2`,
   `github.com/dustin/go-humanize`,
   `github.com/erikgeiser/coninput`,
+  `github.com/go-ole/go-ole`,
   `github.com/grandcat/zeroconf`,
   `github.com/lucasb-eyer/go-colorful`,
   `github.com/mattn/go-isatty`,
@@ -110,15 +123,36 @@ after any `go mod tidy` or dependency-version change.
 
 The Go standard library is distributed under its upstream BSD-style license.
 
+## Embedded web application dependencies
+
+The production web bundle compiled into the Go executable contains code from
+React and React DOM (MIT), Motion (MIT), Recharts (MIT), and Lucide React
+(ISC). Exact runtime and development versions are locked by
+`Tools/Controller/web/package-lock.json`.
+Vite and its React plugin (MIT), Vitest (MIT), TypeScript (Apache-2.0), and the
+React type declarations (MIT) are build/test dependencies and are not served
+at runtime. Their upstream license files remain authoritative and must be
+included beside redistributed release artifacts by the packaging pipeline.
+
+## Optional PC speaker support
+
+The optional Windows motherboard-speaker mirror uses the PIT/channel-2 I/O
+sequence from `cocafe/pc-beeper` (MIT, Copyright (c) 2018
+cocafehj@gmail.com), translated to Go. Its full MIT terms are in
+`LICENSES/MIT.txt`. The separately supplied `WinRing0x64.sys` driver is an
+OpenLibSys/WinRing0 component under its upstream modified BSD terms. The Go
+host calls its published device-control interface directly; no OpenLibSys DLL
+or external buzzer executable is loaded. The driver is not committed to or
+redistributed by this repository.
+
 ## Build/runtime tools (not vendored)
 
 Node.js, CMake, Ninja, GCC/MinGW-w64, Go, `go-winres`, UPX, Git, and GitHub CLI
 are discovered from the user's environment. They are not included in this
 source tree and retain their own licenses.
 
-## Behavioral references with no copied source
-
-`Tools/Controller/docs/Upstream-Source-Audit.md` records the local and network projects that
-were inspected for behavior or workflow ideas. It also records their known
-license status. Their source was not copied into PCController and they are not
-relicensed here.
+The project-owned Node build presentation resolves Chalk (MIT) and
+`cli-table3` (MIT), plus their transitive dependencies, from the exact
+`Tools/Build/package-lock.json`. They are build-time dependencies rather than
+host-runtime code and are not embedded in `controller.exe`. Their upstream
+license files are installed with `npm ci` and remain authoritative.

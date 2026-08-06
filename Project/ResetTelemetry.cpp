@@ -7,15 +7,24 @@
 #include "UartProtocol.h"
 
 namespace {
+// Wear-levelled reset-journal geometry and committed-record marker.
 constexpr int ResetJournalEepromAddress = EepromLayout::ResetJournalAddress;
 constexpr uint8_t ResetJournalSlots = EepromLayout::ResetJournalSlots;
 constexpr uint8_t ResetRecordMarker = 0xA7;
 
+#if defined(_MSC_VER)
+#pragma pack(push, 1)
+struct ResetRecord {
+#else
 struct __attribute__((packed)) ResetRecord {
+#endif
   uint32_t count;
   uint8_t checksum;
   uint8_t marker;
 };
+#if defined(_MSC_VER)
+#pragma pack(pop)
+#endif
 
 static_assert(sizeof(ResetRecord) == EepromLayout::ResetRecordBytes,
               "Reset record layout changed");
@@ -28,33 +37,34 @@ static_assert(
         E2END + 1,
     "Reset journal exceeds ATmega328P EEPROM");
 
+#if defined(PCCONTROLLER_NATIVE_TEST)
+uint8_t capturedResetCause = 0;
+#else
 uint8_t capturedResetCause __attribute__((section(".noinit")));
 
 void captureResetCause()
     __attribute__((naked, used, section(".init3")));
 
 void captureResetCause() {
-  capturedResetCause = MCUSR;
+  uint8_t cause = MCUSR;
+  if (cause == 0) {
+    // Urboot preserves the pre-clear MCUSR byte in r2 across its app jump.
+    register uint8_t urbootCause asm("r2");
+    cause = urbootCause;
+  }
+  capturedResetCause = cause;
   MCUSR = 0;
   wdt_disable();
 }
+#endif
 
 uint8_t resetRecordChecksum(uint32_t count) {
-  // 0x1F advances the protocol CRC-8 from its zero seed to the journal's
-  // historical 0x5D seed, preserving every record written by older firmware
-  // while sharing the already-linked CRC implementation.
-  struct __attribute__((packed)) ChecksumInput {
-    uint8_t seedPrefix;
-    uint32_t count;
-  };
-  const ChecksumInput input = {0x1F, count};
   return ControllerProtocol::UartProtocol::crc8(
-      reinterpret_cast<const uint8_t *>(&input), sizeof(input));
+      reinterpret_cast<const uint8_t *>(&count), sizeof(count));
 }
 
 bool validResetRecord(const ResetRecord &record) {
   return record.marker == ResetRecordMarker && record.count != 0 &&
-         record.count != UINT32_MAX &&
          record.checksum == resetRecordChecksum(record.count);
 }
 
@@ -74,7 +84,7 @@ void ResetTelemetry::begin() {
   for (uint8_t slot = 0; slot < ResetJournalSlots; ++slot) {
     EEPROM.get(
         ResetJournalEepromAddress +
-            static_cast<int>(slot) * sizeof(ResetRecord),
+            static_cast<int>(slot) * EepromLayout::ResetRecordBytes,
         record);
     if (validResetRecord(record) &&
         (!found || countIsNewer(record.count, count_))) {
@@ -90,7 +100,7 @@ void ResetTelemetry::begin() {
       found ? static_cast<uint8_t>((newestSlot + 1) % ResetJournalSlots) : 0;
   const int address =
       ResetJournalEepromAddress +
-      static_cast<int>(nextSlot) * sizeof(ResetRecord);
+      static_cast<int>(nextSlot) * EepromLayout::ResetRecordBytes;
   const uint8_t checksum = resetRecordChecksum(count_);
 
   // Invalidate first and publish the marker last. A power loss can therefore

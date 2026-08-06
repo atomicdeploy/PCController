@@ -8,10 +8,10 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
-var ErrHostMenuOverlayUnsupported = errors.New("firmware does not advertise volatile host-menu overlay capability bit 24")
+var ErrHostMenuOverlayUnsupported = errors.New("firmware does not advertise the volatile host-menu overlay protocol")
 
 func (runtime *Runtime) ReplaceHostMenuDirectory(ctx context.Context, directory native.HostMenuDirectory) error {
-	if runtime.Snapshot().Hello.Capabilities&native.CapabilityHostMenuOverlay == 0 {
+	if !native.SupportsHostMenuOverlay(runtime.Snapshot().Hello) {
 		return ErrHostMenuOverlayUnsupported
 	}
 	payload, err := native.EncodeHostMenuDirectory(directory)
@@ -25,7 +25,7 @@ func (runtime *Runtime) ReplaceHostMenuDirectory(ctx context.Context, directory 
 }
 
 func (runtime *Runtime) PushHostMenuContent(ctx context.Context, content native.HostMenuContent) error {
-	if runtime.Snapshot().Hello.Capabilities&native.CapabilityHostMenuOverlay == 0 {
+	if !native.SupportsHostMenuOverlay(runtime.Snapshot().Hello) {
 		return ErrHostMenuOverlayUnsupported
 	}
 	payload, err := native.EncodeHostMenuContent(content)
@@ -39,7 +39,7 @@ func (runtime *Runtime) PushHostMenuContent(ctx context.Context, content native.
 }
 
 func (runtime *Runtime) HostMenuState(ctx context.Context) (native.HostMenuState, error) {
-	if runtime.Snapshot().Hello.Capabilities&native.CapabilityHostMenuOverlay == 0 {
+	if !native.SupportsHostMenuOverlay(runtime.Snapshot().Hello) {
 		return native.HostMenuState{}, ErrHostMenuOverlayUnsupported
 	}
 	frame, err := runtime.Request(ctx, native.OpHostMenuStateGet, nil, native.OpHostMenuState)

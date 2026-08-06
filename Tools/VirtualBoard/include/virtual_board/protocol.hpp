@@ -8,7 +8,7 @@
 namespace pccontroller::wire {
 
 constexpr std::uint8_t kMagic = 0xA5;
-constexpr std::uint8_t kVersion = 1;
+constexpr std::uint8_t kEnvelopeRevision = 1;
 constexpr std::size_t kMaximumPayload = 48;
 constexpr std::size_t kRawOverhead = 6;
 constexpr std::size_t kMaximumRaw = kMaximumPayload + kRawOverhead;
@@ -25,10 +25,12 @@ enum Opcode : std::uint8_t {
   Buzzer = 0x10,
   PwmSet = 0x11,
   PwmAllOff = 0x12,
-  PwmMode = 0x13,
   StatusRgb = 0x14,
   PwmGet = 0x15,
   AddressableLed = 0x16,
+  StatusEffect = 0x17,
+  StatusProfileGet = 0x18,
+  StatusProfileSet = 0x19,
 
   RadioTransmit = 0x20,
   RadioLearnStart = 0x21,
@@ -36,7 +38,6 @@ enum Opcode : std::uint8_t {
   RadioLearnClear = 0x23,
   RadioLearnList = 0x24,
   RadioLearnRemove = 0x25,
-  RadioLearnMap = 0x26,
 
   MenuAction = 0x30,
   RelaySet = 0x31,
@@ -44,7 +45,7 @@ enum Opcode : std::uint8_t {
   RelayAllOff = 0x33,
   RelayTest = 0x34,
   Reset = 0x35,
-  I2cScan = 0x36,
+  I2cTransfer = 0x36,
   MenuSetPage = 0x37,
   DisplayText = 0x38,
   MacroStart = 0x39,
@@ -59,6 +60,7 @@ enum Opcode : std::uint8_t {
   HostMenuDirectory = 0x42,
   HostMenuContent = 0x43,
   HostMenuStateGet = 0x44,
+  ProgramState = 0x45,
 
   Ack = 0x80,
   HelloResponse = 0x81,
@@ -66,13 +68,19 @@ enum Opcode : std::uint8_t {
   StatusResponse = 0x90,
   SettingsResponse = 0x91,
   PwmValuesResponse = 0x92,
-  I2cScanResponse = 0x93,
+  I2cTransferResponse = 0x93,
   RadioLearnListResponse = 0x94,
   TemperatureListResponse = 0x95,
+  FrontPanelResponse = 0x96,
+  MenuListResponse = 0x97,
   MacroStatusResponse = 0x98,
   MenuLayoutResponse = 0x99,
   HostMenuContentRequest = 0x9A,
   HostMenuStateResponse = 0x9B,
+  SegmentChanged = 0x9C,
+  BuzzerChanged = 0x9D,
+  StatusLedChanged = 0x9E,
+  StatusProfileResponse = 0x9F,
   Event = 0xA0,
 };
 

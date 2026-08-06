@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/programmer"
 )
 
@@ -75,5 +76,37 @@ func TestLegacyDirectFlashCommandsAreUnavailable(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "direct flash writes are disabled") {
 			t.Fatalf("args=%v err=%v", args, err)
 		}
+	}
+}
+
+func TestDevelopmentReinitializeRequiresAuthenticatedLifecycle(t *testing.T) {
+	firmware := filepath.Join(t.TempDir(), "firmware.hex")
+	if err := os.WriteFile(firmware, []byte(":020000000102FB\n:00000001FF\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := programCommand(
+		context.Background(), New(Options{}), CommandOptions{},
+		[]string{"flash", firmware, "COM18", "--reinitialize-eeprom"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "authenticated application connection") {
+		t.Fatalf("unrecoverable reinitialization was accepted: %v", err)
+	}
+}
+
+func TestProgrammingReconnectSelectorUsesStableIdentityFirst(t *testing.T) {
+	device := ports.Info{
+		Name: "COM18", SerialNumber: "BOARD-1",
+		InstanceID: `USB\VID_1A86&PID_7523\5&25b7e96&0&11`,
+	}
+	if got := programmingReconnectSelector(device); got != "instance:"+device.InstanceID {
+		t.Fatalf("instance selector = %q", got)
+	}
+	device.InstanceID = ""
+	if got := programmingReconnectSelector(device); got != "serial:BOARD-1" {
+		t.Fatalf("serial selector = %q", got)
+	}
+	device.SerialNumber = ""
+	if got := programmingReconnectSelector(device); got != "COM18" {
+		t.Fatalf("port selector = %q", got)
 	}
 }

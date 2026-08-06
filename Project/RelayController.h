@@ -20,6 +20,7 @@ constexpr uint8_t GeneralCount = 4;
 
 } // namespace RelayOutputs
 
+// RelaySide identifies motion group A or B.
 enum class RelaySide : uint8_t {
   A = 0,
   B = 1,
@@ -28,17 +29,19 @@ enum class RelaySide : uint8_t {
 // Forward is the de-energized direction-relay state. Reverse energizes the
 // direction relay. Neither direction is powered unless the side enable relay
 // is also active.
+// RelayDirection is the requested direction-relay state before enable is applied.
 enum class RelayDirection : uint8_t {
   Forward = 0,
   Reverse,
 };
 
+// RelaySequencePhase exposes whether a side is idle or inside reversal break time.
 enum class RelaySequencePhase : uint8_t {
   Idle = 0,
   BreakBeforeDirection,
-  DirectionSettling,
 };
 
+// RelaySideStatus is a snapshot of requested and electrically applied side state.
 struct RelaySideStatus {
   RelayDirection requestedDirection;
   RelayDirection appliedDirection;
@@ -47,6 +50,7 @@ struct RelaySideStatus {
   bool appliedEnabled;
 };
 
+// RelayController owns R1..R8 state and nonblocking two-side motion interlocks.
 class RelayController {
 public:
   explicit RelayController(ShiftRegisters &registers);
@@ -55,14 +59,18 @@ public:
   void begin(uint32_t now = millis());
   void allOff(uint32_t now = millis());
   void service(uint32_t now = millis());
-  void setMotionAllowed(bool allowed) { motionAllowed_ = allowed; }
+  // Revoking policy is fail-safe and immediately drops both motion enables.
+  void setMotionAllowed(bool allowed, uint32_t now = millis());
   bool motionAllowed() const { return motionAllowed_; }
   void setBreakBeforeDirectionMs(uint8_t value) {
     breakBeforeDirectionMs_ = value == 0 ? 1 : value;
   }
+  void setRetainDirectionOnStop(bool retain) {
+    retainDirectionOnStop_ = retain;
+  }
 
-  // Requests are nonblocking. A direction reversal while enabled is sequenced
-  // as disable -> dead time -> direction -> settle time -> enable.
+  // Requests are nonblocking. A live reversal is sequenced strictly as
+  // disable -> configured break -> direction -> enable.
   bool requestSide(RelaySide side, RelayDirection direction, bool enabled,
                    uint32_t now = millis());
   void stopSide(RelaySide side, uint32_t now = millis());
@@ -82,10 +90,10 @@ public:
   uint8_t activeRelayMask() const;
 
   static constexpr uint8_t BreakBeforeDirectionMs = 1;
-  static constexpr uint16_t DirectionSettleMs = 50;
-  static constexpr uint16_t DirectionInterlockMs = 5;
+  static constexpr uint8_t DirectionInterlockMs = 5;
 
 private:
+  // SideState keeps requested and applied direction/enable sequencing state.
   struct SideState {
     RelayDirection requestedDirection = RelayDirection::Forward;
     RelayDirection appliedDirection = RelayDirection::Forward;
@@ -109,4 +117,5 @@ private:
   uint32_t nextDirectionChangeAt_ = 0;
   uint8_t breakBeforeDirectionMs_ = BreakBeforeDirectionMs;
   bool motionAllowed_ = true;
+  bool retainDirectionOnStop_ = false;
 };

@@ -59,27 +59,27 @@ bool normalizePwmMode2() {
 
 // Low-pass a completed INA219 sample in-place without another history buffer.
 __attribute__((noinline)) int32_t
-smoothInaValue(int32_t previous, int32_t sample, bool quarter) {
+smoothInaValue(int32_t previous, int32_t sample, bool currentOrPower) {
   if (previous == INVALID_I32) {
     return sample;
   }
-  int32_t step = (sample - previous) >> 1;
-  if (quarter) {
-    step >>= 1;
-  }
-  return step == 0 ? sample : previous + step;
+  // Voltage uses a 1/4 EMA with a 1 mV deadband; noisier current/power use
+  // 1/8 with a two-unit deadband. First-valid and sensor errors remain fast.
+  return TransitionMath::smoothSample(previous, sample,
+                                      currentOrPower ? 3 : 2,
+                                      currentOrPower ? 2 : 1);
 }
 
 // Samples and filters INA219 at the door-dependent cadence.
-void sampleIna219(uint32_t now) {
+void sampleIna219(uint32_t at) {
   const uint16_t samplePeriod =
       systemInputs.doorOpen() ? INA219_DOOR_OPEN_SAMPLE_MS
                               : INA219_SAMPLE_MS;
   if (!ina219Available ||
-      static_cast<uint32_t>(now - lastIna219SampleAt) < samplePeriod) {
+      static_cast<uint32_t>(at - lastIna219SampleAt) < samplePeriod) {
     return;
   }
-  lastIna219SampleAt = now;
+  lastIna219SampleAt = at;
   Ina219Reading reading;
   if (!ina219.read(reading)) {
     ina219Available = false;
@@ -128,19 +128,18 @@ void discoverTemperatureSensors() {
 
 // Maps sorted ROM index to tLED/tBT, honoring the EEPROM swap option.
 uint8_t temperatureRole(uint8_t addressIndex) {
-  return settingsStore.values().swapTemperatureSensors()
-             ? addressIndex
-             : static_cast<uint8_t>(1 - addressIndex);
+  return TemperatureRoles::fromSortedIndex(
+      addressIndex, settingsStore.values().swapTemperatureSensors());
 }
 
 // Starts a nonblocking conversion unless RF learning owns interrupt timing.
-void requestTemperatures(uint32_t now) {
+void requestTemperatures(uint32_t at) {
   if (temperatureAddressCount == 0 || learningActive) {
     return;
   }
   temperatureBus.requestTemperatures();
   temperatureConversionPending = true;
-  lastTemperatureRequestAt = now;
+  lastTemperatureRequestAt = at;
 }
 
 // Prepares cached four-character tLED/tBT text outside the display hot path.
@@ -158,7 +157,7 @@ void formatTemperatureSegmentText(uint8_t index, int16_t centiC) {
 }
 
 // Completes ready conversions and schedules the next door-dependent request.
-void serviceTemperatures(uint32_t now) {
+void serviceTemperatures(uint32_t at) {
   // OneWire briefly masks interrupts. Keep it idle during RF learning so
   // receiver pulse timing is not disturbed.
   if (learningActive || temperatureAddressCount == 0) {
@@ -166,14 +165,14 @@ void serviceTemperatures(uint32_t now) {
   }
 
   if (temperatureConversionPending) {
-    if (static_cast<uint32_t>(now - lastTemperatureRequestAt) <
+    if (static_cast<uint32_t>(at - lastTemperatureRequestAt) <
         TEMPERATURE_CONVERSION_MS) {
       return;
     }
     for (uint8_t index = 0; index < temperatureAddressCount; ++index) {
-      // On this controller's physical harness the lexicographically first ROM
-      // is tLED and the second is tBT. The EEPROM swap flag remains available
-      // if either probe is replaced or the harness order changes.
+      // Factory semantics assign the first sorted ROM to tLED and the second
+      // to tBT; the EEPROM swap flag reverses them. Physical probe identity
+      // still requires the illumination-heating test after installation.
       const uint8_t destination = temperatureRole(index);
       const int16_t sample =
           temperatureBus.getTempCentiC(temperatureAddresses[index]);
@@ -189,8 +188,8 @@ void serviceTemperatures(uint32_t now) {
   const uint16_t samplePeriod =
       systemInputs.doorOpen() ? TEMPERATURE_DOOR_OPEN_PERIOD_MS
                               : TEMPERATURE_PERIOD_MS;
-  if (static_cast<uint32_t>(now - lastTemperatureRequestAt) >=
+  if (static_cast<uint32_t>(at - lastTemperatureRequestAt) >=
       samplePeriod) {
-    requestTemperatures(now);
+    requestTemperatures(at);
   }
 }

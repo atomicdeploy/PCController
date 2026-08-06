@@ -1,25 +1,23 @@
 package native
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 )
 
 const (
-	BoardKindPCController   byte = 1
-	SettingsSchemaLegacy    byte = 1
-	SettingsSchema          byte = 2
-	IdentitySchemaLegacy    byte = 1
-	IdentitySchema          byte = 2
-	IdentitySchemaCompact   byte = 3
-	RFEntriesSchema         byte = 1
-	MenuListSchema          byte = 1
-	TemperatureSchema       byte = 1
-	StatusPayloadSizeLegacy      = 43
-	StatusPayloadSize            = 48
-	RFEntryPayloadSize           = 12
+	BoardKindPCController byte = 1
+	SettingsShape         byte = 3
+	IdentitySchemaCompact byte = 3
+	RFEntriesSchema       byte = 1
+	MenuListSchema        byte = 1
+	TemperatureSchema     byte = 1
+	StatusPayloadSize          = 48
+	RFEntryPayloadSize         = 12
 )
 
 // HELLO capability bits are the authoritative guard for optional operations.
@@ -33,13 +31,80 @@ const (
 	CapabilityMotionBreak        uint32 = 1 << 21
 	CapabilityTimedMacroQueue    uint32 = 1 << 22
 	CapabilityMenuLayout         uint32 = 1 << 23
-	// CapabilityHostMenuOverlay gates the volatile PC-owned directory/content
-	// protocol. Current AVR builds may omit it when the feature does not fit;
-	// callers must retain built-in flash labels and disable live host nodes.
-	CapabilityHostMenuOverlay uint32 = 1 << 24
+	CapabilityProgramState       uint32 = 1 << 24
+	CapabilityScheduledSegments  uint32 = 1 << 25
+	CapabilitySegmentPush        uint32 = 1 << 26
+	CapabilityBuzzerPush         uint32 = 1 << 27
+	CapabilityStatusEffects      uint32 = 1 << 28
+	CapabilityStatusLEDPush      uint32 = 1 << 29
+	CapabilityStatusProfiles     uint32 = 1 << 30
+	CapabilityBoardName          uint32 = 1 << 31
 )
 
-const StatusBuzzerBusy uint16 = 0x1000
+const MaximumBoardNameLength = 8
+
+type BoardName struct {
+	Name      string `json:"name"`
+	Persisted bool   `json:"persisted"`
+}
+
+func ValidateBoardName(name string) error {
+	if len(name) > MaximumBoardNameLength {
+		return fmt.Errorf("board name is %d bytes; maximum is %d", len(name), MaximumBoardNameLength)
+	}
+	if strings.TrimSpace(name) != name {
+		return fmt.Errorf("board name must not have leading or trailing whitespace")
+	}
+	for index := 0; index < len(name); index++ {
+		if name[index] < 0x20 || name[index] > 0x7E {
+			return fmt.Errorf("board name must contain printable ASCII characters only")
+		}
+	}
+	return nil
+}
+
+// SettingsWithBoardNamePayload extends the canonical 15-byte settings command
+// with a name length and name. An unextended settings write deliberately keeps
+// the name so ordinary settings changes do not erase the board's identity.
+func SettingsWithBoardNamePayload(settings Settings, name string) ([]byte, error) {
+	if err := ValidateBoardName(name); err != nil {
+		return nil, err
+	}
+	payload, err := settings.Payload()
+	if err != nil {
+		return nil, err
+	}
+	payload = append(payload, byte(len(name)))
+	payload = append(payload, name...)
+	return payload, nil
+}
+
+// ParseBoardNameFromSettings reads the optional extension of SETTINGS. Keeping
+// identity in that existing exchange saves flash and protocol slots on AVR.
+func ParseBoardNameFromSettings(payload []byte) (BoardName, error) {
+	if len(payload) < 18 || len(payload) > 18+MaximumBoardNameLength || payload[16] > 1 ||
+		int(payload[17]) > MaximumBoardNameLength || len(payload) != 18+int(payload[17]) ||
+		(payload[16] == 0 && payload[17] != 0) {
+		return BoardName{}, fmt.Errorf("invalid SETTINGS board-name extension")
+	}
+	name := string(payload[18:])
+	if err := ValidateBoardName(name); err != nil {
+		return BoardName{}, err
+	}
+	return BoardName{Name: name, Persisted: payload[16] != 0}, nil
+}
+
+const (
+	StatusBuzzerBusy     uint16 = 1 << 12
+	StatusProgramRunning uint16 = 1 << 13
+	StatusHostOffline    uint16 = 1 << 14
+	StatusHot            uint16 = 1 << 15
+)
+
+// SupportsHostMenuOverlay remains an explicit semantic probe for the
+// anticipatory host-menu code. No capability bit is currently assigned by the
+// firmware, so bit 24 must never be mistaken for this feature.
+func SupportsHostMenuOverlay(Hello) bool { return false }
 
 // BuzzerBusy only interprets status bit 12 when HELLO advertises the new
 // meaning; legacy firmware used the same raw bit for macro-active.
@@ -85,6 +150,92 @@ type FrontPanel struct {
 	HostEditableValue uint16  `json:"host_editable_value"`
 }
 
+// SegmentState is the changed-only display frame pushed by the board. It is
+// intentionally smaller than FrontPanel: hosts use FRONT_PANEL_GET for an
+// initial/explicit refresh and this event for low-latency live mirroring.
+type SegmentState struct {
+	RawSegments [4]byte `json:"raw_segments"`
+	Brightness  byte    `json:"brightness"`
+}
+
+func ParseSegmentState(payload []byte) (SegmentState, error) {
+	if len(payload) != 5 {
+		return SegmentState{}, fmt.Errorf("SEGMENT_CHANGED payload is %d bytes, need exactly 5", len(payload))
+	}
+	state := SegmentState{Brightness: payload[4]}
+	copy(state.RawSegments[:], payload[:4])
+	return state, nil
+}
+
+// BuzzerState describes the tone most recently started by firmware. Duration
+// lets every host surface stop its local mirror without a second board event.
+type BuzzerState struct {
+	FrequencyHz uint16 `json:"frequency_hz"`
+	DurationMS  uint16 `json:"duration_ms"`
+	Muted       bool   `json:"muted"`
+}
+
+func ParseBuzzerState(payload []byte) (BuzzerState, error) {
+	if len(payload) != 5 {
+		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED payload is %d bytes, need exactly 5", len(payload))
+	}
+	if payload[4] > 1 {
+		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED muted flag is %d, need 0 or 1", payload[4])
+	}
+	return BuzzerState{
+		FrequencyHz: binary.LittleEndian.Uint16(payload[:2]),
+		DurationMS:  binary.LittleEndian.Uint16(payload[2:4]),
+		Muted:       payload[4] != 0,
+	}, nil
+}
+
+// StatusLEDState is the changed-only physical RGB result pushed after the MCU
+// compositor applies local safety priority, brightness, and procedural effects.
+type StatusLEDState struct {
+	Red        byte `json:"red"`
+	Green      byte `json:"green"`
+	Blue       byte `json:"blue"`
+	Brightness byte `json:"brightness"`
+	Effect     byte `json:"effect"`
+	Condition  byte `json:"condition"`
+}
+
+func ParseStatusLEDState(payload []byte) (StatusLEDState, error) {
+	if len(payload) != 6 {
+		return StatusLEDState{}, fmt.Errorf("STATUS_LED_CHANGED payload is %d bytes, need exactly 6", len(payload))
+	}
+	if payload[4] > StatusEffectTransition {
+		return StatusLEDState{}, fmt.Errorf("STATUS_LED_CHANGED effect %d is outside 0..%d", payload[4], StatusEffectTransition)
+	}
+	return StatusLEDState{
+		Red: payload[0], Green: payload[1], Blue: payload[2],
+		Brightness: payload[3], Effect: payload[4], Condition: payload[5],
+	}, nil
+}
+
+type StatusProfile struct {
+	Condition byte                `json:"condition"`
+	Persisted bool                `json:"persisted"`
+	Effect    StatusEffectOptions `json:"effect"`
+}
+
+func ParseStatusProfile(payload []byte) (StatusProfile, error) {
+	if len(payload) != 13 && len(payload) != 14 {
+		return StatusProfile{}, fmt.Errorf("STATUS_PROFILE payload is %d bytes, need 13 or 14", len(payload))
+	}
+	if payload[0] >= StatusProfileCount {
+		return StatusProfile{}, fmt.Errorf("status profile condition %d is outside 0..%d", payload[0], StatusProfileCount-1)
+	}
+	effect, err := parseStatusEffectPayload(payload[1:13])
+	if err != nil {
+		return StatusProfile{}, err
+	}
+	// Thirteen-byte responses predate the appended persistence flag. Treat
+	// them as authoritative so a newer host never overwrites unknown firmware.
+	persisted := len(payload) == 13 || payload[13] != 0
+	return StatusProfile{Condition: payload[0], Persisted: persisted, Effect: effect}, nil
+}
+
 func ParseFrontPanel(payload []byte) (FrontPanel, error) {
 	if len(payload) < 44 {
 		return FrontPanel{}, fmt.Errorf("FRONT_PANEL payload is %d bytes, need at least 44", len(payload))
@@ -111,7 +262,7 @@ func ParseFrontPanel(payload []byte) (FrontPanel, error) {
 	if panel.Schema == 2 {
 		panel.HostCaptured = payload[44]&0x80 != 0
 		panel.HostState = payload[44] & 0x0F
-		panel.HostEditableValue = uint16(payload[45]) | uint16(payload[46]&0x0F)<<8
+		panel.HostEditableValue = binary.LittleEndian.Uint16(payload[45:47]) & 0x0FFF
 	}
 	return panel, nil
 }
@@ -127,13 +278,19 @@ const (
 	EventRFReceived
 	EventRFLearning
 	EventRelay
+	EventAlert
+	EventAppNavigation
 )
 
-// EventBoot and EventFault are compatibility names for the reset telemetry
-// event. Firmware wire type 7 is [type, MCUSR cause, reset count LE u32].
 const (
-	EventBoot  = EventReset
-	EventFault = EventReset
+	AppNavigationAll byte = iota
+	AppNavigationWebUI
+	AppNavigationTUI
+)
+
+const (
+	AlertFault byte = iota + 1
+	AlertHot
 )
 
 const (
@@ -154,105 +311,48 @@ const (
 	RFLearningCancelled
 	RFLearningFull
 	RFLearningStarted
+	RFLearningProgress
+)
+
+const (
+	RFLearnModeIndefinite byte = iota
+	RFLearnModeTimer
 )
 
 type Hello struct {
-	FirmwareMajor  byte   `json:"firmware_major"`
-	FirmwareMinor  byte   `json:"firmware_minor"`
-	FirmwarePatch  byte   `json:"firmware_patch"`
 	BoardKind      byte   `json:"board_kind"`
 	Capabilities   uint32 `json:"capabilities"`
 	Name           string `json:"name"`
 	IdentitySchema byte   `json:"identity_schema"`
 	BuildHash      uint32 `json:"build_hash"`
-	BuildDate      string `json:"build_date,omitempty"`
-	BuildTime      string `json:"build_time,omitempty"`
 	BuildTimestamp uint32 `json:"build_timestamp_packed,omitempty"`
 	BuildStamp     string `json:"build_timestamp,omitempty"`
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	// Schema 3 is the current flash-compact identity: it intentionally drops
-	// semantic firmware versions and the repeated name in favor of hash/time.
-	if len(payload) == 14 && payload[0] == IdentitySchemaCompact {
-		hello := Hello{
-			BoardKind:      payload[1],
-			Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
-			Name:           "PCController",
-			IdentitySchema: IdentitySchemaCompact,
-			BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
-			BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
-		}
-		stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
-		if err != nil {
-			return Hello{}, err
-		}
-		hello.BuildStamp = stamp
-		return hello, nil
+	if len(payload) != 14 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14", len(payload))
 	}
-	if len(payload) < 9 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need at least 9", len(payload))
-	}
-	nameLength := int(payload[8])
-	if len(payload) < 9+nameLength {
-		return Hello{}, fmt.Errorf(
-			"HELLO name length is %d but payload has %d bytes",
-			nameLength,
-			len(payload),
-		)
+	if payload[0] != IdentitySchemaCompact {
+		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
 	}
 	hello := Hello{
-		FirmwareMajor: payload[0],
-		FirmwareMinor: payload[1],
-		FirmwarePatch: payload[2],
-		BoardKind:     payload[3],
-		Capabilities:  binary.LittleEndian.Uint32(payload[4:8]),
-		Name:          string(payload[9 : 9+nameLength]),
+		BoardKind:      payload[1],
+		Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
+		Name:           "PCController",
+		IdentitySchema: IdentitySchemaCompact,
+		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
+		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
 	}
-	extension := payload[9+nameLength:]
-	if len(extension) == 0 {
-		return hello, nil
+	stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
+	if err != nil {
+		return Hello{}, err
 	}
-	hello.IdentitySchema = extension[0]
-	switch hello.IdentitySchema {
-	case IdentitySchemaLegacy:
-		const legacyPayloadSize = 1 + 4 + 11 + 8
-		if len(extension) < legacyPayloadSize {
-			return Hello{}, fmt.Errorf(
-				"HELLO schema-1 identity extension is %d bytes, need %d",
-				len(extension),
-				legacyPayloadSize,
-			)
-		}
-		hello.BuildHash = binary.LittleEndian.Uint32(extension[1:5])
-		hello.BuildDate = string(extension[5:16])
-		hello.BuildTime = string(extension[16:24])
-	case IdentitySchema:
-		const packedPayloadSize = 1 + 4 + 4
-		if len(extension) < packedPayloadSize {
-			return Hello{}, fmt.Errorf(
-				"HELLO schema-2 identity extension is %d bytes, need %d",
-				len(extension),
-				packedPayloadSize,
-			)
-		}
-		hello.BuildHash = binary.LittleEndian.Uint32(extension[1:5])
-		hello.BuildTimestamp = binary.LittleEndian.Uint32(extension[5:9])
-		stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
-		if err != nil {
-			return Hello{}, err
-		}
-		hello.BuildStamp = stamp
-	default:
-		return Hello{}, fmt.Errorf(
-			"unsupported HELLO identity schema %d",
-			hello.IdentitySchema,
-		)
-	}
+	hello.BuildStamp = stamp
 	return hello, nil
 }
 
-// FormatBuildTimestamp decodes the schema-2 date<<16|time value as YYMMDDHHMMSS.
+// FormatBuildTimestamp decodes the packed date<<16|time value as YYMMDDHHMMSS.
 func FormatBuildTimestamp(packed uint32) (string, error) {
 	if packed == 0 {
 		return "", nil
@@ -264,11 +364,11 @@ func FormatBuildTimestamp(packed uint32) (string, error) {
 	minute := int((packed >> 5) & 0x3F)
 	second := int(packed&0x1F) * 2
 	if month < 1 || month > 12 || day < 1 || hour > 23 || minute > 59 || second > 59 {
-		return "", fmt.Errorf("invalid schema-2 build timestamp 0x%08X", packed)
+		return "", fmt.Errorf("invalid packed build timestamp 0x%08X", packed)
 	}
 	value := time.Date(year, month, day, hour, minute, second, 0, time.UTC)
 	if value.Year() != year || value.Month() != month || value.Day() != day {
-		return "", fmt.Errorf("invalid schema-2 build calendar date 0x%08X", packed)
+		return "", fmt.Errorf("invalid packed build calendar date 0x%08X", packed)
 	}
 	return value.Format("060102150405"), nil
 }
@@ -278,28 +378,35 @@ func (hello Hello) IsPCController() bool {
 }
 
 func ParseSettings(payload []byte) (Settings, error) {
-	if len(payload) < 10 {
-		return Settings{}, fmt.Errorf("SETTINGS payload is %d bytes, need 10", len(payload))
+	extended := len(payload) >= 18 && len(payload) <= 18+MaximumBoardNameLength
+	if len(payload) != 15 && len(payload) != 16 && !extended {
+		return Settings{}, fmt.Errorf("SETTINGS payload is %d bytes, need 15, 16, or 18..%d", len(payload), 18+MaximumBoardNameLength)
 	}
-	if payload[0] != SettingsSchemaLegacy && payload[0] != SettingsSchema {
-		return Settings{}, fmt.Errorf("unsupported settings schema %d", payload[0])
+	if payload[0] != SettingsShape {
+		return Settings{}, fmt.Errorf("unsupported SETTINGS shape %d", payload[0])
 	}
-	settings := Settings{
-		Flags:             payload[1],
-		LightMode:         payload[2],
-		OnBrightness:      payload[3],
-		OffBrightness:     payload[4],
-		DisplayBrightness: payload[5],
-		StatusBrightness:  payload[6],
-		PWMBootMode:       payload[7],
-		StreamPeriodMS:    binary.LittleEndian.Uint16(payload[8:10]),
-	}
-	if payload[0] == SettingsSchema {
-		if len(payload) < 12 {
-			return Settings{}, fmt.Errorf("SETTINGS schema 2 payload is %d bytes, need 12", len(payload))
+	if extended {
+		if _, err := ParseBoardNameFromSettings(payload); err != nil {
+			return Settings{}, err
 		}
-		settings.DefaultPage = payload[10]
-		settings.ExtendedFlags = payload[11]
+	}
+	closedBrightness, holdSeconds := decodeDisplayOptions(payload[12])
+	settings := Settings{
+		Flags:                   payload[1],
+		LightMode:               payload[2],
+		OnBrightness:            payload[3],
+		OffBrightness:           payload[4],
+		DisplayBrightness:       payload[5],
+		StatusBrightness:        payload[6],
+		OutputPersistence:       payload[7],
+		StreamPeriodMS:          binary.LittleEndian.Uint16(payload[8:10]),
+		DefaultPage:             payload[10],
+		ExtendedFlags:           payload[11],
+		DisplayClosedBrightness: closedBrightness,
+		MotionExitHoldSeconds:   holdSeconds,
+		RelayRestoreMask:        payload[13],
+		MotionBreakMSValue:      payload[14],
+		Persisted:               len(payload) == 15 || payload[15] != 0,
 	}
 	if _, err := settings.Payload(); err != nil {
 		return Settings{}, err
@@ -316,6 +423,9 @@ type Status struct {
 	TLEDCenti      int16  `json:"temperature_led_centi_c"`
 	TBTCenti       int16  `json:"temperature_bt_audio_centi_c"`
 	Flags          uint16 `json:"flags"`
+	ProgramRunning bool   `json:"program_running"`
+	HostOffline    bool   `json:"host_offline"`
+	Hot            bool   `json:"hot"`
 	RawInputs      byte   `json:"raw_inputs"`
 	ActiveKeys     byte   `json:"active_keys"`
 	ActiveRelays   byte   `json:"active_relays"`
@@ -323,7 +433,7 @@ type Status struct {
 	ProgramMode    byte   `json:"program_mode"`
 	DoorOpen       bool   `json:"door_open"`
 	BluetoothState byte   `json:"bluetooth_audio_state"`
-	PWMMode        byte   `json:"pwm_mode"`
+	PWMAvailable   bool   `json:"pwm_available"`
 	PWMChannel     byte   `json:"pwm_channel"`
 	PWMValue       uint16 `json:"pwm_value"`
 	LCDAddress     byte   `json:"lcd_address"`
@@ -334,19 +444,48 @@ type Status struct {
 	ResetCount     uint32 `json:"reset_count"`
 }
 
+func (status Status) UptimeDuration() time.Duration {
+	return time.Duration(status.UptimeMS) * time.Millisecond
+}
+
+func (status Status) ReadableUptime() string {
+	return status.UptimeDuration().String()
+}
+
+// MarshalJSON keeps uptime_ms as the stable machine value and adds a derived
+// human-readable value to every snapshot, history, REST, RPC, and scripting
+// JSON surface. The derived field never enters the compact UART payload.
+func (status Status) MarshalJSON() ([]byte, error) {
+	type StatusFields Status
+	return json.Marshal(struct {
+		StatusFields
+		Uptime string `json:"uptime"`
+	}{
+		StatusFields: StatusFields(status),
+		Uptime:       status.ReadableUptime(),
+	})
+}
+
+func (status *Status) UnmarshalJSON(data []byte) error {
+	type StatusFields Status
+	decoded := struct {
+		StatusFields
+		Uptime string `json:"uptime"`
+	}{}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*status = Status(decoded.StatusFields)
+	return nil
+}
+
 func ParseStatus(payload []byte) (Status, error) {
-	if len(payload) < StatusPayloadSizeLegacy {
+	if len(payload) < StatusPayloadSize {
 		return Status{}, fmt.Errorf(
 			"STATUS payload is %d bytes, need at least %d",
 			len(payload),
-			StatusPayloadSizeLegacy,
-		)
-	}
-	if len(payload) > StatusPayloadSizeLegacy && len(payload) < StatusPayloadSize {
-		return Status{}, fmt.Errorf(
-			"STATUS payload is %d bytes, need legacy %d or current %d",
-			len(payload),
-			StatusPayloadSizeLegacy,
 			StatusPayloadSize,
 		)
 	}
@@ -366,7 +505,7 @@ func ParseStatus(payload []byte) (Status, error) {
 		ProgramMode:    payload[30],
 		DoorOpen:       payload[31] != 0,
 		BluetoothState: payload[32],
-		PWMMode:        payload[33],
+		PWMAvailable:   payload[33] != 0,
 		PWMChannel:     payload[34],
 		PWMValue:       binary.LittleEndian.Uint16(payload[35:37]),
 		LCDAddress:     payload[37],
@@ -374,15 +513,16 @@ func ParseStatus(payload []byte) (Status, error) {
 		FramingErrors:  binary.LittleEndian.Uint16(payload[39:41]),
 		CRCErrors:      binary.LittleEndian.Uint16(payload[41:43]),
 	}
-	if len(payload) >= StatusPayloadSize {
-		status.ResetCause = payload[43]
-		status.ResetCount = binary.LittleEndian.Uint32(payload[44:48])
-	}
+	status.ProgramRunning = status.Flags&StatusProgramRunning != 0
+	status.HostOffline = status.Flags&StatusHostOffline != 0
+	status.Hot = status.Flags&StatusHot != 0
+	status.ResetCause = payload[43]
+	status.ResetCount = binary.LittleEndian.Uint32(payload[44:48])
 	return status, nil
 }
 
 type PWMValues struct {
-	Mode            byte       `json:"mode"`
+	Available       bool       `json:"available"`
 	SelectedChannel byte       `json:"selected_channel"`
 	Values          [16]uint16 `json:"values"`
 }
@@ -391,7 +531,10 @@ func ParsePWMValues(payload []byte) (PWMValues, error) {
 	if len(payload) < 34 {
 		return PWMValues{}, fmt.Errorf("PWM_VALUES payload is %d bytes, need 34", len(payload))
 	}
-	result := PWMValues{Mode: payload[0], SelectedChannel: payload[1]}
+	if payload[0] > 1 {
+		return PWMValues{}, fmt.Errorf("PWM availability %d is outside 0..1", payload[0])
+	}
+	result := PWMValues{Available: payload[0] != 0, SelectedChannel: payload[1]}
 	for index := range result.Values {
 		offset := 2 + index*2
 		result.Values[index] = binary.LittleEndian.Uint16(payload[offset : offset+2])
@@ -466,31 +609,38 @@ func ParseTemperatures(payload []byte) ([]TemperatureSensor, error) {
 }
 
 type DeviceEvent struct {
-	Type         byte         `json:"type"`
-	Key          byte         `json:"key,omitempty"`
-	Gesture      byte         `json:"gesture,omitempty"`
-	Source       byte         `json:"source,omitempty"`
-	SourceID     byte         `json:"source_id,omitempty"`
-	DoorOpen     bool         `json:"door_open,omitempty"`
-	Bluetooth    byte         `json:"bluetooth,omitempty"`
-	PWMChannel   byte         `json:"pwm_channel,omitempty"`
-	RFID         byte         `json:"rf_id,omitempty"`
-	MacroState   byte         `json:"macro_state,omitempty"`
-	MacroID      byte         `json:"macro_id,omitempty"`
-	ResetCause   byte         `json:"reset_cause,omitempty"`
-	ResetCount   uint32       `json:"reset_count,omitempty"`
-	RFCode       uint32       `json:"rf_code,omitempty"`
-	RFBits       byte         `json:"rf_bits,omitempty"`
-	RFProtocol   byte         `json:"rf_protocol,omitempty"`
-	RFPulseUS    uint16       `json:"rf_pulse_us,omitempty"`
-	RFLearnedID  byte         `json:"rf_learned_id,omitempty"`
-	RFLearnState byte         `json:"rf_learning_state,omitempty"`
-	RFLearnCount byte         `json:"rf_learning_count,omitempty"`
-	RelayMask    byte         `json:"relay_mask,omitempty"`
-	DeviceMicros uint32       `json:"device_micros,omitempty"`
-	Timed        bool         `json:"timed,omitempty"`
-	Macro        *MacroStatus `json:"macro,omitempty"`
-	Raw          []byte       `json:"raw,omitempty"`
+	Type                    byte         `json:"type"`
+	Key                     byte         `json:"key,omitempty"`
+	Gesture                 byte         `json:"gesture,omitempty"`
+	Source                  byte         `json:"source,omitempty"`
+	SourceID                byte         `json:"source_id,omitempty"`
+	DoorOpen                bool         `json:"door_open,omitempty"`
+	Bluetooth               byte         `json:"bluetooth,omitempty"`
+	PWMChannel              byte         `json:"pwm_channel,omitempty"`
+	RFID                    byte         `json:"rf_id,omitempty"`
+	MacroState              byte         `json:"macro_state,omitempty"`
+	MacroID                 byte         `json:"macro_id,omitempty"`
+	ResetCause              byte         `json:"reset_cause,omitempty"`
+	ResetCount              uint32       `json:"reset_count,omitempty"`
+	RFCode                  uint32       `json:"rf_code,omitempty"`
+	RFBits                  byte         `json:"rf_bits,omitempty"`
+	RFProtocol              byte         `json:"rf_protocol,omitempty"`
+	RFPulseUS               uint16       `json:"rf_pulse_us,omitempty"`
+	RFLearnedID             byte         `json:"rf_learned_id,omitempty"`
+	RFLearnState            byte         `json:"rf_learning_state,omitempty"`
+	RFLearnCount            byte         `json:"rf_learning_count,omitempty"`
+	RFLearnMode             byte         `json:"rf_learning_mode,omitempty"`
+	RFLearnTotalSeconds     byte         `json:"rf_learning_total_seconds,omitempty"`
+	RFLearnRemainingSeconds byte         `json:"rf_learning_remaining_seconds,omitempty"`
+	RelayMask               byte         `json:"relay_mask,omitempty"`
+	AlertKind               byte         `json:"alert_kind,omitempty"`
+	AlertActive             bool         `json:"alert_active,omitempty"`
+	AppTarget               string       `json:"app_target,omitempty"`
+	AppPage                 string       `json:"app_page,omitempty"`
+	DeviceMicros            uint32       `json:"device_micros,omitempty"`
+	Timed                   bool         `json:"timed,omitempty"`
+	Macro                   *MacroStatus `json:"macro,omitempty"`
+	Raw                     []byte       `json:"raw,omitempty"`
 }
 
 func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
@@ -584,13 +734,21 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 		event.RFPulseUS = binary.LittleEndian.Uint16(payload[7:9])
 		event.RFLearnedID = payload[9]
 	case EventRFLearning:
-		if len(payload) != 3 {
+		if len(payload) != 6 {
 			return DeviceEvent{}, fmt.Errorf(
-				"RF learning EVENT is %d bytes, need exactly 3",
+				"RF learning EVENT is %d bytes, need exactly 6",
 				len(payload),
 			)
 		}
+		if payload[1] > RFLearningProgress || payload[3] > RFLearnModeTimer ||
+			(payload[3] == RFLearnModeIndefinite && (payload[4] != 0 || payload[5] != 0)) ||
+			payload[5] > payload[4] {
+			return DeviceEvent{}, fmt.Errorf("invalid RF learning EVENT fields: % X", payload)
+		}
 		event.RFLearnState, event.RFLearnCount = payload[1], payload[2]
+		event.RFLearnMode = payload[3]
+		event.RFLearnTotalSeconds = payload[4]
+		event.RFLearnRemainingSeconds = payload[5]
 	case EventRelay:
 		if len(payload) != 2 {
 			return DeviceEvent{}, fmt.Errorf(
@@ -599,6 +757,44 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			)
 		}
 		event.RelayMask = payload[1]
+	case EventAlert:
+		if len(payload) != 3 {
+			return DeviceEvent{}, fmt.Errorf(
+				"alert EVENT is %d bytes, need exactly 3",
+				len(payload),
+			)
+		}
+		if payload[1] < AlertFault || payload[1] > AlertHot || payload[2] > 1 {
+			return DeviceEvent{}, fmt.Errorf("invalid alert EVENT fields: % X", payload)
+		}
+		event.AlertKind, event.AlertActive = payload[1], payload[2] != 0
+	case EventAppNavigation:
+		if len(payload) < 3 {
+			return DeviceEvent{}, fmt.Errorf(
+				"app navigation EVENT is %d bytes, need a target and page",
+				len(payload),
+			)
+		}
+		if payload[1] > AppNavigationTUI {
+			return DeviceEvent{}, fmt.Errorf("invalid app navigation target %d", payload[1])
+		}
+		rawPage := string(payload[2:])
+		page := strings.TrimSpace(rawPage)
+		if page == "" || len(page) > 96 || page != rawPage {
+			return DeviceEvent{}, fmt.Errorf("app navigation page is empty or too long")
+		}
+		for index := 0; index < len(page); index++ {
+			value := page[index]
+			if (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+				(value >= '0' && value <= '9') || strings.ContainsRune("._/-", rune(value)) {
+				continue
+			}
+			return DeviceEvent{}, fmt.Errorf("app navigation page contains an invalid byte")
+		}
+		event.AppTarget = map[byte]string{
+			AppNavigationAll: "*", AppNavigationWebUI: "webui", AppNavigationTUI: "tui",
+		}[payload[1]]
+		event.AppPage = strings.ToLower(page)
 	}
 	return event, nil
 }
@@ -665,10 +861,7 @@ func ParseMenuList(payload []byte) (MenuListPage, error) {
 	return page, nil
 }
 
-const (
-	MenuLayoutLegacySchema byte = 1
-	MenuLayoutSchema       byte = 2
-)
+const MenuLayoutSchema byte = 2
 
 // MenuLayout is the compact board-owned menu visibility and rank record. Rank
 // is the index in Order; VisibleMask bits are keyed by stable page ID.
@@ -685,21 +878,18 @@ func ParseMenuLayout(payload []byte) (MenuLayout, error) {
 	if len(payload) < 5 {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT payload is %d bytes, need at least 5", len(payload))
 	}
-	if payload[0] != MenuLayoutLegacySchema && payload[0] != MenuLayoutSchema {
+	if payload[0] != MenuLayoutSchema {
 		return MenuLayout{}, fmt.Errorf("unsupported menu-layout schema %d", payload[0])
 	}
 	count := int(payload[1])
 	if count < 1 || count > 16 {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT count %d is outside 1..16", count)
 	}
-	expectedLength := 4 + count
-	if payload[0] == MenuLayoutSchema {
-		expectedLength = 4 + (count+1)/2
-	}
+	expectedLength := 4 + (count+1)/2
 	if len(payload) != expectedLength {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT schema %d count %d requires exactly %d bytes, payload has %d", payload[0], count, expectedLength, len(payload))
 	}
-	mask := uint16(payload[2]) | uint16(payload[3])<<8
+	mask := binary.LittleEndian.Uint16(payload[2:4])
 	allowedMask := uint16(0xFFFF)
 	if count < 16 {
 		allowedMask = uint16(1<<count) - 1
@@ -711,20 +901,16 @@ func ParseMenuLayout(payload []byte) (MenuLayout, error) {
 		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT must keep at least one page visible")
 	}
 	order := make([]byte, count)
-	if payload[0] == MenuLayoutLegacySchema {
-		copy(order, payload[4:])
-	} else {
-		for rank := range order {
-			packed := payload[4+rank/2]
-			if rank&1 == 0 {
-				order[rank] = packed & 0x0F
-			} else {
-				order[rank] = packed >> 4
-			}
+	for rank := range order {
+		packed := payload[4+rank/2]
+		if rank&1 == 0 {
+			order[rank] = packed & 0x0F
+		} else {
+			order[rank] = packed >> 4
 		}
-		if count&1 != 0 && payload[len(payload)-1]>>4 != 0x0F {
-			return MenuLayout{}, fmt.Errorf("MENU_LAYOUT odd-count padding nibble must be 0xF")
-		}
+	}
+	if count&1 != 0 && payload[len(payload)-1]>>4 != 0x0F {
+		return MenuLayout{}, fmt.Errorf("MENU_LAYOUT odd-count padding nibble must be 0xF")
 	}
 	seen := make([]bool, count)
 	for rank, id := range order {

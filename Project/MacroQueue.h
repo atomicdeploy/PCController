@@ -12,6 +12,7 @@ public:
   static constexpr uint8_t ExecutionSequence = 0xFE;
   static constexpr uint8_t KeepOutputsOnCancel = 1U << 0;
 
+  // State is the compact lifecycle value reported to the host.
   enum State : uint8_t {
     Idle = 0,
     Buffering = 1,
@@ -37,6 +38,7 @@ private:
   static constexpr uint8_t QueueSize = 128;
   static constexpr uint8_t QueueMask = QueueSize - 1;
 
+  // Report is the synchronous macro status response payload.
   struct __attribute__((packed)) Report {
     uint8_t schema;
     uint8_t state;
@@ -51,6 +53,7 @@ private:
     uint16_t totalSteps;
   };
 
+  // EventReport records MCU timing fidelity for one dispatched step.
   struct __attribute__((packed)) EventReport {
     uint8_t type;
     Report report;

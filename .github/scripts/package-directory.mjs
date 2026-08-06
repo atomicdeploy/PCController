@@ -18,8 +18,11 @@ import {
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
+import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
+import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const productName = PRODUCT_METADATA.productName;
 const [sourceArgument, packageName, targetName] = process.argv.slice(2);
 
 if (!sourceArgument || !packageName || !targetName) {
@@ -76,9 +79,9 @@ for (const projectFile of ["LICENSE", "THIRD_PARTY_NOTICES.md"]) {
 
 writeFileSync(join(packageRoot, "VERSION"), `${version}\n`, "utf8");
 const sourceCommit = process.env.GITHUB_SHA || "local-build";
-const sourceRepository = process.env.GITHUB_REPOSITORY || "atomicdeploy/PCController";
+const sourceRepository = resolveRepository(process.env, { cwd: root });
 const sourceRef = sourceCommit === "local-build" ? "main" : sourceCommit;
-const sourceUrl = `${process.env.GITHUB_SERVER_URL || "https://github.com"}/${sourceRepository}`;
+const sourceUrl = repositoryWebUrl(sourceRepository, process.env);
 const packageManifest = {
   format: "pccontroller-distribution-package/v1",
   product: name,
@@ -95,10 +98,10 @@ writeFileSync(
 );
 
 const packageReadme = (() => {
-  const header = `# ${name} ${version} — ${target}\n\nThis is a CI-built, source-identified PCController distribution. Source: [${sourceRepository}@${sourceCommit}](${sourceUrl}/tree/${sourceRef}).\n\n`;
-  const footer = `\n## Trust and support\n\n- \`PACKAGE-MANIFEST.json\` identifies the exact source and package root.\n- \`THIRD_PARTY_NOTICES.md\` records bundled dependency notices.\n- Release downloads include a sibling \`.sha256\` file and GitHub build-provenance attestation.\n- Full documentation: [PCController ${target} guide](${sourceUrl}/blob/${sourceRef}/docs/CI-CD-and-Releases.md).\n`;
+  const header = `# ${name} ${version} — ${target}\n\nThis is a CI-built, source-identified ${productName} distribution. Source: [${sourceRepository}@${sourceCommit}](${sourceUrl}/tree/${sourceRef}).\n\n`;
+  const footer = `\n## Trust and support\n\n- \`PACKAGE-MANIFEST.json\` identifies the exact source and package root.\n- \`THIRD_PARTY_NOTICES.md\` records bundled dependency notices.\n- Release downloads include a sibling \`.sha256\` file and GitHub build-provenance attestation.\n- Full documentation: [${productName} ${target} guide](${sourceUrl}/blob/${sourceRef}/docs/CI-CD-and-Releases.md).\n`;
   if (/firmware/iu.test(name)) {
-    return `${header}## Choose the correct image\n\n- \`PCController.ino.hex\`: normal guarded upload through the installed Urboot bootloader.\n- \`PCController.ino.with_bootloader.hex\`: explicit USBasp/ISP recovery only; this replaces the full flash including bootloader.\n- \`firmware-manifest.json\`: flash, SRAM, source, and per-image SHA-256 evidence.\n\nDo not use the full-flash recovery image for a normal serial update. A successful CI build proves compilation and static validation, not physical-device acceptance.\n${footer}`;
+    return `${header}## Choose the correct image\n\n- \`PCController.ino.hex\`: normal guarded upload through the installed Urboot bootloader.\n- \`PCController.ino.with_bootloader.hex\`: explicit USBasp/ISP recovery only; this replaces the full flash including bootloader.\n- \`safe-default-eeprom.hex\`: complete 1 KiB current-layout defaults for an explicitly authorized recovery transaction.\n- \`firmware-manifest.json\`: flash, EEPROM, SRAM, source, and per-image SHA-256 evidence.\n\nDo not use the full-flash recovery image for a normal serial update. A successful CI build proves compilation and static validation, not physical-device acceptance.\n${footer}`;
   }
   if (/virtualboard/iu.test(name)) {
     const launch = /windows/iu.test(target)

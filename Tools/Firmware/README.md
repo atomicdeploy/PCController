@@ -1,15 +1,25 @@
+<div align="center"><a href="../../README.md"><img src="../../docs/assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a></div>
+
 # PCController AVR firmware studio
 
-`firmware.mjs` is the dependency-free AVR counterpart to ASA0002E's advanced
-Node firmware tool. It keeps the polished VT-100/emoji output, stable watch
-mode, coalescing, byte-identical skip, strict artifact validation, hashes,
-atomic manifests, graceful interruption, and explicit exit codes.
+`firmware.mjs` is PCController's dependency-free AVR build and deployment
+interface. It provides polished VT-100/emoji output, stable watch mode,
+coalescing, byte-identical skip, strict artifact validation, hashes, atomic
+manifests, graceful interruption, explicit exit codes, and machine-readable
+`--plan-json` output.
 
 It delegates compile to `Tools/Build/build.mjs` and every programmer action to
 the canonical native Controller instead of duplicating MiniCore, Arduino CLI,
 or AVRDUDE discovery. Paths are resolved from the script location and `PATH`;
 no machine- or user-specific path is embedded and no PowerShell process is
 used.
+
+Board identity, memory geometry, canonical artifact paths, and exact
+Controller argv construction come from the same shared command policy used by
+the root build. The Go host consumes the generated form of the same board
+profile, so FQBN and capacity changes cannot silently diverge by entry point.
+The thin CMD and Bash launchers require the same Node.js 22.12-or-newer runtime
+as the root build and return the underlying tool's exit status unchanged.
 
 ## Safe, offline operations
 
@@ -18,6 +28,7 @@ firmware.cmd build
 firmware.cmd check
 firmware.cmd manifest
 firmware.cmd upload --port COM18 --dry-run
+firmware.cmd upload --method usbasp --plan-json
 firmware.cmd watch --once --dry-run
 ```
 
@@ -38,8 +49,9 @@ firmware.cmd watch --upload --method urclock --port COM18
 
 The watcher hashes source contents every 250 ms and waits for a 500 ms stable
 window. It skips timestamp-only touches, serializes actions, and queues one
-new action when editing continues during a build. UART upload is never
-implicit.
+new action when editing continues during a build. `watch --upload` deliberately
+hands every verified image to the canonical Controller programming transaction;
+plain `watch` remains useful for CI and editors where hardware must stay untouched.
 
 ## Urboot operations
 
@@ -49,7 +61,7 @@ fallback to an arbitrary serial device.
 ```console
 firmware.cmd upload --port COM18
 firmware.cmd upload --method urclock --port COM18
-firmware.cmd upload --method usbasp --programmer usbasp --usbasp-troubleshooting
+firmware.cmd upload --method usbasp --port COM18
 firmware.cmd probe --port COM18
 firmware.cmd metadata --port COM18
 firmware.cmd backup --port COM18 --output backups\flash.hex
@@ -68,14 +80,18 @@ points retain `-Wl,--relax` so the MiniCore application has the same verified
 flash layout.
 
 - `urclock` hands the validated application image to the native Controller.
-- `usbasp` additionally requires `--usbasp-troubleshooting`, the complete
-  merged application + Urboot image, and the Controller's EESAVE preflight.
+- `usbasp` is selected explicitly by `--method usbasp` and additionally
+  requires the complete merged application + Urboot image and the
+  Controller's EESAVE preflight. `--programmer` is only an optional backend-ID
+  override for different ISP hardware. For a standalone write, `--port`
+  identifies the separate application UART lifecycle and is translated to
+  Controller's `--app-device`; it is never passed to ISP.
   It never writes the generated `.eep`.
 
 Direct `arduino-cli upload` is intentionally disabled. Controller owns the
 automatic pre-flash backup, write/verify, and post-program application
-reauthentication. The root `build.cmd --arduino-update` command likewise
-routes index/core/library maintenance through `controller arduino update`.
+reauthentication. The root `build.cmd --toolchain-sync` command likewise
+routes index/core/library maintenance through `controller toolchain sync`.
 
 Thus a malformed, oversized, incomplete, or missing image cannot reach a
 serial or ISP programmer through this tool.

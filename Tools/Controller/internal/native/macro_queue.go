@@ -55,13 +55,15 @@ func (status MacroStatus) Faithful() bool {
 		status.DispatchErrors == 0
 }
 
-// ParseMacroStatus accepts the shared [EventMacro, report] envelope.
+// ParseMacroStatus accepts the shared [EventMacro, report] envelope. The event
+// type may carry the protocol's high-bit timestamp marker; callers strip the
+// trailing timestamp before parsing the report body.
 func ParseMacroStatus(payload []byte) (MacroStatus, error) {
 	const size = 19
 	if len(payload) != size {
 		return MacroStatus{}, fmt.Errorf("MACRO_STATUS payload is %d bytes, need %d", len(payload), size)
 	}
-	if payload[0] != EventMacro || payload[1] != MacroQueueSchema {
+	if payload[0]&0x7F != EventMacro || payload[1] != MacroQueueSchema {
 		return MacroStatus{}, fmt.Errorf("unsupported MACRO_STATUS envelope %d/schema %d", payload[0], payload[1])
 	}
 	return MacroStatus{

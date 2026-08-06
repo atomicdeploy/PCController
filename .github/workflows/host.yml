@@ -8,10 +8,20 @@ on:
         required: false
         default: ""
         type: string
+      firmware_artifact_name:
+        description: Optional same-run firmware artifact to embed in every host target
+        required: false
+        default: ""
+        type: string
   workflow_call:
     inputs:
       version:
         description: Version embedded in the packages
+        required: false
+        default: ""
+        type: string
+      firmware_artifact_name:
+        description: Exact same-run firmware artifact to embed in every host target
         required: false
         default: ""
         type: string
@@ -58,22 +68,15 @@ jobs:
       - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: "🔐 Read exact host dependency lock"
+        id: host-dependencies
+        shell: bash
+        run: node Tools/Dependencies/export-lock.mjs export-host --output "$GITHUB_OUTPUT"
+
       - name: "🧰 Select native Windows C compiler"
         if: matrix.windows
-        shell: pwsh
-        run: |
-          $mingwBin = "C:\mingw64\bin"
-          $gcc = Join-Path $mingwBin "gcc.exe"
-          if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) {
-            throw "The GitHub Windows image is missing its standalone MinGW64 compiler: $gcc"
-          }
-          $target = (& $gcc -dumpmachine).Trim()
-          if ($target -ne "x86_64-w64-mingw32") {
-            throw "Expected x86_64-w64-mingw32 GCC, found $target"
-          }
-          $mingwBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          "CC=gcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          & $gcc --version
+        shell: cmd
+        run: node Tools\Dependencies\select-windows-compiler.mjs
 
       - name: "🐹 Install Go from go.mod"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -83,17 +86,37 @@ jobs:
 
       - name: "📌 Pin selected Windows Go toolchain first on PATH"
         if: matrix.windows
-        shell: pwsh
+        shell: bash
         run: |
-          $goRoot = go env GOROOT
-          $goBin = Join-Path $goRoot "bin"
-          $goBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          & (Join-Path $goBin "go.exe") version
+          go_root="$(go env GOROOT)"
+          printf '%s/bin\n' "$go_root" >> "$GITHUB_PATH"
+          go version
 
       - name: "🟢 Install Node.js"
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.host-dependencies.outputs.node_version }}
+
+      - name: "📦 Restore locked build-tool dependencies"
+        run: npm ci --prefix Tools/Build --ignore-scripts
+
+      - name: "🧹 Clean generated host output before accepting firmware"
+        shell: bash
+        run: node Tools/Build/build.mjs --clean --no-color
+
+      - name: "⬇️ Download the exact validated firmware defaults"
+        if: inputs.firmware_artifact_name != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ${{ inputs.firmware_artifact_name }}
+          path: .build/firmware
+
+      - name: "🔎 Validate the downloaded firmware and EEPROM pair"
+        if: inputs.firmware_artifact_name != ''
+        shell: bash
+        run: >-
+          node .github/scripts/assert-firmware-defaults.mjs
+          .build/firmware/firmware-manifest.json
 
       - name: "🕰️ Freeze reproducible build time"
         shell: bash
@@ -101,25 +124,34 @@ jobs:
 
       - name: "🪟 Install Win32 resource tool"
         if: matrix.windows
-        shell: pwsh
+        shell: bash
         run: |
           go version
-          $requiredGo = (Select-String -Path "Tools/Controller/go.mod" -Pattern '^go\s+(.+)$').Matches.Groups[1].Value
-          $actualGo = (go env GOVERSION) -replace '^go', ''
-          if ($actualGo -ne $requiredGo) {
-            throw "Expected Go $requiredGo from go.mod, found $actualGo"
+          required_go="$(awk '$1 == "go" { print $2; exit }' Tools/Controller/go.mod)"
+          actual_go="$(go env GOVERSION)"
+          actual_go="${actual_go#go}"
+          test "$actual_go" = "$required_go" || {
+            printf 'Expected Go %s from go.mod, found %s\n' "$required_go" "$actual_go" >&2
+            exit 1
           }
-          go install github.com/tc-hib/go-winres@v0.3.3
+          go install "${{ steps.host-dependencies.outputs.go_winres_module }}@${{ steps.host-dependencies.outputs.go_winres_version }}"
 
-      - name: "🚀 Build Unix package"
+      - name: "🚀 Build and validate complete Unix package"
         if: ${{ !matrix.windows }}
         shell: bash
-        run: ./build.sh --host-only --clean --version "$PCCONTROLLER_VERSION"
+        run: ./build.sh --host-only --version "$PCCONTROLLER_VERSION"
 
-      - name: "🚀 Build Windows package"
+      - name: "🚀 Build and validate complete Windows package"
         if: matrix.windows
         shell: cmd
-        run: build.cmd --host-only --clean --no-upx --version %PCCONTROLLER_VERSION%
+        run: build.cmd --host-only --no-upx --version %PCCONTROLLER_VERSION%
+
+      - name: "🧷 Assert both defaults are embedded in the host manifest"
+        if: inputs.firmware_artifact_name != ''
+        shell: bash
+        run: >-
+          node .github/scripts/assert-host-defaults.mjs
+          Tools/Controller/bin/host-manifest.json
 
       - name: "📦 Create Host package"
         id: package
@@ -152,10 +184,15 @@ jobs:
       - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: "🔐 Read exact Host dependency lock"
+        id: summary-host-dependencies
+        shell: bash
+        run: node Tools/Dependencies/export-lock.mjs export-host --output "$GITHUB_OUTPUT"
+
       - name: "🟢 Install Node.js"
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.summary-host-dependencies.outputs.node_version }}
 
       - name: "🔎 Capture Host results"
         env:

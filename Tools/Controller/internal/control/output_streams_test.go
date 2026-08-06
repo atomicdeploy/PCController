@@ -139,6 +139,43 @@ func TestReplacingMelodyCancelsOldStreamWithoutLeakingWaiter(t *testing.T) {
 	}
 }
 
+func TestMelodyZeroRepeatsUntilExplicitStop(t *testing.T) {
+	target := &recordingOutputTarget{}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	operation, err := scheduler.StartMelody(
+		context.Background(),
+		appconfig.Melody{
+			Name: "attention",
+			Notes: []appconfig.MelodyNote{{
+				FrequencyHz: 880, DurationMS: 2, GapMS: 1,
+			}},
+		},
+		0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(target.snapshot()) < 3 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if commands := len(target.snapshot()); commands < 3 {
+		t.Fatalf("indefinite melody emitted only %d commands", commands)
+	}
+	if !scheduler.StopMelody() {
+		t.Fatal("indefinite melody was not active")
+	}
+	select {
+	case err := <-operation.Done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("indefinite melody did not stop")
+	}
+}
+
 func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 	target := &recordingOutputTarget{}
 	scheduler := NewOutputScheduler(target)
@@ -149,7 +186,7 @@ func TestBreatheEffectIsRateLimitedAndRestoresSteadyBase(t *testing.T) {
 			Name: "test", Kind: "breathe",
 			Red: 10, Green: 20, Blue: 30,
 			Brightness: 100, MinBrightness: 10,
-			PeriodMS: 400, DurationMS: 220,
+			PeriodMS: 640, DurationMS: 220,
 		},
 	)
 	if err != nil {
@@ -193,7 +230,7 @@ func TestStatusEffectRestoresNewestPolicyBase(t *testing.T) {
 			Name: "overlay", Kind: "breathe",
 			Red: 90, Green: 20, Blue: 200,
 			Brightness: 180, MinBrightness: 10,
-			PeriodMS: 400, DurationMS: 220,
+			PeriodMS: 640, DurationMS: 220,
 		},
 	)
 	if err != nil {
@@ -261,7 +298,7 @@ func TestSteadyRGBOverrideCannotBeUndoneByCanceledEffectCleanup(t *testing.T) {
 			Name: "continuous", Kind: "breathe",
 			Red: 1, Green: 2, Blue: 3,
 			Brightness: 100, MinBrightness: 5,
-			PeriodMS: 400,
+			PeriodMS: 640,
 		},
 	)
 	if err != nil {

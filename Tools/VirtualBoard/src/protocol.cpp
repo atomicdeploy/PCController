@@ -81,7 +81,7 @@ std::vector<std::uint8_t> encode(const Frame &frame) {
   std::vector<std::uint8_t> raw;
   raw.reserve(frame.payload.size() + kRawOverhead);
   raw.push_back(kMagic);
-  raw.push_back(kVersion);
+  raw.push_back(kEnvelopeRevision);
   raw.push_back(frame.opcode);
   raw.push_back(frame.sequence);
   raw.push_back(static_cast<std::uint8_t>(frame.payload.size()));
@@ -108,8 +108,8 @@ DecodeResult decode(const std::uint8_t *encoded, std::size_t length) {
   if (raw.size() < kRawOverhead || raw.size() > kMaximumRaw) {
     return {{}, DecodeError::Framing, "raw frame length is invalid"};
   }
-  if (raw[0] != kMagic || raw[1] != kVersion) {
-    return {{}, DecodeError::Framing, "magic or protocol version mismatch"};
+  if (raw[0] != kMagic) {
+    return {{}, DecodeError::Framing, "frame magic mismatch"};
   }
   const std::size_t payloadLength = raw[4];
   if (payloadLength > kMaximumPayload ||

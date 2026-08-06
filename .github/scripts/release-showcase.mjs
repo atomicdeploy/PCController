@@ -12,10 +12,12 @@ import {
 } from "node:fs";
 import { basename, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
 
 import { usageProgress } from "./usage-progress.mjs";
 
 const FORMAT = "pccontroller-release-manifest/v1";
+const PRODUCT_NAME = PRODUCT_METADATA.productName;
 const GENERATED_FILES = new Set([
   "RELEASE-NOTES.md",
   "release-manifest.json",
@@ -471,7 +473,7 @@ function releaseNotes({ tag, sourceSha, assets, selection, context, metrics }) {
     ? `\n> [!TIP]\n> This is a GitHub draft, whose final tag/download URLs do not exist yet. The chooser therefore names each file without a broken link; use the release page's **Assets** section. Published reruns activate direct links.\n`
     : "";
 
-  return `# 🚀 PCController ${escapeMarkdown(tag)} — ${channel}
+  return `# 🚀 ${escapeMarkdown(PRODUCT_NAME)} ${escapeMarkdown(tag)} — ${channel}
 
 > [!IMPORTANT]
 > AVR firmware, Host, and Virtual Board packages were built for five OS/architecture targets before release assembly.
@@ -602,7 +604,7 @@ function stepSummary({ tag, sourceSha, assets, selection, context, metrics }) {
     ? `\n## 🧠 AVR capacity evidence\n\n${usageProgress(flashPercent, "Application flash")}\n${sramBadge}\n| Resource | Used | Capacity | Free |\n|---|---:|---:|---:|\n| Application flash | ${metrics.flash.usedBytes.toLocaleString("en-US")} B (${metrics.flash.usagePercent}%) | ${metrics.flash.capacityBytes.toLocaleString("en-US")} B | **${metrics.flash.freeBytes.toLocaleString("en-US")} B** |${metrics?.peakSram?.usedBytes != null ? `\n| Estimated peak SRAM | ${metrics.peakSram.usedBytes.toLocaleString("en-US")} B | ${metrics.peakSram.capacityBytes.toLocaleString("en-US")} B | **${metrics.peakSram.freeBytes.toLocaleString("en-US")} B** |` : ""}\n`
     : "";
 
-  return `# 🚀 PCController ${escapeMarkdown(tag)} release
+  return `# 🚀 ${escapeMarkdown(PRODUCT_NAME)} ${escapeMarkdown(tag)} release
 
 > [!TIP]
 > **11 build targets passed.**
@@ -635,7 +637,7 @@ ${flashBlock}
 - ✅ A machine-readable ${code("release-manifest.json")} and fixed ${code("RELEASE-NOTES.md")} were generated
 - ⚠️ Physical flash/upload remains a separate hardware validation step
 
-${context.releaseUrl ? `**${context.draft ? "Draft assembly run" : "Release"}:** [Open PCController ${escapeMarkdown(tag)}](${context.releaseUrl})` : ""}
+${context.releaseUrl ? `**${context.draft ? "Draft assembly run" : "Release"}:** [Open ${escapeMarkdown(PRODUCT_NAME)} ${escapeMarkdown(tag)}](${context.releaseUrl})` : ""}
 `;
 }
 
@@ -651,7 +653,7 @@ function releaseManifest({
 }) {
   return {
     format: FORMAT,
-    product: "PCController",
+    product: PRODUCT_NAME,
     release: {
       tag,
       draft: context.draft,

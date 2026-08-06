@@ -2,7 +2,9 @@ package native
 
 // COBSEncode returns a Consistent Overhead Byte Stuffing representation.
 func COBSEncode(src []byte) []byte {
-	dst := make([]byte, 1, len(src)+len(src)/254+1)
+	// Grow from the required code byte. Computing the theoretical maximum
+	// capacity from an arbitrary slice length can overflow int near MaxInt.
+	dst := make([]byte, 1)
 	codeIndex := 0
 	code := byte(1)
 

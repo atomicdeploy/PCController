@@ -1,10 +1,14 @@
 package programmer
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +55,50 @@ func TestBuildUSBaspDoesNotInventEEPROMFile(t *testing.T) {
 	}
 }
 
+func TestBuildUSBaspForcedBitClock(t *testing.T) {
+	command, err := Build(Options{
+		Method: MethodUSBasp, Operation: OperationProbe,
+		Avrdude: "avrdude", AvrdudeConf: "avrdude.conf", USBaspBitClockUS: 32,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(command.Args, " "); !strings.Contains(joined, "-cusbasp -B32") {
+		t.Fatalf("USBasp command did not force slow SCK: %s", joined)
+	}
+}
+
+func TestUSBaspAutoSlowRetriesAndRetainsSlowMode(t *testing.T) {
+	var commands []Command
+	runner := CommandRunnerFunc(func(_ context.Context, command Command, _ io.Writer) error {
+		commands = append(commands, command)
+		if len(commands) == 1 {
+			return errors.New("initial SCK failed")
+		}
+		return nil
+	})
+	var output bytes.Buffer
+	wrapped := &usbaspSlowFallbackRunner{inner: runner, output: &output}
+	probe := Command{Name: "avrdude", Args: []string{"-patmega328p", "-cusbasp"}}
+	if err := wrapped.Run(context.Background(), probe, &output); err != nil {
+		t.Fatal(err)
+	}
+	if err := wrapped.Run(context.Background(), probe, &output); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 3 {
+		t.Fatalf("commands=%d want 3", len(commands))
+	}
+	for _, index := range []int{1, 2} {
+		if !strings.Contains(strings.Join(commands[index].Args, " "), "-B32") {
+			t.Fatalf("slow command %d missing -B32: %#v", index, commands[index])
+		}
+	}
+	if !strings.Contains(output.String(), "retaining slow mode") {
+		t.Fatalf("fallback not reported: %s", output.String())
+	}
+}
+
 func TestArduinoUploadUsesSketchNotInputFile(t *testing.T) {
 	command, err := Build(Options{
 		Method: MethodArduino, Port: "COM18", SketchPath: ".",
@@ -79,9 +127,10 @@ func TestArduinoCompileUsesFirmwareRelaxFlags(t *testing.T) {
 	joined := strings.Join(command.Args, " ")
 	for _, expected := range []string{
 		"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x",
-		"-DPCCONTROLLER_BUILD_TIMESTAMP=0x35019D5DUL -mcall-prologues",
+		"-DPCCONTROLLER_BUILD_TIMESTAMP=0x35019D5DUL -DPCCONTROLLER_IDENTITY_ADDRESS=0x7E74UL -mcall-prologues",
 		"-fno-tree-scev-cprop -fipa-pta -fstack-usage",
 		"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax",
+		"-Wl,--section-start=.firmware_identity=0x7E74",
 		"--warnings all", "--jobs 1", "--build-path", "--output-dir",
 	} {
 		if !strings.Contains(joined, expected) {
@@ -198,6 +247,20 @@ func TestArduinoCoreInfoAndBurnBootloader(t *testing.T) {
 		"board details --fqbn MiniCore:avr:328 --full --list-programmers",
 	) {
 		t.Fatalf("unexpected board details command: %s", joined)
+	}
+
+	properties, err := Build(Options{
+		Method: MethodArduino, Operation: OperationCoreProperties,
+		FQBN: "MiniCore:avr:328", SketchPath: "fixture", ArduinoCLI: "arduino-cli",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(properties.Args, " "); !strings.Contains(
+		joined,
+		"compile --fqbn MiniCore:avr:328 --show-properties=expanded fixture",
+	) {
+		t.Fatalf("unexpected core-properties command: %s", joined)
 	}
 
 	burn, err := Build(Options{

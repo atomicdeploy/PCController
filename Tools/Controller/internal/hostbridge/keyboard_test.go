@@ -3,6 +3,7 @@ package hostbridge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -218,6 +219,48 @@ func TestLiveTelemetryRelinquishesExternallyStoppedOrReversedMotionLatch(t *test
 	manager.observeKeyboardStatus(controller.Status{ActiveRelays: 1<<2 | 1<<3}, now)
 	if len(manager.keyboardLatches) != 0 {
 		t.Fatal("externally reversed Side B motion did not relinquish Up latch")
+	}
+}
+
+func TestLiveTelemetryAndFullSnapshotRelinquishExternalPWMLatches(t *testing.T) {
+	now := time.Unix(200, 0)
+	latch := func(channel byte, value uint16) keyboardLatch {
+		return keyboardLatch{
+			binding: fmt.Sprintf("pwm-%d", channel),
+			operation: keyboardOperation{
+				kind: "pwm", behavior: "latch", channel: channel,
+				value: value, releaseValue: 0,
+			},
+			started: now.Add(-time.Second),
+		}
+	}
+	manager := &Manager{keyboardLatches: map[string]keyboardLatch{
+		"pwm:2": latch(2, 1024),
+		"pwm:7": latch(7, 2048),
+	}}
+
+	manager.observeKeyboardStatus(controller.Status{
+		PWMAvailable: true, PWMChannel: 2, PWMValue: 1024,
+	}, now)
+	if len(manager.keyboardLatches) != 2 {
+		t.Fatalf("matching selected PWM telemetry dropped a latch: %#v", manager.keyboardLatches)
+	}
+	manager.observeKeyboardStatus(controller.Status{
+		PWMAvailable: true, PWMChannel: 2, PWMValue: 512,
+	}, now)
+	if _, exists := manager.keyboardLatches["pwm:2"]; exists {
+		t.Fatal("externally changed selected PWM did not relinquish its latch")
+	}
+
+	status := controller.Status{PWMAvailable: true, PWMChannel: 2, PWMValue: 512}
+	if !manager.keyboardPWMQueryDue(status, now) || manager.keyboardPWMQueryDue(status, now.Add(100*time.Millisecond)) {
+		t.Fatal("full PWM reconciliation was not due exactly once inside its throttle window")
+	}
+	values := controller.PWMValues{Available: true}
+	values.Values[7] = 4095
+	manager.observeKeyboardPWMValues(values, now)
+	if len(manager.keyboardLatches) != 0 {
+		t.Fatalf("externally changed unselected PWM did not relinquish latch: %#v", manager.keyboardLatches)
 	}
 }
 

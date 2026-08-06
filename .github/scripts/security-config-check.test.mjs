@@ -83,6 +83,19 @@ test("CodeQL validation rejects a hollow manual-build category", () => {
   assert.ok(errors.some((error) => error.includes("go-linux build is missing go test ./...")));
 });
 
+test("CodeQL Windows validation requires stable tests and rejects PowerShell", () => {
+  const directTests = codeql.replace(
+    "node ../Build/go-tests.mjs --module . --output ../../.build/tests/go --go go",
+    "go test ./...",
+  );
+  const directTestErrors = validateCodeql(directTests, inventory.languages);
+  assert.ok(directTestErrors.some((error) => error.includes("go-windows build is missing ../Build/go-tests.mjs --module . --output ../../.build/tests/go")));
+
+  const powershell = codeql.replace("        shell: cmd\n", "        shell: pwsh\n");
+  const powershellErrors = validateCodeql(powershell, inventory.languages);
+  assert.ok(powershellErrors.some((error) => error.includes("not PowerShell")));
+});
+
 test("CodeQL validation rejects a cosmetic gate that ignores failures", () => {
   const mutated = codeql
     .replace("    if: always()\n    needs: analyze\n", "    needs: analyze\n")

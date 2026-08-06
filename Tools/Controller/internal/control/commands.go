@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
@@ -21,12 +24,15 @@ import (
 )
 
 const (
-	settingsSetUsage = "settings set FLAGS LIGHT ON OFF DISPLAY STATUS " +
-		"PWMBOOT STREAM [DEFAULT_PAGE SAVE_LAST " +
-		"[STATUS_COLOR VOLTAGE_DECIMALS CURRENT_DECIMALS]]"
+	settingsSetUsage = "settings set FLAGS LIGHT ON OFF DISPLAY_OPEN " +
+		"DISPLAY_CLOSED STATUS OUTPUT_PERSISTENCE STREAM DEFAULT_PAGE SAVE_LAST " +
+		"STATUS_COLOR VOLTAGE_DECIMALS CURRENT_DECIMALS MOTION_EXIT_HOLD_SECONDS " +
+		"MOTION_BREAK_MS RELAY_RESTORE_MASK"
 	settingsUsage = "settings | settings decimals VOLTAGE CURRENT | " +
+		"settings export-live | " +
 		"settings color INDEX | settings motion always|closed|open|never | " +
-		"settings motion-break 1|100 | " +
+		"settings motion-break 1..255 | " +
+		"settings motion-exit-hold SECONDS | " +
 		"settings audio door|relay on|off | " + settingsSetUsage
 )
 
@@ -35,16 +41,119 @@ type CommandOptions struct {
 	FQBN             string
 	Macros           func() []appconfig.Macro
 	ArduinoCLI       string
+	ArduinoConfig    string
 	Avrdude          string
 	AvrdudeConf      string
 	Programmer       string
 	HostConfig       func() appconfig.Config
+	HostFacts        hostfacts.Provider
 	UpdateHostConfig func(func(*appconfig.Config) error) error
 	Resolve          func() CommandOptions
 	Outputs          *OutputScheduler
 	ProgramRunner    programmer.CommandRunner
 	ProgramExecute   func(context.Context, programmer.Options, io.Writer) error
 	ProgramDataPaths programmer.HostDataPaths
+	InitializeBoard  func(context.Context, *Runtime, []string, io.Writer) error
+	BlankBoard       func(context.Context, *Runtime, []string, io.Writer) error
+	USBaspDriver     func(context.Context, []string, io.Writer) error
+}
+
+func parseDisplayCommand(args []string) (DisplayRequest, error) {
+	if len(args) < 1 {
+		return DisplayRequest{}, errors.New("usage: display segments|lcd|both [options] [--] [TEXT]")
+	}
+	request := DisplayRequest{Target: args[0]}
+	// Preserve the original compact form. For long segment text the historical
+	// duration value was the step speed; for static/LCD text it was the hold.
+	if len(args) >= 2 && !strings.HasPrefix(args[1], "--") {
+		if legacy, err := strconv.ParseUint(args[1], 0, 16); err == nil {
+			request.SpeedMS = int(legacy)
+			request.DurationMS = int(legacy)
+			request.Text = strings.Join(args[2:], " ")
+			return request, nil
+		}
+	}
+	for index := 1; index < len(args); index++ {
+		argument := args[index]
+		if argument == "--" {
+			request.Text = strings.Join(args[index+1:], " ")
+			return request, nil
+		}
+		name, inline, hasInline := strings.Cut(argument, "=")
+		nextValue := func() (string, error) {
+			if hasInline {
+				return inline, nil
+			}
+			if index+1 >= len(args) {
+				return "", fmt.Errorf("%s requires a value", name)
+			}
+			index++
+			return args[index], nil
+		}
+		switch strings.ToLower(name) {
+		case "--speed", "--speed-ms":
+			value, err := nextValue()
+			if err != nil {
+				return DisplayRequest{}, err
+			}
+			request.SpeedMS, err = parseDisplayMilliseconds(value)
+			if err != nil {
+				return DisplayRequest{}, fmt.Errorf("invalid display speed %q: %w", value, err)
+			}
+		case "--duration", "--duration-ms", "--hold":
+			value, err := nextValue()
+			if err != nil {
+				return DisplayRequest{}, err
+			}
+			request.DurationMS, err = parseDisplayMilliseconds(value)
+			if err != nil {
+				return DisplayRequest{}, fmt.Errorf("invalid display duration %q: %w", value, err)
+			}
+		case "--repeat":
+			value, err := nextValue()
+			if err != nil {
+				return DisplayRequest{}, err
+			}
+			request.Repeat = DisplayRepeat(value)
+		case "--interval", "--interval-ms", "--wait":
+			value, err := nextValue()
+			if err != nil {
+				return DisplayRequest{}, err
+			}
+			request.IntervalMS, err = parseDisplayMilliseconds(value)
+			if err != nil {
+				return DisplayRequest{}, fmt.Errorf("invalid display interval %q: %w", value, err)
+			}
+		case "--scroll", "--marquee":
+			if hasInline {
+				return DisplayRequest{}, fmt.Errorf("%s does not take a value", name)
+			}
+			request.Scroll = true
+		case "--no-scroll":
+			if hasInline {
+				return DisplayRequest{}, fmt.Errorf("%s does not take a value", name)
+			}
+			request.Scroll = false
+		default:
+			if strings.HasPrefix(argument, "--") {
+				return DisplayRequest{}, fmt.Errorf("unknown display option %q", argument)
+			}
+			request.Text = strings.Join(args[index:], " ")
+			return request, nil
+		}
+	}
+	return request, nil
+}
+
+func parseDisplayMilliseconds(value string) (int, error) {
+	if milliseconds, err := strconv.ParseUint(value, 0, 31); err == nil {
+		return int(milliseconds), nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 || duration%time.Millisecond != 0 {
+		return 0, errors.New("use milliseconds or a positive duration such as 220ms or 30s")
+	}
+	return int(duration / time.Millisecond), nil
 }
 
 func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
@@ -55,10 +164,15 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		options.HostConfig,
 		options.UpdateHostConfig,
 	)
+	runtime.setMacroRunner(macroRunner)
 	outputs := options.Outputs
 	if outputs == nil {
 		outputs = NewOutputScheduler(runtime)
 	}
+	// Keep the runtime-owned scheduler attached when a watched configuration
+	// resolver refreshes only file-backed options. Programming capture/restore
+	// must observe the same RGB/melody owner used by the live command engine.
+	options.Outputs = outputs
 	mustRegister := func(command shell.Command) {
 		if err := engine.Register(command); err != nil {
 			panic(err)
@@ -75,6 +189,14 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		Summary: "close the interactive controller application",
 		Run: func(context.Context, []string) (string, error) {
 			return "", shell.ErrExit
+		},
+	})
+	mustRegister(shell.Command{
+		Name:    "config",
+		Usage:   "config get ui.app_title | config set ui.app_title VALUE",
+		Summary: "inspect or update supported watched host settings",
+		Run: func(_ context.Context, args []string) (string, error) {
+			return hostConfigCommand(options, args)
 		},
 	})
 	mustRegister(shell.Command{
@@ -314,9 +436,23 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 
 			action := strings.ToLower(args[0])
 			switch action {
+			case "export-live":
+				if len(args) != 1 {
+					return "", fmt.Errorf("usage: settings export-live")
+				}
+				settings, err := querySettings(ctx, runtime)
+				if err != nil {
+					return "", err
+				}
+				encoded, err := encodeLiveSettingsExport(settings)
+				if err != nil {
+					return "", err
+				}
+				return encoded, nil
+
 			case "motion-break", "motion-dead-time":
 				if len(args) != 2 {
-					return "", fmt.Errorf("usage: settings motion-break 1|100")
+					return "", fmt.Errorf("usage: settings motion-break 1..255")
 				}
 				milliseconds, err := strconv.ParseUint(args[1], 10, 16)
 				if err != nil {
@@ -366,6 +502,32 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				}
 				return formatSettings(settings), nil
 
+			case "motion-exit-hold", "motion-hold":
+				if len(args) != 2 {
+					return "", fmt.Errorf(
+						"usage: settings motion-exit-hold SECONDS (1..31)",
+					)
+				}
+				holdSeconds, err := parseBoundedByte(
+					args[1], native.SettingsMaximumMotionExitHoldSeconds,
+					"motion exit hold",
+				)
+				if err != nil {
+					return "", err
+				}
+				if holdSeconds == 0 {
+					return "", errors.New("motion exit hold must be at least 1 second")
+				}
+				settings, err := querySettings(ctx, runtime)
+				if err != nil {
+					return "", err
+				}
+				settings.MotionExitHoldSeconds = holdSeconds
+				if err := storeSettings(ctx, runtime, settings); err != nil {
+					return "", err
+				}
+				return formatSettings(settings), nil
+
 			case "audio", "cues":
 				if len(args) != 3 {
 					return "", fmt.Errorf(
@@ -386,7 +548,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				case "relay", "relays":
 					settings.SetRelayAudioEnabled(enabled)
 				default:
-					return "", fmt.Errorf("audio cue group must be door or relay")
+					return "", fmt.Errorf("buzzer cue group must be door or relay")
 				}
 				if err := storeSettings(ctx, runtime, settings); err != nil {
 					return "", err
@@ -451,14 +613,10 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return formatSettings(settings), nil
 
 			case "set":
-				if len(args) != 9 && len(args) != 11 && len(args) != 14 {
+				if len(args) != 18 {
 					return "", fmt.Errorf("usage: %s", settingsSetUsage)
 				}
-				current, err := querySettings(ctx, runtime)
-				if err != nil {
-					return "", err
-				}
-				settings, err := settingsFromSetArgs(current, args)
+				settings, err := settingsFromSetArgs(args)
 				if err != nil {
 					return "", err
 				}
@@ -488,7 +646,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "pwm", Usage: "pwm get|off|mode MODE|set CHANNEL VALUE",
+		Name: "pwm", Usage: "pwm get|off|set CHANNEL VALUE",
 		Summary: "query/control logical PWM output values",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return pwmCommand(ctx, runtime, args)
@@ -585,8 +743,11 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS", Summary: "play a buzzer tone",
+		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS | buzzer status | buzzer path board|host|both|none", Summary: "play a tone or select board/PC buzzer routing",
 		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) >= 1 && (strings.EqualFold(args[0], "status") || strings.EqualFold(args[0], "path")) {
+				return buzzerRoutingCommand(ctx, runtime, options, args)
+			}
 			values, err := exactUintArgs(args, 2, 16, "buzzer FREQUENCY_HZ DURATION_MS")
 			if err != nil {
 				return "", err
@@ -621,98 +782,33 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "silent", Usage: "silent status|on|off",
-		Summary: "query or persist the EEPROM-backed buzzer silent flag",
+		Name: "silent", Usage: "silent status|on|off | silent board|host|both status|on|off",
+		Summary: "control independent board and host buzzer silence",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			if len(args) != 1 {
-				return "", fmt.Errorf("usage: silent status|on|off")
-			}
-			frame, err := request(ctx, runtime, native.OpGetSettings, nil, native.OpSettings)
-			if err != nil {
-				return "", err
-			}
-			settings, err := native.ParseSettings(frame.Payload)
-			if err != nil {
-				return "", err
-			}
-			switch strings.ToLower(args[0]) {
-			case "status":
-				return fmt.Sprintf(
-					"silent=%t",
-					settings.Flags&native.SettingsSilent != 0,
-				), nil
-			case "on":
-				settings.Flags |= native.SettingsSilent
-			case "off":
-				settings.Flags &^= native.SettingsSilent
-			default:
-				return "", fmt.Errorf("usage: silent status|on|off")
-			}
-			payload, err := settings.Payload()
-			if err != nil {
-				return "", err
-			}
-			if err := command(ctx, runtime, native.OpSetSettings, payload); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf(
-				"silent=%t saved to board EEPROM",
-				settings.Flags&native.SettingsSilent != 0,
-			), nil
+			return silentCommand(ctx, runtime, options, args)
 		},
 	})
 	mustRegister(shell.Command{
 		Name:    "display",
-		Usage:   "display segments|lcd|both DURATION_MS [TEXT]",
-		Summary: "show or clear bounded ASCII text on the board displays",
+		Usage:   "display segments|lcd|both [--speed 220ms] [--duration 5s] [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]",
+		Summary: "send arbitrary timed text; long segment messages marquee automatically",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			if len(args) < 2 {
-				return "", fmt.Errorf("usage: display segments|lcd|both DURATION_MS [TEXT]")
-			}
-			targets := map[string]byte{
-				"segments": native.DisplaySegments, "segment": native.DisplaySegments,
-				"seg": native.DisplaySegments, "lcd": native.DisplayLCD,
-				"both": native.DisplayBoth,
-			}
-			target, ok := targets[strings.ToLower(args[0])]
-			if !ok {
-				return "", fmt.Errorf("display target must be segments, lcd, or both")
-			}
-			duration, err := strconv.ParseUint(args[1], 0, 16)
-			if err != nil {
-				return "", fmt.Errorf("invalid display duration %q", args[1])
-			}
-			text := strings.Join(args[2:], " ")
-			payload, err := native.DisplayTextPayload(target, uint16(duration), text)
+			request, err := parseDisplayCommand(args)
 			if err != nil {
 				return "", err
 			}
-			if err := command(ctx, runtime, native.OpDisplayText, payload); err != nil {
+			result, err := runtime.PresentDisplay(ctx, request)
+			if err != nil {
 				return "", err
 			}
-			if target == native.DisplayLCD || target == native.DisplayBoth {
-				line1, line2 := text, ""
-				if len(line1) > 16 {
-					line2 = line1[16:]
-					line1 = line1[:16]
-				}
-				if err := runtime.LCDPresenter().RenderPhysical(
-					ctx,
-					lcdLine(line1),
-					lcdLine(line2),
-				); err != nil {
-					// The native display command remains successful when the
-					// optional PC-owned backpack is absent or temporarily busy.
-					runtime.PublishStructuredEvent(Event{
-						Kind: "lcd.error", Lifecycle: "render", State: "degraded",
-						Text: "direct LCD render: " + err.Error(),
-					})
-				}
-			}
-			if text == "" {
+			if result.Text == "" {
 				return "display override cleared", nil
 			}
-			return fmt.Sprintf("display text accepted for %d ms", duration), nil
+			return fmt.Sprintf(
+				"display text accepted target=%s scroll=%t repeat=%s speed=%dms duration=%dms interval=%dms",
+				result.Target, result.Scrolling, result.Repeat, result.SpeedMS,
+				result.DurationMS, result.IntervalMS,
+			), nil
 		},
 	})
 	mustRegister(shell.Command{
@@ -724,7 +820,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name: "os",
-		Usage: "os status|policy|key KEY [HOLD_MS] | os virtual enable|disable|allow|deny [KEY] | " +
+		Usage: "os status|facts [PROFILE|list]|policy|key KEY [HOLD_MS] | os virtual enable|disable|allow|deny [KEY] | " +
 			"os power ACTION CONFIRMATION | os power-policy enable|disable|allow|deny [ACTION] | " +
 			"os brightness get|set VALUE | os brightness-policy enable|disable|range MIN MAX",
 		Summary: "inspect the PC or invoke explicitly policy-gated OS actions",
@@ -806,11 +902,11 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				defer cancel()
 				if err := runtime.Reconnect(
 					reconnectContext,
-					"safe application reset acknowledged",
+					"application reboot acknowledged",
 				); err != nil {
 					return "", err
 				}
-				return "safe reset ACK received; application HELLO reauthenticated", nil
+				return "reboot ACK received; application HELLO reauthenticated", nil
 			case "boot", "bootloader":
 				return "reset requested; use DTR/urclock for guaranteed bootloader entry",
 					command(ctx, runtime, native.OpReset, []byte{native.ResetBootloader})
@@ -850,6 +946,53 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name:    "opcode",
+		Usage:   "opcode OPCODE [PAYLOAD_HEX] [--expect RESPONSE_OPCODE]",
+		Summary: "exchange an opaque versionless opcode (ACK expected by default)",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) == 0 {
+				return "", fmt.Errorf("usage: opcode OPCODE [PAYLOAD_HEX] [--expect RESPONSE_OPCODE]")
+			}
+			opcode, err := parseByte(args[0])
+			if err != nil || opcode == 0 {
+				return "", fmt.Errorf("opcode must be 1..255")
+			}
+			expected := byte(native.OpACK)
+			var payload []byte
+			for index := 1; index < len(args); index++ {
+				if strings.EqualFold(args[index], "--expect") {
+					if index+1 >= len(args) {
+						return "", errors.New("--expect requires a response opcode")
+					}
+					expected, err = parseByte(args[index+1])
+					if err != nil || expected == 0 {
+						return "", errors.New("response opcode must be 1..255")
+					}
+					index++
+					continue
+				}
+				if payload != nil {
+					return "", errors.New("only one hexadecimal payload is allowed")
+				}
+				payload, err = decodeHex(args[index])
+				if err != nil {
+					return "", err
+				}
+			}
+			if len(payload) > native.MaxPayload {
+				return "", native.ErrPayloadTooLong
+			}
+			frame, err := request(ctx, runtime, opcode, payload, expected)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(
+				"opcode=0x%02X name=%s seq=%d payload=% X",
+				frame.Opcode, native.OpcodeName(frame.Opcode), frame.Seq, frame.Payload,
+			), nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "write", Usage: "write HEX_BYTES", Summary: "write raw serial bytes",
 		Run: func(_ context.Context, args []string) (string, error) {
 			if len(args) == 0 {
@@ -866,32 +1009,123 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name:    "arduino",
-		Usage:   "arduino update|compile SKETCH|core-info|burn-bootloader [PORT]",
-		Summary: "update dependencies or use arduino-cli; flash via guarded program flash",
+		Name:    "board",
+		Usage:   "board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]",
+		Summary: "provision, securely blank, or name a board",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			resolved := options
-			if options.Resolve != nil {
-				resolved = options.Resolve()
+			if len(args) == 0 {
+				return "", errors.New("usage: board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
 			}
-			if len(args) == 1 && strings.EqualFold(args[0], "update") {
+			if strings.EqualFold(args[0], "initialize") {
+				if options.InitializeBoard == nil {
+					return "", errors.New("board initialization is unavailable")
+				}
 				var output bytes.Buffer
-				report, updateErr := programmer.UpdateArduino(
+				err := options.InitializeBoard(ctx, runtime, args[1:], &output)
+				return strings.TrimSpace(output.String()), err
+			}
+			if strings.EqualFold(args[0], "blank") {
+				if options.BlankBoard == nil {
+					return "", errors.New("board blanking is unavailable")
+				}
+				var output bytes.Buffer
+				err := options.BlankBoard(ctx, runtime, args[1:], &output)
+				return strings.TrimSpace(output.String()), err
+			}
+			if !strings.EqualFold(args[0], "name") {
+				return "", errors.New("usage: board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
+			}
+			if len(args) == 1 || (len(args) == 2 && strings.EqualFold(args[1], "get")) {
+				value, err := runtime.BoardName(ctx)
+				if err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("name=%q persisted=%t", value.Name, value.Persisted), nil
+			}
+			name := ""
+			switch {
+			case len(args) == 2 && strings.EqualFold(args[1], "clear"):
+			case len(args) == 3 && strings.EqualFold(args[1], "set"):
+				name = args[2]
+			default:
+				return "", errors.New("usage: board name [get|set NAME|clear]")
+			}
+			value, err := runtime.SetBoardName(ctx, name)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("name=%q persisted=%t", value.Name, value.Persisted), nil
+		},
+	})
+	mustRegister(shell.Command{
+		Name:    "driver",
+		Usage:   "driver usbasp status|ensure|zadig",
+		Summary: "inspect or repair the Windows USBasp driver",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if options.USBaspDriver == nil {
+				return "", errors.New("USBasp driver management is unavailable")
+			}
+			var output bytes.Buffer
+			err := options.USBaspDriver(ctx, args, &output)
+			return strings.TrimSpace(output.String()), err
+		},
+	})
+	mustRegister(shell.Command{
+		Name:    "toolchain",
+		Usage:   "toolchain bootstrap|sync|profile|compile SKETCH|core-info|install-bootloader [PORT]",
+		Summary: "bootstrap or synchronize the firmware build/programming toolchain",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			resolved := resolveCommandOptions(options)
+			if len(args) == 1 && strings.EqualFold(args[0], "sync") {
+				var output bytes.Buffer
+				report, updateErr := programmer.SyncToolchain(
 					ctx,
-					programmer.ArduinoUpdateOptions{
-						ArduinoCLI:  resolved.ArduinoCLI,
-						DirectRetry: true,
+					programmer.ToolchainSyncOptions{
+						ToolchainCLI: resolved.ArduinoCLI,
+						DirectRetry:  true,
 					},
 					&output,
 				)
 				fmt.Fprintf(
 					&output,
-					"\nArduino update finished: %d steps.\n",
+					"\nToolchain sync finished: %d steps.\n",
 					len(report.Steps),
 				)
 				return strings.TrimSpace(output.String()), updateErr
 			}
-			programArgs, err := arduinoProgramArguments(args)
+			if len(args) == 1 && strings.EqualFold(args[0], "profile") {
+				encoded, err := json.MarshalIndent(programmer.DefaultToolchainProfile(), "", "  ")
+				return string(encoded), err
+			}
+			if len(args) >= 1 && strings.EqualFold(args[0], "bootstrap") {
+				dryRun := false
+				if len(args) == 2 && strings.EqualFold(args[1], "--dry-run") {
+					dryRun = true
+				} else if len(args) != 1 {
+					return "", errors.New("usage: toolchain bootstrap [--dry-run]")
+				}
+				var output bytes.Buffer
+				report, bootstrapErr := programmer.BootstrapToolchain(
+					ctx,
+					programmer.ToolchainBootstrapOptions{
+						Profile:     programmer.DefaultToolchainProfile(),
+						DirectRetry: true, DryRun: dryRun,
+					},
+					&output,
+				)
+				if bootstrapErr == nil && !dryRun && options.UpdateHostConfig != nil {
+					if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
+						config.Programming.ToolchainCLI = report.CLIPath
+						return nil
+					}); err != nil {
+						bootstrapErr = fmt.Errorf("save managed toolchain path: %w", err)
+					}
+				}
+				encoded, _ := json.MarshalIndent(report, "", "  ")
+				fmt.Fprintln(&output, string(encoded))
+				return strings.TrimSpace(output.String()), bootstrapErr
+			}
+			programArgs, err := toolchainProgramArguments(args)
 			if err != nil {
 				return "", err
 			}
@@ -907,26 +1141,219 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 			if err != nil {
 				return "", err
 			}
-			resolved := options
-			if options.Resolve != nil {
-				resolved = options.Resolve()
-			}
+			resolved := resolveCommandOptions(options)
 			return programCommand(ctx, runtime, resolved, programArgs)
 		},
 	})
 	mustRegister(shell.Command{
 		Name:    "program",
-		Usage:   "program flash HEX [PORT] [--usbasp-troubleshooting] [--allow-incomplete-backup] | program OPERATION METHOD PATH [PORT]",
+		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom] | program OPERATION METHOD PATH [PORT]",
 		Summary: "guarded backup-then-flash, or non-write programmer diagnostics",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			resolved := options
-			if options.Resolve != nil {
-				resolved = options.Resolve()
-			}
+			resolved := resolveCommandOptions(options)
 			return programCommand(ctx, runtime, resolved, args)
 		},
 	})
 	return engine
+}
+
+func encodeLiveSettingsExport(settings native.Settings) (string, error) {
+	encoded, err := json.MarshalIndent(struct {
+		Format   string          `json:"format"`
+		Source   string          `json:"source"`
+		Settings native.Settings `json:"settings"`
+	}{
+		Format: "controller-mcu-settings/v1", Source: "live-opcode",
+		Settings: settings,
+	}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func hostConfigCommand(options CommandOptions, args []string) (string, error) {
+	const usage = "config get PATH | config set PATH VALUE; PATH is ui.app_title, ui.tagline, ui.appearance.*, or integrations.buzzer_mirror.{enabled,native_enabled,web_audio_enabled,driver_directory}"
+	if len(args) < 2 {
+		return "", errors.New(usage)
+	}
+	action := strings.ToLower(strings.TrimSpace(args[0]))
+	path := strings.ToLower(strings.TrimSpace(args[1]))
+	switch action {
+	case "get":
+		if len(args) != 2 {
+			return "", errors.New(usage)
+		}
+		if options.HostConfig == nil {
+			return "", errors.New("host configuration is unavailable")
+		}
+		config := options.HostConfig()
+		ui := config.UI
+		buzzer := config.Integrations.BuzzerMirror
+		switch path {
+		case "ui.app_title":
+			return fmt.Sprintf("ui.app_title=%q", ui.AppTitle), nil
+		case "ui.tagline":
+			return fmt.Sprintf("ui.tagline=%q", ui.Tagline), nil
+		case "ui.appearance.theme":
+			return "ui.appearance.theme=" + ui.Appearance.Theme, nil
+		case "ui.appearance.locale":
+			return "ui.appearance.locale=" + ui.Appearance.Locale, nil
+		case "ui.appearance.direction":
+			return "ui.appearance.direction=" + ui.Appearance.Direction, nil
+		case "ui.appearance.reduce_motion":
+			return fmt.Sprintf("ui.appearance.reduce_motion=%t", ui.Appearance.ReduceMotion), nil
+		case "ui.appearance.compact_numbers":
+			return fmt.Sprintf("ui.appearance.compact_numbers=%t", ui.Appearance.CompactNumbers), nil
+		case "ui.appearance.audio_muted":
+			return fmt.Sprintf("ui.appearance.audio_muted=%t", ui.Appearance.AudioMuted), nil
+		case "ui.appearance.audio_volume":
+			return fmt.Sprintf("ui.appearance.audio_volume=%.0f%%", ui.Appearance.AudioVolume*100), nil
+		case "integrations.buzzer_mirror.enabled":
+			return fmt.Sprintf("integrations.buzzer_mirror.enabled=%t", buzzer.Enabled), nil
+		case "integrations.buzzer_mirror.native_enabled":
+			return fmt.Sprintf("integrations.buzzer_mirror.native_enabled=%t", buzzer.NativeEnabled), nil
+		case "integrations.buzzer_mirror.web_audio_enabled":
+			return fmt.Sprintf("integrations.buzzer_mirror.web_audio_enabled=%t", buzzer.WebAudioEnabled), nil
+		case "integrations.buzzer_mirror.driver_directory":
+			return fmt.Sprintf("integrations.buzzer_mirror.driver_directory=%q", buzzer.DriverDirectory), nil
+		default:
+			return "", fmt.Errorf("unsupported host setting %q", args[1])
+		}
+	case "set":
+		if len(args) < 3 {
+			return "", errors.New(usage)
+		}
+		if options.HostConfig == nil {
+			return "", errors.New("host configuration is unavailable")
+		}
+		if options.UpdateHostConfig == nil {
+			return "", errors.New("host configuration is read-only")
+		}
+		raw := strings.TrimSpace(strings.Join(args[2:], " "))
+		candidate := options.HostConfig()
+		beforeUI := candidate.UI
+		beforeBuzzer := candidate.Integrations.BuzzerMirror
+		switch path {
+		case "ui.app_title":
+			if raw == "" {
+				return "", errors.New("ui.app_title cannot be empty")
+			}
+			candidate.UI.AppTitle = raw
+		case "ui.tagline":
+			if raw == "" {
+				return "", errors.New("ui.tagline cannot be empty")
+			}
+			candidate.UI.Tagline = raw
+		case "ui.appearance.theme":
+			candidate.UI.Appearance.Theme = raw
+		case "ui.appearance.locale":
+			candidate.UI.Appearance.Locale = raw
+		case "ui.appearance.direction":
+			candidate.UI.Appearance.Direction = raw
+		case "ui.appearance.reduce_motion":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("ui.appearance.reduce_motion: %w", err)
+			}
+			candidate.UI.Appearance.ReduceMotion = value
+		case "ui.appearance.compact_numbers":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("ui.appearance.compact_numbers: %w", err)
+			}
+			candidate.UI.Appearance.CompactNumbers = value
+		case "ui.appearance.audio_muted":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("ui.appearance.audio_muted: %w", err)
+			}
+			candidate.UI.Appearance.AudioMuted = value
+		case "ui.appearance.audio_volume":
+			percent, err := strconv.ParseFloat(strings.TrimSuffix(raw, "%"), 64)
+			if err != nil || percent < 0 || percent > 100 {
+				return "", errors.New("ui.appearance.audio_volume must be 0..100 percent")
+			}
+			candidate.UI.Appearance.AudioVolume = percent / 100
+		case "integrations.buzzer_mirror.enabled":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("integrations.buzzer_mirror.enabled: %w", err)
+			}
+			candidate.Integrations.BuzzerMirror.Enabled = value
+		case "integrations.buzzer_mirror.native_enabled":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("integrations.buzzer_mirror.native_enabled: %w", err)
+			}
+			candidate.Integrations.BuzzerMirror.NativeEnabled = value
+		case "integrations.buzzer_mirror.web_audio_enabled":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("integrations.buzzer_mirror.web_audio_enabled: %w", err)
+			}
+			candidate.Integrations.BuzzerMirror.WebAudioEnabled = value
+		case "integrations.buzzer_mirror.driver_directory":
+			candidate.Integrations.BuzzerMirror.DriverDirectory = raw
+		default:
+			return "", fmt.Errorf("unsupported host setting %q", args[1])
+		}
+		candidate.UI.Appearance = appconfig.NormalizeAppearance(candidate.UI.Appearance)
+		if err := candidate.Validate(); err != nil {
+			return "", err
+		}
+		if reflect.DeepEqual(beforeUI, candidate.UI) &&
+			reflect.DeepEqual(beforeBuzzer, candidate.Integrations.BuzzerMirror) {
+			return path + " unchanged", nil
+		}
+		if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
+			config.UI = candidate.UI
+			config.Integrations.BuzzerMirror = candidate.Integrations.BuzzerMirror
+			return config.Validate()
+		}); err != nil {
+			return "", err
+		}
+		return path + " saved and hot-reload queued", nil
+	default:
+		return "", errors.New(usage)
+	}
+}
+
+func parseHostConfigBool(value string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "true", "on", "yes", "1":
+		return true, nil
+	case "false", "off", "no", "0":
+		return false, nil
+	default:
+		return false, errors.New("value must be true/false or on/off")
+	}
+}
+
+func resolveCommandOptions(base CommandOptions) CommandOptions {
+	if base.Resolve == nil {
+		return base
+	}
+	resolved := base.Resolve()
+	if resolved.Outputs == nil {
+		resolved.Outputs = base.Outputs
+	}
+	if resolved.HostConfig == nil {
+		resolved.HostConfig = base.HostConfig
+	}
+	if resolved.UpdateHostConfig == nil {
+		resolved.UpdateHostConfig = base.UpdateHostConfig
+	}
+	if resolved.ProgramRunner == nil {
+		resolved.ProgramRunner = base.ProgramRunner
+	}
+	if resolved.ProgramExecute == nil {
+		resolved.ProgramExecute = base.ProgramExecute
+	}
+	if strings.TrimSpace(resolved.ProgramDataPaths.DataDir) == "" {
+		resolved.ProgramDataPaths = base.ProgramDataPaths
+	}
+	return resolved
 }
 
 func parseProgramMode(value string) ProgramMode {
@@ -956,7 +1383,7 @@ func osCommand(
 	args []string,
 ) (string, error) {
 	if len(args) == 0 {
-		return "", errors.New("usage: os status|policy|key|virtual|power|power-policy|brightness|brightness-policy ...")
+		return "", errors.New("usage: os status|facts|policy|key|virtual|power|power-policy|brightness|brightness-policy ...")
 	}
 	config := appconfig.Defaults()
 	if options.HostConfig != nil {
@@ -985,6 +1412,32 @@ func osCommand(
 			}
 		}
 		return strings.Join(lines, "\n"), nil
+	case "facts":
+		if len(args) > 2 {
+			return "", errors.New("usage: os facts [system|computer|firmware|storage|serial|list]")
+		}
+		if len(args) == 2 && (strings.EqualFold(args[1], "list") || strings.EqualFold(args[1], "catalog")) {
+			encoded, err := json.MarshalIndent(hostfacts.Catalog(), "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(encoded), nil
+		}
+		profile := ""
+		if len(args) == 2 {
+			profile = args[1]
+		}
+		provider := options.HostFacts
+		if provider == nil {
+			provider = hostfacts.Default()
+		}
+		result, err := provider.Query(ctx, profile)
+		if err != nil {
+			audit("os.host-facts", "read unavailable: "+err.Error())
+			return "", err
+		}
+		audit("os.host-facts", fmt.Sprintf("read profile=%s rows=%d truncated=%t", result.Profile, len(result.Rows), result.Truncated))
+		return formatHostFacts(result), nil
 	case "policy":
 		if len(args) != 1 {
 			return "", errors.New("usage: os policy")
@@ -1090,11 +1543,49 @@ func formatBrightness(result hostos.BrightnessResult) string {
 	if result.Changed {
 		verb = "set"
 	}
+	backend := result.Status.Backend
+	if backend == "" {
+		backend = "platform"
+	}
+	kind := "external"
+	if result.Status.Integrated {
+		kind = "integrated"
+	}
 	return fmt.Sprintf(
-		"monitor brightness %s=%d%% raw=%d/%d..%d display=%q",
+		"monitor brightness %s=%d%% raw=%d/%d..%d display=%q backend=%s kind=%s",
 		verb, result.Status.Percent, result.Status.RawCurrent,
 		result.Status.RawMinimum, result.Status.RawMaximum, result.Status.Display,
+		backend, kind,
 	)
+}
+
+func formatHostFacts(result hostfacts.Result) string {
+	lines := []string{fmt.Sprintf(
+		"host facts profile=%s class=%s source=%s rows=%d truncated=%t duration=%dms collected=%s",
+		result.Profile,
+		result.Class,
+		result.Source,
+		len(result.Rows),
+		result.Truncated,
+		result.DurationMS,
+		result.CollectedAt.UTC().Format(time.RFC3339),
+	)}
+	for index, row := range result.Rows {
+		fields := make([]string, 0, len(result.Columns))
+		for _, column := range result.Columns {
+			value, exists := row[column]
+			if !exists {
+				continue
+			}
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				encoded = []byte("null")
+			}
+			fields = append(fields, column+"="+string(encoded))
+		}
+		lines = append(lines, fmt.Sprintf("row[%d] %s", index, strings.Join(fields, " ")))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func updateVirtualKeyPolicy(
@@ -1373,18 +1864,17 @@ func queryLiveMenuCatalog(
 
 func describeLiveMenuEntry(entry native.MenuEntry) (MenuPageInfo, bool) {
 	label := normalizeMenuName(strings.TrimRight(entry.Label, " \x00"))
-	for _, catalog := range [][]MenuPageInfo{protocolMenuPages, legacyMenuPages} {
-		for _, page := range catalog {
-			if normalizeMenuName(page.Label) == label {
-				return page, true
-			}
+	for _, page := range protocolMenuPages {
+		if normalizeMenuName(page.Label) == label {
+			page.ID = entry.ID
+			return page, true
 		}
 	}
 	return MenuPageInfo{}, false
 }
 
-func arduinoProgramArguments(args []string) ([]string, error) {
-	const usage = "usage: arduino compile SKETCH | core-info | burn-bootloader [PORT]"
+func toolchainProgramArguments(args []string) ([]string, error) {
+	const usage = "usage: toolchain compile SKETCH | core-info | install-bootloader [PORT]"
 	if len(args) == 0 {
 		return nil, fmt.Errorf("%s", usage)
 	}
@@ -1394,10 +1884,6 @@ func arduinoProgramArguments(args []string) ([]string, error) {
 			return nil, fmt.Errorf("%s", usage)
 		}
 		return []string{string(programmer.MethodCompile), args[1]}, nil
-	case "upload":
-		return nil, errors.New(
-			"direct arduino upload is disabled; compile to Intel HEX, then use program flash HEX [PORT] so flash and EEPROM are backed up first",
-		)
 	case "core-info", "info":
 		if len(args) != 1 {
 			return nil, fmt.Errorf("%s", usage)
@@ -1406,7 +1892,7 @@ func arduinoProgramArguments(args []string) ([]string, error) {
 			string(programmer.OperationCoreInfo),
 			string(programmer.MethodArduino),
 		}, nil
-	case "burn", "burn-bootloader":
+	case "install-bootloader":
 		if len(args) > 2 {
 			return nil, fmt.Errorf("%s", usage)
 		}
@@ -1487,6 +1973,185 @@ func metricCommand(
 	}
 }
 
+func buzzerRoutingCommand(
+	ctx context.Context,
+	runtime *Runtime,
+	options CommandOptions,
+	args []string,
+) (string, error) {
+	if len(args) == 0 {
+		args = []string{"status"}
+	}
+	if len(args) != 1 && !(len(args) == 2 && strings.EqualFold(args[0], "path")) {
+		return "", errors.New("usage: buzzer status | buzzer path board|host|both|none")
+	}
+	if options.HostConfig == nil {
+		return "", errors.New("host buzzer configuration is unavailable")
+	}
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return "", err
+	}
+	config := options.HostConfig()
+	if len(args) == 1 {
+		if !strings.EqualFold(args[0], "status") {
+			return "", errors.New("usage: buzzer status | buzzer path board|host|both|none")
+		}
+		return formatBuzzerRouting(settings, config), nil
+	}
+
+	desiredPath := strings.ToLower(strings.TrimSpace(args[1]))
+	var boardSilent, hostEnabled bool
+	switch desiredPath {
+	case "board":
+		boardSilent, hostEnabled = false, false
+	case "host":
+		boardSilent, hostEnabled = true, true
+	case "both":
+		boardSilent, hostEnabled = false, true
+	case "none":
+		boardSilent, hostEnabled = true, false
+	default:
+		return "", errors.New("buzzer path must be board, host, both, or none")
+	}
+
+	beforeMirror := config.Integrations.BuzzerMirror
+	hostChanged := beforeMirror.Enabled != hostEnabled
+	if hostChanged {
+		if options.UpdateHostConfig == nil {
+			return "", errors.New("host buzzer configuration is read-only")
+		}
+		if err := options.UpdateHostConfig(func(value *appconfig.Config) error {
+			value.Integrations.BuzzerMirror.Enabled = hostEnabled
+			return value.Validate()
+		}); err != nil {
+			return "", fmt.Errorf("set host buzzer path: %w", err)
+		}
+	}
+
+	boardChanged := settings.Flags&native.SettingsSilent != 0 != boardSilent
+	if boardChanged {
+		if boardSilent {
+			settings.Flags |= native.SettingsSilent
+		} else {
+			settings.Flags &^= native.SettingsSilent
+		}
+		if err := storeSettings(ctx, runtime, settings); err != nil {
+			if hostChanged {
+				_ = options.UpdateHostConfig(func(value *appconfig.Config) error {
+					value.Integrations.BuzzerMirror = beforeMirror
+					return value.Validate()
+				})
+			}
+			return "", fmt.Errorf("set board silent state: %w", err)
+		}
+	}
+
+	verified, err := querySettings(ctx, runtime)
+	if err != nil {
+		return "", fmt.Errorf("verify board silent state: %w", err)
+	}
+	if (verified.Flags&native.SettingsSilent != 0) != boardSilent {
+		return "", errors.New("board silent-state readback did not match the requested buzzer path")
+	}
+	return formatBuzzerRouting(verified, options.HostConfig()) + " applied live", nil
+}
+
+func formatBuzzerRouting(settings native.Settings, config appconfig.Config) string {
+	boardSilent := settings.Flags&native.SettingsSilent != 0
+	hostEnabled := config.Integrations.BuzzerMirror.Enabled
+	path := "none"
+	switch {
+	case !boardSilent && hostEnabled:
+		path = "both"
+	case !boardSilent:
+		path = "board"
+	case hostEnabled:
+		path = "host"
+	}
+	return fmt.Sprintf(
+		"buzzer_path=%s board_silent=%t host_silent=%t native=%t web_audio=%t",
+		path, boardSilent, !hostEnabled,
+		hostEnabled && config.Integrations.BuzzerMirror.NativeEnabled,
+		hostEnabled && config.Integrations.BuzzerMirror.WebAudioEnabled,
+	)
+}
+
+func silentCommand(
+	ctx context.Context,
+	runtime *Runtime,
+	options CommandOptions,
+	args []string,
+) (string, error) {
+	const usage = "usage: silent status|on|off | silent board|host|both status|on|off"
+	if len(args) == 2 {
+		target := strings.ToLower(strings.TrimSpace(args[0]))
+		action := strings.ToLower(strings.TrimSpace(args[1]))
+		if action != "status" && action != "on" && action != "off" {
+			return "", errors.New(usage)
+		}
+		switch target {
+		case "board":
+			args = []string{action}
+		case "host":
+			if options.HostConfig == nil {
+				return "", errors.New("host buzzer configuration is unavailable")
+			}
+			config := options.HostConfig()
+			if action == "status" {
+				return fmt.Sprintf("host_silent=%t", !config.Integrations.BuzzerMirror.Enabled), nil
+			}
+			if options.UpdateHostConfig == nil {
+				return "", errors.New("host buzzer configuration is read-only")
+			}
+			silent := action == "on"
+			if err := options.UpdateHostConfig(func(value *appconfig.Config) error {
+				value.Integrations.BuzzerMirror.Enabled = !silent
+				return value.Validate()
+			}); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("host_silent=%t applied live", silent), nil
+		case "both":
+			if action == "status" {
+				return buzzerRoutingCommand(ctx, runtime, options, []string{"status"})
+			}
+			path := "both"
+			if action == "on" {
+				path = "none"
+			}
+			return buzzerRoutingCommand(ctx, runtime, options, []string{"path", path})
+		default:
+			return "", errors.New(usage)
+		}
+	}
+	if len(args) != 1 {
+		return "", errors.New(usage)
+	}
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return "", err
+	}
+	switch strings.ToLower(strings.TrimSpace(args[0])) {
+	case "status":
+		return fmt.Sprintf("silent=%t board_silent=%t", settings.Flags&native.SettingsSilent != 0, settings.Flags&native.SettingsSilent != 0), nil
+	case "on":
+		settings.Flags |= native.SettingsSilent
+	case "off":
+		settings.Flags &^= native.SettingsSilent
+	default:
+		return "", errors.New(usage)
+	}
+	if err := storeSettings(ctx, runtime, settings); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf(
+		"silent=%t board_silent=%t saved to board EEPROM and applied live",
+		settings.Flags&native.SettingsSilent != 0,
+		settings.Flags&native.SettingsSilent != 0,
+	), nil
+}
+
 func refresh(ctx context.Context, runtime *Runtime) (native.Status, error) {
 	requestContext, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 	defer cancel()
@@ -1544,19 +2209,15 @@ func storeSettings(
 	return command(ctx, runtime, native.OpSetSettings, payload)
 }
 
-func settingsFromSetArgs(
-	current native.Settings,
-	args []string,
-) (native.Settings, error) {
-	if (len(args) != 9 && len(args) != 11 && len(args) != 14) ||
-		!strings.EqualFold(args[0], "set") {
+func settingsFromSetArgs(args []string) (native.Settings, error) {
+	if len(args) != 18 || !strings.EqualFold(args[0], "set") {
 		return native.Settings{}, fmt.Errorf("usage: %s", settingsSetUsage)
 	}
 
-	values := make([]uint64, 8)
-	for index, value := range args[1:9] {
+	values := make([]uint64, 9)
+	for index, value := range args[1:10] {
 		bits := 8
-		if index == 7 {
+		if index == 8 {
 			bits = 16
 		}
 		parsed, err := strconv.ParseUint(value, 0, bits)
@@ -1569,69 +2230,66 @@ func settingsFromSetArgs(
 		values[index] = parsed
 	}
 
-	// Begin with the device record, then replace only the fields present in
-	// this command form. This makes both older positional forms safe after new
-	// EEPROM flags are introduced.
-	settings := current
-	settings.Flags = byte(values[0])
-	settings.LightMode = byte(values[1])
-	settings.OnBrightness = byte(values[2])
-	settings.OffBrightness = byte(values[3])
-	settings.DisplayBrightness = byte(values[4])
-	settings.StatusBrightness = byte(values[5])
-	settings.PWMBootMode = byte(values[6])
-	settings.StreamPeriodMS = uint16(values[7])
-
-	if len(args) >= 11 {
-		defaultPage, err := strconv.ParseUint(args[9], 0, 8)
-		if err != nil {
-			return native.Settings{}, fmt.Errorf(
-				"invalid DEFAULT_PAGE value %q",
-				args[9],
-			)
-		}
-		saveLast, err := parseBool(args[10])
-		if err != nil {
-			return native.Settings{}, fmt.Errorf(
-				"invalid SAVE_LAST value %q: %w",
-				args[10],
-				err,
-			)
-		}
-		settings.DefaultPage = byte(defaultPage)
-		settings.SetSaveLastPage(saveLast)
+	defaultPage, err := parseBoundedByte(args[10], 13, "default page")
+	if err != nil {
+		return native.Settings{}, err
 	}
-
-	if len(args) == 14 {
-		statusColor, err := parseBoundedByte(args[11], 7, "status color")
-		if err != nil {
-			return native.Settings{}, err
-		}
-		voltageDecimals, err := parseBoundedByte(
-			args[12],
-			2,
-			"voltage decimals",
-		)
-		if err != nil {
-			return native.Settings{}, err
-		}
-		currentDecimals, err := parseBoundedByte(
-			args[13],
-			2,
-			"current decimals",
-		)
-		if err != nil {
-			return native.Settings{}, err
-		}
-		if err := settings.SetStatusColor(statusColor); err != nil {
-			return native.Settings{}, err
-		}
-		if err := settings.SetVoltageDecimals(voltageDecimals); err != nil {
-			return native.Settings{}, err
-		}
-		if err := settings.SetCurrentDecimals(currentDecimals); err != nil {
-			return native.Settings{}, err
-		}
+	saveLast, err := parseBool(args[11])
+	if err != nil {
+		return native.Settings{}, fmt.Errorf("invalid SAVE_LAST value %q: %w", args[11], err)
+	}
+	statusColor, err := parseBoundedByte(args[12], 7, "status color")
+	if err != nil {
+		return native.Settings{}, err
+	}
+	voltageDecimals, err := parseBoundedByte(args[13], 2, "voltage decimals")
+	if err != nil {
+		return native.Settings{}, err
+	}
+	currentDecimals, err := parseBoundedByte(args[14], 2, "current decimals")
+	if err != nil {
+		return native.Settings{}, err
+	}
+	motionExitHoldSeconds, err := parseBoundedByte(
+		args[15], native.SettingsMaximumMotionExitHoldSeconds,
+		"motion exit hold",
+	)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	if motionExitHoldSeconds == 0 {
+		return native.Settings{}, errors.New("motion exit hold must be at least 1 second")
+	}
+	motionBreakMS, err := parseBoundedByte(args[16], 0xFF, "motion break")
+	if err != nil {
+		return native.Settings{}, err
+	}
+	if motionBreakMS == 0 {
+		return native.Settings{}, errors.New("motion break must be at least 1 ms")
+	}
+	relayRestoreMask, err := parseBoundedByte(args[17], 0xFF, "relay restore mask")
+	if err != nil {
+		return native.Settings{}, err
+	}
+	settings := native.Settings{
+		Flags: byte(values[0]), LightMode: byte(values[1]),
+		OnBrightness: byte(values[2]), OffBrightness: byte(values[3]),
+		DisplayBrightness: byte(values[4]), DisplayClosedBrightness: byte(values[5]),
+		StatusBrightness: byte(values[6]), OutputPersistence: byte(values[7]),
+		StreamPeriodMS: uint16(values[8]), DefaultPage: defaultPage,
+		MotionExitHoldSeconds: motionExitHoldSeconds,
+		RelayRestoreMask:      relayRestoreMask,
+		MotionBreakMSValue:    motionBreakMS,
+	}
+	settings.SetSaveLastPage(saveLast)
+	if err := settings.SetStatusColor(statusColor); err != nil {
+		return native.Settings{}, err
+	}
+	if err := settings.SetVoltageDecimals(voltageDecimals); err != nil {
+		return native.Settings{}, err
+	}
+	if err := settings.SetCurrentDecimals(currentDecimals); err != nil {
+		return native.Settings{}, err
 	}
 	return settings, nil
 }
@@ -1700,7 +2358,7 @@ func melodyCommandWithUpdate(
 			return "", err
 		}
 		return fmt.Sprintf(
-			"melody %q saved in PC host configuration with %d notes",
+			"melody %q saved in HOST configuration with %d notes",
 			melody.Name,
 			len(melody.Notes),
 		), nil
@@ -1731,7 +2389,7 @@ func melodyCommandWithUpdate(
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("melody %q removed from PC host configuration", args[1]), nil
+		return fmt.Sprintf("melody %q removed from HOST configuration", args[1]), nil
 	}
 	if len(args) == 1 {
 		switch strings.ToLower(args[0]) {
@@ -1790,9 +2448,9 @@ func melodyCommandWithUpdate(
 	repeats := 1
 	if len(args) == 3 {
 		value, err := strconv.ParseUint(args[2], 0, 8)
-		if err != nil || value < 1 || value > maxMelodyRepeats {
+		if err != nil || value > maxMelodyRepeats {
 			return "", fmt.Errorf(
-				"melody repeats must be 1..%d",
+				"melody repeats must be 0 (until stopped) or 1..%d",
 				maxMelodyRepeats,
 			)
 		}
@@ -1815,11 +2473,15 @@ func melodyCommandWithUpdate(
 			return "", ctx.Err()
 		}
 	}
+	repeatLabel := strconv.Itoa(repeats)
+	if repeats == 0 {
+		repeatLabel = "until-stopped"
+	}
 	return fmt.Sprintf(
-		"melody %q started (id=%d repeats=%d)",
+		"melody %q started (id=%d repeats=%s)",
 		melody.Name,
 		operation.ID,
-		repeats,
+		repeatLabel,
 	), nil
 }
 
@@ -1879,25 +2541,37 @@ func rgbCommand(
 	args []string,
 ) (string, error) {
 	if len(args) != 0 && strings.EqualFold(args[0], "effect") {
-		return statusEffectCommand(ctx, outputs, configProvider, args[1:])
+		return statusEffectCommand(ctx, runtime, outputs, configProvider, args[1:])
 	}
-	if len(args) != 3 && len(args) != 4 {
+	if len(args) != 0 && strings.EqualFold(args[0], "profile") {
+		return statusProfileCommand(ctx, runtime, args[1:])
+	}
+	if len(args) != 0 && strings.EqualFold(args[0], "color") {
+		args = args[1:]
+	}
+	color, consumed, err := parseStatusColor(args)
+	if err != nil {
 		return "", fmt.Errorf(
-			"usage: rgb R G B [BRIGHTNESS] | rgb effect list|play NAME|wait NAME|stop|status",
+			"usage: rgb [color] '#RRGGBB' [BRIGHTNESS] | rgb [color] R G B [BRIGHTNESS] | rgb effect ...: %w",
+			err,
 		)
 	}
-	values, err := uintArgs(args, 8)
-	if err != nil {
-		return "", err
+	if len(args) != consumed && len(args) != consumed+1 {
+		return "", fmt.Errorf(
+			"usage: rgb [color] '#RRGGBB' [BRIGHTNESS] | rgb [color] R G B [BRIGHTNESS] | rgb effect ...",
+		)
 	}
 	brightness := uint64(255)
-	if len(values) == 4 {
-		brightness = values[3]
+	if len(args) == consumed+1 {
+		brightness, err = strconv.ParseUint(args[consumed], 10, 8)
+		if err != nil {
+			return "", fmt.Errorf("invalid brightness %q", args[consumed])
+		}
 	}
 	payload := native.StatusRGBPayload(
-		byte(values[0]),
-		byte(values[1]),
-		byte(values[2]),
+		color.Red,
+		color.Green,
+		color.Blue,
 		byte(brightness),
 	)
 	outputs.OverrideStatusEffect()
@@ -1906,15 +2580,16 @@ func rgbCommand(
 	}
 	return fmt.Sprintf(
 		"status RGB=%d,%d,%d brightness=%d",
-		values[0],
-		values[1],
-		values[2],
+		color.Red,
+		color.Green,
+		color.Blue,
 		brightness,
 	), nil
 }
 
 func statusEffectCommand(
 	ctx context.Context,
+	runtime *Runtime,
 	outputs *OutputScheduler,
 	configProvider func() appconfig.Config,
 	args []string,
@@ -1951,6 +2626,12 @@ func statusEffectCommand(
 			if outputs.StopStatusEffect() {
 				return "status LED effect stop requested", nil
 			}
+			if runtime.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects != 0 {
+				if err := command(ctx, runtime, native.OpStatusEffect, native.StatusEffectReleasePayload()); err != nil {
+					return "", err
+				}
+				return "status LED effect released to firmware ownership", nil
+			}
 			return "no status LED effect is playing", nil
 		case "status":
 			state := outputs.State()
@@ -1961,6 +2642,25 @@ func statusEffectCommand(
 				"status LED effect playing id=%d name=%q",
 				state.EffectID,
 				state.EffectName,
+			), nil
+		}
+	}
+	if len(args) > 0 {
+		switch strings.ToLower(args[0]) {
+		case "breathe", "flash", "cycle", "transition":
+			effect, err := parseAdHocStatusEffect(args)
+			if err != nil {
+				return "", err
+			}
+			operation, err := outputs.StartStatusEffect(ctx, effect)
+			if err != nil {
+				return "", err
+			}
+			return fmt.Sprintf(
+				"status LED %s started id=%d rgb=#%02X%02X%02X to=#%02X%02X%02X period=%dms repeats=%s",
+				effect.Kind, operation.ID, effect.Red, effect.Green, effect.Blue,
+				effect.AlternateRed, effect.AlternateGreen, effect.AlternateBlue,
+				effect.PeriodMS, statusEffectRepeatLabel(effect.Repeats),
 			), nil
 		}
 	}
@@ -2004,6 +2704,255 @@ func statusEffectCommand(
 		effect.Name,
 		operation.ID,
 	), nil
+}
+
+func parseStatusColor(args []string) (appconfig.RGBColor, int, error) {
+	if len(args) == 0 {
+		return appconfig.RGBColor{}, 0, errors.New("color is required")
+	}
+	if strings.HasPrefix(args[0], "#") {
+		value := strings.TrimPrefix(args[0], "#")
+		if len(value) == 3 {
+			value = strings.Repeat(value[0:1], 2) +
+				strings.Repeat(value[1:2], 2) +
+				strings.Repeat(value[2:3], 2)
+		}
+		if len(value) != 6 {
+			return appconfig.RGBColor{}, 0, fmt.Errorf("hex color %q must be #RGB or #RRGGBB", args[0])
+		}
+		parsed, err := strconv.ParseUint(value, 16, 24)
+		if err != nil {
+			return appconfig.RGBColor{}, 0, fmt.Errorf("invalid hex color %q", args[0])
+		}
+		return appconfig.RGBColor{
+			Red: byte(parsed >> 16), Green: byte(parsed >> 8), Blue: byte(parsed),
+		}, 1, nil
+	}
+	if len(args) < 3 {
+		return appconfig.RGBColor{}, 0, errors.New("decimal color requires R G B")
+	}
+	values := [3]byte{}
+	for index := range values {
+		parsed, err := strconv.ParseUint(args[index], 10, 8)
+		if err != nil {
+			return appconfig.RGBColor{}, 0,
+				fmt.Errorf("invalid decimal color channel %q", args[index])
+		}
+		values[index] = byte(parsed)
+	}
+	return appconfig.RGBColor{Red: values[0], Green: values[1], Blue: values[2]}, 3, nil
+}
+
+func parseAdHocStatusEffect(args []string) (appconfig.StatusLEDEffect, error) {
+	kind := strings.ToLower(args[0])
+	effect := appconfig.StatusLEDEffect{
+		Name: "manual-" + kind, Kind: kind, Brightness: 255, PeriodMS: 1000,
+	}
+	index := 1
+	color, consumed, err := parseStatusColor(args[index:])
+	if err != nil {
+		return effect, fmt.Errorf("rgb effect %s: %w", kind, err)
+	}
+	effect.Red, effect.Green, effect.Blue = color.Red, color.Green, color.Blue
+	index += consumed
+	haveAlternate := false
+	for index < len(args) {
+		option := strings.ToLower(args[index])
+		index++
+		switch option {
+		case "--to", "--alternate":
+			color, consumed, err := parseStatusColor(args[index:])
+			if err != nil {
+				return effect, fmt.Errorf("%s: %w", option, err)
+			}
+			effect.AlternateRed, effect.AlternateGreen, effect.AlternateBlue =
+				color.Red, color.Green, color.Blue
+			index += consumed
+			haveAlternate = true
+		case "--period", "--speed":
+			if index >= len(args) {
+				return effect, fmt.Errorf("%s requires a duration", option)
+			}
+			duration, err := time.ParseDuration(args[index])
+			if err != nil {
+				milliseconds, numberErr := strconv.ParseUint(args[index], 10, 16)
+				if numberErr != nil {
+					return effect, fmt.Errorf("invalid effect period %q", args[index])
+				}
+				duration = time.Duration(milliseconds) * time.Millisecond
+			}
+			effect.PeriodMS = int(duration / time.Millisecond)
+			index++
+		case "--brightness", "--minimum", "--min", "--repeat", "--repeats":
+			if index >= len(args) {
+				return effect, fmt.Errorf("%s requires a value", option)
+			}
+			value := strings.ToLower(args[index])
+			index++
+			if option == "--repeat" || option == "--repeats" {
+				switch value {
+				case "loop", "forever", "infinite":
+					effect.Repeats = 0
+				case "once":
+					effect.Repeats = 1
+				default:
+					parsed, err := strconv.ParseUint(value, 10, 8)
+					if err != nil || parsed == 0 {
+						return effect, fmt.Errorf("repeat must be once, loop, or 1..255")
+					}
+					effect.Repeats = byte(parsed)
+				}
+				continue
+			}
+			parsed, err := strconv.ParseUint(value, 10, 8)
+			if err != nil {
+				return effect, fmt.Errorf("%s must be 0..255", option)
+			}
+			if option == "--brightness" {
+				effect.Brightness = byte(parsed)
+			} else {
+				effect.MinBrightness = byte(parsed)
+			}
+		default:
+			return effect, fmt.Errorf("unknown status effect option %q", option)
+		}
+	}
+	if (kind == "cycle" || kind == "transition") && !haveAlternate {
+		return effect, fmt.Errorf("rgb effect %s requires --to COLOR", kind)
+	}
+	if err := appconfig.ValidateStatusLEDEffect(effect); err != nil {
+		return effect, err
+	}
+	return effect, nil
+}
+
+func statusEffectRepeatLabel(repeats byte) string {
+	if repeats == 0 {
+		return "loop"
+	}
+	return strconv.Itoa(int(repeats))
+}
+
+var statusProfileNames = [...]string{
+	"off", "boot", "ready", "learning", "hot", "fault", "custom",
+	"bluetooth-connected", "bluetooth-off", "bluetooth-waiting", "running",
+	"door-open", "door-closed", "bluetooth", "menu", "radio", "save",
+	"discard", "reset",
+}
+
+func statusProfileCondition(value string) (byte, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for index, name := range statusProfileNames {
+		if normalized == name {
+			return byte(index), nil
+		}
+	}
+	if normalized == "warning" {
+		return 4, nil
+	}
+	parsed, err := strconv.ParseUint(normalized, 10, 8)
+	if err == nil && parsed < uint64(len(statusProfileNames)) {
+		return byte(parsed), nil
+	}
+	return 0, fmt.Errorf("unknown status profile condition %q", value)
+}
+
+func statusProfileCommand(ctx context.Context, runtime *Runtime, args []string) (string, error) {
+	if len(args) == 1 && strings.EqualFold(args[0], "list") {
+		lines := make([]string, 0, len(statusProfileNames))
+		for condition, name := range statusProfileNames {
+			profile, err := readStatusProfile(ctx, runtime, byte(condition))
+			if err != nil {
+				return "", err
+			}
+			lines = append(lines, formatStatusProfile(name, profile.Effect))
+		}
+		return strings.Join(lines, "\n"), nil
+	}
+	if len(args) == 2 && strings.EqualFold(args[0], "get") {
+		condition, err := statusProfileCondition(args[1])
+		if err != nil {
+			return "", err
+		}
+		profile, err := readStatusProfile(ctx, runtime, condition)
+		if err != nil {
+			return "", err
+		}
+		return formatStatusProfile(statusProfileNames[condition], profile.Effect), nil
+	}
+	if len(args) >= 4 && strings.EqualFold(args[0], "set") {
+		condition, err := statusProfileCondition(args[1])
+		if err != nil {
+			return "", err
+		}
+		var options native.StatusEffectOptions
+		if strings.EqualFold(args[2], "color") || strings.EqualFold(args[2], "steady") {
+			color, consumed, err := parseStatusColor(args[3:])
+			if err != nil {
+				return "", err
+			}
+			brightness := byte(255)
+			if len(args) > 3+consumed {
+				if len(args) != 4+consumed {
+					return "", errors.New("steady profile accepts only an optional brightness")
+				}
+				parsed, err := strconv.ParseUint(args[3+consumed], 10, 8)
+				if err != nil {
+					return "", fmt.Errorf("invalid brightness %q", args[3+consumed])
+				}
+				brightness = byte(parsed)
+			}
+			options = native.StatusEffectOptions{
+				Kind: native.StatusEffectNone, Red: color.Red, Green: color.Green,
+				Blue: color.Blue, Brightness: brightness,
+			}
+		} else {
+			effect, err := parseAdHocStatusEffect(args[2:])
+			if err != nil {
+				return "", err
+			}
+			options, _, err = nativeStatusEffect(effect)
+			if err != nil {
+				return "", err
+			}
+		}
+		payload, err := native.StatusProfileSetPayload(condition, options)
+		if err != nil {
+			return "", err
+		}
+		if err := command(ctx, runtime, native.OpStatusProfileSet, payload); err != nil {
+			return "", err
+		}
+		return "EEPROM status profile saved: " + formatStatusProfile(statusProfileNames[condition], options), nil
+	}
+	return "", errors.New("usage: rgb profile list|get CONDITION|set CONDITION color COLOR [BRIGHTNESS]|set CONDITION EFFECT COLOR [options]")
+}
+
+func readStatusProfile(ctx context.Context, runtime *Runtime, condition byte) (native.StatusProfile, error) {
+	payload, err := native.StatusProfileGetPayload(condition)
+	if err != nil {
+		return native.StatusProfile{}, err
+	}
+	frame, err := runtime.Request(ctx, native.OpStatusProfileGet, payload, native.OpStatusProfile)
+	if err != nil {
+		return native.StatusProfile{}, err
+	}
+	return native.ParseStatusProfile(frame.Payload)
+}
+
+func formatStatusProfile(name string, effect native.StatusEffectOptions) string {
+	kinds := [...]string{"color", "breathe", "flash", "cycle", "transition"}
+	kind := "unknown"
+	if int(effect.Kind) < len(kinds) {
+		kind = kinds[effect.Kind]
+	}
+	return fmt.Sprintf(
+		"%s effect=%s color=#%02X%02X%02X alternate=#%02X%02X%02X brightness=%d minimum=%d period=%dms repeats=%s",
+		name, kind, effect.Red, effect.Green, effect.Blue,
+		effect.AlternateRed, effect.AlternateGreen, effect.AlternateBlue,
+		effect.Brightness, effect.MinimumBrightness, effect.PeriodMS,
+		statusEffectRepeatLabel(effect.Repeats),
+	)
 }
 
 func findMelody(
@@ -2192,21 +3141,10 @@ func pwmCommand(ctx context.Context, runtime *Runtime, args []string) (string, e
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("PWM mode=%d selected=%d values=%v", values.Mode, values.SelectedChannel, values.Values), nil
+			return fmt.Sprintf("PWM available=%t selected=%d values=%v", values.Available, values.SelectedChannel, values.Values), nil
 		case "off":
 			return "all PWM channels off", command(ctx, runtime, native.OpPWMAllOff, nil)
 		}
-	}
-	if len(args) == 2 && strings.EqualFold(args[0], "mode") {
-		modes := map[string]byte{
-			"off": native.PWMOff, "manual": native.PWMManual, "auto": native.PWMAuto,
-			"0": native.PWMOff, "1": native.PWMManual, "2": native.PWMAuto,
-		}
-		mode, ok := modes[strings.ToLower(args[1])]
-		if !ok {
-			return "", fmt.Errorf("PWM mode must be off, manual, or auto")
-		}
-		return "PWM mode " + args[1], command(ctx, runtime, native.OpPWMMode, []byte{mode})
 	}
 	if len(args) == 3 && strings.EqualFold(args[0], "set") {
 		channel, err := parsePWMChannel(args[1])
@@ -2224,7 +3162,7 @@ func pwmCommand(ctx context.Context, runtime *Runtime, args []string) (string, e
 		return fmt.Sprintf("PWM channel %d logical value %d", channel, value),
 			command(ctx, runtime, native.OpPWMSet, payload)
 	}
-	return "", fmt.Errorf("usage: pwm get|off|mode MODE|set CHANNEL VALUE")
+	return "", fmt.Errorf("usage: pwm get | pwm off | pwm set CHANNEL VALUE")
 }
 
 func parsePWMChannel(value string) (byte, error) {
@@ -2284,19 +3222,23 @@ func rfCommand(
 			state := runtime.RFLearnState()
 			if !state.Active {
 				return fmt.Sprintf(
-					"RF learning ended reason=%q captured=%d",
+					"RF learning ended mode=%s configured=%s reason=%q captured=%d",
+					state.Mode,
+					time.Duration(state.ConfiguredMS)*time.Millisecond,
 					state.Reason,
 					state.Learned,
 				), nil
 			}
-			duration := "indefinite"
-			if !state.EndsAt.IsZero() {
-				duration = time.Until(state.EndsAt).Round(time.Second).String()
+			configured, remaining := "indefinite", "indefinite"
+			if state.Mode == RFLearnTimer {
+				configured = (time.Duration(state.ConfiguredMS) * time.Millisecond).String()
+				remaining = (time.Duration(state.RemainingMS) * time.Millisecond).Round(time.Second).String()
 			}
 			return fmt.Sprintf(
-				"RF learning active multi=%t remaining=%s captured=%d",
-				state.Multiple,
-				duration,
+				"RF learning active mode=%s multi-code=true configured=%s remaining=%s captured=%d",
+				state.Mode,
+				configured,
+				remaining,
 				state.Learned,
 			), nil
 		case "list":
@@ -2317,12 +3259,12 @@ func rfCommand(
 			return "", err
 		}
 		duration := options.Timeout.String()
-		if state.Indefinite {
+		if state.Mode == RFLearnIndefinite {
 			duration = "indefinite"
 		}
 		return fmt.Sprintf(
-			"RF learning started multi=%t duration=%s; completion is reported as rf.learn.ended",
-			state.Multiple,
+			"RF learning started mode=%s multi-code=true configured=%s; remaining time is reported by status and completion by rf.learn.ended",
+			state.Mode,
 			duration,
 		), nil
 	}
@@ -2343,7 +3285,9 @@ func rfCommand(
 		if err != nil {
 			return "", err
 		}
-		return description, command(ctx, runtime, native.OpRFMap, payload)
+		return description, NewRFReplaceService(runtime).UpdateMapping(
+			ctx, payload[0], payload[1], payload[2], payload[3],
+		)
 	}
 	if len(args) >= 4 && len(args) <= 6 && strings.EqualFold(args[0], "send") {
 		code, err := strconv.ParseUint(args[1], 0, 32)
@@ -2386,45 +3330,44 @@ func rfCommand(
 	}
 	return "", fmt.Errorf(
 		"usage: rf send CODE BITS PROTOCOL [PULSE_US] [REPEATS] | " +
-			"rf learn [SECONDS|DURATION|indefinite] [single|multi] | " +
+			"rf learn [indefinite|timer [DURATION]] (timer aliases: single, one-shot) | " +
 			"rf status|cancel|list | rf remove ID|all | rf map ID ACTION ...",
 	)
 }
 
 func parseRFLearnOptions(args []string) (RFLearnOptions, error) {
-	options := RFLearnOptions{Timeout: 15 * time.Second}
-	haveDuration := false
-	for _, argument := range args {
-		switch strings.ToLower(strings.TrimSpace(argument)) {
-		case "multi", "multiple":
-			options.Multiple = true
-		case "single", "one":
-			options.Multiple = false
-		case "forever", "indefinite", "infinite":
-			if haveDuration {
-				return RFLearnOptions{}, fmt.Errorf("RF learn duration was specified more than once")
-			}
-			options.Indefinite = true
-			options.Timeout = 0
-			haveDuration = true
-		default:
-			if haveDuration {
-				return RFLearnOptions{}, fmt.Errorf("RF learn duration was specified more than once")
-			}
-			duration, err := time.ParseDuration(argument)
-			if err != nil {
-				seconds, secondsErr := strconv.ParseUint(argument, 0, 32)
-				if secondsErr != nil {
-					return RFLearnOptions{}, fmt.Errorf("invalid RF learn duration %q", argument)
-				}
-				duration = time.Duration(seconds) * time.Second
-			}
-			if duration <= 0 || duration > 24*time.Hour {
-				return RFLearnOptions{}, fmt.Errorf("RF learn duration must be positive and at most 24h")
-			}
-			options.Timeout = duration
-			haveDuration = true
+	if len(args) == 0 {
+		return RFLearnOptions{Mode: RFLearnIndefinite}, nil
+	}
+	if len(args) > 2 {
+		return RFLearnOptions{}, fmt.Errorf("usage: rf learn [indefinite|timer [DURATION]]")
+	}
+	mode, err := ParseRFLearnMode(args[0])
+	if err != nil {
+		return RFLearnOptions{}, err
+	}
+	options := RFLearnOptions{Mode: mode}
+	if mode == RFLearnIndefinite {
+		if len(args) != 1 {
+			return RFLearnOptions{}, fmt.Errorf("indefinite RF learning does not accept a duration")
 		}
+		return options, nil
+	}
+	options.Timeout = 15 * time.Second
+	if len(args) == 2 {
+		duration, parseErr := time.ParseDuration(args[1])
+		if parseErr != nil {
+			seconds, secondsErr := strconv.ParseUint(args[1], 0, 32)
+			if secondsErr != nil {
+				return RFLearnOptions{}, fmt.Errorf("invalid RF learn timer duration %q", args[1])
+			}
+			duration = time.Duration(seconds) * time.Second
+		}
+		maximum := time.Duration(native.MaxRFLearnSeconds) * time.Second
+		if duration <= 0 || duration > maximum {
+			return RFLearnOptions{}, fmt.Errorf("RF learn timer duration must be positive and at most %s", maximum)
+		}
+		options.Timeout = duration
 	}
 	return options, nil
 }
@@ -2610,7 +3553,7 @@ func rfMapArgs(args []string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	payload, err := native.RFMapPayload(id, kind, value, behavior)
+	payload, err := native.RFMappingPayload(id, kind, value, behavior)
 	if err != nil {
 		return nil, "", err
 	}
@@ -2654,6 +3597,9 @@ func programCommand(
 	if len(args) != 0 && strings.EqualFold(args[0], "flash") {
 		return safeFlashCommand(ctx, runtime, options, args[1:])
 	}
+	if len(args) != 0 && strings.EqualFold(args[0], "recover") {
+		return recoverProgrammingCommand(ctx, runtime, options, args[1:])
+	}
 	if len(args) < 2 || len(args) > 5 {
 		return "", fmt.Errorf("usage: program flash HEX [PORT] [advanced flags] | program OPERATION METHOD PATH [PORT]")
 	}
@@ -2669,9 +3615,10 @@ func programCommand(
 	method := programmer.Method(strings.ToLower(args[methodIndex]))
 	programOptions := programmer.Options{
 		Method: method, Operation: operation, FQBN: options.FQBN,
-		ArduinoCLI: options.ArduinoCLI,
-		Avrdude:    options.Avrdude, AvrdudeConf: options.AvrdudeConf,
-		Programmer: options.Programmer,
+		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig,
+		Avrdude: options.Avrdude, AvrdudeConf: options.AvrdudeConf,
+		Programmer:     options.Programmer,
+		USBaspAutoSlow: true,
 	}
 	pathIndex := methodIndex + 1
 	needsPath := operation != programmer.OperationMetadata &&
@@ -2699,7 +3646,7 @@ func programCommand(
 				programOptions.SketchPath = options.ProjectPath
 			}
 		case programmer.OperationCoreInfo, programmer.OperationBurnBoot:
-			// These arduino-cli operations do not take a sketch or memory file.
+			// These dependency-CLI operations do not take a project or memory file.
 		default:
 			return "", fmt.Errorf("%s does not support operation %s", method, operation)
 		}
@@ -2748,8 +3695,6 @@ func programCommand(
 	}
 	snapshot := runtime.Snapshot()
 	programOptions.ApplicationHash = snapshot.Hello.BuildHash
-	programOptions.ApplicationDate = snapshot.Hello.BuildDate
-	programOptions.ApplicationTime = snapshot.Hello.BuildTime
 	programOptions.ApplicationIdentitySchema = snapshot.Hello.IdentitySchema
 	programOptions.ApplicationPackedTimestamp = snapshot.Hello.BuildTimestamp
 	if method == programmer.MethodCompile {
@@ -2778,6 +3723,10 @@ func programCommand(
 
 	deviceOperation := method != programmer.MethodCompile &&
 		operation != programmer.OperationCoreInfo
+	if deviceOperation {
+		runtime.programmingMu.Lock()
+		defer runtime.programmingMu.Unlock()
+	}
 	serialWasOpen := runtime.Snapshot().Connected
 	if deviceOperation && serialWasOpen {
 		if err := runtime.Close(); err != nil {
@@ -2797,13 +3746,12 @@ func programCommand(
 		fmt.Fprintln(&output, "programmer operation failed:", programErr)
 	}
 	if deviceOperation && serialWasOpen {
-		runtime.ResumeAuto()
 		reconnectContext, cancel := context.WithTimeout(
 			context.WithoutCancel(ctx),
 			12*time.Second,
 		)
 		defer cancel()
-		reconnectErr := runtime.EnsureConnected(reconnectContext)
+		reconnectErr := reconnectProgrammingDevice(reconnectContext, runtime, snapshot.Port)
 		if reconnectErr != nil {
 			return strings.TrimSpace(output.String()), fmt.Errorf(
 				"programmer result (%v); application HELLO reconnect failed: %w",
@@ -2831,7 +3779,7 @@ func safeFlashCommand(
 	options CommandOptions,
 	args []string,
 ) (string, error) {
-	const usage = "usage: program flash HEX [PORT] [--usbasp-troubleshooting] [--allow-incomplete-backup]"
+	const usage = "usage: program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom]"
 	if len(args) == 0 {
 		return "", errors.New(usage)
 	}
@@ -2841,15 +3789,24 @@ func safeFlashCommand(
 	}
 	method := programmer.MethodUrclock
 	port := ""
-	allowUSBasp := false
 	allowIncomplete := false
-	for _, argument := range args[1:] {
-		switch strings.ToLower(strings.TrimSpace(argument)) {
-		case "--usbasp-troubleshooting":
-			method = programmer.MethodUSBasp
-			allowUSBasp = true
-		case "--allow-incomplete-backup":
+	reinitializeEEPROM := false
+	for index := 1; index < len(args); index++ {
+		argument := strings.TrimSpace(args[index])
+		lower := strings.ToLower(argument)
+		switch {
+		case lower == "--allow-incomplete-backup":
 			allowIncomplete = true
+		case lower == "--reinitialize-eeprom":
+			reinitializeEEPROM = true
+		case lower == "--method":
+			if index+1 >= len(args) {
+				return "", errors.New(usage)
+			}
+			index++
+			method = programmer.Method(strings.ToLower(strings.TrimSpace(args[index])))
+		case strings.HasPrefix(lower, "--method="):
+			method = programmer.Method(strings.TrimPrefix(lower, "--method="))
 		default:
 			if strings.HasPrefix(argument, "--") || port != "" {
 				return "", fmt.Errorf("%s", usage)
@@ -2857,10 +3814,25 @@ func safeFlashCommand(
 			port = argument
 		}
 	}
-	if _, err := programmer.LoadIntelHex(firmwarePath); err != nil {
+	if method != programmer.MethodUrclock && method != programmer.MethodUSBasp {
+		return "", fmt.Errorf("guarded flash method must be urclock or usbasp, got %q", method)
+	}
+	if reinitializeEEPROM && allowIncomplete {
+		return "", errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
+	}
+	if runtime == nil {
+		return "", errors.New("guarded flash requires an application runtime")
+	}
+	runtime.programmingMu.Lock()
+	defer runtime.programmingMu.Unlock()
+	firmwareDocument, err := programmer.LoadIntelHex(firmwarePath)
+	if err != nil {
 		return "", fmt.Errorf("inspect firmware before releasing UART: %w", err)
 	}
 	snapshot := runtime.Snapshot()
+	if reinitializeEEPROM && !snapshot.Connected {
+		return "", errors.New("--reinitialize-eeprom requires an authenticated application connection so the post-backup Prog latch can be armed and the final settings can be verified")
+	}
 	if method == programmer.MethodUrclock {
 		if port == "" {
 			port = snapshot.Port.Name
@@ -2868,8 +3840,22 @@ func safeFlashCommand(
 		if strings.TrimSpace(port) == "" {
 			return "", errors.New("guarded Urclock flash requires a connected device or explicit port")
 		}
+		if snapshot.Connected {
+			selector, err := ports.ParseSelector(port)
+			if err != nil {
+				return "", fmt.Errorf("parse guarded Urclock device selector: %w", err)
+			}
+			if len(ports.Candidates([]ports.Info{snapshot.Port}, selector)) != 1 {
+				return "", fmt.Errorf(
+					"guarded Urclock selector %q does not identify the authenticated device on %s",
+					port,
+					snapshot.Port.Name,
+				)
+			}
+			port = snapshot.Port.Name
+		}
 	} else if port != "" {
-		return "", errors.New("USBasp troubleshooting mode does not accept a serial port")
+		return "", errors.New("USBasp method does not accept a serial port")
 	}
 	dataPaths := options.ProgramDataPaths
 	if strings.TrimSpace(dataPaths.DataDir) == "" {
@@ -2893,32 +3879,118 @@ func safeFlashCommand(
 	backup := programmer.Options{
 		Method: method, Port: port, Operation: programmer.OperationBackup,
 		FQBN: options.FQBN, Programmer: options.Programmer,
-		ArduinoCLI: options.ArduinoCLI, Avrdude: options.Avrdude,
+		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig, Avrdude: options.Avrdude,
 		AvrdudeConf:               options.AvrdudeConf,
+		USBaspAutoSlow:            true,
 		ApplicationHash:           snapshot.Hello.BuildHash,
-		ApplicationDate:           snapshot.Hello.BuildDate,
-		ApplicationTime:           snapshot.Hello.BuildTime,
 		ApplicationIdentitySchema: snapshot.Hello.IdentitySchema,
 	}
 	writeOptions := backup
 	writeOptions.Operation = programmer.OperationWriteFlash
 	writeOptions.HexPath = firmwarePath
+	lifecycleOptions := ProgrammingLifecycleOptions{
+		DataPaths:          dataPaths,
+		Outputs:            options.Outputs,
+		HostConfig:         options.HostConfig,
+		ReinitializeEEPROM: reinitializeEEPROM,
+	}
 	serialWasOpen := snapshot.Connected
+	var programmingSession *ProgrammingSession
+	var prepareOutput bytes.Buffer
 	if serialWasOpen {
+		programmingSession, err = findRetryableProgrammingSession(
+			dataPaths,
+			programmingIdentity(snapshot.Port),
+			firmwareDocument.SourceSHA256,
+			reinitializeEEPROM,
+		)
+		if err != nil {
+			return "", fmt.Errorf("inspect pending programming state: %w", err)
+		}
+		if programmingSession != nil {
+			if err := reassertProgrammingSession(
+				ctx,
+				runtimeProgrammingDevice{runtime: runtime, options: lifecycleOptions},
+				programmingSession,
+				lifecycleOptions,
+			); err != nil {
+				return "", fmt.Errorf("resume failed programming transaction: %w", err)
+			}
+			fmt.Fprintf(
+				&prepareOutput,
+				"resuming verified-safe failed programming transaction for firmware SHA-256 %s\n",
+				firmwareDocument.SourceSHA256,
+			)
+		} else {
+			programmingSession, err = PrepareProgrammingSession(
+				ctx,
+				runtime,
+				firmwarePath,
+				lifecycleOptions,
+				&prepareOutput,
+			)
+			if err != nil {
+				return strings.TrimSpace(prepareOutput.String()), fmt.Errorf(
+					"prepare application programming state: %w", err,
+				)
+			}
+		}
 		if err := runtime.Close(); err != nil {
-			return "", fmt.Errorf("release application UART: %w", err)
+			return strings.TrimSpace(prepareOutput.String()), fmt.Errorf(
+				"release application UART (settings recovery marker retained): %w", err,
+			)
 		}
 	}
 	var output bytes.Buffer
+	if serialWasOpen {
+		output.Write(prepareOutput.Bytes())
+		if output.Len() != 0 && !strings.HasSuffix(output.String(), "\n") {
+			output.WriteByte('\n')
+		}
+	}
 	fmt.Fprintln(&output, "application UART released; guarded programmer transaction has exclusive ownership")
 	fmt.Fprintf(&output, "pre-flash method=%s firmware=%s\n", method, firmwarePath)
+	var afterBackup programmer.PostBackupOperation
+	if serialWasOpen && programmingSession != nil && reinitializeEEPROM {
+		afterBackup = func(
+			backupContext context.Context,
+			_ programmer.AutomaticPreflashResult,
+			writer io.Writer,
+		) error {
+			reconnectContext, reconnectCancel := context.WithTimeout(
+				context.WithoutCancel(backupContext), 12*time.Second,
+			)
+			reconnectErr := reconnectProgrammingDevice(
+				reconnectContext, runtime, snapshot.Port,
+			)
+			reconnectCancel()
+			if reconnectErr != nil {
+				return fmt.Errorf("reconnect application after untouched raw backup: %w", reconnectErr)
+			}
+			armContext, armCancel := context.WithTimeout(
+				context.WithoutCancel(backupContext), 8*time.Second,
+			)
+			armErr := ArmProgrammingSessionAfterBackup(
+				armContext, runtime, programmingSession, lifecycleOptions, writer,
+			)
+			armCancel()
+			closeErr := runtime.Close()
+			if armErr != nil {
+				return errors.Join(armErr, closeErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("release application UART after arming programming latch: %w", closeErr)
+			}
+			return nil
+		}
+	}
 	result, flashErr := programmer.AutomaticBackupThenFlash(
 		ctx,
 		programmer.AutomaticPreflashOptions{
 			FirmwarePath: firmwarePath,
 			Backup:       backup, DataPaths: dataPaths,
-			AllowUSBaspTroubleshooting:  allowUSBasp,
 			AllowFlashWithoutFullBackup: allowIncomplete,
+			AfterBackup:                 afterBackup,
 		},
 		runner,
 		func(flashContext context.Context, path string, writer io.Writer) error {
@@ -2940,24 +4012,238 @@ func safeFlashCommand(
 	if result.Flashed {
 		fmt.Fprintln(&output, "guarded firmware flash completed")
 	}
+	verifiedProgram := flashErr == nil && result.Flashed
+	if verifiedProgram && reinitializeEEPROM {
+		factoryErr := programmer.ProgramLatchedFactoryEEPROM(
+			context.WithoutCancel(ctx), dataPaths, writeOptions,
+			programmer.EEPROMProgramOperation(execute), &output,
+		)
+		if factoryErr != nil {
+			flashErr = errors.Join(flashErr, factoryErr)
+			verifiedProgram = false
+		} else {
+			fmt.Fprintln(&output,
+				"host-owned Silent/Prog factory EEPROM programmed and independently read back")
+		}
+	}
+	if programmingSession != nil {
+		if markerErr := MarkProgrammingSessionComplete(
+			programmingSession, verifiedProgram,
+		); markerErr != nil {
+			flashErr = errors.Join(flashErr, fmt.Errorf(
+				"persist host programming result (safety latch retained): %w", markerErr,
+			))
+			verifiedProgram = false
+		}
+	}
+	var reconnectErr error
+	var restoreErr error
 	if serialWasOpen {
-		runtime.ResumeAuto()
 		reconnectContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 12*time.Second)
-		reconnectErr := runtime.EnsureConnected(reconnectContext)
+		reconnectErr = reconnectProgrammingDevice(reconnectContext, runtime, snapshot.Port)
 		cancel()
-		if reconnectErr != nil {
-			return strings.TrimSpace(output.String()), fmt.Errorf(
-				"guarded flash result (%v); application HELLO reconnect failed: %w",
-				flashErr, reconnectErr,
+		if reconnectErr == nil && verifiedProgram {
+			restoreContext, restoreCancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
+			restoreErr = RestoreProgrammingSession(
+				restoreContext, runtime, programmingSession,
+				lifecycleOptions, &output,
+			)
+			restoreCancel()
+		} else if reconnectErr == nil && programmingSession != nil {
+			fmt.Fprintln(&output,
+				"programmer result was not verified successful; programming latch and recovery marker retained")
+		} else {
+			reconnectErr = fmt.Errorf(
+				"application HELLO reconnect failed; settings recovery marker retained: %w",
+				reconnectErr,
 			)
 		}
-		connected := runtime.Snapshot()
-		fmt.Fprintf(&output, "application mode restored and authenticated on %s: %s\n", connected.Port.Name, formatHello(connected.Hello))
+		if reconnectErr == nil {
+			connected := runtime.Snapshot()
+			fmt.Fprintf(&output, "application mode restored and authenticated on %s: %s\n", connected.Port.Name, formatHello(connected.Hello))
+		}
 	}
-	if flashErr != nil {
-		return strings.TrimSpace(output.String()), flashErr
+	if joined := errors.Join(flashErr, reconnectErr, restoreErr); joined != nil {
+		return strings.TrimSpace(output.String()), joined
 	}
 	return strings.TrimSpace(output.String()), nil
+}
+
+// recoverProgrammingCommand proves an already-written image with a fresh
+// Urboot readback, then completes the original durable restore transaction.
+// It never writes flash and is owned by the same primary runtime as COM18.
+func recoverProgrammingCommand(
+	ctx context.Context,
+	runtime *Runtime,
+	options CommandOptions,
+	args []string,
+) (string, error) {
+	const usage = "usage: program recover HEX [PORT]"
+	if runtime == nil || len(args) < 1 || len(args) > 2 {
+		return "", errors.New(usage)
+	}
+	runtime.programmingMu.Lock()
+	defer runtime.programmingMu.Unlock()
+
+	firmwarePath := strings.TrimSpace(args[0])
+	if firmwarePath == "" {
+		return "", errors.New(usage)
+	}
+	document, err := programmer.LoadIntelHex(firmwarePath)
+	if err != nil {
+		return "", fmt.Errorf("inspect programming recovery target: %w", err)
+	}
+	snapshot := runtime.Snapshot()
+	if !snapshot.Connected || strings.TrimSpace(snapshot.Port.Name) == "" {
+		return "", errors.New("programming recovery requires the authenticated application device")
+	}
+	if len(args) == 2 {
+		selector, parseErr := ports.ParseSelector(args[1])
+		if parseErr != nil {
+			return "", fmt.Errorf("parse programming recovery selector: %w", parseErr)
+		}
+		if len(ports.Candidates([]ports.Info{snapshot.Port}, selector)) != 1 {
+			return "", fmt.Errorf(
+				"programming recovery selector %q does not identify the authenticated device on %s",
+				args[1], snapshot.Port.Name,
+			)
+		}
+	}
+	dataPaths := options.ProgramDataPaths
+	if strings.TrimSpace(dataPaths.DataDir) == "" {
+		dataPaths, err = programmer.DefaultHostDataPaths()
+		if err != nil {
+			return "", err
+		}
+	}
+	if err := programmer.EnsureHostDataPaths(dataPaths); err != nil {
+		return "", err
+	}
+	session, err := findFailedProgrammingSession(
+		dataPaths,
+		programmingIdentity(snapshot.Port),
+		document.SourceSHA256,
+	)
+	if err != nil {
+		return "", fmt.Errorf("locate failed programming transaction: %w", err)
+	}
+	if session == nil {
+		return "", errors.New("no failed programming transaction matches this device and firmware SHA-256")
+	}
+	lifecycleOptions := ProgrammingLifecycleOptions{
+		DataPaths: dataPaths, Outputs: options.Outputs,
+		HostConfig: options.HostConfig, ReinitializeEEPROM: session.ReinitializeEEPROM,
+	}
+	var output bytes.Buffer
+	if err := reassertProgrammingSession(
+		ctx,
+		runtimeProgrammingDevice{runtime: runtime, options: lifecycleOptions},
+		session,
+		lifecycleOptions,
+	); err != nil {
+		return "", fmt.Errorf("reassert programming recovery safe state: %w", err)
+	}
+	fmt.Fprintf(
+		&output,
+		"fresh read-only recovery verification for firmware SHA-256 %s on %s\n",
+		document.SourceSHA256,
+		snapshot.Port.Name,
+	)
+	if err := runtime.Close(); err != nil {
+		return strings.TrimSpace(output.String()), fmt.Errorf(
+			"release application UART for recovery readback: %w", err,
+		)
+	}
+	runner := options.ProgramRunner
+	if runner == nil {
+		runner = programmer.CommandRunnerFunc(programmer.Run)
+	}
+	verifyOptions := programmer.Options{
+		Method: programmer.MethodUrclock, Port: snapshot.Port.Name,
+		HexPath: firmwarePath, FQBN: options.FQBN,
+		Programmer: options.Programmer, ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig,
+		Avrdude: options.Avrdude, AvrdudeConf: options.AvrdudeConf,
+		USBaspAutoSlow: true,
+	}
+	verifyErr := programmer.VerifyFlashReadbackWithRunner(
+		ctx, verifyOptions, &output, runner,
+	)
+	verified := verifyErr == nil
+	markerErr := MarkProgrammingSessionComplete(session, verified)
+	if markerErr != nil {
+		verified = false
+		markerErr = fmt.Errorf("persist recovered programmer result: %w", markerErr)
+	}
+
+	reconnectContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 12*time.Second)
+	reconnectErr := reconnectProgrammingDevice(reconnectContext, runtime, snapshot.Port)
+	cancel()
+	var restoreErr error
+	if reconnectErr == nil && verified {
+		restoreContext, restoreCancel := context.WithTimeout(context.WithoutCancel(ctx), 8*time.Second)
+		restoreErr = RestoreProgrammingSession(
+			restoreContext, runtime, session, lifecycleOptions, &output,
+		)
+		restoreCancel()
+	} else if reconnectErr == nil {
+		fmt.Fprintln(&output,
+			"fresh readback was not verified; safe outputs and recovery marker remain active")
+	}
+	if reconnectErr == nil {
+		connected := runtime.Snapshot()
+		fmt.Fprintf(
+			&output,
+			"application mode restored and authenticated on %s: %s\n",
+			connected.Port.Name,
+			formatHello(connected.Hello),
+		)
+	}
+	if joined := errors.Join(verifyErr, markerErr, reconnectErr, restoreErr); joined != nil {
+		return strings.TrimSpace(output.String()), joined
+	}
+	fmt.Fprintln(&output, "failed programming transaction recovered without rewriting flash")
+	return strings.TrimSpace(output.String()), nil
+}
+
+// reconnectProgrammingDevice keeps auto-discovery paused until the exact
+// physical device released for programming has authenticated again.
+func reconnectProgrammingDevice(
+	ctx context.Context,
+	runtime *Runtime,
+	expected ports.Info,
+) error {
+	if runtime == nil {
+		return errors.New("programming reconnect requires an application runtime")
+	}
+	if strings.TrimSpace(expected.Name) == "" {
+		return errors.New("programming reconnect has no original port identity")
+	}
+	selector := programmingReconnectSelector(expected)
+	if err := runtime.Open(ctx, selector); err != nil {
+		return fmt.Errorf("reopen original device %s: %w", expected.Name, err)
+	}
+	connected := runtime.Snapshot()
+	if !connected.Connected || !sameProgrammingDevice(
+		programmingIdentity(expected),
+		programmingIdentity(connected.Port),
+	) {
+		_ = runtime.Close()
+		return fmt.Errorf(
+			"authenticated device on %s does not match the original programming device",
+			expected.Name,
+		)
+	}
+	return nil
+}
+
+func programmingReconnectSelector(device ports.Info) string {
+	if strings.TrimSpace(device.InstanceID) != "" {
+		return "instance:" + device.InstanceID
+	}
+	if strings.TrimSpace(device.SerialNumber) != "" {
+		return "serial:" + device.SerialNumber
+	}
+	return device.Name
 }
 
 func parseProgramOperation(value string) programmer.Operation {
@@ -2977,8 +4263,8 @@ func parseProgramOperation(value string) programmer.Operation {
 func formatStatus(status native.Status) string {
 	return fmt.Sprintf(
 		"uptime=%s supply=%.3fV bus=%.3fV current=%dmA power=%dmW tLED=%.2fC tBT=%.2fC\n"+
-			"flags=0x%04X inputs=0x%02X keys=0x%02X relays=0x%02X menu=%d mode=%d door=%t bt=%d\n"+
-			"PWM mode=%d channel=%d value=%d errors=%d LCD=0x%02X framing=%d crc=%d reset_cause=0x%02X reset_count=%d",
+			"flags=0x%04X running=%t host_offline=%t hot=%t inputs=0x%02X keys=0x%02X relays=0x%02X menu=%d mode=%d door=%t bt=%d\n"+
+			"PWM available=%t channel=%d value=%d errors=%d LCD=0x%02X framing=%d crc=%d reset_cause=0x%02X reset_count=%d",
 		(time.Duration(status.UptimeMS) * time.Millisecond).Round(time.Millisecond),
 		float64(status.SupplyMV)/1000,
 		float64(status.BusMV)/1000,
@@ -2987,6 +4273,9 @@ func formatStatus(status native.Status) string {
 		float64(status.TLEDCenti)/100,
 		float64(status.TBTCenti)/100,
 		status.Flags,
+		status.ProgramRunning,
+		status.HostOffline,
+		status.Hot,
 		status.RawInputs,
 		status.ActiveKeys,
 		status.ActiveRelays,
@@ -2994,7 +4283,7 @@ func formatStatus(status native.Status) string {
 		status.ProgramMode,
 		status.DoorOpen,
 		status.BluetoothState,
-		status.PWMMode,
+		status.PWMAvailable,
 		status.PWMChannel,
 		status.PWMValue,
 		status.PWMErrors,
@@ -3008,17 +4297,20 @@ func formatStatus(status native.Status) string {
 
 func formatSettings(settings native.Settings) string {
 	return fmt.Sprintf(
-		"flags=0x%02X light=%d on=%d off=%d display=%d status=%d "+
-			"PWMboot=%d stream=%dms default_page=%d save_last=%t "+
+		"flags=0x%02X light=%d on=%d off=%d display_open=%d display_closed=%d status=%d "+
+			"output_persistence=0x%02X relay_restore_mask=0x%02X stream=%dms default_page=%d save_last=%t "+
 			"status_color=%d voltage_decimals=%d current_decimals=%d "+
-			"motion_door=%s motion_break=%dms door_audio=%t relay_audio=%t extended=0x%02X",
+			"motion_door=%s motion_break=%dms motion_exit_hold=%ds "+
+			"door_audio=%t relay_audio=%t programming_latch=%t extended=0x%02X",
 		settings.Flags,
 		settings.LightMode,
 		settings.OnBrightness,
 		settings.OffBrightness,
 		settings.DisplayBrightness,
+		settings.DisplayClosedBrightness,
 		settings.StatusBrightness,
-		settings.PWMBootMode,
+		settings.OutputPersistence,
+		settings.RelayRestoreMask,
 		settings.StreamPeriodMS,
 		settings.DefaultPage,
 		settings.SaveLastPage(),
@@ -3027,8 +4319,10 @@ func formatSettings(settings native.Settings) string {
 		settings.CurrentDecimals(),
 		motionDoorPolicyName(settings.MotionDoorPolicy()),
 		settings.MotionBreakMS(),
+		settings.MotionExitHoldSeconds,
 		settings.DoorAudioEnabled(),
 		settings.RelayAudioEnabled(),
+		settings.Flags&native.SettingsProgrammingMode != 0,
 		settings.ExtendedFlags,
 	)
 }
@@ -3049,8 +4343,7 @@ func formatHello(hello native.Hello) string {
 		hello.BoardKind,
 		hello.Capabilities,
 	)
-	if hello.IdentitySchema == native.IdentitySchema ||
-		hello.IdentitySchema == native.IdentitySchemaCompact {
+	if hello.IdentitySchema == native.IdentitySchemaCompact {
 		stamp := hello.BuildStamp
 		if stamp == "" {
 			stamp = "unknown"
@@ -3063,22 +4356,7 @@ func formatHello(hello native.Hello) string {
 			hello.BuildTimestamp,
 		)
 	}
-	if hello.IdentitySchema == native.IdentitySchemaLegacy {
-		return fmt.Sprintf(
-			"%s build=%08X date=%s time=%s",
-			base,
-			hello.BuildHash,
-			strings.TrimSpace(hello.BuildDate),
-			strings.TrimSpace(hello.BuildTime),
-		)
-	}
-	return fmt.Sprintf(
-		"%s legacy-firmware=%d.%d.%d",
-		base,
-		hello.FirmwareMajor,
-		hello.FirmwareMinor,
-		hello.FirmwarePatch,
-	)
+	return base + " build identity unavailable"
 }
 
 func formatTemperatures(sensors []native.TemperatureSensor) string {
@@ -3198,7 +4476,7 @@ func macroCommand(
 		if err := runner.Delete(args[1]); err != nil {
 			return "", err
 		}
-		return "macro deleted from PC configuration", nil
+		return "macro deleted from HOST configuration", nil
 	case "record":
 		if len(args) < 2 {
 			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|discard")

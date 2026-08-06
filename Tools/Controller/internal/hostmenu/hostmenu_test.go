@@ -15,7 +15,7 @@ import (
 
 func testMenuConfig() appconfig.HostMenuConfig {
 	return appconfig.HostMenuConfig{
-		DefaultMenu: "root", RequestGesture: "status-hold-k4",
+		DefaultMenu: "root", RequestGesture: "door-hold-k4",
 		DisplayDurationMS: 1500, SessionTimeoutMS: 120000,
 		Menus: []appconfig.HostMenu{
 			{ID: "root", Label: "ROOT", Title: "Root", Items: []appconfig.HostMenuItem{
@@ -244,5 +244,165 @@ func TestHostMenuShellCommandUsesSameManager(t *testing.T) {
 	output, err = engine.Execute(context.Background(), "host-menu list")
 	if err != nil || !strings.Contains(output, "root") || !strings.Contains(output, "more") {
 		t.Fatalf("list output=%q err=%v", output, err)
+	}
+}
+
+func TestHostMenuShellOpenRefreshesLiveReadValue(t *testing.T) {
+	reads := 0
+	manager := New(appconfig.DefaultHostMenus(), Callbacks{
+		Read: func(_ context.Context, action string) (string, error) {
+			reads++
+			if action != "host.status" {
+				t.Fatalf("unexpected initial read action %q", action)
+			}
+			return "PC online - device connected", nil
+		},
+	})
+	engine := shell.New(10)
+	if err := RegisterCommands(engine, manager); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := engine.Execute(context.Background(), "host-menu open host")
+	if err != nil || reads != 1 || !strings.Contains(output, "PC online - device connected") {
+		t.Fatalf("open output=%q reads=%d err=%v", output, reads, err)
+	}
+}
+
+func TestDefaultHostDateAndTimeItemsRenderLiveValues(t *testing.T) {
+	manager := New(appconfig.DefaultHostMenus(), Callbacks{
+		Read: func(_ context.Context, action string) (string, error) {
+			switch action {
+			case "host.date":
+				return "2026-08-02", nil
+			case "host.time":
+				return "10:08:04", nil
+			default:
+				return "ready", nil
+			}
+		},
+	})
+	if err := manager.Open("host"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.HandleKey(context.Background(), 2, "press"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.HandleKey(context.Background(), 2, "press"); err != nil {
+		t.Fatal(err)
+	}
+	date, err := manager.Refresh(context.Background())
+	if err != nil || date.Panel.Segments != "DATE" || date.Value != "2026-08-02" ||
+		date.Panel.LCDLine1 != "Current date" || date.Panel.LCDLine2 != "2026-08-02" {
+		t.Fatalf("date snapshot=%+v err=%v", date, err)
+	}
+	if _, err := manager.HandleKey(context.Background(), 2, "press"); err != nil {
+		t.Fatal(err)
+	}
+	clock, err := manager.Refresh(context.Background())
+	if err != nil || clock.Panel.Segments != "TIME" || clock.Value != "10:08:04" ||
+		clock.Panel.LCDLine1 != "Current time" || clock.Panel.LCDLine2 != "10:08:04" {
+		t.Fatalf("time snapshot=%+v err=%v", clock, err)
+	}
+}
+
+func TestDynamicMacroOptionsNavigateExecuteAndRenderResult(t *testing.T) {
+	writes := make(map[string]string)
+	var executed string
+	manager := New(appconfig.DefaultHostMenus(), Callbacks{
+		Read: func(_ context.Context, action string) (string, error) {
+			if action == "host.macro.selection" {
+				return "2", nil
+			}
+			return "Idle", nil
+		},
+		Write: func(_ context.Context, action, value string) (string, error) {
+			writes[action] = value
+			return "Selected " + value, nil
+		},
+		Execute: func(_ context.Context, action string) (string, error) {
+			executed = action
+			return "PLAY 7 Demo", nil
+		},
+	})
+	if err := manager.UpdateSelectOptions("macro.library", []appconfig.HostMenuOption{
+		{Label: "2 Door alert", Value: "2"},
+		{Label: "7 Output demo", Value: "7"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Open("macro-library"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := manager.Refresh(context.Background())
+	if err != nil || snapshot.Value != "2" || !strings.Contains(snapshot.Panel.LCDLine2, "Door") {
+		t.Fatalf("initial macro selector=%+v err=%v", snapshot, err)
+	}
+	snapshot, err = manager.HandleKey(context.Background(), 4, "press")
+	if err != nil || snapshot.Value != "7" || writes["host.macro.selection"] != "7" ||
+		!strings.Contains(snapshot.Panel.LCDLine2, "Output") {
+		t.Fatalf("advanced macro selector=%+v writes=%v err=%v", snapshot, writes, err)
+	}
+	_, _ = manager.HandleKey(context.Background(), 2, "press") // details
+	_, _ = manager.HandleKey(context.Background(), 2, "press") // play
+	snapshot, err = manager.HandleKey(context.Background(), 4, "press")
+	if err != nil || !snapshot.GuardPending || executed != "" {
+		t.Fatalf("play guard=%+v executed=%q err=%v", snapshot, executed, err)
+	}
+	snapshot, err = manager.HandleKey(context.Background(), 4, "hold")
+	if err != nil || executed != "host.macro.play" || snapshot.Value != "PLAY 7 Demo" ||
+		!strings.Contains(snapshot.Panel.LCDLine2, "PLAY") {
+		t.Fatalf("play result=%+v executed=%q err=%v", snapshot, executed, err)
+	}
+}
+
+func TestDynamicSelectWithEmptyLibraryFailsWithoutMutation(t *testing.T) {
+	manager := New(appconfig.DefaultHostMenus(), Callbacks{})
+	if err := manager.UpdateSelectOptions("macro.library", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Open("macro-library"); err != nil {
+		t.Fatal(err)
+	}
+	before := manager.Snapshot()
+	after, err := manager.HandleKey(context.Background(), 4, "press")
+	if err == nil || after.Value != before.Value {
+		t.Fatalf("empty selector after=%+v before=%+v err=%v", after, before, err)
+	}
+}
+
+func TestPanelChangedTracksOpenKeyRefreshAndClose(t *testing.T) {
+	panels := make([]Snapshot, 0, 4)
+	manager := New(testMenuConfig(), Callbacks{
+		Read: func(context.Context, string) (string, error) { return "fresh", nil },
+		PanelChanged: func(snapshot Snapshot) {
+			panels = append(panels, snapshot)
+		},
+	})
+	if err := manager.Open("root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.HandleKey(context.Background(), 2, "press"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	manager.Close("test complete")
+
+	if len(panels) != 4 {
+		t.Fatalf("panel callback count=%d snapshots=%+v", len(panels), panels)
+	}
+	if !panels[0].Active || panels[0].MenuID != "root" || panels[0].Cursor != 0 {
+		t.Fatalf("open panel=%+v", panels[0])
+	}
+	if !panels[1].Active || panels[1].ItemID != "mode" || panels[1].Cursor != 1 {
+		t.Fatalf("key panel=%+v", panels[1])
+	}
+	if !panels[2].Active || panels[2].Revision < panels[1].Revision {
+		t.Fatalf("refresh panel=%+v previous=%+v", panels[2], panels[1])
+	}
+	if panels[3].Active || panels[3].Status != "test complete" {
+		t.Fatalf("close panel=%+v", panels[3])
 	}
 }

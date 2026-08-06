@@ -45,9 +45,6 @@ func TestPublicPeripheralValidationWithoutDevice(t *testing.T) {
 	if err := client.SetPWMChannel(ctx, 0, 4096); err == nil {
 		t.Fatal("expected PWM value 4096 to fail validation")
 	}
-	if err := client.SetPWMMode(ctx, PWMMode(3)); err == nil {
-		t.Fatal("expected PWM mode 3 to fail validation")
-	}
 	if err := client.PlayTone(ctx, 440, 0); err == nil {
 		t.Fatal("expected zero-duration tone to fail validation")
 	}

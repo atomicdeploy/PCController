@@ -1,4 +1,4 @@
-// Package controller is the reusable host API for a PCController board.
+// Package controller is the reusable host API for a controller board.
 //
 // It owns authenticated serial discovery, the native framed protocol, live
 // status, settings, learned RF records, and the same command engine used by the
@@ -8,6 +8,7 @@ package controller
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -26,62 +27,105 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
+// Protocol, configuration, and host-service aliases form the embeddable API's
+// shared data model without duplicating their wire or validation definitions.
 type (
-	Hello                  = native.Hello
-	Status                 = native.Status
-	Settings               = native.Settings
-	RFEntry                = native.RFEntry
-	RFConfig               = appconfig.RFConfig
-	RFCategory             = appconfig.RFCategory
-	RFCodeKey              = appconfig.RFCodeKey
-	RFMetadata             = appconfig.RFMetadata
-	TemperatureSensor      = native.TemperatureSensor
-	DeviceEvent            = native.DeviceEvent
-	PWMValues              = native.PWMValues
-	Melody                 = appconfig.Melody
-	MelodyNote             = appconfig.MelodyNote
-	StatusLEDEffect        = appconfig.StatusLEDEffect
-	StatusLEDPolicy        = appconfig.StatusLEDPolicy
-	StatusLEDVisual        = appconfig.StatusLEDVisual
-	RGBColor               = appconfig.RGBColor
-	OutputStreamState      = control.OutputStreamState
-	StatusSample           = control.StatusSample
-	TimelineEntry          = control.TimelineEntry
-	HistoryOptions         = control.HistoryOptions
-	RFLearnOptions         = control.RFLearnOptions
-	RFLearnState           = control.RFLearnState
-	MenuPageInfo           = control.MenuPageInfo
-	MenuCatalog            = control.MenuCatalog
-	MenuLayout             = control.MenuLayout
-	HostMenuDirectory      = native.HostMenuDirectory
-	HostMenuDirectoryEntry = native.HostMenuDirectoryEntry
-	HostMenuContent        = native.HostMenuContent
-	HostMenuState          = native.HostMenuState
-	HostMenuContentRequest = native.HostMenuContentRequest
-	I2CTransferResult      = native.I2CTransferResult
-	LCDPresentationOptions = control.LCDPresentationOptions
-	LCDPresentationState   = control.LCDPresentationState
-	OSPolicy               = hostos.Policy
-	VirtualKeyPolicy       = hostos.VirtualKeyPolicy
-	PowerPolicy            = hostos.PowerPolicy
-	VirtualKeyRequest      = hostos.VirtualKeyRequest
-	PowerRequest           = hostos.PowerRequest
-	OSActionResult         = hostos.ActionResult
-	SystemStatus           = hostos.SystemStatus
-	ArduinoUpdateOptions   = programmer.ArduinoUpdateOptions
-	ArduinoUpdateStep      = programmer.ArduinoUpdateStep
-	ArduinoUpdateReport    = programmer.ArduinoUpdateReport
-	ProgramMode            = control.ProgramMode
-	ProgramStateOwner      = control.ProgramStateOwner
-	ProgramStateSnapshot   = control.ProgramStateSnapshot
-	ProgramStateLease      = control.ProgramStateLease
+	Hello                     = native.Hello
+	Status                    = native.Status
+	Settings                  = native.Settings
+	BoardName                 = native.BoardName
+	RFEntry                   = native.RFEntry
+	RFConfig                  = appconfig.RFConfig
+	RFCategory                = appconfig.RFCategory
+	RFCodeKey                 = appconfig.RFCodeKey
+	RFMetadata                = appconfig.RFMetadata
+	TemperatureSensor         = native.TemperatureSensor
+	DeviceEvent               = native.DeviceEvent
+	PWMValues                 = native.PWMValues
+	FrontPanel                = native.FrontPanel
+	Melody                    = appconfig.Melody
+	MelodyNote                = appconfig.MelodyNote
+	StatusLEDEffect           = appconfig.StatusLEDEffect
+	StatusLEDState            = native.StatusLEDState
+	StatusProfile             = native.StatusProfile
+	StatusEffectOptions       = native.StatusEffectOptions
+	StatusLEDPolicy           = appconfig.StatusLEDPolicy
+	StatusLEDVisual           = appconfig.StatusLEDVisual
+	RGBColor                  = appconfig.RGBColor
+	OutputStreamState         = control.OutputStreamState
+	StatusSample              = control.StatusSample
+	TimelineEntry             = control.TimelineEntry
+	HistoryOptions            = control.HistoryOptions
+	RFLearnMode               = control.RFLearnMode
+	RFLearnOptions            = control.RFLearnOptions
+	RFLearnState              = control.RFLearnState
+	MenuPageInfo              = control.MenuPageInfo
+	MenuCatalog               = control.MenuCatalog
+	MenuLayout                = control.MenuLayout
+	HostMenuDirectory         = native.HostMenuDirectory
+	HostMenuDirectoryEntry    = native.HostMenuDirectoryEntry
+	HostMenuContent           = native.HostMenuContent
+	HostMenuState             = native.HostMenuState
+	HostMenuContentRequest    = native.HostMenuContentRequest
+	I2CTransferResult         = native.I2CTransferResult
+	LCDPresentationOptions    = control.LCDPresentationOptions
+	LCDPresentationState      = control.LCDPresentationState
+	DisplayRepeat             = control.DisplayRepeat
+	DisplayRequest            = control.DisplayRequest
+	DisplayResult             = control.DisplayResult
+	OSPolicy                  = hostos.Policy
+	VirtualKeyPolicy          = hostos.VirtualKeyPolicy
+	PowerPolicy               = hostos.PowerPolicy
+	VirtualKeyRequest         = hostos.VirtualKeyRequest
+	PowerRequest              = hostos.PowerRequest
+	OSActionResult            = hostos.ActionResult
+	SystemStatus              = hostos.SystemStatus
+	CommandDescriptor         = shell.CommandDescriptor
+	ToolchainSyncOptions      = programmer.ToolchainSyncOptions
+	ToolchainSyncStep         = programmer.ToolchainSyncStep
+	ToolchainSyncReport       = programmer.ToolchainSyncReport
+	ToolchainProfile          = programmer.ToolchainProfile
+	ToolchainPolicy           = programmer.ToolchainPolicy
+	ToolchainLock             = programmer.ToolchainLock
+	ToolchainCanary           = programmer.ToolchainCanary
+	ToolchainResolution       = programmer.ToolchainResolution
+	ToolchainChange           = programmer.ToolchainChange
+	ToolchainResolveOptions   = programmer.ToolchainResolveOptions
+	ToolchainBootstrapOptions = programmer.ToolchainBootstrapOptions
+	ToolchainBootstrapReport  = programmer.ToolchainBootstrapReport
+	ProgramMode               = control.ProgramMode
+	ProgramStateOwner         = control.ProgramStateOwner
+	ProgramStateSnapshot      = control.ProgramStateSnapshot
+	ProgramStateLease         = control.ProgramStateLease
 )
 
-type RFAction byte
-type RFBehavior byte
-type RelayMotion byte
-type PWMMode byte
+// RF learning modes select indefinite multi-code or bounded timer operation.
+const (
+	RFLearnIndefinite = control.RFLearnIndefinite
+	RFLearnTimer      = control.RFLearnTimer
+)
 
+const (
+	DisplayRepeatOnce     = control.DisplayRepeatOnce
+	DisplayRepeatLoop     = control.DisplayRepeatLoop
+	DisplayRepeatInterval = control.DisplayRepeatInterval
+)
+
+// ParseRFLearnMode accepts the canonical RF learning mode and documented aliases.
+func ParseRFLearnMode(value string) (RFLearnMode, error) {
+	return control.ParseRFLearnMode(value)
+}
+
+// RFAction identifies the peripheral domain invoked by a learned RF code.
+type RFAction byte
+
+// RFBehavior selects press, toggle, momentary, or motion behavior.
+type RFBehavior byte
+
+// RelayMotion selects the requested state of one interlocked motion side.
+type RelayMotion byte
+
+// RF mapping, motion, settings, and program-state constants mirror the native API.
 const (
 	RFActionNone  RFAction = RFAction(native.RFActionNone)
 	RFActionKey   RFAction = RFAction(native.RFActionKey)
@@ -101,12 +145,7 @@ const (
 	RelayMotionUp   RelayMotion = 1
 	RelayMotionDown RelayMotion = 2
 
-	PWMModeOff    PWMMode = PWMMode(native.PWMOff)
-	PWMModeManual PWMMode = PWMMode(native.PWMManual)
-	PWMModeAuto   PWMMode = PWMMode(native.PWMAuto)
-
 	SettingsSaveLastPage       byte = native.SettingsSaveLastPage
-	SettingsMotionBreak100MS   byte = native.SettingsMotionBreak100MS
 	SettingsStatusColorMask    byte = native.SettingsStatusColorMask
 	SettingsVoltageDecimalMask byte = native.SettingsVoltageDecimalMask
 	SettingsCurrentDecimalMask byte = native.SettingsCurrentDecimalMask
@@ -119,12 +158,14 @@ const (
 	ProgramRunning                  = control.ProgramRunning
 )
 
+// RFMapping binds a learned record to one board action and behavior.
 type RFMapping struct {
 	Action   RFAction   `json:"action"`
 	Value    byte       `json:"value"`
 	Behavior RFBehavior `json:"behavior"`
 }
 
+// OutputOperation tracks an asynchronous melody or status-LED effect.
 type OutputOperation struct {
 	ID   uint64       `json:"id"`
 	Kind string       `json:"kind"`
@@ -132,12 +173,14 @@ type OutputOperation struct {
 	Done <-chan error `json:"-"`
 }
 
+// StatusUpdate contains one subscribed telemetry result or its polling error.
 type StatusUpdate struct {
 	Time   time.Time `json:"time"`
 	Status Status    `json:"status"`
 	Error  string    `json:"error,omitempty"`
 }
 
+// Options configures discovery, transport, tooling, automation, and host policy.
 type Options struct {
 	Port             string                 `json:"port,omitempty"`
 	VID              string                 `json:"vid,omitempty"`
@@ -151,7 +194,7 @@ type Options struct {
 	ResetOnReconnect bool                   `json:"reset_on_reconnect,omitempty"`
 	ProjectPath      string                 `json:"project_path,omitempty"`
 	FQBN             string                 `json:"fqbn,omitempty"`
-	ArduinoCLI       string                 `json:"arduino_cli,omitempty"`
+	ToolchainCLI     string                 `json:"toolchain_cli,omitempty"`
 	Avrdude          string                 `json:"avrdude,omitempty"`
 	AvrdudeConf      string                 `json:"avrdude_conf,omitempty"`
 	Programmer       string                 `json:"programmer,omitempty"`
@@ -166,6 +209,7 @@ type Options struct {
 	OSActions        OSPolicy               `json:"os_actions"`
 }
 
+// Macro describes a host-owned, MCU-timed sequence of peripheral operations.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
@@ -178,9 +222,9 @@ type Macro struct {
 	Steps               []MacroStep `json:"steps"`
 }
 
+// MacroStep describes one timestamped operation within a Macro.
 type MacroStep struct {
 	AtUS        uint32 `json:"at_us,omitempty"`
-	AtMS        int    `json:"at_ms,omitempty"`
 	Kind        string `json:"kind"`
 	Target      byte   `json:"target,omitempty"`
 	Value       uint16 `json:"value,omitempty"`
@@ -200,6 +244,7 @@ type MacroStep struct {
 	PayloadHex  string `json:"payload_hex,omitempty"`
 }
 
+// Automation maps an event match to one or more host-side actions.
 type Automation struct {
 	Name       string             `json:"name"`
 	Enabled    bool               `json:"enabled"`
@@ -208,6 +253,7 @@ type Automation struct {
 	Actions    []AutomationAction `json:"actions"`
 }
 
+// AutomationMatch selects the event properties that trigger an automation.
 type AutomationMatch struct {
 	Kind       string  `json:"kind"`
 	Lifecycle  string  `json:"lifecycle,omitempty"`
@@ -221,6 +267,7 @@ type AutomationMatch struct {
 	RFProtocol byte    `json:"rf_protocol,omitempty"`
 }
 
+// AutomationAction describes one command, macro, integration, or OS action.
 type AutomationAction struct {
 	Type       string      `json:"type"`
 	Command    string      `json:"command,omitempty"`
@@ -236,6 +283,7 @@ type AutomationAction struct {
 	Confirm    string      `json:"confirm,omitempty"`
 }
 
+// RFTransmit contains the complete waveform metadata for one 433 MHz send action.
 type RFTransmit struct {
 	Code     uint32 `json:"code"`
 	Bits     byte   `json:"bits"`
@@ -244,6 +292,7 @@ type RFTransmit struct {
 	Repeats  byte   `json:"repeats,omitempty"`
 }
 
+// RFEntryView combines one MCU record with host-owned display metadata.
 type RFEntryView struct {
 	ID          byte   `json:"id"`
 	Code        uint32 `json:"code"`
@@ -258,6 +307,7 @@ type RFEntryView struct {
 	Category    string `json:"category,omitempty"`
 }
 
+// PortInfo identifies one serial candidate with stable USB metadata when available.
 type PortInfo struct {
 	Name         string `json:"name"`
 	VID          string `json:"vid,omitempty"`
@@ -269,6 +319,7 @@ type PortInfo struct {
 	InstanceID   string `json:"instance_id,omitempty"`
 }
 
+// Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
 	Connected         bool                 `json:"connected"`
 	Paused            bool                 `json:"paused"`
@@ -283,12 +334,21 @@ type Snapshot struct {
 	ConnectionReason  string               `json:"connection_reason,omitempty"`
 	ConnectionUpdated time.Time            `json:"connection_updated,omitempty"`
 	ProgramState      ProgramStateSnapshot `json:"program_state"`
+	RFLearning        RFLearnState         `json:"rf_learning"`
+	FrontPanel        FrontPanel           `json:"front_panel"`
+	HaveFrontPanel    bool                 `json:"have_front_panel"`
+	FrontPanelUpdated time.Time            `json:"front_panel_updated,omitempty"`
+	StatusLED         StatusLEDState       `json:"status_led"`
+	HaveStatusLED     bool                 `json:"have_status_led"`
+	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
 }
 
+// Event is the normalized event envelope shared by embedders and bridge clients.
 type Event struct {
 	ID          uint64            `json:"id"`
 	Time        time.Time         `json:"time"`
 	Kind        string            `json:"kind"`
+	Stream      string            `json:"stream"`
 	Text        string            `json:"text"`
 	Opcode      byte              `json:"opcode,omitempty"`
 	Seq         byte              `json:"seq,omitempty"`
@@ -315,6 +375,17 @@ type Event struct {
 	ResetCount  uint32            `json:"reset_count,omitempty"`
 }
 
+// OpcodeFrame is the raw, versionless UART exchange result. Payload is kept
+// opaque so clients can query firmware additions before the host understands
+// their schema.
+type OpcodeFrame struct {
+	Opcode     byte   `json:"opcode"`
+	Name       string `json:"name"`
+	Sequence   byte   `json:"sequence"`
+	Payload    []byte `json:"payload,omitempty"`
+	PayloadHex string `json:"payload_hex,omitempty"`
+}
+
 // TextMessage is a typed envelope shared by IPC, WebSocket, webhooks, the host
 // bridge, and LCD presentation. Action is descriptive; it is never executed
 // implicitly. Remote command execution uses the authenticated execute method.
@@ -329,6 +400,7 @@ type TextMessage struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
+// Client owns one controller runtime, command engine, and host integration state.
 type Client struct {
 	runtime        *control.Runtime
 	engine         *shell.Engine
@@ -352,6 +424,7 @@ type Client struct {
 	doneOnce       sync.Once
 }
 
+// New creates a client that owns its serial and background-service lifecycle.
 func New(options Options) *Client {
 	baud := options.BaudRate
 	if baud == 0 {
@@ -359,7 +432,7 @@ func New(options Options) *Client {
 	}
 	fqbn := options.FQBN
 	if fqbn == "" {
-		fqbn = programmer.DefaultFQBN
+		fqbn = programmer.DefaultFQBN()
 	}
 	runtime := control.New(control.Options{
 		Filter: ports.Filter{
@@ -398,7 +471,7 @@ func New(options Options) *Client {
 	client.commandOptions = control.CommandOptions{
 		ProjectPath:      options.ProjectPath,
 		FQBN:             fqbn,
-		ArduinoCLI:       options.ArduinoCLI,
+		ArduinoCLI:       options.ToolchainCLI,
 		Avrdude:          options.Avrdude,
 		AvrdudeConf:      options.AvrdudeConf,
 		Programmer:       options.Programmer,
@@ -410,7 +483,7 @@ func New(options Options) *Client {
 		ProjectPath:      options.ProjectPath,
 		FQBN:             fqbn,
 		Macros:           client.currentMacros,
-		ArduinoCLI:       options.ArduinoCLI,
+		ArduinoCLI:       options.ToolchainCLI,
 		Avrdude:          options.Avrdude,
 		AvrdudeConf:      options.AvrdudeConf,
 		Programmer:       options.Programmer,
@@ -460,6 +533,7 @@ func AttachSharedRuntime(
 	}
 }
 
+// ApplyHostOptions atomically refreshes runtime and host-owned configuration.
 func (client *Client) ApplyHostOptions(options Options) bool {
 	baud := options.BaudRate
 	if baud == 0 {
@@ -492,12 +566,12 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 	client.hostMu.Unlock()
 	fqbn := options.FQBN
 	if fqbn == "" {
-		fqbn = programmer.DefaultFQBN
+		fqbn = programmer.DefaultFQBN()
 	}
 	client.optionsMu.Lock()
 	client.commandOptions = control.CommandOptions{
 		ProjectPath: options.ProjectPath, FQBN: fqbn,
-		ArduinoCLI: options.ArduinoCLI, Avrdude: options.Avrdude,
+		ArduinoCLI: options.ToolchainCLI, Avrdude: options.Avrdude,
 		AvrdudeConf:      options.AvrdudeConf,
 		Programmer:       options.Programmer,
 		HostConfig:       client.currentHostConfig,
@@ -590,12 +664,14 @@ func (client *Client) currentCommandOptions() control.CommandOptions {
 	return client.commandOptions
 }
 
+// SetMacros replaces the host-owned macro catalog with a defensive copy.
 func (client *Client) SetMacros(macros []Macro) {
 	client.macroMu.Lock()
 	client.macros = toAppMacros(macros)
 	client.macroMu.Unlock()
 }
 
+// SetOutputDefinitions replaces the host-owned melody and LED-effect catalogs.
 func (client *Client) SetOutputDefinitions(
 	melodies []Melody,
 	effects []StatusLEDEffect,
@@ -651,7 +727,7 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 		}
 		for stepIndex, step := range macro.Steps {
 			result[index].Steps[stepIndex] = appconfig.MacroStep{
-				AtUS: step.AtUS, AtMS: step.AtMS, Kind: step.Kind,
+				AtUS: step.AtUS, Kind: step.Kind,
 				Target: step.Target, Value: step.Value,
 				DurationMS: step.DurationMS, FrequencyHz: step.FrequencyHz,
 				Text: step.Text, Destination: step.Destination,
@@ -764,12 +840,14 @@ func cloneRFConfigOrDefault(source appconfig.RFConfig) appconfig.RFConfig {
 	return result
 }
 
+// ConfigureRFPresentation replaces host-only RF names, categories, and radix.
 func (client *Client) ConfigureRFPresentation(config RFConfig) {
 	client.hostMu.Lock()
 	client.rfConfig = cloneRFConfigOrDefault(config)
 	client.hostMu.Unlock()
 }
 
+// RFPresentation returns a defensive copy of host-owned RF presentation data.
 func (client *Client) RFPresentation() RFConfig {
 	client.hostMu.RLock()
 	defer client.hostMu.RUnlock()
@@ -786,15 +864,18 @@ func normalizedMotionDoorPolicy(value string) string {
 	}
 }
 
+// Connect resumes automatic discovery and authenticates the selected board.
 func (client *Client) Connect(ctx context.Context) error {
 	client.runtime.ResumeAuto()
 	return client.runtime.EnsureConnected(ctx)
 }
 
+// Open connects directly to a named serial port and authenticates the board.
 func (client *Client) Open(ctx context.Context, port string) error {
 	return client.runtime.Open(ctx, port)
 }
 
+// SetDeviceObserver receives authenticated device identities after connection.
 func (client *Client) SetDeviceObserver(
 	observer func(PortInfo, Hello),
 ) {
@@ -807,6 +888,7 @@ func (client *Client) SetDeviceObserver(
 	})
 }
 
+// Close stops active output streams and intentionally closes the serial port.
 func (client *Client) Close() error {
 	client.outputs.StopAll()
 	return client.runtime.Close()
@@ -837,10 +919,19 @@ func (client *Client) Shutdown() error {
 	return err
 }
 
+// Execute runs one command through the same engine exposed by every host surface.
 func (client *Client) Execute(ctx context.Context, command string) (string, error) {
 	client.engineMu.Lock()
 	defer client.engineMu.Unlock()
 	return client.engine.Execute(ctx, command)
+}
+
+// CommandCatalog exposes the same discoverable command contract used by the
+// shell, primary IPC, REST, WebSocket RPC, and the C-compatible library.
+func (client *Client) CommandCatalog() []CommandDescriptor {
+	client.engineMu.Lock()
+	defer client.engineMu.Unlock()
+	return client.engine.Catalog()
 }
 
 // ProgramState returns the host-owned application state. Hardware conditions
@@ -849,6 +940,7 @@ func (client *Client) ProgramState() ProgramStateSnapshot {
 	return client.runtime.ProgramState()
 }
 
+// SetProgramState updates host-owned Idle or Running state for a named owner.
 func (client *Client) SetProgramState(
 	owner string,
 	mode ProgramMode,
@@ -857,6 +949,7 @@ func (client *Client) SetProgramState(
 	return client.runtime.SetProgramState(owner, mode, reason)
 }
 
+// AcquireProgramState holds Running state until the returned lease is released.
 func (client *Client) AcquireProgramState(
 	owner string,
 	reason string,
@@ -864,6 +957,7 @@ func (client *Client) AcquireProgramState(
 	return client.runtime.AcquireProgramState(owner, reason)
 }
 
+// Status requests one fresh native telemetry snapshot from the board.
 func (client *Client) Status(ctx context.Context) (Status, error) {
 	return client.runtime.RefreshStatus(ctx)
 }
@@ -910,20 +1004,24 @@ func (client *Client) SubscribeStatus(
 	return updates, nil
 }
 
+// ConfigureHistory updates bounded telemetry retention and persistence policy.
 func (client *Client) ConfigureHistory(options HistoryOptions) error {
 	return client.runtime.ConfigureHistory(options)
 }
 
+// ConfigureLCDPresentation updates host-owned LCD discovery and fallback policy.
 func (client *Client) ConfigureLCDPresentation(
 	options LCDPresentationOptions,
 ) error {
 	return client.runtime.LCDPresenter().Configure(options)
 }
 
+// MirrorLCDPrompt publishes two prompt lines through the LCD presenter.
 func (client *Client) MirrorLCDPrompt(line1, line2 string) {
 	client.runtime.LCDPresenter().MirrorPrompt(line1, line2)
 }
 
+// ShowLCDPriority temporarily replaces ordinary LCD content by event priority.
 func (client *Client) ShowLCDPriority(
 	kind, line1, line2 string,
 	hold time.Duration,
@@ -936,22 +1034,38 @@ func (client *Client) ShowLCDPriority(
 	)
 }
 
+// LCDPresentationState returns the current address, visibility, and fallback state.
 func (client *Client) LCDPresentationState() LCDPresentationState {
 	return client.runtime.LCDPresenter().State()
 }
 
+// StatusHistory returns retained telemetry at or after since.
 func (client *Client) StatusHistory(since time.Time) []StatusSample {
 	return client.runtime.StatusHistory(since)
 }
 
+// Timeline returns retained device and host events in chronological order.
 func (client *Client) Timeline(since time.Time, limit int) []TimelineEntry {
 	return client.runtime.Timeline(since, limit)
 }
 
+// SetMenuPage navigates directly to one stable board menu ID.
 func (client *Client) SetMenuPage(ctx context.Context, page byte) error {
 	return client.runtime.Command(ctx, native.OpMenuSetPage, []byte{page})
 }
 
+// BoardName reads the operator-assigned MCU EEPROM name.
+func (client *Client) BoardName(ctx context.Context) (BoardName, error) {
+	return client.runtime.BoardName(ctx)
+}
+
+// SetBoardName persists and verifies up to eight printable ASCII characters.
+// Passing an empty string clears the name.
+func (client *Client) SetBoardName(ctx context.Context, name string) (BoardName, error) {
+	return client.runtime.SetBoardName(ctx, name)
+}
+
+// SetMenuPageByName resolves a live catalog name or ID before navigating.
 func (client *Client) SetMenuPageByName(
 	ctx context.Context,
 	reference string,
@@ -970,6 +1084,7 @@ func (client *Client) SetMenuPageByName(
 	return page, nil
 }
 
+// MenuCatalog queries the board-authoritative page directory and active page.
 func (client *Client) MenuCatalog(ctx context.Context) (MenuCatalog, error) {
 	return control.QueryMenuCatalog(ctx, client.runtime)
 }
@@ -993,14 +1108,17 @@ func (client *Client) ReplaceHostMenuDirectory(ctx context.Context, directory Ho
 	return client.runtime.ReplaceHostMenuDirectory(ctx, directory)
 }
 
+// PushHostMenuContent supplies one volatile host-menu value to the front panel.
 func (client *Client) PushHostMenuContent(ctx context.Context, content HostMenuContent) error {
 	return client.runtime.PushHostMenuContent(ctx, content)
 }
 
+// HostMenuState queries the active host-menu generation and selection.
 func (client *Client) HostMenuState(ctx context.Context) (HostMenuState, error) {
 	return client.runtime.HostMenuState(ctx)
 }
 
+// MenuPages returns the built-in stable menu metadata known to this host build.
 func MenuPages() []MenuPageInfo { return control.MenuPages() }
 
 // I2CTransfer exposes the firmware's bounded cooperative I2C lease to Go API
@@ -1015,10 +1133,12 @@ func (client *Client) I2CTransfer(
 	return control.TransferI2C(ctx, client.runtime, address, leaseSeconds, write, readLength)
 }
 
+// ScanI2C probes all valid seven-bit addresses through the cooperative lease.
 func (client *Client) ScanI2C(ctx context.Context) ([]byte, error) {
 	return control.ScanI2C(ctx, client.runtime)
 }
 
+// RescanLCD probes configured LCD addresses and returns the detected address.
 func (client *Client) RescanLCD(ctx context.Context) (byte, error) {
 	return client.runtime.LCDPresenter().RescanPhysical(ctx)
 }
@@ -1045,6 +1165,7 @@ func (client *Client) SetRelay(
 	return client.runtime.Command(ctx, native.OpRelaySet, payload)
 }
 
+// SetMotionSide requests interlocked Up, Down, or Stop for side 1 or 2.
 func (client *Client) SetMotionSide(
 	ctx context.Context,
 	sideNumber byte,
@@ -1146,6 +1267,7 @@ func (client *Client) checkMotionDoorPolicy(status Status) error {
 	}
 }
 
+// AllRelaysOff immediately requests the firmware's all-relays-off path.
 func (client *Client) AllRelaysOff(ctx context.Context) error {
 	return client.runtime.Command(ctx, native.OpRelayAllOff, nil)
 }
@@ -1163,17 +1285,12 @@ func (client *Client) SetPWMChannel(
 	return client.runtime.Command(ctx, native.OpPWMSet, payload)
 }
 
+// AllPWMOff requests zero for every logical PWM channel.
 func (client *Client) AllPWMOff(ctx context.Context) error {
 	return client.runtime.Command(ctx, native.OpPWMAllOff, nil)
 }
 
-func (client *Client) SetPWMMode(ctx context.Context, mode PWMMode) error {
-	if mode > PWMModeAuto {
-		return fmt.Errorf("PWM mode %d is outside 0..2", mode)
-	}
-	return client.runtime.Command(ctx, native.OpPWMMode, []byte{byte(mode)})
-}
-
+// PWMValues requests all logical PWM values and controller availability.
 func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 	frame, err := client.runtime.Request(
 		ctx,
@@ -1187,6 +1304,7 @@ func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 	return native.ParsePWMValues(frame.Payload)
 }
 
+// SetStatusRGB replaces the base status color and cancels an active overlay.
 func (client *Client) SetStatusRGB(
 	ctx context.Context,
 	red, green, blue, brightness byte,
@@ -1204,10 +1322,12 @@ func (client *Client) SetStatusRGBBase(
 	return client.outputs.SetStatusBase(ctx, red, green, blue, brightness)
 }
 
+// OutputState returns active melody and status-effect operation metadata.
 func (client *Client) OutputState() OutputStreamState {
 	return client.outputs.State()
 }
 
+// PlayTone sends one bounded buzzer tone after stopping streamed melody playback.
 func (client *Client) PlayTone(
 	ctx context.Context,
 	frequencyHz, durationMS uint16,
@@ -1226,6 +1346,7 @@ func (client *Client) PlayTone(
 	)
 }
 
+// StartMelody begins asynchronous playback; zero repeats until StopMelody.
 func (client *Client) StartMelody(
 	ctx context.Context,
 	melody Melody,
@@ -1235,10 +1356,12 @@ func (client *Client) StartMelody(
 	return publicOutputOperation(operation), err
 }
 
+// ConfiguredMelodies returns the effective named melody catalog.
 func (client *Client) ConfiguredMelodies() []Melody {
 	return appconfig.EffectiveMelodies(client.currentHostConfig())
 }
 
+// StartConfiguredMelody begins a named melody; zero repeats until stopped.
 func (client *Client) StartConfiguredMelody(
 	ctx context.Context,
 	name string,
@@ -1252,10 +1375,12 @@ func (client *Client) StartConfiguredMelody(
 	return OutputOperation{}, fmt.Errorf("configured melody %q was not found", name)
 }
 
+// StopMelody cancels active host-streamed melody playback.
 func (client *Client) StopMelody() bool {
 	return client.outputs.StopMelody()
 }
 
+// StartStatusLEDEffect begins one asynchronous host-defined LED overlay.
 func (client *Client) StartStatusLEDEffect(
 	ctx context.Context,
 	effect StatusLEDEffect,
@@ -1264,10 +1389,12 @@ func (client *Client) StartStatusLEDEffect(
 	return publicOutputOperation(operation), err
 }
 
+// ConfiguredStatusLEDEffects returns the effective named LED-effect catalog.
 func (client *Client) ConfiguredStatusLEDEffects() []StatusLEDEffect {
 	return appconfig.EffectiveStatusLEDEffects(client.currentHostConfig())
 }
 
+// StartConfiguredStatusLEDEffect begins a named effect from the effective catalog.
 func (client *Client) StartConfiguredStatusLEDEffect(
 	ctx context.Context,
 	name string,
@@ -1283,10 +1410,12 @@ func (client *Client) StartConfiguredStatusLEDEffect(
 	)
 }
 
+// StopStatusLEDEffect cancels the active host-defined LED overlay.
 func (client *Client) StopStatusLEDEffect() bool {
 	return client.outputs.StopStatusEffect()
 }
 
+// TransmitRF sends a validated 433 MHz code one or more times.
 func (client *Client) TransmitRF(
 	ctx context.Context,
 	code uint32,
@@ -1319,13 +1448,15 @@ func publicOutputOperation(operation control.StreamOperation) OutputOperation {
 	}
 }
 
+// BeginRFLearn starts the bounded timer-learning convenience form.
 func (client *Client) BeginRFLearn(ctx context.Context, timeout time.Duration) error {
 	_, err := client.runtime.StartRFLearning(ctx, control.RFLearnOptions{
-		Timeout: timeout,
+		Mode: control.RFLearnTimer, Timeout: timeout,
 	})
 	return err
 }
 
+// StartRFLearning begins indefinite multi-code or bounded timer learning.
 func (client *Client) StartRFLearning(
 	ctx context.Context,
 	options RFLearnOptions,
@@ -1333,22 +1464,27 @@ func (client *Client) StartRFLearning(
 	return client.runtime.StartRFLearning(ctx, options)
 }
 
+// RFLearningState returns the latest host-tracked learning lifecycle.
 func (client *Client) RFLearningState() RFLearnState {
 	return client.runtime.RFLearnState()
 }
 
+// CancelRFLearn ends the current learning session with an explicit reason.
 func (client *Client) CancelRFLearn(ctx context.Context) error {
 	return client.runtime.CancelRFLearning(ctx, "cancelled through API")
 }
 
+// RemoveLearnedRF clears one EEPROM-backed learned record by stable slot ID.
 func (client *Client) RemoveLearnedRF(ctx context.Context, id byte) error {
 	return client.runtime.Command(ctx, native.OpRFLearnRemove, []byte{id})
 }
 
+// ClearLearnedRF clears every EEPROM-backed learned RF record.
 func (client *Client) ClearLearnedRF(ctx context.Context) error {
 	return client.runtime.Command(ctx, native.OpRFLearnClear, nil)
 }
 
+// MapLearnedRF updates one learned slot while preserving motion safety rules.
 func (client *Client) MapLearnedRF(
 	ctx context.Context,
 	id byte,
@@ -1360,7 +1496,7 @@ func (client *Client) MapLearnedRF(
 				"use RFActionSide up/down/stop for door-gated motion",
 		)
 	}
-	payload, err := native.RFMapPayload(
+	payload, err := native.RFMappingPayload(
 		id,
 		byte(mapping.Action),
 		mapping.Value,
@@ -1369,9 +1505,12 @@ func (client *Client) MapLearnedRF(
 	if err != nil {
 		return err
 	}
-	return client.runtime.Command(ctx, native.OpRFMap, payload)
+	return control.NewRFReplaceService(client.runtime).UpdateMapping(
+		ctx, payload[0], payload[1], payload[2], payload[3],
+	)
 }
 
+// Snapshot returns the latest cached connection and board state without polling.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
 	return Snapshot{
@@ -1397,13 +1536,60 @@ func (client *Client) Snapshot() Snapshot {
 		ConnectionReason:  snapshot.ConnectionReason,
 		ConnectionUpdated: snapshot.ConnectionUpdated,
 		ProgramState:      snapshot.ProgramState,
+		RFLearning:        snapshot.RFLearning,
+		FrontPanel:        snapshot.FrontPanel,
+		HaveFrontPanel:    snapshot.HaveFrontPanel,
+		FrontPanelUpdated: snapshot.FrontPanelUpdated,
+		StatusLED:         snapshot.StatusLED,
+		HaveStatusLED:     snapshot.HaveStatusLED,
+		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
 	}
 }
 
+// SetSegmentText presents static or scrolling text through the firmware's
+// native display path. Text longer than four cells scrolls using dwell as its
+// per-window speed; an empty value releases the host segment presentation.
+func (client *Client) SetSegmentText(
+	ctx context.Context,
+	text string,
+	dwell time.Duration,
+) error {
+	if dwell < 0 || dwell > time.Duration(^uint16(0))*time.Millisecond {
+		return errors.New("segment dwell must fit 0..65535 milliseconds")
+	}
+	payload, err := native.DisplayTextPayload(
+		native.DisplaySegments,
+		uint16(dwell/time.Millisecond),
+		text,
+	)
+	if err != nil {
+		return err
+	}
+	return client.runtime.Command(ctx, native.OpDisplayText, payload)
+}
+
+// PresentDisplay sends an arbitrary segment/LCD message through the shared
+// primary runtime. Long segment text scrolls automatically; callers can force
+// a marquee and select once, explicit loop, or interval scheduling.
+func (client *Client) PresentDisplay(
+	ctx context.Context,
+	request DisplayRequest,
+) (DisplayResult, error) {
+	return client.runtime.PresentDisplay(ctx, request)
+}
+
+// RefreshFrontPanel returns the board's exact cached display/LCD/key state and
+// updates Snapshot for every UI consuming the shared primary instance.
+func (client *Client) RefreshFrontPanel(ctx context.Context) (FrontPanel, error) {
+	return client.runtime.RefreshFrontPanel(ctx)
+}
+
+// Events returns the lossy, bounded stream of normalized runtime events.
 func (client *Client) Events() <-chan Event {
 	return client.events
 }
 
+// NextEvent waits for the first matching event newer than afterID.
 func (client *Client) NextEvent(
 	ctx context.Context,
 	afterID uint64,
@@ -1416,6 +1602,61 @@ func (client *Client) NextEvent(
 	return publicEvent(event), nil
 }
 
+// NextEventStream waits on activity, state, telemetry, or debug without
+// allowing a high-rate stream to displace retained activity events.
+func (client *Client) NextEventStream(
+	ctx context.Context,
+	afterID uint64,
+	kind string,
+	stream string,
+) (Event, error) {
+	event, err := client.runtime.WaitEventStreamFilter(ctx, afterID, kind, nil, stream)
+	if err != nil {
+		return Event{}, err
+	}
+	return publicEvent(event), nil
+}
+
+// NextOpcodeEvent waits for an unsolicited raw frame, optionally filtered by
+// exact opcode. It is the long-polling counterpart to WebSocket/Socket.IO's
+// `opcodes` subscription topic.
+func (client *Client) NextOpcodeEvent(
+	ctx context.Context,
+	afterID uint64,
+	kind string,
+	opcode *byte,
+) (Event, error) {
+	event, err := client.runtime.WaitEventFilter(ctx, afterID, kind, opcode)
+	if err != nil {
+		return Event{}, err
+	}
+	return publicEvent(event), nil
+}
+
+// ExchangeOpcode sends one opaque UART request and waits for the caller's
+// expected opcode. The default expectation is ACK, but experimental queries
+// can name any response opcode without a host update.
+func (client *Client) ExchangeOpcode(
+	ctx context.Context,
+	opcode byte,
+	payload []byte,
+	expectedOpcode byte,
+) (OpcodeFrame, error) {
+	if len(payload) > native.MaxPayload {
+		return OpcodeFrame{}, native.ErrPayloadTooLong
+	}
+	frame, err := client.runtime.Request(ctx, opcode, payload, expectedOpcode)
+	if err != nil {
+		return OpcodeFrame{}, err
+	}
+	return OpcodeFrame{
+		Opcode: frame.Opcode, Name: native.OpcodeName(frame.Opcode),
+		Sequence: frame.Seq, Payload: append([]byte(nil), frame.Payload...),
+		PayloadHex: strings.ToUpper(hex.EncodeToString(frame.Payload)),
+	}, nil
+}
+
+// SendTextMessage validates and routes a typed host, bridge, board, or LCD message.
 func (client *Client) SendTextMessage(
 	ctx context.Context,
 	message TextMessage,
@@ -1425,7 +1666,7 @@ func (client *Client) SendTextMessage(
 	message.Type = strings.ToLower(strings.TrimSpace(message.Type))
 	message.Text = strings.TrimSpace(message.Text)
 	message.Action = strings.TrimSpace(message.Action)
-	if !oneOf(message.Source, "client", "server", "bridge", "board", "lcd", "host", "ipc", "webhook", "websocket") {
+	if !oneOf(message.Source, "client", "server", "bridge", "board", "lcd", "host", "ipc", "rest", "webhook", "websocket", "socket_io") {
 		return Event{}, fmt.Errorf("unsupported message source %q", message.Source)
 	}
 	if !oneOf(message.Target, "client", "server", "bridge", "board", "lcd", "host", "all") {
@@ -1520,6 +1761,7 @@ func lcdASCII(value string) string {
 	return builder.String()
 }
 
+// LatestEventID returns the most recently published runtime event ID.
 func (client *Client) LatestEventID() uint64 {
 	return client.runtime.LatestEventID()
 }
@@ -1544,18 +1786,58 @@ func (client *Client) EmitHostActionEvent(
 	return publicEvent(event)
 }
 
-// UpdateArduinoDependencies updates installed Arduino cores/libraries and
-// ensures every PCController dependency through the controller-owned runner.
+// SyncToolchain updates installed cores/libraries and ensures every
+// PCController dependency through the controller-owned runner.
 // It never opens, resets, or programs a board.
-func (client *Client) UpdateArduinoDependencies(
+func (client *Client) SyncToolchain(
 	ctx context.Context,
-	options ArduinoUpdateOptions,
+	options ToolchainSyncOptions,
 	output io.Writer,
-) (ArduinoUpdateReport, error) {
-	if strings.TrimSpace(options.ArduinoCLI) == "" {
-		options.ArduinoCLI = client.currentCommandOptions().ArduinoCLI
+) (ToolchainSyncReport, error) {
+	if strings.TrimSpace(options.ToolchainCLI) == "" {
+		options.ToolchainCLI = client.currentCommandOptions().ArduinoCLI
 	}
-	return programmer.UpdateArduino(ctx, options, output)
+	return programmer.SyncToolchain(ctx, options, output)
+}
+
+// BootstrapToolchain installs one resolved, profile-local firmware toolchain.
+// It does not replace an unrelated global dependency installation. Callers may
+// supply the latest resolved profile or an intentionally selected rollback lock.
+func BootstrapToolchain(
+	ctx context.Context,
+	options ToolchainBootstrapOptions,
+	output io.Writer,
+) (ToolchainBootstrapReport, error) {
+	return programmer.BootstrapToolchain(ctx, options, output)
+}
+
+// LoadToolchainPolicy reads the latest-compatible dependency policy.
+func LoadToolchainPolicy(path string) (ToolchainPolicy, error) {
+	return programmer.LoadToolchainPolicy(path)
+}
+
+// LoadToolchainLock reads an exact, hash-bearing resolved dependency lock.
+func LoadToolchainLock(path string) (ToolchainLock, error) {
+	return programmer.LoadToolchainLock(path)
+}
+
+// ResolveToolchainPolicy resolves stable dependencies without device I/O.
+func ResolveToolchainPolicy(
+	ctx context.Context,
+	policy ToolchainPolicy,
+	options ToolchainResolveOptions,
+) (ToolchainResolution, error) {
+	return programmer.ResolveToolchainPolicy(ctx, policy, options)
+}
+
+// CompareToolchainLocks reports substantive changes between exact locks.
+func CompareToolchainLocks(current, resolved ToolchainLock) []ToolchainChange {
+	return programmer.CompareToolchainLocks(current, resolved)
+}
+
+// UpdateToolchainLock atomically writes a changed exact lock without timestamp churn.
+func UpdateToolchainLock(path string, current, resolved ToolchainLock) (bool, error) {
+	return programmer.UpdateToolchainLock(path, current, resolved)
 }
 
 // SetBeforeDisconnectHook lets the primary host bridge release momentary or
@@ -1600,6 +1882,7 @@ func (client *Client) RequestPowerAction(
 	return result, nil
 }
 
+// Temperatures lists detected DS18B20 identities, roles, and current readings.
 func (client *Client) Temperatures(
 	ctx context.Context,
 	rescan bool,
@@ -1620,6 +1903,7 @@ func (client *Client) Temperatures(
 	return native.ParseTemperatures(frame.Payload)
 }
 
+// ListLearned retrieves every learned RF record using bounded pagination.
 func (client *Client) ListLearned(ctx context.Context) ([]RFEntry, error) {
 	cursor := byte(0)
 	var result []RFEntry
@@ -1649,6 +1933,7 @@ func (client *Client) ListLearned(ctx context.Context) ([]RFEntry, error) {
 	return nil, fmt.Errorf("RF list exceeded pagination safety limit")
 }
 
+// ListLearnedDetailed joins learned records with host names and categories.
 func (client *Client) ListLearnedDetailed(ctx context.Context) ([]RFEntryView, error) {
 	entries, err := client.ListLearned(ctx)
 	if err != nil {
@@ -1672,6 +1957,7 @@ func (client *Client) ListLearnedDetailed(ctx context.Context) ([]RFEntryView, e
 	return result, nil
 }
 
+// ListPorts enumerates serial candidates with available USB identity metadata.
 func ListPorts() ([]PortInfo, error) {
 	list, err := ports.List()
 	if err != nil {
@@ -1731,7 +2017,7 @@ func (client *Client) forwardEvents() {
 func publicEvent(event control.Event) Event {
 	forwarded := Event{
 		ID: event.ID, Time: event.Time,
-		Kind: event.Kind, Text: event.Text,
+		Kind: event.Kind, Stream: event.Stream, Text: event.Text,
 		Opcode: event.Frame.Opcode, Seq: event.Frame.Seq,
 		Payload:   append([]byte(nil), event.Frame.Payload...),
 		Lifecycle: event.Lifecycle,

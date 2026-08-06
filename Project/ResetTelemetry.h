@@ -16,4 +16,5 @@ private:
   uint8_t cause_ = 0;
 };
 
+// resetTelemetry is the single reset-cause and boot-count journal service.
 extern ResetTelemetry resetTelemetry;

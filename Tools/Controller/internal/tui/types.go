@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"os"
 	"strings"
 	"time"
 
@@ -11,6 +10,8 @@ import (
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/portowner"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 type Page int
@@ -37,10 +38,10 @@ type pageDefinition struct {
 
 var pageDefinitions = [...]pageDefinition{
 	{"1", "Dashboard", "Dashboard & Live Measurements"},
-	{"2", "Outputs", "Relays, Motion & PWM Outputs"},
+	{"2", "Control", "Relays, Motion & PWM Control"},
 	{"3", "Menus", "Board Display Menus"},
 	{"4", "Board", "Board EEPROM Settings"},
-	{"5", "App", "PC Host Settings"},
+	{"5", "App", "HOST Settings"},
 	{"6", "RF", "433 MHz Learn & Mapping"},
 	{"7", "Program", "Programming & Urboot/Urclock"},
 	{"8", "Automate", "Automations & Macros"},
@@ -50,6 +51,7 @@ var pageDefinitions = [...]pageDefinition{
 
 type Preferences struct {
 	AppTitle            string
+	Tagline             string
 	PollInterval        time.Duration
 	EventLogLimit       int
 	HistoryWindow       time.Duration
@@ -61,12 +63,9 @@ type Preferences struct {
 }
 
 func defaultPreferences() Preferences {
-	title := strings.TrimSpace(os.Getenv("PCCONTROLLER_APP_TITLE"))
-	if title == "" {
-		title = "PCController"
-	}
 	return Preferences{
-		AppTitle:            title,
+		AppTitle:            productidentity.Title(""),
+		Tagline:             productidentity.FirstRunTagline,
 		PollInterval:        250 * time.Millisecond,
 		EventLogLimit:       2000,
 		HistoryWindow:       24 * time.Hour,
@@ -84,8 +83,10 @@ func defaultPreferences() Preferences {
 
 func preferencesFromUI(value appconfig.UI) Preferences {
 	result := defaultPreferences()
-	if title := strings.TrimSpace(value.AppTitle); title != "" {
-		result.AppTitle = title
+	result.AppTitle = productidentity.Title(value.AppTitle)
+	result.Tagline = strings.TrimSpace(value.Tagline)
+	if result.Tagline == "" {
+		result.Tagline = productidentity.FirstRunTagline
 	}
 	if value.StatusIntervalMS >= 100 {
 		result.PollInterval = time.Duration(value.StatusIntervalMS) * time.Millisecond
@@ -156,6 +157,8 @@ type FrontPanelState struct {
 	PressedKeys      byte
 	InputSource      string
 	Exact            bool
+	StatusLED        native.StatusLEDState
+	HaveStatusLED    bool
 }
 
 type Options struct {
@@ -178,10 +181,15 @@ type Options struct {
 	Integrations     func() hostui.IntegrationStatus
 	Notifier         hostui.Notifier
 	AppActions       <-chan hostui.AppAction
+	InstanceID       string
+	ReportPage       func(string) error
+	ReportTerminal   func(page, title string) error
+	WriteOSC         func(payload string) error
 	Preview          *control.Snapshot
 	ForceWelcome     bool
 	DisableWelcome   bool
 	MarkWelcomed     func()
 	WelcomeMelody    func(context.Context) error
+	PortOwnerActions portowner.Actions
 	Debug            bool
 }

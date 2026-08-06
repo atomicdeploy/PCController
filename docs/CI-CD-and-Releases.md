@@ -1,285 +1,237 @@
-# CI/CD and Releases
+<div align="center">
+  <a href="../README.md"><img src="assets/doc-banner.svg" width="100%" alt="PCController documentation — return to the main page"></a>
+</div>
 
-PCController's GitHub automation builds AVR firmware, the native Host, and the
-native Virtual Board from one source commit. Build provides a download catalog,
-compatibility matrix, memory report, and validation record.
+# CI/CD and releases
+
+PCController builds firmware, the native Host, and the Virtual Board as
+separate deliverables. The flagship workflow gathers their packages into one
+run without flattening product identity or creating duplicate compatibility
+artifacts.
 
 > [!IMPORTANT]
-> GitHub-hosted CI is hardware-free. A green firmware job proves compilation,
-> HEX integrity, packaging, and provenance; it does **not** prove that a board
-> was programmed or passed a physical smoke test. Host binaries are currently
-> unsigned alpha artifacts. Attestation proves build origin, not platform code
-> signing.
+> The project is in active pre-release development and has no stable release.
+> CI artifacts are unsigned engineering builds. Provenance confirms source and
+> workflow origin; it is not physical-device acceptance or code signing.
 
 ## Workflow map
 
-| Workflow | Role | Triggers |
+| Workflow | Purpose | Hardware policy |
 |---|---|---|
-| `Build` (`build.yml`) | Build orchestrator and combined download catalog | pull request, `main`, manual dispatch |
-| `⚡ Firmware · AVR` (`firmware.yml`) | Reusable MiniCore compile, HEX validation, footprint and firmware package | called by Build and Release |
-| `🖥️ Host · Cross-platform` (`host.yml`) | Reusable Go test/vet, identity, C ABI smoke test and five-target packaging | called by Build and Release |
-| `🧪 Virtual Board · Cross-platform` (`virtual-board.yml`) | Reusable native CMake/CTest and five-target packaging | called by Build and Release |
-| `🛡️ Quality · Repository Health` (`repository-health.yml`) | Source, license, docs, build-tool, workflow and whitespace audits | pull request, `main`, manual dispatch |
-| `🛡️ Security · CodeQL` (`codeql.yml`) | Six-category security-extended scan across every supported repository language and platform-specific source branch | pull request, merge queue, `main`, weekly schedule, manual dispatch |
-| `🔭 Dependencies · AVR Supply Chain` (`dependencies.yml`) | Daily pinned-toolchain health report and verified update proposal | daily schedule, manual dispatch |
-| `✨ Release · Attested Packages` (`release.yml`) | Rebuild, attest, and create or update a deterministic release | `v*` tag, manual dispatch |
-| `🔌 Deploy · Protected AVR Hardware` (`deploy-avr.yml`) | Explicitly gated physical programming path | manual dispatch on approved self-hosted runner only |
+| `Build` | Compile and validate all three deliverables across supported targets | Never opens serial, USB, or a programmer |
+| `Firmware · AVR` | MiniCore compile, Intel HEX checks, memory evidence, dependency inventory, package | Build-only |
+| `Host` | WebUI build/tests, Go tests/vet, native host and C ABI packages | Build-only |
+| `Virtual Board` | Native simulator build and behavior/protocol tests | Hardware-free by design |
+| `Release` | Repackage a selected source revision, hash, attest, and publish release assets | Build-only |
+| `Deploy AVR` | Explicit operator-authorized deployment on a labeled self-hosted runner | May access only the selected attached target |
+| `Repository health` | Documentation, metadata, scripts, locks, and policy checks | Hardware-free |
+| `CodeQL` | Six-category repository-wide security scan with one stable gate | Hardware-free |
+| `Update dependencies` | Resolve, lock, preflight, and propose compatible dependency updates | Hardware-free |
 
-The three build workflows remain independently callable and reusable, while
-Build presents them as one product:
+## Artifact catalog
 
-```mermaid
-flowchart TD
-    T["PR, main, or manual ref"] --> B["Build"]
-    B --> F["Firmware · ATmega328P"]
-    B --> H["Host · 5 targets"]
-    B --> V["Virtual Board · 5 targets"]
-    F --> C["Combined build catalog"]
-    H --> C
-    V --> C
-    C --> A["Actions artifacts"]
-```
+Actions publishes one friendly artifact for each deliverable/target:
 
-## Builds and Actions artifacts
-
-| Deliverable | Actions artifact | Validation |
+| Deliverable | Artifact name | Contents |
 |---|---|---|
-| AVR firmware | `PCController-Firmware-ATmega328P` | Pinned MiniCore 3.1.2 and rc-switch 2.6.4, compile, strict Intel HEX validation, flash/static/estimated-peak SRAM report, dependency inventory |
-| AVR alias | `firmware` | Flat AVR payload from `Build` |
-| Host | `PCController-Host-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Go tests and vet, executable identity, native package, C ABI library and smoke test |
-| Virtual Board | `PCController-VirtualBoard-Linux-x64`, `-Linux-ARM64`, `-Windows-x64`, `-macOS-Intel`, `-macOS-Apple-Silicon` | Native CMake build and CTest |
+| AVR firmware | `PCController-Firmware-ATmega328P` | Application HEX, full-flash recovery HEX, validated 1 KiB safe-default EEPROM, manifests, dependency inventory, archive, checksum |
+| Native host | `PCController-Host-<platform>` | Versioned package with native executable/library, the exact same-run firmware/EEPROM defaults, metadata, notices, and checksum |
+| Virtual Board | `PCController-VirtualBoard-<platform>` | Versioned simulator package, metadata, notices, and checksum |
 
-Every archive carries a matching `.sha256` sidecar and expands into a
-versioned, product-specific root. For example:
+Supported host labels are Linux x64, Linux ARM64, Windows x64, macOS Intel,
+and macOS Apple Silicon. Release archives add the selected version to their
+product-named root directory.
 
-```text
-PCController-Host-v0.1.0-alpha.1-Linux-x64/
-PCController-VirtualBoard-v0.1.0-alpha.1-Windows-x64/
-PCController-Firmware-v0.1.0-alpha.1-AVR-ATmega328P/
-```
+The firmware job publishes its artifact name as a reusable-workflow output.
+Every host target first cleans generated output, then downloads that exact
+artifact, verifies the application and complete EEPROM ranges/hashes, embeds
+them, and requires both independent enabled flags in `host-manifest.json`.
+This ordering prevents host cleanup from silently deleting the firmware input.
 
-That layout keeps multiple versions and targets safe to extract into the same
-download directory. The workflow fails if an expected binary, library,
-manifest, license, or checksum is missing.
+Artifact retention is deliberate: pull-request packages remain available for
+14 days, while `main`, tag, and manual-run packages remain available for 90
+days. Published release assets remain attached to their release until a
+maintainer explicitly removes them.
 
-Each archive's `.sha256` sidecar is the simplest way to verify one selected
-download. Use the platform-native command for the package you downloaded:
+## Download an engineering build
 
-**Linux**
+1. Open the current [Build workflow](https://github.com/atomicdeploy/PCController/actions/workflows/build.yml).
+2. Select a successful run for the exact commit you want.
+3. Download the firmware, Host, or Virtual Board artifact matching the
+   target.
+4. Keep the archive beside its `.sha256` sidecar.
+5. Verify before extracting.
+
+Linux:
 
 ```bash
-archive=PCController-Host-v0.1.0-alpha.1-Linux-x64.tar.gz
-sha256sum --check "${archive}.sha256"
+archive=PCController-Host-<version>-Linux-x64.tar.gz
+sha256sum -c "${archive}.sha256"
 tar -xzf "$archive"
 ```
 
-**macOS**
+macOS:
 
 ```bash
-archive=PCController-Host-v0.1.0-alpha.1-macOS-Apple-Silicon.tar.gz
+archive=PCController-Host-<version>-macOS-Apple-Silicon.tar.gz
 shasum -a 256 -c "${archive}.sha256"
 tar -xzf "$archive"
 ```
 
-**Windows PowerShell**
+Windows PowerShell:
 
 ```powershell
-$archive = "PCController-Host-v0.1.0-alpha.1-Windows-x64.tar.gz"
-$expected = ((Get-Content -LiteralPath "$archive.sha256" -Raw) -split '\s+', 2)[0]
-$actual = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
-if ($actual.ToLowerInvariant() -ne $expected.ToLowerInvariant()) {
-  throw "SHA-256 mismatch: $archive"
-}
+$archive = "PCController-Host-<version>-Windows-x64.tar.gz"
+$expected = (Get-Content ".\$archive.sha256" -Raw).Split()[0]
+$actual = (Get-FileHash ".\$archive" -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected.ToLowerInvariant()) { throw "SHA-256 mismatch" }
 tar.exe -xzf $archive
 ```
 
-Every command extracts one product-named version root. The Windows release is
-currently a `.tar.gz`, so `tar.exe` is the native matching extractor; it is not
-necessary to install a Unix shell.
+## Release integrity and draft repair
 
-Artifact retention is deliberate:
+A release never relabels packages from an older run. Tag-triggered releases
+build the commit named by that tag; a manual run builds the immutable
+`github.sha` selected in the **Run workflow** dialog. That same source identity
+is passed into every reusable checkout, recorded in every manifest, and used
+as the release target.
 
-- pull-request artifacts are retained for **14 days**;
-- `main`, tags, and manual-run artifacts are retained for **90 days**;
-- GitHub release assets remain available with the release until a maintainer
-  removes them.
+Release waits for the complete firmware, Host, and Virtual Board target set,
+then stages only artifacts produced by that invocation. Missing or colliding
+assets fail the run. The workflow emits deterministic checksums, a release
+manifest, direct application and full-flash recovery images, release notes,
+and build-provenance attestations before it creates or updates the release.
+
+Manual releases default to draft and prerelease. Re-running a matching draft
+repairs it in place: case-folded filename collisions are removed, current
+assets replace their exact predecessors, stale draft assets are pruned, and
+release notes are replaced rather than appended. The repair step never deletes
+pre-existing assets from an already published release.
+
+## Verify provenance
+
+Release workflow assets may carry GitHub artifact attestations. Verification
+requires GitHub CLI:
+
+```console
+gh attestation verify <archive> --repo atomicdeploy/PCController
+```
+
+Check all three identities before deployment:
+
+- repository and source commit;
+- release/version metadata inside the package;
+- SHA-256 in the sidecar and package manifest.
+
+An attestation does not replace a signature from a trusted platform publisher,
+and it does not authorize hardware programming.
 
 Each codebase writes one summary. Host and Virtual Board show shared checks
-once, then list only platform-specific values in a target table; failed,
-cancelled, skipped, and missing targets remain visible. The AVR summary shows
-flash/SRAM meters, free space, libraries, build configuration, and stack
-headroom. Usage meters are green through 50%, orange above 50%, and red above
-80%. The combined Build summary links every package.
-
-## Release integrity
-
-A release never relabels packages from an older run. Both entry points build
-the exact event source SHA:
-
-- a `v*` tag build uses the commit named by that tag;
-- a manual run must be launched from the desired branch, tag, or commit in the
-  GitHub **Run workflow** selector and uses that run's immutable `github.sha`.
-
-The same SHA is passed into every reusable checkout, recorded in every
-manifest, and used as the release's target commit. A mutable branch name is
-never substituted after the build, preventing tag/package/provenance drift.
-
-After all eleven platform/firmware packages pass, Release:
-
-1. downloads only the artifacts produced by that exact invocation;
-2. promotes the firmware application and merged Urboot images as direct assets:
-   `PCController-<version>-ATmega328P-Application.hex` and
-   `PCController-<version>-ATmega328P-Full-Flash-Urboot.hex`;
-3. generates a deterministic `SHA256SUMS.txt`, release manifest, and release
-   notes containing the source SHA, platform chooser, compatibility details,
-   verification commands, and honest hardware limitations;
-4. creates GitHub build-provenance attestations for release subjects;
-5. creates or updates the matching release without appending duplicate notes.
-
-Manual releases default to draft and prerelease. A hyphenated SemVer tag is
-also treated as a prerelease. `v0.1.0-alpha.1` is intentionally an alpha: it
-can demonstrate fresh compilation, native tests, package integrity, and build
-provenance while physical-device acceptance stays a separate, recorded
-operation.
-
-After the checksum succeeds, verify GitHub build provenance on Linux or macOS:
-
-```bash
-gh attestation verify PCController-Host-v0.1.0-alpha.1-Linux-x64.tar.gz \
-  --repo atomicdeploy/PCController
-```
-
-Or in PowerShell:
-
-```powershell
-gh attestation verify .\PCController-Host-v0.1.0-alpha.1-Windows-x64.tar.gz `
-  --repo atomicdeploy/PCController
-```
-
-`SHA256SUMS.txt` covers all eleven archives and both direct firmware images.
-Running a whole-file `--check` is appropriate only when every listed payload
-is present; missing files correctly make that command fail. For a single
-archive, use its sidecar as shown above. For a direct HEX, select its exact line
-from `SHA256SUMS.txt` or verify its GitHub attestation.
+once, then list only platform-specific differences in a target table. Failed,
+cancelled, skipped, and missing targets remain visible. Firmware reports its
+flash and SRAM budgets, dependencies, build configuration, and stack headroom.
+Usage meters are green through 50%, orange above 50%, and red above 80%.
 
 ## Dependency automation
 
-The daily dependency radar reports the pinned Arduino CLI, MiniCore, and every
-declared Arduino library in a readable summary and machine-readable artifact.
-The canonical manifest preserves exact archive URLs and SHA-256 digests for the
-core and libraries as well as the checksum-pinned Arduino CLI. Official index
-metadata must still agree with those pins, each library repository and exported
-header are verified, release-note requests can target only code-reviewed
-repository constants, and source inventory rejects an undeclared third-party
-firmware include or a stale library declaration. Adding a new Arduino library
-therefore requires both a manifest entry and an explicit outbound-source
-allowlist change in review.
+The daily `Update dependencies` workflow owns Arduino CLI, MiniCore, all
+declared firmware libraries, Urboot-Custom, Go and Node toolchains, Go modules,
+npm packages, GitHub Actions, UPX, go-winres, and the native Windows compiler.
+It resolves compatible stable releases, records exact source and integrity data
+in reviewed locks, checks release/license/security/size impact, and compiles the
+AVR firmware before opening a uniquely named pull request. It never merges or
+releases its own proposal, and duplicate or failed proposals remain explicit.
 
-When a newer stable version is available, the scheduled run updates the
-canonical pins and synchronized current-version documentation, installs the
-proposed core and complete library set, and performs a real ATmega328P compile
-plus strict Intel HEX validation before any branch is pushed. Only a successful
-preflight can open a reviewable pull request on a uniquely named automation
-branch; the workflow never merges or releases the change. The proposal includes
-bounded links to exact upstream release notes and archive provenance rather
-than copying third-party Markdown into a trusted PR body. An existing proposal
-suppresses duplicates. Manual `check` and `apply` modes provide the same audit
-and proposal paths on demand.
+Release discovery is not allowed to follow caller-supplied repository names.
+Firmware, bootloader, and native-tool release APIs are rooted in reviewed
+profile or policy entries, with hashes and official index metadata verified
+before use. Adding a new release source therefore requires an explicit policy
+or manifest change in review; generated proposal text cannot expand the
+outbound-source allowlist.
 
-Dependabot independently checks GitHub Actions daily, the Go Host module
-weekly, and both project-owned Node package roots weekly. Minor and patch
-version updates are grouped by ecosystem, security updates receive their own
-groups, and major updates remain isolated for review. The two Node tools do
-not currently declare third-party packages, but their roots are already
-covered so a future dependency cannot arrive outside update policy.
-
-Arduino CLI, MiniCore, and Arduino libraries do not have a native Dependabot
-package ecosystem. They remain covered by the checksum-verified AVR dependency
-radar rather than being presented as native Dependabot coverage. The updater's
-own preflight rejects an unbuildable proposal, and the protected pull-request
-build independently exposes any resulting flash or SRAM movement before it can
-be merged.
-
-Repository Health inventories every `go.mod` and `package.json`, validates the
-corresponding Dependabot roots, verifies the CodeQL language/platform matrix,
-and rejects mutable third-party Action references. Mutation tests prove those
-checks fail when an ecosystem, analyzer, safe trigger, or immutable pin is
-removed.
+Dependabot independently covers GitHub Actions daily, the Go Host module
+weekly, and the Build, Firmware, and WebUI npm roots weekly. Minor and patch
+updates are grouped by ecosystem; security updates have separate groups; major
+updates remain isolated for review. Repository Health inventories all module
+roots and rejects gaps between the repository and Dependabot configuration.
 
 ## Code scanning
 
-CodeQL uses advanced setup with the `security-extended` query suite and six
-unique result categories. Unique categories preserve both platform analyses
-for languages with build-tagged or conditional source instead of allowing one
-upload to replace another.
+CodeQL runs `security-extended` queries across GitHub Actions, JavaScript and
+TypeScript tooling, Go on Linux and Windows, and C/C++ across AVR, Linux, and
+Windows builds. Platform-specific categories remain distinct, while the stable
+`🛡️ CodeQL · Entire repository` job is the protected-branch gate. Checkouts do
+not persist credentials, workflows receive no repository secrets, and the scan
+uploads SARIF only.
 
-| Codebase | Analyzer | Build captured by CodeQL |
-|---|---|---|
-| GitHub Actions | `actions` | Every tracked workflow |
-| Project tooling | `javascript-typescript` | Build, Firmware, Audit, and CI scripts and tests |
-| Host | `go` | Linux and Windows tests, ignored icon generator, and tagged C ABI builds |
-| Firmware + Virtual Board | `c-cpp` | Real MiniCore AVR compile, Linux CMake build, Windows CMake build, and Windows C ABI smoke source |
+## Release policy
 
-The workflow has no path filters, receives no repository secrets, checks out
-without persisted credentials, and uploads only SARIF results. Its final
-`🛡️ CodeQL · Entire repository` job is the stable branch-protection gate and
-publishes one consolidated codebase summary even when an analysis fails.
+A release tag must be explicit SemVer. A tag below `v1.0.0`, or a tag that
+contains a SemVer prerelease suffix, is published as a GitHub prerelease.
+PCController must not be described as stable until all of the following are
+true:
 
-Dependabot-authored updates should be merged with a merge commit. Squashing a
-Dependabot commit can cause the following `main` push to receive a read-only
-token, which prevents SARIF upload even though the pull-request analysis
-already passed.
+- the exact release source passes the complete automated matrix;
+- packaged Windows, Linux, and macOS hosts pass launch and identity checks;
+- the embedded WebUI passes desktop/mobile, RTL/LTR, theme, keyboard, event,
+  and HTTP-serving acceptance from the packaged executable;
+- a labeled board passes connection, telemetry, peripheral, reconnect,
+  backup/program/verify/restore, and safe-loaded-output checks;
+- known hardware-dependent limitations are documented in release notes;
+- platform signing status is stated accurately.
 
-## Gated hardware deployment
+## Local release-equivalent build
 
-The AVR deploy workflow is intentionally separate from build and release. It
-runs only through manual dispatch on an approved, labeled self-hosted runner
-with a protected GitHub Environment. It requires explicit target/method inputs
-and confirmation, verifies the selected firmware SHA-256 before invoking the
-project's guarded programmer path, and retains the deployment log.
+Build the firmware and host with an explicit version without touching hardware:
 
-The preparation job can validate either a published release or a release draft.
-GitHub exposes drafts only to tokens with push access, so `contents: write` is
-scoped to that job alone; its commands only download and verify assets. The
-hardware job retains the workflow's read-only token and cannot run until every
-independent hardware gate below is satisfied.
-
-Bundle preparation also runs through the `avr-release-read` environment,
-whose deployment policy accepts only the `main` branch. It has no secrets and
-requires no manual approval; the environment exists to enforce the branch
-boundary independently of the workflow file.
-
-The release manifest's source SHA is firmware provenance, not executable
-runner input. The self-hosted job always builds its guarded programmer from
-the protected `main` branch with checkout credentials disabled; it never
-checks out a release-selected or operator-supplied commit. Deployment evidence
-records both the firmware source SHA and the independently trusted deployment
-controller SHA. Preparation also requires the release target to equal the
-manifest SHA and proves that commit is an ancestor of the protected `main`
-checkout before a programming bundle can reach the hardware job.
-
-The device job remains inert until repository setup explicitly sets
-`ENABLE_AVR_DEPLOY=true`, configures the protected `avr-hardware` environment,
-and registers a trusted runner with the `pccontroller-avr` label. The workflow
-file alone does not satisfy any of those hardware gates.
-
-The presence of this workflow is not evidence of a successful upload. Record
-the board identity, firmware hash, port/programmer, backup, read-back result,
-and smoke-test evidence for each physical acceptance. Never connect serial
-upload and ISP programming at the same time.
-
-## Local parity checks
-
-On Windows, the highest-value hardware-free pre-push checks are:
-
-```bat
-build.cmd --all --clean --no-upx --version v0.1.0-alpha.1
-cmake -S Tools\VirtualBoard -B .build\virtual-board -DBUILD_TESTING=ON
-cmake --build .build\virtual-board --config Release --parallel
-ctest --test-dir .build\virtual-board -C Release --output-on-failure
+```console
+build.cmd --all --clean --no-upx --version <semver>
 ```
 
-On Linux or macOS, use `./build.sh` with the same build arguments. None of the
-commands above programs hardware. See the
-[build-tool guide](../Tools/Build/README.md) for dependency setup and the
-[firmware studio guide](../Tools/Firmware/README.md) for guarded upload paths.
+```bash
+./build.sh --all --clean --no-upx --version <semver>
+```
+
+Build and test the Virtual Board with the CMake commands in its
+[maintained guide](../Tools/VirtualBoard/README.md); the flagship CI workflow
+runs the checked-in `release` preset independently on all five targets.
+
+The local build writes generated output only to canonical project locations:
+
+- `.build/firmware/`
+- `Tools/Controller/bin/`
+- `Tools/VirtualBoard/.build/` for the standalone Virtual Board helper
+
+Do not treat loose executables or files outside those locations as current
+artifacts.
+
+## Hardware deployment boundary
+
+Ordinary CI and source watching do not program a board. Physical deployment
+requires an explicit port/device selector and operator-selected method. The
+Host owns backup, quiet-output preparation, programmer execution,
+readback verification, reconnect, and board-settings restoration.
+
+The deploy job always runs trusted controller code from protected `main`; the
+release-selected SHA remains firmware provenance only. A protected environment,
+repository opt-in, labeled self-hosted runner, exact device/method selection,
+checksum verification, and explicit confirmation must all pass before the
+hardware job can start. A workflow definition is never presented as evidence
+that a physical upload occurred.
+
+Bundle preparation may verify either a published release or a draft. Because
+GitHub restricts draft visibility, `contents: write` is scoped only to the
+download-and-verify preparation job; the hardware job retains a read-only
+token. Preparation also runs through the secret-free `avr-release-read`
+environment, whose deployment policy accepts only protected `main`.
+
+The release target must equal the manifest source SHA and be an ancestor of
+the protected deployment checkout. The self-hosted runner builds the guarded
+programmer from protected `main` with persisted checkout credentials disabled,
+so deployment evidence records firmware provenance and the independently
+trusted deployment-controller identity separately.
+
+See [Toolchain and Safe Programming](Toolchain-and-Safe-Programming.md) for the
+complete transaction and recovery rules.
+
+<p align="center"><a href="../README.md">← Return to the PCController main page</a></p>

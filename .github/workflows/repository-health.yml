@@ -24,10 +24,18 @@ jobs:
       - name: "📥 Check out source"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      - name: "🔐 Read exact Host dependency lock"
+        id: host-dependencies
+        shell: bash
+        run: node Tools/Dependencies/export-lock.mjs export-host --output "$GITHUB_OUTPUT"
+
       - name: "🟢 Install Node.js"
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
-          node-version: "24"
+          node-version: ${{ steps.host-dependencies.outputs.node_version }}
+
+      - name: "📦 Restore locked build-tool dependencies"
+        run: npm ci --prefix Tools/Build --ignore-scripts
 
       - name: "🐹 Install Go from go.mod"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
@@ -52,9 +60,13 @@ jobs:
           node --check .github/scripts/codebase-summary.mjs
           node --check .github/scripts/package-directory.mjs
           node --check .github/scripts/step-summary.mjs
+          node Tools/Dependencies/export-lock.mjs validate
+          node --test .github/scripts/assert-defaults.test.mjs
           node --test .github/scripts/codebase-summary.test.mjs
           node --test .github/scripts/package-directory.test.mjs
-          node --test .github/scripts/dependency-report.test.mjs
+          node --test .github/scripts/repository-context.test.mjs
+          node --test .github/scripts/repository-policy.test.mjs
+          node --test Tools/Dependencies/export-lock.test.mjs
           node --test .github/scripts/release-asset-collisions.test.mjs
           node --test .github/scripts/release-showcase.test.mjs
           node --test .github/scripts/security-config-check.test.mjs
@@ -64,7 +76,7 @@ jobs:
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
       - name: "🧹 Check whitespace"
-        run: git show --check --oneline HEAD
+        run: git show --check --oneline HEAD -- . ':(exclude)**/*.patch'
 
       - name: "✨ Publish repository quality summary"
         if: success()

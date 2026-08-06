@@ -3,11 +3,15 @@ package appconfig
 import (
 	"fmt"
 	"strings"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 const (
-	MaxOutputDefinitions = 32
-	MaxMelodyNotes       = 64
+	MaxOutputDefinitions       = 32
+	MaxMelodyNotes             = 64
+	PowerDownMelodyName        = "power-down"
+	ProgrammingReadyMelodyName = "programming-ready"
 )
 
 // Melody is PC-side configuration. The host streams one note at a time over
@@ -23,19 +27,23 @@ type MelodyNote struct {
 	GapMS       uint16 `json:"gap_ms,omitempty"`
 }
 
-// StatusLEDEffect describes a host-streamed animation for the board's status
-// RGB output. Kind is "flash" or "breathe"; DurationMS zero means run until
-// explicitly stopped.
+// StatusLEDEffect describes one compact MCU-owned status RGB animation. Repeats
+// zero means loop until explicitly stopped; DurationMS remains a compatibility
+// input and is converted to a bounded cycle count when Repeats is omitted.
 type StatusLEDEffect struct {
-	Name          string `json:"name"`
-	Kind          string `json:"kind"`
-	Red           byte   `json:"red"`
-	Green         byte   `json:"green"`
-	Blue          byte   `json:"blue"`
-	Brightness    byte   `json:"brightness"`
-	MinBrightness byte   `json:"min_brightness,omitempty"`
-	PeriodMS      int    `json:"period_ms"`
-	DurationMS    int    `json:"duration_ms,omitempty"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	Red            byte   `json:"red"`
+	Green          byte   `json:"green"`
+	Blue           byte   `json:"blue"`
+	AlternateRed   byte   `json:"alternate_red,omitempty"`
+	AlternateGreen byte   `json:"alternate_green,omitempty"`
+	AlternateBlue  byte   `json:"alternate_blue,omitempty"`
+	Brightness     byte   `json:"brightness"`
+	MinBrightness  byte   `json:"min_brightness,omitempty"`
+	PeriodMS       int    `json:"period_ms"`
+	DurationMS     int    `json:"duration_ms,omitempty"`
+	Repeats        byte   `json:"repeats,omitempty"`
 }
 
 func DefaultMelodies() []Melody {
@@ -56,6 +64,34 @@ func DefaultMelodies() []Melody {
 				{FrequencyHz: 880, DurationMS: 180},
 			},
 		},
+		DefaultPowerDownMelody(),
+		DefaultProgrammingReadyMelody(),
+	}
+}
+
+// DefaultPowerDownMelody is the deterministic short PC-streamed cue used by
+// guarded programming when the watched host configuration omits its override.
+func DefaultPowerDownMelody() Melody {
+	return Melody{
+		Name: PowerDownMelodyName,
+		Notes: []MelodyNote{
+			{FrequencyHz: 784, DurationMS: 80, GapMS: 25},
+			{FrequencyHz: 659, DurationMS: 90, GapMS: 25},
+			{FrequencyHz: 523, DurationMS: 140},
+		},
+	}
+}
+
+// DefaultProgrammingReadyMelody mirrors the board's short rising startup cue
+// after a programming latch intentionally suppressed the MCU boot melody.
+func DefaultProgrammingReadyMelody() Melody {
+	return Melody{
+		Name: ProgrammingReadyMelodyName,
+		Notes: []MelodyNote{
+			{FrequencyHz: 1032, DurationMS: 70, GapMS: 60},
+			{FrequencyHz: 2010, DurationMS: 70, GapMS: 60},
+			{FrequencyHz: 2400, DurationMS: 120, GapMS: 150},
+		},
 	}
 }
 
@@ -64,6 +100,7 @@ func DefaultStatusLEDEffects() []StatusLEDEffect {
 		{
 			Name: "attention", Kind: "flash",
 			Red: 255, Green: 96, Blue: 0, Brightness: 220,
+			AlternateRed: 0, AlternateGreen: 0, AlternateBlue: 0,
 			PeriodMS: 700, DurationMS: 0,
 		},
 		{
@@ -75,20 +112,13 @@ func DefaultStatusLEDEffects() []StatusLEDEffect {
 	}
 }
 
-// Effective* provides useful built-ins for old configuration files that
-// predate these optional fields. A non-empty configured list replaces the
-// built-ins, so a file-watcher reload takes effect on the next play command.
+// Effective* returns the watched configuration exactly. Defaults are written
+// when a new configuration is created; an empty list is an intentional choice.
 func EffectiveMelodies(config Config) []Melody {
-	if len(config.Melodies) == 0 {
-		return DefaultMelodies()
-	}
 	return cloneMelodies(config.Melodies)
 }
 
 func EffectiveStatusLEDEffects(config Config) []StatusLEDEffect {
-	if len(config.StatusEffects) == 0 {
-		return DefaultStatusLEDEffects()
-	}
 	return append([]StatusLEDEffect(nil), config.StatusEffects...)
 }
 
@@ -180,23 +210,18 @@ func validateOutputDefinitions(
 		names[name] = true
 		kind := strings.ToLower(strings.TrimSpace(effect.Kind))
 		switch kind {
-		case "flash":
-			if effect.PeriodMS < 200 || effect.PeriodMS > 60000 {
+		case "flash", "breathe", "cycle", "transition":
+			if effect.PeriodMS < int(native.StatusEffectMinimumPeriodMS) ||
+				effect.PeriodMS > int(native.StatusEffectMaximumPeriodMS) {
 				return fmt.Errorf(
-					"status_effects[%d].period_ms for flash must be 200..60000",
-					index,
-				)
-			}
-		case "breathe":
-			if effect.PeriodMS < 400 || effect.PeriodMS > 60000 {
-				return fmt.Errorf(
-					"status_effects[%d].period_ms for breathe must be 400..60000",
-					index,
+					"status_effects[%d].period_ms must be %d..%d",
+					index, native.StatusEffectMinimumPeriodMS,
+					native.StatusEffectMaximumPeriodMS,
 				)
 			}
 		default:
 			return fmt.Errorf(
-				"status_effects[%d].kind must be flash or breathe",
+				"status_effects[%d].kind must be flash, breathe, cycle, or transition",
 				index,
 			)
 		}

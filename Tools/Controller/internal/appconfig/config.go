@@ -9,22 +9,31 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fsnotify/fsnotify"
 
 	"pccontroller.local/controller/internal/hostos"
+	"pccontroller.local/controller/internal/productidentity"
+	"pccontroller.local/controller/internal/secretstore"
 )
 
 const (
-	SchemaVersion        = 1
+	// SchemaVersion identifies the current host configuration schema.
+	SchemaVersion = 1
+	// DefaultWatchInterval bounds the polling fallback when file notifications
+	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
 )
 
+// Config is the persistent host-side configuration root; it never mirrors or
+// replaces the MCU's EEPROM-owned settings.
 type Config struct {
 	Schema        int               `json:"schema"`
 	Connection    Connection        `json:"connection"`
@@ -44,6 +53,7 @@ type Config struct {
 	Automations   []Automation      `json:"automations,omitempty"`
 }
 
+// Connection configures serial discovery, handshake timing, and reconnect behavior.
 type Connection struct {
 	Port             string          `json:"port,omitempty"`
 	VID              string          `json:"vid,omitempty"`
@@ -57,6 +67,7 @@ type Connection struct {
 	LastDevice       *DeviceIdentity `json:"last_device,omitempty"`
 }
 
+// DeviceIdentity records the last successfully connected USB serial device.
 type DeviceIdentity struct {
 	Port         string    `json:"port,omitempty"`
 	VID          string    `json:"vid,omitempty"`
@@ -67,51 +78,117 @@ type DeviceIdentity struct {
 	LastSeen     time.Time `json:"last_seen,omitempty"`
 }
 
+// UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
-	AppTitle             string `json:"app_title"`
-	SetupComplete        bool   `json:"setup_complete"`
-	WelcomeMelody        string `json:"welcome_melody"`
-	StatusIntervalMS     int    `json:"status_interval_ms"`
-	IdleStatusIntervalMS int    `json:"idle_status_interval_ms"`
-	EventLogLimit        int    `json:"event_log_limit"`
-	HistoryHours         int    `json:"history_hours"`
-	HistorySampleMS      int    `json:"history_sample_ms"`
-	VoltageDecimals      int    `json:"voltage_decimals"`
-	CurrentDecimals      int    `json:"current_decimals"`
-	PowerDecimals        int    `json:"power_decimals"`
-	TemperatureDecimals  int    `json:"temperature_decimals"`
-	ShowSupplyVoltage    bool   `json:"show_supply_voltage"`
-	ShowBusVoltage       bool   `json:"show_bus_voltage"`
-	ShowCurrent          bool   `json:"show_current"`
-	ShowPower            bool   `json:"show_power"`
-	ShowTemperatureLED   bool   `json:"show_temperature_led"`
-	ShowTemperatureBT    bool   `json:"show_temperature_bt"`
-	ShowIO               bool   `json:"show_io"`
-	ShowDiagnostics      bool   `json:"show_diagnostics"`
-	ShowGraphs           bool   `json:"show_graphs"`
-	LCDServiceEnabled    bool   `json:"lcd_service_enabled"`
-	MirrorPromptToLCD    bool   `json:"mirror_prompt_to_lcd"`
-	LCDPromptDebounceMS  int    `json:"lcd_prompt_debounce_ms"`
-	LCDPriorityHoldMS    int    `json:"lcd_priority_hold_ms"`
+	AppTitle             string            `json:"app_title"`
+	Tagline              string            `json:"tagline"`
+	Appearance           Appearance        `json:"appearance"`
+	SeparatePortButtons  bool              `json:"separate_port_buttons"`
+	TableLayout          string            `json:"table_layout"`
+	PeripheralNames      map[string]string `json:"peripheral_names,omitempty"`
+	SetupComplete        bool              `json:"setup_complete"`
+	WelcomeMelody        string            `json:"welcome_melody"`
+	StatusIntervalMS     int               `json:"status_interval_ms"`
+	IdleStatusIntervalMS int               `json:"idle_status_interval_ms"`
+	EventLogLimit        int               `json:"event_log_limit"`
+	HistoryHours         int               `json:"history_hours"`
+	HistorySampleMS      int               `json:"history_sample_ms"`
+	VoltageDecimals      int               `json:"voltage_decimals"`
+	CurrentDecimals      int               `json:"current_decimals"`
+	PowerDecimals        int               `json:"power_decimals"`
+	TemperatureDecimals  int               `json:"temperature_decimals"`
+	ShowSupplyVoltage    bool              `json:"show_supply_voltage"`
+	ShowBusVoltage       bool              `json:"show_bus_voltage"`
+	ShowCurrent          bool              `json:"show_current"`
+	ShowPower            bool              `json:"show_power"`
+	ShowTemperatureLED   bool              `json:"show_temperature_led"`
+	ShowTemperatureBT    bool              `json:"show_temperature_bt"`
+	ShowIO               bool              `json:"show_io"`
+	ShowDiagnostics      bool              `json:"show_diagnostics"`
+	ShowGraphs           bool              `json:"show_graphs"`
+	LCDServiceEnabled    bool              `json:"lcd_service_enabled"`
+	MirrorPromptToLCD    bool              `json:"mirror_prompt_to_lcd"`
+	LCDPromptDebounceMS  int               `json:"lcd_prompt_debounce_ms"`
+	LCDPriorityHoldMS    int               `json:"lcd_priority_hold_ms"`
+	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
 }
 
+// Appearance is the host-authoritative presentation preference shared by the
+// WebUI and native surfaces. Browser storage is only a startup cache; the
+// watched PC configuration remains authoritative.
+type Appearance struct {
+	Theme          string  `json:"theme"`
+	Locale         string  `json:"locale"`
+	Direction      string  `json:"direction"`
+	ReduceMotion   bool    `json:"reduce_motion"`
+	CompactNumbers bool    `json:"compact_numbers"`
+	AudioMuted     bool    `json:"audio_muted"`
+	AudioVolume    float64 `json:"audio_volume"`
+}
+
+// NormalizeAppearance canonicalizes textual preference values without
+// changing explicit false, zero, or empty values. Validation decides whether
+// the resulting values are supported.
+func NormalizeAppearance(value Appearance) Appearance {
+	value.Theme = strings.ToLower(strings.TrimSpace(value.Theme))
+	value.Locale = strings.ToLower(strings.TrimSpace(value.Locale))
+	value.Direction = strings.ToLower(strings.TrimSpace(value.Direction))
+	if value.AudioVolume == 0 {
+		value.AudioVolume = 0 // canonicalize negative zero for stable hashing.
+	}
+	return value
+}
+
+// IPC configures authenticated local and optional remote controller transports.
 type IPC struct {
-	Listen         string   `json:"listen"`
-	WebSocketPath  string   `json:"websocket_path"`
-	AllowRemote    bool     `json:"allow_remote"`
-	AuthToken      string   `json:"auth_token,omitempty"`
-	AllowedOrigins []string `json:"allowed_origins,omitempty"`
+	Listen          string             `json:"listen"`
+	WebSocketPath   string             `json:"websocket_path"`
+	AllowRemote     bool               `json:"allow_remote"`
+	AuthToken       string             `json:"auth_token,omitempty"`
+	AuthTokenRef    string             `json:"auth_token_ref,omitempty"`
+	RemotePrincipal string             `json:"remote_principal"`
+	AllowedOrigins  []string           `json:"allowed_origins,omitempty"`
+	RemotePolicy    RemoteAccessPolicy `json:"remote_policy"`
 	// Socket.IO is a distinct protocol and is never advertised by the plain
 	// WebSocket endpoint. This path is reserved for an explicit adapter.
 	SocketIOPath string `json:"socket_io_path"`
 }
 
+// RemoteAccessPolicy grants authenticated network peers only the capabilities
+// the operator selected. Loopback IPC remains the trusted primary-owner API.
+// Monitoring and event subscriptions are safe defaults; every mutating or OS
+// capability is opt-in.
+type RemoteAccessPolicy struct {
+	Read              bool `json:"read"`
+	Events            bool `json:"events"`
+	Messages          bool `json:"messages"`
+	BoardCommands     bool `json:"board_commands"`
+	HostConfiguration bool `json:"host_configuration"`
+	ConnectionControl bool `json:"connection_control"`
+	Reset             bool `json:"reset"`
+	Programming       bool `json:"programming"`
+	Shutdown          bool `json:"shutdown"`
+	VirtualKeys       bool `json:"virtual_keys"`
+	PowerActions      bool `json:"power_actions"`
+	HostAutomations   bool `json:"host_automations"`
+	BridgeCalls       bool `json:"bridge_calls"`
+	Integrations      bool `json:"integrations"`
+}
+
+// DefaultRemoteAccessPolicy allows authenticated observation without granting
+// any remote write, reset, programming, OS, or bridge-pivot authority.
+func DefaultRemoteAccessPolicy() RemoteAccessPolicy {
+	return RemoteAccessPolicy{Read: true, Events: true}
+}
+
+// Safety configures host-side guards applied before board control commands.
 type Safety struct {
 	// MotionDoorPolicy is a PC-side command guard, not an MCU EEPROM mirror.
 	// Values are always, open, closed, and never.
 	MotionDoorPolicy string `json:"motion_door_policy"`
 }
 
+// Paths locates project, script, firmware, and history resources used by the host.
 type Paths struct {
 	Project          string `json:"project,omitempty"`
 	ScriptsDirectory string `json:"scripts_directory,omitempty"`
@@ -119,15 +196,18 @@ type Paths struct {
 	HistoryFile      string `json:"history_file,omitempty"`
 }
 
+// Programming selects the host toolchain and default programming transport.
 type Programming struct {
-	Method      string `json:"method,omitempty"`
-	FQBN        string `json:"fqbn,omitempty"`
-	Programmer  string `json:"programmer,omitempty"`
-	ArduinoCLI  string `json:"arduino_cli,omitempty"`
-	Avrdude     string `json:"avrdude,omitempty"`
-	AvrdudeConf string `json:"avrdude_conf,omitempty"`
+	Method          string `json:"method,omitempty"`
+	FQBN            string `json:"fqbn,omitempty"`
+	Programmer      string `json:"programmer,omitempty"`
+	ToolchainCLI    string `json:"toolchain_cli,omitempty"`
+	ToolchainConfig string `json:"toolchain_config,omitempty"`
+	Avrdude         string `json:"avrdude,omitempty"`
+	AvrdudeConf     string `json:"avrdude_conf,omitempty"`
 }
 
+// Macro defines a named, host-persisted sequence streamed to the MCU executor.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
@@ -140,11 +220,10 @@ type Macro struct {
 	Steps               []MacroStep `json:"steps"`
 }
 
+// MacroStep describes one precisely timed macro operation.
 type MacroStep struct {
-	// AtUS is the canonical absolute offset from the MCU playback epoch. AtMS
-	// remains accepted for readable/legacy configuration files.
+	// AtUS is the absolute offset from the MCU playback epoch.
 	AtUS uint32 `json:"at_us,omitempty"`
-	AtMS int    `json:"at_ms,omitempty"`
 	Kind string `json:"kind"`
 
 	Target      byte   `json:"target,omitempty"`
@@ -165,6 +244,7 @@ type MacroStep struct {
 	PayloadHex  string `json:"payload_hex,omitempty"`
 }
 
+// Automation binds matching host or board events to ordered host-side actions.
 type Automation struct {
 	Name       string             `json:"name"`
 	Enabled    bool               `json:"enabled"`
@@ -173,6 +253,7 @@ type Automation struct {
 	Actions    []AutomationAction `json:"actions"`
 }
 
+// AutomationMatch selects the event attributes that trigger an automation.
 type AutomationMatch struct {
 	Kind       string  `json:"kind"`
 	Lifecycle  string  `json:"lifecycle,omitempty"`
@@ -186,6 +267,7 @@ type AutomationMatch struct {
 	RFProtocol byte    `json:"rf_protocol,omitempty"`
 }
 
+// AutomationAction describes one command, macro, process, RF, key, or OS action.
 type AutomationAction struct {
 	Type       string      `json:"type"`
 	Command    string      `json:"command,omitempty"`
@@ -201,6 +283,7 @@ type AutomationAction struct {
 	Confirm    string      `json:"confirm,omitempty"`
 }
 
+// RFTransmit defines a host-configured 433 MHz transmission payload.
 type RFTransmit struct {
 	Code     uint32 `json:"code"`
 	Bits     byte   `json:"bits"`
@@ -209,6 +292,7 @@ type RFTransmit struct {
 	Repeats  byte   `json:"repeats,omitempty"`
 }
 
+// Defaults returns a complete safe host configuration for a new installation.
 func Defaults() Config {
 	return Config{
 		Schema: SchemaVersion,
@@ -222,7 +306,12 @@ func Defaults() Config {
 			HelloAttempts:    3,
 		},
 		UI: UI{
-			AppTitle:             "PCController",
+			AppTitle: productidentity.DefaultTitle,
+			Tagline:  productidentity.FirstRunTagline,
+			Appearance: Appearance{
+				Theme: "system", Locale: "en", Direction: "auto", AudioVolume: 0.42,
+			},
+			TableLayout:          "compact",
 			WelcomeMelody:        "notify",
 			StatusIntervalMS:     200,
 			IdleStatusIntervalMS: 0,
@@ -246,21 +335,31 @@ func Defaults() Config {
 			MirrorPromptToLCD:    false,
 			LCDPromptDebounceMS:  120,
 			LCDPriorityHoldMS:    2000,
+			SegmentScroll:        DefaultSegmentScroll(),
 		},
 		IPC: IPC{
-			Listen:         "127.0.0.1:8787",
-			WebSocketPath:  "/ipc",
-			AllowedOrigins: []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
-			SocketIOPath:   "/socket.io/",
+			Listen:          "127.0.0.1:8787",
+			WebSocketPath:   "/ipc",
+			RemotePrincipal: "remote-operator",
+			AllowedOrigins:  []string{"localhost:*", "127.0.0.1:*", "[::1]:*"},
+			SocketIOPath:    "/socket.io/",
+			RemotePolicy:    DefaultRemoteAccessPolicy(),
 		},
 		Safety:    Safety{MotionDoorPolicy: "always"},
 		RF:        DefaultRFConfig(),
 		HostMenus: DefaultHostMenus(),
 		OSActions: hostos.DefaultPolicy(),
 		Integrations: Integrations{
-			Keyboard:  DefaultKeyboardControl(),
-			StatusLED: DefaultStatusLEDPolicy(),
+			Keyboard:     DefaultKeyboardControl(),
+			Lifecycle:    DefaultLifecycleSafety(),
+			StatusLED:    DefaultStatusLEDPolicy(),
+			BuzzerMirror: DefaultBuzzerMirror(),
 			Hotkeys: []Hotkey{
+				{Name: "open-dashboard", Enabled: true, Chord: "F13", Command: "app page dashboard"},
+				{Name: "open-controls", Enabled: true, Chord: "F14", Command: "app page controls"},
+				{Name: "open-workbench", Enabled: true, Chord: "F15", Command: "app page workbench"},
+				{Name: "open-updates", Enabled: true, Chord: "F16", Command: "app page updates"},
+				{Name: "open-settings", Enabled: true, Chord: "F17", Command: "app page settings"},
 				{Name: "open-events", Enabled: true, Chord: "Ctrl+Alt+P", Command: "app page events"},
 				{Name: "emergency-outputs-off", Enabled: true, Chord: "Ctrl+Alt+Shift+S", Command: "relay off"},
 			},
@@ -276,6 +375,7 @@ func Defaults() Config {
 					{ID: "stop", Label: "Stop outputs", Command: "relay off"},
 				},
 			},
+			DataHub: DataHub{BaseURL: "http://127.0.0.1:8080"},
 		},
 		Scripts:       map[string]string{},
 		Macros:        []Macro{},
@@ -284,14 +384,17 @@ func Defaults() Config {
 	}
 }
 
+// DefaultPath returns the canonical per-user host configuration path.
 func DefaultPath() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", fmt.Errorf("locate user configuration directory: %w", err)
 	}
-	return filepath.Join(base, "PCController", "config.json"), nil
+	return filepath.Join(base, productidentity.ConfigDirectory, "config.json"), nil
 }
 
+// ResolvePath selects an explicit path, then the environment override, then
+// the canonical per-user path.
 func ResolvePath(explicit string) (string, error) {
 	if explicit == "" {
 		explicit = os.Getenv("PCCONTROLLER_CONFIG")
@@ -306,6 +409,8 @@ func ResolvePath(explicit string) (string, error) {
 	return absolute, nil
 }
 
+// Load decodes and validates a JSON, YAML, or TOML host configuration and
+// returns the exact source-content digest.
 func Load(path string) (Config, [sha256.Size]byte, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -319,13 +424,16 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
-	value.HostMenus = canonicalizeHostMenus(value.HostMenus)
+	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	if err := value.Validate(); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: %w", path, err)
 	}
 	return value, sha256.Sum256(content), nil
 }
 
+// LoadOrCreate loads an existing configuration or writes validated defaults
+// when the target does not yet exist.
 func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 	value, digest, err := Load(path)
 	if err == nil {
@@ -341,9 +449,11 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 	return Load(path)
 }
 
+// Write validates and persists a host configuration with protected file permissions.
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
-	value.HostMenus = canonicalizeHostMenus(value.HostMenus)
+	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -392,6 +502,7 @@ func Write(path string, value Config) error {
 	return nil
 }
 
+// Validate rejects unsafe, ambiguous, or unsupported host configuration values.
 func (value Config) Validate() error {
 	if value.Schema != SchemaVersion {
 		return fmt.Errorf("unsupported schema %d", value.Schema)
@@ -410,8 +521,50 @@ func (value Config) Validate() error {
 		return fmt.Errorf("connection.hello_attempts must be 1..10")
 	}
 	if title := strings.TrimSpace(value.UI.AppTitle); title == "" ||
-		len(title) > 64 || !printableText(title) {
+		utf8.RuneCountInString(title) > 64 || !printableText(title) {
 		return fmt.Errorf("ui.app_title must be 1..64 printable characters")
+	}
+	if tagline := strings.TrimSpace(value.UI.Tagline); tagline == "" ||
+		utf8.RuneCountInString(tagline) > 96 || !printableText(tagline) {
+		return fmt.Errorf("ui.tagline must be 1..96 printable characters")
+	}
+	appearance := NormalizeAppearance(value.UI.Appearance)
+	switch appearance.Theme {
+	case "system", "light", "dark":
+	default:
+		return errors.New("ui.appearance.theme must be system, light, or dark")
+	}
+	switch appearance.Locale {
+	case "en", "fa":
+	default:
+		return errors.New("ui.appearance.locale must be en or fa")
+	}
+	switch appearance.Direction {
+	case "auto", "ltr", "rtl":
+	default:
+		return errors.New("ui.appearance.direction must be auto, ltr, or rtl")
+	}
+	if math.IsNaN(appearance.AudioVolume) || math.IsInf(appearance.AudioVolume, 0) ||
+		appearance.AudioVolume < 0 || appearance.AudioVolume > 1 {
+		return errors.New("ui.appearance.audio_volume must be a finite value from 0 to 1")
+	}
+	if len(value.UI.PeripheralNames) > MaxPeripheralNames {
+		return fmt.Errorf("ui.peripheral_names may contain at most %d entries", MaxPeripheralNames)
+	}
+	switch strings.ToLower(strings.TrimSpace(value.UI.TableLayout)) {
+	case "compact", "expanded":
+	default:
+		return errors.New("ui.table_layout must be compact or expanded")
+	}
+	for key, name := range value.UI.PeripheralNames {
+		key = strings.TrimSpace(key)
+		name = strings.TrimSpace(name)
+		if key == "" || len(key) > 32 || !printableASCII(key) {
+			return fmt.Errorf("ui.peripheral_names key %q must be 1..32 printable ASCII bytes", key)
+		}
+		if name == "" || utf8.RuneCountInString(name) > 64 || !printableText(name) {
+			return fmt.Errorf("ui.peripheral_names[%q] must be 1..64 printable characters", key)
+		}
 	}
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {
 		return errors.New("ui.welcome_melody must contain 1..64 characters")
@@ -437,6 +590,9 @@ func (value Config) Validate() error {
 	}
 	if value.UI.LCDPriorityHoldMS < 250 || value.UI.LCDPriorityHoldMS > 60_000 {
 		return fmt.Errorf("ui.lcd_priority_hold_ms must be 250..60000")
+	}
+	if err := validateSegmentScroll(value.UI.SegmentScroll); err != nil {
+		return err
 	}
 	for name, decimals := range map[string]int{
 		"voltage":     value.UI.VoltageDecimals,
@@ -507,16 +663,7 @@ func (value Config) Validate() error {
 		}
 		var previous uint32
 		for stepIndex, step := range macro.Steps {
-			if step.AtMS < 0 || (step.AtUS != 0 && step.AtMS != 0) {
-				return fmt.Errorf("macros[%d].steps[%d] must use one nonnegative at_us or at_ms offset", index, stepIndex)
-			}
 			due := step.AtUS
-			if step.AtUS == 0 && step.AtMS != 0 {
-				if step.AtMS > 2_147_483 {
-					return fmt.Errorf("macros[%d].steps[%d].at_ms exceeds the MCU timing window", index, stepIndex)
-				}
-				due = uint32(step.AtMS) * 1000
-			}
 			if due > 0x7FFFFFFF || (stepIndex != 0 && due < previous) {
 				return fmt.Errorf("macros[%d].steps[%d] offset must be ordered within 0..2147483647 us", index, stepIndex)
 			}
@@ -795,16 +942,27 @@ func printableText(value string) bool {
 	return true
 }
 
+// Store owns the current validated host configuration and its subscribers.
 type Store struct {
-	path           string
-	mu             sync.RWMutex
-	value          Config
-	digest         [sha256.Size]byte
-	subscribers    map[uint64]chan Config
-	nextSubscriber uint64
+	path               string
+	mu                 sync.RWMutex
+	value              Config
+	digest             [sha256.Size]byte
+	subscribers        map[uint64]chan Config
+	runtimeSubscribers map[uint64]chan Config
+	nextSubscriber     uint64
+	secrets            *secretstore.Resolver
+	appTitleOverride   string
+	taglineOverride    string
 }
 
+// Open resolves and loads a persistent configuration store, creating defaults
+// when required.
 func Open(path string) (*Store, error) {
+	return openWithSecrets(path, secretstore.New(productidentity.StableAppID))
+}
+
+func openWithSecrets(path string, secrets *secretstore.Resolver) (*Store, error) {
 	resolved, err := ResolvePath(path)
 	if err != nil {
 		return nil, err
@@ -813,20 +971,65 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{
+	store := &Store{
 		path: resolved, value: clone(value), digest: digest,
-		subscribers: make(map[uint64]chan Config),
-	}, nil
+		subscribers:        make(map[uint64]chan Config),
+		runtimeSubscribers: make(map[uint64]chan Config),
+		secrets:            secrets,
+	}
+	if _, err := store.Runtime(); err != nil {
+		return nil, fmt.Errorf("resolve configuration secrets: %w", err)
+	}
+	return store, nil
 }
 
+// Path returns the resolved backing-file path.
 func (store *Store) Path() string {
 	return store.path
 }
 
+// Current returns an isolated copy of the active configuration.
 func (store *Store) Current() Config {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	return clone(store.value)
+	return store.effectiveLocked()
+}
+
+// SetPresentationOverrides applies process-lifetime branding without writing
+// it to the watched configuration. Empty values leave the corresponding
+// configuration value authoritative. Callers resolve precedence before this
+// method, so command-line flags can override environment variables cleanly.
+func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
+	appTitle = strings.TrimSpace(appTitle)
+	tagline = strings.TrimSpace(tagline)
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	candidate := clone(store.value)
+	if appTitle != "" {
+		candidate.UI.AppTitle = appTitle
+	}
+	if tagline != "" {
+		candidate.UI.Tagline = tagline
+	}
+	if err := candidate.Validate(); err != nil {
+		return fmt.Errorf("presentation override: %w", err)
+	}
+	store.appTitleOverride = appTitle
+	store.taglineOverride = tagline
+	store.notifyLocked(store.value)
+	store.notifyRuntimeLocked(store.value)
+	return nil
+}
+
+func (store *Store) effectiveLocked() Config {
+	value := clone(store.value)
+	if store.appTitleOverride != "" {
+		value.UI.AppTitle = store.appTitleOverride
+	}
+	if store.taglineOverride != "" {
+		value.UI.Tagline = store.taglineOverride
+	}
+	return value
 }
 
 // Update applies one atomic PC-side configuration mutation and persists it.
@@ -841,6 +1044,9 @@ func (store *Store) Update(change func(*Config) error) (Config, error) {
 	if err := change(&value); err != nil {
 		return clone(store.value), err
 	}
+	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
+		return clone(store.value), fmt.Errorf("resolve configuration secrets: %w", err)
+	}
 	if err := Write(store.path, value); err != nil {
 		return clone(store.value), err
 	}
@@ -851,7 +1057,8 @@ func (store *Store) Update(change func(*Config) error) (Config, error) {
 	store.value = clone(loaded)
 	store.digest = digest
 	store.notifyLocked(loaded)
-	return clone(store.value), nil
+	store.notifyRuntimeLocked(loaded)
+	return store.effectiveLocked(), nil
 }
 
 // Subscribe receives the current PC-side configuration immediately and every
@@ -863,7 +1070,7 @@ func (store *Store) Subscribe(ctx context.Context) <-chan Config {
 	store.nextSubscriber++
 	id := store.nextSubscriber
 	store.subscribers[id] = channel
-	channel <- clone(store.value)
+	channel <- store.effectiveLocked()
 	store.mu.Unlock()
 	go func() {
 		<-ctx.Done()
@@ -877,7 +1084,36 @@ func (store *Store) Subscribe(ctx context.Context) <-chan Config {
 	return channel
 }
 
+// SubscribeRuntime receives configurations with every secret reference
+// resolved in memory. Persistent snapshots and ordinary subscribers retain
+// references and never receive the resolved values.
+func (store *Store) SubscribeRuntime(ctx context.Context) <-chan Config {
+	channel := make(chan Config, 1)
+	store.mu.Lock()
+	store.nextSubscriber++
+	id := store.nextSubscriber
+	store.runtimeSubscribers[id] = channel
+	channel <- store.runtimeLocked()
+	store.mu.Unlock()
+	go func() {
+		<-ctx.Done()
+		store.mu.Lock()
+		if current, ok := store.runtimeSubscribers[id]; ok {
+			delete(store.runtimeSubscribers, id)
+			close(current)
+		}
+		store.mu.Unlock()
+	}()
+	return channel
+}
+
 func (store *Store) notifyLocked(value Config) {
+	if store.appTitleOverride != "" {
+		value.UI.AppTitle = store.appTitleOverride
+	}
+	if store.taglineOverride != "" {
+		value.UI.Tagline = store.taglineOverride
+	}
 	for _, subscriber := range store.subscribers {
 		copyValue := clone(value)
 		select {
@@ -895,7 +1131,53 @@ func (store *Store) notifyLocked(value Config) {
 	}
 }
 
+func (store *Store) notifyRuntimeLocked(value Config) {
+	if store.appTitleOverride != "" {
+		value.UI.AppTitle = store.appTitleOverride
+	}
+	if store.taglineOverride != "" {
+		value.UI.Tagline = store.taglineOverride
+	}
+	runtime, err := resolveConfigSecrets(value, store.secrets)
+	if err != nil {
+		runtime = failClosedRuntime(value)
+	}
+	for _, subscriber := range store.runtimeSubscribers {
+		copyValue := clone(runtime)
+		select {
+		case subscriber <- copyValue:
+		default:
+			select {
+			case <-subscriber:
+			default:
+			}
+			select {
+			case subscriber <- copyValue:
+			default:
+			}
+		}
+	}
+}
+
+func (store *Store) runtimeLocked() Config {
+	effective := store.effectiveLocked()
+	runtime, err := resolveConfigSecrets(effective, store.secrets)
+	if err != nil {
+		return failClosedRuntime(effective)
+	}
+	return runtime
+}
+
+// UpdateUI atomically replaces and persists the host UI section.
 func (store *Store) UpdateUI(value UI) (Config, error) {
+	store.mu.RLock()
+	if store.appTitleOverride != "" {
+		value.AppTitle = store.value.UI.AppTitle
+	}
+	if store.taglineOverride != "" {
+		value.Tagline = store.value.UI.Tagline
+	}
+	store.mu.RUnlock()
 	return store.Update(func(config *Config) error {
 		config.UI = value
 		return nil
@@ -931,6 +1213,9 @@ func (store *Store) RememberDevice(identity DeviceIdentity) (bool, error) {
 	}
 	value := clone(store.value)
 	value.Connection.LastDevice = &identity
+	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
+		return false, fmt.Errorf("resolve configuration secrets: %w", err)
+	}
 	if err := Write(store.path, value); err != nil {
 		return false, err
 	}
@@ -941,9 +1226,11 @@ func (store *Store) RememberDevice(identity DeviceIdentity) (bool, error) {
 	store.value = clone(loaded)
 	store.digest = digest
 	store.notifyLocked(loaded)
+	store.notifyRuntimeLocked(loaded)
 	return true, nil
 }
 
+// Reload validates the backing file and publishes it only when its content changed.
 func (store *Store) Reload() (Config, bool, error) {
 	// Serialize the disk read with Update's write/load/commit transaction. If
 	// Reload reads before taking the mutex, an older fsnotify snapshot can wait
@@ -955,14 +1242,20 @@ func (store *Store) Reload() (Config, bool, error) {
 		return Config{}, false, err
 	}
 	if digest == store.digest {
-		return clone(store.value), false, nil
+		return store.effectiveLocked(), false, nil
+	}
+	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
+		return Config{}, false, fmt.Errorf("resolve configuration secrets: %w", err)
 	}
 	store.value = clone(value)
 	store.digest = digest
 	store.notifyLocked(value)
-	return clone(value), true, nil
+	store.notifyRuntimeLocked(value)
+	return store.effectiveLocked(), true, nil
 }
 
+// Watch applies validated filesystem changes, using polling only when native
+// notifications are unavailable or stop unexpectedly.
 func (store *Store) Watch(
 	ctx context.Context,
 	interval time.Duration,
@@ -991,6 +1284,7 @@ func (store *Store) Watch(
 	const debounce = 60 * time.Millisecond
 	var timer *time.Timer
 	var timerChannel <-chan time.Time
+	lastReloadError := ""
 	schedule := func() {
 		if timer == nil {
 			timer = time.NewTimer(debounce)
@@ -1008,11 +1302,10 @@ func (store *Store) Watch(
 	reload := func() {
 		value, changed, reloadErr := store.Reload()
 		if reloadErr != nil {
-			if onError != nil {
-				onError(reloadErr)
-			}
+			reportDistinctReloadError(&lastReloadError, reloadErr, onError)
 			return
 		}
+		lastReloadError = ""
 		if changed && onChange != nil {
 			onChange(value)
 		}
@@ -1070,6 +1363,7 @@ func (store *Store) watchPolling(
 ) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	lastReloadError := ""
 	for {
 		select {
 		case <-ctx.Done():
@@ -1077,15 +1371,31 @@ func (store *Store) watchPolling(
 		case <-ticker.C:
 			value, changed, err := store.Reload()
 			if err != nil {
-				if onError != nil {
-					onError(err)
-				}
+				reportDistinctReloadError(&lastReloadError, err, onError)
 				continue
 			}
+			lastReloadError = ""
 			if changed && onChange != nil {
 				onChange(value)
 			}
 		}
+	}
+}
+
+// reportDistinctReloadError emits a rejected file state once, then stays
+// quiet until either the error changes or a valid configuration is loaded.
+func reportDistinctReloadError(last *string, err error, onError func(error)) {
+	if err == nil {
+		*last = ""
+		return
+	}
+	message := err.Error()
+	if message == *last {
+		return
+	}
+	*last = message
+	if onError != nil {
+		onError(err)
 	}
 }
 

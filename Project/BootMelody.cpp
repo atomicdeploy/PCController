@@ -10,5 +10,3 @@ void playBootMelody(TonePlayer &player) {
   player.enqueue(2400, 120);
   player.pause(150);
 }
-
-void welcomeMelody() { playBootMelody(); }

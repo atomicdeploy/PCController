@@ -151,7 +151,3 @@ void ShiftRegisters::setVirtualInput(uint8_t bit, bool active) {
 }
 
 void ShiftRegisters::clearVirtualInputs() { virtualInputs_ = 0xFF; }
-
-void setupShiftRegisters() { shiftRegisters.begin(); }
-void serviceShiftRegisters() { shiftRegisters.service(); }
-void shiftRegistersService() { shiftRegisters.service(); }

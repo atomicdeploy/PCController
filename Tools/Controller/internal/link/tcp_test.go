@@ -26,9 +26,7 @@ func TestTCPVirtualBoardAcceptsDelayedFragmentedHello(t *testing.T) {
 		}
 		defer connection.Close()
 		time.Sleep(45 * time.Millisecond)
-		name := []byte("PCController")
-		payload := []byte{0, 0, 0, native.BoardKindPCController, 1, 0, 0, 0, byte(len(name))}
-		payload = append(payload, name...)
+		payload := currentHelloPayload(1)
 		response, _ := native.Encode(native.Frame{
 			Opcode: native.OpHelloResp, Seq: 0, Payload: payload,
 		})

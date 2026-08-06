@@ -9,7 +9,7 @@ import (
 	"pccontroller.local/controller/internal/native"
 )
 
-func TestPCOwnedLCDDiscoversInitializesAndCaches(t *testing.T) {
+func TestHostOwnedLCDDiscoversInitializesAndCaches(t *testing.T) {
 	var writes [][]byte
 	var leases []byte
 	transfer := func(
@@ -29,7 +29,7 @@ func TestPCOwnedLCDDiscoversInitializesAndCaches(t *testing.T) {
 		}
 		return native.I2CTransferResult{Status: status, Address: address}, nil
 	}
-	lcd := newPCOwnedLCD(transfer)
+	lcd := newHostOwnedLCD(transfer)
 	lcd.sleep = func(time.Duration) {}
 	if err := lcd.render(context.Background(), "device-1", "PC offline", "Connect USB"); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestLCDNibbleUsesCommonPCF8574MappingAndSafePulse(t *testing.T) {
 }
 
 func TestLCDRejectsIncompleteEnablePulse(t *testing.T) {
-	lcd := newPCOwnedLCD(nil)
+	lcd := newHostOwnedLCD(nil)
 	if err := lcd.writeSequence(context.Background(), []byte{0x08, 0x0C}); err == nil {
 		t.Fatal("accepted a sequence that could strand enable high")
 	}
@@ -88,7 +88,7 @@ func TestLCDPreloadsExactHiddenOfflineFallback(t *testing.T) {
 		t.Fatalf("offline page must be exactly 2x16: %q/%q", lcdOfflineLine1, lcdOfflineLine2)
 	}
 	var flattened []byte
-	lcd := newPCOwnedLCD(func(
+	lcd := newHostOwnedLCD(func(
 		_ context.Context, address, lease byte, write []byte, _ byte,
 	) (native.I2CTransferResult, error) {
 		if lease != 0 {
@@ -116,7 +116,7 @@ func TestLCDStateDoesNotBlockBehindUARTRender(t *testing.T) {
 	blocking := false
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
-	lcd := newPCOwnedLCD(func(
+	lcd := newHostOwnedLCD(func(
 		_ context.Context, address, _ byte, write []byte, _ byte,
 	) (native.I2CTransferResult, error) {
 		if blocking && len(write) != 0 {
@@ -142,7 +142,7 @@ func TestLCDStateDoesNotBlockBehindUARTRender(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("render did not enter blocked UART transfer")
 	}
-	stateDone := make(chan pcOwnedLCDState, 1)
+	stateDone := make(chan hostOwnedLCDState, 1)
 	go func() { stateDone <- lcd.state() }()
 	select {
 	case state := <-stateDone:
@@ -158,8 +158,8 @@ func TestLCDStateDoesNotBlockBehindUARTRender(t *testing.T) {
 	}
 }
 
-func TestPCOwnedLCDReportsMissingBackpack(t *testing.T) {
-	lcd := newPCOwnedLCD(func(
+func TestHostOwnedLCDReportsMissingBackpack(t *testing.T) {
+	lcd := newHostOwnedLCD(func(
 		_ context.Context,
 		address, _ byte,
 		_ []byte,
