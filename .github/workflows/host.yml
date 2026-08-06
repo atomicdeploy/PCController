@@ -75,8 +75,8 @@ jobs:
 
       - name: "🧰 Select native Windows C compiler"
         if: matrix.windows
-        shell: pwsh
-        run: Tools/Dependencies/select-windows-compiler.ps1
+        shell: cmd
+        run: node Tools\Dependencies\select-windows-compiler.mjs
 
       - name: "🐹 Install Go from go.mod"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7

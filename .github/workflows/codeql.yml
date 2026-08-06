@@ -80,8 +80,8 @@ jobs:
 
       - name: "🧰 Select native Windows C compiler"
         if: matrix.key == 'go-windows' || matrix.key == 'cpp-windows'
-        shell: pwsh
-        run: Tools/Dependencies/select-windows-compiler.ps1
+        shell: cmd
+        run: node Tools\Dependencies\select-windows-compiler.mjs
 
       - name: "🐹 Install Go from go.mod"
         if: startsWith(matrix.key, 'go-') || matrix.key == 'cpp-avr-linux'
