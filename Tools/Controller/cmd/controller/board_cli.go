@@ -276,6 +276,7 @@ func initializeBoard(
 	fmt.Fprintln(output, "\n[isp] USBasp signature, complete backup, core bootloader/fuses, and post-write verification")
 	coreReport, err := programmer.InitializeBoardCore(ctx, programmer.BoardCoreInitializeOptions{
 		FQBN: *fqbn, Programmer: *programmerName, ArduinoCLI: cli, ArduinoConfig: cliConfig,
+		SketchPath:       project,
 		Avrdude:          store.Current().Programming.Avrdude,
 		AvrdudeConf:      store.Current().Programming.AvrdudeConf,
 		BackupRoot:       dataPaths.BackupsDir,

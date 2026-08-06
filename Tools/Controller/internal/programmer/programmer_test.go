@@ -249,6 +249,20 @@ func TestArduinoCoreInfoAndBurnBootloader(t *testing.T) {
 		t.Fatalf("unexpected board details command: %s", joined)
 	}
 
+	properties, err := Build(Options{
+		Method: MethodArduino, Operation: OperationCoreProperties,
+		FQBN: "MiniCore:avr:328", SketchPath: "fixture", ArduinoCLI: "arduino-cli",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(properties.Args, " "); !strings.Contains(
+		joined,
+		"compile --fqbn MiniCore:avr:328 --show-properties=expanded fixture",
+	) {
+		t.Fatalf("unexpected core-properties command: %s", joined)
+	}
+
 	burn, err := Build(Options{
 		Method: MethodArduino, Operation: OperationBurnBoot,
 		FQBN: "MiniCore:avr:328", Programmer: "usbasp",

@@ -1,10 +1,12 @@
 package programmer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -16,6 +18,7 @@ type BoardCoreInitializeOptions struct {
 	Programmer       string
 	ArduinoCLI       string
 	ArduinoConfig    string
+	SketchPath       string
 	Avrdude          string
 	AvrdudeConf      string
 	MCU              string
@@ -25,12 +28,21 @@ type BoardCoreInitializeOptions struct {
 }
 
 type BoardCoreInitializeReport struct {
-	FQBN                string `json:"fqbn"`
-	MCU                 string `json:"mcu"`
-	Programmer          string `json:"programmer"`
-	BackupDirectory     string `json:"backup_directory"`
-	BootloaderInstalled bool   `json:"bootloader_installed"`
-	SlowUSBaspUsed      bool   `json:"slow_usbasp_used"`
+	FQBN                 string `json:"fqbn"`
+	MCU                  string `json:"mcu"`
+	Programmer           string `json:"programmer"`
+	BackupDirectory      string `json:"backup_directory"`
+	BootloaderInstalled  bool   `json:"bootloader_installed"`
+	SlowUSBaspUsed       bool   `json:"slow_usbasp_used"`
+	FuseRecoveryApplied  bool   `json:"fuse_recovery_applied"`
+	NormalSpeedRecovered bool   `json:"normal_speed_recovered"`
+	BootloaderProgrammer string `json:"bootloader_programmer"`
+}
+
+type boardCoreFusePolicy struct {
+	Low      byte
+	High     byte
+	Extended byte
 }
 
 func InitializeBoardCore(
@@ -78,6 +90,7 @@ func InitializeBoardCoreWithRunner(
 	ispRunner := runner
 	var fallback *usbaspSlowFallbackRunner
 	forceSlow := strings.EqualFold(options.Programmer, "usbasp_slow") || options.USBaspBitClockUS > 0
+	report.SlowUSBaspUsed = forceSlow
 	if options.USBaspAutoSlow && !forceSlow {
 		fallback = &usbaspSlowFallbackRunner{inner: runner, output: output}
 		ispRunner = fallback
@@ -115,7 +128,37 @@ func InitializeBoardCoreWithRunner(
 
 	fmt.Fprintln(output, "[3/4] Installing bootloader and fuse/lock policy from the selected board core")
 	coreProgrammer := options.Programmer
-	if report.SlowUSBaspUsed && strings.EqualFold(coreProgrammer, "usbasp") {
+	if fallback != nil && fallback.slow && strings.EqualFold(coreProgrammer, "usbasp") {
+		fmt.Fprintln(output, "Slow SCK was needed for discovery; repairing only the selected core's fuse policy at -B32 before retrying normal speed.")
+		policy, policyErr := resolveBoardCoreFusePolicy(ctx, options, runner)
+		if policyErr != nil {
+			return report, fmt.Errorf("resolve selected core fuse policy: %w", policyErr)
+		}
+		fuseCommand, buildErr := buildSlowFuseCorrectionCommand(isp, policy)
+		if buildErr != nil {
+			return report, fmt.Errorf("build slow fuse correction: %w", buildErr)
+		}
+		if fuseErr := runner.Run(ctx, fuseCommand, output); fuseErr != nil {
+			return report, fmt.Errorf("apply selected core fuse policy at slow SCK: %w", fuseErr)
+		}
+		report.FuseRecoveryApplied = true
+
+		fastProbeOptions := isp
+		fastProbeOptions.Operation = OperationProbe
+		fastProbeOptions.USBaspBitClockUS = 0
+		fastProbe, buildErr := Build(fastProbeOptions)
+		if buildErr != nil {
+			return report, fmt.Errorf("build normal-speed probe after fuse correction: %w", buildErr)
+		}
+		fmt.Fprintln(output, "Fuse policy corrected; retrying USBasp at normal speed before loading the bootloader.")
+		if fastErr := runner.Run(ctx, fastProbe, output); fastErr == nil {
+			report.NormalSpeedRecovered = true
+			fmt.Fprintln(output, "Normal-speed USBasp recovered; bootloader installation will use the fast programmer.")
+		} else {
+			fmt.Fprintln(output, "Normal-speed USBasp is still unavailable after fuse correction; retaining -B32 for bootloader installation.")
+			coreProgrammer = "usbasp_slow"
+		}
+	} else if report.SlowUSBaspUsed && strings.EqualFold(coreProgrammer, "usbasp") {
 		coreProgrammer = "usbasp_slow"
 	}
 	burnOptions := Options{
@@ -141,16 +184,18 @@ func InitializeBoardCoreWithRunner(
 				fmt.Errorf("slow core bootloader install: %w", slowErr),
 			)
 		}
+		coreProgrammer = "usbasp_slow"
 		report.SlowUSBaspUsed = true
 	} else if burnErr != nil {
 		return report, fmt.Errorf("install core bootloader: %w", burnErr)
 	}
+	report.BootloaderProgrammer = coreProgrammer
 	report.BootloaderInstalled = true
 
 	fmt.Fprintln(output, "[4/4] Re-reading target signature, fuses, and lock bits after bootloader install")
 	verify := isp
 	verify.Operation = OperationProbe
-	if report.SlowUSBaspUsed && verify.USBaspBitClockUS <= 0 {
+	if strings.EqualFold(coreProgrammer, "usbasp_slow") && verify.USBaspBitClockUS <= 0 {
 		verify.USBaspBitClockUS = defaultUSBaspSlowBitClockUS
 	}
 	verifyCommand, err := Build(verify)
@@ -165,4 +210,70 @@ func InitializeBoardCoreWithRunner(
 		return report, fmt.Errorf("verify target after core bootloader install: %w", err)
 	}
 	return report, nil
+}
+
+func resolveBoardCoreFusePolicy(
+	ctx context.Context,
+	options BoardCoreInitializeOptions,
+	runner CommandRunner,
+) (boardCoreFusePolicy, error) {
+	command, err := Build(Options{
+		Method: MethodArduino, Operation: OperationCoreProperties,
+		FQBN: options.FQBN, SketchPath: options.SketchPath,
+		ArduinoCLI: options.ArduinoCLI, ArduinoConfig: options.ArduinoConfig,
+	})
+	if err != nil {
+		return boardCoreFusePolicy{}, err
+	}
+	var properties bytes.Buffer
+	if err := runner.Run(ctx, command, &properties); err != nil {
+		return boardCoreFusePolicy{}, err
+	}
+	values := make(map[string]string)
+	for _, line := range strings.Split(properties.String(), "\n") {
+		key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+		if found {
+			values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	parse := func(key string) (byte, error) {
+		value, ok := values[key]
+		if !ok || value == "" {
+			return 0, fmt.Errorf("Arduino core properties omitted %s", key)
+		}
+		parsed, parseErr := strconv.ParseUint(value, 0, 8)
+		if parseErr != nil {
+			return 0, fmt.Errorf("parse %s=%q: %w", key, value, parseErr)
+		}
+		return byte(parsed), nil
+	}
+	low, err := parse("bootloader.low_fuses")
+	if err != nil {
+		return boardCoreFusePolicy{}, err
+	}
+	high, err := parse("bootloader.high_fuses")
+	if err != nil {
+		return boardCoreFusePolicy{}, err
+	}
+	extended, err := parse("bootloader.extended_fuses")
+	if err != nil {
+		return boardCoreFusePolicy{}, err
+	}
+	return boardCoreFusePolicy{Low: low, High: high, Extended: extended}, nil
+}
+
+func buildSlowFuseCorrectionCommand(isp Options, policy boardCoreFusePolicy) (Command, error) {
+	isp.Operation = OperationProbe
+	command, err := Build(isp)
+	if err != nil {
+		return Command{}, err
+	}
+	command = withUSBaspBitClock(command, defaultUSBaspSlowBitClockUS)
+	command.Args = append(command.Args,
+		"-D",
+		fmt.Sprintf("-Ulfuse:w:0x%02X:m", policy.Low),
+		fmt.Sprintf("-Uhfuse:w:0x%02X:m", policy.High),
+		fmt.Sprintf("-Uefuse:w:0x%02X:m", policy.Extended),
+	)
+	return command, nil
 }

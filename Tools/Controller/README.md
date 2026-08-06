@@ -833,7 +833,12 @@ bin\controller.exe board blank --confirm EDGE-01 --uart auto
 It installs or repairs the selected FQBN's exact toolchain, compiles before
 touching the MCU, validates the ISP signature, captures a complete backup,
 burns the stock core-provided bootloader/fuse/lock policy, and retries the first
-failed USBasp exchange at `-B32`. With UART it then programs with mandatory
+failed USBasp exchange at `-B32`. If slow discovery was required, the host first
+completes the mandatory backup, resolves the selected FQBN's own
+`bootloader.*_fuses` properties, and applies only those fuse bytes at `-B32`.
+It then retries a normal-speed probe and uses fast `usbasp` for the bootloader
+whenever the corrected clock policy permits; `usbasp_slow` remains the bounded
+fallback when that retry still fails. With UART it then programs with mandatory
 readback, authenticates the first application HELLO, persists factory settings,
 and probes available peripherals. Missing INA219, PCA9685, DS18B20, or LCD
 hardware is reported as a warning rather than preventing the present hardware

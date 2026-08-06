@@ -389,8 +389,13 @@ the USBasp target signature, backs up flash, EEPROM, signature, fuses, and lock
 bits, then invokes the selected FQBN's stock core `burn-bootloader` recipe with
 verification. It does not install PCController's custom Urboot experiment.
 The first failed default-speed USBasp exchange is retried with a 32 microsecond
-bit-clock period and the slower speed remains active for that transaction;
-the core burn similarly falls back to its `usbasp_slow` programmer definition.
+bit-clock period. Initialization completes its mandatory backup at the working
+speed, obtains the fuse bytes from the selected FQBN's expanded core properties,
+and uses slow SCK only to repair that fuse policy before probing again at normal
+speed. A successful fast probe makes the core bootloader burn use `usbasp`;
+`usbasp_slow` is retained only when normal speed still fails (or was explicitly
+forced). This avoids carrying a recovery clock into the much larger bootloader
+write while keeping a conservative fallback.
 
 When UART is connected, the host releases ISP, writes the compiled application
 through Urclock, reads it back, requires a native HELLO, confirms factory

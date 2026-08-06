@@ -30,18 +30,19 @@ const (
 )
 
 const (
-	OperationWriteFlash  Operation = "write-flash"
-	OperationReadFlash   Operation = "read-flash"
-	OperationVerifyFlash Operation = "verify-flash"
-	OperationReadEEPROM  Operation = "read-eeprom"
-	OperationWriteEEPROM Operation = "write-eeprom"
-	OperationMetadata    Operation = "metadata"
-	OperationProbe       Operation = "probe"
-	OperationStart       Operation = "start"
-	OperationCoreInfo    Operation = "core-info"
-	OperationBurnBoot    Operation = "install-bootloader"
-	OperationBackup      Operation = "backup"
-	OperationChipErase   Operation = "chip-erase"
+	OperationWriteFlash     Operation = "write-flash"
+	OperationReadFlash      Operation = "read-flash"
+	OperationVerifyFlash    Operation = "verify-flash"
+	OperationReadEEPROM     Operation = "read-eeprom"
+	OperationWriteEEPROM    Operation = "write-eeprom"
+	OperationMetadata       Operation = "metadata"
+	OperationProbe          Operation = "probe"
+	OperationStart          Operation = "start"
+	OperationCoreInfo       Operation = "core-info"
+	OperationCoreProperties Operation = "core-properties"
+	OperationBurnBoot       Operation = "install-bootloader"
+	OperationBackup         Operation = "backup"
+	OperationChipErase      Operation = "chip-erase"
 )
 
 type Options struct {
@@ -74,8 +75,9 @@ type Options struct {
 	compilePlanned             bool
 	compileStaged              bool
 	// USBaspBitClockUS forces AVRDUDE's -B bit-clock period. USBaspAutoSlow
-	// retries the first failed USBasp exchange at MiniCore's conservative
-	// 32-microsecond period and keeps that period for the rest of the operation.
+	// retries a failed USBasp exchange at MiniCore's conservative 32-microsecond
+	// period. Multi-step callers may deliberately return to normal speed after
+	// repairing a target clock/fuse policy.
 	USBaspBitClockUS float64
 	USBaspAutoSlow   bool
 }
@@ -189,6 +191,14 @@ func Build(options Options) (Command, error) {
 			return Command{Name: executable, Args: toolchainCLIArguments(executable, options.ArduinoConfig,
 				"board", "details", "--fqbn", options.FQBN,
 				"--full", "--list-programmers",
+			)}, nil
+		case OperationCoreProperties:
+			if strings.TrimSpace(options.SketchPath) == "" {
+				return Command{}, errors.New("core properties require a sketch path")
+			}
+			return Command{Name: executable, Args: toolchainCLIArguments(executable, options.ArduinoConfig,
+				"compile", "--fqbn", options.FQBN,
+				"--show-properties=expanded", options.SketchPath,
 			)}, nil
 		case OperationBurnBoot:
 			if options.Programmer == "" {
