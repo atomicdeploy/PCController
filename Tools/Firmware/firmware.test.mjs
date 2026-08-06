@@ -256,13 +256,15 @@ test('persistent Ready profile remains host-owned with a compact firmware fallba
 })
 
 test('physical, injected, and RF key actions retain the immediate dispatch contract', async () => {
-	const [keys, frontPanel, protocol, radio] = await Promise.all([
+	const [configuration, keys, frontPanel, protocol, radio] = await Promise.all([
+		readFile(new URL('../../Project/Firmware/ControllerConfiguration.inc.h', import.meta.url), 'utf8'),
 		readFile(new URL('../../LocalLib/Keys.h', import.meta.url), 'utf8'),
 		readFile(new URL('../../Project/Firmware/FrontPanelRuntime.inc.h', import.meta.url), 'utf8'),
 		readFile(new URL('../../Project/Firmware/ProtocolRuntime.inc.h', import.meta.url), 'utf8'),
 		readFile(new URL('../../Project/Firmware/RadioRuntime.inc.h', import.meta.url), 'utf8')
 	])
 	assert.match(keys, /KEY_DEBOUNCE_MS = 20;/u)
+	assert.match(configuration, /SHIFT_POLL_MS \+ KEY_DEBOUNCE_MS <=\s*\n?\s*KEY_PRIMARY_ACTION_BUDGET_MS/u)
 	assert.match(
 		keys,
 		/return event == KeyEvent::Down \|\| event == KeyEvent::HoldRepeat;/u
@@ -275,7 +277,7 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 	)
 	assert.match(
 		radio,
-		/case RemoteActionKind::Key:[^]*?handleMenuAction\(remote\.actionValue, true\);/u
+		/case RemoteActionKind::Key:[^]*?KeyEvent::Down[^]*?handleMenuAction\(remote\.actionValue, true\);/u
 	)
 })
 

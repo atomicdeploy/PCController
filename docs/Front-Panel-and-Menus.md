@@ -463,12 +463,14 @@ Canonical sources: [ProjectConfig.h](../ProjectConfig.h),
 
 ## Key gestures
 
-The key engine debounces physical edges for 20 ms. The first debounced `Down`
-runs the primary action immediately; it never waits for release, click
+The key engine polls the front register every 5 ms and debounces physical edges
+for 20 ms. The first debounced `Down` runs the primary action within a guarded
+25 ms worst-case input budget; it never waits for release, click
 classification, audio feedback, a display update, UART, or the 300 ms
 double-click window. PC-injected lifecycle input follows the same rule, while
 the stateless `MENU_ACTION` command and a learned RF mapping execute in the
-same service pass in which they are received.
+same service pass in which they are received. An accepted RF key frame is also
+reported as `Down`, not as the later physical `Click` classification.
 
 | Gesture | Timing and effect |
 |---|---|
@@ -489,9 +491,12 @@ This is a non-negotiable responsiveness invariant. Future work must not move
 the initial action back to `Click`/`HoldStart`, debounce it twice, wait for a
 double-click decision, perform EEPROM or network work before dispatch, or let
 buzzer/display/overlay feedback block input service. Hardware-free tests cap
-physical debounce at 25 ms and assert that only `Down` and `HoldRepeat` drive
-primary actions; physical acceptance must additionally verify all four panel
-keys, PC virtual buttons, and learned RF keys against the exact flashed image.
+the complete scan-plus-debounce path at 25 ms and assert that only `Down` and
+`HoldRepeat` drive primary actions. Physical acceptance must additionally
+verify all four panel keys, PC virtual buttons, and learned RF keys against the
+exact flashed image, and record a live HELLO build hash that matches the tested
+artifact. A source-only fix on a board running an older hash does not close a
+latency regression.
 
 ## Local menu directory
 

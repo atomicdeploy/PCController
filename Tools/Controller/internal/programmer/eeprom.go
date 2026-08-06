@@ -414,7 +414,9 @@ func decodeOfflineResetJournal(image *IntelHexImage) OfflineResetJournalDecode {
 		slot.Count = binary.LittleEndian.Uint32(record[0:4])
 		slot.StoredChecksum = record[4]
 		slot.Marker = record[5]
-		checksumInput := []byte{0x1F, record[0], record[1], record[2], record[3]}
+		// Firmware ResetTelemetry CRCs the packed uint32 count only. Keep the
+		// offline decoder byte-for-byte identical to that native record.
+		checksumInput := record[0:4]
 		slot.ComputedChecksum = avrCRC8(checksumInput)
 		slot.Occupied = slot.Marker != 0xFF || slot.Count != ^uint32(0) ||
 			slot.StoredChecksum != 0xFF

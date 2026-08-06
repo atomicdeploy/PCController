@@ -528,25 +528,42 @@ func verifyMandatoryProgrammerReadback(
 	if readback.Inspection.HasData && readback.Inspection.MaximumAddress >= capacity {
 		return fmt.Errorf("%s programmer readback exceeds %d-byte device capacity", memory, capacity)
 	}
-	redirect, err := verifyWrittenProgrammerBytes(options, memory, written.Image, readback.Image)
+	allowance, err := verifyWrittenProgrammerBytes(options, memory, written.Image, readback.Image)
 	if err != nil {
 		return err
 	}
-	if output != nil && redirect != nil {
+	if output != nil && allowance.UrbootRedirect != nil {
 		fmt.Fprintf(
 			output,
 			"Urboot vector redirection verified: reset -> 0x%04X, vector %d -> application 0x%04X; all other written bytes are exact.\n",
-			redirect.BootloaderAddress,
-			redirect.Vector,
-			redirect.ApplicationAddress,
+			allowance.UrbootRedirect.BootloaderAddress,
+			allowance.UrbootRedirect.Vector,
+			allowance.UrbootRedirect.ApplicationAddress,
+		)
+	}
+	if output != nil && allowance.MutableEEPROMBytes != 0 {
+		fmt.Fprintf(
+			output,
+			"EEPROM reset journal advanced during application restart: %d mutable byte(s) changed; journal CRC/markers and every immutable EEPROM byte verified.\n",
+			allowance.MutableEEPROMBytes,
 		)
 	}
 	if output != nil {
-		fmt.Fprintf(
-			output,
-			"Mandatory %s readback verified %d written byte(s); input SHA-256 %s, readback SHA-256 %s.\n",
-			memory, written.Inspection.DataBytes, written.SourceSHA256, readback.SourceSHA256,
-		)
+		if allowance.MutableEEPROMBytes == 0 {
+			fmt.Fprintf(
+				output,
+				"Mandatory %s readback verified %d written byte(s); input SHA-256 %s, readback SHA-256 %s.\n",
+				memory, written.Inspection.DataBytes, written.SourceSHA256, readback.SourceSHA256,
+			)
+		} else {
+			fmt.Fprintf(
+				output,
+				"Mandatory EEPROM readback verified %d immutable written byte(s) and validated %d restart-journal mutation byte(s); input SHA-256 %s, readback SHA-256 %s.\n",
+				written.Inspection.DataBytes-allowance.MutableEEPROMBytes,
+				allowance.MutableEEPROMBytes,
+				written.SourceSHA256, readback.SourceSHA256,
+			)
+		}
 	}
 	return nil
 }
@@ -594,6 +611,11 @@ type urbootVectorRedirect struct {
 	ApplicationAddress uint32
 }
 
+type programmerReadbackAllowance struct {
+	UrbootRedirect     *urbootVectorRedirect
+	MutableEEPROMBytes uint32
+}
+
 // verifyWrittenProgrammerBytes keeps independent readback byte-exact, except
 // for Urboot's documented reset-vector redirection on application flash writes.
 func verifyWrittenProgrammerBytes(
@@ -601,33 +623,59 @@ func verifyWrittenProgrammerBytes(
 	memory string,
 	written *IntelHexImage,
 	readback *IntelHexImage,
-) (*urbootVectorRedirect, error) {
+) (programmerReadbackAllowance, error) {
+	var allowance programmerReadbackAllowance
 	mismatches := make([]uint32, 0, 8)
 	for address, expected := range written.data {
 		actual, present := readback.Byte(address)
 		if !present {
-			return nil, fmt.Errorf("%s programmer readback has no byte at 0x%04X", memory, address)
+			return allowance, fmt.Errorf("%s programmer readback has no byte at 0x%04X", memory, address)
 		}
 		if actual != expected {
 			mismatches = append(mismatches, address)
 		}
 	}
 	if len(mismatches) == 0 {
-		return nil, nil
+		return allowance, nil
 	}
 	sort.Slice(mismatches, func(left, right int) bool { return mismatches[left] < mismatches[right] })
 	if options.Method == MethodUrclock && options.Operation == OperationWriteFlash {
 		if redirect, ok := recognizeUrbootVectorRedirect(written, readback, mismatches); ok {
-			return redirect, nil
+			allowance.UrbootRedirect = redirect
+			return allowance, nil
 		}
+	}
+	if options.Operation == OperationWriteEEPROM &&
+		validRestartJournalMutation(readback, mismatches) {
+		allowance.MutableEEPROMBytes = uint32(len(mismatches))
+		return allowance, nil
 	}
 	address := mismatches[0]
 	expected, _ := written.Byte(address)
 	actual, _ := readback.Byte(address)
-	return nil, fmt.Errorf(
+	return allowance, fmt.Errorf(
 		"%s programmer readback mismatch at 0x%04X: got 0x%02X require 0x%02X",
 		memory, address, actual, expected,
 	)
+}
+
+// The application records its reset cause immediately after an EEPROM write.
+// AVRDUDE verifies the write before starting it, while our independent second
+// read necessarily observes the advanced journal. Only that bounded region may
+// differ, and the post-boot journal must still be structurally valid.
+func validRestartJournalMutation(
+	readback *IntelHexImage,
+	mismatches []uint32,
+) bool {
+	journalEnd := EEPROMResetJournalAddress +
+		uint32(EEPROMResetJournalSlots)*EEPROMResetJournalRecordSize
+	for _, address := range mismatches {
+		if address < EEPROMResetJournalAddress || address >= journalEnd {
+			return false
+		}
+	}
+	journal := decodeOfflineResetJournal(readback)
+	return journal.Complete && journal.Valid && journal.ValidRecords != 0
 }
 
 // recognizeUrbootVectorRedirect proves the two AVR instructions Urboot writes:

@@ -43,6 +43,14 @@ constexpr uint16_t TEMPERATURE_DOOR_OPEN_PERIOD_MS = 450;
 constexpr uint16_t TEMPERATURE_CONVERSION_MS = 375;
 constexpr uint16_t HOST_OFFLINE_MS = 5000;
 
+// A physical menu binding is dispatched on the first debounced Down sample.
+// Guard the complete scan + debounce path, not merely the debounce constant:
+// shortening a later Click timer does not satisfy this response contract.
+constexpr uint16_t KEY_PRIMARY_ACTION_BUDGET_MS = 25;
+static_assert(SHIFT_POLL_MS + KEY_DEBOUNCE_MS <=
+                  KEY_PRIMARY_ACTION_BUDGET_MS,
+              "front-key Down dispatch exceeds the physical response budget");
+
 // RF learning has one default indefinite/multi mode and one bounded timer mode.
 constexpr uint8_t DEFAULT_LEARNING_SECONDS = 15;
 constexpr uint8_t MAX_LEARNING_SECONDS = 120;

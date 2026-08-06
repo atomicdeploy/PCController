@@ -116,15 +116,16 @@ func TestVerifyWrittenProgrammerBytesAcceptsOnlyProvenUrbootRedirect(t *testing.
 		0x0200: 0xA5, 0x7FFA: 0x03, 0x7FFB: 0x19,
 	}
 	options := Options{Method: MethodUrclock, Operation: OperationWriteFlash}
-	redirect, err := verifyWrittenProgrammerBytes(
+	allowance, err := verifyWrittenProgrammerBytes(
 		options, "flash", written, &IntelHexImage{data: cloneHexData(validReadback)},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	redirect := allowance.UrbootRedirect
 	if redirect == nil || redirect.Vector != 25 ||
 		redirect.BootloaderAddress != 0x7E80 || redirect.ApplicationAddress != 0x024E {
-		t.Fatalf("unexpected Urboot redirect: %+v", redirect)
+		t.Fatalf("unexpected Urboot redirect: %+v", allowance)
 	}
 
 	for _, test := range []struct {
@@ -188,15 +189,60 @@ func TestVerifyWrittenProgrammerBytesAcceptsMetadataDerivedCustomUrbootBase(t *t
 		0x0064: 0x0C, 0x0065: 0x94, 0x0066: 0x27, 0x0067: 0x01,
 		0x7FFA: 0x04, 0x7FFB: 0x19,
 	}}
-	redirect, err := verifyWrittenProgrammerBytes(
+	allowance, err := verifyWrittenProgrammerBytes(
 		Options{Method: MethodUrclock, Operation: OperationWriteFlash},
 		"flash", written, readback,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
+	redirect := allowance.UrbootRedirect
 	if redirect == nil || redirect.BootloaderAddress != 0x7E00 || redirect.Vector != 25 {
-		t.Fatalf("custom Urboot metadata was not honored: %+v", redirect)
+		t.Fatalf("custom Urboot metadata was not honored: %+v", allowance)
+	}
+}
+
+func TestVerifyWrittenEEPROMAllowsOnlyValidRestartJournalAdvance(t *testing.T) {
+	writtenData := make(map[uint32]byte, PCControllerEEPROMBytes)
+	readbackData := make(map[uint32]byte, PCControllerEEPROMBytes)
+	for address := uint32(0); address < PCControllerEEPROMBytes; address++ {
+		writtenData[address] = 0xFF
+		readbackData[address] = 0xFF
+	}
+	count := uint32(1)
+	base := EEPROMResetJournalAddress
+	readbackData[base] = byte(count)
+	readbackData[base+1] = byte(count >> 8)
+	readbackData[base+2] = byte(count >> 16)
+	readbackData[base+3] = byte(count >> 24)
+	readbackData[base+4] = avrCRC8([]byte{1, 0, 0, 0})
+	readbackData[base+5] = 0xA7
+
+	options := Options{Method: MethodUrclock, Operation: OperationWriteEEPROM}
+	allowance, err := verifyWrittenProgrammerBytes(
+		options, "EEPROM", &IntelHexImage{data: writtenData},
+		&IntelHexImage{data: readbackData},
+	)
+	if err != nil || allowance.MutableEEPROMBytes == 0 {
+		t.Fatalf("valid restart journal advance rejected: allowance=%+v err=%v", allowance, err)
+	}
+
+	invalidJournal := cloneHexData(readbackData)
+	invalidJournal[base+4] ^= 0x01
+	if _, err := verifyWrittenProgrammerBytes(
+		options, "EEPROM", &IntelHexImage{data: writtenData},
+		&IntelHexImage{data: invalidJournal},
+	); err == nil {
+		t.Fatal("invalid reset journal mutation was accepted")
+	}
+
+	changedSetting := cloneHexData(readbackData)
+	changedSetting[EEPROMSettingsAddress] = 0
+	if _, err := verifyWrittenProgrammerBytes(
+		options, "EEPROM", &IntelHexImage{data: writtenData},
+		&IntelHexImage{data: changedSetting},
+	); err == nil {
+		t.Fatal("immutable EEPROM mismatch was accepted")
 	}
 }
 

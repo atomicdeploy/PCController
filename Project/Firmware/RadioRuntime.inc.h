@@ -135,10 +135,11 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
   }
   switch (kind) {
     case RemoteActionKind::Key:
-      // RF mappings execute in this receive-service pass. Click names the
-      // completed wireless press for telemetry; it is not a delayed trigger.
+      // An accepted RF frame is the wireless Down edge: publish that same
+      // immediate semantic before dispatching the binding in this service
+      // pass. It must never masquerade as the later Click classification.
       appEvents.key(remote.actionValue,
-                    static_cast<uint8_t>(KeyEvent::Click),
+                    static_cast<uint8_t>(KeyEvent::Down),
                     InputEventSource::Radio, remote.id);
       handleMenuAction(remote.actionValue, true);
       return;

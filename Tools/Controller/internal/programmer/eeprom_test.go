@@ -266,6 +266,6 @@ func writeResetRecord(data []byte, slot byte, count uint32) {
 	start := EEPROMResetJournalAddress + uint32(slot)*EEPROMResetJournalRecordSize
 	record := data[start : start+EEPROMResetJournalRecordSize]
 	binary.LittleEndian.PutUint32(record[0:4], count)
-	record[4] = avrCRC8([]byte{0x1F, record[0], record[1], record[2], record[3]})
+	record[4] = avrCRC8(record[0:4])
 	record[5] = 0xA7
 }
