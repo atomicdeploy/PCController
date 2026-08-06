@@ -75,25 +75,8 @@ jobs:
 
       - name: "🧰 Select native Windows C compiler"
         if: matrix.windows
-        shell: cmd
-        run: |
-          @echo off
-          set "MINGW_BIN=C:\mingw64\bin"
-          set "GCC=C:\mingw64\bin\gcc.exe"
-          if not exist "%GCC%" (
-            echo The GitHub Windows image is missing its standalone MinGW64 compiler: %GCC% 1>&2
-            exit /b 1
-          )
-          "%GCC%" -dumpmachine > "%RUNNER_TEMP%\host-gcc-target.txt"
-          findstr /x /c:"x86_64-w64-mingw32" "%RUNNER_TEMP%\host-gcc-target.txt" >nul
-          if errorlevel 1 (
-            echo Expected x86_64-w64-mingw32 GCC; detected: 1>&2
-            type "%RUNNER_TEMP%\host-gcc-target.txt" 1>&2
-            exit /b 1
-          )
-          >>"%GITHUB_PATH%" echo %MINGW_BIN%
-          >>"%GITHUB_ENV%" echo CC=gcc.exe
-          "%GCC%" --version
+        shell: pwsh
+        run: Tools/Dependencies/select-windows-compiler.ps1
 
       - name: "🐹 Install Go from go.mod"
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
