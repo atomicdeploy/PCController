@@ -68,6 +68,39 @@ func TestIconResourceNamesAreDistinctAndStable(t *testing.T) {
 	}
 }
 
+func TestApplyConsoleIconsAssignsPackagedLargeAndSmallResources(t *testing.T) {
+	var loaded []bool
+	var assigned [][2]uintptr
+	applyConsoleIcons(10, 20, func(small bool) uintptr {
+		loaded = append(loaded, small)
+		if small {
+			return 200
+		}
+		return 100
+	}, func(kind, icon uintptr) {
+		assigned = append(assigned, [2]uintptr{kind, icon})
+	})
+	if len(loaded) != 2 || loaded[0] || !loaded[1] {
+		t.Fatalf("icon loads=%v; want large then small", loaded)
+	}
+	want := [][2]uintptr{{iconBig, 100}, {iconSmall, 200}}
+	if len(assigned) != len(want) || assigned[0] != want[0] || assigned[1] != want[1] {
+		t.Fatalf("icon assignments=%v; want %v", assigned, want)
+	}
+}
+
+func TestApplyConsoleIconsSkipsUnavailableWindowModuleAndIcon(t *testing.T) {
+	calls := 0
+	load := func(bool) uintptr { calls++; return 0 }
+	set := func(uintptr, uintptr) { t.Fatal("unavailable icon was assigned") }
+	applyConsoleIcons(0, 20, load, set)
+	applyConsoleIcons(10, 0, load, set)
+	applyConsoleIcons(10, 20, load, set)
+	if calls != 2 {
+		t.Fatalf("load calls=%d; want two attempted icon sizes only for valid handles", calls)
+	}
+}
+
 func TestNativeThemeStateRejectsReentrantAndRedundantApplication(t *testing.T) {
 	var state nativeThemeState
 	if !state.begin(true) {

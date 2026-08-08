@@ -325,6 +325,23 @@ dispatcher, one product identity, and one safety policy. A new feature should
 include the smallest relevant firmware/host/WebUI tests, update its capability
 matrix, and state whether physical validation is still required.
 
+Before implementation begins, reconcile every new request with the canonical
+[requirements backlog](docs/Requirements-Backlog.md), existing GitHub issues
+and pull requests, and the maintained operating/API documentation. Update and
+link an existing requirement when it already owns the scope; create a new
+stable requirement only when the work is genuinely distinct. The same change
+must keep affected documentation and truthful completed/pending evidence in
+sync.
+
+Reusable code from owner-authorized sibling applications is a source-porting
+input, not merely visual inspiration. Directly import every applicable
+system/framework component with its attribution, license, provenance, and
+behavior tests; adapt it behind Controller's safety and platform interfaces.
+Record a concrete rationale for each reviewed component that is not applicable,
+and never copy unrelated business logic, credentials, or private machine data.
+The exhaustive audit and porting matrix is tracked in
+[issue #118](https://github.com/atomicdeploy/PCController/issues/118).
+
 Third-party licenses and notices are collected in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Source is licensed under the
 terms in [LICENSE](LICENSE).

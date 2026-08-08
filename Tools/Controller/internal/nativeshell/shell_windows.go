@@ -26,6 +26,7 @@ const (
 	wmQuit          = 0x0012
 	wmSettingChange = 0x001A
 	wmContextMenu   = 0x007B
+	wmSetIcon       = 0x0080
 	wmTimer         = 0x0113
 	wmLButtonUp     = 0x0202
 	wmRButtonUp     = 0x0205
@@ -56,6 +57,8 @@ const (
 	imageIcon     = 1
 	lrDefaultSize = 0x00000040
 	lrShared      = 0x00008000
+	iconSmall     = 0
+	iconBig       = 1
 
 	mfString     = 0x00000000
 	mfDisabled   = 0x00000002
@@ -75,6 +78,12 @@ const (
 	dwmUseImmersiveDarkMode           = 20
 	smCXMenuCheck                     = 71
 	smCYMenuCheck                     = 72
+	smCXIcon                          = 11
+	smCYIcon                          = 12
+	smCXSmallIcon                     = 49
+	smCYSmallIcon                     = 50
+	smtoAbortIfHung                   = 0x0002
+	consoleIconMessageTimeoutMS       = 250
 )
 
 type winPoint struct {
@@ -181,6 +190,8 @@ var (
 	procShellNotifyIcon       = shell32.NewProc("Shell_NotifyIconW")
 	procGetModuleHandle       = kernel32.NewProc("GetModuleHandleW")
 	procGetCurrentThreadID    = kernel32.NewProc("GetCurrentThreadId")
+	procGetConsoleWindow      = kernel32.NewProc("GetConsoleWindow")
+	procSendMessageTimeout    = user32.NewProc("SendMessageTimeoutW")
 	procSetWindowTheme        = uxtheme.NewProc("SetWindowTheme")
 	procDwmSetWindowAttribute = dwmapi.NewProc("DwmSetWindowAttribute")
 	procDeleteObject          = gdi32.NewProc("DeleteObject")
@@ -254,6 +265,63 @@ type windowsShell struct {
 }
 
 func Supported() bool { return true }
+
+// ApplyConsoleIcon assigns the packaged APP resource to an attached classic
+// console window. Windows does not consistently replace conhost's inherited
+// icon when the executable icon uses a named RT_GROUP_ICON resource, especially
+// when Controller is launched from a build shell. The tray keeps using the same
+// resource independently. Windows Terminal/pseudoconsole and resource-free
+// development builds have no applicable HWND/icon and therefore remain a safe
+// no-op.
+func ApplyConsoleIcon() {
+	hwnd, _, _ := procGetConsoleWindow.Call()
+	instance, _, _ := procGetModuleHandle.Call(0)
+	resourceName, err := windows.UTF16PtrFromString("APP")
+	if err != nil {
+		return
+	}
+	load := func(small bool) uintptr {
+		xMetric, yMetric := uintptr(smCXIcon), uintptr(smCYIcon)
+		if small {
+			xMetric, yMetric = smCXSmallIcon, smCYSmallIcon
+		}
+		width, _, _ := procGetSystemMetrics.Call(xMetric)
+		height, _, _ := procGetSystemMetrics.Call(yMetric)
+		icon, _, _ := procLoadImage.Call(
+			instance,
+			uintptr(unsafe.Pointer(resourceName)),
+			imageIcon,
+			width,
+			height,
+			lrShared,
+		)
+		return icon
+	}
+	applyConsoleIcons(hwnd, instance, load, func(kind, icon uintptr) {
+		var result uintptr
+		_, _, _ = procSendMessageTimeout.Call(
+			hwnd, wmSetIcon, kind, icon,
+			smtoAbortIfHung, consoleIconMessageTimeoutMS,
+			uintptr(unsafe.Pointer(&result)),
+		)
+	})
+}
+
+func applyConsoleIcons(
+	hwnd, instance uintptr,
+	load func(small bool) uintptr,
+	set func(kind, icon uintptr),
+) {
+	if hwnd == 0 || instance == 0 || load == nil || set == nil {
+		return
+	}
+	if icon := load(false); icon != 0 {
+		set(iconBig, icon)
+	}
+	if icon := load(true); icon != 0 {
+		set(iconSmall, icon)
+	}
+}
 
 func startPlatform(ctx context.Context, options Options) (Shell, error) {
 	actionContext, cancelActions := context.WithCancel(ctx)
