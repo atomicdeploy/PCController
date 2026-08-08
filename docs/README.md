@@ -13,6 +13,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Goal | Recommended guide |
 |---|---|
 | Build or run PCController for the first time | [Getting Started and Operations](Getting-Started-and-Operations.md) |
+| Find the authoritative code, test, asset, tool, or generated output | [Repository and File Map](Repository-Map.md) |
 | Understand the physical panel | [Front Panel and Menus](Front-Panel-and-Menus.md) |
 | Configure the host, WebUI, hotkeys, notifications, or integrations | [Host Configuration and Integrations](Host-Configuration-and-Integrations.md) |
 | Integrate through UART, JSON-RPC, REST, WebSocket, Go, or C | [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md), [machine-readable contracts](../Tools/Controller/api/reference.html), and [C Library API](../Tools/Controller/docs/C-Library-API.md) |
@@ -58,6 +59,8 @@ device identity or interface settings.
 
 ## 🛠️ Delivery and engineering
 
+- [Repository and File Map](Repository-Map.md) — complete first-contributor
+  map, ownership boundaries, generated-file rules, and runtime storage paths.
 - [Build Tool](../Tools/Build/README.md) — canonical build entry points and
   package locations.
 - [Firmware Tool](../Tools/Firmware/README.md) — content-watched builds,
