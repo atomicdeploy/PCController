@@ -904,6 +904,12 @@ protocol and host:
   the PC host must reset/hand off before programming, backup, or restore;
 - compact HELLO identity using source/build hash and packed date/time rather
   than a manually versioned firmware number;
+- host connect/reconnect surfaces query that HELLO identity and must discard it
+  on disconnect. A tracked local firmware-identity page will show the complete
+  hash on LCD and nonblockingly alternate its first/last four characters on
+  TM1637; this board-owned page is not yet part of the current menu image and
+  remains tracked in the
+  [firmware-identity requirement](Requirements-Backlog.md);
 - periodic or on-demand telemetry with uptime, voltage, bus voltage, current,
   power, two temperatures, inputs, relay/PWM/menu state, protocol errors,
   reset cause, and persistent reset count;

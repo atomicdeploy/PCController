@@ -25,6 +25,7 @@ import (
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/nativeshell"
 	"pccontroller.local/controller/internal/netpolicy"
 	"pccontroller.local/controller/internal/pcspeaker"
 	"pccontroller.local/controller/internal/portowner"
@@ -42,6 +43,12 @@ var (
 )
 
 func main() {
+	// A console can be created by conhost before Windows consults the named
+	// executable icon resource. Explicitly apply the packaged product icon so
+	// direct launches and inherited build/terminal consoles do not retain the
+	// generic console-host icon. Pseudoconsole and resource-free developer
+	// builds intentionally treat this as a best-effort no-op.
+	nativeshell.ApplyConsoleIcon()
 	if err := netpolicy.EnsureProcessLocalNetworkNoProxy(); err != nil {
 		fmt.Fprintln(os.Stderr, "network proxy bypass policy:", err)
 		os.Exit(1)

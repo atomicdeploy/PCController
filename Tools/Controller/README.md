@@ -72,6 +72,10 @@ module for binary redistribution.
 Resource regeneration and UPX are default packaging steps. Use root
 `--skip-resources` or `--no-upx` to disable them explicitly. The ordinary
 executable is built with `CGO_ENABLED=0` and does not require a C compiler.
+On classic Windows consoles, the host explicitly assigns the packaged named
+`APP` icon to both large and small conhost window slots at startup. This avoids
+retaining a generic or inherited build-shell icon; Windows Terminal and
+resource-free developer builds safely treat the operation as unavailable.
 During development, `controller version` reports `development`, a SHA-256
 source hash, and the UTC build time injected by the build script. Windows
 resources intentionally use numeric `0.0.0.0` and the string `development`;
@@ -1034,6 +1038,14 @@ An authenticated peer can consume `GET /api/discovery/manifest`, whose
 relative artifact links point at this host's immutable SHA-256 download routes.
 The same schema can be returned through `controller.discovery.local_manifest`;
 no local filesystem path or credential is published.
+
+The current contract covers content-addressed firmware, EEPROM, verified flash
+readback, the running host executable, explicit device capture, remote staging,
+and guarded updates. Serving every validated historical backup, portable
+allow-listed source/documentation/configuration bundles, resumable peer
+inventory synchronization, and conflict-aware import/export remain tracked in
+[the network artifact-sync requirement](../../docs/Requirements-Backlog.md); those
+capabilities must not be inferred from the current manifest routes.
 
 ## WebSocket firmware relay
 
