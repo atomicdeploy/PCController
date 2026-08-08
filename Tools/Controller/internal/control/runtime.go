@@ -608,7 +608,7 @@ func (runtime *Runtime) Open(ctx context.Context, name string) error {
 		runtime.mu.RUnlock()
 		result, err := link.OpenAuthenticated(
 			ctx,
-			ports.Info{Name: name, Product: productidentity.DefaultTitle + " Virtual Board"},
+			ports.Info{Name: name, Product: productidentity.DefaultAppTitle() + " Virtual Board"},
 			link.DiscoveryOptions{
 				BaudRate: options.BaudRate, StartupWait: options.StartupWait,
 				RequestTimeout: options.RequestTimeout,

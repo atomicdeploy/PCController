@@ -302,7 +302,7 @@ func shortcutFileName(displayName string) string {
 	}, strings.TrimSpace(displayName))
 	name = strings.Trim(name, " .")
 	if name == "" {
-		return productidentity.DefaultTitle
+		return productidentity.DefaultAppTitle()
 	}
 	return name
 }

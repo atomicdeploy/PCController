@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "PCController Control Center",
+  "name": "PCController",
   "short_name": "PCController",
-  "description": "A secure, responsive control surface for the PCController board and its primary host.",
+  "description": "Unified hardware and integration control center",
   "lang": "en",
   "dir": "auto",
   "start_url": "/#/dashboard",
@@ -11,15 +11,72 @@
   "orientation": "any",
   "background_color": "#0b0a0e",
   "theme_color": "#6845bf",
-  "categories": ["utilities", "productivity"],
+  "categories": [
+    "utilities",
+    "productivity"
+  ],
   "icons": [
-    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" },
-    { "src": "/favicon.ico", "sizes": "16x16 24x24 32x32 48x48 64x64 128x128 256x256", "type": "image/x-icon", "purpose": "any" }
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon.ico",
+      "sizes": "16x16 24x24 32x32 48x48 64x64 128x128 256x256",
+      "type": "image/x-icon",
+      "purpose": "any"
+    }
   ],
   "shortcuts": [
-    { "name": "Overview", "short_name": "Overview", "url": "/#/dashboard", "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }] },
-    { "name": "Peripheral workbench", "short_name": "Workbench", "url": "/#/workbench", "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }] },
-    { "name": "Events", "short_name": "Events", "url": "/#/events", "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }] },
-    { "name": "Settings", "short_name": "Settings", "url": "/#/settings", "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }] }
+    {
+      "name": "Overview",
+      "short_name": "Overview",
+      "url": "/#/dashboard",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Peripheral workbench",
+      "short_name": "Workbench",
+      "url": "/#/workbench",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "short_name": "Events",
+      "url": "/#/events",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    },
+    {
+      "name": "Settings",
+      "short_name": "Settings",
+      "url": "/#/settings",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
   ]
 }

@@ -116,7 +116,7 @@ func platformPowerAction(ctx context.Context, action string) error {
 		}[action]
 		arguments := []string{argument}
 		if action != "logoff" {
-			arguments = append(arguments, "/t", "0", "/d", "p:0:0", "/c", productidentity.DefaultTitle+" requested action")
+			arguments = append(arguments, "/t", "0", "/d", "p:0:0", "/c", productidentity.DefaultAppTitle()+" requested action")
 		}
 		output, err := exec.CommandContext(ctx, "shutdown.exe", arguments...).CombinedOutput()
 		if err != nil {

@@ -782,13 +782,19 @@ make a validated config edit to rebuild a long-lived outbound WebSocket peer.
 
 User-visible default identity is owned by
 [`web/package.json`](web/package.json): `productName`, `productShortName`,
-`productTagline`, `description`, and the local TUI console defaults in the
-`productTUIConsole*` fields. The normal build verifies that the generated Go
-constants and Win32 resources still match that source. Set
+`productTagline`, `productFirstRunTagline`, `description`, and the local TUI
+console defaults in the `productTUIConsole*` fields. The normal build verifies
+that the generated Go constants and Win32 resources still match that source. Set
 `ui.app_title` and `ui.tagline` in the watched host configuration for the
 persistent application name and first-run line. Runtime precedence is
 defaults < watched config < `APP_NAME`/`APP_TAGLINE` < global
 `--app-name`/`--tagline` flags. Runtime overrides never rewrite the config.
+Product builds may set `--app-name` and `--tagline`, or the
+`PCCONTROLLER_BUILD_APP_NAME` and `PCCONTROLLER_BUILD_TAGLINE` environment
+variables. `APP_TITLE` remains a supported build-time name alias and
+`APP_TAGLINE` can seed a build-time first-run line. These values are embedded
+as the defaults used by both the Go host and WebUI; watched config and the
+runtime environment/flags above still take precedence.
 TUI, CLI help/version, WebUI navigation/first-run gate, browser title, desktop
 notifications, host-defined menus, and service display names consume the
 effective values. `APP_TITLE` remains a build-time web/package metadata input;

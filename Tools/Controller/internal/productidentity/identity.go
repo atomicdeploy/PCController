@@ -5,8 +5,10 @@ package productidentity
 //go:generate node generate.mjs
 
 import (
+	"encoding/base64"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -14,9 +16,6 @@ const (
 	// Keeping environment resolution out of Title lets an explicit flag retain
 	// the documented highest precedence.
 	RuntimeTitleEnvironment = "APP_NAME"
-	// FirstRunTagline is the configurable default shown by first-run surfaces;
-	// Tagline remains the shorter build-time product badge.
-	FirstRunTagline = "One host. Every board surface."
 )
 
 // Title normalizes a title already resolved by the executable's precedence
@@ -25,7 +24,40 @@ func Title(configured string) string {
 	if configured = strings.TrimSpace(configured); configured != "" {
 		return configured
 	}
-	return DefaultTitle
+	return DefaultAppTitle()
+}
+
+// DefaultAppTitle returns the package default or a validated link-time build
+// override. Base64 keeps every printable UTF-8 title representable through
+// Go's deliberately limited -ldflags quoting grammar.
+func DefaultAppTitle() string {
+	return buildPresentation(BuildTitleBase64, DefaultTitle, 64)
+}
+
+// DefaultFirstRunLine returns the package default or the matching validated
+// link-time build override used to seed a new host configuration.
+func DefaultFirstRunLine() string {
+	return buildPresentation(BuildFirstRunTaglineBase64, DefaultFirstRunTagline, 96)
+}
+
+func buildPresentation(encoded, fallback string, maximum int) string {
+	if encoded == "" {
+		return fallback
+	}
+	decoded, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || !utf8.Valid(decoded) {
+		return fallback
+	}
+	value := strings.TrimSpace(string(decoded))
+	if value == "" || utf8.RuneCountInString(value) > maximum {
+		return fallback
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return fallback
+		}
+	}
+	return value
 }
 
 // ResolveTitle applies config < environment < flag precedence.

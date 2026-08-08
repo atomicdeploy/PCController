@@ -3,6 +3,7 @@
   "productName": "PCController",
   "productShortName": "PC",
   "productTagline": "CONTROL CENTER",
+  "productFirstRunTagline": "One host. Every board surface.",
   "productAppId": "DRSDavidSoft.PCController",
   "productProtocol": "pccontroller",
   "productConfigDirectory": "PCController",

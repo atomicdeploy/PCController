@@ -356,7 +356,7 @@ func TestLoadMergesNewUIDefaultsWithoutOverridingExplicitFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.UI.AppTitle != productidentity.DefaultTitle || value.UI.TableLayout != "compact" || value.UI.HistoryHours != 24 ||
+	if value.UI.AppTitle != productidentity.DefaultAppTitle() || value.UI.TableLayout != "compact" || value.UI.HistoryHours != 24 ||
 		!value.UI.ShowCurrent || value.UI.ShowPower ||
 		!value.UI.LCDServiceEnabled || value.UI.MirrorPromptToLCD {
 		t.Fatalf("merged UI defaults=%#v", value.UI)
@@ -424,6 +424,22 @@ func TestPresentationOverridesRemainRuntimeOnlyAndSurviveUIUpdates(t *testing.T)
 	}
 	if current := store.Current(); current.UI.AppTitle != "Environment Name" || current.UI.Tagline != "Flag tagline" || current.UI.ShowGraphs {
 		t.Fatalf("effective configuration lost override/update: %#v", current.UI)
+	}
+}
+
+func TestDefaultsUseBuildPresentationVariables(t *testing.T) {
+	oldTitle := productidentity.DefaultTitle
+	oldTagline := productidentity.DefaultFirstRunTagline
+	productidentity.DefaultTitle = "Build Controller"
+	productidentity.DefaultFirstRunTagline = "Build-time first-run line"
+	t.Cleanup(func() {
+		productidentity.DefaultTitle = oldTitle
+		productidentity.DefaultFirstRunTagline = oldTagline
+	})
+
+	defaults := Defaults()
+	if defaults.UI.AppTitle != "Build Controller" || defaults.UI.Tagline != "Build-time first-run line" {
+		t.Fatalf("build presentation defaults=%#v", defaults.UI)
 	}
 }
 

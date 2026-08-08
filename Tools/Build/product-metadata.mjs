@@ -13,6 +13,7 @@ const requiredFields = [
 	'productName',
 	'productShortName',
 	'productTagline',
+	'productFirstRunTagline',
 	'description',
 	'productAppId',
 	'productProtocol',
@@ -29,6 +30,12 @@ export function validateProductMetadata(metadata) {
 	for (const field of requiredFields) {
 		if (typeof metadata[field] !== 'string' || !metadata[field].trim()) {
 			throw new Error(`canonical product metadata ${field} must be a non-empty string`)
+		}
+	}
+	for (const [field, maximum] of [['productName', 64], ['productFirstRunTagline', 96]]) {
+		const value = metadata[field].trim()
+		if ([...value].length > maximum || [...value].some(character => /\p{Cc}/u.test(character))) {
+			throw new Error(`canonical product metadata ${field} must be 1..${maximum} printable characters`)
 		}
 	}
 	if (typeof metadata.productTUIConsoleEnabled !== 'boolean') {

@@ -320,8 +320,8 @@ func Defaults() Config {
 			HelloAttempts:    3,
 		},
 		UI: UI{
-			AppTitle: productidentity.DefaultTitle,
-			Tagline:  productidentity.FirstRunTagline,
+			AppTitle: productidentity.DefaultAppTitle(),
+			Tagline:  productidentity.DefaultFirstRunLine(),
 			Appearance: Appearance{
 				Theme: "system", Locale: "en", Direction: "auto", AudioVolume: 0.42,
 			},

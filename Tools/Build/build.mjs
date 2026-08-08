@@ -103,6 +103,22 @@ function normalizeHexTimestamp(value) {
 	return Number.parseInt(text, 16).toString(16).toUpperCase().padStart(8, '0')
 }
 
+function normalizeBuildPresentation(value, label, maximum) {
+	const text = String(value ?? '').trim()
+	const printable = [...text].every(character => !/\p{Cc}/u.test(character))
+	if (!text || [...text].length > maximum || !printable) {
+		throw new BuildError(`${label} must be 1..${maximum} printable characters`, 2)
+	}
+	return text
+}
+
+function presentationLinkerFlags(identity) {
+	return [
+		'-X', `pccontroller.local/controller/internal/productidentity.BuildTitleBase64=${Buffer.from(identity.appName, 'utf8').toString('base64')}`,
+		'-X', `pccontroller.local/controller/internal/productidentity.BuildFirstRunTaglineBase64=${Buffer.from(identity.tagline, 'utf8').toString('base64')}`
+	].join(' ')
+}
+
 export function packBuildTimestamp(date) {
 	if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
 		throw new BuildError('invalid build date', 2)
@@ -143,12 +159,29 @@ export function resolveBuildIdentity(options, env = process.env, now = new Date(
 	if (!/^[0-9A-Za-z][0-9A-Za-z._+-]*$/.test(version)) {
 		throw new BuildError('version may contain only letters, digits, dot, underscore, plus, and hyphen', 2)
 	}
+	const appName = normalizeBuildPresentation(
+		options.appName !== undefined ? options.appName : environmentValue(env, 'PCCONTROLLER_BUILD_APP_NAME') ||
+			environmentValue(env, 'APP_TITLE') || PRODUCT_METADATA.productName,
+		'build application name', 64
+	)
+	const tagline = normalizeBuildPresentation(
+		options.tagline !== undefined ? options.tagline : environmentValue(env, 'PCCONTROLLER_BUILD_TAGLINE') ||
+			environmentValue(env, 'APP_TAGLINE') || PRODUCT_METADATA.productFirstRunTagline,
+		'build first-run tagline', 96
+	)
 	return {
 		version,
+		appName,
+		tagline,
 		hostBuildTime: instant.toISOString().replace('.000Z', 'Z'),
 		packedTimestamp: packed,
 		env: {
-			...env,
+			...withoutEnvironmentNames(env, [
+				'PCCONTROLLER_BUILD_APP_NAME',
+				'PCCONTROLLER_BUILD_TAGLINE'
+			]),
+			PCCONTROLLER_BUILD_APP_NAME: appName,
+			PCCONTROLLER_BUILD_TAGLINE: tagline,
 			PCCONTROLLER_BUILD_TIMESTAMP: `0x${packed}`,
 			PCCONTROLLER_HOST_BUILD_TIME: instant.toISOString().replace('.000Z', 'Z')
 		}
@@ -184,6 +217,8 @@ export function parseArguments(argv, env = process.env) {
 		toolchainSync: false,
 		toolchainCLI: '',
 		version: '',
+		appName: undefined,
+		tagline: undefined,
 		buildTime: '',
 		buildTimestamp: ''
 	}
@@ -241,6 +276,15 @@ export function parseArguments(argv, env = process.env) {
 			case '--version': {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.version = value; index = next; break
+			}
+			case '--app-name': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.appName = value; index = next; break
+			}
+			case '--tagline':
+			case '--app-tagline': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.tagline = value; index = next; break
 			}
 			case '--build-time': {
 				const [value, next] = valueAfter(argv, index, inline, name)
@@ -380,7 +424,11 @@ export function createPlan(options, identity, platform = process.platform) {
 			actions.push(commandAction('upx-pack', 'Compress controller host', 'upx', ['--best', '--lzma', '<staging>/controller.exe'], HOST_ROOT))
 			actions.push(commandAction('upx-test', 'Test compressed controller host', 'upx', ['-t', '<staging>/controller.exe'], HOST_ROOT))
 		}
-		if (options.sharedLibrary) actions.push(commandAction('c-abi', 'Build and smoke-test C ABI', 'go', ['build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib', '-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controllerlib'], HOST_ROOT))
+		if (options.sharedLibrary) actions.push(commandAction('c-abi', 'Build and smoke-test C ABI', 'go', [
+			'build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib',
+			'-ldflags', '<embedded presentation defaults>',
+			'-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controllerlib'
+		], HOST_ROOT))
 		actions.push({ id: 'licenses', stage: 'Collect project and Go-module notices', hardware: false })
 		actions.push({ id: 'host-manifest', stage: 'Publish canonical host package and manifest', hardware: false })
 	}
@@ -419,7 +467,13 @@ export function createPlan(options, identity, platform = process.platform) {
 			defaultEEPROM: paths.defaultEEPROM,
 			manifest: paths.manifest
 		},
-		identity: { version: identity.version, hostBuildTime: identity.hostBuildTime, packedTimestamp: identity.packedTimestamp },
+		identity: {
+			version: identity.version,
+			appName: identity.appName,
+			tagline: identity.tagline,
+			hostBuildTime: identity.hostBuildTime,
+			packedTimestamp: identity.packedTimestamp
+		},
 		actions
 	}
 }
@@ -444,6 +498,8 @@ Safe build options:
   --no-shared-library       Skip C ABI library/header/smoke test
   --no-compiler-bootstrap   Do not install a missing native Windows C compiler
   --version VALUE           Host version identity (default: product metadata)
+  --app-name TEXT           Embed the default host/WebUI application name
+  --tagline TEXT            Embed the default first-run host/WebUI tagline
   --build-time ISO          Freeze host build time for reproducible packaging
   --build-timestamp HEX     Freeze packed firmware timestamp
   --toolchain-sync          Explicitly synchronize firmware dependencies
@@ -493,6 +549,13 @@ function assertNodeVersion(minimum = MINIMUM_NODE, purpose = '') {
 function environmentValue(env, name) {
 	const key = Object.keys(env).find(candidate => candidate.toLowerCase() === name.toLowerCase())
 	return key ? env[key] : ''
+}
+
+function withoutEnvironmentNames(env, names) {
+	const blocked = new Set(names.map(name => name.toLowerCase()))
+	return Object.fromEntries(
+		Object.entries(env).filter(([name]) => !blocked.has(name.toLowerCase()))
+	)
 }
 
 function hasEnvironmentName(env, name) {
@@ -644,19 +707,30 @@ function directoryIdentity(root, excludeBuildState = false) {
 	return { sha256: sha256Buffer(Buffer.from(manifest, 'utf8')), files: files.length, manifest }
 }
 
-function verifyEmbeddedWebBuild() {
+function verifyEmbeddedWebBuild(expectedAppName) {
 	const index = join(WEB_DIST, 'index.html')
 	if (!existsSync(index)) throw new BuildError('web build did not produce internal/webui/dist/index.html')
 	const html = readFileSync(index, 'utf8')
 	if (/(?:\/src\/|@vite\/client)/i.test(html)) {
 		throw new BuildError('web build output still references Vite development sources')
 	}
+	const manifestPath = join(WEB_DIST, 'manifest.webmanifest')
+	if (!existsSync(manifestPath)) throw new BuildError('web build did not produce manifest.webmanifest')
+	let manifest
+	try {
+		manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+	} catch (error) {
+		throw new BuildError(`web build produced an invalid manifest.webmanifest: ${error.message}`)
+	}
+	if (manifest.name !== expectedAppName || manifest.short_name !== expectedAppName) {
+		throw new BuildError('web application manifest does not match the embedded build application name')
+	}
 	const identity = directoryIdentity(WEB_DIST)
 	if (identity.files < 2) throw new BuildError('web build output is incomplete; expected index.html and bundled assets')
 	return identity
 }
 
-function buildWebUI(options, env, log) {
+function buildWebUI(options, env, log, expectedAppName) {
 	assertNodeVersion(MINIMUM_WEB_NODE, 'the embedded web build')
 	if (!existsSync(WEB_LOCK)) {
 		throw new BuildError('embedded web build requires Tools/Controller/web/package-lock.json; regenerate and review the lockfile')
@@ -697,7 +771,7 @@ function buildWebUI(options, env, log) {
 	if (inputsAfter.sha256 !== inputsBefore.sha256) {
 		throw new BuildError('web source or package lock changed during the embedded build; retry from a stable tree')
 	}
-	const dist = verifyEmbeddedWebBuild()
+	const dist = verifyEmbeddedWebBuild(expectedAppName)
 	log.detail(`embedded web: ${dist.files} files, SHA256 ${dist.sha256}`)
 	return {
 		dependencies: 'npm-ci',
@@ -1314,7 +1388,7 @@ int main(void) {
 `
 }
 
-function buildSharedLibrary(go, stage, env, goArch, options, log) {
+function buildSharedLibrary(go, stage, env, goArch, options, log, ldflags) {
 	const extension = process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'
 	const output = join(stage, `pccontroller${extension}`)
 	const compiler = selectCCompiler(env, goArch, options)
@@ -1334,6 +1408,7 @@ function buildSharedLibrary(go, stage, env, goArch, options, log) {
 	}
 	run(go, [
 		'build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib',
+		'-ldflags', ldflags,
 		'-buildmode=c-shared', '-o', output, './cmd/controllerlib'
 	], { cwd: HOST_ROOT, env: { ...compiler.env, CGO_ENABLED: '1' }, verbose: options.verbose })
 	const header = join(stage, 'pccontroller.h')
@@ -1556,7 +1631,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	assertGeneratedPath(PROJECT_ROOT, stage)
 	removeGeneratedTree(stage)
 	mkdirSync(stage, { recursive: true })
-	const webUI = buildWebUI(options, env, log)
+	const webUI = buildWebUI(options, env, log, identity.appName)
 	log.stage('🎯', 'Checking runtime toolchain policy generated from the canonical profile')
 	run(process.execPath, [TOOLCHAIN_POLICY_GENERATOR, '--check'], {
 		cwd: PROJECT_ROOT, env, verbose: options.verbose
@@ -1598,7 +1673,8 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	const before = hostSourceIdentity()
 	const executableName = process.platform === 'win32' ? 'controller.exe' : 'controller'
 	const executable = join(stage, executableName)
-	const ldflags = `-s -w -X main.version=${identity.version} -X main.sourceHash=${before.sha256} -X main.buildTime=${identity.hostBuildTime}`
+	const presentationFlags = presentationLinkerFlags(identity)
+	const ldflags = `-s -w -X main.version=${identity.version} -X main.sourceHash=${before.sha256} -X main.buildTime=${identity.hostBuildTime} ${presentationFlags}`
 	log.stage('🖥️', `Building host ${identity.version} from ${before.sha256.slice(0, 12)}`)
 	const executableCGO = process.platform === 'darwin' ? '1' : '0'
 	run(go, ['build', '-buildvcs=false', '-trimpath', '-ldflags', ldflags, '-o', executable, './cmd/controller'], {
@@ -1619,10 +1695,24 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		})
 		resourceGenerated = true
 	}
-	let versionOutput = run(executable, ['version'], { cwd: stage, env, capture: true }).stdout.trim()
+	const verificationEnv = withoutEnvironmentNames(env, ['APP_NAME', 'APP_TAGLINE'])
+	const presentationConfig = join(stage, 'build-presentation-check.json')
+	const versionArguments = ['--config', presentationConfig, 'version']
+	let versionOutput = run(executable, versionArguments, { cwd: stage, env: verificationEnv, capture: true }).stdout.trim()
 	const expectedIdentity = [identity.version, `source-hash=${before.sha256}`, `built=${identity.hostBuildTime}`]
 	for (const expected of expectedIdentity) {
 		if (!versionOutput.includes(expected)) throw new BuildError(`controller identity check is missing ${expected}`)
+	}
+	if (!versionOutput.startsWith(`${identity.appName} `)) {
+		throw new BuildError(`controller identity check did not use the embedded application name ${JSON.stringify(identity.appName)}`)
+	}
+	const presentationOutput = run(executable, ['--config', presentationConfig, 'config', 'show'], {
+		cwd: stage, env: verificationEnv, capture: true
+	}).stdout
+	const presentation = JSON.parse(presentationOutput)
+	rmSync(presentationConfig, { force: true })
+	if (presentation.ui?.app_title !== identity.appName || presentation.ui?.tagline !== identity.tagline) {
+		throw new BuildError('controller configuration defaults do not match the embedded build presentation')
 	}
 	if (process.platform === 'win32' && options.resources) verifyWindowsResources(executable, identity.version)
 
@@ -1633,7 +1723,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		const version = run(upxPath, ['--version'], { env, capture: true }).stdout.split(/\r?\n/)[0].trim()
 		run(upxPath, ['--best', '--lzma', executable], { cwd: stage, env, verbose: options.verbose })
 		run(upxPath, ['-t', executable], { cwd: stage, env, verbose: options.verbose })
-		versionOutput = run(executable, ['version'], { cwd: stage, env, capture: true }).stdout.trim()
+		versionOutput = run(executable, versionArguments, { cwd: stage, env: verificationEnv, capture: true }).stdout.trim()
 		for (const expected of expectedIdentity) {
 			if (!versionOutput.includes(expected)) throw new BuildError(`packed controller identity check is missing ${expected}`)
 		}
@@ -1643,7 +1733,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	let shared = { paths: [], compiler: null }
 	if (options.sharedLibrary) {
 		log.stage('🧩', 'Building and smoke-testing the C ABI library')
-		shared = buildSharedLibrary(go, stage, goEnv, goArch, options, log)
+		shared = buildSharedLibrary(go, stage, goEnv, goArch, options, log, presentationFlags)
 	} else log.warning('C ABI package was explicitly skipped.')
 
 	log.stage('📜', 'Collecting project and dependency notices')
@@ -1655,6 +1745,8 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		target: { platform: process.platform, architecture: goArch },
 		identity: {
 			version: identity.version,
+			appName: identity.appName,
+			tagline: identity.tagline,
 			sourceSHA256: before.sha256,
 			sourceFiles: before.files,
 			buildTime: identity.hostBuildTime,
@@ -1688,6 +1780,8 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		{ label: 'Verified value' }
 	], [
 		['Version', identity.version],
+		['Application name', identity.appName],
+		['First-run tagline', identity.tagline],
 		['Source SHA-256', before.sha256],
 		['Build time', identity.hostBuildTime],
 		['Embedded board defaults', embeddedDefaults.enabled ? `${shortHash(embeddedDefaults.firmwareSHA256)} + EEPROM ${shortHash(embeddedDefaults.eepromSHA256)}` : 'not packaged'],

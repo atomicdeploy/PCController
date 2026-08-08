@@ -18,7 +18,6 @@ package productidentity
 
 const (
 \tVersion         = ${quote(version)}
-\tDefaultTitle    = ${quote(metadata.productName)}
 \tShortName       = ${quote(metadata.productShortName)}
 \tTagline         = ${quote(metadata.productTagline)}
 \tDescription     = ${quote(metadata.description)}
@@ -27,15 +26,20 @@ const (
 \tConfigDirectory = ${quote(metadata.productConfigDirectory)}
 )
 
-// TUI console defaults are variables so product builds can replace them with
-// Go -ldflags -X. appconfig seeds its defaults from these values before it
-// decodes the user's file, preserving config-over-build precedence.
+// Presentation and TUI console defaults are variables so product builds can
+// replace them with Go -ldflags -X. appconfig seeds its defaults from these
+// values before decoding the user's file, preserving config-over-build
+// precedence.
 var (
-\tDefaultTUIConsoleEnabled  = ${quote(String(metadata.productTUIConsoleEnabled))}
-\tDefaultTUIConsoleColumns  = ${quote(String(metadata.productTUIConsoleColumns))}
-\tDefaultTUIConsoleRows     = ${quote(String(metadata.productTUIConsoleRows))}
-\tDefaultTUIConsoleFontFace = ${quote(metadata.productTUIConsoleFontFace)}
-\tDefaultTUIConsoleFontSize = ${quote(String(metadata.productTUIConsoleFontSize))}
+\tDefaultTitle               = ${quote(metadata.productName)}
+\tDefaultFirstRunTagline     = ${quote(metadata.productFirstRunTagline)}
+\tBuildTitleBase64           = ""
+\tBuildFirstRunTaglineBase64 = ""
+\tDefaultTUIConsoleEnabled   = ${quote(String(metadata.productTUIConsoleEnabled))}
+\tDefaultTUIConsoleColumns   = ${quote(String(metadata.productTUIConsoleColumns))}
+\tDefaultTUIConsoleRows      = ${quote(String(metadata.productTUIConsoleRows))}
+\tDefaultTUIConsoleFontFace  = ${quote(metadata.productTUIConsoleFontFace)}
+\tDefaultTUIConsoleFontSize  = ${quote(String(metadata.productTUIConsoleFontSize))}
 )
 `
 

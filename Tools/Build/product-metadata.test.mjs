@@ -14,7 +14,7 @@ test('canonical product metadata is loaded once from the web package', () => {
 	assert.equal(loadProductMetadata().productName, PRODUCT_METADATA.productName)
 	for (const field of [
 		'version',
-		'productName', 'productShortName', 'productTagline', 'description',
+		'productName', 'productShortName', 'productTagline', 'productFirstRunTagline', 'description',
 		'productAppId', 'productProtocol', 'productConfigDirectory'
 	]) assert.ok(PRODUCT_METADATA[field].trim(), `${field} must be populated`)
 	assert.equal(typeof PRODUCT_METADATA.productTUIConsoleEnabled, 'boolean')
@@ -32,6 +32,18 @@ test('TUI console font metadata matches the runtime safety contract', () => {
 				productTUIConsoleFontFace: fontFace
 			}),
 			/1\.\.31 printable UTF-16 code units/
+		)
+	}
+})
+
+test('build presentation metadata matches runtime length and text bounds', () => {
+	for (const [field, value, expression] of [
+		['productName', 'x'.repeat(65), /1\.\.64 printable characters/],
+		['productFirstRunTagline', 'line\nbreak', /1\.\.96 printable characters/]
+	]) {
+		assert.throws(
+			() => validateProductMetadata({ ...PRODUCT_METADATA, [field]: value }),
+			expression
 		)
 	}
 })

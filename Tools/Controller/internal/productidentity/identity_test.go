@@ -1,6 +1,7 @@
 package productidentity
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ func TestGeneratedIdentityMatchesCanonicalPackageMetadata(t *testing.T) {
 		ProductName               string `json:"productName"`
 		ProductShortName          string `json:"productShortName"`
 		ProductTagline            string `json:"productTagline"`
+		ProductFirstRunTagline    string `json:"productFirstRunTagline"`
 		Description               string `json:"description"`
 		ProductAppID              string `json:"productAppId"`
 		ProductProtocol           string `json:"productProtocol"`
@@ -34,6 +36,7 @@ func TestGeneratedIdentityMatchesCanonicalPackageMetadata(t *testing.T) {
 	want := []string{
 		metadata.Version,
 		metadata.ProductName, metadata.ProductShortName, metadata.ProductTagline,
+		metadata.ProductFirstRunTagline,
 		metadata.Description, metadata.ProductAppID, metadata.ProductProtocol,
 		metadata.ProductConfigDirectory,
 		fmt.Sprint(metadata.ProductTUIConsoleEnabled),
@@ -44,7 +47,7 @@ func TestGeneratedIdentityMatchesCanonicalPackageMetadata(t *testing.T) {
 	}
 	got := []string{
 		Version,
-		DefaultTitle, ShortName, Tagline, Description, StableAppID,
+		DefaultTitle, ShortName, Tagline, DefaultFirstRunTagline, Description, StableAppID,
 		ProtocolScheme, ConfigDirectory,
 		DefaultTUIConsoleEnabled, DefaultTUIConsoleColumns, DefaultTUIConsoleRows,
 		DefaultTUIConsoleFontFace, DefaultTUIConsoleFontSize,
@@ -106,5 +109,27 @@ func TestTitlePrecedence(t *testing.T) {
 	}
 	if got := ResolveTitle("Workshop Controller", "Temporary Lab", ""); got != "Temporary Lab" {
 		t.Fatalf("environment title=%q", got)
+	}
+}
+
+func TestEncodedBuildPresentationSupportsPrintableQuotes(t *testing.T) {
+	oldTitle := BuildTitleBase64
+	oldTagline := BuildFirstRunTaglineBase64
+	BuildTitleBase64 = base64.StdEncoding.EncodeToString([]byte(`Lab "Controller"`))
+	BuildFirstRunTaglineBase64 = base64.StdEncoding.EncodeToString([]byte(`Builder's first-run line`))
+	t.Cleanup(func() {
+		BuildTitleBase64 = oldTitle
+		BuildFirstRunTaglineBase64 = oldTagline
+	})
+
+	if got := DefaultAppTitle(); got != `Lab "Controller"` {
+		t.Fatalf("build title=%q", got)
+	}
+	if got := DefaultFirstRunLine(); got != `Builder's first-run line` {
+		t.Fatalf("build tagline=%q", got)
+	}
+	BuildTitleBase64 = "not-base64"
+	if got := DefaultAppTitle(); got != DefaultTitle {
+		t.Fatalf("invalid build title did not fail closed: %q", got)
 	}
 }
