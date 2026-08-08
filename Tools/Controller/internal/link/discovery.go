@@ -45,7 +45,7 @@ func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error)
 
 	if IsNetworkEndpoint(options.Filter.Port) {
 		return OpenAuthenticated(ctx, ports.Info{
-			Name: options.Filter.Port, Product: productidentity.DefaultTitle + " Virtual Board",
+			Name: options.Filter.Port, Product: productidentity.DefaultAppTitle() + " Virtual Board",
 		}, options)
 	}
 	all, err := ports.List()

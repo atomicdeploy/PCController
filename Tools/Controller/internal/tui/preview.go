@@ -24,7 +24,7 @@ func RichPreviewSnapshot() control.Snapshot {
 		Connected: true,
 		Port: ports.Info{
 			Name: "VIRTUAL", VID: "1A86", PID: "7523",
-			FriendlyName: productidentity.DefaultTitle + " Virtual Board (COM18 profile)",
+			FriendlyName: productidentity.DefaultAppTitle() + " Virtual Board (COM18 profile)",
 		},
 		Hello: native.Hello{
 			Name: "PCController", BoardKind: native.BoardKindPCController,

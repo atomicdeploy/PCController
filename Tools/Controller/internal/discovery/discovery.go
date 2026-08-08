@@ -67,7 +67,7 @@ func Advertise(
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		name = productidentity.DefaultTitle
+		name = productidentity.DefaultAppTitle()
 	}
 	txt = normalizeTXT(txt)
 	ctx, cancel := context.WithCancel(parent)

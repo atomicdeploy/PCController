@@ -683,6 +683,85 @@ test('fixed identity is propagated exactly to host and firmware', () => {
 	assert.equal(identity.env.PCCONTROLLER_BUILD_TIMESTAMP, '0x35019D5D')
 })
 
+test('build presentation switches override environment and package defaults', () => {
+	const options = parseArguments([
+		'--host-only', '--app-name', 'Flag Controller',
+		'--tagline', 'Flag first-run line'
+	], {})
+	const identity = resolveBuildIdentity(options, {
+		PCCONTROLLER_BUILD_APP_NAME: 'Environment Controller',
+		PCCONTROLLER_BUILD_TAGLINE: 'Environment line',
+		APP_TITLE: 'Legacy build title',
+		APP_TAGLINE: 'Runtime/build line'
+	})
+	assert.equal(identity.appName, 'Flag Controller')
+	assert.equal(identity.tagline, 'Flag first-run line')
+	assert.equal(identity.env.PCCONTROLLER_BUILD_APP_NAME, 'Flag Controller')
+	assert.equal(identity.env.PCCONTROLLER_BUILD_TAGLINE, 'Flag first-run line')
+	assert.deepEqual(
+		Object.keys(identity.env).filter(name => name.toLowerCase() === 'pccontroller_build_app_name'),
+		['PCCONTROLLER_BUILD_APP_NAME']
+	)
+	assert.deepEqual(
+		Object.keys(identity.env).filter(name => name.toLowerCase() === 'pccontroller_build_tagline'),
+		['PCCONTROLLER_BUILD_TAGLINE']
+	)
+	const plan = createPlan(options, identity, 'win32')
+	assert.deepEqual(plan.identity, {
+		version: PRODUCT_METADATA.version,
+		appName: 'Flag Controller',
+		tagline: 'Flag first-run line',
+		hostBuildTime: identity.hostBuildTime,
+		packedTimestamp: identity.packedTimestamp
+	})
+})
+
+test('build presentation environment is case-insensitive and validated', () => {
+	const options = parseArguments(['--host-only'], {})
+	const identity = resolveBuildIdentity(options, {
+		pccontroller_build_app_name: 'Environment Controller',
+		PcController_Build_Tagline: 'Environment first-run line'
+	})
+	assert.equal(identity.appName, 'Environment Controller')
+	assert.equal(identity.tagline, 'Environment first-run line')
+	const overridden = resolveBuildIdentity(parseArguments([
+		'--app-name', 'Flag Controller', '--tagline', 'Flag line'
+	], {}), {
+		pccontroller_build_app_name: 'Stale environment title',
+		PcController_Build_Tagline: 'Stale environment line'
+	})
+	assert.equal(overridden.appName, 'Flag Controller')
+	assert.equal(overridden.tagline, 'Flag line')
+	assert.deepEqual(
+		Object.keys(overridden.env).filter(name => name.toLowerCase() === 'pccontroller_build_app_name'),
+		['PCCONTROLLER_BUILD_APP_NAME']
+	)
+	assert.deepEqual(
+		Object.keys(overridden.env).filter(name => name.toLowerCase() === 'pccontroller_build_tagline'),
+		['PCCONTROLLER_BUILD_TAGLINE']
+	)
+	assert.throws(
+		() => resolveBuildIdentity(parseArguments(['--app-name', 'x'.repeat(65)], {}), {}),
+		/1\.\.64 printable characters/
+	)
+	assert.throws(
+		() => resolveBuildIdentity(parseArguments(['--tagline', 'line\nbreak'], {}), {}),
+		/1\.\.96 printable characters/
+	)
+	assert.throws(
+		() => resolveBuildIdentity(parseArguments(['--app-name='], {}), {
+			PCCONTROLLER_BUILD_APP_NAME: 'must not mask an explicit empty flag'
+		}),
+		/1\.\.64 printable characters/
+	)
+	assert.throws(
+		() => resolveBuildIdentity(parseArguments(['--tagline', ''], {}), {
+			PCCONTROLLER_BUILD_TAGLINE: 'must not mask an explicit empty flag'
+		}),
+		/1\.\.96 printable characters/
+	)
+})
+
 test('Windows resources are patched after link and before UPX', () => {
 	const options = parseArguments([
 		'--host-only', '--build-time', '2026-08-01T16:12:58Z',

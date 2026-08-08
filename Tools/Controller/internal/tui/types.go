@@ -65,7 +65,7 @@ type Preferences struct {
 func defaultPreferences() Preferences {
 	return Preferences{
 		AppTitle:            productidentity.Title(""),
-		Tagline:             productidentity.FirstRunTagline,
+		Tagline:             productidentity.DefaultFirstRunLine(),
 		PollInterval:        250 * time.Millisecond,
 		EventLogLimit:       2000,
 		HistoryWindow:       24 * time.Hour,
@@ -86,7 +86,7 @@ func preferencesFromUI(value appconfig.UI) Preferences {
 	result.AppTitle = productidentity.Title(value.AppTitle)
 	result.Tagline = strings.TrimSpace(value.Tagline)
 	if result.Tagline == "" {
-		result.Tagline = productidentity.FirstRunTagline
+		result.Tagline = productidentity.DefaultFirstRunLine()
 	}
 	if value.StatusIntervalMS >= 100 {
 		result.PollInterval = time.Duration(value.StatusIntervalMS) * time.Millisecond
