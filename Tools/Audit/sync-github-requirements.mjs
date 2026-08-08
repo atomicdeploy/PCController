@@ -963,6 +963,7 @@ const PR_ORIGINAL_REQUESTS = {
   113: [PROMPT_EXCERPTS.releaseHandoff, PROMPT_EXCERPTS.ciDelivery],
   114: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.mergePolicy],
   119: [PROMPT_EXCERPTS.consoleIcon, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.artifactSync],
+  120: [PROMPT_EXCERPTS.tuiConsole, PROMPT_EXCERPTS.webRoot, PROMPT_EXCERPTS.configurationSources, PROMPT_EXCERPTS.canonicalLogo, PROMPT_EXCERPTS.trackerReconciliation],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
