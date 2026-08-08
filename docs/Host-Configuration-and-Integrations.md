@@ -247,6 +247,16 @@ links are present only for an authenticated controller; Connect/Reconnect and
 Exit remain available otherwise. State is checked again at dispatch, so a
 disconnect while the menu is open cannot launch a stale page.
 
+This is currently an in-process web-primary tray, not a Windows service. The
+tracked service split keeps a privileged, headless, session-independent serial
+owner separate from an unelevated per-user tray client. That client will attach
+through authenticated local IPC, launch or foreground Win32, TUI, or WebUI
+surfaces, select among multiple ports, open/close/reconnect, navigate menus,
+edit quick settings, and exit independently from a separately guarded service
+stop. Until that requirement is implemented, do not register `controller web`
+as a privileged service or assume its tray survives user sign-out. See the
+[service/tray requirement](Requirements-Backlog.md).
+
 The same hidden native window receives Windows session lock/unlock and power
 suspend/resume notifications. A bounded network-state monitor emits only real
 interface/address signature changes. These become typed
@@ -415,6 +425,16 @@ All accepted/denied brightness and power attempts publish host events. Because
 the manager reads the current Store value on every action, JSON/YAML/TOML file
 watcher changes apply immediately to CLI, TUI/front-panel, IPC, and WebSocket
 callers. The default remains deny-safe.
+
+The cross-platform extension remains tracked rather than implied complete:
+enumerate every supported internal/external display, query and set native
+system volume/mute, query normalized battery/AC state, and report durable
+accepted/in-progress/completed/failed outcomes for Suspend/Sleep, Hibernate,
+Shut down, and Reboot. Each OS must use its native API/provider and expose the
+same typed state through TUI, tray, WebUI, CLI, IPC, REST, WebSocket,
+automations, and history. Current Windows brightness and guarded request
+support is only the implemented subset; the full normalized contract remains
+open in the [host OS-actions requirement](Requirements-Backlog.md).
 
 ### Read-only Windows host facts
 

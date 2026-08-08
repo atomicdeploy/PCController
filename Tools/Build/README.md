@@ -38,7 +38,10 @@ selects or opens a serial/USB device.
 Before the WebUI input identity is frozen, the build regenerates the canonical
 256 px product mark and its seven-size ICO from the same project-owned source.
 The native Windows resource and embedded browser therefore cannot silently
-drift to different icons.
+drift to different icons. The packaged host also applies the named `APP`
+resource explicitly to attached classic conhost windows, so a parent build
+shell or Windows icon cache cannot leave the running app with the generic
+console icon.
 
 ## Common commands
 
