@@ -559,9 +559,13 @@ func editorVisualPreview(editor *settingEditor) (appconfig.RGBColor, bool) {
 	if editor == nil || !strings.HasPrefix(editor.Key, "led.visual.") {
 		return appconfig.RGBColor{}, false
 	}
-	return appconfig.RGBColor{
-		Red: byte(editorField(editor, "red")), Green: byte(editorField(editor, "green")), Blue: byte(editorField(editor, "blue")),
-	}, true
+	red, redErr := checkedUint8(editorField(editor, "red"))
+	green, greenErr := checkedUint8(editorField(editor, "green"))
+	blue, blueErr := checkedUint8(editorField(editor, "blue"))
+	if redErr != nil || greenErr != nil || blueErr != nil {
+		return appconfig.RGBColor{}, false
+	}
+	return appconfig.RGBColor{Red: red, Green: green, Blue: blue}, true
 }
 
 func visualEditorFields(visual appconfig.StatusLEDVisual) []settingEditorField {

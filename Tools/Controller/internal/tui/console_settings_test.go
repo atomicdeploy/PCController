@@ -94,3 +94,22 @@ func TestCheckedSettingIntegerConversionsRejectOverflow(t *testing.T) {
 		t.Fatalf("checkedInt16 boundary=%d err=%v", value, err)
 	}
 }
+
+func TestVisualPreviewRejectsOutOfRangeColor(t *testing.T) {
+	editor := &settingEditor{
+		Key: "led.visual.idle",
+		Fields: []settingEditorField{
+			{Key: "red", Value: 256},
+			{Key: "green", Value: 20},
+			{Key: "blue", Value: 30},
+		},
+	}
+	if _, ok := editorVisualPreview(editor); ok {
+		t.Fatal("visual preview accepted an overflowing color channel")
+	}
+	editor.Fields[0].Value = 255
+	color, ok := editorVisualPreview(editor)
+	if !ok || color.Red != 255 || color.Green != 20 || color.Blue != 30 {
+		t.Fatalf("valid visual preview color=%#v ok=%t", color, ok)
+	}
+}
