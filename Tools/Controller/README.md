@@ -260,6 +260,38 @@ The same filters can be supplied through `PCCONTROLLER_DEVICE`,
 `PCCONTROLLER_VID`, `PCCONTROLLER_PID`, `PCCONTROLLER_NAME`, and
 `PCCONTROLLER_BAUD`.
 
+On a directly attached classic Windows console, the TUI selects a usable
+initial window (`132 × 38`) and console font (`Consolas`, 18 px) before it
+enters the alternate screen. Override that launch without editing settings:
+
+```console
+controller tui --columns 144 --rows 44 --console-font "Cascadia Mono" --console-font-size 18
+controller tui --console-management=false
+```
+
+The same values are persisted under `ui.tui_console` in JSON, YAML, or TOML,
+can be edited live on the TUI **HOST Settings** page, and can be changed with
+`config set ui.tui_console.columns 144` (likewise `rows`, `font_face`,
+`font_size`, and `enabled`). Environment overrides are
+`PCCONTROLLER_TUI_CONSOLE`, `PCCONTROLLER_TUI_COLUMNS`,
+`PCCONTROLLER_TUI_ROWS`, `PCCONTROLLER_TUI_FONT`, and
+`PCCONTROLLER_TUI_FONT_SIZE`.
+
+Precedence is runtime flags, environment, watched config, build defaults, then
+the packaged defaults above. The package defaults are also declared as
+`productTUIConsole*` fields in `web/package.json`. Product builds may replace
+the five Go defaults without source edits, for example:
+
+```console
+go build -ldflags "-X pccontroller.local/controller/internal/productidentity.DefaultTUIConsoleEnabled=true -X pccontroller.local/controller/internal/productidentity.DefaultTUIConsoleColumns=144 -X pccontroller.local/controller/internal/productidentity.DefaultTUIConsoleRows=44 -X pccontroller.local/controller/internal/productidentity.DefaultTUIConsoleFontFace=Consolas -X pccontroller.local/controller/internal/productidentity.DefaultTUIConsoleFontSize=20" ./cmd/controller
+```
+
+This feature is local by design. SSH and RDP clients own their terminal; the
+host therefore skips config/build defaults there, while an explicit runtime
+console flag returns a clear error. Non-Windows, redirected-output,
+Windows-Terminal/ConPTY, and unattached sessions similarly remain safe and do
+not receive classic-console font changes.
+
 Keys:
 
 ```text
@@ -750,8 +782,9 @@ make a validated config edit to rebuild a long-lived outbound WebSocket peer.
 
 User-visible default identity is owned by
 [`web/package.json`](web/package.json): `productName`, `productShortName`,
-`productTagline`, and `description`. The normal build verifies that the
-generated Go constants and Win32 resources still match that source. Set
+`productTagline`, `description`, and the local TUI console defaults in the
+`productTUIConsole*` fields. The normal build verifies that the generated Go
+constants and Win32 resources still match that source. Set
 `ui.app_title` and `ui.tagline` in the watched host configuration for the
 persistent application name and first-run line. Runtime precedence is
 defaults < watched config < `APP_NAME`/`APP_TAGLINE` < global

@@ -12,9 +12,11 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/fsnotify/fsnotify"
@@ -83,6 +85,7 @@ type UI struct {
 	AppTitle             string            `json:"app_title"`
 	Tagline              string            `json:"tagline"`
 	Appearance           Appearance        `json:"appearance"`
+	TUIConsole           TUIConsole        `json:"tui_console"`
 	SeparatePortButtons  bool              `json:"separate_port_buttons"`
 	TableLayout          string            `json:"table_layout"`
 	PeripheralNames      map[string]string `json:"peripheral_names,omitempty"`
@@ -111,6 +114,17 @@ type UI struct {
 	LCDPromptDebounceMS  int               `json:"lcd_prompt_debounce_ms"`
 	LCDPriorityHoldMS    int               `json:"lcd_priority_hold_ms"`
 	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
+}
+
+// TUIConsole contains local classic-console presentation preferences. These
+// settings are intentionally host-only: remote/SSH terminals retain control of
+// their own dimensions and font.
+type TUIConsole struct {
+	Enabled  bool   `json:"enabled"`
+	Columns  int    `json:"columns"`
+	Rows     int    `json:"rows"`
+	FontFace string `json:"font_face"`
+	FontSize int    `json:"font_size"`
 }
 
 // Appearance is the host-authoritative presentation preference shared by the
@@ -311,6 +325,7 @@ func Defaults() Config {
 			Appearance: Appearance{
 				Theme: "system", Locale: "en", Direction: "auto", AudioVolume: 0.42,
 			},
+			TUIConsole:           productTUIConsoleDefaults(),
 			TableLayout:          "compact",
 			WelcomeMelody:        "notify",
 			StatusIntervalMS:     200,
@@ -384,6 +399,17 @@ func Defaults() Config {
 	}
 }
 
+func productTUIConsoleDefaults() TUIConsole {
+	enabled, _ := strconv.ParseBool(strings.TrimSpace(productidentity.DefaultTUIConsoleEnabled))
+	columns, _ := strconv.Atoi(strings.TrimSpace(productidentity.DefaultTUIConsoleColumns))
+	rows, _ := strconv.Atoi(strings.TrimSpace(productidentity.DefaultTUIConsoleRows))
+	fontSize, _ := strconv.Atoi(strings.TrimSpace(productidentity.DefaultTUIConsoleFontSize))
+	return TUIConsole{
+		Enabled: enabled, Columns: columns, Rows: rows,
+		FontFace: strings.TrimSpace(productidentity.DefaultTUIConsoleFontFace), FontSize: fontSize,
+	}
+}
+
 // DefaultPath returns the canonical per-user host configuration path.
 func DefaultPath() (string, error) {
 	base, err := os.UserConfigDir()
@@ -426,6 +452,7 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
+	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
 		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: %w", path, err)
 	}
@@ -454,6 +481,7 @@ func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
+	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
 		return err
 	}
@@ -527,6 +555,20 @@ func (value Config) Validate() error {
 	if tagline := strings.TrimSpace(value.UI.Tagline); tagline == "" ||
 		utf8.RuneCountInString(tagline) > 96 || !printableText(tagline) {
 		return fmt.Errorf("ui.tagline must be 1..96 printable characters")
+	}
+	console := value.UI.TUIConsole
+	if console.Columns < 56 || console.Columns > 300 {
+		return errors.New("ui.tui_console.columns must be 56..300")
+	}
+	if console.Rows < 18 || console.Rows > 120 {
+		return errors.New("ui.tui_console.rows must be 18..120")
+	}
+	fontFace := strings.TrimSpace(console.FontFace)
+	if fontFace == "" || len(utf16.Encode([]rune(fontFace))) > 31 || !printableText(fontFace) {
+		return errors.New("ui.tui_console.font_face must be 1..31 printable UTF-16 code units")
+	}
+	if console.FontSize < 5 || console.FontSize > 72 {
+		return errors.New("ui.tui_console.font_size must be 5..72")
 	}
 	appearance := NormalizeAppearance(value.UI.Appearance)
 	switch appearance.Theme {

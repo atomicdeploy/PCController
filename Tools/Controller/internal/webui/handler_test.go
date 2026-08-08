@@ -27,6 +27,7 @@ func testHandler(t *testing.T, additionalReserved ...string) http.Handler {
 		"assets/chunk-abcdef12.bin": {Data: append([]byte(nil), testAsset...), ModTime: modified},
 		"assets/app-abcdef12.js":    {Data: []byte("export const ready = true\n"), ModTime: modified},
 		"assets/app-abcdef12.css":   {Data: []byte(":root { color-scheme: dark }\n"), ModTime: modified},
+		"assets/index-abcdef12.css": {Data: []byte("body { color: white }\n"), ModTime: modified},
 		"assets/icon-abcdef12.svg":  {Data: []byte("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"), ModTime: modified},
 		"assets/ui-abcdef12.woff2":  {Data: []byte("test-font-data"), ModTime: modified},
 		"assets/plain.js":           {Data: []byte("export {}\n"), ModTime: modified},
@@ -75,6 +76,60 @@ func TestEmbeddedHandlerServesUsefulAppShell(t *testing.T) {
 	assertSecurityHeaders(t, response.Header())
 	if got := response.Header().Get("Cache-Control"); got != "no-cache" {
 		t.Fatalf("index cache policy=%q", got)
+	}
+	for _, match := range regexp.MustCompile(`(?:src|href)="(/[^"]+)"`).FindAllStringSubmatch(body, -1) {
+		asset := request(t, Handler(), http.MethodHead, match[1], nil)
+		if asset.Code != http.StatusOK {
+			t.Fatalf("embedded app shell reference %q returned status %d", match[1], asset.Code)
+		}
+	}
+}
+
+func TestStaleFingerprintedEntryAssetsRedirectToCurrentBundle(t *testing.T) {
+	handler := testHandler(t)
+	tests := []struct {
+		path     string
+		location string
+	}{
+		{path: "/assets/app-stale000.js", location: "/assets/app-abcdef12.js"},
+		{path: "/assets/index-stale000.css", location: "/assets/index-abcdef12.css"},
+	}
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			response := request(t, handler, http.MethodGet, test.path, nil)
+			if response.Code != http.StatusTemporaryRedirect {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if got := response.Header().Get("Location"); got != test.location {
+				t.Fatalf("Location=%q want=%q", got, test.location)
+			}
+			if got := response.Header().Get("Cache-Control"); got != "no-store" {
+				t.Fatalf("Cache-Control=%q", got)
+			}
+			assertSecurityHeaders(t, response.Header())
+		})
+	}
+}
+
+func TestStaleEntryRecoveryDoesNotMaskMissingChunksOrAmbiguousBundles(t *testing.T) {
+	handler := testHandler(t)
+	missingChunk := request(t, handler, http.MethodGet, "/assets/chunk-stale000.js", nil)
+	if missingChunk.Code != http.StatusNotFound {
+		t.Fatalf("missing chunk status=%d", missingChunk.Code)
+	}
+
+	files := fstest.MapFS{
+		"index.html":             {Data: []byte("<!doctype html><title>PCController</title>")},
+		"assets/app-first000.js": {Data: []byte("export {}")},
+		"assets/app-second00.js": {Data: []byte("export {}")},
+	}
+	ambiguous, err := NewHandler(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := request(t, ambiguous, http.MethodGet, "/assets/app-stale000.js", nil)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("ambiguous entry status=%d", response.Code)
 	}
 }
 

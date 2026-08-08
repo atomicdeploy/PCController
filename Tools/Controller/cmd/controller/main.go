@@ -21,6 +21,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
+	"pccontroller.local/controller/internal/consolewindow"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
@@ -683,11 +684,24 @@ func runTUIWithInitialAction(
 	flags := flag.NewFlagSet("tui", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
+	consoleOptions, err := addTUIConsoleFlags(flags, store.Current().UI.TUIConsole)
+	if err != nil {
+		return err
+	}
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	connection.captureOverrides(flags)
+	if err := consoleOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	if err := applyTUIConsole(
+		consoleOptions.resolve(store.Current().UI.TUIConsole), stderr,
+		consoleOptions.haveRuntimeFlag(),
+	); err != nil {
+		return fmt.Errorf("apply local TUI console settings: %w", err)
+	}
 	claim, havePrimary, err := preparePrimaryMode("tui")
 	if err != nil {
 		return err
@@ -806,6 +820,17 @@ func runTUIWithInitialAction(
 			SaveUI: func(value appconfig.UI) error {
 				_, err := store.UpdateUI(value)
 				return err
+			},
+			ApplyTUIConsole: func(value appconfig.TUIConsole) error {
+				settings := consoleOptions.resolve(value)
+				result, err := consolewindow.Apply(settings)
+				if err != nil {
+					return err
+				}
+				if !result.Applied && settings.Enabled {
+					return errors.New(result.Reason)
+				}
+				return nil
 			},
 			HostIntegrations: func() appconfig.Integrations {
 				return store.Current().Integrations

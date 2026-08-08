@@ -1173,7 +1173,7 @@ func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 }
 
 func hostConfigCommand(options CommandOptions, args []string) (string, error) {
-	const usage = "config get PATH | config set PATH VALUE; PATH is ui.app_title, ui.tagline, ui.appearance.*, or integrations.buzzer_mirror.{enabled,native_enabled,web_audio_enabled,driver_directory}"
+	const usage = "config get PATH | config set PATH VALUE; PATH is ui.app_title, ui.tagline, ui.appearance.*, ui.tui_console.*, or integrations.buzzer_mirror.{enabled,native_enabled,web_audio_enabled,driver_directory}"
 	if len(args) < 2 {
 		return "", errors.New(usage)
 	}
@@ -1209,6 +1209,16 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 			return fmt.Sprintf("ui.appearance.audio_muted=%t", ui.Appearance.AudioMuted), nil
 		case "ui.appearance.audio_volume":
 			return fmt.Sprintf("ui.appearance.audio_volume=%.0f%%", ui.Appearance.AudioVolume*100), nil
+		case "ui.tui_console.enabled":
+			return fmt.Sprintf("ui.tui_console.enabled=%t", ui.TUIConsole.Enabled), nil
+		case "ui.tui_console.columns":
+			return fmt.Sprintf("ui.tui_console.columns=%d", ui.TUIConsole.Columns), nil
+		case "ui.tui_console.rows":
+			return fmt.Sprintf("ui.tui_console.rows=%d", ui.TUIConsole.Rows), nil
+		case "ui.tui_console.font_face":
+			return fmt.Sprintf("ui.tui_console.font_face=%q", ui.TUIConsole.FontFace), nil
+		case "ui.tui_console.font_size":
+			return fmt.Sprintf("ui.tui_console.font_size=%d", ui.TUIConsole.FontSize), nil
 		case "integrations.buzzer_mirror.enabled":
 			return fmt.Sprintf("integrations.buzzer_mirror.enabled=%t", buzzer.Enabled), nil
 		case "integrations.buzzer_mirror.native_enabled":
@@ -1275,6 +1285,32 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 				return "", errors.New("ui.appearance.audio_volume must be 0..100 percent")
 			}
 			candidate.UI.Appearance.AudioVolume = percent / 100
+		case "ui.tui_console.enabled":
+			value, err := parseHostConfigBool(raw)
+			if err != nil {
+				return "", fmt.Errorf("ui.tui_console.enabled: %w", err)
+			}
+			candidate.UI.TUIConsole.Enabled = value
+		case "ui.tui_console.columns":
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				return "", errors.New("ui.tui_console.columns must be 56..300")
+			}
+			candidate.UI.TUIConsole.Columns = value
+		case "ui.tui_console.rows":
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				return "", errors.New("ui.tui_console.rows must be 18..120")
+			}
+			candidate.UI.TUIConsole.Rows = value
+		case "ui.tui_console.font_face":
+			candidate.UI.TUIConsole.FontFace = raw
+		case "ui.tui_console.font_size":
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				return "", errors.New("ui.tui_console.font_size must be 5..72")
+			}
+			candidate.UI.TUIConsole.FontSize = value
 		case "integrations.buzzer_mirror.enabled":
 			value, err := parseHostConfigBool(raw)
 			if err != nil {

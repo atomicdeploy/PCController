@@ -1,20 +1,11 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
+import { loadProductMetadata } from '../../../Build/product-metadata.mjs'
+
 const directory = fileURLToPath(new URL('.', import.meta.url))
 const packagePath = fileURLToPath(new URL('../../web/package.json', import.meta.url))
-const metadata = JSON.parse(await readFile(packagePath, 'utf8'))
-
-const required = [
-  'version',
-  'productName', 'productShortName', 'productTagline', 'description',
-  'productAppId', 'productProtocol', 'productConfigDirectory',
-]
-for (const field of required) {
-  if (typeof metadata[field] !== 'string' || metadata[field].trim() === '') {
-    throw new Error(`web/package.json.${field} must be a non-empty string`)
-  }
-}
+const metadata = loadProductMetadata(packagePath)
 
 const quote = (value) => JSON.stringify(value.trim())
 const version = metadata.version.trim()
@@ -34,6 +25,17 @@ const (
 \tStableAppID     = ${quote(metadata.productAppId)}
 \tProtocolScheme  = ${quote(metadata.productProtocol)}
 \tConfigDirectory = ${quote(metadata.productConfigDirectory)}
+)
+
+// TUI console defaults are variables so product builds can replace them with
+// Go -ldflags -X. appconfig seeds its defaults from these values before it
+// decodes the user's file, preserving config-over-build precedence.
+var (
+\tDefaultTUIConsoleEnabled  = ${quote(String(metadata.productTUIConsoleEnabled))}
+\tDefaultTUIConsoleColumns  = ${quote(String(metadata.productTUIConsoleColumns))}
+\tDefaultTUIConsoleRows     = ${quote(String(metadata.productTUIConsoleRows))}
+\tDefaultTUIConsoleFontFace = ${quote(metadata.productTUIConsoleFontFace)}
+\tDefaultTUIConsoleFontSize = ${quote(String(metadata.productTUIConsoleFontSize))}
 )
 `
 

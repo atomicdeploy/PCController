@@ -114,6 +114,10 @@ func (model Model) appSettingRows() []settingRow {
 		{Key: "appearance.accessibility", Group: "", Label: "Motion · number density", Value: fmt.Sprintf("%s · %s", boolWord(appearance.ReduceMotion, "REDUCED", "FULL"), boolWord(appearance.CompactNumbers, "COMPACT", "DETAILED")), Editable: true},
 		{Key: "appearance.audio", Group: "", Label: "Interface audio", Value: fmt.Sprintf("%s · %.0f%%", boolWord(appearance.AudioMuted, "MUTED", "ON"), appearance.AudioVolume*100), Editable: true},
 		{Key: "layout.tables", Group: "", Label: "Table layout", Value: strings.ToUpper(ui.TableLayout), Editable: true},
+		{Key: "console.enabled", Group: "LOCAL CONSOLE", Label: "Manage local window", Value: onOff(ui.TUIConsole.Enabled), Editable: true},
+		{Key: "console.window", Group: "", Label: "Window columns · rows", Value: fmt.Sprintf("%d × %d", ui.TUIConsole.Columns, ui.TUIConsole.Rows), Editable: true},
+		{Key: "console.font", Group: "", Label: "Font face", Value: ui.TUIConsole.FontFace, Editable: true},
+		{Key: "console.font_size", Group: "", Label: "Font height", Value: fmt.Sprintf("%d px", ui.TUIConsole.FontSize), Editable: true},
 		{Key: "poll.active", Group: "MEASUREMENTS", Label: "Active polling", Value: model.prefs.PollInterval.String(), Editable: true},
 		{Key: "history.retention", Group: "", Label: "History retention", Value: model.prefs.HistoryWindow.String(), Editable: true},
 		{Key: "display.decimals", Group: "", Label: "Decimal places", Value: fmt.Sprintf("V %d  ·  A %d  ·  W %d  ·  °C %d", ui.VoltageDecimals, ui.CurrentDecimals, ui.PowerDecimals, ui.TemperatureDecimals), Editable: true},
@@ -334,6 +338,20 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			layout = 1
 		}
 		editor.Fields = []settingEditorField{{Key: "layout", Label: "Table layout", Value: layout, Options: []settingOption{{0, "Compact · centered"}, {1, "Expanded · full width"}}}}
+	case "console.enabled":
+		editor.Fields = []settingEditorField{boolean("enabled", "Manage local window", ui.TUIConsole.Enabled)}
+	case "console.window":
+		editor.Fields = []settingEditorField{
+			rangeField("columns", "Columns", ui.TUIConsole.Columns, 56, 300, 1, "columns", true),
+			rangeField("rows", "Rows", ui.TUIConsole.Rows, 18, 120, 1, "rows", true),
+		}
+	case "console.font":
+		editor.IsText = true
+		editor.Text = ui.TUIConsole.FontFace
+	case "console.font_size":
+		editor.Fields = []settingEditorField{
+			rangeField("pixels", "Font height", ui.TUIConsole.FontSize, 5, 72, 1, "px", true),
+		}
 	case "poll.active":
 		editor.Fields = []settingEditorField{{Key: "interval", Label: "Polling interval", Value: ui.StatusIntervalMS, Options: intOptions([]int{100, 125, 200, 250, 500, 1000, 2000, 5000}, "ms")}}
 	case "history.retention":
@@ -541,9 +559,13 @@ func editorVisualPreview(editor *settingEditor) (appconfig.RGBColor, bool) {
 	if editor == nil || !strings.HasPrefix(editor.Key, "led.visual.") {
 		return appconfig.RGBColor{}, false
 	}
-	return appconfig.RGBColor{
-		Red: byte(editorField(editor, "red")), Green: byte(editorField(editor, "green")), Blue: byte(editorField(editor, "blue")),
-	}, true
+	red, redErr := checkedUint8(editorField(editor, "red"))
+	green, greenErr := checkedUint8(editorField(editor, "green"))
+	blue, blueErr := checkedUint8(editorField(editor, "blue"))
+	if redErr != nil || greenErr != nil || blueErr != nil {
+		return appconfig.RGBColor{}, false
+	}
+	return appconfig.RGBColor{Red: red, Green: green, Blue: blue}, true
 }
 
 func visualEditorFields(visual appconfig.StatusLEDVisual) []settingEditorField {

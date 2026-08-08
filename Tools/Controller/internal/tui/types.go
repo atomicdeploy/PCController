@@ -164,6 +164,7 @@ type FrontPanelState struct {
 type Options struct {
 	UIConfig         func() appconfig.UI
 	SaveUI           func(appconfig.UI) error
+	ApplyTUIConsole  func(appconfig.TUIConsole) error
 	HostIntegrations func() appconfig.Integrations
 	SaveIntegrations func(appconfig.Integrations) error
 	RFConfig         func() appconfig.RFConfig

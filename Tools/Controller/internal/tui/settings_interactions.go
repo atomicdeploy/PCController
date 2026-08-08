@@ -160,11 +160,27 @@ func (model Model) commitSettingEditor() (Model, tea.Cmd, bool) {
 func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 	editor := model.settingEditor
 	settings := model.snapshot().Settings
+	var valueErr error
+	record := func(key string, err error) {
+		if err != nil && valueErr == nil {
+			valueErr = fmt.Errorf("%s: %w", key, err)
+		}
+	}
+	byteField := func(key string) byte {
+		value, err := checkedUint8(editorField(editor, key))
+		record(key, err)
+		return value
+	}
+	uint16Field := func(key string) uint16 {
+		value, err := checkedUint16(editorField(editor, key))
+		record(key, err)
+		return value
+	}
 	switch editor.Key {
 	case "sound.silent":
 		setFlag(&settings.Flags, native.SettingsSilent, editorField(editor, "enabled") != 0)
 	case "illumination.mode":
-		settings.LightMode = byte(editorField(editor, "mode"))
+		settings.LightMode = byteField("mode")
 	case "illumination.on":
 		settings.OnBrightness = percentByte(editorField(editor, "value"))
 	case "illumination.off":
@@ -176,7 +192,7 @@ func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 	case "status.brightness":
 		settings.StatusBrightness = percentByte(editorField(editor, "value"))
 	case "status.color":
-		_ = settings.SetStatusColor(byte(editorField(editor, "color")))
+		record("color", settings.SetStatusColor(byteField("color")))
 	case "output.persistence":
 		settings.OutputPersistence = 0
 		for _, item := range []struct {
@@ -195,26 +211,30 @@ func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 			}
 		}
 	case "stream.period":
-		settings.StreamPeriodMS = uint16(editorField(editor, "period"))
+		settings.StreamPeriodMS = uint16Field("period")
 	case "measurement.decimals":
-		_ = settings.SetVoltageDecimals(byte(editorField(editor, "voltage")))
-		_ = settings.SetCurrentDecimals(byte(editorField(editor, "current")))
+		record("voltage", settings.SetVoltageDecimals(byteField("voltage")))
+		record("current", settings.SetCurrentDecimals(byteField("current")))
 	case "menu.default":
-		settings.DefaultPage = byte(editorField(editor, "page"))
+		settings.DefaultPage = byteField("page")
 	case "menu.remember":
 		settings.SetSaveLastPage(editorField(editor, "enabled") != 0)
 	case "motion.door":
-		_ = settings.SetMotionDoorPolicy(byte(editorField(editor, "policy")))
+		record("policy", settings.SetMotionDoorPolicy(byteField("policy")))
 	case "motion.exit":
-		settings.MotionExitHoldSeconds = byte(editorField(editor, "seconds"))
+		settings.MotionExitHoldSeconds = byteField("seconds")
 	case "motion.break":
-		_ = settings.SetMotionBreakMS(uint16(editorField(editor, "milliseconds")))
+		record("milliseconds", settings.SetMotionBreakMS(uint16Field("milliseconds")))
 	case "audio.door":
 		settings.SetDoorAudioEnabled(editorField(editor, "enabled") != 0)
 	case "audio.relay":
 		settings.SetRelayAudioEnabled(editorField(editor, "enabled") != 0)
 	default:
 		model.setNotice("This setting is read-only")
+		return model, nil, true
+	}
+	if valueErr != nil {
+		model.setNotice("Setting value is out of range: " + valueErr.Error())
 		return model, nil, true
 	}
 
@@ -311,6 +331,20 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		if editorField(editor, "layout") == 1 {
 			ui.TableLayout = "expanded"
 		}
+	case "console.enabled":
+		ui.TUIConsole.Enabled = editorField(editor, "enabled") != 0
+	case "console.window":
+		ui.TUIConsole.Columns = editorField(editor, "columns")
+		ui.TUIConsole.Rows = editorField(editor, "rows")
+	case "console.font":
+		font := strings.TrimSpace(editor.Text)
+		if font == "" || len([]rune(font)) > 31 || strings.ContainsAny(font, "\r\n\t") {
+			model.setNotice("Console font must be 1..31 printable characters")
+			return model, nil, true
+		}
+		ui.TUIConsole.FontFace = font
+	case "console.font_size":
+		ui.TUIConsole.FontSize = editorField(editor, "pixels")
 	case "poll.active":
 		ui.StatusIntervalMS = editorField(editor, "interval")
 	case "history.retention":
@@ -342,6 +376,13 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	}
 	ui.Appearance = appconfig.NormalizeAppearance(ui.Appearance)
 	ui.SetupComplete = true
+	if strings.HasPrefix(editor.Key, "console.") && model.applyTUIConsole != nil {
+		if err := model.applyTUIConsole(ui.TUIConsole); err != nil {
+			model.appendLog("error", "apply local console settings: "+err.Error())
+			model.setNotice("Local console setting was not applied or saved: " + err.Error())
+			return model, nil, true
+		}
+	}
 	if model.saveUI != nil {
 		if err := model.saveUI(ui); err != nil {
 			model.appendLog("error", "save host settings: "+err.Error())
@@ -361,6 +402,14 @@ func (model Model) commitStatusLEDSettingEditor() (Model, tea.Cmd, bool) {
 	editor := model.settingEditor
 	value := model.hostIntegrationValue
 	policy := value.StatusLED
+	var valueErr error
+	byteField := func(key string) byte {
+		converted, err := checkedUint8(editorField(editor, key))
+		if err != nil && valueErr == nil {
+			valueErr = fmt.Errorf("%s: %w", key, err)
+		}
+		return converted
+	}
 	switch editor.Key {
 	case "led.enabled":
 		policy.Enabled = editorField(editor, "enabled") != 0
@@ -371,7 +420,11 @@ func (model Model) commitStatusLEDSettingEditor() (Model, tea.Cmd, bool) {
 	case "led.door_hold":
 		policy.DoorCueHoldMS = editorField(editor, "milliseconds")
 	case "led.hot":
-		policy.HotThresholdCentiC = int16(editorField(editor, "centi"))
+		converted, err := checkedInt16(editorField(editor, "centi"))
+		if err != nil {
+			valueErr = fmt.Errorf("centi: %w", err)
+		}
+		policy.HotThresholdCentiC = converted
 	default:
 		if !strings.HasPrefix(editor.Key, "led.visual.") {
 			return model, nil, true
@@ -387,12 +440,12 @@ func (model Model) commitStatusLEDSettingEditor() (Model, tea.Cmd, bool) {
 			effect = 0
 		}
 		visual.Effect = effects[effect]
-		visual.Color.Red = byte(editorField(editor, "red"))
-		visual.Color.Green = byte(editorField(editor, "green"))
-		visual.Color.Blue = byte(editorField(editor, "blue"))
-		visual.AlternateColor.Red = byte(editorField(editor, "alt-red"))
-		visual.AlternateColor.Green = byte(editorField(editor, "alt-green"))
-		visual.AlternateColor.Blue = byte(editorField(editor, "alt-blue"))
+		visual.Color.Red = byteField("red")
+		visual.Color.Green = byteField("green")
+		visual.Color.Blue = byteField("blue")
+		visual.AlternateColor.Red = byteField("alt-red")
+		visual.AlternateColor.Green = byteField("alt-green")
+		visual.AlternateColor.Blue = byteField("alt-blue")
 		visual.Brightness = percentByte(editorField(editor, "brightness"))
 		visual.MinimumBrightness = percentByte(editorField(editor, "minimum"))
 		if visual.MinimumBrightness > visual.Brightness {
@@ -411,6 +464,10 @@ func (model Model) commitStatusLEDSettingEditor() (Model, tea.Cmd, bool) {
 				visual.PeriodMS = 1000
 			}
 		}
+	}
+	if valueErr != nil {
+		model.setNotice("Setting value is out of range: " + valueErr.Error())
+		return model, nil, true
 	}
 	value.StatusLED = policy
 	if model.saveHostIntegrations != nil {
@@ -432,4 +489,25 @@ func setFlag(flags *byte, mask byte, enabled bool) {
 	} else {
 		*flags &^= mask
 	}
+}
+
+func checkedUint8(value int) (uint8, error) {
+	if value < 0 || value > 255 {
+		return 0, fmt.Errorf("%d is outside 0..255", value)
+	}
+	return uint8(value), nil
+}
+
+func checkedUint16(value int) (uint16, error) {
+	if value < 0 || value > 65535 {
+		return 0, fmt.Errorf("%d is outside 0..65535", value)
+	}
+	return uint16(value), nil
+}
+
+func checkedInt16(value int) (int16, error) {
+	if value < -32768 || value > 32767 {
+		return 0, fmt.Errorf("%d is outside -32768..32767", value)
+	}
+	return int16(value), nil
 }
