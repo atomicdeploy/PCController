@@ -155,11 +155,54 @@ func (handler *staticHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 		handler.serveAsset(writer, request, name)
 		return
 	}
+	// An already-open browser tab can briefly retain an older index document
+	// while the self-contained host executable is replaced. Vite fingerprints
+	// its entry script and stylesheet, so that stale document would otherwise
+	// receive a 404 and render an unstyled, inert shell. Redirect only the two
+	// well-known entry assets to the current bundle; chunks remain strict so a
+	// genuinely inconsistent package still fails loudly instead of mixing code.
+	if replacement, exists := handler.staleEntryReplacement(name); exists {
+		writer.Header().Set("Cache-Control", "no-store")
+		http.Redirect(writer, request, "/"+replacement, http.StatusTemporaryRedirect)
+		return
+	}
 	if acceptsSPAFallback(requestPath, request.Header.Get("Accept")) {
 		handler.serveAsset(writer, request, "index.html")
 		return
 	}
 	http.NotFound(writer, request)
+}
+
+func (handler *staticHandler) staleEntryReplacement(name string) (string, bool) {
+	if path.Dir(name) != "assets" || !fingerprintedAsset(name) {
+		return "", false
+	}
+	base := path.Base(name)
+	prefix := ""
+	switch {
+	case strings.HasPrefix(base, "app-") && strings.EqualFold(path.Ext(base), ".js"):
+		prefix = "app-"
+	case strings.HasPrefix(base, "index-") && strings.EqualFold(path.Ext(base), ".css"):
+		prefix = "index-"
+	default:
+		return "", false
+	}
+
+	replacement := ""
+	for candidate := range handler.assets {
+		candidateBase := path.Base(candidate)
+		if path.Dir(candidate) != "assets" || !strings.HasPrefix(candidateBase, prefix) ||
+			!strings.EqualFold(path.Ext(candidateBase), path.Ext(base)) || !fingerprintedAsset(candidate) {
+			continue
+		}
+		if replacement != "" {
+			// Multiple entry candidates indicate a malformed or transitional
+			// bundle. Do not guess which executable resource is authoritative.
+			return "", false
+		}
+		replacement = candidate
+	}
+	return replacement, replacement != ""
 }
 
 func (handler *staticHandler) serveAsset(

@@ -18,6 +18,13 @@
   "ui": {
     "app_title": "PCController",
 	"tagline": "One host. Every board surface.",
+	"tui_console": {
+	  "enabled": true,
+	  "columns": 132,
+	  "rows": 38,
+	  "font_face": "Consolas",
+	  "font_size": 18
+	},
     "table_layout": "compact",
     "setup_complete": false,
     "welcome_melody": "notify",

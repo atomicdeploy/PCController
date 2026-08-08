@@ -311,6 +311,20 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		if editorField(editor, "layout") == 1 {
 			ui.TableLayout = "expanded"
 		}
+	case "console.enabled":
+		ui.TUIConsole.Enabled = editorField(editor, "enabled") != 0
+	case "console.window":
+		ui.TUIConsole.Columns = editorField(editor, "columns")
+		ui.TUIConsole.Rows = editorField(editor, "rows")
+	case "console.font":
+		font := strings.TrimSpace(editor.Text)
+		if font == "" || len([]rune(font)) > 31 || strings.ContainsAny(font, "\r\n\t") {
+			model.setNotice("Console font must be 1..31 printable characters")
+			return model, nil, true
+		}
+		ui.TUIConsole.FontFace = font
+	case "console.font_size":
+		ui.TUIConsole.FontSize = editorField(editor, "pixels")
 	case "poll.active":
 		ui.StatusIntervalMS = editorField(editor, "interval")
 	case "history.retention":
@@ -342,6 +356,13 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	}
 	ui.Appearance = appconfig.NormalizeAppearance(ui.Appearance)
 	ui.SetupComplete = true
+	if strings.HasPrefix(editor.Key, "console.") && model.applyTUIConsole != nil {
+		if err := model.applyTUIConsole(ui.TUIConsole); err != nil {
+			model.appendLog("error", "apply local console settings: "+err.Error())
+			model.setNotice("Local console setting was not applied or saved: " + err.Error())
+			return model, nil, true
+		}
+	}
 	if model.saveUI != nil {
 		if err := model.saveUI(ui); err != nil {
 			model.appendLog("error", "save host settings: "+err.Error())

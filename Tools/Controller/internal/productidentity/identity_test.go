@@ -2,6 +2,7 @@ package productidentity
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -13,14 +14,19 @@ func TestGeneratedIdentityMatchesCanonicalPackageMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	var metadata struct {
-		Version                string `json:"version"`
-		ProductName            string `json:"productName"`
-		ProductShortName       string `json:"productShortName"`
-		ProductTagline         string `json:"productTagline"`
-		Description            string `json:"description"`
-		ProductAppID           string `json:"productAppId"`
-		ProductProtocol        string `json:"productProtocol"`
-		ProductConfigDirectory string `json:"productConfigDirectory"`
+		Version                   string `json:"version"`
+		ProductName               string `json:"productName"`
+		ProductShortName          string `json:"productShortName"`
+		ProductTagline            string `json:"productTagline"`
+		Description               string `json:"description"`
+		ProductAppID              string `json:"productAppId"`
+		ProductProtocol           string `json:"productProtocol"`
+		ProductConfigDirectory    string `json:"productConfigDirectory"`
+		ProductTUIConsoleEnabled  bool   `json:"productTUIConsoleEnabled"`
+		ProductTUIConsoleColumns  int    `json:"productTUIConsoleColumns"`
+		ProductTUIConsoleRows     int    `json:"productTUIConsoleRows"`
+		ProductTUIConsoleFontFace string `json:"productTUIConsoleFontFace"`
+		ProductTUIConsoleFontSize int    `json:"productTUIConsoleFontSize"`
 	}
 	if err := json.Unmarshal(content, &metadata); err != nil {
 		t.Fatal(err)
@@ -30,11 +36,18 @@ func TestGeneratedIdentityMatchesCanonicalPackageMetadata(t *testing.T) {
 		metadata.ProductName, metadata.ProductShortName, metadata.ProductTagline,
 		metadata.Description, metadata.ProductAppID, metadata.ProductProtocol,
 		metadata.ProductConfigDirectory,
+		fmt.Sprint(metadata.ProductTUIConsoleEnabled),
+		fmt.Sprint(metadata.ProductTUIConsoleColumns),
+		fmt.Sprint(metadata.ProductTUIConsoleRows),
+		metadata.ProductTUIConsoleFontFace,
+		fmt.Sprint(metadata.ProductTUIConsoleFontSize),
 	}
 	got := []string{
 		Version,
 		DefaultTitle, ShortName, Tagline, Description, StableAppID,
 		ProtocolScheme, ConfigDirectory,
+		DefaultTUIConsoleEnabled, DefaultTUIConsoleColumns, DefaultTUIConsoleRows,
+		DefaultTUIConsoleFontFace, DefaultTUIConsoleFontSize,
 	}
 	for index := range want {
 		if want[index] == "" || want[index] != got[index] {

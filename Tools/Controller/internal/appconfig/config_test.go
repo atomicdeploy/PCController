@@ -207,6 +207,43 @@ func TestUIAppTitleCountsUnicodeCharacters(t *testing.T) {
 	}
 }
 
+func TestTUIConsoleValidation(t *testing.T) {
+	value := Defaults()
+	if err := value.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*TUIConsole){
+		"columns":   func(console *TUIConsole) { console.Columns = 55 },
+		"rows":      func(console *TUIConsole) { console.Rows = 121 },
+		"font":      func(console *TUIConsole) { console.FontFace = strings.Repeat("x", 32) },
+		"font size": func(console *TUIConsole) { console.FontSize = 4 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			candidate := value
+			mutate(&candidate.UI.TUIConsole)
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("invalid TUI console setting was accepted")
+			}
+		})
+	}
+}
+
+func TestTUIConsoleFontFaceIsCanonicalizedOnDisk(t *testing.T) {
+	value := Defaults()
+	value.UI.TUIConsole.FontFace = "   Consolas   "
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.UI.TUIConsole.FontFace != "Consolas" {
+		t.Fatalf("font face=%q", loaded.UI.TUIConsole.FontFace)
+	}
+}
+
 func TestAutomationValidationAndRecursiveRuleRejection(t *testing.T) {
 	value := Defaults()
 	code := uint32(0x123456)
@@ -436,6 +473,10 @@ func TestJSONYAMLAndTOMLRoundTrip(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "controller"+extension)
 			value := Defaults()
 			value.UI.AppTitle = "Workshop Controller"
+			value.UI.TUIConsole = TUIConsole{
+				Enabled: true, Columns: 144, Rows: 44,
+				FontFace: "Cascadia Mono", FontSize: 20,
+			}
 			value.Connection.Port = "COM18"
 			value.Integrations.Hotkeys = []Hotkey{{
 				Name: "stop", Enabled: true, Chord: "CTRL+ALT+S",
@@ -456,6 +497,7 @@ func TestJSONYAMLAndTOMLRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			if loaded.UI.AppTitle != value.UI.AppTitle ||
+				loaded.UI.TUIConsole != value.UI.TUIConsole ||
 				loaded.Connection.Port != "COM18" ||
 				len(loaded.Integrations.Hotkeys) != 1 {
 				t.Fatalf("round trip mismatch: %#v", loaded)

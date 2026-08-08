@@ -5,7 +5,8 @@ import {
 	PRODUCT_METADATA,
 	PRODUCT_METADATA_PATH,
 	loadProductMetadata,
-	resolveProductTitle
+	resolveProductTitle,
+	validateProductMetadata
 } from './product-metadata.mjs'
 
 test('canonical product metadata is loaded once from the web package', () => {
@@ -16,6 +17,23 @@ test('canonical product metadata is loaded once from the web package', () => {
 		'productName', 'productShortName', 'productTagline', 'description',
 		'productAppId', 'productProtocol', 'productConfigDirectory'
 	]) assert.ok(PRODUCT_METADATA[field].trim(), `${field} must be populated`)
+	assert.equal(typeof PRODUCT_METADATA.productTUIConsoleEnabled, 'boolean')
+	assert.equal(typeof PRODUCT_METADATA.productTUIConsoleFontFace, 'string')
+	for (const field of [
+		'productTUIConsoleColumns', 'productTUIConsoleRows', 'productTUIConsoleFontSize'
+	]) assert.ok(Number.isInteger(PRODUCT_METADATA[field]), `${field} must be an integer`)
+})
+
+test('TUI console font metadata matches the runtime safety contract', () => {
+	for (const fontFace of ['x'.repeat(32), 'Con\nsolas']) {
+		assert.throws(
+			() => validateProductMetadata({
+				...PRODUCT_METADATA,
+				productTUIConsoleFontFace: fontFace
+			}),
+			/1\.\.31 printable UTF-16 code units/
+		)
+	}
 })
 
 test('APP_TITLE overrides the canonical product name', () => {

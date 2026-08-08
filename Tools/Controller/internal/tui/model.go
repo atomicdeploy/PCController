@@ -62,6 +62,7 @@ type Model struct {
 	statusPending            bool
 	uiConfig                 func() appconfig.UI
 	saveUI                   func(appconfig.UI) error
+	applyTUIConsole          func(appconfig.TUIConsole) error
 	uiValue                  appconfig.UI
 	hostIntegrations         func() appconfig.Integrations
 	saveHostIntegrations     func(appconfig.Integrations) error
@@ -384,7 +385,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 	model := Model{
 		runtime: runtime, engine: engine, input: input, spinner: progress,
 		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
-		saveUI: options.SaveUI, uiValue: uiValue,
+		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
 		hostIntegrations:     options.HostIntegrations,
 		saveHostIntegrations: options.SaveIntegrations,
 		hostIntegrationValue: hostIntegrationValue,
@@ -1126,6 +1127,12 @@ func (model *Model) advanceWelcome(now time.Time) tea.Cmd {
 }
 
 func (model *Model) syncUIConfig(value appconfig.UI) {
+	if model.uiValue.TUIConsole != value.TUIConsole && model.applyTUIConsole != nil {
+		if err := model.applyTUIConsole(value.TUIConsole); err != nil {
+			model.appendLog("warn", "apply local console settings: "+err.Error())
+			model.setNotice("Local console settings were not applied: " + err.Error())
+		}
+	}
 	previousTitle := model.prefs.AppTitle
 	model.uiValue = value
 	model.prefs = preferencesFromUI(value)

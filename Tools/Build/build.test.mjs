@@ -89,8 +89,13 @@ test('refreshed Windows PATH preserves invoking shell precedence and one canonic
 		if (key.toLowerCase() === 'path') delete windowsEnvironment[key]
 	}
 	windowsEnvironment.Path = [selected, session].join(delimiter)
+	windowsEnvironment.LOCALAPPDATA = resolve('local-app-data')
 	const refreshed = refreshedEnvironment(windowsEnvironment, 'win32')
 	assert.deepEqual(refreshed.PATH.split(delimiter).slice(0, 2), [selected, session])
+	assert.equal(
+		refreshed.PATH.split(delimiter)[2],
+		join(windowsEnvironment.LOCALAPPDATA, PRODUCT_METADATA.productConfigDirectory, 'tools', 'go', 'bin')
+	)
 	assert.deepEqual(Object.keys(refreshed).filter(key => key.toLowerCase() === 'path'), ['PATH'])
 })
 

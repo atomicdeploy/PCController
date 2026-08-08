@@ -445,6 +445,47 @@ func TestHostConfigCommandUpdatesAppearanceWithoutNoOpWrites(t *testing.T) {
 	}
 }
 
+func TestHostConfigCommandUpdatesTUIConsole(t *testing.T) {
+	runtime := New(Options{})
+	config := appconfig.Defaults()
+	engine := NewCommandEngine(runtime, CommandOptions{
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	})
+	for _, command := range []string{
+		"config set ui.tui_console.columns 144",
+		"config set ui.tui_console.rows 44",
+		"config set ui.tui_console.font_face Cascadia Mono",
+		"config set ui.tui_console.font_size 20",
+	} {
+		if output, err := engine.Execute(context.Background(), command); err != nil || !strings.Contains(output, "hot-reload queued") {
+			t.Fatalf("%q output=%q err=%v", command, output, err)
+		}
+	}
+	console := config.UI.TUIConsole
+	if console.Columns != 144 || console.Rows != 44 || console.FontFace != "Cascadia Mono" || console.FontSize != 20 {
+		t.Fatalf("console=%#v", console)
+	}
+	if output, err := engine.Execute(context.Background(), "config get ui.tui_console.font_face"); err != nil || !strings.Contains(output, `"Cascadia Mono"`) {
+		t.Fatalf("get output=%q err=%v", output, err)
+	}
+	for _, command := range []string{
+		"config set ui.tui_console.columns 12",
+		"config set ui.tui_console.font_size 100",
+	} {
+		if _, err := engine.Execute(context.Background(), command); err == nil {
+			t.Fatalf("invalid console command %q was accepted", command)
+		}
+	}
+}
+
 func TestHostConfigCommandControlsBuzzerMirror(t *testing.T) {
 	runtime := New(Options{})
 	config := appconfig.Defaults()

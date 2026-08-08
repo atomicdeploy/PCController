@@ -516,10 +516,17 @@ export function refreshedEnvironment(base = process.env, platform = process.plat
 	if (platform !== 'win32') return { ...base }
 	const machine = registryPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', base)
 	const user = registryPath('HKCU\\Environment', base)
+	const localAppData = environmentValue(base, 'LOCALAPPDATA')
+	const managedTools = localAppData
+		? [join(localAppData, PRODUCT_METADATA.productConfigDirectory, 'tools', 'go', 'bin')]
+		: []
 	// The invoking shell or CI setup deliberately selects the active toolchain.
-	// Registry paths only add newly installed tools that this process has not
-	// inherited yet; they must never shadow an explicit current-process choice.
-	const values = [environmentValue(base, 'PATH'), machine, user].flatMap(value => value.split(delimiter)).filter(Boolean)
+	// Project-managed tools and registry paths only add binaries that this
+	// process has not inherited yet; they must never shadow an explicit
+	// current-process choice. The managed path is derived from LOCALAPPDATA and
+	// package metadata, never from a developer-specific absolute path.
+	const values = [environmentValue(base, 'PATH'), ...managedTools, machine, user]
+		.flatMap(value => value.split(delimiter)).filter(Boolean)
 	const seen = new Set()
 	const path = []
 	for (const entry of values) {
