@@ -144,3 +144,16 @@ func TestApplyWindowsConsoleRollsBackAfterResizeFailure(t *testing.T) {
 		t.Fatalf("rollback calls=%#v want tail=%#v", fake.calls, wantTail)
 	}
 }
+
+func TestCheckedInt16RejectsWin32CoordinateOverflow(t *testing.T) {
+	for _, value := range []int{-32769, 32768} {
+		if _, err := checkedInt16(value, "test"); err == nil {
+			t.Fatalf("checkedInt16(%d) accepted overflow", value)
+		}
+	}
+	for _, value := range []int{-32768, 32767} {
+		if converted, err := checkedInt16(value, "test"); err != nil || int(converted) != value {
+			t.Fatalf("checkedInt16(%d)=%d err=%v", value, converted, err)
+		}
+	}
+}

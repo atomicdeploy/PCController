@@ -109,7 +109,11 @@ func applyWindowsConsole(api windowsConsoleAPI, handle windows.Handle, settings 
 	}
 	font := originalFont
 	font.FontSize.X = 0
-	font.FontSize.Y = int16(settings.FontSize)
+	fontHeight, err := checkedInt16(settings.FontSize, "font size")
+	if err != nil {
+		return err
+	}
+	font.FontSize.Y = fontHeight
 	font.FaceName = [32]uint16{}
 	copy(font.FaceName[:], utf16.Encode([]rune(settings.FontFace)))
 	if err := api.setFont(handle, font); err != nil {
@@ -135,7 +139,15 @@ func applyWindowsConsole(api windowsConsoleAPI, handle windows.Handle, settings 
 			settings.Columns, settings.Rows, largest.X, largest.Y,
 		)
 	}
-	target := coord{X: int16(settings.Columns), Y: int16(settings.Rows)}
+	columns, err := checkedInt16(settings.Columns, "columns")
+	if err != nil {
+		return err
+	}
+	rows, err := checkedInt16(settings.Rows, "rows")
+	if err != nil {
+		return err
+	}
+	target := coord{X: columns, Y: rows}
 	currentWindow := coord{
 		X: info.Window.Right - info.Window.Left + 1,
 		Y: info.Window.Bottom - info.Window.Top + 1,
@@ -241,6 +253,13 @@ func restoreWindowsConsole(
 
 func rectFor(size coord) smallRect {
 	return smallRect{Right: size.X - 1, Bottom: size.Y - 1}
+}
+
+func checkedInt16(value int, name string) (int16, error) {
+	if value < -32768 || value > 32767 {
+		return 0, fmt.Errorf("%s %d is outside the Win32 16-bit coordinate range", name, value)
+	}
+	return int16(value), nil
 }
 
 func (nativeConsoleAPI) font(handle windows.Handle) (fontInfoEx, error) {

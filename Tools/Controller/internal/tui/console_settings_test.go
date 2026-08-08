@@ -67,3 +67,30 @@ func TestUnavailableLocalConsoleDoesNotPersistRuntimeEdit(t *testing.T) {
 		t.Fatalf("saves=%d editor=%#v notice=%q", saves, model.settingEditor, model.notice)
 	}
 }
+
+func TestCheckedSettingIntegerConversionsRejectOverflow(t *testing.T) {
+	for _, value := range []int{-1, 256} {
+		if _, err := checkedUint8(value); err == nil {
+			t.Fatalf("checkedUint8(%d) accepted overflow", value)
+		}
+	}
+	if value, err := checkedUint8(255); err != nil || value != 255 {
+		t.Fatalf("checkedUint8 boundary=%d err=%v", value, err)
+	}
+	for _, value := range []int{-1, 65536} {
+		if _, err := checkedUint16(value); err == nil {
+			t.Fatalf("checkedUint16(%d) accepted overflow", value)
+		}
+	}
+	if value, err := checkedUint16(65535); err != nil || value != 65535 {
+		t.Fatalf("checkedUint16 boundary=%d err=%v", value, err)
+	}
+	for _, value := range []int{-32769, 32768} {
+		if _, err := checkedInt16(value); err == nil {
+			t.Fatalf("checkedInt16(%d) accepted overflow", value)
+		}
+	}
+	if value, err := checkedInt16(-32768); err != nil || value != -32768 {
+		t.Fatalf("checkedInt16 boundary=%d err=%v", value, err)
+	}
+}
