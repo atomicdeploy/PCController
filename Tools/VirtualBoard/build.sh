@@ -90,7 +90,9 @@ cmake --build --preset "$preset" --parallel
 
 if ((skip_tests == 0)); then
     printf '%s🧪 Running protocol and EEPROM tests%s\n' "$cyan" "$reset"
-    ctest --preset "$preset" --test-dir "$source_root"
+    # The test preset already points at the matching generated build tree.
+    # Overriding it with the source directory makes CTest discover zero tests.
+    ctest --preset "$preset" --no-tests=error
 fi
 
 printf '%s✅ Virtual board build passed.%s\n' "$green" "$reset"

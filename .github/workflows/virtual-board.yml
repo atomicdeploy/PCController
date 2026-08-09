@@ -67,17 +67,10 @@ jobs:
         with:
           node-version: "24"
 
-      - name: "⚙️ Configure native simulator"
+      - name: "🧪 Build simulator and run native test suite"
         working-directory: Tools/VirtualBoard
-        run: cmake --preset release
-
-      - name: "🔨 Build simulator and tests"
-        working-directory: Tools/VirtualBoard
-        run: cmake --build --preset release --parallel
-
-      - name: "🧪 Run native CTest suite"
-        working-directory: Tools/VirtualBoard
-        run: ctest --preset release
+        shell: bash
+        run: ./build.sh --configuration Release --clean
 
       - name: "🕰️ Freeze reproducible package time"
         shell: bash
