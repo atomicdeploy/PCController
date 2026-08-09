@@ -107,28 +107,102 @@ func (policy HTTPRedirectPolicy) CheckRedirect(request *http.Request, via []*htt
 	if request == nil || request.URL == nil || len(via) == 0 {
 		return fmt.Errorf("%s received an invalid redirect", operation)
 	}
-	if err := ValidateHTTPURLForScope(request.URL.String(), policy.Subject, policy.Scope); err != nil {
+	requestedURL, err := snapshotHTTPURL(request.URL)
+	if err != nil {
+		return fmt.Errorf("%s received an invalid redirect: %w", operation, err)
+	}
+	historyURLs, callbackHistory, err := snapshotRedirectHistory(via)
+	if err != nil {
+		return fmt.Errorf("%s received an invalid redirect chain: %w", operation, err)
+	}
+	for index := range historyURLs {
+		if err := ValidateHTTPURLForScope(historyURLs[index].String(), policy.Subject, policy.Scope); err != nil {
+			return fmt.Errorf("%s redirect chain hop %d: %w", operation, index, err)
+		}
+	}
+	if err := ValidateHTTPURLForScope(requestedURL.String(), policy.Subject, policy.Scope); err != nil {
 		return fmt.Errorf("%s redirect: %w", operation, err)
 	}
-	previousRequest := via[len(via)-1]
-	if previousRequest == nil || previousRequest.URL == nil {
-		return fmt.Errorf("%s received an invalid redirect chain", operation)
-	}
-	if strings.EqualFold(previousRequest.URL.Scheme, "https") && strings.EqualFold(request.URL.Scheme, "http") {
+	previousURL := historyURLs[len(historyURLs)-1]
+	if isHTTPDowngrade(&previousURL, &requestedURL) {
 		return fmt.Errorf("%s refused an HTTPS-to-HTTP redirect", operation)
 	}
 	if policy.Previous != nil {
-		if err := policy.Previous(request, via); err != nil {
+		// Historical requests are snapshots. A composed callback may inspect or
+		// mutate its copies, but cannot corrupt the chain used for this or a
+		// later hop. Mutations to the candidate request remain supported and are
+		// treated as untrusted input below.
+		if err := policy.Previous(request, callbackHistory); err != nil {
 			return err
 		}
 	}
-	// Enforce credential confinement after a composed policy runs as well, so
-	// an injected callback cannot accidentally restore credentials on a new
-	// authority.
-	if !sameHTTPAuthority(previousRequest.URL, request.URL) {
-		request.Header.Del("Authorization")
+	finalURL, err := snapshotHTTPURL(request.URL)
+	if err != nil {
+		return fmt.Errorf("%s callback produced an invalid redirect: %w", operation, err)
+	}
+	if err := ValidateHTTPURLForScope(finalURL.String(), policy.Subject, policy.Scope); err != nil {
+		return fmt.Errorf("%s callback redirect: %w", operation, err)
+	}
+	if isHTTPDowngrade(&previousURL, &finalURL) {
+		return fmt.Errorf("%s refused an HTTPS-to-HTTP redirect after callback", operation)
+	}
+	// Detach the final URL/header values from pointers retained by the callback,
+	// then enforce credential confinement against the trusted historical
+	// snapshot. This also removes credentials a callback tried to restore.
+	request.URL = &finalURL
+	request.Header = request.Header.Clone()
+	if !sameHTTPAuthority(&previousURL, &finalURL) {
+		deleteHTTPHeader(request.Header, "Authorization")
 	}
 	return nil
+}
+
+func snapshotHTTPURL(source *url.URL) (url.URL, error) {
+	if source == nil {
+		return url.URL{}, errors.New("redirect URL is missing")
+	}
+	result := *source
+	if source.User != nil {
+		if password, present := source.User.Password(); present {
+			result.User = url.UserPassword(source.User.Username(), password)
+		} else {
+			result.User = url.User(source.User.Username())
+		}
+	}
+	return result, nil
+}
+
+func snapshotRedirectHistory(via []*http.Request) ([]url.URL, []*http.Request, error) {
+	urls := make([]url.URL, len(via))
+	requests := make([]*http.Request, len(via))
+	for index, source := range via {
+		if source == nil || source.URL == nil {
+			return nil, nil, fmt.Errorf("hop %d is missing", index)
+		}
+		snapshot, err := snapshotHTTPURL(source.URL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("hop %d: %w", index, err)
+		}
+		urls[index] = snapshot
+		clone := source.Clone(source.Context())
+		callbackURL, _ := snapshotHTTPURL(&snapshot)
+		clone.URL = &callbackURL
+		requests[index] = clone
+	}
+	return urls, requests, nil
+}
+
+func isHTTPDowngrade(previous, next *url.URL) bool {
+	return previous != nil && next != nil &&
+		strings.EqualFold(previous.Scheme, "https") && strings.EqualFold(next.Scheme, "http")
+}
+
+func deleteHTTPHeader(header http.Header, name string) {
+	for key := range header {
+		if strings.EqualFold(key, name) {
+			delete(header, key)
+		}
+	}
 }
 
 func sameHTTPAuthority(left, right *url.URL) bool {

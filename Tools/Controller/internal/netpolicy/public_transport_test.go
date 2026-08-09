@@ -222,6 +222,95 @@ func TestHTTPRedirectPolicyRejectsDowngradeAndConfinesCredentials(t *testing.T) 
 	}
 }
 
+func TestHTTPRedirectPolicyRevalidatesHostileCallbackMutations(t *testing.T) {
+	t.Run("whole request URL", func(t *testing.T) {
+		origin, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/file.hex", nil)
+		redirect, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/next.hex", nil)
+		policy := HTTPRedirectPolicy{
+			Operation: "artifact download", Subject: "artifact URL", Scope: HTTPDestinationPublic,
+			Previous: func(request *http.Request, _ []*http.Request) error {
+				request.URL, _ = url.Parse("http://127.0.0.1/private.hex")
+				return nil
+			},
+		}
+		err := policy.CheckRedirect(redirect, []*http.Request{origin})
+		if err == nil || !strings.Contains(err.Error(), "callback redirect") {
+			t.Fatalf("mutated request URL error=%v", err)
+		}
+	})
+
+	t.Run("scheme and prior chain", func(t *testing.T) {
+		origin, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/file.hex", nil)
+		redirect, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/next.hex", nil)
+		policy := HTTPRedirectPolicy{
+			Operation: "artifact download", Subject: "artifact URL", Scope: HTTPDestinationPublic,
+			Previous: func(request *http.Request, history []*http.Request) error {
+				request.URL.Scheme = "http"
+				history[len(history)-1].URL.Scheme = "http"
+				return nil
+			},
+		}
+		err := policy.CheckRedirect(redirect, []*http.Request{origin})
+		if err == nil || !strings.Contains(err.Error(), "after callback") {
+			t.Fatalf("mutated scheme error=%v", err)
+		}
+		if origin.URL.Scheme != "https" {
+			t.Fatalf("callback mutated the live redirect history: %s", origin.URL)
+		}
+	})
+
+	t.Run("host and authorization", func(t *testing.T) {
+		origin, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/file.hex", nil)
+		redirect, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/next.hex", nil)
+		redirect.Header.Set("Authorization", "Bearer original")
+		policy := HTTPRedirectPolicy{
+			Operation: "artifact download", Subject: "artifact URL", Scope: HTTPDestinationPublic,
+			Previous: func(request *http.Request, _ []*http.Request) error {
+				request.URL.Host = "cdn.example.com"
+				request.Header.Set("Authorization", "Bearer restored")
+				request.Header["authorization"] = []string{"Bearer lowercase"}
+				return nil
+			},
+		}
+		if err := policy.CheckRedirect(redirect, []*http.Request{origin}); err != nil {
+			t.Fatal(err)
+		}
+		if redirect.URL.Host != "cdn.example.com" {
+			t.Fatalf("validated callback host=%q", redirect.URL.Host)
+		}
+		if credential := redirect.Header.Get("Authorization"); credential != "" {
+			t.Fatalf("callback-restored cross-authority credential=%q", credential)
+		}
+		for name := range redirect.Header {
+			if strings.EqualFold(name, "Authorization") {
+				t.Fatalf("callback-restored credential key survived as %q", name)
+			}
+		}
+	})
+
+	t.Run("prior authority and authorization", func(t *testing.T) {
+		origin, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/file.hex", nil)
+		redirect, _ := http.NewRequest(http.MethodGet, "https://cdn.example.com/next.hex", nil)
+		policy := HTTPRedirectPolicy{
+			Operation: "artifact download", Subject: "artifact URL", Scope: HTTPDestinationPublic,
+			Previous: func(request *http.Request, history []*http.Request) error {
+				history[len(history)-1].URL.Host = request.URL.Host
+				request.Header.Set("Authorization", "Bearer restored")
+				return nil
+			},
+		}
+		if err := policy.CheckRedirect(redirect, []*http.Request{origin}); err != nil {
+			t.Fatal(err)
+		}
+		if origin.URL.Host != "updates.example.com" {
+			t.Fatalf("callback mutated the live prior authority: %s", origin.URL)
+		}
+		if credential := redirect.Header.Get("Authorization"); credential != "" {
+			t.Fatalf("via mutation concealed cross-authority credential=%q", credential)
+		}
+	})
+}
+
 func TestValidateResolvedPublicURLRejectsUnsafeEffectiveDestination(t *testing.T) {
 	target, _ := url.Parse("http://169.254.169.254/latest/meta-data/")
 	err := validateResolvedPublicURL(context.Background(), nil, target, "artifact URL")
