@@ -223,59 +223,75 @@ func validateDescriptorMetadata(values map[string]string) (map[string]string, er
 }
 
 func (store *Store) Get(kind Kind, digest string) (Descriptor, error) {
+	descriptor, file, err := store.openVerified(kind, digest)
+	if file != nil {
+		_ = file.Close()
+	}
+	return descriptor, err
+}
+
+func (store *Store) Open(kind Kind, digest string) (Descriptor, *os.File, error) {
+	descriptor, file, err := store.openVerified(kind, digest)
+	if err != nil {
+		return Descriptor{}, nil, err
+	}
+	return publicDescriptor(descriptor), file, nil
+}
+
+// openVerified reads metadata and opens the blob through one os.Root, then
+// validates size, type, and digest on that same file handle. Callers that serve
+// or consume content keep this handle; there is no verified-path/reopen window.
+func (store *Store) openVerified(kind Kind, digest string) (Descriptor, *os.File, error) {
 	kind, err := canonicalStoreKind(kind)
 	if err != nil {
-		return Descriptor{}, err
+		return Descriptor{}, nil, err
 	}
 	normalized, err := normalizeSHA256(digest)
 	if err != nil {
-		return Descriptor{}, err
+		return Descriptor{}, nil, err
 	}
 	metadataPath, err := metadataRelativePath(kind, normalized)
 	if err != nil {
-		return Descriptor{}, err
+		return Descriptor{}, nil, err
 	}
 	root, err := os.OpenRoot(store.root)
 	if err != nil {
-		return Descriptor{}, err
+		return Descriptor{}, nil, err
 	}
 	defer root.Close()
 	content, err := root.ReadFile(metadataPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Descriptor{}, os.ErrNotExist
+			return Descriptor{}, nil, os.ErrNotExist
 		}
-		return Descriptor{}, err
+		return Descriptor{}, nil, err
 	}
 	var metadata storedMetadata
 	if err := strictJSON(content, &metadata); err != nil {
-		return Descriptor{}, fmt.Errorf("decode artifact metadata: %w", err)
+		return Descriptor{}, nil, fmt.Errorf("decode artifact metadata: %w", err)
 	}
 	if metadata.Schema != metadataSchema || metadata.Descriptor.Kind != kind || metadata.Descriptor.SHA256 != normalized {
-		return Descriptor{}, errors.New("artifact metadata identity mismatch")
+		return Descriptor{}, nil, errors.New("artifact metadata identity mismatch")
 	}
 	blob, err := store.resolveBlob(metadata.Blob)
 	if err != nil {
-		return Descriptor{}, err
+		return Descriptor{}, nil, err
 	}
-	if err := verifyRegularFile(blob, normalized, metadata.Descriptor.Bytes); err != nil {
-		return Descriptor{}, err
+	relative, err := filepath.Rel(store.root, blob)
+	if err != nil || !filepath.IsLocal(relative) {
+		return Descriptor{}, nil, errors.New("artifact blob escapes the opened store")
+	}
+	file, err := root.Open(relative)
+	if err != nil {
+		return Descriptor{}, nil, err
+	}
+	if err := verifyRegularFileHandle(file, normalized, metadata.Descriptor.Bytes); err != nil {
+		_ = file.Close()
+		return Descriptor{}, nil, err
 	}
 	metadata.Descriptor.LocalPath = blob
 	metadata.Descriptor.Current = store.isCurrent(kind, normalized)
-	return metadata.Descriptor, nil
-}
-
-func (store *Store) Open(kind Kind, digest string) (Descriptor, *os.File, error) {
-	descriptor, err := store.Get(kind, digest)
-	if err != nil {
-		return Descriptor{}, nil, err
-	}
-	file, err := os.Open(descriptor.LocalPath)
-	if err != nil {
-		return Descriptor{}, nil, err
-	}
-	return publicDescriptor(descriptor), file, nil
+	return metadata.Descriptor, file, nil
 }
 
 func (store *Store) List(kind *Kind) ([]Descriptor, error) {
@@ -592,6 +608,23 @@ func verifyRegularFile(path, expectedHash string, expectedBytes int64) error {
 		return err
 	}
 	defer file.Close()
+	return verifyRegularFileHandle(file, expectedHash, expectedBytes)
+}
+
+func verifyRegularFileHandle(file *os.File, expectedHash string, expectedBytes int64) error {
+	if file == nil {
+		return errors.New("artifact blob is unavailable")
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() || info.Size() != expectedBytes {
+		return errors.New("artifact blob has the wrong type or size")
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		return err
@@ -599,7 +632,8 @@ func verifyRegularFile(path, expectedHash string, expectedBytes int64) error {
 	if hex.EncodeToString(hash.Sum(nil)) != expectedHash {
 		return errors.New("artifact blob SHA-256 mismatch")
 	}
-	return nil
+	_, err = file.Seek(0, io.SeekStart)
+	return err
 }
 
 func strictJSON(content []byte, destination any) error {

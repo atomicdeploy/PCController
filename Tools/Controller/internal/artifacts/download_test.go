@@ -49,7 +49,6 @@ func TestDownloaderDoesNotForwardBearerAcrossAuthority(t *testing.T) {
 	}))
 	defer origin.Close()
 	client := origin.Client()
-	client.CheckRedirect = NewDownloader(nil).client.CheckRedirect
 	_, err := NewDownloader(client).Fetch(context.Background(), newTestStore(t), FetchRequest{
 		URL: origin.URL, Kind: KindFirmware, BearerToken: "secret",
 	}, nil)
@@ -58,5 +57,22 @@ func TestDownloaderDoesNotForwardBearerAcrossAuthority(t *testing.T) {
 	}
 	if received != "" {
 		t.Fatalf("cross-authority Authorization=%q", received)
+	}
+}
+
+func TestDefaultDownloaderRejectsNonPublicInitialAndRedirectURLs(t *testing.T) {
+	downloader := NewDownloader(nil)
+	_, err := downloader.Fetch(context.Background(), newTestStore(t), FetchRequest{
+		URL: "http://169.254.169.254/latest/meta-data/", Kind: KindFirmware,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "artifact URL") {
+		t.Fatalf("metadata destination error=%v", err)
+	}
+
+	origin, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/board.hex", nil)
+	redirect, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1/private.hex", nil)
+	err = downloader.client.CheckRedirect(redirect, []*http.Request{origin})
+	if err == nil || !strings.Contains(err.Error(), "public network destination") {
+		t.Fatalf("private redirect error=%v", err)
 	}
 }

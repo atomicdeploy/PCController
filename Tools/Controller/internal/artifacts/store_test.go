@@ -2,6 +2,8 @@ package artifacts
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -143,5 +145,64 @@ func TestStoreRejectsTransportPathsOutsideItsOpenedRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store.root, "..", "escape.json")); !os.IsNotExist(err) {
 		t.Fatalf("metadata escaped store root: %v", err)
+	}
+}
+
+func TestStoreOpenKeepsTheVerifiedConfinedHandle(t *testing.T) {
+	store := newTestStore(t)
+	descriptor, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindFirmware, Name: "verified.hex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, file, err := store.Open(KindFirmware, descriptor.SHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	blob := filepath.Join(store.blobs, descriptor.SHA256[:2], descriptor.SHA256)
+	originalName := blob + ".opened"
+	if err := os.Rename(blob, originalName); err != nil {
+		// Some filesystems prohibit renaming an open file. That behavior also
+		// prevents the path-swap class this test exercises.
+		t.Skipf("filesystem keeps open artifact names locked: %v", err)
+	}
+	if err := os.WriteFile(blob, []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte(validIntelHEX)) {
+		t.Fatalf("open artifact followed a replaced path: %q", content)
+	}
+}
+
+func TestVerifyRegularFileHandleHashesAndRewindsOneHandle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "artifact.hex")
+	if err := os.WriteFile(path, []byte(validIntelHEX), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Seek(3, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(validIntelHEX))
+	if err := verifyRegularFileHandle(file, hex.EncodeToString(digest[:]), int64(len(validIntelHEX))); err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte(validIntelHEX)) {
+		t.Fatalf("verified handle was not rewound: %q", content)
 	}
 }

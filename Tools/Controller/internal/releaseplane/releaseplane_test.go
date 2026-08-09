@@ -138,6 +138,50 @@ func TestManifestIgnoresAdditiveFieldsWithinKnownFormat(t *testing.T) {
 	}
 }
 
+func TestManifestRelativeArtifactsUseValidatedFinalResponseURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/manifest.json":
+			http.Redirect(writer, request, "/channels/stable/manifest.json", http.StatusFound)
+		case "/channels/stable/manifest.json":
+			writeTestJSON(writer, Manifest{Format: ManifestFormat, Artifacts: []ManifestArtifact{{
+				Kind: artifacts.KindFirmware, Name: "board.hex", URL: "files/board.hex",
+			}}})
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+
+	result, err := NewClient(server.Client()).DiscoverManifest(
+		context.Background(), ManifestRequest{URL: server.URL + "/manifest.json"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := server.URL + "/channels/stable/files/board.hex"
+	if len(result.Candidates) != 1 || result.Candidates[0].URL != want {
+		t.Fatalf("redirected manifest candidate=%#v want URL %q", result.Candidates, want)
+	}
+}
+
+func TestDefaultClientRejectsNonPublicInitialAndRedirectURLs(t *testing.T) {
+	client := NewClient(nil)
+	_, err := client.DiscoverManifest(context.Background(), ManifestRequest{
+		URL: "http://127.0.0.1/private/manifest.json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "public network destination") {
+		t.Fatalf("private manifest error=%v", err)
+	}
+
+	origin, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/manifest.json", nil)
+	redirect, _ := http.NewRequest(http.MethodGet, "http://10.0.0.9/manifest.json", nil)
+	err = client.http.CheckRedirect(redirect, []*http.Request{origin})
+	if err == nil || !strings.Contains(err.Error(), "public network destination") {
+		t.Fatalf("private redirect error=%v", err)
+	}
+}
+
 func TestArchiveSelectionRejectsTraversal(t *testing.T) {
 	var buffer bytes.Buffer
 	writer := zip.NewWriter(&buffer)
@@ -242,10 +286,10 @@ func TestArchiveStageStreamsProgressAndPreservesMetadata(t *testing.T) {
 
 func TestDefaultClientUsesProxyEnvironment(t *testing.T) {
 	manifest := Manifest{Format: ManifestFormat, Artifacts: []ManifestArtifact{{
-		Kind: artifacts.KindFirmware, Name: "board.hex", URL: "http://origin.invalid/board.hex",
+		Kind: artifacts.KindFirmware, Name: "board.hex", URL: "http://1.1.1.1/board.hex",
 	}}}
 	proxy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Host != "origin.invalid" {
+		if request.URL.Host != "1.1.1.1" {
 			t.Fatalf("proxy received URL %s", request.URL)
 		}
 		writeTestJSON(writer, manifest)
@@ -255,7 +299,7 @@ func TestDefaultClientUsesProxyEnvironment(t *testing.T) {
 	t.Setenv("http_proxy", proxy.URL)
 	t.Setenv("NO_PROXY", "")
 	t.Setenv("no_proxy", "")
-	result, err := NewClient(nil).DiscoverManifest(context.Background(), ManifestRequest{URL: "http://origin.invalid/manifest.json"})
+	result, err := NewClient(nil).DiscoverManifest(context.Background(), ManifestRequest{URL: "http://1.1.1.1/manifest.json"})
 	if err != nil || len(result.Candidates) != 1 {
 		t.Fatalf("proxied discovery = %#v, %v", result, err)
 	}
