@@ -3,8 +3,8 @@
 This is the canonical public map from normalized project requirements to GitHub issues. Closely related requests are grouped into one verifiable requirement; raw conversation text, machine-local paths, and private audit data are intentionally excluded.
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
-- Normalized requirements: **69**
-- Open: **57**
+- Normalized requirements: **71**
+- Open: **59**
 - Closed with current evidence: **12**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
@@ -78,7 +78,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#7 — PC host TUI, configuration, automation, and OS integration](https://github.com/atomicdeploy/PCController/issues/7)
 
-9 open / 0 closed / 9 total
+10 open / 0 closed / 10 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
@@ -91,6 +91,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `host-keyboard-bindings-output-state` | [#45](https://github.com/atomicdeploy/PCController/issues/45) | 🟡 open | Add configurable keyboard motion/output bindings with authoritative live-state reconciliation |
 | `embedded-webui-native-experience` | [#101](https://github.com/atomicdeploy/PCController/issues/101) | 🟡 open | Deliver the embedded responsive WebUI as a complete native-feeling controller client |
 | `privileged-service-tray-controller` | [#116](https://github.com/atomicdeploy/PCController/issues/116) | 🟡 open | Run a privileged background service with a separate interactive tray controller |
+| `ui-surface-capability-parity` | [#124](https://github.com/atomicdeploy/PCController/issues/124) | 🟡 open | Generate and enforce declared capability parity across TUI, WebUI, native GUI, CLI, and APIs |
 
 ## [#8 — IPC, APIs, networking, discovery, and remote bridges](https://github.com/atomicdeploy/PCController/issues/8)
 
@@ -131,7 +132,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#11 — Build, dependencies, simulation, packaging, and developer tooling](https://github.com/atomicdeploy/PCController/issues/11)
 
-4 open / 3 closed / 7 total
+5 open / 3 closed / 8 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
@@ -142,6 +143,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `canonical-host-artifact-packaging` | [#64](https://github.com/atomicdeploy/PCController/issues/64) | 🟡 open | Produce one current source-identified controller artifact with verified packaging |
 | `latest-toolchain-update-automation` | [#89](https://github.com/atomicdeploy/PCController/issues/89) | 🟡 open | Automate latest-compatible dependency updates with resolved-lock reproducibility |
 | `authorized-reusable-component-porting` | [#118](https://github.com/atomicdeploy/PCController/issues/118) | 🟡 open | Directly port all applicable generalized components from authorized sibling applications |
+| `canonical-cross-language-contracts` | [#125](https://github.com/atomicdeploy/PCController/issues/125) | 🟡 open | Generate protocol, settings, hardware, and capability definitions from canonical contracts |
 
 ## [#12 — Documentation, licensing, GitHub, and final code quality](https://github.com/atomicdeploy/PCController/issues/12)
 
