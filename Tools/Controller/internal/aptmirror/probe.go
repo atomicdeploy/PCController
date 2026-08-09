@@ -66,9 +66,13 @@ func (prober *HTTPProber) Probe(ctx context.Context, config Config, candidate Ca
 	}
 	release, err := parseInRelease(content)
 	if err != nil || release.Origin != "Ubuntu" || release.Label != "Ubuntu" ||
-		release.Suite != suite || release.Codename != config.Codename ||
-		!containsString(release.Architectures, config.Architecture) {
+		release.Suite != suite || release.Codename != config.Codename {
 		return ProbeResult{Status: ProbeUnsafe, Detail: "identity"}
+	}
+	for _, architecture := range config.Architectures {
+		if !containsString(release.Architectures, architecture) {
+			return ProbeResult{Status: ProbeUnsafe, Detail: "identity"}
+		}
 	}
 	for _, component := range config.Components {
 		if !containsString(release.Components, component) {
@@ -97,22 +101,24 @@ func (prober *HTTPProber) Probe(ctx context.Context, config Config, candidate Ca
 	// referenced by the signed InRelease. This rejects mirrors which publish a
 	// plausible signed header but omit or corrupt the package-index topology.
 	for _, component := range config.Components {
-		relative := fmt.Sprintf("%s/binary-%s/Release", component, config.Architecture)
-		reference, ok := release.SHA256[relative]
-		if !ok {
-			return ProbeResult{Status: ProbeUnsafe, Detail: "index-reference"}
-		}
-		indexURL, err := base.Parse("dists/" + suite + "/" + relative)
-		if err != nil {
-			return ProbeResult{Status: ProbeUnsafe, Detail: "index-reference"}
-		}
-		index, indexStatus, err := fetchBounded(ctx, client, indexURL.String(), maximumReleaseBytes)
-		if err != nil {
-			return ProbeResult{Status: indexStatus, Detail: probeDetailForStatus(indexStatus)}
-		}
-		digest := sha256.Sum256(index)
-		if int64(len(index)) != reference.Size || !bytes.Equal(digest[:], reference.Hash[:]) {
-			return ProbeResult{Status: ProbeUnsafe, Detail: "content-hash"}
+		for _, architecture := range config.Architectures {
+			relative := fmt.Sprintf("%s/binary-%s/Release", component, architecture)
+			reference, ok := release.SHA256[relative]
+			if !ok {
+				return ProbeResult{Status: ProbeUnsafe, Detail: "index-reference"}
+			}
+			indexURL, err := base.Parse("dists/" + suite + "/" + relative)
+			if err != nil {
+				return ProbeResult{Status: ProbeUnsafe, Detail: "index-reference"}
+			}
+			index, indexStatus, err := fetchBounded(ctx, client, indexURL.String(), maximumReleaseBytes)
+			if err != nil {
+				return ProbeResult{Status: indexStatus, Detail: probeDetailForStatus(indexStatus)}
+			}
+			digest := sha256.Sum256(index)
+			if int64(len(index)) != reference.Size || !bytes.Equal(digest[:], reference.Hash[:]) {
+				return ProbeResult{Status: ProbeUnsafe, Detail: "content-hash"}
+			}
 		}
 	}
 	return ProbeResult{

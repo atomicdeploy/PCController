@@ -95,10 +95,10 @@ func TestRefreshRoutingPriorities(t *testing.T) {
 			wantedBase: 20, wantedMoving: 20,
 		},
 		{
-			name:       "old signed mirror remains rescue only",
+			name:       "old immutable base stays domestic first during official cutoff",
 			domestic:   ProbeResult{Status: ProbeVerified, Publication: now.Add(-200 * 24 * time.Hour)},
 			official:   ProbeResult{Status: ProbeTransient, Detail: "transport"},
-			wantedBase: 950, wantedMoving: 950,
+			wantedBase: 20, wantedMoving: 950,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

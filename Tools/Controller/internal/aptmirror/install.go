@@ -135,12 +135,9 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 	// Install non-source support files first, then generate a verified mirror
 	// list/state, and only then switch active APT source stanzas. At no point may
 	// APT observe a canonical mirror+file source whose target list is absent.
-	sourceSwitch := map[string]bool{config.Paths.CanonicalSource: true}
-	for path := range plan.Edits {
-		sourceSwitch[path] = true
-	}
 	for _, path := range uniqueSortedMapKeys(managedContent) {
-		if sourceSwitch[path] {
+		_, legacySource := plan.Edits[path]
+		if path == config.Paths.CanonicalSource || legacySource {
 			continue
 		}
 		mode := managedFileMode(config, path)
@@ -155,18 +152,37 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 		return report, err
 	}
 	report.Refresh = refresh
-	for _, path := range uniqueSortedMapKeys(managedContent) {
-		if !sourceSwitch[path] {
-			continue
-		}
-		if err := atomicWrite(path, managedContent[path], managedFileMode(config, path)); err != nil {
-			return report, fmt.Errorf("activate managed APT mirror source %s: %w", path, err)
-		}
+	if err := activateManagedSources(config, managedContent, plan, atomicWrite); err != nil {
+		return report, err
 	}
 	report.Applied = true
 	failed = false
 	fmt.Fprintln(output, "APT domestic-first profile installed with rollback backup:", backupDirectory)
 	return report, nil
+}
+
+func activateManagedSources(
+	config Config,
+	managedContent map[string][]byte,
+	plan sourcePlan,
+	write func(string, []byte, os.FileMode) error,
+) error {
+	canonical, ok := managedContent[config.Paths.CanonicalSource]
+	if !ok {
+		return errors.New("managed APT topology has no canonical Ubuntu source")
+	}
+	// The canonical source must become active before any legacy Ubuntu source
+	// is disabled. A power loss between atomic renames can therefore leave only
+	// a temporary duplicate topology, never a host with no Ubuntu source.
+	if err := write(config.Paths.CanonicalSource, canonical, managedFileMode(config, config.Paths.CanonicalSource)); err != nil {
+		return fmt.Errorf("activate canonical APT mirror source %s: %w", config.Paths.CanonicalSource, err)
+	}
+	for _, path := range uniqueSortedMapKeys(plan.Edits) {
+		if err := write(path, managedContent[path], managedFileMode(config, path)); err != nil {
+			return fmt.Errorf("disable adopted legacy APT source %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func managedMirrorFiles(config Config, executable []byte, environment []string, plan sourcePlan) (map[string][]byte, error) {
@@ -178,7 +194,7 @@ func managedMirrorFiles(config Config, executable []byte, environment []string, 
 		config.Paths.StableExecutable: executable,
 		config.Paths.InstalledConfig:  encodedConfig,
 		config.Paths.CanonicalSource:  SourceDeb822(config),
-		config.Paths.APTResilience:    APTResilienceConfig(),
+		config.Paths.APTResilience:    APTResilienceConfig(config),
 		config.Paths.ProxyEnvironment: proxyEnvironmentFile(environment),
 		config.Paths.Service:          SystemdService(config),
 		config.Paths.Timer:            SystemdTimer(),
@@ -222,7 +238,11 @@ func managedFileMode(config Config, path string) os.FileMode {
 }
 
 func proxyEnvironmentFile(environment []string) []byte {
-	values := make(map[string]string)
+	type selectedValue struct {
+		value          string
+		exactUppercase bool
+	}
+	values := make(map[string]selectedValue)
 	for _, entry := range environment {
 		name, value, found := strings.Cut(entry, "=")
 		name = strings.TrimSpace(name)
@@ -232,7 +252,17 @@ func proxyEnvironmentFile(environment []string) []byte {
 		}
 		switch upper {
 		case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "FTP_PROXY", "NO_PROXY":
-			values[name] = value
+			candidate := selectedValue{value: value, exactUppercase: name == upper}
+			if existing, ok := values[upper]; !ok || (!existing.exactUppercase && candidate.exactUppercase) {
+				values[upper] = candidate
+			}
+		}
+	}
+	if fallback, ok := values["ALL_PROXY"]; ok {
+		for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY"} {
+			if _, exists := values[name]; !exists {
+				values[name] = fallback
+			}
 		}
 	}
 	var names []string
@@ -243,7 +273,7 @@ func proxyEnvironmentFile(environment []string) []byte {
 	var output strings.Builder
 	output.WriteString("# Root-readable proxy environment captured by PCController; values are never logged.\n")
 	for _, name := range names {
-		value := strings.ReplaceAll(values[name], "\\", "\\\\")
+		value := strings.ReplaceAll(values[name].value, "\\", "\\\\")
 		value = strings.ReplaceAll(value, "\"", "\\\"")
 		fmt.Fprintf(&output, "%s=\"%s\"\n", name, value)
 	}
@@ -256,7 +286,7 @@ Description=Refresh PCController Ubuntu mirror health
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=15min
+OnUnitActiveSec=2h
 RandomizedDelaySec=2min
 Persistent=true
 Unit=pccontroller-apt-mirror-health.service

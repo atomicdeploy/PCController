@@ -55,7 +55,7 @@ type Paths struct {
 type Config struct {
 	Format                   string      `json:"format"`
 	Codename                 string      `json:"codename"`
-	Architecture             string      `json:"architecture"`
+	Architectures            []string    `json:"architectures"`
 	Components               []string    `json:"components"`
 	MaxLagSeconds            int64       `json:"max_lag_seconds"`
 	LastGoodTTLSeconds       int64       `json:"last_good_ttl_seconds"`
@@ -69,9 +69,10 @@ type Config struct {
 	Paths                    Paths       `json:"paths"`
 }
 
-func DomesticFirstConfig(codename, architecture string) Config {
+func DomesticFirstConfig(codename string, architectures ...string) Config {
 	return Config{
-		Format: ConfigFormat, Codename: codename, Architecture: architecture,
+		Format: ConfigFormat, Codename: codename,
+		Architectures: append([]string(nil), architectures...),
 		Components:    []string{"main", "restricted", "universe", "multiverse"},
 		MaxLagSeconds: 8 * 60 * 60, LastGoodTTLSeconds: 24 * 60 * 60,
 		FirstRunMovingAgeSeconds: 48 * 60 * 60,
@@ -128,8 +129,15 @@ func (config Config) Validate() error {
 	}
 	identifier := regexp.MustCompile(`^[a-z0-9][a-z0-9.-]*$`)
 	architecture := regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
-	if !identifier.MatchString(config.Codename) || !architecture.MatchString(config.Architecture) {
-		return errors.New("APT mirror config requires a safe Ubuntu codename and Debian architecture")
+	if !identifier.MatchString(config.Codename) || len(config.Architectures) == 0 {
+		return errors.New("APT mirror config requires a safe Ubuntu codename and at least one Debian architecture")
+	}
+	seenArchitecture := make(map[string]bool)
+	for _, value := range config.Architectures {
+		if !architecture.MatchString(value) || seenArchitecture[value] {
+			return fmt.Errorf("invalid or duplicate Debian architecture %q", value)
+		}
+		seenArchitecture[value] = true
 	}
 	if len(config.Components) == 0 || len(config.Candidates) == 0 {
 		return errors.New("APT mirror config requires components and candidates")

@@ -11,7 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,6 +24,7 @@ var (
 	linuxAPTMirrorRefresh        = aptmirror.Refresh
 	linuxAPTMirrorLoadConfig     = aptmirror.LoadConfig
 	linuxAPTMirrorLoadCandidates = aptmirror.LoadCandidateOverrides
+	linuxAPTMirrorArchitectures  = linuxDebianArchitectures
 )
 
 func provisionLinuxUbuntuMirrors(
@@ -37,11 +38,11 @@ func provisionLinuxUbuntuMirrors(
 	if err != nil {
 		return aptmirror.InstallReport{}, err
 	}
-	architecture, err := linuxDebianArchitecture()
+	architectures, err := linuxAPTMirrorArchitectures()
 	if err != nil {
 		return aptmirror.InstallReport{}, err
 	}
-	config := aptmirror.DomesticFirstConfig(codename, architecture)
+	config := aptmirror.DomesticFirstConfig(codename, architectures...)
 	if options.MirrorCandidatesPath != "" {
 		candidates, loadErr := linuxAPTMirrorLoadCandidates(options.MirrorCandidatesPath)
 		if loadErr != nil {
@@ -67,7 +68,7 @@ func provisionLinuxUbuntuMirrors(
 		if err != nil {
 			return aptmirror.InstallReport{}, err
 		}
-		if err := quiesceLegacyMirrorTimer(ctx, environment, systemd); err != nil {
+		if err := quiesceMirrorSystemd(ctx, environment, systemd); err != nil {
 			return aptmirror.InstallReport{}, err
 		}
 	}
@@ -121,11 +122,11 @@ func runToolchainMirrorInstall(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	architecture, err := linuxDebianArchitecture()
+	architectures, err := linuxAPTMirrorArchitectures()
 	if err != nil {
 		return err
 	}
-	config := aptmirror.DomesticFirstConfig(codename, architecture)
+	config := aptmirror.DomesticFirstConfig(codename, architectures...)
 	if strings.TrimSpace(*candidatesPath) != "" {
 		candidates, loadErr := linuxAPTMirrorLoadCandidates(strings.TrimSpace(*candidatesPath))
 		if loadErr != nil {
@@ -153,7 +154,7 @@ func runToolchainMirrorInstall(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if err := quiesceLegacyMirrorTimer(ctx, environment, systemd); err != nil {
+		if err := quiesceMirrorSystemd(ctx, environment, systemd); err != nil {
 			return err
 		}
 	}
@@ -183,11 +184,15 @@ func runToolchainMirrorInstall(args []string, stdout, stderr io.Writer) error {
 }
 
 type mirrorSystemdState struct {
-	Path          string
-	Enabled       bool
-	Active        bool
-	LegacyEnabled bool
-	LegacyActive  bool
+	Path                    string
+	Enabled                 bool
+	Active                  bool
+	ServiceLoaded           bool
+	ServiceWasRunning       bool
+	LegacyEnabled           bool
+	LegacyActive            bool
+	LegacyServiceLoaded     bool
+	LegacyServiceWasRunning bool
 }
 
 func inspectMirrorSystemd(ctx context.Context, environment []string) (mirrorSystemdState, error) {
@@ -200,16 +205,59 @@ func inspectMirrorSystemd(ctx context.Context, environment []string) (mirrorSyst
 	state.Active = linuxHostProvisionRun(ctx, linuxHostProvisionCommand{Name: path, Args: []string{"is-active", "--quiet", "pccontroller-apt-mirror-health.timer"}}, environment, io.Discard) == nil
 	state.LegacyEnabled = linuxHostProvisionRun(ctx, linuxHostProvisionCommand{Name: path, Args: []string{"is-enabled", "--quiet", "apt-mirror-health.timer"}}, environment, io.Discard) == nil
 	state.LegacyActive = linuxHostProvisionRun(ctx, linuxHostProvisionCommand{Name: path, Args: []string{"is-active", "--quiet", "apt-mirror-health.timer"}}, environment, io.Discard) == nil
+	state.ServiceLoaded, state.ServiceWasRunning, err = inspectMirrorServiceState(ctx, environment, path, "pccontroller-apt-mirror-health.service")
+	if err != nil {
+		return mirrorSystemdState{}, err
+	}
+	state.LegacyServiceLoaded, state.LegacyServiceWasRunning, err = inspectMirrorServiceState(ctx, environment, path, "apt-mirror-health.service")
+	if err != nil {
+		return mirrorSystemdState{}, err
+	}
 	return state, nil
 }
 
-func quiesceLegacyMirrorTimer(ctx context.Context, environment []string, state mirrorSystemdState) error {
-	if !state.LegacyEnabled && !state.LegacyActive {
-		return nil
+func inspectMirrorServiceState(ctx context.Context, environment []string, systemctl, unit string) (bool, bool, error) {
+	var output strings.Builder
+	command := linuxHostProvisionCommand{Name: systemctl, Args: []string{
+		"show", "--property=LoadState", "--property=ActiveState", "--value", unit,
+	}}
+	if err := linuxHostProvisionRun(ctx, command, environment, &output); err != nil {
+		return false, false, fmt.Errorf("inspect APT mirror service %s: %w", unit, err)
 	}
-	command := linuxHostProvisionCommand{Name: state.Path, Args: []string{"disable", "--now", "apt-mirror-health.timer"}}
-	if err := linuxHostProvisionRun(ctx, command, environment, io.Discard); err != nil {
-		return fmt.Errorf("quiesce legacy apt-mirror-health.timer before Go-owned adoption: %w", err)
+	values := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(values) != 2 {
+		return false, false, fmt.Errorf("inspect APT mirror service %s: unexpected systemd state", unit)
+	}
+	loadState := strings.TrimSpace(values[0])
+	activeState := strings.TrimSpace(values[1])
+	loaded := loadState != "" && loadState != "not-found"
+	running := activeState == "active" || activeState == "activating" || activeState == "reloading" || activeState == "refreshing"
+	return loaded, running, nil
+}
+
+func quiesceMirrorSystemd(ctx context.Context, environment []string, state mirrorSystemdState) error {
+	var commands [][]string
+	if state.Enabled || state.Active {
+		commands = append(commands, []string{"disable", "--now", "pccontroller-apt-mirror-health.timer"})
+	}
+	if state.LegacyEnabled || state.LegacyActive {
+		commands = append(commands, []string{"disable", "--now", "apt-mirror-health.timer"})
+	}
+	if state.ServiceLoaded {
+		commands = append(commands, []string{"stop", "pccontroller-apt-mirror-health.service"})
+	}
+	if state.LegacyServiceLoaded {
+		commands = append(commands, []string{"stop", "apt-mirror-health.service"})
+	}
+	for _, args := range commands {
+		command := linuxHostProvisionCommand{Name: state.Path, Args: args}
+		if err := linuxHostProvisionRun(ctx, command, environment, io.Discard); err != nil {
+			quiesceErr := fmt.Errorf("quiesce APT mirror unit %s before Go-owned adoption: %w", args[len(args)-1], err)
+			if restoreErr := restoreMirrorTimerState(context.WithoutCancel(ctx), environment, state); restoreErr != nil {
+				return errors.Join(quiesceErr, restoreErr)
+			}
+			return quiesceErr
+		}
 	}
 	return nil
 }
@@ -237,18 +285,37 @@ func restoreMirrorTimerState(ctx context.Context, environment []string, prior mi
 	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	var failures []error
-	commands := [][]string{{"disable", "--now", "pccontroller-apt-mirror-health.timer"}, {"daemon-reload"}}
+	var commands [][]string
+	currentEnabled := linuxHostProvisionRun(cleanupContext, linuxHostProvisionCommand{Name: prior.Path, Args: []string{"is-enabled", "--quiet", "pccontroller-apt-mirror-health.timer"}}, environment, io.Discard) == nil
+	currentActive := linuxHostProvisionRun(cleanupContext, linuxHostProvisionCommand{Name: prior.Path, Args: []string{"is-active", "--quiet", "pccontroller-apt-mirror-health.timer"}}, environment, io.Discard) == nil
+	currentServiceLoaded, _, inspectErr := inspectMirrorServiceState(cleanupContext, environment, prior.Path, "pccontroller-apt-mirror-health.service")
+	if inspectErr != nil {
+		failures = append(failures, inspectErr)
+	}
+	if currentEnabled || currentActive {
+		commands = append(commands, []string{"disable", "--now", "pccontroller-apt-mirror-health.timer"})
+	}
+	if currentServiceLoaded {
+		commands = append(commands, []string{"stop", "pccontroller-apt-mirror-health.service"})
+	}
+	commands = append(commands, []string{"daemon-reload"})
 	if prior.Enabled {
 		commands = append(commands, []string{"enable", "pccontroller-apt-mirror-health.timer"})
 	}
 	if prior.Active {
 		commands = append(commands, []string{"start", "pccontroller-apt-mirror-health.timer"})
 	}
+	if prior.ServiceWasRunning {
+		commands = append(commands, []string{"start", "--no-block", "pccontroller-apt-mirror-health.service"})
+	}
 	if prior.LegacyEnabled {
 		commands = append(commands, []string{"enable", "apt-mirror-health.timer"})
 	}
 	if prior.LegacyActive {
 		commands = append(commands, []string{"start", "apt-mirror-health.timer"})
+	}
+	if prior.LegacyServiceWasRunning {
+		commands = append(commands, []string{"start", "--no-block", "apt-mirror-health.service"})
 	}
 	for _, args := range commands {
 		if err := linuxHostProvisionRun(cleanupContext, linuxHostProvisionCommand{Name: prior.Path, Args: args}, environment, io.Discard); err != nil {
@@ -321,7 +388,7 @@ func linuxUbuntuCodename() (string, error) {
 	}
 	id := strings.ToLower(values["ID"])
 	idLike := strings.Fields(strings.ToLower(values["ID_LIKE"]))
-	if id != "ubuntu" && !containsArgument(idLike, "ubuntu") {
+	if id != "ubuntu" && !slices.Contains(idLike, "ubuntu") {
 		return "", fmt.Errorf("domestic-first APT profile supports Ubuntu only, got ID=%q", id)
 	}
 	codename := values["UBUNTU_CODENAME"]
@@ -334,15 +401,35 @@ func linuxUbuntuCodename() (string, error) {
 	return strings.TrimSpace(codename), nil
 }
 
-func linuxDebianArchitecture() (string, error) {
-	switch runtime.GOARCH {
-	case "amd64", "arm64", "riscv64", "s390x":
-		return runtime.GOARCH, nil
-	case "386":
-		return "i386", nil
-	case "ppc64le":
-		return "ppc64el", nil
-	default:
-		return "", fmt.Errorf("no reviewed Debian architecture mapping for Controller GOARCH=%s", runtime.GOARCH)
+func linuxDebianArchitectures() ([]string, error) {
+	dpkg, err := linuxHostProvisionLookPath("dpkg")
+	if err != nil {
+		return nil, errors.New("APT mirror provisioning requires trusted dpkg architecture discovery")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	environment := []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C"}
+	var result []string
+	seen := make(map[string]bool)
+	for index, argument := range []string{"--print-architecture", "--print-foreign-architectures"} {
+		var output strings.Builder
+		command := linuxHostProvisionCommand{Name: dpkg, Args: []string{argument}}
+		if err := linuxHostProvisionRun(ctx, command, environment, &output); err != nil {
+			return nil, fmt.Errorf("discover Debian architectures with dpkg: %w", err)
+		}
+		values := strings.Fields(output.String())
+		if index == 0 && len(values) != 1 {
+			return nil, errors.New("dpkg did not report exactly one native Debian architecture")
+		}
+		for _, value := range values {
+			if !seen[value] {
+				seen[value] = true
+				result = append(result, value)
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil, errors.New("dpkg did not report a Debian architecture")
+	}
+	return result, nil
 }

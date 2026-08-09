@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -168,6 +169,19 @@ func Refresh(ctx context.Context, options RefreshOptions) (RefreshReport, error)
 		}
 		officialReachable[probe.suite] = true
 	}
+	routingReferences := cloneInt64Map(references)
+	domesticReference := make(map[string]bool)
+	for _, probe := range probes {
+		if probe.candidate.Role != RoleDomestic || probe.result.Status != ProbeVerified ||
+			officialReachable[probe.suite] || references[probe.suite] != 0 {
+			continue
+		}
+		epoch := probe.result.Publication.Unix()
+		if epoch > routingReferences[probe.suite] {
+			routingReferences[probe.suite] = epoch
+		}
+		domesticReference[probe.suite] = true
+	}
 
 	good := cloneGoodMap(state.Good)
 	priorGood := cloneGoodMap(state.Good)
@@ -186,7 +200,10 @@ func Refresh(ctx context.Context, options RefreshOptions) (RefreshReport, error)
 		switch probe.result.Status {
 		case ProbeVerified:
 			epoch := probe.result.Publication.Unix()
-			selected := domesticPriority(config, probe.suite, epoch, references[probe.suite], officialReachable[probe.suite], now)
+			selected := domesticPriority(
+				config, probe.suite, epoch, routingReferences[probe.suite],
+				officialReachable[probe.suite], domesticReference[probe.suite], now,
+			)
 			priority[key] = selected
 			good[key] = GoodState{
 				Publication: epoch, LastSuccess: now.Unix(),
@@ -298,24 +315,35 @@ func goodStateValidUntil(config Config, suite string, state GoodState) int64 {
 	return state.Publication + maximumAge
 }
 
-func domesticPriority(config Config, suite string, publication, reference int64, officialReachable bool, now time.Time) int {
+func domesticPriority(
+	config Config,
+	suite string,
+	publication, reference int64,
+	officialReachable, domesticReference bool,
+	now time.Time,
+) int {
 	threshold := int64(0)
 	if reference > config.MaxLagSeconds {
 		threshold = reference - config.MaxLagSeconds
+	}
+	if domesticReference {
+		if publication < threshold {
+			return 950
+		}
+		if suite == config.Codename {
+			return 20
+		}
+		age := now.Unix() - publication
+		if age >= 0 && age <= config.FirstRunMovingAgeSeconds {
+			return 20
+		}
+		return 950
 	}
 	if reference > 0 && publication >= threshold {
 		return 10
 	}
 	if officialReachable {
 		return 950
-	}
-	maximumAge := config.FirstRunMovingAgeSeconds
-	if suite == config.Codename {
-		maximumAge = config.FirstRunBaseAgeSeconds
-	}
-	age := now.Unix() - publication
-	if reference == 0 && age >= 0 && age <= maximumAge {
-		return 20
 	}
 	return 950
 }
@@ -477,10 +505,31 @@ func SourceDeb822(config Config) []byte {
 	return []byte(fmt.Sprintf(
 		"Types: deb\nURIs: mirror+file:%s\nSuites: %s\nComponents: %s\nArchitectures: %s\nSigned-By: %s\n",
 		config.Paths.MirrorList, strings.Join(config.Suites(), " "),
-		strings.Join(config.Components, " "), config.Architecture, config.Paths.Keyring,
+		strings.Join(config.Components, " "), strings.Join(config.Architectures, " "), config.Paths.Keyring,
 	))
 }
 
-func APTResilienceConfig() []byte {
-	return []byte("Acquire::Queue-Mode \"host\";\nAcquire::Retries \"1\";\nAcquire::http::Timeout \"15\";\nAcquire::https::Timeout \"15\";\nAcquire::http::Dl-Limit \"0\";\n")
+func APTResilienceConfig(config Config) []byte {
+	var output strings.Builder
+	output.WriteString("Acquire::Queue-Mode \"host\";\nAcquire::Retries \"1\";\nAcquire::http::Timeout \"15\";\nAcquire::https::Timeout \"15\";\nAcquire::http::Dl-Limit \"0\";\n")
+	hosts := make(map[string]bool)
+	for _, candidate := range config.Candidates {
+		if !candidate.BypassProxy {
+			continue
+		}
+		parsed, err := url.Parse(candidate.URI)
+		if err == nil && parsed.Hostname() != "" {
+			hosts[strings.ToLower(parsed.Hostname())] = true
+		}
+	}
+	var ordered []string
+	for host := range hosts {
+		ordered = append(ordered, host)
+	}
+	sort.Strings(ordered)
+	for _, host := range ordered {
+		fmt.Fprintf(&output, "Acquire::http::Proxy::%s \"DIRECT\";\n", host)
+		fmt.Fprintf(&output, "Acquire::https::Proxy::%s \"DIRECT\";\n", host)
+	}
+	return []byte(output.String())
 }
