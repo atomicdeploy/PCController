@@ -4472,10 +4472,11 @@ func macroCommand(
 			return "", err
 		}
 		lines := []string{fmt.Sprintf(
-			"macro id=%d name=%q category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t",
+			"macro id=%d name=%q category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t recording_source=%q capture_dropped=%d capture_missing=%d",
 			macro.ID, macro.Name, macro.Category, normalizedMacroColor(macro.Color),
 			macro.Label, len(macro.Steps), time.Duration(compiled.durationUS)*time.Microsecond,
 			len(compiled.stream), macro.TimingToleranceUS, macro.KeepOutputsOnCancel,
+			macro.RecordingSource, macro.CaptureDroppedSteps, macro.CaptureMissingSteps,
 		)}
 		for index, step := range macro.Steps {
 			due, _ := macroStepDueUS(step)
@@ -4505,6 +4506,22 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf("macro %d/%s draft created; add steps in the watched host config or record a new macro", macro.ID, macro.Name), nil
+	case "update", "rename":
+		if len(args) < 3 || len(args) > 5 {
+			return "", fmt.Errorf("usage: macro update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]")
+		}
+		category, color := "", ""
+		if len(args) >= 4 {
+			category = args[3]
+		}
+		if len(args) == 5 {
+			color = args[4]
+		}
+		macro, err := runner.UpdateMetadata(args[1], args[2], category, color)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d renamed to %q category=%q color=%q", macro.ID, macro.Name, macro.Category, macro.Color), nil
 	case "delete", "remove":
 		if len(args) != 2 {
 			return "", fmt.Errorf("usage: macro delete NAME_OR_ID")

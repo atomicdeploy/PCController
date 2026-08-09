@@ -134,6 +134,88 @@ func TestMacroRecorderCombinesPanelAndRFWithoutDuplicatingHostEcho(t *testing.T)
 	}
 }
 
+func TestBoardRecordingStatusAutoStartsProvisionalHostMacro(t *testing.T) {
+	runtime := New(Options{})
+	config := appconfig.Defaults()
+	runner := NewMacroRunner(
+		runtime,
+		func() []appconfig.Macro { return config.Macros },
+		func() appconfig.Config { return config },
+		func(change func(*appconfig.Config) error) error {
+			if err := change(&config); err != nil {
+				return err
+			}
+			return config.Validate()
+		},
+	)
+	runtime.publishMacroStatus(native.MacroStatus{
+		Schema: native.MacroQueueSchema, State: native.MacroRecording, ID: 7,
+	})
+	state := runner.RecordingState()
+	if !state.Active || !state.BoardOwned || state.BoardID != 7 ||
+		state.ID != 7 || state.Name != "Board capture 7" || state.Category != "board" {
+		t.Fatalf("unexpected board recording state: %#v", state)
+	}
+	runtime.publishActionEvidence(ActionEvidence{
+		Opcode: native.OpRelaySide, Payload: []byte{1, 2},
+		Source: native.InputSourcePhysical, BoardOrigin: true,
+		DeviceMicros: 50, Timed: true,
+	})
+	if state = runner.RecordingState(); state.Steps != 1 || state.PanelSteps != 1 {
+		t.Fatalf("board action was not captured: %#v", state)
+	}
+	if _, err := runner.StopRecording(false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCaptureStreamDecodeMergeAndMetadataUpdate(t *testing.T) {
+	first, err := native.EncodeMacroRecord(100, native.OpRelaySide, []byte{0, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := native.EncodeMacroRecord(250, native.OpPWMSet, []byte{2, 0x00, 0x08})
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, err := decodeMacroCaptureStream(append(first, second...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := mergeRecordedMacroSteps(steps[:1], steps)
+	if len(merged) != 2 || merged[0].AtUS != 100 || merged[1].AtUS != 250 ||
+		merged[0].Kind != "motion" || merged[1].Kind != "pwm" {
+		t.Fatalf("unexpected recovered steps: %#v", merged)
+	}
+
+	runtime := New(Options{})
+	config := appconfig.Defaults()
+	config.Macros = []appconfig.Macro{{
+		ID: 7, Name: "Board capture 7", Category: "board", Color: "green",
+		RecordingSource: "board", Steps: merged,
+	}}
+	runner := NewMacroRunner(
+		runtime,
+		func() []appconfig.Macro { return config.Macros },
+		func() appconfig.Config { return config },
+		func(change func(*appconfig.Config) error) error {
+			if err := change(&config); err != nil {
+				return err
+			}
+			return config.Validate()
+		},
+	)
+	updated, err := runner.UpdateMetadata("7", "Night lift", "motion", "purple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "Night lift" || updated.Category != "motion" ||
+		updated.Color != "violet" || updated.RecordingSource != "board" ||
+		len(updated.Steps) != 2 {
+		t.Fatalf("metadata update changed capture data: %#v", updated)
+	}
+}
+
 func TestMacroExplicitSafeCancelOverridesBeginKeepPreference(t *testing.T) {
 	if payload := native.MacroQueueCancelPayload(false); len(payload) != 1 || payload[0] != 0 {
 		t.Fatalf("safe cancel must be explicit zero, got %v", payload)
