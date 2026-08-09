@@ -618,7 +618,7 @@ const R = [
     ], 'Schema-2 last-session.json atomically records cached identity, connection, status/reset/settings/menu/front-panel state, recent typed events, active/latest programming operation, current/default artifact hashes, and privacy-safe durable recovery marker/session hashes without mixing host config or EEPROM bytes. Validated recovery diagnostics reject interrupted-write completion claims. Source tests cover replacement, corruption, partial completeness, deduplication, RPC, and marker consumption; a graceful exit during/after the live programming lifecycle remains open.'),
 
   requirement('arduino-go-dependencies', 11, 'Provision managed firmware and host toolchains plus globally discoverable UPX', 'open',
-    ['🏗️ tooling-build', '📦 dependencies', '🐛 regression'], 'Firmware toolchain and dependencies', [
+    ['🏗️ tooling-build', '🔒 security', '📦 dependencies', '🐛 regression'], 'Firmware toolchain and dependencies', [
       'Audit and update installed Arduino cores and requested well-supported libraries through the configured network path.',
       'Declare all Go host dependencies and package checksums.',
       'Use fixed-size local AVR drivers where needed to fit the target without misrepresenting linked libraries.',
@@ -1079,6 +1079,7 @@ const PR_ORIGINAL_REQUESTS = {
   136: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies, PROMPT_EXCERPTS.proxyPolicy],
   138: [PROMPT_EXCERPTS.httpMessages, PROMPT_EXCERPTS.remoteSecurity],
   140: [PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking],
+  141: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.remoteSecurity, PROMPT_EXCERPTS.domainTracking],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
