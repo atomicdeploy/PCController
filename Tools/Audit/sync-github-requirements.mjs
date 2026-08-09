@@ -1079,6 +1079,7 @@ const PR_ORIGINAL_REQUESTS = {
   136: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies, PROMPT_EXCERPTS.proxyPolicy],
   138: [PROMPT_EXCERPTS.httpMessages, PROMPT_EXCERPTS.remoteSecurity],
   140: [PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking],
+  141: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.remoteSecurity, PROMPT_EXCERPTS.domainTracking],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
