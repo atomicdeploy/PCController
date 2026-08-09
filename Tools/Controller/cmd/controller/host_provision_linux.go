@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 
+	"pccontroller.local/controller/internal/aptmirror"
 	"pccontroller.local/controller/internal/netpolicy"
 	"pccontroller.local/controller/internal/programmer"
 )
@@ -42,18 +43,22 @@ var linuxHostNativePackages = []string{
 	"nodejs",
 	"pkg-config",
 	"ripgrep",
+	"gpgv",
+	"ubuntu-keyring",
 	"upx-ucl",
 	"xdg-utils",
 }
 
 type linuxHostProvisionOptions struct {
-	TargetUser  string
-	Apply       bool
-	Locked      bool
-	PolicyPath  string
-	LockPath    string
-	DirectRetry bool
-	Environment []string
+	TargetUser           string
+	Apply                bool
+	Locked               bool
+	PolicyPath           string
+	LockPath             string
+	DirectRetry          bool
+	UbuntuMirrors        string
+	MirrorCandidatesPath string
+	Environment          []string
 }
 
 type linuxHostProvisionStep struct {
@@ -84,6 +89,7 @@ type linuxHostProvisionReport struct {
 	NPMPath                    string                   `json:"npm_path,omitempty"`
 	UPXPath                    string                   `json:"upx_path,omitempty"`
 	ProxyVariables             []string                 `json:"proxy_variables,omitempty"`
+	UbuntuMirrors              *aptmirror.InstallReport `json:"ubuntu_mirrors,omitempty"`
 	Steps                      []linuxHostProvisionStep `json:"steps"`
 }
 
@@ -157,10 +163,12 @@ func runToolchainHostProvision(args []string, stdout, stderr io.Writer) error {
 	lockPath := flags.String("lock", "", "exact resolved toolchain lock JSON passed to the target-user bootstrap")
 	locked := flags.Bool("locked", false, "bootstrap the existing exact lock as the target user")
 	directRetry := flags.Bool("direct-retry", true, "retry failed target-user network steps once without proxy variables")
+	ubuntuMirrors := flags.String("ubuntu-mirrors", "", "opt-in Ubuntu mirror profile: domestic-first")
+	mirrorCandidates := flags.String("mirror-candidates", "", "reviewed JSON array overriding mirror candidates (paths/policy remain Controller-owned)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	const usage = "usage: controller toolchain provision-host --target-user USER [--apply|--dry-run] [--locked --lock FILE] [--policy FILE] [--direct-retry=false]"
+	const usage = "usage: controller toolchain provision-host --target-user USER [--apply|--dry-run] [--ubuntu-mirrors=domestic-first] [--mirror-candidates FILE] [--locked --lock FILE] [--policy FILE] [--direct-retry=false]"
 	if flags.NArg() != 0 {
 		return errors.New(usage)
 	}
@@ -175,6 +183,12 @@ func runToolchainHostProvision(args []string, stdout, stderr io.Writer) error {
 	}
 	if !*locked && strings.TrimSpace(*lockPath) != "" {
 		return errors.New("--lock requires --locked")
+	}
+	if *ubuntuMirrors != "" && !strings.EqualFold(strings.TrimSpace(*ubuntuMirrors), "domestic-first") {
+		return errors.New("--ubuntu-mirrors supports only the reviewed domestic-first profile")
+	}
+	if strings.TrimSpace(*mirrorCandidates) != "" && strings.TrimSpace(*ubuntuMirrors) == "" {
+		return errors.New("--mirror-candidates requires --ubuntu-mirrors=domestic-first")
 	}
 
 	resolvedPolicy := ""
@@ -205,7 +219,8 @@ func runToolchainHostProvision(args []string, stdout, stderr io.Writer) error {
 	report, err := provisionLinuxHost(ctx, linuxHostProvisionOptions{
 		TargetUser: strings.TrimSpace(*targetUser), Apply: *apply,
 		Locked: *locked, PolicyPath: resolvedPolicy, LockPath: resolvedLock,
-		DirectRetry: *directRetry, Environment: os.Environ(),
+		DirectRetry: *directRetry, UbuntuMirrors: strings.ToLower(strings.TrimSpace(*ubuntuMirrors)),
+		MirrorCandidatesPath: strings.TrimSpace(*mirrorCandidates), Environment: os.Environ(),
 	}, stdout)
 	encoded, _ := json.MarshalIndent(report, "", "  ")
 	if len(encoded) != 0 {
@@ -284,6 +299,13 @@ func provisionLinuxHost(
 	executable, err = filepath.Abs(executable)
 	if err != nil {
 		return report, fmt.Errorf("resolve current Controller executable: %w", err)
+	}
+	if options.UbuntuMirrors == "domestic-first" {
+		mirrorReport, mirrorErr := provisionLinuxUbuntuMirrors(ctx, options, executable, output, &report)
+		report.UbuntuMirrors = &mirrorReport
+		if mirrorErr != nil {
+			return report, mirrorErr
+		}
 	}
 
 	group, alreadyMember, err := linuxSerialGroup(account)

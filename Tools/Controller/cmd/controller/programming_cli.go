@@ -741,6 +741,18 @@ func configIndependentToolchainHostProvision(args []string) bool {
 		strings.EqualFold(args[1], "provision-host")
 }
 
+func configIndependentToolchainMirrorRefresh(args []string) bool {
+	return len(args) >= 2 &&
+		strings.EqualFold(args[0], "toolchain") &&
+		strings.EqualFold(args[1], "mirror-refresh")
+}
+
+func configIndependentToolchainMirrorInstall(args []string) bool {
+	return len(args) >= 2 &&
+		strings.EqualFold(args[0], "toolchain") &&
+		strings.EqualFold(args[1], "mirror-install")
+}
+
 func guardedFlashBooleanFlag(argument string) bool {
 	lower := strings.ToLower(argument)
 	if lower == "--allow-incomplete-backup" || lower == "--reinitialize-eeprom" || lower == "--dry-run" {
@@ -1182,6 +1194,12 @@ func runToolchain(
 	if len(args) != 0 && strings.EqualFold(args[0], "provision-host") {
 		return runToolchainHostProvision(args[1:], stdout, stderr)
 	}
+	if len(args) != 0 && strings.EqualFold(args[0], "mirror-refresh") {
+		return runToolchainMirrorRefresh(args[1:], stdout, stderr)
+	}
+	if len(args) != 0 && strings.EqualFold(args[0], "mirror-install") {
+		return runToolchainMirrorInstall(args[1:], stdout, stderr)
+	}
 	if len(args) != 0 && strings.EqualFold(args[0], "sync") {
 		return runToolchainSync(args[1:], stdout, stderr, store)
 	}
@@ -1515,7 +1533,7 @@ func defaultToolchainModuleDir() string {
 }
 
 func toolchainCLIArguments(args []string) ([]string, error) {
-	const usage = "usage: controller toolchain provision-host|check|update|bootstrap|sync|profile|lock|compile SKETCH|core-info|install-bootloader [flags]"
+	const usage = "usage: controller toolchain provision-host|mirror-install|mirror-refresh|check|update|bootstrap|sync|profile|lock|compile SKETCH|core-info|install-bootloader [flags]"
 	if len(args) == 0 {
 		return nil, errors.New(usage)
 	}

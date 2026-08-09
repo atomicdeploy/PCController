@@ -159,6 +159,14 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// configuration before it switches to the explicitly selected account.
 		return runToolchainHostProvision(args[2:], stdout, stderr)
 	}
+	if configIndependentToolchainMirrorRefresh(args) {
+		// The system timer must refresh mirrors even when no target account has
+		// a runtime/device configuration yet.
+		return runToolchainMirrorRefresh(args[2:], stdout, stderr)
+	}
+	if configIndependentToolchainMirrorInstall(args) {
+		return runToolchainMirrorInstall(args[2:], stdout, stderr)
+	}
 	store, err := appconfig.Open(configPath)
 	if err != nil {
 		return err
