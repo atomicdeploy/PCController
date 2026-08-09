@@ -24,7 +24,7 @@ func TestReleaseDiscoveryRPCAndRemotePolicy(t *testing.T) {
 		})
 	}))
 	defer manifestServer.Close()
-	discovery, err := releaseplane.NewService(releaseplane.NewClient(manifestServer.Client()), artifactService, nil)
+	discovery, err := releaseplane.NewService(releaseplane.NewTrustedClient(manifestServer.Client()), artifactService, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
