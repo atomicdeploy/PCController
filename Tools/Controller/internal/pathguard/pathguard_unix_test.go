@@ -27,6 +27,9 @@ func TestResolveAbsoluteCanonicalizesExistingSymlinkPrefix(t *testing.T) {
 	if resolved != want {
 		t.Fatalf("resolved=%q want=%q", resolved, want)
 	}
+	if err := ValidateComponents(filepath.Join(alias, "missing", "data"), true); err == nil {
+		t.Fatal("user-owned symlink prefix was accepted")
+	}
 	if err := ValidateComponents(resolved, true); err != nil {
 		t.Fatalf("canonical path should not traverse the alias: %v", err)
 	}

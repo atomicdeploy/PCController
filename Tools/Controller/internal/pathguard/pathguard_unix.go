@@ -35,6 +35,13 @@ func resolvePlatformAbsolute(path string) (string, error) {
 	}
 }
 
-func platformComponentIsLink(_ string, info fs.FileInfo) (bool, error) {
-	return info.Mode()&fs.ModeSymlink != 0, nil
+func platformComponentIsLink(path string, info fs.FileInfo) (bool, error) {
+	if info.Mode()&fs.ModeSymlink == 0 {
+		return false, nil
+	}
+	trusted, err := trustedSystemSymlink(path, info)
+	if err != nil {
+		return false, err
+	}
+	return !trusted, nil
 }
