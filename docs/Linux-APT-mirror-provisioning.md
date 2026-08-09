@@ -57,8 +57,10 @@ multiarch host instead of silently reducing it to the native architecture.
 The stable runtime and configuration are:
 
 - `/opt/pccontroller/bin/controller`
+- `/opt/pccontroller/libexec/unattended-upgrade`
 - `/etc/pccontroller/apt-mirrors.json`
 - `/etc/pccontroller/apt-mirror-proxy.env` (mode `0600`)
+- `/etc/systemd/system/apt-daily-upgrade.service.d/50-pccontroller-origin-cache.conf`
 - `pccontroller-apt-mirror-health.service`
 - `pccontroller-apt-mirror-health.timer`
 
@@ -71,8 +73,46 @@ repositories are preserved byte-for-byte. Mixed or unknown `mirror+file`
 topologies fail closed. Commented, disabled, distribution upgrade and backup
 files are reported as inventory and are never activated. The current and
 legacy mirror timers and loaded services are quiesced before adoption so they
-cannot race the Go refresh; their prior running/enabled state is restored if
-installation rolls back.
+cannot race the Go refresh. Controller also stops (but never disables)
+`apt-daily.timer` and `apt-daily-upgrade.timer`, verifies both package services
+are idle, and non-blockingly retains the dpkg frontend, dpkg, APT lists and APT
+archives POSIX record locks for the complete adoption and systemd activation.
+An active package service or lock owner fails the operation before `Install`
+can edit a source. Controller never stops or signals an APT/dpkg service or
+package process. Every timer's prior active state is restored on success and on
+rollback.
+
+## Ubuntu 26.04 unattended-upgrades compatibility
+
+Ubuntu 26.04's `python3-apt` repeatedly performs a linear source-index lookup
+for every `Version.origins` access. A large multiarch topology can consequently
+spend tens of minutes issuing failed `stat` calls before unattended-upgrades
+downloads or invokes dpkg. This is the still-open Debian bug
+[#1012752](https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1012752); it is
+independent of the number of backends inside a single `mirror+file` list.
+
+PCController keeps unattended security upgrades enabled and installs a narrow
+same-process wrapper for `apt-daily-upgrade.service`. The wrapper invokes the
+unchanged distro `/usr/bin/unattended-upgrade` with `runpy`, so argv, signals,
+locks, logging and the systemd process identity remain unchanged. It calls the
+reviewed upstream `apt.package.Origin` constructor once per PackageFile and
+caches only the resulting upstream-derived fields, including `trusted`, on the
+current `apt.Cache` object. It does not synthesize or override trust.
+
+The workaround is deliberately fail-closed for affected implementations. The
+identical reviewed constructor used by Ubuntu 24.04.4 `apt_pkg` 2.8.3 and
+Ubuntu 26.04 `apt_pkg` 3.2.0 is recognized by exact source (SHA-256
+`3abb1ceff3af2e4f5b42f45c9e16754632c8bfd3db062b7e1f9041328d220f9f`), and the
+distro program must remain root-owned and non-writable.
+During installation, before any source adoption or systemd reload, the newly
+written wrapper creates the live `apt.Cache`, compares original and cached
+Origin state for every PackageFile, and proves one upstream call per file. Any
+unknown constructor which still calls `find_index`, state mismatch, or inability
+to scope the cache aborts the installation and restores the file snapshots. If
+a future constructor has removed every `find_index` call, the wrapper reports
+passthrough and runs the distro program completely unpatched. Security upgrades
+are therefore neither disabled after an upstream fix nor silently run with an
+unreviewed affected trust path.
 
 ## Trust and routing policy
 
@@ -150,7 +190,8 @@ two hours after the prior activation with up to two minutes of randomized
 delay. This cadence limits repeated metadata traffic while still adapting to a
 failed or recovered mirror.
 
-Before installation, exact snapshots of every managed path and every active
+Before installation, exact snapshots of every managed path (including the
+unattended-upgrade shim and systemd drop-in) and every active
 Ubuntu source that will be edited, plus a SHA-256 manifest, are written under
 `/var/backups/pccontroller-apt-mirrors-*`. A file-write, refresh, or systemd
 activation failure during the same install invocation restores those snapshots
@@ -188,6 +229,11 @@ systemctl is-enabled pccontroller-apt-mirror-health.timer
 systemctl start pccontroller-apt-mirror-health.service
 systemctl --no-pager --full status pccontroller-apt-mirror-health.service
 systemctl list-timers pccontroller-apt-mirror-health.timer --no-pager
+
+# Prove the distro constructor and every live PackageFile still match the
+# reviewed cache contract, then inspect the service-scoped PATH selection.
+/opt/pccontroller/libexec/unattended-upgrade --pccontroller-self-test
+systemctl cat apt-daily-upgrade.service
 
 # Exercise APT itself, then simulate package resolution without installing.
 apt-get update

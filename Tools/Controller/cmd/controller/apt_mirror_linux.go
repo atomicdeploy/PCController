@@ -26,6 +26,7 @@ var (
 	linuxAPTMirrorLoadCandidates = aptmirror.LoadCandidateOverrides
 	linuxAPTMirrorArchitectures  = linuxDebianArchitectures
 	linuxAPTMirrorAdoptionLock   = aptmirror.AcquireAdoptionLock
+	linuxAPTMirrorPackageLocks   = aptmirror.AcquirePackageManagerLocks
 )
 
 func provisionLinuxUbuntuMirrors(
@@ -65,19 +66,18 @@ func provisionLinuxUbuntuMirrors(
 	environment := linuxProvisionEnvironment(options.Environment)
 	var systemd mirrorSystemdState
 	var releaseAdoptionLock func()
+	var releasePackageLocks func()
 	if options.Apply {
 		releaseAdoptionLock, err = linuxAPTMirrorAdoptionLock()
 		if err != nil {
 			return aptmirror.InstallReport{}, fmt.Errorf("serialize Ubuntu mirror adoption: %w", err)
 		}
 		defer releaseAdoptionLock()
-		systemd, err = inspectMirrorSystemd(ctx, environment)
+		systemd, releasePackageLocks, err = prepareMirrorAdoption(ctx, environment)
 		if err != nil {
 			return aptmirror.InstallReport{}, err
 		}
-		if err := quiesceMirrorSystemd(ctx, environment, systemd); err != nil {
-			return aptmirror.InstallReport{}, err
-		}
+		defer releasePackageLocks()
 	}
 	fmt.Fprintln(output, "\n▶", step.Name)
 	mirrorReport, err := linuxAPTMirrorInstall(ctx, aptmirror.InstallOptions{
@@ -157,19 +157,18 @@ func runToolchainMirrorInstall(args []string, stdout, stderr io.Writer) error {
 	defer cancel()
 	var systemd mirrorSystemdState
 	var releaseAdoptionLock func()
+	var releasePackageLocks func()
 	if *apply {
 		releaseAdoptionLock, err = linuxAPTMirrorAdoptionLock()
 		if err != nil {
 			return fmt.Errorf("serialize Ubuntu mirror adoption: %w", err)
 		}
 		defer releaseAdoptionLock()
-		systemd, err = inspectMirrorSystemd(ctx, environment)
+		systemd, releasePackageLocks, err = prepareMirrorAdoption(ctx, environment)
 		if err != nil {
 			return err
 		}
-		if err := quiesceMirrorSystemd(ctx, environment, systemd); err != nil {
-			return err
-		}
+		defer releasePackageLocks()
 	}
 	installOutput := stdout
 	if *jsonOutput {
@@ -206,6 +205,8 @@ type mirrorSystemdState struct {
 	LegacyActive            bool
 	LegacyServiceLoaded     bool
 	LegacyServiceWasRunning bool
+	APTDailyTimerActive     bool
+	APTUpgradeTimerActive   bool
 }
 
 func inspectMirrorSystemd(ctx context.Context, environment []string) (mirrorSystemdState, error) {
@@ -218,6 +219,8 @@ func inspectMirrorSystemd(ctx context.Context, environment []string) (mirrorSyst
 	state.Active = linuxHostProvisionRun(ctx, linuxHostProvisionCommand{Name: path, Args: []string{"is-active", "--quiet", "pccontroller-apt-mirror-health.timer"}}, environment, io.Discard) == nil
 	state.LegacyEnabled = linuxHostProvisionRun(ctx, linuxHostProvisionCommand{Name: path, Args: []string{"is-enabled", "--quiet", "apt-mirror-health.timer"}}, environment, io.Discard) == nil
 	state.LegacyActive = linuxHostProvisionRun(ctx, linuxHostProvisionCommand{Name: path, Args: []string{"is-active", "--quiet", "apt-mirror-health.timer"}}, environment, io.Discard) == nil
+	state.APTDailyTimerActive = linuxHostProvisionRun(ctx, linuxHostProvisionCommand{Name: path, Args: []string{"is-active", "--quiet", "apt-daily.timer"}}, environment, io.Discard) == nil
+	state.APTUpgradeTimerActive = linuxHostProvisionRun(ctx, linuxHostProvisionCommand{Name: path, Args: []string{"is-active", "--quiet", "apt-daily-upgrade.timer"}}, environment, io.Discard) == nil
 	state.ServiceLoaded, state.ServiceWasRunning, err = inspectMirrorServiceState(ctx, environment, path, "pccontroller-apt-mirror-health.service")
 	if err != nil {
 		return mirrorSystemdState{}, err
@@ -244,12 +247,67 @@ func inspectMirrorServiceState(ctx context.Context, environment []string, system
 	loadState := strings.TrimSpace(values[0])
 	activeState := strings.TrimSpace(values[1])
 	loaded := loadState != "" && loadState != "not-found"
-	running := activeState == "active" || activeState == "activating" || activeState == "reloading" || activeState == "refreshing"
+	running := activeState != "" && activeState != "inactive" && activeState != "failed"
 	return loaded, running, nil
+}
+
+func prepareMirrorAdoption(ctx context.Context, environment []string) (mirrorSystemdState, func(), error) {
+	state, err := inspectMirrorSystemd(ctx, environment)
+	if err != nil {
+		return mirrorSystemdState{}, nil, err
+	}
+	if err := quiesceMirrorSystemd(ctx, environment, state); err != nil {
+		return mirrorSystemdState{}, nil, err
+	}
+	barrierFailure := func(barrierErr error) (mirrorSystemdState, func(), error) {
+		wrapped := fmt.Errorf("APT/dpkg quiescence barrier: %w; no APT source files were changed", barrierErr)
+		if restoreErr := restoreMirrorTimerState(context.WithoutCancel(ctx), environment, state); restoreErr != nil {
+			wrapped = errors.Join(wrapped, restoreErr)
+		}
+		return mirrorSystemdState{}, nil, wrapped
+	}
+	if err := ensurePackageManagerServicesIdle(ctx, environment, state.Path); err != nil {
+		return barrierFailure(err)
+	}
+	release, err := linuxAPTMirrorPackageLocks()
+	if err != nil {
+		return barrierFailure(err)
+	}
+	// Close the inspect/acquire race. Once this second check succeeds, the
+	// retained record locks prevent a new package transaction until adoption,
+	// daemon-reload and timer restoration are complete.
+	if err := ensurePackageManagerServicesIdle(ctx, environment, state.Path); err != nil {
+		release()
+		return barrierFailure(err)
+	}
+	return state, release, nil
+}
+
+func ensurePackageManagerServicesIdle(ctx context.Context, environment []string, systemctl string) error {
+	var busy []string
+	for _, unit := range []string{"apt-daily.service", "apt-daily-upgrade.service"} {
+		_, running, err := inspectMirrorServiceState(ctx, environment, systemctl, unit)
+		if err != nil {
+			return err
+		}
+		if running {
+			busy = append(busy, unit)
+		}
+	}
+	if len(busy) != 0 {
+		return fmt.Errorf("package service still active: %s", strings.Join(busy, ", "))
+	}
+	return nil
 }
 
 func quiesceMirrorSystemd(ctx context.Context, environment []string, state mirrorSystemdState) error {
 	var commands [][]string
+	if state.APTDailyTimerActive {
+		commands = append(commands, []string{"stop", "apt-daily.timer"})
+	}
+	if state.APTUpgradeTimerActive {
+		commands = append(commands, []string{"stop", "apt-daily-upgrade.timer"})
+	}
 	if state.Enabled || state.Active {
 		commands = append(commands, []string{"disable", "--now", "pccontroller-apt-mirror-health.timer"})
 	}
@@ -276,22 +334,53 @@ func quiesceMirrorSystemd(ctx context.Context, environment []string, state mirro
 }
 
 func activateMirrorSystemd(ctx context.Context, environment []string, output io.Writer, prior mirrorSystemdState, report *aptmirror.InstallReport) error {
+	var activationErr error
 	for _, args := range [][]string{{"daemon-reload"}, {"enable", "--now", "pccontroller-apt-mirror-health.timer"}} {
 		command := linuxHostProvisionCommand{Name: prior.Path, Args: args}
 		fmt.Fprintln(output, formatLinuxProvisionCommand(command))
 		if err := linuxHostProvisionRun(ctx, command, environment, output); err != nil {
-			var rollbackErrors []error
-			if rollbackErr := report.Rollback(); rollbackErr != nil {
-				rollbackErrors = append(rollbackErrors, rollbackErr)
-			}
-			if restoreErr := restoreMirrorTimerState(context.WithoutCancel(ctx), environment, prior); restoreErr != nil {
-				rollbackErrors = append(rollbackErrors, restoreErr)
-			}
-			return errors.Join(append([]error{fmt.Errorf("activate APT mirror timer: %w", err)}, rollbackErrors...)...)
+			activationErr = fmt.Errorf("activate APT mirror timer: %w", err)
+			break
 		}
+	}
+	if activationErr == nil {
+		if err := restorePackageManagerTimerState(ctx, environment, output, prior); err != nil {
+			activationErr = fmt.Errorf("restore APT package timers after source adoption: %w", err)
+		}
+	}
+	if activationErr != nil {
+		var rollbackErrors []error
+		if rollbackErr := report.Rollback(); rollbackErr != nil {
+			rollbackErrors = append(rollbackErrors, rollbackErr)
+		}
+		if restoreErr := restoreMirrorTimerState(context.WithoutCancel(ctx), environment, prior); restoreErr != nil {
+			rollbackErrors = append(rollbackErrors, restoreErr)
+		}
+		return errors.Join(append([]error{activationErr}, rollbackErrors...)...)
 	}
 	report.Commit()
 	return nil
+}
+
+func restorePackageManagerTimerState(ctx context.Context, environment []string, output io.Writer, prior mirrorSystemdState) error {
+	var failures []error
+	for _, timer := range []struct {
+		unit   string
+		active bool
+	}{
+		{"apt-daily.timer", prior.APTDailyTimerActive},
+		{"apt-daily-upgrade.timer", prior.APTUpgradeTimerActive},
+	} {
+		if !timer.active {
+			continue
+		}
+		command := linuxHostProvisionCommand{Name: prior.Path, Args: []string{"start", timer.unit}}
+		fmt.Fprintln(output, formatLinuxProvisionCommand(command))
+		if err := linuxHostProvisionRun(ctx, command, environment, output); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
 
 func restoreMirrorTimerState(ctx context.Context, environment []string, prior mirrorSystemdState) error {
@@ -329,6 +418,12 @@ func restoreMirrorTimerState(ctx context.Context, environment []string, prior mi
 	}
 	if prior.LegacyServiceWasRunning {
 		commands = append(commands, []string{"start", "--no-block", "apt-mirror-health.service"})
+	}
+	if prior.APTDailyTimerActive {
+		commands = append(commands, []string{"start", "apt-daily.timer"})
+	}
+	if prior.APTUpgradeTimerActive {
+		commands = append(commands, []string{"start", "apt-daily-upgrade.timer"})
 	}
 	for _, args := range commands {
 		if err := linuxHostProvisionRun(cleanupContext, linuxHostProvisionCommand{Name: prior.Path, Args: args}, environment, io.Discard); err != nil {

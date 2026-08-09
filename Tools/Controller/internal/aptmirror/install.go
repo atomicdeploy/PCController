@@ -25,6 +25,8 @@ type InstallOptions struct {
 	Output           io.Writer
 }
 
+var runUnattendedUpgradeSelfTest = selfTestUnattendedUpgradeShim
+
 type InstallReport struct {
 	Applied             bool          `json:"applied"`
 	BackupDirectory     string        `json:"backup_directory,omitempty"`
@@ -69,7 +71,11 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 	if executable == "." || !filepath.IsAbs(executable) {
 		return InstallReport{}, errors.New("APT mirror profile requires an absolute current Controller executable path")
 	}
-	executableContent, err := os.ReadFile(executable)
+	// Pin one no-follow descriptor and derive both the digest and installed
+	// bytes from it. The apply path also validates ownership and write bits on
+	// that same descriptor, so a path swap cannot change what is trusted or
+	// copied after validation.
+	executableContent, err := readPinnedExecutable(executable, options.Apply)
 	if err != nil {
 		return InstallReport{}, fmt.Errorf("read current Controller executable: %w", err)
 	}
@@ -88,7 +94,9 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 	if err != nil {
 		return InstallReport{}, err
 	}
-	managedPaths := make([]string, 0, len(managedContent)+2)
+	// Do not add a constant to a map-derived capacity. Apart from being
+	// unnecessary, unchecked arithmetic here can overflow on hostile input.
+	managedPaths := make([]string, 0, len(managedContent))
 	for path := range managedContent {
 		managedPaths = append(managedPaths, path)
 	}
@@ -111,7 +119,7 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 		fmt.Fprintln(output, "APT domestic-first install dry-run: topology inventoried and signed health probed; no files changed.")
 		return report, nil
 	}
-	if err := validateMirrorApply(executable, managedPaths, config.Paths.BackupRoot); err != nil {
+	if err := validateMirrorApply(managedPaths, config.Paths.BackupRoot); err != nil {
 		return report, err
 	}
 	snapshots, err := captureSnapshots(managedPaths)
@@ -144,6 +152,13 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 		if err := atomicWrite(path, managedContent[path], mode); err != nil {
 			return report, fmt.Errorf("install managed APT mirror file %s: %w", path, err)
 		}
+	}
+	// The drop-in has not been daemon-reloaded and all APT timers are held by
+	// the caller's quiescence barrier at this point. Validate every PackageFile
+	// against the unmodified upstream Origin implementation before any source
+	// stanza or generated mirror list is adopted.
+	if err := runUnattendedUpgradeSelfTest(ctx, UnattendedUpgradeShimPath); err != nil {
+		return report, fmt.Errorf("validate unattended-upgrade Origin cache workaround: %w", err)
 	}
 	refresh, err = Refresh(ctx, RefreshOptions{
 		Config: config, Apply: true, Now: now, Prober: options.Prober, Output: output,
@@ -198,6 +213,8 @@ func managedMirrorFiles(config Config, executable []byte, environment []string, 
 		config.Paths.ProxyEnvironment: proxyEnvironmentFile(environment),
 		config.Paths.Service:          SystemdService(config),
 		config.Paths.Timer:            SystemdTimer(),
+		UnattendedUpgradeShimPath:     UnattendedUpgradeShim(),
+		UnattendedUpgradeDropInPath:   UnattendedUpgradeSystemdDropIn(),
 	}
 	for path, content := range plan.Edits {
 		result[path] = content
@@ -228,7 +245,7 @@ ReadWritePaths=%s %s %s
 }
 
 func managedFileMode(config Config, path string) os.FileMode {
-	if path == config.Paths.StableExecutable {
+	if path == config.Paths.StableExecutable || path == UnattendedUpgradeShimPath {
 		return 0o755
 	}
 	if path == config.Paths.ProxyEnvironment {

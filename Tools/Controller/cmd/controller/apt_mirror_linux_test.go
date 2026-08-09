@@ -22,15 +22,21 @@ func TestMirrorInstallIsConfigIndependentAndReadOnlyByDefault(t *testing.T) {
 	originalExecutable := linuxHostProvisionExecutable
 	originalArchitectures := linuxAPTMirrorArchitectures
 	originalAdoptionLock := linuxAPTMirrorAdoptionLock
+	originalPackageLocks := linuxAPTMirrorPackageLocks
 	t.Cleanup(func() {
 		linuxAPTMirrorReadFile = originalReadFile
 		linuxAPTMirrorInstall = originalInstall
 		linuxHostProvisionExecutable = originalExecutable
 		linuxAPTMirrorArchitectures = originalArchitectures
 		linuxAPTMirrorAdoptionLock = originalAdoptionLock
+		linuxAPTMirrorPackageLocks = originalPackageLocks
 	})
 	linuxAPTMirrorAdoptionLock = func() (func(), error) {
 		t.Fatal("dry-run acquired the mutating APT mirror adoption lock")
+		return nil, nil
+	}
+	linuxAPTMirrorPackageLocks = func() (func(), error) {
+		t.Fatal("dry-run acquired APT/dpkg package locks")
 		return nil, nil
 	}
 	linuxAPTMirrorArchitectures = func() ([]string, error) { return []string{"amd64", "i386"}, nil }
@@ -75,6 +81,7 @@ func TestMirrorAdoptionLockCoversCLIAndProvisionTransactions(t *testing.T) {
 	originalExecutable := linuxHostProvisionExecutable
 	originalArchitectures := linuxAPTMirrorArchitectures
 	originalAdoptionLock := linuxAPTMirrorAdoptionLock
+	originalPackageLocks := linuxAPTMirrorPackageLocks
 	originalCurrentEUID := linuxHostProvisionCurrentEUID
 	originalLookPath := linuxHostProvisionLookPath
 	originalRun := linuxHostProvisionRun
@@ -84,6 +91,7 @@ func TestMirrorAdoptionLockCoversCLIAndProvisionTransactions(t *testing.T) {
 		linuxHostProvisionExecutable = originalExecutable
 		linuxAPTMirrorArchitectures = originalArchitectures
 		linuxAPTMirrorAdoptionLock = originalAdoptionLock
+		linuxAPTMirrorPackageLocks = originalPackageLocks
 		linuxHostProvisionCurrentEUID = originalCurrentEUID
 		linuxHostProvisionLookPath = originalLookPath
 		linuxHostProvisionRun = originalRun
@@ -110,6 +118,7 @@ func TestMirrorAdoptionLockCoversCLIAndProvisionTransactions(t *testing.T) {
 	}
 
 	lockHeld := false
+	packageLocksHeld := false
 	acquisitions := 0
 	releases := 0
 	contentionChecks := 0
@@ -132,6 +141,17 @@ func TestMirrorAdoptionLockCoversCLIAndProvisionTransactions(t *testing.T) {
 			events = append(events, "unlock")
 		}, nil
 	}
+	linuxAPTMirrorPackageLocks = func() (func(), error) {
+		if !lockHeld || packageLocksHeld {
+			return nil, errors.New("invalid package-lock lifecycle")
+		}
+		packageLocksHeld = true
+		events = append(events, "package-lock")
+		return func() {
+			packageLocksHeld = false
+			events = append(events, "package-unlock")
+		}, nil
+	}
 	linuxHostProvisionRun = func(_ context.Context, command linuxHostProvisionCommand, _ []string, output io.Writer) error {
 		if !lockHeld {
 			t.Errorf("systemd command ran outside adoption lock: %+v", command)
@@ -147,8 +167,8 @@ func TestMirrorAdoptionLockCoversCLIAndProvisionTransactions(t *testing.T) {
 		return nil
 	}
 	linuxAPTMirrorInstall = func(_ context.Context, options aptmirror.InstallOptions) (aptmirror.InstallReport, error) {
-		if !options.Apply || !lockHeld {
-			t.Errorf("mutating install ran without adoption lock: apply=%v held=%v", options.Apply, lockHeld)
+		if !options.Apply || !lockHeld || !packageLocksHeld {
+			t.Errorf("mutating install ran without both barriers: apply=%v adoption=%v package=%v", options.Apply, lockHeld, packageLocksHeld)
 		}
 		events = append(events, "install")
 		if release, err := linuxAPTMirrorAdoptionLock(); err == nil {
@@ -167,9 +187,9 @@ func TestMirrorAdoptionLockCoversCLIAndProvisionTransactions(t *testing.T) {
 	}, executable, io.Discard, &provisionReport); err != nil {
 		t.Fatalf("provision-host mirror adoption: %v", err)
 	}
-	if lockHeld || acquisitions != 2 || releases != 2 || contentionChecks != 2 {
-		t.Fatalf("lock lifecycle held=%v acquisitions=%d releases=%d contention=%d events=%q",
-			lockHeld, acquisitions, releases, contentionChecks, events)
+	if lockHeld || packageLocksHeld || acquisitions != 2 || releases != 2 || contentionChecks != 2 {
+		t.Fatalf("lock lifecycle held=%v package=%v acquisitions=%d releases=%d contention=%d events=%q",
+			lockHeld, packageLocksHeld, acquisitions, releases, contentionChecks, events)
 	}
 	for index := 0; index < len(events); {
 		if events[index] != "lock" {
@@ -286,5 +306,88 @@ func TestLegacyMirrorTimerIsQuiescedAndRestoredExactly(t *testing.T) {
 		if !strings.Contains(text, wanted) {
 			t.Fatalf("rollback omitted %q:\n%s", wanted, text)
 		}
+	}
+}
+
+func TestMirrorAdoptionQuiescenceBarrierNeverStopsPackageServices(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		activeService bool
+		lockError     error
+	}{
+		{name: "active unattended upgrade", activeService: true},
+		{name: "record lock owner", lockError: errors.New("APT/dpkg lock is held by pid 4242")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			originalLookPath := linuxHostProvisionLookPath
+			originalRun := linuxHostProvisionRun
+			originalPackageLocks := linuxAPTMirrorPackageLocks
+			t.Cleanup(func() {
+				linuxHostProvisionLookPath = originalLookPath
+				linuxHostProvisionRun = originalRun
+				linuxAPTMirrorPackageLocks = originalPackageLocks
+			})
+			linuxHostProvisionLookPath = func(name string) (string, error) {
+				if name == "systemctl" {
+					return "/usr/bin/systemctl", nil
+				}
+				return "", errors.New("not found")
+			}
+			packageLockCalls := 0
+			linuxAPTMirrorPackageLocks = func() (func(), error) {
+				packageLockCalls++
+				if test.lockError != nil {
+					return nil, test.lockError
+				}
+				return func() {}, nil
+			}
+			var commands []string
+			linuxHostProvisionRun = func(_ context.Context, command linuxHostProvisionCommand, _ []string, output io.Writer) error {
+				joined := strings.Join(command.Args, " ")
+				commands = append(commands, joined)
+				if strings.HasPrefix(joined, "show ") {
+					if test.activeService && strings.HasSuffix(joined, "apt-daily-upgrade.service") {
+						_, _ = io.WriteString(output, "loaded\nactive\n")
+					} else {
+						_, _ = io.WriteString(output, "not-found\ninactive\n")
+					}
+					return nil
+				}
+				if joined == "is-active --quiet apt-daily.timer" || joined == "is-active --quiet apt-daily-upgrade.timer" {
+					return nil
+				}
+				if strings.HasPrefix(joined, "is-") {
+					return errors.New("inactive")
+				}
+				return nil
+			}
+
+			_, release, err := prepareMirrorAdoption(context.Background(), nil)
+			if release != nil || err == nil || !strings.Contains(err.Error(), "no APT source files were changed") {
+				t.Fatalf("release=%v err=%v", release != nil, err)
+			}
+			if test.activeService && packageLockCalls != 0 {
+				t.Fatalf("record locks attempted while package service was active: %d", packageLockCalls)
+			}
+			if !test.activeService && packageLockCalls != 1 {
+				t.Fatalf("record-lock attempts=%d", packageLockCalls)
+			}
+			text := strings.Join(commands, "\n")
+			for _, wanted := range []string{
+				"stop apt-daily.timer",
+				"stop apt-daily-upgrade.timer",
+				"start apt-daily.timer",
+				"start apt-daily-upgrade.timer",
+			} {
+				if !strings.Contains(text, wanted) {
+					t.Fatalf("barrier omitted %q:\n%s", wanted, text)
+				}
+			}
+			for _, forbidden := range []string{"stop apt-daily.service", "stop apt-daily-upgrade.service"} {
+				if strings.Contains(text, forbidden) {
+					t.Fatalf("barrier tried to stop a package process with %q:\n%s", forbidden, text)
+				}
+			}
+		})
 	}
 }

@@ -133,7 +133,7 @@ func reconcileListSource(path string, content []byte, config Config) ([]byte, bo
 			if location != "mirror+file:"+config.Paths.MirrorList {
 				return nil, false, false, fmt.Errorf("refusing ambiguous APT mirror topology in %s: %s", path, location)
 			}
-			if !hasConfiguredSuite(suites, config) {
+			if !hasOnlyConfiguredSuites(suites, config) {
 				return nil, false, false, fmt.Errorf("active PCController mirror source %s has unsupported suites", path)
 			}
 			topology = true
@@ -143,7 +143,7 @@ func reconcileListSource(path string, content []byte, config Config) ([]byte, bo
 			continue
 		}
 		if isUbuntuArchiveURI(location, config) {
-			if !hasConfiguredSuite(suites, config) {
+			if !hasOnlyConfiguredSuites(suites, config) {
 				return nil, false, false, fmt.Errorf("active Ubuntu source %s has suites outside the selected release", path)
 			}
 			active = true
@@ -168,7 +168,7 @@ func reconcileDeb822Source(path string, content []byte, config Config) ([]byte, 
 			continue
 		}
 		disabled := strings.EqualFold(strings.TrimSpace(fields["enabled"]), "no")
-		suiteMatch := hasConfiguredSuite(strings.Fields(fields["suites"]), config)
+		suiteMatch := hasOnlyConfiguredSuites(strings.Fields(fields["suites"]), config)
 		paragraphUbuntu, paragraphTopology := false, false
 		unknownURI := false
 		for _, location := range locations {
@@ -306,7 +306,11 @@ func sourceURIAndSuites(fields []string) (string, []string) {
 		if strings.HasPrefix(field, "http://") || strings.HasPrefix(field, "https://") ||
 			strings.HasPrefix(field, "mirror+file:") {
 			if index+1 < len(fields) {
-				return field, fields[index+1:]
+				// A one-line source has exactly one suite token after the URI;
+				// every later token is a component. Keeping components out of
+				// suite validation prevents a selected-release-looking component
+				// from making a foreign suite appear acceptable.
+				return field, []string{fields[index+1]}
 			}
 			return field, nil
 		}
@@ -314,15 +318,20 @@ func sourceURIAndSuites(fields []string) (string, []string) {
 	return "", nil
 }
 
-func hasConfiguredSuite(values []string, config Config) bool {
+func hasOnlyConfiguredSuites(values []string, config Config) bool {
+	if len(values) == 0 {
+		return false
+	}
+	configured := make(map[string]struct{}, len(config.Suites()))
+	for _, suite := range config.Suites() {
+		configured[suite] = struct{}{}
+	}
 	for _, value := range values {
-		for _, suite := range config.Suites() {
-			if value == suite {
-				return true
-			}
+		if _, ok := configured[value]; !ok {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func bytesContainUbuntuEvidence(content []byte) bool {

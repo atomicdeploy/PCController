@@ -170,6 +170,55 @@ func TestSourceAdoptionIsConservativeAndInventoriesInactiveFiles(t *testing.T) {
 	}
 }
 
+func TestSourceAdoptionRejectsMixedReleaseSuitesWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name     string
+		relative string
+		content  string
+	}{
+		{
+			name:     "one-line selected and foreign suites",
+			relative: "sources.list",
+			content: "deb https://archive.ubuntu.com/ubuntu resolute main\n" +
+				"deb https://archive.ubuntu.com/ubuntu noble resolute main\n",
+		},
+		{
+			name:     "deb822 selected and foreign suites",
+			relative: filepath.Join("sources.list.d", "mixed.sources"),
+			content:  "Types: deb\nURIs: https://archive.ubuntu.com/ubuntu\nSuites: resolute noble\nComponents: main\n",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := mirrorTestConfig(t)
+			sourcePath := filepath.Join(config.Paths.APTRoot, test.relative)
+			if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			original := []byte(test.content)
+			if err := os.WriteFile(sourcePath, original, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := planUbuntuSources(config); err == nil ||
+				!strings.Contains(err.Error(), "suites outside the selected release") {
+				t.Fatalf("source adoption did not reject mixed release suites: %v", err)
+			}
+			after, err := os.ReadFile(sourcePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(after) != string(original) {
+				t.Fatalf("refused source was mutated:\n%s", after)
+			}
+			for _, path := range []string{config.Paths.CanonicalSource, config.Paths.StableExecutable} {
+				if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("refused apply created %s: %v", path, err)
+				}
+			}
+		})
+	}
+}
+
 func TestInstallDryRunAndGeneratedTopologyDoNotMutate(t *testing.T) {
 	config := mirrorTestConfig(t)
 	config.Architectures = []string{"amd64", "i386"}
