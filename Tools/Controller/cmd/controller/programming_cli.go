@@ -874,6 +874,8 @@ func executeGuardedCLIFlash(
 		fmt.Fprintln(output, "guarded firmware flash completed")
 	}
 	verifiedProgram := flashErr == nil && result.Flashed
+	abortedBeforeWrite := programmingSession != nil && !result.BackupComplete &&
+		!allowIncompleteBackup
 	if verifiedProgram && reinitializeEEPROM {
 		if factoryErr := programFactoryEEPROM(
 			context.WithoutCancel(ctx), paths, options, output,
@@ -885,13 +887,24 @@ func executeGuardedCLIFlash(
 		}
 	}
 	if programmingSession != nil {
-		if markerErr := control.MarkProgrammingSessionComplete(
-			programmingSession, verifiedProgram,
-		); markerErr != nil {
+		var markerErr error
+		if abortedBeforeWrite {
+			markerErr = control.AbortProgrammingSessionBeforeWrite(programmingSession)
+			if markerErr == nil {
+				fmt.Fprintln(output,
+					"mandatory backup stopped before any flash write; restoring the pre-flash application state")
+			}
+		} else {
+			markerErr = control.MarkProgrammingSessionComplete(
+				programmingSession, verifiedProgram,
+			)
+		}
+		if markerErr != nil {
 			flashErr = errors.Join(flashErr, fmt.Errorf(
 				"persist host programming completion (safe-state marker retained): %w", markerErr,
 			))
 			verifiedProgram = false
+			abortedBeforeWrite = false
 		}
 	}
 	var reconnectErr error
@@ -908,7 +921,7 @@ func executeGuardedCLIFlash(
 				"application HELLO reconnect failed; settings recovery marker retained: %w",
 				reconnectErr,
 			)
-		} else if verifiedProgram {
+		} else if verifiedProgram || abortedBeforeWrite {
 			restoreContext, restoreCancel := context.WithTimeout(
 				context.WithoutCancel(ctx), 8*time.Second,
 			)
