@@ -1,11 +1,61 @@
 package native
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
-func TestMacroStatusSchemaTwoRoundTripLayout(t *testing.T) {
+func TestGeneratedMacroContractMatchesCanonicalCXXSources(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate macro contract test")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", ".."))
+	protocol, err := os.ReadFile(filepath.Join(root, "Project", "ProtocolContract.h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, err := os.ReadFile(filepath.Join(root, "Project", "MacroActions.inc.h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.New()
+	_, _ = hash.Write(protocol)
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(actions)
+	if got := fmt.Sprintf("%x", hash.Sum(nil)); got != macroContractSourceSHA256 {
+		t.Fatalf("generated macro contract is stale: got source %s, generated %s; run go generate ./internal/native", got, macroContractSourceSHA256)
+	}
+	if FeatureProfileFullPeripheral != 0 || FeatureProfileMotionMacro != 1 ||
+		FeatureProfileKeyDiagnostic != 2 || FeatureProfileCustom != 3 {
+		t.Fatal("generated feature-profile values differ from ProtocolContract.h")
+	}
+	if BuildFeatureLocalMacroCapture != 1 ||
+		BuildFeatureUnifiedPageIdentifiesKeys != 2 ||
+		BuildFeatureForceSilent != 4 || BuildFeatureBlankEepromSilent != 8 ||
+		BuildFeatureMcuLcdRenderer != 16 || BuildFeatureLocalPcaPages != 32 ||
+		BuildFeatureStatusLedEngine != 64 ||
+		BuildFeatureIlluminationAutomation != 128 {
+		t.Fatal("generated build-feature values differ from ProtocolContract.h")
+	}
+	if !MacroPlaybackAllowed(OpRelaySide) || MacroPlaybackAllowed(OpSetSettings) ||
+		MacroPlaybackAllowed(OpRFLearnStart) || MacroPlaybackAllowed(OpRelayTest) {
+		t.Fatal("generated playback allowlist differs from the AVR safety registry")
+	}
+	if length, recordable := MacroBoardActionPayloadLength(OpRelayAllOff); !recordable || length != 0 {
+		t.Fatalf("zero-payload capture contract=%d/%t", length, recordable)
+	}
+	if _, recordable := MacroBoardActionPayloadLength(OpStatusEffect); recordable {
+		t.Fatal("variable playback-only action entered board evidence")
+	}
+}
+
+func TestMacroStatusSchemaThreeRoundTripLayout(t *testing.T) {
 	payload := []byte{
 		EventMacro, MacroQueueSchema, MacroPlaying, 9,
 		7, 0, 5, 0, 64, 0,
@@ -95,12 +145,27 @@ func TestBoardActionEventUsesOrdinaryMacroOpcodeContract(t *testing.T) {
 func TestBoardActionEventRejectsControlAndOversizedPayload(t *testing.T) {
 	for _, payload := range [][]byte{
 		{EventAction, InputSourcePhysical, OpMacroStart, 0},
+		{EventAction, InputSourcePhysical, OpRelayAllOff, 1, 0},
+		{EventAction, InputSourceRF, OpRelaySet, 1, 0},
 		{EventAction, InputSourceRF, OpRelaySet, MacroBoardActionMaximumPayload + 1,
 			0, 0, 0, 0, 0, 0, 0, 0, 0},
 	} {
 		if _, err := ParseDeviceEvent(payload); err == nil {
 			t.Fatalf("invalid action event accepted: % X", payload)
 		}
+	}
+}
+
+func TestBoardCaptureCommandsCarryIdentity(t *testing.T) {
+	query := MacroCaptureQueryPayload(0x2A, 0x1234)
+	if len(query) != 4 || query[0] != 3 || query[1] != 0x2A ||
+		binary.LittleEndian.Uint16(query[2:]) != 0x1234 {
+		t.Fatalf("capture query payload=% X", query)
+	}
+	ack := MacroCaptureAcknowledgePayload(0x2A, 0x78563412)
+	if len(ack) != 6 || ack[0] != 4 || ack[1] != 0x2A ||
+		binary.LittleEndian.Uint32(ack[2:]) != 0x78563412 {
+		t.Fatalf("capture acknowledgement payload=% X", ack)
 	}
 }
 
@@ -114,8 +179,9 @@ func TestMacroCaptureChunkUsesBoundedOffsetPages(t *testing.T) {
 		len(chunk.Data) != 3 || chunk.Data[2] != 0xCC {
 		t.Fatalf("unexpected capture chunk: %#v", chunk)
 	}
-	query := MacroCaptureQueryPayload(0x1234)
-	if len(query) != 3 || query[0] != 3 || query[1] != 0x34 || query[2] != 0x12 {
+	query := MacroCaptureQueryPayload(9, 0x1234)
+	if len(query) != 4 || query[0] != 3 || query[1] != 9 ||
+		query[2] != 0x34 || query[3] != 0x12 {
 		t.Fatalf("unexpected capture query: % X", query)
 	}
 }

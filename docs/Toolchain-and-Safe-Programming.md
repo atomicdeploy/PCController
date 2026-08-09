@@ -270,13 +270,13 @@ reasserts relay/PWM-off, the safe EEPROM image, and `Prog`; it deliberately does
 not resume illumination or audio. Once the programmer has recorded its final
 outcome, the next connection finishes exact restoration and clears the marker.
 
-### Development EEPROM reinitialization
+### Development EEPROM semantic migration
 
-`--reinitialize-eeprom` is a deliberately destructive, host-tool-only escape
-hatch for an unpublished development board whose `GET_SETTINGS` payload no
-longer matches the current host schema. It does **not** add an old settings
-decoder, migration table, or compatibility branch to the firmware. Use it only
-when losing the board's previous semantic settings is acceptable:
+`--reinitialize-eeprom` is a host-tool-only transaction for an unpublished
+development board whose raw EEPROM layout differs from the compiled layout. It
+does **not** add a compatibility branch to firmware. The host requires the
+stable semantic SETTINGS response and exact live-state capture, retains the raw
+backup, and converts only fields that exist in the new schema:
 
 ```console
 controller program flash .build\firmware\PCController.ino.hex COM18 ^
@@ -291,41 +291,35 @@ result. The primary remains the only process that opens the port.
 The exception still requires a complete verified flash, raw EEPROM, and
 programmer-metadata backup before the firmware write. It cannot be combined
 with `--allow-incomplete-backup`. Before releasing UART ownership, the host
-persists the settings-query failure and any live state it could capture,
-cancels macros, releases all relays, fades PWM when possible (otherwise forces
-it off), shows the programming cues, and plays the power-down melody. It does
-not rewrite the incompatible EEPROM before that raw backup.
+captures settings and live state, cancels macros, releases all relays, fades
+PWM, shows the programming cues, and plays the power-down melody. A failed
+semantic capture stops the transaction. It does not rewrite EEPROM before the
+untouched raw backup.
 
-Immediately after the untouched raw backup, Controller reconnects to a
-current-schema application when available, persists and reads back the durable
-Silent/Programming flags, restores `Prog`, and releases UART again before the
-firmware write. This post-backup boundary is part of the flash gate: failure to
-arm a supported latch prevents flashing. If the old settings schema is
-genuinely unsupported, Controller cannot safely patch unknown EEPROM bytes and
-reports that limitation; the newly written transaction image becomes the
-first safe latch point.
+Immediately after the raw backup, Controller reconnects, persists and reads
+back the old application's durable Silent/Programming flags, then releases
+UART. It semantically converts the validated backup to production schema 1
+(22 controller bytes plus name envelope and CRC-8), preserves RF/status/reset
+and unknown regions, erases the retired menu-layout tail, forces outputs off,
+arms Silent/Programming, and programs this complete image **before** firmware
+flash. Failure at any step prevents flashing.
 
-After verified flashing, and before clearing the lifecycle marker, the host
-programs and independently reads back a complete generated 1,024-byte
-**transaction** EEPROM image. It contains the canonical Go-owned settings,
-empty RF store, rich status-LED profiles, and an armed Silent/Programming latch
-with visible `Prog`. Every verification/reconnect reset after this write
-therefore remains quiet and output-safe. Only after the new authenticated
-`HELLO` does the host query the current schema, commit and verify ordinary
-canonical settings with Silent and Programming cleared and all relay/PWM
-persistence disabled, then play the single configurable ready cue. It never
-maps or restores old semantic values or live outputs. The original raw EEPROM
-remains recoverable from the pre-flash backup, but restoring it would
-deliberately reintroduce the incompatible development state.
+Every reset during flash therefore remains quiet, output-safe, and visibly
+latched at `Prog`. Only after the new authenticated `HELLO` does the host stage
+the captured semantic settings behind Programming, verify them, clear
+Programming as the final settings write, and restore the captured live state.
+The original raw EEPROM remains recoverable from the verified backup; it is
+never written directly across layouts.
 
 ### Alpha version and feature-profile policy
 
 During alpha, a newer **version build** may replace the current wire, flash, or
 EEPROM layout directly. Do not add dual readers, migrations, compatibility
-aliases, or preservation logic merely to accept an earlier alpha version. Keep
-the mandatory raw backup, reject the obsolete semantic layout, and use the
-explicit reinitialization transaction when the old values are intentionally
-discarded.
+aliases, or preservation logic to normal firmware merely to accept an earlier
+alpha version. Keep the mandatory raw backup and use the explicit host
+transaction for a one-time conversion of shared semantic fields. That bounded
+converter must not become a permanent live protocol/version compatibility
+chain.
 
 Compatibility and preservation are required only when distinct
 **profile/feature builds are intentionally supported at the same time**. Each

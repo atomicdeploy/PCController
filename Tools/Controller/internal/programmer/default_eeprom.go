@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"pccontroller.local/controller/internal/native"
 )
@@ -44,36 +45,69 @@ func GenerateProgrammingEEPROMIntelHex() ([]byte, error) {
 	return generateEEPROMIntelHex(factory)
 }
 
+// GenerateMigratedProgrammingEEPROMIntelHex converts a validated pre-flash
+// backup semantically into the compiled production schema. It preserves every
+// unrelated EEPROM byte, drops only schema-2 menu-layout storage, recalculates
+// CRC-8, and arms Silent/Prog before the new firmware is allowed to boot.
+func GenerateMigratedProgrammingEEPROMIntelHex(manifestPath string) ([]byte, OfflineSettingsDecode, error) {
+	_, backup, decoded, err := loadCurrentBackupEEPROM(manifestPath)
+	if err != nil {
+		return nil, OfflineSettingsDecode{}, err
+	}
+	values := decoded.Settings.Values
+	values.Flags |= native.SettingsSilent | native.SettingsProgrammingMode
+	values.IlluminationMode = 0
+	values.IlluminationOnBrightness = 0
+	values.IlluminationOffBrightness = 0
+	values.StatusBrightness = 0
+	values.OutputPersistence = 0
+	values.RelayRestoreMask = 0
+	values.DisplayClosedBrightness = values.DisplayBrightness
+	record, err := encodeCurrentEEPROMSettingsRecord(values)
+	if err != nil {
+		return nil, OfflineSettingsDecode{}, fmt.Errorf("migrate EEPROM settings to schema 1: %w", err)
+	}
+	migrated := &IntelHexImage{data: make(map[uint32]byte, len(backup.Image.data))}
+	for address, value := range backup.Image.data {
+		migrated.data[address] = value
+	}
+	// Clear the superseded schema-2 tail so a future forensic decoder cannot
+	// mistake stale menu-layout/name bytes for a second live record.
+	for offset := uint32(0); offset < EEPROMMenuLayoutRecordBytes; offset++ {
+		migrated.data[EEPROMSettingsAddress+offset] = 0xFF
+	}
+	for offset, value := range record {
+		migrated.data[EEPROMSettingsAddress+uint32(offset)] = value
+	}
+	content, err := migrated.Canonical()
+	if err != nil {
+		return nil, OfflineSettingsDecode{}, fmt.Errorf("encode migrated EEPROM: %w", err)
+	}
+	verification, err := ParseIntelHex(strings.NewReader(string(content)))
+	if err != nil {
+		return nil, OfflineSettingsDecode{}, err
+	}
+	if err := requireFullEEPROMImage(verification); err != nil {
+		return nil, OfflineSettingsDecode{}, err
+	}
+	confirmed := decodeOfflineSettings(verification)
+	wantFlags := native.SettingsSilent | native.SettingsProgrammingMode
+	if !confirmed.Valid || confirmed.Schema != EEPROMSettingsRecordSchema || confirmed.Values.Flags&wantFlags != wantFlags {
+		return nil, OfflineSettingsDecode{}, fmt.Errorf("migrated EEPROM failed schema-1 Silent/Prog verification: %s", confirmed.Issue)
+	}
+	return content, confirmed, nil
+}
+
 func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 	data := make([]byte, PCControllerEEPROMBytes)
 	for index := range data {
 		data[index] = 0xFF
 	}
-	settings := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsRecordBytes]
-	values := settings[:EEPROMSettingsValueBytes]
-	values[0] = factory.Flags
-	values[1] = factory.LightMode
-	values[2] = factory.OnBrightness
-	values[3] = factory.OffBrightness
-	values[4] = factory.DisplayBrightness
-	values[5] = factory.StatusBrightness
-	values[6] = factory.OutputPersistence
-	binary.LittleEndian.PutUint16(values[7:9], factory.StreamPeriodMS)
-	for index := 9; index < 17; index++ {
-		values[index] = 0 // eight safe, off user-PWM defaults
+	settings, err := encodeCurrentEEPROMSettingsRecord(controllerSettingsFromNative(factory))
+	if err != nil {
+		return nil, fmt.Errorf("encode safe settings EEPROM: %w", err)
 	}
-	values[17] = factory.DefaultPage
-	values[18] = factory.ExtendedFlags
-	binary.LittleEndian.PutUint16(values[19:21], DefaultVisibleMenuMask)
-	copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})
-	values[28] = factory.DisplayClosedBrightness |
-		(factory.MotionExitHoldSeconds << 3)
-	values[29] = factory.RelayRestoreMask
-	values[30] = factory.MotionBreakMSValue
-	for index := 31; index < len(values); index++ {
-		values[index] = 0 // valid empty board name plus deterministic padding
-	}
-	settings[EEPROMSettingsValueBytes] = avrCRC8(values)
+	copy(data[EEPROMSettingsAddress:EEPROMSettingsAddress+EEPROMSettingsRecordBytes], settings)
 
 	// A new board starts with a valid empty 20-record learned-RF store.
 	header := data[EEPROMRemoteHeaderAddress : EEPROMRemoteHeaderAddress+4]
@@ -192,6 +226,51 @@ func ProgramLatchedFactoryEEPROM(
 	write.ConfirmEEPROMWrite = true
 	if err := execute(ctx, write, output); err != nil {
 		return fmt.Errorf("program latched factory EEPROM: %w", err)
+	}
+	return nil
+}
+
+// ProgramMigratedProgrammingEEPROM writes a semantically migrated, complete
+// EEPROM image before the application flash. The programmer executor performs
+// its ordinary independent read-back verification.
+func ProgramMigratedProgrammingEEPROM(
+	ctx context.Context,
+	manifestPath string,
+	paths HostDataPaths,
+	base Options,
+	execute EEPROMProgramOperation,
+	output io.Writer,
+) error {
+	if execute == nil {
+		return fmt.Errorf("migrated programming EEPROM requires an executor")
+	}
+	content, decoded, err := GenerateMigratedProgrammingEEPROMIntelHex(manifestPath)
+	if err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(paths.StateDir, "migrated-programming-eeprom-*.hex")
+	if err != nil {
+		return fmt.Errorf("reserve migrated programming EEPROM image: %w", err)
+	}
+	path := temporary.Name()
+	if err := temporary.Close(); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("prepare migrated programming EEPROM image: %w", err)
+	}
+	defer os.Remove(path)
+	if err := writeEEPROMIntelHexExclusive(path, content); err != nil {
+		return err
+	}
+	write := base
+	write.Operation = OperationWriteEEPROM
+	write.HexPath = path
+	write.OutputPath = ""
+	write.ConfirmEEPROMWrite = true
+	if err := execute(ctx, write, output); err != nil {
+		return fmt.Errorf("program migrated schema-%d EEPROM: %w", decoded.Schema, err)
 	}
 	return nil
 }

@@ -331,6 +331,12 @@ ordinary opcode/payload shape. Source=HOST event echoes are deduplicated against
 their authoritative ACK, and USB/network arrival time is never used as the
 recording clock.
 
+`macro record status` exposes `last_at_us` and `last_delta_us` while recording.
+After save or board recovery, `macro show NAME_OR_ID` prints the exact integer
+`at_us` offset from the capture epoch and `delta_us` from the preceding action
+for every step. The TUI uses the same state and the Web workbench calls these
+same commands, so none of the three surfaces substitutes host arrival time.
+
 Pressing Record on the board opens provisional PC metadata named
 `Board capture N` in category `board`. The schema-3 MCU ring retains a strict
 no-overwrite prefix and exposes it in bounded 40-byte recovery pages; a
@@ -342,6 +348,21 @@ its exact steps. Macro definitions remain PC configuration; only the active
 timing/capture ring occupies AVR RAM. The deterministic preview contains a
 safe representative library, forces every buzzer path to a state-only/muted
 double, and never opens serial or energizes physical outputs.
+
+The host writes a board-identity/capture-epoch/stream SHA-256 import key into
+configuration before sending the identity-guarded export acknowledgement.
+The board deliberately retains acknowledged bytes for replay and inspection;
+reconnecting to an `Exported` capture acknowledges the same durable import
+without creating another macro. Capture pages, acknowledgement, playback, and
+cancel requests are pinned to one authenticated connection generation, so a
+replacement board can never inherit an in-flight operation.
+
+Current alpha firmware identifies itself with strict 16-byte HELLO schema 4.
+Its profile (`full-peripheral`, `motion-macro`, `key-diagnostic`, or `custom`)
+and one-byte build-feature mask are displayed by CLI, TUI, and Web UI. The
+current production/default profile is `full-peripheral`; it keeps INA219,
+PCA9685, DS18B20, LCD, local macro capture, status LED, and illumination
+support. Schema 3 is intentionally not treated as compatible during alpha.
 
 The same library is now available as the default HOST-presented physical
 `MACR` submenu. Its selector is rebuilt from the watched macro array and sorted
@@ -704,12 +725,13 @@ Tools\Controller\bin\controller.exe program --operation read-eeprom --method urc
 Tools\Controller\bin\controller.exe program --operation write-eeprom --method urclock --port COM18 --hex EEPROM-FACTORY.hex --confirm-eeprom-write
 ```
 
-The current settings artifact is exactly 40 settings/name value bytes plus
-CRC-8 at EEPROM addresses `0x0020..0x0048`. Export emits only that sparse
-region. Import
+The production settings artifact is exactly 22 controller bytes, one name
+length byte, eight name bytes, and CRC-8 at EEPROM addresses
+`0x0020..0x003F`. Export emits only that sparse 32-byte region. Import
 overlays it on the validated 1,024-byte backup so RF records, reset journal,
-and every unknown byte remain unchanged; restore reproduces the original full
-EEPROM image. Outputs are hashed and never overwritten. These commands do not
+and every unrelated byte remain unchanged. A retired 41-byte menu-layout
+record is decoded only for explicit semantic conversion; its raw tail is erased
+instead of restored. Outputs are hashed and never overwritten. These commands do not
 open serial or write a device; an actual EEPROM write and readback remain
 separate, explicit programming operations.
 

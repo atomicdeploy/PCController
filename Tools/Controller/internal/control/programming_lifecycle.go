@@ -38,9 +38,8 @@ type ProgrammingLifecycleOptions struct {
 	Wait             func(context.Context, time.Duration) error
 	Outputs          *OutputScheduler
 	HostConfig       func() appconfig.Config
-	// ReinitializeEEPROM is an explicit development exception for a
-	// connected board whose settings payload cannot be decoded by this host.
-	// It never teaches the firmware or protocol about an obsolete layout.
+	// ReinitializeEEPROM is an explicit alpha-layout migration. The raw backup
+	// remains mandatory, but only compatible semantic fields cross layouts.
 	ReinitializeEEPROM bool
 }
 
@@ -95,9 +94,8 @@ type ProgrammingSession struct {
 	RecoveryMarkerPath   string                    `json:"-"`
 	OriginalSettings     *native.Settings          `json:"original_mcu_eeprom_settings,omitempty"`
 	OriginalLiveState    *ProgrammingLiveState     `json:"original_live_state,omitempty"`
-	// ReinitializeEEPROM deliberately discards incompatible semantic settings
-	// after the mandatory raw EEPROM backup. This is tooling-only development
-	// state and is not a firmware migration or compatibility mechanism.
+	// ReinitializeEEPROM semantically migrates a validated raw backup into the
+	// compiled layout; superseded raw bytes are never replayed.
 	ReinitializeEEPROM bool             `json:"reinitialize_eeprom,omitempty"`
 	SettingsQueryError string           `json:"settings_query_error,omitempty"`
 	PostFlashSettings  *native.Settings `json:"post_flash_mcu_eeprom_settings,omitempty"`
@@ -463,11 +461,9 @@ func prepareProgrammingSession(
 	settings, settingsErr := device.QuerySettings(ctx)
 	if settingsErr != nil {
 		snapshot.SettingsQueryError = settingsErr.Error()
-		if !options.ReinitializeEEPROM {
-			return nil, fmt.Errorf(
-				"capture exact MCU EEPROM settings before programming: %w", settingsErr,
-			)
-		}
+		return nil, fmt.Errorf(
+			"capture semantic MCU EEPROM settings before programming: %w", settingsErr,
+		)
 	} else if settings.Flags&native.SettingsProgrammingMode != 0 {
 		return nil, errors.New(
 			"board programming safety latch is already active; recover the pending programming session first",
@@ -483,9 +479,7 @@ func prepareProgrammingSession(
 	liveState, liveStateErr := device.CaptureLiveState(ctx)
 	if liveStateErr != nil {
 		snapshot.LiveStateQueryError = liveStateErr.Error()
-		if !options.ReinitializeEEPROM {
-			return nil, fmt.Errorf("capture live board outputs before programming: %w", liveStateErr)
-		}
+		return nil, fmt.Errorf("capture live board outputs before programming: %w", liveStateErr)
 	}
 	snapshot.LiveState = &liveState
 	snapshotPath, err := persistBoardSettingsSnapshot(options.DataPaths, snapshot)
@@ -502,15 +496,7 @@ func prepareProgrammingSession(
 	}
 	if options.ReinitializeEEPROM {
 		session.Warnings = append(session.Warnings,
-			"DEVELOPMENT EEPROM REINITIALIZATION: the pre-flash raw EEPROM backup is retained, but incompatible board settings and live outputs will not be restored")
-		if snapshot.SettingsQueryError != "" {
-			session.Warnings = append(session.Warnings,
-				"current MCU settings could not be decoded and were captured as an error: "+snapshot.SettingsQueryError)
-		}
-		if snapshot.LiveStateQueryError != "" {
-			session.Warnings = append(session.Warnings,
-				"live-state capture was partial; the board will be forced directly off: "+snapshot.LiveStateQueryError)
-		}
+			"DEVELOPMENT EEPROM MIGRATION: the untouched raw backup is retained; compatible settings and live outputs will be restored semantically into the compiled layout")
 	}
 	markerPath, err := persistProgrammingMarker(options.DataPaths, session)
 	if err != nil {
@@ -531,17 +517,7 @@ func prepareProgrammingSession(
 		return session, err
 	}
 	if err := device.RampPWMToZero(ctx, liveState); err != nil {
-		if !options.ReinitializeEEPROM {
-			return session, fmt.Errorf("gracefully fade PWM outputs before programming (recovery marker retained): %w", err)
-		}
-		session.Warnings = append(session.Warnings,
-			"PWM fade was unavailable; applying an immediate all-output safe state: "+err.Error())
-		if safeErr := device.EnterSafeProgrammingState(ctx); safeErr != nil {
-			return session, fmt.Errorf(
-				"force relays/PWM/macro off for EEPROM reinitialization (recovery marker retained): %w",
-				safeErr,
-			)
-		}
+		return session, fmt.Errorf("gracefully fade PWM outputs before programming (recovery marker retained): %w", err)
 	}
 	if err := advanceProgrammingSessionPhase(device, session, "outputs-ramped"); err != nil {
 		return session, err
@@ -597,7 +573,7 @@ func prepareProgrammingSession(
 			"pre-flash EEPROM mute/latch was unavailable because the old settings payload is intentionally unsupported; outputs are live-safe and the completed power-down melody will not be followed by the host buzzer")
 	} else {
 		session.Warnings = append(session.Warnings,
-			"pre-flash EEPROM was deliberately left byte-for-byte untouched so the mandatory raw backup preserves the original development settings; live outputs are safe and the host buzzer has stopped")
+			"pre-flash EEPROM remains byte-for-byte untouched until the mandatory raw backup completes; the post-backup gate will then program a schema-migrated Silent/Prog image before flash")
 	}
 	session.SafeStateApplied = true
 	finalPreparationPhase := "latched-safe"
@@ -832,10 +808,10 @@ func restoreProgrammingSession(
 	return nil
 }
 
-// finalizeDevelopmentEEPROMReinitialization validates the newly flashed
-// firmware's current settings schema, then commits the host-owned canonical
-// defaults. It never imports rich defaults from AVR flash and intentionally
-// does not decode or restore superseded semantic settings from the raw backup.
+// finalizeDevelopmentEEPROMReinitialization authenticates the newly flashed
+// schema, then restores the captured semantic settings behind the Prog latch.
+// Raw records are never replayed across alpha layouts; menu-layout-only fields
+// are intentionally dropped by the pre-flash schema-1 migration.
 func finalizeDevelopmentEEPROMReinitialization(
 	ctx context.Context,
 	device programmingDevice,
@@ -845,61 +821,64 @@ func finalizeDevelopmentEEPROMReinitialization(
 	warningStart int,
 	live Snapshot,
 ) error {
+	if session.OriginalSettings == nil || session.OriginalLiveState == nil {
+		return retainProgrammingSafeState(ctx, device, session, options, errors.New(
+			"semantic EEPROM migration lacks captured settings/live state",
+		))
+	}
 	queried, err := device.QuerySettings(ctx)
 	if err != nil {
 		return retainProgrammingSafeState(ctx, device, session, options, fmt.Errorf(
-			"query current firmware defaults after development EEPROM reinitialization: %w", err,
+			"query migrated settings after application HELLO: %w", err,
 		))
 	}
-	if queried.Flags&native.SettingsProgrammingMode != 0 {
-		session.Warnings = append(session.Warnings,
-			"current-schema defaults retained the interrupted programming latch; the verified development reinitialization will clear it as its final settings write")
+	if queried.Flags&native.SettingsProgrammingMode == 0 {
+		return retainProgrammingSafeState(ctx, device, session, options, errors.New(
+			"migrated settings did not retain the Prog latch through first HELLO",
+		))
 	}
 	session.PostFlashSettings = &queried
 	if err := advanceProgrammingSessionPhase(device, session, "development-defaults-queried"); err != nil {
 		return err
 	}
-
-	// The Go host is the canonical factory-default owner. The AVR value queried
-	// above proves only that the new schema is operational; it is not used as a
-	// source of descriptive defaults.
-	finalSettings := native.DefaultSettings()
-	finalSettings.Persisted = true
-	finalSettings.Flags &^= native.SettingsSilent | native.SettingsProgrammingMode
-	finalSettings.LightMode = 0
-	finalSettings.OutputPersistence = 0
-	finalSettings.RelayRestoreMask = 0
 	if err := device.EnterSafeProgrammingState(ctx); err != nil {
 		return retainProgrammingSafeState(ctx, device, session, options, fmt.Errorf(
-			"de-energize new firmware before committing reinitialized settings: %w", err,
+			"de-energize new firmware before semantic restore: %w", err,
 		))
 	}
+	original := *session.OriginalSettings
+	original.Flags &^= native.SettingsProgrammingMode
+	latched := original
+	latched.Flags |= native.SettingsProgrammingMode
 	if err := storeAndVerifyProgrammingSettings(
-		ctx, device, finalSettings, options,
-		"commit host-owned current-schema defaults with Silent off and outputs disabled",
+		ctx, device, latched, options,
+		"stage migrated semantic settings behind programming latch",
 	); err != nil {
 		return retainProgrammingSafeState(ctx, device, session, options, err)
 	}
-	if err := device.EnterSafeProgrammingState(ctx); err != nil {
-		return retainProgrammingSafeState(ctx, device, session, options, fmt.Errorf(
-			"verify relays/PWM/macro remain off after EEPROM reinitialization: %w", err,
-		))
+	if err := advanceProgrammingSessionPhase(device, session, "settings-staged"); err != nil {
+		return retainProgrammingSafeState(ctx, device, session, options, err)
 	}
-	confirmed, err := device.QuerySettings(ctx)
+	if err := storeAndVerifyProgrammingSettings(
+		ctx, device, original, options,
+		"clear programming latch after migrated settings verification",
+	); err != nil {
+		return retainProgrammingSafeState(ctx, device, session, options, err)
+	}
+	if err := advanceProgrammingSessionPhase(device, session, "latch-cleared"); err != nil {
+		return retainProgrammingSafeState(ctx, device, session, options, err)
+	}
+	warnings, err := device.RestoreLiveState(ctx, *session.OriginalLiveState)
 	if err != nil {
 		return retainProgrammingSafeState(ctx, device, session, options, fmt.Errorf(
-			"read back reinitialized MCU settings: %w", err,
+			"restore captured live state after semantic migration: %w", err,
 		))
 	}
-	if confirmed != finalSettings || confirmed.Flags&native.SettingsSilent != 0 ||
-		confirmed.Flags&native.SettingsProgrammingMode != 0 ||
-		confirmed.LightMode != 0 || confirmed.OutputPersistence != 0 ||
-		confirmed.RelayRestoreMask != 0 {
-		return retainProgrammingSafeState(ctx, device, session, options, errors.New(
-			"reinitialized settings failed audible/off/read-back invariants",
-		))
+	session.Warnings = append(session.Warnings, warnings...)
+	session.PostFlashSettings = &original
+	if err := advanceProgrammingSessionPhase(device, session, "live-restored"); err != nil {
+		return retainProgrammingSafeState(ctx, device, session, options, err)
 	}
-	session.PostFlashSettings = &confirmed
 	if err := advanceProgrammingSessionPhase(device, session, "development-reinitialized"); err != nil {
 		return err
 	}
@@ -915,11 +894,13 @@ func finalizeDevelopmentEEPROMReinitialization(
 				"physical LCD completion message unavailable: "+err.Error())
 		}
 	}
-	if err := device.PlayProgrammingMelody(
-		ctx, programmingReadyMelody(options.HostConfig),
-	); err != nil {
-		session.Warnings = append(session.Warnings,
-			"programming-ready melody unavailable: "+err.Error())
+	if original.Flags&native.SettingsSilent == 0 {
+		if err := device.PlayProgrammingMelody(
+			ctx, programmingReadyMelody(options.HostConfig),
+		); err != nil {
+			session.Warnings = append(session.Warnings,
+				"programming-ready melody unavailable: "+err.Error())
+		}
 	}
 	if err := os.Remove(session.RecoveryMarkerPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove completed EEPROM reinitialization recovery marker: %w", err)
@@ -927,9 +908,9 @@ func finalizeDevelopmentEEPROMReinitialization(
 	writeProgrammingWarningsFrom(output, session, warningStart)
 	if output != nil {
 		fmt.Fprintln(output,
-			"DEVELOPMENT EEPROM REINITIALIZED: old semantic settings were not restored; raw pre-flash EEPROM remains in the verified backup")
+			"DEVELOPMENT EEPROM MIGRATED: compatible settings and live state restored semantically; raw pre-flash EEPROM remains in the verified backup")
 		fmt.Fprintln(output,
-			"current-schema settings verified with Silent off and relay/PWM/macro outputs off; recovery marker cleared")
+			"schema-1 settings verified and Prog cleared only after HELLO; recovery marker cleared")
 	}
 	return nil
 }
@@ -1010,7 +991,7 @@ func reassertProgrammingSession(
 	if err := device.EnterSafeProgrammingState(ctx); err != nil {
 		return fmt.Errorf("reassert safe relays/PWM/macro state: %w", err)
 	}
-	if session.OriginalSettings != nil && !session.ReinitializeEEPROM {
+	if session.OriginalSettings != nil {
 		safe := programmingSafeSettings(*session.OriginalSettings)
 		if err := storeAndVerifyProgrammingSettings(
 			ctx, device, safe, options, "reassert safe EEPROM settings",
@@ -1115,7 +1096,7 @@ func retainProgrammingSafeState(
 			"reassert safe live outputs after restore failure: %w", err,
 		))
 	}
-	if session.OriginalSettings != nil && !session.ReinitializeEEPROM {
+	if session.OriginalSettings != nil {
 		if err := storeAndVerifyProgrammingSettings(
 			ctx, device, programmingSafeSettings(*session.OriginalSettings), options,
 			"re-persist programming latch after restore failure",

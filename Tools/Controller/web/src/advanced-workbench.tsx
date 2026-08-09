@@ -407,8 +407,8 @@ export function AdvancedWorkbench({
     'macro update',
     quoteArgument(macroRef.trim()),
     quoteArgument(macroName.trim()),
-    quoteArgument(macroCategory.trim()),
-    quoteArgument(macroColor.trim()),
+    quoteArgument(macroCategory.trim() || '-'),
+    quoteArgument(macroColor.trim() || '-'),
   ].join(' ')
   const messageByteLength = new TextEncoder().encode(messageText.trim()).byteLength
   const lcdMessageValid = Boolean(messageLine1 || messageLine2) &&
@@ -702,8 +702,10 @@ export function AdvancedWorkbench({
           <div className="advanced-actions">
             <Button icon={Save} busy={busy === 'macro record save'} onClick={() => void run('macro record save')}>{copy('Save recording', 'ذخیره ضبط')}</Button>
             <Button icon={Trash2} busy={busy === 'macro record discard'} onClick={() => void run('macro record discard')}>{copy('Discard recording', 'حذف ضبط')}</Button>
+            <Button tone="primary" icon={Play} disabled={!online || !macroRef.trim()} busy={busy === `macro play ${quoteArgument(macroRef.trim())}`} onClick={() => void run(`macro play ${quoteArgument(macroRef.trim())}`)}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
             <Button icon={CircleStop} disabled={!online} busy={busy === 'macro cancel'} onClick={() => void run('macro cancel')}>{copy('Cancel safely', 'لغو امن')}</Button>
             <Button tone="danger" icon={ShieldAlert} disabled={!online} onClick={() => prepare('macro cancel keep', copy('Cancelling with keep deliberately leaves current physical outputs unchanged.', 'لغو با حفظ خروجی، وضعیت فعلی خروجی‌های فیزیکی را عمداً نگه می‌دارد.'), 'danger', true)}>{copy('Prepare cancel + keep', 'آماده‌سازی لغو با حفظ خروجی')}</Button>
+            <Button tone="danger" icon={Trash2} disabled={!macroRef.trim()} onClick={() => prepare(`macro delete ${quoteArgument(macroRef.trim())}`, copy('This permanently removes the selected macro from host configuration.', 'این فرمان ماکروی انتخاب‌شده را برای همیشه از پیکربندی میزبان حذف می‌کند.'), 'danger', true)}>{copy('Prepare deletion', 'آماده‌سازی حذف')}</Button>
           </div>
         </AdvancedPanel>
 

@@ -87,6 +87,7 @@ type ActionEvidence struct {
 	DeviceMicros uint32    `json:"device_micros"`
 	Timed        bool      `json:"timed"`
 	ObservedAt   time.Time `json:"observed_at"`
+	Generation   uint64    `json:"connection_generation"`
 }
 
 type rfGestureKey struct {
@@ -194,7 +195,7 @@ type Runtime struct {
 	actionObservers         map[uint64]func(ActionEvidence)
 	nextActionObserver      uint64
 	macroStatusObserverMu   sync.RWMutex
-	macroStatusObservers    map[uint64]func(native.MacroStatus)
+	macroStatusObservers    map[uint64]func(native.MacroStatus, uint64)
 	nextMacroStatusObserver uint64
 	hostMenuRequestMu       sync.RWMutex
 	hostMenuRequestHandler  func(native.HostMenuContentRequest)
@@ -746,7 +747,10 @@ func (runtime *Runtime) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
-	session := runtime.currentSession()
+	runtime.mu.RLock()
+	session := runtime.session
+	generation := runtime.generation
+	runtime.mu.RUnlock()
 	if session == nil {
 		return native.Frame{}, errors.New("device is not connected")
 	}
@@ -754,7 +758,9 @@ func (runtime *Runtime) Request(
 	if err != nil {
 		return native.Frame{}, err
 	}
-	runtime.observe(frame)
+	if !runtime.observeAtGeneration(frame, generation) {
+		return native.Frame{}, fmt.Errorf("connection generation %d changed while the request was in flight", generation)
+	}
 	return frame, nil
 }
 
@@ -786,7 +792,9 @@ func (runtime *Runtime) requestAtGeneration(
 	if !current {
 		return native.Frame{}, fmt.Errorf("connection generation %d changed while the request was in flight", generation)
 	}
-	runtime.observe(frame)
+	if !runtime.observeAtGeneration(frame, generation) {
+		return native.Frame{}, fmt.Errorf("connection generation %d changed before its response could be observed", generation)
+	}
 	return frame, nil
 }
 
@@ -795,7 +803,13 @@ func (runtime *Runtime) Command(
 	opcode byte,
 	payload []byte,
 ) error {
-	frame, err := runtime.Request(ctx, opcode, payload, native.OpACK)
+	snapshot := runtime.Snapshot()
+	if !snapshot.Connected {
+		return errors.New("device is not connected")
+	}
+	frame, err := runtime.requestAtGeneration(
+		ctx, snapshot.Generation, opcode, payload, native.OpACK,
+	)
 	if err != nil {
 		return err
 	}
@@ -804,6 +818,7 @@ func (runtime *Runtime) Command(
 		Opcode: opcode, Payload: append([]byte(nil), payload...),
 		Source: native.InputSourceHost, SourceID: 0xFF,
 		DeviceMicros: deviceMicros, Timed: timed, ObservedAt: time.Now(),
+		Generation: snapshot.Generation,
 	})
 	return nil
 }
@@ -825,13 +840,13 @@ func (runtime *Runtime) publishActionEvidence(evidence ActionEvidence) {
 // ObserveMacroStatuses subscribes board-local capture and playback services
 // without competing for Runtime.Events. The callback receives a value copy in
 // UART order; the returned release function is idempotent.
-func (runtime *Runtime) ObserveMacroStatuses(observer func(native.MacroStatus)) func() {
+func (runtime *Runtime) ObserveMacroStatuses(observer func(native.MacroStatus, uint64)) func() {
 	if observer == nil {
 		return func() {}
 	}
 	runtime.macroStatusObserverMu.Lock()
 	if runtime.macroStatusObservers == nil {
-		runtime.macroStatusObservers = make(map[uint64]func(native.MacroStatus))
+		runtime.macroStatusObservers = make(map[uint64]func(native.MacroStatus, uint64))
 	}
 	runtime.nextMacroStatusObserver++
 	id := runtime.nextMacroStatusObserver
@@ -847,7 +862,7 @@ func (runtime *Runtime) ObserveMacroStatuses(observer func(native.MacroStatus)) 
 	}
 }
 
-func (runtime *Runtime) publishBoardAction(event native.DeviceEvent) {
+func (runtime *Runtime) publishBoardAction(event native.DeviceEvent, generation uint64) {
 	if event.Type != native.EventAction {
 		return
 	}
@@ -855,18 +870,23 @@ func (runtime *Runtime) publishBoardAction(event native.DeviceEvent) {
 		Opcode: event.ActionOpcode, Payload: append([]byte(nil), event.ActionPayload...),
 		Source: event.Source, SourceID: event.SourceID, BoardOrigin: true,
 		DeviceMicros: event.DeviceMicros, Timed: event.Timed, ObservedAt: time.Now(),
+		Generation: generation,
 	})
 }
 
-func (runtime *Runtime) publishMacroStatus(status native.MacroStatus) {
+func (runtime *Runtime) publishMacroStatus(status native.MacroStatus, generation ...uint64) {
+	value := runtime.Snapshot().Generation
+	if len(generation) != 0 {
+		value = generation[0]
+	}
 	runtime.macroStatusObserverMu.RLock()
-	observers := make([]func(native.MacroStatus), 0, len(runtime.macroStatusObservers))
+	observers := make([]func(native.MacroStatus, uint64), 0, len(runtime.macroStatusObservers))
 	for _, observer := range runtime.macroStatusObservers {
 		observers = append(observers, observer)
 	}
 	runtime.macroStatusObserverMu.RUnlock()
 	for _, observer := range observers {
-		observer(status)
+		observer(status, value)
 	}
 }
 
@@ -1266,11 +1286,19 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 	for {
 		select {
 		case event := <-session.Events():
+			// A replaced session may still have buffered frames when its read
+			// goroutine unwinds. Reject them before any cache, action, or macro
+			// observer can relabel the frame with the new connection generation.
+			if !runtime.sessionGenerationCurrent(session, generation) {
+				return
+			}
 			if event.Err != nil {
 				disconnectReason = event.Err.Error()
 				runtime.publish("error", event.Err.Error(), native.Frame{})
 			} else {
-				runtime.observe(event.Frame)
+				if !runtime.observeAtGeneration(event.Frame, generation) {
+					return
+				}
 				kind := "rx"
 				text := fmt.Sprintf(
 					"%s seq=%d payload=% X",
@@ -1301,9 +1329,9 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						rfMappingRequired, rfCaptured = runtime.observeRFLearningEvent(parsed)
 						kind, text = describeDeviceEvent(parsed)
 						parsedDevice = &parsed
-						runtime.publishBoardAction(parsed)
+						runtime.publishBoardAction(parsed, generation)
 						if parsed.Macro != nil {
-							runtime.publishMacroStatus(*parsed.Macro)
+							runtime.publishMacroStatus(*parsed.Macro, generation)
 						}
 					} else {
 						kind = "error"
@@ -1418,6 +1446,16 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 							"page": parsedDevice.AppPage, "value": parsedDevice.AppPage,
 							"target_instance": parsedDevice.AppTarget,
 						}
+					} else if parsedDevice.Type == native.EventAction {
+						deviceEvent.Metadata = map[string]string{
+							"connection_generation": strconv.FormatUint(generation, 10),
+							"device_micros":         strconv.FormatUint(uint64(parsedDevice.DeviceMicros), 10),
+							"source":                inputSourceName(parsedDevice.Source),
+							"source_id":             strconv.Itoa(int(parsedDevice.SourceID)),
+							"opcode":                fmt.Sprintf("0x%02X", parsedDevice.ActionOpcode),
+							"opcode_name":           native.OpcodeName(parsedDevice.ActionOpcode),
+							"payload":               fmt.Sprintf("%X", parsedDevice.ActionPayload),
+						}
 					}
 					runtime.publishEvent(deviceEvent)
 				} else {
@@ -1461,6 +1499,15 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 			return
 		}
 	}
+}
+
+func (runtime *Runtime) sessionGenerationCurrent(
+	session *link.Session,
+	generation uint64,
+) bool {
+	runtime.mu.RLock()
+	defer runtime.mu.RUnlock()
+	return runtime.session == session && runtime.generation == generation
 }
 
 func (runtime *Runtime) autoReconnect(epoch uint64) {
@@ -1542,6 +1589,20 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 func (runtime *Runtime) observe(frame native.Frame) {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
+	runtime.observeLocked(frame)
+}
+
+func (runtime *Runtime) observeAtGeneration(frame native.Frame, generation uint64) bool {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.generation != generation || runtime.session == nil {
+		return false
+	}
+	runtime.observeLocked(frame)
+	return true
+}
+
+func (runtime *Runtime) observeLocked(frame native.Frame) {
 	switch frame.Opcode {
 	case native.OpStatus:
 		if status, err := native.ParseStatus(frame.Payload); err == nil {
@@ -1656,6 +1717,7 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 				native.MacroFailed:    "failed",
 				native.MacroRecording: "recording",
 				native.MacroCaptured:  "captured",
+				native.MacroExported:  "exported",
 			}[event.Macro.State]
 			if state == "" {
 				state = fmt.Sprintf("state-%d", event.Macro.State)

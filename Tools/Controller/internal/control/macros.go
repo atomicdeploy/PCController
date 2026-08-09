@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -29,6 +30,7 @@ const (
 // bridge clients. Timing deltas are calculated solely from MCU timestamps.
 type MacroState struct {
 	Running              bool               `json:"running"`
+	Generation           uint64             `json:"connection_generation,omitempty"`
 	ID                   byte               `json:"id"`
 	Name                 string             `json:"name"`
 	Category             string             `json:"category,omitempty"`
@@ -76,6 +78,7 @@ type boardCaptureToken struct {
 	Generation  uint64
 	ID          byte
 	StartedAtUS uint32
+	Board       string
 }
 
 type MacroRunner struct {
@@ -108,6 +111,7 @@ type MacroRunner struct {
 	boardCaptureFinished   map[boardCaptureToken]struct{}
 	fetchCapture           func(boardCaptureToken) ([]byte, error)
 	queryCaptureStatus     func(uint64) (native.MacroStatus, error)
+	ackCapture             func(boardCaptureToken) error
 }
 
 // MacroRecordingState describes a HOST-owned recording session. Each captured
@@ -122,6 +126,10 @@ type MacroRecordingState struct {
 	HostSteps    int       `json:"host_steps"`
 	PanelSteps   int       `json:"panel_steps"`
 	RFSteps      int       `json:"rf_steps"`
+	LastAtUS     uint32    `json:"last_at_us"`
+	LastDeltaUS  uint32    `json:"last_delta_us"`
+	LastOpcode   byte      `json:"last_opcode"`
+	LastSource   byte      `json:"last_source"`
 	BoardOwned   bool      `json:"board_owned,omitempty"`
 	BoardID      byte      `json:"board_id,omitempty"`
 	DroppedSteps uint16    `json:"dropped_steps,omitempty"`
@@ -148,6 +156,7 @@ func NewMacroRunner(
 	}
 	runner.fetchCapture = runner.fetchBoardCapture
 	runner.queryCaptureStatus = runner.queryBoardMacroStatus
+	runner.ackCapture = runner.ackBoardCaptureExport
 	if runtime != nil {
 		runtime.ObserveMacroStatuses(runner.handleBoardMacroStatus)
 		runtime.ObserveConnectionReady(runner.recoverBoardCaptureOnConnect)
@@ -202,7 +211,10 @@ func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (a
 
 // UpdateMetadata keeps names/categories/colors host-owned, including for a
 // provisional `Board capture N` recovered from the MCU ring.
-func (runner *MacroRunner) UpdateMetadata(reference, name, category, color string) (appconfig.Macro, error) {
+func (runner *MacroRunner) UpdateMetadata(
+	reference, name string,
+	category, color *string,
+) (appconfig.Macro, error) {
 	if runner.updateHostConfig == nil {
 		return appconfig.Macro{}, errors.New("macro persistence is unavailable")
 	}
@@ -214,15 +226,24 @@ func (runner *MacroRunner) UpdateMetadata(reference, name, category, color strin
 	if name == "" {
 		return appconfig.Macro{}, errors.New("macro name is required")
 	}
-	if category == "-" {
-		category = ""
+	var nextCategory, nextColor *string
+	if category != nil {
+		value := strings.TrimSpace(*category)
+		if value == "-" {
+			value = ""
+		}
+		nextCategory = &value
 	}
-	if color == "-" {
-		color = ""
-	}
-	color = normalizedMacroColor(color)
-	if !validMacroColor(color) {
-		return appconfig.Macro{}, fmt.Errorf("macro color %q is not red, blue, violet, green, white, or empty", color)
+	if color != nil {
+		value := strings.TrimSpace(*color)
+		if value == "-" {
+			value = ""
+		}
+		value = normalizedMacroColor(value)
+		if !validMacroColor(value) {
+			return appconfig.Macro{}, fmt.Errorf("macro color %q is not red, blue, violet, green, white, or empty", value)
+		}
+		nextColor = &value
 	}
 	err = runner.updateHostConfig(func(config *appconfig.Config) error {
 		for index, existing := range config.Macros {
@@ -231,8 +252,12 @@ func (runner *MacroRunner) UpdateMetadata(reference, name, category, color strin
 			}
 			if existing.ID == macro.ID {
 				config.Macros[index].Name = name
-				config.Macros[index].Category = strings.TrimSpace(category)
-				config.Macros[index].Color = color
+				if nextCategory != nil {
+					config.Macros[index].Category = *nextCategory
+				}
+				if nextColor != nil {
+					config.Macros[index].Color = *nextColor
+				}
 				macro = config.Macros[index]
 				return nil
 			}
@@ -390,7 +415,7 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 	// observers. Their synchronous ACK already supplied the authoritative MCU
 	// timestamp, so the echo must not become a duplicate recorded step.
 	if (evidence.BoardOrigin && evidence.Source == native.InputSourceHost) ||
-		!evidence.Timed || !native.MacroQueueableOpcode(evidence.Opcode) {
+		!evidence.Timed || !native.MacroPlaybackAllowed(evidence.Opcode) {
 		return
 	}
 	step, ok := recordedMacroStep(evidence)
@@ -400,6 +425,10 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 	runner.recordMu.Lock()
 	defer runner.recordMu.Unlock()
 	if !runner.recording.Active || runner.recordSealed {
+		return
+	}
+	if runner.recording.BoardOwned &&
+		evidence.Generation != runner.recordCapture.Generation {
 		return
 	}
 	if runner.recording.LastError != "" {
@@ -415,6 +444,10 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 		return
 	}
 	step.AtUS = delta
+	previousAtUS := uint32(0)
+	if count := len(runner.recordMacro.Steps); count != 0 {
+		previousAtUS = runner.recordMacro.Steps[count-1].AtUS
+	}
 	opcode, payload, err := compileMacroCommand(step)
 	if err != nil {
 		runner.recording.LastError = fmt.Sprintf("record action: %v", err)
@@ -436,6 +469,10 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 	runner.recordMacro.Steps = append(runner.recordMacro.Steps, step)
 	runner.recordBytes += uint32(len(record))
 	runner.recording.Steps = len(runner.recordMacro.Steps)
+	runner.recording.LastAtUS = step.AtUS
+	runner.recording.LastDeltaUS = step.AtUS - previousAtUS
+	runner.recording.LastOpcode = evidence.Opcode
+	runner.recording.LastSource = evidence.Source
 	switch evidence.Source {
 	case native.InputSourcePhysical:
 		runner.recording.PanelSteps++
@@ -446,20 +483,27 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 	}
 }
 
-func (runner *MacroRunner) handleBoardMacroStatus(status native.MacroStatus) {
+func (runner *MacroRunner) handleBoardMacroStatus(
+	status native.MacroStatus,
+	generation uint64,
+) {
+	snapshot := runner.runtime.Snapshot()
+	if snapshot.Generation != generation {
+		return
+	}
 	runner.handleBoardMacroStatusAtGeneration(
-		status,
-		runner.runtime.Snapshot().Generation,
+		status, generation, captureBoardIdentity(snapshot.Port, snapshot.Hello),
 	)
 }
 
 func (runner *MacroRunner) handleBoardMacroStatusAtGeneration(
 	status native.MacroStatus,
 	generation uint64,
+	board string,
 ) {
 	token := boardCaptureToken{
 		Generation: generation,
-		ID:         status.ID, StartedAtUS: status.StartedAtUS,
+		ID:         status.ID, StartedAtUS: status.StartedAtUS, Board: board,
 	}
 	switch status.State {
 	case native.MacroRecording:
@@ -500,14 +544,16 @@ func (runner *MacroRunner) handleBoardMacroStatusAtGeneration(
 				Reason: err.Error(), Text: fmt.Sprintf("start board capture %d: %v", status.ID, err),
 			})
 		}
-	case native.MacroCaptured:
+	case native.MacroCaptured, native.MacroExported:
 		runner.beginBoardCaptureFinalization(token, status)
+	case native.MacroIdle, native.MacroCancelled, native.MacroFailed:
+		runner.finishBoardRecordingLifecycle(token, status.State)
 	}
 }
 
 func (runner *MacroRunner) recoverBoardCaptureOnConnect(
 	generation uint64,
-	_ ports.Info,
+	port ports.Info,
 	hello native.Hello,
 ) {
 	if hello.Capabilities&native.CapabilityTimedMacroQueue == 0 {
@@ -521,8 +567,11 @@ func (runner *MacroRunner) recoverBoardCaptureOnConnect(
 		})
 		return
 	}
-	if status.State == native.MacroRecording || status.State == native.MacroCaptured {
-		runner.handleBoardMacroStatusAtGeneration(status, generation)
+	if status.State == native.MacroRecording || status.State == native.MacroCaptured ||
+		status.State == native.MacroExported {
+		runner.handleBoardMacroStatusAtGeneration(
+			status, generation, captureBoardIdentity(port, hello),
+		)
 	}
 }
 
@@ -547,6 +596,71 @@ func (runner *MacroRunner) prepareBoardCaptureGenerationLocked(generation uint64
 	runner.boardCaptureGeneration = generation
 	runner.boardCaptureFinalizing = make(map[boardCaptureToken]struct{})
 	runner.boardCaptureFinished = make(map[boardCaptureToken]struct{})
+}
+
+func captureBoardIdentity(port ports.Info, hello native.Hello) string {
+	transport := strings.TrimSpace(port.SerialNumber)
+	if transport == "" {
+		transport = strings.TrimSpace(port.InstanceID)
+	}
+	if transport == "" {
+		transport = strings.TrimSpace(port.Name)
+	}
+	if transport == "" {
+		transport = "unknown"
+	}
+	if len(transport) > 160 || !printableCaptureIdentity(transport) {
+		digest := sha256.Sum256([]byte(transport))
+		transport = "sha256:" + hex.EncodeToString(digest[:])
+	}
+	return fmt.Sprintf(
+		"transport=%s;vid=%s;pid=%s;kind=%d;build=%08X",
+		transport, strings.ToUpper(port.VID), strings.ToUpper(port.PID),
+		hello.BoardKind, hello.BuildHash,
+	)
+}
+
+func printableCaptureIdentity(value string) bool {
+	for _, character := range []byte(value) {
+		if character < 0x20 || character > 0x7E {
+			return false
+		}
+	}
+	return true
+}
+
+func (runner *MacroRunner) finishBoardRecordingLifecycle(
+	token boardCaptureToken,
+	state byte,
+) {
+	runner.boardCaptureMu.Lock()
+	defer runner.boardCaptureMu.Unlock()
+	recording := runner.RecordingState()
+	if !recording.Active || !recording.BoardOwned {
+		return
+	}
+	runner.recordMu.RLock()
+	active := runner.recordCapture
+	runner.recordMu.RUnlock()
+	if active.Generation != token.Generation || active.ID != token.ID ||
+		(token.StartedAtUS != 0 && active.StartedAtUS != token.StartedAtUS) {
+		return
+	}
+	macro, err := runner.StopRecording(false)
+	if err != nil {
+		return
+	}
+	lifecycle := "discarded"
+	if state == native.MacroFailed {
+		lifecycle = "failed"
+	}
+	runner.runtime.PublishStructuredEvent(Event{
+		Kind: "macro.recording", Lifecycle: lifecycle, State: lifecycle,
+		Text: fmt.Sprintf(
+			"board capture %d/%s ended in state %d and was %s",
+			macro.ID, macro.Name, state, lifecycle,
+		),
+	})
 }
 
 // beginBoardCaptureFinalization freezes the Action subscription synchronously
@@ -637,6 +751,7 @@ func (runner *MacroRunner) finalizeBoardCapture(
 		runner.publishBoardCaptureFailure(token, err)
 		return
 	}
+	importKey := boardCaptureImportKey(token, stream)
 
 	runner.boardCaptureMu.Lock()
 	defer runner.boardCaptureMu.Unlock()
@@ -651,6 +766,29 @@ func (runner *MacroRunner) finalizeBoardCapture(
 		runner.finishBoardCaptureLocked(token, false)
 		return
 	}
+	if existing, imported := runner.importedBoardCapture(importKey); imported {
+		_, _ = runner.StopRecording(false)
+		if err := runner.ackCapture(token); err != nil {
+			runner.finishBoardCaptureLocked(token, false)
+			runner.runtime.PublishStructuredEvent(Event{
+				Kind: "macro.recovery", Lifecycle: "ack-pending", State: "saved",
+				Reason: err.Error(), Text: fmt.Sprintf(
+					"board capture %d is already saved as %d/%s but export acknowledgement failed: %v",
+					token.ID, existing.ID, existing.Name, err,
+				),
+			})
+			return
+		}
+		runner.finishBoardCaptureLocked(token, true)
+		runner.runtime.PublishStructuredEvent(Event{
+			Kind: "macro.recovery", Lifecycle: "deduplicated", State: "saved",
+			Text: fmt.Sprintf(
+				"board capture %d was already saved as %d/%s; retained export acknowledged",
+				token.ID, existing.ID, existing.Name,
+			),
+		})
+		return
+	}
 	runner.recordMu.Lock()
 	if !runner.recording.Active || !runner.recording.BoardOwned ||
 		runner.recordCapture != token || !runner.recordSealed {
@@ -661,6 +799,10 @@ func (runner *MacroRunner) finalizeBoardCapture(
 	runner.recordMacro.Steps = mergeRecordedMacroSteps(runner.recordMacro.Steps, recovered)
 	runner.recordMacro.RecordingSource = "board"
 	runner.recordMacro.CaptureDroppedSteps = status.DroppedSteps
+	runner.recordMacro.CaptureImportKey = importKey
+	runner.recordMacro.CaptureBoard = token.Board
+	runner.recordMacro.CaptureID = token.ID
+	runner.recordMacro.CaptureStartedAtUS = token.StartedAtUS
 	// accepted_steps is the exact retained prefix. dropped_steps counts the
 	// first action that did not fit and stopped local capture; a continuously
 	// connected host still receives that Action event, while recovery-only
@@ -685,10 +827,24 @@ func (runner *MacroRunner) finalizeBoardCapture(
 		runner.publishBoardCaptureFailure(token, err)
 		return
 	}
-	runner.finishBoardCaptureLocked(token, true)
+	acknowledged := true
+	if err := runner.ackCapture(token); err != nil {
+		acknowledged = false
+		runner.runtime.PublishStructuredEvent(Event{
+			Kind: "macro.recovery", Lifecycle: "ack-pending", State: "saved",
+			Reason: err.Error(), Text: fmt.Sprintf(
+				"board capture %d was saved as %d/%s but export acknowledgement failed: %v",
+				status.ID, macro.ID, macro.Name, err,
+			),
+		})
+	}
+	runner.finishBoardCaptureLocked(token, acknowledged)
 	lifecycle := "saved"
 	if macro.CaptureMissingSteps != 0 {
 		lifecycle = "saved-truncated"
+	}
+	if !acknowledged {
+		lifecycle += "-ack-pending"
 	}
 	runner.runtime.PublishStructuredEvent(Event{
 		Kind: "macro.recording", Lifecycle: lifecycle, State: lifecycle,
@@ -698,6 +854,38 @@ func (runner *MacroRunner) finalizeBoardCapture(
 			macro.CaptureDroppedSteps, macro.CaptureMissingSteps,
 		),
 	})
+}
+
+func boardCaptureImportKey(token boardCaptureToken, stream []byte) string {
+	hash := sha256.New()
+	_, _ = hash.Write([]byte("pccontroller-board-capture-v1\x00"))
+	_, _ = hash.Write([]byte(token.Board))
+	_, _ = hash.Write([]byte{0, token.ID})
+	var identity [4]byte
+	binary.LittleEndian.PutUint32(identity[:], token.StartedAtUS)
+	_, _ = hash.Write(identity[:])
+	_, _ = hash.Write(stream)
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+func (runner *MacroRunner) importedBoardCapture(importKey string) (appconfig.Macro, bool) {
+	for _, macro := range runner.List() {
+		if macro.CaptureImportKey == importKey {
+			return macro, true
+		}
+	}
+	return appconfig.Macro{}, false
+}
+
+func (runner *MacroRunner) ackBoardCaptureExport(token boardCaptureToken) error {
+	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
+	defer cancel()
+	_, err := runner.runtime.requestAtGeneration(
+		ctx, token.Generation, native.OpMacroStep,
+		native.MacroCaptureAcknowledgePayload(token.ID, token.StartedAtUS),
+		native.OpACK,
+	)
+	return err
 }
 
 func (runner *MacroRunner) finishBoardCapture(token boardCaptureToken, completed bool) {
@@ -737,7 +925,7 @@ func (runner *MacroRunner) fetchBoardCapture(token boardCaptureToken) ([]byte, e
 	for first := true; first || len(stream) < int(total); first = false {
 		frame, err := runner.runtime.requestAtGeneration(
 			ctx, token.Generation, native.OpMacroStep,
-			native.MacroCaptureQueryPayload(uint16(len(stream))),
+			native.MacroCaptureQueryPayload(token.ID, uint16(len(stream))),
 			native.OpMacroStatus,
 		)
 		if err != nil {
@@ -770,8 +958,8 @@ func decodeMacroCaptureStream(stream []byte) ([]appconfig.MacroStep, error) {
 		opcode := stream[offset+4]
 		length := int(stream[offset+5])
 		end := offset + native.MacroRecordHeaderSize + length
-		if length > native.MacroBoardActionMaximumPayload || end > len(stream) ||
-			!native.MacroQueueableOpcode(opcode) {
+		required, recordable := native.MacroBoardActionPayloadLength(opcode)
+		if !recordable || length != int(required) || end > len(stream) {
 			return nil, fmt.Errorf("invalid captured record at byte %d", offset)
 		}
 		step, ok := recordedMacroStep(ActionEvidence{
@@ -860,7 +1048,8 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		tolerance = defaultMacroTimingToleranceUS
 	}
 	runner.state = MacroState{
-		Running: true, ID: macro.ID, Name: macro.Name,
+		Running: true, Generation: snapshot.Generation,
+		ID: macro.ID, Name: macro.Name,
 		Category: macro.Category, Color: normalizedMacroColor(macro.Color),
 		StepCount: len(compiled.steps), DurationUS: compiled.durationUS,
 		StartedAt: time.Now(), TimingToleranceUS: tolerance,
@@ -879,7 +1068,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	begun := false
 	fail := func(cause error) (MacroState, error) {
 		if begun {
-			if cleanupErr := runner.cancelBoard(false); cleanupErr != nil {
+			if cleanupErr := runner.cancelBoardAtGeneration(snapshot.Generation, false); cleanupErr != nil {
 				cause = errors.Join(cause, fmt.Errorf("macro cleanup: %w", cleanupErr))
 			}
 		}
@@ -896,19 +1085,19 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	if err != nil {
 		return fail(err)
 	}
-	if _, err = runner.request(ctx, native.OpMacroStart, startPayload, native.OpACK); err != nil {
+	if _, err = runner.request(ctx, snapshot.Generation, native.OpMacroStart, startPayload, native.OpACK); err != nil {
 		return fail(err)
 	}
 	begun = true
 	afterID := runner.runtime.LatestEventID()
-	sent, err := runner.appendBytes(ctx, compiled, 0, native.MacroQueueCapacity)
+	sent, err := runner.appendBytes(ctx, snapshot.Generation, compiled, 0, native.MacroQueueCapacity)
 	if err != nil {
 		return fail(err)
 	}
-	if err := runner.showMacroIdentity(ctx, compiled); err != nil {
+	if err := runner.showMacroIdentity(ctx, snapshot.Generation, compiled); err != nil {
 		runner.runtime.PublishHostEvent("macro.display", "macro identity display unavailable: "+err.Error())
 	}
-	if _, err = runner.request(ctx, native.OpMacroStep, native.MacroQueueRunPayload(), native.OpACK); err != nil {
+	if _, err = runner.request(ctx, snapshot.Generation, native.OpMacroStep, native.MacroQueueRunPayload(), native.OpACK); err != nil {
 		return fail(err)
 	}
 
@@ -922,7 +1111,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	state := runner.state
 	runner.mu.Unlock()
 	runner.publishLifecycle("started", state, nil)
-	go runner.play(playContext, done, compiled, sent, afterID, lease)
+	go runner.play(playContext, done, snapshot.Generation, compiled, sent, afterID, lease)
 	return state, nil
 }
 
@@ -976,6 +1165,7 @@ func (runner *MacroRunner) find(reference string) (appconfig.Macro, error) {
 func (runner *MacroRunner) play(
 	ctx context.Context,
 	done chan struct{},
+	generation uint64,
 	compiled compiledMacro,
 	sent int,
 	afterID uint64,
@@ -984,7 +1174,7 @@ func (runner *MacroRunner) play(
 	defer close(done)
 	defer lease.Release()
 
-	status, err := runner.queryBoard(ctx)
+	status, err := runner.queryBoard(ctx, generation)
 	if err == nil {
 		runner.applyDeviceStatus(status)
 	}
@@ -997,12 +1187,17 @@ func (runner *MacroRunner) play(
 	deadline := time.Now().Add(watchdog)
 	cancelled := false
 	for err == nil {
+		playSnapshot := runner.runtime.Snapshot()
+		if !playSnapshot.Connected || playSnapshot.Generation != generation {
+			err = fmt.Errorf("connection generation %d became unavailable during macro playback", generation)
+			break
+		}
 		if ctx.Err() != nil {
 			cancelled = true
 			runner.mu.RLock()
 			keep := runner.cancelKeep
 			runner.mu.RUnlock()
-			err = runner.cancelBoard(keep)
+			err = runner.cancelBoardAtGeneration(generation, keep)
 			if err == nil {
 				status.State = native.MacroCancelled
 			}
@@ -1015,7 +1210,7 @@ func (runner *MacroRunner) play(
 
 		if status.Active() && sent < len(compiled.stream) && status.Free() != 0 {
 			before := sent
-			sent, err = runner.appendBytes(ctx, compiled, sent, int(status.Free()))
+			sent, err = runner.appendBytes(ctx, generation, compiled, sent, int(status.Free()))
 			if err != nil {
 				break
 			}
@@ -1036,7 +1231,7 @@ func (runner *MacroRunner) play(
 
 		wait := macroStatusPollInterval - time.Since(lastQuery)
 		if wait <= 0 {
-			status, err = runner.queryBoard(ctx)
+			status, err = runner.queryBoard(ctx, generation)
 			lastQuery = time.Now()
 			if err == nil {
 				runner.applyDeviceStatus(status)
@@ -1054,6 +1249,11 @@ func (runner *MacroRunner) play(
 				continue
 			}
 			err = waitErr
+			break
+		}
+		playSnapshot = runner.runtime.Snapshot()
+		if !playSnapshot.Connected || playSnapshot.Generation != generation {
+			err = fmt.Errorf("connection generation %d became unavailable while waiting for macro evidence", generation)
 			break
 		}
 		afterID = event.ID
@@ -1091,7 +1291,7 @@ func (runner *MacroRunner) play(
 		runner.mu.RLock()
 		keep := runner.cancelKeep
 		runner.mu.RUnlock()
-		cancelErr := runner.cancelBoard(keep)
+		cancelErr := runner.cancelBoardAtGeneration(generation, keep)
 		if cancelErr == nil {
 			status.State = native.MacroCancelled
 			err = nil
@@ -1101,7 +1301,7 @@ func (runner *MacroRunner) play(
 	}
 
 	if err != nil && !cancelled {
-		if cleanupErr := runner.cancelBoard(false); cleanupErr != nil {
+		if cleanupErr := runner.cancelBoardAtGeneration(generation, false); cleanupErr != nil {
 			err = errors.Join(err, fmt.Errorf("macro safe-stop cleanup: %w", cleanupErr))
 		}
 	}
@@ -1110,6 +1310,7 @@ func (runner *MacroRunner) play(
 
 func (runner *MacroRunner) appendBytes(
 	ctx context.Context,
+	generation uint64,
 	compiled compiledMacro,
 	offset int,
 	available int,
@@ -1130,7 +1331,7 @@ func (runner *MacroRunner) appendBytes(
 		if err != nil {
 			return offset, err
 		}
-		if _, err := runner.request(ctx, native.OpMacroStep, payload, native.OpACK); err != nil {
+		if _, err := runner.request(ctx, generation, native.OpMacroStep, payload, native.OpACK); err != nil {
 			return offset, err
 		}
 		offset += length
@@ -1139,9 +1340,9 @@ func (runner *MacroRunner) appendBytes(
 	return offset, nil
 }
 
-func (runner *MacroRunner) queryBoard(ctx context.Context) (native.MacroStatus, error) {
+func (runner *MacroRunner) queryBoard(ctx context.Context, generation uint64) (native.MacroStatus, error) {
 	frame, err := runner.request(
-		ctx,
+		ctx, generation,
 		native.OpMacroStep,
 		native.MacroQueueQueryPayload(),
 		native.OpMacroStatus,
@@ -1154,28 +1355,42 @@ func (runner *MacroRunner) queryBoard(ctx context.Context) (native.MacroStatus, 
 
 func (runner *MacroRunner) request(
 	ctx context.Context,
+	generation uint64,
 	opcode byte,
 	payload []byte,
 	expected byte,
 ) (native.Frame, error) {
 	requestContext, cancel := context.WithTimeout(ctx, macroRequestTimeout)
 	defer cancel()
-	return runner.runtime.Request(requestContext, opcode, payload, expected)
+	return runner.runtime.requestAtGeneration(
+		requestContext, generation, opcode, payload, expected,
+	)
 }
 
 func (runner *MacroRunner) cancelBoard(keepOutputs bool) error {
+	state := runner.State()
+	generation := runner.runtime.Snapshot().Generation
+	if state.Running && state.Generation != 0 {
+		generation = state.Generation
+	}
+	return runner.cancelBoardAtGeneration(generation, keepOutputs)
+}
+
+func (runner *MacroRunner) cancelBoardAtGeneration(generation uint64, keepOutputs bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
 	defer cancel()
-	_, err := runner.runtime.Request(
-		ctx,
-		native.OpMacroCancel,
-		native.MacroQueueCancelPayload(keepOutputs),
-		native.OpACK,
+	_, err := runner.runtime.requestAtGeneration(
+		ctx, generation, native.OpMacroCancel,
+		native.MacroQueueCancelPayload(keepOutputs), native.OpACK,
 	)
 	return err
 }
 
-func (runner *MacroRunner) showMacroIdentity(ctx context.Context, compiled compiledMacro) error {
+func (runner *MacroRunner) showMacroIdentity(
+	ctx context.Context,
+	generation uint64,
+	compiled compiledMacro,
+) error {
 	macro := compiled.definition
 	label := strings.TrimSpace(macro.Label)
 	if label == "" {
@@ -1193,7 +1408,7 @@ func (runner *MacroRunner) showMacroIdentity(ctx context.Context, compiled compi
 		if err != nil {
 			return err
 		}
-		if _, err := runner.request(ctx, native.OpDisplayText, payload, native.OpACK); err != nil {
+		if _, err := runner.request(ctx, generation, native.OpDisplayText, payload, native.OpACK); err != nil {
 			return err
 		}
 	}
@@ -1202,7 +1417,7 @@ func (runner *MacroRunner) showMacroIdentity(ctx context.Context, compiled compi
 		if err != nil {
 			return err
 		}
-		if _, err := runner.request(ctx, native.OpDisplayText, payload, native.OpACK); err != nil {
+		if _, err := runner.request(ctx, generation, native.OpDisplayText, payload, native.OpACK); err != nil {
 			return err
 		}
 	}
@@ -1433,7 +1648,7 @@ func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 		}
 		return native.OpMenuAction, []byte{step.Target}, nil
 	case "raw", "opcode":
-		if !native.MacroQueueableOpcode(step.Opcode) {
+		if !native.MacroPlaybackAllowed(step.Opcode) {
 			return 0, nil, fmt.Errorf("opcode 0x%02X is not a queueable acknowledged command", step.Opcode)
 		}
 		payload, err := decodeMacroHex(step.PayloadHex)
@@ -1458,6 +1673,10 @@ func decodeMacroHex(value string) ([]byte, error) {
 func recordedMacroStep(evidence ActionEvidence) (appconfig.MacroStep, bool) {
 	payload := evidence.Payload
 	step := appconfig.MacroStep{}
+	required, recordable := native.MacroBoardActionPayloadLength(evidence.Opcode)
+	if !recordable || len(payload) != int(required) {
+		return step, false
+	}
 	switch evidence.Opcode {
 	case native.OpRelaySet:
 		if len(payload) != 2 {

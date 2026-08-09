@@ -1,7 +1,9 @@
 package control
 
 import (
+	"context"
 	"encoding/binary"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -50,6 +52,7 @@ func newMacroCaptureTestRunner(t *testing.T) (*Runtime, *MacroRunner, *macroCapt
 			return nil
 		},
 	)
+	runner.ackCapture = func(boardCaptureToken) error { return nil }
 	return runtime, runner, store
 }
 
@@ -182,7 +185,9 @@ func TestMacroRecorderCombinesPanelAndRFWithoutDuplicatingHostEcho(t *testing.T)
 	})
 	state := runner.RecordingState()
 	if state.Steps != 2 || state.PanelSteps != 1 || state.RFSteps != 1 ||
-		state.HostSteps != 0 {
+		state.HostSteps != 0 || state.LastAtUS != 1750 ||
+		state.LastDeltaUS != 1750 || state.LastOpcode != native.OpPWMSet ||
+		state.LastSource != native.InputSourceRF {
 		t.Fatalf("unexpected mixed-source recorder state: %#v", state)
 	}
 	macro, err := runner.StopRecording(true)
@@ -193,6 +198,15 @@ func TestMacroRecorderCombinesPanelAndRFWithoutDuplicatingHostEcho(t *testing.T)
 		macro.Steps[1].AtUS != 1750 || macro.Steps[0].Kind != "motion" ||
 		macro.Steps[1].Kind != "pwm" {
 		t.Fatalf("unexpected mixed-source macro: %#v", macro)
+	}
+	shown, err := macroCommand(context.Background(), runner, []string{"show", "mixed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(shown, "at_us=0") ||
+		!strings.Contains(shown, "at_us=1750") ||
+		!strings.Contains(shown, "delta_us=1750") {
+		t.Fatalf("exact MCU offsets/deltas missing from macro show:\n%s", shown)
 	}
 }
 
@@ -406,7 +420,7 @@ func TestConnectActivelyRecoversCaptureCompletedWhileHostWasAbsent(t *testing.T)
 		}, nil
 	}
 	runner.fetchCapture = func(token boardCaptureToken) ([]byte, error) {
-		if token != (boardCaptureToken{Generation: 22, ID: 9, StartedAtUS: 7000}) {
+		if token.Generation != 22 || token.ID != 9 || token.StartedAtUS != 7000 {
 			t.Fatalf("offline recovery token=%#v", token)
 		}
 		return record, nil
@@ -430,6 +444,89 @@ func TestConnectActivelyRecoversCaptureCompletedWhileHostWasAbsent(t *testing.T)
 		macros[0].Name != "Board capture 9" || macros[0].RecordingSource != "board" ||
 		len(macros[0].Steps) != 1 || macros[0].Steps[0].AtUS != 375 {
 		t.Fatalf("offline reconnect recovery=%#v queries=%d", macros, queries.Load())
+	}
+}
+
+func TestRetainedCaptureReconnectIsDurablyDeduplicatedAndAcknowledged(t *testing.T) {
+	runtime, runner, store := newMacroCaptureTestRunner(t)
+	record, err := native.EncodeMacroRecord(375, native.OpRelaySide, []byte{1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.fetchCapture = func(boardCaptureToken) ([]byte, error) { return record, nil }
+	var acknowledgements atomic.Int32
+	runner.ackCapture = func(token boardCaptureToken) error {
+		if token.ID != 9 || token.StartedAtUS != 7000 {
+			t.Fatalf("acknowledgement token=%#v", token)
+		}
+		acknowledgements.Add(1)
+		return nil
+	}
+	status := native.MacroStatus{
+		Schema: native.MacroQueueSchema, State: native.MacroRecording,
+		ID: 9, StartedAtUS: 7000, AcceptedSteps: 1,
+	}
+	const board = "transport=USB-BOARD-A;vid=1A86;pid=7523;kind=1;build=01234567"
+	runtime.mu.Lock()
+	runtime.generation = 1
+	runtime.mu.Unlock()
+	runner.handleBoardMacroStatusAtGeneration(status, 1, board)
+	status.State = native.MacroCaptured
+	runner.handleBoardMacroStatusAtGeneration(status, 1, board)
+	select {
+	case <-store.saved:
+	case <-time.After(time.Second):
+		t.Fatal("first retained capture was not saved")
+	}
+	deadline := time.Now().Add(time.Second)
+	for acknowledgements.Load() != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	macros := store.macros()
+	if len(macros) != 1 || len(macros[0].CaptureImportKey) != 64 ||
+		macros[0].CaptureBoard != board || macros[0].CaptureID != 9 ||
+		macros[0].CaptureStartedAtUS != 7000 {
+		t.Fatalf("durable capture identity missing: %#v", macros)
+	}
+
+	// The retained Exported state is intentionally queryable after reconnect.
+	// It must acknowledge the same capture again without creating a duplicate.
+	runtime.mu.Lock()
+	runtime.generation = 2
+	runtime.mu.Unlock()
+	status.State = native.MacroExported
+	runner.handleBoardMacroStatusAtGeneration(status, 2, board)
+	deadline = time.Now().Add(time.Second)
+	for acknowledgements.Load() != 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if acknowledgements.Load() != 2 {
+		t.Fatalf("recovered capture acknowledgement count=%d", acknowledgements.Load())
+	}
+	if macros = store.macros(); len(macros) != 1 {
+		t.Fatalf("reconnect duplicated retained capture: %#v", macros)
+	}
+	if runner.RecordingState().Active {
+		t.Fatal("deduplicated retained capture left a provisional recording active")
+	}
+}
+
+func TestBoardCaptureRejectsActionFromAnotherConnectionGeneration(t *testing.T) {
+	_, runner, _ := newMacroCaptureTestRunner(t)
+	token := boardCaptureToken{Generation: 7, ID: 4, StartedAtUS: 1000, Board: "board-A"}
+	if _, err := runner.startRecording(&token, "Board capture 4", "board", "green"); err != nil {
+		t.Fatal(err)
+	}
+	runner.captureAction(ActionEvidence{
+		Opcode: native.OpRelaySide, Payload: []byte{0, 1},
+		Source: native.InputSourcePhysical, BoardOrigin: true,
+		DeviceMicros: 1100, Timed: true, Generation: 8,
+	})
+	if state := runner.RecordingState(); state.Steps != 0 {
+		t.Fatalf("replacement-generation action entered capture: %#v", state)
+	}
+	if _, err := runner.StopRecording(false); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -469,7 +566,8 @@ func TestCaptureStreamDecodeMergeAndMetadataUpdate(t *testing.T) {
 			return config.Validate()
 		},
 	)
-	updated, err := runner.UpdateMetadata("7", "Night lift", "motion", "purple")
+	category, color := "motion", "purple"
+	updated, err := runner.UpdateMetadata("7", "Night lift", &category, &color)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,10 +576,38 @@ func TestCaptureStreamDecodeMergeAndMetadataUpdate(t *testing.T) {
 		len(updated.Steps) != 2 {
 		t.Fatalf("metadata update changed capture data: %#v", updated)
 	}
+	preserved, err := runner.UpdateMetadata("7", "Night lift renamed", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preserved.Category != "motion" || preserved.Color != "violet" {
+		t.Fatalf("rename erased omitted metadata: %#v", preserved)
+	}
+	clear := "-"
+	cleared, err := runner.UpdateMetadata("7", "Night lift renamed", &clear, &clear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Category != "" || cleared.Color != "" {
+		t.Fatalf("explicit metadata clear was ignored: %#v", cleared)
+	}
 }
 
 func TestMacroExplicitSafeCancelOverridesBeginKeepPreference(t *testing.T) {
 	if payload := native.MacroQueueCancelPayload(false); len(payload) != 1 || payload[0] != 0 {
 		t.Fatalf("safe cancel must be explicit zero, got %v", payload)
+	}
+}
+
+func TestRecordedMacroStepRequiresCanonicalFixedPayloadShape(t *testing.T) {
+	for _, evidence := range []ActionEvidence{
+		{Opcode: native.OpRelayAllOff, Payload: []byte{1}},
+		{Opcode: native.OpPWMAllOff, Payload: []byte{0}},
+		{Opcode: native.OpRelaySet, Payload: []byte{5}},
+		{Opcode: native.OpStatusEffect, Payload: []byte{1, 2, 3}},
+	} {
+		if step, ok := recordedMacroStep(evidence); ok {
+			t.Fatalf("malformed/playback-only evidence accepted: %#v => %#v", evidence, step)
+		}
 	}
 }

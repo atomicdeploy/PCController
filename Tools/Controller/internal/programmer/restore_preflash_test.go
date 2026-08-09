@@ -71,7 +71,7 @@ func TestBackupManifestContentAddressingValidationAndRestorePlan(t *testing.T) {
 	date := uint32((2026-2000)<<9 | 8<<5 | 1)
 	clock := uint32(19<<11 | 42<<5 | 58>>1)
 	options := fakeBackupOptions(root)
-	options.ApplicationIdentitySchema = 3
+	options.ApplicationIdentitySchema = 4
 	options.ApplicationPackedTimestamp = date<<16 | clock
 	directory, err := BackupWithRunner(context.Background(), options, io.Discard, runner)
 	if err != nil {
@@ -119,12 +119,12 @@ func TestValidateBackupAcceptsCurrentPackedIdentitySchema(t *testing.T) {
 	date := uint32((2026-2000)<<9 | 8<<5 | 1)
 	clock := uint32(19<<11 | 42<<5 | 58>>1)
 	options := fakeBackupOptions(t.TempDir())
-	options.ApplicationIdentitySchema = 3
+	options.ApplicationIdentitySchema = 4
 	options.ApplicationPackedTimestamp = date<<16 | clock
 	if err := ValidateBackup(options); err != nil {
-		t.Fatalf("schema 3: %v", err)
+		t.Fatalf("schema 4: %v", err)
 	}
-	for _, schema := range []byte{1, 2} {
+	for _, schema := range []byte{1, 2, 3} {
 		options := fakeBackupOptions(t.TempDir())
 		options.ApplicationIdentitySchema = schema
 		options.ApplicationPackedTimestamp = date<<16 | clock
