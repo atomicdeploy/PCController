@@ -135,6 +135,9 @@ ephemeral repository token through the same path.
 `--apply --validate` is designed to reject a dependency PR unless all affected
 areas still work together:
 
+- candidate-lock-compatible Windows compiler selection or provisioning before
+  build-system tests;
+- regeneration of the runtime Go policy after candidate lock/hash changes;
 - exact firmware toolchain bootstrap and firmware compile;
 - firmware size at or below the 32,256-byte Urboot-Custom application ceiling;
 - active Urboot source hashes, clean diff application, exact `u8.0` stock
@@ -145,6 +148,25 @@ areas still work together:
   build;
 - VirtualBoard configure, compile, and CTest execution;
 - generated firmware, bootloader, and host manifests.
+
+The vendored Urboot upstream license, custom patch, and assembly backend are
+explicitly checked out with LF bytes on every host so their exact reviewed
+SHA-256 identities survive Windows `core.autocrlf` settings and the
+cross-platform gate verifies the same source.
+
+The bounded build-system test output is captured into a failed structured
+report, so its assertion and stack trace reach the blocked-update issue and
+artifact instead of being available only in the transient Actions log.
+
+The exact toolchain bootstrap returns both its selected firmware CLI and its
+managed configuration path. Candidate validation forwards those paths to the
+root firmware/host build explicitly, so a global `arduino-cli` or global
+Arduino data directory cannot replace the just-validated portable profile.
+Stale differently-cased copies of those two build variables are removed before
+the canonical values are injected. All other environment values remain
+inherited, including caller-supplied proxy variables and the local-network
+`NO_PROXY` policy; no proxy endpoint is stored in source or generated
+configuration.
 
 The candidate report also contains npm audit severity totals. A deterministic
 PR plan turns the report into release-note links, explicit license/security/size

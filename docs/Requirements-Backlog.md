@@ -4,8 +4,8 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 - Repository: [atomicdeploy/PCController](https://github.com/atomicdeploy/PCController)
 - Normalized requirements: **71**
-- Open: **59**
-- Closed with current evidence: **12**
+- Open: **60**
+- Closed with current evidence: **11**
 - State policy: hardware, live-system, regression, partial-integration, and finalization work stays open until its own acceptance evidence exists.
 
 ## [#1 — Firmware architecture, flash budget, EEPROM, and reset safety](https://github.com/atomicdeploy/PCController/issues/1)
@@ -132,11 +132,11 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 ## [#11 — Build, dependencies, simulation, packaging, and developer tooling](https://github.com/atomicdeploy/PCController/issues/11)
 
-5 open / 3 closed / 8 total
+6 open / 2 closed / 8 total
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `arduino-go-dependencies` | [#60](https://github.com/atomicdeploy/PCController/issues/60) | ✅ closed | Provision managed firmware and host toolchains plus globally discoverable UPX |
+| `arduino-go-dependencies` | [#60](https://github.com/atomicdeploy/PCController/issues/60) | 🟡 open | Provision managed firmware and host toolchains plus globally discoverable UPX |
 | `project-import-structure` | [#61](https://github.com/atomicdeploy/PCController/issues/61) | ✅ closed | Preserve reusable project layers, merge LocalLib variants, and consolidate source/tool directories |
 | `native-virtual-board` | [#62](https://github.com/atomicdeploy/PCController/issues/62) | ✅ closed | Provide a desktop virtual board for fast native protocol and behavior tests |
 | `tooling-entrypoint-consolidation` | [#63](https://github.com/atomicdeploy/PCController/issues/63) | 🟡 open | Unify build and programmer policy behind one command-plan implementation |

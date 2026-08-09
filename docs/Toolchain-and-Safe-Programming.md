@@ -82,6 +82,18 @@ Tools\Controller\bin\controller.exe toolchain bootstrap --locked --dry-run
 Tools\Controller\bin\controller.exe toolchain bootstrap --locked
 ```
 
+Use the managed executable and its generated configuration explicitly for a
+reproducible project build:
+
+```console
+build.cmd --all --toolchain-cli C:\path\to\arduino-cli.exe --toolchain-config C:\path\to\firmware-cli.yaml
+```
+
+`PCCONTROLLER_TOOLCHAIN_CLI` and `PCCONTROLLER_TOOLCHAIN_CONFIG` provide the
+same build-only defaults. Explicit command-line switches win. Proxy selection
+continues to come only from the standard proxy environment, with the shared
+local-network and loopback bypass policy; neither path persists a proxy URL.
+
 Bootstrap does not replace an unrelated global executable or add a
 developer-specific source directory to `PATH`. Override the managed location
 with `--install-dir`, use an existing dependency CLI with `--cli`, or provide

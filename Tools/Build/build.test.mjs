@@ -445,12 +445,21 @@ test('build plan and execution share exact Controller programming argv construct
 		invocation: source,
 		method: 'compile',
 		sketch: PROJECT_ROOT,
-		outputDir: commandPlanPaths(PROJECT_ROOT).firmwareOutput
+		outputDir: commandPlanPaths(PROJECT_ROOT).firmwareOutput,
+		toolchainCLI: 'C:\\portable\\arduino-cli.exe',
+		toolchainConfig: 'C:\\portable\\firmware-cli.yaml'
 	})
 	assert.deepEqual(compile.args.slice(0, 7), [
 		'run', '-buildvcs=false', './cmd/controller', 'program', '--method', 'compile', '--sketch'
 	])
-	assert.equal(compile.args.at(-2), '--output-dir')
+	assert.equal(
+		compile.args[compile.args.indexOf('--output-dir') + 1],
+		commandPlanPaths(PROJECT_ROOT).firmwareOutput
+	)
+	assert.deepEqual(compile.args.slice(-4), [
+		'--toolchain-cli', 'C:\\portable\\arduino-cli.exe',
+		'--toolchain-config', 'C:\\portable\\firmware-cli.yaml'
+	])
 
 	const packaged = canonicalControllerInvocation(PROJECT_ROOT, 'win32')
 	const usbasp = createControllerProgramCommand({
@@ -654,8 +663,8 @@ test('USBasp and bootloader paths use the canonical method without alpha aliases
 
 test('toolchain synchronization is explicit and owned by Controller', () => {
 	assert.throws(
-		() => parseArguments(['--toolchain-cli', 'arduino-cli'], {}),
-		error => /only valid with --toolchain-sync/.test(error.message)
+		() => parseArguments(['--host-only', '--toolchain-cli', 'arduino-cli'], {}),
+		error => /requires firmware compilation or --toolchain-sync/.test(error.message)
 	)
 	const options = parseArguments([
 		'--host-only', '--toolchain-sync', '--toolchain-cli', 'CUSTOM_CLI',
@@ -667,6 +676,35 @@ test('toolchain synchronization is explicit and owned by Controller', () => {
 	assert.equal(update.externalMutation, true)
 	assert.match(update.command.args.join(' '), /toolchain sync --cli CUSTOM_CLI/)
 	assert.doesNotMatch(JSON.stringify(update), /arduino-cli.*core.*update-index/i)
+})
+
+test('portable CLI and config are propagated to compile with flags over environment', () => {
+	const fromEnvironment = parseArguments(['--firmware-only'], {
+		pccontroller_toolchain_cli: 'ENV_CLI',
+		PcController_Toolchain_Config: 'ENV_CONFIG'
+	})
+	let compile = createPlan(
+		fromEnvironment,
+		resolveBuildIdentity(fromEnvironment, {}),
+		'win32'
+	).actions.find(action => action.id === 'firmware-compile').command.args
+	assert.match(compile.join(' '), /--toolchain-cli ENV_CLI --toolchain-config ENV_CONFIG/)
+
+	const fromFlags = parseArguments([
+		'--firmware-only',
+		'--toolchain-cli', 'FLAG_CLI',
+		'--toolchain-config', 'FLAG_CONFIG'
+	], {
+		PCCONTROLLER_TOOLCHAIN_CLI: 'ENV_CLI',
+		PCCONTROLLER_TOOLCHAIN_CONFIG: 'ENV_CONFIG'
+	})
+	compile = createPlan(
+		fromFlags,
+		resolveBuildIdentity(fromFlags, {}),
+		'win32'
+	).actions.find(action => action.id === 'firmware-compile').command.args
+	assert.match(compile.join(' '), /--toolchain-cli FLAG_CLI --toolchain-config FLAG_CONFIG/)
+	assert.doesNotMatch(compile.join(' '), /ENV_CLI|ENV_CONFIG/)
 })
 
 test('fixed identity is propagated exactly to host and firmware', () => {
