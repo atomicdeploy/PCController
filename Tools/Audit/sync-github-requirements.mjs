@@ -1052,6 +1052,10 @@ const PR_ORIGINAL_REQUESTS = {
   121: [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.configurationSources, PROMPT_EXCERPTS.configurationPrecedence],
   122: [PROMPT_EXCERPTS.httpMessages, PROMPT_EXCERPTS.remoteSecurity],
   123: [PROMPT_EXCERPTS.repositoryMap, PROMPT_EXCERPTS.wikiStyling, PROMPT_EXCERPTS.documentation],
+  126: [PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.remoteSecurity, PROMPT_EXCERPTS.proxyPolicy],
+  127: [PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.canonicalContracts, PROMPT_EXCERPTS.surfaceParity],
+  128: [PROMPT_EXCERPTS.wikiStyling, PROMPT_EXCERPTS.repositoryMap],
+  129: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
