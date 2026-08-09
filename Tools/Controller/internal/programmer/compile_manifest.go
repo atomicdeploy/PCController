@@ -34,12 +34,18 @@ type compileManifest struct {
 }
 
 type compileManifestEEPROMLayout struct {
-	Schema          byte   `json:"schema"`
-	SettingsAddress uint32 `json:"settingsAddress"`
-	ControllerBytes uint32 `json:"controllerBytes"`
-	BoardNameBytes  uint32 `json:"boardNameBytes"`
-	RecordBytes     uint32 `json:"recordBytes"`
-	Checksum        string `json:"checksum"`
+	Schema                 byte   `json:"schema"`
+	SettingsAddress        uint32 `json:"settingsAddress"`
+	SettingsStagingAddress uint32 `json:"settingsStagingAddress"`
+	SettingsBankBytes      uint32 `json:"settingsBankBytes"`
+	SettingsBankCount      byte   `json:"settingsBankCount"`
+	ControllerBytes        uint32 `json:"controllerBytes"`
+	BoardNameBytes         uint32 `json:"boardNameBytes"`
+	RecordBytes            uint32 `json:"recordBytes"`
+	Generation             string `json:"generation"`
+	TemperatureRoleAddress uint32 `json:"temperatureRoleAddress"`
+	TemperatureRoleBytes   uint32 `json:"temperatureRoleBytes"`
+	Checksum               string `json:"checksum"`
 }
 
 type compileManifestPatchRegion struct {
@@ -187,9 +193,15 @@ func writeCompileManifest(
 		},
 		EEPROMLayout: compileManifestEEPROMLayout{
 			Schema: EEPROMSettingsRecordSchema, SettingsAddress: EEPROMSettingsAddress,
-			ControllerBytes: EEPROMSettingsControllerBytes,
-			BoardNameBytes:  1 + native.MaximumBoardNameLength,
-			RecordBytes:     EEPROMSettingsRecordBytes, Checksum: "CRC-8/ATM (poly 0x07)",
+			SettingsStagingAddress: EEPROMSettingsStagingAddress,
+			SettingsBankBytes:      EEPROMSettingsBankBytes, SettingsBankCount: EEPROMSettingsBankCount,
+			ControllerBytes:        EEPROMSettingsControllerBytes,
+			BoardNameBytes:         1 + native.MaximumBoardNameLength,
+			RecordBytes:            EEPROMSettingsRecordBytes,
+			Generation:             "board-name metadata high nibble, modulo 16; delta 1..7 is newer",
+			TemperatureRoleAddress: EEPROMTemperatureRoleAddress,
+			TemperatureRoleBytes:   EEPROMTemperatureRoleBytes,
+			Checksum:               "CRC-8/ATM (poly 0x07)",
 		},
 		StackBudget:  stackBudget,
 		PatchRegions: firmwareIdentityManifestRegions(),

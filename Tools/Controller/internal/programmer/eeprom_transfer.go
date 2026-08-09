@@ -62,7 +62,7 @@ func ExportCurrentEEPROMSettings(
 func ImportCurrentEEPROMSettings(
 	manifestPath, settingsPath, outputPath string,
 ) (EEPROMTransferResult, error) {
-	backup, base, _, err := loadCurrentBackupEEPROM(manifestPath)
+	backup, base, baseDecoded, err := loadCurrentBackupEEPROM(manifestPath)
 	if err != nil {
 		return EEPROMTransferResult{}, err
 	}
@@ -80,12 +80,7 @@ func ImportCurrentEEPROMSettings(
 	for address, value := range base.Image.data {
 		merged.data[address] = value
 	}
-	for offset := uint32(0); offset < EEPROMMenuLayoutRecordBytes; offset++ {
-		merged.data[EEPROMSettingsAddress+offset] = 0xFF
-	}
-	for offset, value := range record {
-		merged.data[EEPROMSettingsAddress+uint32(offset)] = value
-	}
+	replaceSettingsStorageWithCanonical(merged, record, baseDecoded.Settings.Schema)
 	content, err := merged.Canonical()
 	if err != nil {
 		return EEPROMTransferResult{}, fmt.Errorf("encode imported EEPROM image: %w", err)
@@ -129,16 +124,11 @@ func PrepareCurrentEEPROMRestore(
 	for address, value := range document.Image.data {
 		migrated.data[address] = value
 	}
-	for offset := uint32(0); offset < EEPROMMenuLayoutRecordBytes; offset++ {
-		migrated.data[EEPROMSettingsAddress+offset] = 0xFF
-	}
 	record, err := encodeCurrentEEPROMSettingsRecord(decoded.Settings.Values)
 	if err != nil {
 		return EEPROMTransferResult{}, fmt.Errorf("semantically migrate backup settings: %w", err)
 	}
-	for offset, value := range record {
-		migrated.data[EEPROMSettingsAddress+uint32(offset)] = value
-	}
+	replaceSettingsStorageWithCanonical(migrated, record, decoded.Settings.Schema)
 	content, err := migrated.Canonical()
 	if err != nil {
 		return EEPROMTransferResult{}, fmt.Errorf("encode restore EEPROM image: %w", err)

@@ -1017,11 +1017,14 @@ remains marked `incomplete`; it is never reported as a complete backup.
 
 ### Offline current settings transfer
 
-No unpublished alpha-build migration/version chain is retained. The production
-record is schema 1: 22 controller bytes, one name-length byte, eight name bytes,
-and CRC-8 (32 bytes total at `0x0020..0x003F`). File-only commands also recognize
-the retired 41-byte menu-layout record only to perform an explicit, one-time
-semantic conversion; they never replay its raw bytes into production firmware:
+No unpublished alpha-build migration/version chain is retained. Production
+schema 1 has two power-loss-safe 32-byte banks at `0x0000` and `0x0020`: 22
+controller bytes, one name metadata byte, eight name bytes, and CRC-8. The
+metadata low nibble is name length and its high nibble is a modulo-16
+generation. File-only commands select the same newest valid bank as firmware
+and also recognize the retired 41-byte menu-layout record only for an explicit,
+one-time connected-board safety conversion; they never replay its raw bytes
+into production firmware or promise alpha-to-alpha compatibility:
 
 During alpha, version builds may replace unpublished layouts and use the raw
 backup plus explicit `--reinitialize-eeprom` path. Compatibility/preservation

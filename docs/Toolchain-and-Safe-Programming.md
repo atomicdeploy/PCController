@@ -314,6 +314,16 @@ the first new-application boot already sees schema-1 Prog/Silent. A standalone
 new-schema EEPROM write before flash is forbidden because its reset would let
 the old schema reader discard the latch.
 
+Production schema 1 uses two 32-byte power-loss-safe banks: staging at
+`0x0000..0x001F` and canonical at `0x0020..0x003F`. The board-name metadata
+byte stores length `0..8` in its low nibble and a modulo-16 generation in its
+high nibble; CRC-8 covers both. Boot selects staging only when its generation
+is 1..7 steps newer, so canonical deterministically wins a tie. Host-generated
+factory/migration images erase staging and write canonical generation zero;
+later MCU writes cooperatively update the inactive bank. The compile manifest
+publishes both bank addresses, record size, generation rule, and the adjacent
+16-byte learned temperature-role region at `0x0040..0x004F`.
+
 Every reset during flash therefore remains quiet, output-safe, and visibly
 latched at `Prog`. Only after the new authenticated `HELLO` does the host stage
 the captured semantic settings behind Programming, verify them, clear
@@ -328,8 +338,9 @@ EEPROM layout directly. Do not add dual readers, migrations, compatibility
 aliases, or preservation logic to normal firmware merely to accept an earlier
 alpha version. Keep the mandatory raw backup and use the explicit host
 transaction for a one-time conversion of shared semantic fields. That bounded
-converter must not become a permanent live protocol/version compatibility
-chain.
+converter is a safety operation for the currently connected development board,
+not a compatibility promise, and must not become a permanent live
+protocol/version chain.
 
 Compatibility and preservation are required only when distinct
 **profile/feature builds are intentionally supported at the same time**. Each

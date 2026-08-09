@@ -71,14 +71,7 @@ func GenerateMigratedProgrammingEEPROMIntelHex(manifestPath string) ([]byte, Off
 	for address, value := range backup.Image.data {
 		migrated.data[address] = value
 	}
-	// Clear the superseded schema-2 tail so a future forensic decoder cannot
-	// mistake stale menu-layout/name bytes for a second live record.
-	for offset := uint32(0); offset < EEPROMMenuLayoutRecordBytes; offset++ {
-		migrated.data[EEPROMSettingsAddress+offset] = 0xFF
-	}
-	for offset, value := range record {
-		migrated.data[EEPROMSettingsAddress+uint32(offset)] = value
-	}
+	replaceSettingsStorageWithCanonical(migrated, record, decoded.Settings.Schema)
 	content, err := migrated.Canonical()
 	if err != nil {
 		return nil, OfflineSettingsDecode{}, fmt.Errorf("encode migrated EEPROM: %w", err)
@@ -107,7 +100,6 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode safe settings EEPROM: %w", err)
 	}
-	copy(data[EEPROMSettingsAddress:EEPROMSettingsAddress+EEPROMSettingsRecordBytes], settings)
 
 	// A new board starts with a valid empty 20-record learned-RF store.
 	header := data[EEPROMRemoteHeaderAddress : EEPROMRemoteHeaderAddress+4]
@@ -141,6 +133,7 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 	for address, value := range data {
 		image.data[uint32(address)] = value
 	}
+	replaceSettingsStorageWithCanonical(image, settings, 0)
 	return image.Canonical()
 }
 

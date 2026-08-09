@@ -11,7 +11,10 @@ import (
 
 const (
 	PCControllerEEPROMBytes         uint32 = generatedBoardEEPROMBytes
+	EEPROMSettingsStagingAddress    uint32 = 0
 	EEPROMSettingsAddress           uint32 = 32
+	EEPROMSettingsBankBytes         uint32 = 32
+	EEPROMSettingsBankCount         byte   = 2
 	EEPROMSettingsRecordSchema      byte   = 1
 	EEPROMSettingsControllerBytes   uint32 = 22
 	EEPROMSettingsValueBytes        uint32 = EEPROMSettingsControllerBytes + 1 + native.MaximumBoardNameLength
@@ -20,6 +23,8 @@ const (
 	EEPROMMenuLayoutControllerBytes uint32 = 31
 	EEPROMMenuLayoutValueBytes      uint32 = EEPROMMenuLayoutControllerBytes + 1 + native.MaximumBoardNameLength
 	EEPROMMenuLayoutRecordBytes     uint32 = EEPROMMenuLayoutValueBytes + 1
+	EEPROMTemperatureRoleAddress    uint32 = 64
+	EEPROMTemperatureRoleBytes      uint32 = 16
 	EEPROMRemoteHeaderAddress       uint32 = 80
 	EEPROMRemoteEntriesAddress      uint32 = 84
 	EEPROMRemoteRecordSize          byte   = 12
@@ -84,6 +89,8 @@ type OfflineSettingsDecode struct {
 	Format           string             `json:"format"`
 	Schema           byte               `json:"schema"`
 	ValueBytes       uint32             `json:"value_bytes"`
+	Address          uint32             `json:"address"`
+	Generation       byte               `json:"generation"`
 	Issue            string             `json:"issue,omitempty"`
 	StoredChecksum   byte               `json:"stored_checksum"`
 	ComputedChecksum byte               `json:"computed_checksum"`
@@ -159,7 +166,7 @@ func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
 	decoded := OfflineEEPROMDecode{
 		SourceKind: "offline-eeprom-hex",
 		SourcePath: path, SourceSHA256: document.SourceSHA256,
-		Layout: "settings-schema1-core22-record32/rf-record12-cap20/reset-journal-336",
+		Layout: "settings-schema1-dual-bank32-generation4/rf-record12-cap20/reset-journal-336",
 	}
 	decoded.Settings = decodeOfflineSettings(document.Image)
 	decoded.Remotes = decodeOfflineRemotes(document.Image)
@@ -168,41 +175,60 @@ func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
 }
 
 func decodeOfflineSettings(image *IntelHexImage) OfflineSettingsDecode {
-	currentRecord, currentErr := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
+	stagingRecord, stagingErr := image.BytesAt(EEPROMSettingsStagingAddress, EEPROMSettingsRecordBytes)
+	canonicalRecord, canonicalErr := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
 	legacyRecord, legacyErr := image.BytesAt(EEPROMSettingsAddress, EEPROMMenuLayoutRecordBytes)
-	var current, legacy OfflineSettingsDecode
-	if currentErr == nil {
-		current = decodeOfflineSettingsRecord(currentRecord, false)
+	var staging, canonical, legacy OfflineSettingsDecode
+	if stagingErr == nil {
+		staging = decodeOfflineSettingsRecord(stagingRecord, false)
+		staging.Address = EEPROMSettingsStagingAddress
+	}
+	if canonicalErr == nil {
+		canonical = decodeOfflineSettingsRecord(canonicalRecord, false)
+		canonical.Address = EEPROMSettingsAddress
 	}
 	if legacyErr == nil {
 		legacy = decodeOfflineSettingsRecord(legacyRecord, true)
+		legacy.Address = EEPROMSettingsAddress
+	}
+	// Match the MCU's exact boot selection: canonical wins a generation tie;
+	// staging wins only when its modulo-16 generation is 1..7 steps newer.
+	current := canonical
+	if staging.Valid && (!canonical.Valid || settingsGenerationNewer(staging.Generation, canonical.Generation)) {
+		current = staging
 	}
 	switch {
-	case current.Valid && !legacy.Valid:
+	case current.Valid:
 		return current
-	case legacy.Valid && !current.Valid:
+	case legacy.Valid:
 		return legacy
-	case current.Valid && legacy.Valid:
-		current.Valid = false
-		current.Issue = "ambiguous settings record validates as both schema 1 and schema 2"
-		return current
-	case currentErr == nil:
+	case canonicalErr == nil:
+		current = canonical
+		if stagingErr == nil && staging.Issue != "" {
+			current.Issue += "; staging bank: " + staging.Issue
+		}
 		if legacyErr == nil && legacy.Issue != "" {
 			current.Issue += "; schema 2: " + legacy.Issue
 		}
 		return current
 	default:
-		_, present := image.data[EEPROMSettingsAddress]
+		_, stagingPresent := image.data[EEPROMSettingsStagingAddress]
+		_, canonicalPresent := image.data[EEPROMSettingsAddress]
 		return OfflineSettingsDecode{
-			Present: present,
+			Present: stagingPresent || canonicalPresent,
 			Format:  "unsupported",
 			Issue: fmt.Sprintf(
-				"unsupported settings layout: require schema 1 record (%d bytes) at EEPROM 0x%04X..0x%04X: %v",
-				EEPROMSettingsRecordBytes, EEPROMSettingsAddress,
-				EEPROMSettingsAddress+EEPROMSettingsRecordBytes-1, currentErr,
+				"unsupported settings layout: require schema 1 bank (%d bytes) at EEPROM 0x%04X or 0x%04X: staging=%v canonical=%v",
+				EEPROMSettingsRecordBytes, EEPROMSettingsStagingAddress,
+				EEPROMSettingsAddress, stagingErr, canonicalErr,
 			),
 		}
 	}
+}
+
+func settingsGenerationNewer(candidate, current byte) bool {
+	delta := (candidate - current) & 0x0F
+	return delta != 0 && delta < 8
 }
 
 func decodeOfflineSettingsRecord(record []byte, menuLayout bool) OfflineSettingsDecode {
@@ -267,7 +293,12 @@ func decodeOfflineSettingsRecord(record []byte, menuLayout bool) OfflineSettings
 	}
 	values.RelayRestoreMask = settings[relayRestoreOffset]
 	values.MotionBreakMS = uint16(settings[motionBreakOffset])
-	nameLength := settings[nameLengthOffset]
+	nameMetadata := settings[nameLengthOffset]
+	nameLength := nameMetadata
+	if !menuLayout {
+		result.Generation = nameMetadata >> 4
+		nameLength &= 0x0F
+	}
 	if nameLength <= native.MaximumBoardNameLength {
 		values.BoardName = string(settings[nameOffset : nameOffset+int(nameLength)])
 	}
@@ -331,6 +362,13 @@ func controllerSettingsFromNative(settings native.Settings) ControllerSettings {
 // production schema-1 record. Menu-layout fields intentionally do not enter
 // this alpha layout; they are independent protocol data when compiled in.
 func encodeCurrentEEPROMSettingsRecord(values ControllerSettings) ([]byte, error) {
+	return encodeCurrentEEPROMSettingsRecordGeneration(values, 0)
+}
+
+func encodeCurrentEEPROMSettingsRecordGeneration(
+	values ControllerSettings,
+	generation byte,
+) ([]byte, error) {
 	if values.MotionBreakMS == 0 || values.MotionBreakMS > 255 {
 		return nil, errors.New("motion break is outside 1..255 ms")
 	}
@@ -359,7 +397,7 @@ func encodeCurrentEEPROMSettingsRecord(values ControllerSettings) ([]byte, error
 	record[19] = values.DisplayClosedBrightness | hold<<3
 	record[20] = values.RelayRestoreMask
 	record[21] = byte(values.MotionBreakMS)
-	record[22] = byte(len(values.BoardName))
+	record[22] = (generation&0x0F)<<4 | byte(len(values.BoardName))
 	copy(record[23:31], []byte(values.BoardName))
 	record[EEPROMSettingsValueBytes] = avrCRC8(record[:EEPROMSettingsValueBytes])
 	decoded := decodeOfflineSettingsRecord(record, false)
@@ -367,6 +405,29 @@ func encodeCurrentEEPROMSettingsRecord(values ControllerSettings) ([]byte, error
 		return nil, fmt.Errorf("encode schema-1 EEPROM settings: %s", decoded.Issue)
 	}
 	return record, nil
+}
+
+// replaceSettingsStorageWithCanonical invalidates both production banks,
+// optionally clears the retired schema-2 tail, then installs one deterministic
+// generation-zero canonical record. This is the single host rewrite policy for
+// factory, migration, import, and semantic restore images.
+func replaceSettingsStorageWithCanonical(
+	image *IntelHexImage,
+	record []byte,
+	previousSchema byte,
+) {
+	for address := EEPROMSettingsStagingAddress; address < EEPROMSettingsAddress+EEPROMSettingsBankBytes; address++ {
+		image.data[address] = 0xFF
+	}
+	if previousSchema == EEPROMMenuLayoutRecordSchema {
+		legacyEnd := EEPROMSettingsAddress + EEPROMMenuLayoutRecordBytes
+		for address := EEPROMSettingsAddress + EEPROMSettingsBankBytes; address < legacyEnd; address++ {
+			image.data[address] = 0xFF
+		}
+	}
+	for offset, value := range record {
+		image.data[EEPROMSettingsAddress+uint32(offset)] = value
+	}
 }
 
 func validateOfflineMenuLayout(values ControllerSettings) []string {

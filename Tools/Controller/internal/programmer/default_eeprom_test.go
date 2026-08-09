@@ -35,6 +35,18 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 	if record[EEPROMSettingsValueBytes] != avrCRC8(record[:EEPROMSettingsValueBytes]) {
 		t.Fatal("default settings CRC does not match")
 	}
+	if record[22]>>4 != 0 {
+		t.Fatalf("factory canonical settings generation = %d, want 0", record[22]>>4)
+	}
+	staging, err := image.BytesAt(EEPROMSettingsStagingAddress, EEPROMSettingsBankBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for offset, value := range staging {
+		if value != 0xFF {
+			t.Fatalf("factory staging bank byte %d = 0x%02X, want erased", offset, value)
+		}
+	}
 	if record[19]&0x07 != 0 {
 		t.Fatalf("closed brightness = %d", record[19]&0x07)
 	}

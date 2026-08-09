@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 func TestCurrentEEPROMExportImportAndRestoreRequireValidatedBackup(t *testing.T) {
@@ -119,6 +121,53 @@ func TestLegacyBackupMigratesSemanticallyAndArmsProgBeforeFlash(t *testing.T) {
 	}
 }
 
+func TestDualBankBackupMigrationSelectsNewestAndPreservesTemperatureRole(t *testing.T) {
+	content, err := GenerateDefaultEEPROMIntelHex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := ParseIntelHex(strings.NewReader(string(content)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := controllerSettingsFromNative(native.DefaultSettings())
+	values.StreamPeriodMS = 333
+	values.BoardName = "NEWEST"
+	newest, err := encodeCurrentEEPROMSettingsRecordGeneration(values, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for offset, value := range newest {
+		document.data[EEPROMSettingsStagingAddress+uint32(offset)] = value
+	}
+	document.data[EEPROMTemperatureRoleAddress] = 0x5A
+	content, err = document.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := backupManifestForEEPROM(t, content)
+	migrated, decoded, err := GenerateMigratedProgrammingEEPROMIntelHex(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Values.StreamPeriodMS != 333 ||
+		decoded.Values.BoardName != "NEWEST" {
+		t.Fatalf("migration ignored newest bank: %#v", decoded)
+	}
+	result, err := ParseIntelHex(strings.NewReader(string(migrated)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.data[EEPROMTemperatureRoleAddress] != 0x5A {
+		t.Fatalf("migration erased temperature role data: 0x%02X", result.data[EEPROMTemperatureRoleAddress])
+	}
+	selected := decodeOfflineSettings(result)
+	if !selected.Valid || selected.Address != EEPROMSettingsAddress || selected.Generation != 0 ||
+		selected.Values.StreamPeriodMS != 333 {
+		t.Fatalf("migration did not canonicalize selected settings: %#v", selected)
+	}
+}
+
 func TestMigratedProgrammingEEPROMCanOnlyBeStagedForPairedWrite(t *testing.T) {
 	manifest := currentEEPROMBackupManifest(t)
 	paths, err := HostDataPathsFor(filepath.Join(t.TempDir(), "data"))
@@ -195,6 +244,11 @@ func currentEEPROMBackupManifest(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return backupManifestForEEPROM(t, content)
+}
+
+func backupManifestForEEPROM(t *testing.T, content []byte) string {
+	t.Helper()
 	runner := newFakeAVRRunner(t)
 	runner.eepromHEX = content
 	directory, err := BackupWithRunner(

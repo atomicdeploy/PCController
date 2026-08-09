@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
@@ -59,10 +61,11 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.SourceKind != "offline-eeprom-hex" ||
-		decoded.Layout != "settings-schema1-core22-record32/rf-record12-cap20/reset-journal-336" ||
+		decoded.Layout != "settings-schema1-dual-bank32-generation4/rf-record12-cap20/reset-journal-336" ||
 		!decoded.Settings.Supported || !decoded.Settings.Valid ||
 		decoded.Settings.Format != "schema1/core22+name9+crc8" ||
-		decoded.Settings.Schema != EEPROMSettingsRecordSchema || decoded.Settings.ValueBytes != 31 {
+		decoded.Settings.Schema != EEPROMSettingsRecordSchema || decoded.Settings.ValueBytes != 31 ||
+		decoded.Settings.Address != EEPROMSettingsAddress || decoded.Settings.Generation != 0 {
 		t.Fatalf("settings decode invalid: %#v", decoded.Settings)
 	}
 	settings := decoded.Settings.Values
@@ -92,6 +95,79 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		*decoded.ResetJournal.NewestCount != 41 || decoded.ResetJournal.NewestSlot == nil ||
 		*decoded.ResetJournal.NewestSlot != 4 {
 		t.Fatalf("unexpected reset journal: %#v", decoded.ResetJournal)
+	}
+}
+
+func TestDecodeOfflineEEPROMSelectsNewestValidSettingsBank(t *testing.T) {
+	values := controllerSettingsFromNative(native.DefaultSettings())
+	values.BoardName = "CANON"
+	canonical, err := encodeCurrentEEPROMSettingsRecordGeneration(values, 14)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values.BoardName = "STAGING"
+	staging, err := encodeCurrentEEPROMSettingsRecordGeneration(values, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeEEPROMFixture(t, func(data []byte) {
+		copy(data[EEPROMSettingsAddress:EEPROMSettingsAddress+EEPROMSettingsRecordBytes], canonical)
+		copy(data[EEPROMSettingsStagingAddress:EEPROMSettingsStagingAddress+EEPROMSettingsRecordBytes], staging)
+	})
+	decoded, err := DecodeOfflineEEPROMHex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Settings.Valid || decoded.Settings.Address != EEPROMSettingsStagingAddress ||
+		decoded.Settings.Generation != 0 || decoded.Settings.Values.BoardName != "STAGING" {
+		t.Fatalf("modulo generation selection = %#v", decoded.Settings)
+	}
+
+	// An equal generation is not newer: the MCU deterministically keeps the
+	// canonical bank, and the host forensic decoder must report the same value.
+	values.BoardName = "TIE"
+	tied, err := encodeCurrentEEPROMSettingsRecordGeneration(values, 14)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path = writeEEPROMFixture(t, func(data []byte) {
+		copy(data[EEPROMSettingsAddress:EEPROMSettingsAddress+EEPROMSettingsRecordBytes], canonical)
+		copy(data[EEPROMSettingsStagingAddress:EEPROMSettingsStagingAddress+EEPROMSettingsRecordBytes], tied)
+	})
+	decoded, err = DecodeOfflineEEPROMHex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Settings.Address != EEPROMSettingsAddress ||
+		decoded.Settings.Values.BoardName != "CANON" {
+		t.Fatalf("canonical bank did not win generation tie: %#v", decoded.Settings)
+	}
+}
+
+func TestCanonicalSettingsRewriteInvalidatesBothBanksButPreservesRoleData(t *testing.T) {
+	values := controllerSettingsFromNative(native.DefaultSettings())
+	record, err := encodeCurrentEEPROMSettingsRecord(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := &IntelHexImage{data: make(map[uint32]byte, PCControllerEEPROMBytes)}
+	for address := uint32(0); address < PCControllerEEPROMBytes; address++ {
+		image.data[address] = 0xA5
+	}
+	const roleSentinel = 0x5A
+	image.data[EEPROMTemperatureRoleAddress] = roleSentinel
+	replaceSettingsStorageWithCanonical(image, record, EEPROMSettingsRecordSchema)
+	for address := EEPROMSettingsStagingAddress; address < EEPROMSettingsAddress; address++ {
+		if image.data[address] != 0xFF {
+			t.Fatalf("staging bank byte 0x%X was not invalidated", address)
+		}
+	}
+	if image.data[EEPROMTemperatureRoleAddress] != roleSentinel {
+		t.Fatalf("DS role data after settings banks was changed: 0x%02X", image.data[EEPROMTemperatureRoleAddress])
+	}
+	decoded := decodeOfflineSettings(image)
+	if !decoded.Valid || decoded.Address != EEPROMSettingsAddress || decoded.Generation != 0 {
+		t.Fatalf("canonical rewrite did not produce deterministic bank: %#v", decoded)
 	}
 }
 
