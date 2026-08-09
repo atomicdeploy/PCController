@@ -63,6 +63,7 @@ const pages = [
   ["Virtual-Board", "Tools/VirtualBoard/README.md", "Virtual Board", "🧪", "Build and test"],
   ["Dependency-Maintenance", "Tools/Dependencies/README.md", "Dependency maintenance", "📦", "Build and test"],
   ["Toolchain-and-Safe-Programming", "docs/Toolchain-and-Safe-Programming.md", "Toolchain bootstrap and safe programming", "🛡️", "Build and test"],
+  ["Firmware-Autonomy-and-Storage", "docs/Firmware-Autonomy-and-Storage.md", "Firmware autonomy and storage", "🧱", "Build and test"],
   ["Memory-and-Feature-Tradeoffs", "docs/Memory-and-Feature-Tradeoffs.md", "Memory and feature tradeoffs", "🧠", "Build and test"],
   ["CI-CD-and-Releases", "docs/CI-CD-and-Releases.md", "CI/CD and releases", "🚦", "Build and test"],
   ["Urboot-Custom", "Tools/Bootloader/Urboot-Custom/README.md", "Urboot-Custom reproducible fork", "🔩", "Build and test"],
