@@ -112,6 +112,8 @@ const EXTRA_ISSUE_REQUIRED_LABELS = {
   112: ['🖥️ host', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
   115: ['📦 dependencies', '🏗️ tooling-build'],
   131: ['🖥️ host', '💾 storage', '🧪 testing', '🔒 security'],
+  134: ['📦 dependencies', '🏗️ tooling-build'],
+  135: ['🖥️ host', '🧪 testing', '🏗️ tooling-build', '🔍 needs-hardware'],
 };
 
 function requirement(id, parent, title, state, labels, section, criteria, evidence) {
@@ -1022,6 +1024,8 @@ const EXTRA_ISSUE_ORIGINAL_REQUESTS = {
   112: [PROMPT_EXCERPTS.zadig],
   115: [PROMPT_EXCERPTS.dependencyBlocker],
   131: [PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.trackerReconciliation],
+  134: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
+  135: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.serviceTray],
 };
 
 const PR_ORIGINAL_REQUESTS = {
