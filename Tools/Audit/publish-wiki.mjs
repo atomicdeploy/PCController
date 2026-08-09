@@ -326,6 +326,12 @@ try {
     );
   }
 
+  // The staging clone is disposable and must not depend on a contributor or CI
+  // runner having global Git identity configured. Keep this identity local to
+  // the Wiki clone; source-repository commits retain the caller's normal one.
+  run("git", ["config", "user.name", `${canonicalProductName} Wiki Publisher`], { cwd: staging });
+  run("git", ["config", "user.email", `${repositoryOwner}@users.noreply.github.com`], { cwd: staging });
+
   materializeWiki(staging);
   for (const page of obsoletePages) {
     rmSync(join(staging, page), { force: true });
