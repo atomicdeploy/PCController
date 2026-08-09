@@ -68,9 +68,25 @@ jobs:
           node-version: "24"
 
       - name: "🧪 Build simulator and run native test suite"
+        if: ${{ !matrix.windows }}
         working-directory: Tools/VirtualBoard
         shell: bash
         run: ./build.sh --configuration Release --clean
+
+      - name: "⚙️ Configure native Windows simulator"
+        if: ${{ matrix.windows }}
+        working-directory: Tools/VirtualBoard
+        run: cmake --preset release
+
+      - name: "🔨 Build native Windows simulator and tests"
+        if: ${{ matrix.windows }}
+        working-directory: Tools/VirtualBoard
+        run: cmake --build --preset release --parallel
+
+      - name: "🧪 Run native Windows CTest suite"
+        if: ${{ matrix.windows }}
+        working-directory: Tools/VirtualBoard
+        run: ctest --preset release --no-tests=error
 
       - name: "🕰️ Freeze reproducible package time"
         shell: bash
