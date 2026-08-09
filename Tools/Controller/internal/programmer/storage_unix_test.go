@@ -23,7 +23,11 @@ func TestHostDataPathsResolveExistingUnixSymlinkPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(realRoot, "host-data")
+	canonicalRealRoot, err := filepath.EvalSymlinks(realRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(canonicalRealRoot, "host-data")
 	if paths.DataDir != want {
 		t.Fatalf("data dir=%q want=%q", paths.DataDir, want)
 	}
