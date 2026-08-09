@@ -1768,7 +1768,7 @@ func commandCapability(command string) string {
 			(words[1] == "record" && len(words) >= 3 && words[2] == "status")) {
 			return capabilityRead
 		}
-		if len(words) >= 2 && (words[1] == "create" || words[1] == "delete" || words[1] == "remove" || words[1] == "record") {
+		if len(words) >= 2 && (words[1] == "create" || words[1] == "update" || words[1] == "rename" || words[1] == "delete" || words[1] == "remove" || words[1] == "record") {
 			return capabilityHostConfig
 		}
 		return capabilityBoard

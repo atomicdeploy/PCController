@@ -306,7 +306,7 @@ func (runner *MacroRunner) startRecording(boardID *byte, name, category, color s
 	runner.recordMu.Unlock()
 	runner.runtime.PublishStructuredEvent(Event{
 		Kind: "macro.recording", Lifecycle: "started", State: "recording",
-		Text: fmt.Sprintf("macro recording %d/%s started; MCU ACK deltas are authoritative", id, name),
+		Text: fmt.Sprintf("macro recording %d/%s started; MCU action deltas are authoritative", id, name),
 	})
 	return state, nil
 }
@@ -443,6 +443,16 @@ func (runner *MacroRunner) handleBoardMacroStatus(status native.MacroStatus) {
 				Kind: "macro.recording", Lifecycle: "failed", State: "error",
 				Reason: err.Error(), Text: fmt.Sprintf("start board capture %d: %v", status.ID, err),
 			})
+		} else {
+			// Board ring records are relative to the K3 capture epoch, not the
+			// first streamed Action. Sharing that base makes live evidence and a
+			// later ring recovery byte-identical and therefore deduplicable.
+			runner.recordMu.Lock()
+			if runner.recording.Active && runner.recording.BoardID == status.ID {
+				runner.recordBaseUS = status.StartedAtUS
+				runner.recordHasBase = true
+			}
+			runner.recordMu.Unlock()
 		}
 	case native.MacroCaptured:
 		// Recovery uses request/response I/O and must never block the runtime's

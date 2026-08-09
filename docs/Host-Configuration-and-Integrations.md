@@ -316,18 +316,32 @@ The action keys are:
 - `S` saves the current recording and `D` discards it;
 - `P` plays the selected macro; `C` cancels and safely turns affected outputs
   off, while `K` explicitly cancels and keeps their current states;
-- `I` shows the selected definition, `X` requires a second `X` before deleting
+- `I` shows the selected definition; `E` prepares its host-owned name,
+  category, and color for editing; `X` requires a second `X` before deleting
   PC-side metadata, and `A` opens the automation rules list.
 
 Playback reads the same `MacroRunner` instance used by shell, IPC, and API
 commands. The page therefore reports live macro identity, elapsed/duration,
 step progress, MCU circular-buffer fill out of 127 bytes, accepted bytes,
 last/maximum device timing delta, configured tolerance, violations, underruns,
-dispatch errors, lifecycle, and final faithfulness. Recording offsets come from
-MCU acknowledgement timestamps, not variable USB/network arrival time. Macro
-definitions remain PC configuration; only the active timing queue occupies AVR
-RAM. The deterministic preview contains a safe representative library for UI
-inspection and never opens serial.
+dispatch errors, dropped/missing capture evidence, lifecycle, and final
+faithfulness. Recording offsets come from one typed MCU-clock evidence stream:
+acknowledged host operations and successful physical/RF actions carry the same
+ordinary opcode/payload shape. Source=HOST event echoes are deduplicated against
+their authoritative ACK, and USB/network arrival time is never used as the
+recording clock.
+
+Pressing Record on the board opens provisional PC metadata named
+`Board capture N` in category `board`. The schema-3 MCU ring retains a strict
+no-overwrite prefix and exposes it in bounded 40-byte recovery pages; a
+continuously connected host also retains the final action that seals a full
+ring. Save records `capture_dropped_steps` and `capture_missing_steps`, so an
+offline/truncated recovery can never masquerade as complete. `macro update`
+and the TUI/Web edit action rename or recategorize the result without changing
+its exact steps. Macro definitions remain PC configuration; only the active
+timing/capture ring occupies AVR RAM. The deterministic preview contains a
+safe representative library, forces every buzzer path to a state-only/muted
+double, and never opens serial or energizes physical outputs.
 
 The same library is now available as the default HOST-presented physical
 `MACR` submenu. Its selector is rebuilt from the watched macro array and sorted
