@@ -4619,7 +4619,7 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("recording macro %d/%s; acknowledged board commands will use exact MCU deltas", state.ID, state.Name), nil
+			return fmt.Sprintf("recording macro %d/%s; host, front-panel, and RF actions use exact MCU deltas", state.ID, state.Name), nil
 		case "status":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record status")
@@ -4628,7 +4628,7 @@ func macroCommand(
 			if !state.Active && state.Name == "" {
 				return "no macro has been recorded in this session", nil
 			}
-			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d host=%d panel=%d rf=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
 		case "save", "stop":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record save")
@@ -4673,7 +4673,7 @@ func macroCommand(
 			return "no macro has run in this session", nil
 		}
 		return fmt.Sprintf(
-			"macro id=%d name=%q lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
+			"macro id=%d name=%q lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d dropped=%d faithful=%t started=%s error=%q",
 			state.ID,
 			state.Name,
 			state.Lifecycle,
@@ -4686,6 +4686,7 @@ func macroCommand(
 			state.TimingViolations,
 			state.Underruns,
 			state.DispatchErrors,
+			state.DroppedSteps,
 			state.Faithful,
 			state.StartedAt.Format(time.RFC3339),
 			state.LastError,

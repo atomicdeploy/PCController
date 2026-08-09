@@ -296,6 +296,9 @@ const (
 	EventRelay
 	EventAlert
 	EventAppNavigation
+	// EventAction carries one successfully applied ordinary command from a
+	// physical or RF source. The host ACK remains authoritative for source=Host.
+	EventAction
 )
 
 const (
@@ -663,6 +666,8 @@ type DeviceEvent struct {
 	AlertActive             bool         `json:"alert_active,omitempty"`
 	AppTarget               string       `json:"app_target,omitempty"`
 	AppPage                 string       `json:"app_page,omitempty"`
+	ActionOpcode            byte         `json:"action_opcode,omitempty"`
+	ActionPayload           []byte       `json:"action_payload,omitempty"`
 	DeviceMicros            uint32       `json:"device_micros,omitempty"`
 	Timed                   bool         `json:"timed,omitempty"`
 	Macro                   *MacroStatus `json:"macro,omitempty"`
@@ -821,6 +826,28 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			AppNavigationAll: "*", AppNavigationWebUI: "webui", AppNavigationTUI: "tui",
 		}[payload[1]]
 		event.AppPage = strings.ToLower(page)
+	case EventAction:
+		// [type, source, ordinary opcode, payload length, payload...]. The
+		// high-bit event marker and trailing MCU timestamp are removed above.
+		if len(payload) < 4 {
+			return DeviceEvent{}, fmt.Errorf("action EVENT is %d bytes, need at least 4", len(payload))
+		}
+		if payload[1] > InputSourceHost {
+			return DeviceEvent{}, fmt.Errorf("action EVENT source %d is invalid", payload[1])
+		}
+		length := int(payload[3])
+		if length > MacroBoardActionMaximumPayload || len(payload) != 4+length {
+			return DeviceEvent{}, fmt.Errorf(
+				"action EVENT payload length %d/body %d is invalid; maximum is %d",
+				length, len(payload), MacroBoardActionMaximumPayload,
+			)
+		}
+		if !MacroQueueableOpcode(payload[2]) {
+			return DeviceEvent{}, fmt.Errorf("action EVENT opcode 0x%02X is not recordable", payload[2])
+		}
+		event.Source = payload[1]
+		event.ActionOpcode = payload[2]
+		event.ActionPayload = append([]byte(nil), payload[4:]...)
 	}
 	return event, nil
 }

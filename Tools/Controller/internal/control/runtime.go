@@ -78,12 +78,15 @@ type Event struct {
 	ResetCount  uint32
 }
 
-// CommandEvidence is emitted only after the board acknowledges a command. Its
-// MCU timestamp lets recorders preserve activation deltas without trusting
-// host USB/network arrival time.
-type CommandEvidence struct {
+// ActionEvidence is the canonical recorder input for both acknowledged host
+// commands and successfully applied physical/RF board actions. Its MCU clock
+// is authoritative; ObservedAt is informational and never drives playback.
+type ActionEvidence struct {
 	Opcode       byte      `json:"opcode"`
 	Payload      []byte    `json:"payload,omitempty"`
+	Source       byte      `json:"source"`
+	SourceID     byte      `json:"source_id,omitempty"`
+	BoardOrigin  bool      `json:"board_origin,omitempty"`
 	DeviceMicros uint32    `json:"device_micros"`
 	Timed        bool      `json:"timed"`
 	ObservedAt   time.Time `json:"observed_at"`
@@ -187,11 +190,14 @@ type Runtime struct {
 	displayMu                  sync.Mutex
 	lcdMessageCancel           context.CancelFunc
 
-	commandObserverMu      sync.RWMutex
-	commandObservers       map[uint64]func(CommandEvidence)
-	nextCommandObserver    uint64
-	hostMenuRequestMu      sync.RWMutex
-	hostMenuRequestHandler func(native.HostMenuContentRequest)
+	actionObserverMu        sync.RWMutex
+	actionObservers         map[uint64]func(ActionEvidence)
+	nextActionObserver      uint64
+	macroStatusObserverMu   sync.RWMutex
+	macroStatusObservers    map[uint64]func(native.MacroStatus)
+	nextMacroStatusObserver uint64
+	hostMenuRequestMu       sync.RWMutex
+	hostMenuRequestHandler  func(native.HostMenuContentRequest)
 }
 
 const programStateHeartbeatPeriod = 2 * time.Second
@@ -269,26 +275,27 @@ func (runtime *Runtime) Events() <-chan Event {
 	return runtime.events
 }
 
-// ObserveCommands registers a lightweight command recorder. Callbacks run in
-// acknowledgement order; the returned release function is idempotent.
-func (runtime *Runtime) ObserveCommands(observer func(CommandEvidence)) func() {
+// ObserveActions registers a lightweight macro-recorder input. Host actions
+// arrive in acknowledgement order; physical/RF actions arrive in board event
+// order. Both use the same MCU timestamp domain. The release is idempotent.
+func (runtime *Runtime) ObserveActions(observer func(ActionEvidence)) func() {
 	if observer == nil {
 		return func() {}
 	}
-	runtime.commandObserverMu.Lock()
-	if runtime.commandObservers == nil {
-		runtime.commandObservers = make(map[uint64]func(CommandEvidence))
+	runtime.actionObserverMu.Lock()
+	if runtime.actionObservers == nil {
+		runtime.actionObservers = make(map[uint64]func(ActionEvidence))
 	}
-	runtime.nextCommandObserver++
-	id := runtime.nextCommandObserver
-	runtime.commandObservers[id] = observer
-	runtime.commandObserverMu.Unlock()
+	runtime.nextActionObserver++
+	id := runtime.nextActionObserver
+	runtime.actionObservers[id] = observer
+	runtime.actionObserverMu.Unlock()
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			runtime.commandObserverMu.Lock()
-			delete(runtime.commandObservers, id)
-			runtime.commandObserverMu.Unlock()
+			runtime.actionObserverMu.Lock()
+			delete(runtime.actionObservers, id)
+			runtime.actionObserverMu.Unlock()
 		})
 	}
 }
@@ -716,24 +723,73 @@ func (runtime *Runtime) Command(
 		return err
 	}
 	deviceMicros, timed := native.ResponseDeviceMicros(frame)
-	runtime.publishCommandEvidence(CommandEvidence{
+	runtime.publishActionEvidence(ActionEvidence{
 		Opcode: opcode, Payload: append([]byte(nil), payload...),
+		Source: native.InputSourceHost, SourceID: 0xFF,
 		DeviceMicros: deviceMicros, Timed: timed, ObservedAt: time.Now(),
 	})
 	return nil
 }
 
-func (runtime *Runtime) publishCommandEvidence(evidence CommandEvidence) {
-	runtime.commandObserverMu.RLock()
-	observers := make([]func(CommandEvidence), 0, len(runtime.commandObservers))
-	for _, observer := range runtime.commandObservers {
+func (runtime *Runtime) publishActionEvidence(evidence ActionEvidence) {
+	runtime.actionObserverMu.RLock()
+	observers := make([]func(ActionEvidence), 0, len(runtime.actionObservers))
+	for _, observer := range runtime.actionObservers {
 		observers = append(observers, observer)
 	}
-	runtime.commandObserverMu.RUnlock()
+	runtime.actionObserverMu.RUnlock()
 	for _, observer := range observers {
 		copyEvidence := evidence
 		copyEvidence.Payload = append([]byte(nil), evidence.Payload...)
 		observer(copyEvidence)
+	}
+}
+
+// ObserveMacroStatuses subscribes board-local capture and playback services
+// without competing for Runtime.Events. The callback receives a value copy in
+// UART order; the returned release function is idempotent.
+func (runtime *Runtime) ObserveMacroStatuses(observer func(native.MacroStatus)) func() {
+	if observer == nil {
+		return func() {}
+	}
+	runtime.macroStatusObserverMu.Lock()
+	if runtime.macroStatusObservers == nil {
+		runtime.macroStatusObservers = make(map[uint64]func(native.MacroStatus))
+	}
+	runtime.nextMacroStatusObserver++
+	id := runtime.nextMacroStatusObserver
+	runtime.macroStatusObservers[id] = observer
+	runtime.macroStatusObserverMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			runtime.macroStatusObserverMu.Lock()
+			delete(runtime.macroStatusObservers, id)
+			runtime.macroStatusObserverMu.Unlock()
+		})
+	}
+}
+
+func (runtime *Runtime) publishBoardAction(event native.DeviceEvent) {
+	if event.Type != native.EventAction {
+		return
+	}
+	runtime.publishActionEvidence(ActionEvidence{
+		Opcode: event.ActionOpcode, Payload: append([]byte(nil), event.ActionPayload...),
+		Source: event.Source, SourceID: event.SourceID, BoardOrigin: true,
+		DeviceMicros: event.DeviceMicros, Timed: event.Timed, ObservedAt: time.Now(),
+	})
+}
+
+func (runtime *Runtime) publishMacroStatus(status native.MacroStatus) {
+	runtime.macroStatusObserverMu.RLock()
+	observers := make([]func(native.MacroStatus), 0, len(runtime.macroStatusObservers))
+	for _, observer := range runtime.macroStatusObservers {
+		observers = append(observers, observer)
+	}
+	runtime.macroStatusObserverMu.RUnlock()
+	for _, observer := range observers {
+		observer(status)
 	}
 }
 
@@ -1167,6 +1223,10 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						rfMappingRequired, rfCaptured = runtime.observeRFLearningEvent(parsed)
 						kind, text = describeDeviceEvent(parsed)
 						parsedDevice = &parsed
+						runtime.publishBoardAction(parsed)
+						if parsed.Macro != nil {
+							runtime.publishMacroStatus(*parsed.Macro)
+						}
 					} else {
 						kind = "error"
 						text = err.Error()
@@ -1516,6 +1576,8 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 				native.MacroCancelled: "cancelled",
 				native.MacroCompleted: "completed",
 				native.MacroFailed:    "failed",
+				native.MacroRecording: "recording",
+				native.MacroCaptured:  "captured",
 			}[event.Macro.State]
 			if state == "" {
 				state = fmt.Sprintf("state-%d", event.Macro.State)
@@ -1598,6 +1660,16 @@ func describeDeviceEvent(event native.DeviceEvent) (string, string) {
 			"board requested page %s for %s",
 			event.AppPage,
 			event.AppTarget,
+		)
+	case native.EventAction:
+		source := inputSourceName(event.Source)
+		if source == "" {
+			source = fmt.Sprintf("source-%d", event.Source)
+		}
+		return "action.applied", fmt.Sprintf(
+			"%s action %s payload=% X at MCU %d us",
+			source, native.OpcodeName(event.ActionOpcode), event.ActionPayload,
+			event.DeviceMicros,
 		)
 	default:
 		return "event", fmt.Sprintf("device event %d payload=% X", event.Type, event.Raw)

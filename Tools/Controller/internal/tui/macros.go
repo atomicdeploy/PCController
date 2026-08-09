@@ -443,7 +443,7 @@ func macroRecordingSummary(state control.MacroRecordingState, now time.Time) str
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	return fmt.Sprintf("%d · %s · %s · %d steps · %s", state.ID, state.Name, state.Category, state.Steps, formatMacroDuration(elapsed))
+	return fmt.Sprintf("%d · %s · %s · %d steps (host %d · panel %d · RF %d) · %s", state.ID, state.Name, state.Category, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, formatMacroDuration(elapsed))
 }
 
 func macroRecordingHelp(state control.MacroRecordingState) string {
@@ -451,9 +451,9 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		return errorStyle.Render("Recorder error: " + state.LastError)
 	}
 	if state.Active {
-		return warnStyle.Render("Operate any queueable relay, motion, PWM, buzzer, display, RF, RGB, LED, or menu command; S saves, D discards.")
+		return warnStyle.Render("Operate the host, front panel, or RF controls; queueable relay, motion, PWM/MOSFET, buzzer, display, RF, RGB, LED, and menu actions share MCU timing. S saves, D discards.")
 	}
-	return labelStyle.Render("R starts a named recording; exact MCU acknowledgement timestamps become step offsets. N creates an editable empty draft.")
+	return labelStyle.Render("R starts a named recording; exact MCU action timestamps become step offsets. N creates an editable empty draft.")
 }
 
 func macroTableHeader(width int) string {
