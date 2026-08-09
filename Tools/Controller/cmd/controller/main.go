@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	gort "runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -167,6 +168,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if configIndependentToolchainMirrorInstall(args) {
 		return runToolchainMirrorInstall(args[2:], stdout, stderr)
 	}
+	if configIndependentToolchainRuntime(args) {
+		// Runtime publication, status, rollback, and removal operate only on
+		// explicit package/system paths. They must remain usable when no target
+		// account has a valid device configuration yet.
+		return runToolchainRuntime(args[1], args[2:], stdout, stderr)
+	}
 	store, err := appconfig.Open(configPath)
 	if err != nil {
 		return err
@@ -319,13 +326,24 @@ func runWebWithInitialAction(
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
 	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
 	noTray := flags.Bool("no-tray", false, "serve the web app without a native system-tray menu")
+	listen := flags.String("listen", "", "transient loopback IPC/WebUI listen address (does not change saved config)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller web [--no-open] [--no-tray] [--no-auto] [connection flags]")
+		return errors.New("usage: controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-auto] [connection flags]")
 	}
 	connection.captureOverrides(flags)
+	if strings.TrimSpace(*listen) != "" {
+		runtimeConfig, err := transientWebRuntimeConfig(store, *listen)
+		if err != nil {
+			return err
+		}
+		// This process-only endpoint lets an immutable user unit guarantee a
+		// loopback WebUI without rewriting the target user's network policy.
+		// Authentication and all other runtime settings remain config-owned.
+		configurePrimaryIPC(runtimeConfig)
+	}
 	claimContext, claimCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	claim, existing, err := claimOrResolveHostInstance(claimContext, "web")
 	claimCancel()
@@ -337,7 +355,7 @@ func runWebWithInitialAction(
 			_ = claim.Close()
 		}
 	}()
-	appURL, err := browserURL(store.Current().IPC.Listen)
+	appURL, err := browserURL(currentPrimaryEndpoint().Listen)
 	if err != nil {
 		return err
 	}
@@ -535,8 +553,34 @@ func runWebWithInitialAction(
 	}
 }
 
+func transientWebRuntimeConfig(store *appconfig.Store, listen string) (appconfig.Config, error) {
+	normalized, err := loopbackWebListen(listen)
+	if err != nil {
+		return appconfig.Config{}, err
+	}
+	runtimeConfig := store.CurrentRuntime()
+	runtimeConfig.IPC.Listen = normalized
+	return runtimeConfig, nil
+}
+
 func webBrowserAutoOpenAllowed(noOpen, controllerConnected bool) bool {
 	return !noOpen && controllerConnected
+}
+
+func loopbackWebListen(value string) (string, error) {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(value))
+	if err != nil {
+		return "", fmt.Errorf("--listen must be a loopback host:port address: %w", err)
+	}
+	parsedPort, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || parsedPort == 0 {
+		return "", errors.New("--listen port must be in 1..65535")
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if !strings.EqualFold(host, "localhost") && (ip == nil || !ip.IsLoopback()) {
+		return "", errors.New("--listen is intentionally restricted to a loopback address")
+	}
+	return net.JoinHostPort(host, strconv.FormatUint(parsedPort, 10)), nil
 }
 
 func primaryControllerConnected(ctx context.Context) bool {

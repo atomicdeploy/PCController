@@ -299,7 +299,7 @@ func printUsage(output io.Writer, configuredTitle ...string) {
 Interactive control:
   controller                         launch the Charm TUI
   controller tui [connection flags]
-  controller web [--no-open] [--no-tray] [--no-auto] [connection flags]
+  controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-auto] [connection flags]
   controller web export --output FILE.zip
   controller ports [connection flags]
   controller shell [connection flags]
@@ -324,6 +324,11 @@ Device, firmware and recovery:
 	controller toolchain provision-host --target-user USER [--apply|--dry-run] [--ubuntu-mirrors=domestic-first] [toolchain flags]
 	controller toolchain mirror-install [--apply|--dry-run] [--mirror-candidates FILE] [--json]
 	controller toolchain mirror-refresh [--config FILE] [--apply|--dry-run] [--json]
+	controller toolchain runtime-stage --package DIR --virtual-board FILE [--apply|--dry-run] [--json]
+	controller toolchain runtime-install --target-user USER [--package DIR] [--virtual-board FILE] [--browser FILE] [--apply|--dry-run] [--json]
+	controller toolchain runtime-status [--json]
+	controller toolchain runtime-rollback [--apply|--dry-run] [--json]
+	controller toolchain runtime-uninstall [--apply|--dry-run] [--json]
 	controller toolchain check|update|bootstrap|lock|sync|profile|compile|core-info|install-bootloader [flags]
 	controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only]
 	controller board blank --confirm NAME [--uart auto|PORT|none]
