@@ -248,6 +248,36 @@ test('package publishing tolerates a shell holding the canonical directory', asy
         assert.deepEqual(await readdir(canonical), ['controller.exe', 'licenses'])
 })
 
+test('package publishing tolerates a transient lock on the completed stage directory', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-stage-lock-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const canonical = join(root, 'bin')
+	const stage = join(root, 'stage')
+	await mkdir(join(stage, 'licenses'), { recursive: true })
+	await writeFile(join(stage, 'controller.exe'), 'new host')
+	await writeFile(join(stage, 'licenses', 'NOTICE.txt'), 'current notice')
+
+	let simulatedStageLock = true
+	installPackage(stage, {
+		root,
+		canonical,
+		rename(source, target) {
+			if (simulatedStageLock && source === stage && target === canonical) {
+				simulatedStageLock = false
+				const error = new Error('recent child still holds the stage directory')
+				error.code = 'EPERM'
+				throw error
+			}
+			renameSync(source, target)
+		}
+	})
+
+	assert.equal(simulatedStageLock, false)
+	assert.deepEqual(await readdir(root), ['bin'])
+	assert.equal(await readFile(join(canonical, 'controller.exe'), 'utf8'), 'new host')
+	assert.equal(await readFile(join(canonical, 'licenses', 'NOTICE.txt'), 'utf8'), 'current notice')
+})
+
 test('stale package cleanup recognizes only exact rollback transaction directories', async t => {
 	const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-transactions-'))
 	t.after(() => rm(root, { recursive: true, force: true }))
@@ -817,6 +847,17 @@ test('Windows resources are patched after link and before UPX', () => {
 		'<staging>/controller.exe'
 	])
 	assert.doesNotMatch(JSON.stringify(plan.actions), /go-winres[^}]*make|\.syso/i)
+})
+
+test('Windows installation inventory follows the final packed host manifest', () => {
+	const options = parseArguments(['--host-only'], {})
+	const windows = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	const ids = windows.actions.map(action => action.id)
+	assert.ok(ids.indexOf('upx-test') < ids.indexOf('host-manifest'))
+	assert.ok(ids.indexOf('host-manifest') < ids.indexOf('installation-inventory'))
+	assert.ok(ids.indexOf('installation-inventory') < ids.indexOf('host-publish'))
+	const linux = createPlan(options, resolveBuildIdentity(options, {}), 'linux')
+	assert.equal(linux.actions.some(action => action.id === 'installation-inventory'), false)
 })
 
 test('Win32 resource configuration retains icon, manifest, and version data', async () => {

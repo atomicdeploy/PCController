@@ -59,11 +59,7 @@ func ensurePlatformDesktopIntegration(
 		appID = productidentity.StableAppID
 	}
 	displayName := productidentity.Title(options.DisplayName)
-	executable, err := os.Executable()
-	if err != nil {
-		return DesktopIntegrationStatus{Supported: true, LastError: err.Error()}, err
-	}
-	executable, err = filepath.Abs(executable)
+	executable, err := resolveDesktopExecutable(options.Executable)
 	if err != nil {
 		return DesktopIntegrationStatus{Supported: true, LastError: err.Error()}, err
 	}
@@ -105,11 +101,7 @@ func removePlatformDesktopIntegration(
 		return DesktopIntegrationCleanupStatus{Supported: true, LastError: err.Error()}, err
 	}
 	displayName := productidentity.Title(options.DisplayName)
-	executable, err := os.Executable()
-	if err != nil {
-		return DesktopIntegrationCleanupStatus{Supported: true, LastError: err.Error()}, err
-	}
-	executable, err = filepath.Abs(executable)
+	executable, err := resolveDesktopExecutable(options.Executable)
 	if err != nil {
 		return DesktopIntegrationCleanupStatus{Supported: true, LastError: err.Error()}, err
 	}

@@ -7,9 +7,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"pccontroller.local/controller/internal/productidentity"
 	"time"
+
+	"pccontroller.local/controller/internal/ownedstorage"
+	"pccontroller.local/controller/internal/pathguard"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 const HostDataDirectoryEnvironment = "PCCONTROLLER_DATA_DIR"
@@ -39,9 +41,14 @@ func DefaultHostDataPaths() (HostDataPaths, error) {
 }
 
 func HostDataPathsFor(dataDirectory string) (HostDataPaths, error) {
-	dataDirectory = filepath.Clean(strings.TrimSpace(dataDirectory))
-	if dataDirectory == "" || dataDirectory == "." || !filepath.IsAbs(dataDirectory) {
+	dataDirectory = strings.TrimSpace(dataDirectory)
+	if dataDirectory == "" || !filepath.IsAbs(dataDirectory) {
 		return HostDataPaths{}, errors.New("host data directory must be an absolute path")
+	}
+	var err error
+	dataDirectory, err = pathguard.ResolveAbsolute(dataDirectory)
+	if err != nil {
+		return HostDataPaths{}, fmt.Errorf("resolve host data directory: %w", err)
 	}
 	backups := filepath.Join(dataDirectory, "backups")
 	state := filepath.Join(dataDirectory, "state")
@@ -59,6 +66,9 @@ func HostDataPathsFor(dataDirectory string) (HostDataPaths, error) {
 }
 
 func EnsureHostDataPaths(paths HostDataPaths) error {
+	if err := ownedstorage.Ensure(paths.DataDir); err != nil {
+		return fmt.Errorf("establish host data ownership: %w", err)
+	}
 	for _, directory := range []string{
 		paths.DataDir, paths.BackupsDir, paths.BackupOperations,
 		paths.FirmwareBlobsDir, paths.BoardSettingsDir, paths.ToolchainDir,

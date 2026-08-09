@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/installer"
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/programmer"
 	"pccontroller.local/controller/internal/secretstore"
@@ -333,6 +334,11 @@ Host configuration and integration:
 	controller config secrets status|set REF (--from-env NAME|--stdin)|clear REF
 	controller network edge-enable|edge-disable|peer-add|peer-remove|probe|status
 	controller --open-user-data | --open-config-dir | --clear-settings
+	controller package inventory --directory DIR [--output FILE]
+	controller install [--package DIR] [--expected-package-sha256 SHA256] [--desktop]
+	controller repair [--package DIR] [--expected-package-sha256 SHA256] [--desktop]
+	controller installation status
+	controller uninstall [--purge-data [--preview-purge | --confirm-purge {{PURGE_CONFIRMATION}}]]
   controller desktop [install|ensure|uninstall|remove]
   controller uri {{SCHEME}}://ACTION
   controller version
@@ -352,6 +358,7 @@ Device auto-detection always requires a valid controller HELLO identity.`
 	usage = strings.NewReplacer(
 		"{{PRODUCT}}", productidentity.Title(title),
 		"{{SCHEME}}", productidentity.ProtocolScheme,
+		"{{PURGE_CONFIRMATION}}", installer.PurgeConfirmation,
 	).Replace(usage)
 	fmt.Fprintln(output, decorateUsage(usage, usageANSIEnabled(output)))
 }

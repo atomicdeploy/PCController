@@ -16,6 +16,7 @@ import {
 	readdirSync,
 	readFileSync,
 	renameSync,
+	rmdirSync,
 	rmSync,
 	statSync,
 	writeFileSync
@@ -440,7 +441,13 @@ export function createPlan(options, identity, platform = process.platform) {
 			'-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controllerlib'
 		], HOST_ROOT))
 		actions.push({ id: 'licenses', stage: 'Collect project and Go-module notices', hardware: false })
-		actions.push({ id: 'host-manifest', stage: 'Publish canonical host package and manifest', hardware: false })
+		actions.push({ id: 'host-manifest', stage: 'Write canonical host package manifest', hardware: false })
+		if (platform === 'win32') actions.push({
+			id: 'installation-inventory',
+			stage: 'Generate hash-bound per-user installation inventory',
+			hardware: false
+		})
+		actions.push({ id: 'host-publish', stage: 'Publish canonical host package', hardware: false })
 	}
 	if (!options.cleanOnly && options.installBootloader) {
 		const command = createControllerProgramCommand({
@@ -1569,10 +1576,23 @@ export function installPackage(stage, options = {}) {
                 }
                 rename(stage, canonical)
         } catch (error) {
-                if (!movedPrevious && existsSync(canonical) &&
-                        ['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) {
-                        installPackageEntries(stage, canonical, previous, rename)
-                        return
+                if (!movedPrevious && ['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) {
+                        let createdCanonical = false
+                        if (!existsSync(canonical)) {
+                                mkdirSync(canonical)
+                                createdCanonical = true
+                        }
+                        try {
+                                installPackageEntries(stage, canonical, previous, rename)
+                                return
+                        } catch (fallbackError) {
+                                if (createdCanonical) {
+                                        // Remove only the empty directory created by this
+                                        // transaction. Any rollback residue stays visible.
+                                        try { rmdirSync(canonical) } catch {}
+                                }
+                                throw fallbackError
+                        }
                 }
                 if (movedPrevious && !existsSync(canonical) && existsSync(previous)) {
                         rename(previous, canonical)
@@ -1777,6 +1797,13 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		artifacts
 	}
 	atomicWriteJSON(join(stage, 'host-manifest.json'), manifest)
+	if (process.platform === 'win32') {
+		log.stage('🔐', 'Generating hash-bound per-user installation inventory')
+		run(executable, [
+			'package', 'inventory', '--directory', stage,
+			'--output', join(stage, 'installation-package.json')
+		], { cwd: stage, env, verbose: options.verbose })
+	}
 	log.stage('📤', 'Publishing the canonical host package')
 	installPackage(stage)
 	removeGeneratedTree(stage)
