@@ -28,6 +28,8 @@ func validatePlatformRelativeSyntax(path string) error {
 	return validateWindowsComponents(strings.ReplaceAll(path, "/", `\`))
 }
 
+func resolvePlatformAbsolute(path string) (string, error) { return path, nil }
+
 func validateWindowsComponents(path string) error {
 	for _, component := range strings.Split(path, `\`) {
 		if component == "" {

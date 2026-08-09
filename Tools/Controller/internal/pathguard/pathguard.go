@@ -32,6 +32,20 @@ func CleanAbsolute(value string) (string, error) {
 	return path, nil
 }
 
+// ResolveAbsolute returns an absolute path whose existing prefix is expressed
+// through the platform's canonical filesystem namespace. Unix callers use it
+// before persisting ownership paths so stable system aliases such as macOS
+// /var -> /private/var are not mistaken for user-controlled traversal. Windows
+// deliberately retains the lexical drive-rooted path: reparse points remain
+// visible to ValidateComponents and are rejected component by component.
+func ResolveAbsolute(value string) (string, error) {
+	path, err := CleanAbsolute(value)
+	if err != nil {
+		return "", err
+	}
+	return resolvePlatformAbsolute(path)
+}
+
 // ValidateRelative rejects traversal, device aliases, alternate data streams,
 // reserved names, and non-local relative paths before filepath.Join is used.
 func ValidateRelative(value string) error {

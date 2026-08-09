@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/ownedstorage"
+	"pccontroller.local/controller/internal/pathguard"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -40,9 +41,14 @@ func DefaultHostDataPaths() (HostDataPaths, error) {
 }
 
 func HostDataPathsFor(dataDirectory string) (HostDataPaths, error) {
-	dataDirectory = filepath.Clean(strings.TrimSpace(dataDirectory))
-	if dataDirectory == "" || dataDirectory == "." || !filepath.IsAbs(dataDirectory) {
+	dataDirectory = strings.TrimSpace(dataDirectory)
+	if dataDirectory == "" || !filepath.IsAbs(dataDirectory) {
 		return HostDataPaths{}, errors.New("host data directory must be an absolute path")
+	}
+	var err error
+	dataDirectory, err = pathguard.ResolveAbsolute(dataDirectory)
+	if err != nil {
+		return HostDataPaths{}, fmt.Errorf("resolve host data directory: %w", err)
 	}
 	backups := filepath.Join(dataDirectory, "backups")
 	state := filepath.Join(dataDirectory, "state")
