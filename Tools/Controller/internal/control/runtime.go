@@ -26,6 +26,7 @@ type Options struct {
 
 type Snapshot struct {
 	Connected         bool
+	Generation        uint64
 	Paused            bool
 	Port              ports.Info
 	Hello             native.Hello
@@ -145,6 +146,9 @@ type Runtime struct {
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
+	connectionObserverMu   sync.RWMutex
+	connectionObservers    map[uint64]func(uint64, ports.Info, native.Hello)
+	nextConnectionObserver uint64
 
 	events chan Event
 
@@ -440,6 +444,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	defer runtime.mu.RUnlock()
 	return Snapshot{
 		Connected:         runtime.session != nil,
+		Generation:        runtime.generation,
 		Paused:            runtime.paused,
 		Port:              runtime.port,
 		Hello:             runtime.hello,
@@ -481,6 +486,50 @@ func (runtime *Runtime) SetConnectionReadyHandler(handler func(ports.Info, nativ
 	runtime.mu.Lock()
 	runtime.connectionReadyHandler = handler
 	runtime.mu.Unlock()
+}
+
+// ObserveConnectionReady adds a non-exclusive service hook for every
+// authenticated initial connection and reconnect. Unlike
+// SetConnectionReadyHandler, independent subsystems cannot replace each
+// other's callback. The release function is idempotent.
+func (runtime *Runtime) ObserveConnectionReady(
+	observer func(uint64, ports.Info, native.Hello),
+) func() {
+	if observer == nil {
+		return func() {}
+	}
+	runtime.connectionObserverMu.Lock()
+	if runtime.connectionObservers == nil {
+		runtime.connectionObservers = make(map[uint64]func(uint64, ports.Info, native.Hello))
+	}
+	runtime.nextConnectionObserver++
+	id := runtime.nextConnectionObserver
+	runtime.connectionObservers[id] = observer
+	runtime.connectionObserverMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			runtime.connectionObserverMu.Lock()
+			delete(runtime.connectionObservers, id)
+			runtime.connectionObserverMu.Unlock()
+		})
+	}
+}
+
+func (runtime *Runtime) notifyConnectionReady(
+	generation uint64,
+	port ports.Info,
+	hello native.Hello,
+) {
+	runtime.connectionObserverMu.RLock()
+	observers := make([]func(uint64, ports.Info, native.Hello), 0, len(runtime.connectionObservers))
+	for _, observer := range runtime.connectionObservers {
+		observers = append(observers, observer)
+	}
+	runtime.connectionObserverMu.RUnlock()
+	for _, observer := range observers {
+		go observer(generation, port, hello)
+	}
 }
 
 // SetBeforeDisconnect installs one synchronous host-side fail-safe hook. The
@@ -709,6 +758,38 @@ func (runtime *Runtime) Request(
 	return frame, nil
 }
 
+// requestAtGeneration pins one request to the authenticated session that
+// produced an asynchronous lifecycle token. It can never fall through to a
+// replacement board after reconnect, even if the old request completes late.
+func (runtime *Runtime) requestAtGeneration(
+	ctx context.Context,
+	generation uint64,
+	opcode byte,
+	payload []byte,
+	expected ...byte,
+) (native.Frame, error) {
+	runtime.mu.RLock()
+	if runtime.generation != generation || runtime.session == nil {
+		runtime.mu.RUnlock()
+		return native.Frame{}, fmt.Errorf("connection generation %d is no longer active", generation)
+	}
+	session := runtime.session
+	runtime.mu.RUnlock()
+
+	frame, err := session.Request(ctx, opcode, payload, expected...)
+	if err != nil {
+		return native.Frame{}, err
+	}
+	runtime.mu.RLock()
+	current := runtime.generation == generation && runtime.session == session
+	runtime.mu.RUnlock()
+	if !current {
+		return native.Frame{}, fmt.Errorf("connection generation %d changed while the request was in flight", generation)
+	}
+	runtime.observe(frame)
+	return frame, nil
+}
+
 func (runtime *Runtime) Command(
 	ctx context.Context,
 	opcode byte,
@@ -883,6 +964,7 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	if ready != nil {
 		go ready(result.Port, result.Hello)
 	}
+	runtime.notifyConnectionReady(generation, result.Port, result.Hello)
 	go runtime.pump(result.Session, generation)
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
