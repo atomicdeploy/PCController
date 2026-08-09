@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/http/httpproxy"
 	"pccontroller.local/controller/internal/netpolicy"
 )
 
@@ -25,39 +24,48 @@ const (
 )
 
 type Client struct {
-	http  *http.Client
-	scope netpolicy.HTTPDestinationScope
+	http    *http.Client
+	scope   netpolicy.HTTPDestinationScope
+	initErr error
 }
 
-func NewClient(client *http.Client) *Client {
-	scope := netpolicy.HTTPDestinationConfigured
+// NewClient always enforces the public-source transport invariant. A non-nil
+// client is a settings/*http.Transport template, not permission to reach a
+// local destination.
+func NewClient(template *http.Client) *Client {
+	client, err := netpolicy.NewPublicHTTPClient(template, netpolicy.PublicHTTPClientOptions{
+		Timeout: requestTimeout, Operation: "update discovery",
+		Subject: "update URL", MaximumRedirects: 5,
+	})
+	return &Client{http: client, scope: netpolicy.HTTPDestinationPublic, initErr: err}
+}
+
+// NewTrustedClient explicitly allows configured local destinations and custom
+// transports. Use it only for tests or an authenticated/pinned peer path whose
+// trust decision happened before construction.
+func NewTrustedClient(client *http.Client) *Client {
 	if client == nil {
-		scope = netpolicy.HTTPDestinationPublic
-		proxyConfiguration := httpproxy.FromEnvironment()
-		proxy := proxyConfiguration.ProxyFunc()
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = func(request *http.Request) (*url.URL, error) {
-			return proxy(request.URL)
-		}
-		transport.DialContext = netpolicy.PinnedDialContext(
-			nil, transport.DialContext,
-			proxyConfiguration.HTTPProxy, proxyConfiguration.HTTPSProxy,
-		)
-		client = &http.Client{
-			Transport: netpolicy.PublicRoundTripper(transport, nil, "update URL"),
-			Timeout:   requestTimeout,
-		}
+		client = &http.Client{Timeout: requestTimeout}
 	}
 	copy := *client
+	if copy.Timeout == 0 {
+		copy.Timeout = requestTimeout
+	}
 	copy.CheckRedirect = (netpolicy.HTTPRedirectPolicy{
 		Operation: "update discovery", Subject: "update URL", MaximumHops: 5,
-		Scope: scope, Previous: copy.CheckRedirect,
+		Scope: netpolicy.HTTPDestinationConfigured, Previous: copy.CheckRedirect,
 	}).CheckRedirect
-	return &Client{http: &copy, scope: scope}
+	return &Client{http: &copy, scope: netpolicy.HTTPDestinationConfigured}
 }
 
 func (client *Client) get(ctx context.Context, rawURL, token, accept string) (*http.Response, error) {
-	if client == nil || client.http == nil {
+	if client == nil {
+		return nil, errors.New("release discovery HTTP client is unavailable")
+	}
+	if client.initErr != nil {
+		return nil, fmt.Errorf("initialize release discovery client: %w", client.initErr)
+	}
+	if client.http == nil {
 		return nil, errors.New("release discovery HTTP client is unavailable")
 	}
 	parsed, err := netpolicy.ParseHTTPURLForScope(rawURL, "update URL", client.scope)

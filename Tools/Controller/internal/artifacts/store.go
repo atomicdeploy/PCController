@@ -60,6 +60,9 @@ func NewStore(root string) (*Store, error) {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			return nil, fmt.Errorf("create artifact store %q: %w", directory, err)
 		}
+		if err := os.Chmod(directory, 0o700); err != nil {
+			return nil, fmt.Errorf("restrict artifact store %q: %w", directory, err)
+		}
 	}
 	return store, nil
 }
@@ -241,6 +244,10 @@ func (store *Store) Open(kind Kind, digest string) (Descriptor, *os.File, error)
 // openVerified reads metadata and opens the blob through one os.Root, then
 // validates size, type, and digest on that same file handle. Callers that serve
 // or consume content keep this handle; there is no verified-path/reopen window.
+// The store root is an exclusive trusted-writer boundary. Published blobs are
+// assigned portable read-only mode, and every later Open revalidates them; a
+// privileged actor that restores write permission (or an OS that treats mode as
+// advisory) and mutates the already-open inode is outside this boundary.
 func (store *Store) openVerified(kind Kind, digest string) (Descriptor, *os.File, error) {
 	kind, err := canonicalStoreKind(kind)
 	if err != nil {
@@ -591,6 +598,12 @@ func publishImmutable(source, destination, digest string, size int64) error {
 		if verifyErr := verifyRegularFile(destination, digest, size); verifyErr != nil {
 			return fmt.Errorf("publish artifact blob: %w", err)
 		}
+	}
+	// Content-addressed blobs are never edited in place by the application.
+	// Portable read-only mode narrows accidental mutation where the OS enforces
+	// it; the enclosing account-owned store remains the trust boundary.
+	if err := os.Chmod(destination, 0o444); err != nil {
+		return fmt.Errorf("make artifact blob read-only: %w", err)
 	}
 	return verifyRegularFile(destination, digest, size)
 }

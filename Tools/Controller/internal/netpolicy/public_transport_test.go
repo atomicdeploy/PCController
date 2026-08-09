@@ -3,10 +3,10 @@ package netpolicy
 import (
 	"context"
 	"errors"
-	"io"
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -53,7 +53,7 @@ func TestPinnedDialContextDialsValidatedNumericAddress(t *testing.T) {
 		_ = right.Close()
 		return left, nil
 	}
-	connection, err := PinnedDialContext(resolver, dial)(context.Background(), "tcp", "updates.example.com:443")
+	connection, err := pinnedDialContext(resolver, dial, "")(context.Background(), "tcp", "updates.example.com:443")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,74 +63,169 @@ func TestPinnedDialContextDialsValidatedNumericAddress(t *testing.T) {
 	}
 }
 
-func TestPinnedDialContextKeepsConfiguredProxyCompatibility(t *testing.T) {
-	resolver := resolverFunc(func(context.Context, string, string) ([]netip.Addr, error) {
-		return nil, errors.New("proxy address must not use destination resolution")
+func TestPublicTransportBindsProxyTrustToActualSelection(t *testing.T) {
+	resolver := resolverFunc(func(_ context.Context, _, host string) ([]netip.Addr, error) {
+		switch host {
+		case "updates.example.com":
+			return []netip.Addr{netip.MustParseAddr("1.1.1.1")}, nil
+		case "proxy.example.com":
+			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+		default:
+			return nil, errors.New("unexpected host " + host)
+		}
 	})
-	var dialed string
-	dial := func(_ context.Context, _ string, address string) (net.Conn, error) {
-		dialed = address
+	proxyURL, _ := url.Parse("http://proxy.example.com:3128")
+	selector := func(request *http.Request) (*url.URL, error) {
+		if request.Header.Get("Use-Test-Proxy") == "yes" {
+			return proxyURL, nil
+		}
+		return nil, nil // models NO_PROXY/direct selection
+	}
+	transport := NewPublicTransport(nil, selector, resolver, "artifact URL").(*publicRoundTripper)
+	var dialed []string
+	transport.dial = func(_ context.Context, _ string, address string) (net.Conn, error) {
+		dialed = append(dialed, address)
 		left, right := net.Pipe()
 		_ = right.Close()
 		return left, nil
 	}
-	connection, err := PinnedDialContext(resolver, dial, "127.0.0.1:3128")(
-		context.Background(), "tcp", "127.0.0.1:3128",
-	)
+
+	directRequest, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/file.hex", nil)
+	selected, err := transport.proxy(directRequest)
+	if err != nil || selected != nil {
+		t.Fatalf("direct selection=%v, %v", selected, err)
+	}
+	direct, err := transport.transportFor(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := direct.DialContext(context.Background(), "tcp", "proxy.example.com:3128"); err == nil ||
+		!strings.Contains(err.Error(), "non-public") {
+		t.Fatalf("bypassed proxy authority was trusted for a direct request: %v", err)
+	}
+	if len(dialed) != 0 {
+		t.Fatalf("direct request dialed an unvalidated address: %v", dialed)
+	}
+
+	proxiedRequest := directRequest.Clone(context.Background())
+	proxiedRequest.Header.Set("Use-Test-Proxy", "yes")
+	selected, err = transport.proxy(proxiedRequest)
+	if err != nil || selected == nil {
+		t.Fatalf("proxy selection=%v, %v", selected, err)
+	}
+	proxied, err := transport.transportFor(selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := proxied.DialContext(context.Background(), "tcp", "proxy.example.com:3128")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = connection.Close()
-	if dialed != "127.0.0.1:3128" {
-		t.Fatalf("proxy dial=%q", dialed)
+	if len(dialed) != 1 || dialed[0] != "proxy.example.com:3128" {
+		t.Fatalf("selected proxy dial=%v", dialed)
 	}
 }
 
-func TestPublicRoundTripperRejectsRedirectToPrivateDestination(t *testing.T) {
-	resolver := publicTestResolver(t)
-	calls := 0
-	base := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		calls++
-		return &http.Response{
-			StatusCode: http.StatusFound,
-			Header:     http.Header{"Location": []string{"http://127.0.0.1/private.hex"}},
-			Body:       io.NopCloser(strings.NewReader("")),
-			Request:    request,
-		}, nil
+func TestPublicClientDoesNotInheritInjectedDialOrProxyCapabilities(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "")
+	t.Setenv("HTTPS_PROXY", "")
+	t.Setenv("ALL_PROXY", "")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("http_proxy", "")
+	t.Setenv("https_proxy", "")
+	t.Setenv("all_proxy", "")
+	t.Setenv("no_proxy", "")
+	unsafeDialUsed := false
+	unsafeProxyUsed := false
+	template := &http.Client{Transport: &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			unsafeDialUsed = true
+			return nil, errors.New("unsafe injected dial")
+		},
+		Proxy: func(*http.Request) (*url.URL, error) {
+			unsafeProxyUsed = true
+			return url.Parse("http://127.0.0.1:3128")
+		},
+	}}
+	client, err := NewPublicHTTPClient(template, PublicHTTPClientOptions{
+		Subject: "artifact URL",
+		Resolver: resolverFunc(func(_ context.Context, _, _ string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("1.1.1.1")}, nil
+		}),
 	})
-	request, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/board.hex", nil)
-	_, err := (&http.Client{Transport: PublicRoundTripper(base, resolver, "artifact URL")}).Do(request)
-	if err == nil || !strings.Contains(err.Error(), "public network destination") {
-		t.Fatalf("redirect error = %v", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if calls != 1 {
-		t.Fatalf("private redirect reached transport; calls=%d", calls)
+	public := client.Transport.(*publicRoundTripper)
+	request, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/file.hex", nil)
+	selected, err := public.proxy(request)
+	if err != nil || selected != nil || unsafeProxyUsed {
+		t.Fatalf("public proxy selection=%v, %v; injected=%v", selected, err, unsafeProxyUsed)
 	}
-}
-
-func TestPublicRoundTripperRejectsUnsafeEffectiveResponseURL(t *testing.T) {
-	resolver := publicTestResolver(t)
-	base := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		effective := request.Clone(request.Context())
-		effective.URL, _ = effective.URL.Parse("http://169.254.169.254/latest/meta-data/")
-		return &http.Response{
-			StatusCode: http.StatusOK, Header: make(http.Header),
-			Body: io.NopCloser(strings.NewReader("payload")), Request: effective,
-		}, nil
-	})
-	request, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/board.hex", nil)
-	_, err := PublicRoundTripper(base, resolver, "artifact URL").RoundTrip(request)
-	if err == nil || !strings.Contains(err.Error(), "final remote destination") {
-		t.Fatalf("effective URL error = %v", err)
-	}
-}
-
-func publicTestResolver(t *testing.T) IPResolver {
-	t.Helper()
-	return resolverFunc(func(_ context.Context, _, host string) ([]netip.Addr, error) {
-		if host != "updates.example.com" {
-			return nil, errors.New("unexpected host " + host)
+	public.dial = func(_ context.Context, _ string, address string) (net.Conn, error) {
+		if address != "1.1.1.1:443" {
+			t.Fatalf("public dial received %q", address)
 		}
-		return []netip.Addr{netip.MustParseAddr("1.1.1.1")}, nil
-	})
+		left, right := net.Pipe()
+		_ = right.Close()
+		return left, nil
+	}
+	direct, err := public.transportFor(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := direct.DialContext(context.Background(), "tcp", "updates.example.com:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.Close()
+	if unsafeDialUsed {
+		t.Fatal("public client inherited an injected dial capability")
+	}
+}
+
+func TestNewPublicHTTPClientRejectsCustomRoundTripper(t *testing.T) {
+	called := false
+	template := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("must not run")
+	})}
+	_, err := NewPublicHTTPClient(template, PublicHTTPClientOptions{Subject: "artifact URL"})
+	if err == nil || !strings.Contains(err.Error(), "explicit trusted client") {
+		t.Fatalf("custom transport error=%v", err)
+	}
+	if called {
+		t.Fatal("rejected custom transport was invoked")
+	}
+}
+
+func TestHTTPRedirectPolicyRejectsDowngradeAndConfinesCredentials(t *testing.T) {
+	origin, _ := http.NewRequest(http.MethodGet, "https://updates.example.com/file.hex", nil)
+	downgrade, _ := http.NewRequest(http.MethodGet, "http://updates.example.com/file.hex", nil)
+	policy := HTTPRedirectPolicy{Operation: "artifact download", Subject: "artifact URL", Scope: HTTPDestinationPublic}
+	if err := policy.CheckRedirect(downgrade, []*http.Request{origin}); err == nil || !strings.Contains(err.Error(), "HTTPS-to-HTTP") {
+		t.Fatalf("downgrade error=%v", err)
+	}
+
+	crossAuthority, _ := http.NewRequest(http.MethodGet, "https://cdn.example.com/file.hex", nil)
+	crossAuthority.Header.Set("Authorization", "Bearer secret")
+	policy.Previous = func(request *http.Request, _ []*http.Request) error {
+		request.Header.Set("Authorization", "Bearer restored")
+		return nil
+	}
+	if err := policy.CheckRedirect(crossAuthority, []*http.Request{origin}); err != nil {
+		t.Fatal(err)
+	}
+	if credential := crossAuthority.Header.Get("Authorization"); credential != "" {
+		t.Fatalf("cross-authority credential=%q", credential)
+	}
+}
+
+func TestValidateResolvedPublicURLRejectsUnsafeEffectiveDestination(t *testing.T) {
+	target, _ := url.Parse("http://169.254.169.254/latest/meta-data/")
+	err := validateResolvedPublicURL(context.Background(), nil, target, "artifact URL")
+	if err == nil {
+		t.Fatalf("effective URL error=%v", err)
+	}
 }

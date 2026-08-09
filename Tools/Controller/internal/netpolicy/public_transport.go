@@ -2,6 +2,8 @@ package netpolicy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -9,6 +11,8 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 )
 
 // IPResolver is the small resolver surface needed to validate a destination.
@@ -20,6 +24,61 @@ type IPResolver interface {
 
 // DialContextFunc matches net.Dialer.DialContext.
 type DialContextFunc func(context.Context, string, string) (net.Conn, error)
+
+// ProxySelector matches http.Transport.Proxy. The selected proxy is evaluated
+// for each request before a transport/dial policy is chosen.
+type ProxySelector func(*http.Request) (*url.URL, error)
+
+// PublicHTTPClientOptions describes one public-only HTTP consumer.
+type PublicHTTPClientOptions struct {
+	Timeout          time.Duration
+	Operation        string
+	Subject          string
+	MaximumRedirects int
+	Resolver         IPResolver
+}
+
+// NewPublicHTTPClient copies safe client settings while enforcing the same
+// public destination, redirect, proxy-selection, and pinned-dial invariant for
+// nil and non-nil templates. HTTP-client timeout, cookie jar, and redirect
+// policy are retained, but transport capabilities are not. A custom
+// RoundTripper cannot be proven to use the pinned dialer and is rejected;
+// callers that deliberately trust such a transport must use an explicitly
+// trusted higher-level constructor.
+func NewPublicHTTPClient(template *http.Client, options PublicHTTPClientOptions) (*http.Client, error) {
+	client := &http.Client{}
+	base := http.DefaultTransport.(*http.Transport).Clone()
+	if template != nil {
+		*client = *template
+		switch template.Transport.(type) {
+		case nil:
+			// A nil transport has ordinary net/http semantics, including the
+			// process proxy environment.
+		case *http.Transport:
+			// A transport is a capability container, not a settings value: even
+			// apparently harmless fields can install proxy headers, client
+			// certificates, protocol handlers, or dial hooks. Public consumers
+			// therefore use the canonical transport below.
+		default:
+			return nil, fmt.Errorf("%s public client requires *http.Transport; use an explicit trusted client for custom transports", normalizedSubject(options.Subject))
+		}
+	}
+	// Proxy and dial hooks are security-sensitive capabilities, not passive
+	// client settings. Public consumers always take proxy configuration from
+	// the standard environment and replace every supplied dial hook. Callers
+	// that deliberately inject either capability must choose an explicit
+	// trusted constructor instead.
+	client.Transport = NewPublicTransport(base, EnvironmentProxySelector(), options.Resolver, options.Subject)
+	if client.Timeout == 0 {
+		client.Timeout = options.Timeout
+	}
+	client.CheckRedirect = (HTTPRedirectPolicy{
+		Operation: options.Operation, Subject: options.Subject,
+		MaximumHops: options.MaximumRedirects, Scope: HTTPDestinationPublic,
+		Previous: client.CheckRedirect,
+	}).CheckRedirect
+	return client, nil
+}
 
 // HTTPRedirectPolicy is the canonical redirect boundary for downloads and
 // release discovery. It composes with a caller's policy after enforcing URL,
@@ -58,11 +117,16 @@ func (policy HTTPRedirectPolicy) CheckRedirect(request *http.Request, via []*htt
 	if strings.EqualFold(previousRequest.URL.Scheme, "https") && strings.EqualFold(request.URL.Scheme, "http") {
 		return fmt.Errorf("%s refused an HTTPS-to-HTTP redirect", operation)
 	}
+	if policy.Previous != nil {
+		if err := policy.Previous(request, via); err != nil {
+			return err
+		}
+	}
+	// Enforce credential confinement after a composed policy runs as well, so
+	// an injected callback cannot accidentally restore credentials on a new
+	// authority.
 	if !sameHTTPAuthority(previousRequest.URL, request.URL) {
 		request.Header.Del("Authorization")
-	}
-	if policy.Previous != nil {
-		return policy.Previous(request, via)
 	}
 	return nil
 }
@@ -84,7 +148,7 @@ func ResolvePublicHost(ctx context.Context, resolver IPResolver, host string) ([
 	}
 	if literal, err := netip.ParseAddr(host); err == nil {
 		literal = literal.Unmap()
-		if !publicIP(net.IP(literal.AsSlice())) {
+		if !publicAddress(literal) {
 			return nil, fmt.Errorf("remote destination %q is not public", host)
 		}
 		return []netip.Addr{literal}, nil
@@ -103,7 +167,7 @@ func ResolvePublicHost(ctx context.Context, resolver IPResolver, host string) ([
 	seen := make(map[netip.Addr]bool, len(addresses))
 	for _, address := range addresses {
 		address = address.Unmap()
-		if !address.IsValid() || !publicIP(net.IP(address.AsSlice())) {
+		if !publicAddress(address) {
 			return nil, fmt.Errorf("remote destination %q resolved to a non-public address", host)
 		}
 		if !seen[address] {
@@ -114,23 +178,18 @@ func ResolvePublicHost(ctx context.Context, resolver IPResolver, host string) ([
 	return result, nil
 }
 
-// PinnedDialContext resolves and validates a direct destination, then passes a
-// numeric address to the actual dialer. A second DNS lookup cannot redirect the
-// connection after validation. Explicit proxy endpoints are trusted process
-// configuration and are dialed normally; PublicRoundTripper still validates
-// the requested target before the proxy sees it.
-func PinnedDialContext(
-	resolver IPResolver,
-	dial DialContextFunc,
-	trustedProxyURLs ...string,
-) DialContextFunc {
+// pinnedDialContext resolves and validates a direct destination, then passes a
+// numeric address to the actual dialer. selectedProxyAuthority is non-empty
+// only on the cached transport created after ProxySelector actually selected
+// that proxy for the current request class. A configured-but-bypassed proxy can
+// therefore never exempt a direct destination from validation.
+func pinnedDialContext(resolver IPResolver, dial DialContextFunc, selectedProxyAuthority string) DialContextFunc {
 	if dial == nil {
 		dialer := &net.Dialer{}
 		dial = dialer.DialContext
 	}
-	trusted := proxyAuthorities(trustedProxyURLs)
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		if trusted[canonicalAuthority(address)] {
+		if selectedProxyAuthority != "" && canonicalAuthority(address) == selectedProxyAuthority {
 			return dial(ctx, network, address)
 		}
 		host, port, err := net.SplitHostPort(address)
@@ -153,31 +212,60 @@ func PinnedDialContext(
 	}
 }
 
-// PublicRoundTripper validates every request passed to the base transport.
-// net/http invokes RoundTrip separately for each redirect hop, so a redirect
-// cannot escape the policy. The final response request is checked as a defense
-// against custom transports that return a different effective URL.
-func PublicRoundTripper(base http.RoundTripper, resolver IPResolver, subject string) http.RoundTripper {
-	if base == nil {
-		base = http.DefaultTransport
+// NewPublicTransport validates every request, evaluates its actual proxy
+// selection, and uses a cached transport whose only dial exemption is that
+// selected proxy. Direct and per-proxy pools stay separate.
+func NewPublicTransport(template *http.Transport, proxy ProxySelector, resolver IPResolver, subject string) http.RoundTripper {
+	if template == nil {
+		template = http.DefaultTransport.(*http.Transport).Clone()
+	} else {
+		template = template.Clone()
 	}
-	return publicRoundTripper{base: base, resolver: resolver, subject: normalizedSubject(subject)}
+	// All TLS connections must flow through the pinned DialContext. A custom
+	// TLS dial hook would otherwise bypass destination pinning.
+	template.DialTLS = nil
+	template.DialTLSContext = nil
+	template.Proxy = nil
+	return &publicRoundTripper{
+		template: template, proxy: proxy, resolver: resolver,
+		subject: normalizedSubject(subject), transports: make(map[string]*http.Transport),
+		dial: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+	}
 }
 
 type publicRoundTripper struct {
-	base     http.RoundTripper
-	resolver IPResolver
-	subject  string
+	template   *http.Transport
+	proxy      ProxySelector
+	resolver   IPResolver
+	subject    string
+	dial       DialContextFunc
+	mu         sync.Mutex
+	transports map[string]*http.Transport
 }
 
-func (transport publicRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+func (transport *publicRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil || request.URL == nil {
 		return nil, errors.New("remote request has no URL")
 	}
 	if err := validateResolvedPublicURL(request.Context(), transport.resolver, request.URL, transport.subject); err != nil {
 		return nil, err
 	}
-	response, err := transport.base.RoundTrip(request)
+	var selectedProxy *url.URL
+	var err error
+	if transport.proxy != nil {
+		selectedProxy, err = transport.proxy(request)
+		if err != nil {
+			return nil, fmt.Errorf("select proxy for %s: %w", transport.subject, err)
+		}
+	}
+	selectedTransport, err := transport.transportFor(selectedProxy)
+	if err != nil {
+		return nil, err
+	}
+	response, err := selectedTransport.RoundTrip(request)
 	if err != nil {
 		return response, err
 	}
@@ -194,6 +282,46 @@ func (transport publicRoundTripper) RoundTrip(request *http.Request) (*http.Resp
 	return response, nil
 }
 
+func (transport *publicRoundTripper) transportFor(selectedProxy *url.URL) (*http.Transport, error) {
+	key := "direct"
+	selectedAuthority := ""
+	if selectedProxy != nil {
+		var err error
+		selectedAuthority, err = proxyDialAuthority(selectedProxy)
+		if err != nil {
+			return nil, err
+		}
+		digest := sha256.Sum256([]byte(selectedProxy.String()))
+		key = "proxy:" + hex.EncodeToString(digest[:])
+	}
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	if existing := transport.transports[key]; existing != nil {
+		return existing, nil
+	}
+	created := transport.template.Clone()
+	created.DialTLS = nil
+	created.DialTLSContext = nil
+	created.DialContext = pinnedDialContext(transport.resolver, transport.dial, selectedAuthority)
+	if selectedProxy == nil {
+		created.Proxy = nil
+	} else {
+		copy := *selectedProxy
+		created.Proxy = http.ProxyURL(&copy)
+	}
+	transport.transports[key] = created
+	return created, nil
+}
+
+// CloseIdleConnections releases every direct/per-proxy cached pool.
+func (transport *publicRoundTripper) CloseIdleConnections() {
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	for _, candidate := range transport.transports {
+		candidate.CloseIdleConnections()
+	}
+}
+
 func validateResolvedPublicURL(ctx context.Context, resolver IPResolver, target *url.URL, subject string) error {
 	if target == nil {
 		return errors.New("remote destination is missing")
@@ -206,32 +334,24 @@ func validateResolvedPublicURL(ctx context.Context, resolver IPResolver, target 
 	return err
 }
 
-func proxyAuthorities(values []string) map[string]bool {
-	result := make(map[string]bool)
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if !strings.Contains(value, "://") {
-			value = "http://" + value
-		}
-		parsed, err := url.Parse(value)
-		if err != nil || parsed.Hostname() == "" {
-			continue
-		}
-		port := parsed.Port()
-		if port == "" {
-			switch strings.ToLower(parsed.Scheme) {
-			case "https":
-				port = "443"
-			default:
-				port = "80"
-			}
-		}
-		result[canonicalAuthority(net.JoinHostPort(parsed.Hostname(), port))] = true
+func proxyDialAuthority(proxy *url.URL) (string, error) {
+	if proxy == nil || strings.TrimSpace(proxy.Hostname()) == "" {
+		return "", errors.New("selected proxy has no host")
 	}
-	return result
+	port := proxy.Port()
+	if port == "" {
+		switch strings.ToLower(strings.TrimSpace(proxy.Scheme)) {
+		case "http":
+			port = "80"
+		case "https":
+			port = "443"
+		case "socks5", "socks5h":
+			port = "1080"
+		default:
+			return "", fmt.Errorf("selected proxy uses unsupported scheme %q", proxy.Scheme)
+		}
+	}
+	return canonicalAuthority(net.JoinHostPort(proxy.Hostname(), port)), nil
 }
 
 func canonicalAuthority(value string) string {

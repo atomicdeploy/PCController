@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,12 @@ import (
 
 	"pccontroller.local/controller/internal/artifacts"
 )
+
+type releaseRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip releaseRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
+}
 
 func TestGitHubWorkflowAndReleaseDiscoveryPreserveDigests(t *testing.T) {
 	archiveDigest := strings.Repeat("a", 64)
@@ -51,7 +58,7 @@ func TestGitHubWorkflowAndReleaseDiscoveryPreserveDigests(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client := NewClient(server.Client())
+	client := NewTrustedClient(server.Client())
 	workflow, err := client.DiscoverWorkflow(context.Background(), GitHubWorkflowRequest{
 		Repository: "acme/device", Branch: "main", Workflow: "Build",
 		Kind: artifacts.KindFirmware, APIBaseURL: server.URL, PackedTimestamp: 1234,
@@ -90,7 +97,7 @@ func TestManifestResolutionAndPlatformAwareComparison(t *testing.T) {
 		writeTestJSON(writer, manifest)
 	}))
 	defer server.Close()
-	result, err := NewClient(server.Client()).DiscoverManifest(context.Background(), ManifestRequest{URL: server.URL + "/updates/manifest.json"})
+	result, err := NewTrustedClient(server.Client()).DiscoverManifest(context.Background(), ManifestRequest{URL: server.URL + "/updates/manifest.json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +136,7 @@ func TestManifestIgnoresAdditiveFieldsWithinKnownFormat(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := NewClient(server.Client()).DiscoverManifest(context.Background(), ManifestRequest{URL: server.URL + "/manifest.json"})
+	result, err := NewTrustedClient(server.Client()).DiscoverManifest(context.Background(), ManifestRequest{URL: server.URL + "/manifest.json"})
 	if err != nil {
 		t.Fatalf("discover additive manifest: %v", err)
 	}
@@ -153,7 +160,7 @@ func TestManifestRelativeArtifactsUseValidatedFinalResponseURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	result, err := NewClient(server.Client()).DiscoverManifest(
+	result, err := NewTrustedClient(server.Client()).DiscoverManifest(
 		context.Background(), ManifestRequest{URL: server.URL + "/manifest.json"},
 	)
 	if err != nil {
@@ -179,6 +186,35 @@ func TestDefaultClientRejectsNonPublicInitialAndRedirectURLs(t *testing.T) {
 	err = client.http.CheckRedirect(redirect, []*http.Request{origin})
 	if err == nil || !strings.Contains(err.Error(), "public network destination") {
 		t.Fatalf("private redirect error=%v", err)
+	}
+}
+
+func TestClientInjectionCannotRelaxPublicDestinationPolicy(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+
+	_, err := NewClient(server.Client()).DiscoverManifest(context.Background(), ManifestRequest{URL: server.URL + "/manifest.json"})
+	if err == nil || !strings.Contains(err.Error(), "public network destination") {
+		t.Fatalf("injected client local-destination error=%v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("local server received %d public discovery requests", requests)
+	}
+
+	called := false
+	custom := &http.Client{Transport: releaseRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("must not run")
+	})}
+	_, err = NewClient(custom).DiscoverManifest(context.Background(), ManifestRequest{URL: "https://updates.example.com/manifest.json"})
+	if err == nil || !strings.Contains(err.Error(), "explicit trusted client") {
+		t.Fatalf("custom transport error=%v", err)
+	}
+	if called {
+		t.Fatal("rejected custom discovery transport was invoked")
 	}
 }
 
@@ -223,7 +259,7 @@ func TestArchiveStageStreamsProgressAndPreservesMetadata(t *testing.T) {
 	}
 	defer artifactService.Close()
 	events := make(chan string, 32)
-	service, err := NewService(NewClient(server.Client()), artifactService, func(kind, _ string, _ map[string]string) { events <- kind })
+	service, err := NewService(NewTrustedClient(server.Client()), artifactService, func(kind, _ string, _ map[string]string) { events <- kind })
 	if err != nil {
 		t.Fatal(err)
 	}

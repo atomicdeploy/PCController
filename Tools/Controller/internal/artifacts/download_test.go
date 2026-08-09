@@ -4,11 +4,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+type artifactRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip artifactRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
+}
 
 func TestDownloaderVerifiesRemoteSizeAndHash(t *testing.T) {
 	digest := sha256.Sum256([]byte(validIntelHEX))
@@ -20,7 +27,7 @@ func TestDownloaderVerifiesRemoteSizeAndHash(t *testing.T) {
 	}))
 	defer server.Close()
 	store := newTestStore(t)
-	descriptor, err := NewDownloader(server.Client()).Fetch(context.Background(), store, FetchRequest{
+	descriptor, err := NewTrustedDownloader(server.Client()).Fetch(context.Background(), store, FetchRequest{
 		URL: server.URL, Kind: KindFirmware, SHA256: hash, Bytes: int64(len(validIntelHEX)),
 	}, nil)
 	if err != nil {
@@ -29,7 +36,7 @@ func TestDownloaderVerifiesRemoteSizeAndHash(t *testing.T) {
 	if descriptor.SHA256 != hash || descriptor.Name != "remote.hex" {
 		t.Fatalf("descriptor=%#v", descriptor)
 	}
-	_, err = NewDownloader(server.Client()).Fetch(context.Background(), store, FetchRequest{
+	_, err = NewTrustedDownloader(server.Client()).Fetch(context.Background(), store, FetchRequest{
 		URL: server.URL, Kind: KindFirmware, SHA256: strings.Repeat("0", 64),
 	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "checksum header") {
@@ -49,7 +56,7 @@ func TestDownloaderDoesNotForwardBearerAcrossAuthority(t *testing.T) {
 	}))
 	defer origin.Close()
 	client := origin.Client()
-	_, err := NewDownloader(client).Fetch(context.Background(), newTestStore(t), FetchRequest{
+	_, err := NewTrustedDownloader(client).Fetch(context.Background(), newTestStore(t), FetchRequest{
 		URL: origin.URL, Kind: KindFirmware, BearerToken: "secret",
 	}, nil)
 	if err != nil {
@@ -74,5 +81,38 @@ func TestDefaultDownloaderRejectsNonPublicInitialAndRedirectURLs(t *testing.T) {
 	err = downloader.client.CheckRedirect(redirect, []*http.Request{origin})
 	if err == nil || !strings.Contains(err.Error(), "public network destination") {
 		t.Fatalf("private redirect error=%v", err)
+	}
+}
+
+func TestDownloaderInjectionCannotRelaxPublicDestinationPolicy(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		requests++
+	}))
+	defer server.Close()
+
+	_, err := NewDownloader(server.Client()).Fetch(context.Background(), newTestStore(t), FetchRequest{
+		URL: server.URL, Kind: KindFirmware,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "public network destination") {
+		t.Fatalf("injected client local-destination error=%v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("local server received %d public downloader requests", requests)
+	}
+
+	called := false
+	custom := &http.Client{Transport: artifactRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("must not run")
+	})}
+	_, err = NewDownloader(custom).Fetch(context.Background(), newTestStore(t), FetchRequest{
+		URL: "https://updates.example.com/board.hex", Kind: KindFirmware,
+	}, nil)
+	if err == nil || !strings.Contains(err.Error(), "explicit trusted client") {
+		t.Fatalf("custom transport error=%v", err)
+	}
+	if called {
+		t.Fatal("rejected custom artifact transport was invoked")
 	}
 }

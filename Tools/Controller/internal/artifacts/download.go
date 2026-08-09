@@ -12,42 +12,44 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/http/httpproxy"
 	"pccontroller.local/controller/internal/netpolicy"
 )
 
 const defaultDownloadTimeout = 10 * time.Minute
 
 type Downloader struct {
-	client *http.Client
-	scope  netpolicy.HTTPDestinationScope
+	client  *http.Client
+	scope   netpolicy.HTTPDestinationScope
+	initErr error
 }
 
-func NewDownloader(client *http.Client) *Downloader {
-	scope := netpolicy.HTTPDestinationConfigured
+// NewDownloader always enforces the public-source transport invariant. A
+// non-nil client is a settings/*http.Transport template, not permission to
+// reach loopback or the LAN.
+func NewDownloader(template *http.Client) *Downloader {
+	client, err := netpolicy.NewPublicHTTPClient(template, netpolicy.PublicHTTPClientOptions{
+		Timeout: defaultDownloadTimeout, Operation: "artifact download",
+		Subject: "artifact URL", MaximumRedirects: 5,
+	})
+	return &Downloader{client: client, scope: netpolicy.HTTPDestinationPublic, initErr: err}
+}
+
+// NewTrustedDownloader explicitly allows configured local destinations and
+// custom transports. Use it only for tests or an authenticated/pinned peer
+// path whose trust decision happened before construction.
+func NewTrustedDownloader(client *http.Client) *Downloader {
 	if client == nil {
-		scope = netpolicy.HTTPDestinationPublic
-		proxyConfiguration := httpproxy.FromEnvironment()
-		proxy := proxyConfiguration.ProxyFunc()
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = func(request *http.Request) (*url.URL, error) {
-			return proxy(request.URL)
-		}
-		transport.DialContext = netpolicy.PinnedDialContext(
-			nil, transport.DialContext,
-			proxyConfiguration.HTTPProxy, proxyConfiguration.HTTPSProxy,
-		)
-		client = &http.Client{
-			Transport: netpolicy.PublicRoundTripper(transport, nil, "artifact URL"),
-			Timeout:   defaultDownloadTimeout,
-		}
+		client = &http.Client{Timeout: defaultDownloadTimeout}
 	}
 	copy := *client
+	if copy.Timeout == 0 {
+		copy.Timeout = defaultDownloadTimeout
+	}
 	copy.CheckRedirect = (netpolicy.HTTPRedirectPolicy{
 		Operation: "artifact download", Subject: "artifact URL", MaximumHops: 5,
-		Scope: scope, Previous: copy.CheckRedirect,
+		Scope: netpolicy.HTTPDestinationConfigured, Previous: copy.CheckRedirect,
 	}).CheckRedirect
-	return &Downloader{client: &copy, scope: scope}
+	return &Downloader{client: &copy, scope: netpolicy.HTTPDestinationConfigured}
 }
 
 func (downloader *Downloader) Fetch(
@@ -56,7 +58,13 @@ func (downloader *Downloader) Fetch(
 	request FetchRequest,
 	progress ProgressFunc,
 ) (Descriptor, error) {
-	if downloader == nil || downloader.client == nil {
+	if downloader == nil {
+		return Descriptor{}, errors.New("artifact downloader is unavailable")
+	}
+	if downloader.initErr != nil {
+		return Descriptor{}, fmt.Errorf("initialize artifact downloader: %w", downloader.initErr)
+	}
+	if downloader.client == nil {
 		return Descriptor{}, errors.New("artifact downloader is unavailable")
 	}
 	if store == nil {
