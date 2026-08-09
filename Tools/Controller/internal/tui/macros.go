@@ -48,6 +48,7 @@ var macroSecondaryButtons = []macroButtonDefinition{
 	{key: "k", label: "K Cancel keep"},
 	{key: "/", label: "/ Find"},
 	{key: "i", label: "I Info"},
+	{key: "e", label: "E Edit"},
 	{key: "x", label: "X Delete", tone: macroButtonDanger},
 	{key: "a", label: "A Rules"},
 }
@@ -300,6 +301,17 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 			return model, nil, true
 		}
 		return model.dispatchLine(fmt.Sprintf("macro show %d", macro.ID))
+	case "e":
+		macro, ok := model.selectedMacro()
+		if !ok {
+			model.setNotice("No macro selected")
+			return model, nil, true
+		}
+		model.input.SetValue(fmt.Sprintf("macro update %d %s %s %s", macro.ID, strconv.Quote(macro.Name), strconv.Quote(macro.Category), strconv.Quote(macro.Color)))
+		model.input.CursorEnd()
+		model.revealTerminal()
+		model.setNotice("Edit name, category, and color; use - to clear category or color")
+		return model, nil, true
 	case "x":
 		return model.deleteSelectedMacro()
 	}

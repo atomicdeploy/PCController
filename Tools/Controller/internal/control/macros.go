@@ -180,6 +180,48 @@ func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (a
 	return macro, err
 }
 
+// UpdateMetadata keeps names/categories/colors host-owned, including for a
+// provisional `Board capture N` recovered from the MCU ring.
+func (runner *MacroRunner) UpdateMetadata(reference, name, category, color string) (appconfig.Macro, error) {
+	if runner.updateHostConfig == nil {
+		return appconfig.Macro{}, errors.New("macro persistence is unavailable")
+	}
+	macro, err := runner.find(reference)
+	if err != nil {
+		return appconfig.Macro{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return appconfig.Macro{}, errors.New("macro name is required")
+	}
+	if category == "-" {
+		category = ""
+	}
+	if color == "-" {
+		color = ""
+	}
+	color = normalizedMacroColor(color)
+	if !validMacroColor(color) {
+		return appconfig.Macro{}, fmt.Errorf("macro color %q is not red, blue, violet, green, white, or empty", color)
+	}
+	err = runner.updateHostConfig(func(config *appconfig.Config) error {
+		for index, existing := range config.Macros {
+			if existing.ID != macro.ID && strings.EqualFold(existing.Name, name) {
+				return fmt.Errorf("macro name %q already exists", name)
+			}
+			if existing.ID == macro.ID {
+				config.Macros[index].Name = name
+				config.Macros[index].Category = strings.TrimSpace(category)
+				config.Macros[index].Color = color
+				macro = config.Macros[index]
+				return nil
+			}
+		}
+		return fmt.Errorf("macro %q disappeared before it could be updated", reference)
+	})
+	return macro, err
+}
+
 func (runner *MacroRunner) Delete(reference string) error {
 	if runner.updateHostConfig == nil {
 		return errors.New("macro persistence is unavailable")
@@ -458,9 +500,14 @@ func (runner *MacroRunner) finalizeBoardCapture(status native.MacroStatus) {
 	runner.recordMacro.Steps = mergeRecordedMacroSteps(runner.recordMacro.Steps, recovered)
 	runner.recordMacro.RecordingSource = "board"
 	runner.recordMacro.CaptureDroppedSteps = status.DroppedSteps
+	// accepted_steps is the exact retained prefix. dropped_steps counts the
+	// first action that did not fit and stopped local capture; a continuously
+	// connected host still receives that Action event, while recovery-only
+	// clients truthfully report it missing.
+	expected := int(status.AcceptedSteps) + int(status.DroppedSteps)
 	missing := 0
-	if int(status.AcceptedSteps) > len(runner.recordMacro.Steps) {
-		missing = int(status.AcceptedSteps) - len(runner.recordMacro.Steps)
+	if expected > len(runner.recordMacro.Steps) {
+		missing = expected - len(runner.recordMacro.Steps)
 	}
 	if missing > 65535 {
 		missing = 65535
