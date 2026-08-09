@@ -16,6 +16,7 @@ import {
 	readdirSync,
 	readFileSync,
 	renameSync,
+	rmdirSync,
 	rmSync,
 	statSync,
 	writeFileSync
@@ -1575,10 +1576,23 @@ export function installPackage(stage, options = {}) {
                 }
                 rename(stage, canonical)
         } catch (error) {
-                if (!movedPrevious && existsSync(canonical) &&
-                        ['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) {
-                        installPackageEntries(stage, canonical, previous, rename)
-                        return
+                if (!movedPrevious && ['EBUSY', 'EPERM', 'EACCES'].includes(error.code)) {
+                        let createdCanonical = false
+                        if (!existsSync(canonical)) {
+                                mkdirSync(canonical)
+                                createdCanonical = true
+                        }
+                        try {
+                                installPackageEntries(stage, canonical, previous, rename)
+                                return
+                        } catch (fallbackError) {
+                                if (createdCanonical) {
+                                        // Remove only the empty directory created by this
+                                        // transaction. Any rollback residue stays visible.
+                                        try { rmdirSync(canonical) } catch {}
+                                }
+                                throw fallbackError
+                        }
                 }
                 if (movedPrevious && !existsSync(canonical) && existsSync(previous)) {
                         rename(previous, canonical)
