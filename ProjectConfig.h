@@ -87,6 +87,13 @@
 #define PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS 0
 #endif
 
+// Audio streaming and the native Buzzer opcode stay available. Autonomous
+// boot/menu/success/error melodies are host presentation and are omitted from
+// the byte-tight production image (and cannot wake a room after a reset).
+#ifndef PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+#define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 0
+#endif
+
 // The production front panel has one input/output page. In the normal build it
 // is the four-key motion surface (Side A up/down, Side B up/down). A diagnostic
 // image may compile the same page as a key identifier without adding a second
@@ -175,6 +182,11 @@
 #if (PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS != 0) && \
     (PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS != 1)
 #error "PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES != 0) && \
+    (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES != 1)
+#error "PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES must be 0 or 1"
 #endif
 
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the

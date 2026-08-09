@@ -39,12 +39,14 @@ void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
   }
 
   buzzer.stop();
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   const ProgramMode currentMode = modeManager.current();
   if (currentMode <= MODE_RF) {
     modeBeforeLearning = currentMode;
   } else {
     modeBeforeLearning = MODE_RF;
   }
+#endif
   learningActive = true;
   learningMode = mode;
   learningTotalSeconds = timeoutSeconds;
@@ -52,7 +54,9 @@ void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
   learningEndsAt = mode == RF_LEARN_TIMER
                        ? now + static_cast<uint32_t>(timeoutSeconds) * 1000UL
                        : 0;
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   modeManager.transitionTo(MODE_RF_LEARNING);
+#endif
   appEvents.rfLearning(3, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, learningReportedRemaining);
 }
@@ -65,16 +69,22 @@ void endLearning(uint8_t state, int8_t feedback) {
   const uint8_t remaining = learningRemainingSeconds(now);
   learningActive = false;
   learningEndsAt = 0;
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   if (modeManager.current() == MODE_RF_LEARNING) {
     modeManager.transitionTo(modeBeforeLearning);
   }
+#endif
   appEvents.rfLearning(state, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, remaining);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
   if (feedback > 0) {
     buzzer.success();
   } else if (feedback < 0) {
     buzzer.error();
   }
+#else
+  (void)feedback;
+#endif
 }
 
 // Emits one MCU-timed timer update per changed second and closes at zero.

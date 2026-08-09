@@ -1,5 +1,7 @@
 // Arduino compiles root translation units but not arbitrary root subfolders.
 // Keep the LocalLib domain layout while building each implementation once.
+#include "ProjectConfig.h"
+
 #if PCCONTROLLER_ENABLE_DS18B20
 #include "LocalLib/DallasTemperatureBus.cpp"
 #endif

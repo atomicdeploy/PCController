@@ -245,12 +245,16 @@ void programService(uint32_t at) {
         break;
       case MODE_FLASH_MESSAGE:
         break;
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
       case MODE_RF_LEARNING:
         display.showText(commonText(TextLearn));
         break;
+#endif
       case MODE_FAULT:
         display.showText(commonText(TextError));
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
         buzzer.error();
+#endif
         break;
       default:
         break;
@@ -266,6 +270,7 @@ void programService(uint32_t at) {
       }
       break;
 
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
     case MODE_RF_LEARNING:
       if (!learningActive) {
         modeManager.transitionTo(modeBeforeLearning);
@@ -273,6 +278,7 @@ void programService(uint32_t at) {
         serviceLearningTimer(at);
       }
       break;
+#endif
 
     case MODE_MOTION_CONTROL:
       if (!relays.motionAllowed()) {
@@ -316,6 +322,9 @@ void programService(uint32_t at) {
     case MODE_USER_RELAY_BEHAVIOR_EDIT:
     case MODE_USER_RELAY_CONTROL:
     case MODE_SAVE_PROMPT:
+#if !PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
+    case MODE_RF_LEARNING:
+#endif
     case MODE_UNDEFINED:
       break;
   }
@@ -326,7 +335,9 @@ void menuFeedback(bool fromRemote) {
   statusLeds.playCue(fromRemote ? StatusLedCue::Radio
                                 : StatusLedCue::Menu,
                      260, now);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
   buzzer.beep();
+#endif
 }
 
 // Rolls an 8-bit brightness by the configured front-panel step.
@@ -484,10 +495,14 @@ void finishEditTransaction(bool save, uint32_t at) {
   flashMessageSaved = save;
   flashMessageEndsAt = at + 900;
   if (save) {
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     buzzer.success();
+#endif
     statusLeds.playCue(StatusLedCue::Save, 900, at);
   } else {
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     buzzer.error();
+#endif
     statusLeds.playCue(StatusLedCue::Discard, 900, at);
   }
   modeManager.transitionTo(MODE_FLASH_MESSAGE);
@@ -594,7 +609,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
     } else if (relays.motionAllowed()) {
       modeManager.transitionTo(MODE_MOTION_CONTROL);
     } else {
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
       buzzer.error();
+#endif
     }
 #endif
     menuFeedback(fromRemote);
@@ -884,13 +901,19 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         modeManager.transitionTo(MODE_USER_PWM_CHANNEL_EDIT);
       } else if (menuPage == PAGE_USER_RELAYS) {
         modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
-      } else if (menuPage == PAGE_RF) {
+      }
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
+      else if (menuPage == PAGE_RF) {
         beginLearning(RF_LEARN_INDEFINITE, 0);
-      } else {
+      }
+#endif
+      else {
         display.showText(commonText(TextError));
         menuLabelEndsAt = actionNow + 650;
         statusLeds.playCue(StatusLedCue::Discard, 650, actionNow);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
         buzzer.error();
+#endif
         return;
       }
       break;
@@ -1067,7 +1090,9 @@ void serviceMotionExit(uint32_t at) {
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
     setMenuPage(PAGE_MOTION);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     buzzer.success();
+#endif
     motionExitStartedAt = 0xFFFFFFFFUL;
   }
 }
@@ -1079,9 +1104,11 @@ void serviceSystemInputs(uint32_t at) {
   bool value;
   if (systemInputs.consumeDoorChange(value)) {
     appEvents.door(value);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().doorAudioEnabled()) {
       buzzer.beep(45, value ? 1700 : 1100);
     }
+#endif
     statusLeds.playCue(value ? StatusLedCue::DoorOpen
                              : StatusLedCue::DoorClosed,
                        720, at);
@@ -1156,6 +1183,7 @@ void showPwmChannel() {
 }
 
 // Alternates timer total/remaining while indefinite learning keeps LErn.
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
 void showLearningProgress(uint32_t at) {
   if (learningMode != RF_LEARN_TIMER) {
     display.showText(commonText(TextLearn));
@@ -1173,11 +1201,13 @@ void showLearningProgress(uint32_t at) {
   };
   display.showText(text);
 }
+#endif
 
 // Advances a host-owned presentation. Every marquee walks beyond the last
 // character and renders one completely empty frame before it stops, waits, or
 // explicitly loops. Interval waits return ownership to the local menu page.
 bool showHostSegmentText(uint32_t at) {
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
   constexpr uint8_t RepeatMask = 0x03U;
   constexpr uint8_t IntervalWaiting = 0x40U;
   constexpr uint8_t ForceScroll = 0x80U;
@@ -1224,6 +1254,27 @@ bool showHostSegmentText(uint32_t at) {
       return false;
     }
   }
+#else
+  // The production image retains ordinary static/scrolling host text without
+  // duplicating the host's once/loop/interval scheduler on the AVR.
+  const bool scrolling = hostSegmentTextLength > 4;
+  if (!scrolling) {
+    if (hostSegmentTextEndsAt != 0 &&
+        timeReached(at, hostSegmentTextEndsAt)) {
+      clearHostSegmentText();
+      return false;
+    }
+    display.showText(hostSegmentText);
+    return true;
+  }
+  if (timeReached(at, hostSegmentTextEndsAt)) {
+    hostSegmentScrollIndex =
+        hostSegmentScrollIndex < hostSegmentTextLength
+            ? static_cast<uint8_t>(hostSegmentScrollIndex + 1U)
+            : 0;
+    hostSegmentTextEndsAt = at + hostSegmentStepMs;
+  }
+#endif
   char window[5];
   for (uint8_t index = 0; index < 4; ++index) {
     const uint8_t source =
@@ -1249,10 +1300,12 @@ void serviceDisplay(uint32_t at) {
   if (currentMode == MODE_BOOT || currentMode == MODE_FAULT) {
     return;
   }
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   if (learningActive) {
     showLearningProgress(at);
     return;
   }
+#endif
   if (currentMode == MODE_FLASH_MESSAGE) {
     if (((at / 150U) & 1U) != 0) {
       display.showText(commonText(flashMessageSaved ? TextSave
@@ -1395,6 +1448,7 @@ void serviceDisplay(uint32_t at) {
 #endif
     return;
   }
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   if (currentMode == MODE_RF) {
     if (learnedRemotes.count() == 0) {
       display.showUnavailable();
@@ -1403,6 +1457,7 @@ void serviceDisplay(uint32_t at) {
     }
     return;
   }
+#endif
 
   switch (currentMode) {
     case MODE_ILLUMINATION_MODE_EDIT:

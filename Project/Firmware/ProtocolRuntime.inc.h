@@ -237,6 +237,7 @@ void sendFrontPanel(uint8_t sequence) {
 
 // Pushes only the changed TM1637 state. The full front-panel request remains
 // available for initial synchronization and explicit refreshes.
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
 void serviceSegmentPush() {
   const uint8_t *segments = display.rawSegments();
   const uint8_t brightness = display.brightness();
@@ -273,6 +274,7 @@ void serviceBuzzerPush() {
 
 // Mirrors the physical PWM RGB result after the board compositor has applied
 // local safety priority, cues, brightness, and a host-requested effect.
+#if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
 void serviceStatusLedPush() {
   uint8_t payload[6] = {
       statusLeds.renderedRed(), statusLeds.renderedGreen(),
@@ -285,6 +287,8 @@ void serviceStatusLedPush() {
   appProtocol.send(ControllerProtocol::StatusLedChanged, 0, payload,
                    sizeof(payload));
 }
+#endif
+#endif
 
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
 // Reports one built-in page's stable ID, parent category, flags, and label.
@@ -613,7 +617,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 #endif
 
-    case StatusRgb:
+    case StatusRgb: {
 #if !PCCONTROLLER_ENABLE_PCA9685
       goto hardwareUnavailable;
 #else
@@ -640,6 +644,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 #endif
       goto acknowledged;
 #endif
+    }
 
     case StatusEffect:
 #if !PCCONTROLLER_ENABLE_PCA9685 || \
@@ -820,15 +825,24 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case DisplayText: {
-      if (length < 4 || payload[0] > 5 || payload[3] > 40 ||
+      constexpr uint8_t maximumDisplayTarget =
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
+          5;
+#else
+          4;
+#endif
+      if (length < 4 || payload[0] > maximumDisplayTarget ||
+          payload[3] > 40 ||
           (payload[0] != 5 &&
            length < static_cast<uint8_t>(4 + payload[3])) ||
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
           (payload[0] == 5 &&
            (length < 8 ||
             length < static_cast<uint8_t>(8 + payload[3]) ||
             (payload[4] & 0x03U) > 2 ||
             (payload[4] & 0x7CU) != 0 ||
             ((payload[4] & 0x03U) == 2 && payload[7] == 0))) ||
+#endif
           (payload[0] == 3 && (payload[3] < 4 || payload[3] > 36)) ||
           (payload[0] == 4 && payload[3] != 0)) {
         goto badPayload;
@@ -836,8 +850,13 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       const uint8_t target = payload[0];
       const uint16_t duration = readU16(payload + 1);
       const uint8_t textLength = payload[3];
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
       const bool scheduledSegments = target == 5;
       const uint8_t textOffset = scheduledSegments ? 8 : 4;
+#else
+      constexpr bool scheduledSegments = false;
+      constexpr uint8_t textOffset = 4;
+#endif
       if (target == 4) {
         releaseHostPanel();
         goto acknowledged;
@@ -849,6 +868,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       if (target == 0 || target == 2 || target == 3 || scheduledSegments) {
         hostSegmentTextActive = textLength != 0;
         hostSegmentScrollIndex = 0;
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
         hostSegmentOptions = scheduledSegments ? payload[4] : 0;
         hostSegmentHoldMs = scheduledSegments ? readU16(payload + 5) : duration;
         hostSegmentIntervalSeconds = scheduledSegments ? payload[7] : 0;
@@ -859,6 +879,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         if (!scheduledSegments && scrolling) {
           hostSegmentOptions = 1; // legacy long text remains an explicit loop
         }
+#else
+        const bool scrolling = target == 0 && textLength > 4;
+#endif
         const uint8_t copyLength = scrolling
                                        ? textLength
                                        : (textLength > 4 ? 4 : textLength);
@@ -873,11 +896,17 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
               (duration < 80 ? 80 : duration);
           hostSegmentTextEndsAt = frameNow + hostSegmentStepMs;
         } else {
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
           const uint16_t hold = scheduledSegments ? hostSegmentHoldMs : duration;
           hostSegmentTextEndsAt = target == 3 || hold == 0 ||
                                           (hostSegmentOptions & 0x03U) == 1
                                       ? 0
                                       : frameNow + hold;
+#else
+          hostSegmentTextEndsAt = target == 3 || duration == 0
+                                      ? 0
+                                      : frameNow + duration;
+#endif
         }
       }
       if (target == 1 || target == 2 || target == 3) {

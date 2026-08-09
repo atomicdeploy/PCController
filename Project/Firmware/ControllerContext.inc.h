@@ -150,7 +150,9 @@ bool editTransactionActive = false;
 bool flashMessageSaved = false;
 
 ModeManager<ProgramMode> modeManager(MODE_BOOT);
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
 ProgramMode modeBeforeLearning = MODE_RF;
+#endif
 
 // Zero disables periodic telemetry; the live EEPROM default is 500 ms.
 uint16_t streamPeriodMs = 0;
@@ -174,10 +176,14 @@ uint32_t lastRemoteActionAt = 0;
 uint32_t lastRemoteActionCode = 0;
 uint8_t lastRelayMask = 0;
 bool firmwareReady = false;
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
 uint8_t lastPushedSegments[4] = {};
 uint8_t lastPushedSegmentBrightness = 0;
 uint8_t lastPushedBuzzerRevision = 0;
+#if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
 uint8_t lastPushedStatusLed[6] = {};
+#endif
+#endif
 
 // Host-captured panel text, LCD fallback metadata, and cooperative I2C lease.
 bool hostSegmentTextActive = false;
@@ -186,11 +192,13 @@ char hostSegmentText[41] = {};
 uint8_t hostSegmentTextLength = 0;
 uint8_t hostSegmentScrollIndex = 0;
 uint16_t hostSegmentStepMs = 0;
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
 // Low two bits select once/loop/interval, bit 6 marks the interval wait, and
 // bit 7 forces a marquee even when the text fits the four-cell display.
 uint8_t hostSegmentOptions = 0;
 uint16_t hostSegmentHoldMs = 0;
 uint8_t hostSegmentIntervalSeconds = 0;
+#endif
 char temperatureSegmentText[2][4] = {
     {'L', '-', '-', 'C'},
     {'b', '-', '-', 'C'},

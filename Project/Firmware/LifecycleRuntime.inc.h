@@ -93,9 +93,11 @@ static inline __attribute__((always_inline)) void initializeController() {
   radioReceiver.setReceiveTolerance(70);
   radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
 
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
   if (!programming && !effectiveSilentMode()) {
     playBootMelody();
   }
+#endif
   firmwareReady = true;
   appEvents.reset(resetTelemetry.cause(), resetTelemetry.count());
   sendHello(0);
@@ -116,6 +118,9 @@ static inline __attribute__((always_inline)) void serviceController() {
     return;
   }
   serviceRadio();
+#if !PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
+  serviceLearningTimer(loopNow);
+#endif
   ControllerProtocol::Frame queuedMacroFrame;
   while (macroPlayback.dequeueDue(queuedMacroFrame)) {
     const uint16_t errors = appProtocol.responseErrors();
@@ -162,7 +167,9 @@ static inline __attribute__((always_inline)) void serviceController() {
   static uint32_t lastHotAlertAt = 0;
   if (hot && (!hotReported ||
               static_cast<uint32_t>(loopNow - lastHotAlertAt) >= 10000UL)) {
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     buzzer.error();
+#endif
     lastHotAlertAt = loopNow;
   }
   if (hot != hotReported) {
@@ -215,10 +222,12 @@ static inline __attribute__((always_inline)) void serviceController() {
   const uint8_t relayMask = relays.activeRelayMask();
   if (relayMask != lastRelayMask) {
     appEvents.relay(relayMask);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().relayAudioEnabled() &&
         ((relayMask ^ lastRelayMask) & 0xFAU) != 0) {
       buzzer.beep(35, (relayMask & ~lastRelayMask) != 0 ? 1900 : 1250);
     }
+#endif
     settingsStore.values().relayRestoreMask = relayMask;
     settingsStore.markDirty(loopNow);
     lastRelayMask = relayMask;
@@ -229,14 +238,21 @@ static inline __attribute__((always_inline)) void serviceController() {
                                 : displaySettings.displayClosedBrightness(),
                             loopNow);
   serviceDisplay(loopNow);
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
   serviceSegmentPush();
+#endif
   if (!i2cReserved) {
     statusLeds.service(loopNow);
   }
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS && \
+    PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
   serviceStatusLedPush();
+#endif
   taskManager.update(loopNow);
   buzzer.update(loopNow);
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
   serviceBuzzerPush();
+#endif
 
   if (streamPeriodMs != 0 &&
       static_cast<uint32_t>(loopNow - lastTelemetryAt) >= streamPeriodMs) {

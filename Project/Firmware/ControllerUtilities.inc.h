@@ -96,7 +96,9 @@ void clearHostSegmentText() {
   hostSegmentTextActive = false;
   hostSegmentTextLength = 0;
   hostSegmentScrollIndex = 0;
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
   hostSegmentOptions = 0;
+#endif
   hostSegmentTextEndsAt = 0;
 }
 
