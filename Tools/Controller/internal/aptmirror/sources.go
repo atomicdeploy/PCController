@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -12,14 +11,23 @@ import (
 )
 
 type sourcePlan struct {
-	Edits             map[string][]byte
-	ActiveUbuntu      []string
-	ExistingTopology  []string
-	InactiveInventory []string
+	Edits                map[string][]byte
+	ActiveUbuntu         []string
+	ExistingTopology     []string
+	InactiveInventory    []string
+	SourceInventory      []SourceDefinition
+	DiscoveredCandidates []Candidate
 }
 
 func planUbuntuSources(config Config) (sourcePlan, error) {
 	plan := sourcePlan{Edits: make(map[string][]byte)}
+	discovery, err := discoverSourceDefinitions(config)
+	if err != nil {
+		return plan, err
+	}
+	plan.InactiveInventory = discovery.InactiveInventory
+	plan.SourceInventory = discovery.Definitions
+	plan.DiscoveredCandidates = discovery.Candidates
 	activeFiles := []string{filepath.Join(config.Paths.APTRoot, "sources.list")}
 	for _, pattern := range []string{
 		filepath.Join(config.Paths.APTRoot, "sources.list.d", "*.list"),
@@ -38,8 +46,8 @@ func planUbuntuSources(config Config) (sourcePlan, error) {
 			continue
 		}
 		seen[path] = true
-		content, err := os.ReadFile(path)
-		if errors.Is(err, os.ErrNotExist) {
+		content, err := readBoundedSourceFile(path, maximumSourceDefinitionBytes)
+		if errors.Is(err, errSourceFileMissing) {
 			continue
 		}
 		if err != nil {
@@ -65,54 +73,8 @@ func planUbuntuSources(config Config) (sourcePlan, error) {
 			plan.Edits[path] = edited
 		}
 	}
-	backupMatches, globErr := filepath.Glob(filepath.Join(config.Paths.APTRoot, "sources.list.*"))
-	if globErr != nil {
-		return plan, globErr
-	}
-	for _, path := range backupMatches {
-		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
-			plan.InactiveInventory = append(plan.InactiveInventory, path)
-		}
-	}
-
-	// Backup, disabled, distribution-upgrade, and comment-only source files are
-	// evidence, not candidates for automatic activation. Inventory them so the
-	// operator can review history without turning stale repositories back on.
-	entries, err := os.ReadDir(filepath.Join(config.Paths.APTRoot, "sources.list.d"))
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return plan, err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := strings.ToLower(entry.Name())
-		if strings.HasSuffix(name, ".list") || strings.HasSuffix(name, ".sources") {
-			continue
-		}
-		if strings.Contains(name, "source") || strings.Contains(name, "ubuntu") ||
-			strings.HasSuffix(name, ".save") || strings.HasSuffix(name, ".bak") ||
-			strings.HasSuffix(name, ".disabled") || strings.Contains(name, "distupgrade") {
-			plan.InactiveInventory = append(plan.InactiveInventory, filepath.Join(config.Paths.APTRoot, "sources.list.d", entry.Name()))
-		}
-	}
-	activeUbuntuSet := make(map[string]bool)
-	for _, path := range plan.ActiveUbuntu {
-		activeUbuntuSet[filepath.Clean(path)] = true
-	}
-	for _, path := range activeFiles {
-		content, err := os.ReadFile(path)
-		if err != nil || activeUbuntuSet[filepath.Clean(path)] {
-			continue
-		}
-		if bytesContainUbuntuEvidence(content) {
-			plan.InactiveInventory = append(plan.InactiveInventory, filepath.Clean(path))
-		}
-	}
 	sort.Strings(plan.ActiveUbuntu)
 	sort.Strings(plan.ExistingTopology)
-	sort.Strings(plan.InactiveInventory)
-	plan.InactiveInventory = uniqueStrings(plan.InactiveInventory)
 	return plan, nil
 }
 
@@ -332,11 +294,6 @@ func hasOnlyConfiguredSuites(values []string, config Config) bool {
 		}
 	}
 	return true
-}
-
-func bytesContainUbuntuEvidence(content []byte) bool {
-	lower := strings.ToLower(string(content))
-	return strings.Contains(lower, "ubuntu") || strings.Contains(lower, "mirror+file:")
 }
 
 func bytesEqual(left, right []byte) bool { return string(left) == string(right) }

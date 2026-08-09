@@ -11,8 +11,9 @@ Mirror management is independent of the Arduino/firmware toolchain. This is the
 minimal rollout path for an Ubuntu server that only needs APT resilience:
 
 ```sh
-# Probe signed metadata and inventory active, commented, disabled and backup
-# source files. This is read-only; --dry-run is optional because it is default.
+# Recursively inventory real source definitions (including commented, disabled,
+# backup and legacy mirror-list entries), then probe possible Ubuntu archive
+# roots. This is read-only; --dry-run is optional because it is the default.
 controller toolchain mirror-install --dry-run --json
 
 # Explicit privileged adoption. This installs the verified current executable
@@ -71,9 +72,31 @@ list exists. The canonical source is activated before legacy Ubuntu stanzas are
 disabled, so a power loss between atomic writes can temporarily leave duplicate
 Ubuntu topology but cannot leave the host with no Ubuntu source. Third-party
 repositories are preserved byte-for-byte. Mixed or unknown `mirror+file`
-topologies fail closed. Commented, disabled, distribution upgrade and backup
-files are reported as inventory and are never activated. The current and
-legacy mirror timers and loaded services are quiesced before adoption so they
+topologies fail closed.
+
+Controller never re-enables a historical source file literally. Instead, it
+recursively reads bounded regular files without following symlinks, parses
+one-line and deb822 definitions (including `Enabled: no`, commented stanzas,
+backup suffixes, distribution-upgrade files and nested `disabled` directories),
+and parses legacy `/etc/apt/mirrors/*.list` entries. Distinct HTTP(S) archive
+roots are normalized and deduplicated, with a verified HTTPS spelling preferred
+over the same HTTP backend. A historical root is merged into the one managed
+mirror list only after the current Ubuntu archive keyring, release identity,
+suite, architecture, component and signed index-topology checks below succeed
+for at least one current-release pocket. Historical suite names are provenance;
+they never override the currently detected Ubuntu codename. PPAs and other
+third-party repositories cannot pass Ubuntu archive identity verification and
+are never adopted.
+
+The JSON report's `source_inventory` records path, line, exact active/commented/
+disabled/backup/legacy-list status, credential-free URI, historical suites,
+classification, candidate ID and per-suite verification. Rejected and
+unreachable definitions cannot become routes. Unsafe inactive files remain
+visible as credential-free `ignored` inventory; an unsafe active APT source
+fails the install before mutation. `verified_discovered_candidates` lists only roots merged
+into the persisted configuration; `inactive_source_inventory` remains the
+backward-compatible path summary. The current and legacy mirror timers and
+loaded services are quiesced before adoption so they
 cannot race the Go refresh. Controller also stops (but never disables)
 `apt-daily.timer` and `apt-daily-upgrade.timer`, verifies both package services
 are idle, and non-blockingly retains the dpkg frontend, dpkg, APT lists and APT
@@ -131,6 +154,13 @@ For every candidate/suite pair Controller:
 That final check rejects a mirror which serves plausible signed metadata while
 omitting the binary index topology, including the observed broken security
 endpoint shape.
+
+"Working" therefore means more than an HTTP response: a route must have a valid
+Ubuntu signature and identity, serve the configured architecture/component
+topology, and meet the per-suite freshness policy. Several equally preferred
+domestic routes let APT's mirror transport select a backend per requested file;
+this can spread concurrent package downloads and lets a missing object fall
+through to another route, but it does not stripe one package file across hosts.
 
 Routes are generated with these APT mirror priorities:
 
@@ -260,7 +290,10 @@ disable live repositories merely to demonstrate fallback on a production host.
 remain Controller-owned; unknown fields, credentials in URLs, duplicate IDs or
 URIs, and missing official suite coverage are rejected. Domestic priority must
 be omitted because health derives it. Official roles use reviewed priority 850
-or 900.
+or 900. The override remains useful for a nonstandard archive root whose path
+does not look like an Ubuntu archive and therefore cannot be safely inferred
+from historical files. Automatic discovery never bypasses these validation
+rules and never promotes a PPA or arbitrary third-party repository.
 
 ```json
 [

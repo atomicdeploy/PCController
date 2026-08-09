@@ -135,7 +135,7 @@ func TestHTTPProberRejectsVerifierFailure(t *testing.T) {
 	}
 }
 
-func TestSourceAdoptionIsConservativeAndInventoriesInactiveFiles(t *testing.T) {
+func TestSourceAdoptionIsConservativeAndInventoriesInactiveDefinitions(t *testing.T) {
 	config := mirrorTestConfig(t)
 	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
@@ -146,9 +146,9 @@ func TestSourceAdoptionIsConservativeAndInventoriesInactiveFiles(t *testing.T) {
 	_ = os.WriteFile(unrelatedPath, unrelated, 0o644)
 	legacyPath := filepath.Join(config.Paths.APTRoot, "sources.list")
 	_ = os.WriteFile(legacyPath, []byte("deb https://archive.ubuntu.com/ubuntu resolute main\n"), 0o644)
-	disabledPath := filepath.Join(directory, "old.sources.disabled")
-	_ = os.WriteFile(disabledPath, []byte("# old ubuntu source\n"), 0o644)
-	_ = os.WriteFile(filepath.Join(config.Paths.APTRoot, "sources.list.save"), []byte("# ubuntu backup\n"), 0o644)
+	disabledPath := filepath.Join(directory, "old.list.disabled")
+	_ = os.WriteFile(disabledPath, []byte("# deb https://mirror.example/ubuntu noble main\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(config.Paths.APTRoot, "sources.list.save"), []byte("deb https://archive.ubuntu.com/ubuntu noble main\n"), 0o644)
 	plan, err := planUbuntuSources(config)
 	if err != nil {
 		t.Fatal(err)
@@ -162,11 +162,252 @@ func TestSourceAdoptionIsConservativeAndInventoriesInactiveFiles(t *testing.T) {
 	if len(plan.InactiveInventory) < 2 {
 		t.Fatalf("inactive inventory=%q", plan.InactiveInventory)
 	}
+	for _, definition := range plan.SourceInventory {
+		if definition.Path == unrelatedPath && definition.Classification != SourceClassThirdParty {
+			t.Fatalf("third-party source classification=%q", definition.Classification)
+		}
+	}
 
 	mixed := []byte("Types: deb\nURIs: https://archive.ubuntu.com/ubuntu https://packages.example.invalid/repo\nSuites: resolute\nComponents: main\n")
 	_ = os.WriteFile(config.Paths.CanonicalSource, mixed, 0o644)
 	if _, err := planUbuntuSources(config); err == nil {
 		t.Fatal("mixed canonical source was overwritten")
+	}
+}
+
+func TestDiscoveryRecursesVerifiesAndPrefersHTTPSWithoutAdoptingThirdParties(t *testing.T) {
+	config := mirrorTestConfig(t)
+	sourcesDirectory := filepath.Join(config.Paths.APTRoot, "sources.list.d")
+	disabledDirectory := filepath.Join(sourcesDirectory, "disabled", "upgrade-history")
+	if err := os.MkdirAll(disabledDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	historyPath := filepath.Join(disabledDirectory, "domestic.list.save")
+	if err := os.WriteFile(historyPath, []byte("# deb http://history.example.ir/ubuntu jammy main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deb822Path := filepath.Join(sourcesDirectory, "historical.sources")
+	deb822 := "Types: deb\nURIs: https://history.example.ir/ubuntu\nSuites: noble\nComponents: main\nEnabled: no\n\n" +
+		"# Types: deb\n# URIs: https://history.example.ir/ubuntu\n# Suites: jammy-updates\n# Components: main\n"
+	if err := os.WriteFile(deb822Path, []byte(deb822), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	thirdPartyPath := filepath.Join(sourcesDirectory, "third-party.sources")
+	thirdParty := "Types: deb\nURIs: https://repo.dovecot.example/ce/ubuntu/noble\nSuites: noble\nComponents: main\n\n" +
+		"Types: deb\nURIs: https://download.webmin.example/repository\nSuites: stable\nComponents: contrib\n\n" +
+		"Types: deb\nURIs: https://dl.winehq.example/wine-builds/ubuntu\nSuites: noble\nComponents: main\n"
+	if err := os.WriteFile(thirdPartyPath, []byte(thirdParty), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ppaPath := filepath.Join(sourcesDirectory, "vendor-ubuntu-ppa-resolute.list")
+	if err := os.WriteFile(ppaPath, []byte("deb https://ppa.example/owner/tool/ubuntu resolute main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mirrorsDirectory := filepath.Join(config.Paths.APTRoot, "mirrors")
+	if err := os.MkdirAll(mirrorsDirectory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyMirrorPath := filepath.Join(mirrorsDirectory, "ubuntu-archive.list")
+	legacyMirror := "http://history.example.ir/ubuntu/ priority:10\n" +
+		"https://history.example.ir/ubuntu/ priority:10 suite:jammy-security\n"
+	if err := os.WriteFile(legacyMirrorPath, []byte(legacyMirror), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	firstPlan, err := planUbuntuSources(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPlan, err := planUbuntuSources(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var historyCandidate Candidate
+	for _, candidate := range firstPlan.DiscoveredCandidates {
+		if strings.Contains(candidate.URI, "history.example.ir") {
+			historyCandidate = candidate
+		}
+	}
+	if historyCandidate.ID == "" || historyCandidate.URI != "https://history.example.ir/ubuntu/" || !historyCandidate.BypassProxy {
+		t.Fatalf("preferred historical candidate=%+v", historyCandidate)
+	}
+	foundDeterministic := false
+	for _, candidate := range secondPlan.DiscoveredCandidates {
+		if candidate.URI == historyCandidate.URI && candidate.ID == historyCandidate.ID {
+			foundDeterministic = true
+		}
+	}
+	if !foundDeterministic {
+		t.Fatalf("candidate identity was not deterministic: first=%+v second=%+v", firstPlan.DiscoveredCandidates, secondPlan.DiscoveredCandidates)
+	}
+
+	now := time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC)
+	results := probeResults(config,
+		ProbeResult{Status: ProbeVerified, Publication: now},
+		ProbeResult{Status: ProbeVerified, Publication: now},
+	)
+	for _, candidate := range firstPlan.DiscoveredCandidates {
+		for _, suite := range config.Suites() {
+			result := ProbeResult{Status: ProbeUnsafe, Detail: "signature"}
+			if strings.Contains(candidate.URI, "history.example.ir") {
+				result = ProbeResult{Status: ProbeVerified, Publication: now}
+			}
+			results[stateKey(candidate.ID, suite)] = result
+		}
+	}
+	executable := filepath.Join(t.TempDir(), "controller")
+	if err := os.WriteFile(executable, []byte("verified-controller"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Install(context.Background(), InstallOptions{
+		Config: config, ExecutableSource: executable, Now: now,
+		Prober: &tableProber{results: results},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.DiscoveredCandidates) != 1 || report.DiscoveredCandidates[0].URI != "https://history.example.ir/ubuntu/" {
+		t.Fatalf("verified discovered candidates=%+v", report.DiscoveredCandidates)
+	}
+	if routePriority(report.Refresh, report.DiscoveredCandidates[0].ID, config.Codename) != 10 {
+		t.Fatalf("verified historical mirror was not domestic-first: %+v", report.Refresh.Routes)
+	}
+	if containsString(report.InactiveInventory, thirdPartyPath) {
+		t.Fatalf("active third-party source mislabeled inactive: %q", report.InactiveInventory)
+	}
+	for _, wanted := range []string{historyPath, deb822Path} {
+		if !containsString(report.InactiveInventory, wanted) {
+			t.Fatalf("inactive source %s missing from %q", wanted, report.InactiveInventory)
+		}
+	}
+	var verifiedHistorical, rejectedPPA, activeDovecot, activeWebmin, rejectedWineHQ bool
+	for _, definition := range report.SourceInventory {
+		switch {
+		case strings.Contains(definition.URI, "history.example.ir"):
+			if definition.Classification == SourceClassVerified && definition.CandidateID == report.DiscoveredCandidates[0].ID {
+				verifiedHistorical = true
+				for _, verification := range definition.Verification {
+					if !strings.HasPrefix(verification.Suite, config.Codename) {
+						t.Fatalf("historical suite was not mapped to current release: %+v", definition.Verification)
+					}
+				}
+			}
+		case strings.Contains(definition.URI, "ppa.example"):
+			rejectedPPA = definition.Status == SourceStatusActive && definition.Classification == SourceClassThirdParty && len(definition.Verification) != 0
+		case strings.Contains(definition.URI, "dovecot.example"):
+			activeDovecot = definition.Status == SourceStatusActive && definition.Classification == SourceClassThirdParty && definition.CandidateID == ""
+		case strings.Contains(definition.URI, "webmin.example"):
+			activeWebmin = definition.Status == SourceStatusActive && definition.Classification == SourceClassThirdParty && definition.CandidateID == ""
+		case strings.Contains(definition.URI, "winehq.example"):
+			rejectedWineHQ = definition.Status == SourceStatusActive && definition.Classification == SourceClassThirdParty && len(definition.Verification) != 0
+		}
+	}
+	if !verifiedHistorical || !rejectedPPA || !activeDovecot || !activeWebmin || !rejectedWineHQ {
+		t.Fatalf("structured discovery missing classifications: verified=%t ppa=%t dovecot=%t webmin=%t winehq=%t inventory=%+v", verifiedHistorical, rejectedPPA, activeDovecot, activeWebmin, rejectedWineHQ, report.SourceInventory)
+	}
+	for _, candidate := range report.Refresh.Candidates {
+		if strings.Contains(candidate.CandidateID, "ppa") {
+			t.Fatalf("rejected PPA reached final refresh: %+v", candidate)
+		}
+	}
+}
+
+func TestDiscoveryDoesNotParseSymlinkOversizeOrCommentProse(t *testing.T) {
+	config := mirrorTestConfig(t)
+	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d", "disabled")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "target.list")
+	if err := os.WriteFile(target, []byte("deb https://symlink.example.ir/ubuntu resolute main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	symlink := filepath.Join(directory, "symlink.list.save")
+	if err := os.Symlink(target, symlink); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	oversize := filepath.Join(directory, "oversize.list.save")
+	content := make([]byte, maximumSourceDefinitionBytes+1)
+	copy(content, "deb https://oversize.example.ir/ubuntu resolute main\n")
+	if err := os.WriteFile(oversize, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prose := filepath.Join(config.Paths.APTRoot, "sources.list.save")
+	if err := os.MkdirAll(filepath.Dir(prose), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(prose, []byte("# Ubuntu sources moved to a deb822 file.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	private := filepath.Join(directory, "private.list.save")
+	if err := os.WriteFile(private, []byte("deb https://name:secret@private.example/ubuntu resolute main\n"+
+		"deb https://private.example/ubuntu?token=secret resolute main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := planUbuntuSources(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containsString(plan.InactiveInventory, prose) {
+		t.Fatalf("comment prose was misreported as a source definition: %q", plan.InactiveInventory)
+	}
+	for _, path := range []string{symlink, oversize} {
+		if !containsString(plan.InactiveInventory, path) {
+			t.Fatalf("unsafe inactive file %s missing from inventory", path)
+		}
+	}
+	var ignored int
+	for _, definition := range plan.SourceInventory {
+		if (definition.Path == symlink || definition.Path == oversize) &&
+			definition.Status == SourceStatusIgnored && definition.Classification == SourceClassUnsafe {
+			ignored++
+		}
+		if strings.Contains(definition.URI, "symlink.example") || strings.Contains(definition.URI, "oversize.example") {
+			t.Fatalf("unsafe file content was parsed: %+v", definition)
+		}
+		if definition.Path == private && (definition.URI != "" || definition.Classification != SourceClassUnsafe) {
+			t.Fatalf("credential-bearing source was exposed: %+v", definition)
+		}
+	}
+	if ignored != 2 || len(plan.DiscoveredCandidates) != 0 || strings.Contains(fmt.Sprintf("%+v", plan.SourceInventory), "secret") {
+		t.Fatalf("unsafe inventory ignored=%d candidates=%+v inventory=%+v", ignored, plan.DiscoveredCandidates, plan.SourceInventory)
+	}
+}
+
+func TestDiscoveryRejectsActiveSourceSymlink(t *testing.T) {
+	config := mirrorTestConfig(t)
+	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "target.list")
+	if err := os.WriteFile(target, []byte("deb https://archive.ubuntu.com/ubuntu resolute main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(directory, "active.list")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if _, err := planUbuntuSources(config); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("active source symlink was not rejected: %v", err)
+	}
+}
+
+func TestDiscoveryBoundsRecursiveFileInventory(t *testing.T) {
+	config := mirrorTestConfig(t)
+	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d", "disabled")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// sources.list itself consumes one inventory slot even when absent, so this
+	// final backup must trip the bound before any file content is parsed.
+	for index := 0; index < maximumSourceInventoryFiles; index++ {
+		path := filepath.Join(directory, fmt.Sprintf("history-%03d.list.save", index))
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := planUbuntuSources(config); !errors.Is(err, errSourceInventoryLimit) {
+		t.Fatalf("recursive inventory bound error=%v", err)
 	}
 }
 

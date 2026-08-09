@@ -28,18 +28,20 @@ type InstallOptions struct {
 var runUnattendedUpgradeSelfTest = selfTestUnattendedUpgradeShim
 
 type InstallReport struct {
-	Applied             bool          `json:"applied"`
-	BackupDirectory     string        `json:"backup_directory,omitempty"`
-	ExecutableSource    string        `json:"executable_source"`
-	ExecutableTarget    string        `json:"executable_target"`
-	ExecutableSHA256    string        `json:"executable_sha256"`
-	ActiveUbuntuSources []string      `json:"active_ubuntu_sources,omitempty"`
-	AdoptedTopology     []string      `json:"adopted_topology,omitempty"`
-	InactiveInventory   []string      `json:"inactive_source_inventory,omitempty"`
-	DisabledSources     []string      `json:"disabled_sources,omitempty"`
-	ManagedFiles        []string      `json:"managed_files"`
-	Refresh             RefreshReport `json:"refresh"`
-	rollback            func() error
+	Applied              bool               `json:"applied"`
+	BackupDirectory      string             `json:"backup_directory,omitempty"`
+	ExecutableSource     string             `json:"executable_source"`
+	ExecutableTarget     string             `json:"executable_target"`
+	ExecutableSHA256     string             `json:"executable_sha256"`
+	ActiveUbuntuSources  []string           `json:"active_ubuntu_sources,omitempty"`
+	AdoptedTopology      []string           `json:"adopted_topology,omitempty"`
+	InactiveInventory    []string           `json:"inactive_source_inventory,omitempty"`
+	SourceInventory      []SourceDefinition `json:"source_inventory,omitempty"`
+	DiscoveredCandidates []Candidate        `json:"verified_discovered_candidates,omitempty"`
+	DisabledSources      []string           `json:"disabled_sources,omitempty"`
+	ManagedFiles         []string           `json:"managed_files"`
+	Refresh              RefreshReport      `json:"refresh"`
+	rollback             func() error
 }
 
 func (report *InstallReport) Rollback() error {
@@ -84,12 +86,42 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 	if err != nil {
 		return InstallReport{}, err
 	}
+	prober := options.Prober
+	if prober == nil {
+		prober = NewHTTPProber(config)
+	}
+	cached := newCachedProber(prober)
+	var assessments []candidateAssessment
+	var acceptedCandidates []Candidate
+	if len(plan.DiscoveredCandidates) != 0 {
+		evaluationConfig := config
+		evaluationConfig.Candidates = append(append([]Candidate(nil), config.Candidates...), plan.DiscoveredCandidates...)
+		if err := evaluationConfig.Validate(); err != nil {
+			return InstallReport{}, fmt.Errorf("validate discovered APT mirror candidates: %w", err)
+		}
+		evaluation, refreshErr := Refresh(ctx, RefreshOptions{
+			Config: evaluationConfig, Apply: false, Now: now, Prober: cached, Output: output,
+		})
+		if refreshErr != nil {
+			return InstallReport{}, refreshErr
+		}
+		assessments = assessDiscoveredCandidates(plan.DiscoveredCandidates, evaluation)
+		config, acceptedCandidates, _ = mergeDiscoveredCandidates(config, assessments)
+		if err := config.Validate(); err != nil {
+			return InstallReport{}, fmt.Errorf("merge verified APT mirror candidates: %w", err)
+		}
+		plan, err = planUbuntuSources(config)
+		if err != nil {
+			return InstallReport{}, err
+		}
+	}
 	refresh, err := Refresh(ctx, RefreshOptions{
-		Config: config, Apply: false, Now: now, Prober: options.Prober, Output: output,
+		Config: config, Apply: false, Now: now, Prober: cached, Output: output,
 	})
 	if err != nil {
 		return InstallReport{}, err
 	}
+	plan.SourceInventory = annotateSourceDefinitions(plan.SourceInventory, assessments, refresh)
 	managedContent, err := managedMirrorFiles(config, executableContent, options.ProxyEnvironment, plan)
 	if err != nil {
 		return InstallReport{}, err
@@ -104,12 +136,14 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 	managedPaths = uniqueSortedStrings(managedPaths)
 	report = InstallReport{
 		Applied: false, ExecutableSource: executable,
-		ExecutableTarget:    config.Paths.StableExecutable,
-		ExecutableSHA256:    hex.EncodeToString(digest[:]),
-		ActiveUbuntuSources: append([]string(nil), plan.ActiveUbuntu...),
-		AdoptedTopology:     append([]string(nil), plan.ExistingTopology...),
-		InactiveInventory:   append([]string(nil), plan.InactiveInventory...),
-		ManagedFiles:        managedPaths, Refresh: refresh,
+		ExecutableTarget:     config.Paths.StableExecutable,
+		ExecutableSHA256:     hex.EncodeToString(digest[:]),
+		ActiveUbuntuSources:  append([]string(nil), plan.ActiveUbuntu...),
+		AdoptedTopology:      append([]string(nil), plan.ExistingTopology...),
+		InactiveInventory:    append([]string(nil), plan.InactiveInventory...),
+		SourceInventory:      append([]SourceDefinition(nil), plan.SourceInventory...),
+		DiscoveredCandidates: append([]Candidate(nil), acceptedCandidates...),
+		ManagedFiles:         managedPaths, Refresh: refresh,
 	}
 	for path := range plan.Edits {
 		report.DisabledSources = append(report.DisabledSources, path)
@@ -161,7 +195,7 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 		return report, fmt.Errorf("validate unattended-upgrade Origin cache workaround: %w", err)
 	}
 	refresh, err = Refresh(ctx, RefreshOptions{
-		Config: config, Apply: true, Now: now, Prober: options.Prober, Output: output,
+		Config: config, Apply: true, Now: now, Prober: cached, Output: output,
 	})
 	if err != nil {
 		return report, err
