@@ -17,6 +17,10 @@ var cmLocateDevNodeW = windows.NewLazySystemDLL(
 	"cfgmgr32.dll",
 ).NewProc("CM_Locate_DevNodeW")
 
+func platformEnumerationSource() string {
+	return "go.bug.st/serial detailed enumerator; Windows SetupAPI Ports class with DIGCF_PRESENT"
+}
+
 type registryDevice struct {
 	FriendlyName string
 	InstanceID   string

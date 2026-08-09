@@ -35,10 +35,15 @@ func platformPowerAction(ctx context.Context, action string) error {
 	switch action {
 	case "lock":
 		name = "loginctl"
-		arguments = []string{"lock-session"}
-		if session := strings.TrimSpace(os.Getenv("XDG_SESSION_ID")); session != "" {
-			arguments = append(arguments, session)
+		session := strings.TrimSpace(os.Getenv("XDG_SESSION_ID"))
+		if session == "" {
+			var err error
+			session, err = activeLinuxPhysicalSessionID(ctx)
+			if err != nil {
+				return err
+			}
 		}
+		arguments = []string{"lock-session", session}
 	case "sleep":
 		arguments = []string{"suspend"}
 	case "hibernate":
@@ -198,4 +203,49 @@ func boundedText(value string, maximum int) string {
 		value = value[:maximum] + "..."
 	}
 	return value
+}
+
+func activeLinuxPhysicalSessionID(ctx context.Context) (string, error) {
+	output, err := linuxHostCommand(ctx, "loginctl", "list-sessions", "--no-legend", "--no-pager")
+	if err != nil {
+		return "", fmt.Errorf("discover physical login session: %w%s", err, commandOutputDetail(output))
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		uid, uidErr := strconv.Atoi(fields[1])
+		if uidErr != nil || uid < 0 || strings.TrimSpace(fields[2]) == "" {
+			continue
+		}
+		properties, propertyErr := linuxHostCommand(
+			ctx, "loginctl", "show-session", fields[0],
+			"--property=Active", "--property=Remote", "--property=Type", "--property=State",
+			"--property=Seat", "--property=Class", "--property=User", "--property=Name", "--no-pager",
+		)
+		if propertyErr != nil {
+			continue
+		}
+		values := parseLinuxSessionProperties(string(properties))
+		graphical := strings.EqualFold(values["Type"], "wayland") || strings.EqualFold(values["Type"], "x11")
+		state := strings.ToLower(values["State"])
+		if values["Active"] == "yes" && values["Remote"] == "no" && graphical &&
+			(state == "active" || state == "online") && values["Seat"] == "seat0" &&
+			values["Class"] == "user" && values["User"] == strconv.Itoa(uid) && values["Name"] == fields[2] {
+			return fields[0], nil
+		}
+	}
+	return "", errors.New("no active local seat0 user Wayland or X11 session is available")
+}
+
+func parseLinuxSessionProperties(output string) map[string]string {
+	values := make(map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		key, value, found := strings.Cut(line, "=")
+		if found {
+			values[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	return values
 }

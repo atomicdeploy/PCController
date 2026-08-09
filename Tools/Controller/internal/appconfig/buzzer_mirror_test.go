@@ -34,8 +34,13 @@ func TestBuzzerMirrorRequiresDriverDirectoryOnlyForNativePlayback(t *testing.T) 
 		t.Fatalf("native %s playback was accepted without a backend", runtime.GOOS)
 	}
 	value.DriverDirectory = `C:\optional\winring0`
-	if err := validateBuzzerMirror(value); err != nil {
-		t.Fatal(err)
+	err := validateBuzzerMirror(value)
+	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
+		if err != nil {
+			t.Fatalf("native %s playback rejected with its supported configuration: %v", runtime.GOOS, err)
+		}
+	} else if err == nil {
+		t.Fatalf("Windows driver path incorrectly enabled native playback on %s", runtime.GOOS)
 	}
 }
 

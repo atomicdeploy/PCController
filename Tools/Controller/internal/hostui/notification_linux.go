@@ -27,6 +27,7 @@ type linuxNotifier struct {
 }
 
 var linuxNotifyLookPath = exec.LookPath
+var linuxNotifyEUID = os.Geteuid
 
 var linuxNotifyRun = func(ctx context.Context, environment []string, name string, arguments ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, name, arguments...)
@@ -113,30 +114,29 @@ func deliverLinuxNotification(
 	if notification.Body != "" {
 		arguments = append(arguments, notification.Body)
 	}
-	if bus := strings.TrimSpace(os.Getenv("DBUS_SESSION_BUS_ADDRESS")); bus != "" {
-		return runNotifyCommand(ctx, nil, tool, arguments)
-	}
-	uid := os.Geteuid()
-	if uid != 0 {
-		runtimeDirectory := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR"))
-		if runtimeDirectory == "" {
-			runtimeDirectory = "/run/user/" + strconv.Itoa(uid)
-		}
-		bus := filepath.Join(runtimeDirectory, "bus")
-		if _, err := os.Stat(bus); err == nil {
-			environment := []string{"XDG_RUNTIME_DIR=" + runtimeDirectory, "DBUS_SESSION_BUS_ADDRESS=unix:path=" + bus}
-			return runNotifyCommand(ctx, environment, tool, arguments)
-		}
-	}
 	session, err := activeLinuxGraphicalSession(ctx)
 	if err != nil {
 		return err
 	}
-	runtimeDirectory := "/run/user/" + session.uid
-	runuserArguments := []string{
-		"-u", session.user, "--", "env",
+	runtimeDirectory := "/run/user/" + strconv.Itoa(session.uid)
+	environment := []string{
 		"XDG_RUNTIME_DIR=" + runtimeDirectory,
 		"DBUS_SESSION_BUS_ADDRESS=unix:path=" + runtimeDirectory + "/bus",
+	}
+	currentUID := linuxNotifyEUID()
+	if currentUID == session.uid {
+		return runNotifyCommand(ctx, environment, tool, arguments)
+	}
+	if currentUID != 0 {
+		return fmt.Errorf(
+			"active physical desktop belongs to UID %d, but notification process runs as UID %d",
+			session.uid, currentUID,
+		)
+	}
+	runuserArguments := []string{
+		"-u", session.user, "--", "env",
+		environment[0],
+		environment[1],
 		tool,
 	}
 	runuserArguments = append(runuserArguments, arguments...)
@@ -159,7 +159,8 @@ func runNotifyCommand(ctx context.Context, environment []string, name string, ar
 }
 
 type linuxGraphicalSession struct {
-	id, uid, user string
+	id, user string
+	uid      int
 }
 
 func activeLinuxGraphicalSession(ctx context.Context) (linuxGraphicalSession, error) {
@@ -172,22 +173,30 @@ func activeLinuxGraphicalSession(ctx context.Context) (linuxGraphicalSession, er
 		if len(fields) < 3 {
 			continue
 		}
-		candidate := linuxGraphicalSession{id: fields[0], uid: fields[1], user: fields[2]}
+		uid, uidErr := strconv.Atoi(fields[1])
+		if uidErr != nil || uid < 0 || strings.TrimSpace(fields[2]) == "" {
+			continue
+		}
+		candidate := linuxGraphicalSession{id: fields[0], uid: uid, user: fields[2]}
 		properties, propertyErr := linuxNotifyRun(
 			ctx, nil, "loginctl", "show-session", candidate.id,
-			"--property=Active", "--property=Remote", "--property=Type", "--property=State", "--no-pager",
+			"--property=Active", "--property=Remote", "--property=Type", "--property=State",
+			"--property=Seat", "--property=Class", "--property=User", "--property=Name", "--no-pager",
 		)
 		if propertyErr != nil {
 			continue
 		}
 		values := parseLoginctlProperties(string(properties))
-		graphical := values["Type"] == "wayland" || values["Type"] == "x11"
-		if values["Active"] == "yes" && values["Remote"] != "yes" && graphical &&
-			(values["State"] == "active" || values["State"] == "online") {
+		graphical := strings.EqualFold(values["Type"], "wayland") || strings.EqualFold(values["Type"], "x11")
+		state := strings.ToLower(values["State"])
+		if values["Active"] == "yes" && values["Remote"] == "no" && graphical &&
+			(state == "active" || state == "online") && values["Seat"] == "seat0" &&
+			values["Class"] == "user" && values["User"] == strconv.Itoa(candidate.uid) &&
+			values["Name"] == candidate.user {
 			return candidate, nil
 		}
 	}
-	return linuxGraphicalSession{}, errors.New("no active local Wayland or X11 session is available for desktop notifications")
+	return linuxGraphicalSession{}, errors.New("no active local seat0 user Wayland or X11 session is available for desktop notifications")
 }
 
 func parseLoginctlProperties(output string) map[string]string {

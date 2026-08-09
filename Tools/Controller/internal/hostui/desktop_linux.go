@@ -3,7 +3,6 @@
 package hostui
 
 import (
-	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -88,7 +87,12 @@ func removePlatformDesktopIntegration(
 	status := DesktopIntegrationCleanupStatus{Supported: true, Shortcut: desktopPath}
 	info, statErr := os.Lstat(desktopPath)
 	if os.IsNotExist(statErr) {
-		return status, nil
+		removed, cleanupErr := removeLinuxMimeAssociation(desktopName)
+		status.ProtocolRemoved = removed && cleanupErr == nil
+		if cleanupErr != nil {
+			status.LastError = cleanupErr.Error()
+		}
+		return status, cleanupErr
 	}
 	if statErr != nil {
 		status.LastError = statErr.Error()
@@ -114,7 +118,7 @@ func removePlatformDesktopIntegration(
 	status.ShortcutRemoved = true
 	status.AppIdentityRemoved = true
 	removed, cleanupErr := removeLinuxMimeAssociation(desktopName)
-	status.ProtocolRemoved = removed || status.ShortcutRemoved
+	status.ProtocolRemoved = removed && cleanupErr == nil
 	if cleanupErr != nil {
 		status.LastError = cleanupErr.Error()
 	}
@@ -276,9 +280,12 @@ func removeMimeDefault(content []byte, mimeType, desktopName string) ([]byte, bo
 	var output []string
 	changed := false
 	section := ""
-	scanner := bufio.NewScanner(strings.NewReader(string(content)))
-	for scanner.Scan() {
-		line := scanner.Text()
+	lines := strings.Split(string(content), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for _, rawLine := range lines {
+		line := strings.TrimSuffix(rawLine, "\r")
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 			section = trimmed

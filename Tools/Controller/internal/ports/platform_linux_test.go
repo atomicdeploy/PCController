@@ -3,10 +3,18 @@
 package ports
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/fsnotify/fsnotify"
 )
+
+func TestLinuxEnumerationSourceIsTruthful(t *testing.T) {
+	source := EnumerationSource()
+	if !strings.Contains(source, "Linux sysfs") || strings.Contains(source, "Windows") || strings.Contains(source, "SetupAPI") {
+		t.Fatalf("EnumerationSource=%q", source)
+	}
+}
 
 func TestLinuxSerialDeviceEventFiltersUnrelatedDevChanges(t *testing.T) {
 	for _, name := range []string{"/dev/ttyUSB0", "/dev/ttyACM1", "/dev/ttyS0", "/dev/ttyAMA2", "/dev/rfcomm0"} {

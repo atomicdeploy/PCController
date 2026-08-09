@@ -2,14 +2,13 @@ package ports
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"go.bug.st/serial/enumerator"
 )
 
-func TestDetailedSetupAPISourceRetainsPortsMissingFromWMI(t *testing.T) {
+func TestDetailedPortSourceRetainsEnumeratedPorts(t *testing.T) {
 	result := detailedPortsToInfo([]*enumerator.PortDetails{
 		{Name: "COM1"},
 		{Name: "COM18", IsUSB: true, VID: "1a86", PID: "7523", Product: "USB-SERIAL CH340"},
@@ -18,10 +17,6 @@ func TestDetailedSetupAPISourceRetainsPortsMissingFromWMI(t *testing.T) {
 	if len(result) != 3 || result[1].Name != "COM18" || result[2].Name != "COM19" ||
 		result[1].VID != "1A86" || result[1].PID != "7523" {
 		t.Fatalf("SetupAPI-derived details were lost: %#v", result)
-	}
-	if !strings.Contains(EnumerationSource(), "SetupAPI") ||
-		!strings.Contains(EnumerationSource(), "DIGCF_PRESENT") {
-		t.Fatalf("discovery source is not explicit: %q", EnumerationSource())
 	}
 }
 

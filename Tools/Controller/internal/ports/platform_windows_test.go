@@ -2,7 +2,18 @@
 
 package ports
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestWindowsEnumerationSourceIsTruthful(t *testing.T) {
+	source := EnumerationSource()
+	if !strings.Contains(source, "Windows") || !strings.Contains(source, "SetupAPI") ||
+		!strings.Contains(source, "DIGCF_PRESENT") || strings.Contains(source, "Linux") {
+		t.Fatalf("EnumerationSource=%q", source)
+	}
+}
 
 func TestRegistrySelectionPrefersOnlyPresentDuplicate(t *testing.T) {
 	got := selectRegistryDevice([]registryDevice{

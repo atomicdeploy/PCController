@@ -14,6 +14,10 @@ import (
 
 func enrichPlatform(values []Info) []Info { return values }
 
+func platformEnumerationSource() string {
+	return "go.bug.st/serial detailed enumerator backed by Linux sysfs"
+}
+
 func watchPlatformChanges(ctx context.Context) (<-chan Change, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {

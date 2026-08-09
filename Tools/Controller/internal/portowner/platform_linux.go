@@ -20,6 +20,8 @@ type linuxEnumerator struct {
 	procRoot string
 }
 
+const maxLinuxPID = uint32(1<<31 - 1)
+
 func systemEnumerator() Enumerator { return linuxEnumerator{procRoot: "/proc"} }
 
 func isAccessDenied(cause error) bool {
@@ -47,16 +49,52 @@ func linuxSerialPath(value string) (string, error) {
 		return "", err
 	}
 	path = filepath.Clean(path)
-	relative, err := filepath.Rel("/dev", path)
-	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
-		return "", errors.New("serial-owner lookup is restricted to /dev")
-	}
-	base := filepath.Base(path)
-	serialName := strings.HasPrefix(base, "tty") || strings.HasPrefix(base, "rfcomm") || strings.Contains(relative, "serial")
-	if !serialName {
-		return "", fmt.Errorf("%s is not a recognized Linux serial-device path", path)
+	if _, _, err := linuxSerialDirectoryEntry(path); err != nil {
+		return "", err
 	}
 	return path, nil
+}
+
+// linuxSerialDirectoryEntry reduces an accepted path to one of the fixed
+// Linux serial directories plus a single entry name. The user-provided path is
+// used only for equality against names returned by ReadDir; it is never passed
+// to a filesystem operation.
+func linuxSerialDirectoryEntry(path string) (string, string, error) {
+	relative, err := filepath.Rel("/dev", path)
+	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
+		return "", "", errors.New("serial-owner lookup is restricted to /dev")
+	}
+	parts := strings.Split(relative, string(os.PathSeparator))
+	if len(parts) == 1 && (strings.HasPrefix(parts[0], "tty") || strings.HasPrefix(parts[0], "rfcomm")) {
+		return "/dev", parts[0], nil
+	}
+	if len(parts) == 3 && parts[0] == "serial" &&
+		(parts[1] == "by-id" || parts[1] == "by-path") && parts[2] != "" {
+		return filepath.Join("/dev", "serial", parts[1]), parts[2], nil
+	}
+	return "", "", fmt.Errorf("%s is not a recognized Linux serial-device path", path)
+}
+
+func statLinuxSerialTarget(path string) (os.FileInfo, error) {
+	directory, name, err := linuxSerialDirectoryEntry(path)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry.Name() != name {
+			continue
+		}
+		info, statErr := os.Stat(filepath.Join(directory, entry.Name()))
+		if statErr != nil {
+			return nil, statErr
+		}
+		return info, nil
+	}
+	return nil, os.ErrNotExist
 }
 
 func (enumerator linuxEnumerator) FindOwner(ctx context.Context, port string) (Owner, bool, error) {
@@ -75,32 +113,37 @@ func (enumerator linuxEnumerator) FindOwner(ctx context.Context, port string) (O
 }
 
 func findLinuxOwner(ctx context.Context, procRoot, target string) (Owner, bool, error) {
-	targetInfo, err := os.Stat(target)
+	targetInfo, err := statLinuxSerialTarget(target)
 	if err != nil {
 		return Owner{}, false, fmt.Errorf("inspect serial device %s: %w", target, err)
 	}
+	return findLinuxOwnerByFileInfo(ctx, procRoot, targetInfo)
+}
+
+func findLinuxOwnerByFileInfo(ctx context.Context, procRoot string, targetInfo os.FileInfo) (Owner, bool, error) {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
 		return Owner{}, false, fmt.Errorf("enumerate Linux processes: %w", err)
 	}
-	var pids []int
+	var pids []uint32
 	for _, entry := range entries {
-		pid, parseErr := strconv.Atoi(entry.Name())
+		pid, parseErr := strconv.ParseUint(entry.Name(), 10, 31)
 		if parseErr == nil && pid > 0 && entry.IsDir() {
-			pids = append(pids, pid)
+			pids = append(pids, uint32(pid))
 		}
 	}
-	sort.Ints(pids)
+	sort.Slice(pids, func(left, right int) bool { return pids[left] < pids[right] })
 	for _, pid := range pids {
 		if err := ctx.Err(); err != nil {
 			return Owner{}, false, err
 		}
-		fds, readErr := os.ReadDir(filepath.Join(procRoot, strconv.Itoa(pid), "fd"))
+		pidText := strconv.FormatUint(uint64(pid), 10)
+		fds, readErr := os.ReadDir(filepath.Join(procRoot, pidText, "fd"))
 		if readErr != nil {
 			continue
 		}
 		for _, fd := range fds {
-			fdInfo, statErr := os.Stat(filepath.Join(procRoot, strconv.Itoa(pid), "fd", fd.Name()))
+			fdInfo, statErr := os.Stat(filepath.Join(procRoot, pidText, "fd", fd.Name()))
 			if statErr != nil || !os.SameFile(targetInfo, fdInfo) {
 				continue
 			}
@@ -110,8 +153,8 @@ func findLinuxOwner(ctx context.Context, procRoot, target string) (Owner, bool, 
 	return Owner{}, false, nil
 }
 
-func linuxOwner(procRoot string, pid int) Owner {
-	processDirectory := filepath.Join(procRoot, strconv.Itoa(pid))
+func linuxOwner(procRoot string, pid uint32) Owner {
+	processDirectory := filepath.Join(procRoot, strconv.FormatUint(uint64(pid), 10))
 	nameBytes, _ := os.ReadFile(filepath.Join(processDirectory, "comm"))
 	name := strings.TrimSpace(strings.ToValidUTF8(string(nameBytes), ""))
 	if len(name) > 256 {
@@ -119,14 +162,14 @@ func linuxOwner(procRoot string, pid int) Owner {
 	}
 	executable, _ := os.Readlink(filepath.Join(processDirectory, "exe"))
 	startTime, _ := linuxProcessStartTime(procRoot, pid)
-	return Owner{PID: uint32(pid), Name: name, Executable: executable, ProcessStartTime: startTime}
+	return Owner{PID: pid, Name: name, Executable: executable, ProcessStartTime: startTime}
 }
 
 // linuxProcessStartTime returns Unix time in 100ns units. Linux exposes process
 // starts as USER_HZ ticks since boot; /proc uses USER_HZ=100 on supported Go
 // Linux targets irrespective of the kernel scheduler frequency.
-func linuxProcessStartTime(procRoot string, pid int) (uint64, error) {
-	stat, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "stat"))
+func linuxProcessStartTime(procRoot string, pid uint32) (uint64, error) {
+	stat, err := os.ReadFile(filepath.Join(procRoot, strconv.FormatUint(uint64(pid), 10), "stat"))
 	if err != nil {
 		return 0, err
 	}
@@ -216,7 +259,7 @@ func (actions linuxActions) verify(owner Owner) error {
 	if procRoot == "" {
 		procRoot = "/proc"
 	}
-	pid := int(owner.PID)
+	pid := owner.PID
 	if owner.ProcessStartTime != 0 {
 		startTime, err := linuxProcessStartTime(procRoot, pid)
 		if err != nil {
@@ -227,7 +270,7 @@ func (actions linuxActions) verify(owner Owner) error {
 		}
 	}
 	if owner.Executable != "" {
-		executable, err := os.Readlink(filepath.Join(procRoot, strconv.Itoa(pid), "exe"))
+		executable, err := os.Readlink(filepath.Join(procRoot, strconv.FormatUint(uint64(pid), 10), "exe"))
 		if err != nil {
 			return fmt.Errorf("verify %s executable: %w", owner.Label(), err)
 		}
@@ -241,6 +284,9 @@ func (actions linuxActions) verify(owner Owner) error {
 func (actions linuxActions) send(ctx context.Context, owner Owner, signal unix.Signal, operation string) error {
 	if owner.PID == 0 {
 		return errors.New("serial owner has no PID")
+	}
+	if owner.PID > maxLinuxPID {
+		return fmt.Errorf("serial owner PID %d exceeds the Linux process range", owner.PID)
 	}
 	open := actions.pidfdOpen
 	if open == nil {

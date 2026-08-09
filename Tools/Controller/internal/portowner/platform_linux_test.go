@@ -42,7 +42,11 @@ func TestLinuxEnumeratorFindsProcessHoldingDevice(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(procRoot, "stat"), []byte("cpu 1 2 3\nbtime 1000\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	owner, found, err := findLinuxOwner(context.Background(), procRoot, device)
+	targetInfo, err := os.Stat(device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, found, err := findLinuxOwnerByFileInfo(context.Background(), procRoot, targetInfo)
 	if err != nil || !found {
 		t.Fatalf("findLinuxOwner found=%t err=%v", found, err)
 	}
@@ -124,9 +128,30 @@ func TestLinuxSerialPathAcceptsDeviceAliasesOnly(t *testing.T) {
 			t.Fatalf("linuxSerialPath(%q): %v", value, err)
 		}
 	}
-	for _, value := range []string{"tcp://127.0.0.1:9000", "/tmp/ttyUSB0", "/dev/null"} {
+	for _, value := range []string{
+		"tcp://127.0.0.1:9000", "/tmp/ttyUSB0", "/dev/null", "/dev/not-serial/ttyUSB0", "/dev/serial/other/controller",
+	} {
 		if _, err := linuxSerialPath(value); err == nil {
 			t.Fatalf("linuxSerialPath(%q) unexpectedly succeeded", value)
 		}
+	}
+}
+
+func TestLinuxEnumeratorIgnoresPIDOutsideSignedProcessRange(t *testing.T) {
+	procRoot := t.TempDir()
+	if err := os.Mkdir(filepath.Join(procRoot, "4294967295"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	device := filepath.Join(t.TempDir(), "device")
+	if err := os.WriteFile(device, []byte("device"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(device)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, found, err := findLinuxOwnerByFileInfo(context.Background(), procRoot, info)
+	if err != nil || found || owner.PID != 0 {
+		t.Fatalf("owner=%+v found=%t err=%v", owner, found, err)
 	}
 }

@@ -7,7 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,15 +19,25 @@ type linuxSecretBackend struct {
 	namespace string
 	toolPath  string
 	run       func([]byte, string, ...string) ([]byte, error)
+	probe     func() bool
 }
 
 var linuxSecretLookPath = exec.LookPath
+
+var linuxSecretProbeRun = func(environment []string, name string, arguments ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, name, arguments...)
+	command.Env = append(os.Environ(), environment...)
+	return command.CombinedOutput()
+}
 
 var linuxSecretRun = func(input []byte, name string, arguments ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, name, arguments...)
 	command.Stdin = bytes.NewReader(input)
+	command.Env = append(os.Environ(), linuxSecretBusEnvironment()...)
 	return command.Output()
 }
 
@@ -37,11 +50,13 @@ func newPlatformBackend(namespace string) Backend {
 	if err != nil {
 		return unavailableBackend{}
 	}
-	return &linuxSecretBackend{namespace: namespace, toolPath: path, run: linuxSecretRun}
+	return &linuxSecretBackend{
+		namespace: namespace, toolPath: path, run: linuxSecretRun, probe: linuxSecretServiceAvailable,
+	}
 }
 
 func (backend *linuxSecretBackend) Status() Status {
-	available := backend != nil && backend.toolPath != "" && backend.run != nil
+	available := backend.available()
 	return Status{Provider: "libsecret", Available: available, Durable: available, Scope: "current-user"}
 }
 
@@ -90,11 +105,46 @@ func (backend *linuxSecretBackend) Delete(name string) error {
 }
 
 func (backend *linuxSecretBackend) available() bool {
-	return backend != nil && backend.toolPath != "" && backend.run != nil
+	return backend != nil && backend.toolPath != "" && backend.run != nil && backend.probe != nil && backend.probe()
 }
 
 func (backend *linuxSecretBackend) attributes(name string) []string {
 	return []string{"application", backend.namespace, "key", name}
+}
+
+func linuxSecretBusEnvironment() []string {
+	runtimeDirectory := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR"))
+	if !filepath.IsAbs(runtimeDirectory) {
+		runtimeDirectory = "/run/user/" + strconv.Itoa(os.Geteuid())
+	}
+	address := strings.TrimSpace(os.Getenv("DBUS_SESSION_BUS_ADDRESS"))
+	if address == "" {
+		address = "unix:path=" + filepath.Join(runtimeDirectory, "bus")
+	}
+	return []string{
+		"XDG_RUNTIME_DIR=" + runtimeDirectory,
+		"DBUS_SESSION_BUS_ADDRESS=" + address,
+	}
+}
+
+func linuxSecretServiceAvailable() bool {
+	busctl, err := linuxSecretLookPath("busctl")
+	if err != nil {
+		return false
+	}
+	output, err := linuxSecretProbeRun(
+		linuxSecretBusEnvironment(), busctl, "--user", "--no-pager", "--list",
+	)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && fields[0] == "org.freedesktop.secrets" {
+			return true
+		}
+	}
+	return false
 }
 
 type exitCoder interface{ ExitCode() int }

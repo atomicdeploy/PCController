@@ -50,6 +50,39 @@ func TestLinuxPowerActionsUseBoundedSystemInterfaces(t *testing.T) {
 	}
 }
 
+func TestLinuxLockResolvesActivePhysicalSessionWithoutEnvironmentID(t *testing.T) {
+	original := linuxHostCommand
+	t.Cleanup(func() { linuxHostCommand = original })
+	t.Setenv("XDG_SESSION_ID", "")
+	var lockedSession string
+	linuxHostCommand = func(_ context.Context, name string, arguments ...string) ([]byte, error) {
+		if name != "loginctl" {
+			return nil, errors.New("unexpected command")
+		}
+		switch arguments[0] {
+		case "list-sessions":
+			return []byte("4 0 root -\n5 1000 asus seat0\n"), nil
+		case "show-session":
+			if arguments[1] == "4" {
+				return []byte("Active=yes\nRemote=yes\nType=tty\nState=active\nSeat=\nClass=user\nUser=0\nName=root\n"), nil
+			}
+			return []byte("Active=yes\nRemote=no\nType=wayland\nState=active\nSeat=seat0\nClass=user\nUser=1000\nName=asus\n"), nil
+		case "lock-session":
+			lockedSession = arguments[1]
+			return nil, nil
+		default:
+			return nil, errors.New("unexpected loginctl action")
+		}
+	}
+
+	if err := platformPowerAction(context.Background(), "lock"); err != nil {
+		t.Fatal(err)
+	}
+	if lockedSession != "5" {
+		t.Fatalf("locked session %q", lockedSession)
+	}
+}
+
 func TestLinuxBrightnessPrefersPanelAndFallsBackToDDC(t *testing.T) {
 	original := linuxHostCommand
 	t.Cleanup(func() { linuxHostCommand = original })

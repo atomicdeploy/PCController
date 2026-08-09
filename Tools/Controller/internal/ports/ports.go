@@ -68,10 +68,8 @@ type Filter struct {
 	Preferred    Identity
 }
 
-const detailedPortEnumerationSource = "go.bug.st/serial detailed enumerator; Windows SetupAPI Ports class with DIGCF_PRESENT"
-
 // EnumerationSource identifies the live OS source authoritative for port lists.
-func EnumerationSource() string { return detailedPortEnumerationSource }
+func EnumerationSource() string { return platformEnumerationSource() }
 
 func List() ([]Info, error) {
 	details, err := enumerator.GetDetailedPortsList()
