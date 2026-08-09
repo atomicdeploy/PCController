@@ -94,6 +94,8 @@ test('candidate build stays bound to the CLI and config returned by bootstrap', 
     HTTP_PROXY: 'http://proxy.invalid:8080',
     NO_PROXY: 'localhost,.lan',
     PATH: 'C:\\Windows\\System32',
+    pccontroller_toolchain_cli: 'C:\\stale\\arduino-cli.exe',
+    PcController_Toolchain_Config: 'C:\\stale\\firmware-cli.yaml',
   }
   const selected = buildEnvironmentFromToolchainBootstrap(`
 Installing exact firmware dependencies
@@ -104,10 +106,16 @@ Saved managed firmware CLI path in PC-side host configuration.
 }
 `, environment)
   assert.deepEqual(selected, {
-    ...environment,
+    HTTP_PROXY: environment.HTTP_PROXY,
+    NO_PROXY: environment.NO_PROXY,
+    PATH: environment.PATH,
     PCCONTROLLER_TOOLCHAIN_CLI: 'C:\\managed tools\\arduino-cli.exe',
     PCCONTROLLER_TOOLCHAIN_CONFIG: 'C:\\managed tools\\firmware-cli.yaml',
   })
+  assert.equal(Object.keys(selected).filter((name) =>
+    name.toUpperCase() === 'PCCONTROLLER_TOOLCHAIN_CLI').length, 1)
+  assert.equal(Object.keys(selected).filter((name) =>
+    name.toUpperCase() === 'PCCONTROLLER_TOOLCHAIN_CONFIG').length, 1)
   assert.throws(
     () => buildEnvironmentFromToolchainBootstrap('{"cli_path":"arduino-cli"}', environment),
     /config_path/u,

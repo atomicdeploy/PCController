@@ -679,8 +679,16 @@ function buildEnvironmentFromToolchainBootstrap(output, environment = process.en
       throw new Error(`toolchain bootstrap report has no ${field}`)
     }
   }
+  const canonical = {}
+  const replaced = new Set([
+    'PCCONTROLLER_TOOLCHAIN_CLI',
+    'PCCONTROLLER_TOOLCHAIN_CONFIG',
+  ])
+  for (const [name, value] of Object.entries(environment)) {
+    if (!replaced.has(name.toUpperCase())) canonical[name] = value
+  }
   return {
-    ...environment,
+    ...canonical,
     PCCONTROLLER_TOOLCHAIN_CLI: report.cli_path,
     PCCONTROLLER_TOOLCHAIN_CONFIG: report.config_path,
   }
