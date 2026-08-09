@@ -314,6 +314,44 @@ func TestLinuxProvisionEnvironmentCanonicalizesCaseInsensitiveProxyValues(t *tes
 	}
 }
 
+func TestLinuxHostProvisionExpandsAllProxyForAptWithoutLoggingValue(t *testing.T) {
+	calls := installLinuxProvisionTestHooks(t, false, false)
+	const proxy = "socks5h://proxy-user:top-secret@proxy.invalid:1080"
+	var output bytes.Buffer
+	report, err := provisionLinuxHost(context.Background(), linuxHostProvisionOptions{
+		TargetUser: "alice", Environment: []string{"ALL_PROXY=" + proxy},
+	}, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 1 || (*calls)[0].command.Name != "/usr/bin/apt-get" ||
+		!containsArgument((*calls)[0].command.Args, "--simulate") {
+		t.Fatalf("expected one read-only apt-get simulation, got %+v", *calls)
+	}
+	values := make(map[string]string)
+	for _, entry := range (*calls)[0].environment {
+		name, value, found := strings.Cut(entry, "=")
+		if found {
+			values[name] = value
+		}
+	}
+	for _, name := range []string{
+		"ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+	} {
+		if values[name] != proxy {
+			t.Errorf("apt-get environment %s=%q want ALL_PROXY fallback", name, values[name])
+		}
+	}
+	for _, name := range []string{"ALL_PROXY", "HTTP_PROXY", "HTTPS_PROXY"} {
+		if !containsArgument(report.ProxyVariables, name) {
+			t.Errorf("secret-free proxy variable report omitted %s: %q", name, report.ProxyVariables)
+		}
+	}
+	if strings.Contains(output.String(), "top-secret") || strings.Contains(output.String(), "proxy-user") {
+		t.Fatalf("provision output leaked proxy credentials: %s", output.String())
+	}
+}
+
 func TestTrustedLinuxProvisionExecutableIgnoresCallerPATH(t *testing.T) {
 	originalStat := linuxHostProvisionStat
 	t.Cleanup(func() { linuxHostProvisionStat = originalStat })

@@ -25,6 +25,7 @@ var (
 	linuxAPTMirrorLoadConfig     = aptmirror.LoadConfig
 	linuxAPTMirrorLoadCandidates = aptmirror.LoadCandidateOverrides
 	linuxAPTMirrorArchitectures  = linuxDebianArchitectures
+	linuxAPTMirrorAdoptionLock   = aptmirror.AcquireAdoptionLock
 )
 
 func provisionLinuxUbuntuMirrors(
@@ -63,7 +64,13 @@ func provisionLinuxUbuntuMirrors(
 	}
 	environment := linuxProvisionEnvironment(options.Environment)
 	var systemd mirrorSystemdState
+	var releaseAdoptionLock func()
 	if options.Apply {
+		releaseAdoptionLock, err = linuxAPTMirrorAdoptionLock()
+		if err != nil {
+			return aptmirror.InstallReport{}, fmt.Errorf("serialize Ubuntu mirror adoption: %w", err)
+		}
+		defer releaseAdoptionLock()
 		systemd, err = inspectMirrorSystemd(ctx, environment)
 		if err != nil {
 			return aptmirror.InstallReport{}, err
@@ -149,7 +156,13 @@ func runToolchainMirrorInstall(args []string, stdout, stderr io.Writer) error {
 	ctx, cancel := signalContext()
 	defer cancel()
 	var systemd mirrorSystemdState
+	var releaseAdoptionLock func()
 	if *apply {
+		releaseAdoptionLock, err = linuxAPTMirrorAdoptionLock()
+		if err != nil {
+			return fmt.Errorf("serialize Ubuntu mirror adoption: %w", err)
+		}
+		defer releaseAdoptionLock()
 		systemd, err = inspectMirrorSystemd(ctx, environment)
 		if err != nil {
 			return err

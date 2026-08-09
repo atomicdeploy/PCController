@@ -43,9 +43,16 @@ Types: deb
 URIs: mirror+file:/etc/apt/mirrors/ubuntu-dynamic.list
 Suites: RELEASE RELEASE-updates RELEASE-backports RELEASE-security
 Components: main restricted universe multiverse
-Architectures: HOST-DEBIAN-ARCH
+Architectures: DPKG-NATIVE-ARCH DPKG-FOREIGN-ARCH...
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 ```
+
+Controller discovers the native architecture with
+`dpkg --print-architecture`, then appends every architecture reported by
+`dpkg --print-foreign-architectures` without duplicates. Every discovered
+architecture is rendered into the source and must pass the signed metadata and
+per-component topology probes. Provisioning therefore preserves an existing
+multiarch host instead of silently reducing it to the native architecture.
 
 The stable runtime and configuration are:
 
@@ -57,11 +64,14 @@ The stable runtime and configuration are:
 
 An existing PCController-style `mirror+file` source is adopted. Active raw
 Ubuntu source lines are backed up and disabled only after a verified generated
-list exists. Third-party repositories are preserved byte-for-byte. Mixed or
-unknown `mirror+file` topologies fail closed. Commented, disabled, distribution
-upgrade and backup files are reported as inventory and are never activated.
-The legacy `apt-mirror-health.timer`, when present, is quiesced before adoption
-so it cannot race the Go refresh; its prior enabled/active state is restored if
+list exists. The canonical source is activated before legacy Ubuntu stanzas are
+disabled, so a power loss between atomic writes can temporarily leave duplicate
+Ubuntu topology but cannot leave the host with no Ubuntu source. Third-party
+repositories are preserved byte-for-byte. Mixed or unknown `mirror+file`
+topologies fail closed. Commented, disabled, distribution upgrade and backup
+files are reported as inventory and are never activated. The current and
+legacy mirror timers and loaded services are quiesced before adoption so they
+cannot race the Go refresh; their prior running/enabled state is restored if
 installation rolls back.
 
 ## Trust and routing policy
@@ -70,9 +80,11 @@ For every candidate/suite pair Controller:
 
 1. fetches `InRelease` with a bounded timeout;
 2. verifies its signature with `/usr/bin/gpgv` and the Ubuntu archive keyring;
-3. verifies Ubuntu origin, label, exact suite/codename, architecture,
-   components, publication time and signed `Valid-Until` when present;
-4. fetches every configured `component/binary-ARCH/Release`; and
+3. verifies Ubuntu origin, label, exact suite/codename, every discovered
+   native/foreign architecture, all components, publication time and signed
+   `Valid-Until` when present;
+4. fetches every configured `component/binary-ARCH/Release` for every
+   discovered architecture; and
 5. verifies each file's size and SHA-256 against the signed `InRelease`.
 
 That final check rejects a mirror which serves plausible signed metadata while
@@ -81,22 +93,39 @@ endpoint shape.
 
 Routes are generated with these APT mirror priorities:
 
-- `10`: domestic and within eight hours of a reachable official reference;
-- `20`: first-run domestic bootstrap while official references are cut off,
-  provided signed publication age is within the strict suite limit;
+- `10`: verified domestic and within eight hours of the current or persisted
+  official per-suite reference;
+- `20`: censorship-safe domestic bootstrap when that suite has neither a
+  reachable official source nor a persisted official reference;
 - `850`/`900`: unconditional official fallbacks; and
 - `950`: signed but stale domestic or bounded transient last-good rescue.
 
-Ubuntu does not consistently publish `Valid-Until`. A signed value, when
-present, may only shorten validity. Otherwise Controller derives a conservative
-deadline from the signed `Date` (48 hours for moving pockets and 180 days for
-the immutable release pocket). Explicitly expired signed metadata is unsafe;
-age-stale but otherwise signed/hash-valid metadata remains rescue-only.
+During that no-official/no-last-known-good cutoff case, the newest verified
+domestic publication becomes a per-suite routing consensus for the current run
+only. It is not persisted as an official freshness reference. Domestic mirrors
+within eight hours of that consensus receive `20` for the immutable base suite
+even when its signed `Date` is old. Moving pockets receive `20` only when their
+signed publication is no more than 48 hours old; stale moving pockets and
+domestic mirrors more than eight hours behind consensus remain rescue-only at
+`950`. This lets an older immutable Ubuntu release bootstrap during official
+censorship without treating stale updates or security metadata as current.
 
-Domestic candidates marked `bypass_proxy` connect directly. Other candidates
-use Go's proxy environment handling, including `NO_PROXY`. Provisioning copies
-only proxy variables into the root-readable timer environment file and never
-prints their values.
+Ubuntu does not consistently publish `Valid-Until`. An explicitly expired
+signed value is always unsafe. When it is absent, Controller derives a
+suite-specific deadline from the signed `Date` (48 hours for moving pockets and
+180 days for the immutable base) to bound transient last-good reuse. That
+derived deadline does not override the routing-only immutable-base consensus
+exception above. All identity, signature, hash and topology checks still apply.
+
+Domestic candidates marked `bypass_proxy` connect directly during Go probes.
+Controller also writes per-host `Acquire::http::Proxy` and
+`Acquire::https::Proxy` rules with the value `DIRECT`, so later APT downloads
+to those domestic hosts bypass a configured proxy as well. Other candidates use
+Go's proxy environment handling, including `NO_PROXY`, and APT inherits the
+captured proxy environment. Provisioning copies only recognized proxy variables
+into the root-readable timer environment file and never prints their values. If
+only `ALL_PROXY` is present, it is also supplied as `HTTP_PROXY` and
+`HTTPS_PROXY` for clients that do not consume `ALL_PROXY` directly.
 
 ## Recurring refresh and rollback
 
@@ -110,13 +139,69 @@ The timer runs:
 
 Run the same command without `--apply` for a read-only health report. Apply
 holds a non-blocking process lock before reading last-good state, probes with an
-overall four-minute deadline, and atomically replaces state and mirror output.
-Cancellation and corrupt state preserve the prior output.
+overall four-minute deadline, and atomically replaces each state and mirror
+output file. Cancellation and corrupt state preserve the prior output. If the
+mirror-list write returns an error after state was written, Controller restores
+the prior state. A sudden power loss between those two renames can leave new
+state beside the prior valid mirror list; the next refresh reconciles them.
 
-Before installation, exact file snapshots and a SHA-256 manifest are written
-under `/var/backups/pccontroller-apt-mirrors-*`. Any file or systemd activation
-failure restores the snapshots and the previous timer state. Backups are kept
-for operator-reviewed recovery.
+The persistent timer first becomes eligible two minutes after boot, then runs
+two hours after the prior activation with up to two minutes of randomized
+delay. This cadence limits repeated metadata traffic while still adapting to a
+failed or recovered mirror.
+
+Before installation, exact snapshots of every managed path and every active
+Ubuntu source that will be edited, plus a SHA-256 manifest, are written under
+`/var/backups/pccontroller-apt-mirrors-*`. A file-write, refresh, or systemd
+activation failure during the same install invocation restores those snapshots
+and the previously observed current/legacy unit state.
+
+That rollback is deliberately bounded. Once timer activation succeeds, the
+in-process rollback is committed. Recurring refreshes do not create another
+full backup directory, and a saved backup does not include APT package lists,
+cache, dpkg state, third-party repositories, or inactive historical source
+files that were only inventoried. It also does not persist the prior systemd
+unit state for a later manual rollback. Backups are therefore retained for
+operator-reviewed file recovery through `manifest.json`, followed by an
+explicit `systemctl daemon-reload` and deliberate unit-state restoration; they
+are not a general package or host transaction snapshot.
+
+## Live validation after apply
+
+`mirror-install --apply` proves source inventory, signed mirror health, file
+installation and timer activation. It does not run an end-to-end APT update or
+package transaction. A production rollout is not complete until the host also
+passes live APT validation:
+
+```sh
+# Confirm the installed config and source retain native plus foreign arches.
+dpkg --print-architecture
+dpkg --print-foreign-architectures
+sed -n '/"architectures"/,/]/p' /etc/pccontroller/apt-mirrors.json
+grep '^Architectures:' /etc/apt/sources.list.d/ubuntu.sources
+
+# Re-run health through the stable, root-owned executable without mutation.
+/opt/pccontroller/bin/controller toolchain mirror-refresh --dry-run --json
+
+# Verify the managed schedule and execute one refresh now.
+systemctl is-enabled pccontroller-apt-mirror-health.timer
+systemctl start pccontroller-apt-mirror-health.service
+systemctl --no-pager --full status pccontroller-apt-mirror-health.service
+systemctl list-timers pccontroller-apt-mirror-health.timer --no-pager
+
+# Exercise APT itself, then simulate package resolution without installing.
+apt-get update
+apt-get --simulate dist-upgrade
+```
+
+Review the refresh JSON and generated mirror list to confirm every suite keeps
+an official `850`/`900` fallback and healthy domestic routes appear before it.
+`apt-get update` must succeed for every configured architecture without
+duplicate index downloads, signature warnings or missing component indexes.
+The simulation must resolve normally and must not propose removing foreign
+architecture support. Exercise forced domestic failure/official fallback only
+in a controlled staging or maintenance test; do not edit the generated list or
+disable live repositories merely to demonstrate fallback on a production host.
 
 ## Candidate override
 

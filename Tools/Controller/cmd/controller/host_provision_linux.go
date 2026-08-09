@@ -663,6 +663,16 @@ func linuxProvisionEnvironment(source []string) []string {
 		}
 		selected[canonical] = candidate
 	}
+	// apt-get does not consistently honor ALL_PROXY. Preserve explicit
+	// protocol-specific values, but expand an ALL_PROXY-only root environment
+	// so both HTTP and HTTPS repository transports receive the same proxy.
+	if fallback, ok := selected["ALL_PROXY"]; ok {
+		for _, name := range []string{"HTTP_PROXY", "HTTPS_PROXY"} {
+			if _, exists := selected[name]; !exists {
+				selected[name] = fallback
+			}
+		}
+	}
 	keys := make([]string, 0, len(selected))
 	for key := range selected {
 		keys = append(keys, key)
