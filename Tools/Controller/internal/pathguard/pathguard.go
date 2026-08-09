@@ -85,8 +85,14 @@ func ValidateComponents(value string, allowMissingSuffix bool) error {
 		if err := ValidateComponent(current, info); err != nil {
 			return err
 		}
-		if index < len(parts)-1 && !info.IsDir() {
-			return fmt.Errorf("path component %s is not a directory", current)
+		if index < len(parts)-1 {
+			isDirectory, err := platformComponentIsDirectory(current, info)
+			if err != nil {
+				return fmt.Errorf("inspect path component type %s: %w", current, err)
+			}
+			if !isDirectory {
+				return fmt.Errorf("path component %s is not a directory", current)
+			}
 		}
 	}
 	return nil

@@ -61,3 +61,7 @@ func platformComponentIsLink(path string, info fs.FileInfo) (bool, error) {
 	}
 	return info.Mode()&fs.ModeSymlink != 0 || attributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0, nil
 }
+
+func platformComponentIsDirectory(_ string, info fs.FileInfo) (bool, error) {
+	return info.IsDir(), nil
+}

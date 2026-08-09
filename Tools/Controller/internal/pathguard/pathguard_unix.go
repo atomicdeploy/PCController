@@ -45,3 +45,21 @@ func platformComponentIsLink(path string, info fs.FileInfo) (bool, error) {
 	}
 	return !trusted, nil
 }
+
+func platformComponentIsDirectory(path string, info fs.FileInfo) (bool, error) {
+	if info.IsDir() {
+		return true, nil
+	}
+	if info.Mode()&fs.ModeSymlink == 0 {
+		return false, nil
+	}
+	trusted, err := trustedSystemSymlink(path, info)
+	if err != nil || !trusted {
+		return false, err
+	}
+	target, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return target.IsDir(), nil
+}

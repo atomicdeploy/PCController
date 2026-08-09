@@ -8,6 +8,16 @@ import (
 	"testing"
 )
 
+func TestValidateComponentsAcceptsPlatformTemporaryDirectory(t *testing.T) {
+	// macOS commonly exposes t.TempDir through the root-owned /var ->
+	// /private/var system alias. The alias is trusted by the Unix path guard,
+	// and its followed target must still be classified as a directory.
+	root := t.TempDir()
+	if err := ValidateComponents(filepath.Join(root, "missing"), true); err != nil {
+		t.Fatalf("temporary directory path was rejected: %v", err)
+	}
+}
+
 func TestResolveAbsoluteCanonicalizesExistingSymlinkPrefix(t *testing.T) {
 	base := t.TempDir()
 	realRoot := filepath.Join(base, "real")
