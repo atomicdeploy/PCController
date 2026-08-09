@@ -114,6 +114,7 @@ const EXTRA_ISSUE_REQUIRED_LABELS = {
   131: ['🖥️ host', '💾 storage', '🧪 testing', '🔒 security'],
   134: ['📦 dependencies', '🏗️ tooling-build'],
   135: ['🖥️ host', '🧪 testing', '🏗️ tooling-build', '🔍 needs-hardware'],
+  137: ['🖥️ host', '🛡️ safety', '🧪 testing', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
 };
 
 function requirement(id, parent, title, state, labels, section, criteria, evidence) {
@@ -1026,6 +1027,7 @@ const EXTRA_ISSUE_ORIGINAL_REQUESTS = {
   131: [PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.trackerReconciliation],
   134: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
   135: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.serviceTray],
+  137: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy],
 };
 
 const PR_ORIGINAL_REQUESTS = {
