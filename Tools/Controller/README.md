@@ -185,6 +185,60 @@ foreign registrations or shortcuts:
 .\bin\controller.exe desktop uninstall
 ```
 
+### Per-user Windows installation lifecycle
+
+Windows packages include `installation-package.json`, a deterministic inventory
+that binds every installable file to its size and SHA-256, the exact host
+manifest, source identity, target architecture, executable, embedded WebUI, and
+verified Win32 resources. Installation copies only inventoried files into a
+content-addressed per-user slot; it never trusts an archive filename or loose
+shadow executable.
+
+From an extracted, verified package:
+
+```console
+controller.exe install --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe installation status
+controller.exe repair --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe uninstall
+```
+
+Install and update activation are journaled and recoverable. Presentation-only
+desktop enable and display-name changes journal both the prior and desired
+identity before touching native artifacts, then roll forward idempotently after
+an interruption; a failed cleanup or registration retains the journal for the
+next retry. A healthy repeated install or repair is a no-op; a damaged slot is
+rebuilt from the verified package without replacing a mapped executable in
+place. One exact prior slot is retained for rollback. The per-user root carries
+a product-and-user ownership marker, and lifecycle commands refuse a foreign or
+unmarked non-empty root.
+
+Uninstall preserves configuration, board backups, downloaded tools, logs, and
+host state. Purging them is a separate destructive choice that requires both
+flags and the exact confirmation shown by `controller help`:
+
+```console
+controller.exe uninstall --purge-data --preview-purge
+controller.exe uninstall --purge-data --confirm-purge PURGE-PC-CONTROLLER-USER-DATA
+```
+
+The preview returns the exact deduplicated deletion set without changing the
+installation or user data. Configuration is always modeled as its exact file;
+an explicit `--config`/`PCCONTROLLER_CONFIG` can never turn its parent into a
+recursive deletion target. The data root honors `PCCONTROLLER_DATA_DIR` at any
+absolute local path, but recursive removal requires its durable product/user
+ownership marker. A non-empty unmarked directory is never silently adopted.
+All existing path components and removal trees are rejected if they contain a
+Windows junction/reparse point or symbolic link.
+
+When uninstall is launched from the installed executable, a verified native
+helper binds both the parent PID and process-creation identity, continues only
+after that exact process exits, and writes a durable success/failure outcome at
+the returned path. Lifecycle commands are interruptible and impose a five-minute
+upper bound on lock waits. URI/AUMID/shortcut work uses the existing direct
+native desktop adapter and the exact active executable; it does not invoke
+PowerShell or accept a shell-backed fallback.
+
 The UI includes live electrical/thermal graphs, relay and PWM controls, a
 peripheral workbench for displays, addressable LEDs, sound, RF, macros, I2C,
 host actions and recovery diagnostics, a typed local-device surface, a

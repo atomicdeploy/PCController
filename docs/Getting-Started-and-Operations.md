@@ -115,6 +115,43 @@ Tools\Controller\bin\controller.exe desktop ensure
 Tools\Controller\bin\controller.exe desktop uninstall
 ```
 
+For a durable per-user installation, use the extracted Windows package rather
+than copying `controller.exe` by itself. The release package carries a
+hash-bound inventory for the exact executable, embedded resources, host
+manifest, notices, and companion files:
+
+```console
+controller.exe install --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe installation status
+controller.exe repair --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe uninstall
+```
+
+Installation and repair use content-addressed slots and a recovery journal, so
+an update never overwrites the running image. Repair is idempotent when every
+installed digest is healthy and rebuilds a damaged slot only from a verified
+package. Enabling native desktop integration or changing its display name also
+journals the prior and desired identities before mutation; interrupted cleanup
+or activation is retried idempotently before status can report healthy. The
+default uninstall preserves both roaming configuration and local host data,
+including board backups. Data removal is deliberately separate:
+
+```console
+controller.exe uninstall --purge-data --preview-purge
+controller.exe uninstall --purge-data --confirm-purge PURGE-PC-CONTROLLER-USER-DATA
+```
+
+The exact confirmation is required in addition to `--purge-data`; neither flag
+is implied by uninstall. Preview reports the exact deduplicated set without
+deleting it. A configured host file is removed only as that exact file, while a
+canonical or `PCCONTROLLER_DATA_DIR` data root is recursive only when its durable
+product/user ownership marker validates. Unmarked non-empty roots and any path
+containing a symlink, junction, reparse point, device alias, or alternate data
+stream are refused. `--desktop` uses the direct native URI/AUMID/shortcut adapter
+with the exact installed executable. Lifecycle lock waits are interruptible and
+bounded to five minutes. Unsupported platforms return an error rather than
+falling back to a shell script.
+
 The exact embedded WebUI can also be exported for audit or a trusted static
 host. The command never overwrites an existing archive:
 
