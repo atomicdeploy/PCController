@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"pccontroller.local/controller/internal/pathguard"
 	"pccontroller.local/controller/internal/programmer"
 )
 
@@ -23,8 +24,12 @@ func TestLifecyclePurgeTargetsKeepExactConfigAndHonorDataOverride(t *testing.T) 
 	if len(configs) != 1 || configs[0] != config {
 		t.Fatalf("config purge targets=%#v, want exact file %q", configs, config)
 	}
-	if len(roots) != 1 || roots[0] != data {
-		t.Fatalf("data purge roots=%#v, want override %q", roots, data)
+	canonicalData, err := pathguard.ResolveAbsolute(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0] != canonicalData {
+		t.Fatalf("data purge roots=%#v, want canonical override %q", roots, canonicalData)
 	}
 }
 
