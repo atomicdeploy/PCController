@@ -31,6 +31,7 @@ const policyPath = join(here, 'dependency-policy.json')
 const toolsLockPath = join(here, 'resolved-tools-lock.json')
 const toolchainPolicyPath = join(controller, 'toolchain-profile.json')
 const toolchainLockPath = join(controller, 'toolchain-lock.json')
+const toolchainPolicyGenerator = join(controller, 'internal', 'programmer', 'generate-toolchain-policy.mjs')
 const buildReportDir = join(repo, '.build', 'dependencies')
 const workflowsDirectory = join(repo, '.github', 'workflows')
 const defaultReportPath = join(buildReportDir, 'update-report.json')
@@ -652,6 +653,47 @@ function controllerToolchain(action, extra = [], capture = true) {
   })
 }
 
+function parseTrailingJSONObject(output, label) {
+  const text = String(output ?? '').trim()
+  const candidates = []
+  for (let index = text.lastIndexOf('\n{'); index >= 0; index = text.lastIndexOf('\n{', index - 1)) {
+    candidates.push(text.slice(index + 1))
+  }
+  if (text.startsWith('{')) candidates.push(text)
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate)
+      if (value && typeof value === 'object' && !Array.isArray(value)) return value
+    } catch {
+      // Keep scanning: bootstrap progress can contain non-JSON lines before
+      // the final machine-readable object.
+    }
+  }
+  throw new Error(`${label} did not emit a trailing JSON object`)
+}
+
+function buildEnvironmentFromToolchainBootstrap(output, environment = process.env) {
+  const report = parseTrailingJSONObject(output, 'toolchain bootstrap')
+  for (const field of ['cli_path', 'config_path']) {
+    if (typeof report[field] !== 'string' || !report[field].trim()) {
+      throw new Error(`toolchain bootstrap report has no ${field}`)
+    }
+  }
+  const canonical = {}
+  const replaced = new Set([
+    'PCCONTROLLER_TOOLCHAIN_CLI',
+    'PCCONTROLLER_TOOLCHAIN_CONFIG',
+  ])
+  for (const [name, value] of Object.entries(environment)) {
+    if (!replaced.has(name.toUpperCase())) canonical[name] = value
+  }
+  return {
+    ...canonical,
+    PCCONTROLLER_TOOLCHAIN_CLI: report.cli_path,
+    PCCONTROLLER_TOOLCHAIN_CONFIG: report.config_path,
+  }
+}
+
 function resolveToolchain(mode, directRetry) {
   validateToolchainSourcePolicy()
   validateToolchainLockSources()
@@ -771,6 +813,9 @@ function findNamed(root, wanted) {
 
 function installResolvedHostTools(lock, directRetry) {
   validateHostToolsLock(lock)
+  if (platform() === 'win32') {
+    run(process.execPath, [join(here, 'select-windows-compiler.mjs')], { capture: false })
+  }
   const goBin = join(buildReportDir, 'tools', 'go', 'bin')
   mkdirSync(goBin, { recursive: true })
   runNetwork('go', ['install', `${lock.go_winres.module}@${lock.go_winres.version}`], {
@@ -827,7 +872,18 @@ function validateEverything(hostTools, directRetry) {
   // including the dependency-tool staging directory used below.
   step('Clean generated build outputs', () => run(rootBuild, ['--clean'], { capture: false }))
   installResolvedHostTools(hostTools, directRetry)
-  step('Exact toolchain bootstrap', () => controllerToolchain('bootstrap', ['--locked'], false))
+  let bootstrapResult
+  step('Exact toolchain bootstrap', () => {
+    bootstrapResult = controllerToolchain('bootstrap', ['--locked'])
+    if (bootstrapResult.stdout) process.stdout.write(bootstrapResult.stdout)
+    if (bootstrapResult.stderr) process.stderr.write(bootstrapResult.stderr)
+  })
+  // Bootstrap can select a portable CLI even when another arduino-cli is on
+  // PATH. Bind the later root build to the exact executable and managed
+  // profile returned by that bootstrap instead of falling back to global
+  // Arduino state. The inherited environment, including proxy and NO_PROXY,
+  // is otherwise preserved byte-for-byte.
+  const buildEnvironment = buildEnvironmentFromToolchainBootstrap(bootstrapResult.stdout)
   step('Generated product identity', () => run('node', [
     'Tools/Controller/internal/productidentity/generate.mjs', '--check',
   ], { capture: false }))
@@ -838,9 +894,14 @@ function validateEverything(hostTools, directRetry) {
   step('Web typecheck', () => npmRun(['run', 'typecheck'], { cwd: web, capture: false }))
   step('Web tests', () => npmRun(['test'], { cwd: web, capture: false }))
   step('Web production build', () => npmRun(['run', 'build'], { cwd: web, capture: false }))
+  // Keep this bounded test output captured so a failure is preserved in the
+  // structured report and blocked-update issue instead of existing only in
+  // the transient Actions log.
   step('Build-system tests', () => run('node', ['--test',
-    'Tools/Build/build.test.mjs', 'Tools/Audit/extract-user-turns.test.mjs'], { capture: false }))
-  step('Firmware and host build', () => run(rootBuild, ['--all'], { capture: false }))
+    'Tools/Build/build.test.mjs', 'Tools/Audit/extract-user-turns.test.mjs']))
+  step('Firmware and host build', () => run(rootBuild, ['--all'], {
+    capture: false, env: buildEnvironment,
+  }))
   const bootBuild = platform() === 'win32'
     ? join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.cmd')
     : join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.sh')
@@ -955,6 +1016,10 @@ function main() {
       if (goDirective !== resolvedGoVersion || moduleUpdates.length || npm.some((item) => item.update_available)) {
         updateSourceDependencies(moduleUpdates, npm, options.directRetry)
       }
+      // The generated Go policy embeds the complete firmware lock, including
+      // host-source hashes refreshed above. Regenerate it before validation
+      // and before the candidate branch is created.
+      run(process.execPath, [toolchainPolicyGenerator], { capture: false })
       hostTools = resolveHostTools(options.directRetry)
       const afterTools = readJSON(toolsLockPath)
       if (!afterTools || !sameSubstantive(afterTools, hostTools)) writeJSONAtomic(toolsLockPath, hostTools)
@@ -989,6 +1054,7 @@ export {
   assertTrustedDependencyURL,
   assertTrustedGitHubURL,
   assertTrustedRepository,
+  buildEnvironmentFromToolchainBootstrap,
   commandInvocation,
   compareHostToolLocks,
   compareCompositeVersions,

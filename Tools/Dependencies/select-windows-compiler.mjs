@@ -92,9 +92,12 @@ function main() {
 
   const githubPath = environmentValue('GITHUB_PATH')
   const githubEnv = environmentValue('GITHUB_ENV')
-  invariant(githubPath && githubEnv, 'GitHub Actions environment export files are unavailable')
-  appendFileSync(githubPath, `${dirname(selected)}\n`)
-  appendFileSync(githubEnv, `CC=${selected}\n`)
+  invariant(Boolean(githubPath) === Boolean(githubEnv),
+    'GitHub Actions compiler exports require both GITHUB_PATH and GITHUB_ENV')
+  if (githubPath && githubEnv) {
+    appendFileSync(githubPath, `${dirname(selected)}\n`)
+    appendFileSync(githubEnv, `CC=${selected}\n`)
+  }
   process.stdout.write(`Selected locked Windows C compiler: ${selected}\n`)
   const version = spawnSync(selected, ['--version'], { encoding: 'utf8', windowsHide: true })
   invariant(version.status === 0, 'the selected compiler failed its final version check')
