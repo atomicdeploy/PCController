@@ -10,6 +10,10 @@ current source tree and keeps three kinds of state separate:
 - host settings stored in the platform PC configuration directory;
 - build/deployment evidence stored in manifests and backup directories.
 
+Contributors should open the [Repository and File Map](Repository-Map.md)
+before editing. It shows which file owns each domain, what is generated, where
+tests live, and which per-user files must never enter Git.
+
 > [!CAUTION]
 > Start with unloaded outputs. A successful build, simulator run, or browser
 > session does not prove a relay, mechanism, supply, sensor, or programmer is

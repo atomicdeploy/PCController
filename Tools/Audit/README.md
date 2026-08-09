@@ -4,12 +4,20 @@
 
 ## GitHub wiki publisher
 
-`publish-wiki.mjs` validates and mirrors the canonical starter guides,
-hardware notes, protocol/API guide, memory tradeoffs, checklist, and backlog to
-the repository wiki. Preview the exact page map first:
+`publish-wiki.mjs` validates and mirrors the maintained onboarding, operation,
+API, build, contributor, acceptance, and backlog sources to the repository
+Wiki. Inspect the page plan first:
 
 ```cmd
 node Tools\Audit\publish-wiki.mjs
+```
+
+Generate the complete branded Home, sidebar, 23 source-backed pages, banner,
+and product icon under the ignored `.build/wiki-preview` directory and validate
+every generated Wiki link without contacting or changing the Wiki remote:
+
+```cmd
+node Tools\Audit\publish-wiki.mjs --preview
 ```
 
 After GitHub's one-time first wiki page has been created, publish with:
@@ -18,9 +26,10 @@ After GitHub's one-time first wiki page has been created, publish with:
 node Tools\Audit\publish-wiki.mjs --apply
 ```
 
-The publisher uses a verified temporary directory, generates `Home.md` and
-`_Sidebar.md`, commits only when content changed, and leaves repository
-Markdown as the canonical source. Repository identity is resolved from
+The publisher uses a verified temporary directory, generates the branded
+`Home.md` and `_Sidebar.md`, rewrites source-relative links to their Wiki page
+or canonical repository target, commits only when content changed, and leaves
+repository Markdown as the canonical source. Repository identity is resolved from
 `GITHUB_REPOSITORY` in automation or the authenticated `gh repo view` result
 locally; the publisher and issue synchronizer contain no checkout-specific
 owner/repository fallback.

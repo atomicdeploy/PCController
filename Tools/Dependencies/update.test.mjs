@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import test from 'node:test'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,10 +10,12 @@ import {
   assertTrustedDependencyURL,
   assertTrustedGitHubURL,
   assertTrustedRepository,
+  commandInvocation,
   compareHostToolLocks,
   compareCompositeVersions,
   compareVersions,
   parseWingetCompilerManifest,
+  run,
   sameSubstantive,
   stableParts,
   validateHostSourcePolicy,
@@ -23,6 +27,54 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, '..', '..')
+
+test('Windows command scripts use an explicit ComSpec command line while native commands stay direct', () => {
+  const commandProcessor = 'C:\\Windows\\System32\\cmd.exe'
+  assert.deepEqual(
+    commandInvocation(
+      'C:\\Program Files\\PCController\\build.cmd',
+      ['--report', 'C:\\Result Files\\report.json'],
+      { ComSpec: commandProcessor },
+      'win32',
+    ),
+    {
+      file: commandProcessor,
+      args: [
+        '/d', '/s', '/v:off', '/c',
+        '""C:\\Program Files\\PCController\\build.cmd" "--report" "C:\\Result Files\\report.json""',
+      ],
+      windowsVerbatimArguments: true,
+    },
+  )
+  assert.deepEqual(
+    commandInvocation('./build.sh', ['--all'], {}, 'linux'),
+    { file: './build.sh', args: ['--all'], windowsVerbatimArguments: false },
+  )
+  assert.deepEqual(
+    commandInvocation('node.exe', ['--version'], {}, 'win32'),
+    { file: 'node.exe', args: ['--version'], windowsVerbatimArguments: false },
+  )
+  assert.throws(
+    () => commandInvocation('build.cmd', ['%PATH%'], { ComSpec: commandProcessor }, 'win32'),
+    /cannot contain/u,
+  )
+})
+
+test('Windows command-script runner fixes the Node spawnSync EINVAL regression', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const directory = mkdtempSync(join(tmpdir(), 'pccontroller command script '))
+  const script = join(directory, 'argument fixture.cmd')
+  writeFileSync(script, '@echo off\r\nif "%~1"=="hello world" exit /b 0\r\nexit /b 42\r\n', 'utf8')
+  try {
+    const direct = spawnSync(script, ['hello world'], { encoding: 'utf8', windowsHide: true })
+    assert.equal(direct.status, null)
+    assert.equal(direct.error?.code, 'EINVAL')
+    assert.equal(run(script, ['hello world']).status, 0)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
 
 test('stable comparison is semantic and rejects prereleases', () => {
   assert.equal(compareVersions('1.10.0', '1.9.9'), 1)
