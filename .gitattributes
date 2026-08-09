@@ -1,3 +1,5 @@
 Tools/Build/package-lock.json text eol=lf
 Tools/Controller/web/package-lock.json text eol=lf
 Tools/Bootloader/Urboot-Custom/LICENSE.upstream text eol=lf
+Tools/Bootloader/Urboot-Custom/backends/tm1637_progress.S text eol=lf
+Tools/Bootloader/Urboot-Custom/patches/0001-optional-progress-backend-hook.patch text eol=lf

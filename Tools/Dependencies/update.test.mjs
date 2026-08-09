@@ -268,9 +268,15 @@ test('scheduled updater validates every required candidate gate before PR creati
   assert.match(updater, /PCCONTROLLER_TOOLCHAIN_CLI:\s*report\.cli_path/u)
   assert.match(updater, /PCCONTROLLER_TOOLCHAIN_CONFIG:\s*report\.config_path/u)
   assert.match(updater, /run\(rootBuild, \['--all'\], \{[\s\S]*?env: buildEnvironment/u)
-  assert.match(attributes,
-    /^Tools\/Bootloader\/Urboot-Custom\/LICENSE\.upstream text eol=lf$/mu,
-    'the exact vendored upstream license hash must survive Windows checkout conversion')
+  for (const path of [
+    'LICENSE\\.upstream',
+    'backends\\/tm1637_progress\\.S',
+    'patches\\/0001-optional-progress-backend-hook\\.patch',
+  ]) {
+    assert.match(attributes,
+      new RegExp(`^Tools/Bootloader/Urboot-Custom/${path} text eol=lf$`, 'mu'),
+      'exact Urboot-Custom input hashes must survive Windows checkout conversion')
+  }
   const buildSystemGate = updater.slice(
     updater.indexOf("step('Build-system tests'"),
     updater.indexOf("step('Firmware and host build'"),

@@ -149,9 +149,10 @@ areas still work together:
 - VirtualBoard configure, compile, and CTest execution;
 - generated firmware, bootloader, and host manifests.
 
-The vendored Urboot upstream license is explicitly checked out with LF bytes on
-every host so its exact reviewed SHA-256 identity survives Windows
-`core.autocrlf` settings and the cross-platform gate verifies the same source.
+The vendored Urboot upstream license, custom patch, and assembly backend are
+explicitly checked out with LF bytes on every host so their exact reviewed
+SHA-256 identities survive Windows `core.autocrlf` settings and the
+cross-platform gate verifies the same source.
 
 The bounded build-system test output is captured into a failed structured
 report, so its assertion and stack trace reach the blocked-update issue and
