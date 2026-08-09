@@ -215,7 +215,8 @@ export function parseArguments(argv, env = process.env) {
 		allowIncompleteBackup: false,
 		installBootloader: false,
 		toolchainSync: false,
-		toolchainCLI: '',
+		toolchainCLI: env.PCCONTROLLER_TOOLCHAIN_CLI || '',
+		toolchainConfig: env.PCCONTROLLER_TOOLCHAIN_CONFIG || '',
 		version: '',
 		appName: undefined,
 		tagline: undefined,
@@ -273,6 +274,10 @@ export function parseArguments(argv, env = process.env) {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.toolchainCLI = value; index = next; break
 			}
+			case '--toolchain-config': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.toolchainConfig = value; index = next; break
+			}
 			case '--version': {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.version = value; index = next; break
@@ -317,8 +322,11 @@ export function parseArguments(argv, env = process.env) {
 			throw new BuildError('--install-bootloader requires explicit --method usbasp', 2)
 		}
 	}
-	if (options.toolchainCLI && !options.toolchainSync) {
-		throw new BuildError('--toolchain-cli is only valid with --toolchain-sync', 2)
+	if (options.toolchainCLI && !options.toolchainSync && !options.firmware) {
+		throw new BuildError('--toolchain-cli requires firmware compilation or --toolchain-sync', 2)
+	}
+	if (options.toolchainConfig && !options.firmware) {
+		throw new BuildError('--toolchain-config requires firmware compilation', 2)
 	}
 	options.cleanOnly = options.clean && !substantive
 	return options
@@ -356,7 +364,9 @@ export function createPlan(options, identity, platform = process.platform) {
 			invocation: sourceControllerInvocation(PROJECT_ROOT),
 			method: 'compile',
 			sketch: PROJECT_ROOT,
-			outputDir: FIRMWARE_OUTPUT
+			outputDir: FIRMWARE_OUTPUT,
+			toolchainCLI: options.toolchainCLI,
+			toolchainConfig: options.toolchainConfig
 		})
 		actions.push(commandAction(
 			'firmware-compile',
@@ -503,7 +513,8 @@ Safe build options:
   --build-time ISO          Freeze host build time for reproducible packaging
   --build-timestamp HEX     Freeze packed firmware timestamp
   --toolchain-sync          Explicitly synchronize firmware dependencies
-  --toolchain-cli PATH      Dependency CLI override (with --toolchain-sync)
+  --toolchain-cli PATH      Dependency CLI override (compile or sync)
+  --toolchain-config PATH   Dependency CLI config override (compile)
   --dry-run                 Print the plan; run no subprocess and open no device
   --plan-json               Emit the shared CMD/Bash plan as JSON only
   --verbose                 Print every native argv vector
@@ -1828,7 +1839,9 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 		invocation: executionControllerInvocation(controllerPath),
 		method: 'compile',
 		sketch: PROJECT_ROOT,
-		outputDir: FIRMWARE_OUTPUT
+		outputDir: FIRMWARE_OUTPUT,
+		toolchainCLI: options.toolchainCLI,
+		toolchainConfig: options.toolchainConfig
 	})
 	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	log.stage('💾', 'Generating and validating the complete safe default EEPROM image')

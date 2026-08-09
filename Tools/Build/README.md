@@ -51,6 +51,7 @@ build.cmd --plan-json
 build.cmd --host-only
 build.cmd --firmware-only
 build.cmd --toolchain-sync
+build.cmd --firmware-only --toolchain-cli C:\path\to\arduino-cli.exe --toolchain-config C:\path\to\firmware-cli.yaml
 build.cmd --clean
 ```
 
@@ -152,6 +153,12 @@ requires a device to be opened or a Controller subprocess to be started.
   installation. Run `controller toolchain bootstrap` on a clean machine to
   resolve the latest compatible profile into an exact, hash-verified local
   lock without replacing unrelated global tools.
+- A build can select that managed CLI and its adjacent profile explicitly with
+  `--toolchain-cli` and `--toolchain-config`. The equivalent build-only
+  environment variables are `PCCONTROLLER_TOOLCHAIN_CLI` and
+  `PCCONTROLLER_TOOLCHAIN_CONFIG`; command-line values take precedence. These
+  values are forwarded through the shared Controller command plan, so compile
+  never falls back to a different global CLI after a portable bootstrap.
 - Windows host packaging requires `go-winres` unless
   `--skip-resources` is explicit, and UPX unless `--no-upx` is explicit.
 - The C ABI package requires a native target-matching C compiler unless
