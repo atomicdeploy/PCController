@@ -3,6 +3,37 @@
 // Utility helpers
 // -----------------------------------------------------------------------------
 
+// Publishes and optionally retains one successful ordinary action at one exact
+// MCU clock edge. The same opcode/payload then drives host recording and local
+// circular-buffer playback; macro sequence 0xFE callers are filtered at the
+// protocol boundary to prevent replay from recursively evidencing itself.
+void acceptedAction(InputEventSource source, uint8_t opcode,
+                    const uint8_t *payload, uint8_t availablePayload,
+                    bool retain = true) {
+  if (!MacroAction::recordable(opcode, availablePayload)) {
+    return;
+  }
+  const uint32_t capturedAtUs = micros();
+  // Evidence is serialized first. If capture seals because its ring is full,
+  // the following Captured lifecycle event can never overtake the final action.
+  appEvents.action(source, opcode, payload, availablePayload, capturedAtUs);
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+  if (retain) {
+    macroPlayback.captureAction(opcode, payload, availablePayload,
+                                capturedAtUs);
+  }
+#else
+  (void)retain;
+#endif
+}
+
+// Build silence is an electrical output policy, not an EEPROM migration. A
+// diagnostic image therefore reports/mutes effectively while preserving the
+// user's stored preference for the next ordinary build.
+bool effectiveSilentMode() {
+  return BuildForcesSilent || settingsStore.values().silent();
+}
+
 // Tests a 32-bit deadline without breaking across millis() rollover.
 bool __attribute__((noinline)) timeReached(uint32_t at,
                                            uint32_t deadline) {
@@ -174,7 +205,7 @@ uint16_t statusFlags() {
   if (radioState.lastCode != 0) {
     flags |= STATUS_RF_RECEIVED;
   }
-  if (settingsStore.values().silent()) {
+  if (effectiveSilentMode()) {
     flags |= STATUS_SILENT;
   }
   if (relays.anySideBusy()) {

@@ -29,7 +29,7 @@ static inline __attribute__((always_inline)) void initializeController() {
   const ControllerSettings &settings = settingsStore.values();
   const bool programming = settings.programmingMode();
   menuPage = settings.defaultMenuPage;
-  buzzer.setMuted(settings.silent() || programming);
+  buzzer.setMuted(BuildForcesSilent || settings.silent() || programming);
   streamPeriodMs = settings.streamPeriodMs;
   display.begin(programming || systemInputs.doorOpen()
                     ? settings.displayBrightness
@@ -83,7 +83,7 @@ static inline __attribute__((always_inline)) void initializeController() {
   radioReceiver.setReceiveTolerance(70);
   radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
 
-  if (!programming) {
+  if (!programming && !effectiveSilentMode()) {
     playBootMelody();
   }
   firmwareReady = true;
@@ -126,7 +126,7 @@ static inline __attribute__((always_inline)) void serviceController() {
     showHostOfflineOnLcd();
     hostLcdFlags |= HOST_LCD_OFFLINE;
   }
-  if (macroPlayback.active() &&
+  if (macroPlayback.hostDependent() &&
       hostOffline) {
     macroPlayback.cancel(false);
     if (macroPlayback.takeSafeStopRequest()) {

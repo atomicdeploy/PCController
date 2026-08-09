@@ -29,6 +29,17 @@ enum MenuPage : uint8_t {
   PAGE_COUNT
 };
 
+// PAGE_KEYS remains a stable protocol/EEPROM ID for alpha tooling, but the MCU
+// presents exactly one input page. Requests for the retired duplicate page are
+// canonicalized to PAGE_MOTION and navigation skips it in every build profile.
+constexpr uint8_t canonicalFrontPanelPage(uint8_t page) {
+  return page == PAGE_KEYS ? static_cast<uint8_t>(PAGE_MOTION) : page;
+}
+
+constexpr bool frontPanelPageCompiled(uint8_t page) {
+  return page < PAGE_COUNT && page != PAGE_KEYS;
+}
+
 // Top-level pages and modal editors consumed by ModeManager.
 enum ProgramMode : uint8_t {
   MODE_BOOT = 0,
@@ -70,13 +81,47 @@ enum ProgramMode : uint8_t {
 // One policy describes whether K3 navigates or invokes a leaf-owned action.
 enum class LeafDecreaseAction : uint8_t {
   ParentCategory,
-  IdentifyKey3,
   AllRelaysOff,
 };
 
 constexpr LeafDecreaseAction leafDecreaseAction(ProgramMode mode) {
-  return mode == MODE_KEYS
-             ? LeafDecreaseAction::IdentifyKey3
-             : (mode == MODE_RELAY ? LeafDecreaseAction::AllRelaysOff
-                                   : LeafDecreaseAction::ParentCategory);
+  return mode == MODE_RELAY ? LeafDecreaseAction::AllRelaysOff
+                            : LeafDecreaseAction::ParentCategory;
+}
+
+// UnifiedInputIntent is the complete four-key policy for the single input page.
+// Diagnostics keep two direct exits, so key identification can never trap the
+// operator. The normal image assigns K3 to record/stop/play and K4 to motion.
+enum class UnifiedInputIntent : uint8_t {
+  PreviousPage,
+  NextPage,
+  Identify,
+  Macro,
+  Motion,
+};
+
+constexpr UnifiedInputIntent unifiedInputIntent(MenuAction action,
+                                                 bool identifyKeys) {
+  if (action == MENU_PREVIOUS) {
+    return UnifiedInputIntent::PreviousPage;
+  }
+  if (action == MENU_NEXT) {
+    return UnifiedInputIntent::NextPage;
+  }
+  if (identifyKeys) {
+    return UnifiedInputIntent::Identify;
+  }
+  return action == MENU_DECREASE ? UnifiedInputIntent::Macro
+                                 : UnifiedInputIntent::Motion;
+}
+
+// One immutable mapping is consumed by physical, injected, and native tests.
+struct MotionKeyBinding {
+  uint8_t side;
+  bool reverse;
+};
+
+constexpr MotionKeyBinding motionKeyBinding(MenuAction action) {
+  return {static_cast<uint8_t>(action >= MENU_DECREASE),
+          action == MENU_NEXT || action == MENU_INCREASE};
 }

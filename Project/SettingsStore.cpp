@@ -152,6 +152,9 @@ void SettingsStore::setDefaults() {
   settings_.displayBrightness = 5;
   settings_.statusBrightness = 128;
   settings_.streamPeriodMs = 500;
+#if PCCONTROLLER_BLANK_EEPROM_SILENT
+  settings_.flags |= SettingsFlags::Silent;
+#endif
   // Host-owned factory provisioning supplies the legacy packed menu bytes.
   // They intentionally stay zero in the volatile blank-EEPROM fallback.
   settings_.motionBreakMs = 1;

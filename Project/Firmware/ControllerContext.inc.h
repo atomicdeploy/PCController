@@ -102,12 +102,20 @@ uint8_t userPwmMenuIndex = 0;
 uint8_t userRelayMenuIndex = 0;
 uint8_t userRelayBehavior = 0;
 uint8_t settingsMenuItem = 0;
+#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
 uint8_t identifiedKey = 0;
+#endif
 uint32_t menuLabelEndsAt = 0;
 uint32_t modeEnteredAt = 0;
+#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
 uint32_t identifiedKeyEndsAt = 0;
+#endif
 uint32_t motionExitStartedAt = 0;
+uint8_t motionPressedMask = 0;
 uint32_t flashMessageEndsAt = 0;
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+uint8_t nextLocalMacroId = 1;
+#endif
 // Presentation visibility/order is configured independently over UART and is
 // not rolled back by a local edit. The late display-options byte is captured
 // separately because it owns the locally editable closed-door brightness.

@@ -685,7 +685,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
           payload[1] > static_cast<uint8_t>(KeyEvent::Up)) {
         goto badPayload;
       }
-      applyKeyGesture(payload[0], static_cast<KeyEvent>(payload[1]));
+      applyKeyGesture(payload[0], static_cast<KeyEvent>(payload[1]),
+                      InputEventSource::Host,
+                      frame.sequence != MacroQueue::ExecutionSequence);
       appEvents.key(payload[0], payload[1], InputEventSource::Host);
       goto acknowledged;
 
@@ -831,6 +833,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
   }
 
 acknowledged:
+  if (frame.sequence != MacroQueue::ExecutionSequence &&
+      frame.opcode != ControllerProtocol::RemoteKeyGesture) {
+    acceptedAction(InputEventSource::Host, frame.opcode, payload, length);
+  }
   appProtocol.sendAck(frame.sequence, frame.opcode);
   return;
 badPayload:
