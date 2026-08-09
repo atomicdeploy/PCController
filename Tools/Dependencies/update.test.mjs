@@ -244,6 +244,7 @@ test('npm projects declare compatibility ranges while each lock stays exact', ()
 test('scheduled updater validates every required candidate gate before PR creation', () => {
   const workflow = readFileSync(join(repo, '.github', 'workflows', 'update-dependencies.yml'), 'utf8')
   const updater = readFileSync(join(here, 'update.mjs'), 'utf8')
+  const attributes = readFileSync(join(repo, '.gitattributes'), 'utf8')
   for (const expected of [
     'schedule:', '--apply --validate', 'steps.candidate.outcome == \'success\'',
     'body-path: .build/dependencies/dependency-pr.md', 'dependency-blocked',
@@ -267,6 +268,9 @@ test('scheduled updater validates every required candidate gate before PR creati
   assert.match(updater, /PCCONTROLLER_TOOLCHAIN_CLI:\s*report\.cli_path/u)
   assert.match(updater, /PCCONTROLLER_TOOLCHAIN_CONFIG:\s*report\.config_path/u)
   assert.match(updater, /run\(rootBuild, \['--all'\], \{[\s\S]*?env: buildEnvironment/u)
+  assert.match(attributes,
+    /^Tools\/Bootloader\/Urboot-Custom\/LICENSE\.upstream text eol=lf$/mu,
+    'the exact vendored upstream license hash must survive Windows checkout conversion')
   const buildSystemGate = updater.slice(
     updater.indexOf("step('Build-system tests'"),
     updater.indexOf("step('Firmware and host build'"),

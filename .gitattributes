@@ -1,2 +1,3 @@
 Tools/Build/package-lock.json text eol=lf
 Tools/Controller/web/package-lock.json text eol=lf
+Tools/Bootloader/Urboot-Custom/LICENSE.upstream text eol=lf
