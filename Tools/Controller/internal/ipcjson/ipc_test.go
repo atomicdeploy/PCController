@@ -20,6 +20,7 @@ import (
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/webui"
 )
@@ -606,7 +607,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	_ = response.Body.Close()
 	if readErr != nil || response.StatusCode != http.StatusOK ||
 		!strings.Contains(string(osStatusBody), `"serial_discovery_source"`) ||
-		!strings.Contains(string(osStatusBody), "Windows SetupAPI") {
+		!strings.Contains(string(osStatusBody), ports.EnumerationSource()) {
 		t.Fatalf("OS status=%d body=%s err=%v", response.StatusCode, osStatusBody, readErr)
 	}
 

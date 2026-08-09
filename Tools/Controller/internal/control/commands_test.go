@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/ports"
 )
 
 type fixedHostFactsProvider struct {
@@ -492,24 +494,40 @@ func TestHostConfigCommandControlsBuzzerMirror(t *testing.T) {
 	engine := NewCommandEngine(runtime, CommandOptions{
 		HostConfig: func() appconfig.Config { return config },
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
-			if err := change(&config); err != nil {
+			candidate := config
+			if err := change(&candidate); err != nil {
 				return err
 			}
-			return config.Validate()
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
 		},
 	})
-	for _, command := range []string{
-		`config set integrations.buzzer_mirror.driver_directory C:\optional\winring0`,
-		"config set integrations.buzzer_mirror.native_enabled on",
-		"config set integrations.buzzer_mirror.enabled on",
-		"config set integrations.buzzer_mirror.web_audio_enabled off",
-	} {
+	for _, command := range []string{`config set integrations.buzzer_mirror.driver_directory C:\optional\winring0`} {
 		if _, err := engine.Execute(context.Background(), command); err != nil {
 			t.Fatalf("%q: %v", command, err)
 		}
 	}
+	nativeSupported := goruntime.GOOS == "windows" || goruntime.GOOS == "linux"
+	if _, err := engine.Execute(context.Background(), "config set integrations.buzzer_mirror.native_enabled on"); nativeSupported && err != nil {
+		t.Fatalf("native %s buzzer configuration failed: %v", goruntime.GOOS, err)
+	} else if !nativeSupported && (err == nil || !strings.Contains(err.Error(), "unavailable")) {
+		t.Fatalf("unsupported native %s buzzer configuration err=%v", goruntime.GOOS, err)
+	}
+	for _, command := range []string{"config set integrations.buzzer_mirror.enabled on"} {
+		if _, err := engine.Execute(context.Background(), command); err != nil {
+			t.Fatalf("%q: %v", command, err)
+		}
+	}
+	if nativeSupported {
+		if _, err := engine.Execute(context.Background(), "config set integrations.buzzer_mirror.web_audio_enabled off"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	buzzer := config.Integrations.BuzzerMirror
-	if !buzzer.Enabled || !buzzer.NativeEnabled || buzzer.WebAudioEnabled {
+	if !buzzer.Enabled || buzzer.NativeEnabled != nativeSupported || buzzer.WebAudioEnabled == nativeSupported {
 		t.Fatalf("buzzer mirror=%+v", buzzer)
 	}
 	output, err := engine.Execute(context.Background(), "config get integrations.buzzer_mirror.enabled")
@@ -549,7 +567,7 @@ func TestOSCommandsExposeStatusPolicyAndDenyExecutionByDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"host=", "os=", "Windows SetupAPI", "DIGCF_PRESENT"} {
+	for _, expected := range []string{"host=", "os=", ports.EnumerationSource()} {
 		if !strings.Contains(status, expected) {
 			t.Fatalf("OS status missing %q: %s", expected, status)
 		}
