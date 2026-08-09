@@ -8,6 +8,7 @@
 #include "LocalLib/TonePlayer.h"
 #include "Project/FrontPanelModel.h"
 #include "Project/MotionDoorPolicy.h"
+#include "Project/PwmController.h"
 #include "Project/RelayController.h"
 #include "Project/SettingsStore.h"
 #include "Project/TemperatureRoles.h"
@@ -474,6 +475,24 @@ void testFrontPanelLeafDecreaseDispatch() {
   }
 }
 
+void testPowerSignalFallbackPolicy() {
+  std::uint16_t value = 0;
+  const std::uint16_t first =
+      PowerSignalFallback::nextValue(value, true, false);
+  require(first == PowerSignalFallback::Step,
+          "offline power signal did not start with one bounded fade step");
+  value = first;
+  for (std::uint8_t turn = 0; turn < 20; ++turn) {
+    value = PowerSignalFallback::nextValue(value, true, false);
+  }
+  require(value == PowerSignalFallback::FullBrightness,
+          "offline power signal did not saturate at full brightness");
+  require(PowerSignalFallback::nextValue(731, false, false) == 731,
+          "reconnected host did not retain channel-12 ownership");
+  require(PowerSignalFallback::nextValue(0, true, true) == 0,
+          "Prog mode allowed the fallback to re-enable channel 12");
+}
+
 void testDallasAbsentPullupBound() {
   arduino_mock::resetHardware();
   arduino_mock::portInput = 0; // Missing pull-up/stuck-low bus.
@@ -521,6 +540,7 @@ void testBuzzerTimerAndQueue() {
 
 int main() {
   try {
+    testPowerSignalFallbackPolicy();
     testKeyGestures();
     testRelayInterlocks();
     testMotionDoorPolicyMatrixAndEntryPaths();

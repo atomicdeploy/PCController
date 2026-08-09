@@ -85,9 +85,19 @@ void markIlluminationSettingsChanged(uint32_t at) {
   }
 }
 
-// Defers EEPROM writes during timing-sensitive RF learning and menu transactions.
-void serviceIlluminationSettings(uint32_t at) {
-  settingsStore.service(at, !learningActive && !editTransactionActive);
+// Advances at most one EEPROM byte across every persistent owner. Settings
+// take priority when due (especially the Prog latch); learned-RF work then uses
+// otherwise idle persistence turns. EEPROM.update only launches one hardware
+// byte after every input service has run; RF interrupts remain enabled while
+// that byte programs. This must continue during multi/indefinite learning or
+// the first queued code would keep the store Busy and reject the second.
+void servicePersistence(uint32_t at) {
+  if (editTransactionActive) {
+    return;
+  }
+  if (!settingsStore.service(at, true)) {
+    learnedRemotes.service();
+  }
 }
 
 // Clears every scheduled segment state so a later message always starts at
@@ -130,7 +140,11 @@ void showHostOfflineOnLcd() {
       // PCF8574 pulses for HD44780 command 0x18 (shift display left).
       i2cBus.write(shiftCommand, sizeof(shiftCommand));
     }
-    (void)i2cBus.endTransmission();
+    if (i2cBus.endTransmission() != 0) {
+      // A missing/wedged optional LCD costs one bounded transaction only; do
+      // not multiply the timeout across the remaining display-shift batches.
+      break;
+    }
   }
 }
 
@@ -159,13 +173,46 @@ uint32_t readU32(const uint8_t *buffer) {
          (static_cast<uint32_t>(buffer[3]) << 24);
 }
 
-// Returns relays and user PWM channels to a safe state after macro termination.
+// Cancels every output domain that a queued/captured macro may touch. Normal
+// completion intentionally retains final outputs; cancel/failure is all-off,
+// with only the operational (non-Prog) power indicator restored steadily.
 void safeStopMacroOutputs() {
   relays.allOff(now);
-  pwm.clearMask(PwmChannels::UserTestMask);
+  illumination.setMode(IlluminationMode::Off);
+  illumination.setOffBrightness(0);
+  if (i2cLeaseActive(now)) {
+    // Relays/audio/strip stop immediately; the PCA all-off transaction is
+    // retried as soon as the host releases its whole-bus lease.
+    macroPwmSafeStopPending = true;
+  } else {
+    pwm.tryAllOff();
+    if (!settingsStore.values().programmingMode()) {
+      pwm.setPowerSignal(true);
+    }
+    macroPwmSafeStopPending = false;
+  }
   buzzer.stop();
+  AddressableLeds::clear();
+  AddressableLeds::show();
   hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
   statusLeds.cancelEffect();
+  if ((hostLcdFlags & HOST_PANEL_CAPTURED) != 0) {
+    releaseHostPanel();
+  } else {
+    clearHostSegmentText();
+  }
+}
+
+void serviceDeferredMacroPwmSafeStop(bool i2cReserved) {
+  if (!macroPwmSafeStopPending || i2cReserved) {
+    return;
+  }
+  if (pwm.tryAllOff()) {
+    if (!settingsStore.values().programmingMode()) {
+      pwm.setPowerSignal(true);
+    }
+    macroPwmSafeStopPending = false;
+  }
 }
 
 // Treats a never-seen or timed-out PC as unavailable after firmware startup.
@@ -185,6 +232,32 @@ bool temperatureHot() {
 #endif
 }
 
+// Channel 12 is host-owned while connected (including arbitrary fade/pulse
+// values). If the host disappears, the MCU restores a steady full indicator
+// in small nonblocking I2C steps. Prog and an active generic-I2C lease remain
+// authoritative and can never be overridden by this fallback.
+void servicePowerSignalFallback(bool hostOffline, bool i2cReserved,
+                                uint32_t at) {
+  if (!hostOffline) {
+    lastPowerSignalFallbackAt = at;
+    return;
+  }
+  if (settingsStore.values().programmingMode() || macroPwmSafeStopPending ||
+      i2cReserved ||
+      !pwm.available() ||
+      static_cast<uint32_t>(at - lastPowerSignalFallbackAt) <
+          PowerSignalFallback::IntervalMs) {
+    return;
+  }
+  lastPowerSignalFallbackAt = at;
+  const uint16_t current = pwm.logicalValue(PwmChannels::PowerSignal);
+  const uint16_t next =
+      PowerSignalFallback::nextValue(current, true, false);
+  if (next != current) {
+    pwm.setLogical(PwmChannels::PowerSignal, next);
+  }
+}
+
 // Composes the compact availability/activity bitmap used by StatusResponse.
 uint16_t statusFlags() {
   uint16_t flags = 0;
@@ -200,7 +273,7 @@ uint16_t statusFlags() {
   if (sensors.temperatureCentiC[1] != INVALID_I16) {
     flags |= STATUS_TBT;
   }
-  if (learnedRemotes.count() != 0) {
+  if (learnedRemotes.ready() && learnedRemotes.count() != 0) {
     flags |= STATUS_RF_LEARNED;
   }
   if (learningActive) {

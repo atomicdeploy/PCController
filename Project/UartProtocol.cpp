@@ -15,14 +15,25 @@ void UartProtocol::begin(uint32_t baud, FrameHandler handler, void *context) {
 }
 
 void UartProtocol::service() {
-  while (serial_.available() > 0) {
+  uint8_t servicedBytes = 0;
+  while (serial_.available() > 0 &&
+         servicedBytes < MaximumServiceBytes) {
+    ++servicedBytes;
     const uint8_t value = static_cast<uint8_t>(serial_.read());
     if (value == 0) {
+      const bool frameEnded = dropping_ || receiveLength_ != 0;
       if (!dropping_ && receiveLength_ != 0) {
         processEncodedFrame();
       }
       receiveLength_ = 0;
       dropping_ = false;
+      // Never let a burst of host commands monopolize the controller loop.
+      // Empty delimiters may be skipped, but each complete (even malformed or
+      // oversized) frame yields to physical keys, RF, safety, and one macro
+      // action before another UART frame is considered.
+      if (frameEnded) {
+        break;
+      }
       continue;
     }
 

@@ -38,12 +38,35 @@ void PwmController::begin(bool available, uint32_t now) {
 }
 
 bool PwmController::tryAllOff() {
-  return clearMask(PwmChannels::AllMask);
+  if (!available_) {
+    return false;
+  }
+#if PCCONTROLLER_PWM_ACTIVE_LOW
+  constexpr uint16_t allOffOn = 4096;
+  constexpr uint16_t allOffOff = 0;
+#else
+  constexpr uint16_t allOffOn = 0;
+  constexpr uint16_t allOffOff = 4096;
+#endif
+  if (driver_.setAllPWM(allOffOn, allOffOff) != 0) {
+    tripUnavailable();
+    return false;
+  }
+  for (uint8_t channel = 0; channel < PwmChannels::Count; ++channel) {
+    cachedValues_[channel] = 0;
+  }
+  cacheValidMask_ = PwmChannels::AllMask;
+  value_ = 0;
+  consecutiveWriteErrors_ = 0;
+  return true;
 }
 
 bool PwmController::clearMask(uint16_t channelMask) {
   if (!available_) {
     return false;
+  }
+  if (channelMask == PwmChannels::AllMask) {
+    return tryAllOff();
   }
 
   uint16_t failedMask = channelMask;

@@ -49,7 +49,9 @@ static inline __attribute__((always_inline)) void initializeController() {
   if (i2cReady) {
     i2cBus.begin();
     // Reset the TWI peripheral if any state remains blocked for 25 ms.
-    i2cBus.setWireTimeout(25000UL, true);
+    // A wedged optional peripheral may cost one bounded turn, never the old
+    // 25 ms stall that was visible as key latency.
+    i2cBus.setWireTimeout(5000UL, true);
 #if PCCONTROLLER_ENABLE_PCA9685
     pwmAvailable = pwmDriver.begin();
     if (pwmAvailable) {
@@ -89,7 +91,6 @@ static inline __attribute__((always_inline)) void initializeController() {
   wdt_reset();
 
   learnedRemotes.begin();
-  radioTransmitter.enableTransmit(BoardPins::RcTransmit);
   radioReceiver.setReceiveTolerance(70);
   radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
 
@@ -110,19 +111,30 @@ static inline __attribute__((always_inline)) void serviceController() {
   // Keep the shared snapshot in registers across driver calls. Re-reading the
   // file-scope value grows this byte-tight AVR image past its identity boundary.
   const uint32_t loopNow = now;
-  const bool i2cReserved = i2cLeaseActive(loopNow);
   wdt_reset();
 
   appProtocol.service();
+  // I2cTransfer is dispatched above and may establish/release a lease in this
+  // same controller turn. Snapshot only after UART dispatch so no firmware-
+  // owned PCA/INA/LCD transaction can overlap a newly granted host lease.
+  const bool i2cReserved = i2cLeaseActive(loopNow);
   if (settingsStore.values().programmingMode()) {
+    // The host may just have queued the durable Prog latch. Keep publishing
+    // that record cooperatively while all ordinary outputs remain disabled.
+    servicePersistence(loopNow);
     return;
   }
   serviceRadio();
 #if !PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   serviceLearningTimer(loopNow);
 #endif
+  // Give physical keys and expiring RF momentary actions a turn before macro
+  // output. Combined with one UART frame and one macro step per loop, this is
+  // the cooperative fairness contract for physical, RF, and virtual input.
+  serviceShiftRegisterAndKeys(loopNow);
+  serviceRemoteMomentary(loopNow);
   ControllerProtocol::Frame queuedMacroFrame;
-  while (macroPlayback.dequeueDue(queuedMacroFrame)) {
+  if (macroPlayback.dequeueDue(queuedMacroFrame)) {
     const uint16_t errors = appProtocol.responseErrors();
     handleProtocolFrame(queuedMacroFrame, nullptr);
     macroPlayback.completeStep(errors == appProtocol.responseErrors());
@@ -132,13 +144,18 @@ static inline __attribute__((always_inline)) void serviceController() {
     safeStopMacroOutputs();
   }
   const bool hostOffline = hostUnavailable();
-  if (hostOffline && (hostLcdFlags & HOST_LCD_OFFLINE) == 0) {
+  servicePowerSignalFallback(hostOffline, i2cReserved, loopNow);
+  if (hostOffline && (hostLcdFlags & HOST_LCD_OFFLINE) == 0 &&
+      !i2cReserved) {
     if ((hostLcdFlags & HOST_PANEL_CAPTURED) != 0) {
       releaseHostPanel();
     } else {
       clearHostSegmentText();
     }
     showHostOfflineOnLcd();
+    // Publish the marker only after all shift transactions have either
+    // completed or failed. An active lease leaves it clear so a later turn
+    // retries the offline transition instead of silently losing it.
     hostLcdFlags |= HOST_LCD_OFFLINE;
   }
   if (macroPlayback.hostDependent() &&
@@ -148,8 +165,7 @@ static inline __attribute__((always_inline)) void serviceController() {
       safeStopMacroOutputs();
     }
   }
-  serviceShiftRegisterAndKeys(loopNow);
-  serviceRemoteMomentary(loopNow);
+  serviceDeferredMacroPwmSafeStop(i2cReserved);
 #if PCCONTROLLER_ENABLE_DS18B20
   serviceTemperatures(loopNow);
 #endif
@@ -217,7 +233,6 @@ static inline __attribute__((always_inline)) void serviceController() {
   }
 
   illumination.service(systemInputs.doorOpen(), !i2cReserved, loopNow);
-  serviceIlluminationSettings(loopNow);
   relays.service(loopNow);
   const uint8_t relayMask = relays.activeRelayMask();
   if (relayMask != lastRelayMask) {
@@ -248,7 +263,9 @@ static inline __attribute__((always_inline)) void serviceController() {
     PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
   serviceStatusLedPush();
 #endif
+#if PCCONTROLLER_ENABLE_TASK_SCHEDULER
   taskManager.update(loopNow);
+#endif
   buzzer.update(loopNow);
 #if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
   serviceBuzzerPush();
@@ -260,5 +277,9 @@ static inline __attribute__((always_inline)) void serviceController() {
     sendTelemetry(0);
   }
 
+  // Launch at most one asynchronous EEPROM byte only after every latency-
+  // sensitive domain has had its turn. The next loop checks EEPE before any
+  // EEPROM read/write path can run.
+  servicePersistence(loopNow);
   safeReset.service(relays, pwm, loopNow);
 }

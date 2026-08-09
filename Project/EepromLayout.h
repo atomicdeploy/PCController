@@ -5,7 +5,13 @@
 // Canonical MCU-owned layout. Invalid records are replaced with defaults;
 // firmware never carries a chain of development-layout migration handlers.
 namespace EepromLayout {
+// Production settings use two CRC banks. Urboot owns no EEPROM metadata; bank
+// zero was previously unallocated application space.
+constexpr int SettingsStagingAddress = 0;
+constexpr uint8_t SettingsBankBytes = 32;
 constexpr int SettingsAddress = 32;
+constexpr int TemperatureRoleAddress = 64;
+constexpr uint8_t TemperatureRoleBytes = 16;
 constexpr int RemoteHeaderAddress = 80;
 constexpr int RemoteEntriesAddress = RemoteHeaderAddress + 4;
 constexpr uint8_t RemoteCapacity = 20;
@@ -33,4 +39,11 @@ static_assert(ResetJournalEnd <= E2END + 1,
               "EEPROM layout exceeds ATmega328P EEPROM");
 static_assert(StatusProfileEnd <= E2END + 1,
               "status profiles exceed ATmega328P EEPROM");
+static_assert(SettingsStagingAddress + SettingsBankBytes <= SettingsAddress,
+              "settings staging bank overlaps canonical settings");
+static_assert(SettingsAddress + SettingsBankBytes <= TemperatureRoleAddress,
+              "canonical settings bank overlaps temperature role identity");
+static_assert(TemperatureRoleAddress + TemperatureRoleBytes <=
+                  RemoteHeaderAddress,
+              "temperature role identity overlaps learned RF header");
 } // namespace EepromLayout

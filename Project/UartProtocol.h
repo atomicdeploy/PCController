@@ -32,6 +32,10 @@ using FrameHandler = void (*)(const Frame &frame, void *context);
 // UartProtocol incrementally decodes COBS frames and owns bounded RX/TX scratch.
 class UartProtocol {
 public:
+  // One service turn consumes no more than one maximum encoded packet's worth
+  // of bytes, even when a hostile stream never supplies a delimiter.
+  static constexpr uint8_t MaximumServiceBytes = MaximumPayload + 8;
+
   explicit UartProtocol(HardwareSerial &serial);
 
   void begin(uint32_t baud, FrameHandler handler, void *context = nullptr);
@@ -60,7 +64,7 @@ public:
 private:
   static constexpr uint8_t RawOverhead = 6;
   static constexpr uint8_t MaximumRaw = MaximumPayload + RawOverhead;
-  static constexpr uint8_t MaximumEncoded = MaximumRaw + 2;
+  static constexpr uint8_t MaximumEncoded = MaximumServiceBytes;
 
   bool writeCobs(const uint8_t *input, uint8_t length);
   bool sendTimestamped(uint8_t opcode, uint8_t sequence,

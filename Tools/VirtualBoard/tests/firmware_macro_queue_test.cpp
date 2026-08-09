@@ -29,7 +29,8 @@ void testSharedActionRegistry() {
           "ordinary action registry lost a required output/input opcode");
   require(!MacroAction::macroQueueableOpcode(Reset) &&
               !MacroAction::macroQueueableOpcode(MacroStart) &&
-              MacroAction::playbackAllowed(StatusEffect) &&
+              !MacroAction::macroQueueableOpcode(RadioTransmit) &&
+              !MacroAction::playbackAllowed(StatusEffect) &&
               MacroAction::validPlaybackPayload(RelaySide, 2) &&
               !MacroAction::validPlaybackPayload(RelaySide, 1) &&
               !MacroAction::recordable(StatusEffect, 48) &&
@@ -257,6 +258,102 @@ void testFrontPanelMotionCapturesSemanticSideActions() {
   queue.completeStep(true);
 }
 
+void testMotionExitChordNeverCapturesOpposingStart() {
+  using ControllerProtocol::RelayAllOff;
+  using ControllerProtocol::RelaySide;
+
+  require(unifiedInputIntent(MENU_DECREASE, false) ==
+                  UnifiedInputIntent::Macro &&
+              unifiedInputIntent(MENU_INCREASE, false) ==
+                  UnifiedInputIntent::Motion,
+          "K3/K4 no longer select macro capture and motion control");
+
+  const MenuAction chordOrders[][2] = {
+      {MENU_PREVIOUS, MENU_NEXT},
+      {MENU_NEXT, MENU_PREVIOUS},
+      {MENU_DECREASE, MENU_INCREASE},
+      {MENU_INCREASE, MENU_DECREASE},
+  };
+  for (const auto &chord : chordOrders) {
+    const std::uint8_t simultaneous = static_cast<std::uint8_t>(
+        (1U << chord[0]) | (1U << chord[1]));
+    require(motionKeyCompletesExitChord(simultaneous, chord[0]) &&
+                motionKeyCompletesExitChord(simultaneous, chord[1]),
+            "simultaneous raw motion chord allowed a relay twitch");
+  }
+  for (std::uint8_t order = 0; order < 4; ++order) {
+    HardwareSerial serial;
+    ControllerProtocol::UartProtocol protocol(serial);
+    MacroQueue queue(protocol);
+
+    // K3 starts capture and K4 enters motion. Neither page-navigation action
+    // is recorded; only accepted output opcodes belong in the capture.
+    require(queue.beginCapture(static_cast<std::uint8_t>(20 + order), 100),
+            "K3 could not start the exit-chord capture fixture");
+    const auto first = chordOrders[order][0];
+    const auto second = chordOrders[order][1];
+    std::uint8_t activeSnapshot =
+        static_cast<std::uint8_t>(1U << first);
+    std::uint8_t commandedMask = 0;
+    require(!motionKeyCompletesExitChord(activeSnapshot, first),
+            "first motion Down was mistaken for an exit chord");
+
+    const MotionKeyBinding firstBinding = motionKeyBinding(first);
+    const std::uint8_t start[] = {
+        firstBinding.side,
+        static_cast<std::uint8_t>(firstBinding.reverse ? 2 : 1)};
+    require(queue.captureAction(RelaySide, start, sizeof(start), 110),
+            "first immediate motion Down was not captured");
+    commandedMask |= static_cast<std::uint8_t>(1U << first);
+
+    // The partner Down completes the physical UI chord. Runtime suppresses
+    // its opposing relay request/capture, then serviceMotionExit records the
+    // real safety stop and global all-off at the same MCU timestamp.
+    activeSnapshot |= static_cast<std::uint8_t>(1U << second);
+    require(motionKeyCompletesExitChord(activeSnapshot, second),
+            "same-side partner Down did not complete the exit chord");
+    require((commandedMask & static_cast<std::uint8_t>(1U << second)) == 0,
+            "suppressed partner Down created a phantom pressed motion bit");
+    const std::uint8_t stop[] = {firstBinding.side, 0};
+    require(queue.captureAction(RelaySide, stop, sizeof(stop), 160) &&
+                queue.captureAction(RelayAllOff, nullptr, 0, 160),
+            "motion exit safety actions were not captured");
+    commandedMask = 0; // serviceMotionExit owns the all-off mask clear.
+    require(commandedMask == 0 && queue.recording() &&
+                queue.retainedSteps() == 3,
+            "motion exit left a pressed bit or stopped K3 recording early");
+
+    // Both physical Up events observe the cleared mask and add no phantom
+    // stop. Only the later K3 lifecycle ends recording.
+    for (const auto released : {first, second}) {
+      require((commandedMask & static_cast<std::uint8_t>(1U << released)) == 0,
+              "released exit key retained a motion bit");
+    }
+    require(queue.recording() && queue.finishCapture() &&
+                queue.playCapture(1000),
+            "K3 did not remain responsible for stop/replay lifecycle");
+
+    ControllerProtocol::Frame frame{};
+    arduino_mock::nowMicros = 1009;
+    require(queue.dequeueDue(frame) && frame.opcode == RelaySide &&
+                frame.payload[0] == firstBinding.side &&
+                frame.payload[1] == start[1],
+            "first real direction changed during exit-chord replay");
+    queue.completeStep(true);
+    arduino_mock::nowMicros = 1059;
+    require(queue.dequeueDue(frame) && frame.opcode == RelaySide &&
+                frame.payload[0] == firstBinding.side &&
+                frame.payload[1] == 0,
+            "opposing start survived instead of the safety stop");
+    queue.completeStep(true);
+    require(queue.active(),
+            "same-due all-off was drained in the stop dispatch turn");
+    require(queue.dequeueDue(frame) && frame.opcode == RelayAllOff,
+            "global all-off was not retained for the next dispatch turn");
+    queue.completeStep(true);
+  }
+}
+
 void testCaptureClockRollover() {
   HardwareSerial serial;
   ControllerProtocol::UartProtocol protocol(serial);
@@ -341,6 +438,7 @@ int main() {
     testHostileRawStreamIsRejected();
     testLifecycleAndStreamingStateValidation();
     testFrontPanelMotionCapturesSemanticSideActions();
+    testMotionExitChordNeverCapturesOpposingStart();
     std::cout << "firmware_macro_queue_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {

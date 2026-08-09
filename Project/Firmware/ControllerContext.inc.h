@@ -61,7 +61,6 @@ DallasTemperatureBus temperatureBus(BoardPins::OneWireData);
 Ds18b20Address temperatureAddresses[2];
 #endif
 RCSwitch radioReceiver;
-RCSwitch radioTransmitter;
 RelayController relays(shiftRegisters);
 ControllerProtocol::UartProtocol appProtocol(Serial);
 ControllerEvents appEvents(appProtocol);
@@ -118,7 +117,9 @@ uint8_t menuPage = PAGE_DOOR;
 uint8_t menuTreeState = 0;
 #endif
 uint8_t relayMenuIndex = 0;
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
 uint8_t userPwmMenuIndex = 0;
+#endif
 uint8_t userRelayMenuIndex = 0;
 uint8_t userRelayBehavior = 0;
 uint8_t settingsMenuItem = 0;
@@ -167,6 +168,8 @@ uint32_t lastIna219SampleAt = 0;
 uint32_t lastTemperatureRequestAt = 0;
 #endif
 uint32_t lastTelemetryAt = 0;
+uint32_t lastPowerSignalFallbackAt = 0;
+bool macroPwmSafeStopPending = false;
 
 // RF momentary actions expire locally even if repeats or the host disappear.
 RemoteActionKind remoteMomentaryKind = RemoteActionKind::None;

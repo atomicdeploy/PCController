@@ -1,6 +1,8 @@
 #include "Tasks.h"
 
+#if PCCONTROLLER_ENABLE_TASK_SCHEDULER
 Tasks taskManager;
+#endif
 
 Tasks::Tasks() {
   clear();
@@ -29,6 +31,10 @@ void Tasks::update(uint32_t now) {
     }
   }
 }
+
+#if PCCONTROLLER_ENABLE_TASK_SCHEDULER
+void serviceTasks() { taskManager.update(); }
+#endif
 
 int8_t Tasks::addTask(uint32_t delayMs, TaskCallback callback,
                       void *context) {
@@ -75,4 +81,3 @@ void Tasks::clear() {
 
 uint8_t Tasks::count() const { return itemCount_; }
 
-void serviceTasks() { taskManager.update(); }

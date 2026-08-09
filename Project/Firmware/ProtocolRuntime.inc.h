@@ -16,7 +16,7 @@ void sendHello(uint8_t sequence) {
       (1UL << 2) |  // 16-channel PWM
 #endif
       (1UL << 3) |  // relay safety controller
-      (1UL << 4) |  // 433 MHz RX/TX, learning, and action mapping
+      (1UL << 4) |  // 433 MHz RX, learning, and action mapping
       (1UL << 5) |  // TM1637
 #if PCCONTROLLER_ENABLE_I2C_LCD
       (1UL << 6) |  // MCU-rendered I2C LCD
@@ -85,8 +85,8 @@ void sendHello(uint8_t sequence) {
       (PCCONTROLLER_BLANK_EEPROM_SILENT
            ? ControllerProtocol::BlankEepromSilent
            : 0) |
-      (PCCONTROLLER_ENABLE_I2C_LCD
-           ? ControllerProtocol::McuLcdRenderer
+      (PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+           ? ControllerProtocol::AutonomousAudioCues
            : 0) |
       (PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
            ? ControllerProtocol::LocalPcaPages
@@ -532,6 +532,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       return;
 
     case SetSettings:
+      if (i2cLeaseActive(frameNow)) {
+        goto busy;
+      }
       if (!applySettings(payload, length, frameNow)) {
         goto badPayload;
       }
@@ -593,6 +596,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 #if !PCCONTROLLER_ENABLE_PCA9685
       goto hardwareUnavailable;
 #else
+      // A host-owned generic-I2C lease covers the whole bus, not only the
+      // leased address. Direct and macro-dispatched PWM actions must retry
+      // after release instead of racing the host's LCD/diagnostic sequence.
+      if (i2cLeaseActive(frameNow)) {
+        goto busy;
+      }
       const uint16_t value = length >= 3 ? readU16(payload + 1) : 0;
       if (length < 3 || payload[0] >= PwmChannels::Count || value > 4095) {
         goto badPayload;
@@ -611,6 +620,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 #if !PCCONTROLLER_ENABLE_PCA9685
       goto hardwareUnavailable;
 #else
+      if (i2cLeaseActive(frameNow)) {
+        goto busy;
+      }
       if (!pwm.tryAllOff()) {
         goto hardwareUnavailable;
       }
@@ -621,6 +633,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 #if !PCCONTROLLER_ENABLE_PCA9685
       goto hardwareUnavailable;
 #else
+      if (i2cLeaseActive(frameNow)) {
+        goto busy;
+      }
       if (length < 4) {
         goto badPayload;
       }
@@ -740,12 +755,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
     }
 
     case RadioTransmit:
-      if (length < 8 ||
-          !transmitRadio(readU32(payload), payload[4], payload[5],
-                         readU16(payload + 6))) {
-        goto badPayload;
-      }
-      goto acknowledged;
+      // RCSwitch::send is a synchronous ~560 ms path on this board. Reject it
+      // until a timer-driven transmitter exists so host traffic cannot stall
+      // physical, virtual, or RF-received keys. RX/learning/mappings remain.
+      goto unsupported;
 
     case RadioLearnStart:
       if (length != 2 || payload[0] > RF_LEARN_TIMER ||
@@ -753,6 +766,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
           (payload[0] == RF_LEARN_TIMER &&
            (payload[1] == 0 || payload[1] > MAX_LEARNING_SECONDS))) {
         goto badPayload;
+      }
+      if (learnedRemotes.busy()) {
+        goto busy;
       }
       beginLearning(payload[0], payload[1]);
       goto acknowledged;
@@ -762,19 +778,33 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case RadioLearnClear:
+      if (learnedRemotes.busy()) {
+        goto busy;
+      }
       endLearning(1, 0);
-      learnedRemotes.clear();
+      if (!learnedRemotes.clear()) {
+        goto busy;
+      }
       goto acknowledged;
 
     case RadioLearnList:
       if (length < 1 || payload[0] >= RemoteLearningStore::Capacity) {
         goto badPayload;
       }
+      if (!learnedRemotes.ready()) {
+        goto busy;
+      }
       sendLearnedRemotes(frame.sequence, payload[0]);
       return;
 
     case RadioLearnRemove:
-      if (length < 1 || !learnedRemotes.remove(payload[0])) {
+      if (length < 1 || payload[0] >= RemoteLearningStore::Capacity) {
+        goto badPayload;
+      }
+      if (learnedRemotes.busy()) {
+        goto busy;
+      }
+      if (!learnedRemotes.remove(payload[0])) {
         goto badPayload;
       }
       goto acknowledged;
@@ -785,6 +815,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       }
       LearnedRemote remote;
       memcpy(&remote, payload, sizeof(remote));
+      if (learnedRemotes.busy()) {
+        goto busy;
+      }
       if (!learnedRemotes.replace(remote)) {
         goto badPayload;
       }

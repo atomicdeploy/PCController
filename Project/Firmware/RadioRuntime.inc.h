@@ -270,7 +270,9 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
 
 // Consumes one RC-switch frame, emits it immediately, then learns or executes it.
 void serviceRadio() {
-  if (!radioReceiver.available()) {
+  // AVR EEPROM reads wait behind an in-flight write. Leave the RC-switch frame
+  // latched for a later turn instead of blocking this input pass.
+  if (!learnedRemotes.ready() || !radioReceiver.available()) {
     return;
   }
 
@@ -334,20 +336,3 @@ void serviceRadio() {
   }
 }
 
-// Temporarily releases INT0 receive timing while INT1 transmits one RF frame.
-bool transmitRadio(uint32_t code, uint8_t bits, uint8_t protocol,
-                   uint16_t pulseLength) {
-  if (learningActive || code == 0 || bits == 0 || bits > 32 ||
-      protocol == 0 || protocol > MAX_RC_PROTOCOL) {
-    return false;
-  }
-
-  radioReceiver.disableReceive();
-  radioTransmitter.setProtocol(protocol);
-  if (pulseLength != 0) {
-    radioTransmitter.setPulseLength(pulseLength);
-  }
-  radioTransmitter.send(code, bits);
-  radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
-  return true;
-}

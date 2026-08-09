@@ -602,6 +602,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
     } else if (intent == UnifiedInputIntent::Identify) {
       identifiedKey = static_cast<uint8_t>(action + 1);
       identifiedKeyEndsAt = actionNow + 900;
+    }
 #else
     } else if (intent == UnifiedInputIntent::Macro) {
       // Local capture lifecycle is handled from the physical classified key
@@ -619,6 +620,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   }
 
   switch (modeManager.current()) {
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
     case MODE_ILLUMINATION_MODE_EDIT:
       if (action == MENU_PREVIOUS) {
         modeManager.transitionTo(MODE_SAVE_PROMPT);
@@ -655,6 +658,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       menuFeedback(fromRemote);
       return;
+#endif
 
     case MODE_SOUND_EDIT:
       if (action == MENU_PREVIOUS) {
@@ -712,6 +716,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       menuFeedback(fromRemote);
       return;
 
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
     case MODE_PWM_CHANNEL_EDIT:
       if (action == MENU_PREVIOUS) {
         modeManager.transitionTo(MODE_SAVE_PROMPT);
@@ -767,6 +772,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       menuFeedback(fromRemote);
       return;
     }
+#endif
 
     case MODE_USER_RELAY_CHANNEL_EDIT:
       if (action == MENU_PREVIOUS) {
@@ -878,19 +884,26 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       break;
     case MENU_INCREASE:
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
       if (menuPage == PAGE_ILLUMINATION) {
         beginEditTransaction(MODE_ILLUMINATION);
         modeManager.transitionTo(MODE_ILLUMINATION_MODE_EDIT);
-      } else if (menuPage == PAGE_SOUND) {
+      } else
+#endif
+      if (menuPage == PAGE_SOUND) {
         beginEditTransaction(MODE_SOUND);
         settingsMenuItem = 0;
         modeManager.transitionTo(MODE_SOUND_EDIT);
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
       } else if (menuPage == PAGE_PWM) {
         beginEditTransaction(MODE_PWM);
         modeManager.transitionTo(MODE_PWM_CHANNEL_EDIT);
+#endif
       } else if (menuPage == PAGE_RELAY) {
         relays.allOff(actionNow);
         modeManager.transitionTo(MODE_RELAY_CHANNEL_EDIT);
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
       } else if (menuPage == PAGE_USER_PWM) {
         beginEditTransaction(MODE_USER_PWM);
         for (uint8_t channel = 0; channel < 8; ++channel) {
@@ -899,6 +912,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
               userPwm12(settingsStore.values().userPwm[channel]));
         }
         modeManager.transitionTo(MODE_USER_PWM_CHANNEL_EDIT);
+#endif
       } else if (menuPage == PAGE_USER_RELAYS) {
         modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
       }
@@ -962,6 +976,15 @@ void applyKeyGesture(uint8_t bit, KeyEvent event,
   if (momentary) {
     if (event == KeyEvent::Down) {
       if (mode == MODE_MOTION_CONTROL) {
+        // The second physical key in a same-side exit chord is navigation,
+        // not a motion command. Suppress it before relay dispatch and action
+        // capture; serviceMotionExit() will immediately stop/all-off and then
+        // complete the hold-to-exit lifecycle. Injected host/RF gestures do
+        // not masquerade as a physical chord.
+        if (source == InputEventSource::Physical &&
+            motionKeyCompletesExitChord(shiftRegisters.activeInputs(), bit)) {
+          return;
+        }
         now = millis();
         const MotionKeyBinding binding =
             motionKeyBinding(static_cast<MenuAction>(bit));
@@ -1164,12 +1187,16 @@ void serviceShiftRegisterAndKeys(uint32_t at) {
 }
 
 // Renders the current illumination mode from the packed flash text table.
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
 void showIlluminationMode() {
   display.showText(commonText(pgm_read_byte(
       ModeTextOffsets + static_cast<uint8_t>(illumination.mode()))));
 }
+#endif
 
 // Renders the selected PWM channel without a hidden demo/mode state.
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
 void showPwmChannel() {
   const uint8_t channel = pwm.channel();
   char label[5] = {
@@ -1181,6 +1208,7 @@ void showPwmChannel() {
   };
   display.showText(label);
 }
+#endif
 
 // Alternates timer total/remaining while indefinite learning keeps LErn.
 #if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
@@ -1379,16 +1407,20 @@ void serviceDisplay(uint32_t at) {
     display.showText(temperatureSegmentText[index]);
     return;
   }
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
   if (currentMode == MODE_ILLUMINATION) {
     showIlluminationMode();
     return;
   }
+#endif
   if (currentMode == MODE_SOUND) {
     display.showText(commonText(effectiveSilentMode()
                                     ? TextMute
                                     : TextBeep));
     return;
   }
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
   if (currentMode == MODE_PWM) {
     if (!pwm.available()) {
       display.showUnavailable();
@@ -1458,8 +1490,11 @@ void serviceDisplay(uint32_t at) {
     return;
   }
 #endif
+#endif
 
   switch (currentMode) {
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
     case MODE_ILLUMINATION_MODE_EDIT:
       showIlluminationMode();
       return;
@@ -1469,6 +1504,7 @@ void serviceDisplay(uint32_t at) {
     case MODE_ILLUMINATION_OFF_EDIT:
       display.showInteger(illumination.offBrightness());
       return;
+#endif
     case MODE_SOUND_EDIT:
       if (settingsMenuItem == 0) {
         display.showText(commonText(effectiveSilentMode()
@@ -1500,6 +1536,7 @@ void serviceDisplay(uint32_t at) {
         display.showInteger(value);
       }
       return;
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
     case MODE_PWM_CHANNEL_EDIT:
       display.showInteger(pwm.channel());
       return;
@@ -1519,6 +1556,7 @@ void serviceDisplay(uint32_t at) {
       display.showInteger(
           settingsStore.values().userPwm[userPwmMenuIndex]);
       return;
+#endif
     case MODE_USER_RELAY_CHANNEL_EDIT:
       display.showInteger(static_cast<int32_t>(userRelayMenuIndex + 5));
       return;

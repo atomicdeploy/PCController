@@ -33,6 +33,24 @@ constexpr uint16_t AllMask = 0xFFFFU;
 
 } // namespace PwmChannels
 
+namespace PowerSignalFallback {
+constexpr uint16_t Step = 256;
+constexpr uint16_t FullBrightness = 4095;
+constexpr uint16_t IntervalMs = 32;
+
+// Host-connected and Prog states never alter channel 12. Only an offline
+// operational controller advances one bounded fade step toward full power.
+constexpr uint16_t nextValue(uint16_t current, bool hostOffline,
+                             bool programming) {
+  if (!hostOffline || programming || current >= FullBrightness) {
+    return current;
+  }
+  return current > static_cast<uint16_t>(FullBrightness - Step)
+             ? FullBrightness
+             : static_cast<uint16_t>(current + Step);
+}
+} // namespace PowerSignalFallback
+
 // PwmChannelRole records the logical ownership of one 16-channel output.
 enum class PwmChannelRole : uint8_t {
   UserLight,

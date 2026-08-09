@@ -337,11 +337,9 @@ void MacroQueue::completeStep(bool succeeded) {
     ++report.dispatchErrors;
   }
   if (report.executedSteps == report.totalSteps) {
-    const bool exportedCapture =
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    const bool exportedCapture =
         capturePlayback_ && (options_ & CaptureExportAcknowledged) != 0;
-#else
-        false;
 #endif
     report.state = used_ == 0 && report.dispatchErrors == 0 ? Completed
                                                             : Failed;

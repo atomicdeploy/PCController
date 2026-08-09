@@ -37,14 +37,18 @@ public:
   void fill(std::uint8_t value) {
     bytes_.fill(value);
     updates_.clear();
+    ready_ = true;
   }
 
   void clearUpdates() { updates_.clear(); }
   const std::vector<Update> &updates() const { return updates_; }
+  bool ready() const { return ready_; }
+  void setReady(bool value) { ready_ = value; }
 
 private:
   std::array<std::uint8_t, 1024> bytes_{};
   std::vector<Update> updates_;
+  bool ready_ = true;
 };
 
 inline EEPROMClass EEPROM;

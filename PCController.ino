@@ -13,7 +13,9 @@
 #include "LocalLib/ModeManager.h"
 #include "LocalLib/SevenSegments.h"
 #include "LocalLib/ShiftRegisters.h"
+#if PCCONTROLLER_ENABLE_TASK_SCHEDULER
 #include "LocalLib/Tasks.h"
+#endif
 #include "LocalLib/TonePlayer.h"
 #include "Project/AddressableLeds.h"
 #include "Project/BootMelody.h"

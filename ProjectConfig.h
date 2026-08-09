@@ -63,7 +63,7 @@
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
-#define PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION 0
+#define PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION 1
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
@@ -93,6 +93,13 @@
 // the byte-tight production image (and cannot wake a room after a reset).
 #ifndef PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
 #define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 0
+#endif
+
+// The callback scheduler remains available to feature builds/larger MCUs, but
+// the ATmega328P production image registers no Tasks and therefore carries no
+// scheduler object, callbacks, or fixed RAM table.
+#ifndef PCCONTROLLER_ENABLE_TASK_SCHEDULER
+#define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0
 #endif
 
 // The production front panel has one input/output page. In the normal build it
@@ -164,6 +171,18 @@
 #error "PCCONTROLLER_ENABLE_I2C_LCD is reserved until the MCU renderer has lifecycle and DisplayText call sites; use generic I2C capability bit 16"
 #endif
 
+#if PCCONTROLLER_ENABLE_STATUS_LED_ENGINE && !PCCONTROLLER_ENABLE_PCA9685
+#error "PCCONTROLLER_ENABLE_STATUS_LED_ENGINE requires PCA9685"
+#endif
+
+#if PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION && !PCCONTROLLER_ENABLE_PCA9685
+#error "PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION requires PCA9685"
+#endif
+
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && !PCCONTROLLER_ENABLE_PCA9685
+#error "PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES requires PCA9685"
+#endif
+
 #if (PCCONTROLLER_ENABLE_STATUS_LED_ENGINE != 0) && \
     (PCCONTROLLER_ENABLE_STATUS_LED_ENGINE != 1)
 #error "PCCONTROLLER_ENABLE_STATUS_LED_ENGINE must be 0 or 1"
@@ -199,6 +218,11 @@
 #error "PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES must be 0 or 1"
 #endif
 
+#if (PCCONTROLLER_ENABLE_TASK_SCHEDULER != 0) && \
+    (PCCONTROLLER_ENABLE_TASK_SCHEDULER != 1)
+#error "PCCONTROLLER_ENABLE_TASK_SCHEDULER must be 0 or 1"
+#endif
+
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the
 // fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
 // ordering, hierarchy, or layout-protocol implementations in release builds.
@@ -208,6 +232,14 @@
 
 #ifndef PCCONTROLLER_MENU_LAYOUT_STORAGE
 #define PCCONTROLLER_MENU_LAYOUT_STORAGE 0
+#endif
+
+// The 41-byte local layout profile extends settings through EEPROM byte 72,
+// while the full-peripheral profile reserves 64..79 for the learned DS18B20
+// role identity. They are intentionally separate alpha feature profiles; do
+// not silently overlap their persistent records.
+#if PCCONTROLLER_MENU_LAYOUT_STORAGE && PCCONTROLLER_ENABLE_DS18B20
+#error "PCCONTROLLER_MENU_LAYOUT_STORAGE overlaps the full-peripheral DS18B20 role record; keep production layout host-owned or disable DS18B20"
 #endif
 
 // AVR-owned persistent front-panel catalog. Stable page IDs remain protocol

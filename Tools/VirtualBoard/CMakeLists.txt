@@ -143,4 +143,40 @@ if(BUILD_TESTING)
     target_compile_options(firmware_reset_telemetry_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_reset_telemetry_unit COMMAND firmware_reset_telemetry_tests)
+
+  # Compile both production EEPROM owners against the byte-accurate 328P
+  # EEPROM double. Packing is forced to AVR byte alignment for this target.
+  add_executable(firmware_persistence_tests
+    tests/firmware_persistence_test.cpp
+    ../../Project/SettingsStore.cpp
+    ../../Project/RemoteLearningStore.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_persistence_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_persistence_tests PRIVATE
+    PCCONTROLLER_NATIVE_TEST=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_persistence_tests PRIVATE /W4 /permissive- /Zp1)
+  else()
+    target_compile_options(firmware_persistence_tests PRIVATE
+      ${VIRTUAL_BOARD_WARNINGS}
+      -fpack-struct=1
+    )
+  endif()
+  add_test(NAME firmware_persistence_unit COMMAND firmware_persistence_tests)
+
+  # Zero-flash structural guard for the cooperative controller-loop contract.
+  # The production sketch cannot be linked natively as a whole, so this test
+  # complements the executable UART/macro tests by pinning input-before-output
+  # ordering and forbidding a same-due macro-drain loop.
+  add_test(
+    NAME firmware_cooperative_dispatch_contract
+    COMMAND "${CMAKE_COMMAND}"
+      "-DPCCONTROLLER_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/../.."
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/cooperative_dispatch_contract.cmake"
+  )
 endif()
