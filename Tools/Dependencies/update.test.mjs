@@ -10,6 +10,7 @@ import {
   assertTrustedDependencyURL,
   assertTrustedGitHubURL,
   assertTrustedRepository,
+  buildEnvironmentFromToolchainBootstrap,
   commandInvocation,
   compareHostToolLocks,
   compareCompositeVersions,
@@ -85,6 +86,31 @@ test('captured command failures retain child diagnostics for structured reports'
       assert.match(error.message, /diagnostic stderr/u)
       return true
     },
+  )
+})
+
+test('candidate build stays bound to the CLI and config returned by bootstrap', () => {
+  const environment = {
+    HTTP_PROXY: 'http://proxy.invalid:8080',
+    NO_PROXY: 'localhost,.lan',
+    PATH: 'C:\\Windows\\System32',
+  }
+  const selected = buildEnvironmentFromToolchainBootstrap(`
+Installing exact firmware dependencies
+Saved managed firmware CLI path in PC-side host configuration.
+{
+  "cli_path": "C:\\\\managed tools\\\\arduino-cli.exe",
+  "config_path": "C:\\\\managed tools\\\\firmware-cli.yaml"
+}
+`, environment)
+  assert.deepEqual(selected, {
+    ...environment,
+    PCCONTROLLER_TOOLCHAIN_CLI: 'C:\\managed tools\\arduino-cli.exe',
+    PCCONTROLLER_TOOLCHAIN_CONFIG: 'C:\\managed tools\\firmware-cli.yaml',
+  })
+  assert.throws(
+    () => buildEnvironmentFromToolchainBootstrap('{"cli_path":"arduino-cli"}', environment),
+    /config_path/u,
   )
 })
 
@@ -230,6 +256,9 @@ test('scheduled updater validates every required candidate gate before PR creati
     updater.indexOf('run(process.execPath, [toolchainPolicyGenerator]') < updater.indexOf('if (options.validate)'),
     'the generated runtime policy must be refreshed before candidate validation',
   )
+  assert.match(updater, /PCCONTROLLER_TOOLCHAIN_CLI:\s*report\.cli_path/u)
+  assert.match(updater, /PCCONTROLLER_TOOLCHAIN_CONFIG:\s*report\.config_path/u)
+  assert.match(updater, /run\(rootBuild, \['--all'\], \{[\s\S]*?env: buildEnvironment/u)
   const buildSystemGate = updater.slice(
     updater.indexOf("step('Build-system tests'"),
     updater.indexOf("step('Firmware and host build'"),

@@ -653,6 +653,39 @@ function controllerToolchain(action, extra = [], capture = true) {
   })
 }
 
+function parseTrailingJSONObject(output, label) {
+  const text = String(output ?? '').trim()
+  const candidates = []
+  for (let index = text.lastIndexOf('\n{'); index >= 0; index = text.lastIndexOf('\n{', index - 1)) {
+    candidates.push(text.slice(index + 1))
+  }
+  if (text.startsWith('{')) candidates.push(text)
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate)
+      if (value && typeof value === 'object' && !Array.isArray(value)) return value
+    } catch {
+      // Keep scanning: bootstrap progress can contain non-JSON lines before
+      // the final machine-readable object.
+    }
+  }
+  throw new Error(`${label} did not emit a trailing JSON object`)
+}
+
+function buildEnvironmentFromToolchainBootstrap(output, environment = process.env) {
+  const report = parseTrailingJSONObject(output, 'toolchain bootstrap')
+  for (const field of ['cli_path', 'config_path']) {
+    if (typeof report[field] !== 'string' || !report[field].trim()) {
+      throw new Error(`toolchain bootstrap report has no ${field}`)
+    }
+  }
+  return {
+    ...environment,
+    PCCONTROLLER_TOOLCHAIN_CLI: report.cli_path,
+    PCCONTROLLER_TOOLCHAIN_CONFIG: report.config_path,
+  }
+}
+
 function resolveToolchain(mode, directRetry) {
   validateToolchainSourcePolicy()
   validateToolchainLockSources()
@@ -831,7 +864,18 @@ function validateEverything(hostTools, directRetry) {
   // including the dependency-tool staging directory used below.
   step('Clean generated build outputs', () => run(rootBuild, ['--clean'], { capture: false }))
   installResolvedHostTools(hostTools, directRetry)
-  step('Exact toolchain bootstrap', () => controllerToolchain('bootstrap', ['--locked'], false))
+  let bootstrapResult
+  step('Exact toolchain bootstrap', () => {
+    bootstrapResult = controllerToolchain('bootstrap', ['--locked'])
+    if (bootstrapResult.stdout) process.stdout.write(bootstrapResult.stdout)
+    if (bootstrapResult.stderr) process.stderr.write(bootstrapResult.stderr)
+  })
+  // Bootstrap can select a portable CLI even when another arduino-cli is on
+  // PATH. Bind the later root build to the exact executable and managed
+  // profile returned by that bootstrap instead of falling back to global
+  // Arduino state. The inherited environment, including proxy and NO_PROXY,
+  // is otherwise preserved byte-for-byte.
+  const buildEnvironment = buildEnvironmentFromToolchainBootstrap(bootstrapResult.stdout)
   step('Generated product identity', () => run('node', [
     'Tools/Controller/internal/productidentity/generate.mjs', '--check',
   ], { capture: false }))
@@ -847,7 +891,9 @@ function validateEverything(hostTools, directRetry) {
   // the transient Actions log.
   step('Build-system tests', () => run('node', ['--test',
     'Tools/Build/build.test.mjs', 'Tools/Audit/extract-user-turns.test.mjs']))
-  step('Firmware and host build', () => run(rootBuild, ['--all'], { capture: false }))
+  step('Firmware and host build', () => run(rootBuild, ['--all'], {
+    capture: false, env: buildEnvironment,
+  }))
   const bootBuild = platform() === 'win32'
     ? join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.cmd')
     : join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.sh')
@@ -1000,6 +1046,7 @@ export {
   assertTrustedDependencyURL,
   assertTrustedGitHubURL,
   assertTrustedRepository,
+  buildEnvironmentFromToolchainBootstrap,
   commandInvocation,
   compareHostToolLocks,
   compareCompositeVersions,

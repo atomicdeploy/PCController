@@ -153,6 +153,14 @@ The bounded build-system test output is captured into a failed structured
 report, so its assertion and stack trace reach the blocked-update issue and
 artifact instead of being available only in the transient Actions log.
 
+The exact toolchain bootstrap returns both its selected firmware CLI and its
+managed configuration path. Candidate validation forwards those paths to the
+root firmware/host build explicitly, so a global `arduino-cli` or global
+Arduino data directory cannot replace the just-validated portable profile.
+All other environment values remain inherited, including caller-supplied proxy
+variables and the local-network `NO_PROXY` policy; no proxy endpoint is stored
+in source or generated configuration.
+
 The candidate report also contains npm audit severity totals. A deterministic
 PR plan turns the report into release-note links, explicit license/security/size
 review statements, memory headroom, compressed host size, and reviewer
