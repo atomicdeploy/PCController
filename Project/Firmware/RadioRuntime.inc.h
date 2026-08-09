@@ -15,7 +15,6 @@ void storeUserPwmValue(uint8_t channel, uint16_t value) {
     settingsStore.markDirty(now);
   }
 }
-
 // Returns ceil(remaining milliseconds / 1000), or zero for indefinite mode.
 uint8_t learningRemainingSeconds(uint32_t at) {
   if (learningMode != RF_LEARN_TIMER || learningEndsAt == 0 ||
@@ -39,12 +38,14 @@ void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
   }
 
   buzzer.stop();
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   const ProgramMode currentMode = modeManager.current();
   if (currentMode <= MODE_RF) {
     modeBeforeLearning = currentMode;
   } else {
     modeBeforeLearning = MODE_RF;
   }
+#endif
   learningActive = true;
   learningMode = mode;
   learningTotalSeconds = timeoutSeconds;
@@ -52,7 +53,9 @@ void beginLearning(uint8_t mode, uint8_t timeoutSeconds) {
   learningEndsAt = mode == RF_LEARN_TIMER
                        ? now + static_cast<uint32_t>(timeoutSeconds) * 1000UL
                        : 0;
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   modeManager.transitionTo(MODE_RF_LEARNING);
+#endif
   appEvents.rfLearning(3, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, learningReportedRemaining);
 }
@@ -65,16 +68,22 @@ void endLearning(uint8_t state, int8_t feedback) {
   const uint8_t remaining = learningRemainingSeconds(now);
   learningActive = false;
   learningEndsAt = 0;
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   if (modeManager.current() == MODE_RF_LEARNING) {
     modeManager.transitionTo(modeBeforeLearning);
   }
+#endif
   appEvents.rfLearning(state, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, remaining);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
   if (feedback > 0) {
     buzzer.success();
   } else if (feedback < 0) {
     buzzer.error();
   }
+#else
+  (void)feedback;
+#endif
 }
 
 // Emits one MCU-timed timer update per changed second and closes at zero.
@@ -91,7 +100,6 @@ void serviceLearningTimer(uint32_t at) {
                          learningTotalSeconds, remaining);
   }
 }
-
 // Deactivates the output held by the current RF momentary mapping.
 void stopRemoteMomentary(uint32_t at) {
   switch (remoteMomentaryKind) {
@@ -141,7 +149,8 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
       appEvents.key(remote.actionValue,
                     static_cast<uint8_t>(KeyEvent::Down),
                     InputEventSource::Radio, remote.id);
-      handleMenuAction(remote.actionValue, true);
+      applyKeyGesture(remote.actionValue, KeyEvent::Down,
+                      InputEventSource::Radio, true);
       return;
     case RemoteActionKind::Menu:
       handleMenuAction(remote.actionValue, true);
@@ -155,6 +164,12 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
                             : true;
       const bool accepted = relays.requestRelayForTest(
           static_cast<uint8_t>(remote.actionValue + 1), next, at);
+      if (accepted) {
+        const uint8_t payload[] = {remote.actionValue,
+                                   static_cast<uint8_t>(next)};
+        acceptedAction(InputEventSource::Radio, ControllerProtocol::RelaySet,
+                       payload, sizeof(payload));
+      }
       if (accepted && behavior == RemoteBehavior::Momentary) {
         remoteMomentaryKind = kind;
         remoteMomentaryValue = remote.actionValue;
@@ -169,12 +184,21 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
       }
       if (behavior == RemoteBehavior::Stop) {
         relays.stopSide(static_cast<::RelaySide>(remote.actionValue), at);
+        const uint8_t payload[] = {remote.actionValue, 0};
+        acceptedAction(InputEventSource::Radio, ControllerProtocol::RelaySide,
+                       payload, sizeof(payload));
       } else {
         const RelayDirection direction =
             behavior == RemoteBehavior::Down ? RelayDirection::Reverse
                                                : RelayDirection::Forward;
         if (relays.requestSide(static_cast<::RelaySide>(remote.actionValue),
                                direction, true, at)) {
+          const uint8_t payload[] = {
+              remote.actionValue,
+              static_cast<uint8_t>(direction == RelayDirection::Reverse ? 2 : 1)};
+          acceptedAction(InputEventSource::Radio,
+                         ControllerProtocol::RelaySide, payload,
+                         sizeof(payload));
           remoteMomentaryKind = kind;
           remoteMomentaryValue = remote.actionValue;
           remoteMomentaryEndsAt = at + 350;
@@ -189,6 +213,11 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
                                  : (active ? 0 : 4095);
       pwm.setValue(value, at);
       storeUserPwmValue(remote.actionValue, value);
+      const uint8_t payload[] = {
+          remote.actionValue, static_cast<uint8_t>(value),
+          static_cast<uint8_t>(value >> 8)};
+      acceptedAction(InputEventSource::Radio, ControllerProtocol::PwmSet,
+                     payload, sizeof(payload));
       if (behavior == RemoteBehavior::Momentary) {
         remoteMomentaryKind = kind;
         remoteMomentaryValue = remote.actionValue;
@@ -203,7 +232,9 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
 
 // Consumes one RC-switch frame, emits it immediately, then learns or executes it.
 void serviceRadio() {
-  if (!radioReceiver.available()) {
+  // AVR EEPROM reads wait behind an in-flight write. Leave the RC-switch frame
+  // latched for a later turn instead of blocking this input pass.
+  if (!learnedRemotes.ready() || !radioReceiver.available()) {
     return;
   }
 
@@ -266,21 +297,4 @@ void serviceRadio() {
     }
   }
 }
-
-// Temporarily releases INT0 receive timing while INT1 transmits one RF frame.
-bool transmitRadio(uint32_t code, uint8_t bits, uint8_t protocol,
-                   uint16_t pulseLength) {
-  if (learningActive || code == 0 || bits == 0 || bits > 32 ||
-      protocol == 0 || protocol > MAX_RC_PROTOCOL) {
-    return false;
-  }
-
-  radioReceiver.disableReceive();
-  radioTransmitter.setProtocol(protocol);
-  if (pulseLength != 0) {
-    radioTransmitter.setPulseLength(pulseLength);
-  }
-  radioTransmitter.send(code, bits);
-  radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
-  return true;
-}
+// End of radio runtime fragment.

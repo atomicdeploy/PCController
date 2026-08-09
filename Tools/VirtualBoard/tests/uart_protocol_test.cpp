@@ -99,7 +99,12 @@ void testRepresentativeAndMaximumPayloads() {
   serial.feed(encode(ControllerProtocol::GetStatus, 8, maximum));
   protocol.service();
 
-  require(capture.payloads.size() == 2, "valid frames were not dispatched");
+  require(capture.payloads.size() == 1 && capture.payloads[0] == zeros &&
+              serial.available() > 0,
+          "one UART service pass consumed more than one complete frame");
+  protocol.service();
+  require(capture.payloads.size() == 2,
+          "second UART service pass did not dispatch its queued frame");
   require(capture.payloads[0] == zeros,
           "consecutive or trailing zero payload changed in-place");
   require(capture.payloads[1] == maximum,
@@ -149,6 +154,10 @@ void testInvalidFramesAreRejected() {
   malformed.push_back(0);
   serial.feed(malformed);
 
+  // Invalid frames obey the same one-frame cooperative budget as valid host
+  // commands, so a malicious burst cannot starve key/RF/safety service.
+  protocol.service();
+  protocol.service();
   protocol.service();
   require(capture.payloads.empty(), "invalid frame reached the handler");
   require(protocol.framingErrors() == 2,
@@ -184,6 +193,23 @@ void testMacroScratchCannotCorruptSplitSerialFrame() {
           "macro scratch corrupted a split serial frame");
 }
 
+void testUndelimitedInputHasAByteBudget() {
+  HardwareSerial serial;
+  UartProtocol protocol(serial);
+  Capture capture;
+  capture.protocol = &protocol;
+  protocol.begin(115200, captureFrame, &capture);
+
+  const std::size_t excess = 11;
+  serial.feed(std::vector<std::uint8_t>(
+      static_cast<std::size_t>(UartProtocol::MaximumServiceBytes) + excess,
+      0x55));
+  protocol.service();
+  require(serial.available() == static_cast<int>(excess) &&
+              capture.payloads.empty(),
+          "undelimited UART traffic exceeded its per-loop byte budget");
+}
+
 } // namespace
 
 int main() {
@@ -192,6 +218,7 @@ int main() {
     testAdvisoryRevisionDoesNotBlockSemanticFrames();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
+    testUndelimitedInputHasAByteBudget();
     std::cout << "firmware_uart_protocol_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {
