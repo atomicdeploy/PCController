@@ -488,12 +488,14 @@ that cannot add an upgrade header uses this two-step exchange instead:
 2. Open the clean WebSocket URL while offering subprotocols `pccontroller`
    and `pccontroller.ticket.TICKET`.
 
-The 256-bit ticket expires after 30 seconds and is consumed once, before the
+The 256-bit ticket expires after 15 seconds and is consumed once, before the
 upgrade. It is bound to the issuing principal, exact Origin, peer address, and
 transport, so it cannot be replayed on the other socket surface. Unauthorized
 standard WebSocket and Socket.IO handshakes are rejected before the server
 sends any application or Engine.IO frame. Token comparison is constant-time;
-discovery advertisements and responses never contain a durable token.
+discovery advertisements and responses never contain a durable token. The
+server retains only a SHA-256 digest of each outstanding ticket, never the raw
+ticket returned to the browser.
 
 Missing-Origin handling is explicit. Loopback native clients may omit
 `Origin`; non-loopback native requests may omit it only when they present a
@@ -766,6 +768,12 @@ bootstrap apply host authentication. Bodies are limited to
 when disabled. An inbound webhook is data, not an implicit shell command. To
 make it actionable, enable a narrow text mapping whose resulting command still
 passes the normal safety path.
+
+Before publishing an inbound webhook, the host removes credential-shaped query
+and metadata names, caller-reserved provenance, cookies, referrers, signatures,
+and all headers outside a bounded trace/content allowlist. Host-owned method and
+path provenance is then added, and an empty-body fallback records only the
+routed path—not the raw `RequestURI` or query string.
 
 ### Peripheral names and authoritative PWM state
 

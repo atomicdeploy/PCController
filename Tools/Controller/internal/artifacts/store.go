@@ -746,7 +746,19 @@ func createRootTemp(root *os.Root, directory string) (string, *os.File, error) {
 	return "", nil, errors.New("cannot allocate artifact metadata staging file")
 }
 
+func cloneDescriptor(value Descriptor) Descriptor {
+	if value.Metadata != nil {
+		metadata := make(map[string]string, len(value.Metadata))
+		for key, item := range value.Metadata {
+			metadata[key] = item
+		}
+		value.Metadata = metadata
+	}
+	return value
+}
+
 func publicDescriptor(value Descriptor) Descriptor {
+	value = cloneDescriptor(value)
 	value.LocalPath = ""
 	return value
 }

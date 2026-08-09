@@ -3,6 +3,7 @@ package ipcjson
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
@@ -23,7 +24,7 @@ const (
 
 	browserWebSocketProtocol = "pccontroller"
 	browserTicketPrefix      = "pccontroller.ticket."
-	sessionTicketLifetime    = 30 * time.Second
+	sessionTicketLifetime    = 15 * time.Second
 	maxSessionTickets        = 256
 )
 
@@ -155,6 +156,7 @@ func (service *Service) issueSessionTicket(
 		return sessionTicketResponse{}, fmt.Errorf("create session ticket: %w", err)
 	}
 	ticket := hex.EncodeToString(secret)
+	digest := sha256.Sum256([]byte(ticket))
 	now := service.sessionNow()
 	expiresAt := now.Add(sessionTicketLifetime)
 	record := sessionTicket{
@@ -164,7 +166,7 @@ func (service *Service) issueSessionTicket(
 
 	service.sessionMu.Lock()
 	if service.sessionTickets == nil {
-		service.sessionTickets = make(map[string]sessionTicket)
+		service.sessionTickets = make(map[[sha256.Size]byte]sessionTicket)
 	}
 	for key, candidate := range service.sessionTickets {
 		if !candidate.ExpiresAt.After(now) {
@@ -172,16 +174,20 @@ func (service *Service) issueSessionTicket(
 		}
 	}
 	if len(service.sessionTickets) >= maxSessionTickets {
-		var oldestKey string
+		var oldestKey [sha256.Size]byte
 		var oldest time.Time
+		oldestSet := false
 		for key, candidate := range service.sessionTickets {
-			if oldestKey == "" || candidate.ExpiresAt.Before(oldest) {
+			if !oldestSet || candidate.ExpiresAt.Before(oldest) {
 				oldestKey, oldest = key, candidate.ExpiresAt
+				oldestSet = true
 			}
 		}
-		delete(service.sessionTickets, oldestKey)
+		if oldestSet {
+			delete(service.sessionTickets, oldestKey)
+		}
 	}
-	service.sessionTickets[ticket] = record
+	service.sessionTickets[digest] = record
 	service.sessionMu.Unlock()
 
 	service.auditAccess(access, "POST "+SessionTicketPath, "session", true)
@@ -202,10 +208,11 @@ func (service *Service) consumeSessionTicket(
 		return base, false
 	}
 	now := service.sessionNow()
+	digest := sha256.Sum256([]byte(ticket))
 	service.sessionMu.Lock()
-	record, exists := service.sessionTickets[ticket]
+	record, exists := service.sessionTickets[digest]
 	if exists {
-		delete(service.sessionTickets, ticket)
+		delete(service.sessionTickets, digest)
 	}
 	service.sessionMu.Unlock()
 	if !exists || !record.ExpiresAt.After(now) ||
@@ -348,7 +355,8 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 	base = service.normalizeAccess(base)
 
 	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
-	if request != nil && request.URL != nil && request.URL.Query().Has("access_token") {
+	if request != nil && request.URL != nil &&
+		(request.URL.Query().Has("access_token") || request.URL.Query().Has("ticket")) {
 		writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
 			"error": "URL credentials are not accepted; use a header or one-time WebSocket ticket",
 		})

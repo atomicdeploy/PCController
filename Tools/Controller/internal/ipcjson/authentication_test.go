@@ -2,7 +2,9 @@ package ipcjson
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +79,14 @@ func TestBrowserSessionTicketAuthenticatesCleanURLOnce(t *testing.T) {
 		len(ticket.Ticket) != 64 || ticket.ExpiresInMS != sessionTicketLifetime.Milliseconds() {
 		t.Fatalf("ticket=%#v", ticket)
 	}
+	digest := sha256.Sum256([]byte(ticket.Ticket))
+	service.sessionMu.Lock()
+	_, digestStored := service.sessionTickets[digest]
+	cacheSnapshot := fmt.Sprint(service.sessionTickets)
+	service.sessionMu.Unlock()
+	if !digestStored || strings.Contains(cacheSnapshot, ticket.Ticket) {
+		t.Fatalf("ticket cache retained raw credential or omitted digest: %s", cacheSnapshot)
+	}
 	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ipc"
 	dial := func(origin string) (*websocket.Conn, *http.Response, error) {
 		return websocket.Dial(context.Background(), websocketURL, &websocket.DialOptions{
@@ -110,6 +120,63 @@ func TestBrowserSessionTicketAuthenticatesCleanURLOnce(t *testing.T) {
 	}
 	if replayErr == nil || replayResponse == nil || replayResponse.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("replayed ticket err=%v response=%v", replayErr, replayResponse)
+	}
+}
+
+func TestBrowserSessionTicketHasOneConcurrentWinner(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	server := httptest.NewServer(websocketMux(context.Background(), service))
+	defer server.Close()
+
+	ticket := issueBrowserTicket(t, server.URL, server.URL, "websocket")
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ipc"
+	type result struct {
+		accepted bool
+		status   int
+		err      error
+	}
+	const contenders = 16
+	start := make(chan struct{})
+	results := make(chan result, contenders)
+	for range contenders {
+		go func() {
+			<-start
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			connection, response, err := websocket.Dial(ctx, websocketURL, &websocket.DialOptions{
+				HTTPHeader: http.Header{"Origin": []string{server.URL}},
+				Subprotocols: []string{
+					browserWebSocketProtocol,
+					browserTicketPrefix + ticket.Ticket,
+				},
+			})
+			if connection != nil {
+				_ = connection.CloseNow()
+			}
+			status := 0
+			if response != nil {
+				status = response.StatusCode
+			}
+			results <- result{accepted: err == nil, status: status, err: err}
+		}()
+	}
+	close(start)
+	accepted, rejected := 0, 0
+	for range contenders {
+		result := <-results
+		if result.accepted {
+			accepted++
+			continue
+		}
+		if result.status != http.StatusUnauthorized {
+			t.Errorf("losing ticket request status=%d err=%v", result.status, result.err)
+			continue
+		}
+		rejected++
+	}
+	if accepted != 1 || rejected != contenders-1 {
+		t.Fatalf("accepted=%d rejected=%d", accepted, rejected)
 	}
 }
 
@@ -224,7 +291,9 @@ func TestDurableURLCredentialsAndPreAuthSocketFramesAreRejected(t *testing.T) {
 
 	for _, path := range []string{
 		"/ipc?access_token=" + testAccessToken,
+		"/ipc?ticket=" + strings.Repeat("a", 64),
 		"/socket.io/?EIO=4&transport=websocket&access_token=" + testAccessToken,
+		"/socket.io/?EIO=4&transport=websocket&ticket=" + strings.Repeat("a", 64),
 	} {
 		url := "ws" + strings.TrimPrefix(server.URL, "http") + path
 		connection, response, err := websocket.Dial(context.Background(), url, &websocket.DialOptions{
