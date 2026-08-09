@@ -33,7 +33,11 @@ func TestResolveAbsoluteCanonicalizesExistingSymlinkPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(realRoot, "missing", "data")
+	canonicalRealRoot, err := filepath.EvalSymlinks(realRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(canonicalRealRoot, "missing", "data")
 	if resolved != want {
 		t.Fatalf("resolved=%q want=%q", resolved, want)
 	}
