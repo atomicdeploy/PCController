@@ -1,0 +1,17 @@
+{
+  "name": "pccontroller-build-tool",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "chalk": "^6.0.0",
+    "cli-table3": "^0.6.5"
+  },
+  "scripts": {
+    "lint": "node --check ../CommandPlan/controller-command.mjs && node --check presentation.mjs && node --check product-metadata.mjs && node --check build.mjs && node --check go-tests.mjs && node --check build.test.mjs && node --check product-metadata.test.mjs",
+    "test": "node --test build.test.mjs product-metadata.test.mjs",
+    "check": "npm run lint && npm test"
+  }
+}

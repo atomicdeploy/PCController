@@ -1,0 +1,83 @@
+name: Build
+run-name: "🚀 ${{ github.event.repository.name }} · ${{ github.ref_name }} · ${{ github.event_name }}"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Optional version embedded in every package
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: flagship-build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    name: "⚡ AVR Firmware"
+    uses: ./.github/workflows/firmware.yml
+    with:
+      version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+
+  host:
+    name: "🖥️ Host · Five native targets"
+    needs: firmware
+    uses: ./.github/workflows/host.yml
+    with:
+      version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+      firmware_artifact_name: ${{ needs.firmware.outputs.artifact_name }}
+
+  virtual-board:
+    name: "🧪 Virtual Board · Five native targets"
+    uses: ./.github/workflows/virtual-board.yml
+    with:
+      version: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
+
+  build:
+    needs: [firmware, host, virtual-board]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: "📥 Check out source"
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: "🟢 Install Node.js"
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: "🔗 Capture artifact links"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build-downloads
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            > build-downloads/artifact-index.json
+
+      - name: "⬇️ Download build artifacts"
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: PCController-*
+          path: build-downloads
+          merge-multiple: true
+
+      - name: "🔎 Validate eleven-package catalog"
+        run: |
+          set -euo pipefail
+          package_count="$(find build-downloads -type f -name '*.tar.gz' | wc -l | tr -d ' ')"
+          test "$package_count" -eq 11
+          find build-downloads -type f -name '*.tar.gz' -printf '%f\n' | sort
+
+      - name: "✨ Publish build summary"
+        run: node .github/scripts/step-summary.mjs catalog build-downloads

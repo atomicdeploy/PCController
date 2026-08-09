@@ -1,0 +1,56 @@
+{
+  "format": "pccontroller-host-tool-policy/v1",
+  "name": "pccontroller-host-build-tools",
+  "node": {
+    "channel": "lts",
+    "minimum_version": "24.0.0",
+    "index_url": "https://nodejs.org/dist/index.json",
+    "checksums_url_template": "https://nodejs.org/dist/v{version}/SHASUMS256.txt",
+    "asset_suffixes": [
+      "win-x64.zip",
+      "linux-x64.tar.xz",
+      "linux-arm64.tar.xz",
+      "darwin-x64.tar.gz",
+      "darwin-arm64.tar.gz"
+    ]
+  },
+  "upx": {
+    "channel": "stable",
+    "minimum_version": "5.2.0",
+    "repository": "upx/upx",
+    "release_api": "https://api.github.com/repos/upx/upx/releases/latest",
+    "asset_hints": {
+      "windows-amd64": "win64.zip",
+      "linux-amd64": "amd64_linux.tar.xz",
+      "linux-arm64": "arm64_linux.tar.xz"
+    }
+  },
+  "go_winres": {
+    "channel": "latest-stable",
+    "minimum_version": "0.3.3",
+    "module": "github.com/tc-hib/go-winres"
+  },
+  "windows_c_compiler": {
+    "channel": "latest-stable",
+    "package_id": "BrechtSanders.WinLibs.POSIX.UCRT",
+    "architecture": "x64",
+    "target": "x86_64-w64-mingw32",
+    "minimum_compiler_version": "15.0.0",
+    "manifest_api": "https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/b/BrechtSanders/WinLibs/POSIX/UCRT"
+  },
+  "web": {
+    "channel": "latest-compatible",
+    "directory": "Tools/Controller/web",
+    "lock_file": "Tools/Controller/web/package-lock.json"
+  },
+  "build": {
+    "channel": "latest-compatible",
+    "directory": "Tools/Build",
+    "lock_file": "Tools/Build/package-lock.json",
+    "minimum_node_version": "22.12.0"
+  },
+  "github_actions": {
+    "channel": "stable",
+    "managed_by": ".github/dependabot.yml"
+  }
+}

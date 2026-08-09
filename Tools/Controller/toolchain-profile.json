@@ -1,0 +1,66 @@
+{
+  "format": "pccontroller-toolchain-policy/v1",
+  "name": "controllerboardmini-atmega328p",
+  "fqbn": "MiniCore:avr:328:bootloader=uart0,eeprom=keep,baudrate=115200,variant=modelP,BOD=2v7,LTO=Os_flto,clock=16MHz_external",
+  "target": {
+    "mcu": "atmega328p",
+    "clock_hz": 16000000,
+    "bootloader": "UART0 Urboot/urclock",
+    "baud": 115200,
+    "application_limit_bytes": 32384,
+    "flash_bytes": 32768,
+    "eeprom_bytes": 1024
+  },
+  "library_index": "https://downloads.arduino.cc/libraries/library_index.json.gz",
+  "cli": {
+    "dependency": "arduino-cli",
+    "repository": "arduino/arduino-cli",
+    "release_api": "https://api.github.com/repos/arduino/arduino-cli/releases?per_page=100",
+    "constraint": {
+      "channel": "stable",
+      "minimum_version": "1.5.1"
+    },
+    "assets": [
+      { "goos": "windows", "goarch": "amd64", "suffix": "_Windows_64bit.zip", "archive": "zip" },
+      { "goos": "windows", "goarch": "386", "suffix": "_Windows_32bit.zip", "archive": "zip" },
+      { "goos": "linux", "goarch": "amd64", "suffix": "_Linux_64bit.tar.gz", "archive": "tar.gz" },
+      { "goos": "linux", "goarch": "arm64", "suffix": "_Linux_ARM64.tar.gz", "archive": "tar.gz" },
+      { "goos": "darwin", "goarch": "amd64", "suffix": "_macOS_64bit.tar.gz", "archive": "tar.gz" },
+      { "goos": "darwin", "goarch": "arm64", "suffix": "_macOS_ARM64.tar.gz", "archive": "tar.gz" }
+    ]
+  },
+  "core": {
+    "id": "MiniCore:avr",
+    "index_url": "https://mcudude.github.io/MiniCore/package_MCUdude_MiniCore_index.json",
+    "constraint": {
+      "channel": "stable",
+      "minimum_version": "3.1.2"
+    }
+  },
+  "libraries": [
+    { "name": "Adafruit PWM Servo Driver Library", "constraint": { "channel": "stable", "minimum_version": "3.0.3" } },
+    { "name": "Adafruit INA219", "constraint": { "channel": "stable", "minimum_version": "1.2.3" } },
+    { "name": "rc-switch", "constraint": { "channel": "stable", "minimum_version": "2.6.4" } },
+    { "name": "TM1637TinyDisplay", "constraint": { "channel": "stable", "minimum_version": "1.12.2" } },
+    { "name": "DallasTemperature", "constraint": { "channel": "stable", "minimum_version": "4.0.6" } },
+    { "name": "OneWire", "constraint": { "channel": "stable", "minimum_version": "2.3.8" } }
+  ],
+  "bootloader": {
+    "repository": "stefanrueger/urboot",
+    "tag_prefix": "u",
+    "tags_api": "https://api.github.com/repos/stefanrueger/urboot/tags?per_page=100",
+    "commits_api": "https://api.github.com/repos/stefanrueger/urboot/commits",
+    "canary_ref": "main",
+    "constraint": {
+      "channel": "stable",
+      "minimum_version": "8.0"
+    }
+  },
+  "go": {
+    "version_url": "https://go.dev/VERSION?m=text",
+    "constraint": {
+      "channel": "stable",
+      "minimum_version": "1.25.0"
+    }
+  }
+}
