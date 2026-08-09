@@ -1061,6 +1061,7 @@ const PR_ORIGINAL_REQUESTS = {
   129: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
   130: [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.serviceTray, PROMPT_EXCERPTS.releaseHandoff],
   132: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.serviceTray],
+  133: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.toolingEntrypoint],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
