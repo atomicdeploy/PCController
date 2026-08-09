@@ -111,6 +111,9 @@ const EXTRA_ISSUE_REQUIRED_LABELS = {
   110: ['🖥️ host', '🚀 programming', '🧪 testing', '🏗️ tooling-build'],
   112: ['🖥️ host', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
   115: ['📦 dependencies', '🏗️ tooling-build'],
+  131: ['🖥️ host', '💾 storage', '🧪 testing', '🔒 security'],
+  134: ['📦 dependencies', '🏗️ tooling-build'],
+  135: ['🖥️ host', '🧪 testing', '🏗️ tooling-build', '🔍 needs-hardware'],
 };
 
 function requirement(id, parent, title, state, labels, section, criteria, evidence) {
@@ -606,8 +609,8 @@ const R = [
       'Use the snapshot as a safe input to future migration and recovery diagnostics.',
     ], 'Schema-2 last-session.json atomically records cached identity, connection, status/reset/settings/menu/front-panel state, recent typed events, active/latest programming operation, current/default artifact hashes, and privacy-safe durable recovery marker/session hashes without mixing host config or EEPROM bytes. Validated recovery diagnostics reject interrupted-write completion claims. Source tests cover replacement, corruption, partial completeness, deduplication, RPC, and marker consumption; a graceful exit during/after the live programming lifecycle remains open.'),
 
-  requirement('arduino-go-dependencies', 11, 'Provision managed firmware and host toolchains plus globally discoverable UPX', 'closed',
-    ['🏗️ tooling-build', '📦 dependencies', '✅ verified'], 'Firmware toolchain and dependencies', [
+  requirement('arduino-go-dependencies', 11, 'Provision managed firmware and host toolchains plus globally discoverable UPX', 'open',
+    ['🏗️ tooling-build', '📦 dependencies', '🐛 regression'], 'Firmware toolchain and dependencies', [
       'Audit and update installed Arduino cores and requested well-supported libraries through the configured network path.',
       'Declare all Go host dependencies and package checksums.',
       'Use fixed-size local AVR drivers where needed to fit the target without misrepresenting linked libraries.',
@@ -616,7 +619,8 @@ const R = [
       'Inherit HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, and NO_PROXY case-insensitively into every dependency subprocess without logging secrets, with a bounded direct retry only when the configured proxy cannot reach the source.',
       'On Windows, provision the latest compatible native MinGW-w64/Windows-GNU compiler for Go c-shared packaging when absent, forward the configured proxy, and reject Git/MSYS/Cygwin gcc false positives by target and preprocessor identity.',
       'Expose generic public toolchain bootstrap/sync/profile/compile/core-info/install-bootloader commands while retaining dependency-specific names only internally or when invoking the dependency itself.',
-    ], 'Current core/library/Go dependency versions are recorded as the verified bootstrap baseline, UPX 5.2.0 is globally discoverable without a hard-coded source path, and the isolated managed profile downloads/verifies its CLI, installs MiniCore 3.1.2 plus requested libraries, inherits proxy semantics, inventories dependencies, and completes a Controller compile. The Windows host packager validates target/macros, rejects the Cygwin/MSYS gcc shadowing PATH, replays or provisions the resolved user-scoped WinLibs package through WinGet with proxy forwarding, live-selects native x86_64-w64-mingw32 GCC 16.1.0, successfully links the real Go c-shared DLL/header, and passes a stable external-C ABI call without opening COM. Source tests cover existing-path, dry-run, profile parity, extraction bounds, proxy handling, compiler false positives, provisioning arguments, native selection, manifest identity, and the caller lifecycle; the separate update-automation requirement owns latest-first resolved locks across maintained dependencies.'),
+      'On Linux, a privileged fresh-host bootstrap must assign the managed profile to the intended interactive/service account, install required native packages and serial access declaratively, and leave reusable state with least-privilege ownership.',
+    ], 'Current core/library/Go dependency versions are recorded as the verified bootstrap baseline, UPX 5.2.0 is globally discoverable without a hard-coded source path, and the isolated managed profile downloads/verifies its CLI, installs MiniCore 3.1.2 plus requested libraries, inherits proxy semantics, inventories dependencies, and completes a Controller compile. The Windows host packager validates target/macros, rejects the Cygwin/MSYS gcc shadowing PATH, replays or provisions the resolved user-scoped WinLibs package through WinGet with proxy forwarding, live-selects native x86_64-w64-mingw32 GCC 16.1.0, successfully links the real Go c-shared DLL/header, and passes a stable external-C ABI call without opening COM. Source tests cover existing-path, dry-run, profile parity, extraction bounds, proxy handling, compiler false positives, provisioning arguments, native selection, manifest identity, and the caller lifecycle. A fresh Ubuntu 26.04 validation exposed that root-owned private bootstrap state cannot be reused safely by the intended unelevated account; this issue remains open until Controller owns target-account provisioning, native dependencies, serial permissions, and fresh/reuse tests. The separate update-automation requirement owns latest-first resolved locks across maintained dependencies.'),
   requirement('latest-toolchain-update-automation', 11, 'Automate latest-compatible dependency updates with resolved-lock reproducibility', 'open',
     ['🏗️ tooling-build', '📦 dependencies', '🧪 testing', '💡 enhancement'], 'Firmware toolchain and dependencies', [
       'Resolve the latest compatible dependency CLI/core/libraries/Urboot, Go modules/toolchain, Node/npm packages, GitHub Actions, UPX, and go-winres instead of treating policy-file versions as permanent pins.',
@@ -1019,6 +1023,9 @@ const EXTRA_ISSUE_ORIGINAL_REQUESTS = {
   110: [PROMPT_EXCERPTS.stuckUpdate],
   112: [PROMPT_EXCERPTS.zadig],
   115: [PROMPT_EXCERPTS.dependencyBlocker],
+  131: [PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.trackerReconciliation],
+  134: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
+  135: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.serviceTray],
 };
 
 const PR_ORIGINAL_REQUESTS = {
@@ -1057,6 +1064,8 @@ const PR_ORIGINAL_REQUESTS = {
   128: [PROMPT_EXCERPTS.wikiStyling, PROMPT_EXCERPTS.repositoryMap],
   129: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
   130: [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.serviceTray, PROMPT_EXCERPTS.releaseHandoff],
+  132: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.serviceTray],
+  133: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.toolingEntrypoint],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
