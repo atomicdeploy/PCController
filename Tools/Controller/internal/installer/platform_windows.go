@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"pccontroller.local/controller/internal/ownedstorage"
+	"pccontroller.local/controller/internal/pathguard"
 )
 
 type lifecycleLock struct {
@@ -20,7 +23,7 @@ type lifecycleLock struct {
 }
 
 func acquireLifecycleLock(ctx context.Context, path string) (*lifecycleLock, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := pathguard.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
@@ -83,12 +86,5 @@ func replaceFile(source, destination string) error {
 }
 
 func platformOwnerID() (string, error) {
-	owner, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
-		return "", fmt.Errorf("resolve current Windows user SID: %w", err)
-	}
-	if owner == nil || owner.User.Sid == nil {
-		return "", errors.New("current Windows user SID is unavailable")
-	}
-	return owner.User.Sid.String(), nil
+	return ownedstorage.CurrentOwnerID()
 }

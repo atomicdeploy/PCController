@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/hostui"
@@ -17,6 +19,21 @@ import (
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/programmer"
 )
+
+const lifecycleCommandTimeout = 5 * time.Minute
+
+func lifecycleCommandContext() (context.Context, context.CancelFunc) {
+	return lifecycleCommandContextWithTimeout(lifecycleCommandTimeout)
+}
+
+func lifecycleCommandContextWithTimeout(timeout time.Duration) (context.Context, context.CancelFunc) {
+	signalContext, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt)
+	contextWithTimeout, cancelTimeout := context.WithTimeout(signalContext, timeout)
+	return contextWithTimeout, func() {
+		cancelTimeout()
+		stopSignals()
+	}
+}
 
 func runPackageLifecycle(args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 || !strings.EqualFold(args[0], "inventory") {
@@ -76,7 +93,8 @@ func runInstallLifecycle(
 		Root: *root, PackageRoot: resolvedPackage,
 		ExpectedPackageSHA256: *expected, ConfigureDesktop: *desktop,
 	}
-	ctx := context.Background()
+	ctx, cancel := lifecycleCommandContext()
+	defer cancel()
 	var result installer.LifecycleResult
 	if action == "repair" {
 		result, err = service.Repair(ctx, request)
@@ -106,7 +124,9 @@ func runInstallationStatus(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	result, err := service.Status(context.Background(), *root)
+	ctx, cancel := lifecycleCommandContext()
+	defer cancel()
+	result, err := service.Status(ctx, *root)
 	if err != nil {
 		return err
 	}
@@ -123,6 +143,7 @@ func runUninstallLifecycle(
 	root := flags.String("root", "", "per-user installation directory")
 	purgeData := flags.Bool("purge-data", false, "also remove host configuration, backups, tools, logs, and state")
 	confirmation := flags.String("confirm-purge", "", "exact separate data-purge confirmation")
+	previewPurge := flags.Bool("preview-purge", false, "validate and show the exact purge set without deleting anything")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -135,19 +156,32 @@ func runUninstallLifecycle(
 	}
 	request := installer.UninstallRequest{
 		Root: *root, PurgeData: *purgeData, PurgeConfirmation: *confirmation,
+		PreviewPurge: *previewPurge,
+	}
+	if *previewPurge && !*purgeData {
+		return errors.New("--preview-purge requires --purge-data")
 	}
 	if *purgeData {
-		request.PurgePaths, err = lifecyclePurgePaths(configPath)
+		request.PurgeConfigFiles, request.PurgeDataRoots, err = lifecyclePurgeTargets(configPath)
 		if err != nil {
 			return err
 		}
+	}
+	ctx, cancel := lifecycleCommandContext()
+	defer cancel()
+	if request.PreviewPurge {
+		result, previewErr := service.Uninstall(ctx, request)
+		if previewErr != nil {
+			return previewErr
+		}
+		return writeLifecycleJSON(stdout, result)
 	}
 	running, err := service.RunningFromRoot(request.Root)
 	if err != nil {
 		return err
 	}
 	if running {
-		plan, err := service.PrepareExternalUninstall(context.Background(), request)
+		plan, err := service.PrepareExternalUninstall(ctx, request)
 		if err != nil {
 			return err
 		}
@@ -157,7 +191,7 @@ func runUninstallLifecycle(
 			"data_preserved": !request.PurgeData,
 		})
 	}
-	result, err := service.Uninstall(context.Background(), request)
+	result, err := service.Uninstall(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -222,26 +256,16 @@ func runningPackageDirectory() (string, error) {
 	return filepath.Dir(executable), nil
 }
 
-func lifecyclePurgePaths(configPath string) ([]string, error) {
+func lifecyclePurgeTargets(configPath string) ([]string, []string, error) {
 	resolvedConfig, err := appconfig.ResolvePath(configPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	paths, err := programmer.DefaultHostDataPaths()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	values := []string{filepath.Dir(resolvedConfig), paths.DataDir}
-	seen := make(map[string]bool, len(values))
-	result := make([]string, 0, len(values))
-	for _, value := range values {
-		key := strings.ToLower(filepath.Clean(value))
-		if !seen[key] {
-			seen[key] = true
-			result = append(result, value)
-		}
-	}
-	return result, nil
+	return []string{filepath.Clean(resolvedConfig)}, []string{filepath.Clean(paths.DataDir)}, nil
 }
 
 func writeLifecycleJSON(output io.Writer, value any) error {

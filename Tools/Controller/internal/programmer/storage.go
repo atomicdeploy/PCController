@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"pccontroller.local/controller/internal/productidentity"
 	"time"
+
+	"pccontroller.local/controller/internal/ownedstorage"
+	"pccontroller.local/controller/internal/productidentity"
 )
 
 const HostDataDirectoryEnvironment = "PCCONTROLLER_DATA_DIR"
@@ -59,6 +60,9 @@ func HostDataPathsFor(dataDirectory string) (HostDataPaths, error) {
 }
 
 func EnsureHostDataPaths(paths HostDataPaths) error {
+	if err := ownedstorage.Ensure(paths.DataDir); err != nil {
+		return fmt.Errorf("establish host data ownership: %w", err)
+	}
 	for _, directory := range []string{
 		paths.DataDir, paths.BackupsDir, paths.BackupOperations,
 		paths.FirmwareBlobsDir, paths.BoardSettingsDir, paths.ToolchainDir,

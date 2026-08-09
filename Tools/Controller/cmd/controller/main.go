@@ -58,7 +58,9 @@ func main() {
 	if installer.IsUninstallHelperInvocation(os.Args[1:]) {
 		service, err := newInstallerService("")
 		if err == nil {
-			err = installer.RunExternalUninstallHelper(context.Background(), os.Args[2], service)
+			ctx, cancel := lifecycleCommandContext()
+			err = installer.RunExternalUninstallHelper(ctx, os.Args[2], service)
+			cancel()
 		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "uninstall helper:", err)

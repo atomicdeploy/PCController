@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"pccontroller.local/controller/internal/ownedstorage"
+	"pccontroller.local/controller/internal/pathguard"
 )
 
 type lifecycleLock struct {
@@ -20,7 +22,7 @@ type lifecycleLock struct {
 }
 
 func acquireLifecycleLock(ctx context.Context, path string) (*lifecycleLock, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := pathguard.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
@@ -66,9 +68,5 @@ func (lock *lifecycleLock) Close() error {
 func replaceFile(source, destination string) error { return os.Rename(source, destination) }
 
 func platformOwnerID() (string, error) {
-	value, err := user.Current()
-	if err != nil {
-		return "", err
-	}
-	return "uid:" + value.Uid, nil
+	return ownedstorage.CurrentOwnerID()
 }

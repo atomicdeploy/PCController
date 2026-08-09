@@ -20,6 +20,7 @@ import (
 	"unicode/utf16"
 
 	"pccontroller.local/controller/internal/artifacts"
+	"pccontroller.local/controller/internal/pathguard"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -411,8 +412,8 @@ func inventoryFiles(root, excluded string) ([]PackageFile, error) {
 		if err != nil {
 			return err
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("package path %s is a symbolic link", path)
+		if err := pathguard.ValidateComponent(path, info); err != nil {
+			return fmt.Errorf("package path is not trusted: %w", err)
 		}
 		if entry.IsDir() {
 			return nil
@@ -535,8 +536,12 @@ func utf16Bytes(value string) []byte {
 
 func normalizeInventoryPath(value string) (string, error) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
-	if value == "" || strings.HasPrefix(value, "/") || filepath.IsAbs(value) || strings.ContainsRune(value, '\x00') {
+	if value == "" || strings.HasPrefix(value, "/") || filepath.IsAbs(value) || strings.ContainsRune(value, '\x00') ||
+		!filepath.IsLocal(filepath.FromSlash(value)) {
 		return "", errors.New("inventory path must be relative")
+	}
+	if err := pathguard.ValidateRelative(filepath.FromSlash(value)); err != nil {
+		return "", fmt.Errorf("inventory path is not local: %w", err)
 	}
 	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(value)))
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
@@ -558,15 +563,18 @@ func inventoryEntryPath(root, relative string) (string, error) {
 }
 
 func secureDirectory(path string) (string, error) {
-	path, err := filepath.Abs(strings.TrimSpace(path))
+	path, err := pathguard.CleanAbsolute(path)
 	if err != nil {
+		return "", err
+	}
+	if err := pathguard.ValidateComponents(path, false); err != nil {
 		return "", err
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
 		return "", err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() {
 		return "", errors.New("package root must be a real directory, not a link")
 	}
 	return filepath.Clean(path), nil
@@ -607,6 +615,9 @@ func digestFile(path string) (string, int64, error) {
 }
 
 func openRegularFile(path string) (*os.File, os.FileInfo, error) {
+	if err := pathguard.ValidateComponents(path, false); err != nil {
+		return nil, nil, err
+	}
 	pathInfo, err := os.Lstat(path)
 	if err != nil {
 		return nil, nil, err
@@ -626,6 +637,10 @@ func openRegularFile(path string) (*os.File, os.FileInfo, error) {
 	if !openedInfo.Mode().IsRegular() || !os.SameFile(pathInfo, openedInfo) {
 		_ = file.Close()
 		return nil, nil, errors.New("regular file changed while opening")
+	}
+	if err := pathguard.ValidateComponents(path, false); err != nil {
+		_ = file.Close()
+		return nil, nil, err
 	}
 	return file, openedInfo, nil
 }

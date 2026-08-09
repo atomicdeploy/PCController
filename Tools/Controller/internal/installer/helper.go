@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"pccontroller.local/controller/internal/pathguard"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -83,10 +84,8 @@ func (service *Service) PrepareExternalUninstall(ctx context.Context, request Un
 		if request.PurgeConfirmation != PurgeConfirmation {
 			return ExternalUninstallPlan{}, fmt.Errorf("data purge requires the exact separate confirmation %q", PurgeConfirmation)
 		}
-		for _, path := range request.PurgePaths {
-			if _, err := safePurgePath(path, root); err != nil {
-				return ExternalUninstallPlan{}, err
-			}
+		if _, err := preparePurgeTargets(request, root, service.OwnerID); err != nil {
+			return ExternalUninstallPlan{}, err
 		}
 	}
 	id, err := transactionID()
@@ -94,13 +93,19 @@ func (service *Service) PrepareExternalUninstall(ctx context.Context, request Un
 		return ExternalUninstallPlan{}, err
 	}
 	directory := filepath.Join(os.TempDir(), productidentity.ConfigDirectory+"-uninstall-"+id)
+	if err := pathguard.ValidateComponents(directory, true); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
 	if err := os.Mkdir(directory, 0o700); err != nil {
+		return ExternalUninstallPlan{}, err
+	}
+	if err := pathguard.ValidateComponents(directory, false); err != nil {
 		return ExternalUninstallPlan{}, err
 	}
 	cleanup := true
 	defer func() {
 		if cleanup {
-			_ = os.RemoveAll(directory)
+			_ = removeTreeSecure(directory)
 		}
 	}()
 	extension := filepath.Ext(service.CurrentExecutable)

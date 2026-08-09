@@ -12,25 +12,27 @@ import (
 	"testing"
 	"time"
 
+	"pccontroller.local/controller/internal/ownedstorage"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
 const testSourceSHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 type fakeDesktop struct {
-	ensure []DesktopTarget
-	remove []DesktopTarget
-	err    error
+	ensure    []DesktopTarget
+	remove    []DesktopTarget
+	ensureErr error
+	removeErr error
 }
 
 func (desktop *fakeDesktop) Ensure(_ context.Context, target DesktopTarget) error {
 	desktop.ensure = append(desktop.ensure, target)
-	return desktop.err
+	return desktop.ensureErr
 }
 
 func (desktop *fakeDesktop) RemoveOwned(_ context.Context, target DesktopTarget) error {
 	desktop.remove = append(desktop.remove, target)
-	return desktop.err
+	return desktop.removeErr
 }
 
 func TestPackageInventoryBindsHostExecutableAndResources(t *testing.T) {
@@ -158,14 +160,14 @@ func TestDesktopFailureRollsBackDurableActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	packageTwo, _ := writeTestPackage(t, "2.0.0", "two")
-	desktop.err = errors.New("native registration failed")
+	desktop.ensureErr = errors.New("native registration failed")
 	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageTwo}); err == nil {
 		t.Fatal("desktop activation failure was ignored")
 	}
 	if len(desktop.remove) != 1 {
 		t.Fatalf("failed desktop activation was not cleaned up: %#v", desktop.remove)
 	}
-	desktop.err = nil
+	desktop.ensureErr = nil
 	status, err := service.Status(ctx, root)
 	if err != nil || !status.Healthy || status.PackageSHA256 != manifestOne.RootSHA256 || !samePath(status.Executable, first.Executable) {
 		t.Fatalf("rollback status=%#v err=%v", status, err)
@@ -199,6 +201,170 @@ func TestRecoveryCompletesDesktopActivationAfterStateCommit(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
 		t.Fatalf("recovered transaction journal remains: %v", err)
+	}
+}
+
+func TestRecoveryVerifiesSlotBeforeDesktopActivation(t *testing.T) {
+	for _, phase := range []string{"slot-ready", "activated"} {
+		t.Run(phase, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "installation")
+			packageRoot, _ := writeTestPackage(t, "1.0.0", phase)
+			desktop := &fakeDesktop{}
+			service := testService(t, desktop)
+			installed, err := service.Install(context.Background(), ChangeRequest{
+				Root: root, PackageRoot: packageRoot, ConfigureDesktop: true,
+			})
+			if err != nil || installed.State == nil {
+				t.Fatalf("install=%#v err=%v", installed, err)
+			}
+			desktop.ensure = nil
+			journal := transactionJournal{
+				Format: transactionFormat, ID: "corrupt-recovery", Operation: "install",
+				Phase: phase, NewSlot: installed.State.ActiveSlot,
+				NewSHA256: installed.State.ActiveSHA256, UpdatedAt: time.Now().UTC(),
+			}
+			if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(installed.Executable, []byte("corrupt"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := service.Status(context.Background(), root); err == nil {
+				t.Fatal("corrupted recovered slot was accepted")
+			}
+			if len(desktop.ensure) != 0 {
+				t.Fatalf("desktop was activated before slot verification: %#v", desktop.ensure)
+			}
+			if _, err := os.Stat(filepath.Join(root, transactionName)); err != nil {
+				t.Fatalf("failed recovery journal was not retained: %v", err)
+			}
+		})
+	}
+}
+
+func TestInterruptedUninstallRollsBackToRetryableState(t *testing.T) {
+	for _, phase := range []string{"uninstall-prepared", "uninstalling"} {
+		t.Run(phase, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "installation")
+			packageRoot, _ := writeTestPackage(t, "1.0.0", phase)
+			desktop := &fakeDesktop{}
+			service := testService(t, desktop)
+			installed, err := service.Install(context.Background(), ChangeRequest{
+				Root: root, PackageRoot: packageRoot, ConfigureDesktop: true,
+			})
+			if err != nil || installed.State == nil {
+				t.Fatalf("install=%#v err=%v", installed, err)
+			}
+			desktop.ensure = nil
+			stateCopy := *installed.State
+			journal := transactionJournal{
+				Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+				Phase: phase, PreviousState: &stateCopy, UpdatedAt: time.Now().UTC(),
+			}
+			if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			status, err := service.Status(context.Background(), root)
+			if err != nil || !status.Healthy || len(desktop.ensure) != 1 {
+				t.Fatalf("recovered status=%#v desktop=%#v err=%v", status, desktop.ensure, err)
+			}
+			if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
+				t.Fatalf("retryable recovery left journal: %v", err)
+			}
+			removed, err := service.Uninstall(context.Background(), UninstallRequest{Root: root})
+			if err != nil || !removed.Changed {
+				t.Fatalf("retry uninstall=%#v err=%v", removed, err)
+			}
+		})
+	}
+}
+
+func TestDetachedUninstallTombstoneIsRecovered(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	packageRoot, _ := writeTestPackage(t, "1.0.0", "tombstone")
+	service := testService(t, nil)
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
+		t.Fatal(err)
+	}
+	journal := transactionJournal{
+		Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+		Phase: "uninstalling", UpdatedAt: time.Now().UTC(),
+	}
+	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tombstone := removalTombstone(root)
+	if err := os.Rename(root, tombstone); err != nil {
+		t.Fatal(err)
+	}
+	status, err := service.Status(context.Background(), root)
+	if err != nil || !status.Changed || status.Healthy {
+		t.Fatalf("detached recovery status=%#v err=%v", status, err)
+	}
+	if _, err := os.Stat(tombstone); !os.IsNotExist(err) {
+		t.Fatalf("detached tombstone remains: %v", err)
+	}
+}
+
+func TestCurrentDisplayNameWinsEnableUpdateRollbackAndCleanup(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "installation")
+	packageOne, _ := writeTestPackage(t, "1.0.0", "name-one")
+	packageTwo, _ := writeTestPackage(t, "2.0.0", "name-two")
+	desktop := &fakeDesktop{}
+	service := testService(t, desktop)
+	service.DisplayName = "Old Name"
+	first, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageOne})
+	if err != nil || first.State == nil {
+		t.Fatal(err)
+	}
+	service.DisplayName = "Current Name"
+	enabled, err := service.Install(context.Background(), ChangeRequest{
+		Root: root, PackageRoot: packageOne, ConfigureDesktop: true,
+	})
+	if err != nil || enabled.State.DisplayName != "Current Name" ||
+		len(desktop.ensure) != 1 || desktop.ensure[0].DisplayName != "Current Name" {
+		t.Fatalf("enable=%#v desktop=%#v err=%v", enabled, desktop.ensure, err)
+	}
+	service.DisplayName = "Updated Name"
+	updated, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageTwo})
+	if err != nil || updated.State.DisplayName != "Updated Name" ||
+		len(desktop.remove) == 0 || desktop.remove[len(desktop.remove)-1].DisplayName != "Current Name" ||
+		desktop.ensure[len(desktop.ensure)-1].DisplayName != "Updated Name" {
+		t.Fatalf("update=%#v desktop=%#v err=%v", updated, desktop, err)
+	}
+
+	service.DisplayName = "Failed Rename"
+	desktop.ensureErr = errors.New("registration failed")
+	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageTwo}); err == nil {
+		t.Fatal("rename registration failure was ignored")
+	}
+	desktop.ensureErr = nil
+	status, err := service.Status(context.Background(), root)
+	if err != nil || status.State == nil || status.State.DisplayName != "Updated Name" {
+		t.Fatalf("rename rollback status=%#v err=%v", status, err)
+	}
+	desktop.remove = nil
+	removed, err := service.Uninstall(context.Background(), UninstallRequest{Root: root})
+	if err != nil || !removed.Changed || len(desktop.remove) != 1 || desktop.remove[0].DisplayName != "Updated Name" {
+		t.Fatalf("renamed cleanup=%#v desktop=%#v err=%v", removed, desktop.remove, err)
+	}
+}
+
+func TestLifecycleLockHonorsContextDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), lockName)
+	first, err := acquireLifecycleLock(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if _, err := acquireLifecycleLock(ctx, path); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("contended lock error=%v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("contended lock exceeded bounded cancellation: %s", elapsed)
 	}
 }
 
@@ -244,37 +410,101 @@ func TestUninstallPreservesDataUnlessSeparatelyConfirmed(t *testing.T) {
 	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
 		t.Fatal(err)
 	}
-	data := filepath.Join(t.TempDir(), "data", productidentity.ConfigDirectory)
-	if err := os.MkdirAll(data, 0o700); err != nil {
+	data := filepath.Join(t.TempDir(), "custom", "controller-data")
+	if err := ownedstorage.EnsureFor(data, service.OwnerID); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(data, "keep.json"), []byte("important"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := service.Uninstall(ctx, UninstallRequest{Root: root, PurgePaths: []string{data}})
+	repository := filepath.Join(t.TempDir(), productidentity.ConfigDirectory)
+	if err := os.MkdirAll(repository, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := filepath.Join(repository, "config.json")
+	sibling := filepath.Join(repository, "source.go")
+	if err := os.WriteFile(config, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sibling, []byte("package source"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := service.Uninstall(ctx, UninstallRequest{
+		Root: root, PurgeConfigFiles: []string{config}, PurgeDataRoots: []string{data},
+	})
 	if err != nil || !removed.Changed || !removed.DataPreserved {
 		t.Fatalf("uninstall=%#v err=%v", removed, err)
 	}
 	if _, err := os.Stat(filepath.Join(data, "keep.json")); err != nil {
 		t.Fatalf("default uninstall removed user data: %v", err)
 	}
+	if _, err := os.Stat(config); err != nil {
+		t.Fatalf("default uninstall removed configuration: %v", err)
+	}
 
 	root = filepath.Join(t.TempDir(), "installation")
 	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageRoot}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Uninstall(ctx, UninstallRequest{Root: root, PurgeData: true, PurgeConfirmation: "yes", PurgePaths: []string{data}}); err == nil {
+	if _, err := service.Uninstall(ctx, UninstallRequest{
+		Root: root, PurgeData: true, PurgeConfirmation: "yes",
+		PurgeConfigFiles: []string{config}, PurgeDataRoots: []string{data},
+	}); err == nil {
 		t.Fatal("weak purge confirmation was accepted")
+	}
+	preview, err := service.Uninstall(ctx, UninstallRequest{
+		Root: root, PurgeData: true, PreviewPurge: true,
+		PurgeConfigFiles: []string{config, config}, PurgeDataRoots: []string{data, data},
+	})
+	if err != nil || preview.Changed || len(preview.PurgeTargets) != 2 {
+		t.Fatalf("purge preview=%#v err=%v", preview, err)
+	}
+	if _, err := os.Stat(root); err != nil {
+		t.Fatalf("purge preview changed installation: %v", err)
 	}
 	purged, err := service.Uninstall(ctx, UninstallRequest{
 		Root: root, PurgeData: true, PurgeConfirmation: PurgeConfirmation,
-		PurgePaths: []string{data},
+		PurgeConfigFiles: []string{config}, PurgeDataRoots: []string{data},
 	})
-	if err != nil || purged.DataPreserved || !reflect.DeepEqual(purged.PurgedPaths, []string{data}) {
+	if err != nil || purged.DataPreserved || !reflect.DeepEqual(
+		purged.PurgedPaths, []string{config, data},
+	) {
 		t.Fatalf("purge=%#v err=%v", purged, err)
 	}
 	if _, err := os.Stat(data); !os.IsNotExist(err) {
 		t.Fatalf("confirmed data purge did not remove the exact directory: %v", err)
+	}
+	if _, err := os.Stat(config); !os.IsNotExist(err) {
+		t.Fatalf("confirmed purge did not remove the exact config file: %v", err)
+	}
+	if _, err := os.Stat(sibling); err != nil {
+		t.Fatalf("confirmed purge removed a repository sibling: %v", err)
+	}
+}
+
+func TestPurgeRejectsUnmarkedRootsAndAllowsAbsentOverrides(t *testing.T) {
+	service := testService(t, nil)
+	installRoot := filepath.Join(t.TempDir(), "installation")
+	unmarked := filepath.Join(t.TempDir(), "arbitrary-data")
+	if err := os.MkdirAll(unmarked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unmarked, "foreign.txt"), []byte("foreign"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Uninstall(context.Background(), UninstallRequest{
+		Root: installRoot, PurgeData: true, PreviewPurge: true,
+		PurgeDataRoots: []string{unmarked},
+	}); !errors.Is(err, ownedstorage.ErrNotOwned) {
+		t.Fatalf("unmarked root error=%v", err)
+	}
+	absent := filepath.Join(t.TempDir(), "custom", "missing-data")
+	preview, err := service.Uninstall(context.Background(), UninstallRequest{
+		Root: installRoot, PurgeData: true, PreviewPurge: true,
+		PurgeDataRoots: []string{absent},
+	})
+	if err != nil || len(preview.PurgeTargets) != 1 || preview.PurgeTargets[0].Exists {
+		t.Fatalf("absent override preview=%#v err=%v", preview, err)
 	}
 }
 

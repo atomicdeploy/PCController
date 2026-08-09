@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"pccontroller.local/controller/internal/ownedstorage"
+	"pccontroller.local/controller/internal/pathguard"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -114,7 +116,15 @@ type UninstallRequest struct {
 	Root              string
 	PurgeData         bool
 	PurgeConfirmation string
-	PurgePaths        []string
+	PurgeConfigFiles  []string
+	PurgeDataRoots    []string
+	PreviewPurge      bool
+}
+
+type PurgeTarget struct {
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	Exists bool   `json:"exists"`
 }
 
 type LifecycleResult struct {
@@ -127,6 +137,7 @@ type LifecycleResult struct {
 	Version        string             `json:"version,omitempty"`
 	DesktopManaged bool               `json:"desktop_managed"`
 	DataPreserved  bool               `json:"data_preserved"`
+	PurgeTargets   []PurgeTarget      `json:"purge_targets,omitempty"`
 	PurgedPaths    []string           `json:"purged_paths,omitempty"`
 	Warnings       []string           `json:"warnings,omitempty"`
 	State          *InstallationState `json:"state,omitempty"`
@@ -194,6 +205,11 @@ func (service *Service) Status(ctx context.Context, root string) (LifecycleResul
 	}
 	result := LifecycleResult{Action: "status", Root: resolved, DataPreserved: true}
 	if _, err := os.Lstat(resolved); os.IsNotExist(err) {
+		cleaned, cleanupErr := service.cleanupDetachedInstallation(resolved)
+		result.Changed = cleaned
+		if cleanupErr != nil {
+			return result, cleanupErr
+		}
 		return result, nil
 	} else if err != nil {
 		return result, err
@@ -238,6 +254,11 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 		return LifecycleResult{}, err
 	}
 	result := LifecycleResult{Action: operation, Root: root, DataPreserved: true}
+	if _, err := os.Lstat(root); os.IsNotExist(err) {
+		if _, cleanupErr := service.cleanupDetachedInstallation(root); cleanupErr != nil {
+			return result, cleanupErr
+		}
+	}
 	manifest, err := VerifyPackage(request.PackageRoot, request.ExpectedPackageSHA256, ManifestOptions{
 		Platform: service.Platform, Architecture: service.Architecture,
 		VerifyExecutable: service.VerifyExecutable,
@@ -283,24 +304,40 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 	}
 	if exists && strings.EqualFold(previous.ActiveSHA256, manifest.RootSHA256) {
 		if verifyErr := service.verifySlot(root, previous.ActiveSlot, previous.ActiveSHA256); verifyErr == nil {
+			next := previous
+			next.DisplayName = service.DisplayName
+			next.DesktopManaged = desktopManaged
+			nameChanged := !strings.EqualFold(strings.TrimSpace(previous.DisplayName), strings.TrimSpace(next.DisplayName))
 			if desktopManaged {
-				if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, previous)); err != nil {
-					return result, fmt.Errorf("repair native desktop integration: %w", err)
+				if previous.DesktopManaged && nameChanged {
+					if err := service.Desktop.RemoveOwned(ctx, service.desktopTarget(root, previous)); err != nil {
+						return result, fmt.Errorf("remove prior native desktop identity: %w", err)
+					}
+				}
+				if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, next)); err != nil {
+					var restoreErr error
+					if previous.DesktopManaged && nameChanged {
+						restoreErr = service.Desktop.Ensure(ctx, service.desktopTarget(root, previous))
+					}
+					return result, errors.Join(fmt.Errorf("repair native desktop integration: %w", err), restoreErr)
 				}
 			}
-			if previous.DesktopManaged != desktopManaged || strings.TrimSpace(previous.DisplayName) == "" {
-				previous.DesktopManaged = desktopManaged
-				if strings.TrimSpace(previous.DisplayName) == "" {
-					previous.DisplayName = service.DisplayName
-				}
-				previous.UpdatedAt = service.now()
-				if err := writeJSONAtomic(filepath.Join(root, installationStateName), previous, 0o600); err != nil {
-					return result, fmt.Errorf("persist desktop integration state: %w", err)
+			if previous.DesktopManaged != desktopManaged || nameChanged {
+				next.UpdatedAt = service.now()
+				if err := writeJSONAtomic(filepath.Join(root, installationStateName), next, 0o600); err != nil {
+					var rollbackErr error
+					if desktopManaged {
+						rollbackErr = service.Desktop.RemoveOwned(ctx, service.desktopTarget(root, next))
+					}
+					if previous.DesktopManaged {
+						rollbackErr = errors.Join(rollbackErr, service.Desktop.Ensure(ctx, service.desktopTarget(root, previous)))
+					}
+					return result, errors.Join(fmt.Errorf("persist desktop integration state: %w", err), rollbackErr)
 				}
 				result.Changed = true
 			}
-			result.Healthy, result.DesktopManaged, result.Executable = true, desktopManaged, filepath.Join(root, filepath.FromSlash(previous.Executable))
-			result.State = &previous
+			result.Healthy, result.DesktopManaged, result.Executable = true, desktopManaged, filepath.Join(root, filepath.FromSlash(next.Executable))
+			result.State = &next
 			return result, nil
 		} else if !repair {
 			result.Warnings = append(result.Warnings, "matching installed package was damaged and has been replaced from the verified source")
@@ -325,28 +362,30 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 	}
 	stage := filepath.Join(root, filepath.FromSlash(stageRelative))
 	if err := service.stagePackage(packageRoot, stage, manifest); err != nil {
-		_ = os.RemoveAll(stage)
+		_ = removeOwnedSubtree(root, stage)
 		_ = os.Remove(filepath.Join(root, transactionName))
 		return result, err
 	}
 
 	slotRelative := filepath.ToSlash(filepath.Join(packagesDirectory, manifest.RootSHA256))
 	slot := filepath.Join(root, filepath.FromSlash(slotRelative))
-	if err := os.MkdirAll(filepath.Dir(slot), 0o700); err != nil {
+	if err := pathguard.MkdirAll(filepath.Dir(slot), 0o700); err != nil {
 		return result, err
 	}
 	if _, statErr := os.Lstat(slot); statErr == nil {
 		if verifyErr := service.verifySlot(root, slotRelative, manifest.RootSHA256); verifyErr == nil {
-			_ = os.RemoveAll(stage)
+			if err := removeOwnedSubtree(root, stage); err != nil {
+				return result, err
+			}
 		} else {
 			slotRelative = filepath.ToSlash(filepath.Join(packagesDirectory, manifest.RootSHA256+"-repair-"+id))
 			slot = filepath.Join(root, filepath.FromSlash(slotRelative))
-			if err := os.Rename(stage, slot); err != nil {
+			if err := publishDirectory(stage, slot); err != nil {
 				return result, fmt.Errorf("publish repaired package slot: %w", err)
 			}
 		}
 	} else if os.IsNotExist(statErr) {
-		if err := os.Rename(stage, slot); err != nil {
+		if err := publishDirectory(stage, slot); err != nil {
 			return result, fmt.Errorf("publish package slot: %w", err)
 		}
 	} else {
@@ -371,9 +410,6 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 	}
 	if exists {
 		next.InstalledAt = previous.InstalledAt
-		if previous.DesktopManaged && strings.TrimSpace(previous.DisplayName) != "" {
-			next.DisplayName = previous.DisplayName
-		}
 		if previous.ActiveSlot != slotRelative {
 			next.PreviousSlot, next.PreviousSHA256 = previous.ActiveSlot, previous.ActiveSHA256
 		} else {
@@ -388,6 +424,12 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 		return result, err
 	}
 	if desktopManaged {
+		if exists && previous.DesktopManaged && !strings.EqualFold(strings.TrimSpace(previous.DisplayName), strings.TrimSpace(next.DisplayName)) {
+			if err := service.Desktop.RemoveOwned(ctx, service.desktopTarget(root, previous)); err != nil {
+				rollbackErr := service.rollbackActivation(ctx, root, journal)
+				return result, errors.Join(fmt.Errorf("remove prior native desktop identity: %w", err), rollbackErr)
+			}
+		}
 		if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, next)); err != nil {
 			rollbackErr := service.rollbackActivation(ctx, root, journal)
 			return result, errors.Join(fmt.Errorf("activate native desktop integration: %w", err), rollbackErr)
@@ -413,24 +455,36 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 	}
 	result := LifecycleResult{Action: "uninstall", Root: root, DataPreserved: !request.PurgeData}
 	if request.PurgeData {
-		if request.PurgeConfirmation != PurgeConfirmation {
+		if !request.PreviewPurge && request.PurgeConfirmation != PurgeConfirmation {
 			return result, fmt.Errorf("data purge requires the exact separate confirmation %q", PurgeConfirmation)
 		}
-		for _, path := range request.PurgePaths {
-			if _, err := safePurgePath(path, root); err != nil {
-				return result, err
-			}
+		result.PurgeTargets, err = preparePurgeTargets(request, root, service.OwnerID)
+		if err != nil {
+			return result, err
+		}
+		if request.PreviewPurge {
+			return result, nil
 		}
 	}
 	if _, err := os.Lstat(root); os.IsNotExist(err) {
+		cleaned, cleanupErr := service.cleanupDetachedInstallation(root)
+		result.Changed = cleaned
+		if cleanupErr != nil {
+			return result, cleanupErr
+		}
 		if request.PurgeData {
-			if err := purgePaths(request.PurgePaths, root, &result); err != nil {
+			if err := executePurgeTargets(result.PurgeTargets, root, service.OwnerID, &result); err != nil {
 				return result, err
 			}
 		}
 		return result, nil
 	} else if err != nil {
 		return result, err
+	}
+	if cleaned, cleanupErr := service.cleanupDetachedInstallation(root); cleanupErr != nil {
+		return result, cleanupErr
+	} else if cleaned {
+		result.Warnings = append(result.Warnings, "completed cleanup of a previously detached installation")
 	}
 	if err := service.checkOwnership(root, false); err != nil {
 		return result, err
@@ -455,6 +509,17 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 	if exists && state.OwnerID != service.OwnerID {
 		return result, ErrOwnershipMismatch
 	}
+	journal := transactionJournal{
+		Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
+		Phase: "uninstall-prepared", UpdatedAt: service.now(),
+	}
+	if exists {
+		copy := state
+		journal.PreviousState = &copy
+	}
+	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+		return result, err
+	}
 	if exists && state.DesktopManaged {
 		if service.Desktop == nil {
 			return result, ErrDesktopAdapterUnavailable
@@ -463,10 +528,7 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 			return result, fmt.Errorf("remove owned native desktop integration: %w", err)
 		}
 	}
-	journal := transactionJournal{
-		Format: transactionFormat, ID: "uninstall", Operation: "uninstall",
-		Phase: "uninstalling", UpdatedAt: service.now(),
-	}
+	journal.Phase, journal.UpdatedAt = "uninstalling", service.now()
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
 		return result, err
 	}
@@ -477,16 +539,28 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 	if pathWithin(root, service.CurrentExecutable) {
 		return result, ErrExternalCleanupRequired
 	}
-	tombstone := root + ".remove-" + fmt.Sprint(service.now().UnixNano())
+	if err := pathguard.ValidateTree(root); err != nil {
+		return result, fmt.Errorf("validate installation before detaching: %w", err)
+	}
+	tombstone := removalTombstone(root)
+	if err := pathguard.ValidateComponents(tombstone, true); err != nil {
+		return result, err
+	}
 	if err := os.Rename(root, tombstone); err != nil {
 		return result, fmt.Errorf("detach installation for removal: %w", err)
 	}
+	if err := pathguard.ValidateTree(tombstone); err != nil {
+		return result, fmt.Errorf("validate detached installation: %w", err)
+	}
+	if err := service.checkDetachedOwnership(tombstone, root); err != nil {
+		return result, fmt.Errorf("validate detached installation ownership: %w", err)
+	}
 	result.Changed = true
-	if err := os.RemoveAll(tombstone); err != nil {
+	if err := removeTreeSecure(tombstone); err != nil {
 		result.Warnings = append(result.Warnings, "detached installation remains queued for cleanup: "+tombstone)
 	}
 	if request.PurgeData {
-		if err := purgePaths(request.PurgePaths, root, &result); err != nil {
+		if err := executePurgeTargets(result.PurgeTargets, root, service.OwnerID, &result); err != nil {
 			return result, err
 		}
 	}
@@ -515,6 +589,27 @@ func (service *Service) validate() error {
 	return nil
 }
 
+func removalTombstone(root string) string { return root + ".removing" }
+
+func (service *Service) cleanupDetachedInstallation(root string) (bool, error) {
+	tombstone := removalTombstone(root)
+	if err := pathguard.ValidateComponents(tombstone, true); err != nil {
+		return false, err
+	}
+	if _, err := os.Lstat(tombstone); os.IsNotExist(err) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	if err := service.checkDetachedOwnership(tombstone, root); err != nil {
+		return false, fmt.Errorf("refuse foreign detached installation cleanup: %w", err)
+	}
+	if err := removeTreeSecure(tombstone); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (service *Service) now() time.Time { return service.Now().UTC() }
 
 func (service *Service) desktopTarget(root string, state InstallationState) DesktopTarget {
@@ -529,9 +624,12 @@ func (service *Service) desktopTarget(root string, state InstallationState) Desk
 }
 
 func (service *Service) checkOwnership(root string, create bool) error {
+	if err := pathguard.ValidateComponents(root, create); err != nil {
+		return err
+	}
 	info, err := os.Lstat(root)
 	if os.IsNotExist(err) && create {
-		if err := os.MkdirAll(root, 0o700); err != nil {
+		if err := pathguard.MkdirAll(root, 0o700); err != nil {
 			return err
 		}
 		info, err = os.Lstat(root)
@@ -539,8 +637,11 @@ func (service *Service) checkOwnership(root string, create bool) error {
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+	if !info.IsDir() {
 		return errors.New("installation root must be a real directory, not a link")
+	}
+	if err := pathguard.ValidateComponents(root, false); err != nil {
+		return err
 	}
 	path := filepath.Join(root, ownerMarkerName)
 	content, err := readBoundedRegularFile(path, 64<<10)
@@ -566,21 +667,43 @@ func (service *Service) checkOwnership(root string, create bool) error {
 		}
 		return err
 	}
+	return service.validateOwnershipMarker(content, root)
+}
+
+func (service *Service) checkDetachedOwnership(location, originalRoot string) error {
+	if err := pathguard.ValidateComponents(location, false); err != nil {
+		return err
+	}
+	info, err := os.Lstat(location)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return ErrOwnershipMismatch
+	}
+	content, err := readBoundedRegularFile(filepath.Join(location, ownerMarkerName), 64<<10)
+	if err != nil {
+		return err
+	}
+	return service.validateOwnershipMarker(content, originalRoot)
+}
+
+func (service *Service) validateOwnershipMarker(content []byte, expectedRoot string) error {
 	var marker ownerMarker
 	if err := decodeStrictJSON(content, &marker); err != nil {
 		return fmt.Errorf("%w: invalid ownership marker: %v", ErrOwnershipMismatch, err)
 	}
-	if marker.Format != ownerMarkerFormat || marker.ProductAppID != productidentity.StableAppID || marker.OwnerID != service.OwnerID || !samePath(marker.InstallRoot, root) {
+	if marker.Format != ownerMarkerFormat || marker.ProductAppID != productidentity.StableAppID || marker.OwnerID != service.OwnerID || !samePath(marker.InstallRoot, expectedRoot) {
 		return ErrOwnershipMismatch
 	}
 	return nil
 }
 
 func (service *Service) stagePackage(source, stage string, manifest PackageManifest) error {
-	if err := os.RemoveAll(stage); err != nil {
+	if err := removeTreeSecure(stage); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(stage, 0o700); err != nil {
+	if err := pathguard.MkdirAll(stage, 0o700); err != nil {
 		return err
 	}
 	for _, entry := range manifest.Files {
@@ -647,7 +770,9 @@ func (service *Service) recover(ctx context.Context, root string) error {
 			if pathErr != nil {
 				return pathErr
 			}
-			_ = os.RemoveAll(stage)
+			if err := removeOwnedSubtree(root, stage); err != nil {
+				return err
+			}
 		}
 	case "slot-ready":
 		state, exists, stateErr := loadState(root)
@@ -662,7 +787,9 @@ func (service *Service) recover(ctx context.Context, root string) error {
 				if pathErr != nil {
 					return pathErr
 				}
-				_ = os.RemoveAll(slot)
+				if err := removeOwnedSubtree(root, slot); err != nil {
+					return err
+				}
 			}
 		} else {
 			if err := service.verifySlot(root, state.ActiveSlot, state.ActiveSHA256); err != nil {
@@ -682,6 +809,9 @@ func (service *Service) recover(ctx context.Context, root string) error {
 		if stateErr != nil || !exists || state.ActiveSlot != journal.NewSlot || !strings.EqualFold(state.ActiveSHA256, journal.NewSHA256) {
 			return errors.New("activated installation transaction does not match durable state")
 		}
+		if err := service.verifySlot(root, state.ActiveSlot, state.ActiveSHA256); err != nil {
+			return fmt.Errorf("recover activated installation slot: %w", err)
+		}
 		if state.DesktopManaged {
 			if service.Desktop == nil {
 				return ErrDesktopAdapterUnavailable
@@ -690,8 +820,27 @@ func (service *Service) recover(ctx context.Context, root string) error {
 				return err
 			}
 		}
-	case "uninstalling":
-		return errors.New("an interrupted uninstall must be retried from an external package copy")
+	case "uninstall-prepared", "uninstalling":
+		state, exists, stateErr := loadState(root)
+		if stateErr != nil {
+			return stateErr
+		}
+		if exists {
+			if state.OwnerID != service.OwnerID {
+				return ErrOwnershipMismatch
+			}
+			if err := service.verifySlot(root, state.ActiveSlot, state.ActiveSHA256); err != nil {
+				return fmt.Errorf("recover interrupted uninstall installation slot: %w", err)
+			}
+			if state.DesktopManaged {
+				if service.Desktop == nil {
+					return ErrDesktopAdapterUnavailable
+				}
+				if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, state)); err != nil {
+					return fmt.Errorf("restore desktop integration after interrupted uninstall: %w", err)
+				}
+			}
+		}
 	default:
 		return fmt.Errorf("installation recovery journal phase %q is unsupported", journal.Phase)
 	}
@@ -725,7 +874,7 @@ func (service *Service) rollbackActivation(ctx context.Context, root string, jou
 	}
 	if journal.NewSlot != "" && (journal.PreviousState == nil || journal.PreviousState.ActiveSlot != journal.NewSlot) {
 		if slot, err := inventoryEntryPath(root, journal.NewSlot); err == nil {
-			_ = os.RemoveAll(slot)
+			result = errors.Join(result, removeOwnedSubtree(root, slot))
 		}
 	}
 	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !os.IsNotExist(err) {
@@ -777,7 +926,10 @@ func copyVerifiedFile(source, target string, entry PackageFile) error {
 	if info.Size() != entry.Bytes {
 		return errors.New("source file type or size differs from inventory")
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+	if err := pathguard.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return err
+	}
+	if err := pathguard.ValidateComponents(target, true); err != nil {
 		return err
 	}
 	temporary, err := os.CreateTemp(filepath.Dir(target), ".install-copy-*.tmp")
@@ -813,6 +965,9 @@ func copyVerifiedFile(source, target string, entry PackageFile) error {
 		return err
 	}
 	cleanup = false
+	if err := pathguard.ValidateComponents(target, false); err != nil {
+		return err
+	}
 	return verifyRegularFile(target, entry.Bytes, entry.SHA256)
 }
 
@@ -826,6 +981,12 @@ func transactionID() (string, error) {
 
 func prunePackageSlots(root string, state InstallationState) []string {
 	directory := filepath.Join(root, packagesDirectory)
+	if err := pathguard.ValidateComponents(directory, false); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return []string{"unable to trust superseded package directory: " + err.Error()}
+	}
 	entries, err := os.ReadDir(directory)
 	if os.IsNotExist(err) {
 		return nil
@@ -844,7 +1005,8 @@ func prunePackageSlots(root string, state InstallationState) []string {
 		if keep[entry.Name()] {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(directory, entry.Name())); err != nil {
+		candidate := filepath.Join(directory, entry.Name())
+		if err := removeOwnedSubtree(root, candidate); err != nil {
 			warnings = append(warnings, "superseded package remains for later cleanup: "+entry.Name())
 		}
 	}
@@ -852,33 +1014,153 @@ func prunePackageSlots(root string, state InstallationState) []string {
 	return warnings
 }
 
-func purgePaths(paths []string, installRoot string, result *LifecycleResult) error {
-	for _, value := range paths {
-		path, err := safePurgePath(value, installRoot)
+func preparePurgeTargets(request UninstallRequest, installRoot, ownerID string) ([]PurgeTarget, error) {
+	dataTargets := make([]PurgeTarget, 0, len(request.PurgeDataRoots))
+	for _, value := range request.PurgeDataRoots {
+		target, err := validatePurgeDataRoot(value, installRoot, ownerID)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("purge user data %s: %w", path, err)
+		duplicate := false
+		for index := 0; index < len(dataTargets); index++ {
+			existing := dataTargets[index]
+			if samePath(existing.Path, target.Path) || pathWithin(existing.Path, target.Path) {
+				duplicate = true
+				break
+			}
+			if pathWithin(target.Path, existing.Path) {
+				dataTargets = append(dataTargets[:index], dataTargets[index+1:]...)
+				index--
+			}
 		}
-		result.PurgedPaths = append(result.PurgedPaths, path)
+		if !duplicate {
+			dataTargets = append(dataTargets, target)
+		}
 	}
-	return nil
+	sort.Slice(dataTargets, func(left, right int) bool {
+		return strings.ToLower(dataTargets[left].Path) < strings.ToLower(dataTargets[right].Path)
+	})
+
+	configTargets := make([]PurgeTarget, 0, len(request.PurgeConfigFiles))
+	for _, value := range request.PurgeConfigFiles {
+		target, err := validatePurgeConfigFile(value, installRoot)
+		if err != nil {
+			return nil, err
+		}
+		covered := false
+		for _, data := range dataTargets {
+			if pathWithin(data.Path, target.Path) {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		for _, existing := range configTargets {
+			if samePath(existing.Path, target.Path) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			configTargets = append(configTargets, target)
+		}
+	}
+	sort.Slice(configTargets, func(left, right int) bool {
+		return strings.ToLower(configTargets[left].Path) < strings.ToLower(configTargets[right].Path)
+	})
+	return append(configTargets, dataTargets...), nil
 }
 
-func safePurgePath(value, installRoot string) (string, error) {
-	path, err := filepath.Abs(strings.TrimSpace(value))
-	if err != nil || strings.TrimSpace(value) == "" {
-		return "", errors.New("purge path must be an absolute product data directory")
+func validatePurgeConfigFile(value, installRoot string) (PurgeTarget, error) {
+	path, err := pathguard.CleanAbsolute(value)
+	if err != nil {
+		return PurgeTarget{}, fmt.Errorf("purge configuration file: %w", err)
 	}
-	path = filepath.Clean(path)
-	if samePath(path, filepath.VolumeName(path)+string(os.PathSeparator)) || samePath(path, installRoot) || pathWithin(path, installRoot) || pathWithin(installRoot, path) {
-		return "", errors.New("purge path overlaps the installation root or a filesystem root")
+	if samePath(path, installRoot) || pathWithin(installRoot, path) {
+		return PurgeTarget{}, errors.New("purge configuration file overlaps the installation root")
 	}
-	if !strings.EqualFold(filepath.Base(path), productidentity.ConfigDirectory) {
-		return "", fmt.Errorf("purge path %s is not the product data directory", path)
+	if err := pathguard.ValidateComponents(path, true); err != nil {
+		return PurgeTarget{}, fmt.Errorf("purge configuration file %s: %w", path, err)
 	}
-	return path, nil
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return PurgeTarget{Kind: "config-file", Path: path}, nil
+	}
+	if err != nil {
+		return PurgeTarget{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return PurgeTarget{}, errors.New("purge configuration target is not a regular file")
+	}
+	return PurgeTarget{Kind: "config-file", Path: path, Exists: true}, nil
+}
+
+func validatePurgeDataRoot(value, installRoot, ownerID string) (PurgeTarget, error) {
+	path, err := pathguard.CleanAbsolute(value)
+	if err != nil {
+		return PurgeTarget{}, fmt.Errorf("purge data root: %w", err)
+	}
+	volumeRoot := filepath.VolumeName(path) + string(os.PathSeparator)
+	if samePath(path, volumeRoot) || filepath.Dir(path) == path || samePath(path, installRoot) ||
+		pathWithin(path, installRoot) || pathWithin(installRoot, path) {
+		return PurgeTarget{}, errors.New("purge data root overlaps the installation root or a filesystem root")
+	}
+	if err := pathguard.ValidateComponents(path, true); err != nil {
+		return PurgeTarget{}, fmt.Errorf("purge data root %s: %w", path, err)
+	}
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return PurgeTarget{Kind: "data-root", Path: path}, nil
+	}
+	if err != nil {
+		return PurgeTarget{}, err
+	}
+	if !info.IsDir() {
+		return PurgeTarget{}, errors.New("purge data root is not a directory")
+	}
+	if err := pathguard.ValidateTree(path); err != nil {
+		return PurgeTarget{}, fmt.Errorf("purge data root %s: %w", path, err)
+	}
+	if err := ownedstorage.VerifyFor(path, ownerID); err != nil {
+		return PurgeTarget{}, fmt.Errorf("purge data root %s: %w", path, err)
+	}
+	return PurgeTarget{Kind: "data-root", Path: path, Exists: true}, nil
+}
+
+func executePurgeTargets(targets []PurgeTarget, installRoot, ownerID string, result *LifecycleResult) error {
+	for _, target := range targets {
+		switch target.Kind {
+		case "config-file":
+			validated, err := validatePurgeConfigFile(target.Path, installRoot)
+			if err != nil {
+				return err
+			}
+			if !validated.Exists {
+				continue
+			}
+			if err := os.Remove(validated.Path); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("purge configuration file %s: %w", validated.Path, err)
+			}
+			result.PurgedPaths = append(result.PurgedPaths, validated.Path)
+		case "data-root":
+			validated, err := validatePurgeDataRoot(target.Path, installRoot, ownerID)
+			if err != nil {
+				return err
+			}
+			if !validated.Exists {
+				continue
+			}
+			if err := removeTreeSecure(validated.Path); err != nil {
+				return fmt.Errorf("purge user data %s: %w", validated.Path, err)
+			}
+			result.PurgedPaths = append(result.PurgedPaths, validated.Path)
+		default:
+			return fmt.Errorf("unsupported purge target kind %q", target.Kind)
+		}
+	}
+	return nil
 }
 
 func safeInstallRoot(value string) (string, error) {
@@ -889,11 +1171,10 @@ func safeInstallRoot(value string) (string, error) {
 			return "", err
 		}
 	}
-	root, err := filepath.Abs(strings.TrimSpace(value))
+	root, err := pathguard.CleanAbsolute(value)
 	if err != nil {
 		return "", err
 	}
-	root = filepath.Clean(root)
 	volumeRoot := filepath.VolumeName(root) + string(os.PathSeparator)
 	if samePath(root, volumeRoot) || filepath.Dir(root) == root {
 		return "", errors.New("installation root must not be a filesystem root")
@@ -917,7 +1198,10 @@ func writeJSONAtomic(path string, value any, mode os.FileMode) error {
 }
 
 func writeFileAtomic(path string, content []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := pathguard.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if err := pathguard.ValidateComponents(path, true); err != nil {
 		return err
 	}
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".install-state-*.tmp")
@@ -948,5 +1232,54 @@ func writeFileAtomic(path string, content []byte, mode os.FileMode) error {
 		return err
 	}
 	cleanup = false
-	return nil
+	return pathguard.ValidateComponents(path, false)
+}
+
+func removeOwnedSubtree(root, target string) error {
+	root, err := pathguard.CleanAbsolute(root)
+	if err != nil {
+		return err
+	}
+	target, err = pathguard.CleanAbsolute(target)
+	if err != nil {
+		return err
+	}
+	if samePath(root, target) || !pathWithin(root, target) {
+		return errors.New("recursive removal target is outside the owned root")
+	}
+	if err := pathguard.ValidateComponents(root, false); err != nil {
+		return err
+	}
+	return removeTreeSecure(target)
+}
+
+func removeTreeSecure(path string) error {
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if err := pathguard.ValidateTree(path); err != nil {
+		return err
+	}
+	return os.RemoveAll(path)
+}
+
+func publishDirectory(source, target string) error {
+	if err := pathguard.ValidateTree(source); err != nil {
+		return err
+	}
+	if err := pathguard.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return err
+	}
+	if err := pathguard.ValidateComponents(target, true); err != nil {
+		return err
+	}
+	if err := os.Rename(source, target); err != nil {
+		return err
+	}
+	if err := pathguard.ValidateComponents(target, false); err != nil {
+		return err
+	}
+	return pathguard.ValidateTree(target)
 }
