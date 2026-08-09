@@ -319,7 +319,7 @@ func firmwareTopLevelSourceFiles(root string) ([]string, error) {
 
 func firmwareSourceExtension(extension string) bool {
 	switch strings.ToLower(extension) {
-	case ".ino", ".h", ".hpp", ".c", ".cpp":
+	case ".ino", ".h", ".hpp", ".c", ".cpp", ".def":
 		return true
 	default:
 		return false
