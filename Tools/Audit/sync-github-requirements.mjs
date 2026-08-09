@@ -1056,6 +1056,7 @@ const PR_ORIGINAL_REQUESTS = {
   127: [PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.canonicalContracts, PROMPT_EXCERPTS.surfaceParity],
   128: [PROMPT_EXCERPTS.wikiStyling, PROMPT_EXCERPTS.repositoryMap],
   129: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
+  130: [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.serviceTray, PROMPT_EXCERPTS.releaseHandoff],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
