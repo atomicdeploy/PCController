@@ -22,6 +22,19 @@ type linuxEnumerator struct {
 
 const maxLinuxPID = uint32(1<<31 - 1)
 
+type linuxSerialDirectory uint8
+
+const (
+	linuxSerialDirectoryDev linuxSerialDirectory = iota + 1
+	linuxSerialDirectoryByID
+	linuxSerialDirectoryByPath
+)
+
+type linuxFileIdentity struct {
+	device uint64
+	inode  uint64
+}
+
 func systemEnumerator() Enumerator { return linuxEnumerator{procRoot: "/proc"} }
 
 func isAccessDenied(cause error) bool {
@@ -59,42 +72,67 @@ func linuxSerialPath(value string) (string, error) {
 // Linux serial directories plus a single entry name. The user-provided path is
 // used only for equality against names returned by ReadDir; it is never passed
 // to a filesystem operation.
-func linuxSerialDirectoryEntry(path string) (string, string, error) {
+func linuxSerialDirectoryEntry(path string) (linuxSerialDirectory, string, error) {
 	relative, err := filepath.Rel("/dev", path)
 	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
-		return "", "", errors.New("serial-owner lookup is restricted to /dev")
+		return 0, "", errors.New("serial-owner lookup is restricted to /dev")
 	}
 	parts := strings.Split(relative, string(os.PathSeparator))
 	if len(parts) == 1 && (strings.HasPrefix(parts[0], "tty") || strings.HasPrefix(parts[0], "rfcomm")) {
-		return "/dev", parts[0], nil
+		return linuxSerialDirectoryDev, parts[0], nil
 	}
 	if len(parts) == 3 && parts[0] == "serial" &&
 		(parts[1] == "by-id" || parts[1] == "by-path") && parts[2] != "" {
-		return filepath.Join("/dev", "serial", parts[1]), parts[2], nil
+		if parts[1] == "by-id" {
+			return linuxSerialDirectoryByID, parts[2], nil
+		}
+		return linuxSerialDirectoryByPath, parts[2], nil
 	}
-	return "", "", fmt.Errorf("%s is not a recognized Linux serial-device path", path)
+	return 0, "", fmt.Errorf("%s is not a recognized Linux serial-device path", path)
 }
 
-func statLinuxSerialTarget(path string) (os.FileInfo, error) {
+func openLinuxSerialDirectory(directory linuxSerialDirectory) (*os.File, error) {
+	switch directory {
+	case linuxSerialDirectoryDev:
+		return os.Open("/dev")
+	case linuxSerialDirectoryByID:
+		return os.Open("/dev/serial/by-id")
+	case linuxSerialDirectoryByPath:
+		return os.Open("/dev/serial/by-path")
+	default:
+		return nil, errors.New("unrecognized Linux serial directory")
+	}
+}
+
+func statLinuxSerialTarget(path string) (identity linuxFileIdentity, resultErr error) {
 	directory, name, err := linuxSerialDirectoryEntry(path)
 	if err != nil {
-		return nil, err
+		return linuxFileIdentity{}, err
 	}
-	entries, err := os.ReadDir(directory)
+	directoryFile, err := openLinuxSerialDirectory(directory)
 	if err != nil {
-		return nil, err
+		return linuxFileIdentity{}, err
+	}
+	defer func() {
+		if closeErr := directoryFile.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close Linux serial directory: %w", closeErr))
+		}
+	}()
+	entries, err := directoryFile.ReadDir(-1)
+	if err != nil {
+		return linuxFileIdentity{}, err
 	}
 	for _, entry := range entries {
 		if entry.Name() != name {
 			continue
 		}
-		info, statErr := os.Stat(filepath.Join(directory, entry.Name()))
-		if statErr != nil {
-			return nil, statErr
+		var stat unix.Stat_t
+		if statErr := unix.Fstatat(int(directoryFile.Fd()), entry.Name(), &stat, 0); statErr != nil {
+			return linuxFileIdentity{}, statErr
 		}
-		return info, nil
+		return linuxFileIdentity{device: uint64(stat.Dev), inode: uint64(stat.Ino)}, nil
 	}
-	return nil, os.ErrNotExist
+	return linuxFileIdentity{}, os.ErrNotExist
 }
 
 func (enumerator linuxEnumerator) FindOwner(ctx context.Context, port string) (Owner, bool, error) {
@@ -113,14 +151,30 @@ func (enumerator linuxEnumerator) FindOwner(ctx context.Context, port string) (O
 }
 
 func findLinuxOwner(ctx context.Context, procRoot, target string) (Owner, bool, error) {
-	targetInfo, err := statLinuxSerialTarget(target)
+	targetIdentity, err := statLinuxSerialTarget(target)
 	if err != nil {
 		return Owner{}, false, fmt.Errorf("inspect serial device %s: %w", target, err)
 	}
-	return findLinuxOwnerByFileInfo(ctx, procRoot, targetInfo)
+	return findLinuxOwnerByIdentity(ctx, procRoot, targetIdentity)
 }
 
 func findLinuxOwnerByFileInfo(ctx context.Context, procRoot string, targetInfo os.FileInfo) (Owner, bool, error) {
+	targetIdentity, err := linuxIdentityFromFileInfo(targetInfo)
+	if err != nil {
+		return Owner{}, false, err
+	}
+	return findLinuxOwnerByIdentity(ctx, procRoot, targetIdentity)
+}
+
+func linuxIdentityFromFileInfo(info os.FileInfo) (linuxFileIdentity, error) {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return linuxFileIdentity{}, errors.New("Linux file information has no device/inode identity")
+	}
+	return linuxFileIdentity{device: uint64(stat.Dev), inode: uint64(stat.Ino)}, nil
+}
+
+func findLinuxOwnerByIdentity(ctx context.Context, procRoot string, targetIdentity linuxFileIdentity) (Owner, bool, error) {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
 		return Owner{}, false, fmt.Errorf("enumerate Linux processes: %w", err)
@@ -144,7 +198,11 @@ func findLinuxOwnerByFileInfo(ctx context.Context, procRoot string, targetInfo o
 		}
 		for _, fd := range fds {
 			fdInfo, statErr := os.Stat(filepath.Join(procRoot, pidText, "fd", fd.Name()))
-			if statErr != nil || !os.SameFile(targetInfo, fdInfo) {
+			if statErr != nil {
+				continue
+			}
+			fdIdentity, identityErr := linuxIdentityFromFileInfo(fdInfo)
+			if identityErr != nil || fdIdentity != targetIdentity {
 				continue
 			}
 			return linuxOwner(procRoot, pid), true, nil
