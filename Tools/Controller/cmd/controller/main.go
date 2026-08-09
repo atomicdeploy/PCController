@@ -25,6 +25,7 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/installer"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/nativeshell"
 	"pccontroller.local/controller/internal/netpolicy"
@@ -53,6 +54,17 @@ func main() {
 	if err := netpolicy.EnsureProcessLocalNetworkNoProxy(); err != nil {
 		fmt.Fprintln(os.Stderr, "network proxy bypass policy:", err)
 		os.Exit(1)
+	}
+	if installer.IsUninstallHelperInvocation(os.Args[1:]) {
+		service, err := newInstallerService("")
+		if err == nil {
+			err = installer.RunExternalUninstallHelper(context.Background(), os.Args[2], service)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "uninstall helper:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	if pcspeaker.IsHelperInvocation(os.Args[1:]) {
 		if err := pcspeaker.RunHelperInvocation(context.Background(), os.Args[2:], os.Stderr); err != nil {
@@ -133,6 +145,20 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runFirmwareArtifact(args[1:], stdout, stderr)
 	case "driver":
 		return runDriver(args[1:], stdout, stderr)
+	case "package":
+		return runPackageLifecycle(args[1:], stdout, stderr)
+	case "install", "repair":
+		return runInstallLifecycle(
+			strings.ToLower(args[0]), args[1:], stdout, stderr,
+			configuredProductTitle(configPath, presentation.AppName),
+		)
+	case "installation":
+		return runInstallationStatus(args[1:], stdout, stderr)
+	case "uninstall":
+		return runUninstallLifecycle(
+			args[1:], stdout, stderr, configPath,
+			configuredProductTitle(configPath, presentation.AppName),
+		)
 	}
 	if isConfigMaintenance(args) {
 		return runConfigMaintenance(args, configPath, stdout)

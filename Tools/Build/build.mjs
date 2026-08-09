@@ -440,7 +440,13 @@ export function createPlan(options, identity, platform = process.platform) {
 			'-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controllerlib'
 		], HOST_ROOT))
 		actions.push({ id: 'licenses', stage: 'Collect project and Go-module notices', hardware: false })
-		actions.push({ id: 'host-manifest', stage: 'Publish canonical host package and manifest', hardware: false })
+		actions.push({ id: 'host-manifest', stage: 'Write canonical host package manifest', hardware: false })
+		if (platform === 'win32') actions.push({
+			id: 'installation-inventory',
+			stage: 'Generate hash-bound per-user installation inventory',
+			hardware: false
+		})
+		actions.push({ id: 'host-publish', stage: 'Publish canonical host package', hardware: false })
 	}
 	if (!options.cleanOnly && options.installBootloader) {
 		const command = createControllerProgramCommand({
@@ -1777,6 +1783,13 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		artifacts
 	}
 	atomicWriteJSON(join(stage, 'host-manifest.json'), manifest)
+	if (process.platform === 'win32') {
+		log.stage('🔐', 'Generating hash-bound per-user installation inventory')
+		run(executable, [
+			'package', 'inventory', '--directory', stage,
+			'--output', join(stage, 'installation-package.json')
+		], { cwd: stage, env, verbose: options.verbose })
+	}
 	log.stage('📤', 'Publishing the canonical host package')
 	installPackage(stage)
 	removeGeneratedTree(stage)

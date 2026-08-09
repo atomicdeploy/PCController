@@ -185,6 +185,43 @@ foreign registrations or shortcuts:
 .\bin\controller.exe desktop uninstall
 ```
 
+### Per-user Windows installation lifecycle
+
+Windows packages include `installation-package.json`, a deterministic inventory
+that binds every installable file to its size and SHA-256, the exact host
+manifest, source identity, target architecture, executable, embedded WebUI, and
+verified Win32 resources. Installation copies only inventoried files into a
+content-addressed per-user slot; it never trusts an archive filename or loose
+shadow executable.
+
+From an extracted, verified package:
+
+```console
+controller.exe install --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe installation status
+controller.exe repair --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe uninstall
+```
+
+Install and update activation are journaled and recoverable. A healthy repeated
+install or repair is a no-op; a damaged slot is rebuilt from the verified
+package without replacing a mapped executable in place. One exact prior slot is
+retained for rollback. The per-user root carries a product-and-user ownership
+marker, and lifecycle commands refuse a foreign or unmarked non-empty root.
+
+Uninstall preserves configuration, board backups, downloaded tools, logs, and
+host state. Purging them is a separate destructive choice that requires both
+flags and the exact confirmation shown by `controller help`:
+
+```console
+controller.exe uninstall --purge-data --confirm-purge PURGE-PC-CONTROLLER-USER-DATA
+```
+
+When uninstall is launched from the installed executable, a verified native
+helper continues only after the running process exits. URI/AUMID/shortcut work
+uses the existing direct native desktop adapter and the exact active executable;
+it does not invoke PowerShell or accept a shell-backed fallback.
+
 The UI includes live electrical/thermal graphs, relay and PWM controls, a
 peripheral workbench for displays, addressable LEDs, sound, RF, macros, I2C,
 host actions and recovery diagnostics, a typed local-device surface, a

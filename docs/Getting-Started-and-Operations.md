@@ -115,6 +115,33 @@ Tools\Controller\bin\controller.exe desktop ensure
 Tools\Controller\bin\controller.exe desktop uninstall
 ```
 
+For a durable per-user installation, use the extracted Windows package rather
+than copying `controller.exe` by itself. The release package carries a
+hash-bound inventory for the exact executable, embedded resources, host
+manifest, notices, and companion files:
+
+```console
+controller.exe install --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe installation status
+controller.exe repair --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe uninstall
+```
+
+Installation and repair use content-addressed slots and a recovery journal, so
+an update never overwrites the running image. Repair is idempotent when every
+installed digest is healthy and rebuilds a damaged slot only from a verified
+package. The default uninstall preserves both roaming configuration and local
+host data, including board backups. Data removal is deliberately separate:
+
+```console
+controller.exe uninstall --purge-data --confirm-purge PURGE-PC-CONTROLLER-USER-DATA
+```
+
+The exact confirmation is required in addition to `--purge-data`; neither flag
+is implied by uninstall. `--desktop` uses the direct native URI/AUMID/shortcut
+adapter with the exact installed executable. Unsupported platforms return an
+error rather than falling back to a shell script.
+
 The exact embedded WebUI can also be exported for audit or a trusted static
 host. The command never overwrites an existing archive:
 

@@ -1,8 +1,17 @@
 package hostui
 
+import (
+	"os"
+	"path/filepath"
+	"strings"
+)
+
 type DesktopIntegrationOptions struct {
 	AppID       string
 	DisplayName string
+	// Executable selects the exact owned host binary. Empty preserves the
+	// existing behavior and resolves the currently running executable.
+	Executable string
 }
 
 type DesktopIntegrationStatus struct {
@@ -40,4 +49,16 @@ func RemoveDesktopIntegration(
 	options DesktopIntegrationOptions,
 ) (DesktopIntegrationCleanupStatus, error) {
 	return removePlatformDesktopIntegration(options)
+}
+
+func resolveDesktopExecutable(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		var err error
+		value, err = os.Executable()
+		if err != nil {
+			return "", err
+		}
+	}
+	return filepath.Abs(value)
 }

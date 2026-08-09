@@ -819,6 +819,17 @@ test('Windows resources are patched after link and before UPX', () => {
 	assert.doesNotMatch(JSON.stringify(plan.actions), /go-winres[^}]*make|\.syso/i)
 })
 
+test('Windows installation inventory follows the final packed host manifest', () => {
+	const options = parseArguments(['--host-only'], {})
+	const windows = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	const ids = windows.actions.map(action => action.id)
+	assert.ok(ids.indexOf('upx-test') < ids.indexOf('host-manifest'))
+	assert.ok(ids.indexOf('host-manifest') < ids.indexOf('installation-inventory'))
+	assert.ok(ids.indexOf('installation-inventory') < ids.indexOf('host-publish'))
+	const linux = createPlan(options, resolveBuildIdentity(options, {}), 'linux')
+	assert.equal(linux.actions.some(action => action.id === 'installation-inventory'), false)
+})
+
 test('Win32 resource configuration retains icon, manifest, and version data', async () => {
 	const source = await readFile(
 		join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'winres.json'),

@@ -123,6 +123,14 @@ Check all three identities before deployment:
 - release/version metadata inside the package;
 - SHA-256 in the sidecar and package manifest.
 
+Windows host packages also contain `installation-package.json`. Its canonical
+root digest binds the target architecture, source/build identity, host manifest,
+verified native resources, embedded WebUI, executable, and every installable
+companion file. `controller.exe install` and `repair` verify that inventory
+again while copying and after publishing the content-addressed slot. Supplying
+the displayed root digest with `--expected-package-sha256` adds an explicit
+operator check against package substitution after extraction.
+
 An attestation does not replace a signature from a trusted platform publisher,
 and it does not authorize hardware programming.
 
