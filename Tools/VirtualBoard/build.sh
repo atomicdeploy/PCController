@@ -59,7 +59,11 @@ command -v "$cxx" >/dev/null || { printf '%s is required in PATH\n' "$cxx" >&2; 
 triplet=$("$cxx" -dumpmachine)
 compiler_display=$(command -v "$cxx")
 compiler_path=$compiler_display
-if [[ "$triplet" == *msys* ]] && command -v cygpath >/dev/null; then
+if [[ -n "${MSYSTEM:-}" ]]; then
+    # Native Windows CMake cannot resolve Git Bash's virtual compiler path.
+    # Keep the command name so CMake resolves the same executable through PATH.
+    compiler_path=$cxx
+elif [[ "$triplet" == *msys* ]] && command -v cygpath >/dev/null; then
     [[ -x "${compiler_path}.exe" ]] && compiler_path="${compiler_path}.exe"
     compiler_path=$(cygpath -m "$compiler_path")
 fi
