@@ -17,25 +17,29 @@ import (
 )
 
 type fakeProgrammingDevice struct {
-	snapshot      Snapshot
-	settings      native.Settings
-	queryErr      error
-	storeErr      error
-	panelErr      error
-	lcdErr        error
-	stores        []native.Settings
-	panelShown    int
-	panelReleased int
-	lcdLines      [][2]string
-	safeCalls     int
-	liveState     ProgrammingLiveState
-	liveErr       error
-	rampErr       error
-	restoreErr    error
-	restoredLive  *ProgrammingLiveState
-	calls         []string
-	phases        []string
-	melodies      []string
+	snapshot            Snapshot
+	settings            native.Settings
+	storePending        bool
+	queriesSinceStore   int
+	persistAfterQueries int
+	neverPersist        bool
+	queryErr            error
+	storeErr            error
+	panelErr            error
+	lcdErr              error
+	stores              []native.Settings
+	panelShown          int
+	panelReleased       int
+	lcdLines            [][2]string
+	safeCalls           int
+	liveState           ProgrammingLiveState
+	liveErr             error
+	rampErr             error
+	restoreErr          error
+	restoredLive        *ProgrammingLiveState
+	calls               []string
+	phases              []string
+	melodies            []string
 }
 
 func (device *fakeProgrammingDevice) EnterSafeProgrammingState(context.Context) error {
@@ -51,7 +55,13 @@ func (device *fakeProgrammingDevice) QuerySettings(context.Context) (native.Sett
 	if device.queryErr != nil {
 		return native.Settings{}, device.queryErr
 	}
-	return device.settings, nil
+	settings := device.settings
+	if device.storePending {
+		device.queriesSinceStore++
+		settings.Persisted = !device.neverPersist &&
+			device.queriesSinceStore > device.persistAfterQueries
+	}
+	return settings, nil
 }
 
 func (device *fakeProgrammingDevice) StoreSettings(
@@ -62,9 +72,55 @@ func (device *fakeProgrammingDevice) StoreSettings(
 		return device.storeErr
 	}
 	device.settings = settings
+	device.storePending = true
+	device.queriesSinceStore = 0
 	device.stores = append(device.stores, settings)
 	device.calls = append(device.calls, "settings-store")
 	return nil
+}
+
+func TestProgrammingSettingsACKWaitsForDurablePersistedResponse(t *testing.T) {
+	device := &fakeProgrammingDevice{persistAfterQueries: 3}
+	expected := native.DefaultSettings()
+	waits := 0
+	err := storeAndVerifyProgrammingSettings(
+		context.Background(), device, expected,
+		ProgrammingLifecycleOptions{
+			PersistenceDelay:        20 * time.Millisecond,
+			PersistencePollInterval: 5 * time.Millisecond,
+			Wait: func(context.Context, time.Duration) error {
+				waits++
+				return nil
+			},
+		},
+		"persist programming settings",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if device.queriesSinceStore != 4 || waits != 3 {
+		t.Fatalf(
+			"durability polling queries=%d waits=%d, want 4/3",
+			device.queriesSinceStore, waits,
+		)
+	}
+}
+
+func TestProgrammingSettingsACKWithoutPersistenceRetainsRecoveryMarker(t *testing.T) {
+	device := &fakeProgrammingDevice{neverPersist: true}
+	err := storeAndVerifyProgrammingSettings(
+		context.Background(), device, native.DefaultSettings(),
+		ProgrammingLifecycleOptions{
+			PersistenceDelay:        2 * time.Millisecond,
+			PersistencePollInterval: time.Millisecond,
+			Wait:                    noProgrammingWait,
+		},
+		"persist programming settings",
+	)
+	if err == nil || !strings.Contains(err.Error(), "accepted but never reported durable") ||
+		!strings.Contains(err.Error(), "recovery marker retained") {
+		t.Fatalf("non-durable ACK was accepted: %v", err)
+	}
 }
 
 func (device *fakeProgrammingDevice) CaptureLiveState(context.Context) (ProgrammingLiveState, error) {
@@ -153,7 +209,7 @@ func TestProgrammingLifecycleSnapshotsMutesWaitsRestoresAndVerifies(t *testing.T
 		snapshot: connectedProgrammingSnapshot(
 			native.CapabilityHostFrontPanel | native.CapabilityI2CTransfer,
 		),
-		settings: original,
+		settings: original, persistAfterQueries: 1,
 	}
 	var waits []time.Duration
 	options := ProgrammingLifecycleOptions{
@@ -178,13 +234,13 @@ func TestProgrammingLifecycleSnapshotsMutesWaitsRestoresAndVerifies(t *testing.T
 		device.safeCalls != 0 || device.panelShown != 1 || len(device.lcdLines) != 1 {
 		t.Fatalf("preparation session=%+v device=%+v", session, device)
 	}
-	if len(waits) != 1 || waits[0] != ProgrammingSettingsPersistenceDelay {
+	if len(waits) != 1 || waits[0] != ProgrammingSettingsPollInterval {
 		t.Fatalf("preparation waits=%v", waits)
 	}
 	wantOrder := []string{
 		"settings-query", "capture-live", "macro-cancel", "relays-off",
 		"pwm-ramp", "programming-cue", "panel-show", "lcd",
-		"power-down-melody", "settings-store", "settings-query",
+		"power-down-melody", "settings-store", "settings-query", "settings-query",
 	}
 	if strings.Join(device.calls, ",") != strings.Join(wantOrder, ",") {
 		t.Fatalf("unsafe programming preparation order:\n got %v\nwant %v", device.calls, wantOrder)

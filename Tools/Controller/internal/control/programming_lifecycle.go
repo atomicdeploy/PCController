@@ -23,9 +23,11 @@ const (
 	programmingSnapshotFormat = "pccontroller.board-settings-snapshot"
 	programmingMarkerFormat   = "pccontroller.programming-recovery"
 
-	// SettingsStore defers EEPROM.update() calls for 1500 ms. The host waits
-	// beyond that window before deliberately resetting into the bootloader.
+	// SettingsStore may defer and then cooperatively write EEPROM. An ACK only
+	// means accepted, so the host polls the SETTINGS persisted bit throughout
+	// this bounded window before deliberately resetting into the bootloader.
 	ProgrammingSettingsPersistenceDelay = 1700 * time.Millisecond
+	ProgrammingSettingsPollInterval     = 50 * time.Millisecond
 	programmingRampSteps                = 8
 	programmingRampStepDelay            = 25 * time.Millisecond
 )
@@ -33,11 +35,12 @@ const (
 // ProgrammingLifecycleOptions keeps MCU EEPROM recovery artifacts under the
 // host data directory; these are board backups, never PC application config.
 type ProgrammingLifecycleOptions struct {
-	DataPaths        programmer.HostDataPaths
-	PersistenceDelay time.Duration
-	Wait             func(context.Context, time.Duration) error
-	Outputs          *OutputScheduler
-	HostConfig       func() appconfig.Config
+	DataPaths               programmer.HostDataPaths
+	PersistenceDelay        time.Duration
+	PersistencePollInterval time.Duration
+	Wait                    func(context.Context, time.Duration) error
+	Outputs                 *OutputScheduler
+	HostConfig              func() appconfig.Config
 	// ReinitializeEEPROM is an explicit alpha-layout migration. The raw backup
 	// remains mandatory, but only compatible semantic fields cross layouts.
 	ReinitializeEEPROM bool
@@ -1252,17 +1255,52 @@ func storeAndVerifyProgrammingSettings(
 	if err := device.StoreSettings(ctx, expected); err != nil {
 		return fmt.Errorf("%s (recovery marker retained): %w", operation, err)
 	}
-	if err := options.Wait(ctx, options.PersistenceDelay); err != nil {
-		return fmt.Errorf("wait to %s (recovery marker retained): %w", operation, err)
+	pollInterval := options.PersistencePollInterval
+	if pollInterval <= 0 {
+		pollInterval = ProgrammingSettingsPollInterval
 	}
-	confirmed, err := device.QuerySettings(ctx)
-	if err != nil {
-		return fmt.Errorf("verify %s (recovery marker retained): %w", operation, err)
+	persistenceWindow := options.PersistenceDelay
+	if persistenceWindow <= 0 {
+		persistenceWindow = ProgrammingSettingsPersistenceDelay
 	}
-	if confirmed != expected {
-		return fmt.Errorf("%s differs after read-back; recovery marker retained", operation)
+	wait := options.Wait
+	if wait == nil {
+		wait = waitProgrammingPersistence
 	}
-	return nil
+	attempts := int((persistenceWindow+pollInterval-1)/pollInterval) + 1
+	var last native.Settings
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		confirmed, err := device.QuerySettings(ctx)
+		if err == nil {
+			last = confirmed
+			lastErr = nil
+			if confirmed.Persisted && programmingSettingsEqual(confirmed, expected) {
+				return nil
+			}
+		} else {
+			lastErr = err
+		}
+		if attempt+1 == attempts {
+			break
+		}
+		if err := wait(ctx, pollInterval); err != nil {
+			return fmt.Errorf("wait to %s (recovery marker retained): %w", operation, err)
+		}
+	}
+	if lastErr != nil {
+		return fmt.Errorf("verify durable %s (recovery marker retained): %w", operation, lastErr)
+	}
+	if programmingSettingsEqual(last, expected) && !last.Persisted {
+		return fmt.Errorf("%s was accepted but never reported durable; recovery marker retained", operation)
+	}
+	return fmt.Errorf("%s differs after durable read-back; recovery marker retained", operation)
+}
+
+func programmingSettingsEqual(left, right native.Settings) bool {
+	left.Persisted = false
+	right.Persisted = false
+	return left == right
 }
 
 func normalizeProgrammingLifecycleOptions(
@@ -1280,6 +1318,9 @@ func normalizeProgrammingLifecycleOptions(
 	}
 	if options.PersistenceDelay <= 0 {
 		options.PersistenceDelay = ProgrammingSettingsPersistenceDelay
+	}
+	if options.PersistencePollInterval <= 0 {
+		options.PersistencePollInterval = ProgrammingSettingsPollInterval
 	}
 	if options.Wait == nil {
 		options.Wait = waitProgrammingPersistence
