@@ -150,6 +150,7 @@ func TestBoardRecordingStatusAutoStartsProvisionalHostMacro(t *testing.T) {
 	)
 	runtime.publishMacroStatus(native.MacroStatus{
 		Schema: native.MacroQueueSchema, State: native.MacroRecording, ID: 7,
+		StartedAtUS: 1000,
 	})
 	state := runner.RecordingState()
 	if !state.Active || !state.BoardOwned || state.BoardID != 7 ||
@@ -159,10 +160,25 @@ func TestBoardRecordingStatusAutoStartsProvisionalHostMacro(t *testing.T) {
 	runtime.publishActionEvidence(ActionEvidence{
 		Opcode: native.OpRelaySide, Payload: []byte{1, 2},
 		Source: native.InputSourcePhysical, BoardOrigin: true,
-		DeviceMicros: 50, Timed: true,
+		DeviceMicros: 1100, Timed: true,
 	})
 	if state = runner.RecordingState(); state.Steps != 1 || state.PanelSteps != 1 {
 		t.Fatalf("board action was not captured: %#v", state)
+	}
+	runner.recordMu.RLock()
+	live := append([]appconfig.MacroStep(nil), runner.recordMacro.Steps...)
+	runner.recordMu.RUnlock()
+	recoveredRecord, err := native.EncodeMacroRecord(100, native.OpRelaySide, []byte{1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := decodeMacroCaptureStream(recoveredRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := mergeRecordedMacroSteps(live, recovered)
+	if len(merged) != 1 || merged[0].AtUS != 100 {
+		t.Fatalf("live and recovered board-relative step did not deduplicate: %#v", merged)
 	}
 	if _, err := runner.StopRecording(false); err != nil {
 		t.Fatal(err)
