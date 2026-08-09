@@ -114,6 +114,7 @@ const EXTRA_ISSUE_REQUIRED_LABELS = {
   131: ['🖥️ host', '💾 storage', '🧪 testing', '🔒 security'],
   134: ['📦 dependencies', '🏗️ tooling-build'],
   135: ['🖥️ host', '🧪 testing', '🏗️ tooling-build', '🔍 needs-hardware'],
+  137: ['🖥️ host', '🛡️ safety', '🧪 testing', '🏗️ tooling-build', '📦 dependencies'],
 };
 
 function requirement(id, parent, title, state, labels, section, criteria, evidence) {
@@ -1026,6 +1027,7 @@ const EXTRA_ISSUE_ORIGINAL_REQUESTS = {
   131: [PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.trackerReconciliation],
   134: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
   135: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.serviceTray],
+  137: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.serviceTray],
 };
 
 const PR_ORIGINAL_REQUESTS = {
@@ -1066,6 +1068,8 @@ const PR_ORIGINAL_REQUESTS = {
   130: [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.serviceTray, PROMPT_EXCERPTS.releaseHandoff],
   132: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.serviceTray],
   133: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.toolingEntrypoint],
+  136: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies, PROMPT_EXCERPTS.proxyPolicy],
+  138: [PROMPT_EXCERPTS.httpMessages, PROMPT_EXCERPTS.remoteSecurity],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
