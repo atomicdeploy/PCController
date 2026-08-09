@@ -115,6 +115,7 @@ const EXTRA_ISSUE_REQUIRED_LABELS = {
   134: ['📦 dependencies', '🏗️ tooling-build'],
   135: ['🖥️ host', '🧪 testing', '🏗️ tooling-build', '🔍 needs-hardware'],
   137: ['🖥️ host', '🛡️ safety', '🧪 testing', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
+  139: ['🖥️ host', '🛡️ safety', '🧪 testing', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
 };
 
 // Supplemental issues retain their independently authored bodies, but a small
@@ -1034,6 +1035,7 @@ const EXTRA_ISSUE_ORIGINAL_REQUESTS = {
   134: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
   135: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.serviceTray],
   137: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.serviceTray],
+  139: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy],
 };
 
 const PR_ORIGINAL_REQUESTS = {
@@ -1076,6 +1078,7 @@ const PR_ORIGINAL_REQUESTS = {
   133: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.toolingEntrypoint],
   136: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies, PROMPT_EXCERPTS.proxyPolicy],
   138: [PROMPT_EXCERPTS.httpMessages, PROMPT_EXCERPTS.remoteSecurity],
+  140: [PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
