@@ -306,6 +306,7 @@ Release archives add the version and include SHA-256 metadata. Follow
 | Guide | Use it for |
 |---|---|
 | [Documentation hub](docs/README.md) | Reading order and all maintained references |
+| [Repository and File Map](docs/Repository-Map.md) | First-contributor map of code, assets, tests, tooling, generated files, and runtime state |
 | [Getting Started and Operations](docs/Getting-Started-and-Operations.md) | First connection, WebUI/TUI/CLI operation, RF, automation, and troubleshooting |
 | [Front Panel and Menus](docs/Front-Panel-and-Menus.md) | Physical controls, editors, display semantics, and hosted menus |
 | [Host Configuration and Integrations](docs/Host-Configuration-and-Integrations.md) | JSON configuration, hotkeys, notifications, discovery, local devices, webhooks, and bridges |
@@ -319,6 +320,10 @@ Release archives add the version and include SHA-256 metadata. Follow
 | [Project Acceptance](docs/Project-Checklist.md) | Current acceptance gates and intentionally unverified hardware work |
 
 ## 🤝 Contributing
+
+Start with the [Repository and File Map](docs/Repository-Map.md). It identifies
+the authoritative file for each domain, the tests and documentation that move
+with it, and generated/runtime paths that must not be edited or committed.
 
 Keep changes inside the shared architecture: one device protocol, one command
 dispatcher, one product identity, and one safety policy. A new feature should

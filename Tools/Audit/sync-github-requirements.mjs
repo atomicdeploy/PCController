@@ -16,6 +16,7 @@ const REPO_URL = repositoryWebUrl(REPO, process.env);
 const OUTPUT = resolve(ROOT, 'docs', 'Requirements-Backlog.md');
 
 const EXPECTED_LABEL_COLORS = {
+  '🧭 epic': '5319E7',
   '🔥 priority: critical': 'B60205',
   '⚡ priority: high': 'D93F0B',
   '🖥️ host': '1D76DB',
@@ -41,6 +42,28 @@ const EXPECTED_LABEL_COLORS = {
   '💡 enhancement': 'A2EEEF',
 };
 
+// Domain labels are the Kanban grouping contract. Priority, workflow, evidence,
+// and regression labels are useful metadata, but they never substitute for an
+// owning product or engineering domain.
+const DOMAIN_LABELS = new Set([
+  '🖥️ host',
+  '🧩 firmware',
+  '🎛️ front-panel',
+  '📡 rf-433',
+  '🔌 protocol-api',
+  '💾 storage',
+  '🚀 programming',
+  '🛡️ safety',
+  '🧪 testing',
+  '🏗️ tooling-build',
+  '📚 documentation',
+  '🔍 needs-hardware',
+  '🌐 networking',
+  '✨ ux',
+  '📦 dependencies',
+  '🔒 security',
+]);
+
 const EPICS = {
   1: '[Epic] Firmware architecture, flash budget, EEPROM, and reset safety',
   2: '[Epic] Board peripherals, sensors, displays, lighting, and audio',
@@ -55,6 +78,42 @@ const EPICS = {
   11: '[Epic] Build, dependencies, simulation, packaging, and developer tooling',
   12: '[Epic] Documentation, licensing, GitHub, and final code quality',
   13: '[Epic] Live hardware acceptance and release readiness',
+};
+
+const EPIC_LABELS = {
+  1: ['🧭 epic', '🔥 priority: critical', '🧩 firmware', '🛡️ safety'],
+  2: ['🧭 epic', '⚡ priority: high', '🧩 firmware', '🎛️ front-panel'],
+  3: ['🧭 epic', '🔥 priority: critical', '🧩 firmware', '🛡️ safety'],
+  4: ['🧭 epic', '⚡ priority: high', '🎛️ front-panel', '✨ ux'],
+  5: ['🧭 epic', '🧩 firmware', '🖥️ host', '📡 rf-433'],
+  6: ['🧭 epic', '🧩 firmware', '🖥️ host', '🔌 protocol-api'],
+  7: ['🧭 epic', '⚡ priority: high', '🖥️ host', '✨ ux'],
+  8: ['🧭 epic', '🔌 protocol-api', '🌐 networking', '🔒 security'],
+  9: ['🧭 epic', '🖥️ host', '🛡️ safety', '🌐 networking'],
+  10: ['🧭 epic', '🔥 priority: critical', '🛡️ safety', '💾 storage', '🚀 programming'],
+  11: ['🧭 epic', '🧪 testing', '🏗️ tooling-build', '📦 dependencies'],
+  12: ['🧭 epic', '📚 documentation', '⏳ finalization'],
+  13: ['🧭 epic', '🔥 priority: critical', '🧪 testing', '🔍 needs-hardware'],
+};
+
+// Supplemental issues are intentionally not body-owned by the normalized
+// requirement catalog. Their required domain labels are additive so human and
+// automation-managed workflow labels remain intact.
+const EXTRA_ISSUE_REQUIRED_LABELS = {
+  102: ['🔌 protocol-api', '📚 documentation', '✨ ux'],
+  103: ['🧩 firmware', '🔌 protocol-api', '🧪 testing', '🏗️ tooling-build'],
+  104: ['🖥️ host', '✨ ux'],
+  105: ['🖥️ host', '🧪 testing', '🔍 needs-hardware'],
+  106: ['🖥️ host', '🔌 protocol-api', '🧪 testing', '🏗️ tooling-build'],
+  107: ['🧩 firmware', '🖥️ host', '🎛️ front-panel', '🔌 protocol-api', '💾 storage'],
+  108: ['🖥️ host', '🔌 protocol-api', '🧪 testing', '🌐 networking', '✨ ux'],
+  109: ['🖥️ host', '🔌 protocol-api', '🧪 testing', '🌐 networking', '🔒 security'],
+  110: ['🖥️ host', '🚀 programming', '🧪 testing', '🏗️ tooling-build'],
+  112: ['🖥️ host', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
+  115: ['📦 dependencies', '🏗️ tooling-build'],
+  131: ['🖥️ host', '💾 storage', '🧪 testing', '🔒 security'],
+  134: ['📦 dependencies', '🏗️ tooling-build'],
+  135: ['🖥️ host', '🧪 testing', '🏗️ tooling-build', '🔍 needs-hardware'],
 };
 
 function requirement(id, parent, title, state, labels, section, criteria, evidence) {
@@ -315,6 +374,15 @@ const R = [
       'Make RF actions state-sensitive (Learn only while idle, Cancel only while learning), use View In rather than Radix, remove static UNMAPPED/USBasp/internal hints, and keep timer/single/one-shot duration visible.',
       'On a local interactive console, apply configured first-open columns/rows and expose safe controls for changing the current console size and font family/size; detect SSH and other remote terminals and report the operation as unavailable without mutating their display.',
     ], 'Source-level interaction gaps are closed: typed numeric modals isolate drafts, brightness maps to 0..100%, compact/expanded Charm tables share visible-width geometry, front-panel/menu/control mouse hit-tests derive from rendered rows, settings rows open the correct editor, tilde/arrow focus is isolated, and state-sensitive RF/actions avoid static internal hints. Local console sizing/font controls, settings interaction, validation, rollback, and SSH/RDP no-op behavior are source-tested; ConPTY is detected but still needs direct injected and packaged acceptance. Stable Go and Web regressions pass; packaged Windows first-open screenshot, click/wheel, and live-board feedback acceptance remains open.'),
+  requirement('ui-surface-capability-parity', 7, 'Generate and enforce declared capability parity across TUI, WebUI, native GUI, CLI, and APIs', 'open',
+    ['🖥️ host', '🔌 protocol-api', '🧪 testing', '✨ ux', '⏳ finalization', '💡 enhancement'], 'Host application, TUI, configuration, shell, IPC, and library', [
+      'Define one typed capability/page/action registry with stable IDs, domains, query-versus-mutation classification, schemas, connection/capability/policy requirements, event bindings, and availability reasons.',
+      'Declare the disposition of every capability on TUI, WebUI, native GUI/tray, CLI, REST/JSON-RPC/WebSocket, and bridge surfaces as implemented, intentionally not applicable, or pending with a linked issue.',
+      'Generate or adapt navigation, validation, help, API schemas, and availability metadata from the registry instead of repeating hand-maintained definitions in each controller.',
+      'Bring useful TUI-only board-menu, RF, programming, automation, and console workflows to WebUI/native surfaces where applicable, and expose WebUI-only data/device workspaces through equivalent TUI/native workflows.',
+      'Keep genuinely local console sizing/font operations explicitly local-only and never simulate unsupported behavior over SSH or a remote browser.',
+      'Add repository checks and golden tests that reject duplicate capability IDs, undeclared omissions, stale labels, incompatible schemas, or surface drift.',
+    ], 'The TUI currently declares ten pages, the WebUI eight top-level routes, and the native tray a smaller command set. Several capabilities are reachable only through differently grouped workspaces, while native Device/Data/Events and dedicated board workflows are absent. Availability, navigation, and validation metadata are repeated across the command engine, TUI, WebUI, native shell, and API schema layers. A canonical registry and automated parity gate do not yet exist.'),
   requirement('monitoring-format-history', 7, 'Improve monitoring presentation, adaptive units, subscriptions, graphs, and timeline', 'open',
     ['🖥️ host', '✨ ux', '💾 storage', '💡 enhancement'], 'TUI structure and interaction', [
       'Style grouped key/value monitoring and expand LED Temperature and BT Audio Temperature names/states.',
@@ -414,7 +482,7 @@ const R = [
       'Require explicit authenticated authority after discovery; discovery alone never grants control.',
     ], 'Correlated host-to-host JSON-RPC/Socket.IO calls, typed event forwarding without echo loops, mDNS/DNS-SD, and SSDP alive/byebye/search are source/test complete; an in-process two-host bridge passes. On 2026-08-08 David-PC directly reached the cafe-pc edge listener on TCP 8787 and received HTTP 200 from /api/ui-config; public-key-only SSH from David-PC also executed Codex on the edge host through a /24-scoped firewall rule. An authenticated two-controller bridge programming, disconnect/recovery, and VLAN pass remains open.'),
   requirement('network-artifact-import-export-sync', 8, 'Serve, fetch, import, export, and synchronize controller artifacts between hosts', 'open',
-    ['🖥️ host', '🔌 protocol-api', '🌐 networking', '🔒 security', '💾 storage', '🚀 programming', '💡 enhancement'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
+    ['🖥️ host', '🔌 protocol-api', '🌐 networking', '🔒 security', '💾 storage', '🚀 programming', '💡 enhancement', '🚧 in progress'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'On explicit request, let the primary serial owner capture and then serve verified current board flash and EEPROM; also serve any validated backup, staged firmware/bootloader/default image, and the exact running host executable by immutable SHA-256.',
       'Provide authenticated GET/HEAD byte-range downloads, portable manifests, CLI/TUI/WebUI export, and content-addressed deduplication without publishing local paths, credentials, incomplete captures, or mutable files.',
       'Fetch the same artifact classes from an authenticated remote Controller instance, validate type, bounds, digest, build identity, and target compatibility, then stage them inertly before any separately authorized import, restore, programming, or host update.',
@@ -432,7 +500,7 @@ const R = [
       'Use lossless JSON encoding and optional receiver-verifiable HMAC timestamp/nonce signatures; event text, quotes, and newlines must never corrupt a configured JSON payload.',
     ], 'Inbound HTTP, all requested outbound methods, standard WebSocket client/server roles, genuine Engine.IO-v4/Socket.IO, typed actionable messages, masking, correlation, bridge forwarding, and loopback delivery tests exist. Outbound delivery now uses an atomically persisted bounded queue with restart recovery, stable idempotency and per-attempt identities, timeout/backoff/jitter/Retry-After, deduplication, dead-letter inspection/replay/clear, shutdown drain, lossless JSON templating, optional timestamp/nonce HMAC, secret-free durable state, and redirect rejection. Packaged/live receiver commissioning remains open.'),
   requirement('remote-control-security', 8, 'Define security and policy gates for every remote and disruptive control path', 'open',
-    ['🔌 protocol-api', '🌐 networking', '🔒 security', '🛡️ safety', '🔥 priority: critical'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
+    ['🔌 protocol-api', '🌐 networking', '🔒 security', '🛡️ safety', '🔥 priority: critical', '🚧 in progress'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'Authenticate remote commands, subscriptions, toast actions, messages, bridges, and network APIs.',
       'Authorize operations by capability and route board commands through the same motion/programming safety guards.',
       'Keep disruptive OS actions and key injection disabled by default with explicit policy and confirmation.',
@@ -552,7 +620,7 @@ const R = [
       'On Windows, provision the latest compatible native MinGW-w64/Windows-GNU compiler for Go c-shared packaging when absent, forward the configured proxy, and reject Git/MSYS/Cygwin gcc false positives by target and preprocessor identity.',
       'Expose generic public toolchain bootstrap/sync/profile/compile/core-info/install-bootloader commands while retaining dependency-specific names only internally or when invoking the dependency itself.',
       'On Linux, a privileged fresh-host bootstrap must assign the managed profile to an explicit non-root interactive/service account, install reviewed native packages and existing-group serial access declaratively, and leave reusable least-privilege state without a manual chown, direct dependency-CLI call, or broad udev rule.',
-    ], 'Current core/library/Go dependency versions remain the verified baseline, and the Windows provisioning evidence is unchanged. A fresh Ubuntu 26.04 run exposed a Linux regression: ordinary root bootstrap created a private root-owned cache that the desktop account could not reuse. Controller now exposes a default-read-only provision-host path with APT availability simulation, trusted privileged command discovery, case-insensitive secret-safe proxy forwarding, reviewed native packages, conditional npm selection, global distribution UPX verification, existing dialout/uucp assignment, and a nested target-user Controller bootstrap. The issue remains open until live fresh/reuse evidence and the branch PR checks confirm that root-owned/manual-chown state is no longer required.'),
+    ], 'Current core/library/Go dependency versions are recorded as the verified bootstrap baseline, UPX 5.2.0 is globally discoverable without a hard-coded source path, and the isolated managed profile downloads/verifies its CLI, installs MiniCore 3.1.2 plus requested libraries, inherits proxy semantics, inventories dependencies, and completes a Controller compile. The Windows host packager validates target/macros, rejects the Cygwin/MSYS gcc shadowing PATH, replays or provisions the resolved user-scoped WinLibs package through WinGet with proxy forwarding, live-selects native x86_64-w64-mingw32 GCC 16.1.0, successfully links the real Go c-shared DLL/header, and passes a stable external-C ABI call without opening COM. Source tests cover existing-path, dry-run, profile parity, extraction bounds, proxy handling, compiler false positives, provisioning arguments, native selection, manifest identity, and the caller lifecycle. On an audited Ubuntu 26.04 host, Controller now exposes a default-read-only provision-host path with APT availability simulation, trusted privileged command discovery, case-insensitive secret-safe proxy forwarding, reviewed native packages, conditional npm selection, global distribution UPX verification, existing dialout/uucp assignment, and a nested target-user Controller bootstrap. Live apply and reuse left all managed files owned by the target account and completed a firmware compile through its persisted managed CLI/config without a manual chown or direct dependency-CLI call. The requirement remains open until the branch PR checks and post-merge fresh-host validation confirm the complete Go-owned provisioning path. The separate update-automation requirement owns latest-first resolved locks across maintained dependencies.'),
   requirement('latest-toolchain-update-automation', 11, 'Automate latest-compatible dependency updates with resolved-lock reproducibility', 'open',
     ['🏗️ tooling-build', '📦 dependencies', '🧪 testing', '💡 enhancement'], 'Firmware toolchain and dependencies', [
       'Resolve the latest compatible dependency CLI/core/libraries/Urboot, Go modules/toolchain, Node/npm packages, GitHub Actions, UPX, and go-winres instead of treating policy-file versions as permanent pins.',
@@ -589,6 +657,15 @@ const R = [
       'Speak the native protocol over TCP and support interactive injection.',
       'Pass native unit, raw protocol, and host fragmented-transport tests.',
     ], 'The simulator builds and its tests/smokes pass, including full status shape and reset journal behavior; cycle-accurate shared AVR translation was not required for this completed behavioral scope.'),
+  requirement('canonical-cross-language-contracts', 11, 'Generate protocol, settings, hardware, and capability definitions from canonical contracts', 'open',
+    ['🧩 firmware', '🖥️ host', '🔌 protocol-api', '💾 storage', '🧪 testing', '🏗️ tooling-build', '⏳ finalization'], 'Project import, LocalLib merge, and structure', [
+      'Keep controllers general-purpose by separating reusable contracts and mechanisms from board-profile wiring, product presentation, and application-specific policy.',
+      'Define one machine-readable source for opcodes, payloads, capabilities, errors, events, settings fields, EEPROM ownership, hardware pins/addresses, menu/action/page identities, and feature/profile availability.',
+      'Generate AVR C++, VirtualBoard C++, Go, TypeScript, test vectors, and maintained reference tables from that source; never maintain competing handwritten constants for the same contract.',
+      'Represent alpha feature/profile differences as explicit capabilities rather than adding version-to-version migration or compatibility baggage before layouts freeze.',
+      'Share one firmware behavior core behind AVR and VirtualBoard hardware-abstraction layers, while keeping target-only physical drivers isolated.',
+      'Add deterministic generation, golden wire/storage vectors, and a check mode that fails CI on duplicate IDs, manually edited outputs, undocumented divergence, or generated-document drift.',
+    ], 'Confirmed drift exists today: the Go and VirtualBoard opcode catalogs contain 0x42–0x44 and 0x9A–0x9B entries absent from the AVR UART header. EEPROM/settings semantics, pins/addresses/defaults, VirtualBoard behavior, UI capability metadata, and generated documentation also have multiple hand-maintained sources. The recovery work must converge these definitions rather than creating another parallel controller or authentication implementation.'),
   requirement('tooling-entrypoint-consolidation', 11, 'Unify build and programmer policy behind one command-plan implementation', 'open',
     ['🏗️ tooling-build', '🚀 programming', '🐛 regression', '⚡ priority: high'], 'Tooling entry-point consolidation audit', [
       'Move board profile and build/programming policy out of divergent PowerShell, Bash, Node, and Go implementations.',
@@ -645,6 +722,7 @@ const R = [
     ['📚 documentation', '🧪 testing', '🚧 in progress'], 'Development EEPROM, repository, licensing, and documentation', [
       'Normalize all distinct checklist and audited user requirements while keeping complete transcripts and private paths local; prepend only the issue- or pull-request-relevant original excerpt, lightly grammar-corrected and publication-safe, to every applicable GitHub issue or pull request.',
       'Give every normalized item a stable requirement marker, clear acceptance criteria, evidence/gaps, labels, and evidence-based state.',
+      'Give every epic, normalized requirement, supplemental issue, and active pull request at least one accurate product/engineering domain label so Kanban area views never depend on workflow or priority labels alone.',
       'Attach each requirement as a true GitHub sub-issue of exactly one epic and summarize open/closed counts on the epics.',
       'Keep a canonical repository map and an idempotent sync/validation helper.',
 		'Before implementing every new task or request, reconcile it with existing GitHub issues, pull requests, requirements, and maintained documentation; update and link the existing records when scope overlaps, and create a new stable requirement only for genuinely distinct work.',
@@ -654,7 +732,9 @@ const R = [
       'Maintain one repository-linked PCController Development project containing all 13 epics and every normalized requirement exactly once, with truthful workflow, Area, Priority, Verification metadata and practical backlog/area/hardware/completed views.',
       'Keep routine narrowly scoped fixes eligible for direct main commits, while substantial refactors and feature additions use an issue-linked branch and reviewed pull request before merge.',
       'Immediately approve and merge a pull request once it is qualifying, green, and non-WIP; mark incomplete work as draft/WIP with the exact blocker and preserve a resumable issue/PR handoff instead of waiting indefinitely for a separate approval round.',
-    ], 'The public graph contains 13 epics and 69 normalized requirements with stable markers, labels, evidence-based states, counts, and true sub-issue links. The catalog and sync helper encode issue/PR/docs reconciliation as a mandatory first step for every new request and retain the distinct platform-service, artifact-sync, and authorized-porting requirements. A reproducible extraction inventories 215 human-authored turns across the relevant edge/origin sessions; publication-safe, lightly grammar-corrected prompt excerpts now prepend all 93 issues and all 26 pull requests, while credentials, private paths, and the full archive remain unpublished. The public PCController Delivery project tracks every open issue and pull request, the Wiki is live, and all three interrupted origin discussions acknowledged the merge/WIP policy, edge route, and dirty-worktree preservation handoff. Ongoing tracker maintenance and final implementation-state reconciliation remain active rather than being represented as permanently complete.'),
+      'Treat GitHub comments as full-duplex coordination: read new replies and review threads, acknowledge or answer them, update disposition/evidence/blockers, and carry decisions back into code, docs, issues, pull requests, the Project board, and every participating agent.',
+      'Preserve original dirty worktrees, but promptly checkpoint semantically unique in-progress work to a named remote branch and issue-linked Draft/WIP pull request with immutable provenance, validation, blockers, owner, and next test; never publish superseded/generated/noise deltas.',
+    ], 'The public graph contains 13 epics and 71 normalized requirements with stable markers, domain labels, evidence-based states, counts, and true sub-issue links. The catalog and sync helper encode issue/PR/docs reconciliation as a mandatory first step for every new request and retain the distinct platform-service, artifact-sync, authorized-porting, cross-surface-parity, and canonical-contract requirements. A reproducible extraction inventories 224 human-authored turns across the relevant edge/origin sessions; publication-safe, lightly grammar-corrected prompt excerpts prepend every issue and pull request while credentials, private paths, coordinator transport messages, and the full archive remain unpublished. The public PCController Delivery project tracks the work, and all three interrupted origin discussions acknowledged the merge/WIP, domain-label, edge-route, full-duplex, and dirty-worktree preservation handoff. Ongoing tracker/Wiki maintenance, unique-WIP salvage, and final implementation-state reconciliation remain active rather than being represented as permanently complete.'),
 
   requirement('hardware-frontpanel-audio', 13, 'Validate final-image buttons, menus, reset stability, and audio cues on hardware', 'open',
     ['🧪 testing', '🔍 needs-hardware', '🎛️ front-panel', '🔥 priority: critical'], 'Final hardware validation and handoff', [
@@ -762,9 +842,11 @@ const PROMPT_EXCERPTS = {
   monitorOff: prompt(SESSION.edge, 215, 'The IPC, bridge, and board can issue Monitor Off. Requests can come from board opcodes, other instances, WebUI, TUI, API, IPC, WebSocket, or bridge.'),
   protocolMenus: prompt(SESSION.main, 52, 'The host must query the board’s live menu list, show the active page and descriptions, and navigate by menu ID or name.'),
   protocolSimulator: prompt(SESSION.recovery, 159, 'Keep VirtualBoard and AVR in sync by compiling the same firmware for the PC with physical-device implementations replaced by virtual ones; do not maintain a separate implementation.'),
+  canonicalContracts: prompt(SESSION.edge, 218, 'Ensure the controllers are general purpose and there are no duplicated definitions in the project. Find violations, choose remedies, and add documentation and checks that prevent recurrence.'),
   hostFoundation: prompt(SESSION.main, 10, 'The PC host needs monitoring, CLI and scripting capabilities, IPC, and the ability for the entire project to be consumed as a dynamic library.'),
   tuiPages: prompt(SESSION.main, 52, 'The controller needs dedicated pages for app configuration, board EEPROM settings, live controls, RF, programming, monitoring, and a polished mouse-aware TUI.'),
   tuiConsole: prompt(SESSION.edge, 215, 'Let the TUI manage its window size, use the correct rows and columns on first open, and set the console font. This applies only to local instances, not remote sessions such as SSH.'),
+  surfaceParity: prompt(SESSION.edge, 218, 'Ensure TUI functions are not missing from the WebUI, and vice versa, with the same comparison for the native GUI. Backlog every real gap.'),
   monitoring: prompt(SESSION.main, 52, 'Let users choose monitored fields and polling rates, format adaptive SI units, retain graphs and history, and show important events in a clear timeline.'),
   eventNoise: prompt(SESSION.recovery, 186, 'Continuous events such as LED frames and measurements must not spam the logging console; use separate paths unless explicitly enabled for debugging.'),
   consoleUx: prompt(SESSION.main, 52, 'Finish nested completion, history recall, command grouping, clean colorized output, quit/exit, and clear-console behavior.'),
@@ -799,10 +881,14 @@ const PROMPT_EXCERPTS = {
   repositoryPublication: prompt(SESSION.main, 53, 'Publish the repository through the authenticated GitHub tooling and retain the requested dual licensing and required third-party terms.'),
   documentation: prompt(SESSION.main, 77, 'Fully set up the Wiki, Markdown, README, and docs; organize, write, verify, and use the documentation.'),
   wikiAndHandoff: prompt(SESSION.edge, 215, 'Complete the Wiki and repository settings, and place a simple-English version of the remaining tasks and next steps on the Desktop.'),
+  repositoryMap: prompt(SESSION.edge, 219, 'Add a map of all files and how code, assets, and documentation are organized so a first-time contributor can find exactly what they need.'),
+  wikiStyling: prompt(SESSION.edge, 222, 'Improve the Wiki with real styling, branding, emoji accents, and useful GitHub-specific Markdown.'),
   finalAudit: prompt(SESSION.main, 61, 'After the codebase is finalized, add concise comments for functions, settings, wiring, units, timing, and non-obvious behavior, then perform a final missing-requirement audit.'),
   tracker: prompt(SESSION.main, 66, 'Publish my requests from the checklist and JSONL turns as deduplicated GitHub issues and sub-issues, apply correct labels, and keep their open or closed states accurate.'),
   trackerReconciliation: prompt(SESSION.edge, 215, 'Extract all relevant local and origin-host prompts, prepend the applicable original portions to GitHub issues and pull requests, and synchronize issue, pull-request, project-board, Wiki, and local repository states.'),
   mergePolicy: prompt(SESSION.edge, 215, 'Immediately approve and merge pull requests that qualify. Mark work-in-progress pull requests as such and explain the reason.'),
+  domainTracking: prompt(SESSION.edge, 221, 'Tag every GitHub issue by domain so it can be filtered clearly in the Kanban view, and checkpoint genuine in-progress work to remote branches instead of leaving it only in a dirty local tree.'),
+  fullDuplexTracking: prompt(SESSION.edge, 218, 'Make GitHub issue comments two-way and full duplex, and keep every agent coordinated through the same issues, pull requests, project board, evidence, blockers, and replies.'),
   hardwareFrontPanel: prompt(SESSION.edge, 204, 'Physical front-panel keys, PC-sent virtual buttons, and RF-received keys must always respond immediately; fix the root cause and protect against regression.'),
   hardwareDoor: prompt(SESSION.main, 82, 'Verify door and BT Audio transitions, smooth informational LED changes, keep warning states immediate, and validate the temperature roles on real hardware.'),
   hardwarePwm: prompt(SESSION.main, 82, 'Perform final verification on the real board, including illumination, status LED transitions, displays, and every safely testable output.'),
@@ -864,6 +950,7 @@ const ORIGINAL_REQUESTS = {
   'protocol-simulator-transport': [PROMPT_EXCERPTS.protocolSimulator],
   'host-foundation-config-library': [PROMPT_EXCERPTS.hostFoundation, PROMPT_EXCERPTS.tuiConsole, PROMPT_EXCERPTS.configurationSources, PROMPT_EXCERPTS.configurationPrecedence],
   'tui-pages-controls': [PROMPT_EXCERPTS.tuiPages, PROMPT_EXCERPTS.tuiConsole],
+  'ui-surface-capability-parity': [PROMPT_EXCERPTS.surfaceParity, PROMPT_EXCERPTS.canonicalContracts],
   'monitoring-format-history': [PROMPT_EXCERPTS.monitoring, PROMPT_EXCERPTS.eventNoise],
   'console-command-ux': [PROMPT_EXCERPTS.consoleUx],
   'host-automation-hotkeys-os': [PROMPT_EXCERPTS.hostAutomation, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.monitorOff],
@@ -889,12 +976,13 @@ const ORIGINAL_REQUESTS = {
   'latest-toolchain-update-automation': [PROMPT_EXCERPTS.latestDependencies, PROMPT_EXCERPTS.proxyPolicy],
   'project-import-structure': [PROMPT_EXCERPTS.projectImport],
   'native-virtual-board': [PROMPT_EXCERPTS.protocolSimulator],
+  'canonical-cross-language-contracts': [PROMPT_EXCERPTS.canonicalContracts, PROMPT_EXCERPTS.sharedFirmware],
   'tooling-entrypoint-consolidation': [PROMPT_EXCERPTS.toolingEntrypoint],
   'canonical-host-artifact-packaging': [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.canonicalLogo, PROMPT_EXCERPTS.configurationSources, PROMPT_EXCERPTS.configurationPrecedence],
   'github-license-notices': [PROMPT_EXCERPTS.repositoryPublication],
-  'canonical-documentation-guide': [PROMPT_EXCERPTS.documentation, PROMPT_EXCERPTS.wikiAndHandoff, PROMPT_EXCERPTS.canonicalLogo],
+  'canonical-documentation-guide': [PROMPT_EXCERPTS.documentation, PROMPT_EXCERPTS.wikiAndHandoff, PROMPT_EXCERPTS.canonicalLogo, PROMPT_EXCERPTS.repositoryMap, PROMPT_EXCERPTS.wikiStyling],
   'final-code-documentation-gate': [PROMPT_EXCERPTS.finalAudit],
-  'requirements-backlog-publication': [PROMPT_EXCERPTS.tracker, PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.mergePolicy],
+  'requirements-backlog-publication': [PROMPT_EXCERPTS.tracker, PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.mergePolicy, PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking],
   'hardware-frontpanel-audio': [PROMPT_EXCERPTS.hardwareFrontPanel],
   'hardware-door-bt-temperature': [PROMPT_EXCERPTS.hardwareDoor],
   'hardware-pwm-displays-lighting': [PROMPT_EXCERPTS.hardwarePwm],
@@ -914,12 +1002,12 @@ const EPIC_ORIGINAL_REQUESTS = {
   4: [PROMPT_EXCERPTS.keyLatency, PROMPT_EXCERPTS.boardMenus],
   5: [PROMPT_EXCERPTS.rfCore, PROMPT_EXCERPTS.rfSessions],
   6: [PROMPT_EXCERPTS.nativeProtocol, PROMPT_EXCERPTS.commandCoverage],
-  7: [PROMPT_EXCERPTS.hostFoundation, PROMPT_EXCERPTS.tuiPages, PROMPT_EXCERPTS.osActions],
+  7: [PROMPT_EXCERPTS.hostFoundation, PROMPT_EXCERPTS.tuiPages, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.surfaceParity],
   8: [PROMPT_EXCERPTS.ipcApi, PROMPT_EXCERPTS.networkDiscovery, PROMPT_EXCERPTS.monitorOff],
   9: [PROMPT_EXCERPTS.usbReconnect, PROMPT_EXCERPTS.serialOwner],
   10: [PROMPT_EXCERPTS.urclock, PROMPT_EXCERPTS.backups, PROMPT_EXCERPTS.programmingEntrypoint],
-  11: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.protocolSimulator, PROMPT_EXCERPTS.packagingIdentity],
-  12: [PROMPT_EXCERPTS.documentation, PROMPT_EXCERPTS.trackerReconciliation],
+  11: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.protocolSimulator, PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.canonicalContracts],
+  12: [PROMPT_EXCERPTS.documentation, PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.repositoryMap, PROMPT_EXCERPTS.wikiStyling],
   13: [PROMPT_EXCERPTS.releaseHandoff],
 };
 
@@ -935,6 +1023,9 @@ const EXTRA_ISSUE_ORIGINAL_REQUESTS = {
   110: [PROMPT_EXCERPTS.stuckUpdate],
   112: [PROMPT_EXCERPTS.zadig],
   115: [PROMPT_EXCERPTS.dependencyBlocker],
+  131: [PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.trackerReconciliation],
+  134: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
+  135: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.serviceTray],
 };
 
 const PR_ORIGINAL_REQUESTS = {
@@ -965,6 +1056,16 @@ const PR_ORIGINAL_REQUESTS = {
   114: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.mergePolicy],
   119: [PROMPT_EXCERPTS.consoleIcon, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.artifactSync],
   120: [PROMPT_EXCERPTS.tuiConsole, PROMPT_EXCERPTS.webRoot, PROMPT_EXCERPTS.configurationSources, PROMPT_EXCERPTS.canonicalLogo, PROMPT_EXCERPTS.trackerReconciliation],
+  121: [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.configurationSources, PROMPT_EXCERPTS.configurationPrecedence],
+  122: [PROMPT_EXCERPTS.httpMessages, PROMPT_EXCERPTS.remoteSecurity],
+  123: [PROMPT_EXCERPTS.repositoryMap, PROMPT_EXCERPTS.wikiStyling, PROMPT_EXCERPTS.documentation],
+  126: [PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.remoteSecurity, PROMPT_EXCERPTS.proxyPolicy],
+  127: [PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.canonicalContracts, PROMPT_EXCERPTS.surfaceParity],
+  128: [PROMPT_EXCERPTS.wikiStyling, PROMPT_EXCERPTS.repositoryMap],
+  129: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
+  130: [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.serviceTray, PROMPT_EXCERPTS.releaseHandoff],
+  132: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.serviceTray],
+  133: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.toolingEntrypoint],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
@@ -1074,14 +1175,21 @@ async function syncSupplementalTraceability(issues) {
     const issue = issueByNumber.get(number);
     if (!issue) throw new Error(`supplemental tracker issue #${number} is missing`);
     const body = bodyWithOriginalRequests(issue.body ?? '', excerpts);
-    if (issue.body === body) continue;
+    const requiredLabels = EXTRA_ISSUE_REQUIRED_LABELS[number];
+    if (!requiredLabels?.length) throw new Error(`supplemental tracker issue #${number} has no domain-label contract`);
+    const needsBody = issue.body !== body;
+    const needsLabels = !hasRequiredLabels(issue, requiredLabels);
+    if (!needsBody && !needsLabels) continue;
     if (!APPLY) {
-      process.stdout.write(`UPDATE #${number} supplemental prompt provenance: body\n`);
+      process.stdout.write(`UPDATE #${number} supplemental tracker: ${[needsBody && 'body', needsLabels && 'domain labels'].filter(Boolean).join(', ')}\n`);
       continue;
     }
-    const updated = api('PATCH', `repos/${REPO}/issues/${number}`, { body });
+    const updated = api('PATCH', `repos/${REPO}/issues/${number}`, {
+      body,
+      labels: labelsWithRequired(issue, requiredLabels),
+    });
     issueByNumber.set(number, updated);
-    process.stdout.write(`updated #${number} supplemental prompt provenance\n`);
+    process.stdout.write(`updated #${number} supplemental prompt provenance/domain labels\n`);
   }
 
   const pulls = await allPullRequests();
@@ -1133,8 +1241,21 @@ function bodyFor(item) {
 }
 
 function sameLabels(issue, expected) {
-  const actual = issue.labels.map((label) => typeof label === 'string' ? label : label.name).sort();
+  const actual = issueLabelNames(issue).sort();
   return JSON.stringify(actual) === JSON.stringify([...expected].sort());
+}
+
+function issueLabelNames(issue) {
+  return issue.labels.map((label) => typeof label === 'string' ? label : label.name);
+}
+
+function hasRequiredLabels(issue, required) {
+  const actual = new Set(issueLabelNames(issue));
+  return required.every((label) => actual.has(label));
+}
+
+function labelsWithRequired(issue, required) {
+  return [...new Set([...issueLabelNames(issue), ...required])];
 }
 
 function gqlAddSubIssue(parentNodeId, childNodeId) {
@@ -1183,8 +1304,26 @@ async function validateRemote(published) {
   if (issueTraceMissing.length) {
     errors.push(`issues missing prepended prompt provenance: ${issueTraceMissing.map((issue) => `#${issue.number}`).join(', ')}`);
   }
+  const issuesWithoutDomain = fresh.filter((issue) => !issueLabelNames(issue).some((label) => DOMAIN_LABELS.has(label)));
+  if (issuesWithoutDomain.length) {
+    errors.push(`issues missing a Kanban domain label: ${issuesWithoutDomain.map((issue) => `#${issue.number}`).join(', ')}`);
+  }
+  for (const [numberText, labels] of Object.entries(EPIC_LABELS)) {
+    const number = Number(numberText);
+    const issue = fresh.find((candidate) => candidate.number === number);
+    if (!issue || !sameLabels(issue, labels)) errors.push(`epic #${number}: labels drifted`);
+  }
+  for (const [numberText, labels] of Object.entries(EXTRA_ISSUE_REQUIRED_LABELS)) {
+    const number = Number(numberText);
+    const issue = fresh.find((candidate) => candidate.number === number);
+    if (!issue || !hasRequiredLabels(issue, labels)) errors.push(`supplemental issue #${number}: required domain labels drifted`);
+  }
 
   const pulls = await allPullRequests();
+  const openPullsWithoutDomain = pulls.filter((pull) => pull.state === 'open' && !issueLabelNames(pull).some((label) => DOMAIN_LABELS.has(label)));
+  if (openPullsWithoutDomain.length) {
+    errors.push(`open pull requests missing a Kanban domain label: ${openPullsWithoutDomain.map((pull) => `#${pull.number}`).join(', ')}`);
+  }
   const pullTraceMissing = pulls.filter((pull) => !hasCompletePromptTrace(pull.body));
   if (pullTraceMissing.length) {
     errors.push(`pull requests missing prepended prompt provenance: ${pullTraceMissing.map((pull) => `#${pull.number}`).join(', ')}`);
@@ -1260,6 +1399,12 @@ function markdown(items) {
 
 async function main() {
   if (new Set(R.map((item) => item.id)).size !== R.length) throw new Error('duplicate requirement id');
+  const missingRequirementDomains = R.filter((item) => !item.labels.some((label) => DOMAIN_LABELS.has(label))).map((item) => item.id);
+  const missingEpicDomains = Object.entries(EPIC_LABELS).filter(([, labels]) => !labels.some((label) => DOMAIN_LABELS.has(label))).map(([number]) => number);
+  const missingSupplementalDomains = Object.entries(EXTRA_ISSUE_REQUIRED_LABELS).filter(([, labels]) => !labels.some((label) => DOMAIN_LABELS.has(label))).map(([number]) => number);
+  if (missingRequirementDomains.length || missingEpicDomains.length || missingSupplementalDomains.length) {
+    throw new Error(`domain-label contract drift; requirements=${missingRequirementDomains.join(',') || 'none'} epics=${missingEpicDomains.join(',') || 'none'} supplemental=${missingSupplementalDomains.join(',') || 'none'}`);
+  }
   const missingRequirementPrompts = R.filter((item) => !(ORIGINAL_REQUESTS[item.id]?.length)).map((item) => item.id);
   const staleRequirementPrompts = Object.keys(ORIGINAL_REQUESTS).filter((id) => !R.some((item) => item.id === id));
   if (missingRequirementPrompts.length || staleRequirementPrompts.length) {
@@ -1269,7 +1414,12 @@ async function main() {
   if (missingEpicPrompts.length) throw new Error(`epics missing prompt provenance: ${missingEpicPrompts.join(', ')}`);
   const labels = JSON.parse(gh(['label', 'list', '--repo', REPO, '--limit', '200', '--json', 'name,color']));
   const labelNames = new Set(labels.map((label) => label.name));
-  const missingLabels = [...new Set(R.flatMap((item) => item.labels))].filter((label) => !labelNames.has(label));
+  const managedLabels = new Set([
+    ...R.flatMap((item) => item.labels),
+    ...Object.values(EPIC_LABELS).flat(),
+    ...Object.values(EXTRA_ISSUE_REQUIRED_LABELS).flat(),
+  ]);
+  const missingLabels = [...managedLabels].filter((label) => !labelNames.has(label));
   if (missingLabels.length) throw new Error(`missing repository labels: ${missingLabels.join(', ')}`);
   const labelColors = new Map(labels.map((label) => [label.name, label.color.toUpperCase()]));
   const colorDrift = Object.entries(EXPECTED_LABEL_COLORS)
@@ -1356,6 +1506,10 @@ async function main() {
   const managedIssueNumbers = new Set([...Object.keys(EPICS).map(Number), ...published.map((item) => item.number)]);
   const supplementalIssueNumbers = issues.filter((issue) => !managedIssueNumbers.has(issue.number)).map((issue) => issue.number).sort((a, b) => a - b);
   const expectedSupplementalNumbers = Object.keys(EXTRA_ISSUE_ORIGINAL_REQUESTS).map(Number).sort((a, b) => a - b);
+  const expectedSupplementalLabelNumbers = Object.keys(EXTRA_ISSUE_REQUIRED_LABELS).map(Number).sort((a, b) => a - b);
+  if (JSON.stringify(expectedSupplementalLabelNumbers) !== JSON.stringify(expectedSupplementalNumbers)) {
+    throw new Error(`supplemental issue label/provenance catalog drift; labels=${expectedSupplementalLabelNumbers.join(',')} provenance=${expectedSupplementalNumbers.join(',')}`);
+  }
   if (JSON.stringify(supplementalIssueNumbers) !== JSON.stringify(expectedSupplementalNumbers)) {
     throw new Error(`supplemental issue provenance catalog drift; remote=${supplementalIssueNumbers.join(',')} static=${expectedSupplementalNumbers.join(',')}`);
   }
@@ -1366,8 +1520,11 @@ async function main() {
       const children = published.filter((item) => item.parent === parent).sort((a, b) => a.number - b.number);
       const desiredState = children.length > 0 && children.every((child) => child.state === 'closed') ? 'closed' : 'open';
       const parentIssue = parents.get(parent);
-      if (parentIssue.body !== epicBody(parent, children) || parentIssue.state.toLowerCase() !== desiredState) {
-        process.stdout.write(`UPDATE epic #${parent}: body${parentIssue.state.toLowerCase() !== desiredState ? ', state' : ''}\n`);
+      const bodyDrift = parentIssue.body !== epicBody(parent, children);
+      const stateDrift = parentIssue.state.toLowerCase() !== desiredState;
+      const labelDrift = !sameLabels(parentIssue, EPIC_LABELS[parent]);
+      if (bodyDrift || stateDrift || labelDrift) {
+        process.stdout.write(`UPDATE epic #${parent}: ${[bodyDrift && 'body', stateDrift && 'state', labelDrift && 'domain labels'].filter(Boolean).join(', ')}\n`);
       }
     }
     process.stdout.write(`dry run: ${R.length} normalized requirements; body/title/label/state and hierarchy drift shown above; rerun with --apply to mutate GitHub and write ${OUTPUT}\n`);
@@ -1379,9 +1536,10 @@ async function main() {
     const desiredState = children.length > 0 && children.every((child) => child.state === 'closed') ? 'closed' : 'open';
     const parentIssue = parents.get(parent);
     const body = epicBody(parent, children);
-    if (parentIssue.body !== body || parentIssue.state.toLowerCase() !== desiredState) {
+    if (parentIssue.body !== body || parentIssue.state.toLowerCase() !== desiredState || !sameLabels(parentIssue, EPIC_LABELS[parent])) {
       api('PATCH', `repos/${REPO}/issues/${parent}`, {
         body,
+        labels: EPIC_LABELS[parent],
         state: desiredState,
         ...(desiredState === 'closed' ? { state_reason: 'completed' } : {}),
       });

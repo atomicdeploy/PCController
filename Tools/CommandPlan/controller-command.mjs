@@ -209,6 +209,8 @@ export function createControllerProgramCommand({
 	output = '',
 	sketch = '',
 	outputDir = '',
+	toolchainCLI = '',
+	toolchainConfig = '',
 	dryRun = false,
 	allowIncompleteBackup = false
 }) {
@@ -219,6 +221,8 @@ export function createControllerProgramCommand({
 			'--sketch', requireValue(sketch, 'compile sketch'),
 			'--output-dir', requireValue(outputDir, 'compile output directory')
 		]
+		if (String(toolchainCLI).trim()) args.push('--toolchain-cli', String(toolchainCLI))
+		if (String(toolchainConfig).trim()) args.push('--toolchain-config', String(toolchainConfig))
 		if (dryRun) args.push('--dry-run')
 		return controllerCommand(invocation, args)
 	}

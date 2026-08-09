@@ -260,12 +260,37 @@ function commandText(file, args) {
   return [file, ...args].map((part) => /\s/.test(part) ? JSON.stringify(part) : part).join(' ')
 }
 
+function windowsCommandArgument(value) {
+  const argument = String(value)
+  if (/[\0\r\n"%]/u.test(argument)) {
+    throw new Error('Windows command-script paths and arguments cannot contain NUL, line breaks, quotes, or percent signs')
+  }
+  return `"${argument}"`
+}
+
+function commandInvocation(file, args, environment = process.env, runtimePlatform = platform()) {
+  if (runtimePlatform !== 'win32' || !/\.(?:bat|cmd)$/iu.test(file)) {
+    return { file, args, windowsVerbatimArguments: false }
+  }
+  const commandProcessor = environment.ComSpec ?? environment.COMSPEC
+  if (!commandProcessor) throw new Error('ComSpec is required to run Windows command scripts')
+  const command = [file, ...args].map(windowsCommandArgument).join(' ')
+  return {
+    file: commandProcessor,
+    args: ['/d', '/s', '/v:off', '/c', `"${command}"`],
+    windowsVerbatimArguments: true,
+  }
+}
+
 function run(file, args, options = {}) {
-  const result = spawnSync(file, args, {
+  const environment = options.env ?? process.env
+  const invocation = commandInvocation(file, args, environment)
+  const result = spawnSync(invocation.file, invocation.args, {
     cwd: options.cwd ?? repo,
-    env: options.env ?? process.env,
+    env: environment,
     encoding: 'utf8',
     windowsHide: true,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     stdio: options.capture === false ? 'inherit' : ['ignore', 'pipe', 'pipe'],
   })
   const accepted = options.accept ?? [0]
@@ -964,12 +989,14 @@ export {
   assertTrustedDependencyURL,
   assertTrustedGitHubURL,
   assertTrustedRepository,
+  commandInvocation,
   compareHostToolLocks,
   compareCompositeVersions,
   compareVersions,
   parseWingetCompilerManifest,
   sameSubstantive,
   stableParts,
+  run,
   validateHostSourcePolicy,
   validateHostToolsLock,
   validateToolchainLockSources,

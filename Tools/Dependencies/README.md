@@ -114,6 +114,13 @@ upper- or lower-case `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `FTP_PROXY`, and
 backend. Reports list only the names of detected variables; values and
 credentials are neither printed nor persisted.
 
+On Windows, validation wrappers ending in `.cmd` or `.bat` are launched through
+the inherited `ComSpec` with AutoRun and delayed expansion disabled and an
+explicitly quoted command line. Native executables remain
+direct child processes, and POSIX never uses a shell. This avoids Node's
+`spawnSync *.cmd EINVAL` behavior without `shell: true` and without changing
+the caller's proxy or local-network bypass environment.
+
 The configured network route is attempted first. By default, a failed registry
 or download request is retried once in a child environment with proxy variables
 removed. This temporary retry does not mutate the parent process or machine
