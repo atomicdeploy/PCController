@@ -14,8 +14,10 @@ struct __attribute__((packed)) StoredSettings {
   uint8_t checksum;
 };
 
-static_assert(sizeof(StoredSettings) == 41,
-              "settings/name EEPROM record layout changed");
+static_assert(sizeof(StoredSettings) ==
+                  sizeof(ControllerSettings) +
+                      1U + SettingsStore::MaximumBoardNameLength + 1U,
+              "settings/name EEPROM record packing changed");
 
 static_assert(SettingsStore::EepromAddress + sizeof(StoredSettings) <=
                   EepromLayout::RemoteHeaderAddress,

@@ -1,6 +1,6 @@
 #include "StatusLedController.h"
 
-#if PCCONTROLLER_ENABLE_PCA9685
+#if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
 
 #include <EEPROM.h>
 #include <string.h>

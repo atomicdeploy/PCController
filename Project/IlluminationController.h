@@ -14,7 +14,8 @@ enum class IlluminationMode : uint8_t {
 };
 
 // Drives enclosure PWM toward Off/Auto/On targets with a nonblocking fade.
-#if PCCONTROLLER_ENABLE_PCA9685
+#if PCCONTROLLER_ENABLE_PCA9685 && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
 class IlluminationController {
 public:
   // Starts from the electrically observed door target without a startup jump.

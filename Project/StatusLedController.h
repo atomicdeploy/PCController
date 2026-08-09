@@ -45,7 +45,7 @@ enum class StatusLedEffect : uint8_t {
 };
 
 // Composes base state and transient cues onto PWM RGB channels 13..15.
-#if PCCONTROLLER_ENABLE_PCA9685
+#if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
 class StatusLedController {
 public:
   static constexpr uint8_t ProfileCount = 19;

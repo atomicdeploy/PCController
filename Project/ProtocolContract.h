@@ -126,6 +126,10 @@ enum BuildFeatureFlag : uint8_t {
   UnifiedPageIdentifiesKeys = 1U << 1,
   ForceSilent = 1U << 2,
   BlankEepromSilent = 1U << 3,
+  McuLcdRenderer = 1U << 4,
+  LocalPcaPages = 1U << 5,
+  StatusLedEngine = 1U << 6,
+  IlluminationAutomation = 1U << 7,
 };
 
 } // namespace ControllerProtocol

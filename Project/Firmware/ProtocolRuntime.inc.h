@@ -47,10 +47,15 @@ void sendHello(uint8_t sequence) {
       (1UL << 23) | // persistent visible-mask and stable-ID rank permutation
 #endif
       (1UL << 24) | // host-owned Idle/Running application state (opcode 0x45)
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
       (1UL << 25) | // scheduled segment once/loop/interval presentation
+#endif
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
       (1UL << 26) | // unsolicited changed-only TM1637 state frames
       (1UL << 27) | // unsolicited buzzer frequency/duration frames
-#if PCCONTROLLER_ENABLE_PCA9685
+#endif
+#if PCCONTROLLER_ENABLE_PCA9685 && \
+    PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
       (1UL << 28) | // MCU-owned procedural status LED effects
       (1UL << 29) | // unsolicited rendered status LED state frames
       (1UL << 30) | // EEPROM-resident condition status profiles
@@ -61,7 +66,7 @@ void sendHello(uint8_t sequence) {
 #if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
       ControllerProtocol::KeyDiagnosticProfile;
 #elif PCCONTROLLER_ENABLE_INA219 && PCCONTROLLER_ENABLE_DS18B20 && \
-    PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_I2C_LCD
+    PCCONTROLLER_ENABLE_PCA9685
       ControllerProtocol::FullPeripheralProfile;
 #elif !PCCONTROLLER_ENABLE_INA219 && !PCCONTROLLER_ENABLE_DS18B20 && \
     !PCCONTROLLER_ENABLE_PCA9685 && !PCCONTROLLER_ENABLE_I2C_LCD
@@ -79,6 +84,18 @@ void sendHello(uint8_t sequence) {
       (PCCONTROLLER_FORCE_SILENT ? ControllerProtocol::ForceSilent : 0) |
       (PCCONTROLLER_BLANK_EEPROM_SILENT
            ? ControllerProtocol::BlankEepromSilent
+           : 0) |
+      (PCCONTROLLER_ENABLE_I2C_LCD
+           ? ControllerProtocol::McuLcdRenderer
+           : 0) |
+      (PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
+           ? ControllerProtocol::LocalPcaPages
+           : 0) |
+      (PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+           ? ControllerProtocol::StatusLedEngine
+           : 0) |
+      (PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+           ? ControllerProtocol::IlluminationAutomation
            : 0);
   // Schema 4 preserves the prior identity prefix and appends explicit profile
   // truth so a host never guesses compile-time behavior from runtime absence.
@@ -604,14 +621,30 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         goto badPayload;
       }
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
+#if PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
       statusLeds.setBrightness(payload[3]);
       statusLeds.setCustom(payload[0], payload[1], payload[2]);
+#else
+      // Preserve the direct RGB hardware API without carrying the duplicated
+      // procedural/profile engine. Brightness 255 maps each component exactly.
+      const uint16_t level = static_cast<uint16_t>(payload[3]) + 1U;
+      if (!pwm.setStatusRgb8(
+              static_cast<uint8_t>(
+                  (static_cast<uint16_t>(payload[0]) * level) >> 8),
+              static_cast<uint8_t>(
+                  (static_cast<uint16_t>(payload[1]) * level) >> 8),
+              static_cast<uint8_t>(
+                  (static_cast<uint16_t>(payload[2]) * level) >> 8))) {
+        goto hardwareUnavailable;
+      }
+#endif
       goto acknowledged;
 #endif
 
     case StatusEffect:
-#if !PCCONTROLLER_ENABLE_PCA9685
-      goto hardwareUnavailable;
+#if !PCCONTROLLER_ENABLE_PCA9685 || \
+    !PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+      goto unsupported;
 #else
       // [kind][RGB A][RGB B][brightness][minimum brightness][period u16]
       // [repeats]. Repeats zero loops; 1..255 are MCU-counted cycles.
@@ -632,8 +665,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
 #endif
 
     case StatusProfileGet: {
-#if !PCCONTROLLER_ENABLE_PCA9685
-      goto hardwareUnavailable;
+#if !PCCONTROLLER_ENABLE_PCA9685 || \
+    !PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+      goto unsupported;
 #else
       if (length < 1 || payload[0] >= StatusLedController::ProfileCount) {
         goto badPayload;
@@ -649,8 +683,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
     }
 
     case StatusProfileSet:
-#if !PCCONTROLLER_ENABLE_PCA9685
-      goto hardwareUnavailable;
+#if !PCCONTROLLER_ENABLE_PCA9685 || \
+    !PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+      goto unsupported;
 #else
       if (length < 1 + StatusLedController::ProfilePayloadBytes ||
           !statusLeds.setProfile(payload[0], payload + 1, frameNow)) {

@@ -1,6 +1,7 @@
 #include "IlluminationController.h"
 
-#if PCCONTROLLER_ENABLE_PCA9685
+#if PCCONTROLLER_ENABLE_PCA9685 && \
+    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
 
 #include "PwmController.h"
 #include "TransitionMath.h"

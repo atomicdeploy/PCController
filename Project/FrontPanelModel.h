@@ -53,9 +53,14 @@ constexpr bool frontPanelPageCompiled(uint8_t page) {
     return false;
   }
 #endif
-#if !PCCONTROLLER_ENABLE_PCA9685
+#if !PCCONTROLLER_ENABLE_PCA9685 || !PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
   if (page == PAGE_ILLUMINATION || page == PAGE_PWM ||
       page == PAGE_USER_PWM) {
+    return false;
+  }
+#endif
+#if !PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
+  if (page == PAGE_RF) {
     return false;
   }
 #endif

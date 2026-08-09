@@ -31,28 +31,60 @@
 #define PCCONTROLLER_BT_LED_ON_RAW_HIGH 0
 #endif
 
-// The host owns the 16x2 PCF8574 LCD through the generic I2C opcode. Keeping
-// the full HD44780 renderer off the 328P recovers flash for the timed macro
-// queue; the host still scans 0x27/0x3F and mirrors all text/front-panel state.
+// The production host owns the 16x2 PCF8574 LCD through the bounded generic
+// I2C opcode. The physical LCD remains fully usable while its duplicated
+// HD44780 presentation renderer stays off this 32 KiB MCU. Diagnostic builds
+// may enable the renderer without changing the hardware contract.
 #ifndef PCCONTROLLER_ENABLE_I2C_LCD
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
 
-// The current motion/macro boards intentionally omit these optional I2C and
-// OneWire modules. Keeping them as independent build features lets a later
-// full-peripheral FQBN/profile restore the exact drivers without source edits,
-// while the default deployment image spends its 328P flash on input latency,
-// relay/RF safety, and timed macro capture.
+// The live ControllerBoardMini production profile includes all three native
+// peripheral drivers. Constrained/diagnostic profiles must opt out explicitly
+// and advertise the resulting capability bitmap truthfully in HELLO.
 #ifndef PCCONTROLLER_ENABLE_INA219
-#define PCCONTROLLER_ENABLE_INA219 0
+#define PCCONTROLLER_ENABLE_INA219 1
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_DS18B20
-#define PCCONTROLLER_ENABLE_DS18B20 0
+#define PCCONTROLLER_ENABLE_DS18B20 1
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_PCA9685
-#define PCCONTROLLER_ENABLE_PCA9685 0
+#define PCCONTROLLER_ENABLE_PCA9685 1
+#endif
+
+// Keep the PCA9685's complete 16-channel output API on the MCU while the host
+// owns rich animation and local configuration presentation. These optional
+// engines do not affect direct PWM/status RGB commands or hardware discovery.
+#ifndef PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+#define PCCONTROLLER_ENABLE_STATUS_LED_ENGINE 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+#define PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
+#define PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES 0
+#endif
+
+// RF receive, learned mappings, protocol learning, and exact action evidence
+// remain enabled. Only the duplicated four-digit local learning page is host
+// owned in the production profile.
+#ifndef PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
+#define PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI 0
+#endif
+
+// Host polling and ordinary action evidence remain available. Changed-only
+// render mirrors and the MCU segment scheduler duplicate host presentation and
+// can be enabled in feature builds when flash permits.
+#ifndef PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
+#define PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
+#define PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS 0
 #endif
 
 // The production front panel has one input/output page. In the normal build it
@@ -115,6 +147,36 @@
 #error "PCCONTROLLER_ENABLE_PCA9685 must be 0 or 1"
 #endif
 
+#if (PCCONTROLLER_ENABLE_STATUS_LED_ENGINE != 0) && \
+    (PCCONTROLLER_ENABLE_STATUS_LED_ENGINE != 1)
+#error "PCCONTROLLER_ENABLE_STATUS_LED_ENGINE must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION != 0) && \
+    (PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION != 1)
+#error "PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES != 0) && \
+    (PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES != 1)
+#error "PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI != 0) && \
+    (PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI != 1)
+#error "PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS != 0) && \
+    (PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS != 1)
+#error "PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS != 0) && \
+    (PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS != 1)
+#error "PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS must be 0 or 1"
+#endif
+
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the
 // fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
 // ordering, hierarchy, or layout-protocol implementations in release builds.
@@ -123,7 +185,7 @@
 #endif
 
 #ifndef PCCONTROLLER_MENU_LAYOUT_STORAGE
-#define PCCONTROLLER_MENU_LAYOUT_STORAGE 1
+#define PCCONTROLLER_MENU_LAYOUT_STORAGE 0
 #endif
 
 // AVR-owned persistent front-panel catalog. Stable page IDs remain protocol
