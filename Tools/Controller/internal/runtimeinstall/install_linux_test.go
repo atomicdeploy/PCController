@@ -33,6 +33,30 @@ func TestPrivilegedPackageValidationRejectsUserOwnedInput(t *testing.T) {
 	}
 }
 
+func TestBrowserExecutableHasDistinctBoundedSparseFileLimit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chrome")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if err := file.Truncate(maximumBinaryBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePinnedFile(file, maximumBinaryBytes, false, true); err == nil {
+		t.Fatal("general Controller/VirtualBoard limit accepted a browser-sized file")
+	}
+	if err := validatePinnedFile(file, maximumBrowserExecutableBytes, false, true); err != nil {
+		t.Fatalf("browser limit rejected sparse file just above 256 MiB: %v", err)
+	}
+	if err := file.Truncate(maximumBrowserExecutableBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := validatePinnedFile(file, maximumBrowserExecutableBytes, false, true); err == nil {
+		t.Fatal("browser limit accepted a file above its 512 MiB ceiling")
+	}
+}
+
 func TestPinnedPackageCopySurvivesPathSwapAndRejectsSymlink(t *testing.T) {
 	oldEffectiveUID := runtimeEffectiveUID
 	runtimeEffectiveUID = func() int { return 1000 }

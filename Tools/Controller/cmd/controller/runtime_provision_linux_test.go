@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -131,6 +132,30 @@ func TestRuntimeInstallDryRunValidatesCanonicalInputsWithoutOpeningConfig(t *tes
 	}
 	if !strings.Contains(stdout.String(), `"package_validated": true`) || !strings.Contains(stdout.String(), `"applied": false`) {
 		t.Fatalf("unexpected report: %s", stdout.String())
+	}
+}
+
+func TestRuntimeInstallRejectsBrowserBeforeAutomaticStaging(t *testing.T) {
+	home := t.TempDir()
+	oldLookup := linuxHostProvisionLookupUser
+	linuxHostProvisionLookupUser = func(string) (*user.User, error) {
+		return &user.User{Username: "runtime-target", Uid: "1000", HomeDir: home}, nil
+	}
+	oldValidate := runtimeInstallValidateBrowser
+	want := errors.New("browser preflight rejected")
+	runtimeInstallValidateBrowser = func(string) (string, error) { return "", want }
+	t.Cleanup(func() {
+		linuxHostProvisionLookupUser = oldLookup
+		runtimeInstallValidateBrowser = oldValidate
+	})
+	var stdout, stderr bytes.Buffer
+	err := runToolchainRuntimeInstall([]string{
+		"--target-user", "runtime-target", "--package", filepath.Join(home, "missing-package"),
+		"--virtual-board", filepath.Join(home, "missing-virtual-board"),
+		"--browser", filepath.Join(home, "missing-browser"), "--apply",
+	}, &stdout, &stderr)
+	if !errors.Is(err, want) {
+		t.Fatalf("runtime-install error=%v, want browser preflight error", err)
 	}
 }
 

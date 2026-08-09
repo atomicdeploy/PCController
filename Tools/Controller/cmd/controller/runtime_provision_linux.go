@@ -23,6 +23,8 @@ import (
 
 const runtimeInstallUsage = "usage: controller toolchain runtime-install --target-user USER [--package DIR] [--virtual-board FILE] [--browser FILE] [--apply|--dry-run] [--json]"
 
+var runtimeInstallValidateBrowser = runtimeinstall.ValidateBrowser
+
 func runToolchainRuntime(action string, args []string, stdout, stderr io.Writer) error {
 	switch strings.ToLower(strings.TrimSpace(action)) {
 	case "runtime-install":
@@ -192,6 +194,10 @@ func runToolchainRuntimeInstall(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	resolvedBrowser, err := resolveRuntimeBrowser(*browser)
+	if err != nil {
+		return err
+	}
+	resolvedBrowser, err = runtimeInstallValidateBrowser(resolvedBrowser)
 	if err != nil {
 		return err
 	}

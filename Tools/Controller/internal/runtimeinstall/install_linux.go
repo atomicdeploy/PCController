@@ -50,14 +50,11 @@ func Install(ctx context.Context, options InstallOptions) (Report, error) {
 	}
 	defer validated.Close()
 	report.PackageValidated = true
-	browser, err := validateBrowser(options.Browser)
+	browser, err := ValidateBrowser(options.Browser)
 	if err != nil {
 		return report, err
 	}
 	report.Browser = browser
-	if _, err := browserMainExecutable(browser); err != nil {
-		return report, err
-	}
 	curl, err := trustedRegularExecutable(defaultString(options.Curl, "/usr/bin/curl"), "curl")
 	if err != nil {
 		return report, err
@@ -492,7 +489,7 @@ func validateTarget(username string, uid uint32, home string) error {
 }
 
 func validateBrowser(path string) (string, error) {
-	resolved, err := trustedRegularExecutable(path, "Chrome/Chromium executable")
+	resolved, err := trustedBrowserExecutable(path, "Chrome/Chromium executable")
 	if err != nil {
 		return "", err
 	}
@@ -502,8 +499,21 @@ func validateBrowser(path string) (string, error) {
 	return resolved, nil
 }
 
+// ValidateBrowser pins and validates both the launcher and the native process
+// executable before runtime-install is allowed to stage or publish anything.
+func ValidateBrowser(path string) (string, error) {
+	resolved, err := validateBrowser(path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := browserMainExecutable(resolved); err != nil {
+		return "", err
+	}
+	return resolved, nil
+}
+
 func browserMainExecutable(launcher string) (string, error) {
-	launcher, err := trustedRegularExecutable(launcher, "Chrome/Chromium launcher")
+	launcher, err := trustedBrowserExecutable(launcher, "Chrome/Chromium launcher")
 	if err != nil {
 		return "", err
 	}
@@ -521,7 +531,7 @@ func browserMainExecutable(launcher string) (string, error) {
 		return launcher, nil
 	}
 	if filepath.Clean(launcher) == "/opt/google/chrome/google-chrome" {
-		return trustedRegularExecutable("/opt/google/chrome/chrome", "Google Chrome MainPID executable")
+		return trustedBrowserExecutable("/opt/google/chrome/chrome", "Google Chrome MainPID executable")
 	}
 	return "", fmt.Errorf("browser launcher %s is a script; pass the native browser executable so MainPID identity can be verified", launcher)
 }

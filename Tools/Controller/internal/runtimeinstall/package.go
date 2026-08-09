@@ -23,7 +23,11 @@ const (
 	DefaultStageRoot      = "/var/lib/pccontroller/runtime-input"
 	maximumManifestBytes  = 1 << 20
 	maximumBinaryBytes    = 256 << 20
-	maximumSmokeOutput    = 32 << 10
+	// Chrome's native executable can exceed the Controller/VirtualBoard cap
+	// (current stable Linux builds are roughly 275 MB). Keep the exception
+	// browser-specific and bounded while preserving the tighter artifact cap.
+	maximumBrowserExecutableBytes = 512 << 20
+	maximumSmokeOutput            = 32 << 10
 )
 
 type HostArtifact struct {

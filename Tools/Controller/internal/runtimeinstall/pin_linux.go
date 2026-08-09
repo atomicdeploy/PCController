@@ -345,6 +345,14 @@ func sha256PinnedFile(file *os.File, maximum int64) (string, error) {
 }
 
 func trustedRegularExecutable(path, label string) (string, error) {
+	return trustedExecutableWithin(path, label, maximumBinaryBytes)
+}
+
+func trustedBrowserExecutable(path, label string) (string, error) {
+	return trustedExecutableWithin(path, label, maximumBrowserExecutableBytes)
+}
+
+func trustedExecutableWithin(path, label string, maximum int64) (string, error) {
 	path, err := cleanAbsolutePath(path, label)
 	if err != nil {
 		return "", err
@@ -358,7 +366,7 @@ func trustedRegularExecutable(path, label string) (string, error) {
 		return "", fmt.Errorf("pin %s: %w", label, err)
 	}
 	defer file.Close()
-	if err := validatePinnedFile(file, maximumBinaryBytes, true, true); err != nil {
+	if err := validatePinnedFile(file, maximum, true, true); err != nil {
 		return "", fmt.Errorf("trust %s: %w", label, err)
 	}
 	return filepath.Clean(resolved), nil
