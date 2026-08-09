@@ -1,21 +1,48 @@
 package netpolicy
 
 import (
+	"errors"
+	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
+
+	"golang.org/x/net/http/httpproxy"
 )
+
+// localNetworkHostnameSuffixes is the single source for both public-source
+// rejection and the default process-wide proxy bypass list.
+var localNetworkHostnameSuffixes = []string{
+	".home.arpa", ".internal", ".lan", ".local", ".localdomain", ".localhost",
+}
 
 // LocalNetworkNoProxyEntries are deliberately address ranges, not proxy
 // endpoints. They keep controller IPC, WebSocket, bridge, discovery, and local
 // integration traffic on the LAN even when an operator configures a proxy for
 // dependency downloads.
-var LocalNetworkNoProxyEntries = []string{
-	"localhost", ".localhost", ".local",
-	"127.0.0.0/8", "::1",
-	"10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16",
-	"172.16.0.0/12", "192.168.0.0/16",
-	"fc00::/7", "fe80::/10",
+var LocalNetworkNoProxyEntries = func() []string {
+	result := []string{"localhost"}
+	result = append(result, localNetworkHostnameSuffixes...)
+	return append(result,
+		"127.0.0.0/8", "::1",
+		"10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16",
+		"172.16.0.0/12", "192.168.0.0/16",
+		"fc00::/7", "fe80::/10", "fec0::/10",
+	)
+}()
+
+// EnvironmentProxySelector reads standard proxy variables through Go's
+// canonical parser. It does not invent or persist a proxy endpoint.
+func EnvironmentProxySelector() ProxySelector {
+	configuration := httpproxy.FromEnvironment()
+	selectProxy := configuration.ProxyFunc()
+	return func(request *http.Request) (*url.URL, error) {
+		if request == nil || request.URL == nil {
+			return nil, errors.New("proxy selection requires a request URL")
+		}
+		return selectProxy(request.URL)
+	}
 }
 
 // WithLocalNetworkNoProxy returns an isolated environment with the caller's

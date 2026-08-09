@@ -41,6 +41,10 @@ func (client *Client) DiscoverManifest(ctx context.Context, request ManifestRequ
 		response.Body.Close()
 		return DiscoveryResult{}, fmt.Errorf("update manifest exceeds %d bytes", maxMetadataBytes)
 	}
+	effectiveManifestURL := manifestURL
+	if response.Request != nil && response.Request.URL != nil {
+		effectiveManifestURL = response.Request.URL.String()
+	}
 	var manifest Manifest
 	// The format identifier defines the semantic contract. Unknown additive
 	// fields are ignored so a newer publisher can extend v1 without breaking an
@@ -51,7 +55,7 @@ func (client *Client) DiscoverManifest(ctx context.Context, request ManifestRequ
 	if manifest.Format != ManifestFormat {
 		return DiscoveryResult{}, fmt.Errorf("unsupported update manifest format %q", manifest.Format)
 	}
-	base, err := url.Parse(manifestURL)
+	base, err := url.Parse(effectiveManifestURL)
 	if err != nil {
 		return DiscoveryResult{}, err
 	}

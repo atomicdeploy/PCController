@@ -12,43 +12,44 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/http/httpproxy"
 	"pccontroller.local/controller/internal/netpolicy"
 )
 
 const defaultDownloadTimeout = 10 * time.Minute
 
 type Downloader struct {
-	client *http.Client
+	client  *http.Client
+	scope   netpolicy.HTTPDestinationScope
+	initErr error
 }
 
-func NewDownloader(client *http.Client) *Downloader {
+// NewDownloader always enforces the public-source transport invariant. A
+// non-nil client is a settings/*http.Transport template, not permission to
+// reach loopback or the LAN.
+func NewDownloader(template *http.Client) *Downloader {
+	client, err := netpolicy.NewPublicHTTPClient(template, netpolicy.PublicHTTPClientOptions{
+		Timeout: defaultDownloadTimeout, Operation: "artifact download",
+		Subject: "artifact URL", MaximumRedirects: 5,
+	})
+	return &Downloader{client: client, scope: netpolicy.HTTPDestinationPublic, initErr: err}
+}
+
+// NewTrustedDownloader explicitly allows configured local destinations and
+// custom transports. Use it only for tests or an authenticated/pinned peer
+// path whose trust decision happened before construction.
+func NewTrustedDownloader(client *http.Client) *Downloader {
 	if client == nil {
-		proxyConfiguration := httpproxy.FromEnvironment()
-		proxy := proxyConfiguration.ProxyFunc()
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = func(request *http.Request) (*url.URL, error) {
-			return proxy(request.URL)
-		}
-		client = &http.Client{
-			Transport: transport,
-			Timeout:   defaultDownloadTimeout,
-			CheckRedirect: func(request *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return errors.New("artifact download exceeded five redirects")
-				}
-				previous := via[len(via)-1]
-				if strings.EqualFold(previous.URL.Scheme, "https") && strings.EqualFold(request.URL.Scheme, "http") {
-					return errors.New("artifact download refused an HTTPS-to-HTTP redirect")
-				}
-				if !sameAuthority(previous.URL, request.URL) {
-					request.Header.Del("Authorization")
-				}
-				return nil
-			},
-		}
+		client = &http.Client{Timeout: defaultDownloadTimeout}
 	}
-	return &Downloader{client: client}
+	copy := *client
+	if copy.Timeout == 0 {
+		copy.Timeout = defaultDownloadTimeout
+	}
+	copy.CheckRedirect = (netpolicy.HTTPRedirectPolicy{
+		Operation: "artifact download", Subject: "artifact URL", MaximumHops: 5,
+		Scope: netpolicy.HTTPDestinationConfigured, Previous: copy.CheckRedirect,
+	}).CheckRedirect
+	return &Downloader{client: &copy, scope: netpolicy.HTTPDestinationConfigured}
 }
 
 func (downloader *Downloader) Fetch(
@@ -57,13 +58,19 @@ func (downloader *Downloader) Fetch(
 	request FetchRequest,
 	progress ProgressFunc,
 ) (Descriptor, error) {
-	if downloader == nil || downloader.client == nil {
+	if downloader == nil {
+		return Descriptor{}, errors.New("artifact downloader is unavailable")
+	}
+	if downloader.initErr != nil {
+		return Descriptor{}, fmt.Errorf("initialize artifact downloader: %w", downloader.initErr)
+	}
+	if downloader.client == nil {
 		return Descriptor{}, errors.New("artifact downloader is unavailable")
 	}
 	if store == nil {
 		return Descriptor{}, errors.New("artifact store is unavailable")
 	}
-	parsed, err := netpolicy.ParseHTTPURL(request.URL, "artifact URL")
+	parsed, err := netpolicy.ParseHTTPURLForScope(request.URL, "artifact URL", downloader.scope)
 	if err != nil {
 		return Descriptor{}, err
 	}
@@ -87,6 +94,13 @@ func (downloader *Downloader) Fetch(
 		return Descriptor{}, fmt.Errorf("download artifact: %w", err)
 	}
 	defer response.Body.Close()
+	effectiveURL := parsed
+	if response.Request != nil && response.Request.URL != nil {
+		effectiveURL = response.Request.URL
+	}
+	if err := netpolicy.ValidateHTTPURLForScope(effectiveURL.String(), "artifact URL", downloader.scope); err != nil {
+		return Descriptor{}, fmt.Errorf("download artifact final URL: %w", err)
+	}
 	if response.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		return Descriptor{}, fmt.Errorf("download artifact: HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
@@ -110,7 +124,7 @@ func (downloader *Downloader) Fetch(
 	}
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
-		name = responseFilename(response, parsed, kind)
+		name = responseFilename(response, effectiveURL, kind)
 	}
 	if progress != nil {
 		progress("downloading", 35, "validating and content-addressing remote artifact")
@@ -128,10 +142,6 @@ func (downloader *Downloader) Fetch(
 		progress("downloaded", 100, "remote artifact verified")
 	}
 	return descriptor, nil
-}
-
-func sameAuthority(left, right *url.URL) bool {
-	return strings.EqualFold(left.Scheme, right.Scheme) && strings.EqualFold(left.Host, right.Host)
 }
 
 func responseFilename(response *http.Response, source *url.URL, kind Kind) string {

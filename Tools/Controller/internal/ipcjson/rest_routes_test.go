@@ -44,7 +44,7 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseClient := releaseplane.NewClient(&http.Client{Transport: inventoryRoundTripper(
+	releaseClient := releaseplane.NewTrustedClient(&http.Client{Transport: inventoryRoundTripper(
 		func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("route inventory transport is intentionally offline")
 		},
