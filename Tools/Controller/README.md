@@ -681,7 +681,7 @@ or bridge calls.
 
 HTTP and native socket clients authenticate with a Bearer or compatibility
 header. The Web UI exchanges that header credential at
-`POST /api/session/ticket` for a 30-second, one-use, Origin/peer/transport-
+`POST /api/session/ticket` for a 15-second, one-use, Origin/peer/transport-
 bound WebSocket subprotocol ticket. Durable tokens are rejected in URLs, and
 unauthorized standard WebSocket or Socket.IO handshakes emit no application
 frames. Durable host and integration credentials can be referenced from the
