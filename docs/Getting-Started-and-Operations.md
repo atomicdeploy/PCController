@@ -130,8 +130,11 @@ controller.exe uninstall
 Installation and repair use content-addressed slots and a recovery journal, so
 an update never overwrites the running image. Repair is idempotent when every
 installed digest is healthy and rebuilds a damaged slot only from a verified
-package. The default uninstall preserves both roaming configuration and local
-host data, including board backups. Data removal is deliberately separate:
+package. Enabling native desktop integration or changing its display name also
+journals the prior and desired identities before mutation; interrupted cleanup
+or activation is retried idempotently before status can report healthy. The
+default uninstall preserves both roaming configuration and local host data,
+including board backups. Data removal is deliberately separate:
 
 ```console
 controller.exe uninstall --purge-data --preview-purge

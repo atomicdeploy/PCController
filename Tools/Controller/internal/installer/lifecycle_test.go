@@ -149,28 +149,42 @@ func TestMatchingInstallPersistsNewDesktopIntegration(t *testing.T) {
 	}
 }
 
-func TestDesktopFailureRollsBackDurableActivation(t *testing.T) {
+func TestDesktopFailureRetainsJournalAndRollsForwardOnRetry(t *testing.T) {
 	ctx := context.Background()
 	root := filepath.Join(t.TempDir(), "installation")
-	packageOne, manifestOne := writeTestPackage(t, "1.0.0", "one")
+	packageOne, _ := writeTestPackage(t, "1.0.0", "one")
 	desktop := &fakeDesktop{}
 	service := testService(t, desktop)
-	first, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageOne, ConfigureDesktop: true})
-	if err != nil {
+	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageOne, ConfigureDesktop: true}); err != nil {
 		t.Fatal(err)
 	}
-	packageTwo, _ := writeTestPackage(t, "2.0.0", "two")
+	packageTwo, manifestTwo := writeTestPackage(t, "2.0.0", "two")
 	desktop.ensureErr = errors.New("native registration failed")
 	if _, err := service.Install(ctx, ChangeRequest{Root: root, PackageRoot: packageTwo}); err == nil {
 		t.Fatal("desktop activation failure was ignored")
 	}
 	if len(desktop.remove) != 1 {
-		t.Fatalf("failed desktop activation was not cleaned up: %#v", desktop.remove)
+		t.Fatalf("prior desktop activation was not cleaned up: %#v", desktop.remove)
+	}
+	if _, err := os.Stat(filepath.Join(root, transactionName)); err != nil {
+		t.Fatalf("failed desktop activation did not retain its journal: %v", err)
+	}
+	if _, err := service.Status(ctx, root); err == nil {
+		t.Fatal("status ignored the incomplete desktop transition")
+	}
+	if _, err := os.Stat(filepath.Join(root, transactionName)); err != nil {
+		t.Fatalf("failed recovery removed its retry journal: %v", err)
 	}
 	desktop.ensureErr = nil
 	status, err := service.Status(ctx, root)
-	if err != nil || !status.Healthy || status.PackageSHA256 != manifestOne.RootSHA256 || !samePath(status.Executable, first.Executable) {
-		t.Fatalf("rollback status=%#v err=%v", status, err)
+	if err != nil || !status.Healthy || status.PackageSHA256 != manifestTwo.RootSHA256 {
+		t.Fatalf("roll-forward status=%#v err=%v", status, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
+		t.Fatalf("successful recovery retained its journal: %v", err)
+	}
+	if len(desktop.remove) != 3 || len(desktop.ensure) != 4 {
+		t.Fatalf("desktop transition was not retried idempotently: %#v", desktop)
 	}
 }
 
@@ -183,14 +197,18 @@ func TestRecoveryCompletesDesktopActivationAfterStateCommit(t *testing.T) {
 	installed, err := service.Install(ctx, ChangeRequest{
 		Root: root, PackageRoot: packageRoot, ConfigureDesktop: true,
 	})
-	if err != nil || installed.State == nil {
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installed.State == nil {
 		t.Fatalf("install=%#v err=%v", installed, err)
 	}
 	desktop.ensure = nil
+	desired := *installed.State
 	journal := transactionJournal{
 		Format: transactionFormat, ID: "state-committed", Operation: "install",
 		Phase: "slot-ready", NewSlot: installed.State.ActiveSlot,
-		NewSHA256: installed.State.ActiveSHA256, UpdatedAt: time.Now().UTC(),
+		NewSHA256: installed.State.ActiveSHA256, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 	}
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
 		t.Fatal(err)
@@ -218,10 +236,11 @@ func TestRecoveryVerifiesSlotBeforeDesktopActivation(t *testing.T) {
 				t.Fatalf("install=%#v err=%v", installed, err)
 			}
 			desktop.ensure = nil
+			desired := *installed.State
 			journal := transactionJournal{
 				Format: transactionFormat, ID: "corrupt-recovery", Operation: "install",
 				Phase: phase, NewSlot: installed.State.ActiveSlot,
-				NewSHA256: installed.State.ActiveSHA256, UpdatedAt: time.Now().UTC(),
+				NewSHA256: installed.State.ActiveSHA256, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
 			}
 			if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
 				t.Fatal(err)
@@ -237,6 +256,134 @@ func TestRecoveryVerifiesSlotBeforeDesktopActivation(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(root, transactionName)); err != nil {
 				t.Fatalf("failed recovery journal was not retained: %v", err)
+			}
+		})
+	}
+}
+
+func TestPresentationJournalRecoversEnableAndRenameCrashBoundaries(t *testing.T) {
+	tests := []struct {
+		name             string
+		initiallyManaged bool
+		previousName     string
+		desiredName      string
+		stateCommitted   bool
+		wantRemove       int
+	}{
+		{name: "initial-enable-before-state", previousName: "Initial", desiredName: "Enabled", wantRemove: 0},
+		{name: "initial-enable-after-state", previousName: "Initial", desiredName: "Enabled", stateCommitted: true, wantRemove: 0},
+		{name: "rename-before-state", initiallyManaged: true, previousName: "Old Name", desiredName: "New Name", wantRemove: 1},
+		{name: "rename-after-state", initiallyManaged: true, previousName: "Old Name", desiredName: "New Name", stateCommitted: true, wantRemove: 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "installation")
+			packageRoot, _ := writeTestPackage(t, "1.0.0", test.name)
+			desktop := &fakeDesktop{}
+			service := testService(t, desktop)
+			service.DisplayName = test.previousName
+			installed, err := service.Install(context.Background(), ChangeRequest{
+				Root: root, PackageRoot: packageRoot, ConfigureDesktop: test.initiallyManaged,
+			})
+			if err != nil || installed.State == nil {
+				t.Fatalf("install=%#v err=%v", installed, err)
+			}
+			previous := *installed.State
+			desired := previous
+			desired.DisplayName = test.desiredName
+			desired.DesktopManaged = true
+			desired.UpdatedAt = previous.UpdatedAt.Add(time.Second)
+			if test.stateCommitted {
+				if err := writeJSONAtomic(filepath.Join(root, installationStateName), desired, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			journal := transactionJournal{
+				Format: transactionFormat, ID: test.name, Operation: "install", Phase: "presentation",
+				NewSlot: desired.ActiveSlot, NewSHA256: desired.ActiveSHA256,
+				PreviousState: &previous, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
+			}
+			if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			desktop.ensure, desktop.remove = nil, nil
+			status, err := service.Status(context.Background(), root)
+			if err != nil || !status.Healthy || status.State == nil || *status.State != desired {
+				t.Fatalf("recovered status=%#v err=%v", status, err)
+			}
+			if len(desktop.remove) != test.wantRemove || len(desktop.ensure) != 1 ||
+				desktop.ensure[0].DisplayName != test.desiredName {
+				t.Fatalf("desktop reconciliation=%#v", desktop)
+			}
+			if test.wantRemove == 1 && desktop.remove[0].DisplayName != test.previousName {
+				t.Fatalf("prior desktop identity was not selected for cleanup: %#v", desktop.remove)
+			}
+			if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
+				t.Fatalf("recovered presentation journal remains: %v", err)
+			}
+		})
+	}
+}
+
+func TestPackageRenameRecoveryCleansPriorIdentityAndRetainsFailures(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		phase      string
+		failRemove bool
+	}{
+		{name: "slot-ready", phase: "slot-ready"},
+		{name: "activated", phase: "activated"},
+		{name: "activated-cleanup-retry", phase: "activated", failRemove: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "installation")
+			packageOne, _ := writeTestPackage(t, "1.0.0", "old-"+test.name)
+			packageTwo, _ := writeTestPackage(t, "2.0.0", "new-"+test.name)
+			desktop := &fakeDesktop{}
+			service := testService(t, desktop)
+			service.DisplayName = "Old Name"
+			installed, err := service.Install(context.Background(), ChangeRequest{
+				Root: root, PackageRoot: packageOne, ConfigureDesktop: true,
+			})
+			if err != nil || installed.State == nil {
+				t.Fatalf("install=%#v err=%v", installed, err)
+			}
+			previous := *installed.State
+			service.DisplayName = "New Name"
+			updated, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageTwo})
+			if err != nil || updated.State == nil {
+				t.Fatalf("update=%#v err=%v", updated, err)
+			}
+			desired := *updated.State
+			journal := transactionJournal{
+				Format: transactionFormat, ID: test.name, Operation: "install", Phase: test.phase,
+				NewSlot: desired.ActiveSlot, NewSHA256: desired.ActiveSHA256,
+				PreviousState: &previous, DesiredState: &desired, UpdatedAt: time.Now().UTC(),
+			}
+			if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			desktop.ensure, desktop.remove = nil, nil
+			if test.failRemove {
+				desktop.removeErr = errors.New("shortcut cleanup failed")
+				if _, err := service.Status(context.Background(), root); err == nil {
+					t.Fatal("desktop cleanup failure was ignored")
+				}
+				if _, err := os.Stat(filepath.Join(root, transactionName)); err != nil {
+					t.Fatalf("failed cleanup removed its retry journal: %v", err)
+				}
+				desktop.removeErr = nil
+			}
+			status, err := service.Status(context.Background(), root)
+			if err != nil || !status.Healthy || status.State == nil || *status.State != desired {
+				t.Fatalf("recovered status=%#v err=%v", status, err)
+			}
+			if len(desktop.remove) == 0 || desktop.remove[len(desktop.remove)-1].DisplayName != "Old Name" ||
+				len(desktop.ensure) != 1 || desktop.ensure[0].DisplayName != "New Name" {
+				t.Fatalf("package rename reconciliation=%#v", desktop)
+			}
+			if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
+				t.Fatalf("recovered activation journal remains: %v", err)
 			}
 		})
 	}
@@ -306,7 +453,7 @@ func TestDetachedUninstallTombstoneIsRecovered(t *testing.T) {
 	}
 }
 
-func TestCurrentDisplayNameWinsEnableUpdateRollbackAndCleanup(t *testing.T) {
+func TestCurrentDisplayNameWinsEnableUpdateRetryAndCleanup(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "installation")
 	packageOne, _ := writeTestPackage(t, "1.0.0", "name-one")
 	packageTwo, _ := writeTestPackage(t, "2.0.0", "name-two")
@@ -338,14 +485,20 @@ func TestCurrentDisplayNameWinsEnableUpdateRollbackAndCleanup(t *testing.T) {
 	if _, err := service.Install(context.Background(), ChangeRequest{Root: root, PackageRoot: packageTwo}); err == nil {
 		t.Fatal("rename registration failure was ignored")
 	}
+	if _, err := os.Stat(filepath.Join(root, transactionName)); err != nil {
+		t.Fatalf("failed rename did not retain its recovery journal: %v", err)
+	}
 	desktop.ensureErr = nil
 	status, err := service.Status(context.Background(), root)
-	if err != nil || status.State == nil || status.State.DisplayName != "Updated Name" {
-		t.Fatalf("rename rollback status=%#v err=%v", status, err)
+	if err != nil || status.State == nil || status.State.DisplayName != "Failed Rename" {
+		t.Fatalf("rename retry status=%#v err=%v", status, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, transactionName)); !os.IsNotExist(err) {
+		t.Fatalf("successful rename retry retained its journal: %v", err)
 	}
 	desktop.remove = nil
 	removed, err := service.Uninstall(context.Background(), UninstallRequest{Root: root})
-	if err != nil || !removed.Changed || len(desktop.remove) != 1 || desktop.remove[0].DisplayName != "Updated Name" {
+	if err != nil || !removed.Changed || len(desktop.remove) != 1 || desktop.remove[0].DisplayName != "Failed Rename" {
 		t.Fatalf("renamed cleanup=%#v desktop=%#v err=%v", removed, desktop.remove, err)
 	}
 }

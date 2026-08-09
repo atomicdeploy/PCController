@@ -100,6 +100,9 @@ binary, checksum, or test run cannot satisfy a newer tree.
   waits are signal-aware and bounded, activated recovery verifies its slot
   before desktop registration, and current app-name precedence replaces stored
   presentation while preserving the prior identity only for cleanup/rollback.
+  Desktop enable/name transitions journal both identities before mutation,
+  reconcile old cleanup plus desired activation idempotently, and retain the
+  journal on failure so every crash boundary can roll forward on retry.
 - ✅ The self-uninstall helper binds PID plus process-creation identity and
   leaves a durable observable completion/failure record instead of reporting
   only that cleanup was scheduled.

@@ -91,6 +91,7 @@ type transactionJournal struct {
 	NewSlot       string             `json:"new_slot,omitempty"`
 	NewSHA256     string             `json:"new_sha256,omitempty"`
 	PreviousState *InstallationState `json:"previous_state,omitempty"`
+	DesiredState  *InstallationState `json:"desired_state,omitempty"`
 	UpdatedAt     time.Time          `json:"updated_at"`
 }
 
@@ -306,32 +307,47 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 			next.DisplayName = service.DisplayName
 			next.DesktopManaged = desktopManaged
 			nameChanged := !strings.EqualFold(strings.TrimSpace(previous.DisplayName), strings.TrimSpace(next.DisplayName))
-			if desktopManaged {
-				if previous.DesktopManaged && nameChanged {
-					if err := service.Desktop.RemoveOwned(ctx, service.desktopTarget(root, previous)); err != nil {
-						return result, fmt.Errorf("remove prior native desktop identity: %w", err)
+			stateChanged := previous.DesktopManaged != desktopManaged || nameChanged
+			desktopTransition := service.desktopTransitionRequired(root, &previous, next)
+			if stateChanged {
+				next.UpdatedAt = service.now()
+			}
+			if desktopTransition {
+				id, idErr := transactionID()
+				if idErr != nil {
+					return result, idErr
+				}
+				previousCopy, desiredCopy := previous, next
+				journal := transactionJournal{
+					Format: transactionFormat, ID: id, Operation: operation, Phase: "presentation",
+					NewSlot: next.ActiveSlot, NewSHA256: next.ActiveSHA256,
+					PreviousState: &previousCopy, DesiredState: &desiredCopy, UpdatedAt: service.now(),
+				}
+				if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+					return result, err
+				}
+				if err := service.reconcileDesktopTransition(ctx, root, journal.PreviousState, next); err != nil {
+					return result, fmt.Errorf("apply journaled desktop transition: %w", err)
+				}
+				if err := writeJSONAtomic(filepath.Join(root, installationStateName), next, 0o600); err != nil {
+					return result, fmt.Errorf("persist journaled desktop transition: %w", err)
+				}
+				if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !errors.Is(err, os.ErrNotExist) {
+					return result, fmt.Errorf("commit desktop transition: %w", err)
+				}
+			} else {
+				if desktopManaged {
+					if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, next)); err != nil {
+						return result, fmt.Errorf("repair native desktop integration: %w", err)
 					}
 				}
-				if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, next)); err != nil {
-					var restoreErr error
-					if previous.DesktopManaged && nameChanged {
-						restoreErr = service.Desktop.Ensure(ctx, service.desktopTarget(root, previous))
+				if stateChanged {
+					if err := writeJSONAtomic(filepath.Join(root, installationStateName), next, 0o600); err != nil {
+						return result, fmt.Errorf("persist presentation state: %w", err)
 					}
-					return result, errors.Join(fmt.Errorf("repair native desktop integration: %w", err), restoreErr)
 				}
 			}
-			if previous.DesktopManaged != desktopManaged || nameChanged {
-				next.UpdatedAt = service.now()
-				if err := writeJSONAtomic(filepath.Join(root, installationStateName), next, 0o600); err != nil {
-					var rollbackErr error
-					if desktopManaged {
-						rollbackErr = service.Desktop.RemoveOwned(ctx, service.desktopTarget(root, next))
-					}
-					if previous.DesktopManaged {
-						rollbackErr = errors.Join(rollbackErr, service.Desktop.Ensure(ctx, service.desktopTarget(root, previous)))
-					}
-					return result, errors.Join(fmt.Errorf("persist desktop integration state: %w", err), rollbackErr)
-				}
+			if stateChanged {
 				result.Changed = true
 			}
 			result.Healthy, result.DesktopManaged, result.Executable = true, desktopManaged, filepath.Join(root, filepath.FromSlash(next.Executable))
@@ -414,6 +430,11 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 			next.PreviousSlot, next.PreviousSHA256 = previous.PreviousSlot, previous.PreviousSHA256
 		}
 	}
+	desiredCopy := next
+	journal.DesiredState, journal.UpdatedAt = &desiredCopy, service.now()
+	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
+		return result, fmt.Errorf("persist desired installation state: %w", err)
+	}
 	if err := writeJSONAtomic(filepath.Join(root, installationStateName), next, 0o600); err != nil {
 		return result, err
 	}
@@ -421,17 +442,8 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 	if err := writeJSONAtomic(filepath.Join(root, transactionName), journal, 0o600); err != nil {
 		return result, err
 	}
-	if desktopManaged {
-		if exists && previous.DesktopManaged && !strings.EqualFold(strings.TrimSpace(previous.DisplayName), strings.TrimSpace(next.DisplayName)) {
-			if err := service.Desktop.RemoveOwned(ctx, service.desktopTarget(root, previous)); err != nil {
-				rollbackErr := service.rollbackActivation(ctx, root, journal)
-				return result, errors.Join(fmt.Errorf("remove prior native desktop identity: %w", err), rollbackErr)
-			}
-		}
-		if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, next)); err != nil {
-			rollbackErr := service.rollbackActivation(ctx, root, journal)
-			return result, errors.Join(fmt.Errorf("activate native desktop integration: %w", err), rollbackErr)
-		}
+	if err := service.reconcileDesktopTransition(ctx, root, journal.PreviousState, next); err != nil {
+		return result, fmt.Errorf("activate journaled desktop integration: %w", err)
 	}
 	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return result, fmt.Errorf("commit installation transaction: %w", err)
@@ -621,6 +633,50 @@ func (service *Service) desktopTarget(root string, state InstallationState) Desk
 	}
 }
 
+func (service *Service) desktopTransitionRequired(root string, previous *InstallationState, desired InstallationState) bool {
+	if previous == nil {
+		return desired.DesktopManaged
+	}
+	if previous.DesktopManaged != desired.DesktopManaged {
+		return true
+	}
+	if !desired.DesktopManaged {
+		return false
+	}
+	priorTarget := service.desktopTarget(root, *previous)
+	desiredTarget := service.desktopTarget(root, desired)
+	return !strings.EqualFold(strings.TrimSpace(priorTarget.DisplayName), strings.TrimSpace(desiredTarget.DisplayName)) ||
+		!samePath(priorTarget.Executable, desiredTarget.Executable)
+}
+
+// reconcileDesktopTransition is deliberately idempotent. The transaction
+// journal remains durable until prior owned artifacts have been removed, the
+// desired identity has been ensured, and the matching installation state has
+// been persisted. Re-running after any crash boundary is therefore safe.
+func (service *Service) reconcileDesktopTransition(
+	ctx context.Context,
+	root string,
+	previous *InstallationState,
+	desired InstallationState,
+) error {
+	if (previous != nil && previous.DesktopManaged) || desired.DesktopManaged {
+		if service.Desktop == nil {
+			return ErrDesktopAdapterUnavailable
+		}
+	}
+	if previous != nil && previous.DesktopManaged && service.desktopTransitionRequired(root, previous, desired) {
+		if err := service.Desktop.RemoveOwned(ctx, service.desktopTarget(root, *previous)); err != nil {
+			return fmt.Errorf("remove prior native desktop identity: %w", err)
+		}
+	}
+	if desired.DesktopManaged {
+		if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, desired)); err != nil {
+			return fmt.Errorf("ensure desired native desktop identity: %w", err)
+		}
+	}
+	return nil
+}
+
 func (service *Service) checkOwnership(root string, create bool) error {
 	if err := pathguard.ValidateComponents(root, create); err != nil {
 		return err
@@ -761,6 +817,28 @@ func (service *Service) recover(ctx context.Context, root string) error {
 	if err := decodeStrictJSON(content, &journal); err != nil || journal.Format != transactionFormat {
 		return fmt.Errorf("installation recovery journal is invalid: %w", err)
 	}
+	for _, candidate := range []struct {
+		name  string
+		state *InstallationState
+	}{
+		{name: "previous", state: journal.PreviousState},
+		{name: "desired", state: journal.DesiredState},
+	} {
+		if candidate.state == nil {
+			continue
+		}
+		if err := validateInstallationState(*candidate.state); err != nil {
+			return fmt.Errorf("installation recovery journal %s state is invalid: %w", candidate.name, err)
+		}
+		if candidate.state.OwnerID != service.OwnerID {
+			return ErrOwnershipMismatch
+		}
+	}
+	if journal.DesiredState != nil &&
+		(journal.DesiredState.ActiveSlot != journal.NewSlot ||
+			!strings.EqualFold(journal.DesiredState.ActiveSHA256, journal.NewSHA256)) {
+		return errors.New("installation recovery journal desired state differs from its slot identity")
+	}
 	switch journal.Phase {
 	case "staging":
 		if journal.Stage != "" {
@@ -793,13 +871,11 @@ func (service *Service) recover(ctx context.Context, root string) error {
 			if err := service.verifySlot(root, state.ActiveSlot, state.ActiveSHA256); err != nil {
 				return fmt.Errorf("recover published installation slot: %w", err)
 			}
-			if state.DesktopManaged {
-				if service.Desktop == nil {
-					return ErrDesktopAdapterUnavailable
-				}
-				if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, state)); err != nil {
-					return fmt.Errorf("recover native desktop integration: %w", err)
-				}
+			if journal.DesiredState == nil || state != *journal.DesiredState {
+				return errors.New("published installation transaction does not match its desired state")
+			}
+			if err := service.reconcileDesktopTransition(ctx, root, journal.PreviousState, state); err != nil {
+				return fmt.Errorf("recover native desktop transition: %w", err)
 			}
 		}
 	case "activated":
@@ -807,16 +883,34 @@ func (service *Service) recover(ctx context.Context, root string) error {
 		if stateErr != nil || !exists || state.ActiveSlot != journal.NewSlot || !strings.EqualFold(state.ActiveSHA256, journal.NewSHA256) {
 			return errors.New("activated installation transaction does not match durable state")
 		}
+		if journal.DesiredState == nil || state != *journal.DesiredState {
+			return errors.New("activated installation transaction does not match its desired state")
+		}
 		if err := service.verifySlot(root, state.ActiveSlot, state.ActiveSHA256); err != nil {
 			return fmt.Errorf("recover activated installation slot: %w", err)
 		}
-		if state.DesktopManaged {
-			if service.Desktop == nil {
-				return ErrDesktopAdapterUnavailable
-			}
-			if err := service.Desktop.Ensure(ctx, service.desktopTarget(root, state)); err != nil {
-				return err
-			}
+		if err := service.reconcileDesktopTransition(ctx, root, journal.PreviousState, state); err != nil {
+			return fmt.Errorf("recover activated desktop transition: %w", err)
+		}
+	case "presentation":
+		if journal.PreviousState == nil || journal.DesiredState == nil {
+			return errors.New("desktop presentation transaction is incomplete")
+		}
+		state, exists, stateErr := loadState(root)
+		if stateErr != nil || !exists {
+			return errors.New("desktop presentation transaction has no durable installation state")
+		}
+		if state != *journal.PreviousState && state != *journal.DesiredState {
+			return errors.New("desktop presentation transaction differs from durable state")
+		}
+		if err := service.verifySlot(root, journal.DesiredState.ActiveSlot, journal.DesiredState.ActiveSHA256); err != nil {
+			return fmt.Errorf("recover desktop presentation installation slot: %w", err)
+		}
+		if err := service.reconcileDesktopTransition(ctx, root, journal.PreviousState, *journal.DesiredState); err != nil {
+			return fmt.Errorf("recover desktop presentation transition: %w", err)
+		}
+		if err := writeJSONAtomic(filepath.Join(root, installationStateName), *journal.DesiredState, 0o600); err != nil {
+			return fmt.Errorf("persist recovered desktop presentation state: %w", err)
 		}
 	case "uninstall-prepared", "uninstalling":
 		state, exists, stateErr := loadState(root)
@@ -848,39 +942,6 @@ func (service *Service) recover(ctx context.Context, root string) error {
 	return nil
 }
 
-func (service *Service) rollbackActivation(ctx context.Context, root string, journal transactionJournal) error {
-	var result error
-	activated, activatedExists, activatedErr := loadState(root)
-	if activatedErr != nil {
-		result = errors.Join(result, activatedErr)
-	} else if activatedExists && activated.DesktopManaged && service.Desktop != nil {
-		result = errors.Join(
-			result,
-			service.Desktop.RemoveOwned(ctx, service.desktopTarget(root, activated)),
-		)
-	}
-	if journal.PreviousState == nil {
-		if err := os.Remove(filepath.Join(root, installationStateName)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			result = errors.Join(result, err)
-		}
-	} else {
-		if err := writeJSONAtomic(filepath.Join(root, installationStateName), *journal.PreviousState, 0o600); err != nil {
-			result = errors.Join(result, err)
-		} else if journal.PreviousState.DesktopManaged && service.Desktop != nil {
-			result = errors.Join(result, service.Desktop.Ensure(ctx, service.desktopTarget(root, *journal.PreviousState)))
-		}
-	}
-	if journal.NewSlot != "" && (journal.PreviousState == nil || journal.PreviousState.ActiveSlot != journal.NewSlot) {
-		if slot, err := inventoryEntryPath(root, journal.NewSlot); err == nil {
-			result = errors.Join(result, removeOwnedSubtree(root, slot))
-		}
-	}
-	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		result = errors.Join(result, err)
-	}
-	return result
-}
-
 func loadState(root string) (InstallationState, bool, error) {
 	content, err := readBoundedRegularFile(filepath.Join(root, installationStateName), 256<<10)
 	if errors.Is(err, os.ErrNotExist) {
@@ -893,26 +954,44 @@ func loadState(root string) (InstallationState, bool, error) {
 	if err := decodeStrictJSON(content, &state); err != nil {
 		return InstallationState{}, false, err
 	}
-	if state.Format != installationStateFormat || state.ProductAppID != productidentity.StableAppID || strings.TrimSpace(state.OwnerID) == "" {
-		return InstallationState{}, false, errors.New("installation state identity is invalid")
-	}
-	if strings.TrimSpace(state.DisplayName) == "" {
-		return InstallationState{}, false, errors.New("installation display name is missing")
-	}
-	if _, err := normalizeInventoryPath(state.ActiveSlot); err != nil {
-		return InstallationState{}, false, err
-	}
-	if _, err := normalizeInventoryPath(state.Executable); err != nil {
-		return InstallationState{}, false, err
-	}
-	activePrefix := strings.TrimSuffix(filepath.ToSlash(state.ActiveSlot), "/") + "/"
-	if !strings.HasPrefix(strings.ToLower(filepath.ToSlash(state.Executable)), strings.ToLower(activePrefix)) {
-		return InstallationState{}, false, errors.New("installation executable is outside the active package slot")
-	}
-	if _, err := normalizeDigest(state.ActiveSHA256); err != nil {
+	if err := validateInstallationState(state); err != nil {
 		return InstallationState{}, false, err
 	}
 	return state, true, nil
+}
+
+func validateInstallationState(state InstallationState) error {
+	if state.Format != installationStateFormat || state.ProductAppID != productidentity.StableAppID || strings.TrimSpace(state.OwnerID) == "" {
+		return errors.New("installation state identity is invalid")
+	}
+	if strings.TrimSpace(state.DisplayName) == "" {
+		return errors.New("installation display name is missing")
+	}
+	if _, err := normalizeInventoryPath(state.ActiveSlot); err != nil {
+		return err
+	}
+	if _, err := normalizeInventoryPath(state.Executable); err != nil {
+		return err
+	}
+	activePrefix := strings.TrimSuffix(filepath.ToSlash(state.ActiveSlot), "/") + "/"
+	if !strings.HasPrefix(strings.ToLower(filepath.ToSlash(state.Executable)), strings.ToLower(activePrefix)) {
+		return errors.New("installation executable is outside the active package slot")
+	}
+	if _, err := normalizeDigest(state.ActiveSHA256); err != nil {
+		return err
+	}
+	if (state.PreviousSlot == "") != (state.PreviousSHA256 == "") {
+		return errors.New("installation rollback slot identity is incomplete")
+	}
+	if state.PreviousSlot != "" {
+		if _, err := normalizeInventoryPath(state.PreviousSlot); err != nil {
+			return err
+		}
+		if _, err := normalizeDigest(state.PreviousSHA256); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func copyVerifiedFile(source, target string, entry PackageFile) error {

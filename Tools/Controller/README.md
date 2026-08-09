@@ -203,11 +203,15 @@ controller.exe repair --expected-package-sha256 <inventory-root-sha256> --deskto
 controller.exe uninstall
 ```
 
-Install and update activation are journaled and recoverable. A healthy repeated
-install or repair is a no-op; a damaged slot is rebuilt from the verified
-package without replacing a mapped executable in place. One exact prior slot is
-retained for rollback. The per-user root carries a product-and-user ownership
-marker, and lifecycle commands refuse a foreign or unmarked non-empty root.
+Install and update activation are journaled and recoverable. Presentation-only
+desktop enable and display-name changes journal both the prior and desired
+identity before touching native artifacts, then roll forward idempotently after
+an interruption; a failed cleanup or registration retains the journal for the
+next retry. A healthy repeated install or repair is a no-op; a damaged slot is
+rebuilt from the verified package without replacing a mapped executable in
+place. One exact prior slot is retained for rollback. The per-user root carries
+a product-and-user ownership marker, and lifecycle commands refuse a foreign or
+unmarked non-empty root.
 
 Uninstall preserves configuration, board backups, downloaded tools, logs, and
 host state. Purging them is a separate destructive choice that requires both
