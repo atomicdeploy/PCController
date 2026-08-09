@@ -361,6 +361,83 @@ func TestDiscoveryHTTPSPreferenceStillDisablesActiveHTTPSpelling(t *testing.T) {
 	}
 }
 
+func TestDiscoveryParsesCommentedDeb822Continuations(t *testing.T) {
+	config := mirrorTestConfig(t)
+	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "commented.sources")
+	content := "# Types: deb\n" +
+		"# URIs:\n" +
+		"#   https://history.example.ir/ubuntu\n" +
+		"# Suites:\n" +
+		"#   jammy\n" +
+		"#   jammy-updates\n" +
+		"# Components: main\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := planUbuntuSources(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, definition := range plan.SourceInventory {
+		if definition.Path != path {
+			continue
+		}
+		found = definition.Status == SourceStatusCommented &&
+			definition.URI == "https://history.example.ir/ubuntu" &&
+			strings.Join(definition.Suites, " ") == "jammy jammy-updates"
+	}
+	if !found {
+		t.Fatalf("commented multiline deb822 definition missing: %+v", plan.SourceInventory)
+	}
+	if len(plan.DiscoveredCandidates) != 1 || plan.DiscoveredCandidates[0].URI != "https://history.example.ir/ubuntu/" {
+		t.Fatalf("commented multiline candidate=%+v", plan.DiscoveredCandidates)
+	}
+}
+
+func TestDiscoverySplitsFullyCommentedDeb822Stanzas(t *testing.T) {
+	config := mirrorTestConfig(t)
+	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "commented-stanzas.sources")
+	content := "# Types: deb\n" +
+		"# URIs: https://first.example.ir/ubuntu\n" +
+		"# Suites: jammy\n" +
+		"# Components: main\n" +
+		"#\n" +
+		"# Types: deb\n" +
+		"# URIs: https://second.example.ir/ubuntu\n" +
+		"# Suites: noble\n" +
+		"# Components: main\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := planUbuntuSources(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := make(map[string]bool)
+	for _, definition := range plan.SourceInventory {
+		if definition.Path == path && definition.Status == SourceStatusCommented {
+			found[definition.URI] = true
+		}
+	}
+	for _, wanted := range []string{"https://first.example.ir/ubuntu", "https://second.example.ir/ubuntu"} {
+		if !found[wanted] {
+			t.Fatalf("fully commented deb822 stanza %s missing: %+v", wanted, plan.SourceInventory)
+		}
+	}
+	if len(plan.DiscoveredCandidates) != 2 {
+		t.Fatalf("fully commented deb822 candidates=%+v", plan.DiscoveredCandidates)
+	}
+}
+
 func TestDiscoveryDoesNotParseSymlinkOversizeOrCommentProse(t *testing.T) {
 	config := mirrorTestConfig(t)
 	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d", "disabled")

@@ -355,10 +355,38 @@ func splitDeb822Definitions(content string) []deb822Paragraph {
 		if index != len(lines) && strings.TrimSpace(lines[index]) != "" {
 			continue
 		}
-		if index > start {
-			result = append(result, deb822Paragraph{Text: strings.Join(lines[start:index], "\n"), Line: start + 1})
-		}
+		result = appendDeb822DefinitionParagraphs(result, lines, start, index)
 		start = index + 1
+	}
+	return result
+}
+
+func appendDeb822DefinitionParagraphs(result []deb822Paragraph, lines []string, start, end int) []deb822Paragraph {
+	if end <= start {
+		return result
+	}
+	fullyCommented := true
+	for _, line := range lines[start:end] {
+		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
+			fullyCommented = false
+			break
+		}
+	}
+	if !fullyCommented {
+		return append(result, deb822Paragraph{Text: strings.Join(lines[start:end], "\n"), Line: start + 1})
+	}
+	paragraphStart := start
+	for index := start; index < end; index++ {
+		trimmed := strings.TrimSpace(lines[index])
+		if trimmed != "" && strings.Trim(trimmed, "#") == "" {
+			if index > paragraphStart {
+				result = append(result, deb822Paragraph{Text: strings.Join(lines[paragraphStart:index], "\n"), Line: paragraphStart + 1})
+			}
+			paragraphStart = index + 1
+		}
+	}
+	if end > paragraphStart {
+		result = append(result, deb822Paragraph{Text: strings.Join(lines[paragraphStart:end], "\n"), Line: paragraphStart + 1})
 	}
 	return result
 }
@@ -370,8 +398,12 @@ func uncommentDeb822(paragraph string) string {
 		if !strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-		lines[index] = indent + strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+		marker := len(line) - len(strings.TrimLeft(line, " \t"))
+		remaining := line[marker+1:]
+		if strings.HasPrefix(remaining, " ") || strings.HasPrefix(remaining, "\t") {
+			remaining = remaining[1:]
+		}
+		lines[index] = line[:marker] + remaining
 	}
 	return strings.Join(lines, "\n")
 }
