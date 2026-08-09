@@ -422,7 +422,7 @@ void applyStoredSettings(uint32_t at) {
                             ? settings.displayBrightness
                             : settings.displayClosedBrightness());
   statusLeds.setBrightness(settings.statusBrightness);
-  statusLeds.setPowerSignal(true);
+  pwm.setPowerSignal(true);
   relays.setMotionAllowed(motionPolicyAllows(), at);
 }
 

@@ -32,8 +32,8 @@ public:
     Idle = 0,
     Buffering = 1,
     Playing = 2,
-    Cancelled = 3,
-    Completed = 4,
+    Completed = 3,
+    Cancelled = 4,
     Failed = 5,
     Recording = 6,
     Captured = 7,
@@ -92,7 +92,7 @@ private:
   struct PCCONTROLLER_PACKED EventReport {
     uint8_t type;
     Report report;
-  } wire_;
+  } wire_{};
   PCCONTROLLER_PACK_POP
 
   static_assert(sizeof(Report) == 20,
@@ -138,6 +138,9 @@ static_assert(MacroQueue::QueueSize >=
               "macro byte ring must retain at least two maximum actions");
 static_assert(MacroQueue::QueueCapacity < 0x80U,
               "macro used/head arithmetic requires a seven-bit capacity");
+static_assert(MacroQueue::Completed == 3 && MacroQueue::Cancelled == 4 &&
+                  MacroQueue::Exported == 8,
+              "macro lifecycle wire values drifted from the host contract");
 
 #undef PCCONTROLLER_PACKED
 #undef PCCONTROLLER_PACK_POP
