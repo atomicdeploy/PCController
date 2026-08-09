@@ -42,6 +42,8 @@ const (
 
 var speakerMu sync.Mutex
 
+func driverDirectoryRequired() bool { return true }
+
 type winRing0Driver struct {
 	handle  windows.Handle
 	manager *mgr.Mgr

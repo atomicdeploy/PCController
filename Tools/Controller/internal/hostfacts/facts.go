@@ -1,5 +1,5 @@
-// Package hostfacts exposes bounded, read-only Windows host facts through a
-// fixed catalog. Callers select a profile; they never submit WQL.
+// Package hostfacts exposes bounded, read-only native host facts through a
+// fixed catalog. Callers select a profile; they never submit native queries.
 package hostfacts
 
 import (
@@ -79,7 +79,7 @@ var queryCatalog = map[string]querySpec{
 	"serial": {
 		QueryDescriptor: QueryDescriptor{
 			Profile: "serial", Class: "Win32_SerialPort",
-			Description: "serial ports and their current Windows device status",
+			Description: "serial ports and their current device status",
 			Columns:     []string{"DeviceID", "Name", "Description", "Status", "ConfigManagerErrorCode"},
 			MaxRows:     32,
 		},
@@ -97,7 +97,7 @@ var queryCatalog = map[string]querySpec{
 	"system": {
 		QueryDescriptor: QueryDescriptor{
 			Profile: "system", Class: "Win32_OperatingSystem",
-			Description: "Windows version, architecture, boot time, and aggregate memory",
+			Description: "operating-system version, architecture, boot time, and aggregate memory",
 			Columns:     []string{"Caption", "Version", "BuildNumber", "OSArchitecture", "LastBootUpTime", "TotalVisibleMemorySize", "FreePhysicalMemory"},
 			MaxRows:     1,
 		},
@@ -110,6 +110,7 @@ func Catalog() []QueryDescriptor {
 	result := make([]QueryDescriptor, 0, len(queryCatalog))
 	for _, spec := range queryCatalog {
 		descriptor := spec.QueryDescriptor
+		descriptor.Class = platformHostFactsClass(descriptor.Profile, descriptor.Class)
 		descriptor.Columns = append([]string(nil), descriptor.Columns...)
 		result = append(result, descriptor)
 	}
@@ -177,6 +178,7 @@ func (provider *CachedProvider) Query(ctx context.Context, profile string) (Resu
 	if provider == nil || provider.backend == nil {
 		return Result{}, errors.New("host facts are unavailable")
 	}
+	spec.Class = platformHostFactsClass(spec.Profile, spec.Class)
 
 	queryContext, cancel := boundedContext(ctx)
 	defer cancel()
@@ -246,7 +248,7 @@ func (provider *CachedProvider) run(ctx context.Context, spec querySpec) (Result
 				Profile: spec.Profile, Class: spec.Class,
 				Columns: append([]string(nil), spec.Columns...), Rows: rows,
 				Truncated: backendTruncated || boundedTruncated,
-				Source:    "wmi", CollectedAt: provider.now().UTC(),
+				Source:    platformHostFactsSource(), CollectedAt: provider.now().UTC(),
 				DurationMS: maxInt64(0, provider.now().Sub(started).Milliseconds()),
 			}
 			value.result = boundResult(value.result)

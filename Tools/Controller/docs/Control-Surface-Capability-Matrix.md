@@ -58,7 +58,7 @@ additional convenience that still ends in the same runtime/native protocol.
 | Reset and serial lifecycle | `ports`, `open`, `close`, `reconnect`, `reset` | `ListPorts`, `Connect`, `Open`, `Close`, `PulseResetFor` | port/reset RPCs and snapshot | connection lifecycle events | `connection_control` or `reset` |
 | Build, bootloader, backup, restore, flash | `toolchain`, `boot`, `program` | toolchain bootstrap/sync conveniences; complete operations remain Generic | artifact/update RPCs plus dedicated `controller.restore.flash`; `/api/restores/flash`; Generic command | programming lifecycle, backup manifest, verified write, and fresh authenticated `HELLO` | `programming` **and** `connection_control` |
 | Idle/Running application state | `program-state` (`run-state`) | `ProgramState`, `SetProgramState`, `AcquireProgramState` | `controller.program_state.get/set`; `GET/PUT /api/program-state` | `program.state` and `program.state.sync`; telemetry `program_running` | query: `read`; mutation: `board_commands` |
-| Host/OS status, virtual keys, power, monitor brightness | `os` | `HostSystemStatus`, `PressVirtualKey`, `RequestPowerAction` | `controller.os.*`; `/api/os/status`; `/api/os/key`; `/api/os/power` | audited OS action/timeline events | `read`, `virtual_keys`, or `power_actions` |
+| Host/OS status, virtual keys, power, monitor brightness | `os` | `HostSystemStatus`, `PressVirtualKey`, `RequestPowerAction` | `controller.os.*`; `/api/os/status`; `/api/os/key`; `/api/os/power` | audited OS action/timeline events; Linux uptime from `/proc`, power through logind/systemd, brightness through `brightnessctl` or `ddcutil` | `read`, `virtual_keys`, or `power_actions` |
 | Read-only Windows host facts | `os facts [system\|computer\|firmware\|storage\|serial\|list]` | shared fixed-catalog provider through Generic command | `controller.os.facts*` and `controller.host.facts*`; `GET /api/os/facts` | bounded snapshot with profile/class/columns/rows/truncation/source/time | `read`; no arbitrary query or write surface |
 | Typed text and LCD messages | message API rather than free-form shell text | `SendTextMessage` | `controller.message.send`; `/api/messages`; webhooks/Socket.IO | source-tagged message/event and optional LCD presentation | `messages` |
 
@@ -95,6 +95,11 @@ accepted.
 - The C-compatible library owns its own serial connection. If a primary host is
   already running, external consumers should use IPC/JSON-RPC instead of
   opening a competing library handle.
+- Wayland does not expose a compositor-neutral, permission-scoped API for
+  process-wide hotkeys, raw keyboard capture, synthetic input, or reliable
+  PID-to-window foreground activation. Linux reports those capabilities as
+  unsupported and keeps focused WebUI input available; it does not weaken the
+  desktop security model with `/dev/input` or XTest workarounds.
 
 ## Automated acceptance
 

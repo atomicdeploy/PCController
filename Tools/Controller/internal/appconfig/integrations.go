@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"runtime"
 	"strings"
 	"unicode"
 
@@ -478,10 +479,17 @@ func validateBuzzerMirror(value BuzzerMirror) error {
 		strings.ContainsAny(value.DriverDirectory, "\r\n\"") {
 		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is invalid")
 	}
-	if value.NativeEnabled && value.DriverDirectory == "" {
-		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is required when native playback is enabled")
+	if runtime.GOOS == "windows" && value.NativeEnabled && value.DriverDirectory == "" {
+		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is required for native Windows playback")
+	}
+	if value.NativeEnabled && !nativeBuzzerPlaybackSupported(runtime.GOOS) {
+		return fmt.Errorf("integrations.buzzer_mirror native playback is unavailable on %s", runtime.GOOS)
 	}
 	return nil
+}
+
+func nativeBuzzerPlaybackSupported(goos string) bool {
+	return goos == "windows" || goos == "linux"
 }
 
 func validateLifecycleSafety(value LifecycleSafety) error {

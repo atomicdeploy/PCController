@@ -18,6 +18,10 @@ const (
 	comSFalse                 = 0x00000001
 )
 
+func platformHostFactsSource() string { return "wmi" }
+
+func platformHostFactsClass(_ string, windowsClass string) string { return windowsClass }
+
 // nativeBackend talks directly to the local Windows Management
 // Instrumentation COM automation API. It performs no process launch and does
 // not accept a namespace, class, columns, or WQL string from a caller.

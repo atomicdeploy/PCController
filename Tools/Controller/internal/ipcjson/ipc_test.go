@@ -220,7 +220,15 @@ func TestHostFactsRPCAndRESTUseTypedReadOnlyProvider(t *testing.T) {
 		t.Fatalf("response=%#v profile=%q calls=%d", response, provider.profile, provider.calls)
 	}
 	catalog := service.Dispatch(context.Background(), Request{Method: "controller.os.facts.catalog"})
-	if catalog.Error != nil || !strings.Contains(fmt.Sprint(catalog.Result), "Win32_OperatingSystem") || provider.calls != 1 {
+	expectedSystemClass := ""
+	for _, descriptor := range hostfacts.Catalog() {
+		if descriptor.Profile == "system" {
+			expectedSystemClass = descriptor.Class
+			break
+		}
+	}
+	if catalog.Error != nil || expectedSystemClass == "" ||
+		!strings.Contains(fmt.Sprint(catalog.Result), expectedSystemClass) || provider.calls != 1 {
 		t.Fatalf("catalog=%#v calls=%d", catalog, provider.calls)
 	}
 	invalidParams, _ := json.Marshal(map[string]any{"profile": "system", "timeout_ms": 50})

@@ -97,6 +97,47 @@ func TestCompileDryRunDoesNotRequireToolchainOnPATH(t *testing.T) {
 	}
 }
 
+func TestToolchainCompileAliasReusesManagedTargetUserConfiguration(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	managedRoot := filepath.Join(t.TempDir(), "managed-toolchain")
+	managedCLI := filepath.Join(managedRoot, "arduino-cli")
+	managedConfig := filepath.Join(managedRoot, "firmware-cli.yaml")
+	if err := os.MkdirAll(managedRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedCLI, []byte("managed target-user CLI"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedConfig, []byte("directories: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := appconfig.Open(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Update(func(config *appconfig.Config) error {
+		config.Programming.ToolchainCLI = managedCLI
+		config.Programming.ToolchainConfig = managedConfig
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err = run([]string{
+		"--config", configPath,
+		"toolchain", "compile", findProjectRoot(),
+		"--output-dir", t.TempDir(), "--dry-run",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("managed target-user compile plan failed: %v\nstderr: %s", err, stderr.String())
+	}
+	for _, expected := range []string{managedCLI, managedConfig} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("compile alias did not reuse managed path %q:\n%s", expected, stdout.String())
+		}
+	}
+}
+
 func TestRuntimeCommandStillValidatesRuntimeConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(

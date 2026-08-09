@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package portowner
 
@@ -28,6 +28,7 @@ func (unsupportedActions) TerminateConfirmation(owner Owner) string {
 	return terminationConfirmation(owner)
 }
 
-func systemEnumerator() Enumerator    { return unsupportedEnumerator{} }
-func DefaultActions() Actions         { return unsupportedActions{} }
-func isAccessDenied(cause error) bool { return looksAccessDenied(cause) }
+func systemEnumerator() Enumerator          { return unsupportedEnumerator{} }
+func DefaultActions() Actions               { return unsupportedActions{} }
+func isAccessDenied(cause error) bool       { return looksAccessDenied(cause) }
+func isLocalSerialTarget(value string) bool { return isCOMPort(value) }

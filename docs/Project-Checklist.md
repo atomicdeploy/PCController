@@ -72,6 +72,12 @@ binary, checksum, or test run cannot satisfy a newer tree.
 - ✅ Windows C-ABI builds reject Git/MSYS/Cygwin `gcc` false positives and
   discover or provision a latest compatible, proxy-aware native MinGW-w64
   compiler; the current resolver selects WinLibs GCC 16.1.0.
+- 🚧 Linux fresh-host provisioning is now owned by
+  `controller toolchain provision-host`: dry-run checks the configured APT
+  sources, apply installs the reviewed native profile, grants an existing
+  serial group, and runs the managed bootstrap as the explicit target account.
+  Live fresh/reuse validation and the resulting PR checks remain the closure
+  gate for reopened issue #60.
 - ✅ The generated dependency lock records the native compiler package,
   version, target, immutable manifest/archive provenance, and checksum; the
   canonical host manifest records the selected compiler and binary integrity.

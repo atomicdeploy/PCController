@@ -135,7 +135,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
-| `arduino-go-dependencies` | [#60](https://github.com/atomicdeploy/PCController/issues/60) | ✅ closed | Provision managed firmware and host toolchains plus globally discoverable UPX |
+| `arduino-go-dependencies` | [#60](https://github.com/atomicdeploy/PCController/issues/60) | 🚧 open | Provision managed firmware and host toolchains plus globally discoverable UPX |
 | `project-import-structure` | [#61](https://github.com/atomicdeploy/PCController/issues/61) | ✅ closed | Preserve reusable project layers, merge LocalLib variants, and consolidate source/tool directories |
 | `native-virtual-board` | [#62](https://github.com/atomicdeploy/PCController/issues/62) | ✅ closed | Provide a desktop virtual board for fast native protocol and behavior tests |
 | `tooling-entrypoint-consolidation` | [#63](https://github.com/atomicdeploy/PCController/issues/63) | 🟡 open | Unify build and programmer policy behind one command-plan implementation |

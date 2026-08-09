@@ -321,6 +321,7 @@ Device, firmware and recovery:
 	controller program recover HEX [PORT]  fresh readback + durable restore; never rewrites flash
 	controller program --operation DIAGNOSTIC [program flags]
   controller boot probe|info|metadata|backup|read|write|verify|start [flags]
+	controller toolchain provision-host --target-user USER [--apply|--dry-run] [toolchain flags]
 	controller toolchain check|update|bootstrap|lock|sync|profile|compile|core-info|install-bootloader [flags]
 	controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only]
 	controller board blank --confirm NAME [--uart auto|PORT|none]

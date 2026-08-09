@@ -154,6 +154,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 			translated, stdout, stderr, appconfig.Defaults(),
 		)
 	}
+	if configIndependentToolchainHostProvision(args) {
+		// Fresh-host provisioning must not open or create root's runtime
+		// configuration before it switches to the explicitly selected account.
+		return runToolchainHostProvision(args[2:], stdout, stderr)
+	}
 	store, err := appconfig.Open(configPath)
 	if err != nil {
 		return err

@@ -712,9 +712,33 @@ func configIndependentProgramCompile(args []string) bool {
 }
 
 func configIndependentToolchainCompile(args []string) bool {
+	if len(args) < 2 || !strings.EqualFold(args[0], "toolchain") || !strings.EqualFold(args[1], "compile") {
+		return false
+	}
+	// An explicit dependency executable/config is self-contained and must
+	// remain usable even when an unrelated runtime config is invalid. Without
+	// either flag, load the target account's validated config so a managed
+	// bootstrap can actually be reused by the documented toolchain alias.
+	for index := 2; index < len(args); index++ {
+		argument := strings.ToLower(args[index])
+		switch {
+		case argument == "--":
+			return false
+		case argument == "--toolchain-cli" || argument == "--toolchain-config":
+			return index+1 < len(args) && strings.TrimSpace(args[index+1]) != ""
+		case strings.HasPrefix(argument, "--toolchain-cli="):
+			return strings.TrimSpace(args[index][len("--toolchain-cli="):]) != ""
+		case strings.HasPrefix(argument, "--toolchain-config="):
+			return strings.TrimSpace(args[index][len("--toolchain-config="):]) != ""
+		}
+	}
+	return false
+}
+
+func configIndependentToolchainHostProvision(args []string) bool {
 	return len(args) >= 2 &&
 		strings.EqualFold(args[0], "toolchain") &&
-		strings.EqualFold(args[1], "compile")
+		strings.EqualFold(args[1], "provision-host")
 }
 
 func guardedFlashBooleanFlag(argument string) bool {
@@ -1155,6 +1179,9 @@ func runToolchain(
 	stdout, stderr io.Writer,
 	store *appconfig.Store,
 ) error {
+	if len(args) != 0 && strings.EqualFold(args[0], "provision-host") {
+		return runToolchainHostProvision(args[1:], stdout, stderr)
+	}
 	if len(args) != 0 && strings.EqualFold(args[0], "sync") {
 		return runToolchainSync(args[1:], stdout, stderr, store)
 	}
@@ -1488,7 +1515,7 @@ func defaultToolchainModuleDir() string {
 }
 
 func toolchainCLIArguments(args []string) ([]string, error) {
-	const usage = "usage: controller toolchain check|update|bootstrap|sync|profile|lock|compile SKETCH|core-info|install-bootloader [flags]"
+	const usage = "usage: controller toolchain provision-host|check|update|bootstrap|sync|profile|lock|compile SKETCH|core-info|install-bootloader [flags]"
 	if len(args) == 0 {
 		return nil, errors.New(usage)
 	}

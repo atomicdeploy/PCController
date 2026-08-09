@@ -55,6 +55,41 @@ Tools\Controller\bin\controller.exe toolchain bootstrap --dry-run
 Tools\Controller\bin\controller.exe toolchain bootstrap
 ```
 
+### Privileged Linux fresh-host assignment
+
+Do not run the ordinary managed bootstrap as root and then recursively change
+ownership. On Debian/Ubuntu, use Controller's explicit target-account path:
+
+```bash
+controller toolchain provision-host --target-user pccontroller --dry-run --locked
+sudo controller toolchain provision-host --target-user pccontroller --apply --locked
+```
+
+`--target-user` is required and root is rejected as a target. The command is
+read-only unless `--apply` is present. Its dry-run performs an APT simulation
+against the currently configured sources, then prints every mutating step. The
+apply path uses only trusted system executable directories, refreshes APT,
+installs the reviewed build/runtime profile, verifies npm after the selected
+Node.js provider is known, and makes the distribution's `upx-ucl` command
+globally discoverable as `upx` without overwriting an existing path. Exact
+release validation still uses the SHA-locked UPX asset in
+`Tools/Dependencies`; the global distribution command is the operator/developer
+fallback.
+
+Controller grants serial access only through an existing `dialout` or `uucp`
+group. It does not create a group or install a broad USB udev rule. A new login
+session is required after first membership assignment. Finally, the privileged
+process invokes the same Controller executable through `runuser`; the nested
+`toolchain bootstrap` creates and reuses
+`~/.local/share/pccontroller/tools/toolchain` as the selected account. No
+firmware dependency CLI is invoked directly by the privileged provisioner, and
+no root-owned cache is handed to the desktop/service process.
+
+Only proxy/trust/locale variables needed by package and dependency tools cross
+the privilege boundary. Proxy names are reported but their values are never
+printed or persisted. Upper- and lower-case proxy spellings are normalized to
+one deterministic value and local-network bypass entries remain present.
+
 The first command is read-only. By default bootstrap resolves the current
 stable policy, then:
 

@@ -265,7 +265,7 @@ func ParseSelector(value string) (Filter, error) {
 	}
 	upper := strings.ToUpper(value)
 	if strings.HasPrefix(strings.ToLower(value), "tcp://") ||
-		isCOMName(upper) {
+		isCOMName(upper) || strings.HasPrefix(value, "/dev/") {
 		return Filter{Port: value}, nil
 	}
 	if strings.HasPrefix(strings.ToLower(value), "serial:") {

@@ -64,7 +64,7 @@ everywhere through the same typed event stream.
 | 🧭 Signal-aware event paths | Human activity, continuous output state, telemetry, and explicit debug traces travel independently, so frame and measurement streams update every UI without flooding consoles or evicting one-shot events. |
 | 🎨 Native-quality WebUI | Responsive desktop/mobile layouts, installable standalone presentation where supported, RTL/LTR, Persian typography, light/dark themes, semantic color, real telemetry charts, keyboard navigation, optional audio/haptic cues, dialogs, notifications, and tab-to-tab synchronization. |
 | 🎛️ Complete device workbench | Relays, PWM, lighting, RGB/status output, addressable strip, buzzer, displays, I²C, RF learning/transmit, macros, menus, settings, backups, and guarded programming. |
-| 🪟 Host integration | Global hotkeys, desktop notifications, local-device diagnostics, bounded read-only WMI/COM facts, native Microsoft display and shell adapters, discovery, webhooks, host bridges, scripts, automation, and platform-specific port-owner diagnostics. |
+| 🖥️ Host integration | Global hotkeys where the compositor permits them, desktop notifications, local-device diagnostics, bounded read-only native host facts (WMI/COM on Windows and sysfs/procfs on Linux), native display and shell adapters, discovery, webhooks, host bridges, scripts, automation, and platform-specific port-owner diagnostics. |
 | ♻️ Recoverable updates | Content-addressed artifacts, SHA-256 verification, pre-flash backup, explicit review, write/verify, reconnect, settings restoration, and recovery markers. |
 | 🧪 Test without hardware | A native virtual board exercises protocol and host behavior over the same authenticated transport contract. |
 

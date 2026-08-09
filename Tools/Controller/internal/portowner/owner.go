@@ -102,7 +102,7 @@ func EnrichOpenErrorWith(ctx context.Context, port string, cause error, enumerat
 	if cause == nil {
 		return nil
 	}
-	if !isCOMPort(port) || !isAccessDenied(cause) {
+	if !isLocalSerialTarget(port) || !isAccessDenied(cause) {
 		return fmt.Errorf("open %s: %w", port, cause)
 	}
 	failure := &BusyError{Port: port, Cause: cause}
@@ -139,6 +139,8 @@ func looksAccessDenied(cause error) bool {
 	return strings.Contains(text, "access is denied") ||
 		strings.Contains(text, "permission denied") ||
 		strings.Contains(text, "serial port busy") ||
+		strings.Contains(text, "device or resource busy") ||
+		strings.Contains(text, "resource busy") ||
 		strings.Contains(text, "sharing violation")
 }
 

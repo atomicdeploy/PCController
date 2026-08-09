@@ -36,8 +36,9 @@ optional C-compatible library, and firmware WebSocket relay in one codebase.
 - Importable Go API and optional `c-shared` JSON ABI
 - Persistent JSON host configuration, `fsnotify` hot reload, macros,
   event-driven automations, a typed local-device contract, and loopback data-hub integration
-- A fixed, read-only Windows host-facts catalog for system, computer, firmware,
-  storage, and serial diagnostics; callers cannot submit arbitrary queries
+- A fixed, read-only native host-facts catalog for system, computer, firmware,
+  storage, and serial diagnostics (WMI on Windows; sysfs/procfs on Linux);
+  callers cannot submit arbitrary queries
 - DTR and RTS reset pulse
 - Controller-owned Arduino CLI compile/update, MiniCore `urclock`, and guarded
   USBasp/AVRDUDE recovery workflows; direct Arduino upload is disabled
@@ -176,6 +177,17 @@ a bounded deadline. Unlock, resume, and network changes reconcile telemetry or
 device discovery without overriding a deliberately paused connection. These
 policies are validated and editable from the Web Settings page.
 
+On Linux, `web` uses the browser app as the visible shell and deliberately does
+not install global keyboard hooks or emulate a tray under Wayland. The host
+still provides native, policy-gated power actions through logind/systemd,
+internal-panel brightness through `brightnessctl` with DDC/CI fallback through
+`ddcutil`, desktop notifications through the active local session's
+`notify-send`, per-user secrets through libsecret's `secret-tool`, serial-owner
+diagnostics through `/proc`, and event-driven serial hotplug refresh through
+inotify. The status APIs report an explicit Wayland security boundary for the
+unsupported global-input capabilities instead of silently pretending they are
+active.
+
 Per-user URI and Start-menu integration is opt-in and can be removed
 idempotently. Cleanup verifies ownership before deleting anything and preserves
 foreign registrations or shortcuts:
@@ -183,7 +195,14 @@ foreign registrations or shortcuts:
 ```console
 .\bin\controller.exe desktop ensure
 .\bin\controller.exe desktop uninstall
+controller desktop ensure
+controller desktop uninstall
 ```
+
+Linux installs an owned freedesktop `.desktop` entry under the current user's
+XDG data directory and registers `pccontroller://` with `xdg-mime`. Run the
+command from the final installed executable path: ownership markers prevent a
+temporary or foreign executable from replacing or deleting that registration.
 
 The UI includes live electrical/thermal graphs, relay and PWM controls, a
 peripheral workbench for displays, addressable LEDs, sound, RF, macros, I2C,
@@ -210,7 +229,7 @@ controller-target validation, and the required origin policy. `web export`
 fails if its destination already exists and prints file/byte counts plus the
 archive SHA-256.
 
-### Bounded Windows host facts
+### Bounded native host facts
 
 The shared `os facts` command exposes five read-only diagnostic profiles:
 `system`, `computer`, `firmware`, `storage`, and `serial`. `os facts list`
@@ -223,11 +242,12 @@ bin\controller.exe ipc call --method controller.os.facts.catalog
 bin\controller.exe ipc call --method controller.os.facts --params "{\"profile\":\"serial\",\"timeout_ms\":2500}"
 ```
 
-The Windows adapter uses a bounded native management provider internally. It
-accepts only catalog profile names: no shell command, arbitrary query text,
+Windows uses its bounded native management provider; Linux reads the equivalent
+fixed fields from sysfs, procfs, the mount table, uname, and sysinfo. Both
+accept only catalog profile names: no shell command, arbitrary query text,
 write, method invocation, or caller-selected class/column is exposed. Results
 have fixed row/byte/cell limits, a short private cache, and a deadline no longer
-than five seconds. Other platforms report this optional capability as
+than five seconds. Platforms without a native adapter report the capability as
 unavailable.
 
 ## Terminal UI
@@ -531,16 +551,16 @@ door presentation uses a 30-second interval rather than looping continuously.
 
 Board `BUZZER_CHANGED` frames are always available to event subscribers. When
 `integrations.buzzer_mirror.enabled` is true, the WebUI can play the reported
-frequency/duration with Web Audio and Windows can play it through WinRing0. The
-native implementation is inside the Go controller: it opens the
-`WinRing0x64.sys` device and drives PIT channel 2 directly; it loads no wrapper
-DLL and never launches the old `beep.exe`, SSH, or a UAC prompt. Elevated SSH
-is an operator-only test harness, not an application transport. `buzzer path`
+frequency/duration with Web Audio. Windows can play it through WinRing0; Linux
+uses the kernel console's `KIOCSOUND` interface through `/dev/console` or
+`/dev/tty0` and requires a loaded `pcspkr` module plus service access to that
+device. Both native implementations live inside the Go controller: no wrapper
+DLL, `beep` process, SSH transport, or interactive elevation is used. `buzzer path`
 independently selects the board, host, both, or neither; board silent and host
 silent remain distinct.
 
 WinRing0 is an optional, best-effort adapter rather than a host dependency.
-Missing drivers, unsupported port `0x61`, insufficient access, or a machine
+Missing drivers/devices, unsupported port `0x61`, insufficient access, or a machine
 that produces only clicks must not prevent the bridge, updates, board buzzer,
 or Web Audio from running. Native playback is disabled independently, exposes
 one retained state/error transition instead of one log entry per note, and can
@@ -840,6 +860,24 @@ does not reconnect, acknowledged application resets do not consume/re-trigger
 the policy, and TCP endpoints are never pulsed.
 
 ## Programming
+
+On a fresh Debian/Ubuntu host, keep privileged native-package and account setup
+inside Controller. The first command validates APT package availability and
+prints the complete plan without changing the host; the second explicitly
+applies it and runs the managed firmware bootstrap as the selected non-root
+account:
+
+```console
+controller toolchain provision-host --target-user operator --dry-run --locked
+sudo controller toolchain provision-host --target-user operator --apply --locked
+```
+
+This installs the reviewed Linux source-build/native-adapter profile, verifies
+npm and globally discoverable UPX, grants only an existing `dialout`/`uucp`
+serial group, and leaves reusable toolchain/config state below the target
+account's PCController data directory. It never installs a broad udev rule,
+directly invokes the firmware dependency CLI, or repairs a root-created cache
+with recursive `chown`.
 
 Bootstrap the latest resolved, host-data-local firmware toolchain with
 `controller toolchain bootstrap`; use `--locked` only for an intentional exact
