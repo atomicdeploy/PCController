@@ -2,9 +2,12 @@ package artifacts
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -143,5 +146,103 @@ func TestStoreRejectsTransportPathsOutsideItsOpenedRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(store.root, "..", "escape.json")); !os.IsNotExist(err) {
 		t.Fatalf("metadata escaped store root: %v", err)
+	}
+}
+
+func TestStoreOpenKeepsTheVerifiedConfinedHandle(t *testing.T) {
+	store := newTestStore(t)
+	descriptor, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindFirmware, Name: "verified.hex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, file, err := store.Open(KindFirmware, descriptor.SHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	blob := filepath.Join(store.blobs, descriptor.SHA256[:2], descriptor.SHA256)
+	originalName := blob + ".opened"
+	if err := os.Rename(blob, originalName); err != nil {
+		// Some filesystems prohibit renaming an open file. That behavior also
+		// prevents the path-swap class this test exercises.
+		t.Skipf("filesystem keeps open artifact names locked: %v", err)
+	}
+	if err := os.WriteFile(blob, []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte(validIntelHEX)) {
+		t.Fatalf("open artifact followed a replaced path: %q", content)
+	}
+}
+
+func TestStoreRequestsReadOnlyModeAndRevalidatesInPlaceChanges(t *testing.T) {
+	store := newTestStore(t)
+	descriptor, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindFirmware, Name: "immutable.hex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := filepath.Join(store.blobs, descriptor.SHA256[:2], descriptor.SHA256)
+	info, err := os.Stat(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows maps portable modes to its read-only attribute and may report
+	// synthesized write bits. POSIX platforms expose the exact stored bits.
+	if writable := info.Mode().Perm() & 0o222; runtime.GOOS != "windows" && writable != 0 {
+		t.Fatalf("published blob mode=%#o retains write bits %#o", info.Mode().Perm(), writable)
+	}
+	// Model a privileged/out-of-boundary actor deliberately re-enabling write
+	// access. The next open must still hash the same handle and reject it.
+	if err := os.Chmod(blob, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mutated := strings.Replace(validIntelHEX, "01FE", "02FD", 1)
+	if len(mutated) != len(validIntelHEX) {
+		t.Fatal("mutation fixture changed artifact length")
+	}
+	if err := os.WriteFile(blob, []byte(mutated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, file, err := store.Open(KindFirmware, descriptor.SHA256)
+	if file != nil {
+		_ = file.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "SHA-256 mismatch") {
+		t.Fatalf("in-place mutation error=%v", err)
+	}
+}
+
+func TestVerifyRegularFileHandleHashesAndRewindsOneHandle(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "artifact.hex")
+	if err := os.WriteFile(path, []byte(validIntelHEX), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Seek(3, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(validIntelHEX))
+	if err := verifyRegularFileHandle(file, hex.EncodeToString(digest[:]), int64(len(validIntelHEX))); err != nil {
+		t.Fatal(err)
+	}
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(content, []byte(validIntelHEX)) {
+		t.Fatalf("verified handle was not rewound: %q", content)
 	}
 }

@@ -735,7 +735,7 @@ or bridge calls.
 
 HTTP and native socket clients authenticate with a Bearer or compatibility
 header. The Web UI exchanges that header credential at
-`POST /api/session/ticket` for a 30-second, one-use, Origin/peer/transport-
+`POST /api/session/ticket` for a 15-second, one-use, Origin/peer/transport-
 bound WebSocket subprotocol ticket. Durable tokens are rejected in URLs, and
 unauthorized standard WebSocket or Socket.IO handshakes emit no application
 frames. Durable host and integration credentials can be referenced from the
@@ -1063,8 +1063,10 @@ The page can:
 
 - select a local firmware, EEPROM Intel HEX, readback, or host executable;
   calculate SHA-256 in the browser; then upload and stage it without writing;
-- download and verify an HTTP(S) or peer-host artifact, with optional expected
-  SHA-256, while the Go transport honors the process proxy environment;
+- download and verify a public HTTP(S) artifact, with optional expected
+  SHA-256, while the Go transport honors the process proxy environment,
+  validates every redirect/final URL, and pins direct dials to a validated
+  public address;
 - discover the newest successful GitHub Actions artifact, latest/tagged GitHub
   release, or a product-neutral HTTP manifest before downloading; retain
   release/run/source metadata, provider digests, build hash/time, packed
@@ -1073,6 +1075,8 @@ The page can:
   traversal, links/devices, ambiguous matches, and expansion-limit violations;
 - inventory and download content-addressed firmware, flash readbacks, EEPROM
   backups, and host packages without duplicating identical firmware bytes;
+  confined downloads reuse the exact file handle whose size and SHA-256 were
+  verified rather than reopening a mutable path;
 - explicitly request a fresh flash+EEPROM capture, board-firmware update,
   dedicated captured-flash restore, current-layout EEPROM restore, or
   recoverable host self-update; and

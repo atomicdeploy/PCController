@@ -189,7 +189,7 @@ async function websocketProtocols(config: UIConfig, signal?: AbortSignal): Promi
   })
   const ticket = await decode<SessionTicket>(response)
   if (!/^[a-f0-9]{64}$/.test(ticket.ticket) || ticket.protocol !== 'pccontroller' ||
-      !Number.isFinite(ticket.expires_in_ms) || ticket.expires_in_ms <= 0 || ticket.expires_in_ms > 30_000 ||
+      !Number.isFinite(ticket.expires_in_ms) || ticket.expires_in_ms <= 0 || ticket.expires_in_ms > 15_000 ||
       Number.isNaN(Date.parse(ticket.expires_at)) || typeof ticket.principal !== 'string' || !ticket.principal.trim()) {
     throw new Error('Controller returned an invalid WebSocket session ticket')
   }
