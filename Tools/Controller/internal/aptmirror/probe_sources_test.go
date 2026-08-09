@@ -312,6 +312,55 @@ func TestDiscoveryRecursesVerifiesAndPrefersHTTPSWithoutAdoptingThirdParties(t *
 	}
 }
 
+func TestDiscoveryHTTPSPreferenceStillDisablesActiveHTTPSpelling(t *testing.T) {
+	config := mirrorTestConfig(t)
+	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d")
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	activePath := filepath.Join(directory, "historical.list")
+	if err := os.WriteFile(activePath, []byte("deb http://history.example.ir/ubuntu resolute main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(directory, "historical.list.save")
+	if err := os.WriteFile(backupPath, []byte("# deb https://history.example.ir/ubuntu noble main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := planUbuntuSources(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.DiscoveredCandidates) != 1 || plan.DiscoveredCandidates[0].URI != "https://history.example.ir/ubuntu/" {
+		t.Fatalf("HTTPS candidate was not preferred: %+v", plan.DiscoveredCandidates)
+	}
+	now := time.Date(2026, 8, 9, 8, 0, 0, 0, time.UTC)
+	results := probeResults(config,
+		ProbeResult{Status: ProbeVerified, Publication: now},
+		ProbeResult{Status: ProbeVerified, Publication: now},
+	)
+	for _, suite := range config.Suites() {
+		results[stateKey(plan.DiscoveredCandidates[0].ID, suite)] = ProbeResult{Status: ProbeVerified, Publication: now}
+	}
+	executable := filepath.Join(t.TempDir(), "controller")
+	if err := os.WriteFile(executable, []byte("verified-controller"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report, err := Install(context.Background(), InstallOptions{
+		Config: config, ExecutableSource: executable, Now: now,
+		Prober: &tableProber{results: results},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.DiscoveredCandidates) != 1 || report.DiscoveredCandidates[0].URI != "https://history.example.ir/ubuntu/" {
+		t.Fatalf("persisted discovered candidates=%+v", report.DiscoveredCandidates)
+	}
+	if !containsString(report.DisabledSources, activePath) {
+		t.Fatalf("active HTTP spelling was not disabled after HTTPS adoption: %q", report.DisabledSources)
+	}
+}
+
 func TestDiscoveryDoesNotParseSymlinkOversizeOrCommentProse(t *testing.T) {
 	config := mirrorTestConfig(t)
 	directory := filepath.Join(config.Paths.APTRoot, "sources.list.d", "disabled")

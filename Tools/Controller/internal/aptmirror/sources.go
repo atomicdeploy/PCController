@@ -191,10 +191,13 @@ func isUbuntuArchiveURI(raw string, config Config) bool {
 	if raw == "" {
 		return false
 	}
-	normalized := strings.TrimSuffix(raw, "/")
-	for _, candidate := range config.Candidates {
-		if normalized == strings.TrimSuffix(candidate.URI, "/") {
-			return true
+	_, identity, ok := normalizeArchiveRoot(raw)
+	if ok {
+		for _, candidate := range config.Candidates {
+			_, candidateIdentity, candidateOK := normalizeArchiveRoot(candidate.URI)
+			if candidateOK && identity == candidateIdentity {
+				return true
+			}
 		}
 	}
 	parsed, err := url.Parse(raw)
