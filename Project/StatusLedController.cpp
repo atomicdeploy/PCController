@@ -1,5 +1,7 @@
 #include "StatusLedController.h"
 
+#if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+
 #include <EEPROM.h>
 #include <string.h>
 
@@ -14,8 +16,6 @@ constexpr uint8_t EffectPhaseStep = 8;
 constexpr uint8_t StatusModePaletteCount = 11;
 
 } // namespace
-
-StatusLedController statusLeds;
 
 void StatusLedController::begin(PwmController &pwm, uint8_t brightness,
                                 uint32_t now, bool powerSignal) {
@@ -310,3 +310,7 @@ uint8_t StatusLedController::scale(uint8_t value, uint8_t level) {
       (static_cast<uint16_t>(value) * (static_cast<uint16_t>(level) + 1U)) >>
       8);
 }
+
+#endif
+
+StatusLedController statusLeds;

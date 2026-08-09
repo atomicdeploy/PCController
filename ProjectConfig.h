@@ -38,6 +38,98 @@
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
 
+// The production ControllerBoardMini image keeps the independent INA219,
+// DS18B20 and PCA9685 drivers in one profile.  A missing module is discovered
+// at runtime and reported as unavailable; a constrained or diagnostic image
+// must explicitly opt out rather than silently compiling another feature set.
+#ifndef PCCONTROLLER_ENABLE_INA219
+#define PCCONTROLLER_ENABLE_INA219 1
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_DS18B20
+#define PCCONTROLLER_ENABLE_DS18B20 1
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_PCA9685
+#define PCCONTROLLER_ENABLE_PCA9685 1
+#endif
+
+// The PWM and direct RGB engines stay present even when these higher-level
+// policies are host-owned.  This keeps one reusable output path and makes
+// optional autonomous behavior a build-profile choice rather than a fork.
+#ifndef PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+#define PCCONTROLLER_ENABLE_STATUS_LED_ENGINE 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+#define PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
+#define PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
+#define PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
+#define PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
+#define PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS 0
+#endif
+
+// Tone playback and the Buzzer opcode remain available.  Only unsolicited
+// boot/menu/error cue policy is optional so a freshly programmed board stays
+// quiet until the user deliberately enables an autonomous profile.
+#ifndef PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+#define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_TASK_SCHEDULER
+#define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0
+#endif
+
+// PAGE_KEYS is retained as a stable wire/EEPROM identifier but is no longer a
+// second physical page.  The normal image shows motion; a diagnostic build
+// changes that one page into a key identifier.
+#ifndef PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+#define PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_MACRO_CAPTURE
+#define PCCONTROLLER_ENABLE_MACRO_CAPTURE 1
+#endif
+
+#ifndef PCCONTROLLER_FORCE_SILENT
+#define PCCONTROLLER_FORCE_SILENT 0
+#endif
+
+#ifndef PCCONTROLLER_BLANK_EEPROM_SILENT
+#define PCCONTROLLER_BLANK_EEPROM_SILENT 1
+#endif
+
+#if (PCCONTROLLER_ENABLE_INA219 != 0) && (PCCONTROLLER_ENABLE_INA219 != 1)
+#error "PCCONTROLLER_ENABLE_INA219 must be 0 or 1"
+#endif
+#if (PCCONTROLLER_ENABLE_DS18B20 != 0) && (PCCONTROLLER_ENABLE_DS18B20 != 1)
+#error "PCCONTROLLER_ENABLE_DS18B20 must be 0 or 1"
+#endif
+#if (PCCONTROLLER_ENABLE_PCA9685 != 0) && (PCCONTROLLER_ENABLE_PCA9685 != 1)
+#error "PCCONTROLLER_ENABLE_PCA9685 must be 0 or 1"
+#endif
+#if PCCONTROLLER_ENABLE_STATUS_LED_ENGINE && !PCCONTROLLER_ENABLE_PCA9685
+#error "PCCONTROLLER_ENABLE_STATUS_LED_ENGINE requires PCA9685"
+#endif
+#if PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION && !PCCONTROLLER_ENABLE_PCA9685
+#error "PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION requires PCA9685"
+#endif
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && !PCCONTROLLER_ENABLE_PCA9685
+#error "PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES requires PCA9685"
+#endif
+
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the
 // fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
 // ordering, hierarchy, or layout-protocol implementations in release builds.
@@ -46,7 +138,15 @@
 #endif
 
 #ifndef PCCONTROLLER_MENU_LAYOUT_STORAGE
-#define PCCONTROLLER_MENU_LAYOUT_STORAGE 1
+#define PCCONTROLLER_MENU_LAYOUT_STORAGE 0
+#endif
+
+// The 41-byte local layout profile extends settings through EEPROM byte 72,
+// while the full-peripheral profile reserves 64..79 for the learned DS18B20
+// role identity. They are intentionally separate alpha feature profiles; do
+// not silently overlap their persistent records.
+#if PCCONTROLLER_MENU_LAYOUT_STORAGE && PCCONTROLLER_ENABLE_DS18B20
+#error "PCCONTROLLER_MENU_LAYOUT_STORAGE overlaps the full-peripheral DS18B20 role record; keep production layout host-owned or disable DS18B20"
 #endif
 
 // AVR-owned persistent front-panel catalog. Stable page IDs remain protocol

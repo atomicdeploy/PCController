@@ -1,4 +1,6 @@
 // Project-layer implementation aggregator for the root-level Project folder.
+#include "ProjectConfig.h"
+
 #include "Project/AddressableLeds.cpp"
 #include "Project/BootMelody.cpp"
 #include "Project/CompactI2c.cpp"

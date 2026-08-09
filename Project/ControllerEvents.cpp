@@ -1,11 +1,31 @@
 #include "ControllerEvents.h"
 
+#include <string.h>
+
 ControllerEvents::ControllerEvents(
     ControllerProtocol::UartProtocol &protocol)
     : protocol_(protocol) {}
 
-void ControllerEvents::send(const uint8_t *payload, uint8_t length) {
-  protocol_.send(ControllerProtocol::Event, 0, payload, length);
+bool ControllerEvents::send(const uint8_t *payload, uint8_t length) {
+  return protocol_.send(ControllerProtocol::Event, 0, payload, length);
+}
+
+bool ControllerEvents::action(InputEventSource source, uint8_t opcode,
+                              const uint8_t *payload,
+                              uint8_t availablePayload,
+                              uint32_t capturedAtUs) {
+  if (!MacroAction::recordable(opcode, availablePayload)) {
+    return false;
+  }
+  const uint8_t length = MacroAction::payloadLength(opcode);
+  uint8_t evidence[4 + MacroAction::MaximumPayload] = {
+      static_cast<uint8_t>(ControllerEventType::Action),
+      static_cast<uint8_t>(source), opcode, length};
+  if (length != 0) {
+    memcpy(evidence + 4, payload, length);
+  }
+  return protocol_.sendEventAt(evidence, static_cast<uint8_t>(4 + length),
+                               capturedAtUs);
 }
 
 void ControllerEvents::key(uint8_t bit, uint8_t gesture,

@@ -6,6 +6,7 @@ namespace {
 // PWM-expander register addresses and MODE1 control bits used by the driver.
 constexpr uint8_t Mode1Register = 0x00;
 constexpr uint8_t FirstChannelRegister = 0x06;
+constexpr uint8_t AllChannelRegister = 0xFA;
 constexpr uint8_t PrescaleRegister = 0xFE;
 constexpr uint8_t Mode1Restart = 0x80;
 constexpr uint8_t Mode1AutoIncrement = 0x20;
@@ -63,6 +64,19 @@ uint8_t PwmExpanderDriver::setPWM(uint8_t channel, uint16_t on,
   }
   i2cBus.beginTransmission(address_);
   i2cBus.write(static_cast<uint8_t>(FirstChannelRegister + channel * 4U));
+  i2cBus.write(static_cast<uint8_t>(on));
+  i2cBus.write(static_cast<uint8_t>(on >> 8));
+  i2cBus.write(static_cast<uint8_t>(off));
+  i2cBus.write(static_cast<uint8_t>(off >> 8));
+  return i2cBus.endTransmission();
+}
+
+uint8_t PwmExpanderDriver::setAllPWM(uint16_t on, uint16_t off) {
+  if (on > 4096 || off > 4096) {
+    return 4;
+  }
+  i2cBus.beginTransmission(address_);
+  i2cBus.write(AllChannelRegister);
   i2cBus.write(static_cast<uint8_t>(on));
   i2cBus.write(static_cast<uint8_t>(on >> 8));
   i2cBus.write(static_cast<uint8_t>(off));
