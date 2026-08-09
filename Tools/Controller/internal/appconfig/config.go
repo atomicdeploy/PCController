@@ -231,6 +231,9 @@ type Macro struct {
 	LCDMessage          string      `json:"lcd_message,omitempty"`
 	TimingToleranceUS   uint32      `json:"timing_tolerance_us,omitempty"`
 	KeepOutputsOnCancel bool        `json:"keep_outputs_on_cancel,omitempty"`
+	RecordingSource     string      `json:"recording_source,omitempty"`
+	CaptureDroppedSteps uint16      `json:"capture_dropped_steps,omitempty"`
+	CaptureMissingSteps uint16      `json:"capture_missing_steps,omitempty"`
 	Steps               []MacroStep `json:"steps"`
 }
 

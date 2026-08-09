@@ -60,12 +60,14 @@ func TestMacroRecorderUsesWrappingMCUAcknowledgementDeltas(t *testing.T) {
 	if _, err := runner.StartRecording("lift", "motion", "purple"); err != nil {
 		t.Fatal(err)
 	}
-	runner.captureCommand(CommandEvidence{
+	runner.captureAction(ActionEvidence{
 		Opcode: native.OpRelaySet, Payload: []byte{5, 1},
+		Source:       native.InputSourceHost,
 		DeviceMicros: 0xFFFFFF00, Timed: true,
 	})
-	runner.captureCommand(CommandEvidence{
+	runner.captureAction(ActionEvidence{
 		Opcode: native.OpPWMSet, Payload: []byte{2, 0x00, 0x08},
+		Source:       native.InputSourceHost,
 		DeviceMicros: 0x000000F4, Timed: true,
 	})
 	macro, err := runner.StopRecording(true)
@@ -80,6 +82,55 @@ func TestMacroRecorderUsesWrappingMCUAcknowledgementDeltas(t *testing.T) {
 	}
 	if len(config.Macros) != 1 || config.Macros[0].Name != "lift" {
 		t.Fatalf("recording was not persisted: %#v", config.Macros)
+	}
+}
+
+func TestMacroRecorderCombinesPanelAndRFWithoutDuplicatingHostEcho(t *testing.T) {
+	runtime := New(Options{})
+	config := appconfig.Defaults()
+	runner := NewMacroRunner(
+		runtime,
+		func() []appconfig.Macro { return config.Macros },
+		func() appconfig.Config { return config },
+		func(change func(*appconfig.Config) error) error {
+			if err := change(&config); err != nil {
+				return err
+			}
+			return config.Validate()
+		},
+	)
+	if _, err := runner.StartRecording("mixed", "motion", "green"); err != nil {
+		t.Fatal(err)
+	}
+	runner.captureAction(ActionEvidence{
+		Opcode: native.OpRelaySide, Payload: []byte{0, 1},
+		Source: native.InputSourcePhysical, BoardOrigin: true,
+		DeviceMicros: 1000, Timed: true,
+	})
+	runner.captureAction(ActionEvidence{
+		Opcode: native.OpPWMSet, Payload: []byte{4, 0xFF, 0x0F},
+		Source: native.InputSourceRF, SourceID: 3, BoardOrigin: true,
+		DeviceMicros: 2750, Timed: true,
+	})
+	// This is the board echo for a host ACK, not a third activation.
+	runner.captureAction(ActionEvidence{
+		Opcode: native.OpPWMSet, Payload: []byte{4, 0xFF, 0x0F},
+		Source: native.InputSourceHost, BoardOrigin: true,
+		DeviceMicros: 2750, Timed: true,
+	})
+	state := runner.RecordingState()
+	if state.Steps != 2 || state.PanelSteps != 1 || state.RFSteps != 1 ||
+		state.HostSteps != 0 {
+		t.Fatalf("unexpected mixed-source recorder state: %#v", state)
+	}
+	macro, err := runner.StopRecording(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(macro.Steps) != 2 || macro.Steps[0].AtUS != 0 ||
+		macro.Steps[1].AtUS != 1750 || macro.Steps[0].Kind != "motion" ||
+		macro.Steps[1].Kind != "pwm" {
+		t.Fatalf("unexpected mixed-source macro: %#v", macro)
 	}
 }
 
