@@ -31,6 +31,7 @@ const policyPath = join(here, 'dependency-policy.json')
 const toolsLockPath = join(here, 'resolved-tools-lock.json')
 const toolchainPolicyPath = join(controller, 'toolchain-profile.json')
 const toolchainLockPath = join(controller, 'toolchain-lock.json')
+const toolchainPolicyGenerator = join(controller, 'internal', 'programmer', 'generate-toolchain-policy.mjs')
 const buildReportDir = join(repo, '.build', 'dependencies')
 const workflowsDirectory = join(repo, '.github', 'workflows')
 const defaultReportPath = join(buildReportDir, 'update-report.json')
@@ -771,6 +772,9 @@ function findNamed(root, wanted) {
 
 function installResolvedHostTools(lock, directRetry) {
   validateHostToolsLock(lock)
+  if (platform() === 'win32') {
+    run(process.execPath, [join(here, 'select-windows-compiler.mjs')], { capture: false })
+  }
   const goBin = join(buildReportDir, 'tools', 'go', 'bin')
   mkdirSync(goBin, { recursive: true })
   runNetwork('go', ['install', `${lock.go_winres.module}@${lock.go_winres.version}`], {
@@ -838,8 +842,11 @@ function validateEverything(hostTools, directRetry) {
   step('Web typecheck', () => npmRun(['run', 'typecheck'], { cwd: web, capture: false }))
   step('Web tests', () => npmRun(['test'], { cwd: web, capture: false }))
   step('Web production build', () => npmRun(['run', 'build'], { cwd: web, capture: false }))
+  // Keep this bounded test output captured so a failure is preserved in the
+  // structured report and blocked-update issue instead of existing only in
+  // the transient Actions log.
   step('Build-system tests', () => run('node', ['--test',
-    'Tools/Build/build.test.mjs', 'Tools/Audit/extract-user-turns.test.mjs'], { capture: false }))
+    'Tools/Build/build.test.mjs', 'Tools/Audit/extract-user-turns.test.mjs']))
   step('Firmware and host build', () => run(rootBuild, ['--all'], { capture: false }))
   const bootBuild = platform() === 'win32'
     ? join(repo, 'Tools', 'Bootloader', 'Urboot-Custom', 'build.cmd')
@@ -955,6 +962,10 @@ function main() {
       if (goDirective !== resolvedGoVersion || moduleUpdates.length || npm.some((item) => item.update_available)) {
         updateSourceDependencies(moduleUpdates, npm, options.directRetry)
       }
+      // The generated Go policy embeds the complete firmware lock, including
+      // host-source hashes refreshed above. Regenerate it before validation
+      // and before the candidate branch is created.
+      run(process.execPath, [toolchainPolicyGenerator], { capture: false })
       hostTools = resolveHostTools(options.directRetry)
       const afterTools = readJSON(toolsLockPath)
       if (!afterTools || !sameSubstantive(afterTools, hostTools)) writeJSONAtomic(toolsLockPath, hostTools)

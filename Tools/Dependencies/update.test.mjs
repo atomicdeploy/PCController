@@ -76,6 +76,18 @@ test('Windows command-script runner fixes the Node spawnSync EINVAL regression',
   }
 })
 
+test('captured command failures retain child diagnostics for structured reports', () => {
+  assert.throws(
+    () => run(process.execPath, ['-e',
+      'process.stdout.write("diagnostic stdout\\n"); process.stderr.write("diagnostic stderr\\n"); process.exit(7)']),
+    (error) => {
+      assert.match(error.message, /diagnostic stdout/u)
+      assert.match(error.message, /diagnostic stderr/u)
+      return true
+    },
+  )
+})
+
 test('stable comparison is semantic and rejects prereleases', () => {
   assert.equal(compareVersions('1.10.0', '1.9.9'), 1)
   assert.equal(compareVersions('u8.0', '8.0.0'), 0)
@@ -208,11 +220,22 @@ test('scheduled updater validates every required candidate gate before PR creati
     '32256', 'Urboot-Custom', 'VirtualBoard tests', 'Generated product identity',
     'Go tests from stable paths', 'Web tests',
     'windowsResources', 'upx', 'function resolveToolchain(mode, directRetry)',
+    'select-windows-compiler.mjs', 'generate-toolchain-policy.mjs',
   ]) assert.ok(updater.includes(expected), `updater missing ${expected}`)
   assert.ok(
     updater.indexOf("step('Clean generated build outputs'") < updater.indexOf('installResolvedHostTools(hostTools'),
     'managed host tools must be provisioned after the root clean step',
   )
+  assert.ok(
+    updater.indexOf('run(process.execPath, [toolchainPolicyGenerator]') < updater.indexOf('if (options.validate)'),
+    'the generated runtime policy must be refreshed before candidate validation',
+  )
+  const buildSystemGate = updater.slice(
+    updater.indexOf("step('Build-system tests'"),
+    updater.indexOf("step('Firmware and host build'"),
+  )
+  assert.doesNotMatch(buildSystemGate, /capture:\s*false/u,
+    'build-system test failures must remain captured for the structured report')
 })
 
 test('every external workflow action is immutable and included in the resolved inventory', () => {
