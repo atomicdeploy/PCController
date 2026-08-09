@@ -156,8 +156,13 @@ func TestMirrorAdoptionLockCoversCLIAndProvisionTransactions(t *testing.T) {
 		if !lockHeld {
 			t.Errorf("systemd command ran outside adoption lock: %+v", command)
 		}
-		events = append(events, strings.Join(command.Args, " "))
+		joined := strings.Join(command.Args, " ")
+		events = append(events, joined)
 		if len(command.Args) > 0 && command.Args[0] == "show" {
+			if strings.Contains(joined, "NextElapseUSecMonotonic") {
+				_, _ = io.WriteString(output, "ActiveState=active\nNextElapseUSecMonotonic=2min\n")
+				return nil
+			}
 			_, _ = io.WriteString(output, "not-found\ninactive\n")
 			return nil
 		}
@@ -200,10 +205,36 @@ func TestMirrorAdoptionLockCoversCLIAndProvisionTransactions(t *testing.T) {
 			end++
 		}
 		if end == len(events) || !containsArgument(events[index:end], "install") ||
-			!containsArgument(events[index:end], "enable --now pccontroller-apt-mirror-health.timer") {
+			!containsArgument(events[index:end], "enable --now pccontroller-apt-mirror-health.timer") ||
+			!containsArgument(events[index:end], "show --property=ActiveState --property=NextElapseUSecMonotonic pccontroller-apt-mirror-health.timer") {
 			t.Fatalf("lock did not cover install through activation: %q", events[index:])
 		}
 		index = end + 1
+	}
+}
+
+func TestVerifyMirrorTimerScheduledRejectsElapsedLateInstall(t *testing.T) {
+	originalRun := linuxHostProvisionRun
+	t.Cleanup(func() { linuxHostProvisionRun = originalRun })
+
+	var next string
+	linuxHostProvisionRun = func(_ context.Context, command linuxHostProvisionCommand, _ []string, output io.Writer) error {
+		if !reflect.DeepEqual(command.Args, []string{
+			"show", "--property=ActiveState", "--property=NextElapseUSecMonotonic",
+			"pccontroller-apt-mirror-health.timer",
+		}) {
+			t.Fatalf("unexpected timer verification command: %+v", command)
+		}
+		_, _ = io.WriteString(output, "ActiveState=active\nNextElapseUSecMonotonic="+next+"\n")
+		return nil
+	}
+	if err := verifyMirrorTimerScheduled(context.Background(), nil, "/usr/bin/systemctl"); err == nil ||
+		!strings.Contains(err.Error(), "finite next monotonic activation") {
+		t.Fatalf("elapsed timer was accepted: %v", err)
+	}
+	next = "2min 30s"
+	if err := verifyMirrorTimerScheduled(context.Background(), nil, "/usr/bin/systemctl"); err != nil {
+		t.Fatalf("fresh activation schedule was rejected: %v", err)
 	}
 }
 

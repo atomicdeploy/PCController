@@ -344,6 +344,11 @@ func activateMirrorSystemd(ctx context.Context, environment []string, output io.
 		}
 	}
 	if activationErr == nil {
+		if err := verifyMirrorTimerScheduled(ctx, environment, prior.Path); err != nil {
+			activationErr = fmt.Errorf("verify APT mirror timer schedule: %w", err)
+		}
+	}
+	if activationErr == nil {
 		if err := restorePackageManagerTimerState(ctx, environment, output, prior); err != nil {
 			activationErr = fmt.Errorf("restore APT package timers after source adoption: %w", err)
 		}
@@ -359,6 +364,30 @@ func activateMirrorSystemd(ctx context.Context, environment []string, output io.
 		return errors.Join(append([]error{activationErr}, rollbackErrors...)...)
 	}
 	report.Commit()
+	return nil
+}
+
+func verifyMirrorTimerScheduled(ctx context.Context, environment []string, systemctl string) error {
+	command := linuxHostProvisionCommand{Name: systemctl, Args: []string{
+		"show", "--property=ActiveState", "--property=NextElapseUSecMonotonic",
+		"pccontroller-apt-mirror-health.timer",
+	}}
+	var output strings.Builder
+	if err := linuxHostProvisionRun(ctx, command, environment, &output); err != nil {
+		return err
+	}
+	properties := make(map[string]string)
+	for _, line := range strings.Split(output.String(), "\n") {
+		name, value, found := strings.Cut(line, "=")
+		if found {
+			properties[strings.TrimSpace(name)] = strings.TrimSpace(value)
+		}
+	}
+	next := properties["NextElapseUSecMonotonic"]
+	if properties["ActiveState"] != "active" || next == "" || next == "0" || strings.EqualFold(next, "infinity") {
+		return fmt.Errorf("timer is not active with a finite next monotonic activation (ActiveState=%q, NextElapseUSecMonotonic=%q)",
+			properties["ActiveState"], next)
+	}
 	return nil
 }
 

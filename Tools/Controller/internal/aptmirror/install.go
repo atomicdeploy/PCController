@@ -342,7 +342,7 @@ func SystemdTimer() []byte {
 Description=Refresh PCController Ubuntu mirror health
 
 [Timer]
-OnBootSec=2min
+OnActiveSec=2min
 OnUnitActiveSec=2h
 RandomizedDelaySec=2min
 Persistent=true

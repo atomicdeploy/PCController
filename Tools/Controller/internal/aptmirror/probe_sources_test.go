@@ -621,8 +621,10 @@ func TestInstallDryRunAndGeneratedTopologyDoNotMutate(t *testing.T) {
 			t.Fatalf("service missing %q:\n%s", wanted, service)
 		}
 	}
-	if timer := string(SystemdTimer()); !strings.Contains(timer, "OnUnitActiveSec=2h") || strings.Contains(timer, "OnUnitActiveSec=15min") {
-		t.Fatalf("mirror timer wastes bandwidth or lacks the reviewed two-hour cadence:\n%s", timer)
+	if timer := string(SystemdTimer()); !strings.Contains(timer, "OnActiveSec=2min") ||
+		!strings.Contains(timer, "OnUnitActiveSec=2h") || strings.Contains(timer, "OnBootSec=") ||
+		strings.Contains(timer, "OnUnitActiveSec=15min") {
+		t.Fatalf("mirror timer lacks a late-install first activation or the reviewed two-hour cadence:\n%s", timer)
 	}
 	if strings.Contains(fmt.Sprintf("%+v", report), "secret") {
 		t.Fatal("report leaked proxy secret")
