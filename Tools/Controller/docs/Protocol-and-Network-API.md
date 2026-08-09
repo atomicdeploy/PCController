@@ -488,12 +488,14 @@ that cannot add an upgrade header uses this two-step exchange instead:
 2. Open the clean WebSocket URL while offering subprotocols `pccontroller`
    and `pccontroller.ticket.TICKET`.
 
-The 256-bit ticket expires after 30 seconds and is consumed once, before the
+The 256-bit ticket expires after 15 seconds and is consumed once, before the
 upgrade. It is bound to the issuing principal, exact Origin, peer address, and
 transport, so it cannot be replayed on the other socket surface. Unauthorized
 standard WebSocket and Socket.IO handshakes are rejected before the server
 sends any application or Engine.IO frame. Token comparison is constant-time;
-discovery advertisements and responses never contain a durable token.
+discovery advertisements and responses never contain a durable token. The
+server retains only a SHA-256 digest of each outstanding ticket, never the raw
+ticket returned to the browser.
 
 Missing-Origin handling is explicit. Loopback native clients may omit
 `Origin`; non-loopback native requests may omit it only when they present a
@@ -766,6 +768,12 @@ bootstrap apply host authentication. Bodies are limited to
 when disabled. An inbound webhook is data, not an implicit shell command. To
 make it actionable, enable a narrow text mapping whose resulting command still
 passes the normal safety path.
+
+Before publishing an inbound webhook, the host removes credential-shaped query
+and metadata names, caller-reserved provenance, cookies, referrers, signatures,
+and all headers outside a bounded trace/content allowlist. Host-owned method and
+path provenance is then added, and an empty-body fallback records only the
+routed path—not the raw `RequestURI` or query string.
 
 ### Peripheral names and authoritative PWM state
 
@@ -1113,7 +1121,39 @@ size, build hash, packed build timestamp, and platform. Firmware, EEPROM, and
 flash-readback artifacts must parse as Intel HEX before publication. Downloads
 respect `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`, limit redirects, reject an
 HTTPS-to-HTTP downgrade, remove bearer credentials on cross-authority
-redirects, and verify declared size plus SHA-256 before the final name appears.
+redirects (including after a composed client redirect callback), and verify
+declared size plus SHA-256 before the final name appears. An injected ordinary
+HTTP client is only a settings template: its proxy and dial hooks cannot relax
+the public-source invariant. A local test or authenticated peer must select the
+separately named trusted constructor explicitly.
+Remote artifact and update sources are public-network only: the initial URL,
+every redirect, and the effective response URL reject loopback, private,
+link-local, multicast, local-DNS, and metadata destinations. Direct connections
+resolve again immediately before dialing and use the validated numeric address,
+closing DNS-rebinding time-of-check/time-of-use gaps while preserving the
+original TLS server name. Proxy trust is bound to the proxy function's actual
+choice for that request; a configured proxy bypassed by `NO_PROXY` cannot exempt
+a matching direct destination. The local-name suffix list used by public-source
+rejection is also the one used to build the default `NO_PROXY` bypass. An
+explicitly configured forward proxy remains an operator trust boundary because
+that proxy performs its own destination lookup; commission proxy behavior before
+enabling remote artifact intake.
+
+Artifact metadata and blobs are opened relative to one confined store root.
+Size and SHA-256 are verified on the already-open regular-file handle, that
+handle is rewound, and the same handle is served to the caller. The store does
+not verify a path and reopen it later, so a rename or symlink replacement cannot
+substitute a different file between integrity verification and download.
+
+The store root is an exclusive trusted-writer boundary owned by the controller
+process account: it requests owner-only directory modes and portable read-only
+blob modes, while the canonical user-data directory supplies the platform ACL.
+Portable modes are advisory on platforms such as Windows. Every later open
+hashes the content again and rejects an in-place change. A privileged or
+same-account actor that deliberately changes permissions and overwrites an inode
+while that already-open handle is actively being streamed is outside this
+process-local threat model. Do not grant another process write access to the
+store root; use the import API, which stages and rehashes content, instead.
 
 An embedded default firmware/EEPROM pair makes first-board recovery available;
 it never authorizes a write. The manifest reports `defaults_enabled` only when

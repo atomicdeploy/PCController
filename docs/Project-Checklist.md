@@ -89,6 +89,32 @@ binary, checksum, or test run cannot satisfy a newer tree.
 - ✅ Reusable host builds clean first, then consume the exact same-run firmware
   artifact and require both the validated application and complete 1 KiB safe
   EEPROM defaults to be independently enabled in `host-manifest.json`.
+- ✅ Windows host packaging generates a deterministic installation inventory
+  that binds the exact executable, embedded resources/WebUI, host manifest,
+  source identity, architecture, notices, and companion files by SHA-256.
+- ✅ The software-only per-user lifecycle enforces product/user ownership,
+  content-addressed atomic activation, recovery journals, exact post-copy
+  verification, one-slot rollback, idempotent repair, the existing direct
+  native desktop adapter, and an external native self-uninstall helper.
+  Uninstall preserves configuration and host data unless a separate exact
+  purge confirmation is supplied.
+- ✅ Purge preview separates exact configuration files from marker-owned data
+  roots, honors the validated data-directory override, deduplicates overlaps,
+  and refuses unmarked or junction/reparse-traversed recursive targets.
+- ✅ Interrupted uninstall phases roll back to a verified retryable state;
+  deterministic owned tombstones are recovered after detach. Lifecycle lock
+  waits are signal-aware and bounded, activated recovery verifies its slot
+  before desktop registration, and current app-name precedence replaces stored
+  presentation while preserving the prior identity only for cleanup/rollback.
+  Desktop enable/name transitions journal both identities before mutation,
+  reconcile old cleanup plus desired activation idempotently, and retain the
+  journal on failure so every crash boundary can roll forward on retry.
+- ✅ The self-uninstall helper binds PID plus process-creation identity and
+  leaves a durable observable completion/failure record instead of reporting
+  only that cleanup was scheduled.
+- 🟣 Exercise install, repair, update, native desktop integration,
+  self-uninstall, and confirmed purge from the final packaged Windows
+  executable before promoting an alpha artifact.
 - ✅ Virtual Board builds use the native CMake test path on supported targets.
 - ✅ Canonical firmware source identity `DB5C1EBA` links 32,206 of the stock
   32,384-byte application range, emits 32,218 application HEX data bytes, and

@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/http/httpproxy"
 	"pccontroller.local/controller/internal/netpolicy"
 )
 
@@ -25,42 +24,51 @@ const (
 )
 
 type Client struct {
-	http *http.Client
+	http    *http.Client
+	scope   netpolicy.HTTPDestinationScope
+	initErr error
 }
 
-func NewClient(client *http.Client) *Client {
+// NewClient always enforces the public-source transport invariant. A non-nil
+// client is a settings/*http.Transport template, not permission to reach a
+// local destination.
+func NewClient(template *http.Client) *Client {
+	client, err := netpolicy.NewPublicHTTPClient(template, netpolicy.PublicHTTPClientOptions{
+		Timeout: requestTimeout, Operation: "update discovery",
+		Subject: "update URL", MaximumRedirects: 5,
+	})
+	return &Client{http: client, scope: netpolicy.HTTPDestinationPublic, initErr: err}
+}
+
+// NewTrustedClient explicitly allows configured local destinations and custom
+// transports. Use it only for tests or an authenticated/pinned peer path whose
+// trust decision happened before construction.
+func NewTrustedClient(client *http.Client) *Client {
 	if client == nil {
-		proxy := httpproxy.FromEnvironment().ProxyFunc()
-		transport := http.DefaultTransport.(*http.Transport).Clone()
-		transport.Proxy = func(request *http.Request) (*url.URL, error) {
-			return proxy(request.URL)
-		}
-		client = &http.Client{
-			Transport: transport,
-			Timeout:   requestTimeout,
-			CheckRedirect: func(request *http.Request, via []*http.Request) error {
-				if len(via) >= 5 {
-					return errors.New("update discovery exceeded five redirects")
-				}
-				previous := via[len(via)-1]
-				if previous.URL.Scheme == "https" && request.URL.Scheme == "http" {
-					return errors.New("update discovery refused an HTTPS-to-HTTP redirect")
-				}
-				if !sameAuthority(previous.URL, request.URL) {
-					request.Header.Del("Authorization")
-				}
-				return nil
-			},
-		}
+		client = &http.Client{Timeout: requestTimeout}
 	}
-	return &Client{http: client}
+	copy := *client
+	if copy.Timeout == 0 {
+		copy.Timeout = requestTimeout
+	}
+	copy.CheckRedirect = (netpolicy.HTTPRedirectPolicy{
+		Operation: "update discovery", Subject: "update URL", MaximumHops: 5,
+		Scope: netpolicy.HTTPDestinationConfigured, Previous: copy.CheckRedirect,
+	}).CheckRedirect
+	return &Client{http: &copy, scope: netpolicy.HTTPDestinationConfigured}
 }
 
 func (client *Client) get(ctx context.Context, rawURL, token, accept string) (*http.Response, error) {
-	if client == nil || client.http == nil {
+	if client == nil {
 		return nil, errors.New("release discovery HTTP client is unavailable")
 	}
-	parsed, err := netpolicy.ParseHTTPURL(rawURL, "update URL")
+	if client.initErr != nil {
+		return nil, fmt.Errorf("initialize release discovery client: %w", client.initErr)
+	}
+	if client.http == nil {
+		return nil, errors.New("release discovery HTTP client is unavailable")
+	}
+	parsed, err := netpolicy.ParseHTTPURLForScope(rawURL, "update URL", client.scope)
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +86,14 @@ func (client *Client) get(ctx context.Context, rawURL, token, accept string) (*h
 	response, err := client.http.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", safeURL(rawURL), err)
+	}
+	effectiveURL := parsed
+	if response.Request != nil && response.Request.URL != nil {
+		effectiveURL = response.Request.URL
+	}
+	if err := netpolicy.ValidateHTTPURLForScope(effectiveURL.String(), "update URL", client.scope); err != nil {
+		response.Body.Close()
+		return nil, fmt.Errorf("download %s final URL: %w", safeURL(rawURL), err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
@@ -120,10 +136,6 @@ func safeURL(raw string) string {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String()
-}
-
-func sameAuthority(left, right *url.URL) bool {
-	return strings.EqualFold(left.Scheme, right.Scheme) && strings.EqualFold(left.Host, right.Host)
 }
 
 func normalizeDigest(value string) (string, error) {

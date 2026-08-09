@@ -386,11 +386,17 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 		return OperationResult{}, err
 	}
 	if reused {
-		decorateDescriptor(&artifact)
-		return OperationResult{Operation: status, Artifact: &artifact, Reused: true}, nil
+		responseArtifact := publicDescriptor(artifact)
+		decorateDescriptor(&responseArtifact)
+		return OperationResult{Operation: status, Artifact: &responseArtifact, Reused: true}, nil
 	}
+	// The worker owns an immutable execution snapshot. Finalize a separate
+	// public response before launching it so response decoration can never race
+	// any firmware, EEPROM, flash-restore, or host-update executor read.
+	executionArtifact := cloneDescriptor(artifact)
+	responseArtifact := publicDescriptor(artifact)
+	decorateDescriptor(&responseArtifact)
 	service.updateBytes(status.ID, 0, artifact.Bytes)
-	executionArtifact := artifact
 	go service.runTransaction(status.ID, func(ctx context.Context, progress ProgressFunc) (string, error) {
 		var updateErr error
 		switch operationKind {
@@ -428,8 +434,7 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 		}
 		return executionArtifact.SHA256, updateErr
 	})
-	decorateDescriptor(&artifact)
-	return OperationResult{Operation: status, Artifact: &artifact}, nil
+	return OperationResult{Operation: status, Artifact: &responseArtifact}, nil
 }
 
 func (service *Service) importCaptured(captured []CapturedFile, components []string) (string, error) {

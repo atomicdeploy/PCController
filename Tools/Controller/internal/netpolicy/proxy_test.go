@@ -13,6 +13,8 @@ func TestWithLocalNetworkNoProxyPreservesCallerAndAddsPrivateRanges(t *testing.T
 	for _, expected := range []string{
 		"HTTPS_PROXY=http://proxy.invalid", "example.test", "localhost",
 		"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+		".home.arpa", ".internal", ".lan", ".local", ".localdomain", ".localhost",
+		"fc00::/7", "fe80::/10", "fec0::/10",
 		"NO_PROXY=", "no_proxy=",
 	} {
 		if !strings.Contains(joined, expected) {
@@ -31,6 +33,22 @@ func TestWithLocalNetworkNoProxyPreservesCallerAndAddsPrivateRanges(t *testing.T
 		}
 		if count != 1 {
 			t.Fatalf("caller duplicate was not removed from %q", line)
+		}
+	}
+}
+
+func TestLocalHostnameSuffixesHaveOnePolicySource(t *testing.T) {
+	bypasses := make(map[string]bool, len(LocalNetworkNoProxyEntries))
+	for _, entry := range LocalNetworkNoProxyEntries {
+		bypasses[entry] = true
+	}
+	for _, suffix := range localNetworkHostnameSuffixes {
+		if !bypasses[suffix] {
+			t.Fatalf("public-source suffix %q is absent from NO_PROXY defaults", suffix)
+		}
+		target := "https://controller" + suffix + "/artifact.hex"
+		if _, err := ParsePublicHTTPURL(target, "artifact URL"); err == nil {
+			t.Fatalf("NO_PROXY local suffix accepted as public source: %q", target)
 		}
 	}
 }

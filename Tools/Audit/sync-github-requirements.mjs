@@ -114,6 +114,14 @@ const EXTRA_ISSUE_REQUIRED_LABELS = {
   131: ['🖥️ host', '💾 storage', '🧪 testing', '🔒 security'],
   134: ['📦 dependencies', '🏗️ tooling-build'],
   135: ['🖥️ host', '🧪 testing', '🏗️ tooling-build', '🔍 needs-hardware'],
+  137: ['🖥️ host', '🛡️ safety', '🧪 testing', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
+  139: ['🖥️ host', '🛡️ safety', '🧪 testing', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
+};
+
+// Supplemental issues retain their independently authored bodies, but a small
+// number are still first-class children of a normalized epic.
+const EXTRA_ISSUE_EPIC_PARENTS = {
+  106: 7,
 };
 
 function requirement(id, parent, title, state, labels, section, criteria, evidence) {
@@ -498,7 +506,7 @@ const R = [
       'Authenticate, authorize, audit, and safety-check every actionable message.',
       'Deliver outbound webhooks through a bounded durable queue with attempt IDs, target timeouts, exponential backoff with jitter and Retry-After, idempotency/deduplication, shutdown drain/recovery, and explicit dead-letter inspection and replay.',
       'Use lossless JSON encoding and optional receiver-verifiable HMAC timestamp/nonce signatures; event text, quotes, and newlines must never corrupt a configured JSON payload.',
-    ], 'Inbound HTTP, all requested outbound methods, standard WebSocket client/server roles, genuine Engine.IO-v4/Socket.IO, typed actionable messages, masking, correlation, bridge forwarding, and loopback delivery tests exist. Outbound delivery now uses an atomically persisted bounded queue with restart recovery, stable idempotency and per-attempt identities, timeout/backoff/jitter/Retry-After, deduplication, dead-letter inspection/replay/clear, shutdown drain, lossless JSON templating, optional timestamp/nonce HMAC, secret-free durable state, and redirect rejection. Packaged/live receiver commissioning remains open.'),
+    ], 'Inbound HTTP, all requested outbound methods, standard WebSocket client/server roles, genuine Engine.IO-v4/Socket.IO, typed actionable messages, masking, correlation, bridge forwarding, and loopback delivery tests exist. Inbound hooks now discard credential-shaped query/header metadata, caller-reserved provenance, cookies, referrers, signatures, and raw RequestURI values before durable publication. Outbound delivery uses an atomically persisted bounded queue with restart recovery, stable idempotency and per-attempt identities, timeout/backoff/jitter/Retry-After, deduplication, dead-letter inspection/replay/clear, shutdown drain, lossless JSON templating, optional timestamp/nonce HMAC, secret-free durable state, and redirect rejection. Packaged/live receiver commissioning remains open.'),
   requirement('remote-control-security', 8, 'Define security and policy gates for every remote and disruptive control path', 'open',
     ['🔌 protocol-api', '🌐 networking', '🔒 security', '🛡️ safety', '🔥 priority: critical', '🚧 in progress'], 'IPC, WebSocket, USB lifecycle, and primary ownership', [
       'Authenticate remote commands, subscriptions, toast actions, messages, bridges, and network APIs.',
@@ -509,7 +517,7 @@ const R = [
       'Never place a long-lived secret in a URL, browser history, access log, or diagnostic payload; establish WebSocket browser sessions through one-time or short-lived tickets or an equivalent header-safe authenticated handshake.',
       'Store durable integration secrets through operating-system-backed secret references where available and redact them from configuration, snapshots, logs, diagnostics, and exports.',
       'Use one named-principal and capability-decision model across HTTP, WebSocket, Socket.IO, local IPC, and host bridges; audit principal, transport, origin, capability, decision, and correlation identity while preserving an explicit missing-Origin policy and sending no pre-auth application frames.',
-    ], 'Transport-assigned provenance, token authentication, file-watched capability authorization, default read/event-only access, default-denied mutation/programming/OS/bridge capabilities, and policy events are source-tested. Monitor Off still needs an explicit capability, confirmation, provenance, and audit test matrix across every originating surface. The browser WebSocket still carries its long-lived token in a URL query, durable tokens remain plaintext configuration, and audit access lacks a stable named principal; secret storage, session-ticket, unified-principal, adversarial, and live-network acceptance remain open.'),
+    ], 'Transport-assigned provenance, token authentication, file-watched capability authorization, default read/event-only access, default-denied mutation/programming/OS/bridge capabilities, and policy events are source-tested. Browser WebSocket and Socket.IO sessions use a 15-second, one-use, Origin/peer/transport-bound ticket in Sec-WebSocket-Protocol; upgrade URLs reject credentials, only ticket digests are retained, and concurrent replay has one winner. Inbound webhook events discard credential-shaped query/header metadata, caller-reserved provenance, cookies, referrers, signatures, and raw RequestURI values. Monitor Off still needs an explicit capability, confirmation, provenance, and audit test matrix across every originating surface. Operating-system-backed durable secret storage, a fully unified principal/correlation model across raw IPC and every bridge, and live adversarial network acceptance remain open.'),
 
   requirement('stable-device-selection', 9, 'Select the controller by stable identity, friendly name, COM name, or VID/PID', 'closed',
     ['🖥️ host', '🌐 networking', '✅ verified'], 'Host application, TUI, configuration, shell, IPC, and library', [
@@ -610,7 +618,7 @@ const R = [
     ], 'Schema-2 last-session.json atomically records cached identity, connection, status/reset/settings/menu/front-panel state, recent typed events, active/latest programming operation, current/default artifact hashes, and privacy-safe durable recovery marker/session hashes without mixing host config or EEPROM bytes. Validated recovery diagnostics reject interrupted-write completion claims. Source tests cover replacement, corruption, partial completeness, deduplication, RPC, and marker consumption; a graceful exit during/after the live programming lifecycle remains open.'),
 
   requirement('arduino-go-dependencies', 11, 'Provision managed firmware and host toolchains plus globally discoverable UPX', 'open',
-    ['🏗️ tooling-build', '📦 dependencies', '🐛 regression', '🚧 in progress'], 'Firmware toolchain and dependencies', [
+    ['🏗️ tooling-build', '🔒 security', '📦 dependencies', '🐛 regression', '🚧 in progress'], 'Firmware toolchain and dependencies', [
       'Audit and update installed Arduino cores and requested well-supported libraries through the configured network path.',
       'Declare all Go host dependencies and package checksums.',
       'Use fixed-size local AVR drivers where needed to fit the target without misrepresenting linked libraries.',
@@ -1026,6 +1034,8 @@ const EXTRA_ISSUE_ORIGINAL_REQUESTS = {
   131: [PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.trackerReconciliation],
   134: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies],
   135: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.osActions, PROMPT_EXCERPTS.serviceTray],
+  137: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.serviceTray],
+  139: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy],
 };
 
 const PR_ORIGINAL_REQUESTS = {
@@ -1066,6 +1076,10 @@ const PR_ORIGINAL_REQUESTS = {
   130: [PROMPT_EXCERPTS.packagingIdentity, PROMPT_EXCERPTS.serviceTray, PROMPT_EXCERPTS.releaseHandoff],
   132: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.serviceTray],
   133: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.toolingEntrypoint],
+  136: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies, PROMPT_EXCERPTS.proxyPolicy],
+  138: [PROMPT_EXCERPTS.httpMessages, PROMPT_EXCERPTS.remoteSecurity],
+  140: [PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking],
+  141: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.remoteSecurity, PROMPT_EXCERPTS.domainTracking],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
@@ -1290,7 +1304,12 @@ async function validateRemote(published) {
   const seen = new Map();
   for (const parent of Object.keys(EPICS).map(Number)) {
     const actual = await currentSubIssues(parent);
-    const expected = published.filter((item) => item.parent === parent).map((item) => item.number).sort((a, b) => a - b);
+    const expected = [
+      ...published.filter((item) => item.parent === parent).map((item) => item.number),
+      ...Object.entries(EXTRA_ISSUE_EPIC_PARENTS)
+        .filter(([, expectedParent]) => expectedParent === parent)
+        .map(([number]) => Number(number)),
+    ].sort((a, b) => a - b);
     const actualNumbers = actual.map((item) => item.number).sort((a, b) => a - b);
     if (JSON.stringify(actualNumbers) !== JSON.stringify(expected)) {
       errors.push(`epic #${parent}: sub-issues differ; actual=${actualNumbers.join(',')} expected=${expected.join(',')}`);
@@ -1299,6 +1318,9 @@ async function validateRemote(published) {
   }
   for (const item of published) {
     if (seen.get(item.number) !== 1) errors.push(`${item.id}: linked to ${seen.get(item.number) ?? 0} epics`);
+  }
+  for (const number of Object.keys(EXTRA_ISSUE_EPIC_PARENTS).map(Number)) {
+    if (seen.get(number) !== 1) errors.push(`supplemental issue #${number}: linked to ${seen.get(number) ?? 0} epics`);
   }
   const issueTraceMissing = fresh.filter((issue) => !hasCompletePromptTrace(issue.body));
   if (issueTraceMissing.length) {
@@ -1479,27 +1501,34 @@ async function main() {
     const linked = await currentSubIssues(parent);
     const linkedNumbers = new Set(linked.map((issue) => issue.number));
     const parentIssue = parents.get(parent);
-    const expectedNumbers = new Set(published.filter((item) => item.parent === parent).map((item) => item.number));
+    const expectedNumbers = new Set([
+      ...published.filter((item) => item.parent === parent).map((item) => item.number),
+      ...Object.entries(EXTRA_ISSUE_EPIC_PARENTS)
+        .filter(([, expectedParent]) => expectedParent === parent)
+        .map(([number]) => Number(number)),
+    ]);
     for (const child of linked) {
       const managed = published.find((item) => item.number === child.number);
-      if (!managed || expectedNumbers.has(child.number)) continue;
+      const expectedParent = managed?.parent ?? EXTRA_ISSUE_EPIC_PARENTS[child.number];
+      if (!expectedParent || expectedNumbers.has(child.number)) continue;
       if (!APPLY) {
-        process.stdout.write(`RELINK #${child.number}: remove from epic #${parent}, expected #${managed.parent}\n`);
+        process.stdout.write(`RELINK #${child.number}: remove from epic #${parent}, expected #${expectedParent}\n`);
         continue;
       }
       api('DELETE', `repos/${REPO}/issues/${parent}/sub_issue`, { sub_issue_id: child.id });
       linkedNumbers.delete(child.number);
       process.stdout.write(`unlinked #${child.number} from epic #${parent}\n`);
     }
-    for (const child of published.filter((item) => item.parent === parent)) {
-      if (linkedNumbers.has(child.number)) continue;
+    for (const childNumber of expectedNumbers) {
+      if (linkedNumbers.has(childNumber)) continue;
       if (!APPLY) {
-        process.stdout.write(`LINK #${child.number} under epic #${parent}\n`);
+        process.stdout.write(`LINK #${childNumber} under epic #${parent}\n`);
         continue;
       }
-      const childIssue = issues.find((issue) => issue.number === child.number);
+      const childIssue = issues.find((issue) => issue.number === childNumber);
+      if (!childIssue) throw new Error(`expected epic child #${childNumber} is missing`);
       gqlAddSubIssue(parentIssue.node_id, childIssue.node_id);
-      process.stdout.write(`linked #${child.number} under #${parent}\n`);
+      process.stdout.write(`linked #${childNumber} under #${parent}\n`);
     }
   }
 

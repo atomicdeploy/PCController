@@ -61,6 +61,9 @@ Generated outputs have one canonical location per product:
 
 - `Tools/Controller/bin/` contains `controller.exe` (or `controller`), the
   optional C ABI library/header, dependency notices, and `host-manifest.json`.
+- Windows output also contains `installation-package.json`, whose canonical
+  root SHA-256 binds every installable file and the validated host/resource
+  identity used by install, repair, and uninstall.
 - `.build/firmware/` contains Controller-validated AVR images and
   `firmware-manifest.json`.
 

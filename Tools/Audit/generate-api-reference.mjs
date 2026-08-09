@@ -395,7 +395,7 @@ const openapi = {
           ticket: { type: "string", pattern: "^[a-f0-9]{64}$", writeOnly: true, description: "One-use ticket carried in Sec-WebSocket-Protocol, never in the URL." },
 			protocol: { type: "string", const: "pccontroller" },
           expires_at: { type: "string", format: "date-time" },
-          expires_in_ms: { type: "integer", const: 30000 },
+		  expires_in_ms: { type: "integer", const: 15000 },
 			principal: { type: "string" },
 		},
 		},

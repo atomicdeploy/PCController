@@ -204,6 +204,60 @@ XDG data directory and registers `pccontroller://` with `xdg-mime`. Run the
 command from the final installed executable path: ownership markers prevent a
 temporary or foreign executable from replacing or deleting that registration.
 
+### Per-user Windows installation lifecycle
+
+Windows packages include `installation-package.json`, a deterministic inventory
+that binds every installable file to its size and SHA-256, the exact host
+manifest, source identity, target architecture, executable, embedded WebUI, and
+verified Win32 resources. Installation copies only inventoried files into a
+content-addressed per-user slot; it never trusts an archive filename or loose
+shadow executable.
+
+From an extracted, verified package:
+
+```console
+controller.exe install --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe installation status
+controller.exe repair --expected-package-sha256 <inventory-root-sha256> --desktop
+controller.exe uninstall
+```
+
+Install and update activation are journaled and recoverable. Presentation-only
+desktop enable and display-name changes journal both the prior and desired
+identity before touching native artifacts, then roll forward idempotently after
+an interruption; a failed cleanup or registration retains the journal for the
+next retry. A healthy repeated install or repair is a no-op; a damaged slot is
+rebuilt from the verified package without replacing a mapped executable in
+place. One exact prior slot is retained for rollback. The per-user root carries
+a product-and-user ownership marker, and lifecycle commands refuse a foreign or
+unmarked non-empty root.
+
+Uninstall preserves configuration, board backups, downloaded tools, logs, and
+host state. Purging them is a separate destructive choice that requires both
+flags and the exact confirmation shown by `controller help`:
+
+```console
+controller.exe uninstall --purge-data --preview-purge
+controller.exe uninstall --purge-data --confirm-purge PURGE-PC-CONTROLLER-USER-DATA
+```
+
+The preview returns the exact deduplicated deletion set without changing the
+installation or user data. Configuration is always modeled as its exact file;
+an explicit `--config`/`PCCONTROLLER_CONFIG` can never turn its parent into a
+recursive deletion target. The data root honors `PCCONTROLLER_DATA_DIR` at any
+absolute local path, but recursive removal requires its durable product/user
+ownership marker. A non-empty unmarked directory is never silently adopted.
+All existing path components and removal trees are rejected if they contain a
+Windows junction/reparse point or symbolic link.
+
+When uninstall is launched from the installed executable, a verified native
+helper binds both the parent PID and process-creation identity, continues only
+after that exact process exits, and writes a durable success/failure outcome at
+the returned path. Lifecycle commands are interruptible and impose a five-minute
+upper bound on lock waits. URI/AUMID/shortcut work uses the existing direct
+native desktop adapter and the exact active executable; it does not invoke
+PowerShell or accept a shell-backed fallback.
+
 The UI includes live electrical/thermal graphs, relay and PWM controls, a
 peripheral workbench for displays, addressable LEDs, sound, RF, macros, I2C,
 host actions and recovery diagnostics, a typed local-device surface, a
@@ -701,7 +755,7 @@ or bridge calls.
 
 HTTP and native socket clients authenticate with a Bearer or compatibility
 header. The Web UI exchanges that header credential at
-`POST /api/session/ticket` for a 30-second, one-use, Origin/peer/transport-
+`POST /api/session/ticket` for a 15-second, one-use, Origin/peer/transport-
 bound WebSocket subprotocol ticket. Durable tokens are rejected in URLs, and
 unauthorized standard WebSocket or Socket.IO handshakes emit no application
 frames. Durable host and integration credentials can be referenced from the
@@ -1047,8 +1101,10 @@ The page can:
 
 - select a local firmware, EEPROM Intel HEX, readback, or host executable;
   calculate SHA-256 in the browser; then upload and stage it without writing;
-- download and verify an HTTP(S) or peer-host artifact, with optional expected
-  SHA-256, while the Go transport honors the process proxy environment;
+- download and verify a public HTTP(S) artifact, with optional expected
+  SHA-256, while the Go transport honors the process proxy environment,
+  validates every redirect/final URL, and pins direct dials to a validated
+  public address;
 - discover the newest successful GitHub Actions artifact, latest/tagged GitHub
   release, or a product-neutral HTTP manifest before downloading; retain
   release/run/source metadata, provider digests, build hash/time, packed
@@ -1057,6 +1113,8 @@ The page can:
   traversal, links/devices, ambiguous matches, and expansion-limit violations;
 - inventory and download content-addressed firmware, flash readbacks, EEPROM
   backups, and host packages without duplicating identical firmware bytes;
+  confined downloads reuse the exact file handle whose size and SHA-256 were
+  verified rather than reopening a mutable path;
 - explicitly request a fresh flash+EEPROM capture, board-firmware update,
   dedicated captured-flash restore, current-layout EEPROM restore, or
   recoverable host self-update; and

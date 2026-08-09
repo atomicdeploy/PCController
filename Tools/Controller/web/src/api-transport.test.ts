@@ -151,7 +151,7 @@ describe('Web IPC transport', () => {
       ticket,
       protocol: 'pccontroller',
       expires_at: '2026-08-02T12:00:00Z',
-      expires_in_ms: 30_000,
+      expires_in_ms: 15_000,
       principal: 'remote-operator',
     }), { status: 201 }))
     vi.stubGlobal('fetch', fetchSpy)
@@ -190,7 +190,7 @@ describe('Web IPC transport', () => {
       ticket: 'a'.repeat(64),
       protocol: 'unexpected.v1',
       expires_at: '2026-08-02T12:00:00Z',
-      expires_in_ms: 30_000,
+      expires_in_ms: 15_000,
       principal: 'remote-operator',
     }), { status: 201 })))
     const states: string[] = []
