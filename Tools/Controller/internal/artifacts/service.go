@@ -390,18 +390,19 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 		return OperationResult{Operation: status, Artifact: &artifact, Reused: true}, nil
 	}
 	service.updateBytes(status.ID, 0, artifact.Bytes)
+	executionArtifact := artifact
 	go service.runTransaction(status.ID, func(ctx context.Context, progress ProgressFunc) (string, error) {
 		var updateErr error
 		switch operationKind {
 		case "firmware":
-			updateErr = service.executor.ProgramFirmware(ctx, artifact, request, progress)
+			updateErr = service.executor.ProgramFirmware(ctx, executionArtifact, request, progress)
 			if updateErr == nil {
-				updateErr = service.store.SetCurrent(KindFirmware, artifact.SHA256)
+				updateErr = service.store.SetCurrent(KindFirmware, executionArtifact.SHA256)
 			}
 		case "flash-restore":
-			updateErr = service.executor.RestoreFlash(ctx, artifact, request, progress)
+			updateErr = service.executor.RestoreFlash(ctx, executionArtifact, request, progress)
 			if updateErr == nil {
-				updateErr = service.store.SetCurrent(KindFlashBackup, artifact.SHA256)
+				updateErr = service.store.SetCurrent(KindFlashBackup, executionArtifact.SHA256)
 			}
 		case "eeprom":
 			progress("backing-up", 20, "capturing flash and EEPROM before EEPROM restore")
@@ -413,19 +414,19 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 				_, captureErr = service.importCaptured(captured, []string{"flash", "eeprom"})
 			}
 			if captureErr != nil {
-				return artifact.SHA256, fmt.Errorf("pre-EEPROM verified backup: %w", captureErr)
+				return executionArtifact.SHA256, fmt.Errorf("pre-EEPROM verified backup: %w", captureErr)
 			}
-			updateErr = service.executor.ProgramEEPROM(ctx, artifact, request, progress)
+			updateErr = service.executor.ProgramEEPROM(ctx, executionArtifact, request, progress)
 			if updateErr == nil {
-				updateErr = service.store.SetCurrent(KindEEPROM, artifact.SHA256)
+				updateErr = service.store.SetCurrent(KindEEPROM, executionArtifact.SHA256)
 			}
 		case "host":
-			updateErr = service.executor.StageHostUpdate(ctx, artifact, request, progress)
+			updateErr = service.executor.StageHostUpdate(ctx, executionArtifact, request, progress)
 		}
 		if updateErr == nil {
-			service.updateBytes(status.ID, artifact.Bytes, artifact.Bytes)
+			service.updateBytes(status.ID, executionArtifact.Bytes, executionArtifact.Bytes)
 		}
-		return artifact.SHA256, updateErr
+		return executionArtifact.SHA256, updateErr
 	})
 	decorateDescriptor(&artifact)
 	return OperationResult{Operation: status, Artifact: &artifact}, nil

@@ -184,42 +184,47 @@ func TestUrclockTimeoutHasTypedISPFallbackTelemetry(t *testing.T) {
 	}
 }
 
+type serializingExecutorCall struct {
+	kind     string
+	artifact Descriptor
+}
+
 type serializingExecutor struct {
-	entered chan string
+	entered chan serializingExecutorCall
 	release chan struct{}
 }
 
-func (executor *serializingExecutor) wait(kind string) {
-	executor.entered <- kind
+func (executor *serializingExecutor) wait(kind string, artifact Descriptor) {
+	executor.entered <- serializingExecutorCall{kind: kind, artifact: artifact}
 	<-executor.release
 }
 
 func (executor *serializingExecutor) Capture(_ Context, _ CaptureRequest, _ ProgressFunc) ([]CapturedFile, error) {
-	executor.wait("capture")
+	executor.wait("capture", Descriptor{})
 	return nil, errors.New("test capture has no files")
 }
-func (executor *serializingExecutor) ProgramFirmware(_ Context, _ Descriptor, _ UpdateRequest, _ ProgressFunc) error {
-	executor.wait("firmware")
+func (executor *serializingExecutor) ProgramFirmware(_ Context, artifact Descriptor, _ UpdateRequest, _ ProgressFunc) error {
+	executor.wait("firmware", artifact)
 	return nil
 }
-func (executor *serializingExecutor) RestoreFlash(_ Context, _ Descriptor, _ UpdateRequest, _ ProgressFunc) error {
-	executor.wait("restore")
+func (executor *serializingExecutor) RestoreFlash(_ Context, artifact Descriptor, _ UpdateRequest, _ ProgressFunc) error {
+	executor.wait("restore", artifact)
 	return nil
 }
-func (executor *serializingExecutor) ProgramEEPROM(_ Context, _ Descriptor, _ UpdateRequest, _ ProgressFunc) error {
-	executor.wait("eeprom")
+func (executor *serializingExecutor) ProgramEEPROM(_ Context, artifact Descriptor, _ UpdateRequest, _ ProgressFunc) error {
+	executor.wait("eeprom", artifact)
 	return nil
 }
-func (executor *serializingExecutor) StageHostUpdate(_ Context, _ Descriptor, _ UpdateRequest, _ ProgressFunc) error {
-	executor.wait("host")
+func (executor *serializingExecutor) StageHostUpdate(_ Context, artifact Descriptor, _ UpdateRequest, _ ProgressFunc) error {
+	executor.wait("host", artifact)
 	return nil
 }
 
-func TestProgrammingTransactionsAreSerialized(t *testing.T) {
+func TestProgrammingTransactionsAreSerializedWithStableExecutionArtifacts(t *testing.T) {
 	store := newTestStore(t)
 	firmware, _ := store.Put(strings.NewReader(validIntelHEX), PutOptions{Kind: KindFirmware, Name: "firmware.hex"})
 	readback, _ := store.Put(strings.NewReader(validIntelHEX), PutOptions{Kind: KindFlashBackup, Name: "flash.hex"})
-	executor := &serializingExecutor{entered: make(chan string, 2), release: make(chan struct{}, 2)}
+	executor := &serializingExecutor{entered: make(chan serializingExecutorCall, 2), release: make(chan struct{}, 2)}
 	service, err := NewService(Options{Store: store, Executor: executor})
 	if err != nil {
 		t.Fatal(err)
@@ -233,14 +238,24 @@ func TestProgrammingTransactionsAreSerialized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-executor.entered
+	if first.Artifact == nil || first.Artifact.DownloadURL == "" ||
+		second.Artifact == nil || second.Artifact.DownloadURL == "" {
+		t.Fatalf("operation responses were not decorated: first=%#v second=%#v", first.Artifact, second.Artifact)
+	}
+	firstCall := <-executor.entered
+	if firstCall.artifact.DownloadURL != "" {
+		t.Fatalf("executor received response-only download URL %q", firstCall.artifact.DownloadURL)
+	}
 	select {
 	case next := <-executor.entered:
-		t.Fatalf("second transaction entered concurrently: %s", next)
+		t.Fatalf("second transaction entered concurrently: %s", next.kind)
 	case <-time.After(40 * time.Millisecond):
 	}
 	executor.release <- struct{}{}
-	<-executor.entered
+	secondCall := <-executor.entered
+	if secondCall.artifact.DownloadURL != "" {
+		t.Fatalf("queued executor received response-only download URL %q", secondCall.artifact.DownloadURL)
+	}
 	executor.release <- struct{}{}
 	if status := waitOperation(t, service, first.Operation.ID); status.State != "completed" {
 		t.Fatalf("first=%#v", status)
