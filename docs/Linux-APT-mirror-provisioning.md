@@ -60,6 +60,7 @@ The stable runtime and configuration are:
 - `/opt/pccontroller/libexec/unattended-upgrade`
 - `/etc/pccontroller/apt-mirrors.json`
 - `/etc/pccontroller/apt-mirror-proxy.env` (mode `0600`)
+- `/etc/systemd/system/apt-daily.service.d/50-pccontroller-proxy.conf`
 - `/etc/systemd/system/apt-daily-upgrade.service.d/50-pccontroller-origin-cache.conf`
 - `pccontroller-apt-mirror-health.service`
 - `pccontroller-apt-mirror-health.timer`
@@ -161,11 +162,15 @@ Domestic candidates marked `bypass_proxy` connect directly during Go probes.
 Controller also writes per-host `Acquire::http::Proxy` and
 `Acquire::https::Proxy` rules with the value `DIRECT`, so later APT downloads
 to those domestic hosts bypass a configured proxy as well. Other candidates use
-Go's proxy environment handling, including `NO_PROXY`, and APT inherits the
-captured proxy environment. Provisioning copies only recognized proxy variables
-into the root-readable timer environment file and never prints their values. If
-only `ALL_PROXY` is present, it is also supplied as `HTTP_PROXY` and
-`HTTPS_PROXY` for clients that do not consume `ALL_PROXY` directly.
+Go's proxy environment handling, including `NO_PROXY`. Both `apt-daily` and
+`apt-daily-upgrade` inherit the same captured environment through managed
+systemd drop-ins, so unattended third-party indexes use the requested proxy
+while the per-host `DIRECT` rules still keep domestic Ubuntu traffic local.
+Provisioning copies only recognized proxy variables into the root-readable
+environment file, emits both uppercase (Go) and lowercase (APT) spellings, and
+never prints their values. If only `ALL_PROXY` is present, it is also supplied
+as `HTTP_PROXY` and `HTTPS_PROXY` for clients that do not consume `ALL_PROXY`
+directly.
 
 ## Recurring refresh and rollback
 

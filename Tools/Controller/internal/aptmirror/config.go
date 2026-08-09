@@ -47,6 +47,9 @@ type Paths struct {
 	ProxyEnvironment string `json:"proxy_environment"`
 	InstalledConfig  string `json:"installed_config"`
 	StableExecutable string `json:"stable_executable"`
+	UnattendedShim   string `json:"unattended_upgrade_shim"`
+	UnattendedDropIn string `json:"unattended_upgrade_drop_in"`
+	APTDailyDropIn   string `json:"apt_daily_proxy_drop_in"`
 	Service          string `json:"service"`
 	Timer            string `json:"timer"`
 	BackupRoot       string `json:"backup_root"`
@@ -108,6 +111,9 @@ func DefaultPaths() Paths {
 		ProxyEnvironment: "/etc/pccontroller/apt-mirror-proxy.env",
 		InstalledConfig:  "/etc/pccontroller/apt-mirrors.json",
 		StableExecutable: "/opt/pccontroller/bin/controller",
+		UnattendedShim:   UnattendedUpgradeShimPath,
+		UnattendedDropIn: UnattendedUpgradeDropInPath,
+		APTDailyDropIn:   APTDailyProxyDropInPath,
 		Service:          "/etc/systemd/system/pccontroller-apt-mirror-health.service",
 		Timer:            "/etc/systemd/system/pccontroller-apt-mirror-health.timer",
 		BackupRoot:       "/var/backups",
@@ -204,12 +210,15 @@ func (config Config) Validate() error {
 		"APT root":    config.Paths.APTRoot,
 		"mirror list": config.Paths.MirrorList, "state": config.Paths.State,
 		"lock": config.Paths.Lock, "Ubuntu keyring": config.Paths.Keyring,
-		"canonical source":      config.Paths.CanonicalSource,
-		"APT resilience config": config.Paths.APTResilience,
-		"proxy environment":     config.Paths.ProxyEnvironment,
-		"installed config":      config.Paths.InstalledConfig,
-		"stable executable":     config.Paths.StableExecutable,
-		"service":               config.Paths.Service, "timer": config.Paths.Timer,
+		"canonical source":           config.Paths.CanonicalSource,
+		"APT resilience config":      config.Paths.APTResilience,
+		"proxy environment":          config.Paths.ProxyEnvironment,
+		"installed config":           config.Paths.InstalledConfig,
+		"stable executable":          config.Paths.StableExecutable,
+		"unattended-upgrade shim":    config.Paths.UnattendedShim,
+		"unattended-upgrade drop-in": config.Paths.UnattendedDropIn,
+		"apt-daily proxy drop-in":    config.Paths.APTDailyDropIn,
+		"service":                    config.Paths.Service, "timer": config.Paths.Timer,
 		"backup root": config.Paths.BackupRoot,
 	}
 	seenPath := make(map[string]string)

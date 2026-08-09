@@ -157,7 +157,7 @@ func Install(ctx context.Context, options InstallOptions) (report InstallReport,
 	// the caller's quiescence barrier at this point. Validate every PackageFile
 	// against the unmodified upstream Origin implementation before any source
 	// stanza or generated mirror list is adopted.
-	if err := runUnattendedUpgradeSelfTest(ctx, UnattendedUpgradeShimPath); err != nil {
+	if err := runUnattendedUpgradeSelfTest(ctx, config.Paths.UnattendedShim); err != nil {
 		return report, fmt.Errorf("validate unattended-upgrade Origin cache workaround: %w", err)
 	}
 	refresh, err = Refresh(ctx, RefreshOptions{
@@ -213,8 +213,9 @@ func managedMirrorFiles(config Config, executable []byte, environment []string, 
 		config.Paths.ProxyEnvironment: proxyEnvironmentFile(environment),
 		config.Paths.Service:          SystemdService(config),
 		config.Paths.Timer:            SystemdTimer(),
-		UnattendedUpgradeShimPath:     UnattendedUpgradeShim(),
-		UnattendedUpgradeDropInPath:   UnattendedUpgradeSystemdDropIn(),
+		config.Paths.UnattendedShim:   UnattendedUpgradeShim(),
+		config.Paths.UnattendedDropIn: UnattendedUpgradeSystemdDropIn(config.Paths.ProxyEnvironment),
+		config.Paths.APTDailyDropIn:   APTDailyProxySystemdDropIn(config.Paths.ProxyEnvironment),
 	}
 	for path, content := range plan.Edits {
 		result[path] = content
@@ -245,7 +246,7 @@ ReadWritePaths=%s %s %s
 }
 
 func managedFileMode(config Config, path string) os.FileMode {
-	if path == config.Paths.StableExecutable || path == UnattendedUpgradeShimPath {
+	if path == config.Paths.StableExecutable || path == config.Paths.UnattendedShim {
 		return 0o755
 	}
 	if path == config.Paths.ProxyEnvironment {
@@ -293,6 +294,11 @@ func proxyEnvironmentFile(environment []string) []byte {
 		value := strings.ReplaceAll(values[name].value, "\\", "\\\\")
 		value = strings.ReplaceAll(value, "\"", "\\\"")
 		fmt.Fprintf(&output, "%s=\"%s\"\n", name, value)
+		// Go's proxy resolver prefers the conventional uppercase variables,
+		// while APT's acquire methods consume the lowercase spellings. Emit the
+		// same already-sanitized value under both names so the generated policy
+		// behaves identically in both managed services.
+		fmt.Fprintf(&output, "%s=\"%s\"\n", strings.ToLower(name), value)
 	}
 	return []byte(output.String())
 }

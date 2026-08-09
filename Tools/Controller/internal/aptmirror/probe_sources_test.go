@@ -271,7 +271,7 @@ func TestInstallDryRunAndGeneratedTopologyDoNotMutate(t *testing.T) {
 		t.Fatalf("official fallback incorrectly bypassed configured proxy:\n%s", resilience)
 	}
 	proxyFile := string(proxyEnvironmentFile([]string{"ALL_PROXY=socks5://name:secret@proxy.invalid:1080"}))
-	for _, name := range []string{"ALL_PROXY", "HTTP_PROXY", "HTTPS_PROXY"} {
+	for _, name := range []string{"ALL_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "all_proxy", "http_proxy", "https_proxy"} {
 		if !strings.Contains(proxyFile, name+"=\"socks5://name:secret@proxy.invalid:1080\"") {
 			t.Fatalf("ALL_PROXY fallback omitted %s without logging it: %q", name, proxyFile)
 		}

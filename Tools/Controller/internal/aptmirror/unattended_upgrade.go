@@ -6,6 +6,7 @@ const (
 	UnattendedUpgradeRealPath   = "/usr/bin/unattended-upgrade"
 	UnattendedUpgradeShimPath   = "/opt/pccontroller/libexec/unattended-upgrade"
 	UnattendedUpgradeDropInPath = "/etc/systemd/system/apt-daily-upgrade.service.d/50-pccontroller-origin-cache.conf"
+	APTDailyProxyDropInPath     = "/etc/systemd/system/apt-daily.service.d/50-pccontroller-proxy.conf"
 )
 
 // This exact affected constructor is shared by the reviewed Ubuntu 24.04.4
@@ -187,8 +188,19 @@ else:
 `, realProgram, testModuleRoot, expectedUID, unattendedUpgradeAffectedOriginConstructor))
 }
 
-func UnattendedUpgradeSystemdDropIn() []byte {
-	return []byte(`[Service]
+func UnattendedUpgradeSystemdDropIn(proxyEnvironment string) []byte {
+	return []byte(fmt.Sprintf(`[Service]
+EnvironmentFile=-%s
 Environment="PATH=/opt/pccontroller/libexec:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-`)
+`, proxyEnvironment))
+}
+
+// APTDailyProxySystemdDropIn gives the distro-owned index refresh the same
+// root-readable proxy policy as the mirror health service. Candidate-specific
+// DIRECT rules in the managed APT configuration still keep domestic traffic
+// off the proxy.
+func APTDailyProxySystemdDropIn(proxyEnvironment string) []byte {
+	return []byte(fmt.Sprintf(`[Service]
+EnvironmentFile=-%s
+`, proxyEnvironment))
 }

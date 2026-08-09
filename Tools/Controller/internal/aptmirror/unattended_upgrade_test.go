@@ -92,7 +92,7 @@ func TestUnattendedUpgradeArtifactsAreManagedAndDryRunStaysReadOnly(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{UnattendedUpgradeShimPath, UnattendedUpgradeDropInPath} {
+	for _, path := range []string{config.Paths.UnattendedShim, config.Paths.UnattendedDropIn, config.Paths.APTDailyDropIn} {
 		if !slices.Contains(report.ManagedFiles, path) {
 			t.Fatalf("transactional managed paths omitted %s: %q", path, report.ManagedFiles)
 		}
@@ -101,11 +101,13 @@ func TestUnattendedUpgradeArtifactsAreManagedAndDryRunStaysReadOnly(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if managedFileMode(config, UnattendedUpgradeShimPath) != 0o755 {
+	if managedFileMode(config, config.Paths.UnattendedShim) != 0o755 {
 		t.Fatal("unattended-upgrade shim is not executable")
 	}
-	if !strings.Contains(string(content[UnattendedUpgradeDropInPath]), "/opt/pccontroller/libexec") ||
-		!strings.HasPrefix(string(content[UnattendedUpgradeShimPath]), "#!/usr/bin/python3 -I") {
+	if !strings.Contains(string(content[config.Paths.UnattendedDropIn]), "/opt/pccontroller/libexec") ||
+		!strings.Contains(string(content[config.Paths.UnattendedDropIn]), "EnvironmentFile=-"+config.Paths.ProxyEnvironment) ||
+		!strings.Contains(string(content[config.Paths.APTDailyDropIn]), "EnvironmentFile=-"+config.Paths.ProxyEnvironment) ||
+		!strings.HasPrefix(string(content[config.Paths.UnattendedShim]), "#!/usr/bin/python3 -I") {
 		t.Fatal("managed unattended-upgrade artifacts do not select the isolated root-owned shim")
 	}
 }
