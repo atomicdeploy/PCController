@@ -59,13 +59,17 @@ command -v "$cxx" >/dev/null || { printf '%s is required in PATH\n' "$cxx" >&2; 
 triplet=$("$cxx" -dumpmachine)
 compiler_display=$(command -v "$cxx")
 compiler_path=$compiler_display
+cmake_compiler_args=()
 if [[ -n "${MSYSTEM:-}" ]]; then
-    # Native Windows CMake cannot resolve Git Bash's virtual compiler path.
-    # Keep the command name so CMake resolves the same executable through PATH.
-    compiler_path=$cxx
-elif [[ "$triplet" == *msys* ]] && command -v cygpath >/dev/null; then
-    [[ -x "${compiler_path}.exe" ]] && compiler_path="${compiler_path}.exe"
-    compiler_path=$(cygpath -m "$compiler_path")
+    # The preset already selects the GNU compiler from the native Windows PATH.
+    # Do not pass Git Bash's virtual path through to native CMake.
+    :
+else
+    if [[ "$triplet" == *msys* ]] && command -v cygpath >/dev/null; then
+        [[ -x "${compiler_path}.exe" ]] && compiler_path="${compiler_path}.exe"
+        compiler_path=$(cygpath -m "$compiler_path")
+    fi
+    cmake_compiler_args+=("-DCMAKE_CXX_COMPILER=${compiler_path}")
 fi
 
 cyan=$'\033[36m'
@@ -86,8 +90,7 @@ if ((clean)) && [[ -d "$build_root" ]]; then
 fi
 
 printf '%s⚙️  Configuring CMake%s\n' "$cyan" "$reset"
-cmake --preset "$preset" -S "$source_root" \
-    "-DCMAKE_CXX_COMPILER=${compiler_path}"
+cmake --preset "$preset" -S "$source_root" "${cmake_compiler_args[@]}"
 
 printf '%s🔨 Building C++17 virtual hardware%s\n' "$cyan" "$reset"
 cmake --build --preset "$preset" --parallel
