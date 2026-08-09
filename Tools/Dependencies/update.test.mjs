@@ -10,6 +10,7 @@ import {
   assertTrustedDependencyURL,
   assertTrustedGitHubURL,
   assertTrustedRepository,
+  buildEnvironmentFromToolchainBootstrap,
   commandInvocation,
   compareHostToolLocks,
   compareCompositeVersions,
@@ -74,6 +75,51 @@ test('Windows command-script runner fixes the Node spawnSync EINVAL regression',
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('captured command failures retain child diagnostics for structured reports', () => {
+  assert.throws(
+    () => run(process.execPath, ['-e',
+      'process.stdout.write("diagnostic stdout\\n"); process.stderr.write("diagnostic stderr\\n"); process.exit(7)']),
+    (error) => {
+      assert.match(error.message, /diagnostic stdout/u)
+      assert.match(error.message, /diagnostic stderr/u)
+      return true
+    },
+  )
+})
+
+test('candidate build stays bound to the CLI and config returned by bootstrap', () => {
+  const environment = {
+    HTTP_PROXY: 'http://proxy.invalid:8080',
+    NO_PROXY: 'localhost,.lan',
+    PATH: 'C:\\Windows\\System32',
+    pccontroller_toolchain_cli: 'C:\\stale\\arduino-cli.exe',
+    PcController_Toolchain_Config: 'C:\\stale\\firmware-cli.yaml',
+  }
+  const selected = buildEnvironmentFromToolchainBootstrap(`
+Installing exact firmware dependencies
+Saved managed firmware CLI path in PC-side host configuration.
+{
+  "cli_path": "C:\\\\managed tools\\\\arduino-cli.exe",
+  "config_path": "C:\\\\managed tools\\\\firmware-cli.yaml"
+}
+`, environment)
+  assert.deepEqual(selected, {
+    HTTP_PROXY: environment.HTTP_PROXY,
+    NO_PROXY: environment.NO_PROXY,
+    PATH: environment.PATH,
+    PCCONTROLLER_TOOLCHAIN_CLI: 'C:\\managed tools\\arduino-cli.exe',
+    PCCONTROLLER_TOOLCHAIN_CONFIG: 'C:\\managed tools\\firmware-cli.yaml',
+  })
+  assert.equal(Object.keys(selected).filter((name) =>
+    name.toUpperCase() === 'PCCONTROLLER_TOOLCHAIN_CLI').length, 1)
+  assert.equal(Object.keys(selected).filter((name) =>
+    name.toUpperCase() === 'PCCONTROLLER_TOOLCHAIN_CONFIG').length, 1)
+  assert.throws(
+    () => buildEnvironmentFromToolchainBootstrap('{"cli_path":"arduino-cli"}', environment),
+    /config_path/u,
+  )
 })
 
 test('stable comparison is semantic and rejects prereleases', () => {
@@ -198,6 +244,7 @@ test('npm projects declare compatibility ranges while each lock stays exact', ()
 test('scheduled updater validates every required candidate gate before PR creation', () => {
   const workflow = readFileSync(join(repo, '.github', 'workflows', 'update-dependencies.yml'), 'utf8')
   const updater = readFileSync(join(here, 'update.mjs'), 'utf8')
+  const attributes = readFileSync(join(repo, '.gitattributes'), 'utf8')
   for (const expected of [
     'schedule:', '--apply --validate', 'steps.candidate.outcome == \'success\'',
     'body-path: .build/dependencies/dependency-pr.md', 'dependency-blocked',
@@ -208,11 +255,34 @@ test('scheduled updater validates every required candidate gate before PR creati
     '32256', 'Urboot-Custom', 'VirtualBoard tests', 'Generated product identity',
     'Go tests from stable paths', 'Web tests',
     'windowsResources', 'upx', 'function resolveToolchain(mode, directRetry)',
+    'select-windows-compiler.mjs', 'generate-toolchain-policy.mjs',
   ]) assert.ok(updater.includes(expected), `updater missing ${expected}`)
   assert.ok(
     updater.indexOf("step('Clean generated build outputs'") < updater.indexOf('installResolvedHostTools(hostTools'),
     'managed host tools must be provisioned after the root clean step',
   )
+  assert.ok(
+    updater.indexOf('run(process.execPath, [toolchainPolicyGenerator]') < updater.indexOf('if (options.validate)'),
+    'the generated runtime policy must be refreshed before candidate validation',
+  )
+  assert.match(updater, /PCCONTROLLER_TOOLCHAIN_CLI:\s*report\.cli_path/u)
+  assert.match(updater, /PCCONTROLLER_TOOLCHAIN_CONFIG:\s*report\.config_path/u)
+  assert.match(updater, /run\(rootBuild, \['--all'\], \{[\s\S]*?env: buildEnvironment/u)
+  for (const path of [
+    'LICENSE\\.upstream',
+    'backends\\/tm1637_progress\\.S',
+    'patches\\/0001-optional-progress-backend-hook\\.patch',
+  ]) {
+    assert.match(attributes,
+      new RegExp(`^Tools/Bootloader/Urboot-Custom/${path} text eol=lf$`, 'mu'),
+      'exact Urboot-Custom input hashes must survive Windows checkout conversion')
+  }
+  const buildSystemGate = updater.slice(
+    updater.indexOf("step('Build-system tests'"),
+    updater.indexOf("step('Firmware and host build'"),
+  )
+  assert.doesNotMatch(buildSystemGate, /capture:\s*false/u,
+    'build-system test failures must remain captured for the structured report')
 })
 
 test('every external workflow action is immutable and included in the resolved inventory', () => {
