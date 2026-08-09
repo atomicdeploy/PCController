@@ -134,13 +134,20 @@ package. The default uninstall preserves both roaming configuration and local
 host data, including board backups. Data removal is deliberately separate:
 
 ```console
+controller.exe uninstall --purge-data --preview-purge
 controller.exe uninstall --purge-data --confirm-purge PURGE-PC-CONTROLLER-USER-DATA
 ```
 
 The exact confirmation is required in addition to `--purge-data`; neither flag
-is implied by uninstall. `--desktop` uses the direct native URI/AUMID/shortcut
-adapter with the exact installed executable. Unsupported platforms return an
-error rather than falling back to a shell script.
+is implied by uninstall. Preview reports the exact deduplicated set without
+deleting it. A configured host file is removed only as that exact file, while a
+canonical or `PCCONTROLLER_DATA_DIR` data root is recursive only when its durable
+product/user ownership marker validates. Unmarked non-empty roots and any path
+containing a symlink, junction, reparse point, device alias, or alternate data
+stream are refused. `--desktop` uses the direct native URI/AUMID/shortcut adapter
+with the exact installed executable. Lifecycle lock waits are interruptible and
+bounded to five minutes. Unsupported platforms return an error rather than
+falling back to a shell script.
 
 The exact embedded WebUI can also be exported for audit or a trusted static
 host. The command never overwrites an existing archive:

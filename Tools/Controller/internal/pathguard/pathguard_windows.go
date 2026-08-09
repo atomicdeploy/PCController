@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	"golang.org/x/sys/windows"
 )
@@ -50,9 +49,6 @@ func validateWindowsComponents(path string) error {
 }
 
 func platformComponentIsLink(path string, info fs.FileInfo) (bool, error) {
-	if data, ok := info.Sys().(*syscall.Win32FileAttributeData); ok {
-		return info.Mode()&fs.ModeSymlink != 0 || data.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0, nil
-	}
 	value, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return false, err

@@ -148,7 +148,7 @@ func runUninstallLifecycle(
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller uninstall [--root DIR] [--purge-data --confirm-purge TOKEN]")
+		return errors.New("usage: controller uninstall [--root DIR] [--purge-data [--preview-purge | --confirm-purge TOKEN]]")
 	}
 	service, err := newInstallerService(displayName)
 	if err != nil {
@@ -188,6 +188,7 @@ func runUninstallLifecycle(
 		return writeLifecycleJSON(stdout, map[string]any{
 			"action": "uninstall", "scheduled": true,
 			"helper":         plan.HelperPath,
+			"outcome":        plan.OutcomePath,
 			"data_preserved": !request.PurgeData,
 		})
 	}

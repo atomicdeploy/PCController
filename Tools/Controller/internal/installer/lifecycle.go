@@ -204,12 +204,12 @@ func (service *Service) Status(ctx context.Context, root string) (LifecycleResul
 		return LifecycleResult{}, err
 	}
 	result := LifecycleResult{Action: "status", Root: resolved, DataPreserved: true}
-	if _, err := os.Lstat(resolved); os.IsNotExist(err) {
-		cleaned, cleanupErr := service.cleanupDetachedInstallation(resolved)
-		result.Changed = cleaned
-		if cleanupErr != nil {
-			return result, cleanupErr
-		}
+	cleaned, cleanupErr := service.cleanupDetachedInstallation(resolved)
+	result.Changed = cleaned
+	if cleanupErr != nil {
+		return result, cleanupErr
+	}
+	if _, err := os.Lstat(resolved); errors.Is(err, os.ErrNotExist) {
 		return result, nil
 	} else if err != nil {
 		return result, err
@@ -254,10 +254,8 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 		return LifecycleResult{}, err
 	}
 	result := LifecycleResult{Action: operation, Root: root, DataPreserved: true}
-	if _, err := os.Lstat(root); os.IsNotExist(err) {
-		if _, cleanupErr := service.cleanupDetachedInstallation(root); cleanupErr != nil {
-			return result, cleanupErr
-		}
+	if _, cleanupErr := service.cleanupDetachedInstallation(root); cleanupErr != nil {
+		return result, cleanupErr
 	}
 	manifest, err := VerifyPackage(request.PackageRoot, request.ExpectedPackageSHA256, ManifestOptions{
 		Platform: service.Platform, Architecture: service.Architecture,
@@ -384,7 +382,7 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 				return result, fmt.Errorf("publish repaired package slot: %w", err)
 			}
 		}
-	} else if os.IsNotExist(statErr) {
+	} else if errors.Is(statErr, os.ErrNotExist) {
 		if err := publishDirectory(stage, slot); err != nil {
 			return result, fmt.Errorf("publish package slot: %w", err)
 		}
@@ -435,7 +433,7 @@ func (service *Service) activate(ctx context.Context, operation string, request 
 			return result, errors.Join(fmt.Errorf("activate native desktop integration: %w", err), rollbackErr)
 		}
 	}
-	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return result, fmt.Errorf("commit installation transaction: %w", err)
 	}
 	result.Changed, result.Healthy, result.DesktopManaged = true, true, desktopManaged
@@ -466,7 +464,7 @@ func (service *Service) Uninstall(ctx context.Context, request UninstallRequest)
 			return result, nil
 		}
 	}
-	if _, err := os.Lstat(root); os.IsNotExist(err) {
+	if _, err := os.Lstat(root); errors.Is(err, os.ErrNotExist) {
 		cleaned, cleanupErr := service.cleanupDetachedInstallation(root)
 		result.Changed = cleaned
 		if cleanupErr != nil {
@@ -596,7 +594,7 @@ func (service *Service) cleanupDetachedInstallation(root string) (bool, error) {
 	if err := pathguard.ValidateComponents(tombstone, true); err != nil {
 		return false, err
 	}
-	if _, err := os.Lstat(tombstone); os.IsNotExist(err) {
+	if _, err := os.Lstat(tombstone); errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	} else if err != nil {
 		return false, err
@@ -628,7 +626,7 @@ func (service *Service) checkOwnership(root string, create bool) error {
 		return err
 	}
 	info, err := os.Lstat(root)
-	if os.IsNotExist(err) && create {
+	if errors.Is(err, os.ErrNotExist) && create {
 		if err := pathguard.MkdirAll(root, 0o700); err != nil {
 			return err
 		}
@@ -645,7 +643,7 @@ func (service *Service) checkOwnership(root string, create bool) error {
 	}
 	path := filepath.Join(root, ownerMarkerName)
 	content, err := readBoundedRegularFile(path, 64<<10)
-	if os.IsNotExist(err) && create {
+	if errors.Is(err, os.ErrNotExist) && create {
 		entries, readErr := os.ReadDir(root)
 		if readErr != nil {
 			return readErr
@@ -662,7 +660,7 @@ func (service *Service) checkOwnership(root string, create bool) error {
 		return writeJSONAtomic(path, marker, 0o600)
 	}
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return ErrOwnershipMismatch
 		}
 		return err
@@ -753,7 +751,7 @@ func (service *Service) verifySlot(root, relative, digest string) error {
 
 func (service *Service) recover(ctx context.Context, root string) error {
 	content, err := readBoundedRegularFile(filepath.Join(root, transactionName), 256<<10)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
@@ -844,7 +842,7 @@ func (service *Service) recover(ctx context.Context, root string) error {
 	default:
 		return fmt.Errorf("installation recovery journal phase %q is unsupported", journal.Phase)
 	}
-	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
@@ -862,7 +860,7 @@ func (service *Service) rollbackActivation(ctx context.Context, root string, jou
 		)
 	}
 	if journal.PreviousState == nil {
-		if err := os.Remove(filepath.Join(root, installationStateName)); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(filepath.Join(root, installationStateName)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			result = errors.Join(result, err)
 		}
 	} else {
@@ -877,7 +875,7 @@ func (service *Service) rollbackActivation(ctx context.Context, root string, jou
 			result = errors.Join(result, removeOwnedSubtree(root, slot))
 		}
 	}
-	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(filepath.Join(root, transactionName)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		result = errors.Join(result, err)
 	}
 	return result
@@ -885,7 +883,7 @@ func (service *Service) rollbackActivation(ctx context.Context, root string, jou
 
 func loadState(root string) (InstallationState, bool, error) {
 	content, err := readBoundedRegularFile(filepath.Join(root, installationStateName), 256<<10)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return InstallationState{}, false, nil
 	}
 	if err != nil {
@@ -982,13 +980,13 @@ func transactionID() (string, error) {
 func prunePackageSlots(root string, state InstallationState) []string {
 	directory := filepath.Join(root, packagesDirectory)
 	if err := pathguard.ValidateComponents(directory, false); err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return []string{"unable to trust superseded package directory: " + err.Error()}
 	}
 	entries, err := os.ReadDir(directory)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
@@ -1085,7 +1083,7 @@ func validatePurgeConfigFile(value, installRoot string) (PurgeTarget, error) {
 		return PurgeTarget{}, fmt.Errorf("purge configuration file %s: %w", path, err)
 	}
 	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return PurgeTarget{Kind: "config-file", Path: path}, nil
 	}
 	if err != nil {
@@ -1111,7 +1109,7 @@ func validatePurgeDataRoot(value, installRoot, ownerID string) (PurgeTarget, err
 		return PurgeTarget{}, fmt.Errorf("purge data root %s: %w", path, err)
 	}
 	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return PurgeTarget{Kind: "data-root", Path: path}, nil
 	}
 	if err != nil {
@@ -1140,7 +1138,7 @@ func executePurgeTargets(targets []PurgeTarget, installRoot, ownerID string, res
 			if !validated.Exists {
 				continue
 			}
-			if err := os.Remove(validated.Path); err != nil && !os.IsNotExist(err) {
+			if err := os.Remove(validated.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return fmt.Errorf("purge configuration file %s: %w", validated.Path, err)
 			}
 			result.PurgedPaths = append(result.PurgedPaths, validated.Path)
@@ -1254,7 +1252,10 @@ func removeOwnedSubtree(root, target string) error {
 }
 
 func removeTreeSecure(path string) error {
-	if _, err := os.Lstat(path); os.IsNotExist(err) {
+	if err := pathguard.ValidateComponents(path, true); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
 		return nil
 	} else if err != nil {
 		return err

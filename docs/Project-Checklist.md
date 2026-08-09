@@ -92,6 +92,17 @@ binary, checksum, or test run cannot satisfy a newer tree.
   native desktop adapter, and an external native self-uninstall helper.
   Uninstall preserves configuration and host data unless a separate exact
   purge confirmation is supplied.
+- ✅ Purge preview separates exact configuration files from marker-owned data
+  roots, honors the validated data-directory override, deduplicates overlaps,
+  and refuses unmarked or junction/reparse-traversed recursive targets.
+- ✅ Interrupted uninstall phases roll back to a verified retryable state;
+  deterministic owned tombstones are recovered after detach. Lifecycle lock
+  waits are signal-aware and bounded, activated recovery verifies its slot
+  before desktop registration, and current app-name precedence replaces stored
+  presentation while preserving the prior identity only for cleanup/rollback.
+- ✅ The self-uninstall helper binds PID plus process-creation identity and
+  leaves a durable observable completion/failure record instead of reporting
+  only that cleanup was scheduled.
 - 🟣 Exercise install, repair, update, native desktop integration,
   self-uninstall, and confirmed purge from the final packaged Windows
   executable before promoting an alpha artifact.

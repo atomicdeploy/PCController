@@ -16,24 +16,37 @@ import (
 const (
 	uninstallHelperCommand = "__installation-uninstall-helper"
 	uninstallPlanFormat    = "pccontroller-uninstall-helper/v1"
+	uninstallOutcomeFormat = "pccontroller-uninstall-outcome/v1"
 )
 
 type uninstallHelperPlan struct {
-	Format       string           `json:"format"`
-	CreatedAt    time.Time        `json:"created_at"`
-	ParentPID    int              `json:"parent_pid"`
-	OwnerID      string           `json:"owner_id"`
-	Platform     string           `json:"platform"`
-	Architecture string           `json:"architecture"`
-	HelperPath   string           `json:"helper_path"`
-	HelperSHA256 string           `json:"helper_sha256"`
-	PlanPath     string           `json:"plan_path"`
-	Request      UninstallRequest `json:"request"`
+	Format         string           `json:"format"`
+	CreatedAt      time.Time        `json:"created_at"`
+	ParentPID      int              `json:"parent_pid"`
+	ParentIdentity string           `json:"parent_identity"`
+	OwnerID        string           `json:"owner_id"`
+	Platform       string           `json:"platform"`
+	Architecture   string           `json:"architecture"`
+	HelperPath     string           `json:"helper_path"`
+	HelperSHA256   string           `json:"helper_sha256"`
+	PlanPath       string           `json:"plan_path"`
+	OutcomePath    string           `json:"outcome_path"`
+	Request        UninstallRequest `json:"request"`
 }
 
 type ExternalUninstallPlan struct {
-	HelperPath string `json:"helper_path"`
-	PlanPath   string `json:"plan_path"`
+	HelperPath  string `json:"helper_path"`
+	PlanPath    string `json:"plan_path"`
+	OutcomePath string `json:"outcome_path"`
+}
+
+type uninstallOutcome struct {
+	Format        string    `json:"format"`
+	CompletedAt   time.Time `json:"completed_at"`
+	Success       bool      `json:"success"`
+	Error         string    `json:"error,omitempty"`
+	Root          string    `json:"root"`
+	DataPreserved bool      `json:"data_preserved"`
 }
 
 func IsUninstallHelperInvocation(args []string) bool {
@@ -120,10 +133,17 @@ func (service *Service) PrepareExternalUninstall(ctx context.Context, request Un
 		return ExternalUninstallPlan{}, err
 	}
 	planPath := filepath.Join(directory, "uninstall-plan.json")
+	outcomePath := filepath.Join(directory, "uninstall-outcome.json")
+	parentIdentity, err := parentProcessIdentity(os.Getpid())
+	if err != nil {
+		return ExternalUninstallPlan{}, fmt.Errorf("bind uninstall helper to parent identity: %w", err)
+	}
 	plan := uninstallHelperPlan{
 		Format: uninstallPlanFormat, CreatedAt: service.now(), ParentPID: os.Getpid(),
-		OwnerID: service.OwnerID, Platform: service.Platform, Architecture: service.Architecture,
-		HelperPath: helperPath, HelperSHA256: digest, PlanPath: planPath, Request: request,
+		ParentIdentity: parentIdentity,
+		OwnerID:        service.OwnerID, Platform: service.Platform, Architecture: service.Architecture,
+		HelperPath: helperPath, HelperSHA256: digest, PlanPath: planPath,
+		OutcomePath: outcomePath, Request: request,
 	}
 	if err := writeJSONAtomic(planPath, plan, 0o600); err != nil {
 		return ExternalUninstallPlan{}, err
@@ -132,10 +152,10 @@ func (service *Service) PrepareExternalUninstall(ctx context.Context, request Un
 		return ExternalUninstallPlan{}, err
 	}
 	cleanup = false
-	return ExternalUninstallPlan{HelperPath: helperPath, PlanPath: planPath}, nil
+	return ExternalUninstallPlan{HelperPath: helperPath, PlanPath: planPath, OutcomePath: outcomePath}, nil
 }
 
-func RunExternalUninstallHelper(ctx context.Context, planPath string, service *Service) error {
+func RunExternalUninstallHelper(ctx context.Context, planPath string, service *Service) (resultErr error) {
 	if service == nil {
 		return errors.New("uninstall helper requires an installation service")
 	}
@@ -151,8 +171,15 @@ func RunExternalUninstallHelper(ctx context.Context, planPath string, service *S
 		return err
 	}
 	now := service.now()
-	if plan.Format != uninstallPlanFormat || plan.ParentPID <= 0 || plan.OwnerID != service.OwnerID || plan.Platform != service.Platform || plan.Architecture != service.Architecture || !samePath(plan.PlanPath, planPath) || now.Before(plan.CreatedAt.Add(-time.Minute)) || now.After(plan.CreatedAt.Add(15*time.Minute)) {
+	if plan.Format != uninstallPlanFormat || plan.ParentPID <= 0 || strings.TrimSpace(plan.ParentIdentity) == "" || plan.OwnerID != service.OwnerID || plan.Platform != service.Platform || plan.Architecture != service.Architecture || !samePath(plan.PlanPath, planPath) || now.Before(plan.CreatedAt.Add(-time.Minute)) || now.After(plan.CreatedAt.Add(15*time.Minute)) {
 		return errors.New("uninstall helper plan identity or lifetime is invalid")
+	}
+	planDirectory := filepath.Dir(planPath)
+	if filepath.Base(plan.OutcomePath) != "uninstall-outcome.json" || !samePath(filepath.Dir(plan.OutcomePath), planDirectory) || !samePath(filepath.Dir(plan.HelperPath), planDirectory) {
+		return errors.New("uninstall helper plan paths are not co-located")
+	}
+	if err := pathguard.ValidateComponents(plan.OutcomePath, true); err != nil {
+		return err
 	}
 	current, err := filepath.Abs(service.CurrentExecutable)
 	if err != nil || !samePath(current, plan.HelperPath) {
@@ -162,13 +189,24 @@ func RunExternalUninstallHelper(ctx context.Context, planPath string, service *S
 	if err != nil || !strings.EqualFold(digest, plan.HelperSHA256) {
 		return errors.New("uninstall helper executable digest differs from its plan")
 	}
-	if err := waitForParentExit(ctx, plan.ParentPID, 3*time.Minute); err != nil {
-		return err
+	if err := waitForParentExit(ctx, plan.ParentPID, plan.ParentIdentity, 3*time.Minute); err != nil {
+		resultErr = err
+	} else if _, err := service.Uninstall(ctx, plan.Request); err != nil {
+		resultErr = err
 	}
-	if _, err := service.Uninstall(ctx, plan.Request); err != nil {
-		return err
+	outcome := uninstallOutcome{
+		Format: uninstallOutcomeFormat, CompletedAt: service.now(), Success: resultErr == nil,
+		Root: plan.Request.Root, DataPreserved: !plan.Request.PurgeData,
 	}
-	_ = os.Remove(plan.PlanPath)
-	_ = scheduleHelperRemoval(plan.HelperPath)
-	return nil
+	if resultErr != nil {
+		outcome.Error = resultErr.Error()
+	}
+	if err := writeJSONAtomic(plan.OutcomePath, outcome, 0o600); err != nil {
+		resultErr = errors.Join(resultErr, fmt.Errorf("persist uninstall helper outcome: %w", err))
+	}
+	if resultErr == nil {
+		_ = os.Remove(plan.PlanPath)
+		_ = scheduleHelperRemoval(plan.HelperPath)
+	}
+	return resultErr
 }

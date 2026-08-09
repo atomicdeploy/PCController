@@ -506,6 +506,22 @@ func TestPurgeRejectsUnmarkedRootsAndAllowsAbsentOverrides(t *testing.T) {
 	if err != nil || len(preview.PurgeTargets) != 1 || preview.PurgeTargets[0].Exists {
 		t.Fatalf("absent override preview=%#v err=%v", preview, err)
 	}
+	owned := filepath.Join(t.TempDir(), "owned-data")
+	if err := ownedstorage.EnsureFor(owned, service.OwnerID); err != nil {
+		t.Fatal(err)
+	}
+	coveredConfig := filepath.Join(owned, "config.json")
+	if err := os.WriteFile(coveredConfig, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	overlap, err := service.Uninstall(context.Background(), UninstallRequest{
+		Root: installRoot, PurgeData: true, PreviewPurge: true,
+		PurgeConfigFiles: []string{coveredConfig, coveredConfig},
+		PurgeDataRoots:   []string{owned, owned},
+	})
+	if err != nil || len(overlap.PurgeTargets) != 1 || overlap.PurgeTargets[0].Kind != "data-root" {
+		t.Fatalf("overlap purge preview=%#v err=%v", overlap, err)
+	}
 }
 
 func TestUnsupportedPlatformAndForeignRootAreExplicit(t *testing.T) {
