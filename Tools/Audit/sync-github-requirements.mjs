@@ -117,6 +117,12 @@ const EXTRA_ISSUE_REQUIRED_LABELS = {
   137: ['🖥️ host', '🛡️ safety', '🧪 testing', '🏗️ tooling-build', '🔒 security', '📦 dependencies'],
 };
 
+// Supplemental issues retain their independently authored bodies, but a small
+// number are still first-class children of a normalized epic.
+const EXTRA_ISSUE_EPIC_PARENTS = {
+  106: 7,
+};
+
 function requirement(id, parent, title, state, labels, section, criteria, evidence) {
   return { id, parent, title, state, labels, section, criteria, evidence };
 }
@@ -1069,6 +1075,7 @@ const PR_ORIGINAL_REQUESTS = {
   132: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.serviceTray],
   133: [PROMPT_EXCERPTS.dependencies, PROMPT_EXCERPTS.proxyPolicy, PROMPT_EXCERPTS.toolingEntrypoint],
   136: [PROMPT_EXCERPTS.dependencyBlocker, PROMPT_EXCERPTS.latestDependencies, PROMPT_EXCERPTS.proxyPolicy],
+  138: [PROMPT_EXCERPTS.httpMessages, PROMPT_EXCERPTS.remoteSecurity],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
@@ -1293,7 +1300,12 @@ async function validateRemote(published) {
   const seen = new Map();
   for (const parent of Object.keys(EPICS).map(Number)) {
     const actual = await currentSubIssues(parent);
-    const expected = published.filter((item) => item.parent === parent).map((item) => item.number).sort((a, b) => a - b);
+    const expected = [
+      ...published.filter((item) => item.parent === parent).map((item) => item.number),
+      ...Object.entries(EXTRA_ISSUE_EPIC_PARENTS)
+        .filter(([, expectedParent]) => expectedParent === parent)
+        .map(([number]) => Number(number)),
+    ].sort((a, b) => a - b);
     const actualNumbers = actual.map((item) => item.number).sort((a, b) => a - b);
     if (JSON.stringify(actualNumbers) !== JSON.stringify(expected)) {
       errors.push(`epic #${parent}: sub-issues differ; actual=${actualNumbers.join(',')} expected=${expected.join(',')}`);
@@ -1302,6 +1314,9 @@ async function validateRemote(published) {
   }
   for (const item of published) {
     if (seen.get(item.number) !== 1) errors.push(`${item.id}: linked to ${seen.get(item.number) ?? 0} epics`);
+  }
+  for (const number of Object.keys(EXTRA_ISSUE_EPIC_PARENTS).map(Number)) {
+    if (seen.get(number) !== 1) errors.push(`supplemental issue #${number}: linked to ${seen.get(number) ?? 0} epics`);
   }
   const issueTraceMissing = fresh.filter((issue) => !hasCompletePromptTrace(issue.body));
   if (issueTraceMissing.length) {
@@ -1482,27 +1497,34 @@ async function main() {
     const linked = await currentSubIssues(parent);
     const linkedNumbers = new Set(linked.map((issue) => issue.number));
     const parentIssue = parents.get(parent);
-    const expectedNumbers = new Set(published.filter((item) => item.parent === parent).map((item) => item.number));
+    const expectedNumbers = new Set([
+      ...published.filter((item) => item.parent === parent).map((item) => item.number),
+      ...Object.entries(EXTRA_ISSUE_EPIC_PARENTS)
+        .filter(([, expectedParent]) => expectedParent === parent)
+        .map(([number]) => Number(number)),
+    ]);
     for (const child of linked) {
       const managed = published.find((item) => item.number === child.number);
-      if (!managed || expectedNumbers.has(child.number)) continue;
+      const expectedParent = managed?.parent ?? EXTRA_ISSUE_EPIC_PARENTS[child.number];
+      if (!expectedParent || expectedNumbers.has(child.number)) continue;
       if (!APPLY) {
-        process.stdout.write(`RELINK #${child.number}: remove from epic #${parent}, expected #${managed.parent}\n`);
+        process.stdout.write(`RELINK #${child.number}: remove from epic #${parent}, expected #${expectedParent}\n`);
         continue;
       }
       api('DELETE', `repos/${REPO}/issues/${parent}/sub_issue`, { sub_issue_id: child.id });
       linkedNumbers.delete(child.number);
       process.stdout.write(`unlinked #${child.number} from epic #${parent}\n`);
     }
-    for (const child of published.filter((item) => item.parent === parent)) {
-      if (linkedNumbers.has(child.number)) continue;
+    for (const childNumber of expectedNumbers) {
+      if (linkedNumbers.has(childNumber)) continue;
       if (!APPLY) {
-        process.stdout.write(`LINK #${child.number} under epic #${parent}\n`);
+        process.stdout.write(`LINK #${childNumber} under epic #${parent}\n`);
         continue;
       }
-      const childIssue = issues.find((issue) => issue.number === child.number);
+      const childIssue = issues.find((issue) => issue.number === childNumber);
+      if (!childIssue) throw new Error(`expected epic child #${childNumber} is missing`);
       gqlAddSubIssue(parentIssue.node_id, childIssue.node_id);
-      process.stdout.write(`linked #${child.number} under #${parent}\n`);
+      process.stdout.write(`linked #${childNumber} under #${parent}\n`);
     }
   }
 
