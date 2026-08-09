@@ -23,6 +23,17 @@ type fakeExecutor struct {
 	err      error
 }
 
+type capturingExecutor struct {
+	fakeExecutor
+	firmwareArtifacts chan Descriptor
+}
+
+func (executor *capturingExecutor) ProgramFirmware(_ Context, artifact Descriptor, _ UpdateRequest, progress ProgressFunc) error {
+	executor.firmwareArtifacts <- artifact
+	progress("programming", 70, "programming firmware")
+	return executor.err
+}
+
 func (fake *fakeExecutor) Capture(_ Context, _ CaptureRequest, progress ProgressFunc) ([]CapturedFile, error) {
 	progress("reading", 50, "reading device")
 	return fake.captured, fake.err
@@ -111,6 +122,54 @@ func TestServiceRequiresAuthorizationAndRunsExplicitFirmwareUpdate(t *testing.T)
 		case <-deadline:
 			t.Fatal("completion event not published")
 		}
+	}
+}
+
+func TestStartFirmwareUpdateSnapshotsDescriptorBeforeAsyncHandoff(t *testing.T) {
+	store := newTestStore(t)
+	firmware, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{Kind: KindFirmware, Name: "firmware.hex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &capturingExecutor{firmwareArtifacts: make(chan Descriptor, 1)}
+	service, err := NewService(Options{Store: store, Executor: executor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	// Hold the transaction token so the async executor cannot inspect its
+	// descriptor until StartFirmwareUpdate has finalized the public response.
+	<-service.transaction
+	released := false
+	defer func() {
+		if !released {
+			service.transaction <- struct{}{}
+		}
+	}()
+	result, err := service.StartFirmwareUpdate(UpdateRequest{
+		ArtifactSHA256: firmware.SHA256,
+		Authorized:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Artifact == nil || result.Artifact.DownloadURL == "" {
+		t.Fatalf("public artifact was not decorated: %#v", result.Artifact)
+	}
+
+	service.transaction <- struct{}{}
+	released = true
+	select {
+	case executionArtifact := <-executor.firmwareArtifacts:
+		if executionArtifact.DownloadURL != "" {
+			t.Fatalf("executor received mutable public descriptor state: %#v", executionArtifact)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("executor did not receive the firmware descriptor")
+	}
+	if status := waitOperation(t, service, result.Operation.ID); status.State != "completed" {
+		t.Fatalf("status=%#v", status)
 	}
 }
 
