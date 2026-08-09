@@ -1363,6 +1363,28 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 			t.Errorf("commandCapability(%q)=%q want %q", test.command, got, test.want)
 		}
 	}
+
+	params, err := json.Marshal(map[string]string{
+		"command": "macro update 7 renamed motion green",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	access := Access{Remote: true, Transport: "websocket", Principal: "config-peer"}
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	config.IPC.RemotePolicy.HostConfiguration = true
+	config.IPC.RemotePolicy.BoardCommands = false
+	service := &Service{HostConfig: func() appconfig.Config { return config }}
+	if err := service.authorizeAccess(access, "controller.command.execute", params); err != nil {
+		t.Fatalf("config-only peer could not rename macro metadata: %v", err)
+	}
+	config.IPC.RemotePolicy.HostConfiguration = false
+	config.IPC.RemotePolicy.BoardCommands = true
+	if err := service.authorizeAccess(access, "controller.command.execute", params); err == nil ||
+		!strings.Contains(err.Error(), capabilityHostConfig) {
+		t.Fatalf("board-only peer mutated host macro metadata: %v", err)
+	}
 }
 
 func TestRFMapParamsNormalizeSemanticTargetsAndRejectUnsafeMappings(t *testing.T) {
