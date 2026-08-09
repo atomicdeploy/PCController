@@ -82,6 +82,25 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME firmware_uart_protocol_unit COMMAND firmware_uart_protocol_tests)
 
+  # Compile the production bounded macro/action core directly on the host. This
+  # proves exact uint32 deltas, rollover, local capture/replay, and strict
+  # no-overwrite behavior without energizing physical outputs.
+  add_executable(firmware_macro_queue_tests
+    tests/firmware_macro_queue_test.cpp
+    ../../Project/MacroQueue.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_macro_queue_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  if(MSVC)
+    target_compile_options(firmware_macro_queue_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_macro_queue_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_macro_queue_unit COMMAND firmware_macro_queue_tests)
+
   # Exercise production key, relay, 1-Wire, and transition primitives against
   # host-native GPIO doubles before risking a physical firmware upload.
   add_executable(firmware_controls_tests

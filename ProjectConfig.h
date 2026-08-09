@@ -38,6 +38,51 @@
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
 
+// The production front panel has one input/output page. In the normal build it
+// is the four-key motion surface (Side A up/down, Side B up/down). A diagnostic
+// image may compile the same page as a key identifier without adding a second
+// page or carrying its flash cost in the normal image.
+#ifndef PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+#define PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS 0
+#endif
+
+// Capture ordinary accepted actions into the same bounded byte ring used for
+// MCU-timed playback. Disable only for an exceptionally constrained profile.
+#ifndef PCCONTROLLER_ENABLE_MACRO_CAPTURE
+#define PCCONTROLLER_ENABLE_MACRO_CAPTURE 1
+#endif
+
+// A validation/development image can make every audio path electrically quiet
+// without mutating the user's EEPROM Silent preference. Blank/corrupt EEPROM
+// also starts silent by default so a newly programmed board cannot surprise a
+// sleeping household before the host provisions it.
+#ifndef PCCONTROLLER_FORCE_SILENT
+#define PCCONTROLLER_FORCE_SILENT 0
+#endif
+
+#ifndef PCCONTROLLER_BLANK_EEPROM_SILENT
+#define PCCONTROLLER_BLANK_EEPROM_SILENT 1
+#endif
+
+#if (PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS != 0) && \
+    (PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS != 1)
+#error "PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_MACRO_CAPTURE != 0) && \
+    (PCCONTROLLER_ENABLE_MACRO_CAPTURE != 1)
+#error "PCCONTROLLER_ENABLE_MACRO_CAPTURE must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_FORCE_SILENT != 0) && (PCCONTROLLER_FORCE_SILENT != 1)
+#error "PCCONTROLLER_FORCE_SILENT must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_BLANK_EEPROM_SILENT != 0) && \
+    (PCCONTROLLER_BLANK_EEPROM_SILENT != 1)
+#error "PCCONTROLLER_BLANK_EEPROM_SILENT must be 0 or 1"
+#endif
+
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the
 // fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
 // ordering, hierarchy, or layout-protocol implementations in release builds.

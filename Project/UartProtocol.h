@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "ProtocolContract.h"
+
 namespace ControllerProtocol {
 
 // Native frame marker and bounded payload capacity for the AVR transport.
@@ -11,84 +13,6 @@ constexpr uint8_t Magic = 0xA5;
 // otherwise understandable peer solely because this byte differs.
 constexpr uint8_t EnvelopeRevision = 1;
 constexpr uint8_t MaximumPayload = 48;
-
-// Opcode is the stable native request, response, and event operation registry.
-enum Opcode : uint8_t {
-  Hello = 0x01,
-  GetStatus = 0x02,
-  SetStreamPeriod = 0x03,
-  GetSettings = 0x04,
-  SetSettings = 0x05,
-  TemperatureList = 0x06,
-
-  Buzzer = 0x10,
-  PwmSet = 0x11,
-  PwmAllOff = 0x12,
-  StatusRgb = 0x14,
-  PwmGet = 0x15,
-  AddressableLed = 0x16,
-  StatusEffect = 0x17,
-  StatusProfileGet = 0x18,
-  StatusProfileSet = 0x19,
-
-  RadioTransmit = 0x20,
-  RadioLearnStart = 0x21,
-  RadioLearnCancel = 0x22,
-  RadioLearnClear = 0x23,
-  RadioLearnList = 0x24,
-  RadioLearnRemove = 0x25,
-
-  MenuAction = 0x30,
-  RelaySet = 0x31,
-  RelaySide = 0x32,
-  RelayAllOff = 0x33,
-  RelayTest = 0x34,
-  Reset = 0x35,
-  I2cTransfer = 0x36,
-  MenuSetPage = 0x37,
-  DisplayText = 0x38,
-  MacroStart = 0x39,
-  MacroCancel = 0x3A,
-  MacroStep = 0x3B,
-  FrontPanelGet = 0x3C,
-  RemoteKeyGesture = 0x3D,
-  MenuList = 0x3E,
-  RadioLearnReplace = 0x3F,
-  MenuLayoutGet = 0x40,
-  MenuLayoutSet = 0x41,
-  // Host-owned application state: payload prefix [0=Idle, 1=Running].
-  ProgramState = 0x45,
-
-  Ack = 0x80,
-  HelloResponse = 0x81,
-  ErrorResponse = 0x82,
-  StatusResponse = 0x90,
-  SettingsResponse = 0x91,
-  PwmValuesResponse = 0x92,
-  I2cTransferResponse = 0x93,
-  RadioLearnListResponse = 0x94,
-  TemperatureListResponse = 0x95,
-  FrontPanelResponse = 0x96,
-  MenuListResponse = 0x97,
-  MacroStatusResponse = 0x98,
-  MenuLayoutResponse = 0x99,
-  SegmentChanged = 0x9C,
-  BuzzerChanged = 0x9D,
-  StatusLedChanged = 0x9E,
-  StatusProfileResponse = 0x9F,
-  Event = 0xA0,
-};
-
-// Error is the compact protocol failure code returned by ErrorResponse.
-enum Error : uint8_t {
-  NoError = 0,
-  BadEnvelope = 1,
-  Unsupported = 2,
-  BadPayload = 3,
-  HardwareUnavailable = 4,
-  Busy = 5,
-  Unsafe = 6,
-};
 
 // Frame is a validated zero-copy view of one decoded native packet.
 struct Frame {
@@ -117,6 +41,10 @@ public:
 
   bool send(uint8_t opcode, uint8_t sequence, const uint8_t *payload = nullptr,
             uint8_t payloadLength = 0);
+  // Emits one Event with a caller-captured MCU timestamp. Action capture uses
+  // this so its ring record and host evidence share the exact same clock edge.
+  bool sendEventAt(const uint8_t *payload, uint8_t payloadLength,
+                   uint32_t capturedAtUs);
   bool sendAck(uint8_t sequence, uint8_t requestOpcode);
   bool sendError(uint8_t sequence, uint8_t requestOpcode, Error error);
 
@@ -137,6 +65,9 @@ private:
   static constexpr uint8_t MaximumEncoded = MaximumRaw + 2;
 
   bool writeCobs(const uint8_t *input, uint8_t length);
+  bool sendTimestamped(uint8_t opcode, uint8_t sequence,
+                       const uint8_t *payload, uint8_t payloadLength,
+                       bool timedEvent, bool timed, uint32_t capturedAtUs);
   static uint8_t cobsDecode(const uint8_t *input, uint8_t length,
                             uint8_t *output, uint8_t capacity);
   void processEncodedFrame();

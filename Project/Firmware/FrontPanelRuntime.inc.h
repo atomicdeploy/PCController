@@ -29,6 +29,21 @@ uint8_t modeToPage(ProgramMode mode) {
              : menuPage;
 }
 
+// Moves through the compiled top-level surface. PAGE_KEYS is a retired stable
+// alias for the unified PAGE_MOTION surface and is never a second live page.
+uint8_t nextCompiledMenuPage(uint8_t page, bool forward) {
+  uint8_t candidate = canonicalFrontPanelPage(page);
+  for (uint8_t checked = 0; checked < PAGE_COUNT; ++checked) {
+    candidate = forward
+                    ? static_cast<uint8_t>((candidate + 1U) % PAGE_COUNT)
+                    : (candidate == 0 ? PAGE_COUNT - 1U : candidate - 1U);
+    if (frontPanelPageCompiled(candidate)) {
+      return candidate;
+    }
+  }
+  return PAGE_MOTION;
+}
+
 #if PCCONTROLLER_MENU_VISIBILITY
 // Reads the stable page ID stored at a presentation rank.
 uint8_t configuredMenuPageAt(uint8_t rank) {
@@ -85,7 +100,8 @@ uint8_t nextConfiguredMenuPage(uint8_t page, bool forward,
       rank = static_cast<uint8_t>(rank - PAGE_COUNT);
     }
     const uint8_t candidate = configuredMenuPageAt(rank);
-    if (!settingsStore.values().menuPageVisible(candidate)) {
+    if (!frontPanelPageCompiled(candidate) ||
+        !settingsStore.values().menuPageVisible(candidate)) {
       continue;
     }
 #if PCCONTROLLER_MENU_HIERARCHY
@@ -106,7 +122,8 @@ uint8_t nextConfiguredMenuPage(uint8_t page, bool forward,
 uint8_t firstConfiguredMenuPage(uint8_t category) {
   for (uint8_t rank = 0; rank < PAGE_COUNT; ++rank) {
     const uint8_t page = configuredMenuPageAt(rank);
-    if (settingsStore.values().menuPageVisible(page) &&
+    if (frontPanelPageCompiled(page) &&
+        settingsStore.values().menuPageVisible(page) &&
         menuCategory(page) == category) {
       return page;
     }
@@ -142,7 +159,7 @@ void moveMenuCategory(bool forward, uint32_t at) {
 
 // Activates a stable page and optionally persists it as the boot default.
 void setMenuPage(uint8_t page) {
-  menuPage = page;
+  menuPage = canonicalFrontPanelPage(page);
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
 #endif
@@ -156,6 +173,21 @@ void setMenuPage(uint8_t page) {
     settingsStore.markDirty(now);
   }
   modeManager.transitionTo(pageToMode(menuPage));
+}
+
+// Applies the same visibility/order/hierarchy policy to ordinary navigation
+// and the two guaranteed exits from the optional key-identification behavior.
+void moveTopLevelPage(bool forward) {
+#if PCCONTROLLER_MENU_VISIBILITY
+  setMenuPage(nextConfiguredMenuPage(
+      menuPage, forward
+#if PCCONTROLLER_MENU_HIERARCHY
+      , menuTreeState
+#endif
+      ));
+#else
+  setMenuPage(nextCompiledMenuPage(menuPage, forward));
+#endif
 }
 
 // Runs mode entry actions and time-based exits for transient/modal states.
@@ -338,7 +370,7 @@ void setSilentMode(bool silent, uint32_t at) {
   if (!editTransactionActive) {
     settingsStore.markDirty(at);
   }
-  buzzer.setMuted(silent);
+  buzzer.setMuted(BuildForcesSilent || silent);
 }
 
 // Expands an EEPROM 8-bit user value over the full 12-bit PWM range.
@@ -364,7 +396,7 @@ void applyStoredSettings(uint32_t at) {
     modeManager.transitionTo(MODE_BOOT);
     return;
   }
-  buzzer.setMuted(settings.silent());
+  buzzer.setMuted(BuildForcesSilent || settings.silent());
   illumination.setMode(
       static_cast<IlluminationMode>(settings.illuminationMode));
   illumination.setOnBrightness(settings.illuminationOnBrightness);
@@ -455,6 +487,26 @@ void finishEditTransaction(bool save, uint32_t at) {
   modeManager.transitionTo(MODE_FLASH_MESSAGE);
 }
 
+// Applies one four-key motion Down edge and reports whether the shared safety
+// controller accepted it. Callers may then evidence RelaySide rather than a
+// mode-dependent raw key gesture.
+bool handleMotionPanelAction(uint8_t action, bool fromRemote,
+                             uint32_t actionNow) {
+  const MotionKeyBinding binding =
+      motionKeyBinding(static_cast<MenuAction>(action));
+  const bool accepted = relays.requestSide(
+      static_cast<::RelaySide>(binding.side),
+      binding.reverse ? RelayDirection::Reverse : RelayDirection::Forward,
+      true, actionNow);
+  if (accepted && fromRemote) {
+    remoteMomentaryKind = RemoteActionKind::Side;
+    remoteMomentaryValue = binding.side;
+    remoteMomentaryEndsAt = actionNow + 350;
+  }
+  menuFeedback(fromRemote);
+  return accepted;
+}
+
 // Dispatches physical, RF, or host navigation through the modal menu state machine.
 void handleMenuAction(uint8_t action, bool fromRemote) {
   if (action > MENU_INCREASE) {
@@ -500,11 +552,41 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 
 #endif
 
-  // KEY owns all four actions, including K3 identification, before the generic
-  // leaf hierarchy considers K3 as Back.
-  if (modeManager.current() == MODE_KEYS) {
-    identifiedKey = static_cast<uint8_t>(action + 1);
-    identifiedKeyEndsAt = actionNow + 900;
+  // One input page has two build-time behaviors. Diagnostics always retain K1
+  // and K2 as direct exits. The normal image uses K3 to record/stop/play the
+  // bounded local capture and K4 to enter immediate four-key motion control.
+  if (modeManager.current() == MODE_MOTION) {
+    const UnifiedInputIntent intent = unifiedInputIntent(
+        static_cast<MenuAction>(action),
+        PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS != 0);
+    if (intent == UnifiedInputIntent::PreviousPage) {
+      moveTopLevelPage(false);
+    } else if (intent == UnifiedInputIntent::NextPage) {
+      moveTopLevelPage(true);
+#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+    } else if (intent == UnifiedInputIntent::Identify) {
+      identifiedKey = static_cast<uint8_t>(action + 1);
+      identifiedKeyEndsAt = actionNow + 900;
+#else
+    } else if (intent == UnifiedInputIntent::Macro) {
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+      if (macroPlayback.recording()) {
+        macroPlayback.finishCapture();
+      } else if (macroPlayback.captured()) {
+        macroPlayback.playCapture(micros());
+      } else {
+        const uint8_t id = nextLocalMacroId++;
+        if (nextLocalMacroId == 0) {
+          nextLocalMacroId = 1;
+        }
+        macroPlayback.beginCapture(id, micros());
+      }
+#endif
+    } else if (relays.motionAllowed()) {
+      modeManager.transitionTo(MODE_MOTION_CONTROL);
+    } else {
+      buzzer.error();
+#endif
     menuFeedback(fromRemote);
     return;
   }
@@ -705,19 +787,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       return;
 
     case MODE_MOTION_CONTROL: {
-      const uint8_t side = action >= MENU_DECREASE ? 1 : 0;
-      const bool reverse =
-          action == MENU_NEXT || action == MENU_INCREASE;
-      const bool accepted = relays.requestSide(
-          static_cast<::RelaySide>(side),
-          reverse ? RelayDirection::Reverse : RelayDirection::Forward, true,
-          actionNow);
-      if (accepted && fromRemote) {
-        remoteMomentaryKind = RemoteActionKind::Side;
-        remoteMomentaryValue = side;
-        remoteMomentaryEndsAt = actionNow + 350;
-      }
-      menuFeedback(fromRemote);
+      handleMotionPanelAction(action, fromRemote, actionNow);
       return;
     }
 
@@ -761,28 +831,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 
   switch (action) {
     case MENU_PREVIOUS:
-#if PCCONTROLLER_MENU_VISIBILITY
-      setMenuPage(nextConfiguredMenuPage(
-          menuPage, false
-#if PCCONTROLLER_MENU_HIERARCHY
-          , menuTreeState
-#endif
-          ));
-#else
-      setMenuPage(menuPage == 0 ? PAGE_COUNT - 1 : menuPage - 1);
-#endif
+      moveTopLevelPage(false);
       break;
     case MENU_NEXT:
-#if PCCONTROLLER_MENU_VISIBILITY
-      setMenuPage(nextConfiguredMenuPage(
-          menuPage, true
-#if PCCONTROLLER_MENU_HIERARCHY
-          , menuTreeState
-#endif
-          ));
-#else
-      setMenuPage(static_cast<uint8_t>((menuPage + 1) % PAGE_COUNT));
-#endif
+      moveTopLevelPage(true);
       break;
     case MENU_DECREASE:
       // The shared K3 dispatch preserves the two leaf-owned actions: KEY was
@@ -822,12 +874,6 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         modeManager.transitionTo(MODE_USER_PWM_CHANNEL_EDIT);
       } else if (menuPage == PAGE_USER_RELAYS) {
         modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
-      } else if (menuPage == PAGE_MOTION) {
-        if (relays.motionAllowed()) {
-          modeManager.transitionTo(MODE_MOTION_CONTROL);
-        } else {
-          buzzer.error();
-        }
       } else if (menuPage == PAGE_RF) {
         beginLearning(RF_LEARN_INDEFINITE, 0);
       } else {
@@ -845,31 +891,93 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 // Applies one physical or injected lifecycle without duplicating the local
 // safety path in protocol dispatch. Primary actions run on Down; Click remains
 // deferred classification only and must never sit on the control path.
-void applyKeyGesture(uint8_t bit, KeyEvent event) {
+void applyKeyGesture(uint8_t bit, KeyEvent event,
+                     InputEventSource source = InputEventSource::Physical,
+                     bool emitEvidence = true) {
   const ProgramMode mode = modeManager.current();
   const bool momentary = mode == MODE_MOTION_CONTROL ||
                          (mode == MODE_USER_RELAY_CONTROL &&
                           userRelayBehavior && bit == BoardPins::KeyIncrease);
   if (momentary) {
     if (event == KeyEvent::Down) {
-      handleMenuAction(bit);
+      if (mode == MODE_MOTION_CONTROL) {
+        now = millis();
+        const MotionKeyBinding binding =
+            motionKeyBinding(static_cast<MenuAction>(bit));
+        if (handleMotionPanelAction(bit, source == InputEventSource::Radio,
+                                    now)) {
+          motionPressedMask |= _BV(bit);
+          const uint8_t payload[] = {
+              binding.side,
+              static_cast<uint8_t>(binding.reverse ? 2 : 1)};
+          if (emitEvidence) {
+            acceptedAction(source, ControllerProtocol::RelaySide, payload,
+                           sizeof(payload));
+          }
+        }
+      } else {
+        handleMenuAction(bit);
+        const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
+        if (emitEvidence) {
+          acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                         sizeof(payload));
+        }
+      }
     } else if (event == KeyEvent::Up) {
       now = millis();
       const uint32_t releaseNow = now;
       if (mode == MODE_MOTION_CONTROL) {
+        if ((motionPressedMask & _BV(bit)) == 0) {
+          return;
+        }
+        motionPressedMask &= static_cast<uint8_t>(~_BV(bit));
+        const MotionKeyBinding binding =
+            motionKeyBinding(static_cast<MenuAction>(bit));
         relays.stopSide(
-            static_cast<::RelaySide>(bit <= BoardPins::KeyNext ? 0 : 1),
-            releaseNow);
+            static_cast<::RelaySide>(binding.side), releaseNow);
+        const uint8_t payload[] = {binding.side, 0};
+        if (emitEvidence) {
+          acceptedAction(source, ControllerProtocol::RelaySide, payload,
+                         sizeof(payload));
+        }
       } else {
         setSelectedUserRelay(false, releaseNow);
+        const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
+        if (emitEvidence) {
+          acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                         sizeof(payload));
+        }
       }
     }
   } else if (keyEventRunsPrimaryAction(event) &&
              (event != KeyEvent::HoldRepeat || mode != MODE_KEYS)) {
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    const bool recordingBefore = macroPlayback.recording();
+#endif
     handleMenuAction(bit);
+    const bool unifiedLifecycle =
+        mode == MODE_MOTION && bit >= BoardPins::KeyDecrease;
+    const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    const bool openedCapture = !recordingBefore && macroPlayback.recording();
+    if (emitEvidence && !unifiedLifecycle) {
+      acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                     sizeof(payload), !openedCapture);
+    }
+#else
+    if (emitEvidence && !unifiedLifecycle) {
+      acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                     sizeof(payload));
+    }
+#endif
   } else if (event == KeyEvent::DoubleClick &&
              bit == BoardPins::KeyPrevious && isMenuMode(mode)) {
     setMenuPage(settingsStore.values().defaultMenuPage);
+    const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
+    if (emitEvidence) {
+      acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
+                     sizeof(payload));
+    }
   }
 }
 
@@ -1170,7 +1278,7 @@ void serviceDisplay(uint32_t at) {
     return;
   }
   if (currentMode == MODE_SOUND) {
-    display.showText(commonText(settingsStore.values().silent()
+    display.showText(commonText(effectiveSilentMode()
                                     ? TextMute
                                     : TextBeep));
     return;
@@ -1199,14 +1307,6 @@ void serviceDisplay(uint32_t at) {
     }
     return;
   }
-  if (currentMode == MODE_KEYS) {
-    if (!timeReached(at, identifiedKeyEndsAt) && identifiedKey != 0) {
-      display.showInteger(identifiedKey);
-    } else {
-      display.showText(commonText(TextKey));
-    }
-    return;
-  }
   if (currentMode == MODE_USER_PWM) {
     if (((at / 900UL) & 1U) == 0) {
       display.showInteger(static_cast<int32_t>(userPwmMenuIndex + 1));
@@ -1221,8 +1321,25 @@ void serviceDisplay(uint32_t at) {
     return;
   }
   if (currentMode == MODE_MOTION) {
-    display.showText(commonText(systemInputs.doorOpen() ? TextOpen
-                                                       : TextClosed));
+#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+    if (!timeReached(at, identifiedKeyEndsAt) && identifiedKey != 0) {
+      display.showInteger(identifiedKey);
+    } else {
+      display.showText(commonText(TextKey));
+    }
+#else
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    if (macroPlayback.recording()) {
+      display.showText(commonText(TextRecord));
+    } else if (macroPlayback.captured()) {
+      display.showText(commonText(TextPlay));
+    } else {
+      display.showText(commonText(TextSide));
+    }
+#else
+    display.showText(commonText(TextSide));
+#endif
+#endif
     return;
   }
   if (currentMode == MODE_RF) {
@@ -1246,7 +1363,7 @@ void serviceDisplay(uint32_t at) {
       return;
     case MODE_SOUND_EDIT:
       if (settingsMenuItem == 0) {
-        display.showText(commonText(settingsStore.values().silent()
+        display.showText(commonText(effectiveSilentMode()
                                         ? TextMute
                                         : TextBeep));
       } else {
@@ -1305,9 +1422,24 @@ void serviceDisplay(uint32_t at) {
       display.showText(
           commonText(selectedUserRelayActive() ? TextOn : TextOff));
       return;
-    case MODE_MOTION_CONTROL:
-      display.showInteger(relays.activeRelayMask());
+    case MODE_MOTION_CONTROL: {
+      const uint8_t mask = relays.activeRelayMask();
+      const bool sideA = (mask & _BV(1)) != 0;
+      const bool sideB = (mask & _BV(3)) != 0;
+      if (!sideA && !sideB) {
+        display.showText(commonText(TextSide));
+        return;
+      }
+      const uint8_t side = sideA && sideB
+                               ? static_cast<uint8_t>((at / 500U) & 1U)
+                               : static_cast<uint8_t>(sideB);
+      const bool reverse = (mask & _BV(static_cast<uint8_t>(side * 2U))) != 0;
+      const char motion[5] = {
+          side == 0 ? 'A' : 'b', '-', reverse ? 'd' : 'U',
+          reverse ? 'n' : 'P', '\0'};
+      display.showText(motion);
       return;
+    }
     default:
       break;
   }

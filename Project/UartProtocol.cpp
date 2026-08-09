@@ -46,6 +46,20 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
   const bool timedEvent = opcode == Event && payloadLength != 0;
   const bool timed = timedEvent || opcode == Ack ||
                      (opcode == ErrorResponse && sequence == 0xFE);
+  return sendTimestamped(opcode, sequence, payload, payloadLength, timedEvent,
+                         timed, timed ? micros() : 0);
+}
+
+bool UartProtocol::sendEventAt(const uint8_t *payload, uint8_t payloadLength,
+                               uint32_t capturedAtUs) {
+  return sendTimestamped(Event, 0, payload, payloadLength, true, true,
+                         capturedAtUs);
+}
+
+bool UartProtocol::sendTimestamped(uint8_t opcode, uint8_t sequence,
+                                   const uint8_t *payload,
+                                   uint8_t payloadLength, bool timedEvent,
+                                   bool timed, uint32_t capturedAtUs) {
   if (payloadLength > static_cast<uint8_t>(MaximumPayload -
                                            (timed ? 4 : 0)) ||
       (payloadLength != 0 && payload == nullptr)) {
@@ -66,8 +80,7 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
     if (timedEvent) {
       raw_[5] |= 0x80;
     }
-    const uint32_t capturedAt = micros();
-    memcpy(raw_ + 5 + payloadLength, &capturedAt, sizeof(capturedAt));
+    memcpy(raw_ + 5 + payloadLength, &capturedAtUs, sizeof(capturedAtUs));
   }
   const uint8_t rawLength = static_cast<uint8_t>(raw_[4] + RawOverhead);
   raw_[rawLength - 1] = crc8(raw_, static_cast<uint8_t>(rawLength - 1));

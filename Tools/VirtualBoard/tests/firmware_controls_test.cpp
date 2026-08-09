@@ -428,16 +428,37 @@ void testFrontPanelLeafDecreaseDispatch() {
   for (std::uint8_t mode = MODE_DOOR; mode <= MODE_RF; ++mode) {
     const auto current = static_cast<ProgramMode>(mode);
     const LeafDecreaseAction expected =
-        current == MODE_KEYS
-            ? LeafDecreaseAction::IdentifyKey3
-            : (current == MODE_RELAY
-                   ? LeafDecreaseAction::AllRelaysOff
-                   : LeafDecreaseAction::ParentCategory);
+        current == MODE_RELAY ? LeafDecreaseAction::AllRelaysOff
+                              : LeafDecreaseAction::ParentCategory;
     require(leafDecreaseAction(current) == expected,
             "leaf K3 dispatch no longer matches its page context");
   }
-  require(static_cast<std::uint8_t>(MENU_DECREASE) + 1U == 3U,
-          "KEY-page K3 identification no longer resolves to key 3");
+
+  require(canonicalFrontPanelPage(PAGE_KEYS) == PAGE_MOTION &&
+              canonicalFrontPanelPage(PAGE_MOTION) == PAGE_MOTION &&
+              !frontPanelPageCompiled(PAGE_KEYS) &&
+              frontPanelPageCompiled(PAGE_MOTION),
+          "retired KEY page is no longer one canonical MOVE surface");
+  require(unifiedInputIntent(MENU_PREVIOUS, true) ==
+                  UnifiedInputIntent::PreviousPage &&
+              unifiedInputIntent(MENU_NEXT, true) ==
+                  UnifiedInputIntent::NextPage,
+          "diagnostic key page lost a direct exit");
+  require(unifiedInputIntent(MENU_DECREASE, false) ==
+                  UnifiedInputIntent::Macro &&
+              unifiedInputIntent(MENU_INCREASE, false) ==
+                  UnifiedInputIntent::Motion,
+          "normal unified page no longer exposes macro/motion actions");
+
+  const MotionKeyBinding expectedMotion[] = {
+      {0, false}, {0, true}, {1, false}, {1, true}};
+  for (std::uint8_t action = MENU_PREVIOUS; action <= MENU_INCREASE;
+       ++action) {
+    const auto actual = motionKeyBinding(static_cast<MenuAction>(action));
+    require(actual.side == expectedMotion[action].side &&
+                actual.reverse == expectedMotion[action].reverse,
+            "four front keys no longer map to A/B up/down immediately");
+  }
 }
 
 void testDallasAbsentPullupBound() {

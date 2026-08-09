@@ -34,6 +34,68 @@ bool MacroQueue::recordReady() const {
   return used_ >= 6 && used_ >= static_cast<uint8_t>(6 + peek(5));
 }
 
+bool MacroQueue::bufferedRecordsValid() const {
+  uint16_t offset = 0;
+  while (static_cast<uint16_t>(used_) - offset >=
+         MacroAction::RecordHeaderBytes) {
+    const uint8_t opcode = peek(static_cast<uint8_t>(offset + 4U));
+    const uint8_t payloadLength = peek(static_cast<uint8_t>(offset + 5U));
+    if (!MacroAction::playbackAllowed(opcode) ||
+        payloadLength > ControllerProtocol::MaximumPayload) {
+      return false;
+    }
+    const uint16_t recordLength =
+        MacroAction::RecordHeaderBytes + payloadLength;
+    if (static_cast<uint16_t>(used_) - offset < recordLength) {
+      return true; // a valid header with a split payload tail
+    }
+    offset += recordLength;
+  }
+  return true;
+}
+
+void MacroQueue::appendByte(uint8_t value) {
+  queue_[static_cast<uint8_t>(head_ + used_) & QueueMask] = value;
+  ++used_;
+}
+
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+void MacroQueue::preserveCaptureSnapshot() {
+  capturedHead_ = head_;
+  capturedUsed_ = used_;
+  capturedSteps_ = retainedSteps_;
+  capturedData_ = retainedSteps_ != 0;
+}
+
+void MacroQueue::restoreCaptureSnapshot() {
+  head_ = capturedHead_;
+  used_ = capturedUsed_;
+  retainedSteps_ = capturedSteps_;
+}
+
+void MacroQueue::sendCaptureChunk(uint8_t sequence, uint16_t offset) {
+  // [schema, command=3, id, total bytes LE16, offset LE16, chunk length,
+  //  raw ring bytes...]. Forty data bytes keep the whole response bounded by
+  // ControllerProtocol::MaximumPayload without allocating a second buffer.
+  uint8_t *response = protocol_.framePayloadScratch();
+  response[0] = Schema;
+  response[1] = 3;
+  response[2] = wire_.report.id;
+  response[3] = used_;
+  response[4] = 0;
+  response[5] = static_cast<uint8_t>(offset);
+  response[6] = static_cast<uint8_t>(offset >> 8);
+  const uint8_t remaining = static_cast<uint8_t>(used_ - offset);
+  const uint8_t chunk = remaining > 40 ? 40 : remaining;
+  response[7] = chunk;
+  for (uint8_t index = 0; index < chunk; ++index) {
+    response[8 + index] = peek(static_cast<uint8_t>(offset + index));
+  }
+  protocol_.send(ControllerProtocol::MacroStatusResponse, sequence, response,
+                 static_cast<uint8_t>(8 + chunk));
+}
+#endif
+
 void MacroQueue::sendStatus(uint8_t opcode, uint8_t sequence) {
   Report &report = wire_.report;
   report.fill = used_;
@@ -44,8 +106,19 @@ void MacroQueue::sendStatus(uint8_t opcode, uint8_t sequence) {
 
 void MacroQueue::fail() {
   wire_.report.state = Failed;
-  head_ = used_ = 0;
   safeStopRequested_ = true;
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+  if (capturePlayback_ && capturedData_) {
+    restoreCaptureSnapshot();
+  } else {
+    head_ = used_ = 0;
+    retainedSteps_ = 0;
+    capturedData_ = false;
+  }
+  capturePlayback_ = false;
+#else
+  head_ = used_ = 0;
+#endif
   sendStatus(ControllerProtocol::Event, 0);
 }
 
@@ -77,6 +150,11 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
     options_ = payload[2];
     head_ = used_ = 0;
     safeStopRequested_ = false;
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    retainedSteps_ = 0;
+    capturePlayback_ = false;
+    capturedData_ = false;
+#endif
     protocol_.sendAck(frame.sequence, frame.opcode);
     sendStatus(ControllerProtocol::Event, 0);
     return true;
@@ -95,6 +173,18 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
   if (frame.opcode != ControllerProtocol::MacroStep) {
     return false;
   }
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+  if (length >= 3 && payload[0] == 3) {
+    const uint16_t offset = read16(payload + 1);
+    if (!captured() || offset > used_) {
+      protocol_.sendError(frame.sequence, frame.opcode,
+                          ControllerProtocol::BadPayload);
+      return true;
+    }
+    sendCaptureChunk(frame.sequence, offset);
+    return true;
+  }
+#endif
   if (length != 0 && payload[0] == 2) {
     sendStatus(ControllerProtocol::MacroStatusResponse, frame.sequence);
     return true;
@@ -129,8 +219,13 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
   }
   const bool wasStarved = !recordReady();
   for (uint8_t index = 5; index < length; ++index) {
-    queue_[static_cast<uint8_t>(head_ + used_) & QueueMask] = payload[index];
-    ++used_;
+    appendByte(payload[index]);
+  }
+  if (!bufferedRecordsValid()) {
+    fail();
+    protocol_.sendError(frame.sequence, frame.opcode,
+                        ControllerProtocol::BadPayload);
+    return true;
   }
   report.acceptedBytes =
       static_cast<uint16_t>(report.acceptedBytes + length - 5);
@@ -150,14 +245,21 @@ bool MacroQueue::dequeueDue(ControllerProtocol::Frame &frame) {
       return false;
     }
     const uint8_t payloadLength = peek(5);
-    if (payloadLength > ControllerProtocol::MaximumPayload) {
+    if (payloadLength > ControllerProtocol::MaximumPayload ||
+        !MacroAction::playbackAllowed(peek(4))) {
       ++report.dispatchErrors;
       fail();
       return false;
     }
     const uint32_t actual = micros();
+    uint32_t due = peekU32(0);
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    if (capturePlayback_) {
+      due -= capturePlaybackOffsetUs_;
+    }
+#endif
     const int32_t error =
-        static_cast<int32_t>(actual - (startedAtUs_ + peekU32(0)));
+        static_cast<int32_t>(actual - (startedAtUs_ + due));
     if (error < 0) {
       return false;
     }
@@ -172,6 +274,11 @@ bool MacroQueue::dequeueDue(ControllerProtocol::Frame &frame) {
     const uint8_t recordLength = static_cast<uint8_t>(6 + payloadLength);
     head_ = static_cast<uint8_t>(head_ + recordLength) & QueueMask;
     used_ = static_cast<uint8_t>(used_ - recordLength);
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    if (capturePlayback_ && retainedSteps_ != 0) {
+      --retainedSteps_;
+    }
+#endif
     ++report.executedSteps;
     if (frame.opcode >= ControllerProtocol::MacroStart &&
         frame.opcode <= ControllerProtocol::MacroStep) {
@@ -189,9 +296,20 @@ void MacroQueue::completeStep(bool succeeded) {
     ++report.dispatchErrors;
   }
   if (report.executedSteps == report.totalSteps) {
-    report.state = used_ == 0 ? Completed : Failed;
-    head_ = used_ = 0;
+    report.state = used_ == 0 && report.dispatchErrors == 0 ? Completed
+                                                            : Failed;
     safeStopRequested_ = report.state == Failed;
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    if (capturePlayback_ && capturedData_) {
+      restoreCaptureSnapshot();
+    } else {
+      head_ = used_ = 0;
+      retainedSteps_ = 0;
+    }
+    capturePlayback_ = false;
+#else
+    head_ = used_ = 0;
+#endif
     sendStatus(ControllerProtocol::Event, 0);
   }
 }
@@ -200,9 +318,21 @@ void MacroQueue::cancel(bool keepOutputs) {
   if (!active()) {
     return;
   }
+  const bool ownedOutputs = wire_.report.state == Playing;
   wire_.report.state = Cancelled;
+  safeStopRequested_ = ownedOutputs && !keepOutputs;
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+  if (capturePlayback_ && capturedData_) {
+    restoreCaptureSnapshot();
+  } else {
+    head_ = used_ = 0;
+    retainedSteps_ = 0;
+    capturedData_ = false;
+  }
+  capturePlayback_ = false;
+#else
   head_ = used_ = 0;
-  safeStopRequested_ = !keepOutputs;
+#endif
   sendStatus(ControllerProtocol::Event, 0);
 }
 
@@ -213,5 +343,121 @@ bool MacroQueue::takeSafeStopRequest() {
 }
 
 bool MacroQueue::active() const {
+  return wire_.report.state == Buffering || wire_.report.state == Playing ||
+         wire_.report.state == Recording;
+}
+
+bool MacroQueue::hostDependent() const {
   return wire_.report.state == Buffering || wire_.report.state == Playing;
 }
+
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+bool MacroQueue::beginCapture(uint8_t id, uint32_t atUs) {
+  if (active()) {
+    return false;
+  }
+  Report &report = wire_.report;
+  memset(&report.acceptedSteps, 0,
+         sizeof(report) - offsetof(Report, acceptedSteps));
+  report.state = Recording;
+  report.id = id;
+  report.startedAtUs = atUs;
+  startedAtUs_ = atUs;
+  head_ = used_ = 0;
+  retainedSteps_ = 0;
+  capturePlaybackOffsetUs_ = 0;
+  capturePlayback_ = false;
+  capturedData_ = false;
+  options_ = 0;
+  safeStopRequested_ = false;
+  sendStatus(ControllerProtocol::Event, 0);
+  return true;
+}
+
+bool MacroQueue::captureAction(uint8_t opcode, const uint8_t *payload,
+                               uint8_t availablePayload, uint32_t atUs) {
+  if (!recording() || !MacroAction::recordable(opcode, availablePayload)) {
+    return false;
+  }
+  const uint8_t payloadLength = MacroAction::payloadLength(opcode);
+  if (payloadLength != 0 && payload == nullptr) {
+    return false;
+  }
+  const uint8_t recordLength =
+      static_cast<uint8_t>(MacroAction::RecordHeaderBytes + payloadLength);
+  Report &report = wire_.report;
+  if (static_cast<uint16_t>(used_) + recordLength > QueueCapacity) {
+    // Never overwrite an unconsumed record. The exact retained prefix remains
+    // downloadable/playable; a connected host still receives this action's
+    // separate timestamped evidence and can preserve the complete sequence.
+    if (report.droppedSteps != UINT16_MAX) {
+      ++report.droppedSteps;
+    }
+    report.state = Captured;
+    report.totalSteps = retainedSteps_;
+    preserveCaptureSnapshot();
+    sendStatus(ControllerProtocol::Event, 0);
+    return false;
+  }
+
+  const uint32_t due = atUs - startedAtUs_;
+  appendByte(static_cast<uint8_t>(due));
+  appendByte(static_cast<uint8_t>(due >> 8));
+  appendByte(static_cast<uint8_t>(due >> 16));
+  appendByte(static_cast<uint8_t>(due >> 24));
+  appendByte(opcode);
+  appendByte(payloadLength);
+  for (uint8_t index = 0; index < payloadLength; ++index) {
+    appendByte(payload[index]);
+  }
+  if (report.acceptedSteps != UINT16_MAX) {
+    ++report.acceptedSteps;
+  }
+  report.acceptedBytes = static_cast<uint16_t>(
+      report.acceptedBytes + recordLength);
+  ++retainedSteps_;
+  report.totalSteps = retainedSteps_;
+  return true;
+}
+
+bool MacroQueue::finishCapture() {
+  if (!recording()) {
+    return false;
+  }
+  wire_.report.state = Captured;
+  wire_.report.totalSteps = retainedSteps_;
+  preserveCaptureSnapshot();
+  sendStatus(ControllerProtocol::Event, 0);
+  return true;
+}
+
+bool MacroQueue::playCapture(uint32_t atUs) {
+  if (!captured() || retainedSteps_ == 0 || !recordReady()) {
+    return false;
+  }
+  Report &report = wire_.report;
+  report.state = Playing;
+  report.executedSteps = 0;
+  report.dispatchErrors = 0;
+  report.underruns = 0;
+  report.totalSteps = retainedSteps_;
+  startedAtUs_ = atUs;
+  report.startedAtUs = atUs;
+  capturePlaybackOffsetUs_ = peekU32(0);
+  capturePlayback_ = true;
+  safeStopRequested_ = false;
+  sendStatus(ControllerProtocol::Event, 0);
+  return true;
+}
+
+bool MacroQueue::recording() const {
+  return wire_.report.state == Recording;
+}
+
+bool MacroQueue::captured() const {
+  return capturedData_ && wire_.report.state != Recording &&
+         wire_.report.state != Buffering && wire_.report.state != Playing;
+}
+
+uint16_t MacroQueue::retainedSteps() const { return retainedSteps_; }
+#endif
