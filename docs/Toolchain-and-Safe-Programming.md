@@ -301,8 +301,18 @@ back the old application's durable Silent/Programming flags, then releases
 UART. It semantically converts the validated backup to production schema 1
 (22 controller bytes plus name envelope and CRC-8), preserves RF/status/reset
 and unknown regions, erases the retired menu-layout tail, forces outputs off,
-arms Silent/Programming, and programs this complete image **before** firmware
-flash. Failure at any step prevents flashing.
+and arms Silent/Programming. The converted image is staged, not written on its
+own. Controller then gives AVRDUDE both images in one programmer invocation:
+application flash is the first `-U` operation and migrated EEPROM is the
+second. AVRDUDE verifies both and returns control to the target only once.
+
+That order is a deployment safety invariant. If flash fails, the old firmware
+reboots with its already-latched old-schema Prog/Silent record. If flash
+succeeds but EEPROM fails, the new firmware boots its invalid/blank-EEPROM
+silent-safe defaults and the host recovery marker remains. If both succeed,
+the first new-application boot already sees schema-1 Prog/Silent. A standalone
+new-schema EEPROM write before flash is forbidden because its reset would let
+the old schema reader discard the latch.
 
 Every reset during flash therefore remains quiet, output-safe, and visibly
 latched at `Prog`. Only after the new authenticated `HELLO` does the host stage

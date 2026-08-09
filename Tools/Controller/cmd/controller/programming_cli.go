@@ -812,6 +812,12 @@ func executeGuardedCLIFlash(
 	backup.OutputPath = ""
 	write := options
 	write.Operation = programmer.OperationWriteFlash
+	var migratedEEPROMPath string
+	defer func() {
+		if migratedEEPROMPath != "" {
+			_ = os.Remove(migratedEEPROMPath)
+		}
+	}()
 	var afterBackup programmer.PostBackupOperation
 	if application != nil && programmingSession != nil && reinitializeEEPROM {
 		afterBackup = func(
@@ -842,13 +848,18 @@ func executeGuardedCLIFlash(
 			if closeErr != nil {
 				return fmt.Errorf("release application UART after arming programming latch: %w", closeErr)
 			}
-			if err := programmer.ProgramMigratedProgrammingEEPROM(
-				context.WithoutCancel(backupContext), backupResult.BackupManifest,
-				paths, options, programmer.Execute, writer,
-			); err != nil {
-				return fmt.Errorf("preseed migrated Silent/Prog EEPROM before flash: %w", err)
+			path, decoded, err := programmer.StageMigratedProgrammingEEPROM(
+				backupResult.BackupManifest, paths,
+			)
+			if err != nil {
+				return fmt.Errorf("stage migrated Silent/Prog EEPROM for atomic application write: %w", err)
 			}
-			fmt.Fprintln(writer, "semantic EEPROM migration programmed and verified before firmware write")
+			migratedEEPROMPath = path
+			fmt.Fprintf(
+				writer,
+				"semantic EEPROM schema-%d migration staged for the same flash programmer session\n",
+				decoded.Schema,
+			)
 			return nil
 		}
 	}
@@ -863,6 +874,11 @@ func executeGuardedCLIFlash(
 		programmer.CommandRunnerFunc(programmer.Run),
 		func(flashContext context.Context, path string, writer io.Writer) error {
 			write.HexPath = path
+			if migratedEEPROMPath != "" {
+				write.EEPROMHexPath = migratedEEPROMPath
+				write.ConfirmEEPROMWrite = true
+				fmt.Fprintln(writer, "atomic programmer transaction: flash first, migrated EEPROM second, one final target reset")
+			}
 			return programmer.Execute(flashContext, write, writer)
 		},
 		output,

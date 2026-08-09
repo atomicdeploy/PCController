@@ -119,6 +119,33 @@ func TestLegacyBackupMigratesSemanticallyAndArmsProgBeforeFlash(t *testing.T) {
 	}
 }
 
+func TestMigratedProgrammingEEPROMCanOnlyBeStagedForPairedWrite(t *testing.T) {
+	manifest := currentEEPROMBackupManifest(t)
+	paths, err := HostDataPathsFor(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureHostDataPaths(paths); err != nil {
+		t.Fatal(err)
+	}
+	path, decoded, err := StageMigratedProgrammingEEPROM(manifest, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+	if decoded.Schema != EEPROMSettingsRecordSchema || !decoded.Valid {
+		t.Fatalf("staged migration is not the current schema: %#v", decoded)
+	}
+	if filepath.Dir(path) != paths.StateDir || !strings.Contains(filepath.Base(path), "migrated-programming-eeprom-") {
+		t.Fatalf("migration artifact escaped the state directory: %s", path)
+	}
+	staged, err := DecodeOfflineEEPROMHex(path)
+	if err != nil || !staged.Settings.Valid ||
+		staged.Settings.Values.Flags&(0x01|0x02) != 0x03 {
+		t.Fatalf("staged migration lost Silent/Prog: %+v err=%v", staged.Settings, err)
+	}
+}
+
 func TestCurrentEEPROMTransferRejectsIncompleteBackupImage(t *testing.T) {
 	root := t.TempDir()
 	directory, err := BackupWithRunner(

@@ -36,6 +36,36 @@ func TestBuildUrclock(t *testing.T) {
 	}
 }
 
+func TestBuildUrclockPairsFlashThenEEPROMInOneInvocation(t *testing.T) {
+	base := Options{
+		Method: MethodUrclock, Operation: OperationWriteFlash, Port: "COM18",
+		HexPath: "application.hex", EEPROMHexPath: "migrated-eeprom.hex",
+		Avrdude: "avrdude", AvrdudeConf: "avrdude.conf",
+	}
+	if _, err := Build(base); err == nil || !strings.Contains(err.Error(), "confirm-eeprom-write") {
+		t.Fatalf("paired EEPROM write without confirmation was accepted: %v", err)
+	}
+	base.ConfirmEEPROMWrite = true
+	command, err := Build(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flash := "-Uflash:w:application.hex:i"
+	eeprom := "-Ueeprom:w:migrated-eeprom.hex:i"
+	flashIndex, eepromIndex := -1, -1
+	for index, argument := range command.Args {
+		switch argument {
+		case flash:
+			flashIndex = index
+		case eeprom:
+			eepromIndex = index
+		}
+	}
+	if flashIndex < 0 || eepromIndex != flashIndex+1 {
+		t.Fatalf("paired write order is not flash then EEPROM: %#v", command.Args)
+	}
+}
+
 func TestBuildUSBaspDoesNotInventEEPROMFile(t *testing.T) {
 	hex := filepath.Join("build", "PCController.ino.with_bootloader.hex")
 	command, err := Build(Options{

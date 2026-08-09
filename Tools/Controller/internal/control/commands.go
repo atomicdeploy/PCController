@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -3986,6 +3987,12 @@ func safeFlashCommand(
 	}
 	fmt.Fprintln(&output, "application UART released; guarded programmer transaction has exclusive ownership")
 	fmt.Fprintf(&output, "pre-flash method=%s firmware=%s\n", method, firmwarePath)
+	var migratedEEPROMPath string
+	defer func() {
+		if migratedEEPROMPath != "" {
+			_ = os.Remove(migratedEEPROMPath)
+		}
+	}()
 	var afterBackup programmer.PostBackupOperation
 	if serialWasOpen && programmingSession != nil && reinitializeEEPROM {
 		afterBackup = func(
@@ -4017,13 +4024,18 @@ func safeFlashCommand(
 			if closeErr != nil {
 				return fmt.Errorf("release application UART after arming programming latch: %w", closeErr)
 			}
-			if err := programmer.ProgramMigratedProgrammingEEPROM(
-				context.WithoutCancel(backupContext), backupResult.BackupManifest,
-				dataPaths, writeOptions, programmer.EEPROMProgramOperation(execute), writer,
-			); err != nil {
-				return fmt.Errorf("preseed migrated Silent/Prog EEPROM before flash: %w", err)
+			path, decoded, err := programmer.StageMigratedProgrammingEEPROM(
+				backupResult.BackupManifest, dataPaths,
+			)
+			if err != nil {
+				return fmt.Errorf("stage migrated Silent/Prog EEPROM for atomic application write: %w", err)
 			}
-			fmt.Fprintln(writer, "semantic EEPROM migration programmed and verified before firmware write")
+			migratedEEPROMPath = path
+			fmt.Fprintf(
+				writer,
+				"semantic EEPROM schema-%d migration staged for the same flash programmer session\n",
+				decoded.Schema,
+			)
 			return nil
 		}
 	}
@@ -4038,6 +4050,11 @@ func safeFlashCommand(
 		runner,
 		func(flashContext context.Context, path string, writer io.Writer) error {
 			writeOptions.HexPath = path
+			if migratedEEPROMPath != "" {
+				writeOptions.EEPROMHexPath = migratedEEPROMPath
+				writeOptions.ConfirmEEPROMWrite = true
+				fmt.Fprintln(writer, "atomic programmer transaction: flash first, migrated EEPROM second, one final target reset")
+			}
 			return execute(flashContext, writeOptions, writer)
 		},
 		&output,

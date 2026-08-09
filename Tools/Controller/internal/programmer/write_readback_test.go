@@ -2,12 +2,50 @@ package programmer
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+type pairedReadbackFixtureRunner struct {
+	commands        []Command
+	flashContent    []byte
+	eepromContent   []byte
+	failTransaction bool
+}
+
+func (runner *pairedReadbackFixtureRunner) Run(
+	_ context.Context,
+	command Command,
+	_ io.Writer,
+) error {
+	runner.commands = append(runner.commands, command)
+	joined := strings.Join(command.Args, " ")
+	if strings.Contains(joined, "-Uflash:w:") {
+		if !strings.Contains(joined, "-Ueeprom:w:") {
+			return errors.New("test observed a standalone flash write")
+		}
+		if runner.failTransaction {
+			return errors.New("simulated combined programmer failure")
+		}
+		return nil
+	}
+	for _, argument := range command.Args {
+		for prefix, content := range map[string][]byte{
+			"-Uflash:r:":  runner.flashContent,
+			"-Ueeprom:r:": runner.eepromContent,
+		} {
+			if strings.HasPrefix(argument, prefix) && strings.HasSuffix(argument, ":i") {
+				path := strings.TrimSuffix(strings.TrimPrefix(argument, prefix), ":i")
+				return os.WriteFile(path, content, 0o600)
+			}
+		}
+	}
+	return nil
+}
 
 type readbackFixtureRunner struct {
 	commands []Command
@@ -69,6 +107,93 @@ func TestExecuteWithRunnerRequiresAndVerifiesIndependentReadback(t *testing.T) {
 				t.Fatalf("mandatory readback was not visible: command=%s log=%s", joined, log.String())
 			}
 		})
+	}
+}
+
+func TestExecutePairedWriteHasNoOldFirmwareBootGapAndVerifiesBothMemories(t *testing.T) {
+	flashImage := &IntelHexImage{data: map[uint32]byte{0: 0x12, 7: 0xA5}}
+	flashContent, err := flashImage.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	eepromImage := &IntelHexImage{data: map[uint32]byte{0: 0x03, 31: 0x9C}}
+	eepromContent, err := eepromImage.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	flashPath := filepath.Join(directory, "application.hex")
+	eepromPath := filepath.Join(directory, "migrated-eeprom.hex")
+	if err := os.WriteFile(flashPath, flashContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(eepromPath, eepromContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	options := Options{
+		Method: MethodUrclock, Operation: OperationWriteFlash, Port: "OFFLINE",
+		HexPath: flashPath, EEPROMHexPath: eepromPath,
+		ConfirmEEPROMWrite: true,
+		Avrdude:            "avrdude", AvrdudeConf: "avrdude.conf",
+	}
+	runner := &pairedReadbackFixtureRunner{
+		flashContent: flashContent, eepromContent: eepromContent,
+	}
+	var log strings.Builder
+	if err := ExecuteWithRunner(context.Background(), options, &log, runner); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.commands) != 3 {
+		t.Fatalf("combined write plus two readbacks produced %d commands", len(runner.commands))
+	}
+	writeArgs := strings.Join(runner.commands[0].Args, " ")
+	flashAt := strings.Index(writeArgs, "-Uflash:w:")
+	eepromAt := strings.Index(writeArgs, "-Ueeprom:w:")
+	if flashAt < 0 || eepromAt <= flashAt {
+		t.Fatalf("single transaction is not flash-first/EEPROM-second: %s", writeArgs)
+	}
+	if !strings.Contains(strings.Join(runner.commands[1].Args, " "), "-Uflash:r:") ||
+		!strings.Contains(strings.Join(runner.commands[2].Args, " "), "-Ueeprom:r:") {
+		t.Fatalf("both memory readbacks were not independent: %#v", runner.commands)
+	}
+	if !strings.Contains(log.String(), "Mandatory flash readback verified") ||
+		!strings.Contains(log.String(), "Mandatory EEPROM readback verified") {
+		t.Fatalf("both readback results were not reported: %s", log.String())
+	}
+}
+
+func TestExecutePairedWriteFailureCannotFallThroughToStandaloneEEPROM(t *testing.T) {
+	image := &IntelHexImage{data: map[uint32]byte{0: 0xA5}}
+	content, err := image.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	flashPath := filepath.Join(directory, "application.hex")
+	eepromPath := filepath.Join(directory, "migrated-eeprom.hex")
+	for _, path := range []string{flashPath, eepromPath} {
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &pairedReadbackFixtureRunner{
+		flashContent: content, eepromContent: content, failTransaction: true,
+	}
+	err = ExecuteWithRunner(context.Background(), Options{
+		Method: MethodUrclock, Operation: OperationWriteFlash, Port: "OFFLINE",
+		HexPath: flashPath, EEPROMHexPath: eepromPath,
+		ConfirmEEPROMWrite: true,
+		Avrdude:            "avrdude", AvrdudeConf: "avrdude.conf",
+	}, io.Discard, runner)
+	if err == nil || !strings.Contains(err.Error(), "simulated combined programmer failure") {
+		t.Fatalf("combined write failure was lost: %v", err)
+	}
+	if len(runner.commands) != 1 {
+		t.Fatalf("failure ran additional commands and could create a reboot gap: %#v", runner.commands)
+	}
+	joined := strings.Join(runner.commands[0].Args, " ")
+	if strings.Index(joined, "-Uflash:w:") > strings.Index(joined, "-Ueeprom:w:") {
+		t.Fatalf("failed transaction was not flash-first: %s", joined)
 	}
 }
 

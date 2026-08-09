@@ -230,49 +230,36 @@ func ProgramLatchedFactoryEEPROM(
 	return nil
 }
 
-// ProgramMigratedProgrammingEEPROM writes a semantically migrated, complete
-// EEPROM image before the application flash. The programmer executor performs
-// its ordinary independent read-back verification.
-func ProgramMigratedProgrammingEEPROM(
-	ctx context.Context,
+// StageMigratedProgrammingEEPROM creates the semantically migrated EEPROM
+// image that must be paired with an application flash. It intentionally does
+// not execute a standalone EEPROM write: allowing old firmware to reboot
+// against the new schema would lose the already-latched Prog/Silent state.
+// The caller owns the returned path and must remove it after the single
+// flash-then-EEPROM programmer transaction completes or fails.
+func StageMigratedProgrammingEEPROM(
 	manifestPath string,
 	paths HostDataPaths,
-	base Options,
-	execute EEPROMProgramOperation,
-	output io.Writer,
-) error {
-	if execute == nil {
-		return fmt.Errorf("migrated programming EEPROM requires an executor")
-	}
+) (string, OfflineSettingsDecode, error) {
 	content, decoded, err := GenerateMigratedProgrammingEEPROMIntelHex(manifestPath)
 	if err != nil {
-		return err
+		return "", OfflineSettingsDecode{}, err
 	}
 	temporary, err := os.CreateTemp(paths.StateDir, "migrated-programming-eeprom-*.hex")
 	if err != nil {
-		return fmt.Errorf("reserve migrated programming EEPROM image: %w", err)
+		return "", OfflineSettingsDecode{}, fmt.Errorf("reserve migrated programming EEPROM image: %w", err)
 	}
 	path := temporary.Name()
 	if err := temporary.Close(); err != nil {
 		_ = os.Remove(path)
-		return err
+		return "", OfflineSettingsDecode{}, err
 	}
 	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("prepare migrated programming EEPROM image: %w", err)
+		return "", OfflineSettingsDecode{}, fmt.Errorf("prepare migrated programming EEPROM image: %w", err)
 	}
-	defer os.Remove(path)
 	if err := writeEEPROMIntelHexExclusive(path, content); err != nil {
-		return err
+		return "", OfflineSettingsDecode{}, err
 	}
-	write := base
-	write.Operation = OperationWriteEEPROM
-	write.HexPath = path
-	write.OutputPath = ""
-	write.ConfirmEEPROMWrite = true
-	if err := execute(ctx, write, output); err != nil {
-		return fmt.Errorf("program migrated schema-%d EEPROM: %w", decoded.Schema, err)
-	}
-	return nil
+	return path, decoded, nil
 }
 
 // stageDefaultEEPROMCompileArtifact publishes the canonical deployment EEPROM
