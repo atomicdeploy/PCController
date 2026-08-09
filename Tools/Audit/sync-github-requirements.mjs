@@ -189,6 +189,9 @@ const R = [
   requirement('pwm-lighting-rgb-strip', 2, 'Complete PWM ownership, enclosure fade, status RGB, power light, and addressable strip behavior', 'open',
     ['🧩 firmware', '🎛️ front-panel', '🐛 regression', '🔍 needs-hardware'], 'PWM, enclosure light, power, RGB, and addressable LEDs', [
       'Map channels 0-10 to user outputs, 11 to enclosure light, 12 to power, and 13-15 to status RGB with safe polarity, caching, and 1 kHz output.',
+      'Document how the shared direct RGB/PWM engine, autonomous board policy, build-profile defaults, EEPROM parameters, and host live overrides cooperate; do not maintain duplicate effect engines.',
+      'For host/USB disconnected state, define the exact color, effect kind, timing/easing, priority, ownership handoff, and reconnect restoration path, with both build-time defaults and bounded CRC-protected EEPROM configuration where the measured profile permits it.',
+      'Publish clean A/B flash, initialized-data, BSS/peak-SRAM, and EEPROM costs for autonomous disconnected effects versus host-owned policy, and expose truthful capabilities plus transactional read/write/readback.',
       'Expose every user channel directly as a named 0..100% value; remove the PWM-mode concept and replace the old auto demo with a host macro/example that uses ordinary channel commands.',
       'Persist optional non-motion relay/MOSFET last values across reset, fix channel 0 writes/readback, and retain manual channel identification plus Off/Auto/On enclosure brightness settings.',
       'Fade both door-transition directions without jitter or a jump and use coherent configurable RGB transition colors.',
@@ -813,6 +816,7 @@ const SESSION = {
   web: 'origin-web',
   recovery: 'origin-recovery',
   edge: 'edge-current',
+  critical: '019fd7a5-7062-7f00-a8e8-c75a587183d5',
 };
 
 function prompt(session, turn, text) {
@@ -831,6 +835,7 @@ const PROMPT_EXCERPTS = {
   boardPins: prompt(SESSION.main, 8, '433 MHz receive is on INT0 and transmit is on INT1. The PWM controller uses address 0x41 while INA219 remains at 0x40.'),
   measurements: prompt(SESSION.main, 43, 'Keep the excellent display refresh rate, add smoothing or filtering, and do not reduce the immediate response to events such as high temperature.'),
   pwmLighting: prompt(SESSION.main, 22, 'The enclosure light is jittery when fading from on to off. Fix it, and implement RGB LEDs for the idle state as well.'),
+  rgbAutonomy: prompt(SESSION.critical, 35, 'Explain exactly how the RGB status LED works and how autonomous firmware and the host share its engine. Make the USB-disconnected color/effect configurable through build-time flash defaults and EEPROM parameters, and record the measured costs.'),
   displaysAudio: prompt(SESSION.main, 5, 'Restore the boot-up melody, ensure the buttons produce a short beep, and restore WS2811/WS2812 support.'),
   cooperativeI2c: prompt(SESSION.main, 53, 'I2C detection and scanning can be offloaded to the PC side if it saves flash, while the LCD retains a short offline message when the PC is disconnected.'),
   relaySafety: prompt(SESSION.main, 7, 'The first four relays work in two groups for direction and enable/disable, ensuring Up and Down cannot activate at the same time. The last four relays are general-purpose user outputs.'),
@@ -937,7 +942,7 @@ const ORIGINAL_REQUESTS = {
   'firmware-identity-layout-time': [PROMPT_EXCERPTS.firmwareIdentity],
   'board-pin-map-inputs': [PROMPT_EXCERPTS.boardPins],
   'measurement-sensors-i2c': [PROMPT_EXCERPTS.measurements],
-  'pwm-lighting-rgb-strip': [PROMPT_EXCERPTS.pwmLighting],
+  'pwm-lighting-rgb-strip': [PROMPT_EXCERPTS.pwmLighting, PROMPT_EXCERPTS.rgbAutonomy],
   'displays-audio': [PROMPT_EXCERPTS.displaysAudio],
   'cooperative-host-i2c-profile': [PROMPT_EXCERPTS.cooperativeI2c],
   'relay-motion-interlocks': [PROMPT_EXCERPTS.relaySafety],
