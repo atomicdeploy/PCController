@@ -680,8 +680,8 @@ test('toolchain synchronization is explicit and owned by Controller', () => {
 
 test('portable CLI and config are propagated to compile with flags over environment', () => {
 	const fromEnvironment = parseArguments(['--firmware-only'], {
-		PCCONTROLLER_TOOLCHAIN_CLI: 'ENV_CLI',
-		PCCONTROLLER_TOOLCHAIN_CONFIG: 'ENV_CONFIG'
+		pccontroller_toolchain_cli: 'ENV_CLI',
+		PcController_Toolchain_Config: 'ENV_CONFIG'
 	})
 	let compile = createPlan(
 		fromEnvironment,
