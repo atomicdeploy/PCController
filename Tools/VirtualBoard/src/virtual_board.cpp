@@ -1,5 +1,7 @@
 #include "virtual_board/virtual_board.hpp"
 
+#include "Project/MacroAction.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -391,6 +393,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
         request.sequence, request.opcode, wire::BadPayload, now)};
   };
   const auto ack = [&]() {
+    queueActionEvent(2, request.opcode, payload);
     return std::vector<wire::Frame>{
         ackFrame(request.sequence, request.opcode, now)};
   };
@@ -669,7 +672,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     return ack();
   }
   case wire::MacroStart:
-    if (payload.size() < 5 || payload[0] != 2) {
+    if (payload.size() < 5 || payload[0] != 3) {
       return bad();
     }
     if (macroState_ == 1 || macroState_ == 2) {
@@ -684,6 +687,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     macroAcceptedBytes_ = 0;
     macroUnderruns_ = 0;
     macroDispatchErrors_ = 0;
+    macroDroppedSteps_ = 0;
     macroStartedAtUs_ = 0;
     macroQueue_.clear();
     macroLastHostActivity_ = now;
@@ -947,6 +951,8 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
       }
       queueEvent(
           {1, static_cast<std::uint8_t>(key - 1), gesture, 0, 0xFF});
+      queueActionEvent(0, wire::RemoteKeyGesture,
+                       {static_cast<std::uint8_t>(key - 1), gesture});
       return {"key event queued"};
     }
     if (command == "relay") {
@@ -974,6 +980,9 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
                 ? "motion relay denied by the enclosure-door policy"
                 : "relay command was rejected");
       }
+      queueActionEvent(0, wire::RelaySet,
+                       {static_cast<std::uint8_t>(relay - 1),
+                        static_cast<std::uint8_t>(active)});
       return {"relay mask updated"};
     }
     if (command == "pwm") {
@@ -989,6 +998,9 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
         throw std::runtime_error("PWM controller is unavailable");
       }
       storeUserPwmValue(channel, value);
+      queueActionEvent(0, wire::PwmSet,
+                       {channel, static_cast<std::uint8_t>(value),
+                        static_cast<std::uint8_t>(value >> 8U)});
       return {"PWM value updated"};
     }
     if (command == "strip") {
@@ -1283,7 +1295,7 @@ wire::Frame VirtualBoard::errorFrame(std::uint8_t sequence,
 
 wire::Frame VirtualBoard::macroStatusFrame(std::uint8_t opcode,
                                            std::uint8_t sequence) const {
-  std::vector<std::uint8_t> payload{6, 2, macroState_, macroId_};
+  std::vector<std::uint8_t> payload{6, 3, macroState_, macroId_};
   appendU16(payload, macroAcceptedSteps_);
   appendU16(payload, macroExecutedSteps_);
   appendU16(payload, macroAcceptedBytes_);
@@ -1292,6 +1304,7 @@ wire::Frame VirtualBoard::macroStatusFrame(std::uint8_t opcode,
   payload.push_back(macroDispatchErrors_);
   appendU32(payload, macroStartedAtUs_);
   appendU16(payload, macroTotalSteps_);
+  appendU16(payload, macroDroppedSteps_);
   return {opcode, sequence, std::move(payload)};
 }
 
@@ -1768,14 +1781,18 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
       setMenuPage(static_cast<std::uint8_t>(
           (menuPage_ + 1U) % kMenuPageCount));
     }
+    queueActionEvent(1, wire::MenuAction, {remote.actionValue});
     return;
   case 3: { // Relay: Press and Toggle invert; Momentary expires after 350 ms.
     const bool active = (relays_.mask() & (1U << remote.actionValue)) != 0;
     const bool next = remote.behavior <= 1 ? !active : true;
-    if (executeQueuedCommand(
-            wire::RelaySet, {remote.actionValue,
-                             static_cast<std::uint8_t>(next)}, now) &&
-        remote.behavior == 2) {
+    const std::vector<std::uint8_t> action{
+        remote.actionValue, static_cast<std::uint8_t>(next)};
+    const bool accepted = executeQueuedCommand(wire::RelaySet, action, now);
+    if (accepted) {
+      queueActionEvent(1, wire::RelaySet, action);
+    }
+    if (accepted && remote.behavior == 2) {
       remoteMomentaryKind_ = remote.actionKind;
       remoteMomentaryValue_ = remote.actionValue;
       remoteMomentaryDeadline_ = now + std::chrono::milliseconds(350);
@@ -1785,9 +1802,12 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
   case 4: { // Side: Up/Down refresh a 350 ms hold; Stop is immediate.
     const std::uint8_t motion =
         remote.behavior == 5 ? 0 : (remote.behavior == 4 ? 2 : 1);
-    if (executeQueuedCommand(wire::RelaySide,
-                             {remote.actionValue, motion}, now) &&
-        motion != 0) {
+    const std::vector<std::uint8_t> action{remote.actionValue, motion};
+    const bool accepted = executeQueuedCommand(wire::RelaySide, action, now);
+    if (accepted) {
+      queueActionEvent(1, wire::RelaySide, action);
+    }
+    if (accepted && motion != 0) {
       remoteMomentaryKind_ = remote.actionKind;
       remoteMomentaryValue_ = remote.actionValue;
       remoteMomentaryDeadline_ = now + std::chrono::milliseconds(350);
@@ -1798,12 +1818,14 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
     const bool active = pwm_.value(remote.actionValue) != 0;
     const std::uint16_t value =
         remote.behavior == 2 ? 4095 : (active ? 0 : 4095);
-    if (executeQueuedCommand(
-            wire::PwmSet,
-            {remote.actionValue, static_cast<std::uint8_t>(value),
-             static_cast<std::uint8_t>(value >> 8U)},
-            now) &&
-        remote.behavior == 2) {
+    const std::vector<std::uint8_t> action{
+        remote.actionValue, static_cast<std::uint8_t>(value),
+        static_cast<std::uint8_t>(value >> 8U)};
+    const bool accepted = executeQueuedCommand(wire::PwmSet, action, now);
+    if (accepted) {
+      queueActionEvent(1, wire::PwmSet, action);
+    }
+    if (accepted && remote.behavior == 2) {
       remoteMomentaryKind_ = remote.actionKind;
       remoteMomentaryValue_ = remote.actionValue;
       remoteMomentaryDeadline_ = now + std::chrono::milliseconds(350);
@@ -1817,18 +1839,27 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
 
 void VirtualBoard::stopRemoteMomentary(TimePoint now) {
   switch (remoteMomentaryKind_) {
-  case 3:
-    static_cast<void>(executeQueuedCommand(
-        wire::RelaySet, {remoteMomentaryValue_, 0}, now));
+  case 3: {
+    const std::vector<std::uint8_t> action{remoteMomentaryValue_, 0};
+    if (executeQueuedCommand(wire::RelaySet, action, now)) {
+      queueActionEvent(1, wire::RelaySet, action);
+    }
     break;
-  case 4:
-    static_cast<void>(executeQueuedCommand(
-        wire::RelaySide, {remoteMomentaryValue_, 0}, now));
+  }
+  case 4: {
+    const std::vector<std::uint8_t> action{remoteMomentaryValue_, 0};
+    if (executeQueuedCommand(wire::RelaySide, action, now)) {
+      queueActionEvent(1, wire::RelaySide, action);
+    }
     break;
-  case 5:
-    static_cast<void>(executeQueuedCommand(
-        wire::PwmSet, {remoteMomentaryValue_, 0, 0}, now));
+  }
+  case 5: {
+    const std::vector<std::uint8_t> action{remoteMomentaryValue_, 0, 0};
+    if (executeQueuedCommand(wire::PwmSet, action, now)) {
+      queueActionEvent(1, wire::PwmSet, action);
+    }
     break;
+  }
   default:
     break;
   }
@@ -2495,6 +2526,22 @@ void VirtualBoard::queueEvent(std::vector<std::uint8_t> payload) {
   payload[0] |= 0x80U;
   appendU32(payload, deviceMicros(Clock::now()));
   pendingEvents_.push_back({wire::Event, 0, std::move(payload)});
+}
+
+void VirtualBoard::queueActionEvent(
+    std::uint8_t source, std::uint8_t opcode,
+    const std::vector<std::uint8_t> &payload) {
+  if (!MacroAction::recordable(
+          opcode, static_cast<std::uint8_t>(
+                      std::min<std::size_t>(payload.size(), 0xFFU)))) {
+    return;
+  }
+  const std::size_t length = MacroAction::payloadLength(opcode);
+  std::vector<std::uint8_t> event{13, source, opcode,
+                                  static_cast<std::uint8_t>(length)};
+  event.insert(event.end(), payload.begin(),
+               payload.begin() + static_cast<std::ptrdiff_t>(length));
+  queueEvent(std::move(event));
 }
 
 void VirtualBoard::queueMirrorChanges() {

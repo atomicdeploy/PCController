@@ -482,7 +482,7 @@ void testBoardAndPersistence() {
             "interactive strip command was not applied");
 
     response = board.handle(
-        {pccontroller::wire::MacroStart, 14, {2, 7, 0, 2, 0}});
+        {pccontroller::wire::MacroStart, 14, {3, 7, 0, 2, 0}});
     require(response[0].opcode == pccontroller::wire::Ack,
             "MACRO_START was not acknowledged");
     response = board.handle(
@@ -890,7 +890,7 @@ void testMotionDoorPolicyAcrossVirtualCommandSources() {
           {pccontroller::wire::RelaySide, 97, {0, 0}}));
 
       response = board.handle(
-          {pccontroller::wire::MacroStart, 5, {2, 1, 0, 1, 0}});
+          {pccontroller::wire::MacroStart, 5, {3, 1, 0, 1, 0}});
       require(response[0].opcode == pccontroller::wire::Ack,
               "motion-policy macro fixture did not start");
       response = board.handle(

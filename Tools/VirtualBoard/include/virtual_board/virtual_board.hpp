@@ -126,6 +126,8 @@ private:
   void queueMacroEvent();
   void queueEvent(std::initializer_list<std::uint8_t> payload);
   void queueEvent(std::vector<std::uint8_t> payload);
+  void queueActionEvent(std::uint8_t source, std::uint8_t opcode,
+                        const std::vector<std::uint8_t> &payload);
   void queueMirrorChanges();
   bool applyStatusEffect(const std::vector<std::uint8_t> &payload,
                          TimePoint now);
@@ -209,6 +211,7 @@ private:
   std::uint16_t macroAcceptedBytes_ = 0;
   std::uint8_t macroUnderruns_ = 0;
   std::uint8_t macroDispatchErrors_ = 0;
+  std::uint16_t macroDroppedSteps_ = 0;
   std::uint32_t macroStartedAtUs_ = 0;
   TimePoint macroStartedAt_;
   TimePoint macroLastHostActivity_;

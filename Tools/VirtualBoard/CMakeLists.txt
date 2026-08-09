@@ -14,7 +14,10 @@ add_library(virtual_board_core
   src/protocol.cpp
   src/virtual_board.cpp
 )
-target_include_directories(virtual_board_core PUBLIC include)
+target_include_directories(virtual_board_core PUBLIC
+  include
+  "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
 target_link_libraries(virtual_board_core PUBLIC Threads::Threads)
 
 add_executable(virtual_board
