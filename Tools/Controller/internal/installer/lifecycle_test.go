@@ -270,8 +270,8 @@ func TestPresentationJournalRecoversEnableAndRenameCrashBoundaries(t *testing.T)
 		stateCommitted   bool
 		wantRemove       int
 	}{
-		{name: "initial-enable-before-state", previousName: "Initial", desiredName: "Enabled", wantRemove: 0},
-		{name: "initial-enable-after-state", previousName: "Initial", desiredName: "Enabled", stateCommitted: true, wantRemove: 0},
+		{name: "initial-enable-before-state", previousName: "Enabled", desiredName: "Enabled", wantRemove: 0},
+		{name: "initial-enable-after-state", previousName: "Enabled", desiredName: "Enabled", stateCommitted: true, wantRemove: 0},
 		{name: "rename-before-state", initiallyManaged: true, previousName: "Old Name", desiredName: "New Name", wantRemove: 1},
 		{name: "rename-after-state", initiallyManaged: true, previousName: "Old Name", desiredName: "New Name", stateCommitted: true, wantRemove: 1},
 	}
