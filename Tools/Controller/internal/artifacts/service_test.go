@@ -127,7 +127,10 @@ func TestServiceRequiresAuthorizationAndRunsExplicitFirmwareUpdate(t *testing.T)
 
 func TestStartFirmwareUpdateSnapshotsDescriptorBeforeAsyncHandoff(t *testing.T) {
 	store := newTestStore(t)
-	firmware, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{Kind: KindFirmware, Name: "firmware.hex"})
+	firmware, err := store.Put(strings.NewReader(validIntelHEX), PutOptions{
+		Kind: KindFirmware, Name: "firmware.hex",
+		Metadata: map[string]string{"channel": "stable"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,6 +160,7 @@ func TestStartFirmwareUpdateSnapshotsDescriptorBeforeAsyncHandoff(t *testing.T) 
 	if result.Artifact == nil || result.Artifact.DownloadURL == "" {
 		t.Fatalf("public artifact was not decorated: %#v", result.Artifact)
 	}
+	result.Artifact.Metadata["channel"] = "mutated-response"
 
 	service.transaction <- struct{}{}
 	released = true
@@ -164,6 +168,9 @@ func TestStartFirmwareUpdateSnapshotsDescriptorBeforeAsyncHandoff(t *testing.T) 
 	case executionArtifact := <-executor.firmwareArtifacts:
 		if executionArtifact.DownloadURL != "" {
 			t.Fatalf("executor received mutable public descriptor state: %#v", executionArtifact)
+		}
+		if got := executionArtifact.Metadata["channel"]; got != "stable" {
+			t.Fatalf("executor metadata changed through response alias: got %q", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("executor did not receive the firmware descriptor")

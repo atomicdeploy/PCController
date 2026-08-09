@@ -393,7 +393,7 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 	// The worker owns an immutable execution snapshot. Finalize a separate
 	// public response before launching it so response decoration can never race
 	// any firmware, EEPROM, flash-restore, or host-update executor read.
-	executionArtifact := artifact
+	executionArtifact := cloneDescriptor(artifact)
 	responseArtifact := publicDescriptor(artifact)
 	decorateDescriptor(&responseArtifact)
 	service.updateBytes(status.ID, 0, artifact.Bytes)
