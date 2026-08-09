@@ -794,7 +794,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=` + systemdQuote(board) + ` --bind 127.0.0.1 --port 8765 --eeprom=%h/.local/share/pccontroller/virtual-board/eeprom.bin --no-stdin --quiet
+ExecStart=` + systemdQuote(board) + ` --bind 127.0.0.1 --port 8765 --eeprom ` + systemdQuote("%h/.local/share/pccontroller/virtual-board/eeprom.bin") + ` --no-stdin --quiet
 Restart=on-failure
 RestartSec=2s
 NoNewPrivileges=true
@@ -1348,6 +1348,9 @@ var runtimeVerifyUserUnit = verifyUserUnit
 var runtimePIDOwnsTCPListener = pidOwnsTCPListener
 var runtimeWaitForPIDListener = waitForPIDListener
 var runtimeWaitForHealth = waitForRuntimeHealth
+var runtimeReadProcessExecutable = os.Readlink
+var runtimeUserUnitReadyTimeout = 30 * time.Second
+var runtimeUserUnitPollInterval = 250 * time.Millisecond
 
 func graphicalEnvironmentPresent(output string) bool {
 	for _, line := range strings.Split(output, "\n") {
@@ -1362,35 +1365,64 @@ func graphicalEnvironmentPresent(output string) bool {
 }
 
 func verifyUserUnit(ctx context.Context, run userSystemctlRunner, unit, expectedExecutable string) (int, error) {
-	deadline := time.NewTimer(30 * time.Second)
+	deadline := time.NewTimer(runtimeUserUnitReadyTimeout)
 	defer deadline.Stop()
-	ticker := time.NewTicker(250 * time.Millisecond)
+	ticker := time.NewTicker(runtimeUserUnitPollInterval)
 	defer ticker.Stop()
+	expected := ""
+	if expectedExecutable != "" {
+		resolved, err := filepath.EvalSymlinks(expectedExecutable)
+		if err != nil {
+			return 0, fmt.Errorf("resolve expected executable for unit %s: %w", unit, err)
+		}
+		expected = filepath.Clean(resolved)
+	}
 	var last string
+	stablePID := 0
+	stableSamples := 0
 	for {
 		output, err := run("show", "--property=ActiveState", "--property=MainPID", "--value", unit)
 		if err == nil {
-			lines := strings.Fields(output)
-			if len(lines) >= 2 && lines[0] == "active" {
-				pid64, parseErr := strconv.ParseInt(lines[1], 10, 32)
-				if parseErr == nil && pid64 > 0 {
-					pid := int(pid64)
-					if expectedExecutable == "" {
-						return pid, nil
-					}
-					expected, resolveErr := filepath.EvalSymlinks(expectedExecutable)
-					actual, readErr := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
-					if resolveErr == nil && readErr == nil && filepath.Clean(actual) == filepath.Clean(expected) {
-						return pid, nil
-					}
-					last = fmt.Sprintf("MainPID %d executable is %q, want %q", pid, actual, expected)
+			state, pid := parseUserUnitShow(output)
+			if state == "active" && pid > 0 {
+				actual := ""
+				var readErr error
+				if expected != "" {
+					actual, readErr = runtimeReadProcessExecutable(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
 				}
+				if readErr == nil && (expected == "" || filepath.Clean(actual) == expected) {
+					if stablePID == pid {
+						stableSamples++
+					} else {
+						stablePID = pid
+						stableSamples = 1
+					}
+					if stableSamples >= 2 {
+						return pid, nil
+					}
+					last = fmt.Sprintf("MainPID %d has the expected executable but is awaiting a stable sample", pid)
+				} else {
+					stablePID = 0
+					stableSamples = 0
+					switch {
+					case readErr != nil:
+						last = fmt.Sprintf("read MainPID %d executable: %v", pid, readErr)
+					case filepath.Base(filepath.Clean(actual)) == "systemd-executor":
+						last = fmt.Sprintf("MainPID %d is still transitioning through %q", pid, actual)
+					default:
+						last = fmt.Sprintf("MainPID %d executable is %q, want %q", pid, actual, expected)
+					}
+				}
+			} else {
+				stablePID = 0
+				stableSamples = 0
+				last = fmt.Sprintf("unit state is %q with MainPID %d", state, pid)
 			}
 		}
 		if err != nil {
+			stablePID = 0
+			stableSamples = 0
 			last = err.Error()
-		} else if last == "" {
-			last = boundedText(output)
 		}
 		select {
 		case <-ctx.Done():
@@ -1400,6 +1432,29 @@ func verifyUserUnit(ctx context.Context, run userSystemctlRunner, unit, expected
 		case <-ticker.C:
 		}
 	}
+}
+
+func parseUserUnitShow(output string) (string, int) {
+	state := ""
+	pid := 0
+	for _, field := range strings.Fields(output) {
+		value := field
+		if strings.HasPrefix(field, "ActiveState=") {
+			value = strings.TrimPrefix(field, "ActiveState=")
+		}
+		switch value {
+		case "active", "activating", "deactivating", "failed", "inactive", "reloading", "maintenance":
+			state = value
+			continue
+		}
+		if strings.HasPrefix(field, "MainPID=") {
+			value = strings.TrimPrefix(field, "MainPID=")
+		}
+		if parsed, err := strconv.ParseInt(value, 10, 32); err == nil && parsed >= 0 {
+			pid = int(parsed)
+		}
+	}
+	return state, pid
 }
 
 func reverifyUnitPID(ctx context.Context, run userSystemctlRunner, unit, executable string, expectedPID int) error {

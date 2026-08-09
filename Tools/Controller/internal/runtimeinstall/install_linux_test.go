@@ -171,6 +171,71 @@ func TestVerifyUserUnitBindsMainPIDToExecutable(t *testing.T) {
 	}
 }
 
+func TestVerifyUserUnitWaitsForStableExecutableAfterSystemdExecutor(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := filepath.EvalSymlinks(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRead := runtimeReadProcessExecutable
+	oldTimeout := runtimeUserUnitReadyTimeout
+	oldInterval := runtimeUserUnitPollInterval
+	attempts := 0
+	runtimeReadProcessExecutable = func(string) (string, error) {
+		attempts++
+		if attempts == 1 {
+			return "/usr/lib/systemd/systemd-executor", nil
+		}
+		return expected, nil
+	}
+	runtimeUserUnitReadyTimeout = 100 * time.Millisecond
+	runtimeUserUnitPollInterval = time.Millisecond
+	t.Cleanup(func() {
+		runtimeReadProcessExecutable = oldRead
+		runtimeUserUnitReadyTimeout = oldTimeout
+		runtimeUserUnitPollInterval = oldInterval
+	})
+	run := func(arguments ...string) (string, error) {
+		return "active\n4242\n", nil
+	}
+	pid, err := verifyUserUnit(context.Background(), run, "pccontroller-virtual-board.service", executable)
+	if err != nil || pid != 4242 || attempts != 3 {
+		t.Fatalf("stable executor transition pid=%d attempts=%d err=%v", pid, attempts, err)
+	}
+}
+
+func TestVerifyUserUnitRejectsSystemdExecutorThatNeverTransitions(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRead := runtimeReadProcessExecutable
+	oldTimeout := runtimeUserUnitReadyTimeout
+	oldInterval := runtimeUserUnitPollInterval
+	attempts := 0
+	runtimeReadProcessExecutable = func(string) (string, error) {
+		attempts++
+		return "/usr/lib/systemd/systemd-executor", nil
+	}
+	runtimeUserUnitReadyTimeout = 20 * time.Millisecond
+	runtimeUserUnitPollInterval = time.Millisecond
+	t.Cleanup(func() {
+		runtimeReadProcessExecutable = oldRead
+		runtimeUserUnitReadyTimeout = oldTimeout
+		runtimeUserUnitPollInterval = oldInterval
+	})
+	run := func(arguments ...string) (string, error) {
+		return "active\n4242\n", nil
+	}
+	if _, err := verifyUserUnit(context.Background(), run, "pccontroller-virtual-board.service", executable); err == nil ||
+		!strings.Contains(err.Error(), "systemd-executor") || attempts < 2 {
+		t.Fatalf("never-transition attempts=%d error=%v", attempts, err)
+	}
+}
+
 func TestRuntimeUnitProxyBypassAndReadinessArgv(t *testing.T) {
 	unit := runtimeUnits(DefaultRoot, "/usr/bin/chromium", "/usr/bin/curl")["pccontroller-window.service"]
 	for _, required := range []string{
@@ -181,6 +246,14 @@ func TestRuntimeUnitProxyBypassAndReadinessArgv(t *testing.T) {
 		if !strings.Contains(unit, required) {
 			t.Fatalf("window unit omitted %q:\n%s", required, unit)
 		}
+	}
+}
+
+func TestVirtualBoardUnitUsesSupportedEEPROMArgumentShape(t *testing.T) {
+	unit := runtimeUnits(DefaultRoot, "/usr/bin/chromium", "/usr/bin/curl")["pccontroller-virtual-board.service"]
+	want := `--eeprom "%h/.local/share/pccontroller/virtual-board/eeprom.bin"`
+	if !strings.Contains(unit, want) || strings.Contains(unit, "--eeprom=") {
+		t.Fatalf("VirtualBoard unit does not use the supported --eeprom FILE argv shape:\n%s", unit)
 	}
 }
 
