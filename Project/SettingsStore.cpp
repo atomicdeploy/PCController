@@ -18,6 +18,8 @@ static_assert(sizeof(StoredSettings) ==
                   sizeof(ControllerSettings) +
                       1U + SettingsStore::MaximumBoardNameLength + 1U,
               "settings/name EEPROM record packing changed");
+static_assert(sizeof(StoredSettings) == SettingsRecordLayout::RecordBytes,
+              "settings/name EEPROM schema byte count changed");
 
 static_assert(SettingsStore::EepromAddress + sizeof(StoredSettings) <=
                   EepromLayout::RemoteHeaderAddress,

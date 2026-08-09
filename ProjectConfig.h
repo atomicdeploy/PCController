@@ -33,8 +33,9 @@
 
 // The production host owns the 16x2 PCF8574 LCD through the bounded generic
 // I2C opcode. The physical LCD remains fully usable while its duplicated
-// HD44780 presentation renderer stays off this 32 KiB MCU. Diagnostic builds
-// may enable the renderer without changing the hardware contract.
+// HD44780 presentation renderer stays off this 32 KiB MCU. The native-renderer
+// flag is reserved until real lifecycle/DisplayText call sites exist; rejecting
+// it prevents an image from falsely advertising capability bit 6.
 #ifndef PCCONTROLLER_ENABLE_I2C_LCD
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
@@ -152,6 +153,15 @@
 #if (PCCONTROLLER_ENABLE_PCA9685 != 0) && \
     (PCCONTROLLER_ENABLE_PCA9685 != 1)
 #error "PCCONTROLLER_ENABLE_PCA9685 must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_I2C_LCD != 0) && \
+    (PCCONTROLLER_ENABLE_I2C_LCD != 1)
+#error "PCCONTROLLER_ENABLE_I2C_LCD must be 0 or 1"
+#endif
+
+#if PCCONTROLLER_ENABLE_I2C_LCD
+#error "PCCONTROLLER_ENABLE_I2C_LCD is reserved until the MCU renderer has lifecycle and DisplayText call sites; use generic I2C capability bit 16"
 #endif
 
 #if (PCCONTROLLER_ENABLE_STATUS_LED_ENGINE != 0) && \

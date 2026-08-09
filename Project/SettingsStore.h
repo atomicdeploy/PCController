@@ -240,6 +240,26 @@ struct ControllerSettings {
 #endif
 };
 
+// Explicit build contract for the checksum-backed EEPROM settings/name record.
+// Schema IDs describe feature layouts, not a compatibility/migration chain:
+// alpha builds intentionally reject a record whose exact shape/CRC differs.
+namespace SettingsRecordLayout {
+constexpr uint8_t CoreSchema = 1;
+constexpr uint8_t MenuLayoutSchema = 2;
+#if PCCONTROLLER_MENU_LAYOUT_STORAGE
+constexpr uint8_t Schema = MenuLayoutSchema;
+constexpr uint8_t ControllerBytes = 31;
+#else
+constexpr uint8_t Schema = CoreSchema;
+constexpr uint8_t ControllerBytes = 22;
+#endif
+constexpr uint8_t BoardNameLengthBytes = 1;
+constexpr uint8_t BoardNameBytes = 8;
+constexpr uint8_t ChecksumBytes = 1;
+constexpr uint8_t RecordBytes = ControllerBytes + BoardNameLengthBytes +
+                                BoardNameBytes + ChecksumBytes;
+} // namespace SettingsRecordLayout
+
 // The seven leading byte-sized settings form the canonical UART settings
 // prefix. Keep the shared semantic prefix explicit while allowing later
 // payloads to append independently discoverable fields.
@@ -252,10 +272,10 @@ static_assert(offsetof(ControllerSettings, streamPeriodMs) ==
                   ControllerSettingsPrefixSize,
               "Controller settings prefix layout changed");
 #if PCCONTROLLER_MENU_LAYOUT_STORAGE
-static_assert(sizeof(ControllerSettings) == 31,
+static_assert(sizeof(ControllerSettings) == SettingsRecordLayout::ControllerBytes,
               "Host-owned packed menu storage changed AVR EEPROM/RAM layout");
 #else
-static_assert(sizeof(ControllerSettings) == 22,
+static_assert(sizeof(ControllerSettings) == SettingsRecordLayout::ControllerBytes,
               "Controller settings AVR layout changed");
 #endif
 #endif
