@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -230,6 +231,11 @@ func applyTUIConsole(settings consolewindow.Settings, output io.Writer, strict b
 		return nil
 	}
 	if !result.Applied && settings.Enabled && result.Reason != "" {
+		// Linux terminal emulators own their presentation. This is expected, not
+		// actionable, so do not pollute the TUI with a platform warning.
+		if runtime.GOOS == "linux" && strings.Contains(result.Reason, "unavailable on linux") {
+			return nil
+		}
 		if strict {
 			return errors.New(result.Reason)
 		}
