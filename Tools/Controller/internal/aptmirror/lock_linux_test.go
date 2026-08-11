@@ -51,6 +51,9 @@ func TestOperationLockUsesKernelLifetimeAndDoesNotConflictAcrossPaths(t *testing
 
 func TestPackageManagerRecordLocksFailClosedWithOwnerPID(t *testing.T) {
 	root := t.TempDir()
+	if err := os.Chmod(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	paths := []string{
 		filepath.Join(root, "lock-frontend"),
 		filepath.Join(root, "dpkg-lock"),
