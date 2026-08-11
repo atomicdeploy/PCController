@@ -255,6 +255,64 @@ func PreferredCandidate(candidates []Info, preferred Identity) (Info, bool) {
 	return Info{}, false
 }
 
+// ReconnectCandidates relaxes only a stale COM-name constraint after a
+// previously connected USB transport disappeared.  A serial number or PnP
+// instance remains authoritative when it is still present.  When Windows has
+// reassigned the port (or the inexpensive bridge exposes neither identifier),
+// the host may continue only with a unique match for the remaining configured
+// identity, or a single present USB serial device.  It deliberately returns
+// multiple candidates for an ambiguous topology so the caller can require an
+// explicit user selection rather than opening an arbitrary board.
+func ReconnectCandidates(all []Info, filter Filter) []Info {
+	if strings.TrimSpace(filter.Port) == "" {
+		return nil
+	}
+	withoutPort := filter
+	withoutPort.Port = ""
+	if withoutPort.VID != "" || withoutPort.PID != "" ||
+		withoutPort.Name != "" || withoutPort.SerialNumber != "" ||
+		withoutPort.InstanceID != "" {
+		if candidates := Candidates(all, withoutPort); len(candidates) > 0 {
+			return candidates
+		}
+	}
+
+	// USB bridges commonly lack a serial number and can receive a fresh PnP
+	// instance on another physical hub.  Keep the descriptive USB identity;
+	// it is still safer than the obsolete COM number.
+	loose := withoutPort
+	loose.SerialNumber = ""
+	loose.InstanceID = ""
+	if loose.VID == "" {
+		loose.VID = filter.Preferred.VID
+	}
+	if loose.PID == "" {
+		loose.PID = filter.Preferred.PID
+	}
+	if loose.Name == "" {
+		loose.Name = filter.Preferred.Name
+	}
+	if loose.VID != "" || loose.PID != "" || loose.Name != "" {
+		if candidates := Candidates(all, loose); len(candidates) > 0 {
+			return candidates
+		}
+	}
+
+	// Last-resort rebind is intentionally narrow: a single USB serial device
+	// is unambiguous even if its driver did not expose VID/PID, a friendly name,
+	// or a durable serial number.  More than one candidate is never guessed.
+	usb := make([]Info, 0, 1)
+	for _, candidate := range all {
+		if candidate.IsUSB {
+			usb = append(usb, candidate)
+		}
+	}
+	if len(usb) == 1 {
+		return usb
+	}
+	return nil
+}
+
 // ParseSelector accepts a COM device ID, tcp endpoint, VID:PID pair,
 // VID_xxxx&PID_yyyy token, serial:VALUE, instance:VALUE, or a human-friendly
 // name substring.

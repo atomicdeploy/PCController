@@ -21,6 +21,11 @@ type DiscoveryOptions struct {
 	// serial transport. It is never called for TCP endpoints or HELLO retries.
 	ResetAfterOpen func(ports.Info) bool
 	ResetPulse     time.Duration
+	// AllowPortRebind is set only by an already-running Runtime after a USB
+	// disconnect. It lets discovery replace a stale COM number with one
+	// unambiguous present USB identity; initial explicit --port selection stays
+	// strict.
+	AllowPortRebind bool
 }
 
 type OpenResult struct {
@@ -53,6 +58,9 @@ func AutoOpen(ctx context.Context, options DiscoveryOptions) (OpenResult, error)
 		return OpenResult{}, err
 	}
 	candidates := ports.Candidates(all, options.Filter)
+	if len(candidates) == 0 && options.AllowPortRebind {
+		candidates = ports.ReconnectCandidates(all, options.Filter)
+	}
 	if len(candidates) == 0 {
 		return OpenResult{}, errors.New("no serial ports match the configured filters")
 	}
