@@ -319,6 +319,33 @@ func TestDurableURLCredentialsAndPreAuthSocketFramesAreRejected(t *testing.T) {
 	}
 }
 
+func TestAuthorizationDisabledAllowsHTTPWithoutCredentialsAndSkipsRemotePolicy(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	service.AuthorizationDisabled = true
+	handler := websocketMux(context.Background(), service)
+
+	request := httptest.NewRequest(http.MethodGet, "http://controller.example/api/snapshot", nil)
+	request.RemoteAddr = "198.51.100.10:45000"
+	request.Header.Set("Authorization", "not-a-bearer-token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("X-PCController-Authentication") != "disabled" ||
+		response.Header().Get("X-PCController-Principal") != "test-operator" {
+		t.Fatalf("disabled auth status=%d headers=%v", response.Code, response.Header())
+	}
+
+	uiRequest := httptest.NewRequest(http.MethodGet, "http://controller.example/api/ui-config", nil)
+	ui := httptest.NewRecorder()
+	handler.ServeHTTP(ui, uiRequest)
+	var config struct {
+		AuthRequired bool `json:"auth_required"`
+	}
+	if err := json.NewDecoder(ui.Body).Decode(&config); err != nil || config.AuthRequired {
+		t.Fatalf("disabled auth config=%+v err=%v", config, err)
+	}
+}
+
 func TestMissingOriginPolicyAndCredentialAmbiguityAreFailClosed(t *testing.T) {
 	service, client := testAuthenticatedService(t)
 	defer client.Shutdown()
