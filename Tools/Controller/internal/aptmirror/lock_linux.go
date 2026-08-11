@@ -12,7 +12,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const AdoptionLockPath = "/run/lock/pccontroller-apt-mirror-adoption.lock"
+// /run/lock is intentionally group-writable on modern Linux systems. Keep
+// Controller's root-only lock files in a dedicated root-owned child instead.
+const AdoptionLockPath = "/run/pccontroller/apt-mirror-adoption.lock"
 
 var packageManagerLockPaths = []string{
 	"/var/lib/dpkg/lock-frontend",

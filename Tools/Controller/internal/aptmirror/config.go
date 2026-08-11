@@ -104,7 +104,7 @@ func DefaultPaths() Paths {
 		APTRoot:          "/etc/apt",
 		MirrorList:       "/etc/apt/mirrors/ubuntu-dynamic.list",
 		State:            "/var/lib/pccontroller-apt-mirrors/state.json",
-		Lock:             "/run/lock/pccontroller-apt-mirrors.lock",
+		Lock:             "/run/pccontroller/apt-mirrors.lock",
 		Keyring:          "/usr/share/keyrings/ubuntu-archive-keyring.gpg",
 		CanonicalSource:  "/etc/apt/sources.list.d/ubuntu.sources",
 		APTResilience:    "/etc/apt/apt.conf.d/80-pccontroller-mirror-resilience",
