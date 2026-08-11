@@ -67,6 +67,17 @@
 #define PCCONTROLLER_MENU_LAYOUT_PROTOCOL 0
 #endif
 
+// KEY normally identifies the four physical inputs. Set this to 0 for a
+// motion-only production image: the identification renderer/state is compiled
+// out, while the existing guarded MOVE control page remains available.
+#ifndef PCCONTROLLER_ENABLE_KEY_IDENTIFICATION
+#define PCCONTROLLER_ENABLE_KEY_IDENTIFICATION 1
+#endif
+
+#if PCCONTROLLER_ENABLE_KEY_IDENTIFICATION > 1
+#error "PCCONTROLLER_ENABLE_KEY_IDENTIFICATION must be 0 or 1"
+#endif
+
 #if PCCONTROLLER_MENU_ORDERING && !PCCONTROLLER_MENU_VISIBILITY
 #error "Menu ordering requires persistent visibility"
 #endif

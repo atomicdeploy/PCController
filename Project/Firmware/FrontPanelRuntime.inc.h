@@ -500,14 +500,17 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 
 #endif
 
-  // KEY owns all four actions, including K3 identification, before the generic
-  // leaf hierarchy considers K3 as Back.
+  // In diagnostic builds KEY owns all four actions, including K3, before the
+  // generic leaf hierarchy considers K3 as Back. Motion-only images compile
+  // this diagnostic path out entirely.
+#if PCCONTROLLER_ENABLE_KEY_IDENTIFICATION
   if (modeManager.current() == MODE_KEYS) {
     identifiedKey = static_cast<uint8_t>(action + 1);
     identifiedKeyEndsAt = actionNow + 900;
     menuFeedback(fromRemote);
     return;
   }
+#endif
 
   switch (modeManager.current()) {
     case MODE_ILLUMINATION_MODE_EDIT:
@@ -883,14 +886,20 @@ void keyGesture(uint8_t bit, KeyEvent event, void *) {
   appEvents.key(bit, static_cast<uint8_t>(event));
 }
 
-// Stops motion and exits its modal page after either side's two-key hold.
+// Stops motion or exits optional key identification after either side's
+// two-key hold, so neither front-panel mode can trap the operator.
 void serviceMotionExit(uint32_t at) {
   const bool motionControl = modeManager.current() == MODE_MOTION_CONTROL;
+#if PCCONTROLLER_ENABLE_KEY_IDENTIFICATION
+  const bool keyIdentification = modeManager.current() == MODE_KEYS;
+#else
+  const bool keyIdentification = false;
+#endif
   const bool sideAExit =
       menuKeys[0].isPressed() && menuKeys[1].isPressed();
   const bool sideBExit =
       menuKeys[2].isPressed() && menuKeys[3].isPressed();
-  if (!motionControl || (!sideAExit && !sideBExit)) {
+  if ((!motionControl && !keyIdentification) || (!sideAExit && !sideBExit)) {
     motionExitStartedAt = 0;
     return;
   }
@@ -905,7 +914,13 @@ void serviceMotionExit(uint32_t at) {
   } else if (static_cast<uint32_t>(at - motionExitStartedAt) >=
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
-    setMenuPage(PAGE_MOTION);
+    const uint8_t exitPage = keyIdentification
+                                 ? (settingsStore.values().defaultMenuPage ==
+                                            PAGE_KEYS
+                                        ? PAGE_DOOR
+                                        : settingsStore.values().defaultMenuPage)
+                                 : PAGE_MOTION;
+    setMenuPage(exitPage);
     buzzer.success();
     motionExitStartedAt = 0xFFFFFFFFUL;
   }
@@ -1200,11 +1215,15 @@ void serviceDisplay(uint32_t at) {
     return;
   }
   if (currentMode == MODE_KEYS) {
+#if PCCONTROLLER_ENABLE_KEY_IDENTIFICATION
     if (!timeReached(at, identifiedKeyEndsAt) && identifiedKey != 0) {
       display.showInteger(identifiedKey);
     } else {
       display.showText(commonText(TextKey));
     }
+#else
+    display.showText(commonText(TextKey));
+#endif
     return;
   }
   if (currentMode == MODE_USER_PWM) {

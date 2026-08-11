@@ -102,10 +102,15 @@ uint8_t userPwmMenuIndex = 0;
 uint8_t userRelayMenuIndex = 0;
 uint8_t userRelayBehavior = 0;
 uint8_t settingsMenuItem = 0;
+#if PCCONTROLLER_ENABLE_KEY_IDENTIFICATION
+// The optional KEY diagnostic uses no RAM in motion-only production images.
 uint8_t identifiedKey = 0;
+#endif
 uint32_t menuLabelEndsAt = 0;
 uint32_t modeEnteredAt = 0;
+#if PCCONTROLLER_ENABLE_KEY_IDENTIFICATION
 uint32_t identifiedKeyEndsAt = 0;
+#endif
 uint32_t motionExitStartedAt = 0;
 uint32_t flashMessageEndsAt = 0;
 // Presentation visibility/order is configured independently over UART and is

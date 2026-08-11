@@ -75,7 +75,7 @@ enum class LeafDecreaseAction : uint8_t {
 };
 
 constexpr LeafDecreaseAction leafDecreaseAction(ProgramMode mode) {
-  return mode == MODE_KEYS
+  return mode == MODE_KEYS && PCCONTROLLER_ENABLE_KEY_IDENTIFICATION
              ? LeafDecreaseAction::IdentifyKey3
              : (mode == MODE_RELAY ? LeafDecreaseAction::AllRelaysOff
                                    : LeafDecreaseAction::ParentCategory);
