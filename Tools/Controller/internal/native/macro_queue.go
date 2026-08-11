@@ -1,29 +1,40 @@
 package native
 
+//go:generate go run ./cmd/genmacrocontract -protocol ../../../../Project/ProtocolContract.h -actions ../../../../Project/MacroActions.inc.h -output macro_contract_generated.go
+
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 )
 
 const (
-	MacroQueueSchema       byte = 2
-	MacroExecutionSequence byte = 0xFE
-	MacroQueueCapacity          = 127
-	MacroAppendHeaderSize       = 5
-	MacroRecordHeaderSize       = 6
-	MacroMaximumFragment        = MaxPayload - MacroAppendHeaderSize
+	MacroQueueSchema         byte = 3
+	MacroExecutionSequence   byte = 0xFE
+	MacroQueueCapacity            = 127
+	MacroAppendHeaderSize         = 5
+	MacroRecordHeaderSize         = 6
+	MacroMaximumFragment          = MaxPayload - MacroAppendHeaderSize
+	MacroCaptureChunkMaximum      = 40
+	// EventAction is intentionally smaller than an ordinary host command. It
+	// covers every board-generated physical/RF action without consuming a
+	// second MaximumPayload-sized AVR buffer.
+	MacroBoardActionMaximumPayload = 8
 )
 
 const (
 	MacroIdle byte = iota
 	MacroBuffering
 	MacroPlaying
-	MacroCancelled
 	MacroCompleted
+	MacroCancelled
 	MacroFailed
+	MacroRecording
+	MacroCaptured
+	MacroExported
 )
 
-// MacroStatus is the common schema-2 envelope returned by MACRO_STATUS and
+// MacroStatus is the common schema-3 envelope returned by MACRO_STATUS and
 // emitted for lifecycle changes. Free bytes are derived from Fill.
 type MacroStatus struct {
 	Schema         byte   `json:"schema"`
@@ -37,6 +48,7 @@ type MacroStatus struct {
 	DispatchErrors byte   `json:"dispatch_errors"`
 	StartedAtUS    uint32 `json:"started_at_us"`
 	TotalSteps     uint16 `json:"total_steps"`
+	DroppedSteps   uint16 `json:"dropped_steps"`
 }
 
 func (status MacroStatus) Free() byte {
@@ -47,19 +59,20 @@ func (status MacroStatus) Free() byte {
 }
 
 func (status MacroStatus) Active() bool {
-	return status.State == MacroBuffering || status.State == MacroPlaying
+	return status.State == MacroBuffering || status.State == MacroPlaying ||
+		status.State == MacroRecording
 }
 
 func (status MacroStatus) Faithful() bool {
 	return status.State == MacroCompleted && status.Underruns == 0 &&
-		status.DispatchErrors == 0
+		status.DispatchErrors == 0 && status.DroppedSteps == 0
 }
 
 // ParseMacroStatus accepts the shared [EventMacro, report] envelope. The event
 // type may carry the protocol's high-bit timestamp marker; callers strip the
 // trailing timestamp before parsing the report body.
 func ParseMacroStatus(payload []byte) (MacroStatus, error) {
-	const size = 19
+	const size = 21
 	if len(payload) != size {
 		return MacroStatus{}, fmt.Errorf("MACRO_STATUS payload is %d bytes, need %d", len(payload), size)
 	}
@@ -72,8 +85,9 @@ func ParseMacroStatus(payload []byte) (MacroStatus, error) {
 		ExecutedSteps: binary.LittleEndian.Uint16(payload[6:8]),
 		AcceptedBytes: binary.LittleEndian.Uint16(payload[8:10]),
 		Fill:          payload[10], Underruns: payload[11], DispatchErrors: payload[12],
-		StartedAtUS: binary.LittleEndian.Uint32(payload[13:17]),
-		TotalSteps:  binary.LittleEndian.Uint16(payload[17:19]),
+		StartedAtUS:  binary.LittleEndian.Uint32(payload[13:17]),
+		TotalSteps:   binary.LittleEndian.Uint16(payload[17:19]),
+		DroppedSteps: binary.LittleEndian.Uint16(payload[19:21]),
 	}, nil
 }
 
@@ -105,6 +119,70 @@ func MacroQueueAppendPayload(offset, completeSteps uint16, fragment []byte) ([]b
 func MacroQueueRunPayload() []byte   { return []byte{1} }
 func MacroQueueQueryPayload() []byte { return []byte{2} }
 
+// MacroCaptureQueryPayload requests the retained schema-3 board-capture ring
+// from an absolute byte offset. It does not alter capture/playback state.
+func MacroCaptureQueryPayload(id byte, offset uint16) []byte {
+	return []byte{3, id, byte(offset), byte(offset >> 8)}
+}
+
+// MacroCaptureAcknowledgePayload marks one identity-guarded retained capture
+// durably exported. Firmware keeps the ring replayable/fetchable; only the
+// explicit user-only command 5 may clear it.
+func MacroCaptureAcknowledgePayload(id byte, startedAtUS uint32) []byte {
+	return []byte{
+		4, id,
+		byte(startedAtUS), byte(startedAtUS >> 8),
+		byte(startedAtUS >> 16), byte(startedAtUS >> 24),
+	}
+}
+
+// MacroCaptureChunk is a bounded recovery page from the board-owned capture
+// ring. Data contains whole/partial stream bytes; callers concatenate pages
+// and validate complete records only after TotalBytes have arrived.
+type MacroCaptureChunk struct {
+	Schema     byte   `json:"schema"`
+	Command    byte   `json:"command"`
+	ID         byte   `json:"id"`
+	TotalBytes uint16 `json:"total_bytes"`
+	Offset     uint16 `json:"offset"`
+	Data       []byte `json:"data"`
+}
+
+func ParseMacroCaptureChunk(payload []byte) (MacroCaptureChunk, error) {
+	const header = 8
+	if len(payload) < header || payload[0] != MacroQueueSchema || payload[1] != 3 {
+		return MacroCaptureChunk{}, fmt.Errorf("invalid schema-3 macro capture chunk")
+	}
+	length := int(payload[7])
+	if length > MaxPayload-header || len(payload) != header+length {
+		return MacroCaptureChunk{}, fmt.Errorf(
+			"macro capture chunk length %d/body %d is invalid", length, len(payload),
+		)
+	}
+	chunk := MacroCaptureChunk{
+		Schema: payload[0], Command: payload[1], ID: payload[2],
+		TotalBytes: binary.LittleEndian.Uint16(payload[3:5]),
+		Offset:     binary.LittleEndian.Uint16(payload[5:7]),
+		Data:       append([]byte(nil), payload[8:]...),
+	}
+	if chunk.TotalBytes > MacroQueueCapacity || len(chunk.Data) > MacroCaptureChunkMaximum {
+		return MacroCaptureChunk{}, fmt.Errorf(
+			"macro capture exceeds ring/page bounds: total=%d page=%d",
+			chunk.TotalBytes, len(chunk.Data),
+		)
+	}
+	if chunk.Offset > chunk.TotalBytes ||
+		int(chunk.Offset)+len(chunk.Data) > int(chunk.TotalBytes) {
+		return MacroCaptureChunk{}, fmt.Errorf(
+			"macro capture range %d+%d exceeds %d", chunk.Offset, len(chunk.Data), chunk.TotalBytes,
+		)
+	}
+	if chunk.Offset < chunk.TotalBytes && len(chunk.Data) == 0 {
+		return MacroCaptureChunk{}, errors.New("macro capture returned an empty non-terminal chunk")
+	}
+	return chunk, nil
+}
+
 func MacroQueueCancelPayload(keepOutputs bool) []byte {
 	if keepOutputs {
 		return []byte{1}
@@ -117,8 +195,8 @@ func MacroQueueCancelPayload(keepOutputs bool) []byte {
 // EncodeMacroRecord stores one ordinary opcode command against an MCU-clock
 // due offset. Macro-control recursion is rejected before it reaches firmware.
 func EncodeMacroRecord(dueUS uint32, opcode byte, payload []byte) ([]byte, error) {
-	if opcode >= OpMacroStart && opcode <= OpMacroStep {
-		return nil, fmt.Errorf("macro control opcode 0x%02X cannot be queued recursively", opcode)
+	if !MacroPlaybackAllowed(opcode) {
+		return nil, fmt.Errorf("opcode 0x%02X is not a queueable acknowledged command", opcode)
 	}
 	if len(payload) > MaxPayload {
 		return nil, ErrPayloadTooLong
@@ -129,6 +207,28 @@ func EncodeMacroRecord(dueUS uint32, opcode byte, payload []byte) ([]byte, error
 	record[5] = byte(len(payload))
 	copy(record[6:], payload)
 	return record, nil
+}
+
+type macroActionContract struct {
+	captureLength byte
+}
+
+// MacroPlaybackAllowed is generated from Project/MacroActions.inc.h and is the
+// exact safe ordinary-action allowlist enforced by the production AVR queue.
+func MacroPlaybackAllowed(opcode byte) bool {
+	_, exists := macroActionContracts[opcode]
+	return exists
+}
+
+// MacroBoardActionPayloadLength returns the exact fixed evidence prefix. A
+// 0xFF canonical row is playback-only/variable and cannot enter board capture.
+func MacroBoardActionPayloadLength(opcode byte) (byte, bool) {
+	contract, exists := macroActionContracts[opcode]
+	if !exists || contract.captureLength == 0xFF ||
+		contract.captureLength > MacroBoardActionMaximumPayload {
+		return 0, false
+	}
+	return contract.captureLength, true
 }
 
 // ResponseDeviceMicros extracts the schema-2 MCU timestamp appended to ACKs
