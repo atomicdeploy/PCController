@@ -16,7 +16,7 @@ func registerArtifactHTTP(mux *http.ServeMux, service *Service) {
 		// Artifact bytes and update requests are never anonymously exposed off
 		// loopback, even if a deployment accidentally enables remote IPC without
 		// configuring a bearer token.
-		if access.Remote && strings.TrimSpace(service.currentAuthToken()) == "" {
+		if !service.authorizationDisabled() && access.Remote && strings.TrimSpace(service.currentAuthToken()) == "" {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{
 				"error": "remote artifact access requires a configured authentication token",
 			})

@@ -251,8 +251,10 @@ p { color: var(--text-soft); }
 .sidebar__footer strong { color: var(--text-soft); font-size: 11px; }
 .sidebar__footer span { color: var(--text-muted); font: 9px var(--font-mono); }
 
-.is-sidebar-compact .brand { grid-template-columns: 42px; justify-content: center; padding-inline: 20px; }
-.is-sidebar-compact .brand__copy, .is-sidebar-compact .sidebar-toggle, .is-sidebar-compact .sidebar__status > div, .is-sidebar-compact .sidebar__status > svg, .is-sidebar-compact .nav-group__label, .is-sidebar-compact .nav-button__label, .is-sidebar-compact .nav-button__badge, .is-sidebar-compact .nav-button__chevron, .is-sidebar-compact .sidebar__footer div { opacity: 0; width: 0; pointer-events: none; }
+.is-sidebar-compact .brand { grid-template-columns: 34px 34px; justify-content: space-between; gap: 2px; padding-inline: 4px; }
+.is-sidebar-compact .brand__mark { width: 34px; height: 34px; border-radius: 10px; font-size: 10px; }
+.is-sidebar-compact .brand__copy, .is-sidebar-compact .sidebar__status > div, .is-sidebar-compact .sidebar__status > svg, .is-sidebar-compact .nav-group__label, .is-sidebar-compact .nav-button__label, .is-sidebar-compact .nav-button__badge, .is-sidebar-compact .nav-button__chevron, .is-sidebar-compact .sidebar__footer div { opacity: 0; width: 0; pointer-events: none; }
+.is-sidebar-compact .sidebar-toggle { display: grid; width: 34px; height: 34px; opacity: 1; pointer-events: auto; }
 .is-sidebar-compact .sidebar__status { grid-template-columns: 3px 30px; margin-inline: 12px; padding-inline: 13px; }
 .is-sidebar-compact .sidebar__status::after { content: "PC"; font: 700 10px var(--font-mono); color: var(--text-soft); }
 .is-sidebar-compact .sidebar__nav { padding-inline: 12px; }

@@ -77,9 +77,9 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Controller command')
   })
 
-  it('never labels disconnected dashboard telemetry as live', () => {
+  it('hides board telemetry entirely while the controller is disconnected', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} />)
-    expect(markup).toContain('Telemetry history')
+    expect(markup).not.toContain('Telemetry history')
     expect(markup).not.toMatch(/\bLive\b/)
   })
 
