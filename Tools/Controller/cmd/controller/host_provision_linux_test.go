@@ -165,8 +165,8 @@ func TestLinuxHostProvisionApplyFreshPathUsesControllerAsTargetUser(t *testing.T
 	if report.UPXPath != "/usr/local/bin/upx" {
 		t.Fatalf("global UPX path=%q", report.UPXPath)
 	}
-	if len(*calls) != 6 {
-		t.Fatalf("fresh provision commands=%d want apt update/install, npm/UPX verify, usermod, Controller bootstrap: %+v", len(*calls), *calls)
+	if len(*calls) != 7 {
+		t.Fatalf("fresh provision commands=%d want apt update/install, npm/UPX verify, usermod, target data preparation, Controller bootstrap: %+v", len(*calls), *calls)
 	}
 	if got := (*calls)[0].command; got.Name != "/usr/bin/apt-get" || !containsArgument(got.Args, "update") {
 		t.Fatalf("first command did not refresh APT: %+v", got)
@@ -190,7 +190,14 @@ func TestLinuxHostProvisionApplyFreshPathUsesControllerAsTargetUser(t *testing.T
 	if got := (*calls)[4].command; got.Name != "/usr/sbin/usermod" || !reflect.DeepEqual(got.Args, []string{"--append", "--groups", "dialout", "alice"}) {
 		t.Fatalf("serial membership command is not tightly scoped: %+v", got)
 	}
-	bootstrap := (*calls)[5].command
+	prepare := (*calls)[5].command
+	if prepare.Name != "/usr/sbin/runuser" || !reflect.DeepEqual(prepare.Args, []string{
+		"--user", "alice", "--", "/opt/pccontroller/controller", "toolchain", "prepare-host-data",
+		"--data-dir", "/home/alice/.local/share/pccontroller", "--apply",
+	}) {
+		t.Fatalf("target data preparation did not use the bounded target-user Controller path: %+v", prepare)
+	}
+	bootstrap := (*calls)[6].command
 	if bootstrap.Name != "/usr/sbin/runuser" {
 		t.Fatalf("toolchain did not cross the target-user boundary: %+v", bootstrap)
 	}

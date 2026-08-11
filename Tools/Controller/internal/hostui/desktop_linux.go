@@ -29,7 +29,7 @@ func ensurePlatformDesktopIntegration(
 	if err != nil {
 		return DesktopIntegrationStatus{Supported: true, LastError: err.Error()}, err
 	}
-	executable, err := linuxExecutablePath()
+	executable, err := linuxExecutablePath(options.Executable)
 	if err != nil {
 		return DesktopIntegrationStatus{Supported: true, LastError: err.Error()}, err
 	}
@@ -74,7 +74,7 @@ func removePlatformDesktopIntegration(
 	if err != nil {
 		return DesktopIntegrationCleanupStatus{Supported: true, LastError: err.Error()}, err
 	}
-	executable, err := linuxExecutablePath()
+	executable, err := linuxExecutablePath(options.Executable)
 	if err != nil {
 		return DesktopIntegrationCleanupStatus{Supported: true, LastError: err.Error()}, err
 	}
@@ -145,16 +145,15 @@ func linuxDesktopIdentity(options DesktopIntegrationOptions) (string, string, er
 	return appID, displayName, nil
 }
 
-func linuxExecutablePath() (string, error) {
+func linuxExecutablePath(value string) (string, error) {
+	if strings.TrimSpace(value) != "" {
+		return resolveDesktopExecutable(value)
+	}
 	executable, err := linuxDesktopExecutable()
 	if err != nil {
 		return "", err
 	}
-	executable, err = filepath.Abs(executable)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Clean(executable), nil
+	return resolveDesktopExecutable(executable)
 }
 
 func linuxApplicationsDirectory() (string, error) {

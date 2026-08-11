@@ -758,7 +758,7 @@ func configIndependentToolchainRuntime(args []string) bool {
 		return false
 	}
 	switch strings.ToLower(args[1]) {
-	case "runtime-stage", "runtime-install", "runtime-status", "runtime-rollback", "runtime-uninstall", "runtime-user-links":
+	case "runtime-stage", "runtime-install", "runtime-status", "runtime-rollback", "runtime-uninstall", "runtime-user-links", "prepare-host-data":
 		return true
 	default:
 		return false
@@ -1207,6 +1207,9 @@ func runToolchain(
 		return runToolchainRuntimeWindowReady(args[1:], stdout, stderr, store)
 	}
 	if len(args) != 0 && configIndependentToolchainRuntime(append([]string{"toolchain"}, args...)) {
+		if strings.EqualFold(args[0], "prepare-host-data") {
+			return runToolchainPrepareHostData(args[1:], stdout, stderr)
+		}
 		return runToolchainRuntime(args[0], args[1:], stdout, stderr)
 	}
 	if len(args) != 0 && strings.EqualFold(args[0], "provision-host") {

@@ -459,6 +459,29 @@ func provisionLinuxHost(
 	} else if options.PolicyPath != "" {
 		bootstrapArguments = append(bootstrapArguments, "--policy", options.PolicyPath)
 	}
+	prepareArguments := []string{
+		"--user", account.Username, "--", executable,
+		"toolchain", "prepare-host-data", "--data-dir", paths.DataDir, "--apply",
+	}
+	prepare := linuxHostProvisionCommand{Name: runuser, Args: prepareArguments, Dir: home}
+	prepareStep := linuxHostProvisionStep{
+		Name: "prepare target-owned Controller data", Command: formatLinuxProvisionCommand(prepare), Mutating: true,
+		Detail: "runs as the target user and adopts only the reviewed legacy toolchain/VirtualBoard layout",
+	}
+	fmt.Fprintln(output, "\n▶", prepareStep.Name)
+	fmt.Fprintln(output, prepareStep.Command)
+	if !options.Apply {
+		prepareStep.Planned = true
+		fmt.Fprintln(output, "  dry-run: not executed; non-empty unmarked data remains protected")
+		report.Steps = append(report.Steps, prepareStep)
+	} else if err := linuxHostProvisionRun(ctx, prepare, environment, output); err != nil {
+		report.Steps = append(report.Steps, prepareStep)
+		return report, fmt.Errorf("prepare target-owned Controller data: %w", err)
+	} else {
+		prepareStep.Succeeded = true
+		report.Steps = append(report.Steps, prepareStep)
+	}
+
 	bootstrap := linuxHostProvisionCommand{Name: runuser, Args: bootstrapArguments, Dir: home}
 	step := linuxHostProvisionStep{
 		Name:    "bootstrap managed firmware toolchain as target user",
@@ -485,6 +508,32 @@ func provisionLinuxHost(
 		fmt.Fprintln(output, "The target account must start a new login session before applications inherit the serial group.")
 	}
 	return report, nil
+}
+
+func runToolchainPrepareHostData(args []string, stdout, stderr io.Writer) error {
+	flags := flag.NewFlagSet("toolchain prepare-host-data", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dataDir := flags.String("data-dir", "", "absolute target-user PCController data directory")
+	apply := flags.Bool("apply", false, "publish the ownership marker after validating the known legacy layout")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || strings.TrimSpace(*dataDir) == "" || !*apply {
+		return errors.New("usage: controller toolchain prepare-host-data --data-dir DIR --apply")
+	}
+	if os.Geteuid() == 0 {
+		return errors.New("prepare-host-data must run as the target non-root user")
+	}
+	paths, err := programmer.HostDataPathsFor(*dataDir)
+	if err != nil {
+		return err
+	}
+	if err := programmer.AdoptKnownLegacyHostDataPaths(paths); err != nil {
+		return err
+	}
+	encoded, _ := json.Marshal(map[string]any{"data_dir": paths.DataDir, "prepared": true})
+	fmt.Fprintln(stdout, string(encoded))
+	return nil
 }
 
 func ensureLinuxNPM(

@@ -42,6 +42,50 @@ func Ensure(root string) error {
 	return EnsureFor(root, owner)
 }
 
+// AdoptKnown permits a caller that has independently validated a narrowly
+// defined legacy layout to publish the normal ownership marker. It never
+// replaces an existing marker: a malformed or foreign marker remains a hard
+// failure rather than becoming silently adopted data.
+func AdoptKnown(root string, validate func(string) error) error {
+	owner, err := CurrentOwnerID()
+	if err != nil {
+		return err
+	}
+	return AdoptKnownFor(root, owner, validate)
+}
+
+// AdoptKnownFor is the injected-owner variant used by platform-specific
+// migration code. The validator runs before the marker is written.
+func AdoptKnownFor(root, owner string, validate func(string) error) error {
+	if strings.TrimSpace(owner) == "" {
+		return errors.New("host data owner identity is unavailable")
+	}
+	resolved, err := pathguard.CleanAbsolute(root)
+	if err != nil {
+		return err
+	}
+	root = resolved
+	if err := pathguard.ValidateComponents(root, false); err != nil {
+		return err
+	}
+	if err := VerifyFor(root, owner); err == nil {
+		return nil
+	}
+	markerPath := filepath.Join(root, MarkerName)
+	if _, err := os.Lstat(markerPath); err == nil {
+		return ErrNotOwned
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if validate == nil {
+		return errors.New("legacy host data validator is required")
+	}
+	if err := validate(root); err != nil {
+		return err
+	}
+	return writeMarkerFor(root, owner)
+}
+
 // EnsureFor supports installer services with an injected owner identity while
 // keeping production ownership resolution centralized in CurrentOwnerID.
 func EnsureFor(root, owner string) error {
@@ -68,6 +112,10 @@ func EnsureFor(root, owner string) error {
 	if len(entries) != 0 {
 		return fmt.Errorf("%w: refusing to adopt non-empty unmarked root %s", ErrNotOwned, root)
 	}
+	return writeMarkerFor(root, owner)
+}
+
+func writeMarkerFor(root, owner string) error {
 	value := marker{
 		Format: markerFormat, ProductAppID: productidentity.StableAppID,
 		OwnerID: owner, DataRoot: root, CreatedAt: time.Now().UTC(),

@@ -271,6 +271,7 @@ func runDesktop(
 	options := hostui.DesktopIntegrationOptions{
 		AppID:       productidentity.StableAppID,
 		DisplayName: productidentity.Title(store.Current().UI.AppTitle),
+		Executable:  strings.TrimSpace(os.Getenv("PCCONTROLLER_DESKTOP_EXECUTABLE")),
 	}
 	var status any
 	var integrationErr error
