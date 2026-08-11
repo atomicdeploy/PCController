@@ -22,7 +22,7 @@ func registerReleaseDiscoveryHTTP(mux *http.ServeMux, service *Service) {
 	}
 	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		access := accessFromHTTPRequest(request, "rest")
-		if access.Remote && strings.TrimSpace(service.currentAuthToken()) == "" {
+		if !service.authorizationDisabled() && access.Remote && strings.TrimSpace(service.currentAuthToken()) == "" {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{
 				"error": "remote release discovery requires a configured authentication token",
 			})

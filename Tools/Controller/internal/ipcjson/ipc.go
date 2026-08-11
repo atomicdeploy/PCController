@@ -244,16 +244,22 @@ const (
 )
 
 type Service struct {
-	Client                *controller.Client
-	WebSocketPath         string
-	SocketIOPath          string
-	WebUI                 http.Handler
-	IntegrationProxy      http.Handler
-	LocalDevice           LocalDeviceService
-	HostFacts             hostfacts.Provider
-	Artifacts             *artifacts.Service
-	ReleaseDiscovery      ReleaseDiscoveryService
-	AuthToken             string
+	Client           *controller.Client
+	WebSocketPath    string
+	SocketIOPath     string
+	WebUI            http.Handler
+	IntegrationProxy http.Handler
+	LocalDevice      LocalDeviceService
+	HostFacts        hostfacts.Provider
+	Artifacts        *artifacts.Service
+	ReleaseDiscovery ReleaseDiscoveryService
+	AuthToken        string
+	// AuthorizationDisabled is the explicit alpha-only escape hatch used by the
+	// host while the durable remote-login design is deferred.  It deliberately
+	// bypasses both credential checks and remote capability policy; do not turn
+	// this into a configurable security mode.  The future authentication feature
+	// replaces this flag with its own reviewed policy.
+	AuthorizationDisabled bool
 	RemotePrincipal       string
 	AllowedOrigins        []string
 	InboundWebhooks       bool
@@ -1526,6 +1532,9 @@ func (service *Service) authorizeCapability(
 	operation, capability string,
 ) error {
 	access = service.normalizeAccess(access)
+	if service.authorizationDisabled() {
+		return nil
+	}
 	if !access.Remote {
 		if capability != capabilityRead && capability != capabilityEvents {
 			service.auditAccess(access, operation, capability, true)
@@ -2122,7 +2131,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"websocket_path":      webSocketPath,
 			"socket_io_path":      socketIOPath,
 			"session_ticket_path": SessionTicketPath,
-			"auth_required":       strings.TrimSpace(service.currentAuthToken()) != "",
+			"auth_required":       !service.authorizationDisabled() && strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device":          config.Integrations.LocalDevice.Enabled,
 				"data_hub":              config.Integrations.DataHub.Enabled,
@@ -3509,6 +3518,10 @@ func (service *Service) currentAuthToken() string {
 		return service.HostConfig().IPC.AuthToken
 	}
 	return service.AuthToken
+}
+
+func (service *Service) authorizationDisabled() bool {
+	return service != nil && service.AuthorizationDisabled
 }
 
 func (service *Service) currentAllowedOrigins() []string {
