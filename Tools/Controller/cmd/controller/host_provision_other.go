@@ -18,3 +18,7 @@ func runToolchainMirrorRefresh(_ []string, _, _ io.Writer) error {
 func runToolchainMirrorInstall(_ []string, _, _ io.Writer) error {
 	return errors.New("controller toolchain mirror-install is supported only on Linux; no host state was changed")
 }
+
+func runToolchainPrepareHostData(_ []string, _, _ io.Writer) error {
+	return errors.New("controller toolchain prepare-host-data is supported only on Linux; no host state was changed")
+}
