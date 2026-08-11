@@ -206,10 +206,12 @@ void programService(uint32_t at) {
       return;
     }
 
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
     if (current == MODE_SOUND_EDIT) {
       showPackedLabel(SettingsLabels, settingsMenuItem, at);
       return;
     }
+#endif
 
     const uint8_t editLabel =
         static_cast<uint8_t>(current) -
@@ -307,7 +309,14 @@ void programService(uint32_t at) {
     case MODE_ILLUMINATION_MODE_EDIT:
     case MODE_ILLUMINATION_ON_EDIT:
     case MODE_ILLUMINATION_OFF_EDIT:
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
     case MODE_SOUND_EDIT:
+#else
+    // Stable mode ID retained for host diagnostics; compact builds never enter
+    // the omitted local settings editor.
+    case MODE_SOUND_EDIT:
+      break;
+#endif
     case MODE_PWM_CHANNEL_EDIT:
     case MODE_PWM_VALUE_EDIT:
     case MODE_RELAY_CHANNEL_EDIT:
@@ -654,6 +663,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       return;
 #endif
 
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
     case MODE_SOUND_EDIT:
       if (action == MENU_PREVIOUS) {
         if (settingsMenuItem == 0) {
@@ -709,6 +719,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       menuFeedback(fromRemote);
       return;
+#endif
 
 #if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
     case MODE_PWM_CHANNEL_EDIT:
@@ -876,8 +887,14 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       moveTopLevelPage(true);
       break;
     case MENU_DECREASE:
+      // Sound is a safety-relevant global setting, not a buried editor-only
+      // action: K3 always mutes immediately and persistence is serviced after
+      // the latency-sensitive input turn. K4 below performs the reciprocal
+      // unmute, so a silent board can always be recovered from the TM1637.
+      if (menuPage == PAGE_SOUND) {
+        setSilentMode(true, actionNow);
       // rELY owns immediate All-Off; the unified page handled its own K3.
-      if (leafDecreaseAction(modeManager.current()) ==
+      } else if (leafDecreaseAction(modeManager.current()) ==
           LeafDecreaseAction::AllRelaysOff) {
         relays.allOff(actionNow);
 #if PCCONTROLLER_MENU_HIERARCHY
@@ -897,9 +914,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else
 #endif
       if (menuPage == PAGE_SOUND) {
-        beginEditTransaction(MODE_SOUND);
-        settingsMenuItem = 0;
-        modeManager.transitionTo(MODE_SOUND_EDIT);
+        setSilentMode(false, actionNow);
 #if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
       } else if (menuPage == PAGE_PWM) {
         beginEditTransaction(MODE_PWM);
@@ -1514,6 +1529,7 @@ void serviceDisplay(uint32_t at) {
       display.showInteger(illumination.offBrightness());
       return;
 #endif
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
     case MODE_SOUND_EDIT:
       if (settingsMenuItem == 0) {
         display.showText(commonText(settingsStore.values().silent()
@@ -1545,6 +1561,7 @@ void serviceDisplay(uint32_t at) {
         display.showInteger(value);
       }
       return;
+#endif
 #if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
     case MODE_PWM_CHANNEL_EDIT:
       display.showInteger(pwm.channel());

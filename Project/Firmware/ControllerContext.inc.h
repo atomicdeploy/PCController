@@ -103,7 +103,9 @@ uint8_t userPwmMenuIndex = 0;
 #endif
 uint8_t userRelayMenuIndex = 0;
 uint8_t userRelayBehavior = 0;
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
 uint8_t settingsMenuItem = 0;
+#endif
 uint8_t identifiedKey = 0;
 uint32_t menuLabelEndsAt = 0;
 uint32_t modeEnteredAt = 0;

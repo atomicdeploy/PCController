@@ -47,6 +47,35 @@ constexpr uint16_t nextValue(uint16_t current, bool hostOffline,
 }
 } // namespace PowerSignalFallback
 
+// Front-panel PWM editing must visit both electrical endpoints before wrapping:
+// 3840 + 256 shows 4095, and only the next increment returns to zero. The
+// same applies in reverse. Keeping this pure helper shared with native tests
+// prevents the seven-segment value from appearing to skip its rollover point.
+namespace PwmValueRollover {
+constexpr uint16_t next(uint16_t current, int16_t delta) {
+  if (current > 4095) {
+    current = 4095;
+  }
+  if (delta > 0) {
+    if (current == 4095) {
+      return 0;
+    }
+    const uint16_t candidate = static_cast<uint16_t>(current + delta);
+    return candidate >= 4095 ? 4095 : candidate;
+  }
+  if (delta < 0) {
+    if (current == 0) {
+      return 4095;
+    }
+    const uint16_t magnitude =
+        static_cast<uint16_t>(-static_cast<int32_t>(delta));
+    return current <= magnitude ? 0
+                                : static_cast<uint16_t>(current - magnitude);
+  }
+  return current;
+}
+} // namespace PwmValueRollover
+
 // PwmChannelRole records the logical ownership of one 16-channel output.
 enum class PwmChannelRole : uint8_t {
   UserLight,
