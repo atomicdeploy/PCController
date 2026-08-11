@@ -238,6 +238,22 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 	_ = runtime.Close()
 }
 
+func TestUSBConnectionEventsAreNormalizedForAllConsumers(t *testing.T) {
+	runtime := New(Options{})
+	after := runtime.LatestEventID()
+	port := ports.Info{Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523"}
+	runtime.publishConnection("disconnect", port, "USB removed")
+	first, err := runtime.WaitEvent(context.Background(), after, "usb.disconnected")
+	if err != nil || first.Port.Name != "COM4" || first.Target != "app.clients" {
+		t.Fatalf("usb disconnect event=%#v err=%v", first, err)
+	}
+	runtime.publishConnection("reconnected", port, "")
+	second, err := runtime.WaitEvent(context.Background(), first.ID, "usb.reconnected")
+	if err != nil || second.Port.Name != "COM4" || second.Source != "host" {
+		t.Fatalf("usb reconnect event=%#v err=%v", second, err)
+	}
+}
+
 func TestHotResetPolicyChangeDoesNotDropLiveConnection(t *testing.T) {
 	runtime := New(Options{})
 	port := newReconnectTestPort()

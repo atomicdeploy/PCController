@@ -938,11 +938,16 @@ func (runtime *Runtime) currentSession() *link.Session {
 }
 
 func (runtime *Runtime) discoveryOptions(options Options) link.DiscoveryOptions {
+	runtime.mu.RLock()
+	allowPortRebind := runtime.connectionState == "reconnecting" &&
+		runtime.session == nil
+	runtime.mu.RUnlock()
 	return link.DiscoveryOptions{
 		Filter: options.Filter, BaudRate: options.BaudRate,
 		StartupWait: options.StartupWait, RequestTimeout: options.RequestTimeout,
-		HelloAttempts:  options.HelloAttempts,
-		ResetAfterOpen: runtime.resetAfterOpen,
+		HelloAttempts:   options.HelloAttempts,
+		ResetAfterOpen:  runtime.resetAfterOpen,
+		AllowPortRebind: allowPortRebind,
 	}
 }
 
@@ -2004,6 +2009,26 @@ func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, rea
 		Kind: "connection", Text: text,
 		Lifecycle: lifecycle, Port: port, Reason: reason, State: state,
 	})
+	// Keep transport transitions first-class for every consumer of the common
+	// event stream (Web UI, TUI, IPC, API, and relays), rather than making each
+	// surface infer USB state from a generic connection string.
+	usbKind := ""
+	switch lifecycle {
+	case "disconnect":
+		usbKind = "usb.disconnected"
+	case "reconnecting":
+		usbKind = "usb.reconnecting"
+	case "connect", "reconnected":
+		if port.IsUSB {
+			usbKind = "usb.reconnected"
+		}
+	}
+	if usbKind != "" && port.IsUSB {
+		runtime.publishEvent(Event{
+			Kind: usbKind, Text: text, Lifecycle: lifecycle, Port: port,
+			Reason: reason, State: state, Source: "host", Target: "app.clients",
+		})
+	}
 }
 
 func (runtime *Runtime) publishEvent(event Event) Event {
