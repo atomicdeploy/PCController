@@ -2,6 +2,10 @@
 
 #include <stdint.h>
 
+// This model is shared by the AVR and VirtualBoard builds; it owns compile-time
+// front-panel feature selection rather than relying on Arduino include order.
+#include "../ProjectConfig.h"
+
 // Physical, RF, and host keys share these stable four action IDs.
 enum MenuAction : uint8_t {
   MENU_PREVIOUS = 0,
