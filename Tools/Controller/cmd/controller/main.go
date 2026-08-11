@@ -200,6 +200,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		// Runtime publication, status, rollback, and removal operate only on
 		// explicit package/system paths. They must remain usable when no target
 		// account has a valid device configuration yet.
+		if strings.EqualFold(args[1], "prepare-host-data") {
+			return runToolchainPrepareHostData(args[2:], stdout, stderr)
+		}
 		return runToolchainRuntime(args[1], args[2:], stdout, stderr)
 	}
 	store, err := appconfig.Open(configPath)
