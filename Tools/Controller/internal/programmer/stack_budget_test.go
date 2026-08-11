@@ -94,7 +94,8 @@ func TestFinalListingFrameParserAndBudget(t *testing.T) {
 		"main":                         8,
 		"handleProtocolFrame(Frame)":   24,
 		"sendTelemetry(unsigned char)": 17,
-		"ControllerProtocol::UartProtocol::send(unsigned char)": 2,
+		"ControllerProtocol::UartProtocol::send(unsigned char)":                           1,
+		"ControllerProtocol::UartProtocol::sendTimestamped(unsigned char, unsigned long)": 2,
 		"__vector_1":                  3,
 		"RCSwitch::handleInterrupt()": 14,
 		"micros":                      0,
@@ -115,12 +116,12 @@ func TestFinalListingFrameParserAndBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	if report.SelectedResponseBranch != "telemetry" ||
-		report.SerialPathBytes != 70 || report.RFInterruptAllowanceBytes != 23 ||
-		report.EstimatedPeakSRAMBytes != 1893 || report.EstimatedFreeSRAMBytes != 155 {
+		report.SerialPathBytes != 73 || report.RFInterruptAllowanceBytes != 23 ||
+		report.EstimatedPeakSRAMBytes != 1896 || report.EstimatedFreeSRAMBytes != 152 {
 		t.Fatalf("unexpected budget: %#v", report)
 	}
 	serialAllowance := report.SerialPath[len(report.SerialPath)-1]
-	if serialAllowance.Bytes != 14 || serialAllowance.Function != "7 active CALL edges" {
+	if serialAllowance.Bytes != 16 || serialAllowance.Function != "8 active CALL edges" {
 		t.Fatalf("serial return allowance=%#v", serialAllowance)
 	}
 	rfAllowance := report.RFInterruptPath[len(report.RFInterruptPath)-1]
@@ -141,19 +142,19 @@ func TestFinalListingAcceptsModularLifecycleInlineMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	if report.SerialPath[2].Function != "serviceController()" ||
-		report.SerialPathBytes != 70 {
+		report.SerialPathBytes != 73 {
 		t.Fatalf("modular lifecycle marker changed stack topology: %#v", report)
 	}
 }
 
 func TestFinalListingBudgetRejectsLessThanNinetySixBytes(t *testing.T) {
 	listing := parseListingFixture(t, completeAVRListingFixture())
-	_, err := estimateFirmwareStackBudget(listing, 1860)
+	_, err := estimateFirmwareStackBudget(listing, 1857)
 	if err == nil || !strings.Contains(err.Error(), "leaving 95 bytes") ||
 		!strings.Contains(err.Error(), "minimum safe margin is 96 bytes") {
 		t.Fatalf("unexpected guard failure: %v", err)
 	}
-	if report, err := estimateFirmwareStackBudget(listing, 1859); err != nil ||
+	if report, err := estimateFirmwareStackBudget(listing, 1856); err != nil ||
 		report.EstimatedFreeSRAMBytes != 96 {
 		t.Fatalf("exact minimum margin should pass: report=%#v err=%v", report, err)
 	}
@@ -171,7 +172,7 @@ func TestFinalListingComputesCallEdgesFromSelectedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowance := report.SerialPath[len(report.SerialPath)-1]
-	if report.SerialPathBytes != 68 || allowance.Bytes != 12 || allowance.Function != "6 active CALL edges" {
+	if report.SerialPathBytes != 71 || allowance.Bytes != 14 || allowance.Function != "7 active CALL edges" {
 		t.Fatalf("computed call edges did not follow topology: report=%#v allowance=%#v", report, allowance)
 	}
 }
@@ -226,8 +227,8 @@ func TestPrintFirmwareStackBudgetShowsFinalEvidence(t *testing.T) {
 	var output bytes.Buffer
 	printFirmwareStackBudget(&output, report)
 	for _, expected := range []string{
-		"static 1800 + serial response 70 + RF INT0 23 = 1893/2048 bytes",
-		"estimated margin 155 bytes (minimum 96)",
+		"static 1800 + serial response 73 + RF INT0 23 = 1896/2048 bytes",
+		"estimated margin 152 bytes (minimum 96)",
 		"selected response branch telemetry",
 		"0 records from 4 .su files",
 		"opcode handler:", "edge timestamp:",
@@ -235,6 +236,36 @@ func TestPrintFirmwareStackBudgetShowsFinalEvidence(t *testing.T) {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("missing %q in output:\n%s", expected, output.String())
 		}
+	}
+}
+
+func TestProductionListingTimestampedResponseTopology(t *testing.T) {
+	path := os.Getenv("PCCONTROLLER_FINAL_AVR_LISTING")
+	if path == "" {
+		t.Skip("set PCCONTROLLER_FINAL_AVR_LISTING to validate a linked production listing")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing, err := parseAVRListing(file)
+	closeErr := file.Close()
+	if err != nil || closeErr != nil {
+		t.Fatalf("parse=%v close=%v", err, closeErr)
+	}
+	report, err := estimateFirmwareStackBudget(listing, 1465)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, stage := range report.SerialPath {
+		if stage.Name == "timestamped UART response" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("timestamped UART stage missing: %#v", report.SerialPath)
 	}
 }
 
@@ -303,9 +334,13 @@ handle():
 
 00001300 <ControllerProtocol::UartProtocol::send(unsigned char)>:
     1300:  0f 93        push r16
-    1302:  1f 93        push r17
+	1302:  0e 94 c0 09  call 0x1380 ; 0x1380 <ControllerProtocol::UartProtocol::sendTimestamped(unsigned char, unsigned long)>
+
+00001380 <ControllerProtocol::UartProtocol::sendTimestamped(unsigned char, unsigned long)>:
+	1380:  0f 93        push r16
+	1382:  1f 93        push r17
 writeCobs():
-    1304:  09 95        icall
+	1384:  09 95        icall
 
 00001400 <Print::write(unsigned char const*, unsigned int)>:
     1400:  0f 93        push r16

@@ -403,6 +403,13 @@ export function AdvancedWorkbench({
     ...(macroCategory.trim() ? [quoteArgument(macroCategory.trim())] : []),
     ...(macroColor.trim() ? [quoteArgument(macroColor.trim())] : []),
   ].join(' ')
+  const macroUpdateCommand = [
+    'macro update',
+    quoteArgument(macroRef.trim()),
+    quoteArgument(macroName.trim()),
+    quoteArgument(macroCategory.trim() || '-'),
+    quoteArgument(macroColor.trim() || '-'),
+  ].join(' ')
   const messageByteLength = new TextEncoder().encode(messageText.trim()).byteLength
   const lcdMessageValid = Boolean(messageLine1 || messageLine2) &&
     messageLine1.length <= 16 && messageLine2.length <= 16 &&
@@ -659,7 +666,7 @@ export function AdvancedWorkbench({
           icon={Workflow}
           eyebrow={copy('MCU-TIMED', 'زمان‌بندی‌شده روی MCU')}
           title={copy('Macro inspection & recording', 'بررسی و ضبط ماکرو')}
-          detail={copy('Inspect compiled timing, record acknowledged board commands, then save or discard deliberately.', 'زمان‌بندی کامپایل‌شده را ببینید، فرمان‌های تأییدشده برد را ضبط و آگاهانه ذخیره یا دور بریزید.')}
+          detail={copy('Inspect compiled timing; record exact host, front-panel, and RF action deltas; then name, categorize, save, or discard deliberately.', 'زمان‌بندی کامپایل‌شده را ببینید؛ اختلاف زمانی دقیق کنش‌های میزبان، پنل و RF را ضبط و سپس آگاهانه نام‌گذاری، دسته‌بندی، ذخیره یا دور بریزید.')}
         >
           <div className="advanced-actions">
             <Button icon={List} busy={busy === 'macro list'} onClick={() => void run('macro list')}>{copy('List', 'فهرست')}</Button>
@@ -677,7 +684,7 @@ export function AdvancedWorkbench({
             />
           </div>
           <div className="advanced-fields advanced-fields--record">
-            <TextField label={copy('New recording name', 'نام ضبط جدید')} value={macroName} dir="ltr" spellCheck={false} onChange={(event) => setMacroName(event.target.value)} />
+            <TextField label={copy('New or updated name', 'نام جدید یا ویرایش‌شده')} value={macroName} dir="ltr" spellCheck={false} onChange={(event) => setMacroName(event.target.value)} />
             <TextField label={copy('Category', 'دسته‌بندی')} value={macroCategory} dir="ltr" spellCheck={false} onChange={(event) => setMacroCategory(event.target.value)} />
             <div className="advanced-field">
               <label>{copy('Color', 'رنگ')}</label>
@@ -690,12 +697,15 @@ export function AdvancedWorkbench({
               ]} onChange={setMacroColor} />
             </div>
             <Button tone="primary" icon={CircleDot} disabled={!online || !macroName.trim() || (!!macroColor.trim() && !macroCategory.trim())} busy={busy === macroRecordCommand} onClick={() => void run(macroRecordCommand)}>{copy('Start recording', 'شروع ضبط')}</Button>
+            <Button icon={Save} disabled={!macroRef.trim() || !macroName.trim()} busy={busy === macroUpdateCommand} onClick={() => void run(macroUpdateCommand)}>{copy('Save name/category', 'ذخیره نام/دسته')}</Button>
           </div>
           <div className="advanced-actions">
             <Button icon={Save} busy={busy === 'macro record save'} onClick={() => void run('macro record save')}>{copy('Save recording', 'ذخیره ضبط')}</Button>
             <Button icon={Trash2} busy={busy === 'macro record discard'} onClick={() => void run('macro record discard')}>{copy('Discard recording', 'حذف ضبط')}</Button>
+            <Button tone="primary" icon={Play} disabled={!online || !macroRef.trim()} busy={busy === `macro play ${quoteArgument(macroRef.trim())}`} onClick={() => void run(`macro play ${quoteArgument(macroRef.trim())}`)}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
             <Button icon={CircleStop} disabled={!online} busy={busy === 'macro cancel'} onClick={() => void run('macro cancel')}>{copy('Cancel safely', 'لغو امن')}</Button>
             <Button tone="danger" icon={ShieldAlert} disabled={!online} onClick={() => prepare('macro cancel keep', copy('Cancelling with keep deliberately leaves current physical outputs unchanged.', 'لغو با حفظ خروجی، وضعیت فعلی خروجی‌های فیزیکی را عمداً نگه می‌دارد.'), 'danger', true)}>{copy('Prepare cancel + keep', 'آماده‌سازی لغو با حفظ خروجی')}</Button>
+            <Button tone="danger" icon={Trash2} disabled={!macroRef.trim()} onClick={() => prepare(`macro delete ${quoteArgument(macroRef.trim())}`, copy('This permanently removes the selected macro from host configuration.', 'این فرمان ماکروی انتخاب‌شده را برای همیشه از پیکربندی میزبان حذف می‌کند.'), 'danger', true)}>{copy('Prepare deletion', 'آماده‌سازی حذف')}</Button>
           </div>
         </AdvancedPanel>
 

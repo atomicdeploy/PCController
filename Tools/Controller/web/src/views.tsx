@@ -175,6 +175,12 @@ export function DashboardView(props: SharedViewProps) {
   const status = snapshot.status
   const connectedTone = snapshot.connected ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
+  const featureProfiles = ['full-peripheral', 'motion-macro', 'key-diagnostic', 'custom']
+  const featureProfileID = snapshot.hello.feature_profile
+  const featureProfile = featureProfileID === undefined ? '—' : featureProfiles[featureProfileID] || `profile-${featureProfileID}`
+  const buildFeatures = snapshot.hello.build_features === undefined
+    ? '—'
+    : `0x${snapshot.hello.build_features.toString(16).toUpperCase().padStart(2, '0')}`
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
@@ -275,6 +281,8 @@ export function DashboardView(props: SharedViewProps) {
           <div className="data-list">
             <DataRow label={t('device')} value={snapshot.port.friendly_name || snapshot.port.name || '—'} />
             <DataRow label={t('firmware')} value={snapshot.hello.build_timestamp || hash} mono />
+            <DataRow label={copy('Firmware profile', 'نمایهٔ میان‌افزار')} value={featureProfile} mono />
+            <DataRow label={copy('Build features', 'قابلیت‌های ساخت')} value={buildFeatures} mono />
             <DataRow label={t('door')} value={status.door_open ? t('open') : t('closed')} tone={status.door_open ? 'warn' : 'good'} />
             <DataRow label={t('bluetooth')} value={status.bluetooth_audio_state === 2 ? t('online') : status.bluetooth_audio_state === 1 ? t('connecting') : t('offline')} />
             <DataRow label={copy('UART CRC / framing', 'CRC / قاب‌بندی UART')} value={`${status.crc_errors} / ${status.framing_errors}`} mono tone={status.crc_errors || status.framing_errors ? 'warn' : 'good'} />

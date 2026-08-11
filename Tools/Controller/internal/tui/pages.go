@@ -1037,10 +1037,12 @@ func firmwareIdentity(snapshot control.Snapshot) string {
 			stamp = "timestamp unavailable"
 		}
 		return fmt.Sprintf(
-			"hash %08X · %s · packed %08X",
+			"hash %08X · %s · packed %08X · %s · flags %02X",
 			snapshot.Hello.BuildHash,
 			stamp,
 			snapshot.Hello.BuildTimestamp,
+			native.FeatureProfileName(snapshot.Hello.FeatureProfile),
+			snapshot.Hello.BuildFeatures,
 		)
 	}
 	if snapshot.Hello.Name != "" {

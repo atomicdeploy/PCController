@@ -48,6 +48,7 @@ var macroSecondaryButtons = []macroButtonDefinition{
 	{key: "k", label: "K Cancel keep"},
 	{key: "/", label: "/ Find"},
 	{key: "i", label: "I Info"},
+	{key: "e", label: "E Edit"},
 	{key: "x", label: "X Delete", tone: macroButtonDanger},
 	{key: "a", label: "A Rules"},
 }
@@ -300,6 +301,17 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 			return model, nil, true
 		}
 		return model.dispatchLine(fmt.Sprintf("macro show %d", macro.ID))
+	case "e":
+		macro, ok := model.selectedMacro()
+		if !ok {
+			model.setNotice("No macro selected")
+			return model, nil, true
+		}
+		model.input.SetValue(fmt.Sprintf("macro update %d %s %s %s", macro.ID, strconv.Quote(macro.Name), strconv.Quote(macro.Category), strconv.Quote(macro.Color)))
+		model.input.CursorEnd()
+		model.revealTerminal()
+		model.setNotice("Edit name, category, and color; use - to clear category or color")
+		return model, nil, true
 	case "x":
 		return model.deleteSelectedMacro()
 	}
@@ -443,7 +455,7 @@ func macroRecordingSummary(state control.MacroRecordingState, now time.Time) str
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	return fmt.Sprintf("%d · %s · %s · %d steps · %s", state.ID, state.Name, state.Category, state.Steps, formatMacroDuration(elapsed))
+	return fmt.Sprintf("%d · %s · %s · %d steps (host %d · panel %d · RF %d) · last at %dµs, delta %dµs · %s", state.ID, state.Name, state.Category, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, state.LastAtUS, state.LastDeltaUS, formatMacroDuration(elapsed))
 }
 
 func macroRecordingHelp(state control.MacroRecordingState) string {
@@ -451,9 +463,9 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		return errorStyle.Render("Recorder error: " + state.LastError)
 	}
 	if state.Active {
-		return warnStyle.Render("Operate any queueable relay, motion, PWM, buzzer, display, RF, RGB, LED, or menu command; S saves, D discards.")
+		return warnStyle.Render("Operate the host, front panel, or RF controls; queueable relay, motion, PWM/MOSFET, buzzer, display, RF, RGB, LED, and menu actions share MCU timing. S saves, D discards.")
 	}
-	return labelStyle.Render("R starts a named recording; exact MCU acknowledgement timestamps become step offsets. N creates an editable empty draft.")
+	return labelStyle.Render("R starts a named recording; exact MCU action timestamps become step offsets. N creates an editable empty draft.")
 }
 
 func macroTableHeader(width int) string {

@@ -12,7 +12,7 @@ import (
 const (
 	BoardKindPCController byte = 1
 	SettingsShape         byte = 3
-	IdentitySchemaCompact byte = 3
+	IdentitySchemaCompact byte = 4
 	RFEntriesSchema       byte = 1
 	MenuListSchema        byte = 1
 	TemperatureSchema     byte = 1
@@ -42,6 +42,15 @@ const (
 )
 
 const MaximumBoardNameLength = 8
+
+func FeatureProfileName(profile byte) string {
+	return map[byte]string{
+		FeatureProfileFullPeripheral: "full-peripheral",
+		FeatureProfileMotionMacro:    "motion-macro",
+		FeatureProfileKeyDiagnostic:  "key-diagnostic",
+		FeatureProfileCustom:         "custom",
+	}[profile]
+}
 
 type BoardName struct {
 	Name      string `json:"name"`
@@ -280,6 +289,9 @@ const (
 	EventRelay
 	EventAlert
 	EventAppNavigation
+	// EventAction carries one successfully applied ordinary command from a
+	// physical or RF source. The host ACK remains authoritative for source=Host.
+	EventAction
 )
 
 const (
@@ -327,22 +339,42 @@ type Hello struct {
 	BuildHash      uint32 `json:"build_hash"`
 	BuildTimestamp uint32 `json:"build_timestamp_packed,omitempty"`
 	BuildStamp     string `json:"build_timestamp,omitempty"`
+	FeatureProfile byte   `json:"feature_profile"`
+	BuildFeatures  byte   `json:"build_features"`
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	if len(payload) != 14 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14", len(payload))
+	// The 14-byte identity is accepted only by the host-side guarded updater
+	// while migrating an already-backed-up board to the current 16-byte
+	// profile-aware identity.  It is not a firmware compatibility mode: the
+	// legacy shape has no feature/profile fields, so callers cannot infer new
+	// macro or page capabilities from it.
+	if len(payload) != 14 && len(payload) != 16 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need 14 or 16", len(payload))
 	}
-	if payload[0] != IdentitySchemaCompact {
+	legacyIdentity := len(payload) == 14 && payload[0] == 3
+	if payload[0] != IdentitySchemaCompact && !legacyIdentity {
 		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
 	}
 	hello := Hello{
 		BoardKind:      payload[1],
 		Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
 		Name:           "PCController",
-		IdentitySchema: IdentitySchemaCompact,
+		IdentitySchema: payload[0],
 		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
 		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
+	}
+	if len(payload) == 16 {
+		hello.FeatureProfile = payload[14]
+		hello.BuildFeatures = payload[15]
+	}
+	if len(payload) == 14 {
+		// Unknown/legacy profile.  The migration lifecycle uses only the
+		// stable identity/settings path and will replace it atomically.
+		return hello, nil
+	}
+	if FeatureProfileName(hello.FeatureProfile) == "" {
+		return Hello{}, fmt.Errorf("unsupported firmware feature profile %d", hello.FeatureProfile)
 	}
 	stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
 	if err != nil {
@@ -637,6 +669,8 @@ type DeviceEvent struct {
 	AlertActive             bool         `json:"alert_active,omitempty"`
 	AppTarget               string       `json:"app_target,omitempty"`
 	AppPage                 string       `json:"app_page,omitempty"`
+	ActionOpcode            byte         `json:"action_opcode,omitempty"`
+	ActionPayload           []byte       `json:"action_payload,omitempty"`
 	DeviceMicros            uint32       `json:"device_micros,omitempty"`
 	Timed                   bool         `json:"timed,omitempty"`
 	Macro                   *MacroStatus `json:"macro,omitempty"`
@@ -795,6 +829,29 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			AppNavigationAll: "*", AppNavigationWebUI: "webui", AppNavigationTUI: "tui",
 		}[payload[1]]
 		event.AppPage = strings.ToLower(page)
+	case EventAction:
+		// [type, source, ordinary opcode, payload length, payload...]. The
+		// high-bit event marker and trailing MCU timestamp are removed above.
+		if len(payload) < 4 {
+			return DeviceEvent{}, fmt.Errorf("action EVENT is %d bytes, need at least 4", len(payload))
+		}
+		if payload[1] > InputSourceHost {
+			return DeviceEvent{}, fmt.Errorf("action EVENT source %d is invalid", payload[1])
+		}
+		length := int(payload[3])
+		if length > MacroBoardActionMaximumPayload || len(payload) != 4+length {
+			return DeviceEvent{}, fmt.Errorf(
+				"action EVENT payload length %d/body %d is invalid; maximum is %d",
+				length, len(payload), MacroBoardActionMaximumPayload,
+			)
+		}
+		required, recordable := MacroBoardActionPayloadLength(payload[2])
+		if !recordable || byte(length) != required {
+			return DeviceEvent{}, fmt.Errorf("action EVENT opcode 0x%02X is not recordable", payload[2])
+		}
+		event.Source = payload[1]
+		event.ActionOpcode = payload[2]
+		event.ActionPayload = append([]byte(nil), payload[4:]...)
 	}
 	return event, nil
 }

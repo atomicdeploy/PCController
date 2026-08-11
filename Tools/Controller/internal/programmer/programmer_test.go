@@ -36,6 +36,36 @@ func TestBuildUrclock(t *testing.T) {
 	}
 }
 
+func TestBuildUrclockPairsFlashThenEEPROMInOneInvocation(t *testing.T) {
+	base := Options{
+		Method: MethodUrclock, Operation: OperationWriteFlash, Port: "COM18",
+		HexPath: "application.hex", EEPROMHexPath: "migrated-eeprom.hex",
+		Avrdude: "avrdude", AvrdudeConf: "avrdude.conf",
+	}
+	if _, err := Build(base); err == nil || !strings.Contains(err.Error(), "confirm-eeprom-write") {
+		t.Fatalf("paired EEPROM write without confirmation was accepted: %v", err)
+	}
+	base.ConfirmEEPROMWrite = true
+	command, err := Build(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flash := "-Uflash:w:application.hex:i"
+	eeprom := "-Ueeprom:w:migrated-eeprom.hex:i"
+	flashIndex, eepromIndex := -1, -1
+	for index, argument := range command.Args {
+		switch argument {
+		case flash:
+			flashIndex = index
+		case eeprom:
+			eepromIndex = index
+		}
+	}
+	if flashIndex < 0 || eepromIndex != flashIndex+1 {
+		t.Fatalf("paired write order is not flash then EEPROM: %#v", command.Args)
+	}
+}
+
 func TestBuildUSBaspDoesNotInventEEPROMFile(t *testing.T) {
 	hex := filepath.Join("build", "PCController.ino.with_bootloader.hex")
 	command, err := Build(Options{
@@ -157,11 +187,12 @@ func TestCompilePlanMatchesManifestAndStagesOnlyCuratedRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := fmt.Sprintf(
-		"LocalLib/value.cpp:%X\nMenuLogic.cpp:%X\nPCController.ino:%X\nProject/Firmware/Domain.inc.h:%X\nProjectConfig.h:%X\n",
+		"LocalLib/value.cpp:%X\nMenuLogic.cpp:%X\nPCController.ino:%X\nProject/Firmware/Domain.inc.h:%X\nProject/MacroActions.inc.h:%X\nProjectConfig.h:%X\n",
 		sha256.Sum256([]byte("int value = 1;\n")),
 		sha256.Sum256([]byte("void menuLogic() {}\n")),
 		sha256.Sum256([]byte("void setup() {}\nvoid loop() {}\n")),
 		sha256.Sum256([]byte("void firmwareDomain() {}\n")),
+		sha256.Sum256([]byte("PCCONTROLLER_MACRO_ACTION(Buzzer, 4)\n")),
 		sha256.Sum256([]byte("#pragma once\n")),
 	)
 	digest := sha256.Sum256([]byte(manifest))
@@ -186,6 +217,7 @@ func TestCompilePlanMatchesManifestAndStagesOnlyCuratedRoots(t *testing.T) {
 		"PCController.ino", "ProjectConfig.h", "MenuLogic.cpp",
 		filepath.Join("LocalLib", "value.cpp"),
 		filepath.Join("Project", "Firmware", "Domain.inc.h"),
+		filepath.Join("Project", "MacroActions.inc.h"),
 	} {
 		if _, err := os.Stat(filepath.Join(staged.SketchPath, relative)); err != nil {
 			t.Fatalf("missing staged source %s: %v", relative, err)
@@ -220,6 +252,7 @@ func firmwareCompileFixture(t *testing.T) string {
 		"MenuLogic.cpp":                        "void menuLogic() {}\n",
 		filepath.Join("LocalLib", "value.cpp"): "int value = 1;\n",
 		filepath.Join("Project", "Firmware", "Domain.inc.h"): "void firmwareDomain() {}\n",
+		filepath.Join("Project", "MacroActions.inc.h"):       "PCCONTROLLER_MACRO_ACTION(Buzzer, 4)\n",
 		filepath.Join(".cache", "poison.cpp"):                "#error must not be staged\n",
 	}
 	for name, content := range files {

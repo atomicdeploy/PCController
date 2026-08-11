@@ -212,10 +212,10 @@ func TestPayloadBuildersValidateRanges(t *testing.T) {
 	}
 }
 
-func TestParseHelloCompactIdentitySchema3(t *testing.T) {
+func TestParseHelloCompactIdentitySchema4(t *testing.T) {
 	payload := []byte{
-		0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x1C,
-		0xF8, 0xD9, 0x2F, 0x5D, 0x9D, 0x01, 0x35,
+		0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x1C,
+		0xF8, 0xD9, 0x2F, 0x5D, 0x9D, 0x01, 0x35, 0x00, 0xF9,
 	}
 	hello, err := ParseHello(payload)
 	if err != nil {
@@ -224,21 +224,42 @@ func TestParseHelloCompactIdentitySchema3(t *testing.T) {
 	if !hello.IsPCController() || hello.IdentitySchema != IdentitySchemaCompact ||
 		hello.BoardKind != BoardKindPCController || hello.Name != "PCController" ||
 		hello.Capabilities != 0 || hello.BuildHash != 0x2FD9F81C ||
-		hello.BuildTimestamp != 0x35019D5D || hello.BuildStamp != "260801194258" {
+		hello.BuildTimestamp != 0x35019D5D || hello.BuildStamp != "260801194258" ||
+		hello.FeatureProfile != FeatureProfileFullPeripheral || hello.BuildFeatures != 0xF9 {
 		t.Fatalf("unexpected compact HELLO: %#v", hello)
 	}
-	if _, err := ParseHello(payload[:13]); err == nil {
+	if _, err := ParseHello(payload[:15]); err == nil {
 		t.Fatal("truncated compact HELLO was accepted")
 	}
 	wrongSchema := append([]byte(nil), payload...)
-	wrongSchema[0] = 2
+	wrongSchema[0] = 3
 	if _, err := ParseHello(wrongSchema); err == nil {
 		t.Fatal("unpublished expanded HELLO schema was accepted")
+	}
+	unknownProfile := append([]byte(nil), payload...)
+	unknownProfile[14] = 4
+	if _, err := ParseHello(unknownProfile); err == nil {
+		t.Fatal("unknown firmware feature profile was accepted")
 	}
 	invalidTimestamp := append([]byte(nil), payload...)
 	binary.LittleEndian.PutUint32(invalidTimestamp[10:14], 0x341F0000)
 	if _, err := ParseHello(invalidTimestamp); err == nil {
 		t.Fatal("invalid packed build timestamp was accepted")
+	}
+}
+
+func TestParseHelloLegacySchema3OnlyForMigration(t *testing.T) {
+	payload := []byte{
+		0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x94,
+		0x7A, 0xE5, 0x45, 0xE0, 0x6B, 0x06, 0x35,
+	}
+	hello, err := ParseHello(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hello.IsPCController() || hello.IdentitySchema != 3 ||
+		hello.FeatureProfile != 0 || hello.BuildFeatures != 0 {
+		t.Fatalf("unexpected legacy HELLO: %#v", hello)
 	}
 }
 
