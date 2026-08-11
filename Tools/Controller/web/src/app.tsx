@@ -41,7 +41,8 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+import { connectStream, execute, getSnapshot, getUIConfig, rpc } from './api'
+import { primaryShortcutARIA, primaryShortcutModifier } from './client-platform'
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -271,7 +272,7 @@ function demoSnapshot(now = Date.now()): Snapshot {
 
 function demoEvent(id: number): ControllerEvent {
   const definitions = [
-    ['device.state', 'Authenticated controller identity on COM18', 'host'],
+    ['device.state', 'Controller identity on COM18', 'host'],
     ['door', 'Door input returned to closed', 'physical'],
     ['macro.completed', 'Ambient evening macro completed faithfully', 'host'],
     ['rf.received', 'Remote #3 · living-room toggle', 'rf'],
@@ -308,7 +309,7 @@ export function commandWarning(command: string, locale: Appearance['locale']): C
   if (/^(os (power|sleep|suspend|hibernate|restart|shutdown|lock)|quit|exit)(?: |$)/.test(normalized)) {
     return fa
       ? warning('عملیات میزبان اجرا شود؟', 'این فرمان می‌تواند نشست یا رایانه را متوقف کند. سیاست و توکن تأیید میزبان همچنان در سمت سرویس اعمال می‌شود.', 'تأیید عملیات')
-      : warning('Run the host operation?', 'This command can end the session or affect the computer. Host-side policy and confirmation-token checks still apply.', 'Confirm operation')
+      : warning('Run the host operation?', 'This command can end the session or affect the computer. Review the selected operation before continuing.', 'Confirm operation')
   }
   return null
 }
@@ -321,6 +322,16 @@ export function snapshotAfterTransportLoss(
   return {
     ...current,
     connected: false,
+    // A disconnect must not leave actuator, telemetry, or EEPROM values looking
+    // live.  Keep host state and event history, but make every board-derived
+    // surface wait for a new authoritative snapshot.
+    have_status: false,
+    have_settings: false,
+    have_front_panel: false,
+    have_status_led: false,
+    hello: emptySnapshot.hello,
+    status: emptySnapshot.status,
+    settings: emptySnapshot.settings,
     connection_state: current.paused ? 'paused' : state === 'connecting' ? 'connecting' : 'disconnected',
     connection_reason: detail || (state === 'connecting' ? 'Re-establishing the host event stream' : 'Host event stream unavailable'),
   }
@@ -374,7 +385,6 @@ export default function App() {
   const [bootProgress, setBootProgress] = useState(12)
   const [bootTarget, setBootTarget] = useState(demo ? 100 : 24)
   const [startupProbeResolved, setStartupProbeResolved] = useState(demo)
-  const [token, setTokenState] = useState(getToken)
   const [tabBusSupported, setTabBusSupported] = useState(false)
   const [tabPeers, setTabPeers] = useState(0)
   const [appInstanceID, setAppInstanceID] = useState('')
@@ -571,7 +581,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(leaseRefresh)
     }
-  }, [appInstanceID, appearance.locale, appearance.theme, demo, page, resolvedDirection, startupProbeResolved, token])
+  }, [appInstanceID, appearance.locale, appearance.theme, demo, page, resolvedDirection, startupProbeResolved])
 
   useEffect(() => () => {
     if (!appInstanceID) return
@@ -823,13 +833,6 @@ export default function App() {
   const toggleAudio = useCallback(() => {
     saveAppearance({ ...appearance, audioMuted: !appearance.audioMuted })
   }, [appearance, saveAppearance])
-
-  const saveToken = useCallback((value: string) => {
-    storeToken(value)
-    setTokenState(value.trim())
-    notify('success', value.trim() ? 'Session token applied' : 'Session token cleared')
-    window.setTimeout(() => location.reload(), 180)
-  }, [notify])
 
   useEffect(() => {
     applyAppearance(appearance)
@@ -1109,7 +1112,7 @@ export default function App() {
       }
     })()
     return () => { abort.abort(); stopStream() }
-  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance, token])
+  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance])
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
@@ -1123,7 +1126,7 @@ export default function App() {
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
         : <PageView {...shared} />}
     </Suspense>
   )
@@ -1212,7 +1215,7 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" aria-label={t('openNavigation')} onClick={() => setMobileNav(true)}><Menu size={20} /></button>
         <div className="breadcrumbs"><span>{productShortName}</span><i>/</i><strong>{t(current.label)}</strong></div>
-        <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[["Ctrl", "⌘"], "K"]} /></button>
+        <button className="command-trigger" aria-keyshortcuts={primaryShortcutARIA()} onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[primaryShortcutModifier(), "K"]} /></button>
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
           <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>
