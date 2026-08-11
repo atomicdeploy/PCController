@@ -89,9 +89,11 @@ static_assert(sizeof(MenuLabels) == PAGE_COUNT * 4U + 1U,
 const char EditLabels[] PROGMEM =
     "L-MdL-onL-oFS-MdP-ChP-u r-Chr-onuP-CuP-uur-Cur-M";
 constexpr uint8_t EditLabelCount = 12;
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
 const char SettingsLabels[] PROGMEM = "bEEPdiSPdCLSStBrV-dPA-dPSAFE";
 constexpr uint8_t SettingsPolicyItem = 6;
 constexpr uint8_t SettingsItemCount = 7;
+#endif
 const char CommonTexts[] PROGMEM =
     "oFF  on AutoSAVEOPENMutebEEPLErnBOOTdiSC"
     "r5-8Go  Err KEY CLSdtoGLPuSHProgrEC PLAYSIDE";

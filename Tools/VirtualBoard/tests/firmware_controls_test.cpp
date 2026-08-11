@@ -351,6 +351,12 @@ void testTransitionsAndRollover() {
               rollByte(0, 16, false) == 255,
           "front-panel byte rollover skipped or trapped an endpoint");
 
+  require(PwmValueRollover::next(3840, 256) == 4095 &&
+              PwmValueRollover::next(4095, 256) == 0 &&
+              PwmValueRollover::next(255, -256) == 0 &&
+              PwmValueRollover::next(0, -256) == 4095,
+          "seven-segment PWM editor rollover skipped an endpoint");
+
   std::uint8_t value = 128;
   std::uint8_t previous = value;
   unsigned frames = 0;

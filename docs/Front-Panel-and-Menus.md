@@ -597,10 +597,19 @@ wrap; brightness changes in nominal 16-count steps. Auto selects On brightness
 while the door is open and Off brightness while closed. Channel 11 moves in
 four-count steps every 20 ms toward the target; it is not supposed to jump.
 
-### Board Settings editor
+### Sound control and commissioning settings
 
-Enter from `bEEP` with K4. This modal sequence is the closest thing the current
-local UI has to a settings submenu:
+In the constrained production image, `bEEP` is deliberately an immediate,
+recoverable control: K3 mutes and K4 unmutes. It is not hidden behind a
+transaction, save prompt, click window, or host connection; the delayed
+EEPROM writer persists the new choice after the input-critical turn. This is a
+non-negotiable recovery path for a board left silent during provisioning.
+
+Commissioning builds may set `PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR=1` and
+disable `PCCONTROLLER_ENABLE_MACRO_CAPTURE` (or target a larger MCU) to restore
+the extended local settings editor. The standard host settings surface remains
+available in every profile and owns these same values in normal production
+operation:
 
 | Item | Label | Values | K3/K4 |
 |---:|---|---|---|
@@ -612,13 +621,19 @@ local UI has to a settings submenu:
 | 6 | `A-dP` | Current decimals 0-2 | Decrease/increase with rollover |
 | 7 | `SAFE` | Motion policy: 0 Always, 1 Closed only, 2 Open only, 3 Never | Decrease/increase with rollover |
 
-Each field label is shown for about 650 ms and its value then blinks at about
-300 ms. Sound, both display brightness targets, RGB brightness, and the motion
-gate preview during editing. Selecting a policy that denies the current door
+Each commissioning-editor field label is shown for about 650 ms and its value
+then blinks at about 300 ms. Selecting a policy that denies the current door
 state immediately revokes motion through the ordinary fail-safe relay path.
 Save persists the compact two-bit policy; Discard restores the exact locally
 editable snapshot and reapplies the prior gate. Ready and event colors are
 host-owned persistent status profiles rather than a fixed local color index.
+
+The compact production profile still drives channels 13–15 directly: red for
+fault/warning, green for learning/connected, and blue for boot, waiting,
+running, and disconnected-safe states. A host `StatusRgb` command owns those
+channels until it clears its override; no local RGB work occurs during a host
+I2C lease. Channel 12 remains the separate power indicator and fades to full
+brightness only after host loss.
 
 The reed input selects the two EEPROM-backed TM1637 targets. The display walks
 one intensity step every 70 ms toward the open or closed target without slowing
@@ -630,7 +645,9 @@ factory values are 5 while open and 0 while closed.
 Enter from `PWM` with K4:
 
 1. `P-Ch`: select channel 0-15.
-2. `P-u`: set its logical value 0-4095 in 256-count steps with rollover.
+2. `P-u`: set its logical value 0-4095 in 256-count steps with rollover. A
+   step crossing an endpoint first displays 4095 or 0; only the following step
+   wraps, so the TM1637 never appears to skip a boundary value.
 3. Finish the live transaction and return to the page.
 
 There is no global state or autonomous sweep. Values are applied directly;

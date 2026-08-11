@@ -88,6 +88,13 @@
 #define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 0
 #endif
 
+// The constrained production profile retains immediate bEEP-page mute/unmute
+// but keeps the extended seven-segment settings editor host-owned.  Opt in for
+// commissioning builds that need the local brightness/decimal/policy editor.
+#ifndef PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
+#define PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR 0
+#endif
+
 #ifndef PCCONTROLLER_ENABLE_TASK_SCHEDULER
 #define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0
 #endif
@@ -101,6 +108,13 @@
 
 #ifndef PCCONTROLLER_ENABLE_MACRO_CAPTURE
 #define PCCONTROLLER_ENABLE_MACRO_CAPTURE 1
+#endif
+
+// On the 32 KiB production target this editor is a commissioning trade-off:
+// disable board-local macro capture in that optional build, or use a larger
+// MCU. The production profile keeps macro capture and direct bEEP recovery.
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR && PCCONTROLLER_ENABLE_MACRO_CAPTURE
+#error "Local settings editor requires a reduced commissioning profile (disable macro capture)"
 #endif
 
 #ifndef PCCONTROLLER_FORCE_SILENT

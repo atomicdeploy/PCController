@@ -131,13 +131,7 @@ void PwmController::setValue(uint16_t value, uint32_t now) {
 }
 
 void PwmController::adjustValue(int16_t delta, uint32_t now) {
-  int32_t next = static_cast<int32_t>(value_) + delta;
-  if (next < 0) {
-    next = 4095;
-  } else if (next > 4095) {
-    next = 0;
-  }
-  setValue(static_cast<uint16_t>(next), now);
+  setValue(PwmValueRollover::next(value_, delta), now);
 }
 
 uint16_t PwmController::value() const { return value_; }
