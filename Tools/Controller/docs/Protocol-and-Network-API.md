@@ -54,11 +54,11 @@ For a safe one-shot board tone, use the typed CLI spelling:
 controller beep --frequency 440 --duration 125 [connection flags]
 ```
 
-It is exactly equivalent to `controller exec buzzer 440 125` and is routed
+It is exactly equivalent to `controller exec beep 440 125` and is routed
 through the primary/IPC command engine. Before any tone opcode is sent, the
 engine reads the firmware-owned EEPROM settings; a board marked silent returns
-`buzzer suppressed: board is silent` without a board write. The same behavior
-therefore applies to Web/RPC/TUI test actions that execute `buzzer`.
+`beep suppressed: board is silent` without a board write. The same behavior
+therefore applies to Web/RPC/TUI test actions that execute `beep`.
 
 EEPROM settings reports distinguish *accepted/live* from *persisted*. A
 successful settings command is immediately applied by the firmware and its

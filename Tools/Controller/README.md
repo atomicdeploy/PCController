@@ -486,9 +486,9 @@ rgb profile set CONDITION EFFECT COLOR [effect options]
 strip pixel N R G B [BRIGHTNESS]
 strip fill R G B [BRIGHTNESS]
 strip clear
-buzzer FREQUENCY_HZ DURATION_MS
-buzzer status
-buzzer path board|host|both|none
+beep FREQUENCY_HZ DURATION_MS
+beep status
+beep path board|host|both|none
 melody list
 melody create NAME FREQ:DURATION_MS[:GAP_MS] ...
 melody play NAME [REPEATS]            # background; 0=until stopped, otherwise 1..20
@@ -604,7 +604,7 @@ frequency/duration with Web Audio and Windows can play it through WinRing0. The
 native implementation is inside the Go controller: it opens the
 `WinRing0x64.sys` device and drives PIT channel 2 directly; it loads no wrapper
 DLL and never launches the old `beep.exe`, SSH, or a UAC prompt. Elevated SSH
-is an operator-only test harness, not an application transport. `buzzer path`
+is an operator-only test harness, not an application transport. `beep path`
 independently selects the board, host, both, or neither; board silent and host
 silent remain distinct.
 

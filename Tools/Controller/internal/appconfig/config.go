@@ -793,14 +793,16 @@ func (value Config) Validate() error {
 				if step.Target != 0 || step.Value != 0 {
 					return fmt.Errorf("macros[%d].steps[%d] all-off target/value must be zero", index, stepIndex)
 				}
-			case "buzzer", "tone":
+			// "buzzer" remains readable for existing persisted macros; new
+			// macro steps are emitted with the canonical "beep" kind.
+			case "beep", "buzzer", "tone":
 				frequency := step.FrequencyHz
 				if frequency == 0 {
 					frequency = step.Value
 				}
 				if (frequency == 0 && step.DurationMS != 0) ||
 					(frequency != 0 && (step.DurationMS == 0 || frequency < 20 || frequency > 20000)) {
-					return fmt.Errorf("macros[%d].steps[%d] buzzer needs either frequency/duration 0/0 (stop) or frequency 20..20000 Hz with nonzero duration_ms", index, stepIndex)
+					return fmt.Errorf("macros[%d].steps[%d] beep needs either frequency/duration 0/0 (stop) or frequency 20..20000 Hz with nonzero duration_ms", index, stepIndex)
 				}
 			case "display", "message":
 				if len(step.Text) > 40 || !printableASCII(step.Text) {
