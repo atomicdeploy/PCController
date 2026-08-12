@@ -41,6 +41,7 @@ describe('transport truth', () => {
     const connected = {
       ...emptySnapshot,
       connected: true,
+	  status_led_epoch: 7,
       connection_state: 'connected',
       connection_reason: '',
     }
@@ -48,6 +49,7 @@ describe('transport truth', () => {
     expect(waiting.connected).toBe(false)
     expect(waiting.connection_state).toBe('disconnected')
     expect(waiting.connection_reason).toBe('retrying')
+	expect(waiting.status_led_epoch).toBe(connected.status_led_epoch)
     expect(snapshotAfterTransportLoss(connected, 'connecting').connected).toBe(false)
   })
 

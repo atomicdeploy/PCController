@@ -43,6 +43,11 @@ type Snapshot struct {
 	StatusLED         native.StatusLEDState
 	HaveStatusLED     bool
 	StatusLEDUpdated  time.Time
+	// StatusLEDEpoch is assigned only by a remote transport. The primary's
+	// runtime snapshot leaves it zero and exposes StatusLEDRevision as the
+	// monotonic source order within that process lifetime.
+	StatusLEDEpoch    uint64
+	StatusLEDRevision uint64
 	ProgramState      ProgramStateSnapshot
 	RFLearning        RFLearnState
 }
@@ -134,6 +139,7 @@ type Runtime struct {
 	statusLED              native.StatusLEDState
 	haveStatusLED          bool
 	statusLEDUpdated       time.Time
+	statusLEDRevision      uint64
 	statusUpdated          time.Time
 	paused                 bool
 	connecting             bool
@@ -451,9 +457,9 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		FrontPanel:        runtime.frontPanel, HaveFrontPanel: runtime.haveFrontPanel,
 		FrontPanelUpdated: runtime.frontPanelUpdated,
 		StatusLED:         runtime.statusLED, HaveStatusLED: runtime.haveStatusLED,
-		StatusLEDUpdated: runtime.statusLEDUpdated,
-		ProgramState:     programState,
-		RFLearning:       rfLearning,
+		StatusLEDUpdated: runtime.statusLEDUpdated, StatusLEDRevision: runtime.statusLEDRevision,
+		ProgramState: programState,
+		RFLearning:   rfLearning,
 	}
 }
 
@@ -1136,7 +1142,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				disconnectReason = event.Err.Error()
 				runtime.publish("error", event.Err.Error(), native.Frame{})
 			} else {
-				observedChange := runtime.observe(event.Frame)
+				observedChange, statusLEDRevision := runtime.observe(event.Frame)
 				kind := "rx"
 				text := fmt.Sprintf(
 					"%s seq=%d payload=% X",
@@ -1272,6 +1278,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 							"brightness": strconv.Itoa(int(parsedStatusLED.Brightness)),
 							"effect":     strconv.Itoa(int(parsedStatusLED.Effect)),
 							"condition":  strconv.Itoa(int(parsedStatusLED.Condition)),
+							"revision":   strconv.FormatUint(statusLEDRevision, 10),
 						},
 					})
 				} else if parsedDevice != nil {
@@ -1407,7 +1414,7 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 	}
 }
 
-func (runtime *Runtime) observe(frame native.Frame) bool {
+func (runtime *Runtime) observe(frame native.Frame) (bool, uint64) {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	switch frame.Opcode {
@@ -1444,11 +1451,13 @@ func (runtime *Runtime) observe(frame native.Frame) bool {
 	case native.OpStatusLEDChanged:
 		if state, err := native.ParseStatusLEDState(frame.Payload); err == nil {
 			if runtime.haveStatusLED && runtime.statusLED == state {
-				return false
+				return false, runtime.statusLEDRevision
 			}
 			runtime.statusLED = state
 			runtime.haveStatusLED = true
 			runtime.statusLEDUpdated = time.Now()
+			runtime.statusLEDRevision++
+			return true, runtime.statusLEDRevision
 		}
 	case native.OpEvent:
 		if event, err := native.ParseDeviceEvent(frame.Payload); err == nil {
@@ -1477,7 +1486,7 @@ func (runtime *Runtime) observe(frame native.Frame) bool {
 			}
 		}
 	}
-	return true
+	return true, 0
 }
 
 func describeDeviceEvent(event native.DeviceEvent) (string, string) {

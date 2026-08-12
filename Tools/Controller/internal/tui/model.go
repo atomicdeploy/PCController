@@ -836,16 +836,33 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.remoteSnapshot.StatusUpdated = updatedAt
 			model.recordSample(update.Status, receivedAt)
 		}
-		if update.HaveStatusLED {
-			// A reconnect may replay the last composed frame. Preserve the current
-			// phase/timestamp for identical data so the visual never jumps backward.
-			if !model.remoteSnapshot.HaveStatusLED || model.remoteSnapshot.StatusLED != update.StatusLED {
+		if update.HaveStatusLED || update.StatusLEDOrderKnown {
+			// Snapshot HTTP and the state WebSocket are independent transports. A
+			// newer snapshot can therefore arrive before an older, already-sent
+			// state frame. Source revisions order those paths without relying on a
+			// wall clock that can step backward; the transport epoch admits a lower
+			// revision after the primary restarts.
+			order := compareStatusLEDOrder(
+				model.remoteSnapshot.StatusLEDEpoch, model.remoteSnapshot.StatusLEDRevision,
+				update.StatusLEDEpoch, update.StatusLEDRevision,
+			)
+			accept := (!model.remoteSnapshot.HaveStatusLED && order != statusLEDOrderOlder && order != statusLEDOrderEqual) ||
+				order == statusLEDOrderNewer || order == statusLEDOrderUnknown
+			if update.HaveStatusLED && accept && (!model.remoteSnapshot.HaveStatusLED ||
+				model.remoteSnapshot.StatusLED != update.StatusLED || order == statusLEDOrderNewer) {
 				model.remoteSnapshot.StatusLED = update.StatusLED
 				model.remoteSnapshot.HaveStatusLED = true
 				model.remoteSnapshot.StatusLEDUpdated = update.StatusLEDUpdated
-				if model.remoteSnapshot.StatusLEDUpdated.IsZero() {
-					model.remoteSnapshot.StatusLEDUpdated = update.StatusLEDReceivedAt
-				}
+				model.remoteSnapshot.StatusLEDEpoch = update.StatusLEDEpoch
+				model.remoteSnapshot.StatusLEDRevision = update.StatusLEDRevision
+				model.remoteLEDSequence++
+			} else if !update.HaveStatusLED && update.StatusLEDOrderKnown &&
+				order == statusLEDOrderNewer {
+				// A restarted primary may not have observed its first LED frame yet.
+				// Retain the last visual value, but advance the source watermark so a
+				// delayed frame from the previous primary cannot fill the gap.
+				model.remoteSnapshot.StatusLEDEpoch = update.StatusLEDEpoch
+				model.remoteSnapshot.StatusLEDRevision = update.StatusLEDRevision
 				model.remoteLEDSequence++
 			}
 		}
@@ -1276,12 +1293,69 @@ func mergeRemoteSnapshot(current, incoming control.Snapshot, allowStatus, allowL
 	// not an authoritative black/off frame. Preserve the last known composed
 	// value. A real off frame has HaveStatusLED=true and six explicit zero/color
 	// fields, and therefore still replaces the current value.
-	if !allowLED || (current.HaveStatusLED && !incoming.HaveStatusLED) {
+	order := compareStatusLEDOrder(
+		current.StatusLEDEpoch, current.StatusLEDRevision,
+		incoming.StatusLEDEpoch, incoming.StatusLEDRevision,
+	)
+	staleLED := incoming.HaveStatusLED &&
+		(order == statusLEDOrderOlder || order == statusLEDOrderEqual)
+	newSourceEpoch := incoming.StatusLEDEpoch > current.StatusLEDEpoch
+	rejectSequenceConflict := !allowLED && order != statusLEDOrderNewer
+	if rejectSequenceConflict || staleLED || (current.HaveStatusLED && !incoming.HaveStatusLED &&
+		!newSourceEpoch) {
 		incoming.StatusLED = current.StatusLED
 		incoming.HaveStatusLED = current.HaveStatusLED
 		incoming.StatusLEDUpdated = current.StatusLEDUpdated
+		incoming.StatusLEDEpoch = current.StatusLEDEpoch
+		incoming.StatusLEDRevision = current.StatusLEDRevision
+	} else if current.HaveStatusLED && !incoming.HaveStatusLED {
+		// Missing is not black. On a new source epoch, keep the last rendered
+		// value while adopting the new epoch/revision watermark.
+		incoming.StatusLED = current.StatusLED
+		incoming.HaveStatusLED = true
+		incoming.StatusLEDUpdated = current.StatusLEDUpdated
 	}
 	return incoming
+}
+
+type statusLEDOrder byte
+
+const (
+	statusLEDOrderUnknown statusLEDOrder = iota
+	statusLEDOrderOlder
+	statusLEDOrderEqual
+	statusLEDOrderNewer
+)
+
+func compareStatusLEDOrder(currentEpoch, currentRevision, incomingEpoch, incomingRevision uint64) statusLEDOrder {
+	if currentEpoch == 0 && incomingEpoch == 0 {
+		return statusLEDOrderUnknown
+	}
+	if currentEpoch == 0 {
+		return statusLEDOrderNewer
+	}
+	if incomingEpoch == 0 {
+		return statusLEDOrderOlder
+	}
+	if incomingEpoch < currentEpoch {
+		return statusLEDOrderOlder
+	}
+	if incomingEpoch > currentEpoch {
+		return statusLEDOrderNewer
+	}
+	if currentRevision == 0 && incomingRevision == 0 {
+		return statusLEDOrderUnknown
+	}
+	if currentRevision == 0 {
+		return statusLEDOrderNewer
+	}
+	if incomingRevision == 0 || incomingRevision < currentRevision {
+		return statusLEDOrderOlder
+	}
+	if incomingRevision == currentRevision {
+		return statusLEDOrderEqual
+	}
+	return statusLEDOrderNewer
 }
 
 func (model Model) statusFreshnessLabel(snapshot control.Snapshot, now time.Time) string {
