@@ -21,9 +21,9 @@ describe('startup browser console', () => {
     }, sink)
 
     expect(sink.groupCollapsed).toHaveBeenCalledWith(expect.stringContaining('%c%s%c'), expect.any(String), 'PCController', expect.any(String))
-		expect(sink.info).toHaveBeenCalledWith('%cHost%c version %s · living API', expect.any(String), expect.any(String), '1.2.3')
-    expect(sink.info).toHaveBeenCalledWith('%cController%c offline · no authenticated board', expect.any(String), expect.any(String))
-    expect(sink.debug).toHaveBeenCalledWith('%cTransport%c %s', expect.any(String), expect.any(String), 'Host event stream connected')
+		expect(sink.info).toHaveBeenCalledWith('%cHost%c 🧩 version %s · versionless living API', expect.any(String), expect.any(String), '1.2.3')
+    expect(sink.info).toHaveBeenCalledWith('%cController%c 🟠 offline · no authenticated board', expect.any(String), expect.any(String))
+    expect(sink.debug).toHaveBeenCalledWith('%cTransport%c 📡 %s · subscribe with addEventListener("pccontroller:state", handler)', expect.any(String), expect.any(String), 'Host event stream connected')
     expect(sink.info.mock.calls.flat().join(' ')).not.toContain('Live')
     expect(sink.groupEnd).toHaveBeenCalledOnce()
   })
@@ -38,8 +38,8 @@ describe('startup browser console', () => {
       streamState: 'connecting',
     }, sink)
 
-    expect(sink.groupCollapsed.mock.calls[0][0]).toBe('%c%s%c · browser control center')
+		expect(sink.groupCollapsed.mock.calls[0][0]).toBe('%c%s%c ✨ browser control center')
     expect(sink.groupCollapsed.mock.calls[0][2]).toBe('%c hostile name')
-    expect(sink.info).toHaveBeenCalledWith('%cController%c connected · %s', expect.any(String), expect.any(String), '%c COM18')
+    expect(sink.info).toHaveBeenCalledWith('%cController%c 🟢 connected · %s', expect.any(String), expect.any(String), '%c COM18')
   })
 })

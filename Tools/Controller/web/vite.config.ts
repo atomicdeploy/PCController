@@ -90,11 +90,15 @@ export default defineConfig(() => {
     assetsInlineLimit: 4096,
     rollupOptions: {
       output: {
-        entryFileNames: 'assets/app-[hash].js',
-        chunkFileNames: 'assets/chunk-[hash].js',
+        // The embedded host already provides a strong ETag for every response.
+        // Keep URLs deterministic for diagnostics, userscripts, and release
+        // comparison; the host revalidates instead of relying on opaque random
+        // filename suffixes for cache invalidation.
+        entryFileNames: 'assets/app.js',
+        chunkFileNames: 'assets/chunk-[name].js',
         assetFileNames: ({ names }) => {
           const name = names?.[0] ?? ''
-          return name.endsWith('.woff2') ? 'fonts/[name]-[hash][extname]' : 'assets/[name]-[hash][extname]'
+          return name.endsWith('.woff2') ? 'fonts/[name][extname]' : 'assets/[name][extname]'
         }
       }
     }
