@@ -14,6 +14,22 @@ route families.
 
 ## Cross-surface control contract
 
+### Host-synchronized Live Measurements timing
+
+`ui.status_interval_ms` is the host-owned Live Measurements refresh period;
+it defaults to `250` ms (4 Hz) and is strictly bounded to `200..500` ms.
+`ui.measurement_freshness_ms` defaults to `1500` ms and must be at least the
+chosen refresh period plus `100` ms scheduling/transport headroom. Both values
+are persisted in the host configuration—not browser or TUI preferences—and
+are returned by `controller.ui.config.get` / `controller.ui.config.set` as
+`status_interval_ms` and `measurement_freshness_ms`.
+
+Updating either field is atomic: invalid combinations leave both persisted
+values unchanged. A successful write emits the ordinary host `config` event,
+so WebUI and local or remote TUI clients reload the same effective values
+immediately. No controller EEPROM write, VirtualBoard action, or application
+restart is involved.
+
 Public REST routes are versionless: use `/api/peripherals`, `/api/pwm`, and
 `/api/rpc`; `/api/v1/...` is deliberately not a supported alias. JSON-RPC,
 WebUI, TUI, and CLI all consume the same host-owned peripheral registry rather

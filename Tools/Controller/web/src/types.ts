@@ -245,6 +245,8 @@ export interface HostUISettings {
 	tagline: string
   setup_complete: boolean
   welcome_melody: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
   appearance: Appearance
   appearance_etag: string
   segment_scroll: SegmentScrollSettings

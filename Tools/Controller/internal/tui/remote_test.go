@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/shell"
 )
@@ -38,6 +39,31 @@ func TestRemoteSnapshotPollingIsBackstopNotRenderLoop(t *testing.T) {
 	model.preview = &snapshot
 	if interval := model.statusInterval(); interval != 125*time.Millisecond {
 		t.Fatalf("local door-open interval=%s, want 125ms", interval)
+	}
+}
+
+func TestRemoteConfigEventRefreshesHostMeasurementPolicy(t *testing.T) {
+	defaults := appconfig.Defaults().UI
+	updated := defaults
+	updated.StatusIntervalMS = 300
+	updated.MeasurementFreshnessMS = 1600
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		DisableWelcome: true,
+		UIConfig:       func() appconfig.UI { return defaults },
+		Remote: &RemoteBackend{
+			LoadHostUI: func(context.Context) (appconfig.UI, error) { return updated, nil },
+		},
+	})
+	defer model.runtime.Close()
+	updatedModel, command := model.Update(runtimeEventMsg(control.Event{Kind: "config"}))
+	model = updatedModel.(Model)
+	if command == nil || !model.remoteUIConfigPending {
+		t.Fatal("remote config event did not schedule a host-policy refresh")
+	}
+	updatedModel, _ = model.Update(command())
+	model = updatedModel.(Model)
+	if model.remoteUIConfigPending || model.prefs.PollInterval != 300*time.Millisecond || model.prefs.FreshnessWindow != 1600*time.Millisecond {
+		t.Fatalf("remote preferences=%+v pending=%v", model.prefs, model.remoteUIConfigPending)
 	}
 }
 

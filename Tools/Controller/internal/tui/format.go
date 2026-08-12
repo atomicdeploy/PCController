@@ -67,23 +67,24 @@ func formatUptime(milliseconds uint32) string {
 	return duration.Truncate(time.Second).String()
 }
 
-// freshnessLiveThreshold covers the four-Hz remote convergence path with
-// enough scheduling and network headroom. A 500 ms threshold previously made
-// a healthy remote view alternate between "live" and a fractional age on every
-// poll. Once this window expires, the age is actionable and shown.
+// freshnessLiveThreshold is the default host window retained for remote-TUI
+// compatibility checks. The rendered value always comes from Preferences.
 const freshnessLiveThreshold = 1500 * time.Millisecond
 
-// freshnessLabel reports data as live while it remains within the expected
-// convergence window. Once stale, the age is stable enough to be actionable.
-func freshnessLabel(updated, now time.Time) string {
+// freshnessLabel uses the host-owned window so every local or remote TUI
+// renders the same live/stale boundary as the WebUI.
+func freshnessLabel(updated, now time.Time, window time.Duration) string {
 	if updated.IsZero() {
 		return "waiting for device"
+	}
+	if window <= 0 {
+		window = 1500 * time.Millisecond
 	}
 	age := now.Sub(updated)
 	if age < 0 {
 		age = 0
 	}
-	if age < freshnessLiveThreshold {
+	if age < window {
 		return "live"
 	}
 	if age < 10*time.Second {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -93,6 +94,31 @@ func TestBrowserUIConfigRPCPersistsOnlyRequestedHostFields(t *testing.T) {
 	})
 	if rejected.Error == nil || config.UI.AppTitle != "Control Room" {
 		t.Fatalf("invalid title was not rejected atomically: response=%#v title=%q", rejected, config.UI.AppTitle)
+	}
+}
+
+func TestBrowserUIConfigMeasurementTimingIsHostOwnedAndAtomicallyValidated(t *testing.T) {
+	service, config := browserUIConfigTestService(t)
+	params, _ := json.Marshal(map[string]any{
+		"status_interval_ms":       300,
+		"measurement_freshness_ms": 1600,
+	})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.ui.config.set", Params: params})
+	updated, ok := response.Result.(browserUISettings)
+	if response.Error != nil || !ok || updated.StatusIntervalMS != 300 || updated.MeasurementFreshnessMS != 1600 {
+		t.Fatalf("measurement update=%#v error=%v", response.Result, response.Error)
+	}
+	if !reflect.DeepEqual(updated.ChangedFields, []string{"status_interval_ms", "measurement_freshness_ms"}) ||
+		config.UI.StatusIntervalMS != 300 || config.UI.MeasurementFreshnessMS != 1600 {
+		t.Fatalf("persisted timing=%+v fields=%#v", config.UI, updated.ChangedFields)
+	}
+	invalid, _ := json.Marshal(map[string]any{
+		"status_interval_ms":       500,
+		"measurement_freshness_ms": 550,
+	})
+	rejected := service.Dispatch(context.Background(), Request{Method: "controller.ui.config.set", Params: invalid})
+	if rejected.Error == nil || config.UI.StatusIntervalMS != 300 || config.UI.MeasurementFreshnessMS != 1600 {
+		t.Fatalf("invalid timing was not rejected atomically: %#v config=%+v", rejected, config.UI)
 	}
 }
 

@@ -32,6 +32,13 @@ const (
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
+	// Live measurement timing is host-owned so every local and remote surface
+	// evaluates the same stream cadence and freshness boundary.
+	MeasurementRefreshMinMS        = 200
+	MeasurementRefreshMaxMS        = 500
+	DefaultMeasurementRefreshMS    = 250
+	DefaultMeasurementFreshnessMS  = 1500
+	MeasurementFreshnessHeadroomMS = 100
 )
 
 // Config is the persistent host-side configuration root; it never mirrors or
@@ -82,38 +89,39 @@ type DeviceIdentity struct {
 
 // UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
-	AppTitle             string            `json:"app_title"`
-	Tagline              string            `json:"tagline"`
-	Appearance           Appearance        `json:"appearance"`
-	TUIConsole           TUIConsole        `json:"tui_console"`
-	SeparatePortButtons  bool              `json:"separate_port_buttons"`
-	TableLayout          string            `json:"table_layout"`
-	PeripheralNames      map[string]string `json:"peripheral_names,omitempty"`
-	SetupComplete        bool              `json:"setup_complete"`
-	WelcomeMelody        string            `json:"welcome_melody"`
-	StatusIntervalMS     int               `json:"status_interval_ms"`
-	IdleStatusIntervalMS int               `json:"idle_status_interval_ms"`
-	EventLogLimit        int               `json:"event_log_limit"`
-	HistoryHours         int               `json:"history_hours"`
-	HistorySampleMS      int               `json:"history_sample_ms"`
-	VoltageDecimals      int               `json:"voltage_decimals"`
-	CurrentDecimals      int               `json:"current_decimals"`
-	PowerDecimals        int               `json:"power_decimals"`
-	TemperatureDecimals  int               `json:"temperature_decimals"`
-	ShowSupplyVoltage    bool              `json:"show_supply_voltage"`
-	ShowBusVoltage       bool              `json:"show_bus_voltage"`
-	ShowCurrent          bool              `json:"show_current"`
-	ShowPower            bool              `json:"show_power"`
-	ShowTemperatureLED   bool              `json:"show_temperature_led"`
-	ShowTemperatureBT    bool              `json:"show_temperature_bt"`
-	ShowIO               bool              `json:"show_io"`
-	ShowDiagnostics      bool              `json:"show_diagnostics"`
-	ShowGraphs           bool              `json:"show_graphs"`
-	LCDServiceEnabled    bool              `json:"lcd_service_enabled"`
-	MirrorPromptToLCD    bool              `json:"mirror_prompt_to_lcd"`
-	LCDPromptDebounceMS  int               `json:"lcd_prompt_debounce_ms"`
-	LCDPriorityHoldMS    int               `json:"lcd_priority_hold_ms"`
-	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
+	AppTitle               string            `json:"app_title"`
+	Tagline                string            `json:"tagline"`
+	Appearance             Appearance        `json:"appearance"`
+	TUIConsole             TUIConsole        `json:"tui_console"`
+	SeparatePortButtons    bool              `json:"separate_port_buttons"`
+	TableLayout            string            `json:"table_layout"`
+	PeripheralNames        map[string]string `json:"peripheral_names,omitempty"`
+	SetupComplete          bool              `json:"setup_complete"`
+	WelcomeMelody          string            `json:"welcome_melody"`
+	StatusIntervalMS       int               `json:"status_interval_ms"`
+	MeasurementFreshnessMS int               `json:"measurement_freshness_ms"`
+	IdleStatusIntervalMS   int               `json:"idle_status_interval_ms"`
+	EventLogLimit          int               `json:"event_log_limit"`
+	HistoryHours           int               `json:"history_hours"`
+	HistorySampleMS        int               `json:"history_sample_ms"`
+	VoltageDecimals        int               `json:"voltage_decimals"`
+	CurrentDecimals        int               `json:"current_decimals"`
+	PowerDecimals          int               `json:"power_decimals"`
+	TemperatureDecimals    int               `json:"temperature_decimals"`
+	ShowSupplyVoltage      bool              `json:"show_supply_voltage"`
+	ShowBusVoltage         bool              `json:"show_bus_voltage"`
+	ShowCurrent            bool              `json:"show_current"`
+	ShowPower              bool              `json:"show_power"`
+	ShowTemperatureLED     bool              `json:"show_temperature_led"`
+	ShowTemperatureBT      bool              `json:"show_temperature_bt"`
+	ShowIO                 bool              `json:"show_io"`
+	ShowDiagnostics        bool              `json:"show_diagnostics"`
+	ShowGraphs             bool              `json:"show_graphs"`
+	LCDServiceEnabled      bool              `json:"lcd_service_enabled"`
+	MirrorPromptToLCD      bool              `json:"mirror_prompt_to_lcd"`
+	LCDPromptDebounceMS    int               `json:"lcd_prompt_debounce_ms"`
+	LCDPriorityHoldMS      int               `json:"lcd_priority_hold_ms"`
+	SegmentScroll          SegmentScroll     `json:"segment_scroll"`
 }
 
 // TUIConsole contains local classic-console presentation preferences. These
@@ -325,32 +333,33 @@ func Defaults() Config {
 			Appearance: Appearance{
 				Theme: "system", Locale: "en", Direction: "auto", AudioVolume: 0.42,
 			},
-			TUIConsole:           productTUIConsoleDefaults(),
-			TableLayout:          "compact",
-			WelcomeMelody:        "notify",
-			StatusIntervalMS:     200,
-			IdleStatusIntervalMS: 0,
-			EventLogLimit:        2000,
-			HistoryHours:         24,
-			HistorySampleMS:      1000,
-			VoltageDecimals:      2,
-			CurrentDecimals:      1,
-			PowerDecimals:        2,
-			TemperatureDecimals:  1,
-			ShowSupplyVoltage:    true,
-			ShowBusVoltage:       true,
-			ShowCurrent:          true,
-			ShowPower:            true,
-			ShowTemperatureLED:   true,
-			ShowTemperatureBT:    true,
-			ShowIO:               true,
-			ShowDiagnostics:      true,
-			ShowGraphs:           true,
-			LCDServiceEnabled:    true,
-			MirrorPromptToLCD:    false,
-			LCDPromptDebounceMS:  120,
-			LCDPriorityHoldMS:    2000,
-			SegmentScroll:        DefaultSegmentScroll(),
+			TUIConsole:             productTUIConsoleDefaults(),
+			TableLayout:            "compact",
+			WelcomeMelody:          "notify",
+			StatusIntervalMS:       DefaultMeasurementRefreshMS,
+			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
+			IdleStatusIntervalMS:   0,
+			EventLogLimit:          2000,
+			HistoryHours:           24,
+			HistorySampleMS:        1000,
+			VoltageDecimals:        2,
+			CurrentDecimals:        1,
+			PowerDecimals:          2,
+			TemperatureDecimals:    1,
+			ShowSupplyVoltage:      true,
+			ShowBusVoltage:         true,
+			ShowCurrent:            true,
+			ShowPower:              true,
+			ShowTemperatureLED:     true,
+			ShowTemperatureBT:      true,
+			ShowIO:                 true,
+			ShowDiagnostics:        true,
+			ShowGraphs:             true,
+			LCDServiceEnabled:      true,
+			MirrorPromptToLCD:      false,
+			LCDPromptDebounceMS:    120,
+			LCDPriorityHoldMS:      2000,
+			SegmentScroll:          DefaultSegmentScroll(),
 		},
 		IPC: IPC{
 			Listen:          "127.0.0.1:8787",
@@ -611,8 +620,14 @@ func (value Config) Validate() error {
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {
 		return errors.New("ui.welcome_melody must contain 1..64 characters")
 	}
-	if value.UI.StatusIntervalMS < 50 || value.UI.StatusIntervalMS > 60_000 {
-		return fmt.Errorf("ui.status_interval_ms must be 50..60000")
+	if value.UI.StatusIntervalMS < MeasurementRefreshMinMS || value.UI.StatusIntervalMS > MeasurementRefreshMaxMS {
+		return fmt.Errorf("ui.status_interval_ms must be %d..%d", MeasurementRefreshMinMS, MeasurementRefreshMaxMS)
+	}
+	if value.UI.MeasurementFreshnessMS < value.UI.StatusIntervalMS+MeasurementFreshnessHeadroomMS {
+		return fmt.Errorf("ui.measurement_freshness_ms must be at least ui.status_interval_ms + %d", MeasurementFreshnessHeadroomMS)
+	}
+	if value.UI.MeasurementFreshnessMS > 60_000 {
+		return errors.New("ui.measurement_freshness_ms must be at most 60000")
 	}
 	if value.UI.IdleStatusIntervalMS != 0 &&
 		(value.UI.IdleStatusIntervalMS < 100 || value.UI.IdleStatusIntervalMS > 60_000) {

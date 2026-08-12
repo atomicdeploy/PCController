@@ -53,6 +53,7 @@ type Preferences struct {
 	AppTitle            string
 	Tagline             string
 	PollInterval        time.Duration
+	FreshnessWindow     time.Duration
 	EventLogLimit       int
 	HistoryWindow       time.Duration
 	VoltageDecimals     int
@@ -66,7 +67,8 @@ func defaultPreferences() Preferences {
 	return Preferences{
 		AppTitle:            productidentity.Title(""),
 		Tagline:             productidentity.DefaultFirstRunLine(),
-		PollInterval:        250 * time.Millisecond,
+		PollInterval:        time.Duration(appconfig.DefaultMeasurementRefreshMS) * time.Millisecond,
+		FreshnessWindow:     time.Duration(appconfig.DefaultMeasurementFreshnessMS) * time.Millisecond,
 		EventLogLimit:       2000,
 		HistoryWindow:       24 * time.Hour,
 		VoltageDecimals:     2,
@@ -88,8 +90,11 @@ func preferencesFromUI(value appconfig.UI) Preferences {
 	if result.Tagline == "" {
 		result.Tagline = productidentity.DefaultFirstRunLine()
 	}
-	if value.StatusIntervalMS >= 100 {
+	if value.StatusIntervalMS >= appconfig.MeasurementRefreshMinMS {
 		result.PollInterval = time.Duration(value.StatusIntervalMS) * time.Millisecond
+	}
+	if value.MeasurementFreshnessMS >= value.StatusIntervalMS+appconfig.MeasurementFreshnessHeadroomMS {
+		result.FreshnessWindow = time.Duration(value.MeasurementFreshnessMS) * time.Millisecond
 	}
 	if value.EventLogLimit >= 50 {
 		result.EventLogLimit = value.EventLogLimit
@@ -178,6 +183,9 @@ type RemoteBackend struct {
 	// names) through the remote primary's structured IPC contract. Client
 	// appearance and terminal preferences continue to use Options.SaveUI.
 	SaveHostUI func(appconfig.UI) error
+	// LoadHostUI refreshes host-owned presentation and measurement policy after
+	// a remote config event; no client-local preferences are substituted.
+	LoadHostUI func(context.Context) (appconfig.UI, error)
 }
 
 type Options struct {
