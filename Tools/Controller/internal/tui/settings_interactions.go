@@ -283,7 +283,7 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 			return model, nil, true
 		}
 		model.settingEditor = nil
-		return model.dispatchLine("buzzer path " + paths[selected])
+		return model.dispatchLine("beep path " + paths[selected])
 	}
 	ui := model.uiValue
 	switch editor.Key {

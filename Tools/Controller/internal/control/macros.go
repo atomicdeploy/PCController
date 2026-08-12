@@ -2293,14 +2293,16 @@ func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 		return native.OpRelayAllOff, nil, nil
 	case "pwm-off":
 		return native.OpPWMAllOff, nil, nil
-	case "buzzer", "tone":
+	// "buzzer" is accepted only for backwards-compatible persisted macros.
+	// Newly recorded and authored steps use the canonical "beep" kind.
+	case "beep", "buzzer", "tone":
 		frequency := step.FrequencyHz
 		if frequency == 0 {
 			frequency = step.Value
 		}
 		if (frequency == 0 && step.DurationMS != 0) ||
 			(frequency != 0 && (step.DurationMS == 0 || frequency < 20 || frequency > 20000)) {
-			return 0, nil, errors.New("buzzer requires frequency/duration 0/0 to stop, or frequency 20..20000 Hz with nonzero duration_ms")
+			return 0, nil, errors.New("beep requires frequency/duration 0/0 to stop, or frequency 20..20000 Hz with nonzero duration_ms")
 		}
 		return native.OpBuzzer, native.BuzzerPayload(frequency, step.DurationMS), nil
 	case "display", "message":
@@ -2393,7 +2395,7 @@ func recordedMacroStep(evidence ActionEvidence) (appconfig.MacroStep, bool) {
 		if len(payload) != 4 {
 			return step, false
 		}
-		step.Kind = "buzzer"
+		step.Kind = "beep"
 		step.FrequencyHz = binary.LittleEndian.Uint16(payload[0:2])
 		step.DurationMS = binary.LittleEndian.Uint16(payload[2:4])
 	case native.OpDisplayText:

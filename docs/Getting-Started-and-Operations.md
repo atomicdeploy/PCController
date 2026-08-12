@@ -355,7 +355,8 @@ are `GET`, `PUT`, and `DELETE /api/pwm`.
 
 ### Buzzer and effects
 
-`buzzer path board|host|both|none` selects the two independent renderers.
+`beep path board|host|both|none` selects the two independent renderers. A
+deprecated compatibility alias remains accepted for existing automation.
 `silent board ...` changes the EEPROM-backed board mute while `silent host ...`
 changes PC playback; neither silently overwrites the other. A board-silent
 planned tone is still pushed to the host and may play there when the host path

@@ -504,7 +504,7 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		if state.BoardOwned {
 			return warnStyle.Render("Board capture owns the retained MCU ring. B seals/fetches it; the host deduplicates, saves, and ACKs the export automatically.")
 		}
-		return warnStyle.Render("Operate the host, front panel, or RF controls; queueable relay, motion, PWM/MOSFET, buzzer, display, RF, RGB, LED, and menu actions share MCU timing. S saves, D discards.")
+		return warnStyle.Render("Operate the host, front panel, or RF controls; queueable relay, motion, PWM/MOSFET, beep, display, RF, RGB, LED, and menu actions share MCU timing. S saves, D discards.")
 	}
 	return labelStyle.Render("R starts a named host recording; B starts/stops retained board capture; exact MCU timestamps become step offsets. N creates a draft.")
 }
