@@ -97,7 +97,11 @@ presentation values, and bounded current board values. Metadata refreshes are
 coalesced from pushed events and never poll the board; secret-like TXT/header
 keys are discarded before either multicast protocol is updated.
 
-Windows desktop integration has no internal PowerShell dependency. Toasts use
+Windows desktop integration has no internal PowerShell dependency. Web-host
+startup establishes its current executable's per-user AppUserModelID and
+Start-menu shortcut before native notifications are used, so Windows resolves
+the packaged `APP` icon instead of presenting a blank/generic toast identity.
+Toasts use
 the WinRT notification ABI directly; Start-menu shortcuts and their
 AppUserModelID use Shell COM; URI registration uses the per-user Registry API.
 If an unpackaged WinRT toast cannot be delivered, the host uses an eight-second
