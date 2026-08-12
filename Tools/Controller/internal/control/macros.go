@@ -188,6 +188,72 @@ func (runner *MacroRunner) Delete(reference string) error {
 	})
 }
 
+// Rename updates host-owned macro metadata without introducing another macro
+// store. A playing macro keeps a stable identity through its final lifecycle
+// event, so its definition cannot be renamed mid-run.
+func (runner *MacroRunner) Rename(reference, name string) (appconfig.Macro, error) {
+	if runner.updateHostConfig == nil {
+		return appconfig.Macro{}, errors.New("macro persistence is unavailable")
+	}
+	macro, err := runner.find(reference)
+	if err != nil {
+		return appconfig.Macro{}, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return appconfig.Macro{}, errors.New("macro name is required")
+	}
+	if state := runner.State(); state.Running && state.ID == macro.ID {
+		return appconfig.Macro{}, errors.New("cannot rename the macro currently playing")
+	}
+	updated := macro
+	updated.Name = name
+	err = runner.updateHostConfig(func(config *appconfig.Config) error {
+		for index := range config.Macros {
+			if config.Macros[index].ID != macro.ID && strings.EqualFold(config.Macros[index].Name, name) {
+				return fmt.Errorf("macro name %q already exists", name)
+			}
+		}
+		for index := range config.Macros {
+			if config.Macros[index].ID == macro.ID {
+				config.Macros[index].Name = name
+				return nil
+			}
+		}
+		return fmt.Errorf("macro %q disappeared before it could be renamed", reference)
+	})
+	return updated, err
+}
+
+// SetCategory updates the durable host-library grouping used by CLI, TUI, and
+// hosted menus. It intentionally shares the same persistence transaction as
+// every other macro metadata mutation.
+func (runner *MacroRunner) SetCategory(reference, category string) (appconfig.Macro, error) {
+	if runner.updateHostConfig == nil {
+		return appconfig.Macro{}, errors.New("macro persistence is unavailable")
+	}
+	macro, err := runner.find(reference)
+	if err != nil {
+		return appconfig.Macro{}, err
+	}
+	category = strings.TrimSpace(category)
+	if state := runner.State(); state.Running && state.ID == macro.ID {
+		return appconfig.Macro{}, errors.New("cannot change the category of the macro currently playing")
+	}
+	updated := macro
+	updated.Category = category
+	err = runner.updateHostConfig(func(config *appconfig.Config) error {
+		for index := range config.Macros {
+			if config.Macros[index].ID == macro.ID {
+				config.Macros[index].Category = category
+				return nil
+			}
+		}
+		return fmt.Errorf("macro %q disappeared before its category could be updated", reference)
+	})
+	return updated, err
+}
+
 func (runner *MacroRunner) StartRecording(name, category, color string) (MacroRecordingState, error) {
 	if runner.updateHostConfig == nil {
 		return MacroRecordingState{}, errors.New("macro persistence is unavailable")

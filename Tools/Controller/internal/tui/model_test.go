@@ -1448,6 +1448,7 @@ func TestAutomationLifecycleButtonsDispatchEveryRecorderAndCancelPolicy(t *testi
 		{key: "c", command: "macro cancel", playing: true},
 		{key: "k", command: "macro cancel keep", playing: true},
 		{key: "i", command: "macro show 1"},
+		{key: "o", command: "macro monitor"},
 		{key: "a", command: "automation list"},
 		{key: "m", command: "macro list"},
 	}
@@ -1459,6 +1460,24 @@ func TestAutomationLifecycleButtonsDispatchEveryRecorderAndCancelPolicy(t *testi
 			updated, command, handled := model.macroShortcut(test.key)
 			if !handled || command == nil || !logsContain(updated.logs, test.command) {
 				t.Fatalf("key %q handled=%v command=%v logs=%#v", test.key, handled, command, updated.logs)
+			}
+		})
+	}
+}
+
+func TestAutomationMetadataShortcutsPrepareSelectedMacroCommands(t *testing.T) {
+	for _, test := range []struct {
+		key  string
+		want string
+	}{
+		{key: "u", want: "macro rename 1 "},
+		{key: "g", want: "macro category 1 "},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			model := readyModel(t, PageAutomations)
+			updated, command, handled := model.macroShortcut(test.key)
+			if !handled || command != nil || updated.input.Value() != test.want {
+				t.Fatalf("key %q handled=%v command=%v input=%q, want %q", test.key, handled, command, updated.input.Value(), test.want)
 			}
 		})
 	}
