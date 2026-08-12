@@ -9,6 +9,8 @@ import {
 } from './tab-channel'
 import { applyPushedOutputEvent } from './status-led-event'
 import { applyMacroEventToSnapshot } from './macro-live'
+import { updateStatusFromEvent } from './updates-view'
+import type { UpdateStatus } from './updates-api'
 import { emptySnapshot } from './types'
 import type { ControllerEvent, MacroSnapshot, Snapshot } from './types'
 
@@ -214,6 +216,31 @@ describe('tab channel', () => {
     expect(firstState.recording).toMatchObject({ id: 12, name: 'Relay cadence', steps: 4, last_at_us: 91250, last_delta_us: 7500 })
     expect(secondState.recording).toEqual(firstState.recording)
     expect(secondState.latest_event_id).toBe(57)
+    first.close()
+    second.close()
+  })
+
+  it('keeps two Web clients on the same pushed update progress without manual refresh', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('update-first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('update-second') })
+    const progress: ControllerEvent = {
+      id: 58,
+      time: '2026-08-12T10:02:00.000Z',
+      kind: 'update.verifying',
+      stream: 'state',
+      text: 'readback verified',
+      metadata: { operation_id: 'op-live', kind: 'firmware', progress_percent: '91', programming_method: 'urclock' },
+    }
+    let firstStatus: UpdateStatus | null = updateStatusFromEvent(null, progress)
+    let secondStatus: UpdateStatus | null = null
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') secondStatus = updateStatusFromEvent(secondStatus, payload.event as ControllerEvent)
+    })
+
+    first.publishControllerEvent(progress)
+
+    expect(firstStatus).toMatchObject({ id: 'op-live', state: 'verifying', progress_percent: 91 })
+    expect(secondStatus).toEqual(firstStatus)
     first.close()
     second.close()
   })

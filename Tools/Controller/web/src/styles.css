@@ -1213,6 +1213,42 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .live-segment-preview line { stroke: rgba(194, 181, 205, .16); stroke-width: 5; stroke-linecap: round; transition: stroke .08s ease, filter .08s ease; }
 .live-segment-preview circle { fill: rgba(194, 181, 205, .16); transition: fill .08s ease, filter .08s ease; }
 .live-segment-preview .is-lit { stroke: var(--amber); fill: var(--amber); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--amber) 70%, transparent)); }
+
+.overview-peripherals { display: grid; gap: 9px; margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); }
+.overview-peripheral { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-muted); }
+.overview-peripheral > header { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; color: var(--text-soft); }
+.overview-peripheral > header > svg { color: var(--accent); }
+.overview-peripheral > header > strong { margin-inline-end: auto; font-size: 10px; }
+.overview-peripheral--segment { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; }
+.overview-peripheral--segment > header { grid-column: 1 / -1; margin-bottom: 0; }
+.overview-peripheral--segment .live-segment-preview { justify-self: start; }
+.overview-segment-navigation { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: end; gap: 6px; min-width: 0; }
+.overview-segment-navigation > label { display: grid; gap: 4px; min-width: 0; }
+.overview-segment-navigation > label > span, .overview-buzzer-fields label > span { color: var(--text-muted); font: 600 8px var(--font-mono); letter-spacing: .04em; }
+.overview-segment-navigation select, .advanced-select-field select { width: 100%; min-width: 0; height: 32px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 8px; outline: 0; background: var(--surface-solid); color: var(--text); font: 600 9px var(--font-ui); }
+.overview-segment-navigation select:focus-visible, .advanced-select-field select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.overview-lcd-lines { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 6px; }
+.overview-lcd-lines input, .overview-buzzer-fields input { min-width: 0; height: 32px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 8px; outline: 0; background: var(--surface-solid); color: var(--text); font: 600 10px var(--font-mono); }
+.overview-lcd-lines input:focus-visible, .overview-buzzer-fields input:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent); }
+.overview-buzzer-fields { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) auto; align-items: end; gap: 6px; }
+.overview-buzzer-fields label { position: relative; display: grid; gap: 4px; min-width: 0; }
+.overview-buzzer-fields label > small { position: absolute; inset-inline-end: 8px; inset-block-end: 9px; color: var(--text-muted); font: 7px var(--font-mono); pointer-events: none; }
+.overview-buzzer-fields input { padding-inline-end: 30px; }
+.overview-peripheral__notice { margin: 8px 0 0; color: var(--text-muted); font-size: 9px; line-height: 1.45; }
+
+.advanced-select-field { display: grid; gap: 7px; min-width: 0; }
+.advanced-select-field > span { color: var(--text-soft); font-size: 10px; font-weight: 600; }
+.advanced-select-field > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 7px; }
+
+@media (max-width: 640px) {
+  .overview-peripheral--segment { grid-template-columns: 1fr; }
+  .overview-peripheral--segment > header { grid-column: auto; }
+  .overview-peripheral--segment .live-segment-preview { justify-self: center; }
+  .overview-segment-navigation { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .overview-segment-navigation > .button:nth-last-child(2) { grid-column: 2 / 3; }
+  .overview-lcd-lines, .overview-buzzer-fields { grid-template-columns: 1fr; }
+  .overview-lcd-lines .button, .overview-buzzer-fields .button { justify-content: center; }
+}
 .advanced-actions,
 .advanced-inline-actions,
 .advanced-review__actions {
