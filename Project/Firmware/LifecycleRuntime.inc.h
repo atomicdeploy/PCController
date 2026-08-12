@@ -83,7 +83,6 @@ static inline __attribute__((always_inline)) void initializeController() {
   wdt_reset();
 
   learnedRemotes.begin();
-  radioTransmitter.enableTransmit(BoardPins::RcTransmit);
   radioReceiver.setReceiveTolerance(70);
   radioReceiver.enableReceive(digitalPinToInterrupt(BoardPins::RcReceive));
 
@@ -222,41 +221,6 @@ static inline __attribute__((always_inline)) void serviceController() {
   if (statusLeds.mode() != desiredLedMode) {
     statusLeds.setMode(desiredLedMode, loopNow);
   }
-
-#if PCCONTROLLER_ENABLE_PCA9685 && !PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
-  // The compact profile intentionally omits the EEPROM profile/effect
-  // compositor, but the physical RGB indicator must never become a no-op.
-  // Keep one cached, direct fallback on the shared PWM engine.  A host
-  // StatusRgb command owns the channels unchanged while its override bit is
-  // set; this path resumes only for a local operational/safety state and
-  // never competes with a granted I2C lease.
-  static uint8_t lastCompactStatusMode = 0xFF;
-  static uint8_t lastCompactStatusBrightness = 0xFF;
-  const uint8_t compactStatusBrightness = settingsStore.values().statusBrightness;
-  if ((hostLcdFlags & HOST_STATUS_OVERRIDE) == 0 && !i2cReserved &&
-      (lastCompactStatusMode != static_cast<uint8_t>(desiredLedMode) ||
-       lastCompactStatusBrightness != compactStatusBrightness)) {
-    uint8_t red = 0;
-    uint8_t green = 0;
-    uint8_t blue = 0;
-    if (desiredLedMode == StatusLedMode::Warning ||
-        desiredLedMode == StatusLedMode::Fault) {
-      red = compactStatusBrightness;
-    } else if (desiredLedMode == StatusLedMode::Learning ||
-               desiredLedMode == StatusLedMode::Connected) {
-      green = compactStatusBrightness;
-    } else if (desiredLedMode != StatusLedMode::Off) {
-      // Blue is the quiet, visible default for boot/ready/waiting/running and
-      // host-loss. The power indicator itself remains independently owned by
-      // channel 12 and its bounded host-disconnect fallback.
-      blue = compactStatusBrightness;
-    }
-    if (pwm.setStatusRgb8(red, green, blue)) {
-      lastCompactStatusMode = static_cast<uint8_t>(desiredLedMode);
-      lastCompactStatusBrightness = compactStatusBrightness;
-    }
-  }
-#endif
 
   illumination.service(systemInputs.doorOpen(), !i2cReserved, loopNow);
   relays.service(loopNow);

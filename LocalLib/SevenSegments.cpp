@@ -127,7 +127,11 @@ void SevenSegments::begin(uint8_t brightness) {
   clockHigh();
   dataHigh();
   begun_ = true;
+  // One unequal cache byte forces clear() to write all four physical cells.
+  cachedSegments_[0] = 0xFF;
   clear();
+  // Zero is a valid display-off setting, so force the first command too.
+  brightness_ = 0xFF;
   setBrightness(brightness);
 }
 

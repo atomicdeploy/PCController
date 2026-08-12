@@ -53,7 +53,6 @@ Ina219Sensor ina219(BoardPins::Ina219Address);
 DallasTemperatureBus temperatureBus(BoardPins::OneWireData);
 Ds18b20Address temperatureAddresses[2];
 RCSwitch radioReceiver;
-RCSwitch radioTransmitter;
 RelayController relays(shiftRegisters);
 ControllerProtocol::UartProtocol appProtocol(Serial);
 ControllerEvents appEvents(appProtocol);

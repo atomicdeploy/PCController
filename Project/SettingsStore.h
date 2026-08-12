@@ -320,8 +320,10 @@ private:
   uint32_t changedAt_ = 0;
   uint8_t writeIndex_ = 0;
   uint8_t generation_ = 0;
-  uint8_t activeBank_ = 0xFF;
-  uint8_t writeBank_ = 1;
+  // begin() establishes the nonzero sentinels; keep the singleton in .bss so
+  // its 75-byte working set does not consume an equal flash initializer.
+  uint8_t activeBank_ = 0;
+  uint8_t writeBank_ = 0;
   bool dirty_ = false;
   bool persisted_ = false;
   bool writePending_ = false;
