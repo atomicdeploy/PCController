@@ -231,9 +231,10 @@ func applyTUIConsole(settings consolewindow.Settings, output io.Writer, strict b
 		return nil
 	}
 	if !result.Applied && settings.Enabled && result.Reason != "" {
-		// Linux terminal emulators own their presentation. This is expected, not
-		// actionable, so do not pollute the TUI with a platform warning.
-		if runtime.GOOS == "linux" && strings.Contains(result.Reason, "unavailable on linux") {
+		// Linux terminals (including SSH, Ptyxis, and GNOME RDP) own their
+		// presentation. A best-effort local console preference must never add
+		// a distracting warning to an otherwise working TUI there.
+		if runtime.GOOS == "linux" && !strict {
 			return nil
 		}
 		if strict {
