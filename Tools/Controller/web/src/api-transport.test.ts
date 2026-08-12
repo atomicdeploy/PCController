@@ -36,6 +36,11 @@ class FakeWebSocket {
     this.emit('close', { reason: 'closed by test' })
   }
 
+  pushClose(reason = 'closed by test'): void {
+    this.readyState = 0
+    this.emit('close', { reason })
+  }
+
   pushMessage(value: unknown): void {
     this.emit('message', { data: JSON.stringify(value) })
   }
@@ -61,13 +66,20 @@ describe('Web IPC transport', () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
 
-    const events: Array<{ kind: string; stream?: string }> = []
+    const events: Array<{ value: { kind: string; stream?: string }; generation: number; instanceID?: string }> = []
+	const states: Array<{ state: string; generation?: number; instanceID?: string }> = []
     const stop = connectStream({
       name: 'PCController', setup_complete: false, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
       appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
       appearance_etag: 'a'.repeat(64),
-    }, { status: () => undefined, event: (value) => events.push(value), state: () => undefined })
+    }, {
+      status: () => undefined,
+      event: (value, source) => events.push({ value, ...source }),
+	  state: (state, _detail, source) => states.push({ state, ...source }),
+    })
     await new Promise((resolve) => setTimeout(resolve, 0))
+	expect(states.at(-1)).toMatchObject({ state: 'connecting' })
+	expect(states.some((value) => value.state === 'open')).toBe(false)
 
     await expect(rpc<{ output: string }>('controller.command.execute', { command: 'status' })).resolves.toEqual({ output: 'ws-ok' })
     expect(fetchSpy).not.toHaveBeenCalled()
@@ -79,7 +91,104 @@ describe('Web IPC transport', () => {
       method: 'controller.state',
       params: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
     })
-    expect(events).toEqual([{ id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' }])
+    expect(events).toEqual([])
+    const subscription = JSON.parse(sockets[0].sent[0]) as { id: number }
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', id: subscription.id,
+      result: { subscribed: true, latest_id: 7, instance_id: 'primary-web-test' },
+    })
+	expect(states.at(-1)).toMatchObject({
+	  state: 'open', instanceID: 'primary-web-test',
+	})
+    expect(events).toEqual([{
+      value: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
+      generation: 1,
+      instanceID: 'primary-web-test',
+    }])
+    stop()
+  })
+
+  it('ignores stale close, status, and error callbacks after a newer socket opens', async () => {
+    const sockets: FakeWebSocket[] = []
+    class CapturingSocket extends FakeWebSocket {
+      constructor(url: string) { super(url); sockets.push(this) }
+    }
+    Object.defineProperty(CapturingSocket, 'OPEN', { value: 1 })
+    vi.stubGlobal('WebSocket', CapturingSocket)
+    vi.stubGlobal('location', { protocol: 'http:', host: '127.0.0.1:18887' })
+    vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: () => undefined, removeItem: () => undefined })
+    const retryTimers = new Map<number, () => void>()
+    let nextTimer = 0
+    vi.stubGlobal('window', {
+      setTimeout: (callback: () => void) => {
+        const id = ++nextTimer
+        retryTimers.set(id, callback)
+        return id
+      },
+      clearTimeout: (id: number) => { retryTimers.delete(Number(id)) },
+    })
+
+    const states: Array<{ state: string; detail?: string; generation?: number; instanceID?: string }> = []
+    const statuses: Array<{ status: { supply_mv: number } }> = []
+    const stop = connectStream({
+      name: 'PCController', setup_complete: true, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
+      appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+      appearance_etag: 'a'.repeat(64),
+    }, {
+      status: (value) => statuses.push(value as { status: { supply_mv: number } }),
+      event: () => undefined,
+      state: (state, detail, source) => states.push({ state, detail, ...source }),
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sockets).toHaveLength(1)
+    const firstSubscription = JSON.parse(sockets[0].sent[0]) as { id: number }
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', id: firstSubscription.id,
+      result: { subscribed: true, latest_id: 1, instance_id: 'primary-a' },
+    })
+    const firstOpen = states.at(-1)!
+    expect(firstOpen).toMatchObject({ state: 'open', instanceID: 'primary-a' })
+
+    sockets[0].pushClose('primary A disconnected')
+    expect(states.at(-1)).toMatchObject({
+      state: 'waiting', generation: firstOpen.generation, instanceID: 'primary-a',
+    })
+    expect(retryTimers.size).toBe(1)
+    const retry = [...retryTimers.entries()][0]
+    retryTimers.delete(retry[0])
+    retry[1]()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(sockets).toHaveLength(2)
+    const secondSubscription = JSON.parse(sockets[1].sent[0]) as { id: number }
+    sockets[1].pushMessage({
+      jsonrpc: '2.0', id: secondSubscription.id,
+      result: { subscribed: true, latest_id: 2, instance_id: 'primary-b' },
+    })
+    sockets[1].pushMessage({
+      jsonrpc: '2.0', method: 'controller.status',
+      params: { time: '2026-08-12T00:00:02Z', status: { supply_mv: 13_002 } },
+    })
+    const secondOpen = states.at(-1)!
+    expect(secondOpen).toMatchObject({ state: 'open', instanceID: 'primary-b' })
+    expect(secondOpen.generation).toBeGreaterThan(firstOpen.generation!)
+    expect(statuses.at(-1)?.status.supply_mv).toBe(13_002)
+
+    const stateCount = states.length
+    const statusCount = statuses.length
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', method: 'controller.status',
+      params: { time: '2026-08-12T00:00:03Z', status: { supply_mv: 9_999 } },
+    })
+    sockets[0].pushMessage({
+      jsonrpc: '2.0', method: 'controller.error', params: { error: 'late primary A error' },
+    })
+    sockets[0].pushClose('late primary A close')
+    await Promise.resolve()
+    expect(states).toHaveLength(stateCount)
+    expect(statuses).toHaveLength(statusCount)
+    expect(statuses.at(-1)?.status.supply_mv).toBe(13_002)
+    expect(retryTimers.size).toBe(0)
+    expect(sockets).toHaveLength(2)
     stop()
   })
 

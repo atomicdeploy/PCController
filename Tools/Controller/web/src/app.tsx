@@ -41,7 +41,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken, streamFailureState, transportFailureDetail, type StreamState } from './api'
+import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken, streamFailureState, transportFailureDetail, type StreamSource, type StreamState } from './api'
 import { primaryShortcutARIA, primaryShortcutModifier } from './client-platform'
 import {
   adjacentPageHotkey,
@@ -83,7 +83,7 @@ import type {
   ToastMessage,
   UIConfig,
 } from './types'
-import { applyPushedOutputEvent } from './status-led-event'
+import { advanceStatusLEDSource, applyPushedOutputEvent, mergeStatusLEDSnapshot, statusLEDSnapshotMatchesSource, statusLEDSourceUnchanged } from './status-led-event'
 import { shouldToastControllerEvent } from './event-notification-policy'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
@@ -410,6 +410,8 @@ export default function App() {
   const sidebarStatusRef = useRef<HTMLDivElement>(null)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
+  const ledTransportEpoch = useRef(0)
+	const ledTransportInstanceID = useRef('')
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
@@ -719,8 +721,15 @@ export default function App() {
       return
     }
     try {
+	  const started = { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current }
       const value = await getSnapshot()
-      setSnapshot(value)
+	  const current = { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current }
+	  if (!statusLEDSourceUnchanged(started, current)) return
+	  if (!statusLEDSnapshotMatchesSource(value, started)) return
+      setSnapshot((current) => mergeStatusLEDSnapshot(current, value, {
+		epoch: started.epoch, instanceID: value.host_instance_id,
+		authoritativeInstanceID: started.instanceID,
+      }))
       if (value.have_status) setSamples((current) => [...current.slice(-71), sampleFrom(value)])
     } catch (cause) {
       const failureState = streamFailureState(cause)
@@ -1173,7 +1182,10 @@ export default function App() {
         setBootResolved(true)
         setBootTarget(70)
         const value = await getSnapshot(abort.signal)
-        setSnapshot(value)
+        setSnapshot((current) => mergeStatusLEDSnapshot(current, value, {
+		  epoch: ledTransportEpoch.current, instanceID: value.host_instance_id,
+		  authoritativeInstanceID: ledTransportInstanceID.current,
+        }))
         setStartupProbeResolved(true)
         if (value.have_status) setSamples([sampleFrom(value)])
         const since = new Date(Date.now() - 60 * 60_000).toISOString()
@@ -1206,10 +1218,19 @@ export default function App() {
             setSnapshot((current) => ({ ...current, connected: true, have_status: true, status: update.status, status_updated: update.time }))
             setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, status: update.status }, new Date(update.time).getTime())])
           },
-          event: (event) => {
+          event: (event, source: StreamSource) => {
+			const adoptedSource = advanceStatusLEDSource(
+			  { epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
+			  { epoch: source.generation, instanceID: source.instanceID },
+			)
+			if (!adoptedSource) return
+			ledTransportEpoch.current = adoptedSource.epoch
+			ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
 			const eventKind = event.kind.toLowerCase()
 			if (event.kind.toLowerCase() === 'status_led.changed' || event.kind.toLowerCase() === 'front_panel.segment') {
-				setSnapshot((current) => applyPushedOutputEvent(current, event))
+				setSnapshot((current) => applyPushedOutputEvent(current, event, {
+					epoch: source.generation, instanceID: source.instanceID,
+				}))
 			}
 						if (config.integrations?.buzzer_web_audio && event.kind.toLowerCase() === 'buzzer.note') {
 							const frequencyHz = Number(event.metadata?.frequency_hz)
@@ -1245,7 +1266,16 @@ export default function App() {
             if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
             if (/device|connection|settings/i.test(event.kind)) void refresh()
           },
-          state: (state, detail) => {
+          state: (state, detail, source) => {
+			if (source?.generation) {
+			  const adoptedSource = advanceStatusLEDSource(
+				{ epoch: ledTransportEpoch.current, instanceID: ledTransportInstanceID.current },
+				{ epoch: source.generation, instanceID: source.instanceID },
+			  )
+			  if (!adoptedSource) return
+			  ledTransportEpoch.current = adoptedSource.epoch
+			  ledTransportInstanceID.current = adoptedSource.instanceID ?? ''
+			}
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
@@ -1261,7 +1291,7 @@ export default function App() {
                 setStreamDetail(cause instanceof Error ? cause.message : String(cause))
               })
             } else {
-              setSnapshot((current) => snapshotAfterTransportLoss(current, state, detail))
+			  setSnapshot((current) => snapshotAfterTransportLoss(current, state, detail))
             }
           },
         })

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -39,6 +40,68 @@ func TestRemoteLiveNotificationsCoalesceAndPreserveIntentionalOff(t *testing.T) 
 	if !update.HaveStatus || update.Status.SupplyMV != 12_345 || !update.HaveStatusLED ||
 		update.StatusLED != (native.StatusLEDState{Condition: 255}) {
 		t.Fatalf("coalesced update=%#v payload=%s", update, base64.StdEncoding.EncodeToString([]byte{0, 0, 0, 0, 0, 255}))
+	}
+}
+
+func TestRemoteLiveCoalescerPreservesSourceOrderAndMissingEpochMarker(t *testing.T) {
+	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1)}
+	peak := native.StatusLEDState{Blue: 145, Brightness: 145, Effect: native.StatusEffectBreathe}
+	baseline := tui.RemoteLiveUpdate{
+		StatusLED: peak, HaveStatusLED: true, StatusLEDOrderKnown: true,
+		StatusLEDEpoch: 2, StatusLEDRevision: 10,
+	}
+	client.publishLive(baseline)
+	delayed := baseline
+	delayed.StatusLED.Blue = 18
+	delayed.StatusLEDRevision = 9
+	client.publishLive(delayed)
+	got := <-client.liveRaw
+	if got.StatusLED != peak || got.StatusLEDEpoch != 2 || got.StatusLEDRevision != 10 {
+		t.Fatalf("delayed frame replaced newer queued baseline: %#v", got)
+	}
+
+	client.publishLive(baseline)
+	newer := baseline
+	newer.StatusLED.Blue = 100
+	newer.StatusLEDRevision = 11
+	client.publishLive(newer)
+	got = <-client.liveRaw
+	if got.StatusLED != newer.StatusLED || got.StatusLEDRevision != 11 {
+		t.Fatalf("newer frame did not replace queued baseline: %#v", got)
+	}
+
+	oldPrimary := tui.RemoteLiveUpdate{
+		StatusLED: peak, HaveStatusLED: true, StatusLEDOrderKnown: true,
+		StatusLEDEpoch: 1, StatusLEDRevision: 100,
+	}
+	client.publishLive(oldPrimary)
+	client.publishLive(tui.RemoteLiveUpdate{
+		StatusLEDOrderKnown: true, StatusLEDEpoch: 2, StatusLEDRevision: 0,
+	})
+	delayedOldPrimary := oldPrimary
+	delayedOldPrimary.StatusLED.Blue = 18
+	delayedOldPrimary.StatusLEDRevision = 101
+	client.publishLive(delayedOldPrimary)
+	got = <-client.liveRaw
+	if !got.HaveStatusLED || got.StatusLED != peak || !got.StatusLEDOrderKnown ||
+		got.StatusLEDEpoch != 2 || got.StatusLEDRevision != 0 {
+		t.Fatalf("missing new-primary marker lost visual/order authority: %#v", got)
+	}
+}
+
+func TestRemoteLiveCoalescerKeepsLatestLegacyFrameWithoutRevision(t *testing.T) {
+	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1)}
+	first := tui.RemoteLiveUpdate{
+		StatusLED: native.StatusLEDState{Blue: 18}, HaveStatusLED: true,
+		StatusLEDOrderKnown: true, StatusLEDEpoch: 1,
+	}
+	second := first
+	second.StatusLED.Blue = 36
+	client.publishLive(first)
+	client.publishLive(second)
+	got := <-client.liveRaw
+	if got.StatusLED != second.StatusLED || got.StatusLEDEpoch != 1 || got.StatusLEDRevision != 0 {
+		t.Fatalf("legacy revisionless stream did not coalesce latest value: %#v", got)
 	}
 }
 
@@ -122,6 +185,7 @@ func TestRemoteStateStreamRejectsOutOfOrderFramesButKeepsTrueOff(t *testing.T) {
 		event, _ := json.Marshal(controllerapi.Event{
 			ID: id, Time: time.Unix(int64(id), 0), Kind: "status_led.changed",
 			Opcode: native.OpStatusLEDChanged, Payload: payload,
+			Metadata: map[string]string{"revision": fmt.Sprint(id)},
 		})
 		message, _ := json.Marshal(remoteLiveMessage{Method: "controller.state", Params: event})
 		return message
@@ -160,17 +224,22 @@ func TestRemoteStateCursorPersistsAcrossSessionsAndIsSentOnSubscribe(t *testing.
 }
 
 func TestRemoteStateCursorResetsOnPrimaryEpochChange(t *testing.T) {
-	client := &remoteTUIIPC{liveStateCursor: 500, liveRequestedAfter: 500}
-	if reset := client.acceptLiveAcknowledgement(2); !reset {
+	client := &remoteTUIIPC{
+		liveStateCursor: 2, liveRequestedAfter: 2,
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
+	}
+	if reset := client.acceptLiveAcknowledgement(10, "primary-b"); !reset {
 		t.Fatal("primary event epoch reset was not detected")
 	}
-	if client.liveStateCursor != 2 || client.liveRequestedAfter != 2 {
+	if client.liveStateCursor != 10 || client.liveRequestedAfter != 10 ||
+		client.liveEpoch != 2 || client.liveSessionEpoch != 2 {
 		t.Fatalf("reset cursor=%d requested=%d", client.liveStateCursor, client.liveRequestedAfter)
 	}
-	if !client.advanceLiveStateCursor(3) {
+	if !client.advanceLiveStateCursor(11) {
 		t.Fatal("new primary epoch state was rejected by the old cursor")
 	}
-	if reset := client.acceptLiveAcknowledgement(4); reset {
+	if reset := client.acceptLiveAcknowledgement(12, "primary-b"); reset {
 		t.Fatal("monotonic same-epoch acknowledgement triggered a reset")
 	}
 }
@@ -185,6 +254,8 @@ func TestRemoteEpochResetPublishesAuthoritativeBaselineBeforeNewFrames(t *testin
 	client := &remoteTUIIPC{
 		ctx: ctx, liveRaw: make(chan tui.RemoteLiveUpdate, 1),
 		liveStateCursor: 500, liveRequestedAfter: 500,
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
 	}
 	client.callFn = func(_ context.Context, method string, _ any, target any) error {
 		if method != "controller.snapshot" {
@@ -198,20 +269,160 @@ func TestRemoteEpochResetPublishesAuthoritativeBaselineBeforeNewFrames(t *testin
 		wire.StatusLED = authoritative.StatusLED
 		wire.HaveStatusLED = authoritative.HaveStatusLED
 		wire.StatusLEDUpdated = authoritative.StatusLEDUpdated
+		wire.StatusLEDRevision = 1
+		wire.HostInstanceID = "primary-b"
 		return nil
 	}
-	reset, err := client.consumeLiveEpochReset(2)
+	reset, err := client.consumeLiveEpochReset(2, "primary-b")
 	if err != nil || !reset {
 		t.Fatalf("reset=%t err=%v", reset, err)
 	}
 	baseline := <-client.liveRaw
 	if !baseline.HaveStatus || baseline.Status.SupplyMV != 13_002 ||
-		!baseline.HaveStatusLED || baseline.StatusLED != authoritative.StatusLED {
+		!baseline.HaveStatusLED || baseline.StatusLED != authoritative.StatusLED ||
+		baseline.StatusLEDEpoch != 2 || baseline.StatusLEDRevision != 1 {
 		t.Fatalf("authoritative restart baseline=%#v", baseline)
 	}
 	_, afterID := client.nextLiveRequest()
 	if afterID != 2 || !client.advanceLiveStateCursor(3) {
 		t.Fatalf("next after_id=%d cursor=%d", afterID, client.liveStateCursor)
+	}
+}
+
+func TestRemoteSnapshotDiscardsOldPrimaryResponseAfterLiveIdentitySwitch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	client := &remoteTUIIPC{
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
+	}
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	client.callFn = func(_ context.Context, method string, _ any, target any) error {
+		if method != "controller.snapshot" {
+			return errors.New("unexpected method " + method)
+		}
+		wire := target.(*remoteSnapshotWire)
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+			wire.HostInstanceID = "primary-a"
+			wire.StatusLEDRevision = 99
+			return nil
+		}
+		wire.HostInstanceID = "primary-b"
+		wire.StatusLEDRevision = 2
+		return nil
+	}
+	result := make(chan control.Snapshot, 1)
+	go func() {
+		snapshot, _ := client.Snapshot(ctx)
+		result <- snapshot
+	}()
+	<-firstStarted
+	if !client.acceptLiveAcknowledgement(10, "primary-b") {
+		t.Fatal("live identity switch was not detected")
+	}
+	close(releaseFirst)
+	snapshot := <-result
+	if calls.Load() != 2 || snapshot.StatusLEDEpoch != 2 || snapshot.StatusLEDRevision != 2 ||
+		client.liveInstanceID != "primary-b" {
+		t.Fatalf("stale A response was relabeled/adopted: calls=%d snapshot=%#v client=%#v",
+			calls.Load(), snapshot, client)
+	}
+}
+
+func TestRemotePostBaselinePreAcknowledgementFrameUsesNewEpoch(t *testing.T) {
+	client := &remoteTUIIPC{
+		liveRaw:         make(chan tui.RemoteLiveUpdate, 1),
+		liveStateCursor: 2, liveRequestedAfter: 2,
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
+	}
+	if !client.acceptLiveAcknowledgement(10, "primary-b") {
+		t.Fatal("restart was not detected")
+	}
+	off := native.StatusLEDState{Condition: 255}
+	payload := []byte{off.Red, off.Green, off.Blue, off.Brightness, off.Effect, off.Condition}
+	event, _ := json.Marshal(controllerapi.Event{
+		ID: 11, Time: time.Unix(11, 0), Kind: "status_led.changed",
+		Opcode: native.OpStatusLEDChanged, Payload: payload,
+		Metadata: map[string]string{"revision": "2"},
+	})
+	message, _ := json.Marshal(remoteLiveMessage{Method: "controller.state", Params: event})
+	if _, err := client.consumeLiveMessage(message, 0); err != nil {
+		t.Fatal(err)
+	}
+	update := <-client.liveRaw
+	if update.StatusLEDEpoch != 2 || update.StatusLEDRevision != 2 || update.StatusLED != off {
+		t.Fatalf("post-baseline frame used stale session epoch: %#v", update)
+	}
+}
+
+func TestRemoteStateBeforeAcknowledgementWaitsForSourceIdentity(t *testing.T) {
+	client := &remoteTUIIPC{
+		liveRaw:         make(chan tui.RemoteLiveUpdate, 1),
+		liveStateCursor: 10, liveRequestedAfter: 10,
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
+	}
+	event, _ := json.Marshal(controllerapi.Event{
+		ID: 11, Time: time.Unix(11, 0), Kind: "status_led.changed",
+		Opcode: native.OpStatusLEDChanged, Payload: []byte{0, 0, 8, 145, 1, 9},
+		Metadata: map[string]string{"revision": "1"},
+	})
+	message, _ := json.Marshal(remoteLiveMessage{Method: "controller.state", Params: event})
+	var pending [][]byte
+	acknowledged, err := client.consumeOrBufferLiveMessage(message, 1, false, &pending)
+	if err != nil || acknowledged || len(pending) != 1 || client.liveStateCursor != 10 {
+		t.Fatalf("pre-ack frame was not quarantined: ack=%t err=%v pending=%d cursor=%d",
+			acknowledged, err, len(pending), client.liveStateCursor)
+	}
+	select {
+	case update := <-client.liveRaw:
+		t.Fatalf("pre-ack frame leaked under the previous identity: %#v", update)
+	default:
+	}
+	if !client.acceptLiveAcknowledgement(10, "primary-b") {
+		t.Fatal("primary restart was not adopted from the acknowledgement")
+	}
+	if _, err := client.consumeLiveMessage(pending[0], 0); err != nil {
+		t.Fatal(err)
+	}
+	update := <-client.liveRaw
+	if update.StatusLEDEpoch != 2 || update.StatusLEDRevision != 1 || update.StatusLED.Blue != 8 {
+		t.Fatalf("buffered frame was not replayed under primary B: %#v", update)
+	}
+}
+
+func TestRemoteEpochResetPublishesMissingLEDOrderWatermark(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := &remoteTUIIPC{
+		ctx: ctx, liveRaw: make(chan tui.RemoteLiveUpdate, 1),
+		liveStateCursor: 100, liveRequestedAfter: 100,
+		liveEpoch: 1, liveInstanceID: "primary-a",
+		liveSessionEpoch: 1, liveSessionInstanceID: "primary-a",
+	}
+	client.callFn = func(_ context.Context, method string, _ any, target any) error {
+		if method != "controller.snapshot" {
+			return errors.New("unexpected method " + method)
+		}
+		wire := target.(*remoteSnapshotWire)
+		wire.HostInstanceID = "primary-b"
+		wire.HaveStatusLED = false
+		wire.StatusLEDRevision = 0
+		return nil
+	}
+	reset, err := client.consumeLiveEpochReset(2, "primary-b")
+	if err != nil || !reset {
+		t.Fatalf("reset=%t err=%v", reset, err)
+	}
+	baseline := <-client.liveRaw
+	if baseline.HaveStatusLED || !baseline.StatusLEDOrderKnown ||
+		baseline.StatusLEDEpoch != 2 || baseline.StatusLEDRevision != 0 {
+		t.Fatalf("missing new-primary baseline lost its order watermark: %#v", baseline)
 	}
 }
 

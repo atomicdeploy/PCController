@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -137,6 +138,11 @@ func TestStatusLEDPumpSuppressesOnlyUnchangedFrames(t *testing.T) {
 	if !firstSnapshot.HaveStatusLED || firstSnapshot.StatusLED != state {
 		t.Fatalf("initial status LED snapshot=%#v", firstSnapshot.StatusLED)
 	}
+	if firstSnapshot.StatusLEDRevision != 1 ||
+		first.Metadata["revision"] != strconv.FormatUint(firstSnapshot.StatusLEDRevision, 10) {
+		t.Fatalf("initial revision snapshot=%d event=%q",
+			firstSnapshot.StatusLEDRevision, first.Metadata["revision"])
+	}
 
 	if err := port.sendStatusLED(state); err != nil {
 		t.Fatal(err)
@@ -151,6 +157,10 @@ func TestStatusLEDPumpSuppressesOnlyUnchangedFrames(t *testing.T) {
 	if !duplicateSnapshot.StatusLEDUpdated.Equal(firstSnapshot.StatusLEDUpdated) {
 		t.Fatalf("unchanged frame advanced status timestamp: before=%v after=%v",
 			firstSnapshot.StatusLEDUpdated, duplicateSnapshot.StatusLEDUpdated)
+	}
+	if duplicateSnapshot.StatusLEDRevision != firstSnapshot.StatusLEDRevision {
+		t.Fatalf("unchanged frame advanced revision: before=%d after=%d",
+			firstSnapshot.StatusLEDRevision, duplicateSnapshot.StatusLEDRevision)
 	}
 
 	changes := []native.StatusLEDState{
@@ -174,8 +184,12 @@ func TestStatusLEDPumpSuppressesOnlyUnchangedFrames(t *testing.T) {
 				index, published, err, changed)
 		}
 		snapshot := runtime.Snapshot()
-		if snapshot.StatusLED != changed {
-			t.Fatalf("change %d was lost: got=%#v want=%#v", index, snapshot.StatusLED, changed)
+		wantRevision := uint64(index + 2)
+		if snapshot.StatusLED != changed || snapshot.StatusLEDRevision != wantRevision ||
+			event.Metadata["revision"] != strconv.FormatUint(wantRevision, 10) {
+			t.Fatalf("change %d state/revision mismatch: snapshot=%#v rev=%d event_rev=%q want=%#v rev=%d",
+				index, snapshot.StatusLED, snapshot.StatusLEDRevision,
+				event.Metadata["revision"], changed, wantRevision)
 		}
 	}
 	if got, want := runtime.LatestEventID(), first.ID+uint64(len(changes)); got != want {

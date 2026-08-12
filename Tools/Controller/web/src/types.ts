@@ -134,6 +134,7 @@ export interface StatusLEDState {
 }
 
 export interface Snapshot {
+	host_instance_id?: string
   connected: boolean
   paused: boolean
   port: PortInfo
@@ -154,6 +155,9 @@ export interface Snapshot {
 	status_led?: StatusLEDState
 	have_status_led?: boolean
 	status_led_updated?: string
+	status_led_revision?: number
+	/** Browser-local transport generation; never sent to the controller. */
+	status_led_epoch?: number
 }
 
 export interface StatusUpdate {

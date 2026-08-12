@@ -341,6 +341,7 @@ type Snapshot struct {
 	StatusLED         StatusLEDState       `json:"status_led"`
 	HaveStatusLED     bool                 `json:"have_status_led"`
 	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
+	StatusLEDRevision uint64               `json:"status_led_revision,omitempty"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -1655,6 +1656,7 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLED:         snapshot.StatusLED,
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
+		StatusLEDRevision: snapshot.StatusLEDRevision,
 	}
 }
 

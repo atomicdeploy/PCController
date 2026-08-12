@@ -95,22 +95,35 @@ func TestRemoteSnapshotUsesLiveRevisionWithoutFreezingConvergence(t *testing.T) 
 	}
 }
 
-func TestRemoteLEDIdenticalReplayPreservesPhaseAndIntentionalOffApplies(t *testing.T) {
+func TestRemoteLEDRevisionAdvancesForIdenticalStateAndPreservesMissingState(t *testing.T) {
 	base := time.Date(2026, 8, 12, 3, 4, 5, 0, time.UTC)
 	blue := native.StatusLEDState{Blue: 120, Brightness: 120, Condition: 255}
 	model := Model{remote: &RemoteBackend{}, remoteSnapshot: RichPreviewSnapshot()}
 	model.remoteSnapshot.StatusLED = blue
 	model.remoteSnapshot.HaveStatusLED = true
 	model.remoteSnapshot.StatusLEDUpdated = base
+	model.remoteSnapshot.StatusLEDEpoch = 1
+	model.remoteSnapshot.StatusLEDRevision = 5
 
 	replay := RemoteLiveUpdate{
 		StatusLED: blue, HaveStatusLED: true,
-		StatusLEDUpdated: base.Add(time.Second), StatusLEDReceivedAt: base.Add(time.Second),
+		// Source clocks may step backward; only revision orders this update.
+		StatusLEDUpdated: base.Add(-time.Hour), StatusLEDReceivedAt: base.Add(time.Second),
+		StatusLEDEpoch: 1, StatusLEDRevision: 6,
 	}
 	updated, _ := model.Update(remoteLiveUpdateMsg(replay))
 	model = updated.(Model)
-	if !model.remoteSnapshot.StatusLEDUpdated.Equal(base) {
-		t.Fatalf("identical replay reset LED phase to %s", model.remoteSnapshot.StatusLEDUpdated)
+	if model.remoteSnapshot.StatusLEDRevision != 6 ||
+		!model.remoteSnapshot.StatusLEDUpdated.Equal(replay.StatusLEDUpdated) {
+		t.Fatalf("identical newer frame did not advance ordering watermark: %#v", model.remoteSnapshot)
+	}
+	delayed := replay
+	delayed.StatusLED.Blue = 18
+	delayed.StatusLEDRevision = 5
+	updated, _ = model.Update(remoteLiveUpdateMsg(delayed))
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != blue || model.remoteSnapshot.StatusLEDRevision != 6 {
+		t.Fatalf("older different frame passed an identical newer watermark: %#v", model.remoteSnapshot)
 	}
 	unknown := RichPreviewSnapshot()
 	unknown.HaveStatusLED = false
@@ -128,22 +141,187 @@ func TestRemoteLEDIdenticalReplayPreservesPhaseAndIntentionalOffApplies(t *testi
 	off := replay
 	off.StatusLED = native.StatusLEDState{Condition: 255}
 	off.StatusLEDUpdated = base.Add(2 * time.Second)
+	off.StatusLEDRevision = 7
 	updated, _ = model.Update(remoteLiveUpdateMsg(off))
 	model = updated.(Model)
 	if model.remoteSnapshot.StatusLED != off.StatusLED ||
-		!model.remoteSnapshot.StatusLEDUpdated.Equal(off.StatusLEDUpdated) {
+		model.remoteSnapshot.StatusLEDRevision != 7 {
 		t.Fatalf("intentional off frame was hidden: %#v", model.remoteSnapshot)
 	}
 	stale := RichPreviewSnapshot()
 	stale.StatusLED = blue
 	stale.HaveStatusLED = true
 	stale.StatusLEDUpdated = base.Add(time.Second)
+	stale.StatusLEDEpoch = 1
+	stale.StatusLEDRevision = 6
 	updated, _ = model.Update(remoteSnapshotResultMsg{
-		snapshot: stale, receivedAt: base.Add(3 * time.Second), ledSequence: 0,
+		snapshot: stale, receivedAt: base.Add(3 * time.Second),
+		ledSequence: model.remoteLEDSequence,
 	})
 	model = updated.(Model)
 	if model.remoteSnapshot.StatusLED != off.StatusLED {
 		t.Fatalf("pre-event snapshot synthesized an off-to-blue jump: %#v", model.remoteSnapshot.StatusLED)
+	}
+}
+
+func TestRemoteLEDSnapshotAheadDoesNotReplayDelayedRise(t *testing.T) {
+	base := time.Date(2026, 8, 12, 3, 4, 5, 0, time.UTC)
+	peak := native.StatusLEDState{
+		Blue: 145, Brightness: 145,
+		Effect: native.StatusEffectBreathe, Condition: native.StatusConditionBluetoothWaiting,
+	}
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: RichPreviewSnapshot()}
+	model.remoteSnapshot.StatusLED = native.StatusLEDState{
+		Blue: 8, Brightness: 145,
+		Effect: native.StatusEffectBreathe, Condition: native.StatusConditionBluetoothWaiting,
+	}
+	model.remoteSnapshot.HaveStatusLED = true
+	model.remoteSnapshot.StatusLEDUpdated = base
+	model.remoteSnapshot.StatusLEDEpoch = 1
+	model.remoteSnapshot.StatusLEDRevision = 8
+
+	newerSnapshot := model.remoteSnapshot
+	newerSnapshot.StatusLED = peak
+	newerSnapshot.StatusLEDUpdated = base.Add(5 * time.Second)
+	newerSnapshot.StatusLEDRevision = 10
+	updated, _ := model.Update(remoteSnapshotResultMsg{
+		snapshot: newerSnapshot, receivedAt: base.Add(6 * time.Second),
+		statusSequence: model.remoteStatusSequence, ledSequence: model.remoteLEDSequence,
+	})
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != peak || model.remoteSnapshot.StatusLEDRevision != 10 {
+		t.Fatalf("newer snapshot did not overtake prior live state: %#v", model.remoteSnapshot)
+	}
+
+	// The snapshot HTTP response can overtake an already-sent WebSocket frame.
+	// Replaying that older rising frame after the peak makes the terminal show
+	// peak -> sudden minimum -> rise again, even though the MCU never jumped.
+	delayedRise := RemoteLiveUpdate{
+		StatusLED: native.StatusLEDState{
+			Blue: 18, Brightness: 145,
+			Effect: native.StatusEffectBreathe, Condition: native.StatusConditionBluetoothWaiting,
+		},
+		HaveStatusLED: true, StatusLEDUpdated: base.Add(time.Second),
+		StatusLEDReceivedAt: base.Add(6 * time.Second),
+		StatusLEDEpoch:      1, StatusLEDRevision: 9,
+	}
+	updated, _ = model.Update(remoteLiveUpdateMsg(delayedRise))
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != peak ||
+		model.remoteSnapshot.StatusLEDRevision != 10 {
+		t.Fatalf("delayed rise rolled newer peak backward: state=%#v updated=%s",
+			model.remoteSnapshot.StatusLED, model.remoteSnapshot.StatusLEDUpdated)
+	}
+
+	fall := delayedRise
+	fall.StatusLED.Blue = 100
+	fall.StatusLEDUpdated = base.Add(-time.Hour)
+	fall.StatusLEDRevision = 11
+	updated, _ = model.Update(remoteLiveUpdateMsg(fall))
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != fall.StatusLED ||
+		model.remoteSnapshot.StatusLEDRevision != 11 ||
+		!model.remoteSnapshot.StatusLEDUpdated.Equal(fall.StatusLEDUpdated) {
+		t.Fatalf("newer falling frame was rejected: %#v", model.remoteSnapshot)
+	}
+}
+
+func TestRemoteLEDPrimaryEpochResetAcceptsLowerRevision(t *testing.T) {
+	peak := native.StatusLEDState{Blue: 145, Brightness: 145, Effect: native.StatusEffectBreathe}
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: RichPreviewSnapshot()}
+	model.remoteSnapshot.StatusLED = peak
+	model.remoteSnapshot.HaveStatusLED = true
+	model.remoteSnapshot.StatusLEDEpoch = 1
+	model.remoteSnapshot.StatusLEDRevision = 100
+
+	restarted := RemoteLiveUpdate{
+		StatusLED: native.StatusLEDState{Condition: 255}, HaveStatusLED: true,
+		StatusLEDEpoch: 2, StatusLEDRevision: 1,
+	}
+	updated, _ := model.Update(remoteLiveUpdateMsg(restarted))
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != restarted.StatusLED ||
+		model.remoteSnapshot.StatusLEDEpoch != 2 || model.remoteSnapshot.StatusLEDRevision != 1 {
+		t.Fatalf("new primary's lower revision was frozen by old epoch: %#v", model.remoteSnapshot)
+	}
+
+	delayedOldEpoch := restarted
+	delayedOldEpoch.StatusLED = peak
+	delayedOldEpoch.StatusLEDEpoch = 1
+	delayedOldEpoch.StatusLEDRevision = 101
+	updated, _ = model.Update(remoteLiveUpdateMsg(delayedOldEpoch))
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != restarted.StatusLED || model.remoteSnapshot.StatusLEDEpoch != 2 {
+		t.Fatalf("delayed old-primary frame crossed the epoch boundary: %#v", model.remoteSnapshot)
+	}
+}
+
+func TestRemoteLEDMissingNewEpochRejectsDelayedOldPrimaryThenAcceptsOff(t *testing.T) {
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: RichPreviewSnapshot()}
+	retained := native.StatusLEDState{Blue: 145, Brightness: 145}
+	model.remoteSnapshot.HaveStatusLED = true
+	model.remoteSnapshot.StatusLED = retained
+	model.remoteSnapshot.StatusLEDEpoch = 1
+	model.remoteSnapshot.StatusLEDRevision = 100
+	missing := RichPreviewSnapshot()
+	missing.HaveStatusLED = false
+	missing.StatusLED = native.StatusLEDState{}
+	missing.StatusLEDEpoch = 2
+	missing.StatusLEDRevision = 0
+	merged := mergeRemoteSnapshot(model.remoteSnapshot, missing, true, true)
+	if !merged.HaveStatusLED || merged.StatusLED != retained ||
+		merged.StatusLEDEpoch != 2 || merged.StatusLEDRevision != 0 {
+		t.Fatalf("new-primary missing snapshot did not retain value and advance watermark: %#v", merged)
+	}
+	// A live A frame completing while the B snapshot RPC was in flight changes
+	// the sequence gate. The provably newer B epoch must still win.
+	model.remoteLEDSequence = 1
+	updated, _ := model.Update(remoteSnapshotResultMsg{
+		snapshot: missing, ledSequence: 0,
+	})
+	model = updated.(Model)
+	if !model.remoteSnapshot.HaveStatusLED || model.remoteSnapshot.StatusLED != retained ||
+		model.remoteSnapshot.StatusLEDEpoch != 2 || model.remoteSnapshot.StatusLEDRevision != 0 {
+		t.Fatalf("new-primary missing live baseline did not retain value and advance watermark: %#v",
+			model.remoteSnapshot)
+	}
+	delayedOld := RemoteLiveUpdate{
+		StatusLED: native.StatusLEDState{Blue: 145, Brightness: 145}, HaveStatusLED: true,
+		StatusLEDEpoch: 1, StatusLEDRevision: 101,
+	}
+	updated, _ = model.Update(remoteLiveUpdateMsg(delayedOld))
+	model = updated.(Model)
+	if !model.remoteSnapshot.HaveStatusLED || model.remoteSnapshot.StatusLED != retained ||
+		model.remoteSnapshot.StatusLEDEpoch != 2 {
+		t.Fatalf("old primary filled a missing new-primary baseline: %#v", model.remoteSnapshot)
+	}
+	off := RemoteLiveUpdate{
+		StatusLED: native.StatusLEDState{Condition: 255}, HaveStatusLED: true,
+		StatusLEDEpoch: 2, StatusLEDRevision: 1,
+	}
+	updated, _ = model.Update(remoteLiveUpdateMsg(off))
+	model = updated.(Model)
+	if !model.remoteSnapshot.HaveStatusLED || model.remoteSnapshot.StatusLED != off.StatusLED ||
+		model.remoteSnapshot.StatusLEDRevision != 1 {
+		t.Fatalf("same-new-epoch explicit off was not accepted: %#v", model.remoteSnapshot)
+	}
+}
+
+func TestRemoteLEDMissingWithoutRetainedVisualRejectsOlderSnapshot(t *testing.T) {
+	current := RichPreviewSnapshot()
+	current.HaveStatusLED = false
+	current.StatusLED = native.StatusLEDState{}
+	current.StatusLEDEpoch = 2
+	current.StatusLEDRevision = 0
+	oldPrimary := RichPreviewSnapshot()
+	oldPrimary.HaveStatusLED = true
+	oldPrimary.StatusLED = native.StatusLEDState{Blue: 18, Brightness: 145}
+	oldPrimary.StatusLEDEpoch = 1
+	oldPrimary.StatusLEDRevision = 101
+	merged := mergeRemoteSnapshot(current, oldPrimary, true, true)
+	if merged.HaveStatusLED || merged.StatusLED != (native.StatusLEDState{}) ||
+		merged.StatusLEDEpoch != 2 || merged.StatusLEDRevision != 0 {
+		t.Fatalf("older snapshot filled a missing new-primary baseline: %#v", merged)
 	}
 }
 
