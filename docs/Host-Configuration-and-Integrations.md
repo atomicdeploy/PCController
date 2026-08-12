@@ -736,8 +736,11 @@ render that registry according to their available space and transport.
   described as disconnected; board-only controls and firmware actions are not
   presented as actionable until the host has a live board capability report.
 - Tables use the shared typed-collection control.  It provides column
-  visibility and resizing, drag-to-reorder headers, a valid page-range
-  **Go to** selector, keyboard/focus handling, and context-menu dismissal.
+  visibility, a visible direct resize affordance, drag-to-reorder grips in
+  both the column selector and headers, a valid page-range **Go to** selector,
+  keyboard/focus handling, and context-menu dismissal on pointer, Escape,
+  window blur, or focus loss.  Selector ordering deliberately has no second
+  width slider: the header resize control is the one authoritative width path.
   The events table also filters by event type.  High-rate diagnostic events
   such as `STATUS_RGB` stay hidden unless the operator enables the debug-noise
   toggle, so normal operational history remains readable.
