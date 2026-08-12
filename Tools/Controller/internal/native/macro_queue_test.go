@@ -1,6 +1,7 @@
 package native
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
@@ -25,9 +26,9 @@ func TestGeneratedMacroContractMatchesCanonicalCXXSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := sha256.New()
-	_, _ = hash.Write(protocol)
+	_, _ = hash.Write(canonicalMacroContractSource(protocol))
 	_, _ = hash.Write([]byte{0})
-	_, _ = hash.Write(actions)
+	_, _ = hash.Write(canonicalMacroContractSource(actions))
 	if got := fmt.Sprintf("%x", hash.Sum(nil)); got != macroContractSourceSHA256 {
 		t.Fatalf("generated macro contract is stale: got source %s, generated %s; run go generate ./internal/native", got, macroContractSourceSHA256)
 	}
@@ -53,6 +54,11 @@ func TestGeneratedMacroContractMatchesCanonicalCXXSources(t *testing.T) {
 	if _, recordable := MacroBoardActionPayloadLength(OpStatusEffect); recordable {
 		t.Fatal("variable playback-only action entered board evidence")
 	}
+}
+
+func canonicalMacroContractSource(source []byte) []byte {
+	canonical := bytes.ReplaceAll(source, []byte("\r\n"), []byte("\n"))
+	return bytes.ReplaceAll(canonical, []byte("\r"), []byte("\n"))
 }
 
 func TestMacroStatusSchemaThreeRoundTripLayout(t *testing.T) {

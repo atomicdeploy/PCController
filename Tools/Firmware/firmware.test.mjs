@@ -273,7 +273,7 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 	assert.doesNotMatch(frontPanel, /event == KeyEvent::Click \|\| event == KeyEvent::HoldStart/u)
 	assert.match(
 		protocol,
-		/case RemoteKeyGesture:[^]*?applyKeyGesture\(payload\[0\], static_cast<KeyEvent>\(payload\[1\]\)\);/u
+		/case RemoteKeyGesture:[^]*?applyKeyGesture\(payload\[0\], static_cast<KeyEvent>\(payload\[1\]\),\s*InputEventSource::Host, true\);/u
 	)
 	assert.match(
 		radio,
@@ -309,7 +309,7 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
         )
         assert.equal(
                 sources.join('\n').match(/\bnow = millis\(\);/gu)?.length,
-                6
+                7
         )
         assert.match(
                 sources[1],
@@ -322,6 +322,10 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
         assert.match(
                 sources[3],
                 /handleMenuAction[^]*?\{[^]*?now = millis\(\);\s*const uint32_t actionNow = now;/u
+        )
+        assert.match(
+                sources[3],
+                /event == KeyEvent::Down[^]*?now = millis\(\);\s*const MotionKeyBinding/u
         )
         assert.match(sources[3], /const uint32_t releaseNow = now;/u)
 })
