@@ -43,6 +43,6 @@ func parseBeepCommand(args []string, stderr io.Writer, config appconfig.Connecti
 	if *frequency > 0xffff || (!stopping && (*frequency < 20 || *frequency > 20000)) {
 		return nil, "", errors.New("beep frequency must be 20..20000 Hz, or 0 with duration 0 to stop")
 	}
-	command := "buzzer " + strconv.FormatUint(uint64(*frequency), 10) + " " + strconv.FormatUint(uint64(*duration), 10)
+	command := "beep " + strconv.FormatUint(uint64(*frequency), 10) + " " + strconv.FormatUint(uint64(*duration), 10)
 	return connection, command, nil
 }

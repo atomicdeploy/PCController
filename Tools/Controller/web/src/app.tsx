@@ -1020,7 +1020,7 @@ export default function App() {
   }, [notify])
 
   const setBuzzerPath = useCallback(async (value: BuzzerPath) => {
-    await runCommand(`buzzer path ${value}`, 'Buzzer routing updated')
+		await runCommand(`beep path ${value}`, 'Buzzer routing updated')
     await refreshHostAppearance()
   }, [refreshHostAppearance, runCommand])
 

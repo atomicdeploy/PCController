@@ -16,7 +16,7 @@ func TestParseBeepCommandUsesSharedBuzzerContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command != "buzzer 440 125" || connection.port != "COM44" || !connection.overrides["port"] {
+	if command != "beep 440 125" || connection.port != "COM44" || !connection.overrides["port"] {
 		t.Fatalf("connection=%+v command=%q", connection, command)
 	}
 }
@@ -35,7 +35,7 @@ func TestParseBeepCommandRejectsUnsafeOrAmbiguousInputs(t *testing.T) {
 		}
 	}
 	_, command, err := parseBeepCommand([]string{"--frequency", "0", "--duration", "0"}, &bytes.Buffer{}, appconfig.Defaults().Connection)
-	if err != nil || command != "buzzer 0 0" {
+	if err != nil || command != "beep 0 0" {
 		t.Fatalf("stop command=%q err=%v", command, err)
 	}
 }

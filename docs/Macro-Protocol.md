@@ -9,7 +9,7 @@ Schema 3 adds capture while retaining the record shape. `MacroStart` is
 `[3,id,flags,total_steps LE16]`; flag bit 1 starts MCU-timed capture. A
 capturing board records only an ordinary command that already passed the same
 validation and safety checks used by live host, front-panel, or learned-RF
-input. Capture can therefore include relay, side-motion, PWM/MOSFET, buzzer,
+input. Capture can therefore include relay, side-motion, PWM/MOSFET, beep,
 display/message and LED operations without a parallel action vocabulary.
 
 `MacroStep` selectors: `0` append, `1` play, `2` status, `3` clear, `4` fetch

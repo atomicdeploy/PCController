@@ -409,8 +409,8 @@ export function DashboardView(props: SharedViewProps) {
   const testBuzzer = () => {
     void performPeripheral(
       'buzzer',
-      () => execute(`buzzer ${buzzerFrequency} ${buzzerDuration}`),
-      copy('Buzzer test command accepted.', 'فرمان آزمون بیزر پذیرفته شد.'),
+		() => execute(`beep ${buzzerFrequency} ${buzzerDuration}`),
+		copy('Beep command accepted.', 'فرمان بوق پذیرفته شد.'),
     )
   }
   const updateLayout = (change: (current: ReturnType<typeof loadDashboardLayout>) => ReturnType<typeof loadDashboardLayout>) => {
