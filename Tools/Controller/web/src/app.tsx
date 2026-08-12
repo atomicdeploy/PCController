@@ -371,7 +371,6 @@ export default function App() {
   const appearanceETagRef = useRef('')
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
-  const refreshAfterHostRestart = useRef(false)
   const resourceProbeInFlight = useRef<Promise<ResourceConvergenceState> | null>(null)
   const resourceHintAllowedAt = useRef(0)
   const startupConsoleShown = useRef(false)
@@ -545,7 +544,13 @@ export default function App() {
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
         setEvents((current) => prependSignificantControllerEvent(current, event))
-        if (isCompletedHostUpdate(event)) refreshAfterHostRestart.current = true
+        if (isCompletedHostUpdate(event)) {
+          void reconcileHostResources(true).then((convergence) => {
+            if (convergence === 'blocked') {
+              setStreamDetail('The host WebUI bundle changed, but this tab already used its safe reload attempt for that bundle')
+            }
+          }).catch(() => undefined)
+        }
       }
     })
     const announce = () => channel.publishPresence(document.hidden ? 'hidden' : 'active', pageRef.current)
@@ -1108,7 +1113,13 @@ export default function App() {
 			}
             if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
             if (isCompletedHostUpdate(event)) {
-              refreshAfterHostRestart.current = true
+              // The completion event is the fast path. A later stream-open
+              // probe remains the backstop if replacement has not landed yet.
+              void reconcileHostResources(true).then((convergence) => {
+                if (convergence === 'blocked') {
+                  setStreamDetail('The host WebUI bundle changed, but this tab already used its safe reload attempt for that bundle')
+                }
+              }).catch(() => undefined)
             }
             if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
             if (/device|connection|settings/i.test(event.kind)) void refresh()
@@ -1117,7 +1128,6 @@ export default function App() {
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
-              refreshAfterHostRestart.current = false
               // Probe on every open, not only after a witnessed update event.
               // This closes the missed-event, sleeping-tab, and reconnect gap.
               void reconcileHostResources(true).then((convergence) => {
