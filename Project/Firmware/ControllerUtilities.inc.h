@@ -8,11 +8,10 @@
 // so playback can never recursively record itself.
 void acceptedAction(InputEventSource source, uint8_t opcode,
                     const uint8_t *payload, uint8_t availablePayload,
-                    bool retain = true) {
+                    bool retain = true, uint32_t capturedAtUs = micros()) {
   if (!MacroAction::recordable(opcode, availablePayload)) {
     return;
   }
-  const uint32_t capturedAtUs = micros();
   appEvents.action(source, opcode, payload, availablePayload, capturedAtUs);
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
   if (retain) {

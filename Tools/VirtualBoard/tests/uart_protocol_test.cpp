@@ -48,6 +48,44 @@ encode(std::uint8_t opcode, std::uint8_t sequence,
   return encoded;
 }
 
+std::vector<std::vector<std::uint8_t>>
+decodeResponses(const std::vector<std::uint8_t> &encoded) {
+  std::vector<std::vector<std::uint8_t>> frames;
+  std::size_t begin = 0;
+  while (begin < encoded.size()) {
+    const auto delimiter = std::find(encoded.begin() + begin, encoded.end(), 0);
+    require(delimiter != encoded.end(), "response frame is not delimited");
+    const std::size_t end = static_cast<std::size_t>(delimiter - encoded.begin());
+    std::vector<std::uint8_t> raw;
+    std::size_t cursor = begin;
+    while (cursor < end) {
+      const auto code = encoded[cursor++];
+      require(code != 0, "invalid response COBS code");
+      for (std::uint8_t index = 1; index < code; ++index) {
+        require(cursor < end, "truncated response COBS block");
+        raw.push_back(encoded[cursor++]);
+      }
+      if (code != 0xFF && cursor < end) {
+        raw.push_back(0);
+      }
+    }
+    require(raw.size() >= 6 && raw.size() == 6U + raw[4],
+            "invalid decoded response envelope");
+    frames.push_back(raw);
+    begin = end + 1;
+  }
+  return frames;
+}
+
+std::uint32_t trailingMicros(const std::vector<std::uint8_t> &raw) {
+  require(raw[4] >= 4, "timed response is missing its MCU clock");
+  const std::size_t offset = 5U + raw[4] - 4U;
+  return static_cast<std::uint32_t>(raw[offset]) |
+         static_cast<std::uint32_t>(raw[offset + 1]) << 8 |
+         static_cast<std::uint32_t>(raw[offset + 2]) << 16 |
+         static_cast<std::uint32_t>(raw[offset + 3]) << 24;
+}
+
 struct Capture {
   UartProtocol *protocol = nullptr;
   std::vector<std::vector<std::uint8_t>> payloads;
@@ -210,6 +248,34 @@ void testUndelimitedInputHasAByteBudget() {
           "undelimited UART traffic exceeded its per-loop byte budget");
 }
 
+void testActionAndACKShareTheExactAcceptedEdge() {
+  HardwareSerial serial;
+  UartProtocol protocol(serial);
+  const std::uint32_t acceptedAt = 0x89ABCDEF;
+  for (const std::size_t actionLength : {std::size_t{0}, std::size_t{8}}) {
+    serial.clearWritten();
+    std::vector<std::uint8_t> action(4 + actionLength, 0);
+    action[0] = 13; // ControllerEventType::Action
+    action[1] = 2;  // InputEventSource::Host
+    action[2] = actionLength == 0 ? ControllerProtocol::RelayAllOff
+                                  : ControllerProtocol::RadioTransmit;
+    action[3] = static_cast<std::uint8_t>(actionLength);
+    require(protocol.sendEventAt(action.data(),
+                                 static_cast<std::uint8_t>(action.size()),
+                                 acceptedAt),
+            "accepted Action evidence was not sent");
+    require(protocol.sendAckAt(7, action[2], acceptedAt),
+            "accepted ACK was not sent");
+    const auto frames = decodeResponses(serial.written());
+    require(frames.size() == 2 &&
+                frames[0][2] == ControllerProtocol::Event &&
+                frames[1][2] == ControllerProtocol::Ack &&
+                trailingMicros(frames[0]) == acceptedAt &&
+                trailingMicros(frames[1]) == acceptedAt,
+            "Action and ACK timestamps differ from the accepted edge");
+  }
+}
+
 } // namespace
 
 int main() {
@@ -219,6 +285,7 @@ int main() {
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
     testUndelimitedInputHasAByteBudget();
+    testActionAndACKShareTheExactAcceptedEdge();
     std::cout << "firmware_uart_protocol_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {

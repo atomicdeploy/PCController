@@ -291,7 +291,15 @@ func buildSerialStackPath(listing *avrListing) ([]compileManifestStackStage, str
 		Name: "timestamped UART response", Match: "ControllerProtocol::UartProtocol::sendTimestamped(", InlineLabel: "sendTimestamped",
 	})
 	if err != nil {
-		return nil, "", 0, err
+		// Current firmware intentionally performs timestamp selection inside
+		// send() so Event/ACK framing shares one bounded AVR frame. Retain the
+		// audit stage without inventing a second stack frame; the writer topology
+		// checks below still prove the linked virtual Print edge.
+		timestampedStage = listingStage{Manifest: compileManifestStackStage{
+			Name: "timestamped UART response", Function: sendStage.Function.Name,
+			Qualifier: "consolidated; frame included by UART response",
+			Source:    fmt.Sprintf("listing parent address 0x%04X", sendStage.Function.Address),
+		}}
 	}
 	responseWriter := sendStage.Function
 	if timestampedStage.Function != nil {

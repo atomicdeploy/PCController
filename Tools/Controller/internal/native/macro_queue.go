@@ -20,6 +20,7 @@ const (
 	// covers every board-generated physical/RF action without consuming a
 	// second MaximumPayload-sized AVR buffer.
 	MacroBoardActionMaximumPayload = 8
+	MacroCaptureInputsFlag         = 1 << 1
 )
 
 const (
@@ -119,6 +120,16 @@ func MacroQueueAppendPayload(offset, completeSteps uint16, fragment []byte) ([]b
 func MacroQueueRunPayload() []byte   { return []byte{1} }
 func MacroQueueQueryPayload() []byte { return []byte{2} }
 
+// MacroCaptureStartPayload asks schema-3 firmware to record accepted ordinary
+// board/host actions into its retained circular buffer.
+func MacroCaptureStartPayload(id byte) []byte {
+	return []byte{MacroQueueSchema, id, MacroCaptureInputsFlag, 0, 0}
+}
+
+// MacroCaptureStopPayload seals a recording. Selector 5 with one byte is
+// distinct from identity-guarded CLEAR_CAPTURE [5,id,startedAtUS LE32].
+func MacroCaptureStopPayload() []byte { return []byte{5} }
+
 // MacroCaptureQueryPayload requests the retained schema-3 board-capture ring
 // from an absolute byte offset. It does not alter capture/playback state.
 func MacroCaptureQueryPayload(id byte, offset uint16) []byte {
@@ -195,8 +206,8 @@ func MacroQueueCancelPayload(keepOutputs bool) []byte {
 // EncodeMacroRecord stores one ordinary opcode command against an MCU-clock
 // due offset. Macro-control recursion is rejected before it reaches firmware.
 func EncodeMacroRecord(dueUS uint32, opcode byte, payload []byte) ([]byte, error) {
-	if !MacroPlaybackAllowed(opcode) {
-		return nil, fmt.Errorf("opcode 0x%02X is not a queueable acknowledged command", opcode)
+	if !MacroPlaybackPayloadSemanticallyValid(opcode, payload) {
+		return nil, fmt.Errorf("opcode 0x%02X payload length %d violates the macro action contract", opcode, len(payload))
 	}
 	if len(payload) > MaxPayload {
 		return nil, ErrPayloadTooLong
@@ -207,6 +218,54 @@ func EncodeMacroRecord(dueUS uint32, opcode byte, payload []byte) ([]byte, error
 	record[5] = byte(len(payload))
 	copy(record[6:], payload)
 	return record, nil
+}
+
+// MacroPlaybackPayloadValid mirrors MacroAction::validPlaybackPayload. Fixed
+// board-action rows must match exactly; 0xFF rows remain variable-length host
+// actions and are semantically checked by their ordinary command parser.
+func MacroPlaybackPayloadValid(opcode byte, payload []byte) bool {
+	contract, exists := macroActionContracts[opcode]
+	if !exists || len(payload) > MaxPayload {
+		return false
+	}
+	return contract.captureLength == 0xFF || len(payload) == int(contract.captureLength)
+}
+
+// MacroPlaybackPayloadSemanticallyValid applies the ordinary command shape to
+// variable actions as well. Host ACK recording may retain these larger
+// payloads, while the board's compact Action evidence remains fixed and <=8.
+func MacroPlaybackPayloadSemanticallyValid(opcode byte, payload []byte) bool {
+	if !MacroPlaybackPayloadValid(opcode, payload) {
+		return false
+	}
+	switch opcode {
+	case OpStatusEffect:
+		if len(payload) == 1 {
+			return payload[0] == StatusEffectNone
+		}
+		if len(payload) != 12 || payload[0] < StatusEffectBreathe ||
+			payload[0] > StatusEffectTransition || payload[8] > payload[7] {
+			return false
+		}
+		period := binary.LittleEndian.Uint16(payload[9:11])
+		return period >= StatusEffectMinimumPeriodMS && period <= StatusEffectMaximumPeriodMS
+	case OpDisplayText:
+		if len(payload) < 4 || payload[0] > 5 || payload[3] > 40 {
+			return false
+		}
+		textLength := int(payload[3])
+		if payload[0] == 5 {
+			return len(payload) == 8+textLength &&
+				payload[4]&0x7C == 0 && payload[4]&0x03 <= 2 &&
+				(payload[4]&0x03 != 2 || payload[7] != 0)
+		}
+		if len(payload) != 4+textLength ||
+			(payload[0] == 3 && (textLength < 4 || textLength > 36)) ||
+			(payload[0] == 4 && textLength != 0) {
+			return false
+		}
+	}
+	return true
 }
 
 type macroActionContract struct {

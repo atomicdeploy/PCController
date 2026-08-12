@@ -48,6 +48,8 @@ public:
   bool sendEventAt(const uint8_t *payload, uint8_t payloadLength,
                    uint32_t capturedAtUs);
   bool sendAck(uint8_t sequence, uint8_t requestOpcode);
+  bool sendAckAt(uint8_t sequence, uint8_t requestOpcode,
+                 uint32_t capturedAtUs);
   bool sendError(uint8_t sequence, uint8_t requestOpcode, Error error);
 
   uint16_t framingErrors() const;

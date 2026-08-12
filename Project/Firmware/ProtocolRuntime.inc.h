@@ -471,6 +471,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
   using namespace ControllerProtocol;
   const uint8_t *payload = frame.payload;
   const uint8_t length = frame.payloadLength;
+  uint32_t acceptedAtUs = 0;
   now = millis();
   const uint32_t frameNow = now;
   lastHostActivityAt = frameNow;
@@ -961,12 +962,13 @@ acknowledged:
   // board capture before the ACK overwrites transport scratch. Macro playback
   // uses sequence 0xFE, and RemoteKeyGesture already records through the
   // shared physical/virtual key path, so neither can duplicate itself.
+  acceptedAtUs = micros();
   if (frame.sequence != MacroQueue::ExecutionSequence &&
       frame.opcode != ControllerProtocol::RemoteKeyGesture) {
     acceptedAction(InputEventSource::Host, frame.opcode, frame.payload,
-                   frame.payloadLength);
+                   frame.payloadLength, true, acceptedAtUs);
   }
-  appProtocol.sendAck(frame.sequence, frame.opcode);
+  appProtocol.sendAckAt(frame.sequence, frame.opcode, acceptedAtUs);
   return;
 badPayload:
   appProtocol.sendError(frame.sequence, frame.opcode, BadPayload);
