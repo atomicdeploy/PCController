@@ -33,7 +33,7 @@ func TestBuzzerMirrorJobRequiresOptInAndValidBoardNote(t *testing.T) {
 
 func TestNativeBuzzerFailuresAreStateTransitionsNotPerNoteLogSpam(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controller.AttachSharedRuntime(runtime, shell.New(1))
+	client := controller.AttachIsolatedRuntime(runtime, shell.New(1))
 	manager := &Manager{client: client}
 	after := runtime.LatestEventID()
 

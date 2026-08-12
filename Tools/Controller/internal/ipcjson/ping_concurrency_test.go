@@ -13,7 +13,7 @@ import (
 
 func TestPrimaryPingBypassesSerializedShellCommand(t *testing.T) {
 	service := &Service{
-		Client: controllerapi.AttachSharedRuntime(
+		Client: controllerapi.AttachIsolatedRuntime(
 			control.New(control.Options{}),
 			shell.New(1),
 		),

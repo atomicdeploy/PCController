@@ -21,7 +21,7 @@ func appearanceTestService(t *testing.T) (*Service, *appconfig.Config, *int) {
 	runtime := control.New(control.Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
 	service := &Service{
-		Client:     controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		Client:     controllerapi.AttachIsolatedRuntime(runtime, shell.New(8)),
 		HostConfig: func() appconfig.Config { return config },
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			candidate := config

@@ -82,6 +82,7 @@ type primaryIPC struct {
 	closeErr              error
 	client                *controllerapi.Client
 	runtime               *control.Runtime
+	outputs               *control.OutputScheduler
 	sessionSnapshot       *hostSessionRecorder
 	integrations          atomic.Pointer[hostbridge.Manager]
 	localDevice           *localDeviceHost
@@ -108,6 +109,7 @@ func startPrimaryIPC(
 	runtime *control.Runtime,
 	engine *shell.Engine,
 	store *appconfig.Store,
+	outputs *control.OutputScheduler,
 ) (*primaryIPC, error) {
 	claimContext, claimCancel := context.WithTimeout(parent, 3*time.Second)
 	defer claimCancel()
@@ -118,7 +120,7 @@ func startPrimaryIPC(
 	if existing != nil {
 		return nil, errPrimaryAlreadyRunning
 	}
-	return startPrimaryIPCClaimed(parent, runtime, engine, store, claim)
+	return startPrimaryIPCClaimed(parent, runtime, engine, store, claim, outputs)
 }
 
 func startPrimaryIPCClaimed(
@@ -127,17 +129,22 @@ func startPrimaryIPCClaimed(
 	engine *shell.Engine,
 	store *appconfig.Store,
 	claim *hostInstanceClaim,
+	outputs *control.OutputScheduler,
 ) (*primaryIPC, error) {
 	if claim == nil {
 		return nil, errors.New("primary controller host requires a per-user ownership claim")
 	}
-	server, err := startPrimaryIPCAtWithIdentity(
+	if outputs == nil {
+		return nil, errors.New("primary controller host requires its shared output scheduler")
+	}
+	server, err := startPrimaryIPCAtWithIdentityAndOutputs(
 		parent,
 		currentPrimaryEndpoint().Listen,
 		runtime,
 		engine,
 		claim.identity,
-		store,
+		[]*appconfig.Store{store},
+		outputs,
 	)
 	if err != nil {
 		_ = claim.Close()
@@ -235,8 +242,9 @@ func startPrimaryIPCAt(
 	engine *shell.Engine,
 	stores ...*appconfig.Store,
 ) (*primaryIPC, error) {
-	return startPrimaryIPCAtWithIdentity(
-		parent, address, runtime, engine, hostInstanceIdentity{}, stores...,
+	return startPrimaryIPCAtWithIdentityAndOutputs(
+		parent, address, runtime, engine, hostInstanceIdentity{}, stores,
+		control.NewOutputScheduler(runtime),
 	)
 }
 
@@ -248,6 +256,24 @@ func startPrimaryIPCAtWithIdentity(
 	identity hostInstanceIdentity,
 	stores ...*appconfig.Store,
 ) (*primaryIPC, error) {
+	return startPrimaryIPCAtWithIdentityAndOutputs(
+		parent, address, runtime, engine, identity, stores,
+		control.NewOutputScheduler(runtime),
+	)
+}
+
+func startPrimaryIPCAtWithIdentityAndOutputs(
+	parent context.Context,
+	address string,
+	runtime *control.Runtime,
+	engine *shell.Engine,
+	identity hostInstanceIdentity,
+	stores []*appconfig.Store,
+	sharedOutputs *control.OutputScheduler,
+) (*primaryIPC, error) {
+	if sharedOutputs == nil {
+		return nil, errors.New("primary IPC requires its shared output scheduler")
+	}
 	endpoint := currentPrimaryEndpoint()
 	// Explicit in-process servers without a configuration store are test/tool
 	// fixtures, not the configured primary endpoint. Keep them loopback and
@@ -273,7 +299,8 @@ func startPrimaryIPCAtWithIdentity(
 	ctx, cancel := context.WithCancel(parent)
 	server := &primaryIPC{
 		cancel: cancel, listener: listener, done: make(chan error, 1),
-		quit: make(chan struct{}), runtime: runtime, hostInstanceID: identity.ID,
+		quit: make(chan struct{}), runtime: runtime, outputs: sharedOutputs,
+		hostInstanceID: identity.ID,
 	}
 	server.actions = hostui.NewActionBroker()
 	server.instances = hostui.NewInstanceRegistry()
@@ -324,7 +351,7 @@ func startPrimaryIPCAtWithIdentity(
 			return nil, fmt.Errorf("register coordinator app instance: %w", registerErr)
 		}
 	}
-	sharedClient := controllerapi.AttachSharedRuntime(runtime, engine)
+	sharedClient := controllerapi.AttachSharedRuntime(runtime, engine, sharedOutputs)
 	server.client = sharedClient
 	service := &ipcjson.Service{
 		Client:                sharedClient,
@@ -349,8 +376,9 @@ func startPrimaryIPCAtWithIdentity(
 			if integrations := server.integrations.Load(); integrations != nil {
 				_ = integrations.ReleaseKeyboard("ipc-shutdown")
 			}
-			_ = runtime.Close()
-			cancel()
+			// The primary owner performs transactional LED release before it closes
+			// the runtime transport. closeErr remains observable to the run loop.
+			go func() { _ = server.Close() }()
 		},
 		BridgeList: func() any {
 			if integrations := server.integrations.Load(); integrations != nil {
@@ -565,14 +593,19 @@ func (server *primaryIPC) close() error {
 	if server.artifacts != nil {
 		server.artifacts.Close()
 	}
+	var outputErr error
+	if server.outputs != nil {
+		outputErr = server.outputs.Close()
+	}
 	server.cancel()
 	_ = server.listener.Close()
 	select {
 	case err := <-server.done:
-		return errors.Join(snapshotErr, err, server.closeInstanceClaim())
+		return errors.Join(snapshotErr, outputErr, err, server.closeInstanceClaim())
 	case <-time.After(time.Second):
 		return errors.Join(
 			snapshotErr,
+			outputErr,
 			server.closeInstanceClaim(),
 			errors.New("primary IPC server did not stop within one second"),
 		)

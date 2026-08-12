@@ -15,7 +15,7 @@ import (
 
 func TestInboundWebhookDropsCredentialBoundariesAndCallerProvenance(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	defer client.Shutdown()
 	const bearer = "durable-header-credential"
 	handler := websocketMux(context.Background(), &Service{
@@ -84,7 +84,7 @@ func TestInboundWebhookDropsCredentialBoundariesAndCallerProvenance(t *testing.T
 
 func TestInboundWebhookEmptyBodyFallbackContainsPathWithoutQuery(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	defer client.Shutdown()
 	handler := websocketMux(context.Background(), &Service{
 		Client: client, InboundWebhooks: true,

@@ -2689,14 +2689,13 @@ func rgbCommand(
 			return "", fmt.Errorf("invalid brightness %q", args[consumed])
 		}
 	}
-	payload := native.StatusRGBPayload(
+	if err := outputs.ReplaceStatusRGB(
+		ctx,
 		color.Red,
 		color.Green,
 		color.Blue,
 		byte(brightness),
-	)
-	outputs.OverrideStatusEffect()
-	if err := command(ctx, runtime, native.OpStatusRGB, payload); err != nil {
+	); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf(
@@ -2744,20 +2743,21 @@ func statusEffectCommand(
 			}
 			return strings.Join(lines, "\n"), nil
 		case "stop", "cancel":
-			if outputs.StopStatusEffect() {
-				return "status LED effect stop requested", nil
+			if err := outputs.ReconcileStatusEffect(ctx); err != nil {
+				return "", err
 			}
-			if runtime.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects != 0 {
-				if err := command(ctx, runtime, native.OpStatusEffect, native.StatusEffectReleasePayload()); err != nil {
-					return "", err
-				}
-				return "status LED effect released to firmware ownership", nil
-			}
-			return "no status LED effect is playing", nil
+			return "status LED effect released to firmware ownership", nil
 		case "status":
 			state := outputs.State()
-			if state.EffectID == 0 {
+			if state.EffectID == 0 && !state.EffectRetained {
 				return "status LED effect idle", nil
+			}
+			if state.EffectReleasePending {
+				return fmt.Sprintf(
+					"status LED effect release pending id=%d name=%q",
+					state.EffectID,
+					state.EffectName,
+				), nil
 			}
 			return fmt.Sprintf(
 				"status LED effect playing id=%d name=%q",

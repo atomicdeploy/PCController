@@ -53,6 +53,7 @@ public:
   void noteProtocolErrors(std::size_t framing, std::size_t crc);
 
 private:
+  friend struct VirtualBoardStatusLedTestAccess;
   using Clock = std::chrono::steady_clock;
   using TimePoint = Clock::time_point;
 
@@ -114,6 +115,7 @@ private:
   void saveRemote(std::uint8_t id);
   void clearRemotes();
   void recordReset(std::uint8_t cause, bool emitEvent);
+  void requestReset(std::uint8_t cause, TimePoint now);
   void resetRuntime(TimePoint now);
   void setMenuPage(std::uint8_t page);
   void updateMenuDisplay();
@@ -126,9 +128,18 @@ private:
   void queueMacroEvent();
   void queueEvent(std::initializer_list<std::uint8_t> payload);
   void queueEvent(std::vector<std::uint8_t> payload);
-  void queueMirrorChanges();
+  void queueMirrorChanges(TimePoint now = Clock::now());
   bool applyStatusEffect(const std::vector<std::uint8_t> &payload,
                          TimePoint now);
+  void requestStatusPreview(const std::uint8_t *payload, TimePoint now);
+  void applyStatusDescriptor(const std::uint8_t *payload,
+                             std::uint8_t condition, std::uint8_t phase,
+                             std::uint8_t repeats, TimePoint now);
+  void applyStatusCondition(std::uint8_t condition, TimePoint now);
+  void restoreStatusPresentation(TimePoint now);
+  void playStatusCue(std::uint8_t condition,
+                     std::chrono::milliseconds duration, TimePoint now);
+  bool safetyStatusCondition(TimePoint now, std::uint8_t &condition) const;
   void renderStatusEffect();
   void finishStatusEffect();
   void serviceStatusEffect(TimePoint now);
@@ -155,9 +166,12 @@ private:
   mutable std::mutex mutex_;
   Settings settings_;
   TimePoint startedAt_;
+  TimePoint bootEndsAt_;
   TimePoint lastStreamAt_;
   TimePoint lastFadeAt_;
-  TimePoint lastStatusEffectAt_;
+  TimePoint statusEffectCycleStartedAt_;
+  TimePoint lastStatusLedPushAt_;
+  TimePoint resetDeadline_;
   TimePoint lastRelayTestAt_;
   TimePoint lastHostActivityAt_;
   TimePoint learningDeadline_;
@@ -201,7 +215,14 @@ private:
   std::uint8_t statusEffectRepeats_ = 0;
   std::array<std::uint8_t, 12> statusEffectDescriptor_{};
   bool statusEffectDescriptorValid_ = false;
-  std::uint16_t statusEffectStepMs_ = 20;
+  std::array<std::uint8_t, 12> statusRequestedDescriptor_{};
+  bool statusRequestedDescriptorValid_ = false;
+  bool statusCueActive_ = false;
+  bool resetPending_ = false;
+  std::uint8_t pendingResetCause_ = 0;
+  std::uint8_t statusCueCondition_ = 0;
+  TimePoint statusCueDeadline_;
+  std::uint16_t statusEffectPeriodMs_ = 640;
   bool hostPanelCaptured_ = false;
   std::uint16_t hostPanelMeta_ = 0;
   std::uint8_t macroState_ = 0;

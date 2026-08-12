@@ -341,6 +341,7 @@ type Snapshot struct {
 	StatusLED         StatusLEDState       `json:"status_led"`
 	HaveStatusLED     bool                 `json:"have_status_led"`
 	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
+	Outputs           OutputStreamState    `json:"outputs"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -541,6 +542,7 @@ func New(options Options) *Client {
 func AttachSharedRuntime(
 	runtime *control.Runtime,
 	engine *shell.Engine,
+	outputs *control.OutputScheduler,
 ) *Client {
 	if runtime == nil {
 		panic("controller: shared runtime is nil")
@@ -548,13 +550,32 @@ func AttachSharedRuntime(
 	if engine == nil {
 		panic("controller: shared command engine is nil")
 	}
+	if outputs == nil {
+		panic("controller: shared output scheduler is nil")
+	}
 	return &Client{
 		runtime: runtime,
 		engine:  engine,
-		outputs: control.NewOutputScheduler(runtime),
+		outputs: outputs,
 		events:  make(chan Event),
 		done:    make(chan struct{}),
 	}
+}
+
+// AttachIsolatedRuntime creates a self-contained facade for tests and small
+// tools that do not have a process composition root. Production hosts must use
+// AttachSharedRuntime and inject their one shared scheduler explicitly.
+func AttachIsolatedRuntime(
+	runtime *control.Runtime,
+	engine *shell.Engine,
+) *Client {
+	return AttachSharedRuntime(runtime, engine, control.NewOutputScheduler(runtime))
+}
+
+// UsesOutputScheduler reports whether this facade shares a specific scheduler.
+// It is intended for construction assertions in sibling host packages.
+func (client *Client) UsesOutputScheduler(outputs *control.OutputScheduler) bool {
+	return outputs != nil && client.outputs == outputs
 }
 
 // ApplyHostOptions atomically refreshes runtime and host-owned configuration.
@@ -914,7 +935,12 @@ func (client *Client) SetDeviceObserver(
 
 // Close stops active output streams and intentionally closes the serial port.
 func (client *Client) Close() error {
-	client.outputs.StopAll()
+	client.outputs.StopMelody()
+	releaseContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := client.outputs.ReleaseStatusEffect(releaseContext); err != nil {
+		return fmt.Errorf("release status LED ownership before closing port: %w", err)
+	}
 	return client.runtime.Close()
 }
 
@@ -936,7 +962,9 @@ func (client *Client) PulseResetFor(
 // Shutdown closes the serial port and releases background event forwarding.
 // A shutdown client must not be reused.
 func (client *Client) Shutdown() error {
-	client.outputs.Close()
+	if err := client.outputs.Close(); err != nil {
+		return fmt.Errorf("release status LED ownership before shutdown: %w", err)
+	}
 	_ = hostos.DefaultExecutor.ReleaseAll()
 	err := client.runtime.Close()
 	client.doneOnce.Do(func() { close(client.done) })
@@ -1421,8 +1449,7 @@ func (client *Client) SetStatusRGB(
 	ctx context.Context,
 	red, green, blue, brightness byte,
 ) error {
-	client.outputs.OverrideStatusEffect()
-	return client.outputs.SetStatusBase(ctx, red, green, blue, brightness)
+	return client.outputs.ReplaceStatusRGB(ctx, red, green, blue, brightness)
 }
 
 // SetStatusRGBBase updates the host state-policy color without canceling a
@@ -1432,6 +1459,12 @@ func (client *Client) SetStatusRGBBase(
 	red, green, blue, brightness byte,
 ) error {
 	return client.outputs.SetStatusBase(ctx, red, green, blue, brightness)
+}
+
+// ClearStatusRGBBase clears cached host policy/fallback color without changing
+// an explicit board preview/effect or emitting a wire command.
+func (client *Client) ClearStatusRGBBase() {
+	client.outputs.ClearStatusBase()
 }
 
 // OutputState returns active melody and status-effect operation metadata.
@@ -1525,6 +1558,12 @@ func (client *Client) StartConfiguredStatusLEDEffect(
 // StopStatusLEDEffect cancels the active host-defined LED overlay.
 func (client *Client) StopStatusLEDEffect() bool {
 	return client.outputs.StopStatusEffect()
+}
+
+// ReleaseStatusLEDEffect synchronously returns a board-owned preview/effect to
+// native lifecycle ownership. Failed ACKs remain represented for retry.
+func (client *Client) ReleaseStatusLEDEffect(ctx context.Context) error {
+	return client.outputs.ReconcileStatusEffect(ctx)
 }
 
 // TransmitRF sends a validated 433 MHz code one or more times.
@@ -1655,6 +1694,7 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLED:         snapshot.StatusLED,
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
+		Outputs:           client.outputs.State(),
 	}
 }
 

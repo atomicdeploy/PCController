@@ -16,7 +16,7 @@ import (
 
 func TestHTTPControlPlaneRejectsCrossOriginBrowserRequests(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	handler := websocketMux(context.Background(), &Service{Client: client})
 
 	request := httptest.NewRequest(
@@ -37,7 +37,7 @@ func TestHTTPControlPlaneRejectsCrossOriginBrowserRequests(t *testing.T) {
 
 func TestWebSocketRejectsUntrustedBrowserOriginWithoutToken(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	server := httptest.NewServer(websocketMux(context.Background(), &Service{Client: client}))
 	defer server.Close()
 
@@ -55,7 +55,7 @@ func TestWebSocketRejectsUntrustedBrowserOriginWithoutToken(t *testing.T) {
 
 func TestHTTPJSONRPCRequiresJSONContentType(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	handler := websocketMux(context.Background(), &Service{Client: client})
 	body := `{"jsonrpc":"2.0","id":1,"method":"controller.ping"}`
 
@@ -90,7 +90,7 @@ func TestHTTPJSONRPCRequiresJSONContentType(t *testing.T) {
 
 func TestHTTPControlPlaneAllowsConfiguredOriginAndNativeClient(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	handler := websocketMux(context.Background(), &Service{
 		Client: client, AllowedOrigins: []string{"console.example:*"},
 	})
@@ -117,7 +117,7 @@ func TestHTTPControlPlaneAllowsConfiguredOriginAndNativeClient(t *testing.T) {
 
 func TestHTTPControlPlaneCORSUsesConfiguredOriginWithoutCredentials(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	handler := websocketMux(context.Background(), &Service{
 		Client: client, AllowedOrigins: []string{"console.example:*"},
 	})
@@ -162,7 +162,7 @@ func TestHTTPControlPlaneCORSUsesConfiguredOriginWithoutCredentials(t *testing.T
 
 func TestHTTPControlPlaneCORSRejectsUntrustedOriginAndHeaders(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	handler := websocketMux(context.Background(), &Service{
 		Client: client, AllowedOrigins: []string{"console.example:*"},
 	})

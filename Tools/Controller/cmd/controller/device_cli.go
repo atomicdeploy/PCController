@@ -83,11 +83,16 @@ func runShell(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	watchContext, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
 	go watchConfiguration(watchContext, store, runtime, connection)
-	engine := control.NewCommandEngine(runtime, commandOptions(store, findProjectRoot()))
+	outputs := control.NewOutputScheduler(runtime)
+	commandConfig := commandOptions(store, findProjectRoot())
+	commandConfig.Outputs = outputs
+	engine := control.NewCommandEngine(runtime, commandConfig)
 	if err := hostmenu.RegisterCommands(engine, newHostMenuManager(store, runtime, engine)); err != nil {
 		return err
 	}
-	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
+	primary, err := startPrimaryIPCClaimed(
+		watchContext, runtime, engine, store, claim, outputs,
+	)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
 	}
@@ -176,13 +181,18 @@ func runExecCommand(connection *connectionFlags, commandText string, stdout io.W
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	defer runtime.Close()
-	engine := control.NewCommandEngine(runtime, commandOptions(store, findProjectRoot()))
+	outputs := control.NewOutputScheduler(runtime)
+	commandConfig := commandOptions(store, findProjectRoot())
+	commandConfig.Outputs = outputs
+	engine := control.NewCommandEngine(runtime, commandConfig)
 	if err := hostmenu.RegisterCommands(engine, newHostMenuManager(store, runtime, engine)); err != nil {
 		return err
 	}
 	ownerContext, stopOwner := context.WithCancel(context.Background())
 	defer stopOwner()
-	primary, err := startPrimaryIPCClaimed(ownerContext, runtime, engine, store, claim)
+	primary, err := startPrimaryIPCClaimed(
+		ownerContext, runtime, engine, store, claim, outputs,
+	)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		ctx, cancel := context.WithTimeout(
 			context.Background(),
@@ -283,11 +293,16 @@ func runBatch(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	watchContext, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
 	go watchConfiguration(watchContext, store, runtime, connection)
-	engine := control.NewCommandEngine(runtime, commandOptions(store, findProjectRoot()))
+	outputs := control.NewOutputScheduler(runtime)
+	commandConfig := commandOptions(store, findProjectRoot())
+	commandConfig.Outputs = outputs
+	engine := control.NewCommandEngine(runtime, commandConfig)
 	if err := hostmenu.RegisterCommands(engine, newHostMenuManager(store, runtime, engine)); err != nil {
 		return err
 	}
-	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
+	primary, err := startPrimaryIPCClaimed(
+		watchContext, runtime, engine, store, claim, outputs,
+	)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		return script.Run(ctx, input, primaryExecutor{}, scriptOptions)
 	}
@@ -356,11 +371,16 @@ func runMonitor(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	bindRuntimeDevicePersistence(runtime, store)
 	defer runtime.Close()
 	go watchConfiguration(ctx, store, runtime, connection)
-	engine := control.NewCommandEngine(runtime, commandOptions(store, findProjectRoot()))
+	outputs := control.NewOutputScheduler(runtime)
+	commandConfig := commandOptions(store, findProjectRoot())
+	commandConfig.Outputs = outputs
+	engine := control.NewCommandEngine(runtime, commandConfig)
 	if err := hostmenu.RegisterCommands(engine, newHostMenuManager(store, runtime, engine)); err != nil {
 		return err
 	}
-	primary, err := startPrimaryIPCClaimed(ctx, runtime, engine, store, claim)
+	primary, err := startPrimaryIPCClaimed(
+		ctx, runtime, engine, store, claim, outputs,
+	)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		return runRemoteMonitor(
 			ctx,
@@ -788,13 +808,18 @@ func runReset(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	defer runtime.Close()
-	engine := control.NewCommandEngine(runtime, commandOptions(store, findProjectRoot()))
+	outputs := control.NewOutputScheduler(runtime)
+	commandConfig := commandOptions(store, findProjectRoot())
+	commandConfig.Outputs = outputs
+	engine := control.NewCommandEngine(runtime, commandConfig)
 	if err := hostmenu.RegisterCommands(engine, newHostMenuManager(store, runtime, engine)); err != nil {
 		return err
 	}
 	ownerContext, stopOwner := context.WithCancel(context.Background())
 	defer stopOwner()
-	primary, err := startPrimaryIPCClaimed(ownerContext, runtime, engine, store, claim)
+	primary, err := startPrimaryIPCClaimed(
+		ownerContext, runtime, engine, store, claim, outputs,
+	)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()

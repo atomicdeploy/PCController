@@ -222,7 +222,7 @@ func startRawPeerManager(
 		t.Fatal(err)
 	}
 	runtime := control.New(control.Options{})
-	client := controller.AttachSharedRuntime(runtime, shell.New(8))
+	client := controller.AttachIsolatedRuntime(runtime, shell.New(8))
 	ctx, cancel := context.WithCancel(context.Background())
 	manager, err := Start(ctx, client, store, nil)
 	if err != nil {

@@ -58,13 +58,11 @@ public:
   StatusLedMode mode() const;
   void setBrightness(uint8_t brightness);
   uint8_t brightness() const;
-  void setCustom(uint8_t red, uint8_t green, uint8_t blue);
-  bool setEffect(StatusLedEffect effect, uint8_t red, uint8_t green,
-                 uint8_t blue, uint8_t alternateRed,
-                 uint8_t alternateGreen, uint8_t alternateBlue,
-                 uint8_t brightness, uint8_t minimumBrightness,
-                 uint16_t periodMs, uint8_t repeats,
-                 uint32_t now = millis());
+  void setCustom(uint8_t red, uint8_t green, uint8_t blue,
+                 uint8_t brightness, uint32_t now = millis());
+  // Atomically owns a complete STATUS_EFFECT descriptor. Exact repeats retain
+  // phase; changed descriptors replace in place without an owner-release gap.
+  bool setEffect(const uint8_t *payload, uint32_t now = millis());
   void cancelEffect();
   StatusLedEffect effect() const;
   uint8_t renderedRed() const;
@@ -83,18 +81,17 @@ private:
   void loadProfile(uint8_t condition, uint32_t now);
   void defaultProfile(uint8_t condition, uint8_t *payload) const;
   void applyProfile(uint8_t condition, const uint8_t *payload, uint32_t now);
+  bool persistentPriorityActive() const;
   static bool validProfile(const uint8_t *payload);
   void renderColor(uint8_t red, uint8_t green, uint8_t blue, uint8_t level);
   void renderEffect();
   void finishEffect();
-  static uint8_t scale(uint8_t value, uint8_t level);
-  static uint8_t interpolate(uint8_t from, uint8_t to, uint8_t phase);
-
   // Static storage zero-initializes the singleton. Avoiding per-member dynamic
   // initializers saves both flash copy data and constructor code on ATmega328P.
   PwmController *pwm_; // Non-owning shared PWM controller.
   StatusLedMode mode_;
   uint8_t brightness_;
+  uint8_t fallbackBrightness_; // Stable board setting, not descriptor-local.
   uint8_t customRed_;
   uint8_t customGreen_;
   uint8_t customBlue_;
@@ -109,10 +106,13 @@ private:
   uint8_t renderedBlue_;
   uint8_t condition_;
   StatusLedEffect effect_;
-  uint16_t effectStepMs_;
-  uint32_t lastEffectStepAt_;
+  uint16_t effectPeriodMs_; // Full duration of one 64-phase cycle.
+  uint32_t effectCycleStartedAt_;
   uint32_t cueEndsAt_; // millis() deadline; zero means no active cue.
   StatusLedCue cue_;
+  // The requested owner survives temporary cue/safety rendering. Its complete
+  // wire descriptor makes idempotence exact without another protocol roundtrip.
+  uint8_t requested_[ProfilePayloadBytes];
 };
 
 // statusLeds is the board-wide RGB state and cue compositor.
