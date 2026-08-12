@@ -2,7 +2,7 @@
 
 package native
 
-const macroContractSourceSHA256 = "bf7934ef22f04f83efb948c52401986d69e7e08f40144e1cf9ed27af538750a8"
+const macroContractSourceSHA256 = "30ff60ad3543b42f8e2715ee771c79468cdc9ab9e7e214ce4ee7896ed49d0aed"
 
 const (
 	FeatureProfileFullPeripheral byte = 0x00
