@@ -497,7 +497,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 }
 
 func (model Model) Init() tea.Cmd {
-	commands := []tea.Cmd{model.spinner.Tick, tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
+	commands := []tea.Cmd{tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
 	if model.appActions != nil {
 		commands = append(commands, waitAppAction(model.appActions))
 	}
@@ -1373,11 +1373,11 @@ func (model Model) header(snapshot control.Snapshot) string {
 		status = "CLOSED"
 		detail = "auto-reconnect paused"
 	} else if snapshot.ConnectionState == "reconnecting" {
-		status = model.spinner.View() + " RECONNECTING"
+		status = model.spinnerView() + " RECONNECTING"
 		style = warnStyle
 		detail = strings.TrimSpace(snapshot.Port.Name + " · " + snapshot.ConnectionReason)
 	} else if model.connectPending {
-		status = model.spinner.View() + " SCANNING"
+		status = model.spinnerView() + " SCANNING"
 		style = warnStyle
 	}
 	left := titleStyle.Render("◆ " + model.prefs.AppTitle)
@@ -1423,7 +1423,7 @@ func (model Model) actionBarItems(snapshot control.Snapshot) []actionBarItem {
 	rebootLabel := "R Reboot"
 	rebootAction := "reboot"
 	if model.rebootPending {
-		rebootLabel = model.spinner.View() + " Rebooting"
+		rebootLabel = model.spinnerView() + " Rebooting"
 		rebootAction = ""
 	}
 	items = append(items,
@@ -1596,21 +1596,47 @@ func notifyImportant(notifier hostui.Notifier, notification hostui.Notification)
 }
 
 func (model Model) statusInterval() time.Duration {
+	var interval time.Duration
 	if !model.pageNeedsStatus() {
 		if model.uiValue.IdleStatusIntervalMS >= 100 {
-			return time.Duration(model.uiValue.IdleStatusIntervalMS) * time.Millisecond
+			interval = time.Duration(model.uiValue.IdleStatusIntervalMS) * time.Millisecond
+		} else {
+			// Keep lightweight UI/reconnect housekeeping without polling STATUS.
+			interval = time.Second
 		}
-		// Keep lightweight UI/reconnect housekeeping without polling STATUS.
-		return time.Second
+	} else {
+		interval = model.prefs.PollInterval
+		if interval < 100*time.Millisecond {
+			interval = 100 * time.Millisecond
+		}
+		if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond {
+			interval = 125 * time.Millisecond
+		}
 	}
-	interval := model.prefs.PollInterval
-	if interval < 100*time.Millisecond {
-		interval = 100 * time.Millisecond
-	}
-	if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond && model.pageNeedsStatus() {
-		return 125 * time.Millisecond
+	// Remote activity events remain push-driven. The snapshot poll is only a
+	// convergence/backstop path, so rendering and making an authenticated RPC
+	// eight times per second adds load without improving control latency.
+	if model.remote != nil && interval < time.Second {
+		interval = time.Second
 	}
 	return interval
+}
+
+// spinnerView advances progress glyphs from wall time instead of running a
+// permanent Bubble Tea spinner command. Any real UI event (including the
+// bounded status tick) redraws an active operation; an idle connected TUI no
+// longer performs a full Lip Gloss render at the spinner's frame rate.
+func (model Model) spinnerView() string {
+	frames := model.spinner.Spinner.Frames
+	if len(frames) == 0 {
+		return ""
+	}
+	interval := model.spinner.Spinner.FPS
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
+	}
+	frame := int(time.Now().UnixNano()/int64(interval)) % len(frames)
+	return model.spinner.Style.Render(frames[frame])
 }
 
 func (model Model) eventLogLimit() int {

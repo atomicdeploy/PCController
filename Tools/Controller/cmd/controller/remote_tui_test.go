@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,6 +11,52 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/shell"
 )
+
+func TestRemoteTUIPollEventsBacksOffAndRediscoversAfterTransportFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &remoteTUIIPC{
+		events: make(chan control.Event, 1), done: make(chan struct{}), retry: 80 * time.Millisecond,
+	}
+	var calls atomic.Int32
+	fourthCall := make(chan struct{})
+	client.callFn = func(_ context.Context, method string, _ any, target any) error {
+		call := calls.Add(1)
+		if call == 1 {
+			if method != "controller.event.latest" {
+				t.Fatalf("first method=%q", method)
+			}
+			target.(*struct {
+				ID uint64 `json:"id"`
+			}).ID = 9
+			return nil
+		}
+		if call == 2 && method != "controller.event.next" {
+			t.Errorf("second method=%q, want event.next", method)
+		}
+		if (call == 3 || call == 4) && method != "controller.event.latest" {
+			t.Errorf("call %d method=%q, want event.latest", call, method)
+		}
+		if call == 4 {
+			close(fourthCall)
+		}
+		return errors.New("primary unavailable")
+	}
+	started := time.Now()
+	go client.pollEvents(ctx)
+	select {
+	case <-fourthCall:
+	case <-time.After(time.Second):
+		t.Fatal("poller did not retry")
+	}
+	cancel()
+	<-client.done
+	if elapsed := time.Since(started); elapsed < 60*time.Millisecond {
+		t.Fatalf("transport failure retried without backoff: %s", elapsed)
+	}
+	if got := calls.Load(); got != 4 {
+		t.Fatalf("RPC calls=%d, want one backoff then cursor rediscovery", got)
+	}
+}
 
 func TestRemoteTUICommandEngineMirrorsPrimaryCatalog(t *testing.T) {
 	runtime := control.New(control.Options{})

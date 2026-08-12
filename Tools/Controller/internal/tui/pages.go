@@ -52,7 +52,7 @@ func (model Model) portPickerPage(snapshot control.Snapshot) string {
 		labelStyle.Render("Friendly name, COM ID, VID/PID and serial identity are shown; authentication still verifies HELLO before use."),
 	}
 	if model.portLoading {
-		lines = append(lines, warnStyle.Render(model.spinner.View()+" querying Windows serial devices…"))
+		lines = append(lines, warnStyle.Render(model.spinnerView()+" querying Windows serial devices…"))
 	}
 	if model.portError != "" {
 		lines = append(lines, errorStyle.Render(model.portError))
@@ -478,7 +478,7 @@ func (model Model) rfPage() string {
 		titleStyle.Render("ID  CODE        BITS  PROTO  NAME / CATEGORY                 BOARD MAPPING"),
 	}
 	if model.rfPending {
-		lines = append(lines, warnStyle.Render(model.spinner.View()+" loading live RF list…"))
+		lines = append(lines, warnStyle.Render(model.spinnerView()+" loading live RF list…"))
 	}
 	if model.rfError != "" {
 		lines = append(lines, errorStyle.Render("RF list: "+model.rfError))
