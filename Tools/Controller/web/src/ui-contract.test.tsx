@@ -34,6 +34,7 @@ function shared(): SharedViewProps {
     snapshot: emptySnapshot,
     samples: [],
     events: [],
+    macroEvents: [],
     locale: 'en',
     t: (key) => key,
     command: vi.fn(async () => ''),
