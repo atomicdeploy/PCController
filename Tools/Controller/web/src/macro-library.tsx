@@ -292,7 +292,7 @@ export function MacroLibraryPanel({ online, locale, events, legacyCommand }: Mac
       <div className="macro-library__control-grid">
         <section>
           <header>{copy('Host recording', 'ضبط میزبان')}</header>
-          <p>{copy('Relay, motion, MOSFET, buzzer, display, RF, and front-panel actions are captured through the shared opcode path.', 'رله، حرکت، ماسفت، بیزر، نمایشگر، RF و پنل از مسیر مشترک opcode ضبط می‌شوند.')}</p>
+          <p>{copy('Relay, motion, MOSFET, beep, display, RF, and front-panel actions are captured through the shared opcode path.', 'رله، حرکت، ماسفت، بوق، نمایشگر، RF و پنل از مسیر مشترک opcode ضبط می‌شوند.')}</p>
           <div className="macro-library__actions">
             <Button tone="primary" icon={CircleDot} disabled={!online || !name.trim() || Boolean(recording?.active)} busy={busy === 'controller.macro.record.start'} onClick={() => void perform(
               'controller.macro.record.start',

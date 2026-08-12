@@ -203,7 +203,7 @@ func commandHelpGroup(command *Command) string {
 		return "Connection and telemetry"
 	case "settings", "menu", "display", "host-menu":
 		return "Board configuration and menus"
-	case "relay", "pwm", "rgb", "strip", "buzzer", "melody", "silent", "i2c":
+	case "relay", "pwm", "rgb", "strip", "beep", "melody", "silent", "i2c":
 		return "Outputs and front panel"
 	case "rf", "macro", "automation":
 		return "RF, macros and automation"

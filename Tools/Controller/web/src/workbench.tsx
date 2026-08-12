@@ -352,7 +352,7 @@ export function WorkbenchView(props: SharedViewProps) {
         {snapshot.connected && <Card icon={AudioLines} iconTone="green" title={copy('Buzzer & melody', 'بیزر و ملودی')} eyebrow={copy('Timed audio', 'صدای زمان‌بندی‌شده')}>
           <RangeField label={copy('Frequency', 'فرکانس')} value={frequency} min={20} max={20000} step={10} unit="Hz" onChange={setFrequency} />
           <RangeField label={copy('Duration', 'مدت')} value={toneDuration} min={20} max={5000} step={20} unit="ms" onChange={setToneDuration} />
-          <Button icon={Volume2} onClick={() => void run(`buzzer ${frequency} ${toneDuration}`)}>{copy('Play tone', 'پخش صدا')}</Button>
+		  <Button icon={Volume2} onClick={() => void run(`beep ${frequency} ${toneDuration}`)}>{copy('Play tone', 'پخش صدا')}</Button>
           <TextField label={copy('Configured melody', 'ملودی ذخیره‌شده')} value={melody} spellCheck={false} onChange={(event) => setMelody(event.target.value)} />
           <div className="inline-actions"><Button icon={Play} disabled={!melody.trim()} onClick={() => void run(`melody play ${shellArgument(melody.trim())}`)}>{copy('Play', 'پخش')}</Button><Button icon={StopCircle} onClick={() => void run('melody stop')}>{copy('Stop', 'توقف')}</Button><Button icon={List} onClick={() => void run('melody list')}>{copy('List', 'فهرست')}</Button></div>
         </Card>}

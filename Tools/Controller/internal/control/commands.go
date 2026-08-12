@@ -795,25 +795,25 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS | buzzer 0 0 | buzzer status | buzzer path board|host|both|none", Summary: "play/stop a tone or select board/PC buzzer routing",
+		Name: "beep", Aliases: []string{"buzzer"}, Usage: "beep FREQUENCY_HZ DURATION_MS | beep 0 0 | beep status | beep path board|host|both|none", Summary: "play/stop a tone or select board/PC buzzer routing",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) >= 1 && (strings.EqualFold(args[0], "status") || strings.EqualFold(args[0], "path")) {
 				return buzzerRoutingCommand(ctx, runtime, options, args)
 			}
-			values, err := exactUintArgs(args, 2, 16, "buzzer FREQUENCY_HZ DURATION_MS")
+			values, err := exactUintArgs(args, 2, 16, "beep FREQUENCY_HZ DURATION_MS")
 			if err != nil {
 				return "", err
 			}
 			stopping := values[0] == 0 && values[1] == 0
 			if !stopping && values[1] == 0 {
-				return "", errors.New("buzzer duration must be nonzero unless frequency/duration are 0/0 to stop")
+				return "", errors.New("beep duration must be nonzero unless frequency/duration are 0/0 to stop")
 			}
 			if values[0] == 0 && values[1] != 0 {
-				return "", errors.New("buzzer stop is exactly 0 0; timed pauses belong to melodies")
+				return "", errors.New("beep stop is exactly 0 0; timed pauses belong to melodies")
 			}
 			if !stopping && (values[0] < 20 || values[0] > 20000) {
 				return "", errors.New(
-					"buzzer frequency must be 20..20000 Hz, or 0 with duration 0 to stop",
+					"beep frequency must be 20..20000 Hz, or 0 with duration 0 to stop",
 				)
 			}
 			outputs.StopMelody()
@@ -821,7 +821,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(0, 0)); err != nil {
 					return "", err
 				}
-				return "buzzer stopped", nil
+				return "beep stopped", nil
 			}
 			// A direct tone is an explicit action on every surface, but it must
 			// never bypass the firmware-owned silent flag.  Query before sending
@@ -832,12 +832,12 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "", err
 			}
 			if settings.Flags&native.SettingsSilent != 0 {
-				return "buzzer suppressed: board is silent", nil
+				return "beep suppressed: board is silent", nil
 			}
 			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(uint16(values[0]), uint16(values[1]))); err != nil {
 				return "", err
 			}
-			return "buzzer command accepted", nil
+			return "beep command accepted", nil
 		},
 	})
 	mustRegister(shell.Command{
@@ -2101,7 +2101,7 @@ func buzzerRoutingCommand(
 		args = []string{"status"}
 	}
 	if len(args) != 1 && !(len(args) == 2 && strings.EqualFold(args[0], "path")) {
-		return "", errors.New("usage: buzzer status | buzzer path board|host|both|none")
+		return "", errors.New("usage: beep status | beep path board|host|both|none")
 	}
 	if options.HostConfig == nil {
 		return "", errors.New("host buzzer configuration is unavailable")
@@ -2113,7 +2113,7 @@ func buzzerRoutingCommand(
 	config := options.HostConfig()
 	if len(args) == 1 {
 		if !strings.EqualFold(args[0], "status") {
-			return "", errors.New("usage: buzzer status | buzzer path board|host|both|none")
+			return "", errors.New("usage: beep status | beep path board|host|both|none")
 		}
 		return formatBuzzerRouting(settings, config), nil
 	}
@@ -2130,7 +2130,7 @@ func buzzerRoutingCommand(
 	case "none":
 		boardSilent, hostEnabled = true, false
 	default:
-		return "", errors.New("buzzer path must be board, host, both, or none")
+		return "", errors.New("beep path must be board, host, both, or none")
 	}
 
 	beforeMirror := config.Integrations.BuzzerMirror

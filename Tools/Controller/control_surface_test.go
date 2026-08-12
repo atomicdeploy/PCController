@@ -18,7 +18,7 @@ func TestCommandCatalogCoversEveryControllerDomain(t *testing.T) {
 		"menu and front panel":        {"menu", "display"},
 		"relay and motion":            {"relay"},
 		"PWM and lighting":            {"pwm", "rgb", "strip"},
-		"buzzer and melodies":         {"buzzer", "melody", "silent"},
+		"beep and melodies":           {"beep", "melody", "silent"},
 		"RF learn, map, and transmit": {"rf"},
 		"macros and automation":       {"macro", "automation"},
 		"sensors and I2C":             {"status", "temp", "i2c"},

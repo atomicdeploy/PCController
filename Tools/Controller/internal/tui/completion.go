@@ -45,7 +45,9 @@ var nestedCompletions = map[string][]string{
 	"silent board":       {"status", "on", "off"},
 	"silent host":        {"status", "on", "off"},
 	"silent both":        {"status", "on", "off"},
-	"buzzer":             {"status", "path"},
+	"beep":               {"status", "path"},
+	"beep path":          {"board", "host", "both", "none"},
+	"buzzer":             {"status", "path"}, // compatibility alias
 	"buzzer path":        {"board", "host", "both", "none"},
 	"menu":               {"list", "prev", "next", "dec", "inc", "page"},
 	"menu page":          {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"},
