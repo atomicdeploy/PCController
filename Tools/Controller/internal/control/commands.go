@@ -859,7 +859,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]",
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|stop|discard|play NAME_OR_ID|status|monitor|cancel [keep]",
 		Summary: "manage and play MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
@@ -4527,7 +4527,7 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|stop|discard|play NAME_OR_ID|status|monitor|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4610,7 +4610,7 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf("macro %d/%s draft created; add steps in the watched host config or record a new macro", macro.ID, macro.Name), nil
-	case "update", "rename":
+	case "update":
 		if len(args) < 3 || len(args) > 5 {
 			return "", fmt.Errorf("usage: macro update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]")
 		}
@@ -4634,9 +4634,27 @@ func macroCommand(
 			return "", err
 		}
 		return "macro deleted from HOST configuration", nil
+	case "rename":
+		if len(args) != 3 {
+			return "", fmt.Errorf("usage: macro rename NAME_OR_ID NAME")
+		}
+		macro, err := runner.Rename(args[1], args[2])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d renamed to %q in HOST configuration", macro.ID, macro.Name), nil
+	case "category", "categorize":
+		if len(args) != 3 {
+			return "", fmt.Errorf("usage: macro category NAME_OR_ID CATEGORY")
+		}
+		macro, err := runner.SetCategory(args[1], args[2])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d/%s category set to %q in HOST configuration", macro.ID, macro.Name, macro.Category), nil
 	case "record":
 		if len(args) < 2 {
-			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|discard")
+			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|stop|discard")
 		}
 		switch strings.ToLower(args[1]) {
 		case "start":
@@ -4666,7 +4684,7 @@ func macroCommand(
 			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d host=%d panel=%d rf=%d last_at_us=%d last_delta_us=%d last_opcode=0x%02X last_source=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, state.LastAtUS, state.LastDeltaUS, state.LastOpcode, state.LastSource, state.StartedAt.Format(time.RFC3339), state.LastError), nil
 		case "save", "stop":
 			if len(args) != 2 {
-				return "", fmt.Errorf("usage: macro record save")
+				return "", fmt.Errorf("usage: macro record save|stop")
 			}
 			macro, err := runner.StopRecording(true)
 			if err != nil {
@@ -4683,7 +4701,7 @@ func macroCommand(
 			}
 			return fmt.Sprintf("macro %d/%s recording discarded", macro.ID, macro.Name), nil
 		default:
-			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|discard")
+			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|stop|discard")
 		}
 	case "play", "run", "start":
 		if len(args) != 2 {
@@ -4725,6 +4743,18 @@ func macroCommand(
 			state.Faithful,
 			state.StartedAt.Format(time.RFC3339),
 			state.LastError,
+		), nil
+	case "monitor":
+		if len(args) != 1 {
+			return "", fmt.Errorf("usage: macro monitor")
+		}
+		state := runner.State()
+		recording := runner.RecordingState()
+		return fmt.Sprintf(
+			"macro monitor playback=%s running=%t id=%d name=%q step=%d/%d buffer=%dB underruns=%d faithful=%t recording=%t record_id=%d record_name=%q record_steps=%d",
+			state.Lifecycle, state.Running, state.ID, state.Name, state.Step, state.StepCount,
+			state.BufferFill, state.Underruns, state.Faithful, recording.Active, recording.ID,
+			recording.Name, recording.Steps,
 		), nil
 	case "cancel", "stop":
 		if len(args) > 2 || (len(args) == 2 && !strings.EqualFold(args[1], "keep")) {

@@ -317,7 +317,17 @@ The action keys are:
 - `P` plays the selected macro; `C` cancels and safely turns affected outputs
   off, while `K` explicitly cancels and keeps their current states;
 - `I` shows the selected definition, `X` requires a second `X` before deleting
-  PC-side metadata, and `A` opens the automation rules list.
+  PC-side metadata, `U` prepares a rename, `G` prepares a category change,
+  `O` writes a current monitor summary to the terminal, and `A` opens the
+  automation rules list.
+
+The CLI and every command-capable host surface use the same closed command
+family: `macro list`, `show`, `record start`, `record save` (or `record stop`),
+`record discard`, `rename`, `category`, `play`, `cancel`, and `monitor`.
+`macro monitor` is an immediate shared-runner snapshot—playback identity,
+progress, queue health, faithfulness, and recording state—not a second polling
+or streaming mechanism. Long-lived TUI, API, and Web views consume the
+existing lifecycle events instead.
 
 Playback reads the same `MacroRunner` instance used by shell, IPC, and API
 commands. The page therefore reports live macro identity, elapsed/duration,

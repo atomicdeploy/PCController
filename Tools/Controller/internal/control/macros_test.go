@@ -611,3 +611,39 @@ func TestRecordedMacroStepRequiresCanonicalFixedPayloadShape(t *testing.T) {
 		}
 	}
 }
+
+func TestMacroMetadataAndMonitorCommandsUseTheSharedRunner(t *testing.T) {
+	runtime := New(Options{})
+	config := appconfig.Defaults()
+	config.Macros = []appconfig.Macro{{
+		ID: 7, Name: "old-name", Category: "Test", Color: "violet",
+		Steps: []appconfig.MacroStep{{Kind: "relay", Target: 5, Value: 1}},
+	}}
+	runner := NewMacroRunner(
+		runtime,
+		func() []appconfig.Macro { return config.Macros },
+		func() appconfig.Config { return config },
+		func(change func(*appconfig.Config) error) error {
+			if err := change(&config); err != nil {
+				return err
+			}
+			return config.Validate()
+		},
+	)
+	ctx := context.Background()
+	if output, err := macroCommand(ctx, runner, []string{"rename", "7", "new-name"}); err != nil || !strings.Contains(output, "new-name") {
+		t.Fatalf("rename output=%q err=%v", output, err)
+	}
+	if output, err := macroCommand(ctx, runner, []string{"category", "new-name", "Diagnostics"}); err != nil || !strings.Contains(output, "Diagnostics") {
+		t.Fatalf("category output=%q err=%v", output, err)
+	}
+	if got := config.Macros[0]; got.Name != "new-name" || got.Category != "Diagnostics" {
+		t.Fatalf("metadata did not persist: %#v", got)
+	}
+	if output, err := macroCommand(ctx, runner, []string{"monitor"}); err != nil || !strings.Contains(output, "playback=") || !strings.Contains(output, "recording=") {
+		t.Fatalf("monitor output=%q err=%v", output, err)
+	}
+	if _, err := macroCommand(ctx, runner, []string{"rename", "7", ""}); err == nil {
+		t.Fatal("empty rename was accepted")
+	}
+}

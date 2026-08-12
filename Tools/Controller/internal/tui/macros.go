@@ -49,6 +49,9 @@ var macroSecondaryButtons = []macroButtonDefinition{
 	{key: "/", label: "/ Find"},
 	{key: "i", label: "I Info"},
 	{key: "e", label: "E Edit"},
+	{key: "u", label: "U Rename"},
+	{key: "g", label: "G Category"},
+	{key: "o", label: "O Monitor"},
 	{key: "x", label: "X Delete", tone: macroButtonDanger},
 	{key: "a", label: "A Rules"},
 }
@@ -312,6 +315,30 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 		model.revealTerminal()
 		model.setNotice("Edit name, category, and color; use - to clear category or color")
 		return model, nil, true
+	case "u":
+		macro, ok := model.selectedMacro()
+		if !ok {
+			model.setNotice("No macro selected")
+			return model, nil, true
+		}
+		model.input.SetValue(fmt.Sprintf("macro rename %d ", macro.ID))
+		model.input.CursorEnd()
+		model.revealTerminal()
+		model.setNotice("Complete the new printable ASCII macro name")
+		return model, nil, true
+	case "g":
+		macro, ok := model.selectedMacro()
+		if !ok {
+			model.setNotice("No macro selected")
+			return model, nil, true
+		}
+		model.input.SetValue(fmt.Sprintf("macro category %d ", macro.ID))
+		model.input.CursorEnd()
+		model.revealTerminal()
+		model.setNotice("Complete the category (up to 64 printable ASCII bytes)")
+		return model, nil, true
+	case "o":
+		return model.dispatchLine("macro monitor")
 	case "x":
 		return model.deleteSelectedMacro()
 	}

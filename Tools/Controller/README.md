@@ -498,9 +498,10 @@ silent status|on|off                  # legacy alias for board silent
 silent board|host|both status|on|off
 display segments|lcd|both [--speed 220ms] [--duration 5s]
   [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]
-macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|delete NAME_OR_ID
-macro record start NAME [CATEGORY [COLOR]]|record status|record save|record discard
-macro play NAME_OR_ID|status|cancel [keep]
+macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME
+  |category NAME_OR_ID CATEGORY|delete NAME_OR_ID
+macro record start NAME [CATEGORY [COLOR]]|record status|record save|stop|discard
+macro play NAME_OR_ID|status|monitor|cancel [keep]
 automation list|run NAME
 rf send CODE BITS PROTOCOL [PULSE_US]  # protocol 1..12
 rf learn [indefinite|timer [DURATION]] # default indefinite + multi-code; timer aliases: single, one-shot
