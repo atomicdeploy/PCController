@@ -144,9 +144,10 @@ host-only settings and diagnostics while the board is offline.
 
 Supported desktop and mobile browsers can install the WebUI as a standalone
 app. Its manifest exposes shortcuts to Overview, Workbench, Activity, and
-Settings. The service worker is deliberately network-only: it keeps no offline
-cache, so stopping the host is visible immediately instead of leaving a stale
-control surface on screen.
+Settings. The service worker caches only the versioned UI shell; it never
+caches live API, WebSocket, health, or generated-controller configuration
+traffic. A temporary offline shell therefore never claims that the board is
+still connected. See [PWA and touch behavior](docs/PWA-and-touch.md).
 
 On Windows, a primary-owning `controller web` process adds a native tray menu
 unless `--no-tray` is supplied. It reports authenticated controller state,

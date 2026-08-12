@@ -254,12 +254,13 @@ not require remote assets.
 
 The bundled manifest lets supported desktop and mobile browsers install the
 same-origin UI in standalone presentation and provides shortcuts to Overview,
-Workbench, Activity, and Settings. Its service worker always uses the network
-and stores no offline response cache. Closing the Controller host therefore
-becomes visible immediately instead of leaving an obsolete control panel. When
-optional interaction cues are enabled, supported visible-page mobile clients
-may also use restrained vibration for select, success, and warning feedback;
-no workflow depends on haptics.
+Workbench, Activity, and Settings. Its service worker retains only the
+versioned UI shell and immutable bundles; it never caches controller API,
+WebSocket, health, or generated configuration responses. Closing the Controller
+host therefore leaves an explicitly offline shell, never an obsolete “live”
+control panel. When optional interaction cues are enabled, supported
+visible-page mobile clients may also use restrained vibration for select,
+success, and warning feedback; no workflow depends on haptics.
 
 The exact embedded distribution also has a deterministic, secret-free ZIP
 export contract for trusted static hosting. See

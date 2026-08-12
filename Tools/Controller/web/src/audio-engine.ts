@@ -379,15 +379,21 @@ class ProceduralAudioEngine implements AudioEngine {
   }
 }
 
+export function vibrationPattern(name: AudioCue): VibratePattern | null {
+  if (name === 'select') return 8
+  if (name === 'success') return [10, 22, 14]
+  if (name === 'warning') return [18, 32, 18]
+  if (name === 'error') return [22, 28, 22]
+  if (name === 'connect') return 10
+  if (name === 'disconnect') return [12, 24, 10]
+  return null
+}
+
 function vibrateCue(name: AudioCue): void {
   if (typeof navigator === 'undefined' || typeof navigator.vibrate !== 'function') return
   if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
-  if (name === 'select') navigator.vibrate(8)
-  else if (name === 'success') navigator.vibrate([10, 22, 14])
-  else if (name === 'warning') navigator.vibrate([18, 32, 18])
-  else if (name === 'error') navigator.vibrate([22, 28, 22])
-  else if (name === 'connect') navigator.vibrate(10)
-  else if (name === 'disconnect') navigator.vibrate([12, 24, 10])
+  const pattern = vibrationPattern(name)
+  if (pattern !== null) navigator.vibrate(pattern)
 }
 
 function navigationTone(direction: NavigationDirection): { start: number; end: number; pan: number } {

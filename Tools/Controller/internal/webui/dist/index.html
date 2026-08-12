@@ -2,13 +2,15 @@
 <html lang="en" dir="ltr" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#0b0a0e" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#0b0a0e" data-runtime-theme />
     <meta name="color-scheme" content="dark light" />
     <meta name="application-name" content="PCController" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PCController" />
+    <meta name="format-detection" content="telephone=no, date=no, email=no, address=no" />
     <meta name="description" content="Unified hardware and integration control center" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" sizes="any" />
@@ -18,10 +20,19 @@
     <title>PCController</title>
     <script src="/theme-init.js"></script>
     <script src="/controller-config.js"></script>
-    <script type="module" crossorigin src="/assets/app-BSyWFiw5.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-C8yyomG3.css">
+    <style>
+      /* First paint before the module/CSS bundle arrives: a restrained Fuji
+         silhouette, not a blank or faux-live control surface. */
+      #startup-preloader{position:fixed;z-index:9999;inset:0;display:grid;place-items:center;overflow:hidden;background:linear-gradient(150deg,#09090c,#1b1722 52%,#09090c);color:#f4f0f8;font:500 12px system-ui,sans-serif}
+      #startup-preloader::before{content:"";position:absolute;inset:0;background:linear-gradient(123deg,transparent 0 60%,rgb(177 147 255/.08) 60.1% 60.3%,transparent 60.4%)}
+      .startup-fuji{position:relative;width:min(76vw,460px);height:min(31vh,230px);filter:drop-shadow(0 26px 46px rgb(0 0 0/.45))}.startup-fuji b,.startup-fuji i{position:absolute;inset:0;display:block}.startup-fuji b{background:linear-gradient(135deg,#4b4553,#18151e 54%);clip-path:polygon(2% 100%,50% 5%,98% 100%)}.startup-fuji i{background:linear-gradient(135deg,#f5f1f7,#c7bfce 51%,transparent 52%);clip-path:polygon(38% 33%,50% 5%,62% 33%,57% 30%,53% 39%,50% 31%,46% 39%,42% 30%)}
+      .startup-status{position:absolute;bottom:max(7vh,32px);display:flex;gap:10px;align-items:center;color:#cfc6dc;letter-spacing:.12em;text-transform:uppercase;font-size:10px}.startup-status::before{content:"";width:7px;height:7px;border-radius:50%;background:#b69aff;box-shadow:0 0 15px #b69aff;animation:startup-pulse 1.1s ease-in-out infinite}@keyframes startup-pulse{50%{opacity:.28;transform:scale(.7)}}@media (prefers-reduced-motion:reduce){.startup-status::before{animation:none}}
+    </style>
+    <script type="module" crossorigin src="/assets/app-Aa4Ogcx9.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DzbeMLey.css">
   </head>
   <body>
+    <div id="startup-preloader" role="status" aria-live="polite" aria-label="Loading PCController"><div class="startup-fuji" aria-hidden="true"><b></b><i></i></div><span class="startup-status">Preparing control surface</span></div>
     <div id="root" data-pccontroller-shell></div>
   </body>
 </html>
