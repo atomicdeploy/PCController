@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getSnapshot, getUIConfig, responseErrorDetail, streamFailureState, transportFailureDetail } from './api'
+import { getSnapshot, getUIConfig, HTTPResponseError, responseErrorDetail, streamFailureState, transportFailureDetail } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -33,6 +33,20 @@ describe('API error details', () => {
 
     expect(streamFailureState(failure)).toBe('authentication-required')
     expect(transportFailureDetail(failure)).toBe('HTTP 401 · authentication required')
+  })
+
+  it('recognizes the host authentication-specific 403 without hiding unrelated denial', () => {
+    const challenge = new Response(
+      JSON.stringify({ error: 'remote requests without Origin require an Authorization or X-PCController-Token header' }),
+      { status: 403, statusText: 'Forbidden' },
+    )
+    const denied = new Response(JSON.stringify({ error: 'request Origin is not allowed' }), { status: 403, statusText: 'Forbidden' })
+
+    expect(streamFailureState(new HTTPResponseError(
+      'remote requests without Origin require an Authorization or X-PCController-Token header',
+      challenge.status,
+    ))).toBe('authentication-required')
+    expect(streamFailureState(new HTTPResponseError('request Origin is not allowed', denied.status))).toBe('waiting')
   })
 
   it('requires the current setup contract while tolerating future fields', async () => {

@@ -50,7 +50,11 @@ export class HTTPResponseError extends Error {
 
 /** Distinguishes a credential challenge from an unavailable transport. */
 export function streamFailureState(cause: unknown): StreamFailureState {
-  return cause instanceof HTTPResponseError && cause.status === 401
+  const authenticationChallenge = cause instanceof HTTPResponseError && (
+    cause.status === 401 ||
+    (cause.status === 403 && /\b(?:auth(?:entication|orization)?|credentials?|tokens?)\b/i.test(cause.message))
+  )
+  return authenticationChallenge
     ? 'authentication-required'
     : 'waiting'
 }
