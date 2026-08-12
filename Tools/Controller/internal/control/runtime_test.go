@@ -241,16 +241,80 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 func TestUSBConnectionEventsAreNormalizedForAllConsumers(t *testing.T) {
 	runtime := New(Options{})
 	after := runtime.LatestEventID()
-	port := ports.Info{Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523"}
+	port := ports.Info{
+		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
+		SerialNumber: "BOARD-A", InstanceID: `USB\CH340\A`,
+	}
 	runtime.publishConnection("disconnect", port, "USB removed")
 	first, err := runtime.WaitEvent(context.Background(), after, "usb.disconnected")
 	if err != nil || first.Port.Name != "COM4" || first.Target != "app.clients" {
 		t.Fatalf("usb disconnect event=%#v err=%v", first, err)
 	}
+	port.Name = "COM9"
 	runtime.publishConnection("reconnected", port, "")
 	second, err := runtime.WaitEvent(context.Background(), first.ID, "usb.reconnected")
-	if err != nil || second.Port.Name != "COM4" || second.Source != "host" {
+	if err != nil || second.Port.Name != "COM9" || second.Source != "host" ||
+		second.Port.SerialNumber != "BOARD-A" || second.Target != "app.clients" {
 		t.Fatalf("usb reconnect event=%#v err=%v", second, err)
+	}
+}
+
+func TestReconnectDiscoveryUsesLastAuthenticatedPortIdentity(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM4"}})
+	runtime.mu.Lock()
+	runtime.connectionState = "reconnecting"
+	runtime.portRebindAllowed = true
+	runtime.port = ports.Info{
+		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
+		SerialNumber: "BOARD-A", FriendlyName: "USB-SERIAL CH340",
+		InstanceID: `USB\CH340\A`,
+	}
+	options := runtime.options
+	runtime.mu.Unlock()
+
+	discovery := runtime.discoveryOptions(options)
+	if !discovery.AllowPortRebind {
+		t.Fatal("authenticated reconnect did not permit stale COM rebinding")
+	}
+	preferred := discovery.Filter.Preferred
+	if preferred.Port != "COM4" || preferred.VID != "1A86" ||
+		preferred.PID != "7523" || preferred.SerialNumber != "BOARD-A" ||
+		preferred.Name != "USB-SERIAL CH340" ||
+		preferred.InstanceID != `USB\CH340\A` {
+		t.Fatalf("observed reconnect identity=%#v", preferred)
+	}
+	candidates := ports.ReconnectCandidates([]ports.Info{
+		{
+			Name: "COM9", IsUSB: true, VID: "1A86", PID: "7523",
+			SerialNumber: "BOARD-A", FriendlyName: "USB-SERIAL CH340",
+			InstanceID: `USB\CH340\A`,
+		},
+		{Name: "COM12", IsUSB: true, VID: "2341", PID: "0043"},
+	}, discovery.Filter)
+	if len(candidates) != 1 || candidates[0].Name != "COM9" {
+		t.Fatalf("authenticated COM reassignment candidates=%#v", candidates)
+	}
+}
+
+func TestExplicitReconnectDoesNotRelaxChangedPortSelection(t *testing.T) {
+	runtime := New(Options{Filter: ports.Filter{Port: "COM4"}})
+	runtime.mu.Lock()
+	runtime.connectionState = "reconnecting"
+	runtime.portRebindAllowed = false // Explicit/configured reconnect, not USB removal.
+	runtime.port = ports.Info{
+		Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523",
+		SerialNumber: "BOARD-A",
+	}
+	options := runtime.options
+	options.Filter.Port = "COM12"
+	runtime.mu.Unlock()
+
+	discovery := runtime.discoveryOptions(options)
+	if discovery.AllowPortRebind {
+		t.Fatal("explicit reconnect relaxed the requested COM selection")
+	}
+	if discovery.Filter.Preferred.SerialNumber != "" {
+		t.Fatalf("explicit reconnect inherited old device identity: %#v", discovery.Filter.Preferred)
 	}
 }
 
