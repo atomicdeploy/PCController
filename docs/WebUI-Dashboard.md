@@ -1,0 +1,58 @@
+# 🧭 WebUI dashboard contract
+
+> WIP delivery tracked by [#159](https://github.com/atomicdeploy/PCController/issues/159), with shared UI follow-up in [#154](https://github.com/atomicdeploy/PCController/issues/154) and native-feeling embedded UI acceptance in [#101](https://github.com/atomicdeploy/PCController/issues/101).
+
+The dashboard is a live view, not an alternate board-control authority. The
+host owns the serial connection and emits snapshot, status, event, and
+front-panel updates to every UI surface.
+
+## Live and stale state
+
+- A `LIVE` badge with its Wi-Fi icon means a status sample arrived less than
+  one second ago. While it is live, the manual Refresh button is hidden.
+- A connected but older stream is visibly `STALE`; Refresh is then available.
+- On transport loss the host clears board-derived values before rendering, so
+  relays, EEPROM values, front-panel segments, and telemetry never masquerade
+  as current data.
+- `front_panel.segment` is pushed into the snapshot immediately. The dashboard
+  shows the raw seven-segment bytes without polling the board.
+
+## Personal layout versus shared names
+
+Card order, collapse state, and visibility are persisted only in that
+browser's local storage. Drag a card by its grip to reorder it; hide or
+collapse it with its controls, then use the hero action menu to restore a
+hidden card. This is deliberately local and does not mutate a board or another
+operator's layout.
+
+Peripheral labels are different: relay, MOSFET/PWM, and motion-side names use
+the host's canonical peripheral catalog. The dashboard action opens Settings,
+where saving a label propagates through the host, CLI, TUI, IPC, bridge, and
+WebUI. This prevents duplicate definitions while allowing each board setup to
+be described clearly.
+
+## Connection and notification behavior
+
+The hero menu offers open, close, reconnect, and USB-device discovery actions.
+Its output is sent through the normal command route; it does not bypass the
+host's single connection owner.
+
+Relay toggles use that same canonical command path. Toasts for relay changes
+are intentionally limited to physical-front-panel and RF sources. WebUI,
+macro, and automation actions already have their initiating feedback and do
+not produce duplicate notifications. Fault and door safety notifications remain
+visible regardless of origin.
+
+The overview collects connection freshness, LCD address, buzzer/silent state,
+and event-driven seven-segment state alongside board identity and diagnostics.
+Temperature cards use an LED/audio tab instead of displaying two competing
+thermal cards.
+
+## Remaining WIP acceptance
+
+1. Exercise drag, hide/restore, and label editing in a browser connected to a
+   live board.
+2. Confirm every host command used by the hero menu has the expected port
+   selection UX on multi-port systems.
+3. Run visual desktop, narrow/mobile, RTL/LTR, and screen-reader checks before
+   merging [#159](https://github.com/atomicdeploy/PCController/issues/159).

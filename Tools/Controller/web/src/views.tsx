@@ -28,11 +28,14 @@ import {
   Database,
   DoorOpen,
   Download,
+  Eye,
+  EyeOff,
   ExternalLink,
   Fan,
   FileJson2,
   FileSpreadsheet,
   Gauge,
+  GripVertical,
   HardDrive,
   HeartPulse,
   Info,
@@ -66,6 +69,7 @@ import {
   Usb,
   Volume2,
   Waves,
+  Wifi,
   Zap,
 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
@@ -131,6 +135,7 @@ import type {
   UIConfig,
 } from './types'
 import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
+import { type DashboardCardID, loadDashboardLayout, moveDashboardCard, saveDashboardLayout, toggleDashboardCard } from './dashboard-layout'
 
 export interface SharedViewProps {
   appTitle: string
@@ -169,6 +174,47 @@ function eventTone(event: ControllerEvent): 'good' | 'warn' | 'bad' | 'info' {
   return 'info'
 }
 
+function DashboardCardFrame({
+  id,
+  title,
+  order,
+  collapsed,
+  hidden,
+  onToggleCollapsed,
+  onToggleHidden,
+  onDragStart,
+  onDrop,
+  children,
+}: {
+  id: DashboardCardID
+  title: string
+  order: number
+  collapsed: boolean
+  hidden: boolean
+  onToggleCollapsed: () => void
+  onToggleHidden: () => void
+  onDragStart: (id: DashboardCardID) => void
+  onDrop: (id: DashboardCardID) => void
+  children: ReactNode
+}) {
+  if (hidden) return null
+  return <section
+    className={`dashboard-card-frame${collapsed ? ' is-collapsed' : ''}`}
+    style={{ order }}
+    draggable
+    onDragStart={() => onDragStart(id)}
+    onDragOver={(event) => event.preventDefault()}
+    onDrop={() => onDrop(id)}
+  >
+    <div className="dashboard-card-frame__actions">
+      <span title="Drag to reorder"><GripVertical size={15} /></span><strong>{title}</strong>
+      <button type="button" title={collapsed ? 'Expand card' : 'Collapse card'} aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`} onClick={onToggleCollapsed}><ChevronDown size={15} /></button>
+      <button type="button" title="Hide card" aria-label={`Hide ${title}`} onClick={onToggleHidden}><EyeOff size={15} /></button>
+    </div>
+    {!collapsed && children}
+  </section>
+}
+
 export function DashboardView(props: SharedViewProps) {
   const { appTitle, snapshot, samples, events, locale, t, command, refresh, openDialog } = props
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
@@ -178,6 +224,14 @@ export function DashboardView(props: SharedViewProps) {
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
+  const [layout, setLayout] = useState(loadDashboardLayout)
+  const [draggedCard, setDraggedCard] = useState<DashboardCardID | null>(null)
+  const [temperatureTab, setTemperatureTab] = useState<'led' | 'audio'>('led')
+  const [clock, setClock] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [])
   useEffect(() => {
     let active = true
     void rpc<HostUISettings>('controller.ui.config.get')
@@ -192,6 +246,26 @@ export function DashboardView(props: SharedViewProps) {
     copy('User relay 5', 'رلهٔ کاربر ۵'), copy('User relay 6', 'رلهٔ کاربر ۶'),
     copy('User relay 7', 'رلهٔ کاربر ۷'), copy('User relay 8', 'رلهٔ کاربر ۸'),
   ]
+  const statusAgeMS = snapshot.status_updated ? Math.max(0, clock - new Date(snapshot.status_updated).getTime()) : Number.POSITIVE_INFINITY
+  const socketFresh = snapshot.connected && Number.isFinite(statusAgeMS) && statusAgeMS < 1000
+  const updateLayout = (change: (current: ReturnType<typeof loadDashboardLayout>) => ReturnType<typeof loadDashboardLayout>) => {
+    setLayout((current) => {
+      const next = change(current)
+      saveDashboardLayout(next)
+      return next
+    })
+  }
+  const frame = (id: DashboardCardID, title: string, child: ReactNode) => <DashboardCardFrame
+    id={id}
+    title={title}
+    order={layout.order.indexOf(id)}
+    collapsed={layout.collapsed.includes(id)}
+    hidden={layout.hidden.includes(id)}
+    onToggleCollapsed={() => updateLayout((current) => ({ ...current, collapsed: toggleDashboardCard(current.collapsed, id) }))}
+    onToggleHidden={() => updateLayout((current) => ({ ...current, hidden: toggleDashboardCard(current.hidden, id) }))}
+    onDragStart={setDraggedCard}
+    onDrop={(target) => { if (draggedCard) updateLayout((current) => moveDashboardCard(current, draggedCard, target)); setDraggedCard(null) }}
+  >{child}</DashboardCardFrame>
   return (
     <>
       <SectionTitle
@@ -201,10 +275,10 @@ export function DashboardView(props: SharedViewProps) {
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
-              {snapshot.connected ? t('online') : snapshot.connection_state === 'connecting' ? t('connecting') : t('offline')}
+              {socketFresh ? <><Wifi size={14} /> {t('online')}</> : snapshot.connected ? <><Wifi size={14} /> {copy('STALE', 'قدیمی')}</> : snapshot.connection_state === 'connecting' ? t('connecting') : t('offline')}
             </StatusBadge>
             {!snapshot.connected && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
-            <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
+            {!socketFresh && <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>}
           </div>
         }
       />
@@ -219,16 +293,29 @@ export function DashboardView(props: SharedViewProps) {
           <span>{copy('BUILD', 'ساخت')}</span><strong>{hash}</strong>
           <span>{copy('UPTIME', 'زمان کارکرد')}</span><strong>{formatDuration(locale, status.uptime_ms)}</strong>
         </div>
+        <details className="hero-panel__menu">
+          <summary aria-label={copy('Connection actions', 'عملیات اتصال')}><MoreHorizontal size={18} /></summary>
+          <div>
+            <Button compact icon={snapshot.connected ? Unplug : Cable} onClick={() => void command(snapshot.connected ? 'close' : 'open', snapshot.connected ? copy('Connection closed', 'اتصال بسته شد') : copy('Connection opened', 'اتصال باز شد'))}>{snapshot.connected ? copy('Close', 'بستن') : copy('Open', 'بازکردن')}</Button>
+            <Button compact icon={RefreshCw} onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>
+            <Button compact icon={Usb} onClick={() => void command('ports', copy('USB device list requested', 'فهرست دستگاه‌های USB درخواست شد'))}>{copy('Change USB device', 'تغییر دستگاه USB')}</Button>
+            {layout.hidden.map((id) => <Button key={id} compact icon={Eye} onClick={() => updateLayout((current) => ({ ...current, hidden: toggleDashboardCard(current.hidden, id) }))}>{copy(`Show ${id}`, `نمایش ${id}`)}</Button>)}
+          </div>
+        </details>
       </section>
 
       {snapshot.connected && snapshot.have_status && <section className="metric-grid">
         <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />
         <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />
-        <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" detail={`${peripheralName('sensor.temperature-audio', copy('Audio temperature', 'دمای صوت'))} · ${formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} °C`} />
+        <Card icon={Thermometer} iconTone="amber" title={copy('Temperature', 'دما')} eyebrow={temperatureTab === 'led' ? peripheralName('sensor.temperature-led', 'LED') : peripheralName('sensor.temperature-audio', copy('Audio', 'صوت'))} className="temperature-card">
+          <Segmented value={temperatureTab} label={copy('Temperature sensor', 'حسگر دما')} options={[{ value: 'led', label: 'LED' }, { value: 'audio', label: copy('Audio', 'صوت') }]} onChange={(value) => setTemperatureTab(value as 'led' | 'audio')} />
+          <strong className="temperature-card__value">{formatNumber(locale, (temperatureTab === 'led' ? status.temperature_led_centi_c : status.temperature_bt_audio_centi_c) / 100, 1)}<small>°C</small></strong>
+          <span>{temperatureTab === 'led' ? copy('Lighting thermal sensor', 'حسگر حرارتی نور') : copy('Bluetooth audio thermal sensor', 'حسگر حرارتی صوت بلوتوث')}</span>
+        </Card>
         <MetricCard icon={PlugZap} label="PWM" value={status.pwm_available ? formatNumber(locale, status.pwm_value * 100 / 4095, 1) : '—'} unit={status.pwm_available ? '%' : ''} values={values(samples, 'power')} tone="violet" detail={status.pwm_available ? `${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}` : copy('Unavailable on this controller', 'در این کنترلر در دسترس نیست')} />
       </section>}
 
-      {snapshot.connected && <Card
+      {snapshot.connected && frame('telemetry', copy('Telemetry', 'تله‌متری'), <Card
         icon={ChartNoAxesCombined}
         iconTone="violet"
         title={snapshot.connected ? t('liveTelemetry') : copy('Telemetry history', 'تاریخچهٔ تله‌متری')}
@@ -243,11 +330,12 @@ export function DashboardView(props: SharedViewProps) {
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
           <TelemetryChart connected={snapshot.connected} locale={locale} samples={samples} />
         </Suspense>
-      </Card>}
+      </Card>)}
 
       <section className="dashboard-grid">
-        {snapshot.connected && <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
+        {snapshot.connected && frame('outputs', copy('Outputs', 'خروجی‌ها'), <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
           { label: copy('Read controller status', 'خواندن وضعیت کنترلر'), icon: Gauge, onSelect: () => { void command('status') } },
+          { label: copy('Edit relay, MOSFET, and side labels', 'ویرایش برچسب رله، ماسفت و سمت‌ها'), icon: PanelTop, onSelect: () => { window.location.hash = '#/settings' } },
           { label: copy('Release every output', 'آزادسازی همهٔ خروجی‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off'); await command('pwm off') } }) },
         ]}>
           <div className="output-matrix">
@@ -266,9 +354,9 @@ export function DashboardView(props: SharedViewProps) {
             })}
           </div>
           <div className="safety-strip"><ShieldCheck size={17} /><span>{activeRelayCount ? copy(`${activeRelayCount} outputs active · confirmation required for emergency release`, `${activeRelayCount} خروجی فعال است · آزادسازی اضطراری به تأیید نیاز دارد`) : copy('All physical outputs are released', 'همهٔ خروجی‌های فیزیکی آزاد هستند')}</span></div>
-        </Card>}
+        </Card>)}
 
-        {snapshot.connected && <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
+        {snapshot.connected && frame('overview', copy('Controller overview', 'نمای کلی کنترلر'), <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
           { label: copy('Read identity', 'خواندن شناسه'), icon: Cpu, onSelect: () => { void command('hello') } },
           { label: copy('Open controller controls', 'بازکردن کنترل‌های برد'), icon: CircuitBoard, onSelect: () => { window.location.hash = '#/controls' } },
         ]}>
@@ -277,12 +365,16 @@ export function DashboardView(props: SharedViewProps) {
             <DataRow label={t('firmware')} value={snapshot.hello.build_timestamp || hash} mono />
             <DataRow label={t('door')} value={status.door_open ? t('open') : t('closed')} tone={status.door_open ? 'warn' : 'good'} />
             <DataRow label={t('bluetooth')} value={status.bluetooth_audio_state === 2 ? t('online') : status.bluetooth_audio_state === 1 ? t('connecting') : t('offline')} />
+            <DataRow label="LCD" value={status.lcd_address ? `0x${status.lcd_address.toString(16).toUpperCase().padStart(2, '0')}` : copy('not detected', 'شناسایی نشد')} mono />
+            <DataRow label={copy('Seven-segment', 'هفت‌بخشی')} value={snapshot.have_front_panel && snapshot.front_panel ? snapshot.front_panel.raw_segments.map((value) => value.toString(16).toUpperCase().padStart(2, '0')).join(' ') : copy('awaiting event', 'در انتظار رویداد')} mono tone={snapshot.have_front_panel ? 'good' : 'warn'} />
+            <DataRow label={copy('Buzzer', 'بیزر')} value={(snapshot.settings.flags & 0x01) !== 0 ? copy('silent', 'بی‌صدا') : copy('available', 'آماده')} tone={(snapshot.settings.flags & 0x01) !== 0 ? 'warn' : 'good'} />
+            <DataRow label={copy('Socket', 'سوکت')} value={socketFresh ? copy('live (<1 s)', 'زنده (کمتر از ۱ ثانیه)') : copy('stale', 'قدیمی')} tone={socketFresh ? 'good' : 'warn'} />
             <DataRow label={copy('UART CRC / framing', 'CRC / قاب‌بندی UART')} value={`${status.crc_errors} / ${status.framing_errors}`} mono tone={status.crc_errors || status.framing_errors ? 'warn' : 'good'} />
             <DataRow label={copy('Reset count', 'تعداد بازنشانی')} value={status.reset_count} mono />
           </div>
-        </Card>}
+        </Card>)}
 
-        {snapshot.connected && <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
+        {snapshot.connected && frame('actions', copy('Quick actions', 'عملیات سریع'), <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
           <div className="action-grid">
             <Button icon={Unplug} tone="danger" onClick={() => openDialog({
               tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'),
@@ -291,14 +383,14 @@ export function DashboardView(props: SharedViewProps) {
             <Button icon={Gauge} onClick={() => void command('status')}>{copy('Read status', 'خواندن وضعیت')}</Button>
             <Button icon={Lightbulb} onClick={() => void command('rgb effect play attention')}>{copy('Attention cue', 'اعلان توجه')}</Button>
           </div>
-        </Card>}
+        </Card>)}
 
-        <Card icon={Activity} iconTone="violet" title={t('events')} eyebrow={events.length ? `${formatClock(locale, events[0].time)} · ${events[0].kind}` : t('eventStream')} className="activity-card" action={<span className="count-chip">{events.length}</span>} menu={[
+        {frame('events', copy('Events', 'رویدادها'), <Card icon={Activity} iconTone="violet" title={t('events')} eyebrow={events.length ? `${formatClock(locale, events[0].time)} · ${events[0].kind}` : t('eventStream')} className="activity-card" action={<span className="count-chip">{events.length}</span>} menu={[
           { label: copy('Open full timeline', 'بازکردن خط زمانی کامل'), icon: Activity, onSelect: () => { window.location.hash = '#/events' } },
           { label: copy('Refresh snapshot', 'تازه‌سازی وضعیت'), icon: RefreshCw, onSelect: () => { void refresh() } },
         ]}>
           <EventList events={events} locale={locale} t={t} />
-        </Card>
+        </Card>)}
       </section>
     </>
   )

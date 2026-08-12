@@ -251,6 +251,21 @@ p { color: var(--text-soft); }
 .sidebar__footer strong { color: var(--text-soft); font-size: 11px; }
 .sidebar__footer span { color: var(--text-muted); font: 9px var(--font-mono); }
 
+/* Dashboard cards preserve a personal, local layout without changing the
+   controller configuration shared with other hosts. */
+.dashboard-card-frame { min-width: 0; }
+.dashboard-card-frame__actions { display: flex; align-items: center; gap: 5px; min-height: 27px; padding: 0 6px 4px; color: var(--text-muted); cursor: grab; user-select: none; }
+.dashboard-card-frame__actions > span { display: grid; place-items: center; }
+.dashboard-card-frame__actions strong { margin-inline-end: auto; font: 600 9px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.dashboard-card-frame__actions button { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid transparent; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; }
+.dashboard-card-frame__actions button:hover, .dashboard-card-frame__actions button:focus-visible { border-color: var(--line); background: var(--surface-muted); color: var(--text); outline: 0; }
+.dashboard-card-frame.is-collapsed .dashboard-card-frame__actions svg { transition: rotate .16s ease; }.dashboard-card-frame.is-collapsed .dashboard-card-frame__actions button:first-of-type svg { rotate: -90deg; }
+.hero-panel { position: relative; }
+.hero-panel__menu { position: absolute; inset-block-start: 13px; inset-inline-end: 13px; z-index: 3; }
+.hero-panel__menu > summary { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); color: var(--text-muted); cursor: pointer; list-style: none; }.hero-panel__menu > summary::-webkit-details-marker { display: none; }
+.hero-panel__menu > div { position: absolute; inset-inline-end: 0; top: 36px; width: max-content; max-width: min(320px, 80vw); display: grid; gap: 5px; padding: 7px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--glass-strong); box-shadow: var(--shadow); }.hero-panel__menu .button { justify-content: flex-start; }
+.temperature-card { min-height: 145px; }.temperature-card__value { display: block; margin: 17px 0 5px; font: 700 30px/1 var(--font-mono); color: var(--text); }.temperature-card__value small { margin-inline-start: 4px; color: var(--text-muted); font-size: 12px; }.temperature-card > span { color: var(--text-muted); font-size: 10px; }
+
 .is-sidebar-compact .brand { grid-template-columns: 34px 34px; justify-content: space-between; gap: 2px; padding-inline: 4px; }
 .is-sidebar-compact .brand__mark { width: 34px; height: 34px; border-radius: 10px; font-size: 10px; }
 .is-sidebar-compact .brand__copy, .is-sidebar-compact .sidebar__status > div, .is-sidebar-compact .sidebar__status > svg, .is-sidebar-compact .nav-group__label, .is-sidebar-compact .nav-button__label, .is-sidebar-compact .nav-button__badge, .is-sidebar-compact .nav-button__chevron, .is-sidebar-compact .sidebar__footer div { opacity: 0; width: 0; pointer-events: none; }

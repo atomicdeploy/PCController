@@ -83,6 +83,7 @@ import type {
   UIConfig,
 } from './types'
 import { applyPushedOutputEvent } from './status-led-event'
+import { shouldToastControllerEvent } from './event-notification-policy'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
@@ -1079,7 +1080,7 @@ export default function App() {
 				navigate('updates')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-            if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
+			if (shouldToastControllerEvent(event)) notify(eventToneForToast(event), event.kind, event.text)
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
             }
