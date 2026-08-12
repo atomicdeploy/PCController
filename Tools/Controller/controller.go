@@ -97,6 +97,8 @@ type (
 	ProgramStateOwner         = control.ProgramStateOwner
 	ProgramStateSnapshot      = control.ProgramStateSnapshot
 	ProgramStateLease         = control.ProgramStateLease
+	MacroState                = control.MacroState
+	MacroRecordingState       = control.MacroRecordingState
 )
 
 // RF learning modes select indefinite multi-code or bounded timer operation.
@@ -230,7 +232,23 @@ type Macro struct {
 	LCDMessage          string      `json:"lcd_message,omitempty"`
 	TimingToleranceUS   uint32      `json:"timing_tolerance_us,omitempty"`
 	KeepOutputsOnCancel bool        `json:"keep_outputs_on_cancel,omitempty"`
+	RecordingSource     string      `json:"recording_source,omitempty"`
+	CaptureDroppedSteps uint16      `json:"capture_dropped_steps,omitempty"`
+	CaptureMissingSteps uint16      `json:"capture_missing_steps,omitempty"`
+	CaptureImportKey    string      `json:"capture_import_key,omitempty"`
+	CaptureBoard        string      `json:"capture_board,omitempty"`
+	CaptureID           byte        `json:"capture_id,omitempty"`
+	CaptureStartedAtUS  uint32      `json:"capture_started_at_us,omitempty"`
 	Steps               []MacroStep `json:"steps"`
+}
+
+// MacroSnapshot is the typed, point-in-time model shared by Web, IPC, RPC,
+// REST, native embedders, and bridge consumers.
+type MacroSnapshot struct {
+	Library       []Macro             `json:"library"`
+	Playback      MacroState          `json:"playback"`
+	Recording     MacroRecordingState `json:"recording"`
+	LatestEventID uint64              `json:"latest_event_id"`
 }
 
 // MacroStep describes one timestamped operation within a Macro.
@@ -352,6 +370,8 @@ type Snapshot struct {
 	StatusLED         StatusLEDState       `json:"status_led"`
 	HaveStatusLED     bool                 `json:"have_status_led"`
 	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
+	Macro             MacroState           `json:"macro"`
+	MacroRecording    MacroRecordingState  `json:"macro_recording"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -742,7 +762,13 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 			Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
-			Steps:               make([]appconfig.MacroStep, len(macro.Steps)),
+			RecordingSource:     macro.RecordingSource,
+			CaptureDroppedSteps: macro.CaptureDroppedSteps,
+			CaptureMissingSteps: macro.CaptureMissingSteps,
+			CaptureImportKey:    macro.CaptureImportKey,
+			CaptureBoard:        macro.CaptureBoard, CaptureID: macro.CaptureID,
+			CaptureStartedAtUS: macro.CaptureStartedAtUS,
+			Steps:              make([]appconfig.MacroStep, len(macro.Steps)),
 		}
 		for stepIndex, step := range macro.Steps {
 			result[index].Steps[stepIndex] = appconfig.MacroStep{
@@ -943,6 +969,154 @@ func (client *Client) Execute(ctx context.Context, command string) (string, erro
 	client.engineMu.Lock()
 	defer client.engineMu.Unlock()
 	return client.engine.Execute(ctx, command)
+}
+
+func fromAppMacros(macros []appconfig.Macro) []Macro {
+	result := make([]Macro, len(macros))
+	for index, macro := range macros {
+		result[index] = fromAppMacro(macro)
+	}
+	return result
+}
+
+func fromAppMacro(macro appconfig.Macro) Macro {
+	result := Macro{
+		ID: macro.ID, Name: macro.Name, Category: macro.Category,
+		Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
+		TimingToleranceUS:   macro.TimingToleranceUS,
+		KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
+		RecordingSource:     macro.RecordingSource,
+		CaptureDroppedSteps: macro.CaptureDroppedSteps,
+		CaptureMissingSteps: macro.CaptureMissingSteps,
+		CaptureImportKey:    macro.CaptureImportKey,
+		CaptureBoard:        macro.CaptureBoard, CaptureID: macro.CaptureID,
+		CaptureStartedAtUS: macro.CaptureStartedAtUS,
+		Steps:              make([]MacroStep, len(macro.Steps)),
+	}
+	for index, step := range macro.Steps {
+		result.Steps[index] = MacroStep{
+			AtUS: step.AtUS, Kind: step.Kind,
+			Target: step.Target, Value: step.Value,
+			DurationMS: step.DurationMS, FrequencyHz: step.FrequencyHz,
+			Text: step.Text, Destination: step.Destination,
+			Code: step.Code, Bits: step.Bits, Protocol: step.Protocol,
+			PulseUS: step.PulseUS, Red: step.Red, Green: step.Green,
+			Blue: step.Blue, Brightness: step.Brightness,
+			Opcode: step.Opcode, PayloadHex: step.PayloadHex,
+		}
+	}
+	return result
+}
+
+// MacroLibrary returns the defensive, ID-ordered catalog used by every host
+// surface. Definitions remain host-persisted; playback still uses MacroRunner.
+func (client *Client) MacroLibrary() []Macro {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return nil
+	}
+	return fromAppMacros(runner.List())
+}
+
+// MacroStatus returns one coherent live monitor snapshot without polling the
+// board or parsing CLI text.
+func (client *Client) MacroStatus() (MacroState, MacroRecordingState) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroState{}, MacroRecordingState{}
+	}
+	return runner.State(), runner.RecordingState()
+}
+
+func (client *Client) MacroSnapshot() MacroSnapshot {
+	playback, recording := client.MacroStatus()
+	return MacroSnapshot{
+		Library: client.MacroLibrary(), Playback: playback,
+		Recording: recording, LatestEventID: client.LatestEventID(),
+	}
+}
+
+func (client *Client) MacroCreate(id byte, name, category, color string) (Macro, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return Macro{}, errors.New("macro service is unavailable")
+	}
+	macro, err := runner.CreateDraft(id, name, category, color)
+	return fromAppMacro(macro), err
+}
+
+func (client *Client) MacroUpdate(reference, name string, category, color *string) (Macro, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return Macro{}, errors.New("macro service is unavailable")
+	}
+	macro, err := runner.UpdateMetadata(reference, name, category, color)
+	return fromAppMacro(macro), err
+}
+
+func (client *Client) MacroDelete(reference string) error {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return errors.New("macro service is unavailable")
+	}
+	return runner.Delete(reference)
+}
+
+func (client *Client) MacroRecordStart(name, category, color string) (MacroRecordingState, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroRecordingState{}, errors.New("macro service is unavailable")
+	}
+	return runner.StartRecording(name, category, color)
+}
+
+func (client *Client) MacroRecordStop(save bool) (Macro, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return Macro{}, errors.New("macro service is unavailable")
+	}
+	macro, err := runner.StopRecording(save)
+	return fromAppMacro(macro), err
+}
+
+func (client *Client) MacroBoardRecordStart(ctx context.Context, id byte) (MacroRecordingState, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroRecordingState{}, errors.New("macro service is unavailable")
+	}
+	return runner.StartBoardCapture(ctx, id)
+}
+
+func (client *Client) MacroBoardRecordStop(ctx context.Context) (MacroRecordingState, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroRecordingState{}, errors.New("macro service is unavailable")
+	}
+	return runner.StopBoardCapture(ctx)
+}
+
+func (client *Client) MacroBoardRecordClear(ctx context.Context, force bool) (native.MacroStatus, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return native.MacroStatus{}, errors.New("macro service is unavailable")
+	}
+	return runner.ClearBoardCapture(ctx, force)
+}
+
+func (client *Client) MacroPlay(ctx context.Context, reference string) (MacroState, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return MacroState{}, errors.New("macro service is unavailable")
+	}
+	return runner.Start(ctx, reference)
+}
+
+func (client *Client) MacroCancel(ctx context.Context, keepOutputs bool) error {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return errors.New("macro service is unavailable")
+	}
+	return runner.CancelWithPolicy(ctx, keepOutputs)
 }
 
 // CommandCatalog exposes the same discoverable command contract used by the
@@ -1370,11 +1544,15 @@ func (client *Client) PlayTone(
 	ctx context.Context,
 	frequencyHz, durationMS uint16,
 ) error {
-	if durationMS == 0 {
-		return errors.New("tone duration must be nonzero")
+	stopping := frequencyHz == 0 && durationMS == 0
+	if !stopping && durationMS == 0 {
+		return errors.New("tone duration must be nonzero unless frequency/duration are 0/0 to stop")
 	}
-	if frequencyHz != 0 && (frequencyHz < 20 || frequencyHz > 20000) {
-		return fmt.Errorf("tone frequency must be 0 or 20..20000 Hz")
+	if frequencyHz == 0 && durationMS != 0 {
+		return errors.New("tone stop is exactly frequency/duration 0/0")
+	}
+	if !stopping && (frequencyHz < 20 || frequencyHz > 20000) {
+		return fmt.Errorf("tone frequency must be 20..20000 Hz, or 0 with duration 0 to stop")
 	}
 	client.outputs.StopMelody()
 	return client.runtime.Command(
@@ -1551,7 +1729,7 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns the latest cached connection and board state without polling.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
-	return Snapshot{
+	result := Snapshot{
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,
 		Port: PortInfo{
@@ -1582,6 +1760,8 @@ func (client *Client) Snapshot() Snapshot {
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
 	}
+	result.Macro, result.MacroRecording = client.MacroStatus()
+	return result
 }
 
 // SetSegmentText presents static or scrolling text through the firmware's

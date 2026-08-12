@@ -181,6 +181,11 @@ func TestBoardCaptureCommandsCarryIdentity(t *testing.T) {
 		binary.LittleEndian.Uint32(ack[2:]) != 0x78563412 {
 		t.Fatalf("capture acknowledgement payload=% X", ack)
 	}
+	clear := MacroCaptureClearPayload(0x2A, 0x78563412)
+	if len(clear) != 6 || clear[0] != 5 || clear[1] != 0x2A ||
+		binary.LittleEndian.Uint32(clear[2:]) != 0x78563412 {
+		t.Fatalf("capture clear payload=% X", clear)
+	}
 }
 
 func TestMacroVariablePlaybackActionsRemainHostOnlyAndSemantic(t *testing.T) {
@@ -198,7 +203,10 @@ func TestMacroVariablePlaybackActionsRemainHostOnlyAndSemantic(t *testing.T) {
 	for _, action := range []struct {
 		opcode  byte
 		payload []byte
-	}{{OpDisplayText, display}, {OpStatusEffect, effect}, {OpStatusEffect, StatusEffectReleasePayload()}} {
+	}{
+		{OpDisplayText, display}, {OpStatusEffect, effect},
+		{OpStatusEffect, StatusEffectReleasePayload()},
+	} {
 		if !MacroPlaybackPayloadSemanticallyValid(action.opcode, action.payload) {
 			t.Fatalf("valid variable host action rejected: opcode=0x%02X payload=% X", action.opcode, action.payload)
 		}
@@ -209,6 +217,14 @@ func TestMacroVariablePlaybackActionsRemainHostOnlyAndSemantic(t *testing.T) {
 			t.Fatal(encodeErr)
 		}
 	}
+	for _, payload := range [][]byte{{0, 0, 0, 0}, {0xB8, 0x01, 25, 0}} {
+		if !MacroPlaybackPayloadSemanticallyValid(OpBuzzer, payload) {
+			t.Fatalf("valid buzzer macro payload rejected: % X", payload)
+		}
+		if _, recordable := MacroBoardActionPayloadLength(OpBuzzer); !recordable {
+			t.Fatal("fixed buzzer action is missing from board capture contract")
+		}
+	}
 	for _, invalid := range []struct {
 		opcode  byte
 		payload []byte
@@ -216,6 +232,9 @@ func TestMacroVariablePlaybackActionsRemainHostOnlyAndSemantic(t *testing.T) {
 		{OpDisplayText, []byte{DisplayLCD, 0, 0, 5, 'x'}},
 		{OpStatusEffect, []byte{StatusEffectBreathe, 1}},
 		{OpRelayAllOff, []byte{1}},
+		{OpBuzzer, []byte{0, 0, 1, 0}},
+		{OpBuzzer, []byte{19, 0, 1, 0}},
+		{OpBuzzer, []byte{0xB8, 0x01, 0, 0}},
 	} {
 		if MacroPlaybackPayloadSemanticallyValid(invalid.opcode, invalid.payload) {
 			t.Fatalf("malformed macro action accepted: opcode=0x%02X payload=% X", invalid.opcode, invalid.payload)
