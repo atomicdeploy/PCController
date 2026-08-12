@@ -721,6 +721,37 @@ measurement retention. Important events remain separate in the bounded
 
 ## Commissioning boundaries
 
+## Web control centre interaction contract
+
+The Web UI, TUI, CLI, bridge, and API must present the same controller
+capabilities rather than inventing parallel menu or opcode definitions.  The
+host remains the single source for the menu registry; interfaces select and
+render that registry according to their available space and transport.
+
+- The compact Web sidebar is intentionally icon-only: labels remain available
+  to assistive technology and tooltips, while its layout must never retain
+  zero-width text that can produce horizontal overflow.
+- The header offers a small, local **App settings** dialog (appearance,
+  language, and feedback) and a full settings page.  A disconnected board is
+  described as disconnected; board-only controls and firmware actions are not
+  presented as actionable until the host has a live board capability report.
+- Tables use the shared typed-collection control.  It provides column
+  visibility and resizing, drag-to-reorder headers, a valid page-range
+  **Go to** selector, keyboard/focus handling, and context-menu dismissal.
+  The events table also filters by event type.  High-rate diagnostic events
+  such as `STATUS_RGB` stay hidden unless the operator enables the debug-noise
+  toggle, so normal operational history remains readable.
+- Peripheral settings are nested under the reported peripheral menu, not
+  copied into each surface.  Only capabilities reported by the connected
+  board are shown; the same definitions feed user documentation and firmware
+  profile generation.
+
+This is the delivery direction for the shell/data-grid work tracked by
+[#160](https://github.com/atomicdeploy/PCController/issues/160) and
+[#161](https://github.com/atomicdeploy/PCController/issues/161), and builds on
+the disconnected/offline visibility contract in
+[#101](https://github.com/atomicdeploy/PCController/issues/101).
+
 Automated tests can prove parsing, routing, safety checks, reconnect state,
 mock TUI rendering, and network framing. They cannot prove that Windows toast
 registration survived installation, multicast crosses the current network,

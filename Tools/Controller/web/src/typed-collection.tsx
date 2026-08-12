@@ -76,6 +76,7 @@ export interface TypedCollectionLabels {
   resizeColumn: string
   previousWindow: string
   nextWindow: string
+  goTo: string
   showing: string
   of: string
   copied: string
@@ -130,7 +131,7 @@ const englishLabels: TypedCollectionLabels = {
   selectRow: 'Select row', deselectRow: 'Deselect row', sortAscending: 'Sort ascending',
   sortDescending: 'Sort descending', hideColumn: 'Hide column', showColumn: 'Show column',
   moveEarlier: 'Move earlier', moveLater: 'Move later', resizeColumn: 'Resize column',
-  previousWindow: 'Previous rows', nextWindow: 'Next rows', showing: 'Showing', of: 'of',
+  previousWindow: 'Previous rows', nextWindow: 'Next rows', goTo: 'Go to', showing: 'Showing', of: 'of',
   copied: 'Copied to clipboard', copyUnavailable: 'Clipboard unavailable', filtered: 'filtered',
   all: 'all', structuredValue: 'Structured value',
 }
@@ -145,7 +146,7 @@ const persianLabels: TypedCollectionLabels = {
   selectRow: 'انتخاب ردیف', deselectRow: 'برداشتن انتخاب ردیف', sortAscending: 'مرتب‌سازی صعودی',
   sortDescending: 'مرتب‌سازی نزولی', hideColumn: 'پنهان‌کردن ستون', showColumn: 'نمایش ستون',
   moveEarlier: 'انتقال به قبل', moveLater: 'انتقال به بعد', resizeColumn: 'تغییر عرض ستون',
-  previousWindow: 'ردیف‌های قبلی', nextWindow: 'ردیف‌های بعدی', showing: 'نمایش', of: 'از',
+  previousWindow: 'ردیف‌های قبلی', nextWindow: 'ردیف‌های بعدی', goTo: 'رفتن به', showing: 'نمایش', of: 'از',
   copied: 'در کلیپ‌بورد کپی شد', copyUnavailable: 'کلیپ‌بورد در دسترس نیست', filtered: 'فیلترشده',
   all: 'همه', structuredValue: 'مقدار ساخت‌یافته',
 }
@@ -322,6 +323,7 @@ export function TypedCollection<T extends object>({
   const [focus, setFocus] = useState<GridFocus>({ area: 'header', field: 0, row: 0 })
   const [menu, setMenu] = useState<MenuTarget | null>(null)
   const [notice, setNotice] = useState('')
+  const [draggingField, setDraggingField] = useState<string | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const anchorRef = useRef<AnchorSnapshot | null>(null)
@@ -429,6 +431,15 @@ export function TypedCollection<T extends object>({
     if (index < 0 || index === target) return current
     const next = [...current]
     const [field] = next.splice(index, 1)
+    next.splice(target, 0, field)
+    return next
+  })
+  const moveFieldTo = (id: string, targetID: string) => updateRegistry((current) => {
+    const from = current.findIndex((field) => field.id === id)
+    const target = current.findIndex((field) => field.id === targetID)
+    if (from < 0 || target < 0 || from === target) return current
+    const next = [...current]
+    const [field] = next.splice(from, 1)
     next.splice(target, 0, field)
     return next
   })
@@ -616,6 +627,11 @@ export function TypedCollection<T extends object>({
                   onFocus={() => setFocus(current)}
                   onKeyDown={(event) => handleGridKey(event, current)}
                   onContextMenu={(event) => { event.preventDefault(); openContext('header', fieldIndex, 0, event.currentTarget, { left: event.clientX, top: event.clientY }) }}
+                  draggable
+                  onDragStart={(event) => { setDraggingField(field.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', field.id) }}
+                  onDragOver={(event) => { if (draggingField && draggingField !== field.id) event.preventDefault() }}
+                  onDrop={(event) => { event.preventDefault(); const id = draggingField ?? event.dataTransfer.getData('text/plain'); if (id) moveFieldTo(id, field.id); setDraggingField(null) }}
+                  onDragEnd={() => setDraggingField(null)}
                 >
                   <button type="button" className="typed-collection__sort" tabIndex={-1} disabled={!field.sortable} onClick={() => toggleSort(field)}>
                     <span>{field.label}</span>
@@ -674,6 +690,7 @@ export function TypedCollection<T extends object>({
         {filtered.length > windowSize && <nav className="typed-collection__window-nav" aria-label={`${ariaLabel} · ${labels.showing}`}>
           <button type="button" disabled={boundedWindowStart === 0} onClick={() => setWindowStart(Math.max(0, boundedWindowStart - windowSize))}><ChevronLeft size={15} />{labels.previousWindow}</button>
           <span>{labels.showing} <strong>{boundedWindowStart + 1}–{windowEnd}</strong> {labels.of} <strong>{filtered.length}</strong></span>
+          <label className="typed-collection__go-to"><span>{labels.goTo}</span><select value={boundedWindowStart} onChange={(event) => setWindowStart(Number(event.target.value))}>{Array.from({ length: Math.ceil(filtered.length / windowSize) }, (_, index) => { const start = index * windowSize; return <option key={start} value={start}>{start + 1}–{Math.min(filtered.length, start + windowSize)}</option> })}</select></label>
           <button type="button" disabled={windowEnd >= filtered.length} onClick={() => setWindowStart(Math.min(maximumWindowStart, boundedWindowStart + windowSize))}>{labels.nextWindow}<ChevronRight size={15} /></button>
         </nav>}
       </>}

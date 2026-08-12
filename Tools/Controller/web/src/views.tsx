@@ -825,12 +825,19 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
 export function EventsView({ events, locale, t }: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const [level, setLevel] = useState<'all' | 'good' | 'warn' | 'bad' | 'info'>('all')
-  const visible = events.filter((event) => level === 'all' || eventTone(event) === level)
+  const [kind, setKind] = useState('all')
+  const [showDebugNoise, setShowDebugNoise] = useState(false)
+  const kinds = useMemo(() => [...new Set(events.map((event) => event.kind.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right)), [events])
+  const isDebugNoise = (event: ControllerEvent) => /^(status[_ .-]?rgb|status_led\.changed|pwm\.changed|segment\.changed)/i.test(event.kind.trim())
+  const visible = events.filter((event) =>
+    (level === 'all' || eventTone(event) === level) &&
+    (kind === 'all' || event.kind === kind) &&
+    (showDebugNoise || !isDebugNoise(event)))
   return (
     <>
       <SectionTitle eyebrow={copy('Unified history', 'تاریخچهٔ یکپارچه')} title={t('events')} detail={copy('One timeline for controller lifecycle, RF, doors, macros, automations and integrated services.', 'یک خط زمانی برای چرخهٔ کنترلر، RF، درها، ماکروها، خودکارسازی‌ها و سرویس‌های یکپارچه.')} action={<StatusBadge tone="info">{events.length} {copy('retained', 'نگه‌داری‌شده')}</StatusBadge>} />
       <Card icon={Activity} iconTone="violet" className="events-page-card" title={copy('Event timeline', 'خط زمانی رویدادها')} eyebrow={copy(`${visible.length} visible`, `${visible.length} مورد نمایان`)}>
-        <div className="event-toolbar"><Segmented value={level} label={copy('Event severity', 'شدت رویداد')} options={[{ value: 'all', label: copy('All', 'همه') }, { value: 'good', label: copy('Good', 'عادی') }, { value: 'warn', label: copy('Warn', 'هشدار') }, { value: 'bad', label: copy('Fault', 'خطا') }, { value: 'info', label: copy('Info', 'اطلاعات') }]} onChange={setLevel} /></div>
+        <div className="event-toolbar"><Segmented value={level} label={copy('Event severity', 'شدت رویداد')} options={[{ value: 'all', label: copy('All', 'همه') }, { value: 'good', label: copy('Good', 'عادی') }, { value: 'warn', label: copy('Warn', 'هشدار') }, { value: 'bad', label: copy('Fault', 'خطا') }, { value: 'info', label: copy('Info', 'اطلاعات') }]} onChange={setLevel} /><label className="event-toolbar__kind"><span>{copy('Event type', 'نوع رویداد')}</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">{copy('All types', 'همه نوع‌ها')}</option>{kinds.map((value) => <option key={value} value={value}>{value}</option>)}</select></label><Toggle checked={showDebugNoise} onChange={setShowDebugNoise} label={copy('Show STATUS_RGB and high-rate debug events', 'نمایش STATUS_RGB و رویدادهای پرتکرار اشکال‌زدایی')} detail={copy('Off by default to keep the activity timeline actionable.', 'برای خوانایی خط زمانی به‌صورت پیش‌فرض خاموش است.')} /></div>
         <EventList events={visible} locale={locale} t={t} limit={visible.length} toolbar />
       </Card>
     </>
