@@ -756,7 +756,8 @@ func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
 	const optionalBytes = 240
 	const sectionTable = peOffset + 24 + optionalBytes
 	const resourceOffset = 512
-	content := make([]byte, 2048)
+	resourceSize := 4096
+	content := make([]byte, resourceOffset+resourceSize+len(marker))
 	content[0], content[1] = 'M', 'Z'
 	binary.LittleEndian.PutUint32(content[0x3c:0x40], peOffset)
 	copy(content[peOffset:], "PE\x00\x00")
@@ -767,16 +768,63 @@ func minimalResourcePE(version, sourceSHA, buildTime, marker string) []byte {
 	binary.LittleEndian.PutUint16(content[peOffset+24:peOffset+26], 0x020b)
 	header := content[sectionTable : sectionTable+40]
 	copy(header[:8], ".rsrc")
-	binary.LittleEndian.PutUint32(header[16:20], uint32(len(content)-resourceOffset))
+	binary.LittleEndian.PutUint32(header[8:12], uint32(resourceSize))
+	binary.LittleEndian.PutUint32(header[12:16], 0x1000)
+	binary.LittleEndian.PutUint32(header[16:20], uint32(resourceSize))
 	binary.LittleEndian.PutUint32(header[20:24], resourceOffset)
-	resource := content[resourceOffset:]
-	offset := 0
-	for _, value := range [][]byte{
-		utf16Bytes(productidentity.DefaultTitle), utf16Bytes(version), utf16Bytes("controller.exe"),
-		[]byte(sourceSHA), []byte(version), []byte(buildTime), []byte(marker),
-	} {
-		copy(resource[offset:], value)
-		offset += len(value) + 8
+	resource := content[resourceOffset : resourceOffset+resourceSize]
+	// IMAGE_RESOURCE_DIRECTORY tree: numeric RT_VERSION (16), name ID 1,
+	// language 0409, then one data entry. The payload is real VS_VERSIONINFO.
+	binary.LittleEndian.PutUint16(resource[14:16], 1)
+	binary.LittleEndian.PutUint32(resource[16:20], imageResourceTypeVersion)
+	binary.LittleEndian.PutUint32(resource[20:24], resourceDirectoryFlag|0x18)
+	binary.LittleEndian.PutUint16(resource[0x18+14:0x18+16], 1)
+	binary.LittleEndian.PutUint32(resource[0x18+16:0x18+20], 1)
+	binary.LittleEndian.PutUint32(resource[0x18+20:0x18+24], resourceDirectoryFlag|0x30)
+	binary.LittleEndian.PutUint16(resource[0x30+14:0x30+16], 1)
+	binary.LittleEndian.PutUint32(resource[0x30+16:0x30+20], 0x0409)
+	binary.LittleEndian.PutUint32(resource[0x30+20:0x30+24], 0x48)
+	payload := versionInfoPayload(version, sourceSHA, buildTime)
+	binary.LittleEndian.PutUint32(resource[0x48:0x4c], 0x1000+0x100)
+	binary.LittleEndian.PutUint32(resource[0x4c:0x50], uint32(len(payload)))
+	copy(resource[0x100:], payload)
+	copy(content[resourceOffset+resourceSize:], marker)
+	return content
+}
+
+func versionInfoPayload(version, sourceSHA, buildTime string) []byte {
+	table := versionContainer("040904B0", versionString("ProductName", productidentity.DefaultTitle), versionString("ProductVersion", version),
+		versionString("OriginalFilename", "controller.exe"), versionString("PrivateBuild", sourceSHA), versionString("SpecialBuild", buildTime))
+	strings := versionContainer("StringFileInfo", table)
+	fixed := make([]byte, 52)
+	return versionBlockBytes("VS_VERSION_INFO", 0, fixed, strings)
+}
+
+func versionContainer(key string, children ...[]byte) []byte {
+	return versionBlockBytes(key, 1, nil, children...)
+}
+
+func versionString(key, value string) []byte {
+	return versionBlockBytes(key, 1, append(utf16Bytes(value), 0, 0))
+}
+
+func versionBlockBytes(key string, typeCode uint16, value []byte, children ...[]byte) []byte {
+	content := make([]byte, 6)
+	valueLength := len(value)
+	if typeCode == 1 {
+		valueLength /= 2
 	}
+	binary.LittleEndian.PutUint16(content[2:4], uint16(valueLength))
+	binary.LittleEndian.PutUint16(content[4:6], typeCode)
+	content = append(content, utf16Bytes(key)...)
+	content = append(content, 0, 0)
+	content = append(content, make([]byte, align4(len(content))-len(content))...)
+	content = append(content, value...)
+	content = append(content, make([]byte, align4(len(content))-len(content))...)
+	for _, child := range children {
+		content = append(content, child...)
+		content = append(content, make([]byte, align4(len(content))-len(content))...)
+	}
+	binary.LittleEndian.PutUint16(content[0:2], uint16(len(content)))
 	return content
 }

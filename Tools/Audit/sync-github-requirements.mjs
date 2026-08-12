@@ -632,13 +632,14 @@ const R = [
       'Expose open, close, reconnect, reset, quit/exit, and all commands through IPC/WebSocket with correlated results.',
     ], 'Raw-socket and deterministic VirtualBoard tests prove UART ownership remains independent from demand accounting and unsolicited events continue without a polling subscriber. Legacy STATUS demand can be stopped without closing transport; capable changed-state paths must now satisfy the stricter push-first #36/#190 contract. Explicit Close/Open lifecycle results remain correlated. Physical USB unplug/replug and event-driven Windows reconnect acceptance remain open.'),
 
-  requirement('uart-urclock-programming', 10, 'Use UART Urboot/Urclock as the normal programming path and verify application return', 'closed',
-    ['🚀 programming', '🛡️ safety', '✅ verified'], 'Bootloader, programming, build scripts, and packaging', [
+  requirement('uart-urclock-programming', 10, 'Use UART Urboot/Urclock as the normal programming path and verify application return', 'open',
+    ['🚀 programming', '🛡️ safety', '🧪 testing', '🚧 in progress', '🐛 regression'], 'Bootloader, programming, build scripts, and packaging', [
       'Configure current MiniCore Urboot/Urclock for the ATmega328P board and preserve EEPROM as selected.',
       'Release serial ownership, run maintained Arduino CLI/AVRDUDE urclock operations, and reauthenticate application HELLO.',
       'Support probe, metadata, read, write, verify, and start without pretending the native application protocol is the bootloader protocol.',
+      'Derive and pass the installed image boot-size and EEPROM capability overrides for every Urclock operation so compatibility-mode backup cannot fail or leave the board latched.',
       'Keep USBasp as an explicit troubleshooting fallback only.',
-    ], 'Urboot/fuses were ISP-verified and current firmware was UART-uploaded, flash-verified, and reauthenticated; host commands delegate to the maintained backend. A fresh primary-owned recovery also completed a read-only Urboot semantic verification of all 32,228 programmed bytes and critical reset/vector targets before returning to the exact authenticated application, without rewriting flash.'),
+    ], 'Historical hardware verification passed, but the 2026-08-12 cafe-PC recovery exposed a current regression: AVRDUDE 8 compatibility mode rejected metadata/flash/EEPROM reads when the host omitted `-xbootsize=384` and `-xeepromrw`. USBasp recovery remained bridge-owned and completed safely. The command fix is source-tested; a fresh bridge-owned Urclock capture/readback on the physical board is required before re-closing.'),
   requirement('urboot-custom-progress-backend', 10, 'Maintain a reproducible Urboot-Custom progress-hook patch and safe ISP install plan', 'open',
     ['🧩 firmware', '🚀 programming', '🏗️ tooling-build', '🧪 testing', '🔍 needs-hardware'], 'Bootloader, programming, build scripts, and packaging', [
       'Name the extensible fork Urboot-Custom and keep the core as an upstream-applicable diff with a generic optional progress hook; isolate TM1637 or future peripheral implementations as selectable backends.',
@@ -1022,6 +1023,9 @@ const PROMPT_EXCERPTS = {
   commandRecipes: prompt(SESSION.tonight, 7, 'Provide terminal examples for arbitrary display messages, scrolling and timing, LED colors and effects, opcodes, buzzer routing, EEPROM operations, and coordinated UI navigation.'),
   namedSiblingPorts: prompt(SESSION.tonight, 8, 'Bring the applicable Rayan Lamp and Patris-export implementations into this project in full and enhance them; do not merely refer to or imitate them.'),
   identityVisuals: prompt(SESSION.tonight, 9, 'Align the favicon, WebUI logo, executable and console icons as generated forms of one unique source asset, and show before and after variants in GitHub for selection.'),
+  liveMeasurementTiming: prompt(SESSION.tonight, 10, 'Expose host-synchronized Live Measurements refresh rate and freshness window in WebUI and TUI Settings. Default to 250 ms (4 Hz) and 1500 ms, restrict refresh to 200–500 ms, require freshness to include headroom, persist it in host config, and immediately propagate changes to every WebUI/TUI instance including remote TUIs.'),
+  peripheralPresenceUI: prompt(SESSION.tonight, 11, 'When INA219, PCA9685, DS18B20, LCD, or another detectable peripheral is unavailable, hide its UI controls and readings instead of presenting invalid values.'),
+  emptyBoardAcceptance: prompt(SESSION.tonight, 12, 'Use the real physical board on cafe-pc:8787 instead of VirtualBoard; while it is being provisioned without peripherals, accept bridge, MCU, UART, flash, and EEPROM evidence without claiming populated-peripheral validation.'),
   webAcceptanceRepair: prompt(SESSION.cafe, 16, 'Repair the embedded controller WebUI temperature truth and charts, relay controls, terminal behavior, nested workbench routes, settings and tables, updates, and automatic client resource refresh.'),
   ledClientExperience: prompt(SESSION.cafe, 17, 'Keep WebUI and TUI synchronized for status LED ownership, profiles, effects, live preview, stream ordering, accessibility, RTL and LTR, and responsive dark-mode behavior.'),
   buzzerFallback: prompt(SESSION.recovery, 177, 'Add a fallback for audio-frequency generation when port 0x61 is unavailable.'),
@@ -1245,6 +1249,19 @@ const PR_ORIGINAL_REQUESTS = {
   181: [PROMPT_EXCERPTS.rgbEffects, PROMPT_EXCERPTS.hardwarePwm],
   187: [PROMPT_EXCERPTS.webAcceptanceRepair],
   188: [PROMPT_EXCERPTS.ledClientExperience],
+  195: [PROMPT_EXCERPTS.firstRun, PROMPT_EXCERPTS.backups, PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.zadig],
+  196: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.hardwarePwm],
+  197: [PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking],
+  198: [PROMPT_EXCERPTS.timelineMemory, PROMPT_EXCERPTS.fullRemoteTui],
+  199: [PROMPT_EXCERPTS.tuiControlRegression],
+  200: [PROMPT_EXCERPTS.liveMeasurementTiming],
+  201: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate],
+  202: [PROMPT_EXCERPTS.liveMeasurementTiming],
+  203: [PROMPT_EXCERPTS.displaysAudio],
+  204: [PROMPT_EXCERPTS.displayPresentation, PROMPT_EXCERPTS.peripheralPresenceUI],
+  205: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.apiRace, PROMPT_EXCERPTS.fullDuplexTracking],
+  206: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
+  207: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';

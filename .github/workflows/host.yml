@@ -136,6 +136,27 @@ jobs:
           }
           go install "${{ steps.host-dependencies.outputs.go_winres_module }}@${{ steps.host-dependencies.outputs.go_winres_version }}"
 
+      - name: "📦 Install hash-locked UPX for packed Windows verification"
+        if: matrix.windows
+        shell: bash
+        run: |
+          upx_record="$(node --input-type=module -e '
+            import fs from "node:fs";
+            const lock = JSON.parse(fs.readFileSync("Tools/Dependencies/resolved-tools-lock.json", "utf8"));
+            const asset = lock.upx.assets.find(value => value.name.endsWith("-win64.zip"));
+            if (!asset || !/^https:\/\//.test(asset.url) || !/^[0-9a-f]{64}$/.test(asset.sha256)) process.exit(1);
+            process.stdout.write(asset.url + " " + asset.sha256);
+          ')"
+          read -r upx_url upx_sha <<< "$upx_record"
+          mkdir -p "$RUNNER_TEMP/pccontroller-upx"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' "$upx_url" -o "$RUNNER_TEMP/pccontroller-upx/upx.zip"
+          printf '%s  %s\n' "$upx_sha" "$RUNNER_TEMP/pccontroller-upx/upx.zip" | sha256sum --check --strict
+          unzip -q "$RUNNER_TEMP/pccontroller-upx/upx.zip" -d "$RUNNER_TEMP/pccontroller-upx/extract"
+          upx_path="$(find "$RUNNER_TEMP/pccontroller-upx/extract" -iname upx.exe -type f -print -quit)"
+          test -n "$upx_path"
+          dirname "$upx_path" >> "$GITHUB_PATH"
+          "$upx_path" --version
+
       - name: "🚀 Build and validate complete Unix package"
         if: ${{ !matrix.windows }}
         shell: bash
@@ -144,7 +165,7 @@ jobs:
       - name: "🚀 Build and validate complete Windows package"
         if: matrix.windows
         shell: cmd
-        run: build.cmd --host-only --no-upx --version %PCCONTROLLER_VERSION%
+        run: build.cmd --host-only --version %PCCONTROLLER_VERSION%
 
       - name: "🧷 Assert both defaults are embedded in the host manifest"
         if: inputs.firmware_artifact_name != ''

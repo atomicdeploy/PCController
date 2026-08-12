@@ -81,17 +81,18 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	if pageWidth <= 0 {
 		pageWidth = 132
 	}
-	lcdStatus := "offline · physical contents unverified"
-	if snapshot.Connected {
+	lcdStatus := ""
+	lcdAvailable := false
+	if snapshot.Connected && status.LCDAddress != 0 {
+		lcdAvailable = true
 		lcdStatus = fmt.Sprintf("available · 0x%02X", status.LCDAddress)
 	}
 	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 && model.runtime != nil {
 		lcd := model.runtime.LCDPresenter().State()
 		lcdStatus = "not detected"
 		if lcd.Physical {
+			lcdAvailable = true
 			lcdStatus = fmt.Sprintf("available · 0x%02X", lcd.Address)
-		} else if lcd.LastError != "" {
-			lcdStatus += " · " + lcd.LastError
 		}
 	}
 	sectionWidth := pageWidth
@@ -105,22 +106,22 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	if !snapshot.HaveStatus {
 		measurementLines = append(measurementLines, warnStyle.Render("Waiting for the first STATUS frame…"))
 	}
-	if model.prefs.Visible["supply"] {
+	if status.INA219Available && model.prefs.Visible["supply"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.supply-voltage", "Supply Voltage"), formatVoltage(status.SupplyMV, model.prefs.VoltageDecimals)))
 	}
-	if model.prefs.Visible["bus"] {
+	if status.INA219Available && model.prefs.Visible["bus"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.bus-voltage", "Bus Voltage"), formatVoltage(status.BusMV, model.prefs.VoltageDecimals)))
 	}
-	if model.prefs.Visible["current"] {
+	if status.INA219Available && model.prefs.Visible["current"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.current", "Load Current"), formatCurrent(status.CurrentMA, model.prefs.CurrentDecimals)))
 	}
-	if model.prefs.Visible["power"] {
+	if status.INA219Available && model.prefs.Visible["power"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.power", "Load Power"), formatPower(status.PowerMW, model.prefs.PowerDecimals)))
 	}
-	if model.prefs.Visible["temperature_led"] {
+	if status.TLEDAvailable && model.prefs.Visible["temperature_led"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-led", "Temperature · Illumination LED"), formatTemperature(status.TLEDCenti, model.prefs.TemperatureDecimals)))
 	}
-	if model.prefs.Visible["temperature_bt"] {
+	if status.TBTAvailable && model.prefs.Visible["temperature_bt"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
 	}
 
@@ -139,8 +140,12 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		kvCard(sectionWidth, 22, "Active Relays", relaySummary(status.ActiveRelays)),
 		kvCard(sectionWidth, 22, model.peripheralName("display.segment", "Display Menu"), fmt.Sprintf("%d · %s", status.MenuPage, model.menuPageByID(status.MenuPage).Name)),
 		kvCard(sectionWidth, 22, "Menu / Submode", fmt.Sprintf("%d · %s", status.ProgramMode, model.programModeName(status.ProgramMode))),
-		kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %d%%", status.PWMChannel, int(status.PWMValue)*100/4095)),
-		kvCard(sectionWidth, 22, model.peripheralName("display.lcd", "I2C LCD"), lcdStatus),
+	}
+	if status.PWMAvailable {
+		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %d%%", status.PWMChannel, int(status.PWMValue)*100/4095)))
+	}
+	if lcdAvailable {
+		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName("display.lcd", "I2C LCD"), lcdStatus))
 	}
 	if model.prefs.Visible["diagnostics"] {
 		stateLines = append(stateLines,
@@ -177,65 +182,73 @@ func programStateSummary(state control.ProgramStateSnapshot) string {
 }
 
 func (model Model) outputsPage(snapshot control.Snapshot) string {
-	status := snapshot.Status
 	tableWidth := model.presentationTableWidth(118)
-	rows := make([][]string, 0, 27)
+	columns := outputTableColumns(tableWidth)
+	rows := model.controlTableRows(snapshot, max(8, columns[1].Width-7))
+	tableView := renderControlTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, columns, rows, model.uiValue.ControlValueColors)
+	return strings.Join([]string{
+		sectionHeader(model.width, "CONTROL", "↑/↓ select · ←/→ adjust · Home/End limits · Enter activate · F2 rename"),
+		lipgloss.PlaceHorizontal(model.width, lipgloss.Center, tableView),
+	}, "\n")
+}
+
+func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) []controlTableRow {
+	status := snapshot.Status
+	rows := make([]controlTableRow, 0, 27)
 	for index := 0; index < 8; index++ {
 		key := fmt.Sprintf("relay.%d", index+1)
 		fallback, _ := appconfig.PeripheralDefaultName(key)
-		label := fmt.Sprintf("R%d · %s", index+1, truncateText(model.peripheralName(key, fallback), 20))
+		label := fmt.Sprintf("R%d · %s", index+1, model.peripheralName(key, fallback))
 		on := status.ActiveRelays&(1<<index) != 0
-		state := "○ OFF · Enter turns ON"
+		state := "○ OFF"
+		tone := controlToneOff
 		if on {
-			state = "● ON · Enter turns OFF"
+			state = "● ON"
+			tone = controlToneOn
 		}
 		group := ""
 		if index == 0 {
 			group = "RELAYS"
 		}
-		rows = append(rows, []string{group, label, state})
+		rows = append(rows, controlTableRow{Group: group, Name: label, Value: state, Tone: tone})
 	}
-	rows = append(rows, []string{"ACTIONS", "All relays", "Turn OFF"})
+	rows = append(rows, controlTableRow{Name: "All relays", Value: "Turn OFF", Tone: controlToneAction})
 	motionAFallback, _ := appconfig.PeripheralDefaultName("motion.a")
 	motionBFallback, _ := appconfig.PeripheralDefaultName("motion.b")
-	motionA := truncateText(model.peripheralName("motion.a", motionAFallback), 22)
-	motionB := truncateText(model.peripheralName("motion.b", motionBFallback), 22)
+	motionA := model.peripheralName("motion.a", motionAFallback)
+	motionB := model.peripheralName("motion.b", motionBFallback)
 	rows = append(rows,
-		[]string{"MOTION", motionA + " · UP", "Run"},
-		[]string{"", motionA + " · STOP", "Stop"},
-		[]string{"", motionA + " · DOWN", "Run"},
-		[]string{"", motionB + " · UP", "Run"},
-		[]string{"", motionB + " · STOP", "Stop"},
-		[]string{"", motionB + " · DOWN", "Run"},
+		controlTableRow{Group: "MOTION", Name: motionA + " · UP", Value: "Run", Tone: controlToneAction},
+		controlTableRow{Name: motionA + " · STOP", Value: "Stop", Tone: controlToneAction},
+		controlTableRow{Name: motionA + " · DOWN", Value: "Run", Tone: controlToneAction},
+		controlTableRow{Name: motionB + " · UP", Value: "Run", Tone: controlToneAction},
+		controlTableRow{Name: motionB + " · STOP", Value: "Stop", Tone: controlToneAction},
+		controlTableRow{Name: motionB + " · DOWN", Value: "Run", Tone: controlToneAction},
 	)
-	columns := outputTableColumns(tableWidth)
-	levelWidth := columns[2].Width - 7
-	if levelWidth < 8 {
-		levelWidth = 8
-	}
-	for channel := 0; channel <= 10; channel++ {
-		value := uint16(0)
-		if model.havePWMValues {
-			value = model.pwmValues[channel]
-		} else if byte(channel) == status.PWMChannel {
-			value = status.PWMValue
+	if status.PWMAvailable {
+		for channel := 0; channel <= 10; channel++ {
+			value := uint16(0)
+			if model.havePWMValues {
+				value = model.pwmValues[channel]
+			} else if byte(channel) == status.PWMChannel {
+				value = status.PWMValue
+			}
+			key := fmt.Sprintf("pwm.%d", channel)
+			fallback, _ := appconfig.PeripheralDefaultName(key)
+			name := model.peripheralName(key, fallback)
+			percent := int(value) * 100 / 4095
+			group := ""
+			if channel == 0 {
+				group = "PWM"
+			}
+			rows = append(rows, controlTableRow{
+				Group: group, Name: fmt.Sprintf("CH %02d · %s", channel, name),
+				Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
+			})
 		}
-		key := fmt.Sprintf("pwm.%d", channel)
-		fallback, _ := appconfig.PeripheralDefaultName(key)
-		name := truncateText(model.peripheralName(key, fallback), 16)
-		percent := int(value) * 100 / 4095
-		group := ""
-		if channel == 0 {
-			group = "PWM"
-		}
-		rows = append(rows, []string{group, fmt.Sprintf("CH %02d · %s", channel, name), sliderPercent(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent)})
+		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction})
 	}
-	rows = append(rows, []string{"ACTIONS", "All user PWM", "Set 0%"})
-	return strings.Join([]string{
-		sectionHeader(model.width, "CONTROL", "↑/↓ select · Enter activate · ←/→ PWM · Home/End min/max · F2 rename"),
-		labelStyle.Render("R1 Direction A · R2 Output A · R3 Direction B · R4 Output B"),
-		model.centeredDataTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, columns, rows),
-	}, "\n")
+	return rows
 }
 
 type menuPageGeometry struct {
@@ -902,15 +915,24 @@ func sliderPercent(percent, width int) string {
 	return "[" + lipgloss.NewStyle().Foreground(colorAccent).Render(strings.Repeat("━", filled)) + labelStyle.Render(strings.Repeat("─", width-filled)) + "]"
 }
 
+func sliderPercentPlain(percent, width int) string {
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	filled := min(width, percent*width/100)
+	return "[" + strings.Repeat("━", filled) + strings.Repeat("─", width-filled) + "]"
+}
+
 func outputTableColumns(width int) []dataColumn {
-	available := max(42, width-4)
-	group := min(11, max(8, available/8))
-	name := min(34, max(20, available*36/100))
-	value := max(14, available-group-name)
+	available := max(24, width-2)
+	name := min(44, max(20, available*38/100))
+	value := available - name
 	return []dataColumn{
-		{Title: "GROUP", Width: group, Align: lipgloss.Left},
-		{Title: "OUTPUT", Width: name, Align: lipgloss.Left},
-		{Title: "STATE / LEVEL", Width: value, Align: lipgloss.Left},
+		{Title: "CONTROL", Width: name, Align: lipgloss.Left},
+		{Title: "STATUS", Width: value, Align: lipgloss.Left},
 	}
 }
 

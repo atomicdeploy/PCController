@@ -114,6 +114,7 @@ func (model Model) appSettingRows() []settingRow {
 		{Key: "appearance.accessibility", Group: "", Label: "Motion · number density", Value: fmt.Sprintf("%s · %s", boolWord(appearance.ReduceMotion, "REDUCED", "FULL"), boolWord(appearance.CompactNumbers, "COMPACT", "DETAILED")), Editable: true},
 		{Key: "appearance.audio", Group: "", Label: "Interface audio", Value: fmt.Sprintf("%s · %.0f%%", boolWord(appearance.AudioMuted, "MUTED", "ON"), appearance.AudioVolume*100), Editable: true},
 		{Key: "layout.tables", Group: "", Label: "Table layout", Value: strings.ToUpper(ui.TableLayout), Editable: true},
+		{Key: "layout.control_colors", Group: "", Label: "Control state colors", Value: onOff(ui.ControlValueColors), Editable: true},
 		{Key: "console.enabled", Group: "LOCAL CONSOLE", Label: "Manage local window", Value: onOff(ui.TUIConsole.Enabled), Editable: true},
 		{Key: "console.window", Group: "", Label: "Window columns · rows", Value: fmt.Sprintf("%d × %d", ui.TUIConsole.Columns, ui.TUIConsole.Rows), Editable: true},
 		{Key: "console.font", Group: "", Label: "Font face", Value: ui.TUIConsole.FontFace, Editable: true},
@@ -338,6 +339,8 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			layout = 1
 		}
 		editor.Fields = []settingEditorField{{Key: "layout", Label: "Table layout", Value: layout, Options: []settingOption{{0, "Compact · centered"}, {1, "Expanded · full width"}}}}
+	case "layout.control_colors":
+		editor.Fields = []settingEditorField{boolean("enabled", "Color control states", ui.ControlValueColors)}
 	case "console.enabled":
 		editor.Fields = []settingEditorField{boolean("enabled", "Manage local window", ui.TUIConsole.Enabled)}
 	case "console.window":
