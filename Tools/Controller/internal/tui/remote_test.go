@@ -142,7 +142,7 @@ func TestRemoteFreshnessUsesLocalReceiptAcrossClockSkew(t *testing.T) {
 			if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(100*time.Millisecond)); got != "live" {
 				t.Fatalf("fresh local receipt=%q", got)
 			}
-			if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(600*time.Millisecond)); got != "0.6 s ago" {
+			if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(freshnessLiveThreshold)); got != "2.5 s ago" {
 				t.Fatalf("aged local receipt=%q", got)
 			}
 			if got := model.remoteClockWarning(); got != test.wantWarning {
