@@ -59,7 +59,15 @@ func TestLegacySegmentPlanUsesMCUTimingAndHostRepeatBoundaries(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := makeLegacySegmentPlan(test.in); got != test.want {
+			speedMS, err := checkedDisplayUint16(test.in.SpeedMS, "speed_ms")
+			if err != nil {
+				t.Fatal(err)
+			}
+			holdMS, err := checkedDisplayUint16(test.in.DurationMS, "duration_ms")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := makeLegacySegmentPlan(test.in, speedMS, holdMS); got != test.want {
 				t.Fatalf("legacy segment plan=%+v, want %+v", got, test.want)
 			}
 		})

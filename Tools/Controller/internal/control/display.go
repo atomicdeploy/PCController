@@ -130,20 +130,20 @@ func (runtime *Runtime) PresentDisplay(
 	}
 	if request.Target == "segments" || request.Target == "both" {
 		runtime.cancelSegmentMessageSchedule()
+		speedMS, conversionErr := checkedDisplayUint16(request.SpeedMS, "speed_ms")
+		if conversionErr != nil {
+			return DisplayResult{}, conversionErr
+		}
+		holdMS, conversionErr := checkedDisplayUint16(request.DurationMS, "duration_ms")
+		if conversionErr != nil {
+			return DisplayResult{}, conversionErr
+		}
 		snapshot := runtime.Snapshot()
 		if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityScheduledSegments == 0 {
-			if err := runtime.presentLegacySegmentMessage(ctx, request); err != nil {
+			if err := runtime.presentLegacySegmentMessage(ctx, request, speedMS, holdMS); err != nil {
 				return DisplayResult{}, err
 			}
 		} else {
-			speedMS, conversionErr := checkedDisplayUint16(request.SpeedMS, "speed_ms")
-			if conversionErr != nil {
-				return DisplayResult{}, conversionErr
-			}
-			holdMS, conversionErr := checkedDisplayUint16(request.DurationMS, "duration_ms")
-			if conversionErr != nil {
-				return DisplayResult{}, conversionErr
-			}
 			payload, payloadErr := native.ScheduledSegmentPayload(
 				native.ScheduledSegmentOptions{
 					SpeedMS: speedMS, HoldMS: holdMS,
@@ -175,14 +175,18 @@ type legacySegmentPlan struct {
 	repeatWait time.Duration
 }
 
-func makeLegacySegmentPlan(request DisplayRequest) legacySegmentPlan {
+func makeLegacySegmentPlan(
+	request DisplayRequest,
+	speedMS uint16,
+	holdMS uint16,
+) legacySegmentPlan {
 	plan := legacySegmentPlan{text: request.Text}
 	if request.Scroll && len(plan.text) <= 4 && plan.text != "" {
 		plan.text += strings.Repeat(" ", 5-len(plan.text))
 	}
 	scrolling := len(plan.text) > 4
 	if scrolling {
-		plan.durationMS = uint16(request.SpeedMS)
+		plan.durationMS = speedMS
 		plan.clearAfter = time.Duration(len(plan.text)+1) *
 			time.Duration(request.SpeedMS) * time.Millisecond
 		if request.Repeat == DisplayRepeatLoop {
@@ -196,7 +200,7 @@ func makeLegacySegmentPlan(request DisplayRequest) legacySegmentPlan {
 		plan.durationMS = 0
 		return plan
 	}
-	plan.durationMS = uint16(request.DurationMS)
+	plan.durationMS = holdMS
 	if request.Repeat == DisplayRepeatInterval {
 		plan.repeatWait = time.Duration(request.DurationMS+request.IntervalMS) * time.Millisecond
 	}
@@ -210,8 +214,10 @@ func makeLegacySegmentPlan(request DisplayRequest) legacySegmentPlan {
 func (runtime *Runtime) presentLegacySegmentMessage(
 	ctx context.Context,
 	request DisplayRequest,
+	speedMS uint16,
+	holdMS uint16,
 ) error {
-	plan := makeLegacySegmentPlan(request)
+	plan := makeLegacySegmentPlan(request, speedMS, holdMS)
 	if err := runtime.sendLegacySegmentMessage(ctx, plan); err != nil {
 		return err
 	}
