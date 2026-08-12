@@ -134,6 +134,7 @@ func (arbiter *statusLEDArbiter) Run() {
 	var haveCurrent, haveLastSent, suppressed bool
 	var lastNativeEffect controller.StatusEffectOptions
 	var haveLastNativeEffect bool
+	var nextLegacyFrameAt time.Time
 	var macroOverlayPreempted bool
 	var lastErrorAt time.Time
 
@@ -193,6 +194,7 @@ func (arbiter *statusLEDArbiter) Run() {
 		nativeCapable := snapshot.Hello.Capabilities&
 			controller.CapabilityStatusEffects != 0
 		if nativeCapable {
+			nextLegacyFrameAt = time.Time{}
 			effect := statusLEDNativeEffect(visual)
 			if stateChanged || resuming || !haveLastNativeEffect || effect != lastNativeEffect {
 				requestContext, cancel := context.WithTimeout(
@@ -217,6 +219,13 @@ func (arbiter *statusLEDArbiter) Run() {
 			continue
 		}
 		haveLastNativeEffect = false
+		// Board feedback and telemetry events can wake the arbiter much faster
+		// than the configured compatibility cadence. Do not let those wakes
+		// form a STATUS_RGB -> event -> STATUS_RGB feedback loop.
+		if !stateChanged && !resuming && !nextLegacyFrameAt.IsZero() &&
+			now.Before(nextLegacyFrameAt) {
+			continue
+		}
 
 		frame := statusLEDVisualFrame(visual, now.Sub(stateStarted))
 		transitionMS := policy.TransitionMS
@@ -244,6 +253,11 @@ func (arbiter *statusLEDArbiter) Run() {
 				arbiter.onError(err)
 			}
 		}
+		stepMS := policy.StepMS
+		if stepMS < 20 {
+			stepMS = 20
+		}
+		nextLegacyFrameAt = time.Now().Add(time.Duration(stepMS) * time.Millisecond)
 		resetStatusLEDTimer(timer, policy.StepMS)
 	}
 }

@@ -216,13 +216,28 @@ func TestStatusLEDLegacyBoardKeepsSmoothRGBCompatibilityStream(t *testing.T) {
 		arbiter.Run()
 	}()
 	arbiter.Observe(policy, snapshot, controller.Event{Kind: "telemetry"})
+	feedbackDone := make(chan struct{})
+	go func() {
+		defer close(feedbackDone)
+		ticker := time.NewTicker(2 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				arbiter.Observe(policy, snapshot, controller.Event{Kind: "status_led.changed"})
+			}
+		}
+	}()
 	time.Sleep(220 * time.Millisecond)
 	cancel()
 	<-done
+	<-feedbackDone
 
 	base, direct, nativeBase, nativeDirect := target.counts()
-	if base < 3 || direct != 0 {
-		t.Fatalf("legacy RGB frames base=%d direct=%d, want a smooth multi-frame base stream", base, direct)
+	if base < 3 || base > 6 || direct != 0 {
+		t.Fatalf("legacy RGB frames base=%d direct=%d, want a bounded smooth 50ms stream", base, direct)
 	}
 	if nativeBase != 0 || nativeDirect != 0 {
 		t.Fatalf("legacy board received native descriptors: base=%d direct=%d", nativeBase, nativeDirect)
