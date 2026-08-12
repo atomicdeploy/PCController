@@ -620,7 +620,7 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.lcd.priority` | `kind`, `line1`, `line2`, optional `hold_ms` | display a priority overlay, then restore the prompt |
 | `controller.message.send` | typed message envelope below | route/log a message and optionally display it on the board LCD |
 | `controller.bridge.list` | `{}` | configured peers and live connection state, without URLs or credentials |
-| `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; recursive bridge calls are rejected |
+| `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; the nested request may itself target another explicitly configured peer, subject to trace/cycle bounds and per-hop authorization |
 | `controller.artifact.manifest`, `controller.artifact.list` | optional artifact `kind` | update capability/default/current discovery and content-addressed catalog |
 | `controller.artifact.fetch`, `controller.artifact.capture` | typed fetch or explicitly authorized capture request | queue transfer/readback through the primary |
 | `controller.update.firmware`, `controller.update.eeprom`, `controller.update.host` | artifact SHA-256 plus `authorized: true` | queue the guarded update for that domain |
@@ -1067,17 +1067,22 @@ An enabled `integrations.websocket_clients` entry makes the primary host a
 standard WebSocket or bounded Socket.IO client. It authenticates with a Bearer
 token, subscribes to validated `events`/`opcodes`/`status` topics, reconnects with bounded
 backoff, and can forward local events as correlated `controller.message.send`
-calls. Transport/control/error events and remote-origin messages are not
-re-forwarded, preventing a direct two-host echo loop. Incoming remote
-events/status are re-emitted locally as source-tagged messages.
+calls. Transport/control/error events remain local. Traced remote events and
+status may be repeated to additional configured peers; legacy or malformed
+untraced bridge messages remain local. A bounded, expiring seen-trace cache
+suppresses fan-out duplicates and cycles.
 
 `controller.bridge.call`, `POST /api/bridges/call`, and
 `bridge call PEER METHOD [PARAMS_JSON]` use the existing persistent connection
 and an internal wire ID, then restore the caller's nested JSON-RPC ID in the
 response. The target host applies its own token, remote capability policy, and
-ordinary safety path. Recursive bridge calls are rejected, so this API is not
-an unrestricted network pivot. Incoming command requests on an outbound peer
-connection additionally require that peer's `allow_commands` flag.
+ordinary safety path. Nested bridge calls carry transport-owned relay state
+with an eight-hop default budget and a hard sixteen-hop ceiling. A nested
+request cannot replace or reset the inherited trace. Every link authenticates
+independently, every intermediate host must grant `bridge_calls`, and the final
+host authorizes the actual method; relay state grants no capability. Incoming
+command requests on an outbound peer connection additionally require that
+peer's `allow_commands` flag.
 
 `controller.opcode.exchange` may be used as the nested bridge method. Because
 the bridge forwards the opaque opcode and bytes rather than a feature-specific

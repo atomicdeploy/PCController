@@ -764,9 +764,11 @@ credential transient in the launching process. Browser storage holds only the
 one-use ticket, never the durable token.
 
 Configured `integrations.websocket_clients` can subscribe to another primary,
-forward loop-safe typed events, and issue correlated `bridge call` requests.
-Each host still has exactly one local serial owner and the target reapplies its
-own remote policy and board safety guards.
+forward loop-safe typed events/status, and issue correlated `bridge call`
+requests through one or more explicitly configured repeaters. Relay traces are
+bounded and cycle-suppressed; each connection authenticates independently and
+each host reapplies its own remote policy and board safety guards. Each host
+still has exactly one local serial owner.
 
 Go programs can import the module-root `controller` package directly:
 

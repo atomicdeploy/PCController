@@ -52,6 +52,9 @@ type Request struct {
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Auth    string          `json:"auth,omitempty"`
+	// Relay is transport-owned routing state. Callers cannot use it to grant
+	// capabilities: every hop authenticates and authorizes the request again.
+	Relay *RelayTrace `json:"relay,omitempty"`
 }
 
 type Response struct {
@@ -1074,8 +1077,9 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &params); err == nil {
 			if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" {
 				err = errors.New("bridge peer and request.method are required")
-			} else if params.Request.Method == "controller.bridge.call" {
-				err = errors.New("recursive bridge calls are not permitted")
+			} else if err = inheritRelayTrace(request.Relay, &params.Request); err != nil {
+				// Relay metadata is inherited from the authenticated ingress call.
+				// A nested request cannot reset the trace or hop budget.
 			} else if service.BridgeCall == nil {
 				err = errors.New("host bridge manager is unavailable")
 			} else {
@@ -2808,10 +2812,9 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" ||
-			params.Request.Method == "controller.bridge.call" {
+		if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
-				"error": "bridge peer and non-recursive request.method are required",
+				"error": "bridge peer and request.method are required",
 			})
 			return
 		}

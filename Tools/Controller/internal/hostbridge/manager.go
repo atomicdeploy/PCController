@@ -61,7 +61,7 @@ type peerState struct {
 	allowCommands bool
 	forwardEvents bool
 	cancel        context.CancelFunc
-	events        chan controller.Event
+	events        chan relayedEvent
 	mu            sync.RWMutex
 	session       *peerRPCSession
 	lastError     string
@@ -215,6 +215,7 @@ type Manager struct {
 	segmentScroll      *segmentScrollPresenter
 	buzzerJobs         chan buzzerMirrorJob
 	discoveryRefresh   chan struct{}
+	relay              relayTracker
 }
 
 const integrationShutdownTimeout = 8 * time.Second
@@ -495,6 +496,11 @@ func (manager *Manager) CallBridge(
 	if session == nil {
 		return ipcjson.Response{}, fmt.Errorf("bridge peer %q is not connected", peer.name)
 	}
+	trace, err := manager.relay.advance(request.Relay)
+	if err != nil {
+		return ipcjson.Response{}, fmt.Errorf("relay bridge call: %w", err)
+	}
+	request.Relay = &trace
 	response, err := session.Call(ctx, request)
 	if err != nil {
 		manager.client.EmitHostEvent(
@@ -744,7 +750,7 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 			name: peerConfig.Name, protocol: firstProtocol(peerConfig.Protocol),
 			allowCommands: peerConfig.AllowCommands,
 			forwardEvents: peerConfig.ForwardEvents,
-			cancel:        cancel, events: make(chan controller.Event, 128),
+			cancel:        cancel, events: make(chan relayedEvent, 128),
 		}
 		peers[strings.ToLower(peerConfig.Name)] = peer
 		status.WSClientsActive = append(
@@ -790,6 +796,10 @@ func (manager *Manager) eventLoop(afterID uint64) {
 			return
 		}
 		afterID = event.ID
+		relay, process := manager.prepareRelayEvent(event)
+		if !process {
+			continue
+		}
 		if event.Kind == "telemetry" {
 			snapshot := manager.client.Snapshot()
 			if snapshot.HaveStatus {
@@ -833,11 +843,12 @@ func (manager *Manager) eventLoop(afterID uint64) {
 		manager.dispatchNotification(config, event)
 		manager.dispatchBuzzerMirror(config, event)
 		manager.requestDiscoveryMetadataRefresh()
-		if bridgeEventForwardable(event) {
+		if relay != nil {
+			relayed := relayedEvent{event: event, trace: *relay}
 			manager.mu.RLock()
 			for _, peer := range manager.peers {
 				select {
-				case peer.events <- event:
+				case peer.events <- relayed:
 				default:
 				}
 			}
@@ -846,15 +857,60 @@ func (manager *Manager) eventLoop(afterID uint64) {
 	}
 }
 
+// prepareRelayEvent is the event loop's ingress gate. Traced deliveries are
+// validated and claimed before any webhook, mapping, notification, buzzer, or
+// other local side effect runs. A duplicate therefore cannot be made harmless
+// only after it has already acted on the host.
+func (manager *Manager) prepareRelayEvent(
+	event controller.Event,
+) (*ipcjson.RelayTrace, bool) {
+	trace, present, err := relayTraceFromEvent(event)
+	if err != nil {
+		return nil, false
+	}
+	forwardable := bridgeEventForwardable(event)
+	if present {
+		if manager.relay.consumeIncoming(*trace) {
+			if !forwardable {
+				return nil, true
+			}
+			accepted := *trace
+			return &accepted, true
+		}
+		advanced, err := manager.relay.advance(trace)
+		if err != nil {
+			return nil, false
+		}
+		if !forwardable {
+			return nil, true
+		}
+		return &advanced, true
+	}
+	if !forwardable {
+		return nil, true
+	}
+	advanced, err := manager.relay.advance(nil)
+	if err != nil {
+		// A local event must still reach local safety and presentation paths when
+		// cryptographic trace creation is unavailable; only relay is skipped.
+		return nil, true
+	}
+	return &advanced, true
+}
+
 func bridgeEventForwardable(event controller.Event) bool {
-	kind := strings.ToLower(strings.TrimSpace(event.Kind))
-	if kind == "integration.error" || strings.HasPrefix(kind, "bridge.") ||
-		strings.HasPrefix(kind, "security.remote.") {
+	if !relayEventKindForwardable(relayEventKind(event)) {
 		return false
 	}
-	return kind != "message" ||
+	kind := strings.ToLower(strings.TrimSpace(event.Kind))
+	if kind != "message" ||
 		(!strings.EqualFold(event.Source, "bridge") &&
-			!strings.EqualFold(event.Source, "websocket"))
+			!strings.EqualFold(event.Source, "websocket") &&
+			!strings.EqualFold(event.Source, "socket_io")) {
+		return true
+	}
+	_, present, err := relayTraceFromEvent(event)
+	return present && err == nil
 }
 
 // observeRunningDoor combines the explicit HOST-owned Running state with the
@@ -1175,18 +1231,15 @@ func (manager *Manager) webSocketPeerSession(
 				select {
 				case <-sessionContext.Done():
 					return
-				case event := <-peer.events:
-					encoded, _ := json.Marshal(event)
+				case relayed := <-peer.events:
+					encoded, _ := json.Marshal(relayed.event)
 					text := string(encoded)
 					if len(text) > 4096 {
 						text = text[:4096]
 					}
 					params, _ := json.Marshal(controller.TextMessage{
 						Source: "bridge", Target: "host", Type: "local-event",
-						Text: text, Metadata: map[string]string{
-							"event.id":   strconv.FormatUint(event.ID, 10),
-							"event.kind": event.Kind,
-						},
+						Text: text, Metadata: relayMetadata(relayed.trace, relayed.event),
 					})
 					response, err := rpcSession.Call(sessionContext, ipcjson.Request{
 						JSONRPC: ipcjson.Version, Method: "controller.message.send",
@@ -1242,10 +1295,14 @@ func (manager *Manager) webSocketPeerSession(
 			continue
 		}
 		if request.Method == "controller.event" || request.Method == "controller.status" {
-			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
-				Source: "websocket", Target: "host", Type: "remote-event",
-				Text: string(request.Params),
-			})
+			message, messageErr := manager.remoteNotificationMessage(
+				"websocket", request.Method, request.Params,
+			)
+			if messageErr == nil {
+				if _, sendErr := manager.client.SendTextMessage(ctx, message); sendErr != nil {
+					manager.releaseRemoteNotification(message)
+				}
+			}
 			continue
 		}
 		if len(request.ID) == 0 {
@@ -1348,11 +1405,11 @@ func (manager *Manager) socketIOPeerSession(
 				select {
 				case <-sessionContext.Done():
 					return
-				case event := <-peer.events:
-					encoded, _ := json.Marshal(event)
+				case relayed := <-peer.events:
+					encoded, _ := json.Marshal(relayed.event)
 					err := writeEvent("message", controller.TextMessage{
 						Source: "bridge", Target: "host", Type: "local-event",
-						Text: string(encoded),
+						Text: string(encoded), Metadata: relayMetadata(relayed.trace, relayed.event),
 					})
 					if err != nil {
 						select {
@@ -1399,10 +1456,14 @@ func (manager *Manager) socketIOPeerSession(
 				_ = rpcSession.Resolve(response)
 			}
 		case "controller.event", "controller.status", "message.accepted":
-			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
-				Source: "websocket", Target: "host", Type: "remote-event",
-				Text: string(raw),
-			})
+			message, messageErr := manager.remoteNotificationMessage(
+				"socket_io", name, raw,
+			)
+			if messageErr == nil {
+				if _, sendErr := manager.client.SendTextMessage(ctx, message); sendErr != nil {
+					manager.releaseRemoteNotification(message)
+				}
+			}
 		case "message", "controller.message":
 			var message controller.TextMessage
 			if json.Unmarshal(raw, &message) == nil {
@@ -1470,6 +1531,8 @@ func (manager *Manager) remotePeerService() ipcjson.Service {
 			_, err := manager.store.Update(change)
 			return err
 		},
+		BridgeList: func() any { return manager.BridgePeers() },
+		BridgeCall: manager.CallBridge,
 	}
 }
 

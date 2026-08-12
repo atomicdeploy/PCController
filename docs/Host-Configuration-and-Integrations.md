@@ -555,9 +555,13 @@ correlated calls through `controller.bridge.call`, `/api/bridges/call`, or
 the `bridge call` shell command. They retry with bounded backoff and preserve
 the rule that exactly one local primary owns the attached serial port. The
 target host independently checks its remote policy and ordinary safety guards;
-recursive bridge calls are rejected. Remote programming still closes that
-primary's UART, runs the guarded toolchain/Urclock workflow exclusively, and
-requires a fresh application `HELLO` afterward.
+cascaded calls may cross explicitly configured peers, with a transport-owned
+trace, an eight-hop default budget, a hard sixteen-hop ceiling, and per-host
+cycle suppression. Every intermediate host must independently grant bridge
+calls and every final method is authorized again at its destination; relay
+state never carries capabilities. Remote programming still closes that primary's
+UART, runs the guarded toolchain/Urclock workflow exclusively, and requires a
+fresh application `HELLO` afterward.
 
 ## HTTP, webhooks, WebSocket, and Socket.IO
 

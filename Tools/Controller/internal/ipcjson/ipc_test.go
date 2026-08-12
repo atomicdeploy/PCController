@@ -1228,6 +1228,98 @@ func TestBridgeCallPreservesNestedRPCResponse(t *testing.T) {
 	}
 }
 
+func TestBridgeCallInheritsBoundedRelayTraceForCascade(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	trace := RelayTrace{
+		ID: "00112233445566778899aabbccddeeff", Hops: 2, Limit: 8,
+	}
+	var forwarded Request
+	service := Service{
+		Client: client,
+		BridgeCall: func(
+			_ context.Context,
+			peer string,
+			request Request,
+		) (Response, error) {
+			if peer != "next" {
+				t.Fatalf("bridge peer=%q", peer)
+			}
+			forwarded = request
+			return Response{JSONRPC: Version, ID: request.ID, Result: true}, nil
+		},
+	}
+	inner, _ := json.Marshal(map[string]any{
+		"peer": "edge",
+		"request": map[string]any{
+			"jsonrpc": Version, "id": 9, "method": "controller.snapshot",
+		},
+	})
+	params, _ := json.Marshal(map[string]any{
+		"peer": "next",
+		"request": map[string]any{
+			"jsonrpc": Version, "id": 7, "method": "controller.bridge.call",
+			"params": json.RawMessage(inner),
+		},
+	})
+	response := service.Dispatch(context.Background(), Request{
+		JSONRPC: Version, ID: json.RawMessage("1"),
+		Method: "controller.bridge.call", Params: params, Relay: &trace,
+	})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	if forwarded.Method != "controller.bridge.call" || forwarded.Relay == nil ||
+		*forwarded.Relay != trace {
+		t.Fatalf("forwarded cascade=%#v", forwarded)
+	}
+}
+
+func TestBridgeCallRejectsNestedRelayTraceOverride(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	outer := RelayTrace{ID: "00112233445566778899aabbccddeeff", Hops: 1, Limit: 8}
+	inner := RelayTrace{ID: "ffeeddccbbaa99887766554433221100", Hops: 0, Limit: 16}
+	called := false
+	service := Service{
+		Client: client,
+		BridgeCall: func(context.Context, string, Request) (Response, error) {
+			called = true
+			return Response{}, nil
+		},
+	}
+	params, _ := json.Marshal(map[string]any{
+		"peer": "next",
+		"request": map[string]any{
+			"method": "controller.snapshot", "relay": inner,
+		},
+	})
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.bridge.call", Params: params, Relay: &outer,
+	})
+	if response.Error == nil ||
+		!strings.Contains(response.Error.Message, "cannot override") || called {
+		t.Fatalf("override response=%#v called=%t", response, called)
+	}
+}
+
+func TestRelayTraceValidationIsStrictAndBounded(t *testing.T) {
+	valid := RelayTrace{ID: "00112233445566778899aabbccddeeff", Hops: 8, Limit: 8}
+	if err := ValidateRelayTrace(valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []RelayTrace{
+		{ID: "short", Limit: 8},
+		{ID: valid.ID, Limit: 0},
+		{ID: valid.ID, Limit: MaxRelayHopLimit + 1},
+		{ID: valid.ID, Hops: 9, Limit: 8},
+	} {
+		if err := ValidateRelayTrace(invalid); err == nil {
+			t.Fatalf("invalid relay trace accepted: %#v", invalid)
+		}
+	}
+}
+
 func TestInvalidParamsRetainStandardJSONRPCErrorCode(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

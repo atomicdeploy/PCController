@@ -3,6 +3,8 @@ package hostbridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -172,6 +174,368 @@ func TestPeerRPCSessionCorrelatesResponseAndPreservesCallerID(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("correlated bridge call timed out")
+	}
+}
+
+func TestRelayTrackerAllowsCascadeAndRejectsCycle(t *testing.T) {
+	trace := ipcjson.RelayTrace{
+		ID: "00112233445566778899aabbccddeeff", Limit: 8,
+	}
+	var first, second relayTracker
+	one, err := first.advance(&trace)
+	if err != nil || one.Hops != 1 {
+		t.Fatalf("first hop=%#v err=%v", one, err)
+	}
+	two, err := second.advance(&one)
+	if err != nil || two.Hops != 2 {
+		t.Fatalf("second hop=%#v err=%v", two, err)
+	}
+	if _, err := first.advance(&two); err == nil ||
+		!strings.Contains(err.Error(), "already crossed") {
+		t.Fatalf("cycle was not rejected: %v", err)
+	}
+}
+
+func TestRelayTrackerRejectsHopLimit(t *testing.T) {
+	tracker := relayTracker{}
+	trace := ipcjson.RelayTrace{
+		ID: "00112233445566778899aabbccddeeff", Hops: 2, Limit: 2,
+	}
+	if _, err := tracker.advance(&trace); err == nil ||
+		!strings.Contains(err.Error(), "hop limit") {
+		t.Fatalf("over-budget relay was not rejected: %v", err)
+	}
+}
+
+func TestCascadedBridgeCallReauthorizesEveryHost(t *testing.T) {
+	newManager := func(name string, policy appconfig.RemoteAccessPolicy) *Manager {
+		store, err := appconfig.Open(filepath.Join(t.TempDir(), name+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Update(func(config *appconfig.Config) error {
+			config.IPC.AllowRemote = true
+			config.IPC.AuthToken = "relay-test-token-0123456789abcdef"
+			config.IPC.AllowedOrigins = []string{"localhost:*"}
+			config.IPC.RemotePolicy = policy
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return &Manager{
+			client: controller.AttachSharedRuntime(control.New(control.Options{}), shell.New(8)),
+			store:  store, peers: make(map[string]*peerState),
+		}
+	}
+	first := newManager("first", appconfig.DefaultRemoteAccessPolicy())
+	middlePolicy := appconfig.DefaultRemoteAccessPolicy()
+	middlePolicy.BridgeCalls = true
+	middle := newManager("middle", middlePolicy)
+	edge := newManager("edge", appconfig.DefaultRemoteAccessPolicy())
+
+	connect := func(source, target *Manager, name string) *peerRPCSession {
+		var session *peerRPCSession
+		session = newPeerRPCSession(func(value any) error {
+			request, ok := value.(ipcjson.Request)
+			if !ok {
+				return fmt.Errorf("wire request type %T", value)
+			}
+			service := target.remotePeerService()
+			response := service.DispatchRemote(
+				context.Background(), request, "bridge",
+			)
+			if !session.Resolve(response) {
+				return errors.New("wire response was not correlated")
+			}
+			return nil
+		})
+		source.peers[strings.ToLower(name)] = &peerState{name: name, session: session}
+		return session
+	}
+	firstSession := connect(first, middle, "middle")
+	middleSession := connect(middle, edge, "edge")
+	defer firstSession.Close(nil)
+	defer middleSession.Close(nil)
+
+	nested, _ := json.Marshal(map[string]any{
+		"peer": "edge",
+		"request": map[string]any{
+			"jsonrpc": ipcjson.Version, "id": 3, "method": "controller.snapshot",
+		},
+	})
+	call := func() ipcjson.Response {
+		response, err := first.CallBridge(context.Background(), "middle", ipcjson.Request{
+			JSONRPC: ipcjson.Version, ID: json.RawMessage("1"),
+			Method: "controller.bridge.call", Params: nested,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	response := call()
+	encoded, _ := json.Marshal(response)
+	if response.Error != nil || !strings.Contains(string(encoded), `"connected":false`) {
+		t.Fatalf("cascaded read response=%s", encoded)
+	}
+
+	if _, err := edge.store.Update(func(config *appconfig.Config) error {
+		config.IPC.RemotePolicy.Read = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	response = call()
+	encoded, _ = json.Marshal(response)
+	if !strings.Contains(string(encoded), `"code":-32003`) ||
+		!strings.Contains(string(encoded), "read") {
+		t.Fatalf("edge read denial was not preserved: %s", encoded)
+	}
+}
+
+func TestRemoteNotificationPreservesRelayAndLegacyBridgeEventsStayLocal(t *testing.T) {
+	manager := &Manager{}
+	trace := ipcjson.RelayTrace{
+		ID: "00112233445566778899aabbccddeeff", Hops: 3, Limit: 8,
+	}
+	encoded, _ := json.Marshal(controller.Event{
+		ID: 44, Kind: "message", Source: "websocket", Text: "relayed",
+		Metadata: relayMetadata(trace, controller.Event{ID: 44, Kind: "door"}),
+	})
+	message, err := manager.remoteNotificationMessage(
+		"websocket", "controller.event", encoded,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := trace
+	want.Hops++
+	got, present, err := relayTraceFromMetadata(message.Metadata)
+	if err != nil || !present || got == nil || *got != want {
+		t.Fatalf("preserved trace=%#v present=%t err=%v", got, present, err)
+	}
+	if message.Metadata[relayEventKindMetadata] != "door" ||
+		message.Metadata[relayEventSourceMetadata] != "" {
+		t.Fatalf("original event identity was not preserved: %#v", message.Metadata)
+	}
+
+	legacy, _ := json.Marshal(controller.Event{
+		ID: 45, Kind: "message", Source: "bridge", Text: "legacy",
+	})
+	message, err = manager.remoteNotificationMessage(
+		"websocket", "controller.event", legacy,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present, _ := relayTraceFromMetadata(message.Metadata); present {
+		t.Fatalf("legacy bridge event unexpectedly became repeatable: %#v", message)
+	}
+}
+
+func TestRelayIngressCycleDiamondAndReplayRunLocalSideEffectsOnce(t *testing.T) {
+	manager := &Manager{}
+	incoming := ipcjson.RelayTrace{
+		ID: "00112233445566778899aabbccddeeff", Hops: 1, Limit: 8,
+	}
+	remote := controller.Event{ID: 61, Kind: "door", Source: "board", Text: "open"}
+	remote.Metadata = relayMetadata(incoming, remote)
+	raw, _ := json.Marshal(remote)
+	message, err := manager.remoteNotificationMessage(
+		"websocket", "controller.event", raw,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := controller.Event{
+		ID: 62, Kind: "message", Source: message.Source,
+		Text: message.Text, Metadata: message.Metadata,
+	}
+
+	localSideEffects := 0
+	for _, delivery := range []string{"first", "cycle", "diamond", "replay"} {
+		relay, process := manager.prepareRelayEvent(local)
+		if process {
+			localSideEffects++
+		}
+		if delivery == "first" {
+			if !process || relay == nil || relay.Hops != 2 {
+				t.Fatalf("first delivery process=%t relay=%#v", process, relay)
+			}
+		} else if process || relay != nil {
+			t.Fatalf("%s duplicate was accepted: process=%t relay=%#v", delivery, process, relay)
+		}
+	}
+	if localSideEffects != 1 {
+		t.Fatalf("local side effects ran %d times, want 1", localSideEffects)
+	}
+	if _, err := manager.remoteNotificationMessage(
+		"websocket", "controller.event", raw,
+	); err == nil || !strings.Contains(err.Error(), "already crossed") {
+		t.Fatalf("upstream replay was not rejected before publication: %v", err)
+	}
+}
+
+func TestRelayDuplicateCannotRepeatTextMappingSideEffect(t *testing.T) {
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Update(func(config *appconfig.Config) error {
+		config.Integrations.Hotkeys = nil
+		config.Integrations.Notifications.Enabled = false
+		config.Integrations.TextMappings = []appconfig.TextMapping{{
+			Name: "remote-door", Enabled: true,
+			Source: "websocket", Target: "host", Type: "remote-event",
+			Contains: "open", Command: "mark",
+		}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	engine := shell.New(8)
+	called := make(chan struct{}, 8)
+	if err := engine.Register(shell.Command{
+		Name: "mark", Usage: "mark", Summary: "relay side-effect test",
+		Run: func(context.Context, []string) (string, error) {
+			called <- struct{}{}
+			return "marked", nil
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := controller.AttachSharedRuntime(control.New(control.Options{}), engine)
+	ctx, cancel := context.WithCancel(context.Background())
+	manager, err := Start(ctx, client, store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		cancel()
+		manager.Close()
+	}()
+
+	trace := ipcjson.RelayTrace{
+		ID: "00112233445566778899aabbccddeeff", Hops: 1, Limit: 8,
+	}
+	remote := controller.Event{ID: 81, Kind: "door", Source: "board", Text: "open"}
+	remote.Metadata = relayMetadata(trace, remote)
+	raw, _ := json.Marshal(remote)
+	message, err := manager.remoteNotificationMessage(
+		"websocket", "controller.event", raw,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendTextMessage(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-called:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first accepted relay event did not run its mapping")
+	}
+	for duplicate := 0; duplicate < 3; duplicate++ {
+		if _, err := client.SendTextMessage(ctx, message); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-called:
+		t.Fatal("cycle/diamond/replay duplicate repeated the text-mapping side effect")
+	case <-time.After(400 * time.Millisecond):
+	}
+}
+
+func TestSensitiveRemoteEventKindsStayLocalAndPreserveIdentity(t *testing.T) {
+	for _, kind := range []string{
+		"security.remote.denied",
+		"security.local.authorized",
+		"bridge.call",
+		"bridge.call.error",
+		"integration.error",
+		"controller.error",
+		"transport.error",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			manager := &Manager{}
+			trace := ipcjson.RelayTrace{
+				ID: "00112233445566778899aabbccddeeff", Hops: 1, Limit: 8,
+			}
+			remote := controller.Event{ID: 71, Kind: kind, Source: "remote-host"}
+			remote.Metadata = relayMetadata(trace, remote)
+			raw, _ := json.Marshal(remote)
+			message, err := manager.remoteNotificationMessage(
+				"websocket", "controller.event", raw,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, present, err := relayTraceFromMetadata(message.Metadata); err != nil || present {
+				t.Fatalf("sensitive event retained relay trace: present=%t err=%v metadata=%#v", present, err, message.Metadata)
+			}
+			if message.Metadata[relayEventKindMetadata] != kind ||
+				message.Metadata[relayEventSourceMetadata] != "remote-host" {
+				t.Fatalf("original kind/source lost: %#v", message.Metadata)
+			}
+
+			wrapped := controller.Event{
+				Kind: "message", Source: "websocket", Metadata: message.Metadata,
+			}
+			if bridgeEventForwardable(wrapped) {
+				t.Fatalf("sensitive wrapped event became forwardable: %#v", wrapped)
+			}
+			wrapped.Metadata = relayMetadata(trace, wrapped)
+			if bridgeEventForwardable(wrapped) {
+				t.Fatalf("forged trace made sensitive event forwardable: %#v", wrapped)
+			}
+
+			generic := controller.Event{
+				ID: 72, Kind: "message", Source: "remote-host",
+				Metadata: message.Metadata,
+			}
+			genericRaw, _ := json.Marshal(generic)
+			genericMessage, err := manager.remoteNotificationMessage(
+				"websocket", "controller.event", genericRaw,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, present, err := relayTraceFromMetadata(genericMessage.Metadata); err != nil || present {
+				t.Fatalf("generic wrapper assigned a trace to sensitive kind: present=%t err=%v metadata=%#v", present, err, genericMessage.Metadata)
+			}
+		})
+	}
+}
+
+func TestMalformedRemoteEventIsRejectedBeforePublication(t *testing.T) {
+	manager := &Manager{}
+	if _, err := manager.remoteNotificationMessage(
+		"websocket", "controller.event", json.RawMessage(`{"kind":`),
+	); err == nil || !strings.Contains(err.Error(), "decode remote event") {
+		t.Fatalf("malformed event was accepted: %v", err)
+	}
+	event := controller.Event{
+		Kind: "door", Metadata: map[string]string{relayTraceMetadata: "short"},
+	}
+	raw, _ := json.Marshal(event)
+	if _, err := manager.remoteNotificationMessage(
+		"websocket", "controller.event", raw,
+	); err == nil {
+		t.Fatal("partial relay metadata was accepted")
+	}
+}
+
+func TestTracedRemoteEventCanRepeatButUntracedCannot(t *testing.T) {
+	event := controller.Event{Kind: "message", Source: "websocket"}
+	if bridgeEventForwardable(event) {
+		t.Fatal("untraced remote message was repeatable")
+	}
+	event.Metadata = relayMetadata(ipcjson.RelayTrace{
+		ID: "00112233445566778899aabbccddeeff", Hops: 1, Limit: 8,
+	}, event)
+	if !bridgeEventForwardable(event) {
+		t.Fatal("valid traced remote message was not repeatable")
 	}
 }
 
