@@ -1024,6 +1024,7 @@ const PROMPT_EXCERPTS = {
   identityVisuals: prompt(SESSION.tonight, 9, 'Align the favicon, WebUI logo, executable and console icons as generated forms of one unique source asset, and show before and after variants in GitHub for selection.'),
   liveMeasurementTiming: prompt(SESSION.tonight, 10, 'Expose host-synchronized Live Measurements refresh rate and freshness window in WebUI and TUI Settings. Default to 250 ms (4 Hz) and 1500 ms, restrict refresh to 200–500 ms, require freshness to include headroom, persist it in host config, and immediately propagate changes to every WebUI/TUI instance including remote TUIs.'),
   peripheralPresenceUI: prompt(SESSION.tonight, 11, 'When INA219, PCA9685, DS18B20, LCD, or another detectable peripheral is unavailable, hide its UI controls and readings instead of presenting invalid values.'),
+  emptyBoardAcceptance: prompt(SESSION.tonight, 12, 'Use the real physical board on cafe-pc:8787 instead of VirtualBoard; while it is being provisioned without peripherals, accept bridge, MCU, UART, flash, and EEPROM evidence without claiming populated-peripheral validation.'),
   webAcceptanceRepair: prompt(SESSION.cafe, 16, 'Repair the embedded controller WebUI temperature truth and charts, relay controls, terminal behavior, nested workbench routes, settings and tables, updates, and automatic client resource refresh.'),
   ledClientExperience: prompt(SESSION.cafe, 17, 'Keep WebUI and TUI synchronized for status LED ownership, profiles, effects, live preview, stream ordering, accessibility, RTL and LTR, and responsive dark-mode behavior.'),
   buzzerFallback: prompt(SESSION.recovery, 177, 'Add a fallback for audio-frequency generation when port 0x61 is unavailable.'),
@@ -1257,6 +1258,8 @@ const PR_ORIGINAL_REQUESTS = {
   202: [PROMPT_EXCERPTS.liveMeasurementTiming],
   203: [PROMPT_EXCERPTS.displaysAudio],
   204: [PROMPT_EXCERPTS.displayPresentation, PROMPT_EXCERPTS.peripheralPresenceUI],
+  205: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.apiRace, PROMPT_EXCERPTS.fullDuplexTracking],
+  206: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';

@@ -1043,21 +1043,38 @@ func reassertProgrammingSession(
 	return nil
 }
 
-// findRetryableProgrammingSession returns the one failed transaction that
-// exactly matches this physical device, target image, and EEPROM policy.
+// findRetryableProgrammingSession returns the newest safely latched transaction
+// that exactly matches this physical device, target image, and EEPROM policy.
+// A host may stop after durable preparation but before the programmer starts;
+// that pre-write marker is just as safe to resume as an explicit failed result.
 func findRetryableProgrammingSession(
 	paths programmer.HostDataPaths,
 	device ProgrammingDeviceIdentity,
 	targetSHA256 string,
 	reinitializeEEPROM bool,
 ) (*ProgrammingSession, error) {
-	session, err := findFailedProgrammingSession(paths, device, targetSHA256)
+	session, err := findNewestProgrammingSession(paths, device)
 	if err != nil || session == nil {
 		return session, err
+	}
+	targetSHA256 = strings.ToLower(strings.TrimSpace(targetSHA256))
+	if !strings.EqualFold(session.TargetFirmwareSHA256, targetSHA256) {
+		return nil, fmt.Errorf(
+			"device has a newer pending programming session for target SHA-256 %s in phase %s; recover it before starting another target",
+			session.TargetFirmwareSHA256, session.Phase,
+		)
 	}
 	if session.ReinitializeEEPROM != reinitializeEEPROM {
 		return nil, errors.New(
 			"pending programming session uses a different EEPROM policy; recover it before starting a new write",
+		)
+	}
+	prewriteSafe := session.HostResult == "" && (session.Phase == "latched-safe" ||
+		session.Phase == "development-reinitialize-safe")
+	if !session.SafeStateApplied || (session.HostResult != "failed" && !prewriteSafe) {
+		return nil, fmt.Errorf(
+			"newest programming session for target SHA-256 %s in phase %s is not safely retryable",
+			session.TargetFirmwareSHA256, session.Phase,
 		)
 	}
 	return session, nil
@@ -1068,11 +1085,30 @@ func findFailedProgrammingSession(
 	device ProgrammingDeviceIdentity,
 	targetSHA256 string,
 ) (*ProgrammingSession, error) {
+	session, err := findNewestProgrammingSession(paths, device)
+	if err != nil || session == nil {
+		return session, err
+	}
+	targetSHA256 = strings.ToLower(strings.TrimSpace(targetSHA256))
+	matching := session.HostResult == "failed" && session.SafeStateApplied &&
+		strings.EqualFold(session.TargetFirmwareSHA256, targetSHA256)
+	if !matching {
+		return nil, fmt.Errorf(
+			"device has a newer pending programming session for target SHA-256 %s in phase %s; recover it before starting another target",
+			session.TargetFirmwareSHA256, session.Phase,
+		)
+	}
+	return session, nil
+}
+
+func findNewestProgrammingSession(
+	paths programmer.HostDataPaths,
+	device ProgrammingDeviceIdentity,
+) (*ProgrammingSession, error) {
 	markers, err := filepath.Glob(filepath.Join(paths.StateDir, "programming-recovery-*.json"))
 	if err != nil {
 		return nil, err
 	}
-	targetSHA256 = strings.ToLower(strings.TrimSpace(targetSHA256))
 	var candidate *ProgrammingSession
 	for _, markerPath := range markers {
 		session, loadErr := loadProgrammingMarker(markerPath)
@@ -1099,14 +1135,6 @@ func findFailedProgrammingSession(
 	}
 	if candidate == nil {
 		return nil, nil
-	}
-	matching := candidate.HostResult == "failed" && candidate.SafeStateApplied &&
-		strings.EqualFold(candidate.TargetFirmwareSHA256, targetSHA256)
-	if !matching {
-		return nil, fmt.Errorf(
-			"device has a newer pending programming session for target SHA-256 %s in phase %s; recover it before starting another target",
-			candidate.TargetFirmwareSHA256, candidate.Phase,
-		)
 	}
 	return candidate, nil
 }
