@@ -3,6 +3,7 @@ package control
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -60,6 +61,36 @@ func TestHostOwnedLCDDiscoversInitializesAndCaches(t *testing.T) {
 	}
 	if len(writes) != before+1 || string(writes[before]) != string(appendLCDByte(nil, 0x02, false)) {
 		t.Fatalf("unchanged render must only restore home; extra=% X", writes[before:])
+	}
+}
+
+func TestLCDWriteSequenceAbortsAfterFirstI2CFailure(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		result native.I2CTransferResult
+		err    error
+	}{
+		{name: "transport", err: errors.New("UART timeout")},
+		{name: "device-status", result: native.I2CTransferResult{Status: 2}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			calls := 0
+			lcd := newHostOwnedLCD(func(
+				_ context.Context, _ byte, _ byte, _ []byte, _ byte,
+			) (native.I2CTransferResult, error) {
+				calls++
+				return test.result, test.err
+			})
+			lcd.address = 0x27
+			// More than one 15-byte UART/I2C chunk proves no later chunk is sent.
+			sequence := make([]byte, 30)
+			if err := lcd.writeSequence(context.Background(), sequence); err == nil {
+				t.Fatal("failed I2C transfer was accepted")
+			}
+			if calls != 1 {
+				t.Fatalf("LCD continued after first failure: calls=%d", calls)
+			}
+		})
 	}
 }
 

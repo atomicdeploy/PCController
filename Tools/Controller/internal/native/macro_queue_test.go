@@ -1,17 +1,68 @@
 package native
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
-func TestMacroStatusSchemaTwoRoundTripLayout(t *testing.T) {
+func TestGeneratedMacroContractMatchesCanonicalCXXSources(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate macro contract test")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", ".."))
+	protocol, err := os.ReadFile(filepath.Join(root, "Project", "ProtocolContract.h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, err := os.ReadFile(filepath.Join(root, "Project", "MacroActions.inc.h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.New()
+	_, _ = hash.Write(protocol)
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(actions)
+	if got := fmt.Sprintf("%x", hash.Sum(nil)); got != macroContractSourceSHA256 {
+		t.Fatalf("generated macro contract is stale: got source %s, generated %s; run go generate ./internal/native", got, macroContractSourceSHA256)
+	}
+	if FeatureProfileFullPeripheral != 0 || FeatureProfileMotionMacro != 1 ||
+		FeatureProfileKeyDiagnostic != 2 || FeatureProfileCustom != 3 {
+		t.Fatal("generated feature-profile values differ from ProtocolContract.h")
+	}
+	if BuildFeatureLocalMacroCapture != 1 ||
+		BuildFeatureUnifiedPageIdentifiesKeys != 2 ||
+		BuildFeatureForceSilent != 4 || BuildFeatureBlankEepromSilent != 8 ||
+		BuildFeatureMcuLcdRenderer != 16 || BuildFeatureLocalPcaPages != 32 ||
+		BuildFeatureStatusLedEngine != 64 ||
+		BuildFeatureIlluminationAutomation != 128 {
+		t.Fatal("generated build-feature values differ from ProtocolContract.h")
+	}
+	if !MacroPlaybackAllowed(OpRelaySide) || MacroPlaybackAllowed(OpSetSettings) ||
+		MacroPlaybackAllowed(OpRFLearnStart) || MacroPlaybackAllowed(OpRelayTest) {
+		t.Fatal("generated playback allowlist differs from the AVR safety registry")
+	}
+	if length, recordable := MacroBoardActionPayloadLength(OpRelayAllOff); !recordable || length != 0 {
+		t.Fatalf("zero-payload capture contract=%d/%t", length, recordable)
+	}
+	if _, recordable := MacroBoardActionPayloadLength(OpStatusEffect); recordable {
+		t.Fatal("variable playback-only action entered board evidence")
+	}
+}
+
+func TestMacroStatusSchemaThreeRoundTripLayout(t *testing.T) {
 	payload := []byte{
 		EventMacro, MacroQueueSchema, MacroPlaying, 9,
 		7, 0, 5, 0, 64, 0,
 		42, 1, 2,
 		0x78, 0x56, 0x34, 0x12,
 		10, 0,
+		3, 0,
 	}
 	status, err := ParseMacroStatus(payload)
 	if err != nil {
@@ -21,7 +72,8 @@ func TestMacroStatusSchemaTwoRoundTripLayout(t *testing.T) {
 		status.ExecutedSteps != 5 || status.AcceptedBytes != 64 ||
 		status.Fill != 42 || status.Free() != 85 ||
 		status.Underruns != 1 || status.DispatchErrors != 2 ||
-		status.StartedAtUS != 0x12345678 || status.TotalSteps != 10 {
+		status.StartedAtUS != 0x12345678 || status.TotalSteps != 10 ||
+		status.DroppedSteps != 3 {
 		t.Fatalf("unexpected status: %#v", status)
 	}
 }
@@ -33,8 +85,9 @@ func TestTimedMacroStatusEventAcceptsTimestampMarker(t *testing.T) {
 		0, 0, 0,
 		0x10, 0x20, 0x30, 0x40,
 		4, 0,
+		0, 0,
 	}
-	// Timed events append the MCU clock after the 19-byte macro envelope.
+	// Timed events append the MCU clock after the 21-byte macro envelope.
 	payload = append(payload, 0x78, 0x56, 0x34, 0x12)
 	event, err := ParseDeviceEvent(payload)
 	if err != nil {
@@ -69,5 +122,114 @@ func TestMacroFragmentsCarryAbsoluteStreamAndCompleteStepOffsets(t *testing.T) {
 		binary.LittleEndian.Uint16(payload[3:5]) != 4 ||
 		len(payload) != 8 {
 		t.Fatalf("unexpected APPEND payload: %v", payload)
+	}
+}
+
+func TestBoardActionEventUsesOrdinaryMacroOpcodeContract(t *testing.T) {
+	payload := []byte{
+		EventAction | 0x80, InputSourcePhysical, OpRelaySide, 2, 1, 2,
+		0x78, 0x56, 0x34, 0x12,
+	}
+	event, err := ParseDeviceEvent(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != EventAction || !event.Timed ||
+		event.DeviceMicros != 0x12345678 || event.Source != InputSourcePhysical ||
+		event.ActionOpcode != OpRelaySide || len(event.ActionPayload) != 2 ||
+		event.ActionPayload[0] != 1 || event.ActionPayload[1] != 2 {
+		t.Fatalf("unexpected action event: %#v", event)
+	}
+}
+
+func TestBoardActionEventRejectsControlAndOversizedPayload(t *testing.T) {
+	for _, payload := range [][]byte{
+		{EventAction, InputSourcePhysical, OpMacroStart, 0},
+		{EventAction, InputSourcePhysical, OpRelayAllOff, 1, 0},
+		{EventAction, InputSourceRF, OpRelaySet, 1, 0},
+		{EventAction, InputSourceRF, OpRelaySet, MacroBoardActionMaximumPayload + 1,
+			0, 0, 0, 0, 0, 0, 0, 0, 0},
+	} {
+		if _, err := ParseDeviceEvent(payload); err == nil {
+			t.Fatalf("invalid action event accepted: % X", payload)
+		}
+	}
+}
+
+func TestBoardCaptureCommandsCarryIdentity(t *testing.T) {
+	start := MacroCaptureStartPayload(0x2A)
+	if len(start) != 5 || start[0] != MacroQueueSchema || start[1] != 0x2A ||
+		start[2] != MacroCaptureInputsFlag || start[3] != 0 || start[4] != 0 {
+		t.Fatalf("capture start payload=% X", start)
+	}
+	if stop := MacroCaptureStopPayload(); len(stop) != 1 || stop[0] != 5 {
+		t.Fatalf("capture stop payload=% X", stop)
+	}
+	query := MacroCaptureQueryPayload(0x2A, 0x1234)
+	if len(query) != 4 || query[0] != 3 || query[1] != 0x2A ||
+		binary.LittleEndian.Uint16(query[2:]) != 0x1234 {
+		t.Fatalf("capture query payload=% X", query)
+	}
+	ack := MacroCaptureAcknowledgePayload(0x2A, 0x78563412)
+	if len(ack) != 6 || ack[0] != 4 || ack[1] != 0x2A ||
+		binary.LittleEndian.Uint32(ack[2:]) != 0x78563412 {
+		t.Fatalf("capture acknowledgement payload=% X", ack)
+	}
+}
+
+func TestMacroVariablePlaybackActionsRemainHostOnlyAndSemantic(t *testing.T) {
+	display, err := DisplayTextPayload(DisplayLCD, 250, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err := StatusEffectPayload(StatusEffectOptions{
+		Kind: StatusEffectBreathe, Red: 1, Green: 2, Blue: 3,
+		Brightness: 200, MinimumBrightness: 20, PeriodMS: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []struct {
+		opcode  byte
+		payload []byte
+	}{{OpDisplayText, display}, {OpStatusEffect, effect}, {OpStatusEffect, StatusEffectReleasePayload()}} {
+		if !MacroPlaybackPayloadSemanticallyValid(action.opcode, action.payload) {
+			t.Fatalf("valid variable host action rejected: opcode=0x%02X payload=% X", action.opcode, action.payload)
+		}
+		if _, recordable := MacroBoardActionPayloadLength(action.opcode); recordable {
+			t.Fatalf("variable host action entered <=%d-byte board evidence", MacroBoardActionMaximumPayload)
+		}
+		if _, encodeErr := EncodeMacroRecord(10, action.opcode, action.payload); encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+	}
+	for _, invalid := range []struct {
+		opcode  byte
+		payload []byte
+	}{
+		{OpDisplayText, []byte{DisplayLCD, 0, 0, 5, 'x'}},
+		{OpStatusEffect, []byte{StatusEffectBreathe, 1}},
+		{OpRelayAllOff, []byte{1}},
+	} {
+		if MacroPlaybackPayloadSemanticallyValid(invalid.opcode, invalid.payload) {
+			t.Fatalf("malformed macro action accepted: opcode=0x%02X payload=% X", invalid.opcode, invalid.payload)
+		}
+	}
+}
+
+func TestMacroCaptureChunkUsesBoundedOffsetPages(t *testing.T) {
+	payload := []byte{MacroQueueSchema, 3, 9, 5, 0, 2, 0, 3, 0xAA, 0xBB, 0xCC}
+	chunk, err := ParseMacroCaptureChunk(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chunk.ID != 9 || chunk.TotalBytes != 5 || chunk.Offset != 2 ||
+		len(chunk.Data) != 3 || chunk.Data[2] != 0xCC {
+		t.Fatalf("unexpected capture chunk: %#v", chunk)
+	}
+	query := MacroCaptureQueryPayload(9, 0x1234)
+	if len(query) != 4 || query[0] != 3 || query[1] != 9 ||
+		query[2] != 0x34 || query[3] != 0x12 {
+		t.Fatalf("unexpected capture query: % X", query)
 	}
 }

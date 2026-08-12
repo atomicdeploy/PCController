@@ -688,6 +688,49 @@ func TestProgrammingLifecycleFailedProgrammerResultRetainsLatchAndMarker(t *test
 	}
 }
 
+func TestProgrammingLifecycleBackupFailureBeforeWriteRestoresOriginalState(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	original := native.Settings{
+		Flags: native.SettingsSilent, LightMode: 2, OnBrightness: 180,
+		DisplayBrightness: 6, MotionBreakMSValue: 1,
+	}
+	device := &fakeProgrammingDevice{
+		snapshot: connectedProgrammingSnapshot(0), settings: original,
+	}
+	session, err := prepareProgrammingSession(
+		context.Background(), device, firmware,
+		ProgrammingLifecycleOptions{
+			DataPaths: paths, Wait: noProgrammingWait, ReinitializeEEPROM: true,
+		}, io.Discard,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AbortProgrammingSessionBeforeWrite(session); err != nil {
+		t.Fatal(err)
+	}
+	if session.HostResult != "aborted-before-write" ||
+		session.Phase != "aborted-before-write" {
+		t.Fatalf("pre-write abort marker = %+v", session)
+	}
+	if err := restoreProgrammingSession(
+		context.Background(), device, session,
+		ProgrammingLifecycleOptions{
+			DataPaths: paths, Wait: noProgrammingWait, ReinitializeEEPROM: true,
+		}, io.Discard,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if device.settings.Flags&native.SettingsProgrammingMode != 0 ||
+		device.settings.LightMode != original.LightMode ||
+		device.settings.OnBrightness != original.OnBrightness {
+		t.Fatalf("pre-write abort did not restore original settings: %+v", device.settings)
+	}
+	if _, err := os.Stat(session.RecoveryMarkerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("pre-write abort retained marker: %v", err)
+	}
+}
+
 func TestProgrammingLifecycleLiveRestoreFailureRelatchesSafeOutputs(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	original := native.Settings{LightMode: 2, OnBrightness: 180, DisplayBrightness: 6, MotionBreakMSValue: 1}

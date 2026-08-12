@@ -44,6 +44,13 @@ public:
   static constexpr uint8_t Capacity = EepromLayout::RemoteCapacity;
 
   void begin();
+  // Advances at most one EEPROM byte. Record CRCs and the store header magic
+  // are published last so reset/power loss can only expose complete records.
+  bool service();
+  bool busy() const;
+  // True only when no cooperative mutation remains and EEPROM can be read.
+  // Hosts poll list/status until this durability boundary after mutation ACK.
+  bool ready() const;
   uint8_t count() const;
   bool get(uint8_t id, LearnedRemote &remote) const;
   bool find(uint32_t code, uint8_t bits, uint8_t protocol,
@@ -54,7 +61,7 @@ public:
   bool learn(uint32_t code, uint8_t bits, uint8_t protocol,
              uint16_t pulseMicros, uint8_t &id);
   bool remove(uint8_t id);
-  void clear();
+  bool clear();
   // Atomically replaces one slot at record granularity. The existing paged
   // list response is the read-back for host-staged reordering/import.
   bool replace(const LearnedRemote &remote);
@@ -81,9 +88,21 @@ private:
                 "RF records overlap reset journal");
 
   bool readRecord(uint8_t id, Record &record) const;
-  void writeRecord(uint8_t id, Record &record);
+  bool queueRecord(uint8_t id, const Record &record);
+  bool serviceRecordWrite();
+  bool serviceHeaderWrite();
   static bool validMapping(RemoteActionKind kind, uint8_t value,
                            RemoteBehavior behavior);
+
+  Record pendingRecord_{};
+  uint8_t pendingId_ = Capacity;
+  uint8_t writeIndex_ = 0;
+  uint8_t clearId_ = 0;
+  uint8_t headerWriteIndex_ = 0;
+  bool writePending_ = false;
+  bool clearing_ = false;
+  bool headerPending_ = false;
+  bool headerInvalidated_ = false;
 };
 
 // learnedRemotes is the single MCU-owned learned RF table.

@@ -15,14 +15,25 @@ void UartProtocol::begin(uint32_t baud, FrameHandler handler, void *context) {
 }
 
 void UartProtocol::service() {
-  while (serial_.available() > 0) {
+  uint8_t servicedBytes = 0;
+  while (serial_.available() > 0 &&
+         servicedBytes < MaximumServiceBytes) {
+    ++servicedBytes;
     const uint8_t value = static_cast<uint8_t>(serial_.read());
     if (value == 0) {
+      const bool frameEnded = dropping_ || receiveLength_ != 0;
       if (!dropping_ && receiveLength_ != 0) {
         processEncodedFrame();
       }
       receiveLength_ = 0;
       dropping_ = false;
+      // Never let a burst of host commands monopolize the controller loop.
+      // Empty delimiters may be skipped, but each complete (even malformed or
+      // oversized) frame yields to physical keys, RF, safety, and one macro
+      // action before another UART frame is considered.
+      if (frameEnded) {
+        break;
+      }
       continue;
     }
 
@@ -46,6 +57,8 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
   const bool timedEvent = opcode == Event && payloadLength != 0;
   const bool timed = timedEvent || opcode == Ack ||
                      (opcode == ErrorResponse && sequence == 0xFE);
+  const uint32_t capturedAtUs =
+      timed ? (timingOverrideActive_ ? timingOverrideUs_ : micros()) : 0;
   if (payloadLength > static_cast<uint8_t>(MaximumPayload -
                                            (timed ? 4 : 0)) ||
       (payloadLength != 0 && payload == nullptr)) {
@@ -66,8 +79,7 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
     if (timedEvent) {
       raw_[5] |= 0x80;
     }
-    const uint32_t capturedAt = micros();
-    memcpy(raw_ + 5 + payloadLength, &capturedAt, sizeof(capturedAt));
+    memcpy(raw_ + 5 + payloadLength, &capturedAtUs, sizeof(capturedAtUs));
   }
   const uint8_t rawLength = static_cast<uint8_t>(raw_[4] + RawOverhead);
   raw_[rawLength - 1] = crc8(raw_, static_cast<uint8_t>(rawLength - 1));
@@ -79,9 +91,27 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
   return true;
 }
 
+bool UartProtocol::sendEventAt(const uint8_t *payload, uint8_t payloadLength,
+                               uint32_t capturedAtUs) {
+  timingOverrideUs_ = capturedAtUs;
+  timingOverrideActive_ = true;
+  const bool sent = send(Event, 0, payload, payloadLength);
+  timingOverrideActive_ = false;
+  return sent;
+}
+
 bool UartProtocol::sendAck(uint8_t sequence, uint8_t requestOpcode) {
   const uint8_t payload[] = {requestOpcode, NoError};
   return send(Ack, sequence, payload, sizeof(payload));
+}
+
+bool UartProtocol::sendAckAt(uint8_t sequence, uint8_t requestOpcode,
+                             uint32_t capturedAtUs) {
+  timingOverrideUs_ = capturedAtUs;
+  timingOverrideActive_ = true;
+  const bool sent = sendAck(sequence, requestOpcode);
+  timingOverrideActive_ = false;
+  return sent;
 }
 
 bool UartProtocol::sendError(uint8_t sequence, uint8_t requestOpcode,

@@ -8,6 +8,7 @@
 #include "LocalLib/TonePlayer.h"
 #include "Project/FrontPanelModel.h"
 #include "Project/MotionDoorPolicy.h"
+#include "Project/PwmController.h"
 #include "Project/RelayController.h"
 #include "Project/SettingsStore.h"
 #include "Project/TemperatureRoles.h"
@@ -350,6 +351,12 @@ void testTransitionsAndRollover() {
               rollByte(0, 16, false) == 255,
           "front-panel byte rollover skipped or trapped an endpoint");
 
+  require(PwmValueRollover::next(3840, 256) == 4095 &&
+              PwmValueRollover::next(4095, 256) == 0 &&
+              PwmValueRollover::next(255, -256) == 0 &&
+              PwmValueRollover::next(0, -256) == 4095,
+          "seven-segment PWM editor rollover skipped an endpoint");
+
   std::uint8_t value = 128;
   std::uint8_t previous = value;
   unsigned frames = 0;
@@ -428,16 +435,68 @@ void testFrontPanelLeafDecreaseDispatch() {
   for (std::uint8_t mode = MODE_DOOR; mode <= MODE_RF; ++mode) {
     const auto current = static_cast<ProgramMode>(mode);
     const LeafDecreaseAction expected =
-        current == MODE_KEYS
-            ? LeafDecreaseAction::IdentifyKey3
-            : (current == MODE_RELAY
-                   ? LeafDecreaseAction::AllRelaysOff
-                   : LeafDecreaseAction::ParentCategory);
+        current == MODE_RELAY ? LeafDecreaseAction::AllRelaysOff
+                              : LeafDecreaseAction::ParentCategory;
     require(leafDecreaseAction(current) == expected,
             "leaf K3 dispatch no longer matches its page context");
   }
-  require(static_cast<std::uint8_t>(MENU_DECREASE) + 1U == 3U,
-          "KEY-page K3 identification no longer resolves to key 3");
+
+  require(canonicalFrontPanelPage(PAGE_KEYS) == PAGE_MOTION &&
+              canonicalFrontPanelPage(PAGE_MOTION) == PAGE_MOTION &&
+              !frontPanelPageCompiled(PAGE_KEYS) &&
+              frontPanelPageCompiled(PAGE_MOTION),
+          "retired KEY page is no longer one canonical MOVE surface");
+  require(unifiedInputIntent(MENU_PREVIOUS, true) ==
+                  UnifiedInputIntent::PreviousPage &&
+              unifiedInputIntent(MENU_NEXT, true) ==
+                  UnifiedInputIntent::NextPage,
+          "diagnostic key page lost a direct exit");
+  require(unifiedInputIntent(MENU_DECREASE, false) ==
+                  UnifiedInputIntent::Macro &&
+              unifiedInputIntent(MENU_INCREASE, false) ==
+                  UnifiedInputIntent::Motion,
+          "normal unified page no longer exposes macro/motion actions");
+  require(unifiedMacroGesture(KeyEvent::Down, false, false) ==
+                  UnifiedMacroGesture::ImmediateCapture &&
+              unifiedMacroGesture(KeyEvent::HoldRepeat, false, false) ==
+                  UnifiedMacroGesture::None &&
+              unifiedMacroGesture(KeyEvent::Down, true, false) ==
+                  UnifiedMacroGesture::None &&
+              unifiedMacroGesture(KeyEvent::Click, true, false) ==
+                  UnifiedMacroGesture::Replay &&
+              unifiedMacroGesture(KeyEvent::HoldStart, true, false) ==
+                  UnifiedMacroGesture::ReplaceCapture &&
+              unifiedMacroGesture(KeyEvent::Click, true, true) ==
+                  UnifiedMacroGesture::SuppressClassification,
+          "unified macro key lost one-shot replay/replace classification");
+
+  const MotionKeyBinding expectedMotion[] = {
+      {0, false}, {0, true}, {1, false}, {1, true}};
+  for (std::uint8_t action = MENU_PREVIOUS; action <= MENU_INCREASE;
+       ++action) {
+    const auto actual = motionKeyBinding(static_cast<MenuAction>(action));
+    require(actual.side == expectedMotion[action].side &&
+                actual.reverse == expectedMotion[action].reverse,
+            "four front keys no longer map to A/B up/down immediately");
+  }
+}
+
+void testPowerSignalFallbackPolicy() {
+  std::uint16_t value = 0;
+  const std::uint16_t first =
+      PowerSignalFallback::nextValue(value, true, false);
+  require(first == PowerSignalFallback::Step,
+          "offline power signal did not start with one bounded fade step");
+  value = first;
+  for (std::uint8_t turn = 0; turn < 20; ++turn) {
+    value = PowerSignalFallback::nextValue(value, true, false);
+  }
+  require(value == PowerSignalFallback::FullBrightness,
+          "offline power signal did not saturate at full brightness");
+  require(PowerSignalFallback::nextValue(731, false, false) == 731,
+          "reconnected host did not retain channel-12 ownership");
+  require(PowerSignalFallback::nextValue(0, true, true) == 0,
+          "Prog mode allowed the fallback to re-enable channel 12");
 }
 
 void testDallasAbsentPullupBound() {
@@ -487,6 +546,7 @@ void testBuzzerTimerAndQueue() {
 
 int main() {
   try {
+    testPowerSignalFallbackPolicy();
     testKeyGestures();
     testRelayInterlocks();
     testMotionDoorPolicyMatrixAndEntryPaths();
