@@ -26,6 +26,20 @@
 	  "font_size": 18
 	},
     "table_layout": "compact",
+    "peripheral_presentation": {
+      "relay.5": {
+        "name": "Workbench lamp",
+        "description": "Task lighting above the electronics bench"
+      },
+      "pwm.0": {
+        "name": "Cabinet fan",
+        "description": "Variable-speed cooling output"
+      },
+      "motion.a": {
+        "name": "Left actuator",
+        "description": "Interlocked motion control for the left actuator"
+      }
+    },
     "setup_complete": false,
     "welcome_melody": "notify",
     "status_interval_ms": 250,

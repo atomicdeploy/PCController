@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { browserControllerStateEvent, publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
+import { browserControllerStateEvent, normalizeBrowserBeep, publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
 
 describe('browser console controller', () => {
   beforeEach(() => {
@@ -17,12 +17,18 @@ describe('browser console controller', () => {
 
   it('publishes a frozen normalized controller and restores the previous value', () => {
     const previous = window.PCController
-    const controller = { api: 'PCController.browser/1' as const, inspect: () => ({ title: 'PCController', hostVersion: 'x', page: 'dashboard', connected: true, port: 'COM4', transport: 'open', eventCount: 0 }), command: vi.fn(), refresh: vi.fn(), navigate: vi.fn() }
+    const controller = { api: 'PCController.browser/1' as const, inspect: () => ({ title: 'PCController', hostVersion: 'x', page: 'dashboard', connected: true, port: 'COM4', transport: 'open', eventCount: 0 }), command: vi.fn(), beep: vi.fn(), refresh: vi.fn(), navigate: vi.fn() }
     const dispose = publishBrowserConsole(controller)
     expect(window.PCController).toBe(controller)
     expect(Object.isFrozen(window.PCController)).toBe(true)
     dispose()
     expect(window.PCController).toBe(previous)
+  })
+
+  it('normalizes safe browser-console beep arguments', () => {
+    expect(normalizeBrowserBeep()).toEqual({ frequencyHz: 2000, durationMS: 40, target: 'both' })
+    expect(normalizeBrowserBeep(440.4, 70.8, 'browser')).toEqual({ frequencyHz: 440, durationMS: 71, target: 'browser' })
+    expect(() => normalizeBrowserBeep(0)).toThrow(/frequencyHz/)
   })
 
   it('emits immutable browser state events', () => {

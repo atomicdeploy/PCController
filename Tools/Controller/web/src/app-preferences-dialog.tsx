@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Languages, PanelTop, Settings, Volume2, X } from 'lucide-react'
 import { Button, Segmented, Toggle } from './components'
 import type { Appearance, Locale } from './types'
@@ -24,19 +24,43 @@ export function AppPreferencesDialog({
   onClose: () => void
 }) {
   const [tab, setTab] = useState<PreferenceTab>('appearance')
+  const dialog = useRef<HTMLElement>(null)
+  const returnFocus = useRef<HTMLElement | null>(null)
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   useEffect(() => { if (open) setTab('appearance') }, [open])
   useEffect(() => {
     if (!open) return
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
+    returnFocus.current = document.activeElement as HTMLElement | null
+    return () => {
+      const target = returnFocus.current
+      returnFocus.current = null
+      window.requestAnimationFrame(() => target?.focus())
+    }
+  }, [open])
+  useEffect(() => {
+    if (!open) return
+    const frame = window.requestAnimationFrame(() => dialog.current?.querySelector<HTMLElement>('button, input, select, textarea, [tabindex]:not([tabindex="-1"])')?.focus())
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); onClose(); return }
+      if (event.key !== 'Tab' || !dialog.current) return
+      const focusable = [...dialog.current.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')]
+      if (!focusable.length) return
+      const first = focusable[0]
+      const last = focusable.at(-1)!
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', key, true)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      document.removeEventListener('keydown', key, true)
+    }
   }, [onClose, open])
   if (!open) return null
   const setHeaderControl = (id: QuickHeaderControlID, enabled: boolean) => onQuickHeader({ ...quickHeader, [id]: enabled })
   return <div className="app-preferences-layer" role="presentation">
-    <button className="app-preferences-backdrop" aria-label={copy('Close application preferences', 'بستن ترجیحات برنامه')} onClick={onClose} />
-    <section className="app-preferences-dialog" role="dialog" aria-modal="true" aria-label={copy('Application preferences', 'ترجیحات برنامه')}>
+    <button type="button" className="app-preferences-backdrop" aria-label={copy('Close application preferences', 'بستن ترجیحات برنامه')} onClick={onClose} />
+    <section ref={dialog} className="app-preferences-dialog" role="dialog" aria-modal="true" aria-label={copy('Application preferences', 'ترجیحات برنامه')}>
       <header>
         <span><Settings size={19} /><strong>{copy('Application preferences', 'ترجیحات برنامه')}</strong></span>
         <Button compact aria-label={copy('Close application preferences', 'بستن ترجیحات برنامه')} icon={X} onClick={onClose}>{copy('Close', 'بستن')}</Button>
@@ -59,7 +83,7 @@ export function AppPreferencesDialog({
         <Toggle checked={quickHeader.hotkeys} onChange={(value) => setHeaderControl('hotkeys', value)} label={copy('Keyboard guide', 'راهنمای صفحه‌کلید')} />
         <Toggle checked={quickHeader.notifications} onChange={(value) => setHeaderControl('notifications', value)} label={copy('Event notifications', 'اعلان رویدادها')} />
       </div>}
-      <footer>{copy('These are host application preferences. Board EEPROM settings stay on the Settings page and are never changed here.', 'این‌ها ترجیحات برنامهٔ میزبان هستند. تنظیمات EEPROM برد در صفحهٔ تنظیمات باقی می‌مانند و اینجا تغییر نمی‌کنند.')}</footer>
+      <footer>{copy('These are host application preferences. Board EEPROM settings stay in the Settings dialog and are never changed here.', 'این‌ها ترجیحات برنامهٔ میزبان هستند. تنظیمات EEPROM برد در گفت‌وگوی تنظیمات باقی می‌مانند و اینجا تغییر نمی‌کنند.')}</footer>
     </section>
   </div>
 }

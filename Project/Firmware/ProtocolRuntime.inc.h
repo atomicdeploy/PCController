@@ -241,9 +241,9 @@ void serviceSegmentPush() {
 // Mirrors the exact note/pause dequeued by Timer1 playback. This event never
 // drives local audio and therefore cannot add jitter to the hardware waveform.
 #if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
-void serviceBuzzerPush() {
+void serviceBuzzerPush(bool force = false) {
   const uint8_t revision = buzzer.revision();
-  if (revision == lastPushedBuzzerRevision) {
+  if (!force && revision == lastPushedBuzzerRevision) {
     return;
   }
   lastPushedBuzzerRevision = revision;
@@ -260,12 +260,12 @@ void serviceBuzzerPush() {
 // Mirrors the physical PWM RGB result after the board compositor has applied
 // local safety priority, cues, brightness, and a host-requested effect.
 #if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
-void serviceStatusLedPush() {
+void serviceStatusLedPush(bool force = false) {
   uint8_t payload[6] = {
       statusLeds.renderedRed(), statusLeds.renderedGreen(),
       statusLeds.renderedBlue(), statusLeds.brightness(),
       static_cast<uint8_t>(statusLeds.effect()), statusLeds.condition()};
-  if (memcmp(payload, lastPushedStatusLed, sizeof(payload)) == 0) {
+  if (!force && memcmp(payload, lastPushedStatusLed, sizeof(payload)) == 0) {
     return;
   }
   memcpy(lastPushedStatusLed, payload, sizeof(payload));
@@ -496,6 +496,21 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
   switch (frame.opcode) {
     case Hello:
       sendHello(frame.sequence);
+#if PCCONTROLLER_ENABLE_HELLO_OUTPUT_SYNC
+#if PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
+      // Revision values wrap, and the prior cached value can be arbitrarily
+      // old after a host reconnect. Make it exactly unequal to the current
+      // display revision instead of decrementing an unrelated cached value.
+      lastPushedSegmentRevision =
+          static_cast<uint8_t>(display.revision() - 1U);
+#endif
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
+      serviceBuzzerPush(true);
+#if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+      serviceStatusLedPush(true);
+#endif
+#endif
+#endif
       return;
 
     case GetStatus:

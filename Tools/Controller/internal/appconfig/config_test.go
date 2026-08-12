@@ -79,6 +79,9 @@ func TestPeripheralRegistryCoversEveryCoreRoleAndNamingCapacity(t *testing.T) {
 		if descriptor.Key == "" || descriptor.DefaultName == "" || descriptor.Control == "" {
 			t.Fatalf("incomplete descriptor: %+v", descriptor)
 		}
+		if descriptor.DefaultDescription != "" {
+			t.Fatalf("descriptor %q has a deployment-specific default description %q", descriptor.Key, descriptor.DefaultDescription)
+		}
 		if seen[descriptor.Key] {
 			t.Fatalf("duplicate peripheral key %q", descriptor.Key)
 		}
@@ -108,6 +111,13 @@ func TestPeripheralRegistryCoversEveryCoreRoleAndNamingCapacity(t *testing.T) {
 	copyOfCatalog[0].DefaultName = "mutated"
 	if name, _ := PeripheralDefaultName("relay.1"); name == "mutated" {
 		t.Fatal("callers can mutate the canonical peripheral registry")
+	}
+	for key, want := range map[string]string{
+		"relay.1": "Relay 1", "motion.a": "Motion A", "pwm.0": "PWM 0", "pwm.15": "PWM 15",
+	} {
+		if got, ok := PeripheralDefaultName(key); !ok || got != want {
+			t.Fatalf("generic default name for %s=%q found=%t, want %q", key, got, ok, want)
+		}
 	}
 }
 
@@ -159,6 +169,95 @@ func TestControlDescriptorsResolveOneOrderedCrossSurfaceContract(t *testing.T) {
 	if control, found := byKey["pwm.11"]; !found || control.Control != "role-specific" {
 		t.Fatalf("role-specific MOSFET/PWM descriptor is missing: %+v", control)
 	}
+}
+
+func TestLegacyCopiedPeripheralDefaultsAreRemovedOnLoadAndWrite(t *testing.T) {
+	order := 4
+	value := Defaults()
+	value.UI.PeripheralNames = map[string]string{
+		"relay.5":      "User Relay 5",
+		"relay.6":      "Relay 6",
+		"relay.7":      "Bench extraction",
+		"sensor.power": "Load power",
+	}
+	value.UI.PeripheralPresentation = map[string]PeripheralPresentation{
+		"relay.5": {
+			Name: "User Relay 5", Description: "Protected relay output R5 (user output)",
+		},
+		"relay.6": {Name: "Relay 6"},
+		"pwm.11": {
+			Name: "Enclosure light", Description: "12-bit PWM channel 11 (illumination)", Order: &order,
+		},
+		"pwm.0": {Name: "Cooling fan", Description: "Variable-speed cooling output"},
+	}
+	byKey := make(map[string]ControlDescriptor, MaxPresentedControls)
+	for _, control := range ControlDescriptors(value.UI) {
+		byKey[control.Key] = control
+	}
+	if relay := byKey["relay.5"]; relay.Name != "Relay 5" || relay.Description != "" {
+		t.Fatalf("resolved contract exposed a copied legacy default: %#v", relay)
+	}
+	if roleSpecific := byKey["pwm.11"]; roleSpecific.Name != "PWM 11" || roleSpecific.Description != "" {
+		t.Fatalf("resolved contract exposed a copied role-specific default: %#v", roleSpecific)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	if value.UI.PeripheralNames["relay.5"] != "User Relay 5" ||
+		value.UI.PeripheralPresentation["pwm.11"].Name != "Enclosure light" {
+		t.Fatal("Write mutated the caller's presentation maps")
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, copiedDefault := range []string{"User Relay 5", "Enclosure light", "Load power"} {
+		if strings.Contains(string(written), copiedDefault) {
+			t.Fatalf("copied registry default %q remained in persisted config:\n%s", copiedDefault, written)
+		}
+	}
+	assertMigrated := func(label string, loaded Config) {
+		t.Helper()
+		if len(loaded.UI.PeripheralNames) != 1 || loaded.UI.PeripheralNames["relay.7"] != "Bench extraction" {
+			t.Fatalf("%s names=%#v", label, loaded.UI.PeripheralNames)
+		}
+		if _, exists := loaded.UI.PeripheralPresentation["relay.5"]; exists {
+			t.Fatalf("%s retained legacy relay presentation: %#v", label, loaded.UI.PeripheralPresentation)
+		}
+		if _, exists := loaded.UI.PeripheralPresentation["relay.6"]; exists {
+			t.Fatalf("%s retained copied current default: %#v", label, loaded.UI.PeripheralPresentation)
+		}
+		roleSpecific, exists := loaded.UI.PeripheralPresentation["pwm.11"]
+		if !exists || roleSpecific.Name != "" || roleSpecific.Description != "" ||
+			roleSpecific.Order == nil || *roleSpecific.Order != order {
+			t.Fatalf("%s did not preserve the independent order override: %#v", label, roleSpecific)
+		}
+		custom := loaded.UI.PeripheralPresentation["pwm.0"]
+		if custom.Name != "Cooling fan" || custom.Description != "Variable-speed cooling output" {
+			t.Fatalf("%s lost custom presentation: %#v", label, custom)
+		}
+	}
+	loaded, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMigrated("write", loaded)
+
+	legacyPath := filepath.Join(t.TempDir(), "legacy.json")
+	legacyDocument, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyPath, legacyDocument, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, err = Load(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMigrated("load", loaded)
 }
 
 func TestInvalidReloadRetainsLastGoodValue(t *testing.T) {

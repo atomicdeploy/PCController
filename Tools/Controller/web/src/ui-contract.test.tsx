@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } from './components'
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
-import { artifactUpdateAvailable, updateStateIsFresh, updateStatusFromEvent, UpdatesView } from './updates-view'
+import { artifactUpdateAvailable, isActiveUpdateStatus, updateStateIsFresh, updateStatusFromEvent, UpdatesView } from './updates-view'
 import {
   ControlsView,
   DashboardView,
@@ -124,7 +124,7 @@ describe('offline and settings UI contracts', () => {
     expect(live.toLowerCase()).not.toMatch(/\breleased\b|\bconfirmed\b/)
     expect(live).toContain('All relay and motion outputs are off')
     expect(live).toContain('Live physical seven-segment display')
-    expect(live).toContain('aria-label="Controller page"')
+    expect(live).toContain('aria-label="Page"')
     expect(live).toContain('aria-label="LCD line 1"')
     expect(live).toContain('aria-label="LCD line 2"')
     expect(live).toContain('aria-label="Buzzer frequency Hz"')
@@ -158,6 +158,17 @@ describe('offline and settings UI contracts', () => {
     expect(updateStatusFromEvent(null, { ...event, kind: 'door' })).toBeNull()
   })
 
+  it('shows progress only while an update operation is actively running', () => {
+    const status = { id: 'op-9', kind: 'firmware' as const, progress_percent: 100 }
+    expect(isActiveUpdateStatus(null)).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'staged' })).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'downloaded' })).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'completed' })).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'failed' })).toBe(false)
+    expect(isActiveUpdateStatus({ ...status, state: 'queued', progress_percent: 0 })).toBe(true)
+    expect(isActiveUpdateStatus({ ...status, state: 'programming', progress_percent: 42 })).toBe(true)
+  })
+
   it('shows useful controller identity states instead of a placeholder', () => {
     expect(dashboardDeviceSummary(emptySnapshot, 'en')).toEqual({ device: 'Awaiting controller', firmware: 'No controller connected' })
     expect(dashboardDeviceSummary({
@@ -188,7 +199,8 @@ describe('offline and settings UI contracts', () => {
     expect(artifactUpdateAvailable(true, 'firmware')).toBe(true)
     const markup = renderToStaticMarkup(<UpdatesView {...shared()} />)
     expect(markup).toContain('Stage a local artifact')
-    expect(markup).toContain('LOADING')
+    expect(markup).toContain('CHECKING SERVICE')
+    expect(markup).not.toContain('0%')
     expect(markup).not.toContain('DISABLED')
     expect(markup).not.toContain('>Refresh<')
     expect(markup).not.toContain('Review firmware programming')

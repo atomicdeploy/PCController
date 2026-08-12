@@ -5,6 +5,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 // formatEngineering chooses a readable SI prefix without throwing away the
@@ -50,6 +52,11 @@ func formatPower(milliwatts int32, decimals int) string {
 }
 
 func formatTemperature(centiCelsius int16, decimals int) string {
+	if centiCelsius == native.InvalidTemperatureCentiC ||
+		centiCelsius < native.MinimumTemperatureCentiC ||
+		centiCelsius > native.MaximumTemperatureCentiC {
+		return "Unavailable"
+	}
 	if decimals < 0 {
 		decimals = 0
 	}
@@ -57,6 +64,13 @@ func formatTemperature(centiCelsius int16, decimals int) string {
 		decimals = 2
 	}
 	return fmt.Sprintf("%.*f °C", decimals, float64(centiCelsius)/100)
+}
+
+func formatStatusTemperature(centiCelsius int16, flags, availabilityFlag uint16, decimals int) string {
+	if !native.TemperatureAvailable(flags, centiCelsius, availabilityFlag) {
+		return "Unavailable"
+	}
+	return formatTemperature(centiCelsius, decimals)
 }
 
 func formatUptime(milliseconds uint32) string {

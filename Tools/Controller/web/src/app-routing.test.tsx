@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   canonicalPageHash,
+  canonicalLocationHash,
   canonicalPageURL,
   connectionTransitionCue,
   isCompletedHostUpdate,
@@ -11,21 +12,23 @@ import {
   shouldOpenSetup,
 	shouldNavigateToUpdates,
   snapshotAfterTransportLoss,
+  snapshotAfterStatusRecovery,
 } from './app'
 import { pageOrder } from './hotkeys'
 import { emptySnapshot } from './types'
 
 describe('web page routing', () => {
   it('maps every navigation ID to exactly one intended domain view', () => {
-    expect(navigation.map((item) => item.id)).toEqual([...pageOrder])
-    expect(new Set(navigation.map((item) => item.id)).size).toBe(pageOrder.length)
-    expect(new Set(navigation.map((item) => item.view)).size).toBe(pageOrder.length)
-    for (const page of pageOrder) {
+    const routedPages = pageOrder.filter((page) => page !== 'settings')
+    expect(navigation.map((item) => item.id)).toEqual(routedPages)
+    expect(new Set(navigation.map((item) => item.id)).size).toBe(routedPages.length)
+    expect(new Set(navigation.map((item) => item.view)).size).toBe(routedPages.length)
+    for (const page of routedPages) {
       expect(pageViewFor(page), page).toBe(navigation.find((item) => item.id === page)?.view)
     }
   })
 
-  it('normalizes initial hashes and produces stable history destinations', () => {
+  it('preserves settings hashes as modal destinations while rejecting unknown pages', () => {
     expect(pageFromHash('#/settings')).toBe('settings')
     expect(pageFromHash('#settings')).toBe('settings')
     expect(pageFromHash('#/settings/appearance')).toBe('settings')
@@ -33,6 +36,9 @@ describe('web page routing', () => {
     expect(pageFromHash('')).toBe('dashboard')
     expect(canonicalPageHash('events')).toBe('#/events')
     expect(canonicalPageURL('events', '/control', '?demo=1')).toBe('/control?demo=1#/events')
+    expect(canonicalLocationHash('#/workbench/sensors/temperature')).toBe('#/workbench/sensors/temperature')
+    expect(canonicalLocationHash('#workbench/interface/audio')).toBe('#/workbench/interface/audio')
+    expect(canonicalLocationHash('#/workbench/not-real')).toBe('#/workbench')
   })
 })
 
@@ -49,6 +55,17 @@ describe('transport truth', () => {
     expect(waiting.connection_state).toBe('disconnected')
     expect(waiting.connection_reason).toBe('retrying')
     expect(snapshotAfterTransportLoss(connected, 'connecting').connected).toBe(false)
+  })
+
+  it('restores coherent connection truth on the first valid status after an error', () => {
+    const lost = snapshotAfterTransportLoss({
+      ...emptySnapshot, connected: true, connection_state: 'connected', have_settings: true,
+    }, 'waiting', 'controller disconnected')
+    const recovered = snapshotAfterStatusRecovery(lost, { ...emptySnapshot.status, supply_mv: 12_000 }, '2026-08-12T12:00:00Z')
+    expect(recovered).toMatchObject({
+      connected: true, connection_state: 'connected', connection_reason: '', have_status: true,
+      status: { supply_mv: 12_000 },
+    })
   })
 
   it('refreshes embedded resources only after a completed host replacement', () => {

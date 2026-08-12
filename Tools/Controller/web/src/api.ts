@@ -177,6 +177,7 @@ export interface StreamHandlers {
   status: (value: StatusUpdate) => void
   event: (value: ControllerEvent) => void
   state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string) => void
+  error?: (detail: string, source?: string) => void
 }
 
 interface SessionTicket {
@@ -286,8 +287,8 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
 			handlers.event(value.params as ControllerEvent)
 		}
         if (value.method === 'controller.error') {
-          const detail = (value.params as { error?: string } | undefined)?.error
-          handlers.state('open', detail)
+          const problem = value.params as { error?: string; source?: string } | undefined
+          handlers.error?.(problem?.error || 'Controller status stream failed', problem?.source)
         }
       } catch {
         // The controller protocol is JSON-only; malformed frames are ignored and

@@ -5,11 +5,12 @@ const metricFields = ['supply', 'bus', 'current', 'power', 'ledTemp', 'btTemp'] 
 export type ChartDomain = readonly [number, number]
 
 function finiteSample(sample: MetricSample): boolean {
-  return Number.isFinite(sample.at) && metricFields.every((field) => Number.isFinite(sample[field]))
+  return Number.isFinite(sample.at) && metricFields.some((field) => Number.isFinite(sample[field]))
 }
 
 function median(values: readonly number[]): number {
-  const ordered = [...values].sort((left, right) => left - right)
+  const ordered = values.filter(Number.isFinite).sort((left, right) => left - right)
+  if (!ordered.length) return Number.NaN
   const middle = Math.floor(ordered.length / 2)
   return ordered.length % 2 === 1 ? ordered[middle] : (ordered[middle - 1] + ordered[middle]) / 2
 }
@@ -33,7 +34,11 @@ export function medianSmoothTelemetrySamples(samples: readonly MetricSample[]): 
     const end = Math.min(samples.length, index + 2)
     const window = samples.slice(start, end)
     const smoothed: MetricSample = { ...sample }
-    for (const field of metricFields) smoothed[field] = median(window.map((item) => item[field]))
+    for (const field of metricFields) {
+      // Missing measurements are semantic gaps, not spikes. Preserve the gap
+      // at its exact timestamp instead of inventing a value from neighbours.
+      smoothed[field] = Number.isFinite(sample[field]) ? median(window.map((item) => item[field])) : Number.NaN
+    }
     return smoothed
   })
 }
@@ -45,6 +50,7 @@ export function stabilizeCurrentSeries(samples: readonly MetricSample[], alpha =
   let previous: number | undefined
   return samples.map((sample) => {
     const raw = sample.current
+    if (!Number.isFinite(raw)) return sample
     const next = previous === undefined ? raw : previous + alpha * (raw - previous)
     const stable = previous !== undefined && Math.abs(next - previous) < deadband ? previous : next
     previous = stable

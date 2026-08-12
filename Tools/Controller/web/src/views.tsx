@@ -1,5 +1,6 @@
 import {
   type FormEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
   lazy,
   Suspense,
@@ -51,6 +52,7 @@ import {
   Network,
   PackageSearch,
   PanelTop,
+  Pencil,
   PlugZap,
   Power,
   Radio,
@@ -85,8 +87,8 @@ import {
   MetricCard,
   RangeField,
   SectionTitle,
+  SelectMenu,
   Segmented,
-  Sparkline,
   StatusBadge,
   TextField,
   Toggle,
@@ -97,6 +99,7 @@ import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
 import { movePeripheralControl, peripheralPresentationPayload } from './peripheral-presentation'
+import { pointerReorderTargetChanged } from './pointer-reorder'
 import { SevenSegmentPreview } from './seven-segment-preview'
 import {
   normalizePWMValues,
@@ -144,6 +147,7 @@ import type {
 } from './types'
 import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { type DashboardCardID, loadDashboardLayout, moveDashboardCard, saveDashboardLayout, toggleDashboardCard } from './dashboard-layout'
+import { audioTemperatureAvailableFlag, controllerTemperatureCelsius, lightingTemperatureAvailableFlag } from './temperature-status'
 
 export interface SharedViewProps {
   appTitle: string
@@ -153,7 +157,7 @@ export interface SharedViewProps {
   macroEvents: ControllerEvent[]
   locale: Locale
   t: (key: MessageKey) => string
-  command: (command: string, success?: string) => Promise<string>
+  command: (command: string, success?: string, options?: CommandOptions) => Promise<string>
   relayToggle: (relay: number, active: boolean) => Promise<void>
   relayPending: ReadonlySet<number>
   refresh: () => Promise<void>
@@ -167,6 +171,11 @@ export interface SharedViewProps {
   broadcastTerminal: (entry: TabTerminalEntry) => void
   boardSettingsReadState: BoardSettingsReadState
   openAppPreferences: () => void
+}
+
+export interface CommandOptions {
+  notifyOnSuccess?: boolean
+  refreshAfter?: boolean
 }
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
@@ -230,8 +239,11 @@ function DashboardCardFrame({
   hidden,
   onToggleCollapsed,
   onToggleHidden,
-  onDragStart,
-  onDrop,
+  dragging,
+  onReorderStart,
+  onReorderMove,
+  onReorderEnd,
+  onKeyboardReorder,
   children,
 }: {
   id: DashboardCardID
@@ -241,26 +253,52 @@ function DashboardCardFrame({
   hidden: boolean
   onToggleCollapsed: () => void
   onToggleHidden: () => void
-  onDragStart: (id: DashboardCardID) => void
-  onDrop: (id: DashboardCardID) => void
+  dragging: boolean
+  onReorderStart: (id: DashboardCardID, x: number, y: number) => void
+  onReorderMove: (id: DashboardCardID, x: number, y: number) => void
+  onReorderEnd: () => void
+  onKeyboardReorder: (id: DashboardCardID, offset: -1 | 1) => void
   children: ReactNode
 }) {
   if (hidden) return null
-  return <section
-    className={`dashboard-card-frame${collapsed ? ' is-collapsed' : ''}`}
+  const beginReorder = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0 || !event.isPrimary) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    onReorderStart(id, event.clientX, event.clientY)
+  }
+  return <motion.section
+    layout
+    data-dashboard-card-id={id}
+    className={`dashboard-card-frame${collapsed ? ' is-collapsed' : ''}${dragging ? ' is-dragging' : ''}`}
     style={{ order }}
-    draggable
-    onDragStart={() => onDragStart(id)}
-    onDragOver={(event) => event.preventDefault()}
-    onDrop={() => onDrop(id)}
   >
     <div className="dashboard-card-frame__actions">
-      <span title="Drag to reorder"><GripVertical size={15} /></span><strong>{title}</strong>
-      <button type="button" title={collapsed ? 'Expand card' : 'Collapse card'} aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`} onClick={onToggleCollapsed}><ChevronDown size={15} /></button>
+      <button
+        type="button"
+        className="dashboard-card-frame__reorder"
+        title="Reorder card"
+        aria-label={`Reorder ${title}`}
+        onPointerDown={beginReorder}
+        onPointerMove={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) onReorderMove(id, event.clientX, event.clientY)
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+          onReorderEnd()
+        }}
+        onPointerCancel={onReorderEnd}
+        onKeyDown={(event) => {
+          if (event.key !== 'ArrowUp' && event.key !== 'ArrowLeft' && event.key !== 'ArrowDown' && event.key !== 'ArrowRight') return
+          event.preventDefault()
+          onKeyboardReorder(id, event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 1)
+        }}
+      ><GripVertical size={15} /></button><strong>{title}</strong>
+      <button type="button" className="dashboard-card-frame__collapse" title={collapsed ? 'Expand card' : 'Collapse card'} aria-label={collapsed ? `Expand ${title}` : `Collapse ${title}`} onClick={onToggleCollapsed}><ChevronDown size={15} /></button>
       <button type="button" title="Hide card" aria-label={`Hide ${title}`} onClick={onToggleHidden}><EyeOff size={15} /></button>
     </div>
     {!collapsed && children}
-  </section>
+  </motion.section>
 }
 
 // A real popover rather than <details>: native disclosure controls inherit
@@ -317,7 +355,8 @@ export function DashboardView(props: SharedViewProps) {
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
   const [layout, setLayout] = useState(loadDashboardLayout)
   const [draggedCard, setDraggedCard] = useState<DashboardCardID | null>(null)
-  const [temperatureTab, setTemperatureTab] = useState<'led' | 'audio'>('led')
+  const [cardDragPosition, setCardDragPosition] = useState<{ x: number; y: number } | null>(null)
+  const dashboardDragTargetRef = useRef<DashboardCardID | null>(null)
   const [telemetryMode, setTelemetryMode] = useState<'electrical' | 'power' | 'thermal'>('electrical')
   const [menuCatalog, setMenuCatalog] = useState<MenuCatalog | null>(null)
   const [menuPage, setMenuPage] = useState('')
@@ -361,14 +400,14 @@ export function DashboardView(props: SharedViewProps) {
     if (menuCatalog?.pages.some((candidate) => candidate.id === current)) setMenuPage(String(current))
   }, [menuCatalog, snapshot.front_panel?.menu_page, snapshot.have_front_panel, snapshot.status.menu_page])
   const peripheralName = (key: string, fallback: string) => hostUI?.peripheral_names?.[key]?.trim() || fallback
-  const relayDefaults = [
-    copy('Side A direction', 'جهت سمت A'), copy('Side A output', 'خروجی سمت A'),
-    copy('Side B direction', 'جهت سمت B'), copy('Side B output', 'خروجی سمت B'),
-    copy('User relay 5', 'رلهٔ کاربر ۵'), copy('User relay 6', 'رلهٔ کاربر ۶'),
-    copy('User relay 7', 'رلهٔ کاربر ۷'), copy('User relay 8', 'رلهٔ کاربر ۸'),
-  ]
   const socketFresh = dashboardSocketIsFresh(snapshot, transport.streamState, clock)
   const deviceSummary = dashboardDeviceSummary(snapshot, locale)
+  const lightingTemperature = controllerTemperatureCelsius(status.temperature_led_centi_c, status.flags, lightingTemperatureAvailableFlag)
+  const audioTemperature = controllerTemperatureCelsius(status.temperature_bt_audio_centi_c, status.flags, audioTemperatureAvailableFlag)
+  const liveLED = snapshot.have_status_led ? snapshot.status_led : undefined
+  const liveLEDHex = liveLED
+    ? `#${[liveLED.red, liveLED.green, liveLED.blue].map((value) => value.toString(16).padStart(2, '0')).join('')}`.toUpperCase()
+    : '#000000'
   const performPeripheral = async (name: string, task: () => Promise<unknown>, success: string) => {
     if (peripheralBusy) return
     setPeripheralBusy(name)
@@ -382,11 +421,12 @@ export function DashboardView(props: SharedViewProps) {
       setPeripheralBusy('')
     }
   }
-  const selectMenuPage = () => {
-    if (!menuCatalog?.pages.some((candidate) => String(candidate.id) === menuPage)) return
+  const selectMenuPage = (page = menuPage) => {
+    if (!menuCatalog?.pages.some((candidate) => String(candidate.id) === page)) return
+    setMenuPage(page)
     void performPeripheral(
       'menu-page',
-      () => rpc('controller.menu.jump', { page: menuPage }),
+      () => rpc('controller.menu.jump', { page }),
       copy('Front-panel page selected.', 'صفحهٔ پنل انتخاب شد.'),
     )
   }
@@ -420,6 +460,18 @@ export function DashboardView(props: SharedViewProps) {
       return next
     })
   }
+  const moveCardAtPoint = (source: DashboardCardID, x: number, y: number) => {
+    setCardDragPosition({ x, y })
+    const target = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-dashboard-card-id]')?.dataset.dashboardCardId as DashboardCardID | undefined
+    if (!pointerReorderTargetChanged(dashboardDragTargetRef.current, source, target)) return
+    dashboardDragTargetRef.current = target
+    updateLayout((current) => moveDashboardCard(current, source, target))
+  }
+  const moveCardByKeyboard = (source: DashboardCardID, offset: -1 | 1) => updateLayout((current) => {
+    const index = current.order.indexOf(source)
+    const target = current.order[index + offset]
+    return target ? moveDashboardCard(current, source, target) : current
+  })
   const frame = (id: DashboardCardID, title: string, child: ReactNode) => <DashboardCardFrame
     id={id}
     title={title}
@@ -428,11 +480,22 @@ export function DashboardView(props: SharedViewProps) {
     hidden={layout.hidden.includes(id)}
     onToggleCollapsed={() => updateLayout((current) => ({ ...current, collapsed: toggleDashboardCard(current.collapsed, id) }))}
     onToggleHidden={() => updateLayout((current) => ({ ...current, hidden: toggleDashboardCard(current.hidden, id) }))}
-    onDragStart={setDraggedCard}
-    onDrop={(target) => { if (draggedCard) updateLayout((current) => moveDashboardCard(current, draggedCard, target)); setDraggedCard(null) }}
+    dragging={draggedCard === id}
+    onReorderStart={(source, x, y) => { dashboardDragTargetRef.current = null; setDraggedCard(source); setCardDragPosition({ x, y }) }}
+    onReorderMove={moveCardAtPoint}
+    onReorderEnd={() => { dashboardDragTargetRef.current = null; setDraggedCard(null); setCardDragPosition(null) }}
+    onKeyboardReorder={moveCardByKeyboard}
   >{child}</DashboardCardFrame>
   return (
     <>
+      <AnimatePresence>{draggedCard && cardDragPosition && <motion.div
+        className="dashboard-card-drag-overlay"
+        aria-hidden="true"
+        initial={{ opacity: 0, scale: .96 }}
+        animate={{ opacity: 1, scale: 1, x: cardDragPosition.x + 14, y: cardDragPosition.y - 18 }}
+        exit={{ opacity: 0, scale: .96 }}
+        transition={{ duration: .16, ease: [0.22, 1, 0.36, 1] }}
+      >{draggedCard}</motion.div>}</AnimatePresence>
       <SectionTitle
         eyebrow={snapshot.connected ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
         title={t('dashboard')}
@@ -469,13 +532,8 @@ export function DashboardView(props: SharedViewProps) {
       {snapshot.connected && snapshot.have_status && <section className="metric-grid">
         <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" scale="supply" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />
         <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" scale="current" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />
-        <Card icon={Thermometer} iconTone="amber" title={copy('Temperature', 'دما')} eyebrow={temperatureTab === 'led' ? peripheralName('sensor.temperature-led', 'LED') : peripheralName('sensor.temperature-audio', copy('Audio', 'صوت'))} className="temperature-card">
-          <Segmented value={temperatureTab} label={copy('Temperature sensor', 'حسگر دما')} options={[{ value: 'led', label: 'LED' }, { value: 'audio', label: copy('Audio', 'صوت') }]} onChange={(value) => { setTemperatureTab(value as 'led' | 'audio'); setTelemetryMode('thermal') }} />
-          <strong className="temperature-card__value">{formatNumber(locale, (temperatureTab === 'led' ? status.temperature_led_centi_c : status.temperature_bt_audio_centi_c) / 100, 1)}<small>°C</small></strong>
-          <span>{temperatureTab === 'led' ? copy('Lighting thermal sensor', 'حسگر حرارتی نور') : copy('Bluetooth audio thermal sensor', 'حسگر حرارتی صوت بلوتوث')}</span>
-          <Sparkline values={values(samples, temperatureTab === 'led' ? 'ledTemp' : 'btTemp')} tone="amber" scale="temperature" label={temperatureTab === 'led' ? copy('LED temperature trend', 'روند دمای LED') : copy('Audio temperature trend', 'روند دمای صوت')} />
-        </Card>
-        <MetricCard icon={PlugZap} label="PWM" value={status.pwm_available ? formatNumber(locale, status.pwm_value * 100 / 4095, 1) : '—'} unit={status.pwm_available ? '%' : ''} values={values(samples, 'power')} tone="violet" detail={status.pwm_available ? `${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}` : copy('Unavailable on this controller', 'در این کنترلر در دسترس نیست')} />
+        <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', copy('Lighting temperature', 'دمای نور'))} value={lightingTemperature === null ? '---' : formatNumber(locale, lightingTemperature, 1)} unit={lightingTemperature === null ? undefined : '°C'} values={values(samples, 'ledTemp')} tone="amber" scale="temperature" detail={lightingTemperature === null ? copy('Sensor unavailable', 'حسگر در دسترس نیست') : copy('Lighting thermal sensor', 'حسگر حرارتی نور')} />
+        <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('Audio temperature', 'دمای صوت'))} value={audioTemperature === null ? '---' : formatNumber(locale, audioTemperature, 1)} unit={audioTemperature === null ? undefined : '°C'} values={values(samples, 'btTemp')} tone="violet" scale="temperature" detail={audioTemperature === null ? copy('Sensor unavailable', 'حسگر در دسترس نیست') : copy('Bluetooth audio thermal sensor', 'حسگر حرارتی صوت بلوتوث')} />
       </section>}
 
       {snapshot.connected && frame('telemetry', copy('Telemetry', 'تله‌متری'), <Card
@@ -491,12 +549,12 @@ export function DashboardView(props: SharedViewProps) {
         ]}
       >
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
-          <TelemetryChart connected={snapshot.connected} locale={locale} samples={samples} mode={telemetryMode} onModeChange={setTelemetryMode} thermalSeries={telemetryMode === 'thermal' ? temperatureTab : undefined} />
+          <TelemetryChart connected={snapshot.connected} locale={locale} samples={samples} mode={telemetryMode} onModeChange={setTelemetryMode} />
         </Suspense>
       </Card>)}
 
       <section className="dashboard-grid">
-        {snapshot.connected && frame('outputs', copy('Outputs', 'خروجی‌ها'), <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
+        {snapshot.connected && frame('outputs', copy('Outputs', 'خروجی‌ها'), <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('ALL OFF', 'همه خاموش')}</StatusBadge>} menu={[
           { label: copy('Read controller status', 'خواندن وضعیت کنترلر'), icon: Gauge, onSelect: () => { void command('status') } },
           { label: copy('Edit relay, MOSFET, and side labels', 'ویرایش برچسب رله، ماسفت و سمت‌ها'), icon: PanelTop, onSelect: () => { window.location.hash = '#/settings' } },
           { label: copy('Turn every output off', 'خاموش‌کردن همهٔ خروجی‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off'); await command('pwm off') } }) },
@@ -509,18 +567,23 @@ export function DashboardView(props: SharedViewProps) {
                   key={index}
                   type="button"
                   className={`output-cell${active ? ' is-active' : ''}${relayPending.has(index + 1) ? ' is-pending' : ''}`}
-                  onClick={() => void relayToggle(index + 1, active)}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return
+                    event.preventDefault()
+                    void relayToggle(index + 1, active)
+                  }}
+                  onClick={(event) => { if (event.detail === 0) void relayToggle(index + 1, active) }}
                   disabled={relayPending.has(index + 1)}
                   aria-pressed={active}
                   aria-label={copy(`Turn relay ${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} را ${active ? 'خاموش' : 'روشن'} کن`)}
                   title={copy(`Turn relay ${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} را ${active ? 'خاموش' : 'روشن'} کن`)}
                 >
-                  <span>R{index + 1} · {peripheralName(`relay.${index + 1}`, relayDefaults[index])}</span><strong>{active ? t('on') : t('off')}</strong><i aria-hidden="true" />
+                  <span>R{index + 1} · {peripheralName(`relay.${index + 1}`, `Relay ${index + 1}`)}</span><strong>{active ? t('on') : t('off')}</strong><i aria-hidden="true" />
                 </button>
               )
             })}
           </div>
-          <div className="safety-strip"><ShieldCheck size={17} /><span>{activeRelayCount ? copy(`${activeRelayCount} outputs active · approval required before turning all off`, `${activeRelayCount} خروجی فعال است · خاموش‌کردن همه نیازمند اجازه است`) : copy('All relay and motion outputs are off', 'همهٔ خروجی‌های رله و حرکت خاموش‌اند')}</span></div>
+          <div className="output-summary"><CirclePower size={17} /><span>{activeRelayCount ? copy(`${activeRelayCount} outputs active · confirm before turning all off`, `${activeRelayCount} خروجی فعال است · خاموش‌کردن همه نیازمند تأیید است`) : copy('All relay and motion outputs are off', 'همهٔ خروجی‌های رله و حرکت خاموش‌اند')}</span></div>
         </Card>)}
 
         {snapshot.connected && frame('overview', copy('Controller overview', 'نمای کلی کنترلر'), <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
@@ -544,42 +607,50 @@ export function DashboardView(props: SharedViewProps) {
             <DataRow label={copy('UART CRC / framing', 'CRC / قاب‌بندی UART')} value={`${status.crc_errors} / ${status.framing_errors}`} mono tone={status.crc_errors || status.framing_errors ? 'warn' : 'good'} />
             <DataRow label={copy('Reset count', 'تعداد بازنشانی')} value={status.reset_count} mono />
           </div>
-          <div className="overview-peripherals">
-            <section className="overview-peripheral overview-peripheral--segment" aria-label={copy('Seven-segment controls', 'کنترل‌های نمایشگر هفت‌بخشی')}>
-              <header><Binary size={16} /><strong>{copy('Seven-segment', 'هفت‌بخشی')}</strong><StatusBadge tone={snapshot.have_front_panel ? 'good' : 'warn'}>{snapshot.have_front_panel ? copy('LIVE', 'زنده') : copy('WAITING', 'در انتظار')}</StatusBadge></header>
-              <SevenSegmentPreview panel={snapshot.have_front_panel ? snapshot.front_panel : undefined} label={copy('Live physical seven-segment display', 'نمایش زندهٔ نمایشگر فیزیکی هفت‌بخشی')} />
-              <div className="overview-segment-navigation">
-                <Button compact icon={ChevronLeft} aria-label={copy('Previous front-panel page', 'صفحهٔ قبلی پنل')} busy={peripheralBusy === 'menu-prev'} onClick={() => navigateMenu('prev')} />
-                <label>
-                  <span>{copy('Controller page', 'صفحهٔ کنترلر')}</span>
-                  <select aria-label={copy('Controller page', 'صفحهٔ کنترلر')} value={menuPage} disabled={!menuCatalog?.pages.length || Boolean(peripheralBusy)} onChange={(event) => setMenuPage(event.target.value)}>
-                    {!menuCatalog?.pages.length && <option value="">{copy('Loading verified catalog…', 'در حال دریافت کاتالوگ معتبر…')}</option>}
-                    {menuCatalog?.pages.map((candidate) => <option key={candidate.id} value={String(candidate.id)}>{candidate.label} · {candidate.name}</option>)}
-                  </select>
-                </label>
-                <Button compact tone="primary" disabled={!menuCatalog?.pages.some((candidate) => String(candidate.id) === menuPage)} busy={peripheralBusy === 'menu-page'} onClick={selectMenuPage}>{copy('Go', 'برو')}</Button>
-                <Button compact icon={ChevronRight} aria-label={copy('Next front-panel page', 'صفحهٔ بعدی پنل')} busy={peripheralBusy === 'menu-next'} onClick={() => navigateMenu('next')} />
-              </div>
-            </section>
-            <section className="overview-peripheral" aria-label={copy('LCD message', 'پیام LCD')}>
-              <header><MessageSquareText size={16} /><strong>LCD</strong><StatusBadge tone={status.lcd_address ? 'good' : 'warn'}>{status.lcd_address ? `0x${status.lcd_address.toString(16).toUpperCase()}` : copy('NOT DETECTED', 'شناسایی نشده')}</StatusBadge></header>
-              <div className="overview-lcd-lines">
-                <input aria-label={copy('LCD line 1', 'خط اول LCD')} value={lcdLine1} maxLength={16} placeholder={copy('Line 1', 'خط ۱')} onChange={(event) => setLCDLine1(event.target.value.replace(/[^\x20-\x7e]/g, '').slice(0, 16))} />
-                <input aria-label={copy('LCD line 2', 'خط دوم LCD')} value={lcdLine2} maxLength={16} placeholder={copy('Line 2', 'خط ۲')} onChange={(event) => setLCDLine2(event.target.value.replace(/[^\x20-\x7e]/g, '').slice(0, 16))} />
-                <Button compact icon={Send} disabled={!status.lcd_address || (!lcdLine1 && !lcdLine2)} busy={peripheralBusy === 'lcd'} onClick={writeLCD}>{copy('Write LCD', 'نوشتن LCD')}</Button>
-              </div>
-            </section>
-            <section className="overview-peripheral" aria-label={copy('Buzzer test', 'آزمون بیزر')}>
-              <header><Volume2 size={16} /><strong>{copy('Buzzer test', 'آزمون بیزر')}</strong><StatusBadge tone={(snapshot.settings.flags & 0x01) !== 0 ? 'warn' : 'good'}>{(snapshot.settings.flags & 0x01) !== 0 ? copy('SILENT', 'بی‌صدا') : copy('READY', 'آماده')}</StatusBadge></header>
-              <div className="overview-buzzer-fields">
-                <label><span>{copy('Frequency', 'فرکانس')}</span><input aria-label={copy('Buzzer frequency Hz', 'فرکانس بیزر به هرتز')} type="number" min={20} max={20000} value={buzzerFrequency} onChange={(event) => setBuzzerFrequency(Math.min(20000, Math.max(20, Number.parseInt(event.target.value, 10) || 20)))} /><small>Hz</small></label>
-                <label><span>{copy('Duration', 'مدت')}</span><input aria-label={copy('Buzzer duration ms', 'مدت بیزر به میلی‌ثانیه')} type="number" min={1} max={65535} value={buzzerDuration} onChange={(event) => setBuzzerDuration(Math.min(65535, Math.max(1, Number.parseInt(event.target.value, 10) || 1)))} /><small>ms</small></label>
-                <Button compact icon={Volume2} busy={peripheralBusy === 'buzzer'} onClick={testBuzzer}>{copy('Test beep', 'بوق آزمایشی')}</Button>
-              </div>
-            </section>
-          </div>
-          {peripheralNotice && <p className="overview-peripheral__notice" role="status">{peripheralNotice}</p>}
         </Card>)}
+
+        {snapshot.connected && <Card icon={Binary} iconTone="violet" title={copy('Seven-segment', 'هفت‌بخشی')} eyebrow={snapshot.have_front_panel ? copy('Live board mirror', 'بازتاب زندهٔ برد') : copy('No sample yet', 'هنوز نمونه‌ای نیست')} className="overview-peripheral-card overview-peripheral-card--segment">
+          <SevenSegmentPreview panel={snapshot.have_front_panel ? snapshot.front_panel : undefined} label={copy('Live physical seven-segment display', 'نمایش زندهٔ نمایشگر فیزیکی هفت‌بخشی')} />
+          <div className="overview-segment-navigation">
+            <Button compact icon={ChevronLeft} aria-label={copy('Previous front-panel page', 'صفحهٔ قبلی پنل')} busy={peripheralBusy === 'menu-prev'} onClick={() => navigateMenu('prev')} />
+            <SelectMenu
+              label={copy('Page', 'صفحه')}
+              value={menuPage}
+              disabled={!menuCatalog?.pages.length || Boolean(peripheralBusy)}
+              placeholder={copy('Reading page catalog…', 'در حال دریافت فهرست صفحه‌ها…')}
+              options={(menuCatalog?.pages ?? []).map((candidate) => ({ value: String(candidate.id), label: candidate.label, detail: candidate.name }))}
+              onChange={selectMenuPage}
+            />
+            <Button compact icon={ChevronRight} aria-label={copy('Next front-panel page', 'صفحهٔ بعدی پنل')} busy={peripheralBusy === 'menu-next'} onClick={() => navigateMenu('next')} />
+          </div>
+        </Card>}
+
+        {snapshot.connected && <Card icon={MessageSquareText} iconTone="accent" title="LCD" eyebrow={status.lcd_address ? `0x${status.lcd_address.toString(16).toUpperCase()}` : copy('Not detected', 'شناسایی نشده')} className="overview-peripheral-card">
+          <div className="overview-lcd-lines">
+            <input aria-label={copy('LCD line 1', 'خط اول LCD')} value={lcdLine1} maxLength={16} placeholder={copy('Line 1', 'خط ۱')} onChange={(event) => setLCDLine1(event.target.value.replace(/[^\x20-\x7e]/g, '').slice(0, 16))} />
+            <input aria-label={copy('LCD line 2', 'خط دوم LCD')} value={lcdLine2} maxLength={16} placeholder={copy('Line 2', 'خط ۲')} onChange={(event) => setLCDLine2(event.target.value.replace(/[^\x20-\x7e]/g, '').slice(0, 16))} />
+            <Button compact icon={Send} disabled={!status.lcd_address || (!lcdLine1 && !lcdLine2)} busy={peripheralBusy === 'lcd'} onClick={writeLCD}>{copy('Write LCD', 'نوشتن LCD')}</Button>
+          </div>
+        </Card>}
+
+        {snapshot.connected && <Card icon={Volume2} iconTone="green" title={copy('Buzzer test', 'آزمون بیزر')} eyebrow={(snapshot.settings.flags & 0x01) !== 0 ? copy('Muted on board', 'روی برد بی‌صدا') : copy('Board audio', 'صدای برد')} className="overview-peripheral-card">
+          <div className="overview-buzzer-fields">
+            <label><span>{copy('Frequency', 'فرکانس')}</span><input aria-label={copy('Buzzer frequency Hz', 'فرکانس بیزر به هرتز')} type="number" min={20} max={20000} value={buzzerFrequency} onChange={(event) => setBuzzerFrequency(Math.min(20000, Math.max(20, Number.parseInt(event.target.value, 10) || 20)))} /><small>Hz</small></label>
+            <label><span>{copy('Duration', 'مدت')}</span><input aria-label={copy('Buzzer duration ms', 'مدت بیزر به میلی‌ثانیه')} type="number" min={1} max={65535} value={buzzerDuration} onChange={(event) => setBuzzerDuration(Math.min(65535, Math.max(1, Number.parseInt(event.target.value, 10) || 1)))} /><small>ms</small></label>
+            <Button compact icon={Volume2} busy={peripheralBusy === 'buzzer'} onClick={testBuzzer}>{copy('Test beep', 'بوق آزمایشی')}</Button>
+          </div>
+        </Card>}
+
+        {snapshot.connected && <Card icon={Lightbulb} iconTone="amber" title={copy('Physical status LED', 'LED وضعیت فیزیکی')} eyebrow={liveLED ? copy('Pushed board state', 'وضعیت ارسالی برد') : copy('No live LED sample yet', 'هنوز نمونهٔ زنده‌ای نیست')} className="overview-peripheral-card">
+          <div className="status-led-live status-led-live--dashboard" style={{ '--preview': liveLEDHex } as React.CSSProperties}>
+            <i aria-hidden="true" />
+            <div><strong>{liveLED ? liveLEDHex : '---'}</strong><small dir="ltr">{liveLED ? `effect ${liveLED.effect} · condition ${liveLED.condition}` : copy('The next board LED event will appear here.', 'رویداد بعدی LED برد اینجا نمایش داده می‌شود.')}</small></div>
+          </div>
+        </Card>}
+
+        <AnimatePresence initial={false}>
+          {peripheralNotice && <motion.p key={peripheralNotice} className="overview-peripheral__notice" role="status" initial={{ opacity: 0, height: 0, y: -6 }} animate={{ opacity: 1, height: 'auto', y: 0 }} exit={{ opacity: 0, height: 0, y: -4 }} transition={{ duration: .24, ease: [0.22, 1, 0.36, 1] }}>{peripheralNotice}</motion.p>}
+        </AnimatePresence>
 
         {snapshot.connected && frame('actions', copy('Quick actions', 'عملیات سریع'), <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
           <div className="action-grid">
@@ -616,7 +687,12 @@ export function ControlsView(props: SharedViewProps) {
   const [pwmAllBusy, setPWMAllBusy] = useState(false)
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
   const [presentationBusy, setPresentationBusy] = useState('')
+  const [presentationEditor, setPresentationEditor] = useState('')
   const [draggedPeripheral, setDraggedPeripheral] = useState('')
+  const [presentationDragDraft, setPresentationDragDraft] = useState<PeripheralControlDescriptor[] | null>(null)
+  const [presentationDragPosition, setPresentationDragPosition] = useState<{ x: number; y: number } | null>(null)
+  const presentationDragDraftRef = useRef<PeripheralControlDescriptor[] | null>(null)
+  const presentationDragTargetRef = useRef<string | null>(null)
   const [red, setRed] = useState(25)
   const [green, setGreen] = useState(130)
   const [blue, setBlue] = useState(220)
@@ -633,10 +709,6 @@ export function ControlsView(props: SharedViewProps) {
   const pwmOperationsRef = useRef<PWMOperationQueue | null>(null)
   const pwmSchedulerRef = useRef<PWMMutationScheduler | null>(null)
 	const chosenHex = `#${[red, green, blue].map((value) => value.toString(16).padStart(2, '0')).join('')}`.toUpperCase()
-	const liveLED = snapshot.have_status_led ? snapshot.status_led : undefined
-	const liveHex = liveLED
-		? `#${[liveLED.red, liveLED.green, liveLED.blue].map((value) => value.toString(16).padStart(2, '0')).join('')}`.toUpperCase()
-		: '#000000'
 	const effectOptions = `${statusEffect === 'color' ? '' : ` --period ${statusPeriod} --minimum ${statusMinimum} --repeat ${statusRepeat}`}${statusEffect === 'flash' || statusEffect === 'cycle' || statusEffect === 'transition' ? ` --to "${alternateColor}"` : ''}`
 	const statusCommand = statusEffect === 'color'
 		? `rgb color "${chosenHex}" ${statusBrightness}`
@@ -715,22 +787,10 @@ export function ControlsView(props: SharedViewProps) {
     }
   }, [snapshot.have_status, snapshot.status.pwm_channel, snapshot.status.pwm_value])
 
-  const pwmDefaults = [
-    'MOSFET 1', 'MOSFET 2', 'MOSFET 3', 'MOSFET 4',
-    'MOSFET 5', 'MOSFET 6', 'MOSFET 7', 'MOSFET 8',
-    copy('User PWM 9', 'PWM کاربر ۹'), copy('User PWM 10', 'PWM کاربر ۱۰'), copy('User PWM 11', 'PWM کاربر ۱۱'), copy('Enclosure light', 'نور محفظه'),
-    copy('Power indicator', 'نشانگر توان'), copy('Status red', 'وضعیت قرمز'), copy('Status green', 'وضعیت سبز'), copy('Status blue', 'وضعیت آبی'),
-  ]
-  const relayDefaults = [
-    copy('Side A direction', 'جهت سمت A'), copy('Side A output', 'خروجی سمت A'),
-    copy('Side B direction', 'جهت سمت B'), copy('Side B output', 'خروجی سمت B'),
-    copy('User relay 5', 'رلهٔ کاربر ۵'), copy('User relay 6', 'رلهٔ کاربر ۶'),
-    copy('User relay 7', 'رلهٔ کاربر ۷'), copy('User relay 8', 'رلهٔ کاربر ۸'),
-  ]
-  const presentationControls = hostUI?.controls ?? []
+  const presentationControls = presentationDragDraft ?? hostUI?.controls ?? []
   const controlByKey = new Map(presentationControls.map((control) => [control.key, control]))
   const peripheralName = (key: string, fallback: string) => controlByKey.get(key)?.name?.trim() || hostUI?.peripheral_names?.[key]?.trim() || fallback
-  const pwmName = (channel: number) => peripheralName(`pwm.${channel}`, pwmDefaults[channel])
+  const pwmName = (channel: number) => peripheralName(`pwm.${channel}`, `PWM ${channel}`)
   const commitPresentation = async (controls: PeripheralControlDescriptor[], busyKey: string) => {
     if (!controls.length || presentationBusy) return
     setPresentationBusy(busyKey)
@@ -763,22 +823,66 @@ export function ControlsView(props: SharedViewProps) {
       [field]: value || (field === 'name' ? control.default_name : control.default_description),
     } : control), key)
   }
-  const reorderPresentation = (targetKey: string) => {
-    const source = presentationControls.find((control) => control.key === draggedPeripheral)
-    const reordered = movePeripheralControl(presentationControls, draggedPeripheral, targetKey)
-    setDraggedPeripheral('')
-    if (!source || reordered.every((control, index) => control.key === presentationControls[index]?.key)) return
-    void commitPresentation(reordered, source.key)
+  const previewPresentationReorder = (sourceKey: string, x: number, y: number) => {
+    setPresentationDragPosition({ x, y })
+    const targetKey = document.elementFromPoint(x, y)?.closest<HTMLElement>('[data-peripheral-control-key]')?.dataset.peripheralControlKey
+    if (!pointerReorderTargetChanged(presentationDragTargetRef.current, sourceKey, targetKey)) return
+    presentationDragTargetRef.current = targetKey
+    const next = movePeripheralControl(presentationDragDraftRef.current ?? hostUI?.controls ?? [], sourceKey, targetKey)
+    presentationDragDraftRef.current = next
+    setPresentationDragDraft(next)
   }
-  const editor = (control: PeripheralControlDescriptor | undefined) => control ? <div
+  const finishPresentationReorder = (sourceKey = draggedPeripheral) => {
+    const draft = presentationDragDraftRef.current
+    setDraggedPeripheral('')
+    setPresentationDragDraft(null)
+    presentationDragDraftRef.current = null
+    presentationDragTargetRef.current = null
+    setPresentationDragPosition(null)
+    if (!sourceKey || !draft || draft.every((control, index) => control.key === hostUI?.controls[index]?.key)) return
+    void commitPresentation(draft, sourceKey)
+  }
+  const editor = (control: PeripheralControlDescriptor | undefined) => control ? <div className="peripheral-customize" data-peripheral-control-key={control.key}>
+    <Button
+      compact
+      icon={Pencil}
+      aria-expanded={presentationEditor === control.key}
+      onClick={() => setPresentationEditor((current) => current === control.key ? '' : control.key)}
+    >{copy('Customize', 'شخصی‌سازی')}</Button>
+    <AnimatePresence initial={false}>
+    {presentationEditor === control.key && <motion.div
+      initial={{ height: 0, opacity: 0, clipPath: 'inset(0 0 100% 0)' }}
+      animate={{ height: 'auto', opacity: 1, clipPath: 'inset(0 0 0 0)' }}
+      exit={{ height: 0, opacity: 0, clipPath: 'inset(0 0 100% 0)' }}
+      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+      className="peripheral-customize__reveal"
+    ><div
     className={`peripheral-inline-editor${presentationBusy === control.key ? ' is-busy' : ''}`}
-    draggable={!presentationBusy}
-    onDragStart={() => setDraggedPeripheral(control.key)}
-    onDragEnd={() => setDraggedPeripheral('')}
-    onDragOver={(event) => event.preventDefault()}
-    onDrop={() => reorderPresentation(control.key)}
   >
-    <GripVertical aria-hidden="true" size={15} />
+    <button
+      type="button"
+      className="peripheral-inline-editor__reorder"
+      aria-label={copy(`Reorder ${control.key}`, `جابجایی ${control.key}`)}
+      disabled={Boolean(presentationBusy)}
+      onPointerDown={(event) => {
+        if (event.button !== 0 || !event.isPrimary) return
+        event.preventDefault()
+        event.currentTarget.setPointerCapture(event.pointerId)
+        setDraggedPeripheral(control.key)
+        presentationDragTargetRef.current = null
+        presentationDragDraftRef.current = hostUI?.controls ?? []
+        setPresentationDragDraft(presentationDragDraftRef.current)
+        setPresentationDragPosition({ x: event.clientX, y: event.clientY })
+      }}
+      onPointerMove={(event) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) previewPresentationReorder(control.key, event.clientX, event.clientY)
+      }}
+      onPointerUp={(event) => {
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+        finishPresentationReorder(control.key)
+      }}
+      onPointerCancel={() => finishPresentationReorder(control.key)}
+    ><GripVertical aria-hidden="true" size={15} /></button>
     <input
       key={`${control.key}-name-${control.name}`}
       aria-label={copy(`Name for ${control.key}`, `نام ${control.key}`)}
@@ -797,6 +901,8 @@ export function ControlsView(props: SharedViewProps) {
       onBlur={(event) => updatePresentation(control.key, 'description', event.currentTarget.value)}
       onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { event.currentTarget.value = control.description; event.currentTarget.blur() } }}
     />
+  </div></motion.div>}
+    </AnimatePresence>
   </div> : null
   const relayControls = presentationControls.filter((control) => control.kind === 'relay')
   const sideControls = presentationControls.filter((control) => control.kind === 'side')
@@ -836,6 +942,14 @@ export function ControlsView(props: SharedViewProps) {
   }
   return (
     <>
+      <AnimatePresence>{draggedPeripheral && presentationDragPosition && <motion.div
+        className="peripheral-drag-overlay"
+        aria-hidden="true"
+        initial={{ opacity: 0, scale: .96 }}
+        animate={{ opacity: 1, scale: 1, x: presentationDragPosition.x + 14, y: presentationDragPosition.y - 18 }}
+        exit={{ opacity: 0, scale: .96 }}
+        transition={{ duration: .16, ease: [0.22, 1, 0.36, 1] }}
+      >{controlByKey.get(draggedPeripheral)?.name || draggedPeripheral}</motion.div>}</AnimatePresence>
       <SectionTitle eyebrow={copy('Connected controller', 'کنترلر متصل')} title={t('controls')} detail={pageDetail(snapshot, props.appTitle, locale)} />
       <section className="control-layout">
         <Card icon={CircuitBoard} iconTone={snapshot.status.active_relays ? 'amber' : 'green'} eyebrow={copy('Eight protected outputs', 'هشت خروجی محافظت‌شده')} title={copy('Relays & motion', 'رله‌ها و حرکت')} className="relay-control-card" action={<StatusBadge tone={snapshot.status.active_relays ? 'warn' : 'good'}>{snapshot.status.active_relays ? copy('OUTPUTS ON', 'خروجی‌ها روشن') : copy('ALL OFF', 'همه خاموش')}</StatusBadge>} menu={[
@@ -849,7 +963,7 @@ export function ControlsView(props: SharedViewProps) {
               return (
                 <article key={control.key} className={`relay-switch${active ? ' is-active' : ''}${relayPending.has(index + 1) ? ' is-pending' : ''}`}>
                   <button type="button" className="relay-switch__toggle" data-relay={index + 1} aria-pressed={active} aria-label={copy(`Turn relay ${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} را ${active ? 'خاموش' : 'روشن'} کن`)} disabled={relayPending.has(index + 1)} onClick={(event) => void relayToggle(Number(event.currentTarget.dataset.relay), active)}>
-                    <span>R{index + 1}</span><i aria-hidden="true"><b /></i><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
+                    <span>R{index + 1}</span><i aria-hidden="true"><b /></i><small>{peripheralName(`relay.${index + 1}`, `Relay ${index + 1}`)}</small>
                   </button>
                   <div className="relay-switch__actions"><Button compact disabled={active || relayPending.has(index + 1)} onClick={() => void relayToggle(index + 1, false)}>{t('on')}</Button><Button compact disabled={!active || relayPending.has(index + 1)} onClick={() => void relayToggle(index + 1, true)}>{t('off')}</Button></div>
                   {editor(controlByKey.get(control.key))}
@@ -861,7 +975,7 @@ export function ControlsView(props: SharedViewProps) {
             {(sideControls.length ? sideControls : [{ key: 'motion.a' }, { key: 'motion.b' }] as PeripheralControlDescriptor[]).map((control) => {
               const side = control.key === 'motion.a' ? 'left' : 'right'
               return <div key={control.key} className="motion-side">
-                <strong>{peripheralName(control.key, side === 'left' ? copy('Side A motion', 'حرکت سمت A') : copy('Side B motion', 'حرکت سمت B'))}</strong>
+                <strong>{peripheralName(control.key, side === 'left' ? 'Motion A' : 'Motion B')}</strong>
                 <HoldActionButton compact onHoldStart={() => command(`relay side ${side} up`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Up', 'بالا نگه‌دار')}</HoldActionButton>
                 <Button compact onClick={() => void command(`relay side ${side} stop`)}>{copy('Stop', 'توقف')}</Button>
                 <HoldActionButton compact onHoldStart={() => command(`relay side ${side} down`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Down', 'پایین نگه‌دار')}</HoldActionButton>
@@ -905,10 +1019,6 @@ export function ControlsView(props: SharedViewProps) {
 			<div className="color-preview" style={{ '--preview': chosenHex } as React.CSSProperties}>
 				<span />
 				<strong>{copy('Selected', 'انتخاب‌شده')} · {chosenHex} · RGB {red} {green} {blue}</strong>
-			</div>
-			<div className="status-led-live" style={{ '--preview': liveHex } as React.CSSProperties}>
-				<i aria-hidden="true" />
-				<div><strong>{copy('Physical LED mirror', 'بازتاب LED فیزیکی')}</strong><small dir="ltr">{liveLED ? `${liveHex} · effect ${liveLED.effect} · condition ${liveLED.condition}` : copy('Awaiting pushed board state', 'در انتظار وضعیت ارسالی برد')}</small></div>
 			</div>
 		  </div>
           <label className="native-color-field">
@@ -1029,6 +1139,7 @@ export function LocalDeviceView({ locale, t, events, transport }: SharedViewProp
   return (
     <>
       <SectionTitle eyebrow={`${copy('Local companion', 'وسیلهٔ محلی')} · ${snapshot.phase || 'idle'}`} title={t('device')} detail={snapshot.base_url || copy('Typed local-network companion through the primary host', 'وسیلهٔ شبکهٔ محلی با قرارداد مشخص، از طریق میزبان اصلی')} action={<StatusBadge tone={snapshot.events_online ? 'good' : snapshot.http_reachable ? 'warn' : 'bad'} pulse={snapshot.phase === 'connecting'}>{snapshot.events_online ? copy('EVENT STREAM', 'جریان رویداد') : snapshot.http_reachable ? 'HTTP' : t('offline')}</StatusBadge>} />
+      <div className="device-scope-note"><Info size={18} /><div><strong>{copy('“Offline” here refers only to the optional local companion.', '«آفلاین» در این صفحه فقط به وسیلهٔ محلی اختیاری اشاره دارد.')}</strong><span>{copy('It does not mean the main controller or WebSocket bridge is disconnected. This page follows the companion HTTP and event transports configured in Settings.', 'این وضعیت به معنی قطع‌شدن کنترلر اصلی یا پل WebSocket نیست. این صفحه ارتباط HTTP و رویداد وسیلهٔ محلی را که در تنظیمات پیکربندی شده دنبال می‌کند.')}</span></div><a href="https://github.com/atomicdeploy/PCController/blob/main/docs/Host-Configuration-and-Integrations.md" target="_blank" rel="noreferrer">{copy('Integration guide', 'راهنمای یکپارچه‌سازی')}<ExternalLink size={14} /></a></div>
       <section className="device-layout">
         <Card
           icon={Cpu}
@@ -1110,7 +1221,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
     <>
       <SectionTitle eyebrow={copy('Unified history', 'تاریخچهٔ یکپارچه')} title={t('events')} detail={copy('One timeline for controller lifecycle, RF, doors, macros, automations and integrated services.', 'یک خط زمانی برای چرخهٔ کنترلر، RF، درها، ماکروها، خودکارسازی‌ها و سرویس‌های یکپارچه.')} action={<StatusBadge tone="info">{events.length} {copy('retained', 'نگه‌داری‌شده')}</StatusBadge>} />
       <Card icon={Activity} iconTone="violet" className="events-page-card" title={copy('Event timeline', 'خط زمانی رویدادها')} eyebrow={copy(`${visible.length} visible`, `${visible.length} مورد نمایان`)}>
-        <div className="event-toolbar"><Segmented value={level} label={copy('Event severity', 'شدت رویداد')} options={[{ value: 'all', label: copy('All', 'همه') }, { value: 'good', label: copy('Good', 'عادی') }, { value: 'warn', label: copy('Warn', 'هشدار') }, { value: 'bad', label: copy('Fault', 'خطا') }, { value: 'info', label: copy('Info', 'اطلاعات') }]} onChange={setLevel} /><label className="event-toolbar__kind"><span>{copy('Event type', 'نوع رویداد')}</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">{copy('All types', 'همه نوع‌ها')}</option>{kinds.map((value) => <option key={value} value={value}>{value}</option>)}</select></label><Toggle checked={showDebugNoise} onChange={setShowDebugNoise} label={copy('Show STATUS_RGB and high-rate debug events', 'نمایش STATUS_RGB و رویدادهای پرتکرار اشکال‌زدایی')} detail={copy('Off by default to keep the activity timeline actionable.', 'برای خوانایی خط زمانی به‌صورت پیش‌فرض خاموش است.')} /></div>
+        <div className="event-toolbar"><Segmented value={level} label={copy('Event severity', 'شدت رویداد')} options={[{ value: 'all', label: copy('All', 'همه') }, { value: 'good', label: copy('Good', 'عادی') }, { value: 'warn', label: copy('Warn', 'هشدار') }, { value: 'bad', label: copy('Fault', 'خطا') }, { value: 'info', label: copy('Info', 'اطلاعات') }]} onChange={setLevel} /><label className="event-toolbar__kind"><span>{copy('Event type', 'نوع رویداد')}</span><select value={kind} onChange={(event) => setKind(event.target.value)}><option value="all">{copy('All types', 'همه نوع‌ها')}</option>{kinds.map((value) => <option key={value} value={value}>{value}</option>)}</select></label><Toggle checked={showDebugNoise} onChange={setShowDebugNoise} label={copy('Show high-rate debug events', 'نمایش رویدادهای پرتکرار اشکال‌زدایی')} detail={copy('Off by default to keep the activity timeline actionable.', 'برای خوانایی خط زمانی به‌صورت پیش‌فرض خاموش است.')} /></div>
         <EventList events={visible} locale={locale} t={t} limit={visible.length} toolbar />
       </Card>
     </>

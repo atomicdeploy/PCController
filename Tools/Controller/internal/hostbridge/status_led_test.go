@@ -28,9 +28,23 @@ func TestStatusLEDStatePriority(t *testing.T) {
 	snapshot.Status.DoorOpen = true
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDDoorWarning)
 	snapshot.Status.TLEDCenti = policy.HotThresholdCentiC
+	snapshot.Status.Flags |= controller.StatusTemperatureLED
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDHot)
 	snapshot.Connected = false
 	assertStatusLEDState(t, policy, snapshot, now.Add(time.Second), now, statusLEDOffline)
+}
+
+func TestStatusLEDPolicyIgnoresInvalidTemperature(t *testing.T) {
+	policy := appconfig.DefaultStatusLEDPolicy()
+	now := time.Now()
+	snapshot := controller.Snapshot{
+		Connected: true, HaveStatus: true,
+		ProgramState: controller.ProgramStateSnapshot{Mode: controller.ProgramIdle},
+	}
+	snapshot.Status.Flags = controller.StatusTemperatureLED | controller.StatusTemperatureBT
+	snapshot.Status.TLEDCenti = controller.InvalidTemperatureCentiC
+	snapshot.Status.TBTCenti = controller.MaximumTemperatureCentiC + 1
+	assertStatusLEDState(t, policy, snapshot, time.Time{}, now, statusLEDBTOff)
 }
 
 func TestStatusLEDVisualsAreSmoothAndBounded(t *testing.T) {

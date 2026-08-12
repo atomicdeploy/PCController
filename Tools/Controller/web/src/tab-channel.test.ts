@@ -138,10 +138,11 @@ describe('tab channel', () => {
       state: 'open',
       metadata: { zone: 'front' },
     })).toBeTruthy()
+    expect(sender.publishResourceReload('1.4.1|2026-08-12T12:00:00Z')).toBeTruthy()
 
-    expect(received).toHaveLength(4)
+    expect(received).toHaveLength(5)
     expect(received.map((message) => message.payload.type)).toEqual([
-      'presence', 'appearance', 'terminal', 'controller-event',
+      'presence', 'appearance', 'terminal', 'controller-event', 'resource-reload',
     ])
     expect(received[0]).toMatchObject({
       protocol: TAB_CHANNEL_PROTOCOL,
@@ -157,6 +158,7 @@ describe('tab channel', () => {
     expect(received[3].payload).toMatchObject({
       event: { id: 9, metadata: { zone: 'front' } },
     })
+    expect(received[4].payload).toEqual({ type: 'resource-reload', identity: '1.4.1|2026-08-12T12:00:00Z' })
 
     now += 1
     sender.close()

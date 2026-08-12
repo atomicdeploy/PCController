@@ -648,6 +648,7 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.reset`, `controller.reset.lines`, `controller.port.reset` | optional `pulse_ms` | one explicit DTR-only pulse, then fresh application authentication |
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
+| `controller.melodies.list` | `{}` | effective configured host melody catalog with validated note timing |
 | `controller.status` | `{}` | fresh board status |
 | `controller.peripherals.get` | `{}` | canonical registry plus the resolved ordered relay, Side, and MOSFET/PWM presentation descriptors; requires `read` |
 | `controller.peripherals.set` | `peripheral_presentation` object, or legacy `peripheral_names` | atomically replace validated name/description/order metadata and broadcast a `config` event; requires `host_configuration` |
@@ -857,7 +858,8 @@ routed path—not the raw `RequestURI` or query string.
       "kind": "relay",
       "role": "user-output",
       "index": 5,
-      "default_name": "User Relay 5",
+      "default_name": "Relay 5",
+      "default_description": "",
       "control": "relay"
     }
   ]
@@ -865,11 +867,14 @@ routed path—not the raw `RequestURI` or query string.
 ```
 
 The complete registry always contains 34 descriptors: eight relays, two motion
-sides, sixteen PWM channels, two displays, and six sensors. Custom values are
-presentation names in `ui.peripheral_names`, not device settings. Set methods
-trim keys and names, reject invalid input atomically, and treat a blank name as
-a request to remove that override so the descriptor's `default_name` becomes
-visible again. No peripheral-name operation reads or writes MCU EEPROM.
+sides, sixteen PWM channels, two displays, and six sensors. Registry fallback
+names are derived from stable hardware IDs (`Relay 5`, `Motion A`, `PWM 0`), and
+fallback descriptions are empty. Friendly operator copy belongs in
+`ui.peripheral_presentation`; the legacy `ui.peripheral_names` map remains a
+name-only compatibility surface. Set methods trim keys and names, reject invalid
+input atomically, and treat a blank name as a request to remove that override so
+the descriptor's `default_name` becomes visible again. No peripheral-name
+operation reads or writes MCU EEPROM.
 
 All PWM read and mutation methods return the native `PWM_VALUES` JSON shape:
 

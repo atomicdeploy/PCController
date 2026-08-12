@@ -30,8 +30,8 @@ describe('WebUI acceptance regression contracts', () => {
 
   it('uses pushed state as the ordinary command completion path', () => {
     const app = source('./app.tsx')
-    expect(app).toContain('notifyOnSuccess = true, refreshAfter = false')
-    expect(app).toContain('if (refreshAfter) void refresh()')
-    expect(app).not.toContain('notifyOnSuccess = true, refreshAfter = true')
+    expect(app).toContain('commandSuccessShouldToast(command, success)')
+    expect(app).toContain('if (options.refreshAfter) void refresh()')
+    expect(app).not.toContain('refreshAfter = true')
   })
 })

@@ -465,6 +465,7 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	value.UI = normalizePeripheralPresentationDefaults(value.UI)
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
@@ -494,6 +495,7 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	value.UI = normalizePeripheralPresentationDefaults(value.UI)
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {

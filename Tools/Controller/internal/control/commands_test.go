@@ -37,6 +37,7 @@ func TestDecodeHexAndStatusFormatting(t *testing.T) {
 	text := formatStatus(native.Status{
 		SupplyMV: 5000, BusMV: 12345, CurrentMA: 120,
 		TLEDCenti: 2512, TBTCenti: -550,
+		Flags:      native.StatusTemperatureLED | native.StatusTemperatureBT,
 		PWMChannel: 4, PWMValue: 2048,
 		ResetCause: 0x08, ResetCount: 17,
 	})
@@ -47,6 +48,61 @@ func TestDecodeHexAndStatusFormatting(t *testing.T) {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing %q in %q", expected, text)
 		}
+	}
+}
+
+func TestStatusFormattingRejectsUnavailableAndInvalidTemperatures(t *testing.T) {
+	tests := []native.Status{
+		{TLEDCenti: 2512, TBTCenti: -550},
+		{
+			Flags:     native.StatusTemperatureLED | native.StatusTemperatureBT,
+			TLEDCenti: native.InvalidTemperatureCentiC,
+			TBTCenti:  native.MaximumTemperatureCentiC + 1,
+		},
+	}
+	for _, status := range tests {
+		text := formatStatus(status)
+		if !strings.Contains(text, "tLED=unavailable tBT=unavailable") ||
+			strings.Contains(text, "-327.68") {
+			t.Fatalf("invalid temperatures leaked into status: %q", text)
+		}
+	}
+}
+
+func TestBuzzerToneDefaultsAliasAndBounds(t *testing.T) {
+	frequency, duration, err := parseBuzzerToneArgs(nil)
+	if err != nil || frequency != defaultBuzzerFrequencyHz || duration != defaultBuzzerDurationMS {
+		t.Fatalf("default beep=(%d,%d,%v)", frequency, duration, err)
+	}
+	frequency, duration, err = parseBuzzerToneArgs([]string{"880"})
+	if err != nil || frequency != 880 || duration != defaultBuzzerDurationMS {
+		t.Fatalf("frequency-only beep=(%d,%d,%v)", frequency, duration, err)
+	}
+	frequency, duration, err = parseBuzzerToneArgs([]string{"0", "0"})
+	if err != nil || frequency != 0 || duration != 0 {
+		t.Fatalf("stop beep=(%d,%d,%v)", frequency, duration, err)
+	}
+	for _, args := range [][]string{
+		{"0"}, {"19"}, {"20001"}, {"440", "0"}, {"440", "60001"},
+		{"440", "40", "extra"},
+	} {
+		if _, _, err := parseBuzzerToneArgs(args); err == nil {
+			t.Fatalf("invalid buzzer arguments accepted: %#v", args)
+		}
+	}
+
+	engine := NewCommandEngine(New(Options{}), CommandOptions{})
+	var found bool
+	for _, descriptor := range engine.Catalog() {
+		if descriptor.Name == "buzzer" {
+			found = true
+			if !reflect.DeepEqual(descriptor.Aliases, []string{"beep"}) {
+				t.Fatalf("buzzer aliases=%#v", descriptor.Aliases)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("buzzer command missing from shared command catalog")
 	}
 }
 

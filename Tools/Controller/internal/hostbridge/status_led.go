@@ -346,8 +346,10 @@ func selectStatusLEDState(
 	if !snapshot.Connected || !snapshot.HaveStatus {
 		return statusLEDOffline, policy.PCOffline
 	}
-	hot := snapshot.Status.TLEDCenti >= policy.HotThresholdCentiC ||
-		snapshot.Status.TBTCenti >= policy.HotThresholdCentiC
+	ledTemperature, ledAvailable := snapshot.Status.LEDTemperature()
+	btTemperature, btAvailable := snapshot.Status.BTAudioTemperature()
+	hot := (ledAvailable && ledTemperature >= policy.HotThresholdCentiC) ||
+		(btAvailable && btTemperature >= policy.HotThresholdCentiC)
 	if hot {
 		return statusLEDHot, policy.Hot
 	}

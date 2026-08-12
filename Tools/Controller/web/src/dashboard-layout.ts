@@ -33,8 +33,12 @@ export function saveDashboardLayout(layout: DashboardLayout, storage: Pick<Stora
 
 export function moveDashboardCard(layout: DashboardLayout, source: DashboardCardID, target: DashboardCardID): DashboardLayout {
   if (source === target) return layout
+  const sourceIndex = layout.order.indexOf(source)
+  const targetIndex = layout.order.indexOf(target)
+  if (sourceIndex < 0 || targetIndex < 0) return layout
   const order = layout.order.filter((id) => id !== source)
-  order.splice(Math.max(0, order.indexOf(target)), 0, source)
+  const insertion = order.indexOf(target) + (sourceIndex < targetIndex ? 1 : 0)
+  order.splice(Math.max(0, insertion), 0, source)
   return { ...layout, order }
 }
 

@@ -25,16 +25,23 @@ func TestDiscoveryMetadataIncludesWebAppAndCurrentBoardValues(t *testing.T) {
 	snapshot.Port.Name = "COM18"
 	snapshot.Status.SupplyMV = 12280
 	snapshot.Status.DoorOpen = true
+	snapshot.Status.Flags = controller.StatusTemperatureLED
+	snapshot.Status.TLEDCenti = 2512
+	snapshot.Status.TBTCenti = controller.InvalidTemperatureCentiC
 	snapshot.Settings.Persisted = true
 	values := discoveryMetadata(config, snapshot)
 	for _, expected := range []string{
 		"web=/", "webui=embedded", "api=/api", "snapshot=/api/snapshot",
 		"app.title=Lab Controller", "app.locale=fa-ir", "board.connected=true",
 		"board.build_hash=ADFAEDAB", "board.supply_mv=12280", "board.door_open=true",
-		"board.settings_persisted=true",
+		"board.temperature_led_available=true", "board.temperature_led_centi_c=2512",
+		"board.temperature_bt_audio_available=false", "board.settings_persisted=true",
 	} {
 		if !slices.Contains(values, expected) {
 			t.Fatalf("metadata missing %q: %#v", expected, values)
 		}
+	}
+	if slices.Contains(values, "board.temperature_bt_audio_centi_c=-32768") {
+		t.Fatalf("discovery advertised disconnected temperature sentinel: %#v", values)
 	}
 }

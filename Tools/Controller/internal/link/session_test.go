@@ -160,6 +160,54 @@ func TestAuthenticateAcceptsCompactHelloSchema4(t *testing.T) {
 	}
 }
 
+func TestAuthenticatePublishesForcedOutputStateFrames(t *testing.T) {
+	port := newFakePort()
+	port.onWrite = func(encoded []byte) {
+		request, err := native.Decode(encoded)
+		if err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		frames := []native.Frame{
+			{Opcode: native.OpHelloResp, Seq: request.Seq, Payload: currentHelloPayload(
+				native.CapabilitySegmentPush | native.CapabilityBuzzerPush | native.CapabilityStatusLEDPush,
+			)},
+			{Opcode: native.OpSegmentChanged, Payload: []byte{1, 2, 3, 4, 5}},
+			{Opcode: native.OpBuzzerChanged, Payload: []byte{0xD0, 0x07, 40, 0, 0}},
+			{Opcode: native.OpStatusLEDChanged, Payload: []byte{1, 2, 3, 128, 0, 1}},
+		}
+		var response []byte
+		for _, frame := range frames {
+			encodedFrame, encodeErr := native.Encode(frame)
+			if encodeErr != nil {
+				t.Errorf("encode response: %v", encodeErr)
+				return
+			}
+			response = append(response, encodedFrame...)
+		}
+		port.reads <- response
+	}
+
+	session := NewForPort("TEST", port)
+	defer session.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := session.Authenticate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte{native.OpSegmentChanged, native.OpBuzzerChanged, native.OpStatusLEDChanged}
+	for _, opcode := range want {
+		select {
+		case event := <-session.Events():
+			if event.Frame.Opcode != opcode || event.Frame.Seq != 0 {
+				t.Fatalf("forced state frame=(0x%02X,%d), want (0x%02X,0)", event.Frame.Opcode, event.Frame.Seq, opcode)
+			}
+		case <-ctx.Done():
+			t.Fatalf("forced state frame 0x%02X was not published", opcode)
+		}
+	}
+}
+
 func TestReserveSequenceSkipsMacroExecutionSequence(t *testing.T) {
 	port := newFakePort()
 	session := NewForPort("TEST", port)

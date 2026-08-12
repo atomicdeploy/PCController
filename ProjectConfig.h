@@ -92,11 +92,15 @@
 #define PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS 0
 #endif
 
-// Tone playback and the Buzzer opcode remain available.  Only unsolicited
+// Tone playback and the Buzzer opcode remain available. Only unsolicited
 // boot/menu/error cue policy is optional so a freshly programmed board stays
 // quiet until the user deliberately enables an autonomous profile.
 #ifndef PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
 #define PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_HELLO_OUTPUT_SYNC
+#define PCCONTROLLER_ENABLE_HELLO_OUTPUT_SYNC 1
 #endif
 
 // The constrained production profile retains immediate bEEP-page mute/unmute

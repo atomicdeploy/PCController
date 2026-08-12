@@ -1,5 +1,7 @@
 # 🧭 WebUI dashboard contract
 
+For programmatic browser control, styled `console.*()` records, audio, state events, and tab coordination, see [Browser automation API](Browser-Automation-API.md).
+
 > WIP delivery tracked by #159, with shared UI follow-up in #154 and
 > native-feeling embedded UI acceptance in #101.
 

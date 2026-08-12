@@ -9,7 +9,6 @@ static inline __attribute__((always_inline)) void initializeController() {
   // compact master, startup bus recovery, and this watchdog bound every path.
   wdt_enable(WDTO_2S);
   wdt_reset();
-  now = millis();
   appProtocol.begin(PCCONTROLLER_UART_BAUD, handleProtocolFrame);
   resetTelemetry.begin();
   // Announce as soon as UART0 is ready. Opening a USB serial adapter often
@@ -122,6 +121,9 @@ static inline __attribute__((always_inline)) void serviceController() {
   if (macroPlayback.takeSafeStopRequest()) safeStopMacroOutputs();
 
   appProtocol.service();
+#if PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
+  serviceSegmentPush();
+#endif
   // I2cTransfer is dispatched above and may establish/release a lease in this
   // same controller turn. Snapshot only after UART dispatch so no firmware-
   // owned PCA/INA/LCD transaction can overlap a newly granted host lease.
@@ -227,12 +229,6 @@ static inline __attribute__((always_inline)) void serviceController() {
   const uint8_t relayMask = relays.activeRelayMask();
   if (relayMask != lastRelayMask) {
     appEvents.relay(relayMask);
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-    if (settingsStore.values().relayAudioEnabled() &&
-        ((relayMask ^ lastRelayMask) & 0xFAU) != 0) {
-      buzzer.beep(35, (relayMask & ~lastRelayMask) != 0 ? 1900 : 1250);
-    }
-#endif
     settingsStore.values().relayRestoreMask = relayMask;
     settingsStore.markDirty(loopNow);
     lastRelayMask = relayMask;
@@ -243,9 +239,6 @@ static inline __attribute__((always_inline)) void serviceController() {
                                 : displaySettings.displayClosedBrightness(),
                             loopNow);
   serviceDisplay(loopNow);
-#if PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
-  serviceSegmentPush();
-#endif
   if (!i2cReserved) {
     statusLeds.service(loopNow);
   }

@@ -33,11 +33,11 @@ export function EventList({
 }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const fields = useMemo<CollectionFieldDefinition<ControllerEvent>[]>(() => [
-    { id: 'time', label: copy('Time', 'زمان'), get: (event) => event.time, width: 142 },
-    { id: 'kind', label: copy('Type', 'نوع'), get: (event) => event.kind, width: 165 },
-    { id: 'message', label: copy('Message', 'پیام'), get: eventMessage, width: 330 },
-    { id: 'source', label: copy('Source', 'مبدأ'), get: (event) => event.source, width: 170, visible: toolbar },
-    { id: 'metadata', label: copy('Metadata', 'فراداده'), get: (event) => event.metadata, width: 270, visible: toolbar },
+    { id: 'time', icon: 'time', label: copy('Time', 'زمان'), get: (event) => event.time, width: 142 },
+    { id: 'kind', icon: 'type', label: copy('Type', 'نوع'), get: (event) => event.kind, width: 165 },
+    { id: 'message', icon: 'message', label: copy('Message', 'پیام'), get: eventMessage, width: 330 },
+    { id: 'source', icon: 'source', label: copy('Source', 'مبدأ'), get: (event) => event.source, width: 170, visible: toolbar },
+    { id: 'metadata', icon: 'metadata', label: copy('Metadata', 'فراداده'), get: (event) => event.metadata, width: 270, visible: toolbar },
   ], [locale, toolbar])
   const visible = events.slice(0, limit)
   return (

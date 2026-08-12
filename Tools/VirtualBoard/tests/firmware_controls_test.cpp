@@ -229,6 +229,47 @@ void testRelayInterlocks() {
   require((preciseController.activeRelayMask() & (_BV(0) | _BV(1))) ==
               (_BV(0) | _BV(1)),
           "configured 37 ms break did not apply exactly");
+
+  ShiftRegisters cueRegisters;
+  RelayController cueController(cueRegisters);
+  cueController.begin(0);
+  cueController.setBreakBeforeDirectionMs(1);
+  uint8_t previousMask = cueController.activeRelayMask();
+  uint8_t cueCount = 0;
+  const auto observeSettledCue = [&]() {
+    const uint8_t activeMask = cueController.activeRelayMask();
+    if (activeMask != previousMask && !cueController.anySideBusy()) {
+      ++cueCount;
+    }
+    previousMask = activeMask;
+  };
+  require(cueController.requestSide(RelaySide::A, RelayDirection::Forward,
+                                    true, 1),
+          "relay cue fixture could not start motion");
+  observeSettledCue();
+  require(cueCount == 1,
+          "ordinary motion activation did not produce one settled cue");
+
+  require(cueController.requestSide(RelaySide::A, RelayDirection::Reverse,
+                                    true, 10),
+          "relay cue fixture rejected reversal");
+  observeSettledCue();
+  require(cueController.anySideBusy() && cueCount == 1,
+          "motion reversal exposed its interlock-disable cue");
+  cueController.service(11);
+  observeSettledCue();
+  require(!cueController.anySideBusy() && cueCount == 2,
+          "motion reversal did not coalesce to one settled cue");
+  observeSettledCue();
+  require(cueCount == 2,
+          "stable relay state repeated its cue");
+
+  ControllerSettings cueSettings{};
+  require(cueSettings.relayAudioEnabled(),
+          "factory relay cue policy is unexpectedly disabled");
+  cueSettings.flags |= SettingsFlags::RelayAudioDisabled;
+  require(!cueSettings.relayAudioEnabled(),
+          "persisted relay cue disable policy was ignored");
 }
 
 void testMotionDoorPolicyMatrixAndEntryPaths() {

@@ -62,11 +62,13 @@ describe('Web IPC transport', () => {
     vi.stubGlobal('fetch', fetchSpy)
 
     const events: Array<{ kind: string; stream?: string }> = []
+    const states: string[] = []
+    const errors: string[] = []
     const stop = connectStream({
       name: 'PCController', setup_complete: false, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
       appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
       appearance_etag: 'a'.repeat(64),
-    }, { status: () => undefined, event: (value) => events.push(value), state: () => undefined })
+    }, { status: () => undefined, event: (value) => events.push(value), state: (state) => states.push(state), error: (detail, source) => errors.push(`${source}:${detail}`) })
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     await expect(rpc<{ output: string }>('controller.command.execute', { command: 'status' })).resolves.toEqual({ output: 'ws-ok' })
@@ -80,6 +82,9 @@ describe('Web IPC transport', () => {
       params: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
     })
     expect(events).toEqual([{ id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' }])
+    sockets[0].pushMessage({ jsonrpc: '2.0', method: 'controller.error', params: { source: 'status', error: 'controller disconnected' } })
+    expect(errors).toEqual(['status:controller disconnected'])
+    expect(states).toEqual(['connecting', 'open'])
     stop()
   })
 

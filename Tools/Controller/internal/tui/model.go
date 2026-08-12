@@ -1181,7 +1181,7 @@ func (model *Model) recordSample(status native.Status, at time.Time) {
 		model.pwmValues[status.PWMChannel] = status.PWMValue
 	}
 	model.samples = append(model.samples, measurementSample{
-		At: at, SupplyMV: status.SupplyMV, BusMV: status.BusMV,
+		At: at, Flags: status.Flags, SupplyMV: status.SupplyMV, BusMV: status.BusMV,
 		CurrentMA: status.CurrentMA, PowerMW: status.PowerMW,
 		TLEDCenti: status.TLEDCenti, TBTCenti: status.TBTCenti,
 	})

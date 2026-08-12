@@ -16,6 +16,14 @@ describe('telemetry chart filtering', () => {
     expect(result[1].supply).toBe(12)
   })
 
+  it('preserves unavailable-temperature gaps instead of smoothing through them', () => {
+    const values = [sample(1), { ...sample(2), ledTemp: Number.NaN }, sample(3)]
+    const result = medianSmoothTelemetrySamples(values)
+    expect(Number.isNaN(result[1].ledTemp)).toBe(true)
+    expect(result[0].ledTemp).toBe(33)
+    expect(result[2].ledTemp).toBe(33)
+  })
+
   it('keeps nominal supply high and hot temperatures visibly near their meaningful bounds', () => {
     const values = [{ ...sample(0, 12), ledTemp: 52, btTemp: 51 }]
     expect(focusedVoltageDomain(values)).toEqual([11, 12.5])

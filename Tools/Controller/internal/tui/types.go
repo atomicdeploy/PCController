@@ -125,6 +125,7 @@ func preferencesFromUI(value appconfig.UI) Preferences {
 
 type measurementSample struct {
 	At        time.Time
+	Flags     uint16
 	SupplyMV  int32
 	BusMV     int32
 	CurrentMA int32

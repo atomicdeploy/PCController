@@ -13,17 +13,21 @@ import {
 import {
   ArrowDownAZ,
   ArrowUpAZ,
+  Braces,
   Check,
   ChevronLeft,
   ChevronRight,
   Clipboard,
+  Clock3,
   Columns3,
   Download,
   Ellipsis,
-  Eye,
   EyeOff,
   GripVertical,
+  MessageSquareText,
+  Radio,
   Search,
+  Tag,
   X,
 } from 'lucide-react'
 import {
@@ -49,6 +53,20 @@ import {
   type CollectionSort,
   type GridFocus,
 } from './typed-collection-model'
+import { pointerReorderTargetChanged } from './pointer-reorder'
+
+const fieldIcons = {
+  time: Clock3,
+  type: Tag,
+  message: MessageSquareText,
+  source: Radio,
+  metadata: Braces,
+} as const
+
+function FieldIcon<T extends object>({ field }: { field: CollectionFieldDefinition<T> }) {
+  const FieldIconComponent = field.icon ? fieldIcons[field.icon] : Columns3
+  return <FieldIconComponent size={14} aria-hidden="true" />
+}
 
 export interface TypedCollectionLabels {
   search: string
@@ -122,6 +140,11 @@ interface AnchorSnapshot {
   offset: number
   scrollTop: number
   nearStart: boolean
+}
+
+interface PointerGuide {
+  clientX: number
+  clientY: number
 }
 
 const englishLabels: TypedCollectionLabels = {
@@ -327,6 +350,8 @@ export function TypedCollection<T extends object>({
   const [menu, setMenu] = useState<MenuTarget | null>(null)
   const [notice, setNotice] = useState('')
   const [draggingField, setDraggingField] = useState<string | null>(null)
+  const [dragPosition, setDragPosition] = useState<PointerGuide | null>(null)
+  const [resizeGuide, setResizeGuide] = useState<number | null>(null)
   const viewportRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   const anchorRef = useRef<AnchorSnapshot | null>(null)
@@ -540,11 +565,45 @@ export function TypedCollection<T extends object>({
 
   const beginResize = (field: CollectionField<T>, event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
     const startX = event.clientX
     const startWidth = field.width
     const sign = direction === 'rtl' ? -1 : 1
-    const move = (moveEvent: PointerEvent) => setFieldWidth(field.id, startWidth + (moveEvent.clientX - startX) * sign)
+    setResizeGuide(event.clientX)
+    document.documentElement.classList.add('is-resizing-collection')
+    const move = (moveEvent: PointerEvent) => {
+      setResizeGuide(moveEvent.clientX)
+      setFieldWidth(field.id, startWidth + (moveEvent.clientX - startX) * sign)
+    }
     const finish = () => {
+      setResizeGuide(null)
+      document.documentElement.classList.remove('is-resizing-collection')
+      globalThis.removeEventListener('pointermove', move)
+      globalThis.removeEventListener('pointerup', finish)
+      globalThis.removeEventListener('pointercancel', finish)
+    }
+    globalThis.addEventListener('pointermove', move)
+    globalThis.addEventListener('pointerup', finish)
+    globalThis.addEventListener('pointercancel', finish)
+  }
+
+  const beginColumnReorder = (field: CollectionField<T>, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    setDraggingField(field.id)
+    setDragPosition({ clientX: event.clientX, clientY: event.clientY })
+    let previousTarget: string | null = null
+    const move = (moveEvent: PointerEvent) => {
+      setDragPosition({ clientX: moveEvent.clientX, clientY: moveEvent.clientY })
+      const target = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest<HTMLElement>('[data-collection-field-id]')?.dataset.collectionFieldId
+      if (!pointerReorderTargetChanged(previousTarget, field.id, target)) return
+      previousTarget = target
+      moveFieldTo(field.id, target)
+    }
+    const finish = () => {
+      setDraggingField(null)
+      setDragPosition(null)
       globalThis.removeEventListener('pointermove', move)
       globalThis.removeEventListener('pointerup', finish)
       globalThis.removeEventListener('pointercancel', finish)
@@ -573,6 +632,8 @@ export function TypedCollection<T extends object>({
 
   return (
     <section className={`typed-collection ${className}`.trim()} dir={direction} aria-label={ariaLabel}>
+      {resizeGuide !== null && <div className="typed-collection__resize-guide" aria-hidden="true" style={{ left: resizeGuide }} />}
+      {draggingField && dragPosition && <div className="typed-collection__drag-overlay" aria-hidden="true" style={{ left: dragPosition.clientX, top: dragPosition.clientY }}>{effectiveRegistry.find((field) => field.id === draggingField)?.label}</div>}
       {toolbar && <div className="typed-collection__toolbar">
         <label className="typed-collection__search">
           <Search size={16} aria-hidden="true" />
@@ -589,13 +650,12 @@ export function TypedCollection<T extends object>({
           <summary><Columns3 size={16} />{labels.columns}</summary>
           <div className="typed-collection__popover-panel" role="group" aria-label={labels.columns}>
             {effectiveRegistry.map((field) => <div
-              className="typed-collection__column-option"
+              className={`typed-collection__column-option${draggingField === field.id ? ' is-dragging' : ''}`}
               key={field.id}
-              onDragOver={(event) => { if (draggingField && draggingField !== field.id) event.preventDefault() }}
-              onDrop={(event) => { event.preventDefault(); const id = draggingField ?? event.dataTransfer.getData('text/plain'); if (id) moveFieldTo(id, field.id); setDraggingField(null) }}
+              data-collection-field-id={field.id}
             >
-              <label><input type="checkbox" checked={field.visible} disabled={field.visible && visibleCount <= 1} onChange={(event) => setFieldVisible(field.id, event.target.checked)} />{field.visible ? <Eye size={14} /> : <EyeOff size={14} />}<span>{field.label}</span></label>
-              <button type="button" className="typed-collection__column-drag" draggable aria-label={`${labels.reorderColumn}: ${field.label}`} onDragStart={(event) => { setDraggingField(field.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', field.id) }} onDragEnd={() => setDraggingField(null)}><GripVertical size={15} /></button>
+              <label><input type="checkbox" checked={field.visible} disabled={field.visible && visibleCount <= 1} onChange={(event) => setFieldVisible(field.id, event.target.checked)} /><FieldIcon field={field} /><span>{field.label}</span>{field.visible && <Check className="typed-collection__column-check" size={14} />}</label>
+              <button type="button" className="typed-collection__column-drag" aria-label={`${labels.reorderColumn}: ${field.label}`} onPointerDown={(event) => beginColumnReorder(field, event)}><GripVertical size={15} /></button>
             </div>)}
           </div>
         </details>
@@ -641,17 +701,13 @@ export function TypedCollection<T extends object>({
                   onFocus={() => setFocus(current)}
                   onKeyDown={(event) => handleGridKey(event, current)}
                   onContextMenu={(event) => { event.preventDefault(); openContext('header', fieldIndex, 0, event.currentTarget, { left: event.clientX, top: event.clientY }) }}
-                  onDragOver={(event) => { if (draggingField && draggingField !== field.id) event.preventDefault() }}
-                  onDrop={(event) => { event.preventDefault(); const id = draggingField ?? event.dataTransfer.getData('text/plain'); if (id) moveFieldTo(id, field.id); setDraggingField(null) }}
-                  onDragEnd={() => setDraggingField(null)}
                 >
                   <button type="button" className="typed-collection__sort" tabIndex={-1} disabled={!field.sortable} onClick={() => toggleSort(field)}>
-                    <span>{field.label}</span>
+                    <span className="typed-collection__header-label"><FieldIcon field={field} />{field.label}</span>
                     {sorted === 'asc' ? <ArrowDownAZ size={14} /> : sorted === 'desc' ? <ArrowUpAZ size={14} /> : <span className="typed-collection__sort-placeholder" aria-hidden="true" />}
                   </button>
                   <span className="typed-collection__header-actions">
                     <button type="button" className="typed-collection__header-menu" tabIndex={-1} aria-label={`${labels.columnActions}: ${field.label}`} onClick={(event) => openContext('header', fieldIndex, 0, event.currentTarget)}><Ellipsis size={14} /></button>
-                    <button type="button" className="typed-collection__reorder" tabIndex={-1} draggable aria-label={`${labels.reorderColumn}: ${field.label}`} onDragStart={(event) => { setDraggingField(field.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', field.id) }} onDragEnd={() => setDraggingField(null)}><GripVertical size={13} /></button>
                   </span>
                   <button
                     type="button"
@@ -665,7 +721,7 @@ export function TypedCollection<T extends object>({
                       const physical = event.key === 'ArrowRight' ? 12 : -12
                       setFieldWidth(field.id, field.width + (direction === 'rtl' ? -physical : physical))
                     }}
-                  ><GripVertical size={13} /></button>
+                  ><span className="typed-collection__resize-mark" aria-hidden="true" /></button>
                 </th>
               })}
             </tr></thead>

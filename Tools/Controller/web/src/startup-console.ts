@@ -76,7 +76,8 @@ export function emitStartupConsoleIntroduction(
     target.info('%cController%c 🟠 offline · no authenticated board', offlineStyle, resetStyle)
   }
 
-  target.info('%cAutomation%c window.PCController.inspect(), .command("status"), .refresh(), .navigate("dashboard")', labelStyle, resetStyle)
+  target.info('%cAutomation%c window.PCController.inspect(), .command("status"), .beep(), .refresh(), .navigate("dashboard")', labelStyle, resetStyle)
+  target.debug('%cAudio%c .beep(880, 90, "both") · target may be "board", "browser", or "both"', labelStyle, resetStyle)
   target.debug('%cTransport%c 📡 %s · subscribe with addEventListener("pccontroller:state", handler)', labelStyle, resetStyle, streamLabel(facts.streamState))
   target.groupEnd()
 }

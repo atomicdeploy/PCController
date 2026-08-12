@@ -22,7 +22,8 @@ type PeripheralPresentation struct {
 // PeripheralDescriptor is the host-owned presentation contract for one board
 // peripheral. Names are stored in the PC configuration; this catalog never
 // mutates board EEPROM or implies that a system-owned channel is directly
-// writable through a generic control.
+// writable through a generic control. Its fallback names derive only from
+// stable hardware IDs, and fallback descriptions are intentionally empty.
 type PeripheralDescriptor struct {
 	Key                string `json:"key"`
 	Kind               string `json:"kind"`
@@ -54,35 +55,23 @@ var corePeripheralDescriptors = buildPeripheralDescriptors()
 
 func buildPeripheralDescriptors() []PeripheralDescriptor {
 	descriptors := make([]PeripheralDescriptor, 0, 34)
-	relayNames := []string{
-		"Side A Direction", "Side A Output", "Side B Direction", "Side B Output",
-		"User Relay 5", "User Relay 6", "User Relay 7", "User Relay 8",
-	}
 	relayRoles := []string{
 		"motion-direction", "motion-enable", "motion-direction", "motion-enable",
 		"user-output", "user-output", "user-output", "user-output",
 	}
-	for index, name := range relayNames {
+	for index, role := range relayRoles {
 		descriptors = append(descriptors, PeripheralDescriptor{
 			Key: fmt.Sprintf("relay.%d", index+1), Kind: "relay",
-			Role: relayRoles[index], Index: index + 1, DefaultName: name,
-			DefaultDescription: fmt.Sprintf("Protected relay output R%d (%s)", index+1, strings.ReplaceAll(relayRoles[index], "-", " ")),
-			Control:            "relay",
+			Role: role, Index: index + 1, DefaultName: fmt.Sprintf("Relay %d", index+1),
+			Control: "relay",
 		})
 	}
 	for index, side := range []string{"a", "b"} {
 		descriptors = append(descriptors, PeripheralDescriptor{
 			Key: "motion." + side, Kind: "motion", Role: "motion-side",
-			Index: index + 1, DefaultName: fmt.Sprintf("Side %s motion", []string{"A", "B"}[index]),
-			DefaultDescription: fmt.Sprintf("Interlocked direction and output control for Side %s", []string{"A", "B"}[index]),
-			Control:            "motion",
+			Index: index + 1, DefaultName: fmt.Sprintf("Motion %s", strings.ToUpper(side)),
+			Control: "motion",
 		})
-	}
-	pwmNames := []string{
-		"MOSFET 1", "MOSFET 2", "MOSFET 3", "MOSFET 4",
-		"MOSFET 5", "MOSFET 6", "MOSFET 7", "MOSFET 8",
-		"User PWM 9", "User PWM 10", "User PWM 11", "Enclosure light",
-		"Power indicator", "Status red", "Status green", "Status blue",
 	}
 	pwmRoles := []string{
 		"user-output", "user-output", "user-output", "user-output",
@@ -90,15 +79,14 @@ func buildPeripheralDescriptors() []PeripheralDescriptor {
 		"user-output", "user-output", "user-output", "illumination",
 		"power-indicator", "status-red", "status-green", "status-blue",
 	}
-	for index, name := range pwmNames {
+	for index, role := range pwmRoles {
 		control := "role-specific"
 		if index <= 10 {
 			control = "pwm-user"
 		}
 		descriptors = append(descriptors, PeripheralDescriptor{
-			Key: fmt.Sprintf("pwm.%d", index), Kind: "pwm", Role: pwmRoles[index],
-			Index: index, DefaultName: name, Control: control,
-			DefaultDescription: fmt.Sprintf("12-bit PWM channel %d (%s)", index, strings.ReplaceAll(pwmRoles[index], "-", " ")),
+			Key: fmt.Sprintf("pwm.%d", index), Kind: "pwm", Role: role,
+			Index: index, DefaultName: fmt.Sprintf("PWM %d", index), Control: control,
 		})
 	}
 	for index, display := range []struct{ key, role, name string }{
@@ -107,7 +95,7 @@ func buildPeripheralDescriptors() []PeripheralDescriptor {
 	} {
 		descriptors = append(descriptors, PeripheralDescriptor{
 			Key: display.key, Kind: "display", Role: display.role, Index: index,
-			DefaultName: display.name, DefaultDescription: display.name + " presentation", Control: "read-only",
+			DefaultName: display.name, Control: "read-only",
 		})
 	}
 	for index, sensor := range []struct{ key, role, name string }{
@@ -120,7 +108,7 @@ func buildPeripheralDescriptors() []PeripheralDescriptor {
 	} {
 		descriptors = append(descriptors, PeripheralDescriptor{
 			Key: sensor.key, Kind: "sensor", Role: sensor.role, Index: index,
-			DefaultName: sensor.name, DefaultDescription: sensor.name + " measurement", Control: "read-only",
+			DefaultName: sensor.name, Control: "read-only",
 		})
 	}
 	return descriptors
@@ -155,6 +143,7 @@ func IsPresentedControlKey(key string) bool {
 // controls; sensors and system-owned channels remain available in the full
 // peripheral catalog but are not misrepresented as generic outputs.
 func ControlDescriptors(ui UI) []ControlDescriptor {
+	ui = normalizePeripheralPresentationDefaults(ui)
 	controls := make([]ControlDescriptor, 0, MaxPresentedControls)
 	type orderedOverride struct {
 		key         string

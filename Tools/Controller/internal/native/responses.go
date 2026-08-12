@@ -104,10 +104,18 @@ func ParseBoardNameFromSettings(payload []byte) (BoardName, error) {
 }
 
 const (
+	StatusTemperatureLED uint16 = 1 << 2
+	StatusTemperatureBT  uint16 = 1 << 3
 	StatusBuzzerBusy     uint16 = 1 << 12
 	StatusProgramRunning uint16 = 1 << 13
 	StatusHostOffline    uint16 = 1 << 14
 	StatusHot            uint16 = 1 << 15
+)
+
+const (
+	InvalidTemperatureCentiC int16 = -32768
+	MinimumTemperatureCentiC int16 = -5500
+	MaximumTemperatureCentiC int16 = 12500
 )
 
 // SupportsHostMenuOverlay remains an explicit semantic probe for the
@@ -474,6 +482,26 @@ type Status struct {
 	CRCErrors      uint16 `json:"crc_errors"`
 	ResetCause     byte   `json:"reset_cause"`
 	ResetCount     uint32 `json:"reset_count"`
+}
+
+// TemperatureAvailable applies the complete wire contract: the firmware must
+// advertise a live sample, the raw value must not be the disconnected sentinel,
+// and it must be within the DS18B20 measurement range. Keeping this rule here
+// prevents the CLI, TUI, discovery, diagnostics, and host policy from drifting.
+func TemperatureAvailable(flags uint16, value int16, availabilityFlag uint16) bool {
+	return flags&availabilityFlag != 0 &&
+		value != InvalidTemperatureCentiC &&
+		value >= MinimumTemperatureCentiC && value <= MaximumTemperatureCentiC
+}
+
+func (status Status) LEDTemperature() (int16, bool) {
+	return status.TLEDCenti,
+		TemperatureAvailable(status.Flags, status.TLEDCenti, StatusTemperatureLED)
+}
+
+func (status Status) BTAudioTemperature() (int16, bool) {
+	return status.TBTCenti,
+		TemperatureAvailable(status.Flags, status.TBTCenti, StatusTemperatureBT)
 }
 
 func (status Status) UptimeDuration() time.Duration {

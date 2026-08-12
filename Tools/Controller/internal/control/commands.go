@@ -396,9 +396,9 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 				return fmt.Sprintf(
-					"tLED=%.2f C tBT=%.2f C",
-					float64(status.TLEDCenti)/100,
-					float64(status.TBTCenti)/100,
+					"tLED=%s tBT=%s",
+					formatLEDTemperature(status, 2),
+					formatBTAudioTemperature(status, 2),
 				), nil
 			}
 			if len(args) != 1 ||
@@ -795,27 +795,16 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS | buzzer 0 0 | buzzer status | buzzer path board|host|both|none", Summary: "play/stop a tone or select board/PC buzzer routing",
+		Name: "buzzer", Aliases: []string{"beep"}, Usage: "buzzer|beep [FREQUENCY_HZ [DURATION_MS]] | buzzer 0 0 | buzzer status | buzzer path board|host|both|none", Summary: "play/stop a bounded tone or select board/PC buzzer routing",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) >= 1 && (strings.EqualFold(args[0], "status") || strings.EqualFold(args[0], "path")) {
 				return buzzerRoutingCommand(ctx, runtime, options, args)
 			}
-			values, err := exactUintArgs(args, 2, 16, "buzzer FREQUENCY_HZ DURATION_MS")
+			frequencyHz, durationMS, err := parseBuzzerToneArgs(args)
 			if err != nil {
 				return "", err
 			}
-			stopping := values[0] == 0 && values[1] == 0
-			if !stopping && values[1] == 0 {
-				return "", errors.New("buzzer duration must be nonzero unless frequency/duration are 0/0 to stop")
-			}
-			if values[0] == 0 && values[1] != 0 {
-				return "", errors.New("buzzer stop is exactly 0 0; timed pauses belong to melodies")
-			}
-			if !stopping && (values[0] < 20 || values[0] > 20000) {
-				return "", errors.New(
-					"buzzer frequency must be 20..20000 Hz, or 0 with duration 0 to stop",
-				)
-			}
+			stopping := frequencyHz == 0 && durationMS == 0
 			outputs.StopMelody()
 			if stopping {
 				if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(0, 0)); err != nil {
@@ -834,7 +823,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 			if settings.Flags&native.SettingsSilent != 0 {
 				return "buzzer suppressed: board is silent", nil
 			}
-			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(uint16(values[0]), uint16(values[1]))); err != nil {
+			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(frequencyHz, durationMS)); err != nil {
 				return "", err
 			}
 			return "buzzer command accepted", nil
@@ -3134,7 +3123,11 @@ func relayCommand(
 	args []string,
 ) (string, error) {
 	if len(args) == 1 && strings.EqualFold(args[0], "off") {
-		return "all relays off", command(ctx, runtime, native.OpRelayAllOff, nil)
+		snapshot := runtime.Snapshot()
+		changed := !snapshot.HaveStatus || snapshot.Status.ActiveRelays != 0
+		return "all relays off", commandRelayWithCue(
+			ctx, runtime, native.OpRelayAllOff, nil, false, changed,
+		)
 	}
 	if len(args) >= 1 && strings.EqualFold(args[0], "test") {
 		step := uint64(250)
@@ -3178,8 +3171,12 @@ func relayCommand(
 				return "", err
 			}
 		}
+		snapshot := runtime.Snapshot()
+		changed := relaySideStateChanged(snapshot, side, motion)
 		return fmt.Sprintf("relay side %s %s", args[1], args[2]),
-			command(ctx, runtime, native.OpRelaySide, payload)
+			commandRelayWithCue(
+				ctx, runtime, native.OpRelaySide, payload, motion != 0, changed,
+			)
 	}
 	if len(args) == 2 {
 		number, err := strconv.ParseUint(args[0], 0, 8)
@@ -3215,10 +3212,71 @@ func relayCommand(
 				return "", err
 			}
 		}
+		snapshot := runtime.Snapshot()
+		changed := !snapshot.HaveStatus ||
+			(snapshot.Status.ActiveRelays&(1<<byte(number-1)) != 0) != active
 		return fmt.Sprintf("relay R%d %s", number, onOff(active)),
-			command(ctx, runtime, native.OpRelaySet, payload)
+			commandRelayWithCue(
+				ctx, runtime, native.OpRelaySet, payload, active, changed,
+			)
 	}
 	return "", fmt.Errorf("usage: relay N on|off|toggle | relay side left|right stop|up|down | relay off | relay test [MS]")
+}
+
+// commandRelayWithCue keeps every shell-backed surface on one policy. The cue
+// is emitted once per accepted logical action, never once per electrical frame
+// of a firmware motion reversal. Board silent/relay-audio settings remain the
+// authoritative user controls.
+func commandRelayWithCue(
+	ctx context.Context,
+	runtime *Runtime,
+	opcode byte,
+	payload []byte,
+	activated, changed bool,
+) error {
+	if err := command(ctx, runtime, opcode, payload); err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	snapshot := runtime.Snapshot()
+	if !snapshot.HaveSettings ||
+		!snapshot.Settings.RelayAudioEnabled() ||
+		snapshot.Settings.Flags&native.SettingsSilent != 0 {
+		return nil
+	}
+	frequency := uint16(1250)
+	if activated {
+		frequency = 1900
+	}
+	if err := command(
+		ctx, runtime, native.OpBuzzer, native.BuzzerPayload(frequency, 35),
+	); err != nil {
+		return fmt.Errorf("relay applied but its buzzer cue failed: %w", err)
+	}
+	return nil
+}
+
+func relaySideStateChanged(snapshot Snapshot, side, motion byte) bool {
+	if !snapshot.HaveStatus {
+		return true
+	}
+	shift := side * 2
+	current := (snapshot.Status.ActiveRelays >> shift) & 0x03
+	var desired byte
+	switch motion {
+	case 1:
+		desired = 0x02
+	case 2:
+		desired = 0x03
+	default:
+		if snapshot.HaveSettings &&
+			snapshot.Settings.OutputPersistence&native.OutputPersistDirectionOnly != 0 {
+			desired = current & 0x01
+		}
+	}
+	return current != desired
 }
 
 func requireMotionAllowed(
@@ -4419,8 +4477,10 @@ func parseProgramOperation(value string) programmer.Operation {
 }
 
 func formatStatus(status native.Status) string {
+	ledTemperature := formatLEDTemperature(status, 2)
+	btTemperature := formatBTAudioTemperature(status, 2)
 	return fmt.Sprintf(
-		"uptime=%s supply=%.3fV bus=%.3fV current=%dmA power=%dmW tLED=%.2fC tBT=%.2fC\n"+
+		"uptime=%s supply=%.3fV bus=%.3fV current=%dmA power=%dmW tLED=%s tBT=%s\n"+
 			"flags=0x%04X running=%t host_offline=%t hot=%t inputs=0x%02X keys=0x%02X relays=0x%02X menu=%d mode=%d door=%t bt=%d\n"+
 			"PWM available=%t channel=%d value=%d errors=%d LCD=0x%02X framing=%d crc=%d reset_cause=0x%02X reset_count=%d",
 		(time.Duration(status.UptimeMS) * time.Millisecond).Round(time.Millisecond),
@@ -4428,8 +4488,8 @@ func formatStatus(status native.Status) string {
 		float64(status.BusMV)/1000,
 		status.CurrentMA,
 		status.PowerMW,
-		float64(status.TLEDCenti)/100,
-		float64(status.TBTCenti)/100,
+		ledTemperature,
+		btTemperature,
 		status.Flags,
 		status.ProgramRunning,
 		status.HostOffline,
@@ -4451,6 +4511,64 @@ func formatStatus(status native.Status) string {
 		status.ResetCause,
 		status.ResetCount,
 	)
+}
+
+func formatStatusTemperature(value int16, available bool, decimals int) string {
+	if !available {
+		return "unavailable"
+	}
+	return fmt.Sprintf("%.*fC", decimals, float64(value)/100)
+}
+
+func formatLEDTemperature(status native.Status, decimals int) string {
+	value, available := status.LEDTemperature()
+	return formatStatusTemperature(value, available, decimals)
+}
+
+func formatBTAudioTemperature(status native.Status, decimals int) string {
+	value, available := status.BTAudioTemperature()
+	return formatStatusTemperature(value, available, decimals)
+}
+
+const (
+	defaultBuzzerFrequencyHz uint16 = 2000
+	defaultBuzzerDurationMS  uint16 = 40
+	minimumBuzzerFrequencyHz uint64 = 20
+	maximumBuzzerFrequencyHz uint64 = 20000
+	maximumBuzzerDurationMS  uint64 = 60000
+)
+
+func parseBuzzerToneArgs(args []string) (uint16, uint16, error) {
+	if len(args) > 2 {
+		return 0, 0, errors.New("usage: buzzer|beep [FREQUENCY_HZ [DURATION_MS]]")
+	}
+	if len(args) == 0 {
+		return defaultBuzzerFrequencyHz, defaultBuzzerDurationMS, nil
+	}
+	frequency, err := strconv.ParseUint(args[0], 0, 16)
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid buzzer frequency %q", args[0])
+	}
+	duration := uint64(defaultBuzzerDurationMS)
+	if len(args) == 2 {
+		duration, err = strconv.ParseUint(args[1], 0, 16)
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid buzzer duration %q", args[1])
+		}
+	}
+	if frequency == 0 && duration == 0 && len(args) == 2 {
+		return 0, 0, nil
+	}
+	if frequency == 0 {
+		return 0, 0, errors.New("buzzer stop is exactly 0 0; timed pauses belong to melodies")
+	}
+	if frequency < minimumBuzzerFrequencyHz || frequency > maximumBuzzerFrequencyHz {
+		return 0, 0, fmt.Errorf("buzzer frequency must be %d..%d Hz", minimumBuzzerFrequencyHz, maximumBuzzerFrequencyHz)
+	}
+	if duration == 0 || duration > maximumBuzzerDurationMS {
+		return 0, 0, fmt.Errorf("buzzer duration must be 1..%d ms", maximumBuzzerDurationMS)
+	}
+	return uint16(frequency), uint16(duration), nil
 }
 
 func formatSettings(settings native.Settings) string {

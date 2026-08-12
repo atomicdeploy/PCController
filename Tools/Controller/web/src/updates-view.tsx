@@ -125,6 +125,14 @@ export function updateStateIsFresh(
   return Number.isFinite(updated) && Math.max(0, now - updated) < 1000
 }
 
+const activeUpdateStates = new Set<UpdateStatus['state']>([
+  'queued', 'downloading', 'reading', 'backing-up', 'programming', 'staging', 'verifying',
+])
+
+export function isActiveUpdateStatus(status: UpdateStatus | null | undefined): status is UpdateStatus {
+  return Boolean(status && activeUpdateStates.has(status.state))
+}
+
 export function UpdatesView({ appTitle, snapshot, events, locale, openDialog, transport }: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
@@ -194,7 +202,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog, tr
       : selected?.kind === 'flash-backup' ? manifest?.current.flash_readback : manifest?.current.firmware
   const comparison = compareBuildIdentity(currentForSelected, selected)
   const bootloaderUnavailable = status?.isp_fallback_suggested === true
-  const running = status && !['downloaded', 'completed', 'failed'].includes(status.state)
+  const running = isActiveUpdateStatus(status)
   const socketFresh = updateStateIsFresh(transport.streamState, stateUpdatedAt, clock)
 
   const acceptUploadFile = async (file: File | null) => {
@@ -327,7 +335,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog, tr
         title={copy('Firmware & updates', 'میان‌افزار و به‌روزرسانی')}
         detail={copy(`The primary ${appTitle} instance stages, hashes, backs up, programs and verifies. A browser or remote peer never writes the MCU directly.`, `نمونهٔ اصلی ${appTitle} فایل را آماده و هش می‌کند، پشتیبان می‌گیرد، پروگرام و تأیید می‌کند. مرورگر یا همتای راه‌دور هرگز مستقیم روی ریزکنترل‌گر نمی‌نویسد.`)}
         action={<div className="header-actions">
-          <StatusBadge tone={initialLoading ? 'info' : manifest?.enabled ? 'good' : 'warn'}>{initialLoading ? copy('LOADING', 'در حال بارگیری') : manifest?.enabled ? copy('SERVICE READY', 'سرویس آماده') : copy('NOT CONFIGURED', 'پیکربندی نشده')}</StatusBadge>
+          <StatusBadge tone={initialLoading ? 'info' : manifest?.enabled ? 'good' : 'warn'}>{initialLoading ? copy('CHECKING SERVICE', 'در حال بررسی سرویس') : manifest?.enabled ? copy('SERVICE READY', 'سرویس آماده') : copy('NOT CONFIGURED', 'پیکربندی نشده')}</StatusBadge>
           {!initialLoading && !socketFresh && <Button compact icon={RefreshCw} busy={busy === 'refresh'} onClick={() => void load(true)}>{copy('Refresh', 'تازه‌سازی')}</Button>}
         </div>}
       />
@@ -336,17 +344,18 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog, tr
         <div className="updates-hero__identity"><ShieldCheck /><div><span>{copy('Update permissions', 'مجوزهای به‌روزرسانی')}</span><strong>{copy('Primary host · explicit grant', 'میزبان اصلی · مجوز صریح')}</strong><p>{copy('Download and staging are safe preparation. Programming, EEPROM restore, ISP use, and self-replacement each require a separate confirmation.', 'دانلود و آماده‌سازی، مراحل مقدماتی امن هستند. پروگرام، بازیابی EEPROM، استفاده از ISP و جایگزینی خود برنامه هرکدام تأییدی جداگانه می‌خواهند.')}</p></div></div>
         <div className="updates-hero__state">
           <StatusBadge tone={operationTone(status?.state)} pulse={Boolean(running)}>{status?.state?.toUpperCase() || copy('IDLE', 'آماده')}</StatusBadge>
-          <strong>{Math.max(0, Math.min(100, status?.progress_percent ?? 0)).toFixed(0)}%</strong>
-          <span>{status?.detail || copy('No update operation is active.', 'هیچ عملیات به‌روزرسانی فعالی وجود ندارد.')}</span>
+          {running && <strong>{Math.max(0, Math.min(100, status.progress_percent)).toFixed(0)}%</strong>}
+          <span>{running ? status.detail || copy('The primary host is processing this operation.', 'میزبان اصلی در حال پردازش این عملیات است.') : copy('No update operation is active.', 'هیچ عملیات به‌روزرسانی فعالی وجود ندارد.')}</span>
         </div>
-        <div className="update-progress" aria-label={copy('Update progress', 'پیشرفت به‌روزرسانی')}><i style={{ width: `${Math.max(0, Math.min(100, status?.progress_percent ?? 0))}%` }} /></div>
-        <div className="updates-hero__metrics">
+        {running && <div className="update-progress" role="progressbar" aria-label={copy('Update progress', 'پیشرفت به‌روزرسانی')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.max(0, Math.min(100, status.progress_percent))}><i style={{ width: `${Math.max(0, Math.min(100, status.progress_percent))}%` }} /></div>}
+        {running && <div className="updates-hero__metrics">
           <DataRow label={copy('Transfer', 'انتقال')} value={status?.bytes_total ? `${formatBytes(status.bytes_done)} / ${formatBytes(status.bytes_total)}` : '—'} mono />
           <DataRow label={copy('Artifact', 'خروجی ساخت')} value={shortHash(status?.artifact_sha256)} mono />
           <DataRow label={copy('Updated', 'آخرین تغییر')} value={formatClock(locale, status?.updated_at)} />
           <DataRow label={copy('Programming path', 'مسیر پروگرام')} value={status?.programming_method || copy('none', 'هیچ‌کدام')} mono />
           <DataRow label={copy('Bootloader outcome', 'نتیجهٔ بوت‌لودر')} value={status?.bootloader_outcome || copy('not attempted', 'تلاش نشده')} tone={bootloaderUnavailable ? 'bad' : status?.bootloader_outcome === 'succeeded' ? 'good' : undefined} />
-        </div>
+        </div>}
+        {!running && <p className="updates-hero__idle-detail">{copy('Inventory checks and remote metadata requests may take a moment; progress appears only after the host creates an operation.', 'بررسی فهرست و دریافت فرادادهٔ راه‌دور ممکن است کمی زمان ببرد؛ پیشرفت فقط پس از ایجاد عملیات توسط میزبان نمایش داده می‌شود.')}</p>}
       </section>
 
       {notice && <div className={`update-notice${/failed|error|could not|expected/i.test(notice) ? ' is-error' : ''}`}><CheckCircle2 size={17} /><span>{notice}</span></div>}

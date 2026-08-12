@@ -114,6 +114,7 @@
             "controller.macro.snapshot",
             "controller.macro.status",
             "controller.macro.update",
+            "controller.melodies.list",
             "controller.menu.current",
             "controller.menu.jump",
             "controller.menu.layout.get",
@@ -616,6 +617,11 @@
       "capability": "host_configuration",
       "summary": "Rename, recategorize, recolor, or replace a validated macro.",
       "idempotency": "non-idempotent"
+    },
+    "controller.melodies.list": {
+      "capability": "read",
+      "summary": "Return the effective configured host melody catalog.",
+      "idempotency": "safe"
     },
     "controller.menu.current": {
       "capability": "read",

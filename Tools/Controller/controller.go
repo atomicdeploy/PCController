@@ -125,6 +125,16 @@ const (
 	StatusEffectMinimumPeriodMS = native.StatusEffectMinimumPeriodMS
 )
 
+// Temperature availability and physical range constants are shared by native
+// GUI embedders with the CLI/TUI and network surfaces.
+const (
+	StatusTemperatureLED     = native.StatusTemperatureLED
+	StatusTemperatureBT      = native.StatusTemperatureBT
+	InvalidTemperatureCentiC = native.InvalidTemperatureCentiC
+	MinimumTemperatureCentiC = native.MinimumTemperatureCentiC
+	MaximumTemperatureCentiC = native.MaximumTemperatureCentiC
+)
+
 // ParseRFLearnMode accepts the canonical RF learning mode and documented aliases.
 func ParseRFLearnMode(value string) (RFLearnMode, error) {
 	return control.ParseRFLearnMode(value)

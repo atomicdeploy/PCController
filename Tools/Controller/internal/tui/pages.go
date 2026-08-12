@@ -118,10 +118,10 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.power", "Load Power"), formatPower(status.PowerMW, model.prefs.PowerDecimals)))
 	}
 	if model.prefs.Visible["temperature_led"] {
-		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-led", "Temperature · Illumination LED"), formatTemperature(status.TLEDCenti, model.prefs.TemperatureDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-led", "Temperature · Illumination LED"), formatStatusTemperature(status.TLEDCenti, status.Flags, native.StatusTemperatureLED, model.prefs.TemperatureDecimals)))
 	}
 	if model.prefs.Visible["temperature_bt"] {
-		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatStatusTemperature(status.TBTCenti, status.Flags, native.StatusTemperatureBT, model.prefs.TemperatureDecimals)))
 	}
 
 	stateLines := []string{
@@ -953,8 +953,8 @@ func (model Model) graphTable(width int) string {
 		{"Bus Voltage", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.BusMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
 		{"Load Current", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.CurrentMA) }), func(value float64) string { return formatCurrent(int32(value), model.prefs.CurrentDecimals) }},
 		{"Load Power", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.PowerMW) }), func(value float64) string { return formatPower(int32(value), model.prefs.PowerDecimals) }},
-		{"Illumination Temperature", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.TLEDCenti) }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
-		{"BT Audio Temperature", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.TBTCenti) }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
+		{"Illumination Temperature", temperatureSampleValues(model.samples, native.StatusTemperatureLED, func(sample measurementSample) int16 { return sample.TLEDCenti }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
+		{"BT Audio Temperature", temperatureSampleValues(model.samples, native.StatusTemperatureBT, func(sample measurementSample) int16 { return sample.TBTCenti }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
 	}
 	rows := make([][]string, 0, len(metrics))
 	for _, item := range metrics {
@@ -1055,6 +1055,17 @@ func sampleValues(samples []measurementSample, value func(measurementSample) flo
 	result := make([]float64, len(samples))
 	for index, sample := range samples {
 		result[index] = value(sample)
+	}
+	return result
+}
+
+func temperatureSampleValues(samples []measurementSample, availabilityFlag uint16, value func(measurementSample) int16) []float64 {
+	result := make([]float64, 0, len(samples))
+	for _, sample := range samples {
+		measurement := value(sample)
+		if native.TemperatureAvailable(sample.Flags, measurement, availabilityFlag) {
+			result = append(result, float64(measurement))
+		}
 	}
 	return result
 }

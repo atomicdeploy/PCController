@@ -7,6 +7,7 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/native"
 )
 
 const discoveryMetadataMinimumInterval = 5 * time.Second
@@ -44,14 +45,16 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot) []
 	}
 	if snapshot.HaveStatus {
 		status := snapshot.Status
+		_, ledTemperatureAvailable := status.LEDTemperature()
+		_, btTemperatureAvailable := status.BTAudioTemperature()
 		values = append(values,
 			"board.uptime_ms="+strconv.FormatUint(uint64(status.UptimeMS), 10),
 			"board.supply_mv="+strconv.FormatInt(int64(status.SupplyMV), 10),
 			"board.bus_mv="+strconv.FormatInt(int64(status.BusMV), 10),
 			"board.current_ma="+strconv.FormatInt(int64(status.CurrentMA), 10),
 			"board.power_mw="+strconv.FormatInt(int64(status.PowerMW), 10),
-			"board.temperature_led_centi_c="+strconv.FormatInt(int64(status.TLEDCenti), 10),
-			"board.temperature_bt_audio_centi_c="+strconv.FormatInt(int64(status.TBTCenti), 10),
+			"board.temperature_led_available="+strconv.FormatBool(ledTemperatureAvailable),
+			"board.temperature_bt_audio_available="+strconv.FormatBool(btTemperatureAvailable),
 			"board.flags="+strconv.FormatUint(uint64(status.Flags), 10),
 			"board.program_running="+strconv.FormatBool(status.ProgramRunning),
 			"board.host_offline="+strconv.FormatBool(status.HostOffline),
@@ -69,6 +72,12 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot) []
 			"board.reset_count="+strconv.FormatUint(uint64(status.ResetCount), 10),
 			"board.status_at="+snapshot.StatusUpdated.UTC().Format(time.RFC3339),
 		)
+		if native.TemperatureAvailable(status.Flags, status.TLEDCenti, native.StatusTemperatureLED) {
+			values = append(values, "board.temperature_led_centi_c="+strconv.FormatInt(int64(status.TLEDCenti), 10))
+		}
+		if native.TemperatureAvailable(status.Flags, status.TBTCenti, native.StatusTemperatureBT) {
+			values = append(values, "board.temperature_bt_audio_centi_c="+strconv.FormatInt(int64(status.TBTCenti), 10))
+		}
 	}
 	if snapshot.HaveSettings {
 		settings := snapshot.Settings

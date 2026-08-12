@@ -18,7 +18,7 @@ function shared(): SharedViewProps {
 
 describe('advanced front-panel navigation', () => {
   it('uses only the typed board catalog selector and never accepts an arbitrary page string', () => {
-    const markup = renderToStaticMarkup(<AdvancedWorkbench {...shared()} run={vi.fn(async () => '')} busy="" />)
+    const markup = renderToStaticMarkup(<AdvancedWorkbench {...shared()} run={vi.fn(async () => '')} busy="" destination="interface-displays" />)
     expect(markup).toContain('<select aria-label="Firmware page"')
     expect(markup).toContain('Loading verified catalog')
     expect(markup).not.toContain('Firmware page ID or key')

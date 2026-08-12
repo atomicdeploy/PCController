@@ -8,6 +8,7 @@ describe('dashboard layout', () => {
   it('moves and toggles a card without losing layout state', () => {
     const initial = defaultDashboardLayout()
     expect(moveDashboardCard(initial, 'events', 'telemetry').order[0]).toBe('events')
+    expect(moveDashboardCard(initial, 'telemetry', 'outputs').order.slice(0, 2)).toEqual(['outputs', 'telemetry'])
     expect(toggleDashboardCard([], 'overview')).toEqual(['overview'])
   })
 })

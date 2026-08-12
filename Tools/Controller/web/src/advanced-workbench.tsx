@@ -70,10 +70,13 @@ import { redactSensitiveCommand, shellArgument as quoteArgument } from './comman
 import { SevenSegmentPreview } from './seven-segment-preview'
 import type { MenuCatalog } from './types'
 import type { SharedViewProps } from './views'
+import type { PeripheralDestinationID } from './peripheral-navigation'
+import { advancedWorkbenchPanelVisible, type AdvancedWorkbenchPanelID } from './workbench-subpages'
 
 interface AdvancedWorkbenchProps extends SharedViewProps {
   run: (command: string) => Promise<string>
   busy: string
+  destination: PeripheralDestinationID
 }
 
 type ReviewRisk = 'normal' | 'caution' | 'danger'
@@ -95,6 +98,7 @@ interface PanelProps {
   defaultOpen?: boolean
   tone?: 'good' | 'warn' | 'bad' | 'info' | 'neutral'
   status?: string
+  visible?: boolean
 }
 
 function AdvancedPanel({
@@ -106,8 +110,10 @@ function AdvancedPanel({
   defaultOpen = false,
   tone = 'neutral',
   status,
+  visible = true,
 }: PanelProps) {
   const [open, setOpen] = useState(defaultOpen)
+  if (!visible) return null
   return (
     <details
       className="advanced-panel"
@@ -152,11 +158,13 @@ export function AdvancedWorkbench({
   locale,
   run,
   busy,
+  destination,
 }: AdvancedWorkbenchProps) {
   const isPersian = locale === 'fa'
   const copy = (english: string, persian: string) => isPersian ? persian : english
   const online = snapshot.connected
   const boardBusy = busy.length > 0
+  const show = (panel: AdvancedWorkbenchPanelID) => advancedWorkbenchPanelVisible(destination, panel)
 
   const [port, setPort] = useState('')
   const [streamEnabled, setStreamEnabled] = useState(true)
@@ -412,6 +420,7 @@ export function AdvancedWorkbench({
 
       <div className="advanced-grid">
         <AdvancedPanel
+          visible={show('connection')}
           icon={Usb}
           eyebrow={copy('SERIAL LIFECYCLE', 'چرخه اتصال سریال')}
           title={copy('Connection, stream & program state', 'اتصال، جریان وضعیت و حالت برنامه')}
@@ -462,6 +471,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         {online && <><AdvancedPanel
+          visible={show('temperature')}
           icon={Thermometer}
           eyebrow="DS18B20"
           title={copy('Temperature identities', 'شناسه‌های دما')}
@@ -478,6 +488,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('audio')}
           icon={AudioLines}
           eyebrow={copy('EEPROM-BACKED', 'ذخیره‌شده در EEPROM')}
           title={copy('Silent mode & firmware buzzer cues', 'حالت بی‌صدا و اعلان‌های بیزر')}
@@ -502,6 +513,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('front-panel')}
           icon={LayoutPanelTop}
           eyebrow={copy('FRONT PANEL', 'پنل جلویی')}
           title={copy('Catalog, layout & navigation', 'کاتالوگ، چیدمان و پیمایش')}
@@ -583,6 +595,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('lighting')}
           icon={SlidersHorizontal}
           eyebrow="WS281X + STATUS RGB"
           title={copy('Per-pixel light & effect engine', 'نور هر پیکسل و موتور افکت')}
@@ -607,6 +620,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('radio')}
           icon={Radio}
           eyebrow="433 MHz"
           title={copy('RF inspection, removal & mapping', 'بررسی، حذف و نگاشت RF')}
@@ -644,6 +658,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('i2c')}
           icon={Cable}
           eyebrow="I²C + LCD"
           title={copy('Cooperative bus & raw transfer', 'گذرگاه اشتراکی و انتقال خام')}
@@ -668,6 +683,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('keyboard')}
           icon={Keyboard}
           eyebrow={copy('GLOBAL INPUT', 'ورودی سراسری')}
           title={copy('Keyboard lifecycle & all-off control', 'چرخه صفحه‌کلید و خاموش‌کردن همه')}
@@ -684,6 +700,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel></>}
 
         <AdvancedPanel
+          visible={show('os')}
           icon={MonitorCog}
           eyebrow={copy('POLICY-GATED OS', 'سیستم‌عامل تحت سیاست امنیتی')}
           title={copy('Brightness, virtual key & power preparation', 'روشنایی، کلید مجازی و آماده‌سازی توان')}
@@ -720,6 +737,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('services')}
           icon={Network}
           eyebrow={copy('TYPED HOST SERVICES', 'سرویس‌های تایپ‌شده میزبان')}
           title={copy('Messages, discovery & history', 'پیام‌ها، کشف شبکه و تاریخچه')}
@@ -765,6 +783,7 @@ export function AdvancedWorkbench({
         </AdvancedPanel>
 
         <AdvancedPanel
+          visible={show('firmware')}
           icon={Cpu}
           eyebrow={copy('READ-FIRST RECOVERY', 'بازیابی با اولویت خواندن')}
           title={copy('Firmware, toolchain & boot preparation', 'میان‌افزار، زنجیره‌ابزار و آماده‌سازی بوت')}

@@ -23,6 +23,7 @@ describe('startup browser console', () => {
     expect(sink.groupCollapsed).toHaveBeenCalledWith(expect.stringContaining('%c%s%c'), expect.any(String), 'PCController', expect.any(String))
 		expect(sink.info).toHaveBeenCalledWith('%cHost%c 🧩 version %s · versionless living API', expect.any(String), expect.any(String), '1.2.3')
     expect(sink.info).toHaveBeenCalledWith('%cController%c 🟠 offline · no authenticated board', expect.any(String), expect.any(String))
+    expect(sink.info).toHaveBeenCalledWith(expect.stringContaining('.beep()'), expect.any(String), expect.any(String))
     expect(sink.debug).toHaveBeenCalledWith('%cTransport%c 📡 %s · subscribe with addEventListener("pccontroller:state", handler)', expect.any(String), expect.any(String), 'Host event stream connected')
     expect(sink.info.mock.calls.flat().join(' ')).not.toContain('Live')
     expect(sink.groupEnd).toHaveBeenCalledOnce()

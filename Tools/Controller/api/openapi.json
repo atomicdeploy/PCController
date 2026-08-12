@@ -3920,6 +3920,7 @@
               "controller.macro.snapshot",
               "controller.macro.status",
               "controller.macro.update",
+              "controller.melodies.list",
               "controller.menu.current",
               "controller.menu.jump",
               "controller.menu.layout.get",

@@ -36,6 +36,7 @@ func RichPreviewSnapshot() control.Snapshot {
 		Status: native.Status{
 			UptimeMS: 4_392_210, SupplyMV: 12_224, BusMV: 12_198,
 			CurrentMA: 286, PowerMW: 3492, TLEDCenti: 2812, TBTCenti: 2637,
+			Flags:      native.StatusTemperatureLED | native.StatusTemperatureBT,
 			ActiveKeys: 0x01, ActiveRelays: 0x50, MenuPage: 0,
 			ProgramMode: 1, DoorOpen: true, BluetoothState: 2,
 			PWMAvailable: true, PWMChannel: 3, PWMValue: 2816, LCDAddress: 0x27,
@@ -72,6 +73,7 @@ func RichPreviewModel(welcome bool) Model {
 	for index := 0; index < 72; index++ {
 		model.samples = append(model.samples, measurementSample{
 			At:       base.Add(time.Duration(index) * 4 * time.Second),
+			Flags:    native.StatusTemperatureLED | native.StatusTemperatureBT,
 			SupplyMV: 12220 + int32(index%5), BusMV: 12195 + int32(index%7),
 			CurrentMA: 270 + int32((index*7)%24), PowerMW: 3310 + int32((index*31)%230),
 			TLEDCenti: 2680 + int16(index*2), TBTCenti: 2630 + int16(index%5),

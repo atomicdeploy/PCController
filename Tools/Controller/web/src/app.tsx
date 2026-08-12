@@ -65,7 +65,7 @@ import {
 } from './significant-events'
 import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
-import { publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
+import { normalizeBrowserBeep, publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
 import {
   createTabChannel,
   type TabChannel,
@@ -94,6 +94,12 @@ import type { SharedViewProps } from './views'
 import { AppPreferencesDialog } from './app-preferences-dialog'
 import { loadQuickHeaderPreferences, normalizeQuickHeaderPreferences, saveQuickHeaderPreferences } from './quick-header-preferences'
 import { messageActionParams, messageDeliveryParams, messageToast } from './message-presentation'
+import { commandSuccessShouldToast } from './command-feedback'
+import { parseStatusCommandOutput } from './status-output'
+import { audioTemperatureAvailableFlag, controllerTemperatureSample, lightingTemperatureAvailableFlag } from './temperature-status'
+import type { CommandOptions } from './views'
+import { SettingsDialog } from './settings-dialog'
+import { canonicalPeripheralHash, peripheralDestinationFromHash } from './peripheral-navigation'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -125,7 +131,6 @@ export const navigation: NavDefinition[] = [
   { id: 'data', label: 'data', icon: Boxes, view: DataWorkspacePage, group: 'integrations' },
   { id: 'updates', label: 'updates', icon: PackageOpen, view: UpdatesPage, group: 'system' },
   { id: 'events', label: 'events', icon: Activity, view: EventsPage, group: 'system' },
-  { id: 'settings', label: 'settings', icon: Settings, view: SettingsPage, group: 'system' },
 ]
 
 export function pageViewFor(page: PageID): LazyExoticComponent<ComponentType<any>> {
@@ -149,7 +154,10 @@ const defaultAppearance: Appearance = {
 const appearanceStorageKey = `${__PRODUCT_PROTOCOL__}.appearance`
 const resourceReloadStorageKey = `${__PRODUCT_PROTOCOL__}.resource-reload`
 
-export function reloadForResourceMismatch(config: Pick<UIConfig, 'host_version' | 'build_time'>): boolean {
+export function reloadForResourceMismatch(
+  config: Pick<UIConfig, 'host_version' | 'build_time'>,
+  beforeReload?: (identity: string) => void,
+): boolean {
   const identity = hostResourceIdentity(config)
   if (!embeddedResourcesMismatch(config)) {
     try { sessionStorage.removeItem(resourceReloadStorageKey) } catch { /* storage may be disabled */ }
@@ -162,6 +170,7 @@ export function reloadForResourceMismatch(config: Pick<UIConfig, 'host_version' 
     // Never risk an unbounded reload loop when private storage is unavailable.
     return false
   }
+  beforeReload?.(identity)
   window.location.reload()
   return true
 }
@@ -206,11 +215,22 @@ function applyAppearance(value: Appearance): void {
 
 export function pageFromHash(hash: string): PageID {
   const value = hash.replace(/^#\/?/, '').split(/[/?#]/)[0] as PageID
+  if (value === 'settings') return 'settings'
   return navigation.some((item) => item.id === value) ? value : 'dashboard'
 }
 
 export function canonicalPageHash(page: PageID): string {
   return `#/${page}`
+}
+
+/** Keeps a recognized Workbench subpage shareable while normalizing bad URLs. */
+export function canonicalLocationHash(hash: string): string {
+  const page = pageFromHash(hash)
+  if (page === 'workbench') {
+    const destination = peripheralDestinationFromHash(hash)
+    if (destination) return canonicalPeripheralHash(destination)
+  }
+  return canonicalPageHash(page)
 }
 
 export function canonicalPageURL(page: PageID, pathname = location.pathname, search = location.search): string {
@@ -229,8 +249,8 @@ function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
     bus: status.bus_mv / 1000,
     current: status.current_ma,
     power: status.power_mw / 1000,
-    ledTemp: status.temperature_led_centi_c / 100,
-    btTemp: status.temperature_bt_audio_centi_c / 100,
+    ledTemp: controllerTemperatureSample(status.temperature_led_centi_c, status.flags, lightingTemperatureAvailableFlag),
+    btTemp: controllerTemperatureSample(status.temperature_bt_audio_centi_c, status.flags, audioTemperatureAvailableFlag),
   }
 }
 
@@ -345,6 +365,22 @@ export function snapshotAfterTransportLoss(
   }
 }
 
+export function snapshotAfterStatusRecovery(
+  current: Snapshot,
+  status: Snapshot['status'],
+  updatedAt: string,
+): Snapshot {
+  return {
+    ...current,
+    connected: true,
+    connection_state: 'connected',
+    connection_reason: '',
+    have_status: true,
+    status,
+    status_updated: updatedAt,
+  }
+}
+
 export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'metadata'>): boolean {
   return event.kind.toLowerCase() === 'update.completed' && event.metadata?.kind === 'host'
 }
@@ -371,7 +407,7 @@ export function connectionTransitionCue(
 export default function App() {
   const demo = new URLSearchParams(location.search).get('demo') === '1'
   const [appearance, setAppearance] = useState(loadAppearance)
-  const [page, setPage] = useState<PageID>(pageFromLocation)
+  const [page, setPage] = useState<PageID>(() => pageFromLocation() === 'settings' ? 'dashboard' : pageFromLocation())
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileNav, setMobileNav] = useState(false)
   const [snapshot, setSnapshot] = useState<Snapshot>(demo ? demoSnapshot() : emptySnapshot)
@@ -390,6 +426,7 @@ export default function App() {
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
   const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(() => pageFromLocation() === 'settings')
   const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
   const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
   const [sidebarStatusMenuPosition, setSidebarStatusMenuPosition] = useState({ left: 0, top: 0 })
@@ -411,6 +448,9 @@ export default function App() {
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
   const refreshAfterHostRestart = useRef(false)
+  const resourceRetryTimer = useRef<number | null>(null)
+  const resourceRetryAttempt = useRef(0)
+  const statusRecoveryPending = useRef(false)
   const relayOptimisticRef = useRef(new Map<number, boolean>())
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
@@ -450,11 +490,33 @@ export default function App() {
 
 	const refreshHostAppearance = useCallback(async (): Promise<boolean> => {
 		const config = await getUIConfig()
-		if (reloadForResourceMismatch(config)) return true
+		if (reloadForResourceMismatch(config, (identity) => tabChannelRef.current?.publishResourceReload(identity))) return true
 		setUIConfig(config)
     adoptHostAppearance(config.appearance, config.appearance_etag)
     return false
   }, [adoptHostAppearance])
+
+  const verifyHostResources = useCallback(() => {
+    if (resourceRetryTimer.current !== null) window.clearTimeout(resourceRetryTimer.current)
+    resourceRetryTimer.current = null
+    resourceRetryAttempt.current = 0
+    const attempt = async () => {
+      try {
+        await refreshHostAppearance()
+        resourceRetryAttempt.current = 0
+      } catch {
+        resourceRetryAttempt.current += 1
+        if (resourceRetryAttempt.current >= 6) return
+        const delay = Math.min(30_000, 1_000 * 2 ** (resourceRetryAttempt.current - 1))
+        resourceRetryTimer.current = window.setTimeout(() => { void attempt() }, delay)
+      }
+    }
+    void attempt()
+  }, [refreshHostAppearance])
+
+  useEffect(() => () => {
+    if (resourceRetryTimer.current !== null) window.clearTimeout(resourceRetryTimer.current)
+  }, [])
 
   useEffect(() => {
 	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
@@ -611,6 +673,11 @@ export default function App() {
         })
         setEvents((current) => prependSignificantControllerEvent(current, event))
       }
+      if (payload.type === 'resource-reload') {
+        // The hint is intentionally credential-free. Every receiving tab still
+        // fetches the authoritative no-store config and verifies it itself.
+        verifyHostResources()
+      }
     })
     const announce = () => channel.publishPresence(document.hidden ? 'hidden' : 'active', pageRef.current)
     const onVisibility = () => announce()
@@ -626,7 +693,7 @@ export default function App() {
       if (tabChannelRef.current === channel) tabChannelRef.current = null
       setAppInstanceID((current) => current === channel.tabId ? '' : current)
     }
-  }, [refreshHostAppearance])
+  }, [refreshHostAppearance, verifyHostResources])
 
   useEffect(() => {
     if (demo || !startupProbeResolved || !appInstanceID) return
@@ -770,7 +837,7 @@ export default function App() {
   }, [demo, notify])
 
   useEffect(() => {
-    const shouldRead = boardSettingsReadGate.current.shouldRead(snapshot, page === 'settings')
+    const shouldRead = boardSettingsReadGate.current.shouldRead(snapshot, settingsOpen)
     if (!snapshot.connected) {
       boardSettingsRequestGeneration.current = ''
       setBoardSettingsReadState('idle')
@@ -803,15 +870,17 @@ export default function App() {
     snapshot.port.instance_id,
     snapshot.port.name,
     snapshot.port.serial_number,
+    settingsOpen,
   ])
 
-  const dispatchCommand = useCallback(async (command: string, success?: string, notifyOnSuccess = true, refreshAfter = false): Promise<string> => {
+  const dispatchCommand = useCallback(async (command: string, success?: string, options: CommandOptions = {}): Promise<string> => {
     const safeCommand = redactSensitiveCommand(command)
+    const notifyOnSuccess = options.notifyOnSuccess ?? commandSuccessShouldToast(command, success)
     tabChannelRef.current?.publishTerminal({ kind: 'command', text: `pc› ${safeCommand}`, at: Date.now() })
     if (demo) {
       const output = `[demo] ${safeCommand}`
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output, at: Date.now() })
-      notify('info', success || 'Demonstration command', output)
+      if (notifyOnSuccess) notify('info', success || 'Demonstration command', output)
       return output
     }
     try {
@@ -819,10 +888,22 @@ export default function App() {
       const output = result.output ?? ''
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output || '✓ accepted', at: Date.now() })
       if (notifyOnSuccess) notify('success', success || 'Command completed', output || safeCommand)
+      if (/^status(?:\s|$)/i.test(command.trim())) {
+        const parsed = parseStatusCommandOutput(output)
+        if (parsed && snapshot.connected) {
+          const sampledAt = Date.now()
+          setSnapshot((current) => {
+            if (!current.connected) return current
+            const next = { ...current, have_status: true, status: { ...current.status, ...parsed }, status_updated: new Date(sampledAt).toISOString() }
+            setSamples((samples) => [...samples.slice(-71), sampleFrom(next, sampledAt)])
+            return next
+          })
+        }
+      }
       // State-bearing commands normally converge through the event/status
       // stream for every client. Poll only when a caller explicitly selects a
       // legacy capability path whose firmware cannot emit presentation state.
-      if (refreshAfter) void refresh()
+      if (options.refreshAfter) void refresh()
       return output
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause)
@@ -830,11 +911,11 @@ export default function App() {
       notify('danger', 'Command failed', detail)
       throw cause
     }
-  }, [demo, notify, refresh])
+  }, [demo, notify, refresh, snapshot.connected])
 
-  const runCommand = useCallback((command: string, success?: string): Promise<string> => {
+  const runCommand = useCallback((command: string, success?: string, options?: CommandOptions): Promise<string> => {
     const caution = demo ? null : commandWarning(command, appearance.locale)
-    if (!caution) return dispatchCommand(command, success)
+    if (!caution) return dispatchCommand(command, success, options)
     return new Promise<string>((resolve, reject) => {
       let settled = false
       setDialog({
@@ -850,7 +931,7 @@ export default function App() {
         },
         action: async () => {
           try {
-            const output = await dispatchCommand(command, success)
+            const output = await dispatchCommand(command, success, options)
             settled = true
             resolve(output)
           } catch (cause) {
@@ -887,7 +968,7 @@ export default function App() {
     try {
       // The event/status stream is authoritative; an immediate status poll can
       // race the board acknowledgement and visibly undo the optimistic click.
-      await dispatchCommand(`relay ${relay} ${active ? 'off' : 'on'}`, undefined, false)
+      await dispatchCommand(`relay ${relay} ${active ? 'off' : 'on'}`, undefined, { notifyOnSuccess: false })
     } catch {
       relayOptimisticRef.current.delete(relay)
       setSnapshot((current) => current.status.active_relays === next ? { ...current, status: { ...current.status, active_relays: previous } } : current)
@@ -902,6 +983,12 @@ export default function App() {
   }, [])
 
   const navigate = useCallback((value: PageID) => {
+    if (value === 'settings') {
+      if (location.hash !== canonicalPageHash('settings')) history.pushState({ page: 'settings', modal: true }, '', canonicalPageURL('settings'))
+      setSettingsOpen(true)
+      setMobileNav(false)
+      return
+    }
     const nextHash = canonicalPageHash(value)
     if (pageRef.current !== value || location.hash !== nextHash) {
       history.pushState({ page: value }, '', canonicalPageURL(value))
@@ -931,13 +1018,25 @@ export default function App() {
       if (!command) return Promise.reject(new Error('PCController.command requires a non-empty normalized command string'))
       return runCommand(command)
     },
+    beep: async (frequencyHz, durationMS, target) => {
+      const normalized = normalizeBrowserBeep(frequencyHz, durationMS, target)
+      const tasks: Promise<unknown>[] = []
+      if (normalized.target !== 'board') {
+        tasks.push(Promise.resolve(audioRef.current?.playTone(normalized.frequencyHz, normalized.durationMS)))
+      }
+      if (normalized.target !== 'browser') {
+        if (!snapshot.connected) throw new Error('No authenticated controller is connected for board audio')
+        tasks.push(runCommand(`buzzer ${normalized.frequencyHz} ${normalized.durationMS}`, undefined, { notifyOnSuccess: false }))
+      }
+      await Promise.all(tasks)
+    },
     refresh: async () => { await refresh() },
     navigate: (value) => {
       const destination = navigation.find((candidate) => candidate.id === value)?.id
       if (!destination) throw new Error(`Unknown PCController page: ${value}`)
       navigate(destination)
     },
-  }), [browserConsoleState, navigate, refresh, runCommand])
+  }), [browserConsoleState, navigate, refresh, runCommand, snapshot.connected])
 
   useEffect(() => { publishBrowserConsoleState(browserConsoleState) }, [browserConsoleState])
 
@@ -1038,11 +1137,18 @@ export default function App() {
 
   useEffect(() => {
     const initialPage = pageFromLocation()
-    if (location.hash !== canonicalPageHash(initialPage)) {
-      history.replaceState(history.state, '', canonicalPageURL(initialPage))
+    const initialHash = canonicalLocationHash(location.hash)
+    if (location.hash !== initialHash) {
+      history.replaceState(history.state, '', `${location.pathname}${location.search}${initialHash}`)
     }
     const syncFromHistory = () => {
       const next = pageFromLocation()
+      if (next === 'settings') {
+        setSettingsOpen(true)
+        setMobileNav(false)
+        return
+      }
+      setSettingsOpen(false)
       pageRef.current = next
       setPage(next)
       setMobileNav(false)
@@ -1057,7 +1163,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (bootOpen) return
+      if (bootOpen || settingsOpen || appPreferencesOpen) return
       const composing = event.isComposing || event.keyCode === 229
       if (palette) {
         if (composing) return
@@ -1155,7 +1261,7 @@ export default function App() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, t, toggleAudio])
+  }, [appPreferencesOpen, bootOpen, dialog.open, hotkeyHelp, mobileNav, navigate, page, palette, paletteIndex, paletteQuery, settingsOpen, t, toggleAudio])
 
   useEffect(() => {
     setPaletteIndex(0)
@@ -1206,7 +1312,7 @@ export default function App() {
       try {
         setBootTarget(42)
         const config = await getUIConfig(abort.signal)
-		if (reloadForResourceMismatch(config)) return
+		if (reloadForResourceMismatch(config, (identity) => tabChannelRef.current?.publishResourceReload(identity))) return
         setUIConfig(config)
         adoptHostAppearance(config.appearance, config.appearance_etag)
         const firstSetup = shouldOpenSetup(config)
@@ -1252,8 +1358,21 @@ export default function App() {
               if (authoritative === desired) relayOptimisticRef.current.delete(relay)
               else status.active_relays = desired ? status.active_relays | mask : status.active_relays & ~mask
             }
-            setSnapshot((current) => ({ ...current, connected: true, have_status: true, status, status_updated: update.time }))
+            const recovered = statusRecoveryPending.current
+            statusRecoveryPending.current = false
+            setSnapshot((current) => snapshotAfterStatusRecovery(current, status, update.time))
             setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, status: update.status }, new Date(update.time).getTime())])
+            // A transient status error clears stale board-derived surfaces.
+            // Recover their complete authoritative state exactly once, after
+            // the first good stream sample proves the controller is back.
+            if (recovered) void refresh()
+          },
+          error: (detail) => {
+            statusRecoveryPending.current = true
+            setStreamDetail(detail)
+            setSnapshot((current) => current.connected
+              ? snapshotAfterTransportLoss(current, 'waiting', detail)
+              : { ...current, connection_reason: detail })
           },
           event: (event) => {
 			const eventKind = event.kind.toLowerCase()
@@ -1308,7 +1427,7 @@ export default function App() {
 					}).catch(() => window.location.reload())
 					return
 				}
-				void refreshHostAppearance().catch(() => undefined)
+				verifyHostResources()
 				void refresh()
             } else {
               setSnapshot((current) => snapshotAfterTransportLoss(current, state, detail))
@@ -1326,7 +1445,7 @@ export default function App() {
       }
     })()
     return () => { abort.abort(); stopStream() }
-  }, [adoptHostAppearance, appInstanceID, demo, enqueueToast, navigate, notify, refresh, refreshHostAppearance])
+  }, [adoptHostAppearance, appInstanceID, demo, enqueueToast, navigate, notify, refresh, refreshHostAppearance, verifyHostResources])
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, macroEvents, locale: appearance.locale, t, command: runCommand, relayToggle, relayPending, refresh, openDialog,
@@ -1340,11 +1459,14 @@ export default function App() {
   const PageView = pageViewFor(page)
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
-      {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
-        : <PageView {...shared} />}
+      <PageView {...shared} />
     </Suspense>
   )
+
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false)
+    if (location.hash === canonicalPageHash('settings')) history.replaceState({ page: pageRef.current }, '', canonicalPageURL(pageRef.current))
+  }, [])
 
   const current = navigation.find((item) => item.id === page) ?? navigation[0]
   const filteredPalette = navigation.filter((item) => t(item.label).toLowerCase().includes(paletteQuery.toLowerCase()))
@@ -1399,8 +1521,8 @@ export default function App() {
     <MotionConfig reducedMotion={appearance.reduceMotion ? 'always' : 'user'}>
     <div
       className={`app-shell${sidebarOpen ? '' : ' is-sidebar-compact'}${bootResolved ? '' : ' is-bootstrap-pending'}`}
-      inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
-      aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
+      inert={!bootResolved || bootOpen || hotkeyHelp || settingsOpen || appPreferencesOpen ? true : undefined}
+      aria-hidden={!bootResolved || bootOpen || hotkeyHelp || settingsOpen || appPreferencesOpen ? true : undefined}
     >
       <aside className="sidebar" aria-label={t('primaryNavigation')}>
         <div className="brand">
@@ -1464,7 +1586,7 @@ export default function App() {
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
           <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>
-          <button className="topbar-icon" aria-label={appearance.locale === 'fa' ? 'ترجیحات برنامه' : 'Application preferences'} aria-haspopup="dialog" onClick={() => setAppPreferencesOpen(true)}><Settings size={18} /></button>
+          <button className="topbar-icon" aria-label={t('settings')} aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => navigate('settings')}><Settings size={18} /></button>
           {quickHeader.theme && <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>}
           {quickHeader.language && <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>}
           {quickHeader.audio && <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}
@@ -1518,6 +1640,11 @@ export default function App() {
       </AnimatePresence>
 
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
+      <SettingsDialog open={settingsOpen} active={!appPreferencesOpen} title={t('settings')} closeLabel={appearance.locale === 'fa' ? 'بستن تنظیمات' : 'Close settings'} onClose={closeSettings}>
+        <Suspense fallback={<section className="page-loading" role="status"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری تنظیمات…' : 'Loading settings…'}</section>}>
+          <SettingsPage {...shared} appearance={appearance} onAppearance={saveAppearance} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
+        </Suspense>
+      </SettingsDialog>
       <AppPreferencesDialog open={appPreferencesOpen} locale={appearance.locale} appearance={appearance} quickHeader={quickHeader} onAppearance={saveAppearance} onQuickHeader={saveQuickHeader} onClose={() => setAppPreferencesOpen(false)} />
       <ToastStack
         messages={toasts}

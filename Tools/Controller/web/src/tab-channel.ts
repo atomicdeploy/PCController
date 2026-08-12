@@ -68,12 +68,19 @@ export interface ControllerEventPayload {
   event: SharedControllerEvent
 }
 
+/** Credential-free hint that asks every tab to verify its embedded resource identity. */
+export interface ResourceReloadPayload {
+  type: 'resource-reload'
+  identity: string
+}
+
 /** Payload variants accepted by the tab-channel wire contract. */
 export type TabChannelPayload =
   | PresencePayload
   | AppearancePayload
   | TerminalPayload
   | ControllerEventPayload
+  | ResourceReloadPayload
 
 /** Versioned and expiring envelope sent through BroadcastChannel. */
 export interface TabChannelEnvelope {
@@ -123,6 +130,7 @@ export interface TabChannel {
   publishAppearance(appearance: AppearancePatch, etag?: string): string | null
   publishTerminal(entry: TerminalEntry): string | null
   publishControllerEvent(event: SharedControllerEvent): string | null
+  publishResourceReload(identity: string): string | null
   subscribe(listener: TabChannelListener): () => void
   close(): void
 }
@@ -365,6 +373,12 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
   }
 }
 
+function sanitizeResourceReload(raw: RecordValue): ResourceReloadPayload | null {
+  if (!hasOnlyKeys(raw, ['type', 'identity'])) return null
+  const identity = safeText(raw.identity, 512)
+  return identity === null ? null : { type: 'resource-reload', identity }
+}
+
 function sanitizePayload(value: unknown): TabChannelPayload | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null
   switch (value.type) {
@@ -372,6 +386,7 @@ function sanitizePayload(value: unknown): TabChannelPayload | null {
     case 'appearance': return sanitizeAppearance(value)
     case 'terminal': return sanitizeTerminal(value)
     case 'controller-event': return sanitizeControllerEvent(value)
+    case 'resource-reload': return sanitizeResourceReload(value)
     default: return null
   }
 }
@@ -509,6 +524,7 @@ export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
     publishAppearance: (appearance, etag) => publish({ type: 'appearance', appearance, ...(etag === undefined ? {} : { etag }) }),
     publishTerminal: (entry) => publish({ type: 'terminal', entry }),
     publishControllerEvent: (event) => publish({ type: 'controller-event', event }),
+    publishResourceReload: (identity) => publish({ type: 'resource-reload', identity }),
     subscribe(listener) {
       if (closed) return () => undefined
       listeners.add(listener)

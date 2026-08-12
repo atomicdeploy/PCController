@@ -17,6 +17,7 @@ import {
   AudioLines,
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronRight,
   Keyboard,
   LoaderCircle,
@@ -55,6 +56,88 @@ export function KeyCombo({ keys, separator = '+' }: { keys: Array<string | strin
       ))}
     </span>
   )
+}
+
+export interface SelectOption {
+  value: string
+  label: string
+  detail?: string
+  disabled?: boolean
+}
+
+export function SelectMenu({
+  label,
+  value,
+  options,
+  placeholder,
+  disabled,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: readonly SelectOption[]
+  placeholder?: string
+  disabled?: boolean
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  const listID = `select-menu-${useId().replace(/:/g, '')}`
+  const selected = options.find((option) => option.value === value)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false) }
+    document.addEventListener('pointerdown', close, true)
+    return () => document.removeEventListener('pointerdown', close, true)
+  }, [open])
+
+  const move = (delta: number) => {
+    const available = options.filter((option) => !option.disabled)
+    if (!available.length) return
+    const index = Math.max(0, available.findIndex((option) => option.value === value))
+    onChange(available[(index + delta + available.length) % available.length].value)
+  }
+
+  return <div className={`select-menu${open ? ' is-open' : ''}`} ref={root}>
+    <span className="select-menu__label">{label}</span>
+    <button
+      type="button"
+      className="select-menu__trigger"
+      aria-label={label}
+      aria-haspopup="listbox"
+      aria-controls={listID}
+      aria-expanded={open}
+      disabled={disabled}
+      onClick={() => setOpen((current) => !current)}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); move(event.key === 'ArrowDown' ? 1 : -1); setOpen(true) }
+        if (event.key === 'Escape') { event.preventDefault(); setOpen(false) }
+      }}
+    >
+      <span><strong>{selected?.label ?? placeholder ?? interfaceCopy('Select…', 'انتخاب…')}</strong>{selected?.detail && <small>{selected.detail}</small>}</span>
+      <ChevronDown size={16} aria-hidden="true" />
+    </button>
+    <AnimatePresence>
+      {open && <motion.div
+        id={listID}
+        className="select-menu__options"
+        role="listbox"
+        aria-label={label}
+        initial={{ opacity: 0, y: -7, scale: .985 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: -5, scale: .99 }}
+        transition={{ duration: .18, ease: [0.22, 1, 0.36, 1] }}
+      >{options.map((option) => <button
+        key={option.value}
+        type="button"
+        role="option"
+        aria-selected={option.value === value}
+        disabled={option.disabled}
+        onClick={() => { onChange(option.value); setOpen(false) }}
+      ><span><strong>{option.label}</strong>{option.detail && <small>{option.detail}</small>}</span>{option.value === value && <Check size={15} />}</button>)}</motion.div>}
+    </AnimatePresence>
+  </div>
 }
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -452,7 +535,7 @@ export function MetricCard({
   icon: LucideIcon
   label: string
   value: string
-  unit: string
+  unit?: string
   values: number[]
   tone: 'accent' | 'green' | 'amber' | 'violet'
   detail?: string
@@ -468,7 +551,7 @@ export function MetricCard({
         </span>
       </div>
       <div className="metric__value" dir="ltr">
-        <strong>{value}</strong><span>{unit}</span>
+        <strong>{value}</strong>{unit && <span>{unit}</span>}
       </div>
       <Sparkline values={values} tone={tone} scale={scale} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
     </article>

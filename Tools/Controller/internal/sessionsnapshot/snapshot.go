@@ -20,6 +20,7 @@ import (
 	"time"
 
 	controller "pccontroller.local/controller"
+	"pccontroller.local/controller/internal/native"
 )
 
 const (
@@ -94,9 +95,11 @@ type PWMSummary struct {
 // TemperatureSummary preserves the two named board measurements in their
 // exact wire unit so consumers do not lose precision through float conversion.
 type TemperatureSummary struct {
-	IlluminationCentiC int16 `json:"illumination_centi_c"`
-	BTAudioCentiC      int16 `json:"bt_audio_centi_c"`
-	Hot                bool  `json:"hot"`
+	IlluminationCentiC    int16 `json:"illumination_centi_c"`
+	IlluminationAvailable bool  `json:"illumination_available"`
+	BTAudioCentiC         int16 `json:"bt_audio_centi_c"`
+	BTAudioAvailable      bool  `json:"bt_audio_available"`
+	Hot                   bool  `json:"hot"`
 }
 
 // BoardSettings is a decoded live-cache projection, not an EEPROM image. A
@@ -467,9 +470,11 @@ func BuildWithOperationalContext(
 			SelectedValue: status.PWMValue, ErrorCount: status.PWMErrors,
 		}
 		document.Temperatures = &TemperatureSummary{
-			IlluminationCentiC: status.TLEDCenti,
-			BTAudioCentiC:      status.TBTCenti,
-			Hot:                status.Hot,
+			IlluminationCentiC:    status.TLEDCenti,
+			IlluminationAvailable: native.TemperatureAvailable(status.Flags, status.TLEDCenti, native.StatusTemperatureLED),
+			BTAudioCentiC:         status.TBTCenti,
+			BTAudioAvailable:      native.TemperatureAvailable(status.Flags, status.TBTCenti, native.StatusTemperatureBT),
+			Hot:                   status.Hot,
 		}
 		document.Completeness.PWM = true
 		document.Completeness.Temperatures = true
