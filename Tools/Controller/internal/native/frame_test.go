@@ -212,10 +212,10 @@ func TestPayloadBuildersValidateRanges(t *testing.T) {
 	}
 }
 
-func TestParseHelloCompactIdentitySchema3(t *testing.T) {
+func TestParseHelloCompactIdentitySchema4(t *testing.T) {
 	payload := []byte{
-		0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x1C,
-		0xF8, 0xD9, 0x2F, 0x5D, 0x9D, 0x01, 0x35,
+		0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0x1C,
+		0xF8, 0xD9, 0x2F, 0x5D, 0x9D, 0x01, 0x35, 0x00, 0x09,
 	}
 	hello, err := ParseHello(payload)
 	if err != nil {
@@ -224,10 +224,11 @@ func TestParseHelloCompactIdentitySchema3(t *testing.T) {
 	if !hello.IsPCController() || hello.IdentitySchema != IdentitySchemaCompact ||
 		hello.BoardKind != BoardKindPCController || hello.Name != "PCController" ||
 		hello.Capabilities != 0 || hello.BuildHash != 0x2FD9F81C ||
-		hello.BuildTimestamp != 0x35019D5D || hello.BuildStamp != "260801194258" {
+		hello.BuildTimestamp != 0x35019D5D || hello.BuildStamp != "260801194258" ||
+		hello.FeatureProfile != FeatureProfileFullPeripheral || hello.BuildFeatures != 0x09 {
 		t.Fatalf("unexpected compact HELLO: %#v", hello)
 	}
-	if _, err := ParseHello(payload[:13]); err == nil {
+	if _, err := ParseHello(payload[:15]); err == nil {
 		t.Fatal("truncated compact HELLO was accepted")
 	}
 	wrongSchema := append([]byte(nil), payload...)

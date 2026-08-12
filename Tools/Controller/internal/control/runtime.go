@@ -61,8 +61,12 @@ type Event struct {
 	Gesture     string
 	Source      string
 	Target      string
+	Targets     []string
 	MessageType string
 	Action      string
+	Severity    string
+	Correlation string
+	Delivery    string
 	Metadata    map[string]string
 	RFCode      uint32
 	RFBits      byte
@@ -396,7 +400,7 @@ func EventStreamForKind(kind string) string {
 	switch kind {
 	case "telemetry":
 		return EventStreamTelemetry
-	case "rx", "tx", "opcode":
+	case "rx", "tx", "opcode", "action.applied":
 		return EventStreamDebug
 	case "front_panel.segment", "status_led.changed", "buzzer.note":
 		return EventStreamState

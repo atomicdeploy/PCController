@@ -362,8 +362,12 @@ type Event struct {
 	Gesture     string            `json:"gesture,omitempty"`
 	Source      string            `json:"source,omitempty"`
 	Target      string            `json:"target,omitempty"`
+	Targets     []string          `json:"targets,omitempty"`
 	MessageType string            `json:"message_type,omitempty"`
 	Action      string            `json:"action,omitempty"`
+	Severity    string            `json:"severity,omitempty"`
+	Correlation string            `json:"correlation,omitempty"`
+	Delivery    string            `json:"delivery,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 	SourceID    *byte             `json:"source_id,omitempty"`
 	RFID        *byte             `json:"rf_id,omitempty"`
@@ -390,14 +394,18 @@ type OpcodeFrame struct {
 // bridge, and LCD presentation. Action is descriptive; it is never executed
 // implicitly. Remote command execution uses the authenticated execute method.
 type TextMessage struct {
-	Source   string            `json:"source"`
-	Target   string            `json:"target"`
-	Type     string            `json:"type"`
-	Text     string            `json:"text"`
-	Line1    string            `json:"line1,omitempty"`
-	Line2    string            `json:"line2,omitempty"`
-	Action   string            `json:"action,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Source      string            `json:"source"`
+	Target      string            `json:"target"`
+	Targets     []string          `json:"targets,omitempty"`
+	Type        string            `json:"type"`
+	Text        string            `json:"text"`
+	Line1       string            `json:"line1,omitempty"`
+	Line2       string            `json:"line2,omitempty"`
+	Action      string            `json:"action,omitempty"`
+	Severity    string            `json:"severity,omitempty"`
+	Correlation string            `json:"correlation,omitempty"`
+	Delivery    string            `json:"delivery,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // Client owns one controller runtime, command engine, and host integration state.
@@ -1666,11 +1674,32 @@ func (client *Client) SendTextMessage(
 	message.Type = strings.ToLower(strings.TrimSpace(message.Type))
 	message.Text = strings.TrimSpace(message.Text)
 	message.Action = strings.TrimSpace(message.Action)
+	message.Severity = strings.ToLower(strings.TrimSpace(message.Severity))
+	message.Correlation = strings.TrimSpace(message.Correlation)
+	message.Delivery = strings.ToLower(strings.TrimSpace(message.Delivery))
 	if !oneOf(message.Source, "client", "server", "bridge", "board", "lcd", "host", "ipc", "rest", "webhook", "websocket", "socket_io") {
 		return Event{}, fmt.Errorf("unsupported message source %q", message.Source)
 	}
-	if !oneOf(message.Target, "client", "server", "bridge", "board", "lcd", "host", "all") {
-		return Event{}, fmt.Errorf("unsupported message target %q", message.Target)
+	targets, err := normalizeMessageTargets(message.Target, message.Targets)
+	if err != nil {
+		return Event{}, err
+	}
+	message.Targets = targets
+	message.Target = strings.Join(targets, ",")
+	if message.Severity == "" {
+		message.Severity = "info"
+	}
+	if !oneOf(message.Severity, "debug", "info", "success", "warning", "error") {
+		return Event{}, fmt.Errorf("unsupported message severity %q", message.Severity)
+	}
+	if message.Delivery == "" {
+		message.Delivery = "sync"
+	}
+	if !oneOf(message.Delivery, "sync", "async") {
+		return Event{}, fmt.Errorf("unsupported message delivery %q", message.Delivery)
+	}
+	if len(message.Correlation) > 96 {
+		return Event{}, errors.New("message correlation exceeds 96 characters")
 	}
 	if message.Type == "" || len(message.Type) > 32 {
 		return Event{}, errors.New("message type must contain 1..32 characters")
@@ -1696,7 +1725,7 @@ func (client *Client) SendTextMessage(
 			return Event{}, errors.New("message metadata keys/values exceed limits")
 		}
 	}
-	if message.Target == "lcd" || message.Target == "board" {
+	if containsMessageTarget(targets, "lcd") || containsMessageTarget(targets, "board") || containsMessageTarget(targets, "all") {
 		line1, line2 := message.Line1, message.Line2
 		if line1 == "" && line2 == "" {
 			line1, line2 = splitLCDText(message.Text)
@@ -1716,10 +1745,44 @@ func (client *Client) SendTextMessage(
 	event := client.runtime.PublishStructuredEvent(control.Event{
 		Kind: "message", Text: message.Text,
 		Source: message.Source, Target: message.Target,
-		MessageType: message.Type, Action: message.Action,
-		Metadata: message.Metadata,
+		Targets: targets, MessageType: message.Type, Action: message.Action,
+		Severity: message.Severity, Correlation: message.Correlation, Delivery: message.Delivery,
+		Lifecycle: map[bool]string{true: "accepted", false: "completed"}[message.Delivery == "async"],
+		Metadata:  message.Metadata,
 	})
 	return publicEvent(event), nil
+}
+
+func normalizeMessageTargets(target string, targets []string) ([]string, error) {
+	values := append([]string(nil), targets...)
+	if target = strings.TrimSpace(target); target != "" {
+		values = append(values, strings.Split(target, ",")...)
+	}
+	if len(values) == 0 {
+		return nil, errors.New("message target or targets is required")
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, raw := range values {
+		value := strings.ToLower(strings.TrimSpace(raw))
+		if !oneOf(value, "client", "server", "bridge", "board", "lcd", "host", "all", "native", "web", "tui") {
+			return nil, fmt.Errorf("unsupported message target %q", raw)
+		}
+		if !seen[value] {
+			seen[value] = true
+			result = append(result, value)
+		}
+	}
+	return result, nil
+}
+
+func containsMessageTarget(targets []string, target string) bool {
+	for _, candidate := range targets {
+		if candidate == target {
+			return true
+		}
+	}
+	return false
 }
 
 func oneOf(value string, allowed ...string) bool {
@@ -2030,7 +2093,8 @@ func publicEvent(event control.Event) Event {
 		},
 		Reason: event.Reason, State: event.State,
 		Gesture: event.Gesture, Source: event.Source,
-		Target: event.Target, MessageType: event.MessageType, Action: event.Action,
+		Target: event.Target, Targets: append([]string(nil), event.Targets...), MessageType: event.MessageType, Action: event.Action,
+		Severity: event.Severity, Correlation: event.Correlation, Delivery: event.Delivery,
 		Metadata: cloneStringMap(event.Metadata),
 		RFCode:   event.RFCode, RFBits: event.RFBits,
 		RFProtocol: event.RFProtocol, RFPulseUS: event.RFPulseUS,

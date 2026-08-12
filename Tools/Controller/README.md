@@ -280,6 +280,16 @@ optional interaction cues are enabled, supported visible-page mobile clients
 may also use restrained vibration for select, success, and warning feedback;
 no workflow depends on haptics.
 
+The embedded WebUI uses readable, deterministic asset names and strong ETags
+with revalidation instead of opaque hashed filenames. This keeps deployment
+artifacts inspectable while ensuring a browser checks for a changed asset before
+reuse. For browser-console integration, the page exposes a deliberately small
+`window.PCController` helper: `inspect()` returns the current published state,
+`command("status")` follows the normal command path, `refresh()` requests a
+snapshot, and `navigate("overview")` selects a page. Consumers can subscribe to
+the `pccontroller:state` browser event; this is an observation/control surface,
+not a separate protocol or authentication bypass.
+
 The exact embedded distribution also has a deterministic, secret-free ZIP
 export contract for trusted static hosting. See
 [Portable WebUI bundle](docs/Portable-WebUI.md) for archive guarantees,

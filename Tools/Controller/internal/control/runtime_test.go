@@ -445,8 +445,9 @@ func TestActivityStreamIsRetainedSeparatelyFromContinuousFrames(t *testing.T) {
 func TestEventStreamClassification(t *testing.T) {
 	tests := map[string]string{
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
-		"rx": EventStreamDebug, "front_panel.segment": EventStreamState,
-		"status_led.changed": EventStreamState, "buzzer.note": EventStreamState,
+		"rx": EventStreamDebug, "action.applied": EventStreamDebug,
+		"front_panel.segment": EventStreamState,
+		"status_led.changed":  EventStreamState, "buzzer.note": EventStreamState,
 		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
 	}
 	for kind, expected := range tests {

@@ -11,7 +11,7 @@ function event(id: number, kind: string, stream?: ControllerEvent['stream']): Co
 }
 
 describe('significant controller events', () => {
-	it.each(['telemetry', ' TELEMETRY ', 'rx', ' Rx\t', 'TX', '\ttx ', 'front_panel.segment', 'status_led.changed', 'buzzer.note'])(
+	it.each(['telemetry', ' TELEMETRY ', 'rx', ' Rx\t', 'TX', '\ttx ', 'front_panel.segment', 'status_led.changed', 'buzzer.note', 'action.applied', 'device event 13'])(
     'keeps routine %j transport activity out of human-facing feeds',
     (kind) => expect(isSignificantControllerEvent(event(1, kind))).toBe(false),
 	)

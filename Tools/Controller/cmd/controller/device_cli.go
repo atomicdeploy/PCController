@@ -144,6 +144,14 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 		return errors.New("exec requires a controller shell command")
 	}
 	commandText := joinControllerCommand(flags.Args())
+	return runExecCommand(connection, commandText, stdout, store)
+}
+
+// runExecCommand owns the one local/primary routing path used by typed CLI
+// commands as well as `exec`.  Keeping this below the argument parsers means
+// connection selection, capability discovery, and command safety cannot drift
+// between surfaces.
+func runExecCommand(connection *connectionFlags, commandText string, stdout io.Writer, store *appconfig.Store) error {
 	claim, havePrimary, err := preparePrimaryMode("exec")
 	if err != nil {
 		return err
@@ -211,7 +219,7 @@ func runExec(args []string, stdout, stderr io.Writer, store *appconfig.Store) er
 
 func commandAllowsDisconnected(command string) bool {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
-	return len(words) >= 2 && words[0] == "board" && words[1] == "initialize"
+	return len(words) >= 1 && (words[0] == "message" || (len(words) >= 2 && words[0] == "board" && words[1] == "initialize"))
 }
 
 func runBatch(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {

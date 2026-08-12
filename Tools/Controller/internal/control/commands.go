@@ -423,6 +423,34 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name: "message", Usage: "message TARGETS TYPE TEXT",
+		Summary: "publish a bounded host notification event to native, web, TUI, or other targets",
+		Run: func(_ context.Context, args []string) (string, error) {
+			if len(args) < 3 {
+				return "", errors.New("usage: message TARGETS TYPE TEXT")
+			}
+			targets := strings.Split(strings.ToLower(strings.TrimSpace(args[0])), ",")
+			for _, target := range targets {
+				if !messageTargetAllowed(strings.TrimSpace(target)) {
+					return "", fmt.Errorf("unsupported message target %q", target)
+				}
+			}
+			kind := strings.ToLower(strings.TrimSpace(args[1]))
+			if kind == "" || len(kind) > 32 {
+				return "", errors.New("message type must contain 1..32 characters")
+			}
+			text := strings.TrimSpace(strings.Join(args[2:], " "))
+			if text == "" || len(text) > 4096 {
+				return "", errors.New("message text must contain 1..4096 characters")
+			}
+			event := runtime.PublishStructuredEvent(Event{
+				Kind: "message", Lifecycle: "completed", Source: "cli", Target: strings.Join(targets, ","),
+				Targets: targets, MessageType: kind, Severity: "info", Delivery: "sync", Text: text,
+			})
+			return fmt.Sprintf("message id=%d targets=%s", event.ID, strings.Join(targets, ",")), nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "settings", Usage: settingsUsage,
 		Summary: "query or update the firmware-owned EEPROM settings",
 		Run: func(ctx context.Context, args []string) (string, error) {
@@ -465,7 +493,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetMotionBreakMS(uint16(milliseconds)); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -497,7 +526,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetMotionDoorPolicy(policy); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -523,7 +553,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 					return "", err
 				}
 				settings.MotionExitHoldSeconds = holdSeconds
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -550,7 +581,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				default:
 					return "", fmt.Errorf("buzzer cue group must be door or relay")
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -587,7 +619,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetCurrentDecimals(current); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -607,7 +640,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err := settings.SetStatusColor(color); err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -620,7 +654,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				if err != nil {
 					return "", err
 				}
-				if err := storeSettings(ctx, runtime, settings); err != nil {
+				settings, err = storeSettingsLive(ctx, runtime, settings)
+				if err != nil {
 					return "", err
 				}
 				return formatSettings(settings), nil
@@ -759,6 +794,17 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "", errors.New(
 					"buzzer frequency must be 0 or 20..20000 Hz",
 				)
+			}
+			// A direct tone is an explicit action on every surface, but it must
+			// never bypass the firmware-owned silent flag.  Query before sending
+			// so CLI/RPC/Web/TUI can report a safe, observable suppression rather
+			// than relying on an inaudible side effect on the board.
+			settings, err := querySettings(ctx, runtime)
+			if err != nil {
+				return "", err
+			}
+			if settings.Flags&native.SettingsSilent != 0 {
+				return "buzzer suppressed: board is silent", nil
 			}
 			outputs.StopMelody()
 			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(uint16(values[0]), uint16(values[1]))); err != nil {
@@ -1155,6 +1201,15 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	return engine
+}
+
+func messageTargetAllowed(target string) bool {
+	switch target {
+	case "native", "web", "tui", "host", "client", "server", "bridge", "board", "lcd", "all":
+		return true
+	default:
+		return false
+	}
 }
 
 func encodeLiveSettingsExport(settings native.Settings) (string, error) {
@@ -2178,13 +2233,15 @@ func silentCommand(
 	default:
 		return "", errors.New(usage)
 	}
-	if err := storeSettings(ctx, runtime, settings); err != nil {
+	settings, err = storeSettingsLive(ctx, runtime, settings)
+	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf(
-		"silent=%t board_silent=%t saved to board EEPROM and applied live",
+		"silent=%t board_silent=%t applied_live=true persisted=%t",
 		settings.Flags&native.SettingsSilent != 0,
 		settings.Flags&native.SettingsSilent != 0,
+		settings.Persisted,
 	), nil
 }
 
@@ -2238,11 +2295,39 @@ func storeSettings(
 	runtime *Runtime,
 	settings native.Settings,
 ) error {
+	_, err := storeSettingsLive(ctx, runtime, settings)
+	return err
+}
+
+// storeSettingsLive acknowledges the distinction between command acceptance
+// and observable live state.  SET_SETTINGS has no response body, so every
+// host-owned settings mutation performs one bounded GET_SETTINGS readback.
+// The returned persistence bit is deliberately not guessed: callers display
+// exactly what the board reports while its EEPROM commit completes.
+func storeSettingsLive(
+	ctx context.Context,
+	runtime *Runtime,
+	settings native.Settings,
+) (native.Settings, error) {
 	payload, err := settings.Payload()
 	if err != nil {
-		return err
+		return native.Settings{}, err
 	}
-	return command(ctx, runtime, native.OpSetSettings, payload)
+	if err := command(ctx, runtime, native.OpSetSettings, payload); err != nil {
+		return native.Settings{}, err
+	}
+	live, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, fmt.Errorf("read live settings after accepted write: %w", err)
+	}
+	livePayload, err := live.Payload()
+	if err != nil {
+		return native.Settings{}, fmt.Errorf("encode live settings readback: %w", err)
+	}
+	if !bytes.Equal(payload, livePayload) {
+		return native.Settings{}, errors.New("settings write was accepted but live readback differs")
+	}
+	return live, nil
 }
 
 func settingsFromSetArgs(args []string) (native.Settings, error) {
@@ -4337,7 +4422,7 @@ func formatSettings(settings native.Settings) string {
 			"output_persistence=0x%02X relay_restore_mask=0x%02X stream=%dms default_page=%d save_last=%t "+
 			"status_color=%d voltage_decimals=%d current_decimals=%d "+
 			"motion_door=%s motion_break=%dms motion_exit_hold=%ds "+
-			"door_audio=%t relay_audio=%t programming_latch=%t extended=0x%02X",
+			"door_audio=%t relay_audio=%t programming_latch=%t persisted=%t extended=0x%02X",
 		settings.Flags,
 		settings.LightMode,
 		settings.OnBrightness,
@@ -4359,6 +4444,7 @@ func formatSettings(settings native.Settings) string {
 		settings.DoorAudioEnabled(),
 		settings.RelayAudioEnabled(),
 		settings.Flags&native.SettingsProgrammingMode != 0,
+		settings.Persisted,
 		settings.ExtendedFlags,
 	)
 }

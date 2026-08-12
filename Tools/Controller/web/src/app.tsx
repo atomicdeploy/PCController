@@ -42,6 +42,7 @@ import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engi
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
 import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken, streamFailureState, transportFailureDetail, type StreamState } from './api'
+import { primaryShortcutARIA, primaryShortcutModifier } from './client-platform'
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -62,6 +63,7 @@ import {
 } from './significant-events'
 import { embeddedResourcesMismatch, reloadForResourceMismatch } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
+import { publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
 import {
   createTabChannel,
   type TabChannel,
@@ -82,9 +84,12 @@ import type {
   UIConfig,
 } from './types'
 import { applyPushedOutputEvent } from './status-led-event'
+import { shouldToastControllerEvent } from './event-notification-policy'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
+import { AppPreferencesDialog } from './app-preferences-dialog'
+import { loadQuickHeaderPreferences, normalizeQuickHeaderPreferences, saveQuickHeaderPreferences } from './quick-header-preferences'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -266,7 +271,7 @@ function demoSnapshot(now = Date.now()): Snapshot {
 
 function demoEvent(id: number): ControllerEvent {
   const definitions = [
-    ['device.state', 'Authenticated controller identity on COM18', 'host'],
+    ['device.state', 'Controller identity on COM18', 'host'],
     ['door', 'Door input returned to closed', 'physical'],
     ['macro.completed', 'Ambient evening macro completed faithfully', 'host'],
     ['rf.received', 'Remote #3 · living-room toggle', 'rf'],
@@ -303,7 +308,7 @@ export function commandWarning(command: string, locale: Appearance['locale']): C
   if (/^(os (power|sleep|suspend|hibernate|restart|shutdown|lock)|quit|exit)(?: |$)/.test(normalized)) {
     return fa
       ? warning('عملیات میزبان اجرا شود؟', 'این فرمان می‌تواند نشست یا رایانه را متوقف کند. سیاست و توکن تأیید میزبان همچنان در سمت سرویس اعمال می‌شود.', 'تأیید عملیات')
-      : warning('Run the host operation?', 'This command can end the session or affect the computer. Host-side policy and confirmation-token checks still apply.', 'Confirm operation')
+      : warning('Run the host operation?', 'This command can end the session or affect the computer. Review the selected operation before continuing.', 'Confirm operation')
   }
   return null
 }
@@ -316,6 +321,16 @@ export function snapshotAfterTransportLoss(
   return {
     ...current,
     connected: false,
+    // A disconnect must not leave actuator, telemetry, or EEPROM values looking
+    // live.  Keep host state and event history, but make every board-derived
+    // surface wait for a new authoritative snapshot.
+    have_status: false,
+    have_settings: false,
+    have_front_panel: false,
+    have_status_led: false,
+    hello: emptySnapshot.hello,
+    status: emptySnapshot.status,
+    settings: emptySnapshot.settings,
     connection_state: current.paused ? 'paused' : state === 'connecting' ? 'connecting' : 'disconnected',
     connection_reason: detail || (state === 'connecting' ? 'Re-establishing the host event stream' : 'Host event stream unavailable'),
   }
@@ -366,6 +381,9 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
+  const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
+  const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
+  const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
   const [bootOpen, setBootOpen] = useState(demo)
   const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
@@ -389,6 +407,7 @@ export default function App() {
   const resourceHintAllowedAt = useRef(0)
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
+  const sidebarStatusRef = useRef<HTMLDivElement>(null)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
@@ -406,6 +425,12 @@ export default function App() {
     applyAppearance(value)
     audioRef.current?.setVolume(value.audioVolume)
     audioRef.current?.setMuted(value.audioMuted)
+  }, [])
+
+  const saveQuickHeader = useCallback((value: ReturnType<typeof normalizeQuickHeaderPreferences>) => {
+    const normalized = normalizeQuickHeaderPreferences(value)
+    setQuickHeader(normalized)
+    saveQuickHeaderPreferences(normalized)
   }, [])
 
   const adoptHostAppearance = useCallback((value: Appearance, etag: string) => {
@@ -473,6 +498,31 @@ export default function App() {
   }, [demo, productTitle, snapshot.connected, snapshot.port.name, startupProbeResolved, streamState, uiConfig])
 
   useEffect(() => { pageRef.current = page }, [page])
+
+  useEffect(() => {
+    if (!sidebarStatusMenu) return
+    const outside = (event: PointerEvent | FocusEvent) => {
+      if (!sidebarStatusRef.current?.contains(event.target as Node)) setSidebarStatusMenu(false)
+    }
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSidebarStatusMenu(false)
+    }
+    const close = () => setSidebarStatusMenu(false)
+    window.addEventListener('pointerdown', outside)
+    window.addEventListener('focusin', outside)
+    window.addEventListener('keydown', key)
+    window.addEventListener('blur', close)
+    window.addEventListener('hashchange', close)
+    return () => {
+      window.removeEventListener('pointerdown', outside)
+      window.removeEventListener('focusin', outside)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('hashchange', close)
+    }
+  }, [sidebarStatusMenu])
+
+  useEffect(() => { if (!snapshot.connected) setSidebarStatusMenu(false) }, [snapshot.connected])
 
   useEffect(() => {
     const engine = createAudioEngine({
@@ -618,7 +668,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(leaseRefresh)
     }
-  }, [appInstanceID, appearance.locale, appearance.theme, demo, page, resolvedDirection, startupProbeResolved, token])
+  }, [appInstanceID, appearance.locale, appearance.theme, demo, page, resolvedDirection, startupProbeResolved])
 
   useEffect(() => () => {
     if (!appInstanceID) return
@@ -721,7 +771,7 @@ export default function App() {
     snapshot.port.serial_number,
   ])
 
-  const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
+  const dispatchCommand = useCallback(async (command: string, success?: string, notifyOnSuccess = true): Promise<string> => {
     const safeCommand = redactSensitiveCommand(command)
     tabChannelRef.current?.publishTerminal({ kind: 'command', text: `pc› ${safeCommand}`, at: Date.now() })
     if (demo) {
@@ -734,7 +784,7 @@ export default function App() {
       const result = await execute(command)
       const output = result.output ?? ''
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output || '✓ accepted', at: Date.now() })
-      notify('success', success || 'Command completed', output || safeCommand)
+      if (notifyOnSuccess) notify('success', success || 'Command completed', output || safeCommand)
       void refresh()
       return output
     } catch (cause) {
@@ -776,6 +826,24 @@ export default function App() {
     })
   }, [appearance.locale, demo, dispatchCommand])
 
+  const [relayPending, setRelayPending] = useState<ReadonlySet<number>>(() => new Set())
+  const relayToggle = useCallback(async (relay: number, active: boolean) => {
+    const mask = 1 << (relay - 1)
+    const previous = snapshot.status.active_relays
+    const next = active ? previous & ~mask : previous | mask
+    // Flip locally before transport latency. Only the originating client owns
+    // this optimistic state; socket status remains the authority for all tabs.
+    setSnapshot((current) => ({ ...current, status: { ...current.status, active_relays: next } }))
+    setRelayPending((current) => new Set(current).add(relay))
+    try {
+      await dispatchCommand(`relay ${relay} ${active ? 'off' : 'on'}`, undefined, false)
+    } catch {
+      setSnapshot((current) => current.status.active_relays === next ? { ...current, status: { ...current.status, active_relays: previous } } : current)
+    } finally {
+      setRelayPending((current) => { const nextPending = new Set(current); nextPending.delete(relay); return nextPending })
+    }
+  }, [dispatchCommand, snapshot.status.active_relays])
+
   const openDialog = useCallback((value: Omit<DialogState, 'open'>) => {
     setDialog({ ...value, open: true })
   }, [])
@@ -796,6 +864,34 @@ export default function App() {
     navigate('settings')
   }, [navigate])
 
+
+  const browserConsoleState = useMemo(() => ({
+    title: productTitle,
+    hostVersion: uiConfig?.host_version || 'not reported',
+    page,
+    connected: !demo && snapshot.connected,
+    port: snapshot.port.name || '',
+    transport: streamState,
+    eventCount: events.length,
+  }), [demo, events.length, page, productTitle, snapshot.connected, snapshot.port.name, streamState, uiConfig?.host_version])
+
+  useEffect(() => publishBrowserConsole({
+    api: 'PCController.browser/1',
+    inspect: () => browserConsoleState,
+    command: (value) => {
+      const command = value.trim()
+      if (!command) return Promise.reject(new Error('PCController.command requires a non-empty normalized command string'))
+      return runCommand(command)
+    },
+    refresh: async () => { await refresh() },
+    navigate: (value) => {
+      const destination = navigation.find((candidate) => candidate.id === value)?.id
+      if (!destination) throw new Error(`Unknown PCController page: ${value}`)
+      navigate(destination)
+    },
+  }), [browserConsoleState, navigate, refresh, runCommand])
+
+  useEffect(() => { publishBrowserConsoleState(browserConsoleState) }, [browserConsoleState])
 
   const saveAppearance = useCallback((value: Appearance) => {
     const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
@@ -1136,7 +1232,7 @@ export default function App() {
 				navigate('updates')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-            if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
+			if (shouldToastControllerEvent(event)) notify(eventToneForToast(event), event.kind, event.text)
             if (isCompletedHostUpdate(event)) {
               // The completion event is the fast path. A later stream-open
               // probe remains the backstop if replacement has not landed yet.
@@ -1187,11 +1283,12 @@ export default function App() {
 
   const authenticationRequired = streamState === 'authentication-required'
   const shared: SharedViewProps = {
-    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
+    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, relayToggle, relayPending, refresh, openDialog,
     boardSettingsReadState,
     transport: { streamState, detail: streamDetail, tabBusSupported, tabPeers, requestAuthentication },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
+    openAppPreferences: () => setAppPreferencesOpen(true),
   }
 
   const PageView = pageViewFor(page)
@@ -1271,10 +1368,33 @@ export default function App() {
           <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
 
-        <div className="sidebar__status">
+        <div
+          ref={sidebarStatusRef}
+          className="sidebar__status"
+          role="button"
+          tabIndex={0}
+          aria-haspopup="menu"
+          aria-expanded={sidebarStatusMenu}
+          aria-label={appearance.locale === 'fa' ? 'منوی اتصال کنترلر' : 'Controller connection menu'}
+          onClick={() => setSidebarStatusMenu((value) => !value)}
+          onContextMenu={(event) => { event.preventDefault(); setSidebarStatusMenu(true) }}
+          onKeyDown={(event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10') || event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              setSidebarStatusMenu(true)
+            }
+            if (event.key === 'Escape') setSidebarStatusMenu(false)
+          }}
+        >
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
           <div><strong>{authenticationRequired ? t('authenticationRequired') : snapshot.connected ? t('online') : t('offline')}</strong><small>{authenticationRequired ? streamDetail : snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} />
+          {sidebarStatusMenu && <div className="sidebar__status-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
+            {snapshot.connected && <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('close') }}>{appearance.locale === 'fa' ? 'بستن درگاه' : 'Close port'}</button>}
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); setPaletteQuery('ports'); setPaletteIndex(0); setPalette(true) }}>{appearance.locale === 'fa' ? 'انتخاب درگاه USB' : 'Choose USB port'}</button>
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); navigate('device') }}>{appearance.locale === 'fa' ? 'جزئیات دستگاه' : 'Device details'}</button>
+          </div>}
         </div>
 
         <nav className="sidebar__nav">
@@ -1292,15 +1412,16 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" aria-label={t('openNavigation')} onClick={() => setMobileNav(true)}><Menu size={20} /></button>
         <div className="breadcrumbs"><span>{productShortName}</span><i>/</i><strong>{t(current.label)}</strong></div>
-        <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[["Ctrl", "⌘"], "K"]} /></button>
+        <button className="command-trigger" aria-keyshortcuts={primaryShortcutARIA()} onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[primaryShortcutModifier(), "K"]} /></button>
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
           <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>
-          <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
-          <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>
-          <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
-          <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
-          <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
+          <button className="topbar-icon" aria-label={appearance.locale === 'fa' ? 'ترجیحات برنامه' : 'Application preferences'} aria-haspopup="dialog" onClick={() => setAppPreferencesOpen(true)}><Settings size={18} /></button>
+          {quickHeader.theme && <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>}
+          {quickHeader.language && <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>}
+          {quickHeader.audio && <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}
+          {quickHeader.hotkeys && <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>}
+          {quickHeader.notifications && <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>}
         </div>
       </header>
 
@@ -1350,6 +1471,7 @@ export default function App() {
       </AnimatePresence>
 
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
+      <AppPreferencesDialog open={appPreferencesOpen} locale={appearance.locale} appearance={appearance} quickHeader={quickHeader} onAppearance={saveAppearance} onQuickHeader={saveQuickHeader} onClose={() => setAppPreferencesOpen(false)} />
       <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </div>
     <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />

@@ -9,6 +9,9 @@ import { artifactUpdateAvailable, UpdatesView } from './updates-view'
 import {
   ControlsView,
   DashboardView,
+  dashboardDeviceSummary,
+  dashboardRelayToggleCommand,
+  dashboardSocketIsFresh,
   LocalDeviceView,
   SettingsView,
   localDeviceControlsAvailable,
@@ -35,6 +38,8 @@ function shared(): SharedViewProps {
     locale: 'en',
     t: (key) => key,
     command: vi.fn(async () => ''),
+    relayToggle: vi.fn(async () => undefined),
+    relayPending: new Set(),
     refresh: vi.fn(async () => undefined),
     openDialog: vi.fn(),
     transport: {
@@ -47,6 +52,7 @@ function shared(): SharedViewProps {
     relayedTerminal: [],
     broadcastTerminal: vi.fn(),
     boardSettingsReadState: 'idle',
+    openAppPreferences: vi.fn(),
   }
 }
 
@@ -67,6 +73,13 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Status lighting')
   })
 
+  it('uses one real relay switch button so nested lamp clicks have one optimistic route', () => {
+    const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={{ ...emptySnapshot, connected: true, have_status: true }} />)
+    expect(markup).toContain('relay-switch__toggle')
+    expect(markup).toContain('data-relay="1"')
+    expect(markup).toContain('<i aria-hidden="true"><b></b></i>')
+  })
+
   it('renders only user PWM channels in the generic mixer and keeps system channels role-specific', () => {
     const connected = {
       ...emptySnapshot,
@@ -84,9 +97,9 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Controller command')
   })
 
-  it('never labels disconnected dashboard telemetry as live', () => {
+  it('hides board telemetry entirely while the controller is disconnected', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} />)
-    expect(markup).toContain('Telemetry history')
+    expect(markup).not.toContain('Telemetry history')
     expect(markup).not.toMatch(/\bLive\b/)
   })
 
@@ -126,6 +139,41 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('HTTP 401 · authentication required')
     expect(markup).toContain('Enter session token')
     expect(markup).not.toContain('Controller offline')
+  })
+
+  it('only treats an open, recent event stream as live and derives relay toggle commands directly', () => {
+    const now = Date.now()
+    const connected = { ...emptySnapshot, connected: true, status_updated: new Date(now - 300).toISOString() }
+    expect(dashboardSocketIsFresh(connected, 'open', now)).toBe(true)
+    expect(dashboardSocketIsFresh(connected, 'waiting', now)).toBe(false)
+    expect(dashboardSocketIsFresh({ ...connected, status_updated: new Date(now - 1200).toISOString() }, 'open', now)).toBe(false)
+    expect(dashboardRelayToggleCommand(3, false)).toBe('relay 3 on')
+    expect(dashboardRelayToggleCommand(3, true)).toBe('relay 3 off')
+  })
+
+  it('hides manual refresh only for a fresh open stream and labels the direct relay action', () => {
+    const liveSnapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      connection_state: 'connected',
+      status_updated: new Date().toISOString(),
+    }
+    const live = renderToStaticMarkup(<DashboardView {...shared()} snapshot={liveSnapshot} />)
+    const stale = renderToStaticMarkup(<DashboardView {...shared()} snapshot={{ ...liveSnapshot, status_updated: new Date(Date.now() - 2500).toISOString() }} />)
+    expect(live).not.toContain('>refresh<')
+    expect(stale).toContain('>refresh<')
+    expect(live).toContain('aria-label="Turn relay 1 on"')
+  })
+
+  it('shows useful controller identity states instead of a placeholder', () => {
+    expect(dashboardDeviceSummary(emptySnapshot, 'en')).toEqual({ device: 'Awaiting controller', firmware: 'No controller connected' })
+    expect(dashboardDeviceSummary({
+      ...emptySnapshot,
+      connected: true,
+      port: { friendly_name: 'USB Serial COM4' },
+      hello: { firmware_major: 1, firmware_minor: 2, firmware_patch: 3, build_hash: 0x1234ABCD },
+    }, 'en')).toEqual({ device: 'USB Serial COM4', firmware: 'v1.2.3 · #1234ABCD' })
   })
 
   it('keeps the first-run synchronization phase truthful before a controller is known', () => {

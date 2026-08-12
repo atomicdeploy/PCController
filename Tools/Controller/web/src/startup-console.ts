@@ -69,13 +69,15 @@ export function emitStartupConsoleIntroduction(
     : boundedConsoleValue(facts.config?.host_version, 'not reported')
   const port = facts.boardConnected ? boundedConsoleValue(facts.port, 'authenticated port') : ''
 
-  target.groupCollapsed('%c%s%c · browser control center', titleStyle, title, resetStyle)
-	target.info('%cHost%c version %s · living API', labelStyle, resetStyle, version)
+  target.groupCollapsed('%c%s%c ✨ browser control center', titleStyle, title, resetStyle)
+	target.info('%cHost%c 🧩 version %s · versionless living API', labelStyle, resetStyle, version)
   if (facts.boardConnected) {
-    target.info('%cController%c connected · %s', connectedStyle, resetStyle, port)
+    target.info('%cController%c 🟢 connected · %s', connectedStyle, resetStyle, port)
   } else {
-    target.info('%cController%c offline · no authenticated board', offlineStyle, resetStyle)
+    target.info('%cController%c 🟠 offline · no authenticated board', offlineStyle, resetStyle)
   }
-  target.debug('%cTransport%c %s', labelStyle, resetStyle, streamLabel(facts.streamState))
+
+  target.info('%cAutomation%c window.PCController.inspect(), .command("status"), .refresh(), .navigate("dashboard")', labelStyle, resetStyle)
+  target.debug('%cTransport%c 📡 %s · subscribe with addEventListener("pccontroller:state", handler)', labelStyle, resetStyle, streamLabel(facts.streamState))
   target.groupEnd()
 }

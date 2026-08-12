@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import type { DialogState, ToastMessage } from './types'
 import { HoldActionSession } from './hold-action'
+import { primaryShortcutModifier } from './client-platform'
 
 function interfaceCopy(english: string, persian: string): string {
   return typeof document !== 'undefined' && document.documentElement.lang.toLowerCase().startsWith('fa') ? persian : english
@@ -465,12 +466,14 @@ export function MetricCard({
     <article className={`metric metric--${tone}`}>
       <div className="metric__top">
         <span className="metric__icon"><Icon icon={icon} size={19} /></span>
-        <span className="metric__label">{label}</span>
+        <span className="metric__heading">
+          <span className="metric__label">{label}</span>
+          {detail && <span className="metric__detail">{detail}</span>}
+        </span>
       </div>
       <div className="metric__value" dir="ltr">
         <strong>{value}</strong><span>{unit}</span>
       </div>
-      {detail && <div className="metric__detail">{detail}</div>}
       <Sparkline values={values} tone={tone} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
     </article>
   )
@@ -787,21 +790,22 @@ export function BootGate({
 
 export function HotkeyHelp({ open, locale, onClose }: { open: boolean; locale: 'en' | 'fa'; onClose: () => void }) {
   const title = locale === 'fa' ? 'میانبرهای مرکز کنترل' : 'Control center shortcuts'
+  const modifier = primaryShortcutModifier()
   const shortcuts: Array<{ keys: Array<string | string[]>; separator?: string; detail: string }> = locale === 'fa'
     ? [
-        { keys: [['Ctrl', '⌘'], 'K'], detail: 'فرمان‌ها و صفحه‌ها' },
+        { keys: [modifier, 'K'], detail: 'فرمان‌ها و صفحه‌ها' },
         { keys: ['Alt', '1…8'], detail: 'رفتن مستقیم به صفحه' },
         { keys: ['G', ['D', 'C', 'B', 'V', 'W', 'E', 'S']], separator: 'سپس', detail: 'رفتن به داشبورد، کنترلر، میزکار تجهیزات، دستگاه، فضای داده، رویدادها یا تنظیمات' },
-        { keys: [['Ctrl', '⌘'], 'Shift', ['←', '→']], detail: 'صفحهٔ کناری در جهت دیداری' },
+        { keys: [modifier, 'Shift', ['←', '→']], detail: 'صفحهٔ کناری در جهت دیداری' },
         { keys: ['?'], detail: 'نمایش یا بستن این راهنما' },
         { keys: ['M'], detail: 'قطع یا وصل نشانه‌های صوتی' },
         { keys: ['Esc'], detail: 'بستن لایهٔ فعال' },
       ]
     : [
-        { keys: [['Ctrl', '⌘'], 'K'], detail: 'Commands and pages' },
+        { keys: [modifier, 'K'], detail: 'Commands and pages' },
         { keys: ['Alt', '1…8'], detail: 'Open a page directly' },
         { keys: ['G', ['D', 'C', 'B', 'V', 'W', 'E', 'S']], separator: 'then', detail: 'Go to dashboard, controls, peripheral workbench, device, data workspace, events, or settings' },
-        { keys: [['Ctrl', '⌘'], 'Shift', ['←', '→']], detail: 'Adjacent page in the visual direction' },
+        { keys: [modifier, 'Shift', ['←', '→']], detail: 'Adjacent page in the visual direction' },
         { keys: ['?'], detail: 'Show or close this guide' },
         { keys: ['M'], detail: 'Mute or enable interaction cues' },
         { keys: ['Esc'], detail: 'Close the active layer' },
