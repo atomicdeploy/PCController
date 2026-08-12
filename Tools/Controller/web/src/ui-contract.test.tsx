@@ -245,6 +245,8 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Waiting for the controller to return its live EEPROM settings')
     expect(markup).not.toContain('EEPROM report')
     expect(markup).not.toContain('Write board settings')
+		expect(markup).toContain('Live measurements')
+		expect(markup).toContain('Apply live timing')
   })
 
   it('renders offline controls and settings copy in Persian', () => {

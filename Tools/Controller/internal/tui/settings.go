@@ -118,7 +118,8 @@ func (model Model) appSettingRows() []settingRow {
 		{Key: "console.window", Group: "", Label: "Window columns · rows", Value: fmt.Sprintf("%d × %d", ui.TUIConsole.Columns, ui.TUIConsole.Rows), Editable: true},
 		{Key: "console.font", Group: "", Label: "Font face", Value: ui.TUIConsole.FontFace, Editable: true},
 		{Key: "console.font_size", Group: "", Label: "Font height", Value: fmt.Sprintf("%d px", ui.TUIConsole.FontSize), Editable: true},
-		{Key: "poll.active", Group: "MEASUREMENTS", Label: "Active polling", Value: model.prefs.PollInterval.String(), Editable: true},
+		{Key: "poll.active", Group: "MEASUREMENTS", Label: "Refresh rate", Value: model.prefs.PollInterval.String(), Editable: true},
+		{Key: "measurement.freshness", Group: "", Label: "Freshness window", Value: model.prefs.FreshnessWindow.String(), Editable: true},
 		{Key: "history.retention", Group: "", Label: "History retention", Value: model.prefs.HistoryWindow.String(), Editable: true},
 		{Key: "display.decimals", Group: "", Label: "Decimal places", Value: fmt.Sprintf("V %d  ·  A %d  ·  W %d  ·  °C %d", ui.VoltageDecimals, ui.CurrentDecimals, ui.PowerDecimals, ui.TemperatureDecimals), Editable: true},
 		{Key: "measurement.visibility", Group: "VISIBILITY", Label: "Live measurements", Value: visibleMeasurementSummary(ui), Editable: true},
@@ -163,6 +164,7 @@ func (model Model) appSettingRows() []settingRow {
 				rows[index].Editable = false
 				rows[index].Value = "local host service unavailable in remote mode"
 			case rows[index].Key == "app.title", rows[index].Key == "app.tagline",
+				rows[index].Key == "poll.active", rows[index].Key == "measurement.freshness",
 				strings.HasPrefix(rows[index].Key, peripheralNameSettingPrefix):
 				rows[index].Editable = model.remote.SaveHostUI != nil
 				if model.remote.SaveHostUI == nil {
@@ -371,7 +373,19 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			rangeField("pixels", "Font height", ui.TUIConsole.FontSize, 5, 72, 1, "px", true),
 		}
 	case "poll.active":
-		editor.Fields = []settingEditorField{{Key: "interval", Label: "Polling interval", Value: ui.StatusIntervalMS, Options: intOptions([]int{100, 125, 200, 250, 500, 1000, 2000, 5000}, "ms")}}
+		editor.Fields = []settingEditorField{{Key: "interval", Label: "Refresh interval", Value: ui.StatusIntervalMS, Options: intOptions([]int{200, 250, 300, 400, 500}, "ms")}}
+	case "measurement.freshness":
+		minimum := ui.StatusIntervalMS + appconfig.MeasurementFreshnessHeadroomMS
+		options := make([]int, 0, 7)
+		for _, value := range []int{500, 750, 1000, 1500, 2000, 3000, 5000} {
+			if value >= minimum {
+				options = append(options, value)
+			}
+		}
+		if len(options) == 0 || ui.MeasurementFreshnessMS < minimum {
+			options = append([]int{minimum}, options...)
+		}
+		editor.Fields = []settingEditorField{{Key: "window", Label: "Freshness window", Value: ui.MeasurementFreshnessMS, Options: intOptions(options, "ms")}}
 	case "history.retention":
 		editor.Fields = []settingEditorField{{Key: "hours", Label: "Retention", Value: ui.HistoryHours, Options: intOptions([]int{1, 6, 12, 24, 48, 72, 168}, "h")}}
 	case "display.decimals":
