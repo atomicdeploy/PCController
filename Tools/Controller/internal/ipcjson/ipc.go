@@ -293,6 +293,7 @@ type browserUISettings struct {
 	SegmentScroll   appconfig.SegmentScroll          `json:"segment_scroll"`
 	PeripheralNames map[string]string                `json:"peripheral_names"`
 	Peripherals     []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls        []appconfig.ControlDescriptor    `json:"controls"`
 	Changed         *bool                            `json:"changed,omitempty"`
 	ChangedFields   []string                         `json:"changed_fields,omitempty"`
 	Before          map[string]any                   `json:"before,omitempty"`
@@ -302,6 +303,7 @@ type browserUISettings struct {
 type peripheralSettings struct {
 	Names       map[string]string                `json:"peripheral_names"`
 	Peripherals []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls    []appconfig.ControlDescriptor    `json:"controls"`
 }
 
 type hostFactsParams struct {
@@ -1305,6 +1307,7 @@ func (service *Service) browserUISettings() browserUISettings {
 		SegmentScroll:   ui.SegmentScroll,
 		PeripheralNames: clonePeripheralNames(ui.PeripheralNames),
 		Peripherals:     appconfig.PeripheralDescriptors(),
+		Controls:        appconfig.ControlDescriptors(ui.PeripheralNames),
 	}
 }
 
@@ -1339,6 +1342,7 @@ func (service *Service) peripheralSettings() peripheralSettings {
 	return peripheralSettings{
 		Names:       clonePeripheralNames(service.hostConfig().UI.PeripheralNames),
 		Peripherals: appconfig.PeripheralDescriptors(),
+		Controls:    appconfig.ControlDescriptors(service.hostConfig().UI.PeripheralNames),
 	}
 }
 
