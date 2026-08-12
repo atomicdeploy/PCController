@@ -164,8 +164,7 @@ void testLocalBrightnessAndContinuity() {
           "host brightness zero made the local fault invisible");
   fixture.led.setBrightness(8);
   fixture.led.service(32);
-  require(fixture.led.descriptorForTest()[8] <=
-              fixture.led.descriptorForTest()[7] &&
+  require(fixture.led.localMinimumForTest() <= fixture.led.brightness() &&
               fixture.pwm.logicalValue(PwmChannels::StatusRed) <= from8(8),
           "lowered local brightness underflowed its breathe minimum");
 

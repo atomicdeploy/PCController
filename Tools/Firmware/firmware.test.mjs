@@ -245,14 +245,17 @@ test('board profile keeps Urboot and EEPROM-retention contract', () => {
         assert.equal(BOARD.eepromBytes, 1_024)
 })
 
-test('persistent Ready profile remains host-owned with a compact firmware fallback', async () => {
+test('status descriptors remain host-owned while the compact MCU renders fallback states', async () => {
         const [hostProfiles, firmware] = await Promise.all([
                 readFile(new URL('../Controller/internal/native/status_profiles.go', import.meta.url), 'utf8'),
                 readFile(new URL('../../Project/StatusLedController.cpp', import.meta.url), 'utf8')
         ])
         assert.match(hostProfiles, /StatusConditionReady:\s+static\(255, 255, 255\)/u)
-        assert.match(firmware, /Go tooling owns and provisions the full factory profile table/u)
+        assert.match(firmware, /activeMode_ == StatusLedMode::Custom/u)
+        assert.match(firmware, /activeMode_ == StatusLedMode::Fault/u)
+        assert.match(firmware, /StatusLedTiming::FrameIntervalMs/u)
         assert.doesNotMatch(firmware, /ReadyPalette/u)
+        assert.doesNotMatch(firmware, /StatusProfileAddress/u)
 })
 
 test('physical, injected, and RF key actions retain the immediate dispatch contract', async () => {
