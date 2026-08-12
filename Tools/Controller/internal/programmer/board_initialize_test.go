@@ -92,7 +92,7 @@ func TestBoardInitializeRepairsFusesSlowThenRetriesBootloaderFast(t *testing.T) 
 		!report.BootloaderInstalled || runner.bootProgrammer != "usbasp" {
 		t.Fatalf("unexpected report=%+v boot programmer=%q", report, runner.bootProgrammer)
 	}
-	fuseIndex, fastProbeIndex, bootIndex := -1, -1, -1
+	fuseIndex, fastProbeIndex, backupIndex, bootIndex := -1, -1, -1, -1
 	for index, call := range runner.calls {
 		switch {
 		case strings.Contains(call, "-Ulfuse:w:0xF7:m"):
@@ -100,12 +100,14 @@ func TestBoardInitializeRepairsFusesSlowThenRetriesBootloaderFast(t *testing.T) 
 		case fuseIndex >= 0 && !strings.Contains(call, "-B32") &&
 			strings.Contains(call, "-cusbasp") && !strings.Contains(call, "-U"):
 			fastProbeIndex = index
+		case fuseIndex >= 0 && !strings.Contains(call, "-B32") && strings.Contains(call, "-Uflash:r:"):
+			backupIndex = index
 		case strings.Contains(call, "burn-bootloader"):
 			bootIndex = index
 		}
 	}
-	if fuseIndex < 0 || fastProbeIndex <= fuseIndex || bootIndex <= fastProbeIndex {
-		t.Fatalf("expected slow fuse repair, fast probe, then bootloader; calls=%v", runner.calls)
+	if fuseIndex < 0 || fastProbeIndex <= fuseIndex || backupIndex <= fastProbeIndex || bootIndex <= backupIndex {
+		t.Fatalf("expected slow fuse repair, fast probe, fast backup, then bootloader; calls=%v", runner.calls)
 	}
 }
 

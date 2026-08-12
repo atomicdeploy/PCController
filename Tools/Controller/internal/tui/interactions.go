@@ -1388,7 +1388,7 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 	case PageProgramming:
 		switch key {
 		case "i":
-			return model.dispatchLine("board initialize")
+			return model.dispatchLine("board provision")
 		case "p":
 			return model.dispatchLine("boot probe")
 		case "m":

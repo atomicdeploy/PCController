@@ -935,10 +935,10 @@ For a blank ATmega328P board connected by USBasp, use the end-to-end
 initializer instead of composing fuse and flash commands manually:
 
 ```console
-bin\controller.exe board initialize --uart auto
-bin\controller.exe board initialize --uart none --bootloader-only
-bin\controller.exe board initialize --portable-cli --uart COM4
-bin\controller.exe board initialize --name EDGE-01 --uart auto
+bin\controller.exe board provision --uart auto
+bin\controller.exe board provision --uart none --bootloader-only
+bin\controller.exe board provision --portable-cli --uart COM4
+bin\controller.exe board provision --name EDGE-01 --uart auto
 bin\controller.exe board blank --confirm EDGE-01 --uart auto
 ```
 
@@ -965,12 +965,14 @@ record is authoritative; Urboot/Urclock filename/title metadata is upload-time
 flash metadata and is not used as board identity.
 
 `board blank` is the guarded return-to-shelf operation. With UART present it
-authenticates the application and requires `--confirm` to exactly match the
-stored board name. Without UART, only the literal `--confirm ERASE-BOARD` is
-accepted. It then takes a fresh complete USBasp backup, chip-erases application
-and bootloader flash, writes `0xFF` across the EESAVE-preserved EEPROM, reads
-every flash/EEPROM byte back, and proves the fuse bytes did not change. Raw
-chip erase is intentionally unavailable through the generic programming CLI.
+authenticates the application, persists the `Prog` interlock, and requires
+`--confirm` to exactly match the stored board name. Without UART, only the
+literal `--confirm ERASE-BOARD` is accepted. It backs up the part, temporarily
+uses the selected core's external-crystal fuse policy at slow SCK only when the
+factory clock requires it, proves normal USBasp, clears flash and EEPROM to
+`FF`, restores ATmega328P factory fuses/lock `62/D9/FF/FF`, then reads all
+memory and fuse bytes back at a factory-safe SCK. Thus the final state is a
+true factory blank, not a blank application under deployment fuses.
 
 The TUI exposes initialization on the **Programming** page with `I`, USBasp
 driver repair with `Z`, and a non-executing blank-command prompt with `X` so
