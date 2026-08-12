@@ -6,7 +6,8 @@
 
 class PwmController;
 
-// StatusLedMode selects the persistent operational RGB presentation.
+// Persistent operational states. Custom means the last host descriptor owns
+// the output; all other states are rendered locally, including host loss.
 enum class StatusLedMode : uint8_t {
   Off = 0,
   Boot,
@@ -21,7 +22,8 @@ enum class StatusLedMode : uint8_t {
   Running,
 };
 
-// StatusLedCue selects a temporary informational or warning overlay.
+// Local cue IDs remain source-compatible with the front panel. The production
+// engine deliberately does not let informational cues interrupt an effect.
 enum class StatusLedCue : uint8_t {
   None = 0,
   DoorOpen,
@@ -34,8 +36,7 @@ enum class StatusLedCue : uint8_t {
   Reset,
 };
 
-// One compact procedural engine covers every host-controlled animation. The
-// numeric values are the native STATUS_EFFECT payload contract.
+// Values are the native STATUS_EFFECT wire contract.
 enum class StatusLedEffect : uint8_t {
   None = 0,
   Breathe = 1,
@@ -44,112 +45,90 @@ enum class StatusLedEffect : uint8_t {
   Transition = 4,
 };
 
-// Composes base state and transient cues onto PWM RGB channels 13..15.
+namespace StatusLedTiming {
+// 62.5 render opportunities per second. The engine uses elapsed MCU millis,
+// never UART arrival cadence, and performs at most one PCA update per loop.
+constexpr uint8_t FrameIntervalMs = 16;
+constexpr uint16_t MinimumPeriodMs = 640;
+constexpr uint16_t MaximumPeriodMs = 60000;
+} // namespace StatusLedTiming
+
 #if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
+// Allocation-free descriptor renderer for PCA9685 RGB channels 13..15.
 class StatusLedController {
 public:
-  static constexpr uint8_t ProfileCount = 19;
-  static constexpr uint8_t ProfilePayloadBytes = 12;
-  static constexpr uint8_t ManualCondition = 0xFF;
-  // Claims PWM output plus Power/On signal and starts the boot animation.
   void begin(PwmController &pwm, uint8_t brightness,
              uint32_t now = millis(), bool powerSignal = true);
-  // Advances breathing/easing without blocking other services.
   void service(uint32_t now = millis());
 
   void setMode(StatusLedMode mode, uint32_t now = millis());
-  StatusLedMode mode() const;
+  StatusLedMode mode() const { return activeMode_; }
   void setBrightness(uint8_t brightness);
-  uint8_t brightness() const;
-  void setCustom(uint8_t red, uint8_t green, uint8_t blue);
-  bool setEffect(StatusLedEffect effect, uint8_t red, uint8_t green,
-                 uint8_t blue, uint8_t alternateRed,
-                 uint8_t alternateGreen, uint8_t alternateBlue,
-                 uint8_t brightness, uint8_t minimumBrightness,
-                 uint16_t periodMs, uint8_t repeats,
-                 uint32_t now = millis());
+  uint8_t brightness() const { return activeDescriptor_[7]; }
+  // STATUS_RGB is four bytes; STATUS_EFFECT is the exact 12-byte descriptor.
+  void setCustom(const uint8_t *payload, uint32_t now = millis());
+  bool setEffect(const uint8_t *payload, uint32_t now = millis());
   void cancelEffect();
-  StatusLedEffect effect() const;
-  uint8_t renderedRed() const;
-  uint8_t renderedGreen() const;
-  uint8_t renderedBlue() const;
-  uint8_t condition() const;
-  bool profile(uint8_t condition, uint8_t *payload) const;
-  bool setProfile(uint8_t condition, const uint8_t *payload,
-                  uint32_t now = millis());
-  void setPowerSignal(bool active);
-  // Overlays an informational transition before smoothly restoring base state.
-  void playCue(StatusLedCue cue, uint16_t durationMs,
-               uint32_t now = millis());
+  StatusLedEffect effect() const {
+    return static_cast<StatusLedEffect>(activeDescriptor_[0]);
+  }
+  // Transient front-panel decoration is intentionally omitted from the byte-
+  // tight engine. Safety/operational modes and host descriptors remain native.
+  void playCue(StatusLedCue, uint16_t, uint32_t = millis()) {}
+
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
+  uint8_t renderedRed() const { return renderedRed_; }
+  uint8_t renderedGreen() const { return renderedGreen_; }
+  uint8_t renderedBlue() const { return renderedBlue_; }
+  uint8_t condition() const {
+    return activeMode_ == StatusLedMode::Custom
+               ? 0xFF
+               : static_cast<uint8_t>(activeMode_);
+  }
+#endif
+#if defined(PCCONTROLLER_NATIVE_TEST)
+  uint16_t renderedFrames() const { return renderedFrames_; }
+#endif
 
 private:
-  void loadProfile(uint8_t condition, uint32_t now);
-  void defaultProfile(uint8_t condition, uint8_t *payload) const;
-  void applyProfile(uint8_t condition, const uint8_t *payload, uint32_t now);
-  static bool validProfile(const uint8_t *payload);
-  void renderColor(uint8_t red, uint8_t green, uint8_t blue, uint8_t level);
-  void renderEffect();
-  void finishEffect();
+  void render();
   static uint8_t scale(uint8_t value, uint8_t level);
   static uint8_t interpolate(uint8_t from, uint8_t to, uint8_t phase);
 
-  // Static storage zero-initializes the singleton. Avoiding per-member dynamic
-  // initializers saves both flash copy data and constructor code on ATmega328P.
-  PwmController *pwm_; // Non-owning shared PWM controller.
-  StatusLedMode mode_;
-  uint8_t brightness_;
-  uint8_t customRed_;
-  uint8_t customGreen_;
-  uint8_t customBlue_;
-  uint8_t alternateRed_;
-  uint8_t alternateGreen_;
-  uint8_t alternateBlue_;
-  uint8_t minimumBrightness_;
-  uint8_t effectPhase_;
-  uint8_t effectRepeats_;
+  // Static singleton storage is zero-initialized; no constructor copy table.
+  uint32_t lastFrameAt_;
+  uint16_t effectElapsedMs_;
+  uint16_t effectPeriodMs_;
+  uint8_t hostDescriptor_[12];
+  uint8_t localDescriptor_[12];
+  uint8_t *activeDescriptor_;
+  StatusLedMode activeMode_;
+  uint8_t localBrightness_;
+  bool dirty_;
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
   uint8_t renderedRed_;
   uint8_t renderedGreen_;
   uint8_t renderedBlue_;
-  uint8_t condition_;
-  StatusLedEffect effect_;
-  uint16_t effectStepMs_;
-  uint32_t lastEffectStepAt_;
-  uint32_t cueEndsAt_; // millis() deadline; zero means no active cue.
-  StatusLedCue cue_;
+#endif
+#if defined(PCCONTROLLER_NATIVE_TEST)
+  uint16_t renderedFrames_;
+#endif
 };
 #else
-// Direct RGB remains available through PwmController.  This zero-cost facade
-// deliberately removes the duplicated procedural/profile policy in the
-// compact production profile while keeping callers on one engine contract.
 class StatusLedController {
 public:
-  static constexpr uint8_t ProfileCount = 19;
-  static constexpr uint8_t ProfilePayloadBytes = 12;
-  static constexpr uint8_t ManualCondition = 0xFF;
   void begin(PwmController &, uint8_t, uint32_t = millis(), bool = true) {}
   void service(uint32_t = millis()) {}
   void setMode(StatusLedMode, uint32_t = millis()) {}
   StatusLedMode mode() const { return StatusLedMode::Off; }
   void setBrightness(uint8_t) {}
   uint8_t brightness() const { return 0; }
-  void setCustom(uint8_t, uint8_t, uint8_t) {}
-  bool setEffect(StatusLedEffect, uint8_t, uint8_t, uint8_t, uint8_t,
-                 uint8_t, uint8_t, uint8_t, uint8_t, uint16_t, uint8_t,
-                 uint32_t = millis()) { return false; }
+  void setCustom(const uint8_t *, uint32_t = millis()) {}
+  bool setEffect(const uint8_t *, uint32_t = millis()) { return false; }
   void cancelEffect() {}
   StatusLedEffect effect() const { return StatusLedEffect::None; }
-  uint8_t renderedRed() const { return 0; }
-  uint8_t renderedGreen() const { return 0; }
-  uint8_t renderedBlue() const { return 0; }
-  uint8_t condition() const { return 0; }
-  bool profile(uint8_t, uint8_t *) const { return false; }
-  bool setProfile(uint8_t, const uint8_t *, uint32_t = millis()) {
-    return false;
-  }
-  void setPowerSignal(bool) {}
   void playCue(StatusLedCue, uint16_t, uint32_t = millis()) {}
 };
 #endif
 
-// statusLeds is the board-wide RGB state and cue compositor.
 extern StatusLedController statusLeds;

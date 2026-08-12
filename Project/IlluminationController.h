@@ -35,8 +35,9 @@ public:
 
 private:
   // Brightness fields are 0..255 and are expanded by PwmController.
-  IlluminationMode mode_ = IlluminationMode::Auto;
-  uint8_t onBrightness_ = 128;
+  // Stored settings are applied before begin(); zero-init avoids .data.
+  IlluminationMode mode_ = IlluminationMode::Off;
+  uint8_t onBrightness_ = 0;
   uint8_t offBrightness_ = 0;
   uint8_t currentBrightness_ = 0;
   uint32_t lastFadeAt_ = 0;
@@ -68,8 +69,9 @@ public:
   }
 
 private:
-  IlluminationMode mode_ = IlluminationMode::Auto;
-  uint8_t onBrightness_ = 128;
+  // Stored settings are applied before begin(); zero-init avoids .data.
+  IlluminationMode mode_ = IlluminationMode::Off;
+  uint8_t onBrightness_ = 0;
   uint8_t offBrightness_ = 0;
   uint8_t currentBrightness_ = 0;
 };

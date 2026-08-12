@@ -34,8 +34,8 @@ private:
   void sendCommand(uint8_t command);
   void writeSegments(const uint8_t segments[4]);
 
-  uint8_t cachedSegments_[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-  uint8_t brightness_ = 0xFF;
+  uint8_t cachedSegments_[4] = {};
+  uint8_t brightness_ = 0;
   uint16_t brightnessChangedAt_ = 0;
   bool begun_ = false;
 };

@@ -54,11 +54,15 @@
 #define PCCONTROLLER_ENABLE_PCA9685 1
 #endif
 
-// The PWM and direct RGB engines stay present even when these higher-level
-// policies are host-owned.  This keeps one reusable output path and makes
-// optional autonomous behavior a build-profile choice rather than a fork.
+// The compact status engine renders one host descriptor in MCU time and also
+// owns the disconnected fallback.  EEPROM condition profiles remain a
+// separate, larger-MCU/backlog feature; production advertises only effects.
 #ifndef PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
-#define PCCONTROLLER_ENABLE_STATUS_LED_ENGINE 0
+#define PCCONTROLLER_ENABLE_STATUS_LED_ENGINE 1
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_STATUS_LED_PROFILES
+#define PCCONTROLLER_ENABLE_STATUS_LED_PROFILES 0
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
@@ -136,6 +140,9 @@
 #endif
 #if PCCONTROLLER_ENABLE_STATUS_LED_ENGINE && !PCCONTROLLER_ENABLE_PCA9685
 #error "PCCONTROLLER_ENABLE_STATUS_LED_ENGINE requires PCA9685"
+#endif
+#if PCCONTROLLER_ENABLE_STATUS_LED_PROFILES
+#error "Status LED EEPROM profiles are unavailable in the compact ATmega328P build"
 #endif
 #if PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION && !PCCONTROLLER_ENABLE_PCA9685
 #error "PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION requires PCA9685"
