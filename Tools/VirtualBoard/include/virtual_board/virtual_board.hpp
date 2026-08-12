@@ -191,6 +191,7 @@ private:
   bool statusOverride_ = false;
   std::uint8_t statusEffect_ = 0;
   std::uint8_t statusCondition_ = 0;
+  std::array<std::uint8_t, 12> statusEffectDescriptor_{};
   std::array<std::uint8_t, 3> statusEffectColor_{};
   std::array<std::uint8_t, 3> statusEffectAlternate_{};
   std::uint8_t statusEffectBrightness_ = 0;

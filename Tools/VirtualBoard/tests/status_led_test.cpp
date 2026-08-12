@@ -185,6 +185,46 @@ void testLocalBrightnessAndContinuity() {
   require(maximumDelta <= from8(16),
           "breathe easing has a visible adjacent-frame discontinuity");
 }
+
+void testDescriptorIdempotenceAcrossHeartbeats() {
+  Fixture fixture;
+  const std::uint8_t breathe[] = {
+      1, 40, 120, 255, 0, 0, 0, 220, 12, 0x40, 0x06, 0};
+  require(fixture.led.setEffect(breathe, 0),
+          "initial STATUS_EFFECT descriptor was rejected");
+  fixture.led.service(0);
+
+  // Simulate five two-second host reconciliation heartbeats while the MCU
+  // renders continuously. An exact descriptor repeat must not reset phase.
+  for (std::uint32_t heartbeat = 2000; heartbeat <= 10000;
+       heartbeat += 2000) {
+    for (std::uint32_t now = heartbeat - 1984; now <= heartbeat; now += 16) {
+      fixture.led.service(now);
+    }
+    const auto elapsed = fixture.led.effectElapsedForTest();
+    require(fixture.led.setEffect(breathe, heartbeat),
+            "byte-identical heartbeat descriptor was rejected");
+    require(fixture.led.effectElapsedForTest() == elapsed,
+            "byte-identical heartbeat restarted the native LED phase");
+  }
+
+  std::uint8_t changed[sizeof(breathe)];
+  std::memcpy(changed, breathe, sizeof(changed));
+  changed[3] = 80; // Same effect kind, changed blue component.
+  require(fixture.led.setEffect(changed, 10016),
+          "changed same-kind STATUS_EFFECT descriptor was rejected");
+  require(fixture.led.effectElapsedForTest() == 0 &&
+              std::memcmp(fixture.led.descriptorForTest(), changed,
+                          sizeof(changed)) == 0,
+          "changed same-kind descriptor was ignored instead of applied");
+
+  fixture.led.cancelEffect();
+  fixture.led.setMode(StatusLedMode::Connected, 10032);
+  fixture.led.service(10032);
+  require(fixture.led.effect() == StatusLedEffect::Breathe &&
+              fixture.pwm.logicalValue(PwmChannels::StatusGreen) > 0,
+          "explicit release did not restore autonomous connected feedback");
+}
 } // namespace
 
 bool PwmExpanderDriver::begin() { return true; }
@@ -204,6 +244,7 @@ int main() {
     testLeasePauseAndRollover();
     testPeriodsFiniteCompletionAndOwnership();
     testLocalBrightnessAndContinuity();
+    testDescriptorIdempotenceAcrossHeartbeats();
     std::cout << "firmware_status_led_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {

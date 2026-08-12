@@ -103,6 +103,14 @@ bool StatusLedController::setEffect(const uint8_t *payload, uint32_t now) {
       payload[8] > payload[7]) {
     return false;
   }
+  // Host policy reconciliation may repeat an already-owned descriptor. Keep
+  // the MCU phase continuous only for a byte-identical 12-byte descriptor;
+  // changing colour, brightness, timing, or repeats must take effect even
+  // when the effect kind itself is unchanged.
+  if (activeMode_ == StatusLedMode::Custom &&
+      memcmp(hostDescriptor_, payload, sizeof(hostDescriptor_)) == 0) {
+    return true;
+  }
   memcpy(hostDescriptor_, payload, sizeof(hostDescriptor_));
   activeMode_ = StatusLedMode::Off;
   setMode(StatusLedMode::Custom, now);

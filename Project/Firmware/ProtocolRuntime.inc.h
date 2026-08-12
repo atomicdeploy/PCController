@@ -686,8 +686,11 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       } else {
         hostLcdFlags |= HOST_PROGRAM_RUNNING;
       }
-      hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
-      statusLeds.cancelEffect();
+      // Program state and explicit status-LED ownership are independent host
+      // domains. In particular, the host repeats PROGRAM_STATE as a liveness
+      // heartbeat; it must not restart or release an active MCU-rendered
+      // effect. STATUS_RGB/STATUS_EFFECT and their explicit release paths are
+      // the only ordinary commands that change HOST_STATUS_OVERRIDE.
       goto acknowledged;
 
     case PwmGet:
