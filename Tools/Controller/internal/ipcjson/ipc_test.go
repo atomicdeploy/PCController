@@ -1333,6 +1333,7 @@ func TestGenericCommandRemoteCapabilitiesDistinguishReadsFromMutations(t *testin
 		{"rf inspect 3", capabilityRead},
 		{"rf send 0x1234 24 1 350", capabilityBoard},
 		{"macro show demo", capabilityRead},
+		{"macro monitor", capabilityRead},
 		{"macro play demo", capabilityBoard},
 		{"macro create 1 demo", capabilityHostConfig},
 		{"macro update 1 renamed motion green", capabilityHostConfig},

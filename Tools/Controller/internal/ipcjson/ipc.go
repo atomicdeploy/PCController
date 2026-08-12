@@ -1776,7 +1776,7 @@ func commandCapability(command string) string {
 		}
 		return capabilityBoard
 	case "macro":
-		if len(words) >= 2 && (words[1] == "list" || words[1] == "show" || words[1] == "status" ||
+		if len(words) >= 2 && (words[1] == "list" || words[1] == "show" || words[1] == "status" || words[1] == "monitor" ||
 			(words[1] == "record" && len(words) >= 3 && words[2] == "status")) {
 			return capabilityRead
 		}

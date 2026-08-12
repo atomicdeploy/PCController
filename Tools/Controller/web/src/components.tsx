@@ -466,12 +466,14 @@ export function MetricCard({
     <article className={`metric metric--${tone}`}>
       <div className="metric__top">
         <span className="metric__icon"><Icon icon={icon} size={19} /></span>
-        <span className="metric__label">{label}</span>
+        <span className="metric__heading">
+          <span className="metric__label">{label}</span>
+          {detail && <span className="metric__detail">{detail}</span>}
+        </span>
       </div>
       <div className="metric__value" dir="ltr">
         <strong>{value}</strong><span>{unit}</span>
       </div>
-      {detail && <div className="metric__detail">{detail}</div>}
       <Sparkline values={values} tone={tone} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
     </article>
   )

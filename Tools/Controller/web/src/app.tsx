@@ -407,6 +407,7 @@ export default function App() {
   const refreshAfterHostRestart = useRef(false)
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
+  const sidebarStatusRef = useRef<HTMLDivElement>(null)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
@@ -439,11 +440,12 @@ export default function App() {
     applyLocalAppearance(authoritative)
   }, [applyLocalAppearance])
 
-  const refreshHostAppearance = useCallback(async () => {
-    const config = await getUIConfig()
-    setUIConfig(config)
+	const refreshHostAppearance = useCallback(async (): Promise<boolean> => {
+		const config = await getUIConfig()
+		if (reloadForResourceMismatch(config)) return true
+		setUIConfig(config)
     adoptHostAppearance(config.appearance, config.appearance_etag)
-    return config
+    return false
   }, [adoptHostAppearance])
 
   useEffect(() => {
@@ -469,6 +471,31 @@ export default function App() {
   }, [demo, productTitle, snapshot.connected, snapshot.port.name, startupProbeResolved, streamState, uiConfig])
 
   useEffect(() => { pageRef.current = page }, [page])
+
+  useEffect(() => {
+    if (!sidebarStatusMenu) return
+    const outside = (event: PointerEvent | FocusEvent) => {
+      if (!sidebarStatusRef.current?.contains(event.target as Node)) setSidebarStatusMenu(false)
+    }
+    const key = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSidebarStatusMenu(false)
+    }
+    const close = () => setSidebarStatusMenu(false)
+    window.addEventListener('pointerdown', outside)
+    window.addEventListener('focusin', outside)
+    window.addEventListener('keydown', key)
+    window.addEventListener('blur', close)
+    window.addEventListener('hashchange', close)
+    return () => {
+      window.removeEventListener('pointerdown', outside)
+      window.removeEventListener('focusin', outside)
+      window.removeEventListener('keydown', key)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('hashchange', close)
+    }
+  }, [sidebarStatusMenu])
+
+  useEffect(() => { if (!snapshot.connected) setSidebarStatusMenu(false) }, [snapshot.connected])
 
   useEffect(() => {
     const engine = createAudioEngine({
@@ -689,7 +716,7 @@ export default function App() {
     snapshot.port.serial_number,
   ])
 
-  const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
+  const dispatchCommand = useCallback(async (command: string, success?: string, notifyOnSuccess = true): Promise<string> => {
     const safeCommand = redactSensitiveCommand(command)
     tabChannelRef.current?.publishTerminal({ kind: 'command', text: `pc› ${safeCommand}`, at: Date.now() })
     if (demo) {
@@ -702,7 +729,7 @@ export default function App() {
       const result = await execute(command)
       const output = result.output ?? ''
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output || '✓ accepted', at: Date.now() })
-      notify('success', success || 'Command completed', output || safeCommand)
+      if (notifyOnSuccess) notify('success', success || 'Command completed', output || safeCommand)
       void refresh()
       return output
     } catch (cause) {
@@ -743,6 +770,24 @@ export default function App() {
       })
     })
   }, [appearance.locale, demo, dispatchCommand])
+
+  const [relayPending, setRelayPending] = useState<ReadonlySet<number>>(() => new Set())
+  const relayToggle = useCallback(async (relay: number, active: boolean) => {
+    const mask = 1 << (relay - 1)
+    const previous = snapshot.status.active_relays
+    const next = active ? previous & ~mask : previous | mask
+    // Flip locally before transport latency. Only the originating client owns
+    // this optimistic state; socket status remains the authority for all tabs.
+    setSnapshot((current) => ({ ...current, status: { ...current.status, active_relays: next } }))
+    setRelayPending((current) => new Set(current).add(relay))
+    try {
+      await dispatchCommand(`relay ${relay} ${active ? 'off' : 'on'}`, undefined, false)
+    } catch {
+      setSnapshot((current) => current.status.active_relays === next ? { ...current, status: { ...current.status, active_relays: previous } } : current)
+    } finally {
+      setRelayPending((current) => { const nextPending = new Set(current); nextPending.delete(relay); return nextPending })
+    }
+  }, [dispatchCommand, snapshot.status.active_relays])
 
   const openDialog = useCallback((value: Omit<DialogState, 'open'>) => {
     setDialog({ ...value, open: true })
@@ -1131,12 +1176,17 @@ export default function App() {
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
-              if (refreshAfterHostRestart.current) {
-                refreshAfterHostRestart.current = false
-                window.location.reload()
-                return
-              }
-              void refresh()
+				if (refreshAfterHostRestart.current) {
+					refreshAfterHostRestart.current = false
+					void refreshHostAppearance().then((alreadyReloading) => {
+						// A restart with unchanged identity still deserves one reconnect,
+						// while a changed identity reloads inside refreshHostAppearance.
+						if (!alreadyReloading) window.location.reload()
+					}).catch(() => window.location.reload())
+					return
+				}
+				void refreshHostAppearance().catch(() => undefined)
+				void refresh()
             } else {
               setSnapshot((current) => snapshotAfterTransportLoss(current, state, detail))
             }
@@ -1156,7 +1206,7 @@ export default function App() {
   }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance])
 
   const shared: SharedViewProps = {
-    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
+    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, relayToggle, relayPending, refresh, openDialog,
     boardSettingsReadState,
     transport: { streamState, tabBusSupported, tabPeers },
     relayedTerminal,
@@ -1237,6 +1287,7 @@ export default function App() {
         </div>
 
         <div
+          ref={sidebarStatusRef}
           className="sidebar__status"
           role="button"
           tabIndex={0}

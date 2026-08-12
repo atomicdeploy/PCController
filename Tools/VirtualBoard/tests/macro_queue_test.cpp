@@ -36,7 +36,9 @@ void testCaptureAndReplayUseOrdinaryOpcodes() {
           "second captured ordinary opcode did not replay");
   queue.completeStep(true);
   const uint8_t query[] = {2};
-  queue.handle(frame(ControllerProtocol::MacroStep, 4, query, sizeof(query)));
+  const ControllerProtocol::Frame queryFrame = {
+      ControllerProtocol::MacroStep, 4, sizeof(query), query};
+  queue.handle(queryFrame);
   require(!serial.written().empty(), "macro status produced no UART response");
 }
 } // namespace

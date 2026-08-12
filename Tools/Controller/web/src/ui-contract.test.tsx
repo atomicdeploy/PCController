@@ -37,6 +37,8 @@ function shared(): SharedViewProps {
     locale: 'en',
     t: (key) => key,
     command: vi.fn(async () => ''),
+    relayToggle: vi.fn(async () => undefined),
+    relayPending: new Set(),
     refresh: vi.fn(async () => undefined),
     openDialog: vi.fn(),
     transport: { streamState: 'open', tabBusSupported: true, tabPeers: 0 },
@@ -62,6 +64,13 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('PWM matrix')
     expect(markup).not.toContain('Relays &amp; motion')
     expect(markup).not.toContain('Status lighting')
+  })
+
+  it('uses one real relay switch button so nested lamp clicks have one optimistic route', () => {
+    const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={{ ...emptySnapshot, connected: true, have_status: true }} />)
+    expect(markup).toContain('relay-switch__toggle')
+    expect(markup).toContain('data-relay="1"')
+    expect(markup).toContain('<i aria-hidden="true"><b></b></i>')
   })
 
   it('renders only user PWM channels in the generic mixer and keeps system channels role-specific', () => {

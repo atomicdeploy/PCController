@@ -197,7 +197,7 @@ export function AdvancedWorkbench({
   const [menuOrder, setMenuOrder] = useState('status voltage current temperature')
   const [hostMenuID, setHostMenuID] = useState('')
   const [hostMenuLabel, setHostMenuLabel] = useState('')
-  const [frontPanel, setFrontPanel] = useState<FrontPanelState | undefined>(snapshot.front_panel)
+  const frontPanel = snapshot.have_front_panel ? snapshot.front_panel : undefined
 
   const [pixel, setPixel] = useState(0)
   const [pixelRed, setPixelRed] = useState(32)
@@ -276,10 +276,6 @@ export function AdvancedWorkbench({
   useEffect(() => {
     if (!online && messageTarget === 'lcd') setMessageTarget('host')
   }, [messageTarget, online])
-
-  useEffect(() => {
-    if (snapshot.have_front_panel && snapshot.front_panel) setFrontPanel(snapshot.front_panel)
-  }, [snapshot.front_panel_updated, snapshot.have_front_panel, snapshot.front_panel])
 
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -538,11 +534,10 @@ export function AdvancedWorkbench({
             <div>
               <strong>{copy('Live physical display', 'نمایش زنده پنل')}</strong>
               <span>{frontPanel ? `${copy('page', 'صفحه')} ${frontPanel.menu_page} · ${copy('brightness', 'روشنایی')} ${frontPanel.brightness}/7` : copy('Awaiting exact front-panel state', 'در انتظار وضعیت دقیق پنل')}</span>
-			  <small>{copy('Changed-only board opcodes update this preview immediately; refresh is explicit.', 'اپ‌کدهای تغییرمحور برد این پیش‌نمایش را فوری به‌روز می‌کنند؛ تازه‌سازی صریح است.')}</small>
+			  <small>{copy('Changed-only board events update this preview immediately for every connected client.', 'رویدادهای تغییرمحور برد این پیش‌نمایش را برای همهٔ کاربران متصل فوری به‌روز می‌کنند.')}</small>
             </div>
           </div>
           <div className="advanced-actions">
-			<Button icon={RefreshCw} disabled={!online} onClick={() => void rpc<FrontPanelState>('controller.front_panel').then(setFrontPanel).catch(() => undefined)}>{copy('Refresh physical state', 'تازه‌سازی وضعیت فیزیکی')}</Button>
             <Button icon={BookOpen} disabled={!online} busy={busy === 'menu list'} onClick={() => void run('menu list')}>{copy('Firmware catalog', 'کاتالوگ میان‌افزار')}</Button>
             <Button icon={LayoutDashboard} disabled={!online} busy={busy === 'menu current'} onClick={() => void run('menu current')}>{copy('Current page', 'صفحه فعلی')}</Button>
             <Button icon={LayoutPanelTop} disabled={!online} busy={busy === 'menu layout'} onClick={() => void run('menu layout')}>{copy('Stored layout', 'چیدمان ذخیره‌شده')}</Button>
