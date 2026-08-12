@@ -67,9 +67,16 @@ func formatUptime(milliseconds uint32) string {
 	return duration.Truncate(time.Second).String()
 }
 
-// freshnessLabel deliberately suppresses rapidly changing sub-500 ms values.
-// Below that threshold "live" conveys the useful state without a visual
-// 0/100/200 ms counter. Once stale, the age is stable enough to be actionable.
+// freshnessLiveThreshold covers the remote TUI's one-second convergence poll
+// plus ordinary scheduler and network jitter. Keeping the prior 500 ms window
+// made a healthy remote view alternate between "live" and a fractional age on
+// every poll cycle. Activity events remain push-driven, so this presentation
+// threshold does not delay controls or increase RPC traffic.
+const freshnessLiveThreshold = 2500 * time.Millisecond
+
+// freshnessLabel suppresses rapidly changing ages while samples are arriving
+// within the expected live window. Once stale, the age is actionable and is
+// shown explicitly.
 func freshnessLabel(updated, now time.Time) string {
 	if updated.IsZero() {
 		return "waiting for device"
@@ -78,7 +85,7 @@ func freshnessLabel(updated, now time.Time) string {
 	if age < 0 {
 		age = 0
 	}
-	if age < 500*time.Millisecond {
+	if age < freshnessLiveThreshold {
 		return "live"
 	}
 	if age < 10*time.Second {
