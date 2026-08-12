@@ -246,6 +246,9 @@ func (device runtimeProgrammingDevice) RampPWMToZero(
 		device.options.Outputs.StopMelody()
 		device.options.Outputs.OverrideStatusEffect()
 	}
+	if !state.PWM.Available {
+		return nil
+	}
 	for step := programmingRampSteps - 1; step >= 0; step-- {
 		for channel, original := range state.PWM.Values {
 			if original == 0 {
@@ -382,11 +385,19 @@ func (device runtimeProgrammingDevice) PublishProgrammingPhase(phase string) {
 }
 
 func (device runtimeProgrammingDevice) EnterSafeProgrammingState(ctx context.Context) error {
-	return errors.Join(
+	failures := []error{
 		command(ctx, device.runtime, native.OpMacroCancel, nil),
 		command(ctx, device.runtime, native.OpRelayAllOff, nil),
-		command(ctx, device.runtime, native.OpPWMAllOff, nil),
-	)
+	}
+	// A connected board with a current STATUS frame has authoritative PCA/PWM
+	// availability. Do not turn a deliberately absent peripheral into a failed
+	// recovery transaction; if status is not known, retain the conservative
+	// all-off command.
+	snapshot := device.runtime.Snapshot()
+	if !snapshot.HaveStatus || snapshot.Status.PWMAvailable {
+		failures = append(failures, command(ctx, device.runtime, native.OpPWMAllOff, nil))
+	}
+	return errors.Join(failures...)
 }
 
 func (device runtimeProgrammingDevice) ShowProgrammingPanel(ctx context.Context) error {
@@ -1043,21 +1054,55 @@ func reassertProgrammingSession(
 	return nil
 }
 
-// findRetryableProgrammingSession returns the one failed transaction that
-// exactly matches this physical device, target image, and EEPROM policy.
+// findRetryableProgrammingSession returns the newest safely latched transaction
+// that exactly matches this physical device, target image, and EEPROM policy.
+// A host may stop after durable preparation but before the programmer starts;
+// that pre-write marker is just as safe to resume as an explicit failed result.
 func findRetryableProgrammingSession(
 	paths programmer.HostDataPaths,
 	device ProgrammingDeviceIdentity,
 	targetSHA256 string,
 	reinitializeEEPROM bool,
 ) (*ProgrammingSession, error) {
-	session, err := findFailedProgrammingSession(paths, device, targetSHA256)
+	session, err := findNewestProgrammingSession(paths, device)
 	if err != nil || session == nil {
 		return session, err
+	}
+	targetSHA256 = strings.ToLower(strings.TrimSpace(targetSHA256))
+	prewriteSafe := session.HostResult == "" && (session.Phase == "latched-safe" ||
+		session.Phase == "development-reinitialize-safe")
+	if !strings.EqualFold(session.TargetFirmwareSHA256, targetSHA256) {
+		if !reinitializeEEPROM || !session.SafeStateApplied || !prewriteSafe {
+			return nil, fmt.Errorf(
+				"device has a newer pending programming session for target SHA-256 %s in phase %s; recover it before starting another target",
+				session.TargetFirmwareSHA256, session.Phase,
+			)
+		}
+		previousTarget := session.TargetFirmwareSHA256
+		previousPolicy := session.ReinitializeEEPROM
+		previousWarnings := append([]string(nil), session.Warnings...)
+		session.TargetFirmwareSHA256 = targetSHA256
+		session.ReinitializeEEPROM = true
+		session.Warnings = append(session.Warnings, fmt.Sprintf(
+			"explicit factory EEPROM reinitialization superseded safely prepared pre-write target SHA-256 %s; the untouched raw EEPROM backup remains mandatory",
+			previousTarget,
+		))
+		if err := rewriteProgrammingMarker(session); err != nil {
+			session.TargetFirmwareSHA256 = previousTarget
+			session.ReinitializeEEPROM = previousPolicy
+			session.Warnings = previousWarnings
+			return nil, fmt.Errorf("persist explicit pre-write target supersession: %w", err)
+		}
 	}
 	if session.ReinitializeEEPROM != reinitializeEEPROM {
 		return nil, errors.New(
 			"pending programming session uses a different EEPROM policy; recover it before starting a new write",
+		)
+	}
+	if !session.SafeStateApplied || (session.HostResult != "failed" && !prewriteSafe) {
+		return nil, fmt.Errorf(
+			"newest programming session for target SHA-256 %s in phase %s is not safely retryable",
+			session.TargetFirmwareSHA256, session.Phase,
 		)
 	}
 	return session, nil
@@ -1068,11 +1113,30 @@ func findFailedProgrammingSession(
 	device ProgrammingDeviceIdentity,
 	targetSHA256 string,
 ) (*ProgrammingSession, error) {
+	session, err := findNewestProgrammingSession(paths, device)
+	if err != nil || session == nil {
+		return session, err
+	}
+	targetSHA256 = strings.ToLower(strings.TrimSpace(targetSHA256))
+	matching := session.HostResult == "failed" && session.SafeStateApplied &&
+		strings.EqualFold(session.TargetFirmwareSHA256, targetSHA256)
+	if !matching {
+		return nil, fmt.Errorf(
+			"device has a newer pending programming session for target SHA-256 %s in phase %s; recover it before starting another target",
+			session.TargetFirmwareSHA256, session.Phase,
+		)
+	}
+	return session, nil
+}
+
+func findNewestProgrammingSession(
+	paths programmer.HostDataPaths,
+	device ProgrammingDeviceIdentity,
+) (*ProgrammingSession, error) {
 	markers, err := filepath.Glob(filepath.Join(paths.StateDir, "programming-recovery-*.json"))
 	if err != nil {
 		return nil, err
 	}
-	targetSHA256 = strings.ToLower(strings.TrimSpace(targetSHA256))
 	var candidate *ProgrammingSession
 	for _, markerPath := range markers {
 		session, loadErr := loadProgrammingMarker(markerPath)
@@ -1082,19 +1146,23 @@ func findFailedProgrammingSession(
 		if !sameProgrammingDevice(session.Device, device) {
 			continue
 		}
-		matching := session.HostResult == "failed" &&
-			strings.EqualFold(session.TargetFirmwareSHA256, targetSHA256) &&
-			session.SafeStateApplied
-		if !matching {
-			return nil, fmt.Errorf(
-				"device has a pending programming session for another target or lifecycle phase (%s); recover it before starting a new write",
-				session.Phase,
-			)
+		// Recovery markers form a LIFO stack for one physical device. A newer
+		// preparation snapshots the already-safe state left by an older one, so
+		// recovering the newest marker first preserves the latch until every
+		// interrupted transaction has been completed. Filesystem glob order is
+		// not a lifecycle ordering and must not make an exact recovery target
+		// unreachable merely because an older marker sorts first.
+		if candidate == nil || session.PreparedAt.After(candidate.PreparedAt) {
+			candidate = session
+			continue
 		}
-		if candidate != nil {
-			return nil, errors.New("multiple retryable programming sessions match this device")
+		if session.PreparedAt.Equal(candidate.PreparedAt) &&
+			session.RecoveryMarkerPath != candidate.RecoveryMarkerPath {
+			return nil, errors.New("multiple pending programming sessions share the newest preparation timestamp")
 		}
-		candidate = session
+	}
+	if candidate == nil {
+		return nil, nil
 	}
 	return candidate, nil
 }

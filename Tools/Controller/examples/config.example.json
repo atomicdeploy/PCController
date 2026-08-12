@@ -26,6 +26,7 @@
 	  "font_size": 18
 	},
     "table_layout": "compact",
+    "control_value_colors": true,
     "setup_complete": false,
     "welcome_melody": "notify",
     "status_interval_ms": 250,

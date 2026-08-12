@@ -28,6 +28,7 @@ func TestBuildUrclock(t *testing.T) {
 	joined := strings.Join(command.Args, " ")
 	for _, expected := range []string{
 		"-patmega328p", "-curclock", "-PCOM18", "-b115200",
+		"-xbootsize=384", "-xeepromrw",
 		"-xnometadata", `-Uflash:w:C:\build\app.hex:i`,
 	} {
 		if !strings.Contains(joined, expected) {
@@ -291,7 +292,8 @@ func TestBuildReadVerifyMetadataAndEEPROMConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if joined := strings.Join(command.Args, " "); !strings.Contains(joined, "-Uflash:r:backup.hex:i") {
+	if joined := strings.Join(command.Args, " "); !strings.Contains(joined, "-Uflash:r:backup.hex:i") ||
+		!strings.Contains(joined, "-xbootsize=384") || !strings.Contains(joined, "-xeepromrw") {
 		t.Fatalf("unexpected read command: %s", joined)
 	}
 

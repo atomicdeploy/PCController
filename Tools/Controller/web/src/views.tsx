@@ -132,6 +132,7 @@ import type {
   UIConfig,
 } from './types'
 import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
+import { peripheralAvailability } from './peripheral-availability'
 
 export interface SharedViewProps {
   appTitle: string
@@ -159,7 +160,7 @@ function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): strin
 }
 
 function values(samples: MetricSample[], field: keyof Omit<MetricSample, 'at'>): number[] {
-  return samples.map((sample) => sample[field])
+  return samples.map((sample) => sample[field]).filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
 }
 
 function eventTone(event: ControllerEvent): 'good' | 'warn' | 'bad' | 'info' {
@@ -174,6 +175,9 @@ export function DashboardView(props: SharedViewProps) {
   const { appTitle, snapshot, samples, events, locale, t, command, refresh, openDialog } = props
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const status = snapshot.status
+  const available = peripheralAvailability(snapshot)
+  const haveMeasurements = available.ina219 || available.temperatureLED || available.temperatureBTAudio
+  const haveMetricCards = haveMeasurements || available.pwm
   const connectedTone = snapshot.connected ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
@@ -222,14 +226,15 @@ export function DashboardView(props: SharedViewProps) {
         </div>
       </section>
 
-      {snapshot.have_status && <section className="metric-grid">
-        <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />
-        <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />
-        <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" detail={`${peripheralName('sensor.temperature-audio', copy('Audio temperature', 'دمای صوت'))} · ${formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} °C`} />
-        <MetricCard icon={PlugZap} label="PWM" value={status.pwm_available ? formatNumber(locale, status.pwm_value * 100 / 4095, 1) : '—'} unit={status.pwm_available ? '%' : ''} values={values(samples, 'power')} tone="violet" detail={status.pwm_available ? `${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}` : copy('Unavailable on this controller', 'در این کنترلر در دسترس نیست')} />
+      {snapshot.have_status && haveMetricCards && <section className="metric-grid">
+        {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
+        {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
+        {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" />}
+        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('Buzzer temperature', 'دمای بیزر'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
+        {available.pwm && <MetricCard icon={PlugZap} label="PWM" value={formatNumber(locale, status.pwm_value * 100 / 4095, 1)} unit="%" values={[]} tone="violet" detail={`${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}`} />}
       </section>}
 
-      <Card
+      {haveMeasurements && <Card
         icon={ChartNoAxesCombined}
         iconTone="violet"
         title={snapshot.connected ? t('liveTelemetry') : copy('Telemetry history', 'تاریخچهٔ تله‌متری')}
@@ -244,7 +249,7 @@ export function DashboardView(props: SharedViewProps) {
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
           <TelemetryChart connected={snapshot.connected} locale={locale} samples={samples} />
         </Suspense>
-      </Card>
+      </Card>}
 
       <section className="dashboard-grid">
         {snapshot.connected && <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
@@ -721,6 +726,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
 
 export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
+  const available = peripheralAvailability(snapshot)
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
     'Application title is required.': 'عنوان برنامه الزامی است.',
     'Application title must be 64 characters or fewer.': 'عنوان برنامه باید حداکثر ۶۴ نویسه باشد.',
@@ -1163,7 +1169,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
               <tr><td>{copy('Telemetry period', 'دورهٔ تله‌متری')}</td><td>{snapshot.settings.stream_period_ms} ms</td><td>{streamPeriod} ms</td></tr>
               <tr><td>{copy('Remember motion command', 'به‌خاطرسپاری فرمان حرکت')}</td><td>{snapshot.settings.output_persistence & 1 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td><td>{outputPersistence & 1 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td></tr>
               <tr><td>{copy('Remember user relays', 'به‌خاطرسپاری رله‌های کاربر')}</td><td>{snapshot.settings.output_persistence & 2 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td><td>{outputPersistence & 2 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td></tr>
-              <tr><td>{copy('Remember user PWM', 'به‌خاطرسپاری PWM کاربر')}</td><td>{snapshot.settings.output_persistence & 4 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td><td>{outputPersistence & 4 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td></tr>
+              {available.pwm && <tr><td>{copy('Remember user PWM', 'به‌خاطرسپاری PWM کاربر')}</td><td>{snapshot.settings.output_persistence & 4 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td><td>{outputPersistence & 4 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td></tr>}
               <tr><td>{copy('Stop retains direction', 'حفظ جهت هنگام توقف')}</td><td>{snapshot.settings.output_persistence & 8 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td><td>{outputPersistence & 8 ? copy('Yes', 'بله') : copy('No', 'خیر')}</td></tr>
               <tr><td>{copy('Stored relay restore mask', 'ماسک ذخیره‌شدهٔ بازیابی رله')}</td><td colSpan={2}>0x{relayRestoreMask.toString(16).toUpperCase().padStart(2, '0')}</td></tr>
             </tbody>
@@ -1175,7 +1181,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           <RangeField label={copy('Telemetry period', 'دورهٔ تله‌متری')} value={streamPeriod} min={50} max={5000} step={50} unit="ms" onChange={setStreamPeriod} />
           <Toggle checked={Boolean(outputPersistence & 1)} onChange={(enabled) => setPersistenceBit(1, enabled)} label={copy('Remember motion command', 'به‌خاطرسپاری فرمان حرکت')} detail={copy('Disabled by default; motion starts released after a reboot.', 'به‌طور پیش‌فرض غیرفعال است؛ حرکت پس از راه‌اندازی دوباره در حالت آزاد آغاز می‌شود.')} />
           <Toggle checked={Boolean(outputPersistence & 2)} onChange={(enabled) => setPersistenceBit(2, enabled)} label={copy('Remember user relays R5–R8', 'به‌خاطرسپاری رله‌های کاربر R5 تا R8')} detail={copy('Restore the user-output relay mask kept in EEPROM.', 'ماسک رله‌های خروجی کاربر ذخیره‌شده در EEPROM بازیابی می‌شود.')} />
-          <Toggle checked={Boolean(outputPersistence & 4)} onChange={(enabled) => setPersistenceBit(4, enabled)} label={copy('Remember user PWM values', 'به‌خاطرسپاری مقادیر PWM کاربر')} detail={copy('Restore MOSFET/user PWM channel values after boot.', 'مقادیر کانال‌های MOSFET/PWM کاربر پس از راه‌اندازی بازیابی می‌شوند.')} />
+          {available.pwm && <Toggle checked={Boolean(outputPersistence & 4)} onChange={(enabled) => setPersistenceBit(4, enabled)} label={copy('Remember user PWM values', 'به‌خاطرسپاری مقادیر PWM کاربر')} detail={copy('Restore MOSFET/user PWM channel values after boot.', 'مقادیر کانال‌های MOSFET/PWM کاربر پس از راه‌اندازی بازیابی می‌شوند.')} />}
           <Toggle checked={Boolean(outputPersistence & 8)} onChange={(enabled) => setPersistenceBit(8, enabled)} label={copy('Stop keeps direction relay', 'توقف، رلهٔ جهت را حفظ کند')} detail={outputPersistence & 8 ? copy('Motion stop releases only the output/enable relay.', 'توقف حرکت فقط رلهٔ خروجی/فعال‌سازی را آزاد می‌کند.') : copy('Motion stop releases both direction and output relays.', 'توقف حرکت هر دو رلهٔ جهت و خروجی را آزاد می‌کند.')} />
           <Button tone="primary" icon={MemoryStick} onClick={() => void command(settingsSetCommand(snapshot.settings, displayBrightness, displayClosedBrightness, statusBrightness, streamPeriod, motionExitHoldSeconds, outputPersistence, relayRestoreMask))}>{copy('Write board settings', 'نوشتن تنظیمات برد')}</Button>
           </>}

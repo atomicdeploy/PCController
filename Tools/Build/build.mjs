@@ -1474,16 +1474,32 @@ function peSectionNames(path) {
 	return names
 }
 
-function verifyWindowsResources(executable, version) {
+function createWinresIdentityConfig(stage, identity, sourceSHA256) {
+	const source = join(HOST_ROOT, 'winres', 'winres.json')
+	const config = JSON.parse(readFileSync(source, 'utf8'))
+	const info = config.RT_VERSION?.['#1']?.['0409']?.info?.['0409']
+	if (!info) throw new BuildError('winres configuration has no version-info string table')
+	// These fields survive UPX as UTF-16 PE resources, binding the package
+	// inventory to the exact host source and build rather than raw Go strings.
+	info.PrivateBuild = sourceSHA256
+	info.SpecialBuild = identity.hostBuildTime
+	for (const group of Object.values(config.RT_GROUP_ICON || {})) {
+		for (const [name, iconPath] of Object.entries(group)) {
+			if (typeof iconPath === 'string') group[name] = relative(stage, resolve(dirname(source), iconPath))
+		}
+	}
+	const output = join(stage, 'winres-identity.json')
+	atomicWriteJSON(output, config)
+	return output
+}
+
+function verifyWindowsResources(executable, identity, sourceSHA256) {
 	if (!peSectionNames(executable).includes('.rsrc')) throw new BuildError('controller.exe does not contain a Win32 .rsrc section')
 	const binary = readFileSync(executable)
 	const resources = JSON.parse(readFileSync(join(HOST_ROOT, 'winres', 'winres.json'), 'utf8'))
 	const info = resources.RT_VERSION?.['#1']?.['0409']?.info?.['0409'] || {}
-	for (const value of [info.ProductName, info.CompanyName].filter(Boolean)) {
+	for (const value of [info.ProductName, info.CompanyName, identity.version, sourceSHA256, identity.hostBuildTime].filter(Boolean)) {
 		if (binary.indexOf(Buffer.from(value, 'utf16le')) < 0) throw new BuildError(`controller.exe resource data is missing ${value}`)
-	}
-	if (binary.indexOf(Buffer.from(version, 'utf16le')) < 0) {
-		throw new BuildError(`controller.exe resource data is missing build version ${version}`)
 	}
 }
 
@@ -1717,13 +1733,18 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	if (after.sha256 !== before.sha256) throw new BuildError('Controller source changed during packaging; retry from a stable tree')
 	if (process.platform === 'win32' && options.resources) {
 		log.stage('🎨', 'Applying Win32 icon, manifest, and version resources')
-		run(winres, [
-			'patch', '--in', 'winres/winres.json', '--delete', '--no-backup',
-			'--product-version', identity.version, '--file-version', identity.version,
-			executable
-		], {
-			cwd: HOST_ROOT, env: goEnv, verbose: options.verbose
-		})
+		const resourceConfig = createWinresIdentityConfig(stage, identity, before.sha256)
+		try {
+			run(winres, [
+				'patch', '--in', resourceConfig, '--delete', '--no-backup',
+				'--product-version', identity.version, '--file-version', identity.version,
+				executable
+			], {
+				cwd: HOST_ROOT, env: goEnv, verbose: options.verbose
+			})
+		} finally {
+			rmSync(resourceConfig, { force: true })
+		}
 		resourceGenerated = true
 	}
 	const verificationEnv = withoutEnvironmentNames(env, ['APP_NAME', 'APP_TAGLINE'])
@@ -1745,7 +1766,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 	if (presentation.ui?.app_title !== identity.appName || presentation.ui?.tagline !== identity.tagline) {
 		throw new BuildError('controller configuration defaults do not match the embedded build presentation')
 	}
-	if (process.platform === 'win32' && options.resources) verifyWindowsResources(executable, identity.version)
+	if (process.platform === 'win32' && options.resources) verifyWindowsResources(executable, identity, before.sha256)
 
 	let upx = { enabled: false, tested: false, version: '' }
 	if (process.platform === 'win32' && options.upx) {
@@ -1758,6 +1779,7 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 		for (const expected of expectedIdentity) {
 			if (!versionOutput.includes(expected)) throw new BuildError(`packed controller identity check is missing ${expected}`)
 		}
+		verifyWindowsResources(executable, identity, before.sha256)
 		upx = { enabled: true, tested: true, version }
 	} else if (process.platform === 'win32') log.warning('UPX packaging was explicitly skipped.')
 

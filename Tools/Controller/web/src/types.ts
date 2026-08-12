@@ -47,6 +47,9 @@ export interface ControllerStatus {
   temperature_led_centi_c: number
   temperature_bt_audio_centi_c: number
   flags: number
+  ina219_available: boolean
+  temperature_led_available: boolean
+  temperature_bt_audio_available: boolean
   program_running: boolean
   host_offline: boolean
   hot: boolean
@@ -209,12 +212,12 @@ export type BoardSettingsReadState = 'idle' | 'loading' | 'ready' | 'unavailable
 
 export interface MetricSample {
   at: number
-  supply: number
-  bus: number
-  current: number
-  power: number
-  ledTemp: number
-  btTemp: number
+  supply?: number
+  bus?: number
+  current?: number
+  power?: number
+  ledTemp?: number
+  btTemp?: number
 }
 
 export interface UIConfig {
@@ -385,6 +388,9 @@ export const emptyStatus: ControllerStatus = {
   temperature_led_centi_c: 0,
   temperature_bt_audio_centi_c: 0,
   flags: 0,
+  ina219_available: false,
+  temperature_led_available: false,
+  temperature_bt_audio_available: false,
   program_running: false,
   host_offline: false,
   hot: false,
