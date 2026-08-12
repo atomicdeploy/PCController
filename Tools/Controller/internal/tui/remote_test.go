@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -38,6 +39,111 @@ func TestRemoteSnapshotPollingIsBackstopNotRenderLoop(t *testing.T) {
 	model.preview = &snapshot
 	if interval := model.statusInterval(); interval != 125*time.Millisecond {
 		t.Fatalf("local door-open interval=%s, want 125ms", interval)
+	}
+}
+
+func TestRemoteLiveRateFollowsActiveAndIdlePages(t *testing.T) {
+	rates := make([]time.Duration, 0, 2)
+	model := Model{remote: &RemoteBackend{SetLiveInterval: func(value time.Duration) {
+		rates = append(rates, value)
+	}}, page: PageDashboard}
+	model.switchPage(PageConsole)
+	model.switchPage(PageDashboard)
+	if len(rates) != 2 || rates[0] != remoteIdleLiveInterval || rates[1] != remoteActiveLiveInterval {
+		t.Fatalf("live rates=%v", rates)
+	}
+}
+
+func TestRemoteSnapshotUsesLiveRevisionWithoutFreezingConvergence(t *testing.T) {
+	base := time.Date(2026, 8, 12, 3, 4, 5, 0, time.UTC)
+	initial := RichPreviewSnapshot()
+	initial.StatusUpdated = base
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: initial}
+	live := RemoteLiveUpdate{
+		Status: initial.Status, HaveStatus: true,
+		StatusUpdated: base.Add(time.Second), StatusReceivedAt: base.Add(1100 * time.Millisecond),
+	}
+	live.Status.SupplyMV = 13_371
+	updated, _ := model.Update(remoteLiveUpdateMsg(live))
+	model = updated.(Model)
+	stale := initial
+	stale.Status.SupplyMV = 9_999
+	updated, _ = model.Update(remoteSnapshotResultMsg{
+		snapshot: stale, receivedAt: base.Add(4 * time.Second), statusSequence: 0,
+	})
+	model = updated.(Model)
+	if model.remoteSnapshot.Status.SupplyMV != 13_371 || model.remoteStatusSequence != 1 {
+		t.Fatalf("live status rolled back: %#v sequence=%d", model.remoteSnapshot.Status, model.remoteStatusSequence)
+	}
+	if got := model.statusFreshnessLabel(model.remoteSnapshot, base.Add(4*time.Second)); got == "live" {
+		t.Fatalf("rejected stale snapshot falsely renewed freshness: %q", got)
+	}
+
+	converged := initial
+	converged.Status.SupplyMV = 14_004
+	converged.StatusUpdated = base.Add(4 * time.Second)
+	updated, _ = model.Update(remoteSnapshotResultMsg{
+		snapshot: converged, receivedAt: base.Add(4100 * time.Millisecond),
+		statusSequence: model.remoteStatusSequence,
+	})
+	model = updated.(Model)
+	if model.remoteSnapshot.Status.SupplyMV != 14_004 ||
+		model.statusFreshnessLabel(model.remoteSnapshot, base.Add(4200*time.Millisecond)) != "live" {
+		t.Fatalf("snapshot convergence stayed frozen: %#v freshness=%q",
+			model.remoteSnapshot.Status,
+			model.statusFreshnessLabel(model.remoteSnapshot, base.Add(4200*time.Millisecond)))
+	}
+}
+
+func TestRemoteLEDIdenticalReplayPreservesPhaseAndIntentionalOffApplies(t *testing.T) {
+	base := time.Date(2026, 8, 12, 3, 4, 5, 0, time.UTC)
+	blue := native.StatusLEDState{Blue: 120, Brightness: 120, Condition: 255}
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: RichPreviewSnapshot()}
+	model.remoteSnapshot.StatusLED = blue
+	model.remoteSnapshot.HaveStatusLED = true
+	model.remoteSnapshot.StatusLEDUpdated = base
+
+	replay := RemoteLiveUpdate{
+		StatusLED: blue, HaveStatusLED: true,
+		StatusLEDUpdated: base.Add(time.Second), StatusLEDReceivedAt: base.Add(time.Second),
+	}
+	updated, _ := model.Update(remoteLiveUpdateMsg(replay))
+	model = updated.(Model)
+	if !model.remoteSnapshot.StatusLEDUpdated.Equal(base) {
+		t.Fatalf("identical replay reset LED phase to %s", model.remoteSnapshot.StatusLEDUpdated)
+	}
+	unknown := RichPreviewSnapshot()
+	unknown.HaveStatusLED = false
+	unknown.StatusLED = native.StatusLEDState{}
+	unknown.StatusLEDUpdated = time.Time{}
+	updated, _ = model.Update(remoteSnapshotResultMsg{
+		snapshot: unknown, receivedAt: base.Add(1500 * time.Millisecond),
+		ledSequence: model.remoteLEDSequence,
+	})
+	model = updated.(Model)
+	if !model.remoteSnapshot.HaveStatusLED || model.remoteSnapshot.StatusLED != blue {
+		t.Fatalf("unknown snapshot synthesized a blue-to-off jump: %#v", model.remoteSnapshot)
+	}
+
+	off := replay
+	off.StatusLED = native.StatusLEDState{Condition: 255}
+	off.StatusLEDUpdated = base.Add(2 * time.Second)
+	updated, _ = model.Update(remoteLiveUpdateMsg(off))
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != off.StatusLED ||
+		!model.remoteSnapshot.StatusLEDUpdated.Equal(off.StatusLEDUpdated) {
+		t.Fatalf("intentional off frame was hidden: %#v", model.remoteSnapshot)
+	}
+	stale := RichPreviewSnapshot()
+	stale.StatusLED = blue
+	stale.HaveStatusLED = true
+	stale.StatusLEDUpdated = base.Add(time.Second)
+	updated, _ = model.Update(remoteSnapshotResultMsg{
+		snapshot: stale, receivedAt: base.Add(3 * time.Second), ledSequence: 0,
+	})
+	model = updated.(Model)
+	if model.remoteSnapshot.StatusLED != off.StatusLED {
+		t.Fatalf("pre-event snapshot synthesized an off-to-blue jump: %#v", model.remoteSnapshot.StatusLED)
 	}
 }
 
