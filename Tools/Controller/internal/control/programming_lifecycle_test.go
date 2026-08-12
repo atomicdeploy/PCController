@@ -95,6 +95,16 @@ func (device *fakeProgrammingDevice) RampPWMToZero(context.Context, ProgrammingL
 	return device.rampErr
 }
 
+func TestProgrammingLifecycleTreatsAbsentOptionalPWMAsAlreadySafe(t *testing.T) {
+	device := runtimeProgrammingDevice{}
+	if err := device.RampPWMToZero(context.Background(), ProgrammingLiveState{
+		PWM: &native.PWMValues{Available: false},
+	}); err != nil {
+		t.Fatalf("absent optional PWM = %v, want success", err)
+	}
+}
+
+
 func (device *fakeProgrammingDevice) SetProgrammingCue(context.Context) error {
 	device.calls = append(device.calls, "programming-cue")
 	return nil

@@ -242,6 +242,13 @@ func (device runtimeProgrammingDevice) RampPWMToZero(
 	if state.PWM == nil {
 		return errors.New("captured PWM state is unavailable")
 	}
+	// PCA9685 is optional. A valid PWM_VALUES response with Available=false
+	// means there is no hardware output to fade, not that the safe-programming
+	// transaction failed. Relay/macro safe-state operations are still handled
+	// by their own required steps.
+	if !state.PWM.Available {
+		return nil
+	}
 	if device.options.Outputs != nil {
 		device.options.Outputs.StopMelody()
 		device.options.Outputs.OverrideStatusEffect()
@@ -270,6 +277,9 @@ func (device runtimeProgrammingDevice) RampPWMToZero(
 }
 
 func (device runtimeProgrammingDevice) SetProgrammingCue(ctx context.Context) error {
+	if !device.Snapshot().Status.PWMAvailable {
+		return nil
+	}
 	// Warm amber is distinct from normal idle/running/BT/RF ownership colors.
 	return command(
 		ctx, device.runtime, native.OpStatusRGB,
@@ -382,11 +392,15 @@ func (device runtimeProgrammingDevice) PublishProgrammingPhase(phase string) {
 }
 
 func (device runtimeProgrammingDevice) EnterSafeProgrammingState(ctx context.Context) error {
-	return errors.Join(
+	errorsToJoin := []error{
 		command(ctx, device.runtime, native.OpMacroCancel, nil),
 		command(ctx, device.runtime, native.OpRelayAllOff, nil),
-		command(ctx, device.runtime, native.OpPWMAllOff, nil),
-	)
+	}
+	if device.Snapshot().Status.PWMAvailable {
+		errorsToJoin = append(errorsToJoin,
+			command(ctx, device.runtime, native.OpPWMAllOff, nil))
+	}
+	return errors.Join(errorsToJoin...)
 }
 
 func (device runtimeProgrammingDevice) ShowProgrammingPanel(ctx context.Context) error {
