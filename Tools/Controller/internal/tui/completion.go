@@ -85,7 +85,7 @@ var nestedCompletions = map[string][]string{
 	"program flash":      {"firmware.hex"},
 	"toolchain":          {"bootstrap", "sync", "profile", "compile", "core-info", "install-bootloader"},
 	"board":              {"initialize", "name"},
-	"board initialize":   {"--name=", "--uart=auto", "--uart=none", "--bootloader-only", "--skip-toolchain"},
+	"board provision":    {"--name=", "--uart=auto", "--uart=none", "--bootloader-only", "--skip-toolchain"},
 	"board name":         {"get", "set ", "clear"},
 	"keyboard":           {"status", "list", "enable", "disable", "stop"},
 	"display":            {"segments", "lcd", "both"},

@@ -323,7 +323,7 @@ Device, firmware and recovery:
 	controller program --operation DIAGNOSTIC [program flags]
   controller boot probe|info|metadata|backup|read|write|verify|start [flags]
 	controller toolchain check|update|bootstrap|lock|sync|profile|compile|core-info|install-bootloader [flags]
-	controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only]
+	controller board provision [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only]
 	controller board blank --confirm NAME [--uart auto|PORT|none]
 	controller board name [get|set NAME|clear]
 	controller driver usbasp status | ensure | install [--package DIR] | zadig [--latest] [--download-only] [--exe FILE]

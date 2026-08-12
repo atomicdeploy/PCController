@@ -1083,13 +1083,13 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "board",
-		Usage:   "board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]",
+		Usage:   "board provision [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]",
 		Summary: "provision, securely blank, or name a board",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) == 0 {
-				return "", errors.New("usage: board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
+				return "", errors.New("usage: board provision [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
 			}
-			if strings.EqualFold(args[0], "initialize") {
+			if strings.EqualFold(args[0], "provision") || strings.EqualFold(args[0], "initialize") {
 				if options.InitializeBoard == nil {
 					return "", errors.New("board initialization is unavailable")
 				}
@@ -1106,7 +1106,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return strings.TrimSpace(output.String()), err
 			}
 			if !strings.EqualFold(args[0], "name") {
-				return "", errors.New("usage: board initialize [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
+				return "", errors.New("usage: board provision [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
 			}
 			if len(args) == 1 || (len(args) == 2 && strings.EqualFold(args[1], "get")) {
 				value, err := runtime.BoardName(ctx)
@@ -2355,6 +2355,46 @@ func storeSettingsLive(
 		return native.Settings{}, errors.New("settings write was accepted but live readback differs")
 	}
 	return live, nil
+}
+
+// ArmProgrammingSafetyLatch makes a destructive ISP operation safe while an
+// application is still running.  It is intentionally reusable by CLI, TUI,
+// generic API/RPC commands, and programming workflows: acceptance alone is
+// not enough, so this waits for the EEPROM-backed setting to report durable.
+func ArmProgrammingSafetyLatch(ctx context.Context, runtime *Runtime) (native.Settings, error) {
+	if runtime == nil {
+		return native.Settings{}, errors.New("programming safety latch requires a runtime")
+	}
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	settings.Flags |= native.SettingsProgrammingMode
+	written, err := storeSettingsLive(ctx, runtime, settings)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if written.Persisted {
+			return written, nil
+		}
+		if !time.Now().Before(deadline) {
+			return native.Settings{}, errors.New("programming safety latch was accepted but did not persist within 2s")
+		}
+		select {
+		case <-ctx.Done():
+			return native.Settings{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+		written, err = querySettings(ctx, runtime)
+		if err != nil {
+			return native.Settings{}, err
+		}
+		if written.Flags&native.SettingsProgrammingMode == 0 {
+			return native.Settings{}, errors.New("programming safety latch disappeared during persistence confirmation")
+		}
+	}
 }
 
 func settingsFromSetArgs(args []string) (native.Settings, error) {

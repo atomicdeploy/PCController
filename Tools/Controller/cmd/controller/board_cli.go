@@ -19,14 +19,17 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
-const boardInitializeUsage = "usage: controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
+const boardInitializeUsage = "usage: controller board provision [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
 
 func runBoard(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	if len(args) == 0 {
 		return errors.New(boardInitializeUsage)
 	}
 	action := strings.ToLower(strings.TrimSpace(args[0]))
-	if action != "initialize" && action != "blank" {
+	if action == "initialize" {
+		action = "provision"
+	}
+	if action != "provision" && action != "blank" {
 		return runExec(append([]string{"board"}, args...), stdout, stderr, store)
 	}
 	claim, havePrimary, err := preparePrimaryMode("board " + action)
@@ -85,6 +88,8 @@ func blankBoard(
 		return err
 	}
 	confirmedName := ""
+	programmingLatchArmed := false
+	var programmingLatchDuration time.Duration
 	if uartPort != "" {
 		connectContext, cancel := context.WithTimeout(ctx, 15*time.Second)
 		err = runtime.Open(connectContext, uartPort)
@@ -103,6 +108,21 @@ func blankBoard(
 			return err
 		}
 		fmt.Fprintf(output, "Authenticated board %q on %s before destructive blanking.\n", confirmedName, uartPort)
+		lease, _, leaseErr := runtime.AcquireProgramState("board-lifecycle", "destructive ISP blank")
+		if leaseErr != nil {
+			return fmt.Errorf("enter programming-safe application state: %w", leaseErr)
+		}
+		defer lease.Release()
+		latchStarted := time.Now()
+		latchContext, latchCancel := context.WithTimeout(ctx, 3*time.Second)
+		_, latchErr := control.ArmProgrammingSafetyLatch(latchContext, runtime)
+		latchCancel()
+		programmingLatchDuration = time.Since(latchStarted)
+		if latchErr != nil {
+			return fmt.Errorf("persist programming safety latch before destructive blanking: %w", latchErr)
+		}
+		programmingLatchArmed = true
+		fmt.Fprintf(output, "Programming safety latch persisted in %d ms; application outputs are interlocked before ISP erase.\n", programmingLatchDuration.Milliseconds())
 	} else {
 		if err := validateBoardBlankConfirmation(*confirm, "", ""); err != nil {
 			return err
@@ -121,8 +141,9 @@ func blankBoard(
 	if err := programmer.EnsureHostDataPaths(paths); err != nil {
 		return err
 	}
-	fmt.Fprintln(output, "A new complete recovery backup will be committed before erase; fuses remain installed so the board can be initialized again.")
+	fmt.Fprintln(output, "A new complete recovery backup will be committed before erase; the controller will finish at verified ATmega328P factory fuses and all-FF flash/EEPROM.")
 	report, err := programmer.BlankBoard(ctx, programmer.BoardBlankOptions{
+		FQBN: configuredFQBN(store.Current()), SketchPath: configuredProject(store.Current(), findProjectRoot()),
 		MCU: programmer.DefaultBoardTarget().MCU, Programmer: *programmerName,
 		ArduinoCLI: store.Current().Programming.ToolchainCLI, ArduinoConfig: store.Current().Programming.ToolchainConfig,
 		Avrdude: store.Current().Programming.Avrdude, AvrdudeConf: store.Current().Programming.AvrdudeConf,
@@ -132,9 +153,11 @@ func blankBoard(
 		return err
 	}
 	result := map[string]any{
-		"board_name_before_erase": confirmedName,
-		"uart_port":               uartPort,
-		"blank":                   report,
+		"board_name_before_erase":       confirmedName,
+		"uart_port":                     uartPort,
+		"programming_latch_armed":       programmingLatchArmed,
+		"programming_latch_duration_ms": programmingLatchDuration.Milliseconds(),
+		"blank":                         report,
 	}
 	if *jsonReport {
 		encoded, marshalErr := json.MarshalIndent(result, "", "  ")
@@ -171,7 +194,7 @@ func initializeBoard(
 	if runtime == nil || store == nil {
 		return errors.New("board initialization requires the primary runtime and configuration store")
 	}
-	flags := flag.NewFlagSet("board initialize", flag.ContinueOnError)
+	flags := flag.NewFlagSet("board provision", flag.ContinueOnError)
 	flags.SetOutput(output)
 	uart := flags.String("uart", "auto", "application UART port, auto, or none")
 	boardName := flags.String("name", "", "persist an operator board name of at most eight printable ASCII characters")
@@ -208,7 +231,7 @@ func initializeBoard(
 		return err
 	}
 
-	fmt.Fprintln(output, "=== PCController blank-board initialization ===")
+	fmt.Fprintln(output, "=== PCController blank-board provision ===")
 	fmt.Fprintln(output, "FQBN:", *fqbn)
 	fmt.Fprintln(output, "Host data:", dataPaths.DataDir)
 	fmt.Fprintln(output, "Project:", project)
@@ -303,7 +326,7 @@ func initializeBoard(
 		fmt.Fprintln(output, "\nWARNING:", warning)
 	}
 	if uartPort == "" {
-		fmt.Fprintln(output, "READY (bootloader-only): connect UART later and rerun board initialize --skip-toolchain, or program from the TUI Programming page.")
+		fmt.Fprintln(output, "READY (bootloader-only): connect UART later and rerun board provision --skip-toolchain, or program from the TUI Programming page.")
 		result["warning"] = warning
 		if *boardName != "" {
 			return fmt.Errorf("bootloader installed, but board name %q could not be stored because UART is unavailable", *boardName)
