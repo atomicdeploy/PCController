@@ -2,20 +2,25 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/coder/websocket"
 
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/consolewindow"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/lanresolver"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/shell"
@@ -26,18 +31,34 @@ import (
 // constructs, scans, or opens a local serial runtime; the remote primary stays
 // the sole owner of the board transport.
 type remoteTUIIPC struct {
+	ctx     context.Context
 	address string
 	auth    string
 	callFn  func(context.Context, string, any, any) error
 	retry   time.Duration
 
-	events    chan control.Event
-	ready     chan struct{}
-	readyOnce sync.Once
-	sessions  chan struct{}
-	cancel    context.CancelFunc
-	done      chan struct{}
-	once      sync.Once
+	events                chan control.Event
+	live                  chan tui.RemoteLiveUpdate
+	liveRaw               chan tui.RemoteLiveUpdate
+	liveRates             chan time.Duration
+	flushRates            chan time.Duration
+	ready                 chan struct{}
+	readyOnce             sync.Once
+	sessions              chan struct{}
+	cancel                context.CancelFunc
+	done                  chan struct{}
+	once                  sync.Once
+	liveOnce              sync.Once
+	liveDone              chan struct{}
+	flushDone             chan struct{}
+	liveMu                sync.Mutex
+	liveRate              time.Duration
+	lastStatus            native.Status
+	haveLastStatus        bool
+	lastStatusForwardedAt time.Time
+	liveRequestID         uint64
+	liveStateCursor       uint64
+	liveRequestedAfter    uint64
 }
 
 const remoteTUIInstanceLeaseSeconds = 45
@@ -98,10 +119,12 @@ type remoteRFPresentationWire struct {
 func newRemoteTUIIPC(parent context.Context, address, auth string) *remoteTUIIPC {
 	ctx, cancel := context.WithCancel(parent)
 	client := &remoteTUIIPC{
-		address: strings.TrimSpace(address), auth: auth,
+		ctx: ctx, address: strings.TrimSpace(address), auth: auth,
 		events: make(chan control.Event, 128), ready: make(chan struct{}),
+		live: make(chan tui.RemoteLiveUpdate, 1), liveRaw: make(chan tui.RemoteLiveUpdate, 1),
+		liveRates: make(chan time.Duration, 1), flushRates: make(chan time.Duration, 1),
 		sessions: make(chan struct{}, 1),
-		cancel:   cancel, done: make(chan struct{}),
+		cancel:   cancel, done: make(chan struct{}), liveRate: 50 * time.Millisecond,
 	}
 	go client.pollEvents(ctx)
 	return client
@@ -122,6 +145,112 @@ func (client *remoteTUIIPC) WaitEventCursor(ctx context.Context) error {
 func (client *remoteTUIIPC) Close() {
 	client.once.Do(func() { client.cancel() })
 	<-client.done
+	if client.liveDone != nil {
+		<-client.liveDone
+	}
+	if client.flushDone != nil {
+		<-client.flushDone
+	}
+}
+
+func (client *remoteTUIIPC) StartLive() {
+	if client == nil {
+		return
+	}
+	client.liveOnce.Do(func() {
+		client.liveDone = make(chan struct{})
+		client.flushDone = make(chan struct{})
+		go client.pollLive(client.ctx)
+		go client.flushLive(client.ctx)
+	})
+}
+
+func (client *remoteTUIIPC) SetLiveInterval(interval time.Duration) {
+	if client == nil {
+		return
+	}
+	if interval < 50*time.Millisecond {
+		interval = 50 * time.Millisecond
+	}
+	if interval > time.Minute {
+		interval = time.Minute
+	}
+	client.liveMu.Lock()
+	if client.liveRate == interval {
+		client.liveMu.Unlock()
+		return
+	}
+	client.liveRate = interval
+	client.liveMu.Unlock()
+	select {
+	case client.liveRates <- interval:
+	default:
+		select {
+		case <-client.liveRates:
+		default:
+		}
+		select {
+		case client.liveRates <- interval:
+		default:
+		}
+	}
+	queueLatestDuration(client.flushRates, interval)
+}
+
+func queueLatestDuration(output chan time.Duration, value time.Duration) {
+	select {
+	case output <- value:
+		return
+	default:
+	}
+	select {
+	case <-output:
+	default:
+	}
+	select {
+	case output <- value:
+	default:
+	}
+}
+
+func (client *remoteTUIIPC) currentLiveInterval() time.Duration {
+	client.liveMu.Lock()
+	defer client.liveMu.Unlock()
+	return client.liveRate
+}
+
+func (client *remoteTUIIPC) nextLiveRequest() (uint64, uint64) {
+	client.liveMu.Lock()
+	defer client.liveMu.Unlock()
+	client.liveRequestID++
+	client.liveRequestedAfter = client.liveStateCursor
+	return client.liveRequestID, client.liveStateCursor
+}
+
+func (client *remoteTUIIPC) acceptLiveAcknowledgement(latestID uint64) bool {
+	client.liveMu.Lock()
+	defer client.liveMu.Unlock()
+	if latestID < client.liveRequestedAfter {
+		// The primary restarted and its event epoch reset. Adopt the new retained
+		// cursor; the caller refreshes one authoritative snapshot before accepting
+		// subsequent state frames from this epoch.
+		client.liveStateCursor = latestID
+		client.liveRequestedAfter = latestID
+		return true
+	}
+	return false
+}
+
+func (client *remoteTUIIPC) advanceLiveStateCursor(id uint64) bool {
+	client.liveMu.Lock()
+	defer client.liveMu.Unlock()
+	if id != 0 && id <= client.liveStateCursor {
+		return false
+	}
+	if id != 0 {
+		client.liveStateCursor = id
+	}
+	return true
 }
 
 func (client *remoteTUIIPC) call(
@@ -451,6 +580,328 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 	}
 }
 
+type remoteLiveRead struct {
+	data []byte
+	err  error
+}
+
+type remoteLiveMessage struct {
+	Method string          `json:"method"`
+	Params json.RawMessage `json:"params"`
+}
+
+func (client *remoteTUIIPC) pollLive(ctx context.Context) {
+	defer close(client.liveDone)
+	for ctx.Err() == nil {
+		if err := client.liveSession(ctx); err != nil && ctx.Err() == nil {
+			client.publishLive(tui.RemoteLiveUpdate{
+				ConnectionChange: true, Connected: false, Error: err.Error(),
+			})
+			if !client.remoteRetry(ctx) {
+				return
+			}
+		}
+	}
+}
+
+func (client *remoteTUIIPC) flushLive(ctx context.Context) {
+	defer close(client.flushDone)
+	defer close(client.live)
+	interval := client.currentLiveInterval()
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	var pending tui.RemoteLiveUpdate
+	havePending := false
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case update := <-client.liveRaw:
+			mergeRemoteLiveUpdate(&pending, update)
+			havePending = true
+		case interval = <-client.flushRates:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(interval)
+		case <-timer.C:
+			if havePending {
+				select {
+				case client.live <- pending:
+					pending = tui.RemoteLiveUpdate{}
+					havePending = false
+				default:
+				}
+			}
+			timer.Reset(interval)
+		}
+	}
+}
+
+func (client *remoteTUIIPC) liveSession(ctx context.Context) error {
+	target := url.URL{Scheme: "ws", Host: client.address, Path: "/ipc"}
+	header := http.Header{}
+	if strings.TrimSpace(client.auth) != "" {
+		header.Set("Authorization", "Bearer "+client.auth)
+	}
+	connection, _, err := websocket.Dial(ctx, target.String(), &websocket.DialOptions{
+		HTTPClient: lanresolver.HTTPClient(), HTTPHeader: header,
+	})
+	if err != nil {
+		return err
+	}
+	defer connection.CloseNow()
+	connection.SetReadLimit(1024 * 1024)
+
+	writeSubscription := func(interval time.Duration) (uint64, error) {
+		requestID, afterID := client.nextLiveRequest()
+		request := map[string]any{
+			"jsonrpc": "2.0", "id": requestID,
+			"method": "controller.subscribe",
+			"params": map[string]any{
+				"topics":      []string{"state", "status"},
+				"interval_ms": interval.Milliseconds(),
+				"after_id":    afterID,
+			},
+		}
+		encoded, encodeErr := json.Marshal(request)
+		if encodeErr != nil {
+			return 0, encodeErr
+		}
+		writeContext, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		return requestID, connection.Write(writeContext, websocket.MessageText, encoded)
+	}
+	pendingRequestID, err := writeSubscription(client.currentLiveInterval())
+	if err != nil {
+		return err
+	}
+	currentInterval := client.currentLiveInterval()
+	ackTimer := time.NewTimer(3 * time.Second)
+	defer ackTimer.Stop()
+	acknowledgement := ackTimer.C
+
+	reads := make(chan remoteLiveRead, 1)
+	go func() {
+		for ctx.Err() == nil {
+			messageType, data, readErr := connection.Read(ctx)
+			if readErr == nil && messageType != websocket.MessageText {
+				continue
+			}
+			select {
+			case reads <- remoteLiveRead{data: data, err: readErr}:
+			case <-ctx.Done():
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case interval := <-client.liveRates:
+			currentInterval = interval
+			pendingRequestID, err = writeSubscription(interval)
+			if err != nil {
+				return err
+			}
+			if !ackTimer.Stop() {
+				select {
+				case <-ackTimer.C:
+				default:
+				}
+			}
+			ackTimer.Reset(3 * time.Second)
+			acknowledgement = ackTimer.C
+		case <-acknowledgement:
+			return errors.New("remote live subscription acknowledgement timed out")
+		case read := <-reads:
+			if read.err != nil {
+				return read.err
+			}
+			acknowledged, err := client.consumeLiveMessage(read.data, pendingRequestID)
+			if err != nil {
+				return err
+			}
+			if acknowledged {
+				if !ackTimer.Stop() {
+					select {
+					case <-ackTimer.C:
+					default:
+					}
+				}
+				acknowledgement = nil
+				client.publishLive(tui.RemoteLiveUpdate{
+					ConnectionChange: true, Connected: true,
+				})
+				var response struct {
+					Result struct {
+						LatestID uint64 `json:"latest_id"`
+					} `json:"result"`
+				}
+				if json.Unmarshal(read.data, &response) == nil {
+					reset, resetErr := client.consumeLiveEpochReset(response.Result.LatestID)
+					if resetErr != nil {
+						return resetErr
+					}
+					if reset {
+						pendingRequestID, err = writeSubscription(currentInterval)
+						if err != nil {
+							return err
+						}
+						ackTimer.Reset(3 * time.Second)
+						acknowledgement = ackTimer.C
+					}
+				}
+			}
+		}
+	}
+}
+
+func (client *remoteTUIIPC) consumeLiveMessage(data []byte, pendingRequestID uint64) (bool, error) {
+	var envelope struct {
+		ID     json.RawMessage `json:"id"`
+		Result json.RawMessage `json:"result"`
+		Error  json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return false, fmt.Errorf("decode remote live stream: %w", err)
+	}
+	if len(envelope.ID) != 0 {
+		var responseID uint64
+		if json.Unmarshal(envelope.ID, &responseID) != nil || responseID != pendingRequestID {
+			return false, nil
+		}
+		if len(envelope.Error) != 0 && string(envelope.Error) != "null" {
+			return false, fmt.Errorf("remote live subscription rejected: %s", envelope.Error)
+		}
+		var acknowledgement struct {
+			Subscribed bool   `json:"subscribed"`
+			LatestID   uint64 `json:"latest_id"`
+		}
+		if json.Unmarshal(envelope.Result, &acknowledgement) != nil || !acknowledgement.Subscribed {
+			return false, errors.New("remote live subscription was not acknowledged")
+		}
+		return true, nil
+	}
+	var message remoteLiveMessage
+	if err := json.Unmarshal(data, &message); err != nil {
+		return false, fmt.Errorf("decode remote live notification: %w", err)
+	}
+	now := time.Now()
+	switch message.Method {
+	case "controller.status":
+		var update controllerapi.StatusUpdate
+		if json.Unmarshal(message.Params, &update) != nil || update.Error != "" {
+			return false, nil
+		}
+		client.liveMu.Lock()
+		identical := client.haveLastStatus && client.lastStatus == update.Status
+		forward := !identical || now.Sub(client.lastStatusForwardedAt) >= 500*time.Millisecond
+		if forward {
+			client.lastStatus = update.Status
+			client.haveLastStatus = true
+			client.lastStatusForwardedAt = now
+		}
+		client.liveMu.Unlock()
+		if !forward {
+			return false, nil
+		}
+		client.publishLive(tui.RemoteLiveUpdate{
+			Status: update.Status, HaveStatus: true,
+			StatusUpdated: update.Time, StatusReceivedAt: now,
+			ConnectionChange: true, Connected: true,
+		})
+	case "controller.state":
+		var event controllerapi.Event
+		if json.Unmarshal(message.Params, &event) != nil ||
+			event.Opcode != native.OpStatusLEDChanged {
+			return false, nil
+		}
+		if !client.advanceLiveStateCursor(event.ID) {
+			return false, nil
+		}
+		state, err := native.ParseStatusLEDState(event.Payload)
+		if err != nil {
+			return false, nil
+		}
+		client.publishLive(tui.RemoteLiveUpdate{
+			StatusLED: state, HaveStatusLED: true,
+			StatusLEDUpdated: event.Time, StatusLEDReceivedAt: now,
+			ConnectionChange: true, Connected: true,
+		})
+	}
+	return false, nil
+}
+
+func (client *remoteTUIIPC) consumeLiveEpochReset(latestID uint64) (bool, error) {
+	if !client.acceptLiveAcknowledgement(latestID) {
+		return false, nil
+	}
+	requestContext, cancel := context.WithTimeout(client.ctx, 3*time.Second)
+	defer cancel()
+	snapshot, err := client.Snapshot(requestContext)
+	if err != nil {
+		return false, fmt.Errorf("refresh remote live baseline after primary restart: %w", err)
+	}
+	now := time.Now()
+	client.publishLive(tui.RemoteLiveUpdate{
+		Status: snapshot.Status, HaveStatus: snapshot.HaveStatus,
+		StatusUpdated: snapshot.StatusUpdated, StatusReceivedAt: now,
+		StatusLED: snapshot.StatusLED, HaveStatusLED: snapshot.HaveStatusLED,
+		StatusLEDUpdated: snapshot.StatusLEDUpdated, StatusLEDReceivedAt: now,
+		ConnectionChange: true, Connected: true,
+	})
+	return true, nil
+}
+
+func (client *remoteTUIIPC) publishLive(update tui.RemoteLiveUpdate) {
+	select {
+	case client.liveRaw <- update:
+		return
+	default:
+	}
+	var pending tui.RemoteLiveUpdate
+	select {
+	case pending = <-client.liveRaw:
+	default:
+	}
+	mergeRemoteLiveUpdate(&pending, update)
+	select {
+	case client.liveRaw <- pending:
+	default:
+	}
+}
+
+func mergeRemoteLiveUpdate(pending *tui.RemoteLiveUpdate, update tui.RemoteLiveUpdate) {
+	if pending == nil {
+		return
+	}
+	if update.HaveStatus {
+		pending.Status = update.Status
+		pending.HaveStatus = true
+		pending.StatusUpdated = update.StatusUpdated
+		pending.StatusReceivedAt = update.StatusReceivedAt
+	}
+	if update.HaveStatusLED {
+		pending.StatusLED = update.StatusLED
+		pending.HaveStatusLED = true
+		pending.StatusLEDUpdated = update.StatusLEDUpdated
+		pending.StatusLEDReceivedAt = update.StatusLEDReceivedAt
+	}
+	if update.ConnectionChange {
+		pending.ConnectionChange = true
+		pending.Connected = update.Connected
+		pending.Error = update.Error
+	}
+}
+
 func (client *remoteTUIIPC) notifySession() {
 	if client == nil || client.sessions == nil {
 		return
@@ -517,6 +968,7 @@ func runRemoteTUI(
 	defer cancel()
 	client := newRemoteTUIIPC(ctx, address, auth)
 	defer client.Close()
+	client.StartLive()
 	navigationReporter, err := hostui.NewNavigationReporter(syncNavigation, "")
 	if err != nil {
 		return fmt.Errorf("create remote TUI instance identity: %w", err)
@@ -619,9 +1071,13 @@ func runRemoteTUI(
 					ReportTerminal:  instanceLease.Update,
 					WriteOSC:        func(payload string) error { return hostui.WriteOSC(stdout, payload) },
 					Remote: &tui.RemoteBackend{
-						Endpoint: strings.TrimSpace(address), InitialSnapshot: initial,
-						Snapshot: client.Snapshot, Events: client.events,
-						SaveHostUI: saveRemoteHostUI,
+						Endpoint:                  strings.TrimSpace(address),
+						InitialSnapshot:           initial,
+						InitialSnapshotReceivedAt: initialReceivedAt,
+						Snapshot:                  client.Snapshot, Events: client.events,
+						Live:            client.live,
+						SetLiveInterval: client.SetLiveInterval,
+						SaveHostUI:      saveRemoteHostUI,
 					},
 					DisableWelcome: true,
 				}),

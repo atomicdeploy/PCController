@@ -31,10 +31,17 @@ type Model struct {
 	engine  *shell.Engine
 	remote  *RemoteBackend
 
-	remoteSnapshot        control.Snapshot
-	remoteSnapshotPending bool
-	remoteSnapshotError   string
-	remoteEventsClosed    bool
+	remoteSnapshot         control.Snapshot
+	remoteSnapshotPending  bool
+	remoteSnapshotError    string
+	remoteStatusReceivedAt time.Time
+	remoteStatusSequence   uint64
+	remoteLEDSequence      uint64
+	remoteLiveConnected    bool
+	remoteLiveSeen         bool
+	remoteClockOffset      time.Duration
+	remoteEventsClosed     bool
+	remoteLiveClosed       bool
 
 	width  int
 	height int
@@ -225,9 +232,14 @@ type menuCatalogResultMsg struct {
 type frontPanelResultMsg struct{ err error }
 type resetResultMsg struct{ err error }
 type remoteSnapshotResultMsg struct {
-	snapshot control.Snapshot
-	err      error
+	snapshot       control.Snapshot
+	err            error
+	receivedAt     time.Time
+	statusSequence uint64
+	ledSequence    uint64
 }
+type remoteLiveUpdateMsg RemoteLiveUpdate
+type remoteLiveClosedMsg struct{}
 type portsResultMsg struct {
 	values []ports.Info
 	err    error
@@ -514,12 +526,20 @@ func (model Model) Init() tea.Cmd {
 	}
 	if model.preview == nil {
 		if model.remote != nil {
+			if model.remote.SetLiveInterval != nil {
+				model.remote.SetLiveInterval(model.remoteLiveInterval())
+			}
 			if model.remote.Events != nil {
 				commands = append(commands, waitControlEvent(model.remote.Events))
 			}
+			if model.remote.Live != nil {
+				commands = append(commands, waitRemoteLiveUpdate(model.remote.Live))
+			}
 			if model.remote.Snapshot != nil {
 				model.remoteSnapshotPending = true
-				commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot))
+				commands = append(commands, refreshRemoteSnapshot(
+					model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence,
+				))
 			}
 		} else {
 			commands = append(commands, waitControlEvent(model.runtime.Events()))
@@ -637,7 +657,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if command := model.syncHostPanelCommand(); command != nil {
 			commands = append(commands, command)
 		}
-		model.recordSample(snapshot.Status, snapshot.StatusUpdated)
+		sampleAt := snapshot.StatusUpdated
+		if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
+			sampleAt = model.remoteStatusReceivedAt
+		}
+		model.recordSample(snapshot.Status, sampleAt)
 		if model.frontOverlayNeedsRestore && time.Now().After(model.frontOverlayUntil) {
 			model.frontOverlayNeedsRestore = false
 			model.frontOverlay1, model.frontOverlay2 = "", ""
@@ -649,7 +673,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if model.remote != nil {
 			if !model.remoteSnapshotPending && model.remote.Snapshot != nil {
 				model.remoteSnapshotPending = true
-				commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot))
+				commands = append(commands, refreshRemoteSnapshot(
+					model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence,
+				))
 			}
 			if snapshot.Connected && model.page == PageOutputs && !model.pwmPending &&
 				time.Since(model.lastPWMRefresh) >= time.Second {
@@ -801,6 +827,56 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.appendLog("warning", "remote IPC event stream closed; live snapshots continue")
 		}
 
+	case remoteLiveUpdateMsg:
+		update := RemoteLiveUpdate(message)
+		if update.ConnectionChange {
+			wasConnected := model.remoteLiveConnected
+			model.remoteLiveConnected = update.Connected
+			if !update.Connected && update.Error != "" && (wasConnected || !model.remoteLiveSeen) {
+				model.appendLog("warning", "remote live stream reconnecting: "+update.Error)
+			}
+			model.remoteLiveSeen = true
+		}
+		if update.HaveStatus {
+			receivedAt := update.StatusReceivedAt
+			if receivedAt.IsZero() {
+				receivedAt = time.Now()
+			}
+			updatedAt := update.StatusUpdated
+			if updatedAt.IsZero() {
+				updatedAt = receivedAt
+			}
+			model.remoteStatusReceivedAt = receivedAt
+			model.remoteStatusSequence++
+			model.remoteClockOffset = updatedAt.Sub(receivedAt)
+			model.remoteSnapshot.Status = update.Status
+			model.remoteSnapshot.HaveStatus = true
+			model.remoteSnapshot.StatusUpdated = updatedAt
+			model.recordSample(update.Status, receivedAt)
+		}
+		if update.HaveStatusLED {
+			// A reconnect may replay the last composed frame. Preserve the current
+			// phase/timestamp for identical data so the visual never jumps backward.
+			if !model.remoteSnapshot.HaveStatusLED || model.remoteSnapshot.StatusLED != update.StatusLED {
+				model.remoteSnapshot.StatusLED = update.StatusLED
+				model.remoteSnapshot.HaveStatusLED = true
+				model.remoteSnapshot.StatusLEDUpdated = update.StatusLEDUpdated
+				if model.remoteSnapshot.StatusLEDUpdated.IsZero() {
+					model.remoteSnapshot.StatusLEDUpdated = update.StatusLEDReceivedAt
+				}
+				model.remoteLEDSequence++
+			}
+		}
+		if model.remote != nil && model.remote.Live != nil && !model.remoteLiveClosed {
+			commands = append(commands, waitRemoteLiveUpdate(model.remote.Live))
+		}
+
+	case remoteLiveClosedMsg:
+		if model.remote != nil && !model.remoteLiveClosed {
+			model.remoteLiveClosed = true
+			model.appendLog("warning", "remote live stream closed; snapshot convergence continues")
+		}
+
 	case remoteSnapshotResultMsg:
 		model.remoteSnapshotPending = false
 		if message.err != nil {
@@ -812,7 +888,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		wasUnavailable := model.remoteSnapshotError != ""
-		model.remoteSnapshot = message.snapshot
+		acceptStatus := message.statusSequence == model.remoteStatusSequence
+		acceptLED := message.ledSequence == model.remoteLEDSequence
+		if acceptStatus {
+			model.observeRemoteStatus(message.snapshot, message.receivedAt)
+		}
+		model.remoteSnapshot = mergeRemoteSnapshot(
+			model.remoteSnapshot, message.snapshot, acceptStatus, acceptLED,
+		)
 		model.remoteSnapshotError = ""
 		if strings.TrimSpace(model.remoteSnapshot.ConnectionState) == "" {
 			model.remoteSnapshot.ConnectionState = "remote IPC"
@@ -1210,6 +1293,59 @@ func (model Model) snapshot() control.Snapshot {
 	return model.runtime.Snapshot()
 }
 
+func (model *Model) observeRemoteStatus(snapshot control.Snapshot, receivedAt time.Time) {
+	if snapshot.StatusUpdated.IsZero() {
+		model.remoteStatusReceivedAt = time.Time{}
+		model.remoteClockOffset = 0
+		return
+	}
+	if !model.remoteStatusReceivedAt.IsZero() &&
+		snapshot.StatusUpdated.Equal(model.remoteSnapshot.StatusUpdated) {
+		return
+	}
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	model.remoteStatusReceivedAt = receivedAt
+	// StatusUpdated arrived over JSON and contains only the source wall clock.
+	// Keep it untouched in remoteSnapshot, while recording the observed offset
+	// separately so freshness can use this process's monotonic time component.
+	model.remoteClockOffset = snapshot.StatusUpdated.Sub(receivedAt)
+}
+
+func mergeRemoteSnapshot(current, incoming control.Snapshot, allowStatus, allowLED bool) control.Snapshot {
+	if !allowStatus {
+		incoming.Status = current.Status
+		incoming.HaveStatus = current.HaveStatus
+		incoming.StatusUpdated = current.StatusUpdated
+	}
+	// Missing LED state means this primary has not observed a frame yet; it is
+	// not an authoritative black/off frame. Preserve the last known composed
+	// value. A real off frame has HaveStatusLED=true and six explicit zero/color
+	// fields, and therefore still replaces the current value.
+	if !allowLED || (current.HaveStatusLED && !incoming.HaveStatusLED) {
+		incoming.StatusLED = current.StatusLED
+		incoming.HaveStatusLED = current.HaveStatusLED
+		incoming.StatusLEDUpdated = current.StatusLEDUpdated
+	}
+	return incoming
+}
+
+func (model Model) statusFreshnessLabel(snapshot control.Snapshot, now time.Time) string {
+	updated := snapshot.StatusUpdated
+	if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
+		updated = model.remoteStatusReceivedAt
+	}
+	return freshnessLabel(updated, now)
+}
+
+func (model Model) remoteClockWarning() string {
+	if model.remote == nil || model.remoteStatusReceivedAt.IsZero() {
+		return ""
+	}
+	return remoteClockSkewWarning(model.remoteClockOffset)
+}
+
 func (model Model) rfLearnState() control.RFLearnState {
 	if model.remote != nil {
 		return model.remoteSnapshot.RFLearning
@@ -1335,7 +1471,8 @@ func (model *Model) syncUIConfig(value appconfig.UI) {
 }
 
 func (model *Model) recordSample(status native.Status, at time.Time) {
-	if at.IsZero() || at.Equal(model.lastSample) {
+	if at.IsZero() || at.Equal(model.lastSample) ||
+		(!model.lastSample.IsZero() && at.Sub(model.lastSample) < 100*time.Millisecond) {
 		return
 	}
 	model.lastSample = at
@@ -1669,6 +1806,21 @@ func (model Model) statusInterval() time.Duration {
 	return interval
 }
 
+const (
+	remoteActiveLiveInterval = 50 * time.Millisecond
+	remoteIdleLiveInterval   = time.Second
+)
+
+// remoteLiveInterval keeps active board pages at the authenticated status
+// stream's supported 20 Hz ceiling. Non-board pages retain a one-second
+// convergence sample; state frames such as the status light remain push-driven.
+func (model Model) remoteLiveInterval() time.Duration {
+	if model.pageNeedsStatus() {
+		return remoteActiveLiveInterval
+	}
+	return remoteIdleLiveInterval
+}
+
 // spinnerView advances progress glyphs from wall time instead of running a
 // permanent Bubble Tea spinner command. Any real UI event (including the
 // bounded status tick) redraws an active operation; an idle connected TUI no
@@ -1869,12 +2021,28 @@ func waitControlEvent(events <-chan control.Event) tea.Cmd {
 	}
 }
 
-func refreshRemoteSnapshot(fetch func(context.Context) (control.Snapshot, error)) tea.Cmd {
+func waitRemoteLiveUpdate(updates <-chan RemoteLiveUpdate) tea.Cmd {
+	return func() tea.Msg {
+		update, ok := <-updates
+		if !ok {
+			return remoteLiveClosedMsg{}
+		}
+		return remoteLiveUpdateMsg(update)
+	}
+}
+
+func refreshRemoteSnapshot(
+	fetch func(context.Context) (control.Snapshot, error),
+	statusSequence, ledSequence uint64,
+) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		snapshot, err := fetch(ctx)
-		return remoteSnapshotResultMsg{snapshot: snapshot, err: err}
+		return remoteSnapshotResultMsg{
+			snapshot: snapshot, err: err, receivedAt: time.Now(),
+			statusSequence: statusSequence, ledSequence: ledSequence,
+		}
 	}
 }
 

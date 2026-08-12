@@ -601,6 +601,9 @@ func (model *Model) switchPage(page Page) {
 	model.macroDeleteArmed = false
 	model.macroDeleteReference = ""
 	model.terminalTitleDirty = true
+	if model.remote != nil && model.remote.SetLiveInterval != nil {
+		model.remote.SetLiveInterval(model.remoteLiveInterval())
+	}
 }
 
 func pageInstanceName(page Page) string {

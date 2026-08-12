@@ -162,6 +162,24 @@ type FrontPanelState struct {
 	HaveStatusLED    bool
 }
 
+// RemoteLiveUpdate is one coalescible high-rate patch from the primary host.
+// Status measurements and the composed status-light frame share this bounded
+// path so a slow terminal always renders the newest state instead of building
+// an unbounded animation backlog.
+type RemoteLiveUpdate struct {
+	Status              native.Status
+	HaveStatus          bool
+	StatusUpdated       time.Time
+	StatusReceivedAt    time.Time
+	StatusLED           native.StatusLEDState
+	HaveStatusLED       bool
+	StatusLEDUpdated    time.Time
+	StatusLEDReceivedAt time.Time
+	ConnectionChange    bool
+	Connected           bool
+	Error               string
+}
+
 // RemoteBackend supplies the live board state and activity stream for a TUI
 // attached to another controller host. Command execution deliberately remains
 // on the injected shell.Engine so the remote command catalog, completion,
@@ -170,10 +188,15 @@ type FrontPanelState struct {
 // A remote backend never owns or scans a local serial port. Snapshot polling
 // and Events are expected to travel over the authenticated controller IPC.
 type RemoteBackend struct {
-	Endpoint        string
-	InitialSnapshot control.Snapshot
-	Snapshot        func(context.Context) (control.Snapshot, error)
-	Events          <-chan control.Event
+	Endpoint                  string
+	InitialSnapshot           control.Snapshot
+	InitialSnapshotReceivedAt time.Time
+	Snapshot                  func(context.Context) (control.Snapshot, error)
+	Events                    <-chan control.Event
+	Live                      <-chan RemoteLiveUpdate
+	// SetLiveInterval switches both producer measurement demand and the bounded
+	// client-to-render flush between an active 20 Hz view and low-rate idle view.
+	SetLiveInterval func(time.Duration)
 	// SaveHostUI persists the host-owned UI subset (identity and peripheral
 	// names) through the remote primary's structured IPC contract. Client
 	// appearance and terminal preferences continue to use Options.SaveUI.

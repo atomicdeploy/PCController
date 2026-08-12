@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -11,8 +13,214 @@ import (
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/shell"
+	"pccontroller.local/controller/internal/tui"
 )
+
+func TestRemoteLiveNotificationsCoalesceAndPreserveIntentionalOff(t *testing.T) {
+	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1)}
+	status := native.Status{SupplyMV: 12_345}
+	statusParams, _ := json.Marshal(controllerapi.StatusUpdate{Time: time.Unix(1, 0), Status: status})
+	statusMessage, _ := json.Marshal(remoteLiveMessage{Method: "controller.status", Params: statusParams})
+	if _, err := client.consumeLiveMessage(statusMessage, 0); err != nil {
+		t.Fatal(err)
+	}
+	offEvent, _ := json.Marshal(controllerapi.Event{
+		ID: 7, Time: time.Unix(2, 0), Kind: "status_led.changed",
+		Opcode:  native.OpStatusLEDChanged,
+		Payload: []byte{0, 0, 0, 0, 0, 255},
+	})
+	offMessage, _ := json.Marshal(remoteLiveMessage{Method: "controller.state", Params: offEvent})
+	if _, err := client.consumeLiveMessage(offMessage, 0); err != nil {
+		t.Fatal(err)
+	}
+	update := <-client.liveRaw
+	if !update.HaveStatus || update.Status.SupplyMV != 12_345 || !update.HaveStatusLED ||
+		update.StatusLED != (native.StatusLEDState{Condition: 255}) {
+		t.Fatalf("coalesced update=%#v payload=%s", update, base64.StdEncoding.EncodeToString([]byte{0, 0, 0, 0, 0, 255}))
+	}
+}
+
+func TestRemoteLiveSubscriptionRejectsNegativeAcknowledgement(t *testing.T) {
+	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1)}
+	if _, err := client.consumeLiveMessage([]byte(`{"jsonrpc":"2.0","id":1,"error":{"code":-32003,"message":"capability denied"}}`), 1); err == nil {
+		t.Fatal("negative subscription acknowledgement was ignored")
+	}
+	if _, err := client.consumeLiveMessage([]byte(`{"jsonrpc":"2.0","id":2,"result":{"subscribed":false}}`), 2); err == nil {
+		t.Fatal("false subscription acknowledgement was ignored")
+	}
+}
+
+func TestRemoteLiveSubscriptionCorrelatesLatestAcknowledgement(t *testing.T) {
+	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1)}
+	late := []byte(`{"jsonrpc":"2.0","id":1,"result":{"subscribed":true}}`)
+	if acknowledged, err := client.consumeLiveMessage(late, 2); err != nil || acknowledged {
+		t.Fatalf("late acknowledgement accepted=%t err=%v", acknowledged, err)
+	}
+	current := []byte(`{"jsonrpc":"2.0","id":2,"result":{"subscribed":true}}`)
+	if acknowledged, err := client.consumeLiveMessage(current, 2); err != nil || !acknowledged {
+		t.Fatalf("current acknowledgement accepted=%t err=%v", acknowledged, err)
+	}
+}
+
+func TestRemoteStableStatusEmitsBoundedFreshnessHeartbeat(t *testing.T) {
+	status := native.Status{SupplyMV: 12_345}
+	client := &remoteTUIIPC{
+		liveRaw: make(chan tui.RemoteLiveUpdate, 1), lastStatus: status,
+		haveLastStatus: true, lastStatusForwardedAt: time.Now().Add(-time.Second),
+	}
+	params, _ := json.Marshal(controllerapi.StatusUpdate{Time: time.Now(), Status: status})
+	message, _ := json.Marshal(remoteLiveMessage{Method: "controller.status", Params: params})
+	if _, err := client.consumeLiveMessage(message, 0); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case update := <-client.liveRaw:
+		if !update.HaveStatus || update.Status != status {
+			t.Fatalf("heartbeat=%#v", update)
+		}
+	default:
+		t.Fatal("stable healthy status did not emit its bounded freshness heartbeat")
+	}
+}
+
+func TestRemoteLiveFlushIsLatestOnlyAndPaced(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	client := &remoteTUIIPC{
+		live: make(chan tui.RemoteLiveUpdate, 1), liveRaw: make(chan tui.RemoteLiveUpdate, 1),
+		flushRates: make(chan time.Duration, 1), flushDone: make(chan struct{}),
+		liveRate: 50 * time.Millisecond,
+	}
+	go client.flushLive(ctx)
+	for value := int32(1); value <= 20; value++ {
+		client.publishLive(tui.RemoteLiveUpdate{
+			Status: native.Status{SupplyMV: value}, HaveStatus: true,
+		})
+	}
+	select {
+	case update := <-client.live:
+		t.Fatalf("unpaced live render: %#v", update)
+	case <-time.After(20 * time.Millisecond):
+	}
+	select {
+	case update := <-client.live:
+		if update.Status.SupplyMV != 20 {
+			t.Fatalf("flush delivered %d, want latest 20", update.Status.SupplyMV)
+		}
+	case <-time.After(150 * time.Millisecond):
+		t.Fatal("paced live update was not flushed")
+	}
+	cancel()
+	<-client.flushDone
+}
+
+func TestRemoteStateStreamRejectsOutOfOrderFramesButKeepsTrueOff(t *testing.T) {
+	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1)}
+	encode := func(id uint64, state native.StatusLEDState) []byte {
+		payload := []byte{state.Red, state.Green, state.Blue, state.Brightness, state.Effect, state.Condition}
+		event, _ := json.Marshal(controllerapi.Event{
+			ID: id, Time: time.Unix(int64(id), 0), Kind: "status_led.changed",
+			Opcode: native.OpStatusLEDChanged, Payload: payload,
+		})
+		message, _ := json.Marshal(remoteLiveMessage{Method: "controller.state", Params: event})
+		return message
+	}
+	blue := native.StatusLEDState{Blue: 120, Brightness: 120, Condition: 255}
+	if _, err := client.consumeLiveMessage(encode(10, blue), 0); err != nil {
+		t.Fatal(err)
+	}
+	off := native.StatusLEDState{Condition: 255}
+	if _, err := client.consumeLiveMessage(encode(9, off), 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := (<-client.liveRaw).StatusLED; got != blue {
+		t.Fatalf("out-of-order frame replaced blue with %#v", got)
+	}
+	if _, err := client.consumeLiveMessage(encode(11, off), 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := (<-client.liveRaw).StatusLED; got != off {
+		t.Fatalf("authoritative ordered off frame was hidden: %#v", got)
+	}
+}
+
+func TestRemoteStateCursorPersistsAcrossSessionsAndIsSentOnSubscribe(t *testing.T) {
+	client := &remoteTUIIPC{liveRaw: make(chan tui.RemoteLiveUpdate, 1), liveStateCursor: 42}
+	requestID, afterID := client.nextLiveRequest()
+	if requestID != 1 || afterID != 42 {
+		t.Fatalf("request=%d after=%d", requestID, afterID)
+	}
+	if client.advanceLiveStateCursor(41) {
+		t.Fatal("reconnected session accepted an older retained state frame")
+	}
+	if !client.advanceLiveStateCursor(43) || client.liveStateCursor != 43 {
+		t.Fatalf("new state cursor=%d", client.liveStateCursor)
+	}
+}
+
+func TestRemoteStateCursorResetsOnPrimaryEpochChange(t *testing.T) {
+	client := &remoteTUIIPC{liveStateCursor: 500, liveRequestedAfter: 500}
+	if reset := client.acceptLiveAcknowledgement(2); !reset {
+		t.Fatal("primary event epoch reset was not detected")
+	}
+	if client.liveStateCursor != 2 || client.liveRequestedAfter != 2 {
+		t.Fatalf("reset cursor=%d requested=%d", client.liveStateCursor, client.liveRequestedAfter)
+	}
+	if !client.advanceLiveStateCursor(3) {
+		t.Fatal("new primary epoch state was rejected by the old cursor")
+	}
+	if reset := client.acceptLiveAcknowledgement(4); reset {
+		t.Fatal("monotonic same-epoch acknowledgement triggered a reset")
+	}
+}
+
+func TestRemoteEpochResetPublishesAuthoritativeBaselineBeforeNewFrames(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	authoritative := RichPreviewSnapshotForRemoteTest()
+	authoritative.Status.SupplyMV = 13_002
+	authoritative.StatusLED = native.StatusLEDState{Condition: 255}
+	authoritative.HaveStatusLED = true
+	client := &remoteTUIIPC{
+		ctx: ctx, liveRaw: make(chan tui.RemoteLiveUpdate, 1),
+		liveStateCursor: 500, liveRequestedAfter: 500,
+	}
+	client.callFn = func(_ context.Context, method string, _ any, target any) error {
+		if method != "controller.snapshot" {
+			return errors.New("unexpected method " + method)
+		}
+		wire := target.(*remoteSnapshotWire)
+		wire.Connected = authoritative.Connected
+		wire.Status = authoritative.Status
+		wire.HaveStatus = authoritative.HaveStatus
+		wire.StatusUpdated = authoritative.StatusUpdated
+		wire.StatusLED = authoritative.StatusLED
+		wire.HaveStatusLED = authoritative.HaveStatusLED
+		wire.StatusLEDUpdated = authoritative.StatusLEDUpdated
+		return nil
+	}
+	reset, err := client.consumeLiveEpochReset(2)
+	if err != nil || !reset {
+		t.Fatalf("reset=%t err=%v", reset, err)
+	}
+	baseline := <-client.liveRaw
+	if !baseline.HaveStatus || baseline.Status.SupplyMV != 13_002 ||
+		!baseline.HaveStatusLED || baseline.StatusLED != authoritative.StatusLED {
+		t.Fatalf("authoritative restart baseline=%#v", baseline)
+	}
+	_, afterID := client.nextLiveRequest()
+	if afterID != 2 || !client.advanceLiveStateCursor(3) {
+		t.Fatalf("next after_id=%d cursor=%d", afterID, client.liveStateCursor)
+	}
+}
+
+func RichPreviewSnapshotForRemoteTest() control.Snapshot {
+	return control.Snapshot{
+		Connected: true, HaveStatus: true, StatusUpdated: time.Unix(10, 0),
+		StatusLEDUpdated: time.Unix(10, 0),
+	}
+}
 
 func TestRemoteTUIPollEventsBacksOffAndRediscoversAfterTransportFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
