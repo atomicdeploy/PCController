@@ -746,11 +746,8 @@ render that registry according to their available space and transport.
   board are shown; the same definitions feed user documentation and firmware
   profile generation.
 
-This is the delivery direction for the shell/data-grid work tracked by
-[#160](https://github.com/atomicdeploy/PCController/issues/160) and
-[#161](https://github.com/atomicdeploy/PCController/issues/161), and builds on
-the disconnected/offline visibility contract in
-[#101](https://github.com/atomicdeploy/PCController/issues/101).
+This is the delivery direction for the shell/data-grid work tracked by #160
+and #161, and builds on the disconnected/offline visibility contract in #101.
 
 Automated tests can prove parsing, routing, safety checks, reconnect state,
 mock TUI rendering, and network framing. They cannot prove that Windows toast
