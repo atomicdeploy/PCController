@@ -334,11 +334,14 @@ type Hello struct {
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	if len(payload) != 14 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14", len(payload))
+	if len(payload) != 14 && len(payload) != 16 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14 (or legacy 16)", len(payload))
 	}
 	if payload[0] != IdentitySchemaCompact {
 		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
+	}
+	if len(payload) == 16 && (payload[14] != 0 || payload[15] != 0) {
+		return Hello{}, fmt.Errorf("legacy HELLO reserved tail is non-zero")
 	}
 	hello := Hello{
 		BoardKind:      payload[1],

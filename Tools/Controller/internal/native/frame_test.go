@@ -242,6 +242,31 @@ func TestParseHelloCompactIdentitySchema3(t *testing.T) {
 	}
 }
 
+func TestParseHelloAcceptsLegacySixteenByteIdentity(t *testing.T) {
+	payload := make([]byte, 16)
+	payload[0] = IdentitySchemaCompact
+	payload[1] = 1
+	binary.LittleEndian.PutUint32(payload[2:6], 0xAABBCCDD)
+	binary.LittleEndian.PutUint32(payload[6:10], 0x11223344)
+	binary.LittleEndian.PutUint32(payload[10:14], 0x35019D5D)
+	hello, err := ParseHello(payload)
+	if err != nil {
+		t.Fatalf("legacy HELLO rejected: %v", err)
+	}
+	if hello.BuildHash != 0x11223344 || hello.BuildStamp != "260801194258" {
+		t.Fatalf("legacy HELLO decoded incorrectly: %+v", hello)
+	}
+}
+
+func TestParseHelloRejectsNonZeroLegacyTail(t *testing.T) {
+	payload := make([]byte, 16)
+	payload[0] = IdentitySchemaCompact
+	payload[14] = 1
+	if _, err := ParseHello(payload); err == nil {
+		t.Fatal("non-zero legacy HELLO tail was accepted")
+	}
+}
+
 func TestConfirmedResponseSchemas(t *testing.T) {
 	settings := Settings{
 		Flags: 3, LightMode: 1, OnBrightness: 128, OffBrightness: 4,
