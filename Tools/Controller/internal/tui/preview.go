@@ -92,7 +92,7 @@ func RichPreviewModel(welcome bool) Model {
 				{AtUS: 0, Kind: "relay", Target: 5, Value: 1},
 				{AtUS: 500_000, Kind: "pwm", Target: 0, Value: 1024},
 				{AtUS: 1_250_000, Kind: "display", Text: "PLAY"},
-				{AtUS: 2_000_000, Kind: "buzzer", Value: 880},
+				{AtUS: 2_000_000, Kind: "beep", Value: 880},
 				{AtUS: 3_000_000, Kind: "relay", Target: 5, Value: 0},
 			},
 		},
@@ -101,7 +101,7 @@ func RichPreviewModel(welcome bool) Model {
 			LCDMessage: "Door warning", TimingToleranceUS: 1500,
 			Steps: []appconfig.MacroStep{
 				{AtUS: 0, Kind: "rgb", Value: 1},
-				{AtUS: 250_000, Kind: "buzzer", Value: 1200},
+				{AtUS: 250_000, Kind: "beep", Value: 1200},
 			},
 		},
 		{ID: 3, Name: "draft-scene", Category: "Lighting", Color: "blue", Label: "drAF"},

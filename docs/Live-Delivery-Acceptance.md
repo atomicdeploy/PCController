@@ -103,7 +103,7 @@ must satisfy the relevant live gates below.
 | Gate | Required evidence |
 |---|---|
 | Sources | Host commands, raw opcode exchange, physical keys, and learned RF actions enter one generation/board-bound recorder. |
-| Actions | Relay on/off, motion side/direction/stop, MOSFET/PWM, buzzer start/stop, display/message, and supported LED operations reuse their ordinary validated opcodes. |
+| Actions | Relay on/off, motion side/direction/stop, MOSFET/PWM, beep start/stop, display/message, and supported LED operations reuse their ordinary validated opcodes. |
 | Timing | MCU acceptance timestamps produce wrap-safe ordered deltas. Playback reports its epoch, step progress, timing error, underruns, cancellation, and terminal state live. |
 | Retention | The bounded board ring cannot be overwritten by a competing host start; capture/fetch uses an identity, and local replay/cancel preserves retained data until explicit clear/ack. |
 | Library | Macros can be listed, named, renamed, categorized, colored, shown, deleted, played, cancelled, and monitored through the shared host library. |
