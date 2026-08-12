@@ -7,6 +7,9 @@ import {
   type TabChannelEnvelope,
   type TabChannelIDKind,
 } from './tab-channel'
+import { applyPushedOutputEvent } from './status-led-event'
+import { emptySnapshot } from './types'
+import type { ControllerEvent, Snapshot } from './types'
 
 class FakeBroadcastChannel implements BroadcastChannelPort {
   static rooms = new Map<string, Set<FakeBroadcastChannel>>()
@@ -147,6 +150,33 @@ describe('tab channel', () => {
     now += 1
     sender.close()
     receiver.close()
+  })
+
+  it('keeps two Web tabs on the same pushed seven-segment frame without refresh polling', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('second') })
+    const frame: ControllerEvent = {
+      id: 44,
+      time: '2026-08-12T10:00:00.000Z',
+      kind: 'front_panel.segment',
+      stream: 'state',
+      text: 'changed',
+      metadata: { raw_segments: '6D3F546E', brightness: '7' },
+    }
+    let firstSnapshot: Snapshot = applyPushedOutputEvent(emptySnapshot, frame)
+    let secondSnapshot: Snapshot = emptySnapshot
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') secondSnapshot = applyPushedOutputEvent(secondSnapshot, payload.event as ControllerEvent)
+    })
+
+    first.publishControllerEvent(frame)
+
+    expect(firstSnapshot.front_panel?.raw_segments).toEqual([0x6d, 0x3f, 0x54, 0x6e])
+    expect(secondSnapshot.front_panel?.raw_segments).toEqual(firstSnapshot.front_panel?.raw_segments)
+    expect(firstSnapshot.front_panel_updated).toBe(frame.time)
+    expect(secondSnapshot.front_panel_updated).toBe(frame.time)
+    first.close()
+    second.close()
   })
 
   it('rejects secrets, unknown fields, invalid values, and oversized content before posting', () => {

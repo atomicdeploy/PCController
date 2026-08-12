@@ -57,7 +57,7 @@ export interface TerminalPayload {
 export type SharedControllerEvent = Pick<ControllerEvent, 'id' | 'time' | 'kind' | 'text'> &
   Partial<Pick<
     ControllerEvent,
-    'state' | 'lifecycle' | 'reason' | 'source' | 'target' | 'message_type' |
+    'stream' | 'state' | 'lifecycle' | 'reason' | 'source' | 'target' | 'message_type' |
     'action' | 'gesture' | 'key' | 'rf_id' | 'rf_code' | 'rf_bits' | 'rf_protocol' |
     'metadata'
   >>
@@ -301,7 +301,7 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
   if (!hasOnlyKeys(raw, ['type', 'event']) || !isRecord(raw.event)) return null
   const event = raw.event
   const allowed = [
-    'id', 'time', 'kind', 'text', 'state', 'lifecycle', 'reason', 'source', 'target',
+    'id', 'time', 'kind', 'text', 'stream', 'state', 'lifecycle', 'reason', 'source', 'target',
     'message_type', 'action', 'gesture', 'key', 'rf_id', 'rf_code', 'rf_bits',
     'rf_protocol', 'metadata',
   ] as const
@@ -312,6 +312,8 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
   const text = safeText(event.text, maximumEventTextBytes, true)
   if (id === null || id === undefined || time === null || kind === null || text === null) return null
 
+  const stream = safeOptionalText(event.stream, 16)
+  if (stream === null || (stream !== undefined && !['activity', 'state', 'telemetry', 'debug'].includes(stream))) return null
   const optionalTextKeys = ['state', 'lifecycle', 'reason', 'source', 'target', 'message_type', 'action', 'gesture'] as const
   const optionalTexts: Partial<Record<(typeof optionalTextKeys)[number], string>> = {}
   for (const key of optionalTextKeys) {
@@ -338,6 +340,7 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
       time,
       kind,
       text,
+      ...(stream === undefined ? {} : { stream: stream as ControllerEvent['stream'] }),
       ...optionalTexts,
       ...optionalIntegers,
       ...(metadata === undefined ? {} : { metadata }),

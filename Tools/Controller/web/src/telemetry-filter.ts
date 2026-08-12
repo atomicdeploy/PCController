@@ -40,8 +40,8 @@ export function medianSmoothTelemetrySamples(samples: readonly MetricSample[]): 
 
 // Current sensors tend to jitter by a few milliamps.  Keep raw samples in the
 // runtime/history and only make the drawn series calm: bounded EMA plus a
-// 0.5 mA deadband avoids a full chart animation for insignificant noise.
-export function stabilizeCurrentSeries(samples: readonly MetricSample[], alpha = 0.32, deadband = 0.5): MetricSample[] {
+// 1 mA deadband avoids a full chart animation for insignificant noise.
+export function stabilizeCurrentSeries(samples: readonly MetricSample[], alpha = 0.2, deadband = 1): MetricSample[] {
   let previous: number | undefined
   return samples.map((sample) => {
     const raw = sample.current
@@ -86,4 +86,11 @@ export function focusedThermalDomain(samples: readonly MetricSample[]): ChartDom
     Math.max(0, Math.min(20, roundedDown(low - 8, 1))),
     Math.max(55, roundedUp(high + 3, 1)),
   ]
+}
+
+export function focusedCurrentDomain(samples: readonly MetricSample[]): ChartDomain {
+  const values = finite(samples.map((sample) => sample.current))
+  if (!values.length) return [0, 100]
+  const high = Math.max(0, ...values)
+  return [0, Math.max(100, roundedUp(high * 1.2, 50))]
 }

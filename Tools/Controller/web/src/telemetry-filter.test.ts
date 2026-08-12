@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { focusedThermalDomain, focusedVoltageDomain, medianSmoothTelemetrySamples, normalizeTelemetrySamples, stabilizeCurrentSeries } from './telemetry-filter'
+import { focusedCurrentDomain, focusedThermalDomain, focusedVoltageDomain, medianSmoothTelemetrySamples, normalizeTelemetrySamples, stabilizeCurrentSeries } from './telemetry-filter'
 
 const sample = (at: number, supply = 12): any => ({ at, supply, bus: supply - 0.1, current: 100, power: 1.2, ledTemp: 33, btTemp: 31 })
 
@@ -28,5 +28,6 @@ describe('telemetry chart filtering', () => {
     expect(samples.map((value) => value.current)).toEqual([10, 15, 9, 14, 10])
     expect(stable.at(-1)?.current).toBeLessThan(12)
     expect(Math.max(...stable.map((value) => value.current)) - Math.min(...stable.map((value) => value.current))).toBeLessThan(5)
+    expect(focusedCurrentDomain([{ ...sample(0), current: 387 }])).toEqual([0, 500])
   })
 })

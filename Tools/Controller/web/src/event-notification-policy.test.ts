@@ -8,6 +8,8 @@ describe('controller event toast policy', () => {
     expect(shouldToastControllerEvent({ kind: 'relay.changed', source: 'webui' })).toBe(false)
     expect(shouldToastControllerEvent({ kind: 'relay.changed', source: 'macro' })).toBe(false)
     expect(shouldToastControllerEvent({ kind: 'relay.changed', source: 'automation' })).toBe(false)
+    expect(shouldToastControllerEvent({ kind: 'relay.changed', source: 'board', metadata: { source: 'physical' } })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'relay.changed', source: 'board', metadata: { source: 'webui' } })).toBe(false)
   })
   it('retains fault and door safety notifications', () => {
     expect(shouldToastControllerEvent({ kind: 'motion.fault', source: 'host' })).toBe(true)

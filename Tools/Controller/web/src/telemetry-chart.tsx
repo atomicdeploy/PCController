@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Segmented, StatusBadge } from './components'
-import { focusedThermalDomain, focusedVoltageDomain, medianSmoothTelemetrySamples, normalizeTelemetrySamples, stabilizeCurrentSeries } from './telemetry-filter'
+import { focusedCurrentDomain, focusedThermalDomain, focusedVoltageDomain, medianSmoothTelemetrySamples, normalizeTelemetrySamples, stabilizeCurrentSeries } from './telemetry-filter'
 import type { Locale, MetricSample } from './types'
 
 export type ChartMode = 'electrical' | 'power' | 'thermal'
@@ -62,6 +62,7 @@ export function TelemetryChart({ connected, locale, samples, mode: requestedMode
   const latest = visible.at(-1)
   const voltageDomain = useMemo(() => focusedVoltageDomain(visible), [visible])
   const thermalDomain = useMemo(() => focusedThermalDomain(visible), [visible])
+  const currentDomain = useMemo(() => focusedCurrentDomain(visible), [visible])
   const chartLabel = persian
     ? `نمودار ${modeLabels[mode].fa} با ${visible.length} نمونه`
     : `${modeLabels[mode].en} chart with ${visible.length} samples`
@@ -120,7 +121,7 @@ export function TelemetryChart({ connected, locale, samples, mode: requestedMode
             </defs>
             <XAxis dataKey="timeLabel" minTickGap={38} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={{ stroke: 'var(--line-strong)' }} tickLine={false} />
             <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={mode === 'electrical' ? voltageDomain : mode === 'thermal' ? thermalDomain : ['auto', 'auto']} />
-            {mode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />}
+            {mode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={currentDomain} />}
             <Tooltip
               cursor={{ stroke: 'var(--line-strong)', strokeWidth: 1 }}
               contentStyle={{ background: 'var(--glass-strong)', border: '1px solid var(--line-strong)', borderRadius: 12, boxShadow: 'var(--shadow-tight)', color: 'var(--text)' }}
@@ -129,14 +130,14 @@ export function TelemetryChart({ connected, locale, samples, mode: requestedMode
             />
             <Legend iconType="plainline" wrapperStyle={{ color: 'var(--text-soft)', fontSize: 10, paddingTop: 7 }} />
             {mode === 'electrical' && <>
-              <Area yAxisId="left" type="monotone" dataKey="supply" name={persian ? 'تغذیه V' : 'Supply V'} stroke="var(--accent)" strokeWidth={2.2} fill="url(#telemetry-accent-fill)" isAnimationActive={false} />
-              <Line yAxisId="left" type="monotone" dataKey="bus" name={persian ? 'باس V' : 'Bus V'} stroke="var(--violet)" strokeWidth={1.8} dot={false} isAnimationActive={false} />
-              <Line yAxisId="right" type="monotone" dataKey="current" name={persian ? 'جریان mA' : 'Current mA'} stroke="var(--amber)" strokeWidth={1.8} dot={false} isAnimationActive={false} />
+              <Area yAxisId="left" type="monotone" dataKey="supply" name={persian ? 'تغذیه V' : 'Supply V'} stroke="var(--accent)" strokeWidth={2.2} fill="url(#telemetry-accent-fill)" isAnimationActive animationDuration={260} animationEasing="linear" />
+              <Line yAxisId="left" type="monotone" dataKey="bus" name={persian ? 'باس V' : 'Bus V'} stroke="var(--violet)" strokeWidth={1.8} dot={false} isAnimationActive animationDuration={260} animationEasing="linear" />
+              <Line yAxisId="right" type="monotone" dataKey="current" name={persian ? 'جریان mA' : 'Current mA'} stroke="var(--amber)" strokeWidth={1.8} dot={false} isAnimationActive animationDuration={260} animationEasing="linear" />
             </>}
-            {mode === 'power' && <Area yAxisId="left" type="monotone" dataKey="power" name={persian ? 'توان W' : 'Power W'} stroke="var(--amber)" strokeWidth={2.2} fill="url(#telemetry-amber-fill)" isAnimationActive={false} />}
+            {mode === 'power' && <Area yAxisId="left" type="monotone" dataKey="power" name={persian ? 'توان W' : 'Power W'} stroke="var(--amber)" strokeWidth={2.2} fill="url(#telemetry-amber-fill)" isAnimationActive animationDuration={260} animationEasing="linear" />}
             {mode === 'thermal' && <>
-              {thermalSeries !== 'audio' && <Area yAxisId="left" type="monotone" dataKey="ledTemp" name={persian ? 'دمای LED °C' : 'LED °C'} stroke="var(--red)" strokeWidth={2.1} fill="url(#telemetry-amber-fill)" isAnimationActive={false} />}
-              {thermalSeries !== 'led' && <Line yAxisId="left" type="monotone" dataKey="btTemp" name={persian ? 'دمای صدا °C' : 'Audio °C'} stroke="var(--violet)" strokeWidth={1.9} dot={false} isAnimationActive={false} />}
+              {thermalSeries !== 'audio' && <Area yAxisId="left" type="monotone" dataKey="ledTemp" name={persian ? 'دمای LED °C' : 'LED °C'} stroke="var(--red)" strokeWidth={2.1} fill="url(#telemetry-amber-fill)" isAnimationActive animationDuration={260} animationEasing="linear" />}
+              {thermalSeries !== 'led' && <Line yAxisId="left" type="monotone" dataKey="btTemp" name={persian ? 'دمای صدا °C' : 'Audio °C'} stroke="var(--violet)" strokeWidth={1.9} dot={false} isAnimationActive animationDuration={260} animationEasing="linear" />}
             </>}
           </AreaChart>
         </ResponsiveContainer>

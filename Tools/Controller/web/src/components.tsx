@@ -28,6 +28,7 @@ import {
 import type { DialogState, ToastMessage } from './types'
 import { HoldActionSession } from './hold-action'
 import { primaryShortcutModifier } from './client-platform'
+import { sparklinePoints, type SparklineScale } from './sparkline-scale'
 
 function interfaceCopy(english: string, persian: string): string {
   return typeof document !== 'undefined' && document.documentElement.lang.toLowerCase().startsWith('fa') ? persian : english
@@ -392,22 +393,17 @@ export function Sparkline({
   values,
   tone = 'accent',
   label,
+  scale = 'auto',
 }: {
   values: number[]
   tone?: 'accent' | 'green' | 'amber' | 'violet'
   label: string
+  scale?: SparklineScale
 }) {
   const id = useId().replace(/:/g, '')
   const width = 300
   const height = 92
-  const data = values.length > 1 ? values : [0, 0]
-  const minimum = Math.min(...data)
-  const maximum = Math.max(...data)
-  const span = Math.max(1, maximum - minimum)
-  const points = data.map((value, index) => ({
-    x: (index / Math.max(1, data.length - 1)) * width,
-    y: height - 8 - ((value - minimum) / span) * (height - 20),
-  }))
+  const points = sparklinePoints(values, scale, width, height)
   const line = points.map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ')
   const area = `${line} L${width},${height} L0,${height} Z`
   return (
@@ -426,20 +422,18 @@ export function Sparkline({
       <path className="sparkline__grid" d="M0 24H300 M0 48H300 M0 72H300" />
       <motion.path
         className="sparkline__area"
-        d={area}
         fill={`url(#fill-${id})`}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: .7 }}
+        initial={false}
+        animate={{ d: area, opacity: 1 }}
+        transition={{ d: { duration: .26, ease: 'linear' }, opacity: { duration: .18 } }}
       />
       <motion.path
         className="sparkline__line"
-        d={line}
         fill="none"
         stroke={`url(#line-${id})`}
-        initial={{ pathLength: 0, opacity: 0 }}
-        animate={{ pathLength: 1, opacity: 1 }}
-        transition={{ duration: .8, ease: [0.22, 1, 0.36, 1] }}
+        initial={false}
+        animate={{ d: line, pathLength: 1, opacity: 1 }}
+        transition={{ d: { duration: .26, ease: 'linear' }, opacity: { duration: .18 } }}
       />
     </svg>
   )
@@ -453,6 +447,7 @@ export function MetricCard({
   values,
   tone,
   detail,
+  scale = 'auto',
 }: {
   icon: LucideIcon
   label: string
@@ -461,6 +456,7 @@ export function MetricCard({
   values: number[]
   tone: 'accent' | 'green' | 'amber' | 'violet'
   detail?: string
+  scale?: SparklineScale
 }) {
   return (
     <article className={`metric metric--${tone}`}>
@@ -474,7 +470,7 @@ export function MetricCard({
       <div className="metric__value" dir="ltr">
         <strong>{value}</strong><span>{unit}</span>
       </div>
-      <Sparkline values={values} tone={tone} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
+      <Sparkline values={values} tone={tone} scale={scale} label={interfaceCopy(`${label} trend`, `روند ${label}`)} />
     </article>
   )
 }

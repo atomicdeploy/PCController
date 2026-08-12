@@ -203,7 +203,7 @@ export function hotkeyConfigurationMatches(response: HotkeySettingsResponse): Re
     if (
       !registered || registered.accelerator !== binding.chord ||
       registered.command !== binding.command
-    ) return { state: 'pending', detail: `The host has not confirmed ${binding.name} yet.` }
+    ) return { state: 'pending', detail: `The host has not applied ${binding.name} yet.` }
   }
   return { state: 'active', detail: `${expected.length} global shortcut${expected.length === 1 ? '' : 's'} active.` }
 }

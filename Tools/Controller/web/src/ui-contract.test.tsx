@@ -119,6 +119,8 @@ describe('offline and settings UI contracts', () => {
     expect(live).not.toContain('>refresh<')
     expect(stale).toContain('>refresh<')
     expect(live).toContain('aria-label="Turn relay 1 on"')
+    expect(live.toLowerCase()).not.toMatch(/\breleased\b|\bconfirmed\b/)
+    expect(live).toContain('All relay and motion outputs are off')
   })
 
   it('shows useful controller identity states instead of a placeholder', () => {
