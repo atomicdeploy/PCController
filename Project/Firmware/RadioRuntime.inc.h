@@ -142,9 +142,17 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
                     static_cast<uint8_t>(KeyEvent::Down),
                     InputEventSource::Radio, remote.id);
       handleMenuAction(remote.actionValue, true);
+      {
+        const uint8_t gesture[] = {remote.actionValue,
+                                   static_cast<uint8_t>(KeyEvent::Down)};
+        macroPlayback.capture(ControllerProtocol::RemoteKeyGesture, gesture,
+                              sizeof(gesture));
+      }
       return;
     case RemoteActionKind::Menu:
       handleMenuAction(remote.actionValue, true);
+      macroPlayback.capture(ControllerProtocol::MenuAction,
+                            &remote.actionValue, 1);
       return;
     case RemoteActionKind::Relay: {
       const uint8_t mask = static_cast<uint8_t>(_BV(remote.actionValue));
@@ -160,6 +168,12 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
         remoteMomentaryValue = remote.actionValue;
         remoteMomentaryEndsAt = at + 350;
       }
+      if (accepted) {
+        const uint8_t command[] = {remote.actionValue,
+                                   static_cast<uint8_t>(next)};
+        macroPlayback.capture(ControllerProtocol::RelaySet, command,
+                              sizeof(command));
+      }
       return;
     }
     case RemoteActionKind::Side:
@@ -169,6 +183,9 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
       }
       if (behavior == RemoteBehavior::Stop) {
         relays.stopSide(static_cast<::RelaySide>(remote.actionValue), at);
+        const uint8_t command[] = {remote.actionValue, 0};
+        macroPlayback.capture(ControllerProtocol::RelaySide, command,
+                              sizeof(command));
       } else {
         const RelayDirection direction =
             behavior == RemoteBehavior::Down ? RelayDirection::Reverse
@@ -178,6 +195,11 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
           remoteMomentaryKind = kind;
           remoteMomentaryValue = remote.actionValue;
           remoteMomentaryEndsAt = at + 350;
+          const uint8_t command[] = {
+              remote.actionValue,
+              static_cast<uint8_t>(direction == RelayDirection::Forward ? 1 : 2)};
+          macroPlayback.capture(ControllerProtocol::RelaySide, command,
+                                sizeof(command));
         }
       }
       return;
@@ -189,6 +211,11 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
                                  : (active ? 0 : 4095);
       pwm.setValue(value, at);
       storeUserPwmValue(remote.actionValue, value);
+      const uint8_t command[] = {remote.actionValue,
+                                 static_cast<uint8_t>(value),
+                                 static_cast<uint8_t>(value >> 8)};
+      macroPlayback.capture(ControllerProtocol::PwmSet, command,
+                            sizeof(command));
       if (behavior == RemoteBehavior::Momentary) {
         remoteMomentaryKind = kind;
         remoteMomentaryValue = remote.actionValue;

@@ -29,7 +29,7 @@ void sendHello(uint8_t sequence) {
       (1UL << 19) | // host-captured front-panel session (DisplayText targets 3/4)
       (1UL << 20) | // status bit 12 means buzzer queue/voice is busy
       (1UL << 21) | // EEPROM-selectable 1..255 ms motion break time
-      (1UL << 22) | // MCU-timed events/ACKs and queued macro schema 2
+      (1UL << 22) | // MCU-timed capture/playback and queued macro schema 3
 #if PCCONTROLLER_MENU_LAYOUT_PROTOCOL
       (1UL << 23) | // persistent visible-mask and stable-ID rank permutation
 #endif
@@ -831,6 +831,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
   }
 
 acknowledged:
+  // Capture only a command that has already traversed its ordinary validator
+  // and safety guards.  Macro replay uses its reserved sequence, preventing
+  // a playback from recursively recording itself.
+  if (frame.sequence != MacroQueue::ExecutionSequence) {
+    macroPlayback.capture(frame.opcode, payload, length);
+  }
   appProtocol.sendAck(frame.sequence, frame.opcode);
   return;
 badPayload:

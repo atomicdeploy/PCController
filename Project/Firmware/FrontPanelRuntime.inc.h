@@ -878,6 +878,11 @@ void applyKeyGesture(uint8_t bit, KeyEvent event) {
 void keyGesture(uint8_t bit, KeyEvent event, void *) {
   if ((hostLcdFlags & HOST_PANEL_CAPTURED) == 0) {
     applyKeyGesture(bit, event);
+    // Preserve the physical key lifecycle as the normal virtual-key opcode.
+    // Playback therefore reuses the exact menu/motion safety dispatcher.
+    const uint8_t gesture[] = {bit, static_cast<uint8_t>(event)};
+    macroPlayback.capture(ControllerProtocol::RemoteKeyGesture, gesture,
+                          sizeof(gesture));
   }
 
   appEvents.key(bit, static_cast<uint8_t>(event));

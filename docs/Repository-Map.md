@@ -138,7 +138,7 @@ byte-tight layout remain predictable:
 | `AddressableLeds.*`, `IlluminationController.*`, `StatusLedController.*` | strip, enclosure light, and status/effect rendering |
 | `CompactI2c.*`, `Ina219Sensor.*`, `SystemInputs.*`, `TemperatureRoles.h` | shared bus recovery, optional sensors, panel inputs, temperature roles |
 | `FrontPanelModel.h`, `BootMelody.*`, `FeedbackMelodies.*` | front-panel state and board-owned audible feedback |
-| `MacroQueue.*`, `TransitionMath.h` | deterministic timed operations and bounded transitions |
+| `MacroQueue.*`, `TransitionMath.h` | deterministic timed capture/playback, bounded transitions, and raw ordinary-opcode macro records |
 | `ResetTelemetry.*` | reset-cause/boot-count persistence and reporting |
 
 ## 🖥️ Native Go host
