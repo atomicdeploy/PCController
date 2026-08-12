@@ -61,8 +61,12 @@ type Event struct {
 	Gesture     string
 	Source      string
 	Target      string
+	Targets     []string
 	MessageType string
 	Action      string
+	Severity    string
+	Correlation string
+	Delivery    string
 	Metadata    map[string]string
 	RFCode      uint32
 	RFBits      byte

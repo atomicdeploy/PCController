@@ -219,7 +219,7 @@ func runExecCommand(connection *connectionFlags, commandText string, stdout io.W
 
 func commandAllowsDisconnected(command string) bool {
 	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
-	return len(words) >= 2 && words[0] == "board" && words[1] == "initialize"
+	return len(words) >= 1 && (words[0] == "message" || (len(words) >= 2 && words[0] == "board" && words[1] == "initialize"))
 }
 
 func runBatch(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
