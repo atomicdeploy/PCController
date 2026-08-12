@@ -87,6 +87,8 @@ import { shouldToastControllerEvent } from './event-notification-policy'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
+import { AppPreferencesDialog } from './app-preferences-dialog'
+import { loadQuickHeaderPreferences, normalizeQuickHeaderPreferences, saveQuickHeaderPreferences } from './quick-header-preferences'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -381,6 +383,8 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
+  const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
+  const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
   const [bootOpen, setBootOpen] = useState(demo)
   const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
@@ -418,6 +422,12 @@ export default function App() {
     applyAppearance(value)
     audioRef.current?.setVolume(value.audioVolume)
     audioRef.current?.setMuted(value.audioMuted)
+  }, [])
+
+  const saveQuickHeader = useCallback((value: ReturnType<typeof normalizeQuickHeaderPreferences>) => {
+    const normalized = normalizeQuickHeaderPreferences(value)
+    setQuickHeader(normalized)
+    saveQuickHeaderPreferences(normalized)
   }, [])
 
   const adoptHostAppearance = useCallback((value: Appearance, etag: string) => {
@@ -1121,6 +1131,7 @@ export default function App() {
     transport: { streamState, tabBusSupported, tabPeers },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
+    openAppPreferences: () => setAppPreferencesOpen(true),
   }
 
   const PageView = pageViewFor(page)
@@ -1220,11 +1231,12 @@ export default function App() {
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
           <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>
-          <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
-          <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>
-          <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
-          <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
-          <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
+          <button className="topbar-icon" aria-label={appearance.locale === 'fa' ? 'ترجیحات برنامه' : 'Application preferences'} aria-haspopup="dialog" onClick={() => setAppPreferencesOpen(true)}><Settings size={18} /></button>
+          {quickHeader.theme && <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>}
+          {quickHeader.language && <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>}
+          {quickHeader.audio && <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}
+          {quickHeader.hotkeys && <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>}
+          {quickHeader.notifications && <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>}
         </div>
       </header>
 
@@ -1273,6 +1285,7 @@ export default function App() {
       </AnimatePresence>
 
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
+      <AppPreferencesDialog open={appPreferencesOpen} locale={appearance.locale} appearance={appearance} quickHeader={quickHeader} onAppearance={saveAppearance} onQuickHeader={saveQuickHeader} onClose={() => setAppPreferencesOpen(false)} />
       <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </div>
     <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />

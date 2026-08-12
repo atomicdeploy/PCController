@@ -43,6 +43,7 @@ function shared(): SharedViewProps {
     relayedTerminal: [],
     broadcastTerminal: vi.fn(),
     boardSettingsReadState: 'idle',
+    openAppPreferences: vi.fn(),
   }
 }
 

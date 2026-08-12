@@ -50,8 +50,22 @@ rendering a placeholder.
 
 The overview collects connection freshness, LCD address, buzzer/silent state,
 and event-driven seven-segment state alongside board identity and diagnostics.
+Its action menu links directly to the seven-segment/LCD, buzzer-routing, and
+connection settings surfaces so display and connection state never becomes a
+dead-end summary.
 Temperature cards use an LED/audio tab instead of displaying two competing
 thermal cards.
+
+## Host preferences versus board settings
+
+The always-visible quick-header Settings control opens a tabbed **Application
+preferences** dialog. Theme, language (including the explicit language
+dropdown), direction, interaction feedback, and visibility of nonessential
+quick-header controls are browser/host preferences. The Settings shortcut is
+not hideable, so the choices are always reversible.
+
+Board EEPROM settings remain visibly separate on the Settings page and require
+an explicit board write. The preferences dialog cannot write the controller.
 
 ## Remaining WIP acceptance
 
