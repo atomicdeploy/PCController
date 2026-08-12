@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import { Segmented, StatusBadge } from './components'
-import { medianSmoothTelemetrySamples, normalizeTelemetrySamples } from './telemetry-filter'
+import { focusedThermalDomain, focusedVoltageDomain, medianSmoothTelemetrySamples, normalizeTelemetrySamples } from './telemetry-filter'
 import type { Locale, MetricSample } from './types'
 
 type ChartMode = 'electrical' | 'power' | 'thermal'
@@ -55,6 +55,8 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
   }, [persian, samples, smoothing, windowSize])
 
   const latest = visible.at(-1)
+  const voltageDomain = useMemo(() => focusedVoltageDomain(visible), [visible])
+  const thermalDomain = useMemo(() => focusedThermalDomain(visible), [visible])
   const chartLabel = persian
     ? `نمودار ${modeLabels[mode].fa} با ${visible.length} نمونه`
     : `${modeLabels[mode].en} chart with ${visible.length} samples`
@@ -112,7 +114,7 @@ export function TelemetryChart({ connected, locale, samples }: TelemetryChartPro
               </linearGradient>
             </defs>
             <XAxis dataKey="timeLabel" minTickGap={38} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={{ stroke: 'var(--line-strong)' }} tickLine={false} />
-            <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />
+            <YAxis yAxisId="left" width={44} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={mode === 'electrical' ? voltageDomain : mode === 'thermal' ? thermalDomain : ['auto', 'auto']} />
             {mode === 'electrical' && <YAxis yAxisId="right" orientation="right" width={46} tick={{ fill: 'var(--text-muted)', fontSize: 9 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} />}
             <Tooltip
               cursor={{ stroke: 'var(--line-strong)', strokeWidth: 1 }}

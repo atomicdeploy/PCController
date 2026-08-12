@@ -63,6 +63,7 @@ import {
 } from './significant-events'
 import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
+import { publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
 import {
   createTabChannel,
   type TabChannel,
@@ -385,6 +386,7 @@ export default function App() {
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
   const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
   const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
+  const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
   const [bootOpen, setBootOpen] = useState(demo)
   const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
@@ -757,6 +759,34 @@ export default function App() {
     tabChannelRef.current?.publishPresence(document.hidden ? 'hidden' : 'active', value)
     document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
+
+  const browserConsoleState = useMemo(() => ({
+    title: productTitle,
+    hostVersion: uiConfig?.host_version || 'not reported',
+    page,
+    connected: !demo && snapshot.connected,
+    port: snapshot.port.name || '',
+    transport: streamState,
+    eventCount: events.length,
+  }), [demo, events.length, page, productTitle, snapshot.connected, snapshot.port.name, streamState, uiConfig?.host_version])
+
+  useEffect(() => publishBrowserConsole({
+    api: 'PCController.browser/1',
+    inspect: () => browserConsoleState,
+    command: (value) => {
+      const command = value.trim()
+      if (!command) return Promise.reject(new Error('PCController.command requires a non-empty normalized command string'))
+      return runCommand(command)
+    },
+    refresh: async () => { await refresh() },
+    navigate: (value) => {
+      const destination = navigation.find((candidate) => candidate.id === value)?.id
+      if (!destination) throw new Error(`Unknown PCController page: ${value}`)
+      navigate(destination)
+    },
+  }), [browserConsoleState, navigate, refresh, runCommand])
+
+  useEffect(() => { publishBrowserConsoleState(browserConsoleState) }, [browserConsoleState])
 
   const saveAppearance = useCallback((value: Appearance) => {
     const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
@@ -1206,10 +1236,32 @@ export default function App() {
           <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
 
-        <div className="sidebar__status">
+        <div
+          className="sidebar__status"
+          role="button"
+          tabIndex={0}
+          aria-haspopup="menu"
+          aria-expanded={sidebarStatusMenu}
+          aria-label={appearance.locale === 'fa' ? 'منوی اتصال کنترلر' : 'Controller connection menu'}
+          onClick={() => setSidebarStatusMenu((value) => !value)}
+          onContextMenu={(event) => { event.preventDefault(); setSidebarStatusMenu(true) }}
+          onKeyDown={(event) => {
+            if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10') || event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              setSidebarStatusMenu(true)
+            }
+            if (event.key === 'Escape') setSidebarStatusMenu(false)
+          }}
+        >
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
           <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} />
+          {sidebarStatusMenu && <div className="sidebar__status-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
+            {snapshot.connected && <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('close') }}>{appearance.locale === 'fa' ? 'بستن درگاه' : 'Close port'}</button>}
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); setPaletteQuery('ports'); setPaletteIndex(0); setPalette(true) }}>{appearance.locale === 'fa' ? 'انتخاب درگاه USB' : 'Choose USB port'}</button>
+            <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); navigate('device') }}>{appearance.locale === 'fa' ? 'جزئیات دستگاه' : 'Device details'}</button>
+          </div>}
         </div>
 
         <nav className="sidebar__nav">
