@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestMacroStatusSchemaTwoRoundTripLayout(t *testing.T) {
+func TestMacroStatusSchemaThreeRoundTripLayout(t *testing.T) {
 	payload := []byte{
 		EventMacro, MacroQueueSchema, MacroPlaying, 9,
 		7, 0, 5, 0, 64, 0,
@@ -105,17 +105,34 @@ func TestBoardActionEventRejectsControlAndOversizedPayload(t *testing.T) {
 }
 
 func TestMacroCaptureChunkUsesBoundedOffsetPages(t *testing.T) {
-	payload := []byte{MacroQueueSchema, 3, 9, 5, 0, 2, 0, 3, 0xAA, 0xBB, 0xCC}
+	payload := []byte{EventMacro, MacroQueueSchema, MacroExported, 9, 2, 0, 3, 0xAA, 0xBB, 0xCC}
 	chunk, err := ParseMacroCaptureChunk(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chunk.ID != 9 || chunk.TotalBytes != 5 || chunk.Offset != 2 ||
+	if chunk.ID != 9 || chunk.State != MacroExported || chunk.Offset != 2 ||
 		len(chunk.Data) != 3 || chunk.Data[2] != 0xCC {
 		t.Fatalf("unexpected capture chunk: %#v", chunk)
 	}
-	query := MacroCaptureQueryPayload(0x1234)
-	if len(query) != 3 || query[0] != 3 || query[1] != 0x34 || query[2] != 0x12 {
-		t.Fatalf("unexpected capture query: % X", query)
+	query, err := MacroCaptureFetchPayload(0x34, 12)
+	if err != nil || len(query) != 4 || query[0] != 4 || query[1] != 0x34 || query[2] != 0 || query[3] != 12 {
+		t.Fatalf("unexpected capture fetch: % X (%v)", query, err)
+	}
+}
+
+func TestMacroCaptureStartIsExplicitlyBoundedToTheBoardRing(t *testing.T) {
+	payload := MacroCaptureStartPayload(7)
+	if got, want := payload, []byte{MacroQueueSchema, 7, MacroOptionCaptureInputs, MacroCaptureMaximumBytes, 0}; string(got) != string(want) {
+		t.Fatalf("capture start=% X want % X", got, want)
+	}
+}
+
+func TestMacroExportEventDoesNotPretendToBeAStatusReport(t *testing.T) {
+	event, err := ParseDeviceEvent([]byte{EventMacro, MacroQueueSchema, MacroExported, 4, 0, 0, 1, 0xAA})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Macro != nil || event.MacroState != MacroExported || event.MacroID != 4 {
+		t.Fatalf("unexpected export event: %#v", event)
 	}
 }

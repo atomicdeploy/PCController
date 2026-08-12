@@ -731,6 +731,17 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 		event.RFID = payload[1]
 	case EventMacro:
 		if len(payload) >= 2 && payload[1] == MacroQueueSchema {
+			// Fetch replies reuse the Macro event envelope but are not lifecycle
+			// status reports. They are consumed by the request owner; accepting
+			// the compact export form here keeps an echoed reply from poisoning
+			// the unsolicited event pump.
+			if len(payload) >= 4 && payload[2] == MacroExported {
+				if _, err := ParseMacroCaptureChunk(payload); err != nil {
+					return DeviceEvent{}, err
+				}
+				event.MacroState, event.MacroID = payload[2], payload[3]
+				break
+			}
 			status, err := ParseMacroStatus(payload)
 			if err != nil {
 				return DeviceEvent{}, err

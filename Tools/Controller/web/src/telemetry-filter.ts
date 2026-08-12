@@ -38,6 +38,20 @@ export function medianSmoothTelemetrySamples(samples: readonly MetricSample[]): 
   })
 }
 
+// Current sensors tend to jitter by a few milliamps.  Keep raw samples in the
+// runtime/history and only make the drawn series calm: bounded EMA plus a
+// 0.5 mA deadband avoids a full chart animation for insignificant noise.
+export function stabilizeCurrentSeries(samples: readonly MetricSample[], alpha = 0.32, deadband = 0.5): MetricSample[] {
+  let previous: number | undefined
+  return samples.map((sample) => {
+    const raw = sample.current
+    const next = previous === undefined ? raw : previous + alpha * (raw - previous)
+    const stable = previous !== undefined && Math.abs(next - previous) < deadband ? previous : next
+    previous = stable
+    return { ...sample, current: stable }
+  })
+}
+
 function finite(values: readonly number[]): number[] {
   return values.filter((value) => Number.isFinite(value))
 }

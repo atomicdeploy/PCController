@@ -256,7 +256,7 @@ func TestBoardCaptureSealsAfterOverflowActionAndDeduplicatesLifecycle(t *testing
 	fetchStarted := make(chan boardCaptureToken, 1)
 	releaseFetch := make(chan struct{})
 	var fetchCalls atomic.Int32
-	runner.fetchCapture = func(token boardCaptureToken) ([]byte, error) {
+	runner.fetchCapture = func(token boardCaptureToken, expectedBytes uint16) ([]byte, error) {
 		fetchCalls.Add(1)
 		fetchStarted <- token
 		<-releaseFetch
@@ -330,7 +330,7 @@ func TestBoardCaptureReconnectGenerationCannotSaveOldRecovery(t *testing.T) {
 	}
 	fetchStarted := make(chan boardCaptureToken, 1)
 	releaseFetch := make(chan struct{})
-	runner.fetchCapture = func(token boardCaptureToken) ([]byte, error) {
+	runner.fetchCapture = func(token boardCaptureToken, expectedBytes uint16) ([]byte, error) {
 		fetchStarted <- token
 		<-releaseFetch
 		return record, nil
@@ -362,7 +362,7 @@ func TestBoardCaptureReconnectGenerationCannotSaveOldRecovery(t *testing.T) {
 	}
 
 	// The replacement board may reuse the same uint8 ID and starts cleanly.
-	runner.fetchCapture = func(token boardCaptureToken) ([]byte, error) {
+	runner.fetchCapture = func(token boardCaptureToken, expectedBytes uint16) ([]byte, error) {
 		if token.Generation != 11 || token.StartedAtUS != 9000 {
 			t.Fatalf("replacement capture token=%#v", token)
 		}
@@ -405,7 +405,7 @@ func TestConnectActivelyRecoversCaptureCompletedWhileHostWasAbsent(t *testing.T)
 			ID: 9, StartedAtUS: 7000, AcceptedSteps: 1,
 		}, nil
 	}
-	runner.fetchCapture = func(token boardCaptureToken) ([]byte, error) {
+	runner.fetchCapture = func(token boardCaptureToken, expectedBytes uint16) ([]byte, error) {
 		if token != (boardCaptureToken{Generation: 22, ID: 9, StartedAtUS: 7000}) {
 			t.Fatalf("offline recovery token=%#v", token)
 		}

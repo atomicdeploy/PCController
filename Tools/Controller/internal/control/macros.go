@@ -106,7 +106,7 @@ type MacroRunner struct {
 	boardCaptureGeneration uint64
 	boardCaptureFinalizing map[boardCaptureToken]struct{}
 	boardCaptureFinished   map[boardCaptureToken]struct{}
-	fetchCapture           func(boardCaptureToken) ([]byte, error)
+	fetchCapture           func(boardCaptureToken, uint16) ([]byte, error)
 	queryCaptureStatus     func(uint64) (native.MacroStatus, error)
 }
 
@@ -267,6 +267,60 @@ func (runner *MacroRunner) Delete(reference string) error {
 
 func (runner *MacroRunner) StartRecording(name, category, color string) (MacroRecordingState, error) {
 	return runner.startRecording(nil, name, category, color)
+}
+
+// StartBoardCapture arms the board's bounded capture ring, then attaches the
+// host recorder to the same generation-pinned MCU epoch. This keeps physical
+// and RF action deltas in the exact same library path as host-origin actions.
+func (runner *MacroRunner) StartBoardCapture(ctx context.Context, id byte) (MacroRecordingState, error) {
+	if runner.runtime == nil {
+		return MacroRecordingState{}, errors.New("macro runtime is unavailable")
+	}
+	runner.operationMu.Lock()
+	defer runner.operationMu.Unlock()
+	snapshot := runner.runtime.Snapshot()
+	if !snapshot.Connected {
+		return MacroRecordingState{}, errors.New("connect a controller before starting board capture")
+	}
+	if snapshot.Hello.Capabilities&native.CapabilityTimedMacroQueue == 0 {
+		return MacroRecordingState{}, errors.New("connected firmware does not advertise the MCU-timed macro queue")
+	}
+	if runner.RecordingState().Active {
+		return MacroRecordingState{}, errors.New("another macro recording is already active")
+	}
+	if _, err := runner.runtime.requestAtGeneration(ctx, snapshot.Generation, native.OpMacroStart, native.MacroCaptureStartPayload(id), native.OpACK); err != nil {
+		return MacroRecordingState{}, err
+	}
+	status, err := runner.queryBoardMacroStatus(snapshot.Generation)
+	if err != nil {
+		return MacroRecordingState{}, fmt.Errorf("confirm board capture start: %w", err)
+	}
+	if status.State != native.MacroRecording || status.ID != id {
+		return MacroRecordingState{}, fmt.Errorf("board did not enter recording for macro %d (state=%d id=%d)", id, status.State, status.ID)
+	}
+	runner.handleBoardMacroStatusAtGeneration(status, snapshot.Generation)
+	return runner.RecordingState(), nil
+}
+
+// StopBoardCapture freezes board input capture. Final export/recovery happens
+// asynchronously after the Captured lifecycle report so serial event handling
+// never blocks while pages are fetched.
+func (runner *MacroRunner) StopBoardCapture(ctx context.Context) (MacroRecordingState, error) {
+	if runner.runtime == nil {
+		return MacroRecordingState{}, errors.New("macro runtime is unavailable")
+	}
+	state := runner.RecordingState()
+	if !state.Active || !state.BoardOwned {
+		return state, errors.New("no board-owned macro recording is active")
+	}
+	snapshot := runner.runtime.Snapshot()
+	if !snapshot.Connected {
+		return state, errors.New("controller disconnected before board capture could stop")
+	}
+	if _, err := runner.runtime.requestAtGeneration(ctx, snapshot.Generation, native.OpMacroStep, []byte{5}, native.OpACK); err != nil {
+		return state, err
+	}
+	return runner.RecordingState(), nil
 }
 
 func (runner *MacroRunner) startRecording(board *boardCaptureToken, name, category, color string) (MacroRecordingState, error) {
@@ -625,7 +679,7 @@ func (runner *MacroRunner) finalizeBoardCapture(
 	token boardCaptureToken,
 	status native.MacroStatus,
 ) {
-	stream, err := runner.fetchCapture(token)
+	stream, err := runner.fetchCapture(token, status.AcceptedBytes)
 	if err != nil {
 		runner.finishBoardCapture(token, false)
 		runner.publishBoardCaptureFailure(token, err)
@@ -729,15 +783,26 @@ func (runner *MacroRunner) publishBoardCaptureFailure(token boardCaptureToken, e
 	})
 }
 
-func (runner *MacroRunner) fetchBoardCapture(token boardCaptureToken) ([]byte, error) {
+func (runner *MacroRunner) fetchBoardCapture(token boardCaptureToken, expectedBytes uint16) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if expectedBytes > native.MacroCaptureMaximumBytes {
+		return nil, fmt.Errorf("board capture advertises %d bytes, beyond the %d-byte ring", expectedBytes, native.MacroCaptureMaximumBytes)
+	}
 	var stream []byte
-	var total uint16
-	for first := true; first || len(stream) < int(total); first = false {
+	for len(stream) < int(expectedBytes) {
+		remaining := int(expectedBytes) - len(stream)
+		maximum := native.MacroCaptureFetchMaximum
+		if remaining < maximum {
+			maximum = remaining
+		}
+		payload, err := native.MacroCaptureFetchPayload(uint16(len(stream)), byte(maximum))
+		if err != nil {
+			return nil, err
+		}
 		frame, err := runner.runtime.requestAtGeneration(
 			ctx, token.Generation, native.OpMacroStep,
-			native.MacroCaptureQueryPayload(uint16(len(stream))),
+			payload,
 			native.OpMacroStatus,
 		)
 		if err != nil {
@@ -747,14 +812,15 @@ func (runner *MacroRunner) fetchBoardCapture(token boardCaptureToken) ([]byte, e
 		if err != nil {
 			return nil, err
 		}
-		if chunk.ID != token.ID || int(chunk.Offset) != len(stream) ||
-			(!first && chunk.TotalBytes != total) {
+		if chunk.ID != token.ID || int(chunk.Offset) != len(stream) || len(chunk.Data) > remaining {
 			return nil, fmt.Errorf(
-				"capture identity/range changed: want id=%d offset=%d total=%d, got id=%d offset=%d total=%d",
-				token.ID, len(stream), total, chunk.ID, chunk.Offset, chunk.TotalBytes,
+				"capture identity/range changed: want id=%d offset=%d remaining=%d, got id=%d offset=%d bytes=%d",
+				token.ID, len(stream), remaining, chunk.ID, chunk.Offset, len(chunk.Data),
 			)
 		}
-		total = chunk.TotalBytes
+		if len(chunk.Data) == 0 {
+			return nil, fmt.Errorf("capture export ended at byte %d before expected %d", len(stream), expectedBytes)
+		}
 		stream = append(stream, chunk.Data...)
 	}
 	return stream, nil

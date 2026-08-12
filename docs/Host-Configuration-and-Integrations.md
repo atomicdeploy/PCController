@@ -333,7 +333,9 @@ recording clock.
 
 Pressing Record on the board opens provisional PC metadata named
 `Board capture N` in category `board`. The schema-3 MCU ring retains a strict
-no-overwrite prefix and exposes it in bounded 40-byte recovery pages; a
+no-overwrite prefix and exposes it through bounded selector-4 recovery pages;
+a capture start explicitly declares the 127-byte MCU ring limit, so no UI or
+API can imply unbounded board storage. A
 continuously connected host also retains the final action that seals a full
 ring. Save records `capture_dropped_steps` and `capture_missing_steps`, so an
 offline/truncated recovery can never masquerade as complete. `macro update`
@@ -342,6 +344,13 @@ its exact steps. Macro definitions remain PC configuration; only the active
 timing/capture ring occupies AVR RAM. The deterministic preview contains a
 safe representative library, forces every buzzer path to a state-only/muted
 double, and never opens serial or energizes physical outputs.
+
+The Web library monitors the typed `controller.macro.library` IPC/API result
+instead of parsing terminal output. `controller.macro.record.start` selects
+`host` or `board`; `controller.macro.record.stop`, `controller.macro.play`, and
+`controller.macro.cancel` use the same `MacroRunner` generation-pinned path.
+CLI/TUI metadata editing and deletion remain command-surface actions over that
+same library rather than separate stores.
 
 The same library is now available as the default HOST-presented physical
 `MACR` submenu. Its selector is rebuilt from the watched macro array and sorted

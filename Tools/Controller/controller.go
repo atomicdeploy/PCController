@@ -97,6 +97,8 @@ type (
 	ProgramStateOwner         = control.ProgramStateOwner
 	ProgramStateSnapshot      = control.ProgramStateSnapshot
 	ProgramStateLease         = control.ProgramStateLease
+	MacroPlaybackState        = control.MacroState
+	MacroRecordingState       = control.MacroRecordingState
 )
 
 // RF learning modes select indefinite multi-code or bounded timer operation.
@@ -219,6 +221,9 @@ type Macro struct {
 	LCDMessage          string      `json:"lcd_message,omitempty"`
 	TimingToleranceUS   uint32      `json:"timing_tolerance_us,omitempty"`
 	KeepOutputsOnCancel bool        `json:"keep_outputs_on_cancel,omitempty"`
+	RecordingSource     string      `json:"recording_source,omitempty"`
+	CaptureDroppedSteps uint16      `json:"capture_dropped_steps,omitempty"`
+	CaptureMissingSteps uint16      `json:"capture_missing_steps,omitempty"`
 	Steps               []MacroStep `json:"steps"`
 }
 
@@ -679,6 +684,86 @@ func (client *Client) SetMacros(macros []Macro) {
 	client.macroMu.Unlock()
 }
 
+func (client *Client) macroRunner() (*control.MacroRunner, error) {
+	runner := client.runtime.MacroRunner()
+	if runner == nil {
+		return nil, errors.New("macro runner is unavailable")
+	}
+	return runner, nil
+}
+
+// MacroLibrary, MacroPlayback, and MacroRecording expose one shared runner to
+// API, IPC, CLI/TUI, and Web clients; no surface owns a duplicate macro state.
+func (client *Client) MacroLibrary() []Macro {
+	if runner := client.runtime.MacroRunner(); runner != nil {
+		return fromAppMacros(runner.List())
+	}
+	return fromAppMacros(client.currentMacros())
+}
+
+func (client *Client) MacroPlayback() MacroPlaybackState {
+	if runner := client.runtime.MacroRunner(); runner != nil {
+		return runner.State()
+	}
+	return MacroPlaybackState{}
+}
+
+func (client *Client) MacroRecording() MacroRecordingState {
+	if runner := client.runtime.MacroRunner(); runner != nil {
+		return runner.RecordingState()
+	}
+	return MacroRecordingState{}
+}
+
+func (client *Client) StartMacroRecording(name, category, color string) (MacroRecordingState, error) {
+	runner, err := client.macroRunner()
+	if err != nil {
+		return MacroRecordingState{}, err
+	}
+	return runner.StartRecording(name, category, color)
+}
+
+func (client *Client) StartBoardMacroCapture(ctx context.Context, id byte) (MacroRecordingState, error) {
+	runner, err := client.macroRunner()
+	if err != nil {
+		return MacroRecordingState{}, err
+	}
+	return runner.StartBoardCapture(ctx, id)
+}
+
+func (client *Client) StopMacroRecording(save bool) (Macro, error) {
+	runner, err := client.macroRunner()
+	if err != nil {
+		return Macro{}, err
+	}
+	macro, err := runner.StopRecording(save)
+	return fromAppMacro(macro), err
+}
+
+func (client *Client) StopBoardMacroCapture(ctx context.Context) (MacroRecordingState, error) {
+	runner, err := client.macroRunner()
+	if err != nil {
+		return MacroRecordingState{}, err
+	}
+	return runner.StopBoardCapture(ctx)
+}
+
+func (client *Client) PlayMacro(ctx context.Context, reference string) (MacroPlaybackState, error) {
+	runner, err := client.macroRunner()
+	if err != nil {
+		return MacroPlaybackState{}, err
+	}
+	return runner.Start(ctx, reference)
+}
+
+func (client *Client) CancelMacro(ctx context.Context, keepOutputs bool) error {
+	runner, err := client.macroRunner()
+	if err != nil {
+		return err
+	}
+	return runner.CancelWithPolicy(ctx, keepOutputs)
+}
+
 // SetOutputDefinitions replaces the host-owned melody and LED-effect catalogs.
 func (client *Client) SetOutputDefinitions(
 	melodies []Melody,
@@ -723,6 +808,31 @@ func cloneAppMacros(source []appconfig.Macro) []appconfig.Macro {
 	return result
 }
 
+func fromAppMacros(source []appconfig.Macro) []Macro {
+	result := make([]Macro, len(source))
+	for index, macro := range source {
+		result[index] = fromAppMacro(macro)
+	}
+	return result
+}
+
+func fromAppMacro(macro appconfig.Macro) Macro {
+	result := Macro{
+		ID: macro.ID, Name: macro.Name, Category: macro.Category, Color: macro.Color,
+		Label: macro.Label, LCDMessage: macro.LCDMessage, TimingToleranceUS: macro.TimingToleranceUS,
+		KeepOutputsOnCancel: macro.KeepOutputsOnCancel, RecordingSource: macro.RecordingSource,
+		CaptureDroppedSteps: macro.CaptureDroppedSteps, CaptureMissingSteps: macro.CaptureMissingSteps,
+		Steps: make([]MacroStep, len(macro.Steps)),
+	}
+	for index, step := range macro.Steps {
+		result.Steps[index] = MacroStep{AtUS: step.AtUS, Kind: step.Kind, Target: step.Target, Value: step.Value,
+			DurationMS: step.DurationMS, FrequencyHz: step.FrequencyHz, Text: step.Text, Destination: step.Destination,
+			Code: step.Code, Bits: step.Bits, Protocol: step.Protocol, PulseUS: step.PulseUS, Red: step.Red,
+			Green: step.Green, Blue: step.Blue, Brightness: step.Brightness, Opcode: step.Opcode, PayloadHex: step.PayloadHex}
+	}
+	return result
+}
+
 func toAppMacros(macros []Macro) []appconfig.Macro {
 	result := make([]appconfig.Macro, len(macros))
 	for index, macro := range macros {
@@ -731,6 +841,8 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 			Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
+			RecordingSource:     macro.RecordingSource, CaptureDroppedSteps: macro.CaptureDroppedSteps,
+			CaptureMissingSteps: macro.CaptureMissingSteps,
 			Steps:               make([]appconfig.MacroStep, len(macro.Steps)),
 		}
 		for stepIndex, step := range macro.Steps {

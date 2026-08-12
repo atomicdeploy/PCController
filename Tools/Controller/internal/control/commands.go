@@ -4558,11 +4558,10 @@ func macroCommand(
 			return "", err
 		}
 		lines := []string{fmt.Sprintf(
-			"macro id=%d name=%q category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t recording_source=%q capture_dropped=%d capture_missing=%d",
+			"macro id=%d name=%q category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t",
 			macro.ID, macro.Name, macro.Category, normalizedMacroColor(macro.Color),
 			macro.Label, len(macro.Steps), time.Duration(compiled.durationUS)*time.Microsecond,
 			len(compiled.stream), macro.TimingToleranceUS, macro.KeepOutputsOnCancel,
-			macro.RecordingSource, macro.CaptureDroppedSteps, macro.CaptureMissingSteps,
 		)}
 		for index, step := range macro.Steps {
 			due, _ := macroStepDueUS(step)
@@ -4592,22 +4591,6 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf("macro %d/%s draft created; add steps in the watched host config or record a new macro", macro.ID, macro.Name), nil
-	case "update", "rename":
-		if len(args) < 3 || len(args) > 5 {
-			return "", fmt.Errorf("usage: macro update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]")
-		}
-		category, color := "", ""
-		if len(args) >= 4 {
-			category = args[3]
-		}
-		if len(args) == 5 {
-			color = args[4]
-		}
-		macro, err := runner.UpdateMetadata(args[1], args[2], category, color)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("macro %d renamed to %q category=%q color=%q", macro.ID, macro.Name, macro.Category, macro.Color), nil
 	case "delete", "remove":
 		if len(args) != 2 {
 			return "", fmt.Errorf("usage: macro delete NAME_OR_ID")
@@ -4636,7 +4619,7 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("recording macro %d/%s; host, front-panel, and RF actions use exact MCU deltas", state.ID, state.Name), nil
+			return fmt.Sprintf("recording macro %d/%s; acknowledged board commands will use exact MCU deltas", state.ID, state.Name), nil
 		case "status":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record status")
@@ -4645,7 +4628,7 @@ func macroCommand(
 			if !state.Active && state.Name == "" {
 				return "no macro has been recorded in this session", nil
 			}
-			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d host=%d panel=%d rf=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
 		case "save", "stop":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record save")
@@ -4690,7 +4673,7 @@ func macroCommand(
 			return "no macro has run in this session", nil
 		}
 		return fmt.Sprintf(
-			"macro id=%d name=%q lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d dropped=%d faithful=%t started=%s error=%q",
+			"macro id=%d name=%q lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
 			state.ID,
 			state.Name,
 			state.Lifecycle,
@@ -4703,7 +4686,6 @@ func macroCommand(
 			state.TimingViolations,
 			state.Underruns,
 			state.DispatchErrors,
-			state.DroppedSteps,
 			state.Faithful,
 			state.StartedAt.Format(time.RFC3339),
 			state.LastError,

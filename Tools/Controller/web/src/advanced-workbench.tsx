@@ -68,6 +68,7 @@ import {
   Toggle,
 } from './components'
 import { rpc } from './api'
+import { MacroLibrary } from './macro-library'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
@@ -445,6 +446,7 @@ export function AdvancedWorkbench({
           status={online ? snapshot.port.name || copy('connected', 'متصل') : copy('offline', 'آفلاین')}
           tone={online ? 'good' : 'warn'}
         >
+          <MacroLibrary locale={locale} connected={online} run={run} />
           <div className="advanced-actions">
             <Button icon={ListTree} busy={busy === 'ports'} onClick={() => void run('ports')}>{copy('List ports', 'فهرست درگاه‌ها')}</Button>
             {online && <Button icon={Activity} busy={busy === 'status'} onClick={() => void run('status')}>{copy('Live status', 'وضعیت زنده')}</Button>}

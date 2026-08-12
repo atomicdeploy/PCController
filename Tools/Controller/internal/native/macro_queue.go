@@ -2,7 +2,6 @@ package native
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 )
 
@@ -13,6 +12,11 @@ const (
 	MacroAppendHeaderSize       = 5
 	MacroRecordHeaderSize       = 6
 	MacroMaximumFragment        = MaxPayload - MacroAppendHeaderSize
+	// Board capture is retained in the MCU's bounded macro ring. The declared
+	// capture total must never claim more storage than the board owns.
+	MacroCaptureMaximumBytes    = MacroQueueCapacity
+	MacroCaptureFetchHeaderSize = 7
+	MacroCaptureFetchMaximum    = MaxPayload - MacroCaptureFetchHeaderSize
 	// EventAction is intentionally smaller than an ordinary host command. It
 	// covers every board-generated physical/RF action without consuming a
 	// second MaximumPayload-sized AVR buffer.
@@ -23,11 +27,17 @@ const (
 	MacroIdle byte = iota
 	MacroBuffering
 	MacroPlaying
-	MacroCancelled
 	MacroCompleted
+	MacroCancelled
 	MacroFailed
 	MacroRecording
 	MacroCaptured
+	MacroExported
+)
+
+const (
+	MacroOptionKeepOutputsOnCancel byte = 1 << iota
+	MacroOptionCaptureInputs
 )
 
 // MacroStatus is the common schema-2 envelope returned by MACRO_STATUS and
@@ -95,7 +105,7 @@ func MacroQueueStartPayload(id byte, totalSteps uint16, keepOnCancel bool) ([]by
 	}
 	flags := byte(0)
 	if keepOnCancel {
-		flags = 1
+		flags = MacroOptionKeepOutputsOnCancel
 	}
 	return []byte{MacroQueueSchema, id, flags, byte(totalSteps), byte(totalSteps >> 8)}, nil
 }
@@ -115,49 +125,58 @@ func MacroQueueAppendPayload(offset, completeSteps uint16, fragment []byte) ([]b
 func MacroQueueRunPayload() []byte   { return []byte{1} }
 func MacroQueueQueryPayload() []byte { return []byte{2} }
 
-// MacroCaptureQueryPayload requests the retained schema-3 board-capture ring
-// from an absolute byte offset. It does not alter capture/playback state.
-func MacroCaptureQueryPayload(offset uint16) []byte {
-	return []byte{3, byte(offset), byte(offset >> 8)}
+// MacroCaptureStartPayload tells schema-3 firmware to capture board-origin
+// actions into its fixed in-memory ring. It deliberately advertises only the
+// ring capacity; a host must not imply that an AVR retained an unbounded trace.
+func MacroCaptureStartPayload(id byte) []byte {
+	return []byte{MacroQueueSchema, id, MacroOptionCaptureInputs, MacroCaptureMaximumBytes, 0}
+}
+
+// MacroCaptureFetchPayload requests a bounded page from the retained
+// schema-3 board-capture ring. Selector 4 is fetch; selector 3 is clear.
+func MacroCaptureFetchPayload(offset uint16, maximum byte) ([]byte, error) {
+	if offset > MacroCaptureMaximumBytes {
+		return nil, fmt.Errorf("macro capture offset %d exceeds %d-byte ring", offset, MacroCaptureMaximumBytes)
+	}
+	if maximum == 0 || int(maximum) > MacroCaptureFetchMaximum {
+		return nil, fmt.Errorf("macro capture fetch maximum must be 1..%d", MacroCaptureFetchMaximum)
+	}
+	return []byte{4, byte(offset), byte(offset >> 8), maximum}, nil
 }
 
 // MacroCaptureChunk is a bounded recovery page from the board-owned capture
-// ring. Data contains whole/partial stream bytes; callers concatenate pages
-// and validate complete records only after TotalBytes have arrived.
+// ring. Data may end in a partial stream record; callers validate only after
+// the status-declared retained-byte count has been recovered.
 type MacroCaptureChunk struct {
-	Schema     byte   `json:"schema"`
-	Command    byte   `json:"command"`
-	ID         byte   `json:"id"`
-	TotalBytes uint16 `json:"total_bytes"`
-	Offset     uint16 `json:"offset"`
-	Data       []byte `json:"data"`
+	Schema byte   `json:"schema"`
+	State  byte   `json:"state"`
+	ID     byte   `json:"id"`
+	Offset uint16 `json:"offset"`
+	Data   []byte `json:"data"`
 }
 
 func ParseMacroCaptureChunk(payload []byte) (MacroCaptureChunk, error) {
-	const header = 8
-	if len(payload) < header || payload[0] != MacroQueueSchema || payload[1] != 3 {
-		return MacroCaptureChunk{}, fmt.Errorf("invalid schema-3 macro capture chunk")
+	const header = MacroCaptureFetchHeaderSize
+	if len(payload) < header || payload[0] != EventMacro ||
+		payload[1] != MacroQueueSchema || payload[2] != MacroExported {
+		return MacroCaptureChunk{}, fmt.Errorf("invalid schema-3 macro capture export")
 	}
-	length := int(payload[7])
+	length := int(payload[6])
 	if length > MaxPayload-header || len(payload) != header+length {
 		return MacroCaptureChunk{}, fmt.Errorf(
 			"macro capture chunk length %d/body %d is invalid", length, len(payload),
 		)
 	}
 	chunk := MacroCaptureChunk{
-		Schema: payload[0], Command: payload[1], ID: payload[2],
-		TotalBytes: binary.LittleEndian.Uint16(payload[3:5]),
-		Offset:     binary.LittleEndian.Uint16(payload[5:7]),
-		Data:       append([]byte(nil), payload[8:]...),
+		Schema: payload[1], State: payload[2], ID: payload[3],
+		Offset: binary.LittleEndian.Uint16(payload[4:6]),
+		Data:   append([]byte(nil), payload[7:]...),
 	}
-	if chunk.Offset > chunk.TotalBytes ||
-		int(chunk.Offset)+len(chunk.Data) > int(chunk.TotalBytes) {
+	if chunk.Offset > MacroCaptureMaximumBytes ||
+		int(chunk.Offset)+len(chunk.Data) > MacroCaptureMaximumBytes {
 		return MacroCaptureChunk{}, fmt.Errorf(
-			"macro capture range %d+%d exceeds %d", chunk.Offset, len(chunk.Data), chunk.TotalBytes,
+			"macro capture range %d+%d exceeds %d-byte ring", chunk.Offset, len(chunk.Data), MacroCaptureMaximumBytes,
 		)
-	}
-	if chunk.Offset < chunk.TotalBytes && len(chunk.Data) == 0 {
-		return MacroCaptureChunk{}, errors.New("macro capture returned an empty non-terminal chunk")
 	}
 	return chunk, nil
 }

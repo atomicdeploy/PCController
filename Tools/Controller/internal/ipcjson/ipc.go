@@ -841,6 +841,63 @@ func (service *Service) dispatch(
 				}
 			}
 		}
+	case "controller.macro.library", "controller.macro.status":
+		result = map[string]any{
+			"library":   service.Client.MacroLibrary(),
+			"playback":  service.Client.MacroPlayback(),
+			"recording": service.Client.MacroRecording(),
+		}
+	case "controller.macro.play":
+		var params struct {
+			Reference string `json:"reference"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			if strings.TrimSpace(params.Reference) == "" {
+				err = errors.New("macro reference is required")
+			} else {
+				result, err = service.Client.PlayMacro(ctx, params.Reference)
+			}
+		}
+	case "controller.macro.cancel":
+		var params struct {
+			KeepOutputs bool `json:"keep_outputs,omitempty"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			err = service.Client.CancelMacro(ctx, params.KeepOutputs)
+			if err == nil {
+				result = service.Client.MacroPlayback()
+			}
+		}
+	case "controller.macro.record.start":
+		var params struct {
+			Source   string `json:"source"`
+			ID       byte   `json:"id,omitempty"`
+			Name     string `json:"name,omitempty"`
+			Category string `json:"category,omitempty"`
+			Color    string `json:"color,omitempty"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			switch strings.ToLower(strings.TrimSpace(params.Source)) {
+			case "host", "":
+				result, err = service.Client.StartMacroRecording(params.Name, params.Category, params.Color)
+			case "board":
+				result, err = service.Client.StartBoardMacroCapture(ctx, params.ID)
+			default:
+				err = errors.New("macro recording source must be host or board")
+			}
+		}
+	case "controller.macro.record.stop":
+		var params struct {
+			Source string `json:"source"`
+			Save   bool   `json:"save"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			if strings.EqualFold(params.Source, "board") {
+				result, err = service.Client.StopBoardMacroCapture(ctx)
+			} else {
+				result, err = service.Client.StopMacroRecording(params.Save)
+			}
+		}
 	case "controller.rf.list":
 		result, err = service.Client.ListLearnedDetailed(ctx)
 	case "controller.rf.presentation":
@@ -1631,6 +1688,12 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.event.next", "controller.event.latest", "controller.subscribe",
 		"controller.unsubscribe":
 		return capabilityEvents
+	case "controller.macro.library", "controller.macro.status":
+		return capabilityRead
+	case "controller.macro.record.start", "controller.macro.record.stop":
+		return capabilityHostConfig
+	case "controller.macro.play", "controller.macro.cancel":
+		return capabilityBoard
 	case "controller.artifact.manifest", "controller.artifact.list", "controller.update.status":
 		return capabilityRead
 	case "controller.discovery.github.workflow", "controller.discovery.github.release",
