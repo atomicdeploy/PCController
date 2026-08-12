@@ -13,4 +13,10 @@ describe('controller event toast policy', () => {
     expect(shouldToastControllerEvent({ kind: 'motion.fault', source: 'host' })).toBe(true)
     expect(shouldToastControllerEvent({ kind: 'door', source: 'physical' })).toBe(true)
   })
+
+  it('does not toast parsed HELLO or status traffic', () => {
+    expect(shouldToastControllerEvent({ kind: 'hello.parsed', text: 'HELLO PCController' })).toBe(false)
+    expect(shouldToastControllerEvent({ kind: 'status', text: 'STATUS relay=0' })).toBe(false)
+    expect(shouldToastControllerEvent({ kind: 'serial.line', text: 'HELLO PCController' })).toBe(false)
+  })
 })

@@ -174,6 +174,32 @@ function eventTone(event: ControllerEvent): 'good' | 'warn' | 'bad' | 'info' {
   return 'info'
 }
 
+export function dashboardSocketIsFresh(
+  snapshot: Pick<Snapshot, 'connected' | 'status_updated'>,
+  streamState: SharedViewProps['transport']['streamState'],
+  now = Date.now(),
+): boolean {
+  if (!snapshot.connected || streamState !== 'open' || !snapshot.status_updated) return false
+  const updated = new Date(snapshot.status_updated).getTime()
+  return Number.isFinite(updated) && Math.max(0, now - updated) < 1000
+}
+
+export function dashboardRelayToggleCommand(relay: number, active: boolean): string {
+  return `relay ${relay} ${active ? 'off' : 'on'}`
+}
+
+export function dashboardDeviceSummary(snapshot: Pick<Snapshot, 'connected' | 'connection_reason' | 'port' | 'hello'>, locale: Locale): { device: string; firmware: string } {
+  const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
+  const version = [snapshot.hello.firmware_major, snapshot.hello.firmware_minor, snapshot.hello.firmware_patch]
+  const versionText = version.every((value) => typeof value === 'number') ? `v${version.join('.')}` : ''
+  const hash = typeof snapshot.hello.build_hash === 'number' ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : ''
+  const build = snapshot.hello.build_timestamp?.trim() || [snapshot.hello.build_date, snapshot.hello.build_time].filter(Boolean).join(' ').trim()
+  return {
+    device: snapshot.hello.name?.trim() || snapshot.port.friendly_name?.trim() || snapshot.port.product?.trim() || snapshot.port.name?.trim() || (snapshot.connected ? copy('Connected controller', 'کنترلر متصل') : snapshot.connection_reason?.trim() || copy('Awaiting controller', 'در انتظار کنترلر')),
+    firmware: [build, versionText, hash ? `#${hash}` : ''].filter(Boolean).join(' · ') || (snapshot.connected ? copy('Firmware identity pending', 'شناسهٔ میان‌افزار در انتظار است') : copy('No controller connected', 'کنترلری متصل نیست')),
+  }
+}
+
 function DashboardCardFrame({
   id,
   title,
@@ -216,7 +242,7 @@ function DashboardCardFrame({
 }
 
 export function DashboardView(props: SharedViewProps) {
-  const { appTitle, snapshot, samples, events, locale, t, command, refresh, openDialog } = props
+  const { appTitle, snapshot, samples, events, locale, t, command, refresh, openDialog, transport } = props
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const status = snapshot.status
   const connectedTone = snapshot.connected ? 'good' : snapshot.paused ? 'warn' : 'bad'
@@ -246,8 +272,8 @@ export function DashboardView(props: SharedViewProps) {
     copy('User relay 5', 'رلهٔ کاربر ۵'), copy('User relay 6', 'رلهٔ کاربر ۶'),
     copy('User relay 7', 'رلهٔ کاربر ۷'), copy('User relay 8', 'رلهٔ کاربر ۸'),
   ]
-  const statusAgeMS = snapshot.status_updated ? Math.max(0, clock - new Date(snapshot.status_updated).getTime()) : Number.POSITIVE_INFINITY
-  const socketFresh = snapshot.connected && Number.isFinite(statusAgeMS) && statusAgeMS < 1000
+  const socketFresh = dashboardSocketIsFresh(snapshot, transport.streamState, clock)
+  const deviceSummary = dashboardDeviceSummary(snapshot, locale)
   const updateLayout = (change: (current: ReturnType<typeof loadDashboardLayout>) => ReturnType<typeof loadDashboardLayout>) => {
     setLayout((current) => {
       const next = change(current)
@@ -344,9 +370,12 @@ export function DashboardView(props: SharedViewProps) {
               return (
                 <button
                   key={index}
+                  type="button"
                   className={`output-cell${active ? ' is-active' : ''}`}
-                  onClick={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`, copy(`R${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} ${active ? 'خاموش' : 'روشن'} شد`))}
+                  onClick={() => void command(dashboardRelayToggleCommand(index + 1, active), copy(`R${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} ${active ? 'خاموش' : 'روشن'} شد`))}
                   aria-pressed={active}
+                  aria-label={copy(`Turn relay ${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} را ${active ? 'خاموش' : 'روشن'} کن`)}
+                  title={copy(`Turn relay ${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} را ${active ? 'خاموش' : 'روشن'} کن`)}
                 >
                   <span>R{index + 1} · {peripheralName(`relay.${index + 1}`, relayDefaults[index])}</span><strong>{active ? t('on') : t('off')}</strong><i aria-hidden="true" />
                 </button>
@@ -361,8 +390,8 @@ export function DashboardView(props: SharedViewProps) {
           { label: copy('Open controller controls', 'بازکردن کنترل‌های برد'), icon: CircuitBoard, onSelect: () => { window.location.hash = '#/controls' } },
         ]}>
           <div className="data-list">
-            <DataRow label={t('device')} value={snapshot.port.friendly_name || snapshot.port.name || '—'} />
-            <DataRow label={t('firmware')} value={snapshot.hello.build_timestamp || hash} mono />
+            <DataRow label={t('device')} value={deviceSummary.device} />
+            <DataRow label={t('firmware')} value={deviceSummary.firmware} mono />
             <DataRow label={t('door')} value={status.door_open ? t('open') : t('closed')} tone={status.door_open ? 'warn' : 'good'} />
             <DataRow label={t('bluetooth')} value={status.bluetooth_audio_state === 2 ? t('online') : status.bluetooth_audio_state === 1 ? t('connecting') : t('offline')} />
             <DataRow label="LCD" value={status.lcd_address ? `0x${status.lcd_address.toString(16).toUpperCase().padStart(2, '0')}` : copy('not detected', 'شناسایی نشد')} mono />
