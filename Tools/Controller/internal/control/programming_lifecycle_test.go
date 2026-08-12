@@ -706,6 +706,65 @@ func TestFindRetryableProgrammingSessionRejectsIncompletePreparation(t *testing.
 	}
 }
 
+func TestFindRetryableProgrammingSessionAllowsExplicitFactorySupersession(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	oldTarget := strings.Repeat("1", 64)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: oldTarget,
+		SafeStateApplied: true, Phase: "latched-safe",
+	}
+	markerPath, err := persistProgrammingMarker(paths, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := findRetryableProgrammingSession(
+		paths, identity, document.SourceSHA256, true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil || loaded.TargetFirmwareSHA256 != document.SourceSHA256 ||
+		!loaded.ReinitializeEEPROM || len(loaded.Warnings) != 1 ||
+		!strings.Contains(loaded.Warnings[0], oldTarget) {
+		t.Fatalf("factory reinitialization did not supersede safe pre-write target: %+v", loaded)
+	}
+	persisted, err := loadProgrammingMarker(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.TargetFirmwareSHA256 != document.SourceSHA256 || !persisted.ReinitializeEEPROM {
+		t.Fatalf("superseded target was not durable: %+v", persisted)
+	}
+}
+
+func TestFindRetryableProgrammingSessionRejectsOrdinaryTargetSupersession(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: strings.Repeat("2", 64),
+		SafeStateApplied: true, Phase: "latched-safe",
+	}
+	if _, err := persistProgrammingMarker(paths, session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := findRetryableProgrammingSession(
+		paths, identity, document.SourceSHA256, false,
+	); err == nil || !strings.Contains(err.Error(), "recover it before starting another target") {
+		t.Fatalf("ordinary target supersession was accepted: %v", err)
+	}
+}
+
 func TestFindRetryableProgrammingSessionUsesNewestMarkerBeforeOlderConflicts(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	content, err := os.ReadFile(firmware)

@@ -1058,19 +1058,36 @@ func findRetryableProgrammingSession(
 		return session, err
 	}
 	targetSHA256 = strings.ToLower(strings.TrimSpace(targetSHA256))
+	prewriteSafe := session.HostResult == "" && (session.Phase == "latched-safe" ||
+		session.Phase == "development-reinitialize-safe")
 	if !strings.EqualFold(session.TargetFirmwareSHA256, targetSHA256) {
-		return nil, fmt.Errorf(
-			"device has a newer pending programming session for target SHA-256 %s in phase %s; recover it before starting another target",
-			session.TargetFirmwareSHA256, session.Phase,
-		)
+		if !reinitializeEEPROM || !session.SafeStateApplied || !prewriteSafe {
+			return nil, fmt.Errorf(
+				"device has a newer pending programming session for target SHA-256 %s in phase %s; recover it before starting another target",
+				session.TargetFirmwareSHA256, session.Phase,
+			)
+		}
+		previousTarget := session.TargetFirmwareSHA256
+		previousPolicy := session.ReinitializeEEPROM
+		previousWarnings := append([]string(nil), session.Warnings...)
+		session.TargetFirmwareSHA256 = targetSHA256
+		session.ReinitializeEEPROM = true
+		session.Warnings = append(session.Warnings, fmt.Sprintf(
+			"explicit factory EEPROM reinitialization superseded safely prepared pre-write target SHA-256 %s; the untouched raw EEPROM backup remains mandatory",
+			previousTarget,
+		))
+		if err := rewriteProgrammingMarker(session); err != nil {
+			session.TargetFirmwareSHA256 = previousTarget
+			session.ReinitializeEEPROM = previousPolicy
+			session.Warnings = previousWarnings
+			return nil, fmt.Errorf("persist explicit pre-write target supersession: %w", err)
+		}
 	}
 	if session.ReinitializeEEPROM != reinitializeEEPROM {
 		return nil, errors.New(
 			"pending programming session uses a different EEPROM policy; recover it before starting a new write",
 		)
 	}
-	prewriteSafe := session.HostResult == "" && (session.Phase == "latched-safe" ||
-		session.Phase == "development-reinitialize-safe")
 	if !session.SafeStateApplied || (session.HostResult != "failed" && !prewriteSafe) {
 		return nil, fmt.Errorf(
 			"newest programming session for target SHA-256 %s in phase %s is not safely retryable",
