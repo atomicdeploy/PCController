@@ -9,6 +9,7 @@
       ? value.direction
       : locale === 'fa' ? 'rtl' : 'ltr'
     document.documentElement.dataset.theme = theme
+    document.querySelector('meta[data-runtime-theme]')?.setAttribute('content', theme === 'dark' ? '#0b0a0e' : '#f5f3f6')
     document.documentElement.lang = locale === 'fa' ? 'fa-IR' : 'en'
     document.documentElement.dir = direction
   } catch {

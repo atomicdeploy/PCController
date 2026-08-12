@@ -193,7 +193,7 @@ function applyAppearance(value: Appearance): void {
   document.documentElement.dir = direction
   document.documentElement.classList.toggle('reduce-motion', value.reduceMotion)
   document.documentElement.classList.toggle('compact-numbers', value.compactNumbers)
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0b0a0e' : '#f5f3f6')
+  document.querySelector<HTMLMetaElement>('meta[data-runtime-theme]')?.setAttribute('content', theme === 'dark' ? '#0b0a0e' : '#f5f3f6')
 }
 
 export function pageFromHash(hash: string): PageID {

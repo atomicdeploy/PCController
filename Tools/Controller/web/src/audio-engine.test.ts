@@ -6,6 +6,7 @@ import {
   createAudioEngine,
   isAudioCue,
   isWebAudioSupported,
+  vibrationPattern,
 } from './audio-engine'
 
 describe('procedural audio engine', () => {
@@ -41,6 +42,14 @@ describe('procedural audio engine', () => {
     }
     expect(isAudioCue('')).toBe(false)
     expect(isAudioCue('alarm')).toBe(false)
+  })
+
+  it('uses bounded feature-detected haptic patterns only for meaningful mobile cues', () => {
+    expect(vibrationPattern('focus')).toBeNull()
+    expect(vibrationPattern('navigation')).toBeNull()
+    expect(vibrationPattern('select')).toBe(8)
+    expect(vibrationPattern('success')).toEqual([10, 22, 14])
+    expect(vibrationPattern('disconnect')).toEqual([12, 24, 10])
   })
 
   it('schedules every semantic cue only after gesture start and honors mute', async () => {
