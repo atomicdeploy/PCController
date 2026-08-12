@@ -133,6 +133,7 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 			buttonGoodStyle.Render("R · Running"),
 		),
 		kvCard(sectionWidth, 22, "PC Program State", programStateSummary(snapshot.ProgramState)),
+		kvCard(sectionWidth, 22, "Port Process", portProcessSummary(snapshot.PortProcess)),
 		kvCard(sectionWidth, 22, "Device Uptime", formatUptime(status.UptimeMS)),
 		kvCard(sectionWidth, 22, "Enclosure Door", boolWord(status.DoorOpen, "OPEN", "CLOSED")),
 		kvCard(sectionWidth, 22, "BT Audio", bluetoothAudioState(status.BluetoothState)),
@@ -164,6 +165,14 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	left := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(measurementLines, "\n"))
 	right := cardStyle.Copy().Width(cardRenderWidth).Render(strings.Join(stateLines, "\n"))
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+}
+
+func portProcessSummary(process control.PortProcessSnapshot) string {
+	if !process.Supported { return "unsupported" }
+	if process.State == "owned" { return fmt.Sprintf("%s · PID %d", process.Name, process.PID) }
+	if process.State == "unknown" && process.Error != "" { return "unknown: " + process.Error }
+	if process.State == "free" && process.TakeoverReady { return "FREE · takeover armed" }
+	return strings.ToUpper(process.State)
 }
 
 func programStateSummary(state control.ProgramStateSnapshot) string {
