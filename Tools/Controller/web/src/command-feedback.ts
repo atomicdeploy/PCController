@@ -9,4 +9,3 @@ export function commandSuccessShouldToast(command: string, explicitSuccess?: str
   const family = command.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? ''
   return !quietCommandFamilies.has(family)
 }
-
