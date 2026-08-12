@@ -514,6 +514,14 @@ func ValidateBrowser(path string) (string, error) {
 	return resolved, nil
 }
 
+// BrowserMainExecutable resolves the validated native Chrome/Chromium process
+// image. Managed browser launchers use the native binary so the inherited
+// DevTools pipe is not exposed to, or accidentally repurposed by, a shell
+// launcher script.
+func BrowserMainExecutable(launcher string) (string, error) {
+	return browserMainExecutable(launcher)
+}
+
 func browserMainExecutable(launcher string) (string, error) {
 	launcher, err := trustedBrowserExecutable(launcher, "Chrome/Chromium launcher")
 	if err != nil {
@@ -833,11 +841,13 @@ Requires=pccontroller-controller.service
 BindsTo=pccontroller-controller.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=2min
 Environment=PCCONTROLLER_DATA_DIR=%h/.local/share/pccontroller
 ExecStartPre=` + systemdQuote(curl) + ` --noproxy ` + systemdQuote("*") + ` --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 --max-time 45 http://127.0.0.1:8787/healthz
 ExecStartPre=` + systemdQuote(controller) + ` toolchain runtime-window-ready --timeout 45s
-ExecStart=` + systemdQuote(browser) + ` --app=http://127.0.0.1:8787/ --user-data-dir=%h/.local/share/pccontroller/chrome-profile --no-first-run --no-default-browser-check --noerrdialogs --disable-session-crashed-bubble
+ExecStart=` + systemdQuote(controller) + ` toolchain runtime-window-open --browser ` + systemdQuote(browser) + ` --url http://127.0.0.1:8787/ --profile %h/.local/share/pccontroller/chrome-profile
 Restart=on-failure
 RestartSec=3s
 NoNewPrivileges=true
@@ -1283,7 +1293,7 @@ func activateUserRuntime(ctx context.Context, options InstallOptions, action str
 		if _, err := run("stop", "pccontroller-window.service"); err != nil {
 			return "", err
 		}
-		manifest, release, err := loadCurrentManifest(options.Root)
+		_, release, err := loadCurrentManifest(options.Root)
 		if err != nil {
 			return "", err
 		}
@@ -1328,14 +1338,10 @@ func activateUserRuntime(ctx context.Context, options InstallOptions, action str
 		if err := reverifyUnitPID(ctx, run, "pccontroller-controller.service", filepath.Join(release, "bin", "controller"), controllerPID); err != nil {
 			return "", err
 		}
-		browserProcess, err := browserMainExecutable(manifest.Browser)
-		if err != nil {
-			return "", err
-		}
 		if _, err := run("restart", "pccontroller-window.service"); err != nil {
 			return "", err
 		}
-		if _, err := runtimeVerifyUserUnit(ctx, run, "pccontroller-window.service", browserProcess); err != nil {
+		if _, err := runtimeVerifyUserUnit(ctx, run, "pccontroller-window.service", filepath.Join(release, "bin", "controller")); err != nil {
 			return "", err
 		}
 	case "stop":

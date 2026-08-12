@@ -356,6 +356,24 @@ func TestMissingOriginPolicyAndCredentialAmbiguityAreFailClosed(t *testing.T) {
 	}
 }
 
+func TestRawLoopbackBrowserHeadersRemainTokenProtected(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	handler := websocketMux(context.Background(), service)
+
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8787/api/snapshot", nil)
+	request.RemoteAddr = "127.0.0.1:45100"
+	request.Header.Set("Origin", "http://127.0.0.1:8787")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	request.Header.Set("Sec-Fetch-Mode", "cors")
+	request.Header.Set("Sec-Fetch-Dest", "empty")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), "authentication required") {
+		t.Fatalf("raw loopback browser headers bypassed authentication: status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestCapabilityAuditIncludesStablePrincipalAndAuthentication(t *testing.T) {
 	service, client := testAuthenticatedService(t)
 	defer client.Shutdown()

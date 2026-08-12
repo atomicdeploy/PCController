@@ -360,6 +360,7 @@ func runWebWithInitialAction(
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
+	open := flags.Bool("open", false, "open the browser app (the default unless --no-open is set)")
 	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
 	noTray := flags.Bool("no-tray", false, "serve the web app without a native system-tray menu")
 	listen := flags.String("listen", "", "transient loopback IPC/WebUI listen address (does not change saved config)")
@@ -367,7 +368,10 @@ func runWebWithInitialAction(
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("usage: controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-auto] [connection flags]")
+		return errors.New("usage: controller web [--listen 127.0.0.1:8787] [--open|--no-open] [--no-tray] [--no-auto] [connection flags]")
+	}
+	if *open && *noOpen {
+		return errors.New("web --open and --no-open cannot be combined")
 	}
 	connection.captureOverrides(flags)
 	if strings.TrimSpace(*listen) != "" {
@@ -420,7 +424,7 @@ func runWebWithInitialAction(
 			fmt.Fprintln(stdout, "controller offline; browser not opened")
 			return nil
 		}
-		return openBrowser(appURL)
+		return openAuthenticatedBrowser(appURL, store)
 	}
 	appURL, err = webURLForAppAction(appURL, initial)
 	if err != nil {
@@ -490,7 +494,7 @@ func runWebWithInitialAction(
 				return
 			}
 			browserOpenOnce.Do(func() {
-				if openErr := openBrowser(appURL); openErr != nil {
+				if openErr := openAuthenticatedBrowser(appURL, store); openErr != nil {
 					fmt.Fprintln(stderr, "open browser:", openErr)
 				}
 			})
