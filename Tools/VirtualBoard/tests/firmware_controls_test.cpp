@@ -407,6 +407,19 @@ void testDisplayBrightnessFade() {
 
   SevenSegments segments;
   segments.begin(5);
+  const auto initialRevision = segments.revision();
+  require(initialRevision != 0 &&
+              std::equal(segments.rawSegments(), segments.rawSegments() + 4,
+                         segments.presentationState()) &&
+              segments.presentationState()[4] == segments.brightness(),
+          "TM1637 push state is not contiguous segments plus brightness");
+  segments.showText("test");
+  const auto textRevision = segments.revision();
+  require(textRevision != initialRevision,
+          "TM1637 segment change did not advance its push revision");
+  segments.showText("test");
+  require(segments.revision() == textRevision,
+          "unchanged TM1637 cells generated a duplicate push revision");
   segments.serviceBrightness(0, 69);
   require(segments.brightness() == 5,
           "TM1637 brightness moved before its quiet fade interval");
@@ -420,6 +433,9 @@ void testDisplayBrightnessFade() {
   }
   require(segments.brightness() == 7,
           "door-open TM1637 fade did not clamp/reach full brightness");
+  require(segments.revision() != textRevision &&
+              segments.presentationState()[4] == 7,
+          "TM1637 brightness changes did not update the push state");
 }
 
 void testSemanticProtocolAndTemperatureRoles() {
