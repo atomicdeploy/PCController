@@ -12,6 +12,8 @@ namespace MacroAction {
 
 constexpr uint8_t MaximumPayload = 8;
 constexpr uint8_t RecordHeaderBytes = 6; // due-us LE32, opcode, payload length
+constexpr uint8_t InvalidPayload = 0xFE;
+constexpr uint8_t VariablePayload = 0xFF;
 
 constexpr uint8_t payloadLength(uint8_t opcode) {
   using namespace ControllerProtocol;
@@ -22,20 +24,12 @@ constexpr uint8_t payloadLength(uint8_t opcode) {
 #include "MacroActions.inc.h"
 #undef PCCONTROLLER_MACRO_ACTION
     default:
-      return 0xFF;
+      return InvalidPayload;
   }
 }
 
 constexpr bool playbackAllowed(uint8_t opcode) {
-  using namespace ControllerProtocol;
-  switch (opcode) {
-#define PCCONTROLLER_MACRO_ACTION(name, captureLength) case name:
-#include "MacroActions.inc.h"
-#undef PCCONTROLLER_MACRO_ACTION
-      return true;
-    default:
-      return false;
-  }
+  return payloadLength(opcode) != InvalidPayload;
 }
 
 constexpr bool validPlaybackPayload(uint8_t opcode, uint8_t payloadBytes) {
@@ -44,13 +38,12 @@ constexpr bool validPlaybackPayload(uint8_t opcode, uint8_t payloadBytes) {
     return false;
   }
   const uint8_t fixed = payloadLength(opcode);
-  return fixed == 0xFF || payloadBytes == fixed;
+  return fixed == VariablePayload || payloadBytes == fixed;
 }
 
 constexpr bool recordable(uint8_t opcode, uint8_t availablePayload) {
   const uint8_t required = payloadLength(opcode);
-  return required != 0xFF && availablePayload >= required &&
-         required <= MaximumPayload;
+  return availablePayload >= required && required <= MaximumPayload;
 }
 
 constexpr bool macroQueueableOpcode(uint8_t opcode) {
