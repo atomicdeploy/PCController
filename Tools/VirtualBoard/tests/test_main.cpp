@@ -814,6 +814,70 @@ void testPwmAvailabilityReporting() {
   std::filesystem::remove(path, ignored);
 }
 
+void testStatusLedOwnerFramesAndIdempotentBreathe() {
+  const auto path = temporaryEeprom();
+  std::error_code ignored;
+  std::filesystem::remove(path, ignored);
+  {
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+
+    // Manual condition (0xFF) plus a non-zero effect is the stable six-byte
+    // wire contract for an MCU-owned compositor; steady host preview uses
+    // the same condition with effect 0. This preserves existing parsers.
+    const std::vector<std::uint8_t> breathe{
+        1, 0, 0, 255, 0, 0, 0, 255, 0, 0x80, 0x02, 0};
+    auto response = board.handle(
+        {pccontroller::wire::StatusEffect, 1, breathe});
+    require(response.size() == 1 && response[0].opcode == pccontroller::wire::Ack,
+            "VirtualBoard rejected a native STATUS_EFFECT descriptor");
+
+    std::vector<std::uint8_t> blueFrames;
+    for (unsigned frame = 0; frame < 31; ++frame) {
+      if ((frame % 2U) == 0U) {
+        response = board.handle(
+            {pccontroller::wire::StatusEffect,
+             static_cast<std::uint8_t>(2U + frame), breathe});
+        require(response[0].opcode == pccontroller::wire::Ack,
+                "VirtualBoard rejected an identical STATUS_EFFECT refresh");
+      }
+      if (frame == 12U) {
+        // An unrelated internal state event must not steal an explicit
+        // host-to-board effect handoff or restart its phase.
+        static_cast<void>(board.console("door open"));
+      }
+      // This is intentionally above the 20 ms production frame cadence so a
+      // Windows scheduler quantum cannot turn a rendered-frame assertion into
+      // a no-render false failure.
+      std::this_thread::sleep_for(std::chrono::milliseconds(35));
+      const auto frames = board.tick();
+      const auto *changed =
+          findOpcode(frames, pccontroller::wire::StatusLedChanged);
+      const bool validFrame = changed != nullptr && changed->payload.size() == 6 &&
+                              changed->payload[4] == 1 &&
+                              changed->payload[5] == 0xFF;
+      require(validFrame,
+              "VirtualBoard did not return rendered MCU-owned LED frame " +
+                  std::to_string(frame));
+      blueFrames.push_back(changed->payload[2]);
+    }
+
+    const auto peak = std::max_element(blueFrames.begin(), blueFrames.end());
+    require(peak != blueFrames.end() && *peak > 240U &&
+                blueFrames.back() < 25U,
+            "repeated STATUS_EFFECT refresh did not complete one rise/fall");
+    require(std::is_sorted(peak, blueFrames.end(), std::greater_equal<>()),
+            "repeated STATUS_EFFECT or an internal event reset the fall phase");
+  }
+  std::filesystem::remove(path, ignored);
+}
+
 void testMotionDoorPolicyAcrossVirtualCommandSources() {
   struct PolicyCase {
     std::uint8_t policy;
@@ -996,6 +1060,7 @@ int main() {
   try {
     testProtocolRoundTrip();
     testBoardAndPersistence();
+    testStatusLedOwnerFramesAndIdempotentBreathe();
     testPwmAvailabilityReporting();
     testMotionDoorPolicyAcrossVirtualCommandSources();
     testVirtualResetJournalRecoveryAndRollover();

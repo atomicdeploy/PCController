@@ -8,8 +8,10 @@
 #include "LocalLib/TonePlayer.h"
 #include "Project/FrontPanelModel.h"
 #include "Project/MotionDoorPolicy.h"
+#include "Project/PwmController.h"
 #include "Project/RelayController.h"
 #include "Project/SettingsStore.h"
+#include "Project/StatusLedController.h"
 #include "Project/TemperatureRoles.h"
 #include "Project/TransitionMath.h"
 #include "Project/UartProtocol.h"
@@ -409,6 +411,45 @@ void testDisplayBrightnessFade() {
           "door-open TM1637 fade did not clamp/reach full brightness");
 }
 
+void testStatusEffectOwnershipAndIdempotence() {
+  // The native mock cannot acknowledge I2C, but StatusLedController records
+  // the exact composited RGB values even when the physical driver is absent.
+  // That lets this test exercise the AVR animation engine without hardware.
+  PwmExpanderDriver driver(PwmController::PwmI2cAddress);
+  PwmController pwm(driver);
+  pwm.begin(true, 0);
+  StatusLedController led;
+  led.begin(pwm, 255, 0);
+  require(led.setEffect(StatusLedEffect::Breathe, 0, 0, 255, 0, 0, 0, 255,
+                        0, 640, 0, 0) &&
+              led.mode() == StatusLedMode::Custom,
+          "STATUS_EFFECT did not take board compositor ownership");
+
+  for (std::uint32_t tick = 20; tick <= 320; tick += 20) {
+    led.service(tick);
+  }
+  const std::uint8_t peak = led.renderedBlue();
+  require(peak > 240,
+          "board-native breathe did not reach the high point before refresh");
+
+  require(led.setEffect(StatusLedEffect::Breathe, 0, 0, 255, 0, 0, 0, 255,
+                        0, 640, 0, 320) &&
+              led.renderedBlue() == peak,
+          "identical STATUS_EFFECT refresh restarted the breathe phase");
+  led.service(340);
+  require(led.renderedBlue() < peak && led.renderedBlue() > 0,
+          "board-native breathe did not begin its single smooth fall");
+
+  for (std::uint32_t tick = 360; tick <= 640; tick += 20) {
+    led.service(tick);
+  }
+  require(led.renderedBlue() < 20,
+          "board-native breathe did not complete one fall without reset");
+  led.cancelEffect();
+  require(led.renderedBlue() < 20,
+          "ownership handoff flashed the Custom fallback frame");
+}
+
 void testSemanticProtocolAndTemperatureRoles() {
   require(ControllerProtocol::ProgramState == 0x45,
           "semantic PROGRAM_STATE opcode moved");
@@ -492,6 +533,7 @@ int main() {
     testMotionDoorPolicyMatrixAndEntryPaths();
     testTransitionsAndRollover();
     testDisplayBrightnessFade();
+    testStatusEffectOwnershipAndIdempotence();
     testSemanticProtocolAndTemperatureRoles();
     testFrontPanelLeafDecreaseDispatch();
     testDallasAbsentPullupBound();

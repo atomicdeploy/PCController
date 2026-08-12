@@ -74,6 +74,9 @@ enum Opcode : uint8_t {
   MenuLayoutResponse = 0x99,
   SegmentChanged = 0x9C,
   BuzzerChanged = 0x9D,
+  // Six bytes: rendered RGB, configured brightness, effect, condition.
+  // condition=0xFF/effect!=0 is MCU-owned animation; 0xFF/effect=0 is the
+  // explicit host-preview fallback. Native profile conditions use 0..18.
   StatusLedChanged = 0x9E,
   StatusProfileResponse = 0x9F,
   Event = 0xA0,

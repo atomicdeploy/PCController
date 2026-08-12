@@ -462,8 +462,10 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
       return bad();
     }
     setStatusRgb(payload[0], payload[1], payload[2], payload[3]);
+    statusEffectBrightness_ = payload[3];
     statusOverride_ = true;
     statusEffect_ = 0;
+    statusEffectDescriptorValid_ = false;
     statusCondition_ = 0xFF;
     return ack();
   case wire::StatusEffect:
@@ -2335,8 +2337,10 @@ bool VirtualBoard::executeQueuedCommand(
       return false;
     }
     setStatusRgb(payload[0], payload[1], payload[2], payload[3]);
+    statusEffectBrightness_ = payload[3];
     statusOverride_ = true;
     statusEffect_ = 0;
+    statusEffectDescriptorValid_ = false;
     statusCondition_ = 0xFF;
     return true;
   case wire::StatusEffect:
@@ -2351,6 +2355,8 @@ bool VirtualBoard::executeQueuedCommand(
     programRunning_ = payload[0] != 0;
     statusOverride_ = false;
     statusEffect_ = 0;
+    statusEffectDescriptorValid_ = false;
+    restoreNativeStatus(now);
     return true;
   case wire::AddressableLed: {
     if (payload.size() < 5 ||
@@ -2545,7 +2551,9 @@ void VirtualBoard::setStatusRgb(std::uint8_t red, std::uint8_t green,
   pwm_.set(13, static_cast<std::uint16_t>(scale8(red) * brightness / 255U));
   pwm_.set(14, static_cast<std::uint16_t>(scale8(green) * brightness / 255U));
   pwm_.set(15, static_cast<std::uint16_t>(scale8(blue) * brightness / 255U));
-  statusEffectBrightness_ = brightness;
+  // brightness is the instantaneous rendered level. Do not feed it back into
+  // statusEffectBrightness_: doing so collapses a breathe amplitude toward
+  // zero on every frame and creates a visible hard reset.
 }
 
 bool VirtualBoard::applyStatusEffect(
@@ -2553,13 +2561,23 @@ bool VirtualBoard::applyStatusEffect(
   if (payload.size() == 1 && payload[0] == 0) {
     statusEffect_ = 0;
     statusOverride_ = false;
-    statusCondition_ = 0;
-    setStatusRgb(0, 255, 0, settings_.statusBrightness);
+    statusEffectDescriptorValid_ = false;
+    restoreNativeStatus(now);
     return true;
   }
   if (payload.size() < 12 || payload[0] == 0 || payload[0] > 4 ||
       payload[8] > payload[7] || readU16(payload, 9) < 640) {
     return false;
+  }
+  const bool identical = statusEffectDescriptorValid_ && statusEffect_ != 0 &&
+                         std::equal(payload.begin(), payload.begin() + 12,
+                                    statusEffectDescriptor_.begin());
+  if (identical) {
+    // A host may repeat a descriptor while observing 20..60 Hz output. The
+    // board remains the effect owner, so retain its phase and repeat counter.
+    statusOverride_ = true;
+    statusCondition_ = 0xFF;
+    return true;
   }
   statusEffect_ = payload[0];
   statusCondition_ = 0xFF;
@@ -2569,6 +2587,8 @@ bool VirtualBoard::applyStatusEffect(
   statusEffectMinimum_ = payload[8];
   statusEffectPhase_ = 0;
   statusEffectRepeats_ = payload[11];
+  std::copy_n(payload.begin(), 12, statusEffectDescriptor_.begin());
+  statusEffectDescriptorValid_ = true;
   const std::uint16_t period = readU16(payload, 9);
   statusEffectStepMs_ = static_cast<std::uint16_t>(period >> 5U);
   lastStatusEffectAt_ = now;
@@ -2637,6 +2657,7 @@ bool VirtualBoard::setStatusProfile(std::uint8_t condition,
     if (effect[0] == 0) {
       setStatusRgb(effect[1], effect[2], effect[3], effect[7]);
       statusEffect_ = 0;
+      statusEffectBrightness_ = effect[7];
     } else {
       applyStatusEffect(effect, now);
       statusCondition_ = condition;
@@ -2687,6 +2708,7 @@ void VirtualBoard::finishStatusEffect() {
     statusEffectColor_ = statusEffectAlternate_;
   }
   statusEffect_ = 0;
+  statusEffectDescriptorValid_ = false;
   setStatusRgb(statusEffectColor_[0], statusEffectColor_[1],
                statusEffectColor_[2], statusEffectBrightness_);
 }
@@ -2707,6 +2729,41 @@ void VirtualBoard::serviceStatusEffect(TimePoint now) {
   }
   statusEffectPhase_ = next;
   renderStatusEffect();
+}
+
+std::uint8_t VirtualBoard::nativeStatusCondition(TimePoint now) const {
+  const SensorReadings sensors = sensors_.readings();
+  if (!hostSeen_ || now - lastHostActivityAt_ > kHostOfflineAfter ||
+      (programRunning_ && sensors.doorOpen)) {
+    return 5; // Fault or critical local safety state.
+  }
+  if (sensors.tLedCentiC >= kHotTemperatureCentiC ||
+      sensors.tBtCentiC >= kHotTemperatureCentiC) {
+    return 4; // Warning.
+  }
+  if (programRunning_) {
+    return 10; // Running.
+  }
+  return sensors.bluetoothState == 1 ? 7 :
+         (sensors.bluetoothState == 2 ? 9 : 8);
+}
+
+void VirtualBoard::restoreNativeStatus(TimePoint now) {
+  const std::uint8_t condition = nativeStatusCondition(now);
+  std::array<std::uint8_t, kStatusProfilePayloadSize> profile{};
+  static_cast<void>(statusProfile(condition, profile));
+  statusCondition_ = condition;
+  statusEffectDescriptorValid_ = false;
+  if (profile[0] == 0) {
+    statusEffect_ = 0;
+    statusEffectBrightness_ = profile[7];
+    setStatusRgb(profile[1], profile[2], profile[3], profile[7]);
+    return;
+  }
+  std::vector<std::uint8_t> effect(profile.begin(), profile.end());
+  static_cast<void>(applyStatusEffect(effect, now));
+  statusOverride_ = false;
+  statusCondition_ = condition;
 }
 
 void VirtualBoard::showScheduledSegmentWindow() {
@@ -2743,6 +2800,9 @@ void VirtualBoard::clearScheduledSegments(bool restoreMenu) {
 }
 
 void VirtualBoard::serviceAutomation(TimePoint now) {
+  if (!statusOverride_ && statusCondition_ != nativeStatusCondition(now)) {
+    restoreNativeStatus(now);
+  }
   serviceStatusEffect(now);
   if (learningActive_ && learningMode_ == kLearnModeTimer) {
     const std::uint8_t remaining = learningRemainingSeconds(now);
