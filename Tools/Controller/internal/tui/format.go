@@ -90,6 +90,37 @@ func freshnessLabel(updated, now time.Time) string {
 	return age.Round(time.Minute).String() + " ago"
 }
 
+const remoteClockSkewWarningThreshold = 3 * time.Second
+
+// remoteClockSkewWarning keeps clock diagnostics separate from freshness.
+// Remote status timestamps cross a JSON boundary and therefore cannot carry
+// Go's monotonic clock reading; using them directly for age makes clock skew
+// look like transport lag. The offset is still useful as an explicit warning.
+func remoteClockSkewWarning(offset time.Duration) string {
+	if offset > -remoteClockSkewWarningThreshold && offset < remoteClockSkewWarningThreshold {
+		return ""
+	}
+	direction := "ahead"
+	magnitude := offset
+	if magnitude < 0 {
+		direction = "behind"
+		magnitude = -magnitude
+	}
+	var formatted string
+	switch {
+	case magnitude < 10*time.Second:
+		formatted = fmt.Sprintf("%.1f s", magnitude.Seconds())
+	case magnitude < time.Minute:
+		formatted = fmt.Sprintf("%d s", int(magnitude.Round(time.Second)/time.Second))
+	default:
+		formatted = magnitude.Round(time.Minute).String()
+	}
+	return fmt.Sprintf(
+		"Clock skew · remote ≈%s %s · check time sync",
+		formatted, direction,
+	)
+}
+
 func bluetoothAudioState(value byte) string {
 	switch value {
 	case 0:

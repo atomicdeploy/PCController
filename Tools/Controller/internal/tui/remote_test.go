@@ -108,6 +108,64 @@ func TestRemoteSnapshotFailureIsVisibleAndRecovers(t *testing.T) {
 	}
 }
 
+func TestRemoteFreshnessUsesLocalReceiptAcrossClockSkew(t *testing.T) {
+	receivedAt := time.Date(2026, 8, 12, 2, 3, 4, 0, time.UTC)
+	tests := []struct {
+		name        string
+		offset      time.Duration
+		wantWarning string
+	}{
+		{
+			name:        "remote clock behind",
+			offset:      -9 * time.Second,
+			wantWarning: "Clock skew · remote ≈9.0 s behind · check time sync",
+		},
+		{
+			name:        "remote clock ahead",
+			offset:      7 * time.Second,
+			wantWarning: "Clock skew · remote ≈7.0 s ahead · check time sync",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := RichPreviewSnapshot()
+			snapshot.StatusUpdated = receivedAt.Add(test.offset)
+			model := Model{remote: &RemoteBackend{}}
+
+			updated, _ := model.Update(remoteSnapshotResultMsg{
+				snapshot: snapshot, receivedAt: receivedAt,
+			})
+			model = updated.(Model)
+			if !model.snapshot().StatusUpdated.Equal(snapshot.StatusUpdated) {
+				t.Fatalf("source timestamp changed: got %s want %s", model.snapshot().StatusUpdated, snapshot.StatusUpdated)
+			}
+			if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(100*time.Millisecond)); got != "live" {
+				t.Fatalf("fresh local receipt=%q", got)
+			}
+			if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(600*time.Millisecond)); got != "0.6 s ago" {
+				t.Fatalf("aged local receipt=%q", got)
+			}
+			if got := model.remoteClockWarning(); got != test.wantWarning {
+				t.Fatalf("clock warning=%q want %q", got, test.wantWarning)
+			}
+		})
+	}
+}
+
+func TestRemoteRepeatedTimestampDoesNotResetLocalFreshness(t *testing.T) {
+	receivedAt := time.Date(2026, 8, 12, 2, 3, 4, 0, time.UTC)
+	snapshot := RichPreviewSnapshot()
+	snapshot.StatusUpdated = receivedAt.Add(-9 * time.Second)
+	model := Model{remote: &RemoteBackend{}}
+	updated, _ := model.Update(remoteSnapshotResultMsg{snapshot: snapshot, receivedAt: receivedAt})
+	model = updated.(Model)
+	updated, _ = model.Update(remoteSnapshotResultMsg{snapshot: snapshot, receivedAt: receivedAt.Add(5 * time.Second)})
+	model = updated.(Model)
+	if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(5*time.Second)); got != "5.0 s ago" {
+		t.Fatalf("unchanged source timestamp freshness=%q; repeated polling must not make stale data live", got)
+	}
+}
+
 func TestClosedRemoteEventStreamIsTerminalAndDoesNotResubscribe(t *testing.T) {
 	events := make(chan control.Event)
 	close(events)

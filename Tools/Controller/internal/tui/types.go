@@ -169,10 +169,11 @@ type FrontPanelState struct {
 // A remote backend never owns or scans a local serial port. Snapshot polling
 // and Events are expected to travel over the authenticated controller IPC.
 type RemoteBackend struct {
-	Endpoint        string
-	InitialSnapshot control.Snapshot
-	Snapshot        func(context.Context) (control.Snapshot, error)
-	Events          <-chan control.Event
+	Endpoint                  string
+	InitialSnapshot           control.Snapshot
+	InitialSnapshotReceivedAt time.Time
+	Snapshot                  func(context.Context) (control.Snapshot, error)
+	Events                    <-chan control.Event
 	// SaveHostUI persists the host-owned UI subset (identity and peripheral
 	// names) through the remote primary's structured IPC contract. Client
 	// appearance and terminal preferences continue to use Options.SaveUI.

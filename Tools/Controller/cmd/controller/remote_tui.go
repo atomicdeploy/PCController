@@ -340,6 +340,7 @@ func runRemoteTUI(
 
 	probeContext, probeCancel := context.WithTimeout(ctx, 8*time.Second)
 	initial, err := client.Snapshot(probeContext)
+	initialReceivedAt := time.Now()
 	if err == nil {
 		var engine *shell.Engine
 		engine, err = client.CommandEngine(probeContext)
@@ -421,8 +422,10 @@ func runRemoteTUI(
 					InstanceID: "remote-tui:" + strings.TrimSpace(address),
 					WriteOSC:   func(payload string) error { return hostui.WriteOSC(stdout, payload) },
 					Remote: &tui.RemoteBackend{
-						Endpoint: strings.TrimSpace(address), InitialSnapshot: initial,
-						Snapshot: client.Snapshot, Events: client.events,
+						Endpoint:                  strings.TrimSpace(address),
+						InitialSnapshot:           initial,
+						InitialSnapshotReceivedAt: initialReceivedAt,
+						Snapshot:                  client.Snapshot, Events: client.events,
 						SaveHostUI: saveRemoteHostUI,
 					},
 					DisableWelcome: true,

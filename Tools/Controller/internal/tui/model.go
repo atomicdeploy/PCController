@@ -30,10 +30,12 @@ type Model struct {
 	engine  *shell.Engine
 	remote  *RemoteBackend
 
-	remoteSnapshot        control.Snapshot
-	remoteSnapshotPending bool
-	remoteSnapshotError   string
-	remoteEventsClosed    bool
+	remoteSnapshot         control.Snapshot
+	remoteSnapshotPending  bool
+	remoteSnapshotError    string
+	remoteStatusReceivedAt time.Time
+	remoteClockOffset      time.Duration
+	remoteEventsClosed     bool
 
 	width  int
 	height int
@@ -213,8 +215,9 @@ type menuCatalogResultMsg struct {
 type frontPanelResultMsg struct{ err error }
 type resetResultMsg struct{ err error }
 type remoteSnapshotResultMsg struct {
-	snapshot control.Snapshot
-	err      error
+	snapshot   control.Snapshot
+	err        error
+	receivedAt time.Time
 }
 type portsResultMsg struct {
 	values []ports.Info
@@ -422,6 +425,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 	}
 	if options.Remote != nil {
 		model.remoteSnapshot = options.Remote.InitialSnapshot
+		model.observeRemoteStatus(options.Remote.InitialSnapshot, options.Remote.InitialSnapshotReceivedAt)
 		model.remoteSnapshotPending = options.Remote.Snapshot != nil
 		model.remoteSnapshot.ConnectionState = strings.TrimSpace(model.remoteSnapshot.ConnectionState)
 		if model.remoteSnapshot.ConnectionState == "" {
@@ -746,6 +750,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		wasUnavailable := model.remoteSnapshotError != ""
+		model.observeRemoteStatus(message.snapshot, message.receivedAt)
 		model.remoteSnapshot = message.snapshot
 		model.remoteSnapshotError = ""
 		if strings.TrimSpace(model.remoteSnapshot.ConnectionState) == "" {
@@ -1113,6 +1118,41 @@ func (model Model) snapshot() control.Snapshot {
 		return *model.preview
 	}
 	return model.runtime.Snapshot()
+}
+
+func (model *Model) observeRemoteStatus(snapshot control.Snapshot, receivedAt time.Time) {
+	if snapshot.StatusUpdated.IsZero() {
+		model.remoteStatusReceivedAt = time.Time{}
+		model.remoteClockOffset = 0
+		return
+	}
+	if !model.remoteStatusReceivedAt.IsZero() &&
+		snapshot.StatusUpdated.Equal(model.remoteSnapshot.StatusUpdated) {
+		return
+	}
+	if receivedAt.IsZero() {
+		receivedAt = time.Now()
+	}
+	model.remoteStatusReceivedAt = receivedAt
+	// StatusUpdated arrived over JSON and contains only the source wall clock.
+	// Keep it untouched in remoteSnapshot, while recording the observed offset
+	// separately so freshness can use this process's monotonic time component.
+	model.remoteClockOffset = snapshot.StatusUpdated.Sub(receivedAt)
+}
+
+func (model Model) statusFreshnessLabel(snapshot control.Snapshot, now time.Time) string {
+	updated := snapshot.StatusUpdated
+	if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
+		updated = model.remoteStatusReceivedAt
+	}
+	return freshnessLabel(updated, now)
+}
+
+func (model Model) remoteClockWarning() string {
+	if model.remote == nil || model.remoteStatusReceivedAt.IsZero() {
+		return ""
+	}
+	return remoteClockSkewWarning(model.remoteClockOffset)
 }
 
 func (model Model) rfLearnState() control.RFLearnState {
@@ -1779,7 +1819,7 @@ func refreshRemoteSnapshot(fetch func(context.Context) (control.Snapshot, error)
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		snapshot, err := fetch(ctx)
-		return remoteSnapshotResultMsg{snapshot: snapshot, err: err}
+		return remoteSnapshotResultMsg{snapshot: snapshot, err: err, receivedAt: time.Now()}
 	}
 }
 
