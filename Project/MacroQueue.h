@@ -6,6 +6,14 @@
 #include "MacroAction.h"
 #include "UartProtocol.h"
 
+#if defined(__AVR__)
+// The AVR owns one static MacroQueue; .bss already supplies exact zeroes.
+#define PCCONTROLLER_MACRO_MEMBER_ZERO
+#else
+// Preserve value initialization for host-side fixtures and future adapters.
+#define PCCONTROLLER_MACRO_MEMBER_ZERO {}
+#endif
+
 #if defined(_MSC_VER)
 #define PCCONTROLLER_PACK_PUSH __pragma(pack(push, 1))
 #define PCCONTROLLER_PACK_POP __pragma(pack(pop))
@@ -83,7 +91,7 @@ private:
   struct PCCONTROLLER_PACKED EventReport {
     uint8_t type;
     Report report;
-  } wire_{};
+  } wire_ PCCONTROLLER_MACRO_MEMBER_ZERO;
   PCCONTROLLER_PACK_POP
 
   static_assert(sizeof(Report) == 20,
@@ -107,19 +115,19 @@ private:
 
   ControllerProtocol::UartProtocol &protocol_;
   uint8_t queue_[QueueSize];
-  uint32_t startedAtUs_ = 0;
-  uint8_t head_ = 0;
-  uint8_t used_ = 0;
-  uint8_t options_ = 0;
-  bool safeStopRequested_ = false;
+  uint32_t startedAtUs_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  uint8_t head_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  uint8_t used_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  uint8_t options_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  bool safeStopRequested_ PCCONTROLLER_MACRO_MEMBER_ZERO;
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
-  uint16_t retainedSteps_ = 0;
-  uint8_t capturedHead_ = 0;
-  uint8_t capturedUsed_ = 0;
-  uint16_t capturedSteps_ = 0;
-  uint32_t captureStartedAtUs_ = 0;
-  bool capturePlayback_ = false;
-  bool capturedData_ = false;
+  uint16_t retainedSteps_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  uint8_t capturedHead_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  uint8_t capturedUsed_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  uint16_t capturedSteps_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  uint32_t captureStartedAtUs_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  bool capturePlayback_ PCCONTROLLER_MACRO_MEMBER_ZERO;
+  bool capturedData_ PCCONTROLLER_MACRO_MEMBER_ZERO;
 #endif
 };
 
@@ -135,3 +143,4 @@ static_assert(MacroQueue::QueueCapacity < 0x80U,
 #undef PCCONTROLLER_PACKED
 #undef PCCONTROLLER_PACK_POP
 #undef PCCONTROLLER_PACK_PUSH
+#undef PCCONTROLLER_MACRO_MEMBER_ZERO

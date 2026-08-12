@@ -64,13 +64,19 @@ public:
   void setMode(StatusLedMode mode, uint32_t now = millis());
   StatusLedMode mode() const { return activeMode_; }
   void setBrightness(uint8_t brightness);
-  uint8_t brightness() const { return activeDescriptor_[7]; }
+  uint8_t brightness() const {
+    return activeMode_ == StatusLedMode::Custom ? hostDescriptor_[7]
+                                                : localBrightness_;
+  }
   // STATUS_RGB is four bytes; STATUS_EFFECT is the exact 12-byte descriptor.
   void setCustom(const uint8_t *payload, uint32_t now = millis());
   bool setEffect(const uint8_t *payload, uint32_t now = millis());
   void cancelEffect();
   StatusLedEffect effect() const {
-    return static_cast<StatusLedEffect>(activeDescriptor_[0]);
+    return activeMode_ == StatusLedMode::Custom
+               ? static_cast<StatusLedEffect>(hostDescriptor_[0])
+               : activeMode_ == StatusLedMode::Off ? StatusLedEffect::None
+                                                   : StatusLedEffect::Breathe;
   }
   // Transient front-panel decoration is intentionally omitted from the byte-
   // tight engine. Safety/operational modes and host descriptors remain native.
@@ -88,7 +94,10 @@ public:
 #endif
 #if defined(PCCONTROLLER_NATIVE_TEST)
   uint16_t renderedFrames() const { return renderedFrames_; }
-  const uint8_t *descriptorForTest() const { return activeDescriptor_; }
+  const uint8_t *descriptorForTest() const { return hostDescriptor_; }
+  uint8_t localMinimumForTest() const {
+    return static_cast<uint8_t>(localBrightness_ >> 4);
+  }
 #endif
 
 private:
@@ -101,8 +110,6 @@ private:
   uint16_t effectElapsedMs_;
   uint16_t effectPeriodMs_;
   uint8_t hostDescriptor_[12];
-  uint8_t localDescriptor_[12];
-  uint8_t *activeDescriptor_;
   StatusLedMode activeMode_;
   uint8_t localBrightness_;
   bool dirty_;

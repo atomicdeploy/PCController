@@ -153,7 +153,8 @@ func Build(options Options) (Command, error) {
 					"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL "+
 					"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
 					"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
-					"-fipa-pta -fstack-usage",
+					"-fipa-pta -fstack-usage -fno-partial-inlining "+
+					"-fno-inline-functions-called-once -fno-tree-ccp -fno-tree-fre",
 				options.FirmwareSourceHash,
 				options.FirmwareBuildTimestamp,
 				FirmwareIdentityAddress,

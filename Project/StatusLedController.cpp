@@ -30,7 +30,7 @@ void StatusLedController::service(uint32_t now) {
     render();
     return;
   }
-  if (activeDescriptor_[0] == 0 ||
+  if (effect() == StatusLedEffect::None ||
       static_cast<uint32_t>(now - lastFrameAt_) <
           StatusLedTiming::FrameIntervalMs) {
     return;
@@ -47,13 +47,13 @@ void StatusLedController::service(uint32_t now) {
     effectElapsedMs_ = static_cast<uint16_t>(effectElapsedMs_ -
                                              effectPeriodMs_);
   }
-  if (wrapped && activeDescriptor_ == hostDescriptor_ &&
-      activeDescriptor_[11] != 0 && --activeDescriptor_[11] == 0) {
-    if (activeDescriptor_[0] ==
+  if (wrapped && activeMode_ == StatusLedMode::Custom &&
+      hostDescriptor_[11] != 0 && --hostDescriptor_[11] == 0) {
+    if (hostDescriptor_[0] ==
         static_cast<uint8_t>(StatusLedEffect::Transition)) {
-      memcpy(activeDescriptor_ + 1, activeDescriptor_ + 4, 3);
+      memcpy(hostDescriptor_ + 1, hostDescriptor_ + 4, 3);
     }
-    activeDescriptor_[0] = 0;
+    hostDescriptor_[0] = 0;
   }
   render();
 }
@@ -65,29 +65,13 @@ void StatusLedController::setMode(StatusLedMode mode, uint32_t now) {
   activeMode_ = mode;
   effectElapsedMs_ = 0;
   if (mode == StatusLedMode::Custom) {
-    activeDescriptor_ = hostDescriptor_;
-    if (activeDescriptor_[0] != 0) {
-      effectPeriodMs_ = static_cast<uint16_t>(activeDescriptor_[9]) |
-                        static_cast<uint16_t>(activeDescriptor_[10]) << 8;
+    if (hostDescriptor_[0] != 0) {
+      effectPeriodMs_ = static_cast<uint16_t>(hostDescriptor_[9]) |
+                        static_cast<uint16_t>(hostDescriptor_[10]) << 8;
     }
   } else {
-    activeDescriptor_ = localDescriptor_;
-    memset(localDescriptor_, 0, sizeof(localDescriptor_));
-    localDescriptor_[7] = localBrightness_;
     if (mode != StatusLedMode::Off) {
-      localDescriptor_[0] = static_cast<uint8_t>(StatusLedEffect::Breathe);
-      localDescriptor_[8] = static_cast<uint8_t>(localBrightness_ >> 4);
       effectPeriodMs_ = 1600;
-      if (mode == StatusLedMode::Fault || mode == StatusLedMode::Warning ||
-          mode == StatusLedMode::Running) {
-        localDescriptor_[1] = 255;
-        localDescriptor_[2] = mode == StatusLedMode::Running ? 72 : 0;
-      } else if (mode == StatusLedMode::Learning ||
-                 mode == StatusLedMode::Connected) {
-        localDescriptor_[2] = 255;
-      } else {
-        localDescriptor_[3] = 255;
-      }
     }
   }
   dirty_ = true;
@@ -96,9 +80,7 @@ void StatusLedController::setMode(StatusLedMode mode, uint32_t now) {
 
 void StatusLedController::setBrightness(uint8_t brightness) {
   localBrightness_ = brightness;
-  if (activeDescriptor_ == localDescriptor_) {
-    localDescriptor_[7] = brightness;
-    localDescriptor_[8] = static_cast<uint8_t>(brightness >> 4);
+  if (activeMode_ != StatusLedMode::Custom) {
     dirty_ = true;
   }
 }
@@ -130,14 +112,14 @@ bool StatusLedController::setEffect(const uint8_t *payload, uint32_t now) {
 void StatusLedController::cancelEffect() {
   hostDescriptor_[0] = 0;
   activeMode_ = StatusLedMode::Off;
-  activeDescriptor_ = localDescriptor_;
-  localDescriptor_[0] = 0;
   dirty_ = true;
 }
 
 void StatusLedController::render() {
-  const uint8_t effect = activeDescriptor_[0];
-  uint8_t level = activeDescriptor_[7];
+  const bool custom = activeMode_ == StatusLedMode::Custom;
+  const uint8_t effect = static_cast<uint8_t>(this->effect());
+  const uint8_t *descriptor = hostDescriptor_;
+  uint8_t level = custom ? descriptor[7] : localBrightness_;
   const uint8_t phase = effect == 0
                             ? 0
                             : static_cast<uint8_t>(
@@ -149,9 +131,10 @@ void StatusLedController::render() {
       (static_cast<uint16_t>(phase) * (255U - phase)) >> 6);
   uint8_t amount = 0;
   if (effect == static_cast<uint8_t>(StatusLedEffect::Breathe)) {
+    const uint8_t minimum = custom ? descriptor[8]
+                                   : static_cast<uint8_t>(level >> 4);
     level = static_cast<uint8_t>(
-        activeDescriptor_[8] +
-        scale(activeDescriptor_[7] - activeDescriptor_[8], wave));
+        minimum + scale(level - minimum, wave));
   } else if (effect == static_cast<uint8_t>(StatusLedEffect::Cycle)) {
     amount = wave;
   } else if (effect == static_cast<uint8_t>(StatusLedEffect::Transition)) {
@@ -161,11 +144,27 @@ void StatusLedController::render() {
     amount = 255;
   }
 
-  uint8_t rgb[3];
+  uint8_t rgb[3] = {};
+  if (!custom) {
+    if (activeMode_ == StatusLedMode::Fault ||
+        activeMode_ == StatusLedMode::Warning ||
+        activeMode_ == StatusLedMode::Running) {
+      rgb[0] = 255;
+      rgb[1] = activeMode_ == StatusLedMode::Running ? 72 : 0;
+    } else if (activeMode_ == StatusLedMode::Learning ||
+               activeMode_ == StatusLedMode::Connected) {
+      rgb[1] = 255;
+    } else if (activeMode_ != StatusLedMode::Off) {
+      rgb[2] = 255;
+    }
+  } else {
+    for (uint8_t channel = 0; channel < 3; ++channel) {
+      rgb[channel] = interpolate(descriptor[channel + 1],
+                                 descriptor[channel + 4], amount);
+    }
+  }
   for (uint8_t channel = 0; channel < 3; ++channel) {
-    rgb[channel] = scale(interpolate(activeDescriptor_[channel + 1],
-                                     activeDescriptor_[channel + 4], amount),
-                         level);
+    rgb[channel] = scale(rgb[channel], level);
   }
   statusPwm->setStatusRgb8(rgb[0], rgb[1], rgb[2]);
 #if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS

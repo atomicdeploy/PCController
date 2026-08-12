@@ -159,6 +159,7 @@ func TestArduinoCompileUsesFirmwareRelaxFlags(t *testing.T) {
 		"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x",
 		"-DPCCONTROLLER_BUILD_TIMESTAMP=0x35019D5DUL -DPCCONTROLLER_IDENTITY_ADDRESS=0x7E74UL -mcall-prologues",
 		"-fno-tree-scev-cprop -fipa-pta -fstack-usage",
+		"-fno-partial-inlining -fno-inline-functions-called-once -fno-tree-ccp -fno-tree-fre",
 		"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax",
 		"-Wl,--section-start=.firmware_identity=0x7E74",
 		"--warnings all", "--jobs 1", "--build-path", "--output-dir",
