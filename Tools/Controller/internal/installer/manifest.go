@@ -470,15 +470,15 @@ func verifyWindowsExecutableResources(path string, manifest PackageManifest, hos
 	if err != nil {
 		return err
 	}
-	for label, value := range map[string]string{
-		"source hash": manifest.SourceSHA256,
-		"version":     manifest.Version,
-		"build time":  manifest.BuildTime,
-	} {
-		if !bytes.Contains(content, []byte(value)) {
-			return fmt.Errorf("executable does not contain its declared %s", label)
-		}
-	}
+	// Do not search the executable file for plaintext Go linker values here.
+	// Packers such as UPX preserve the executable's runtime identity while
+	// compressing the sections that contain version, source-hash, and build-time
+	// strings. The canonical build executes the final packed image and verifies
+	// those exact values before it asks that image to generate this inventory.
+	// Subsequent package verification binds the same final executable bytes to
+	// both manifests by size and SHA-256. This verifier is therefore responsible
+	// for the loader-visible PE target and the Win32 identity resources that
+	// remain directly inspectable after packing.
 	resource, err := peResourceSection(content)
 	if err != nil {
 		return err
