@@ -16,6 +16,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Find the authoritative code, test, asset, tool, or generated output | [Repository and File Map](Repository-Map.md) |
 | Understand the physical panel | [Front Panel and Menus](Front-Panel-and-Menus.md) |
 | Configure the host, WebUI, hotkeys, notifications, or integrations | [Host Configuration and Integrations](Host-Configuration-and-Integrations.md) |
+| Understand live dashboard freshness, layout, labels, and toast behavior | [WebUI Dashboard](WebUI-Dashboard.md) |
 | Integrate through UART, JSON-RPC, REST, WebSocket, Go, or C | [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md), [machine-readable contracts](../Tools/Controller/api/reference.html), and [C Library API](../Tools/Controller/docs/C-Library-API.md) |
 | Export or host the WebUI from a separate origin | [Portable WebUI](../Tools/Controller/docs/Portable-WebUI.md) |
 | Build, back up, program, or recover a board | [Toolchain and Safe Programming](Toolchain-and-Safe-Programming.md) |
