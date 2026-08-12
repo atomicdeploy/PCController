@@ -357,6 +357,15 @@ func TestLoadProgrammingMarkerAcceptsLegacyMacroDroppedSteps(t *testing.T) {
 	}
 }
 
+func TestProgrammingPWMRampAcceptsExplicitlyUnavailablePeripheral(t *testing.T) {
+	device := runtimeProgrammingDevice{}
+	if err := device.RampPWMToZero(context.Background(), ProgrammingLiveState{
+		PWM: &native.PWMValues{Available: false},
+	}); err != nil {
+		t.Fatalf("unavailable PWM peripheral should already be safe: %v", err)
+	}
+}
+
 func TestProgrammingLifecycleDoesNotRestoreBeforeHostCompletion(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	device := &fakeProgrammingDevice{

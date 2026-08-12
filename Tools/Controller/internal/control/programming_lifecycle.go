@@ -246,6 +246,9 @@ func (device runtimeProgrammingDevice) RampPWMToZero(
 		device.options.Outputs.StopMelody()
 		device.options.Outputs.OverrideStatusEffect()
 	}
+	if !state.PWM.Available {
+		return nil
+	}
 	for step := programmingRampSteps - 1; step >= 0; step-- {
 		for channel, original := range state.PWM.Values {
 			if original == 0 {
@@ -382,11 +385,19 @@ func (device runtimeProgrammingDevice) PublishProgrammingPhase(phase string) {
 }
 
 func (device runtimeProgrammingDevice) EnterSafeProgrammingState(ctx context.Context) error {
-	return errors.Join(
+	failures := []error{
 		command(ctx, device.runtime, native.OpMacroCancel, nil),
 		command(ctx, device.runtime, native.OpRelayAllOff, nil),
-		command(ctx, device.runtime, native.OpPWMAllOff, nil),
-	)
+	}
+	// A connected board with a current STATUS frame has authoritative PCA/PWM
+	// availability. Do not turn a deliberately absent peripheral into a failed
+	// recovery transaction; if status is not known, retain the conservative
+	// all-off command.
+	snapshot := device.runtime.Snapshot()
+	if !snapshot.HaveStatus || snapshot.Status.PWMAvailable {
+		failures = append(failures, command(ctx, device.runtime, native.OpPWMAllOff, nil))
+	}
+	return errors.Join(failures...)
 }
 
 func (device runtimeProgrammingDevice) ShowProgrammingPanel(ctx context.Context) error {
