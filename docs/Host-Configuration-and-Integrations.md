@@ -502,37 +502,21 @@ The default service is `127.0.0.1:8787`. One listener multiplexes:
 - a bounded Engine.IO v4 / Socket.IO WebSocket adapter at `/socket.io/`;
 - an optional inbound webhook.
 
-Use loopback without a token only for the same PC. A non-loopback listener is
-accepted only with deliberate remote enablement, an authentication token of at
-least 24 characters, a stable `ipc.remote_principal`, and an explicit
-non-wildcard origin allow-list. Native clients authenticate with a Bearer or
-`X-PCController-Token` header. Browser clients first send that header to
-`POST /api/session/ticket`, then offer the returned 30-second one-use ticket
-in `Sec-WebSocket-Protocol` while opening a clean WebSocket URL. The ticket is
-bound to the requesting Origin, peer, and WebSocket transport, and the server
-selects only the non-secret `pccontroller` protocol. Query-string
-credentials, ticket replay, an Origin mismatch, and application frames before
-successful authentication are rejected.
+For the current alpha build, authentication and authorization are deliberately
+disabled on every native and network surface. This is a temporary product
+decision, not a partial security design: clients do not need a token, the Web
+UI must not prompt for one, and supplied credentials or remote-policy bits do
+not grant or deny operations. The complete native/localhost and remote-login
+mission is deferred to GitHub issue #148.
 
-Origin-less native traffic is trusted without a token only on loopback. A
-non-loopback native client without `Origin` must present the durable header;
-browser ticket exchange and upgrade always require the same allowed Origin.
-Conflicting Bearer and `X-PCController-Token` values fail closed.
-
-Authentication and authorization are separate. The default
-`ipc.remote_policy` permits authenticated read/event subscriptions only;
-messages, board commands, host configuration, port control, reset,
-programming, shutdown, virtual keys, power/display actions, bridge calls, and
-configured host-automation execution are independently opt-in. Remote
-programming also requires connection-control permission. Every denied or authorized mutating attempt is source-tagged in
-the host timeline, and generic `controller.command.execute` commands are classified so
-they cannot bypass a narrower gate. Audit events identify the stable principal,
-transport, authentication mechanism, remote scope, decision, capability, and
-operation without recording the credential. Local no-token IPC uses
-`local-operator`, the primary-instance credential uses its instance identity,
-remote HTTP/WebSocket/Socket.IO use `ipc.remote_principal`, and generic bridge
-dispatch currently uses `bridge-peer` because that boundary does not yet carry
-a configured peer name.
+A non-loopback listener still requires deliberate `ipc.allow_remote: true`, a
+non-loopback `ipc.listen`, and an explicit non-wildcard
+`ipc.allowed_origins` list. Those fields select where the service is exposed
+and which browser origins may connect; they are not authentication. Config
+file, environment, and CLI overrides use the normal precedence path. Existing
+`auth_token`, `auth_token_ref`, `remote_principal`, and `remote_policy` fields
+remain readable so old local configs are not broken, but the current host does
+not enforce them.
 
 The exact methods, routes, frames, Socket.IO subset, and examples are in
 [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md).

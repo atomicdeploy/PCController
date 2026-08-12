@@ -385,10 +385,11 @@ const openapi = {
     title: product.httpTitle,
 		version: "unversioned",
 		summary: "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    description: "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS.",
+    description: "Loopback is the default. This alpha build deliberately disables authentication and authorization until issue #148; remote exposure still requires an explicit bind and Origin allow-list. The built-in listener does not terminate TLS.",
   },
   servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
-  security: [{ bearerAuth: [] }, { tokenHeader: [] }],
+  security: [],
+	"x-authentication-state": "disabled-until-issue-148",
   paths: openAPIPaths,
   components: {
     securitySchemes: {
@@ -540,8 +541,8 @@ const rpcSchema = {
   "x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => [name, metadata])),
   "x-error-codes": {
     "-32700": "parse error", "-32600": "invalid request", "-32601": "method not found",
-    "-32602": "invalid params", "-32001": "authentication required",
-    "-32003": "remote capability denied", "-32000": "runtime or device error",
+    "-32602": "invalid params", "-32001": "reserved for deferred authentication",
+    "-32003": "reserved for deferred authorization", "-32000": "runtime or device error",
   },
 };
 
@@ -549,16 +550,13 @@ const asyncapi = {
   asyncapi: "3.0.0",
   info: {
 		title: product.eventTitle, version: "unversioned",
-    description: "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required.",
+    description: "Full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. Authentication and authorization are disabled in this alpha build until issue #148. WebSocket transport is required.",
   },
   servers: {
     loopback: {
       host: "127.0.0.1:8787", protocol: "ws", pathname: "/ipc",
-      description: "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
-	  security: [
-		{ $ref: "#/components/securitySchemes/durableHeader" },
-		{ $ref: "#/components/securitySchemes/browserTicket" },
-	  ],
+      description: "Default loopback primary. Alpha remote exposure requires an explicit bind and allowed Origin; authentication and authorization are deferred to issue #148.",
+	  security: [],
     },
   },
   channels: {
@@ -620,9 +618,9 @@ const reference = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><title>${escapeHTML(product.referenceTitle)}</title>
 <style>:root{font-family:Inter,Segoe UI,system-ui,sans-serif;color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#172033;--muted:#647087;--line:#dfe3ec;--accent:#6d4aff}@media(prefers-color-scheme:dark){:root{--bg:#11131a;--panel:#191c25;--text:#edf0f7;--muted:#a8b0c2;--line:#303543;--accent:#a995ff}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{width:min(1180px,calc(100% - 32px));margin:auto;padding:48px 0 80px}header{display:grid;gap:12px;margin-bottom:34px}h1{font-size:clamp(2rem,5vw,4rem);letter-spacing:-.05em;margin:0}p{color:var(--muted);max-width:76ch;line-height:1.65}.pills{display:flex;flex-wrap:wrap;gap:8px}.pills a,.pills span,td span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--text);text-decoration:none;background:color-mix(in srgb,var(--panel) 88%,var(--accent) 12%)}section{margin-top:34px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 18px 55px color-mix(in srgb,var(--text) 8%,transparent)}section>div{padding:22px 24px 6px}h2{margin:0;font-size:1.25rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}code{font-family:Cascadia Code,ui-monospace,monospace;color:var(--accent);overflow-wrap:anywhere}@media(max-width:720px){main{width:min(100% - 20px,1180px);padding-top:26px}section{overflow:auto}table{min-width:760px}}</style></head>
-<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; every remote operation requires authentication and an explicit capability.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
+<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. In this alpha build authentication and authorization are deliberately disabled until issue #148; remote exposure still requires an explicit listener and Origin allow-list.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
 <section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>; versioned aliases are rejected. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
-<section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved; host extensions use -32001 for authentication, -32003 for capability denial, and -32000 for runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
+<section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved. Codes -32001 and -32003 are reserved for the deferred authentication design; -32000 reports runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
 <p>Contract digest <code>${digest}</code>. Generated by <code>Tools/Audit/generate-api-reference.mjs</code>.</p></main></body></html>\n`;
 outputs.set("reference.html", reference);
 

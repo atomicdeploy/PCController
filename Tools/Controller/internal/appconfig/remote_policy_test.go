@@ -33,7 +33,6 @@ func TestRemoteProgrammingRequiresConnectionControl(t *testing.T) {
 func TestRemoteAccessRejectsMissingOrWildcardBrowserOrigins(t *testing.T) {
 	config := Defaults()
 	config.IPC.AllowRemote = true
-	config.IPC.AuthToken = "0123456789abcdefghijklmn"
 	config.IPC.AllowedOrigins = nil
 	if err := config.Validate(); err == nil {
 		t.Fatal("expected missing remote origin allow-list to be rejected")
@@ -45,6 +44,18 @@ func TestRemoteAccessRejectsMissingOrWildcardBrowserOrigins(t *testing.T) {
 	config.IPC.AllowedOrigins = []string{"controller.example:*"}
 	if err := config.Validate(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAlphaRemoteExposureDoesNotRequireDeferredAuthentication(t *testing.T) {
+	config := Defaults()
+	config.IPC.AllowRemote = true
+	config.IPC.Listen = "0.0.0.0:8787"
+	config.IPC.AllowedOrigins = []string{"cafe-pc:*", "cafe-pc.local:*"}
+	config.IPC.AuthToken = ""
+	config.IPC.AuthTokenRef = ""
+	if err := config.Validate(); err != nil {
+		t.Fatalf("explicit alpha remote exposure required deferred auth: %v", err)
 	}
 }
 

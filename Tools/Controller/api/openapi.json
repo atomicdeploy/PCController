@@ -4,7 +4,7 @@
     "title": "PCController HTTP API",
     "version": "unversioned",
     "summary": "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    "description": "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS."
+    "description": "Loopback is the default. This alpha build deliberately disables authentication and authorization until issue #148; remote exposure still requires an explicit bind and Origin allow-list. The built-in listener does not terminate TLS."
   },
   "servers": [
     {
@@ -12,14 +12,8 @@
       "description": "Default loopback primary"
     }
   ],
-  "security": [
-    {
-      "bearerAuth": []
-    },
-    {
-      "tokenHeader": []
-    }
-  ],
+  "security": [],
+  "x-authentication-state": "disabled-until-issue-148",
   "paths": {
     "/healthz": {
       "get": {

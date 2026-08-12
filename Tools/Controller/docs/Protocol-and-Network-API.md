@@ -563,61 +563,26 @@ still interoperate.
 
 ### Authentication and exposure
 
-Loopback-only use is the safe default. When `ipc.allow_remote` is false, a
-non-loopback bind is rejected. Remote access requires all of the following:
+The current alpha host deliberately disables authentication and authorization
+on native IPC, HTTP, WebSocket, Socket.IO, bridge, CLI, TUI, and Web surfaces.
+No token or login is required, the UI reports `auth_required: false`, and
+credentials or `remote_policy` values are not enforced. The complete session,
+native-user, remote-login, approval-toast, and persistent-client design is
+deferred to GitHub issue #148 and must not be partially re-enabled before that
+work is explicitly requested.
 
-- `ipc.allow_remote: true`;
-- an `ipc.auth_token` containing at least 24 characters, or a resolvable
-  `ipc.auth_token_ref`;
-- a stable, machine-safe `ipc.remote_principal` audit name;
-- an explicit, non-wildcard `ipc.allowed_origins` list for browser WebSocket
-  clients;
-- the relevant `ipc.remote_policy` capability set to `true`.
+Exposure remains explicit and configurable. Loopback is the default. A
+non-loopback bind requires `ipc.allow_remote: true`, a selected `ipc.listen`,
+and a non-wildcard `ipc.allowed_origins` list. Those settings control reach and
+browser Origin acceptance, not identity or permission. The ordinary precedence
+is unchanged: built-in defaults, then config file, then environment, then CLI
+flags. Existing token/principal/policy fields remain accepted for config-file
+compatibility but are dormant.
 
-Raw JSON-RPC carries the token in the top-level `auth` member. HTTP and native
-WebSocket/Socket.IO clients use `Authorization: Bearer TOKEN` or
-`X-PCController-Token: TOKEN`. Durable URL credentials are rejected. A browser
-that cannot add an upgrade header uses this two-step exchange instead:
-
-1. `POST /api/session/ticket` with the durable credential in an HTTP header,
-   an allowed `Origin`, and `{"transport":"websocket"}` (or `socket_io`).
-2. Open the clean WebSocket URL while offering subprotocols `pccontroller`
-   and `pccontroller.ticket.TICKET`.
-
-The 256-bit ticket expires after 15 seconds and is consumed once, before the
-upgrade. It is bound to the issuing principal, exact Origin, peer address, and
-transport, so it cannot be replayed on the other socket surface. Unauthorized
-standard WebSocket and Socket.IO handshakes are rejected before the server
-sends any application or Engine.IO frame. Token comparison is constant-time;
-discovery advertisements and responses never contain a durable token. The
-server retains only a SHA-256 digest of each outstanding ticket, never the raw
-ticket returned to the browser.
-
-Missing-Origin handling is explicit. Loopback native clients may omit
-`Origin`; non-loopback native requests may omit it only when they present a
-durable Authorization/token header. Browser session tickets always require and
-remain bound to an allowed Origin. Conflicting Authorization and compatibility
-headers fail closed.
-
-Authentication proves possession of the host token; authorization is separate.
-The default remote policy permits only `read` and `events`. Messages, board
-commands, host-configuration writes, connection control, reset, programming,
-shutdown, virtual keys, power/display actions, host-automation execution,
-integration access, and bridge calls are independent
-opt-ins. Programming additionally requires connection control. A remote
-`controller.command.execute` request is classified before execution, so using the
-generic command surface cannot bypass the reset, programming, OS-action, or
-bridge-call gates. Authorized mutating attempts and denied attempts publish
-`security.local.*` or `security.remote.*` timeline events with stable
-`principal`, `transport`, `authentication`, `capability`, and operation fields,
-without recording the token or request payload. The configured token maps to
-`ipc.remote_principal`; local transport trust and host-instance/bridge
-delegation use separate fixed principals.
-
-Motion policies, door checks, relay sequencing, bounds, OS confirmation rules,
-and exclusive programming ownership still apply after authorization. Use TLS
-termination, a VPN, or an SSH tunnel on untrusted networks; the built-in
-listener does not itself terminate TLS.
+This alpha bypass does not remove hardware semantics such as motion-door
+policy, relay sequencing, range validation, programming ownership, or explicit
+destructive-operation confirmations. The built-in listener does not terminate
+TLS; expose it only on networks selected by the operator.
 
 ```json
 "ipc": {

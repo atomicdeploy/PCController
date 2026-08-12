@@ -956,8 +956,8 @@
     "-32600": "invalid request",
     "-32601": "method not found",
     "-32602": "invalid params",
-    "-32001": "authentication required",
-    "-32003": "remote capability denied",
+    "-32001": "reserved for deferred authentication",
+    "-32003": "reserved for deferred authorization",
     "-32000": "runtime or device error"
   }
 }

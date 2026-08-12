@@ -659,12 +659,10 @@ func validateIPC(value IPC) error {
 	if err := validateSecretChoice("ipc.auth_token", value.AuthToken, value.AuthTokenRef); err != nil {
 		return err
 	}
-	if value.AllowRemote && !secretConfigured(value.AuthToken, value.AuthTokenRef) {
-		return fmt.Errorf("ipc.auth_token or ipc.auth_token_ref is required when remote access is enabled")
-	}
-	if value.AllowRemote && value.AuthTokenRef == "" && len(strings.TrimSpace(value.AuthToken)) < 24 {
-		return fmt.Errorf("ipc.auth_token must contain at least 24 characters when remote access is enabled")
-	}
+	// Authentication and authorization are deliberately disabled for the alpha
+	// host until the complete login/session design tracked by issue #148 lands.
+	// Keep accepting an optional secret so existing configs remain readable, but
+	// never require one merely to expose the explicitly selected listener.
 	if len(value.AuthToken) > 512 || !printableText(value.AuthToken) {
 		return fmt.Errorf("ipc.auth_token must be at most 512 printable characters")
 	}
