@@ -423,6 +423,34 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name: "message", Usage: "message TARGETS TYPE TEXT",
+		Summary: "publish a bounded host notification event to native, web, TUI, or other targets",
+		Run: func(_ context.Context, args []string) (string, error) {
+			if len(args) < 3 {
+				return "", errors.New("usage: message TARGETS TYPE TEXT")
+			}
+			targets := strings.Split(strings.ToLower(strings.TrimSpace(args[0])), ",")
+			for _, target := range targets {
+				if !messageTargetAllowed(strings.TrimSpace(target)) {
+					return "", fmt.Errorf("unsupported message target %q", target)
+				}
+			}
+			kind := strings.ToLower(strings.TrimSpace(args[1]))
+			if kind == "" || len(kind) > 32 {
+				return "", errors.New("message type must contain 1..32 characters")
+			}
+			text := strings.TrimSpace(strings.Join(args[2:], " "))
+			if text == "" || len(text) > 4096 {
+				return "", errors.New("message text must contain 1..4096 characters")
+			}
+			event := runtime.PublishStructuredEvent(Event{
+				Kind: "message", Lifecycle: "completed", Source: "cli", Target: strings.Join(targets, ","),
+				Targets: targets, MessageType: kind, Severity: "info", Delivery: "sync", Text: text,
+			})
+			return fmt.Sprintf("message id=%d targets=%s", event.ID, strings.Join(targets, ",")), nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "settings", Usage: settingsUsage,
 		Summary: "query or update the firmware-owned EEPROM settings",
 		Run: func(ctx context.Context, args []string) (string, error) {
@@ -1155,6 +1183,15 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	return engine
+}
+
+func messageTargetAllowed(target string) bool {
+	switch target {
+	case "native", "web", "tui", "host", "client", "server", "bridge", "board", "lcd", "all":
+		return true
+	default:
+		return false
+	}
 }
 
 func encodeLiveSettingsExport(settings native.Settings) (string, error) {

@@ -205,6 +205,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runShell(args[1:], stdout, stderr, store)
 	case "exec":
 		return runExec(args[1:], stdout, stderr, store)
+	case "message":
+		return runExec(append([]string{"message"}, args[1:]...), stdout, stderr, store)
 	case "batch", "script":
 		return runBatch(args[1:], stdout, stderr, store)
 	case "monitor":

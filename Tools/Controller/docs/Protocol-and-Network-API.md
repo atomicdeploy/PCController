@@ -12,6 +12,48 @@ without a documentation server. Repository validation regenerates the
 contracts logically and rejects drift from the actual RPC dispatcher or REST
 route families.
 
+## Typed host notification envelope
+
+`controller.message.send` and `POST /api/messages` use the same bounded host
+envelope and publish a normal `message` event through IPC, WebSocket,
+Socket.IO, bridge, TUI, WebUI, and native-host listeners. It does not alter the
+firmware protocol or open a serial connection for host-only deliveries.
+
+```json
+{
+  "source": "ipc",
+  "targets": ["native", "web", "tui"],
+  "type": "operator.notice",
+  "text": "Commissioning is ready",
+  "severity": "warning",
+  "correlation": "commission-42",
+  "delivery": "async",
+  "action": "app.page:events"
+}
+```
+
+`target` remains accepted as a comma-separated shorthand; `targets` is the
+preferred ordered list. Valid presentation targets are `native`, `web`, and
+`tui`; transport/system targets (`host`, `client`, `server`, `bridge`, `board`,
+`lcd`, `all`) remain available for existing integrations. Duplicate targets are
+removed in order. Severity is one of `debug`, `info`, `success`, `warning`, or
+`error`; delivery is `sync` (completed) or `async` (accepted). Correlation and
+action are descriptive event fields in this first host slice—actions are never
+implicitly executed.
+
+The minimal CLI spelling is:
+
+```console
+controller message native,web,tui operator.notice "Commissioning is ready"
+```
+
+It deliberately permits disconnected operation and publishes to the same
+runtime event stream. Native/Web/TUI action adapters, delivery expiry,
+deduplication, and generalized board-operation migration continue under
+[#164](https://github.com/atomicdeploy/PCController/issues/164),
+[#165](https://github.com/atomicdeploy/PCController/issues/165), and
+[#166](https://github.com/atomicdeploy/PCController/issues/166).
+
 ## Framing
 
 Frames are COBS encoded and terminated by `0x00`. The decoded frame is:
