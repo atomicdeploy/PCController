@@ -1136,7 +1136,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				disconnectReason = event.Err.Error()
 				runtime.publish("error", event.Err.Error(), native.Frame{})
 			} else {
-				runtime.observe(event.Frame)
+				observedChange := runtime.observe(event.Frame)
 				kind := "rx"
 				text := fmt.Sprintf(
 					"%s seq=%d payload=% X",
@@ -1189,6 +1189,12 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 					}
 				} else if event.Frame.Opcode == native.OpStatusLEDChanged {
 					if state, err := native.ParseStatusLEDState(event.Frame.Payload); err == nil {
+						if !observedChange {
+							// Some VirtualBoard/firmware paths can repeat the current
+							// compositor result at frame rate. The snapshot already
+							// holds it; do not amplify an unchanged state over IPC.
+							continue
+						}
 						kind = "status_led.changed"
 						text = fmt.Sprintf("status LED changed to #%02X%02X%02X", state.Red, state.Green, state.Blue)
 						parsedStatusLED = &state
@@ -1401,7 +1407,7 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 	}
 }
 
-func (runtime *Runtime) observe(frame native.Frame) {
+func (runtime *Runtime) observe(frame native.Frame) bool {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	switch frame.Opcode {
@@ -1437,6 +1443,9 @@ func (runtime *Runtime) observe(frame native.Frame) {
 		}
 	case native.OpStatusLEDChanged:
 		if state, err := native.ParseStatusLEDState(frame.Payload); err == nil {
+			if runtime.haveStatusLED && runtime.statusLED == state {
+				return false
+			}
 			runtime.statusLED = state
 			runtime.haveStatusLED = true
 			runtime.statusLEDUpdated = time.Now()
@@ -1468,6 +1477,7 @@ func (runtime *Runtime) observe(frame native.Frame) {
 			}
 		}
 	}
+	return true
 }
 
 func describeDeviceEvent(event native.DeviceEvent) (string, string) {
