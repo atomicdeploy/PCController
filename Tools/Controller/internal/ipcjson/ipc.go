@@ -788,6 +788,123 @@ func (service *Service) dispatch(
 		}
 	case "controller.host_menu.state":
 		result, err = service.Client.HostMenuState(ctx)
+	case "controller.macro.snapshot", "controller.macro.list", "controller.macro.status":
+		result = service.Client.MacroSnapshot()
+	case "controller.macro.create":
+		var params struct {
+			ID       *int   `json:"id"`
+			Name     string `json:"name"`
+			Category string `json:"category,omitempty"`
+			Color    string `json:"color,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.ID == nil || *params.ID < 0 || *params.ID > 255 {
+				err = errors.New("macro id is required and must be 0..255")
+			} else {
+				_, err = service.Client.MacroCreate(byte(*params.ID), params.Name, params.Category, params.Color)
+				if err == nil {
+					result = service.Client.MacroSnapshot()
+				}
+			}
+		}
+	case "controller.macro.update":
+		var params struct {
+			Reference string  `json:"reference"`
+			Name      string  `json:"name"`
+			Category  *string `json:"category,omitempty"`
+			Color     *string `json:"color,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			_, err = service.Client.MacroUpdate(params.Reference, params.Name, params.Category, params.Color)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.delete":
+		var params struct {
+			Reference string `json:"reference"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			err = service.Client.MacroDelete(params.Reference)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.record.start":
+		var params struct {
+			Name     string `json:"name"`
+			Category string `json:"category,omitempty"`
+			Color    string `json:"color,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			_, err = service.Client.MacroRecordStart(params.Name, params.Category, params.Color)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.record.stop":
+		var params struct {
+			Save *bool `json:"save,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			save := true
+			if params.Save != nil {
+				save = *params.Save
+			}
+			_, err = service.Client.MacroRecordStop(save)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.board_record.start":
+		var params struct {
+			ID *int `json:"id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if params.ID == nil || *params.ID < 0 || *params.ID > 255 {
+				err = errors.New("macro capture id is required and must be 0..255")
+			} else {
+				_, err = service.Client.MacroBoardRecordStart(ctx, byte(*params.ID))
+				if err == nil {
+					result = service.Client.MacroSnapshot()
+				}
+			}
+		}
+	case "controller.macro.board_record.stop":
+		_, err = service.Client.MacroBoardRecordStop(ctx)
+		if err == nil {
+			result = service.Client.MacroSnapshot()
+		}
+	case "controller.macro.board_record.clear":
+		var params struct {
+			Force bool `json:"force,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			_, err = service.Client.MacroBoardRecordClear(ctx, params.Force)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.play":
+		var params struct {
+			Reference string `json:"reference"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			_, err = service.Client.MacroPlay(ctx, params.Reference)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
+	case "controller.macro.cancel":
+		var params struct {
+			KeepOutputs bool `json:"keep_outputs,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			err = service.Client.MacroCancel(ctx, params.KeepOutputs)
+			if err == nil {
+				result = service.Client.MacroSnapshot()
+			}
+		}
 	case "controller.menu.jump", "controller.menu.page":
 		var params struct {
 			Page string `json:"page"`
@@ -1651,6 +1768,14 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityMessages
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request":
+		return capabilityBoard
+	case "controller.macro.snapshot", "controller.macro.list", "controller.macro.status":
+		return capabilityRead
+	case "controller.macro.create", "controller.macro.update", "controller.macro.delete",
+		"controller.macro.record.start", "controller.macro.record.stop":
+		return capabilityHostConfig
+	case "controller.macro.board_record.start", "controller.macro.board_record.stop",
+		"controller.macro.board_record.clear", "controller.macro.play", "controller.macro.cancel":
 		return capabilityBoard
 	case "controller.host_menu.config", "controller.host_menu.config.get",
 		"controller.ui.config", "controller.ui.config.get",

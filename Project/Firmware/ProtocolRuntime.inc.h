@@ -569,12 +569,26 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       transferI2c(frame.sequence, payload, length, frameNow);
       return;
 
-    case Buzzer:
-      if (length < 4) {
+    case Buzzer: {
+      if (length != 4) {
         goto badPayload;
       }
-      buzzer.beep(readU16(payload + 2), readU16(payload));
+      const uint16_t frequency = readU16(payload);
+      const uint16_t duration = readU16(payload + 2);
+      // Frequency/duration 0/0 is the one canonical immediate stop operation.
+      // A zero-frequency timed pause is intentionally not exposed as a buzzer
+      // command: melodies own pauses, while every interface can stop safely.
+      if (frequency == 0) {
+        if (duration != 0) goto badPayload;
+        buzzer.stop();
+      } else {
+        if (duration == 0 || frequency < 20 || frequency > 20000) {
+          goto badPayload;
+        }
+        buzzer.beep(duration, frequency);
+      }
       goto acknowledged;
+    }
 
     case PwmSet: {
       const uint16_t value = length >= 3 ? readU16(payload + 1) : 0;

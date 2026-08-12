@@ -420,6 +420,8 @@ func EventStreamForKind(kind string) string {
 		"relays.changed", "motion.changed", "pwm.changed", "buzzer.changed",
 		"display.changed":
 		return EventStreamState
+	case "macro.step", "macro.recording.step":
+		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
 		strings.HasSuffix(kind, ".sample") {

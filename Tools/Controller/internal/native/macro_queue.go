@@ -147,6 +147,16 @@ func MacroCaptureAcknowledgePayload(id byte, startedAtUS uint32) []byte {
 	}
 }
 
+// MacroCaptureClearPayload explicitly destroys one retained capture only when
+// both its reusable uint8 ID and MCU-start epoch still match.
+func MacroCaptureClearPayload(id byte, startedAtUS uint32) []byte {
+	return []byte{
+		5, id,
+		byte(startedAtUS), byte(startedAtUS >> 8),
+		byte(startedAtUS >> 16), byte(startedAtUS >> 24),
+	}
+}
+
 // MacroCaptureChunk is a bounded recovery page from the board-owned capture
 // ring. Data contains whole/partial stream bytes; callers concatenate pages
 // and validate complete records only after TotalBytes have arrived.
@@ -239,6 +249,11 @@ func MacroPlaybackPayloadSemanticallyValid(opcode byte, payload []byte) bool {
 		return false
 	}
 	switch opcode {
+	case OpBuzzer:
+		frequency := binary.LittleEndian.Uint16(payload[0:2])
+		duration := binary.LittleEndian.Uint16(payload[2:4])
+		return (frequency == 0 && duration == 0) ||
+			(frequency >= 20 && frequency <= 20000 && duration != 0)
 	case OpStatusEffect:
 		if len(payload) == 1 {
 			return payload[0] == StatusEffectNone

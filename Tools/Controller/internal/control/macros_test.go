@@ -499,6 +499,111 @@ func TestBoardCaptureSealsAfterOverflowActionAndDeduplicatesLifecycle(t *testing
 	}
 }
 
+func TestConnectedBoardCaptureStreamsBeyondRetainedRingUntilExplicitStop(t *testing.T) {
+	runtime, runner, store := newMacroCaptureTestRunner(t)
+	connectMacroRecordingTestRuntime(runtime)
+	const (
+		board = "transport=macro-test-board;vid=1A86;pid=7523;kind=1;build=12345678"
+		steps = 20 // RelaySide records are 8 bytes: 160 bytes > 127-byte ring.
+	)
+	var retained []byte
+	for index := 0; index < 15; index++ {
+		record, err := native.EncodeMacroRecord(
+			uint32((index+1)*100), native.OpRelaySide, []byte{0, 1},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		retained = append(retained, record...)
+	}
+	runner.fetchCapture = func(token boardCaptureToken) ([]byte, error) {
+		if token.Board != board || token.ID != 7 || token.StartedAtUS != 1000 {
+			t.Fatalf("unexpected capture token: %#v", token)
+		}
+		return retained, nil
+	}
+	status := native.MacroStatus{
+		Schema: native.MacroQueueSchema, State: native.MacroRecording,
+		ID: 7, StartedAtUS: 1000,
+	}
+	runner.handleBoardMacroStatusAtGeneration(status, 0, board)
+	for index := 0; index < steps; index++ {
+		runtime.publishActionEvidence(ActionEvidence{
+			Opcode: native.OpRelaySide, Payload: []byte{0, 1},
+			Source: native.InputSourcePhysical, BoardOrigin: true,
+			DeviceMicros: uint32(1100 + index*100), Timed: true,
+		})
+		if index == 15 {
+			status.State = native.MacroCaptured
+			status.AcceptedSteps = 15
+			status.AcceptedBytes = uint16(len(retained))
+			status.Fill = byte(len(retained))
+			status.TotalSteps = 15
+			status.DroppedSteps = 1
+			runner.handleBoardMacroStatusAtGeneration(status, 0, board)
+			if state := runner.RecordingState(); !state.Active || state.Steps != 16 {
+				t.Fatalf("full retained ring stopped connected streaming: %#v", state)
+			}
+		}
+	}
+	if state := runner.RecordingState(); !state.Active || state.Steps != steps ||
+		state.DroppedSteps != 1 {
+		t.Fatalf("connected long capture state=%#v", state)
+	}
+	runner.queryCaptureStatus = func(generation uint64) (native.MacroStatus, error) {
+		if generation != 0 {
+			t.Fatalf("capture queried generation %d", generation)
+		}
+		return status, nil
+	}
+	if _, err := runner.StopBoardCapture(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-store.saved:
+	case <-time.After(time.Second):
+		t.Fatal("connected long capture was not saved after explicit stop")
+	}
+	macros := store.macros()
+	if len(macros) != 1 || len(macros[0].Steps) != steps ||
+		macros[0].CaptureDroppedSteps != 1 || macros[0].CaptureMissingSteps != 0 ||
+		macros[0].Steps[steps-1].AtUS != uint32(steps*100) {
+		t.Fatalf("connected long capture was not lossless: %#v", macros)
+	}
+}
+
+func TestOfflineBoardCaptureReportsBoundedPrefixAsTruncated(t *testing.T) {
+	_, runner, store := newMacroCaptureTestRunner(t)
+	var retained []byte
+	for index := 0; index < 15; index++ {
+		record, err := native.EncodeMacroRecord(
+			uint32((index+1)*100), native.OpRelaySide, []byte{0, 1},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		retained = append(retained, record...)
+	}
+	runner.fetchCapture = func(boardCaptureToken) ([]byte, error) { return retained, nil }
+	status := native.MacroStatus{
+		Schema: native.MacroQueueSchema, State: native.MacroCaptured,
+		ID: 8, StartedAtUS: 2000, AcceptedSteps: 15,
+		AcceptedBytes: uint16(len(retained)), Fill: byte(len(retained)),
+		TotalSteps: 15, DroppedSteps: 1,
+	}
+	runner.handleBoardMacroStatusAtGeneration(status, 0, "offline-board")
+	select {
+	case <-store.saved:
+	case <-time.After(time.Second):
+		t.Fatal("offline retained capture was not recovered")
+	}
+	macros := store.macros()
+	if len(macros) != 1 || len(macros[0].Steps) != 15 ||
+		macros[0].CaptureDroppedSteps != 1 || macros[0].CaptureMissingSteps != 1 {
+		t.Fatalf("offline truncation was not reported truthfully: %#v", macros)
+	}
+}
+
 func TestBoardCaptureReconnectGenerationCannotSaveOldRecovery(t *testing.T) {
 	runtime, runner, store := newMacroCaptureTestRunner(t)
 	runtime.mu.Lock()

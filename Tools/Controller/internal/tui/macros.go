@@ -44,6 +44,7 @@ var macroPrimaryButtons = []macroButtonDefinition{
 }
 
 var macroSecondaryButtons = []macroButtonDefinition{
+	{key: "b", label: "B Board rec", tone: macroButtonGood},
 	{key: "c", label: "C Cancel off", tone: macroButtonDanger},
 	{key: "k", label: "K Cancel keep"},
 	{key: "/", label: "/ Find"},
@@ -271,6 +272,16 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 		model.revealTerminal()
 		model.setNotice("Complete NAME [CATEGORY [COLOR]], then operate relays/PWM/etc.; MCU ACK deltas set timing")
 		return model, nil, true
+	case "b":
+		recording := model.macroRecordingState()
+		if recording.Active {
+			if !recording.BoardOwned {
+				model.setNotice(fmt.Sprintf("Host recording %d/%s is active; save or discard it first", recording.ID, recording.Name))
+				return model, nil, true
+			}
+			return model.dispatchLine("macro record board stop")
+		}
+		return model.dispatchLine(fmt.Sprintf("macro record board start %d", model.nextMacroID()))
 	case "s":
 		if !model.macroRecordingState().Active {
 			model.setNotice("No active recording to save")
@@ -490,9 +501,12 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		return errorStyle.Render("Recorder error: " + state.LastError)
 	}
 	if state.Active {
+		if state.BoardOwned {
+			return warnStyle.Render("Board capture owns the retained MCU ring. B seals/fetches it; the host deduplicates, saves, and ACKs the export automatically.")
+		}
 		return warnStyle.Render("Operate the host, front panel, or RF controls; queueable relay, motion, PWM/MOSFET, buzzer, display, RF, RGB, LED, and menu actions share MCU timing. S saves, D discards.")
 	}
-	return labelStyle.Render("R starts a named recording; exact MCU action timestamps become step offsets. N creates an editable empty draft.")
+	return labelStyle.Render("R starts a named host recording; B starts/stops retained board capture; exact MCU timestamps become step offsets. N creates a draft.")
 }
 
 func macroTableHeader(width int) string {

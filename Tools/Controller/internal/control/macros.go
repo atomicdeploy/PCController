@@ -209,6 +209,9 @@ func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (a
 		config.Macros = append(config.Macros, macro)
 		return nil
 	})
+	if err == nil {
+		runner.publishLibraryChange("created", macro)
+	}
 	return macro, err
 }
 
@@ -267,6 +270,9 @@ func (runner *MacroRunner) UpdateMetadata(
 		}
 		return fmt.Errorf("macro %q disappeared before it could be updated", reference)
 	})
+	if err == nil {
+		runner.publishLibraryChange("updated", macro)
+	}
 	return macro, err
 }
 
@@ -282,7 +288,7 @@ func (runner *MacroRunner) Delete(reference string) error {
 	if state.Running && state.ID == macro.ID {
 		return errors.New("cannot delete the macro currently playing")
 	}
-	return runner.updateHostConfig(func(config *appconfig.Config) error {
+	err = runner.updateHostConfig(func(config *appconfig.Config) error {
 		for index, existing := range config.Macros {
 			if existing.ID == macro.ID {
 				config.Macros = append(config.Macros[:index], config.Macros[index+1:]...)
@@ -291,6 +297,10 @@ func (runner *MacroRunner) Delete(reference string) error {
 		}
 		return fmt.Errorf("macro %q disappeared before it could be deleted", reference)
 	})
+	if err == nil {
+		runner.publishLibraryChange("deleted", macro)
+	}
+	return err
 }
 
 // Rename updates host-owned macro metadata without introducing another macro
@@ -327,6 +337,9 @@ func (runner *MacroRunner) Rename(reference, name string) (appconfig.Macro, erro
 		}
 		return fmt.Errorf("macro %q disappeared before it could be renamed", reference)
 	})
+	if err == nil {
+		runner.publishLibraryChange("renamed", updated)
+	}
 	return updated, err
 }
 
@@ -356,6 +369,9 @@ func (runner *MacroRunner) SetCategory(reference, category string) (appconfig.Ma
 		}
 		return fmt.Errorf("macro %q disappeared before its category could be updated", reference)
 	})
+	if err == nil {
+		runner.publishLibraryChange("categorized", updated)
+	}
 	return updated, err
 }
 
@@ -436,15 +452,21 @@ func (runner *MacroRunner) StopBoardCapture(ctx context.Context) (MacroRecording
 	if !recordingConnectionMatches(runner.runtime.Snapshot(), token) {
 		return state, errors.New("board capture connection changed before it could be stopped")
 	}
-	if _, err := runner.runtime.requestAtGeneration(
-		ctx, token.Generation, native.OpMacroStep,
-		native.MacroCaptureStopPayload(), native.OpACK,
-	); err != nil {
-		return state, err
-	}
-	status, err := runner.queryBoard(ctx, token.Generation)
+	status, err := runner.queryCaptureStatus(token.Generation)
 	if err != nil {
-		return state, fmt.Errorf("verify board capture stop: %w", err)
+		return state, fmt.Errorf("query board capture before stop: %w", err)
+	}
+	if status.State == native.MacroRecording {
+		if _, err = runner.runtime.requestAtGeneration(
+			ctx, token.Generation, native.OpMacroStep,
+			native.MacroCaptureStopPayload(), native.OpACK,
+		); err != nil {
+			return state, err
+		}
+		status, err = runner.queryBoard(ctx, token.Generation)
+		if err != nil {
+			return state, fmt.Errorf("verify board capture stop: %w", err)
+		}
 	}
 	if status.ID != token.ID ||
 		(status.State != native.MacroCaptured && status.State != native.MacroExported) {
@@ -453,8 +475,64 @@ func (runner *MacroRunner) StopBoardCapture(ctx context.Context) (MacroRecording
 			status.State, status.ID, token.ID,
 		)
 	}
-	runner.handleBoardMacroStatusAtGeneration(status, token.Generation, token.Board)
+	// Explicit user stop is the seal boundary even when the retained ring filled
+	// earlier and connected Action streaming continued beyond it.
+	runner.beginBoardCaptureFinalization(token, status)
 	return runner.RecordingState(), nil
+}
+
+// ClearBoardCapture removes one retained board ring after generation/identity
+// verification. Normal callers may clear only an exported capture; force is a
+// deliberate data-loss override, but even force cannot race an active fetch.
+func (runner *MacroRunner) ClearBoardCapture(ctx context.Context, force bool) (native.MacroStatus, error) {
+	runner.operationMu.Lock()
+	defer runner.operationMu.Unlock()
+	snapshot := runner.runtime.Snapshot()
+	if !snapshot.Connected {
+		return native.MacroStatus{}, errors.New("device is not connected")
+	}
+	status, err := runner.queryBoard(ctx, snapshot.Generation)
+	if err != nil {
+		return native.MacroStatus{}, fmt.Errorf("query retained macro capture: %w", err)
+	}
+	if status.State != native.MacroCaptured && status.State != native.MacroExported {
+		return status, fmt.Errorf("board has no retained macro capture to clear (state %d)", status.State)
+	}
+	if status.State != native.MacroExported && !force {
+		return status, errors.New("retained macro capture is not export-acknowledged; save it first or explicitly force clear")
+	}
+	token := boardCaptureToken{
+		Generation: snapshot.Generation, ID: status.ID,
+		StartedAtUS: status.StartedAtUS,
+		Board:       captureBoardIdentity(snapshot.Port, snapshot.Hello),
+	}
+	runner.boardCaptureMu.Lock()
+	_, finalizing := runner.boardCaptureFinalizing[token]
+	runner.boardCaptureMu.Unlock()
+	if finalizing {
+		return status, errors.New("retained macro capture export is still being finalized")
+	}
+	if _, err = runner.runtime.requestAtGeneration(
+		ctx, snapshot.Generation, native.OpMacroStep,
+		native.MacroCaptureClearPayload(status.ID, status.StartedAtUS), native.OpACK,
+	); err != nil {
+		return status, err
+	}
+	cleared, err := runner.queryBoard(ctx, snapshot.Generation)
+	if err != nil {
+		return cleared, fmt.Errorf("verify retained macro capture clear: %w", err)
+	}
+	if cleared.State != native.MacroIdle || cleared.Fill != 0 {
+		return cleared, fmt.Errorf("retained macro capture clear returned state=%d fill=%d", cleared.State, cleared.Fill)
+	}
+	runner.boardCaptureMu.Lock()
+	delete(runner.boardCaptureFinished, token)
+	runner.boardCaptureMu.Unlock()
+	runner.runtime.PublishStructuredEvent(Event{
+		Kind: "macro.recording", Lifecycle: "cleared", State: "idle",
+		Text: fmt.Sprintf("retained board macro capture %d cleared", status.ID),
+	})
+	return cleared, nil
 }
 
 func (runner *MacroRunner) startRecording(board *boardCaptureToken, name, category, color string) (MacroRecordingState, error) {
@@ -657,6 +735,7 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 		}); err != nil {
 			return macro, err
 		}
+		runner.publishLibraryChange("saved", macro)
 	}
 	lifecycle := map[bool]string{true: "saved", false: "discarded"}[save]
 	runner.runtime.PublishStructuredEvent(Event{
@@ -664,6 +743,18 @@ func (runner *MacroRunner) StopRecording(save bool) (appconfig.Macro, error) {
 		Text: fmt.Sprintf("macro recording %d/%s %s with %d MCU-timed steps", macro.ID, macro.Name, lifecycle, len(macro.Steps)),
 	})
 	return macro, nil
+}
+
+func (runner *MacroRunner) publishLibraryChange(lifecycle string, macro appconfig.Macro) {
+	runner.runtime.PublishStructuredEvent(Event{
+		Kind: "macro.library", Lifecycle: lifecycle, State: lifecycle,
+		Text: fmt.Sprintf("macro library %s %d/%s", lifecycle, macro.ID, macro.Name),
+		Metadata: map[string]string{
+			"macro_id": strconv.Itoa(int(macro.ID)), "macro_name": macro.Name,
+			"category": macro.Category, "color": normalizedMacroColor(macro.Color),
+			"steps": strconv.Itoa(len(macro.Steps)),
+		},
+	})
 }
 
 func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
@@ -698,11 +789,12 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 		return
 	}
 	runner.recordMu.Lock()
-	defer runner.recordMu.Unlock()
 	if !runner.recording.Active || runner.recordSealed {
+		runner.recordMu.Unlock()
 		return
 	}
 	if runner.recording.LastError != "" {
+		runner.recordMu.Unlock()
 		return
 	}
 	if !runner.recordHasBase {
@@ -717,11 +809,13 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 		shift := runner.recordBaseUS - evidence.DeviceMicros
 		if shift > 0x7FFFFFFF {
 			runner.recording.LastError = "recording evidence exceeded the MCU signed ordering window"
+			runner.recordMu.Unlock()
 			return
 		}
 		for index := range runner.recordMacro.Steps {
 			if runner.recordMacro.Steps[index].AtUS > 0x7FFFFFFF-shift {
 				runner.recording.LastError = "recording exceeded the MCU signed timing window while ordering evidence"
+				runner.recordMu.Unlock()
 				return
 			}
 		}
@@ -733,17 +827,20 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 	delta := evidence.DeviceMicros - runner.recordBaseUS
 	if delta > 0x7FFFFFFF {
 		runner.recording.LastError = "recording exceeded the MCU signed timing window"
+		runner.recordMu.Unlock()
 		return
 	}
 	step.AtUS = delta
 	opcode, payload, err := compileMacroCommand(step)
 	if err != nil {
 		runner.recording.LastError = fmt.Sprintf("record action: %v", err)
+		runner.recordMu.Unlock()
 		return
 	}
 	record, err := native.EncodeMacroRecord(delta, opcode, payload)
 	if err != nil {
 		runner.recording.LastError = fmt.Sprintf("record action: %v", err)
+		runner.recordMu.Unlock()
 		return
 	}
 	if len(runner.recordMacro.Steps) >= macroMaximumRecordedSteps ||
@@ -752,6 +849,7 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 			"recording reached the bounded %d-step/%d-byte stream limit",
 			macroMaximumRecordedSteps, macroMaximumRecordedBytes,
 		)
+		runner.recordMu.Unlock()
 		return
 	}
 	insertAt := sort.Search(len(runner.recordMacro.Steps), func(index int) bool {
@@ -781,6 +879,19 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 	default:
 		runner.recording.HostSteps++
 	}
+	state := runner.recording
+	runner.recordMu.Unlock()
+	runner.runtime.PublishStructuredEvent(Event{
+		Kind: "macro.recording.step", Lifecycle: "captured", State: "recording",
+		Text: fmt.Sprintf("macro recording %d/%s captured step %d at %dus", state.ID, state.Name, state.Steps, state.LastAtUS),
+		Metadata: map[string]string{
+			"macro_id": strconv.Itoa(int(state.ID)), "macro_name": state.Name,
+			"step": strconv.Itoa(state.Steps), "at_us": strconv.FormatUint(uint64(state.LastAtUS), 10),
+			"delta_us": strconv.FormatUint(uint64(state.LastDeltaUS), 10),
+			"opcode":   fmt.Sprintf("0x%02X", state.LastOpcode),
+			"source":   strconv.Itoa(int(state.LastSource)),
+		},
+	})
 }
 
 func deviceMicrosBefore(candidate, current uint32) bool {
@@ -850,6 +961,29 @@ func (runner *MacroRunner) handleBoardMacroStatusAtGeneration(
 			})
 		}
 	case native.MacroCaptured, native.MacroExported:
+		state := runner.RecordingState()
+		if state.Active && state.BoardOwned && status.DroppedSteps != 0 {
+			// The MCU retained ring is a reconnect-safe prefix. While this exact
+			// connection remains present, timestamped Action events keep extending
+			// the host recording beyond that prefix until the user explicitly
+			// stops. Do not let the bounded/offline lifecycle seal it early.
+			runner.recordMu.RLock()
+			sameCapture := runner.recordCapture == token
+			runner.recordMu.RUnlock()
+			if sameCapture && recordingConnectionMatches(runner.runtime.Snapshot(), token) {
+				runner.recordMu.Lock()
+				runner.recording.DroppedSteps = status.DroppedSteps
+				runner.recordMu.Unlock()
+				runner.runtime.PublishStructuredEvent(Event{
+					Kind: "macro.recording", Lifecycle: "streaming-host", State: "recording",
+					Text: fmt.Sprintf(
+						"board capture %d retained ring is full; connected MCU-timestamped action streaming continues until explicit stop",
+						status.ID,
+					),
+				})
+				return
+			}
+		}
 		runner.beginBoardCaptureFinalization(token, status)
 	case native.MacroIdle, native.MacroCancelled, native.MacroFailed:
 		runner.finishBoardRecordingLifecycle(token, status.State)
@@ -2053,8 +2187,9 @@ func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 		if frequency == 0 {
 			frequency = step.Value
 		}
-		if step.DurationMS == 0 || (frequency != 0 && (frequency < 20 || frequency > 20000)) {
-			return 0, nil, errors.New("buzzer requires duration_ms and frequency 0 or 20..20000 Hz")
+		if (frequency == 0 && step.DurationMS != 0) ||
+			(frequency != 0 && (step.DurationMS == 0 || frequency < 20 || frequency > 20000)) {
+			return 0, nil, errors.New("buzzer requires frequency/duration 0/0 to stop, or frequency 20..20000 Hz with nonzero duration_ms")
 		}
 		return native.OpBuzzer, native.BuzzerPayload(frequency, step.DurationMS), nil
 	case "display", "message":

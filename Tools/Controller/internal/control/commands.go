@@ -779,7 +779,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS | buzzer status | buzzer path board|host|both|none", Summary: "play a tone or select board/PC buzzer routing",
+		Name: "buzzer", Usage: "buzzer FREQUENCY_HZ DURATION_MS | buzzer 0 0 | buzzer status | buzzer path board|host|both|none", Summary: "play/stop a tone or select board/PC buzzer routing",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) >= 1 && (strings.EqualFold(args[0], "status") || strings.EqualFold(args[0], "path")) {
 				return buzzerRoutingCommand(ctx, runtime, options, args)
@@ -788,13 +788,24 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 			if err != nil {
 				return "", err
 			}
-			if values[1] == 0 {
-				return "", errors.New("buzzer duration must be nonzero")
+			stopping := values[0] == 0 && values[1] == 0
+			if !stopping && values[1] == 0 {
+				return "", errors.New("buzzer duration must be nonzero unless frequency/duration are 0/0 to stop")
 			}
-			if values[0] != 0 && (values[0] < 20 || values[0] > 20000) {
+			if values[0] == 0 && values[1] != 0 {
+				return "", errors.New("buzzer stop is exactly 0 0; timed pauses belong to melodies")
+			}
+			if !stopping && (values[0] < 20 || values[0] > 20000) {
 				return "", errors.New(
-					"buzzer frequency must be 0 or 20..20000 Hz",
+					"buzzer frequency must be 20..20000 Hz, or 0 with duration 0 to stop",
 				)
+			}
+			outputs.StopMelody()
+			if stopping {
+				if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(0, 0)); err != nil {
+					return "", err
+				}
+				return "buzzer stopped", nil
 			}
 			// A direct tone is an explicit action on every surface, but it must
 			// never bypass the firmware-owned silent flag.  Query before sending
@@ -807,7 +818,6 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 			if settings.Flags&native.SettingsSilent != 0 {
 				return "buzzer suppressed: board is silent", nil
 			}
-			outputs.StopMelody()
 			if err := command(ctx, runtime, native.OpBuzzer, native.BuzzerPayload(uint16(values[0]), uint16(values[1]))); err != nil {
 				return "", err
 			}
@@ -859,7 +869,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|stop|discard|play NAME_OR_ID|status|monitor|cancel [keep]",
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record board start ID|stop|clear [force]|status|record status|save|stop|discard|play NAME_OR_ID|status|monitor|cancel [keep]",
 		Summary: "manage and play MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
@@ -4527,7 +4537,7 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|stop|discard|play NAME_OR_ID|status|monitor|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record board start ID|stop|clear [force]|status|record status|save|stop|discard|play NAME_OR_ID|status|monitor|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4654,9 +4664,55 @@ func macroCommand(
 		return fmt.Sprintf("macro %d/%s category set to %q in HOST configuration", macro.ID, macro.Name, macro.Category), nil
 	case "record":
 		if len(args) < 2 {
-			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|stop|discard")
+			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|board start ID|stop|clear [force]|status|save|stop|discard")
 		}
 		switch strings.ToLower(args[1]) {
+		case "board":
+			if len(args) < 3 {
+				return "", errors.New("usage: macro record board start ID|stop|clear [force]|status")
+			}
+			switch strings.ToLower(args[2]) {
+			case "start":
+				if len(args) != 4 {
+					return "", errors.New("usage: macro record board start ID")
+				}
+				id, parseErr := strconv.ParseUint(args[3], 0, 8)
+				if parseErr != nil {
+					return "", fmt.Errorf("macro capture ID: %w", parseErr)
+				}
+				state, startErr := runner.StartBoardCapture(ctx, byte(id))
+				if startErr != nil {
+					return "", startErr
+				}
+				return fmt.Sprintf("board macro capture %d started; front-panel, RF, and accepted ordinary actions use the retained MCU ring", state.BoardID), nil
+			case "stop", "save":
+				if len(args) != 3 {
+					return "", errors.New("usage: macro record board stop")
+				}
+				state, stopErr := runner.StopBoardCapture(ctx)
+				if stopErr != nil {
+					return "", stopErr
+				}
+				return fmt.Sprintf("board macro capture %d sealed; retained pages are being fetched, deduplicated, saved, and export-acknowledged", state.BoardID), nil
+			case "clear":
+				if len(args) > 4 || (len(args) == 4 && !strings.EqualFold(args[3], "force")) {
+					return "", errors.New("usage: macro record board clear [force]")
+				}
+				status, clearErr := runner.ClearBoardCapture(ctx, len(args) == 4)
+				if clearErr != nil {
+					return "", clearErr
+				}
+				return fmt.Sprintf("retained board macro capture cleared; state=%d fill=%d", status.State, status.Fill), nil
+			case "status":
+				if len(args) != 3 {
+					return "", errors.New("usage: macro record board status")
+				}
+				state := runner.RecordingState()
+				device := runner.State().Device
+				return fmt.Sprintf("board macro recording active=%t owned=%t id=%d steps=%d dropped=%d device_state=%d fill=%d accepted=%d", state.Active, state.BoardOwned, state.BoardID, state.Steps, state.DroppedSteps, device.State, device.Fill, device.AcceptedSteps), nil
+			default:
+				return "", errors.New("usage: macro record board start ID|stop|clear [force]|status")
+			}
 		case "start":
 			if len(args) < 3 || len(args) > 5 {
 				return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]")
@@ -4701,7 +4757,7 @@ func macroCommand(
 			}
 			return fmt.Sprintf("macro %d/%s recording discarded", macro.ID, macro.Name), nil
 		default:
-			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|stop|discard")
+			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|board start ID|stop|clear [force]|status|save|stop|discard")
 		}
 	case "play", "run", "start":
 		if len(args) != 2 {
