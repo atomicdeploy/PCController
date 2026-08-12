@@ -28,6 +28,8 @@ import (
 type remoteTUIIPC struct {
 	address string
 	auth    string
+	callFn  func(context.Context, string, any, any) error
+	retry   time.Duration
 
 	events chan control.Event
 	cancel context.CancelFunc
@@ -109,6 +111,9 @@ func (client *remoteTUIIPC) call(
 	params any,
 	target any,
 ) error {
+	if client.callFn != nil {
+		return client.callFn(ctx, method, params, target)
+	}
 	return callPrimaryAtAuthenticated(ctx, client.address, client.auth, method, params, target)
 }
 
@@ -240,7 +245,7 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 			err := client.call(requestContext, "controller.event.latest", map[string]any{}, &latest)
 			cancel()
 			if err != nil {
-				if !remoteRetry(ctx) {
+				if !client.remoteRetry(ctx) {
 					return
 				}
 				continue
@@ -264,6 +269,16 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 			}
 			probeErr := client.call(probeContext, "controller.event.latest", map[string]any{}, &latest)
 			probeCancel()
+			if probeErr != nil {
+				// Transport/authentication failures are not long-poll timeouts.
+				// Re-enter discovery after a bounded delay instead of spinning
+				// RPC, sticky-name resolution, and Bubble Tea goroutines.
+				haveCursor = false
+				if !client.remoteRetry(ctx) {
+					return
+				}
+				continue
+			}
 			if probeErr == nil && latest.ID < cursor {
 				cursor = latest.ID
 			}
@@ -278,8 +293,12 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 	}
 }
 
-func remoteRetry(ctx context.Context) bool {
-	timer := time.NewTimer(500 * time.Millisecond)
+func (client *remoteTUIIPC) remoteRetry(ctx context.Context) bool {
+	delay := client.retry
+	if delay <= 0 {
+		delay = 500 * time.Millisecond
+	}
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
 	case <-timer.C:

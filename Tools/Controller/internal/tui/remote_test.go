@@ -4,12 +4,42 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/shell"
 )
+
+func TestIdleSpinnerTickDoesNotScheduleRenderLoop(t *testing.T) {
+	model := RichPreviewModel(false)
+	_, command := model.Update(spinner.TickMsg{})
+	if command != nil {
+		t.Fatal("idle spinner tick scheduled another full-screen render")
+	}
+}
+
+func TestRemoteSnapshotPollingIsBackstopNotRenderLoop(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	snapshot.Status.DoorOpen = true
+	model := Model{
+		remote:         &RemoteBackend{},
+		remoteSnapshot: snapshot,
+		page:           PageDashboard,
+		prefs:          Preferences{PollInterval: 250 * time.Millisecond},
+	}
+	if interval := model.statusInterval(); interval != time.Second {
+		t.Fatalf("remote snapshot interval=%s, want 1s push-event backstop", interval)
+	}
+
+	model.remote = nil
+	model.preview = &snapshot
+	if interval := model.statusInterval(); interval != 125*time.Millisecond {
+		t.Fatalf("local door-open interval=%s, want 125ms", interval)
+	}
+}
 
 func TestRemoteBackendKeepsFullModelAndRelaysPortOpen(t *testing.T) {
 	localRuntime := control.New(control.Options{})
