@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +17,177 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 )
+
+type macroPlaybackRequest struct {
+	generation uint64
+	opcode     byte
+	payload    []byte
+}
+
+type macroPlaybackScript struct {
+	runtime *Runtime
+
+	mu                sync.Mutex
+	requests          []macroPlaybackRequest
+	queryCount        int
+	streamPeriodMS    uint16
+	failRun           bool
+	failPlaybackQuery bool
+	playing           chan struct{}
+	playingOnce       sync.Once
+}
+
+func newMacroPlaybackScriptRunner(
+	t *testing.T,
+) (*Runtime, *MacroRunner, *macroPlaybackScript) {
+	t.Helper()
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.session = &link.Session{}
+	runtime.generation = 7
+	runtime.port = ports.Info{
+		Name: "COM7", IsUSB: true, VID: "1A86", PID: "7523",
+		SerialNumber: "macro-timing-board",
+	}
+	runtime.hello = native.Hello{
+		BoardKind:    native.BoardKindPCController,
+		BuildHash:    0x12345678,
+		Capabilities: native.CapabilityTimedMacroQueue,
+	}
+	runtime.connectionState = "connected"
+	runtime.mu.Unlock()
+
+	config := appconfig.Defaults()
+	config.Macros = []appconfig.Macro{{
+		ID: 7, Name: "demo", Category: "test",
+		Steps: []appconfig.MacroStep{{Kind: "relays-off"}},
+	}}
+	runner := NewMacroRunner(
+		runtime,
+		func() []appconfig.Macro { return config.Macros },
+		func() appconfig.Config { return config },
+	)
+	// Keep best-effort front-panel presentation out of this protocol-order
+	// harness; the scripted request seam deliberately belongs only to the
+	// macro queue and stream guard.
+	runner.presentOnce.Do(func() { runner.present = make(chan MacroState, 1) })
+	script := &macroPlaybackScript{
+		runtime: runtime, streamPeriodMS: 500, playing: make(chan struct{}),
+	}
+	runner.requestGeneration = script.request
+	return runtime, runner, script
+}
+
+func (script *macroPlaybackScript) request(
+	_ context.Context,
+	generation uint64,
+	opcode byte,
+	payload []byte,
+	_ byte,
+) (native.Frame, error) {
+	snapshot := script.runtime.Snapshot()
+	if !snapshot.Connected || snapshot.Generation != generation {
+		return native.Frame{}, fmt.Errorf("connection generation %d is no longer active", generation)
+	}
+	script.mu.Lock()
+	defer script.mu.Unlock()
+	script.requests = append(script.requests, macroPlaybackRequest{
+		generation: generation, opcode: opcode, payload: append([]byte(nil), payload...),
+	})
+	switch opcode {
+	case native.OpGetSettings:
+		settings := native.DefaultSettings()
+		settings.StreamPeriodMS = script.streamPeriodMS
+		encoded, err := settings.Payload()
+		return native.Frame{Opcode: native.OpSettings, Payload: encoded}, err
+	case native.OpSetStream:
+		if len(payload) != 2 {
+			return native.Frame{}, errors.New("invalid SET_STREAM test payload")
+		}
+		script.streamPeriodMS = binary.LittleEndian.Uint16(payload)
+		return native.Frame{Opcode: native.OpACK}, nil
+	case native.OpMacroStep:
+		if len(payload) == 1 && payload[0] == 1 {
+			if script.failRun {
+				return native.Frame{}, errors.New("forced RUN failure")
+			}
+			return native.Frame{Opcode: native.OpACK}, nil
+		}
+		if len(payload) == 1 && payload[0] == 2 {
+			script.queryCount++
+			if script.queryCount == 1 {
+				return macroPlaybackStatusFrame(native.MacroStatus{
+					Schema: native.MacroQueueSchema, State: native.MacroIdle,
+				}), nil
+			}
+			script.playingOnce.Do(func() { close(script.playing) })
+			if script.failPlaybackQuery {
+				return native.Frame{}, errors.New("forced playback status failure")
+			}
+			status := native.MacroStatus{
+				Schema: native.MacroQueueSchema, ID: 7,
+				AcceptedSteps: 1, AcceptedBytes: 6, TotalSteps: 1,
+				StartedAtUS: 1000,
+			}
+			if script.queryCount == 2 {
+				status.State, status.Fill = native.MacroPlaying, 6
+			} else {
+				status.State, status.ExecutedSteps = native.MacroCompleted, 1
+			}
+			return macroPlaybackStatusFrame(status), nil
+		}
+	}
+	return native.Frame{Opcode: native.OpACK}, nil
+}
+
+func macroPlaybackStatusFrame(status native.MacroStatus) native.Frame {
+	payload := make([]byte, 21)
+	payload[0] = native.EventMacro
+	payload[1] = native.MacroQueueSchema
+	payload[2] = status.State
+	payload[3] = status.ID
+	binary.LittleEndian.PutUint16(payload[4:6], status.AcceptedSteps)
+	binary.LittleEndian.PutUint16(payload[6:8], status.ExecutedSteps)
+	binary.LittleEndian.PutUint16(payload[8:10], status.AcceptedBytes)
+	payload[10] = status.Fill
+	payload[11] = status.Underruns
+	payload[12] = status.DispatchErrors
+	binary.LittleEndian.PutUint32(payload[13:17], status.StartedAtUS)
+	binary.LittleEndian.PutUint16(payload[17:19], status.TotalSteps)
+	binary.LittleEndian.PutUint16(payload[19:21], status.DroppedSteps)
+	return native.Frame{Opcode: native.OpMacroStatus, Payload: payload}
+}
+
+func (script *macroPlaybackScript) requestSnapshot() []macroPlaybackRequest {
+	script.mu.Lock()
+	defer script.mu.Unlock()
+	result := make([]macroPlaybackRequest, len(script.requests))
+	copy(result, script.requests)
+	return result
+}
+
+func macroStreamValues(requests []macroPlaybackRequest) []uint16 {
+	var values []uint16
+	for _, request := range requests {
+		if request.opcode == native.OpSetStream && len(request.payload) == 2 {
+			values = append(values, binary.LittleEndian.Uint16(request.payload))
+		}
+	}
+	return values
+}
+
+func waitMacroPlaybackTerminal(t *testing.T, runner *MacroRunner) MacroState {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for runner.State().Running && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	state := runner.State()
+	if state.Running {
+		t.Fatal("macro playback did not reach a terminal state")
+	}
+	return state
+}
 
 func connectMacroRecordingTestRuntime(runtime *Runtime) {
 	runtime.mu.Lock()
@@ -84,6 +257,162 @@ func waitRecordingInactive(t *testing.T, runner *MacroRunner) {
 	}
 	if runner.RecordingState().Active {
 		t.Fatal("recording did not stop")
+	}
+}
+
+func TestMacroPlaybackDisablesPeriodicStreamBeforeRunAndRestoresOnCompletion(t *testing.T) {
+	runtime, runner, script := newMacroPlaybackScriptRunner(t)
+	if _, err := runner.Start(context.Background(), "demo"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-script.playing:
+	case <-time.After(time.Second):
+		t.Fatal("playback did not query the running MCU queue")
+	}
+	ackPayload := []byte{native.OpRelayAllOff, 0, 0, 0, 0, 0}
+	binary.LittleEndian.PutUint32(ackPayload[2:], 1000)
+	runtime.publishEvent(Event{
+		Kind: "rx",
+		Frame: native.Frame{
+			Seq: native.MacroExecutionSequence, Opcode: native.OpACK,
+			Payload: ackPayload,
+		},
+	})
+	state := waitMacroPlaybackTerminal(t, runner)
+	if state.Lifecycle != "completed" || !state.Faithful || state.EvidenceSteps != 1 {
+		t.Fatalf("completed playback state=%#v", state)
+	}
+
+	requests := script.requestSnapshot()
+	settingsIndex, disableIndex, runIndex, restoreIndex := -1, -1, -1, -1
+	for index, request := range requests {
+		switch {
+		case request.opcode == native.OpGetSettings:
+			settingsIndex = index
+		case request.opcode == native.OpSetStream && len(request.payload) == 2 &&
+			binary.LittleEndian.Uint16(request.payload) == 0:
+			disableIndex = index
+		case request.opcode == native.OpMacroStep && len(request.payload) == 1 && request.payload[0] == 1:
+			runIndex = index
+		case request.opcode == native.OpSetStream && len(request.payload) == 2 &&
+			binary.LittleEndian.Uint16(request.payload) == 500:
+			restoreIndex = index
+		}
+	}
+	if settingsIndex < 0 || disableIndex <= settingsIndex || runIndex <= disableIndex || restoreIndex <= runIndex {
+		t.Fatalf(
+			"stream guard order settings=%d disable=%d run=%d restore=%d requests=%#v",
+			settingsIndex, disableIndex, runIndex, restoreIndex, requests,
+		)
+	}
+	if values := macroStreamValues(requests); len(values) != 2 || values[0] != 0 || values[1] != 500 {
+		t.Fatalf("stream period sequence=%v", values)
+	}
+}
+
+func TestMacroPlaybackRestoresPeriodicStreamOnCancelAndFailures(t *testing.T) {
+	t.Run("cancel", func(t *testing.T) {
+		_, runner, script := newMacroPlaybackScriptRunner(t)
+		if _, err := runner.Start(context.Background(), "demo"); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-script.playing:
+		case <-time.After(time.Second):
+			t.Fatal("playback did not enter running state")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := runner.Cancel(ctx); err != nil {
+			t.Fatal(err)
+		}
+		state := runner.State()
+		if state.Lifecycle != "cancelled" {
+			t.Fatalf("cancel state=%#v", state)
+		}
+		if values := macroStreamValues(script.requestSnapshot()); len(values) != 2 || values[0] != 0 || values[1] != 500 {
+			t.Fatalf("cancel stream sequence=%v", values)
+		}
+	})
+
+	t.Run("playback failure", func(t *testing.T) {
+		_, runner, script := newMacroPlaybackScriptRunner(t)
+		script.failPlaybackQuery = true
+		if _, err := runner.Start(context.Background(), "demo"); err != nil {
+			t.Fatal(err)
+		}
+		state := waitMacroPlaybackTerminal(t, runner)
+		if state.Lifecycle != "failed" || !strings.Contains(state.LastError, "forced playback status failure") {
+			t.Fatalf("failed playback state=%#v", state)
+		}
+		if values := macroStreamValues(script.requestSnapshot()); len(values) != 2 || values[0] != 0 || values[1] != 500 {
+			t.Fatalf("failure stream sequence=%v", values)
+		}
+	})
+
+	t.Run("run failure", func(t *testing.T) {
+		_, runner, script := newMacroPlaybackScriptRunner(t)
+		script.failRun = true
+		if _, err := runner.Start(context.Background(), "demo"); err == nil ||
+			!strings.Contains(err.Error(), "forced RUN failure") {
+			t.Fatalf("RUN failure err=%v", err)
+		}
+		state := runner.State()
+		if state.Lifecycle != "failed" {
+			t.Fatalf("RUN failure state=%#v", state)
+		}
+		if values := macroStreamValues(script.requestSnapshot()); len(values) != 2 || values[0] != 0 || values[1] != 500 {
+			t.Fatalf("RUN failure stream sequence=%v", values)
+		}
+	})
+}
+
+func TestMacroPlaybackNeverRestoresStreamOnReplacementBoard(t *testing.T) {
+	runtime, runner, script := newMacroPlaybackScriptRunner(t)
+	if _, err := runner.Start(context.Background(), "demo"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-script.playing:
+	case <-time.After(time.Second):
+		t.Fatal("playback did not enter running state")
+	}
+	runtime.mu.Lock()
+	runtime.session = nil
+	runtime.generation = 8
+	runtime.port.SerialNumber = "replacement-board"
+	runtime.hello.BuildHash = 0x87654321
+	runtime.mu.Unlock()
+	// Wake the evidence wait immediately; the playback loop must fail closed
+	// before either cleanup or stream restoration can reach generation 8.
+	runtime.publishEvent(Event{Kind: "connection", Lifecycle: "replaced"})
+	state := waitMacroPlaybackTerminal(t, runner)
+	if state.Lifecycle != "failed" || !strings.Contains(state.LastError, "generation 7") {
+		t.Fatalf("replacement playback state=%#v", state)
+	}
+	requests := script.requestSnapshot()
+	if values := macroStreamValues(requests); len(values) != 1 || values[0] != 0 {
+		t.Fatalf("replacement board received restoration: stream sequence=%v requests=%#v", values, requests)
+	}
+}
+
+func TestMacroStreamLeaseAlsoRejectsSameGenerationIdentityReplacement(t *testing.T) {
+	runtime, runner, script := newMacroPlaybackScriptRunner(t)
+	snapshot := runtime.Snapshot()
+	lease := &macroStreamLease{
+		Generation: snapshot.Generation,
+		Board:      captureBoardIdentity(snapshot.Port, snapshot.Hello),
+		PeriodMS:   500,
+	}
+	runtime.mu.Lock()
+	runtime.port.SerialNumber = "replacement-board"
+	runtime.mu.Unlock()
+	if err := runner.restoreMacroStream(lease); err != nil {
+		t.Fatal(err)
+	}
+	if requests := script.requestSnapshot(); len(requests) != 0 {
+		t.Fatalf("same-generation replacement received restoration: %#v", requests)
 	}
 }
 

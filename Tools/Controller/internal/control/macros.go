@@ -71,6 +71,19 @@ type compiledMacro struct {
 	durationUS uint32
 }
 
+// macroStreamLease is a volatile, connection-bound promise to restore the
+// board's periodic STATUS cadence after MCU-timed playback. SET_STREAM is
+// deliberately used instead of rewriting the complete settings record. The
+// board identity check is independent of the generation check so a future
+// transport implementation cannot accidentally restore onto a replacement
+// controller while reusing a session token.
+type macroStreamLease struct {
+	Generation uint64
+	Board      string
+	PeriodMS   uint16
+	restored   bool
+}
+
 // boardCaptureToken binds an ephemeral MCU capture ID to one authenticated
 // connection and one board-clock epoch. IDs are intentionally reusable after
 // reboot; the full token is not.
@@ -115,6 +128,10 @@ type MacroRunner struct {
 	fetchCapture           func(boardCaptureToken) ([]byte, error)
 	queryCaptureStatus     func(uint64) (native.MacroStatus, error)
 	ackCapture             func(boardCaptureToken) error
+	// requestGeneration is a focused test seam. Production always falls back
+	// to Runtime.requestAtGeneration, preserving the authenticated-session
+	// pin and its request/response observation checks.
+	requestGeneration func(context.Context, uint64, byte, []byte, byte) (native.Frame, error)
 }
 
 // MacroRecordingState describes a HOST-owned recording session. Each captured
@@ -1628,11 +1645,15 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		return runner.State(), err
 	}
 	begun := false
+	var streamLease *macroStreamLease
 	fail := func(cause error) (MacroState, error) {
 		if begun {
 			if cleanupErr := runner.cancelBoardAtGeneration(snapshot.Generation, false); cleanupErr != nil {
 				cause = errors.Join(cause, fmt.Errorf("macro cleanup: %w", cleanupErr))
 			}
+		}
+		if restoreErr := runner.restoreMacroStream(streamLease); restoreErr != nil {
+			cause = errors.Join(cause, fmt.Errorf("restore telemetry stream: %w", restoreErr))
 		}
 		lease.Release()
 		runner.failStart(macro, cause)
@@ -1659,6 +1680,10 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	if err := runner.showMacroIdentity(ctx, snapshot.Generation, compiled); err != nil {
 		runner.runtime.PublishHostEvent("macro.display", "macro identity display unavailable: "+err.Error())
 	}
+	streamLease, err = runner.pauseMacroStream(ctx, snapshot)
+	if err != nil {
+		return fail(fmt.Errorf("pause periodic telemetry for exact macro timing: %w", err))
+	}
 	if _, err = runner.request(ctx, snapshot.Generation, native.OpMacroStep, native.MacroQueueRunPayload(), native.OpACK); err != nil {
 		return fail(err)
 	}
@@ -1673,7 +1698,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 	state := runner.state
 	runner.mu.Unlock()
 	runner.publishLifecycle("started", state, nil)
-	go runner.play(playContext, done, snapshot.Generation, compiled, sent, afterID, lease)
+	go runner.play(playContext, done, snapshot.Generation, compiled, sent, afterID, lease, streamLease)
 	return state, nil
 }
 
@@ -1732,6 +1757,7 @@ func (runner *MacroRunner) play(
 	sent int,
 	afterID uint64,
 	lease *ProgramStateLease,
+	streamLease *macroStreamLease,
 ) {
 	defer close(done)
 	defer lease.Release()
@@ -1867,6 +1893,9 @@ func (runner *MacroRunner) play(
 			err = errors.Join(err, fmt.Errorf("macro safe-stop cleanup: %w", cleanupErr))
 		}
 	}
+	if restoreErr := runner.restoreMacroStream(streamLease); restoreErr != nil {
+		err = errors.Join(err, fmt.Errorf("restore telemetry stream: %w", restoreErr))
+	}
 	runner.finishPlayback(done, compiled.definition, status, observed, cancelled, err)
 }
 
@@ -1925,6 +1954,83 @@ func (runner *MacroRunner) queryBoard(ctx context.Context, generation uint64) (n
 	return native.ParseMacroStatus(frame.Payload)
 }
 
+// pauseMacroStream drains and disables only the periodic STATUS producer
+// before RUN is acknowledged. Macro execution ACKs, macro status events, and
+// all other pushed state continue over the ordinary event path while this
+// lease is active.
+func (runner *MacroRunner) pauseMacroStream(
+	ctx context.Context,
+	snapshot Snapshot,
+) (*macroStreamLease, error) {
+	frame, err := runner.request(
+		ctx, snapshot.Generation,
+		native.OpGetSettings, nil, native.OpSettings,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("read current stream period: %w", err)
+	}
+	settings, err := native.ParseSettings(frame.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("parse current stream period: %w", err)
+	}
+	lease := &macroStreamLease{
+		Generation: snapshot.Generation,
+		Board:      captureBoardIdentity(snapshot.Port, snapshot.Hello),
+		PeriodMS:   settings.StreamPeriodMS,
+	}
+	if !runner.macroStreamLeaseCurrent(lease) {
+		return nil, fmt.Errorf("connection generation %d changed before telemetry could be paused", snapshot.Generation)
+	}
+	payload, err := native.StreamPeriodPayload(0)
+	if err != nil {
+		return nil, err
+	}
+	// Return the lease even when the request reports an error: the MCU may
+	// have accepted SET_STREAM before the response transport failed. A
+	// same-generation restoration attempt is harmless in that uncertainty.
+	if _, err = runner.request(
+		ctx, snapshot.Generation,
+		native.OpSetStream, payload, native.OpACK,
+	); err != nil {
+		return lease, fmt.Errorf("disable periodic telemetry: %w", err)
+	}
+	return lease, nil
+}
+
+// restoreMacroStream is idempotent and intentionally uses a fresh bounded
+// context so caller cancellation cannot strand a still-connected board at a
+// zero telemetry period. A disconnected or replacement session is skipped;
+// restoration must never target a board that did not grant this lease.
+func (runner *MacroRunner) restoreMacroStream(lease *macroStreamLease) error {
+	if lease == nil || lease.restored {
+		return nil
+	}
+	lease.restored = true
+	if !runner.macroStreamLeaseCurrent(lease) {
+		return nil
+	}
+	payload, err := native.StreamPeriodPayload(lease.PeriodMS)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
+	defer cancel()
+	_, err = runner.request(
+		ctx, lease.Generation,
+		native.OpSetStream, payload, native.OpACK,
+	)
+	return err
+}
+
+func (runner *MacroRunner) macroStreamLeaseCurrent(lease *macroStreamLease) bool {
+	if lease == nil || runner.runtime == nil {
+		return false
+	}
+	snapshot := runner.runtime.Snapshot()
+	return snapshot.Connected && snapshot.Generation == lease.Generation &&
+		captureBoardIdentity(snapshot.Port, snapshot.Hello) == lease.Board
+}
+
 func (runner *MacroRunner) request(
 	ctx context.Context,
 	generation uint64,
@@ -1934,6 +2040,11 @@ func (runner *MacroRunner) request(
 ) (native.Frame, error) {
 	requestContext, cancel := context.WithTimeout(ctx, macroRequestTimeout)
 	defer cancel()
+	if runner.requestGeneration != nil {
+		return runner.requestGeneration(
+			requestContext, generation, opcode, payload, expected,
+		)
+	}
 	return runner.runtime.requestAtGeneration(
 		requestContext, generation, opcode, payload, expected,
 	)
@@ -1951,7 +2062,7 @@ func (runner *MacroRunner) cancelBoard(keepOutputs bool) error {
 func (runner *MacroRunner) cancelBoardAtGeneration(generation uint64, keepOutputs bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
 	defer cancel()
-	_, err := runner.runtime.requestAtGeneration(
+	_, err := runner.request(
 		ctx, generation, native.OpMacroCancel,
 		native.MacroQueueCancelPayload(keepOutputs), native.OpACK,
 	)
