@@ -114,15 +114,41 @@ func TestWatchedConfigHotReloadPushesActiveDefinitionAndEmitsEvent(t *testing.T)
 			manager.UpdateConfig(value.HostMenus)
 		}
 	}()
-	go store.Watch(ctx, 10*time.Millisecond, nil, func(err error) { t.Errorf("watch error: %v", err) })
+	start := make(chan struct{})
+	watchErrors := make(chan error, 1)
+	go func() {
+		<-start
+		store.Watch(ctx, 10*time.Millisecond, nil, func(err error) {
+			select {
+			case watchErrors <- err:
+			default:
+			}
+		})
+	}()
 	value := store.Current()
 	value.HostMenus.Menus[0].Label = "LIVE"
 	value.HostMenus.Menus[0].Title = "Watched Menu"
 	value.HostMenus.Menus[0].Content = "Updated now"
-	if err := appconfig.Write(path, value); err != nil {
+	writeDone := make(chan error, 1)
+	go func() {
+		<-start
+		// Repeated atomic replacements exercise the macOS kqueue registration
+		// window where a temporary file can disappear during fsnotify's scan.
+		for attempt := 0; attempt < 16; attempt++ {
+			if err := appconfig.Write(path, value); err != nil {
+				writeDone <- err
+				return
+			}
+		}
+		writeDone <- nil
+	}()
+	close(start)
+	if err := <-writeDone; err != nil {
 		t.Fatal(err)
 	}
 	select {
+	case err := <-watchErrors:
+		t.Fatalf("watch registration/reload error: %v", err)
 	case change := <-events:
 		if change.Kind != "menu.content.changed" || !change.Active {
 			t.Fatalf("watch event=%+v", change)
@@ -131,6 +157,8 @@ func TestWatchedConfigHotReloadPushesActiveDefinitionAndEmitsEvent(t *testing.T)
 		t.Fatal("watched host-menu edit emitted no normalized event")
 	}
 	select {
+	case err := <-watchErrors:
+		t.Fatalf("watch registration/reload error: %v", err)
 	case panel := <-pushed:
 		if panel.Panel.Segments != "LIVE" || panel.Panel.LCDLine1 != "Watched Menu" || panel.Panel.LCDLine2 != "Updated now" {
 			t.Fatalf("watched active preview=%+v", panel)
