@@ -1260,6 +1260,7 @@ const PR_ORIGINAL_REQUESTS = {
   204: [PROMPT_EXCERPTS.displayPresentation, PROMPT_EXCERPTS.peripheralPresenceUI],
   205: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.apiRace, PROMPT_EXCERPTS.fullDuplexTracking],
   206: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
+  207: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
