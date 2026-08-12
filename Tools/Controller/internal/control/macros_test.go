@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -10,9 +11,22 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 )
+
+func connectMacroRecordingTestRuntime(runtime *Runtime) {
+	runtime.mu.Lock()
+	runtime.session = &link.Session{}
+	runtime.port = ports.Info{
+		Name: "COM-test", IsUSB: true, VID: "1A86", PID: "7523",
+		SerialNumber: "macro-test-board",
+	}
+	runtime.hello = native.Hello{BoardKind: 1, BuildHash: 0x12345678}
+	runtime.connectionState = "connected"
+	runtime.mu.Unlock()
+}
 
 type macroCaptureTestStore struct {
 	mu     sync.RWMutex
@@ -110,6 +124,7 @@ func TestCompileMacroEncodesOrdinaryOpcodesWithExactOffsets(t *testing.T) {
 
 func TestMacroRecorderUsesWrappingMCUAcknowledgementDeltas(t *testing.T) {
 	runtime := New(Options{})
+	connectMacroRecordingTestRuntime(runtime)
 	config := appconfig.Defaults()
 	runner := NewMacroRunner(
 		runtime,
@@ -152,6 +167,7 @@ func TestMacroRecorderUsesWrappingMCUAcknowledgementDeltas(t *testing.T) {
 
 func TestMacroRecorderCombinesPanelAndRFWithoutDuplicatingHostEcho(t *testing.T) {
 	runtime := New(Options{})
+	connectMacroRecordingTestRuntime(runtime)
 	config := appconfig.Defaults()
 	runner := NewMacroRunner(
 		runtime,
@@ -207,6 +223,156 @@ func TestMacroRecorderCombinesPanelAndRFWithoutDuplicatingHostEcho(t *testing.T)
 		!strings.Contains(shown, "at_us=1750") ||
 		!strings.Contains(shown, "delta_us=1750") {
 		t.Fatalf("exact MCU offsets/deltas missing from macro show:\n%s", shown)
+	}
+}
+
+func TestMacroRecorderOrdersConcurrentHostAndPanelEvidenceAcrossRollover(t *testing.T) {
+	runtime, runner, _ := newMacroCaptureTestRunner(t)
+	connectMacroRecordingTestRuntime(runtime)
+	if _, err := runner.StartRecording("ordered", "mixed", "blue"); err != nil {
+		t.Fatal(err)
+	}
+	// The pump publishes the later panel edge first. The requester goroutine
+	// then publishes the earlier ACK edge after micros wrapped.
+	runner.captureAction(ActionEvidence{
+		Opcode: native.OpRelaySide, Payload: []byte{0, 1},
+		Source: native.InputSourcePhysical, BoardOrigin: true,
+		DeviceMicros: 0x00000100, Timed: true, Generation: 0,
+	})
+	runner.captureAction(ActionEvidence{
+		Opcode: native.OpRelayAllOff, Payload: nil,
+		Source:       native.InputSourceHost,
+		DeviceMicros: 0xFFFFFF00, Timed: true, Generation: 0,
+	})
+	macro, err := runner.StopRecording(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(macro.Steps) != 2 || macro.Steps[0].Kind != "relays-off" ||
+		macro.Steps[0].AtUS != 0 || macro.Steps[1].Kind != "motion" ||
+		macro.Steps[1].AtUS != 512 {
+		t.Fatalf("concurrent MCU evidence was not wrap-ordered: %#v", macro.Steps)
+	}
+}
+
+func TestHostRecordingStopsOnPinnedBoardReplacement(t *testing.T) {
+	runtime, runner, _ := newMacroCaptureTestRunner(t)
+	connectMacroRecordingTestRuntime(runtime)
+	if _, err := runner.StartRecording("pinned", "test", "green"); err != nil {
+		t.Fatal(err)
+	}
+	runtime.mu.Lock()
+	runtime.generation++
+	runtime.port.SerialNumber = "replacement-board"
+	runtime.mu.Unlock()
+	runner.captureAction(ActionEvidence{
+		Opcode: native.OpRelayAllOff, Source: native.InputSourceHost,
+		DeviceMicros: 500, Timed: true, Generation: 1,
+	})
+	state := runner.RecordingState()
+	if state.Active || !strings.Contains(state.LastError, "pinned board connection changed") {
+		t.Fatalf("replacement board did not fail closed: %#v", state)
+	}
+}
+
+func TestHostACKRecordingPreservesVariableDisplayAndStatusEffect(t *testing.T) {
+	display, err := native.DisplayTextPayload(native.DisplayLCD, 250, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err := native.StatusEffectPayload(native.StatusEffectOptions{
+		Kind: native.StatusEffectBreathe, Red: 1, Green: 2, Blue: 3,
+		Brightness: 200, MinimumBrightness: 20, PeriodMS: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, evidence := range []ActionEvidence{
+		{Opcode: native.OpDisplayText, Payload: display, Source: native.InputSourceHost},
+		{Opcode: native.OpStatusEffect, Payload: effect, Source: native.InputSourceHost},
+	} {
+		step, ok := recordedMacroStep(evidence)
+		if !ok {
+			t.Fatalf("variable host ACK action was not recordable: %#v", evidence)
+		}
+		opcode, payload, compileErr := compileMacroCommand(step)
+		if compileErr != nil || opcode != evidence.Opcode || !strings.EqualFold(
+			hex.EncodeToString(payload), hex.EncodeToString(evidence.Payload),
+		) {
+			t.Fatalf("variable action was not lossless: step=%#v payload=% X err=%v", step, payload, compileErr)
+		}
+		evidence.BoardOrigin = true
+		if _, accepted := recordedMacroStep(evidence); accepted {
+			t.Fatalf("variable payload entered compact board Action evidence: %#v", evidence)
+		}
+	}
+}
+
+func TestRawOpcodeACKUsesSharedExactEvidenceIngress(t *testing.T) {
+	runtime := New(Options{})
+	var captured []ActionEvidence
+	release := runtime.ObserveActions(func(evidence ActionEvidence) {
+		captured = append(captured, evidence)
+	})
+	defer release()
+	for index, test := range []struct {
+		opcode  byte
+		payload []byte
+		atUS    uint32
+	}{
+		{native.OpRelayAllOff, nil, 0x01020304},
+		{native.OpRFTx, []byte{1, 2, 3, 4, 24, 1, 0x5E, 1}, 0xA1B2C3D4},
+	} {
+		ack := native.Frame{Opcode: native.OpACK, Payload: []byte{
+			test.opcode, 0, byte(test.atUS), byte(test.atUS >> 8),
+			byte(test.atUS >> 16), byte(test.atUS >> 24),
+		}}
+		if !runtime.publishAcknowledgedHostAction(test.opcode, test.payload, ack, 7) {
+			t.Fatalf("case %d was not published", index)
+		}
+	}
+	if len(captured) != 2 || captured[0].DeviceMicros != 0x01020304 ||
+		captured[1].DeviceMicros != 0xA1B2C3D4 ||
+		len(captured[0].Payload) != 0 || len(captured[1].Payload) != 8 {
+		t.Fatalf("raw opcode ACK evidence lost exact timestamp/payload: %#v", captured)
+	}
+}
+
+func TestBoardLocalReplayPublishesLiveProgressAndTerminalState(t *testing.T) {
+	_, runner, store := newMacroCaptureTestRunner(t)
+	const board = "transport=macro-test-board;vid=1A86;pid=7523;kind=1;build=12345678"
+	store.mu.Lock()
+	store.config.Macros = []appconfig.Macro{{
+		ID: 3, Name: "door cycle", Category: "motion",
+		CaptureBoard: board, CaptureID: 7,
+		Steps: []appconfig.MacroStep{
+			{Kind: "relays-off"}, {AtUS: 500, Kind: "relays-off"},
+		},
+	}}
+	store.mu.Unlock()
+	playing := native.MacroStatus{
+		Schema: native.MacroQueueSchema, State: native.MacroPlaying,
+		ID: 7, TotalSteps: 2, StartedAtUS: 5000,
+	}
+	runner.handleBoardMacroStatusAtGeneration(playing, 9, board)
+	state := runner.State()
+	if !state.Running || state.Name != "door cycle" ||
+		state.Lifecycle != "local-playing" || state.DeviceStartedAtUS != 5000 ||
+		state.Step != 0 || state.StepCount != 2 {
+		t.Fatalf("local replay start was not observable: %#v", state)
+	}
+	playing.ExecutedSteps = 1
+	runner.handleBoardMacroStatusAtGeneration(playing, 9, board)
+	if state = runner.State(); state.Step != 1 || state.Device.ExecutedSteps != 1 {
+		t.Fatalf("local replay progress was not observable: %#v", state)
+	}
+	playing.State = native.MacroCompleted
+	playing.ExecutedSteps = 2
+	runner.handleBoardMacroStatusAtGeneration(playing, 9, board)
+	state = runner.State()
+	if state.Running || state.Lifecycle != "local-completed" ||
+		state.Step != 2 || !state.Faithful || state.DeviceStartedAtUS != 5000 {
+		t.Fatalf("local replay completion was not observable: %#v", state)
 	}
 }
 
@@ -596,6 +762,13 @@ func TestCaptureStreamDecodeMergeAndMetadataUpdate(t *testing.T) {
 func TestMacroExplicitSafeCancelOverridesBeginKeepPreference(t *testing.T) {
 	if payload := native.MacroQueueCancelPayload(false); len(payload) != 1 || payload[0] != 0 {
 		t.Fatalf("safe cancel must be explicit zero, got %v", payload)
+	}
+}
+
+func TestObservedPlaybackCountHasNoOffByOne(t *testing.T) {
+	if observedExecutionCount(0) != 0 || observedExecutionCount(1) != 1 ||
+		observedExecutionCount(7) != 7 || observedExecutionCount(70000) != 65535 {
+		t.Fatal("observed playback count is not the exact acknowledged-step count")
 	}
 }
 

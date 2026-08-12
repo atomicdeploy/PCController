@@ -157,6 +157,14 @@ func TestBoardActionEventRejectsControlAndOversizedPayload(t *testing.T) {
 }
 
 func TestBoardCaptureCommandsCarryIdentity(t *testing.T) {
+	start := MacroCaptureStartPayload(0x2A)
+	if len(start) != 5 || start[0] != MacroQueueSchema || start[1] != 0x2A ||
+		start[2] != MacroCaptureInputsFlag || start[3] != 0 || start[4] != 0 {
+		t.Fatalf("capture start payload=% X", start)
+	}
+	if stop := MacroCaptureStopPayload(); len(stop) != 1 || stop[0] != 5 {
+		t.Fatalf("capture stop payload=% X", stop)
+	}
 	query := MacroCaptureQueryPayload(0x2A, 0x1234)
 	if len(query) != 4 || query[0] != 3 || query[1] != 0x2A ||
 		binary.LittleEndian.Uint16(query[2:]) != 0x1234 {
@@ -166,6 +174,46 @@ func TestBoardCaptureCommandsCarryIdentity(t *testing.T) {
 	if len(ack) != 6 || ack[0] != 4 || ack[1] != 0x2A ||
 		binary.LittleEndian.Uint32(ack[2:]) != 0x78563412 {
 		t.Fatalf("capture acknowledgement payload=% X", ack)
+	}
+}
+
+func TestMacroVariablePlaybackActionsRemainHostOnlyAndSemantic(t *testing.T) {
+	display, err := DisplayTextPayload(DisplayLCD, 250, "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	effect, err := StatusEffectPayload(StatusEffectOptions{
+		Kind: StatusEffectBreathe, Red: 1, Green: 2, Blue: 3,
+		Brightness: 200, MinimumBrightness: 20, PeriodMS: 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []struct {
+		opcode  byte
+		payload []byte
+	}{{OpDisplayText, display}, {OpStatusEffect, effect}, {OpStatusEffect, StatusEffectReleasePayload()}} {
+		if !MacroPlaybackPayloadSemanticallyValid(action.opcode, action.payload) {
+			t.Fatalf("valid variable host action rejected: opcode=0x%02X payload=% X", action.opcode, action.payload)
+		}
+		if _, recordable := MacroBoardActionPayloadLength(action.opcode); recordable {
+			t.Fatalf("variable host action entered <=%d-byte board evidence", MacroBoardActionMaximumPayload)
+		}
+		if _, encodeErr := EncodeMacroRecord(10, action.opcode, action.payload); encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+	}
+	for _, invalid := range []struct {
+		opcode  byte
+		payload []byte
+	}{
+		{OpDisplayText, []byte{DisplayLCD, 0, 0, 5, 'x'}},
+		{OpStatusEffect, []byte{StatusEffectBreathe, 1}},
+		{OpRelayAllOff, []byte{1}},
+	} {
+		if MacroPlaybackPayloadSemanticallyValid(invalid.opcode, invalid.payload) {
+			t.Fatalf("malformed macro action accepted: opcode=0x%02X payload=% X", invalid.opcode, invalid.payload)
+		}
 	}
 }
 

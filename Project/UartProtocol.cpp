@@ -105,6 +105,15 @@ bool UartProtocol::sendAck(uint8_t sequence, uint8_t requestOpcode) {
   return send(Ack, sequence, payload, sizeof(payload));
 }
 
+bool UartProtocol::sendAckAt(uint8_t sequence, uint8_t requestOpcode,
+                             uint32_t capturedAtUs) {
+  timingOverrideUs_ = capturedAtUs;
+  timingOverrideActive_ = true;
+  const bool sent = sendAck(sequence, requestOpcode);
+  timingOverrideActive_ = false;
+  return sent;
+}
+
 bool UartProtocol::sendError(uint8_t sequence, uint8_t requestOpcode,
                              Error error) {
   if (responseErrors_ != UINT16_MAX) {

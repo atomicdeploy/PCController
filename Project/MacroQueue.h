@@ -24,6 +24,7 @@ public:
   static constexpr uint8_t Schema = 3;
   static constexpr uint8_t ExecutionSequence = 0xFE;
   static constexpr uint8_t KeepOutputsOnCancel = 1U << 0;
+  static constexpr uint8_t CaptureInputs = 1U << 1;
   static constexpr uint8_t CaptureExportAcknowledged = 1U << 7;
   static constexpr uint8_t QueueSize = 128;
   static constexpr uint8_t QueueCapacity = QueueSize - 1U;
@@ -99,6 +100,7 @@ private:
   void sendCaptureChunk(uint8_t sequence, uint16_t offset);
   void preserveCaptureSnapshot();
   void restoreCaptureSnapshot();
+  void restoreRetainedCaptureState();
 #endif
   void sendStatus(uint8_t opcode, uint8_t sequence);
   void fail();
@@ -115,6 +117,7 @@ private:
   uint8_t capturedHead_ = 0;
   uint8_t capturedUsed_ = 0;
   uint16_t capturedSteps_ = 0;
+  uint32_t captureStartedAtUs_ = 0;
   bool capturePlayback_ = false;
   bool capturedData_ = false;
 #endif

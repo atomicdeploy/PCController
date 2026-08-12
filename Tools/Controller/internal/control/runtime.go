@@ -765,6 +765,7 @@ func (runtime *Runtime) Request(
 	if !runtime.observeAtGeneration(frame, generation) {
 		return native.Frame{}, fmt.Errorf("connection generation %d changed while the request was in flight", generation)
 	}
+	runtime.publishAcknowledgedHostAction(opcode, payload, frame, generation)
 	return frame, nil
 }
 
@@ -817,14 +818,31 @@ func (runtime *Runtime) Command(
 	if err != nil {
 		return err
 	}
+	runtime.publishAcknowledgedHostAction(opcode, payload, frame, snapshot.Generation)
+	return nil
+}
+
+// publishAcknowledgedHostAction is the one recorder ingress for both typed
+// Command calls and raw Request/ExchangeOpcode surfaces. Board SourceHost
+// echoes remain filtered, so each accepted operation is recorded exactly once.
+func (runtime *Runtime) publishAcknowledgedHostAction(
+	opcode byte,
+	payload []byte,
+	frame native.Frame,
+	generation uint64,
+) bool {
+	if frame.Opcode != native.OpACK ||
+		!native.MacroPlaybackPayloadSemanticallyValid(opcode, payload) {
+		return false
+	}
 	deviceMicros, timed := native.ResponseDeviceMicros(frame)
 	runtime.publishActionEvidence(ActionEvidence{
 		Opcode: opcode, Payload: append([]byte(nil), payload...),
 		Source: native.InputSourceHost, SourceID: 0xFF,
 		DeviceMicros: deviceMicros, Timed: timed, ObservedAt: time.Now(),
-		Generation: snapshot.Generation,
+		Generation: generation,
 	})
-	return nil
+	return true
 }
 
 func (runtime *Runtime) publishActionEvidence(evidence ActionEvidence) {

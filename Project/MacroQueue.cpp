@@ -83,6 +83,14 @@ void MacroQueue::restoreCaptureSnapshot() {
   retainedSteps_ = capturedSteps_;
 }
 
+void MacroQueue::restoreRetainedCaptureState() {
+  restoreCaptureSnapshot();
+  wire_.report.startedAtUs = captureStartedAtUs_;
+  wire_.report.state =
+      (options_ & CaptureExportAcknowledged) != 0 ? Exported : Captured;
+  capturePlayback_ = false;
+}
+
 void MacroQueue::sendCaptureChunk(uint8_t sequence, uint16_t offset) {
   // [schema, command=3, id, total bytes LE16, offset LE16, chunk length,
   // raw ring bytes...].  Keeping chunks at forty bytes stays below the native
@@ -117,7 +125,13 @@ void MacroQueue::fail() {
   safeStopRequested_ = true;
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
   if (capturePlayback_ && capturedData_) {
-    restoreCaptureSnapshot();
+    // Report the failed local replay, then restore the retained capture as a
+    // first-class recoverable state.  A reconnect must never mistake a replay
+    // failure for loss of the board-owned recording.
+    sendStatus(ControllerProtocol::Event, 0);
+    restoreRetainedCaptureState();
+    sendStatus(ControllerProtocol::Event, 0);
+    return;
   } else {
     head_ = used_ = 0;
     retainedSteps_ = 0;
@@ -135,7 +149,7 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
   const uint8_t length = frame.payloadLength;
   Report &report = wire_.report;
   if (frame.opcode == ControllerProtocol::MacroStart) {
-    if (length < 5 || payload[0] != Schema || read16(payload + 3) == 0) {
+    if (length != 5 || payload[0] != Schema) {
       protocol_.sendError(frame.sequence, frame.opcode,
                           ControllerProtocol::BadPayload);
       return true;
@@ -143,6 +157,31 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
     if (active()) {
       protocol_.sendError(frame.sequence, frame.opcode,
                           ControllerProtocol::Busy);
+      return true;
+    }
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    // A host stream must not silently erase a capture that has not been
+    // explicitly cleared, including one already acknowledged as exported.
+    if (capturedData_) {
+      protocol_.sendError(frame.sequence, frame.opcode,
+                          ControllerProtocol::Busy);
+      return true;
+    }
+    if ((payload[2] & CaptureInputs) != 0) {
+      if (payload[2] != CaptureInputs || read16(payload + 3) != 0 ||
+          !beginCapture(payload[1], micros())) {
+        protocol_.sendError(frame.sequence, frame.opcode,
+                            ControllerProtocol::BadPayload);
+        return true;
+      }
+      protocol_.sendAck(frame.sequence, frame.opcode);
+      return true;
+    }
+#endif
+    if (read16(payload + 3) == 0 ||
+        (payload[2] & static_cast<uint8_t>(~KeepOutputsOnCancel)) != 0) {
+      protocol_.sendError(frame.sequence, frame.opcode,
+                          ControllerProtocol::BadPayload);
       return true;
     }
     memset(&report.acceptedSteps, 0,
@@ -177,10 +216,22 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
     return false;
   }
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
-  // FETCH [3, offset LE16].
-  if (length == 3 && payload[0] == 3) {
-    const uint16_t offset = read16(payload + 1);
-    if (!captured() || offset > used_) {
+  // FINISH_CAPTURE [5]. CLEAR_CAPTURE keeps the identity-guarded six-byte
+  // selector-5 form, so stop and destructive clear cannot be confused.
+  if (length == 1 && payload[0] == 5) {
+    if (!finishCapture()) {
+      protocol_.sendError(frame.sequence, frame.opcode,
+                          ControllerProtocol::BadPayload);
+      return true;
+    }
+    protocol_.sendAck(frame.sequence, frame.opcode);
+    return true;
+  }
+  // FETCH [3, id, offset LE16].  The identity byte prevents a delayed page
+  // request from reading a replacement capture that reused the same ring.
+  if (length == 4 && payload[0] == 3) {
+    const uint16_t offset = read16(payload + 2);
+    if (!captured() || payload[1] != report.id || offset > used_) {
       protocol_.sendError(frame.sequence, frame.opcode,
                           ControllerProtocol::BadPayload);
       return true;
@@ -191,7 +242,7 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
   // ACK_EXPORT [4, id, capture-start micros LE32].
   if (length == 6 && payload[0] == 4) {
     if (!captured() || payload[1] != report.id ||
-        read32(payload + 2) != report.startedAtUs) {
+        read32(payload + 2) != captureStartedAtUs_) {
       protocol_.sendError(frame.sequence, frame.opcode,
                           ControllerProtocol::BadPayload);
       return true;
@@ -205,13 +256,14 @@ bool MacroQueue::handle(const ControllerProtocol::Frame &frame) {
   // CLEAR_CAPTURE [5, id, capture-start micros LE32].
   if (length == 6 && payload[0] == 5) {
     if (!captured() || payload[1] != report.id ||
-        read32(payload + 2) != report.startedAtUs) {
+        read32(payload + 2) != captureStartedAtUs_) {
       protocol_.sendError(frame.sequence, frame.opcode,
                           ControllerProtocol::BadPayload);
       return true;
     }
     head_ = used_ = capturedHead_ = capturedUsed_ = 0;
     retainedSteps_ = capturedSteps_ = 0;
+    captureStartedAtUs_ = 0;
     capturedData_ = capturePlayback_ = false;
     options_ = 0;
     safeStopRequested_ = true;
@@ -322,17 +374,26 @@ void MacroQueue::completeStep(bool succeeded) {
     ++report.dispatchErrors;
   }
   if (report.executedSteps != report.totalSteps) {
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+    if (capturePlayback_) {
+      // Local replay has no host playback goroutine consuming sequence-0xFE
+      // evidence. Publish bounded progress so every connected monitor sees the
+      // exact executed-step count without polling.
+      sendStatus(ControllerProtocol::Event, 0);
+    }
+#endif
     return;
   }
-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
-  const bool exportedCapture =
-      capturePlayback_ && (options_ & CaptureExportAcknowledged) != 0;
-#endif
   report.state = used_ == 0 && report.dispatchErrors == 0 ? Completed : Failed;
   safeStopRequested_ = report.state == Failed;
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
   if (capturePlayback_ && capturedData_) {
-    restoreCaptureSnapshot();
+    // Preserve both lifecycle evidence and reconnect recovery: observers see
+    // the terminal replay state followed by the retained capture state.
+    sendStatus(ControllerProtocol::Event, 0);
+    restoreRetainedCaptureState();
+    sendStatus(ControllerProtocol::Event, 0);
+    return;
   } else {
     head_ = used_ = 0;
     retainedSteps_ = 0;
@@ -340,11 +401,6 @@ void MacroQueue::completeStep(bool succeeded) {
   capturePlayback_ = false;
 #else
   head_ = used_ = 0;
-#endif
-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
-  if (exportedCapture && capturedData_) {
-    report.state = Exported;
-  }
 #endif
   sendStatus(ControllerProtocol::Event, 0);
 }
@@ -358,7 +414,10 @@ void MacroQueue::cancel(bool keepOutputs) {
   safeStopRequested_ = ownedOutputs && !keepOutputs;
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
   if (capturePlayback_ && capturedData_) {
-    restoreCaptureSnapshot();
+    sendStatus(ControllerProtocol::Event, 0);
+    restoreRetainedCaptureState();
+    sendStatus(ControllerProtocol::Event, 0);
+    return;
   } else {
     head_ = used_ = 0;
     retainedSteps_ = 0;
@@ -402,6 +461,7 @@ bool MacroQueue::beginCapture(uint8_t id, uint32_t atUs) {
   report.state = Recording;
   report.id = id;
   report.startedAtUs = atUs;
+  captureStartedAtUs_ = atUs;
   startedAtUs_ = atUs;
   head_ = used_ = 0;
   retainedSteps_ = 0;
@@ -478,6 +538,7 @@ bool MacroQueue::playCapture(uint32_t atUs) {
   report.underruns = 0;
   report.totalSteps = retainedSteps_;
   startedAtUs_ = atUs;
+  report.startedAtUs = atUs;
   capturePlayback_ = true;
   safeStopRequested_ = false;
   sendStatus(ControllerProtocol::Event, 0);
