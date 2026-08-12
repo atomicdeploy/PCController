@@ -95,6 +95,7 @@ public:
 #if defined(PCCONTROLLER_NATIVE_TEST)
   uint16_t renderedFrames() const { return renderedFrames_; }
   const uint8_t *descriptorForTest() const { return hostDescriptor_; }
+  uint16_t effectElapsedForTest() const { return effectElapsedMs_; }
   uint8_t localMinimumForTest() const {
     return static_cast<uint8_t>(localBrightness_ >> 4);
   }

@@ -86,6 +86,76 @@ std::uint32_t virtualResetCount(
          (static_cast<std::uint32_t>(status[0].payload[47]) << 24U);
 }
 
+std::uint16_t virtualPwmValue(
+    pccontroller::virtual_board::VirtualBoard &board, std::uint8_t channel) {
+  const auto response = board.handle({pccontroller::wire::PwmGet, 0, {}});
+  const std::size_t offset = 2U + static_cast<std::size_t>(channel) * 2U;
+  require(response.size() == 1 && response[0].payload.size() >= offset + 2U,
+          "virtual PWM response is truncated");
+  return static_cast<std::uint16_t>(response[0].payload[offset]) |
+         static_cast<std::uint16_t>(response[0].payload[offset + 1U]) << 8U;
+}
+
+void testStatusEffectProgramStateOwnership() {
+  const auto path = temporaryEeprom();
+  std::error_code ignored;
+  std::filesystem::remove(path, ignored);
+
+  {
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+
+    const std::vector<std::uint8_t> effect{
+        3, 20, 80, 240, 240, 32, 8, 200, 16, 0x40, 0x06, 0};
+    auto response =
+        board.handle({pccontroller::wire::StatusEffect, 1, effect});
+    require(response.size() == 1 &&
+                response[0].opcode == pccontroller::wire::Ack,
+            "virtual board rejected the native status effect");
+    const std::array<std::uint16_t, 3> ownedRgb{{
+        virtualPwmValue(board, 13), virtualPwmValue(board, 14),
+        virtualPwmValue(board, 15)}};
+
+    // Six nominal two-second heartbeats cover five complete heartbeat spans.
+    // Both identical and genuine program-state transitions are orthogonal to
+    // the explicitly acquired status-effect owner.
+    for (std::uint8_t heartbeat = 0; heartbeat < 6; ++heartbeat) {
+      response = board.handle({pccontroller::wire::ProgramState,
+                               static_cast<std::uint8_t>(2 + heartbeat),
+                               {static_cast<std::uint8_t>(heartbeat == 5)}});
+      require(response.size() == 1 &&
+                  response[0].opcode == pccontroller::wire::Ack,
+              "PROGRAM_STATE heartbeat was not acknowledged");
+      require(std::array<std::uint16_t, 3>{{
+                  virtualPwmValue(board, 13), virtualPwmValue(board, 14),
+                  virtualPwmValue(board, 15)}} == ownedRgb,
+              "PROGRAM_STATE heartbeat released status-effect ownership");
+    }
+
+    auto changed = effect;
+    changed[3] = 64; // Same effect kind, changed blue component.
+    response = board.handle({pccontroller::wire::StatusEffect, 8, changed});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                virtualPwmValue(board, 15) != ownedRgb[2],
+            "changed same-kind virtual status effect was ignored");
+
+    response =
+        board.handle({pccontroller::wire::StatusEffect, 9, {0}});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                virtualPwmValue(board, 13) == 0 &&
+                virtualPwmValue(board, 14) > 0 &&
+                virtualPwmValue(board, 15) == 0,
+            "explicit status-effect release did not restore native feedback");
+  }
+  std::filesystem::remove(path, ignored);
+}
+
 void testProtocolRoundTrip() {
   pccontroller::wire::Frame source{
       pccontroller::wire::DisplayText, 73, {0, 0, 2, 0, 3, 0, 4}};
@@ -995,6 +1065,7 @@ void testVirtualResetJournalRecoveryAndRollover() {
 int main() {
   try {
     testProtocolRoundTrip();
+    testStatusEffectProgramStateOwnership();
     testBoardAndPersistence();
     testPwmAvailabilityReporting();
     testMotionDoorPolicyAcrossVirtualCommandSources();

@@ -494,8 +494,6 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
       return bad();
     }
     programRunning_ = payload[0] != 0;
-    statusOverride_ = false;
-    statusEffect_ = 0;
     return ack();
   case wire::PwmGet:
     return {pwmFrame(request.sequence)};
@@ -2349,8 +2347,6 @@ bool VirtualBoard::executeQueuedCommand(
       return false;
     }
     programRunning_ = payload[0] != 0;
-    statusOverride_ = false;
-    statusEffect_ = 0;
     return true;
   case wire::AddressableLed: {
     if (payload.size() < 5 ||
@@ -2561,6 +2557,13 @@ bool VirtualBoard::applyStatusEffect(
       payload[8] > payload[7] || readU16(payload, 9) < 640) {
     return false;
   }
+  if (statusOverride_ && statusEffect_ != 0 &&
+      std::equal(statusEffectDescriptor_.begin(),
+                 statusEffectDescriptor_.end(), payload.begin())) {
+    return true;
+  }
+  std::copy_n(payload.begin(), statusEffectDescriptor_.size(),
+              statusEffectDescriptor_.begin());
   statusEffect_ = payload[0];
   statusCondition_ = 0xFF;
   std::copy_n(payload.begin() + 1, 3, statusEffectColor_.begin());
