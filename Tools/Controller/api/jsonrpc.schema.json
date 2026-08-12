@@ -30,32 +30,6 @@
         }
       ]
     },
-    "relayTrace": {
-      "type": "object",
-      "description": "Transport-owned cascade trace. It bounds forwarding and conveys no authentication or capability.",
-      "required": [
-        "id",
-        "hops",
-        "limit"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "id": {
-          "type": "string",
-          "pattern": "^[a-fA-F0-9]{32}$"
-        },
-        "hops": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 16
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 16
-        }
-      }
-    },
     "request": {
       "type": "object",
       "required": [
@@ -206,10 +180,6 @@
         "auth": {
           "type": "string",
           "writeOnly": true
-        },
-        "relay": {
-          "$ref": "#/$defs/relayTrace",
-          "readOnly": true
         }
       }
     },
