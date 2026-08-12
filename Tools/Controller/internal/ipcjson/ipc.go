@@ -34,6 +34,7 @@ import (
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/lanresolver"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
@@ -4087,8 +4088,7 @@ func Call(
 	if address == "" {
 		address = DefaultListen
 	}
-	dialer := net.Dialer{}
-	connection, err := dialer.DialContext(ctx, "tcp", address)
+	connection, err := lanresolver.Default().DialContext(ctx, "tcp", address)
 	if err != nil {
 		return Response{}, err
 	}
