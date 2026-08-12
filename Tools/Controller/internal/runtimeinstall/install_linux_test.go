@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -129,10 +130,23 @@ func TestControllerSmokeRequiresExactVersionAndSourceHash(t *testing.T) {
 }
 
 func TestTCPListenerParserAndBoundedRetry(t *testing.T) {
-	content := []byte("  0: 0100007F:223D 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 4242 1 0000000000000000\n")
+	content := []byte(strings.Join([]string{
+		"  0: 0100007F:223D 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 4242 1 0000000000000000",
+		"  1: 00000000:223D 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 4343 1 0000000000000000",
+		"  2: 0102A8C0:223D 00000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 4444 1 0000000000000000",
+		"  3: 00000000:223D 00000000:0000 01 00000000:00000000 00:00000000 00000000 1000 0 4545 1 0000000000000000",
+	}, "\n"))
 	inodes, err := parseTCPListenerInodes(content, "127.0.0.1:8765")
-	if err != nil || !inodes["4242"] || len(inodes) != 1 {
+	if err != nil || !inodes["4242"] || !inodes["4343"] || len(inodes) != 2 {
 		t.Fatalf("parsed listener inodes=%v err=%v", inodes, err)
+	}
+	content6 := []byte(strings.Join([]string{
+		"  0: 00000000000000000000000000000000:223D 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 5252 1 0000000000000000",
+		"  1: 00000000000000000000000001000000:223D 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 1000 0 5353 1 0000000000000000",
+	}, "\n"))
+	ipv6Inodes, err := parseTCP6ListenerInodes(content6, "127.0.0.1:8765")
+	if err != nil || !ipv6Inodes["5252"] || len(ipv6Inodes) != 1 {
+		t.Fatalf("parsed IPv6 listener inodes=%v err=%v", ipv6Inodes, err)
 	}
 	old := runtimePIDOwnsTCPListener
 	attempts := 0
@@ -151,6 +165,30 @@ func TestTCPListenerParserAndBoundedRetry(t *testing.T) {
 	defer cancel()
 	if err := waitForPIDListener(ctx, 321, "127.0.0.1:8765"); err != nil || attempts != 3 {
 		t.Fatalf("listener retry attempts=%d err=%v", attempts, err)
+	}
+}
+
+func TestPIDOwnsWildcardTCPListenerOnlyForExactPID(t *testing.T) {
+	listener, err := net.Listen("tcp4", "0.0.0.0:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	address := fmt.Sprintf("127.0.0.1:%d", listener.Addr().(*net.TCPAddr).Port)
+	if err := pidOwnsTCPListener(os.Getpid(), address); err != nil {
+		t.Fatalf("current PID did not own wildcard listener %s: %v", address, err)
+	}
+
+	nonOwner := exec.Command("sleep", "30")
+	if err := nonOwner.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = nonOwner.Process.Kill()
+		_ = nonOwner.Wait()
+	})
+	if err := pidOwnsTCPListener(nonOwner.Process.Pid, address); err == nil {
+		t.Fatalf("unrelated PID %d accepted as owner of %s", nonOwner.Process.Pid, address)
 	}
 }
 

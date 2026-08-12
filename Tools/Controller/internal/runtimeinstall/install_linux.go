@@ -1510,6 +1510,18 @@ func pidOwnsTCPListener(pid int, address string) error {
 	if err != nil {
 		return err
 	}
+	content6, err := os.ReadFile("/proc/net/tcp6")
+	if err == nil {
+		ipv6Inodes, parseErr := parseTCP6ListenerInodes(content6, address)
+		if parseErr != nil {
+			return parseErr
+		}
+		for inode := range ipv6Inodes {
+			inodes[inode] = true
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect IPv6 loopback listener: %w", err)
+	}
 	if len(inodes) == 0 {
 		return fmt.Errorf("no listening %s socket exists", address)
 	}
@@ -1535,7 +1547,30 @@ func parseTCPListenerInodes(content []byte, address string) (map[string]bool, er
 	if err != nil || port == 0 {
 		return nil, fmt.Errorf("invalid loopback listener port %q", portText)
 	}
-	localAddress := fmt.Sprintf("0100007F:%04X", port)
+	localAddresses := map[string]bool{
+		fmt.Sprintf("0100007F:%04X", port): true,
+		fmt.Sprintf("00000000:%04X", port): true,
+	}
+	inodes := map[string]bool{}
+	for _, line := range strings.Split(string(content), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 9 && localAddresses[fields[1]] && fields[3] == "0A" {
+			inodes[fields[9]] = true
+		}
+	}
+	return inodes, nil
+}
+
+func parseTCP6ListenerInodes(content []byte, address string) (map[string]bool, error) {
+	host, portText, err := net.SplitHostPort(address)
+	if err != nil || host != "127.0.0.1" {
+		return nil, fmt.Errorf("unsupported loopback listener address %q", address)
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil || port == 0 {
+		return nil, fmt.Errorf("invalid loopback listener port %q", portText)
+	}
+	localAddress := fmt.Sprintf("00000000000000000000000000000000:%04X", port)
 	inodes := map[string]bool{}
 	for _, line := range strings.Split(string(content), "\n") {
 		fields := strings.Fields(line)
