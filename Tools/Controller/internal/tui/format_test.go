@@ -25,6 +25,15 @@ func TestAdaptiveEngineeringUnits(t *testing.T) {
 	}
 }
 
+func TestFormatTemperatureHidesUnavailableSensorSentinel(t *testing.T) {
+	if got := formatTemperature(-32768, 2); got != "—" {
+		t.Fatalf("unavailable temperature=%q", got)
+	}
+	if got := formatTemperature(3889, 1); got != "38.9 °C" {
+		t.Fatalf("valid temperature=%q", got)
+	}
+}
+
 func TestFreshnessSuppressesSubHalfSecondFlicker(t *testing.T) {
 	now := time.Unix(100, 0)
 	for _, age := range []time.Duration{0, 100 * time.Millisecond, 200 * time.Millisecond, 499 * time.Millisecond} {

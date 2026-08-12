@@ -50,6 +50,9 @@ func formatPower(milliwatts int32, decimals int) string {
 }
 
 func formatTemperature(centiCelsius int16, decimals int) string {
+	if centiCelsius == -32768 {
+		return "—"
+	}
 	if decimals < 0 {
 		decimals = 0
 	}

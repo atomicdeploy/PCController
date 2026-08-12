@@ -108,6 +108,7 @@ import {
   USER_PWM_CHANNELS,
 } from './pwm-authority'
 import { formatClock, formatCompact, formatDuration, formatNumber, type MessageKey } from './i18n'
+import { formatTemperatureValue } from './temperature'
 const TelemetryChart = lazy(() => import('./telemetry-chart').then((module) => ({ default: module.TelemetryChart })))
 import {
   integrationSettingsEqual,
@@ -175,7 +176,7 @@ function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): strin
 }
 
 function values(samples: MetricSample[], field: keyof Omit<MetricSample, 'at'>): number[] {
-  return samples.map((sample) => sample[field])
+  return samples.map((sample) => sample[field]).filter(Number.isFinite)
 }
 
 function eventTone(event: ControllerEvent): 'good' | 'warn' | 'bad' | 'info' {
@@ -471,7 +472,7 @@ export function DashboardView(props: SharedViewProps) {
         <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" scale="current" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />
         <Card icon={Thermometer} iconTone="amber" title={copy('Temperature', 'دما')} eyebrow={temperatureTab === 'led' ? peripheralName('sensor.temperature-led', 'LED') : peripheralName('sensor.temperature-audio', copy('Audio', 'صوت'))} className="temperature-card">
           <Segmented value={temperatureTab} label={copy('Temperature sensor', 'حسگر دما')} options={[{ value: 'led', label: 'LED' }, { value: 'audio', label: copy('Audio', 'صوت') }]} onChange={(value) => { setTemperatureTab(value as 'led' | 'audio'); setTelemetryMode('thermal') }} />
-          <strong className="temperature-card__value">{formatNumber(locale, (temperatureTab === 'led' ? status.temperature_led_centi_c : status.temperature_bt_audio_centi_c) / 100, 1)}<small>°C</small></strong>
+          <strong className="temperature-card__value">{formatTemperatureValue(temperatureTab === 'led' ? status.temperature_led_centi_c : status.temperature_bt_audio_centi_c, (value) => formatNumber(locale, value, 1))}<small>°C</small></strong>
           <span>{temperatureTab === 'led' ? copy('Lighting thermal sensor', 'حسگر حرارتی نور') : copy('Bluetooth audio thermal sensor', 'حسگر حرارتی صوت بلوتوث')}</span>
           <Sparkline values={values(samples, temperatureTab === 'led' ? 'ledTemp' : 'btTemp')} tone="amber" scale="temperature" label={temperatureTab === 'led' ? copy('LED temperature trend', 'روند دمای LED') : copy('Audio temperature trend', 'روند دمای صوت')} />
         </Card>

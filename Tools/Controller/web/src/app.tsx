@@ -86,6 +86,7 @@ import type {
   UIConfig,
 } from './types'
 import { applyPushedOutputEvent, isPushedOutputEvent } from './status-led-event'
+import { temperatureCelsius } from './temperature'
 import { shouldToastControllerEvent } from './event-notification-policy'
 import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import type { BuzzerPath } from './buzzer-routing'
@@ -229,8 +230,8 @@ function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
     bus: status.bus_mv / 1000,
     current: status.current_ma,
     power: status.power_mw / 1000,
-    ledTemp: status.temperature_led_centi_c / 100,
-    btTemp: status.temperature_bt_audio_centi_c / 100,
+    ledTemp: temperatureCelsius(status.temperature_led_centi_c) ?? Number.NaN,
+    btTemp: temperatureCelsius(status.temperature_bt_audio_centi_c) ?? Number.NaN,
   }
 }
 
@@ -418,6 +419,7 @@ export default function App() {
   const sidebarStatusMenuRef = useRef<HTMLDivElement>(null)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
+  const boardEpochRef = useRef({ resetCount: 0, uptimeMS: 0 })
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
@@ -1246,6 +1248,10 @@ export default function App() {
             // text through its tooltip after the transport had recovered.
             setStreamDetail('')
             const status = { ...update.status }
+			const previousEpoch = boardEpochRef.current
+			const resetObserved = previousEpoch.resetCount > 0 &&
+				(status.reset_count > previousEpoch.resetCount || status.uptime_ms < previousEpoch.uptimeMS)
+			boardEpochRef.current = { resetCount: status.reset_count, uptimeMS: status.uptime_ms }
             for (const [relay, desired] of relayOptimisticRef.current) {
               const mask = 1 << (relay - 1)
               const authoritative = Boolean(status.active_relays & mask)
@@ -1254,6 +1260,10 @@ export default function App() {
             }
             setSnapshot((current) => ({ ...current, connected: true, have_status: true, status, status_updated: update.time }))
             setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, status: update.status }, new Date(update.time).getTime())])
+			// A board reset keeps the WebSocket alive, so no transport reconnect is
+			// available to trigger rehydration. Fetch the authoritative snapshot
+			// immediately so every existing client sees new HELLO/settings/panel state.
+			if (resetObserved) void refresh()
           },
           event: (event) => {
 			const eventKind = event.kind.toLowerCase()
