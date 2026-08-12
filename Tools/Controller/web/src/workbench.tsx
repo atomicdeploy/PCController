@@ -49,6 +49,18 @@ import {
   type ConsoleToken,
 } from './console-format'
 import { AdvancedWorkbench } from './advanced-workbench'
+import {
+  canonicalPeripheralHash,
+  peripheralDestinationByID,
+  peripheralDestinationDetail,
+  peripheralDestinationFromHash,
+  peripheralDestinationLabel,
+  peripheralDestinationState,
+  peripheralDestinations,
+  peripheralGroups,
+  peripheralStateLabel,
+  type PeripheralDestinationID,
+} from './peripheral-navigation'
 import { RFGuidedWorkflow } from './rf-guided-workflow'
 import type { SharedViewProps } from './views'
 
@@ -138,10 +150,26 @@ export function WorkbenchView(props: SharedViewProps) {
   const [macro, setMacro] = useState('')
   const [automation, setAutomation] = useState('')
   const [hostBrightness, setHostBrightness] = useState(60)
+  const [peripheralDestination, setPeripheralDestination] = useState<PeripheralDestinationID>(() => peripheralDestinationFromHash(location.hash) ?? 'overview')
   const latestStreamEventID = useRef(events.reduce((latest, event) => Math.max(latest, event.id), 0))
   const relayedTerminalIDs = useRef(new Set<string>())
   const consoleModel = useRef(new BrowserConsoleModel({ maxEntries: 240 }))
   const displayTextIsValid = displayText.length <= 32 && /^[\x20-\x7e]*$/.test(displayText)
+
+  useEffect(() => {
+    const syncPeripheralDestination = () => setPeripheralDestination(peripheralDestinationFromHash(location.hash) ?? 'overview')
+    window.addEventListener('hashchange', syncPeripheralDestination)
+    return () => window.removeEventListener('hashchange', syncPeripheralDestination)
+  }, [])
+
+  const selectPeripheralDestination = (destination: PeripheralDestinationID) => {
+    const hash = canonicalPeripheralHash(destination)
+    setPeripheralDestination(destination)
+    if (location.hash !== hash) location.hash = hash
+  }
+  const selectedPeripheral = peripheralDestinationByID(peripheralDestination)
+  const selectedPeripheralState = peripheralDestinationState(selectedPeripheral, snapshot)
+  const peripheralTone = (state: ReturnType<typeof peripheralDestinationState>) => state === 'available' ? 'good' : state === 'disconnected' ? 'warn' : state === 'unsupported' ? 'bad' : 'neutral'
 
   useEffect(() => {
     const incoming = events
@@ -224,6 +252,33 @@ export function WorkbenchView(props: SharedViewProps) {
         action={<StatusBadge tone={snapshot.connected ? 'good' : 'warn'}>{snapshot.connected ? copy('BOARD + HOST', 'برد + میزبان') : copy('HOST ONLY', 'فقط میزبان')}</StatusBadge>}
       />
 
+      <section className="peripheral-workbench" aria-labelledby="peripheral-workbench-title">
+        <header className="peripheral-workbench__header">
+          <div><span>{copy('PERIPHERAL WORKBENCH', 'میزکار تجهیزات جانبی')}</span><h2 id="peripheral-workbench-title">{copy('Discoverable device destinations', 'مقصدهای قابل‌کشف دستگاه')}</h2><p>{copy('Known routes stay visible while the host reports whether they are ready, pending, unsupported, or disconnected.', 'مسیرهای شناخته‌شده همیشه دیده می‌شوند و میزبان وضعیت آماده، در انتظار، پشتیبانی‌نشده یا قطع را گزارش می‌کند.')}</p></div>
+          <StatusBadge tone={peripheralTone(selectedPeripheralState)}>{peripheralStateLabel(selectedPeripheralState, locale)}</StatusBadge>
+        </header>
+        <nav className="peripheral-workbench__tree" aria-label={copy('Peripheral destinations', 'مقصدهای تجهیزات جانبی')}>
+          {peripheralGroups.map((group) => {
+            const destinations = peripheralDestinations.filter((destination) => destination.group === group.id)
+            const groupOpen = destinations.some((destination) => destination.id === peripheralDestination)
+            return <details key={group.id} open={groupOpen} className="peripheral-workbench__group">
+              <summary>{group.label[locale]}<small>{destinations.length}</small></summary>
+              <div>{destinations.map((destination) => {
+                const state = peripheralDestinationState(destination, snapshot)
+                return <button key={destination.id} type="button" className={destination.id === peripheralDestination ? 'is-active' : ''} aria-current={destination.id === peripheralDestination ? 'page' : undefined} onClick={() => selectPeripheralDestination(destination.id)}>
+                  <span><strong>{peripheralDestinationLabel(destination, locale)}</strong><small dir="ltr">{canonicalPeripheralHash(destination.id)}</small></span>
+                  <StatusBadge tone={peripheralTone(state)}>{peripheralStateLabel(state, locale)}</StatusBadge>
+                </button>
+              })}</div>
+            </details>
+          })}
+        </nav>
+        <footer className={`peripheral-workbench__selection is-${selectedPeripheralState}`}>
+          <div><strong>{peripheralDestinationLabel(selectedPeripheral, locale)}</strong><span>{peripheralDestinationDetail(selectedPeripheral, locale)}</span></div>
+          {selectedPeripheralState === 'disconnected' && <Button compact icon={Cable} onClick={() => { setLine('reconnect'); window.requestAnimationFrame(() => document.getElementById('workbench-command')?.focus()) }}>{copy('Prepare reconnect', 'آماده‌سازی اتصال مجدد')}</Button>}
+        </footer>
+      </section>
+
       <section className="workbench-grid">
         <Card icon={SquareTerminal} iconTone="accent" className="workbench-terminal" title={copy('Bridge terminal', 'ترمینال پل')} eyebrow={copy('Full duplex', 'ارتباط دوطرفه')} action={<div className="terminal-transport"><StatusBadge tone={transport.streamState === 'open' ? 'good' : 'warn'}>WS {transport.streamState.toUpperCase()}</StatusBadge><StatusBadge tone={transport.tabBusSupported ? transport.tabPeers ? 'good' : 'info' : 'warn'}>TAB {transport.tabBusSupported ? transport.tabPeers + 1 : '—'}</StatusBadge><StatusBadge tone="info"><Activity size={13} /> {events.length}</StatusBadge></div>} menu={[
           { label: copy('Clear terminal', 'پاک‌کردن ترمینال'), icon: ListRestart, onSelect: () => { console.clear(); setTranscript([]) } },
@@ -237,7 +292,7 @@ export function WorkbenchView(props: SharedViewProps) {
           </div>
           <form className="command-form" onSubmit={submit}>
             <span className="command-prompt">pc›</span>
-            <input aria-label={copy('Primary bridge command', 'فرمان پل اصلی')} value={line} onChange={(event) => setLine(event.target.value)} spellCheck={false} dir="ltr" />
+            <input id="workbench-command" aria-label={copy('Primary bridge command', 'فرمان پل اصلی')} value={line} onChange={(event) => setLine(event.target.value)} spellCheck={false} dir="ltr" />
             <Button type="submit" tone="primary" icon={Send} busy={busy === line.trim()}>{t('run')}</Button>
           </form>
           <div className="terminal-console-help">
