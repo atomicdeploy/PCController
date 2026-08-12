@@ -1122,6 +1122,501 @@
         }
       }
     },
+    "/api/macros": {
+      "get": {
+        "operationId": "get_api_macros",
+        "summary": "Macro library, recording, and playback snapshot",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      },
+      "post": {
+        "operationId": "post_api_macros",
+        "summary": "Create, rename, categorize, recolor, or delete a named macro",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "put_api_macros",
+        "summary": "Create, rename, categorize, recolor, or delete a named macro",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patch_api_macros",
+        "summary": "Create, rename, categorize, recolor, or delete a named macro",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_macros",
+        "summary": "Create, rename, categorize, recolor, or delete a named macro",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/macros/recording": {
+      "post": {
+        "operationId": "post_api_macros_recording",
+        "summary": "Start or save/discard host-connected exact-delta recording",
+        "tags": [
+          "recording"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_macros_recording",
+        "summary": "Start or save/discard host-connected exact-delta recording",
+        "tags": [
+          "recording"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/macros/board-recording": {
+      "post": {
+        "operationId": "post_api_macros_board_recording",
+        "summary": "Start or stop the board capture ring and continuation stream",
+        "tags": [
+          "board-recording"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_macros_board_recording",
+        "summary": "Start or stop the board capture ring and continuation stream",
+        "tags": [
+          "board-recording"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
+    "/api/macros/board-recording/clear": {
+      "post": {
+        "operationId": "post_api_macros_board_recording_clear",
+        "summary": "Acknowledge and clear one retained board capture",
+        "tags": [
+          "board-recording"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/macros/playback": {
+      "post": {
+        "operationId": "post_api_macros_playback",
+        "summary": "Play or cancel a named macro through ordinary opcodes",
+        "tags": [
+          "playback"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "delete_api_macros_playback",
+        "summary": "Play or cancel a named macro through ordinary opcodes",
+        "tags": [
+          "playback"
+        ],
+        "x-required-capability": "board_commands",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
     "/api/display": {
       "post": {
         "operationId": "post_api_display",

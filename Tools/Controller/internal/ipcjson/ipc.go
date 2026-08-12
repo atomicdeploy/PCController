@@ -2700,6 +2700,223 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		}
 		writeHTTPJSON(writer, http.StatusAccepted, event)
 	})
+	mux.HandleFunc("/api/macros", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		capability := capabilityRead
+		if request.Method != http.MethodGet {
+			capability = capabilityHostConfig
+		}
+		if !authorizeHTTPCapability(writer, request, service, capability) {
+			return
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		switch request.Method {
+		case http.MethodGet:
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		case http.MethodPost:
+			var params struct {
+				ID       *int   `json:"id"`
+				Name     string `json:"name"`
+				Category string `json:"category,omitempty"`
+				Color    string `json:"color,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if params.ID == nil || *params.ID < 0 || *params.ID > 255 {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "macro id is required and must be 0..255"})
+				return
+			}
+			if _, err := service.Client.MacroCreate(byte(*params.ID), params.Name, params.Category, params.Color); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusCreated, service.Client.MacroSnapshot())
+		case http.MethodPut, http.MethodPatch:
+			var params struct {
+				Reference string  `json:"reference"`
+				Name      string  `json:"name"`
+				Category  *string `json:"category,omitempty"`
+				Color     *string `json:"color,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if _, err := service.Client.MacroUpdate(params.Reference, params.Name, params.Category, params.Color); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		case http.MethodDelete:
+			var params struct {
+				Reference string `json:"reference"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if err := service.Client.MacroDelete(params.Reference); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		default:
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPost+", "+http.MethodPut+", "+http.MethodPatch+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/macros/recording", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) ||
+			!authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		switch request.Method {
+		case http.MethodPost:
+			var params struct {
+				Name     string `json:"name"`
+				Category string `json:"category,omitempty"`
+				Color    string `json:"color,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if _, err := service.Client.MacroRecordStart(params.Name, params.Category, params.Color); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusAccepted, service.Client.MacroSnapshot())
+		case http.MethodDelete:
+			var params struct {
+				Save *bool `json:"save,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil && !errors.Is(err, io.EOF) {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			save := true
+			if params.Save != nil {
+				save = *params.Save
+			}
+			if _, err := service.Client.MacroRecordStop(save); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		default:
+			writer.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/macros/board-recording", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) ||
+			!authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		switch request.Method {
+		case http.MethodPost:
+			var params struct {
+				ID *int `json:"id"`
+			}
+			decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if params.ID == nil || *params.ID < 0 || *params.ID > 255 {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "macro capture id is required and must be 0..255"})
+				return
+			}
+			if _, err := service.Client.MacroBoardRecordStart(request.Context(), byte(*params.ID)); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusAccepted, service.Client.MacroSnapshot())
+		case http.MethodDelete:
+			if _, err := service.Client.MacroBoardRecordStop(request.Context()); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		default:
+			writer.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/api/macros/board-recording/clear", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		var params struct {
+			Force bool `json:"force,omitempty"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil && !errors.Is(err, io.EOF) {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if _, err := service.Client.MacroBoardRecordClear(request.Context(), params.Force); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+	})
+	mux.HandleFunc("/api/macros/playback", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) ||
+			!authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		switch request.Method {
+		case http.MethodPost:
+			var params struct {
+				Reference string `json:"reference"`
+			}
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if _, err := service.Client.MacroPlay(request.Context(), params.Reference); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusAccepted, service.Client.MacroSnapshot())
+		case http.MethodDelete:
+			var params struct {
+				KeepOutputs bool `json:"keep_outputs,omitempty"`
+			}
+			if err := decoder.Decode(&params); err != nil && !errors.Is(err, io.EOF) {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if err := service.Client.MacroCancel(request.Context(), params.KeepOutputs); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, service.Client.MacroSnapshot())
+		default:
+			writer.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/api/display", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {
 			return
