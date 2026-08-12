@@ -698,8 +698,8 @@ func runSecondaryConsole(
 	}
 	writeLine(
 		stdout,
-		productidentity.ServiceName(configuredTitle, "secondary console (IPC).")+
-			" The primary process retains exclusive serial ownership.",
+		"\x1b[2m"+productidentity.ServiceName(configuredTitle, "secondary console (IPC).")+
+			" The primary process retains exclusive serial ownership.\x1b[0m",
 	)
 	hostRestart := make(chan struct{}, 1)
 	go streamPrimaryEvents(ctx, stdout, &outputMu, hostRestart)
@@ -720,7 +720,7 @@ func runSecondaryConsole(
 	}()
 	for {
 		outputMu.Lock()
-		fmt.Fprint(stdout, "pc[ipc]> ")
+		fmt.Fprint(stdout, "\x1b[38;5;81m\x1b[1mpc\x1b[0m\x1b[2m[ipc]\x1b[0m\x1b[38;5;245m> \x1b[0m")
 		outputMu.Unlock()
 		var scanned string
 		select {

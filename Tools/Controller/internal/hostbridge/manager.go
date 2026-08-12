@@ -24,6 +24,7 @@ import (
 	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
+	"pccontroller.local/controller/internal/lanresolver"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -1133,6 +1134,7 @@ func (manager *Manager) webSocketPeerSession(
 	}
 	connection, _, err := websocket.Dial(ctx, config.URL, &websocket.DialOptions{
 		HTTPHeader: header,
+		HTTPClient: lanresolver.HTTPClient(),
 	})
 	if err != nil {
 		return err
@@ -1282,6 +1284,7 @@ func (manager *Manager) socketIOPeerSession(
 	}
 	connection, _, err := websocket.Dial(ctx, target.String(), &websocket.DialOptions{
 		HTTPHeader: header,
+		HTTPClient: lanresolver.HTTPClient(),
 	})
 	if err != nil {
 		return err
