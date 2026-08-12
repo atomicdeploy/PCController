@@ -488,7 +488,8 @@ func TestEventStreamClassification(t *testing.T) {
 		"rx": EventStreamDebug, "action.applied": EventStreamDebug,
 		"front_panel.segment": EventStreamState,
 		"status_led.changed":  EventStreamState, "buzzer.note": EventStreamState,
-		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
+		"app.instance.changed": EventStreamState,
+		"sensor.sample":        EventStreamTelemetry, "animation.frame": EventStreamState,
 	}
 	for kind, expected := range tests {
 		if got := EventStreamForKind(kind); got != expected {

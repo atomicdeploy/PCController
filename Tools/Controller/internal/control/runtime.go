@@ -415,7 +415,8 @@ func EventStreamForKind(kind string) string {
 		return EventStreamTelemetry
 	case "rx", "tx", "opcode", "action.applied":
 		return EventStreamDebug
-	case "front_panel.segment", "status_led.changed", "buzzer.note":
+	case "front_panel.segment", "status_led.changed", "buzzer.note",
+		"app.instance.changed":
 		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
