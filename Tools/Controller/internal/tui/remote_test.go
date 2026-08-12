@@ -30,8 +30,8 @@ func TestRemoteSnapshotPollingIsBackstopNotRenderLoop(t *testing.T) {
 		page:           PageDashboard,
 		prefs:          Preferences{PollInterval: 250 * time.Millisecond},
 	}
-	if interval := model.statusInterval(); interval != time.Second {
-		t.Fatalf("remote snapshot interval=%s, want 1s push-event backstop", interval)
+	if interval := model.statusInterval(); interval != 250*time.Millisecond {
+		t.Fatalf("remote snapshot interval=%s, want 250ms real-time convergence", interval)
 	}
 
 	model.remote = nil
@@ -142,7 +142,7 @@ func TestRemoteFreshnessUsesLocalReceiptAcrossClockSkew(t *testing.T) {
 			if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(100*time.Millisecond)); got != "live" {
 				t.Fatalf("fresh local receipt=%q", got)
 			}
-			if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(freshnessLiveThreshold)); got != "2.5 s ago" {
+			if got := model.statusFreshnessLabel(model.snapshot(), receivedAt.Add(freshnessLiveThreshold)); got != "1.5 s ago" {
 				t.Fatalf("aged local receipt=%q", got)
 			}
 			if got := model.remoteClockWarning(); got != test.wantWarning {
