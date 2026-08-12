@@ -783,6 +783,96 @@ func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 	}
 }
 
+func TestTwoWebSocketSubscribersReceiveSameActivityAndStateWithoutPolling(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	server := httptest.NewServer(websocketMux(context.Background(), &Service{
+		Client: client, WebSocketPath: "/ipc",
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dial := func(name string) *websocket.Conn {
+		connection, _, err := websocket.Dial(
+			ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/ipc", nil,
+		)
+		if err != nil {
+			t.Fatalf("dial %s: %v", name, err)
+		}
+		t.Cleanup(func() { connection.CloseNow() })
+		request := map[string]any{
+			"jsonrpc": "2.0", "id": name, "method": "controller.subscribe",
+			"params": map[string]any{"topics": []string{"events", "state"}},
+		}
+		encoded, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := connection.Write(ctx, websocket.MessageText, encoded); err != nil {
+			t.Fatalf("subscribe %s: %v", name, err)
+		}
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("subscription acknowledgement %s: %v", name, err)
+			}
+			var response Response
+			if json.Unmarshal(data, &response) == nil && string(response.ID) == `"`+name+`"` {
+				if response.Error != nil {
+					t.Fatalf("subscription %s rejected: %#v", name, response.Error)
+				}
+				return connection
+			}
+		}
+	}
+	first, second := dial("first"), dial("second")
+
+	activity := runtime.PublishStructuredEvent(control.Event{
+		Kind: "message", Text: "Inspect output 3", Source: "ipc",
+		Target: "web,tui", Targets: []string{"web", "tui"},
+		MessageType: "operator.prompt", Correlation: "job-23",
+	})
+	state := runtime.PublishStructuredEvent(control.Event{
+		Kind: "status_led.changed", Text: "#12AB34", State: "#12AB34",
+	})
+
+	type pushedEvent struct {
+		Method string        `json:"method"`
+		Params control.Event `json:"params"`
+	}
+	readBoth := func(name string, connection *websocket.Conn) (control.Event, control.Event) {
+		var gotActivity, gotState control.Event
+		for gotActivity.ID == 0 || gotState.ID == 0 {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("read %s broadcast events: %v", name, err)
+			}
+			var pushed pushedEvent
+			if json.Unmarshal(data, &pushed) != nil {
+				continue
+			}
+			switch pushed.Params.ID {
+			case activity.ID:
+				gotActivity = pushed.Params
+			case state.ID:
+				gotState = pushed.Params
+			}
+		}
+		return gotActivity, gotState
+	}
+	for name, connection := range map[string]*websocket.Conn{"first": first, "second": second} {
+		gotActivity, gotState := readBoth(name, connection)
+		if gotActivity.Kind != "message" || gotActivity.Stream != "activity" ||
+			gotActivity.Correlation != "job-23" {
+			t.Fatalf("%s activity=%+v", name, gotActivity)
+		}
+		if gotState.Kind != "status_led.changed" || gotState.Stream != "state" {
+			t.Fatalf("%s state=%+v", name, gotState)
+		}
+	}
+}
+
 func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 	runtime := control.New(control.Options{})
 	engine := shell.New(8)

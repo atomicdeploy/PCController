@@ -510,6 +510,26 @@ func TestTargetedAndBoardAppPageActionsSelectOnlyTheIntendedTUI(t *testing.T) {
 	}
 }
 
+func TestTUIMessagePresentationHonorsTargetsAndExposesAction(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	updated, _ := model.Update(runtimeEventMsg(control.Event{
+		Kind: "message", Text: "Inspect output 3", MessageType: "operator.prompt",
+		Targets: []string{"native", "tui"}, Action: "relay off",
+	}))
+	model = updated.(Model)
+	if !strings.Contains(model.notice, "Inspect output 3") ||
+		!strings.Contains(model.notice, "action: relay off") {
+		t.Fatalf("TUI notice=%q", model.notice)
+	}
+	previous := model.notice
+	updated, _ = model.Update(runtimeEventMsg(control.Event{
+		Kind: "message", Text: "Web only", Targets: []string{"web"},
+	}))
+	if got := updated.(Model).notice; got != previous {
+		t.Fatalf("web-only message changed TUI notice to %q", got)
+	}
+}
+
 func TestTUITerminalTitleAndOSCAppActions(t *testing.T) {
 	snapshot := RichPreviewSnapshot()
 	var payloads []string

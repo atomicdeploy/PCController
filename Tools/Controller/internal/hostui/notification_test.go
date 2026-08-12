@@ -54,3 +54,33 @@ func TestImportantEventMappingSuppressesTelemetryAndAddsSafetyAction(t *testing.
 		t.Fatalf("custom-title notification=%#v ok=%t", custom, ok)
 	}
 }
+
+func TestMessageNotificationPreservesCorrelationAndUsesCanonicalActionRoute(t *testing.T) {
+	t.Setenv("APP_TITLE", "")
+	notification, err := NotificationForMessage(MessageNotification{
+		ID: 42, Type: "operator.prompt", Text: "Inspect output 3",
+		Severity: "warning", Correlation: "job-17", Action: "relay off",
+		Metadata: map[string]string{"action_label": "Stop outputs"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notification.ID != "job-17" || notification.Title != "PCController · OPERATOR.PROMPT" ||
+		notification.Severity != "warning" || len(notification.Actions) != 1 ||
+		notification.Actions[0].Label != "Stop outputs" ||
+		notification.Actions[0].URI != "pccontroller://command/relay%20off" {
+		t.Fatalf("notification=%#v", notification)
+	}
+	action, err := ParseActionURI(notification.Actions[0].URI)
+	if err != nil || action.Kind != "command" || action.Value != "relay off" {
+		t.Fatalf("action=%#v err=%v", action, err)
+	}
+}
+
+func TestMessageNotificationRejectsInvalidActionWithoutExecutingIt(t *testing.T) {
+	if _, err := NotificationForMessage(MessageNotification{
+		ID: 7, Type: "operator.prompt", Text: "Review", Action: "app unknown",
+	}); err == nil {
+		t.Fatal("invalid action unexpectedly became an actionable notification")
+	}
+}

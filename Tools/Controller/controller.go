@@ -21,6 +21,7 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/link"
+	"pccontroller.local/controller/internal/messagefabric"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/programmer"
@@ -1815,6 +1816,12 @@ func containsMessageTarget(targets []string, target string) bool {
 	return false
 }
 
+// EventTargetsSurface applies the canonical message target convention used by
+// native, Web, TUI, and bridge presentation adapters.
+func EventTargetsSurface(event Event, surface string) bool {
+	return messagefabric.TargetsSurface(event.Target, event.Targets, surface)
+}
+
 func oneOf(value string, allowed ...string) bool {
 	for _, candidate := range allowed {
 		if value == candidate {
@@ -1874,6 +1881,39 @@ func (client *Client) EmitHostActionEvent(
 ) Event {
 	event := client.runtime.PublishStructuredEvent(control.Event{
 		Kind: kind, Text: text, Source: source, Action: action,
+		Metadata: metadata,
+	})
+	return publicEvent(event)
+}
+
+// EmitMessageDeliveryOutcome publishes a correlated adapter result without
+// pretending that presentation is a new operator message. Consumers can
+// observe native delivery success/failure through the same retained event
+// cursor used for commands and state.
+func (client *Client) EmitMessageDeliveryOutcome(
+	message Event,
+	surface string,
+	deliveryErr error,
+) Event {
+	surface = strings.ToLower(strings.TrimSpace(surface))
+	lifecycle, state := "completed", "delivered"
+	severity := message.Severity
+	text := surface + " presentation completed"
+	metadata := map[string]string{
+		"surface":          surface,
+		"message_event_id": fmt.Sprintf("%d", message.ID),
+	}
+	if deliveryErr != nil {
+		lifecycle, state, severity = "failed", "failed", "error"
+		text = surface + " presentation failed: " + deliveryErr.Error()
+		metadata["error"] = deliveryErr.Error()
+	}
+	event := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: "message.delivery", Text: text, State: state,
+		Lifecycle: lifecycle, Source: surface, Target: surface,
+		Targets: []string{surface}, MessageType: message.MessageType,
+		Action: message.Action, Severity: severity,
+		Correlation: message.Correlation, Delivery: message.Delivery,
 		Metadata: metadata,
 	})
 	return publicEvent(event)

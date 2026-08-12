@@ -489,12 +489,39 @@ func TestEventStreamClassification(t *testing.T) {
 		"front_panel.segment": EventStreamState,
 		"status_led.changed":  EventStreamState, "buzzer.note": EventStreamState,
 		"app.instance.changed": EventStreamState,
-		"sensor.sample":        EventStreamTelemetry, "animation.frame": EventStreamState,
+		"relay.changed":        EventStreamState, "operation.applied": EventStreamState,
+		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
 	}
 	for kind, expected := range tests {
 		if got := EventStreamForKind(kind); got != expected {
 			t.Errorf("EventStreamForKind(%q)=%q want %q", kind, got, expected)
 		}
+	}
+}
+
+func TestAcknowledgedRelayPublishesAuthoritativeStateForEverySubscriber(t *testing.T) {
+	runtime := New(Options{})
+	defer runtime.Close()
+	afterID := runtime.LatestEventID()
+	if !runtime.publishAcknowledgedHostAction(
+		native.OpRelaySet, []byte{4, 1}, native.Frame{Opcode: native.OpACK}, 7,
+	) {
+		t.Fatal("valid acknowledged relay action was not recorded")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	event, err := runtime.WaitEventStreamFilter(ctx, afterID, "relay.changed", nil, EventStreamState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.State != "on" || event.Lifecycle != "completed" ||
+		event.Source != "host" || event.Target != "app.clients" ||
+		event.Metadata["relay"] != "5" || event.Metadata["active"] != "true" ||
+		event.Metadata["connection_generation"] != "7" {
+		t.Fatalf("event=%+v", event)
+	}
+	if runtime.Snapshot().Status.ActiveRelays&(1<<4) == 0 {
+		t.Fatal("post-ACK relay state was not reflected in the shared snapshot")
 	}
 }
 

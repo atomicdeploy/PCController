@@ -416,7 +416,9 @@ func EventStreamForKind(kind string) string {
 	case "rx", "tx", "opcode", "action.applied":
 		return EventStreamDebug
 	case "front_panel.segment", "status_led.changed", "buzzer.note",
-		"app.instance.changed":
+		"app.instance.changed",
+		"operation.applied", "relay.changed", "relays.changed",
+		"motion.changed", "pwm.changed", "buzzer.changed", "display.changed":
 		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
@@ -833,11 +835,16 @@ func (runtime *Runtime) publishAcknowledgedHostAction(
 	frame native.Frame,
 	generation uint64,
 ) bool {
-	if frame.Opcode != native.OpACK ||
-		!native.MacroPlaybackPayloadSemanticallyValid(opcode, payload) {
+	if frame.Opcode != native.OpACK {
 		return false
 	}
 	deviceMicros, timed := native.ResponseDeviceMicros(frame)
+	runtime.publishAcknowledgedOperationState(
+		opcode, payload, deviceMicros, timed, generation,
+	)
+	if !native.MacroPlaybackPayloadSemanticallyValid(opcode, payload) {
+		return false
+	}
 	runtime.publishActionEvidence(ActionEvidence{
 		Opcode: opcode, Payload: append([]byte(nil), payload...),
 		Source: native.InputSourceHost, SourceID: 0xFF,
@@ -845,6 +852,91 @@ func (runtime *Runtime) publishAcknowledgedHostAction(
 		Generation: generation,
 	})
 	return true
+}
+
+// publishAcknowledgedOperationState turns the board ACK into one retained,
+// server-side state event. This is deliberately independent of any browser's
+// optimistic state or BroadcastChannel, so every WS/Socket.IO/TUI subscriber
+// converges from the same post-ACK evidence without polling.
+func (runtime *Runtime) publishAcknowledgedOperationState(
+	opcode byte,
+	payload []byte,
+	deviceMicros uint32,
+	timed bool,
+	generation uint64,
+) {
+	kind, state := "operation.applied", "applied"
+	text := native.OpcodeName(opcode) + " accepted by controller"
+	metadata := map[string]string{
+		"opcode":                fmt.Sprintf("0x%02X", opcode),
+		"opcode_name":           native.OpcodeName(opcode),
+		"payload":               fmt.Sprintf("%X", payload),
+		"connection_generation": strconv.FormatUint(generation, 10),
+		"device_micros":         strconv.FormatUint(uint64(deviceMicros), 10),
+		"timed":                 strconv.FormatBool(timed),
+	}
+	switch opcode {
+	case native.OpRelaySet:
+		if len(payload) != 2 || payload[0] > 7 || payload[1] > 1 {
+			break
+		}
+		active := payload[1] != 0
+		kind = "relay.changed"
+		state = map[bool]string{true: "on", false: "off"}[active]
+		text = fmt.Sprintf("relay %d %s", payload[0]+1, state)
+		metadata["relay"] = strconv.Itoa(int(payload[0] + 1))
+		metadata["active"] = strconv.FormatBool(active)
+		runtime.mu.Lock()
+		mask := byte(1 << payload[0])
+		if active {
+			runtime.status.ActiveRelays |= mask
+		} else {
+			runtime.status.ActiveRelays &^= mask
+		}
+		runtime.statusUpdated = time.Now()
+		metadata["active_mask"] = fmt.Sprintf("0x%02X", runtime.status.ActiveRelays)
+		runtime.mu.Unlock()
+	case native.OpRelayAllOff:
+		if len(payload) != 0 {
+			break
+		}
+		kind, state, text = "relays.changed", "off", "all relays off"
+		runtime.mu.Lock()
+		runtime.status.ActiveRelays = 0
+		runtime.statusUpdated = time.Now()
+		runtime.mu.Unlock()
+		metadata["active_mask"] = "0x00"
+	case native.OpRelaySide:
+		if len(payload) != 2 || payload[0] > 1 || payload[1] > 2 {
+			break
+		}
+		kind = "motion.changed"
+		state = []string{"stop", "up", "down"}[payload[1]]
+		text = fmt.Sprintf("motion side %d %s", payload[0]+1, state)
+		metadata["side"] = strconv.Itoa(int(payload[0] + 1))
+		metadata["motion"] = state
+	case native.OpPWMSet:
+		if len(payload) != 3 || payload[0] > 15 {
+			break
+		}
+		value := uint16(payload[1]) | uint16(payload[2])<<8
+		kind, state = "pwm.changed", strconv.Itoa(int(value))
+		text = fmt.Sprintf("PWM channel %d set to %d", payload[0], value)
+		metadata["channel"] = strconv.Itoa(int(payload[0]))
+		metadata["value"] = strconv.Itoa(int(value))
+	case native.OpPWMAllOff:
+		kind, state, text = "pwm.changed", "off", "all PWM channels off"
+		metadata["all"] = "true"
+	case native.OpBuzzer:
+		kind = "buzzer.changed"
+	case native.OpDisplayText:
+		kind = "display.changed"
+	}
+	runtime.publishEvent(Event{
+		Kind: kind, Text: text, State: state, Lifecycle: "completed",
+		Source: "host", Target: "app.clients", MessageType: "command.result",
+		Action: native.OpcodeName(opcode), Metadata: metadata,
+	})
 }
 
 func (runtime *Runtime) publishActionEvidence(evidence ActionEvidence) {
