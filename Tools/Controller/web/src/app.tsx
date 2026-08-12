@@ -63,6 +63,7 @@ import {
 } from './significant-events'
 import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
+import { publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
 import {
   createTabChannel,
   type TabChannel,
@@ -749,6 +750,34 @@ export default function App() {
     tabChannelRef.current?.publishPresence(document.hidden ? 'hidden' : 'active', value)
     document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
+
+  const browserConsoleState = useMemo(() => ({
+    title: productTitle,
+    hostVersion: uiConfig?.host_version || 'not reported',
+    page,
+    connected: !demo && snapshot.connected,
+    port: snapshot.port.name || '',
+    transport: streamState,
+    eventCount: events.length,
+  }), [demo, events.length, page, productTitle, snapshot.connected, snapshot.port.name, streamState, uiConfig?.host_version])
+
+  useEffect(() => publishBrowserConsole({
+    api: 'PCController.browser/1',
+    inspect: () => browserConsoleState,
+    command: (value) => {
+      const command = value.trim()
+      if (!command) return Promise.reject(new Error('PCController.command requires a non-empty normalized command string'))
+      return runCommand(command)
+    },
+    refresh: async () => { await refresh() },
+    navigate: (value) => {
+      const destination = navigation.find((candidate) => candidate.id === value)?.id
+      if (!destination) throw new Error(`Unknown PCController page: ${value}`)
+      navigate(destination)
+    },
+  }), [browserConsoleState, navigate, refresh, runCommand])
+
+  useEffect(() => { publishBrowserConsoleState(browserConsoleState) }, [browserConsoleState])
 
   const saveAppearance = useCallback((value: Appearance) => {
     const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
