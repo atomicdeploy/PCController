@@ -255,6 +255,17 @@ func Build(options Options) (Command, error) {
 		if options.BaudRate > 0 && programmer == "urclock" {
 			args = append(args, "-b"+strconv.Itoa(options.BaudRate))
 		}
+		if programmer == "urclock" {
+			// The installed MiniCore image can enter urprotocol compatibility
+			// mode when its metadata is unavailable. AVRDUDE then requires the
+			// canonical protected boot size, plus the board's EEPROM capability,
+			// before any signature/read/write operation is safe.
+			bootloaderBytes := generatedBoardFlashBytes - generatedBoardApplicationBytes
+			args = append(args,
+				"-xbootsize="+strconv.FormatUint(uint64(bootloaderBytes), 10),
+				"-xeepromrw",
+			)
+		}
 		switch options.Operation {
 		case OperationWriteFlash:
 			if options.HexPath == "" {

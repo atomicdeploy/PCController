@@ -632,13 +632,14 @@ const R = [
       'Expose open, close, reconnect, reset, quit/exit, and all commands through IPC/WebSocket with correlated results.',
     ], 'Raw-socket and deterministic VirtualBoard tests prove UART ownership remains independent from demand accounting and unsolicited events continue without a polling subscriber. Legacy STATUS demand can be stopped without closing transport; capable changed-state paths must now satisfy the stricter push-first #36/#190 contract. Explicit Close/Open lifecycle results remain correlated. Physical USB unplug/replug and event-driven Windows reconnect acceptance remain open.'),
 
-  requirement('uart-urclock-programming', 10, 'Use UART Urboot/Urclock as the normal programming path and verify application return', 'closed',
-    ['🚀 programming', '🛡️ safety', '✅ verified'], 'Bootloader, programming, build scripts, and packaging', [
+  requirement('uart-urclock-programming', 10, 'Use UART Urboot/Urclock as the normal programming path and verify application return', 'open',
+    ['🚀 programming', '🛡️ safety', '🧪 testing', '🚧 in progress', '🐛 regression'], 'Bootloader, programming, build scripts, and packaging', [
       'Configure current MiniCore Urboot/Urclock for the ATmega328P board and preserve EEPROM as selected.',
       'Release serial ownership, run maintained Arduino CLI/AVRDUDE urclock operations, and reauthenticate application HELLO.',
       'Support probe, metadata, read, write, verify, and start without pretending the native application protocol is the bootloader protocol.',
+      'Derive and pass the installed image boot-size and EEPROM capability overrides for every Urclock operation so compatibility-mode backup cannot fail or leave the board latched.',
       'Keep USBasp as an explicit troubleshooting fallback only.',
-    ], 'Urboot/fuses were ISP-verified and current firmware was UART-uploaded, flash-verified, and reauthenticated; host commands delegate to the maintained backend. A fresh primary-owned recovery also completed a read-only Urboot semantic verification of all 32,228 programmed bytes and critical reset/vector targets before returning to the exact authenticated application, without rewriting flash.'),
+    ], 'Historical hardware verification passed, but the 2026-08-12 cafe-PC recovery exposed a current regression: AVRDUDE 8 compatibility mode rejected metadata/flash/EEPROM reads when the host omitted `-xbootsize=384` and `-xeepromrw`. USBasp recovery remained bridge-owned and completed safely. The command fix is source-tested; a fresh bridge-owned Urclock capture/readback on the physical board is required before re-closing.'),
   requirement('urboot-custom-progress-backend', 10, 'Maintain a reproducible Urboot-Custom progress-hook patch and safe ISP install plan', 'open',
     ['🧩 firmware', '🚀 programming', '🏗️ tooling-build', '🧪 testing', '🔍 needs-hardware'], 'Bootloader, programming, build scripts, and packaging', [
       'Name the extensible fork Urboot-Custom and keep the core as an upstream-applicable diff with a generic optional progress hook; isolate TM1637 or future peripheral implementations as selectable backends.',
