@@ -153,6 +153,24 @@ func (model Model) appSettingRows() []settingRow {
 		})
 	}
 	rows = append(rows, model.peripheralNameSettingRows()...)
+	if model.remote != nil {
+		for index := range rows {
+			switch {
+			case strings.HasPrefix(rows[index].Key, "led."):
+				rows[index].Editable = false
+				rows[index].Value = "unavailable from remote IPC"
+			case rows[index].Key == "lcd.services":
+				rows[index].Editable = false
+				rows[index].Value = "local host service unavailable in remote mode"
+			case rows[index].Key == "app.title", rows[index].Key == "app.tagline",
+				strings.HasPrefix(rows[index].Key, peripheralNameSettingPrefix):
+				rows[index].Editable = model.remote.SaveHostUI != nil
+				if model.remote.SaveHostUI == nil {
+					rows[index].Value = "remote host configuration unavailable"
+				}
+			}
+		}
+	}
 	return rows
 }
 

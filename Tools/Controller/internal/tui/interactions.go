@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -257,7 +258,7 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 
 	switch key {
 	case "ctrl+c":
-		if model.preview == nil {
+		if model.preview == nil && model.remote == nil {
 			_ = model.runtime.Close()
 		}
 		return model, tea.Quit, true
@@ -385,8 +386,8 @@ func (model Model) showPortPicker() (Model, tea.Cmd, bool) {
 	model.portPicker = true
 	model.portCursor = 0
 	model.portError = ""
-	if model.preview != nil {
-		model.portCandidates = []ports.Info{model.preview.Port}
+	if model.preview != nil || model.remote != nil {
+		model.portCandidates = []ports.Info{model.snapshot().Port}
 		model.portLoading = false
 		return model, nil, true
 	}
@@ -398,7 +399,7 @@ func (model Model) submitLine(line string) (Model, tea.Cmd, bool) {
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "quit", "exit":
 		model.appendLog("info", "Exiting "+model.prefs.AppTitle+" cleanly…")
-		if model.preview == nil {
+		if model.preview == nil && model.remote == nil {
 			_ = model.runtime.Close()
 		}
 		return model, tea.Quit, true
@@ -428,6 +429,9 @@ func (model Model) dispatchLine(line string) (Model, tea.Cmd, bool) {
 	if strings.EqualFold(line, "reset app") {
 		model.rebootPending = true
 		model.setNotice("Rebooting controller…")
+	}
+	if model.remote != nil {
+		return model, execute(model.engine, line), true
 	}
 	if model.preview != nil {
 		return model.simulateCommand(line)
@@ -496,6 +500,10 @@ func (model Model) simulateCommand(line string) (Model, tea.Cmd, bool) {
 }
 
 func (model Model) openPort() (Model, tea.Cmd, bool) {
+	if model.remote != nil {
+		model.setNotice("Requesting remote serial owner to connect…")
+		return model.dispatchLine("port open")
+	}
 	if model.preview != nil {
 		model.setNotice("Preview mode: serial open intentionally disabled")
 		return model, nil, true
@@ -509,6 +517,10 @@ func (model Model) openPort() (Model, tea.Cmd, bool) {
 }
 
 func (model Model) closePort() (Model, tea.Cmd, bool) {
+	if model.remote != nil {
+		model.setNotice("Requesting remote serial owner to close…")
+		return model.dispatchLine("port close")
+	}
 	if model.preview != nil {
 		model.setNotice("Preview mode: no serial port is owned")
 		return model, nil, true
@@ -833,7 +845,9 @@ func (model Model) finishPeripheralRename() (Model, tea.Cmd, bool) {
 	if restored {
 		action = "restored"
 	}
-	if updated.saveUI == nil {
+	if updated.remote != nil && updated.remote.SaveHostUI != nil {
+		updated.setNotice(fmt.Sprintf("%s %s to %q on the remote host", target, action, name))
+	} else if updated.saveUI == nil {
 		updated.setNotice(fmt.Sprintf("%s %s to %q for this session", target, action, name))
 	} else {
 		updated.setNotice(fmt.Sprintf("%s %s to %q and saved", target, action, name))
@@ -842,6 +856,9 @@ func (model Model) finishPeripheralRename() (Model, tea.Cmd, bool) {
 }
 
 func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor, value string) (Model, string, bool, error) {
+	if model.remote != nil && model.remote.SaveHostUI == nil {
+		return model, "", false, errors.New("remote peripheral naming is unavailable")
+	}
 	name := strings.TrimSpace(value)
 	if len([]rune(name)) > 64 {
 		return model, "", false, fmt.Errorf("peripheral name must be at most 64 printable characters")
@@ -866,8 +883,12 @@ func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor,
 	}
 	ui.PeripheralNames = names
 	ui.SetupComplete = true
-	if model.saveUI != nil {
-		if err := model.saveUI(ui); err != nil {
+	save := model.saveUI
+	if model.remote != nil {
+		save = model.remote.SaveHostUI
+	}
+	if save != nil {
+		if err := save(ui); err != nil {
 			return model, "", false, err
 		}
 	}
@@ -1081,6 +1102,10 @@ func (model Model) adjustAppSetting(delta int, activate bool) (Model, tea.Cmd, b
 }
 
 func (model Model) adjustStatusLEDSetting(delta int, activate bool) (Model, tea.Cmd, bool) {
+	if model.remote != nil {
+		model.setNotice("Remote status-light host settings are unavailable; no local setting was changed")
+		return model, nil, true
+	}
 	value := model.hostIntegrationValue
 	policy := value.StatusLED
 	step := deltaOrOne(delta)
@@ -1194,19 +1219,19 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 			model = model.beginRFGuidedWorkflow()
 			return model, nil, true
 		case "l":
-			if model.preview == nil && model.runtime.RFLearnState().Active {
+			if model.preview == nil && model.rfLearnState().Active {
 				model.setNotice("RF learning is already active; cancel it before starting another session")
 				return model, nil, true
 			}
 			return model.dispatchLine("rf learn indefinite")
 		case "y":
-			if model.preview == nil && model.runtime.RFLearnState().Active {
+			if model.preview == nil && model.rfLearnState().Active {
 				model.setNotice("RF learning is already active; cancel it before starting another session")
 				return model, nil, true
 			}
 			return model.dispatchLine("rf learn timer 30s")
 		case "c":
-			if model.preview == nil && !model.runtime.RFLearnState().Active {
+			if model.preview == nil && !model.rfLearnState().Active {
 				model.setNotice("RF learning is idle")
 				return model, nil, true
 			}
@@ -1360,6 +1385,9 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 			}
 			if model.menuCatalogPending {
 				return model, nil, true
+			}
+			if model.remote != nil {
+				return model.dispatchLine("menu list")
 			}
 			model.menuCatalogPending = true
 			model.menuCatalogLastAttempt = time.Now()

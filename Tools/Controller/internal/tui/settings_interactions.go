@@ -258,6 +258,10 @@ func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	editor := model.settingEditor
 	if descriptor, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
+		if model.remote != nil && model.remote.SaveHostUI == nil {
+			model.setNotice("Remote peripheral naming is unavailable from this host")
+			return model, nil, true
+		}
 		updated, name, restored, err := model.savePeripheralName(descriptor, editor.Text)
 		if err != nil {
 			model.appendLog("error", "save peripheral name: "+err.Error())
@@ -273,6 +277,10 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		return updated, nil, true
 	}
 	if strings.HasPrefix(editor.Key, "led.") {
+		if model.remote != nil {
+			model.setNotice("Remote status LED host settings are unavailable; no local setting was changed")
+			return model, nil, true
+		}
 		return model.commitStatusLEDSettingEditor()
 	}
 	if editor.Key == "buzzer.path" {
@@ -376,6 +384,22 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	}
 	ui.Appearance = appconfig.NormalizeAppearance(ui.Appearance)
 	ui.SetupComplete = true
+	if model.remote != nil && (editor.Key == "app.title" || editor.Key == "app.tagline") {
+		if model.remote.SaveHostUI == nil {
+			model.setNotice("Remote host configuration is unavailable; no local setting was changed")
+			return model, nil, true
+		}
+		if err := model.remote.SaveHostUI(ui); err != nil {
+			model.appendLog("error", "save remote host setting: "+err.Error())
+			model.setNotice("Remote host setting was not saved: " + err.Error())
+			return model, nil, true
+		}
+		model.uiValue = ui
+		model.prefs = preferencesFromUI(ui)
+		model.settingEditor = nil
+		model.setNotice("Remote host setting saved through authenticated IPC")
+		return model, nil, true
+	}
 	if strings.HasPrefix(editor.Key, "console.") && model.applyTUIConsole != nil {
 		if err := model.applyTUIConsole(ui.TUIConsole); err != nil {
 			model.appendLog("error", "apply local console settings: "+err.Error())
@@ -394,7 +418,11 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	model.prefs = preferencesFromUI(ui)
 	model.lcdMirror = ui.MirrorPromptToLCD
 	model.settingEditor = nil
-	model.setNotice("Host setting saved and hot-applied")
+	if model.remote != nil {
+		model.setNotice("Client TUI preference saved locally")
+	} else {
+		model.setNotice("Host setting saved and hot-applied")
+	}
 	return model, nil, true
 }
 

@@ -121,6 +121,9 @@ func (model Model) macroLibrary() []appconfig.Macro {
 		sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 		return result
 	}
+	if model.remote != nil {
+		return nil
+	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.List()
 	}
@@ -131,6 +134,9 @@ func (model Model) macroState() control.MacroState {
 	if model.preview != nil {
 		return model.previewMacroState
 	}
+	if model.remote != nil {
+		return control.MacroState{}
+	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.State()
 	}
@@ -140,6 +146,9 @@ func (model Model) macroState() control.MacroState {
 func (model Model) macroRecordingState() control.MacroRecordingState {
 	if model.preview != nil {
 		return model.previewMacroRecording
+	}
+	if model.remote != nil {
+		return control.MacroRecordingState{}
 	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.RecordingState()

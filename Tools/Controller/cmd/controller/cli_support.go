@@ -299,7 +299,7 @@ func printUsage(output io.Writer, configuredTitle ...string) {
 
 Interactive control:
   controller                         launch the Charm TUI
-  controller tui [connection flags]
+  controller tui [--ipc-addr HOST:PORT] [--ipc-token-ref REF] [--simple] [connection flags]
   controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-auto] [connection flags]
   controller web export --output FILE.zip
   controller ports [connection flags]
@@ -358,6 +358,14 @@ Connection flags:
   --pid 7523         USB PID filter
   --name CH340       name/product/manufacturer substring
   --baud 115200      UART rate
+
+Remote TUI flags:
+  --ipc-addr HOST:PORT    attach the full Charm TUI to an existing primary
+  --ipc-token-ref REF     load its bearer token from the OS vault/environment
+  --simple                explicit minimal line-oriented IPC fallback
+
+When another local primary already owns serial, the default is the full IPC
+TUI. Simple mode is never selected implicitly.
 
 Application UART and Urboot/AVRDUDE are mutually exclusive. Normal firmware
 writes first verify a complete flash + EEPROM + metadata backup, then flash,

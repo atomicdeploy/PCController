@@ -22,13 +22,18 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/ports"
-	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/shell"
 )
 
 type Model struct {
 	runtime *control.Runtime
 	engine  *shell.Engine
+	remote  *RemoteBackend
+
+	remoteSnapshot        control.Snapshot
+	remoteSnapshotPending bool
+	remoteSnapshotError   string
+	remoteEventsClosed    bool
 
 	width  int
 	height int
@@ -186,6 +191,7 @@ type tickMsg time.Time
 type welcomeTickMsg time.Time
 type welcomeMelodyResultMsg struct{ err error }
 type runtimeEventMsg control.Event
+type controlEventClosedMsg struct{}
 type commandResultMsg struct {
 	line   string
 	output string
@@ -206,6 +212,10 @@ type menuCatalogResultMsg struct {
 }
 type frontPanelResultMsg struct{ err error }
 type resetResultMsg struct{ err error }
+type remoteSnapshotResultMsg struct {
+	snapshot control.Snapshot
+	err      error
+}
 type portsResultMsg struct {
 	values []ports.Info
 	err    error
@@ -284,9 +294,11 @@ func NewApplicationWithOptions(
 	}
 	value := provider()
 	if options.MirrorLCD == nil {
-		options.MirrorLCD = func(line1, line2 string) error {
-			runtime.LCDPresenter().MirrorPrompt(line1, line2)
-			return nil
+		if options.Remote == nil {
+			options.MirrorLCD = func(line1, line2 string) error {
+				runtime.LCDPresenter().MirrorPrompt(line1, line2)
+				return nil
+			}
 		}
 	}
 	if !options.DisableWelcome {
@@ -383,7 +395,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		ownerActions = portowner.DefaultActions()
 	}
 	model := Model{
-		runtime: runtime, engine: engine, input: input, spinner: progress,
+		runtime: runtime, engine: engine, remote: options.Remote, input: input, spinner: progress,
 		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
 		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
 		hostIntegrations:     options.HostIntegrations,
@@ -406,7 +418,18 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		welcomeStarted:   welcomeStarted, welcomeDeadline: welcomeStarted.Add(30 * time.Second),
 		welcomePhase: "Waiting for USB and application HELLO", welcomeMelody: options.WelcomeMelody,
 		markWelcomed: marker, debug: debug,
-		logs: []string{productidentity.ServiceName(prefs.AppTitle, "command console ready")},
+		logs: nil,
+	}
+	if options.Remote != nil {
+		model.remoteSnapshot = options.Remote.InitialSnapshot
+		model.remoteSnapshotPending = options.Remote.Snapshot != nil
+		model.remoteSnapshot.ConnectionState = strings.TrimSpace(model.remoteSnapshot.ConnectionState)
+		if model.remoteSnapshot.ConnectionState == "" {
+			model.remoteSnapshot.ConnectionState = "remote IPC"
+		}
+		if endpoint := strings.TrimSpace(options.Remote.Endpoint); endpoint != "" {
+			model.logs = append(model.logs, "remote IPC attached: "+endpoint)
+		}
 	}
 	capabilities := uint32(0)
 	if options.Preview != nil {
@@ -463,7 +486,17 @@ func (model Model) Init() tea.Cmd {
 		commands = append(commands, welcomeTick())
 	}
 	if model.preview == nil {
-		commands = append(commands, waitRuntimeEvent(model.runtime))
+		if model.remote != nil {
+			if model.remote.Events != nil {
+				commands = append(commands, waitControlEvent(model.remote.Events))
+			}
+			if model.remote.Snapshot != nil {
+				model.remoteSnapshotPending = true
+				commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot))
+			}
+		} else {
+			commands = append(commands, waitControlEvent(model.runtime.Events()))
+		}
 	}
 	return tea.Batch(commands...)
 }
@@ -576,7 +609,22 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				commands = append(commands, mirrorLCDCommand(model.mirrorLCD, state.LCDLine1, state.LCDLine2, "restore LCD prompt"))
 			}
 		}
-		if model.preview == nil {
+		if model.remote != nil {
+			if !model.remoteSnapshotPending && model.remote.Snapshot != nil {
+				model.remoteSnapshotPending = true
+				commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot))
+			}
+			if snapshot.Connected && model.page == PageOutputs && !model.pwmPending &&
+				time.Since(model.lastPWMRefresh) >= time.Second {
+				model.pwmPending = true
+				commands = append(commands, execute(model.engine, "pwm get"))
+			}
+			if snapshot.Connected && model.page == PageRF && !model.rfPending &&
+				time.Since(model.rfLastRefresh) >= 2*time.Second {
+				model.rfPending = true
+				commands = append(commands, model.fetchRFEntriesCommand())
+			}
+		} else if model.preview == nil {
 			if !snapshot.Connected && !snapshot.Paused && !model.connectPending {
 				model.connectPending = true
 				commands = append(commands, connect(model.runtime))
@@ -669,7 +717,43 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if show {
 			model.appendLog(event.Kind, event.Text)
 		}
-		commands = append(commands, waitRuntimeEvent(model.runtime))
+		if model.remote != nil {
+			if model.remote.Events != nil && !model.remoteEventsClosed {
+				commands = append(commands, waitControlEvent(model.remote.Events))
+			}
+		} else {
+			commands = append(commands, waitControlEvent(model.runtime.Events()))
+		}
+
+	case controlEventClosedMsg:
+		// A remote event channel is terminal. Do not subscribe to an already
+		// closed channel again: receiving from it would complete immediately
+		// and spin Bubble Tea's command loop. Snapshot polling remains active
+		// and truthfully reports whether command/snapshot IPC can reconnect.
+		if model.remote != nil && !model.remoteEventsClosed {
+			model.remoteEventsClosed = true
+			model.appendLog("warning", "remote IPC event stream closed; live snapshots continue")
+		}
+
+	case remoteSnapshotResultMsg:
+		model.remoteSnapshotPending = false
+		if message.err != nil {
+			model.remoteSnapshotError = message.err.Error()
+			model.remoteSnapshot.Connected = false
+			model.remoteSnapshot.ConnectionState = "remote IPC unavailable"
+			model.remoteSnapshot.ConnectionReason = message.err.Error()
+			model.remoteSnapshot.ConnectionUpdated = time.Now()
+			break
+		}
+		wasUnavailable := model.remoteSnapshotError != ""
+		model.remoteSnapshot = message.snapshot
+		model.remoteSnapshotError = ""
+		if strings.TrimSpace(model.remoteSnapshot.ConnectionState) == "" {
+			model.remoteSnapshot.ConnectionState = "remote IPC"
+		}
+		if wasUnavailable {
+			model.appendLog("info", "remote IPC connection restored")
+		}
 
 	case commandResultMsg:
 		normalizedLine := strings.ToLower(strings.TrimSpace(message.line))
@@ -678,7 +762,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if errors.Is(message.err, shell.ErrExit) {
-			if model.preview == nil {
+			if model.preview == nil && model.remote == nil {
 				_ = model.runtime.Close()
 			}
 			return model, tea.Quit
@@ -702,9 +786,13 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.menuLayoutError = ""
 				model.menuCatalogLoaded = false
 				if !model.menuCatalogPending {
-					model.menuCatalogPending = true
-					model.menuCatalogLastAttempt = time.Now()
-					commands = append(commands, refreshMenuCatalog(model.runtime))
+					if model.remote != nil {
+						commands = append(commands, execute(model.engine, "menu list"))
+					} else {
+						model.menuCatalogPending = true
+						model.menuCatalogLastAttempt = time.Now()
+						commands = append(commands, refreshMenuCatalog(model.runtime))
+					}
 				}
 			}
 		}
@@ -747,7 +835,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			model.clearRFGuideArms()
 		}
-		if message.err == nil && model.preview == nil && outputCommandNeedsReadback(message.line) {
+		if message.err == nil && model.preview == nil && model.remote == nil && outputCommandNeedsReadback(message.line) {
 			if !model.statusPending {
 				model.statusPending = true
 				commands = append(commands, refreshStatus(model.runtime))
@@ -1022,10 +1110,23 @@ func (model *Model) resize() {
 }
 
 func (model Model) snapshot() control.Snapshot {
+	if model.remote != nil {
+		return model.remoteSnapshot
+	}
 	if model.preview != nil {
 		return *model.preview
 	}
 	return model.runtime.Snapshot()
+}
+
+func (model Model) rfLearnState() control.RFLearnState {
+	if model.remote != nil {
+		return model.remoteSnapshot.RFLearning
+	}
+	if model.preview != nil {
+		return model.preview.RFLearning
+	}
+	return model.runtime.RFLearnState()
 }
 
 func (model *Model) finishWelcome() {
@@ -1641,8 +1742,23 @@ func welcomeTick() tea.Cmd {
 	return tea.Tick(75*time.Millisecond, func(value time.Time) tea.Msg { return welcomeTickMsg(value) })
 }
 
-func waitRuntimeEvent(runtime *control.Runtime) tea.Cmd {
-	return func() tea.Msg { return runtimeEventMsg(<-runtime.Events()) }
+func waitControlEvent(events <-chan control.Event) tea.Cmd {
+	return func() tea.Msg {
+		event, ok := <-events
+		if !ok {
+			return controlEventClosedMsg{}
+		}
+		return runtimeEventMsg(event)
+	}
+}
+
+func refreshRemoteSnapshot(fetch func(context.Context) (control.Snapshot, error)) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		snapshot, err := fetch(ctx)
+		return remoteSnapshotResultMsg{snapshot: snapshot, err: err}
+	}
 }
 
 func connect(runtime *control.Runtime) tea.Cmd {
