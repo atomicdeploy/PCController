@@ -17,6 +17,8 @@ void CompactI2c::begin() {
   error_ = 0;
   rxLength_ = 0;
   rxIndex_ = 0;
+  timeoutMicros_ = 25000;
+  resetOnTimeout_ = true;
 }
 
 void CompactI2c::setWireTimeout(uint32_t timeoutMicros,

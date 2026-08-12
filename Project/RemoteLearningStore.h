@@ -95,7 +95,8 @@ private:
                            RemoteBehavior behavior);
 
   Record pendingRecord_{};
-  uint8_t pendingId_ = Capacity;
+  // begin() installs Capacity before the store can be queried or serviced.
+  uint8_t pendingId_ = 0;
   uint8_t writeIndex_ = 0;
   uint8_t clearId_ = 0;
   uint8_t headerWriteIndex_ = 0;

@@ -56,7 +56,12 @@ void sendHello(uint8_t sequence) {
 #endif
 #if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
       (1UL << 28) | // MCU-owned procedural status LED effects
+#endif
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS && \
+    PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
       (1UL << 29) | // unsolicited rendered status LED state frames
+#endif
+#if PCCONTROLLER_ENABLE_STATUS_LED_PROFILES
       (1UL << 30) | // EEPROM-resident condition status profiles
 #endif
       (1UL << 31) | // checksum-backed operator board name (up to 8 ASCII chars)
@@ -600,8 +605,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       }
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
 #if PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
-      statusLeds.setBrightness(payload[3]);
-      statusLeds.setCustom(payload[0], payload[1], payload[2]);
+      statusLeds.setCustom(payload, frameNow);
 #else
       // Keep the raw shared RGB engine even when the autonomous profile/effect
       // policy is compiled out to recover flash.
@@ -630,21 +634,15 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         statusLeds.cancelEffect();
         goto acknowledged;
       }
-      if (length < 12 || payload[0] == 0 || payload[0] > 4 ||
-          !statusLeds.setEffect(
-              static_cast<StatusLedEffect>(payload[0]), payload[1], payload[2],
-              payload[3], payload[4], payload[5], payload[6], payload[7],
-              payload[8], readU16(payload + 9), payload[11], frameNow)) {
+      if (length < 12 || !statusLeds.setEffect(payload, frameNow)) {
         goto badPayload;
       }
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
       goto acknowledged;
 #endif
 
+#if PCCONTROLLER_ENABLE_STATUS_LED_PROFILES
     case StatusProfileGet: {
-#if !PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
-      goto unsupported;
-#else
       if (length < 1 || payload[0] >= StatusLedController::ProfileCount) {
         goto badPayload;
       }
@@ -655,13 +653,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       appProtocol.send(ControllerProtocol::StatusProfileResponse,
                        frame.sequence, response, sizeof(response));
       return;
-#endif
     }
 
     case StatusProfileSet:
-#if !PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
-      goto unsupported;
-#else
       if (length < 1 + StatusLedController::ProfilePayloadBytes ||
           !statusLeds.setProfile(payload[0], payload + 1, frameNow)) {
         goto badPayload;

@@ -48,9 +48,9 @@ public:
   void clearVirtualInputs();
 
 private:
-  uint8_t inputRegister_ = 0xFF;
-  uint8_t outputRegister_ = 0xFF;
-  uint8_t virtualInputs_ = 0xFF;
+  uint8_t inputRegister_ = 0;
+  uint8_t outputRegister_ = 0;
+  uint8_t virtualInputs_ = 0;
 };
 
 // shiftRegisters is the single board-wide shift-register service.
