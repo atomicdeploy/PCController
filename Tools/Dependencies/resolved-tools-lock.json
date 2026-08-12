@@ -132,7 +132,7 @@
     "installer_sha256": "4273565109cd8ab8ecef1b0dc2a56fd7f5c7ee0885840a1c011b9325160ec0c3"
   },
   "web": {
-    "package_lock_sha256": "113de37dd1a44023b406713ce6a0827177edb8b017bb0c12d2d5e79a3058d3d5"
+    "package_lock_sha256": "46da02bd402f95c767e7f82ebd25f6cc6ff16f5e750f47e7a1ef25d395743d1b"
   },
   "build": {
     "package_lock_sha256": "bc88bbdbe5b14f066848c3ab945282dcd93f529ff53e9fc5bf3ee985ca7bb183"
