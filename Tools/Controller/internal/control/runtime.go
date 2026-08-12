@@ -1351,14 +1351,31 @@ func (runtime *Runtime) SetBoardName(ctx context.Context, name string) (native.B
 	if err := runtime.Command(ctx, native.OpSetSettings, payload); err != nil {
 		return native.BoardName{}, err
 	}
-	confirmed, err := runtime.BoardName(ctx)
-	if err != nil {
-		return native.BoardName{}, fmt.Errorf("read back board name: %w", err)
+	// EEPROM writes are deliberately cooperative.  The first SETTINGS response
+	// can already contain the new in-RAM name while Persisted remains false;
+	// keep that valid state observable, then wait for the durable record rather
+	// than declaring a protocol failure or reinitializing the board.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		confirmed, err := runtime.BoardName(ctx)
+		if err != nil {
+			return native.BoardName{}, fmt.Errorf("read back board name: %w", err)
+		}
+		if confirmed.Name != name {
+			return native.BoardName{}, fmt.Errorf("board name readback=%q; wanted %q", confirmed.Name, name)
+		}
+		if confirmed.Persisted {
+			return confirmed, nil
+		}
+		if !time.Now().Before(deadline) {
+			return native.BoardName{}, fmt.Errorf("board name %q was accepted but did not persist within 2s", name)
+		}
+		select {
+		case <-ctx.Done():
+			return native.BoardName{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
-	if !confirmed.Persisted || confirmed.Name != name {
-		return native.BoardName{}, fmt.Errorf("board name readback=%q persisted=%t; wanted %q", confirmed.Name, confirmed.Persisted, name)
-	}
-	return confirmed, nil
 }
 
 // syncProgramState mirrors the latest host-owned semantic state after HELLO

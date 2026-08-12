@@ -356,9 +356,34 @@ func provisionBoard(
 				return appendBoardInitializationReport(output, result, *jsonReport)
 			}
 		} else {
-			fmt.Fprintln(output, "Existing application did not authenticate; provisioning will initialize the core before upload.")
+			fmt.Fprintln(output, "Existing application did not authenticate; checking the UART bootloader before considering ISP initialization.")
 			_ = runtime.Close()
-			needsInitialize = true
+			// A valid Urboot answers even when the application is absent or broken.
+			// In that case an explicit firmware image can repair the application
+			// without needlessly touching ISP fuses, EEPROM, or the bootloader.
+			if strings.TrimSpace(*firmware) != "" {
+				project := configuredProject(store.Current(), fallbackProject)
+				cli, cliConfig, toolchainErr := resolveProvisionToolchain(ctx, store, *skipToolchain, *portableCLI, *toolchainCLI, *fqbn, project, output)
+				if toolchainErr == nil {
+					probeErr := programmer.Execute(ctx, programmer.Options{
+						Method: programmer.MethodUrclock, Operation: programmer.OperationProbe,
+						Port: uartPort, FQBN: *fqbn, ArduinoCLI: cli, ArduinoConfig: cliConfig,
+						Avrdude: store.Current().Programming.Avrdude, AvrdudeConf: store.Current().Programming.AvrdudeConf,
+					}, output)
+					if probeErr == nil {
+						result["bootloader_authenticated"] = true
+						fmt.Fprintln(output, "Verified UART bootloader is usable; retaining ISP state and uploading the requested firmware.")
+					} else {
+						needsInitialize = true
+						fmt.Fprintln(output, "UART bootloader did not respond; provisioning will initialize the core before upload.")
+					}
+				} else {
+					needsInitialize = true
+					fmt.Fprintln(output, "Toolchain could not prepare a UART bootloader probe; provisioning will initialize the core before upload.")
+				}
+			} else {
+				needsInitialize = true
+			}
 		}
 	} else if !needsInitialize {
 		fmt.Fprintln(output, "No application UART is available; provisioning will initialize the core before any requested upload.")

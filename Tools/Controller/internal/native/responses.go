@@ -92,8 +92,7 @@ func SettingsWithBoardNamePayload(settings Settings, name string) ([]byte, error
 // identity in that existing exchange saves flash and protocol slots on AVR.
 func ParseBoardNameFromSettings(payload []byte) (BoardName, error) {
 	if len(payload) < 18 || len(payload) > 18+MaximumBoardNameLength || payload[16] > 1 ||
-		int(payload[17]) > MaximumBoardNameLength || len(payload) != 18+int(payload[17]) ||
-		(payload[16] == 0 && payload[17] != 0) {
+		int(payload[17]) > MaximumBoardNameLength || len(payload) != 18+int(payload[17]) {
 		return BoardName{}, fmt.Errorf("invalid SETTINGS board-name extension")
 	}
 	name := string(payload[18:])

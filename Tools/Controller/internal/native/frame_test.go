@@ -780,6 +780,12 @@ func TestBoardNamePayloadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pending := append([]byte{}, base...)
+	pending = append(pending, 0, 0, 4, 'T', 'E', 'S', 'T')
+	decoded, err := ParseBoardNameFromSettings(pending)
+	if err != nil || decoded.Name != "TEST" || decoded.Persisted {
+		t.Fatalf("pending board-name response decoded=%#v err=%v", decoded, err)
+	}
 	truncated := append([]byte{}, base...)
 	truncated = append(truncated, 1, 1, 2, 'A')
 	if _, err := ParseBoardNameFromSettings(truncated); err == nil {
