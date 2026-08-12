@@ -649,8 +649,8 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
 | `controller.status` | `{}` | fresh board status |
-| `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
-| `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
+| `controller.peripherals.get` | `{}` | canonical registry plus the resolved ordered relay, Side, and MOSFET/PWM presentation descriptors; requires `read` |
+| `controller.peripherals.set` | `peripheral_presentation` object, or legacy `peripheral_names` | atomically replace validated name/description/order metadata and broadcast a `config` event; requires `host_configuration` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
 | `controller.pwm.set` | `channel` (`0..15`), `value` (`0..4095`) | write one channel, read back, and return the complete authoritative sixteen-channel snapshot; requires `board_commands` |
 | `controller.pwm.off` | `{}` | clear every PWM channel, read back, and return the complete authoritative snapshot; requires `board_commands` |

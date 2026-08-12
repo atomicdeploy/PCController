@@ -613,6 +613,7 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 				); historyErr != nil {
 					fmt.Fprintln(stderr, "history configuration rejected:", historyErr)
 				}
+				client.EmitHostEvent("config", "host configuration reloaded")
 				fmt.Fprintln(stderr, "configuration reloaded:", store.Path())
 			},
 			func(err error) {

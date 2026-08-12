@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/coder/websocket"
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
@@ -118,10 +120,10 @@ func TestPeripheralNamesRPCNormalizesPersistsAndNeverTouchesBoardSettings(t *tes
 	if _, exists := updated.Names["pwm.0"]; exists {
 		t.Fatalf("blank custom name was not restored to default: %#v", updated.Names)
 	}
-	if len(updated.Peripherals) != 34 || len(updated.Controls) != 21 || config.Connection.ResetOnReconnect {
+	if len(updated.Peripherals) != 34 || len(updated.Controls) != appconfig.MaxPresentedControls || config.Connection.ResetOnReconnect {
 		t.Fatalf("peripheral update descriptors=%d controls=%d reset-on-reconnect=%t", len(updated.Peripherals), len(updated.Controls), config.Connection.ResetOnReconnect)
 	}
-	if got := updated.Controls[4]; got.Key != "relay.5" || got.Kind != "relay" || got.Order != 5 || got.Name != "Bench lamp" {
+	if got := updated.Controls[4]; got.Key != "relay.5" || got.Kind != "relay" || got.Order != 4 || got.Name != "Bench lamp" {
 		t.Fatalf("relay control contract=%+v", got)
 	}
 
@@ -156,8 +158,74 @@ func TestPeripheralNamesRESTUsesTheSameTypedContract(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 34 || len(result.Controls) != 21 {
+	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 34 || len(result.Controls) != appconfig.MaxPresentedControls {
 		t.Fatalf("REST peripheral response status=%d result=%+v", response.StatusCode, result)
+	}
+}
+
+func TestPeripheralPresentationBroadcastConvergesTwoWebSocketClients(t *testing.T) {
+	service, config := browserUIConfigTestService(t)
+	server := httptest.NewServer(websocketMux(context.Background(), service))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/ipc"
+	dial := func(id string) *websocket.Conn {
+		connection, _, err := websocket.Dial(ctx, url, nil)
+		if err != nil {
+			t.Fatalf("dial %s: %v", id, err)
+		}
+		t.Cleanup(func() { connection.CloseNow() })
+		request, _ := json.Marshal(map[string]any{
+			"jsonrpc": "2.0", "id": id, "method": "controller.subscribe",
+			"params": map[string]any{"topics": []string{"events"}},
+		})
+		if err := connection.Write(ctx, websocket.MessageText, request); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var response Response
+			if json.Unmarshal(data, &response) == nil && string(response.ID) == `"`+id+`"` {
+				return connection
+			}
+		}
+	}
+	first, second := dial("first"), dial("second")
+	mutation, _ := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": 17, "method": "controller.peripherals.set",
+		"params": map[string]any{"peripheral_presentation": map[string]any{
+			"motion.a": map[string]any{"name": "Left", "description": "Left lift", "order": 0},
+			"motion.b": map[string]any{"name": "Right", "description": "Right lift", "order": 1},
+		}},
+	})
+	if err := first.Write(ctx, websocket.MessageText, mutation); err != nil {
+		t.Fatal(err)
+	}
+	readConfig := func(name string, connection *websocket.Conn) {
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			var notification struct {
+				Method string              `json:"method"`
+				Params controllerapi.Event `json:"params"`
+			}
+			if json.Unmarshal(data, &notification) == nil && notification.Method == "controller.event" &&
+				notification.Params.Kind == "config" && notification.Params.Action == "peripheral.presentation.set" {
+				return
+			}
+		}
+	}
+	readConfig("first", first)
+	readConfig("second", second)
+	if config.UI.PeripheralPresentation["motion.a"].Name != "Left" ||
+		config.UI.PeripheralNames["motion.b"] != "Right" {
+		t.Fatalf("presentation did not persist with compatibility names: %+v / %+v", config.UI.PeripheralPresentation, config.UI.PeripheralNames)
 	}
 }
 

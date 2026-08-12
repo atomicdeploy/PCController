@@ -371,7 +371,9 @@ export interface HostUISettings {
   appearance_etag: string
   segment_scroll: SegmentScrollSettings
   peripheral_names: Record<string, string>
+  peripheral_presentation: Record<string, PeripheralPresentation>
   peripherals: PeripheralDescriptor[]
+  controls: PeripheralControlDescriptor[]
   changed?: boolean
   changed_fields?: string[]
   before?: Record<string, unknown>
@@ -384,12 +386,34 @@ export interface PeripheralDescriptor {
   role: string
   index: number
   default_name: string
+  default_description: string
   control: 'relay' | 'motion' | 'pwm-user' | 'role-specific' | 'read-only'
+}
+
+export interface PeripheralPresentation {
+  name: string
+  description: string
+  order: number
+}
+
+export interface PeripheralControlDescriptor {
+  key: string
+  kind: 'relay' | 'side' | 'mosfet'
+  role: string
+  index: number
+  order: number
+  name: string
+  description: string
+  default_name: string
+  default_description: string
+  control: PeripheralDescriptor['control']
 }
 
 export interface PeripheralSettings {
   peripheral_names: Record<string, string>
+  peripheral_presentation: Record<string, PeripheralPresentation>
   peripherals: PeripheralDescriptor[]
+  controls: PeripheralControlDescriptor[]
 }
 
 export interface PWMValues {

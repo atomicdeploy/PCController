@@ -157,7 +157,20 @@ func (model Model) appSettingRows() []settingRow {
 }
 
 func (model Model) peripheralNameSettingRows() []settingRow {
-	descriptors := appconfig.PeripheralDescriptors()
+	registry := appconfig.PeripheralDescriptors()
+	byKey := make(map[string]appconfig.PeripheralDescriptor, len(registry))
+	for _, descriptor := range registry {
+		byKey[descriptor.Key] = descriptor
+	}
+	descriptors := make([]appconfig.PeripheralDescriptor, 0, len(registry))
+	for _, control := range appconfig.ControlDescriptors(model.uiValue) {
+		descriptors = append(descriptors, byKey[control.Key])
+	}
+	for _, descriptor := range registry {
+		if !appconfig.IsPresentedControlKey(descriptor.Key) {
+			descriptors = append(descriptors, descriptor)
+		}
+	}
 	rows := make([]settingRow, 0, len(descriptors))
 	previousKind := ""
 	for _, descriptor := range descriptors {
@@ -174,9 +187,13 @@ func (model Model) peripheralNameSettingRows() []settingRow {
 		if custom := strings.TrimSpace(model.uiValue.PeripheralNames[descriptor.Key]); custom != "" && custom != descriptor.DefaultName {
 			qualifier = "custom"
 		}
+		description := descriptor.DefaultDescription
+		if presentation, ok := model.uiValue.PeripheralPresentation[descriptor.Key]; ok && presentation.Description != "" {
+			description = presentation.Description
+		}
 		rows = append(rows, settingRow{
 			Key: peripheralNameSettingKey(descriptor.Key), Group: group,
-			Label: fmt.Sprintf("%s · %s", descriptor.Key, descriptor.DefaultName),
+			Label: fmt.Sprintf("%s · %s", descriptor.Key, truncateText(description, 42)),
 			Value: fmt.Sprintf("%s · %s", name, qualifier), Editable: true,
 		})
 	}

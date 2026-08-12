@@ -841,6 +841,11 @@ func outputPeripheralDescriptor(cursor int) (appconfig.PeripheralDescriptor, boo
 }
 
 func (model Model) peripheralName(key, fallback string) string {
+	if presentation, ok := model.uiValue.PeripheralPresentation[key]; ok {
+		if name := strings.TrimSpace(presentation.Name); name != "" {
+			return name
+		}
+	}
 	if name := strings.TrimSpace(model.uiValue.PeripheralNames[key]); name != "" {
 		return name
 	}
@@ -942,6 +947,20 @@ func (model Model) savePeripheralName(descriptor appconfig.PeripheralDescriptor,
 		names[descriptor.Key] = name
 	}
 	ui.PeripheralNames = names
+	if appconfig.IsPresentedControlKey(descriptor.Key) {
+		presentation := make(map[string]appconfig.PeripheralPresentation, len(ui.PeripheralPresentation)+1)
+		for key, current := range ui.PeripheralPresentation {
+			presentation[key] = current
+		}
+		value := presentation[descriptor.Key]
+		if restored {
+			value.Name = ""
+		} else {
+			value.Name = name
+		}
+		presentation[descriptor.Key] = value
+		ui.PeripheralPresentation = presentation
+	}
 	ui.SetupComplete = true
 	if model.saveUI != nil {
 		if err := model.saveUI(ui); err != nil {

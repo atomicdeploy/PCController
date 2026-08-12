@@ -469,11 +469,12 @@ for the full schema and security boundaries.
 
 Web settings normalize text and endpoint input while editing, show current
 validation state, and block malformed or out-of-scope integration targets.
-The same host configuration owns `ui.peripheral_names` for the canonical
-34-peripheral registry. Blank names sent through the typed RPC or REST settings
-surface remove an override and reveal its default; the operation never touches
-MCU EEPROM. Use `controller.peripherals.get`/`.set` or `GET`/`PUT`
-`/api/peripherals` when another host surface needs the same labels.
+The same host configuration owns `ui.peripheral_presentation` for relay,
+motion-side, and MOSFET/PWM names, descriptions, and ordering. The historical
+`ui.peripheral_names` map remains compatible. The operation never touches MCU
+EEPROM. Use `controller.exe peripherals`, `controller.peripherals.get`/`.set`,
+or `GET`/`PUT /api/peripherals` when another host surface needs the same ordered
+descriptors; connected subscribers receive updates immediately.
 
 ## 9. Monitor, scripts, and IPC
 

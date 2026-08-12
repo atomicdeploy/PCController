@@ -96,6 +96,7 @@ import { settingsSetCommand } from './command-line'
 import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
+import { movePeripheralControl, peripheralPresentationPayload } from './peripheral-presentation'
 import { SevenSegmentPreview } from './seven-segment-preview'
 import {
   normalizePWMValues,
@@ -134,6 +135,8 @@ import type {
   LocalDeviceSnapshot,
   MenuCatalog,
   MetricSample,
+  PeripheralControlDescriptor,
+  PeripheralSettings,
   PWMValues,
   Snapshot,
   SegmentScrollSettings,
@@ -612,6 +615,8 @@ export function ControlsView(props: SharedViewProps) {
   const [pwmError, setPWMError] = useState('')
   const [pwmAllBusy, setPWMAllBusy] = useState(false)
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
+  const [presentationBusy, setPresentationBusy] = useState('')
+  const [draggedPeripheral, setDraggedPeripheral] = useState('')
   const [red, setRed] = useState(25)
   const [green, setGreen] = useState(130)
   const [blue, setBlue] = useState(220)
@@ -722,8 +727,80 @@ export function ControlsView(props: SharedViewProps) {
     copy('User relay 5', 'رلهٔ کاربر ۵'), copy('User relay 6', 'رلهٔ کاربر ۶'),
     copy('User relay 7', 'رلهٔ کاربر ۷'), copy('User relay 8', 'رلهٔ کاربر ۸'),
   ]
-  const peripheralName = (key: string, fallback: string) => hostUI?.peripheral_names?.[key]?.trim() || fallback
+  const presentationControls = hostUI?.controls ?? []
+  const controlByKey = new Map(presentationControls.map((control) => [control.key, control]))
+  const peripheralName = (key: string, fallback: string) => controlByKey.get(key)?.name?.trim() || hostUI?.peripheral_names?.[key]?.trim() || fallback
   const pwmName = (channel: number) => peripheralName(`pwm.${channel}`, pwmDefaults[channel])
+  const commitPresentation = async (controls: PeripheralControlDescriptor[], busyKey: string) => {
+    if (!controls.length || presentationBusy) return
+    setPresentationBusy(busyKey)
+    setPWMError('')
+    try {
+      const result = await rpc<PeripheralSettings>('controller.peripherals.set', {
+        peripheral_presentation: peripheralPresentationPayload(controls),
+      })
+      setHostUI((current) => current ? {
+        ...current,
+        peripheral_names: result.peripheral_names,
+        peripheral_presentation: result.peripheral_presentation,
+        peripherals: result.peripherals,
+        controls: result.controls,
+      } : current)
+    } catch (cause) {
+      setPWMError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setPresentationBusy('')
+    }
+  }
+  const updatePresentation = (key: string, field: 'name' | 'description', rawValue: string) => {
+    const current = controlByKey.get(key)
+    const value = rawValue.trim()
+    if (!current) return
+    const defaultValue = field === 'name' ? current.default_name : current.default_description
+    if (current[field] === value || (!value && current[field] === defaultValue)) return
+    void commitPresentation(presentationControls.map((control) => control.key === key ? {
+      ...control,
+      [field]: value || (field === 'name' ? control.default_name : control.default_description),
+    } : control), key)
+  }
+  const reorderPresentation = (targetKey: string) => {
+    const source = presentationControls.find((control) => control.key === draggedPeripheral)
+    const reordered = movePeripheralControl(presentationControls, draggedPeripheral, targetKey)
+    setDraggedPeripheral('')
+    if (!source || reordered.every((control, index) => control.key === presentationControls[index]?.key)) return
+    void commitPresentation(reordered, source.key)
+  }
+  const editor = (control: PeripheralControlDescriptor | undefined) => control ? <div
+    className={`peripheral-inline-editor${presentationBusy === control.key ? ' is-busy' : ''}`}
+    draggable={!presentationBusy}
+    onDragStart={() => setDraggedPeripheral(control.key)}
+    onDragEnd={() => setDraggedPeripheral('')}
+    onDragOver={(event) => event.preventDefault()}
+    onDrop={() => reorderPresentation(control.key)}
+  >
+    <GripVertical aria-hidden="true" size={15} />
+    <input
+      key={`${control.key}-name-${control.name}`}
+      aria-label={copy(`Name for ${control.key}`, `نام ${control.key}`)}
+      defaultValue={control.name}
+      maxLength={64}
+      disabled={Boolean(presentationBusy)}
+      onBlur={(event) => updatePresentation(control.key, 'name', event.currentTarget.value)}
+      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { event.currentTarget.value = control.name; event.currentTarget.blur() } }}
+    />
+    <input
+      key={`${control.key}-description-${control.description}`}
+      aria-label={copy(`Description for ${control.key}`, `توضیح ${control.key}`)}
+      defaultValue={control.description}
+      maxLength={160}
+      disabled={Boolean(presentationBusy)}
+      onBlur={(event) => updatePresentation(control.key, 'description', event.currentTarget.value)}
+      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { event.currentTarget.value = control.description; event.currentTarget.blur() } }}
+    />
+  </div> : null
+  const relayControls = presentationControls.filter((control) => control.kind === 'relay')
+  const sideControls = presentationControls.filter((control) => control.kind === 'side')
+  const userPWMControls = presentationControls.filter((control) => control.kind === 'mosfet' && control.control === 'pwm-user')
   const setPWMPercent = (channel: number, percent: number, immediate = false) => {
     pwmSchedulerRef.current?.schedule(channel, pwmValue(percent), immediate)
   }
@@ -766,34 +843,38 @@ export function ControlsView(props: SharedViewProps) {
           { label: copy('Turn every relay off', 'خاموش‌کردن همهٔ رله‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off') } }) },
         ]}>
           <div className="relay-bank">
-            {Array.from({ length: 8 }, (_, index) => {
+            {(relayControls.length ? relayControls : Array.from({ length: 8 }, (_, index) => ({ key: `relay.${index + 1}`, index: index + 1 } as PeripheralControlDescriptor))).map((control) => {
+              const index = control.index - 1
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
-                <article key={index} className={`relay-switch${active ? ' is-active' : ''}${relayPending.has(index + 1) ? ' is-pending' : ''}`}>
+                <article key={control.key} className={`relay-switch${active ? ' is-active' : ''}${relayPending.has(index + 1) ? ' is-pending' : ''}`}>
                   <button type="button" className="relay-switch__toggle" data-relay={index + 1} aria-pressed={active} aria-label={copy(`Turn relay ${index + 1} ${active ? 'off' : 'on'}`, `رلهٔ ${index + 1} را ${active ? 'خاموش' : 'روشن'} کن`)} disabled={relayPending.has(index + 1)} onClick={(event) => void relayToggle(Number(event.currentTarget.dataset.relay), active)}>
                     <span>R{index + 1}</span><i aria-hidden="true"><b /></i><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
                   </button>
                   <div className="relay-switch__actions"><Button compact disabled={active || relayPending.has(index + 1)} onClick={() => void relayToggle(index + 1, false)}>{t('on')}</Button><Button compact disabled={!active || relayPending.has(index + 1)} onClick={() => void relayToggle(index + 1, true)}>{t('off')}</Button></div>
+                  {editor(controlByKey.get(control.key))}
                 </article>
               )
             })}
           </div>
           <div className="motion-actions">
-            {(['left', 'right'] as const).map((side) => (
-              <div key={side} className="motion-side">
-                <strong>{side === 'left' ? peripheralName('motion.a', copy('Side A motion', 'حرکت سمت A')) : peripheralName('motion.b', copy('Side B motion', 'حرکت سمت B'))}</strong>
+            {(sideControls.length ? sideControls : [{ key: 'motion.a' }, { key: 'motion.b' }] as PeripheralControlDescriptor[]).map((control) => {
+              const side = control.key === 'motion.a' ? 'left' : 'right'
+              return <div key={control.key} className="motion-side">
+                <strong>{peripheralName(control.key, side === 'left' ? copy('Side A motion', 'حرکت سمت A') : copy('Side B motion', 'حرکت سمت B'))}</strong>
                 <HoldActionButton compact onHoldStart={() => command(`relay side ${side} up`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Up', 'بالا نگه‌دار')}</HoldActionButton>
                 <Button compact onClick={() => void command(`relay side ${side} stop`)}>{copy('Stop', 'توقف')}</Button>
                 <HoldActionButton compact onHoldStart={() => command(`relay side ${side} down`)} onHoldStop={() => command(`relay side ${side} stop`)}>{copy('Hold Down', 'پایین نگه‌دار')}</HoldActionButton>
+                {editor(controlByKey.get(control.key))}
               </div>
-            ))}
+            })}
           </div>
           <Button icon={AlertOctagon} tone="danger" onClick={() => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off') } })}>{t('emergencyOff')}</Button>
         </Card>
 
         {snapshot.status.pwm_available && <Card icon={SlidersHorizontal} iconTone="violet" eyebrow={copy('11 user channels · saved changes', '۱۱ کانال کاربر · تغییرات ذخیره‌شده')} title={copy('PWM mixer', 'میکسر PWM')} className="pwm-card" action={<StatusBadge tone={pwmError ? 'bad' : pwmPending.length ? 'warn' : pwmLoaded ? 'good' : 'neutral'}>{pwmError ? copy('ERROR', 'خطا') : pwmPending.length ? copy('SYNCING', 'همگام‌سازی') : pwmLoaded ? copy('READY', 'آماده') : copy('READING', 'در حال خواندن')}</StatusBadge>}>
           <div className="pwm-mixer">
-            {USER_PWM_CHANNELS.map((channel) => {
+            {(userPWMControls.length ? userPWMControls.map((control) => control.index) : USER_PWM_CHANNELS).map((channel) => {
               const reported = pwmReported[channel]
               const draft = pwmDraft[channel]
               const pending = pwmPending.includes(channel)
@@ -804,11 +885,12 @@ export function ControlsView(props: SharedViewProps) {
                   : copy(`Board reported ${reported} / 4095`, `گزارش برد ${reported} از ۴۰۹۵`)}</small></div>
                 <RangeField label={copy(`${name} duty`, `دیوتی ${name}`)} value={pwmPercent(draft)} min={0} max={100} unit="%" disabled={!pwmLoaded || pwmAllBusy} onChange={(percent) => setPWMPercent(channel, percent)} />
                 <div className="pwm-mixer__actions"><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 0} onClick={() => setPWMPercent(channel, 0, true)}>{t('off')}</Button><Button compact disabled={!pwmLoaded || pwmAllBusy || draft === 4095} onClick={() => setPWMPercent(channel, 100, true)}>{copy('FULL', 'کامل')}</Button></div>
+                {editor(controlByKey.get(`pwm.${channel}`))}
               </div>
             })}
           </div>
           <div className="system-output-summary" aria-label={copy('Role-specific system PWM channels', 'کانال‌های PWM سیستمی با کنترل اختصاصی')}>
-            {[11, 12, 13, 14, 15].map((channel) => <span key={channel}><strong>{pwmName(channel)}</strong><small>{pwmReported[channel]} / 4095</small></span>)}
+            {(presentationControls.filter((control) => control.kind === 'mosfet' && control.control === 'role-specific').map((control) => control.index).length ? presentationControls.filter((control) => control.kind === 'mosfet' && control.control === 'role-specific').map((control) => control.index) : [11, 12, 13, 14, 15]).map((channel) => <span key={channel}><strong>{pwmName(channel)}</strong><small>{pwmReported[channel]} / 4095</small>{editor(controlByKey.get(`pwm.${channel}`))}</span>)}
           </div>
           <div className={`pwm-authority-status${pwmError ? ' is-error' : ''}`} role="status" aria-live="polite">{pwmError || (pwmPending.length
             ? copy(`${pwmPending.length} channel${pwmPending.length === 1 ? '' : 's'} waiting for controller acknowledgement.`, `${pwmPending.length} کانال در انتظار تأیید کنترلر است.`)
