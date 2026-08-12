@@ -62,7 +62,7 @@ func (admin *fakeWebhookAdmin) WebhookClearDead(
 
 func webhookAdminTestService(admin WebhookAdminService) *Service {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	return &Service{
 		Client: client,
 		WebhookAdmin: func() WebhookAdminService {

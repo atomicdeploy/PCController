@@ -192,6 +192,9 @@ alter firmware EEPROM.
 | STATUS_RGB | `14` | `u8 r, u8 g, u8 b, u8 brightness` |
 | PWM_GET | `15` | none; returns availability and all sixteen values |
 | ADDRESSABLE_LED | `16` | `u8 pixel, u8 r, u8 g, u8 b, u8 brightness`; pixel `0..10`, or `FF` to fill |
+| STATUS_EFFECT | `17` | 12-byte descriptor below, or one-byte `00` explicit owner release |
+| STATUS_PROFILE_GET | `18` | `u8 condition` (`0..18`) |
+| STATUS_PROFILE_SET | `19` | `u8 condition` followed by the 12-byte descriptor |
 | RF_TX | `20` | `u32 code, u8 bits (1..32), u8 protocol (1..12), u16 pulse_us` |
 | RF_LEARN_START | `21` | `u8 timeout_seconds` (1..120) |
 | RF_LEARN_CANCEL | `22` | none |
@@ -248,6 +251,18 @@ bytes followed by `u8 brightness`. `BUZZER_CHANGED` (`9D`) carries
 emitted only when the corresponding physical output changes. The host may
 still request `FRONT_PANEL_GET` during connection, manual refresh, or recovery.
 
+`STATUS_EFFECT` transfers native compositor ownership atomically. Its exact
+12-byte descriptor is `u8 effect, rgb[3], alternate_rgb[3], brightness,
+minimum_brightness, u16 period_ms, u8 repeats`. Effect values are none `0`,
+breathe `1`, flash `2`, cycle `3`, and transition `4`; a request descriptor
+uses `1..4`. Repeating an identical descriptor is idempotent and retains the
+MCU phase. A changed descriptor replaces it without an intervening release or
+fallback frame. The one-byte payload `00` explicitly releases native ownership
+while retaining the last rendered frame until the board's lifecycle selects
+the next presentation. `STATUS_PROFILE_GET/SET` read and write the same
+descriptor for condition IDs `0..18`; the response is `STATUS_PROFILE` (`9F`)
+with `u8 condition`, all 12 descriptor bytes, then `u8 persisted`.
+
 The host's melody scheduler sends acknowledged `BUZZER` frames. Each accepted
 firmware note is mirrored through `BUZZER_CHANGED`, then published immediately
 through IPC, WebSocket, Socket.IO, bridge peers, optional native WinRing0
@@ -261,10 +276,15 @@ explicit stop, while 1..20 remains the bounded mode. This is the reusable
 continuous `WAIT`/attention-ringtone path; it does not change the `BUZZER`
 wire payload.
 
-These effects are intentionally PC-side configuration, not firmware EEPROM
-settings. They stop producing future frames if the host is canceled or
-disconnected. A buzzer note already accepted by the MCU continues until its
-duration expires because there is no dedicated buzzer-stop opcode.
+On boards advertising both native status-effect and status-profile
+capabilities, the firmware owns physical rendering and its EEPROM profile
+table. The host may edit that table with bounded `STATUS_PROFILE_SET`
+transactions or claim an explicit preview with `STATUS_EFFECT`/`STATUS_RGB`;
+it must send the explicit release when the preview ends. The host generates
+continuous RGB frames only for older firmware that lacks the native
+capabilities, and that compatibility stream stops when the host disconnects.
+A buzzer note already accepted by the MCU continues until its duration expires
+because there is no dedicated buzzer-stop opcode.
 
 `RELAY_SIDE` sides are 0 left and 1 right; motion is 0 stop, 1 up, 2 down.
 The firmware owns safe disable-before-direction sequencing. Direct
@@ -318,7 +338,22 @@ off only outputs claimed by that macro.
 | MENU_LIST | `97` | paginated firmware-owned menu entries below |
 | SEGMENT_CHANGED | `9C` | `u8 raw_segments[4], u8 brightness`; unsolicited, changed-only |
 | BUZZER_CHANGED | `9D` | `u16 frequency_hz, u16 duration_ms, u8 muted`; unsolicited, changed-only |
+| STATUS_LED_CHANGED | `9E` | `u8 rendered_r, rendered_g, rendered_b, configured_brightness, effect, condition`; unsolicited, changed-only |
+| STATUS_PROFILE | `9F` | `u8 condition`, exact 12-byte stored/effective descriptor, `u8 persisted` |
 | EVENT | `A0` | `u8 eventType, event-specific data...` |
+
+`STATUS_LED_CHANGED` always reports the actual post-priority, post-brightness
+8-bit RGB frame rendered by the MCU. Condition `FF` means a host-requested
+manual owner; an effect value `1..4` identifies a board-rendered animation and
+effect `0` identifies its retained steady endpoint or explicit RGB preview.
+Conditions `0..18` identify native base, safety, learning, or cue profiles.
+Animated frames are changed-only; transport coalescing caps observation below
+60 Hz without changing the compositor's configured cycle duration. Shipped
+smooth animations are designed for 20..60 Hz observation. Hard Flash profiles
+intentionally emit only their two state edges per cycle, while very slow user
+descriptors can legitimately produce fewer than 20 distinct 8-bit frames per
+second. Static/hold liveness comes from the link heartbeat, not duplicate LED
+events.
 
 `MENU_LIST` schema `1` starts with `u8 schema, u8 total, u8 nextCursor,
 u8 count`; each entry is `u8 id, u8 mode, char label[4]`. `nextCursor=FF`

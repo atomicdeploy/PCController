@@ -1,4 +1,5 @@
 #include "virtual_board/virtual_board.hpp"
+#include "../../../Project/StatusLedMath.h"
 
 #include <algorithm>
 #include <array>
@@ -331,9 +332,12 @@ VirtualBoard::VirtualBoard(ISensors &sensors, IRelays &relays, IPwm &pwm,
       addressableLeds_(addressableLeds), displays_(displays), eeprom_(eeprom) {
   const TimePoint now = Clock::now();
   startedAt_ = now;
+  bootEndsAt_ = now + std::chrono::milliseconds(650);
   lastStreamAt_ = now;
   lastFadeAt_ = now;
-  lastStatusEffectAt_ = now;
+  statusEffectCycleStartedAt_ = now;
+  lastStatusLedPushAt_ = now;
+  resetDeadline_ = now;
   lastRelayTestAt_ = now;
   lastHostActivityAt_ = now;
   buzzerDeadline_ = now;
@@ -436,7 +440,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
                         readU16(payload));
     buzzerDeadlineActive_ = readU16(payload) != 0;
     buzzerDeadline_ = now + std::chrono::milliseconds(readU16(payload));
-    queueMirrorChanges();
+    queueMirrorChanges(now);
     return ack();
   case wire::PwmSet:
     if (payload.size() < 3 || payload[0] >= 16 ||
@@ -461,12 +465,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     if (payload.size() < 4) {
       return bad();
     }
-    setStatusRgb(payload[0], payload[1], payload[2], payload[3]);
-    statusEffectBrightness_ = payload[3];
-    statusOverride_ = true;
-    statusEffect_ = 0;
-    statusEffectDescriptorValid_ = false;
-    statusCondition_ = 0xFF;
+    requestStatusPreview(payload.data(), now);
     return ack();
   case wire::StatusEffect:
     if (!applyStatusEffect(payload, now)) {
@@ -486,7 +485,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
              std::move(response)}};
   }
   case wire::StatusProfileSet:
-    if (payload.size() < 1 + kStatusProfilePayloadSize ||
+    if (payload.size() != 1 + kStatusProfilePayloadSize ||
         !setStatusProfile(payload[0], payload.data() + 1, now)) {
       return bad();
     }
@@ -496,8 +495,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
       return bad();
     }
     programRunning_ = payload[0] != 0;
-    statusOverride_ = false;
-    statusEffect_ = 0;
+    restoreStatusPresentation(now);
     return ack();
   case wire::PwmGet:
     return {pwmFrame(request.sequence)};
@@ -537,6 +535,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     if (learningMode_ == kLearnModeTimer) {
       learningDeadline_ = now + std::chrono::seconds(payload[1]);
     }
+    restoreStatusPresentation(now);
     queueEvent({9, 3, static_cast<std::uint8_t>(std::count_if(
                           remotes_.begin(), remotes_.end(),
                           [](const RemoteEntry &entry) {
@@ -644,8 +643,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
       return bad();
     }
     endLearning(1);
-    resetRuntime(now);
-    recordReset(kWatchdogResetCause, true);
+    requestReset(kWatchdogResetCause, now);
     return ack();
   case wire::I2cTransfer:
     if (payload.size() < 4 || payload[1] > 10 || payload[2] > 16 ||
@@ -667,7 +665,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     if (!applyDisplayText(payload, now)) {
       return bad();
     }
-    queueMirrorChanges();
+    queueMirrorChanges(now);
     return ack();
   }
   case wire::MacroStart:
@@ -788,7 +786,7 @@ std::vector<wire::Frame> VirtualBoard::tick() {
   serviceAutomation(now);
   std::vector<wire::Frame> output;
   serviceMacro(now, pendingEvents_);
-  queueMirrorChanges();
+  queueMirrorChanges(now);
   output.swap(pendingEvents_);
   if (settings_.streamPeriodMs != 0 &&
       now - lastStreamAt_ >=
@@ -856,6 +854,8 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
         if (!next) {
           setMenuPage(settings_.defaultMenuPage);
         }
+        playStatusCue(next ? 11U : 12U, std::chrono::milliseconds(720),
+                      Clock::now());
       }
       return {std::string("door ") + (next ? "OPEN" : "CLOSED")};
     }
@@ -891,6 +891,7 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
       if (state != sensors_.readings().bluetoothState) {
         sensors_.setBluetoothState(state);
         queueEvent({3, state});
+        playStatusCue(13U, std::chrono::milliseconds(600), Clock::now());
       }
       return {"Bluetooth state=" + std::to_string(state)};
     }
@@ -1079,8 +1080,7 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
           args.size() == 2
               ? static_cast<std::uint8_t>(parseUnsigned(args[1], 255))
               : kWatchdogResetCause;
-      resetRuntime(Clock::now());
-      recordReset(cause, true);
+      requestReset(cause, Clock::now());
       std::ostringstream result;
       result << "reset event queued; cause=0x" << std::hex
              << static_cast<unsigned>(cause) << std::dec
@@ -1934,8 +1934,10 @@ void VirtualBoard::endLearning(std::uint8_t state) {
   if (!learningActive_) {
     return;
   }
-  const std::uint8_t remaining = learningRemainingSeconds(Clock::now());
+  const TimePoint now = Clock::now();
+  const std::uint8_t remaining = learningRemainingSeconds(now);
   learningActive_ = false;
+  restoreStatusPresentation(now);
   const std::uint8_t count = static_cast<std::uint8_t>(std::count_if(
       remotes_.begin(), remotes_.end(),
       [](const RemoteEntry &entry) { return entry.used; }));
@@ -2203,6 +2205,21 @@ void VirtualBoard::recordReset(std::uint8_t cause, bool emitEvent) {
   }
 }
 
+void VirtualBoard::requestReset(std::uint8_t cause, TimePoint now) {
+  relays_.allOff();
+  for (std::uint8_t channel = 0; channel <= 12; ++channel) {
+    static_cast<void>(pwm_.set(channel, 0));
+  }
+  relayTestPeriodMs_ = 0;
+  macroState_ = 0;
+  macroQueue_.clear();
+  resetPending_ = true;
+  pendingResetCause_ = cause;
+  resetDeadline_ = now + std::chrono::milliseconds(240);
+  statusCueActive_ = false;
+  applyStatusCondition(18, now);
+}
+
 void VirtualBoard::resetRuntime(TimePoint now) {
   relays_.allOff();
   pwm_.allOff();
@@ -2227,17 +2244,25 @@ void VirtualBoard::resetRuntime(TimePoint now) {
   startedAt_ = now;
   lastStreamAt_ = now;
   lastFadeAt_ = now;
-  lastStatusEffectAt_ = now;
+  statusEffectCycleStartedAt_ = now;
+  lastStatusLedPushAt_ = now;
+  resetDeadline_ = now;
   clearScheduledSegments(false);
   buzzerDeadlineActive_ = false;
   statusEffect_ = 0;
+  statusEffectDescriptorValid_ = false;
   statusEffectBrightness_ = settings_.statusBrightness;
   displays_.setBuzzer(0, 0);
   i2cLeaseAddress_ = 0;
   activeKeys_ = 0;
   hostSeen_ = false;
+  bootEndsAt_ = now + std::chrono::milliseconds(650);
   programRunning_ = false;
   statusOverride_ = false;
+  statusRequestedDescriptorValid_ = false;
+  statusCueActive_ = false;
+  resetPending_ = false;
+  pendingResetCause_ = 0;
   lastRemoteActionValid_ = false;
   remoteMomentaryKind_ = 0;
   hostPanelCaptured_ = false;
@@ -2336,27 +2361,19 @@ bool VirtualBoard::executeQueuedCommand(
     if (payload.size() < 4) {
       return false;
     }
-    setStatusRgb(payload[0], payload[1], payload[2], payload[3]);
-    statusEffectBrightness_ = payload[3];
-    statusOverride_ = true;
-    statusEffect_ = 0;
-    statusEffectDescriptorValid_ = false;
-    statusCondition_ = 0xFF;
+    requestStatusPreview(payload.data(), now);
     return true;
   case wire::StatusEffect:
     return applyStatusEffect(payload, now);
   case wire::StatusProfileSet:
-    return payload.size() >= 1 + kStatusProfilePayloadSize &&
+    return payload.size() == 1 + kStatusProfilePayloadSize &&
            setStatusProfile(payload[0], payload.data() + 1, now);
   case wire::ProgramState:
     if (payload.empty() || payload[0] > 1) {
       return false;
     }
     programRunning_ = payload[0] != 0;
-    statusOverride_ = false;
-    statusEffect_ = 0;
-    statusEffectDescriptorValid_ = false;
-    restoreNativeStatus(now);
+    restoreStatusPresentation(now);
     return true;
   case wire::AddressableLed: {
     if (payload.size() < 5 ||
@@ -2503,7 +2520,7 @@ void VirtualBoard::queueEvent(std::vector<std::uint8_t> payload) {
   pendingEvents_.push_back({wire::Event, 0, std::move(payload)});
 }
 
-void VirtualBoard::queueMirrorChanges() {
+void VirtualBoard::queueMirrorChanges(TimePoint now) {
   const DisplayState display = displays_.state();
   std::array<std::uint8_t, 4> segments{};
   for (std::size_t index = 0; index < segments.size(); ++index) {
@@ -2537,64 +2554,139 @@ void VirtualBoard::queueMirrorChanges() {
       static_cast<std::uint8_t>(pwm_.value(14) >> 4U),
       static_cast<std::uint8_t>(pwm_.value(15) >> 4U),
       statusEffectBrightness_, statusEffect_, statusCondition_}};
-  if (statusLed != lastPushedStatusLed_) {
+  if (statusLed != lastPushedStatusLed_ &&
+      now - lastStatusLedPushAt_ >= std::chrono::milliseconds(17)) {
     pendingEvents_.push_back(
         {wire::StatusLedChanged, 0,
          std::vector<std::uint8_t>(statusLed.begin(), statusLed.end())});
     lastPushedStatusLed_ = statusLed;
+    lastStatusLedPushAt_ = now;
   }
 }
 
 void VirtualBoard::setStatusRgb(std::uint8_t red, std::uint8_t green,
                                 std::uint8_t blue,
                                 std::uint8_t brightness) {
-  pwm_.set(13, static_cast<std::uint16_t>(scale8(red) * brightness / 255U));
-  pwm_.set(14, static_cast<std::uint16_t>(scale8(green) * brightness / 255U));
-  pwm_.set(15, static_cast<std::uint16_t>(scale8(blue) * brightness / 255U));
+  const auto render = [brightness](std::uint8_t value) {
+    return scale8(StatusLedMath::scale(value, brightness));
+  };
+  pwm_.set(13, render(red));
+  pwm_.set(14, render(green));
+  pwm_.set(15, render(blue));
   // brightness is the instantaneous rendered level. Do not feed it back into
   // statusEffectBrightness_: doing so collapses a breathe amplitude toward
   // zero on every frame and creates a visible hard reset.
 }
 
+void VirtualBoard::requestStatusPreview(const std::uint8_t *payload,
+                                        TimePoint now) {
+  std::array<std::uint8_t, kStatusProfilePayloadSize> descriptor{};
+  std::copy_n(payload, 3, descriptor.begin() + 1);
+  descriptor[7] = payload[3];
+  if (statusRequestedDescriptorValid_ && statusOverride_ &&
+      descriptor == statusRequestedDescriptor_) {
+    return;
+  }
+  statusRequestedDescriptor_ = descriptor;
+  statusRequestedDescriptorValid_ = true;
+  statusOverride_ = true;
+  std::uint8_t safety = 0;
+  if (!safetyStatusCondition(now, safety)) {
+    statusCueActive_ = false;
+    applyStatusDescriptor(descriptor.data(), 0xFF, 0, 0, now);
+  }
+}
+
 bool VirtualBoard::applyStatusEffect(
     const std::vector<std::uint8_t> &payload, TimePoint now) {
   if (payload.size() == 1 && payload[0] == 0) {
-    statusEffect_ = 0;
     statusOverride_ = false;
-    statusEffectDescriptorValid_ = false;
-    restoreNativeStatus(now);
+    statusRequestedDescriptorValid_ = false;
+    if (statusCondition_ == 0xFF) {
+      statusEffect_ = 0;
+      statusEffectDescriptorValid_ = false;
+    }
     return true;
   }
-  if (payload.size() < 12 || payload[0] == 0 || payload[0] > 4 ||
-      payload[8] > payload[7] || readU16(payload, 9) < 640) {
+  if (payload.size() != 12 || payload[0] == 0 || payload[0] > 4 ||
+      payload[8] > payload[7] || readU16(payload, 9) < 640 ||
+      readU16(payload, 9) > 60000) {
     return false;
   }
-  const bool identical = statusEffectDescriptorValid_ && statusEffect_ != 0 &&
+  const bool identical = statusRequestedDescriptorValid_ && statusOverride_ &&
                          std::equal(payload.begin(), payload.begin() + 12,
-                                    statusEffectDescriptor_.begin());
+                                    statusRequestedDescriptor_.begin());
   if (identical) {
     // A host may repeat a descriptor while observing 20..60 Hz output. The
     // board remains the effect owner, so retain its phase and repeat counter.
     statusOverride_ = true;
-    statusCondition_ = 0xFF;
     return true;
   }
+  std::copy_n(payload.begin(), 12, statusRequestedDescriptor_.begin());
+  statusRequestedDescriptorValid_ = true;
+  statusOverride_ = true;
+  std::uint8_t safety = 0;
+  if (!safetyStatusCondition(now, safety)) {
+    statusCueActive_ = false;
+    applyStatusDescriptor(statusRequestedDescriptor_.data(), 0xFF, 0,
+                          statusRequestedDescriptor_[11], now);
+  }
+  return true;
+}
+
+void VirtualBoard::applyStatusDescriptor(const std::uint8_t *payload,
+                                         std::uint8_t condition,
+                                         std::uint8_t phase,
+                                         std::uint8_t repeats,
+                                         TimePoint now) {
+  const bool identical = statusEffectDescriptorValid_ &&
+                         statusCondition_ == condition &&
+                         std::equal(payload, payload + 12,
+                                    statusEffectDescriptor_.begin());
+  if (identical) {
+    return;
+  }
+  std::copy_n(payload, 12, statusEffectDescriptor_.begin());
+  statusEffectDescriptorValid_ = true;
+  statusCondition_ = condition;
   statusEffect_ = payload[0];
-  statusCondition_ = 0xFF;
-  std::copy_n(payload.begin() + 1, 3, statusEffectColor_.begin());
-  std::copy_n(payload.begin() + 4, 3, statusEffectAlternate_.begin());
+  std::copy_n(payload + 1, 3, statusEffectColor_.begin());
+  std::copy_n(payload + 4, 3, statusEffectAlternate_.begin());
   statusEffectBrightness_ = payload[7];
   statusEffectMinimum_ = payload[8];
-  statusEffectPhase_ = 0;
-  statusEffectRepeats_ = payload[11];
-  std::copy_n(payload.begin(), 12, statusEffectDescriptor_.begin());
-  statusEffectDescriptorValid_ = true;
-  const std::uint16_t period = readU16(payload, 9);
-  statusEffectStepMs_ = static_cast<std::uint16_t>(period >> 5U);
-  lastStatusEffectAt_ = now;
-  statusOverride_ = true;
+  statusEffectPhase_ = phase;
+  statusEffectRepeats_ = repeats;
+  if (statusEffect_ == 0) {
+    setStatusRgb(payload[1], payload[2], payload[3], payload[7]);
+    return;
+  }
+  const std::uint16_t period =
+      static_cast<std::uint16_t>(payload[9]) |
+      static_cast<std::uint16_t>(payload[10]) << 8U;
+  statusEffectPeriodMs_ = period;
+  statusEffectCycleStartedAt_ = now;
   renderStatusEffect();
-  return true;
+}
+
+void VirtualBoard::applyStatusCondition(std::uint8_t condition,
+                                        TimePoint now) {
+  std::array<std::uint8_t, kStatusProfilePayloadSize> profile{};
+  static_cast<void>(statusProfile(condition, profile));
+  applyStatusDescriptor(profile.data(), condition, 0, profile[11], now);
+}
+
+void VirtualBoard::playStatusCue(std::uint8_t condition,
+                                 std::chrono::milliseconds duration,
+                                 TimePoint now) {
+  std::uint8_t safety = 0;
+  if (safetyStatusCondition(now, safety) ||
+      (statusOverride_ && statusRequestedDescriptorValid_)) {
+    return;
+  }
+  statusCueActive_ = true;
+  statusCueCondition_ = condition;
+  statusCueDeadline_ = now + duration;
+  restoreStatusPresentation(now);
 }
 
 bool VirtualBoard::statusProfile(
@@ -2614,7 +2706,7 @@ bool VirtualBoard::statusProfile(
       eeprom_.read(address + payload.size()) ==
           wire::crc8(payload.data(), payload.size()) &&
       payload[0] <= 4 && payload[8] <= payload[7] &&
-      (payload[0] == 0 || period >= 640);
+      (payload[0] == 0 || (period >= 640 && period <= 60000));
   if (valid) {
     return true;
   }
@@ -2640,7 +2732,7 @@ bool VirtualBoard::setStatusProfile(std::uint8_t condition,
   }
   const std::uint16_t period = static_cast<std::uint16_t>(payload[9]) |
                                static_cast<std::uint16_t>(payload[10]) << 8U;
-  if (payload[0] != 0 && period < 640) {
+  if (payload[0] != 0 && (period < 640 || period > 60000)) {
     return false;
   }
   const std::size_t address =
@@ -2652,16 +2744,7 @@ bool VirtualBoard::setStatusProfile(std::uint8_t condition,
                  wire::crc8(payload, kStatusProfilePayloadSize));
   eeprom_.flush();
   if (statusCondition_ == condition) {
-    std::vector<std::uint8_t> effect(payload,
-                                     payload + kStatusProfilePayloadSize);
-    if (effect[0] == 0) {
-      setStatusRgb(effect[1], effect[2], effect[3], effect[7]);
-      statusEffect_ = 0;
-      statusEffectBrightness_ = effect[7];
-    } else {
-      applyStatusEffect(effect, now);
-      statusCondition_ = condition;
-    }
+    applyStatusDescriptor(payload, condition, 0, payload[11], now);
   }
   return true;
 }
@@ -2670,11 +2753,9 @@ void VirtualBoard::renderStatusEffect() {
   std::array<std::uint8_t, 3> color = statusEffectColor_;
   std::uint8_t brightness = statusEffectBrightness_;
   const auto interpolate = [this](std::size_t channel) {
-    const int delta = static_cast<int>(statusEffectAlternate_[channel]) -
-                      statusEffectColor_[channel];
-    return static_cast<std::uint8_t>(
-        static_cast<int>(statusEffectColor_[channel]) +
-        delta * statusEffectPhase_ / 255);
+    return StatusLedMath::interpolate(statusEffectColor_[channel],
+                                      statusEffectAlternate_[channel],
+                                      statusEffectPhase_);
   };
   if (statusEffect_ == 1) {
     const std::uint8_t triangle =
@@ -2683,9 +2764,10 @@ void VirtualBoard::renderStatusEffect() {
             : static_cast<std::uint8_t>((255U - statusEffectPhase_) * 2U);
     brightness = static_cast<std::uint8_t>(
         statusEffectMinimum_ +
-        (static_cast<unsigned>(statusEffectBrightness_ - statusEffectMinimum_) *
-         triangle) /
-            255U);
+        StatusLedMath::scale(
+            static_cast<std::uint8_t>(statusEffectBrightness_ -
+                                      statusEffectMinimum_),
+            triangle));
   } else if (statusEffect_ == 2 && statusEffectPhase_ >= 128) {
     color = statusEffectAlternate_;
   } else if (statusEffect_ == 3) {
@@ -2708,62 +2790,133 @@ void VirtualBoard::finishStatusEffect() {
     statusEffectColor_ = statusEffectAlternate_;
   }
   statusEffect_ = 0;
+  // The completed descriptor is no longer active. Invalidating it ensures an
+  // exact finite descriptor sent again starts a fresh cycle, matching AVR.
   statusEffectDescriptorValid_ = false;
+  if (statusCondition_ == 0xFF) {
+    statusRequestedDescriptor_.fill(0);
+    std::copy(statusEffectColor_.begin(), statusEffectColor_.end(),
+              statusRequestedDescriptor_.begin() + 1);
+    statusRequestedDescriptor_[7] = statusEffectBrightness_;
+    statusRequestedDescriptorValid_ = true;
+  }
   setStatusRgb(statusEffectColor_[0], statusEffectColor_[1],
                statusEffectColor_[2], statusEffectBrightness_);
 }
 
 void VirtualBoard::serviceStatusEffect(TimePoint now) {
-  if (statusEffect_ == 0 ||
-      now - lastStatusEffectAt_ <
-          std::chrono::milliseconds(statusEffectStepMs_)) {
+  if (statusEffect_ == 0) {
     return;
   }
-  lastStatusEffectAt_ = now;
-  const std::uint8_t next =
-      static_cast<std::uint8_t>(statusEffectPhase_ + 8U);
-  if (next < statusEffectPhase_ && statusEffectRepeats_ != 0 &&
-      --statusEffectRepeats_ == 0) {
-    finishStatusEffect();
+  auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                     now - statusEffectCycleStartedAt_)
+                     .count();
+  if (elapsed < 0) {
     return;
   }
-  statusEffectPhase_ = next;
-  renderStatusEffect();
+  bool cycleAdvanced = false;
+  if (elapsed >= statusEffectPeriodMs_) {
+    const auto cycles = static_cast<std::uint32_t>(
+        elapsed / statusEffectPeriodMs_);
+    if (statusEffectRepeats_ != 0 && cycles >= statusEffectRepeats_) {
+      finishStatusEffect();
+      return;
+    }
+    if (statusEffectRepeats_ != 0) {
+      statusEffectRepeats_ = static_cast<std::uint8_t>(
+          statusEffectRepeats_ - cycles);
+    }
+    statusEffectCycleStartedAt_ +=
+        std::chrono::milliseconds(cycles * statusEffectPeriodMs_);
+    elapsed -= static_cast<decltype(elapsed)>(cycles) *
+               statusEffectPeriodMs_;
+    statusEffectPhase_ = 0;
+    cycleAdvanced = true;
+  }
+  std::uint8_t step = static_cast<std::uint8_t>(statusEffectPhase_ >> 2U);
+  while (step < 63U) {
+    const std::uint8_t next = static_cast<std::uint8_t>(step + 1U);
+    const std::uint16_t deadline =
+        StatusLedMath::phaseDeadline(statusEffectPeriodMs_, next);
+    if (elapsed < deadline) {
+      break;
+    }
+    step = next;
+  }
+  const std::uint8_t phase = static_cast<std::uint8_t>(step * 4U);
+  if (phase != statusEffectPhase_ || cycleAdvanced) {
+    statusEffectPhase_ = phase;
+    renderStatusEffect();
+  }
 }
 
 std::uint8_t VirtualBoard::nativeStatusCondition(TimePoint now) const {
-  const SensorReadings sensors = sensors_.readings();
-  if (!hostSeen_ || now - lastHostActivityAt_ > kHostOfflineAfter ||
-      (programRunning_ && sensors.doorOpen)) {
-    return 5; // Fault or critical local safety state.
-  }
-  if (sensors.tLedCentiC >= kHotTemperatureCentiC ||
-      sensors.tBtCentiC >= kHotTemperatureCentiC) {
-    return 4; // Warning.
+  std::uint8_t safety = 0;
+  if (safetyStatusCondition(now, safety)) {
+    return safety;
   }
   if (programRunning_) {
     return 10; // Running.
   }
+  const SensorReadings sensors = sensors_.readings();
   return sensors.bluetoothState == 1 ? 7 :
          (sensors.bluetoothState == 2 ? 9 : 8);
 }
 
+bool VirtualBoard::safetyStatusCondition(TimePoint now,
+                                         std::uint8_t &condition) const {
+  if (now < bootEndsAt_) {
+    condition = 1; // Boot owns the physical 650 ms welcome phase.
+    return true;
+  }
+  const SensorReadings sensors = sensors_.readings();
+  if (!hostSeen_ || now - lastHostActivityAt_ > kHostOfflineAfter ||
+      (programRunning_ && sensors.doorOpen)) {
+    condition = 5; // Fault or critical local safety state.
+    return true;
+  }
+  if (sensors.tLedCentiC >= kHotTemperatureCentiC ||
+      sensors.tBtCentiC >= kHotTemperatureCentiC) {
+    condition = 4; // Warning.
+    return true;
+  }
+  if (learningActive_) {
+    condition = 3; // RF Learning.
+    return true;
+  }
+  return false;
+}
+
 void VirtualBoard::restoreNativeStatus(TimePoint now) {
-  const std::uint8_t condition = nativeStatusCondition(now);
-  std::array<std::uint8_t, kStatusProfilePayloadSize> profile{};
-  static_cast<void>(statusProfile(condition, profile));
-  statusCondition_ = condition;
-  statusEffectDescriptorValid_ = false;
-  if (profile[0] == 0) {
-    statusEffect_ = 0;
-    statusEffectBrightness_ = profile[7];
-    setStatusRgb(profile[1], profile[2], profile[3], profile[7]);
+  applyStatusCondition(nativeStatusCondition(now), now);
+}
+
+void VirtualBoard::restoreStatusPresentation(TimePoint now) {
+  if (resetPending_) {
+    applyStatusCondition(18, now);
     return;
   }
-  std::vector<std::uint8_t> effect(profile.begin(), profile.end());
-  static_cast<void>(applyStatusEffect(effect, now));
-  statusOverride_ = false;
-  statusCondition_ = condition;
+  std::uint8_t safety = 0;
+  if (safetyStatusCondition(now, safety)) {
+    // Persistent safety replaces, rather than pauses, an informational cue.
+    statusCueActive_ = false;
+    applyStatusCondition(safety, now);
+    return;
+  }
+  if (statusOverride_ && statusRequestedDescriptorValid_) {
+    statusCueActive_ = false;
+    applyStatusDescriptor(statusRequestedDescriptor_.data(), 0xFF, 0,
+                          statusRequestedDescriptor_[11], now);
+    return;
+  }
+  if (statusCueActive_) {
+    if (now < statusCueDeadline_) {
+      applyStatusCondition(statusCueCondition_, now);
+      return;
+    }
+    statusCueActive_ = false;
+  }
+  restoreNativeStatus(now);
 }
 
 void VirtualBoard::showScheduledSegmentWindow() {
@@ -2800,10 +2953,16 @@ void VirtualBoard::clearScheduledSegments(bool restoreMenu) {
 }
 
 void VirtualBoard::serviceAutomation(TimePoint now) {
-  if (!statusOverride_ && statusCondition_ != nativeStatusCondition(now)) {
-    restoreNativeStatus(now);
+  if (resetPending_ && now >= resetDeadline_) {
+    const std::uint8_t cause = pendingResetCause_;
+    resetRuntime(now);
+    recordReset(cause, true);
   }
+  restoreStatusPresentation(now);
   serviceStatusEffect(now);
+  if (resetPending_) {
+    return;
+  }
   if (learningActive_ && learningMode_ == kLearnModeTimer) {
     const std::uint8_t remaining = learningRemainingSeconds(now);
     if (remaining == 0) {

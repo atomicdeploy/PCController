@@ -2,11 +2,13 @@ package hostbridge
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/native"
 )
 
 func TestStatusLEDStatePriority(t *testing.T) {
@@ -180,14 +182,20 @@ func assertStatusLEDState(
 }
 
 type statusLEDTargetRecorder struct {
-	base   int
-	direct int
+	mu      sync.Mutex
+	base    int
+	direct  int
+	clear   int
+	release int
+	owner   string
 }
 
 func (target *statusLEDTargetRecorder) SetStatusRGBBase(
 	context.Context,
 	byte, byte, byte, byte,
 ) error {
+	target.mu.Lock()
+	defer target.mu.Unlock()
 	target.base++
 	return nil
 }
@@ -196,6 +204,116 @@ func (target *statusLEDTargetRecorder) SetStatusRGB(
 	context.Context,
 	byte, byte, byte, byte,
 ) error {
+	target.mu.Lock()
+	defer target.mu.Unlock()
 	target.direct++
 	return nil
+}
+
+func (target *statusLEDTargetRecorder) ClearStatusRGBBase() {
+	target.mu.Lock()
+	target.clear++
+	target.mu.Unlock()
+}
+
+func (target *statusLEDTargetRecorder) OutputState() controller.OutputStreamState {
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	return controller.OutputStreamState{StatusOwner: target.owner}
+}
+
+func (target *statusLEDTargetRecorder) ReleaseStatusLEDEffect(context.Context) error {
+	target.mu.Lock()
+	target.release++
+	target.owner = "native-lifecycle"
+	target.mu.Unlock()
+	return nil
+}
+
+func (target *statusLEDTargetRecorder) counts() (base, direct, clear, release int) {
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	return target.base, target.direct, target.clear, target.release
+}
+
+func TestNativeStatusLEDLifecycleNeverStreamsRGB(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	target := &statusLEDTargetRecorder{owner: "native-lifecycle"}
+	arbiter := newStatusLEDArbiter(ctx, target, nil, nil)
+	policy := appconfig.DefaultStatusLEDPolicy()
+	policy.StepMS = 20
+	snapshot := controller.Snapshot{
+		Connected: true, HaveStatus: true,
+		Hello:        controller.Hello{Capabilities: native.CapabilityStatusEffects | native.CapabilityStatusProfiles},
+		ProgramState: controller.ProgramStateSnapshot{Mode: controller.ProgramRunning},
+	}
+	snapshot.Status.DoorOpen = true
+	arbiter.Observe(policy, snapshot, controller.Event{Kind: "door"})
+	done := make(chan struct{})
+	go func() { arbiter.Run(); close(done) }()
+	time.Sleep(90 * time.Millisecond)
+	if err := arbiter.PrepareDisconnect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	<-done
+	base, direct, _, release := target.counts()
+	if base != 0 || direct != 0 || release != 0 {
+		t.Fatalf("native lifecycle was overwritten: base=%d direct=%d release=%d", base, direct, release)
+	}
+}
+
+func TestPrepareDisconnectReleasesExplicitNativeOwnerWithoutRGB(t *testing.T) {
+	target := &statusLEDTargetRecorder{owner: "board-preview"}
+	arbiter := newStatusLEDArbiter(context.Background(), target, nil, nil)
+	arbiter.Observe(appconfig.DefaultStatusLEDPolicy(), controller.Snapshot{
+		Connected: true,
+		Hello:     controller.Hello{Capabilities: native.CapabilityStatusEffects | native.CapabilityStatusProfiles},
+	}, controller.Event{})
+	if err := arbiter.PrepareDisconnect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	base, direct, _, release := target.counts()
+	if base != 0 || direct != 0 || release != 1 {
+		t.Fatalf("native disconnect commands base=%d direct=%d release=%d", base, direct, release)
+	}
+}
+
+func TestLegacyPrepareDisconnectUsesOfflineFallback(t *testing.T) {
+	target := &statusLEDTargetRecorder{}
+	arbiter := newStatusLEDArbiter(context.Background(), target, nil, nil)
+	arbiter.Observe(appconfig.DefaultStatusLEDPolicy(), controller.Snapshot{Connected: true}, controller.Event{})
+	if err := arbiter.PrepareDisconnect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	base, direct, clear, release := target.counts()
+	if base != 0 || direct != 1 || clear != 1 || release != 0 {
+		t.Fatalf("legacy disconnect base=%d direct=%d clear=%d release=%d", base, direct, clear, release)
+	}
+}
+
+func TestLegacyRendererMatchesAVRDiscreteSemantics(t *testing.T) {
+	fixture := appconfig.StatusLEDVisual{
+		Color:          appconfig.RGBColor{Red: 240, Green: 80, Blue: 20},
+		AlternateColor: appconfig.RGBColor{Red: 20, Green: 160, Blue: 240},
+		Brightness:     200, MinimumBrightness: 20, PeriodMS: 640,
+	}
+	tests := []struct {
+		effect string
+		at     time.Duration
+		want   statusLEDFrame
+	}{
+		{"steady", 320 * time.Millisecond, statusLEDFrame{240, 80, 20, 200}},
+		{"flash", 320 * time.Millisecond, statusLEDFrame{20, 160, 240, 200}},
+		{"breathe", 160 * time.Millisecond, statusLEDFrame{240, 80, 20, 110}},
+		{"cycle", 160 * time.Millisecond, statusLEDFrame{130, 120, 130, 200}},
+		{"transition", 320 * time.Millisecond, statusLEDFrame{130, 120, 130, 200}},
+		{"crossfade", 160 * time.Millisecond, statusLEDFrame{130, 120, 130, 200}},
+	}
+	for _, test := range tests {
+		fixture.Effect = test.effect
+		if got := statusLEDVisualFrame(fixture, test.at); got != test.want {
+			t.Errorf("%s at %s=%#v want %#v", test.effect, test.at, got, test.want)
+		}
+	}
 }

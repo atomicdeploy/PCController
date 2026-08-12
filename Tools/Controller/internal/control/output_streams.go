@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	maxMelodyRepeats       = 20
-	outputRequestTimeout   = 2 * time.Second
-	minStatusStreamStep    = 50 * time.Millisecond
-	statusBreatheStepCount = 32
+	maxMelodyRepeats           = 20
+	outputRequestTimeout       = 2 * time.Second
+	minStatusStreamStep        = 50 * time.Millisecond
+	statusBreatheStepCount     = 32
+	outputCloseReleaseAttempts = 3
 )
 
 type outputCommander interface {
@@ -37,19 +38,42 @@ type StreamOperation struct {
 }
 
 type OutputStreamState struct {
-	MelodyID       uint64  `json:"melody_id,omitempty"`
-	MelodyName     string  `json:"melody_name,omitempty"`
-	EffectID       uint64  `json:"effect_id,omitempty"`
-	EffectName     string  `json:"effect_name,omitempty"`
-	StatusBase     [4]byte `json:"status_base"`
-	HaveStatusBase bool    `json:"have_status_base"`
+	MelodyID              uint64  `json:"melody_id,omitempty"`
+	MelodyName            string  `json:"melody_name,omitempty"`
+	EffectID              uint64  `json:"effect_id,omitempty"`
+	EffectName            string  `json:"effect_name,omitempty"`
+	EffectRetained        bool    `json:"effect_retained,omitempty"`
+	EffectReleasePending  bool    `json:"effect_release_pending,omitempty"`
+	EffectPendingID       uint64  `json:"effect_pending_id,omitempty"`
+	EffectPendingName     string  `json:"effect_pending_name,omitempty"`
+	StatusOwner           string  `json:"status_owner"`
+	StatusOwnerGeneration uint64  `json:"status_owner_generation,omitempty"`
+	StatusOwnerDevice     string  `json:"status_owner_device,omitempty"`
+	StatusOwnerConnected  bool    `json:"status_owner_connected,omitempty"`
+	StatusOwnerStale      bool    `json:"status_owner_stale,omitempty"`
+	StatusBase            [4]byte `json:"status_base"`
+	HaveStatusBase        bool    `json:"have_status_base"`
 }
 
 type runningOutput struct {
-	id     uint64
-	name   string
-	cancel context.CancelFunc
-	done   chan error
+	id               uint64
+	name             string
+	cancel           context.CancelFunc
+	done             chan error
+	stopRequested    bool
+	nativeAttempted  bool
+	nativeAccepted   bool
+	nativeGeneration uint64
+	nativeDevice     string
+}
+
+type retainedOutput struct {
+	id             uint64
+	name           string
+	releasePending bool
+	owner          string
+	generation     uint64
+	device         string
 }
 
 // OutputScheduler streams high-level PC-side effects through existing native
@@ -61,13 +85,16 @@ type OutputScheduler struct {
 	root   context.Context
 	cancel context.CancelFunc
 
-	mu             sync.Mutex
-	nextID         uint64
-	closed         bool
-	melody         *runningOutput
-	effect         *runningOutput
-	statusBase     [4]byte
-	haveStatusBase bool
+	mu                sync.Mutex
+	statusWireMu      sync.Mutex
+	statusOperationMu sync.Mutex
+	nextID            uint64
+	closed            bool
+	melody            *runningOutput
+	effect            *runningOutput
+	retainedEffect    *retainedOutput
+	statusBase        [4]byte
+	haveStatusBase    bool
 }
 
 func NewOutputScheduler(target outputCommander) *OutputScheduler {
@@ -75,21 +102,40 @@ func NewOutputScheduler(target outputCommander) *OutputScheduler {
 	return &OutputScheduler{target: target, root: ctx, cancel: cancel}
 }
 
-func (scheduler *OutputScheduler) Close() {
+func (scheduler *OutputScheduler) Close() error {
+	scheduler.statusOperationMu.Lock()
+	defer scheduler.statusOperationMu.Unlock()
+
 	scheduler.mu.Lock()
-	if scheduler.closed {
-		scheduler.mu.Unlock()
-		return
-	}
-	scheduler.closed = true
-	scheduler.cancel()
-	if scheduler.melody != nil {
-		scheduler.melody.cancel()
-	}
-	if scheduler.effect != nil {
-		scheduler.effect.cancel()
+	if !scheduler.closed {
+		scheduler.closed = true
+		scheduler.cancel()
+		if scheduler.melody != nil {
+			scheduler.melody.cancel()
+		}
+		if scheduler.effect != nil {
+			running := scheduler.effect
+			running.stopRequested = true
+			running.cancel()
+			if running.nativeAccepted || running.nativeAttempted {
+				scheduler.retainedEffect = scheduler.retainedRunning(running)
+			}
+			scheduler.effect = nil
+		}
 	}
 	scheduler.mu.Unlock()
+
+	var err error
+	for attempt := 0; attempt < outputCloseReleaseAttempts; attempt++ {
+		hadOwner, releaseErr := scheduler.releaseRetainedStatusEffectUnderOperation(
+			context.Background(), false, true,
+		)
+		if !hadOwner || releaseErr == nil {
+			return releaseErr
+		}
+		err = releaseErr
+	}
+	return err
 }
 
 func (scheduler *OutputScheduler) State() OutputStreamState {
@@ -100,13 +146,97 @@ func (scheduler *OutputScheduler) State() OutputStreamState {
 		state.MelodyID = scheduler.melody.id
 		state.MelodyName = scheduler.melody.name
 	}
-	if scheduler.effect != nil {
+	if scheduler.effect != nil && !scheduler.effect.nativeAccepted &&
+		supportsNativeStatusEffects(scheduler.target) {
+		state.EffectPendingID = scheduler.effect.id
+		state.EffectPendingName = scheduler.effect.name
+		if scheduler.retainedEffect != nil {
+			state.EffectID = scheduler.retainedEffect.id
+			state.EffectName = scheduler.retainedEffect.name
+			state.EffectRetained = true
+			state.EffectReleasePending = scheduler.retainedEffect.releasePending
+			state.StatusOwner = retainedStatusOwner(scheduler.retainedEffect)
+		} else if supportsNativeStatusProfiles(scheduler.target) {
+			state.StatusOwner = "native-lifecycle"
+		} else {
+			state.StatusOwner = "host-fallback"
+		}
+	} else if scheduler.effect != nil {
 		state.EffectID = scheduler.effect.id
 		state.EffectName = scheduler.effect.name
+		if supportsNativeStatusEffects(scheduler.target) {
+			state.StatusOwner = "board-effect"
+		} else {
+			state.StatusOwner = "host-fallback"
+		}
+	} else if scheduler.retainedEffect != nil {
+		state.EffectID = scheduler.retainedEffect.id
+		state.EffectName = scheduler.retainedEffect.name
+		state.EffectRetained = true
+		state.EffectReleasePending = scheduler.retainedEffect.releasePending
+		state.StatusOwner = retainedStatusOwner(scheduler.retainedEffect)
+	} else if supportsNativeStatusProfiles(scheduler.target) {
+		state.StatusOwner = "native-lifecycle"
+	} else if scheduler.haveStatusBase {
+		state.StatusOwner = "host-static"
+	} else {
+		state.StatusOwner = "host-fallback"
 	}
 	state.StatusBase = scheduler.statusBase
 	state.HaveStatusBase = scheduler.haveStatusBase
+	if scheduler.retainedEffect != nil {
+		current := scheduler.targetSnapshot()
+		state.StatusOwnerGeneration = scheduler.retainedEffect.generation
+		state.StatusOwnerDevice = scheduler.retainedEffect.device
+		state.StatusOwnerConnected = current.Connected
+		state.StatusOwnerStale = current.Connected &&
+			scheduler.retainedEffect.generation != 0 &&
+			current.ConnectionGeneration != scheduler.retainedEffect.generation
+	}
 	return state
+}
+
+func retainedStatusOwner(owner *retainedOutput) string {
+	if owner != nil && owner.owner != "" {
+		return owner.owner
+	}
+	return "board-effect"
+}
+
+func (scheduler *OutputScheduler) targetSnapshot() Snapshot {
+	reporter, ok := scheduler.target.(outputCapabilityReporter)
+	if !ok {
+		return Snapshot{}
+	}
+	return reporter.Snapshot()
+}
+
+func (scheduler *OutputScheduler) retained(
+	id uint64,
+	name string,
+	owner string,
+) *retainedOutput {
+	snapshot := scheduler.targetSnapshot()
+	device := strings.TrimSpace(snapshot.Port.SerialNumber)
+	if device == "" {
+		device = strings.TrimSpace(snapshot.Port.InstanceID)
+	}
+	if device == "" {
+		device = strings.TrimSpace(snapshot.Port.Name)
+	}
+	return &retainedOutput{
+		id: id, name: name, owner: owner,
+		generation: snapshot.ConnectionGeneration, device: device,
+	}
+}
+
+func (scheduler *OutputScheduler) retainedRunning(
+	running *runningOutput,
+) *retainedOutput {
+	return &retainedOutput{
+		id: running.id, name: running.name, owner: "board-effect",
+		generation: running.nativeGeneration, device: running.nativeDevice,
+	}
 }
 
 // SetStatusBase updates the state-owned RGB frame without interrupting an
@@ -126,7 +256,13 @@ func (scheduler *OutputScheduler) SetStatusBase(
 	}
 	scheduler.statusBase = [4]byte{red, green, blue, brightness}
 	scheduler.haveStatusBase = true
-	if scheduler.effect != nil {
+	if scheduler.effect != nil || scheduler.retainedEffect != nil {
+		return nil
+	}
+	if supportsNativeStatusProfiles(scheduler.target) {
+		// Modern boards render their selected status profile locally. Keep the
+		// host policy base for fallback/restoration without stealing ownership
+		// by streaming STATUS_RGB on every arbiter tick.
 		return nil
 	}
 	requestContext, cancel := context.WithTimeout(ctx, outputRequestTimeout)
@@ -138,10 +274,88 @@ func (scheduler *OutputScheduler) SetStatusBase(
 	)
 }
 
+// ClearStatusBase forgets host policy fallback state without sending a wire
+// command or releasing an explicit board preview/effect owner.
+func (scheduler *OutputScheduler) ClearStatusBase() {
+	scheduler.mu.Lock()
+	scheduler.statusBase = [4]byte{}
+	scheduler.haveStatusBase = false
+	scheduler.mu.Unlock()
+}
+
+// ReplaceStatusRGB atomically transfers status ownership to a steady host RGB
+// frame. Active or retained native ownership remains represented until the RGB
+// ACK succeeds; a failed replacement is therefore still releasable/retryable.
+func (scheduler *OutputScheduler) ReplaceStatusRGB(
+	ctx context.Context,
+	red, green, blue, brightness byte,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	scheduler.statusOperationMu.Lock()
+	defer scheduler.statusOperationMu.Unlock()
+	scheduler.mu.Lock()
+	if scheduler.closed {
+		scheduler.mu.Unlock()
+		return errors.New("output scheduler is closed")
+	}
+	scheduler.mu.Unlock()
+	requestContext, cancel := context.WithTimeout(ctx, outputRequestTimeout)
+	defer cancel()
+	scheduler.statusWireMu.Lock()
+	if err := scheduler.target.Command(
+		requestContext,
+		native.OpStatusRGB,
+		native.StatusRGBPayload(red, green, blue, brightness),
+	); err != nil {
+		scheduler.statusWireMu.Unlock()
+		return err
+	}
+	scheduler.statusWireMu.Unlock()
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	running := scheduler.effect
+	retained := scheduler.retainedEffect
+	if running != nil {
+		scheduler.effect = nil
+		running.cancel()
+	}
+	scheduler.retainedEffect = nil
+	scheduler.statusBase = [4]byte{red, green, blue, brightness}
+	scheduler.haveStatusBase = true
+	if supportsNativeStatusEffects(scheduler.target) {
+		scheduler.nextID++
+		scheduler.retainedEffect = scheduler.retained(
+			scheduler.nextID, "steady RGB", "board-preview",
+		)
+	}
+	if running != nil {
+		scheduler.target.PublishHostEvent(
+			"output",
+			fmt.Sprintf(
+				"effect %q replaced by steady RGB (id=%d)",
+				running.name,
+				running.id,
+			),
+		)
+	} else if retained != nil {
+		scheduler.target.PublishHostEvent(
+			"output",
+			fmt.Sprintf(
+				"effect %q replaced by steady RGB (id=%d)",
+				retained.name,
+				retained.id,
+			),
+		)
+	}
+	return nil
+}
+
 func (scheduler *OutputScheduler) StatusEffectActive() bool {
 	scheduler.mu.Lock()
 	defer scheduler.mu.Unlock()
-	return scheduler.effect != nil
+	return scheduler.effect != nil || scheduler.retainedEffect != nil
 }
 
 func (scheduler *OutputScheduler) StartMelody(
@@ -193,40 +407,73 @@ func (scheduler *OutputScheduler) StartStatusEffect(
 		return StreamOperation{}, err
 	}
 	go func() {
-		if err := waitPreviousOutput(runContext, previousDone); err != nil {
-			scheduler.finish("effect", running, err, nil)
-			return
+		started := false
+		err := waitPreviousOutput(runContext, previousDone)
+		if err == nil {
+			started = true
+			err = scheduler.streamStatusEffect(runContext, running, effect)
 		}
-		err := scheduler.streamStatusEffect(runContext, effect)
-		restore := func() {
-			requestContext, cancel := context.WithTimeout(
-				context.Background(),
-				outputRequestTimeout,
-			)
-			defer cancel()
-			payload := native.StatusRGBPayload(
-				effect.Red,
-				effect.Green,
-				effect.Blue,
-				effect.Brightness,
-			)
-			if scheduler.haveStatusBase {
-				payload = native.StatusRGBPayload(
-					scheduler.statusBase[0],
-					scheduler.statusBase[1],
-					scheduler.statusBase[2],
-					scheduler.statusBase[3],
-				)
-			}
-			_ = scheduler.target.Command(
-				requestContext,
-				native.OpStatusRGB,
-				payload,
-			)
-		}
-		scheduler.finish("effect", running, err, restore)
+		scheduler.completeStatusEffect(running, effect, err, started)
+		scheduler.finish("effect", running, err, nil)
 	}()
 	return operation, nil
+}
+
+// completeStatusEffect commits terminal ownership without holding the state
+// mutex across transport I/O. Native completion retains the MCU's last frame;
+// explicit stop or a possibly delivered failed descriptor is released.
+func (scheduler *OutputScheduler) completeStatusEffect(
+	running *runningOutput,
+	effect appconfig.StatusLEDEffect,
+	err error,
+	started bool,
+) {
+	scheduler.statusOperationMu.Lock()
+	defer scheduler.statusOperationMu.Unlock()
+
+	scheduler.mu.Lock()
+	if scheduler.effect != running {
+		if running.nativeAccepted && scheduler.retainedEffect == nil {
+			scheduler.retainedEffect = scheduler.retainedRunning(running)
+		}
+		scheduler.mu.Unlock()
+		return
+	}
+	if running.nativeAttempted {
+		if running.nativeAccepted || scheduler.retainedEffect == nil {
+			scheduler.retainedEffect = scheduler.retainedRunning(running)
+		}
+		shouldRelease := running.stopRequested || err != nil
+		scheduler.mu.Unlock()
+		if shouldRelease {
+			_, _ = scheduler.releaseRetainedStatusEffectUnderOperation(
+				context.Background(), false, true,
+			)
+		}
+		return
+	}
+	if !started {
+		scheduler.mu.Unlock()
+		return
+	}
+	payload := native.StatusRGBPayload(
+		effect.Red, effect.Green, effect.Blue, effect.Brightness,
+	)
+	if scheduler.haveStatusBase {
+		payload = native.StatusRGBPayload(
+			scheduler.statusBase[0], scheduler.statusBase[1],
+			scheduler.statusBase[2], scheduler.statusBase[3],
+		)
+	}
+	scheduler.mu.Unlock()
+
+	requestContext, cancel := context.WithTimeout(
+		context.Background(), outputRequestTimeout,
+	)
+	defer cancel()
+	scheduler.statusWireMu.Lock()
+	_ = scheduler.target.Command(requestContext, native.OpStatusRGB, payload)
+	scheduler.statusWireMu.Unlock()
 }
 
 func (scheduler *OutputScheduler) StopMelody() bool {
@@ -237,29 +484,31 @@ func (scheduler *OutputScheduler) StopStatusEffect() bool {
 	return scheduler.stop("effect")
 }
 
-// OverrideStatusEffect cancels the animation and clears its lane immediately,
-// preventing the canceled stream's steady-color cleanup from racing a
-// caller's explicit RGB write.
-func (scheduler *OutputScheduler) OverrideStatusEffect() bool {
-	scheduler.mu.Lock()
-	running := scheduler.effect
-	if running != nil {
-		scheduler.effect = nil
-		running.cancel()
+// ReleaseStatusEffect synchronously returns status ownership to firmware. The
+// owner is retained until the release ACK succeeds so callers can safely retry.
+// Native firmware receives one release even if local ownership is unknown,
+// reconciling host state after reconnects or an earlier lost ACK.
+func (scheduler *OutputScheduler) ReleaseStatusEffect(ctx context.Context) (bool, error) {
+	return scheduler.releaseStatusEffect(ctx, false)
+}
+
+// ReconcileStatusEffect sends one explicit release even when no local owner is
+// known. It is used at reconnect/programming boundaries to reconcile firmware.
+func (scheduler *OutputScheduler) ReconcileStatusEffect(ctx context.Context) error {
+	_, err := scheduler.releaseStatusEffect(ctx, true)
+	return err
+}
+
+func (scheduler *OutputScheduler) releaseStatusEffect(
+	ctx context.Context,
+	force bool,
+) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
-	scheduler.mu.Unlock()
-	if running != nil {
-		scheduler.target.PublishHostEvent(
-			"output",
-			fmt.Sprintf(
-				"effect %q overridden by steady RGB (id=%d)",
-				running.name,
-				running.id,
-			),
-		)
-		return true
-	}
-	return false
+	scheduler.statusOperationMu.Lock()
+	defer scheduler.statusOperationMu.Unlock()
+	return scheduler.releaseRetainedStatusEffectUnderOperation(ctx, force, false)
 }
 
 func (scheduler *OutputScheduler) StopAll() {
@@ -286,6 +535,13 @@ func (scheduler *OutputScheduler) replace(
 	slot := &scheduler.melody
 	if kind == "effect" {
 		slot = &scheduler.effect
+		// Preserve the last acknowledged owner until descriptor B is itself
+		// acknowledged. A successful B atomically replaces it without a release;
+		// a failed B leaves a durable handle that can still release the board.
+		if *slot != nil && (*slot).nativeAccepted &&
+			scheduler.retainedEffect == nil {
+			scheduler.retainedEffect = scheduler.retainedRunning(*slot)
+		}
 	}
 	var previousDone <-chan error
 	if *slot != nil {
@@ -310,15 +566,28 @@ func (scheduler *OutputScheduler) replace(
 
 func (scheduler *OutputScheduler) stop(kind string) bool {
 	scheduler.mu.Lock()
-	defer scheduler.mu.Unlock()
 	slot := scheduler.melody
 	if kind == "effect" {
 		slot = scheduler.effect
+		if slot == nil && scheduler.retainedEffect != nil {
+			scheduler.mu.Unlock()
+			_, _ = scheduler.ReleaseStatusEffect(context.Background())
+			return true
+		}
 	}
 	if slot == nil {
+		scheduler.mu.Unlock()
 		return false
 	}
+	if slot.stopRequested {
+		scheduler.mu.Unlock()
+		return false
+	}
+	if kind == "effect" {
+		slot.stopRequested = true
+	}
 	slot.cancel()
+	scheduler.mu.Unlock()
 	return true
 }
 
@@ -334,18 +603,13 @@ func (scheduler *OutputScheduler) finish(
 		slot = &scheduler.effect
 	}
 	isCurrent := *slot == operation
-	// Never let an older canceled animation overwrite the first frame of its
-	// replacement. On explicit stop or natural completion, leave a useful
-	// steady base color instead of a dim breath/blank flash frame. The restore
-	// and slot clear are serialized with replace/override so a new effect
-	// cannot start in the small gap between those operations.
-	if isCurrent && restore != nil {
-		restore()
-	}
 	if isCurrent {
 		*slot = nil
 	}
 	scheduler.mu.Unlock()
+	if isCurrent && restore != nil {
+		restore()
+	}
 	if !isCurrent {
 		operation.done <- normalizedStreamError(err)
 		close(operation.done)
@@ -422,10 +686,10 @@ func (scheduler *OutputScheduler) streamMelody(
 
 func (scheduler *OutputScheduler) streamStatusEffect(
 	ctx context.Context,
+	running *runningOutput,
 	effect appconfig.StatusLEDEffect,
 ) error {
-	if reporter, ok := scheduler.target.(outputCapabilityReporter); ok &&
-		reporter.Snapshot().Hello.Capabilities&native.CapabilityStatusEffects != 0 {
+	if supportsNativeStatusEffects(scheduler.target) {
 		options, duration, err := nativeStatusEffect(effect)
 		if err != nil {
 			return err
@@ -434,7 +698,7 @@ func (scheduler *OutputScheduler) streamStatusEffect(
 		if err != nil {
 			return err
 		}
-		if err := scheduler.send(ctx, native.OpStatusEffect, payload); err != nil {
+		if err := scheduler.sendStatusDescriptor(ctx, running, payload); err != nil {
 			return err
 		}
 		if duration == 0 {
@@ -506,6 +770,115 @@ func (scheduler *OutputScheduler) streamStatusEffect(
 	}
 }
 
+func (scheduler *OutputScheduler) sendStatusDescriptor(
+	ctx context.Context,
+	running *runningOutput,
+	payload []byte,
+) error {
+	scheduler.statusOperationMu.Lock()
+	defer scheduler.statusOperationMu.Unlock()
+	scheduler.mu.Lock()
+	if scheduler.effect != running {
+		scheduler.mu.Unlock()
+		return context.Canceled
+	}
+	if err := ctx.Err(); err != nil {
+		scheduler.mu.Unlock()
+		return err
+	}
+	scheduler.statusWireMu.Lock()
+	defer scheduler.statusWireMu.Unlock()
+	scheduler.mu.Unlock()
+	requestContext, cancel := context.WithTimeout(ctx, outputRequestTimeout)
+	defer cancel()
+	if err := scheduler.target.Command(
+		requestContext,
+		native.OpStatusEffect,
+		payload,
+	); err != nil {
+		return err
+	}
+	running.nativeAccepted = true
+	snapshot := scheduler.targetSnapshot()
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if scheduler.effect != running {
+		return context.Canceled
+	}
+	running.nativeAccepted = true
+	running.nativeGeneration = snapshot.ConnectionGeneration
+	running.nativeDevice = strings.TrimSpace(snapshot.Port.SerialNumber)
+	if running.nativeDevice == "" {
+		running.nativeDevice = strings.TrimSpace(snapshot.Port.InstanceID)
+	}
+	if running.nativeDevice == "" {
+		running.nativeDevice = strings.TrimSpace(snapshot.Port.Name)
+	}
+	scheduler.retainedEffect = nil
+	return nil
+}
+
+func supportsNativeStatusEffects(target outputCommander) bool {
+	reporter, ok := target.(outputCapabilityReporter)
+	return ok && reporter.Snapshot().Hello.Capabilities&
+		native.CapabilityStatusEffects != 0
+}
+
+func supportsNativeStatusProfiles(target outputCommander) bool {
+	reporter, ok := target.(outputCapabilityReporter)
+	if !ok {
+		return false
+	}
+	capabilities := reporter.Snapshot().Hello.Capabilities
+	return capabilities&native.CapabilityStatusEffects != 0 &&
+		capabilities&native.CapabilityStatusProfiles != 0
+}
+
+func (scheduler *OutputScheduler) releaseNativeStatusEffect(ctx context.Context) error {
+	scheduler.statusWireMu.Lock()
+	defer scheduler.statusWireMu.Unlock()
+	requestContext, cancel := context.WithTimeout(
+		ctx,
+		outputRequestTimeout,
+	)
+	defer cancel()
+	return scheduler.target.Command(
+		requestContext,
+		native.OpStatusEffect,
+		native.StatusEffectReleasePayload(),
+	)
+}
+
+// releaseRetainedStatusEffectLocked keeps the owner durable until the release
+// ACK arrives. Callers hold scheduler.mu, serializing release with replacement.
+func (scheduler *OutputScheduler) releaseRetainedStatusEffectLocked(
+	ctx context.Context,
+) error {
+	owner := scheduler.retainedEffect
+	if owner == nil {
+		return nil
+	}
+	owner.releasePending = true
+	if err := scheduler.releaseNativeStatusEffect(ctx); err != nil {
+		scheduler.target.PublishHostEvent(
+			"error",
+			fmt.Sprintf(
+				"effect %q release failed (id=%d): %v",
+				owner.name,
+				owner.id,
+				err,
+			),
+		)
+		return err
+	}
+	scheduler.retainedEffect = nil
+	scheduler.target.PublishHostEvent(
+		"output",
+		fmt.Sprintf("effect %q released (id=%d)", owner.name, owner.id),
+	)
+	return nil
+}
+
 func nativeStatusEffect(effect appconfig.StatusLEDEffect) (
 	native.StatusEffectOptions,
 	time.Duration,
@@ -559,6 +932,13 @@ func (scheduler *OutputScheduler) send(
 	opcode byte,
 	payload []byte,
 ) error {
+	if opcode == native.OpStatusEffect {
+		scheduler.statusWireMu.Lock()
+		defer scheduler.statusWireMu.Unlock()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
 	requestContext, cancel := context.WithTimeout(ctx, outputRequestTimeout)
 	defer cancel()
 	return scheduler.target.Command(requestContext, opcode, payload)

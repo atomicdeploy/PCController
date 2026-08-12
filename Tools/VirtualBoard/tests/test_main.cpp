@@ -1,6 +1,8 @@
 #include "virtual_board/hardware.hpp"
 #include "virtual_board/protocol.hpp"
 #include "virtual_board/virtual_board.hpp"
+#include "../../../Project/StatusLedMath.h"
+#include "status_led_golden.hpp"
 
 #include <algorithm>
 #include <array>
@@ -13,6 +15,65 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+namespace pccontroller::virtual_board {
+
+struct VirtualBoardStatusLedTestAccess {
+  static VirtualBoard::TimePoint now(VirtualBoard &board) {
+    const auto at = VirtualBoard::Clock::now();
+    board.bootEndsAt_ = at;
+    board.hostSeen_ = true;
+    board.lastHostActivityAt_ = at;
+    board.lastStatusLedPushAt_ = at;
+    return at;
+  }
+
+  static VirtualBoard::TimePoint bootNow(VirtualBoard &board) {
+    const auto at = VirtualBoard::Clock::now();
+    board.bootEndsAt_ = at + std::chrono::milliseconds(650);
+    board.lastStatusLedPushAt_ = at;
+    board.restoreStatusPresentation(at);
+    return at;
+  }
+
+  static bool apply(VirtualBoard &board,
+                    const std::array<std::uint8_t, 12> &descriptor,
+                    VirtualBoard::TimePoint at) {
+    return board.applyStatusEffect(
+        std::vector<std::uint8_t>(descriptor.begin(), descriptor.end()), at);
+  }
+
+  static std::vector<wire::Frame> tickAt(VirtualBoard &board,
+                                         VirtualBoard::TimePoint at) {
+    if (board.hostSeen_) {
+      board.lastHostActivityAt_ = at;
+    }
+    board.serviceAutomation(at);
+    board.queueMirrorChanges(at);
+    std::vector<wire::Frame> frames;
+    frames.swap(board.pendingEvents_);
+    return frames;
+  }
+
+  static std::uint8_t effect(const VirtualBoard &board) {
+    return board.statusEffect_;
+  }
+
+  static VirtualBoard::TimePoint resetDeadline(const VirtualBoard &board) {
+    return board.resetDeadline_;
+  }
+
+  static bool resetPending(const VirtualBoard &board) {
+    return board.resetPending_;
+  }
+
+  static void setFallbackBrightness(VirtualBoard &board,
+                                    std::uint8_t brightness) {
+    board.settings_.statusBrightness = brightness;
+  }
+};
+
+} // namespace pccontroller::virtual_board
 
 namespace {
 
@@ -686,7 +747,30 @@ void testBoardAndPersistence() {
     require(response.size() == 1 &&
                 response[0].opcode == pccontroller::wire::Ack,
             "application reset was not acknowledged");
-    const auto resetEvents = board.tick();
+    const auto applicationResetDeadline = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::resetDeadline(board);
+    auto resetEvents = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(
+            board, applicationResetDeadline - std::chrono::milliseconds(220));
+    const auto *resetCue =
+        findOpcode(resetEvents, pccontroller::wire::StatusLedChanged);
+    require(resetCue != nullptr && resetCue->payload.size() == 6 &&
+                resetCue->payload[5] == 18 &&
+                pccontroller::virtual_board::
+                    VirtualBoardStatusLedTestAccess::resetPending(board),
+            "application reset did not render its 240 ms condition-18 cue");
+    resetEvents = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(
+            board, applicationResetDeadline - std::chrono::milliseconds(1));
+    require(std::none_of(resetEvents.begin(), resetEvents.end(),
+                         [](const auto &event) {
+                           return timedEventEquals(event,
+                                                   {7, 0x08, 2, 0, 0, 0});
+                         }),
+            "application reset completed before its cue deadline");
+    resetEvents = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(board,
+                                                 applicationResetDeadline);
     require(
         std::any_of(
             resetEvents.begin(), resetEvents.end(),
@@ -694,6 +778,16 @@ void testBoardAndPersistence() {
               return timedEventEquals(event, {7, 0x08, 2, 0, 0, 0});
             }),
         "reset event is not [7, cause, persistent count LE u32]");
+    const auto bootFrames = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(
+            board, applicationResetDeadline + std::chrono::milliseconds(17));
+    const auto *bootFrame =
+        findOpcode(bootFrames, pccontroller::wire::StatusLedChanged);
+    require(bootFrame != nullptr && bootFrame->payload.size() == 6 &&
+                bootFrame->payload[5] == 1 &&
+                !pccontroller::virtual_board::
+                     VirtualBoardStatusLedTestAccess::resetPending(board),
+            "simulated reboot did not clear reset ownership and begin Boot");
     response =
         board.handle({pccontroller::wire::GetStatus, 21, {}});
     require(response[0].payload.size() == 48 &&
@@ -706,7 +800,11 @@ void testBoardAndPersistence() {
     require(response.size() == 1 &&
                 response[0].opcode == pccontroller::wire::Ack,
             "bootloader reset was not acknowledged");
-    const auto bootloaderResetEvents = board.tick();
+    const auto bootloaderResetDeadline = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::resetDeadline(board);
+    const auto bootloaderResetEvents = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(board,
+                                                bootloaderResetDeadline);
     require(
         std::any_of(
             bootloaderResetEvents.begin(), bootloaderResetEvents.end(),
@@ -827,36 +925,35 @@ void testStatusLedOwnerFramesAndIdempotentBreathe() {
     pccontroller::virtual_board::FileEeprom eeprom(path);
     pccontroller::virtual_board::VirtualBoard board(
         sensors, relays, pwm, addressableLeds, displays, eeprom);
+    static_cast<void>(
+        pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::now(
+            board));
 
     // Manual condition (0xFF) plus a non-zero effect is the stable six-byte
     // wire contract for an MCU-owned compositor; steady host preview uses
     // the same condition with effect 0. This preserves existing parsers.
-    const std::vector<std::uint8_t> breathe{
-        1, 0, 0, 255, 0, 0, 0, 255, 0, 0x80, 0x02, 0};
-    auto response = board.handle(
-        {pccontroller::wire::StatusEffect, 1, breathe});
-    require(response.size() == 1 && response[0].opcode == pccontroller::wire::Ack,
+    const std::array<std::uint8_t, 12> breathe{{
+        1, 0, 0, 255, 0, 0, 0, 255, 0, 0x80, 0x02, 0}};
+    const auto base =
+        pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::now(
+            board);
+    require(pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::apply(
+                board, breathe, base),
             "VirtualBoard rejected a native STATUS_EFFECT descriptor");
 
     std::vector<std::uint8_t> blueFrames;
-    for (unsigned frame = 0; frame < 31; ++frame) {
+    for (unsigned frame = 0; frame < 32; ++frame) {
       if ((frame % 2U) == 0U) {
-        response = board.handle(
+        const auto response = board.handle(
             {pccontroller::wire::StatusEffect,
-             static_cast<std::uint8_t>(2U + frame), breathe});
+             static_cast<std::uint8_t>(2U + frame),
+             std::vector<std::uint8_t>(breathe.begin(), breathe.end())});
         require(response[0].opcode == pccontroller::wire::Ack,
                 "VirtualBoard rejected an identical STATUS_EFFECT refresh");
       }
-      if (frame == 12U) {
-        // An unrelated internal state event must not steal an explicit
-        // host-to-board effect handoff or restart its phase.
-        static_cast<void>(board.console("door open"));
-      }
-      // This is intentionally above the 20 ms production frame cadence so a
-      // Windows scheduler quantum cannot turn a rendered-frame assertion into
-      // a no-render false failure.
-      std::this_thread::sleep_for(std::chrono::milliseconds(35));
-      const auto frames = board.tick();
+      const auto frames = pccontroller::virtual_board::
+          VirtualBoardStatusLedTestAccess::tickAt(
+              board, base + std::chrono::milliseconds((frame + 1U) * 20U));
       const auto *changed =
           findOpcode(frames, pccontroller::wire::StatusLedChanged);
       const bool validFrame = changed != nullptr && changed->payload.size() == 6 &&
@@ -873,7 +970,643 @@ void testStatusLedOwnerFramesAndIdempotentBreathe() {
                 blueFrames.back() < 25U,
             "repeated STATUS_EFFECT refresh did not complete one rise/fall");
     require(std::is_sorted(peak, blueFrames.end(), std::greater_equal<>()),
-            "repeated STATUS_EFFECT or an internal event reset the fall phase");
+            "repeated STATUS_EFFECT reset the fall phase");
+
+    const std::array<std::uint8_t, 12> changed{{
+        1, 255, 0, 0, 0, 0, 0, 200, 50, 0x00, 0x05, 0}};
+    require(pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::apply(
+                board, changed, base + std::chrono::milliseconds(650)),
+            "same-kind changed descriptor was rejected");
+    const auto replacementFrames = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(
+            board, base + std::chrono::milliseconds(670));
+    const auto *replacement =
+        findOpcode(replacementFrames, pccontroller::wire::StatusLedChanged);
+    require(replacement != nullptr && replacement->payload.size() == 6 &&
+                replacement->payload[0] > 20 && replacement->payload[2] == 0 &&
+                replacement->payload[4] == 1 &&
+                replacement->payload[5] == 0xFF,
+            "same-kind changed descriptor did not replace atomically");
+
+    const auto redBeforeRelease = pwm.value(13);
+    const auto response = board.handle(
+        {pccontroller::wire::StatusEffect, 41, {0}});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                pwm.value(13) == redBeforeRelease,
+            "explicit release changed the rendered frame before handoff");
+  }
+  std::filesystem::remove(path, ignored);
+}
+
+std::array<std::uint8_t, 3> renderedStatus(
+    const pccontroller::virtual_board::PwmBank &pwm) {
+  return {{static_cast<std::uint8_t>(pwm.value(13) >> 4U),
+           static_cast<std::uint8_t>(pwm.value(14) >> 4U),
+           static_cast<std::uint8_t>(pwm.value(15) >> 4U)}};
+}
+
+void testStatusLedGoldenCadenceAndDurationParity() {
+  for (std::size_t index = 0;
+       index < status_led_golden::interpolationPhases.size(); ++index) {
+    const auto phase = status_led_golden::interpolationPhases[index];
+    require(StatusLedMath::interpolate(240, 20, phase) ==
+                    status_led_golden::descending[index] &&
+                StatusLedMath::interpolate(20, 240, phase) ==
+                    status_led_golden::ascending[index],
+            "VirtualBoard bidirectional interpolation diverged from golden "
+            "vector");
+  }
+
+  for (std::uint8_t kind = 1; kind <= 4; ++kind) {
+    const auto path = temporaryEeprom();
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    const auto base =
+        pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::now(
+            board);
+    const auto descriptor = status_led_golden::descriptor(kind);
+    require(pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::apply(
+                board, descriptor, base),
+            "VirtualBoard golden descriptor was rejected");
+    for (const auto &golden : status_led_golden::frames) {
+      const auto at = base + std::chrono::milliseconds(
+                                 StatusLedMath::phaseDeadline(
+                                     640, static_cast<std::uint8_t>(
+                                              golden.phase >> 2U)));
+      static_cast<void>(pccontroller::virtual_board::
+                            VirtualBoardStatusLedTestAccess::tickAt(board, at));
+      const auto expected =
+          kind == 1 ? golden.breathe
+                    : (kind == 2 ? golden.flash
+                                 : (kind == 3 ? golden.cycle
+                                              : golden.transition));
+      const auto actual = renderedStatus(pwm);
+      require(actual == expected,
+              "VirtualBoard diverged from AVR golden phase vector kind=" +
+                  std::to_string(kind) + " phase=" +
+                  std::to_string(golden.phase) + " actual=" +
+                  std::to_string(actual[0]) + "," +
+                  std::to_string(actual[1]) + "," +
+                  std::to_string(actual[2]) + " expected=" +
+                  std::to_string(expected[0]) + "," +
+                  std::to_string(expected[1]) + "," +
+                  std::to_string(expected[2]));
+    }
+    static_cast<void>(pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::tickAt(
+                              board, base + std::chrono::milliseconds(639)));
+    const auto terminal =
+        kind == 1 ? status_led_golden::frames[4].breathe
+                  : (kind == 2 ? status_led_golden::frames[4].flash
+                               : (kind == 3
+                                      ? status_led_golden::frames[4].cycle
+                                      : status_led_golden::frames[4].transition));
+    require(renderedStatus(pwm) == terminal,
+            "VirtualBoard effect missed its period-1 terminal phase");
+    static_cast<void>(pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::tickAt(
+                              board, base + std::chrono::milliseconds(640)));
+    const auto primary =
+        kind == 1 ? status_led_golden::frames[0].breathe
+                  : (kind == 2 ? status_led_golden::frames[0].flash
+                               : (kind == 3
+                                      ? status_led_golden::frames[0].cycle
+                                      : status_led_golden::frames[0].transition));
+    require(renderedStatus(pwm) == primary,
+            "VirtualBoard effect did not render phase zero at exact period");
+    static_cast<void>(pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::tickAt(
+                              board, base + std::chrono::milliseconds(650)));
+    const auto first =
+        kind == 1 ? status_led_golden::breatheFirstStep
+                  : (kind == 2 ? status_led_golden::flashFirstStep
+                               : (kind == 3
+                                      ? status_led_golden::cycleFirstStep
+                                      : status_led_golden::transitionFirstStep));
+    const auto firstActual = renderedStatus(pwm);
+    require(firstActual == first,
+            "VirtualBoard effect missed first post-wrap deadline kind=" +
+                std::to_string(kind) + " actual=" +
+                std::to_string(firstActual[0]) + "," +
+                std::to_string(firstActual[1]) + "," +
+                std::to_string(firstActual[2]));
+    static_cast<void>(pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::tickAt(
+                              board, base + std::chrono::milliseconds(1930)));
+    require(renderedStatus(pwm) == first,
+            "VirtualBoard delayed multi-cycle service lost absolute phase");
+    std::filesystem::remove(path, ignored);
+  }
+
+  const std::array<std::uint16_t, 4> periods{{640, 1280, 3200, 60000}};
+  for (const auto period : periods) {
+    const auto run = [&](bool delayed) {
+      const auto path = temporaryEeprom();
+      std::error_code ignored;
+      std::filesystem::remove(path, ignored);
+      pccontroller::virtual_board::SensorBank sensors;
+      pccontroller::virtual_board::RelayBank relays;
+      pccontroller::virtual_board::PwmBank pwm;
+      pccontroller::virtual_board::AddressableLedBank addressableLeds;
+      pccontroller::virtual_board::DisplayBank displays;
+      pccontroller::virtual_board::FileEeprom eeprom(path);
+      pccontroller::virtual_board::VirtualBoard board(
+          sensors, relays, pwm, addressableLeds, displays, eeprom);
+      const auto base =
+          pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::now(
+              board);
+      auto descriptor = status_led_golden::descriptor(4, 1);
+      descriptor[9] = static_cast<std::uint8_t>(period);
+      descriptor[10] = static_cast<std::uint8_t>(period >> 8U);
+      require(pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::
+                  apply(board, descriptor, base),
+              "VirtualBoard finite descriptor was rejected");
+      if (!delayed) {
+        static_cast<void>(pccontroller::virtual_board::
+                              VirtualBoardStatusLedTestAccess::tickAt(
+                                  board, base +
+                                             std::chrono::milliseconds(
+                                                 period - 1U)));
+        require(pccontroller::virtual_board::
+                    VirtualBoardStatusLedTestAccess::effect(board) == 4,
+                "VirtualBoard finite effect completed before exact period");
+      }
+      static_cast<void>(pccontroller::virtual_board::
+                            VirtualBoardStatusLedTestAccess::tickAt(
+                                board, base + std::chrono::milliseconds(
+                                                   period +
+                                                   (delayed ? 9U : 0U))));
+      require(pccontroller::virtual_board::
+                      VirtualBoardStatusLedTestAccess::effect(board) == 0 &&
+                  renderedStatus(pwm) ==
+                      status_led_golden::transitionEndpoint,
+              "VirtualBoard finite effect missed its terminal endpoint");
+      const auto response = board.handle(
+          {pccontroller::wire::StatusEffect, 77,
+           std::vector<std::uint8_t>(descriptor.begin(), descriptor.end())});
+      require(response.size() == 1 &&
+                  response[0].opcode == pccontroller::wire::Ack &&
+                  pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::effect(board) == 4 &&
+                  renderedStatus(pwm) ==
+                      status_led_golden::frames[0].transition,
+              "completed VirtualBoard descriptor did not ACK and restart at "
+              "phase zero");
+      std::filesystem::remove(path, ignored);
+    };
+    run(false);
+    run(true);
+  }
+
+  {
+    const auto path = temporaryEeprom();
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    const auto base =
+        pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::now(
+            board);
+    auto descriptor = status_led_golden::descriptor(4, 1);
+    descriptor[9] = 0x08;
+    descriptor[10] = 0x07;
+    require(pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::apply(
+                board, descriptor, base),
+            "1800 ms VirtualBoard duration fixture was rejected");
+    for (unsigned millisecond = 10; millisecond < 1800;
+         millisecond += 10) {
+      static_cast<void>(pccontroller::virtual_board::
+                            VirtualBoardStatusLedTestAccess::tickAt(
+                                board, base + std::chrono::milliseconds(
+                                                   millisecond)));
+    }
+    require(pccontroller::virtual_board::
+                VirtualBoardStatusLedTestAccess::effect(board) == 4,
+            "10 ms VirtualBoard scheduler completed 1800 ms effect early");
+    static_cast<void>(pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::tickAt(
+                              board, base + std::chrono::milliseconds(1800)));
+    require(pccontroller::virtual_board::
+                    VirtualBoardStatusLedTestAccess::effect(board) == 0 &&
+                renderedStatus(pwm) ==
+                    status_led_golden::transitionEndpoint,
+            "10 ms VirtualBoard scheduler missed exact 1800 ms endpoint");
+    std::filesystem::remove(path, ignored);
+  }
+
+  struct SmoothFixture {
+    const char *name;
+    std::array<std::uint8_t, 12> descriptor;
+  };
+  const std::array<SmoothFixture, 5> shipped{{
+      {"rf-breathe", {{1, 190, 0, 255, 0, 0, 0, 190, 20,
+                        0x84, 0x03, 0}}},
+      {"hot-breathe", {{1, 255, 0, 0, 0, 0, 0, 255, 72,
+                         0xE8, 0x03, 0}}},
+      {"factory-breathe", {{1, 16, 72, 255, 0, 0, 0, 145, 18,
+                             0x40, 0x06, 0}}},
+      {"named-breathe-blue", {{1, 30, 120, 255, 0, 0, 0, 200, 8,
+                                0x08, 0x07, 0}}},
+      {"factory-bt-off-cycle", {{3, 0, 255, 80, 255, 0, 0, 128, 0,
+                                  0xD0, 0x07, 0}}},
+  }};
+  for (const auto &fixture : shipped) {
+    const auto path = temporaryEeprom();
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    const auto base =
+        pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::now(
+            board);
+    require(pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::apply(
+                board, fixture.descriptor, base),
+            std::string(fixture.name) + " VirtualBoard fixture was rejected");
+    unsigned changes = 0;
+    unsigned lastEmission = 0;
+    for (unsigned millisecond = 1; millisecond <= 1000; ++millisecond) {
+      const auto frames = pccontroller::virtual_board::
+          VirtualBoardStatusLedTestAccess::tickAt(
+              board, base + std::chrono::milliseconds(millisecond));
+      const auto *changed =
+          findOpcode(frames, pccontroller::wire::StatusLedChanged);
+      if (changed == nullptr) {
+        continue;
+      }
+      require(lastEmission == 0 || millisecond - lastEmission >= 17,
+              "VirtualBoard emitted status frames above 60 Hz");
+      lastEmission = millisecond;
+      ++changes;
+      require(changed->payload.size() == 6 &&
+                  std::equal(changed->payload.begin(),
+                             changed->payload.begin() + 3,
+                             renderedStatus(pwm).begin()),
+              "VirtualBoard emission was not the latest physical frame");
+    }
+    require(changes >= 20 && changes <= 60,
+            std::string(fixture.name) +
+                " VirtualBoard cadence escaped 20..60 Hz");
+    std::filesystem::remove(path, ignored);
+  }
+
+  {
+    const auto path = temporaryEeprom();
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    auto valid = status_led_golden::descriptor(1);
+    std::vector<std::uint8_t> shortPayload(valid.begin(), valid.end() - 1);
+    std::vector<std::uint8_t> longPayload(valid.begin(), valid.end());
+    longPayload.push_back(0);
+    auto aboveMaximum = valid;
+    aboveMaximum[9] = 0x61;
+    aboveMaximum[10] = 0xEA;
+    auto absoluteMaximum = valid;
+    absoluteMaximum[9] = 0xFF;
+    absoluteMaximum[10] = 0xFF;
+    const std::array<std::vector<std::uint8_t>, 4> rejected{{
+        shortPayload, longPayload,
+        std::vector<std::uint8_t>(aboveMaximum.begin(), aboveMaximum.end()),
+        std::vector<std::uint8_t>(absoluteMaximum.begin(),
+                                  absoluteMaximum.end())}};
+    std::uint8_t sequence = 1;
+    for (const auto &payload : rejected) {
+      const auto response = board.handle(
+          {pccontroller::wire::StatusEffect, sequence++, payload});
+      require(response.size() == 1 &&
+                  response[0].opcode == pccontroller::wire::ErrorResponse,
+              "VirtualBoard accepted a non-canonical STATUS_EFFECT payload");
+    }
+    std::filesystem::remove(path, ignored);
+  }
+
+  // Hard Flash deliberately emits only its two state edges; it is the warning
+  // exception to the smooth changed-frame cadence contract.
+  {
+    const auto path = temporaryEeprom();
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    const auto base =
+        pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::now(
+            board);
+    const auto flash = status_led_golden::descriptor(2);
+    require(pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::apply(
+                board, flash, base),
+            "VirtualBoard hard Flash fixture was rejected");
+    static_cast<void>(pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::tickAt(
+                              board, base + std::chrono::milliseconds(319)));
+    require(renderedStatus(pwm) == status_led_golden::frames[0].flash,
+            "hard Flash changed before its half-cycle edge");
+    static_cast<void>(pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::tickAt(
+                              board, base + std::chrono::milliseconds(320)));
+    require(renderedStatus(pwm) == status_led_golden::frames[2].flash,
+            "hard Flash missed its alternate half-cycle edge");
+    static_cast<void>(pccontroller::virtual_board::
+                          VirtualBoardStatusLedTestAccess::tickAt(
+                              board, base + std::chrono::milliseconds(640)));
+    require(renderedStatus(pwm) == status_led_golden::frames[0].flash,
+            "hard Flash missed its primary cycle edge");
+    std::filesystem::remove(path, ignored);
+  }
+}
+
+void testStatusLedPriorityRestoreAndProfileOwnership() {
+  const auto path = temporaryEeprom();
+  std::error_code ignored;
+  std::filesystem::remove(path, ignored);
+  {
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+    const auto bootBase = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::bootNow(board);
+    static_cast<void>(board.handle({pccontroller::wire::Hello, 1, {}}));
+    const auto bootFirst = status_led_golden::descriptor(1);
+    auto bootLatest = bootFirst;
+    bootLatest[1] = 0;
+    bootLatest[3] = 255;
+    require(pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::apply(
+                board, bootFirst, bootBase + std::chrono::milliseconds(1)) &&
+                pccontroller::virtual_board::
+                    VirtualBoardStatusLedTestAccess::apply(
+                        board, bootLatest,
+                        bootBase + std::chrono::milliseconds(2)),
+            "VirtualBoard rejected a retained request during Boot");
+    auto bootFrames = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(
+            board, bootBase + std::chrono::milliseconds(20));
+    const auto *boot =
+        findOpcode(bootFrames, pccontroller::wire::StatusLedChanged);
+    require(boot != nullptr && boot->payload.size() == 6 &&
+                boot->payload[5] == 1,
+            "VirtualBoard manual request stole Boot priority");
+    static_cast<void>(board.console("door open"));
+    bootFrames = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(
+            board, bootBase + std::chrono::milliseconds(40));
+    const auto *bootCue =
+        findOpcode(bootFrames, pccontroller::wire::StatusLedChanged);
+    require(bootCue == nullptr || bootCue->payload[5] == 1,
+            "VirtualBoard informational cue obscured Boot priority");
+    sensors.setDoorOpen(false);
+    bootFrames = pccontroller::virtual_board::
+        VirtualBoardStatusLedTestAccess::tickAt(
+            board, bootBase + std::chrono::milliseconds(651));
+    const auto *bootRestored =
+        findOpcode(bootFrames, pccontroller::wire::StatusLedChanged);
+    require(bootRestored != nullptr && bootRestored->payload.size() == 6 &&
+                bootRestored->payload[5] == 0xFF &&
+                bootRestored->payload[2] > 0,
+            "VirtualBoard Boot exit did not restore the latest request");
+
+    auto simulatedNow =
+        pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::now(
+            board);
+    const auto nextFrame = [&]() {
+      simulatedNow += std::chrono::milliseconds(20);
+      return pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::
+          tickAt(board, simulatedNow);
+    };
+
+    static_cast<void>(board.handle({pccontroller::wire::Hello, 1, {}}));
+    static_cast<void>(nextFrame());
+    const std::vector<std::uint8_t> red{
+        1, 255, 0, 0, 0, 0, 0, 220, 40, 0x80, 0x02, 0};
+    auto response =
+        board.handle({pccontroller::wire::StatusEffect, 2, red});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "manual effect setup failed");
+
+    sensors.setTLedCentiC(6000);
+    auto frames = nextFrame();
+    const auto *warning =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(warning != nullptr && warning->payload.size() == 6 &&
+                warning->payload[5] == 4 && warning->payload[0] > 0 &&
+                warning->payload[2] == 0,
+            "hot Warning did not preempt the manual effect");
+
+    const std::vector<std::uint8_t> blue{
+        1, 0, 0, 255, 0, 0, 0, 210, 45, 0x00, 0x05, 0};
+    response = board.handle({pccontroller::wire::StatusEffect, 3, blue});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "changed descriptor was rejected during Warning");
+    static_cast<void>(board.console("door open"));
+    static_cast<void>(nextFrame());
+    require(pwm.value(13) > 0 && pwm.value(15) == 0,
+            "manual replacement or door cue obscured Warning");
+
+    sensors.setTLedCentiC(2500);
+    frames = nextFrame();
+    const auto *restored =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(restored != nullptr && restored->payload.size() == 6 &&
+                restored->payload[2] > 20 && restored->payload[0] == 0 &&
+                restored->payload[4] == 1 && restored->payload[5] == 0xFF,
+            "Warning release did not restore the changed retained request");
+
+    static_cast<void>(board.handle(
+        {pccontroller::wire::ProgramState, 4, {1}}));
+    frames = nextFrame();
+    const auto *fault =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(fault != nullptr && fault->payload.size() == 6 &&
+                fault->payload[5] == 5,
+            "running with an open door did not preempt with Fault");
+
+    const std::vector<std::uint8_t> green{
+        1, 0, 255, 0, 0, 0, 0, 180, 35, 0x80, 0x02, 0};
+    response = board.handle({pccontroller::wire::StatusEffect, 5, green});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "changed descriptor was rejected during Fault");
+    sensors.setDoorOpen(false);
+    frames = nextFrame();
+    restored = findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(restored != nullptr && restored->payload.size() == 6 &&
+                restored->payload[1] > 20 && restored->payload[0] == 0 &&
+                restored->payload[4] == 1 && restored->payload[5] == 0xFF,
+            "Fault release did not restore the latest retained request");
+
+    static_cast<void>(board.handle(
+        {pccontroller::wire::StatusEffect, 6, {0}}));
+    frames = nextFrame();
+    const auto *released =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(released != nullptr && released->payload.size() == 6 &&
+                released->payload[5] == 10,
+            "explicit release did not clear the retained manual owner");
+
+    static_cast<void>(board.handle(
+        {pccontroller::wire::ProgramState, 7, {0}}));
+    sensors.setBluetoothState(0);
+    static_cast<void>(nextFrame());
+    const std::vector<std::uint8_t> doorCue{
+        0, 0, 255, 0, 0, 0, 0, 180, 0, 0, 0, 0};
+    std::vector<std::uint8_t> cueSet{11};
+    cueSet.insert(cueSet.end(), doorCue.begin(), doorCue.end());
+    response = board.handle(
+        {pccontroller::wire::StatusProfileSet, 8, cueSet});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "door cue profile setup was rejected");
+    static_cast<void>(board.console("door open"));
+    frames = nextFrame();
+    const auto *cue =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(cue != nullptr && cue->payload.size() == 6 &&
+                cue->payload[5] == 11 && cue->payload[1] > 0,
+            "native door event did not render its cue layer");
+    sensors.setTLedCentiC(6000);
+    frames = nextFrame();
+    warning = findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(warning != nullptr && warning->payload.size() == 6 &&
+                warning->payload[5] == 4,
+            "Warning did not preempt an active informational cue");
+    sensors.setTLedCentiC(2500);
+    frames = nextFrame();
+    const auto *native =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(native != nullptr && native->payload.size() == 6 &&
+                native->payload[5] == 8,
+            "cleared Warning resumed a canceled informational cue");
+    sensors.setDoorOpen(false);
+
+    const std::vector<std::uint8_t> nativeProfile{
+        1, 10, 20, 200, 0, 0, 0, 180, 20, 0x80, 0x02, 0};
+    std::vector<std::uint8_t> profileSet{8};
+    profileSet.insert(profileSet.end(), nativeProfile.begin(),
+                      nativeProfile.end());
+    response = board.handle(
+        {pccontroller::wire::StatusProfileSet, 9, profileSet});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "active native profile edit was rejected");
+    sensors.setBluetoothState(1);
+    frames = nextFrame();
+    const auto *connected =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(connected != nullptr && connected->payload.size() == 6 &&
+                connected->payload[5] == 7,
+            "active native profile edit leaked manual ownership");
+
+    auto trailingProfile = profileSet;
+    trailingProfile.push_back(0xAA);
+    response = board.handle(
+        {pccontroller::wire::StatusProfileSet, 91, trailingProfile});
+    require(response[0].opcode == pccontroller::wire::ErrorResponse,
+            "VirtualBoard accepted trailing STATUS_PROFILE_SET bytes");
+
+    pccontroller::virtual_board::VirtualBoardStatusLedTestAccess::
+        setFallbackBrightness(board, 100);
+    const std::vector<std::uint8_t> fallbackManual{
+        1, 0, 0, 255, 0, 0, 0, 220, 20, 0x80, 0x02, 0};
+    response = board.handle(
+        {pccontroller::wire::StatusEffect, 92, fallbackManual});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "VirtualBoard fallback-brightness manual setup failed");
+    sensors.setTLedCentiC(6000);
+    frames = nextFrame();
+    const auto *fallbackWarning =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(fallbackWarning != nullptr &&
+                fallbackWarning->payload.size() == 6 &&
+                fallbackWarning->payload[3] == 100,
+            "VirtualBoard blank safety fallback inherited manual brightness");
+    sensors.setTLedCentiC(2500);
+    frames = nextFrame();
+    restored = findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(restored != nullptr && restored->payload.size() == 6 &&
+                restored->payload[3] == fallbackManual[7],
+            "VirtualBoard safety clear did not restore manual brightness");
+
+    const std::vector<std::uint8_t> learningRed{
+        1, 255, 0, 0, 0, 0, 0, 190, 30, 0x80, 0x02, 0};
+    response = board.handle(
+        {pccontroller::wire::StatusEffect, 10, learningRed});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "manual setup before RF Learning was rejected");
+    response = board.handle(
+        {pccontroller::wire::RadioLearnStart, 11, {0, 0}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "indefinite RF Learning start was rejected");
+    frames = nextFrame();
+    const auto *learning =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(learning != nullptr && learning->payload.size() == 6 &&
+                learning->payload[5] == 3,
+            "RF Learning did not preempt a manual board-owned effect");
+    const auto learningFrame =
+        std::array<std::uint16_t, 3>{pwm.value(13), pwm.value(14),
+                                     pwm.value(15)};
+
+    const std::vector<std::uint8_t> learningBlue{
+        1, 0, 0, 255, 0, 0, 0, 205, 35, 0x00, 0x05, 0};
+    response = board.handle(
+        {pccontroller::wire::StatusEffect, 12, learningBlue});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                pwm.value(13) == learningFrame[0] &&
+                pwm.value(14) == learningFrame[1] &&
+                pwm.value(15) == learningFrame[2],
+            "changed manual descriptor stole the RF Learning layer");
+    static_cast<void>(board.console("door open"));
+    frames = nextFrame();
+    const auto *learningCueFrame =
+        findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(learningCueFrame == nullptr ||
+                (learningCueFrame->payload.size() == 6 &&
+                 learningCueFrame->payload[5] == 3),
+            "informational cue obscured RF Learning priority");
+
+    response = board.handle(
+        {pccontroller::wire::RadioLearnCancel, 13, {}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "RF Learning cancel was rejected");
+    frames = nextFrame();
+    restored = findOpcode(frames, pccontroller::wire::StatusLedChanged);
+    require(restored != nullptr && restored->payload.size() == 6 &&
+                restored->payload[2] > 20 && restored->payload[0] == 0 &&
+                restored->payload[4] == 1 && restored->payload[5] == 0xFF,
+            "RF Learning exit did not restore the latest manual descriptor");
   }
   std::filesystem::remove(path, ignored);
 }
@@ -1061,6 +1794,8 @@ int main() {
     testProtocolRoundTrip();
     testBoardAndPersistence();
     testStatusLedOwnerFramesAndIdempotentBreathe();
+    testStatusLedGoldenCadenceAndDurationParity();
+    testStatusLedPriorityRestoreAndProfileOwnership();
     testPwmAvailabilityReporting();
     testMotionDoorPolicyAcrossVirtualCommandSources();
     testVirtualResetJournalRecoveryAndRollover();

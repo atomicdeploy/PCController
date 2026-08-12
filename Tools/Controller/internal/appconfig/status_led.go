@@ -16,7 +16,8 @@ type RGBColor struct {
 }
 
 // StatusLEDVisual defines one configurable visual state. AlternateColor is
-// used by crossfade and, when present, by breathe/flash effects.
+// used by flash/cycle/transition effects. The legacy name crossfade remains a
+// compatibility alias for cycle when older HOST configuration is loaded.
 type StatusLEDVisual struct {
 	Effect            string   `json:"effect"`
 	Color             RGBColor `json:"color"`
@@ -62,7 +63,7 @@ func DefaultStatusLEDPolicy() StatusLEDPolicy {
 			Brightness: 145, MinimumBrightness: 18, PeriodMS: 1800,
 		},
 		BluetoothAudioOff: StatusLEDVisual{
-			Effect: "crossfade", Color: RGBColor{Green: 255},
+			Effect: "cycle", Color: RGBColor{Green: 255},
 			AlternateColor: RGBColor{Red: 255}, Brightness: 120,
 			PeriodMS: 1800,
 		},
@@ -144,12 +145,12 @@ func validateStatusLEDVisual(visual StatusLEDVisual) error {
 		if visual.PeriodMS < int(native.StatusEffectMinimumPeriodMS) || visual.PeriodMS > int(native.StatusEffectMaximumPeriodMS) {
 			return fmt.Errorf("flash period_ms must be %d..%d", native.StatusEffectMinimumPeriodMS, native.StatusEffectMaximumPeriodMS)
 		}
-	case "breathe", "crossfade":
+	case "breathe", "cycle", "transition", "crossfade":
 		if visual.PeriodMS < int(native.StatusEffectMinimumPeriodMS) || visual.PeriodMS > int(native.StatusEffectMaximumPeriodMS) {
 			return fmt.Errorf("%s period_ms must be %d..%d", visual.Effect, native.StatusEffectMinimumPeriodMS, native.StatusEffectMaximumPeriodMS)
 		}
 	default:
-		return fmt.Errorf("effect must be steady, flash, breathe, or crossfade")
+		return fmt.Errorf("effect must be steady, flash, breathe, cycle, or transition")
 	}
 	return nil
 }

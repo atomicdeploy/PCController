@@ -527,7 +527,7 @@ func runWebWithInitialAction(
 		openWhenConnected()
 	})
 
-	primary, err := startPrimaryIPCClaimed(ctx, runtime, engine, store, claim)
+	primary, err := startPrimaryIPCClaimed(ctx, runtime, engine, store, claim, outputs)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
 		return errors.New("per-user host ownership changed before the web service started")
@@ -549,8 +549,8 @@ func runWebWithInitialAction(
 		_ = runtime.Close()
 		return err
 	}
-	defer primary.Close()
 	defer runtime.Close()
+	defer primary.Close()
 	if !*noAuto {
 		// The Web host owns the same controller runtime as the TUI and CLI, so
 		// it must initiate the first authenticated connection itself. Reconnect
@@ -930,7 +930,9 @@ func runTUIWithInitialAction(
 	})
 	watchContext, stopWatching := context.WithCancel(context.Background())
 	defer stopWatching()
-	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
+	primary, err := startPrimaryIPCClaimed(
+		watchContext, runtime, engine, store, claim, outputs,
+	)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
 		configured := currentPrimaryEndpoint()

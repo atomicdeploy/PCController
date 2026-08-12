@@ -15,7 +15,7 @@ import (
 
 func TestLocalIntegrationRPCPersistsLifecycleSafety(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	config := appconfig.Defaults()
 	service := &Service{
 		Client:     client,

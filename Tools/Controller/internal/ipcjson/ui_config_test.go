@@ -18,7 +18,7 @@ func browserUIConfigTestService(t *testing.T) (*Service, *appconfig.Config) {
 	t.Helper()
 	runtime := control.New(control.Options{})
 	t.Cleanup(func() { _ = runtime.Close() })
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	config := appconfig.Defaults()
 	config.UI.AppTitle = "Workshop Controller"
 	config.UI.SetupComplete = false

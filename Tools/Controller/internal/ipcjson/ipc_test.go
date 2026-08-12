@@ -50,7 +50,7 @@ func TestListenRejectsNonLoopback(t *testing.T) {
 
 func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	broker := hostui.NewActionBroker()
 	actions := broker.Events()
 	service := Service{Client: client, AppAction: broker.Publish}
@@ -73,7 +73,7 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 
 func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	broker := hostui.NewActionBroker()
 	actions := broker.Events()
 	registry := hostui.NewInstanceRegistry()
@@ -112,7 +112,7 @@ func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
 
 func TestRemoteAppNavigationRejectsCoordinatorMetadataAndKeepsExplicitPath(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	broker := hostui.NewActionBroker()
 	actions := broker.Events()
 	config := appconfig.Defaults()
@@ -177,7 +177,7 @@ func TestRemoteAppNavigationRejectsCoordinatorMetadataAndKeepsExplicitPath(t *te
 
 func TestAppBridgeReturnsCoordinatorSelfInformation(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	registry := hostui.NewInstanceRegistry()
 	coordinatorID := "primary:bridge"
 	_, err := registry.Upsert(hostui.AppInstance{
@@ -208,7 +208,7 @@ func TestAppBridgeReturnsCoordinatorSelfInformation(t *testing.T) {
 
 func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	broker := hostui.NewActionBroker()
 	actions := broker.Events()
 	service := Service{Client: client, AppAction: broker.Publish}
@@ -231,7 +231,7 @@ func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
 
 func TestOSRPCSurfacesAreAuditedAndDisabledByDefault(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	config := appconfig.Defaults()
 	service := Service{
 		Client: client, HostConfig: func() appconfig.Config { return config },
@@ -275,7 +275,7 @@ func TestOSRPCSurfacesAreAuditedAndDisabledByDefault(t *testing.T) {
 
 func TestHostFactsRPCAndRESTUseTypedReadOnlyProvider(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	provider := &ipcHostFactsProvider{}
 	service := &Service{Client: client, HostFacts: provider}
 	params, _ := json.Marshal(map[string]any{"profile": "serial", "timeout_ms": 500})
@@ -339,7 +339,7 @@ func TestHostFactsRPCAndRESTUseTypedReadOnlyProvider(t *testing.T) {
 
 func TestHotkeyRPCMutatesOneValidatedBindingAtATime(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	config := appconfig.Defaults()
 	service := &Service{
 		Client: client,
@@ -416,7 +416,7 @@ func TestHotkeyRPCMutatesOneValidatedBindingAtATime(t *testing.T) {
 
 func TestHostMenuConfigRPCAndRESTUsePersistentHostConfig(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	config := appconfig.Defaults()
 	service := &Service{
 		Client: client, HostConfig: func() appconfig.Config { return config },
@@ -479,7 +479,7 @@ func TestListenPolicyAllowsExplicitRemoteBindWithoutOpeningSocket(t *testing.T) 
 
 func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	config := appconfig.Defaults()
 	config.UI.AppTitle = "Controller Lab"
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
@@ -536,7 +536,7 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 
 func TestIntegrationProxyUsesAuthenticatedReservedRoute(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	const token = "0123456789abcdefghijklmn"
 	proxied := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("X-Integration-Path", request.URL.RequestURI())
@@ -588,7 +588,7 @@ func TestIntegrationProxyUsesAuthenticatedReservedRoute(t *testing.T) {
 
 func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	listener, err := Listen("127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -768,7 +768,7 @@ func TestHTTPRESTAndAuthenticationShareIPCListener(t *testing.T) {
 
 func TestSocketIOEngineV4WebSocketAdapter(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	server := httptest.NewServer(websocketMux(context.Background(), &Service{
 		Client: client, WebSocketPath: "/ipc", SocketIOPath: "/socket.io/",
 	}))
@@ -871,7 +871,7 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	client := controllerapi.AttachSharedRuntime(runtime, engine)
+	client := controllerapi.AttachIsolatedRuntime(runtime, engine)
 	listener, err := Listen("127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -1152,7 +1152,7 @@ func TestCallRoundTripParseError(t *testing.T) {
 
 func TestRemoteCapabilityPolicyAndMessageProvenance(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	config := appconfig.Defaults()
 	config.IPC.AllowRemote = true
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
@@ -1220,7 +1220,7 @@ func TestRemoteCapabilityPolicyAndMessageProvenance(t *testing.T) {
 
 func TestRemoteRESTPolicyBlocksDisruptiveCommand(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	config := appconfig.Defaults()
 	config.IPC.AllowRemote = true
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
@@ -1259,7 +1259,7 @@ func TestRemoteRESTPolicyBlocksDisruptiveCommand(t *testing.T) {
 
 func TestBridgeCallPreservesNestedRPCResponse(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	service := Service{
 		Client:     client,
 		BridgeList: func() any { return []map[string]any{{"name": "lab", "connected": true}} },
@@ -1298,7 +1298,7 @@ func TestBridgeCallPreservesNestedRPCResponse(t *testing.T) {
 
 func TestBridgeCallInheritsBoundedRelayTraceForCascade(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	trace := RelayTrace{
 		ID: "00112233445566778899aabbccddeeff", Hops: 2, Limit: 8,
 	}
@@ -1345,7 +1345,7 @@ func TestBridgeCallInheritsBoundedRelayTraceForCascade(t *testing.T) {
 
 func TestBridgeCallRejectsNestedRelayTraceOverride(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	outer := RelayTrace{ID: "00112233445566778899aabbccddeeff", Hops: 1, Limit: 8}
 	inner := RelayTrace{ID: "ffeeddccbbaa99887766554433221100", Hops: 0, Limit: 16}
 	called := false
@@ -1390,7 +1390,7 @@ func TestRelayTraceValidationIsStrictAndBounded(t *testing.T) {
 
 func TestInvalidParamsRetainStandardJSONRPCErrorCode(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	response := (&Service{Client: client}).Dispatch(context.Background(), Request{
 		JSONRPC: Version, ID: json.RawMessage("9"),
 		Method: "controller.open", Params: json.RawMessage(`{"port":42}`),
@@ -1404,7 +1404,7 @@ func TestInvalidParamsRetainStandardJSONRPCErrorCode(t *testing.T) {
 func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 	runtime := control.New(control.Options{})
 	engine := control.NewCommandEngine(runtime, control.CommandOptions{})
-	client := controllerapi.AttachSharedRuntime(runtime, engine)
+	client := controllerapi.AttachIsolatedRuntime(runtime, engine)
 	service := &Service{Client: client}
 
 	catalog := service.Dispatch(context.Background(), Request{
@@ -1571,7 +1571,7 @@ func TestRFMapParamsNormalizeSemanticTargetsAndRejectUnsafeMappings(t *testing.T
 
 func TestRFGuidedRPCMutationsValidateBeforeBoardAccess(t *testing.T) {
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	client := controllerapi.AttachIsolatedRuntime(runtime, shell.New(8))
 	service := &Service{Client: client}
 
 	for _, test := range []struct {
