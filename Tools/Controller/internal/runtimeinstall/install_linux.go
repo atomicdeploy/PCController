@@ -816,7 +816,7 @@ BindsTo=pccontroller-virtual-board.service
 Type=simple
 Environment=PCCONTROLLER_DATA_DIR=%h/.local/share/pccontroller
 Environment=PCCONTROLLER_DESKTOP_EXECUTABLE=` + systemdQuote(controller) + `
-ExecStart=` + systemdQuote(controller) + ` web --listen 127.0.0.1:8787 --no-open --no-tray --port tcp://127.0.0.1:8765
+ExecStart=` + systemdQuote(controller) + ` web --no-open --no-tray --port tcp://127.0.0.1:8765
 Restart=on-failure
 RestartSec=2s
 NoNewPrivileges=true
@@ -837,7 +837,7 @@ Type=simple
 Environment=PCCONTROLLER_DATA_DIR=%h/.local/share/pccontroller
 ExecStartPre=` + systemdQuote(curl) + ` --noproxy ` + systemdQuote("*") + ` --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 --max-time 45 http://127.0.0.1:8787/healthz
 ExecStartPre=` + systemdQuote(controller) + ` toolchain runtime-window-ready --timeout 45s
-ExecStart=` + systemdQuote(browser) + ` --app=http://127.0.0.1:8787/ --user-data-dir=%h/.local/share/pccontroller/chrome-profile --no-first-run --no-default-browser-check
+ExecStart=` + systemdQuote(browser) + ` --app=http://127.0.0.1:8787/ --user-data-dir=%h/.local/share/pccontroller/chrome-profile --no-first-run --no-default-browser-check --noerrdialogs --disable-session-crashed-bubble
 Restart=on-failure
 RestartSec=3s
 NoNewPrivileges=true

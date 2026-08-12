@@ -242,10 +242,18 @@ func TestRuntimeUnitProxyBypassAndReadinessArgv(t *testing.T) {
 		`ExecStartPre="/usr/bin/curl" --noproxy "*"`,
 		`http://127.0.0.1:8787/healthz`,
 		`toolchain runtime-window-ready --timeout 45s`,
+		`--noerrdialogs --disable-session-crashed-bubble`,
 	} {
 		if !strings.Contains(unit, required) {
 			t.Fatalf("window unit omitted %q:\n%s", required, unit)
 		}
+	}
+	controller := runtimeUnits(DefaultRoot, "/usr/bin/chromium", "/usr/bin/curl")["pccontroller-controller.service"]
+	if strings.Contains(controller, ` web --listen`) {
+		t.Fatalf("controller unit must let the authenticated edge configuration own its listen address:\n%s", controller)
+	}
+	if !strings.Contains(controller, ` web --no-open --no-tray --port tcp://127.0.0.1:8765`) {
+		t.Fatalf("controller unit omitted the config-owned web launch shape:\n%s", controller)
 	}
 }
 
