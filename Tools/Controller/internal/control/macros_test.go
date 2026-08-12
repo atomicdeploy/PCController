@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -422,7 +423,7 @@ func TestCompileMacroEncodesOrdinaryOpcodesWithExactOffsets(t *testing.T) {
 		Steps: []appconfig.MacroStep{
 			{AtUS: 0, Kind: "relay", Target: 5, Value: 1},
 			{AtUS: 1250, Kind: "pwm", Target: 2, Value: 2048},
-			{AtUS: 2500, Kind: "buzzer", FrequencyHz: 880, DurationMS: 25},
+			{AtUS: 2500, Kind: "beep", FrequencyHz: 880, DurationMS: 25},
 		},
 	})
 	if err != nil {
@@ -448,6 +449,21 @@ func TestCompileMacroEncodesOrdinaryOpcodesWithExactOffsets(t *testing.T) {
 	}
 	if offset != len(compiled.stream) {
 		t.Fatalf("decoded %d of %d bytes", offset, len(compiled.stream))
+	}
+}
+
+func TestCompileMacroAcceptsLegacyBuzzerStepAsBeep(t *testing.T) {
+	canonicalOpcode, canonicalPayload, canonicalErr := compileMacroCommand(appconfig.MacroStep{
+		Kind: "beep", FrequencyHz: 880, DurationMS: 25,
+	})
+	legacyOpcode, legacyPayload, legacyErr := compileMacroCommand(appconfig.MacroStep{
+		Kind: "buzzer", FrequencyHz: 880, DurationMS: 25,
+	})
+	if canonicalErr != nil || legacyErr != nil {
+		t.Fatalf("canonical=%v legacy=%v", canonicalErr, legacyErr)
+	}
+	if canonicalOpcode != legacyOpcode || !bytes.Equal(canonicalPayload, legacyPayload) {
+		t.Fatalf("compiled forms differ: canonical=0x%02X/% X legacy=0x%02X/% X", canonicalOpcode, canonicalPayload, legacyOpcode, legacyPayload)
 	}
 }
 
