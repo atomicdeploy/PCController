@@ -32,6 +32,12 @@ const (
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
+	// The kqueue fsnotify backend enumerates existing directory entries while
+	// registering a directory. An atomic configuration write can rename its
+	// temporary file between ReadDir and Lstat, which is transient and safe to
+	// retry with a fresh watcher.
+	filesystemWatchRegistrationAttempts   = 4
+	filesystemWatchRegistrationRetryDelay = 10 * time.Millisecond
 )
 
 // Config is the persistent host-side configuration root; it never mirrors or
@@ -1323,13 +1329,10 @@ func (store *Store) Watch(
 	if interval <= 0 {
 		interval = DefaultWatchInterval
 	}
-	watcher, err := fsnotify.NewWatcher()
-	if err == nil {
-		err = watcher.Add(filepath.Dir(store.path))
-	}
+	watcher, err := openFilesystemWatcher(ctx, filepath.Dir(store.path))
 	if err != nil {
-		if watcher != nil {
-			_ = watcher.Close()
+		if ctx.Err() != nil {
+			return
 		}
 		if onError != nil {
 			onError(fmt.Errorf("filesystem watcher unavailable; using polling fallback: %w", err))
@@ -1411,6 +1414,69 @@ func (store *Store) Watch(
 			reload()
 		}
 	}
+}
+
+func openFilesystemWatcher(ctx context.Context, directory string) (*fsnotify.Watcher, error) {
+	var watcher *fsnotify.Watcher
+	err := retryFilesystemWatchRegistration(
+		ctx,
+		filesystemWatchRegistrationAttempts,
+		filesystemWatchRegistrationRetryDelay,
+		func() error {
+			candidate, err := fsnotify.NewWatcher()
+			if err != nil {
+				return err
+			}
+			if err := candidate.Add(directory); err != nil {
+				// Add can partially register a kqueue directory before its entry
+				// scan fails. Never reuse that uncertain watcher on retry.
+				_ = candidate.Close()
+				return err
+			}
+			watcher = candidate
+			return nil
+		},
+	)
+	return watcher, err
+}
+
+func retryFilesystemWatchRegistration(
+	ctx context.Context,
+	attempts int,
+	delay time.Duration,
+	register func() error,
+) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := register()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, os.ErrNotExist) || attempt == attempts-1 {
+			return err
+		}
+		if delay <= 0 {
+			continue
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil
 }
 
 func (store *Store) watchPolling(

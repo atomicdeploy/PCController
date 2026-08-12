@@ -196,6 +196,57 @@ func TestWatcherAppliesValidChange(t *testing.T) {
 	}
 }
 
+func TestFilesystemWatchRegistrationRetriesOnlyDisappearingEntries(t *testing.T) {
+	transient := &os.PathError{
+		Op:   "lstat",
+		Path: filepath.Join(t.TempDir(), ".config-123.json"),
+		Err:  os.ErrNotExist,
+	}
+	attempts := 0
+	err := retryFilesystemWatchRegistration(context.Background(), 4, 0, func() error {
+		attempts++
+		if attempts < 3 {
+			return transient
+		}
+		return nil
+	})
+	if err != nil || attempts != 3 {
+		t.Fatalf("transient registration err=%v attempts=%d, want success on attempt 3", err, attempts)
+	}
+
+	permanent := errors.New("watch permission denied")
+	attempts = 0
+	err = retryFilesystemWatchRegistration(context.Background(), 4, 0, func() error {
+		attempts++
+		return permanent
+	})
+	if !errors.Is(err, permanent) || attempts != 1 {
+		t.Fatalf("permanent registration err=%v attempts=%d, want immediate failure", err, attempts)
+	}
+
+	attempts = 0
+	err = retryFilesystemWatchRegistration(context.Background(), 4, 0, func() error {
+		attempts++
+		return transient
+	})
+	if !errors.Is(err, os.ErrNotExist) || attempts != 4 {
+		t.Fatalf("persistent disappearing entry err=%v attempts=%d, want bounded failure", err, attempts)
+	}
+}
+
+func TestFilesystemWatchRegistrationStopsWhenCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	attempts := 0
+	err := retryFilesystemWatchRegistration(ctx, 4, time.Hour, func() error {
+		attempts++
+		return os.ErrNotExist
+	})
+	if !errors.Is(err, context.Canceled) || attempts != 0 {
+		t.Fatalf("canceled registration err=%v attempts=%d", err, attempts)
+	}
+}
+
 func TestReloadErrorReportingSuppressesOnlyIdenticalConsecutiveFailures(t *testing.T) {
 	var last string
 	var reported []string
