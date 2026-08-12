@@ -954,7 +954,9 @@ whenever the corrected clock policy permits; `usbasp_slow` remains the bounded
 fallback when that retry still fails. It deliberately does not compile or write
 an application. `board provision --uart auto` authenticates existing firmware
 first and skips ISP initialization if that application is healthy. Supplying
-`--firmware HEX` uploads that exact image through the verified UART bootloader;
+`--firmware HEX` uploads that exact image through the verified UART bootloader.
+If application authentication fails, Provision probes Urboot before it falls
+back to ISP setup, preserving a usable bootloader during application repair;
 `--force-initialize` explicitly requests ISP setup before the upload. Missing
 INA219, PCA9685, DS18B20, or LCD hardware is a warning, not a commissioning
 failure.

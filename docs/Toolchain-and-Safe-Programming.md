@@ -429,7 +429,9 @@ write while keeping a conservative fallback.
 Initialization owns only the selected fuse policy and bootloader; it never
 compiles or uploads application firmware. `board provision` first authenticates
 an existing application and retains it when healthy. With `--firmware HEX`, it
-uses the verified UART bootloader to write/readback exactly that image; use
+uses the verified UART bootloader to write/readback exactly that image. If the
+application cannot authenticate, Provision probes Urboot before falling back
+to ISP, preserving a usable bootloader during application repair; use
 `--force-initialize` only when ISP setup must precede the upload. INA219,
 PCA9685, DS18B20, and LCD absence is non-fatal so a partially populated board
 can still be initialized and verified.
