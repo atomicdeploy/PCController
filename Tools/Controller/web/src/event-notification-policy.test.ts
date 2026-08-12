@@ -21,4 +21,11 @@ describe('controller event toast policy', () => {
     expect(shouldToastControllerEvent({ kind: 'status', text: 'STATUS relay=0' })).toBe(false)
     expect(shouldToastControllerEvent({ kind: 'serial.line', text: 'HELLO PCController' })).toBe(false)
   })
+
+  it('presents only messages explicitly targeted to Web or all surfaces', () => {
+    expect(shouldToastControllerEvent({ kind: 'message', targets: ['web'], text: 'Web' })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'message', target: 'native, all', text: 'Everywhere' })).toBe(true)
+    expect(shouldToastControllerEvent({ kind: 'message', targets: ['native', 'tui'], text: 'Not Web' })).toBe(false)
+    expect(shouldToastControllerEvent({ kind: 'message.delivery', target: 'web', text: 'Delivered' })).toBe(false)
+  })
 })

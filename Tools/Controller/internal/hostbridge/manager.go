@@ -924,6 +924,32 @@ func (manager *Manager) dispatchNotification(
 	config appconfig.Config,
 	event controller.Event,
 ) {
+	if strings.EqualFold(event.Kind, "message") && controller.EventTargetsSurface(event, "native") {
+		if !config.Integrations.Notifications.Enabled || manager.notifier == nil {
+			manager.client.EmitMessageDeliveryOutcome(event, "native", errors.New("native notifications are disabled or unavailable"))
+			return
+		}
+		notification, err := hostui.NotificationForMessage(hostui.MessageNotification{
+			ID: event.ID, Type: event.MessageType, Text: event.Text,
+			Severity: event.Severity, Correlation: event.Correlation,
+			Action: event.Action, Metadata: event.Metadata, AppTitle: config.UI.AppTitle,
+		})
+		if err != nil {
+			manager.recordError("message notification: " + err.Error())
+			manager.client.EmitMessageDeliveryOutcome(event, "native", err)
+			return
+		}
+		key := fmt.Sprintf("message:%d", event.ID)
+		if strings.TrimSpace(event.Correlation) != "" {
+			key = "message:" + event.Correlation
+		}
+		message := event
+		manager.notificationQueue.enqueue(notificationJob{
+			key: key, notification: notification,
+			priority: notificationPriority(event.Severity), message: &message,
+		})
+		return
+	}
 	if !config.Integrations.Notifications.Enabled || manager.notifier == nil ||
 		strings.HasPrefix(event.Kind, "notification.") {
 		return
@@ -976,6 +1002,9 @@ func (manager *Manager) notificationLoop() {
 		err := manager.notifier.Notify(ctx, job.notification)
 		cancel()
 		manager.notificationQueue.complete(job.key)
+		if job.message != nil {
+			manager.client.EmitMessageDeliveryOutcome(*job.message, "native", err)
+		}
 		if err != nil && manager.ctx.Err() == nil {
 			manager.recordError("notification: " + err.Error())
 		}

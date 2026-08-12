@@ -126,6 +126,60 @@ type ImportantEvent struct {
 	AppTitle string
 }
 
+// MessageNotification is the presentation-neutral subset of the canonical
+// message envelope needed by the native notification adapter.
+type MessageNotification struct {
+	ID          uint64
+	Type        string
+	Text        string
+	Severity    string
+	Correlation string
+	Action      string
+	Metadata    map[string]string
+	AppTitle    string
+}
+
+// NotificationForMessage converts an explicitly native-targeted message into
+// a desktop notification. The action stays inert until the operator chooses
+// it; activation then re-enters the existing pccontroller:// action route.
+func NotificationForMessage(message MessageNotification) (Notification, error) {
+	typeName := strings.TrimSpace(message.Type)
+	if typeName == "" {
+		typeName = "message"
+	}
+	title := strings.TrimSpace(message.Metadata["title"])
+	if title == "" {
+		title = productidentity.Title(message.AppTitle) + " · " + strings.ToUpper(typeName)
+	}
+	id := strings.TrimSpace(message.Correlation)
+	if id == "" {
+		id = fmt.Sprintf("message-%d", message.ID)
+	}
+	pageURI := productidentity.ProtocolScheme + "://page/events"
+	notification := Notification{
+		ID: id, Title: title, Body: message.Text,
+		Severity: strings.ToLower(strings.TrimSpace(message.Severity)),
+		LaunchURI: pageURI,
+	}
+	if strings.TrimSpace(message.Action) == "" {
+		return notification, nil
+	}
+	action, err := ParseAction(message.Action, "message:"+id)
+	if err != nil {
+		return Notification{}, fmt.Errorf("message action: %w", err)
+	}
+	actionURI, err := ActionURI(action)
+	if err != nil {
+		return Notification{}, fmt.Errorf("message action URI: %w", err)
+	}
+	label := strings.TrimSpace(message.Metadata["action_label"])
+	if label == "" {
+		label = "Run action"
+	}
+	notification.Actions = []NotificationAction{{Label: label, URI: actionURI}}
+	return notification, nil
+}
+
 // NotificationForImportantEvent maps only actionable/high-signal events.
 // Routine telemetry intentionally returns false to avoid notification spam.
 func NotificationForImportantEvent(event ImportantEvent) (Notification, bool) {

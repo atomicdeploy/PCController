@@ -175,8 +175,12 @@ export interface ControllerEvent {
   reason?: string
   source?: string
   target?: string
+  targets?: string[]
   message_type?: string
   action?: string
+  severity?: 'debug' | 'info' | 'success' | 'warning' | 'error'
+  correlation?: string
+  delivery?: 'sync' | 'async'
   gesture?: string
   key?: number
   rf_id?: number

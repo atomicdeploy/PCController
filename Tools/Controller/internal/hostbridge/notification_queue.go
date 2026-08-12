@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/hostui"
 )
 
@@ -13,6 +14,7 @@ type notificationJob struct {
 	key          string
 	notification hostui.Notification
 	priority     int
+	message      *controller.Event
 }
 
 type notificationQueueStats struct {

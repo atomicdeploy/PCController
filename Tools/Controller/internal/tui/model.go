@@ -19,6 +19,7 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/messagefabric"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/ports"
@@ -652,6 +653,17 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			commands = append(commands, command)
 		}
 		model.recordTimeline(event)
+		if strings.EqualFold(event.Kind, "message") &&
+			messagefabric.TargetsSurface(event.Target, event.Targets, "tui") {
+			notice := strings.TrimSpace(event.Text)
+			if notice == "" {
+				notice = strings.TrimSpace(event.MessageType)
+			}
+			if strings.TrimSpace(event.Action) != "" {
+				notice += " · action: " + strings.TrimSpace(event.Action)
+			}
+			model.setNotice(notice)
+		}
 		if model.setFrontPanelEvent(event) && model.lcdMirror && model.mirrorLCD != nil {
 			commands = append(commands, mirrorLCDCommand(model.mirrorLCD, model.frontOverlay1, model.frontOverlay2, "priority LCD event"))
 		}

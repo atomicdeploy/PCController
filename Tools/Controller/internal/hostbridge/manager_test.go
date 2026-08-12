@@ -22,6 +22,20 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
+type recordingNotifier struct {
+	notifications chan hostui.Notification
+	err           error
+}
+
+func (notifier *recordingNotifier) Notify(_ context.Context, notification hostui.Notification) error {
+	notifier.notifications <- notification
+	return notifier.err
+}
+
+func (notifier *recordingNotifier) Status() hostui.NotificationStatus {
+	return hostui.NotificationStatus{Supported: true, Available: true, Backend: "test"}
+}
+
 func TestWaitForIntegrationShutdownIsBounded(t *testing.T) {
 	var completed sync.WaitGroup
 	completed.Add(1)
@@ -104,6 +118,61 @@ func TestConfiguredToastActionsBecomeActionableProtocolURIs(t *testing.T) {
 		notification.Actions[0].URI != "pccontroller://page/events" ||
 		notification.Actions[1].URI != "pccontroller://command/relay%20off" {
 		t.Fatalf("actions=%#v", notification.Actions)
+	}
+}
+
+func TestExplicitNativeMessageUsesTargetAdapterAndPublishesOutcome(t *testing.T) {
+	client := controller.New(controller.Options{})
+	defer client.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	notifier := &recordingNotifier{notifications: make(chan hostui.Notification, 2)}
+	manager := &Manager{
+		client: client, ctx: ctx, cancel: cancel, notifier: notifier,
+		notificationQueue: newNotificationQueue(4, 0, 0),
+	}
+	manager.wait.Add(1)
+	go manager.notificationLoop()
+	defer func() {
+		cancel()
+		manager.wait.Wait()
+	}()
+
+	config := appconfig.Defaults()
+	afterID := client.LatestEventID()
+	manager.dispatchNotification(config, controller.Event{
+		ID: 23, Kind: "message", Text: "Inspect output 3", MessageType: "operator.prompt",
+		Target: "native", Targets: []string{"native"}, Severity: "warning",
+		Correlation: "job-23", Action: "relay off",
+		Metadata: map[string]string{"action_label": "Stop outputs"},
+	})
+	select {
+	case notification := <-notifier.notifications:
+		if notification.ID != "job-23" || len(notification.Actions) != 1 ||
+			notification.Actions[0].URI != "pccontroller://command/relay%20off" {
+			t.Fatalf("notification=%#v", notification)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("native-targeted message was not delivered")
+	}
+	outcomeContext, outcomeCancel := context.WithTimeout(context.Background(), time.Second)
+	defer outcomeCancel()
+	outcome, err := client.NextEvent(outcomeContext, afterID, "message.delivery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Lifecycle != "completed" || outcome.Correlation != "job-23" ||
+		outcome.Target != "native" || outcome.Action != "relay off" {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+
+	manager.dispatchNotification(config, controller.Event{
+		ID: 24, Kind: "message", Text: "Web only", MessageType: "operator.prompt",
+		Target: "web", Targets: []string{"web"},
+	})
+	select {
+	case notification := <-notifier.notifications:
+		t.Fatalf("web-only message leaked to native adapter: %#v", notification)
+	case <-time.After(50 * time.Millisecond):
 	}
 }
 

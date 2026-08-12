@@ -67,7 +67,7 @@ firmware protocol or open a serial connection for host-only deliveries.
   "severity": "warning",
   "correlation": "commission-42",
   "delivery": "async",
-  "action": "app.page:events"
+  "action": "app page events"
 }
 ```
 
@@ -77,8 +77,13 @@ preferred ordered list. Valid presentation targets are `native`, `web`, and
 `lcd`, `all`) remain available for existing integrations. Duplicate targets are
 removed in order. Severity is one of `debug`, `info`, `success`, `warning`, or
 `error`; delivery is `sync` (completed) or `async` (accepted). Correlation and
-action are descriptive event fields in this first host slice—actions are never
-implicitly executed.
+action remain inert data until an operator invokes them. A native-targeted
+message becomes a desktop notification. If it carries an action, its button
+converts the validated `app ...` or ordinary command to the existing
+`pccontroller://` route. Web and TUI adapters only present messages that target
+their surface (or `all`); they do not execute actions on receipt. A native
+presentation publishes a correlated `message.delivery` outcome with
+`completed` or `failed` lifecycle.
 
 The minimal CLI spelling is:
 
@@ -87,9 +92,21 @@ controller message native,web,tui operator.notice "Commissioning is ready"
 ```
 
 It deliberately permits disconnected operation and publishes to the same
-runtime event stream. Native/Web/TUI action adapters, delivery expiry,
-deduplication, and generalized board-operation migration continue under
-#164, #165, and #166.
+runtime event stream. Independent clients consume retained activity and state
+cursors, so one browser's `BroadcastChannel` is never treated as cross-client
+delivery. Interactive Web/TUI action controls, per-recipient render
+acknowledgements, delivery expiry, and generalized board-operation migration
+continue under #164, #165, and #166.
+
+After an ordinary board operation receives its MCU ACK, the host also emits a
+retained state-stream result for every WebSocket, Socket.IO, TUI, and bridge
+subscriber. The generic kind is `operation.applied`; relay, motion, PWM,
+buzzer, and display operations use specialized `*.changed` kinds and bounded
+metadata. Relay ACKs immediately update the shared snapshot and include the
+post-ACK active mask. These server-side events are the convergence path for
+separate browsers and processes; optimistic UI state may improve latency but
+must not replace them. A later board-origin event/readback may further confirm
+the state.
 
 ## Framing
 
@@ -1447,7 +1464,7 @@ one schema:
 
 Allowed sources are `client`, `server`, `bridge`, `board`, `lcd`, `host`,
 `ipc`, `rest`, `webhook`, `websocket`, and `socket_io`. Targets are `client`, `server`, `bridge`,
-`board`, `lcd`, `host`, and `all`. `type` contains 1..32 lowercase letters,
+`board`, `lcd`, `host`, `native`, `web`, `tui`, and `all`. `type` contains 1..32 lowercase letters,
 digits, dot, dash, or underscore. Text/action lengths are bounded. A board/LCD
 target is converted to two printable 16-byte rows and sent through
 `DISPLAY_TEXT`; every accepted message is also a source-tagged host event.
@@ -1460,8 +1477,9 @@ Authenticated messages also carry bounded `metadata.principal` and
 `metadata.authentication`. This prevents a remote message from impersonating a
 physical `board` event in text mappings.
 
-`action` is descriptive metadata. It is never executed automatically. A
-deliberately enabled host `text_mappings` rule can match source, target, type,
+`action` is inert metadata. It is never executed automatically. An operator
+may invoke a native notification action through the validated application
+protocol described above. A deliberately enabled host `text_mappings` rule can match source, target, type,
 and text content and then submit a fixed configured command. This separation
 prevents received text from becoming shell input and retains authentication,
 logging, motion policy, and board safety.
