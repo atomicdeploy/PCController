@@ -67,11 +67,11 @@ func formatUptime(milliseconds uint32) string {
 	return duration.Truncate(time.Second).String()
 }
 
-// freshnessLiveThreshold covers the remote TUI's one-second convergence poll
-// with enough scheduling and network headroom. A 500 ms threshold previously
-// made a healthy remote view alternate between "live" and a fractional age on
-// every poll. Once this window expires, the age is actionable and shown.
-const freshnessLiveThreshold = 2500 * time.Millisecond
+// freshnessLiveThreshold covers the four-Hz remote convergence path with
+// enough scheduling and network headroom. A 500 ms threshold previously made
+// a healthy remote view alternate between "live" and a fractional age on every
+// poll. Once this window expires, the age is actionable and shown.
+const freshnessLiveThreshold = 1500 * time.Millisecond
 
 // freshnessLabel reports data as live while it remains within the expected
 // convergence window. Once stale, the age is stable enough to be actionable.
