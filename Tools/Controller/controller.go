@@ -1953,15 +1953,122 @@ func (client *Client) SendTextMessage(
 			return Event{}, err
 		}
 	}
+	surfaces := messageDeliverySurfaces(targets)
+	lifecycle := "completed"
+	state := "delivered"
+	if message.Delivery == "async" {
+		lifecycle, state = "accepted", "accepted"
+	} else if len(surfaces) != 0 {
+		lifecycle, state = "pending", "awaiting_delivery"
+	}
 	event := client.runtime.PublishStructuredEvent(control.Event{
 		Kind: "message", Text: message.Text,
 		Source: message.Source, Target: message.Target,
 		Targets: targets, MessageType: message.Type, Action: message.Action,
 		Severity: message.Severity, Correlation: message.Correlation, Delivery: message.Delivery,
-		Lifecycle: map[bool]string{true: "accepted", false: "completed"}[message.Delivery == "async"],
-		Metadata:  message.Metadata,
+		Lifecycle: lifecycle, State: state,
+		Metadata: message.Metadata,
 	})
+	if message.Delivery == "sync" && len(surfaces) != 0 {
+		return client.waitMessageDelivery(ctx, event, surfaces), nil
+	}
 	return publicEvent(event), nil
+}
+
+const messageSyncDeliveryTimeout = 2 * time.Second
+
+func messageDeliverySurfaces(targets []string) []string {
+	result := make([]string, 0, 3)
+	for _, surface := range []string{"native", "web", "tui"} {
+		if messagefabric.TargetsSurface("", targets, surface) {
+			result = append(result, surface)
+		}
+	}
+	return result
+}
+
+func (client *Client) waitMessageDelivery(
+	ctx context.Context,
+	message control.Event,
+	surfaces []string,
+) Event {
+	waitContext, cancel := context.WithTimeout(ctx, messageSyncDeliveryTimeout)
+	defer cancel()
+	pending := make(map[string]bool, len(surfaces))
+	failed := make(map[string]string)
+	for _, surface := range surfaces {
+		pending[surface] = true
+	}
+	afterID := message.ID
+	for len(pending) != 0 {
+		outcome, err := client.runtime.WaitEvent(waitContext, afterID, "message.delivery")
+		if err != nil {
+			break
+		}
+		afterID = outcome.ID
+		if outcome.Metadata["message_event_id"] != fmt.Sprintf("%d", message.ID) {
+			continue
+		}
+		surface := strings.ToLower(strings.TrimSpace(outcome.Metadata["surface"]))
+		if !pending[surface] {
+			continue
+		}
+		delete(pending, surface)
+		if strings.EqualFold(outcome.Lifecycle, "failed") {
+			failed[surface] = firstNonemptyString(outcome.Metadata["error"], "presentation failed")
+		}
+	}
+	missing := sortedMessageDeliveryKeys(pending)
+	failedNames := sortedMessageDeliveryKeys(failed)
+	lifecycle, state, severity := "completed", "delivered", message.Severity
+	text := "message delivered to " + strings.Join(surfaces, ", ")
+	if len(missing) != 0 || len(failedNames) != 0 {
+		lifecycle, state, severity = "failed", "failed", "error"
+		parts := make([]string, 0, 2)
+		if len(failedNames) != 0 {
+			parts = append(parts, "failed="+strings.Join(failedNames, ","))
+		}
+		if len(missing) != 0 {
+			parts = append(parts, "unconfirmed="+strings.Join(missing, ","))
+		}
+		text = "message delivery failed: " + strings.Join(parts, " ")
+	}
+	metadata := map[string]string{
+		"message_event_id": fmt.Sprintf("%d", message.ID),
+		"surfaces":         strings.Join(surfaces, ","),
+	}
+	if len(missing) != 0 {
+		metadata["unconfirmed_surfaces"] = strings.Join(missing, ",")
+	}
+	if len(failedNames) != 0 {
+		metadata["failed_surfaces"] = strings.Join(failedNames, ",")
+	}
+	outcome := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: "message.delivery", Text: text, State: state,
+		Lifecycle: lifecycle, Source: "host", Target: message.Target,
+		Targets: append([]string(nil), message.Targets...), MessageType: message.MessageType,
+		Action: message.Action, Severity: severity, Correlation: message.Correlation,
+		Delivery: message.Delivery, Metadata: metadata,
+	})
+	return publicEvent(outcome)
+}
+
+func sortedMessageDeliveryKeys[T any](values map[string]T) []string {
+	result := make([]string, 0, len(values))
+	for key := range values {
+		result = append(result, key)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func firstNonemptyString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func normalizeMessageTargets(target string, targets []string) ([]string, error) {
@@ -2090,6 +2197,85 @@ func (client *Client) EmitMessageDeliveryOutcome(
 	}
 	event := client.runtime.PublishStructuredEvent(control.Event{
 		Kind: "message.delivery", Text: text, State: state,
+		Lifecycle: lifecycle, Source: surface, Target: surface,
+		Targets: []string{surface}, MessageType: message.MessageType,
+		Action: message.Action, Severity: severity,
+		Correlation: message.Correlation, Delivery: message.Delivery,
+		Metadata: metadata,
+	})
+	return publicEvent(event)
+}
+
+// MessageForSurface resolves one still-retained message and verifies that the
+// named presentation surface was an intended recipient. Action and delivery
+// RPCs use this lookup so a client cannot substitute arbitrary action text.
+func (client *Client) MessageForSurface(eventID uint64, surface string) (Event, error) {
+	surface = strings.ToLower(strings.TrimSpace(surface))
+	if !oneOf(surface, "native", "web", "tui") {
+		return Event{}, fmt.Errorf("unsupported message surface %q", surface)
+	}
+	event, ok := client.runtime.EventByID(eventID)
+	if !ok || !strings.EqualFold(event.Kind, "message") {
+		return Event{}, fmt.Errorf("message event %d is no longer retained", eventID)
+	}
+	result := publicEvent(event)
+	if !EventTargetsSurface(result, surface) {
+		return Event{}, fmt.Errorf("message event %d does not target %s", eventID, surface)
+	}
+	return result, nil
+}
+
+// AcknowledgeMessageDelivery publishes the presentation result supplied by a
+// Web or other out-of-process adapter after validating the retained envelope.
+func (client *Client) AcknowledgeMessageDelivery(
+	eventID uint64,
+	surface string,
+	errorText string,
+) (Event, error) {
+	message, err := client.MessageForSurface(eventID, surface)
+	if err != nil {
+		return Event{}, err
+	}
+	errorText = strings.TrimSpace(errorText)
+	if len(errorText) > 512 {
+		return Event{}, errors.New("message delivery error exceeds 512 characters")
+	}
+	if errorText != "" {
+		err = errors.New(errorText)
+	}
+	return client.EmitMessageDeliveryOutcome(message, surface, err), nil
+}
+
+// EmitMessageActionOutcome records only an explicitly selected message
+// action. Presentation never calls this implicitly; every surface must require
+// an operator gesture before routing the retained action through its engine.
+func (client *Client) EmitMessageActionOutcome(
+	message Event,
+	surface string,
+	output string,
+	actionErr error,
+) Event {
+	surface = strings.ToLower(strings.TrimSpace(surface))
+	lifecycle, state := "completed", "applied"
+	severity := message.Severity
+	text := surface + " message action completed"
+	metadata := map[string]string{
+		"surface":          surface,
+		"message_event_id": fmt.Sprintf("%d", message.ID),
+	}
+	if output = strings.TrimSpace(output); output != "" {
+		if len(output) > 1024 {
+			output = output[:1024]
+		}
+		metadata["output"] = output
+	}
+	if actionErr != nil {
+		lifecycle, state, severity = "failed", "failed", "error"
+		text = surface + " message action failed: " + actionErr.Error()
+		metadata["error"] = actionErr.Error()
+	}
+	event := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: "message.action", Text: text, State: state,
 		Lifecycle: lifecycle, Source: surface, Target: surface,
 		Targets: []string{surface}, MessageType: message.MessageType,
 		Action: message.Action, Severity: severity,

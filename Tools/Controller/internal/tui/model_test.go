@@ -513,13 +513,29 @@ func TestTargetedAndBoardAppPageActionsSelectOnlyTheIntendedTUI(t *testing.T) {
 func TestTUIMessagePresentationHonorsTargetsAndExposesAction(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	updated, _ := model.Update(runtimeEventMsg(control.Event{
-		Kind: "message", Text: "Inspect output 3", MessageType: "operator.prompt",
-		Targets: []string{"native", "tui"}, Action: "relay off",
+		ID: 23, Kind: "message", Text: "Inspect output 3", MessageType: "operator.prompt",
+		Targets: []string{"native", "tui"}, Action: "app page events",
+		Correlation: "job-23", Delivery: "sync",
 	}))
 	model = updated.(Model)
 	if !strings.Contains(model.notice, "Inspect output 3") ||
-		!strings.Contains(model.notice, "action: relay off") {
+		!strings.Contains(model.notice, "Ctrl+A: app page events") || len(model.pendingMessageActions) != 1 {
 		t.Fatalf("TUI notice=%q", model.notice)
+	}
+	delivery, ok := model.runtime.EventByID(model.runtime.LatestEventID())
+	if !ok || delivery.Kind != "message.delivery" || delivery.Correlation != "job-23" ||
+		delivery.Lifecycle != "completed" || delivery.Metadata["message_event_id"] != "23" {
+		t.Fatalf("delivery=%+v ok=%t", delivery, ok)
+	}
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	model = updated.(Model)
+	if command != nil || model.page != PageEvents || len(model.pendingMessageActions) != 0 {
+		t.Fatalf("explicit action page=%v command=%v pending=%d", model.page, command, len(model.pendingMessageActions))
+	}
+	action, ok := model.runtime.EventByID(model.runtime.LatestEventID())
+	if !ok || action.Kind != "message.action" || action.Correlation != "job-23" ||
+		action.Lifecycle != "completed" || action.Action != "app page events" {
+		t.Fatalf("action=%+v ok=%t", action, ok)
 	}
 	previous := model.notice
 	updated, _ = model.Update(runtimeEventMsg(control.Event{
@@ -527,6 +543,26 @@ func TestTUIMessagePresentationHonorsTargetsAndExposesAction(t *testing.T) {
 	}))
 	if got := updated.(Model).notice; got != previous {
 		t.Fatalf("web-only message changed TUI notice to %q", got)
+	}
+}
+
+func TestTUIMessageActionPublishesUnsupportedFailureOnlyAfterCtrlA(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	updated, _ := model.Update(runtimeEventMsg(control.Event{
+		ID: 44, Kind: "message", Text: "Broken action", Targets: []string{"tui"},
+		Action: "app page", Correlation: "bad-action", Delivery: "async",
+	}))
+	model = updated.(Model)
+	beforeAction := model.runtime.LatestEventID()
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	model = updated.(Model)
+	if command != nil || model.runtime.LatestEventID() == beforeAction {
+		t.Fatalf("unsupported action command=%v latest=%d", command, model.runtime.LatestEventID())
+	}
+	action, ok := model.runtime.EventByID(model.runtime.LatestEventID())
+	if !ok || action.Kind != "message.action" || action.Lifecycle != "failed" ||
+		action.Metadata["error"] == "" || len(model.pendingMessageActions) != 0 {
+		t.Fatalf("action=%+v pending=%d", action, len(model.pendingMessageActions))
 	}
 }
 

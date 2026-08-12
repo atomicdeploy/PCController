@@ -70,6 +70,81 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	}
 }
 
+func TestMessageSurfaceDeliveryAndExplicitActionRemainCorrelated(t *testing.T) {
+	runtime := control.New(control.Options{})
+	engine := shell.New(8)
+	if err := engine.Register(shell.Command{
+		Name: "mark", Usage: "mark", Summary: "record explicit action",
+		Run: func(context.Context, []string) (string, error) { return "marked", nil },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := controllerapi.AttachSharedRuntime(runtime, engine)
+	defer client.Close()
+	message, err := client.SendTextMessage(context.Background(), controllerapi.TextMessage{
+		Source: "ipc", Target: "web", Type: "operator.prompt", Text: "Run mark",
+		Action: "mark", Correlation: "job-42", Delivery: "async",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := Service{Client: client}
+	deliveryParams, _ := json.Marshal(map[string]any{
+		"event_id": message.ID, "surface": "web",
+	})
+	delivery := service.Dispatch(context.Background(), Request{
+		Method: "controller.message.delivery", Params: deliveryParams,
+	})
+	if delivery.Error != nil {
+		t.Fatal(delivery.Error)
+	}
+	delivered, ok := delivery.Result.(controllerapi.Event)
+	if !ok || delivered.Kind != "message.delivery" || delivered.Correlation != "job-42" ||
+		delivered.Lifecycle != "completed" || delivered.Metadata["message_event_id"] == "" {
+		t.Fatalf("delivery=%#v", delivery.Result)
+	}
+
+	actionParams, _ := json.Marshal(map[string]any{
+		"event_id": message.ID, "surface": "web", "instance_id": "web:tab-1",
+	})
+	action := service.Dispatch(context.Background(), Request{
+		Method: "controller.message.action", Params: actionParams,
+	})
+	if action.Error != nil {
+		t.Fatal(action.Error)
+	}
+	applied, ok := action.Result.(controllerapi.Event)
+	if !ok || applied.Kind != "message.action" || applied.Correlation != "job-42" ||
+		applied.Action != "mark" || applied.Lifecycle != "completed" ||
+		applied.Metadata["output"] != "marked" {
+		t.Fatalf("action=%#v", action.Result)
+	}
+}
+
+func TestMessageActionPublishesFailureForUnsupportedAction(t *testing.T) {
+	client := controllerapi.AttachSharedRuntime(control.New(control.Options{}), shell.New(8))
+	defer client.Close()
+	message, err := client.SendTextMessage(context.Background(), controllerapi.TextMessage{
+		Source: "ipc", Target: "web", Type: "operator.prompt", Text: "Broken action",
+		Action: "app page", Correlation: "bad-action", Delivery: "async",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params, _ := json.Marshal(map[string]any{"event_id": message.ID, "surface": "web"})
+	response := (&Service{Client: client}).Dispatch(context.Background(), Request{
+		Method: "controller.message.action", Params: params,
+	})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	failed, ok := response.Result.(controllerapi.Event)
+	if !ok || failed.Kind != "message.action" || failed.Lifecycle != "failed" ||
+		failed.State != "failed" || failed.Metadata["error"] == "" {
+		t.Fatalf("failed action=%#v", response.Result)
+	}
+}
+
 func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

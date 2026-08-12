@@ -157,6 +157,16 @@ export function rpc<T>(method: string, params: unknown = {}, signal?: AbortSigna
   return restRPC<T>(request, signal)
 }
 
+/**
+ * Reports presentation work over an independent HTTP request. A synchronous
+ * message.send may itself be waiting on the subscribed WebSocket; reusing that
+ * socket for its delivery acknowledgement would serialize into a deadlock.
+ */
+export function presentationRPC<T>(method: string, params: unknown = {}, signal?: AbortSignal): Promise<T> {
+  const request = { jsonrpc: '2.0' as const, id: nextID++, method, params }
+  return restRPC<T>(request, signal)
+}
+
 /** Executes one canonical controller command through JSON-RPC. */
 export function execute(command: string, signal?: AbortSignal): Promise<CommandResult> {
 	return rpc<CommandResult>('controller.command.execute', { command }, signal)

@@ -76,14 +76,20 @@ preferred ordered list. Valid presentation targets are `native`, `web`, and
 `tui`; transport/system targets (`host`, `client`, `server`, `bridge`, `board`,
 `lcd`, `all`) remain available for existing integrations. Duplicate targets are
 removed in order. Severity is one of `debug`, `info`, `success`, `warning`, or
-`error`; delivery is `sync` (completed) or `async` (accepted). Correlation and
-action remain inert data until an operator invokes them. A native-targeted
+`error`; `async` delivery returns `accepted`, while `sync` remains `pending`
+until every requested presentation surface reports `completed`/`failed` or a
+bounded two-second deadline identifies an unconfirmed (usually disconnected)
+surface. Correlation and action remain inert data until an operator invokes
+them. A native-targeted
 message becomes a desktop notification. If it carries an action, its button
 converts the validated `app ...` or ordinary command to the existing
 `pccontroller://` route. Web and TUI adapters only present messages that target
-their surface (or `all`); they do not execute actions on receipt. A native
-presentation publishes a correlated `message.delivery` outcome with
-`completed` or `failed` lifecycle.
+their surface (or `all`), retain the correlation and action, and require an
+explicit button click or `Ctrl+A` before the shared command/app-action path is
+entered. Presentation publishes `controller.message.delivery`; explicit
+selection publishes `controller.message.action`. Both outcomes retain the
+original event ID, correlation, action, surface, and `completed`/`failed`
+lifecycle. No surface executes an action merely because it rendered a message.
 
 The minimal CLI spelling is:
 
@@ -680,6 +686,8 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.lcd.prompt` | `line1`, `line2` | queue a debounced prompt mirror |
 | `controller.lcd.priority` | `kind`, `line1`, `line2`, optional `hold_ms` | display a priority overlay, then restore the prompt |
 | `controller.message.send` | typed message envelope below | route/log a message and optionally display it on the board LCD |
+| `controller.message.delivery` | `event_id`, `surface`, optional `error` | report completed/failed presentation for one retained, targeted message |
+| `controller.message.action` | `event_id`, `surface`, optional `instance_id` | explicitly invoke the retained action and publish its correlated outcome |
 | `controller.bridge.list` | `{}` | configured peers and live connection state, without URLs or credentials |
 | `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; recursive bridge calls are rejected |
 | `controller.artifact.manifest`, `controller.artifact.list` | optional artifact `kind` | update capability/default/current discovery and content-addressed catalog |

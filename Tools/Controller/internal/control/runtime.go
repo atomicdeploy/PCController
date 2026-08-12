@@ -339,6 +339,26 @@ func (runtime *Runtime) LatestEventID() uint64 {
 	return runtime.nextEventID
 }
 
+// EventByID returns one retained event by its stable runtime identifier. The
+// bounded event ring is the authority used by presentation acknowledgements:
+// callers cannot invent a message action or acknowledge an unrelated event.
+func (runtime *Runtime) EventByID(id uint64) (Event, bool) {
+	if id == 0 {
+		return Event{}, false
+	}
+	runtime.eventMu.Lock()
+	defer runtime.eventMu.Unlock()
+	for index := len(runtime.eventLog) - 1; index >= 0; index-- {
+		if runtime.eventLog[index].ID == id {
+			return runtime.eventLog[index], true
+		}
+		if runtime.eventLog[index].ID < id {
+			break
+		}
+	}
+	return Event{}, false
+}
+
 func (runtime *Runtime) WaitEvent(
 	ctx context.Context,
 	afterID uint64,

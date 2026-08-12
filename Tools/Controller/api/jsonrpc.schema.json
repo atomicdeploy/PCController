@@ -120,6 +120,8 @@
             "controller.menu.layout.set",
             "controller.menu.list",
             "controller.menu.page",
+            "controller.message.action",
+            "controller.message.delivery",
             "controller.message.send",
             "controller.opcode.exchange",
             "controller.opcode.request",
@@ -645,9 +647,19 @@
       "summary": "menu page",
       "idempotency": "idempotent-with-authoritative-readback"
     },
+    "controller.message.action": {
+      "capability": "messages",
+      "summary": "Run a retained message action only after an explicit surface gesture and publish its correlated outcome.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.message.delivery": {
+      "capability": "messages",
+      "summary": "Acknowledge presentation of one retained targeted message from an explicit surface.",
+      "idempotency": "non-idempotent"
+    },
     "controller.message.send": {
       "capability": "messages",
-      "summary": "message send",
+      "summary": "Publish one bounded typed message; synchronous delivery waits for requested presentation outcomes.",
       "idempotency": "non-idempotent"
     },
     "controller.opcode.exchange": {

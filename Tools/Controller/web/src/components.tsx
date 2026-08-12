@@ -921,23 +921,74 @@ export function Modal({ state, onClose, busy }: { state: DialogState; onClose: (
   )
 }
 
-export function ToastStack({ messages, dismiss }: { messages: ToastMessage[]; dismiss: (id: number) => void }) {
+function ToastItem({
+  message,
+  dismiss,
+  act,
+  presented,
+}: {
+  message: ToastMessage
+  dismiss: (id: number) => void
+  act?: (message: ToastMessage) => void
+  presented?: (message: ToastMessage) => void
+}) {
+  const presentedRef = useRef(false)
+  useEffect(() => {
+    if (presentedRef.current) return
+    presentedRef.current = true
+    presented?.(message)
+  }, [message, presented])
+  return (
+    <motion.article
+      className={`toast toast--${message.tone}`}
+      initial={{ opacity: 0, x: 18 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 12 }}
+      transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <span className="toast__rail" aria-hidden="true" />
+      <div className="toast__body">
+        <strong>{message.title}</strong>
+        {message.detail && <p>{message.detail}</p>}
+        {message.correlation && <code className="toast__correlation">#{message.correlation}</code>}
+        {message.action && (
+          <button
+            className="toast__action"
+            type="button"
+            disabled={message.actionBusy}
+            onClick={() => act?.(message)}
+          >
+            {message.actionBusy ? interfaceCopy('Running…', 'در حال اجرا…') : message.actionLabel}
+          </button>
+        )}
+      </div>
+      <button className="toast__dismiss" aria-label={interfaceCopy('Dismiss', 'بستن اعلان')} onClick={() => dismiss(message.id)}><X size={16} /></button>
+    </motion.article>
+  )
+}
+
+export function ToastStack({
+  messages,
+  dismiss,
+  act,
+  presented,
+}: {
+  messages: ToastMessage[]
+  dismiss: (id: number) => void
+  act?: (message: ToastMessage) => void
+  presented?: (message: ToastMessage) => void
+}) {
   return (
     <div className="toast-stack" aria-live="polite" aria-atomic="false">
       <AnimatePresence initial={false}>
         {messages.map((message) => (
-          <motion.article
+          <ToastItem
             key={message.id}
-            className={`toast toast--${message.tone}`}
-            initial={{ opacity: 0, x: 18 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 12 }}
-            transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <span className="toast__rail" aria-hidden="true" />
-            <div><strong>{message.title}</strong>{message.detail && <p>{message.detail}</p>}</div>
-            <button aria-label={interfaceCopy('Dismiss', 'بستن اعلان')} onClick={() => dismiss(message.id)}><X size={16} /></button>
-          </motion.article>
+            message={message}
+            dismiss={dismiss}
+            act={act}
+            presented={presented}
+          />
         ))}
       </AnimatePresence>
     </div>

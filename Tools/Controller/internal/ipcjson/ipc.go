@@ -1183,6 +1183,56 @@ func (service *Service) dispatch(
 			message = tagInboundAccess(message, access)
 			result, err = service.Client.SendTextMessage(ctx, message)
 		}
+	case "controller.message.delivery":
+		var params struct {
+			EventID uint64 `json:"event_id"`
+			Surface string `json:"surface"`
+			Error   string `json:"error,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.Client.AcknowledgeMessageDelivery(
+				params.EventID, params.Surface, params.Error,
+			)
+		}
+	case "controller.message.action":
+		var params struct {
+			EventID    uint64 `json:"event_id"`
+			Surface    string `json:"surface"`
+			InstanceID string `json:"instance_id,omitempty"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			var message controller.Event
+			message, err = service.Client.MessageForSurface(params.EventID, params.Surface)
+			if err == nil {
+				var output string
+				var actionErr error
+				if strings.TrimSpace(message.Action) == "" {
+					actionErr = errors.New("message has no action")
+				} else {
+					var action hostui.AppAction
+					action, actionErr = hostui.ParseAction(
+						message.Action,
+						"message:"+strings.ToLower(strings.TrimSpace(params.Surface)),
+					)
+					if actionErr == nil && action.Kind == "command" {
+						output, actionErr = service.Client.Execute(ctx, action.Value)
+					} else if actionErr == nil {
+						if service.AppAction == nil {
+							actionErr = errors.New("primary app action routing is unavailable")
+						} else {
+							action.Target = strings.TrimSpace(params.InstanceID)
+							actionErr = service.AppAction(action)
+							if actionErr == nil {
+								output = "accepted"
+							}
+						}
+					}
+				}
+				result = service.Client.EmitMessageActionOutcome(
+					message, params.Surface, output, actionErr,
+				)
+			}
+		}
 	case "controller.bridge.list":
 		if service.BridgeList == nil {
 			err = errors.New("host bridge manager is unavailable")
@@ -1764,7 +1814,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityReset
 	case "controller.quit", "controller.exit":
 		return capabilityShutdown
-	case "controller.message.send":
+	case "controller.message.send", "controller.message.delivery", "controller.message.action":
 		return capabilityMessages
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request":

@@ -245,6 +245,40 @@ describe('tab channel', () => {
     second.close()
   })
 
+  it('retains actionable message identity across Web tabs', () => {
+    const first = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('message-first') })
+    const second = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, idFactory: sequenceFactory('message-second') })
+    let received: ControllerEvent | undefined
+    second.subscribe(({ payload }) => {
+      if (payload.type === 'controller-event') received = payload.event as ControllerEvent
+    })
+    first.publishControllerEvent({
+      id: 88,
+      time: '2026-08-12T12:00:00.000Z',
+      kind: 'message',
+      stream: 'activity',
+      text: 'Inspect output 3',
+      target: 'web,tui',
+      targets: ['web', 'tui'],
+      message_type: 'operator.prompt',
+      severity: 'warning',
+      correlation: 'job-88',
+      delivery: 'sync',
+      action: 'relay off',
+    })
+    expect(received).toMatchObject({
+      id: 88,
+      targets: ['web', 'tui'],
+      message_type: 'operator.prompt',
+      severity: 'warning',
+      correlation: 'job-88',
+      delivery: 'sync',
+      action: 'relay off',
+    })
+    first.close()
+    second.close()
+  })
+
   it('rejects secrets, unknown fields, invalid values, and oversized content before posting', () => {
     const channel = createTabChannel({ origin: 'https://control.example', BroadcastChannel: FakeBroadcastChannel, now: () => 1_000, idFactory: sequenceFactory('safe') })
 
