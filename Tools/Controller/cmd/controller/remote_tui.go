@@ -31,11 +31,16 @@ type remoteTUIIPC struct {
 	callFn  func(context.Context, string, any, any) error
 	retry   time.Duration
 
-	events chan control.Event
-	cancel context.CancelFunc
-	done   chan struct{}
-	once   sync.Once
+	events    chan control.Event
+	ready     chan struct{}
+	readyOnce sync.Once
+	sessions  chan struct{}
+	cancel    context.CancelFunc
+	done      chan struct{}
+	once      sync.Once
 }
+
+const remoteTUIInstanceLeaseSeconds = 45
 
 // remoteSettingsWire intentionally omits native.Settings.UnmarshalJSON. An
 // offline primary has no authenticated settings yet and truthfully publishes
@@ -94,10 +99,24 @@ func newRemoteTUIIPC(parent context.Context, address, auth string) *remoteTUIIPC
 	ctx, cancel := context.WithCancel(parent)
 	client := &remoteTUIIPC{
 		address: strings.TrimSpace(address), auth: auth,
-		events: make(chan control.Event, 128), cancel: cancel, done: make(chan struct{}),
+		events: make(chan control.Event, 128), ready: make(chan struct{}),
+		sessions: make(chan struct{}, 1),
+		cancel:   cancel, done: make(chan struct{}),
 	}
 	go client.pollEvents(ctx)
 	return client
+}
+
+func (client *remoteTUIIPC) WaitEventCursor(ctx context.Context) error {
+	if client == nil || client.ready == nil {
+		return errors.New("remote TUI event cursor is unavailable")
+	}
+	select {
+	case <-client.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (client *remoteTUIIPC) Close() {
@@ -213,6 +232,123 @@ func (client *remoteTUIIPC) RFPresentation(ctx context.Context) (appconfig.RFCon
 	return result.Config, err
 }
 
+func (client *remoteTUIIPC) ReportInstance(
+	ctx context.Context,
+	instance hostui.AppInstance,
+) (hostui.AppInstance, error) {
+	var result hostui.AppInstance
+	err := client.call(ctx, "controller.app.instance.report", instance, &result)
+	return result, err
+}
+
+func (client *remoteTUIIPC) RemoveInstance(ctx context.Context, id string) error {
+	return client.call(
+		ctx, "controller.app.instance.remove", map[string]string{"id": id}, nil,
+	)
+}
+
+type remoteTUIInstanceLease struct {
+	client   *remoteTUIIPC
+	reporter *hostui.NavigationReporter
+	self     hostui.InstanceSelf
+	refresh  time.Duration
+
+	mu       sync.Mutex
+	reportMu sync.Mutex
+	page     string
+	title    string
+	have     bool
+	stop     chan struct{}
+	done     chan struct{}
+	once     sync.Once
+}
+
+func newRemoteTUIInstanceLease(
+	client *remoteTUIIPC,
+	reporter *hostui.NavigationReporter,
+	refresh time.Duration,
+) *remoteTUIInstanceLease {
+	if refresh <= 0 {
+		refresh = 15 * time.Second
+	}
+	lease := &remoteTUIInstanceLease{
+		client: client, reporter: reporter, self: hostui.CurrentProcessSelf(time.Now()),
+		refresh: refresh, stop: make(chan struct{}), done: make(chan struct{}),
+	}
+	go lease.run()
+	return lease
+}
+
+func (lease *remoteTUIInstanceLease) Update(page, title string) error {
+	if lease == nil || lease.client == nil || lease.reporter == nil {
+		return errors.New("remote TUI instance reporting is unavailable")
+	}
+	lease.mu.Lock()
+	lease.page = strings.ToLower(strings.TrimSpace(page))
+	lease.title = strings.TrimSpace(title)
+	lease.have = true
+	lease.mu.Unlock()
+	return lease.report(false)
+}
+
+func (lease *remoteTUIInstanceLease) report(catchUp bool) error {
+	lease.reportMu.Lock()
+	defer lease.reportMu.Unlock()
+	lease.mu.Lock()
+	if !lease.have {
+		lease.mu.Unlock()
+		return nil
+	}
+	page, title := lease.page, lease.title
+	lease.mu.Unlock()
+	var values map[string]string
+	if catchUp {
+		values = lease.reporter.NextCatchUpValues()
+	} else {
+		values = lease.reporter.NextValues()
+	}
+	values["terminal_title"] = title
+	values["terminal_osc"] = "enabled"
+	values["terminal_progress"] = "osc-9-4"
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := lease.client.ReportInstance(ctx, hostui.AppInstance{
+		ID: lease.reporter.InstanceID(), Surface: "tui", Page: page, State: "active",
+		LeaseSeconds: remoteTUIInstanceLeaseSeconds, Values: values, Self: &lease.self,
+	})
+	return err
+}
+
+func (lease *remoteTUIInstanceLease) run() {
+	defer close(lease.done)
+	ticker := time.NewTicker(lease.refresh)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			_ = lease.report(false)
+		case <-lease.client.sessions:
+			_ = lease.report(true)
+		case <-lease.stop:
+			return
+		}
+	}
+}
+
+func (lease *remoteTUIInstanceLease) Close() {
+	if lease == nil {
+		return
+	}
+	lease.once.Do(func() { close(lease.stop) })
+	<-lease.done
+	if lease.client == nil || lease.reporter == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = lease.client.RemoveInstance(ctx, lease.reporter.InstanceID())
+}
+
 func cloneRemoteNames(values map[string]string) map[string]string {
 	result := make(map[string]string, len(values))
 	for key, value := range values {
@@ -236,6 +372,8 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 	defer close(client.events)
 	var cursor uint64
 	haveCursor := false
+	connectedOnce := false
+	resetOnConnect := false
 	for ctx.Err() == nil {
 		if !haveCursor {
 			requestContext, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -245,13 +383,28 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 			err := client.call(requestContext, "controller.event.latest", map[string]any{}, &latest)
 			cancel()
 			if err != nil {
+				if connectedOnce {
+					resetOnConnect = true
+				}
 				if !client.remoteRetry(ctx) {
 					return
 				}
 				continue
 			}
+			reconnected := connectedOnce && resetOnConnect
+			if reconnected {
+				if !client.emitSessionReset(ctx) {
+					return
+				}
+			}
 			cursor = latest.ID
 			haveCursor = true
+			connectedOnce = true
+			resetOnConnect = false
+			client.readyOnce.Do(func() { close(client.ready) })
+			if reconnected {
+				client.notifySession()
+			}
 		}
 
 		requestContext, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -274,13 +427,18 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 				// Re-enter discovery after a bounded delay instead of spinning
 				// RPC, sticky-name resolution, and Bubble Tea goroutines.
 				haveCursor = false
+				resetOnConnect = connectedOnce
 				if !client.remoteRetry(ctx) {
 					return
 				}
 				continue
 			}
 			if probeErr == nil && latest.ID < cursor {
+				if !client.emitSessionReset(ctx) {
+					return
+				}
 				cursor = latest.ID
+				client.notifySession()
 			}
 			continue
 		}
@@ -290,6 +448,27 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+func (client *remoteTUIIPC) notifySession() {
+	if client == nil || client.sessions == nil {
+		return
+	}
+	select {
+	case client.sessions <- struct{}{}:
+	default:
+	}
+}
+
+func (client *remoteTUIIPC) emitSessionReset(ctx context.Context) bool {
+	select {
+	case client.events <- control.Event{
+		Kind: "client.navigation.session.reset", Source: "remote-ipc", Target: "tui",
+	}:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -332,11 +511,18 @@ func runRemoteTUI(
 	stdout io.Writer,
 	store *appconfig.Store,
 	consoleOptions *tuiConsoleOptions,
+	syncNavigation bool,
 ) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := newRemoteTUIIPC(ctx, address, auth)
 	defer client.Close()
+	navigationReporter, err := hostui.NewNavigationReporter(syncNavigation, "")
+	if err != nil {
+		return fmt.Errorf("create remote TUI instance identity: %w", err)
+	}
+	instanceLease := newRemoteTUIInstanceLease(client, navigationReporter, 0)
+	defer instanceLease.Close()
 
 	probeContext, probeCancel := context.WithTimeout(ctx, 8*time.Second)
 	initial, err := client.Snapshot(probeContext)
@@ -345,6 +531,15 @@ func runRemoteTUI(
 		var engine *shell.Engine
 		engine, err = client.CommandEngine(probeContext)
 		if err == nil {
+			if syncNavigation {
+				cursorContext, cursorCancel := context.WithTimeout(ctx, 3*time.Second)
+				cursorErr := client.WaitEventCursor(cursorContext)
+				cursorCancel()
+				if cursorErr != nil {
+					probeCancel()
+					return fmt.Errorf("establish remote TUI navigation event cursor: %w", cursorErr)
+				}
+			}
 			probeCancel()
 			remoteHostUI := remoteUISettingsWire{}
 			haveRemoteHostUI := false
@@ -419,8 +614,11 @@ func runRemoteTUI(
 					Integrations: func() hostui.IntegrationStatus {
 						return remoteTUIIntegrationStatus(address)
 					},
-					InstanceID: "remote-tui:" + strings.TrimSpace(address),
-					WriteOSC:   func(payload string) error { return hostui.WriteOSC(stdout, payload) },
+					InstanceID:      navigationReporter.InstanceID(),
+					NavigationSync:  syncNavigation,
+					NavigationGroup: hostui.DefaultNavigationGroup,
+					ReportTerminal:  instanceLease.Update,
+					WriteOSC:        func(payload string) error { return hostui.WriteOSC(stdout, payload) },
 					Remote: &tui.RemoteBackend{
 						Endpoint:                  strings.TrimSpace(address),
 						InitialSnapshot:           initial,

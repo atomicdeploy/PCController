@@ -218,6 +218,71 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	}
 }
 
+func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T) {
+	runtime := control.New(control.Options{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := startPrimaryIPCAt(ctx, "127.0.0.1:0", runtime, shell.New(4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	actions := server.AppActions()
+	makeInstance := func(id, epoch, page, revision string) hostui.AppInstance {
+		return hostui.AppInstance{
+			ID: id, Surface: "tui", Page: page, State: "active", LeaseSeconds: 45,
+			Values: map[string]string{
+				hostui.NavigationSyncKey:  hostui.NavigationSyncFollow,
+				hostui.NavigationGroupKey: hostui.DefaultNavigationGroup,
+				hostui.NavigationEpochKey: epoch, hostui.NavigationRevisionKey: revision,
+			},
+		}
+	}
+	one := makeInstance("tui:one", "11111111111111111111111111111111", "dashboard", "1")
+	two := makeInstance("tui:two", "22222222222222222222222222222222", "controls", "1")
+	three := makeInstance("tui:three", "33333333333333333333333333333333", "settings", "1")
+	if _, err := server.instances.Upsert(one); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.instances.Upsert(two); err != nil {
+		t.Fatal(err)
+	}
+	if action := <-actions; action.Target != two.ID || action.Value != "dashboard" ||
+		action.Metadata[hostui.NavigationRevisionKey] != "1" {
+		t.Fatalf("second follower catch-up=%#v", action)
+	}
+	if _, err := server.instances.Upsert(three); err != nil {
+		t.Fatal(err)
+	}
+	if action := <-actions; action.Target != three.ID || action.Value != "dashboard" {
+		t.Fatalf("third follower catch-up=%#v", action)
+	}
+
+	afterID := runtime.LatestEventID()
+	one.Page, one.Values[hostui.NavigationRevisionKey] = "events", "2"
+	if _, err := server.instances.Upsert(one); err != nil {
+		t.Fatal(err)
+	}
+	for _, wantTarget := range []string{three.ID, two.ID} {
+		if action := <-actions; action.Target != wantTarget || action.Value != "events" ||
+			action.Metadata[hostui.NavigationSourceKey] != one.ID ||
+			action.Metadata[hostui.NavigationRevisionKey] != "2" {
+			t.Fatalf("fanout action target=%q action=%#v", wantTarget, action)
+		}
+	}
+	waitContext, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	event, err := runtime.WaitEvent(waitContext, afterID, "app.page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Metadata[hostui.NavigationSyncKey] != hostui.NavigationSyncGroupUpdate ||
+		event.Metadata[hostui.NavigationSourceKey] != one.ID ||
+		event.Metadata["target_instance"] == "" {
+		t.Fatalf("mirrored synchronization metadata=%#v", event)
+	}
+}
+
 func TestTerminalAppActionFansOutWithoutInterpretingOSC(t *testing.T) {
 	runtime := control.New(control.Options{})
 	engine := shell.New(4)

@@ -299,7 +299,7 @@ func printUsage(output io.Writer, configuredTitle ...string) {
 
 Interactive control:
   controller                         launch the Charm TUI
-  controller tui [--ipc-addr HOST:PORT] [--ipc-token-ref REF] [--simple] [connection flags]
+  controller tui [--ipc-addr HOST:PORT] [--ipc-token-ref REF] [--sync-navigation=false] [--simple] [connection flags]
   controller web [--listen 127.0.0.1:8787] [--no-open] [--no-tray] [--no-auto] [connection flags]
   controller web export --output FILE.zip
   controller ports [connection flags]
@@ -362,6 +362,7 @@ Connection flags:
 Remote TUI flags:
   --ipc-addr HOST:PORT    attach the full Charm TUI to an existing primary
   --ipc-token-ref REF     load its bearer token from the OS vault/environment
+  --sync-navigation=false keep this full TUI's active page independent
   --simple                explicit minimal line-oriented IPC fallback
 
 When another local primary already owns serial, the default is the full IPC

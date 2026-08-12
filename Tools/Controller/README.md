@@ -347,6 +347,17 @@ controller tui --columns 144 --rows 44 --console-font "Cascadia Mono" --console-
 controller tui --console-management=false
 ```
 
+Attach the same full TUI to an authenticated primary without approaching this
+machine's serial ports:
+
+```console
+controller tui --ipc-addr cafe-pc.local:8787 --ipc-token-ref os:ipc.remote
+```
+
+Full TUIs attached to that primary synchronize their active page by default.
+Use `--sync-navigation=false` for an independent page in one process; explicit
+authenticated instance-targeted navigation remains available.
+
 The same values are persisted under `ui.tui_console` in JSON, YAML, or TOML,
 can be edited live on the TUI **HOST Settings** page, and can be changed with
 `config set ui.tui_console.columns 144` (likewise `rows`, `font_face`,

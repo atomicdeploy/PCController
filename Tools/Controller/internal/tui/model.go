@@ -136,6 +136,9 @@ type Model struct {
 	notifier                 hostui.Notifier
 	appActions               <-chan hostui.AppAction
 	instanceID               string
+	navigationSync           bool
+	navigationGroup          string
+	navigationCursor         hostui.NavigationCursor
 	reportPage               func(string) error
 	reportTerminal           func(page, title string) error
 	writeOSC                 func(string) error
@@ -412,7 +415,9 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		mirrorLCD: options.MirrorLCD, lcdMirror: uiValue.MirrorPromptToLCD,
 		integrations: options.Integrations, notifier: options.Notifier,
 		appActions: options.AppActions, instanceID: options.InstanceID,
-		reportPage: options.ReportPage, reportTerminal: options.ReportTerminal,
+		navigationSync:  options.NavigationSync,
+		navigationGroup: strings.ToLower(strings.TrimSpace(options.NavigationGroup)),
+		reportPage:      options.ReportPage, reportTerminal: options.ReportTerminal,
 		writeOSC:  options.WriteOSC,
 		hostMenus: options.HostMenus, pushHostPanel: options.PushHostPanel,
 		releaseHostPanel: options.ReleaseHostPanel,
@@ -422,6 +427,9 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		welcomePhase: "Waiting for USB and application HELLO", welcomeMelody: options.WelcomeMelody,
 		markWelcomed: marker, debug: debug,
 		logs: nil,
+	}
+	if model.navigationGroup == "" {
+		model.navigationGroup = hostui.DefaultNavigationGroup
 	}
 	if options.Remote != nil {
 		model.remoteSnapshot = options.Remote.InitialSnapshot
@@ -520,6 +528,16 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch action.Kind {
 		case "app.page":
+			if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+				if !model.navigationSync {
+					break
+				}
+				pageName, accepted := model.navigationCursor.Accept(action, model.navigationGroup)
+				if !accepted {
+					break
+				}
+				action.Value = pageName
+			}
 			if page, ok := pageForName(action.Value); ok {
 				model.switchPage(page)
 				model.setNotice("Opened " + pageDefinitions[page].Title)
@@ -687,6 +705,13 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runtimeEventMsg:
 		event := control.Event(message)
+		if event.Kind == "client.navigation.session.reset" {
+			model.navigationCursor.Reset()
+			if model.remote != nil && model.remote.Events != nil && !model.remoteEventsClosed {
+				commands = append(commands, waitControlEvent(model.remote.Events))
+			}
+			break
+		}
 		if command := model.observeUpdateEvent(event); command != nil {
 			commands = append(commands, command)
 		}
@@ -695,6 +720,28 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if page, ok := pageForName(event.Metadata["page"]); ok {
 				model.switchPage(page)
 				model.setNotice("Board opened " + pageDefinitions[page].Title)
+			}
+		}
+		if strings.EqualFold(event.Kind, "app.page") &&
+			strings.EqualFold(event.Metadata[hostui.NavigationSyncKey], hostui.NavigationSyncGroupUpdate) &&
+			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") &&
+			model.navigationSync {
+			action := hostui.AppAction{
+				Kind: event.Kind, Value: event.Metadata["page"], Source: event.Source,
+				Target: event.Metadata["target_instance"], Metadata: event.Metadata,
+			}
+			if pageName, accepted := model.navigationCursor.Accept(action, model.navigationGroup); accepted {
+				if page, ok := pageForName(pageName); ok {
+					model.switchPage(page)
+				}
+			}
+		}
+		if model.remote != nil && strings.EqualFold(event.Kind, "app.page") &&
+			!strings.EqualFold(event.Source, "board") &&
+			!hostui.HasCoordinatorNavigationMetadata(event.Metadata) &&
+			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
+			if page, ok := pageForName(event.Metadata["page"]); ok {
+				model.switchPage(page)
 			}
 		}
 		if command := model.observeRFGuidedEvent(event); command != nil {

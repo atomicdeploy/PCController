@@ -202,6 +202,8 @@ type Options struct {
 	Notifier         hostui.Notifier
 	AppActions       <-chan hostui.AppAction
 	InstanceID       string
+	NavigationSync   bool
+	NavigationGroup  string
 	ReportPage       func(string) error
 	ReportTerminal   func(page, title string) error
 	WriteOSC         func(payload string) error
