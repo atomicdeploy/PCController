@@ -637,7 +637,7 @@ func (model *Model) moveCursor(delta int) {
 func (model Model) selectionCount() int {
 	switch model.page {
 	case PageOutputs:
-		return 27
+		return len(model.controlTableRows(model.snapshot(), 8))
 	case PageMenus:
 		return len(model.menuConfigurationEntries())
 	case PageBoardSettings:
@@ -1629,6 +1629,16 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 		return model, nil
 	}
+	if model.page == PageOutputs {
+		if message.Action == tea.MouseActionRelease {
+			model.pwmDragChannel = -1
+			model.pwmDragSet = false
+			return model, nil
+		}
+		if message.Action == tea.MouseActionMotion && message.Button == tea.MouseButtonLeft && model.pwmDragChannel >= 0 {
+			return model.setOutputPWMFromX(15+model.pwmDragChannel, message.X)
+		}
+	}
 	if message.Action == tea.MouseActionRelease && model.page == PageMenus && !model.portPicker {
 		contentY := 4 + strings.Count(model.tabBar(), "\n") + 1
 		geometry := model.menuInteractionGeometry()
@@ -1639,6 +1649,20 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return model, nil
 	}
 	if message.Action != tea.MouseActionPress {
+		return model, nil
+	}
+	if message.Button == tea.MouseButtonWheelLeft {
+		if model.page == PageOutputs {
+			updated, command, _ := model.adjustSelection(-1)
+			return updated, command
+		}
+		return model, nil
+	}
+	if message.Button == tea.MouseButtonWheelRight {
+		if model.page == PageOutputs {
+			updated, command, _ := model.adjustSelection(1)
+			return updated, command
+		}
 		return model, nil
 	}
 	if message.Button == tea.MouseButtonWheelUp {
@@ -1745,19 +1769,22 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 	}
 	switch model.page {
 	case PageOutputs:
-		start, _ := tableWindow(model.selectionCount(), tableBodyRows(model.contentHeight()), model.cursor)
-		index := start + row - 4
-		if index >= 0 && index < model.selectionCount() {
+		tableWidth := model.presentationTableWidth(118)
+		columns := outputTableColumns(tableWidth)
+		rows := model.controlTableRows(model.snapshot(), max(8, columns[1].Width-7))
+		index, ok := controlTableLogicalAt(rows, tableBodyRows(model.contentHeight()), model.cursor, row-3)
+		if ok {
 			model.cursor = index
 			if index >= 15 && index <= 25 {
-				tableWidth := model.presentationTableWidth(118)
-				columns := outputTableColumns(tableWidth)
 				tableStart := max(0, (model.width-tableWidth)/2)
-				valueStart := tableStart + 2 + columns[0].Width + columns[1].Width
-				percent := (x - valueStart) * 100 / max(1, columns[2].Width)
-				percent = min(100, max(0, percent))
-				updated, command, _ := model.setSelectedPWM(uint16(percent * 4095 / 100))
-				return updated, command
+				levelWidth := max(8, columns[1].Width-7)
+				sliderStart := tableStart + 1 + columns[0].Width + 1
+				if x < sliderStart-1 || x > sliderStart+levelWidth {
+					return model, nil
+				}
+				model.pwmDragChannel = index - 15
+				model.pwmDragSet = false
+				return model.setOutputPWMFromX(index, x)
 			}
 			updated, command, _ := model.activateSelection()
 			return updated, command
@@ -1852,6 +1879,29 @@ func (model Model) handleContentClick(row, x int) (tea.Model, tea.Cmd) {
 		}
 	}
 	return model, nil
+}
+
+func (model Model) setOutputPWMFromX(index, x int) (tea.Model, tea.Cmd) {
+	if index < 15 || index > 25 {
+		return model, nil
+	}
+	tableWidth := model.presentationTableWidth(118)
+	columns := outputTableColumns(tableWidth)
+	tableStart := max(0, (model.width-tableWidth)/2)
+	levelWidth := max(8, columns[1].Width-7)
+	sliderStart := tableStart + 1 + columns[0].Width + 1
+	percent := (x - sliderStart) * 100 / max(1, levelWidth-1)
+	percent = min(100, max(0, percent))
+	value := uint16(percent * 4095 / 100)
+	model.cursor = index
+	model.pwmDragChannel = index - 15
+	if model.pwmDragSet && model.pwmDragValue == value {
+		return model, nil
+	}
+	model.pwmDragValue = value
+	model.pwmDragSet = true
+	updated, command, _ := model.setSelectedPWM(value)
+	return updated, command
 }
 
 func (model Model) handleFrontPanelMouse(row, x int, phase string) (tea.Model, tea.Cmd) {
