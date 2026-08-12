@@ -23,6 +23,9 @@ func TestLoadOrCreateAndReload(t *testing.T) {
 	if store.Current().Connection.BaudRate != 115200 {
 		t.Fatalf("unexpected defaults: %#v", store.Current())
 	}
+	if store.Current().Connection.ReconnectInitialMS != 1000 || store.Current().Connection.ReconnectMaximumMS != 15_000 {
+		t.Fatalf("unexpected reconnect defaults: %#v", store.Current().Connection)
+	}
 	value := store.Current()
 	value.Connection.Port = "COM18"
 	value.Connection.ResetOnReconnect = true

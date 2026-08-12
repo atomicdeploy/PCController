@@ -41,6 +41,17 @@ func TestOldPumpFramesAreRejectedAfterSessionReplacement(t *testing.T) {
 	}
 }
 
+func TestReconnectBackoffDefaultsAndCap(t *testing.T) {
+	defaults := normalizedOptions(Options{})
+	if defaults.ReconnectInitial != time.Second || defaults.ReconnectMaximum != 15*time.Second {
+		t.Fatalf("reconnect defaults=%s/%s, want 1s/15s", defaults.ReconnectInitial, defaults.ReconnectMaximum)
+	}
+	capped := normalizedOptions(Options{ReconnectInitial: 4 * time.Second, ReconnectMaximum: time.Second})
+	if capped.ReconnectMaximum != 4*time.Second {
+		t.Fatalf("reconnect cap=%s, want initial 4s", capped.ReconnectMaximum)
+	}
+}
+
 func newReconnectTestPort() *reconnectTestPort {
 	return &reconnectTestPort{closed: make(chan struct{})}
 }
@@ -551,7 +562,7 @@ func TestEventStreamClassification(t *testing.T) {
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
 		"rx": EventStreamDebug, "action.applied": EventStreamDebug,
 		"front_panel.segment": EventStreamState,
-		"status_led.changed":   EventStreamState, "buzzer.note": EventStreamState,
+		"status_led.changed":  EventStreamState, "buzzer.note": EventStreamState,
 		"app.instance.changed": EventStreamState, "relay.changed": EventStreamState,
 		"operation.applied": EventStreamState, "sensor.sample": EventStreamTelemetry,
 		"animation.frame": EventStreamState,

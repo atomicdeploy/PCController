@@ -908,6 +908,16 @@ later candidate opens cannot create a reset storm, changing only this setting
 does not reconnect, acknowledged application resets do not consume/re-trigger
 the policy, and TCP endpoints are never pulsed.
 
+Serial authentication failures are not retried once per second. Configure
+`connection.reconnect_initial_ms` (default `1000`) and
+`connection.reconnect_maximum_ms` (default `15000`) in the same configuration
+file, or override one process with `PCCONTROLLER_RECONNECT_INITIAL` /
+`PCCONTROLLER_RECONNECT_MAX` (Go duration syntax) or `--reconnect-initial` /
+`--reconnect-max`. Delay doubles after each failed attempt up to the cap; after
+the second failure the shared snapshot/event state is `unavailable`, retaining
+the last USB identity. A real USB change or an authenticated HELLO resets the
+schedule. `close` remains the explicit way to pause reconnect completely.
+
 ## Programming
 
 Bootstrap the latest resolved, host-data-local firmware toolchain with

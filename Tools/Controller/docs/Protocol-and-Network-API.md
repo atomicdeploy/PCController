@@ -1010,6 +1010,12 @@ IPC, WebSocket, or bridge consumer requires it. Asynchronous board events keep
 flowing because they do not require polling. `controller.close` deliberately
 pauses automatic reconnect; a later `controller.open`/`controller.connect`
 clears that pause only after a transport has authenticated successfully.
+When reconnect is active, failures back off exponentially from configured
+`connection.reconnect_initial_ms` to `connection.reconnect_maximum_ms`
+(defaults 1000 ms and 15000 ms). After two failures the connection state is
+`unavailable`; `usb.reconnecting` and the retained USB identity remain visible
+to every API, TUI, Web, and bridge consumer until a real USB change or a
+successful HELLO resets the schedule.
 
 ## Socket.IO compatibility
 

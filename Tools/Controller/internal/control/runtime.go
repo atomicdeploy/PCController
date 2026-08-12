@@ -21,6 +21,8 @@ type Options struct {
 	StartupWait      time.Duration
 	RequestTimeout   time.Duration
 	HelloAttempts    int
+	ReconnectInitial time.Duration
+	ReconnectMaximum time.Duration
 	ResetOnReconnect bool
 }
 
@@ -274,6 +276,15 @@ func normalizedOptions(options Options) Options {
 	}
 	if options.HelloAttempts == 0 {
 		options.HelloAttempts = 3
+	}
+	if options.ReconnectInitial <= 0 {
+		options.ReconnectInitial = time.Second
+	}
+	if options.ReconnectMaximum <= 0 {
+		options.ReconnectMaximum = 15 * time.Second
+	}
+	if options.ReconnectMaximum < options.ReconnectInitial {
+		options.ReconnectMaximum = options.ReconnectInitial
 	}
 	return options
 }
@@ -1736,13 +1747,21 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 	}
 	activityCheck := time.NewTicker(500 * time.Millisecond)
 	defer activityCheck.Stop()
-	safetyRetry := time.NewTimer(30 * time.Second)
-	defer safetyRetry.Stop()
+	runtime.mu.RLock()
+	initialRetryDelay := runtime.options.ReconnectInitial
+	runtime.mu.RUnlock()
+	retryDelay := initialRetryDelay
+	retry := time.NewTimer(time.Hour)
+	if !retry.Stop() {
+		<-retry.C
+	}
+	defer retry.Stop()
 	attempt := true
+	failures := 0
 	for {
 		runtime.mu.RLock()
 		active := runtime.reconnectEpoch == epoch &&
-			runtime.connectionState == "reconnecting" &&
+			(runtime.connectionState == "reconnecting" || runtime.connectionState == "unavailable") &&
 			!runtime.paused &&
 			runtime.session == nil
 		options := runtime.options
@@ -1765,20 +1784,35 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 			if err == nil && runtime.Snapshot().Connected {
 				return
 			}
+			failures++
 			if err != nil {
-				reason := err.Error()
+				reason := fmt.Sprintf("unavailable after %d failed authentication attempt(s); retry in %s: %v", failures, retryDelay, err)
 				runtime.mu.Lock()
 				changed := runtime.reconnectEpoch == epoch &&
-					runtime.connectionState == "reconnecting" &&
+					(runtime.connectionState == "reconnecting" || runtime.connectionState == "unavailable") &&
 					runtime.connectionReason != reason
 				if changed {
+					if failures >= 2 {
+						runtime.connectionState = "unavailable"
+					}
 					runtime.connectionReason = reason
 					runtime.connectionUpdated = time.Now()
 				}
 				port := runtime.port
 				runtime.mu.Unlock()
 				if changed {
-					runtime.publishConnection("reconnecting", port, reason)
+					lifecycle := "reconnecting"
+					if failures >= 2 {
+						lifecycle = "unavailable"
+					}
+					runtime.publishConnection(lifecycle, port, reason)
+				}
+			}
+			retry.Reset(retryDelay)
+			if retryDelay < options.ReconnectMaximum {
+				retryDelay *= 2
+				if retryDelay > options.ReconnectMaximum {
+					retryDelay = options.ReconnectMaximum
 				}
 			}
 		}
@@ -1789,11 +1823,12 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 				changes = nil
 			}
 			attempt = true
+			failures = 0
+			retryDelay = options.ReconnectInitial
 		case <-activityCheck.C:
 			// Re-check epoch/pause state without periodically enumerating.
-		case <-safetyRetry.C:
+		case <-retry.C:
 			attempt = true
-			safetyRetry.Reset(30 * time.Second)
 		}
 	}
 }

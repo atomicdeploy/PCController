@@ -29,6 +29,8 @@ type connectionFlags struct {
 	startupWait      time.Duration
 	requestTimeout   time.Duration
 	helloAttempts    int
+	reconnectInitial time.Duration
+	reconnectMaximum time.Duration
 	resetOnReconnect bool
 	overrides        map[string]bool
 	preferred        ports.Identity
@@ -77,6 +79,8 @@ func addConnectionFlags(
 		config.HelloAttempts,
 		"HELLO attempts while Urboot starts",
 	)
+	flags.DurationVar(&options.reconnectInitial, "reconnect-initial", envDuration("PCCONTROLLER_RECONNECT_INITIAL", time.Duration(config.ReconnectInitialMS)*time.Millisecond), "initial automatic reconnect delay")
+	flags.DurationVar(&options.reconnectMaximum, "reconnect-max", envDuration("PCCONTROLLER_RECONNECT_MAX", time.Duration(config.ReconnectMaximumMS)*time.Millisecond), "maximum automatic reconnect delay")
 	flags.BoolVar(
 		&options.resetOnReconnect,
 		"reset-on-reconnect",
@@ -117,6 +121,8 @@ func runtimeOptions(options *connectionFlags) control.Options {
 		StartupWait:      options.startupWait,
 		RequestTimeout:   options.requestTimeout,
 		HelloAttempts:    options.helloAttempts,
+		ReconnectInitial: options.reconnectInitial,
+		ReconnectMaximum: options.reconnectMaximum,
 		ResetOnReconnect: options.resetOnReconnect,
 	}
 }
@@ -176,6 +182,8 @@ func (options *connectionFlags) fromConfig(
 	startupWait := time.Duration(config.StartupWaitMS) * time.Millisecond
 	requestTimeout := time.Duration(config.RequestTimeoutMS) * time.Millisecond
 	helloAttempts := config.HelloAttempts
+	reconnectInitial := time.Duration(config.ReconnectInitialMS) * time.Millisecond
+	reconnectMaximum := time.Duration(config.ReconnectMaximumMS) * time.Millisecond
 	resetOnReconnect := config.ResetOnReconnect
 	if options.overrides["port"] {
 		port = options.port
@@ -220,6 +228,12 @@ func (options *connectionFlags) fromConfig(
 	if options.overrides["hello-attempts"] {
 		helloAttempts = options.helloAttempts
 	}
+	if options.overrides["reconnect-initial"] {
+		reconnectInitial = options.reconnectInitial
+	}
+	if options.overrides["reconnect-max"] {
+		reconnectMaximum = options.reconnectMaximum
+	}
 	if options.overrides["reset-on-reconnect"] {
 		resetOnReconnect = options.resetOnReconnect
 	}
@@ -227,6 +241,7 @@ func (options *connectionFlags) fromConfig(
 		Filter:   filter,
 		BaudRate: baud, StartupWait: startupWait,
 		RequestTimeout: requestTimeout, HelloAttempts: helloAttempts,
+		ReconnectInitial: reconnectInitial, ReconnectMaximum: reconnectMaximum,
 		ResetOnReconnect: resetOnReconnect,
 	}
 }
