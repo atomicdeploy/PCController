@@ -81,6 +81,13 @@
 #define PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS 0
 #endif
 
+// The 328P production image can publish the four-cell presentation without
+// carrying the larger buzzer/status-RGB mirror. Keep that aggregate optional,
+// while advertising segment push independently on the wire.
+#ifndef PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
+#define PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS 1
+#endif
+
 #ifndef PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
 #define PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS 0
 #endif
