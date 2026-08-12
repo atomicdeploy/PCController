@@ -41,7 +41,7 @@ func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {
 		PageProgramming:   "PROGRAMMING",
 		PageAutomations:   "AUTOMATIONS & MACROS",
 		PageEvents:        "24-HOUR HISTORY",
-		PageConsole:       "command console",
+		PageConsole:       "CONSOLE",
 	}
 	for page, needle := range expected {
 		rendered := PreviewFrame(page, 132, 38)

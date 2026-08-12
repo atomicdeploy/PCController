@@ -87,7 +87,7 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		lcdAvailable = true
 		lcdStatus = fmt.Sprintf("available · 0x%02X", status.LCDAddress)
 	}
-	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 && model.runtime != nil {
+	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 && model.remote == nil && model.runtime != nil {
 		lcd := model.runtime.LCDPresenter().State()
 		lcdStatus = "not detected"
 		if lcd.Physical {
@@ -403,7 +403,7 @@ func (model Model) rfPrimaryItems() []actionBarItem {
 		{label: "L Learn", action: "rf-learn", style: buttonGoodStyle},
 		{label: "Y Timed learn · 30s", action: "rf-timer", style: buttonStyle},
 	}
-	if model.preview == nil && model.runtime.RFLearnState().Active {
+	if model.preview == nil && model.rfLearnState().Active {
 		items = []actionBarItem{{label: "C Cancel learning", action: "rf-cancel", style: buttonBadStyle}}
 	}
 	return append(items,
@@ -427,7 +427,7 @@ func (model Model) rfPage() string {
 	}
 	learnState := "idle"
 	if model.preview == nil {
-		state := model.runtime.RFLearnState()
+		state := model.rfLearnState()
 		if state.Active {
 			if state.Mode == control.RFLearnTimer {
 				configured := time.Duration(state.ConfiguredMS) * time.Millisecond

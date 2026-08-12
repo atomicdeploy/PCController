@@ -694,12 +694,25 @@ func executeThroughPrimaryAt(
 	ctx context.Context,
 	address, command string,
 ) (string, error) {
+	auth := ""
+	configured := currentPrimaryEndpoint()
+	if strings.EqualFold(strings.TrimSpace(address), strings.TrimSpace(configured.Listen)) {
+		auth = configured.AuthToken
+	}
+	return executeThroughPrimaryAtAuthenticated(ctx, address, auth, command)
+}
+
+func executeThroughPrimaryAtAuthenticated(
+	ctx context.Context,
+	address, auth, command string,
+) (string, error) {
 	var result struct {
 		Output string `json:"output"`
 	}
-	err := callPrimaryAt(
+	err := callPrimaryAtAuthenticated(
 		ctx,
 		address,
+		auth,
 		"controller.command.execute",
 		map[string]string{"command": command},
 		&result,
@@ -716,6 +729,18 @@ func runSecondaryConsole(
 	stdout, stderr io.Writer,
 	configuredTitle string,
 ) error {
+	configured := currentPrimaryEndpoint()
+	return runSecondaryConsoleAt(
+		input, stdout, stderr, configuredTitle,
+		configured.Listen, configured.AuthToken,
+	)
+}
+
+func runSecondaryConsoleAt(
+	input io.Reader,
+	stdout, stderr io.Writer,
+	configuredTitle, address, auth string,
+) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -731,7 +756,7 @@ func runSecondaryConsole(
 			" The primary process retains exclusive serial ownership.",
 	)
 	hostRestart := make(chan struct{}, 1)
-	go streamPrimaryEvents(ctx, stdout, &outputMu, hostRestart)
+	go streamPrimaryEventsAt(ctx, stdout, &outputMu, hostRestart, address, auth)
 
 	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 1024), 64*1024)
@@ -772,7 +797,7 @@ func runSecondaryConsole(
 			ctx,
 			10*time.Minute,
 		)
-		output, err := executeThroughPrimary(requestContext, line)
+		output, err := executeThroughPrimaryAtAuthenticated(requestContext, address, auth, line)
 		requestCancel()
 		if output != "" {
 			writeLine(stdout, output)
@@ -790,12 +815,25 @@ func streamPrimaryEvents(
 	outputMu *sync.Mutex,
 	hostRestart chan<- struct{},
 ) {
+	configured := currentPrimaryEndpoint()
+	streamPrimaryEventsAt(ctx, output, outputMu, hostRestart, configured.Listen, configured.AuthToken)
+}
+
+func streamPrimaryEventsAt(
+	ctx context.Context,
+	output io.Writer,
+	outputMu *sync.Mutex,
+	hostRestart chan<- struct{},
+	address, auth string,
+) {
 	var latest struct {
 		ID uint64 `json:"id"`
 	}
 	probeContext, cancel := context.WithTimeout(ctx, time.Second)
-	err := callPrimary(
+	err := callPrimaryAtAuthenticated(
 		probeContext,
+		address,
+		auth,
 		"controller.event.latest",
 		map[string]any{},
 		&latest,
@@ -811,8 +849,10 @@ func streamPrimaryEvents(
 			3*time.Second,
 		)
 		var event controllerapi.Event
-		err := callPrimary(
+		err := callPrimaryAtAuthenticated(
 			requestContext,
+			address,
+			auth,
 			"controller.event.next",
 			map[string]any{
 				"after_id":   cursor,

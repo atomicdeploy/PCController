@@ -733,6 +733,10 @@ func runTUIWithInitialAction(
 		return err
 	}
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
+	ipcAddress := flags.String("ipc-addr", "", "attach the full TUI to an existing controller IPC host:port")
+	ipcToken := flags.String("ipc-token", "", "bearer token for --ipc-addr (prefer --ipc-token-ref)")
+	ipcTokenReference := flags.String("ipc-token-ref", "", "resolve the remote IPC bearer token from an OS-vault or environment reference")
+	simpleMode := flags.Bool("simple", false, "use the minimal line-oriented IPC fallback instead of the full TUI")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -740,11 +744,39 @@ func runTUIWithInitialAction(
 	if err := consoleOptions.captureOverrides(flags); err != nil {
 		return err
 	}
+	ipcTokenWasSet := false
+	flags.Visit(func(value *flag.Flag) {
+		ipcTokenWasSet = ipcTokenWasSet || value.Name == "ipc-token"
+	})
+	if strings.TrimSpace(*ipcTokenReference) != "" {
+		if ipcTokenWasSet {
+			return errors.New("--ipc-token and --ipc-token-ref are mutually exclusive")
+		}
+		resolved, resolveErr := store.ResolveSecret(*ipcTokenReference)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve remote IPC bearer token: %w", resolveErr)
+		}
+		*ipcToken = resolved
+	}
 	if err := applyTUIConsole(
 		consoleOptions.resolve(store.Current().UI.TUIConsole), stderr,
 		consoleOptions.haveRuntimeFlag(),
 	); err != nil {
 		return fmt.Errorf("apply local TUI console settings: %w", err)
+	}
+	if address := strings.TrimSpace(*ipcAddress); address != "" {
+		auth := *ipcToken
+		configured := currentPrimaryEndpoint()
+		if auth == "" && strings.EqualFold(address, strings.TrimSpace(configured.Listen)) {
+			auth = configured.AuthToken
+		}
+		if *simpleMode {
+			return runSecondaryConsoleAt(
+				os.Stdin, stdout, stderr, store.Current().UI.AppTitle,
+				address, auth,
+			)
+		}
+		return runRemoteTUI(address, auth, stdout, store, consoleOptions)
 	}
 	claim, havePrimary, err := preparePrimaryMode("tui")
 	if err != nil {
@@ -754,13 +786,20 @@ func runTUIWithInitialAction(
 		if initial.Kind != "" {
 			return deliverExistingAppAction(context.Background(), initial, stdout)
 		}
-		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		if *simpleMode {
+			return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		}
+		configured := currentPrimaryEndpoint()
+		return runRemoteTUI(configured.Listen, configured.AuthToken, stdout, store, consoleOptions)
 	}
 	defer func() {
 		if claim != nil {
 			_ = claim.Close()
 		}
 	}()
+	if *simpleMode {
+		return errors.New("--simple requires an existing IPC primary; start without --simple to own the local runtime")
+	}
 	if err := selectInteractiveDevice(
 		connection,
 		os.Stdin,
@@ -830,7 +869,8 @@ func runTUIWithInitialAction(
 	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
-		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		configured := currentPrimaryEndpoint()
+		return runRemoteTUI(configured.Listen, configured.AuthToken, stdout, store, consoleOptions)
 	}
 	if err != nil {
 		_ = runtime.Close()

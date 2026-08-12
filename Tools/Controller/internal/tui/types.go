@@ -162,6 +162,24 @@ type FrontPanelState struct {
 	HaveStatusLED    bool
 }
 
+// RemoteBackend supplies the live board state and activity stream for a TUI
+// attached to another controller host. Command execution deliberately remains
+// on the injected shell.Engine so the remote command catalog, completion,
+// history, prompt, and console are identical to a locally owned TUI.
+//
+// A remote backend never owns or scans a local serial port. Snapshot polling
+// and Events are expected to travel over the authenticated controller IPC.
+type RemoteBackend struct {
+	Endpoint        string
+	InitialSnapshot control.Snapshot
+	Snapshot        func(context.Context) (control.Snapshot, error)
+	Events          <-chan control.Event
+	// SaveHostUI persists the host-owned UI subset (identity and peripheral
+	// names) through the remote primary's structured IPC contract. Client
+	// appearance and terminal preferences continue to use Options.SaveUI.
+	SaveHostUI func(appconfig.UI) error
+}
+
 type Options struct {
 	UIConfig         func() appconfig.UI
 	SaveUI           func(appconfig.UI) error
@@ -187,6 +205,7 @@ type Options struct {
 	ReportPage       func(string) error
 	ReportTerminal   func(page, title string) error
 	WriteOSC         func(payload string) error
+	Remote           *RemoteBackend
 	Preview          *control.Snapshot
 	ForceWelcome     bool
 	DisableWelcome   bool
