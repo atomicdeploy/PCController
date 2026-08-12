@@ -543,6 +543,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         goto badPayload;
       }
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
+      // STATUS_RGB is the explicit host-preview/fallback owner. It stops a
+      // native effect before painting the supplied static frame.
+      statusLeds.cancelEffect();
       statusLeds.setBrightness(payload[3]);
       statusLeds.setCustom(payload[0], payload[1], payload[2]);
       goto acknowledged;
@@ -562,6 +565,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
               payload[8], readU16(payload + 9), payload[11], frameNow)) {
         goto badPayload;
       }
+      // STATUS_EFFECT transfers ownership to the MCU compositor. setEffect
+      // is descriptor-idempotent, so preview refresh traffic cannot reset its
+      // phase; serviceStatusLedPush mirrors every changed rendered frame.
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
       goto acknowledged;
 

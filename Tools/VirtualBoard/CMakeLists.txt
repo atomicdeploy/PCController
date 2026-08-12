@@ -92,6 +92,11 @@ if(BUILD_TESTING)
     ../../LocalLib/ShiftRegisters.cpp
     ../../LocalLib/TonePlayer.cpp
     ../../Project/RelayController.cpp
+    ../../Project/CompactI2c.cpp
+    ../../Project/PwmController.cpp
+    ../../Project/PwmExpanderDriver.cpp
+    ../../Project/StatusLedController.cpp
+    ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_controls_tests PRIVATE
     tests/arduino_mock

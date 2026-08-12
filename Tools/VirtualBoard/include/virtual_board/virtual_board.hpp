@@ -132,6 +132,8 @@ private:
   void renderStatusEffect();
   void finishStatusEffect();
   void serviceStatusEffect(TimePoint now);
+  void restoreNativeStatus(TimePoint now);
+  std::uint8_t nativeStatusCondition(TimePoint now) const;
   void setStatusRgb(std::uint8_t red, std::uint8_t green,
                     std::uint8_t blue, std::uint8_t brightness);
   bool statusProfile(std::uint8_t condition,
@@ -197,6 +199,8 @@ private:
   std::uint8_t statusEffectMinimum_ = 0;
   std::uint8_t statusEffectPhase_ = 0;
   std::uint8_t statusEffectRepeats_ = 0;
+  std::array<std::uint8_t, 12> statusEffectDescriptor_{};
+  bool statusEffectDescriptorValid_ = false;
   std::uint16_t statusEffectStepMs_ = 20;
   bool hostPanelCaptured_ = false;
   std::uint16_t hostPanelMeta_ = 0;

@@ -95,8 +95,15 @@ bool StatusLedController::setEffect(
       minimumBrightness > brightness) {
     return false;
   }
+  // STATUS_EFFECT selects the board-native compositor. A repeated descriptor
+  // is an acknowledgement-safe host refresh, not a new animation request.
+  // Replace an active kind with STATUS_EFFECT cancel then the new descriptor.
+  if (mode_ == StatusLedMode::Custom && effect_ == effect) {
+    return true;
+  }
   cue_ = StatusLedCue::None;
   condition_ = ManualCondition;
+  mode_ = StatusLedMode::Custom;
   effect_ = effect;
   customRed_ = red;
   customGreen_ = green;
@@ -116,7 +123,9 @@ bool StatusLedController::setEffect(
 
 void StatusLedController::cancelEffect() {
   effect_ = StatusLedEffect::None;
-  loadProfile(static_cast<uint8_t>(mode_), millis());
+  // The caller clears the host override before the next lifecycle pass. Keep
+  // the last rendered frame here so cancellation cannot flash the Custom
+  // fallback profile between the host and board owners.
 }
 
 StatusLedEffect StatusLedController::effect() const { return effect_; }
