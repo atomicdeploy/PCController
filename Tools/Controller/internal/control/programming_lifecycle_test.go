@@ -327,6 +327,36 @@ func TestLoadProgrammingMarkerRejectsUnrecoverableMissingPhase(t *testing.T) {
 	}
 }
 
+func TestLoadProgrammingMarkerAcceptsLegacyMacroDroppedSteps(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "programming-recovery-legacy-macro.json")
+	content := `{
+  "format": "pccontroller.programming-recovery",
+  "prepared_at": "2026-08-12T15:05:54Z",
+  "device": {"port": "COM4"},
+  "target_firmware_sha256": "` + strings.Repeat("a", 64) + `",
+  "settings_snapshot_path": "` + filepath.ToSlash(filepath.Join(directory, "settings.json")) + `",
+  "original_live_state": {
+    "macro": {"schema": 3, "state": 0, "dropped_steps": 7},
+    "program_state": {"mode": "Idle"},
+    "host_outputs": {}
+  },
+  "safe_state_applied": true,
+  "phase": "latched-safe"
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadProgrammingMarker(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OriginalLiveState == nil || loaded.OriginalLiveState.Macro == nil ||
+		loaded.OriginalLiveState.Macro.DroppedSteps != 7 {
+		t.Fatalf("legacy macro status was not preserved: %#v", loaded.OriginalLiveState)
+	}
+}
+
 func TestProgrammingLifecycleDoesNotRestoreBeforeHostCompletion(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	device := &fakeProgrammingDevice{
