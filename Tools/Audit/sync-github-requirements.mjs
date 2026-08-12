@@ -1023,6 +1023,7 @@ const PROMPT_EXCERPTS = {
   namedSiblingPorts: prompt(SESSION.tonight, 8, 'Bring the applicable Rayan Lamp and Patris-export implementations into this project in full and enhance them; do not merely refer to or imitate them.'),
   identityVisuals: prompt(SESSION.tonight, 9, 'Align the favicon, WebUI logo, executable and console icons as generated forms of one unique source asset, and show before and after variants in GitHub for selection.'),
   liveMeasurementTiming: prompt(SESSION.tonight, 10, 'Expose host-synchronized Live Measurements refresh rate and freshness window in WebUI and TUI Settings. Default to 250 ms (4 Hz) and 1500 ms, restrict refresh to 200–500 ms, require freshness to include headroom, persist it in host config, and immediately propagate changes to every WebUI/TUI instance including remote TUIs.'),
+  peripheralPresenceUI: prompt(SESSION.tonight, 11, 'When INA219, PCA9685, DS18B20, LCD, or another detectable peripheral is unavailable, hide its UI controls and readings instead of presenting invalid values.'),
   webAcceptanceRepair: prompt(SESSION.cafe, 16, 'Repair the embedded controller WebUI temperature truth and charts, relay controls, terminal behavior, nested workbench routes, settings and tables, updates, and automatic client resource refresh.'),
   ledClientExperience: prompt(SESSION.cafe, 17, 'Keep WebUI and TUI synchronized for status LED ownership, profiles, effects, live preview, stream ordering, accessibility, RTL and LTR, and responsive dark-mode behavior.'),
   buzzerFallback: prompt(SESSION.recovery, 177, 'Add a fallback for audio-frequency generation when port 0x61 is unavailable.'),
@@ -1254,6 +1255,8 @@ const PR_ORIGINAL_REQUESTS = {
   200: [PROMPT_EXCERPTS.liveMeasurementTiming],
   201: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate],
   202: [PROMPT_EXCERPTS.liveMeasurementTiming],
+  203: [PROMPT_EXCERPTS.displaysAudio],
+  204: [PROMPT_EXCERPTS.displayPresentation, PROMPT_EXCERPTS.peripheralPresenceUI],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';

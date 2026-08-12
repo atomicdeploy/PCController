@@ -95,10 +95,14 @@ func ParseBoardNameFromSettings(payload []byte) (BoardName, error) {
 }
 
 const (
-	StatusBuzzerBusy     uint16 = 1 << 12
-	StatusProgramRunning uint16 = 1 << 13
-	StatusHostOffline    uint16 = 1 << 14
-	StatusHot            uint16 = 1 << 15
+	StatusINA219Available uint16 = 1 << 0
+	StatusPWMAvailable    uint16 = 1 << 1
+	StatusTLEDAvailable   uint16 = 1 << 2
+	StatusTBTAvailable    uint16 = 1 << 3
+	StatusBuzzerBusy      uint16 = 1 << 12
+	StatusProgramRunning  uint16 = 1 << 13
+	StatusHostOffline     uint16 = 1 << 14
+	StatusHot             uint16 = 1 << 15
 )
 
 // SupportsHostMenuOverlay remains an explicit semantic probe for the
@@ -415,33 +419,36 @@ func ParseSettings(payload []byte) (Settings, error) {
 }
 
 type Status struct {
-	UptimeMS       uint32 `json:"uptime_ms"`
-	SupplyMV       int32  `json:"supply_mv"`
-	BusMV          int32  `json:"bus_mv"`
-	CurrentMA      int32  `json:"current_ma"`
-	PowerMW        int32  `json:"power_mw"`
-	TLEDCenti      int16  `json:"temperature_led_centi_c"`
-	TBTCenti       int16  `json:"temperature_bt_audio_centi_c"`
-	Flags          uint16 `json:"flags"`
-	ProgramRunning bool   `json:"program_running"`
-	HostOffline    bool   `json:"host_offline"`
-	Hot            bool   `json:"hot"`
-	RawInputs      byte   `json:"raw_inputs"`
-	ActiveKeys     byte   `json:"active_keys"`
-	ActiveRelays   byte   `json:"active_relays"`
-	MenuPage       byte   `json:"menu_page"`
-	ProgramMode    byte   `json:"program_mode"`
-	DoorOpen       bool   `json:"door_open"`
-	BluetoothState byte   `json:"bluetooth_audio_state"`
-	PWMAvailable   bool   `json:"pwm_available"`
-	PWMChannel     byte   `json:"pwm_channel"`
-	PWMValue       uint16 `json:"pwm_value"`
-	LCDAddress     byte   `json:"lcd_address"`
-	PWMErrors      byte   `json:"pwm_errors"`
-	FramingErrors  uint16 `json:"framing_errors"`
-	CRCErrors      uint16 `json:"crc_errors"`
-	ResetCause     byte   `json:"reset_cause"`
-	ResetCount     uint32 `json:"reset_count"`
+	UptimeMS        uint32 `json:"uptime_ms"`
+	SupplyMV        int32  `json:"supply_mv"`
+	BusMV           int32  `json:"bus_mv"`
+	CurrentMA       int32  `json:"current_ma"`
+	PowerMW         int32  `json:"power_mw"`
+	TLEDCenti       int16  `json:"temperature_led_centi_c"`
+	TBTCenti        int16  `json:"temperature_bt_audio_centi_c"`
+	Flags           uint16 `json:"flags"`
+	INA219Available bool   `json:"ina219_available"`
+	TLEDAvailable   bool   `json:"temperature_led_available"`
+	TBTAvailable    bool   `json:"temperature_bt_audio_available"`
+	ProgramRunning  bool   `json:"program_running"`
+	HostOffline     bool   `json:"host_offline"`
+	Hot             bool   `json:"hot"`
+	RawInputs       byte   `json:"raw_inputs"`
+	ActiveKeys      byte   `json:"active_keys"`
+	ActiveRelays    byte   `json:"active_relays"`
+	MenuPage        byte   `json:"menu_page"`
+	ProgramMode     byte   `json:"program_mode"`
+	DoorOpen        bool   `json:"door_open"`
+	BluetoothState  byte   `json:"bluetooth_audio_state"`
+	PWMAvailable    bool   `json:"pwm_available"`
+	PWMChannel      byte   `json:"pwm_channel"`
+	PWMValue        uint16 `json:"pwm_value"`
+	LCDAddress      byte   `json:"lcd_address"`
+	PWMErrors       byte   `json:"pwm_errors"`
+	FramingErrors   uint16 `json:"framing_errors"`
+	CRCErrors       uint16 `json:"crc_errors"`
+	ResetCause      byte   `json:"reset_cause"`
+	ResetCount      uint32 `json:"reset_count"`
 }
 
 func (status Status) UptimeDuration() time.Duration {
@@ -456,6 +463,7 @@ func (status Status) ReadableUptime() string {
 // human-readable value to every snapshot, history, REST, RPC, and scripting
 // JSON surface. The derived field never enters the compact UART payload.
 func (status Status) MarshalJSON() ([]byte, error) {
+	status.applyAvailability()
 	type StatusFields Status
 	return json.Marshal(struct {
 		StatusFields
@@ -478,7 +486,19 @@ func (status *Status) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*status = Status(decoded.StatusFields)
+	status.applyAvailability()
 	return nil
+}
+
+// applyAvailability turns the firmware's compact STATUS bitmap into typed
+// host/UI facts. Keeping these derived fields out of the UART payload avoids
+// adding bytes to every telemetry frame while preventing invalid sentinel
+// readings from being presented as real measurements.
+func (status *Status) applyAvailability() {
+	status.INA219Available = status.Flags&StatusINA219Available != 0
+	status.PWMAvailable = status.Flags&StatusPWMAvailable != 0
+	status.TLEDAvailable = status.Flags&StatusTLEDAvailable != 0
+	status.TBTAvailable = status.Flags&StatusTBTAvailable != 0
 }
 
 func ParseStatus(payload []byte) (Status, error) {
@@ -516,6 +536,7 @@ func ParseStatus(payload []byte) (Status, error) {
 	status.ProgramRunning = status.Flags&StatusProgramRunning != 0
 	status.HostOffline = status.Flags&StatusHostOffline != 0
 	status.Hot = status.Flags&StatusHot != 0
+	status.applyAvailability()
 	status.ResetCause = payload[43]
 	status.ResetCount = binary.LittleEndian.Uint32(payload[44:48])
 	return status, nil
