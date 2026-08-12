@@ -113,12 +113,38 @@ if(BUILD_TESTING)
     tests/arduino_mock
     ../..
   )
+  target_compile_definitions(firmware_controls_tests PRIVATE
+    PCCONTROLLER_NATIVE_TEST=1
+  )
   if(MSVC)
     target_compile_options(firmware_controls_tests PRIVATE /W4 /permissive-)
   else()
     target_compile_options(firmware_controls_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_controls_unit COMMAND firmware_controls_tests)
+
+  # Run the production MCU status renderer against a fake PCA9685 transport.
+  # Timing is simulated at 1 ms resolution; no host-side animation is involved.
+  add_executable(firmware_status_led_tests
+    tests/status_led_test.cpp
+    ../../Project/StatusLedController.cpp
+    ../../Project/PwmController.cpp
+  )
+  target_include_directories(firmware_status_led_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_status_led_tests PRIVATE
+    PCCONTROLLER_NATIVE_TEST=1
+    PCCONTROLLER_ENABLE_PCA9685=1
+    PCCONTROLLER_ENABLE_STATUS_LED_ENGINE=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_status_led_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_status_led_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_status_led_unit COMMAND firmware_status_led_tests)
 
   # Compile the production EEPROM reset journal against a byte-accurate mock.
   # This covers corrupt/torn slots and both physical/count rollover boundaries.

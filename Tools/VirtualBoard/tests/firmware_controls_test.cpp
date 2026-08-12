@@ -43,6 +43,7 @@ void bind(Key &key, KeyTrace &trace) {
 }
 
 void testKeyGestures() {
+  shiftRegisters.begin();
   shiftRegisters.clearVirtualInputs();
 
   require(KEY_DEBOUNCE_MS <= 25,
@@ -399,6 +400,11 @@ void testTransitionsAndRollover() {
 }
 
 void testDisplayBrightnessFade() {
+  SevenSegments initiallyOff;
+  initiallyOff.begin(0);
+  require(initiallyOff.lastCommandForTest() == 0x80,
+          "TM1637 begin(0) did not issue the display-off command");
+
   SevenSegments segments;
   segments.begin(5);
   segments.serviceBrightness(0, 69);
