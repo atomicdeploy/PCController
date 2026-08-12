@@ -50,10 +50,24 @@ func TestReleaseDiscoveryRPCAndRemotePolicy(t *testing.T) {
 	config.IPC.AuthToken = "0123456789abcdefghijklmn"
 	service.HostConfig = func() appconfig.Config { return config }
 	handler := websocketMux(context.Background(), service)
+
+	service.AuthorizationDisabled = true
+	config.IPC.AllowRemote = false
 	request := httptest.NewRequest(http.MethodPost, "http://controller.example/api/discovery/manifest", strings.NewReader(`{"url":"`+manifestServer.URL+`/manifest.json"}`))
 	request.RemoteAddr = "198.51.100.10:43100"
-	request.Header.Set("Authorization", "Bearer "+config.IPC.AuthToken)
 	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK ||
+		recorder.Header().Get("X-PCController-Authentication") != "disabled" {
+		t.Fatalf("alpha remote discovery status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+
+	service.AuthorizationDisabled = false
+	config.IPC.AllowRemote = true
+	request = httptest.NewRequest(http.MethodPost, "http://controller.example/api/discovery/manifest", strings.NewReader(`{"url":"`+manifestServer.URL+`/manifest.json"}`))
+	request.RemoteAddr = "198.51.100.10:43100"
+	request.Header.Set("Authorization", "Bearer "+config.IPC.AuthToken)
+	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("remote discovery status=%d body=%s", recorder.Code, recorder.Body.String())

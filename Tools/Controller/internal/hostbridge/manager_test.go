@@ -207,7 +207,7 @@ func TestRelayTrackerRejectsHopLimit(t *testing.T) {
 	}
 }
 
-func TestCascadedBridgeCallReauthorizesEveryHost(t *testing.T) {
+func TestCascadedBridgeCallUsesExplicitAlphaAuthorizationMode(t *testing.T) {
 	newManager := func(name string, policy appconfig.RemoteAccessPolicy) *Manager {
 		store, err := appconfig.Open(filepath.Join(t.TempDir(), name+".json"))
 		if err != nil {
@@ -229,9 +229,10 @@ func TestCascadedBridgeCallReauthorizesEveryHost(t *testing.T) {
 	}
 	first := newManager("first", appconfig.DefaultRemoteAccessPolicy())
 	middlePolicy := appconfig.DefaultRemoteAccessPolicy()
-	middlePolicy.BridgeCalls = true
 	middle := newManager("middle", middlePolicy)
-	edge := newManager("edge", appconfig.DefaultRemoteAccessPolicy())
+	edgePolicy := appconfig.DefaultRemoteAccessPolicy()
+	edgePolicy.Read = false
+	edge := newManager("edge", edgePolicy)
 
 	connect := func(source, target *Manager, name string) *peerRPCSession {
 		var session *peerRPCSession
@@ -278,18 +279,20 @@ func TestCascadedBridgeCallReauthorizesEveryHost(t *testing.T) {
 	if response.Error != nil || !strings.Contains(string(encoded), `"connected":false`) {
 		t.Fatalf("cascaded read response=%s", encoded)
 	}
-
-	if _, err := edge.store.Update(func(config *appconfig.Config) error {
-		config.IPC.RemotePolicy.Read = false
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+	for name, manager := range map[string]*Manager{"middle": middle, "edge": edge} {
+		if service := manager.remotePeerService(); !service.AuthorizationDisabled {
+			t.Fatalf("%s bridge service did not opt into alpha authorization mode", name)
+		}
 	}
-	response = call()
-	encoded, _ = json.Marshal(response)
-	if !strings.Contains(string(encoded), `"code":-32003`) ||
-		!strings.Contains(string(encoded), "read") {
-		t.Fatalf("edge read denial was not preserved: %s", encoded)
+
+	strictEdge := edge.remotePeerService()
+	strictEdge.AuthorizationDisabled = false
+	strictResponse := strictEdge.DispatchRemote(
+		context.Background(), ipcjson.Request{Method: "controller.snapshot"}, "bridge",
+	)
+	if strictResponse.Error == nil || strictResponse.Error.Code != -32003 ||
+		!strings.Contains(strictResponse.Error.Message, "read") {
+		t.Fatalf("zero-value strict edge policy was not preserved: %#v", strictResponse)
 	}
 }
 
