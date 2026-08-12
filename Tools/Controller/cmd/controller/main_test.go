@@ -97,6 +97,37 @@ func TestCompileDryRunDoesNotRequireToolchainOnPATH(t *testing.T) {
 	}
 }
 
+func TestToolchainCompileHonorsExistingConfigWithoutMutatingIt(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	configured := appconfig.Defaults()
+	configured.Programming.ToolchainCLI = filepath.Join(t.TempDir(), "shared-arduino-cli.exe")
+	configured.Programming.ToolchainConfig = filepath.Join(t.TempDir(), "shared-firmware-cli.yaml")
+	if err := appconfig.Write(configPath, configured); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{
+		"--config", configPath, "toolchain", "compile", findProjectRoot(), "--dry-run",
+	}, &stdout, &stderr); err != nil {
+		t.Fatalf("toolchain compile: %v\nstderr: %s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), configured.Programming.ToolchainCLI) ||
+		!strings.Contains(stdout.String(), configured.Programming.ToolchainConfig) {
+		t.Fatalf("compile did not honor configured toolchain:\n%s", stdout.String())
+	}
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("toolchain compile rewrote its existing configuration")
+	}
+}
+
 func TestRuntimeCommandStillValidatesRuntimeConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(

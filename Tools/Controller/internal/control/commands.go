@@ -326,6 +326,31 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name: "inputs", Aliases: []string{"input"}, Usage: "inputs",
+		Summary: "read raw shift-register inputs and their board interpretations",
+		Run: func(ctx context.Context, _ []string) (string, error) {
+			status, err := refresh(ctx, runtime)
+			if err != nil {
+				return "", err
+			}
+			level := func(bit uint8) string {
+				if status.RawInputs&(1<<bit) != 0 {
+					return "high"
+				}
+				return "low"
+			}
+			return fmt.Sprintf(
+				"raw=0x%02X active_keys=0x%02X\\n"+
+					"K1(previous)=%s K2(next)=%s K3(decrease)=%s K4(increase)=%s\\n"+
+					"door_reed(bit7)=%s interpreted_open=%t\\n"+
+					"bt_audio_led(bit6)=%s interpreted_state=%d",
+				status.RawInputs, status.ActiveKeys,
+				level(0), level(1), level(2), level(3),
+				level(7), status.DoorOpen, level(6), status.BluetoothState,
+			), nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "event", Usage: "event latest | event wait [KIND] [TIMEOUT]",
 		Summary: "wait for an immediate door/key/RF/macro/device event",
 		Run: func(ctx context.Context, args []string) (string, error) {

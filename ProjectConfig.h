@@ -19,16 +19,15 @@
 
 // Raw 74HC165 levels for the two monitored inputs. A conventional reed switch
 // wired to ground is low while the door magnet is present/closed, so an open
-// door is normally read high. BT audio modules commonly sink the indicator
-// LED cathode while it is illuminated, so that input defaults active-low.
-// Flip either value after electrical verification if the board buffers it
-// differently.
+// door is normally read high. The installed BT Audio indicator is buffered
+// active-high: a sampled high means its LED is on. Flip either value only
+// after electrical verification if a future board buffers it differently.
 #ifndef PCCONTROLLER_DOOR_OPEN_RAW_HIGH
 #define PCCONTROLLER_DOOR_OPEN_RAW_HIGH 1
 #endif
 
 #ifndef PCCONTROLLER_BT_LED_ON_RAW_HIGH
-#define PCCONTROLLER_BT_LED_ON_RAW_HIGH 0
+#define PCCONTROLLER_BT_LED_ON_RAW_HIGH 1
 #endif
 
 // The host owns the 16x2 PCF8574 LCD through the generic I2C opcode. Keeping

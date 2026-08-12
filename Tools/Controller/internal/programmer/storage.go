@@ -14,7 +14,12 @@ import (
 	"pccontroller.local/controller/internal/productidentity"
 )
 
-const HostDataDirectoryEnvironment = "PCCONTROLLER_DATA_DIR"
+const (
+	HostDataDirectoryEnvironment = "PCCONTROLLER_DATA_DIR"
+	// ToolchainDirectoryEnvironment pins managed Arduino/AVR dependencies to
+	// one durable machine-wide-in-practice location instead of a source tree.
+	ToolchainDirectoryEnvironment = "PCCONTROLLER_TOOLCHAIN_DIR"
+)
 
 type HostDataPaths struct {
 	DataDir          string `json:"data_dir"`
@@ -37,7 +42,28 @@ func DefaultHostDataPaths() (HostDataPaths, error) {
 	if err != nil {
 		return HostDataPaths{}, err
 	}
-	return HostDataPathsFor(dataDirectory)
+	paths, err := HostDataPathsFor(dataDirectory)
+	if err != nil {
+		return HostDataPaths{}, err
+	}
+	toolchainDirectory, err := defaultToolchainDirectory(paths.ToolchainDir, os.Getenv)
+	if err != nil {
+		return HostDataPaths{}, err
+	}
+	paths.ToolchainDir = toolchainDirectory
+	return paths, nil
+}
+
+func defaultToolchainDirectory(fallback string, lookup func(string) string) (string, error) {
+	for _, name := range []string{ToolchainDirectoryEnvironment} {
+		if override := strings.TrimSpace(lookup(name)); override != "" {
+			if !filepath.IsAbs(override) {
+				return "", fmt.Errorf("%s must be an absolute path", name)
+			}
+			return filepath.Clean(override), nil
+		}
+	}
+	return fallback, nil
 }
 
 func HostDataPathsFor(dataDirectory string) (HostDataPaths, error) {

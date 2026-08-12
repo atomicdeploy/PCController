@@ -178,8 +178,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if translateErr != nil {
 			return translateErr
 		}
+		// A compile must never create or rewrite the runtime configuration, but
+		// it must honor an already-valid configuration.  In particular that is
+		// where a user selects the shared Arduino/AVR installation instead of
+		// the managed fallback cache.
+		compileConfig := appconfig.Defaults()
+		if configured, _, loadErr := appconfig.Load(configPath); loadErr == nil {
+			compileConfig = configured
+		}
 		return runProgramWithConfig(
-			translated, stdout, stderr, appconfig.Defaults(),
+			translated, stdout, stderr, compileConfig,
 		)
 	}
 	store, err := appconfig.Open(configPath)

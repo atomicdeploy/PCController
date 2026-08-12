@@ -1,6 +1,7 @@
 package appconfig
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -178,6 +179,31 @@ func TestInvalidReloadRetainsLastGoodValue(t *testing.T) {
 	}
 	if store.Current().Connection.BaudRate != 115200 {
 		t.Fatal("invalid reload replaced last-known-good configuration")
+	}
+}
+
+func TestLoadAcceptsUTF8BOMAndWriteRemovesIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := append([]byte{0xEF, 0xBB, 0xBF}, []byte(`{"connection":{"port":"COM19"}}`)...)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	value, _, err := Load(path)
+	if err != nil {
+		t.Fatalf("load BOM-prefixed JSON: %v", err)
+	}
+	if value.Connection.Port != "COM19" {
+		t.Fatalf("port=%q, want COM19", value.Connection.Port)
+	}
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written) >= 3 && bytes.Equal(written[:3], []byte{0xEF, 0xBB, 0xBF}) {
+		t.Fatal("canonical config write retained UTF-8 BOM")
 	}
 }
 

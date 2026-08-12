@@ -28,6 +28,11 @@ func configFormat(path string) (string, error) {
 }
 
 func decodeConfig(path string, content []byte, target *Config) error {
+	// Windows editors commonly prefix UTF-8 JSON, YAML, and TOML with a BOM.
+	// The Go JSON decoder deliberately rejects it, so normalize it at the one
+	// file boundary instead of making every configuration consumer special-case
+	// a harmless encoding marker.  Writes remain BOM-free.
+	content = bytes.TrimPrefix(content, []byte{0xEF, 0xBB, 0xBF})
 	format, err := configFormat(path)
 	if err != nil {
 		return err
