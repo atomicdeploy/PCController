@@ -63,7 +63,6 @@ import {
 } from './significant-events'
 import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
-import { publishBrowserConsole, publishBrowserConsoleState } from './browser-console'
 import {
   createTabChannel,
   type TabChannel,
@@ -88,6 +87,8 @@ import { shouldToastControllerEvent } from './event-notification-policy'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
+import { AppPreferencesDialog } from './app-preferences-dialog'
+import { loadQuickHeaderPreferences, normalizeQuickHeaderPreferences, saveQuickHeaderPreferences } from './quick-header-preferences'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -382,8 +383,8 @@ export default function App() {
   const [paletteQuery, setPaletteQuery] = useState('')
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [hotkeyHelp, setHotkeyHelp] = useState(false)
-  const [quickSettings, setQuickSettings] = useState(false)
-  const [quickSettingsTab, setQuickSettingsTab] = useState<'appearance' | 'audio'>('appearance')
+  const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
+  const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
   const [bootOpen, setBootOpen] = useState(demo)
   const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
@@ -421,6 +422,12 @@ export default function App() {
     applyAppearance(value)
     audioRef.current?.setVolume(value.audioVolume)
     audioRef.current?.setMuted(value.audioMuted)
+  }, [])
+
+  const saveQuickHeader = useCallback((value: ReturnType<typeof normalizeQuickHeaderPreferences>) => {
+    const normalized = normalizeQuickHeaderPreferences(value)
+    setQuickHeader(normalized)
+    saveQuickHeaderPreferences(normalized)
   }, [])
 
   const adoptHostAppearance = useCallback((value: Appearance, etag: string) => {
@@ -750,34 +757,6 @@ export default function App() {
     tabChannelRef.current?.publishPresence(document.hidden ? 'hidden' : 'active', value)
     document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
-
-  const browserConsoleState = useMemo(() => ({
-    title: productTitle,
-    hostVersion: uiConfig?.host_version || 'not reported',
-    page,
-    connected: !demo && snapshot.connected,
-    port: snapshot.port.name || '',
-    transport: streamState,
-    eventCount: events.length,
-  }), [demo, events.length, page, productTitle, snapshot.connected, snapshot.port.name, streamState, uiConfig?.host_version])
-
-  useEffect(() => publishBrowserConsole({
-    api: 'PCController.browser/1',
-    inspect: () => browserConsoleState,
-    command: (value) => {
-      const command = value.trim()
-      if (!command) return Promise.reject(new Error('PCController.command requires a non-empty normalized command string'))
-      return runCommand(command)
-    },
-    refresh: async () => { await refresh() },
-    navigate: (value) => {
-      const destination = navigation.find((candidate) => candidate.id === value)?.id
-      if (!destination) throw new Error(`Unknown PCController page: ${value}`)
-      navigate(destination)
-    },
-  }), [browserConsoleState, navigate, refresh, runCommand])
-
-  useEffect(() => { publishBrowserConsoleState(browserConsoleState) }, [browserConsoleState])
 
   const saveAppearance = useCallback((value: Appearance) => {
     const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
@@ -1152,6 +1131,7 @@ export default function App() {
     transport: { streamState, tabBusSupported, tabPeers },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
+    openAppPreferences: () => setAppPreferencesOpen(true),
   }
 
   const PageView = pageViewFor(page)
@@ -1216,8 +1196,8 @@ export default function App() {
     <MotionConfig reducedMotion={appearance.reduceMotion ? 'always' : 'user'}>
     <div
       className={`app-shell${sidebarOpen ? '' : ' is-sidebar-compact'}${bootResolved ? '' : ' is-bootstrap-pending'}`}
-      inert={!bootResolved || bootOpen || hotkeyHelp || quickSettings ? true : undefined}
-      aria-hidden={!bootResolved || bootOpen || hotkeyHelp || quickSettings ? true : undefined}
+      inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
+      aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
     >
       <aside className="sidebar" aria-label={t('primaryNavigation')}>
         <div className="brand">
@@ -1251,12 +1231,12 @@ export default function App() {
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
           <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>
-          <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
-          <label className="topbar-locale"><Languages size={17} /><span className="sr-only">{t('switchLanguage')}</span><select aria-label={t('switchLanguage')} value={appearance.locale} onChange={(event) => saveAppearance({ ...appearance, locale: event.target.value as Appearance['locale'] })}><option value="en">EN</option><option value="fa">فا</option></select></label>
-          <button className="topbar-icon" aria-label={t('settings')} onClick={() => { setQuickSettingsTab('appearance'); setQuickSettings(true) }}><Settings size={18} /></button>
-          <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>
-          <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>
-          <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>
+          <button className="topbar-icon" aria-label={appearance.locale === 'fa' ? 'ترجیحات برنامه' : 'Application preferences'} aria-haspopup="dialog" onClick={() => setAppPreferencesOpen(true)}><Settings size={18} /></button>
+          {quickHeader.theme && <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>}
+          {quickHeader.language && <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>}
+          {quickHeader.audio && <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>}
+          {quickHeader.hotkeys && <button className="topbar-icon topbar-hotkeys" aria-label={t('keyboardShortcuts')} aria-keyshortcuts="?" onClick={() => setHotkeyHelp(true)}><Keyboard size={18} /></button>}
+          {quickHeader.notifications && <button className="topbar-icon" aria-label={t('notifications')} onClick={() => navigate('events')}><Bell size={18} />{events.length > 0 && <i />}</button>}
         </div>
       </header>
 
@@ -1305,20 +1285,11 @@ export default function App() {
       </AnimatePresence>
 
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
+      <AppPreferencesDialog open={appPreferencesOpen} locale={appearance.locale} appearance={appearance} quickHeader={quickHeader} onAppearance={saveAppearance} onQuickHeader={saveQuickHeader} onClose={() => setAppPreferencesOpen(false)} />
       <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
     </div>
     <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />
     <HotkeyHelp open={hotkeyHelp} locale={appearance.locale} onClose={() => setHotkeyHelp(false)} />
-    <AnimatePresence>
-      {quickSettings && <motion.div className="quick-settings-layer" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-        <button className="modal-backdrop" aria-label={appearance.locale === 'fa' ? 'بستن تنظیمات سریع' : 'Close quick settings'} onClick={() => setQuickSettings(false)} />
-        <motion.section className="quick-settings" role="dialog" aria-modal="true" aria-labelledby="quick-settings-title" initial={{ opacity: 0, y: -12, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -8, scale: .985 }} transition={{ duration: .2, ease: 'easeOut' }}>
-          <header><div><Settings size={18} /><span id="quick-settings-title">{appearance.locale === 'fa' ? 'تنظیمات سریع' : 'Quick settings'}</span></div><button className="modal__close" aria-label={appearance.locale === 'fa' ? 'بستن' : 'Close'} onClick={() => setQuickSettings(false)}><X size={18} /></button></header>
-          <nav className="quick-settings__tabs" aria-label={appearance.locale === 'fa' ? 'بخش‌های تنظیمات' : 'Settings sections'}><button className={quickSettingsTab === 'appearance' ? 'is-active' : ''} onClick={() => setQuickSettingsTab('appearance')}>{appearance.locale === 'fa' ? 'ظاهر' : 'Appearance'}</button><button className={quickSettingsTab === 'audio' ? 'is-active' : ''} onClick={() => setQuickSettingsTab('audio')}>{appearance.locale === 'fa' ? 'بازخورد' : 'Feedback'}</button></nav>
-          {quickSettingsTab === 'appearance' ? <div className="quick-settings__body"><label>{appearance.locale === 'fa' ? 'پوسته' : 'Theme'}<select value={appearance.theme} onChange={(event) => saveAppearance({ ...appearance, theme: event.target.value as Appearance['theme'] })}><option value="system">{appearance.locale === 'fa' ? 'سیستم' : 'System'}</option><option value="dark">{appearance.locale === 'fa' ? 'تیره' : 'Dark'}</option><option value="light">{appearance.locale === 'fa' ? 'روشن' : 'Light'}</option></select></label><label>{appearance.locale === 'fa' ? 'زبان' : 'Language'}<select value={appearance.locale} onChange={(event) => saveAppearance({ ...appearance, locale: event.target.value as Appearance['locale'] })}><option value="en">English</option><option value="fa">فارسی</option></select></label><Button icon={Settings} onClick={() => { setQuickSettings(false); navigate('settings') }}>{appearance.locale === 'fa' ? 'باز کردن همه تنظیمات' : 'Open all settings'}</Button></div> : <div className="quick-settings__body"><Button icon={appearance.audioMuted ? VolumeX : Volume2} onClick={toggleAudio}>{appearance.audioMuted ? t('enableAudio') : t('muteAudio')}</Button><Button icon={Keyboard} onClick={() => { setQuickSettings(false); setHotkeyHelp(true) }}>{appearance.locale === 'fa' ? 'راهنمای میان‌برها' : 'Keyboard shortcuts'}</Button><Button icon={Bell} onClick={() => { setQuickSettings(false); navigate('events') }}>{appearance.locale === 'fa' ? 'مشاهده رویدادها' : 'View activity'}</Button></div>}
-        </motion.section>
-      </motion.div>}
-    </AnimatePresence>
     </MotionConfig>
   )
 }

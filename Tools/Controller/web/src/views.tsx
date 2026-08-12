@@ -155,6 +155,7 @@ export interface SharedViewProps {
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
   boardSettingsReadState: BoardSettingsReadState
+  openAppPreferences: () => void
 }
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
@@ -388,6 +389,9 @@ export function DashboardView(props: SharedViewProps) {
         {snapshot.connected && frame('overview', copy('Controller overview', 'نمای کلی کنترلر'), <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
           { label: copy('Read identity', 'خواندن شناسه'), icon: Cpu, onSelect: () => { void command('hello') } },
           { label: copy('Open controller controls', 'بازکردن کنترل‌های برد'), icon: CircuitBoard, onSelect: () => { window.location.hash = '#/controls' } },
+          { label: copy('Configure seven-segment and LCD', 'پیکربندی نمایشگر هفت‌بخشی و LCD'), icon: Binary, onSelect: () => { window.location.hash = '#/settings' } },
+          { label: copy('Configure buzzer routing', 'پیکربندی مسیر بیزر'), icon: Volume2, onSelect: () => { window.location.hash = '#/settings' } },
+          { label: copy('Open connection settings', 'باز کردن تنظیمات اتصال'), icon: Cable, onSelect: () => { window.location.hash = '#/settings' } },
         ]}>
           <div className="data-list">
             <DataRow label={t('device')} value={deviceSummary.device} />
@@ -844,7 +848,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; /** Accepted but intentionally ignored while alpha auth is disabled. */ token?: string; onToken?: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, openAppPreferences }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; /** Accepted but intentionally ignored while alpha auth is disabled. */ token?: string; onToken?: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
     'Application title is required.': 'عنوان برنامه الزامی است.',
@@ -903,7 +907,6 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [integrationsBusy, setIntegrationsBusy] = useState(true)
   const [integrationsLoaded, setIntegrationsLoaded] = useState(false)
   const [integrationsNotice, setIntegrationsNotice] = useState('')
-  const updateAppearance = <K extends keyof Appearance>(key: K, value: Appearance[K]) => onAppearance({ ...appearance, [key]: value })
   const titleValidation = useMemo(() => validateAppTitle(draftAppTitle), [draftAppTitle])
 	const boardSilent = (snapshot.settings.flags & 0x01) !== 0
 	const hostSilent = !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
@@ -1236,18 +1239,8 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 			{buzzerPathNotice && <p className="settings-action-feedback" role="status">{buzzerPathNotice}</p>}
 		</Card>
 
-        <Card icon={PanelTop} iconTone="accent" title={t('appearance')} eyebrow={`${appearanceThemeLabel} · ${appearanceDirectionLabel}`} className="settings-card settings-card--wide" menu={[
-          { label: copy('Follow system appearance', 'پیروی از ظاهر سیستم'), icon: PanelTop, onSelect: () => onAppearance({ ...appearance, theme: 'system', direction: 'auto' }) },
-          { label: appearance.reduceMotion ? copy('Enable interface motion', 'فعال‌سازی حرکت رابط') : copy('Reduce interface motion', 'کاهش حرکت رابط'), icon: Activity, onSelect: () => updateAppearance('reduceMotion', !appearance.reduceMotion) },
-        ]}>
-          <div className="setting-group"><label>{t('theme')}</label><Segmented value={appearance.theme} label={t('theme')} options={[{ value: 'system', label: t('system'), icon: PanelTop }, { value: 'dark', label: t('dark'), icon: Moon }, { value: 'light', label: t('light'), icon: Sun }]} onChange={(value) => updateAppearance('theme', value)} /></div>
-          <div className="setting-group"><label>{t('language')}</label><Segmented value={appearance.locale} label={t('language')} options={[{ value: 'en', label: t('english'), icon: Languages }, { value: 'fa', label: t('persian'), icon: Languages }]} onChange={(value) => updateAppearance('locale', value)} /></div>
-          <div className="setting-group"><label>{t('direction')}</label><Segmented value={appearance.direction} label={t('direction')} options={[{ value: 'auto', label: t('auto') }, { value: 'ltr', label: t('leftToRight') }, { value: 'rtl', label: t('rightToLeft') }]} onChange={(value) => updateAppearance('direction', value)} /></div>
-          <Toggle checked={appearance.reduceMotion} onChange={(value) => updateAppearance('reduceMotion', value)} label={t('reduceMotion')} detail={appearance.reduceMotion ? copy('Nonessential motion is off.', 'حرکت‌های غیرضروری خاموش‌اند.') : copy('Smooth interface transitions are on.', 'گذارهای نرم رابط فعال‌اند.')} />
-          <Toggle checked={appearance.compactNumbers} onChange={(value) => updateAppearance('compactNumbers', value)} label={t('compactNumbers')} detail={appearance.compactNumbers ? copy('Large values use compact notation.', 'مقادیر بزرگ به‌صورت فشرده نمایش داده می‌شوند.') : copy('Large values use full notation.', 'مقادیر بزرگ به‌صورت کامل نمایش داده می‌شوند.')} />
-          <Toggle checked={!appearance.audioMuted} onChange={(value) => updateAppearance('audioMuted', !value)} label={<span className="setting-icon-label"><Volume2 size={16} />{copy('Interaction audio', 'صدای تعامل')}</span>} detail={appearance.audioMuted ? copy('Audio cues are off.', 'نشانه‌های صوتی خاموش‌اند.') : copy(`Audio cues are at ${Math.round(appearance.audioVolume * 100)}%.`, `بلندی نشانه‌های صوتی ${Math.round(appearance.audioVolume * 100)}٪ است.`)} />
-          {!appearance.audioMuted && <RangeField label={copy('Cue volume', 'بلندی نشانه‌ها')} value={Math.round(appearance.audioVolume * 100)} min={0} max={100} unit="%" onChange={(value) => updateAppearance('audioVolume', value / 100)} />}
-          {!appearance.audioMuted && <Button icon={Volume2} onClick={() => window.dispatchEvent(new Event('pccontroller:test-feedback'))}>{copy('Test notification', 'آزمایش اعلان')}</Button>}
+        <Card icon={PanelTop} iconTone="accent" title={copy('Application preferences', 'ترجیحات برنامه')} eyebrow={`${appearanceThemeLabel} · ${appearanceLocaleLabel} · ${appearanceDirectionLabel}`} className="settings-card settings-card--wide" action={<Button compact icon={Settings2} onClick={openAppPreferences}>{copy('Open preferences', 'باز کردن ترجیحات')}</Button>}>
+          <p className="card-copy">{copy('Theme, language, direction, interaction feedback, and quick-header visibility belong to the host application. They are edited in the tabbed preferences dialog and never write to the controller.', 'پوسته، زبان، جهت، بازخورد تعامل و نمایش نوار سریع متعلق به برنامهٔ میزبان هستند. این موارد در گفت‌وگوی زبانه‌دار ترجیحات ویرایش می‌شوند و هرگز روی کنترلر نوشته نمی‌شوند.')}</p>
         </Card>
 
         <HotkeyEditor locale={appearance.locale} />
