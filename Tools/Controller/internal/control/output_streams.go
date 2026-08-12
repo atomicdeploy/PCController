@@ -61,13 +61,15 @@ type OutputScheduler struct {
 	root   context.Context
 	cancel context.CancelFunc
 
-	mu             sync.Mutex
-	nextID         uint64
-	closed         bool
-	melody         *runningOutput
-	effect         *runningOutput
-	statusBase     [4]byte
-	haveStatusBase bool
+	mu                   sync.Mutex
+	nextID               uint64
+	closed               bool
+	melody               *runningOutput
+	effect               *runningOutput
+	statusBase           [4]byte
+	haveStatusBase       bool
+	statusBaseEffect     native.StatusEffectOptions
+	haveStatusBaseEffect bool
 }
 
 func NewOutputScheduler(target outputCommander) *OutputScheduler {
@@ -126,6 +128,7 @@ func (scheduler *OutputScheduler) SetStatusBase(
 	}
 	scheduler.statusBase = [4]byte{red, green, blue, brightness}
 	scheduler.haveStatusBase = true
+	scheduler.haveStatusBaseEffect = false
 	if scheduler.effect != nil {
 		return nil
 	}
@@ -135,6 +138,43 @@ func (scheduler *OutputScheduler) SetStatusBase(
 		requestContext,
 		native.OpStatusRGB,
 		native.StatusRGBPayload(red, green, blue, brightness),
+	)
+}
+
+// SetStatusEffectBase updates the host policy base with one MCU-rendered
+// descriptor. Explicit user/macro effects retain the overlay lane; when one is
+// active, the descriptor is remembered and restored only after it finishes.
+func (scheduler *OutputScheduler) SetStatusEffectBase(
+	ctx context.Context,
+	effect native.StatusEffectOptions,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	payload, err := native.StatusEffectPayload(effect)
+	if err != nil {
+		return err
+	}
+	scheduler.mu.Lock()
+	defer scheduler.mu.Unlock()
+	if scheduler.closed {
+		return errors.New("output scheduler is closed")
+	}
+	scheduler.statusBase = [4]byte{
+		effect.Red, effect.Green, effect.Blue, effect.Brightness,
+	}
+	scheduler.haveStatusBase = true
+	scheduler.statusBaseEffect = effect
+	scheduler.haveStatusBaseEffect = true
+	if scheduler.effect != nil {
+		return nil
+	}
+	requestContext, cancel := context.WithTimeout(ctx, outputRequestTimeout)
+	defer cancel()
+	return scheduler.target.Command(
+		requestContext,
+		native.OpStatusEffect,
+		payload,
 	)
 }
 
@@ -204,6 +244,7 @@ func (scheduler *OutputScheduler) StartStatusEffect(
 				outputRequestTimeout,
 			)
 			defer cancel()
+			opcode := byte(native.OpStatusRGB)
 			payload := native.StatusRGBPayload(
 				effect.Red,
 				effect.Green,
@@ -218,9 +259,15 @@ func (scheduler *OutputScheduler) StartStatusEffect(
 					scheduler.statusBase[3],
 				)
 			}
+			if scheduler.haveStatusBaseEffect {
+				opcode = native.OpStatusEffect
+				payload, _ = native.StatusEffectPayload(
+					scheduler.statusBaseEffect,
+				)
+			}
 			_ = scheduler.target.Command(
 				requestContext,
-				native.OpStatusRGB,
+				opcode,
 				payload,
 			)
 		}
