@@ -671,6 +671,8 @@ func (service *Service) dispatch(
 		}
 	case "controller.snapshot":
 		result = service.Client.Snapshot()
+	case "controller.port.process", "controller.port.owner":
+		result = service.Client.Snapshot().PortProcess
 	case "controller.session.snapshot", "controller.session.snapshot.last":
 		if service.LastSessionSnapshot == nil {
 			err = errors.New("graceful-exit diagnostic snapshot is unavailable")
@@ -1689,7 +1691,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.program_state.get", "controller.program-state.get",

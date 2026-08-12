@@ -242,6 +242,23 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name: "port-process", Aliases: []string{"port-owner"}, Usage: "port-process",
+		Summary: "show the exact process currently holding the selected serial port",
+		Run: func(context.Context, []string) (string, error) {
+			process := runtime.Snapshot().PortProcess
+			if !process.Supported {
+				return "port process inspection unsupported", nil
+			}
+			if process.State == "free" {
+				return fmt.Sprintf("%s is free (takeover_ready=%t)", process.Port, process.TakeoverReady), nil
+			}
+			if process.State == "unknown" {
+				return fmt.Sprintf("%s owner unknown: %s", process.Port, process.Error), nil
+			}
+			return fmt.Sprintf("%s: %s (PID %d) executable=%q start=%d window=%q [%s]", process.Port, process.Name, process.PID, process.Executable, process.ProcessStartTime, process.Window.Title, process.Window.Class), nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "open", Usage: "open [PORT]", Summary: "open explicitly or auto-detect by HELLO",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) > 1 {
