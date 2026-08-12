@@ -100,7 +100,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | ID | Issue | State | Requirement |
 |---|---:|:---:|---|
 | `ipc-websocket-api-suite` | [#46](https://github.com/atomicdeploy/PCController/issues/46) | 🟡 open | Provide unversioned living IPC, REST, JSON-RPC, WebSocket, and bridge APIs |
-| `network-bridge-discovery` | [#47](https://github.com/atomicdeploy/PCController/issues/47) | 🟡 open | Bridge controller hosts over the network with mDNS/SSDP discovery |
+| `network-bridge-discovery` | [#47](https://github.com/atomicdeploy/PCController/issues/47) | 🟡 open | Connect, mirror, and synchronize multiple local and remote boards |
 | `http-webhooks-socketio-messages` | [#48](https://github.com/atomicdeploy/PCController/issues/48) | 🟡 open | Add bidirectional HTTP, webhooks, WebSocket client/server, Socket.IO, and actionable messages |
 | `remote-control-security` | [#49](https://github.com/atomicdeploy/PCController/issues/49) | 🟡 open | Define security and policy gates for every remote and disruptive control path |
 | `network-artifact-import-export-sync` | [#117](https://github.com/atomicdeploy/PCController/issues/117) | 🟡 open | Serve, fetch, import, export, and synchronize controller artifacts between hosts |
