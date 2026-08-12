@@ -92,6 +92,7 @@ type primaryIPC struct {
 	instanceClaim         *hostInstanceClaim
 	hostInstanceID        string
 	coordinatorInstanceID string
+	navigationCommand     func(hostui.NavigationCommand) (hostui.NavigationOutcome, error)
 }
 
 type primaryExecutor struct{}
@@ -302,6 +303,19 @@ func startPrimaryIPCAtWithIdentity(
 			runtime.PublishStructuredEvent(event)
 		}
 	})
+	commitNavigation := func(command hostui.NavigationCommand) (hostui.NavigationOutcome, error) {
+		outcome, commitErr := navigation.Commit(command, server.instances.List())
+		if commitErr != nil {
+			return hostui.NavigationOutcome{}, commitErr
+		}
+		for _, action := range outcome.Actions {
+			if publishErr := server.actions.Publish(action); publishErr != nil {
+				return hostui.NavigationOutcome{}, publishErr
+			}
+		}
+		return outcome, nil
+	}
+	server.navigationCommand = commitNavigation
 	if strings.TrimSpace(identity.ID) != "" {
 		server.coordinatorInstanceID = identity.ID + ":bridge"
 		process := hostui.CurrentProcessSelf(identity.StartedAt)
@@ -343,6 +357,7 @@ func startPrimaryIPCAtWithIdentity(
 		HostSurface:           identity.Surface,
 		CoordinatorInstanceID: server.coordinatorInstanceID,
 		AppAction:             server.actions.Publish,
+		NavigationCommand:     commitNavigation,
 		AppInstances:          server.instances,
 		Shutdown: func() {
 			server.quitOnce.Do(func() { close(server.quit) })

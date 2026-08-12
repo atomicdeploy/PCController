@@ -3370,6 +3370,7 @@
               "controller.app.instance.report",
               "controller.app.instances",
               "controller.app.navigate",
+              "controller.app.navigation.commit",
               "controller.app.page",
               "controller.artifact.capture",
               "controller.artifact.fetch",

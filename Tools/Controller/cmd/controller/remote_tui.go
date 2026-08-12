@@ -241,6 +241,14 @@ func (client *remoteTUIIPC) ReportInstance(
 	return result, err
 }
 
+func (client *remoteTUIIPC) CommitNavigation(
+	ctx context.Context, command hostui.NavigationCommand,
+) (hostui.NavigationOutcome, error) {
+	var result hostui.NavigationOutcome
+	err := client.call(ctx, "controller.app.navigation.commit", command, &result)
+	return result, err
+}
+
 func (client *remoteTUIIPC) RemoveInstance(ctx context.Context, id string) error {
 	return client.call(
 		ctx, "controller.app.instance.remove", map[string]string{"id": id}, nil,
@@ -258,6 +266,7 @@ type remoteTUIInstanceLease struct {
 	page     string
 	title    string
 	have     bool
+	joined   bool
 	stop     chan struct{}
 	done     chan struct{}
 	once     sync.Once
@@ -284,11 +293,36 @@ func (lease *remoteTUIInstanceLease) Update(page, title string) error {
 		return errors.New("remote TUI instance reporting is unavailable")
 	}
 	lease.mu.Lock()
+	previousPage, joined := lease.page, lease.joined
 	lease.page = strings.ToLower(strings.TrimSpace(page))
 	lease.title = strings.TrimSpace(title)
 	lease.have = true
 	lease.mu.Unlock()
-	return lease.report(false)
+	if err := lease.report(false); err != nil {
+		return err
+	}
+	if !joined {
+		lease.mu.Lock()
+		lease.joined = true
+		lease.mu.Unlock()
+		return nil
+	}
+	if previousPage == lease.page {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	outcome, err := lease.client.CommitNavigation(ctx, hostui.NavigationCommand{
+		Group: hostui.DefaultNavigationGroup, Source: lease.reporter.InstanceID(), Page: lease.page,
+		OperationID: lease.reporter.NextOperationID(),
+	})
+	if err != nil {
+		return err
+	}
+	lease.mu.Lock()
+	lease.page = outcome.Page
+	lease.mu.Unlock()
+	return nil
 }
 
 func (lease *remoteTUIInstanceLease) report(catchUp bool) error {

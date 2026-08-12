@@ -2,8 +2,10 @@ package hostui
 
 import (
 	"reflect"
+	"sort"
 	"strconv"
 	"testing"
+	"time"
 )
 
 const (
@@ -59,7 +61,28 @@ func observeUpdated(
 	instance AppInstance,
 	live ...AppInstance,
 ) []AppAction {
-	return coordinator.Observe(InstanceChange{Kind: "updated", Instance: instance}, live)
+	actions := coordinator.Observe(InstanceChange{Kind: "updated", Instance: instance}, live)
+	if len(actions) != 0 {
+		return actions
+	}
+	participant, ok := parseNavigationParticipant(instance)
+	if !ok {
+		return nil
+	}
+	outcome, err := coordinator.Commit(NavigationCommand{
+		Group: participant.group, Source: participant.id, Page: participant.page,
+		OperationID: participant.epoch + "-" + strconv.FormatUint(participant.revision, 10),
+	}, live)
+	if err != nil {
+		return nil
+	}
+	result := make([]AppAction, 0, len(outcome.Actions))
+	for _, action := range outcome.Actions {
+		if action.Target != participant.id {
+			result = append(result, action)
+		}
+	}
+	return result
 }
 
 func TestNavigationCoordinatorConvergesThreeFollowersWithoutEcho(t *testing.T) {
@@ -103,6 +126,61 @@ func TestNavigationCoordinatorConvergesThreeFollowersWithoutEcho(t *testing.T) {
 	two = follower(two.ID, "events", participantEpoch2, 2)
 	if echo := observeUpdated(coordinator, two, one, two, three); len(echo) != 0 {
 		t.Fatalf("receiver acknowledgement echoed=%#v", echo)
+	}
+}
+
+func TestNavigationCoordinatorCommitAcknowledgesSourceAndRejectsLateLeaseRollback(t *testing.T) {
+	coordinator := deterministicCoordinator(groupEpoch1)
+	one := follower("tui:one", "dashboard", participantEpoch1, 1)
+	two := follower("tui:two", "dashboard", participantEpoch2, 1)
+	observeJoined(coordinator, one, one)
+	observeJoined(coordinator, two, one, two)
+	outcome, err := coordinator.Commit(NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "op-events-1",
+	}, []AppInstance{one, two})
+	if err != nil || outcome.Page != "events" || outcome.Revision != 2 || outcome.OperationID != "op-events-1" || len(outcome.Actions) != 2 {
+		t.Fatalf("commit outcome=%#v err=%v", outcome, err)
+	}
+	if outcome.Actions[0].Target != one.ID || outcome.Actions[1].Target != two.ID ||
+		outcome.Actions[0].Metadata[NavigationOperationKey] != outcome.OperationID {
+		t.Fatalf("ordered source/follower actions=%#v", outcome.Actions)
+	}
+	// The old report path is presence-only: a late dashboard lease cannot undo
+	// the acknowledged events selection.
+	one = follower(one.ID, "dashboard", participantEpoch1, 2)
+	if actions := coordinator.Observe(InstanceChange{Kind: "updated", Instance: one}, []AppInstance{one, two}); len(actions) != 0 {
+		t.Fatalf("late lease published navigation=%#v", actions)
+	}
+	join := follower("tui:three", "settings", participantEpoch3, 1)
+	catchUp := observeJoined(coordinator, join, one, two, join)
+	if len(catchUp) != 1 || catchUp[0].Value != "events" {
+		t.Fatalf("late lease rolled canonical state back: %#v", catchUp)
+	}
+}
+
+func TestNavigationCommitLANBudgetHarness(t *testing.T) {
+	coordinator := deterministicCoordinator(groupEpoch1)
+	one := follower("tui:one", "dashboard", participantEpoch1, 1)
+	two := follower("tui:two", "dashboard", participantEpoch2, 1)
+	observeJoined(coordinator, one, one)
+	observeJoined(coordinator, two, one, two)
+	durations := make([]time.Duration, 0, 100)
+	for index := 0; index < 100; index++ {
+		page := "events"
+		if index%2 == 0 {
+			page = "settings"
+		}
+		started := time.Now()
+		outcome, err := coordinator.Commit(NavigationCommand{Group: DefaultNavigationGroup, Source: one.ID, Page: page, OperationID: "lan-" + strconv.Itoa(index)}, []AppInstance{one, two})
+		durations = append(durations, time.Since(started))
+		if err != nil || outcome.Page != page || len(outcome.Actions) != 2 {
+			t.Fatalf("iteration %d outcome=%#v err=%v", index, outcome, err)
+		}
+	}
+	sort.Slice(durations, func(left, right int) bool { return durations[left] < durations[right] })
+	p95 := durations[(len(durations)*95+99)/100-1]
+	if p95 >= 250*time.Millisecond {
+		t.Fatalf("coordinator p95=%s, need <250ms", p95)
 	}
 }
 
@@ -180,7 +258,7 @@ func TestNavigationCoordinatorRejectsSourceReplayAndEpochReplacement(t *testing.
 		follower(one.ID, "controls", participantEpoch1, 2),
 		follower(one.ID, "updates", participantEpoch4, 4),
 	} {
-		if actions := observeUpdated(coordinator, stale, stale, two); len(actions) != 0 {
+		if actions := coordinator.Observe(InstanceChange{Kind: "updated", Instance: stale}, []AppInstance{stale, two}); len(actions) != 0 {
 			t.Fatalf("stale/colliding report emitted=%#v", actions)
 		}
 	}

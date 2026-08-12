@@ -270,6 +270,7 @@ type Service struct {
 	HostSurface           string
 	CoordinatorInstanceID string
 	AppAction             func(hostui.AppAction) error
+	NavigationCommand     func(hostui.NavigationCommand) (hostui.NavigationOutcome, error)
 	AppInstances          *hostui.InstanceRegistry
 	Shutdown              func()
 	HostConfig            func() appconfig.Config
@@ -1136,10 +1137,17 @@ func (service *Service) dispatch(
 				if target == "" {
 					target = "*"
 				}
-				err = service.AppAction(hostui.AppAction{
-					Kind: "app.page", Value: params.Page, Source: "ipc", Target: target,
-				})
+				err = service.AppAction(hostui.AppAction{Kind: "app.page", Value: params.Page, Source: "ipc", Target: target})
 				result = map[string]bool{"accepted": err == nil}
+			}
+		}
+	case "controller.app.navigation.commit":
+		var params hostui.NavigationCommand
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.NavigationCommand == nil {
+				err = errors.New("authoritative navigation coordinator is unavailable")
+			} else {
+				result, err = service.NavigationCommand(params)
 			}
 		}
 	case "controller.app.instances":
