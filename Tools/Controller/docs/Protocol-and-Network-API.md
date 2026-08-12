@@ -88,10 +88,8 @@ controller message native,web,tui operator.notice "Commissioning is ready"
 
 It deliberately permits disconnected operation and publishes to the same
 runtime event stream. Native/Web/TUI action adapters, delivery expiry,
-deduplication, and generalized board-operation migration continue under
-[#164](https://github.com/atomicdeploy/PCController/issues/164),
-[#165](https://github.com/atomicdeploy/PCController/issues/165), and
-[#166](https://github.com/atomicdeploy/PCController/issues/166).
+deduplication, and generalized board-operation migration continue under #164,
+#165, and #166.
 
 ## Framing
 
