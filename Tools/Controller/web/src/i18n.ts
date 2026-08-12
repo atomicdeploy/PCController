@@ -102,10 +102,17 @@ export function formatDuration(locale: Locale, milliseconds: number): string {
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
-  const pieces = days > 0 ? [`${days}d`, `${hours}h`] : hours > 0 ? [`${hours}h`, `${minutes}m`] : [`${minutes}m`]
+  const remainingSeconds = seconds % 60
+  const pieces = days > 0
+    ? [`${days}d`, `${hours}h`, `${minutes}m`, `${remainingSeconds}s`]
+    : hours > 0
+      ? [`${hours}h`, `${minutes}m`, `${remainingSeconds}s`]
+      : minutes > 0
+        ? [`${minutes}m`, `${remainingSeconds}s`]
+        : [`${remainingSeconds}s`]
   const value = pieces.join(' ')
   if (locale !== 'fa') return value
-  return value.replace(/\d+/g, (digits) => localizeDigits(locale, Number(digits))).replace('d', 'ر').replace('h', 'س').replace('m', 'د')
+  return value.replace(/\d+/g, (digits) => localizeDigits(locale, Number(digits))).replace('d', 'ر').replace('h', 'س').replace('m', 'د').replace('s', 'ث')
 }
 
 export function formatClock(locale: Locale, value?: string | number | Date): string {
