@@ -537,6 +537,118 @@ func TestTargetedAndBoardAppPageActionsSelectOnlyTheIntendedTUI(t *testing.T) {
 	}
 }
 
+func navigationSyncAction(epoch string, revision string, page string) hostui.AppAction {
+	return hostui.AppAction{
+		Kind: "app.page", Value: page, Source: "navigation-sync", Target: "tui:one",
+		Metadata: map[string]string{
+			hostui.NavigationSyncKey:     hostui.NavigationSyncGroupUpdate,
+			hostui.NavigationGroupKey:    hostui.DefaultNavigationGroup,
+			hostui.NavigationEpochKey:    epoch,
+			hostui.NavigationRevisionKey: revision,
+			hostui.NavigationSourceKey:   "tui:two",
+		},
+	}
+}
+
+func TestTUINavigationSyncRejectsReplayAndResetsOnlyOnRemoteSession(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+	})
+	firstEpoch := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	secondEpoch := "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	updated, _ := model.Update(appActionMsg(navigationSyncAction(firstEpoch, "2", "events")))
+	model = updated.(Model)
+	if model.page != PageEvents {
+		t.Fatalf("fresh synchronized page=%v", model.page)
+	}
+	for _, stale := range []hostui.AppAction{
+		navigationSyncAction(firstEpoch, "2", "settings"),
+		navigationSyncAction(firstEpoch, "1", "controls"),
+		navigationSyncAction(secondEpoch, "3", "updates"),
+	} {
+		updated, _ = model.Update(appActionMsg(stale))
+		model = updated.(Model)
+		if model.page != PageEvents {
+			t.Fatalf("stale/foreign action changed page to %v: %#v", model.page, stale)
+		}
+	}
+	updated, _ = model.Update(runtimeEventMsg(control.Event{
+		Kind: "client.navigation.session.reset", Source: "remote-ipc",
+	}))
+	model = updated.(Model)
+	updated, _ = model.Update(appActionMsg(navigationSyncAction(secondEpoch, "1", "updates")))
+	if got := updated.(Model).page; got != PageProgramming {
+		t.Fatalf("new primary-session epoch page=%v", got)
+	}
+}
+
+func TestTUIOptOutIgnoresGroupSyncButAcceptsExplicitRemoteNavigation(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.instanceID = "tui:private"
+	model.navigationGroup = hostui.DefaultNavigationGroup
+	model.navigationSync = false
+	group := navigationSyncAction("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "1", "events")
+	group.Target = model.instanceID
+	updated, _ := model.Update(appActionMsg(group))
+	model = updated.(Model)
+	if model.page != PageDashboard {
+		t.Fatalf("opted-out TUI followed group page %v", model.page)
+	}
+	updated, _ = model.Update(appActionMsg(hostui.AppAction{
+		Kind: "app.page", Value: "events", Source: "ipc", Target: model.instanceID,
+	}))
+	if got := updated.(Model).page; got != PageEvents {
+		t.Fatalf("explicit remote navigation page=%v", got)
+	}
+}
+
+func TestRemoteTUIOptOutAcceptsExplicitNavigationRuntimeEvent(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.remote = &RemoteBackend{}
+	model.instanceID = "tui:private"
+	model.navigationSync = false
+	updated, _ := model.Update(runtimeEventMsg(control.Event{
+		Kind: "app.page", Source: "ipc", Action: "navigate",
+		Metadata: map[string]string{
+			"page": "events", "target_instance": model.instanceID,
+		},
+	}))
+	if got := updated.(Model).page; got != PageEvents {
+		t.Fatalf("explicit remote runtime navigation page=%v", got)
+	}
+}
+
+func TestRemoteRuntimeNavigationMetadataUsesSameReplayCursor(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	model.remote = &RemoteBackend{}
+	model.instanceID = "tui:one"
+	model.navigationSync = true
+	model.navigationGroup = hostui.DefaultNavigationGroup
+	action := navigationSyncAction("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "4", "settings")
+	event := control.Event{
+		Kind: action.Kind, Source: action.Source,
+		Metadata: map[string]string{},
+	}
+	for key, value := range action.Metadata {
+		event.Metadata[key] = value
+	}
+	event.Metadata["page"] = action.Value
+	event.Metadata["target_instance"] = action.Target
+	updated, _ := model.Update(runtimeEventMsg(event))
+	model = updated.(Model)
+	if model.page != PageAppSettings {
+		t.Fatalf("runtime synchronized page=%v", model.page)
+	}
+	event.Metadata[hostui.NavigationRevisionKey] = "3"
+	event.Metadata["page"] = "events"
+	updated, _ = model.Update(runtimeEventMsg(event))
+	if got := updated.(Model).page; got != PageAppSettings {
+		t.Fatalf("out-of-order runtime event changed page=%v", got)
+	}
+}
+
 func TestTUITerminalTitleAndOSCAppActions(t *testing.T) {
 	snapshot := RichPreviewSnapshot()
 	var payloads []string

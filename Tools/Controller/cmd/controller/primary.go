@@ -305,6 +305,7 @@ func startPrimaryIPCAtWithIdentity(
 	}
 	server.actions = hostui.NewActionBroker()
 	server.instances = hostui.NewInstanceRegistry()
+	navigation := hostui.NewNavigationCoordinator()
 	server.instances.SetObserver(func(change hostui.InstanceChange) {
 		runtime.PublishStructuredEvent(control.Event{
 			Kind: "app.instance.changed", Text: change.Kind + " app instance " + change.Instance.ID,
@@ -315,6 +316,14 @@ func startPrimaryIPCAtWithIdentity(
 				"state": change.Instance.State,
 			},
 		})
+		for _, action := range navigation.Observe(change, server.instances.List()) {
+			if publishErr := server.actions.Publish(action); publishErr != nil {
+				runtime.PublishHostEvent(
+					"app.navigation.sync.error",
+					"navigation synchronization delivery failed: "+publishErr.Error(),
+				)
+			}
+		}
 	})
 	server.actions.SetObserver(func(action hostui.AppAction) {
 		if event, ok := browserAppActionEvent(action); ok {
@@ -462,9 +471,12 @@ func browserAppActionEvent(action hostui.AppAction) (control.Event, bool) {
 	if value != "" {
 		text += " " + value
 	}
-	metadata := map[string]string{
-		"value": value, "target_instance": target,
+	metadata := make(map[string]string, len(action.Metadata)+3)
+	for key, item := range action.Metadata {
+		metadata[key] = item
 	}
+	metadata["value"] = value
+	metadata["target_instance"] = target
 	actionName := verb
 	if kind == "app.page" {
 		metadata["page"] = value
