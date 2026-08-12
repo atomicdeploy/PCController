@@ -79,6 +79,16 @@ type compiledMacro struct {
 	durationUS uint32
 }
 
+// macroStreamLease remembers the exact connected board and stream cadence
+// that MCU-timed playback temporarily suspends. A replacement board must never
+// receive restoration intended for the session that granted this lease.
+type macroStreamLease struct {
+	Generation uint64
+	Board      string
+	PeriodMS   uint16
+	restored   bool
+}
+
 type MacroRunner struct {
 	runtime          *Runtime
 	library          func() []appconfig.Macro
@@ -106,6 +116,11 @@ type MacroRunner struct {
 	recordRelayOriginUS uint32
 	recordRelayOriginAt uint32
 	recordRelayClock    bool
+
+	// requestGeneration is a focused protocol-order test seam. Production uses
+	// Runtime.requestAtGeneration so every macro request remains pinned to the
+	// authenticated connection observed at playback start.
+	requestGeneration func(context.Context, uint64, byte, []byte, byte) (native.Frame, error)
 }
 
 // MacroRecordingState describes a HOST-owned recording session. Mode states
@@ -560,11 +575,15 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 		return runner.State(), err
 	}
 	begun := false
+	var streamLease *macroStreamLease
 	fail := func(cause error) (MacroState, error) {
 		if begun {
-			if cleanupErr := runner.cancelBoard(false); cleanupErr != nil {
+			if cleanupErr := runner.cancelBoardAtGeneration(snapshot.ConnectionGeneration, false); cleanupErr != nil {
 				cause = errors.Join(cause, fmt.Errorf("macro cleanup: %w", cleanupErr))
 			}
+		}
+		if restoreErr := runner.restoreMacroStream(streamLease); restoreErr != nil {
+			cause = errors.Join(cause, fmt.Errorf("restore telemetry stream: %w", restoreErr))
 		}
 		lease.Release()
 		runner.failStart(macro, cause)
@@ -572,7 +591,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 	}
 	if mode == macroModeHost {
 		command := boundHostMacroCommand(runner.runtime)
-		if err := runner.showMacroIdentity(ctx, compiled); err != nil {
+		if err := runner.showMacroIdentity(ctx, snapshot.ConnectionGeneration, compiled); err != nil {
 			runner.runtime.PublishHostEvent("macro.display", "macro identity display unavailable: "+err.Error())
 		}
 		playContext, cancel := context.WithCancel(context.Background())
@@ -597,19 +616,23 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 	if err != nil {
 		return fail(err)
 	}
-	if _, err = runner.request(ctx, native.OpMacroStart, startPayload, native.OpACK); err != nil {
+	if _, err = runner.requestAtGeneration(ctx, snapshot.ConnectionGeneration, native.OpMacroStart, startPayload, native.OpACK); err != nil {
 		return fail(err)
 	}
 	begun = true
 	afterID := runner.runtime.LatestEventID()
-	sent, err := runner.appendBytes(ctx, compiled, 0, native.MacroQueueCapacity)
+	sent, err := runner.appendBytes(ctx, snapshot.ConnectionGeneration, compiled, 0, native.MacroQueueCapacity)
 	if err != nil {
 		return fail(err)
 	}
-	if err := runner.showMacroIdentity(ctx, compiled); err != nil {
+	if err := runner.showMacroIdentity(ctx, snapshot.ConnectionGeneration, compiled); err != nil {
 		runner.runtime.PublishHostEvent("macro.display", "macro identity display unavailable: "+err.Error())
 	}
-	if _, err = runner.request(ctx, native.OpMacroStep, native.MacroQueueRunPayload(), native.OpACK); err != nil {
+	streamLease, err = runner.pauseMacroStream(ctx, snapshot)
+	if err != nil {
+		return fail(fmt.Errorf("pause periodic telemetry for exact macro timing: %w", err))
+	}
+	if _, err = runner.requestAtGeneration(ctx, snapshot.ConnectionGeneration, native.OpMacroStep, native.MacroQueueRunPayload(), native.OpACK); err != nil {
 		return fail(err)
 	}
 
@@ -623,7 +646,7 @@ func (runner *MacroRunner) StartMode(ctx context.Context, reference, modeOverrid
 	state := runner.state
 	runner.mu.Unlock()
 	runner.publishLifecycle("started", state, nil)
-	go runner.play(playContext, done, compiled, sent, afterID, lease)
+	go runner.play(playContext, done, snapshot.ConnectionGeneration, compiled, sent, afterID, lease, streamLease)
 	return state, nil
 }
 
@@ -683,15 +706,17 @@ func (runner *MacroRunner) find(reference string) (appconfig.Macro, error) {
 func (runner *MacroRunner) play(
 	ctx context.Context,
 	done chan struct{},
+	generation uint64,
 	compiled compiledMacro,
 	sent int,
 	afterID uint64,
 	lease *ProgramStateLease,
+	streamLease *macroStreamLease,
 ) {
 	defer close(done)
 	defer lease.Release()
 
-	status, err := runner.queryBoard(ctx)
+	status, err := runner.queryBoardAtGeneration(ctx, generation)
 	if err == nil {
 		runner.applyDeviceStatus(status)
 	}
@@ -733,7 +758,7 @@ func (runner *MacroRunner) play(
 			runner.mu.RLock()
 			keep := runner.cancelKeep
 			runner.mu.RUnlock()
-			err = runner.cancelBoard(keep)
+			err = runner.cancelBoardAtGeneration(generation, keep)
 			if err == nil {
 				status.State = native.MacroCancelled
 			}
@@ -750,7 +775,7 @@ func (runner *MacroRunner) play(
 
 		if status.Active() && sent < len(compiled.stream) && status.Free() != 0 {
 			before := sent
-			sent, err = runner.appendBytes(ctx, compiled, sent, int(status.Free()))
+			sent, err = runner.appendBytes(ctx, generation, compiled, sent, int(status.Free()))
 			if err != nil {
 				break
 			}
@@ -771,7 +796,7 @@ func (runner *MacroRunner) play(
 				continue
 			}
 			var reported native.MacroStatus
-			reported, err = runner.queryBoard(ctx)
+			reported, err = runner.queryBoardAtGeneration(ctx, generation)
 			lastQuery = time.Now()
 			if err == nil {
 				status = mergeMacroDeviceStatus(status, reported)
@@ -799,7 +824,7 @@ func (runner *MacroRunner) play(
 		runner.mu.RLock()
 		keep := runner.cancelKeep
 		runner.mu.RUnlock()
-		cancelErr := runner.cancelBoard(keep)
+		cancelErr := runner.cancelBoardAtGeneration(generation, keep)
 		if cancelErr == nil {
 			status.State = native.MacroCancelled
 			err = nil
@@ -813,9 +838,12 @@ func (runner *MacroRunner) play(
 	// Missing host timestamps are a proof failure, not unfinished execution;
 	// do not issue another cancellation/output action merely to repair evidence.
 	if err != nil && !cancelled && !errors.As(err, &evidenceError) {
-		if cleanupErr := runner.cancelBoard(false); cleanupErr != nil {
+		if cleanupErr := runner.cancelBoardAtGeneration(generation, false); cleanupErr != nil {
 			err = errors.Join(err, fmt.Errorf("macro safe-stop cleanup: %w", cleanupErr))
 		}
+	}
+	if restoreErr := runner.restoreMacroStream(streamLease); restoreErr != nil {
+		err = errors.Join(err, fmt.Errorf("restore telemetry stream: %w", restoreErr))
 	}
 	runner.finishPlayback(done, compiled.definition, status, observed, cancelled, err)
 }
@@ -962,6 +990,7 @@ func safeStopHostWithCommand(command hostMacroCommand) error {
 
 func (runner *MacroRunner) appendBytes(
 	ctx context.Context,
+	generation uint64,
 	compiled compiledMacro,
 	offset int,
 	available int,
@@ -982,7 +1011,7 @@ func (runner *MacroRunner) appendBytes(
 		if err != nil {
 			return offset, err
 		}
-		if _, err := runner.request(ctx, native.OpMacroStep, payload, native.OpACK); err != nil {
+		if _, err := runner.requestAtGeneration(ctx, generation, native.OpMacroStep, payload, native.OpACK); err != nil {
 			return offset, err
 		}
 		offset += length
@@ -992,8 +1021,17 @@ func (runner *MacroRunner) appendBytes(
 }
 
 func (runner *MacroRunner) queryBoard(ctx context.Context) (native.MacroStatus, error) {
-	frame, err := runner.request(
+	snapshot := runner.runtime.Snapshot()
+	if !snapshot.Connected {
+		return native.MacroStatus{}, errors.New("device is not connected")
+	}
+	return runner.queryBoardAtGeneration(ctx, snapshot.ConnectionGeneration)
+}
+
+func (runner *MacroRunner) queryBoardAtGeneration(ctx context.Context, generation uint64) (native.MacroStatus, error) {
+	frame, err := runner.requestAtGeneration(
 		ctx,
+		generation,
 		native.OpMacroStep,
 		native.MacroQueueQueryPayload(),
 		native.OpMacroStatus,
@@ -1004,22 +1042,136 @@ func (runner *MacroRunner) queryBoard(ctx context.Context) (native.MacroStatus, 
 	return native.ParseMacroStatus(frame.Payload)
 }
 
+// pauseMacroStream drains and disables only periodic STATUS production before
+// RUN is acknowledged. Macro ACKs, completion status, and all other changed
+// state continue over the ordinary event path while the lease is active.
+func (runner *MacroRunner) pauseMacroStream(
+	ctx context.Context,
+	snapshot Snapshot,
+) (*macroStreamLease, error) {
+	frame, err := runner.requestAtGeneration(
+		ctx, snapshot.ConnectionGeneration,
+		native.OpGetSettings, nil, native.OpSettings,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("read current stream period: %w", err)
+	}
+	settings, err := native.ParseSettings(frame.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("parse current stream period: %w", err)
+	}
+	lease := &macroStreamLease{
+		Generation: snapshot.ConnectionGeneration,
+		Board:      macroBoardIdentity(snapshot),
+		PeriodMS:   settings.StreamPeriodMS,
+	}
+	if !runner.macroStreamLeaseCurrent(lease) {
+		return nil, fmt.Errorf("connection generation %d changed before telemetry could be paused", snapshot.ConnectionGeneration)
+	}
+	payload, err := native.StreamPeriodPayload(0)
+	if err != nil {
+		return nil, err
+	}
+	// Return the lease even when the response fails: the MCU might have accepted
+	// SET_STREAM before the transport failed. Same-session restoration is safe.
+	if _, err = runner.requestAtGeneration(
+		ctx, snapshot.ConnectionGeneration,
+		native.OpSetStream, payload, native.OpACK,
+	); err != nil {
+		return lease, fmt.Errorf("disable periodic telemetry: %w", err)
+	}
+	return lease, nil
+}
+
+// restoreMacroStream is idempotent and uses a fresh bounded context so caller
+// cancellation cannot strand the same connected board with telemetry disabled.
+func (runner *MacroRunner) restoreMacroStream(lease *macroStreamLease) error {
+	if lease == nil || lease.restored {
+		return nil
+	}
+	lease.restored = true
+	if !runner.macroStreamLeaseCurrent(lease) {
+		return nil
+	}
+	payload, err := native.StreamPeriodPayload(lease.PeriodMS)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
+	defer cancel()
+	_, err = runner.requestAtGeneration(
+		ctx, lease.Generation,
+		native.OpSetStream, payload, native.OpACK,
+	)
+	return err
+}
+
+func (runner *MacroRunner) macroStreamLeaseCurrent(lease *macroStreamLease) bool {
+	if lease == nil || runner.runtime == nil {
+		return false
+	}
+	snapshot := runner.runtime.Snapshot()
+	return snapshot.Connected && snapshot.ConnectionGeneration == lease.Generation &&
+		macroBoardIdentity(snapshot) == lease.Board
+}
+
+func macroBoardIdentity(snapshot Snapshot) string {
+	device := strings.TrimSpace(snapshot.Port.SerialNumber)
+	if device == "" {
+		device = strings.TrimSpace(snapshot.Port.InstanceID)
+	}
+	if device == "" {
+		device = strings.TrimSpace(snapshot.Port.Name)
+	}
+	return fmt.Sprintf(
+		"%s|%s|%s|%s|%d|%08X|%08X|%08X",
+		device, snapshot.Port.VID, snapshot.Port.PID, snapshot.Hello.Name,
+		snapshot.Hello.BoardKind, snapshot.Hello.BuildHash,
+		snapshot.Hello.BuildTimestamp, snapshot.Hello.Capabilities,
+	)
+}
+
 func (runner *MacroRunner) request(
 	ctx context.Context,
 	opcode byte,
 	payload []byte,
 	expected byte,
 ) (native.Frame, error) {
+	snapshot := runner.runtime.Snapshot()
+	if !snapshot.Connected {
+		return native.Frame{}, errors.New("device is not connected")
+	}
+	return runner.requestAtGeneration(ctx, snapshot.ConnectionGeneration, opcode, payload, expected)
+}
+
+func (runner *MacroRunner) requestAtGeneration(
+	ctx context.Context,
+	generation uint64,
+	opcode byte,
+	payload []byte,
+	expected byte,
+) (native.Frame, error) {
 	requestContext, cancel := context.WithTimeout(ctx, macroRequestTimeout)
 	defer cancel()
-	return runner.runtime.Request(requestContext, opcode, payload, expected)
+	if runner.requestGeneration != nil {
+		return runner.requestGeneration(requestContext, generation, opcode, payload, expected)
+	}
+	return runner.runtime.requestAtGeneration(requestContext, generation, opcode, payload, expected)
 }
 
 func (runner *MacroRunner) cancelBoard(keepOutputs bool) error {
+	snapshot := runner.runtime.Snapshot()
+	if !snapshot.Connected {
+		return errors.New("device is not connected")
+	}
+	return runner.cancelBoardAtGeneration(snapshot.ConnectionGeneration, keepOutputs)
+}
+
+func (runner *MacroRunner) cancelBoardAtGeneration(generation uint64, keepOutputs bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
 	defer cancel()
-	_, err := runner.runtime.Request(
-		ctx,
+	_, err := runner.requestAtGeneration(
+		ctx, generation,
 		native.OpMacroCancel,
 		native.MacroQueueCancelPayload(keepOutputs),
 		native.OpACK,
@@ -1027,7 +1179,7 @@ func (runner *MacroRunner) cancelBoard(keepOutputs bool) error {
 	return err
 }
 
-func (runner *MacroRunner) showMacroIdentity(ctx context.Context, compiled compiledMacro) error {
+func (runner *MacroRunner) showMacroIdentity(ctx context.Context, generation uint64, compiled compiledMacro) error {
 	macro := compiled.definition
 	label := strings.TrimSpace(macro.Label)
 	if label == "" {
@@ -1045,7 +1197,7 @@ func (runner *MacroRunner) showMacroIdentity(ctx context.Context, compiled compi
 		if err != nil {
 			return err
 		}
-		if _, err := runner.request(ctx, native.OpDisplayText, payload, native.OpACK); err != nil {
+		if _, err := runner.requestAtGeneration(ctx, generation, native.OpDisplayText, payload, native.OpACK); err != nil {
 			return err
 		}
 	}
@@ -1054,7 +1206,7 @@ func (runner *MacroRunner) showMacroIdentity(ctx context.Context, compiled compi
 		if err != nil {
 			return err
 		}
-		if _, err := runner.request(ctx, native.OpDisplayText, payload, native.OpACK); err != nil {
+		if _, err := runner.requestAtGeneration(ctx, generation, native.OpDisplayText, payload, native.OpACK); err != nil {
 			return err
 		}
 	}

@@ -1677,18 +1677,49 @@ func (runtime *Runtime) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	runtime.mu.RLock()
+	generation := runtime.generation
+	runtime.mu.RUnlock()
+	return runtime.requestAtGeneration(ctx, generation, opcode, payload, expected...)
+}
+
+// requestAtGeneration pins one request and its observation to the exact
+// authenticated transport generation. It cannot fall through to a replacement
+// board if the old request completes after reconnect.
+func (runtime *Runtime) requestAtGeneration(
+	ctx context.Context,
+	generation uint64,
+	opcode byte,
+	payload []byte,
+	expected ...byte,
+) (native.Frame, error) {
 	if opcode == native.OpAddressableLED && runtime.activeUseMask.Load()&(activeUseMacroPlayback|activeUseMacroRecording) != 0 {
 		return native.Frame{}, errors.New("stop macro recording/playback before sending strip frames; WS2811 blocks the MCU clock interrupts")
 	}
-	session := runtime.currentSession()
-	if session == nil {
+	runtime.mu.RLock()
+	if runtime.generation != generation {
+		runtime.mu.RUnlock()
+		return native.Frame{}, fmt.Errorf("connection generation %d is no longer active", generation)
+	}
+	if runtime.session == nil {
+		runtime.mu.RUnlock()
 		return native.Frame{}, errors.New("device is not connected")
 	}
+	session := runtime.session
+	runtime.mu.RUnlock()
 	frame, err := session.Request(ctx, opcode, payload, expected...)
 	if err != nil {
 		return native.Frame{}, err
 	}
-	runtime.observe(frame)
+	runtime.mu.RLock()
+	current := runtime.generation == generation && runtime.session == session
+	runtime.mu.RUnlock()
+	if !current {
+		return native.Frame{}, fmt.Errorf("connection generation %d changed while the request was in flight", generation)
+	}
+	if _, observed := runtime.observeAtGeneration(frame, generation); !observed {
+		return native.Frame{}, fmt.Errorf("connection generation %d changed before its response could be observed", generation)
+	}
 	return frame, nil
 }
 
@@ -2794,6 +2825,19 @@ func (runtime *Runtime) publishReconnectFailure(
 func (runtime *Runtime) observe(frame native.Frame) uint64 {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
+	return runtime.observeLocked(frame)
+}
+
+func (runtime *Runtime) observeAtGeneration(frame native.Frame, generation uint64) (uint64, bool) {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.generation != generation || runtime.session == nil {
+		return 0, false
+	}
+	return runtime.observeLocked(frame), true
+}
+
+func (runtime *Runtime) observeLocked(frame native.Frame) uint64 {
 	switch frame.Opcode {
 	case native.OpStatus:
 		if status, err := native.ParseStatus(frame.Payload); err == nil {
