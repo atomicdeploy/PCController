@@ -1245,6 +1245,11 @@ const PR_ORIGINAL_REQUESTS = {
   181: [PROMPT_EXCERPTS.rgbEffects, PROMPT_EXCERPTS.hardwarePwm],
   187: [PROMPT_EXCERPTS.webAcceptanceRepair],
   188: [PROMPT_EXCERPTS.ledClientExperience],
+  195: [PROMPT_EXCERPTS.firstRun, PROMPT_EXCERPTS.backups, PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.zadig],
+  196: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.hardwarePwm],
+  197: [PROMPT_EXCERPTS.trackerReconciliation, PROMPT_EXCERPTS.domainTracking, PROMPT_EXCERPTS.fullDuplexTracking],
+  198: [PROMPT_EXCERPTS.timelineMemory, PROMPT_EXCERPTS.fullRemoteTui],
+  199: [PROMPT_EXCERPTS.tuiControlRegression],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
