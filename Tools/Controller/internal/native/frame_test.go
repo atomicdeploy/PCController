@@ -244,7 +244,7 @@ func TestParseHelloCompactIdentitySchema3(t *testing.T) {
 
 func TestParseHelloAcceptsLegacySixteenByteIdentity(t *testing.T) {
 	payload := make([]byte, 16)
-	payload[0] = IdentitySchemaLegacy
+	payload[0] = IdentitySchemaCompact
 	payload[1] = 1
 	binary.LittleEndian.PutUint32(payload[2:6], 0xAABBCCDD)
 	binary.LittleEndian.PutUint32(payload[6:10], 0x11223344)
@@ -260,7 +260,7 @@ func TestParseHelloAcceptsLegacySixteenByteIdentity(t *testing.T) {
 
 func TestParseHelloRejectsNonZeroLegacyTail(t *testing.T) {
 	payload := make([]byte, 16)
-	payload[0] = IdentitySchemaLegacy
+	payload[0] = IdentitySchemaCompact
 	payload[14] = 1
 	if _, err := ParseHello(payload); err == nil {
 		t.Fatal("non-zero legacy HELLO tail was accepted")
