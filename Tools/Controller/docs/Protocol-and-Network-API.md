@@ -12,6 +12,45 @@ without a documentation server. Repository validation regenerates the
 contracts logically and rejects drift from the actual RPC dispatcher or REST
 route families.
 
+## Cross-surface control contract
+
+Public REST routes are versionless: use `/api/peripherals`, `/api/pwm`, and
+`/api/rpc`; `/api/v1/...` is deliberately not a supported alias. JSON-RPC,
+WebUI, TUI, and CLI all consume the same host-owned peripheral registry rather
+than maintaining their own relay/PWM labels. `GET /api/peripherals` and
+`controller.peripherals.get` return both the complete `peripherals` catalog
+and a compact ordered `controls` list:
+
+| Control kind | Canonical key | Order | Scope |
+|---|---|---:|---|
+| `relay` | `relay.1` … `relay.8` | 1 … 8 | Relay outputs; first four retain motion safety interlocks. |
+| `side` | `motion.a`, `motion.b` | 1, 2 | Directional motion through the guarded side command. |
+| `mosfet` | `pwm.0` … `pwm.10` | 0 … 10 | Generic user/commissioning PWM channels. |
+
+`name` is resolved from persistent host configuration (falling back to the
+registry default), while `key` and `order` are stable machine identifiers.
+System-owned illumination, power-indicator, and RGB PWM channels are retained
+in the complete catalog but not presented as generic MOSFET controls.
+
+For a safe one-shot board tone, use the typed CLI spelling:
+
+```console
+controller beep --frequency 440 --duration 125 [connection flags]
+```
+
+It is exactly equivalent to `controller exec buzzer 440 125` and is routed
+through the primary/IPC command engine. Before any tone opcode is sent, the
+engine reads the firmware-owned EEPROM settings; a board marked silent returns
+`buzzer suppressed: board is silent` without a board write. The same behavior
+therefore applies to Web/RPC/TUI test actions that execute `buzzer`.
+
+EEPROM settings reports distinguish *accepted/live* from *persisted*. A
+successful settings command is immediately applied by the firmware and its
+next `GET_SETTINGS` response is the observable live state. The response's
+`persisted` flag is authoritative for whether the EEPROM commit is complete;
+callers must surface it rather than claiming a reboot is required or that an
+ACK alone proves durability.
+
 ## Framing
 
 Frames are COBS encoded and terminated by `0x00`. The decoded frame is:

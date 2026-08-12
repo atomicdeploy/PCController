@@ -118,8 +118,11 @@ func TestPeripheralNamesRPCNormalizesPersistsAndNeverTouchesBoardSettings(t *tes
 	if _, exists := updated.Names["pwm.0"]; exists {
 		t.Fatalf("blank custom name was not restored to default: %#v", updated.Names)
 	}
-	if len(updated.Peripherals) != 34 || config.Connection.ResetOnReconnect {
-		t.Fatalf("peripheral update descriptors=%d reset-on-reconnect=%t", len(updated.Peripherals), config.Connection.ResetOnReconnect)
+	if len(updated.Peripherals) != 34 || len(updated.Controls) != 21 || config.Connection.ResetOnReconnect {
+		t.Fatalf("peripheral update descriptors=%d controls=%d reset-on-reconnect=%t", len(updated.Peripherals), len(updated.Controls), config.Connection.ResetOnReconnect)
+	}
+	if got := updated.Controls[4]; got.Key != "relay.5" || got.Kind != "relay" || got.Order != 5 || got.Name != "Bench lamp" {
+		t.Fatalf("relay control contract=%+v", got)
 	}
 
 	bad, _ := json.Marshal(map[string]any{
@@ -153,7 +156,7 @@ func TestPeripheralNamesRESTUsesTheSameTypedContract(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 34 {
+	if response.StatusCode != http.StatusOK || result.Names["display.lcd"] != "Cabinet LCD" || len(result.Peripherals) != 34 || len(result.Controls) != 21 {
 		t.Fatalf("REST peripheral response status=%d result=%+v", response.StatusCode, result)
 	}
 }
