@@ -219,7 +219,7 @@
     "/api/peripherals": {
       "get": {
         "operationId": "get_api_peripherals",
-        "summary": "Peripheral descriptors and host-owned names",
+        "summary": "Ordered peripheral presentation descriptors",
         "tags": [
           "service"
         ],
@@ -253,7 +253,7 @@
       },
       "put": {
         "operationId": "put_api_peripherals",
-        "summary": "Replace host-owned peripheral names",
+        "summary": "Replace peripheral name, description, and order metadata",
         "tags": [
           "service"
         ],

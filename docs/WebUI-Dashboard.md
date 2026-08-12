@@ -27,11 +27,14 @@ collapse it with its controls, then use the hero action menu to restore a
 hidden card. This is deliberately local and does not mutate a board or another
 operator's layout.
 
-Peripheral labels are different: relay, MOSFET/PWM, and motion-side names use
-the host's canonical peripheral catalog. The dashboard action opens Settings,
-where saving a label propagates through the host, CLI, TUI, IPC, bridge, and
-WebUI. This prevents duplicate definitions while allowing each board setup to
-be described clearly.
+Peripheral labels are different: every relay, MOSFET/PWM channel, and motion
+Side uses the host's canonical ordered peripheral catalog. On the main Controls
+page, edit a name or description inline and press Enter or leave the field to
+commit; drag the grip to reorder within Relays, Sides, or MOSFET/PWM. Side A/B
+can therefore be presented as Left/Right or arbitrary installation names.
+There is no separate save button. The host broadcasts the resulting metadata
+to every connected client, while the initiating Web client avoids a duplicate
+toast.
 
 ## Connection and notification behavior
 

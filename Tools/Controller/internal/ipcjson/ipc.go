@@ -289,26 +289,28 @@ type Service struct {
 // browserUISettings is the narrow persistent host-owned subset exposed to the
 // browser. Board EEPROM settings remain on the independent board command path.
 type browserUISettings struct {
-	AppTitle        string                           `json:"app_title"`
-	Tagline         string                           `json:"tagline"`
-	SetupComplete   bool                             `json:"setup_complete"`
-	WelcomeMelody   string                           `json:"welcome_melody"`
-	Appearance      browserAppearance                `json:"appearance"`
-	AppearanceETag  string                           `json:"appearance_etag"`
-	SegmentScroll   appconfig.SegmentScroll          `json:"segment_scroll"`
-	PeripheralNames map[string]string                `json:"peripheral_names"`
-	Peripherals     []appconfig.PeripheralDescriptor `json:"peripherals"`
-	Controls        []appconfig.ControlDescriptor    `json:"controls"`
-	Changed         *bool                            `json:"changed,omitempty"`
-	ChangedFields   []string                         `json:"changed_fields,omitempty"`
-	Before          map[string]any                   `json:"before,omitempty"`
-	After           map[string]any                   `json:"after,omitempty"`
+	AppTitle               string                                      `json:"app_title"`
+	Tagline                string                                      `json:"tagline"`
+	SetupComplete          bool                                        `json:"setup_complete"`
+	WelcomeMelody          string                                      `json:"welcome_melody"`
+	Appearance             browserAppearance                           `json:"appearance"`
+	AppearanceETag         string                                      `json:"appearance_etag"`
+	SegmentScroll          appconfig.SegmentScroll                     `json:"segment_scroll"`
+	PeripheralNames        map[string]string                           `json:"peripheral_names"`
+	PeripheralPresentation map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation"`
+	Peripherals            []appconfig.PeripheralDescriptor            `json:"peripherals"`
+	Controls               []appconfig.ControlDescriptor               `json:"controls"`
+	Changed                *bool                                       `json:"changed,omitempty"`
+	ChangedFields          []string                                    `json:"changed_fields,omitempty"`
+	Before                 map[string]any                              `json:"before,omitempty"`
+	After                  map[string]any                              `json:"after,omitempty"`
 }
 
 type peripheralSettings struct {
-	Names       map[string]string                `json:"peripheral_names"`
-	Peripherals []appconfig.PeripheralDescriptor `json:"peripherals"`
-	Controls    []appconfig.ControlDescriptor    `json:"controls"`
+	Names        map[string]string                           `json:"peripheral_names"`
+	Presentation map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation"`
+	Peripherals  []appconfig.PeripheralDescriptor            `json:"peripherals"`
+	Controls     []appconfig.ControlDescriptor               `json:"controls"`
 }
 
 type hostFactsParams struct {
@@ -625,12 +627,13 @@ func (service *Service) dispatch(
 		result = service.peripheralSettings()
 	case "controller.peripherals.set":
 		var params struct {
-			PeripheralNames map[string]string `json:"peripheral_names"`
+			PeripheralNames        *map[string]string                           `json:"peripheral_names,omitempty"`
+			PeripheralPresentation *map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
-			if params.PeripheralNames == nil {
-				err = errors.New("peripheral_names is required")
-			} else if err = service.setPeripheralNames(params.PeripheralNames); err == nil {
+			if params.PeripheralNames == nil && params.PeripheralPresentation == nil {
+				err = errors.New("peripheral_names or peripheral_presentation is required")
+			} else if err = service.setPeripheralSettings(params.PeripheralNames, params.PeripheralPresentation); err == nil {
 				result = service.peripheralSettings()
 			}
 		}
@@ -1470,16 +1473,17 @@ func (service *Service) hostConfig() appconfig.Config {
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
 	return browserUISettings{
-		AppTitle:        productidentity.Title(ui.AppTitle),
-		Tagline:         ui.Tagline,
-		SetupComplete:   ui.SetupComplete,
-		WelcomeMelody:   ui.WelcomeMelody,
-		Appearance:      browserAppearanceFromConfig(ui.Appearance),
-		AppearanceETag:  appearanceETag(ui.Appearance),
-		SegmentScroll:   ui.SegmentScroll,
-		PeripheralNames: clonePeripheralNames(ui.PeripheralNames),
-		Peripherals:     appconfig.PeripheralDescriptors(),
-		Controls:        appconfig.ControlDescriptors(ui.PeripheralNames),
+		AppTitle:               productidentity.Title(ui.AppTitle),
+		Tagline:                ui.Tagline,
+		SetupComplete:          ui.SetupComplete,
+		WelcomeMelody:          ui.WelcomeMelody,
+		Appearance:             browserAppearanceFromConfig(ui.Appearance),
+		AppearanceETag:         appearanceETag(ui.Appearance),
+		SegmentScroll:          ui.SegmentScroll,
+		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
+		PeripheralPresentation: appconfig.ResolvedPeripheralPresentation(ui),
+		Peripherals:            appconfig.PeripheralDescriptors(),
+		Controls:               appconfig.ControlDescriptors(ui),
 	}
 }
 
@@ -1487,6 +1491,19 @@ func clonePeripheralNames(names map[string]string) map[string]string {
 	result := make(map[string]string, len(names))
 	for key, name := range names {
 		result[key] = name
+	}
+	return result
+}
+
+func clonePeripheralPresentation(values map[string]appconfig.PeripheralPresentation) map[string]appconfig.PeripheralPresentation {
+	result := make(map[string]appconfig.PeripheralPresentation, len(values))
+	for key, value := range values {
+		copy := value
+		if value.Order != nil {
+			order := *value.Order
+			copy.Order = &order
+		}
+		result[key] = copy
 	}
 	return result
 }
@@ -1510,31 +1527,125 @@ func normalizePeripheralNames(names map[string]string) (map[string]string, error
 	return result, nil
 }
 
+func normalizePeripheralPresentation(values map[string]appconfig.PeripheralPresentation) (map[string]appconfig.PeripheralPresentation, error) {
+	result := make(map[string]appconfig.PeripheralPresentation, len(values))
+	for rawKey, rawValue := range values {
+		key := strings.ToLower(strings.TrimSpace(rawKey))
+		if key == "" || !appconfig.IsPresentedControlKey(key) {
+			return nil, fmt.Errorf("peripheral_presentation key %q is not a relay, motion side, or PWM ID", rawKey)
+		}
+		if _, duplicate := result[key]; duplicate {
+			return nil, fmt.Errorf("peripheral_presentation contains duplicate normalized key %q", key)
+		}
+		value := rawValue
+		value.Name = strings.TrimSpace(value.Name)
+		value.Description = strings.TrimSpace(value.Description)
+		if value.Order != nil {
+			order := *value.Order
+			value.Order = &order
+		}
+		result[key] = value
+	}
+	return result, nil
+}
+
 func (service *Service) peripheralSettings() peripheralSettings {
 	return peripheralSettings{
-		Names:       clonePeripheralNames(service.hostConfig().UI.PeripheralNames),
-		Peripherals: appconfig.PeripheralDescriptors(),
-		Controls:    appconfig.ControlDescriptors(service.hostConfig().UI.PeripheralNames),
+		Names:        clonePeripheralNames(service.hostConfig().UI.PeripheralNames),
+		Presentation: appconfig.ResolvedPeripheralPresentation(service.hostConfig().UI),
+		Peripherals:  appconfig.PeripheralDescriptors(),
+		Controls:     appconfig.ControlDescriptors(service.hostConfig().UI),
 	}
 }
 
 func (service *Service) setPeripheralNames(names map[string]string) error {
+	return service.setPeripheralSettings(&names, nil)
+}
+
+func (service *Service) setPeripheralSettings(
+	names *map[string]string,
+	presentation *map[string]appconfig.PeripheralPresentation,
+) error {
 	if service.UpdateHostConfig == nil {
 		return errors.New("persistent host configuration is unavailable")
 	}
-	normalized, err := normalizePeripheralNames(names)
-	if err != nil {
-		return err
+	var normalizedNames map[string]string
+	var normalizedPresentation map[string]appconfig.PeripheralPresentation
+	var err error
+	if names != nil {
+		normalizedNames, err = normalizePeripheralNames(*names)
+		if err != nil {
+			return err
+		}
+	}
+	if presentation != nil {
+		normalizedPresentation, err = normalizePeripheralPresentation(*presentation)
+		if err != nil {
+			return err
+		}
 	}
 	candidate := service.hostConfig()
-	candidate.UI.PeripheralNames = normalized
+	applyPeripheralSettings(&candidate.UI, normalizedNames, normalizedPresentation, names != nil, presentation != nil)
 	if err := candidate.Validate(); err != nil {
 		return err
 	}
-	return service.UpdateHostConfig(func(value *appconfig.Config) error {
-		value.UI.PeripheralNames = clonePeripheralNames(normalized)
+	err = service.UpdateHostConfig(func(value *appconfig.Config) error {
+		applyPeripheralSettings(&value.UI, normalizedNames, normalizedPresentation, names != nil, presentation != nil)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if service.Client != nil {
+		service.Client.EmitHostActionEvent(
+			"config", "Peripheral presentation updated", "host", "peripheral.presentation.set",
+			map[string]string{"scope": "peripherals"},
+		)
+	}
+	return nil
+}
+
+func applyPeripheralSettings(
+	ui *appconfig.UI,
+	names map[string]string,
+	presentation map[string]appconfig.PeripheralPresentation,
+	setNames bool,
+	setPresentation bool,
+) {
+	if setPresentation {
+		ui.PeripheralPresentation = clonePeripheralPresentation(presentation)
+	}
+	if setNames {
+		ui.PeripheralNames = clonePeripheralNames(names)
+		if ui.PeripheralPresentation == nil {
+			ui.PeripheralPresentation = make(map[string]appconfig.PeripheralPresentation)
+		}
+		for _, descriptor := range appconfig.PeripheralDescriptors() {
+			if !appconfig.IsPresentedControlKey(descriptor.Key) {
+				continue
+			}
+			value := ui.PeripheralPresentation[descriptor.Key]
+			value.Name = strings.TrimSpace(names[descriptor.Key])
+			ui.PeripheralPresentation[descriptor.Key] = value
+		}
+	}
+	// Keep the historical name map as a compatibility projection for older
+	// clients while presentation remains authoritative for controllable IDs.
+	if setPresentation {
+		if ui.PeripheralNames == nil {
+			ui.PeripheralNames = make(map[string]string)
+		}
+		for key := range ui.PeripheralNames {
+			if appconfig.IsPresentedControlKey(key) {
+				delete(ui.PeripheralNames, key)
+			}
+		}
+		for key, value := range ui.PeripheralPresentation {
+			if value.Name != "" {
+				ui.PeripheralNames[key] = value.Name
+			}
+		}
+	}
 }
 
 func (service *Service) hostFacts() hostfacts.Provider {
@@ -2361,18 +2472,19 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		var params struct {
-			PeripheralNames map[string]string `json:"peripheral_names"`
+			PeripheralNames        *map[string]string                           `json:"peripheral_names,omitempty"`
+			PeripheralPresentation *map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation,omitempty"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&params); err != nil || params.PeripheralNames == nil {
+		if err := decoder.Decode(&params); err != nil || (params.PeripheralNames == nil && params.PeripheralPresentation == nil) {
 			if err == nil {
-				err = errors.New("peripheral_names is required")
+				err = errors.New("peripheral_names or peripheral_presentation is required")
 			}
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if err := service.setPeripheralNames(params.PeripheralNames); err != nil {
+		if err := service.setPeripheralSettings(params.PeripheralNames, params.PeripheralPresentation); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}

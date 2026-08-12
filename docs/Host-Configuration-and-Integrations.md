@@ -131,23 +131,25 @@ Every status-LED state has its own effect, primary/alternate RGB, brightness,
 minimum, and period editor with a live terminal color preview. The fixed sensor
 role assignment is intentionally absent from daily settings.
 
-### Semantic peripheral names
+### Peripheral presentation metadata
 
 The host exposes one canonical registry of 34 physical or logical peripherals:
 eight relays, two motion sides, sixteen PWM channels, two displays, and six
 sensors. Every descriptor has a stable `key`, `kind`, `role`, `index`,
-`default_name`, and `control` hint. TUI and Web surfaces resolve labels from
+`default_name`, `default_description`, and `control` hint. TUI, CLI, Web,
+REST, and RPC surfaces resolve one ordered descriptor list from this registry
 this registry so a custom name remains consistent across dashboards, controls,
 graphs, and settings rather than being copied into individual pages.
 
-Overrides are stored under `ui.peripheral_names`, for example:
+Relay, motion-side, and all sixteen MOSFET/PWM presentation overrides are
+stored under `ui.peripheral_presentation`, for example:
 
 ```json
 {
   "ui": {
-    "peripheral_names": {
-      "relay.5": "Workbench lamp",
-      "sensor.power": "Cabinet load"
+    "peripheral_presentation": {
+      "relay.5": {"name": "Workbench lamp", "description": "Overhead work light", "order": 4},
+      "motion.a": {"name": "Left", "description": "Left lift", "order": 8}
     }
   }
 }
@@ -155,12 +157,12 @@ Overrides are stored under `ui.peripheral_names`, for example:
 
 These names belong only to the PC host. They do not consume EEPROM and never
 rename, reconfigure, or write a board peripheral. Through
-`controller.peripherals.set` or `PUT /api/peripherals`, keys and names are
-trimmed and the complete update is validated before persistence. Supplying a
-blank name removes that override and restores the registry default. A blank
-value written directly into the configuration file is invalid; omit the key
-instead. Reads return both the current override map and the complete descriptor
-registry so clients do not need a duplicated peripheral list.
+`controller.peripherals.set` or `PUT /api/peripherals`, keys, names,
+descriptions, and the normalized `0..25` ordering are validated before atomic
+persistence. Reads return the resolved ordered `controls` list. The historical
+`ui.peripheral_names` map remains accepted and returned as a compatibility
+projection. A successful change publishes one `config` event to every live
+subscriber so Web, TUI, CLI, REST, and RPC readers converge without refresh.
 
 PWM channels `0..10` are the generic user/commissioning outputs. Channels
 `11..15` remain visible in authoritative sixteen-channel readback but are

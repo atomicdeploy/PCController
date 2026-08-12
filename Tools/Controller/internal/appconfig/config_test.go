@@ -112,13 +112,20 @@ func TestPeripheralRegistryCoversEveryCoreRoleAndNamingCapacity(t *testing.T) {
 }
 
 func TestControlDescriptorsResolveOneOrderedCrossSurfaceContract(t *testing.T) {
-	controls := ControlDescriptors(map[string]string{
-		"relay.5":  "Bench lamp",
-		"pwm.0":    "Left MOSFET",
-		"motion.b": "Rear side",
-	})
-	if len(controls) != 21 {
-		t.Fatalf("control count=%d, want 21", len(controls))
+	config := Defaults()
+	config.UI.PeripheralNames = map[string]string{"relay.5": "Legacy bench lamp"}
+	first, last := 0, MaxPresentedControls-1
+	config.UI.PeripheralPresentation = map[string]PeripheralPresentation{
+		"relay.5":  {Name: "Bench lamp", Description: "Overhead work light", Order: &last},
+		"pwm.0":    {Name: "Left MOSFET", Description: "Left bank dimmer"},
+		"motion.b": {Name: "Rear side", Description: "Rear lift", Order: &first},
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	controls := ControlDescriptors(config.UI)
+	if len(controls) != MaxPresentedControls {
+		t.Fatalf("control count=%d, want %d", len(controls), MaxPresentedControls)
 	}
 	byKey := make(map[string]ControlDescriptor, len(controls))
 	for _, control := range controls {
@@ -128,21 +135,29 @@ func TestControlDescriptorsResolveOneOrderedCrossSurfaceContract(t *testing.T) {
 		byKey[control.Key] = control
 	}
 	for key, want := range map[string]struct {
-		kind  string
-		order int
-		name  string
+		kind        string
+		name        string
+		description string
 	}{
-		"relay.5":  {"relay", 5, "Bench lamp"},
-		"pwm.0":    {"mosfet", 0, "Left MOSFET"},
-		"motion.b": {"side", 2, "Rear side"},
+		"relay.5":  {"relay", "Bench lamp", "Overhead work light"},
+		"pwm.0":    {"mosfet", "Left MOSFET", "Left bank dimmer"},
+		"motion.b": {"side", "Rear side", "Rear lift"},
 	} {
 		got, ok := byKey[key]
-		if !ok || got.Kind != want.kind || got.Order != want.order || got.Name != want.name {
-			t.Fatalf("control %q=%+v, want kind=%q order=%d name=%q", key, got, want.kind, want.order, want.name)
+		if !ok || got.Kind != want.kind || got.Name != want.name || got.Description != want.description {
+			t.Fatalf("control %q=%+v, want kind=%q name=%q description=%q", key, got, want.kind, want.name, want.description)
 		}
 	}
-	if _, found := byKey["pwm.11"]; found {
-		t.Fatal("system illumination must not be exposed as a generic MOSFET control")
+	if controls[0].Key != "motion.b" || controls[len(controls)-1].Key != "relay.5" {
+		t.Fatalf("custom order was not normalized: first=%s last=%s", controls[0].Key, controls[len(controls)-1].Key)
+	}
+	for order, control := range controls {
+		if control.Order != order {
+			t.Fatalf("control %s order=%d, want normalized %d", control.Key, control.Order, order)
+		}
+	}
+	if control, found := byKey["pwm.11"]; !found || control.Control != "role-specific" {
+		t.Fatalf("role-specific MOSFET/PWM descriptor is missing: %+v", control)
 	}
 }
 

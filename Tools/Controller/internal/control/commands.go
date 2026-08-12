@@ -201,6 +201,22 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
+		Name: "peripherals", Usage: "peripherals", Summary: "list ordered host presentation descriptors",
+		Run: func(_ context.Context, args []string) (string, error) {
+			if len(args) != 0 {
+				return "", errors.New("usage: peripherals")
+			}
+			if options.HostConfig == nil {
+				return "", errors.New("host configuration is unavailable")
+			}
+			encoded, err := json.MarshalIndent(appconfig.ControlDescriptors(options.HostConfig().UI), "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(encoded), nil
+		},
+	})
+	mustRegister(shell.Command{
 		Name: "program-state", Aliases: []string{"run-state"},
 		Usage:   "program-state [running [REASON...]|idle] | program-state set OWNER idle|running [REASON...]",
 		Summary: "inspect or set the host-owned Idle/Running application state",
