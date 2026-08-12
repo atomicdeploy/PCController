@@ -656,6 +656,56 @@ func TestFindRetryableProgrammingSessionRequiresExactFailedTransaction(t *testin
 	}
 }
 
+func TestFindRetryableProgrammingSessionResumesSafePrewriteMarker(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: document.SourceSHA256,
+		SettingsSnapshotPath: filepath.Join(paths.BoardSettingsDir, "captured.json"),
+		SafeStateApplied:     true, Phase: "latched-safe",
+	}
+	markerPath, err := persistProgrammingMarker(paths, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := findRetryableProgrammingSession(
+		paths, identity, document.SourceSHA256, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil || loaded.RecoveryMarkerPath != markerPath || loaded.HostResult != "" {
+		t.Fatalf("safe pre-write session not recovered: %+v", loaded)
+	}
+}
+
+func TestFindRetryableProgrammingSessionRejectsIncompletePreparation(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: document.SourceSHA256,
+		SafeStateApplied: true, Phase: "display-ready",
+	}
+	if _, err := persistProgrammingMarker(paths, session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := findRetryableProgrammingSession(
+		paths, identity, document.SourceSHA256, false,
+	); err == nil || !strings.Contains(err.Error(), "not safely retryable") {
+		t.Fatalf("incomplete preparation was accepted: %v", err)
+	}
+}
+
 func TestFindRetryableProgrammingSessionUsesNewestMarkerBeforeOlderConflicts(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	content, err := os.ReadFile(firmware)
