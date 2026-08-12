@@ -148,6 +148,7 @@ type Runtime struct {
 	connectionUpdated      time.Time
 	reconnectEpoch         uint64
 	resetIssued            bool
+	portRebindAllowed      bool
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
@@ -588,6 +589,7 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 	runtime.reconnectEpoch++
 	epoch := runtime.reconnectEpoch
 	runtime.resetIssued = true // A configuration reload is not a USB reappearance.
+	runtime.portRebindAllowed = false
 	runtime.mu.Unlock()
 	runtime.publish(
 		"config",
@@ -626,6 +628,7 @@ func (runtime *Runtime) Reconnect(ctx context.Context, reason string) error {
 	runtime.reconnectEpoch++
 	epoch := runtime.reconnectEpoch
 	runtime.resetIssued = true
+	runtime.portRebindAllowed = false
 	port := runtime.port
 	runtime.mu.Unlock()
 	runtime.publishConnection("reconnecting", port, reason)
@@ -1053,16 +1056,62 @@ func (runtime *Runtime) currentSession() *link.Session {
 
 func (runtime *Runtime) discoveryOptions(options Options) link.DiscoveryOptions {
 	runtime.mu.RLock()
+	// pump arms rebinding only for a disappeared USB transport. Explicit
+	// reconnects and configuration changes never relax a newly requested COM
+	// selector, while a failed HELLO attempt may safely retry the rebound port.
 	allowPortRebind := runtime.connectionState == "reconnecting" &&
-		runtime.session == nil
+		runtime.session == nil && runtime.portRebindAllowed && runtime.port.IsUSB
+	lastPort := runtime.port
 	runtime.mu.RUnlock()
+	filter := options.Filter
+	if allowPortRebind {
+		// The just-authenticated transport is the freshest identity available.
+		// In particular, an explicit --port/--device override deliberately
+		// clears the persisted preference, but must not make a later COM
+		// reassignment forget the VID/PID, friendly name, serial, or instance
+		// that the host actually opened. Missing fields retain any durable
+		// preference because inexpensive bridges expose uneven metadata.
+		filter.Preferred = mergeObservedDeviceIdentity(filter.Preferred, lastPort)
+	}
 	return link.DiscoveryOptions{
-		Filter: options.Filter, BaudRate: options.BaudRate,
+		Filter: filter, BaudRate: options.BaudRate,
 		StartupWait: options.StartupWait, RequestTimeout: options.RequestTimeout,
 		HelloAttempts:   options.HelloAttempts,
 		ResetAfterOpen:  runtime.resetAfterOpen,
 		AllowPortRebind: allowPortRebind,
 	}
+}
+
+func mergeObservedDeviceIdentity(
+	preferred ports.Identity,
+	observed ports.Info,
+) ports.Identity {
+	if value := strings.TrimSpace(observed.Name); value != "" {
+		preferred.Port = value
+	}
+	if value := strings.TrimSpace(observed.VID); value != "" {
+		preferred.VID = value
+	}
+	if value := strings.TrimSpace(observed.PID); value != "" {
+		preferred.PID = value
+	}
+	if value := strings.TrimSpace(observed.SerialNumber); value != "" {
+		preferred.SerialNumber = value
+	}
+	if value := strings.TrimSpace(observed.InstanceID); value != "" {
+		preferred.InstanceID = value
+	}
+	for _, value := range []string{
+		observed.FriendlyName,
+		observed.Product,
+		observed.Manufacturer,
+	} {
+		if value = strings.TrimSpace(value); value != "" {
+			preferred.Name = value
+			break
+		}
+	}
+	return preferred
 }
 
 // resetAfterOpen consumes the reconnect reset permit before pulsing. Failed
@@ -1097,6 +1146,7 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	runtime.connectionReason = ""
 	runtime.connectionUpdated = time.Now()
 	runtime.reconnectEpoch++
+	runtime.portRebindAllowed = false
 	observer := runtime.deviceObserver
 	ready := runtime.connectionReadyHandler
 	runtime.mu.Unlock()
@@ -1395,6 +1445,7 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 	runtime.connectionState = "disconnected"
 	runtime.connectionReason = reason
 	runtime.connectionUpdated = time.Now()
+	runtime.portRebindAllowed = false
 	runtime.mu.Unlock()
 	if session == nil {
 		return nil
@@ -1611,6 +1662,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				runtime.reconnectEpoch++
 				epoch = runtime.reconnectEpoch
 				runtime.resetIssued = false
+				runtime.portRebindAllowed = port.IsUSB
 			}
 			runtime.mu.Unlock()
 			if owned {

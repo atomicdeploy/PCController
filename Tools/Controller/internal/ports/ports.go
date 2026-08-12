@@ -269,6 +269,26 @@ func ReconnectCandidates(all []Info, filter Filter) []Info {
 	}
 	withoutPort := filter
 	withoutPort.Port = ""
+	// Preferred is normally populated from the last authenticated device. Try
+	// its strong identifiers before relaxing to descriptive identity. This is
+	// essential when an explicit COM selector supplied no VID/PID/name and an
+	// unrelated second USB serial device is also present.
+	if withoutPort.SerialNumber == "" && withoutPort.InstanceID == "" {
+		if serial := strings.TrimSpace(filter.Preferred.SerialNumber); serial != "" {
+			strong := withoutPort
+			strong.SerialNumber = serial
+			if candidates := Candidates(all, strong); len(candidates) > 0 {
+				return candidates
+			}
+		}
+		if instance := strings.TrimSpace(filter.Preferred.InstanceID); instance != "" {
+			strong := withoutPort
+			strong.InstanceID = instance
+			if candidates := Candidates(all, strong); len(candidates) > 0 {
+				return candidates
+			}
+		}
+	}
 	if withoutPort.VID != "" || withoutPort.PID != "" ||
 		withoutPort.Name != "" || withoutPort.SerialNumber != "" ||
 		withoutPort.InstanceID != "" {
