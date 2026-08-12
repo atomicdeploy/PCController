@@ -193,6 +193,7 @@ type Runtime struct {
 	programStateSentMode       ProgramMode
 	macroRunner                *MacroRunner
 	displayMu                  sync.Mutex
+	segmentMessageCancel       context.CancelFunc
 	lcdMessageCancel           context.CancelFunc
 
 	actionObserverMu        sync.RWMutex
