@@ -19,17 +19,14 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
-const boardInitializeUsage = "usage: controller board provision [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
+const boardInitializeUsage = "usage: controller board initialize [--skip-toolchain] [--portable-cli] [--fqbn FQBN] | controller board provision [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--force-initialize] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
 
 func runBoard(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	if len(args) == 0 {
 		return errors.New(boardInitializeUsage)
 	}
 	action := strings.ToLower(strings.TrimSpace(args[0]))
-	if action == "initialize" {
-		action = "provision"
-	}
-	if action != "provision" && action != "blank" {
+	if action != "initialize" && action != "provision" && action != "blank" {
 		return runExec(append([]string{"board"}, args...), stdout, stderr, store)
 	}
 	claim, havePrimary, err := preparePrimaryMode("board " + action)
@@ -56,7 +53,10 @@ func runBoard(args []string, stdout, stderr io.Writer, store *appconfig.Store) e
 	if action == "blank" {
 		return blankBoard(ctx, runtime, args[1:], store, stdout)
 	}
-	return initializeBoard(ctx, runtime, args[1:], store, findProjectRoot(), stdout)
+	if action == "initialize" {
+		return initializeBoard(ctx, runtime, args[1:], store, findProjectRoot(), stdout)
+	}
+	return provisionBoard(ctx, runtime, args[1:], store, findProjectRoot(), stdout)
 }
 
 func blankBoard(
@@ -194,12 +194,8 @@ func initializeBoard(
 	if runtime == nil || store == nil {
 		return errors.New("board initialization requires the primary runtime and configuration store")
 	}
-	flags := flag.NewFlagSet("board provision", flag.ContinueOnError)
+	flags := flag.NewFlagSet("board initialize", flag.ContinueOnError)
 	flags.SetOutput(output)
-	uart := flags.String("uart", "auto", "application UART port, auto, or none")
-	boardName := flags.String("name", "", "persist an operator board name of at most eight printable ASCII characters")
-	firmware := flags.String("firmware", store.Current().Paths.FirmwareHex, "precompiled application Intel HEX (compile project when empty)")
-	bootloaderOnly := flags.Bool("bootloader-only", false, "install and verify only the core bootloader/fuses")
 	skipToolchain := flags.Bool("skip-toolchain", false, "use the already configured toolchain without an install/repair pass")
 	portableCLI := flags.Bool("portable-cli", false, "download/use a fresh managed portable arduino-cli even when another CLI is configured")
 	toolchainCLI := flags.String("cli", "", "explicit arduino-cli executable")
@@ -213,12 +209,6 @@ func initializeBoard(
 	if flags.NArg() != 0 || *bitClock < 0 {
 		return errors.New(boardInitializeUsage)
 	}
-	if err := native.ValidateBoardName(*boardName); err != nil {
-		return err
-	}
-	if *boardName != "" && (*bootloaderOnly || strings.EqualFold(strings.TrimSpace(*uart), "none")) {
-		return errors.New("--name requires the UART application phase; it cannot be combined with --bootloader-only or --uart none")
-	}
 	project := configuredProject(store.Current(), fallbackProject)
 	if strings.TrimSpace(project) == "" || project == "." {
 		return errors.New("board initialization cannot locate the firmware project; configure paths.project")
@@ -231,7 +221,7 @@ func initializeBoard(
 		return err
 	}
 
-	fmt.Fprintln(output, "=== PCController blank-board provision ===")
+	fmt.Fprintln(output, "=== PCController board initialization (fuse policy + bootloader only) ===")
 	fmt.Fprintln(output, "FQBN:", *fqbn)
 	fmt.Fprintln(output, "Host data:", dataPaths.DataDir)
 	fmt.Fprintln(output, "Project:", project)
@@ -268,33 +258,10 @@ func initializeBoard(
 		return errors.New("--skip-toolchain requires a configured or explicit --cli executable")
 	}
 
-	applicationHex := strings.TrimSpace(*firmware)
-	if !*bootloaderOnly && applicationHex == "" {
-		fmt.Fprintln(output, "\n[firmware] Compiling the current project before touching the MCU")
-		compileOptions, identity, planErr := programmer.PlanCompile(programmer.Options{
-			Method: programmer.MethodCompile, SketchPath: project,
-			ArduinoCLI: cli, ArduinoConfig: cliConfig, FQBN: *fqbn,
-		})
-		if planErr != nil {
-			return planErr
-		}
-		if err := programmer.Execute(ctx, compileOptions, output); err != nil {
-			return fmt.Errorf("compile initialization firmware: %w", err)
-		}
-		applicationHex, err = findCompiledApplicationHex(identity.OutputDir)
-		if err != nil {
-			return err
-		}
-	}
-	if applicationHex != "" {
-		if _, err := programmer.LoadIntelHex(applicationHex); err != nil {
-			return fmt.Errorf("inspect initialization firmware: %w", err)
-		}
-		fmt.Fprintln(output, "Application image:", applicationHex)
-	}
-
-	// No authenticated application is expected yet, but close any stale UART
-	// session before ISP takes ownership of RESET and the target clock.
+	// Initialization intentionally owns only ISP fuse/bootloader setup.  It
+	// never compiles or uploads application firmware; `board provision` does
+	// that only when a usable existing application/bootloader is unavailable or
+	// when an explicit image was supplied.
 	_ = runtime.Close()
 	fmt.Fprintln(output, "\n[isp] USBasp signature, complete backup, core bootloader/fuses, and post-write verification")
 	coreReport, err := programmer.InitializeBoardCore(ctx, programmer.BoardCoreInitializeOptions{
@@ -309,60 +276,150 @@ func initializeBoard(
 		return err
 	}
 
-	result := map[string]any{
-		"core": coreReport, "application_hex": applicationHex,
-		"uart_requested": *uart, "uart_programmed": false,
-		"board_name_requested": *boardName,
+	result := map[string]any{"core": coreReport, "initialized": true}
+	fmt.Fprintln(output, "\nREADY: selected fuse policy and bootloader verified. Run board provision to deploy or inspect an application.")
+	return appendBoardInitializationReport(output, result, *jsonReport)
+}
+
+// provisionBoard is the application-level lifecycle. A healthy authenticated
+// PCController firmware takes precedence: it is inspected and retained unless
+// the caller supplies --firmware or requests --force-initialize.  This avoids
+// resetting a known-good board merely because somebody ran the full lifecycle.
+func provisionBoard(
+	ctx context.Context,
+	runtime *control.Runtime,
+	args []string,
+	store *appconfig.Store,
+	fallbackProject string,
+	output io.Writer,
+) error {
+	if runtime == nil || store == nil {
+		return errors.New("board provisioning requires the primary runtime and configuration store")
 	}
-	applicationPhases := make([]programmer.BoardLifecyclePhase, 0, 3)
-	applicationPhase := func(name string, run func() error) error {
-		started := time.Now()
-		err := run()
-		applicationPhases = append(applicationPhases, programmer.BoardLifecyclePhase{
-			Name: name, DurationMS: time.Since(started).Milliseconds(),
-		})
+	flags := flag.NewFlagSet("board provision", flag.ContinueOnError)
+	flags.SetOutput(output)
+	uart := flags.String("uart", "auto", "application UART port, auto, or none")
+	boardName := flags.String("name", "", "persist an operator board name of at most eight printable ASCII characters")
+	firmware := flags.String("firmware", "", "precompiled application Intel HEX to upload through the verified bootloader")
+	forceInitialize := flags.Bool("force-initialize", false, "run ISP initialize even if an application authenticates")
+	skipToolchain := flags.Bool("skip-toolchain", false, "use the configured toolchain without an install/repair pass")
+	portableCLI := flags.Bool("portable-cli", false, "use a fresh managed portable arduino-cli")
+	toolchainCLI := flags.String("cli", "", "explicit arduino-cli executable")
+	fqbn := flags.String("fqbn", configuredFQBN(store.Current()), "board FQBN and core bootloader policy")
+	jsonReport := flags.Bool("json", false, "append the machine-readable provisioning report")
+	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if *bootloaderOnly {
-		fmt.Fprintln(output, "\nREADY (bootloader-only): UART application programming and first-boot checks were explicitly skipped.")
-		return appendBoardInitializationReport(output, result, *jsonReport)
+	if flags.NArg() != 0 {
+		return errors.New(boardInitializeUsage)
 	}
+	if err := native.ValidateBoardName(*boardName); err != nil {
+		return err
+	}
+
+	result := map[string]any{"initialized": false, "uart_programmed": false, "firmware": strings.TrimSpace(*firmware)}
 	uartPort, warning, err := resolveInitializationUART(*uart, store.Current().Connection)
 	if err != nil {
 		return err
 	}
 	if warning != "" {
-		fmt.Fprintln(output, "\nWARNING:", warning)
+		fmt.Fprintln(output, "WARNING:", warning)
+	}
+
+	needsInitialize := *forceInitialize
+	if uartPort != "" && !needsInitialize {
+		fmt.Fprintf(output, "[detect] Authenticating existing application on %s before considering ISP initialization\n", uartPort)
+		openContext, cancel := context.WithTimeout(ctx, 12*time.Second)
+		err := runtime.Open(openContext, uartPort)
+		cancel()
+		if err == nil {
+			nameContext, nameCancel := context.WithTimeout(ctx, 4*time.Second)
+			identity, nameErr := runtime.BoardName(nameContext)
+			nameCancel()
+			if nameErr != nil {
+				return fmt.Errorf("read authenticated board identity: %w", nameErr)
+			}
+			result["existing_application"] = true
+			result["board_name"] = identity
+			fmt.Fprintf(output, "Existing PCController firmware authenticated: board=%q persisted=%t.\n", identity.Name, identity.Persisted)
+			if strings.TrimSpace(*firmware) == "" {
+				if *boardName != "" && *boardName != identity.Name {
+					nameContext, nameCancel := context.WithTimeout(ctx, 5*time.Second)
+					updated, nameErr := runtime.SetBoardName(nameContext, *boardName)
+					nameCancel()
+					if nameErr != nil {
+						return fmt.Errorf("persist board name: %w", nameErr)
+					}
+					result["board_name"] = updated
+				}
+				fmt.Fprintln(output, "READY: healthy application retained; ISP initialization and firmware upload skipped.")
+				return appendBoardInitializationReport(output, result, *jsonReport)
+			}
+		} else {
+			fmt.Fprintln(output, "Existing application did not authenticate; provisioning will initialize the core before upload.")
+			_ = runtime.Close()
+			needsInitialize = true
+		}
+	} else if !needsInitialize {
+		fmt.Fprintln(output, "No application UART is available; provisioning will initialize the core before any requested upload.")
+		needsInitialize = true
+	}
+
+	if needsInitialize {
+		initializeArgs := make([]string, 0, 8)
+		if *skipToolchain {
+			initializeArgs = append(initializeArgs, "--skip-toolchain")
+		}
+		if *portableCLI {
+			initializeArgs = append(initializeArgs, "--portable-cli")
+		}
+		if *toolchainCLI != "" {
+			initializeArgs = append(initializeArgs, "--cli", *toolchainCLI)
+		}
+		if *fqbn != "" {
+			initializeArgs = append(initializeArgs, "--fqbn", *fqbn)
+		}
+		fmt.Fprintln(output, "[initialize] Running explicit/required ISP fuse and bootloader initialization.")
+		if err := initializeBoard(ctx, runtime, initializeArgs, store, fallbackProject, output); err != nil {
+			return err
+		}
+		result["initialized"] = true
+	}
+
+	if strings.TrimSpace(*firmware) == "" {
+		if needsInitialize {
+			fmt.Fprintln(output, "READY: initialization complete; no application image was requested.")
+			return appendBoardInitializationReport(output, result, *jsonReport)
+		}
+		return errors.New("no authenticated application, no firmware supplied, and initialization was not requested")
+	}
+	if _, err := programmer.LoadIntelHex(*firmware); err != nil {
+		return fmt.Errorf("inspect requested firmware: %w", err)
 	}
 	if uartPort == "" {
-		fmt.Fprintln(output, "READY (bootloader-only): connect UART later and rerun board provision --skip-toolchain, or program from the TUI Programming page.")
-		result["warning"] = warning
-		if *boardName != "" {
-			return fmt.Errorf("bootloader installed, but board name %q could not be stored because UART is unavailable", *boardName)
-		}
-		return appendBoardInitializationReport(output, result, *jsonReport)
+		return errors.New("firmware was supplied but no UART bootloader port is available; initialize completed without upload")
 	}
-
-	fmt.Fprintf(output, "\n[uart] Programming application through %s with mandatory Urclock readback\n", uartPort)
-	if err := applicationPhase("uart_application_write", func() error {
-		return programmer.Execute(ctx, programmer.Options{
-			Method: programmer.MethodUrclock, Operation: programmer.OperationWriteFlash,
-			Port: uartPort, HexPath: applicationHex, FQBN: *fqbn,
-			ArduinoCLI: cli, ArduinoConfig: cliConfig, Avrdude: store.Current().Programming.Avrdude,
-			AvrdudeConf: store.Current().Programming.AvrdudeConf,
-		}, output)
-	}); err != nil {
-		return fmt.Errorf("program application through UART bootloader: %w", err)
-	}
-	result["uart_port"] = uartPort
-	result["uart_programmed"] = true
-
-	fmt.Fprintln(output, "\n[first boot] Authenticating application HELLO and provisioning missing host-owned defaults")
-	connectContext, connectCancel := context.WithTimeout(ctx, 20*time.Second)
-	err = applicationPhase("first_hello", func() error { return runtime.Open(connectContext, uartPort) })
-	connectCancel()
+	_ = runtime.Close()
+	project := configuredProject(store.Current(), fallbackProject)
+	cli, cliConfig, err := resolveProvisionToolchain(ctx, store, *skipToolchain, *portableCLI, *toolchainCLI, *fqbn, project, output)
 	if err != nil {
-		return fmt.Errorf("authenticate first application boot on %s: %w", uartPort, err)
+		return err
+	}
+	fmt.Fprintf(output, "[upload] Writing requested firmware through %s with mandatory readback\n", uartPort)
+	if err := programmer.Execute(ctx, programmer.Options{
+		Method: programmer.MethodUrclock, Operation: programmer.OperationWriteFlash,
+		Port: uartPort, HexPath: *firmware, FQBN: *fqbn, ArduinoCLI: cli, ArduinoConfig: cliConfig,
+		Avrdude: store.Current().Programming.Avrdude, AvrdudeConf: store.Current().Programming.AvrdudeConf,
+	}, output); err != nil {
+		return fmt.Errorf("upload requested firmware: %w", err)
+	}
+	result["uart_programmed"] = true
+	_ = runtime.Close()
+	openContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+	err = runtime.Open(openContext, uartPort)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("authenticate uploaded application: %w", err)
 	}
 	if *boardName != "" {
 		nameContext, nameCancel := context.WithTimeout(ctx, 5*time.Second)
@@ -372,21 +429,37 @@ func initializeBoard(
 			return fmt.Errorf("persist board name: %w", nameErr)
 		}
 		result["board_name"] = confirmed
-		fmt.Fprintf(output, "BOARD NAME: %q persisted and read back\n", confirmed.Name)
 	}
-	var health map[string]any
-	err = applicationPhase("first_boot_health", func() error {
-		var healthErr error
-		health, healthErr = firstBootHealthChecks(ctx, runtime, output)
-		return healthErr
-	})
-	if err != nil {
-		return err
-	}
-	result["health"] = health
-	result["application_phases"] = applicationPhases
-	fmt.Fprintln(output, "\nREADY: bootloader, application, UART authentication, defaults, and available peripherals verified.")
+	fmt.Fprintln(output, "READY: requested firmware uploaded, read back, and application HELLO authenticated.")
 	return appendBoardInitializationReport(output, result, *jsonReport)
+}
+
+func resolveProvisionToolchain(ctx context.Context, store *appconfig.Store, skip, portable bool, requestedCLI, fqbn, project string, output io.Writer) (string, string, error) {
+	cli, config := strings.TrimSpace(requestedCLI), strings.TrimSpace(store.Current().Programming.ToolchainConfig)
+	if cli == "" && !portable {
+		cli = strings.TrimSpace(store.Current().Programming.ToolchainCLI)
+	}
+	if portable {
+		config = ""
+	}
+	if skip {
+		if cli == "" {
+			return "", "", errors.New("--skip-toolchain requires a configured or explicit --cli executable")
+		}
+		return cli, config, nil
+	}
+	report, err := programmer.BootstrapToolchain(ctx, programmer.ToolchainBootstrapOptions{Profile: programmer.DefaultToolchainProfile(), CLI: cli, DirectRetry: true}, output)
+	if err != nil {
+		return "", "", fmt.Errorf("prepare firmware toolchain: %w", err)
+	}
+	if _, err := store.Update(func(value *appconfig.Config) error {
+		value.Programming.ToolchainCLI, value.Programming.ToolchainConfig = report.CLIPath, report.ConfigPath
+		value.Programming.FQBN, value.Paths.Project = fqbn, project
+		return nil
+	}); err != nil {
+		return "", "", err
+	}
+	return report.CLIPath, report.ConfigPath, nil
 }
 
 func findCompiledApplicationHex(directory string) (string, error) {

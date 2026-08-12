@@ -73,7 +73,7 @@ The generated CLI configuration path is recorded independently from the
 executable path. This keeps an explicit global `--cli` usable even though its
 core/library installation lives under the machine-specific PCController data
 root. Omitting `--cli` installs the verified portable executable there too;
-`board provision --portable-cli` deliberately forces that portable choice.
+`board initialize --portable-cli` deliberately forces that portable choice.
 
 To reproduce the checked-in lock without registry resolution, use:
 
@@ -407,13 +407,13 @@ and safe-state recovery did not depend on that optional peripheral.
 Use one ownership-aware transaction for a new board:
 
 ```console
+controller board initialize --skip-toolchain
 controller board provision --uart auto
-controller board provision --uart none --bootloader-only
-controller board provision --portable-cli --uart COM4
-controller board provision --name EDGE-01 --uart auto
+controller board provision --firmware PCController.ino.hex --uart COM4
+controller board provision --force-initialize --firmware PCController.ino.hex --uart COM4
 ```
 
-The provisioner compiles the application before any device write, validates
+The initializer validates
 the USBasp target signature, backs up flash, EEPROM, signature, fuses, and lock
 bits, then invokes the selected FQBN's stock core `burn-bootloader` recipe with
 verification. It does not install PCController's custom Urboot experiment.
@@ -426,12 +426,13 @@ speed. A successful fast probe makes the core bootloader burn use `usbasp`;
 forced). This avoids carrying a recovery clock into the much larger bootloader
 write while keeping a conservative fallback.
 
-When UART is connected, the host releases ISP, writes the compiled application
-through Urclock, reads it back, requires a native HELLO, confirms factory
-settings persistence, and probes I2C and 1-Wire peripherals. INA219, PCA9685,
-DS18B20, and LCD absence is non-fatal so a partially populated board can still
-be initialized and verified. If no UART is detected, the host clearly reports
-that the bootloader-only phase is complete and skips all serial assertions.
+Initialization owns only the selected fuse policy and bootloader; it never
+compiles or uploads application firmware. `board provision` first authenticates
+an existing application and retains it when healthy. With `--firmware HEX`, it
+uses the verified UART bootloader to write/readback exactly that image; use
+`--force-initialize` only when ISP setup must precede the upload. INA219,
+PCA9685, DS18B20, and LCD absence is non-fatal so a partially populated board
+can still be initialized and verified.
 
 `--name` accepts at most eight printable ASCII characters with no surrounding
 whitespace. After the first authenticated application boot, Controller writes
@@ -452,7 +453,7 @@ must never become the source of truth.
 The Programming page in the TUI runs the same transaction with `I`; the CLI
 remains useful for logs and automation.
 
-`board provision` and `board blank` are also Controller shell commands, so
+`board initialize`, `board provision`, and `board blank` are also Controller shell commands, so
 the existing versionless API/RPC/TUI command path uses the exact same Go
 lifecycle rather than a browser- or shell-specific AVRDUDE path. The output's
 machine-readable report includes each named phase and measured milliseconds.

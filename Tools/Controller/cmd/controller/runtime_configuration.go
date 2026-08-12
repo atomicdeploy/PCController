@@ -258,6 +258,14 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 	) error {
 		return initializeBoard(ctx, runtime, args, store, fallbackProject, output)
 	}
+	options.ProvisionBoard = func(
+		ctx context.Context,
+		runtime *control.Runtime,
+		args []string,
+		output io.Writer,
+	) error {
+		return provisionBoard(ctx, runtime, args, store, fallbackProject, output)
+	}
 	options.BlankBoard = func(
 		ctx context.Context,
 		runtime *control.Runtime,
@@ -283,6 +291,7 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 			UpdateHostConfig: options.UpdateHostConfig,
 			Macros:           options.Macros,
 			InitializeBoard:  options.InitializeBoard,
+			ProvisionBoard:   options.ProvisionBoard,
 			BlankBoard:       options.BlankBoard,
 			USBaspDriver:     options.USBaspDriver,
 		}

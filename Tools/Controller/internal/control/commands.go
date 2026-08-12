@@ -55,6 +55,7 @@ type CommandOptions struct {
 	ProgramExecute   func(context.Context, programmer.Options, io.Writer) error
 	ProgramDataPaths programmer.HostDataPaths
 	InitializeBoard  func(context.Context, *Runtime, []string, io.Writer) error
+	ProvisionBoard   func(context.Context, *Runtime, []string, io.Writer) error
 	BlankBoard       func(context.Context, *Runtime, []string, io.Writer) error
 	USBaspDriver     func(context.Context, []string, io.Writer) error
 }
@@ -1083,18 +1084,26 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "board",
-		Usage:   "board provision [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]",
-		Summary: "provision, securely blank, or name a board",
+		Usage:   "board initialize [...] | board provision [--firmware HEX] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]",
+		Summary: "initialize, provision, securely blank, or name a board",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			if len(args) == 0 {
-				return "", errors.New("usage: board provision [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
+				return "", errors.New("usage: board initialize [...] | board provision [--firmware HEX] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
 			}
-			if strings.EqualFold(args[0], "provision") || strings.EqualFold(args[0], "initialize") {
+			if strings.EqualFold(args[0], "initialize") {
 				if options.InitializeBoard == nil {
 					return "", errors.New("board initialization is unavailable")
 				}
 				var output bytes.Buffer
 				err := options.InitializeBoard(ctx, runtime, args[1:], &output)
+				return strings.TrimSpace(output.String()), err
+			}
+			if strings.EqualFold(args[0], "provision") {
+				if options.ProvisionBoard == nil {
+					return "", errors.New("board provisioning is unavailable")
+				}
+				var output bytes.Buffer
+				err := options.ProvisionBoard(ctx, runtime, args[1:], &output)
 				return strings.TrimSpace(output.String()), err
 			}
 			if strings.EqualFold(args[0], "blank") {
@@ -1106,7 +1115,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return strings.TrimSpace(output.String()), err
 			}
 			if !strings.EqualFold(args[0], "name") {
-				return "", errors.New("usage: board provision [--name NAME] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
+				return "", errors.New("usage: board initialize [...] | board provision [--firmware HEX] [...] | board blank --confirm NAME [...] | board name [get|set NAME|clear]")
 			}
 			if len(args) == 1 || (len(args) == 2 && strings.EqualFold(args[1], "get")) {
 				value, err := runtime.BoardName(ctx)
