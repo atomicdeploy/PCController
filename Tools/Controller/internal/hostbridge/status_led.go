@@ -32,6 +32,8 @@ type statusLEDFrame struct {
 type statusLEDTarget interface {
 	SetStatusRGBBase(context.Context, byte, byte, byte, byte) error
 	SetStatusRGB(context.Context, byte, byte, byte, byte) error
+	SetStatusLEDEffectBase(context.Context, controller.StatusEffectOptions) error
+	SetStatusLEDEffect(context.Context, controller.StatusEffectOptions) error
 }
 
 // statusLEDArbiter owns only the host policy layer. Explicit streamed effects
@@ -130,6 +132,9 @@ func (arbiter *statusLEDArbiter) Run() {
 	var stateStarted, transitionStarted time.Time
 	var current, transitionFrom, lastSent statusLEDFrame
 	var haveCurrent, haveLastSent, suppressed bool
+	var lastNativeEffect controller.StatusEffectOptions
+	var haveLastNativeEffect bool
+	var nextLegacyFrameAt time.Time
 	var macroOverlayPreempted bool
 	var lastErrorAt time.Time
 
@@ -154,7 +159,8 @@ func (arbiter *statusLEDArbiter) Run() {
 			macroOverlayPreempted = true
 		}
 		connected := policy.Enabled && snapshot.Connected && snapshot.HaveStatus
-		if nextState != state {
+		stateChanged := nextState != state
+		if stateChanged {
 			state = nextState
 			stateStarted = now
 			transitionStarted = now
@@ -178,10 +184,47 @@ func (arbiter *statusLEDArbiter) Run() {
 			resetStatusLEDTimer(timer, policy.StepMS)
 			continue
 		}
+		resuming := suppressed
 		if suppressed {
 			transitionFrom = current
 			transitionStarted = now
 			suppressed = false
+		}
+
+		nativeCapable := snapshot.Hello.Capabilities&
+			controller.CapabilityStatusEffects != 0
+		if nativeCapable {
+			nextLegacyFrameAt = time.Time{}
+			effect := statusLEDNativeEffect(visual)
+			if stateChanged || resuming || !haveLastNativeEffect || effect != lastNativeEffect {
+				requestContext, cancel := context.WithTimeout(
+					arbiter.ctx, 500*time.Millisecond,
+				)
+				err := sendStatusLEDNativeEffect(
+					requestContext, arbiter.target, state, effect,
+				)
+				cancel()
+				if err == nil {
+					lastNativeEffect = effect
+					haveLastNativeEffect = true
+				} else if arbiter.onError != nil && now.Sub(lastErrorAt) >= 5*time.Second {
+					lastErrorAt = now
+					arbiter.onError(err)
+				}
+			}
+			current = statusLEDVisualFrame(visual, now.Sub(stateStarted))
+			haveCurrent = true
+			haveLastSent = false
+			resetStatusLEDTimer(timer, policy.StepMS)
+			continue
+		}
+		haveLastNativeEffect = false
+		// Board feedback and telemetry events can wake the arbiter much faster
+		// than the configured compatibility cadence. Do not let those wakes
+		// form a STATUS_RGB -> event -> STATUS_RGB feedback loop.
+		if !stateChanged && !resuming && !nextLegacyFrameAt.IsZero() &&
+			now.Before(nextLegacyFrameAt) {
+			continue
 		}
 
 		frame := statusLEDVisualFrame(visual, now.Sub(stateStarted))
@@ -210,8 +253,55 @@ func (arbiter *statusLEDArbiter) Run() {
 				arbiter.onError(err)
 			}
 		}
+		stepMS := policy.StepMS
+		if stepMS < 20 {
+			stepMS = 20
+		}
+		nextLegacyFrameAt = time.Now().Add(time.Duration(stepMS) * time.Millisecond)
 		resetStatusLEDTimer(timer, policy.StepMS)
 	}
+}
+
+func statusLEDNativeEffect(
+	visual appconfig.StatusLEDVisual,
+) controller.StatusEffectOptions {
+	kind := byte(controller.StatusEffectTransition)
+	alternate := visual.AlternateColor
+	periodMS := visual.PeriodMS
+	switch strings.ToLower(strings.TrimSpace(visual.Effect)) {
+	case "breathe":
+		kind = controller.StatusEffectBreathe
+	case "flash":
+		kind = controller.StatusEffectFlash
+	case "crossfade":
+		kind = controller.StatusEffectCycle
+	default:
+		// The native opcode has no steady kind. A transition whose endpoints
+		// match is a constant, locally rendered descriptor with no UART stream.
+		alternate = visual.Color
+		periodMS = int(controller.StatusEffectMinimumPeriodMS)
+	}
+	return controller.StatusEffectOptions{
+		Kind: kind,
+		Red:  visual.Color.Red, Green: visual.Color.Green, Blue: visual.Color.Blue,
+		AlternateRed: alternate.Red, AlternateGreen: alternate.Green,
+		AlternateBlue:     alternate.Blue,
+		Brightness:        visual.Brightness,
+		MinimumBrightness: visual.MinimumBrightness,
+		PeriodMS:          uint16(periodMS),
+	}
+}
+
+func sendStatusLEDNativeEffect(
+	ctx context.Context,
+	target statusLEDTarget,
+	state string,
+	effect controller.StatusEffectOptions,
+) error {
+	if state == statusLEDDoorWarning {
+		return target.SetStatusLEDEffect(ctx, effect)
+	}
+	return target.SetStatusLEDEffectBase(ctx, effect)
 }
 
 func sendStatusLEDFrame(

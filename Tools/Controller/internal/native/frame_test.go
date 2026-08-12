@@ -232,14 +232,34 @@ func TestParseHelloCompactIdentitySchema4(t *testing.T) {
 		t.Fatal("truncated compact HELLO was accepted")
 	}
 	wrongSchema := append([]byte(nil), payload...)
-	wrongSchema[0] = 2
+	wrongSchema[0] = 3
 	if _, err := ParseHello(wrongSchema); err == nil {
 		t.Fatal("unpublished expanded HELLO schema was accepted")
+	}
+	unknownProfile := append([]byte(nil), payload...)
+	unknownProfile[14] = 4
+	if _, err := ParseHello(unknownProfile); err == nil {
+		t.Fatal("unknown firmware feature profile was accepted")
 	}
 	invalidTimestamp := append([]byte(nil), payload...)
 	binary.LittleEndian.PutUint32(invalidTimestamp[10:14], 0x341F0000)
 	if _, err := ParseHello(invalidTimestamp); err == nil {
 		t.Fatal("invalid packed build timestamp was accepted")
+	}
+}
+
+func TestParseHelloLegacySchema3OnlyForMigration(t *testing.T) {
+	payload := []byte{
+		0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x94,
+		0x7A, 0xE5, 0x45, 0xE0, 0x6B, 0x06, 0x35,
+	}
+	hello, err := ParseHello(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hello.IsPCController() || hello.IdentitySchema != 3 ||
+		hello.FeatureProfile != 0 || hello.BuildFeatures != 0 {
+		t.Fatalf("unexpected legacy HELLO: %#v", hello)
 	}
 }
 

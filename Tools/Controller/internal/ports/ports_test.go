@@ -109,6 +109,30 @@ func TestPreferredIdentityResolvesOnlyStrongUniqueMatch(t *testing.T) {
 	}
 }
 
+func TestReconnectCandidatesReplaceOnlyStaleCOMName(t *testing.T) {
+	all := []Info{
+		{Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523", InstanceID: `USB\CH340\NEW`},
+		{Name: "COM7", IsUSB: true, VID: "2341", PID: "0043"},
+	}
+	candidates := ReconnectCandidates(all, Filter{
+		Port: "COM5", VID: "1A86", PID: "7523",
+		Preferred: Identity{Port: "COM5", InstanceID: `USB\CH340\OLD`},
+	})
+	if len(candidates) != 1 || candidates[0].Name != "COM4" {
+		t.Fatalf("stale COM rebind=%#v", candidates)
+	}
+}
+
+func TestReconnectCandidatesNeverGuessAmongUSBPorts(t *testing.T) {
+	all := []Info{
+		{Name: "COM4", IsUSB: true},
+		{Name: "COM7", IsUSB: true},
+	}
+	if candidates := ReconnectCandidates(all, Filter{Port: "COM5"}); candidates != nil {
+		t.Fatalf("ambiguous USB rebind=%#v", candidates)
+	}
+}
+
 func TestDeviceChangeWatcherCancels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	changes, err := WatchChanges(ctx)

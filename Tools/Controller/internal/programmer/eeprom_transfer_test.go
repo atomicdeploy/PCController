@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"pccontroller.local/controller/internal/native"
 )
 
 func TestCurrentEEPROMExportImportAndRestoreRequireValidatedBackup(t *testing.T) {
@@ -18,7 +20,7 @@ func TestCurrentEEPROMExportImportAndRestoreRequireValidatedBackup(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if exportResult.Action != "export" || exportResult.SettingsFormat != "current/unversioned-40+crc8" {
+	if exportResult.Action != "export" || exportResult.SettingsFormat != "schema1/core22+name9+crc8" {
 		t.Fatalf("unexpected export result: %+v", exportResult)
 	}
 	exportDocument, exportDecoded, err := loadCurrentSettingsArtifact(exported)
@@ -87,6 +89,112 @@ func TestCurrentEEPROMExportImportAndRestoreRequireValidatedBackup(t *testing.T)
 	}
 }
 
+func TestLegacyBackupMigratesSemanticallyAndArmsProgBeforeFlash(t *testing.T) {
+	manifest := currentEEPROMBackupManifest(t) // fixture is schema-2 alpha layout
+	content, decoded, err := GenerateMigratedProgrammingEEPROMIntelHex(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Schema != EEPROMSettingsRecordSchema || !decoded.Valid ||
+		decoded.Values.Flags&(0x01|0x02) != 0x03 || decoded.Values.StreamPeriodMS != 500 {
+		t.Fatalf("migration did not preserve semantics behind Silent/Prog: %#v", decoded)
+	}
+	document, err := ParseIntelHex(strings.NewReader(string(content)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentinel, err := document.BytesAt(500, 1)
+	if err != nil || sentinel[0] != 0xA5 {
+		t.Fatalf("migration changed unrelated EEPROM: % X err=%v", sentinel, err)
+	}
+	tail, err := document.BytesAt(
+		EEPROMSettingsAddress+EEPROMSettingsRecordBytes,
+		EEPROMMenuLayoutRecordBytes-EEPROMSettingsRecordBytes,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for offset, value := range tail {
+		if value != 0xFF {
+			t.Fatalf("legacy raw tail byte %d was replayed: 0x%02X", offset, value)
+		}
+	}
+}
+
+func TestDualBankBackupMigrationSelectsNewestAndPreservesTemperatureRole(t *testing.T) {
+	content, err := GenerateDefaultEEPROMIntelHex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	document, err := ParseIntelHex(strings.NewReader(string(content)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := controllerSettingsFromNative(native.DefaultSettings())
+	values.StreamPeriodMS = 333
+	values.BoardName = "NEWEST"
+	newest, err := encodeCurrentEEPROMSettingsRecordGeneration(values, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for offset, value := range newest {
+		document.data[EEPROMSettingsStagingAddress+uint32(offset)] = value
+	}
+	document.data[EEPROMTemperatureRoleAddress] = 0x5A
+	content, err = document.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := backupManifestForEEPROM(t, content)
+	migrated, decoded, err := GenerateMigratedProgrammingEEPROMIntelHex(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Values.StreamPeriodMS != 333 ||
+		decoded.Values.BoardName != "NEWEST" {
+		t.Fatalf("migration ignored newest bank: %#v", decoded)
+	}
+	result, err := ParseIntelHex(strings.NewReader(string(migrated)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.data[EEPROMTemperatureRoleAddress] != 0x5A {
+		t.Fatalf("migration erased temperature role data: 0x%02X", result.data[EEPROMTemperatureRoleAddress])
+	}
+	selected := decodeOfflineSettings(result)
+	if !selected.Valid || selected.Address != EEPROMSettingsAddress || selected.Generation != 0 ||
+		selected.Values.StreamPeriodMS != 333 {
+		t.Fatalf("migration did not canonicalize selected settings: %#v", selected)
+	}
+}
+
+func TestMigratedProgrammingEEPROMCanOnlyBeStagedForPairedWrite(t *testing.T) {
+	manifest := currentEEPROMBackupManifest(t)
+	paths, err := HostDataPathsFor(filepath.Join(t.TempDir(), "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureHostDataPaths(paths); err != nil {
+		t.Fatal(err)
+	}
+	path, decoded, err := StageMigratedProgrammingEEPROM(manifest, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(path)
+	if decoded.Schema != EEPROMSettingsRecordSchema || !decoded.Valid {
+		t.Fatalf("staged migration is not the current schema: %#v", decoded)
+	}
+	if filepath.Dir(path) != paths.StateDir || !strings.Contains(filepath.Base(path), "migrated-programming-eeprom-") {
+		t.Fatalf("migration artifact escaped the state directory: %s", path)
+	}
+	staged, err := DecodeOfflineEEPROMHex(path)
+	if err != nil || !staged.Settings.Valid ||
+		staged.Settings.Values.Flags&(0x01|0x02) != 0x03 {
+		t.Fatalf("staged migration lost Silent/Prog: %+v err=%v", staged.Settings, err)
+	}
+}
+
 func TestCurrentEEPROMTransferRejectsIncompleteBackupImage(t *testing.T) {
 	root := t.TempDir()
 	directory, err := BackupWithRunner(
@@ -109,7 +217,7 @@ func currentEEPROMBackupManifest(t *testing.T) string {
 	for index := range data {
 		data[index] = 0xFF
 	}
-	values := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsValueBytes]
+	values := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMMenuLayoutValueBytes]
 	values[0] = 0
 	values[1] = 1
 	values[2] = 180
@@ -122,10 +230,11 @@ func currentEEPROMBackupManifest(t *testing.T) string {
 	binary.LittleEndian.PutUint16(values[19:21], 0x3FFF)
 	copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})
 	values[28] = 0
-	for index := 31; index < int(EEPROMSettingsValueBytes); index++ {
+	values[30] = 1
+	for index := 31; index < int(EEPROMMenuLayoutValueBytes); index++ {
 		values[index] = 0
 	}
-	data[EEPROMSettingsAddress+EEPROMSettingsValueBytes] = avrCRC8(values)
+	data[EEPROMSettingsAddress+EEPROMMenuLayoutValueBytes] = avrCRC8(values)
 	data[500] = 0xA5
 	image := &IntelHexImage{data: make(map[uint32]byte, len(data))}
 	for address, value := range data {
@@ -135,6 +244,11 @@ func currentEEPROMBackupManifest(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return backupManifestForEEPROM(t, content)
+}
+
+func backupManifestForEEPROM(t *testing.T, content []byte) string {
+	t.Helper()
 	runner := newFakeAVRRunner(t)
 	runner.eepromHEX = content
 	directory, err := BackupWithRunner(

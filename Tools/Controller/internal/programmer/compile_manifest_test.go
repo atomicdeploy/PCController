@@ -62,6 +62,12 @@ func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *te
 		manifest.Source.PackedTimestamp != "35019D5D" ||
 		manifest.Source.BuildTimestamp != "260801194258" ||
 		manifest.StackBudget.EstimatedFreeSRAMBytes != 408 ||
+		manifest.EEPROMLayout.Schema != EEPROMSettingsRecordSchema ||
+		manifest.EEPROMLayout.SettingsStagingAddress != EEPROMSettingsStagingAddress ||
+		manifest.EEPROMLayout.SettingsBankBytes != 32 || manifest.EEPROMLayout.SettingsBankCount != 2 ||
+		manifest.EEPROMLayout.ControllerBytes != 22 || manifest.EEPROMLayout.RecordBytes != 32 ||
+		manifest.EEPROMLayout.TemperatureRoleAddress != 64 || manifest.EEPROMLayout.TemperatureRoleBytes != 16 ||
+		!strings.Contains(manifest.EEPROMLayout.Generation, "modulo 16") ||
 		len(manifest.Artifacts) != 4 || len(manifest.PatchRegions) != 1 {
 		t.Fatalf("manifest=%#v", manifest)
 	}

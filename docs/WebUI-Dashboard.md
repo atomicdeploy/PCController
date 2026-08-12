@@ -1,6 +1,7 @@
 # 🧭 WebUI dashboard contract
 
-> WIP delivery tracked by [#159](https://github.com/atomicdeploy/PCController/issues/159), with shared UI follow-up in [#154](https://github.com/atomicdeploy/PCController/issues/154) and native-feeling embedded UI acceptance in [#101](https://github.com/atomicdeploy/PCController/issues/101).
+> WIP delivery tracked by #159, with shared UI follow-up in #154 and
+> native-feeling embedded UI acceptance in #101.
 
 The dashboard is a live view, not an alternate board-control authority. The
 host owns the serial connection and emits snapshot, status, event, and
@@ -74,4 +75,4 @@ an explicit board write. The preferences dialog cannot write the controller.
 2. Confirm every host command used by the hero menu has the expected port
    selection UX on multi-port systems.
 3. Run visual desktop, narrow/mobile, RTL/LTR, and screen-reader checks before
-   merging [#159](https://github.com/atomicdeploy/PCController/issues/159).
+   merging #159.

@@ -25,6 +25,9 @@ public:
   void serviceBrightness(uint8_t target, uint32_t now = millis());
   const uint8_t *rawSegments() const { return cachedSegments_; }
   uint8_t brightness() const { return brightness_; }
+#if defined(PCCONTROLLER_NATIVE_TEST)
+  uint8_t lastCommandForTest() const { return lastCommand_; }
+#endif
 
 private:
   static uint8_t encodeCharacter(char value);
@@ -34,10 +37,13 @@ private:
   void sendCommand(uint8_t command);
   void writeSegments(const uint8_t segments[4]);
 
-  uint8_t cachedSegments_[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-  uint8_t brightness_ = 0xFF;
+  uint8_t cachedSegments_[4] = {};
+  uint8_t brightness_ = 0;
   uint16_t brightnessChangedAt_ = 0;
   bool begun_ = false;
+#if defined(PCCONTROLLER_NATIVE_TEST)
+  uint8_t lastCommand_ = 0;
+#endif
 };
 
 // display is the single board-wide TM1637 presentation service.

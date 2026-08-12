@@ -129,31 +129,35 @@ func (runtime *Runtime) PresentDisplay(
 		SegmentCells: 4, LCDCells: 32,
 	}
 	if request.Target == "segments" || request.Target == "both" {
+		runtime.cancelSegmentMessageSchedule()
 		snapshot := runtime.Snapshot()
 		if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityScheduledSegments == 0 {
-			return DisplayResult{}, errors.New("connected firmware does not support scheduled segment messages; flash the current firmware first")
-		}
-		speedMS, conversionErr := checkedDisplayUint16(request.SpeedMS, "speed_ms")
-		if conversionErr != nil {
-			return DisplayResult{}, conversionErr
-		}
-		holdMS, conversionErr := checkedDisplayUint16(request.DurationMS, "duration_ms")
-		if conversionErr != nil {
-			return DisplayResult{}, conversionErr
-		}
-		payload, payloadErr := native.ScheduledSegmentPayload(
-			native.ScheduledSegmentOptions{
-				SpeedMS: speedMS, HoldMS: holdMS,
-				IntervalSecond: byte(request.IntervalMS / 1000),
-				Repeat:         displayRepeatCode(request.Repeat), ForceScroll: request.Scroll,
-			},
-			request.Text,
-		)
-		if payloadErr != nil {
-			return DisplayResult{}, payloadErr
-		}
-		if err := runtime.Command(ctx, native.OpDisplayText, payload); err != nil {
-			return DisplayResult{}, err
+			if err := runtime.presentLegacySegmentMessage(ctx, request); err != nil {
+				return DisplayResult{}, err
+			}
+		} else {
+			speedMS, conversionErr := checkedDisplayUint16(request.SpeedMS, "speed_ms")
+			if conversionErr != nil {
+				return DisplayResult{}, conversionErr
+			}
+			holdMS, conversionErr := checkedDisplayUint16(request.DurationMS, "duration_ms")
+			if conversionErr != nil {
+				return DisplayResult{}, conversionErr
+			}
+			payload, payloadErr := native.ScheduledSegmentPayload(
+				native.ScheduledSegmentOptions{
+					SpeedMS: speedMS, HoldMS: holdMS,
+					IntervalSecond: byte(request.IntervalMS / 1000),
+					Repeat:         displayRepeatCode(request.Repeat), ForceScroll: request.Scroll,
+				},
+				request.Text,
+			)
+			if payloadErr != nil {
+				return DisplayResult{}, payloadErr
+			}
+			if err := runtime.Command(ctx, native.OpDisplayText, payload); err != nil {
+				return DisplayResult{}, err
+			}
 		}
 	}
 	if request.Target == "lcd" || request.Target == "both" {
@@ -162,6 +166,121 @@ func (runtime *Runtime) PresentDisplay(
 		}
 	}
 	return result, nil
+}
+
+type legacySegmentPlan struct {
+	text       string
+	durationMS uint16
+	clearAfter time.Duration
+	repeatWait time.Duration
+}
+
+func makeLegacySegmentPlan(request DisplayRequest) legacySegmentPlan {
+	plan := legacySegmentPlan{text: request.Text}
+	if request.Scroll && len(plan.text) <= 4 && plan.text != "" {
+		plan.text += strings.Repeat(" ", 5-len(plan.text))
+	}
+	scrolling := len(plan.text) > 4
+	if scrolling {
+		plan.durationMS = uint16(request.SpeedMS)
+		plan.clearAfter = time.Duration(len(plan.text)+1) *
+			time.Duration(request.SpeedMS) * time.Millisecond
+		if request.Repeat == DisplayRepeatLoop {
+			plan.clearAfter = 0
+		} else if request.Repeat == DisplayRepeatInterval {
+			plan.repeatWait = time.Duration(request.IntervalMS) * time.Millisecond
+		}
+		return plan
+	}
+	if request.Repeat == DisplayRepeatLoop {
+		plan.durationMS = 0
+		return plan
+	}
+	plan.durationMS = uint16(request.DurationMS)
+	if request.Repeat == DisplayRepeatInterval {
+		plan.repeatWait = time.Duration(request.DurationMS+request.IntervalMS) * time.Millisecond
+	}
+	return plan
+}
+
+// presentLegacySegmentMessage keeps ordinary display support useful on the
+// compact full-peripheral profile. The MCU still owns each frame and static
+// hold; the host only schedules clear/repeat boundaries that require the
+// optional autonomous segment scheduler.
+func (runtime *Runtime) presentLegacySegmentMessage(
+	ctx context.Context,
+	request DisplayRequest,
+) error {
+	plan := makeLegacySegmentPlan(request)
+	if err := runtime.sendLegacySegmentMessage(ctx, plan); err != nil {
+		return err
+	}
+	if plan.text == "" || (plan.clearAfter == 0 && plan.repeatWait == 0) {
+		return nil
+	}
+	scheduleContext, cancel := context.WithCancel(context.Background())
+	runtime.displayMu.Lock()
+	runtime.segmentMessageCancel = cancel
+	runtime.displayMu.Unlock()
+	go runtime.runLegacySegmentSchedule(scheduleContext, plan)
+	return nil
+}
+
+func (runtime *Runtime) cancelSegmentMessageSchedule() {
+	runtime.displayMu.Lock()
+	if runtime.segmentMessageCancel != nil {
+		runtime.segmentMessageCancel()
+		runtime.segmentMessageCancel = nil
+	}
+	runtime.displayMu.Unlock()
+}
+
+func (runtime *Runtime) sendLegacySegmentMessage(
+	ctx context.Context,
+	plan legacySegmentPlan,
+) error {
+	payload, err := native.DisplayTextPayload(
+		native.DisplaySegments,
+		plan.durationMS,
+		plan.text,
+	)
+	if err != nil {
+		return err
+	}
+	return runtime.Command(ctx, native.OpDisplayText, payload)
+}
+
+func (runtime *Runtime) runLegacySegmentSchedule(
+	ctx context.Context,
+	plan legacySegmentPlan,
+) {
+	if plan.clearAfter > 0 {
+		if !waitDisplayTimer(ctx, plan.clearAfter) {
+			return
+		}
+		requestContext, cancel := context.WithTimeout(ctx, 3*time.Second)
+		_ = runtime.sendLegacySegmentMessage(requestContext, legacySegmentPlan{})
+		cancel()
+	}
+	for plan.repeatWait > 0 {
+		if !waitDisplayTimer(ctx, plan.repeatWait) {
+			return
+		}
+		requestContext, cancel := context.WithTimeout(ctx, 3*time.Second)
+		if runtime.sendLegacySegmentMessage(requestContext, plan) != nil {
+			cancel()
+			return
+		}
+		cancel()
+		if plan.clearAfter > 0 {
+			if !waitDisplayTimer(ctx, plan.clearAfter) {
+				return
+			}
+			requestContext, cancel = context.WithTimeout(ctx, 3*time.Second)
+			_ = runtime.sendLegacySegmentMessage(requestContext, legacySegmentPlan{})
+			cancel()
+		}
+	}
 }
 
 func (runtime *Runtime) presentLCDMessage(ctx context.Context, request DisplayRequest) error {
@@ -242,6 +361,7 @@ func (runtime *Runtime) sendLCDMessage(ctx context.Context, text string) error {
 }
 
 func (runtime *Runtime) cancelDisplaySchedules() {
+	runtime.cancelSegmentMessageSchedule()
 	runtime.displayMu.Lock()
 	if runtime.lcdMessageCancel != nil {
 		runtime.lcdMessageCancel()

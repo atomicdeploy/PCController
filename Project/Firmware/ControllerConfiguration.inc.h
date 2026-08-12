@@ -71,18 +71,32 @@ constexpr int16_t INVALID_I16 = (-32767 - 1);
 static_assert(PAGE_COUNT == PersistentMenuPageCount,
               "Persistent menu catalog no longer matches stable page IDs");
 
+constexpr bool BuildForcesSilent = PCCONTROLLER_FORCE_SILENT != 0;
+
 // Four-character labels are packed contiguously to avoid pointer tables in SRAM.
+// PAGE_KEYS is retained as an ID but is not rendered as an independent page.
+#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+#define PCCONTROLLER_UNIFIED_PAGE_LABEL "KEY "
+#else
+#define PCCONTROLLER_UNIFIED_PAGE_LABEL "MOVE"
+#endif
 const char MenuLabels[] PROGMEM =
-    "doorVOLTCURRtLEDtBT LItEbEEPPWM rELYKEY uPWMr5-8MOVELErn";
+    "doorVOLTCURRtLEDtBT LItEbEEPPWM rELY    uPWMr5-8"
+    PCCONTROLLER_UNIFIED_PAGE_LABEL "LErn";
+#undef PCCONTROLLER_UNIFIED_PAGE_LABEL
+static_assert(sizeof(MenuLabels) == PAGE_COUNT * 4U + 1U,
+              "packed menu labels no longer match stable page IDs");
 const char EditLabels[] PROGMEM =
     "L-MdL-onL-oFS-MdP-ChP-u r-Chr-onuP-CuP-uur-Cur-M";
 constexpr uint8_t EditLabelCount = 12;
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
 const char SettingsLabels[] PROGMEM = "bEEPdiSPdCLSStBrV-dPA-dPSAFE";
 constexpr uint8_t SettingsPolicyItem = 6;
 constexpr uint8_t SettingsItemCount = 7;
+#endif
 const char CommonTexts[] PROGMEM =
     "oFF  on AutoSAVEOPENMutebEEPLErnBOOTdiSC"
-    "r5-8Go  Err KEY CLSdtoGLPuSHProg";
+    "r5-8Go  Err KEY CLSdtoGLPuSHProgrEC PLAYSIDE";
 // CommonTextOffset names four-byte cells within the packed CommonTexts table.
 enum CommonTextOffset : uint8_t {
   TextOff = 0,
@@ -103,6 +117,9 @@ enum CommonTextOffset : uint8_t {
   TextToggle = 60,
   TextPush = 64,
   TextProgram = 68,
+  TextRecord = 72,
+  TextPlay = 76,
+  TextSide = 80,
 };
 
 // Returns a flash-string view at a known four-byte CommonTexts offset. These

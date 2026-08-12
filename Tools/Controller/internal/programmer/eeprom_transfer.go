@@ -34,7 +34,8 @@ func ExportCurrentEEPROMSettings(
 	if err != nil {
 		return EEPROMTransferResult{}, err
 	}
-	record, err := document.Image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
+	_ = document
+	record, err := encodeCurrentEEPROMSettingsRecord(decoded.Settings.Values)
 	if err != nil {
 		return EEPROMTransferResult{}, err
 	}
@@ -51,7 +52,7 @@ func ExportCurrentEEPROMSettings(
 		return EEPROMTransferResult{}, err
 	}
 	return newEEPROMTransferResult(
-		"export", backup, decoded.Settings.Format, "", "", output, content,
+		"export", backup, "schema1/core22+name9+crc8", "", "", output, content,
 	), nil
 }
 
@@ -61,7 +62,7 @@ func ExportCurrentEEPROMSettings(
 func ImportCurrentEEPROMSettings(
 	manifestPath, settingsPath, outputPath string,
 ) (EEPROMTransferResult, error) {
-	backup, base, _, err := loadCurrentBackupEEPROM(manifestPath)
+	backup, base, baseDecoded, err := loadCurrentBackupEEPROM(manifestPath)
 	if err != nil {
 		return EEPROMTransferResult{}, err
 	}
@@ -79,9 +80,7 @@ func ImportCurrentEEPROMSettings(
 	for address, value := range base.Image.data {
 		merged.data[address] = value
 	}
-	for offset, value := range record {
-		merged.data[EEPROMSettingsAddress+uint32(offset)] = value
-	}
+	replaceSettingsStorageWithCanonical(merged, record, baseDecoded.Settings.Schema)
 	content, err := merged.Canonical()
 	if err != nil {
 		return EEPROMTransferResult{}, fmt.Errorf("encode imported EEPROM image: %w", err)
@@ -121,7 +120,16 @@ func PrepareCurrentEEPROMRestore(
 	if err != nil {
 		return EEPROMTransferResult{}, err
 	}
-	content, err := document.Image.Canonical()
+	migrated := &IntelHexImage{data: make(map[uint32]byte, len(document.Image.data))}
+	for address, value := range document.Image.data {
+		migrated.data[address] = value
+	}
+	record, err := encodeCurrentEEPROMSettingsRecord(decoded.Settings.Values)
+	if err != nil {
+		return EEPROMTransferResult{}, fmt.Errorf("semantically migrate backup settings: %w", err)
+	}
+	replaceSettingsStorageWithCanonical(migrated, record, decoded.Settings.Schema)
+	content, err := migrated.Canonical()
 	if err != nil {
 		return EEPROMTransferResult{}, fmt.Errorf("encode restore EEPROM image: %w", err)
 	}
@@ -130,7 +138,7 @@ func PrepareCurrentEEPROMRestore(
 		return EEPROMTransferResult{}, err
 	}
 	return newEEPROMTransferResult(
-		"restore", backup, decoded.Settings.Format, "", "", output, content,
+		"restore", backup, "schema1/core22+name9+crc8", "", "", output, content,
 	), nil
 }
 

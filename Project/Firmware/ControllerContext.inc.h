@@ -53,7 +53,6 @@ Ina219Sensor ina219(BoardPins::Ina219Address);
 DallasTemperatureBus temperatureBus(BoardPins::OneWireData);
 Ds18b20Address temperatureAddresses[2];
 RCSwitch radioReceiver;
-RCSwitch radioTransmitter;
 RelayController relays(shiftRegisters);
 ControllerProtocol::UartProtocol appProtocol(Serial);
 ControllerEvents appEvents(appProtocol);
@@ -98,10 +97,14 @@ uint8_t menuPage = PAGE_DOOR;
 uint8_t menuTreeState = 0;
 #endif
 uint8_t relayMenuIndex = 0;
+#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
 uint8_t userPwmMenuIndex = 0;
+#endif
 uint8_t userRelayMenuIndex = 0;
 uint8_t userRelayBehavior = 0;
+#if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
 uint8_t settingsMenuItem = 0;
+#endif
 uint8_t identifiedKey = 0;
 uint32_t menuLabelEndsAt = 0;
 uint32_t modeEnteredAt = 0;
@@ -119,9 +122,17 @@ uint8_t editDisplayOptionsSnapshot = 0;
 ProgramMode editReturnMode = MODE_DOOR;
 bool editTransactionActive = false;
 bool flashMessageSaved = false;
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
+    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+uint8_t nextLocalMacroId = 1;
+bool suppressLocalMacroClassification = false;
+#endif
+uint8_t motionPressedMask = 0;
 
 ModeManager<ProgramMode> modeManager(MODE_BOOT);
+#if PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
 ProgramMode modeBeforeLearning = MODE_RF;
+#endif
 
 // Zero disables periodic telemetry; the live EEPROM default is 500 ms.
 uint16_t streamPeriodMs = 0;
@@ -132,6 +143,8 @@ uint32_t lastDisplayRefreshAt = 0;
 uint32_t lastIna219SampleAt = 0;
 uint32_t lastTemperatureRequestAt = 0;
 uint32_t lastTelemetryAt = 0;
+uint32_t lastPowerSignalFallbackAt = 0;
+bool macroPwmSafeStopPending = false;
 
 // RF momentary actions expire locally even if repeats or the host disappear.
 RemoteActionKind remoteMomentaryKind = RemoteActionKind::None;
@@ -141,10 +154,14 @@ uint32_t lastRemoteActionAt = 0;
 uint32_t lastRemoteActionCode = 0;
 uint8_t lastRelayMask = 0;
 bool firmwareReady = false;
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
 uint8_t lastPushedSegments[4] = {};
 uint8_t lastPushedSegmentBrightness = 0;
 uint8_t lastPushedBuzzerRevision = 0;
+#if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
 uint8_t lastPushedStatusLed[6] = {};
+#endif
+#endif
 
 // Host-captured panel text, LCD fallback metadata, and cooperative I2C lease.
 bool hostSegmentTextActive = false;
@@ -153,11 +170,13 @@ char hostSegmentText[41] = {};
 uint8_t hostSegmentTextLength = 0;
 uint8_t hostSegmentScrollIndex = 0;
 uint16_t hostSegmentStepMs = 0;
+#if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
 // Low two bits select once/loop/interval, bit 6 marks the interval wait, and
 // bit 7 forces a marquee even when the text fits the four-cell display.
 uint8_t hostSegmentOptions = 0;
 uint16_t hostSegmentHoldMs = 0;
 uint8_t hostSegmentIntervalSeconds = 0;
+#endif
 char temperatureSegmentText[2][4] = {
     {'L', '-', '-', 'C'},
     {'b', '-', '-', 'C'},
@@ -188,6 +207,8 @@ constexpr uint8_t HOST_PANEL_CAPTURED = 1U << 4;
 
 // Cross-domain entry points required before their ordered implementation fragments.
 void handleMenuAction(uint8_t action, bool fromRemote = false);
+void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
+                     bool emitEvidence);
 void setMenuPage(uint8_t page);
 void sendTelemetry(uint8_t sequence);
 void endLearning(uint8_t state, int8_t feedback);

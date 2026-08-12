@@ -17,6 +17,30 @@ type reconnectTestPort struct {
 	closed chan struct{}
 }
 
+func TestOldPumpFramesAreRejectedAfterSessionReplacement(t *testing.T) {
+	runtime := New(Options{})
+	oldSession := &link.Session{}
+	newSession := &link.Session{}
+	runtime.mu.Lock()
+	runtime.session = oldSession
+	runtime.generation = 7
+	runtime.mu.Unlock()
+	if !runtime.sessionGenerationCurrent(oldSession, 7) {
+		t.Fatal("current pump generation was rejected")
+	}
+	runtime.mu.Lock()
+	runtime.session = newSession
+	runtime.generation = 8
+	runtime.mu.Unlock()
+	if runtime.sessionGenerationCurrent(oldSession, 7) ||
+		runtime.sessionGenerationCurrent(oldSession, 8) {
+		t.Fatal("buffered old-session frame could enter replacement generation")
+	}
+	if !runtime.sessionGenerationCurrent(newSession, 8) {
+		t.Fatal("replacement session generation was rejected")
+	}
+}
+
 func newReconnectTestPort() *reconnectTestPort {
 	return &reconnectTestPort{closed: make(chan struct{})}
 }
@@ -212,6 +236,22 @@ func TestUnplugReplugLifecycleAndOneResetPermit(t *testing.T) {
 		t.Fatal("replug did not update snapshot immediately")
 	}
 	_ = runtime.Close()
+}
+
+func TestUSBConnectionEventsAreNormalizedForAllConsumers(t *testing.T) {
+	runtime := New(Options{})
+	after := runtime.LatestEventID()
+	port := ports.Info{Name: "COM4", IsUSB: true, VID: "1A86", PID: "7523"}
+	runtime.publishConnection("disconnect", port, "USB removed")
+	first, err := runtime.WaitEvent(context.Background(), after, "usb.disconnected")
+	if err != nil || first.Port.Name != "COM4" || first.Target != "app.clients" {
+		t.Fatalf("usb disconnect event=%#v err=%v", first, err)
+	}
+	runtime.publishConnection("reconnected", port, "")
+	second, err := runtime.WaitEvent(context.Background(), first.ID, "usb.reconnected")
+	if err != nil || second.Port.Name != "COM4" || second.Source != "host" {
+		t.Fatalf("usb reconnect event=%#v err=%v", second, err)
+	}
 }
 
 func TestHotResetPolicyChangeDoesNotDropLiveConnection(t *testing.T) {
@@ -445,8 +485,9 @@ func TestActivityStreamIsRetainedSeparatelyFromContinuousFrames(t *testing.T) {
 func TestEventStreamClassification(t *testing.T) {
 	tests := map[string]string{
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
-		"rx": EventStreamDebug, "front_panel.segment": EventStreamState,
-		"status_led.changed": EventStreamState, "buzzer.note": EventStreamState,
+		"rx": EventStreamDebug, "action.applied": EventStreamDebug,
+		"front_panel.segment": EventStreamState,
+		"status_led.changed":  EventStreamState, "buzzer.note": EventStreamState,
 		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
 	}
 	for kind, expected := range tests {

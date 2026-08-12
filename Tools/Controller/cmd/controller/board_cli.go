@@ -401,7 +401,7 @@ func firstBootHealthChecks(ctx context.Context, runtime *control.Runtime, output
 		return nil, fmt.Errorf("read first-boot status: %w", err)
 	}
 	snapshot := runtime.Snapshot()
-	fmt.Fprintf(output, "HELLO: build=%08X schema=%d capabilities=%08X\n", snapshot.Hello.BuildHash, snapshot.Hello.IdentitySchema, snapshot.Hello.Capabilities)
+	fmt.Fprintf(output, "HELLO: build=%08X schema=%d capabilities=%08X profile=%s(%d) build_features=%02X\n", snapshot.Hello.BuildHash, snapshot.Hello.IdentitySchema, snapshot.Hello.Capabilities, native.FeatureProfileName(snapshot.Hello.FeatureProfile), snapshot.Hello.FeatureProfile, snapshot.Hello.BuildFeatures)
 	fmt.Fprintf(output, "STATUS: uptime=%s reset_cause=%d reset_count=%d framing=%d crc=%d\n", status.ReadableUptime(), status.ResetCause, status.ResetCount, status.FramingErrors, status.CRCErrors)
 
 	settingsPersisted := false
@@ -461,6 +461,9 @@ func firstBootHealthChecks(ctx context.Context, runtime *control.Runtime, output
 	return map[string]any{
 		"hello_build_hash":    fmt.Sprintf("%08X", snapshot.Hello.BuildHash),
 		"identity_schema":     snapshot.Hello.IdentitySchema,
+		"feature_profile":     native.FeatureProfileName(snapshot.Hello.FeatureProfile),
+		"feature_profile_id":  snapshot.Hello.FeatureProfile,
+		"build_features":      fmt.Sprintf("%02X", snapshot.Hello.BuildFeatures),
 		"settings_persisted":  settingsPersisted,
 		"i2c_addresses":       addressText,
 		"temperature_sensors": len(temperatures),

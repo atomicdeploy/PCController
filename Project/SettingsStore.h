@@ -240,6 +240,26 @@ struct ControllerSettings {
 #endif
 };
 
+// Explicit build contract for the checksum-backed EEPROM settings/name record.
+// Schema IDs describe feature layouts, not a compatibility/migration chain:
+// alpha builds intentionally reject a record whose exact shape/CRC differs.
+namespace SettingsRecordLayout {
+constexpr uint8_t CoreSchema = 1;
+constexpr uint8_t MenuLayoutSchema = 2;
+#if PCCONTROLLER_MENU_LAYOUT_STORAGE
+constexpr uint8_t Schema = MenuLayoutSchema;
+constexpr uint8_t ControllerBytes = 31;
+#else
+constexpr uint8_t Schema = CoreSchema;
+constexpr uint8_t ControllerBytes = 22;
+#endif
+constexpr uint8_t BoardNameLengthBytes = 1;
+constexpr uint8_t BoardNameBytes = 8;
+constexpr uint8_t ChecksumBytes = 1;
+constexpr uint8_t RecordBytes = ControllerBytes + BoardNameLengthBytes +
+                                BoardNameBytes + ChecksumBytes;
+} // namespace SettingsRecordLayout
+
 // The seven leading byte-sized settings form the canonical UART settings
 // prefix. Keep the shared semantic prefix explicit while allowing later
 // payloads to append independently discoverable fields.
@@ -252,10 +272,10 @@ static_assert(offsetof(ControllerSettings, streamPeriodMs) ==
                   ControllerSettingsPrefixSize,
               "Controller settings prefix layout changed");
 #if PCCONTROLLER_MENU_LAYOUT_STORAGE
-static_assert(sizeof(ControllerSettings) == 31,
+static_assert(sizeof(ControllerSettings) == SettingsRecordLayout::ControllerBytes,
               "Host-owned packed menu storage changed AVR EEPROM/RAM layout");
 #else
-static_assert(sizeof(ControllerSettings) == 22,
+static_assert(sizeof(ControllerSettings) == SettingsRecordLayout::ControllerBytes,
               "Controller settings AVR layout changed");
 #endif
 #endif
@@ -276,7 +296,9 @@ public:
   // Coalesces edits before a delayed EEPROM write to reduce wear.
   void markDirty(uint32_t now = millis());
   bool service(uint32_t now = millis(), bool allowWrite = true);
-  // Writes the checksum-backed record immediately with EEPROM.update wear reduction.
+  // Queues the current checksum-backed record without blocking the controller
+  // loop. service() writes at most one EEPROM byte per later call and publishes
+  // the checksum last; persisted() becomes true only after that publication.
   bool saveNow();
   bool dirty() const;
   bool persisted() const;
@@ -288,13 +310,24 @@ public:
 private:
   void setDefaults();
   bool loadCurrent();
+  void preparePendingRecord();
+  bool servicePendingWrite();
 
   ControllerSettings settings_{}; // Live MCU settings; never host-config storage.
   uint8_t boardNameLength_ = 0;
   uint8_t boardName_[MaximumBoardNameLength]{};
+  uint8_t pendingRecord_[SettingsRecordLayout::RecordBytes]{};
   uint32_t changedAt_ = 0;
+  uint8_t writeIndex_ = 0;
+  uint8_t generation_ = 0;
+  // begin() establishes the nonzero sentinels; keep the singleton in .bss so
+  // its 75-byte working set does not consume an equal flash initializer.
+  uint8_t activeBank_ = 0;
+  uint8_t writeBank_ = 0;
   bool dirty_ = false;
   bool persisted_ = false;
+  bool writePending_ = false;
+  bool saveImmediately_ = false;
 };
 
 // settingsStore is the single MCU EEPROM settings owner.

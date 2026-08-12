@@ -443,10 +443,12 @@ func (board *rawVirtualBoard) acceptLoop() {
 				switch request.Opcode {
 				case native.OpHello:
 					response.Opcode = native.OpHelloResp
-					response.Payload = make([]byte, 14)
+					response.Payload = make([]byte, 16)
 					response.Payload[0] = native.IdentitySchemaCompact
 					response.Payload[1] = native.BoardKindPCController
 					binary.LittleEndian.PutUint32(response.Payload[6:10], 0xA1B2C3D4)
+					response.Payload[14] = native.FeatureProfileFullPeripheral
+					response.Payload[15] = native.BuildFeatureLocalMacroCapture
 				case native.OpGetStatus:
 					count := board.statusCount.Add(1)
 					response.Opcode = native.OpStatus

@@ -245,14 +245,17 @@ test('board profile keeps Urboot and EEPROM-retention contract', () => {
         assert.equal(BOARD.eepromBytes, 1_024)
 })
 
-test('persistent Ready profile remains host-owned with a compact firmware fallback', async () => {
+test('status descriptors remain host-owned while the compact MCU renders fallback states', async () => {
         const [hostProfiles, firmware] = await Promise.all([
                 readFile(new URL('../Controller/internal/native/status_profiles.go', import.meta.url), 'utf8'),
                 readFile(new URL('../../Project/StatusLedController.cpp', import.meta.url), 'utf8')
         ])
         assert.match(hostProfiles, /StatusConditionReady:\s+static\(255, 255, 255\)/u)
-        assert.match(firmware, /Go tooling owns and provisions the full factory profile table/u)
+        assert.match(firmware, /activeMode_ == StatusLedMode::Custom/u)
+        assert.match(firmware, /activeMode_ == StatusLedMode::Fault/u)
+        assert.match(firmware, /StatusLedTiming::FrameIntervalMs/u)
         assert.doesNotMatch(firmware, /ReadyPalette/u)
+        assert.doesNotMatch(firmware, /StatusProfileAddress/u)
 })
 
 test('physical, injected, and RF key actions retain the immediate dispatch contract', async () => {
@@ -273,7 +276,7 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 	assert.doesNotMatch(frontPanel, /event == KeyEvent::Click \|\| event == KeyEvent::HoldStart/u)
 	assert.match(
 		protocol,
-		/case RemoteKeyGesture:[^]*?applyKeyGesture\(payload\[0\], static_cast<KeyEvent>\(payload\[1\]\)\);/u
+		/case RemoteKeyGesture:[^]*?applyKeyGesture\(payload\[0\], static_cast<KeyEvent>\(payload\[1\]\),\s*InputEventSource::Host, true\);/u
 	)
 	assert.match(
 		radio,
@@ -309,7 +312,7 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
         )
         assert.equal(
                 sources.join('\n').match(/\bnow = millis\(\);/gu)?.length,
-                6
+                7
         )
         assert.match(
                 sources[1],
@@ -322,6 +325,10 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
         assert.match(
                 sources[3],
                 /handleMenuAction[^]*?\{[^]*?now = millis\(\);\s*const uint32_t actionNow = now;/u
+        )
+        assert.match(
+                sources[3],
+                /event == KeyEvent::Down[^]*?now = millis\(\);\s*const MotionKeyBinding/u
         )
         assert.match(sources[3], /const uint32_t releaseNow = now;/u)
 })

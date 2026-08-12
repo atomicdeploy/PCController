@@ -255,10 +255,9 @@ type Service struct {
 	ReleaseDiscovery ReleaseDiscoveryService
 	AuthToken        string
 	// AuthorizationDisabled is the explicit alpha-only escape hatch used by the
-	// host while the durable remote-login design is deferred.  It deliberately
-	// bypasses both credential checks and remote capability policy; do not turn
-	// this into a configurable security mode.  The future authentication feature
-	// replaces this flag with its own reviewed policy.
+	// host while the durable remote-login design is deferred. It deliberately
+	// bypasses credential and remote-capability policy; the future authentication
+	// feature replaces this flag with its own reviewed policy.
 	AuthorizationDisabled bool
 	RemotePrincipal       string
 	AllowedOrigins        []string
@@ -1777,11 +1776,11 @@ func commandCapability(command string) string {
 		}
 		return capabilityBoard
 	case "macro":
-		if len(words) >= 2 && (words[1] == "list" || words[1] == "show" || words[1] == "status" ||
+		if len(words) >= 2 && (words[1] == "list" || words[1] == "show" || words[1] == "status" || words[1] == "monitor" ||
 			(words[1] == "record" && len(words) >= 3 && words[2] == "status")) {
 			return capabilityRead
 		}
-		if len(words) >= 2 && (words[1] == "create" || words[1] == "delete" || words[1] == "remove" || words[1] == "record") {
+		if len(words) >= 2 && (words[1] == "create" || words[1] == "update" || words[1] == "rename" || words[1] == "category" || words[1] == "categorize" || words[1] == "delete" || words[1] == "remove" || words[1] == "record") {
 			return capabilityHostConfig
 		}
 		return capabilityBoard
