@@ -616,7 +616,17 @@ func TestInstallDryRunAndGeneratedTopologyDoNotMutate(t *testing.T) {
 		t.Fatalf("generated source topology:\n%s", source)
 	}
 	service := string(SystemdService(config))
-	for _, wanted := range []string{config.Paths.StableExecutable, "EnvironmentFile=-" + config.Paths.ProxyEnvironment, "TimeoutStartSec=5min"} {
+	if second := string(SystemdService(config)); second != service {
+		t.Fatalf("generated service is not deterministic:\nfirst:\n%s\nsecond:\n%s", service, second)
+	}
+	for _, wanted := range []string{
+		config.Paths.StableExecutable,
+		"EnvironmentFile=-" + config.Paths.ProxyEnvironment,
+		"TimeoutStartSec=5min",
+		"RuntimeDirectory=pccontroller",
+		"RuntimeDirectoryMode=0755",
+		"RuntimeDirectoryPreserve=yes",
+	} {
 		if !strings.Contains(service, wanted) {
 			t.Fatalf("service missing %q:\n%s", wanted, service)
 		}

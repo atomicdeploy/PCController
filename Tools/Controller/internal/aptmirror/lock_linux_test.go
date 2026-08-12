@@ -9,11 +9,64 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"golang.org/x/sys/unix"
 )
+
+func TestGeneratedServiceRecreatesTrustedRuntimeDirectoryAfterBoot(t *testing.T) {
+	config := DomesticFirstConfig("resolute", "amd64")
+	service := string(SystemdService(config))
+	directives := make(map[string]string)
+	for _, line := range strings.Split(service, "\n") {
+		name, value, ok := strings.Cut(line, "=")
+		if ok {
+			directives[name] = value
+		}
+	}
+
+	runtimeName := directives["RuntimeDirectory"]
+	if runtimeName == "" || filepath.IsAbs(runtimeName) || strings.Contains(runtimeName, "..") ||
+		strings.IndexFunc(runtimeName, unicode.IsSpace) >= 0 {
+		t.Fatalf("unsafe generated RuntimeDirectory=%q in:\n%s", runtimeName, service)
+	}
+	if got, want := filepath.ToSlash(filepath.Dir(config.Paths.Lock)), "/run/"+filepath.ToSlash(runtimeName); got != want {
+		t.Fatalf("runtime directory %q does not create lock parent %q", runtimeName, got)
+	}
+
+	parsedMode, err := strconv.ParseUint(directives["RuntimeDirectoryMode"], 8, 32)
+	if err != nil {
+		t.Fatalf("invalid generated RuntimeDirectoryMode=%q: %v", directives["RuntimeDirectoryMode"], err)
+	}
+	if os.FileMode(parsedMode)&0o022 != 0 {
+		t.Fatalf("generated runtime directory mode %04o permits group/world writes", parsedMode)
+	}
+	if directives["RuntimeDirectoryPreserve"] != "yes" {
+		t.Fatalf("shared adoption/refresh lock directory must survive oneshot exit, got RuntimeDirectoryPreserve=%q", directives["RuntimeDirectoryPreserve"])
+	}
+
+	// Model the documented systemd fresh-start contract below a temporary
+	// /run: the volatile directory does not exist after boot, systemd creates
+	// it with the generated mode and service identity, and the refresh lock's
+	// existing no-follow/ownership validation accepts it.
+	fakeRun := filepath.Join(t.TempDir(), "run")
+	runtimePath := filepath.Join(fakeRun, filepath.FromSlash(runtimeName))
+	if _, err := os.Lstat(runtimePath); !os.IsNotExist(err) {
+		t.Fatalf("fresh-boot fixture unexpectedly has %s: %v", runtimePath, err)
+	}
+	if err := os.MkdirAll(runtimePath, os.FileMode(parsedMode)); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(runtimePath, filepath.Base(config.Paths.Lock))
+	unlock, err := acquireOperationLock(lockPath, "fresh-boot mirror refresh")
+	if err != nil {
+		t.Fatalf("systemd-created runtime directory failed lock trust validation: %v", err)
+	}
+	unlock()
+}
 
 func TestOperationLockUsesKernelLifetimeAndDoesNotConflictAcrossPaths(t *testing.T) {
 	root := t.TempDir()
