@@ -88,6 +88,7 @@ public:
 #endif
 #if defined(PCCONTROLLER_NATIVE_TEST)
   uint16_t renderedFrames() const { return renderedFrames_; }
+  const uint8_t *descriptorForTest() const { return activeDescriptor_; }
 #endif
 
 private:

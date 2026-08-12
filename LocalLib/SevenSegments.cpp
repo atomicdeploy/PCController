@@ -350,6 +350,9 @@ void SevenSegments::commit(const uint8_t segments[4]) {
 }
 
 void SevenSegments::sendCommand(uint8_t command) {
+#if defined(PCCONTROLLER_NATIVE_TEST)
+  lastCommand_ = command;
+#endif
   startBus();
   writeBusByte(command);
   stopBus();
