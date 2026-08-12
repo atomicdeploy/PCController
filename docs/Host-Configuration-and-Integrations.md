@@ -80,13 +80,23 @@ host file can override all three. After a successful native `HELLO`, the host
 stores the stable identity and prefers it on the next launch. A unique match is
 selected automatically; ambiguous matches are shown for selection.
 
+The host also keeps the successfully authenticated port identity in memory.
+If Windows assigns a different COM number after a physical reconnect,
+discovery can still use the observed VID/PID, friendly name, USB serial, and
+PnP instance even when an explicit `--port` or `--device` override suppressed
+the persisted preference. Automatic rebind still requires one unique match;
+ambiguous devices require an explicit selection.
+
 The first long-running host becomes the primary process and is the only process
 that opens the serial port. Later CLI or UI instances use its IPC service. An
 explicit Close pauses reconnect until Open is requested. On Windows, registry
 change notifications from the Plug-and-Play serial map drive arrival/removal;
 the fallback retry is used only when native notification cannot be established.
 Connection lifecycle events are available to the TUI, scripts, IPC, WebSocket,
-and host automations.
+and host automations. The normalized `usb.disconnected`, `usb.reconnecting`,
+and `usb.reconnected` records use the same retained event IDs for TUI and Web
+clients, raw IPC, REST `controller.event.next`, standard WebSocket, and
+Socket.IO subscribers; no manual refresh is required to receive them.
 
 The serial driver opens with DTR and RTS inactive. If
 `reset_on_reconnect=true`, only a genuine physical reappearance may issue one

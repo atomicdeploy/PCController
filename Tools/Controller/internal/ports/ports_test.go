@@ -123,6 +123,36 @@ func TestReconnectCandidatesReplaceOnlyStaleCOMName(t *testing.T) {
 	}
 }
 
+func TestReconnectCandidatesUsePreferredStrongIdentityAmongUSBDevices(t *testing.T) {
+	all := []Info{
+		{
+			Name: "COM9", IsUSB: true, VID: "1A86", PID: "7523",
+			SerialNumber: "BOARD-A", InstanceID: `USB\CH340\A`,
+		},
+		{
+			Name: "COM12", IsUSB: true, VID: "2341", PID: "0043",
+			SerialNumber: "OTHER", InstanceID: `USB\OTHER\B`,
+		},
+	}
+	tests := []struct {
+		name      string
+		preferred Identity
+	}{
+		{name: "serial", preferred: Identity{SerialNumber: "BOARD-A"}},
+		{name: "instance", preferred: Identity{InstanceID: `USB\CH340\A`}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			candidates := ReconnectCandidates(all, Filter{
+				Port: "COM4", Preferred: test.preferred,
+			})
+			if len(candidates) != 1 || candidates[0].Name != "COM9" {
+				t.Fatalf("strong preferred rebind=%#v", candidates)
+			}
+		})
+	}
+}
+
 func TestReconnectCandidatesNeverGuessAmongUSBPorts(t *testing.T) {
 	all := []Info{
 		{Name: "COM4", IsUSB: true},
