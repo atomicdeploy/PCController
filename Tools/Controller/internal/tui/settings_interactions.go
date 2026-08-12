@@ -347,6 +347,8 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		ui.TUIConsole.FontSize = editorField(editor, "pixels")
 	case "poll.active":
 		ui.StatusIntervalMS = editorField(editor, "interval")
+	case "measurement.freshness":
+		ui.MeasurementFreshnessMS = editorField(editor, "window")
 	case "history.retention":
 		ui.HistoryHours = editorField(editor, "hours")
 	case "display.decimals":

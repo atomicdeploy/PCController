@@ -293,6 +293,8 @@ type browserUISettings struct {
 	Tagline                string                                      `json:"tagline"`
 	SetupComplete          bool                                        `json:"setup_complete"`
 	WelcomeMelody          string                                      `json:"welcome_melody"`
+	StatusIntervalMS       int                                         `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                                         `json:"measurement_freshness_ms"`
 	Appearance             browserAppearance                           `json:"appearance"`
 	AppearanceETag         string                                      `json:"appearance_etag"`
 	SegmentScroll          appconfig.SegmentScroll                     `json:"segment_scroll"`
@@ -1477,6 +1479,8 @@ func (service *Service) browserUISettings() browserUISettings {
 		Tagline:                ui.Tagline,
 		SetupComplete:          ui.SetupComplete,
 		WelcomeMelody:          ui.WelcomeMelody,
+		StatusIntervalMS:       ui.StatusIntervalMS,
+		MeasurementFreshnessMS: ui.MeasurementFreshnessMS,
 		Appearance:             browserAppearanceFromConfig(ui.Appearance),
 		AppearanceETag:         appearanceETag(ui.Appearance),
 		SegmentScroll:          ui.SegmentScroll,

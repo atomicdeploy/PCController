@@ -109,7 +109,8 @@ func DefaultHostMenus() HostMenuConfig {
 				Label: "CFG", Title: "HOST Settings", Content: "Configuration", Brightness: 5,
 				EditVisual: "blink", Flags: HostMenuFlags{Visible: true, Selectable: true, Editable: true}, Items: []HostMenuItem{
 					{ID: "app-title", Label: "NAME", Title: "Application title", Type: "text", ReadAction: "pc.ui.app_title", WriteAction: "pc.ui.app_title"},
-					{ID: "poll", Label: "POLL", Title: "Polling ms", Type: "number", Value: "200", Min: 100, Max: 5000, Step: 50, ReadAction: "pc.ui.status_interval_ms", WriteAction: "pc.ui.status_interval_ms"},
+					{ID: "poll", Label: "RATE", Title: "Measurement refresh ms", Type: "number", Value: "250", Min: MeasurementRefreshMinMS, Max: MeasurementRefreshMaxMS, Step: 10, ReadAction: "pc.ui.status_interval_ms", WriteAction: "pc.ui.status_interval_ms"},
+					{ID: "fresh", Label: "FRSH", Title: "Measurement freshness ms", Type: "number", Value: "1500", Min: MeasurementRefreshMinMS + MeasurementFreshnessHeadroomMS, Max: 10000, Step: 50, ReadAction: "pc.ui.measurement_freshness_ms", WriteAction: "pc.ui.measurement_freshness_ms"},
 					{ID: "lcd-service", Label: "I2C", Title: "HOST LCD service", Type: "bool", Value: "true", ReadAction: "pc.ui.lcd_service_enabled", WriteAction: "pc.ui.lcd_service_enabled"},
 					{ID: "lcd-mirror", Label: "LCD", Title: "Prompt mirror", Type: "bool", Value: "false", ReadAction: "pc.ui.mirror_prompt_to_lcd", WriteAction: "pc.ui.mirror_prompt_to_lcd"},
 					{ID: "dtr", Label: "DTR", Title: "Reset reconnect", Type: "bool", Value: "false", ReadAction: "pc.connection.reset_on_reconnect", WriteAction: "pc.connection.reset_on_reconnect"},

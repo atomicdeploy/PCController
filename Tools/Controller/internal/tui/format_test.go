@@ -25,14 +25,14 @@ func TestAdaptiveEngineeringUnits(t *testing.T) {
 	}
 }
 
-func TestFreshnessSuppressesSubHalfSecondFlicker(t *testing.T) {
+func TestFreshnessUsesHostWindow(t *testing.T) {
 	now := time.Unix(100, 0)
-	for _, age := range []time.Duration{0, 100 * time.Millisecond, 200 * time.Millisecond, 499 * time.Millisecond} {
-		if got := freshnessLabel(now.Add(-age), now); got != "live" {
+	for _, age := range []time.Duration{0, 100 * time.Millisecond, 1200 * time.Millisecond, 1499 * time.Millisecond} {
+		if got := freshnessLabel(now.Add(-age), now, 1500*time.Millisecond); got != "live" {
 			t.Errorf("age %s=%q", age, got)
 		}
 	}
-	if got := freshnessLabel(now.Add(-600*time.Millisecond), now); got != "0.6 s ago" {
+	if got := freshnessLabel(now.Add(-1600*time.Millisecond), now, 1500*time.Millisecond); got != "1.6 s ago" {
 		t.Fatalf("stale age=%q", got)
 	}
 }

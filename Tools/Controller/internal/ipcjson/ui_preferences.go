@@ -39,6 +39,8 @@ type browserUIConfigMutation struct {
 	PeripheralNames        *map[string]string                           `json:"peripheral_names,omitempty"`
 	PeripheralPresentation *map[string]appconfig.PeripheralPresentation `json:"peripheral_presentation,omitempty"`
 	Appearance             *browserAppearancePatch                      `json:"appearance,omitempty"`
+	StatusIntervalMS       *int                                         `json:"status_interval_ms,omitempty"`
+	MeasurementFreshnessMS *int                                         `json:"measurement_freshness_ms,omitempty"`
 	IfMatch                string                                       `json:"if_match,omitempty"`
 }
 
@@ -90,7 +92,7 @@ func (patch browserAppearancePatch) apply(value appconfig.Appearance) appconfig.
 func (params browserUIConfigMutation) empty() bool {
 	return params.AppTitle == nil && params.Tagline == nil && params.SetupComplete == nil &&
 		params.SegmentScroll == nil && params.PeripheralNames == nil && params.PeripheralPresentation == nil &&
-		params.Appearance == nil
+		params.Appearance == nil && params.StatusIntervalMS == nil && params.MeasurementFreshnessMS == nil
 }
 
 func (params browserUIConfigMutation) apply(value *appconfig.Config) error {
@@ -123,11 +125,17 @@ func (params browserUIConfigMutation) apply(value *appconfig.Config) error {
 	if params.Appearance != nil {
 		value.UI.Appearance = params.Appearance.apply(value.UI.Appearance)
 	}
+	if params.StatusIntervalMS != nil {
+		value.UI.StatusIntervalMS = *params.StatusIntervalMS
+	}
+	if params.MeasurementFreshnessMS != nil {
+		value.UI.MeasurementFreshnessMS = *params.MeasurementFreshnessMS
+	}
 	return value.Validate()
 }
 
 func browserUIConfigDiff(before, after appconfig.Config) ([]string, map[string]any, map[string]any) {
-	fields := make([]string, 0, 11)
+	fields := make([]string, 0, 13)
 	oldValues := make(map[string]any)
 	newValues := make(map[string]any)
 	add := func(name string, oldValue, newValue any) {
@@ -143,6 +151,8 @@ func browserUIConfigDiff(before, after appconfig.Config) ([]string, map[string]a
 	add("segment_scroll", before.UI.SegmentScroll, after.UI.SegmentScroll)
 	add("peripheral_names", before.UI.PeripheralNames, after.UI.PeripheralNames)
 	add("peripheral_presentation", before.UI.PeripheralPresentation, after.UI.PeripheralPresentation)
+	add("status_interval_ms", before.UI.StatusIntervalMS, after.UI.StatusIntervalMS)
+	add("measurement_freshness_ms", before.UI.MeasurementFreshnessMS, after.UI.MeasurementFreshnessMS)
 	oldAppearance := browserAppearanceFromConfig(before.UI.Appearance)
 	newAppearance := browserAppearanceFromConfig(after.UI.Appearance)
 	add("appearance.theme", oldAppearance.Theme, newAppearance.Theme)
@@ -172,7 +182,7 @@ func (service *Service) updateBrowserUISettings(raw json.RawMessage) (any, error
 		params.SegmentScroll = &merged
 	}
 	if params.empty() {
-		return nil, errors.New("app_title, tagline, setup_complete, segment_scroll, peripheral_names, peripheral_presentation, or appearance is required")
+		return nil, errors.New("app_title, tagline, setup_complete, segment_scroll, peripheral_names, peripheral_presentation, appearance, status_interval_ms, or measurement_freshness_ms is required")
 	}
 	if service.UpdateHostConfig == nil {
 		return nil, errors.New("persistent host configuration is unavailable")
@@ -222,8 +232,15 @@ func (service *Service) updateBrowserUISettings(raw json.RawMessage) (any, error
 		return nil, err
 	}
 	fields, beforeValues, afterValues = browserUIConfigDiff(appliedBefore, appliedAfter)
-	if service.Client != nil && (params.PeripheralNames != nil || params.PeripheralPresentation != nil) {
-		service.Client.EmitHostActionEvent("config", "Peripheral presentation updated", "host", "peripheral.presentation.set", map[string]string{"scope": "peripherals"})
+	if service.Client != nil {
+		metadata := map[string]string{"scope": "ui"}
+		if params.PeripheralNames != nil || params.PeripheralPresentation != nil {
+			metadata["scope"] = "peripherals"
+		}
+		if params.StatusIntervalMS != nil || params.MeasurementFreshnessMS != nil {
+			metadata["scope"] = "measurements"
+		}
+		service.Client.EmitHostActionEvent("config", "Host UI configuration updated", "host", "ui.config.set", metadata)
 	}
 	changed := true
 	result := service.browserUISettings()

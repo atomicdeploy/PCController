@@ -100,7 +100,7 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		sectionWidth = outerCardWidth - cardStyle.GetHorizontalFrameSize()
 	}
 	measurementLines := []string{
-		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", freshnessLabel(snapshot.StatusUpdated, time.Now())),
+		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", freshnessLabel(snapshot.StatusUpdated, time.Now(), model.prefs.FreshnessWindow)),
 	}
 	if !snapshot.HaveStatus {
 		measurementLines = append(measurementLines, warnStyle.Render("Waiting for the first STATUS frame…"))

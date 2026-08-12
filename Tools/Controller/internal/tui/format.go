@@ -67,18 +67,20 @@ func formatUptime(milliseconds uint32) string {
 	return duration.Truncate(time.Second).String()
 }
 
-// freshnessLabel deliberately suppresses rapidly changing sub-500 ms values.
-// Below that threshold "live" conveys the useful state without a visual
-// 0/100/200 ms counter. Once stale, the age is stable enough to be actionable.
-func freshnessLabel(updated, now time.Time) string {
+// freshnessLabel uses the host-owned window so every local or remote TUI
+// renders the same live/stale boundary as the WebUI.
+func freshnessLabel(updated, now time.Time, window time.Duration) string {
 	if updated.IsZero() {
 		return "waiting for device"
+	}
+	if window <= 0 {
+		window = 1500 * time.Millisecond
 	}
 	age := now.Sub(updated)
 	if age < 0 {
 		age = 0
 	}
-	if age < 500*time.Millisecond {
+	if age < window {
 		return "live"
 	}
 	if age < 10*time.Second {
