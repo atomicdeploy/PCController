@@ -470,44 +470,149 @@ func verifyWindowsExecutableResources(path string, manifest PackageManifest, hos
 	if err != nil {
 		return err
 	}
-	for label, value := range map[string]string{
-		"source hash": manifest.SourceSHA256,
-		"version":     manifest.Version,
-		"build time":  manifest.BuildTime,
-	} {
-		if !bytes.Contains(content, []byte(value)) {
-			return fmt.Errorf("executable does not contain its declared %s", label)
-		}
-	}
-	resource, err := peResourceSection(content)
+	resource, err := peVersionResource(content)
 	if err != nil {
 		return err
 	}
+	strings, err := parseVersionInfoStrings(resource)
+	if err != nil {
+		return err
+	}
+	return verifyWindowsResourceIdentity(strings, manifest, host)
+}
+
+// verifyWindowsResourceIdentity checks the immutable PE resource strings that
+// remain inspectable when controller.exe is UPX-compressed.
+func verifyWindowsResourceIdentity(values map[string]string, manifest PackageManifest, host hostPackageManifest) error {
 	for label, value := range map[string]string{
 		"product name":      productidentity.DefaultTitle,
 		"product version":   host.Identity.Version,
 		"original filename": "controller.exe",
+		"source hash":       manifest.SourceSHA256,
+		"build time":        manifest.BuildTime,
 	} {
-		if !bytes.Contains(resource, utf16Bytes(value)) {
-			return fmt.Errorf("Windows resource section does not contain declared %s", label)
+		key := map[string]string{
+			"product name": "ProductName", "product version": "ProductVersion",
+			"original filename": "OriginalFilename", "source hash": "PrivateBuild", "build time": "SpecialBuild",
+		}[label]
+		if values[key] != value {
+			return fmt.Errorf("Windows version resource %s does not match declared %s", key, label)
 		}
 	}
 	return nil
 }
 
-func peResourceSection(content []byte) ([]byte, error) {
+const (
+	imageResourceTypeVersion uint32 = 16
+	resourceDirectoryFlag    uint32 = 0x80000000
+)
+
+type peResourceLocation struct {
+	rawOffset int
+	virtual   uint32
+	size      int
+}
+
+// peVersionResource reads precisely one RT_VERSION payload from the PE
+// resource tree. It never scans arbitrary executable bytes for identity text.
+func peVersionResource(content []byte) ([]byte, error) {
+	location, err := parsePEResourceLocation(content)
+	if err != nil {
+		return nil, err
+	}
+	types, err := resourceDirectoryEntries(content, location, 0)
+	if err != nil {
+		return nil, err
+	}
+	var versionDirectories []uint32
+	for _, entry := range types {
+		if entry.id == imageResourceTypeVersion && entry.directory {
+			versionDirectories = append(versionDirectories, entry.offset)
+		}
+	}
+	if len(versionDirectories) != 1 {
+		return nil, fmt.Errorf("PE resource tree must contain exactly one RT_VERSION directory, found %d", len(versionDirectories))
+	}
+	names, err := resourceDirectoryEntries(content, location, versionDirectories[0])
+	if err != nil {
+		return nil, err
+	}
+	var payloads []resourceEntry
+	for _, name := range names {
+		if name.id != 1 {
+			return nil, fmt.Errorf("RT_VERSION directory has unsupported name id 0x%X", name.id)
+		}
+		if !name.directory {
+			return nil, errors.New("RT_VERSION name entry is not a directory")
+		}
+		languages, err := resourceDirectoryEntries(content, location, name.offset)
+		if err != nil {
+			return nil, err
+		}
+		for _, language := range languages {
+			if language.directory {
+				return nil, errors.New("RT_VERSION language entry is unexpectedly a directory")
+			}
+			payloads = append(payloads, language)
+		}
+	}
+	if len(payloads) != 1 {
+		return nil, fmt.Errorf("PE resource tree must contain exactly one RT_VERSION payload, found %d", len(payloads))
+	}
+	entryOffset := location.rawOffset + int(payloads[0].offset)
+	if entryOffset < location.rawOffset || entryOffset+16 > location.rawOffset+location.size || entryOffset+16 > len(content) {
+		return nil, errors.New("RT_VERSION data entry is outside the resource section")
+	}
+	rva := binary.LittleEndian.Uint32(content[entryOffset : entryOffset+4])
+	size := int(binary.LittleEndian.Uint32(content[entryOffset+4 : entryOffset+8]))
+	if rva < location.virtual || size <= 0 {
+		return nil, errors.New("RT_VERSION data entry has invalid bounds")
+	}
+	start := location.rawOffset + int(rva-location.virtual)
+	if start < location.rawOffset || start > len(content)-size || start+size > location.rawOffset+location.size {
+		return nil, errors.New("RT_VERSION payload is outside the resource section")
+	}
+	return content[start : start+size], nil
+}
+
+type resourceEntry struct {
+	id        uint32
+	offset    uint32
+	directory bool
+}
+
+func resourceDirectoryEntries(content []byte, location peResourceLocation, relative uint32) ([]resourceEntry, error) {
+	start := location.rawOffset + int(relative)
+	if start < location.rawOffset || start+16 > location.rawOffset+location.size || start+16 > len(content) {
+		return nil, errors.New("PE resource directory is outside the resource section")
+	}
+	count := int(binary.LittleEndian.Uint16(content[start+12:start+14])) + int(binary.LittleEndian.Uint16(content[start+14:start+16]))
+	if count <= 0 || count > 1024 || start+16+count*8 > location.rawOffset+location.size || start+16+count*8 > len(content) {
+		return nil, errors.New("PE resource directory has invalid entries")
+	}
+	entries := make([]resourceEntry, 0, count)
+	for index := 0; index < count; index++ {
+		offset := start + 16 + index*8
+		name := binary.LittleEndian.Uint32(content[offset : offset+4])
+		data := binary.LittleEndian.Uint32(content[offset+4 : offset+8])
+		entries = append(entries, resourceEntry{id: name, offset: data &^ resourceDirectoryFlag, directory: data&resourceDirectoryFlag != 0})
+	}
+	return entries, nil
+}
+
+func parsePEResourceLocation(content []byte) (peResourceLocation, error) {
 	if len(content) < 64 || content[0] != 'M' || content[1] != 'Z' {
-		return nil, errors.New("executable is not a PE image")
+		return peResourceLocation{}, errors.New("executable is not a PE image")
 	}
 	offset := int(binary.LittleEndian.Uint32(content[0x3c:0x40]))
 	if offset < 64 || offset+24 > len(content) || string(content[offset:offset+4]) != "PE\x00\x00" {
-		return nil, errors.New("PE image has an invalid executable header")
+		return peResourceLocation{}, errors.New("PE image has an invalid executable header")
 	}
 	sections := int(binary.LittleEndian.Uint16(content[offset+6 : offset+8]))
 	optionalBytes := int(binary.LittleEndian.Uint16(content[offset+20 : offset+22]))
 	table := offset + 24 + optionalBytes
 	if sections <= 0 || table < 0 || table+sections*40 > len(content) {
-		return nil, errors.New("PE image has an invalid section table")
+		return peResourceLocation{}, errors.New("PE image has an invalid section table")
 	}
 	for index := 0; index < sections; index++ {
 		header := content[table+index*40 : table+(index+1)*40]
@@ -518,11 +623,132 @@ func peResourceSection(content []byte) ([]byte, error) {
 		size := int(binary.LittleEndian.Uint32(header[16:20]))
 		start := int(binary.LittleEndian.Uint32(header[20:24]))
 		if size <= 0 || start < 0 || start > len(content)-size {
-			return nil, errors.New("PE resource section is outside the executable")
+			return peResourceLocation{}, errors.New("PE resource section is outside the executable")
 		}
-		return content[start : start+size], nil
+		return peResourceLocation{rawOffset: start, virtual: binary.LittleEndian.Uint32(header[12:16]), size: size}, nil
 	}
-	return nil, errors.New("PE executable has no .rsrc section")
+	return peResourceLocation{}, errors.New("PE executable has no .rsrc section")
+}
+
+// parseVersionInfoStrings decodes the canonical VS_VERSIONINFO hierarchy and
+// rejects duplicate string keys so an executable cannot carry ambiguous IDs.
+func parseVersionInfoStrings(content []byte) (map[string]string, error) {
+	root, err := parseVersionBlock(content, 0, len(content))
+	if err != nil {
+		return nil, fmt.Errorf("parse VS_VERSIONINFO: %w", err)
+	}
+	if root.key != "VS_VERSION_INFO" {
+		return nil, errors.New("RT_VERSION payload is not VS_VERSION_INFO")
+	}
+	values := make(map[string]string)
+	var walk func(versionBlock) error
+	walk = func(block versionBlock) error {
+		if block.key == "StringFileInfo" {
+			for _, table := range block.children {
+				for _, entry := range table.children {
+					if entry.value == "" {
+						return fmt.Errorf("VERSIONINFO string %q is empty", entry.key)
+					}
+					if _, exists := values[entry.key]; exists {
+						return fmt.Errorf("VERSIONINFO has duplicate string key %q", entry.key)
+					}
+					values[entry.key] = entry.value
+				}
+			}
+		}
+		for _, child := range block.children {
+			if err := walk(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk(root); err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		return nil, errors.New("VS_VERSIONINFO has no StringFileInfo values")
+	}
+	return values, nil
+}
+
+type versionBlock struct {
+	key      string
+	value    string
+	children []versionBlock
+}
+
+func parseVersionBlock(content []byte, start, limit int) (versionBlock, error) {
+	if start < 0 || start+6 > limit || limit > len(content) {
+		return versionBlock{}, errors.New("VERSIONINFO block header is truncated")
+	}
+	length := int(binary.LittleEndian.Uint16(content[start : start+2]))
+	valueLength := int(binary.LittleEndian.Uint16(content[start+2 : start+4]))
+	typeCode := binary.LittleEndian.Uint16(content[start+4 : start+6])
+	end := start + length
+	if length < 6 || end > limit {
+		return versionBlock{}, errors.New("VERSIONINFO block length is invalid")
+	}
+	keyEnd := start + 6
+	for {
+		if keyEnd+2 > end {
+			return versionBlock{}, errors.New("VERSIONINFO key is unterminated")
+		}
+		if binary.LittleEndian.Uint16(content[keyEnd:keyEnd+2]) == 0 {
+			break
+		}
+		keyEnd += 2
+	}
+	key, err := decodeUTF16(content[start+6 : keyEnd])
+	if err != nil || key == "" {
+		return versionBlock{}, errors.New("VERSIONINFO key is invalid")
+	}
+	valueStart := align4(keyEnd + 2)
+	if valueStart > end {
+		return versionBlock{}, errors.New("VERSIONINFO value is outside its block")
+	}
+	valueBytes := valueLength
+	if typeCode == 1 {
+		valueBytes *= 2
+	}
+	if valueBytes < 0 || valueStart+valueBytes > end {
+		return versionBlock{}, errors.New("VERSIONINFO value length is invalid")
+	}
+	block := versionBlock{key: key}
+	if typeCode == 1 && valueBytes > 0 {
+		block.value, err = decodeUTF16(content[valueStart : valueStart+valueBytes])
+		if err != nil {
+			return versionBlock{}, err
+		}
+		block.value = strings.TrimRight(block.value, "\x00")
+	}
+	child := align4(valueStart + valueBytes)
+	for child < end {
+		if child+2 > end || binary.LittleEndian.Uint16(content[child:child+2]) == 0 {
+			break
+		}
+		parsed, err := parseVersionBlock(content, child, end)
+		if err != nil {
+			return versionBlock{}, err
+		}
+		block.children = append(block.children, parsed)
+		length := int(binary.LittleEndian.Uint16(content[child : child+2]))
+		child = align4(child + length)
+	}
+	return block, nil
+}
+
+func align4(value int) int { return (value + 3) &^ 3 }
+
+func decodeUTF16(content []byte) (string, error) {
+	if len(content)%2 != 0 {
+		return "", errors.New("UTF-16 string has odd length")
+	}
+	units := make([]uint16, len(content)/2)
+	for index := range units {
+		units[index] = binary.LittleEndian.Uint16(content[index*2 : index*2+2])
+	}
+	return string(utf16.Decode(units)), nil
 }
 
 func utf16Bytes(value string) []byte {

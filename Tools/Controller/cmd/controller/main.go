@@ -390,6 +390,16 @@ func runWebWithInitialAction(
 
 	ctx, cancel := signalContext()
 	defer cancel()
+	// An unpackaged Windows toast needs the per-user AppUserModelID and
+	// Start-menu shortcut before Explorer can associate it with the packaged
+	// application icon. Keep desktop-integration trouble non-fatal: the host
+	// and board connection must remain usable even when a locked-down profile
+	// prevents a notification registration write.
+	if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
+		fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
+	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady) {
+		fmt.Fprintln(stderr, "desktop notification identity is incomplete")
+	}
 	runtime := newRuntime(connection, store)
 	bindRuntimeDevicePersistence(runtime, store)
 	if *noAuto {

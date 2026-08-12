@@ -81,6 +81,7 @@ import type {
   ToastMessage,
   UIConfig,
 } from './types'
+import { peripheralAvailability } from './peripheral-availability'
 import { applyPushedOutputEvent } from './status-led-event'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
@@ -214,14 +215,17 @@ function pageFromLocation(): PageID {
 
 function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
   const status = snapshot.status
+  const available = peripheralAvailability(snapshot)
   return {
     at,
-    supply: status.supply_mv / 1000,
-    bus: status.bus_mv / 1000,
-    current: status.current_ma,
-    power: status.power_mw / 1000,
-    ledTemp: status.temperature_led_centi_c / 100,
-    btTemp: status.temperature_bt_audio_centi_c / 100,
+    ...(available.ina219 ? {
+      supply: status.supply_mv / 1000,
+      bus: status.bus_mv / 1000,
+      current: status.current_ma,
+      power: status.power_mw / 1000,
+    } : {}),
+    ...(available.temperatureLED ? { ledTemp: status.temperature_led_centi_c / 100 } : {}),
+    ...(available.temperatureBTAudio ? { btTemp: status.temperature_bt_audio_centi_c / 100 } : {}),
   }
 }
 
@@ -257,6 +261,10 @@ function demoSnapshot(now = Date.now()): Snapshot {
       power_mw: Math.round(4660 + Math.sin(now / 2100) * 340),
       temperature_led_centi_c: Math.round(3640 + Math.sin(now / 7400) * 55),
       temperature_bt_audio_centi_c: Math.round(3310 + Math.sin(now / 6200) * 40),
+      flags: 0x000f,
+      ina219_available: true,
+      temperature_led_available: true,
+      temperature_bt_audio_available: true,
       active_relays: 0b00110000,
       door_open: false,
       bluetooth_audio_state: 2,

@@ -327,6 +327,45 @@ func TestLoadProgrammingMarkerRejectsUnrecoverableMissingPhase(t *testing.T) {
 	}
 }
 
+func TestLoadProgrammingMarkerAcceptsLegacyMacroDroppedSteps(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "programming-recovery-legacy-macro.json")
+	content := `{
+  "format": "pccontroller.programming-recovery",
+  "prepared_at": "2026-08-12T15:05:54Z",
+  "device": {"port": "COM4"},
+  "target_firmware_sha256": "` + strings.Repeat("a", 64) + `",
+  "settings_snapshot_path": "` + filepath.ToSlash(filepath.Join(directory, "settings.json")) + `",
+  "original_live_state": {
+    "macro": {"schema": 3, "state": 0, "dropped_steps": 7},
+    "program_state": {"mode": "Idle"},
+    "host_outputs": {}
+  },
+  "safe_state_applied": true,
+  "phase": "latched-safe"
+}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := loadProgrammingMarker(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.OriginalLiveState == nil || loaded.OriginalLiveState.Macro == nil ||
+		loaded.OriginalLiveState.Macro.DroppedSteps != 7 {
+		t.Fatalf("legacy macro status was not preserved: %#v", loaded.OriginalLiveState)
+	}
+}
+
+func TestProgrammingPWMRampAcceptsExplicitlyUnavailablePeripheral(t *testing.T) {
+	device := runtimeProgrammingDevice{}
+	if err := device.RampPWMToZero(context.Background(), ProgrammingLiveState{
+		PWM: &native.PWMValues{Available: false},
+	}); err != nil {
+		t.Fatalf("unavailable PWM peripheral should already be safe: %v", err)
+	}
+}
+
 func TestProgrammingLifecycleDoesNotRestoreBeforeHostCompletion(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	device := &fakeProgrammingDevice{
@@ -653,6 +692,171 @@ func TestFindRetryableProgrammingSessionRequiresExactFailedTransaction(t *testin
 		paths, identity, strings.Repeat("0", 64), true,
 	); err == nil || !strings.Contains(err.Error(), "another target") {
 		t.Fatalf("mismatched target was accepted: %v", err)
+	}
+}
+
+func TestFindRetryableProgrammingSessionResumesSafePrewriteMarker(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: document.SourceSHA256,
+		SettingsSnapshotPath: filepath.Join(paths.BoardSettingsDir, "captured.json"),
+		SafeStateApplied:     true, Phase: "latched-safe",
+	}
+	markerPath, err := persistProgrammingMarker(paths, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := findRetryableProgrammingSession(
+		paths, identity, document.SourceSHA256, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil || loaded.RecoveryMarkerPath != markerPath || loaded.HostResult != "" {
+		t.Fatalf("safe pre-write session not recovered: %+v", loaded)
+	}
+}
+
+func TestFindRetryableProgrammingSessionRejectsIncompletePreparation(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: document.SourceSHA256,
+		SafeStateApplied: true, Phase: "display-ready",
+	}
+	if _, err := persistProgrammingMarker(paths, session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := findRetryableProgrammingSession(
+		paths, identity, document.SourceSHA256, false,
+	); err == nil || !strings.Contains(err.Error(), "not safely retryable") {
+		t.Fatalf("incomplete preparation was accepted: %v", err)
+	}
+}
+
+func TestFindRetryableProgrammingSessionAllowsExplicitFactorySupersession(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	oldTarget := strings.Repeat("1", 64)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: oldTarget,
+		SafeStateApplied: true, Phase: "latched-safe",
+	}
+	markerPath, err := persistProgrammingMarker(paths, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := findRetryableProgrammingSession(
+		paths, identity, document.SourceSHA256, true,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil || loaded.TargetFirmwareSHA256 != document.SourceSHA256 ||
+		!loaded.ReinitializeEEPROM || len(loaded.Warnings) != 1 ||
+		!strings.Contains(loaded.Warnings[0], oldTarget) {
+		t.Fatalf("factory reinitialization did not supersede safe pre-write target: %+v", loaded)
+	}
+	persisted, err := loadProgrammingMarker(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.TargetFirmwareSHA256 != document.SourceSHA256 || !persisted.ReinitializeEEPROM {
+		t.Fatalf("superseded target was not durable: %+v", persisted)
+	}
+}
+
+func TestFindRetryableProgrammingSessionRejectsOrdinaryTargetSupersession(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	document, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	session := &ProgrammingSession{
+		Format: programmingMarkerFormat, PreparedAt: time.Now().UTC(),
+		Device: identity, TargetFirmwareSHA256: strings.Repeat("2", 64),
+		SafeStateApplied: true, Phase: "latched-safe",
+	}
+	if _, err := persistProgrammingMarker(paths, session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := findRetryableProgrammingSession(
+		paths, identity, document.SourceSHA256, false,
+	); err == nil || !strings.Contains(err.Error(), "recover it before starting another target") {
+		t.Fatalf("ordinary target supersession was accepted: %v", err)
+	}
+}
+
+func TestFindRetryableProgrammingSessionUsesNewestMarkerBeforeOlderConflicts(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	content, err := os.ReadFile(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newerFirmware := filepath.Join(t.TempDir(), "newer.hex")
+	if err := os.WriteFile(newerFirmware, append(content, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	olderDocument, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newerDocument, err := programmer.LoadIntelHex(newerFirmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	preparedAt := time.Now().UTC()
+	for _, session := range []*ProgrammingSession{
+		{
+			Format: programmingMarkerFormat, PreparedAt: preparedAt.Add(-time.Minute),
+			Device: identity, TargetFirmwareSHA256: olderDocument.SourceSHA256,
+			SafeStateApplied: true, Phase: "host-failed", HostResult: "failed",
+		},
+		{
+			Format: programmingMarkerFormat, PreparedAt: preparedAt,
+			Device: identity, TargetFirmwareSHA256: newerDocument.SourceSHA256,
+			SafeStateApplied: true, Phase: "latched-safe", HostResult: "failed",
+		},
+	} {
+		markerPath, persistErr := persistProgrammingMarker(paths, session)
+		if persistErr != nil {
+			t.Fatal(persistErr)
+		}
+		session.RecoveryMarkerPath = markerPath
+	}
+
+	loaded, err := findRetryableProgrammingSession(
+		paths, identity, newerDocument.SourceSHA256, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil || loaded.TargetFirmwareSHA256 != newerDocument.SourceSHA256 {
+		t.Fatalf("newest exact recovery marker not selected: %+v", loaded)
+	}
+	if _, err := findRetryableProgrammingSession(
+		paths, identity, olderDocument.SourceSHA256, false,
+	); err == nil || !strings.Contains(err.Error(), newerDocument.SourceSHA256) ||
+		!strings.Contains(err.Error(), "newer pending") {
+		t.Fatalf("older recovery did not identify the newer target: %v", err)
 	}
 }
 

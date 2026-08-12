@@ -104,6 +104,9 @@ type Model struct {
 	preview                  *control.Snapshot
 	pwmValues                [16]uint16
 	havePWMValues            bool
+	pwmDragChannel           int
+	pwmDragValue             uint16
+	pwmDragSet               bool
 	pwmPending               bool
 	lastPWMRefresh           time.Time
 	portPicker               bool
@@ -402,6 +405,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		hostMenus: options.HostMenus, pushHostPanel: options.PushHostPanel,
 		releaseHostPanel: options.ReleaseHostPanel,
 		prefs:            prefs, preview: options.Preview, welcome: welcome,
+		pwmDragChannel:   -1,
 		portOwnerActions: ownerActions,
 		welcomeStarted:   welcomeStarted, welcomeDeadline: welcomeStarted.Add(30 * time.Second),
 		welcomePhase: "Waiting for USB and application HELLO", welcomeMelody: options.WelcomeMelody,

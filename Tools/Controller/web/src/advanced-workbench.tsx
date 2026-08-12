@@ -71,6 +71,7 @@ import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
 import type { FrontPanelState } from './types'
 import type { SharedViewProps } from './views'
+import { peripheralAvailability } from './peripheral-availability'
 
 interface AdvancedWorkbenchProps extends SharedViewProps {
   run: (command: string) => Promise<string>
@@ -176,6 +177,7 @@ export function AdvancedWorkbench({
   run,
   busy,
 }: AdvancedWorkbenchProps) {
+  const available = peripheralAvailability(snapshot)
   const isPersian = locale === 'fa'
   const copy = (english: string, persian: string) => isPersian ? persian : english
   const online = snapshot.connected
@@ -479,7 +481,7 @@ export function AdvancedWorkbench({
           </div>
         </AdvancedPanel>
 
-        {online && <><AdvancedPanel
+        {online && <>{(available.temperatureLED || available.temperatureBTAudio) && <AdvancedPanel
           icon={Thermometer}
           eyebrow="DS18B20"
           title={copy('Temperature identities', 'شناسه‌های دما')}
@@ -493,7 +495,7 @@ export function AdvancedWorkbench({
             <Button icon={ScanSearch} disabled={!online} busy={busy === 'temp scan'} onClick={() => void run('temp scan')}>{copy('Rescan bus', 'پویش دوباره')}</Button>
           </div>
           <p className="advanced-note">{copy('A rescan refreshes physical sensor assignment; it does not claim that attached probes have been validated here.', 'پویش دوباره، تخصیص حسگر فیزیکی را به‌روز می‌کند؛ این صفحه به‌تنهایی تأییدکننده سلامت سخت‌افزار متصل نیست.')}</p>
-        </AdvancedPanel>
+        </AdvancedPanel>}
 
         <AdvancedPanel
           icon={AudioLines}
@@ -641,7 +643,7 @@ export function AdvancedWorkbench({
               { value: 'menu', label: copy('Menu', 'منو') },
               { value: 'relay', label: copy('Relay', 'رله') },
               { value: 'side', label: copy('Motion', 'حرکت') },
-              { value: 'pwm', label: 'PWM' },
+              ...(available.pwm ? [{ value: 'pwm' as const, label: 'PWM' }] : []),
               { value: 'none', label: copy('None', 'بدون نگاشت') },
             ]} onChange={setRFDefaults} />
           </div>
@@ -704,12 +706,12 @@ export function AdvancedWorkbench({
           eyebrow="I²C + LCD"
           title={copy('Cooperative bus & raw transfer', 'گذرگاه اشتراکی و انتقال خام')}
           detail={copy('Inspect LCD ownership and scan safely; raw schemas are reviewed before the host lease is acquired.', 'مالکیت LCD را ببینید و امن پویش کنید؛ انتقال خام پیش از گرفتن دسترسی میزبان بازبینی می‌شود.')}
-          status={online ? `LCD 0x${snapshot.status.lcd_address.toString(16).padStart(2, '0').toUpperCase()}` : copy('offline', 'آفلاین')}
+          status={available.lcd ? `LCD 0x${(snapshot.front_panel?.lcd_address || snapshot.status.lcd_address).toString(16).padStart(2, '0').toUpperCase()}` : copy('LCD not detected', 'LCD شناسایی نشد')}
           tone={online ? 'info' : 'neutral'}
         >
           <div className="advanced-actions">
             <Button icon={ScanSearch} disabled={!online} busy={busy === 'i2c scan'} onClick={() => void run('i2c scan')}>{copy('Scan bus', 'پویش گذرگاه')}</Button>
-            <Button icon={MonitorCog} busy={busy === 'i2c lcd status'} onClick={() => void run('i2c lcd status')}>{copy('LCD status', 'وضعیت LCD')}</Button>
+            {available.lcd && <Button icon={MonitorCog} busy={busy === 'i2c lcd status'} onClick={() => void run('i2c lcd status')}>{copy('LCD status', 'وضعیت LCD')}</Button>}
             <Button icon={RefreshCw} disabled={!online} busy={busy === 'i2c lcd rescan'} onClick={() => void run('i2c lcd rescan')}>{copy('Rescan LCD', 'پویش دوباره LCD')}</Button>
             <Button icon={Unplug} disabled={!online} busy={busy === 'i2c release'} onClick={() => void run('i2c release')}>{copy('Release lease', 'آزادسازی دسترسی')}</Button>
           </div>

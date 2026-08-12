@@ -39,6 +39,9 @@ func RichPreviewSnapshot() control.Snapshot {
 			ActiveKeys: 0x01, ActiveRelays: 0x50, MenuPage: 0,
 			ProgramMode: 1, DoorOpen: true, BluetoothState: 2,
 			PWMAvailable: true, PWMChannel: 3, PWMValue: 2816, LCDAddress: 0x27,
+			Flags: native.StatusINA219Available | native.StatusPWMAvailable |
+				native.StatusTLEDAvailable | native.StatusTBTAvailable,
+			INA219Available: true, TLEDAvailable: true, TBTAvailable: true,
 			ResetCause: 0, ResetCount: 2075,
 		},
 		Settings: native.Settings{

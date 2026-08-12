@@ -331,6 +331,8 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		if editorField(editor, "layout") == 1 {
 			ui.TableLayout = "expanded"
 		}
+	case "layout.control_colors":
+		ui.ControlValueColors = editorField(editor, "enabled") != 0
 	case "console.enabled":
 		ui.TUIConsole.Enabled = editorField(editor, "enabled") != 0
 	case "console.window":
