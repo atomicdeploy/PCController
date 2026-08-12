@@ -5,10 +5,12 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Activity,
   Bell,
@@ -83,7 +85,7 @@ import type {
   ToastMessage,
   UIConfig,
 } from './types'
-import { applyPushedOutputEvent } from './status-led-event'
+import { applyPushedOutputEvent, isPushedOutputEvent } from './status-led-event'
 import { shouldToastControllerEvent } from './event-notification-policy'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
@@ -298,7 +300,7 @@ export function commandWarning(command: string, locale: Appearance['locale']): C
   if (/^(reset|boot|program|programmer|firmware|flash|upload|restore|query|write)(?: |$)/.test(normalized)) {
     return fa
       ? warning('ورود به مسیر بازیابی یا برنامه‌ریزی؟', 'این فرمان ممکن است درگاه سریال را آزاد کند، خطوط کنترل را تغییر دهد یا وارد مسیر محافظت‌شدهٔ برنامه‌ریزی شود. فرمان را یک‌بار دیگر بررسی کنید.', 'تأیید و ارسال')
-      : warning('Enter a recovery or programming path?', 'This command may release the serial port, pulse control lines, or enter the guarded programming workflow. Review the exact command before dispatch.', 'Confirm and dispatch')
+      : warning('Enter a recovery or programming path?', 'This command may close the serial port, pulse control lines, or enter the guarded programming workflow. Review the exact command before dispatch.', 'Review and dispatch')
   }
   if (/^rf send(?: |$)/.test(normalized)) {
     return fa
@@ -387,6 +389,7 @@ export default function App() {
   const [appPreferencesOpen, setAppPreferencesOpen] = useState(false)
   const [quickHeader, setQuickHeader] = useState(loadQuickHeaderPreferences)
   const [sidebarStatusMenu, setSidebarStatusMenu] = useState(false)
+  const [sidebarStatusMenuPosition, setSidebarStatusMenuPosition] = useState({ left: 0, top: 0 })
   const [bootOpen, setBootOpen] = useState(demo)
   const [bootResolved, setBootResolved] = useState(demo)
   const [bootProgress, setBootProgress] = useState(12)
@@ -405,9 +408,11 @@ export default function App() {
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
   const refreshAfterHostRestart = useRef(false)
+  const relayOptimisticRef = useRef(new Map<number, boolean>())
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
   const sidebarStatusRef = useRef<HTMLDivElement>(null)
+  const sidebarStatusMenuRef = useRef<HTMLDivElement>(null)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
@@ -472,21 +477,43 @@ export default function App() {
 
   useEffect(() => { pageRef.current = page }, [page])
 
+  const openSidebarStatusMenu = useCallback((left?: number, top?: number) => {
+    const bounds = sidebarStatusRef.current?.getBoundingClientRect()
+    setSidebarStatusMenuPosition({
+      left: left ?? (sidebarOpen ? bounds?.left ?? 10 : (bounds?.right ?? 84) + 7),
+      top: top ?? (bounds?.bottom ?? 10) + 7,
+    })
+    setSidebarStatusMenu(true)
+  }, [sidebarOpen])
+
+  useLayoutEffect(() => {
+    if (!sidebarStatusMenu || !sidebarStatusMenuRef.current) return
+    const bounds = sidebarStatusMenuRef.current.getBoundingClientRect()
+    const margin = 10
+    setSidebarStatusMenuPosition((current) => ({
+      left: Math.max(margin, Math.min(current.left, window.innerWidth - bounds.width - margin)),
+      top: Math.max(margin, Math.min(current.top, window.innerHeight - bounds.height - margin)),
+    }))
+  }, [sidebarStatusMenu])
+
   useEffect(() => {
     if (!sidebarStatusMenu) return
     const outside = (event: PointerEvent | FocusEvent) => {
-      if (!sidebarStatusRef.current?.contains(event.target as Node)) setSidebarStatusMenu(false)
+      const target = event.target as Node
+      if (!sidebarStatusRef.current?.contains(target) && !sidebarStatusMenuRef.current?.contains(target)) setSidebarStatusMenu(false)
     }
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setSidebarStatusMenu(false)
     }
     const close = () => setSidebarStatusMenu(false)
+    const focusFrame = window.requestAnimationFrame(() => sidebarStatusMenuRef.current?.querySelector<HTMLButtonElement>('button')?.focus())
     window.addEventListener('pointerdown', outside)
     window.addEventListener('focusin', outside)
     window.addEventListener('keydown', key)
     window.addEventListener('blur', close)
     window.addEventListener('hashchange', close)
     return () => {
+      window.cancelAnimationFrame(focusFrame)
       window.removeEventListener('pointerdown', outside)
       window.removeEventListener('focusin', outside)
       window.removeEventListener('keydown', key)
@@ -494,8 +521,6 @@ export default function App() {
       window.removeEventListener('hashchange', close)
     }
   }, [sidebarStatusMenu])
-
-  useEffect(() => { if (!snapshot.connected) setSidebarStatusMenu(false) }, [snapshot.connected])
 
   useEffect(() => {
     const engine = createAudioEngine({
@@ -567,6 +592,17 @@ export default function App() {
       }
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
+        if (isPushedOutputEvent(event)) setSnapshot((current) => {
+          const next = applyPushedOutputEvent(current, event)
+          if (event.kind.trim().toLowerCase() === 'relay.state' && event.metadata?.optimistic === 'true') {
+            const changed = current.status.active_relays ^ next.status.active_relays
+            for (let relay = 1; relay <= 8; relay += 1) {
+              const mask = 1 << (relay - 1)
+              if (changed & mask) relayOptimisticRef.current.set(relay, Boolean(next.status.active_relays & mask))
+            }
+          }
+          return next
+        })
         setEvents((current) => prependSignificantControllerEvent(current, event))
       }
     })
@@ -716,7 +752,7 @@ export default function App() {
     snapshot.port.serial_number,
   ])
 
-  const dispatchCommand = useCallback(async (command: string, success?: string, notifyOnSuccess = true): Promise<string> => {
+  const dispatchCommand = useCallback(async (command: string, success?: string, notifyOnSuccess = true, refreshAfter = false): Promise<string> => {
     const safeCommand = redactSensitiveCommand(command)
     tabChannelRef.current?.publishTerminal({ kind: 'command', text: `pc› ${safeCommand}`, at: Date.now() })
     if (demo) {
@@ -730,7 +766,10 @@ export default function App() {
       const output = result.output ?? ''
       tabChannelRef.current?.publishTerminal({ kind: 'output', text: output || '✓ accepted', at: Date.now() })
       if (notifyOnSuccess) notify('success', success || 'Command completed', output || safeCommand)
-      void refresh()
+      // State-bearing commands normally converge through the event/status
+      // stream for every client. Poll only when a caller explicitly selects a
+      // legacy capability path whose firmware cannot emit presentation state.
+      if (refreshAfter) void refresh()
       return output
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause)
@@ -776,14 +815,30 @@ export default function App() {
     const mask = 1 << (relay - 1)
     const previous = snapshot.status.active_relays
     const next = active ? previous & ~mask : previous | mask
-    // Flip locally before transport latency. Only the originating client owns
-    // this optimistic state; socket status remains the authority for all tabs.
+    const desired = !active
+    relayOptimisticRef.current.set(relay, desired)
+    const shareRelayState = (activeRelays: number) => tabChannelRef.current?.publishControllerEvent({
+      id: Date.now(),
+      time: new Date().toISOString(),
+      kind: 'relay.state',
+      stream: 'state',
+      text: 'relay mask changed',
+      source: 'webui',
+      metadata: { active_relays: String(activeRelays), optimistic: 'true' },
+    })
+    // Flip locally and across sibling Web tabs before serial transport latency.
+    // The next matching status sample clears the optimistic overlay.
     setSnapshot((current) => ({ ...current, status: { ...current.status, active_relays: next } }))
+    shareRelayState(next)
     setRelayPending((current) => new Set(current).add(relay))
     try {
+      // The event/status stream is authoritative; an immediate status poll can
+      // race the board acknowledgement and visibly undo the optimistic click.
       await dispatchCommand(`relay ${relay} ${active ? 'off' : 'on'}`, undefined, false)
     } catch {
+      relayOptimisticRef.current.delete(relay)
       setSnapshot((current) => current.status.active_relays === next ? { ...current, status: { ...current.status, active_relays: previous } } : current)
+      shareRelayState(previous)
     } finally {
       setRelayPending((current) => { const nextPending = new Set(current); nextPending.delete(relay); return nextPending })
     }
@@ -1136,12 +1191,19 @@ export default function App() {
             // Keeping the old detail made the live badge expose stale offline
             // text through its tooltip after the transport had recovered.
             setStreamDetail('')
-            setSnapshot((current) => ({ ...current, connected: true, have_status: true, status: update.status, status_updated: update.time }))
+            const status = { ...update.status }
+            for (const [relay, desired] of relayOptimisticRef.current) {
+              const mask = 1 << (relay - 1)
+              const authoritative = Boolean(status.active_relays & mask)
+              if (authoritative === desired) relayOptimisticRef.current.delete(relay)
+              else status.active_relays = desired ? status.active_relays | mask : status.active_relays & ~mask
+            }
+            setSnapshot((current) => ({ ...current, connected: true, have_status: true, status, status_updated: update.time }))
             setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, status: update.status }, new Date(update.time).getTime())])
           },
           event: (event) => {
 			const eventKind = event.kind.toLowerCase()
-			if (event.kind.toLowerCase() === 'status_led.changed' || event.kind.toLowerCase() === 'front_panel.segment') {
+            if (isPushedOutputEvent(event)) {
 				setSnapshot((current) => applyPushedOutputEvent(current, event))
 			}
 						if (config.integrations?.buzzer_web_audio && event.kind.toLowerCase() === 'buzzer.note') {
@@ -1149,10 +1211,11 @@ export default function App() {
 							const durationMS = Number(event.metadata?.duration_ms)
 							audioRef.current?.playTone(frequencyHz, durationMS)
 						}
-            if (isSignificantControllerEvent(event)) {
+            const significant = isSignificantControllerEvent(event)
+            if (significant) {
               setEvents((current) => prependSignificantControllerEvent(current, event))
-              tabChannelRef.current?.publishControllerEvent(event)
             }
+            if (significant || isPushedOutputEvent(event)) tabChannelRef.current?.publishControllerEvent(event)
             if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
@@ -1259,7 +1322,7 @@ export default function App() {
           ? appearance.locale === 'fa'
             ? `${snapshot.status.active_relays.toString(2).replace(/0/g, '').length} خروجی فعال`
             : `${snapshot.status.active_relays.toString(2).replace(/0/g, '').length} active outputs`
-          : appearance.locale === 'fa' ? 'همهٔ خروجی‌ها آزادند' : 'All outputs released'],
+          : appearance.locale === 'fa' ? 'همهٔ خروجی‌ها خاموش‌اند' : 'All outputs are off'],
         ['rf list', appearance.locale === 'fa' ? 'فهرست رادیویی کنترلر' : 'Controller radio inventory'],
         ['macro list', appearance.locale === 'fa' ? 'فهرست ماکروهای کنترلر' : 'Controller macro inventory'],
       ]
@@ -1294,12 +1357,12 @@ export default function App() {
           aria-haspopup="menu"
           aria-expanded={sidebarStatusMenu}
           aria-label={appearance.locale === 'fa' ? 'منوی اتصال کنترلر' : 'Controller connection menu'}
-          onClick={() => setSidebarStatusMenu((value) => !value)}
-          onContextMenu={(event) => { event.preventDefault(); setSidebarStatusMenu(true) }}
+          onClick={() => { if (sidebarStatusMenu) setSidebarStatusMenu(false); else openSidebarStatusMenu() }}
+          onContextMenu={(event) => { event.preventDefault(); openSidebarStatusMenu(event.clientX, event.clientY) }}
           onKeyDown={(event) => {
             if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10') || event.key === 'Enter' || event.key === ' ') {
               event.preventDefault()
-              setSidebarStatusMenu(true)
+              openSidebarStatusMenu()
             }
             if (event.key === 'Escape') setSidebarStatusMenu(false)
           }}
@@ -1307,13 +1370,20 @@ export default function App() {
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
           <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} />
-          {sidebarStatusMenu && <div className="sidebar__status-menu" role="menu" onClick={(event) => event.stopPropagation()}>
+        </div>
+        {sidebarStatusMenu && typeof document !== 'undefined' && createPortal(<div
+          ref={sidebarStatusMenuRef}
+          className="sidebar__status-menu"
+          role="menu"
+          aria-label={appearance.locale === 'fa' ? 'عملیات اتصال کنترلر' : 'Controller connection actions'}
+          style={sidebarStatusMenuPosition}
+          onClick={(event) => event.stopPropagation()}
+        >
             <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('reconnect') }}>{appearance.locale === 'fa' ? 'اتصال مجدد' : 'Reconnect'}</button>
             {snapshot.connected && <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); void runCommand('close') }}>{appearance.locale === 'fa' ? 'بستن درگاه' : 'Close port'}</button>}
             <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); setPaletteQuery('ports'); setPaletteIndex(0); setPalette(true) }}>{appearance.locale === 'fa' ? 'انتخاب درگاه USB' : 'Choose USB port'}</button>
             <button role="menuitem" onClick={() => { setSidebarStatusMenu(false); navigate('device') }}>{appearance.locale === 'fa' ? 'جزئیات دستگاه' : 'Device details'}</button>
-          </div>}
-        </div>
+        </div>, document.body)}
 
         <nav className="sidebar__nav">
           {(['core', 'integrations', 'system'] as const).map((group) => (

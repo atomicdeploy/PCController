@@ -376,13 +376,13 @@ export function DashboardView(props: SharedViewProps) {
       </section>
 
       {snapshot.connected && snapshot.have_status && <section className="metric-grid">
-        <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />
-        <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />
+        <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" scale="supply" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />
+        <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" scale="current" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />
         <Card icon={Thermometer} iconTone="amber" title={copy('Temperature', 'دما')} eyebrow={temperatureTab === 'led' ? peripheralName('sensor.temperature-led', 'LED') : peripheralName('sensor.temperature-audio', copy('Audio', 'صوت'))} className="temperature-card">
           <Segmented value={temperatureTab} label={copy('Temperature sensor', 'حسگر دما')} options={[{ value: 'led', label: 'LED' }, { value: 'audio', label: copy('Audio', 'صوت') }]} onChange={(value) => { setTemperatureTab(value as 'led' | 'audio'); setTelemetryMode('thermal') }} />
           <strong className="temperature-card__value">{formatNumber(locale, (temperatureTab === 'led' ? status.temperature_led_centi_c : status.temperature_bt_audio_centi_c) / 100, 1)}<small>°C</small></strong>
           <span>{temperatureTab === 'led' ? copy('Lighting thermal sensor', 'حسگر حرارتی نور') : copy('Bluetooth audio thermal sensor', 'حسگر حرارتی صوت بلوتوث')}</span>
-          <Sparkline values={values(samples, temperatureTab === 'led' ? 'ledTemp' : 'btTemp')} tone="amber" label={temperatureTab === 'led' ? copy('LED temperature trend', 'روند دمای LED') : copy('Audio temperature trend', 'روند دمای صوت')} />
+          <Sparkline values={values(samples, temperatureTab === 'led' ? 'ledTemp' : 'btTemp')} tone="amber" scale="temperature" label={temperatureTab === 'led' ? copy('LED temperature trend', 'روند دمای LED') : copy('Audio temperature trend', 'روند دمای صوت')} />
         </Card>
         <MetricCard icon={PlugZap} label="PWM" value={status.pwm_available ? formatNumber(locale, status.pwm_value * 100 / 4095, 1) : '—'} unit={status.pwm_available ? '%' : ''} values={values(samples, 'power')} tone="violet" detail={status.pwm_available ? `${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}` : copy('Unavailable on this controller', 'در این کنترلر در دسترس نیست')} />
       </section>}
@@ -408,7 +408,7 @@ export function DashboardView(props: SharedViewProps) {
         {snapshot.connected && frame('outputs', copy('Outputs', 'خروجی‌ها'), <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
           { label: copy('Read controller status', 'خواندن وضعیت کنترلر'), icon: Gauge, onSelect: () => { void command('status') } },
           { label: copy('Edit relay, MOSFET, and side labels', 'ویرایش برچسب رله، ماسفت و سمت‌ها'), icon: PanelTop, onSelect: () => { window.location.hash = '#/settings' } },
-          { label: copy('Release every output', 'آزادسازی همهٔ خروجی‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off'); await command('pwm off') } }) },
+          { label: copy('Turn every output off', 'خاموش‌کردن همهٔ خروجی‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off'); await command('pwm off') } }) },
         ]}>
           <div className="output-matrix">
             {Array.from({ length: 8 }, (_, index) => {
@@ -429,7 +429,7 @@ export function DashboardView(props: SharedViewProps) {
               )
             })}
           </div>
-          <div className="safety-strip"><ShieldCheck size={17} /><span>{activeRelayCount ? copy(`${activeRelayCount} outputs active · confirmation required for emergency release`, `${activeRelayCount} خروجی فعال است · آزادسازی اضطراری به تأیید نیاز دارد`) : copy('All physical outputs are released', 'همهٔ خروجی‌های فیزیکی آزاد هستند')}</span></div>
+          <div className="safety-strip"><ShieldCheck size={17} /><span>{activeRelayCount ? copy(`${activeRelayCount} outputs active · approval required before turning all off`, `${activeRelayCount} خروجی فعال است · خاموش‌کردن همه نیازمند اجازه است`) : copy('All relay and motion outputs are off', 'همهٔ خروجی‌های رله و حرکت خاموش‌اند')}</span></div>
         </Card>)}
 
         {snapshot.connected && frame('overview', copy('Controller overview', 'نمای کلی کنترلر'), <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
@@ -640,7 +640,7 @@ export function ControlsView(props: SharedViewProps) {
       <section className="control-layout">
         <Card icon={CircuitBoard} iconTone={snapshot.status.active_relays ? 'amber' : 'green'} eyebrow={copy('Eight protected outputs', 'هشت خروجی محافظت‌شده')} title={copy('Relays & motion', 'رله‌ها و حرکت')} className="relay-control-card" action={<StatusBadge tone={snapshot.status.active_relays ? 'warn' : 'good'}>{snapshot.status.active_relays ? copy('OUTPUTS ON', 'خروجی‌ها روشن') : copy('ALL OFF', 'همه خاموش')}</StatusBadge>} menu={[
           ...(!socketFresh ? [{ label: copy('Refresh output state', 'تازه‌سازی وضعیت خروجی‌ها'), icon: RefreshCw, onSelect: () => { void command('status') } }] : []),
-          { label: copy('Release every relay', 'آزادسازی همهٔ رله‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off') } }) },
+          { label: copy('Turn every relay off', 'خاموش‌کردن همهٔ رله‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off') } }) },
         ]}>
           <div className="relay-bank">
             {Array.from({ length: 8 }, (_, index) => {
@@ -1324,10 +1324,10 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           <RangeField label={copy('Motion-menu exit hold', 'مکث خروج از منوی حرکت')} value={motionExitHoldSeconds} min={1} max={31} unit="s" onChange={setMotionExitHoldSeconds} />
           <RangeField label={copy('Status brightness', 'روشنایی وضعیت')} value={statusBrightness} min={0} max={255} onChange={setStatusBrightness} />
           <RangeField label={copy('Telemetry period', 'دورهٔ تله‌متری')} value={streamPeriod} min={50} max={5000} step={50} unit="ms" onChange={setStreamPeriod} />
-          <Toggle checked={Boolean(outputPersistence & 1)} onChange={(enabled) => setPersistenceBit(1, enabled)} label={copy('Remember motion command', 'به‌خاطرسپاری فرمان حرکت')} detail={copy('Disabled by default; motion starts released after a reboot.', 'به‌طور پیش‌فرض غیرفعال است؛ حرکت پس از راه‌اندازی دوباره در حالت آزاد آغاز می‌شود.')} />
+          <Toggle checked={Boolean(outputPersistence & 1)} onChange={(enabled) => setPersistenceBit(1, enabled)} label={copy('Remember motion command', 'به‌خاطرسپاری فرمان حرکت')} detail={copy('Disabled by default; motion outputs start off after a reboot.', 'به‌طور پیش‌فرض غیرفعال است؛ خروجی‌های حرکت پس از راه‌اندازی دوباره خاموش‌اند.')} />
           <Toggle checked={Boolean(outputPersistence & 2)} onChange={(enabled) => setPersistenceBit(2, enabled)} label={copy('Remember user relays R5–R8', 'به‌خاطرسپاری رله‌های کاربر R5 تا R8')} detail={copy('Restore the user-output relay mask kept in EEPROM.', 'ماسک رله‌های خروجی کاربر ذخیره‌شده در EEPROM بازیابی می‌شود.')} />
           <Toggle checked={Boolean(outputPersistence & 4)} onChange={(enabled) => setPersistenceBit(4, enabled)} label={copy('Remember user PWM values', 'به‌خاطرسپاری مقادیر PWM کاربر')} detail={copy('Restore MOSFET/user PWM channel values after boot.', 'مقادیر کانال‌های MOSFET/PWM کاربر پس از راه‌اندازی بازیابی می‌شوند.')} />
-          <Toggle checked={Boolean(outputPersistence & 8)} onChange={(enabled) => setPersistenceBit(8, enabled)} label={copy('Stop keeps direction relay', 'توقف، رلهٔ جهت را حفظ کند')} detail={outputPersistence & 8 ? copy('Motion stop releases only the output/enable relay.', 'توقف حرکت فقط رلهٔ خروجی/فعال‌سازی را آزاد می‌کند.') : copy('Motion stop releases both direction and output relays.', 'توقف حرکت هر دو رلهٔ جهت و خروجی را آزاد می‌کند.')} />
+          <Toggle checked={Boolean(outputPersistence & 8)} onChange={(enabled) => setPersistenceBit(8, enabled)} label={copy('Stop keeps direction relay', 'توقف، رلهٔ جهت را حفظ کند')} detail={outputPersistence & 8 ? copy('Motion stop turns off only the output/enable relay.', 'توقف حرکت فقط رلهٔ خروجی/فعال‌سازی را خاموش می‌کند.') : copy('Motion stop turns off both direction and output relays.', 'توقف حرکت هر دو رلهٔ جهت و خروجی را خاموش می‌کند.')} />
           <Button tone="primary" icon={MemoryStick} onClick={() => void command(settingsSetCommand(snapshot.settings, displayBrightness, displayClosedBrightness, statusBrightness, streamPeriod, motionExitHoldSeconds, outputPersistence, relayRestoreMask))}>{copy('Write board settings', 'نوشتن تنظیمات برد')}</Button>
           </>}
         </Card>}

@@ -716,7 +716,7 @@ export function AdvancedWorkbench({
             <Button icon={ScanSearch} disabled={!online} busy={busy === 'i2c scan'} onClick={() => void run('i2c scan')}>{copy('Scan bus', 'پویش گذرگاه')}</Button>
             <Button icon={MonitorCog} busy={busy === 'i2c lcd status'} onClick={() => void run('i2c lcd status')}>{copy('LCD status', 'وضعیت LCD')}</Button>
             <Button icon={RefreshCw} disabled={!online} busy={busy === 'i2c lcd rescan'} onClick={() => void run('i2c lcd rescan')}>{copy('Rescan LCD', 'پویش دوباره LCD')}</Button>
-            <Button icon={Unplug} disabled={!online} busy={busy === 'i2c release'} onClick={() => void run('i2c release')}>{copy('Release lease', 'آزادسازی دسترسی')}</Button>
+            <Button icon={Unplug} disabled={!online} busy={busy === 'i2c release'} onClick={() => void run('i2c release')}>{copy('Stop bus access', 'پایان دسترسی به گذرگاه')}</Button>
           </div>
           <div className="advanced-fields advanced-fields--i2c">
             <TextField label={copy('7-bit address', 'نشانی ۷ بیتی')} value={i2cAddress} dir="ltr" spellCheck={false} onChange={(event) => setI2CAddress(event.target.value)} />
@@ -731,17 +731,17 @@ export function AdvancedWorkbench({
         <AdvancedPanel
           icon={Keyboard}
           eyebrow={copy('GLOBAL INPUT', 'ورودی سراسری')}
-          title={copy('Keyboard lifecycle & emergency release', 'چرخه صفحه‌کلید و آزادسازی اضطراری')}
-          detail={copy('Inspect bindings, control the primary Windows hook, or release every held and latched output.', 'نگاشت‌ها را ببینید، هوک اصلی ویندوز را کنترل یا همه خروجی‌های نگه‌داشته‌شده را آزاد کنید.')}
+          title={copy('Keyboard lifecycle & all-off control', 'چرخه صفحه‌کلید و خاموش‌کردن همه')}
+          detail={copy('Inspect bindings, control the primary Windows hook, or turn every held and latched output off.', 'نگاشت‌ها را ببینید، هوک اصلی ویندوز را کنترل یا همهٔ خروجی‌های نگه‌داشته‌شده را خاموش کنید.')}
         >
           <div className="advanced-actions">
             <Button icon={Activity} busy={busy === 'keyboard status'} onClick={() => void run('keyboard status')}>{copy('Hook status', 'وضعیت هوک')}</Button>
             <Button icon={ListTree} busy={busy === 'keyboard list'} onClick={() => void run('keyboard list')}>{copy('Binding catalog', 'فهرست نگاشت‌ها')}</Button>
             <Button icon={Keyboard} onClick={() => prepare('keyboard enable', copy('Enabling the global hook activates the configured bindings; review them first with Keyboard list.', 'فعال‌سازی هوک سراسری، نگاشت‌های پیکربندی‌شده را فعال می‌کند؛ ابتدا فهرست صفحه‌کلید را بازبینی کنید.'), 'caution')}>{copy('Review enable', 'بازبینی فعال‌سازی')}</Button>
-            <Button icon={KeyboardOff} busy={busy === 'keyboard disable'} onClick={() => void run('keyboard disable')}>{copy('Disable & release', 'غیرفعال و آزادسازی')}</Button>
-            <Button tone="danger" icon={CircleStop} busy={busy === 'keyboard stop'} onClick={() => void run('keyboard stop')}>{copy('Emergency output release', 'آزادسازی اضطراری خروجی‌ها')}</Button>
+            <Button icon={KeyboardOff} busy={busy === 'keyboard disable'} onClick={() => void run('keyboard disable')}>{copy('Disable & turn off', 'غیرفعال و خاموش‌کردن')}</Button>
+            <Button tone="danger" icon={CircleStop} busy={busy === 'keyboard stop'} onClick={() => void run('keyboard stop')}>{copy('Turn all keyboard outputs off', 'خاموش‌کردن همهٔ خروجی‌های صفحه‌کلید')}</Button>
           </div>
-          <p className="advanced-note advanced-note--safe">{copy('The stop command releases keyboard-held and latched outputs without shutting down the host.', 'فرمان توقف، خروجی‌های نگه‌داشته‌شده توسط صفحه‌کلید را بدون خاموش‌کردن میزبان آزاد می‌کند.')}</p>
+          <p className="advanced-note advanced-note--safe">{copy('The stop command turns keyboard-held and latched outputs off without shutting down the host.', 'فرمان توقف، خروجی‌های نگه‌داشته‌شده توسط صفحه‌کلید را بدون خاموش‌کردن میزبان خاموش می‌کند.')}</p>
         </AdvancedPanel></>}
 
         <AdvancedPanel

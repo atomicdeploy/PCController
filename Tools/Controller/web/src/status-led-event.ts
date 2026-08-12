@@ -6,6 +6,19 @@ const byte = (value: string | undefined): number | null => {
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 255 ? parsed : null
 }
 
+export function isPushedOutputEvent(event: Pick<ControllerEvent, 'kind'>): boolean {
+  return ['status_led.changed', 'front_panel.segment', 'relay.state', 'relay.changed'].includes(event.kind.trim().toLowerCase())
+}
+
+export function relayMaskFromEvent(event: ControllerEvent): number | null {
+  const kind = event.kind.trim().toLowerCase()
+  if (kind !== 'relay.state' && kind !== 'relay.changed') return null
+  const raw = event.metadata?.active_relays ?? event.metadata?.relay_mask
+  if (raw === undefined || raw.trim() === '') return null
+  const parsed = Number(raw)
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 0xff ? parsed : null
+}
+
 export function statusLEDFromEvent(event: ControllerEvent): StatusLEDState | null {
   if (event.kind.toLowerCase() !== 'status_led.changed') return null
   const red = byte(event.metadata?.red)
@@ -43,6 +56,15 @@ export function segmentStateFromEvent(event: ControllerEvent): Pick<FrontPanelSt
 export function applyPushedOutputEvent(snapshot: Snapshot, event: ControllerEvent): Snapshot {
   const led = statusLEDFromEvent(event)
   if (led) return applyStatusLEDEvent(snapshot, event)
+  const relays = relayMaskFromEvent(event)
+  if (relays !== null) {
+    return {
+      ...snapshot,
+      status: { ...snapshot.status, active_relays: relays },
+      have_status: true,
+      status_updated: event.time,
+    }
+  }
   const segment = segmentStateFromEvent(event)
   if (!segment) return snapshot
   const current: FrontPanelState = snapshot.front_panel ?? {

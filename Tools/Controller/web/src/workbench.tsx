@@ -151,6 +151,11 @@ export function WorkbenchView(props: SharedViewProps) {
   const [automation, setAutomation] = useState('')
   const [hostBrightness, setHostBrightness] = useState(60)
   const [peripheralDestination, setPeripheralDestination] = useState<PeripheralDestinationID>(() => peripheralDestinationFromHash(location.hash) ?? 'overview')
+  const [openPeripheralGroups, setOpenPeripheralGroups] = useState<ReadonlySet<string>>(() => {
+    const initial = peripheralDestinationFromHash(location.hash) ?? 'overview'
+    const group = peripheralDestinations.find((destination) => destination.id === initial)?.group
+    return new Set(group ? [group] : [])
+  })
   const latestStreamEventID = useRef(events.reduce((latest, event) => Math.max(latest, event.id), 0))
   const relayedTerminalIDs = useRef(new Set<string>())
   const consoleModel = useRef(new BrowserConsoleModel({ maxEntries: 240 }))
@@ -170,6 +175,13 @@ export function WorkbenchView(props: SharedViewProps) {
   const selectedPeripheral = peripheralDestinationByID(peripheralDestination)
   const selectedPeripheralState = peripheralDestinationState(selectedPeripheral, snapshot)
   const peripheralTone = (state: ReturnType<typeof peripheralDestinationState>) => state === 'available' ? 'good' : state === 'disconnected' ? 'warn' : state === 'unsupported' ? 'bad' : 'neutral'
+
+  useEffect(() => {
+    setOpenPeripheralGroups((current) => {
+      if (current.has(selectedPeripheral.group)) return current
+      return new Set([...current, selectedPeripheral.group])
+    })
+  }, [selectedPeripheral.group])
 
   useEffect(() => {
     const incoming = events
@@ -260,8 +272,16 @@ export function WorkbenchView(props: SharedViewProps) {
         <nav className="peripheral-workbench__tree" aria-label={copy('Peripheral destinations', 'مقصدهای تجهیزات جانبی')}>
           {peripheralGroups.map((group) => {
             const destinations = peripheralDestinations.filter((destination) => destination.group === group.id)
-            const groupOpen = destinations.some((destination) => destination.id === peripheralDestination)
-            return <details key={group.id} open={groupOpen} className="peripheral-workbench__group">
+            const groupOpen = openPeripheralGroups.has(group.id)
+            return <details key={group.id} open={groupOpen} className="peripheral-workbench__group" onToggle={(event) => {
+              const open = event.currentTarget.open
+              setOpenPeripheralGroups((current) => {
+                const next = new Set(current)
+                if (open) next.add(group.id)
+                else next.delete(group.id)
+                return next
+              })
+            }}>
               <summary>{group.label[locale]}<small>{destinations.length}</small></summary>
               <div>{destinations.map((destination) => {
                 const state = peripheralDestinationState(destination, snapshot)
@@ -347,7 +367,7 @@ export function WorkbenchView(props: SharedViewProps) {
         </Card>
 
         {snapshot.connected && <Card icon={Cable} iconTone="accent" title={copy('I²C & peripherals', 'I²C و تجهیزات جانبی')} eyebrow={copy('Cooperative host lease', 'دسترسی هماهنگ میزبان')}>
-          <div className="operation-buttons"><Button icon={ScanSearch} onClick={() => void run('i2c scan')}>{copy('Scan bus', 'پویش گذرگاه')}</Button><Button icon={Unplug} onClick={() => void run('i2c release')}>{copy('Release lease', 'آزادسازی دسترسی')}</Button><Button icon={Settings2} onClick={() => void run('settings')}>{copy('Board settings', 'تنظیمات برد')}</Button><Button icon={LayoutDashboard} onClick={() => void run('menu current')}>{copy('Menu state', 'وضعیت منو')}</Button></div>
+          <div className="operation-buttons"><Button icon={ScanSearch} onClick={() => void run('i2c scan')}>{copy('Scan bus', 'پویش گذرگاه')}</Button><Button icon={Unplug} onClick={() => void run('i2c release')}>{copy('Stop bus access', 'پایان دسترسی به گذرگاه')}</Button><Button icon={Settings2} onClick={() => void run('settings')}>{copy('Board settings', 'تنظیمات برد')}</Button><Button icon={LayoutDashboard} onClick={() => void run('menu current')}>{copy('Menu state', 'وضعیت منو')}</Button></div>
         </Card>}
 
         <Card icon={MonitorCog} iconTone="violet" title={copy('Host control', 'کنترل میزبان')} eyebrow={copy('Policy-gated', 'تحت کنترل سیاست‌ها')} menu={[
