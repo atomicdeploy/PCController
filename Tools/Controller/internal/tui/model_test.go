@@ -67,6 +67,33 @@ func TestDashboardUsesExpandedNamesAndAdaptiveUnits(t *testing.T) {
 	}
 }
 
+func TestUnavailablePeripheralsDoNotRenderInvalidDashboardValuesOrControls(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	snapshot := RichPreviewSnapshot()
+	snapshot.Status.Flags = 0
+	snapshot.Status.INA219Available = false
+	snapshot.Status.PWMAvailable = false
+	snapshot.Status.TLEDAvailable = false
+	snapshot.Status.TBTAvailable = false
+	snapshot.Status.SupplyMV = -2147483648
+	snapshot.Status.BusMV = -2147483648
+	snapshot.Status.CurrentMA = -2147483648
+	snapshot.Status.PowerMW = -2147483648
+	snapshot.Status.TLEDCenti = -32768
+	snapshot.Status.TBTCenti = -32768
+	snapshot.Status.LCDAddress = 0
+
+	dashboard := model.dashboardPage(snapshot)
+	for _, unavailable := range []string{"Supply Voltage", "Load Current", "Load Power", "Temperature ·", "PWM", "I2C LCD", "-2147483648", "-32768"} {
+		if strings.Contains(dashboard, unavailable) {
+			t.Fatalf("dashboard rendered unavailable peripheral %q:\n%s", unavailable, dashboard)
+		}
+	}
+	if rows := model.controlTableRows(snapshot, 16); len(rows) != 15 {
+		t.Fatalf("control table retained PCA/PWM rows: got %d rows, want 15", len(rows))
+	}
+}
+
 func TestDashboardConsumesHostPeripheralNamesForSensorsDisplaysAndPWM(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	model.uiValue.PeripheralNames = map[string]string{
@@ -1100,8 +1127,8 @@ func TestFrontPanelPreviewAndOfflineLCD(t *testing.T) {
 	if !strings.Contains(state.LCDLine1, "PC offline") || !strings.Contains(state.LCDLine2, "Connect USB toPC") {
 		t.Fatalf("offline LCD=%q/%q", state.LCDLine1, state.LCDLine2)
 	}
-	if page := model.dashboardPage(snapshot); !strings.Contains(page, "offline · physical contents unverified") {
-		t.Fatalf("dashboard claimed a live LCD while disconnected:\n%s", page)
+	if page := model.dashboardPage(snapshot); strings.Contains(page, "I2C LCD") || strings.Contains(page, "0x27") {
+		t.Fatalf("dashboard retained unavailable LCD state while disconnected:\n%s", page)
 	}
 }
 

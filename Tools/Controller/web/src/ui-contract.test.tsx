@@ -66,6 +66,7 @@ describe('offline and settings UI contracts', () => {
       ...emptySnapshot,
       connected: true,
       connection_state: 'connected',
+      status: { ...emptySnapshot.status, lcd_address: 0x27 },
     }
     const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
     expect(markup).toContain('TM1637 + LCD')
@@ -97,8 +98,37 @@ describe('offline and settings UI contracts', () => {
 
   it('never labels disconnected dashboard telemetry as live', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} />)
-    expect(markup).toContain('Telemetry history')
+    expect(markup).not.toContain('Telemetry history')
     expect(markup).not.toMatch(/\bLive\b/)
+  })
+
+  it('hides unavailable peripherals and their invalid readings', () => {
+    const connected = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      connection_state: 'connected',
+      status: {
+        ...emptySnapshot.status,
+        supply_mv: -2147483648,
+        bus_mv: -2147483648,
+        current_ma: -2147483648,
+        power_mw: -2147483648,
+        temperature_led_centi_c: -32768,
+        temperature_bt_audio_centi_c: -32768,
+      },
+    }
+    const dashboard = renderToStaticMarkup(<DashboardView {...shared()} snapshot={connected} />)
+    expect(dashboard).not.toContain('metric-grid')
+    expect(dashboard).not.toContain('Telemetry history')
+    expect(dashboard).not.toContain('-2147483648')
+    expect(dashboard).not.toContain('-32768')
+
+    const workbench = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
+    expect(workbench).toContain('TM1637')
+    expect(workbench).not.toContain('TM1637 + LCD')
+    expect(workbench).not.toContain('Display target')
+    expect(workbench).not.toContain('Temperature identities')
   })
 
   it('keeps the first-run synchronization phase truthful before a controller is known', () => {

@@ -81,17 +81,18 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	if pageWidth <= 0 {
 		pageWidth = 132
 	}
-	lcdStatus := "offline · physical contents unverified"
-	if snapshot.Connected {
+	lcdStatus := ""
+	lcdAvailable := false
+	if snapshot.Connected && status.LCDAddress != 0 {
+		lcdAvailable = true
 		lcdStatus = fmt.Sprintf("available · 0x%02X", status.LCDAddress)
 	}
 	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 && model.runtime != nil {
 		lcd := model.runtime.LCDPresenter().State()
 		lcdStatus = "not detected"
 		if lcd.Physical {
+			lcdAvailable = true
 			lcdStatus = fmt.Sprintf("available · 0x%02X", lcd.Address)
-		} else if lcd.LastError != "" {
-			lcdStatus += " · " + lcd.LastError
 		}
 	}
 	sectionWidth := pageWidth
@@ -105,22 +106,22 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	if !snapshot.HaveStatus {
 		measurementLines = append(measurementLines, warnStyle.Render("Waiting for the first STATUS frame…"))
 	}
-	if model.prefs.Visible["supply"] {
+	if status.INA219Available && model.prefs.Visible["supply"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.supply-voltage", "Supply Voltage"), formatVoltage(status.SupplyMV, model.prefs.VoltageDecimals)))
 	}
-	if model.prefs.Visible["bus"] {
+	if status.INA219Available && model.prefs.Visible["bus"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.bus-voltage", "Bus Voltage"), formatVoltage(status.BusMV, model.prefs.VoltageDecimals)))
 	}
-	if model.prefs.Visible["current"] {
+	if status.INA219Available && model.prefs.Visible["current"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.current", "Load Current"), formatCurrent(status.CurrentMA, model.prefs.CurrentDecimals)))
 	}
-	if model.prefs.Visible["power"] {
+	if status.INA219Available && model.prefs.Visible["power"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.power", "Load Power"), formatPower(status.PowerMW, model.prefs.PowerDecimals)))
 	}
-	if model.prefs.Visible["temperature_led"] {
+	if status.TLEDAvailable && model.prefs.Visible["temperature_led"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-led", "Temperature · Illumination LED"), formatTemperature(status.TLEDCenti, model.prefs.TemperatureDecimals)))
 	}
-	if model.prefs.Visible["temperature_bt"] {
+	if status.TBTAvailable && model.prefs.Visible["temperature_bt"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
 	}
 
@@ -139,8 +140,12 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		kvCard(sectionWidth, 22, "Active Relays", relaySummary(status.ActiveRelays)),
 		kvCard(sectionWidth, 22, model.peripheralName("display.segment", "Display Menu"), fmt.Sprintf("%d · %s", status.MenuPage, model.menuPageByID(status.MenuPage).Name)),
 		kvCard(sectionWidth, 22, "Menu / Submode", fmt.Sprintf("%d · %s", status.ProgramMode, model.programModeName(status.ProgramMode))),
-		kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %d%%", status.PWMChannel, int(status.PWMValue)*100/4095)),
-		kvCard(sectionWidth, 22, model.peripheralName("display.lcd", "I2C LCD"), lcdStatus),
+	}
+	if status.PWMAvailable {
+		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %d%%", status.PWMChannel, int(status.PWMValue)*100/4095)))
+	}
+	if lcdAvailable {
+		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName("display.lcd", "I2C LCD"), lcdStatus))
 	}
 	if model.prefs.Visible["diagnostics"] {
 		stateLines = append(stateLines,
@@ -220,27 +225,29 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		controlTableRow{Name: motionB + " · STOP", Value: "Stop", Tone: controlToneAction},
 		controlTableRow{Name: motionB + " · DOWN", Value: "Run", Tone: controlToneAction},
 	)
-	for channel := 0; channel <= 10; channel++ {
-		value := uint16(0)
-		if model.havePWMValues {
-			value = model.pwmValues[channel]
-		} else if byte(channel) == status.PWMChannel {
-			value = status.PWMValue
+	if status.PWMAvailable {
+		for channel := 0; channel <= 10; channel++ {
+			value := uint16(0)
+			if model.havePWMValues {
+				value = model.pwmValues[channel]
+			} else if byte(channel) == status.PWMChannel {
+				value = status.PWMValue
+			}
+			key := fmt.Sprintf("pwm.%d", channel)
+			fallback, _ := appconfig.PeripheralDefaultName(key)
+			name := model.peripheralName(key, fallback)
+			percent := int(value) * 100 / 4095
+			group := ""
+			if channel == 0 {
+				group = "PWM"
+			}
+			rows = append(rows, controlTableRow{
+				Group: group, Name: fmt.Sprintf("CH %02d · %s", channel, name),
+				Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
+			})
 		}
-		key := fmt.Sprintf("pwm.%d", channel)
-		fallback, _ := appconfig.PeripheralDefaultName(key)
-		name := model.peripheralName(key, fallback)
-		percent := int(value) * 100 / 4095
-		group := ""
-		if channel == 0 {
-			group = "PWM"
-		}
-		rows = append(rows, controlTableRow{
-			Group: group, Name: fmt.Sprintf("CH %02d · %s", channel, name),
-			Value: sliderPercentPlain(percent, levelWidth) + fmt.Sprintf(" %3d%%", percent), Tone: controlToneLevel,
-		})
+		rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction})
 	}
-	rows = append(rows, controlTableRow{Name: "All user PWM", Value: "Set 0%", Tone: controlToneAction})
 	return rows
 }
 

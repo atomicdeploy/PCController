@@ -51,6 +51,7 @@ import {
 } from './console-format'
 import { AdvancedWorkbench } from './advanced-workbench'
 import { displayPresentationCommand, type DisplayRepeat, type DisplayTarget } from './display-command'
+import { peripheralAvailability } from './peripheral-availability'
 import { RFGuidedWorkflow } from './rf-guided-workflow'
 import type { SharedViewProps } from './views'
 
@@ -149,6 +150,18 @@ export function WorkbenchView(props: SharedViewProps) {
   const consoleModel = useRef(new BrowserConsoleModel({ maxEntries: 240 }))
   const displayTextLimit = displayTarget === 'segments' ? 40 : 32
   const displayTextIsValid = displayText.length > 0 && displayText.length <= displayTextLimit && /^[\x20-\x7e]*$/.test(displayText)
+  const available = peripheralAvailability(snapshot)
+  const displayTargetOptions = [
+    { value: 'segments' as const, label: copy('Segments', 'سون‌سگمنت') },
+    ...(available.lcd ? [
+      { value: 'lcd' as const, label: 'LCD' },
+      { value: 'both' as const, label: copy('Both', 'هر دو') },
+    ] : []),
+  ]
+
+  useEffect(() => {
+    if (!available.lcd && displayTarget !== 'segments') setDisplayTarget('segments')
+  }, [available.lcd, displayTarget])
 
   useEffect(() => {
     const incoming = events
@@ -256,8 +269,8 @@ export function WorkbenchView(props: SharedViewProps) {
           </div>
         </Card>
 
-        {snapshot.connected && <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow="TM1637 + LCD">
-          <div className="setting-group"><label>{copy('Target', 'مقصد')}</label><Segmented value={displayTarget} label={copy('Display target', 'مقصد نمایش')} options={[{ value: 'segments', label: copy('Segments', 'سون‌سگمنت') }, { value: 'lcd', label: 'LCD' }, { value: 'both', label: copy('Both', 'هر دو') }]} onChange={setDisplayTarget} /></div>
+        {snapshot.connected && <Card icon={Binary} iconTone="violet" title={copy('Displays', 'نمایشگرها')} eyebrow={available.lcd ? 'TM1637 + LCD' : 'TM1637'}>
+          {available.lcd && <div className="setting-group"><label>{copy('Target', 'مقصد')}</label><Segmented value={displayTarget} label={copy('Display target', 'مقصد نمایش')} options={displayTargetOptions} onChange={setDisplayTarget} /></div>}
           <TextField
             label={copy(`Display text · ${displayTextLimit} characters maximum`, `متن نمایشگر، حداکثر ${displayTextLimit} نویسه`)}
             hint={displayTextIsValid

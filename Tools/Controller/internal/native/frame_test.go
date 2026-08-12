@@ -275,7 +275,8 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 
 	statusPayload := make([]byte, StatusPayloadSize+2)
 	binary.LittleEndian.PutUint16(statusPayload[24:26],
-		StatusProgramRunning|StatusHostOffline|StatusHot)
+		StatusINA219Available|StatusPWMAvailable|StatusTLEDAvailable|
+			StatusProgramRunning|StatusHostOffline|StatusHot)
 	statusPayload[31] = 1
 	statusPayload[33] = 1
 	statusPayload[34] = 7
@@ -289,6 +290,7 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !status.DoorOpen || !status.ProgramRunning || !status.HostOffline || !status.Hot ||
+		!status.INA219Available || !status.PWMAvailable || !status.TLEDAvailable || status.TBTAvailable ||
 		status.PWMChannel != 7 ||
 		status.PWMValue != 0x1234 || status.CRCErrors != 0x0900 ||
 		status.ResetCause != 0x0A || status.ResetCount != 0x12345678 {
