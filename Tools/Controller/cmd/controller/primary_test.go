@@ -130,6 +130,31 @@ func TestPrimaryIPCClaimsOwnershipAndRoutesCommands(t *testing.T) {
 	}
 }
 
+func TestPrimaryFacadeUsesInjectedOutputScheduler(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	outputs := control.NewOutputScheduler(runtime)
+	defer outputs.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := startPrimaryIPCAtWithIdentityAndOutputs(
+		ctx,
+		"127.0.0.1:0",
+		runtime,
+		shell.New(4),
+		hostInstanceIdentity{},
+		nil,
+		outputs,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	if !server.client.UsesOutputScheduler(outputs) {
+		t.Fatal("primary facade allocated a second output scheduler")
+	}
+}
+
 func TestPrimaryClosePersistsAndPublishesDiagnosticSnapshotOnce(t *testing.T) {
 	runtime := control.New(control.Options{})
 	defer runtime.Close()

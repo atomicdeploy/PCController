@@ -25,24 +25,25 @@ type Options struct {
 }
 
 type Snapshot struct {
-	Connected         bool
-	Paused            bool
-	Port              ports.Info
-	Hello             native.Hello
-	Status            native.Status
-	Settings          native.Settings
-	HaveStatus        bool
-	HaveSettings      bool
-	StatusUpdated     time.Time
-	ConnectionState   string
-	ConnectionReason  string
-	ConnectionUpdated time.Time
-	FrontPanel        native.FrontPanel
-	HaveFrontPanel    bool
-	FrontPanelUpdated time.Time
-	StatusLED         native.StatusLEDState
-	HaveStatusLED     bool
-	StatusLEDUpdated  time.Time
+	Connected            bool
+	ConnectionGeneration uint64
+	Paused               bool
+	Port                 ports.Info
+	Hello                native.Hello
+	Status               native.Status
+	Settings             native.Settings
+	HaveStatus           bool
+	HaveSettings         bool
+	StatusUpdated        time.Time
+	ConnectionState      string
+	ConnectionReason     string
+	ConnectionUpdated    time.Time
+	FrontPanel           native.FrontPanel
+	HaveFrontPanel       bool
+	FrontPanelUpdated    time.Time
+	StatusLED            native.StatusLEDState
+	HaveStatusLED        bool
+	StatusLEDUpdated     time.Time
 	// StatusLEDEpoch is assigned only by a remote transport. The primary's
 	// runtime snapshot leaves it zero and exposes StatusLEDRevision as the
 	// monotonic source order within that process lifetime.
@@ -442,19 +443,20 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
 	return Snapshot{
-		Connected:         runtime.session != nil,
-		Paused:            runtime.paused,
-		Port:              runtime.port,
-		Hello:             runtime.hello,
-		Status:            runtime.status,
-		Settings:          runtime.settings,
-		HaveStatus:        runtime.haveStatus,
-		HaveSettings:      runtime.haveSettings,
-		StatusUpdated:     runtime.statusUpdated,
-		ConnectionState:   runtime.connectionState,
-		ConnectionReason:  runtime.connectionReason,
-		ConnectionUpdated: runtime.connectionUpdated,
-		FrontPanel:        runtime.frontPanel, HaveFrontPanel: runtime.haveFrontPanel,
+		Connected:            runtime.session != nil,
+		ConnectionGeneration: runtime.generation,
+		Paused:               runtime.paused,
+		Port:                 runtime.port,
+		Hello:                runtime.hello,
+		Status:               runtime.status,
+		Settings:             runtime.settings,
+		HaveStatus:           runtime.haveStatus,
+		HaveSettings:         runtime.haveSettings,
+		StatusUpdated:        runtime.statusUpdated,
+		ConnectionState:      runtime.connectionState,
+		ConnectionReason:     runtime.connectionReason,
+		ConnectionUpdated:    runtime.connectionUpdated,
+		FrontPanel:           runtime.frontPanel, HaveFrontPanel: runtime.haveFrontPanel,
 		FrontPanelUpdated: runtime.frontPanelUpdated,
 		StatusLED:         runtime.statusLED, HaveStatusLED: runtime.haveStatusLED,
 		StatusLEDUpdated: runtime.statusLEDUpdated, StatusLEDRevision: runtime.statusLEDRevision,

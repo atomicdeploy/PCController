@@ -48,3 +48,16 @@ func TestStatusLEDPolicyDoesNotDuplicateDoorAudioEEPROMSetting(t *testing.T) {
 		t.Fatal("host status LED policy must not duplicate the board door-audio setting")
 	}
 }
+
+func TestStatusLEDPolicyAcceptsCanonicalBoardEffectsAndLegacyAlias(t *testing.T) {
+	for _, effect := range []string{"breathe", "flash", "cycle", "transition", "crossfade"} {
+		visual := StatusLEDVisual{
+			Effect: effect, Color: RGBColor{Red: 240, Green: 80, Blue: 20},
+			AlternateColor: RGBColor{Red: 20, Green: 160, Blue: 240},
+			Brightness:     200, MinimumBrightness: 20, PeriodMS: 640,
+		}
+		if err := validateStatusLEDVisual(visual); err != nil {
+			t.Fatalf("%s rejected: %v", effect, err)
+		}
+	}
+}

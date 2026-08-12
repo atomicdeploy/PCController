@@ -29,7 +29,7 @@ func TestRESTAppActionCannotInjectCoordinatorNavigationMetadata(t *testing.T) {
 	broker := hostui.NewActionBroker()
 	actions := broker.Events()
 	handler := websocketMux(context.Background(), &Service{
-		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		Client:    controllerapi.AttachIsolatedRuntime(runtime, shell.New(8)),
 		AppAction: broker.Publish,
 	})
 	spoof := httptest.NewRequest(http.MethodPost, "/api/app/action", strings.NewReader(
@@ -101,7 +101,7 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 	}
 
 	runtime := control.New(control.Options{})
-	client := controllerapi.AttachSharedRuntime(runtime, control.NewCommandEngine(runtime, control.CommandOptions{}))
+	client := controllerapi.AttachIsolatedRuntime(runtime, control.NewCommandEngine(runtime, control.CommandOptions{}))
 	config := appconfig.Defaults()
 	config.Integrations.InboundWebhooksEnabled = true
 	service := &Service{
@@ -218,7 +218,7 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 func TestVersionedRESTPreflightIsRejected(t *testing.T) {
 	runtime := control.New(control.Options{})
 	handler := websocketMux(context.Background(), &Service{
-		Client:         controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		Client:         controllerapi.AttachIsolatedRuntime(runtime, shell.New(8)),
 		AllowedOrigins: []string{"console.example:*"},
 		WebUI:          webui.Handler("/ipc"),
 	})

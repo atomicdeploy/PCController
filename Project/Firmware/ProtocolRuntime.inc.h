@@ -208,17 +208,21 @@ void serviceBuzzerPush() {
                    sizeof(payload));
 }
 
-// Mirrors the physical PWM RGB result after the board compositor has applied
-// local safety priority, cues, brightness, and a host-requested effect.
+// Mirrors the physical PWM RGB result after priority and brightness. A short
+// coalescing interval caps changed-frame UART traffic below 60 Hz without
+// changing the compositor's configured timeline or its latest rendered frame.
 void serviceStatusLedPush() {
   uint8_t payload[6] = {
       statusLeds.renderedRed(), statusLeds.renderedGreen(),
       statusLeds.renderedBlue(), statusLeds.brightness(),
       static_cast<uint8_t>(statusLeds.effect()), statusLeds.condition()};
-  if (memcmp(payload, lastPushedStatusLed, sizeof(payload)) == 0) {
+  const uint16_t tick = static_cast<uint16_t>(now);
+  if (memcmp(payload, lastPushedStatusLed, sizeof(payload)) == 0 ||
+      static_cast<uint16_t>(tick - lastStatusLedPushAt) < 17U) {
     return;
   }
   memcpy(lastPushedStatusLed, payload, sizeof(payload));
+  lastStatusLedPushAt = tick;
   appProtocol.send(ControllerProtocol::StatusLedChanged, 0, payload,
                    sizeof(payload));
 }
@@ -543,8 +547,10 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         goto badPayload;
       }
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
-      statusLeds.setBrightness(payload[3]);
-      statusLeds.setCustom(payload[0], payload[1], payload[2]);
+      // STATUS_RGB atomically replaces the retained board-owned presentation
+      // with the explicit host preview/fallback frame.
+      statusLeds.setCustom(payload[0], payload[1], payload[2], payload[3],
+                           frameNow);
       goto acknowledged;
 
     case StatusEffect:
@@ -555,13 +561,13 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         statusLeds.cancelEffect();
         goto acknowledged;
       }
-      if (length < 12 || payload[0] == 0 || payload[0] > 4 ||
-          !statusLeds.setEffect(
-              static_cast<StatusLedEffect>(payload[0]), payload[1], payload[2],
-              payload[3], payload[4], payload[5], payload[6], payload[7],
-              payload[8], readU16(payload + 9), payload[11], frameNow)) {
+      if (length != 12 || !statusLeds.setEffect(payload, frameNow)) {
         goto badPayload;
       }
+      // STATUS_EFFECT transfers ownership to the MCU compositor. setEffect
+      // is descriptor-idempotent, so preview refresh traffic cannot reset its
+      // phase; serviceStatusLedPush returns the latest changed rendered frame
+      // at a bounded transport cadence.
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
       goto acknowledged;
 
@@ -579,7 +585,7 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
     }
 
     case StatusProfileSet:
-      if (length < 1 + StatusLedController::ProfilePayloadBytes ||
+      if (length != 1 + StatusLedController::ProfilePayloadBytes ||
           !statusLeds.setProfile(payload[0], payload + 1, frameNow)) {
         goto badPayload;
       }
@@ -596,8 +602,6 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       } else {
         hostLcdFlags |= HOST_PROGRAM_RUNNING;
       }
-      hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
-      statusLeds.cancelEffect();
       goto acknowledged;
 
     case PwmGet:

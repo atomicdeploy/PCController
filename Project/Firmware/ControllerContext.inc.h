@@ -145,6 +145,7 @@ uint8_t lastPushedSegments[4] = {};
 uint8_t lastPushedSegmentBrightness = 0;
 uint8_t lastPushedBuzzerRevision = 0;
 uint8_t lastPushedStatusLed[6] = {};
+uint16_t lastStatusLedPushAt = 0;
 
 // Host-captured panel text, LCD fallback metadata, and cooperative I2C lease.
 bool hostSegmentTextActive = false;

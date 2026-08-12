@@ -9,6 +9,7 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/native"
 )
 
 const (
@@ -32,6 +33,9 @@ type statusLEDFrame struct {
 type statusLEDTarget interface {
 	SetStatusRGBBase(context.Context, byte, byte, byte, byte) error
 	SetStatusRGB(context.Context, byte, byte, byte, byte) error
+	ClearStatusRGBBase()
+	OutputState() controller.OutputStreamState
+	ReleaseStatusLEDEffect(context.Context) error
 }
 
 // statusLEDArbiter owns only the host policy layer. Explicit streamed effects
@@ -49,6 +53,7 @@ type statusLEDArbiter struct {
 	snapshot     controller.Snapshot
 	rfUntil      time.Time
 	macroActive  bool
+	wasEnabled   bool
 	doorKnown    bool
 	doorOpen     bool
 	doorCueOpen  bool
@@ -64,6 +69,7 @@ func newStatusLEDArbiter(
 	return &statusLEDArbiter{
 		ctx: ctx, target: target, onState: onState, onError: onError,
 		policy: appconfig.DefaultStatusLEDPolicy(), wake: make(chan struct{}, 1),
+		wasEnabled: true,
 	}
 }
 
@@ -78,6 +84,12 @@ func (arbiter *statusLEDArbiter) Observe(
 	arbiter.mu.Lock()
 	arbiter.policy = policy
 	arbiter.snapshot = snapshot
+	if !policy.Enabled {
+		arbiter.rfUntil = time.Time{}
+		arbiter.macroActive = false
+		arbiter.doorKnown = false
+		arbiter.doorCueUntil = time.Time{}
+	}
 	if snapshot.Connected && snapshot.HaveStatus {
 		changed := arbiter.doorKnown && arbiter.doorOpen != snapshot.Status.DoorOpen
 		if changed || event.Kind == "door" {
@@ -111,16 +123,47 @@ func (arbiter *statusLEDArbiter) Observe(
 	}
 }
 
-// PrepareDisconnect makes a planned loss immediately visible. Unexpected USB
-// loss is covered by the MCU's independently timed red offline fallback.
+// PrepareDisconnect releases only an explicit native preview/effect owner.
+// Native lifecycle boards receive no STATUS_RGB: firmware owns their planned
+// and unexpected offline presentation. Legacy boards receive one deterministic
+// offline fallback frame while the transport is still available.
 func (arbiter *statusLEDArbiter) PrepareDisconnect(ctx context.Context) error {
 	arbiter.mu.Lock()
-	visual := arbiter.policy.PCOffline
+	policy, snapshot := arbiter.policy, arbiter.snapshot
+	arbiter.resetConnectionStateLocked()
 	arbiter.mu.Unlock()
-	frame := statusLEDVisualFrame(visual, 0)
+	arbiter.target.ClearStatusRGBBase()
+	if nativeStatusLEDLifecycle(snapshot) {
+		return arbiter.releaseExplicitNativeOwner(ctx)
+	}
+	frame := statusLEDVisualFrame(policy.PCOffline, 0)
 	return arbiter.target.SetStatusRGB(
 		ctx, frame.red, frame.green, frame.blue, frame.brightness,
 	)
+}
+
+func (arbiter *statusLEDArbiter) resetConnectionStateLocked() {
+	arbiter.snapshot = controller.Snapshot{}
+	arbiter.rfUntil = time.Time{}
+	arbiter.macroActive = false
+	arbiter.doorKnown = false
+	arbiter.doorOpen = false
+	arbiter.doorCueOpen = false
+	arbiter.doorCueUntil = time.Time{}
+}
+
+func (arbiter *statusLEDArbiter) releaseExplicitNativeOwner(ctx context.Context) error {
+	switch arbiter.target.OutputState().StatusOwner {
+	case "board-preview", "board-effect":
+		return arbiter.target.ReleaseStatusLEDEffect(ctx)
+	default:
+		return nil
+	}
+}
+
+func nativeStatusLEDLifecycle(snapshot controller.Snapshot) bool {
+	want := uint32(native.CapabilityStatusEffects | native.CapabilityStatusProfiles)
+	return snapshot.Connected && snapshot.Hello.Capabilities&want == want
 }
 
 func (arbiter *statusLEDArbiter) Run() {
@@ -129,7 +172,7 @@ func (arbiter *statusLEDArbiter) Run() {
 	var state string
 	var stateStarted, transitionStarted time.Time
 	var current, transitionFrom, lastSent statusLEDFrame
-	var haveCurrent, haveLastSent, suppressed bool
+	var haveCurrent, haveLastSent, suppressed, nativeOwned, wasConnected bool
 	var macroOverlayPreempted bool
 	var lastErrorAt time.Time
 
@@ -144,6 +187,21 @@ func (arbiter *statusLEDArbiter) Run() {
 		now := time.Now()
 		policy, snapshot, rfUntil, doorCueUntil, doorCueOpen, macroActive :=
 			arbiter.currentObservation()
+		boardOwned := nativeStatusLEDLifecycle(snapshot)
+		if snapshot.Connected != wasConnected {
+			wasConnected = snapshot.Connected
+			haveCurrent = false
+			haveLastSent = false
+			suppressed = true
+			arbiter.target.ClearStatusRGBBase()
+		}
+		if boardOwned != nativeOwned {
+			nativeOwned = boardOwned
+			haveCurrent = false
+			haveLastSent = false
+			suppressed = true
+			arbiter.target.ClearStatusRGBBase()
+		}
 		nextState, visual := selectStatusLEDState(
 			policy, snapshot, rfUntil, doorCueUntil, doorCueOpen, now,
 		)
@@ -164,6 +222,24 @@ func (arbiter *statusLEDArbiter) Run() {
 			}
 		}
 
+		if !policy.Enabled {
+			if arbiter.wasEnabled {
+				arbiter.target.ClearStatusRGBBase()
+			}
+			arbiter.wasEnabled = false
+			haveCurrent = false
+			haveLastSent = false
+			suppressed = true
+			resetStatusLEDTimer(timer, policy.StepMS)
+			continue
+		}
+		arbiter.wasEnabled = true
+		if boardOwned {
+			// Effects+Profiles is the complete lifecycle contract. Firmware owns
+			// normal, safety, door, and offline states; host policy never steals it.
+			resetStatusLEDTimer(timer, policy.StepMS)
+			continue
+		}
 		if !connected {
 			// Track the expected firmware fallback color so reconnect easing starts
 			// from red instead of an unrelated pre-disconnect host frame.
@@ -294,37 +370,72 @@ func statusLEDVisualFrame(
 	elapsed time.Duration,
 ) statusLEDFrame {
 	effect := strings.ToLower(strings.TrimSpace(visual.Effect))
-	phase := 0.0
-	if visual.PeriodMS > 0 {
-		period := time.Duration(visual.PeriodMS) * time.Millisecond
-		phase = math.Mod(float64(elapsed), float64(period)) / float64(period)
-	}
+	phase := statusLEDEffectPhase(visual.PeriodMS, elapsed)
 	color := visual.Color
 	brightness := visual.Brightness
 	switch effect {
 	case "flash":
-		if phase >= 0.5 {
-			if visual.AlternateColor != (appconfig.RGBColor{}) {
-				color = visual.AlternateColor
-			} else {
-				brightness = visual.MinimumBrightness
-			}
+		if phase >= 128 {
+			color = visual.AlternateColor
 		}
 	case "breathe":
-		wave := 0.5 - 0.5*math.Cos(phase*2*math.Pi)
-		brightness = interpolateByte(
-			visual.MinimumBrightness, visual.Brightness, wave,
+		triangle := statusLEDTriangle(phase)
+		brightness = visual.MinimumBrightness + statusLEDScale(
+			visual.Brightness-visual.MinimumBrightness, triangle,
 		)
-		if visual.AlternateColor != (appconfig.RGBColor{}) {
-			color = interpolateRGB(visual.Color, visual.AlternateColor, wave)
-		}
-	case "crossfade":
-		wave := 0.5 - 0.5*math.Cos(phase*2*math.Pi)
-		color = interpolateRGB(visual.Color, visual.AlternateColor, wave)
+	case "cycle", "crossfade":
+		color = interpolateStatusLEDRGB(
+			visual.Color, visual.AlternateColor, statusLEDTriangle(phase),
+		)
+	case "transition":
+		color = interpolateStatusLEDRGB(visual.Color, visual.AlternateColor, phase)
 	}
 	return statusLEDFrame{
 		red: color.Red, green: color.Green, blue: color.Blue,
 		brightness: brightness,
+	}
+}
+
+// statusLEDEffectPhase reproduces the AVR compositor's 64 discrete phases.
+func statusLEDEffectPhase(periodMS int, elapsed time.Duration) byte {
+	if periodMS <= 0 || elapsed <= 0 {
+		return 0
+	}
+	period := time.Duration(periodMS) * time.Millisecond
+	withinMS := int((elapsed % period) / time.Millisecond)
+	step := 0
+	for next := 1; next < 64; next++ {
+		if withinMS < (next*periodMS)/64 {
+			break
+		}
+		step = next
+	}
+	return byte(step * 4)
+}
+
+func statusLEDTriangle(phase byte) byte {
+	if phase < 128 {
+		return phase << 1
+	}
+	return (255 - phase) << 1
+}
+
+func statusLEDScale(value, level byte) byte {
+	return byte((uint16(value) * (uint16(level) + 1)) >> 8)
+}
+
+func interpolateStatusLEDByte(from, to, phase byte) byte {
+	if to >= from {
+		return from + byte((uint16(to-from)*uint16(phase))/256)
+	}
+	return from - byte((uint16(from-to)*uint16(phase))/256)
+}
+
+func interpolateStatusLEDRGB(from, to appconfig.RGBColor, phase byte) appconfig.RGBColor {
+	return appconfig.RGBColor{
+		Red:   interpolateStatusLEDByte(from.Red, to.Red, phase),
+		Green: interpolateStatusLEDByte(from.Green, to.Green, phase),
+		Blue:  interpolateStatusLEDByte(from.Blue, to.Blue, phase),
 	}
 }
 

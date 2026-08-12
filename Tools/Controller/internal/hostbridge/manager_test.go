@@ -66,7 +66,7 @@ func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	client := controller.AttachSharedRuntime(runtime, engine)
+	client := controller.AttachIsolatedRuntime(runtime, engine)
 	ctx, cancel := context.WithCancel(context.Background())
 	manager, err := Start(ctx, client, store, nil)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestCascadedBridgeCallUsesExplicitAlphaAuthorizationMode(t *testing.T) {
 			t.Fatal(err)
 		}
 		return &Manager{
-			client: controller.AttachSharedRuntime(control.New(control.Options{}), shell.New(8)),
+			client: controller.AttachIsolatedRuntime(control.New(control.Options{}), shell.New(8)),
 			store:  store, peers: make(map[string]*peerState),
 		}
 	}
@@ -407,7 +407,7 @@ func TestRelayDuplicateCannotRepeatTextMappingSideEffect(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	client := controller.AttachSharedRuntime(control.New(control.Options{}), engine)
+	client := controller.AttachIsolatedRuntime(control.New(control.Options{}), engine)
 	ctx, cancel := context.WithCancel(context.Background())
 	manager, err := Start(ctx, client, store, nil)
 	if err != nil {
@@ -611,7 +611,7 @@ func TestOutboundBridgeCanCallRemoteJSONRPCService(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := control.New(control.Options{})
-	client := controller.AttachSharedRuntime(runtime, shell.New(8))
+	client := controller.AttachIsolatedRuntime(runtime, shell.New(8))
 	ctx, cancel := context.WithCancel(context.Background())
 	manager, err := Start(ctx, client, store, nil)
 	if err != nil {
@@ -689,7 +689,7 @@ func TestOutboundWebhooksSupportConfiguredHTTPMethods(t *testing.T) {
 	}))
 	defer server.Close()
 	runtime := control.New(control.Options{})
-	client := controller.AttachSharedRuntime(runtime, shell.New(8))
+	client := controller.AttachIsolatedRuntime(runtime, shell.New(8))
 	manager := &Manager{ctx: context.Background(), client: client}
 	event := controller.Event{ID: 7, Kind: "door", Text: "opened", Source: "board"}
 	for _, method := range []string{
