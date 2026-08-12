@@ -9,7 +9,8 @@ front-panel updates to every UI surface.
 ## Live and stale state
 
 - A `LIVE` badge with its Wi-Fi icon means a status sample arrived less than
-  one second ago. While it is live, the manual Refresh button is hidden.
+  one second ago **and** the event socket is open. While it is live, the
+  manual Refresh button is hidden.
 - A connected but older stream is visibly `STALE`; Refresh is then available.
 - On transport loss the host clears board-derived values before rendering, so
   relays, EEPROM values, front-panel segments, and telemetry never masquerade
@@ -37,11 +38,15 @@ The hero menu offers open, close, reconnect, and USB-device discovery actions.
 Its output is sent through the normal command route; it does not bypass the
 host's single connection owner.
 
-Relay toggles use that same canonical command path. Toasts for relay changes
+Relay toggles use that same canonical command path; each cell is a labelled
+button whose immediate hover/focus cue describes the next on/off action. Toasts for relay changes
 are intentionally limited to physical-front-panel and RF sources. WebUI,
 macro, and automation actions already have their initiating feedback and do
-not produce duplicate notifications. Fault and door safety notifications remain
-visible regardless of origin.
+not produce duplicate notifications. Parsed `HELLO` and `STATUS` transport
+traffic is never surfaced as a toast. Fault and door safety notifications remain
+visible regardless of origin. Device and firmware values use live board
+identity when it is available, otherwise they say what is pending rather than
+rendering a placeholder.
 
 The overview collects connection freshness, LCD address, buzzer/silent state,
 and event-driven seven-segment state alongside board identity and diagnostics.

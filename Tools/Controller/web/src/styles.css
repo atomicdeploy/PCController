@@ -479,9 +479,10 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr); gap: 14px; align-items: start; }
 .outputs-card { grid-row: span 2; }
 .output-matrix { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.output-cell { position: relative; min-height: 84px; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-muted); cursor: pointer; overflow: hidden; transition: border-color .3s, background .3s, box-shadow .3s; }
+.output-cell { position: relative; min-height: 84px; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 13px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-muted); cursor: pointer; overflow: hidden; transition: border-color .08s, background .08s, box-shadow .08s, translate .08s; }
 .output-cell::before { content: ""; position: absolute; inset: 0; background: linear-gradient(120deg, transparent, var(--green-soft), transparent); translate: -110% 0; transition: translate .58s var(--ease-out); }
-.output-cell:hover:not(:disabled)::before { translate: 110% 0; }
+.output-cell:hover:not(:disabled), .output-cell:focus-visible { border-color: color-mix(in srgb, var(--green) 52%, var(--line)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 18%, transparent); translate: 0 -1px; outline: none; }
+.output-cell:hover:not(:disabled)::before { translate: 110% 0; transition-duration: .12s; }
 .output-cell:disabled { opacity: .4; cursor: not-allowed; }
 .output-cell span { color: var(--text-muted); font: 600 10px var(--font-mono); }
 .output-cell strong { font-size: 12px; }
