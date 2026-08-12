@@ -145,7 +145,7 @@ jobs:
             const lock = JSON.parse(fs.readFileSync("Tools/Dependencies/resolved-tools-lock.json", "utf8"));
             const asset = lock.upx.assets.find(value => value.name.endsWith("-win64.zip"));
             if (!asset || !/^https:\/\//.test(asset.url) || !/^[0-9a-f]{64}$/.test(asset.sha256)) process.exit(1);
-            process.stdout.write(`${asset.url} ${asset.sha256}`);
+            process.stdout.write(asset.url + " " + asset.sha256);
           ')"
           read -r upx_url upx_sha <<< "$upx_record"
           mkdir -p "$RUNNER_TEMP/pccontroller-upx"
