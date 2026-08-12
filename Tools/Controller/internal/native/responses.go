@@ -13,6 +13,7 @@ const (
 	BoardKindPCController byte = 1
 	SettingsShape         byte = 3
 	IdentitySchemaCompact byte = 3
+	IdentitySchemaLegacy  byte = 4
 	RFEntriesSchema       byte = 1
 	MenuListSchema        byte = 1
 	TemperatureSchema     byte = 1
@@ -337,7 +338,7 @@ func ParseHello(payload []byte) (Hello, error) {
 	if len(payload) != 14 && len(payload) != 16 {
 		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14 (or legacy 16)", len(payload))
 	}
-	if payload[0] != IdentitySchemaCompact {
+	if payload[0] != IdentitySchemaCompact && !(len(payload) == 16 && payload[0] == IdentitySchemaLegacy) {
 		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
 	}
 	if len(payload) == 16 && (payload[14] != 0 || payload[15] != 0) {
@@ -347,7 +348,7 @@ func ParseHello(payload []byte) (Hello, error) {
 		BoardKind:      payload[1],
 		Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
 		Name:           "PCController",
-		IdentitySchema: IdentitySchemaCompact,
+		IdentitySchema: payload[0],
 		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
 		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
 	}
