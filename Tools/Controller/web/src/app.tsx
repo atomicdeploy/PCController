@@ -87,6 +87,7 @@ import type {
 } from './types'
 import { applyPushedOutputEvent, isPushedOutputEvent } from './status-led-event'
 import { shouldToastControllerEvent } from './event-notification-policy'
+import { isMacroControllerEvent, prependMacroControllerEvent } from './macro-live'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
@@ -375,6 +376,7 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>(demo ? demoSnapshot() : emptySnapshot)
   const [samples, setSamples] = useState<MetricSample[]>(() => demo ? Array.from({ length: 48 }, (_, index) => sampleFrom(demoSnapshot(Date.now() - (47 - index) * 1000), Date.now() - (47 - index) * 1000)) : [])
   const [events, setEvents] = useState<ControllerEvent[]>(() => demo ? Array.from({ length: 12 }, (_, index) => demoEvent(index + 1)) : [])
+  const [macroEvents, setMacroEvents] = useState<ControllerEvent[]>([])
   const [boardSettingsReadState, setBoardSettingsReadState] = useState<BoardSettingsReadState>(demo ? 'ready' : 'idle')
   const [uiConfig, setUIConfig] = useState<UIConfig | null>(null)
   const [streamState, setStreamState] = useState<'connecting' | 'open' | 'waiting' | 'closed'>(demo ? 'open' : 'connecting')
@@ -592,6 +594,9 @@ export default function App() {
       }
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
+        if (isMacroControllerEvent(event)) {
+          setMacroEvents((current) => prependMacroControllerEvent(current, event))
+        }
         if (isPushedOutputEvent(event)) setSnapshot((current) => {
           const next = applyPushedOutputEvent(current, event)
           if (event.kind.trim().toLowerCase() === 'relay.state' && event.metadata?.optimistic === 'true') {
@@ -1175,6 +1180,7 @@ export default function App() {
         }
         if (eventHistory.status === 'fulfilled') {
           setEvents(significantControllerEvents(eventHistory.value).slice(-500).reverse())
+          setMacroEvents(eventHistory.value.filter(isMacroControllerEvent).slice(-80).reverse())
         }
         setBootTarget(92)
         if (firstSetup && value.connected && config.welcome_melody?.trim()) {
@@ -1203,6 +1209,8 @@ export default function App() {
           },
           event: (event) => {
 			const eventKind = event.kind.toLowerCase()
+            const macroEvent = isMacroControllerEvent(event)
+            if (macroEvent) setMacroEvents((current) => prependMacroControllerEvent(current, event))
             if (isPushedOutputEvent(event)) {
 				setSnapshot((current) => applyPushedOutputEvent(current, event))
 			}
@@ -1215,7 +1223,7 @@ export default function App() {
             if (significant) {
               setEvents((current) => prependSignificantControllerEvent(current, event))
             }
-            if (significant || isPushedOutputEvent(event)) tabChannelRef.current?.publishControllerEvent(event)
+            if (significant || isPushedOutputEvent(event) || macroEvent) tabChannelRef.current?.publishControllerEvent(event)
             if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
@@ -1269,7 +1277,7 @@ export default function App() {
   }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance])
 
   const shared: SharedViewProps = {
-    appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, relayToggle, relayPending, refresh, openDialog,
+    appTitle: productTitle, snapshot, samples, events, macroEvents, locale: appearance.locale, t, command: runCommand, relayToggle, relayPending, refresh, openDialog,
     boardSettingsReadState,
     transport: { streamState, tabBusSupported, tabPeers },
     relayedTerminal,

@@ -12,7 +12,6 @@ import {
   BookOpen,
   Cable,
   ChevronDown,
-  CircleDot,
   CircleStop,
   Cpu,
   Database,
@@ -27,7 +26,6 @@ import {
   LayoutDashboard,
   LayoutPanelTop,
   List,
-  ListChecks,
   ListTree,
   MemoryStick,
   MessageSquareText,
@@ -211,11 +209,6 @@ export function AdvancedWorkbench({
   const [rfValue, setRFValue] = useState('1')
   const [rfBehavior, setRFBehavior] = useState('press')
 
-  const [macroRef, setMacroRef] = useState('')
-  const [macroName, setMacroName] = useState('')
-  const [macroCategory, setMacroCategory] = useState('Web')
-  const [macroColor, setMacroColor] = useState<'red' | 'blue' | 'violet' | 'green' | 'white'>('red')
-
   const [i2cAddress, setI2CAddress] = useState('0x27')
   const [i2cLease, setI2CLease] = useState(2)
   const [i2cReadCount, setI2CReadCount] = useState(4)
@@ -393,19 +386,6 @@ export function AdvancedWorkbench({
   const i2cBytes = normalizeTokens(i2cWrite)
   const i2cCommand = `i2c transfer ${i2cAddress.trim() || '0x27'} ${i2cLease} ${i2cReadCount}${i2cBytes ? ` ${i2cBytes}` : ''}`
   const hostMenuLabelUpdate = hostMenuLabelCommand(hostMenuID, hostMenuLabel)
-  const macroRecordCommand = [
-    'macro record start',
-    quoteArgument(macroName.trim()),
-    ...(macroCategory.trim() ? [quoteArgument(macroCategory.trim())] : []),
-    ...(macroColor.trim() ? [quoteArgument(macroColor.trim())] : []),
-  ].join(' ')
-  const macroUpdateCommand = [
-    'macro update',
-    quoteArgument(macroRef.trim()),
-    quoteArgument(macroName.trim()),
-    quoteArgument(macroCategory.trim() || '-'),
-    quoteArgument(macroColor.trim() || '-'),
-  ].join(' ')
   const messageByteLength = new TextEncoder().encode(messageText.trim()).byteLength
   const lcdMessageValid = Boolean(messageLine1 || messageLine2) &&
     messageLine1.length <= 16 && messageLine2.length <= 16 &&
@@ -655,53 +635,6 @@ export function AdvancedWorkbench({
           )}
           <div className="advanced-command-inline" dir="ltr"><code>{rfMapCommand}</code></div>
           <Button icon={ShieldAlert} disabled={!rfID.trim()} onClick={() => prepare(rfMapCommand, copy('RF mappings affect physical outputs and must match the registered action schema.', 'نگاشت RF بر خروجی فیزیکی اثر می‌گذارد و باید دقیقاً با ساختار فرمان سازگار باشد.'), 'caution', true)}>{copy('Review mapping', 'بازبینی نگاشت')}</Button>
-        </AdvancedPanel>
-
-        <AdvancedPanel
-          icon={Workflow}
-          eyebrow={copy('MCU-TIMED', 'زمان‌بندی‌شده روی MCU')}
-          title={copy('Macro inspection & recording', 'بررسی و ضبط ماکرو')}
-          detail={copy('Inspect compiled timing; record exact host, front-panel, and RF action deltas; then name, categorize, save, or discard deliberately.', 'زمان‌بندی کامپایل‌شده را ببینید؛ اختلاف زمانی دقیق کنش‌های میزبان، پنل و RF را ضبط و سپس آگاهانه نام‌گذاری، دسته‌بندی، ذخیره یا دور بریزید.')}
-        >
-          <div className="advanced-actions">
-            <Button icon={List} busy={busy === 'macro list'} onClick={() => void run('macro list')}>{copy('List', 'فهرست')}</Button>
-            <Button icon={Play} busy={busy === 'macro status'} onClick={() => void run('macro status')}>{copy('Playback status', 'وضعیت اجرا')}</Button>
-            <Button icon={CircleDot} busy={busy === 'macro record status'} onClick={() => void run('macro record status')}>{copy('Recording status', 'وضعیت ضبط')}</Button>
-          </div>
-          <div className="advanced-fields">
-            <TextField
-              label={copy('Macro name or ID', 'نام یا شناسه ماکرو')}
-              value={macroRef}
-              dir="ltr"
-              spellCheck={false}
-              onChange={(event) => setMacroRef(event.target.value)}
-              action={<Button icon={ListChecks} disabled={!macroRef.trim()} busy={busy === `macro show ${quoteArgument(macroRef.trim())}`} onClick={() => void run(`macro show ${quoteArgument(macroRef.trim())}`)}>{copy('Inspect exact steps', 'بررسی گام‌های دقیق')}</Button>}
-            />
-          </div>
-          <div className="advanced-fields advanced-fields--record">
-            <TextField label={copy('New or updated name', 'نام جدید یا ویرایش‌شده')} value={macroName} dir="ltr" spellCheck={false} onChange={(event) => setMacroName(event.target.value)} />
-            <TextField label={copy('Category', 'دسته‌بندی')} value={macroCategory} dir="ltr" spellCheck={false} onChange={(event) => setMacroCategory(event.target.value)} />
-            <div className="advanced-field">
-              <label>{copy('Color', 'رنگ')}</label>
-              <Segmented value={macroColor} label={copy('Macro color', 'رنگ ماکرو')} options={[
-                { value: 'red', label: copy('Red', 'قرمز') },
-                { value: 'blue', label: copy('Blue', 'آبی') },
-                { value: 'violet', label: copy('Violet', 'بنفش') },
-                { value: 'green', label: copy('Green', 'سبز') },
-                { value: 'white', label: copy('White', 'سفید') },
-              ]} onChange={setMacroColor} />
-            </div>
-            <Button tone="primary" icon={CircleDot} disabled={!online || !macroName.trim() || (!!macroColor.trim() && !macroCategory.trim())} busy={busy === macroRecordCommand} onClick={() => void run(macroRecordCommand)}>{copy('Start recording', 'شروع ضبط')}</Button>
-            <Button icon={Save} disabled={!macroRef.trim() || !macroName.trim()} busy={busy === macroUpdateCommand} onClick={() => void run(macroUpdateCommand)}>{copy('Save name/category', 'ذخیره نام/دسته')}</Button>
-          </div>
-          <div className="advanced-actions">
-            <Button icon={Save} busy={busy === 'macro record save'} onClick={() => void run('macro record save')}>{copy('Save recording', 'ذخیره ضبط')}</Button>
-            <Button icon={Trash2} busy={busy === 'macro record discard'} onClick={() => void run('macro record discard')}>{copy('Discard recording', 'حذف ضبط')}</Button>
-            <Button tone="primary" icon={Play} disabled={!online || !macroRef.trim()} busy={busy === `macro play ${quoteArgument(macroRef.trim())}`} onClick={() => void run(`macro play ${quoteArgument(macroRef.trim())}`)}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
-            <Button icon={CircleStop} disabled={!online} busy={busy === 'macro cancel'} onClick={() => void run('macro cancel')}>{copy('Cancel safely', 'لغو امن')}</Button>
-            <Button tone="danger" icon={ShieldAlert} disabled={!online} onClick={() => prepare('macro cancel keep', copy('Cancelling with keep deliberately leaves current physical outputs unchanged.', 'لغو با حفظ خروجی، وضعیت فعلی خروجی‌های فیزیکی را عمداً نگه می‌دارد.'), 'danger', true)}>{copy('Prepare cancel + keep', 'آماده‌سازی لغو با حفظ خروجی')}</Button>
-            <Button tone="danger" icon={Trash2} disabled={!macroRef.trim()} onClick={() => prepare(`macro delete ${quoteArgument(macroRef.trim())}`, copy('This permanently removes the selected macro from host configuration.', 'این فرمان ماکروی انتخاب‌شده را برای همیشه از پیکربندی میزبان حذف می‌کند.'), 'danger', true)}>{copy('Prepare deletion', 'آماده‌سازی حذف')}</Button>
-          </div>
         </AdvancedPanel>
 
         <AdvancedPanel

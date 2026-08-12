@@ -143,6 +143,7 @@ export interface SharedViewProps {
   snapshot: Snapshot
   samples: MetricSample[]
   events: ControllerEvent[]
+  macroEvents: ControllerEvent[]
   locale: Locale
   t: (key: MessageKey) => string
   command: (command: string, success?: string) => Promise<string>
