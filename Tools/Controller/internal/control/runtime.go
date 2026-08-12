@@ -921,7 +921,7 @@ func (runtime *Runtime) publishAcknowledgedOperationState(
 		if len(payload) != 3 || payload[0] > 15 {
 			break
 		}
-		value := uint16(payload[1]) | uint16(payload[2])<<8
+		value := uint32(payload[1]) | uint32(payload[2])<<8
 		kind, state = "pwm.changed", strconv.Itoa(int(value))
 		text = fmt.Sprintf("PWM channel %d set to %d", payload[0], value)
 		metadata["channel"] = strconv.Itoa(int(payload[0]))
