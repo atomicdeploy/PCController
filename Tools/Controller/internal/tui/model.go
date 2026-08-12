@@ -1652,11 +1652,11 @@ func (model Model) statusInterval() time.Duration {
 			interval = 125 * time.Millisecond
 		}
 	}
-	// Remote activity events remain push-driven. The snapshot poll is only a
-	// convergence/backstop path, so rendering and making an authenticated RPC
-	// eight times per second adds load without improving control latency.
-	if model.remote != nil && interval < time.Second {
-		interval = time.Second
+	// Remote activity events remain push-driven, but the snapshot also anchors
+	// measured-state freshness. Four samples per second keeps Live Measurements
+	// instantaneous without the high CPU/serial load of an unbounded render loop.
+	if model.remote != nil && interval < 250*time.Millisecond {
+		interval = 250 * time.Millisecond
 	}
 	return interval
 }
