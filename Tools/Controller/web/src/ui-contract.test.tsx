@@ -5,6 +5,7 @@ import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } f
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
+import { WorkbenchView } from './workbench'
 import {
   ControlsView,
   DashboardView,
@@ -58,6 +59,23 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('PWM matrix')
     expect(markup).not.toContain('Relays &amp; motion')
     expect(markup).not.toContain('Status lighting')
+  })
+
+  it('exposes the complete display presentation policy on a connected controller', () => {
+    const connected = {
+      ...emptySnapshot,
+      connected: true,
+      connection_state: 'connected',
+    }
+    const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
+    expect(markup).toContain('TM1637 + LCD')
+    expect(markup).toContain('Display target')
+    expect(markup).toContain('Marquee step speed')
+    expect(markup).toContain('Visible duration')
+    expect(markup).toContain('Repeat policy')
+    expect(markup).toContain('Force marquee')
+    expect(markup).toContain('Overflow scrolls automatically')
+    expect(markup).toContain('Show text')
   })
 
   it('renders only user PWM channels in the generic mixer and keeps system channels role-specific', () => {
