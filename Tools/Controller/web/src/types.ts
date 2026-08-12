@@ -126,6 +126,29 @@ export interface FrontPanelState {
   host_editable_value: number
 }
 
+export interface MenuPageInfo {
+  id: number
+  key: string
+  label: string
+  name: string
+  description: string
+}
+
+export interface MenuLayout {
+  visible_mask: number
+  order: number[]
+}
+
+export interface MenuCatalog {
+  source: string
+  live_list: boolean
+  firmware_hash: number
+  current_page: number
+  program_mode: number
+  pages: MenuPageInfo[]
+  layout: MenuLayout
+}
+
 export interface StatusLEDState {
   red: number
   green: number
@@ -450,7 +473,7 @@ export interface LocalDeviceSnapshot {
   power?: 'ON' | 'OFF' | 'UNKNOWN'
   phase?: string
   http_reachable?: boolean
-  websocket_online?: boolean
+  events_online?: boolean
   updated_at?: string
   last_error?: string
   last_event?: string

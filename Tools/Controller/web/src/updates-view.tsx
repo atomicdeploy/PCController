@@ -26,6 +26,7 @@ import {
 import { Button, Card, DataRow, EmptyState, SectionTitle, StatusBadge, TextField } from './components'
 import { formatClock } from './i18n'
 import { ReleaseDiscovery } from './release-discovery'
+import type { ControllerEvent } from './types'
 import type { SharedViewProps } from './views'
 import {
   captureDeviceArtifacts,
@@ -33,7 +34,6 @@ import {
   downloadArtifact,
   fetchRemoteArtifact,
   getArtifactManifest,
-  getUpdateStatus,
   listArtifacts,
   sha256File,
   startEEPROMUpdate,
@@ -88,7 +88,44 @@ export function artifactUpdateAvailable(connected: boolean, kind: ArtifactKind):
   return kind === 'host-executable' || connected
 }
 
-export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: SharedViewProps) {
+const updateStates = new Set<UpdateStatus['state']>(['queued', 'downloading', 'downloaded', 'reading', 'backing-up', 'programming', 'staging', 'staged', 'verifying', 'completed', 'failed'])
+const updateKinds = new Set<UpdateStatus['kind']>(['artifact-upload', 'artifact-fetch', 'device-capture', 'firmware', 'flash-restore', 'eeprom', 'host'])
+
+export function updateStatusFromEvent(current: UpdateStatus | null, event: ControllerEvent): UpdateStatus | null {
+  const kind = event.kind.trim().toLowerCase()
+  if (!kind.startsWith('update.')) return current
+  const state = kind.slice('update.'.length) as UpdateStatus['state']
+  const operationID = event.metadata?.operation_id?.trim() || current?.id
+  const operationKind = (event.metadata?.kind?.trim() || current?.kind) as UpdateStatus['kind'] | undefined
+  if (!operationID || !operationKind || !updateStates.has(state) || !updateKinds.has(operationKind)) return current
+  const progress = Number.parseInt(event.metadata?.progress_percent ?? '', 10)
+  return {
+    ...(current ?? {} as UpdateStatus),
+    id: operationID,
+    kind: operationKind,
+    state,
+    progress_percent: Number.isFinite(progress) ? Math.min(100, Math.max(0, progress)) : current?.progress_percent ?? 0,
+    updated_at: event.time,
+    detail: event.text || current?.detail,
+    ...(event.metadata?.sha256 ? { artifact_sha256: event.metadata.sha256 } : {}),
+    ...(event.metadata?.error_code ? { error_code: event.metadata.error_code } : {}),
+    ...(event.metadata?.programming_method ? { programming_method: event.metadata.programming_method as UpdateStatus['programming_method'] } : {}),
+    ...(event.metadata?.bootloader_outcome ? { bootloader_outcome: event.metadata.bootloader_outcome as UpdateStatus['bootloader_outcome'] } : {}),
+    ...(event.metadata?.isp_fallback_suggested ? { isp_fallback_suggested: event.metadata.isp_fallback_suggested === 'true' } : {}),
+  }
+}
+
+export function updateStateIsFresh(
+  streamState: SharedViewProps['transport']['streamState'],
+  updatedAt: string,
+  now = Date.now(),
+): boolean {
+  if (streamState !== 'open' || !updatedAt) return false
+  const updated = new Date(updatedAt).getTime()
+  return Number.isFinite(updated) && Math.max(0, now - updated) < 1000
+}
+
+export function UpdatesView({ appTitle, snapshot, events, locale, openDialog, transport }: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const [manifest, setManifest] = useState<ArtifactManifest | null>(null)
   const [artifacts, setArtifacts] = useState<ArtifactDescriptor[]>([])
@@ -106,15 +143,19 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
   const [remoteName, setRemoteName] = useState('')
   const [remoteDigest, setRemoteDigest] = useState('')
   const [remoteBearer, setRemoteBearer] = useState('')
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [stateUpdatedAt, setStateUpdatedAt] = useState('')
+  const [clock, setClock] = useState(() => Date.now())
   const fileInput = useRef<HTMLInputElement>(null)
 
-  const load = useCallback(async () => {
-    setBusy((current) => current || 'refresh')
+  const load = useCallback(async (interactive = false) => {
+    if (interactive) setBusy((current) => current || 'refresh')
     try {
       const [nextManifest, nextList] = await Promise.all([getArtifactManifest(), listArtifacts()])
       setManifest(nextManifest)
       setArtifacts(nextList.artifacts)
       setStatus(nextManifest.update ?? null)
+      setStateUpdatedAt(new Date().toISOString())
       setServiceError('')
       setSelectedSHA((current) => current && nextList.artifacts.some((item) => item.sha256 === current)
         ? current
@@ -124,19 +165,26 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       setArtifacts([])
       setServiceError(cause instanceof Error ? cause.message : String(cause))
     } finally {
+      setInitialLoading(false)
       setBusy((current) => current === 'refresh' ? '' : current)
     }
   }, [])
 
   useEffect(() => { void load() }, [load])
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [])
 
   const lastUpdateEvent = useMemo(
     () => events.find((event) => event.kind.startsWith('update.')),
     [events],
   )
   useEffect(() => {
-    if (!lastUpdateEvent || !manifest?.enabled) return
-    void getUpdateStatus().then(setStatus).then(() => load()).catch(() => undefined)
+    if (!lastUpdateEvent) return
+    setStatus((current) => updateStatusFromEvent(current, lastUpdateEvent))
+    setStateUpdatedAt(lastUpdateEvent.time)
+    if (/^update\.(downloaded|completed|failed)$/i.test(lastUpdateEvent.kind)) void load()
   }, [lastUpdateEvent?.id, lastUpdateEvent?.time]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const selected = artifacts.find((item) => item.sha256 === selectedSHA)
@@ -147,6 +195,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
   const comparison = compareBuildIdentity(currentForSelected, selected)
   const bootloaderUnavailable = status?.isp_fallback_suggested === true
   const running = status && !['downloaded', 'completed', 'failed'].includes(status.state)
+  const socketFresh = updateStateIsFresh(transport.streamState, stateUpdatedAt, clock)
 
   const acceptUploadFile = async (file: File | null) => {
     setUploadFile(file)
@@ -266,7 +315,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       <SectionTitle eyebrow={copy('Verified host updates', 'به‌روزرسانی تأییدشدهٔ میزبان')} title={copy('Firmware & updates', 'میان‌افزار و به‌روزرسانی')} detail={copy('Remote update is performed by the primary host over the board programming link; it is not MCU-native OTA.', 'به‌روزرسانی راه‌دور توسط میزبان اصلی و از مسیر پروگرام برد انجام می‌شود؛ این فرایند OTA بومی ریزکنترل‌گر نیست.')} />
       <Card icon={Server} iconTone="red" title={copy('Artifact service', 'سرویس خروجی‌های ساخت')} eyebrow={copy('Unavailable', 'دردسترس نیست')} className="updates-unavailable">
         <EmptyState icon={Server} title={copy('Artifact service unavailable', 'سرویس خروجی‌های ساخت در دسترس نیست')} detail={serviceError} />
-        <Button icon={RefreshCw} onClick={() => void load()}>{copy('Retry typed service', 'تلاش دوباره برای سرویس')}</Button>
+        <Button icon={RefreshCw} onClick={() => void load(true)}>{copy('Retry typed service', 'تلاش دوباره برای سرویس')}</Button>
       </Card>
     </>
   )
@@ -277,7 +326,10 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
         eyebrow={copy('Verified host updates', 'به‌روزرسانی تأییدشدهٔ میزبان')}
         title={copy('Firmware & updates', 'میان‌افزار و به‌روزرسانی')}
         detail={copy(`The primary ${appTitle} instance stages, hashes, backs up, programs and verifies. A browser or remote peer never writes the MCU directly.`, `نمونهٔ اصلی ${appTitle} فایل را آماده و هش می‌کند، پشتیبان می‌گیرد، پروگرام و تأیید می‌کند. مرورگر یا همتای راه‌دور هرگز مستقیم روی ریزکنترل‌گر نمی‌نویسد.`)}
-        action={<div className="header-actions"><StatusBadge tone={manifest?.enabled ? 'good' : 'warn'}>{manifest?.enabled ? copy('SERVICE READY', 'سرویس آماده') : copy('DISABLED', 'غیرفعال')}</StatusBadge><Button compact icon={RefreshCw} busy={busy === 'refresh'} onClick={() => void load()}>{copy('Refresh', 'تازه‌سازی')}</Button></div>}
+        action={<div className="header-actions">
+          <StatusBadge tone={initialLoading ? 'info' : manifest?.enabled ? 'good' : 'warn'}>{initialLoading ? copy('LOADING', 'در حال بارگیری') : manifest?.enabled ? copy('SERVICE READY', 'سرویس آماده') : copy('NOT CONFIGURED', 'پیکربندی نشده')}</StatusBadge>
+          {!initialLoading && !socketFresh && <Button compact icon={RefreshCw} busy={busy === 'refresh'} onClick={() => void load(true)}>{copy('Refresh', 'تازه‌سازی')}</Button>}
+        </div>}
       />
 
       <section className="updates-hero">

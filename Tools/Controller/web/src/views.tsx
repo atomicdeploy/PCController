@@ -19,6 +19,8 @@ import {
   Cable,
   ChartNoAxesCombined,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   ChevronDown,
   CirclePower,
   CircuitBoard,
@@ -94,6 +96,7 @@ import { settingsSetCommand } from './command-line'
 import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
 import { PeripheralNamesEditor } from './peripheral-names-editor'
+import { SevenSegmentPreview } from './seven-segment-preview'
 import {
   normalizePWMValues,
   pwmPercent,
@@ -129,6 +132,7 @@ import type {
   LocalIntegrationSettings,
   Locale,
   LocalDeviceSnapshot,
+  MenuCatalog,
   MetricSample,
   PWMValues,
   Snapshot,
@@ -186,6 +190,16 @@ export function dashboardSocketIsFresh(
 ): boolean {
   if (!snapshot.connected || streamState !== 'open' || !snapshot.status_updated) return false
   const updated = new Date(snapshot.status_updated).getTime()
+  return Number.isFinite(updated) && Math.max(0, now - updated) < 1000
+}
+
+export function localDeviceSnapshotIsFresh(
+  snapshot: Pick<LocalDeviceSnapshot, 'events_online' | 'updated_at'>,
+  streamState: SharedViewProps['transport']['streamState'],
+  now = Date.now(),
+): boolean {
+  if (!snapshot.events_online || streamState !== 'open' || !snapshot.updated_at) return false
+  const updated = new Date(snapshot.updated_at).getTime()
   return Number.isFinite(updated) && Math.max(0, now - updated) < 1000
 }
 
@@ -302,6 +316,14 @@ export function DashboardView(props: SharedViewProps) {
   const [draggedCard, setDraggedCard] = useState<DashboardCardID | null>(null)
   const [temperatureTab, setTemperatureTab] = useState<'led' | 'audio'>('led')
   const [telemetryMode, setTelemetryMode] = useState<'electrical' | 'power' | 'thermal'>('electrical')
+  const [menuCatalog, setMenuCatalog] = useState<MenuCatalog | null>(null)
+  const [menuPage, setMenuPage] = useState('')
+  const [lcdLine1, setLCDLine1] = useState('')
+  const [lcdLine2, setLCDLine2] = useState('')
+  const [buzzerFrequency, setBuzzerFrequency] = useState(1000)
+  const [buzzerDuration, setBuzzerDuration] = useState(80)
+  const [peripheralBusy, setPeripheralBusy] = useState('')
+  const [peripheralNotice, setPeripheralNotice] = useState('')
   const [clock, setClock] = useState(() => Date.now())
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 250)
@@ -314,6 +336,27 @@ export function DashboardView(props: SharedViewProps) {
       .catch(() => { if (active) setHostUI(null) })
     return () => { active = false }
   }, [configurationEventID])
+  useEffect(() => {
+    if (!snapshot.connected) {
+      setMenuCatalog(null)
+      setMenuPage('')
+      return
+    }
+    const abort = new AbortController()
+    void rpc<MenuCatalog>('controller.menu.list', {}, abort.signal).then((catalog) => {
+      setMenuCatalog(catalog)
+      setMenuPage(String(catalog.current_page))
+    }).catch(() => {
+      if (!abort.signal.aborted) setMenuCatalog(null)
+    })
+    return () => abort.abort()
+  }, [snapshot.connected, snapshot.hello.build_hash, snapshot.port.instance_id])
+  useEffect(() => {
+    const current = snapshot.have_front_panel && snapshot.front_panel
+      ? snapshot.front_panel.menu_page
+      : snapshot.status.menu_page
+    if (menuCatalog?.pages.some((candidate) => candidate.id === current)) setMenuPage(String(current))
+  }, [menuCatalog, snapshot.front_panel?.menu_page, snapshot.have_front_panel, snapshot.status.menu_page])
   const peripheralName = (key: string, fallback: string) => hostUI?.peripheral_names?.[key]?.trim() || fallback
   const relayDefaults = [
     copy('Side A direction', 'جهت سمت A'), copy('Side A output', 'خروجی سمت A'),
@@ -323,6 +366,50 @@ export function DashboardView(props: SharedViewProps) {
   ]
   const socketFresh = dashboardSocketIsFresh(snapshot, transport.streamState, clock)
   const deviceSummary = dashboardDeviceSummary(snapshot, locale)
+  const performPeripheral = async (name: string, task: () => Promise<unknown>, success: string) => {
+    if (peripheralBusy) return
+    setPeripheralBusy(name)
+    setPeripheralNotice('')
+    try {
+      await task()
+      setPeripheralNotice(success)
+    } catch (cause) {
+      setPeripheralNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setPeripheralBusy('')
+    }
+  }
+  const selectMenuPage = () => {
+    if (!menuCatalog?.pages.some((candidate) => String(candidate.id) === menuPage)) return
+    void performPeripheral(
+      'menu-page',
+      () => rpc('controller.menu.jump', { page: menuPage }),
+      copy('Front-panel page selected.', 'صفحهٔ پنل انتخاب شد.'),
+    )
+  }
+  const navigateMenu = (direction: 'prev' | 'next') => {
+    void performPeripheral(
+      `menu-${direction}`,
+      () => execute(`menu ${direction}`),
+      copy('Front-panel navigation sent.', 'پیمایش پنل ارسال شد.'),
+    )
+  }
+  const writeLCD = () => {
+    if (!lcdLine1 && !lcdLine2) return
+    const text = lcdLine2 ? `${lcdLine1.padEnd(16, ' ')}${lcdLine2}` : lcdLine1
+    void performPeripheral(
+      'lcd',
+      () => rpc('controller.display.send', { target: 'lcd', text, duration_ms: 5000, repeat: 'once' }),
+      copy('LCD message sent through the typed display path.', 'پیام LCD از مسیر مشخص نمایش ارسال شد.'),
+    )
+  }
+  const testBuzzer = () => {
+    void performPeripheral(
+      'buzzer',
+      () => execute(`buzzer ${buzzerFrequency} ${buzzerDuration}`),
+      copy('Buzzer test command accepted.', 'فرمان آزمون بیزر پذیرفته شد.'),
+    )
+  }
   const updateLayout = (change: (current: ReturnType<typeof loadDashboardLayout>) => ReturnType<typeof loadDashboardLayout>) => {
     setLayout((current) => {
       const next = change(current)
@@ -454,6 +541,41 @@ export function DashboardView(props: SharedViewProps) {
             <DataRow label={copy('UART CRC / framing', 'CRC / قاب‌بندی UART')} value={`${status.crc_errors} / ${status.framing_errors}`} mono tone={status.crc_errors || status.framing_errors ? 'warn' : 'good'} />
             <DataRow label={copy('Reset count', 'تعداد بازنشانی')} value={status.reset_count} mono />
           </div>
+          <div className="overview-peripherals">
+            <section className="overview-peripheral overview-peripheral--segment" aria-label={copy('Seven-segment controls', 'کنترل‌های نمایشگر هفت‌بخشی')}>
+              <header><Binary size={16} /><strong>{copy('Seven-segment', 'هفت‌بخشی')}</strong><StatusBadge tone={snapshot.have_front_panel ? 'good' : 'warn'}>{snapshot.have_front_panel ? copy('LIVE', 'زنده') : copy('WAITING', 'در انتظار')}</StatusBadge></header>
+              <SevenSegmentPreview panel={snapshot.have_front_panel ? snapshot.front_panel : undefined} label={copy('Live physical seven-segment display', 'نمایش زندهٔ نمایشگر فیزیکی هفت‌بخشی')} />
+              <div className="overview-segment-navigation">
+                <Button compact icon={ChevronLeft} aria-label={copy('Previous front-panel page', 'صفحهٔ قبلی پنل')} busy={peripheralBusy === 'menu-prev'} onClick={() => navigateMenu('prev')} />
+                <label>
+                  <span>{copy('Controller page', 'صفحهٔ کنترلر')}</span>
+                  <select aria-label={copy('Controller page', 'صفحهٔ کنترلر')} value={menuPage} disabled={!menuCatalog?.pages.length || Boolean(peripheralBusy)} onChange={(event) => setMenuPage(event.target.value)}>
+                    {!menuCatalog?.pages.length && <option value="">{copy('Loading verified catalog…', 'در حال دریافت کاتالوگ معتبر…')}</option>}
+                    {menuCatalog?.pages.map((candidate) => <option key={candidate.id} value={String(candidate.id)}>{candidate.label} · {candidate.name}</option>)}
+                  </select>
+                </label>
+                <Button compact tone="primary" disabled={!menuCatalog?.pages.some((candidate) => String(candidate.id) === menuPage)} busy={peripheralBusy === 'menu-page'} onClick={selectMenuPage}>{copy('Go', 'برو')}</Button>
+                <Button compact icon={ChevronRight} aria-label={copy('Next front-panel page', 'صفحهٔ بعدی پنل')} busy={peripheralBusy === 'menu-next'} onClick={() => navigateMenu('next')} />
+              </div>
+            </section>
+            <section className="overview-peripheral" aria-label={copy('LCD message', 'پیام LCD')}>
+              <header><MessageSquareText size={16} /><strong>LCD</strong><StatusBadge tone={status.lcd_address ? 'good' : 'warn'}>{status.lcd_address ? `0x${status.lcd_address.toString(16).toUpperCase()}` : copy('NOT DETECTED', 'شناسایی نشده')}</StatusBadge></header>
+              <div className="overview-lcd-lines">
+                <input aria-label={copy('LCD line 1', 'خط اول LCD')} value={lcdLine1} maxLength={16} placeholder={copy('Line 1', 'خط ۱')} onChange={(event) => setLCDLine1(event.target.value.replace(/[^\x20-\x7e]/g, '').slice(0, 16))} />
+                <input aria-label={copy('LCD line 2', 'خط دوم LCD')} value={lcdLine2} maxLength={16} placeholder={copy('Line 2', 'خط ۲')} onChange={(event) => setLCDLine2(event.target.value.replace(/[^\x20-\x7e]/g, '').slice(0, 16))} />
+                <Button compact icon={Send} disabled={!status.lcd_address || (!lcdLine1 && !lcdLine2)} busy={peripheralBusy === 'lcd'} onClick={writeLCD}>{copy('Write LCD', 'نوشتن LCD')}</Button>
+              </div>
+            </section>
+            <section className="overview-peripheral" aria-label={copy('Buzzer test', 'آزمون بیزر')}>
+              <header><Volume2 size={16} /><strong>{copy('Buzzer test', 'آزمون بیزر')}</strong><StatusBadge tone={(snapshot.settings.flags & 0x01) !== 0 ? 'warn' : 'good'}>{(snapshot.settings.flags & 0x01) !== 0 ? copy('SILENT', 'بی‌صدا') : copy('READY', 'آماده')}</StatusBadge></header>
+              <div className="overview-buzzer-fields">
+                <label><span>{copy('Frequency', 'فرکانس')}</span><input aria-label={copy('Buzzer frequency Hz', 'فرکانس بیزر به هرتز')} type="number" min={20} max={20000} value={buzzerFrequency} onChange={(event) => setBuzzerFrequency(Math.min(20000, Math.max(20, Number.parseInt(event.target.value, 10) || 20)))} /><small>Hz</small></label>
+                <label><span>{copy('Duration', 'مدت')}</span><input aria-label={copy('Buzzer duration ms', 'مدت بیزر به میلی‌ثانیه')} type="number" min={1} max={65535} value={buzzerDuration} onChange={(event) => setBuzzerDuration(Math.min(65535, Math.max(1, Number.parseInt(event.target.value, 10) || 1)))} /><small>ms</small></label>
+                <Button compact icon={Volume2} busy={peripheralBusy === 'buzzer'} onClick={testBuzzer}>{copy('Test beep', 'بوق آزمایشی')}</Button>
+              </div>
+            </section>
+          </div>
+          {peripheralNotice && <p className="overview-peripheral__notice" role="status">{peripheralNotice}</p>}
         </Card>)}
 
         {snapshot.connected && frame('actions', copy('Quick actions', 'عملیات سریع'), <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
@@ -745,7 +867,7 @@ export function localDeviceReconnectAvailable(snapshot: Pick<LocalDeviceSnapshot
   return snapshot.configured === true && !localDeviceControlsAvailable(snapshot)
 }
 
-export function LocalDeviceView({ locale, t }: SharedViewProps) {
+export function LocalDeviceView({ locale, t, events, transport }: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const [snapshot, setSnapshot] = useState<LocalDeviceSnapshot>({ power: 'UNKNOWN', phase: 'idle' })
   const [busy, setBusy] = useState('')
@@ -753,6 +875,9 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
   const [inspection, setInspection] = useState<unknown>(null)
   const [resource, setResource] = useState<(typeof deviceResources)[number]>('capabilities')
   const [error, setError] = useState('')
+  const [clock, setClock] = useState(() => Date.now())
+  const pushedEvent = events.find((event) => event.kind.startsWith('integration.local_device.'))
+  const consumedEventID = useRef(pushedEvent?.id ?? 0)
 
   const load = async () => {
     try {
@@ -762,7 +887,16 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
   }
-  useEffect(() => { void load(); const timer = window.setInterval(() => void load(), 3000); return () => window.clearInterval(timer) }, [])
+  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    const timer = window.setInterval(() => setClock(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [])
+  useEffect(() => {
+    if (!pushedEvent || pushedEvent.id <= consumedEventID.current) return
+    consumedEventID.current = pushedEvent.id
+    void load()
+  }, [pushedEvent?.id, pushedEvent?.time]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const action = async (kind: string, text = '', count = 0) => {
     if (kind !== 'passive.refresh' && !localDeviceControlsAvailable(snapshot)) {
@@ -792,9 +926,10 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
   const powered = snapshot.power === 'ON'
   const controlsAvailable = localDeviceControlsAvailable(snapshot)
   const reconnectAvailable = localDeviceReconnectAvailable(snapshot)
+  const socketFresh = localDeviceSnapshotIsFresh(snapshot, transport.streamState, clock)
   const unavailableTitle = snapshot.configured === false
     ? (locale === 'fa' ? 'یکپارچه‌سازی وسیله غیرفعال است' : 'Local device integration is disabled')
-    : snapshot.websocket_online
+    : snapshot.events_online
       ? (locale === 'fa' ? 'مسیر فرمان HTTP در دسترس نیست' : 'HTTP command transport is unavailable')
       : snapshot.configured
         ? (locale === 'fa' ? 'وسیلهٔ محلی در دسترس نیست' : 'Local companion is unreachable')
@@ -805,19 +940,19 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
     ? (locale === 'fa' ? 'نشانی و فعال‌سازی را در تنظیمات خدمات محلی بررسی کنید.' : 'Choose a private-network endpoint and enable it in local-service settings.')
     : (locale === 'fa' ? `وضعیت فعلی: ${snapshot.phase || 'نامشخص'}` : `Current phase: ${snapshot.phase || 'unknown'}`))
   const deviceMenu = [
-    { label: locale === 'fa' ? 'تازه‌سازی وضعیت' : 'Refresh device status', icon: RefreshCw, onSelect: () => { void load() } },
+    ...(!socketFresh ? [{ label: locale === 'fa' ? 'تازه‌سازی وضعیت' : 'Refresh device status', icon: RefreshCw, onSelect: () => { void load() } }] : []),
     ...(reconnectAvailable ? [{ label: locale === 'fa' ? 'تلاش دوباره برای اتصال' : 'Retry companion connection', icon: PlugZap, onSelect: () => { void action('passive.refresh') } }] : []),
     ...(controlsAvailable ? [{ label: powered ? (locale === 'fa' ? 'خاموش‌کردن وسیله' : 'Turn device off') : (locale === 'fa' ? 'روشن‌کردن وسیله' : 'Turn device on'), icon: CirclePower, onSelect: () => { void action(powered ? 'power.off' : 'power.on') } }] : []),
   ]
   return (
     <>
-      <SectionTitle eyebrow={`${copy('Local companion', 'وسیلهٔ محلی')} · ${snapshot.phase || 'idle'}`} title={t('device')} detail={snapshot.base_url || copy('Typed local-network companion through the primary host', 'وسیلهٔ شبکهٔ محلی با قرارداد مشخص، از طریق میزبان اصلی')} action={<StatusBadge tone={snapshot.websocket_online ? 'good' : snapshot.http_reachable ? 'warn' : 'bad'} pulse={snapshot.phase === 'connecting'}>{snapshot.websocket_online ? copy('EVENT STREAM', 'جریان رویداد') : snapshot.http_reachable ? 'HTTP' : t('offline')}</StatusBadge>} />
+      <SectionTitle eyebrow={`${copy('Local companion', 'وسیلهٔ محلی')} · ${snapshot.phase || 'idle'}`} title={t('device')} detail={snapshot.base_url || copy('Typed local-network companion through the primary host', 'وسیلهٔ شبکهٔ محلی با قرارداد مشخص، از طریق میزبان اصلی')} action={<StatusBadge tone={snapshot.events_online ? 'good' : snapshot.http_reachable ? 'warn' : 'bad'} pulse={snapshot.phase === 'connecting'}>{snapshot.events_online ? copy('EVENT STREAM', 'جریان رویداد') : snapshot.http_reachable ? 'HTTP' : t('offline')}</StatusBadge>} />
       <section className="device-layout">
         <Card
           icon={Cpu}
           iconTone={powered ? 'green' : 'amber'}
           title={copy('Local device', 'وسیلهٔ محلی')}
-          eyebrow={snapshot.websocket_online ? copy('Events connected', 'رویدادها متصل‌اند') : snapshot.http_reachable ? copy('HTTP reachable', 'HTTP در دسترس') : copy('Unavailable', 'دردسترس نیست')}
+          eyebrow={snapshot.events_online ? copy('Events connected', 'رویدادها متصل‌اند') : snapshot.http_reachable ? copy('HTTP reachable', 'HTTP در دسترس') : copy('Unavailable', 'دردسترس نیست')}
           className={`device-stage${powered ? ' is-on' : ''}`}
           menu={deviceMenu}
         >
@@ -831,7 +966,7 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
           </div>
           <div className="device-facts">
             <div><span>{t('status')}</span><strong>{snapshot.power ?? t('unknown')}</strong></div>
-            <div><span>{copy('Transport', 'رسانهٔ ارتباطی')}</span><strong>{snapshot.websocket_online ? copy('Events', 'رویدادها') : snapshot.http_reachable ? 'HTTP' : t('offline')}</strong></div>
+            <div><span>{copy('Transport', 'رسانهٔ ارتباطی')}</span><strong>{snapshot.events_online ? copy('Events', 'رویدادها') : snapshot.http_reachable ? 'HTTP' : t('offline')}</strong></div>
             <div><span>{copy('Updated', 'آخرین تغییر')}</span><strong>{snapshot.updated_at ? formatClock(locale, snapshot.updated_at) : '—'}</strong></div>
           </div>
           {controlsAvailable
@@ -842,7 +977,7 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
                 detail={unavailableDetail}
                 action={<div className="device-unavailable__actions">
                   {reconnectAvailable && <Button compact tone="primary" icon={PlugZap} busy={busy === 'passive.refresh'} onClick={() => void action('passive.refresh')}>{locale === 'fa' ? 'تلاش دوباره' : 'Retry connection'}</Button>}
-                  <Button compact icon={RefreshCw} busy={busy === 'status'} onClick={() => void load()}>{locale === 'fa' ? 'تازه‌سازی وضعیت' : 'Refresh status'}</Button>
+                  {!socketFresh && <Button compact icon={RefreshCw} busy={busy === 'status'} onClick={() => void load()}>{locale === 'fa' ? 'تازه‌سازی وضعیت' : 'Refresh status'}</Button>}
                   {snapshot.configured !== true && <Button compact icon={Settings2} onClick={() => { window.location.hash = '#/settings' }}>{locale === 'fa' ? 'تنظیم یکپارچه‌سازی' : 'Open integration settings'}</Button>}
                 </div>}
               />}
@@ -869,8 +1004,8 @@ export function LocalDeviceView({ locale, t }: SharedViewProps) {
             {inspection !== null && <pre className="diagnostic-output" dir="ltr">{JSON.stringify(inspection, null, 2)}</pre>}
           </Card>}
 
-          <Card icon={HeartPulse} iconTone={snapshot.websocket_online ? 'green' : 'amber'} title={copy('Connection health', 'سلامت اتصال')} eyebrow={snapshot.websocket_online ? copy('Event stream connected', 'جریان رویداد متصل است') : snapshot.http_reachable ? copy('HTTP reachable', 'HTTP در دسترس') : copy('Unavailable', 'دردسترس نیست')} action={<Button icon={RefreshCw} compact onClick={() => void load()}>{locale === 'fa' ? 'تازه‌سازی' : 'Refresh'}</Button>}>
-            <div className="data-list"><DataRow label={copy('Phase', 'مرحله')} value={snapshot.phase || 'idle'} /><DataRow label="HTTP" value={snapshot.http_reachable ? t('online') : t('offline')} tone={snapshot.http_reachable ? 'good' : 'bad'} /><DataRow label={copy('Event stream', 'جریان رویداد')} value={snapshot.websocket_online ? t('online') : t('offline')} tone={snapshot.websocket_online ? 'good' : 'warn'} /><DataRow label={copy('Last event', 'آخرین رویداد')} value={snapshot.last_event || '—'} /><DataRow label={copy('Capabilities', 'قابلیت‌ها')} value={snapshot.capabilities?.join(', ') || '—'} /></div>
+          <Card icon={HeartPulse} iconTone={snapshot.events_online ? 'green' : 'amber'} title={copy('Connection health', 'سلامت اتصال')} eyebrow={snapshot.events_online ? copy('Event stream connected', 'جریان رویداد متصل است') : snapshot.http_reachable ? copy('HTTP reachable', 'HTTP در دسترس') : copy('Unavailable', 'دردسترس نیست')} action={!socketFresh ? <Button icon={RefreshCw} compact onClick={() => void load()}>{locale === 'fa' ? 'تازه‌سازی' : 'Refresh'}</Button> : undefined}>
+            <div className="data-list"><DataRow label={copy('Phase', 'مرحله')} value={snapshot.phase || 'idle'} /><DataRow label="HTTP" value={snapshot.http_reachable ? t('online') : t('offline')} tone={snapshot.http_reachable ? 'good' : 'bad'} /><DataRow label={copy('Event stream', 'جریان رویداد')} value={snapshot.events_online ? t('online') : t('offline')} tone={snapshot.events_online ? 'good' : 'warn'} /><DataRow label={copy('Last event', 'آخرین رویداد')} value={snapshot.last_event || '—'} /><DataRow label={copy('Capabilities', 'قابلیت‌ها')} value={snapshot.capabilities?.join(', ') || '—'} /></div>
           </Card>
         </div>
       </section>

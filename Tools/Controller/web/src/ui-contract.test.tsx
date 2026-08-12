@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } from './components'
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
-import { artifactUpdateAvailable, UpdatesView } from './updates-view'
+import { artifactUpdateAvailable, updateStateIsFresh, updateStatusFromEvent, UpdatesView } from './updates-view'
 import {
   ControlsView,
   DashboardView,
@@ -15,6 +15,7 @@ import {
   SettingsView,
   localDeviceControlsAvailable,
   localDeviceReconnectAvailable,
+  localDeviceSnapshotIsFresh,
   type SharedViewProps,
 } from './views'
 
@@ -122,6 +123,39 @@ describe('offline and settings UI contracts', () => {
     expect(live).toContain('aria-label="Turn relay 1 on"')
     expect(live.toLowerCase()).not.toMatch(/\breleased\b|\bconfirmed\b/)
     expect(live).toContain('All relay and motion outputs are off')
+    expect(live).toContain('Live physical seven-segment display')
+    expect(live).toContain('aria-label="Controller page"')
+    expect(live).toContain('aria-label="LCD line 1"')
+    expect(live).toContain('aria-label="LCD line 2"')
+    expect(live).toContain('aria-label="Buzzer frequency Hz"')
+    expect(live).toContain('Test beep')
+  })
+
+  it('uses exact one-second freshness gates for local-device and update controls', () => {
+    const now = Date.now()
+    const updatedAt = new Date(now - 250).toISOString()
+    expect(localDeviceSnapshotIsFresh({ events_online: true, updated_at: updatedAt }, 'open', now)).toBe(true)
+    expect(localDeviceSnapshotIsFresh({ events_online: true, updated_at: updatedAt }, 'waiting', now)).toBe(false)
+    expect(localDeviceSnapshotIsFresh({ events_online: false, updated_at: updatedAt }, 'open', now)).toBe(false)
+    expect(localDeviceSnapshotIsFresh({ events_online: true, updated_at: new Date(now - 1000).toISOString() }, 'open', now)).toBe(false)
+    expect(updateStateIsFresh('open', updatedAt, now)).toBe(true)
+    expect(updateStateIsFresh('closed', updatedAt, now)).toBe(false)
+    expect(updateStateIsFresh('open', new Date(now - 1000).toISOString(), now)).toBe(false)
+  })
+
+  it('reduces typed update events immediately without a status poll', () => {
+    const event = {
+      id: 41,
+      time: '2026-08-12T10:00:00.250Z',
+      kind: 'update.programming',
+      text: 'verified write in progress',
+      metadata: { operation_id: 'op-9', kind: 'firmware', progress_percent: '42', programming_method: 'urclock' },
+    }
+    expect(updateStatusFromEvent(null, event)).toMatchObject({
+      id: 'op-9', kind: 'firmware', state: 'programming', progress_percent: 42,
+      updated_at: event.time, detail: event.text, programming_method: 'urclock',
+    })
+    expect(updateStatusFromEvent(null, { ...event, kind: 'door' })).toBeNull()
   })
 
   it('shows useful controller identity states instead of a placeholder', () => {
@@ -154,6 +188,9 @@ describe('offline and settings UI contracts', () => {
     expect(artifactUpdateAvailable(true, 'firmware')).toBe(true)
     const markup = renderToStaticMarkup(<UpdatesView {...shared()} />)
     expect(markup).toContain('Stage a local artifact')
+    expect(markup).toContain('LOADING')
+    expect(markup).not.toContain('DISABLED')
+    expect(markup).not.toContain('>Refresh<')
     expect(markup).not.toContain('Review firmware programming')
     expect(markup).not.toContain('Review EEPROM restore')
     expect(markup).not.toContain('Review ISP programming')

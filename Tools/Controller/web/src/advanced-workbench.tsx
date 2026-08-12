@@ -67,7 +67,8 @@ import {
 } from './components'
 import { rpc } from './api'
 import { redactSensitiveCommand, shellArgument as quoteArgument } from './command-line'
-import type { FrontPanelState } from './types'
+import { SevenSegmentPreview } from './seven-segment-preview'
+import type { MenuCatalog } from './types'
 import type { SharedViewProps } from './views'
 
 interface AdvancedWorkbenchProps extends SharedViewProps {
@@ -146,28 +147,6 @@ export function hostMenuLabelCommand(reference: string, label: string): string |
   return `host-menu set ${quoteArgument(normalizedReference)} label ${quoteArgument(normalizedLabel)}`
 }
 
-const segmentLines = [
-  ['a', 8, 5, 28, 5], ['b', 31, 8, 31, 27], ['c', 31, 32, 31, 51],
-  ['d', 8, 54, 28, 54], ['e', 5, 32, 5, 51], ['f', 5, 8, 5, 27],
-  ['g', 8, 29.5, 28, 29.5],
-] as const
-
-function SevenSegmentPreview({ panel }: { panel?: FrontPanelState }) {
-  const raw = panel?.raw_segments ?? [0, 0, 0, 0]
-  return (
-    <div className={`live-segment-preview${panel?.segments_active ? ' is-active' : ''}`} dir="ltr" aria-label="Live four-digit display preview">
-      {raw.map((mask, index) => (
-        <svg key={index} viewBox="0 0 40 62" role="img" aria-label={`digit ${index + 1} raw 0x${mask.toString(16).padStart(2, '0')}`}>
-          {segmentLines.map(([name, x1, y1, x2, y2], bit) => (
-            <line key={name} x1={x1} y1={y1} x2={x2} y2={y2} className={(mask & (1 << bit)) !== 0 ? 'is-lit' : ''} />
-          ))}
-          <circle cx="36" cy="54" r="2.2" className={(mask & 0x80) !== 0 ? 'is-lit' : ''} />
-        </svg>
-      ))}
-    </div>
-  )
-}
-
 export function AdvancedWorkbench({
   snapshot,
   locale,
@@ -190,7 +169,8 @@ export function AdvancedWorkbench({
   const [doorAudio, setDoorAudio] = useState(true)
   const [relayAudio, setRelayAudio] = useState(true)
 
-  const [menuPage, setMenuPage] = useState('status')
+  const [menuCatalog, setMenuCatalog] = useState<MenuCatalog | null>(null)
+  const [menuPage, setMenuPage] = useState('')
   const [menuMask, setMenuMask] = useState('0xFFFF')
   const [menuOrder, setMenuOrder] = useState('status voltage current temperature')
   const [hostMenuID, setHostMenuID] = useState('')
@@ -260,6 +240,25 @@ export function AdvancedWorkbench({
   useEffect(() => {
     if (!port && snapshot.port.name) setPort(snapshot.port.name)
   }, [port, snapshot.port.name])
+
+  useEffect(() => {
+    if (!online) {
+      setMenuCatalog(null)
+      setMenuPage('')
+      return
+    }
+    const abort = new AbortController()
+    void rpc<MenuCatalog>('controller.menu.list', {}, abort.signal).then((catalog) => {
+      setMenuCatalog(catalog)
+      setMenuPage(String(catalog.current_page))
+    }).catch(() => {
+      if (!abort.signal.aborted) {
+        setMenuCatalog(null)
+        setMenuPage('')
+      }
+    })
+    return () => abort.abort()
+  }, [online, snapshot.hello.build_hash, snapshot.port.instance_id])
 
   useEffect(() => {
     if (programModeTouched || !snapshot.program_state?.mode) return
@@ -538,14 +537,21 @@ export function AdvancedWorkbench({
           </div>
           <p className="advanced-note advanced-note--safe">{copy('The Macro front-panel page lists the file-watched library, records MCU acknowledgement deltas, shows playback progress, and offers safe cancel or guarded keep-output cancel.', 'صفحه ماکروی پنل، فهرست تحت پایش فایل، ضبط زمان‌بندی MCU، پیشرفت اجرا و لغو امن یا لغو با حفظ خروجی را ارائه می‌کند.')}</p>
           <div className="advanced-fields">
-            <TextField
-              label={copy('Firmware page ID or key', 'شناسه یا کلید صفحه میان‌افزار')}
-              value={menuPage}
-              dir="ltr"
-              spellCheck={false}
-              onChange={(event) => setMenuPage(event.target.value)}
-              action={<Button icon={LayoutDashboard} disabled={!online || !menuPage.trim()} busy={busy === `menu page ${menuPage.trim()}`} onClick={() => void run(`menu page ${quoteArgument(menuPage.trim())}`)}>{copy('Go to page', 'رفتن به صفحه')}</Button>}
-            />
+            <label className="advanced-select-field">
+              <span>{copy('Firmware page', 'صفحه میان‌افزار')}</span>
+              <div>
+                <select
+                  aria-label={copy('Firmware page', 'صفحه میان‌افزار')}
+                  value={menuPage}
+                  disabled={!online || !menuCatalog?.pages.length}
+                  onChange={(event) => setMenuPage(event.target.value)}
+                >
+                  {!menuCatalog?.pages.length && <option value="">{copy('Loading verified catalog…', 'در حال دریافت کاتالوگ معتبر…')}</option>}
+                  {menuCatalog?.pages.map((page) => <option key={page.id} value={String(page.id)}>{page.label} · {page.name}</option>)}
+                </select>
+                <Button icon={LayoutDashboard} disabled={!online || !menuCatalog?.pages.some((page) => String(page.id) === menuPage)} busy={busy === `menu page ${menuPage}`} onClick={() => void run(`menu page ${menuPage}`)}>{copy('Go to page', 'رفتن به صفحه')}</Button>
+              </div>
+            </label>
             <TextField
               label={copy('Host menu ID · optional', 'شناسه منوی میزبان · اختیاری')}
               value={hostMenuID}
