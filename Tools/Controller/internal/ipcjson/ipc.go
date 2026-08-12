@@ -2112,6 +2112,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		writer.Header().Set("Cache-Control", "no-store")
 		config := service.hostConfig()
 		settings := service.browserUISettings()
 		writeHTTPJSON(writer, http.StatusOK, map[string]any{

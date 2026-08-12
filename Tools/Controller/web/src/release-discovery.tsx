@@ -161,7 +161,7 @@ export function ReleaseDiscovery({ manifest, events, locale, openDialog, onArtif
   })
 
   return (
-    <Card icon={PackageSearch} iconTone="violet" title={copy('Release & workflow discovery', 'کشف انتشار و گردش‌کار')} eyebrow={`${source === 'release' ? copy('Release', 'انتشار') : source === 'workflow' ? copy('Workflow', 'گردش‌کار') : copy('Manifest', 'مانیفست')} · ${copy('proxy aware', 'سازگار با پراکسی')}`} className="release-discovery-card" action={<StatusBadge tone={operation?.state === 'failed' ? 'bad' : operation?.state === 'completed' ? 'good' : operation ? 'info' : 'neutral'}>{operation?.state?.toUpperCase() || copy('READY', 'آماده')}</StatusBadge>}>
+    <Card icon={PackageSearch} iconTone="violet" title={copy('Release & workflow discovery', 'کشف انتشار و گردش‌کار')} eyebrow={`${source === 'release' ? copy('Release', 'انتشار') : source === 'workflow' ? copy('Workflow', 'گردش‌کار') : copy('Manifest', 'مانیفست')} · ${copy('proxy aware', 'سازگار با پراکسی')}`} className="release-discovery-card" action={operation ? <StatusBadge tone={operation.state === 'failed' ? 'bad' : operation.state === 'completed' ? 'good' : 'info'}>{operation.state.toUpperCase()}</StatusBadge> : undefined}>
       <p className="card-copy">{copy('Discover build artifacts without hardcoded product names. Provider metadata, release checksums, hashes, packed timestamps and platform are preserved into the content-addressed inventory.', 'خروجی‌های ساخت بدون نام محصولِ ثابت کشف می‌شوند. فرادادهٔ ارائه‌دهنده، چک‌سام انتشار، هش، مهر زمانی فشرده و پلتفرم در فهرست محتوامحور حفظ می‌شود.')}</p>
       <form className="release-discovery-form" onSubmit={(event) => void runDiscovery(event)}>
         <div className="discovery-source-picker">

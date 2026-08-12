@@ -12,6 +12,7 @@ const maximumTTLMS = 5 * 60_000
 const maximumEnvelopeBytes = 32 * 1024
 const maximumTerminalBytes = 8 * 1024
 const maximumEventTextBytes = 4 * 1024
+const maximumResourceIdentityBytes = 192
 const maximumMetadataEntries = 32
 const maximumSeenMessages = 512
 
@@ -68,12 +69,23 @@ export interface ControllerEventPayload {
   event: SharedControllerEvent
 }
 
+/**
+ * Credential-free hint that prompts peers to re-fetch the host's authoritative
+ * resource identity. Receivers must not reload from this payload alone.
+ */
+export interface ResourceVersionPayload {
+  type: 'resource-version'
+  hostVersion: string
+  buildTime: string
+}
+
 /** Payload variants accepted by the tab-channel wire contract. */
 export type TabChannelPayload =
   | PresencePayload
   | AppearancePayload
   | TerminalPayload
   | ControllerEventPayload
+  | ResourceVersionPayload
 
 /** Versioned and expiring envelope sent through BroadcastChannel. */
 export interface TabChannelEnvelope {
@@ -123,6 +135,7 @@ export interface TabChannel {
   publishAppearance(appearance: AppearancePatch, etag?: string): string | null
   publishTerminal(entry: TerminalEntry): string | null
   publishControllerEvent(event: SharedControllerEvent): string | null
+  publishResourceVersion(hostVersion: string, buildTime: string): string | null
   subscribe(listener: TabChannelListener): () => void
   close(): void
 }
@@ -345,6 +358,15 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
   }
 }
 
+function sanitizeResourceVersion(raw: RecordValue): ResourceVersionPayload | null {
+  if (!hasOnlyKeys(raw, ['type', 'hostVersion', 'buildTime'])) return null
+  const hostVersion = safeText(raw.hostVersion, maximumResourceIdentityBytes)
+  const buildTime = safeText(raw.buildTime, maximumResourceIdentityBytes)
+  if (hostVersion === null || buildTime === null) return null
+  if (!/^[a-z0-9][a-z0-9._:+-]*$/i.test(hostVersion) || !/^[a-z0-9][a-z0-9._:+-]*$/i.test(buildTime)) return null
+  return { type: 'resource-version', hostVersion, buildTime }
+}
+
 function sanitizePayload(value: unknown): TabChannelPayload | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null
   switch (value.type) {
@@ -352,6 +374,7 @@ function sanitizePayload(value: unknown): TabChannelPayload | null {
     case 'appearance': return sanitizeAppearance(value)
     case 'terminal': return sanitizeTerminal(value)
     case 'controller-event': return sanitizeControllerEvent(value)
+    case 'resource-version': return sanitizeResourceVersion(value)
     default: return null
   }
 }
@@ -489,6 +512,7 @@ export function createTabChannel(options: TabChannelOptions = {}): TabChannel {
     publishAppearance: (appearance, etag) => publish({ type: 'appearance', appearance, ...(etag === undefined ? {} : { etag }) }),
     publishTerminal: (entry) => publish({ type: 'terminal', entry }),
     publishControllerEvent: (event) => publish({ type: 'controller-event', event }),
+    publishResourceVersion: (hostVersion, buildTime) => publish({ type: 'resource-version', hostVersion, buildTime }),
     subscribe(listener) {
       if (closed) return () => undefined
       listeners.add(listener)

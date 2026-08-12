@@ -74,7 +74,7 @@ func TestEmbeddedHandlerServesUsefulAppShell(t *testing.T) {
 		}
 	}
 	assertSecurityHeaders(t, response.Header())
-	if got := response.Header().Get("Cache-Control"); got != "no-cache" {
+	if got := response.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("index cache policy=%q", got)
 	}
 	for _, match := range regexp.MustCompile(`(?:src|href)="(/[^"]+)"`).FindAllStringSubmatch(body, -1) {
@@ -105,6 +105,12 @@ func TestStaleFingerprintedEntryAssetsRedirectToCurrentBundle(t *testing.T) {
 			}
 			if got := response.Header().Get("Cache-Control"); got != "no-store" {
 				t.Fatalf("Cache-Control=%q", got)
+			}
+			if got := response.Header().Get("X-PCController-Asset-Replacement"); got != strings.TrimPrefix(test.location, "/") {
+				t.Fatalf("replacement identity=%q want=%q", got, strings.TrimPrefix(test.location, "/"))
+			}
+			if strings.Contains(response.Body.String(), "stale000") {
+				t.Fatalf("redirect returned stale entry bytes: %q", response.Body.String())
 			}
 			assertSecurityHeaders(t, response.Header())
 		})
@@ -274,7 +280,7 @@ func TestMIMEAndCachePolicies(t *testing.T) {
 		contentType string
 		cache       string
 	}{
-		{path: "/index.html", contentType: "text/html; charset=utf-8", cache: "no-cache"},
+		{path: "/index.html", contentType: "text/html; charset=utf-8", cache: "no-store"},
 		{path: "/favicon.svg", contentType: "image/svg+xml", cache: "no-cache"},
 		{path: "/favicon.ico", contentType: "image/x-icon", cache: "no-cache"},
 		{path: "/assets/app-abcdef12.js", contentType: "text/javascript; charset=utf-8", cache: "public, max-age=31536000, immutable"},
@@ -351,6 +357,15 @@ func TestNewHandlerRequiresIndex(t *testing.T) {
 	}
 	if _, err := NewHandler(fstest.MapFS{"asset.js": {Data: []byte("export {}")}}); err == nil {
 		t.Fatal("filesystem without index.html was accepted")
+	}
+}
+
+func TestNewHandlerRejectsIndexWithMissingLocalAsset(t *testing.T) {
+	files := fstest.MapFS{
+		"index.html": {Data: []byte(`<!doctype html><script type="module" src="/assets/app-missing000.js"></script>`)},
+	}
+	if _, err := NewHandler(files); err == nil || !strings.Contains(err.Error(), "app-missing000.js") {
+		t.Fatalf("missing index reference error=%v", err)
 	}
 }
 

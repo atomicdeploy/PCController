@@ -124,10 +124,11 @@ describe('tab channel', () => {
       state: 'open',
       metadata: { zone: 'front' },
     })).toBeTruthy()
+    expect(sender.publishResourceVersion('1.4.1', '2026-08-02T03:21:00Z')).toBeTruthy()
 
-    expect(received).toHaveLength(4)
+    expect(received).toHaveLength(5)
     expect(received.map((message) => message.payload.type)).toEqual([
-      'presence', 'appearance', 'terminal', 'controller-event',
+      'presence', 'appearance', 'terminal', 'controller-event', 'resource-version',
     ])
     expect(received[0]).toMatchObject({
       protocol: TAB_CHANNEL_PROTOCOL,
@@ -142,6 +143,11 @@ describe('tab channel', () => {
     expect(received[1].payload).toMatchObject({ type: 'appearance', etag: 'a'.repeat(64) })
     expect(received[3].payload).toMatchObject({
       event: { id: 9, metadata: { zone: 'front' } },
+    })
+    expect(received[4].payload).toEqual({
+      type: 'resource-version',
+      hostVersion: '1.4.1',
+      buildTime: '2026-08-02T03:21:00Z',
     })
 
     now += 1
@@ -169,6 +175,8 @@ describe('tab channel', () => {
     expect(channel.publishAppearance({ audioVolume: 2 })).toBeNull()
     expect(channel.publishAppearance({ theme: 'dark' }, 'not-an-etag')).toBeNull()
     expect(channel.publishPresence('active', '../unsafe page')).toBeNull()
+    expect(channel.publishResourceVersion('1.4.1', 'Authorization: Bearer abcdefghijklmnop')).toBeNull()
+    expect(channel.publishResourceVersion('1.4.1', '2026-08-02 03:21:00Z')).toBeNull()
     expect(FakeBroadcastChannel.posted).toHaveLength(0)
 
     channel.close()

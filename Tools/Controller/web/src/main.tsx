@@ -16,6 +16,6 @@ createRoot(root).render(
 // installable app shell without hiding host shutdown behind an obsolete cache.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    void navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(() => undefined)
+    void navigator.serviceWorker.register('/service-worker.js', { scope: '/', updateViaCache: 'none' }).catch(() => undefined)
   }, { once: true })
 }

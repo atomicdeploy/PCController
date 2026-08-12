@@ -34,7 +34,6 @@ export const messages = {
     reduceMotion: 'Reduce motion', compactNumbers: 'Compact large numbers', liveTelemetry: 'Live telemetry',
     outputSafety: 'Safety confirmation is required for destructive actions.',
     confirmEmergencyTitle: 'Stop every output?', confirmEmergencyBody: 'This releases all relays and clears PWM output through the same guarded controller command path.',
-    noHardware: 'The dashboard is ready; connect an authenticated controller to receive live telemetry.',
     demoMode: 'Visual demonstration data', eventStream: 'Event stream', status: 'Status',
   },
   fa: {
@@ -67,7 +66,6 @@ export const messages = {
     reduceMotion: 'کاهش حرکت‌ها', compactNumbers: 'نمایش فشرده اعداد بزرگ', liveTelemetry: 'تله‌متری زنده',
     outputSafety: 'برای عملیات مخرب تأیید ایمنی لازم است.',
     confirmEmergencyTitle: 'همه خروجی‌ها متوقف شوند؟', confirmEmergencyBody: 'این کار همه رله‌ها را آزاد و PWM را از همان مسیر امن فرمان کنترلر پاک می‌کند.',
-    noHardware: 'داشبورد آماده است؛ برای دریافت داده زنده یک کنترلر معتبر متصل کنید.',
     demoMode: 'داده نمایشی رابط', eventStream: 'جریان رویدادها', status: 'وضعیت',
   },
 } as const
@@ -76,6 +74,39 @@ export type MessageKey = keyof typeof messages.en
 
 export function translator(locale: Locale): (key: MessageKey) => string {
   return (key) => messages[locale][key] ?? messages.en[key]
+}
+
+export function formatConnectionState(locale: Locale, state: string, connected = false, paused = false): string {
+  if (connected) return locale === 'fa' ? 'آنلاین' : 'Online'
+  if (paused) return locale === 'fa' ? 'اتصال متوقف است' : 'Connection paused'
+
+  const normalized = state.trim().toLowerCase().replace(/[\s_]+/g, '-')
+  const labels = locale === 'fa'
+    ? {
+        connecting: 'در حال اتصال',
+        reconnecting: 'در حال اتصال دوباره',
+        discovering: 'در حال یافتن کنترلر',
+        waiting: 'در انتظار کنترلر',
+        disconnected: 'کنترلر آفلاین است',
+        offline: 'کنترلر آفلاین است',
+        closed: 'اتصال بسته است',
+        failed: 'اتصال ناموفق بود',
+      }
+    : {
+        connecting: 'Connecting',
+        reconnecting: 'Reconnecting',
+        discovering: 'Discovering controller',
+        waiting: 'Waiting for controller',
+        disconnected: 'Controller offline',
+        offline: 'Controller offline',
+        closed: 'Connection closed',
+        failed: 'Connection failed',
+      }
+  const known = labels[normalized as keyof typeof labels]
+  if (known) return known
+  if (!normalized) return locale === 'fa' ? 'کنترلر آفلاین است' : 'Controller offline'
+  const humanized = normalized.replace(/-/g, ' ')
+  return humanized.charAt(0).toUpperCase() + humanized.slice(1)
 }
 
 export function formatNumber(locale: Locale, value: number, digits = 1): string {

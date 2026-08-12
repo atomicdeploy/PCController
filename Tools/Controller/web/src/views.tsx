@@ -98,7 +98,7 @@ import {
   PWMReconciler,
   USER_PWM_CHANNELS,
 } from './pwm-authority'
-import { formatClock, formatCompact, formatDuration, formatNumber, type MessageKey } from './i18n'
+import { formatClock, formatCompact, formatConnectionState, formatDuration, formatNumber, type MessageKey } from './i18n'
 const TelemetryChart = lazy(() => import('./telemetry-chart').then((module) => ({ default: module.TelemetryChart })))
 import {
   integrationSettingsEqual,
@@ -155,7 +155,7 @@ export interface SharedViewProps {
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
   if (snapshot.connected) return snapshot.port.friendly_name || snapshot.port.product || snapshot.port.name || appTitle
-  return snapshot.connection_reason || (locale === 'fa' ? 'در انتظار کنترلر معتبر' : 'Waiting for an authenticated controller')
+  return snapshot.connection_reason || (locale === 'fa' ? 'برای دریافت تله‌متری زنده، یک کنترلر معتبر متصل کنید.' : 'Connect an authenticated controller to receive live telemetry.')
 }
 
 function values(samples: MetricSample[], field: keyof Omit<MetricSample, 'at'>): number[] {
@@ -175,6 +175,7 @@ export function DashboardView(props: SharedViewProps) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const status = snapshot.status
   const connectedTone = snapshot.connected ? 'good' : snapshot.paused ? 'warn' : 'bad'
+  const connectionLabel = formatConnectionState(locale, snapshot.connection_state, snapshot.connected, snapshot.paused)
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
@@ -196,13 +197,13 @@ export function DashboardView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle
-        eyebrow={snapshot.connected ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
+        eyebrow={snapshot.connected ? t('liveTelemetry') : connectionLabel}
         title={t('dashboard')}
         detail={pageDetail(snapshot, appTitle, locale)}
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
-              {snapshot.connected ? t('online') : snapshot.connection_state === 'connecting' ? t('connecting') : t('offline')}
+              {connectionLabel}
             </StatusBadge>
             {!snapshot.connected && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
             <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
@@ -213,8 +214,12 @@ export function DashboardView(props: SharedViewProps) {
       <section className={`hero-panel${snapshot.connected ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
           <div className="eyebrow">{copy('Controller', 'کنترلر')} · {snapshot.connection_state}</div>
-          <h2><a href="#/dashboard">{snapshot.connected ? snapshot.hello.name || appTitle : t('noHardware')}</a></h2>
-          <p>{snapshot.connected ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : snapshot.connection_reason || t('noHardware')}</p>
+          <h2><a href="#/dashboard">{snapshot.connected ? snapshot.hello.name || appTitle : connectionLabel}</a></h2>
+          {snapshot.connected
+            ? <p>{`USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}`}</p>
+            : snapshot.connection_updated
+              ? <p>{copy(`State updated ${formatClock(locale, snapshot.connection_updated)}`, `آخرین تغییر وضعیت ${formatClock(locale, snapshot.connection_updated)}`)}</p>
+              : null}
         </div>
         <div className={`hero-panel__readout${snapshot.have_status ? '' : ' is-empty'}`} dir="ltr">
           <span>{copy('BUILD', 'ساخت')}</span><strong>{hash}</strong>
@@ -226,7 +231,7 @@ export function DashboardView(props: SharedViewProps) {
         <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />
         <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />
         <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" detail={`${peripheralName('sensor.temperature-audio', copy('Audio temperature', 'دمای صوت'))} · ${formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} °C`} />
-        <MetricCard icon={PlugZap} label="PWM" value={status.pwm_available ? formatNumber(locale, status.pwm_value * 100 / 4095, 1) : '—'} unit={status.pwm_available ? '%' : ''} values={values(samples, 'power')} tone="violet" detail={status.pwm_available ? `${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}` : copy('Unavailable on this controller', 'در این کنترلر در دسترس نیست')} />
+        <MetricCard icon={PlugZap} label="PWM" value={status.pwm_available ? formatNumber(locale, status.pwm_value * 100 / 4095, 1) : '—'} unit={status.pwm_available ? '%' : ''} values={values(samples, 'power')} tone="violet" detail={status.pwm_available ? `${copy('CH', 'کانال')} ${status.pwm_channel + 1}` : copy('Unavailable on this controller', 'در این کنترلر در دسترس نیست')} />
       </section>}
 
       <Card

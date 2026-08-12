@@ -16,6 +16,7 @@ describe('release discovery view', () => {
     expect(html).toContain('HTTP manifest')
     expect(html).toContain('Discover metadata')
     expect(html).toContain('Discover build artifacts without hardcoded product names')
+    expect(html).not.toContain('>READY<')
     expect(html).not.toContain('Authorize board programming')
   })
 

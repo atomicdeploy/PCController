@@ -51,7 +51,7 @@ import {
   pageFromNumberHotkey,
   type PageID,
 } from './hotkeys'
-import { formatClock, localizeDigits, translator, type MessageKey } from './i18n'
+import { formatClock, formatConnectionState, localizeDigits, translator, type MessageKey } from './i18n'
 import { redactSensitiveCommand, shellArgument } from './command-line'
 import { effectiveProductTitle, productMark } from './product-identity'
 import { controllerFaviconState, updateRuntimeFavicon } from './state-favicon'
@@ -60,7 +60,7 @@ import {
   prependSignificantControllerEvent,
   significantControllerEvents,
 } from './significant-events'
-import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
+import { embeddedResourcesMismatch, reloadForResourceMismatch } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
 import {
   createTabChannel,
@@ -138,24 +138,6 @@ const defaultAppearance: Appearance = {
 }
 
 const appearanceStorageKey = `${__PRODUCT_PROTOCOL__}.appearance`
-const resourceReloadStorageKey = `${__PRODUCT_PROTOCOL__}.resource-reload`
-
-export function reloadForResourceMismatch(config: Pick<UIConfig, 'host_version' | 'build_time'>): boolean {
-  const identity = hostResourceIdentity(config)
-  if (!embeddedResourcesMismatch(config)) {
-    try { sessionStorage.removeItem(resourceReloadStorageKey) } catch { /* storage may be disabled */ }
-    return false
-  }
-  try {
-    if (sessionStorage.getItem(resourceReloadStorageKey) === identity) return false
-    sessionStorage.setItem(resourceReloadStorageKey, identity)
-  } catch {
-    // Never risk an unbounded reload loop when private storage is unavailable.
-    return false
-  }
-  window.location.reload()
-  return true
-}
 
 function loadAppearance(): Appearance {
   try {
@@ -349,6 +331,8 @@ export function connectionTransitionCue(
   return connected ? 'connect' : 'disconnect'
 }
 
+type ResourceConvergenceState = 'current' | 'reloading' | 'blocked'
+
 export default function App() {
   const demo = new URLSearchParams(location.search).get('demo') === '1'
   const [appearance, setAppearance] = useState(loadAppearance)
@@ -388,6 +372,8 @@ export default function App() {
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
   const refreshAfterHostRestart = useRef(false)
+  const resourceProbeInFlight = useRef<Promise<ResourceConvergenceState> | null>(null)
+  const resourceHintAllowedAt = useRef(0)
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
@@ -416,12 +402,40 @@ export default function App() {
     applyLocalAppearance(authoritative)
   }, [applyLocalAppearance])
 
-  const refreshHostAppearance = useCallback(async () => {
-    const config = await getUIConfig()
+  const applyAuthoritativeUIConfig = useCallback((config: UIConfig, announceMismatch: boolean): ResourceConvergenceState => {
+    const mismatch = embeddedResourcesMismatch(config)
+    const reloading = reloadForResourceMismatch(config, {
+      beforeReload: announceMismatch
+        ? () => { tabChannelRef.current?.publishResourceVersion(config.host_version ?? '', config.build_time ?? '') }
+        : undefined,
+    })
+    if (mismatch) return reloading ? 'reloading' : 'blocked'
     setUIConfig(config)
     adoptHostAppearance(config.appearance, config.appearance_etag)
-    return config
+    return 'current'
   }, [adoptHostAppearance])
+
+  const refreshHostAppearance = useCallback(async () => {
+    const config = await getUIConfig()
+    const convergence = applyAuthoritativeUIConfig(config, true)
+    if (convergence === 'blocked') {
+      throw new Error('The host WebUI bundle changed, but this tab already used its safe reload attempt for that bundle')
+    }
+    return config
+  }, [applyAuthoritativeUIConfig])
+
+  const reconcileHostResources = useCallback((announceMismatch: boolean): Promise<ResourceConvergenceState> => {
+    const active = resourceProbeInFlight.current
+    if (active !== null) return active
+    let probe: Promise<ResourceConvergenceState>
+    probe = getUIConfig()
+      .then((config) => applyAuthoritativeUIConfig(config, announceMismatch))
+      .finally(() => {
+        if (resourceProbeInFlight.current === probe) resourceProbeInFlight.current = null
+      })
+    resourceProbeInFlight.current = probe
+    return probe
+  }, [applyAuthoritativeUIConfig])
 
   useEffect(() => {
 	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
@@ -515,9 +529,23 @@ export default function App() {
           { id: message.messageId, tabId: message.tabId, ...payload.entry },
         ])
       }
+      if (payload.type === 'resource-version') {
+        const now = Date.now()
+        if (now < resourceHintAllowedAt.current) return
+        resourceHintAllowedAt.current = now + 2_000
+        // BroadcastChannel is only a prompt. The no-store host response is the
+        // sole authority allowed to trigger a reload.
+        void reconcileHostResources(false).then((convergence) => {
+          if (convergence === 'blocked') {
+            setStreamDetail('The host WebUI bundle changed, but this tab already used its safe reload attempt for that bundle')
+          }
+        }).catch(() => undefined)
+        return
+      }
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
         setEvents((current) => prependSignificantControllerEvent(current, event))
+        if (isCompletedHostUpdate(event)) refreshAfterHostRestart.current = true
       }
     })
     const announce = () => channel.publishPresence(document.hidden ? 'hidden' : 'active', pageRef.current)
@@ -534,7 +562,7 @@ export default function App() {
       if (tabChannelRef.current === channel) tabChannelRef.current = null
       setAppInstanceID((current) => current === channel.tabId ? '' : current)
     }
-  }, [refreshHostAppearance])
+  }, [reconcileHostResources, refreshHostAppearance])
 
   useEffect(() => {
     if (demo || !startupProbeResolved || !appInstanceID) return
@@ -1009,9 +1037,11 @@ export default function App() {
       try {
         setBootTarget(42)
         const config = await getUIConfig(abort.signal)
-		if (reloadForResourceMismatch(config)) return
-        setUIConfig(config)
-        adoptHostAppearance(config.appearance, config.appearance_etag)
+		const startupConvergence = applyAuthoritativeUIConfig(config, true)
+		if (startupConvergence === 'reloading') return
+		if (startupConvergence === 'blocked') {
+			throw new Error('The host WebUI bundle changed, but this tab already used its safe reload attempt for that bundle')
+		}
         const firstSetup = shouldOpenSetup(config)
         setBootOpen(firstSetup)
         setBootResolved(true)
@@ -1087,12 +1117,18 @@ export default function App() {
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
-              if (refreshAfterHostRestart.current) {
-                refreshAfterHostRestart.current = false
-                window.location.reload()
-                return
-              }
-              void refresh()
+              refreshAfterHostRestart.current = false
+              // Probe on every open, not only after a witnessed update event.
+              // This closes the missed-event, sleeping-tab, and reconnect gap.
+              void reconcileHostResources(true).then((convergence) => {
+                if (convergence === 'current') {
+                  void refresh()
+                } else if (convergence === 'blocked') {
+                  setStreamDetail('The host WebUI bundle changed, but this tab already used its safe reload attempt for that bundle')
+                }
+              }).catch((cause) => {
+                setStreamDetail(cause instanceof Error ? cause.message : String(cause))
+              })
             } else {
               setSnapshot((current) => snapshotAfterTransportLoss(current, state, detail))
             }
@@ -1109,7 +1145,7 @@ export default function App() {
       }
     })()
     return () => { abort.abort(); stopStream() }
-  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance, token])
+  }, [appInstanceID, applyAuthoritativeUIConfig, demo, navigate, notify, reconcileHostResources, refresh, refreshHostAppearance, token])
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
@@ -1152,10 +1188,11 @@ export default function App() {
       : streamState === 'open'
         ? 'neutral'
         : 'warn'
+  const controllerConnectionLabel = formatConnectionState(appearance.locale, snapshot.connection_state, snapshot.connected, snapshot.paused)
   const transportLabel = snapshot.connected
     ? streamState === 'open' ? t('live') : streamState
     : streamState === 'open'
-      ? appearance.locale === 'fa' ? 'میزبان آماده' : 'Host ready'
+      ? appearance.locale === 'fa' ? 'IPC متصل' : 'IPC connected'
       : t('offline')
   const quickCommands = snapshot.connected
     ? [
@@ -1206,7 +1243,7 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="sidebar__footer"><ShieldCheck size={17} /><div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد متصل' : 'Controller connected') : (appearance.locale === 'fa' ? 'میزبان آماده' : 'Host ready')}</strong><span>{footerTransport}</span></div></div>
+        <div className="sidebar__footer"><ShieldCheck size={17} /><div><strong>{controllerConnectionLabel}</strong><span>{footerTransport}</span></div></div>
       </aside>
 
       <header className="topbar">

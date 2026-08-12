@@ -451,6 +451,9 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 		result.BuildTime != "2026-08-02T00:00:00Z" {
 		t.Fatalf("UI config status=%d result=%+v", response.StatusCode, result)
 	}
+	if got := response.Header.Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("UI config Cache-Control=%q, want no-store", got)
+	}
 
 	request, err := http.NewRequest(http.MethodPost, server.URL+"/api/ui-config", nil)
 	if err != nil {

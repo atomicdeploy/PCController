@@ -105,7 +105,11 @@ export function DataWorkspaceView({ locale, t }: SharedViewProps) {
         eyebrow={copy('Local data and streaming', 'داده و جریان محلی')}
         title={t('data')}
         detail={copy('A loopback-only workbench for deliberate data exchange; no service-specific routes or credentials are embedded.', 'میزکاری محدود به شبکهٔ محلی برای تبادل آگاهانهٔ داده؛ هیچ مسیر اختصاصی سرویس یا اطلاعات دسترسی در رابط تعبیه نشده است.')}
-        action={<StatusBadge tone={error ? 'warn' : response ? 'good' : 'info'}>{response ? copy('RESPONSE READY', 'پاسخ آماده') : copy('IDLE', 'آماده')}</StatusBadge>}
+        action={error
+          ? <StatusBadge tone="warn">{copy('REQUEST FAILED', 'درخواست ناموفق')}</StatusBadge>
+          : response !== null
+            ? <StatusBadge tone="good">{copy(`${formatCompact(locale, records.length)} RECORDS`, `${formatCompact(locale, records.length)} رکورد`)}</StatusBadge>
+            : undefined}
       />
       <nav className="subnav" aria-label={copy('Data workspace sections', 'بخش‌های فضای داده')}>
         {([

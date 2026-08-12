@@ -9,12 +9,14 @@ import (
 	"embed"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -30,6 +32,8 @@ var defaultReservedPrefixes = []string{
 var embeddedFiles embed.FS
 
 var embeddedHandler = mustEmbeddedHandler()
+
+var indexReferencePattern = regexp.MustCompile(`(?i)\b(?:src|href)\s*=\s*["']([^"']+)["']`)
 
 type assetMetadata struct {
 	etag    string
@@ -68,11 +72,39 @@ func NewHandler(files fs.FS, additionalReservedPrefixes ...string) (http.Handler
 	if _, ok := assets["index.html"]; !ok {
 		return nil, errors.New("web UI filesystem does not contain index.html")
 	}
+	if err := validateIndexReferences(files, assets); err != nil {
+		return nil, err
+	}
 	return &staticHandler{
 		files:            files,
 		assets:           assets,
 		reservedPrefixes: normalizeReservedPrefixes(additionalReservedPrefixes),
 	}, nil
+}
+
+func validateIndexReferences(files fs.FS, assets map[string]assetMetadata) error {
+	index, err := fs.ReadFile(files, "index.html")
+	if err != nil {
+		return fmt.Errorf("read web UI index: %w", err)
+	}
+	for _, match := range indexReferencePattern.FindAllSubmatch(index, -1) {
+		reference := strings.TrimSpace(string(match[1]))
+		parsed, parseErr := url.Parse(reference)
+		if parseErr != nil {
+			return fmt.Errorf("parse web UI index reference %q: %w", reference, parseErr)
+		}
+		if parsed.Scheme != "" || parsed.Host != "" || parsed.Path == "" {
+			continue
+		}
+		name := strings.TrimPrefix(path.Clean("/"+parsed.Path), "/")
+		if name == "" {
+			continue
+		}
+		if _, ok := assets[name]; !ok {
+			return fmt.Errorf("web UI index references missing asset %q", name)
+		}
+	}
+	return nil
 }
 
 func mustEmbeddedHandler(additionalReservedPrefixes ...string) http.Handler {
@@ -163,6 +195,7 @@ func (handler *staticHandler) ServeHTTP(writer http.ResponseWriter, request *htt
 	// genuinely inconsistent package still fails loudly instead of mixing code.
 	if replacement, exists := handler.staleEntryReplacement(name); exists {
 		writer.Header().Set("Cache-Control", "no-store")
+		writer.Header().Set("X-PCController-Asset-Replacement", replacement)
 		http.Redirect(writer, request, "/"+replacement, http.StatusTemporaryRedirect)
 		return
 	}
@@ -239,6 +272,8 @@ func (handler *staticHandler) serveAsset(
 	writer.Header().Set("ETag", metadata.etag)
 	if name != "index.html" && fingerprintedAsset(name) {
 		writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else if name == "index.html" {
+		writer.Header().Set("Cache-Control", "no-store")
 	} else {
 		writer.Header().Set("Cache-Control", "no-cache")
 	}

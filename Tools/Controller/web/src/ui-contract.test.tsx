@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } from './components'
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
+import { translator } from './i18n'
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
 import {
   ControlsView,
@@ -81,6 +82,21 @@ describe('offline and settings UI contracts', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} />)
     expect(markup).toContain('Telemetry history')
     expect(markup).not.toMatch(/\bLive\b/)
+  })
+
+  it('shows the live connection state instead of dashboard-ready filler while disconnected', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      snapshot={{
+        ...emptySnapshot,
+        connection_state: 'reconnecting',
+        connection_reason: 'Last resolved endpoint refused the connection',
+      }}
+    />)
+    expect(markup).toContain('Reconnecting')
+    expect(markup).toContain('Last resolved endpoint refused the connection')
+    expect(markup).not.toMatch(/dashboard is (?:now )?ready/i)
   })
 
   it('keeps the first-run synchronization phase truthful before a controller is known', () => {
