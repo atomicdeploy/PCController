@@ -22,8 +22,8 @@ func Play(ctx context.Context, driverDirectory string, frequencyHz, durationMS i
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if strings.TrimSpace(driverDirectory) == "" {
-		return errors.New("WinRing0 driver directory is required")
+	if err := validateDriverDirectory(driverDirectory); err != nil {
+		return err
 	}
 	if frequencyHz < MinFrequencyHz || frequencyHz > MaxFrequencyHz {
 		return fmt.Errorf("speaker frequency must be %d..%d Hz", MinFrequencyHz, MaxFrequencyHz)

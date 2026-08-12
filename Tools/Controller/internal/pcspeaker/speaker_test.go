@@ -14,3 +14,13 @@ func TestPITDivisorAndBounds(t *testing.T) {
 		t.Fatal("zero frequency was accepted")
 	}
 }
+
+func TestDriverDirectoryIsPlatformSpecific(t *testing.T) {
+	if err := validateDriverDirectory(""); err != nil {
+		// Windows requires the optional WinRing0 directory; Linux and other
+		// platforms use their native device path instead.
+		if err.Error() != "WinRing0 driver directory is required" {
+			t.Fatalf("unexpected validation error: %v", err)
+		}
+	}
+}
