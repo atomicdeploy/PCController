@@ -37,6 +37,10 @@ type MacroStatus struct {
 	DispatchErrors byte   `json:"dispatch_errors"`
 	StartedAtUS    uint32 `json:"started_at_us"`
 	TotalSteps     uint16 `json:"total_steps"`
+	// DroppedSteps is retained in the durable JSON shape so recovery markers
+	// written by the former schema-3 recorder remain readable. The schema-2
+	// UART report has no such field, so freshly parsed reports leave it zero.
+	DroppedSteps uint16 `json:"dropped_steps,omitempty"`
 }
 
 func (status MacroStatus) Free() byte {
@@ -52,7 +56,7 @@ func (status MacroStatus) Active() bool {
 
 func (status MacroStatus) Faithful() bool {
 	return status.State == MacroCompleted && status.Underruns == 0 &&
-		status.DispatchErrors == 0
+		status.DispatchErrors == 0 && status.DroppedSteps == 0
 }
 
 // ParseMacroStatus accepts the shared [EventMacro, report] envelope. The event
