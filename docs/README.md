@@ -23,6 +23,7 @@ host-owned JSON configuration are documented separately on purpose.
 | Check wiring and electrical assumptions | [Hardware Initialization and Tuning](Hardware-Initialization-and-Tuning.md) |
 | Verify what each UI/API can reach | [Control-Surface Capability Matrix](../Tools/Controller/docs/Control-Surface-Capability-Matrix.md) |
 | Review current acceptance boundaries | [Project Acceptance](Project-Checklist.md) |
+| Run the current exact host/firmware delivery gates | [Live Delivery Acceptance](Live-Delivery-Acceptance.md) |
 
 ## 🧭 Product references
 
@@ -82,6 +83,8 @@ device identity or interface settings.
 - [Requirements Backlog](Requirements-Backlog.md) — issue-linked open work.
 - [Project Acceptance](Project-Checklist.md) — current software gates and
   hardware work that remains deliberately unclaimed.
+- [Live Delivery Acceptance](Live-Delivery-Acceptance.md) — exact packaged-host,
+  firmware, multi-client, WebUI, macro, messaging, and live-board gates.
 
 ## ✍️ Documentation rules
 
