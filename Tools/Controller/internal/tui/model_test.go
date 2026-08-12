@@ -605,6 +605,123 @@ func TestMouseOutputToggleUpdatesInjectedState(t *testing.T) {
 	}
 }
 
+func TestControlTableUsesMappedGroupSeparatorsAndStableHeaders(t *testing.T) {
+	model := readyModel(t, PageOutputs)
+	model.height = 42
+	plain := ansi.Strip(model.outputsPage(model.snapshot()))
+	for _, expected := range []string{"CONTROL", "STATUS", "─ RELAYS", "─ MOTION", "─ PWM", "CH 10 · User PWM 11"} {
+		if !strings.Contains(plain, expected) {
+			t.Errorf("control table missing %q:\n%s", expected, plain)
+		}
+	}
+	for _, unwanted := range []string{"GROUP", "OUTPUT", "STATE / LEVEL", "Enter turns", "R1 Direction A", "…"} {
+		if strings.Contains(plain, unwanted) {
+			t.Errorf("control table retained unwanted text %q:\n%s", unwanted, plain)
+		}
+	}
+
+	columns := outputTableColumns(model.presentationTableWidth(118))
+	rows := model.controlTableRows(model.snapshot(), max(8, columns[1].Width-7))
+	visible := visibleControlTableLines(rows, tableBodyRows(model.contentHeight()), model.cursor)
+	findLine := func(logical int, group string) int {
+		t.Helper()
+		for index, line := range visible {
+			if line.Logical == logical && line.Group == group {
+				return index
+			}
+		}
+		t.Fatalf("logical=%d group=%q absent from visible table: %#v", logical, group, visible)
+		return -1
+	}
+
+	original := model.cursor
+	separator := findLine(-1, "MOTION")
+	updated, _ := model.handleContentClick(3+separator, 10)
+	model = updated.(Model)
+	if model.cursor != original {
+		t.Fatalf("group separator moved cursor to %d, want %d", model.cursor, original)
+	}
+	motion := findLine(9, "")
+	updated, _ = model.handleContentClick(3+motion, 10)
+	if got := updated.(Model).cursor; got != 9 {
+		t.Fatalf("first motion row selected logical %d, want 9", got)
+	}
+}
+
+func TestControlTableSemanticColorsCanBeDisabled(t *testing.T) {
+	priorProfile := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(priorProfile) })
+
+	model := readyModel(t, PageOutputs)
+	model.uiValue.ControlValueColors = true
+	colored := model.outputsPage(model.snapshot())
+	for _, sequence := range []string{"38;2;247;118;142", "38;2;158;206;105"} {
+		if !strings.Contains(colored, sequence) {
+			t.Fatalf("semantic control color %q is absent:\n%q", sequence, colored)
+		}
+	}
+	model.uiValue.ControlValueColors = false
+	plain := model.outputsPage(model.snapshot())
+	for _, sequence := range []string{"38;2;247;118;142", "38;2;158;206;105"} {
+		if strings.Contains(plain, sequence) {
+			t.Fatalf("disabled semantic control color %q is still present", sequence)
+		}
+	}
+}
+
+func TestControlPWMSupportsHorizontalWheelAndMouseDrag(t *testing.T) {
+	model := readyModel(t, PageOutputs)
+	model.cursor = 15
+	before := model.pwmValues[0]
+	updated, command := model.Update(tea.MouseMsg{Button: tea.MouseButtonWheelRight, Action: tea.MouseActionPress})
+	model = updated.(Model)
+	if command == nil || model.pwmValues[0] <= before {
+		t.Fatalf("horizontal wheel did not increase PWM: before=%d after=%d command=%v", before, model.pwmValues[0], command)
+	}
+
+	model.cursor = 0
+	tableWidth := model.presentationTableWidth(118)
+	columns := outputTableColumns(tableWidth)
+	rows := model.controlTableRows(model.snapshot(), max(8, columns[1].Width-7))
+	visible := visibleControlTableLines(rows, tableBodyRows(model.contentHeight()), model.cursor)
+	line := -1
+	for index, candidate := range visible {
+		if candidate.Logical == 15 {
+			line = index
+			break
+		}
+	}
+	if line < 0 {
+		t.Fatal("first PWM row is not visible in the standard Control viewport")
+	}
+	contentY := 4 + strings.Count(model.tabBar(), "\n") + 1
+	tableStart := max(0, (model.width-tableWidth)/2)
+	sliderStart := tableStart + 1 + columns[0].Width + 1
+	levelWidth := max(8, columns[1].Width-7)
+	updated, command = model.Update(tea.MouseMsg{
+		X: sliderStart + levelWidth/3, Y: contentY + 3 + line,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	model = updated.(Model)
+	if command == nil || model.cursor != 15 || model.pwmDragChannel != 0 {
+		t.Fatalf("slider press state cursor=%d drag=%d command=%v", model.cursor, model.pwmDragChannel, command)
+	}
+	pressed := model.pwmValues[0]
+	updated, command = model.Update(tea.MouseMsg{
+		X: sliderStart + levelWidth - 1, Y: contentY + 3 + line,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion,
+	})
+	model = updated.(Model)
+	if command == nil || model.pwmValues[0] <= pressed {
+		t.Fatalf("slider drag did not increase PWM: pressed=%d dragged=%d command=%v", pressed, model.pwmValues[0], command)
+	}
+	updated, _ = model.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease})
+	if got := updated.(Model).pwmDragChannel; got != -1 {
+		t.Fatalf("slider release left drag channel %d active", got)
+	}
+}
+
 func TestMenuAndSettingsMouseHitTestingFollowRenderedGeometry(t *testing.T) {
 	model := readyModel(t, PageMenus)
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 160, Height: 60})

@@ -88,6 +88,7 @@ type UI struct {
 	TUIConsole           TUIConsole        `json:"tui_console"`
 	SeparatePortButtons  bool              `json:"separate_port_buttons"`
 	TableLayout          string            `json:"table_layout"`
+	ControlValueColors   bool              `json:"control_value_colors"`
 	PeripheralNames      map[string]string `json:"peripheral_names,omitempty"`
 	SetupComplete        bool              `json:"setup_complete"`
 	WelcomeMelody        string            `json:"welcome_melody"`
@@ -327,6 +328,7 @@ func Defaults() Config {
 			},
 			TUIConsole:           productTUIConsoleDefaults(),
 			TableLayout:          "compact",
+			ControlValueColors:   true,
 			WelcomeMelody:        "notify",
 			StatusIntervalMS:     200,
 			IdleStatusIntervalMS: 0,
