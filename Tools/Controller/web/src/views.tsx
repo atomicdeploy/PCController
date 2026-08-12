@@ -84,7 +84,7 @@ import {
   TextField,
   Toggle,
 } from './components'
-import { execute, rpc } from './api'
+import { execute, rpc, type StreamState } from './api'
 import { settingsSetCommand } from './command-line'
 import { EventList } from './event-collection'
 import { HotkeyEditor } from './hotkey-settings-editor'
@@ -144,9 +144,11 @@ export interface SharedViewProps {
   refresh: () => Promise<void>
   openDialog: (dialog: Omit<DialogState, 'open'>) => void
   transport: {
-    streamState: 'connecting' | 'open' | 'waiting' | 'closed'
+    streamState: StreamState
+    detail: string
     tabBusSupported: boolean
     tabPeers: number
+    requestAuthentication: () => void
   }
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
@@ -174,8 +176,9 @@ export function DashboardView(props: SharedViewProps) {
   const { appTitle, snapshot, samples, events, locale, t, command, refresh, openDialog } = props
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const status = snapshot.status
-  const connectedTone = snapshot.connected ? 'good' : snapshot.paused ? 'warn' : 'bad'
-  const connectionLabel = formatConnectionState(locale, snapshot.connection_state, snapshot.connected, snapshot.paused)
+  const authenticationRequired = props.transport.streamState === 'authentication-required'
+  const connectedTone = snapshot.connected ? 'good' : authenticationRequired || snapshot.paused ? 'warn' : 'bad'
+  const connectionLabel = authenticationRequired ? t('authenticationRequired') : formatConnectionState(locale, snapshot.connection_state, snapshot.connected, snapshot.paused)
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
@@ -199,14 +202,18 @@ export function DashboardView(props: SharedViewProps) {
       <SectionTitle
         eyebrow={snapshot.connected ? t('liveTelemetry') : connectionLabel}
         title={t('dashboard')}
-        detail={pageDetail(snapshot, appTitle, locale)}
+        detail={authenticationRequired ? props.transport.detail : pageDetail(snapshot, appTitle, locale)}
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
               {connectionLabel}
             </StatusBadge>
-            {!snapshot.connected && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
-            <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
+            {authenticationRequired
+              ? <Button icon={ShieldCheck} compact tone="primary" onClick={props.transport.requestAuthentication}>{t('enterSessionToken')}</Button>
+              : <>
+                  {!snapshot.connected && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
+                  <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
+                </>}
           </div>
         }
       />
@@ -277,7 +284,7 @@ export function DashboardView(props: SharedViewProps) {
         <Card icon={Gauge} iconTone={snapshot.connected ? 'green' : 'amber'} title={t('status')} eyebrow={t('device')} className="device-card" menu={snapshot.connected ? [
           { label: copy('Read identity', 'خواندن شناسه'), icon: Cpu, onSelect: () => { void command('hello') } },
           { label: copy('Open controller controls', 'بازکردن کنترل‌های برد'), icon: CircuitBoard, onSelect: () => { window.location.hash = '#/controls' } },
-        ] : [
+        ] : authenticationRequired ? [] : [
           { label: t('reconnect'), icon: Cable, onSelect: () => { void command('reconnect') } },
         ]}>
           <div className="data-list">
@@ -454,15 +461,18 @@ export function ControlsView(props: SharedViewProps) {
   }
 
   if (!snapshot.connected) {
+    const authenticationRequired = props.transport.streamState === 'authentication-required'
     return (
       <>
-        <SectionTitle eyebrow={copy('Controller controls', 'کنترل‌های برد')} title={t('controls')} detail={snapshot.connection_reason || copy('Controller offline', 'کنترلر آفلاین است')} />
-        <Card icon={CircuitBoard} iconTone="amber" title={copy('Controller controls are unavailable', 'کنترل‌های برد در دسترس نیست')} eyebrow={copy('No authenticated controller', 'کنترلر معتبری متصل نیست')}>
+        <SectionTitle eyebrow={copy('Controller controls', 'کنترل‌های برد')} title={t('controls')} detail={authenticationRequired ? props.transport.detail : snapshot.connection_reason || copy('Controller offline', 'کنترلر آفلاین است')} />
+        <Card icon={authenticationRequired ? ShieldCheck : CircuitBoard} iconTone="amber" title={authenticationRequired ? t('authenticationRequired') : copy('Controller controls are unavailable', 'کنترل‌های برد در دسترس نیست')} eyebrow={authenticationRequired ? 'HTTP 401' : copy('No authenticated controller', 'کنترلر معتبری متصل نیست')}>
           <EmptyState
-            icon={Cable}
-            title={copy('Connect the controller to reveal its controls', 'برای نمایش کنترل‌ها، برد را متصل کنید')}
-            detail={copy('Host tools and the full terminal remain available in Workbench.', 'ابزارهای میزبان و ترمینال کامل همچنان در میزکار در دسترس‌اند.')}
-            action={<Button tone="primary" icon={Cable} onClick={() => void command('reconnect')}>{t('reconnect')}</Button>}
+            icon={authenticationRequired ? ShieldCheck : Cable}
+            title={authenticationRequired ? t('authenticationRequired') : copy('Connect the controller to reveal its controls', 'برای نمایش کنترل‌ها، برد را متصل کنید')}
+            detail={authenticationRequired ? props.transport.detail : copy('Host tools and the full terminal remain available in Workbench.', 'ابزارهای میزبان و ترمینال کامل همچنان در میزکار در دسترس‌اند.')}
+            action={authenticationRequired
+              ? <Button tone="primary" icon={ShieldCheck} onClick={props.transport.requestAuthentication}>{t('enterSessionToken')}</Button>
+              : <Button tone="primary" icon={Cable} onClick={() => void command('reconnect')}>{t('reconnect')}</Button>}
           />
         </Card>
       </>
@@ -724,7 +734,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, transport, sessionAccessRequest = 0 }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void>; sessionAccessRequest?: number }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
     'Application title is required.': 'عنوان برنامه الزامی است.',
@@ -789,6 +799,16 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const normalizedToken = useMemo(() => normalizeSessionToken(draftToken), [draftToken])
 	const boardSilent = (snapshot.settings.flags & 0x01) !== 0
 	const hostSilent = !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
+  useEffect(() => {
+    if (sessionAccessRequest <= 0) return
+    const frame = window.requestAnimationFrame(() => {
+      const field = document.getElementById('session-access-token')
+      if (!(field instanceof HTMLInputElement)) return
+      field.focus({ preventScroll: true })
+      field.scrollIntoView({ block: 'center', behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [appearance.reduceMotion, sessionAccessRequest])
 	const buzzerPath = buzzerPathFromState(boardSilent, hostSilent)
 	const applyBuzzerPath = async (value: BuzzerPath) => {
 		setBuzzerPathBusy(true)
@@ -1141,6 +1161,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
             label={t('authToken')}
             type="password"
             value={draftToken}
+            id="session-access-token"
             autoComplete="off"
             spellCheck={false}
             onInput={(event) => setDraftToken(normalizeSessionToken(event.currentTarget.value))}
@@ -1186,11 +1207,13 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           </>}
         </Card>}
 
-        <Card icon={snapshot.connected ? Usb : Cable} iconTone={snapshot.connected ? 'green' : 'amber'} title={t('connection')} eyebrow={snapshot.connected ? copy('Controller connected', 'کنترلر متصل است') : copy('Controller offline', 'کنترلر آفلاین است')} className="settings-card">
+        <Card icon={snapshot.connected ? Usb : transport.streamState === 'authentication-required' ? ShieldCheck : Cable} iconTone={snapshot.connected ? 'green' : 'amber'} title={t('connection')} eyebrow={snapshot.connected ? copy('Controller connected', 'کنترلر متصل است') : transport.streamState === 'authentication-required' ? t('authenticationRequired') : copy('Controller offline', 'کنترلر آفلاین است')} className="settings-card">
           <div className="data-list"><DataRow label={copy('State', 'وضعیت')} value={snapshot.connection_state} tone={snapshot.connected ? 'good' : 'warn'} /><DataRow label={copy('Port', 'درگاه')} value={snapshot.port.name || copy('automatic', 'خودکار')} mono /><DataRow label="VID:PID" value={`${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'}`} mono /><DataRow label={copy('Serial', 'سریال')} value={snapshot.port.serial_number || '—'} mono /><DataRow label={copy('Baud', 'نرخ باد')} value="115200 8N1" mono /></div>
           <div className="inline-actions">{snapshot.connected
             ? <Button icon={Unplug} onClick={() => void command('close')}>{copy('Pause controller', 'توقف کنترلر')}</Button>
-            : <Button icon={Cable} tone="primary" onClick={() => void command('reconnect')}>{t('reconnect')}</Button>}
+            : transport.streamState === 'authentication-required'
+              ? <Button icon={ShieldCheck} tone="primary" onClick={transport.requestAuthentication}>{t('enterSessionToken')}</Button>
+              : <Button icon={Cable} tone="primary" onClick={() => void command('reconnect')}>{t('reconnect')}</Button>}
           </div>
         </Card>
 

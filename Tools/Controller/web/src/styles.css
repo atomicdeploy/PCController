@@ -304,6 +304,27 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .topbar-icon i { position: absolute; width: 5px; height: 5px; inset-inline-end: 6px; top: 5px; border-radius: 1px; background: var(--red); box-shadow: 0 0 8px var(--red); }
 
 .app-main { grid-column: 2; min-height: 0; overflow: auto; scroll-behavior: smooth; }
+.authentication-required {
+  width: min(1540px, calc(100% - clamp(36px, 4.8vw, 76px)));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin: 18px auto 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--amber) 38%, var(--line));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--amber-soft) 72%, var(--surface));
+  color: var(--amber);
+}
+.authentication-required > div { min-width: 0; }
+.authentication-required strong { display: block; color: var(--text); font-size: 12px; }
+.authentication-required p {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font: 9px/1.5 var(--font-mono);
+}
 .app-shell.is-bootstrap-pending { visibility: hidden; }
 .page { width: min(1540px, 100%); min-height: 100%; margin: 0 auto; padding: 28px clamp(18px, 2.4vw, 38px) 52px; }
 .page[data-route-focus-target]:focus, .page [data-route-focus-target]:focus { outline: none; }
@@ -917,6 +938,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
   body { background-size: auto; }
   .topbar { position: relative; }.breadcrumbs span, .breadcrumbs i { display: none; }.breadcrumbs strong { font-size: 11px; }.topbar__actions { gap: 2px; }.topbar-icon { width: 31px; height: 31px; }.command-trigger kbd { display: none; }
   .app-main { padding-bottom: 70px; }.page { padding: 20px 13px 35px; }
+  .authentication-required { width: calc(100% - 26px); grid-template-columns: auto minmax(0, 1fr); margin-top: 13px; }.authentication-required .button { grid-column: 1 / -1; justify-self: stretch; }
   .section-title { align-items: flex-start; margin-bottom: 17px; }.section-title h1 { font-size: 27px; }.section-title p { font-size: 11px; }.section-title__action .button { display: none; }
   .hero-panel { min-height: 230px; grid-template-columns: 1fr; padding: 23px 20px; }.hero-panel__readout { min-width: 0; padding: 10px 0 0; border-inline-start: 0; border-top: 1px solid var(--line); }
   .metric-grid { grid-template-columns: 1fr 1fr; gap: 9px; }.metric { min-height: 152px; padding-inline: 13px; }.metric__value strong { font-size: 21px; }.metric__detail { display: none; }

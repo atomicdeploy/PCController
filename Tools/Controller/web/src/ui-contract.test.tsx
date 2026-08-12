@@ -37,7 +37,13 @@ function shared(): SharedViewProps {
     command: vi.fn(async () => ''),
     refresh: vi.fn(async () => undefined),
     openDialog: vi.fn(),
-    transport: { streamState: 'open', tabBusSupported: true, tabPeers: 0 },
+    transport: {
+      streamState: 'open',
+      detail: '',
+      tabBusSupported: true,
+      tabPeers: 0,
+      requestAuthentication: vi.fn(),
+    },
     relayedTerminal: [],
     broadcastTerminal: vi.fn(),
     boardSettingsReadState: 'idle',
@@ -97,6 +103,29 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Reconnecting')
     expect(markup).toContain('Last resolved endpoint refused the connection')
     expect(markup).not.toMatch(/dashboard is (?:now )?ready/i)
+  })
+
+  it('renders authentication-required with the live HTTP reason and token action', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      transport={{
+        streamState: 'authentication-required',
+        detail: 'HTTP 401 · authentication required',
+        tabBusSupported: true,
+        tabPeers: 0,
+        requestAuthentication: vi.fn(),
+      }}
+      snapshot={{
+        ...emptySnapshot,
+        connection_state: 'disconnected',
+        connection_reason: 'HTTP 401 · authentication required',
+      }}
+    />)
+    expect(markup).toContain('Authentication required')
+    expect(markup).toContain('HTTP 401 · authentication required')
+    expect(markup).toContain('Enter session token')
+    expect(markup).not.toContain('Controller offline')
   })
 
   it('keeps the first-run synchronization phase truthful before a controller is known', () => {

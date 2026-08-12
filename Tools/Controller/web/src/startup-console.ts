@@ -1,6 +1,6 @@
 import type { UIConfig } from './types'
 
-export type StartupStreamState = 'connecting' | 'open' | 'waiting' | 'closed'
+export type StartupStreamState = 'connecting' | 'open' | 'waiting' | 'closed' | 'authentication-required'
 
 export interface StartupConsoleFacts {
   productTitle: string
@@ -50,6 +50,7 @@ function streamLabel(state: StartupStreamState): string {
     case 'connecting': return 'Host event stream connecting'
     case 'waiting': return 'Host event stream waiting to reconnect'
     case 'closed': return 'Host event stream closed'
+    case 'authentication-required': return 'Host event stream requires authentication'
   }
 }
 

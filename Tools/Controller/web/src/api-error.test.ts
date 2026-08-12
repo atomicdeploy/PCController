@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getUIConfig, responseErrorDetail } from './api'
+import { getSnapshot, getUIConfig, responseErrorDetail, streamFailureState, transportFailureDetail } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -14,6 +14,25 @@ describe('API error details', () => {
   it('retains text and HTTP fallbacks', () => {
     expect(responseErrorDetail('not allowed', 'Forbidden', 403)).toBe('not allowed')
     expect(responseErrorDetail(null, 'Not Found', 404)).toBe('Not Found')
+  })
+
+  it('preserves an HTTP authentication challenge as a distinct transport state', async () => {
+    vi.stubGlobal('location', new URL('http://server:8787/'))
+    vi.stubGlobal('sessionStorage', {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: 'authentication required' }),
+      { status: 401, statusText: 'Unauthorized' },
+    )))
+
+    let failure: unknown
+    try { await getSnapshot() } catch (cause) { failure = cause }
+
+    expect(streamFailureState(failure)).toBe('authentication-required')
+    expect(transportFailureDetail(failure)).toBe('HTTP 401 · authentication required')
   })
 
   it('requires the current setup contract while tolerating future fields', async () => {

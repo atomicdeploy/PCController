@@ -34,6 +34,35 @@ export function setToken(value: string): void {
   else sessionStorage.removeItem(tokenKey)
 }
 
+export type StreamState = 'connecting' | 'open' | 'waiting' | 'closed' | 'authentication-required'
+export type StreamFailureState = Extract<StreamState, 'waiting' | 'authentication-required'>
+
+/** HTTP failure retaining machine-readable status without exposing credentials. */
+export class HTTPResponseError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'HTTPResponseError'
+    this.status = status
+  }
+}
+
+/** Distinguishes a credential challenge from an unavailable transport. */
+export function streamFailureState(cause: unknown): StreamFailureState {
+  return cause instanceof HTTPResponseError && cause.status === 401
+    ? 'authentication-required'
+    : 'waiting'
+}
+
+/** Keeps the host-provided reason and HTTP status available to connection UI. */
+export function transportFailureDetail(cause: unknown): string {
+  const detail = cause instanceof Error ? cause.message : String(cause)
+  return cause instanceof HTTPResponseError
+    ? `HTTP ${cause.status}${detail ? ` · ${detail}` : ''}`
+    : detail
+}
+
 function headers(json = false): HeadersInit {
   const result: Record<string, string> = {}
   if (json) result['Content-Type'] = 'application/json'
@@ -67,7 +96,7 @@ async function decode<T>(response: Response): Promise<T> {
   }
   if (!response.ok) {
     const detail = responseErrorDetail(value, response.statusText, response.status)
-    throw new Error(detail || `HTTP ${response.status}`)
+    throw new HTTPResponseError(detail || response.statusText || 'HTTP request failed', response.status)
   }
   return value as T
 }
@@ -166,7 +195,7 @@ export function execute(command: string, signal?: AbortSignal): Promise<CommandR
 export interface StreamHandlers {
   status: (value: StatusUpdate) => void
   event: (value: ControllerEvent) => void
-  state: (state: 'connecting' | 'open' | 'waiting' | 'closed', detail?: string) => void
+  state: (state: StreamState, detail?: string) => void
 }
 
 interface SessionTicket {
@@ -205,11 +234,12 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
   let attempt = 0
   let ticketAbort: AbortController | null = null
 
-  const scheduleRetry = (detail: string) => {
+  const scheduleRetry = (detail: string, state: StreamFailureState = 'waiting') => {
     if (stopped) return
     retry += 1
     const delay = Math.min(12_000, 500 * 2 ** Math.min(retry, 5)) + Math.floor(Math.random() * 250)
-    handlers.state('waiting', detail || `retrying in ${Math.ceil(delay / 1000)}s`)
+    handlers.state(state, detail || `retrying in ${Math.ceil(delay / 1000)}s`)
+    if (state === 'authentication-required') return
     window.clearTimeout(timer)
     timer = window.setTimeout(() => { void open() }, delay)
   }
@@ -226,7 +256,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       protocols = await websocketProtocols(config, authorizationAbort.signal)
     } catch (cause) {
       if (stopped || currentAttempt !== attempt || authorizationAbort.signal.aborted) return
-      scheduleRetry(cause instanceof Error ? cause.message : String(cause))
+      scheduleRetry(transportFailureDetail(cause), streamFailureState(cause))
       return
     } finally {
       if (ticketAbort === authorizationAbort) ticketAbort = null

@@ -41,7 +41,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken, streamFailureState, transportFailureDetail, type StreamState } from './api'
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -126,6 +126,19 @@ export function pageViewFor(page: PageID): LazyExoticComponent<ComponentType<any
 export function shouldOpenSetup(config: Pick<UIConfig, 'setup_complete'> | null, demo = false): boolean {
   return demo || (config !== null && !config.setup_complete)
 }
+export function AuthenticationRequiredNotice({ title, detail, actionLabel, onAction }: { title: string; detail: string; actionLabel: string; onAction: () => void }) {
+  return (
+    <section className="authentication-required" role="alert" aria-live="assertive">
+      <ShieldCheck size={22} aria-hidden="true" />
+      <div>
+        <strong>{title}</strong>
+        <p>{detail}</p>
+      </div>
+      <Button tone="primary" icon={ShieldCheck} onClick={onAction}>{actionLabel}</Button>
+    </section>
+  )
+}
+
 
 const defaultAppearance: Appearance = {
   theme: 'system',
@@ -297,7 +310,7 @@ export function commandWarning(command: string, locale: Appearance['locale']): C
 
 export function snapshotAfterTransportLoss(
   current: Snapshot,
-  state: 'connecting' | 'waiting' | 'closed',
+  state: Exclude<StreamState, 'open'>,
   detail = '',
 ): Snapshot {
   return {
@@ -344,7 +357,7 @@ export default function App() {
   const [events, setEvents] = useState<ControllerEvent[]>(() => demo ? Array.from({ length: 12 }, (_, index) => demoEvent(index + 1)) : [])
   const [boardSettingsReadState, setBoardSettingsReadState] = useState<BoardSettingsReadState>(demo ? 'ready' : 'idle')
   const [uiConfig, setUIConfig] = useState<UIConfig | null>(null)
-  const [streamState, setStreamState] = useState<'connecting' | 'open' | 'waiting' | 'closed'>(demo ? 'open' : 'connecting')
+  const [streamState, setStreamState] = useState<StreamState>(demo ? 'open' : 'connecting')
   const [streamDetail, setStreamDetail] = useState('')
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [dialog, setDialog] = useState<DialogState>({ open: false, title: '', body: '', confirmLabel: '' })
@@ -359,6 +372,7 @@ export default function App() {
   const [bootTarget, setBootTarget] = useState(demo ? 100 : 24)
   const [startupProbeResolved, setStartupProbeResolved] = useState(demo)
   const [token, setTokenState] = useState(getToken)
+  const [sessionAccessRequest, setSessionAccessRequest] = useState(0)
   const [tabBusSupported, setTabBusSupported] = useState(false)
   const [tabPeers, setTabPeers] = useState(0)
   const [appInstanceID, setAppInstanceID] = useState('')
@@ -659,7 +673,15 @@ export default function App() {
       setSnapshot(value)
       if (value.have_status) setSamples((current) => [...current.slice(-71), sampleFrom(value)])
     } catch (cause) {
-      notify('warning', 'Snapshot unavailable', cause instanceof Error ? cause.message : String(cause))
+      const failureState = streamFailureState(cause)
+      const detail = transportFailureDetail(cause)
+      if (failureState === 'authentication-required') {
+        setStreamState(failureState)
+        setStreamDetail(detail)
+        setSnapshot((current) => snapshotAfterTransportLoss(current, failureState, detail))
+      } else {
+        notify('warning', 'Snapshot unavailable', detail)
+      }
     }
   }, [demo, notify])
 
@@ -769,6 +791,11 @@ export default function App() {
     tabChannelRef.current?.publishPresence(document.hidden ? 'hidden' : 'active', value)
     document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
+  const requestAuthentication = useCallback(() => {
+    setSessionAccessRequest((current) => current + 1)
+    navigate('settings')
+  }, [navigate])
+
 
   const saveAppearance = useCallback((value: Appearance) => {
     const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
@@ -894,9 +921,8 @@ export default function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (bootOpen) return
-      const composing = event.isComposing || event.keyCode === 229
+      if (ignoresGlobalHotkeys(event, palette)) return
       if (palette) {
-        if (composing) return
         const choices = navigation.filter((item) => t(item.label).toLowerCase().includes(paletteQuery.toLowerCase()))
         if (event.key === 'Escape') {
           event.preventDefault()
@@ -944,7 +970,6 @@ export default function App() {
         setMobileNav(false)
         return
       }
-      if (ignoresGlobalHotkeys(event)) return
 
       if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'k') {
         event.preventDefault()
@@ -1146,21 +1171,25 @@ export default function App() {
         })
         setBootTarget(100)
       } catch (cause) {
+        const failureState = streamFailureState(cause)
+        const detail = transportFailureDetail(cause)
         setStartupProbeResolved(true)
         setBootOpen(false)
         setBootResolved(true)
-        setStreamState('waiting')
-        setStreamDetail(cause instanceof Error ? cause.message : String(cause))
+        setStreamState(failureState)
+        setStreamDetail(detail)
+        setSnapshot((current) => snapshotAfterTransportLoss(current, failureState, detail))
         setBootTarget(100)
       }
     })()
     return () => { abort.abort(); stopStream() }
   }, [appInstanceID, applyAuthoritativeUIConfig, demo, navigate, notify, reconcileHostResources, refresh, refreshHostAppearance, token])
 
+  const authenticationRequired = streamState === 'authentication-required'
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
-    transport: { streamState, tabBusSupported, tabPeers },
+    transport: { streamState, detail: streamDetail, tabBusSupported, tabPeers, requestAuthentication },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
   }
@@ -1169,7 +1198,7 @@ export default function App() {
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} sessionAccessRequest={sessionAccessRequest} />
         : <PageView {...shared} />}
     </Suspense>
   )
@@ -1198,13 +1227,17 @@ export default function App() {
       : streamState === 'open'
         ? 'neutral'
         : 'warn'
-  const controllerConnectionLabel = formatConnectionState(appearance.locale, snapshot.connection_state, snapshot.connected, snapshot.paused)
-  const transportLabel = snapshot.connected
+  const controllerConnectionLabel = authenticationRequired ? t('authenticationRequired') : formatConnectionState(appearance.locale, snapshot.connection_state, snapshot.connected, snapshot.paused)
+  const transportLabel = authenticationRequired
+    ? t('authenticationRequired')
+    : snapshot.connected
     ? streamState === 'open' ? t('live') : streamState
     : streamState === 'open'
       ? appearance.locale === 'fa' ? 'IPC متصل' : 'IPC connected'
       : t('offline')
-  const quickCommands = snapshot.connected
+  const quickCommands = authenticationRequired
+    ? []
+    : snapshot.connected
     ? [
         ['status', `${snapshot.port.name || (appearance.locale === 'fa' ? 'کنترلر' : 'Controller')} · ${snapshot.status_updated ? formatClock(appearance.locale, snapshot.status_updated) : t('online')}`],
         ['relay off', snapshot.status.active_relays
@@ -1240,7 +1273,7 @@ export default function App() {
 
         <div className="sidebar__status">
           <span className={`status-rail status-rail--${snapshot.connected ? 'good' : 'bad'}`} aria-hidden="true" />
-          <div><strong>{snapshot.connected ? t('online') : t('offline')}</strong><small>{snapshot.port.name || snapshot.connection_state}</small></div>
+          <div><strong>{authenticationRequired ? t('authenticationRequired') : snapshot.connected ? t('online') : t('offline')}</strong><small>{authenticationRequired ? streamDetail : snapshot.port.name || snapshot.connection_state}</small></div>
           <Cpu size={18} />
         </div>
 
@@ -1272,6 +1305,7 @@ export default function App() {
       </header>
 
       <main className="app-main">
+        {authenticationRequired && <AuthenticationRequiredNotice title={t('authenticationRequired')} detail={streamDetail} actionLabel={t('enterSessionToken')} onAction={requestAuthentication} />}
         <PageTransition pageKey={page}>{view}</PageTransition>
       </main>
 

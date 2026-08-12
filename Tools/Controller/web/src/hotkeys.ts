@@ -35,8 +35,18 @@ export function isEditableTarget(target: EventTarget | null): boolean {
   return typeof element.closest === 'function' && Boolean(element.closest(editableSelector))
 }
 
-export function ignoresGlobalHotkeys(event: ShortcutEvent): boolean {
-  return event.defaultPrevented || event.isComposing || event.keyCode === 229 || isEditableTarget(event.target)
+function isCommandPaletteTarget(target: EventTarget | null): boolean {
+  const element = target as EventTarget & { closest?: (selector: string) => unknown }
+  return typeof element?.closest === 'function' && Boolean(element.closest('.palette'))
+}
+
+export function ignoresGlobalHotkeys(event: ShortcutEvent, paletteOpen = false): boolean {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return true
+  if (!isEditableTarget(event.target)) return false
+  // The palette owns navigation keys only while focus is inside its own input.
+  // Editable controls elsewhere, especially the session token field, always
+  // retain every keystroke even if another layer was left open.
+  return !(paletteOpen && isCommandPaletteTarget(event.target))
 }
 
 export function pageFromAppAction(value: string | undefined): PageID | null {

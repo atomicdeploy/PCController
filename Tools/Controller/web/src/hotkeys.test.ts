@@ -35,6 +35,20 @@ describe('global shortcut safety', () => {
     expect(ignoresGlobalHotkeys(key({ defaultPrevented: true }))).toBe(true)
   })
 
+  it('never routes session-token typing through page or palette shortcuts', () => {
+    const tokenField = {
+      closest: (selector: string) => selector === '.palette' ? null : { id: 'session-access-token' },
+    } as unknown as EventTarget
+    const paletteField = {
+      closest: () => ({ className: 'palette' }),
+    } as unknown as EventTarget
+
+    expect(ignoresGlobalHotkeys(key({ target: tokenField, ctrlKey: true, key: 'k' }), false)).toBe(true)
+    expect(ignoresGlobalHotkeys(key({ target: tokenField, key: 'g' }), true)).toBe(true)
+    expect(ignoresGlobalHotkeys(key({ target: paletteField, key: 'ArrowDown' }), true)).toBe(false)
+    expect(ignoresGlobalHotkeys(key({ target: paletteField, defaultPrevented: true }), true)).toBe(true)
+  })
+
   it('does not mistake ordinary non-editable targets for fields', () => {
     const panel = { closest: () => null } as unknown as EventTarget
     expect(isEditableTarget(panel)).toBe(false)
