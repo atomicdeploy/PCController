@@ -1082,19 +1082,31 @@ func findFailedProgrammingSession(
 		if !sameProgrammingDevice(session.Device, device) {
 			continue
 		}
-		matching := session.HostResult == "failed" &&
-			strings.EqualFold(session.TargetFirmwareSHA256, targetSHA256) &&
-			session.SafeStateApplied
-		if !matching {
-			return nil, fmt.Errorf(
-				"device has a pending programming session for another target or lifecycle phase (%s); recover it before starting a new write",
-				session.Phase,
-			)
+		// Recovery markers form a LIFO stack for one physical device. A newer
+		// preparation snapshots the already-safe state left by an older one, so
+		// recovering the newest marker first preserves the latch until every
+		// interrupted transaction has been completed. Filesystem glob order is
+		// not a lifecycle ordering and must not make an exact recovery target
+		// unreachable merely because an older marker sorts first.
+		if candidate == nil || session.PreparedAt.After(candidate.PreparedAt) {
+			candidate = session
+			continue
 		}
-		if candidate != nil {
-			return nil, errors.New("multiple retryable programming sessions match this device")
+		if session.PreparedAt.Equal(candidate.PreparedAt) &&
+			session.RecoveryMarkerPath != candidate.RecoveryMarkerPath {
+			return nil, errors.New("multiple pending programming sessions share the newest preparation timestamp")
 		}
-		candidate = session
+	}
+	if candidate == nil {
+		return nil, nil
+	}
+	matching := candidate.HostResult == "failed" && candidate.SafeStateApplied &&
+		strings.EqualFold(candidate.TargetFirmwareSHA256, targetSHA256)
+	if !matching {
+		return nil, fmt.Errorf(
+			"device has a newer pending programming session for target SHA-256 %s in phase %s; recover it before starting another target",
+			candidate.TargetFirmwareSHA256, candidate.Phase,
+		)
 	}
 	return candidate, nil
 }

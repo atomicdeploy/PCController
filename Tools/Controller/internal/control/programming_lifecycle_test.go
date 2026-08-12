@@ -656,6 +656,62 @@ func TestFindRetryableProgrammingSessionRequiresExactFailedTransaction(t *testin
 	}
 }
 
+func TestFindRetryableProgrammingSessionUsesNewestMarkerBeforeOlderConflicts(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	content, err := os.ReadFile(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newerFirmware := filepath.Join(t.TempDir(), "newer.hex")
+	if err := os.WriteFile(newerFirmware, append(content, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	olderDocument, err := programmer.LoadIntelHex(firmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newerDocument, err := programmer.LoadIntelHex(newerFirmware)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := programmingIdentity(connectedProgrammingSnapshot(0).Port)
+	preparedAt := time.Now().UTC()
+	for _, session := range []*ProgrammingSession{
+		{
+			Format: programmingMarkerFormat, PreparedAt: preparedAt.Add(-time.Minute),
+			Device: identity, TargetFirmwareSHA256: olderDocument.SourceSHA256,
+			SafeStateApplied: true, Phase: "host-failed", HostResult: "failed",
+		},
+		{
+			Format: programmingMarkerFormat, PreparedAt: preparedAt,
+			Device: identity, TargetFirmwareSHA256: newerDocument.SourceSHA256,
+			SafeStateApplied: true, Phase: "latched-safe", HostResult: "failed",
+		},
+	} {
+		markerPath, persistErr := persistProgrammingMarker(paths, session)
+		if persistErr != nil {
+			t.Fatal(persistErr)
+		}
+		session.RecoveryMarkerPath = markerPath
+	}
+
+	loaded, err := findRetryableProgrammingSession(
+		paths, identity, newerDocument.SourceSHA256, false,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded == nil || loaded.TargetFirmwareSHA256 != newerDocument.SourceSHA256 {
+		t.Fatalf("newest exact recovery marker not selected: %+v", loaded)
+	}
+	if _, err := findRetryableProgrammingSession(
+		paths, identity, olderDocument.SourceSHA256, false,
+	); err == nil || !strings.Contains(err.Error(), newerDocument.SourceSHA256) ||
+		!strings.Contains(err.Error(), "newer pending") {
+		t.Fatalf("older recovery did not identify the newer target: %v", err)
+	}
+}
+
 func TestProgrammingLifecycleFailedProgrammerResultRetainsLatchAndMarker(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	device := &fakeProgrammingDevice{

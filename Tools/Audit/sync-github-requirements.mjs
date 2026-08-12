@@ -1252,6 +1252,8 @@ const PR_ORIGINAL_REQUESTS = {
   198: [PROMPT_EXCERPTS.timelineMemory, PROMPT_EXCERPTS.fullRemoteTui],
   199: [PROMPT_EXCERPTS.tuiControlRegression],
   200: [PROMPT_EXCERPTS.liveMeasurementTiming],
+  201: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate],
+  202: [PROMPT_EXCERPTS.liveMeasurementTiming],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
