@@ -165,22 +165,23 @@ type Model struct {
 	previewMacroState        control.MacroState
 	previewMacroRecording    control.MacroRecordingState
 
-	welcome              bool
-	welcomeFrame         int
-	welcomeStarted       time.Time
-	welcomeDeadline      time.Time
-	welcomeReadyAt       time.Time
-	welcomePhase         string
-	welcomeError         string
-	welcomeSawBusy       bool
-	welcomeMelodyStarted bool
-	welcomeMelodyPending bool
-	welcomeCanContinue   bool
-	welcomeMelody        func(context.Context) error
-	markWelcomed         func()
-	debug                bool
-	notice               string
-	noticeUntil          time.Time
+	welcome               bool
+	welcomeFrame          int
+	welcomeStarted        time.Time
+	welcomeDeadline       time.Time
+	welcomeReadyAt        time.Time
+	welcomePhase          string
+	welcomeError          string
+	welcomeSawBusy        bool
+	welcomeMelodyStarted  bool
+	welcomeMelodyPending  bool
+	welcomeCanContinue    bool
+	welcomeMelody         func(context.Context) error
+	markWelcomed          func()
+	debug                 bool
+	notice                string
+	noticeUntil           time.Time
+	pendingMessageActions []control.Event
 }
 
 type tickMsg time.Time
@@ -212,6 +213,12 @@ type portsResultMsg struct {
 	err    error
 }
 type notificationResultMsg struct{ err error }
+type messageActionResultMsg struct {
+	message control.Event
+	line    string
+	output  string
+	err     error
+}
 type appActionMsg hostui.AppAction
 type appActionClosedMsg struct{}
 type rfEntriesResultMsg struct {
@@ -660,9 +667,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				notice = strings.TrimSpace(event.MessageType)
 			}
 			if strings.TrimSpace(event.Action) != "" {
-				notice += " · action: " + strings.TrimSpace(event.Action)
+				notice += " · Ctrl+A: " + strings.TrimSpace(event.Action)
+				model.queueMessageAction(event)
 			}
 			model.setNotice(notice)
+			model.publishMessageDelivery(event, nil)
 		}
 		if model.setFrontPanelEvent(event) && model.lcdMirror && model.mirrorLCD != nil {
 			commands = append(commands, mirrorLCDCommand(model.mirrorLCD, model.frontOverlay1, model.frontOverlay2, "priority LCD event"))
@@ -853,6 +862,15 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case notificationResultMsg:
 		if message.err != nil {
 			model.appendLog("warn", "desktop notification: "+message.err.Error())
+		}
+
+	case messageActionResultMsg:
+		model.publishMessageAction(message.message, message.output, message.err)
+		model.appendResult(message.line, message.output, message.err)
+		if message.err != nil {
+			model.setNotice("Message action failed: " + message.err.Error())
+		} else {
+			model.setNotice("Message action completed")
 		}
 
 	case rfEntriesResultMsg:
@@ -1408,10 +1426,70 @@ func (model Model) footer() string {
 	if model.portOwner != nil {
 		left = "Serial busy · Ctrl+F show owner · Ctrl+W ask close · Ctrl+T twice to terminate · primary controller protected"
 	}
+	if len(model.pendingMessageActions) != 0 {
+		left = fmt.Sprintf("Ctrl+A run explicit message action · %d pending · Esc leaves it pending", len(model.pendingMessageActions))
+	}
 	if model.notice != "" && time.Now().Before(model.noticeUntil) {
 		left = model.notice
 	}
 	return labelStyle.Render(left)
+}
+
+func (model *Model) queueMessageAction(event control.Event) {
+	for _, pending := range model.pendingMessageActions {
+		if pending.ID != 0 && pending.ID == event.ID {
+			return
+		}
+	}
+	model.pendingMessageActions = append(model.pendingMessageActions, event)
+	if len(model.pendingMessageActions) > 8 {
+		model.pendingMessageActions = append([]control.Event(nil), model.pendingMessageActions[len(model.pendingMessageActions)-8:]...)
+	}
+}
+
+func (model *Model) publishMessageDelivery(message control.Event, deliveryErr error) {
+	lifecycle, state := "completed", "delivered"
+	severity := message.Severity
+	text := "tui presentation completed"
+	metadata := map[string]string{
+		"surface":          "tui",
+		"message_event_id": fmt.Sprintf("%d", message.ID),
+	}
+	if deliveryErr != nil {
+		lifecycle, state, severity = "failed", "failed", "error"
+		text = "tui presentation failed: " + deliveryErr.Error()
+		metadata["error"] = deliveryErr.Error()
+	}
+	model.runtime.PublishStructuredEvent(control.Event{
+		Kind: "message.delivery", Text: text, State: state,
+		Lifecycle: lifecycle, Source: "tui", Target: "tui", Targets: []string{"tui"},
+		MessageType: message.MessageType, Action: message.Action, Severity: severity,
+		Correlation: message.Correlation, Delivery: message.Delivery, Metadata: metadata,
+	})
+}
+
+func (model *Model) publishMessageAction(message control.Event, output string, actionErr error) {
+	lifecycle, state := "completed", "applied"
+	severity := message.Severity
+	text := "tui message action completed"
+	metadata := map[string]string{
+		"surface":          "tui",
+		"message_event_id": fmt.Sprintf("%d", message.ID),
+	}
+	if output = strings.TrimSpace(output); output != "" {
+		metadata["output"] = output
+	}
+	if actionErr != nil {
+		lifecycle, state, severity = "failed", "failed", "error"
+		text = "tui message action failed: " + actionErr.Error()
+		metadata["error"] = actionErr.Error()
+	}
+	model.runtime.PublishStructuredEvent(control.Event{
+		Kind: "message.action", Text: text, State: state,
+		Lifecycle: lifecycle, Source: "tui", Target: "tui", Targets: []string{"tui"},
+		MessageType: message.MessageType, Action: message.Action, Severity: severity,
+		Correlation: message.Correlation, Delivery: message.Delivery, Metadata: metadata,
+	})
 }
 
 func intersperseStrings(values []string, separator string) []string {
@@ -1707,5 +1785,25 @@ func execute(engine *shell.Engine, line string) tea.Cmd {
 		defer cancel()
 		output, err := engine.Execute(ctx, line)
 		return commandResultMsg{line: line, output: output, err: err}
+	}
+}
+
+func executeMessageAction(engine *shell.Engine, message control.Event, line string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		output, err := engine.Execute(ctx, line)
+		return messageActionResultMsg{message: message, line: line, output: output, err: err}
+	}
+}
+
+func executeMessageCallback(message control.Event, label string, callback func() error) tea.Cmd {
+	return func() tea.Msg {
+		err := callback()
+		output := "completed"
+		if err != nil {
+			output = ""
+		}
+		return messageActionResultMsg{message: message, line: label, output: output, err: err}
 	}
 }

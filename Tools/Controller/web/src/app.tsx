@@ -43,7 +43,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getUIConfig, rpc } from './api'
+import { connectStream, execute, getSnapshot, getUIConfig, presentationRPC, rpc } from './api'
 import { primaryShortcutARIA, primaryShortcutModifier } from './client-platform'
 import {
   adjacentPageHotkey,
@@ -93,6 +93,7 @@ import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 import { AppPreferencesDialog } from './app-preferences-dialog'
 import { loadQuickHeaderPreferences, normalizeQuickHeaderPreferences, saveQuickHeaderPreferences } from './quick-header-preferences'
+import { messageActionParams, messageDeliveryParams, messageToast } from './message-presentation'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -685,15 +686,62 @@ export default function App() {
     return () => window.clearInterval(timer)
   }, [bootProgress, bootTarget])
 
-  const notify = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+  const enqueueToast = useCallback((message: Omit<ToastMessage, 'id'>) => {
     toastID.current += 1
     const id = toastID.current
-    setToasts((current) => [...current.slice(-3), { id, tone, title, detail }])
-    if (tone === 'danger') audioRef.current?.cue('error')
-    if (tone === 'warning') audioRef.current?.cue('warning')
-    if (tone === 'success') audioRef.current?.cue('success')
-    window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    setToasts((current) => [...current.slice(-3), { id, ...message }])
+    if (message.tone === 'danger') audioRef.current?.cue('error')
+    if (message.tone === 'warning') audioRef.current?.cue('warning')
+    if (message.tone === 'success') audioRef.current?.cue('success')
+    if (!message.persistent) {
+      window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 5200)
+    }
+    return id
   }, [])
+
+  const notify = useCallback((tone: ToastMessage['tone'], title: string, detail?: string) => {
+    enqueueToast({ tone, title, detail })
+  }, [enqueueToast])
+
+  const acknowledgeMessageToast = useCallback((message: ToastMessage) => {
+    if (!message.messageEventID) return
+    void presentationRPC<ControllerEvent>('controller.message.delivery', messageDeliveryParams(message)).catch((cause) => {
+      setToasts((current) => current.map((item) => item.id === message.id ? {
+        ...item,
+        tone: 'danger',
+        detail: `Presentation acknowledgement failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+        persistent: true,
+      } : item))
+    })
+  }, [])
+
+  const activateMessageToast = useCallback((message: ToastMessage) => {
+    if (!message.messageEventID || !message.action || message.actionBusy) return
+    setToasts((current) => current.map((item) => item.id === message.id ? { ...item, actionBusy: true } : item))
+    void presentationRPC<ControllerEvent>(
+      'controller.message.action',
+      messageActionParams(message, appInstanceID),
+    ).then((outcome) => {
+      const failed = outcome.lifecycle === 'failed'
+      setToasts((current) => current.map((item) => item.id === message.id ? {
+        ...item,
+        tone: failed ? 'danger' : 'success',
+        actionBusy: false,
+        action: failed ? item.action : undefined,
+        actionLabel: failed ? item.actionLabel : undefined,
+        detail: failed ? outcome.metadata?.error || outcome.text : outcome.metadata?.output || outcome.text,
+        persistent: failed,
+      } : item))
+    }).catch((cause) => {
+      setToasts((current) => current.map((item) => item.id === message.id ? {
+        ...item,
+        tone: 'danger',
+        actionBusy: false,
+        detail: cause instanceof Error ? cause.message : String(cause),
+        persistent: true,
+      } : item))
+    })
+  }, [appInstanceID])
 
   useEffect(() => {
     const testFeedback = () => {
@@ -1236,7 +1284,11 @@ export default function App() {
 				navigate('updates')
 				audioRef.current?.cue('navigation', 'forward')
 			}
-			if (shouldToastControllerEvent(event)) notify(eventToneForToast(event), event.kind, event.text)
+			if (shouldToastControllerEvent(event)) {
+              const targetedMessage = messageToast(event)
+              if (targetedMessage) enqueueToast(targetedMessage)
+              else notify(eventToneForToast(event), event.kind, event.text)
+            }
             if (isCompletedHostUpdate(event)) {
               refreshAfterHostRestart.current = true
             }
@@ -1274,7 +1326,7 @@ export default function App() {
       }
     })()
     return () => { abort.abort(); stopStream() }
-  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance])
+  }, [adoptHostAppearance, appInstanceID, demo, enqueueToast, navigate, notify, refresh, refreshHostAppearance])
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, macroEvents, locale: appearance.locale, t, command: runCommand, relayToggle, relayPending, refresh, openDialog,
@@ -1467,7 +1519,12 @@ export default function App() {
 
       <Modal state={{ ...dialog, action: confirmDialog }} onClose={closeDialog} busy={dialogBusy} />
       <AppPreferencesDialog open={appPreferencesOpen} locale={appearance.locale} appearance={appearance} quickHeader={quickHeader} onAppearance={saveAppearance} onQuickHeader={saveQuickHeader} onClose={() => setAppPreferencesOpen(false)} />
-      <ToastStack messages={toasts} dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))} />
+      <ToastStack
+        messages={toasts}
+        dismiss={(id) => setToasts((current) => current.filter((item) => item.id !== id))}
+        act={activateMessageToast}
+        presented={acknowledgeMessageToast}
+      />
     </div>
     <BootGate open={bootResolved && bootOpen} progress={bootProgress} locale={appearance.locale} productTitle={productTitle} productShortName={productShortName} productTagline={productTagline} onEnter={enterApp} />
     <HotkeyHelp open={hotkeyHelp} locale={appearance.locale} onClose={() => setHotkeyHelp(false)} />

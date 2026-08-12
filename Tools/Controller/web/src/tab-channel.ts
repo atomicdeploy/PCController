@@ -58,8 +58,8 @@ export type SharedControllerEvent = Pick<ControllerEvent, 'id' | 'time' | 'kind'
   Partial<Pick<
     ControllerEvent,
     'stream' | 'state' | 'lifecycle' | 'reason' | 'source' | 'target' | 'message_type' |
-    'action' | 'gesture' | 'key' | 'rf_id' | 'rf_code' | 'rf_bits' | 'rf_protocol' |
-    'metadata'
+    'targets' | 'action' | 'severity' | 'correlation' | 'delivery' | 'gesture' | 'key' |
+    'rf_id' | 'rf_code' | 'rf_bits' | 'rf_protocol' | 'metadata'
   >>
 
 /** Controller event update shared between tabs. */
@@ -302,7 +302,7 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
   const event = raw.event
   const allowed = [
     'id', 'time', 'kind', 'text', 'stream', 'state', 'lifecycle', 'reason', 'source', 'target',
-    'message_type', 'action', 'gesture', 'key', 'rf_id', 'rf_code', 'rf_bits',
+    'targets', 'message_type', 'action', 'severity', 'correlation', 'delivery', 'gesture', 'key', 'rf_id', 'rf_code', 'rf_bits',
     'rf_protocol', 'metadata',
   ] as const
   if (!hasOnlyKeys(event, allowed)) return null
@@ -314,7 +314,7 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
 
   const stream = safeOptionalText(event.stream, 16)
   if (stream === null || (stream !== undefined && !['activity', 'state', 'telemetry', 'debug'].includes(stream))) return null
-  const optionalTextKeys = ['state', 'lifecycle', 'reason', 'source', 'target', 'message_type', 'action', 'gesture'] as const
+  const optionalTextKeys = ['state', 'lifecycle', 'reason', 'source', 'target', 'message_type', 'action', 'correlation', 'gesture'] as const
   const optionalTexts: Partial<Record<(typeof optionalTextKeys)[number], string>> = {}
   for (const key of optionalTextKeys) {
     const value = safeOptionalText(event[key], key === 'reason' ? 1024 : 256)
@@ -333,6 +333,20 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
 
   const metadata = sanitizeMetadata(event.metadata)
   if (metadata === null) return null
+  let targets: string[] | undefined
+  if (event.targets !== undefined) {
+    if (!Array.isArray(event.targets) || event.targets.length > 12) return null
+    targets = []
+    for (const rawTarget of event.targets) {
+      const target = safeText(rawTarget, 32)
+      if (target === null) return null
+      targets.push(target)
+    }
+  }
+  const severity = safeOptionalText(event.severity, 16)
+  if (severity === null || (severity !== undefined && !['debug', 'info', 'success', 'warning', 'error'].includes(severity))) return null
+  const delivery = safeOptionalText(event.delivery, 16)
+  if (delivery === null || (delivery !== undefined && delivery !== 'sync' && delivery !== 'async')) return null
   return {
     type: 'controller-event',
     event: {
@@ -342,7 +356,10 @@ function sanitizeControllerEvent(raw: RecordValue): ControllerEventPayload | nul
       text,
       ...(stream === undefined ? {} : { stream: stream as ControllerEvent['stream'] }),
       ...optionalTexts,
+      ...(severity === undefined ? {} : { severity: severity as ControllerEvent['severity'] }),
+      ...(delivery === undefined ? {} : { delivery: delivery as ControllerEvent['delivery'] }),
       ...optionalIntegers,
+      ...(targets === undefined ? {} : { targets }),
       ...(metadata === undefined ? {} : { metadata }),
     },
   }

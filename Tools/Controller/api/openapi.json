@@ -3926,6 +3926,8 @@
               "controller.menu.layout.set",
               "controller.menu.list",
               "controller.menu.page",
+              "controller.message.action",
+              "controller.message.delivery",
               "controller.message.send",
               "controller.opcode.exchange",
               "controller.opcode.request",

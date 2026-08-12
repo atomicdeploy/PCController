@@ -82,7 +82,7 @@ const capabilityGroups = {
   ],
   reset: ["controller.reset.lines", "controller.reset", "controller.port.reset"],
   shutdown: ["controller.quit", "controller.exit"],
-  messages: ["controller.message.send"],
+  messages: ["controller.message.send", "controller.message.delivery", "controller.message.action"],
   host_configuration: [
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set",
     "controller.peripherals.set", "controller.hotkeys.set", "controller.os.configure",
@@ -172,13 +172,17 @@ const methodOverrides = {
   "controller.macro.board_record.clear": "Acknowledge and clear an exact retained board-capture identity.",
   "controller.macro.play": "Play one named macro through the ordinary opcode path with live timing evidence.",
   "controller.macro.cancel": "Cancel active playback and apply the macro output safe-stop policy.",
+  "controller.message.send": "Publish one bounded typed message; synchronous delivery waits for requested presentation outcomes.",
+  "controller.message.delivery": "Acknowledge presentation of one retained targeted message from an explicit surface.",
+  "controller.message.action": "Run a retained message action only after an explicit surface gesture and publish its correlated outcome.",
   "controller.unsubscribe": "Remove this WebSocket connection's active subscriptions.",
 };
 
 const nonIdempotentMethods = new Set([
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
   "controller.rf.learn.start", "controller.rf.transmit", "controller.lcd.prompt", "controller.lcd.priority",
-  "controller.message.send", "controller.bridge.call", "controller.os.key", "controller.os.power",
+  "controller.message.send", "controller.message.delivery", "controller.message.action",
+  "controller.bridge.call", "controller.os.key", "controller.os.power",
 	"controller.device.action", "controller.app.action", "controller.artifact.fetch",
 	"controller.display.send", "controller.opcode.send", "controller.opcode.exchange",
 	"controller.opcode.request",

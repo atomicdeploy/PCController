@@ -12,6 +12,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/shell"
@@ -246,6 +247,8 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 	if inputEmpty {
 		switch key {
+		case "ctrl+a":
+			return model.activatePendingMessageAction()
 		case "ctrl+f":
 			return model.bringPortOwnerToForeground()
 		case "ctrl+w":
@@ -379,6 +382,80 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 	model.completion = nil
 	return model, nil, false
+}
+
+func (model Model) activatePendingMessageAction() (Model, tea.Cmd, bool) {
+	if len(model.pendingMessageActions) == 0 {
+		model.setNotice("No pending message action")
+		return model, nil, true
+	}
+	message := model.pendingMessageActions[0]
+	model.pendingMessageActions = append([]control.Event(nil), model.pendingMessageActions[1:]...)
+	action, err := hostui.ParseAction(message.Action, "message:tui")
+	if err != nil {
+		model.publishMessageAction(message, "", err)
+		model.setNotice("Message action is unsupported: " + err.Error())
+		return model, nil, true
+	}
+	switch action.Kind {
+	case "command":
+		return model, executeMessageAction(model.engine, message, action.Value), true
+	case "app.page":
+		page, ok := pageForName(action.Value)
+		if !ok {
+			err = fmt.Errorf("unknown app page %q", action.Value)
+			break
+		}
+		model.switchPage(page)
+		model.setNotice("Opened " + pageDefinitions[page].Title)
+		model.publishMessageAction(message, "opened "+pageDefinitions[page].Short, nil)
+		return model, nil, true
+	case "app.title":
+		if strings.EqualFold(action.Value, "auto") {
+			model.terminalTitleOverride = ""
+		} else {
+			model.terminalTitleOverride = action.Value
+		}
+		model.terminalTitleDirty = true
+		model.publishMessageAction(message, "terminal title updated", nil)
+		return model, nil, true
+	case "app.osc":
+		return model, executeMessageCallback(message, "terminal OSC", func() error {
+			if model.writeOSC == nil {
+				return fmt.Errorf("terminal OSC output is unavailable")
+			}
+			return model.writeOSC(action.Value)
+		}), true
+	case "app.progress":
+		progress, parseErr := hostui.ParseTerminalProgress(action.Value)
+		if parseErr != nil {
+			err = parseErr
+			break
+		}
+		payload, payloadErr := progress.OSCPayload()
+		if payloadErr != nil {
+			err = payloadErr
+			break
+		}
+		return model, executeMessageCallback(message, "terminal progress", func() error {
+			if model.writeOSC == nil {
+				return fmt.Errorf("terminal OSC output is unavailable")
+			}
+			return model.writeOSC(payload)
+		}), true
+	case "app.port.open":
+		return model, executeMessageAction(model.engine, message, "port open"), true
+	case "app.port.close":
+		return model, executeMessageAction(model.engine, message, "port close"), true
+	case "app.quit":
+		model.publishMessageAction(message, "application exit accepted", nil)
+		return model, tea.Quit, true
+	default:
+		err = fmt.Errorf("unsupported app action %q", action.Kind)
+	}
+	model.publishMessageAction(message, "", err)
+	model.setNotice("Message action failed: " + err.Error())
+	return model, nil, true
 }
 
 func (model Model) showPortPicker() (Model, tea.Cmd, bool) {
