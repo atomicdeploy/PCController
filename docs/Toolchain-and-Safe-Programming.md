@@ -73,7 +73,7 @@ The generated CLI configuration path is recorded independently from the
 executable path. This keeps an explicit global `--cli` usable even though its
 core/library installation lives under the machine-specific PCController data
 root. Omitting `--cli` installs the verified portable executable there too;
-`board initialize --portable-cli` deliberately forces that portable choice.
+`board provision --portable-cli` deliberately forces that portable choice.
 
 To reproduce the checked-in lock without registry resolution, use:
 
@@ -407,13 +407,13 @@ and safe-state recovery did not depend on that optional peripheral.
 Use one ownership-aware transaction for a new board:
 
 ```console
-controller board initialize --uart auto
-controller board initialize --uart none --bootloader-only
-controller board initialize --portable-cli --uart COM4
-controller board initialize --name EDGE-01 --uart auto
+controller board provision --uart auto
+controller board provision --uart none --bootloader-only
+controller board provision --portable-cli --uart COM4
+controller board provision --name EDGE-01 --uart auto
 ```
 
-The initializer compiles the application before any device write, validates
+The provisioner compiles the application before any device write, validates
 the USBasp target signature, backs up flash, EEPROM, signature, fuses, and lock
 bits, then invokes the selected FQBN's stock core `burn-bootloader` recipe with
 verification. It does not install PCController's custom Urboot experiment.
@@ -451,6 +451,11 @@ must never become the source of truth.
 
 The Programming page in the TUI runs the same transaction with `I`; the CLI
 remains useful for logs and automation.
+
+`board provision` and `board blank` are also Controller shell commands, so
+the existing versionless API/RPC/TUI command path uses the exact same Go
+lifecycle rather than a browser- or shell-specific AVRDUDE path. The output's
+machine-readable report includes each named phase and measured milliseconds.
 
 USBasp is an explicit troubleshooting fallback. Its ISP transport must never
 receive a COM or friendly-name selector. Supply the application connection
@@ -493,10 +498,15 @@ fallback because it exposes no supported silent driver-install interface.
 
 Return an initialized test board to shelf state with `controller board blank
 --confirm BOARDNAME --uart auto`. The operation authenticates that exact name,
-takes a new complete backup, erases application and bootloader flash, explicitly
-clears EESAVE-preserved EEPROM, verifies every byte as `0xFF`, and proves the
-fuse bytes remained unchanged. When UART identity is genuinely unavailable,
-the deliberately conspicuous fallback is `--uart none --confirm ERASE-BOARD`.
+persists the `Prog` safety latch, and takes a new complete backup. If the part
+starts on factory clocking, it temporarily applies the selected external-crystal
+core fuse policy at slow SCK, proves normal-speed USBasp, then carries out the
+long erase/readback at fast speed. It clears application/bootloader flash and
+EESAVE-preserved EEPROM to `FF`, restores ATmega328P factory fuse/lock defaults
+`62/D9/FF/FF`, then repeats full flash/EEPROM/fuse readback at a factory-safe
+SCK. A successful report therefore proves a *factory blank*—not merely a
+blanked deployed board. When UART identity is genuinely unavailable, the
+deliberately conspicuous fallback is `--uart none --confirm ERASE-BOARD`.
 
 ## Persistence ownership and artifacts
 

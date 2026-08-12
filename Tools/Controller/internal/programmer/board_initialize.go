@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // BoardCoreInitializeOptions owns the ISP portion of first-board setup. The
@@ -28,15 +29,18 @@ type BoardCoreInitializeOptions struct {
 }
 
 type BoardCoreInitializeReport struct {
-	FQBN                 string `json:"fqbn"`
-	MCU                  string `json:"mcu"`
-	Programmer           string `json:"programmer"`
-	BackupDirectory      string `json:"backup_directory"`
-	BootloaderInstalled  bool   `json:"bootloader_installed"`
-	SlowUSBaspUsed       bool   `json:"slow_usbasp_used"`
-	FuseRecoveryApplied  bool   `json:"fuse_recovery_applied"`
-	NormalSpeedRecovered bool   `json:"normal_speed_recovered"`
-	BootloaderProgrammer string `json:"bootloader_programmer"`
+	FQBN                 string                `json:"fqbn"`
+	MCU                  string                `json:"mcu"`
+	Programmer           string                `json:"programmer"`
+	BackupDirectory      string                `json:"backup_directory"`
+	BootloaderInstalled  bool                  `json:"bootloader_installed"`
+	SlowUSBaspUsed       bool                  `json:"slow_usbasp_used"`
+	FuseRecoveryApplied  bool                  `json:"fuse_recovery_applied"`
+	NormalSpeedRecovered bool                  `json:"normal_speed_recovered"`
+	BootloaderProgrammer string                `json:"bootloader_programmer"`
+	InitialFuses         string                `json:"initial_fuses,omitempty"`
+	InitialLock          string                `json:"initial_lock,omitempty"`
+	Phases               []BoardLifecyclePhase `json:"phases"`
 }
 
 type boardCoreFusePolicy struct {
@@ -87,6 +91,14 @@ func InitializeBoardCoreWithRunner(
 	report := BoardCoreInitializeReport{
 		FQBN: options.FQBN, MCU: options.MCU, Programmer: options.Programmer,
 	}
+	phase := func(name string, run func() error) error {
+		started := time.Now()
+		err := run()
+		report.Phases = append(report.Phases, BoardLifecyclePhase{
+			Name: name, DurationMS: time.Since(started).Milliseconds(),
+		})
+		return err
+	}
 	ispRunner := runner
 	var fallback *usbaspSlowFallbackRunner
 	forceSlow := strings.EqualFold(options.Programmer, "usbasp_slow") || options.USBaspBitClockUS > 0
@@ -110,57 +122,79 @@ func InitializeBoardCoreWithRunner(
 	if err != nil {
 		return report, err
 	}
-	if err := ispRunner.Run(ctx, probe, output); err != nil {
+	if err := phase("probe", func() error { return ispRunner.Run(ctx, probe, output) }); err != nil {
 		return report, fmt.Errorf("probe ISP target before any write: %w", err)
 	}
 
-	fmt.Fprintln(output, "[2/4] Capturing flash, EEPROM, signature, fuse, and lock-bit backup")
-	backup := isp
-	backup.Operation = OperationBackup
-	backup.OutputPath = options.BackupRoot
-	report.BackupDirectory, err = BackupWithRunner(ctx, backup, output, ispRunner)
-	if err != nil {
-		return report, fmt.Errorf("capture mandatory pre-initialization backup: %w", err)
-	}
 	if fallback != nil && fallback.slow {
 		report.SlowUSBaspUsed = true
 	}
 
-	fmt.Fprintln(output, "[3/4] Installing bootloader and fuse/lock policy from the selected board core")
+	fmt.Fprintln(output, "[2/5] Recovering normal-speed USBasp when the selected core expects an external crystal")
 	coreProgrammer := options.Programmer
 	if fallback != nil && fallback.slow && strings.EqualFold(coreProgrammer, "usbasp") {
-		fmt.Fprintln(output, "Slow SCK was needed for discovery; repairing only the selected core's fuse policy at -B32 before retrying normal speed.")
-		policy, policyErr := resolveBoardCoreFusePolicy(ctx, options, runner)
-		if policyErr != nil {
-			return report, fmt.Errorf("resolve selected core fuse policy: %w", policyErr)
-		}
-		fuseCommand, buildErr := buildSlowFuseCorrectionCommand(isp, policy)
-		if buildErr != nil {
-			return report, fmt.Errorf("build slow fuse correction: %w", buildErr)
-		}
-		if fuseErr := runner.Run(ctx, fuseCommand, output); fuseErr != nil {
-			return report, fmt.Errorf("apply selected core fuse policy at slow SCK: %w", fuseErr)
-		}
-		report.FuseRecoveryApplied = true
+		fmt.Fprintln(output, "Slow SCK was needed for discovery; retaining fuse/lock evidence before repairing only the selected core's fuse policy at -B32.")
+		if phaseErr := phase("recover_fast_isp", func() error {
+			initial, evidenceErr := captureFuseLockEvidence(ctx, isp, ispRunner, output)
+			if evidenceErr != nil {
+				return fmt.Errorf("capture pre-fuse evidence: %w", evidenceErr)
+			}
+			report.InitialFuses = fmt.Sprintf("%02X/%02X/%02X", initial.Low, initial.High, initial.Extended)
+			report.InitialLock = fmt.Sprintf("%02X", initial.Lock)
+			policy, policyErr := resolveBoardCoreFusePolicy(ctx, options, runner)
+			if policyErr != nil {
+				return fmt.Errorf("resolve selected core fuse policy: %w", policyErr)
+			}
+			fuseCommand, buildErr := buildSlowFuseCorrectionCommand(isp, policy)
+			if buildErr != nil {
+				return fmt.Errorf("build slow fuse correction: %w", buildErr)
+			}
+			if fuseErr := runner.Run(ctx, fuseCommand, output); fuseErr != nil {
+				return fmt.Errorf("apply selected core fuse policy at slow SCK: %w", fuseErr)
+			}
+			report.FuseRecoveryApplied = true
 
-		fastProbeOptions := isp
-		fastProbeOptions.Operation = OperationProbe
-		fastProbeOptions.USBaspBitClockUS = 0
-		fastProbe, buildErr := Build(fastProbeOptions)
-		if buildErr != nil {
-			return report, fmt.Errorf("build normal-speed probe after fuse correction: %w", buildErr)
-		}
-		fmt.Fprintln(output, "Fuse policy corrected; retrying USBasp at normal speed before loading the bootloader.")
-		if fastErr := runner.Run(ctx, fastProbe, output); fastErr == nil {
-			report.NormalSpeedRecovered = true
-			fmt.Fprintln(output, "Normal-speed USBasp recovered; bootloader installation will use the fast programmer.")
-		} else {
-			fmt.Fprintln(output, "Normal-speed USBasp is still unavailable after fuse correction; retaining -B32 for bootloader installation.")
-			coreProgrammer = "usbasp_slow"
+			fastProbeOptions := isp
+			fastProbeOptions.Operation = OperationProbe
+			fastProbeOptions.USBaspBitClockUS = 0
+			fastProbe, buildErr := Build(fastProbeOptions)
+			if buildErr != nil {
+				return fmt.Errorf("build normal-speed probe after fuse correction: %w", buildErr)
+			}
+			fmt.Fprintln(output, "Fuse policy corrected; retrying USBasp at normal speed before loading the bootloader.")
+			if fastErr := runner.Run(ctx, fastProbe, output); fastErr == nil {
+				report.NormalSpeedRecovered = true
+				// The evidence/fuse transaction used the retained slow wrapper.
+				// From this point the selected external clock is proven, so all
+				// long backup and core operations must use normal USBasp speed.
+				isp.USBaspBitClockUS = 0
+				ispRunner = runner
+				fmt.Fprintln(output, "Normal-speed USBasp recovered; bootloader installation will use the fast programmer.")
+			} else {
+				fmt.Fprintln(output, "Normal-speed USBasp is still unavailable after fuse correction; retaining -B32 for bootloader installation.")
+				coreProgrammer = "usbasp_slow"
+			}
+			return nil
+		}); phaseErr != nil {
+			return report, phaseErr
 		}
 	} else if report.SlowUSBaspUsed && strings.EqualFold(coreProgrammer, "usbasp") {
 		coreProgrammer = "usbasp_slow"
 	}
+
+	fmt.Fprintln(output, "[3/5] Capturing mandatory flash, EEPROM, signature, fuse, and lock-bit backup")
+	backup := isp
+	backup.Operation = OperationBackup
+	backup.OutputPath = options.BackupRoot
+	err = phase("backup", func() error {
+		report.BackupDirectory, err = BackupWithRunner(ctx, backup, output, ispRunner)
+		return err
+	})
+	if err != nil {
+		return report, fmt.Errorf("capture mandatory pre-initialization backup: %w", err)
+	}
+
+	fmt.Fprintln(output, "[4/5] Installing bootloader and fuse/lock policy from the selected board core")
 	burnOptions := Options{
 		Method: MethodArduino, Operation: OperationBurnBoot,
 		FQBN: options.FQBN, Programmer: coreProgrammer,
@@ -170,7 +204,7 @@ func InitializeBoardCoreWithRunner(
 	if err != nil {
 		return report, err
 	}
-	burnErr := runner.Run(ctx, burn, output)
+	burnErr := phase("install_bootloader", func() error { return runner.Run(ctx, burn, output) })
 	if burnErr != nil && options.USBaspAutoSlow && strings.EqualFold(coreProgrammer, "usbasp") {
 		burnOptions.Programmer = "usbasp_slow"
 		slowBurn, buildErr := Build(burnOptions)
@@ -178,7 +212,7 @@ func InitializeBoardCoreWithRunner(
 			return report, errors.Join(burnErr, buildErr)
 		}
 		fmt.Fprintln(output, "Core bootloader attempt failed; retrying with MiniCore's usbasp_slow programmer (-B32).")
-		if slowErr := runner.Run(ctx, slowBurn, output); slowErr != nil {
+		if slowErr := phase("install_bootloader_slow_retry", func() error { return runner.Run(ctx, slowBurn, output) }); slowErr != nil {
 			return report, errors.Join(
 				fmt.Errorf("default-speed core bootloader install: %w", burnErr),
 				fmt.Errorf("slow core bootloader install: %w", slowErr),
@@ -192,7 +226,7 @@ func InitializeBoardCoreWithRunner(
 	report.BootloaderProgrammer = coreProgrammer
 	report.BootloaderInstalled = true
 
-	fmt.Fprintln(output, "[4/4] Re-reading target signature, fuses, and lock bits after bootloader install")
+	fmt.Fprintln(output, "[5/5] Re-reading target signature, fuses, and lock bits after bootloader install")
 	verify := isp
 	verify.Operation = OperationProbe
 	if strings.EqualFold(coreProgrammer, "usbasp_slow") && verify.USBaspBitClockUS <= 0 {
@@ -206,7 +240,7 @@ func InitializeBoardCoreWithRunner(
 		verifyCommand.Args,
 		"-Ulfuse:r:-:h", "-Uhfuse:r:-:h", "-Uefuse:r:-:h", "-Ulock:r:-:h",
 	)
-	if err := runner.Run(ctx, verifyCommand, output); err != nil {
+	if err := phase("verify", func() error { return runner.Run(ctx, verifyCommand, output) }); err != nil {
 		return report, fmt.Errorf("verify target after core bootloader install: %w", err)
 	}
 	return report, nil
