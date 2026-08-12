@@ -116,6 +116,17 @@ const (
 	DisplayRepeatInterval = control.DisplayRepeatInterval
 )
 
+// Status-effect capability and kind constants are exposed for embedders that
+// select between MCU-rendered descriptors and the legacy direct-RGB path.
+const (
+	CapabilityStatusEffects     = native.CapabilityStatusEffects
+	StatusEffectBreathe         = native.StatusEffectBreathe
+	StatusEffectFlash           = native.StatusEffectFlash
+	StatusEffectCycle           = native.StatusEffectCycle
+	StatusEffectTransition      = native.StatusEffectTransition
+	StatusEffectMinimumPeriodMS = native.StatusEffectMinimumPeriodMS
+)
+
 // ParseRFLearnMode accepts the canonical RF learning mode and documented aliases.
 func ParseRFLearnMode(value string) (RFLearnMode, error) {
 	return control.ParseRFLearnMode(value)
@@ -1639,6 +1650,25 @@ func (client *Client) SetStatusRGBBase(
 	red, green, blue, brightness byte,
 ) error {
 	return client.outputs.SetStatusBase(ctx, red, green, blue, brightness)
+}
+
+// SetStatusLEDEffectBase updates the host policy base with one native MCU
+// descriptor without canceling an explicit user/macro overlay.
+func (client *Client) SetStatusLEDEffectBase(
+	ctx context.Context,
+	effect StatusEffectOptions,
+) error {
+	return client.outputs.SetStatusEffectBase(ctx, effect)
+}
+
+// SetStatusLEDEffect replaces an active overlay with a safety-priority native
+// descriptor and makes it the newest host policy base.
+func (client *Client) SetStatusLEDEffect(
+	ctx context.Context,
+	effect StatusEffectOptions,
+) error {
+	client.outputs.OverrideStatusEffect()
+	return client.outputs.SetStatusEffectBase(ctx, effect)
 }
 
 // OutputState returns active melody and status-effect operation metadata.
