@@ -59,11 +59,67 @@ func TestDashboardUsesExpandedNamesAndAdaptiveUnits(t *testing.T) {
 	for _, expected := range []string{
 		"Supply Voltage", "12.22 V", "Load Current", "286.0 mA",
 		"Load Power", "3.49 W", "Temperature · Illumination LED",
-		"Temperature · BT Audio", "BT Audio · disconnected /",
+		"Temperature · BT Audio", "Bluetooth audio", "disconnected or pairing",
 	} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("dashboard missing %q:\n%s", expected, rendered)
 		}
+	}
+}
+
+func TestDashboardWaitsOnlyForAdvertisedStateAndNeverRendersDefaultValues(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	snapshot := control.Snapshot{Connected: true, Hello: native.Hello{
+		Capabilities: native.CapabilityRelayMotion | native.CapabilityINA219 | native.CapabilityPersistentSettings,
+	}}
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	if !strings.Contains(dashboard, "Waiting for the first STATUS frame") {
+		t.Fatalf("advertised in-flight measurements did not render loading state:\n%s", dashboard)
+	}
+	for _, stale := range []string{"Device Uptime", "Enclosure Door", "Active Relays", "Bluetooth audio", "Supply Voltage", "0 ms"} {
+		if strings.Contains(dashboard, stale) {
+			t.Fatalf("dashboard rendered unfetched %q:\n%s", stale, dashboard)
+		}
+	}
+	if rows := model.controlTableRows(snapshot, 16); len(rows) != 0 {
+		t.Fatalf("control rows rendered before STATUS: %#v", rows)
+	}
+	if rows := model.boardSettingRows(); len(rows) != 0 {
+		t.Fatalf("settings rows rendered before SETTINGS: %#v", rows)
+	}
+}
+
+func TestBluetoothAndInvalidMeasurementsRequireAdvertisedValidLiveState(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	snapshot := RichPreviewSnapshot()
+	snapshot.Hello.Capabilities &^= native.CapabilityBluetoothAudio
+	snapshot.Status.TLEDCenti = -32768
+	snapshot.Status.TBTCenti = 32767
+	snapshot.Status.SupplyMV = -2147483648
+
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	for _, absent := range []string{"Bluetooth audio", "Temperature · BT Audio", "Temperature · Illumination LED", "Supply Voltage", "-32768", "327.67"} {
+		if strings.Contains(dashboard, absent) {
+			t.Fatalf("dashboard rendered unavailable or invalid %q:\n%s", absent, dashboard)
+		}
+	}
+	settings := model.appSettingRows()
+	for _, row := range settings {
+		if strings.Contains(strings.ToLower(row.Label), "bt audio") || strings.Contains(row.Key, "bt-") || strings.Contains(row.Key, "temperature-audio") {
+			t.Fatalf("settings exposed absent Bluetooth capability: %#v", row)
+		}
+	}
+}
+
+func TestIntegrationRowsStayEmptyUntilBackendsReportCapabilities(t *testing.T) {
+	model := readyModel(t, PageAutomations)
+	model.integrations = nil
+	if lines := model.integrationStatusLines(); len(lines) != 0 {
+		t.Fatalf("unfetched integrations rendered static rows: %#v", lines)
+	}
+	model.integrations = func() hostui.IntegrationStatus { return hostui.IntegrationStatus{} }
+	if lines := model.integrationStatusLines(); len(lines) != 0 {
+		t.Fatalf("unadvertised integrations rendered rows: %#v", lines)
 	}
 }
 
@@ -1208,7 +1264,7 @@ func TestPrimaryTablesFitRepresentativeNarrowAndWideWidths(t *testing.T) {
 }
 
 func TestDashboardLongValuesWrapInsideTheirValueColumn(t *testing.T) {
-	row := ansi.Strip(kvCard(55, 22, "Bluetooth", "BT Audio · disconnected / pairing (blinking indicator)"))
+	row := ansi.Strip(kvCard(55, 22, "Bluetooth", "disconnected or pairing · blinking indicator"))
 	lines := strings.Split(row, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("representative long value did not wrap: %q", row)

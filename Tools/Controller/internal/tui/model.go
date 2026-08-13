@@ -468,7 +468,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 			model.previewPanel.LCDLine1 = "PC offline"
 			model.previewPanel.LCDLine2 = "Connect USB toPC"
 		}
-		model.recordSample(options.Preview.Status, options.Preview.StatusUpdated)
+		model.recordSample(*options.Preview)
 	}
 	return model
 }
@@ -586,7 +586,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if command := model.syncHostPanelCommand(); command != nil {
 			commands = append(commands, command)
 		}
-		model.recordSample(snapshot.Status, snapshot.StatusUpdated)
+		model.recordSample(snapshot)
 		if model.frontOverlayNeedsRestore && time.Now().After(model.frontOverlayUntil) {
 			model.frontOverlayNeedsRestore = false
 			model.frontOverlay1, model.frontOverlay2 = "", ""
@@ -823,7 +823,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err != nil {
 			model.appendLog("warn", "status: "+message.err.Error())
 		} else {
-			model.recordSample(message.status, time.Now())
+			snapshot := model.snapshot()
+			snapshot.Status = message.status
+			snapshot.HaveStatus = true
+			snapshot.StatusUpdated = time.Now()
+			model.recordSample(snapshot)
 		}
 
 	case menuCatalogResultMsg:
@@ -1186,7 +1190,8 @@ func (model *Model) syncUIConfig(value appconfig.UI) {
 	}
 }
 
-func (model *Model) recordSample(status native.Status, at time.Time) {
+func (model *Model) recordSample(snapshot control.Snapshot) {
+	status, at := snapshot.Status, snapshot.StatusUpdated
 	if at.IsZero() || at.Equal(model.lastSample) {
 		return
 	}
@@ -1198,6 +1203,14 @@ func (model *Model) recordSample(status native.Status, at time.Time) {
 		At: at, SupplyMV: status.SupplyMV, BusMV: status.BusMV,
 		CurrentMA: status.CurrentMA, PowerMW: status.PowerMW,
 		TLEDCenti: status.TLEDCenti, TBTCenti: status.TBTCenti,
+		HaveSupply:  snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validVoltageReading(status.SupplyMV),
+		HaveBus:     snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validVoltageReading(status.BusMV),
+		HaveCurrent: snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validCurrentReading(status.CurrentMA),
+		HavePower:   snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validPowerReading(status.PowerMW),
+		HaveTLED:    snapshot.Connected && snapshot.HaveStatus && status.TLEDAvailable && validTemperatureReading(status.TLEDCenti),
+		HaveTBT: snapshot.Connected && snapshot.HaveStatus &&
+			snapshot.Hello.Capabilities&native.CapabilityBluetoothAudio != 0 &&
+			status.TBTAvailable && validTemperatureReading(status.TBTCenti),
 	})
 	cutoff := at.Add(-model.prefs.HistoryWindow)
 	first := 0

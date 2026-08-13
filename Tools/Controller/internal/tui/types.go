@@ -125,13 +125,19 @@ func preferencesFromUI(value appconfig.UI) Preferences {
 }
 
 type measurementSample struct {
-	At        time.Time
-	SupplyMV  int32
-	BusMV     int32
-	CurrentMA int32
-	PowerMW   int32
-	TLEDCenti int16
-	TBTCenti  int16
+	At          time.Time
+	SupplyMV    int32
+	BusMV       int32
+	CurrentMA   int32
+	PowerMW     int32
+	TLEDCenti   int16
+	TBTCenti    int16
+	HaveSupply  bool
+	HaveBus     bool
+	HaveCurrent bool
+	HavePower   bool
+	HaveTLED    bool
+	HaveTBT     bool
 }
 
 type timelineEntry struct {
