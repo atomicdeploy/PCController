@@ -20,22 +20,33 @@ void require(bool condition, const char *message) {
   }
 }
 
-std::uint8_t xorChecksum(const char *data, std::uint8_t length) {
-  std::uint8_t checksum = 0;
-  while (length-- != 0) {
-    checksum ^= static_cast<std::uint8_t>(*data++);
-  }
-  return checksum;
+std::uint8_t labelCrc(const char *data, std::uint8_t length) {
+	std::uint8_t crc = EepromLayout::MenuLabelsFormatMarker;
+	while (length-- != 0) {
+		crc ^= static_cast<std::uint8_t>(*data++);
+	}
+	return crc;
+}
+
+void beginLabelWrite(const char *labels) {
+	EEPROM.update(EepromLayout::MenuLabelsCommitAddress, 0);
+	for (std::uint8_t index = 0; index < EepromLayout::MenuLabelBytes;
+       ++index) {
+		EEPROM.update(EepromLayout::MenuLabelsAddress + index,
+				  static_cast<std::uint8_t>(labels[index]));
+	}
+	EEPROM.update(EepromLayout::MenuLabelsCrcAddress,
+				  labelCrc(labels, EepromLayout::MenuLabelBytes));
+}
+
+void commitLabelWrite() {
+	EEPROM.update(EepromLayout::MenuLabelsCommitAddress,
+				  EepromLayout::MenuLabelsFormatMarker);
 }
 
 void writeFactoryLabels() {
-  for (std::uint8_t index = 0; index < EepromLayout::MenuLabelBytes;
-       ++index) {
-    EEPROM.update(EepromLayout::MenuLabelsAddress + index,
-                  static_cast<std::uint8_t>(kFactoryLabels[index]));
-  }
-  EEPROM.update(EepromLayout::MenuLabelsChecksumAddress,
-                xorChecksum(kFactoryLabels, EepromLayout::MenuLabelBytes));
+	beginLabelWrite(kFactoryLabels);
+	commitLabelWrite();
 }
 
 void testErasedAndCorruptBlocksFallBackSafely() {
@@ -49,13 +60,101 @@ void testErasedAndCorruptBlocksFallBackSafely() {
             "erased EEPROM label byte did not use a safe fallback");
   }
 
-  writeFactoryLabels();
-  EEPROM.update(EepromLayout::MenuLabelsAddress + 3, 'X');
+	writeFactoryLabels();
+	EEPROM.update(EepromLayout::MenuLabelsAddress + 3, 'X');
   EepromMenuLabels::begin();
   require(!EepromMenuLabels::available(),
           "checksum-corrupt EEPROM label block must not become available");
   require(EepromMenuLabels::read(3, 0) == '-',
           "corrupt EEPROM label byte did not use a safe fallback");
+}
+
+void testVersionedRecordAndTornWriteStayUnavailable() {
+	EEPROM.fill(0xFF);
+	writeFactoryLabels();
+	EepromMenuLabels::begin();
+	require(EepromMenuLabels::available(),
+			"factory EEPROM label block did not validate");
+	require(labelCrc(kFactoryLabels, EepromLayout::MenuLabelBytes) == 0x8B,
+			"factory CRC vector drifted from the Go-compatible contract");
+
+	char replacement[EepromLayout::MenuLabelBytes + 1] = {};
+	for (std::uint8_t index = 0; index < EepromLayout::MenuLabelBytes;
+		 ++index) {
+		replacement[index] = kFactoryLabels[index];
+	}
+	replacement[0] = 'D';
+
+	// Commit invalidation is deliberately first. Every torn prefix stays hidden,
+	// including prefixes with all payload and CRC bytes already written.
+	EEPROM.update(EepromLayout::MenuLabelsCommitAddress, 0);
+	EepromMenuLabels::begin();
+	require(!EepromMenuLabels::available(),
+			"invalidated record remained available");
+	for (std::uint8_t index = 0; index < EepromLayout::MenuLabelBytes;
+		 ++index) {
+		EEPROM.update(EepromLayout::MenuLabelsAddress + index,
+				  static_cast<std::uint8_t>(replacement[index]));
+		EepromMenuLabels::begin();
+		require(!EepromMenuLabels::available(),
+				"torn payload became available before commit");
+	}
+	EEPROM.update(EepromLayout::MenuLabelsCrcAddress,
+			  labelCrc(replacement, EepromLayout::MenuLabelBytes));
+	EepromMenuLabels::begin();
+	require(!EepromMenuLabels::available(),
+			"complete uncommitted record became available");
+	commitLabelWrite();
+	EepromMenuLabels::begin();
+	require(EepromMenuLabels::available(),
+			"committed versioned record did not become available");
+	require(EepromMenuLabels::read(0, 0) == 'D',
+			"committed replacement label was not rendered");
+
+	EEPROM.update(EepromLayout::MenuLabelsCommitAddress,
+			  static_cast<std::uint8_t>(EepromLayout::MenuLabelsFormatMarker + 1U));
+	EepromMenuLabels::begin();
+	require(!EepromMenuLabels::available(),
+			"unknown record format marker became available");
+}
+
+void testCrcRejectsPrintableXorCollisions() {
+	EEPROM.fill(0xFF);
+	writeFactoryLabels();
+	EEPROM.update(EepromLayout::MenuLabelsAddress,
+			  static_cast<std::uint8_t>(kFactoryLabels[1]));
+	EEPROM.update(EepromLayout::MenuLabelsAddress + 1,
+			  static_cast<std::uint8_t>(kFactoryLabels[0]));
+	EepromMenuLabels::begin();
+	require(!EepromMenuLabels::available(),
+			"printable label transposition became valid");
+
+	writeFactoryLabels();
+	EEPROM.update(EepromLayout::MenuLabelsAddress,
+			  static_cast<std::uint8_t>(kFactoryLabels[0] ^ 0x01));
+	EEPROM.update(EepromLayout::MenuLabelsAddress + 1,
+			  static_cast<std::uint8_t>(kFactoryLabels[1] ^ 0x01));
+	EepromMenuLabels::begin();
+	require(!EepromMenuLabels::available(),
+			"two-cell equal-delta corruption became valid");
+
+	char nonPrintable[EepromLayout::MenuLabelBytes + 1] = {};
+	for (std::uint8_t index = 0; index < EepromLayout::MenuLabelBytes;
+		 ++index) {
+		nonPrintable[index] = kFactoryLabels[index];
+	}
+	nonPrintable[7] = '\n';
+	beginLabelWrite(nonPrintable);
+	commitLabelWrite();
+	EepromMenuLabels::begin();
+	require(EepromMenuLabels::available(),
+			"CRC-valid record lost its integrity state");
+	require(EepromMenuLabels::read(1, 3) == '-',
+			"non-printable record cell did not use safe fallback");
+	char label[EepromMenuLabels::LabelWidth] = {};
+	EepromMenuLabels::copy(1, label);
+	require(label[3] == '-',
+			"copy/read disagreed on non-printable cell fallback");
 }
 
 void testFactoryBlockReadsEveryPackedCell() {
@@ -83,8 +182,10 @@ void testFactoryBlockReadsEveryPackedCell() {
 
 int main() {
   try {
-    testErasedAndCorruptBlocksFallBackSafely();
-    testFactoryBlockReadsEveryPackedCell();
+		testErasedAndCorruptBlocksFallBackSafely();
+		testVersionedRecordAndTornWriteStayUnavailable();
+		testCrcRejectsPrintableXorCollisions();
+		testFactoryBlockReadsEveryPackedCell();
     std::cout << "eeprom_menu_labels_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {

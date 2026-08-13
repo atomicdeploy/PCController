@@ -14,7 +14,7 @@ struct __attribute__((packed)) StoredSettings {
   uint8_t checksum;
 };
 
-static_assert(sizeof(StoredSettings) == 41,
+static_assert(sizeof(StoredSettings) == EepromLayout::SettingsRecordBytes,
               "settings/name EEPROM record layout changed");
 
 static_assert(SettingsStore::EepromAddress + sizeof(StoredSettings) <=

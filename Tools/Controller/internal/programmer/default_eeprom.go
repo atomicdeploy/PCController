@@ -105,14 +105,12 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 	}
 
 	// The optional EEPROM-label firmware build reads this exact packed table
-	// from the final 57 EEPROM bytes. Provision it in every factory image so a
-	// later feature-enabled flash does not require a second EEPROM write.
+	// from the final EEPROM bytes. Provision the versioned record in every
+	// factory image so a later feature-enabled flash needs no second write.
 	labels := []byte(defaultEEPROMMenuLabels)
-	if len(labels) != int(EEPROMMenuLabelBytes) {
-		return nil, fmt.Errorf("factory menu labels are %d bytes, require %d", len(labels), EEPROMMenuLabelBytes)
+	if err := applyMenuLabelsWritePlan(data, labels); err != nil {
+		return nil, fmt.Errorf("encode factory menu labels: %w", err)
 	}
-	copy(data[EEPROMMenuLabelsAddress:EEPROMMenuLabelsChecksumAddress], labels)
-	data[EEPROMMenuLabelsChecksumAddress] = xorChecksum(labels)
 
 	image := &IntelHexImage{data: make(map[uint32]byte, PCControllerEEPROMBytes)}
 	for address, value := range data {
