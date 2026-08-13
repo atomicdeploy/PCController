@@ -37,6 +37,8 @@ const (
 	EEPROMStatusProfileCount        byte   = 19
 	EEPROMStatusProfileBytes        uint32 = 12
 	EEPROMStatusProfileRecordBytes  uint32 = EEPROMStatusProfileBytes + 1
+	EEPROMAudioCueRecordBytes       uint32 = 13
+	EEPROMAudioCueAddress           uint32 = PCControllerEEPROMBytes - EEPROMAudioCueRecordBytes
 )
 
 type OfflineEEPROMDecode struct {

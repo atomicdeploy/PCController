@@ -36,6 +36,34 @@ func TestDefaultOutputDefinitionsValidateAndClone(t *testing.T) {
 	}
 }
 
+func TestLegacyFeedbackMelodiesRemainExactHostDefinitions(t *testing.T) {
+	want := map[string][]MelodyNote{
+		FinishMelodyName:        {{659, 100, 0}, {784, 100, 0}, {880, 250, 0}},
+		LostMelodyName:          {{392, 100, 0}, {330, 100, 0}, {262, 100, 0}, {196, 100, 0}},
+		IncorrectBeepMelodyName: {{2000, 100, 100}, {2000, 100, 100}, {2000, 100, 100}},
+		ErrorBeepMelodyName:     {{2000, 10, 10}, {2000, 10, 10}, {2000, 10, 10}, {2000, 10, 10}, {2000, 10, 10}},
+		FaultBeepMelodyName:     {{1000, 250, 0}, {500, 500, 5000}},
+		SuccessCueMelodyName:    {{1047, 70, 30}, {1319, 110, 0}},
+		ErrorCueMelodyName:      {{330, 90, 50}, {262, 160, 0}},
+	}
+	for _, melody := range DefaultMelodies() {
+		if notes, ok := want[melody.Name]; ok {
+			if len(notes) != len(melody.Notes) {
+				t.Fatalf("%s note count=%d want %d", melody.Name, len(melody.Notes), len(notes))
+			}
+			for index := range notes {
+				if melody.Notes[index] != notes[index] {
+					t.Fatalf("%s note %d=%+v want %+v", melody.Name, index, melody.Notes[index], notes[index])
+				}
+			}
+			delete(want, melody.Name)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing host legacy melodies: %v", want)
+	}
+}
+
 func TestOutputDefinitionValidation(t *testing.T) {
 	value := Defaults()
 	value.Melodies = []Melody{{
@@ -60,12 +88,22 @@ func TestOutputDefinitionValidation(t *testing.T) {
 	}
 }
 
-func TestEmptyOutputDefinitionsRemainEmpty(t *testing.T) {
+func TestEmptyOutputDefinitionsRestoreLegacyHostMelodiesOnly(t *testing.T) {
 	value := Defaults()
 	value.Melodies = nil
 	value.StatusEffects = nil
-	if len(EffectiveMelodies(value)) != 0 ||
-		len(EffectiveStatusLEDEffects(value)) != 0 {
-		t.Fatal("empty output definitions were replaced with implicit defaults")
+	if got := EffectiveMelodies(value); len(got) != 7 {
+		t.Fatalf("legacy host melody count=%d want 7", len(got))
+	}
+	if len(EffectiveStatusLEDEffects(value)) != 0 {
+		t.Fatal("empty status effects were replaced with implicit defaults")
+	}
+
+	override := DefaultFinishMelody()
+	override.Notes[0].FrequencyHz = 777
+	value.Melodies = []Melody{override}
+	got := EffectiveMelodies(value)
+	if len(got) != 7 || got[0].Notes[0].FrequencyHz != 777 {
+		t.Fatalf("configured legacy override was not authoritative: %#v", got)
 	}
 }

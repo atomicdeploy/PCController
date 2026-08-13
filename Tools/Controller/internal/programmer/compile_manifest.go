@@ -45,6 +45,8 @@ type compileManifestEEPROMLayout struct {
 	Generation             string `json:"generation"`
 	TemperatureRoleAddress uint32 `json:"temperatureRoleAddress"`
 	TemperatureRoleBytes   uint32 `json:"temperatureRoleBytes"`
+	AudioCueAddress         uint32 `json:"audioCueAddress"`
+	AudioCueBytes           uint32 `json:"audioCueBytes"`
 	Checksum               string `json:"checksum"`
 }
 
@@ -201,6 +203,8 @@ func writeCompileManifest(
 			Generation:             "board-name metadata high nibble, modulo 16; delta 1..7 is newer",
 			TemperatureRoleAddress: EEPROMTemperatureRoleAddress,
 			TemperatureRoleBytes:   EEPROMTemperatureRoleBytes,
+			AudioCueAddress:         EEPROMAudioCueAddress,
+			AudioCueBytes:           EEPROMAudioCueRecordBytes,
 			Checksum:               "CRC-8/ATM (poly 0x07)",
 		},
 		StackBudget:  stackBudget,

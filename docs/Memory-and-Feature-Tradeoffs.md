@@ -92,16 +92,17 @@ bytes, but the firmware does not semantically own every byte:
 
 | EEPROM range | Bytes | Current owner |
 |---|---:|---|
-| `0..31` | 32 | Unallocated |
-| `32..72` | 41 | 31-byte `ControllerSettings`, one name length, eight name bytes, and CRC |
-| `73..79` | 7 | Unallocated alignment gap |
+| `0..31` | 32 | Power-safe settings staging bank |
+| `32..63` | 32 | Canonical packed settings/name bank plus CRC |
+| `64..79` | 16 | DS18B20 ROM-to-role identity record |
 | `80..323` | 244 | Four-byte RF header plus 20 checksummed 12-byte learned-code records |
 | `324..335` | 12 | Unallocated alignment gap |
 | `336..719` | 384 | 64-slot, six-byte reset-count journal |
 | `720..966` | 247 | Nineteen 12-byte status-effect condition descriptors, each with CRC |
-| `967..1023` | 57 | Unallocated |
+| `967..1010` | 44 | Unallocated; candidate space for a future bounded startup/event-opcode record |
+| `1011..1023` | 13 | Four autonomous door/motion-output cue triples plus CRC-8 |
 
-There are therefore 108 logically unallocated EEPROM bytes. Reducing RF or
+There are therefore 56 logically unallocated EEPROM bytes. Reducing RF or
 reset-journal capacity would free EEPROM only; it would not materially solve
 the application-flash ceiling.
 
@@ -196,11 +197,12 @@ EEPROM layout did not change.
 | Requested board capability | What exists now | Exact missing portion | Cost/evidence |
 |---|---|---|---:|
 | Board-pull hosted menus | The host has six file-watched menu definitions. The AVR supports pushed `DisplayText` capture/release, forwards physical keys, and releases capture after host loss. | AVR opcodes `0x42..0x44` and events `0x9A..0x9B`, the eight-entry RAM directory, generation/state, content request on selection, retry timing, `----`, and terminal failure presentation are not in `ControllerProtocol::Opcode` and no capability advertises them. | 450-850 flash, 30-40 SRAM. The directory alone is exactly 24 bytes for eight `{id,parent,flags}` entries; existing 4+32 display buffers can be reused. |
-| EEPROM-configurable buzzer cues | Door and relay cue families have EEPROM enable bits, but their tones are fixed: door open/closed are 1,700/1,100 Hz for 45 ms; relay on/off are 1,900/1,250 Hz for 35 ms. | Persistent selectable cue IDs or note/frequency/duration definitions for door-open, door-close, relay-on, and relay-off, plus settings/protocol/menu fields. | Two retained A/B measurements bound the choice: the compact five-byte choice-table candidate used 33,032 program, 1,442 static-SRAM, and 5 EEPROM bytes; the full four-descriptor candidate used 33,238 program, 1,455 static-SRAM, and 13 EEPROM bytes. Against the current 32,244-byte fixed-identity boundary, they exceed it by 788 and 994 bytes respectively. Neither candidate is shippable in the shared image layout. |
+| EEPROM-configurable buzzer cues | Door open/close and relay/motion on/off use a 13-byte CRC record at `1011..1023`, with exact immutable fallbacks for blank/corrupt EEPROM. | Typed read/write opcodes and UI editors; general multi-step startup/event execution remains separate. | The cue reader reuses `TonePlayer` and the existing protocol CRC instead of carrying another sequencer; exact production fit belongs to the generated manifest. |
 | Board EEPROM automation | Twenty learned RF records can directly map one code to Key/Menu/Relay/Side/PWM behavior. Host automations can react to all events. | There is no generic EEPROM event-to-action rule table for door, BT Audio, relay, host loss, temperature, or other events; no board rule can invoke RF transmit or a macro on those events. Host-loss handling is fixed, not programmable. | 700-1,400 flash, 16-24 SRAM, and about 108 EEPROM bytes for eight compact rules plus an atomic header and CRC that reuse ordinary opcode validation. |
 
-The current 117-byte unallocated EEPROM area can hold compact cue and
-automation records. Flash, not EEPROM, is the limiting resource.
+The current 56-byte unallocated EEPROM area can hold compact automation
+records; 44 bytes are contiguous after status profiles. The cue record is
+already owned. Flash remains the limiting resource for a general executor.
 
 ## Menu migration candidates and exact losses
 
@@ -219,7 +221,7 @@ build, and ranges must not be added to a release manifest as measured bytes.
 | Board `MenuList` directory | 80-180 | Approximately 0 | The host must hard-code local IDs/modes/labels and can silently drift from the firmware. Not recommended. |
 | Addressable D6 strip | 200-350 | Exactly 33 bytes | Loses all 11 WS2811/WS2812 pixels, fill/per-pixel commands, and future strip effects. Current `show()` alone is 158 linked bytes, so 158 is a lower bound, not the net saving. |
 | Smooth status RGB animations/cues, retaining static status colors | 200-420 | 3-10 bytes | Loses eased door/BT/RF/menu/save/discard/reset transitions and breathing/flashing distinctions. Hard warning indications can remain. |
-| Buzzer and melodies | 300-550 | About 50 bytes | Loses boot health melody, key feedback, door/relay/save/discard/error cues, host-streamed tones, and the purpose of Silent mode. |
+| Buzzer engine and all cue policy | 300-550 | About 50 bytes | Forbidden as a silent trim: it loses direct/macro tones, key feedback, autonomous door/motion cues, and Silent mode's purpose. Rich sequences may move to host/EEPROM only with exact-definition tests and the removal ledger. |
 | MCU macro timing queue | 500-900 | Exactly 157 bytes for the playback object | Loses board-clock scheduling, USB-jitter buffering, precise execution deltas, queue/fidelity metrics, synchronized cancellation, and host-loss safe-stop. |
 | rc-switch receive/transmit/learning | At least 900 | About 180 bytes | Loses all 433 MHz RX/TX, repeat recognition, learning, 20 mappings, RF events, and RF-driven actions. The 632-byte interrupt handler plus visible support symbols already exceed 900 linked bytes. |
 

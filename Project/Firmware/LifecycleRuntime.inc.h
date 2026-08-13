@@ -24,6 +24,7 @@ static inline __attribute__((always_inline)) void initializeController() {
   relays.begin(startupNow);
   systemInputs.begin(shiftRegisters.rawInputs(), startupNow);
   buzzer.begin();
+  audioCues.begin();
   AddressableLeds::begin();
   loadIlluminationSettings();
   const ControllerSettings &settings = settingsStore.values();
@@ -88,11 +89,6 @@ static inline __attribute__((always_inline)) void initializeController() {
 
   // Unsolicited cue policy is a build capability; TonePlayer/Buzzer itself
   // remains available to macros and host commands.
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-  if (!programming && !effectiveSilentMode()) {
-    playBootMelody();
-  }
-#endif
   firmwareReady = true;
   appEvents.reset(resetTelemetry.cause(), resetTelemetry.count());
   sendHello(0);
@@ -173,9 +169,6 @@ static inline __attribute__((always_inline)) void serviceController() {
   static uint32_t lastHotAlertAt = 0;
   if (hot && (!hotReported ||
               static_cast<uint32_t>(loopNow - lastHotAlertAt) >= 10000UL)) {
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-    buzzer.error();
-#endif
     lastHotAlertAt = loopNow;
   }
   if (hot != hotReported) {
@@ -234,7 +227,9 @@ static inline __attribute__((always_inline)) void serviceController() {
 #if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().relayAudioEnabled() &&
         ((relayMask ^ lastRelayMask) & 0xFAU) != 0) {
-      buzzer.beep(35, (relayMask & ~lastRelayMask) != 0 ? 1900 : 1250);
+      audioCues.play((relayMask & ~lastRelayMask) != 0
+                         ? AudioCue::OutputOn
+                         : AudioCue::OutputOff);
     }
 #endif
     settingsStore.values().relayRestoreMask = relayMask;

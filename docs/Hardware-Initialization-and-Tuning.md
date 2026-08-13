@@ -16,8 +16,8 @@ EEPROM record can override settings explicitly identified as persistent.
 
 The ATmega328P starts a 2 s watchdog, opens the native COBS/opcode UART, sends
 an early HELLO, then initializes shift I/O, relays, monitored inputs, buzzer,
-addressable LEDs, EEPROM settings, TM1637, I2C, PWM, INA219, DS18B20, RF, and
-the boot melody. Relays are forced off before their output-enable pin is driven,
+addressable LEDs, EEPROM settings and audio cues, TM1637, I2C, PWM, INA219,
+DS18B20, and RF. Relays are forced off before their output-enable pin is driven,
 and all 16 PWM channels are explicitly written off before saved PWM, enclosure,
 power-indicator, and status-RGB state is applied.
 
@@ -293,10 +293,17 @@ between the two sides are separated by at least 5 ms. Factory motion-door policy
 
 ## Buzzer, RGB, and addressable LEDs
 
-The buzzer is driven by Timer1 CTC hardware output on OC1A/D9. No Timer1 compare
+The buzzer is driven by Timer1 CTC hardware output on OC1A/D9. The accepted
+20..20,000 Hz range fits the 16-bit timer with a fixed /8 prescaler. No Timer1 compare
 ISR runs at audio frequency, so buzzer playback does not starve INT0/INT1 RF or
 UART service. Factory EEPROM is audible; the persistent silent flag suppresses
 tones without changing command acknowledgement.
+
+Door open/close and relay or motion activation/release are autonomous. Their
+four records occupy EEPROM `1011..1023` with CRC-8 and fall back to
+1,700/1,100 Hz for 45 ms and 1,900/1,250 Hz for 35 ms. Rich multi-note
+finish/error/welcome sequences are named host melodies; selected ones can move
+to a bounded EEPROM executor after the offline policy is chosen.
 
 PWM channel 12 is the power indicator, and channels 13..15 are status RGB. The
 factory status brightness is 128/255. Animation service runs every 20 ms with a
@@ -332,7 +339,7 @@ particular board.
 | Voltage / current decimals | 2 / 2 |
 | Motion door policy | Always |
 | Break before direction | 1 ms |
-| Door / relay buzzer cues | enabled |
+| Door / relay-motion buzzer cues | enabled; exact EEPROM record plus immutable fallback |
 | Temperature identity swap | off; sorted ROM 0 is tLED, ROM 1 is tBT |
 
 ## What to verify before tuning
@@ -350,8 +357,8 @@ For each final firmware hash, record the following in the acceptance report:
    choices, confirmation blink, and host-owned preview.
 6. RF receive codes/repeats and a known transmit captured by another receiver.
 7. Relay mapping and loaded direction interlock with safe physical observation.
-8. UART reconnect without default DTR reset, boot melody, silent setting, and
-   reset-count telemetry.
+8. UART reconnect without default DTR reset, host welcome melody, autonomous
+   door/motion cues, silent setting, and reset-count telemetry.
 
 Only after those measurements should a setting be called "best" for the final
 hardware. The values above are the current engineering choices and are exposed

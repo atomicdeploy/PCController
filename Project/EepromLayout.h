@@ -32,6 +32,9 @@ constexpr uint8_t StatusProfilePayloadBytes = 12;
 constexpr uint8_t StatusProfileRecordBytes = StatusProfilePayloadBytes + 1;
 constexpr int StatusProfileEnd =
     StatusProfileAddress + StatusProfileCount * StatusProfileRecordBytes;
+constexpr uint8_t AudioCueBytes = 13;
+constexpr int AudioCueAddress = E2END + 1 - AudioCueBytes;
+constexpr int AudioCueEnd = AudioCueAddress + AudioCueBytes;
 
 static_assert(RemoteEnd <= ResetJournalAddress,
               "RF records overlap reset journal");
@@ -39,6 +42,9 @@ static_assert(ResetJournalEnd <= E2END + 1,
               "EEPROM layout exceeds ATmega328P EEPROM");
 static_assert(StatusProfileEnd <= E2END + 1,
               "status profiles exceed ATmega328P EEPROM");
+static_assert(StatusProfileEnd <= AudioCueAddress,
+              "status profiles overlap audio cues");
+static_assert(AudioCueEnd == E2END + 1, "audio cues must end at EEPROM tail");
 static_assert(SettingsStagingAddress + SettingsBankBytes <= SettingsAddress,
               "settings staging bank overlaps canonical settings");
 static_assert(SettingsAddress + SettingsBankBytes <= TemperatureRoleAddress,

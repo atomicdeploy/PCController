@@ -123,6 +123,29 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME firmware_controls_unit COMMAND firmware_controls_tests)
 
+  # Preserve the exact historical autonomous door and motion/output tones.
+  # Blank/corrupt EEPROM must use immutable fallbacks; a valid CRC record may
+  # override them without replacing the cooperative TonePlayer engine.
+  add_executable(firmware_audio_cue_tests
+    tests/audio_cue_test.cpp
+    ../../LocalLib/TonePlayer.cpp
+    ../../Project/AudioCues.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_audio_cue_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_audio_cue_tests PRIVATE
+    PCCONTROLLER_NATIVE_TEST=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_audio_cue_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_audio_cue_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_audio_cue_unit COMMAND firmware_audio_cue_tests)
+
   # Run the production MCU status renderer against a fake PCA9685 transport.
   # Timing is simulated at 1 ms resolution; no host-side animation is involved.
   add_executable(firmware_status_led_tests

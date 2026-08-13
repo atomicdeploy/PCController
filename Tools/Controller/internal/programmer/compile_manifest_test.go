@@ -67,6 +67,7 @@ func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *te
 		manifest.EEPROMLayout.SettingsBankBytes != 32 || manifest.EEPROMLayout.SettingsBankCount != 2 ||
 		manifest.EEPROMLayout.ControllerBytes != 22 || manifest.EEPROMLayout.RecordBytes != 32 ||
 		manifest.EEPROMLayout.TemperatureRoleAddress != 64 || manifest.EEPROMLayout.TemperatureRoleBytes != 16 ||
+		manifest.EEPROMLayout.AudioCueAddress != 1011 || manifest.EEPROMLayout.AudioCueBytes != 13 ||
 		!strings.Contains(manifest.EEPROMLayout.Generation, "modulo 16") ||
 		len(manifest.Artifacts) != 4 || len(manifest.PatchRegions) != 1 {
 		t.Fatalf("manifest=%#v", manifest)

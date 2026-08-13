@@ -252,9 +252,6 @@ void programService(uint32_t at) {
 #endif
       case MODE_FAULT:
         display.showText(commonText(TextError));
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-        buzzer.error();
-#endif
         break;
       default:
         break;
@@ -490,14 +487,8 @@ void finishEditTransaction(bool save, uint32_t at) {
   flashMessageSaved = save;
   flashMessageEndsAt = at + 900;
   if (save) {
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-    buzzer.success();
-#endif
     statusLeds.playCue(StatusLedCue::Save, 900, at);
   } else {
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-    buzzer.error();
-#endif
     statusLeds.playCue(StatusLedCue::Discard, 900, at);
   }
   modeManager.transitionTo(MODE_FLASH_MESSAGE);
@@ -604,9 +595,6 @@ void handleMenuAction(uint8_t action, bool fromRemote,
     } else if (relays.motionAllowed()) {
       modeManager.transitionTo(MODE_MOTION_CONTROL);
     } else {
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-      buzzer.error();
-#endif
     }
 #endif
     menuFeedback(fromRemote);
@@ -879,7 +867,6 @@ void handleMenuAction(uint8_t action, bool fromRemote,
         if (relays.motionAllowed()) {
           modeManager.transitionTo(MODE_MOTION_CONTROL);
         } else {
-          buzzer.error();
         }
       } else if (menuPage == PAGE_RF) {
         if (!hostUnavailable()) {
@@ -892,7 +879,6 @@ void handleMenuAction(uint8_t action, bool fromRemote,
         display.showText(commonText(TextError));
         menuLabelEndsAt = actionNow + 650;
         statusLeds.playCue(StatusLedCue::Discard, 650, actionNow);
-        buzzer.error();
         return;
       }
       break;
@@ -1067,9 +1053,6 @@ void serviceMotionExit(uint32_t at) {
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
     setMenuPage(PAGE_KEYS);
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-    buzzer.success();
-#endif
     motionExitStartedAt = 0xFFFFFFFFUL;
   }
 }
@@ -1083,7 +1066,7 @@ void serviceSystemInputs(uint32_t at) {
     appEvents.door(value);
 #if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().doorAudioEnabled()) {
-      buzzer.beep(45, value ? 1700 : 1100);
+      audioCues.play(value ? AudioCue::DoorOpen : AudioCue::DoorClosed);
     }
 #endif
     statusLeds.playCue(value ? StatusLedCue::DoorOpen

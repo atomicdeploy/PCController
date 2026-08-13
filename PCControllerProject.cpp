@@ -2,10 +2,9 @@
 #include "ProjectConfig.h"
 
 #include "Project/AddressableLeds.cpp"
-#include "Project/BootMelody.cpp"
+#include "Project/AudioCues.cpp"
 #include "Project/CompactI2c.cpp"
 #include "Project/ControllerEvents.cpp"
-#include "Project/FeedbackMelodies.cpp"
 #include "Project/IlluminationController.cpp"
 #include "Project/Ina219Sensor.cpp"
 #include "Project/MacroQueue.cpp"

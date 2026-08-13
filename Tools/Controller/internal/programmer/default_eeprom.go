@@ -129,6 +129,16 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 		record[EEPROMStatusProfileBytes] = avrCRC8(record[:EEPROMStatusProfileBytes])
 	}
 
+	// Exact offline feedback at the EEPROM tail: four packed
+	// frequency/duration triples, then CRC-8.
+	audio := data[EEPROMAudioCueAddress : EEPROMAudioCueAddress+EEPROMAudioCueRecordBytes]
+	for index, cue := range [][2]uint16{{1700, 45}, {1100, 45}, {1900, 35}, {1250, 35}} {
+		offset := index * 3
+		binary.LittleEndian.PutUint16(audio[offset:offset+2], cue[0])
+		audio[offset+2] = byte(cue[1])
+	}
+	audio[len(audio)-1] = avrCRC8(audio[:len(audio)-1])
+
 	image := &IntelHexImage{data: make(map[uint32]byte, PCControllerEEPROMBytes)}
 	for address, value := range data {
 		image.data[uint32(address)] = value

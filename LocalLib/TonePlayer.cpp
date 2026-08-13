@@ -4,6 +4,8 @@
 
 static_assert(BoardPins::Buzzer == PIN_PB1,
               "Timer1 OC1A buzzer output must remain on PB1 / Arduino D9");
+static_assert(F_CPU == 16000000UL,
+              "TonePlayer's compact Timer1 divider assumes the 16 MHz profile");
 
 TonePlayer buzzer(BoardPins::Buzzer);
 
@@ -106,12 +108,18 @@ bool TonePlayer::startHardwareTone(uint16_t frequencyHz) {
     return false;
   }
 
-  uint16_t top;
-  uint8_t clockBits;
-  if (!timerSettings(frequencyHz, top, clockBits)) {
+  // The public/protocol contract is 20..20,000 Hz. At 16 MHz every legal
+  // frequency fits Timer1's 16-bit CTC range with the /8 prescaler, so a
+  // multi-prescaler search was redundant flash baggage.
+  if (frequencyHz < 20U) {
     stopHardwareTone();
     return false;
   }
+  // With F_CPU=16 MHz and the fixed /8 prescaler, the toggle frequency is
+  // 1,000,000 / (OCR1A + 1). Keeping that reduced constant avoids a second
+  // 32-bit multiply/divide path while preserving nearest-integer rounding.
+  const uint16_t top = static_cast<uint16_t>(
+      (1000000UL + frequencyHz / 2U) / frequencyHz - 1UL);
 
   const uint8_t savedStatus = SREG;
   cli();
@@ -125,7 +133,7 @@ bool TonePlayer::startHardwareTone(uint16_t frequencyHz) {
   OCR1A = top;
   TIFR1 = _BV(OCF1A);
   TCCR1A = _BV(COM1A0);
-  TCCR1B = static_cast<uint8_t>(_BV(WGM12) | clockBits);
+  TCCR1B = static_cast<uint8_t>(_BV(WGM12) | _BV(CS11));
 
   SREG = savedStatus;
   return true;
@@ -143,44 +151,4 @@ void TonePlayer::stopHardwareTone() {
 
   SREG = savedStatus;
   digitalWrite(pin_, LOW);
-}
-
-bool TonePlayer::timerSettings(uint16_t frequencyHz, uint16_t &top,
-                               uint8_t &clockBits) {
-  if (frequencyHz == 0) {
-    return false;
-  }
-
-  return timerSettingForPrescaler(frequencyHz, 1, _BV(CS10), top,
-                                  clockBits) ||
-         timerSettingForPrescaler(frequencyHz, 8, _BV(CS11), top,
-                                  clockBits) ||
-         timerSettingForPrescaler(
-             frequencyHz, 64,
-             static_cast<uint8_t>(_BV(CS11) | _BV(CS10)), top, clockBits) ||
-         timerSettingForPrescaler(frequencyHz, 256, _BV(CS12), top,
-                                  clockBits) ||
-         timerSettingForPrescaler(
-             frequencyHz, 1024,
-             static_cast<uint8_t>(_BV(CS12) | _BV(CS10)), top, clockBits);
-}
-
-bool TonePlayer::timerSettingForPrescaler(uint16_t frequencyHz,
-                                          uint16_t divisor,
-                                          uint8_t candidateClockBits,
-                                          uint16_t &top,
-                                          uint8_t &clockBits) {
-  const uint32_t denominator =
-      2U * static_cast<uint32_t>(divisor) * frequencyHz;
-  uint32_t ticks =
-      (static_cast<uint32_t>(F_CPU) + denominator / 2U) / denominator;
-  if (ticks == 0) {
-    ticks = 1;
-  }
-  if (ticks > 65536UL) {
-    return false;
-  }
-  top = static_cast<uint16_t>(ticks - 1UL);
-  clockBits = candidateClockBits;
-  return true;
 }
