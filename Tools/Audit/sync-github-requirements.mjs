@@ -1372,6 +1372,8 @@ const PR_ORIGINAL_REQUESTS = {
   271: [PROMPT_EXCERPTS.keyLatency, PROMPT_EXCERPTS.hardwareFrontPanel],
   272: [PROMPT_EXCERPTS.peerUpdateHardening, PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.stuckUpdate],
   273: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.fullRemoteTui, PROMPT_EXCERPTS.webUi],
+  274: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.messagingFabric, PROMPT_EXCERPTS.webUi],
+  275: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.staticHints, PROMPT_EXCERPTS.tuiPages],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
