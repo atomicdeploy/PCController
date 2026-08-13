@@ -112,6 +112,50 @@ void testExactReversalAndRetainedDirection() {
           "full-off stop failed to clear the retained direction relay");
 }
 
+void testBreakConfigurationBoundaries() {
+  {
+    TraceSink sink;
+    Machine machine(sink);
+    machine.begin(0);
+    machine.setBreakBeforeDirectionMs(0);
+    sink.clearFrames();
+
+    require(machine.requestSide(RelaySide::A, RelayDirection::Forward, true,
+                                1),
+            "zero-break fixture could not start Side A");
+    require(machine.requestSide(RelaySide::A, RelayDirection::Reverse, true,
+                                2),
+            "zero-break fixture could not request a reversal");
+    machine.service(2);
+    require(sink.mask == 0,
+            "zero break bypassed the required one ms de-energized frame");
+    machine.service(3);
+    require(sink.mask == 0x03,
+            "zero break did not clamp to exactly one ms before re-enable");
+  }
+
+  {
+    TraceSink sink;
+    Machine machine(sink);
+    machine.begin(0);
+    machine.setBreakBeforeDirectionMs(255);
+    sink.clearFrames();
+
+    require(machine.requestSide(RelaySide::A, RelayDirection::Forward, true,
+                                1),
+            "max-break fixture could not start Side A");
+    require(machine.requestSide(RelaySide::A, RelayDirection::Reverse, true,
+                                2),
+            "max-break fixture could not request a reversal");
+    machine.service(256);
+    require(sink.mask == 0,
+            "255 ms break ended one ms early");
+    machine.service(257);
+    require(sink.mask == 0x03,
+            "255 ms break did not settle at its exact deadline");
+  }
+}
+
 void testCrossSideInterlockAndPolicyStop() {
   TraceSink sink;
   Machine machine(sink);
@@ -208,6 +252,7 @@ int main() {
   try {
     testTwoFrameAllOffAndGeneralRelays();
     testExactReversalAndRetainedDirection();
+    testBreakConfigurationBoundaries();
     testCrossSideInterlockAndPolicyStop();
     testPendingBreakAllOffAndRollover();
     std::cout << "relay_motion_machine_tests: all checks passed\n";
