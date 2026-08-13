@@ -1368,6 +1368,10 @@ const PR_ORIGINAL_REQUESTS = {
   267: [PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.programmingEntrypoint],
   268: [PROMPT_EXCERPTS.displaysAudio, PROMPT_EXCERPTS.buzzerFallback, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.externalBeepFallback],
   269: [PROMPT_EXCERPTS.authDefer, PROMPT_EXCERPTS.permissionAvailability, PROMPT_EXCERPTS.alphaEdgeReplacement, PROMPT_EXCERPTS.peerUpdateHardening],
+  270: [PROMPT_EXCERPTS.serviceTray, PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.fullRemoteTui],
+  271: [PROMPT_EXCERPTS.keyLatency, PROMPT_EXCERPTS.hardwareFrontPanel],
+  272: [PROMPT_EXCERPTS.peerUpdateHardening, PROMPT_EXCERPTS.artifactSync, PROMPT_EXCERPTS.stuckUpdate],
+  273: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.fullDuplexTracking, PROMPT_EXCERPTS.fullRemoteTui, PROMPT_EXCERPTS.webUi],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
