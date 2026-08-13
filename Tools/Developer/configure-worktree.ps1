@@ -6,17 +6,31 @@ param(
 $ErrorActionPreference = 'Stop'
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 
-git -C $repository config --local core.autocrlf false
-git -C $repository config --local core.eol lf
-git -C $repository config --local commit.template .gitmessage
+function Invoke-CheckedNative {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Command,
+        [Parameter(ValueFromRemainingArguments)]
+        [string[]]$Arguments
+    )
+
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Command failed with exit code $LASTEXITCODE"
+    }
+}
+
+Invoke-CheckedNative -Command 'git' -Arguments @('-C', $repository, 'config', '--local', 'core.autocrlf', 'false')
+Invoke-CheckedNative -Command 'git' -Arguments @('-C', $repository, 'config', '--local', 'core.eol', 'lf')
+Invoke-CheckedNative -Command 'git' -Arguments @('-C', $repository, 'config', '--local', 'commit.template', '.gitmessage')
 
 if (-not $SkipDesktopBranding -and $env:OS -eq 'Windows_NT') {
     $desktopIni = Join-Path $repository 'Desktop.ini'
     if (-not (Test-Path -LiteralPath $desktopIni)) {
         throw "Desktop branding file is missing: $desktopIni"
     }
-    & attrib.exe +s $repository
-    & attrib.exe +h $desktopIni
+    Invoke-CheckedNative -Command 'attrib.exe' -Arguments @('+s', $repository)
+    Invoke-CheckedNative -Command 'attrib.exe' -Arguments @('+h', '+s', $desktopIni)
 }
 
 Write-Host "Configured Git defaults for $repository"

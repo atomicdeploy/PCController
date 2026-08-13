@@ -165,7 +165,7 @@ export function resolveBuildIdentity(options, env = process.env, now = new Date(
 	}
 	const appName = normalizeBuildPresentation(
 		options.appName !== undefined ? options.appName : environmentValue(env, 'PCCONTROLLER_BUILD_APP_NAME') ||
-			environmentValue(env, 'APP_TITLE') || PRODUCT_METADATA.productName,
+			environmentValue(env, 'APP_NAME') || environmentValue(env, 'APP_TITLE') || PRODUCT_METADATA.productName,
 		'build application name', 64
 	)
 	const tagline = normalizeBuildPresentation(

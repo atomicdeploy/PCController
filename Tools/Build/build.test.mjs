@@ -642,9 +642,8 @@ test('all public launchers advertise the shared Node runtime floor', async () =>
 		assert.match(source, /Node\.js 22\.12 or newer/, `${name} has a divergent Node requirement`)
 		assert.match(source, /Install Node\.js, then run this command again\./)
 	}
-	const npmFailure = 'npm was not found in PATH; it is required to install the locked build UI dependencies.'
-	assert.ok(launchers.get('build.cmd').includes(npmFailure))
-	assert.ok(launchers.get('build.sh').includes(npmFailure))
+	assert.match(launchers.get('build.cmd'), /env-bootstrap\.mjs" install-build-dependencies/)
+	assert.match(launchers.get('build.sh'), /env-bootstrap\.mjs" install-build-dependencies/)
 	const firmwareSource = await readFile(
 		join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs'),
 		'utf8'
@@ -759,6 +758,7 @@ test('build presentation switches override environment and package defaults', ()
 	const identity = resolveBuildIdentity(options, {
 		PCCONTROLLER_BUILD_APP_NAME: 'Environment Controller',
 		PCCONTROLLER_BUILD_TAGLINE: 'Environment line',
+		APP_NAME: 'Runtime build title',
 		APP_TITLE: 'Legacy build title',
 		APP_TAGLINE: 'Runtime/build line'
 	})
@@ -782,6 +782,15 @@ test('build presentation switches override environment and package defaults', ()
 		hostBuildTime: identity.hostBuildTime,
 		packedTimestamp: identity.packedTimestamp
 	})
+})
+
+test('APP_NAME configures both canonical build and runtime presentation', () => {
+	const identity = resolveBuildIdentity(parseArguments(['--host-only'], {}), {
+		APP_NAME: 'Shared Environment Controller',
+		APP_TITLE: 'Legacy Controller'
+	})
+	assert.equal(identity.appName, 'Shared Environment Controller')
+	assert.equal(resolveProductTitle(identity.env), 'Shared Environment Controller')
 })
 
 test('build presentation environment is case-insensitive and validated', () => {

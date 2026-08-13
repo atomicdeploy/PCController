@@ -59,7 +59,12 @@ export function resolveProjectEnvFile(environment = process.env, { root = reposi
 // entrypoints.
 export function loadProjectEnv(environment = process.env, options = {}) {
   const path = resolveProjectEnvFile(environment, options)
-  if (!existsSync(path)) return { path, loaded: false, applied: [] }
+  if (!existsSync(path)) {
+    if (String(environment.PCCONTROLLER_ENV_FILE ?? '').trim()) {
+      throw new Error(`explicit environment file does not exist: ${path}`)
+    }
+    return { path, loaded: false, applied: [] }
+  }
   const values = parseEnvFile(readFileSync(path, 'utf8'), path)
   const applied = []
   for (const [key, value] of values) {
@@ -67,6 +72,9 @@ export function loadProjectEnv(environment = process.env, options = {}) {
     environment[key] = value
     applied.push(key)
   }
+  // Children may start in another working directory. Preserve the selected
+  // file itself, not the caller-relative spelling that found it.
+  environment.PCCONTROLLER_ENV_FILE = path
   return { path, loaded: true, applied }
 }
 

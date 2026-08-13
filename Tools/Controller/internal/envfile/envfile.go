@@ -11,7 +11,11 @@ import (
 	"strings"
 )
 
-var keyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var (
+	keyPattern           = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	exportPattern        = regexp.MustCompile(`^export\s+`)
+	inlineCommentPattern = regexp.MustCompile(`\s+#.*$`)
+)
 
 type Result struct {
 	Path    string
@@ -47,9 +51,7 @@ func projectFile(cwd string, lookup func(string) string) (string, error) {
 
 func unquote(value, source string, line int) (string, error) {
 	if len(value) == 0 || (value[0] != '\'' && value[0] != '"') {
-		if comment := strings.Index(value, " #"); comment >= 0 {
-			value = value[:comment]
-		}
+		value = inlineCommentPattern.ReplaceAllString(value, "")
 		return strings.TrimRight(value, " \t"), nil
 	}
 	quote := value[0]
@@ -95,7 +97,7 @@ func parse(content, source string) (map[string]string, error) {
 		if text == "" || strings.HasPrefix(text, "#") {
 			continue
 		}
-		text = strings.TrimPrefix(text, "export ")
+		text = exportPattern.ReplaceAllString(text, "")
 		separator := strings.IndexByte(text, '=')
 		if separator <= 0 {
 			return nil, fmt.Errorf("%s:%d: expected KEY=VALUE", source, line)
@@ -124,8 +126,12 @@ func LoadProcess() (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	explicit := strings.TrimSpace(os.Getenv("PCCONTROLLER_ENV_FILE")) != ""
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
+		if explicit {
+			return Result{}, fmt.Errorf("read explicit environment file %s: %w", path, err)
+		}
 		return Result{Path: path}, nil
 	}
 	if err != nil {
@@ -144,6 +150,11 @@ func LoadProcess() (Result, error) {
 			return Result{}, err
 		}
 		result.Applied = append(result.Applied, key)
+	}
+	// Children may start in another working directory. Preserve the selected
+	// file itself, not the caller-relative spelling that found it.
+	if err := os.Setenv("PCCONTROLLER_ENV_FILE", path); err != nil {
+		return Result{}, err
 	}
 	return result, nil
 }

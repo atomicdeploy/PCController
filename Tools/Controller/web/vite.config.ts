@@ -43,7 +43,7 @@ export function escapeProductHTML(value: string): string {
 }
 
 export default defineConfig(() => {
-  const productName = presentation(process.env.PCCONTROLLER_BUILD_APP_NAME || process.env.APP_TITLE || packageMetadata.productName, 'productName', 64)
+  const productName = presentation(process.env.PCCONTROLLER_BUILD_APP_NAME || process.env.APP_NAME || process.env.APP_TITLE || packageMetadata.productName, 'productName', 64)
   const productShortName = metadata(packageMetadata.productShortName, 'productShortName')
   const productTagline = presentation(process.env.PCCONTROLLER_BUILD_TAGLINE || process.env.APP_TAGLINE || packageMetadata.productFirstRunTagline, 'productFirstRunTagline', 96)
   const productProtocol = metadata(packageMetadata.productProtocol, 'productProtocol').toLowerCase()

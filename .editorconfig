@@ -8,10 +8,18 @@ trim_trailing_whitespace = true
 indent_style = space
 indent_size = 2
 
-[*.{go,ino,cpp,c,h,hpp,cc}]
+[*.go]
+indent_style = tab
+indent_size = 8
+
+[*.{ino,cpp,c,h,hpp,cc}]
 indent_size = 4
 
-[*.{cmd,bat,ps1,ini}]
+[*.{cmd,bat,ps1}]
+end_of_line = crlf
+indent_size = 4
+
+[*.ini]
 end_of_line = crlf
 
 [Makefile]

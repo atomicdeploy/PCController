@@ -136,7 +136,10 @@ Copy [`.env.example`](.env.example) to a local `.env` when development or
 build inputs need to be shared across this checkout. Root build, firmware,
 dependency, audit, WebUI/Vite, and Go command entrypoints load it without shell
 evaluation. An already-inherited process, CI, or service-manager value always
-wins; set `PCCONTROLLER_ENV_FILE` to use an explicit file instead. `.env` and
+wins; set `PCCONTROLLER_ENV_FILE` to use an explicit file instead. Relative
+explicit paths are canonicalized before child tools change directories. The
+root build/update launchers also load the file before their first locked
+`npm ci`, so proxy and registry settings apply on a clean checkout. `.env` and
 `.env.bak` are intentionally ignored, while `.env.example` is tracked.
 
 The tracked [`.editorconfig`](.editorconfig), [`.gitattributes`](.gitattributes),

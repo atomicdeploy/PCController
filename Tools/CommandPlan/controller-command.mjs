@@ -2,6 +2,9 @@ import { readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 export const EXIT = Object.freeze({
 	OK: 0,
