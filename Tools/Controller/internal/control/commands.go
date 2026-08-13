@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/native"
@@ -239,6 +240,65 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				lines = append(lines, port.Label())
 			}
 			return strings.Join(lines, "\n"), nil
+		},
+	})
+	mustRegister(shell.Command{
+		Name: "discover", Usage: "discover [mdns dns-sd ssdp upnp ws-discovery broadcast netbios]",
+		Summary: "discover peer PCController hosts on the local network",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			options := discovery.Options{}
+			if len(args) == 0 {
+				options = discovery.Options{MDNS: true, DNSSD: true, SSDP: true, UPnP: true, WSDiscovery: true, Broadcast: true, NetBIOS: true}
+			}
+			for _, argument := range args {
+				switch strings.ToLower(strings.TrimSpace(argument)) {
+				case "mdns", "dns-sd", "dnssd":
+					options.MDNS, options.DNSSD = true, true
+				case "ssdp":
+					options.SSDP = true
+				case "upnp":
+					options.SSDP, options.UPnP = true, true
+				case "ws-discovery", "wsd":
+					options.WSDiscovery = true
+				case "broadcast", "udp":
+					options.Broadcast = true
+				case "netbios", "nbns":
+					options.NetBIOS = true
+				default:
+					return "", fmt.Errorf("unsupported discovery protocol %q", argument)
+				}
+			}
+			requestContext, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			instances, err := discovery.DiscoverWithOptions(requestContext, options)
+			if err != nil {
+				return "", err
+			}
+			if len(instances) == 0 {
+				return "no peer instances found", nil
+			}
+			lines := make([]string, 0, len(instances))
+			for _, instance := range instances {
+				lines = append(lines, fmt.Sprintf("%s %s %s:%d %s", instance.Protocol, instance.Name, instance.Host, instance.Port, instance.Location))
+			}
+			return strings.Join(lines, "\n"), nil
+		},
+	})
+	mustRegister(shell.Command{
+		Name: "port-process", Aliases: []string{"port-owner"}, Usage: "port-process",
+		Summary: "show the exact process currently holding the selected serial port",
+		Run: func(context.Context, []string) (string, error) {
+			process := runtime.Snapshot().PortProcess
+			if !process.Supported {
+				return "port process inspection unsupported", nil
+			}
+			if process.State == "free" {
+				return fmt.Sprintf("%s is free (takeover_ready=%t)", process.Port, process.TakeoverReady), nil
+			}
+			if process.State == "unknown" {
+				return fmt.Sprintf("%s owner unknown: %s", process.Port, process.Error), nil
+			}
+			return fmt.Sprintf("%s: %s (PID %d) executable=%q start=%d window=%q [%s]", process.Port, process.Name, process.PID, process.Executable, process.ProcessStartTime, process.Window.Title, process.Window.Class), nil
 		},
 	})
 	mustRegister(shell.Command{

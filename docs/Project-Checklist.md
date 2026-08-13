@@ -133,8 +133,9 @@ binary, checksum, or test run cannot satisfy a newer tree.
   system and semantic violet/coral/amber status palette.
 - ✅ A Web App Manifest and mobile metadata enable standalone installation in
   supporting browsers, with route shortcuts for the four primary work areas.
-- ✅ The installability worker is deliberately network-only and retains no
-  offline cache; host shutdown must become visible immediately.
+- ✅ The installability worker caches only the versioned UI shell and immutable
+  bundles. It never caches board/API, WebSocket, health, or generated
+  configuration traffic, so an offline shell cannot claim the host is live.
 - ✅ Light/dark themes, Persian/English localization, RTL/LTR layout, and the
   bundled Persian font are first-class states.
 - ✅ The first-run loading sequence, dialogs, drawers, banners, toasts, focus,
@@ -186,7 +187,7 @@ binary, checksum, or test run cannot satisfy a newer tree.
   open, suffix, and multipart byte ranges, `If-Range`, and correct 416 handling.
 - 🟣 Exercise the packaged WebUI at desktop and narrow mobile widths in both
   locales and themes; check keyboard-only flow, reduced motion, two-tab sync,
-  command/event duplex, install/standalone launch, live network-only worker
+  command/event duplex, install/standalone launch, live shell-worker
   behavior, dialogs, graphs, settings validation, no horizontal overflow, and
   no console/network errors.
 

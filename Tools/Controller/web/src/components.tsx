@@ -172,6 +172,7 @@ export function HoldActionButton({
       event.preventDefault()
       session.release()
     }}
+    data-touch-mode="hold"
     onBlur={() => session.release()}
   >{children}</Button>
 }
@@ -490,14 +491,20 @@ export function Toggle({
   disabled?: boolean
 }) {
   return (
-    <label className={`toggle-row${disabled ? ' is-disabled' : ''}`}>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      className={`toggle-row${disabled ? ' is-disabled' : ''}`}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
       <span className="toggle-row__copy">
         <strong>{label}</strong>
         {detail && <small>{detail}</small>}
       </span>
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
       <span className="toggle" aria-hidden="true"><span /></span>
-    </label>
+    </button>
   )
 }
 

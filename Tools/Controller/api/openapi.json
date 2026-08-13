@@ -3442,6 +3442,8 @@
               "controller.ping",
               "controller.port.close",
               "controller.port.open",
+              "controller.port.owner",
+              "controller.port.process",
               "controller.port.reset",
               "controller.ports",
               "controller.program_state.get",

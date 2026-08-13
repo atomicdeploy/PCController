@@ -287,9 +287,10 @@ filterable timeline.
 
 Supported browsers may install this same URL as a standalone desktop or mobile
 app. The manifest includes shortcuts to Overview, Workbench, Activity, and
-Settings. The worker is intentionally network-only and stores no offline
-responses; it must expose host shutdown or loss of the loopback service rather
-than presenting stale controls.
+Settings. The worker retains only the versioned application shell and never
+stores live board/API, WebSocket, health, or generated configuration responses;
+host shutdown or loss of the loopback service is therefore never presented as
+stale live control state.
 
 System-wide hotkeys remain registered in web-only mode. A validated
 `app.page` action is delivered to the TUI queue when one exists and independently

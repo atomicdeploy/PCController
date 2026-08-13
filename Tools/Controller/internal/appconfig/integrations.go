@@ -200,9 +200,14 @@ type NotificationAction struct {
 }
 
 type Discovery struct {
-	MDNSEnabled  bool   `json:"mdns_enabled"`
-	SSDPEnabled  bool   `json:"ssdp_enabled"`
-	InstanceName string `json:"instance_name,omitempty"`
+	MDNSEnabled        bool   `json:"mdns_enabled"`
+	DNSSDenabled       bool   `json:"dns_sd_enabled"`
+	SSDPEnabled        bool   `json:"ssdp_enabled"`
+	UPnPEnabled        bool   `json:"upnp_enabled"`
+	WSDiscoveryEnabled bool   `json:"ws_discovery_enabled"`
+	BroadcastEnabled   bool   `json:"broadcast_enabled"`
+	NetBIOSEnabled     bool   `json:"netbios_enabled"`
+	InstanceName       string `json:"instance_name,omitempty"`
 }
 
 type Webhook struct {
@@ -298,8 +303,10 @@ func (value Config) validateIntegrations() error {
 	if len(value.Integrations.Discovery.InstanceName) > 63 {
 		return fmt.Errorf("integrations.discovery.instance_name must be at most 63 characters")
 	}
-	if (value.Integrations.Discovery.MDNSEnabled ||
-		value.Integrations.Discovery.SSDPEnabled) && !value.IPC.AllowRemote {
+	discovery := value.Integrations.Discovery
+	if (discovery.MDNSEnabled || discovery.DNSSDenabled || discovery.SSDPEnabled ||
+		discovery.UPnPEnabled || discovery.WSDiscoveryEnabled || discovery.BroadcastEnabled ||
+		discovery.NetBIOSEnabled) && !value.IPC.AllowRemote {
 		return fmt.Errorf("network discovery requires ipc.allow_remote and authenticated remote access")
 	}
 	names := make(map[string]bool)

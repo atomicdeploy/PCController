@@ -170,8 +170,9 @@ browser event stream without constructing a terminal UI.
 Where the browser offers installation, add the WebUI to the desktop or home
 screen for a standalone, native-feeling window. The installed manifest includes
 shortcuts to Overview, Workbench, Activity, and Settings. Installation does not
-make the controller available without its host: the service worker is
-network-only and keeps no offline cache, so a stopped host is reported at once.
+make the controller available without its host: the service worker caches only
+the versioned UI shell and never controller/API traffic, so an offline shell
+cannot be mistaken for a live board connection.
 
 ### Terminal UI
 
