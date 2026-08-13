@@ -780,6 +780,123 @@ void testBoardAndPersistence() {
   std::filesystem::remove(path, ignored);
 }
 
+void testVirtualMacroUsesSharedRingAndCentralDispatch() {
+  const auto path = temporaryEeprom();
+  std::error_code ignored;
+  std::filesystem::remove(path, ignored);
+  {
+    pccontroller::virtual_board::SensorBank sensors;
+    pccontroller::virtual_board::RelayBank relays;
+    pccontroller::virtual_board::PwmBank pwm;
+    pccontroller::virtual_board::AddressableLedBank addressableLeds;
+    pccontroller::virtual_board::DisplayBank displays;
+    pccontroller::virtual_board::FileEeprom eeprom(path);
+    pccontroller::virtual_board::VirtualBoard board(
+        sensors, relays, pwm, addressableLeds, displays, eeprom);
+
+    auto response = board.handle(
+        {pccontroller::wire::MacroStart, 1, {2, 9, 0, 1, 0}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected BEGIN");
+    response = board.handle({pccontroller::wire::MacroStep, 2, {2}});
+    require(response.size() == 1 &&
+                response[0].opcode == pccontroller::wire::MacroStatusResponse &&
+                response[0].payload.size() == 19 &&
+                response[0].payload[0] == 6 && response[0].payload[1] == 2 &&
+                response[0].payload[2] == 1 && response[0].payload[3] == 9,
+            "VirtualBoard did not expose the production schema-2 macro report");
+
+    // SET_STREAM_PERIOD was absent from the old macro-only action switch. A
+    // replayed record must now reach the exact ordinary dispatcher, which
+    // validates and persists this legal control command like a host request.
+    response = board.handle({pccontroller::wire::MacroStep, 3,
+                             {0, 0, 0, 1, 0,
+                              0, 0, 0, 0,
+                              pccontroller::wire::SetStreamPeriod, 2, 100, 0}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected APPEND");
+    response = board.handle({pccontroller::wire::MacroStep, 4, {1}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected RUN");
+
+    const auto events = board.tick();
+    require(std::any_of(events.begin(), events.end(), [](const auto &frame) {
+              return frame.opcode == pccontroller::wire::Ack &&
+                     frame.sequence == 0xFEU &&
+                     frame.payload.size() >= 2 &&
+                     frame.payload[0] == pccontroller::wire::SetStreamPeriod;
+            }),
+            "macro replay did not return the central dispatcher ACK");
+    response = board.handle({pccontroller::wire::GetSettings, 5, {}});
+    require(response[0].opcode == pccontroller::wire::SettingsResponse &&
+                response[0].payload.size() >= 10 &&
+                response[0].payload[8] == 100 && response[0].payload[9] == 0,
+            "central SET_STREAM_PERIOD handling did not persist macro state");
+    response = board.handle({pccontroller::wire::MacroStep, 6, {2}});
+    require(response[0].payload.size() == 19 && response[0].payload[2] == 4 &&
+                response[0].payload[4] == 1 && response[0].payload[6] == 1 &&
+                response[0].payload[10] == 0,
+            "shared macro ring did not report completion/fill consistently");
+
+    // The AVR adapter rejects a recursively queued macro control record by
+    // incrementing the shared report's dispatchErrors, then continues to the
+    // next due ordinary record without a standalone 0xFE ERROR response.
+    response = board.handle(
+        {pccontroller::wire::MacroStart, 7, {2, 10, 0, 2, 0}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected recursive-record fixture BEGIN");
+    response = board.handle({pccontroller::wire::MacroStep, 8,
+                             {0, 0, 0, 2, 0,
+                              0, 0, 0, 0, pccontroller::wire::MacroStart, 0,
+                              0, 0, 0, 0,
+                              pccontroller::wire::SetStreamPeriod, 2, 150, 0}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected recursive-record fixture APPEND");
+    response = board.handle({pccontroller::wire::MacroStep, 9, {1}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected recursive-record fixture RUN");
+    const auto recursiveEvents = board.tick();
+    require(std::none_of(recursiveEvents.begin(), recursiveEvents.end(),
+                         [](const auto &frame) {
+                           return frame.opcode == pccontroller::wire::ErrorResponse &&
+                                  frame.sequence == 0xFEU;
+                         }),
+            "recursive macro control record emitted an AVR-incompatible ERROR");
+    const auto terminal = std::find_if(
+        recursiveEvents.begin(), recursiveEvents.end(), [](const auto &frame) {
+          return frame.opcode == pccontroller::wire::Event &&
+                 frame.sequence == 0 && frame.payload.size() == 19 &&
+                 frame.payload[0] == 6 && frame.payload[1] == 2 &&
+                 frame.payload[2] == 4 && frame.payload[6] == 2 &&
+                 frame.payload[12] == 1;
+        });
+    require(terminal != recursiveEvents.end(),
+            "recursive macro control record did not publish the AVR schema-2 status");
+
+    static_cast<void>(board.handle({pccontroller::wire::RelaySet, 70, {4, 1}}));
+    require(relays.mask() != 0,
+            "safe-stop fixture did not establish active outputs");
+    response = board.handle(
+        {pccontroller::wire::MacroStart, 10, {2, 11, 0, 1, 0}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected second BEGIN");
+    response = board.handle({pccontroller::wire::MacroStep, 11,
+                             {0, 0, 0, 1, 0,
+                              0xFF, 0xFF, 0xFF, 0x7F,
+                              pccontroller::wire::RelaySet, 2, 4, 1}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected future relay record");
+    response = board.handle({pccontroller::wire::MacroStep, 12, {1}});
+    require(response[0].opcode == pccontroller::wire::Ack,
+            "shared macro ring rejected second RUN");
+    response = board.handle({pccontroller::wire::MacroCancel, 13, {0}});
+    require(response[0].opcode == pccontroller::wire::Ack &&
+                relays.mask() == 0,
+            "shared macro safe-stop did not clear local outputs");
+  }
+  std::filesystem::remove(path, ignored);
+}
+
 void testPwmAvailabilityReporting() {
   const auto path = temporaryEeprom();
   std::error_code ignored;
@@ -996,6 +1113,7 @@ int main() {
   try {
     testProtocolRoundTrip();
     testBoardAndPersistence();
+    testVirtualMacroUsesSharedRingAndCentralDispatch();
     testPwmAvailabilityReporting();
     testMotionDoorPolicyAcrossVirtualCommandSources();
     testVirtualResetJournalRecoveryAndRollover();

@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <iomanip>
+#include <iterator>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -31,6 +32,7 @@ constexpr std::uint8_t kResetRecordMarker = 0xA7;
 constexpr std::uint8_t kPowerOnResetCause = 1U << 0U;
 constexpr std::uint8_t kWatchdogResetCause = 1U << 3U;
 constexpr std::uint8_t kResetEventType = 7;
+constexpr std::uint8_t kMacroEventType = 6;
 constexpr std::uint8_t kMenuPageCount = 14;
 constexpr std::uint16_t kMenuAllPagesMask = 0x3FFFU;
 constexpr std::uint8_t kSettingsSilent = 1U << 0U;
@@ -330,6 +332,8 @@ VirtualBoard::VirtualBoard(ISensors &sensors, IRelays &relays, IPwm &pwm,
     : sensors_(sensors), relays_(relays), pwm_(pwm),
       addressableLeds_(addressableLeds), displays_(displays), eeprom_(eeprom) {
   const TimePoint now = Clock::now();
+  macroRing_.initialize(kMacroEventType);
+  macroLastHostActivity_ = now;
   startedAt_ = now;
   lastStreamAt_ = now;
   lastFadeAt_ = now;
@@ -382,10 +386,17 @@ std::vector<wire::Frame> VirtualBoard::connectedFrames() {
 
 std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
   std::lock_guard<std::mutex> lock(mutex_);
-  const auto &payload = request.payload;
   const TimePoint now = Clock::now();
-  hostSeen_ = true;
-  lastHostActivityAt_ = now;
+  return handleLocked(request, now, true);
+}
+
+std::vector<wire::Frame> VirtualBoard::handleLocked(
+    const wire::Frame &request, TimePoint now, bool hostRequest) {
+  const auto &payload = request.payload;
+  if (hostRequest) {
+    hostSeen_ = true;
+    lastHostActivityAt_ = now;
+  }
   const auto bad = [&]() {
     return std::vector<wire::Frame>{errorFrame(
         request.sequence, request.opcode, wire::BadPayload, now)};
@@ -669,23 +680,14 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
     return ack();
   }
   case wire::MacroStart:
-    if (payload.size() < 5 || payload[0] != 2) {
+    if (payload.size() < 5 ||
+        payload[0] != ControllerCore::MacroRing::Schema) {
       return bad();
     }
-    if (macroState_ == 1 || macroState_ == 2) {
+    if (macroRing_.active()) {
       return {errorFrame(request.sequence, request.opcode, wire::Busy, now)};
     }
-    macroState_ = 1;
-    macroId_ = payload[1];
-    macroOptions_ = payload[2];
-    macroTotalSteps_ = readU16(payload, 3);
-    macroAcceptedSteps_ = 0;
-    macroExecutedSteps_ = 0;
-    macroAcceptedBytes_ = 0;
-    macroUnderruns_ = 0;
-    macroDispatchErrors_ = 0;
-    macroStartedAtUs_ = 0;
-    macroQueue_.clear();
+    macroRing_.begin(payload[1], payload[2], readU16(payload, 3));
     macroLastHostActivity_ = now;
     queueMacroEvent();
     return ack();
@@ -694,7 +696,7 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
       return bad();
     }
     cancelMacro(payload.size() == 1 ? payload[0] != 0
-                                    : (macroOptions_ & 1U) != 0,
+                                    : macroRing_.defaultKeepOutputsOnCancel(),
                 true);
     return ack();
   case wire::MacroStep: {
@@ -704,37 +706,18 @@ std::vector<wire::Frame> VirtualBoard::handle(const wire::Frame &request) {
                                request.sequence)};
     }
     if (!payload.empty() && payload[0] == 1) {
-      if (macroState_ != 1 || !macroRecordReady() ||
-          (macroAcceptedSteps_ < macroTotalSteps_ &&
-           macroQueue_.size() < 64U)) {
+      if (!macroRing_.start(deviceMicros(now))) {
         return bad();
       }
-      macroState_ = 2;
-      macroStartedAt_ = now;
-      macroStartedAtUs_ = deviceMicros(now);
       queueMacroEvent();
       return ack();
     }
     if (payload.size() < 6 || payload[0] != 0 ||
-        (macroState_ != 1 && macroState_ != 2) ||
-        readU16(payload, 1) != macroAcceptedBytes_ ||
-        readU16(payload, 3) < macroAcceptedSteps_ ||
-        readU16(payload, 3) > macroTotalSteps_ ||
-        macroQueue_.size() + payload.size() - 5U > 127U) {
+        !macroRing_.append(readU16(payload, 1), readU16(payload, 3),
+                           payload.data() + 5,
+                           static_cast<std::uint8_t>(payload.size() - 5U),
+                           deviceMicros(now))) {
       return bad();
-    }
-    const bool wasStarved = !macroRecordReady();
-    macroQueue_.insert(macroQueue_.end(), payload.begin() + 5,
-                       payload.end());
-    macroAcceptedBytes_ = static_cast<std::uint16_t>(
-        macroAcceptedBytes_ + payload.size() - 5U);
-    macroAcceptedSteps_ = readU16(payload, 3);
-    if (wasStarved && macroState_ == 2 && macroRecordReady()) {
-      const std::uint32_t due = readU32(macroQueue_);
-      if (static_cast<std::int32_t>(deviceMicros(now) -
-                                    (macroStartedAtUs_ + due)) >= 0) {
-        ++macroUnderruns_;
-      }
     }
     return ack();
   }
@@ -964,7 +947,7 @@ ConsoleResult VirtualBoard::console(const std::string &line) {
         throw std::invalid_argument("usage: relay 1..8 on|off");
       }
       const bool active = value == "on" || value == "1";
-      if (!executeQueuedCommand(
+      if (!dispatchLocalCommand(
               wire::RelaySet,
               {static_cast<std::uint8_t>(relay - 1),
                static_cast<std::uint8_t>(active)},
@@ -1282,16 +1265,12 @@ wire::Frame VirtualBoard::errorFrame(std::uint8_t sequence,
 }
 
 wire::Frame VirtualBoard::macroStatusFrame(std::uint8_t opcode,
-                                           std::uint8_t sequence) const {
-  std::vector<std::uint8_t> payload{6, 2, macroState_, macroId_};
-  appendU16(payload, macroAcceptedSteps_);
-  appendU16(payload, macroExecutedSteps_);
-  appendU16(payload, macroAcceptedBytes_);
-  payload.push_back(static_cast<std::uint8_t>(macroQueue_.size()));
-  payload.push_back(macroUnderruns_);
-  payload.push_back(macroDispatchErrors_);
-  appendU32(payload, macroStartedAtUs_);
-  appendU16(payload, macroTotalSteps_);
+                                           std::uint8_t sequence) {
+  // MacroRing owns the packed schema-2 report for both production and the
+  // simulator. Its serializer refreshes the bounded-ring fill byte here.
+  const ControllerCore::MacroRing::StatusEvent &status = macroRing_.status();
+  const auto *bytes = reinterpret_cast<const std::uint8_t *>(&status);
+  std::vector<std::uint8_t> payload(bytes, bytes + sizeof(status));
   return {opcode, sequence, std::move(payload)};
 }
 
@@ -1772,7 +1751,7 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
   case 3: { // Relay: Press and Toggle invert; Momentary expires after 350 ms.
     const bool active = (relays_.mask() & (1U << remote.actionValue)) != 0;
     const bool next = remote.behavior <= 1 ? !active : true;
-    if (executeQueuedCommand(
+    if (dispatchLocalCommand(
             wire::RelaySet, {remote.actionValue,
                              static_cast<std::uint8_t>(next)}, now) &&
         remote.behavior == 2) {
@@ -1785,7 +1764,7 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
   case 4: { // Side: Up/Down refresh a 350 ms hold; Stop is immediate.
     const std::uint8_t motion =
         remote.behavior == 5 ? 0 : (remote.behavior == 4 ? 2 : 1);
-    if (executeQueuedCommand(wire::RelaySide,
+    if (dispatchLocalCommand(wire::RelaySide,
                              {remote.actionValue, motion}, now) &&
         motion != 0) {
       remoteMomentaryKind_ = remote.actionKind;
@@ -1798,7 +1777,7 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
     const bool active = pwm_.value(remote.actionValue) != 0;
     const std::uint16_t value =
         remote.behavior == 2 ? 4095 : (active ? 0 : 4095);
-    if (executeQueuedCommand(
+    if (dispatchLocalCommand(
             wire::PwmSet,
             {remote.actionValue, static_cast<std::uint8_t>(value),
              static_cast<std::uint8_t>(value >> 8U)},
@@ -1818,15 +1797,15 @@ void VirtualBoard::executeLearnedRemote(const RemoteEntry &remote,
 void VirtualBoard::stopRemoteMomentary(TimePoint now) {
   switch (remoteMomentaryKind_) {
   case 3:
-    static_cast<void>(executeQueuedCommand(
+    static_cast<void>(dispatchLocalCommand(
         wire::RelaySet, {remoteMomentaryValue_, 0}, now));
     break;
   case 4:
-    static_cast<void>(executeQueuedCommand(
+    static_cast<void>(dispatchLocalCommand(
         wire::RelaySide, {remoteMomentaryValue_, 0}, now));
     break;
   case 5:
-    static_cast<void>(executeQueuedCommand(
+    static_cast<void>(dispatchLocalCommand(
         wire::PwmSet, {remoteMomentaryValue_, 0, 0}, now));
     break;
   default:
@@ -2216,11 +2195,9 @@ void VirtualBoard::resetRuntime(TimePoint now) {
   learningTotalSeconds_ = 0;
   learningReportedRemaining_ = 0;
   relayTestPeriodMs_ = 0;
-  macroState_ = 0;
-  macroQueue_.clear();
-  macroAcceptedSteps_ = 0;
-  macroExecutedSteps_ = 0;
-  macroAcceptedBytes_ = 0;
+  macroRing_ = ControllerCore::MacroRing{};
+  macroRing_.initialize(kMacroEventType);
+  macroLastHostActivity_ = now;
   menuPage_ = settings_.defaultMenuPage;
   startedAt_ = now;
   lastStreamAt_ = now;
@@ -2250,7 +2227,7 @@ void VirtualBoard::setMenuPage(std::uint8_t page) {
     settings_.defaultMenuPage = menuPage_;
     saveSettings();
   }
-  if (macroState_ != 1 && macroState_ != 2 && !segmentDeadlineActive_ &&
+  if (!macroRing_.active() && !segmentDeadlineActive_ &&
       (!scheduledSegmentActive_ || scheduledSegmentWaiting_)) {
     updateMenuDisplay();
   }
@@ -2267,215 +2244,99 @@ void VirtualBoard::updateMenuDisplay() {
 }
 
 void VirtualBoard::cancelMacro(bool keepOutputs, bool emitEvent) {
-  if (macroState_ != 1 && macroState_ != 2) {
+  if (!macroRing_.cancel(keepOutputs)) {
     return;
   }
-  if (!keepOutputs) {
-    relays_.allOff();
-    for (std::uint8_t channel = 0; channel < 11; ++channel) {
-      pwm_.set(channel, 0);
-    }
-    captureRelayState();
-    queueEvent({10, relays_.mask()});
-  }
-  macroState_ = 3;
-  macroQueue_.clear();
+  applyMacroSafeStop();
   updateMenuDisplay();
   if (emitEvent) {
     queueMacroEvent();
   }
 }
 
-bool VirtualBoard::macroRecordReady() const {
-  return macroQueue_.size() >= 6U &&
-         macroQueue_.size() >=
-             static_cast<std::size_t>(6U + macroQueue_[5]);
-}
-
-void VirtualBoard::queueMacroEvent() {
-  queueEvent(macroStatusFrame(wire::Event, 0).payload);
-}
-
-bool VirtualBoard::executeQueuedCommand(
-    std::uint8_t opcode, const std::vector<std::uint8_t> &payload,
-    TimePoint now) {
-  switch (opcode) {
-  case wire::Buzzer:
-    if (payload.size() < 4) {
-      return false;
-    }
-    displays_.setBuzzer((settings_.flags & kSettingsSilent) != 0
-                            ? 0
-                            : readU16(payload, 2),
-                        readU16(payload));
-    buzzerDeadlineActive_ = readU16(payload) != 0;
-    buzzerDeadline_ = now + std::chrono::milliseconds(readU16(payload));
-    return true;
-  case wire::PwmSet:
-    if (payload.size() < 3 || payload[0] >= 16 ||
-        readU16(payload, 1) > 4095) {
-      return false;
-    }
-    pwm_.select(payload[0]);
-    if (!pwm_.set(payload[0], readU16(payload, 1))) {
-      return false;
-    }
-    storeUserPwmValue(payload[0], readU16(payload, 1));
-    return true;
-  case wire::PwmAllOff:
-    if (!pwm_.available()) {
-      return false;
-    }
+void VirtualBoard::applyMacroSafeStop() {
+  if (!macroRing_.takeSafeStopRequest()) {
+    return;
+  }
+  // The shared ring decides when a playback error/cancel needs safe-off;
+  // VirtualBoard only adapts that request to its local output interfaces.
+  {
+    relays_.allOff();
     for (std::uint8_t channel = 0; channel < 11; ++channel) {
       pwm_.set(channel, 0);
     }
-    return true;
-  case wire::StatusRgb:
-    if (payload.size() < 4) {
-      return false;
-    }
-    setStatusRgb(payload[0], payload[1], payload[2], payload[3]);
-    statusOverride_ = true;
-    statusEffect_ = 0;
-    statusCondition_ = 0xFF;
-    return true;
-  case wire::StatusEffect:
-    return applyStatusEffect(payload, now);
-  case wire::StatusProfileSet:
-    return payload.size() >= 1 + kStatusProfilePayloadSize &&
-           setStatusProfile(payload[0], payload.data() + 1, now);
-  case wire::ProgramState:
-    if (payload.empty() || payload[0] > 1) {
-      return false;
-    }
-    programRunning_ = payload[0] != 0;
-    statusOverride_ = false;
-    statusEffect_ = 0;
-    return true;
-  case wire::AddressableLed: {
-    if (payload.size() < 5 ||
-        (payload[0] != 0xFFU && payload[0] >= kAddressableLedPixelCount)) {
-      return false;
-    }
-    addressableLeds_.setBrightness(payload[4]);
-    const AddressableLedColor color{payload[1], payload[2], payload[3]};
-    if (payload[0] == 0xFFU) {
-      addressableLeds_.fill(color);
-    } else {
-      addressableLeds_.setPixel(payload[0], color);
-    }
-    return true;
-  }
-  case wire::RadioTransmit:
-    return payload.size() >= 8 && readU32(payload) != 0 &&
-           payload[4] != 0 && payload[4] <= 32 && payload[5] != 0 &&
-           payload[5] <= 12;
-  case wire::MenuAction:
-    if (payload.empty() || payload[0] > 3) {
-      return false;
-    }
-    if (payload[0] == 0) {
-      setMenuPage(static_cast<std::uint8_t>(
-          (menuPage_ + kMenuPageCount - 1U) % kMenuPageCount));
-    } else if (payload[0] == 1) {
-      setMenuPage(static_cast<std::uint8_t>(
-          (menuPage_ + 1U) % kMenuPageCount));
-    }
-    return true;
-  case wire::RelaySet:
-    if (payload.size() < 2 || payload[0] >= 8 || payload[1] > 1 ||
-        (payload[1] != 0 && payload[0] < 4 && !motionAllowed())) {
-      return false;
-    }
-    if (payload[0] < 4) {
-      const std::uint8_t side = payload[0] >> 1U;
-      const std::uint8_t direction = side * 2U;
-      const std::uint8_t enable = direction + 1U;
-      if ((payload[0] & 1U) == 0) {
-        const bool wasEnabled = (relays_.mask() & (1U << enable)) != 0;
-        relays_.set(enable, false);
-        relays_.set(direction, payload[1] != 0);
-        relays_.set(enable, wasEnabled);
-      } else {
-        relays_.set(enable, payload[1] != 0);
-      }
-    } else {
-      relays_.set(payload[0], payload[1] != 0);
-    }
-    queueEvent({10, relays_.mask()});
     captureRelayState();
-    return true;
-  case wire::RelaySide: {
-    if (payload.size() < 2 || payload[0] > 1 || payload[1] > 2 ||
-        (payload[1] != 0 && !motionAllowed())) {
-      return false;
-    }
-    relays_.setSide(payload[0], payload[1]);
     queueEvent({10, relays_.mask()});
-    captureRelayState();
-    return true;
   }
-  case wire::RelayAllOff:
-    relays_.allOff();
-    queueEvent({10, relays_.mask()});
-    captureRelayState();
-    return true;
-  case wire::MenuSetPage:
-    if (payload.empty() || payload[0] >= kMenuPageCount) {
-      return false;
-    }
-    setMenuPage(payload[0]);
-    return true;
-  case wire::DisplayText: {
-    return applyDisplayText(payload, now);
-  }
-  default:
-    return false;
-  }
+}
+
+void VirtualBoard::queueMacroEvent() {
+  // MacroQueue sends its schema-2 lifecycle report directly as Event data;
+  // unlike generic VirtualBoard notifications, it has no timestamp suffix.
+  pendingEvents_.push_back(macroStatusFrame(wire::Event, 0));
+}
+
+bool VirtualBoard::dispatchLocalCommand(
+    std::uint8_t opcode, const std::vector<std::uint8_t> &payload,
+    TimePoint now) {
+  const std::vector<wire::Frame> responses =
+      handleLocked({opcode, 0, payload}, now, false);
+  return std::none_of(responses.begin(), responses.end(),
+                      [](const wire::Frame &frame) {
+                        return frame.opcode == wire::ErrorResponse;
+                      });
 }
 
 void VirtualBoard::serviceMacro(TimePoint now,
                                 std::vector<wire::Frame> &output) {
-  if ((macroState_ == 1 || macroState_ == 2) &&
+  if (macroRing_.active() &&
       now - macroLastHostActivity_ > std::chrono::seconds(5)) {
     cancelMacro(false, true);
   }
-  while (macroState_ == 2 && macroExecutedSteps_ < macroTotalSteps_) {
-    if (!macroRecordReady()) {
+  while (macroRing_.status().report.state ==
+         ControllerCore::MacroRing::Playing) {
+    ControllerCore::MacroRing::Command command{};
+    std::array<std::uint8_t, wire::kMaximumPayload> payload{};
+    const ControllerCore::MacroRing::DequeueResult result =
+        macroRing_.dequeueDue(deviceMicros(now), command, payload.data(),
+                              static_cast<std::uint8_t>(payload.size()));
+    if (result == ControllerCore::MacroRing::NotDue) {
       return;
     }
-    const std::uint32_t due = readU32(macroQueue_);
-    if (static_cast<std::int32_t>(deviceMicros(now) -
-                                  (macroStartedAtUs_ + due)) < 0) {
+    if (result == ControllerCore::MacroRing::Malformed) {
+      applyMacroSafeStop();
+      updateMenuDisplay();
+      queueMacroEvent();
       return;
     }
-    const std::uint8_t opcode = macroQueue_[4];
-    const std::size_t payloadLength = macroQueue_[5];
-    std::vector<std::uint8_t> payload(
-        macroQueue_.begin() + 6,
-        macroQueue_.begin() + static_cast<std::ptrdiff_t>(6U + payloadLength));
-    macroQueue_.erase(
-        macroQueue_.begin(),
-        macroQueue_.begin() + static_cast<std::ptrdiff_t>(6U + payloadLength));
-    ++macroExecutedSteps_;
-    const bool succeeded = executeQueuedCommand(opcode, payload, now);
-    if (succeeded) {
-      output.push_back(ackFrame(0xFEU, opcode, now));
+
+    bool succeeded = false;
+    if (command.opcode < wire::MacroStart || command.opcode > wire::MacroStep) {
+      // A released record is deliberately an ordinary wire frame: central
+      // command validation, motion policy, and peripheral handlers remain the
+      // only action authority for host and macro sources alike.
+      const wire::Frame replay{
+          command.opcode, 0xFEU,
+          std::vector<std::uint8_t>(
+              payload.begin(), payload.begin() + command.payloadLength)};
+      std::vector<wire::Frame> responses = handleLocked(replay, now, false);
+      succeeded = std::none_of(responses.begin(), responses.end(),
+                               [](const wire::Frame &frame) {
+                                 return frame.opcode == wire::ErrorResponse;
+                               });
+      output.insert(output.end(), std::make_move_iterator(responses.begin()),
+                    std::make_move_iterator(responses.end()));
     } else {
-      ++macroDispatchErrors_;
-      output.push_back(
-          errorFrame(0xFEU, opcode, wire::BadPayload, now));
+      // Never recursively schedule macro-control records; AVR MacroQueue has
+      // the same adapter-only guard before invoking its ordinary dispatcher.
+      // It records the failure in the shared schema-2 status rather than
+      // emitting a standalone per-step ERROR frame.
     }
-    if (macroExecutedSteps_ == macroTotalSteps_) {
-      macroState_ = macroQueue_.empty() ? 4 : 5;
-      if (macroState_ == 5) {
-        relays_.allOff();
-        for (std::uint8_t channel = 0; channel < 11; ++channel) {
-          pwm_.set(channel, 0);
-        }
-        captureRelayState();
-      }
-      macroQueue_.clear();
+
+    const bool finished = macroRing_.completeStep(succeeded);
+    applyMacroSafeStop();
+    if (finished) {
+      updateMenuDisplay();
       queueMacroEvent();
       return;
     }
@@ -2737,7 +2598,7 @@ void VirtualBoard::clearScheduledSegments(bool restoreMenu) {
   scheduledSegmentActive_ = false;
   scheduledSegmentWaiting_ = false;
   segmentDeadlineActive_ = false;
-  if (restoreMenu && macroState_ != 1 && macroState_ != 2) {
+  if (restoreMenu && !macroRing_.active()) {
     updateMenuDisplay();
   }
 }
@@ -2807,7 +2668,7 @@ void VirtualBoard::serviceAutomation(TimePoint now) {
     }
   } else if (segmentDeadlineActive_ && now >= segmentDeadline_) {
     segmentDeadlineActive_ = false;
-    if (macroState_ != 1 && macroState_ != 2) {
+    if (!macroRing_.active()) {
       updateMenuDisplay();
     }
   }

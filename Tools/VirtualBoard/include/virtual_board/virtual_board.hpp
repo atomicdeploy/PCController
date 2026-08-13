@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Project/Core/MacroRing.h"
 #include "virtual_board/hardware.hpp"
 #include "virtual_board/protocol.hpp"
 
@@ -82,13 +83,18 @@ private:
   wire::Frame remotesFrame(std::uint8_t sequence,
                            std::uint8_t cursor) const;
   wire::Frame macroStatusFrame(std::uint8_t opcode,
-                               std::uint8_t sequence) const;
+                               std::uint8_t sequence);
   wire::Frame menuLayoutFrame(std::uint8_t sequence) const;
   wire::Frame ackFrame(std::uint8_t sequence, std::uint8_t opcode,
                        TimePoint now) const;
   wire::Frame errorFrame(std::uint8_t sequence, std::uint8_t opcode,
                          wire::Error error, TimePoint now) const;
   std::uint32_t deviceMicros(TimePoint now) const;
+  // Dispatches a frame while the board mutex is already held. Macro playback
+  // calls this same path so it inherits the ordinary peripheral safety rules.
+  std::vector<wire::Frame> handleLocked(const wire::Frame &request,
+                                        TimePoint now,
+                                        bool hostRequest);
 
   bool applySettings(const std::vector<std::uint8_t> &payload);
   bool applyMenuLayout(const std::vector<std::uint8_t> &payload);
@@ -118,11 +124,12 @@ private:
   void setMenuPage(std::uint8_t page);
   void updateMenuDisplay();
   void cancelMacro(bool keepOutputs, bool emitEvent);
-  bool executeQueuedCommand(std::uint8_t opcode,
+  // Console/RF adapters share the normal protocol dispatcher with macros.
+  bool dispatchLocalCommand(std::uint8_t opcode,
                             const std::vector<std::uint8_t> &payload,
                             TimePoint now);
   void serviceMacro(TimePoint now, std::vector<wire::Frame> &output);
-  bool macroRecordReady() const;
+  void applyMacroSafeStop();
   void queueMacroEvent();
   void queueEvent(std::initializer_list<std::uint8_t> payload);
   void queueEvent(std::vector<std::uint8_t> payload);
@@ -200,19 +207,9 @@ private:
   std::uint16_t statusEffectStepMs_ = 20;
   bool hostPanelCaptured_ = false;
   std::uint16_t hostPanelMeta_ = 0;
-  std::uint8_t macroState_ = 0;
-  std::uint8_t macroId_ = 0;
-  std::uint8_t macroOptions_ = 0;
-  std::uint16_t macroTotalSteps_ = 0;
-  std::uint16_t macroAcceptedSteps_ = 0;
-  std::uint16_t macroExecutedSteps_ = 0;
-  std::uint16_t macroAcceptedBytes_ = 0;
-  std::uint8_t macroUnderruns_ = 0;
-  std::uint8_t macroDispatchErrors_ = 0;
-  std::uint32_t macroStartedAtUs_ = 0;
-  TimePoint macroStartedAt_;
+  // Shared AVR/VirtualBoard macro queue and schema-2 status report.
+  ControllerCore::MacroRing macroRing_{};
   TimePoint macroLastHostActivity_;
-  std::vector<std::uint8_t> macroQueue_;
   std::uint8_t enclosureBrightness_ = 0;
 
   std::uint16_t menuVisibleMask_ = 0x3FFF;

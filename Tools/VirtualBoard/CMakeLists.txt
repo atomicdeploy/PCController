@@ -13,8 +13,11 @@ add_library(virtual_board_core
   src/hardware.cpp
   src/protocol.cpp
   src/virtual_board.cpp
+  ../../Project/Core/MacroRing.cpp
 )
-target_include_directories(virtual_board_core PUBLIC include)
+# VirtualBoard includes the target-neutral firmware core directly; adapters
+# remain local while the queue/timing implementation is compiled once here.
+target_include_directories(virtual_board_core PUBLIC include ../..)
 target_link_libraries(virtual_board_core PUBLIC Threads::Threads)
 
 add_executable(virtual_board
