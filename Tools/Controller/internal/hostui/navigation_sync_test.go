@@ -225,6 +225,39 @@ func TestNavigationCoordinatorCommitIsIdempotentAndRejectsConflictingReuse(t *te
 	if _, err = coordinator.Commit(command, []AppInstance{one, two}); err == nil {
 		t.Fatal("conflicting operation ID reuse was accepted")
 	}
+	second, err := coordinator.Commit(NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "settings", OperationID: "newer-operation-2",
+	}, []AppInstance{one, two})
+	if err != nil || second.Page != "settings" {
+		t.Fatalf("newer outcome=%#v err=%v", second, err)
+	}
+	replay, err = coordinator.Commit(NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "same-operation-1",
+	}, []AppInstance{one, two})
+	if err != nil || replay.Page != "events" || replay.Revision != first.Revision {
+		t.Fatalf("older retry replay=%#v err=%v", replay, err)
+	}
+	if coordinator.groups[DefaultNavigationGroup].page != "settings" {
+		t.Fatalf("older retry rolled canonical page back to %q", coordinator.groups[DefaultNavigationGroup].page)
+	}
+}
+
+func TestNavigationCoordinatorForgetsOperationsWhenSourceLeaseLeaves(t *testing.T) {
+	coordinator := deterministicCoordinator(groupEpoch1)
+	one := follower("web:one", "dashboard", participantEpoch1, 1)
+	two := follower("tui:two", "dashboard", participantEpoch2, 1)
+	observeJoined(coordinator, one, one)
+	observeJoined(coordinator, two, one, two)
+	command := NavigationCommand{
+		Group: DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "source-session-1",
+	}
+	if _, err := coordinator.Commit(command, []AppInstance{one, two}); err != nil {
+		t.Fatal(err)
+	}
+	coordinator.Observe(InstanceChange{Kind: "left", Instance: one}, []AppInstance{two})
+	if len(coordinator.operations) != 0 || len(coordinator.operationOrder) != 0 {
+		t.Fatalf("departed source operations retained: map=%d order=%d", len(coordinator.operations), len(coordinator.operationOrder))
+	}
 }
 
 func TestNavigationCommitLANBudgetHarness(t *testing.T) {

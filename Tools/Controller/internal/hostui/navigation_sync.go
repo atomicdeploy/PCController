@@ -191,16 +191,19 @@ func parseNavigationParticipant(instance AppInstance) (navigationParticipant, bo
 }
 
 type navigationMember struct {
-	group             string
-	epoch             string
-	revision          uint64
-	page              string
-	pending           bool
-	operationID       string
-	operationPage     string
-	operationEpoch    string
-	operationRevision uint64
+	group    string
+	epoch    string
+	revision uint64
+	page     string
+	pending  bool
 }
+
+type navigationOperation struct {
+	group, source, page string
+	outcome             NavigationOutcome
+}
+
+const navigationOperationLimit = 256
 
 type navigationGroup struct {
 	epoch    string
@@ -235,16 +238,19 @@ type NavigationOutcome struct {
 // follower group. Its entire lifetime is the primary process lifetime; active
 // pages are deliberately never written to host configuration.
 type NavigationCoordinator struct {
-	mu       sync.Mutex
-	groups   map[string]*navigationGroup
-	members  map[string]navigationMember
-	newEpoch func() (string, error)
+	mu             sync.Mutex
+	groups         map[string]*navigationGroup
+	members        map[string]navigationMember
+	operations     map[string]navigationOperation
+	operationOrder []string
+	newEpoch       func() (string, error)
 }
 
 func NewNavigationCoordinator() *NavigationCoordinator {
 	return &NavigationCoordinator{
 		groups: make(map[string]*navigationGroup), members: make(map[string]navigationMember),
-		newEpoch: newNavigationEpoch,
+		operations: make(map[string]navigationOperation),
+		newEpoch:   newNavigationEpoch,
 	}
 }
 
@@ -354,15 +360,13 @@ func (coordinator *NavigationCoordinator) Commit(command NavigationCommand, live
 	if group == nil {
 		return NavigationOutcome{}, errors.New("navigation group is unavailable")
 	}
-	if member.operationID == command.OperationID {
-		if member.operationPage != command.Page {
+	operationKey := command.Source + "\x00" + command.OperationID
+	if operation, exists := coordinator.operations[operationKey]; exists {
+		if operation.group != command.Group || operation.source != command.Source ||
+			operation.page != command.Page {
 			return NavigationOutcome{}, errors.New("navigation operation ID was reused with a different page")
 		}
-		return NavigationOutcome{
-			Group: command.Group, Epoch: member.operationEpoch,
-			Revision: member.operationRevision, OperationID: command.OperationID,
-			Page: member.operationPage,
-		}, nil
+		return operation.outcome, nil
 	}
 	changed := group.page != command.Page
 	if changed {
@@ -371,11 +375,10 @@ func (coordinator *NavigationCoordinator) Commit(command NavigationCommand, live
 		group.revision++
 	}
 	outcome := NavigationOutcome{Group: command.Group, Epoch: group.epoch, Revision: group.revision, OperationID: command.OperationID, Page: group.page}
-	member.operationID = command.OperationID
-	member.operationPage = outcome.Page
-	member.operationEpoch = outcome.Epoch
-	member.operationRevision = outcome.Revision
-	coordinator.members[command.Source] = member
+	coordinator.rememberOperation(operationKey, navigationOperation{
+		group: command.Group, source: command.Source, page: command.Page,
+		outcome: outcome,
+	})
 	if !changed {
 		return outcome, nil
 	}
@@ -391,6 +394,20 @@ func (coordinator *NavigationCoordinator) Commit(command NavigationCommand, live
 		outcome.Actions = append(outcome.Actions, action)
 	}
 	return outcome, nil
+}
+
+func (coordinator *NavigationCoordinator) rememberOperation(key string, operation navigationOperation) {
+	if coordinator.operations == nil {
+		coordinator.operations = make(map[string]navigationOperation)
+	}
+	coordinator.operations[key] = operation
+	coordinator.operationOrder = append(coordinator.operationOrder, key)
+	if len(coordinator.operationOrder) <= navigationOperationLimit {
+		return
+	}
+	oldest := coordinator.operationOrder[0]
+	coordinator.operationOrder = coordinator.operationOrder[1:]
+	delete(coordinator.operations, oldest)
 }
 
 func (coordinator *NavigationCoordinator) seed(participant navigationParticipant) []AppAction {
@@ -431,6 +448,7 @@ func (coordinator *NavigationCoordinator) removeMember(id string) {
 		return
 	}
 	delete(coordinator.members, id)
+	coordinator.removeMemberOperations(id)
 	group := coordinator.groups[member.group]
 	if group == nil {
 		return
@@ -439,6 +457,22 @@ func (coordinator *NavigationCoordinator) removeMember(id string) {
 	if len(group.members) == 0 {
 		delete(coordinator.groups, member.group)
 	}
+}
+
+func (coordinator *NavigationCoordinator) removeMemberOperations(id string) {
+	if len(coordinator.operationOrder) == 0 {
+		return
+	}
+	kept := coordinator.operationOrder[:0]
+	for _, key := range coordinator.operationOrder {
+		operation, ok := coordinator.operations[key]
+		if ok && operation.source == id {
+			delete(coordinator.operations, key)
+			continue
+		}
+		kept = append(kept, key)
+	}
+	coordinator.operationOrder = kept
 }
 
 func (coordinator *NavigationCoordinator) fanout(
