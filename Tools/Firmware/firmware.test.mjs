@@ -406,7 +406,10 @@ test('production KEY dispatches first Down to motion and exits outside KEY', asy
 	assert.match(frontPanel, /!menuPageNavigable\(candidate\)/u)
 	assert.match(frontPanel, /menuPageNavigable\(page\)[^]*?menuCategory\(page\) == category/u)
 	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
-	assert.match(frontPanel, /menuPage == PAGE_USER_RELAYS[^]*?\? PAGE_RF/u)
+	assert.match(
+		frontPanel,
+		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+	)
 	assert.match(model, /page < PAGE_COUNT && page != PAGE_MOTION/u)
 	assert.match(protocol, /\{1, PAGE_COUNT, 0xFF, 0\}/u)
 	assert.match(protocol, /pageToMode\(cursor\)/u)
@@ -431,6 +434,18 @@ test('retired MOVE remains a direct KEY alias, never a persisted second page', a
 	assert.match(protocol, /settingsStore\.normalizeMenuLayout\(\);/u)
 	assert.match(protocol, /const uint8_t defaultMenuPage = canonicalMenuPage\(payload\[10\]\);/u)
 	assert.match(defaults, /DefaultMenuPageMotionAlias\s*=\s*12/u)
+})
+
+test('unused cooperative task engine remains an explicit larger-MCU gate', async () => {
+	const config = await readFile(
+		new URL('../../ProjectConfig.h', import.meta.url), 'utf8'
+	)
+	const lifecycle = await readFile(
+		new URL('../../Project/Runtime/LifecycleRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(config, /#define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0/u)
+	assert.match(lifecycle, /#if PCCONTROLLER_ENABLE_TASK_SCHEDULER\s+taskManager\.update\(loopNow\);/u)
 })
 
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {

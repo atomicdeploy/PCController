@@ -38,6 +38,13 @@
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
 
+// Optional cooperative callback scheduler. No production task is registered
+// on the ATmega328P profile, so keeping the engine off recovers its dormant
+// object/code while preserving a build gate for larger-MCU profiles.
+#ifndef PCCONTROLLER_ENABLE_TASK_SCHEDULER
+#define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0
+#endif
+
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the
 // fixed EEPROM bytes remain, but the AVR does not carry duplicate directory,
 // ordering, hierarchy, or layout-protocol implementations in release builds.
