@@ -220,7 +220,9 @@ static inline __attribute__((always_inline)) void serviceController() {
     statusLeds.service(loopNow);
   }
   serviceStatusLedPush();
+#if PCCONTROLLER_ENABLE_TASK_SCHEDULER
   taskManager.update(loopNow);
+#endif
   buzzer.update(loopNow);
   serviceBuzzerPush();
 
