@@ -39,7 +39,7 @@ function shared(): SharedViewProps {
     command: vi.fn(async () => ''),
     refresh: vi.fn(async () => undefined),
     openDialog: vi.fn(),
-    transport: { streamState: 'open', authenticationRequired: false, tabBusSupported: true, tabPeers: 0 },
+    transport: { streamState: 'open', authenticationRequired: false, boardState: 'ready', tabBusSupported: true, tabPeers: 0 },
     relayedTerminal: [],
     broadcastTerminal: vi.fn(),
     boardSettingsReadState: 'idle',
@@ -80,7 +80,9 @@ describe('offline and settings UI contracts', () => {
     const connected = {
       ...emptySnapshot,
       connected: true,
+      have_status: true,
       connection_state: 'connected',
+      hello: { ...emptySnapshot.hello, capabilities: (1 << 5) | (1 << 6) },
       status: { ...emptySnapshot.status, lcd_address: 0x27 },
     }
     const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
@@ -100,6 +102,7 @@ describe('offline and settings UI contracts', () => {
       connected: true,
       have_status: true,
       connection_state: 'connected',
+      hello: { ...emptySnapshot.hello, capabilities: 1 << 2 },
       status: { ...emptySnapshot.status, pwm_available: true, pwm_channel: 2, pwm_value: 1024 },
     }
     const markup = renderToStaticMarkup(<ControlsView {...shared()} snapshot={connected} />)
@@ -129,6 +132,66 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('The dashboard is ready')
   })
 
+  it('renders no stale board keys or values while host authentication is required', () => {
+    const stale = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      hello: { capabilities: 0xffffffff, build_hash: 0xdeadbeef, build_timestamp: '260812120000' },
+      port: { name: 'COM18', vid: '1A86', pid: '7523' },
+      status: { ...emptySnapshot.status, door_open: true, bluetooth_audio_state: 2, reset_count: 9, uptime_ms: 1000 },
+    }
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      snapshot={stale}
+      t={translator('en')}
+      transport={{ ...shared().transport, streamState: 'waiting', boardState: 'unavailable', authenticationRequired: true }}
+    />)
+    for (const forbidden of ['device-card', 'Door', 'Bluetooth audio', 'Firmware', 'BUILD', 'UPTIME', 'COM18', 'DEADBEEF', 'Events']) {
+      expect(markup).not.toContain(forbidden)
+    }
+    expect(markup).toContain('Authentication required')
+  })
+
+  it('shows Bluetooth Audio state only when HELLO advertises capability bit 11', () => {
+    const base = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      connection_state: 'connected',
+      status: { ...emptySnapshot.status, bluetooth_audio_state: 2 },
+    }
+    const withoutCapability = renderToStaticMarkup(<DashboardView {...shared()} t={translator('en')} snapshot={base} />)
+    expect(withoutCapability).not.toContain('Bluetooth audio')
+    const advertised = renderToStaticMarkup(<DashboardView {...shared()} t={translator('en')} snapshot={{ ...base, hello: { capabilities: 1 << 11 } }} />)
+    expect(advertised).toContain('Bluetooth audio')
+  })
+
+  it('reports advertised invalid measurements without formatting sentinel values', () => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      connection_state: 'connected',
+      hello: { capabilities: (1 << 0) | (1 << 1) },
+      status: {
+        ...emptySnapshot.status,
+        flags: (1 << 0) | (1 << 2) | (1 << 3),
+        supply_mv: -2147483648,
+        bus_mv: -2147483648,
+        current_ma: -2147483648,
+        power_mw: -2147483648,
+        temperature_led_centi_c: -32768,
+        temperature_bt_audio_centi_c: 32767,
+      },
+    }
+    const markup = renderToStaticMarkup(<DashboardView {...shared()} snapshot={snapshot} />)
+    expect(markup).toContain('Measurement unavailable')
+    expect(markup).not.toContain('-2147483648')
+    expect(markup).not.toContain('-32768')
+    expect(markup).not.toContain('32767')
+  })
+
   it('does not mislabel an authenticated host with an offline board as an authentication failure', () => {
     const markup = renderToStaticMarkup(<DashboardView
       {...shared()}
@@ -147,6 +210,7 @@ describe('offline and settings UI contracts', () => {
       connected: true,
       have_status: true,
       connection_state: 'connected',
+      hello: { ...emptySnapshot.hello, capabilities: 1 << 5 },
       status: {
         ...emptySnapshot.status,
         supply_mv: -2147483648,
@@ -214,14 +278,19 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Record shortcut')
     expect(markup).not.toContain('TM1637')
     expect(markup).not.toContain('Write controller settings')
+    expect(markup).not.toContain('Security')
+    expect(markup).not.toContain('authToken')
+    expect(markup).not.toContain('No session token')
   })
 
   it('never presents empty board settings as an authoritative EEPROM report', () => {
     const connectedWithoutSettings = {
       ...emptySnapshot,
       connected: true,
+      have_status: true,
       connection_state: 'connected',
       have_settings: false,
+      hello: { ...emptySnapshot.hello, capabilities: 1 << 8 },
     }
     const markup = renderToStaticMarkup(<SettingsView
       {...shared()}

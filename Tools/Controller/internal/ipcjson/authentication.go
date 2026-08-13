@@ -68,6 +68,10 @@ func serveServerProof(writer http.ResponseWriter, request *http.Request, service
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if service.authorizationDisabled() {
+		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "application authentication is disabled in the immediate alpha"})
+		return
+	}
 	token := strings.TrimSpace(service.currentAuthToken())
 	if !serverProofTokenEligible(token) {
 		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "server proof requires a 24-byte-or-stronger random base64url bearer"})
@@ -167,6 +171,16 @@ func (service *Service) currentRemotePrincipal() string {
 
 func (service *Service) authenticateAccess(access Access, token, mechanism string) (Access, bool) {
 	access = service.normalizeAccess(access)
+	if service.authorizationDisabled() {
+		access.authenticated = true
+		access.Authentication = "disabled-alpha"
+		if access.Remote {
+			access.Principal = service.currentRemotePrincipal()
+		} else {
+			access.Principal = "local-operator"
+		}
+		return access, true
+	}
 	provided := strings.TrimSpace(token)
 	expected := strings.TrimSpace(service.currentAuthToken())
 	delegation := strings.TrimSpace(service.HostInstanceToken)
@@ -428,8 +442,6 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		base = accessFromAddress(stringAddress(request.RemoteAddr), "rest")
 	}
 	base = service.normalizeAccess(base)
-
-	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
 	if request != nil && request.URL != nil &&
 		(request.URL.Query().Has("access_token") || request.URL.Query().Has("ticket")) {
 		writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
@@ -437,6 +449,23 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		})
 		return false
 	}
+	// Application auth/authZ is dormant in the alpha, but browser Origin
+	// isolation and URL-secret rejection are exposure/hygiene checks and remain
+	// active. Missing Origin is valid for native clients.
+	if !httpOriginAllowed(request, service.currentAllowedOrigins()) {
+		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "request origin is not allowed"})
+		return false
+	}
+	if service.authorizationDisabled() {
+		base, _ = service.authenticateAccess(base, "", "disabled-alpha")
+		requestWithAccess := request.WithContext(context.WithValue(request.Context(), authenticatedAccessKey{}, base))
+		*request = *requestWithAccess
+		writer.Header().Set("X-PCController-Principal", base.Principal)
+		writer.Header().Set("X-PCController-Authentication", base.Authentication)
+		return true
+	}
+
+	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
 	if credentialErr != nil {
 		service.auditAccess(Access{Remote: base.Remote, Transport: base.Transport, Principal: "unauthenticated", Authentication: mechanism}, request.Method+" "+request.URL.Path, "authentication", false)
 		writeHTTPJSON(writer, http.StatusUnauthorized, map[string]string{"error": credentialErr.Error()})
@@ -449,11 +478,6 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		})
 		return false
 	}
-	if !httpOriginAllowed(request, service.currentAllowedOrigins()) {
-		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "request origin is not allowed"})
-		return false
-	}
-
 	transport := websocketTransport(request, service)
 	ticket, _, ticketSyntaxOK := requestedSessionTicket(request)
 	hasTicket := ticket != "" || strings.Contains(request.Header.Get("Sec-WebSocket-Protocol"), browserTicketPrefix)
@@ -502,6 +526,10 @@ func serveSessionTicket(writer http.ResponseWriter, request *http.Request, servi
 	if request.Method != http.MethodPost {
 		writer.Header().Set("Allow", http.MethodPost)
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if service.authorizationDisabled() {
+		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "application authentication is disabled in the immediate alpha"})
 		return
 	}
 	if !authorizeHTTPRequest(writer, request, service) {

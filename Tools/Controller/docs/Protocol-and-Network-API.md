@@ -465,109 +465,30 @@ is required by the wire format. Canonical REST URLs live directly under
 rejected. JSON-RPC and WebSocket peers remain capability- and semantics-driven so different feature sets can
 still interoperate.
 
-### Authentication and exposure
+### Immediate-alpha exposure
 
-Loopback-only use is the safe default. When `ipc.allow_remote` is false, a
-non-loopback bind is rejected. Remote access requires all of the following:
+Issue #148 is the active contract: application authentication and
+authorization are disabled across raw IPC, HTTP/REST, standard WebSocket,
+Socket.IO, browser UI configuration, and peer bridges. Product entry points
+report `auth_required: false`; inbound bearer references are neither resolved
+nor injected, and configured principals, Origin rules, session tickets, and
+`remote_policy` bits do not grant or deny an operation. The capability
+classifier remains in the protocol so a complete future permission design can
+reuse semantic operation names, but it is dormant in the alpha runtime.
 
-- `ipc.allow_remote: true`;
-- an `ipc.auth_token` containing at least 24 characters, or a resolvable
-  `ipc.auth_token_ref`;
-- a stable, machine-safe `ipc.remote_principal` audit name;
-- an explicit, non-wildcard `ipc.allowed_origins` list for browser WebSocket
-  clients;
-- the relevant `ipc.remote_policy` capability set to `true`.
+Loopback remains the default listener. Selecting a non-loopback listener still
+requires the explicit `ipc.allow_remote` configuration choice and a valid
+non-wildcard Origin list so exposure cannot happen accidentally through a bind
+typo. These are configuration/exposure checks, not caller authentication. An
+optional *outbound* peer secret reference may be resolved only to contact and
+upgrade an older host that still enforces the superseded bearer flow. New alpha
+peers work without it.
 
-Raw JSON-RPC carries the token in the top-level `auth` member. HTTP and native
-WebSocket/Socket.IO clients use `Authorization: Bearer TOKEN` or
-`X-PCController-Token: TOKEN`. Durable URL credentials are rejected. A browser
-that cannot add an upgrade header uses this two-step exchange instead:
-
-1. `POST /api/session/ticket` with the durable credential in an HTTP header,
-   an allowed `Origin`, and `{"transport":"websocket"}` (or `socket_io`).
-2. Open the clean WebSocket URL while offering subprotocols `pccontroller`
-   and `pccontroller.ticket.TICKET`.
-
-The 256-bit ticket expires after 15 seconds and is consumed once, before the
-upgrade. It is bound to the issuing principal, exact Origin, peer address, and
-transport, so it cannot be replayed on the other socket surface. Unauthorized
-standard WebSocket and Socket.IO handshakes are rejected before the server
-sends any application or Engine.IO frame. Token comparison is constant-time;
-discovery advertisements and responses never contain a durable token. The
-server retains only a SHA-256 digest of each outstanding ticket, never the raw
-ticket returned to the browser.
-
-An authenticated client following an unauthenticated LAN discovery record must
-prove the reached server before transmitting its durable credential:
-
-1. Generate 16–64 random bytes and send them as unpadded base64url in
-   `X-PCController-Nonce` to `GET /api/auth/server-proof` using a direct,
-   no-proxy HTTP client that rejects redirects.
-2. Verify the returned `pccontroller-server-proof/v1` HMAC-SHA256 using the
-   configured token, including the exact nonce, listener `IP:port`, and
-   instance identity.
-3. Require that the signed listener address is the packet source (or an IP
-   resolved directly for the requested hostname), then pin raw IPC, HTTP,
-   WebSocket, and Socket.IO to that proven address.
-
-The endpoint never receives the bearer. It is public by design and therefore
-requires at least 24 decoded random base64url bytes; low-entropy compatibility
-tokens receive HTTP 409. It is a possession proof,
-not a replacement for the authenticated session ticket or capability checks.
-Discovery public information advertises the proof path as
-`endpoints.server_proof`, and CLI `network connect` performs this exchange
-automatically before any bearer-bearing request.
-
-Missing-Origin handling is explicit. Loopback native clients may omit
-`Origin`; non-loopback native requests may omit it only when they present a
-durable Authorization/token header. Browser session tickets always require and
-remain bound to an allowed Origin. Conflicting Authorization and compatibility
-headers fail closed.
-
-Authentication proves possession of the host token; authorization is separate.
-The default remote policy permits only `read` and `events`. Messages, board
-commands, host-configuration writes, connection control, reset, programming,
-shutdown, virtual keys, power/display actions, host-automation execution,
-integration access, and bridge calls are independent
-opt-ins. Programming additionally requires connection control. A remote
-`controller.command.execute` request is classified before execution, so using the
-generic command surface cannot bypass the reset, programming, OS-action, or
-bridge-call gates. Authorized mutating attempts and denied attempts publish
-`security.local.*` or `security.remote.*` timeline events with stable
-`principal`, `transport`, `authentication`, `capability`, and operation fields,
-without recording the token or request payload. The configured token maps to
-`ipc.remote_principal`; local transport trust and host-instance/bridge
-delegation use separate fixed principals.
-
-Motion policies, door checks, relay sequencing, bounds, OS confirmation rules,
-and exclusive programming ownership still apply after authorization. Use TLS
-termination, a VPN, or an SSH tunnel on untrusted networks; the built-in
-listener does not itself terminate TLS.
-
-```json
-"ipc": {
-  "allow_remote": true,
-  "auth_token_ref": "os:ipc/remote",
-  "remote_principal": "maintenance-console",
-  "allowed_origins": ["controller.example:*"],
-  "remote_policy": {
-    "read": true,
-    "events": true,
-    "messages": false,
-    "board_commands": false,
-    "host_configuration": false,
-    "connection_control": false,
-    "reset": false,
-    "programming": false,
-    "shutdown": false,
-    "virtual_keys": false,
-    "power_actions": false,
-    "host_automations": false,
-    "bridge_calls": false,
-    "integrations": false
-  }
-}
-```
+The retained server-proof and session-ticket endpoints are dormant
+compatibility code, not active evidence of a security boundary. Do not expose
+the alpha listener to an untrusted network. Motion policies, door checks, relay
+sequencing, numeric bounds, OS confirmations, and exclusive programming
+ownership remain functional safety checks and are not application auth/authZ.
 
 ## JSON-RPC 2.0
 
@@ -575,7 +496,7 @@ The raw transport contains one UTF-8 JSON object per line. HTTP and WebSocket
 use the same request and response model:
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"controller.status","params":{},"auth":"..."}
+{"jsonrpc":"2.0","id":1,"method":"controller.status","params":{}}
 ```
 
 ```json
@@ -588,9 +509,11 @@ mutating RPC calls through the same controller client while snapshot and event
 subscriptions use cached/thread-safe paths.
 
 Standard codes are parse error `-32700`, invalid request `-32600`, method not
-found `-32601`, and invalid params `-32602`. Host extensions use authentication
-required `-32001`, remote capability denied `-32003`, and runtime/device error
-`-32000`. The request ID is preserved on every parsed request error.
+found `-32601`, and invalid params `-32602`. Runtime/device failures use
+`-32000`. The dormant future-auth implementation reserves authentication
+required `-32001` and remote capability denied `-32003`; alpha product entry
+points do not emit those outcomes. The request ID is preserved on every parsed
+request error.
 
 ### RPC methods
 
@@ -642,6 +565,8 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.message.send` | typed message envelope below | route/log a message and optionally display it on the board LCD |
 | `controller.bridge.list` | `{}` | configured peers and live connection state, without URLs or credentials |
 | `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; recursive bridge calls are rejected |
+| `controller.network.peers.get` | `{}` | persistent peer topology including optional secret references but never resolved or plaintext credentials |
+| `controller.network.peers.set` | `peers` array | atomically replace and hot-apply peer topology; unknown fields and plaintext `auth_token` are rejected, and `host_configuration` classifies remote policy when permissions return |
 | `controller.artifact.manifest`, `controller.artifact.list` | optional artifact `kind` | update capability/default/current discovery and content-addressed catalog |
 | `controller.artifact.fetch`, `controller.artifact.capture` | typed fetch or explicitly authorized capture request | queue transfer/readback through the primary |
 | `controller.update.firmware`, `controller.update.eeprom`, `controller.update.host` | artifact SHA-256 plus `authorized: true` | queue the guarded update for that domain |
@@ -1001,9 +926,9 @@ It sends an Engine.IO open packet, accepts Socket.IO connect/disconnect, and
 implements Engine.IO ping/pong. Socket.IO event packets use the usual
 `42["name",payload]` form. Supported incoming events are:
 
-Authentication completes before the Engine.IO open packet. Native clients use
-a header; browser-capable clients may request a `socket_io` one-use ticket and
-offer the same two WebSocket subprotocols as the standard endpoint.
+In the immediate alpha, Engine.IO opens without an application credential;
+Origin enforcement still precedes the open packet. Header and one-use ticket
+code is retained only for future design and older-host upgrade compatibility.
 
 | Event | Payload | Response/push events |
 |---|---|---|
@@ -1110,12 +1035,14 @@ also emitted to the host timeline.
 ## Outbound WebSocket bridge
 
 An enabled `integrations.websocket_clients` entry makes the primary host a
-standard WebSocket or bounded Socket.IO client. It authenticates with a Bearer
-token, subscribes to validated `events`/`opcodes`/`status` topics, reconnects with bounded
+standard WebSocket or bounded Socket.IO client. During alpha it connects
+without credentials unless an optional compatibility bearer is configured for
+an older peer. It subscribes to validated `events`/`state`/`status` topics, reconnects with bounded
 backoff, and can forward local events as correlated `controller.message.send`
 calls. Transport/control/error events and remote-origin messages are not
 re-forwarded, preventing a direct two-host echo loop. Incoming remote
-events/status are re-emitted locally as source-tagged messages.
+events and state remain structured; status is re-emitted locally as a
+source-tagged message.
 
 `controller.bridge.call`, `POST /api/bridges/call`, and
 `bridge call PEER METHOD [PARAMS_JSON]` use the existing persistent connection
@@ -1136,11 +1063,12 @@ local serial owner. Programming through a remote primary requires the target's
 application-UART close, guarded toolchain/Urclock run, and fresh `HELLO`
 recovery as local programming.
 
-Subscribed peer events remain structured. In particular, an unsolicited
+Subscribed peer state remains structured. In particular, an unsolicited
 `buzzer.note` retains its frequency/duration metadata so an independently
 enabled host renderer can play it immediately. The receiver stamps
 `bridge.ingress` and never forwards an ingressed event again; this gives
-server-to-edge mirroring without polling or bridge cycles.
+server-to-edge mirroring exactly once without polling or bridge cycles. Both
+JSON-RPC and Socket.IO peers must include `state` in their configured topics.
 
 ## Artifact distribution and remote updates
 
@@ -1176,7 +1104,7 @@ HTTPS-to-HTTP downgrade, remove bearer credentials on cross-authority
 redirects (including after a composed client redirect callback), and verify
 declared size plus SHA-256 before the final name appears. An injected ordinary
 HTTP client is only a settings template: its proxy and dial hooks cannot relax
-the public-source invariant. A local test or authenticated peer must select the
+the public-source invariant. A local test or explicitly trusted peer must select the
 separately named trusted constructor explicitly.
 Remote artifact and update sources are public-network only: the initial URL,
 every redirect, and the effective response URL reject loopback, private,
@@ -1411,12 +1339,13 @@ fields directly.
 `controller.discovery.scan` and `controller network discover|list` query any
 combination of the transports and return one merged `Instance` per host.
 `protocols` identifies every successful path and `sources` retains each raw
-transport observation. `controller.discovery.connect` verifies authenticated
-raw IPC and reads the remote snapshot; `controller network connect --target
-NAME --token-ref REF` also probes HTTP, WebSocket, and Socket.IO. The TUI HOST
+transport observation. `controller.discovery.connect` opens raw IPC and reads
+the remote snapshot; `controller network connect --target NAME` also probes
+HTTP, WebSocket, and Socket.IO. Optional `--token-ref REF` exists only for an
+older auth-on host during upgrade. The TUI HOST
 Settings page uses `D` to scan and Enter/C on a discovered row to open its Web
 endpoint. The Web workbench renders the same merged directory and Connect
-navigates to the selected authenticated host.
+navigates to the selected host.
 
 Advertisement can be disabled or narrowed per protocol through host config,
 `controller.discovery.config.get|set`, the Web workbench, the TUI network
@@ -1425,8 +1354,8 @@ completion/failure, connection, and configuration-change events fan out through
 the ordinary WebSocket and Socket.IO event subscriptions. Public-document HTTP
 enrichment bypasses Internet proxies and is pinned to the discovery responder's
 exact host and port. Discovery can still be blocked by Windows Firewall,
-VLANs, VPNs, or Wi-Fi isolation. Finding an instance does not authenticate the
-client and never grants command authority.
+VLANs, VPNs, or Wi-Fi isolation. Finding an instance does not enable its
+listener or change board/OS safety policy.
 
 ## Typed text-message envelope
 

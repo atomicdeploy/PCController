@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"pccontroller.local/controller/internal/appconfig"
@@ -41,6 +42,36 @@ func TestNetworkPeerAddUsesSecretReferenceAndCanBeRemoved(t *testing.T) {
 	}
 	if got := len(store.Current().Integrations.WebSocketClients); got != 0 {
 		t.Fatalf("peer count after removal=%d want 0", got)
+	}
+}
+
+func TestAlphaNetworkConfigurationDoesNotRequireOrGenerateCredentials(t *testing.T) {
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runNetwork([]string{"edge-enable", "--listen", "0.0.0.0:18787", "--origin", "controller.local:*"}, &output, &output, store); err != nil {
+		t.Fatal(err)
+	}
+	configured := store.Current()
+	if !configured.IPC.AllowRemote || configured.IPC.AuthToken != "" || configured.IPC.AuthTokenRef != "" {
+		t.Fatalf("alpha edge config=%#v", configured.IPC)
+	}
+	if !bytes.Contains(output.Bytes(), []byte("alpha authentication disabled")) {
+		t.Fatalf("edge output=%q", output.String())
+	}
+
+	output.Reset()
+	if err := runNetwork([]string{"peer-add", "--name", "lab", "--url", "ws://192.168.1.2:8787/ipc"}, &output, &output, store); err != nil {
+		t.Fatal(err)
+	}
+	peer := store.Current().Integrations.WebSocketClients[0]
+	if peer.AuthToken != "" || peer.AuthTokenRef != "" || !peer.Enabled || !peer.AllowCommands {
+		t.Fatalf("credentialless alpha peer=%#v", peer)
+	}
+	if got := strings.Join(peer.Topics, ","); got != "events,state,status" {
+		t.Fatalf("default peer topics=%q", got)
 	}
 }
 

@@ -365,6 +365,9 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .status-badge--info { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 25%, transparent); }
 .status-badge--neutral { color: var(--text-muted); }
 .status-badge--pulse .status-badge__line { animation: status-pulse 1.2s ease-in-out infinite; transform-origin: center; }
+.transport-reconnect { border: 0; padding: 0; border-radius: 7px; background: none; color: inherit; font: inherit; cursor: pointer; }
+.transport-reconnect:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.transport-reconnect:hover .status-badge { border-color: currentColor; }
 @keyframes status-pulse { 50% { scale: 1.7 1; opacity: .35; } }
 
 .card {
@@ -910,7 +913,7 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
   .mobile-menu { display: grid; }
   .breadcrumbs { min-width: 0; }
   .command-trigger { width: auto; margin: 0 0 0 auto; padding-inline: 10px; }.command-trigger span { display: none; }[dir="rtl"] .command-trigger { margin: 0 auto 0 0; }
-  .topbar { padding-inline: 15px; gap: 10px; }.topbar__actions .status-badge { display: none; }
+  .topbar { padding-inline: 15px; gap: 10px; }.topbar__actions > span .status-badge, .topbar__actions > .status-badge { display: none; }
   .mobile-drawer-layer { display: grid; place-items: stretch start; padding: 0; }.mobile-drawer { position: relative; width: min(320px, 88vw); height: 100%; padding: 14px; border-inline-end: 1px solid var(--line-strong); background: var(--glass-strong); backdrop-filter: blur(26px); box-shadow: 20px 0 80px rgba(0,0,0,.4); }.mobile-drawer > header { height: 55px; display: grid; grid-template-columns: 42px 1fr auto; gap: 10px; align-items: center; margin-bottom: 18px; }.mobile-drawer > header button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 8px; background: var(--surface-muted); color: var(--text-muted); }.mobile-drawer .nav-button { margin-bottom: 3px; }
   [dir="rtl"] .mobile-drawer-layer { place-items: stretch start; }[dir="rtl"] .mobile-drawer { box-shadow: -20px 0 80px rgba(0,0,0,.4); }
 }
