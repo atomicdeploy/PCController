@@ -26,7 +26,7 @@ uint32_t MacroRing::peekU32(uint8_t offset) const {
 
 bool MacroRing::recordReady() const {
   return used_ >= RecordHeaderBytes &&
-         used_ >= static_cast<uint8_t>(RecordHeaderBytes + peek(5));
+         peek(5) <= static_cast<uint8_t>(used_ - RecordHeaderBytes);
 }
 
 void MacroRing::begin(uint8_t id, uint8_t options, uint16_t totalSteps) {
@@ -62,7 +62,7 @@ bool MacroRing::append(uint16_t streamOffset, uint16_t completeStepIndex,
       static_cast<uint16_t>(report.acceptedBytes + byteCount);
   report.acceptedSteps = completeStepIndex;
   if (wasStarved && report.state == Playing && recordReady() &&
-      static_cast<int32_t>(nowUs - (startedAtUs_ + peekU32(0))) >= 0) {
+      static_cast<int32_t>(nowUs - (report.startedAtUs + peekU32(0))) >= 0) {
     ++report.underruns;
   }
   return true;
@@ -81,8 +81,7 @@ bool MacroRing::start(uint32_t nowUs) {
     return false;
   }
   Report &report = status_.report;
-  startedAtUs_ = nowUs;
-  report.startedAtUs = startedAtUs_;
+  report.startedAtUs = nowUs;
   report.state = Playing;
   return true;
 }
@@ -103,7 +102,7 @@ MacroRing::DequeueResult MacroRing::dequeueDue(uint32_t nowUs,
       fail();
       return Malformed;
     }
-    if (static_cast<int32_t>(nowUs - (startedAtUs_ + peekU32(0))) < 0) {
+    if (static_cast<int32_t>(nowUs - (report.startedAtUs + peekU32(0))) < 0) {
       return NotDue;
     }
     command.opcode = peek(4);
