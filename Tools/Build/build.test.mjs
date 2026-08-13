@@ -12,6 +12,7 @@ import {
 	assertGeneratedPath,
 	collectWebNotices,
 	compilerManifestIdentity,
+	compactFirmwareFeatureRows,
         createPlan,
         generatedCleanTargets,
         hostSourceIdentity,
@@ -33,6 +34,30 @@ import {
 	windowsCompilerProvisionArguments,
 	windowsSmokeSource
 } from './build.mjs'
+
+test('local firmware feature table keeps included and excluded gates visible', () => {
+	const rows = compactFirmwareFeatureRows({ features: [
+		{ enabled: true, macro: 'PCCONTROLLER_ENABLE_INA219', runtime: ['cap b0'], label: 'INA219 telemetry' },
+		{ enabled: false, macro: 'PCCONTROLLER_ENABLE_I2C_LCD', runtime: ['cap b6'], label: 'MCU LCD renderer' }
+	] })
+	assert.deepEqual(rows, [
+		['✓ included', 'PCCONTROLLER_ENABLE_INA219', 'cap b0', 'INA219 telemetry'],
+		['— excluded', 'PCCONTROLLER_ENABLE_I2C_LCD', 'cap b6', 'MCU LCD renderer']
+	])
+})
+
+test('build selectors reach the shared Go compile command', () => {
+	const options = parseArguments([
+		'--firmware-only', '--firmware-profile', 'full-peripheral',
+		'--firmware-feature', 'local-audio-cues=off', '--firmware-feature=force-silent=on'
+	], {})
+	const plan = createPlan(options, resolveBuildIdentity(options, {}, new Date('2026-08-13T00:00:00Z')), 'win32')
+	const compile = plan.actions.find(action => action.id === 'firmware-compile')
+	assert.deepEqual(
+		compile.command.args.slice(-6),
+		['--firmware-profile', 'full-peripheral', '--firmware-feature', 'local-audio-cues=off', '--firmware-feature', 'force-silent=on']
+	)
+})
 import { createStableTestPlan, goTestSourceIdentity, stableTestBinaryName } from './go-tests.mjs'
 import { PRODUCT_METADATA } from './product-metadata.mjs'
 import {

@@ -905,6 +905,12 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 		...(identityMatches && prior.stackBudget
 			? { stackBudget: prior.stackBudget }
 			: {}),
+		...(identityMatches && prior.build
+			? { build: prior.build }
+			: {}),
+		...(identityMatches && prior.eepromLayout
+			? { eepromLayout: prior.eepromLayout }
+			: {}),
 		...(identityMatches && Array.isArray(prior.patchRegions)
 			? { patchRegions: prior.patchRegions }
 			: {}),

@@ -149,6 +149,17 @@ if (kind === "firmware") {
         `| ${escape(friendlyRole(artifact.role))} | ${code(basename(artifact.path))} | ${number(artifact.dataBytes)} / ${number(artifact.capacityBytes)} | ${Number(artifact.usagePercent).toFixed(2)}% | ${number(artifact.freeBytes)} B | ${code(artifact.sha256)} |`,
     )
     .join("\n");
+  const sourceLink = (path) => `${repositoryUrl}/blob/${commit}/${path}`;
+  const featureLink = (path) => {
+    const [file, anchor] = String(path || "").split("#", 2);
+    return `${sourceLink(file)}${anchor ? `#${anchor}` : ""}`;
+  };
+  const featureRows = (manifest.build?.features || [])
+    .map((feature) => `| ${feature.enabled ? "✅ included" : "❌ excluded"} | ${code(feature.macro)} | ${escape((feature.runtime || []).join(", ") || "—")} | **${escape(feature.label)}** — ${escape(feature.description)} | [docs](${featureLink(feature.docs)}) · [source](${featureLink(feature.source)}) |`)
+    .join("\n");
+  const capabilityRows = (manifest.build?.capabilities || [])
+    .map((capability) => `| ${capability.enabled ? "✅" : "❌"} | ${number(capability.bit)} | **${escape(capability.label)}** — ${escape(capability.description)} | [docs](${featureLink(capability.docs)}) · [source](${featureLink(capability.source)}) |`)
+    .join("\n");
   const staticSections = (stack.staticSections || [])
     .map((item) => `| ${code(item.name)} | ${number(item.bytes)} B |`)
     .join("\n");
@@ -180,6 +191,25 @@ ${artifactCta(artifactUrl, `${productName} Firmware · ATmega328P`)}
 | Package | ${code(archive.name)} · ${bytes(archive.bytes)} |
 
 ${flashNotice}
+
+## 🧩 Firmware profile, compile gates, and capabilities
+
+| Profile | HELLO build flags | Capability mask |
+|---|---:|---:|
+| [${escape(manifest.build?.profile?.label || "unreported profile")}](${featureLink(manifest.build?.profile?.docs || "docs/Firmware-Features-and-Profiles.md")}) (${number(manifest.build?.profile?.value)}) | ${code(manifest.build?.buildFlagsHex || "unreported")} | ${code(manifest.build?.capabilitiesHex || "unreported")} |
+
+| State | Compile gate | Runtime evidence | Feature | References |
+|---|---|---|---|---|
+${featureRows}
+
+<details>
+<summary><strong>Runtime capability bits</strong></summary>
+
+| State | Bit | Capability | References |
+|---|---:|---|---|
+${capabilityRows}
+
+</details>
 
 ## 💾 Application flash
 

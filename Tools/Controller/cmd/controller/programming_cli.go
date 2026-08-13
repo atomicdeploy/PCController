@@ -86,6 +86,9 @@ func runProgramWithConfig(
 	baud := flags.Int("baud", 115200, "urclock baud rate")
 	toolchainCLI := flags.String("toolchain-cli", config.Programming.ToolchainCLI, "firmware dependency CLI executable")
 	toolchainConfig := flags.String("toolchain-config", config.Programming.ToolchainConfig, "firmware dependency CLI configuration file")
+	firmwareProfile := flags.String("firmware-profile", envOr("PCCONTROLLER_FIRMWARE_PROFILE", "source"), "source|full-peripheral|motion-macro|key-diagnostic|custom")
+	firmwareFeatures := stringListFlag(strings.Fields(os.Getenv("PCCONTROLLER_FIRMWARE_FEATURES")))
+	flags.Var(&firmwareFeatures, "firmware-feature", "repeatable NAME=on|off firmware feature override")
 	avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
 	usbaspBitClock := flags.Float64("usbasp-bitclock-us", 0, "force USBasp AVRDUDE -B bit-clock period in microseconds")
@@ -134,6 +137,13 @@ func runProgramWithConfig(
 		Avrdude: *avrdude, AvrdudeConf: *avrdudeConf,
 		ConfirmEEPROMWrite: *confirmEEPROM,
 		USBaspBitClockUS:   *usbaspBitClock, USBaspAutoSlow: *usbaspAutoSlow,
+	}
+	if options.Method == programmer.MethodCompile {
+		defines, resolveErr := programmer.ResolveFirmwareCompileSelection(*firmwareProfile, firmwareFeatures)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		options.FirmwareDefines = defines
 	}
 	if options.Operation == programmer.OperationChipErase {
 		return errors.New("raw chip erase is disabled; use 'controller board blank' for mandatory backup, EEPROM clearing, and full readback")

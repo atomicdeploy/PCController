@@ -12,6 +12,7 @@ import (
 
 func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *testing.T) {
 	root := t.TempDir()
+	writeFirmwareFeatureFixture(t, root)
 	output := filepath.Join(root, ".build", "firmware")
 	if err := os.MkdirAll(output, 0o755); err != nil {
 		t.Fatal(err)
@@ -61,6 +62,10 @@ func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *te
 		manifest.Source.BuildHash != "1234ABCD" ||
 		manifest.Source.PackedTimestamp != "35019D5D" ||
 		manifest.Source.BuildTimestamp != "260801194258" ||
+		manifest.Build.Format != firmwareFeatureMatrixFormat ||
+		manifest.Build.Profile.ID != "full-peripheral" ||
+		manifest.Build.BuildFlagsHex != "0xD9" ||
+		manifest.Build.CapabilitiesHex == "" ||
 		manifest.StackBudget.EstimatedFreeSRAMBytes != 408 ||
 		manifest.EEPROMLayout.Schema != EEPROMSettingsRecordSchema ||
 		manifest.EEPROMLayout.SettingsStagingAddress != EEPROMSettingsStagingAddress ||
@@ -162,6 +167,7 @@ func TestClearCompileManifestRemovesOnlyStaleManifest(t *testing.T) {
 
 func TestInspectManifestRegionsValidatesAllNamedMemoryDomains(t *testing.T) {
 	root := t.TempDir()
+	writeFirmwareFeatureFixture(t, root)
 	output := filepath.Join(root, ".build", "firmware")
 	if err := os.MkdirAll(output, 0o755); err != nil {
 		t.Fatal(err)
@@ -234,5 +240,20 @@ func TestInspectManifestRegionsValidatesAllNamedMemoryDomains(t *testing.T) {
 	if _, err := InspectManifestRegions(manifestPath); err == nil ||
 		!strings.Contains(err.Error(), "size or SHA-256 differs") {
 		t.Fatalf("tampered artifact was accepted: %v", err)
+	}
+}
+
+func writeFirmwareFeatureFixture(t *testing.T, root string) {
+	t.Helper()
+	file, err := os.Create(filepath.Join(root, firmwareConfigSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFirmwareFeatureTestConfig(file); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

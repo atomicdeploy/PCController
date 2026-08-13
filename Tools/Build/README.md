@@ -52,10 +52,29 @@ build.cmd --host-only
 build.cmd --firmware-only
 build.cmd --toolchain-sync
 build.cmd --firmware-only --toolchain-cli C:\path\to\arduino-cli.exe --toolchain-config C:\path\to\firmware-cli.yaml
+build.cmd --firmware-only --firmware-profile full-peripheral
+build.cmd --firmware-only --firmware-feature local-audio-cues=off --firmware-feature force-silent=on
 build.cmd --clean
 ```
 
 On Bash, use the identical options with `./build.sh`.
+
+Every successful firmware build prints the resolved profile plus an
+included/excluded Unicode table for every compile gate. The same evidence is
+stored under `build` in `.build/firmware/firmware-manifest.json`; inspect it
+without compiling or opening hardware with:
+
+```console
+controller firmware features --manifest .build/firmware/firmware-manifest.json
+controller firmware features --manifest .build/firmware/firmware-manifest.json --format json
+controller firmware features --project . --format markdown
+```
+
+Named profiles and every gate/capability are documented in
+[Firmware features and profiles](../../docs/Firmware-Features-and-Profiles.md).
+GitHub Actions renders the manifest as a linked Markdown matrix in the job
+summary. A source edit that removes or renames a registered literal 0/1 gate
+fails manifest publication instead of silently omitting the feature.
 
 Generated outputs have one canonical location per product:
 
