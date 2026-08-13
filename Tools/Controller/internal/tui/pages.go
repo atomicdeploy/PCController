@@ -20,6 +20,9 @@ func (model Model) pageView(snapshot control.Snapshot) string {
 	if model.settingEditor != nil {
 		return model.fitContent(renderSettingEditor(model.settingEditor, model.width))
 	}
+	if model.displayEditor != nil {
+		return model.fitContent(renderDisplayEditor(model.displayEditor, model.width))
+	}
 	var content string
 	switch model.page {
 	case PageDashboard:
@@ -353,11 +356,16 @@ func (model Model) menuPagePrefix(snapshot control.Snapshot) ([]string, menuPage
 	geometry := menuPageGeometry{frontPanelStart: lipgloss.Height(strings.Join(lines, "\n"))}
 	lines = append(lines,
 		renderFrontPanelButtons(),
+	)
+	geometry.frontPanelEnd = geometry.frontPanelStart + lipgloss.Height(renderFrontPanelButtons())
+	if displayTargetsFor(snapshot) != nil {
+		lines = append(lines, buttonGoodStyle.Render("D · Send arbitrary message"))
+	}
+	lines = append(lines,
 		renderHostMenuDirectory(model.hostMenus, model.width),
 		fmt.Sprintf("LCD prompt mirroring  %s  %s", valueStyle.Render(boolWord(model.lcdMirror, "ON", "OFF")), labelStyle.Render("M toggles · priority events temporarily override and restore")),
 		labelStyle.Render(fmt.Sprintf("Catalog: %s · Layout: %s · Host overlay: %s · Search: %s · Sort: %s", model.menuCatalogSource, layoutState, overlayState, searchState, model.menuLayoutSort)),
 	)
-	geometry.frontPanelEnd = geometry.frontPanelStart + lipgloss.Height(renderFrontPanelButtons())
 	geometry.entriesStart = lipgloss.Height(strings.Join(lines, "\n"))
 	return lines, geometry
 }

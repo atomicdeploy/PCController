@@ -33,7 +33,7 @@ func RichPreviewSnapshot() control.Snapshot {
 				native.CapabilityPersistentSettings | native.CapabilityMenuRemote | native.CapabilityBluetoothAudio |
 				native.CapabilityRemoteKeys | native.CapabilityFrontPanelSnapshot | native.CapabilityMenuDirectory | native.CapabilityRFLearnReplace |
 				native.CapabilityHostFrontPanel | native.CapabilityBuzzerBusy | native.CapabilityMenuLayout | native.CapabilityTimedMacroQueue |
-				native.CapabilityStatusEffects | native.CapabilityProgramState,
+				native.CapabilityStatusEffects | native.CapabilityProgramState | native.CapabilityScheduledSegments,
 			IdentitySchema: native.IdentitySchemaCompact, BuildHash: 0x5DF10D05,
 			BuildTimestamp: 0x3501645C, BuildStamp: "260801123456",
 		},

@@ -68,6 +68,7 @@ type Model struct {
 	renameTarget             string
 	renameTerminalWasVisible bool
 	settingEditor            *settingEditor
+	displayEditor            *displayEditor
 	eventsExpanded           bool
 
 	connectPending           bool

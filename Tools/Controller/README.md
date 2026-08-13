@@ -417,7 +417,14 @@ Ctrl+C    exit
 Up/Down  shell history
 Tab       command completion
 PgUp/Dn  scroll the event log
+D         on the Menus page, compose arbitrary segment/LCD text and timing
 ```
+
+The Menus-page display composer offers only targets confirmed by the current
+HELLO/STATUS state. It sends through the canonical `display` command, including
+speed, hold duration, repeat (`once`, `loop`, or `interval`), interval, and an
+explicit marquee switch. Text longer than the four-cell segment display
+scrolls automatically; forcing marquee also scrolls text that already fits.
 
 Automatic selection never trusts VID/PID or a friendly USB name alone. Every
 candidate must answer the native `HELLO` request with board kind `1` and the

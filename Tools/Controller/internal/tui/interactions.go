@@ -23,6 +23,9 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if model.settingEditor != nil {
 		return model.handleSettingEditorKey(message)
 	}
+	if model.displayEditor != nil {
+		return model.handleDisplayEditorKey(message)
+	}
 	inputEmpty := !model.terminalIsVisible() || strings.TrimSpace(model.input.Value()) == ""
 	if model.renameTarget != "" {
 		switch key {
@@ -1381,6 +1384,8 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		}
 	case PageMenus:
 		switch key {
+		case "d":
+			return model.beginDisplayEditor()
 		case "/":
 			model.menuLayoutSearchEditing = true
 			return model, nil, true
@@ -1738,6 +1743,15 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonWheelDown:
 			model.adjustSettingEditor(1)
 			return model, nil
+		}
+		return model, nil
+	}
+	if model.displayEditor != nil {
+		switch message.Button {
+		case tea.MouseButtonWheelUp:
+			model.adjustDisplayEditor(-1)
+		case tea.MouseButtonWheelDown:
+			model.adjustDisplayEditor(1)
 		}
 		return model, nil
 	}
