@@ -41,6 +41,7 @@ const generatedToolchainPolicyJSON = ${JSON.stringify(canonicalPolicy)}
 const generatedToolchainLockJSON = ${JSON.stringify(canonicalLock)}
 
 const (
+	generatedBoardProfile                 = ${JSON.stringify(policy.name)}
 	generatedBoardMCU                     = ${JSON.stringify(target.mcu)}
 	generatedBoardClockHz          uint32 = ${target.clock_hz}
 	generatedBoardBootloader              = ${JSON.stringify(target.bootloader)}

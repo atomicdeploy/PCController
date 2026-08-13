@@ -471,6 +471,24 @@ func TestNestedTabAndRightArrowCompletion(t *testing.T) {
 	}
 }
 
+func TestFirmwareFeatureConfigurationCompletion(t *testing.T) {
+	engine := shell.New(10)
+	for _, test := range []struct {
+		line string
+		want string
+	}{
+		{"config get programming.f", "config get programming.firmware_features"},
+		{"config set programming.f", "config set programming.firmware_features"},
+		{"config set programming.firmware_features eeprom-m", "config set programming.firmware_features eeprom-menu-labels"},
+		{"config set programming.firmware_features d", "config set programming.firmware_features default-off"},
+	} {
+		candidates := completionCandidates(engine, test.line)
+		if len(candidates) != 1 || candidates[0] != test.want {
+			t.Fatalf("completion %q=%#v want %q", test.line, candidates, test.want)
+		}
+	}
+}
+
 func TestRightArrowRecallsPlaceholderCommand(t *testing.T) {
 	engine := shell.New(10)
 	if err := engine.Register(shell.Command{

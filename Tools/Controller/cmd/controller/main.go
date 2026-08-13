@@ -172,20 +172,25 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runConfigMaintenance(args, configPath, stdout)
 	}
 	if configIndependentProgramCompile(args) {
-		// Compilation is a repository build operation. It must remain usable
-		// when a user's runtime configuration is absent, stale, or invalid and
-		// must never create or rewrite that configuration as a side effect.
+		config, configErr := offlineCompileConfig(configPath)
+		if configErr != nil {
+			return configErr
+		}
 		return runProgramWithConfig(
-			args[1:], stdout, stderr, appconfig.Defaults(),
+			args[1:], stdout, stderr, config,
 		)
 	}
 	if configIndependentToolchainCompile(args) {
+		config, configErr := offlineCompileConfig(configPath)
+		if configErr != nil {
+			return configErr
+		}
 		translated, translateErr := toolchainCLIArguments(args[1:])
 		if translateErr != nil {
 			return translateErr
 		}
 		return runProgramWithConfig(
-			translated, stdout, stderr, appconfig.Defaults(),
+			translated, stdout, stderr, config,
 		)
 	}
 	store, err := appconfig.Open(configPath)
@@ -240,6 +245,23 @@ func run(args []string, stdout, stderr io.Writer) error {
 	default:
 		return fmt.Errorf("unknown command %q; use help", args[0])
 	}
+}
+
+// offlineCompileConfig reads the selected persistent compile policy without
+// creating a config file, resolving secrets, configuring IPC, or probing a
+// device. A genuinely absent config retains the historic default-off profile;
+// an existing invalid config fails visibly instead of silently compiling with
+// different feature selections.
+func offlineCompileConfig(path string) (appconfig.Config, error) {
+	resolved, err := appconfig.ResolvePath(path)
+	if err != nil {
+		return appconfig.Config{}, err
+	}
+	config, _, err := appconfig.Load(resolved)
+	if errors.Is(err, os.ErrNotExist) {
+		return appconfig.Defaults(), nil
+	}
+	return config, err
 }
 
 func runDesktop(
