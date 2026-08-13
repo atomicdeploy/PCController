@@ -75,6 +75,21 @@ func TestAlphaNetworkConfigurationDoesNotRequireOrGenerateCredentials(t *testing
 	}
 }
 
+func TestBoundedDiscoveryInstanceName(t *testing.T) {
+	if got := boundedDiscoveryInstanceName("  Workshop  "); got != "Workshop" {
+		t.Fatalf("trimmed instance name=%q", got)
+	}
+	if got := boundedDiscoveryInstanceName(strings.Repeat("a", 80)); len(got) != 63 {
+		t.Fatalf("ASCII instance name length=%d want 63", len(got))
+	}
+	if got := boundedDiscoveryInstanceName(strings.Repeat("α", 40)); len(got) > 63 || !strings.HasSuffix(got, "α") {
+		t.Fatalf("UTF-8 instance name=%q (%d bytes)", got, len(got))
+	}
+	if got := boundedDiscoveryInstanceName("   "); got != "PCController" {
+		t.Fatalf("empty instance name=%q", got)
+	}
+}
+
 func TestNetworkAdvertiseCanNarrowAndDisableDefaultProtocols(t *testing.T) {
 	previous := currentPrimaryEndpoint()
 	defer primaryEndpoint.Store(previous)

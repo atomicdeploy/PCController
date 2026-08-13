@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -65,6 +66,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		}
 		if *instance == "" {
 			*instance, _ = os.Hostname()
+			*instance = boundedDiscoveryInstanceName(*instance)
 		}
 		_, err = store.Update(func(config *appconfig.Config) error {
 			config.IPC.Listen = *listen
@@ -373,6 +375,18 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	default:
 		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|status")
 	}
+}
+
+func boundedDiscoveryInstanceName(value string) string {
+	value = strings.TrimSpace(value)
+	for len(value) > 63 {
+		_, size := utf8.DecodeLastRuneInString(value)
+		value = value[:len(value)-size]
+	}
+	if value == "" {
+		return "PCController"
+	}
+	return value
 }
 
 func optionsTimeoutMilliseconds(value time.Duration) int64 {
