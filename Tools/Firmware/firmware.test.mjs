@@ -284,6 +284,23 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 	)
 })
 
+test('motion presentation is shared by physical, RF, host, and macro relay-side commands', async () => {
+	const frontPanel = await readFile(
+		new URL('../../Project/Firmware/FrontPanelRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	const overlay = frontPanel.indexOf('motionPresentation(\n      relays.activeRelayMask()')
+	const menuCategory = frontPanel.indexOf('if (menuCategorySelected() && isMenuMode(currentMode))')
+	const menuLabel = frontPanel.indexOf('if (!timeReached(at, menuLabelEndsAt))')
+	const hostText = frontPanel.indexOf('if (hostSegmentTextActive && isMenuMode(currentMode))')
+	assert.notEqual(overlay, -1)
+	assert.ok(overlay < menuCategory, 'active motion must replace an ordinary category label')
+	assert.ok(overlay < menuLabel, 'active motion must replace a transient page label immediately')
+	assert.ok(overlay < hostText, 'active motion must outrank ordinary host text')
+	assert.match(frontPanel, /case MODE_MOTION_CONTROL:\s*display\.showText\(commonText\(TextSide\)\);/u)
+	assert.doesNotMatch(frontPanel, /const uint8_t mask = relays\.activeRelayMask\(\);/u)
+})
+
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
         const runtimeFiles = [
                 'ControllerContext.inc.h',

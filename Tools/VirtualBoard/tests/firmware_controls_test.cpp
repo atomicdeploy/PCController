@@ -523,6 +523,20 @@ void testFrontPanelLeafDecreaseDispatch() {
                 actual.reverse == expectedMotion[action].reverse,
             "four front keys no longer map to A/B up/down immediately");
   }
+
+  const auto idle = motionPresentation(0, false);
+  const auto sideAUp = motionPresentation(_BV(1), false);
+  const auto sideADown = motionPresentation(_BV(0) | _BV(1), false);
+  const auto sideBUp = motionPresentation(_BV(3), false);
+  const auto sideBDown = motionPresentation(_BV(2) | _BV(3), false);
+  const auto bothFirst = motionPresentation(_BV(1) | _BV(2) | _BV(3), false);
+  const auto bothSecond = motionPresentation(_BV(1) | _BV(2) | _BV(3), true);
+  require(!idle.active && sideAUp.active && sideAUp.side == 0 &&
+              !sideAUp.reverse && sideADown.side == 0 && sideADown.reverse &&
+              sideBUp.side == 1 && !sideBUp.reverse && sideBDown.side == 1 &&
+              sideBDown.reverse && bothFirst.side == 0 &&
+              !bothFirst.reverse && bothSecond.side == 1 && bothSecond.reverse,
+          "motion display no longer derives one source-independent live state");
 }
 
 void testPowerSignalFallbackPolicy() {

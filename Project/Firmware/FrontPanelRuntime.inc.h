@@ -1287,6 +1287,19 @@ void serviceDisplay(uint32_t at) {
                                     : TextDiscard));
     return;
   }
+  // Motion presentation follows the applied outputs rather than the UI entry
+  // path. Physical keys, RF mappings, host commands, and macro playback all
+  // use RelayController, so they now produce the same side/direction display.
+  const MotionPresentation motionState = motionPresentation(
+      relays.activeRelayMask(), ((at / 500U) & 1U) != 0);
+  if (motionState.active) {
+    const char motion[5] = {
+        motionState.side == 0 ? 'A' : 'b', '-',
+        motionState.reverse ? 'd' : 'U',
+        motionState.reverse ? 'n' : 'P', '\0'};
+    display.showText(motion);
+    return;
+  }
 #if PCCONTROLLER_MENU_HIERARCHY
   if (menuCategorySelected() && isMenuMode(currentMode)) {
     showMenuCategory(at);
@@ -1497,24 +1510,9 @@ void serviceDisplay(uint32_t at) {
           settingsStore.values().userPwm[userPwmMenuIndex]);
       return;
 #endif
-    case MODE_MOTION_CONTROL: {
-      const uint8_t mask = relays.activeRelayMask();
-      const bool sideA = (mask & _BV(1)) != 0;
-      const bool sideB = (mask & _BV(3)) != 0;
-      if (!sideA && !sideB) {
-        display.showText(commonText(TextSide));
-        return;
-      }
-      const uint8_t side = sideA && sideB
-                               ? static_cast<uint8_t>((at / 500U) & 1U)
-                               : static_cast<uint8_t>(sideB);
-      const bool reverse = (mask & _BV(static_cast<uint8_t>(side * 2U))) != 0;
-      const char motion[5] = {
-          side == 0 ? 'A' : 'b', '-', reverse ? 'd' : 'U',
-          reverse ? 'n' : 'P', '\0'};
-      display.showText(motion);
+    case MODE_MOTION_CONTROL:
+      display.showText(commonText(TextSide));
       return;
-    }
     default:
       break;
   }
