@@ -72,12 +72,8 @@ type Options struct {
 	FirmwareSourceSHA256       string
 	FirmwareSourceFiles        int
 	FirmwareBuildTimestamp     uint32
-	// FirmwareFeatures selects only reviewed named feature gates. Raw compiler
-	// flags are intentionally not exposed because they would bypass the
-	// source-identity and artifact-verifier contract.
-	FirmwareFeatures []FirmwareFeature
-	compilePlanned   bool
-	compileStaged    bool
+	compilePlanned             bool
+	compileStaged              bool
 	// USBaspBitClockUS forces AVRDUDE's -B bit-clock period. USBaspAutoSlow
 	// retries a failed USBasp exchange at MiniCore's conservative 32-microsecond
 	// period. Multi-step callers may deliberately return to normal speed after
@@ -145,23 +141,19 @@ func Build(options Options) (Command, error) {
 			return Command{}, err
 		}
 		args := []string{"compile", "--fqbn", options.FQBN}
-		extraFlags := fmt.Sprintf(
-			"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x%08XUL "+
-				"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL "+
-				"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
-				"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
-				"-fipa-pta -fstack-usage",
-			options.FirmwareSourceHash,
-			options.FirmwareBuildTimestamp,
-			FirmwareIdentityAddress,
-		)
-		if defines := firmwareFeatureBuildDefines(options.FirmwareFeatures); len(defines) != 0 {
-			extraFlags += " " + strings.Join(defines, " ")
-		}
 		args = append(
 			args,
 			"--build-property",
-			extraFlags,
+			fmt.Sprintf(
+				"build.extra_flags=-DPCCONTROLLER_BUILD_HASH=0x%08XUL "+
+					"-DPCCONTROLLER_BUILD_TIMESTAMP=0x%08XUL "+
+					"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
+					"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
+					"-fipa-pta -fstack-usage",
+				options.FirmwareSourceHash,
+				options.FirmwareBuildTimestamp,
+				FirmwareIdentityAddress,
+			),
 			"--build-property",
 			fmt.Sprintf(
 				"compiler.c.elf.extra_flags=-w -flto -fipa-pta -g -Wl,--relax "+

@@ -572,27 +572,6 @@ test('build plan and execution share exact Controller programming argv construct
 	)
 })
 
-test('build forwards only named firmware features to the Controller compiler', () => {
-	const options = parseArguments([
-		'--firmware-only',
-		'--firmware-feature', 'eeprom-boot-opcodes',
-		'--firmware-feature=eeprom-menu-labels'
-	], {})
-	const command = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
-		.actions.find(action => action.id === 'firmware-compile').command.args
-	assert.deepEqual(command.filter((value, index) => command[index - 1] === '--firmware-feature'), [
-		'eeprom-boot-opcodes', 'eeprom-menu-labels'
-	])
-	assert.throws(
-		() => createControllerProgramCommand({
-			invocation: sourceControllerInvocation(PROJECT_ROOT), method: 'compile',
-			sketch: PROJECT_ROOT, outputDir: commandPlanPaths(PROJECT_ROOT).firmwareOutput,
-			firmwareFeatures: ['-DUNSAFE=1']
-		}),
-		/invalid named firmware feature/
-	)
-})
-
 test('firmware plan publishes the same target, artifacts, and explicit USBasp route', () => {
 	const result = spawnSync(process.execPath, [
 		join(PROJECT_ROOT, 'Tools', 'Firmware', 'firmware.mjs'),

@@ -235,9 +235,8 @@ export function parseArguments(argv, env = process.env) {
 		version: '',
 		appName: undefined,
 		tagline: undefined,
-	buildTime: '',
-	buildTimestamp: '',
-	firmwareFeatures: []
+		buildTime: '',
+		buildTimestamp: ''
 	}
 	let substantive = false
 	for (let index = 0; index < argv.length; index += 1) {
@@ -328,10 +327,6 @@ export function parseArguments(argv, env = process.env) {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.buildTimestamp = value; index = next; break
 			}
-			case '--firmware-feature': {
-				const [value, next] = valueAfter(argv, index, inline, name)
-				options.firmwareFeatures.push(value); index = next; break
-			}
 			default: throw new BuildError(`unknown option: ${argument}`, 2)
 		}
 	}
@@ -405,8 +400,7 @@ export function createPlan(options, identity, platform = process.platform) {
 			sketch: PROJECT_ROOT,
 			outputDir: FIRMWARE_OUTPUT,
 			toolchainCLI: options.toolchainCLI,
-			toolchainConfig: options.toolchainConfig,
-			firmwareFeatures: options.firmwareFeatures
+			toolchainConfig: options.toolchainConfig
 		})
 		actions.push(commandAction(
 			'firmware-compile',
@@ -578,7 +572,6 @@ Safe build options:
   --tagline TEXT            Embed the default first-run host/WebUI tagline
   --build-time ISO          Freeze host build time for reproducible packaging
   --build-timestamp HEX     Freeze packed firmware timestamp
-  --firmware-feature NAME  Repeatable Controller-validated compile feature
   --toolchain-sync          Explicitly synchronize firmware dependencies
   --toolchain-cli PATH      Dependency CLI override (compile or sync)
   --toolchain-config PATH   Dependency CLI config override (compile)
@@ -1954,8 +1947,7 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 		sketch: PROJECT_ROOT,
 		outputDir: FIRMWARE_OUTPUT,
 		toolchainCLI: options.toolchainCLI,
-		toolchainConfig: options.toolchainConfig,
-		firmwareFeatures: options.firmwareFeatures
+		toolchainConfig: options.toolchainConfig
 	})
 	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	log.stage('💾', 'Generating and validating the complete safe default EEPROM image')

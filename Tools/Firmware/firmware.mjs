@@ -144,9 +144,8 @@ export function parseArguments(argv, env = process.env) {
 		uploadOnChange: false,
 		once: false,
 		pollMs: DEFAULT_POLL_MS,
-	debounceMs: DEFAULT_DEBOUNCE_MS,
-	firmwareFeatures: [],
-	help: false
+		debounceMs: DEFAULT_DEBOUNCE_MS,
+		help: false
 	}
 	const positional = []
 	const commands = new Set([
@@ -219,12 +218,6 @@ export function parseArguments(argv, env = process.env) {
 			case '--debounce': {
 				const [value, next] = optionValue(argv, index, inlineValue, name)
 				config.debounceMs = positiveInteger(value, name, { minimum: 50 })
-				index = next
-				break
-			}
-			case '--firmware-feature': {
-				const [value, next] = optionValue(argv, index, inlineValue, name)
-				config.firmwareFeatures.push(value)
 				index = next
 				break
 			}
@@ -356,7 +349,6 @@ ${chalk.bold.yellowBright('Options')}
   --hex FILE        Override the application Intel HEX file
   --output FILE     Backup destination (backup only)
   --manifest FILE   Override manifest output
-  --firmware-feature NAME  Repeatable Controller-validated compile feature
   --clean           Clean before building
   --verbose         Show commands and verbose compiler output
   --dry-run         Print the exact action without executing it or opening a port
@@ -430,7 +422,6 @@ export async function createBuildPlan(config, projectRoot) {
 	]
 	if (config.clean) args.push('--clean')
 	if (config.verbose) args.push('--verbose')
-	for (const feature of config.firmwareFeatures) args.push('--firmware-feature', feature)
 	return { file, args, cwd: projectRoot, env }
 }
 

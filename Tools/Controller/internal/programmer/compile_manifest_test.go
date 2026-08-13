@@ -18,7 +18,6 @@ func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *te
 	}
 	identity := CompileIdentity{
 		SourceHash: 0x1234ABCD, SourceSHA256: "abcdef", SourceFiles: 3,
-		Features:        []FirmwareFeature{FirmwareFeatureEEPROMBootOpcodes},
 		PackedTimestamp: 0x35019D5D, SourceRoot: root, OutputDir: output,
 	}
 	application := manifestApplicationFixture(t, identity)
@@ -60,7 +59,6 @@ func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *te
 	}
 	if manifest.Format != firmwareManifestFormat ||
 		manifest.Source.BuildHash != "1234ABCD" ||
-		len(manifest.Source.CompileFeatures) != 1 || manifest.Source.CompileFeatures[0] != string(FirmwareFeatureEEPROMBootOpcodes) ||
 		manifest.Source.PackedTimestamp != "35019D5D" ||
 		manifest.Source.BuildTimestamp != "260801194258" ||
 		manifest.StackBudget.EstimatedFreeSRAMBytes != 408 ||
