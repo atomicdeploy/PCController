@@ -111,7 +111,7 @@ When a verified managed workspace already exists and the shared Arduino
 installation is incomplete or duplicated, adopt it without another download:
 
 ```console
-controller toolchain adopt --source-data C:\path\to\managed\data --source-user C:\path\to\managed\user --target-data C:\Users\USER\AppData\Local\Arduino15 --target-user C:\Users\USER\Documents\Arduino --cli "C:\Program Files\Arduino CLI\arduino-cli.exe" --toolchain-config C:\Users\USER\AppData\Local\Arduino15\pccontroller-firmware-cli.yaml
+controller toolchain adopt --source-data C:\path\to\managed\data --source-user C:\path\to\managed\user --target-data "%LOCALAPPDATA%\Arduino15" --target-user "%USERPROFILE%\Documents\Arduino" --cli "C:\Program Files\Arduino CLI\arduino-cli.exe" --toolchain-config "%LOCALAPPDATA%\Arduino15\pccontroller-firmware-cli.yaml"
 ```
 
 This project-owned operation atomically replaces complete package-vendor
