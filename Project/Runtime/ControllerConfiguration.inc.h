@@ -72,8 +72,10 @@ static_assert(PAGE_COUNT == PersistentMenuPageCount,
               "Persistent menu catalog no longer matches stable page IDs");
 
 // Four-character labels are packed contiguously to avoid pointer tables in SRAM.
+#if !PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
 const char MenuLabels[] PROGMEM =
     "doorVOLTCURRtLEDtBT LItEbEEPPWM rELYKEY uPWMr5-8MOVELErn";
+#endif
 const char EditLabels[] PROGMEM =
     "L-MdL-onL-oFS-MdP-ChP-u r-Chr-onuP-CuP-uur-Cur-M";
 constexpr uint8_t EditLabelCount = 12;

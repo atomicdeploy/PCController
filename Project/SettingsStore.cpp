@@ -15,7 +15,7 @@ struct __attribute__((packed)) StoredSettings {
 };
 
 #if !defined(PCCONTROLLER_SETTINGS_TEST_LAYOUT)
-static_assert(sizeof(StoredSettings) == 41,
+static_assert(sizeof(StoredSettings) == EepromLayout::SettingsRecordBytes,
               "settings/name EEPROM record layout changed");
 #else
 // Native contract tests deliberately enable the optional layout fields. Their
