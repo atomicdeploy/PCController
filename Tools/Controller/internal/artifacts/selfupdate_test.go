@@ -6,11 +6,20 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 )
+
+func TestInheritSelfUpdateIOPreservesInteractiveStreams(t *testing.T) {
+	command := exec.Command(os.Args[0], "-test.run=^$")
+	inheritSelfUpdateIO(command)
+	if command.Stdin != os.Stdin || command.Stdout != os.Stdout || command.Stderr != os.Stderr {
+		t.Fatal("self-update process did not inherit the coordinator terminal streams")
+	}
+}
 
 func TestPrepareSelfUpdateStagesVerifiedArtifactAndUsesInjectedLauncher(t *testing.T) {
 	directory := t.TempDir()
