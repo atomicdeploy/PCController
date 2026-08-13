@@ -152,7 +152,7 @@ jobs:
             -tags controllerlib \
             -buildmode=c-shared \
             -o "$RUNNER_TEMP/host-codeql.so" \
-            ./cmd/controllerlib
+            ./cmd/controller-cabi
 
       - name: "🐹 Build and test Go Host on Windows"
         if: matrix.key == 'go-windows'
@@ -164,7 +164,7 @@ jobs:
           if errorlevel 1 exit /b 1
           go run ./winres/generate_icon.go "%RUNNER_TEMP%\codeql-icon.png"
           if errorlevel 1 exit /b 1
-          go build -buildvcs=false -trimpath -tags controllerlib -buildmode=c-shared -o "%RUNNER_TEMP%\host-codeql.dll" ./cmd/controllerlib
+          go build -buildvcs=false -trimpath -tags controllerlib -buildmode=c-shared -o "%RUNNER_TEMP%\host-codeql.dll" ./cmd/controller-cabi
           if errorlevel 1 exit /b 1
 
       - name: "⚡ Build AVR firmware and Linux Virtual Board"
