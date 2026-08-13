@@ -42,12 +42,15 @@ type BuzzerMirror struct {
 	Enabled         bool   `json:"enabled"`
 	NativeEnabled   bool   `json:"native_enabled"`
 	WebAudioEnabled bool   `json:"web_audio_enabled"`
+	Backend         string `json:"backend"`
+	Executable      string `json:"executable,omitempty"`
 	DriverDirectory string `json:"driver_directory"`
 }
 
 func DefaultBuzzerMirror() BuzzerMirror {
 	return BuzzerMirror{
 		WebAudioEnabled: true,
+		Backend:         "auto",
 	}
 }
 
@@ -507,6 +510,16 @@ func (value Config) validateIntegrations() error {
 }
 
 func validateBuzzerMirror(value BuzzerMirror) error {
+	backend := strings.ToLower(strings.TrimSpace(value.Backend))
+	if backend == "" {
+		backend = "auto"
+	}
+	if backend != "auto" && backend != "native" && backend != "external" {
+		return fmt.Errorf("integrations.buzzer_mirror.backend must be auto, native, or external")
+	}
+	if strings.ContainsAny(value.Executable, "\r\n\x00") {
+		return fmt.Errorf("integrations.buzzer_mirror.executable is invalid")
+	}
 	if value.Enabled && !value.NativeEnabled && !value.WebAudioEnabled {
 		return fmt.Errorf("integrations.buzzer_mirror enables the host buzzer path but selects no native or WebAudio output")
 	}

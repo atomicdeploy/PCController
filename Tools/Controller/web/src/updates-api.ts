@@ -99,6 +99,21 @@ export interface ArtifactOperationResult {
   reused?: boolean
 }
 
+export interface BridgePeer {
+  name: string
+  protocol: string
+  connected: boolean
+  allow_commands: boolean
+  forward_events: boolean
+  last_error?: string
+}
+
+export interface PeerHostUpdateResult {
+  peer: string
+  artifact: ArtifactDescriptor
+  operation: UpdateStatus
+}
+
 /** Remote download request with optional integrity and idempotency constraints. */
 export interface RemoteArtifactRequest {
   url: string
@@ -190,6 +205,20 @@ export function startEEPROMUpdate(request: ArtifactUpdateRequest, signal?: Abort
 /** Queues staging of a verified host executable artifact. */
 export function startHostUpdate(request: ArtifactUpdateRequest, signal?: AbortSignal): Promise<ArtifactOperationResult> {
   return rpc<ArtifactOperationResult>('controller.update.host', request, signal)
+}
+
+/** Lists configured instance bridges without exposing their URLs or credentials. */
+export function listBridgePeers(signal?: AbortSignal): Promise<BridgePeer[]> {
+  return rpc<BridgePeer[]>('controller.bridge.list', {}, signal)
+}
+
+/** Transfers a verified executable over an authenticated bridge, then asks the remote coordinator to replace itself. */
+export function startPeerHostUpdate(peer: string, artifactSHA256: string, signal?: AbortSignal): Promise<PeerHostUpdateResult> {
+  return rpc<PeerHostUpdateResult>('controller.peer.update.host', {
+    peer,
+    artifact_sha256: artifactSHA256,
+    authorized: true,
+  }, signal)
 }
 
 /** Fetches the most recent update-operation status. */

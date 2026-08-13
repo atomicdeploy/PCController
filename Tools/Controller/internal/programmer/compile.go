@@ -44,6 +44,19 @@ func PlanCompile(options Options) (Options, CompileIdentity, error) {
 	}
 	options.FirmwareFeatures = features
 	if options.compilePlanned {
+		currentHash, currentSHA256, currentFiles, currentErr := firmwareCompileInputDigest(
+			options.CompileSourceRoot, features,
+		)
+		if currentErr != nil {
+			return options, CompileIdentity{}, currentErr
+		}
+		if currentHash != options.FirmwareSourceHash ||
+			currentSHA256 != options.FirmwareSourceSHA256 ||
+			currentFiles != options.FirmwareSourceFiles {
+			return options, CompileIdentity{}, errors.New(
+				"firmware sources or compile features changed after planning; create a new compile plan",
+			)
+		}
 		return options, compileIdentity(options), nil
 	}
 	if strings.TrimSpace(options.SketchPath) == "" {

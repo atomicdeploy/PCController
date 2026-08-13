@@ -7,8 +7,9 @@ import test from 'node:test'
 import {
         BOARD,
         artifactRole,
-        assertProgrammingImage,
+	assertProgrammingImage,
 	createBuildPlan,
+	createCommandPlan,
 	createProgramPlan,
 	EXIT,
 	main,
@@ -138,14 +139,97 @@ test('all upload methods use a hardware-free canonical build phase', async () =>
 test('firmware studio forwards named EEPROM feature gates to the shared build plan', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'pccontroller-feature-plan-'))
 	const config = parseArguments([
-		'build', '--firmware-feature', 'eeprom-boot-opcodes',
-		'--firmware-feature=eeprom-menu-labels'
+		'build', '--firmware-feature', 'EEPROM-MENU-LABELS',
+		'--firmware-feature=eeprom-boot-opcodes',
+		'--firmware-feature', 'eeprom-menu-labels'
 	], {})
+	assert.deepEqual(config.firmwareFeatures, [
+		'eeprom-boot-opcodes', 'eeprom-menu-labels'
+	])
 	const plan = await createBuildPlan(config, root)
 	assert.deepEqual(plan.args.slice(-4), [
 		'--firmware-feature', 'eeprom-boot-opcodes',
 		'--firmware-feature', 'eeprom-menu-labels'
 	])
+	const environment = { PCCONTROLLER_FIRMWARE_FEATURES: 'eeprom-menu-labels' }
+	const inherited = parseArguments(['build'], environment)
+	assert.deepEqual(inherited.firmwareFeatures, ['eeprom-menu-labels'])
+	assert.deepEqual((await createBuildPlan(inherited, root)).args.slice(-2), [
+		'--firmware-feature', 'eeprom-menu-labels'
+	])
+	const replaced = parseArguments([
+		'build', '--firmware-feature', 'eeprom-boot-opcodes'
+	], environment)
+	assert.deepEqual(replaced.firmwareFeatures, ['eeprom-boot-opcodes'])
+	const defaultOff = parseArguments(['build', '--no-firmware-features'], environment)
+	assert.deepEqual(defaultOff.firmwareFeatures, [])
+	assert.equal((await createBuildPlan(defaultOff, root)).args.at(-1), '--no-firmware-features')
+	for (const malformed of ['eeprom-menu-labels,', 'eeprom-menu-labels,,eeprom-boot-opcodes']) {
+		assert.throws(
+			() => parseArguments(['build'], { PCCONTROLLER_FIRMWARE_FEATURES: malformed }),
+			/firmware feature must not be empty|invalid named firmware feature/
+		)
+	}
+	for (const command of ['build', 'upload', 'watch']) {
+		const args = [
+			command, '--firmware-feature', 'eeprom-menu-labels'
+		]
+		if (command === 'upload') args.push('--method', 'usbasp')
+		const commandPlan = await createCommandPlan(parseArguments(args, {}), root)
+		const build = commandPlan.actions.find(action => action.id === 'build')
+		assert.deepEqual(
+			build.command.args.filter((value, index) =>
+				build.command.args[index - 1] === '--firmware-feature'),
+			['eeprom-menu-labels'],
+			`${command} feature propagation`
+		)
+	}
+	assert.throws(
+		() => parseArguments([
+			'build', '--firmware-feature', 'unknown'
+		], {}),
+		error => error.exitCode === EXIT.USAGE && /unsupported firmware feature/.test(error.message)
+	)
+	for (const command of ['check', 'manifest', 'backup', 'verify', 'probe', 'metadata']) {
+		const argsWithoutHardware = [command]
+		if (command === 'backup') argsWithoutHardware.push('--output', 'backup.hex')
+		if (['backup', 'verify', 'probe', 'metadata'].includes(command)) {
+			argsWithoutHardware.push('--port', 'DO_NOT_OPEN')
+		}
+		assert.deepEqual(
+			parseArguments(argsWithoutHardware, environment).firmwareFeatures,
+			[],
+			`${command} ignored environment selection`
+		)
+		assert.deepEqual(
+			parseArguments(argsWithoutHardware, {
+				PCCONTROLLER_FIRMWARE_FEATURES: 'unknown'
+			}).firmwareFeatures,
+			[],
+			`${command} ignored invalid environment selection`
+		)
+		assert.throws(
+			() => parseArguments([
+				command, '--firmware-feature', 'eeprom-menu-labels'
+			], {}),
+			error => error.exitCode === EXIT.USAGE && /requires build, upload, or watch/.test(error.message)
+		)
+		assert.throws(
+			() => parseArguments([...argsWithoutHardware, '--no-firmware-features'], environment),
+			error => error.exitCode === EXIT.USAGE && /requires build, upload, or watch/.test(error.message)
+		)
+	}
+	await assert.rejects(
+		() => createBuildPlan({ ...config, firmwareFeatures: ['unknown'] }, root),
+		error => error.exitCode === EXIT.USAGE && /unsupported firmware feature/.test(error.message)
+	)
+	await assert.rejects(
+		() => createCommandPlan({
+			...parseArguments(['check'], {}),
+			firmwareFeatures: ['eeprom-menu-labels']
+		}, root),
+		error => error.exitCode === EXIT.USAGE && /requires build, upload, or watch/.test(error.message)
+	)
 })
 
 test('program plans select USBasp by method and keep programmer as an override', async () => {
@@ -353,7 +437,9 @@ test('studio validation preserves matching Controller compile identity', async (
 	await main(['manifest', '--quiet', '--no-color'], {}, root)
 	const manifestPath = join(output, 'firmware-manifest.json')
 	const controllerManifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+	controllerManifest.format = 'pccontroller-avr-firmware-manifest/v2'
 	controllerManifest.generatedUtc = '2026-08-01T16:12:58Z'
+	controllerManifest.source.compileFeatures = ['eeprom-menu-labels']
 	controllerManifest.source.buildHash = '1234ABCD'
 	controllerManifest.source.packedTimestamp = '35019D5D'
 	controllerManifest.source.buildTimestamp = '2026-08-01 19:42:58'
@@ -365,11 +451,26 @@ test('studio validation preserves matching Controller compile identity', async (
 	await writeFile(manifestPath, `${JSON.stringify(controllerManifest, null, 2)}\n`)
 	await main(['manifest', '--quiet', '--no-color'], {}, root)
 	const validated = JSON.parse(await readFile(manifestPath, 'utf8'))
+	assert.equal(validated.format, 'pccontroller-avr-firmware-manifest/v2')
 	assert.equal(validated.generatedUtc, '2026-08-01T16:12:58Z')
+	assert.deepEqual(validated.source.compileFeatures, ['eeprom-menu-labels'])
 	assert.equal(validated.source.buildHash, '1234ABCD')
 	assert.equal(validated.source.packedTimestamp, '35019D5D')
 	assert.deepEqual(validated.stackBudget, { estimatedFreeSRAMBytes: 287 })
 	assert.deepEqual(validated.patchRegions, controllerManifest.patchRegions)
+
+	const customManifestPath = join(root, '.build', 'validated', 'custom-manifest.json')
+	await main([
+		'manifest', '--manifest', customManifestPath, '--quiet', '--no-color'
+	], {}, root)
+	const custom = JSON.parse(await readFile(customManifestPath, 'utf8'))
+	assert.equal(custom.format, 'pccontroller-avr-firmware-manifest/v2')
+	assert.equal(custom.generatedUtc, '2026-08-01T16:12:58Z')
+	assert.deepEqual(custom.source.compileFeatures, ['eeprom-menu-labels'])
+	assert.equal(custom.source.buildHash, '1234ABCD')
+	assert.equal(custom.source.packedTimestamp, '35019D5D')
+	assert.deepEqual(custom.stackBudget, { estimatedFreeSRAMBytes: 287 })
+	assert.deepEqual(custom.patchRegions, controllerManifest.patchRegions)
 })
 
 test('one-shot watched dry-run is serialized and never starts a tool', async () => {

@@ -25,6 +25,12 @@ export const PROGRAMMING_OPERATIONS = Object.freeze({
 	installBootloader: 'install-bootloader'
 })
 
+export const FIRMWARE_FEATURES = Object.freeze([
+	'eeprom-boot-opcodes',
+	'eeprom-menu-labels'
+])
+const FIRMWARE_FEATURE_SET = new Set(FIRMWARE_FEATURES)
+
 const TOOLCHAIN_POLICY_FORMAT = 'pccontroller-toolchain-policy/v1'
 const TOOLCHAIN_POLICY_URL = new URL('../Controller/toolchain-profile.json', import.meta.url)
 
@@ -215,11 +221,18 @@ export function createControllerProgramCommand({
 	toolchainCLI = '',
 	toolchainConfig = '',
 	firmwareFeatures = [],
+	noFirmwareFeatures,
 	dryRun = false,
 	allowIncompleteBackup = false
 }) {
 	const normalizedMethod = String(method || '').toLowerCase()
+	const normalizedFeatures = normalizeFirmwareFeatures(firmwareFeatures)
+	const freezeDefaultOff = noFirmwareFeatures ??
+		(normalizedMethod === 'compile' && normalizedFeatures.length === 0)
 	if (normalizedMethod === 'compile') {
+		if (freezeDefaultOff && normalizedFeatures.length !== 0) {
+			throw new CommandPlanError('--no-firmware-features cannot be combined with --firmware-feature')
+		}
 		const args = [
 			'program', '--method', 'compile',
 			'--sketch', requireValue(sketch, 'compile sketch'),
@@ -227,9 +240,10 @@ export function createControllerProgramCommand({
 		]
 		if (String(toolchainCLI).trim()) args.push('--toolchain-cli', String(toolchainCLI))
 		if (String(toolchainConfig).trim()) args.push('--toolchain-config', String(toolchainConfig))
-		for (const feature of normalizeFirmwareFeatures(firmwareFeatures)) {
+		for (const feature of normalizedFeatures) {
 			args.push('--firmware-feature', feature)
 		}
+		if (freezeDefaultOff) args.push('--no-firmware-features')
 		if (dryRun) args.push('--dry-run')
 		return controllerCommand(invocation, args)
 	}
@@ -237,6 +251,9 @@ export function createControllerProgramCommand({
 		throw new CommandPlanError(
 			`programming method ${JSON.stringify(method)} is unsupported; use ${PROGRAMMING_METHODS.join(' or ')}`
 		)
+	}
+	if (normalizedFeatures.length !== 0 || freezeDefaultOff) {
+		throw new CommandPlanError('--firmware-feature and --no-firmware-features are only valid with compile')
 	}
 	const normalizedOperation = String(operation || '').toLowerCase()
 	const knownOperations = Object.values(PROGRAMMING_OPERATIONS)
@@ -274,18 +291,24 @@ export function createControllerProgramCommand({
 	return controllerCommand(invocation, args)
 }
 
-// normalizeFirmwareFeatures only transports well-formed named feature tokens.
-// The Controller is the single semantic authority and rejects unsupported
-// names before any compiler or device action is attempted.
-function normalizeFirmwareFeatures(features) {
+// Keep every Node entrypoint aligned with the Controller's finite feature
+// contract before a plan can claim success without starting the Go process.
+export function normalizeFirmwareFeatures(features) {
 	if (!Array.isArray(features)) throw new CommandPlanError('firmware features must be an array')
-	return features.map(feature => {
+	const selected = new Set()
+	for (const feature of features) {
 		const normalized = String(feature || '').trim().toLowerCase()
 		if (!/^[a-z0-9][a-z0-9-]*$/.test(normalized)) {
 			throw new CommandPlanError(`invalid named firmware feature ${JSON.stringify(feature)}`)
 		}
-		return normalized
-	})
+		if (!FIRMWARE_FEATURE_SET.has(normalized)) {
+			throw new CommandPlanError(
+				`unsupported firmware feature ${JSON.stringify(feature)}; supported: ${FIRMWARE_FEATURES.join(', ')}`
+			)
+		}
+		selected.add(normalized)
+	}
+	return [...selected].sort()
 }
 
 export function programmingArtifact(paths, method) {

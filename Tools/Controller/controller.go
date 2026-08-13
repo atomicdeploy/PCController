@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -198,6 +199,7 @@ type Options struct {
 	ResetOnReconnect bool                   `json:"reset_on_reconnect,omitempty"`
 	ProjectPath      string                 `json:"project_path,omitempty"`
 	FQBN             string                 `json:"fqbn,omitempty"`
+	FirmwareFeatures []string               `json:"firmware_features,omitempty"`
 	ToolchainCLI     string                 `json:"toolchain_cli,omitempty"`
 	Avrdude          string                 `json:"avrdude,omitempty"`
 	AvrdudeConf      string                 `json:"avrdude_conf,omitempty"`
@@ -439,6 +441,9 @@ func New(options Options) *Client {
 	if fqbn == "" {
 		fqbn = programmer.DefaultFQBN()
 	}
+	firmwareFeatures, firmwareFeaturesErr := programmer.NormalizeFirmwareFeatures(
+		options.FirmwareFeatures,
+	)
 	runtime := control.New(control.Options{
 		Filter: ports.Filter{
 			Port:      options.Port,
@@ -474,28 +479,32 @@ func New(options Options) *Client {
 	client.outputs = control.NewOutputScheduler(runtime)
 	_ = runtime.LCDPresenter().Configure(options.LCDPresentation)
 	client.commandOptions = control.CommandOptions{
-		ProjectPath:      options.ProjectPath,
-		FQBN:             fqbn,
-		ArduinoCLI:       options.ToolchainCLI,
-		Avrdude:          options.Avrdude,
-		AvrdudeConf:      options.AvrdudeConf,
-		Programmer:       options.Programmer,
-		HostConfig:       client.currentHostConfig,
-		UpdateHostConfig: client.updateHostConfig,
-		Outputs:          client.outputs,
+		ProjectPath:           options.ProjectPath,
+		FQBN:                  fqbn,
+		FirmwareFeatures:      firmwareFeatures,
+		FirmwareFeaturesError: firmwareFeaturesErr,
+		ArduinoCLI:            options.ToolchainCLI,
+		Avrdude:               options.Avrdude,
+		AvrdudeConf:           options.AvrdudeConf,
+		Programmer:            options.Programmer,
+		HostConfig:            client.currentHostConfig,
+		UpdateHostConfig:      client.updateHostConfig,
+		Outputs:               client.outputs,
 	}
 	client.engine = control.NewCommandEngine(runtime, control.CommandOptions{
-		ProjectPath:      options.ProjectPath,
-		FQBN:             fqbn,
-		Macros:           client.currentMacros,
-		ArduinoCLI:       options.ToolchainCLI,
-		Avrdude:          options.Avrdude,
-		AvrdudeConf:      options.AvrdudeConf,
-		Programmer:       options.Programmer,
-		HostConfig:       client.currentHostConfig,
-		UpdateHostConfig: client.updateHostConfig,
-		Resolve:          client.currentCommandOptions,
-		Outputs:          client.outputs,
+		ProjectPath:           options.ProjectPath,
+		FQBN:                  fqbn,
+		FirmwareFeatures:      firmwareFeatures,
+		FirmwareFeaturesError: firmwareFeaturesErr,
+		Macros:                client.currentMacros,
+		ArduinoCLI:            options.ToolchainCLI,
+		Avrdude:               options.Avrdude,
+		AvrdudeConf:           options.AvrdudeConf,
+		Programmer:            options.Programmer,
+		HostConfig:            client.currentHostConfig,
+		UpdateHostConfig:      client.updateHostConfig,
+		Resolve:               client.currentCommandOptions,
+		Outputs:               client.outputs,
 	})
 	automationContext, cancelAutomations := context.WithCancel(context.Background())
 	go func() {
@@ -573,10 +582,15 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 	if fqbn == "" {
 		fqbn = programmer.DefaultFQBN()
 	}
+	firmwareFeatures, firmwareFeaturesErr := programmer.NormalizeFirmwareFeatures(
+		options.FirmwareFeatures,
+	)
 	client.optionsMu.Lock()
 	client.commandOptions = control.CommandOptions{
 		ProjectPath: options.ProjectPath, FQBN: fqbn,
-		ArduinoCLI: options.ToolchainCLI, Avrdude: options.Avrdude,
+		FirmwareFeatures:      firmwareFeatures,
+		FirmwareFeaturesError: firmwareFeaturesErr,
+		ArduinoCLI:            options.ToolchainCLI, Avrdude: options.Avrdude,
 		AvrdudeConf:      options.AvrdudeConf,
 		Programmer:       options.Programmer,
 		HostConfig:       client.currentHostConfig,
@@ -625,6 +639,10 @@ func (client *Client) currentHostConfig() appconfig.Config {
 	osPolicy := hostos.ClonePolicy(client.osPolicy)
 	client.hostMu.RUnlock()
 	config := appconfig.Defaults()
+	config.Programming.FirmwareFeatures = append(
+		[]programmer.FirmwareFeature(nil),
+		client.currentCommandOptions().FirmwareFeatures...,
+	)
 	config.Macros = client.currentMacros()
 	config.Scripts = scripts
 	config.Automations = automations
@@ -660,6 +678,13 @@ func (client *Client) updateHostConfig(
 	client.rfConfig = cloneRFConfigOrDefault(config.RF)
 	client.osPolicy = hostos.ClonePolicy(config.OSActions)
 	client.hostMu.Unlock()
+	client.optionsMu.Lock()
+	client.commandOptions.FirmwareFeatures = append(
+		[]programmer.FirmwareFeature(nil),
+		config.Programming.FirmwareFeatures...,
+	)
+	client.commandOptions.FirmwareFeaturesError = nil
+	client.optionsMu.Unlock()
 	return nil
 }
 
@@ -1797,6 +1822,33 @@ func (client *Client) EmitHostActionEvent(
 		Metadata: metadata,
 	})
 	return publicEvent(event)
+}
+
+// IngestBridgeEvent republishes one authenticated peer event through the
+// local runtime without flattening its kind or metadata into a text message.
+// The ingress marker prevents bridge cycles while allowing local integrations
+// such as the optional PC buzzer mirror to react immediately.
+func (client *Client) IngestBridgeEvent(peer string, event Event) Event {
+	peer = strings.TrimSpace(peer)
+	metadata := cloneStringMap(event.Metadata)
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["bridge.ingress"] = peer
+	metadata["bridge.event_id"] = strconv.FormatUint(event.ID, 10)
+	if source := strings.TrimSpace(event.Source); source != "" {
+		metadata["bridge.original_source"] = source
+	}
+	forwarded := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: event.Kind, Stream: event.Stream, Text: event.Text,
+		Frame:     native.Frame{Opcode: event.Opcode, Seq: event.Seq, Payload: append([]byte(nil), event.Payload...)},
+		Lifecycle: event.Lifecycle, Reason: event.Reason, State: event.State,
+		Gesture: event.Gesture, Source: "bridge", Target: event.Target,
+		MessageType: event.MessageType, Action: event.Action, Metadata: metadata,
+		RFCode: event.RFCode, RFBits: event.RFBits, RFProtocol: event.RFProtocol,
+		RFPulseUS: event.RFPulseUS, ResetCause: event.ResetCause, ResetCount: event.ResetCount,
+	})
+	return publicEvent(forwarded)
 }
 
 // SyncToolchain updates installed cores/libraries and ensures every

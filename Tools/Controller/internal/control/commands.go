@@ -38,25 +38,27 @@ const (
 )
 
 type CommandOptions struct {
-	ProjectPath      string
-	FQBN             string
-	Macros           func() []appconfig.Macro
-	ArduinoCLI       string
-	ArduinoConfig    string
-	Avrdude          string
-	AvrdudeConf      string
-	Programmer       string
-	HostConfig       func() appconfig.Config
-	HostFacts        hostfacts.Provider
-	UpdateHostConfig func(func(*appconfig.Config) error) error
-	Resolve          func() CommandOptions
-	Outputs          *OutputScheduler
-	ProgramRunner    programmer.CommandRunner
-	ProgramExecute   func(context.Context, programmer.Options, io.Writer) error
-	ProgramDataPaths programmer.HostDataPaths
-	InitializeBoard  func(context.Context, *Runtime, []string, io.Writer) error
-	BlankBoard       func(context.Context, *Runtime, []string, io.Writer) error
-	USBaspDriver     func(context.Context, []string, io.Writer) error
+	ProjectPath           string
+	FQBN                  string
+	FirmwareFeatures      []programmer.FirmwareFeature
+	FirmwareFeaturesError error
+	Macros                func() []appconfig.Macro
+	ArduinoCLI            string
+	ArduinoConfig         string
+	Avrdude               string
+	AvrdudeConf           string
+	Programmer            string
+	HostConfig            func() appconfig.Config
+	HostFacts             hostfacts.Provider
+	UpdateHostConfig      func(func(*appconfig.Config) error) error
+	Resolve               func() CommandOptions
+	Outputs               *OutputScheduler
+	ProgramRunner         programmer.CommandRunner
+	ProgramExecute        func(context.Context, programmer.Options, io.Writer) error
+	ProgramDataPaths      programmer.HostDataPaths
+	InitializeBoard       func(context.Context, *Runtime, []string, io.Writer) error
+	BlankBoard            func(context.Context, *Runtime, []string, io.Writer) error
+	USBaspDriver          func(context.Context, []string, io.Writer) error
 }
 
 func parseDisplayCommand(args []string) (DisplayRequest, error) {
@@ -1132,7 +1134,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "toolchain",
-		Usage:   "toolchain bootstrap|sync|profile|compile SKETCH|core-info|install-bootloader [PORT]",
+		Usage:   "toolchain bootstrap|sync|profile|features|compile SKETCH [--firmware-feature NAME ...|--no-firmware-features]|core-info|install-bootloader [PORT]",
 		Summary: "bootstrap or synchronize the firmware build/programming toolchain",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			resolved := resolveCommandOptions(options)
@@ -1156,6 +1158,16 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 			if len(args) == 1 && strings.EqualFold(args[0], "profile") {
 				encoded, err := json.MarshalIndent(programmer.DefaultToolchainProfile(), "", "  ")
 				return string(encoded), err
+			}
+			if len(args) == 1 && strings.EqualFold(args[0], "features") {
+				if resolved.FirmwareFeaturesError != nil {
+					return "", resolved.FirmwareFeaturesError
+				}
+				selected := programmer.FirmwareFeatureNames(resolved.FirmwareFeatures)
+				if len(selected) == 0 {
+					return "firmware features: default-off", nil
+				}
+				return "firmware features: " + strings.Join(selected, ", "), nil
 			}
 			if len(args) >= 1 && strings.EqualFold(args[0], "bootstrap") {
 				dryRun := false
@@ -1207,7 +1219,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "program",
-		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom] | program OPERATION METHOD PATH [PORT]",
+		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom] | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]",
 		Summary: "guarded backup-then-flash, or non-write programmer diagnostics",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			resolved := resolveCommandOptions(options)
@@ -1233,7 +1245,7 @@ func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 }
 
 func hostConfigCommand(options CommandOptions, args []string) (string, error) {
-	const usage = "config get PATH | config set PATH VALUE; PATH is ui.app_title, ui.tagline, ui.appearance.*, ui.tui_console.*, or integrations.buzzer_mirror.{enabled,native_enabled,web_audio_enabled,driver_directory}"
+	const usage = "config get PATH | config set PATH VALUE; every persisted JSON setting path is supported (including array indexes such as integrations.websocket_clients[0].enabled); common paths include programming.firmware_features, ui.app_title, ui.tagline, ui.appearance.*, ui.tui_console.*, and integrations.buzzer_mirror.{enabled,native_enabled,web_audio_enabled,driver_directory}"
 	if len(args) < 2 {
 		return "", errors.New(usage)
 	}
@@ -1251,6 +1263,12 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 		ui := config.UI
 		buzzer := config.Integrations.BuzzerMirror
 		switch path {
+		case "programming.firmware_features":
+			features := programmer.FirmwareFeatureNames(config.Programming.FirmwareFeatures)
+			if len(features) == 0 {
+				return "programming.firmware_features=default-off", nil
+			}
+			return "programming.firmware_features=" + strings.Join(features, ","), nil
 		case "ui.app_title":
 			return fmt.Sprintf("ui.app_title=%q", ui.AppTitle), nil
 		case "ui.tagline":
@@ -1285,10 +1303,14 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 			return fmt.Sprintf("integrations.buzzer_mirror.native_enabled=%t", buzzer.NativeEnabled), nil
 		case "integrations.buzzer_mirror.web_audio_enabled":
 			return fmt.Sprintf("integrations.buzzer_mirror.web_audio_enabled=%t", buzzer.WebAudioEnabled), nil
+		case "integrations.buzzer_mirror.backend":
+			return "integrations.buzzer_mirror.backend=" + buzzer.Backend, nil
+		case "integrations.buzzer_mirror.executable":
+			return fmt.Sprintf("integrations.buzzer_mirror.executable=%q", buzzer.Executable), nil
 		case "integrations.buzzer_mirror.driver_directory":
 			return fmt.Sprintf("integrations.buzzer_mirror.driver_directory=%q", buzzer.DriverDirectory), nil
 		default:
-			return "", fmt.Errorf("unsupported host setting %q", args[1])
+			return genericHostConfigGet(config, path)
 		}
 	case "set":
 		if len(args) < 3 {
@@ -1304,7 +1326,21 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 		candidate := options.HostConfig()
 		beforeUI := candidate.UI
 		beforeBuzzer := candidate.Integrations.BuzzerMirror
+		beforeProgramming := candidate.Programming
 		switch path {
+		case "programming.firmware_features":
+			var values []string
+			if !strings.EqualFold(raw, "default-off") &&
+				!strings.EqualFold(raw, "none") {
+				values = strings.FieldsFunc(raw, func(char rune) bool {
+					return char == ',' || char == ' ' || char == '\t'
+				})
+			}
+			features, err := programmer.NormalizeFirmwareFeatures(values)
+			if err != nil {
+				return "", err
+			}
+			candidate.Programming.FirmwareFeatures = features
 		case "ui.app_title":
 			if raw == "" {
 				return "", errors.New("ui.app_title cannot be empty")
@@ -1389,22 +1425,41 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 				return "", fmt.Errorf("integrations.buzzer_mirror.web_audio_enabled: %w", err)
 			}
 			candidate.Integrations.BuzzerMirror.WebAudioEnabled = value
+		case "integrations.buzzer_mirror.backend":
+			candidate.Integrations.BuzzerMirror.Backend = strings.ToLower(raw)
+		case "integrations.buzzer_mirror.executable":
+			candidate.Integrations.BuzzerMirror.Executable = raw
 		case "integrations.buzzer_mirror.driver_directory":
 			candidate.Integrations.BuzzerMirror.DriverDirectory = raw
 		default:
-			return "", fmt.Errorf("unsupported host setting %q", args[1])
+			updated, err := genericHostConfigSet(candidate, path, raw)
+			if err != nil {
+				return "", err
+			}
+			if reflect.DeepEqual(candidate, updated) {
+				return path + " unchanged", nil
+			}
+			if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
+				*config = updated
+				return config.Validate()
+			}); err != nil {
+				return "", err
+			}
+			return path + " saved and hot-reload queued", nil
 		}
 		candidate.UI.Appearance = appconfig.NormalizeAppearance(candidate.UI.Appearance)
 		if err := candidate.Validate(); err != nil {
 			return "", err
 		}
 		if reflect.DeepEqual(beforeUI, candidate.UI) &&
-			reflect.DeepEqual(beforeBuzzer, candidate.Integrations.BuzzerMirror) {
+			reflect.DeepEqual(beforeBuzzer, candidate.Integrations.BuzzerMirror) &&
+			reflect.DeepEqual(beforeProgramming, candidate.Programming) {
 			return path + " unchanged", nil
 		}
 		if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
 			config.UI = candidate.UI
 			config.Integrations.BuzzerMirror = candidate.Integrations.BuzzerMirror
+			config.Programming = candidate.Programming
 			return config.Validate()
 		}); err != nil {
 			return "", err
@@ -1970,16 +2025,19 @@ func describeLiveMenuEntry(entry native.MenuEntry) (MenuPageInfo, bool) {
 }
 
 func toolchainProgramArguments(args []string) ([]string, error) {
-	const usage = "usage: toolchain compile SKETCH | core-info | install-bootloader [PORT]"
+	const usage = "usage: toolchain compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | core-info | install-bootloader [PORT]"
 	if len(args) == 0 {
 		return nil, fmt.Errorf("%s", usage)
 	}
 	switch strings.ToLower(args[0]) {
 	case "compile":
-		if len(args) != 2 {
+		if len(args) < 2 {
 			return nil, fmt.Errorf("%s", usage)
 		}
-		return []string{string(programmer.MethodCompile), args[1]}, nil
+		return append(
+			[]string{string(programmer.MethodCompile), args[1]},
+			args[2:]...,
+		), nil
 	case "core-info", "info":
 		if len(args) != 1 {
 			return nil, fmt.Errorf("%s", usage)
@@ -2000,6 +2058,58 @@ func toolchainProgramArguments(args []string) ([]string, error) {
 	default:
 		return nil, fmt.Errorf("%s", usage)
 	}
+}
+
+func parseCompileRequest(
+	args []string,
+	defaults []programmer.FirmwareFeature,
+) (string, []programmer.FirmwareFeature, error) {
+	const usage = "compile requires SKETCH followed only by repeatable --firmware-feature NAME options or --no-firmware-features"
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return "", nil, errors.New(usage)
+	}
+	values := programmer.FirmwareFeatureNames(defaults)
+	explicit := false
+	defaultOff := false
+	for index := 1; index < len(args); index++ {
+		argument := args[index]
+		name, inline, hasInline := strings.Cut(argument, "=")
+		if strings.EqualFold(name, "--no-firmware-features") {
+			if hasInline {
+				return "", nil, errors.New("--no-firmware-features does not accept a value")
+			}
+			if explicit {
+				return "", nil, errors.New("--no-firmware-features cannot be combined with --firmware-feature")
+			}
+			values = nil
+			defaultOff = true
+			continue
+		}
+		if !strings.EqualFold(name, "--firmware-feature") {
+			return "", nil, fmt.Errorf("unexpected compile argument %q; %s", argument, usage)
+		}
+		if defaultOff {
+			return "", nil, errors.New("--no-firmware-features cannot be combined with --firmware-feature")
+		}
+		value := inline
+		if !hasInline {
+			if index+1 >= len(args) {
+				return "", nil, errors.New("--firmware-feature requires a value")
+			}
+			index++
+			value = args[index]
+		}
+		if !explicit {
+			values = nil
+			explicit = true
+		}
+		values = append(values, value)
+	}
+	features, err := programmer.NormalizeFirmwareFeatures(values)
+	if err != nil {
+		return "", nil, err
+	}
+	return args[0], features, nil
 }
 
 func bootProgramArguments(args []string) ([]string, error) {
@@ -3696,8 +3806,8 @@ func programCommand(
 	if len(args) != 0 && strings.EqualFold(args[0], "recover") {
 		return recoverProgrammingCommand(ctx, runtime, options, args[1:])
 	}
-	if len(args) < 2 || len(args) > 5 {
-		return "", fmt.Errorf("usage: program flash HEX [PORT] [advanced flags] | program OPERATION METHOD PATH [PORT]")
+	if len(args) < 2 {
+		return "", fmt.Errorf("usage: program flash HEX [PORT] [advanced flags] | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]")
 	}
 	operation := programmer.OperationWriteFlash
 	methodIndex := 0
@@ -3730,7 +3840,17 @@ func programCommand(
 		if operation != programmer.OperationWriteFlash {
 			return "", fmt.Errorf("%s does not support operation %s", method, operation)
 		}
-		programOptions.SketchPath = args[pathIndex]
+		if options.FirmwareFeaturesError != nil {
+			return "", options.FirmwareFeaturesError
+		}
+		sketch, features, err := parseCompileRequest(
+			args[pathIndex:], options.FirmwareFeatures,
+		)
+		if err != nil {
+			return "", err
+		}
+		programOptions.SketchPath = sketch
+		programOptions.FirmwareFeatures = features
 		if programOptions.SketchPath == "." && options.ProjectPath != "" {
 			programOptions.SketchPath = options.ProjectPath
 		}
@@ -3766,7 +3886,9 @@ func programCommand(
 		)
 	}
 	nextIndex := pathIndex
-	if needsPath {
+	if method == programmer.MethodCompile {
+		nextIndex = len(args)
+	} else if needsPath {
 		nextIndex++
 	}
 	if operation == programmer.OperationWriteEEPROM {

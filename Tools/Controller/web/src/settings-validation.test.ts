@@ -88,13 +88,14 @@ describe('settings input normalization', () => {
   })
 
   it('compares normalized integration drafts', () => {
+    const buzzer = { enabled: false, native_enabled: false, web_audio_enabled: true, backend: 'auto' as const, executable: '', driver_directory: '' }
     expect(integrationSettingsEqual(
-      { local_device: { enabled: true, base_url: ' controller.local ' }, data_hub: { enabled: false, base_url: '' }, lifecycle_safety: { session_lock: 'stop-motion', suspend: 'all-off', refresh_on_resume: true } },
-      { local_device: { enabled: true, base_url: 'controller.local' }, data_hub: { enabled: false, base_url: '' }, lifecycle_safety: { session_lock: 'stop-motion', suspend: 'all-off', refresh_on_resume: true } },
+      { local_device: { enabled: true, base_url: ' controller.local ' }, data_hub: { enabled: false, base_url: '' }, lifecycle_safety: { session_lock: 'stop-motion', suspend: 'all-off', refresh_on_resume: true }, buzzer_mirror: buzzer },
+      { local_device: { enabled: true, base_url: 'controller.local' }, data_hub: { enabled: false, base_url: '' }, lifecycle_safety: { session_lock: 'stop-motion', suspend: 'all-off', refresh_on_resume: true }, buzzer_mirror: buzzer },
     )).toBe(true)
     expect(integrationSettingsEqual(
-      { local_device: { enabled: false }, data_hub: { enabled: false }, lifecycle_safety: { session_lock: 'stop-motion', suspend: 'stop-motion', refresh_on_resume: true } },
-      { local_device: { enabled: false }, data_hub: { enabled: false }, lifecycle_safety: { session_lock: 'all-off', suspend: 'stop-motion', refresh_on_resume: true } },
+      { local_device: { enabled: false }, data_hub: { enabled: false }, lifecycle_safety: { session_lock: 'stop-motion', suspend: 'stop-motion', refresh_on_resume: true }, buzzer_mirror: buzzer },
+      { local_device: { enabled: false }, data_hub: { enabled: false }, lifecycle_safety: { session_lock: 'all-off', suspend: 'stop-motion', refresh_on_resume: true }, buzzer_mirror: buzzer },
     )).toBe(false)
   })
 })

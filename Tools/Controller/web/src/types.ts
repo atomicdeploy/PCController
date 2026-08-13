@@ -317,6 +317,14 @@ export interface LocalIntegrationSettings {
     suspend: LifecycleSafetyAction
     refresh_on_resume: boolean
   }
+  buzzer_mirror: {
+    enabled: boolean
+    native_enabled: boolean
+    web_audio_enabled: boolean
+    backend: 'auto' | 'native' | 'external'
+    executable?: string
+    driver_directory?: string
+  }
 }
 
 export type LifecycleSafetyAction = 'leave' | 'stop-motion' | 'all-off'

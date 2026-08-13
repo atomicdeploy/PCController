@@ -151,6 +151,16 @@ rejects MSYS-only targets. Use `--no-shared-library` only when intentionally
 building without the ABI. See
 [C Library API](docs/C-Library-API.md).
 
+For a focused library-only CMake/CTest workflow, configure
+`Tools/Controller` with a native compiler passed as
+`-DPCCONTROLLER_CABI_CC=...`; its `pccontroller_cabi` and
+`pccontroller_cabi_installed_smoke` targets use that compiler for both CGO and
+external C consumers, including one compiled against the CMake-staged install
+tree. The CMake project validates the Windows target/macros and rejects
+MSYS/Cygwin before invoking Go; it intentionally delegates package selection
+and provisioning to the canonical host packager. Its output is developer-only
+verification material, never a deployable host package.
+
 ## Embedded web control center
 
 Launch the full primary host lifecycle and open the same-origin app:
@@ -713,6 +723,8 @@ bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"app title auto\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
+bin\controller.exe exec peer-update host cafe-pc HOST_ARTIFACT_SHA256
+bin\controller.exe ipc call --method controller.peer.update.host --params "{\"peer\":\"cafe-pc\",\"artifact_sha256\":\"HOST_ARTIFACT_SHA256\",\"authorized\":true}"
 ```
 
 Enable an authenticated edge host on a trusted LAN with explicit browser
@@ -792,6 +804,12 @@ Configured `integrations.websocket_clients` can subscribe to another primary,
 forward loop-safe typed events, and issue correlated `bridge call` requests.
 Each host still has exactly one local serial owner and the target reapplies its
 own remote policy and board safety guards.
+
+Host upgrades use that same authenticated connection. A verified executable is
+chunked below the RPC frame limit, validated again by the receiving artifact
+store, and passed to the receiving coordinator for graceful replacement and
+health-checked rollback. No SSH command is embedded in this path. The Updates
+page exposes the same operation for every connected command-enabled peer.
 
 Go programs can import the module-root `controller` package directly:
 
