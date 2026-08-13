@@ -259,14 +259,15 @@ func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T)
 	}
 
 	afterID := runtime.LatestEventID()
-	one.Page, one.Values[hostui.NavigationRevisionKey] = "events", "2"
-	if _, err := server.instances.Upsert(one); err != nil {
-		t.Fatal(err)
+	outcome, err := server.navigationCommand(hostui.NavigationCommand{Group: hostui.DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "test-op-1"})
+	if err != nil || outcome.Revision != 2 || outcome.Page != "events" || len(outcome.Actions) != 3 {
+		t.Fatalf("coordinator outcome=%#v err=%v", outcome, err)
 	}
-	for _, wantTarget := range []string{three.ID, two.ID} {
+	for _, wantTarget := range []string{one.ID, three.ID, two.ID} {
 		if action := <-actions; action.Target != wantTarget || action.Value != "events" ||
 			action.Metadata[hostui.NavigationSourceKey] != one.ID ||
-			action.Metadata[hostui.NavigationRevisionKey] != "2" {
+			action.Metadata[hostui.NavigationRevisionKey] != "2" ||
+			action.Metadata[hostui.NavigationOperationKey] != "test-op-1" {
 			t.Fatalf("fanout action target=%q action=%#v", wantTarget, action)
 		}
 	}
