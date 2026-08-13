@@ -52,8 +52,12 @@ func TestMenuFallbackKeepsUnknownBuildOnCurrentCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if door.ID != 0 || len(pages) != 13 {
-		t.Fatalf("unknown-build fallback door=%d pages=%d", door.ID, len(pages))
+	alias, err := ResolveMenuPageIn(pages, "motion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if door.ID != 0 || alias.ID != menuPageMotionAlias || len(pages) != 14 {
+		t.Fatalf("unknown-build fallback door=%d alias=%#v pages=%d", door.ID, alias, len(pages))
 	}
 	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
 		t.Fatal("unknown build inherited the historical Status page")
@@ -70,8 +74,12 @@ func TestMenuDirectoryCapabilityOverridesHistoricalBuildIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if door.ID != 0 || len(pages) != 13 {
-		t.Fatalf("advertised current catalog door=%d pages=%d", door.ID, len(pages))
+	alias, err := ResolveMenuPageIn(pages, "motion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if door.ID != 0 || alias.ID != menuPageMotionAlias || alias.Name != "Motion (KEY alias)" || len(pages) != 14 {
+		t.Fatalf("advertised current catalog door=%d alias=%#v pages=%d", door.ID, alias, len(pages))
 	}
 	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
 		t.Fatal("advertised current catalog was replaced by historical IDs")
@@ -109,17 +117,24 @@ func TestResolveMenuPageInUsesCurrentStableID(t *testing.T) {
 	}
 }
 
-func TestCurrentCatalogRemovesStandaloneBluetoothPage(t *testing.T) {
+func TestCurrentCatalogRetiresStandaloneBluetoothAndKeepsMotionSelectorAlias(t *testing.T) {
 	current := MenuPages()
 	page, err := ResolveMenuPageIn(current, "6")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page.Key != "settings" || len(current) != 13 {
+	if page.Key != "settings" || len(current) != 14 {
 		t.Fatalf("dense current page 6=%#v catalog=%#v", page, current)
 	}
+	alias := current[menuPageMotionAlias]
+	rf := current[len(current)-1]
+	if alias.ID != menuPageMotionAlias || alias.Key != "motion" ||
+		alias.Description != retiredMotionAliasDetails ||
+		rf.ID != 13 || rf.Key != "rf-learn" {
+		t.Fatalf("current wire catalog did not retain the ID-12 selector and RF-13 endpoint: alias=%#v rf=%#v", alias, rf)
+	}
 	for _, candidate := range current {
-		if candidate.Key == "bt-audio" || candidate.Key == "motion" {
+		if candidate.Key == "bt-audio" {
 			t.Fatalf("current catalog still contains retired page %#v", candidate)
 		}
 	}
