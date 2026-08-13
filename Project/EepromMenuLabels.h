@@ -4,7 +4,9 @@
 
 // Optional EEPROM-backed replacement for the packed four-character menu label
 // table. It is intentionally narrow: labels remain fixed-width and read-only
-// to firmware, while the host provisions their factory bytes and checksum.
+// to firmware. The host provisions a versioned CRC record whose commit marker
+// is written last; firmware never accepts an interrupted or future-format
+// record and does not spend flash on an EEPROM migration chain.
 namespace EepromMenuLabels {
 
 constexpr uint8_t LabelWidth = 4;
@@ -13,11 +15,13 @@ constexpr uint8_t LabelWidth = 4;
 // It never writes EEPROM and leaves the fallback active when validation fails.
 void begin();
 
-// Indicates whether read() can return validated EEPROM label bytes.
+// Indicates that the format marker and CRC validate. read()/copy() still
+// sanitize every cell, so even a deliberately CRC-correct control byte cannot
+// reach the display. The host writer rejects such bytes before provisioning.
 bool available();
 
-// Copies one four-character label into caller-owned display storage. A missing,
-// corrupt, or out-of-range label becomes four dashes without an SRAM cache.
+// Copies one four-character label into caller-owned display storage. Missing,
+// corrupt, out-of-range, or non-printable cells become dashes without a cache.
 void copy(uint8_t page, char output[LabelWidth]);
 
 // Returns one display-safe label byte or '-' when the block is unavailable or
