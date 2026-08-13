@@ -22,16 +22,26 @@ func Play(ctx context.Context, driverDirectory string, frequencyHz, durationMS i
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := validateDriverDirectory(driverDirectory); err != nil {
-		return err
-	}
 	if frequencyHz < MinFrequencyHz || frequencyHz > MaxFrequencyHz {
 		return fmt.Errorf("speaker frequency must be %d..%d Hz", MinFrequencyHz, MaxFrequencyHz)
 	}
 	if durationMS < 1 || durationMS > MaxDurationMS {
 		return fmt.Errorf("speaker duration must be 1..%d ms", MaxDurationMS)
 	}
-	return play(ctx, driverDirectory, uint32(frequencyHz), uint32(durationMS))
+	var nativeErr error
+	if err := validateDriverDirectory(driverDirectory); err != nil {
+		nativeErr = err
+	} else {
+		nativeErr = play(ctx, driverDirectory, uint32(frequencyHz), uint32(durationMS))
+		if nativeErr == nil {
+			return nil
+		}
+	}
+	if fallbackErr := playExternalBeep(ctx, driverDirectory, frequencyHz, durationMS); fallbackErr == nil {
+		return nil
+	} else {
+		return errors.Join(nativeErr, fallbackErr)
+	}
 }
 
 func IsHelperInvocation(args []string) bool {
