@@ -10,6 +10,20 @@ void showPackedLabel(const char *labels, uint8_t index, uint32_t at) {
   menuLabelEndsAt = at + 650;
 }
 
+// Shows an ordinary menu label from its compile-selected storage. EEPROM labels
+// are prevalidated at boot; corrupt/unprovisioned storage is rendered as a
+// harmless four-dash cell rather than exposing arbitrary EEPROM bytes.
+void showMenuLabel(uint8_t index, uint32_t at) {
+#if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
+  char label[EepromMenuLabels::LabelWidth];
+  EepromMenuLabels::copy(index, label);
+  display.showText(label);
+  menuLabelEndsAt = at + 650;
+#else
+  showPackedLabel(MenuLabels, index, at);
+#endif
+}
+
 // Distinguishes ordinary page modes from modal editors and transient states.
 bool isMenuMode(ProgramMode mode) {
   return mode >= MODE_DOOR && mode <= MODE_RF;
@@ -122,7 +136,7 @@ void showMenuCategory(uint32_t at) {
       PAGE_DOOR, PAGE_ILLUMINATION, PAGE_PWM, PAGE_KEYS};
   const uint8_t category = menuTreeState & 0x03U;
   const uint8_t labelPage = pgm_read_byte(labelPages + category);
-  showPackedLabel(MenuLabels, labelPage, at);
+  showMenuLabel(labelPage, at);
 }
 
 // Rolls category selection while skipping categories with no visible children.
@@ -170,7 +184,7 @@ void programService(uint32_t at) {
 
     if (isMenuMode(current)) {
       menuPage = modeToPage(current);
-      showPackedLabel(MenuLabels, menuPage, at);
+      showMenuLabel(menuPage, at);
       return;
     }
 
@@ -489,11 +503,11 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       const uint8_t page = firstConfiguredMenuPage(category);
       if (page != 0xFF) {
         setMenuPage(page);
-        showPackedLabel(MenuLabels, menuPage, actionNow);
+        showMenuLabel(menuPage, actionNow);
       }
     } else {
       menuTreeState = menuCategory(menuPage);
-      showPackedLabel(MenuLabels, menuPage, actionNow);
+      showMenuLabel(menuPage, actionNow);
     }
     menuFeedback(fromRemote);
     return;
