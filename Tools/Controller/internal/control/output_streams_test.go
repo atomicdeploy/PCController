@@ -22,6 +22,7 @@ type recordingOutputTarget struct {
 	commands []recordedOutputCommand
 	events   []string
 	failAt   int
+	ackDelay time.Duration
 }
 
 func (target *recordingOutputTarget) Command(
@@ -33,12 +34,23 @@ func (target *recordingOutputTarget) Command(
 		return err
 	}
 	target.mu.Lock()
-	defer target.mu.Unlock()
 	target.commands = append(target.commands, recordedOutputCommand{
 		at: time.Now(), opcode: opcode,
 		payload: append([]byte(nil), payload...),
 	})
-	if target.failAt != 0 && len(target.commands) >= target.failAt {
+	commandCount := len(target.commands)
+	delay := target.ackDelay
+	target.mu.Unlock()
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if target.failAt != 0 && commandCount >= target.failAt {
 		return errors.New("USB disconnected")
 	}
 	return nil
@@ -92,6 +104,42 @@ func TestMelodyStreamingWaitsBetweenAcknowledgedNotes(t *testing.T) {
 	}
 	if spacing := commands[1].at.Sub(commands[0].at); spacing < 20*time.Millisecond {
 		t.Fatalf("notes streamed too quickly: %v", spacing)
+	}
+}
+
+func TestMelodyStreamingDoesNotAddAcknowledgementLatencyToEveryNote(t *testing.T) {
+	target := &recordingOutputTarget{ackDelay: 40 * time.Millisecond}
+	scheduler := NewOutputScheduler(target)
+	defer scheduler.Close()
+	operation, err := scheduler.StartMelody(
+		context.Background(),
+		appconfig.Melody{
+			Name: "paced",
+			Notes: []appconfig.MelodyNote{
+				{FrequencyHz: 440, DurationMS: 60, GapMS: 10},
+				{FrequencyHz: 660, DurationMS: 10},
+			},
+		},
+		1,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-operation.Done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("melody did not complete")
+	}
+	commands := target.snapshot()
+	if len(commands) != 2 {
+		t.Fatalf("commands=%d, want 2", len(commands))
+	}
+	spacing := commands[1].at.Sub(commands[0].at)
+	if spacing < 60*time.Millisecond || spacing > 90*time.Millisecond {
+		t.Fatalf("ACK latency changed the 70ms source cadence: %v", spacing)
 	}
 }
 

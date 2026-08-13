@@ -83,7 +83,7 @@ import type {
 } from './types'
 import { peripheralAvailability } from './peripheral-availability'
 import { applyPushedOutputEvent } from './status-led-event'
-import type { BuzzerPath } from './buzzer-routing'
+import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
@@ -391,6 +391,7 @@ export default function App() {
   const toastID = useRef(0)
   const goChordUntil = useRef(0)
   const audioRef = useRef<AudioEngine | null>(null)
+  const buzzerTimelineRef = useRef(new BuzzerPlaybackTimeline())
   const previousAudioConnection = useRef<boolean | null>(null)
   const tabChannelRef = useRef<TabChannel | null>(null)
   const appearanceETagRef = useRef('')
@@ -1064,11 +1065,21 @@ export default function App() {
 			if (event.kind.toLowerCase() === 'status_led.changed' || event.kind.toLowerCase() === 'front_panel.segment') {
 				setSnapshot((current) => applyPushedOutputEvent(current, event))
 			}
-						if (config.integrations?.buzzer_web_audio && event.kind.toLowerCase() === 'buzzer.note') {
-							const frequencyHz = Number(event.metadata?.frequency_hz)
-							const durationMS = Number(event.metadata?.duration_ms)
-							audioRef.current?.playTone(frequencyHz, durationMS)
-						}
+            if (config.integrations?.buzzer_web_audio && eventKind === 'buzzer.note') {
+              const frequencyHz = Number(event.metadata?.frequency_hz)
+              const durationMS = Number(event.metadata?.duration_ms)
+              const rawDeviceMicros = event.metadata?.device_micros
+              const deviceMicros = rawDeviceMicros === undefined ? undefined : Number(rawDeviceMicros)
+              const source = event.metadata?.['bridge.ingress']
+                ? `bridge:${event.metadata['bridge.ingress']}`
+                : 'local-board'
+              const plan = buzzerTimelineRef.current.plan({
+                source, frequencyHz, durationMS, deviceMicros,
+              }, performance.now())
+              if (plan?.audible) {
+                audioRef.current?.playTone(frequencyHz, plan.durationMS, plan.delayMS)
+              }
+            }
             if (isSignificantControllerEvent(event)) {
               setEvents((current) => prependSignificantControllerEvent(current, event))
               tabChannelRef.current?.publishControllerEvent(event)
