@@ -88,6 +88,7 @@ type primaryIPC struct {
 	actions               *hostui.ActionBroker
 	instances             *hostui.InstanceRegistry
 	artifacts             *artifacts.Service
+	ipc                   *ipcjson.Service
 	releaseDiscovery      io.Closer
 	instanceClaim         *hostInstanceClaim
 	hostInstanceID        string
@@ -189,6 +190,31 @@ func startPrimaryIPCClaimed(
 		_ = server.Close()
 		_ = claim.Close()
 		return nil, fmt.Errorf("register bridge command: %w", err)
+	}
+	if err := engine.Register(shell.Command{
+		Name: "peer-update", Usage: "peer-update host PEER ARTIFACT_SHA256",
+		Summary: "transfer a verified host artifact and ask the peer coordinator to upgrade",
+		Run: func(ctx context.Context, args []string) (string, error) {
+			if len(args) != 3 || !strings.EqualFold(args[0], "host") {
+				return "", errors.New("usage: peer-update host PEER ARTIFACT_SHA256")
+			}
+			params, _ := json.Marshal(map[string]any{
+				"peer": args[1], "artifact_sha256": args[2], "authorized": true,
+			})
+			response := server.ipc.Dispatch(ctx, ipcjson.Request{
+				JSONRPC: ipcjson.Version, Method: "controller.peer.update.host", Params: params,
+			})
+			if response.Error != nil {
+				return "", response.Error
+			}
+			encoded, err := json.MarshalIndent(response.Result, "", "  ")
+			return string(encoded), err
+		},
+	}); err != nil {
+		manager.Close()
+		_ = server.Close()
+		_ = claim.Close()
+		return nil, fmt.Errorf("register peer update command: %w", err)
 	}
 	if err := engine.Register(shell.Command{
 		Name: "webhook",
@@ -374,6 +400,7 @@ func startPrimaryIPCAtWithIdentity(
 			return ipcjson.Response{}, errors.New("host bridge manager is unavailable")
 		},
 	}
+	server.ipc = service
 	if len(stores) > 0 && stores[0] != nil {
 		store := stores[0]
 		server.sessionSnapshot = newHostSessionRecorder(sharedClient, store)

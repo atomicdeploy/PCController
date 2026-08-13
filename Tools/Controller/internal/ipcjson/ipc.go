@@ -583,12 +583,14 @@ func (service *Service) dispatch(
 			"local_device":     config.LocalDevice,
 			"data_hub":         config.DataHub,
 			"lifecycle_safety": config.Lifecycle,
+			"buzzer_mirror":    config.BuzzerMirror,
 		}
 	case "controller.integrations.local.set":
 		var params struct {
 			LocalDevice     appconfig.LocalDevice      `json:"local_device"`
 			DataHub         appconfig.DataHub          `json:"data_hub"`
 			LifecycleSafety *appconfig.LifecycleSafety `json:"lifecycle_safety,omitempty"`
+			BuzzerMirror    *appconfig.BuzzerMirror    `json:"buzzer_mirror,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
 			if service.UpdateHostConfig == nil {
@@ -600,6 +602,9 @@ func (service *Service) dispatch(
 					if params.LifecycleSafety != nil {
 						value.Integrations.Lifecycle = *params.LifecycleSafety
 					}
+					if params.BuzzerMirror != nil {
+						value.Integrations.BuzzerMirror = *params.BuzzerMirror
+					}
 					return nil
 				})
 				if err == nil {
@@ -608,6 +613,7 @@ func (service *Service) dispatch(
 						"local_device":     config.LocalDevice,
 						"data_hub":         config.DataHub,
 						"lifecycle_safety": config.Lifecycle,
+						"buzzer_mirror":    config.BuzzerMirror,
 					}
 				}
 			}
@@ -1089,6 +1095,11 @@ func (service *Service) dispatch(
 					}
 				}
 			}
+		}
+	case "controller.peer.update.host":
+		var params peerHostUpdateRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.updatePeerHost(ctx, params)
 		}
 	case "controller.app.action":
 		var action hostui.AppAction
@@ -1741,7 +1752,10 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.discovery.manifest", "controller.discovery.local_manifest",
 		"controller.discovery.check", "controller.discovery.status":
 		return capabilityRead
-	case "controller.artifact.fetch", "controller.artifact.upload", "controller.artifact.capture",
+	case "controller.artifact.fetch", "controller.artifact.upload",
+		"controller.artifact.upload.begin", "controller.artifact.upload.chunk",
+		"controller.artifact.upload.finish", "controller.artifact.upload.abort",
+		"controller.artifact.capture", "controller.peer.update.host",
 		"controller.update.firmware", "controller.restore.flash",
 		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage":
 		return capabilityProgramming

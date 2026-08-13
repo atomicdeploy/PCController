@@ -59,6 +59,10 @@
             "controller.artifact.list",
             "controller.artifact.manifest",
             "controller.artifact.upload",
+            "controller.artifact.upload.abort",
+            "controller.artifact.upload.begin",
+            "controller.artifact.upload.chunk",
+            "controller.artifact.upload.finish",
             "controller.bridge.call",
             "controller.bridge.list",
             "controller.close",
@@ -123,6 +127,7 @@
             "controller.os.policy",
             "controller.os.power",
             "controller.os.status",
+            "controller.peer.update.host",
             "controller.peripherals",
             "controller.peripherals.get",
             "controller.peripherals.set",
@@ -332,6 +337,26 @@
       "capability": "programming",
       "summary": "artifact upload",
       "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.artifact.upload.abort": {
+      "capability": "programming",
+      "summary": "Abort and remove an incomplete peer artifact transfer.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.artifact.upload.begin": {
+      "capability": "programming",
+      "summary": "Begin a bounded authenticated peer artifact transfer.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.artifact.upload.chunk": {
+      "capability": "programming",
+      "summary": "Append one ordered bounded chunk to a peer artifact transfer.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.artifact.upload.finish": {
+      "capability": "programming",
+      "summary": "Revalidate and publish a completed peer artifact transfer.",
+      "idempotency": "non-idempotent"
     },
     "controller.bridge.call": {
       "capability": "bridge_calls",
@@ -652,6 +677,11 @@
       "capability": "read",
       "summary": "os status",
       "idempotency": "safe"
+    },
+    "controller.peer.update.host": {
+      "capability": "programming",
+      "summary": "Transfer a verified executable through an authenticated peer and ask its coordinator to replace itself.",
+      "idempotency": "non-idempotent"
     },
     "controller.peripherals": {
       "capability": "read",

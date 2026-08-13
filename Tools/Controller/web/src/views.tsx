@@ -181,14 +181,6 @@ export function DashboardView(props: SharedViewProps) {
   const haveMetricCards = haveMeasurements || available.pwm
   const connectedTone = snapshot.connected ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !snapshot.connected && props.transport.authenticationRequired
-  const hostUnavailable = !snapshot.connected && !authenticationRequired && props.transport.streamState !== 'open'
-  const disconnectedTitle = authenticationRequired
-    ? t('authenticationDashboard')
-    : hostUnavailable
-      ? t('hostUnavailableDashboard')
-      : snapshot.paused
-        ? t('connectionPausedDashboard')
-        : t('noHardware')
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
@@ -212,7 +204,7 @@ export function DashboardView(props: SharedViewProps) {
       <SectionTitle
         eyebrow={snapshot.connected ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
         title={t('dashboard')}
-        detail={pageDetail(snapshot, appTitle, locale)}
+        detail={authenticationRequired ? t('authenticationDashboardDetail') : pageDetail(snapshot, appTitle, locale)}
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
@@ -227,8 +219,9 @@ export function DashboardView(props: SharedViewProps) {
       <section className={`hero-panel${snapshot.connected ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
           <div className="eyebrow">{copy('Controller', 'کنترلر')} · {snapshot.connection_state}</div>
-          <h2><a href={authenticationRequired ? '#/settings' : '#/dashboard'}>{snapshot.connected ? snapshot.hello.name || appTitle : disconnectedTitle}</a></h2>
-          <p>{snapshot.connected ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : snapshot.connection_reason || (hostUnavailable ? t('hostUnavailableDashboardDetail') : t('noHardware'))}</p>
+          <h2>{snapshot.connected ? snapshot.hello.name || appTitle : t(authenticationRequired ? 'authenticationDashboard' : 'noHardware')}</h2>
+          <p>{snapshot.connected ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : snapshot.connection_reason || t('noHardware')}</p>
+          {authenticationRequired && <Button icon={ShieldCheck} tone="primary" onClick={() => { window.location.hash = '#/settings' }}>{copy('Enter access token', 'ورود توکن دسترسی')}</Button>}
         </div>
         <div className={`hero-panel__readout${snapshot.have_status ? '' : ' is-empty'}`} dir="ltr">
           <span>{copy('BUILD', 'ساخت')}</span><strong>{hash}</strong>
@@ -786,11 +779,13 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     local_device: { enabled: false, base_url: '' },
     data_hub: { enabled: false, base_url: 'http://127.0.0.1:8080' },
     lifecycle_safety: { session_lock: 'stop-motion', suspend: 'stop-motion', refresh_on_resume: true },
+    buzzer_mirror: { enabled: false, native_enabled: false, web_audio_enabled: true, backend: 'auto', executable: '', driver_directory: '' },
   })
   const [savedIntegrations, setSavedIntegrations] = useState<LocalIntegrationSettings>({
     local_device: { enabled: false, base_url: '' },
     data_hub: { enabled: false, base_url: 'http://127.0.0.1:8080' },
     lifecycle_safety: { session_lock: 'stop-motion', suspend: 'stop-motion', refresh_on_resume: true },
+    buzzer_mirror: { enabled: false, native_enabled: false, web_audio_enabled: true, backend: 'auto', executable: '', driver_directory: '' },
   })
   const [integrationsBusy, setIntegrationsBusy] = useState(true)
   const [integrationsLoaded, setIntegrationsLoaded] = useState(false)
@@ -985,6 +980,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           lifecycle_safety: value.lifecycle_safety ?? {
             session_lock: 'stop-motion', suspend: 'stop-motion', refresh_on_resume: true,
           },
+          buzzer_mirror: value.buzzer_mirror ?? {
+            enabled: false, native_enabled: false, web_audio_enabled: true, backend: 'auto', executable: '', driver_directory: '',
+          },
         }
         setLocalIntegrations(normalized)
         setSavedIntegrations(normalized)
@@ -1000,8 +998,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     return () => { active = false }
   }, [])
 
-  const saveLocalIntegrations = async (event: FormEvent) => {
-    event.preventDefault()
+  const persistLocalIntegrations = async () => {
     if (!integrationsValid) {
       setIntegrationsNotice(copy('Correct the highlighted field before saving.', 'پیش از ذخیره، فیلد مشخص‌شده را اصلاح کنید.'))
       return
@@ -1013,6 +1010,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         local_device: { ...localIntegrations.local_device, base_url: localDeviceValidation.normalized },
         data_hub: { ...localIntegrations.data_hub, base_url: dataHubValidation.normalized },
         lifecycle_safety: localIntegrations.lifecycle_safety,
+        buzzer_mirror: localIntegrations.buzzer_mirror,
       }
       const saved = await rpc<LocalIntegrationSettings>(
         'controller.integrations.local.set',
@@ -1022,6 +1020,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         local_device: { ...saved.local_device, base_url: normalizeRootURLInput(saved.local_device.base_url ?? '') },
         data_hub: { ...saved.data_hub, base_url: normalizeRootURLInput(saved.data_hub.base_url ?? '') },
         lifecycle_safety: saved.lifecycle_safety,
+        buzzer_mirror: saved.buzzer_mirror,
       }
       setLocalIntegrations(canonical)
       setSavedIntegrations(canonical)
@@ -1031,6 +1030,11 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     } finally {
       setIntegrationsBusy(false)
     }
+  }
+
+  const saveLocalIntegrations = async (event: FormEvent) => {
+    event.preventDefault()
+    await persistLocalIntegrations()
   }
 
   const appearanceThemeLabel = t(appearance.theme)
@@ -1128,6 +1132,14 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 				<StatusBadge tone={hostSilent ? 'neutral' : 'good'}>{copy(`PC ${hostSilent ? 'silent' : 'active'}`, `رایانه ${hostSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
 				{buzzerPathBusy && <StatusBadge tone="warn">{copy('Applying…', 'در حال اعمال…')}</StatusBadge>}
 			</div>
+			<Toggle checked={localIntegrations.buzzer_mirror.enabled} onChange={(enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, enabled } })) }} label={copy('Mirror board beeps on this host', 'بازپخش بوق‌های برد روی این میزبان')} detail={copy('Applies to this instance and synchronizes through the shared host configuration.', 'روی این نمونه اعمال می‌شود و از تنظیمات مشترک میزبان همگام می‌ماند.')} />
+			{localIntegrations.buzzer_mirror.enabled && <>
+				<Toggle checked={localIntegrations.buzzer_mirror.native_enabled} onChange={(native_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, native_enabled } })) }} label={copy('PC speaker renderer', 'پخش‌کنندهٔ بلندگوی رایانه')} detail={copy('Uses the selected native or external beep backend.', 'از پشتیبان بوق بومی یا خارجی انتخاب‌شده استفاده می‌کند.')} />
+				<Toggle checked={localIntegrations.buzzer_mirror.web_audio_enabled} onChange={(web_audio_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, web_audio_enabled } })) }} label={copy('Web browser renderer', 'پخش‌کنندهٔ مرورگر وب')} detail={copy('Lets each connected WebUI render the pushed note with WebAudio.', 'هر WebUI متصل می‌تواند نت دریافتی را با WebAudio پخش کند.')} />
+				<div className="setting-group"><label>{copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')}</label><Segmented value={localIntegrations.buzzer_mirror.backend} label={copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')} options={[{ value: 'auto', label: copy('Auto', 'خودکار') }, { value: 'native', label: copy('Native', 'بومی') }, { value: 'external', label: copy('Command', 'فرمان') }]} onChange={(backend) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, backend: backend as 'auto' | 'native' | 'external' } })) }} /></div>
+				{localIntegrations.buzzer_mirror.backend !== 'native' && <TextField label={copy('Beep executable (optional)', 'فایل اجرایی بوق (اختیاری)')} dir="ltr" spellCheck={false} value={localIntegrations.buzzer_mirror.executable ?? ''} placeholder={copy('Blank uses beep from PATH', 'خالی: استفاده از beep در PATH')} onChange={(event) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, executable: event.currentTarget.value } })) }} />}
+			</>}
+			<div className="inline-actions"><Button icon={ShieldCheck} tone="primary" busy={integrationsBusy} disabled={!integrationsDirty} onClick={() => void persistLocalIntegrations()}>{copy('Save PC buzzer settings', 'ذخیرهٔ تنظیمات بیزر رایانه')}</Button></div>
 			{buzzerPathNotice && <p className="settings-action-feedback" role="status">{buzzerPathNotice}</p>}
 		</Card>
 
