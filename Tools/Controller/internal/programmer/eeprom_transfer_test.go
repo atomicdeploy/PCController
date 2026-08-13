@@ -195,19 +195,19 @@ func TestMigratedProgrammingEEPROMCanOnlyBeStagedForPairedWrite(t *testing.T) {
 	}
 }
 
-func TestCurrentEEPROMTransferRejectsIncompleteBackupImage(t *testing.T) {
+func TestBackupRejectsIncompleteEEPROMImage(t *testing.T) {
 	root := t.TempDir()
-	directory, err := BackupWithRunner(
-		context.Background(), fakeBackupOptions(root), io.Discard, newFakeAVRRunner(t),
-	)
+	runner := newFakeAVRRunner(t)
+	incomplete, err := (&IntelHexImage{data: map[uint32]byte{0: 0xFF, PCControllerEEPROMBytes - 1: 0xAA}}).Canonical()
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = ExportCurrentEEPROMSettings(
-		filepath.Join(directory, "manifest.json"), filepath.Join(root, "settings.hex"),
+	runner.eepromHEX = incomplete
+	directory, err := BackupWithRunner(
+		context.Background(), fakeBackupOptions(root), io.Discard, runner,
 	)
-	if err == nil || !strings.Contains(err.Error(), "complete restore base") {
-		t.Fatalf("incomplete EEPROM backup was accepted: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "EEPROM blob is incomplete") {
+		t.Fatalf("incomplete EEPROM backup directory=%q err=%v", directory, err)
 	}
 }
 

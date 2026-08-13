@@ -861,7 +861,8 @@
   "paths": {},
   "programming": {
     "method": "urclock",
-    "programmer": "usbasp"
+    "programmer": "usbasp",
+    "backup_retention_days": 30
   },
   "scripts": {
     "door-log": "scripts/door-log.cmd"

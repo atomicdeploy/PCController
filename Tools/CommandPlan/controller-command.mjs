@@ -211,8 +211,7 @@ export function createControllerProgramCommand({
 	outputDir = '',
 	toolchainCLI = '',
 	toolchainConfig = '',
-	dryRun = false,
-	allowIncompleteBackup = false
+	dryRun = false
 }) {
 	const normalizedMethod = String(method || '').toLowerCase()
 	if (normalizedMethod === 'compile') {
@@ -256,12 +255,6 @@ export function createControllerProgramCommand({
 	}
 	if (normalizedOperation === PROGRAMMING_OPERATIONS.backup) {
 		args.push('--output', requireValue(output, 'read-flash output'))
-	}
-	if (allowIncompleteBackup) {
-		if (normalizedOperation !== PROGRAMMING_OPERATIONS.upload) {
-			throw new CommandPlanError('--allow-incomplete-backup is only valid with write-flash')
-		}
-		args.push('--allow-incomplete-backup')
 	}
 	if (dryRun) args.push('--dry-run')
 	return controllerCommand(invocation, args)

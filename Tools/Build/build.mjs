@@ -213,7 +213,6 @@ export function parseArguments(argv, env = process.env) {
 		method: 'urclock',
 		device: env.PCCONTROLLER_DEVICE || env.PCCONTROLLER_PORT || '',
 		programmer: env.PCCONTROLLER_PROGRAMMER || '',
-		allowIncompleteBackup: false,
 		installBootloader: false,
 		toolchainSync: false,
 		toolchainCLI: environmentValue(env, 'PCCONTROLLER_TOOLCHAIN_CLI'),
@@ -255,7 +254,6 @@ export function parseArguments(argv, env = process.env) {
 			case '--dry-run': options.dryRun = true; break
 			case '--plan-json': options.planJSON = true; options.noColor = true; break
 			case '--upload': options.upload = true; substantive = true; break
-			case '--allow-incomplete-backup': options.allowIncompleteBackup = true; break
 			case '--install-bootloader': options.installBootloader = true; substantive = true; break
 			case '--toolchain-sync': options.toolchainSync = true; options.host = true; substantive = true; break
 			case '--method': {
@@ -467,8 +465,7 @@ export function createPlan(options, identity, platform = process.platform) {
 			device: options.device,
 			appDevice: options.device,
 			programmer: options.programmer,
-			hex: programmingArtifact(paths, options.method),
-			allowIncompleteBackup: options.allowIncompleteBackup
+			hex: programmingArtifact(paths, options.method)
 		})
 		actions.push(commandAction('program', `Explicit ${options.method} programming through Controller`, command.file, command.args, command.cwd, true))
 	}
@@ -536,7 +533,6 @@ Explicit programming only:
   --install-bootloader --method usbasp
                              Explicitly provision Urboot/fuses through ISP
   --programmer ID           Optional ISP backend-ID override
-  --allow-incomplete-backup Advanced logged override; never the default
 
 No programming action is implied by a normal build. Direct dependency upload
 is disabled: Controller owns compile, backup, validation, programming, verify,
@@ -1961,8 +1957,7 @@ function executeProgramming(options, env, controllerPath, manifest, log) {
 		device: options.device,
 		appDevice: options.device,
 		programmer: options.programmer,
-		hex: artifact.absolutePath,
-		allowIncompleteBackup: options.allowIncompleteBackup
+		hex: artifact.absolutePath
 	})
 	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 }

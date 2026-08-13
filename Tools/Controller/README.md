@@ -954,10 +954,10 @@ bin\controller.exe board blank --confirm EDGE-01 --uart auto
 ```
 
 `board initialize` installs or repairs the selected FQBN's exact toolchain,
-validates the ISP signature, captures a complete backup, burns the stock
+validates the ISP signature, captures the available recovery state, burns the stock
 core-provided bootloader/fuse/lock policy, and retries the first
 failed USBasp exchange at `-B32`. If slow discovery was required, the host first
-completes the mandatory backup, resolves the selected FQBN's own
+captures the available state, resolves the selected FQBN's own
 `bootloader.*_fuses` properties, and applies only those fuse bytes at `-B32`.
 It then retries a normal-speed probe and uses fast `usbasp` for the bootloader
 whenever the corrected clock policy permits; `usbasp_slow` remains the bounded
@@ -995,6 +995,16 @@ existing global firmware CLI can be passed with `--cli`; its generated managed
 configuration path is persisted separately so later compile and programming
 commands continue to use the installed core and libraries. `--portable-cli`
 forces a fresh verified host-data-local copy.
+
+For ordinary updates, Urboot/Urclock is the default and USBasp is neither
+required nor assumed connected. `toolchain bootstrap` resolves the saved CLI,
+then `ARDUINO_CLI`, then an executable below `AVR_HOME`. If none is configured,
+an interactive terminal asks before using PCController's managed directory;
+automation must choose explicitly with `--managed-fallback` or
+`--no-managed-fallback`. Flash, complete EEPROM, and programmer-metadata
+payloads are content-addressed by SHA-256;
+`programming.backup_retention_days` controls expiry while the newest previous
+operation remains protected.
 
 On Windows, `driver usbasp ensure` checks the connected VID/PID and launches
 Zadig only when the device has no started driver. `driver usbasp zadig

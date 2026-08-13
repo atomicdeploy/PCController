@@ -303,8 +303,8 @@ firmware artifact and this flag to the primary through the typed
 result. The primary remains the only process that opens the port.
 
 The exception still requires a complete verified flash, raw EEPROM, and
-programmer-metadata backup before the firmware write. It cannot be combined
-with `--allow-incomplete-backup`. Before releasing UART ownership, the host
+programmer-metadata backup before the firmware write. There is no incomplete-
+backup override. Before releasing UART ownership, the host
 persists the settings-query failure and any live state it could capture,
 cancels macros, releases all relays, fades PWM when possible (otherwise forces
 it off), shows the programming cues, and plays the power-down melody. It does
@@ -490,11 +490,28 @@ override the host's configured ISP backend for different hardware.
 instance selectors as the ordinary connection layer. The resolved application
 port is kept separate and is never placed in the ISP command.
 
-Standalone USBasp fails closed when the application-lifecycle selector is
-absent or cannot authenticate. `--allow-incomplete-backup` is the explicit,
-logged recovery override for an application UART that is genuinely
-unavailable; it is never the default. When the primary TUI owns the board, the
-request routes through that owner and reuses its authenticated runtime.
+USBasp remains an explicit recovery/initialization path when the application
+UART is absent, corrupt, or cannot authenticate; it is never assumed connected
+and is never the default. `--app-device` is optional enrichment: when it is
+available, Controller preserves the application settings/output lifecycle;
+when it is absent, recovery continues without pretending application state was
+captured. When the primary owns the board, the request routes through that
+owner and reuses its authenticated runtime.
+
+Ordinary application updates are UART-first and do not require a fuse backup,
+USBasp, or a complete EEPROM capture. Controller attempts Urboot/Urclock
+flash/EEPROM/metadata capture when that bootloader exposes each region, stores
+flash, EEPROM, and programmer metadata once by SHA-256, and keeps timestamped
+operation manifests.
+The current and immediately previous operations are protected; older
+operations expire after `programming.backup_retention_days` (30 by default).
+Operations that intentionally replace EEPROM, such as
+`--reinitialize-eeprom`, still require a complete EEPROM-capable backup.
+
+A future running-firmware full-EEPROM transfer/temporary housekeeping image is
+tracked in #216. Until its opcode exists, full EEPROM capture uses Urboot or an
+explicitly connected USBasp; the tool never claims an application settings
+query is a complete 1,024-byte EEPROM backup.
 
 Installing Urboot-Custom itself requires ISP because the running bootloader
 protects its region and the custom image begins one page lower. Application
@@ -542,6 +559,8 @@ The default Windows data root is `%LOCALAPPDATA%\PCController`:
 ```text
 backups\operations\                  raw programming transactions/manifests
 backups\firmware\sha256\             deduplicated firmware blobs
+backups\eeprom\sha256\               deduplicated complete EEPROM images
+backups\metadata\sha256\             deduplicated programmer/fuse reports
 backups\board-settings\sha256\       semantic MCU-settings snapshots
 state\programming-recovery-*.json    interrupted-operation recovery markers
 tools\toolchain\                     managed firmware dependency CLI

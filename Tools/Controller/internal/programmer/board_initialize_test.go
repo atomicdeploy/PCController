@@ -35,7 +35,7 @@ func (runner *boardInitializeFixtureRunner) Run(
 		return writeBoardInitializeFixtureHex(path, 0x12)
 	}
 	if path := commandOutputPath(command, "-Ueeprom:r:"); path != "" {
-		return writeBoardInitializeFixtureHex(path, 0x34)
+		return writeBoardInitializeEEPROMFixtureHex(path, 0x34)
 	}
 	if strings.Contains(joined, "-Ulfuse:w:0xF7:m") {
 		if !strings.Contains(joined, "-B32") ||
@@ -70,6 +70,19 @@ func (runner *boardInitializeFixtureRunner) Run(
 
 func writeBoardInitializeFixtureHex(path string, value byte) error {
 	content, err := (&IntelHexImage{data: map[uint32]byte{0: value}}).Canonical()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, content, 0o600)
+}
+
+func writeBoardInitializeEEPROMFixtureHex(path string, value byte) error {
+	data := make(map[uint32]byte, PCControllerEEPROMBytes)
+	for address := uint32(0); address < PCControllerEEPROMBytes; address++ {
+		data[address] = 0xFF
+	}
+	data[0] = value
+	content, err := (&IntelHexImage{data: data}).Canonical()
 	if err != nil {
 		return err
 	}

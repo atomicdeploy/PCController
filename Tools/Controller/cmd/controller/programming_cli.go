@@ -90,11 +90,6 @@ func runProgramWithConfig(
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
 	usbaspBitClock := flags.Float64("usbasp-bitclock-us", 0, "force USBasp AVRDUDE -B bit-clock period in microseconds")
 	usbaspAutoSlow := flags.Bool("usbasp-auto-slow", true, "retry the first failed USBasp exchange at the conservative -B32 period")
-	allowIncompleteBackup := flags.Bool(
-		"allow-incomplete-backup",
-		false,
-		"advanced override: flash even if the automatic full backup fails",
-	)
 	reinitializeEEPROM := flags.Bool(
 		"reinitialize-eeprom",
 		false,
@@ -113,9 +108,6 @@ func runProgramWithConfig(
 	)
 	if err := flags.Parse(args); err != nil {
 		return err
-	}
-	if *reinitializeEEPROM && *allowIncompleteBackup {
-		return errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
 	}
 	explicitDevice := false
 	explicitProgrammerPort := false
@@ -204,16 +196,13 @@ func runProgramWithConfig(
 			if safeFlash {
 				return delegatePrimaryFirmwareUpdate(
 					ctx, options.HexPath, string(options.Method), "",
-					*allowIncompleteBackup, *reinitializeEEPROM,
+					*reinitializeEEPROM,
 					stdout, callPrimary,
 				)
 			}
 			remoteOptions := options
 			remoteOptions.Port = ""
 			words := programShellWords(remoteOptions)
-			if safeFlash && *allowIncompleteBackup {
-				words = append(words, "--allow-incomplete-backup")
-			}
 			output, err := executeThroughPrimary(
 				ctx,
 				joinControllerCommand(words),
@@ -244,10 +233,7 @@ func runProgramWithConfig(
 		case programmer.MethodUSBasp:
 			selector := strings.TrimSpace(*appDevice)
 			if selector == "" {
-				if !*allowIncompleteBackup {
-					return errors.New("standalone USBasp flash requires --app-device SELECTOR so MCU settings/display/audio can be preserved; --allow-incomplete-backup is the explicit recovery override")
-				}
-				fmt.Fprintln(stderr, "WARNING: standalone USBasp application lifecycle skipped by explicit recovery override")
+				fmt.Fprintln(stderr, "USBasp recovery selected without a responding application UART; application lifecycle capture is unavailable.")
 			} else if !*dryRun {
 				resolved, resolveErr := resolveProgrammingPort(
 					selector,
@@ -256,10 +242,7 @@ func runProgramWithConfig(
 					stderr,
 				)
 				if resolveErr != nil {
-					if !*allowIncompleteBackup {
-						return fmt.Errorf("resolve USBasp application lifecycle device: %w", resolveErr)
-					}
-					fmt.Fprintln(stderr, "WARNING: USBasp application lifecycle selector could not be resolved; explicit recovery override continues:", resolveErr)
+					return fmt.Errorf("resolve USBasp application lifecycle device: %w", resolveErr)
 				} else {
 					applicationPort = resolved
 				}
@@ -307,13 +290,10 @@ func runProgramWithConfig(
 		if *dryRun {
 			fmt.Fprintf(
 				stdout,
-				"dry-run: guarded %s flash %s; require verified flash + EEPROM + metadata backup before write\n",
+				"dry-run: guarded %s application flash %s; attempt capability-aware pre-update capture and retain the previous verified backup\n",
 				options.Method,
 				options.HexPath,
 			)
-			if *allowIncompleteBackup {
-				fmt.Fprintln(stdout, "dry-run WARNING: explicit incomplete-backup override enabled")
-			}
 			if *reinitializeEEPROM {
 				fmt.Fprintln(stdout, "dry-run DATA LOSS: current semantic MCU settings will not be restored; the mandatory raw EEPROM backup remains available")
 			}
@@ -326,7 +306,8 @@ func runProgramWithConfig(
 		defer cancel()
 		return executeGuardedCLIFlash(
 			ctx, options, applicationPort, config.Connection,
-			*allowIncompleteBackup, *reinitializeEEPROM, *appReconnect,
+			time.Duration(config.Programming.BackupRetentionDays)*24*time.Hour,
+			*reinitializeEEPROM, *appReconnect,
 			stdout,
 		)
 	}
@@ -375,7 +356,7 @@ type primaryCallFunc func(context.Context, string, any, any) error
 func delegatePrimaryFirmwareUpdate(
 	ctx context.Context,
 	firmwarePath, method, port string,
-	allowIncompleteBackup, reinitializeEEPROM bool,
+	reinitializeEEPROM bool,
 	output io.Writer,
 	call primaryCallFunc,
 ) error {
@@ -418,9 +399,8 @@ func delegatePrimaryFirmwareUpdate(
 	updateRequest := artifacts.UpdateRequest{
 		ArtifactSHA256: upload.Artifact.SHA256,
 		Authorized:     true, Method: method, Port: port,
-		AllowIncompleteBackup: allowIncompleteBackup,
-		ReinitializeEEPROM:    reinitializeEEPROM,
-		IdempotencyKey:        "firmware:" + hex.EncodeToString(idempotencyDigest[:]),
+		ReinitializeEEPROM: reinitializeEEPROM,
+		IdempotencyKey:     "firmware:" + hex.EncodeToString(idempotencyDigest[:]),
 	}
 	var operation artifacts.OperationResult
 	if err := call(ctx, "controller.update.firmware", updateRequest, &operation); err != nil {
@@ -601,7 +581,7 @@ func writeEEPROMTransferResult(
 }
 
 func normalizeProgramCLIArgs(args []string) ([]string, error) {
-	const usage = "usage: controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--allow-incomplete-backup] [--reinitialize-eeprom]"
+	const usage = "usage: controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--reinitialize-eeprom]"
 	shortcut := 0
 	for shortcut < len(args) {
 		argument := args[shortcut]
@@ -719,7 +699,7 @@ func configIndependentToolchainCompile(args []string) bool {
 
 func guardedFlashBooleanFlag(argument string) bool {
 	lower := strings.ToLower(argument)
-	if lower == "--allow-incomplete-backup" || lower == "--reinitialize-eeprom" || lower == "--dry-run" {
+	if lower == "--reinitialize-eeprom" || lower == "--dry-run" {
 		return true
 	}
 	return lower == "--app-reconnect" || strings.HasPrefix(lower, "--app-reconnect=")
@@ -741,7 +721,8 @@ func executeGuardedCLIFlash(
 	options programmer.Options,
 	applicationPort string,
 	connection appconfig.Connection,
-	allowIncompleteBackup, reinitializeEEPROM, appReconnect bool,
+	backupRetention time.Duration,
+	reinitializeEEPROM, appReconnect bool,
 	output io.Writer,
 ) error {
 	paths, err := programmer.DefaultHostDataPaths()
@@ -769,14 +750,7 @@ func executeGuardedCLIFlash(
 		connectCancel()
 		if connectErr != nil {
 			_ = candidate.Close()
-			if !allowIncompleteBackup {
-				return fmt.Errorf("prepare guarded flash application connection: %w", connectErr)
-			}
-			fmt.Fprintln(
-				output,
-				"WARNING: application lifecycle connection failed; explicit recovery override continues:",
-				connectErr,
-			)
+			return fmt.Errorf("prepare guarded flash application connection: %w", connectErr)
 		} else {
 			application = candidate
 			lifecycleOptions.Outputs = control.NewOutputScheduler(application)
@@ -790,14 +764,7 @@ func executeGuardedCLIFlash(
 				output,
 			)
 			if prepareErr != nil {
-				if !allowIncompleteBackup {
-					return fmt.Errorf("prepare application programming state: %w", prepareErr)
-				}
-				fmt.Fprintln(
-					output,
-					"WARNING: application programming preparation was incomplete; explicit recovery override continues:",
-					prepareErr,
-				)
+				return fmt.Errorf("prepare application programming state: %w", prepareErr)
 			}
 			if err := application.Close(); err != nil {
 				return fmt.Errorf(
@@ -808,6 +775,7 @@ func executeGuardedCLIFlash(
 	}
 	backup := options
 	backup.Operation = programmer.OperationBackup
+	backup.BackupRetention = backupRetention
 	backup.HexPath = ""
 	backup.OutputPath = ""
 	write := options
@@ -850,8 +818,8 @@ func executeGuardedCLIFlash(
 		programmer.AutomaticPreflashOptions{
 			FirmwarePath: options.HexPath,
 			Backup:       backup, DataPaths: paths,
-			AllowFlashWithoutFullBackup: allowIncompleteBackup,
-			AfterBackup:                 afterBackup,
+			RequireCompleteBackup: reinitializeEEPROM,
+			AfterBackup:           afterBackup,
 		},
 		programmer.CommandRunnerFunc(programmer.Run),
 		func(flashContext context.Context, path string, writer io.Writer) error {
@@ -874,8 +842,7 @@ func executeGuardedCLIFlash(
 		fmt.Fprintln(output, "guarded firmware flash completed")
 	}
 	verifiedProgram := flashErr == nil && result.Flashed
-	abortedBeforeWrite := programmingSession != nil && !result.BackupComplete &&
-		!allowIncompleteBackup
+	abortedBeforeWrite := programmingSession != nil && reinitializeEEPROM && !result.BackupComplete
 	if verifiedProgram && reinitializeEEPROM {
 		if factoryErr := programFactoryEEPROM(
 			context.WithoutCancel(ctx), paths, options, output,
@@ -1284,14 +1251,32 @@ func runToolchainBootstrap(
 	locked := flags.Bool("locked", false, "bootstrap the existing lock without checking registries")
 	installDir := flags.String("install-dir", "", "managed tool directory (host data directory by default)")
 	firmwareCLI := flags.String("cli", "", "use an existing dependency CLI instead of the managed resolved copy")
+	managedFallback := flags.Bool("managed-fallback", false, "explicitly install under PCController's managed toolchain directory")
+	noManagedFallback := flags.Bool("no-managed-fallback", false, "fail instead of installing under PCController when no shared Arduino path is configured")
 	directRetry := flags.Bool("direct-retry", true, "retry failed network steps once without proxy variables")
 	dryRun := flags.Bool("dry-run", false, "print verified download/install plan without changing the machine")
 	saveCLI := flags.Bool("save-cli", true, "save the resolved dependency path in PC-side host config")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 {
-		return errors.New("usage: controller toolchain bootstrap [--policy FILE] [--locked --lock FILE] [--install-dir DIR] [--cli PATH] [--direct-retry=false] [--dry-run]")
+	if flags.NArg() != 0 || (*managedFallback && *noManagedFallback) {
+		return errors.New("usage: controller toolchain bootstrap [--policy FILE] [--locked --lock FILE] [--install-dir DIR] [--cli PATH] [--managed-fallback|--no-managed-fallback] [--direct-retry=false] [--dry-run]")
+	}
+	if strings.TrimSpace(*firmwareCLI) == "" {
+		*firmwareCLI = firstConfiguredToolchainCLI(store.Current().Programming.ToolchainCLI, os.Getenv)
+	}
+	if strings.TrimSpace(*firmwareCLI) == "" && strings.TrimSpace(*installDir) == "" {
+		fmt.Fprintln(stderr, "WARNING: no configured Arduino CLI was found in host config, ARDUINO_CLI, or AVR_HOME.")
+		if !*managedFallback && !*noManagedFallback {
+			accepted, promptErr := confirmManagedToolchainFallback(os.Stdin, stderr)
+			if promptErr != nil {
+				return promptErr
+			}
+			*managedFallback = accepted
+		}
+		if *noManagedFallback || !*managedFallback {
+			return errors.New("toolchain bootstrap canceled; configure ARDUINO_CLI/AVR_HOME or pass --managed-fallback")
+		}
 	}
 	ctx, cancel := signalContext()
 	defer cancel()
@@ -1343,6 +1328,44 @@ func runToolchainBootstrap(
 	encoded, _ := json.MarshalIndent(report, "", "  ")
 	fmt.Fprintln(stdout, string(encoded))
 	return bootstrapErr
+}
+
+func firstConfiguredToolchainCLI(configured string, lookup func(string) string) string {
+	if value := strings.TrimSpace(configured); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(lookup("ARDUINO_CLI")); value != "" {
+		return value
+	}
+	if root := strings.TrimSpace(lookup("AVR_HOME")); root != "" {
+		for _, candidate := range []string{
+			filepath.Join(root, "arduino-cli.exe"), filepath.Join(root, "arduino-cli"),
+			filepath.Join(root, "bin", "arduino-cli.exe"), filepath.Join(root, "bin", "arduino-cli"),
+		} {
+			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+				return candidate
+			}
+		}
+	}
+	return ""
+}
+
+func confirmManagedToolchainFallback(input io.Reader, output io.Writer) (bool, error) {
+	file, ok := input.(*os.File)
+	if !ok {
+		return false, errors.New("noninteractive toolchain bootstrap requires --managed-fallback or --no-managed-fallback")
+	}
+	info, err := file.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return false, errors.New("noninteractive toolchain bootstrap requires --managed-fallback or --no-managed-fallback")
+	}
+	fmt.Fprint(output, "Install the verified toolchain under PCController's managed data directory? [y/N] ")
+	var answer string
+	if _, err := fmt.Fscanln(input, &answer); err != nil {
+		return false, err
+	}
+	answer = strings.ToLower(strings.TrimSpace(answer))
+	return answer == "y" || answer == "yes", nil
 }
 
 func runToolchainProfile(args []string, stdout, stderr io.Writer) error {
@@ -1652,15 +1675,11 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 		baud := flags.Int("baud", 115200, "urclock baud rate")
 		avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 		avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
-		allowIncomplete := flags.Bool("allow-incomplete-backup", false, "explicitly allow flashing without a complete verified backup")
 		reinitializeEEPROM := flags.Bool("reinitialize-eeprom", false, "development only: retain raw EEPROM backup but discard incompatible semantic settings")
 		reconnect := flags.Duration("reconnect", 2*time.Second, "reconnect delay")
 		maxSize := flags.Int64("max-size", wsrelay.DefaultMaxSize, "maximum firmware bytes")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
-		}
-		if *reinitializeEEPROM && *allowIncomplete {
-			return errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
 		}
 		flashMethod, methodErr := validatedWSFlashMethod(*method)
 		if methodErr != nil {
@@ -1700,9 +1719,6 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 					if flashMethod == programmer.MethodUrclock && strings.TrimSpace(*port) != "" {
 						words = append(words, *port)
 					}
-					if *allowIncomplete {
-						words = append(words, "--allow-incomplete-backup")
-					}
 					if *reinitializeEEPROM {
 						words = append(words, "--reinitialize-eeprom")
 					}
@@ -1718,9 +1734,6 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 				applicationSelector := strings.TrimSpace(*port)
 				if flashMethod == programmer.MethodUSBasp {
 					applicationSelector = strings.TrimSpace(*appDevice)
-					if applicationSelector == "" && !*allowIncomplete {
-						return errors.New("standalone USBasp relay programming requires --app-device SELECTOR or the explicit --allow-incomplete-backup recovery override")
-					}
 				}
 				applicationPort := ""
 				if applicationSelector != "" {
@@ -1728,11 +1741,7 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 						applicationSelector, config.Connection, os.Stdin, stderr,
 					)
 					if err != nil {
-						if !*allowIncomplete {
-							return fmt.Errorf("resolve relay programming application device: %w", err)
-						}
-						logger.Print("WARNING: application selector unresolved under explicit recovery override: ", err)
-						applicationPort = ""
+						return fmt.Errorf("resolve relay programming application device: %w", err)
 					}
 				}
 				programmerPort := applicationPort
@@ -1753,7 +1762,8 @@ func runWS(args []string, stdout, stderr io.Writer, store *appconfig.Store) erro
 				logger.Print("guarded preflight: ", command.String())
 				return executeGuardedCLIFlash(
 					ctx, flashOptions, applicationPort, config.Connection,
-					*allowIncomplete, *reinitializeEEPROM, true, stdout,
+					time.Duration(config.Programming.BackupRetentionDays)*24*time.Hour,
+					*reinitializeEEPROM, true, stdout,
 				)
 			},
 		})

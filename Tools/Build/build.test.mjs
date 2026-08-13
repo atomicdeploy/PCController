@@ -498,14 +498,12 @@ test('build plan and execution share exact Controller programming argv construct
 		operation: PROGRAMMING_OPERATIONS.upload,
 		appDevice: 'DO_NOT_OPEN',
 		programmer: 'atmelice_isp',
-		hex: commandPlanPaths(PROJECT_ROOT).completeFlash,
-		allowIncompleteBackup: true
+		hex: commandPlanPaths(PROJECT_ROOT).completeFlash
 	})
 	assert.deepEqual(usbasp.args.slice(0, 8), [
 		'program', '--method', 'usbasp', '--app-device', 'DO_NOT_OPEN',
 		'--programmer', 'atmelice_isp', '--operation'
 	])
-	assert.equal(usbasp.args.at(-1), '--allow-incomplete-backup')
 	assert.throws(
 		() => createControllerProgramCommand({
 			invocation: packaged,

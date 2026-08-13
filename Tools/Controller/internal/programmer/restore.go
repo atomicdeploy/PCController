@@ -55,6 +55,9 @@ func ValidateBackupManifest(manifestPath string) (ValidatedBackup, error) {
 		manifest.CompletedAt.Before(manifest.CreatedAt) {
 		return ValidatedBackup{}, errors.New("backup manifest timestamps are invalid")
 	}
+	if !manifest.RetainUntil.IsZero() && manifest.RetainUntil.Before(manifest.CompletedAt) {
+		return ValidatedBackup{}, errors.New("backup retention deadline predates completion")
+	}
 	if strings.TrimSpace(manifest.MCU) == "" {
 		return ValidatedBackup{}, errors.New("backup manifest MCU is empty")
 	}
@@ -125,8 +128,19 @@ func ValidateBackupManifest(manifestPath string) (ValidatedBackup, error) {
 			return ValidatedBackup{}, resolveErr
 		}
 		containmentRoot := directory
-		if entry.Storage == "content-addressed" {
-			containmentRoot = filepath.Join(backupRoot, "firmware", "sha256")
+		if entry.Storage == "content-addressed" || entry.Storage == "content-addressed-eeprom" || entry.Storage == "content-addressed-metadata" {
+			if entry.Kind == "flash" && entry.Storage == "content-addressed" {
+				containmentRoot = filepath.Join(backupRoot, "firmware", "sha256")
+			} else if entry.Kind == "eeprom" && entry.Storage == "content-addressed-eeprom" {
+				containmentRoot = filepath.Join(backupRoot, "eeprom", "sha256")
+			} else if entry.Kind == "metadata" && entry.Storage == "content-addressed-metadata" {
+				containmentRoot = filepath.Join(backupRoot, "metadata", "sha256")
+			} else {
+				return ValidatedBackup{}, fmt.Errorf(
+					"artifact %q has storage %q incompatible with kind %q",
+					entry.Name, entry.Storage, entry.Kind,
+				)
+			}
 			if !strings.Contains(entry.Name, expectedHash) {
 				return ValidatedBackup{}, fmt.Errorf(
 					"content-addressed artifact name %q does not include SHA-256", entry.Name,

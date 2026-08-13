@@ -56,12 +56,13 @@ func (runner *blankBoardFixtureRunner) Run(_ context.Context, command Command, o
 		return os.WriteFile(path, content, 0o600)
 	}
 	if path := commandOutputPath(command, "-Ueeprom:r:"); path != "" {
-		data := map[uint32]byte{0: 0x44, atmega328PEEPROMCapacity - 1: 0x55}
-		if runner.eepromBlank {
-			data = make(map[uint32]byte, atmega328PEEPROMCapacity)
-			for address := uint32(0); address < atmega328PEEPROMCapacity; address++ {
-				data[address] = 0xFF
-			}
+		data := make(map[uint32]byte, atmega328PEEPROMCapacity)
+		for address := uint32(0); address < atmega328PEEPROMCapacity; address++ {
+			data[address] = 0xFF
+		}
+		if !runner.eepromBlank {
+			data[0] = 0x44
+			data[atmega328PEEPROMCapacity-1] = 0x55
 		}
 		content, err := (&IntelHexImage{data: data}).Canonical()
 		if err != nil {

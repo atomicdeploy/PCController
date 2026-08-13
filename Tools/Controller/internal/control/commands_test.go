@@ -251,16 +251,6 @@ func TestBootProgramArguments(t *testing.T) {
 	}
 }
 
-func TestDevelopmentEEPROMReinitializationRequiresCompleteBackup(t *testing.T) {
-	_, err := safeFlashCommand(
-		context.Background(), nil, CommandOptions{},
-		[]string{"candidate.hex", "--reinitialize-eeprom", "--allow-incomplete-backup"},
-	)
-	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw flash") {
-		t.Fatalf("unsafe EEPROM reinitialization override was accepted: %v", err)
-	}
-}
-
 func TestToolchainProgramArguments(t *testing.T) {
 	tests := []struct {
 		input []string

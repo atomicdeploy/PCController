@@ -633,15 +633,14 @@ func TestBootAndToolchainCLIArguments(t *testing.T) {
 
 func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	got, err := normalizeProgramCLIArgs([]string{
-		"flash", "firmware image.hex", "COM18", "--allow-incomplete-backup",
-		"--reinitialize-eeprom",
+		"flash", "firmware image.hex", "COM18", "--reinitialize-eeprom",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
 		"--operation", "write-flash", "--method", "urclock",
-		"--hex", "firmware image.hex", "--allow-incomplete-backup",
+		"--hex", "firmware image.hex",
 		"--reinitialize-eeprom", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -661,7 +660,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 		t.Fatalf("prefixed USBasp normalized=%#v want=%#v err=%v", prefixedUSBasp, usb, err)
 	}
 	before, err := normalizeProgramCLIArgs([]string{
-		"--allow-incomplete-backup", "--app-reconnect=false", "flash",
+		"--app-reconnect=false", "flash",
 		"firmware.hex", "--dry-run", "COM18",
 	})
 	if err != nil {
@@ -669,7 +668,7 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 	wantBefore := []string{
 		"--operation", "write-flash", "--method", "urclock", "--hex", "firmware.hex",
-		"--allow-incomplete-backup", "--app-reconnect=false", "--dry-run", "--port", "COM18",
+		"--app-reconnect=false", "--dry-run", "--port", "COM18",
 	}
 	if !reflect.DeepEqual(before, wantBefore) {
 		t.Fatalf("flags-before normalized=%#v want=%#v", before, wantBefore)
@@ -681,14 +680,34 @@ func TestNormalizeGuardedFlashCLIArguments(t *testing.T) {
 	}
 }
 
-func TestProgramCLIRejectsEEPROMReinitializationWithoutCompleteBackup(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	err := runProgramWithConfig([]string{
-		"flash", "candidate.hex", "COM18",
-		"--reinitialize-eeprom", "--allow-incomplete-backup",
-	}, &stdout, &stderr, appconfig.Defaults())
-	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw flash") {
-		t.Fatalf("unsafe development EEPROM reinitialization was accepted: %v", err)
+func TestToolchainBootstrapResolutionHonorsConfigArduinoCLIAndAVRHome(t *testing.T) {
+	lookup := func(values map[string]string) func(string) string {
+		return func(name string) string { return values[name] }
+	}
+	if got := firstConfiguredToolchainCLI(`C:\configured\arduino-cli.exe`, lookup(map[string]string{
+		"ARDUINO_CLI": `C:\env\arduino-cli.exe`,
+	})); got != `C:\configured\arduino-cli.exe` {
+		t.Fatalf("configured precedence=%q", got)
+	}
+	if got := firstConfiguredToolchainCLI("", lookup(map[string]string{
+		"ARDUINO_CLI": `C:\env\arduino-cli.exe`,
+	})); got != `C:\env\arduino-cli.exe` {
+		t.Fatalf("ARDUINO_CLI=%q", got)
+	}
+	root := t.TempDir()
+	cli := filepath.Join(root, "bin", "arduino-cli.exe")
+	if err := os.MkdirAll(filepath.Dir(cli), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cli, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := firstConfiguredToolchainCLI("", lookup(map[string]string{"AVR_HOME": root})); got != cli {
+		t.Fatalf("AVR_HOME=%q want=%q", got, cli)
+	}
+	if _, err := confirmManagedToolchainFallback(strings.NewReader("yes\n"), io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "noninteractive") {
+		t.Fatalf("noninteractive fallback was not rejected: %v", err)
 	}
 }
 
@@ -710,7 +729,7 @@ func TestProgramWithoutOperationShowsUsageWithoutOpeningHardware(t *testing.T) {
 	}
 }
 
-func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing.T) {
+func TestStandaloneUSBaspIsExplicitRecoveryWithoutApplicationUART(t *testing.T) {
 	t.Setenv("PCCONTROLLER_DEVICE", "")
 	t.Setenv("PCCONTROLLER_PORT", "")
 	store, err := appconfig.Open(filepath.Join(t.TempDir(), "controller.json"))
@@ -723,8 +742,8 @@ func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing
 	}
 	var stdout, stderr bytes.Buffer
 	err = runProgram(base, &stdout, &stderr, store)
-	if err == nil || !strings.Contains(err.Error(), "--app-device") {
-		t.Fatalf("standalone USBasp did not fail closed without application selector: %v", err)
+	if err != nil || !strings.Contains(stderr.String(), "application UART") {
+		t.Fatalf("standalone USBasp recovery failed: %v stderr=%s", err, stderr.String())
 	}
 
 	stdout.Reset()
@@ -737,15 +756,6 @@ func TestStandaloneUSBaspRequiresSeparateApplicationLifecycleSelector(t *testing
 		t.Fatalf("dry-run did not separate application selector from ISP:\n%s", stdout.String())
 	}
 
-	stdout.Reset()
-	stderr.Reset()
-	withOverride := append(append([]string(nil), base...), "--allow-incomplete-backup")
-	if err := runProgram(withOverride, &stdout, &stderr, store); err != nil {
-		t.Fatalf("explicit recovery override rejected: %v", err)
-	}
-	if !strings.Contains(stderr.String(), "application lifecycle skipped") {
-		t.Fatalf("override warning missing: stdout=%s stderr=%s", stdout.String(), stderr.String())
-	}
 }
 
 func TestProgramShellWordsPreserveBackupAndEEPROMIntent(t *testing.T) {
@@ -836,7 +846,7 @@ func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testi
 		case "controller.update.firmware":
 			request := params.(artifacts.UpdateRequest)
 			if !request.Authorized || request.Method != "urclock" ||
-				!request.AllowIncompleteBackup || !request.ReinitializeEEPROM ||
+				!request.ReinitializeEEPROM ||
 				request.IdempotencyKey == "" ||
 				request.ArtifactSHA256 != document.SourceSHA256 {
 				t.Fatalf("update request=%+v", request)
@@ -864,7 +874,7 @@ func TestSecondaryFirmwareDelegatesToPrimaryOperationAndFollowsProgress(t *testi
 	}
 	var output bytes.Buffer
 	if err := delegatePrimaryFirmwareUpdate(
-		context.Background(), firmware, "urclock", "", true, true, &output, call,
+		context.Background(), firmware, "urclock", "", true, &output, call,
 	); err != nil {
 		t.Fatal(err)
 	}

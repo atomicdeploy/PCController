@@ -80,6 +80,12 @@ func TestBackupManifestContentAddressingValidationAndRestorePlan(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(directory, "flash.hex")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("per-operation duplicate flash still exists: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(directory, "eeprom.hex")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("per-operation duplicate EEPROM still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "programmer.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("per-operation duplicate metadata still exists: %v", err)
+	}
 	manifestPath := filepath.Join(directory, "manifest.json")
 	validated, err := ValidateBackupManifest(manifestPath)
 	if err != nil {
@@ -136,7 +142,7 @@ func TestValidateBackupAcceptsCurrentAndMigrationPackedIdentitySchemas(t *testin
 	}
 }
 
-func TestBackupReusesOneFirmwareBlobAcrossOperations(t *testing.T) {
+func TestBackupReusesContentAddressedFlashAndEEPROMAcrossOperations(t *testing.T) {
 	root := t.TempDir()
 	runner := newFakeAVRRunner(t)
 	first, err := BackupWithRunner(
@@ -174,6 +180,32 @@ func TestBackupReusesOneFirmwareBlobAcrossOperations(t *testing.T) {
 	}
 	if firstBackup.Files["flash"].Path != secondBackup.Files["flash"].Path {
 		t.Fatal("operation manifests do not reference the same content blob")
+	}
+	eepromFiles := 0
+	err = filepath.Walk(filepath.Join(root, "eeprom"), func(_ string, info os.FileInfo, walkErr error) error {
+		if walkErr == nil && info.Mode().IsRegular() {
+			eepromFiles++
+		}
+		return walkErr
+	})
+	if err != nil || eepromFiles != 1 {
+		t.Fatalf("EEPROM content store files=%d err=%v", eepromFiles, err)
+	}
+	if firstBackup.Files["eeprom"].Path != secondBackup.Files["eeprom"].Path {
+		t.Fatal("operation manifests do not reference the same EEPROM content blob")
+	}
+	metadataFiles := 0
+	err = filepath.Walk(filepath.Join(root, "metadata"), func(_ string, info os.FileInfo, walkErr error) error {
+		if walkErr == nil && info.Mode().IsRegular() {
+			metadataFiles++
+		}
+		return walkErr
+	})
+	if err != nil || metadataFiles != 1 {
+		t.Fatalf("metadata content store files=%d err=%v", metadataFiles, err)
+	}
+	if firstBackup.Files["metadata"].Path != secondBackup.Files["metadata"].Path {
+		t.Fatal("operation manifests do not reference the same metadata blob")
 	}
 }
 
@@ -231,7 +263,7 @@ func TestBackupManifestTamperAndTraversalAreRejected(t *testing.T) {
 	}
 }
 
-func TestAutomaticBackupThenFlashRequiresCompleteBackup(t *testing.T) {
+func TestAutomaticBackupThenFlashUsesCapabilityAwareBackupPolicy(t *testing.T) {
 	root := t.TempDir()
 	firmware := filepath.Join(root, "new.hex")
 	firmwareImage := &IntelHexImage{data: map[uint32]byte{0: 0x99, 1: 0x88}}
@@ -273,26 +305,26 @@ func TestAutomaticBackupThenFlashRequiresCompleteBackup(t *testing.T) {
 		func(context.Context, string, io.Writer) error { flashed++; return nil },
 		io.Discard,
 	)
-	if err == nil || !strings.Contains(err.Error(), "refusing to flash") || flashed != 0 ||
-		failedResult.BackupComplete {
-		t.Fatalf("incomplete backup result=%#v flashed=%d err=%v", failedResult, flashed, err)
+	if err != nil || flashed != 1 || !failedResult.Flashed ||
+		failedResult.BackupComplete || len(failedResult.Warnings) != 1 {
+		t.Fatalf("application-only update result=%#v flashed=%d err=%v", failedResult, flashed, err)
 	}
 
-	override := newFakeAVRRunner(t)
-	override.failEEPROM = true
+	required := newFakeAVRRunner(t)
+	required.failEEPROM = true
 	flashed = 0
-	overrideResult, err := AutomaticBackupThenFlash(
+	requiredResult, err := AutomaticBackupThenFlash(
 		context.Background(), AutomaticPreflashOptions{
-			FirmwarePath:                firmware,
-			Backup:                      fakeBackupOptions(filepath.Join(root, "override-backups")),
-			AllowFlashWithoutFullBackup: true,
-		}, override,
+			FirmwarePath:          firmware,
+			Backup:                fakeBackupOptions(filepath.Join(root, "required-backups")),
+			RequireCompleteBackup: true,
+		}, required,
 		func(context.Context, string, io.Writer) error { flashed++; return nil },
 		io.Discard,
 	)
-	if err != nil || flashed != 1 || !overrideResult.Flashed ||
-		overrideResult.BackupComplete || len(overrideResult.Warnings) != 1 {
-		t.Fatalf("override result=%#v flashed=%d err=%v", overrideResult, flashed, err)
+	if err == nil || !strings.Contains(err.Error(), "refusing to flash") || flashed != 0 ||
+		requiredResult.BackupComplete {
+		t.Fatalf("required backup result=%#v flashed=%d err=%v", requiredResult, flashed, err)
 	}
 }
 
@@ -404,7 +436,12 @@ func TestAutomaticBackupThenFlashRejectsFirmwareChangedDuringBackup(t *testing.T
 func newFakeAVRRunner(t *testing.T) *fakeAVRRunner {
 	t.Helper()
 	flashImage := &IntelHexImage{data: map[uint32]byte{0: 1, 1: 2, 0x200: 3}}
-	eepromImage := &IntelHexImage{data: map[uint32]byte{0: 0xFF, 1023: 0xAA}}
+	eepromData := make(map[uint32]byte, PCControllerEEPROMBytes)
+	for address := uint32(0); address < PCControllerEEPROMBytes; address++ {
+		eepromData[address] = 0xFF
+	}
+	eepromData[PCControllerEEPROMBytes-1] = 0xAA
+	eepromImage := &IntelHexImage{data: eepromData}
 	flashHEX, err := flashImage.Canonical()
 	if err != nil {
 		t.Fatal(err)
@@ -462,5 +499,90 @@ func TestBackupManifestTimestampsRemainOperationSpecific(t *testing.T) {
 	b, _ := ValidateBackupManifest(filepath.Join(second, "manifest.json"))
 	if !b.Manifest.CreatedAt.After(a.Manifest.CreatedAt) || a.Manifest.Reference != b.Manifest.Reference {
 		t.Fatalf("operation times/reference a=%#v b=%#v", a.Manifest, b.Manifest)
+	}
+}
+
+func TestBackupRetentionPrunesExpiredButProtectsPrevious(t *testing.T) {
+	root := t.TempDir()
+	makeBackup := func(created time.Time, expired bool) string {
+		directory, err := BackupWithRunner(context.Background(), fakeBackupOptions(root), io.Discard, newFakeAVRRunner(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(directory, "manifest.json")
+		content, _ := os.ReadFile(path)
+		var manifest BackupManifest
+		_ = json.Unmarshal(content, &manifest)
+		manifest.CreatedAt = created
+		manifest.CompletedAt = created.Add(time.Second)
+		manifest.RetainUntil = created.Add(24 * time.Hour)
+		if !expired {
+			manifest.RetainUntil = created.Add(365 * 24 * time.Hour)
+		}
+		content, _ = json.Marshal(manifest)
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return directory
+	}
+	now := time.Now().UTC()
+	old := makeBackup(now.Add(-72*time.Hour), true)
+	previous := makeBackup(now.Add(-48*time.Hour), true)
+	current := makeBackup(now.Add(-time.Hour), false)
+	removed, err := PruneExpiredBackups(root, now, current)
+	if err != nil || len(removed) > 1 || (len(removed) == 1 && filepath.Clean(removed[0]) != filepath.Clean(old)) {
+		t.Fatalf("removed=%v err=%v", removed, err)
+	}
+	if _, err := os.Stat(old); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expired backup was retained: %v", err)
+	}
+	if _, err := os.Stat(previous); err != nil {
+		t.Fatalf("previous backup was not protected: %v", err)
+	}
+	if _, err := os.Stat(current); err != nil {
+		t.Fatalf("current backup was not protected: %v", err)
+	}
+}
+
+func TestBackupRetentionPrunesUnreferencedContentButKeepsSharedBlob(t *testing.T) {
+	root := t.TempDir()
+	first, err := BackupWithRunner(context.Background(), fakeBackupOptions(root), io.Discard, newFakeAVRRunner(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := BackupWithRunner(context.Background(), fakeBackupOptions(root), io.Discard, newFakeAVRRunner(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstValidated, err := ValidateBackupManifest(filepath.Join(first, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := firstValidated.Files["flash"].Path
+	content, _ := os.ReadFile(filepath.Join(first, "manifest.json"))
+	var manifest BackupManifest
+	_ = json.Unmarshal(content, &manifest)
+	manifest.CreatedAt = time.Now().UTC().Add(-72 * time.Hour)
+	manifest.CompletedAt = manifest.CreatedAt.Add(time.Second)
+	manifest.RetainUntil = manifest.CreatedAt.Add(time.Hour)
+	content, _ = json.Marshal(manifest)
+	if err := os.WriteFile(filepath.Join(first, "manifest.json"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	third, err := BackupWithRunner(context.Background(), fakeBackupOptions(root), io.Discard, newFakeAVRRunner(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PruneExpiredBackups(root, time.Now().UTC(), third); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(first); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expired operation still exists: %v", err)
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("previous operation was lost: %v", err)
+	}
+	if _, err := os.Stat(shared); err != nil {
+		t.Fatalf("shared content blob referenced by retained operations was lost: %v", err)
 	}
 }

@@ -228,6 +228,9 @@ type Programming struct {
 	ToolchainConfig string `json:"toolchain_config,omitempty"`
 	Avrdude         string `json:"avrdude,omitempty"`
 	AvrdudeConf     string `json:"avrdude_conf,omitempty"`
+	// BackupRetentionDays protects the previous pre-update capture until its
+	// expiry. Content blobs are SHA-256 deduplicated independently.
+	BackupRetentionDays int `json:"backup_retention_days,omitempty"`
 }
 
 // Macro defines a named, host-persisted sequence streamed to the MCU executor.
@@ -378,10 +381,11 @@ func Defaults() Config {
 			SocketIOPath:    "/socket.io/",
 			RemotePolicy:    DefaultRemoteAccessPolicy(),
 		},
-		Safety:    Safety{MotionDoorPolicy: "always"},
-		RF:        DefaultRFConfig(),
-		HostMenus: DefaultHostMenus(),
-		OSActions: hostos.DefaultPolicy(),
+		Safety:      Safety{MotionDoorPolicy: "always"},
+		Programming: Programming{Method: "urclock", BackupRetentionDays: 30},
+		RF:          DefaultRFConfig(),
+		HostMenus:   DefaultHostMenus(),
+		OSActions:   hostos.DefaultPolicy(),
 		Integrations: Integrations{
 			Keyboard:     DefaultKeyboardControl(),
 			Lifecycle:    DefaultLifecycleSafety(),
@@ -571,6 +575,14 @@ func (value Config) Validate() error {
 	}
 	if connection.ReconnectMaximumMS < connection.ReconnectInitialMS || connection.ReconnectMaximumMS > 300_000 {
 		return fmt.Errorf("connection.reconnect_maximum_ms must be reconnect_initial_ms..300000")
+	}
+	switch strings.ToLower(strings.TrimSpace(value.Programming.Method)) {
+	case "", "urclock", "usbasp":
+	default:
+		return errors.New("programming.method must be urclock or usbasp")
+	}
+	if value.Programming.BackupRetentionDays < 0 || value.Programming.BackupRetentionDays > 3650 {
+		return errors.New("programming.backup_retention_days must be 0..3650 (zero selects the 30-day default)")
 	}
 	if title := strings.TrimSpace(value.UI.AppTitle); title == "" ||
 		utf8.RuneCountInString(title) > 64 || !printableText(title) {

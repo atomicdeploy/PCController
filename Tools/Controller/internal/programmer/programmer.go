@@ -84,6 +84,7 @@ type Options struct {
 	// repairing a target clock/fuse policy.
 	USBaspBitClockUS float64
 	USBaspAutoSlow   bool
+	BackupRetention  time.Duration
 }
 
 type BackupFile struct {
@@ -95,11 +96,20 @@ type BackupFile struct {
 	RelativePath string `json:"relative_path,omitempty"`
 }
 
+type EEPROMBlob struct {
+	SHA256       string `json:"sha256"`
+	Bytes        int64  `json:"bytes"`
+	Path         string `json:"path"`
+	Reference    string `json:"reference"`
+	Deduplicated bool   `json:"deduplicated"`
+}
+
 type BackupManifest struct {
 	Schema                     int          `json:"schema"`
 	Status                     string       `json:"status"`
 	CreatedAt                  time.Time    `json:"created_at"`
 	CompletedAt                time.Time    `json:"completed_at"`
+	RetainUntil                time.Time    `json:"retain_until,omitempty"`
 	Method                     Method       `json:"method"`
 	Port                       string       `json:"port,omitempty"`
 	MCU                        string       `json:"mcu"`
@@ -871,6 +881,11 @@ func BackupWithRunner(
 		Programmer:                effectiveProgrammer(options),
 		ApplicationIdentitySchema: options.ApplicationIdentitySchema,
 	}
+	retention := options.BackupRetention
+	if retention <= 0 {
+		retention = 30 * 24 * time.Hour
+	}
+	manifest.RetainUntil = manifest.CreatedAt.Add(retention)
 	if currentIdentitySchema(options.ApplicationIdentitySchema) &&
 		options.ApplicationPackedTimestamp != 0 {
 		manifest.ApplicationPackedTimestamp = fmt.Sprintf("%08X", options.ApplicationPackedTimestamp)
@@ -933,8 +948,27 @@ func BackupWithRunner(
 			file.RelativePath = filepath.ToSlash(relative)
 			manifest.Reference = "firmware-sha256:" + blob.SHA256
 		} else {
-			file.Storage = "operation"
-			file.RelativePath = file.Name
+			blobRoot := filepath.Join(root, "eeprom", "sha256")
+			blob, blobErr := StoreEEPROMBlob(blobRoot, path)
+			if blobErr != nil {
+				failures = append(failures, fmt.Errorf("EEPROM content store: %w", blobErr))
+				manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
+				return
+			}
+			relative, relativeErr := filepath.Rel(directory, blob.Path)
+			if relativeErr != nil {
+				failures = append(failures, fmt.Errorf("EEPROM content reference: %w", relativeErr))
+				manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
+				return
+			}
+			if removeErr := os.Remove(path); removeErr != nil {
+				failures = append(failures, fmt.Errorf("remove duplicate EEPROM artifact: %w", removeErr))
+				manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
+				return
+			}
+			file.Name = blob.Reference
+			file.Storage = "content-addressed-eeprom"
+			file.RelativePath = filepath.ToSlash(relative)
 		}
 		manifest.Files = append(manifest.Files, file)
 	}
@@ -979,9 +1013,22 @@ func BackupWithRunner(
 			manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
 		}
 		if file, fileErr := backupFile(metadataPath, "metadata"); fileErr == nil {
-			file.Storage = "operation"
-			file.RelativePath = file.Name
-			manifest.Files = append(manifest.Files, file)
+			blob, blobErr := StoreMetadataBlob(filepath.Join(root, "metadata", "sha256"), metadataPath)
+			if blobErr != nil {
+				failures = append(failures, fmt.Errorf("metadata content store: %w", blobErr))
+				manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
+			} else if relative, relativeErr := filepath.Rel(directory, blob.Path); relativeErr != nil {
+				failures = append(failures, fmt.Errorf("metadata content reference: %w", relativeErr))
+				manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
+			} else if removeErr := os.Remove(metadataPath); removeErr != nil {
+				failures = append(failures, fmt.Errorf("remove duplicate metadata artifact: %w", removeErr))
+				manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
+			} else {
+				file.Name = blob.Reference
+				file.Storage = "content-addressed-metadata"
+				file.RelativePath = filepath.ToSlash(relative)
+				manifest.Files = append(manifest.Files, file)
+			}
 		}
 	}
 
@@ -999,6 +1046,9 @@ func BackupWithRunner(
 	}
 	if len(failures) != 0 {
 		return directory, errors.Join(failures...)
+	}
+	if _, pruneErr := PruneExpiredBackups(root, time.Now().UTC(), directory); pruneErr != nil {
+		fmt.Fprintln(output, "WARNING: prune expired backup operations:", pruneErr)
 	}
 	fmt.Fprintln(output, "Backup reference:", manifest.Reference)
 	fmt.Fprintln(output, "Backup complete; manifest:", filepath.Join(directory, "manifest.json"))

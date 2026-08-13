@@ -112,23 +112,6 @@ func TestPrimaryFirmwareUpdatePropagatesDevelopmentEEPROMReinitialization(t *tes
 	}
 }
 
-func TestPrimaryFirmwareUpdateRejectsReinitializationWithoutMandatoryBackup(t *testing.T) {
-	called := false
-	executor := &primaryArtifactExecutor{execute: func(_ context.Context, _ string) (string, error) {
-		called = true
-		return "", nil
-	}}
-	err := executor.ProgramFirmware(context.Background(), artifacts.Descriptor{
-		Kind: artifacts.KindFirmware, LocalPath: "candidate.hex",
-	}, artifacts.UpdateRequest{
-		Method: "urclock", Port: "COM18", ReinitializeEEPROM: true,
-		AllowIncompleteBackup: true,
-	}, func(string, int, string) {})
-	if err == nil || !strings.Contains(err.Error(), "requires a complete verified raw backup") || called {
-		t.Fatalf("err=%v called=%t", err, called)
-	}
-}
-
 func TestPrimaryCapturedFlashRestoreUsesGuardedTransactionAndExplicitISPFallback(t *testing.T) {
 	image := filepath.Join(t.TempDir(), "captured flash.hex")
 	tests := []struct {
