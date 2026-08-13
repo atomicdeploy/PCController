@@ -123,6 +123,27 @@ func TestBuzzerPlaybackTimelineReanchorsAfterDeviceRestart(t *testing.T) {
 	}
 }
 
+func TestBuzzerPlaybackTimelineReanchorsAfterWholeMicrosWrapOfSilence(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 1_000, timed: true,
+		observedAt: base, source: "board-a",
+	}, base)
+	observedAt := base.Add(time.Duration(uint64(1)<<32) * time.Microsecond).Add(30 * time.Second)
+	fresh := timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 30_001_000, timed: true,
+		observedAt: observedAt, source: "board-a",
+	}, observedAt)
+	if !fresh.start.Equal(observedAt) {
+		t.Fatalf("full-wrap silence did not re-anchor to observation: %+v", fresh)
+	}
+	remaining, ok := fresh.remaining(observedAt)
+	if !ok || remaining != 100*time.Millisecond {
+		t.Fatalf("fresh note remaining=%v ok=%t", remaining, ok)
+	}
+}
+
 func TestBuzzerDispatchReusesResolvedExternalBackend(t *testing.T) {
 	manager := &Manager{
 		buzzerJobs: make(chan buzzerMirrorJob, 1),

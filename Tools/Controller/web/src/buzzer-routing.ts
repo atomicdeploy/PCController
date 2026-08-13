@@ -39,7 +39,8 @@ export class BuzzerPlaybackTimeline {
       const previous = this.anchors.get(input.source)
       if (previous) {
         const deltaUS = (currentMicros - previous.deviceMicros) >>> 0
-        if (deltaUS <= maxBuzzerSourceGapUS) startMS = previous.startMS + deltaUS / 1000
+        const candidateMS = previous.startMS + deltaUS / 1000
+        if (deltaUS <= maxBuzzerSourceGapUS && candidateMS >= nowMS - maxBuzzerSourceGapUS / 1000) startMS = candidateMS
       }
       this.anchors.set(input.source, { deviceMicros: currentMicros, startMS })
     }

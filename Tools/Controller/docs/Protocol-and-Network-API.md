@@ -165,9 +165,10 @@ normal low-latency path.
 The board pushes changed physical outputs instead of requiring the host to poll
 the active front panel. `SEGMENT_CHANGED` (`9C`) carries four raw TM1637 segment
 bytes followed by `u8 brightness`. `BUZZER_CHANGED` (`9D`) carries
-`u16 frequency_hz, u16 duration_ms, u8 muted` and current firmware appends
-`u32 device_micros`. Hosts accept the legacy five-byte form as well as the
-timed nine-byte form. Both use sequence zero and are emitted only when the
+the exact nine-byte schema `u16 frequency_hz, u16 duration_ms, u8 muted,
+u32 device_micros`. Hosts reject obsolete five-byte frames; during alpha work,
+install matching firmware instead of adding a compatibility parser. These frames
+use sequence zero and are emitted only when the
 corresponding physical output changes. The host may still request
 `FRONT_PANEL_GET` during connection, manual refresh, or recovery.
 
@@ -248,7 +249,7 @@ off only outputs claimed by that macro.
 | TEMPERATURES | `95` | named temperature records below |
 | MENU_LIST | `97` | paginated firmware-owned menu entries below |
 | SEGMENT_CHANGED | `9C` | `u8 raw_segments[4], u8 brightness`; unsolicited, changed-only |
-| BUZZER_CHANGED | `9D` | `u16 frequency_hz, u16 duration_ms, u8 muted [, u32 device_micros]`; unsolicited, changed-only; five-byte legacy form accepted |
+| BUZZER_CHANGED | `9D` | exact nine-byte `u16 frequency_hz, u16 duration_ms, u8 muted, u32 device_micros`; unsolicited, changed-only |
 | EVENT | `A0` | `u8 eventType, event-specific data...` |
 
 `MENU_LIST` schema `1` starts with `u8 schema, u8 total, u8 nextCursor,

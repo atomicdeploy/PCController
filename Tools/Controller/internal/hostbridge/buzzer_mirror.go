@@ -52,8 +52,9 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 	if job.timed {
 		if previous, ok := timeline.anchors[job.source]; ok {
 			delta := time.Duration(uint32(job.deviceMicros-previous.deviceMicros)) * time.Microsecond
-			if delta <= maxBuzzerSourceGap {
-				start = previous.start.Add(delta)
+			candidate := previous.start.Add(delta)
+			if delta <= maxBuzzerSourceGap && !candidate.Before(observedAt.Add(-maxBuzzerSourceGap)) {
+				start = candidate
 			}
 		}
 		timeline.anchors[job.source] = buzzerTimelineAnchor{
