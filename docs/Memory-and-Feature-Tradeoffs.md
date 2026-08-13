@@ -126,12 +126,13 @@ is a quiet no-op; boot reads never write EEPROM. The factory image stores the
 existing six-step welcome melody in the 26-byte data area.
 
 This is a configurability experiment, **not** a current flash-saving profile.
-On the fixed-identity `0x5EED0001` source build, the base image measured
-32,364/32,384 application bytes and 1,470 static SRAM bytes. The enabled
-measurement-only image measured 32,746 application bytes (+382) and 1,471
-static SRAM bytes (+1), which is 362 bytes above the delivery ceiling. The
-normal enabled build therefore fails its identity/link gate as intended and
-must not be flashed. A future feature profile needs a measured ≥382-byte
+On the fixed-identity `0x5EED0001` source build after the runtime-layout
+refactor, the base compiler report is 32,316 bytes; its identity-aware
+manifest occupies 32,328/32,384 bytes and leaves 56 physical bytes free.
+The enabled measurement-only image occupies 32,738 bytes (+410) and uses
+1,471 static SRAM bytes (+1), which is 354 bytes above the delivery ceiling.
+The normal enabled build therefore fails its identity/link gate as intended
+and must not be flashed. A future feature profile needs a measured ≥354-byte
 flash recovery before this source can become release-ready.
 
 The host tool accepts only named feature selections, for example
