@@ -34,6 +34,7 @@ import (
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/lanresolver"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
@@ -1104,7 +1105,9 @@ func (service *Service) dispatch(
 	case "controller.app.action":
 		var action hostui.AppAction
 		if err = decodeParams(request.Params, &action); err == nil {
-			if service.AppAction == nil {
+			if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+				err = errors.New("navigation synchronization metadata is coordinator-owned; use controller.app.navigate")
+			} else if service.AppAction == nil {
 				err = errors.New("primary app action routing is unavailable")
 			} else {
 				action.Source = firstNonempty(action.Source, "ipc")
@@ -2895,6 +2898,12 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		action.Source = "rest"
+		if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
+				"error": "navigation synchronization metadata is coordinator-owned; use /api/app/navigate",
+			})
+			return
+		}
 		if err := service.AppAction(action); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
@@ -4079,8 +4088,7 @@ func Call(
 	if address == "" {
 		address = DefaultListen
 	}
-	dialer := net.Dialer{}
-	connection, err := dialer.DialContext(ctx, "tcp", address)
+	connection, err := lanresolver.Default().DialContext(ctx, "tcp", address)
 	if err != nil {
 		return Response{}, err
 	}
