@@ -26,6 +26,10 @@ int main() {
                 "STATUS_EFFECT opcode changed");
   static_assert(ControllerProtocol::HostMenuDirectory == 0x42,
                 "host-menu directory opcode changed");
+  static_assert(ControllerProtocol::HostMenuContent == 0x43,
+                "host-menu content opcode changed");
+  static_assert(ControllerProtocol::HostMenuStateGet == 0x44,
+                "host-menu state opcode changed");
   static_assert(ControllerProtocol::StatusLedChanged == 0x9E,
                 "status-led event opcode changed");
   static_assert(ControllerProtocol::Unsafe == 6,
