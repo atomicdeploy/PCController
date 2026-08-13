@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,9 +17,14 @@ func TestTypedFirmwareBuildUsesCanonicalProjectAndCorrelatedEvents(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	runtime := control.New(control.Options{})
 	engine := control.NewCommandEngine(runtime, control.CommandOptions{
 		ProjectPath: projectRoot,
+		ArduinoCLI:  executable,
 		ProgramExecute: func(_ context.Context, options programmer.Options, output io.Writer) error {
 			if options.Method != programmer.MethodCompile {
 				t.Fatalf("method = %q", options.Method)
