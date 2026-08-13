@@ -27,8 +27,9 @@ constexpr uint8_t Silent = 1U << 0;
 // record without changing the user's persistent Silent preference.
 constexpr uint8_t ProgrammingMode = 1U << 1;
 constexpr uint8_t SwapTemperatureSensors = 1U << 2;
-constexpr uint8_t MotionDoorPolicyMask = 3U << 3;
-constexpr uint8_t MotionDoorPolicyShift = 3;
+constexpr uint8_t MotionDoorPolicyMask = ControllerCore::MotionDoorPolicyMask;
+constexpr uint8_t MotionDoorPolicyShift =
+    ControllerCore::MotionDoorPolicyShift;
 // Disable bits keep the zero-valued factory representation audible while
 // still allowing each cue family to be independently muted.
 constexpr uint8_t DoorAudioDisabled = 1U << 5;
@@ -151,20 +152,15 @@ struct ControllerSettings {
     }
   }
   MotionDoorPolicy motionDoorPolicy() const {
-    return static_cast<MotionDoorPolicy>(
-        (flags & SettingsFlags::MotionDoorPolicyMask) >>
-        SettingsFlags::MotionDoorPolicyShift);
+    return ControllerCore::motionDoorPolicyFromFlags(flags);
   }
   void setMotionDoorPolicy(MotionDoorPolicy value) {
-    flags = static_cast<uint8_t>(
-        (flags & ~SettingsFlags::MotionDoorPolicyMask) |
-        (static_cast<uint8_t>(value) <<
-         SettingsFlags::MotionDoorPolicyShift));
+    flags = ControllerCore::motionDoorPolicyIntoFlags(flags, value);
   }
   // Rolls the two-bit policy without disturbing adjacent audio/settings flags.
   void adjustMotionDoorPolicy(bool increase) {
     flags = static_cast<uint8_t>(
-        (flags & ~SettingsFlags::MotionDoorPolicyMask) |
+        (flags & static_cast<uint8_t>(~SettingsFlags::MotionDoorPolicyMask)) |
         ((flags +
           (increase ? (1U << SettingsFlags::MotionDoorPolicyShift)
                     : (3U << SettingsFlags::MotionDoorPolicyShift))) &
