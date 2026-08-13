@@ -10,8 +10,10 @@
     "cli-table3": "^0.6.5"
   },
   "scripts": {
-    "lint": "node --check ../CommandPlan/controller-command.mjs && node --check env.mjs && node --check env-bootstrap.mjs && node --check presentation.mjs && node --check product-metadata.mjs && node --check build.mjs && node --check go-tests.mjs && node --check env.test.mjs && node --check build.test.mjs && node --check product-metadata.test.mjs",
-    "test": "node --test env.test.mjs env-bootstrap.test.mjs build.test.mjs product-metadata.test.mjs",
-    "check": "npm run lint && npm test"
+    "protocol:generate": "node generate-protocol-contract.mjs",
+    "protocol:check": "node generate-protocol-contract.mjs --check",
+    "lint": "node --check ../CommandPlan/controller-command.mjs && node --check env.mjs && node --check env-bootstrap.mjs && node --check presentation.mjs && node --check product-metadata.mjs && node --check build.mjs && node --check go-tests.mjs && node --check env.test.mjs && node --check build.test.mjs && node --check product-metadata.test.mjs && node --check generate-protocol-contract.mjs && node --check protocol-contract-generator.test.mjs",
+    "test": "node --test env.test.mjs env-bootstrap.test.mjs build.test.mjs product-metadata.test.mjs protocol-contract-generator.test.mjs",
+    "check": "npm run lint && npm run protocol:check && npm test"
   }
 }
