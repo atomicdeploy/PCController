@@ -10,6 +10,7 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/programmer"
 )
 
 type fixedHostFactsProvider struct {
@@ -271,6 +272,10 @@ func TestToolchainProgramArguments(t *testing.T) {
 			[]string{"compile", "."},
 		},
 		{
+			[]string{"compile", ".", "--firmware-feature", "eeprom-menu-labels"},
+			[]string{"compile", ".", "--firmware-feature", "eeprom-menu-labels"},
+		},
+		{
 			[]string{"core-info"},
 			[]string{"core-info", "toolchain"},
 		},
@@ -292,6 +297,89 @@ func TestToolchainProgramArguments(t *testing.T) {
 		if _, err := toolchainProgramArguments(input); err == nil || !strings.Contains(err.Error(), "usage") {
 			t.Fatalf("%v: expected unpublished-command error, got %v", input, err)
 		}
+	}
+}
+
+func TestCompileRequestUsesTypedFeaturesAndNeverSwallowsPositionals(t *testing.T) {
+	defaults := []programmer.FirmwareFeature{
+		programmer.FirmwareFeatureEEPROMMenuLabels,
+	}
+	sketch, features, err := parseCompileRequest([]string{
+		".",
+		"--firmware-feature", "EEPROM-MENU-LABELS",
+		"--firmware-feature=eeprom-boot-opcodes",
+		"--firmware-feature", "eeprom-menu-labels",
+	}, defaults)
+	if err != nil || sketch != "." || !reflect.DeepEqual(
+		programmer.FirmwareFeatureNames(features),
+		[]string{"eeprom-boot-opcodes", "eeprom-menu-labels"},
+	) {
+		t.Fatalf("sketch=%q features=%v err=%v", sketch, features, err)
+	}
+	_, inherited, err := parseCompileRequest([]string{"."}, defaults)
+	if err != nil || !reflect.DeepEqual(inherited, defaults) {
+		t.Fatalf("defaults=%v err=%v", inherited, err)
+	}
+	_, disabled, err := parseCompileRequest(
+		[]string{".", "--no-firmware-features"}, defaults,
+	)
+	if err != nil || len(disabled) != 0 {
+		t.Fatalf("disabled=%v err=%v", disabled, err)
+	}
+	for _, args := range [][]string{
+		{".", "COM18"},
+		{".", "--firmware-feature=unknown"},
+		{".", "--firmware-feature=-DUNSAFE=1"},
+		{".", "--no-firmware-features", "--firmware-feature=eeprom-menu-labels"},
+	} {
+		if _, _, err := parseCompileRequest(args, defaults); err == nil {
+			t.Fatalf("compile args %v unexpectedly accepted", args)
+		}
+	}
+}
+
+func TestCommandEngineReportsAndPersistsFirmwareFeatureProfile(t *testing.T) {
+	config := appconfig.Defaults()
+	engine := NewCommandEngine(New(Options{}), CommandOptions{
+		FirmwareFeatures: []programmer.FirmwareFeature{
+			programmer.FirmwareFeatureEEPROMMenuLabels,
+		},
+		HostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			config = candidate
+			return nil
+		},
+	})
+	status, err := engine.Execute(context.Background(), "toolchain features")
+	if err != nil || status != "firmware features: eeprom-menu-labels" {
+		t.Fatalf("status=%q err=%v", status, err)
+	}
+	output, err := engine.Execute(
+		context.Background(),
+		"config set programming.firmware_features EEPROM-MENU-LABELS,eeprom-boot-opcodes,eeprom-menu-labels",
+	)
+	if err != nil || !strings.Contains(output, "hot-reload queued") {
+		t.Fatalf("set output=%q err=%v", output, err)
+	}
+	if got := programmer.FirmwareFeatureNames(config.Programming.FirmwareFeatures); !reflect.DeepEqual(got, []string{"eeprom-boot-opcodes", "eeprom-menu-labels"}) {
+		t.Fatalf("persisted=%v", got)
+	}
+	output, err = engine.Execute(
+		context.Background(),
+		"config get programming.firmware_features",
+	)
+	if err != nil || output != "programming.firmware_features=eeprom-boot-opcodes,eeprom-menu-labels" {
+		t.Fatalf("get output=%q err=%v", output, err)
+	}
+	if _, err := engine.Execute(
+		context.Background(),
+		"config set programming.firmware_features unknown",
+	); err == nil {
+		t.Fatal("unknown persisted firmware feature was accepted")
 	}
 }
 

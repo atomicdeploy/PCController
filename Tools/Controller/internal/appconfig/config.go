@@ -21,6 +21,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"pccontroller.local/controller/internal/firmwarefeatures"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/productidentity"
 	"pccontroller.local/controller/internal/secretstore"
@@ -213,13 +214,14 @@ type Paths struct {
 
 // Programming selects the host toolchain and default programming transport.
 type Programming struct {
-	Method          string `json:"method,omitempty"`
-	FQBN            string `json:"fqbn,omitempty"`
-	Programmer      string `json:"programmer,omitempty"`
-	ToolchainCLI    string `json:"toolchain_cli,omitempty"`
-	ToolchainConfig string `json:"toolchain_config,omitempty"`
-	Avrdude         string `json:"avrdude,omitempty"`
-	AvrdudeConf     string `json:"avrdude_conf,omitempty"`
+	Method           string                     `json:"method,omitempty"`
+	FQBN             string                     `json:"fqbn,omitempty"`
+	Programmer       string                     `json:"programmer,omitempty"`
+	ToolchainCLI     string                     `json:"toolchain_cli,omitempty"`
+	ToolchainConfig  string                     `json:"toolchain_config,omitempty"`
+	FirmwareFeatures []firmwarefeatures.Feature `json:"firmware_features,omitempty"`
+	Avrdude          string                     `json:"avrdude,omitempty"`
+	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`
 }
 
 // Macro defines a named, host-persisted sequence streamed to the MCU executor.
@@ -454,6 +456,9 @@ func Load(path string) (Config, [sha256.Size]byte, error) {
 	}
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	if err := normalizeProgramming(&value.Programming); err != nil {
+		return Config{}, [sha256.Size]byte{}, fmt.Errorf("validate %s: programming.firmware_features: %w", path, err)
+	}
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
@@ -483,6 +488,9 @@ func LoadOrCreate(path string) (Config, [sha256.Size]byte, error) {
 func Write(path string, value Config) error {
 	value.RF = canonicalizeRFConfig(value.RF)
 	value.HostMenus = normalizeHostMenus(value.HostMenus)
+	if err := normalizeProgramming(&value.Programming); err != nil {
+		return fmt.Errorf("programming.firmware_features: %w", err)
+	}
 	value.UI.Appearance = NormalizeAppearance(value.UI.Appearance)
 	value.UI.TUIConsole.FontFace = strings.TrimSpace(value.UI.TUIConsole.FontFace)
 	if err := value.Validate(); err != nil {
@@ -537,6 +545,11 @@ func Write(path string, value Config) error {
 func (value Config) Validate() error {
 	if value.Schema != SchemaVersion {
 		return fmt.Errorf("unsupported schema %d", value.Schema)
+	}
+	if _, err := firmwarefeatures.Normalize(
+		firmwarefeatures.Names(value.Programming.FirmwareFeatures),
+	); err != nil {
+		return fmt.Errorf("programming.firmware_features: %w", err)
 	}
 	connection := value.Connection
 	if connection.BaudRate < 1200 || connection.BaudRate > 2_000_000 {
@@ -966,6 +979,17 @@ func (value Config) Validate() error {
 			}
 		}
 	}
+	return nil
+}
+
+func normalizeProgramming(value *Programming) error {
+	features, err := firmwarefeatures.Normalize(
+		firmwarefeatures.Names(value.FirmwareFeatures),
+	)
+	if err != nil {
+		return err
+	}
+	value.FirmwareFeatures = features
 	return nil
 }
 
@@ -1446,6 +1470,10 @@ func reportDistinctReloadError(last *string, err error, onError func(error)) {
 
 func clone(value Config) Config {
 	copyValue := value
+	copyValue.Programming.FirmwareFeatures = append(
+		[]firmwarefeatures.Feature(nil),
+		value.Programming.FirmwareFeatures...,
+	)
 	if value.Connection.LastDevice != nil {
 		identity := *value.Connection.LastDevice
 		copyValue.Connection.LastDevice = &identity

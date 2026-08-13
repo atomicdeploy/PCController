@@ -11,8 +11,55 @@ import (
 	"testing"
 	"time"
 
+	"pccontroller.local/controller/internal/firmwarefeatures"
 	"pccontroller.local/controller/internal/productidentity"
 )
+
+func TestProgrammingFirmwareFeaturesRoundTripCanonically(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	content := `{"schema":1,"programming":{"firmware_features":["EEPROM-MENU-LABELS","eeprom-boot-opcodes","eeprom-menu-labels"]}}`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	config, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []firmwarefeatures.Feature{
+		firmwarefeatures.EEPROMBootOpcodes,
+		firmwarefeatures.EEPROMMenuLabels,
+	}
+	if !reflect.DeepEqual(config.Programming.FirmwareFeatures, want) {
+		t.Fatalf("features=%v want=%v", config.Programming.FirmwareFeatures, want)
+	}
+	if err := Write(path, config); err != nil {
+		t.Fatal(err)
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), `"firmware_features": [`) ||
+		strings.Index(string(written), "eeprom-boot-opcodes") >
+			strings.Index(string(written), "eeprom-menu-labels") {
+		t.Fatalf("features were not persisted canonically: %s", written)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detached := store.Current()
+	detached.Programming.FirmwareFeatures[0] = firmwarefeatures.EEPROMMenuLabels
+	if store.Current().Programming.FirmwareFeatures[0] != firmwarefeatures.EEPROMBootOpcodes {
+		t.Fatal("Current exposed the store's firmware feature slice")
+	}
+	if err := os.WriteFile(path, []byte(`{"schema":1,"programming":{"firmware_features":["unknown"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Load(path); err == nil || !strings.Contains(err.Error(), "unsupported firmware feature") {
+		t.Fatalf("unknown feature error=%v", err)
+	}
+}
 
 func TestLoadOrCreateAndReload(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "config.json")

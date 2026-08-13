@@ -20,6 +20,7 @@ import (
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/hostui"
+	"pccontroller.local/controller/internal/programmer"
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/webui"
 )
@@ -1236,7 +1237,11 @@ func TestInvalidParamsRetainStandardJSONRPCErrorCode(t *testing.T) {
 
 func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 	runtime := control.New(control.Options{})
-	engine := control.NewCommandEngine(runtime, control.CommandOptions{})
+	engine := control.NewCommandEngine(runtime, control.CommandOptions{
+		FirmwareFeatures: []programmer.FirmwareFeature{
+			programmer.FirmwareFeatureEEPROMMenuLabels,
+		},
+	})
 	client := controllerapi.AttachSharedRuntime(runtime, engine)
 	service := &Service{Client: client}
 
@@ -1258,6 +1263,14 @@ func TestCommandCatalogAndProgramStateReachRPCAndREST(t *testing.T) {
 	})
 	if executed.Error != nil || !strings.Contains(fmt.Sprint(executed.Result), "strip pixel") {
 		t.Fatalf("command.execute=%#v", executed)
+	}
+	featureParams, _ := json.Marshal(map[string]string{"command": "toolchain features"})
+	featureStatus := service.Dispatch(context.Background(), Request{
+		Method: "controller.command.execute", Params: featureParams,
+	})
+	if featureStatus.Error != nil ||
+		!strings.Contains(fmt.Sprint(featureStatus.Result), "firmware features: eeprom-menu-labels") {
+		t.Fatalf("firmware feature status=%#v", featureStatus)
 	}
 
 	stateParams, _ := json.Marshal(map[string]string{
