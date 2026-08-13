@@ -539,6 +539,7 @@ request error.
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when advertised, otherwise the canonical capability-limited manifest |
 | `controller.menu.jump`, `controller.menu.page` | `page` ID or name | select a board menu page |
 | `controller.command.execute` | `command` | run any ordinary controller command; `quit`/`exit` requests primary shutdown |
+| `controller.firmware.build` | optional `firmware_features` array or `no_firmware_features: true` | compile only the host's canonical configured project; returns an operation ID and normalized final log; requires `programming` |
 | `controller.program_state.get` | `{}` | current host-owned Idle/Running owners, reason, and revision |
 | `controller.program_state.set` | `mode`, optional `owner`, `reason` | set/clear one host-owned Running claim and mirror it to capable firmware |
 | `controller.rf.list` | `{}` | all learned records |

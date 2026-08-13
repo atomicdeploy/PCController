@@ -72,6 +72,22 @@ function operationTone(state: UpdateStatus['state'] | undefined): 'neutral' | 'i
   return 'info'
 }
 
+const activeUpdateStates = new Set<UpdateStatus['state']>([
+  'queued',
+  'downloading',
+  'reading',
+  'backing-up',
+  'programming',
+  'staging',
+  'verifying',
+])
+
+/** Progress is meaningful only while an operation can still advance. */
+export function activeUpdateProgress(status: UpdateStatus | null | undefined): number | null {
+  if (!status || !activeUpdateStates.has(status.state)) return null
+  return Math.max(0, Math.min(100, status.progress_percent))
+}
+
 function artifactLabel(kind: ArtifactKind, locale: SharedViewProps['locale']): string {
   const labels: Record<ArtifactKind, [string, string]> = {
     firmware: ['Board firmware', 'میان‌افزار برد'],
@@ -152,7 +168,8 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
       : selected?.kind === 'flash-backup' ? manifest?.current.flash_readback : manifest?.current.firmware
   const comparison = compareBuildIdentity(currentForSelected, selected)
   const bootloaderUnavailable = status?.isp_fallback_suggested === true
-  const running = status && !['downloaded', 'completed', 'failed'].includes(status.state)
+  const activeProgress = activeUpdateProgress(status)
+  const running = activeProgress !== null
 
   const acceptUploadFile = async (file: File | null) => {
     setUploadFile(file)
@@ -310,12 +327,12 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
 
       <section className="updates-hero">
         <div className="updates-hero__identity"><ShieldCheck /><div><span>{copy('Update permissions', 'مجوزهای به‌روزرسانی')}</span><strong>{copy('Primary host · explicit grant', 'میزبان اصلی · مجوز صریح')}</strong><p>{copy('Download and staging are safe preparation. Programming, EEPROM restore, ISP use, and self-replacement each require a separate confirmation.', 'دانلود و آماده‌سازی، مراحل مقدماتی امن هستند. پروگرام، بازیابی EEPROM، استفاده از ISP و جایگزینی خود برنامه هرکدام تأییدی جداگانه می‌خواهند.')}</p></div></div>
-        <div className="updates-hero__state">
-          <StatusBadge tone={operationTone(status?.state)} pulse={Boolean(running)}>{status?.state?.toUpperCase() || copy('IDLE', 'آماده')}</StatusBadge>
-          <strong>{Math.max(0, Math.min(100, status?.progress_percent ?? 0)).toFixed(0)}%</strong>
-          <span>{status?.detail || copy('No update operation is active.', 'هیچ عملیات به‌روزرسانی فعالی وجود ندارد.')}</span>
-        </div>
-        <div className="update-progress" aria-label={copy('Update progress', 'پیشرفت به‌روزرسانی')}><i style={{ width: `${Math.max(0, Math.min(100, status?.progress_percent ?? 0))}%` }} /></div>
+        {status && <div className="updates-hero__state">
+          <StatusBadge tone={operationTone(status.state)} pulse={running}>{status.state.toUpperCase()}</StatusBadge>
+          {activeProgress !== null && <strong>{activeProgress.toFixed(0)}%</strong>}
+          {status.detail && <span>{status.detail}</span>}
+        </div>}
+        {activeProgress !== null && <div className="update-progress" role="progressbar" aria-label={copy('Update progress', 'پیشرفت به‌روزرسانی')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={activeProgress}><i style={{ width: `${activeProgress}%` }} /></div>}
         <div className="updates-hero__metrics">
           <DataRow label={copy('Transfer', 'انتقال')} value={status?.bytes_total ? `${formatBytes(status.bytes_done)} / ${formatBytes(status.bytes_total)}` : '—'} mono />
           <DataRow label={copy('Artifact', 'خروجی ساخت')} value={shortHash(status?.artifact_sha256)} mono />

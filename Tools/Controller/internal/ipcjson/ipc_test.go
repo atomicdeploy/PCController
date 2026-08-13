@@ -1607,6 +1607,19 @@ func TestRFGuidedRPCMutationsValidateBeforeBoardAccess(t *testing.T) {
 	}
 }
 
+func TestFirmwareBuildRejectsUnknownRemoteInputsBeforeExecution(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	service := &Service{Client: client}
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.firmware.build",
+		Params: json.RawMessage(`{"path":"C:\\\\untrusted","raw_flags":["--verbose"]}`),
+	})
+	if response.Error == nil || !strings.Contains(response.Error.Message, "unknown field") {
+		t.Fatalf("response=%#v, want strict unknown-field rejection", response)
+	}
+}
+
 func catalogContains(catalog []shell.CommandDescriptor, name string) bool {
 	for _, descriptor := range catalog {
 		if descriptor.Name == name {

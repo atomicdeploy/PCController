@@ -411,18 +411,18 @@ func TestRFNameAndRadixPersistPCSideOnly(t *testing.T) {
 	}
 }
 
-func TestDashboardAndProgrammingExposeUptimeAndGuardedFlash(t *testing.T) {
+func TestDashboardAndProgrammingExposeLiveStateAndGuardedActions(t *testing.T) {
 	dashboard := PreviewFrame(PageDashboard, 132, 38)
 	if !strings.Contains(dashboard, "Device Uptime") || !strings.Contains(dashboard, "1h13m12s") {
 		t.Fatalf("polished uptime missing:\n%s", dashboard)
 	}
 	programming := PreviewFrame(PageProgramming, 160, 46)
-	for _, expected := range []string{"U Flash", "backup flash + EEPROM + metadata", "content-addressed SHA-256"} {
+	for _, expected := range []string{"U Flash", "Application protocol", "Current firmware", "5DF10D05"} {
 		if !strings.Contains(programming, expected) {
 			t.Errorf("programming page missing %q:\n%s", expected, programming)
 		}
 	}
-	for _, hidden := range []string{"Safe app reset", "Safe flash", "Advanced USBasp", "--method usbasp"} {
+	for _, hidden := range []string{"Safe app reset", "Safe flash", "Advanced USBasp", "--method usbasp", "backup flash + EEPROM + metadata", "content-addressed SHA-256"} {
 		if strings.Contains(programming, hidden) {
 			t.Errorf("programming page exposed %q:\n%s", hidden, programming)
 		}
@@ -840,6 +840,26 @@ func TestUpdateEventsOpenProgrammingPageAndTrackVisibleProgress(t *testing.T) {
 	}
 	if strings.Contains(rendered, "Progress and hashes appear in Console") {
 		t.Fatal("programming page retained the obsolete static progress hint")
+	}
+}
+
+func TestIdleUpdatePresentationAndDefaultFooterStayQuiet(t *testing.T) {
+	model := readyModel(t, PageProgramming)
+	rendered := ansi.Strip(model.programmingPage(model.snapshot()))
+	for _, forbidden := range []string{
+		"Update state", "Update progress", "0%", "Normal flash gate",
+		"Backup storage", "Blank-board flow", "application opcodes and bootloader operations are mutually exclusive",
+	} {
+		if strings.Contains(rendered, forbidden) {
+			t.Fatalf("idle programming view retained static or false progress copy %q:\n%s", forbidden, rendered)
+		}
+	}
+	if footer := ansi.Strip(model.footer()); footer != "" {
+		t.Fatalf("default TUI footer retained static shortcut noise: %q", footer)
+	}
+	model.setNotice("Firmware build started")
+	if footer := ansi.Strip(model.footer()); footer != "Firmware build started" {
+		t.Fatalf("dynamic notice footer=%q", footer)
 	}
 }
 

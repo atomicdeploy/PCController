@@ -3952,16 +3952,29 @@ func programCommand(
 		}
 	}
 
-	var output bytes.Buffer
-	if deviceOperation {
-		fmt.Fprintln(&output, "application UART released; Urboot/AVRDUDE now has exclusive port ownership")
+	operationID := programOperationID(ctx)
+	if operationID == "" {
+		operationID = nextProgramOperationID(runtime)
 	}
-	fmt.Fprintln(&output, commandDescription)
-	programErr := programmer.Execute(ctx, programOptions, &output)
+	eventWriter := newProgramEventWriter(runtime, operationID, programOptions)
+	defer eventWriter.Close()
+	publishProgramPhase(runtime, "program.started", operationID, programOptions, nil)
+
+	var output bytes.Buffer
+	programOutput := io.MultiWriter(&output, eventWriter)
+	if deviceOperation {
+		fmt.Fprintln(programOutput, "application UART released; Urboot/AVRDUDE now has exclusive port ownership")
+	}
+	fmt.Fprintln(programOutput, commandDescription)
+	execute := options.ProgramExecute
+	if execute == nil {
+		execute = programmer.Execute
+	}
+	programErr := execute(ctx, programOptions, programOutput)
 	if programErr == nil {
-		fmt.Fprintln(&output, "programmer operation completed")
+		fmt.Fprintln(programOutput, "programmer operation completed")
 	} else {
-		fmt.Fprintln(&output, "programmer operation failed:", programErr)
+		fmt.Fprintln(programOutput, "programmer operation failed:", programErr)
 	}
 	if deviceOperation && serialWasOpen {
 		reconnectContext, cancel := context.WithTimeout(
@@ -3971,23 +3984,30 @@ func programCommand(
 		defer cancel()
 		reconnectErr := reconnectProgrammingDevice(reconnectContext, runtime, snapshot.Port)
 		if reconnectErr != nil {
-			return strings.TrimSpace(output.String()), fmt.Errorf(
+			operationErr := fmt.Errorf(
 				"programmer result (%v); application HELLO reconnect failed: %w",
 				programErr,
 				reconnectErr,
 			)
+			fmt.Fprintln(programOutput, operationErr)
+			eventWriter.Close()
+			publishProgramPhase(runtime, "program.failed", operationID, programOptions, operationErr)
+			return strings.TrimSpace(output.String()), operationErr
 		}
 		snapshot := runtime.Snapshot()
 		fmt.Fprintf(
-			&output,
+			programOutput,
 			"application mode restored and authenticated on %s: %s\n",
 			snapshot.Port.Name,
 			formatHello(snapshot.Hello),
 		)
 	}
+	eventWriter.Close()
 	if programErr != nil {
+		publishProgramPhase(runtime, "program.failed", operationID, programOptions, programErr)
 		return strings.TrimSpace(output.String()), programErr
 	}
+	publishProgramPhase(runtime, "program.completed", operationID, programOptions, nil)
 	return strings.TrimSpace(output.String()), nil
 }
 

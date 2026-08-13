@@ -34,7 +34,7 @@ func (model Model) terminalTitle() string {
 	if base == "" {
 		base = "PCController"
 	}
-	if model.update.State != "" && model.update.State != "completed" {
+	if model.update.State != "" && model.update.State != "completed" && model.update.State != "idle" {
 		if model.update.State == "failed" || model.update.State == "cancelled" {
 			return fmt.Sprintf("%s — Update %s — %s", base, strings.ToUpper(model.update.State), pageDefinitions[model.page].Short)
 		}
@@ -85,6 +85,15 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	if state == "" {
 		state = strings.TrimPrefix(strings.ToLower(event.Kind), "update.")
 	}
+	if strings.EqualFold(state, "idle") {
+		model.update = updatePresentation{}
+		model.terminalTitleDirty = true
+		payload, payloadErr := (hostui.TerminalProgress{State: 0, Percent: 0}).OSCPayload()
+		if payloadErr != nil {
+			return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
+		}
+		return terminalOSCCommand(model.writeOSC, payload, "update progress")
+	}
 	model.update = updatePresentation{
 		OperationID: event.Metadata["operation_id"], Kind: event.Metadata["kind"],
 		State: state, Detail: event.Text, Progress: progress, UpdatedAt: event.Time,
@@ -113,11 +122,8 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 }
 
 func (model Model) updateProgressLines() []string {
-	if model.update.State == "" {
-		return []string{
-			kv("Update state", "idle"),
-			kv("Update progress", strings.Repeat("─", 36)+"   0%"),
-		}
+	if model.update.State == "" || strings.EqualFold(model.update.State, "idle") {
+		return nil
 	}
 	width := 36
 	filled := model.update.Progress * width / 100

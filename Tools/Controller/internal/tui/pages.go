@@ -587,17 +587,13 @@ func (model Model) programmingPage(snapshot control.Snapshot) string {
 	secondButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("R Reboot"), " ", buttonStyle.Render("D DTR/RTS reset"), " ", buttonGoodStyle.Render("U Flash"))
 	thirdButtons := lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("Z USBasp driver"), " ", buttonStyle.Render("X Blank…"))
 	lines := []string{
-		sectionHeader(model.width, "PROGRAMMING", "application opcodes and bootloader operations are mutually exclusive"),
+		sectionHeader(model.width, "PROGRAMMING", boolWord(snapshot.Connected, "application protocol connected", "application protocol disconnected")),
 		firstButtons,
 		secondButtons,
 		thirdButtons,
 		"",
 		kv("Application protocol", boolWord(snapshot.Connected, "authenticated and available", "not connected")),
-		kv("Boot protocol", "Urboot/Urclock via the installed MiniCore AVRDUDE backend"),
 		kv("Current firmware", firmwareIdentity(snapshot)),
-		kv("Normal flash gate", "inspect HEX → backup flash + EEPROM + metadata → verify manifest → flash → HELLO"),
-		kv("Backup storage", "content-addressed SHA-256 blobs; identical firmware is never duplicated"),
-		kv("Blank-board flow", "toolchain → ISP signature/backup → core bootloader/fuses → optional UART flash/health"),
 		"",
 	}
 	lines = append(lines, model.updateProgressLines()...)
