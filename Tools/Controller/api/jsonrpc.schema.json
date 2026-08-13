@@ -104,6 +104,8 @@
             "controller.host.facts.catalog",
             "controller.hotkeys.get",
             "controller.hotkeys.set",
+            "controller.illumination.get",
+            "controller.illumination.set",
             "controller.integrations.local.get",
             "controller.integrations.local.set",
             "controller.integrations.status",
@@ -565,6 +567,16 @@
     "controller.hotkeys.set": {
       "capability": "host_configuration",
       "summary": "hotkeys set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.illumination.get": {
+      "capability": "read",
+      "summary": "Read persisted enclosure-light policy, live door-selected target, and exact applied channel-11 PWM.",
+      "idempotency": "safe"
+    },
+    "controller.illumination.set": {
+      "capability": "board_commands",
+      "summary": "Change only mode/on/off illumination fields, verify EEPROM durability, and return authoritative live state.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.integrations.local.get": {

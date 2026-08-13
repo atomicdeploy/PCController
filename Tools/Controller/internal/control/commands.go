@@ -2477,11 +2477,8 @@ func storeSettings(
 	runtime *Runtime,
 	settings native.Settings,
 ) error {
-	payload, err := settings.Payload()
-	if err != nil {
-		return err
-	}
-	return command(ctx, runtime, native.OpSetSettings, payload)
+	_, err := runtime.SetSettings(ctx, settings)
+	return err
 }
 
 func settingsFromSetArgs(args []string) (native.Settings, error) {

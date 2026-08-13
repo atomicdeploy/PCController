@@ -3568,6 +3568,8 @@
               "controller.host.facts.catalog",
               "controller.hotkeys.get",
               "controller.hotkeys.set",
+              "controller.illumination.get",
+              "controller.illumination.set",
               "controller.integrations.local.get",
               "controller.integrations.local.set",
               "controller.integrations.status",

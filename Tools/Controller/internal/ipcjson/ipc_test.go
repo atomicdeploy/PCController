@@ -1195,11 +1195,67 @@ func TestStreamableEventKindSeparatesTimelineFromStatusTraffic(t *testing.T) {
 		{kind: "front_panel.segment", want: false},
 		{kind: "status_led.changed", want: false},
 		{kind: "buzzer.note", want: false},
+		{kind: "illumination.changed", want: false},
+		{kind: "settings.changed", want: false},
 		{kind: "", want: false},
 	}
 	for _, test := range tests {
 		if got := streamableEventKind(test.kind); got != test.want {
 			t.Errorf("streamableEventKind(%q)=%v want %v", test.kind, got, test.want)
+		}
+	}
+}
+
+func TestIlluminationStatePushReachesTwoIndependentWebSocketClients(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(2))
+	server := httptest.NewServer(websocketMux(context.Background(), &Service{
+		Client: client, WebSocketPath: "/ipc", AuthorizationDisabled: true,
+		AllowedOrigins: []string{"127.0.0.1:*"},
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	connections := make([]*websocket.Conn, 2)
+	for index := range connections {
+		connection, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/ipc", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer connection.CloseNow()
+		connections[index] = connection
+		request := []byte(`{"jsonrpc":"2.0","id":1,"method":"controller.subscribe","params":{"topics":["state"]}}`)
+		if err := connection.Write(ctx, websocket.MessageText, request); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(data), `"id":1`) {
+				break
+			}
+		}
+	}
+	runtime.PublishStructuredEvent(control.Event{
+		Kind: "illumination.changed", Stream: control.EventStreamState,
+		Text: "enclosure illumination applied 1024/4095 toward 2056/4095",
+		Metadata: map[string]string{"applied_pwm": "1024", "target_pwm": "2056"},
+	})
+	for index, connection := range connections {
+		for {
+			_, data, err := connection.Read(ctx)
+			if err != nil {
+				t.Fatalf("client %d: %v", index, err)
+			}
+			if strings.Contains(string(data), `"method":"controller.state"`) &&
+				strings.Contains(string(data), `"kind":"illumination.changed"`) {
+				if !strings.Contains(string(data), `"applied_pwm":"1024"`) {
+					t.Fatalf("client %d state=%s", index, data)
+				}
+				break
+			}
 		}
 	}
 }

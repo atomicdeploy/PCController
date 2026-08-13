@@ -325,6 +325,25 @@ type PortInfo struct {
 	InstanceID   string `json:"instance_id,omitempty"`
 }
 
+// IlluminationState combines the persisted enclosure-light policy with the
+// authoritative PWM value currently applied to the dedicated channel. Values
+// ending in Brightness use the board's 0..255 settings scale; PWM values use
+// the PCA controller's native logical 0..4095 scale.
+type IlluminationState struct {
+	Available         bool      `json:"available"`
+	Mode              byte      `json:"mode"`
+	OnBrightness      byte      `json:"on_brightness"`
+	OffBrightness     byte      `json:"off_brightness"`
+	DoorOpen          bool      `json:"door_open"`
+	TargetBrightness  byte      `json:"target_brightness"`
+	TargetPWM         uint16    `json:"target_pwm"`
+	AppliedBrightness byte      `json:"applied_brightness"`
+	AppliedPWM        uint16    `json:"applied_pwm"`
+	AtTarget          bool      `json:"at_target"`
+	Persisted         bool      `json:"persisted"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
+}
+
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
 	Connected         bool                 `json:"connected"`
@@ -347,6 +366,7 @@ type Snapshot struct {
 	StatusLED         StatusLEDState       `json:"status_led"`
 	HaveStatusLED     bool                 `json:"have_status_led"`
 	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
+	Illumination      IlluminationState    `json:"illumination"`
 	PortProcess       PortProcessSnapshot  `json:"port_process"`
 }
 
@@ -431,6 +451,9 @@ type Client struct {
 	doneOnce       sync.Once
 	statusHub      statusSubscriptionHub
 	statusFetch    func(context.Context) (Status, error)
+	illuminationMu sync.RWMutex
+	illumination   IlluminationState
+	illuminationPollAt time.Time
 }
 
 type statusSubscriber struct {
@@ -1101,6 +1124,9 @@ func (client *Client) runStatusSubscriptionHub() {
 		at := time.Now()
 		requestContext, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 		status, err := client.statusForSubscription(requestContext)
+		if err == nil {
+			client.refreshIllumination(requestContext, status)
+		}
 		cancel()
 		update := StatusUpdate{Time: at, Status: status}
 		if err != nil {
@@ -1142,6 +1168,116 @@ func (client *Client) statusForSubscription(ctx context.Context) (Status, error)
 		return client.statusFetch(ctx)
 	}
 	return client.Status(ctx)
+}
+
+const enclosureIlluminationPWMChannel byte = 11
+
+func illuminationPWM(brightness byte) uint16 {
+	return uint16(brightness)*16 + uint16(brightness)/16
+}
+
+func illuminationBrightness(pwm uint16) byte {
+	if pwm >= 4095 {
+		return 255
+	}
+	return byte((uint32(pwm)*16 + 128) / 257)
+}
+
+func illuminationState(
+	settings Settings,
+	status Status,
+	pwm PWMValues,
+	updatedAt time.Time,
+) IlluminationState {
+	target := settings.OffBrightness
+	switch settings.LightMode {
+	case 1:
+		if status.DoorOpen {
+			target = settings.OnBrightness
+		}
+	case 2:
+		target = settings.OnBrightness
+	}
+	targetPWM := illuminationPWM(target)
+	appliedPWM := pwm.Values[enclosureIlluminationPWMChannel]
+	return IlluminationState{
+		Available:         pwm.Available && status.PWMAvailable,
+		Mode:              settings.LightMode,
+		OnBrightness:      settings.OnBrightness,
+		OffBrightness:     settings.OffBrightness,
+		DoorOpen:          status.DoorOpen,
+		TargetBrightness:  target,
+		TargetPWM:         targetPWM,
+		AppliedBrightness: illuminationBrightness(appliedPWM),
+		AppliedPWM:        appliedPWM,
+		AtTarget:          appliedPWM == targetPWM,
+		Persisted:         settings.Persisted,
+		UpdatedAt:         updatedAt,
+	}
+}
+
+func sameIlluminationState(left, right IlluminationState) bool {
+	left.UpdatedAt = time.Time{}
+	right.UpdatedAt = time.Time{}
+	return left == right
+}
+
+func (client *Client) observeIllumination(state IlluminationState) {
+	client.illuminationMu.Lock()
+	previous := client.illumination
+	changed := !sameIlluminationState(previous, state)
+	client.illumination = state
+	client.illuminationMu.Unlock()
+	if !changed || client.runtime == nil {
+		return
+	}
+	client.runtime.PublishStructuredEvent(control.Event{
+		Kind:   "illumination.changed",
+		Stream: control.EventStreamState,
+		Text: fmt.Sprintf(
+			"enclosure illumination applied %d/4095 toward %d/4095",
+			state.AppliedPWM,
+			state.TargetPWM,
+		),
+		Metadata: map[string]string{
+			"mode":               strconv.Itoa(int(state.Mode)),
+			"door_open":          strconv.FormatBool(state.DoorOpen),
+			"on_brightness":      strconv.Itoa(int(state.OnBrightness)),
+			"off_brightness":     strconv.Itoa(int(state.OffBrightness)),
+			"target_brightness":  strconv.Itoa(int(state.TargetBrightness)),
+			"target_pwm":         strconv.Itoa(int(state.TargetPWM)),
+			"applied_brightness": strconv.Itoa(int(state.AppliedBrightness)),
+			"applied_pwm":        strconv.Itoa(int(state.AppliedPWM)),
+			"at_target":          strconv.FormatBool(state.AtTarget),
+			"persisted":          strconv.FormatBool(state.Persisted),
+		},
+	})
+}
+
+func (client *Client) refreshIllumination(ctx context.Context, status Status) {
+	if client.runtime == nil {
+		return
+	}
+	snapshot := client.runtime.Snapshot()
+	if !snapshot.Connected || !snapshot.HaveSettings || !status.PWMAvailable {
+		return
+	}
+	now := time.Now()
+	client.illuminationMu.Lock()
+	if now.Before(client.illuminationPollAt) {
+		client.illuminationMu.Unlock()
+		return
+	}
+	// Ten authoritative samples per second are visually responsive for the
+	// 20 ms firmware fade while avoiding a 34-byte UART response per high-rate
+	// TUI subscriber tick.
+	client.illuminationPollAt = now.Add(100 * time.Millisecond)
+	client.illuminationMu.Unlock()
+	pwm, err := client.PWMValues(ctx)
+	if err != nil || !pwm.Available {
+		return
+	}
+	client.observeIllumination(illuminationState(snapshot.Settings, status, pwm, now))
 }
 
 // ConfigureHistory updates bounded telemetry retention and persistence policy.
@@ -1444,6 +1580,49 @@ func (client *Client) PWMValues(ctx context.Context) (PWMValues, error) {
 	return native.ParsePWMValues(frame.Payload)
 }
 
+// Illumination reads the persisted policy, live door state, and exact applied
+// enclosure PWM value through one typed host surface.
+func (client *Client) Illumination(ctx context.Context) (IlluminationState, error) {
+	settings, err := client.runtime.Settings(ctx)
+	if err != nil {
+		return IlluminationState{}, fmt.Errorf("read illumination settings: %w", err)
+	}
+	status, err := client.Status(ctx)
+	if err != nil {
+		return IlluminationState{}, fmt.Errorf("read illumination status: %w", err)
+	}
+	pwm, err := client.PWMValues(ctx)
+	if err != nil {
+		return IlluminationState{}, fmt.Errorf("read illumination PWM: %w", err)
+	}
+	if !pwm.Available || !status.PWMAvailable {
+		return IlluminationState{}, errors.New("enclosure illumination PWM is unavailable")
+	}
+	state := illuminationState(settings, status, pwm, time.Now())
+	client.observeIllumination(state)
+	return state, nil
+}
+
+// SetIllumination changes only the three enclosure-light policy fields,
+// preserves every unrelated setting, waits for EEPROM durability, and returns
+// an independently read-back live state.
+func (client *Client) SetIllumination(
+	ctx context.Context,
+	mode, onBrightness, offBrightness byte,
+) (IlluminationState, error) {
+	desired, err := client.runtime.Settings(ctx)
+	if err != nil {
+		return IlluminationState{}, fmt.Errorf("read settings before illumination write: %w", err)
+	}
+	desired.LightMode = mode
+	desired.OnBrightness = onBrightness
+	desired.OffBrightness = offBrightness
+	if _, err := client.runtime.SetSettings(ctx, desired); err != nil {
+		return IlluminationState{}, fmt.Errorf("apply illumination settings: %w", err)
+	}
+	return client.Illumination(ctx)
+}
+
 // SetStatusRGB replaces the base status color and cancels an active overlay.
 func (client *Client) SetStatusRGB(
 	ctx context.Context,
@@ -1653,6 +1832,12 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns the latest cached connection and board state without polling.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
+	client.illuminationMu.RLock()
+	illumination := client.illumination
+	client.illuminationMu.RUnlock()
+	if !snapshot.Connected || !snapshot.HaveSettings || !snapshot.HaveStatus {
+		illumination = IlluminationState{}
+	}
 	return Snapshot{
 		Connected: snapshot.Connected,
 		Paused:    snapshot.Paused,
@@ -1683,6 +1868,7 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLED:         snapshot.StatusLED,
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
+		Illumination:      illumination,
 		PortProcess:       snapshot.PortProcess,
 	}
 }

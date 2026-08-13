@@ -122,6 +122,7 @@ import type {
   ControllerEvent,
   DialogState,
   HostUISettings,
+  IlluminationState,
   LifecycleSafetyAction,
   LocalIntegrationSettings,
   Locale,
@@ -782,6 +783,13 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [streamPeriod, setStreamPeriod] = useState(snapshot.settings.stream_period_ms || 200)
   const [outputPersistence, setOutputPersistence] = useState(snapshot.settings.output_persistence)
   const [relayRestoreMask, setRelayRestoreMask] = useState(snapshot.settings.relay_restore_mask)
+  const [illuminationMode, setIlluminationMode] = useState(String(snapshot.settings.light_mode))
+  const [illuminationOn, setIlluminationOn] = useState(snapshot.settings.on_brightness)
+  const [illuminationOff, setIlluminationOff] = useState(snapshot.settings.off_brightness)
+  const [illuminationLive, setIlluminationLive] = useState<IlluminationState>(snapshot.illumination)
+  const [illuminationBusy, setIlluminationBusy] = useState(false)
+  const [illuminationNotice, setIlluminationNotice] = useState('')
+  const [illuminationError, setIlluminationError] = useState(false)
   const [segmentScroll, setSegmentScroll] = useState<SegmentScrollSettings>({
     enabled: true,
     pages: ['door'],
@@ -911,6 +919,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     return () => { active = false }
   }, [])
   useEffect(() => {
+	setIlluminationMode(String(snapshot.settings.light_mode))
+	setIlluminationOn(snapshot.settings.on_brightness)
+	setIlluminationOff(snapshot.settings.off_brightness)
     setDisplayBrightness(snapshot.settings.display_brightness)
     setDisplayClosedBrightness(snapshot.settings.display_closed_brightness)
     setMotionExitHoldSeconds(snapshot.settings.motion_exit_hold_seconds || 2)
@@ -919,6 +930,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     setOutputPersistence(snapshot.settings.output_persistence)
     setRelayRestoreMask(snapshot.settings.relay_restore_mask)
   }, [
+	snapshot.settings.light_mode,
+	snapshot.settings.on_brightness,
+	snapshot.settings.off_brightness,
     snapshot.settings.display_brightness,
     snapshot.settings.display_closed_brightness,
     snapshot.settings.motion_exit_hold_seconds,
@@ -927,6 +941,44 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
     snapshot.settings.output_persistence,
     snapshot.settings.relay_restore_mask,
   ])
+
+  useEffect(() => {
+	setIlluminationLive(snapshot.illumination)
+  }, [snapshot.illumination])
+
+  useEffect(() => {
+	if (!snapshot.connected || !snapshot.have_settings || !available.pwm) return
+	const abort = new AbortController()
+	void rpc<IlluminationState>('controller.illumination.get', {}, abort.signal)
+		.then((state) => { if (!abort.signal.aborted) setIlluminationLive(state) })
+		.catch((cause) => {
+			if (!abort.signal.aborted) {
+				setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+				setIlluminationError(true)
+			}
+		})
+	return () => abort.abort()
+  }, [snapshot.connected, snapshot.have_settings, available.pwm])
+
+  const saveIllumination = async () => {
+	setIlluminationBusy(true)
+	setIlluminationNotice('')
+	setIlluminationError(false)
+	try {
+		const state = await rpc<IlluminationState>('controller.illumination.set', {
+			mode: Number(illuminationMode),
+			on_brightness: illuminationOn,
+			off_brightness: illuminationOff,
+		})
+		setIlluminationLive(state)
+		setIlluminationNotice(copy('Applied live and verified durable in EEPROM.', 'به‌صورت زنده اعمال و ماندگاری آن در EEPROM تأیید شد.'))
+	} catch (cause) {
+		setIlluminationNotice(cause instanceof Error ? cause.message : String(cause))
+		setIlluminationError(true)
+	} finally {
+		setIlluminationBusy(false)
+	}
+  }
 
   const setPersistenceBit = (bit: number, enabled: boolean) => {
     setOutputPersistence((current) => enabled ? current | bit : current & ~bit)
@@ -1230,6 +1282,33 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
             action={<Button tone="primary" icon={ShieldCheck} disabled={!tokenDirty} onClick={() => { onToken(normalizedToken); setDraftToken(normalizedToken) }}>{t('apply')}</Button>}
           />
         </Card>}
+
+        {boardReady && available.settings && <Card icon={Lightbulb} iconTone="amber" title={copy('Enclosure illumination', 'روشنایی محفظه')} eyebrow={illuminationLive.available ? illuminationLive.at_target ? copy('Applied · at target', 'اعمال‌شده · در مقدار هدف') : copy('Transitioning to target', 'در حال گذار به مقدار هدف') : copy('Waiting for live PWM state', 'در انتظار وضعیت زندهٔ PWM')} className="settings-card settings-card--wide illumination-settings-card">
+		{!snapshot.have_settings ? <EmptyState
+			icon={Lightbulb}
+			title={copy('Reading illumination policy', 'در حال خواندن سیاست روشنایی')}
+			detail={copy('The controls appear only after the board returns authoritative EEPROM settings.', 'کنترل‌ها پس از دریافت تنظیمات معتبر EEPROM از برد نمایش داده می‌شوند.')}
+		/> : <>
+			<div className="illumination-state-grid" aria-label={copy('Live enclosure illumination state', 'وضعیت زندهٔ روشنایی محفظه')}>
+				<DataRow label={copy('Policy', 'سیاست')} value={[copy('Off', 'خاموش'), copy('Auto', 'خودکار'), copy('On', 'روشن')][illuminationLive.mode] ?? String(illuminationLive.mode)} />
+				<DataRow label={copy('Door input', 'ورودی درب')} value={illuminationLive.door_open ? copy('Open', 'باز') : copy('Closed', 'بسته')} tone={illuminationLive.door_open ? 'warn' : 'good'} />
+				<DataRow label={copy('Selected target', 'مقدار هدف انتخاب‌شده')} value={`${illuminationLive.target_brightness}/255 · ${illuminationLive.target_pwm}/4095`} mono />
+				<DataRow label={copy('Applied channel 11', 'مقدار اعمال‌شدهٔ کانال ۱۱')} value={illuminationLive.available ? `${illuminationLive.applied_brightness}/255 · ${illuminationLive.applied_pwm}/4095` : copy('Unavailable', 'در دسترس نیست')} tone={illuminationLive.available ? illuminationLive.at_target ? 'good' : 'warn' : undefined} mono />
+				<DataRow label={copy('EEPROM durability', 'ماندگاری EEPROM')} value={illuminationLive.persisted ? copy('Verified', 'تأییدشده') : copy('Not confirmed', 'تأییدنشده')} tone={illuminationLive.persisted ? 'good' : 'warn'} />
+			</div>
+			<div className="setting-group"><label>{copy('Operating mode', 'حالت عملکرد')}</label><Segmented value={illuminationMode} label={copy('Enclosure illumination mode', 'حالت روشنایی محفظه')} options={[
+				{ value: '0', label: copy('Off', 'خاموش') },
+				{ value: '1', label: copy('Auto · door', 'خودکار · درب') },
+				{ value: '2', label: copy('On', 'روشن') },
+			]} onChange={(value) => { setIlluminationNotice(''); setIlluminationMode(value) }} /></div>
+			<RangeField label={copy('Door-open / On brightness', 'روشنایی درب باز / حالت روشن')} value={illuminationOn} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOn(value) }} />
+			<RangeField label={copy('Door-closed / Off brightness', 'روشنایی درب بسته / حالت خاموش')} value={illuminationOff} min={0} max={255} onChange={(value) => { setIlluminationNotice(''); setIlluminationOff(value) }} />
+			<div className="illumination-settings-card__footer">
+				<p className={illuminationError ? 'settings-action-feedback text-bad' : 'settings-action-feedback'} role={illuminationError ? 'alert' : 'status'}>{illuminationNotice || copy('Only these three illumination fields change; every unrelated board setting is preserved.', 'فقط همین سه فیلد روشنایی تغییر می‌کنند و همهٔ تنظیمات نامرتبط برد حفظ می‌شوند.')}</p>
+				<Button tone="primary" icon={Lightbulb} busy={illuminationBusy} disabled={!available.pwm || !illuminationLive.available} onClick={() => void saveIllumination()}>{copy('Apply illumination', 'اعمال روشنایی')}</Button>
+			</div>
+		</>}
+		</Card>}
 
         {boardReady && available.settings && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={snapshot.have_settings ? copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح') : boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Settings unavailable', 'تنظیمات در دسترس نیست')} className="settings-card">
           {!snapshot.have_settings ? <EmptyState

@@ -321,6 +321,42 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Write board settings')
   })
 
+  it('renders complete authoritative enclosure illumination settings and state', () => {
+	const connected = {
+		...emptySnapshot,
+		connected: true,
+		have_status: true,
+		have_settings: true,
+		connection_state: 'connected',
+		hello: { ...emptySnapshot.hello, capabilities: (1 << 2) | (1 << 8) },
+		status: { ...emptySnapshot.status, pwm_available: true, door_open: true },
+		settings: { ...emptySnapshot.settings, persisted: true, light_mode: 1, on_brightness: 180, off_brightness: 12 },
+		illumination: {
+			available: true, mode: 1, on_brightness: 180, off_brightness: 12,
+			door_open: true, target_brightness: 180, target_pwm: 2891,
+			applied_brightness: 160, applied_pwm: 2570, at_target: false, persisted: true,
+		},
+	}
+	const markup = renderToStaticMarkup(<SettingsView
+		{...shared()}
+		snapshot={connected}
+		appearance={appearance}
+		onAppearance={vi.fn()}
+		token=""
+		onToken={vi.fn()}
+		onAppTitle={vi.fn(async (value: string) => value)}
+		uiConfig={null}
+		onBuzzerPath={vi.fn(async () => undefined)}
+	/>)
+	expect(markup).toContain('Enclosure illumination')
+	expect(markup).toContain('Auto · door')
+	expect(markup).toContain('Door-open / On brightness')
+	expect(markup).toContain('Door-closed / Off brightness')
+	expect(markup).toContain('Applied channel 11')
+	expect(markup).toContain('2570/4095')
+	expect(markup).toContain('Apply illumination')
+  })
+
   it('renders offline controls and settings copy in Persian', () => {
     const persianShared = { ...shared(), locale: 'fa' as const }
     const persianAppearance: Appearance = { ...appearance, locale: 'fa', direction: 'rtl' }

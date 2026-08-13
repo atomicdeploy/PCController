@@ -759,6 +759,21 @@ func (service *Service) dispatch(
 		}
 	case "controller.pwm.values":
 		result, err = service.Client.PWMValues(ctx)
+	case "controller.illumination.get":
+		result, err = service.Client.Illumination(ctx)
+	case "controller.illumination.set":
+		var params struct {
+			Mode          int `json:"mode"`
+			OnBrightness  int `json:"on_brightness"`
+			OffBrightness int `json:"off_brightness"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			if params.Mode < 0 || params.Mode > 2 || params.OnBrightness < 0 || params.OnBrightness > 255 || params.OffBrightness < 0 || params.OffBrightness > 255 {
+				err = &RPCError{Code: -32602, Message: "mode must be 0..2 and brightness values must be 0..255"}
+			} else {
+				result, err = service.Client.SetIllumination(ctx, byte(params.Mode), byte(params.OnBrightness), byte(params.OffBrightness))
+			}
+		}
 	case "controller.pwm.set":
 		var params struct {
 			Channel int `json:"channel"`
@@ -1942,9 +1957,9 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.peripherals.set",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
-                        "controller.app.page", "controller.app.navigate", "controller.app.launch",
-                        "controller.app.instance.report", "controller.app.instance.remove",
-                        "controller.network.peers.set":
+		"controller.app.page", "controller.app.navigate", "controller.app.launch",
+		"controller.app.instance.report", "controller.app.instance.remove",
+		"controller.network.peers.set":
 		return capabilityHostConfig
 	case "controller.os.key", "controller.virtual_key":
 		return capabilityVirtualKeys
@@ -1988,8 +2003,10 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.history.timeline", "controller.lcd.presentation.status",
 		"controller.ports", "controller.os.status", "controller.system.status",
 		"controller.os.facts", "controller.host.facts",
-		"controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get", "controller.pwm.values":
+		"controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get", "controller.pwm.values", "controller.illumination.get":
 		return capabilityRead
+	case "controller.illumination.set":
+		return capabilityBoard
 	case "controller.discovery.connect":
 		return capabilityBridgeCalls
 	case "controller.discovery.config.set":
@@ -4223,7 +4240,7 @@ func streamWebSocketEventStream(
 // have not yet received an explicit stream field.
 func streamableEventKind(kind string) bool {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "", "telemetry", "rx", "tx", "front_panel.segment", "status_led.changed", "buzzer.note":
+	case "", "telemetry", "rx", "tx", "front_panel.segment", "status_led.changed", "buzzer.note", "illumination.changed", "settings.changed":
 		return false
 	default:
 		return true

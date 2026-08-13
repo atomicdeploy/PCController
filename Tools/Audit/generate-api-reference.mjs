@@ -122,14 +122,14 @@ const capabilityGroups = {
     "controller.lcd.presentation.status", "controller.ports", "controller.os.status",
     "controller.system.status", "controller.os.facts", "controller.host.facts",
     "controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get",
-		"controller.integrations.status", "controller.pwm.values", "controller.port.owner", "controller.port.process",
+		"controller.integrations.status", "controller.pwm.values", "controller.illumination.get", "controller.port.owner", "controller.port.process",
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
 		"controller.network.peers.get",
   ],
   board_commands: [
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
     "controller.host_menu.directory.replace", "controller.host_menu.content.push", "controller.menu.jump",
-    "controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.rf.learn.start",
+    "controller.menu.page", "controller.pwm.set", "controller.pwm.off", "controller.illumination.set", "controller.rf.learn.start",
     "controller.rf.learn.cancel", "controller.rf.map", "controller.rf.remove", "controller.rf.clear",
 		"controller.rf.transmit", "controller.lcd.prompt", "controller.lcd.priority",
 		"controller.display.send", "controller.opcode.send", "controller.opcode.exchange",
@@ -176,6 +176,8 @@ const methodOverrides = {
   "controller.integrations.status": "Return requested and effective buzzer routing and playback state.",
 	"controller.network.peers.get": "Return persistent peer topology with secret references and no plaintext credentials.",
 	"controller.network.peers.set": "Replace and hot-apply peer topology; events, state, and status topics are accepted, and only optional secret references may carry compatibility credentials.",
+	"controller.illumination.get": "Read persisted enclosure-light policy, live door-selected target, and exact applied channel-11 PWM.",
+	"controller.illumination.set": "Change only mode/on/off illumination fields, verify EEPROM durability, and return authoritative live state.",
   "controller.unsubscribe": "Remove this WebSocket connection's active subscriptions.",
 };
 
