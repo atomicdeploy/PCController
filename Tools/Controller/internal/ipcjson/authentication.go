@@ -456,6 +456,11 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "request origin is not allowed"})
 		return false
 	}
+	if base.Remote && !service.hostConfig().IPC.AllowRemote {
+		service.auditAccess(base, request.Method+" "+request.URL.Path, "remote-network", false)
+		writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "remote network access is disabled"})
+		return false
+	}
 	if service.authorizationDisabled() {
 		base, _ = service.authenticateAccess(base, "", "disabled-alpha")
 		requestWithAccess := request.WithContext(context.WithValue(request.Context(), authenticatedAccessKey{}, base))
