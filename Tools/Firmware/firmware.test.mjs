@@ -402,7 +402,10 @@ test('production KEY dispatches first Down to motion and exits outside KEY', asy
 	assert.match(frontPanel, /const bool momentary = mode == MODE_KEYS \|\| mode == MODE_MOTION_CONTROL/u)
 	assert.match(frontPanel, /if \(modeManager\.current\(\) == MODE_KEYS\)[^]*?relays\.allOff\(actionNow\);[^]*?modeManager\.transitionTo\(MODE_MOTION_CONTROL\);/u)
 	assert.match(frontPanel, /mode == MODE_MOTION_CONTROL && event == KeyEvent::Down[^]*?shiftRegisters\.inputActive\(bit \^ 1U\)/u)
-	assert.match(frontPanel, /setMenuPage\(PAGE_DOOR\);/u)
+	assert.match(
+		frontPanel,
+		/case MODE_MOTION_CONTROL:\s*if \(!relays\.motionAllowed\(\)\) \{\s*relays\.allOff\(at\);\s*modeManager\.transitionTo\(MODE_DOOR\);/u
+	)
 	assert.match(frontPanel, /!menuPageNavigable\(candidate\)/u)
 	assert.match(frontPanel, /menuPageNavigable\(page\)[^]*?menuCategory\(page\) == category/u)
 	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
@@ -433,7 +436,10 @@ test('retired MOVE remains a direct KEY alias, never a persisted second page', a
 		frontPanel,
 		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
 	)
-	assert.match(frontPanel, /case MODE_MOTION_CONTROL:[^]*?setMenuPage\(PAGE_DOOR\);/u)
+	assert.match(
+		frontPanel,
+		/case MODE_MOTION_CONTROL:\s*if \(!relays\.motionAllowed\(\)\) \{\s*relays\.allOff\(at\);\s*modeManager\.transitionTo\(MODE_DOOR\);/u
+	)
 	assert.match(protocol, /settingsStore\.normalizeMenuLayout\(\);/u)
 	assert.match(protocol, /const uint8_t defaultMenuPage = canonicalMenuPage\(payload\[10\]\);/u)
 	assert.match(defaults, /DefaultMenuPageMotionAlias\s*=\s*12/u)

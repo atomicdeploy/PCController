@@ -66,8 +66,8 @@ bool SettingsStore::begin(uint32_t now) {
   setDefaults();
   if (loadCurrent()) {
     persisted_ = true;
-    bool rewriteLayout = normalizeMenuLayout();
 #if PCCONTROLLER_MENU_VISIBILITY
+    bool rewriteLayout = normalizeMenuLayout();
     if (!settings_.menuPageVisible(settings_.defaultMenuPage)) {
       for (uint8_t rank = 0; rank < PersistentMenuPageCount; ++rank) {
 #if PCCONTROLLER_MENU_ORDERING
@@ -82,10 +82,10 @@ bool SettingsStore::begin(uint32_t now) {
         }
       }
     }
-#endif
     if (rewriteLayout) {
       markDirty(now);
     }
+#endif
     return true;
   }
 

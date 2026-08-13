@@ -31,8 +31,13 @@ bool isMenuMode(ProgramMode mode) {
 
 // Converts a stable page ID to its contiguous top-level program mode.
 ProgramMode pageToMode(uint8_t page) {
+#if PCCONTROLLER_ENABLE_MENU_DIRECTORY
+  // MENU_LIST retains the retired direct selector but reports the unified KEY
+  // program mode. Ordinary local callers already canonicalize in setMenuPage.
+  page = canonicalMenuPage(page);
+#endif
   return static_cast<ProgramMode>(
-      static_cast<uint8_t>(MODE_DOOR) + canonicalMenuPage(page));
+      static_cast<uint8_t>(MODE_DOOR) + page);
 }
 
 // Returns the stable page represented by an ordinary mode.
@@ -254,7 +259,7 @@ void programService(uint32_t at) {
     case MODE_MOTION_CONTROL:
       if (!relays.motionAllowed()) {
         relays.allOff(at);
-        setMenuPage(PAGE_DOOR);
+        modeManager.transitionTo(MODE_DOOR);
       }
       break;
 
