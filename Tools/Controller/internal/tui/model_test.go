@@ -191,6 +191,10 @@ func TestRemotePanelAndLCDReadbackRefreshInitiallyAndAfterReconnect(t *testing.T
 		Hello: native.Hello{BuildHash: 0x12345678, Capabilities: native.CapabilityLCD |
 			native.CapabilityI2CTransfer | native.CapabilityFrontPanelSnapshot},
 	}
+	// A cached exact panel in controller.snapshot is not proof that this new
+	// authority epoch fetched the typed panel itself.
+	snapshot.HaveFrontPanel = true
+	snapshot.FrontPanel = native.FrontPanel{Schema: 2, MenuPage: 1}
 	panelCalls, lcdCalls := 0, 0
 	backend := &RemoteBackend{
 		InitialSnapshot: snapshot,
@@ -209,7 +213,7 @@ func TestRemotePanelAndLCDReadbackRefreshInitiallyAndAfterReconnect(t *testing.T
 	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
 		Remote: backend, MirrorLCD: func(string, string) error { return nil }, DisableWelcome: true,
 	})
-	model.page = PageMenus
+	model.page = PageDashboard
 
 	runRefreshes := func(t *testing.T, model Model) Model {
 		t.Helper()
@@ -1398,14 +1402,11 @@ func TestDashboardMapsProgramModeToHumanSubmode(t *testing.T) {
 }
 
 func TestBorderedPageButtonsShareHorizontalRow(t *testing.T) {
-	for _, page := range []Page{PageMenus, PageRF, PageProgramming, PageAutomations} {
+	for _, page := range []Page{PageRF, PageProgramming, PageAutomations} {
 		rendered := PreviewFrame(page, 160, 44)
 		lines := strings.Split(rendered, "\n")
 		found := false
 		for _, line := range lines {
-			if page == PageMenus && strings.Contains(line, "K1 · previous") && strings.Contains(line, "K4 · increase") {
-				found = true
-			}
 			if page == PageRF && strings.Contains(line, "L Learn") && strings.Contains(line, "Refresh list") {
 				found = true
 			}
@@ -1497,8 +1498,11 @@ func TestPreviewHeaderAndFrontPanelFit160Columns(t *testing.T) {
 		}
 	}
 	menu := PreviewFrame(PageMenus, 160, 46)
-	if !strings.Contains(menu, "K4 · increase") {
-		t.Fatalf("K4 card clipped:\n%s", menu)
+	if strings.Contains(menu, "K1 · previous") || strings.Contains(menu, "K4 · increase") {
+		t.Fatalf("unsafe remote-key lifecycle rendered without a board deadman/lease:\n%s", menu)
+	}
+	if !strings.Contains(menu, "deadman/lease not advertised") {
+		t.Fatalf("hidden remote-key controls lack a truthful reason:\n%s", menu)
 	}
 }
 
@@ -1975,7 +1979,7 @@ func logsContain(logs []string, expected string) bool {
 	return false
 }
 
-func TestFrontPanelPressAndHoldUseBackendCallback(t *testing.T) {
+func TestFrontPanelPressAndHoldStayDisabledWithoutBoardDeadmanLease(t *testing.T) {
 	var gestures []string
 	snapshot := RichPreviewSnapshot()
 	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
@@ -1986,12 +1990,19 @@ func TestFrontPanelPressAndHoldUseBackendCallback(t *testing.T) {
 		},
 	})
 	model.page = PageMenus
-	_, press, _ := model.frontPanelGesture(1, "press")
-	_, hold, _ := model.frontPanelGesture(1, "hold")
-	_ = press()
-	_ = hold()
-	if got := strings.Join(gestures, ","); got != "K1:press,K1:hold" {
-		t.Fatalf("front panel gestures=%q", got)
+	updated, press, handled := model.frontPanelGesture(1, "press")
+	if !handled || press != nil {
+		t.Fatalf("unsafe press was not rejected: handled=%t command=%v", handled, press)
+	}
+	updated, hold, handled := updated.frontPanelGesture(1, "hold")
+	if !handled || hold != nil {
+		t.Fatalf("unsafe hold was not rejected: handled=%t command=%v", handled, hold)
+	}
+	if len(gestures) != 0 {
+		t.Fatalf("unsafe backend received gestures=%v", gestures)
+	}
+	if !strings.Contains(updated.notice, "deadman/lease") {
+		t.Fatalf("rejected lifecycle lacks truthful reason: %q", updated.notice)
 	}
 }
 
@@ -2015,7 +2026,7 @@ func TestRemoteFrontPanelDoesNotFallbackToActionOnlyCommands(t *testing.T) {
 	if press != nil || len(calls) != 0 {
 		t.Fatalf("capability-only front panel fell back to an action-only command: command=%v calls=%v", press, calls)
 	}
-	if !strings.Contains(updated.notice, "remote-key capability") {
+	if !strings.Contains(updated.notice, "deadman/lease") {
 		t.Fatalf("missing key backend did not explain the hidden action: %q", updated.notice)
 	}
 }
@@ -2043,7 +2054,7 @@ func TestFrontPanelGestureDoesNotDispatchBeforeExactCapabilitiesArrive(t *testin
 	if !handled || command != nil || calls != 0 {
 		t.Fatalf("unfetched front-panel dispatched: handled=%t command=%v calls=%d", handled, command, calls)
 	}
-	if !strings.Contains(updated.notice, "exact panel snapshot") {
+	if !strings.Contains(updated.notice, "deadman/lease") {
 		t.Fatalf("unfetched front-panel did not explain unavailable action: %q", updated.notice)
 	}
 }

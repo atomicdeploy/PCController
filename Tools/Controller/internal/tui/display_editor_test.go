@@ -90,7 +90,7 @@ func TestMenusPageRendersOnlyAdvertisedFetchedPanelAndDisplayControls(t *testing
 	lines, _ := hostModel.menuPagePrefix(unknown)
 	hostRendered := ansi.Strip(strings.Join(lines, "\n"))
 	assertAbsent(t, hostRendered, "K1/K2 navigate", "K3/K4 adjust")
-	if !strings.Contains(hostRendered, "waiting for exact panel and RemoteKeys readback") {
+	if !strings.Contains(hostRendered, "deadman/lease not advertised") {
 		t.Fatalf("active host menu did not explain unavailable key controls:\n%s", hostRendered)
 	}
 
@@ -127,8 +127,9 @@ func TestMenusPageRendersOnlyAdvertisedFetchedPanelAndDisplayControls(t *testing
 
 	fetched.Hello.Capabilities |= native.CapabilityRemoteKeys
 	rendered, geometry = render(fetched)
-	if !strings.Contains(rendered, "K1 · previous") || geometry.frontPanelEnd <= geometry.frontPanelStart {
-		t.Fatalf("advertised exact remote-key panel missing controls: geometry=%#v\n%s", geometry, rendered)
+	assertAbsent(t, rendered, "K1 · previous", "K4 · increase")
+	if geometry.frontPanelStart != geometry.frontPanelEnd {
+		t.Fatalf("unsafe remote-key lifecycle retained hit target: geometry=%#v\n%s", geometry, rendered)
 	}
 	panelWithoutLCD := fetched
 	panelWithoutLCD.FrontPanel.LCDAvailable = false
@@ -179,6 +180,11 @@ func TestMenusPageRendersOnlyAdvertisedFetchedPanelAndDisplayControls(t *testing
 			t.Fatalf("typed remote LCD readback missing %q:\n%s", expected, rendered)
 		}
 	}
+
+	remoteModel.remoteSnapshot.Hello.Capabilities &^= native.CapabilityI2CTransfer
+	lines, _ = remoteModel.menuPagePrefix(remoteModel.remoteSnapshot)
+	rendered = ansi.Strip(strings.Join(lines, "\n"))
+	assertAbsent(t, rendered, "D · Send arbitrary message", "LCD prompt mirroring", "2×16 LCD")
 
 	disconnected := RichPreviewSnapshot()
 	disconnected.Connected = false

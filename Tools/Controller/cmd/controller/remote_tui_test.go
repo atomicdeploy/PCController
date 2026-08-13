@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,7 +22,6 @@ import (
 func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 	client := &remoteTUIIPC{}
 	var methods []string
-	var keyEvents []byte
 	client.callFn = func(_ context.Context, method string, params any, target any) error {
 		methods = append(methods, method)
 		switch method {
@@ -40,16 +38,6 @@ func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 			if values["line1"] != "line one" || values["line2"] != "line two" {
 				t.Fatalf("LCD prompt params=%#v", values)
 			}
-		case "controller.opcode.send":
-			values := params.(map[string]any)
-			if values["opcode"] != native.OpRemoteKeyGesture {
-				t.Fatalf("remote-key opcode params=%#v", values)
-			}
-			payload := values["payload"].([]byte)
-			if len(payload) != 2 || payload[0] != native.MenuPrevious {
-				t.Fatalf("remote-key payload=%v", payload)
-			}
-			keyEvents = append(keyEvents, payload[1])
 		default:
 			t.Fatalf("unexpected RPC method %q", method)
 		}
@@ -66,14 +54,7 @@ func TestRemotePanelAndLCDMethodsUseTypedPrimaryRPCs(t *testing.T) {
 	if err := client.MirrorLCD("line one", "line two"); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.FrontPanelKey(1, "hold"); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := keyEvents, []byte{native.KeyEventDown, native.KeyEventHoldRepeat, native.KeyEventUp}; !slices.Equal(got, want) {
-		t.Fatalf("remote key lifecycle=%v, want %v", got, want)
-	}
-	want := "controller.front_panel,controller.lcd.presentation.status,controller.lcd.prompt," +
-		"controller.opcode.send,controller.opcode.send,controller.opcode.send"
+	want := "controller.front_panel,controller.lcd.presentation.status,controller.lcd.prompt"
 	if got := strings.Join(methods, ","); got != want {
 		t.Fatalf("RPC methods=%q, want %q", got, want)
 	}

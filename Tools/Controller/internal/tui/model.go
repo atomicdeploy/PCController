@@ -72,129 +72,130 @@ type Model struct {
 	displayEditor            *displayEditor
 	eventsExpanded           bool
 
-	connectPending           bool
-	connectRetryAt           time.Time
-	connectRetryDelay        time.Duration
-	rebootPending            bool
-	statusPending            bool
-	uiConfig                 func() appconfig.UI
-	saveUI                   func(appconfig.UI) error
-	applyTUIConsole          func(appconfig.TUIConsole) error
-	uiValue                  appconfig.UI
-	hostIntegrations         func() appconfig.Integrations
-	saveHostIntegrations     func(appconfig.Integrations) error
-	hostIntegrationValue     appconfig.Integrations
-	rfConfig                 func() appconfig.RFConfig
-	saveRF                   func(appconfig.RFConfig) error
-	rfValue                  appconfig.RFConfig
-	rfFetch                  func(context.Context) ([]native.RFEntry, error)
-	rfApplyOrder             func(context.Context, []native.RFEntry) error
-	rfReplaceSupport         func() control.RFReplaceSupport
-	rfProbeReplace           func(context.Context) (control.RFReplaceSupport, error)
-	rfEntries                []native.RFEntry
-	rfOriginal               []native.RFEntry
-	rfStaged                 []native.RFEntry
-	rfPending                bool
-	rfLastRefresh            time.Time
-	rfError                  string
-	rfStageDirty             bool
-	rfReview                 bool
-	rfActionPicker           bool
-	rfActionQuery            string
-	rfActionCursor           int
-	rfCategoryPicker         bool
-	rfCategoryCursor         int
-	rfEditMode               string
-	rfCategoryDraft          string
-	rfGuideActive            bool
-	rfGuideStep              int
-	rfGuidePhase             string
-	rfGuideCandidate         *native.RFEntry
-	rfGuideCandidateCaptured bool
-	rfGuideCaptures          [4]*native.RFEntry
-	rfGuideAwaitID           int
-	rfGuideMappingID         int
-	rfGuideRemoveArmed       bool
-	rfGuideClearArmed        bool
-	rfGuideTransmitArmed     bool
-	prefs                    Preferences
-	preview                  *control.Snapshot
-	pwmValues                [16]uint16
-	havePWMValues            bool
-	pwmDragChannel           int
-	pwmDragValue             uint16
-	pwmDragSet               bool
-	pwmPending               bool
-	lastPWMRefresh           time.Time
-	portPicker               bool
-	portLoading              bool
-	portCandidates           []ports.Info
-	portCursor               int
-	portError                string
-	portOwner                *portowner.Owner
-	portOwnerActions         portowner.Actions
-	ownerTerminateArmedUntil time.Time
-	frontPanel               func() FrontPanelState
-	frontPanelPending        bool
-	frontPanelLastRefresh    time.Time
-	frontPanelKey            func(key int, phase string) error
-	lcdPresentation          control.LCDPresentationState
-	haveLCDPresentation      bool
-	lcdPresentationPending   bool
-	lcdPresentationLastFetch time.Time
-	mirrorLCD                func(line1, line2 string) error
-	lcdMirror                bool
-	previewPanel             FrontPanelState
-	frontOverlay1            string
-	frontOverlay2            string
-	frontOverlayUntil        time.Time
-	frontOverlayNeedsRestore bool
-	integrations             func() hostui.IntegrationStatus
-	networkDiscovery         func(context.Context) ([]discovery.Instance, error)
-	openNetwork              func(string) error
-	networkDevices           []discovery.Instance
-	networkDiscoveryPending  bool
-	networkDiscoveryError    string
-	notifier                 hostui.Notifier
-	appActions               <-chan hostui.AppAction
-	instanceID               string
-	navigationSync           bool
-	navigationGroup          string
-	navigationCursor         hostui.NavigationCursor
-	reportPage               func(string) error
-	reportTerminal           func(page, title string) error
-	writeOSC                 func(string) error
-	terminalTitleOverride    string
-	terminalTitleDirty       bool
-	update                   updatePresentation
-	hostMenus                *hostmenu.Manager
-	pushHostPanel            func(hostmenu.Snapshot) error
-	releaseHostPanel         func() error
-	hostPanelRevision        uint64
-	hostPanelLastPush        time.Time
-	hostPanelCaptured        bool
-	hostPanelPending         bool
-	menuPages                []menuPage
-	menuCatalogSource        string
-	menuCatalogHash          uint32
-	menuCatalogLoaded        bool
-	menuCatalogPending       bool
-	menuCatalogLastAttempt   time.Time
-	menuLayout               control.MenuLayout
-	menuLayoutOriginal       control.MenuLayout
-	menuLayoutStaged         control.MenuLayout
-	menuLayoutDirty          bool
-	menuLayoutSearch         string
-	menuLayoutSearchEditing  bool
-	menuLayoutSort           string
-	menuLayoutError          string
-	macroSearch              string
-	macroSearchEditing       bool
-	macroDeleteArmed         bool
-	macroDeleteReference     string
-	previewMacros            []appconfig.Macro
-	previewMacroState        control.MacroState
-	previewMacroRecording    control.MacroRecordingState
+	connectPending            bool
+	connectRetryAt            time.Time
+	connectRetryDelay         time.Duration
+	rebootPending             bool
+	statusPending             bool
+	uiConfig                  func() appconfig.UI
+	saveUI                    func(appconfig.UI) error
+	applyTUIConsole           func(appconfig.TUIConsole) error
+	uiValue                   appconfig.UI
+	hostIntegrations          func() appconfig.Integrations
+	saveHostIntegrations      func(appconfig.Integrations) error
+	hostIntegrationValue      appconfig.Integrations
+	rfConfig                  func() appconfig.RFConfig
+	saveRF                    func(appconfig.RFConfig) error
+	rfValue                   appconfig.RFConfig
+	rfFetch                   func(context.Context) ([]native.RFEntry, error)
+	rfApplyOrder              func(context.Context, []native.RFEntry) error
+	rfReplaceSupport          func() control.RFReplaceSupport
+	rfProbeReplace            func(context.Context) (control.RFReplaceSupport, error)
+	rfEntries                 []native.RFEntry
+	rfOriginal                []native.RFEntry
+	rfStaged                  []native.RFEntry
+	rfPending                 bool
+	rfLastRefresh             time.Time
+	rfError                   string
+	rfStageDirty              bool
+	rfReview                  bool
+	rfActionPicker            bool
+	rfActionQuery             string
+	rfActionCursor            int
+	rfCategoryPicker          bool
+	rfCategoryCursor          int
+	rfEditMode                string
+	rfCategoryDraft           string
+	rfGuideActive             bool
+	rfGuideStep               int
+	rfGuidePhase              string
+	rfGuideCandidate          *native.RFEntry
+	rfGuideCandidateCaptured  bool
+	rfGuideCaptures           [4]*native.RFEntry
+	rfGuideAwaitID            int
+	rfGuideMappingID          int
+	rfGuideRemoveArmed        bool
+	rfGuideClearArmed         bool
+	rfGuideTransmitArmed      bool
+	prefs                     Preferences
+	preview                   *control.Snapshot
+	pwmValues                 [16]uint16
+	havePWMValues             bool
+	pwmDragChannel            int
+	pwmDragValue              uint16
+	pwmDragSet                bool
+	pwmPending                bool
+	lastPWMRefresh            time.Time
+	portPicker                bool
+	portLoading               bool
+	portCandidates            []ports.Info
+	portCursor                int
+	portError                 string
+	portOwner                 *portowner.Owner
+	portOwnerActions          portowner.Actions
+	ownerTerminateArmedUntil  time.Time
+	frontPanel                func() FrontPanelState
+	frontPanelPending         bool
+	frontPanelRefreshRequired bool
+	frontPanelLastRefresh     time.Time
+	frontPanelKey             func(key int, phase string) error
+	lcdPresentation           control.LCDPresentationState
+	haveLCDPresentation       bool
+	lcdPresentationPending    bool
+	lcdPresentationLastFetch  time.Time
+	mirrorLCD                 func(line1, line2 string) error
+	lcdMirror                 bool
+	previewPanel              FrontPanelState
+	frontOverlay1             string
+	frontOverlay2             string
+	frontOverlayUntil         time.Time
+	frontOverlayNeedsRestore  bool
+	integrations              func() hostui.IntegrationStatus
+	networkDiscovery          func(context.Context) ([]discovery.Instance, error)
+	openNetwork               func(string) error
+	networkDevices            []discovery.Instance
+	networkDiscoveryPending   bool
+	networkDiscoveryError     string
+	notifier                  hostui.Notifier
+	appActions                <-chan hostui.AppAction
+	instanceID                string
+	navigationSync            bool
+	navigationGroup           string
+	navigationCursor          hostui.NavigationCursor
+	reportPage                func(string) error
+	reportTerminal            func(page, title string) error
+	writeOSC                  func(string) error
+	terminalTitleOverride     string
+	terminalTitleDirty        bool
+	update                    updatePresentation
+	hostMenus                 *hostmenu.Manager
+	pushHostPanel             func(hostmenu.Snapshot) error
+	releaseHostPanel          func() error
+	hostPanelRevision         uint64
+	hostPanelLastPush         time.Time
+	hostPanelCaptured         bool
+	hostPanelPending          bool
+	menuPages                 []menuPage
+	menuCatalogSource         string
+	menuCatalogHash           uint32
+	menuCatalogLoaded         bool
+	menuCatalogPending        bool
+	menuCatalogLastAttempt    time.Time
+	menuLayout                control.MenuLayout
+	menuLayoutOriginal        control.MenuLayout
+	menuLayoutStaged          control.MenuLayout
+	menuLayoutDirty           bool
+	menuLayoutSearch          string
+	menuLayoutSearchEditing   bool
+	menuLayoutSort            string
+	menuLayoutError           string
+	macroSearch               string
+	macroSearchEditing        bool
+	macroDeleteArmed          bool
+	macroDeleteReference      string
+	previewMacros             []appconfig.Macro
+	previewMacroState         control.MacroState
+	previewMacroRecording     control.MacroRecordingState
 
 	welcome              bool
 	welcomeFrame         int
@@ -399,11 +400,10 @@ func NewPreview(engine *shell.Engine, snapshot control.Snapshot, welcome bool) M
 	return NewWithOptions(runtime, engine, Options{
 		UIConfig: func() appconfig.UI { return ui },
 		Preview:  &snapshot, ForceWelcome: welcome, DisableWelcome: !welcome,
-		HostMenus:     menus,
-		RFFetch:       func(context.Context) ([]native.RFEntry, error) { return previewRFEntries(), nil },
-		RFApplyOrder:  func(context.Context, []native.RFEntry) error { return nil },
-		FrontPanelKey: func(int, string) error { return nil },
-		MirrorLCD:     func(string, string) error { return nil },
+		HostMenus:    menus,
+		RFFetch:      func(context.Context) ([]native.RFEntry, error) { return previewRFEntries(), nil },
+		RFApplyOrder: func(context.Context, []native.RFEntry) error { return nil },
+		MirrorLCD:    func(string, string) error { return nil },
 		RFReplaceSupport: func() control.RFReplaceSupport {
 			return control.RFReplaceSupport{Known: true, Supported: true, Reason: "advertised by preview HELLO"}
 		},
@@ -484,6 +484,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 	if options.Remote != nil {
 		model.remoteSnapshot = options.Remote.InitialSnapshot
 		model.remoteSnapshotPending = options.Remote.Snapshot != nil
+		model.frontPanelRefreshRequired = options.Remote.FrontPanel != nil
 		model.remoteSnapshot.ConnectionState = strings.TrimSpace(model.remoteSnapshot.ConnectionState)
 		if model.remoteSnapshot.ConnectionState == "" {
 			model.remoteSnapshot.ConnectionState = "remote IPC"
@@ -711,7 +712,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if snapshot.Connected && model.remote.FrontPanel != nil &&
 				snapshot.Hello.Capabilities&native.CapabilityFrontPanelSnapshot != 0 &&
 				!model.frontPanelPending &&
-				((!snapshot.HaveFrontPanel && time.Since(model.frontPanelLastRefresh) >= time.Second) ||
+				((model.frontPanelRefreshRequired && time.Since(model.frontPanelLastRefresh) >= time.Second) ||
+					(!snapshot.HaveFrontPanel && time.Since(model.frontPanelLastRefresh) >= time.Second) ||
 					(snapshot.HaveFrontPanel && model.page == PageMenus &&
 						time.Since(model.frontPanelLastRefresh) >= 250*time.Millisecond)) {
 				model.frontPanelPending = true
@@ -936,6 +938,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.remoteSnapshot.ConnectionUpdated = time.Now()
 			model.haveLCDPresentation = false
 			model.lcdPresentation = control.LCDPresentationState{}
+			model.frontPanelRefreshRequired = true
 			model.frontPanelLastRefresh = time.Time{}
 			model.lcdPresentationLastFetch = time.Time{}
 			break
@@ -956,6 +959,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.remoteAuthorityEpoch++
 			model.haveLCDPresentation = false
 			model.lcdPresentation = control.LCDPresentationState{}
+			model.frontPanelRefreshRequired = true
 			model.frontPanelLastRefresh = time.Time{}
 			model.lcdPresentationLastFetch = time.Time{}
 		}
@@ -1147,6 +1151,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.remoteSnapshot.FrontPanel = message.panel
 			model.remoteSnapshot.HaveFrontPanel = true
 			model.remoteSnapshot.FrontPanelUpdated = time.Now()
+			model.frontPanelRefreshRequired = false
 		}
 
 	case lcdPresentationResultMsg:

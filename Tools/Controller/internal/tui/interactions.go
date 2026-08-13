@@ -1660,7 +1660,7 @@ func (model Model) frontPanelGesture(key int, phase string) (Model, tea.Cmd, boo
 		return model, nil, true
 	}
 	if !model.frontPanelControlsAvailable(model.snapshot()) {
-		model.setNotice("Front-panel keys are unavailable until an exact panel snapshot and remote-key capability/backend are reported")
+		model.setNotice("Front-panel keys are unavailable until the board advertises a bounded remote-key deadman/lease")
 		return model, nil, true
 	}
 	if model.hostMenus != nil && model.hostMenus.Snapshot().Active {

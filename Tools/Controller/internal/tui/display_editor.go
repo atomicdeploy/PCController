@@ -45,9 +45,11 @@ func (model Model) lcdDisplayState(snapshot control.Snapshot) (byte, bool) {
 	if !snapshot.Connected || snapshot.Hello.Capabilities&native.CapabilityLCD == 0 {
 		return 0, false
 	}
-	if presentation, ok := model.currentLCDPresentation(snapshot); ok &&
-		presentation.Physical && presentation.Address != 0 {
-		return presentation.Address, true
+	if snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 {
+		if presentation, ok := model.currentLCDPresentation(snapshot); ok &&
+			presentation.Physical && presentation.Address != 0 {
+			return presentation.Address, true
+		}
 	}
 	if frontPanelSnapshotAvailable(snapshot) && snapshot.FrontPanel.LCDAvailable &&
 		snapshot.FrontPanel.LCDAddress != 0 {

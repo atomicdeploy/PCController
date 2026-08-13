@@ -129,7 +129,18 @@ func frontPanelSnapshotAvailable(snapshot control.Snapshot) bool {
 
 func (model Model) frontPanelControlsAvailable(snapshot control.Snapshot) bool {
 	return model.frontPanelKey != nil && frontPanelSnapshotAvailable(snapshot) &&
-		snapshot.Hello.Capabilities&native.CapabilityRemoteKeys != 0
+		snapshot.Hello.Capabilities&native.CapabilityRemoteKeys != 0 &&
+		remoteKeyLifecycleLeaseAdvertised(snapshot)
+}
+
+func remoteKeyLifecycleLeaseAdvertised(snapshot control.Snapshot) bool {
+	_ = snapshot
+	// RemoteKeys only promises injected Down/Hold/Up delivery. The current
+	// HELLO contract does not advertise a board-side lease/deadman that expires
+	// a lost Down after process, IPC, or UART failure. Never infer that safety
+	// property from RemoteKeys; keep K1-K4 hidden until a future explicit
+	// capability can be checked here.
+	return false
 }
 
 func (model Model) lcdPromptMirrorAvailable(snapshot control.Snapshot) bool {
