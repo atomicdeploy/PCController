@@ -217,6 +217,7 @@ type Manager struct {
 	statusLED          *statusLEDArbiter
 	segmentScroll      *segmentScrollPresenter
 	buzzerJobs         chan buzzerMirrorJob
+	buzzerPlay         func(context.Context, buzzerMirrorJob) error
 	discoveryRefresh   chan struct{}
 	discoveryIdentity  DiscoveryHostIdentity
 }

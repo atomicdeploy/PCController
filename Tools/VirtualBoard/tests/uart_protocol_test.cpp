@@ -203,7 +203,7 @@ void testBuzzerPushCarriesMCUTimestamp() {
       sizeof(raw));
   require(length == 15 && raw[2] == ControllerProtocol::BuzzerChanged &&
               raw[4] == 9,
-          "buzzer push did not use the optional nine-byte timed payload");
+          "buzzer push did not use the required nine-byte timed payload");
   require(raw[5] == 0x70 && raw[6] == 0x03 && raw[7] == 125 &&
               raw[8] == 0 && raw[9] == 0 && raw[10] == 0x78 &&
               raw[11] == 0x56 && raw[12] == 0x34 && raw[13] == 0x12,
