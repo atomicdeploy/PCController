@@ -855,7 +855,7 @@
     },
     "controller.subscribe": {
       "capability": "events",
-      "summary": "Subscribe this WebSocket connection to activity events, changed state, explicit debug, raw opcodes, and/or status.",
+      "summary": "Subscribe this WebSocket connection to activity events, changed state, explicit debug, raw opcodes, and/or status; preserve=true replaces only listed topics without interrupting other ordered streams.",
       "idempotency": "safe"
     },
     "controller.system.status": {
@@ -870,17 +870,17 @@
     },
     "controller.ui.config": {
       "capability": "read",
-      "summary": "ui config",
+      "summary": "Return host-owned UI settings, including canonical live-measurement refresh and freshness timing.",
       "idempotency": "safe"
     },
     "controller.ui.config.get": {
       "capability": "read",
-      "summary": "ui config get",
+      "summary": "Return host-owned UI settings, including status_interval_ms and measurement_freshness_ms.",
       "idempotency": "safe"
     },
     "controller.ui.config.set": {
       "capability": "host_configuration",
-      "summary": "ui config set",
+      "summary": "Atomically persist host UI fields; live timing requires status_interval_ms 200..500 and measurement_freshness_ms at least refresh+100 and at most 10000.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.unsubscribe": {

@@ -41,7 +41,7 @@ import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
 import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
-import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
+import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken, type StreamControl } from './api'
 import {
   adjacentPageHotkey,
   ignoresGlobalHotkeys,
@@ -393,6 +393,7 @@ export default function App() {
   const audioRef = useRef<AudioEngine | null>(null)
   const previousAudioConnection = useRef<boolean | null>(null)
   const tabChannelRef = useRef<TabChannel | null>(null)
+	const streamControlRef = useRef<StreamControl | null>(null)
   const appearanceETagRef = useRef('')
   const appearanceDesiredRef = useRef(appearance)
   const appearanceSaveChain = useRef<Promise<void>>(Promise.resolve())
@@ -428,6 +429,7 @@ export default function App() {
   const refreshHostAppearance = useCallback(async () => {
     const config = await getUIConfig()
     setUIConfig(config)
+		streamControlRef.current?.updateStatusInterval(config.status_interval_ms)
     adoptHostAppearance(config.appearance, config.appearance_etag)
     return config
   }, [adoptHostAppearance])
@@ -527,6 +529,7 @@ export default function App() {
       if (payload.type === 'controller-event') {
         const event = payload.event as ControllerEvent
         setEvents((current) => prependSignificantControllerEvent(current, event))
+			if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
       }
     })
     const announce = () => channel.publishPresence(document.hidden ? 'hidden' : 'active', pageRef.current)
@@ -1013,7 +1016,7 @@ export default function App() {
       return () => window.clearInterval(timer)
     }
     const abort = new AbortController()
-    let stopStream = () => {}
+	let stopStream = Object.assign(() => {}, { updateStatusInterval: (_intervalMS: number) => {} }) as StreamControl
     void (async () => {
       try {
         setBootTarget(42)
@@ -1107,6 +1110,7 @@ export default function App() {
             }
           },
         })
+		streamControlRef.current = stopStream
         setBootTarget(100)
       } catch (cause) {
         setStartupProbeResolved(true)
@@ -1117,12 +1121,16 @@ export default function App() {
         setBootTarget(100)
       }
     })()
-    return () => { abort.abort(); stopStream() }
+    return () => {
+		abort.abort()
+		if (streamControlRef.current === stopStream) streamControlRef.current = null
+		stopStream()
+	}
   }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance, token])
 
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
-    boardSettingsReadState,
+		boardSettingsReadState, uiConfig,
     transport: {
       streamState,
       authenticationRequired: sessionAuthenticationGuidanceRequired({

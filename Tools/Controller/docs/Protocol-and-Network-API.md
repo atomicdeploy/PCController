@@ -603,6 +603,8 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.snapshot` | `{}` | cached connection, identity, status, and settings |
 | `controller.command.catalog` | `{}` | machine-readable registered command names, aliases, usage, summary, and task group |
 | `controller.status` | `{}` | fresh board status |
+| `controller.ui.config`, `controller.ui.config.get` | `{}` | host-authoritative UI settings, including `status_interval_ms` and `measurement_freshness_ms` |
+| `controller.ui.config.set` | one or both timing fields (or another supported UI field) | atomically validate, persist, and push the host-owned setting; refresh is `200..500` ms and freshness is `refresh + 100..10000` ms |
 | `controller.peripherals.get` | `{}` | host-owned custom names plus the canonical 34-entry peripheral descriptor registry; requires `read` |
 | `controller.peripherals.set` | `peripheral_names` object | atomically replace custom host names and return the normalized names plus registry; requires `host_configuration` |
 | `controller.pwm.values` | `{}` | authoritative board availability, selected channel, and all sixteen logical values; requires `read` |
@@ -922,17 +924,34 @@ WebSocket URL. The successful `subscribed` response includes the authenticated
 principal used for subsequent capability decisions.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"controller.subscribe","params":{"topics":["events","state","opcodes","status"],"opcodes":[156,157,225],"interval_ms":200,"after_id":0}}
+{"jsonrpc":"2.0","id":1,"method":"controller.subscribe","params":{"topics":["events","state","opcodes","status"],"opcodes":[156,157,225],"interval_ms":250,"after_id":0}}
 ```
 
+To adopt a pushed host timing change without interrupting ordered activity and
+state streams, replace only the status topic with `preserve:true`:
+
 ```json
-{"jsonrpc":"2.0","id":2,"method":"controller.unsubscribe","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"controller.subscribe","params":{"topics":["status"],"interval_ms":300,"preserve":true}}
+```
+
+Without `preserve`, `controller.subscribe` retains its compatibility behavior
+and replaces every topic owned by that connection. With `preserve`, only the
+listed topics are joined and replaced; their old workers stop before the new
+ones begin, while all unlisted topics retain their cursor and worker.
+
+```json
+{"jsonrpc":"2.0","id":3,"method":"controller.unsubscribe","params":{}}
 ```
 
 Topics are `events`, `state`, `debug`, `opcodes`, and `status` (`opcode` and
 `telemetry` are accepted as singular/status aliases). An omitted opcode filter receives every
 valid nonzero opcode; a supplied `opcodes` array selects exact values 1..255.
-Status interval is 50..60000 ms and defaults to 200 ms. Event
+Status interval is 200..500 ms (2..5 Hz) and defaults to 250 ms. The same
+host-owned value is exposed in TUI/Web Settings and is hot-applied when a
+`config` event arrives; replacing a subscription cancels its prior scheduler so
+requests do not overlap. The default freshness window is 1500 ms and the live
+boundary is exclusive: an age below the window is live, while an age exactly
+at the boundary is stale. Event
 delivery starts after `after_id`; zero starts at the current tail and does not
 replay the whole timeline. Push messages are JSON-RPC notifications:
 

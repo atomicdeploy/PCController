@@ -33,16 +33,25 @@ describe('API error details', () => {
         websocket_path: '/ipc',
         session_ticket_path: '/api/session/ticket',
         auth_required: true,
+		status_interval_ms: 250,
+		measurement_freshness_ms: 1500,
         appearance: { theme: 'dark', locale: 'fa', direction: 'rtl', reduceMotion: true, compactNumbers: false, audioMuted: true, audioVolume: 0 },
         appearance_etag: 'b'.repeat(64),
         reset_on_reconnect: false,
         future_capability: 'accepted',
       }), { status: 200 }))
+		.mockResolvedValueOnce(new Response(JSON.stringify({
+			name: 'Controller', setup_complete: true, websocket_path: '/ipc',
+			session_ticket_path: '/api/session/ticket', auth_required: false,
+			appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+			appearance_etag: 'c'.repeat(64), status_interval_ms: 125, measurement_freshness_ms: 1500,
+		}), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(getUIConfig()).rejects.toThrow('missing required setup_complete')
     await expect(getUIConfig()).rejects.toThrow('missing host-authoritative appearance')
     await expect(getUIConfig()).rejects.toThrow('missing a safe session-ticket path')
     await expect(getUIConfig()).resolves.toMatchObject({ setup_complete: true, future_capability: 'accepted' })
+		await expect(getUIConfig()).rejects.toThrow('live-measurement timing')
   })
 })

@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/discovery"
@@ -62,6 +63,9 @@ type Model struct {
 	rebootPending            bool
 	statusPending            bool
 	uiConfig                 func() appconfig.UI
+	uiConfigUpdates          <-chan appconfig.Config
+	statusUpdates            <-chan controllerapi.StatusUpdate
+	statusTickGeneration     uint64
 	saveUI                   func(appconfig.UI) error
 	applyTUIConsole          func(appconfig.TUIConsole) error
 	uiValue                  appconfig.UI
@@ -191,7 +195,14 @@ type Model struct {
 	noticeUntil          time.Time
 }
 
-type tickMsg time.Time
+type tickMsg struct {
+	at         time.Time
+	generation uint64
+}
+type uiConfigUpdateMsg struct {
+	value appconfig.UI
+	ok    bool
+}
 type welcomeTickMsg time.Time
 type welcomeMelodyResultMsg struct{ err error }
 type runtimeEventMsg control.Event
@@ -208,6 +219,10 @@ type ownerActionResultMsg struct {
 type statusResultMsg struct {
 	status native.Status
 	err    error
+}
+type subscribedStatusMsg struct {
+	update controllerapi.StatusUpdate
+	ok     bool
 }
 type menuCatalogResultMsg struct {
 	catalog control.MenuCatalog
@@ -402,7 +417,9 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 	model := Model{
 		runtime: runtime, engine: engine, input: input, spinner: progress,
 		page: PageDashboard, historyPos: -1, completionIndex: -1, uiConfig: options.UIConfig,
-		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
+		uiConfigUpdates: options.UIConfigUpdates,
+		statusUpdates:   options.StatusUpdates,
+		saveUI:          options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
 		hostIntegrations:     options.HostIntegrations,
 		saveHostIntegrations: options.SaveIntegrations,
 		hostIntegrationValue: hostIntegrationValue,
@@ -474,7 +491,13 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 }
 
 func (model Model) Init() tea.Cmd {
-	commands := []tea.Cmd{model.spinner.Tick, tick(model.statusInterval()), tea.SetWindowTitle(model.terminalTitle())}
+	commands := []tea.Cmd{model.spinner.Tick, tick(model.statusInterval(), model.statusTickGeneration), tea.SetWindowTitle(model.terminalTitle())}
+	if model.uiConfigUpdates != nil {
+		commands = append(commands, waitUIConfigUpdate(model.uiConfigUpdates))
+	}
+	if model.statusUpdates != nil {
+		commands = append(commands, waitSubscribedStatus(model.statusUpdates))
+	}
 	if model.appActions != nil {
 		commands = append(commands, waitAppAction(model.appActions))
 	}
@@ -546,6 +569,20 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case appActionClosedMsg:
 		model.appActions = nil
 
+	case uiConfigUpdateMsg:
+		if !message.ok {
+			model.uiConfigUpdates = nil
+			break
+		}
+		model.syncUIConfig(message.value)
+		// Invalidate the already-scheduled timer and start a fresh cadence from
+		// this pushed host configuration. Stale timers are ignored below.
+		model.statusTickGeneration++
+		commands = append(commands, tick(model.statusInterval(), model.statusTickGeneration))
+		if model.uiConfigUpdates != nil {
+			commands = append(commands, waitUIConfigUpdate(model.uiConfigUpdates))
+		}
+
 	case tea.WindowSizeMsg:
 		model.width = message.Width
 		model.height = message.Height
@@ -573,8 +610,17 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
+		if message.generation != model.statusTickGeneration {
+			break
+		}
 		if model.uiConfig != nil {
+			before := model.statusInterval()
 			model.syncUIConfig(model.uiConfig())
+			if model.statusInterval() != before {
+				model.statusTickGeneration++
+				commands = append(commands, tick(model.statusInterval(), model.statusTickGeneration))
+				break
+			}
 		}
 		if model.hostIntegrations != nil {
 			model.hostIntegrationValue = model.hostIntegrations()
@@ -600,7 +646,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				model.connectPending = true
 				commands = append(commands, connect(model.runtime))
 			}
-			if snapshot.Connected && model.pageNeedsStatus() && !model.statusPending {
+			if snapshot.Connected && model.pageNeedsStatus() && model.statusUpdates == nil && !model.statusPending {
 				model.statusPending = true
 				commands = append(commands, refreshStatus(model.runtime))
 			}
@@ -628,7 +674,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				commands = append(commands, refreshFrontPanel(model.runtime))
 			}
 		}
-		commands = append(commands, tick(model.statusInterval()))
+		commands = append(commands, tick(model.statusInterval(), model.statusTickGeneration))
 
 	case welcomeTickMsg:
 		if model.welcome {
@@ -824,6 +870,20 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.appendLog("warn", "status: "+message.err.Error())
 		} else {
 			model.recordSample(message.status, time.Now())
+		}
+
+	case subscribedStatusMsg:
+		if !message.ok {
+			model.statusUpdates = nil
+			break
+		}
+		if message.update.Error != "" {
+			model.appendLog("warn", "status: "+message.update.Error)
+		} else {
+			model.recordSample(message.update.Status, message.update.Time)
+		}
+		if model.statusUpdates != nil {
+			commands = append(commands, waitSubscribedStatus(model.statusUpdates))
 		}
 
 	case menuCatalogResultMsg:
@@ -1496,6 +1556,9 @@ func notifyImportant(notifier hostui.Notifier, notification hostui.Notification)
 
 func (model Model) statusInterval() time.Duration {
 	if !model.pageNeedsStatus() {
+		// This drives local repaint/reconnect housekeeping only. The tick handler
+		// gates every STATUS request on pageNeedsStatus, so even a legacy 100ms
+		// idle value cannot exceed the canonical 2..5Hz board sampling policy.
 		if model.uiValue.IdleStatusIntervalMS >= 100 {
 			return time.Duration(model.uiValue.IdleStatusIntervalMS) * time.Millisecond
 		}
@@ -1503,11 +1566,11 @@ func (model Model) statusInterval() time.Duration {
 		return time.Second
 	}
 	interval := model.prefs.PollInterval
-	if interval < 100*time.Millisecond {
-		interval = 100 * time.Millisecond
+	if interval < time.Duration(appconfig.MeasurementRefreshMinMS)*time.Millisecond {
+		interval = time.Duration(appconfig.MeasurementRefreshMinMS) * time.Millisecond
 	}
-	if model.snapshot().Status.DoorOpen && interval > 125*time.Millisecond && model.pageNeedsStatus() {
-		return 125 * time.Millisecond
+	if interval > time.Duration(appconfig.MeasurementRefreshMaxMS)*time.Millisecond {
+		interval = time.Duration(appconfig.MeasurementRefreshMaxMS) * time.Millisecond
 	}
 	return interval
 }
@@ -1677,8 +1740,24 @@ func (model *Model) seedPreviewPWM() {
 	model.havePWMValues = true
 }
 
-func tick(interval time.Duration) tea.Cmd {
-	return tea.Tick(interval, func(value time.Time) tea.Msg { return tickMsg(value) })
+func tick(interval time.Duration, generation uint64) tea.Cmd {
+	return tea.Tick(interval, func(value time.Time) tea.Msg {
+		return tickMsg{at: value, generation: generation}
+	})
+}
+
+func waitUIConfigUpdate(updates <-chan appconfig.Config) tea.Cmd {
+	return func() tea.Msg {
+		value, ok := <-updates
+		return uiConfigUpdateMsg{value: value.UI, ok: ok}
+	}
+}
+
+func waitSubscribedStatus(updates <-chan controllerapi.StatusUpdate) tea.Cmd {
+	return func() tea.Msg {
+		update, ok := <-updates
+		return subscribedStatusMsg{update: update, ok: ok}
+	}
 }
 
 func welcomeTick() tea.Cmd {

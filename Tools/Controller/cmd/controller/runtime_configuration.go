@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -431,6 +432,7 @@ func watchConfiguration(
 	runtime *control.Runtime,
 	connection *connectionFlags,
 ) {
+	publishConfigurationChanges(ctx, store, runtime)
 	store.Watch(
 		ctx,
 		appconfig.DefaultWatchInterval,
@@ -448,10 +450,6 @@ func watchConfiguration(
 					"history configuration rejected: "+err.Error(),
 				)
 			}
-			runtime.PublishHostEvent(
-				"config",
-				"reloaded "+store.Path()+" (PC-side settings only)",
-			)
 		},
 		func(err error) {
 			runtime.PublishHostEvent(
@@ -460,6 +458,30 @@ func watchConfiguration(
 			)
 		},
 	)
+}
+
+func publishConfigurationChanges(
+	ctx context.Context,
+	store *appconfig.Store,
+	runtime *control.Runtime,
+) {
+	updates := store.Subscribe(ctx)
+	// Subscribe publishes the current value synchronously. It is bootstrap
+	// state, not a change, so consume it before returning to the caller.
+	<-updates
+	go func() {
+		for value := range updates {
+			runtime.PublishStructuredEvent(control.Event{
+				Kind: "config", Stream: "activity",
+				Text: "Host configuration updated", Source: "host", Action: "config.changed",
+				Metadata: map[string]string{
+					"scope":                    "host",
+					"status_interval_ms":       strconv.Itoa(value.UI.StatusIntervalMS),
+					"measurement_freshness_ms": strconv.Itoa(value.UI.MeasurementFreshnessMS),
+				},
+			})
+		}
+	}()
 }
 
 func bindRuntimeDevicePersistence(

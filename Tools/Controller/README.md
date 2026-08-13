@@ -189,6 +189,16 @@ pushes status, board events, host events, and global page actions. Those event
 lines are interleaved in the bounded terminal transcript and remain available
 in the filterable Activity page.
 
+Live-measurement timing is one host-owned policy shared by every connected
+surface. The default refresh/update interval is 250 ms (4 Hz), constrained to
+200..500 ms (2..5 Hz), and the default freshness window is 1500 ms. Change both
+from TUI or Web Settings, `controller.ui.config.set`, the watched config file,
+or the process-lifetime `PCCONTROLLER_UI_STATUS_INTERVAL_MS` and
+`PCCONTROLLER_UI_MEASUREMENT_FRESHNESS_MS` environment overrides. Validated
+changes are pushed as `config` events and reschedule TUI/Web sampling without a
+process restart; environment values take precedence without being written back
+to the persistent file.
+
 On Windows, a primary-owning `web` process also provides a native tray menu by
 default; `--no-tray` disables it. Its tooltip and status row use the
 authenticated controller state, not merely an open HTTP/WebSocket listener.

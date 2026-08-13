@@ -241,6 +241,8 @@ export interface UIConfig {
   setup_complete: boolean
   appearance: Appearance
   appearance_etag: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
   welcome_melody?: string
 	websocket_path: string
   socket_io_path?: string
@@ -263,6 +265,8 @@ export interface HostUISettings {
 	tagline: string
   setup_complete: boolean
   welcome_melody: string
+	status_interval_ms: number
+	measurement_freshness_ms: number
   appearance: Appearance
   appearance_etag: string
   segment_scroll: SegmentScrollSettings

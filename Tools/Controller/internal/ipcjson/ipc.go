@@ -284,19 +284,21 @@ type Service struct {
 // browserUISettings is the narrow persistent host-owned subset exposed to the
 // browser. Board EEPROM settings remain on the independent board command path.
 type browserUISettings struct {
-	AppTitle        string                           `json:"app_title"`
-	Tagline         string                           `json:"tagline"`
-	SetupComplete   bool                             `json:"setup_complete"`
-	WelcomeMelody   string                           `json:"welcome_melody"`
-	Appearance      browserAppearance                `json:"appearance"`
-	AppearanceETag  string                           `json:"appearance_etag"`
-	SegmentScroll   appconfig.SegmentScroll          `json:"segment_scroll"`
-	PeripheralNames map[string]string                `json:"peripheral_names"`
-	Peripherals     []appconfig.PeripheralDescriptor `json:"peripherals"`
-	Changed         *bool                            `json:"changed,omitempty"`
-	ChangedFields   []string                         `json:"changed_fields,omitempty"`
-	Before          map[string]any                   `json:"before,omitempty"`
-	After           map[string]any                   `json:"after,omitempty"`
+	AppTitle               string                           `json:"app_title"`
+	Tagline                string                           `json:"tagline"`
+	SetupComplete          bool                             `json:"setup_complete"`
+	WelcomeMelody          string                           `json:"welcome_melody"`
+	StatusIntervalMS       int                              `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                              `json:"measurement_freshness_ms"`
+	Appearance             browserAppearance                `json:"appearance"`
+	AppearanceETag         string                           `json:"appearance_etag"`
+	SegmentScroll          appconfig.SegmentScroll          `json:"segment_scroll"`
+	PeripheralNames        map[string]string                `json:"peripheral_names"`
+	Peripherals            []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Changed                *bool                            `json:"changed,omitempty"`
+	ChangedFields          []string                         `json:"changed_fields,omitempty"`
+	Before                 map[string]any                   `json:"before,omitempty"`
+	After                  map[string]any                   `json:"after,omitempty"`
 }
 
 type peripheralSettings struct {
@@ -1424,15 +1426,17 @@ func (service *Service) hostConfig() appconfig.Config {
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
 	return browserUISettings{
-		AppTitle:        productidentity.Title(ui.AppTitle),
-		Tagline:         ui.Tagline,
-		SetupComplete:   ui.SetupComplete,
-		WelcomeMelody:   ui.WelcomeMelody,
-		Appearance:      browserAppearanceFromConfig(ui.Appearance),
-		AppearanceETag:  appearanceETag(ui.Appearance),
-		SegmentScroll:   ui.SegmentScroll,
-		PeripheralNames: clonePeripheralNames(ui.PeripheralNames),
-		Peripherals:     appconfig.PeripheralDescriptors(),
+		AppTitle:               productidentity.Title(ui.AppTitle),
+		Tagline:                ui.Tagline,
+		SetupComplete:          ui.SetupComplete,
+		WelcomeMelody:          ui.WelcomeMelody,
+		StatusIntervalMS:       ui.StatusIntervalMS,
+		MeasurementFreshnessMS: ui.MeasurementFreshnessMS,
+		Appearance:             browserAppearanceFromConfig(ui.Appearance),
+		AppearanceETag:         appearanceETag(ui.Appearance),
+		SegmentScroll:          ui.SegmentScroll,
+		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
+		Peripherals:            appconfig.PeripheralDescriptors(),
 	}
 }
 
@@ -2214,6 +2218,7 @@ type wsSubscription struct {
 	Opcodes    []int    `json:"opcodes,omitempty"`
 	IntervalMS int      `json:"interval_ms,omitempty"`
 	AfterID    uint64   `json:"after_id,omitempty"`
+	Preserve   bool     `json:"preserve,omitempty"`
 }
 
 func websocketMux(serverContext context.Context, service *Service) http.Handler {
@@ -2245,20 +2250,22 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		config := service.hostConfig()
 		settings := service.browserUISettings()
 		writeHTTPJSON(writer, http.StatusOK, map[string]any{
-			"name":                settings.AppTitle,
-			"tagline":             settings.Tagline,
-			"host_version":        strings.TrimSpace(service.HostVersion),
-			"source_hash":         strings.TrimSpace(service.HostSourceHash),
-			"build_time":          strings.TrimSpace(service.HostBuildTime),
-			"setup_complete":      config.UI.SetupComplete,
-			"welcome_melody":      config.UI.WelcomeMelody,
-			"appearance":          settings.Appearance,
-			"appearance_etag":     settings.AppearanceETag,
-			"websocket_path":      webSocketPath,
-			"socket_io_path":      socketIOPath,
-			"session_ticket_path": SessionTicketPath,
-			"server_proof_path":   ServerProofPath,
-			"auth_required":       strings.TrimSpace(service.currentAuthToken()) != "",
+			"name":                     settings.AppTitle,
+			"tagline":                  settings.Tagline,
+			"host_version":             strings.TrimSpace(service.HostVersion),
+			"source_hash":              strings.TrimSpace(service.HostSourceHash),
+			"build_time":               strings.TrimSpace(service.HostBuildTime),
+			"setup_complete":           config.UI.SetupComplete,
+			"welcome_melody":           config.UI.WelcomeMelody,
+			"status_interval_ms":       settings.StatusIntervalMS,
+			"measurement_freshness_ms": settings.MeasurementFreshnessMS,
+			"appearance":               settings.Appearance,
+			"appearance_etag":          settings.AppearanceETag,
+			"websocket_path":           webSocketPath,
+			"socket_io_path":           socketIOPath,
+			"session_ticket_path":      SessionTicketPath,
+			"server_proof_path":        ServerProofPath,
+			"auth_required":            strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device":          config.Integrations.LocalDevice.Enabled,
 				"data_hub":              config.Integrations.DataHub.Enabled,
@@ -3328,12 +3335,8 @@ func serveWebSocket(
 		defer cancel()
 		return connection.Write(writeContext, websocket.MessageText, encoded)
 	}
-	var stopSubscription context.CancelFunc
-	defer func() {
-		if stopSubscription != nil {
-			stopSubscription()
-		}
-	}()
+	subscriptions := newWebSocketSubscriptions(ctx, service.Client, writeJSON)
+	defer subscriptions.stopAll()
 
 	for {
 		messageType, data, readErr := connection.Read(ctx)
@@ -3364,25 +3367,16 @@ func serveWebSocket(
 			} else if normalized, err := normalizeSubscription(subscription); err != nil {
 				response.Error = &RPCError{Code: -32602, Message: err.Error()}
 			} else {
-				if stopSubscription != nil {
-					stopSubscription()
-				}
-				subscriptionContext, cancel := context.WithCancel(ctx)
-				stopSubscription = cancel
+				subscriptions.replace(normalized)
 				response.Result = map[string]any{
 					"subscribed":  true,
 					"topics":      normalized.Topics,
 					"opcodes":     normalized.Opcodes,
 					"interval_ms": normalized.IntervalMS,
+					"preserve":    normalized.Preserve,
 					"latest_id":   service.Client.LatestEventID(),
 					"principal":   access.Principal,
 				}
-				startWebSocketSubscription(
-					subscriptionContext,
-					service.Client,
-					normalized,
-					writeJSON,
-				)
 			}
 			if len(rpcRequest.ID) != 0 {
 				if err := writeJSON(response); err != nil {
@@ -3392,10 +3386,7 @@ func serveWebSocket(
 			continue
 		}
 		if rpcRequest.Method == "controller.unsubscribe" {
-			if stopSubscription != nil {
-				stopSubscription()
-				stopSubscription = nil
-			}
+			subscriptions.stopAll()
 			if len(rpcRequest.ID) != 0 {
 				if err := writeJSON(Response{
 					JSONRPC: Version, ID: rpcRequest.ID,
@@ -3481,12 +3472,18 @@ func serveSocketIO(
 		return
 	}
 
-	var stopSubscription context.CancelFunc
-	defer func() {
-		if stopSubscription != nil {
-			stopSubscription()
-		}
-	}()
+	subscriptions := newWebSocketSubscriptions(
+		ctx,
+		service.Client,
+		func(value any) error {
+			notification, ok := value.(wsNotification)
+			if !ok {
+				return writeEvent("controller.data", value)
+			}
+			return writeEvent(notification.Method, notification.Params)
+		},
+	)
+	defer subscriptions.stopAll()
 	go func() {
 		ticker := time.NewTicker(25 * time.Second)
 		defer ticker.Stop()
@@ -3550,34 +3547,16 @@ func serveSocketIO(
 					_ = writeEvent("error", map[string]string{"error": err.Error()})
 					continue
 				}
-				if stopSubscription != nil {
-					stopSubscription()
-				}
-				subscriptionContext, stop := context.WithCancel(ctx)
-				stopSubscription = stop
-				startWebSocketSubscription(
-					subscriptionContext,
-					service.Client,
-					normalized,
-					func(value any) error {
-						notification, ok := value.(wsNotification)
-						if !ok {
-							return writeEvent("controller.data", value)
-						}
-						return writeEvent(notification.Method, notification.Params)
-					},
-				)
+				subscriptions.replace(normalized)
 				_ = writeEvent("subscribed", map[string]any{
 					"topics": normalized.Topics, "opcodes": normalized.Opcodes,
 					"interval_ms": normalized.IntervalMS,
+					"preserve":    normalized.Preserve,
 					"latest_id":   service.Client.LatestEventID(),
 					"principal":   access.Principal,
 				})
 			case "unsubscribe":
-				if stopSubscription != nil {
-					stopSubscription()
-					stopSubscription = nil
-				}
+				subscriptions.stopAll()
 				_ = writeEvent("unsubscribed", map[string]bool{"subscribed": false})
 			case "message":
 				if err := service.authorizeCapability(
@@ -3861,10 +3840,15 @@ func normalizeSubscription(value wsSubscription) (wsSubscription, error) {
 	}
 	if seen["status"] {
 		if value.IntervalMS == 0 {
-			value.IntervalMS = 200
+			value.IntervalMS = appconfig.DefaultMeasurementRefreshMS
 		}
-		if value.IntervalMS < 50 || value.IntervalMS > 60_000 {
-			return wsSubscription{}, errors.New("status interval_ms must be 50..60000")
+		if value.IntervalMS < appconfig.MeasurementRefreshMinMS ||
+			value.IntervalMS > appconfig.MeasurementRefreshMaxMS {
+			return wsSubscription{}, fmt.Errorf(
+				"status interval_ms must be %d..%d",
+				appconfig.MeasurementRefreshMinMS,
+				appconfig.MeasurementRefreshMaxMS,
+			)
 		}
 	} else {
 		value.IntervalMS = 0
@@ -3872,52 +3856,113 @@ func normalizeSubscription(value wsSubscription) (wsSubscription, error) {
 	return value, nil
 }
 
-func startWebSocketSubscription(
+type webSocketSubscriptionWorker struct {
+	cancel context.CancelFunc
+	done   <-chan struct{}
+}
+
+// webSocketSubscriptions owns one independently replaceable worker per topic.
+// A preserve subscription is deliberately topic-scoped: changing status
+// cadence cannot cancel and recreate the ordered event/state streams or reset
+// their cursors.
+type webSocketSubscriptions struct {
+	ctx     context.Context
+	client  *controller.Client
+	write   func(any) error
+	workers map[string]webSocketSubscriptionWorker
+}
+
+func newWebSocketSubscriptions(
 	ctx context.Context,
 	client *controller.Client,
-	subscription wsSubscription,
 	write func(any) error,
-) {
-	for _, topic := range subscription.Topics {
+) *webSocketSubscriptions {
+	return &webSocketSubscriptions{
+		ctx: ctx, client: client, write: write,
+		workers: make(map[string]webSocketSubscriptionWorker),
+	}
+}
+
+func (subscriptions *webSocketSubscriptions) replace(value wsSubscription) {
+	if !value.Preserve {
+		subscriptions.stopAll()
+	} else {
+		subscriptions.stop(value.Topics)
+	}
+	for _, topic := range value.Topics {
+		subscriptions.start(topic, value)
+	}
+}
+
+func (subscriptions *webSocketSubscriptions) stop(topics []string) {
+	workers := make([]webSocketSubscriptionWorker, 0, len(topics))
+	for _, topic := range topics {
+		worker, ok := subscriptions.workers[topic]
+		if !ok {
+			continue
+		}
+		delete(subscriptions.workers, topic)
+		worker.cancel()
+		workers = append(workers, worker)
+	}
+	// Join each old topic worker before replacing it. In particular, two rapid
+	// status reconfigurations cannot leave duplicate notification producers.
+	for _, worker := range workers {
+		<-worker.done
+	}
+}
+
+func (subscriptions *webSocketSubscriptions) stopAll() {
+	topics := make([]string, 0, len(subscriptions.workers))
+	for topic := range subscriptions.workers {
+		topics = append(topics, topic)
+	}
+	subscriptions.stop(topics)
+}
+
+func (subscriptions *webSocketSubscriptions) start(topic string, value wsSubscription) {
+	topicContext, cancel := context.WithCancel(subscriptions.ctx)
+	done := make(chan struct{})
+	afterID := value.AfterID
+	if afterID == 0 && topic != "status" {
+		// Capture the cursor before acknowledging the subscription. An event
+		// published immediately after that acknowledgement must not be skipped
+		// while the worker goroutine is still being scheduled.
+		afterID = subscriptions.client.LatestEventID()
+	}
+	subscriptions.workers[topic] = webSocketSubscriptionWorker{cancel: cancel, done: done}
+	go func() {
+		defer close(done)
 		switch topic {
 		case "events":
-			afterID := subscription.AfterID
-			if afterID == 0 {
-				// Capture the cursor before acknowledging the subscription. An
-				// event published immediately after that acknowledgement must not
-				// be skipped while this goroutine is still being scheduled.
-				afterID = client.LatestEventID()
-			}
-			go streamWebSocketEventStream(ctx, client, afterID, "activity", "controller.event", write)
+			streamWebSocketEventStream(
+				topicContext, subscriptions.client, afterID,
+				"activity", "controller.event", subscriptions.write,
+			)
 		case "state":
-			afterID := subscription.AfterID
-			if afterID == 0 {
-				afterID = client.LatestEventID()
-			}
-			go streamWebSocketEventStream(ctx, client, afterID, "state", "controller.state", write)
+			streamWebSocketEventStream(
+				topicContext, subscriptions.client, afterID,
+				"state", "controller.state", subscriptions.write,
+			)
 		case "debug":
-			afterID := subscription.AfterID
-			if afterID == 0 {
-				afterID = client.LatestEventID()
-			}
-			go streamWebSocketEventStream(ctx, client, afterID, "debug", "controller.debug", write)
+			streamWebSocketEventStream(
+				topicContext, subscriptions.client, afterID,
+				"debug", "controller.debug", subscriptions.write,
+			)
 		case "opcodes":
-			afterID := subscription.AfterID
-			if afterID == 0 {
-				afterID = client.LatestEventID()
-			}
-			go streamWebSocketOpcodes(
-				ctx, client, afterID, subscription.Opcodes, write,
+			streamWebSocketOpcodes(
+				topicContext, subscriptions.client, afterID,
+				value.Opcodes, subscriptions.write,
 			)
 		case "status":
-			go streamWebSocketStatus(
-				ctx,
-				client,
-				time.Duration(subscription.IntervalMS)*time.Millisecond,
-				write,
+			streamWebSocketStatus(
+				topicContext,
+				subscriptions.client,
+				time.Duration(value.IntervalMS)*time.Millisecond,
+				subscriptions.write,
 			)
 		}
-	}
+	}()
 }
 
 func streamWebSocketOpcodes(
@@ -4003,7 +4048,17 @@ func streamWebSocketStatus(
 		})
 		return
 	}
-	for update := range updates {
+	for {
+		var update controller.StatusUpdate
+		var ok bool
+		select {
+		case <-ctx.Done():
+			return
+		case update, ok = <-updates:
+			if !ok {
+				return
+			}
+		}
 		if update.Error != "" {
 			if write(wsNotification{
 				JSONRPC: Version,

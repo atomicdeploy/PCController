@@ -30,6 +30,7 @@
     "setup_complete": false,
     "welcome_melody": "notify",
     "status_interval_ms": 250,
+    "measurement_freshness_ms": 1500,
     "idle_status_interval_ms": 0,
     "event_log_limit": 500,
     "history_hours": 24,
@@ -671,14 +672,26 @@
           {
             "id": "poll",
             "label": "POLL",
-            "title": "Polling ms",
+            "title": "Live refresh ms",
             "type": "number",
-            "value": "200",
-            "min": 100,
-            "max": 5000,
+            "value": "250",
+            "min": 200,
+            "max": 500,
             "step": 50,
             "read_action": "pc.ui.status_interval_ms",
             "write_action": "pc.ui.status_interval_ms"
+          },
+          {
+            "id": "fresh",
+            "label": "FRSH",
+            "title": "Fresh window ms",
+            "type": "number",
+            "value": "1500",
+            "min": 300,
+            "max": 10000,
+            "step": 100,
+            "read_action": "pc.ui.measurement_freshness_ms",
+            "write_action": "pc.ui.measurement_freshness_ms"
           },
           {
             "id": "lcd-service",

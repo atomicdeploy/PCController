@@ -14,6 +14,32 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
+func TestMeasurementTimingMutationIsAtomic(t *testing.T) {
+	service, config, updates := appearanceTestService(t)
+	params, _ := json.Marshal(map[string]any{
+		"status_interval_ms": 300, "measurement_freshness_ms": 1600,
+	})
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.ui.config.set", Params: params,
+	})
+	settings, ok := response.Result.(browserUISettings)
+	if response.Error != nil || !ok || settings.StatusIntervalMS != 300 ||
+		settings.MeasurementFreshnessMS != 1600 || *updates != 1 {
+		t.Fatalf("timing response=%#v error=%v updates=%d", response.Result, response.Error, *updates)
+	}
+	invalid, _ := json.Marshal(map[string]any{
+		"status_interval_ms": 500, "measurement_freshness_ms": 550,
+	})
+	response = service.Dispatch(context.Background(), Request{
+		Method: "controller.ui.config.set", Params: invalid,
+	})
+	if response.Error == nil || config.UI.StatusIntervalMS != 300 ||
+		config.UI.MeasurementFreshnessMS != 1600 || *updates != 1 {
+		t.Fatalf("invalid mutation was not atomic: response=%#v config=%d/%d updates=%d",
+			response, config.UI.StatusIntervalMS, config.UI.MeasurementFreshnessMS, *updates)
+	}
+}
+
 func appearanceTestService(t *testing.T) (*Service, *appconfig.Config, *int) {
 	t.Helper()
 	config := appconfig.Defaults()

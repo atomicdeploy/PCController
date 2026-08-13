@@ -98,7 +98,7 @@ import {
   PWMReconciler,
   USER_PWM_CHANNELS,
 } from './pwm-authority'
-import { formatClock, formatCompact, formatDuration, formatNumber, type MessageKey } from './i18n'
+import { formatClock, formatCompact, formatDuration, formatMeasurementFreshness, formatNumber, type MessageKey } from './i18n'
 const TelemetryChart = lazy(() => import('./telemetry-chart').then((module) => ({ default: module.TelemetryChart })))
 import {
   integrationSettingsEqual,
@@ -153,6 +153,37 @@ export interface SharedViewProps {
   relayedTerminal: Array<TabTerminalEntry & { id: string; tabId: string }>
   broadcastTerminal: (entry: TabTerminalEntry) => void
   boardSettingsReadState: BoardSettingsReadState
+	uiConfig: UIConfig | null
+}
+
+function useFreshnessClock(updated: string | undefined, freshnessMS: number): number {
+	const [now, setNow] = useState(Date.now)
+	useEffect(() => {
+		let timer = 0
+		let stopped = false
+		const observed = updated ? Date.parse(updated) : Number.NaN
+		const schedule = () => {
+			if (stopped || !Number.isFinite(observed)) return
+			const age = Math.max(0, Date.now() - observed)
+			// Wake exactly as a sample crosses the exclusive freshness boundary.
+			// Once stale, tenths-of-a-second remain truthful without producing any
+			// extra controller/serial traffic; old ages need only one-Hz repainting.
+			const delay = age < freshnessMS
+				? Math.max(1, freshnessMS - age + 1)
+				: age < 10_000 ? 100 : 1000
+			timer = window.setTimeout(() => {
+				setNow(Date.now())
+				schedule()
+			}, delay)
+		}
+		setNow(Date.now())
+		schedule()
+		return () => {
+			stopped = true
+			window.clearTimeout(timer)
+		}
+	}, [freshnessMS, updated])
+	return now
 }
 
 function pageDetail(snapshot: Snapshot, appTitle: string, locale: Locale): string {
@@ -184,6 +215,14 @@ export function DashboardView(props: SharedViewProps) {
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
+	const freshnessWindow = props.uiConfig?.measurement_freshness_ms ?? 1500
+	const freshnessNow = useFreshnessClock(snapshot.status_updated, freshnessWindow)
+	const measurementFreshness = formatMeasurementFreshness(
+		locale,
+		snapshot.status_updated,
+		freshnessWindow,
+		freshnessNow,
+	)
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
   useEffect(() => {
     let active = true
@@ -202,7 +241,7 @@ export function DashboardView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle
-        eyebrow={snapshot.connected ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
+		eyebrow={snapshot.connected ? measurementFreshness : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
         title={t('dashboard')}
         detail={authenticationRequired ? t('authenticationDashboardDetail') : pageDetail(snapshot, appTitle, locale)}
         action={
@@ -241,7 +280,7 @@ export function DashboardView(props: SharedViewProps) {
         icon={ChartNoAxesCombined}
         iconTone="violet"
         title={snapshot.connected ? t('liveTelemetry') : copy('Telemetry history', 'تاریخچهٔ تله‌متری')}
-        eyebrow={snapshot.connected ? copy('REAL-TIME', 'هم‌زمان') : copy('LAST KNOWN', 'آخرین داده')}
+		eyebrow={snapshot.connected ? measurementFreshness : copy('LAST KNOWN', 'آخرین داده')}
         className="telemetry-chart-card"
         action={<StatusBadge tone={snapshot.connected ? 'good' : 'warn'}>{samples.length} {copy('samples', 'نمونه')}</StatusBadge>}
         menu={[
@@ -775,6 +814,14 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [segmentScrollBusy, setSegmentScrollBusy] = useState(true)
   const [segmentScrollNotice, setSegmentScrollNotice] = useState('')
   const [segmentScrollError, setSegmentScrollError] = useState(false)
+	const [measurementRefreshMS, setMeasurementRefreshMS] = useState(uiConfig?.status_interval_ms ?? 250)
+	const [measurementFreshnessMS, setMeasurementFreshnessMS] = useState(uiConfig?.measurement_freshness_ms ?? 1500)
+	const [savedMeasurementTiming, setSavedMeasurementTiming] = useState({
+		refresh: uiConfig?.status_interval_ms ?? 250,
+		freshness: uiConfig?.measurement_freshness_ms ?? 1500,
+	})
+	const [measurementTimingBusy, setMeasurementTimingBusy] = useState(uiConfig === null)
+	const [measurementTimingNotice, setMeasurementTimingNotice] = useState('')
   const [localIntegrations, setLocalIntegrations] = useState<LocalIntegrationSettings>({
     local_device: { enabled: false, base_url: '' },
     data_hub: { enabled: false, base_url: 'http://127.0.0.1:8080' },
@@ -837,6 +884,10 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   }), [segmentClosedValidation.normalized, segmentOpenValidation.normalized, segmentPagesValidation.pages, segmentScroll])
   const segmentScrollValid = segmentPagesValidation.valid && segmentOpenValidation.valid && segmentClosedValidation.valid
   const segmentScrollDirty = savedSegmentScroll !== null && !segmentScrollSettingsEqual(segmentScrollDraft, savedSegmentScroll)
+	const measurementTimingValid = measurementRefreshMS >= 200 && measurementRefreshMS <= 500 &&
+		measurementFreshnessMS >= measurementRefreshMS + 100 && measurementFreshnessMS <= 10_000
+	const measurementTimingDirty = measurementRefreshMS !== savedMeasurementTiming.refresh ||
+		measurementFreshnessMS !== savedMeasurementTiming.freshness
   const lifecycleOptions: { value: LifecycleSafetyAction; label: string }[] = [
     { value: 'leave', label: copy('Release keys', 'رهاسازی کلیدها') },
     { value: 'stop-motion', label: copy('Stop motion', 'توقف حرکت') },
@@ -856,6 +907,16 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 
   useEffect(() => setDraftAppTitle(appTitle), [appTitle])
   useEffect(() => setDraftToken(token), [token])
+	useEffect(() => {
+		if (!uiConfig) return
+		setMeasurementRefreshMS(uiConfig.status_interval_ms)
+		setMeasurementFreshnessMS(uiConfig.measurement_freshness_ms)
+		setSavedMeasurementTiming({
+			refresh: uiConfig.status_interval_ms,
+			freshness: uiConfig.measurement_freshness_ms,
+		})
+		setMeasurementTimingBusy(false)
+	}, [uiConfig?.measurement_freshness_ms, uiConfig?.status_interval_ms])
   useEffect(() => {
     let active = true
     void rpc<HostUISettings>('controller.ui.config.get')
@@ -949,6 +1010,33 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
       setSegmentScrollBusy(false)
     }
   }
+
+	const saveMeasurementTiming = async (event: FormEvent) => {
+		event.preventDefault()
+		if (!measurementTimingValid || !measurementTimingDirty) return
+		setMeasurementTimingBusy(true)
+		setMeasurementTimingNotice('')
+		try {
+			const saved = await rpc<HostUISettings>('controller.ui.config.set', {
+				status_interval_ms: measurementRefreshMS,
+				measurement_freshness_ms: measurementFreshnessMS,
+			})
+			setMeasurementRefreshMS(saved.status_interval_ms)
+			setMeasurementFreshnessMS(saved.measurement_freshness_ms)
+			setSavedMeasurementTiming({
+				refresh: saved.status_interval_ms,
+				freshness: saved.measurement_freshness_ms,
+			})
+			setMeasurementTimingNotice(copy(
+				'Saved and pushed to every connected controller client.',
+				'ذخیره شد و به همهٔ کلاینت‌های متصل کنترلر فرستاده شد.',
+			))
+		} catch (cause) {
+			setMeasurementTimingNotice(cause instanceof Error ? cause.message : String(cause))
+		} finally {
+			setMeasurementTimingBusy(false)
+		}
+	}
 
   const saveAppTitle = async (event: FormEvent) => {
     event.preventDefault()
@@ -1067,6 +1155,21 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         </Card>
 
         <PeripheralNamesEditor locale={locale} />
+
+		<Card icon={Gauge} iconTone="green" title={copy('Live measurements', 'اندازه‌گیری‌های زنده')} eyebrow={measurementTimingBusy ? copy('Synchronizing', 'در حال همگام‌سازی') : copy(`${(1000 / measurementRefreshMS).toFixed(measurementRefreshMS === 250 ? 0 : 1)} Hz · host policy`, `${(1000 / measurementRefreshMS).toFixed(measurementRefreshMS === 250 ? 0 : 1)} هرتز · سیاست میزبان`)} className="settings-card settings-card--wide">
+			<form className="segment-scroll-settings" onSubmit={(event) => void saveMeasurementTiming(event)}>
+				<RangeField label={copy('Refresh/update interval', 'فاصلهٔ تازه‌سازی/به‌روزرسانی')} value={measurementRefreshMS} min={200} max={500} step={10} unit="ms" onChange={(value) => { setMeasurementTimingNotice(''); setMeasurementRefreshMS(value) }} />
+				<RangeField label={copy('Freshness window', 'پنجرهٔ تازگی')} value={measurementFreshnessMS} min={measurementRefreshMS + 100} max={10000} step={50} unit="ms" onChange={(value) => { setMeasurementTimingNotice(''); setMeasurementFreshnessMS(value) }} />
+				<div className="local-integrations-form__footer">
+					<span className={`segment-scroll-settings__notice${!measurementTimingValid ? ' is-error' : ''}`} role="status" aria-live="polite">
+						{!measurementTimingValid
+							? copy(`Freshness must be ${measurementRefreshMS + 100}..10000 ms.`, `تازگی باید بین ${measurementRefreshMS + 100} تا 10000 میلی‌ثانیه باشد.`)
+							: measurementTimingNotice || copy('Host-owned and pushed immediately to WebUI and TUI instances without restart.', 'متعلق به میزبان و بدون راه‌اندازی مجدد، فوراً به نمونه‌های WebUI و TUI فرستاده می‌شود.')}
+					</span>
+					<Button type="submit" tone="primary" icon={ShieldCheck} busy={measurementTimingBusy} disabled={!measurementTimingDirty || !measurementTimingValid}>{copy('Apply live timing', 'اعمال زمان‌بندی زنده')}</Button>
+				</div>
+			</form>
+		</Card>
 
         <Card icon={Binary} iconTone="accent" title={copy('HOST display scrolling', 'پیمایش نمایشگر میزبان')} eyebrow={segmentScroll.enabled ? copy('Enabled', 'فعال') : copy('Disabled', 'غیرفعال')} className="settings-card settings-card--wide">
           <form className="segment-scroll-settings" onSubmit={(event) => void saveSegmentScroll(event)}>
