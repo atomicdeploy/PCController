@@ -56,6 +56,21 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+  # The target-neutral wire vocabulary is compiled through both its portable
+  # header and the production AVR UART adapter before native targets consume
+  # it. This intentionally does not link or alter VirtualBoard behavior.
+  add_executable(firmware_protocol_contract_tests
+    tests/protocol_contract_test.cpp
+  )
+  target_include_directories(firmware_protocol_contract_tests PRIVATE ../..)
+  set_property(TARGET firmware_protocol_contract_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_protocol_contract_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_protocol_contract_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_protocol_contract_unit COMMAND firmware_protocol_contract_tests)
+
   add_executable(virtual_board_tests tests/test_main.cpp)
   target_link_libraries(virtual_board_tests PRIVATE virtual_board_core)
   if(MSVC)
