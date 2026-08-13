@@ -301,6 +301,18 @@ test('motion presentation is shared by physical, RF, host, and macro relay-side 
 	assert.doesNotMatch(frontPanel, /const uint8_t mask = relays\.activeRelayMask\(\);/u)
 })
 
+test('production KEY dispatches first Down to motion and exits outside KEY', async () => {
+	const frontPanel = await readFile(
+		new URL('../../Project/Firmware/FrontPanelRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(frontPanel, /const bool momentary = mode == MODE_MOTION_CONTROL \|\|[^]*?!PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS && mode == MODE_MOTION/u)
+	assert.match(frontPanel, /if \(mode == MODE_MOTION\) \{\s*relays\.allOff\(now\);\s*modeManager\.transitionTo\(MODE_MOTION_CONTROL\);/u)
+	assert.match(frontPanel, /const bool keyChord = modeManager\.current\(\) == MODE_MOTION[^]*?shiftRegisters\.activeInputs\(\) & 0x0FU/u)
+	assert.match(frontPanel, /setMenuPage\(PAGE_DOOR\);/u)
+	assert.doesNotMatch(frontPanel, /case MODE_MOTION_CONTROL:\s*relays\.allOff\(at\);/u)
+})
+
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
         const runtimeFiles = [
                 'ControllerContext.inc.h',
@@ -345,7 +357,7 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
         )
         assert.match(
                 sources[3],
-                /event == KeyEvent::Down[^]*?now = millis\(\);\s*const MotionKeyBinding/u
+                /event == KeyEvent::Down[^]*?now = millis\(\);[^]*?const MotionKeyBinding/u
         )
         assert.match(sources[3], /const uint32_t releaseNow = now;/u)
 })

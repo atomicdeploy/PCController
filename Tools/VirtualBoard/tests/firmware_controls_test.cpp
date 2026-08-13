@@ -495,24 +495,15 @@ void testFrontPanelLeafDecreaseDispatch() {
               unifiedInputIntent(MENU_NEXT, true) ==
                   UnifiedInputIntent::NextPage,
           "diagnostic key page lost a direct exit");
-  require(unifiedInputIntent(MENU_DECREASE, false) ==
-                  UnifiedInputIntent::Macro &&
+  require(unifiedInputIntent(MENU_PREVIOUS, false) ==
+                  UnifiedInputIntent::Motion &&
+              unifiedInputIntent(MENU_NEXT, false) ==
+                  UnifiedInputIntent::Motion &&
+              unifiedInputIntent(MENU_DECREASE, false) ==
+                  UnifiedInputIntent::Motion &&
               unifiedInputIntent(MENU_INCREASE, false) ==
                   UnifiedInputIntent::Motion,
-          "normal unified page no longer exposes macro/motion actions");
-  require(unifiedMacroGesture(KeyEvent::Down, false, false) ==
-                  UnifiedMacroGesture::ImmediateCapture &&
-              unifiedMacroGesture(KeyEvent::HoldRepeat, false, false) ==
-                  UnifiedMacroGesture::None &&
-              unifiedMacroGesture(KeyEvent::Down, true, false) ==
-                  UnifiedMacroGesture::None &&
-              unifiedMacroGesture(KeyEvent::Click, true, false) ==
-                  UnifiedMacroGesture::Replay &&
-              unifiedMacroGesture(KeyEvent::HoldStart, true, false) ==
-                  UnifiedMacroGesture::ReplaceCapture &&
-              unifiedMacroGesture(KeyEvent::Click, true, true) ==
-                  UnifiedMacroGesture::SuppressClassification,
-          "unified macro key lost one-shot replay/replace classification");
+          "normal unified page no longer maps all four keys to motion");
 
   const MotionKeyBinding expectedMotion[] = {
       {0, false}, {0, true}, {1, false}, {1, true}};

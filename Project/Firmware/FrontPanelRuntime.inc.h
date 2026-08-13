@@ -167,9 +167,6 @@ void setMenuPage(uint8_t page) {
   if (!frontPanelPageCompiled(menuPage)) {
     menuPage = PAGE_KEYS;
   }
-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
-  suppressLocalMacroClassification = false;
-#endif
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
 #endif
@@ -236,7 +233,6 @@ void programService(uint32_t at) {
                                         : TextBoot));
         break;
       case MODE_MOTION_CONTROL:
-        relays.allOff(at);
         display.showText(commonText(TextGo));
         menuLabelEndsAt = at + 450;
         break;
@@ -514,20 +510,6 @@ bool handleMotionPanelAction(uint8_t action, bool fromRemote,
   return accepted;
 }
 
-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
-    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
-void beginLocalMacroCapture() {
-  const uint8_t id = nextLocalMacroId;
-  if (!macroPlayback.beginCapture(id, micros())) {
-    return;
-  }
-  ++nextLocalMacroId;
-  if (nextLocalMacroId == 0) {
-    nextLocalMacroId = 1;
-  }
-}
-#endif
-
 // Dispatches physical, RF, or host navigation through the modal menu state machine.
 void handleMenuAction(uint8_t action, bool fromRemote,
                       uint8_t adjustmentStep) {
@@ -574,26 +556,27 @@ void handleMenuAction(uint8_t action, bool fromRemote,
 
 #endif
 
-  // One input page: K1/K2 navigate in every build. A diagnostic build uses
-  // K3/K4 for ID; the normal image reserves K3 for the local macro lifecycle
-  // and K4 enters immediate four-key motion control.
+  // One input page: diagnostics use K1/K2 to leave and K3/K4 to identify.
+  // Production maps all four keys directly to A/B Up/Down motion.
   if (modeManager.current() == MODE_MOTION) {
     const UnifiedInputIntent intent = unifiedInputIntent(
         static_cast<MenuAction>(action),
         PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS != 0);
-    if (intent == UnifiedInputIntent::PreviousPage) {
+    if (PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS &&
+        intent == UnifiedInputIntent::PreviousPage) {
       moveTopLevelPage(false);
-    } else if (intent == UnifiedInputIntent::NextPage) {
+    } else if (PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS &&
+               intent == UnifiedInputIntent::NextPage) {
       moveTopLevelPage(true);
 #if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
     } else if (intent == UnifiedInputIntent::Identify) {
       identifiedKey = static_cast<uint8_t>(action + 1);
       identifiedKeyEndsAt = actionNow + 900;
 #else
-    } else if (intent == UnifiedInputIntent::Macro) {
-      // The physical classified-key path below owns record/stop/replay.
     } else if (relays.motionAllowed()) {
+      relays.allOff(actionNow);
       modeManager.transitionTo(MODE_MOTION_CONTROL);
+      handleMotionPanelAction(action, fromRemote, actionNow);
     } else {
     }
 #endif
@@ -892,40 +875,28 @@ void handleMenuAction(uint8_t action, bool fromRemote,
 void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
                      bool emitEvidence) {
   const ProgramMode mode = modeManager.current();
-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
-    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
-  if (source == InputEventSource::Physical && mode == MODE_MOTION &&
-      bit == BoardPins::KeyDecrease) {
-    const UnifiedMacroGesture gesture = unifiedMacroGesture(
-        event, macroPlayback.captured(), suppressLocalMacroClassification);
-    switch (gesture) {
-      case UnifiedMacroGesture::ImmediateCapture:
-        suppressLocalMacroClassification = true;
-        if (macroPlayback.recording()) {
-          macroPlayback.finishCapture();
-        } else {
-          beginLocalMacroCapture();
-        }
-        return;
-      case UnifiedMacroGesture::Replay:
-        macroPlayback.playCapture(micros());
-        return;
-      case UnifiedMacroGesture::ReplaceCapture:
-        beginLocalMacroCapture();
-        return;
-      case UnifiedMacroGesture::SuppressClassification:
-        suppressLocalMacroClassification = false;
-        return;
-      case UnifiedMacroGesture::None:
-        return;
-    }
+  if (source == InputEventSource::Physical &&
+      (motionPressedMask == 0xFFU ||
+       (shiftRegisters.activeInputs() & 0x0FU) == 0x0FU)) {
+    return;
   }
-#endif
-
-  const bool momentary = mode == MODE_MOTION_CONTROL;
+  if (source == InputEventSource::Physical &&
+      (mode == MODE_MOTION || mode == MODE_MOTION_CONTROL) &&
+      event == KeyEvent::HoldRepeat &&
+      menuKeys[bit].heldForMs() >= static_cast<uint16_t>(
+          settingsStore.values().motionExitHoldSeconds()) * 1000U) {
+    relays.allOff(now);
+    acceptedAction(InputEventSource::Physical,
+                   ControllerProtocol::RelayAllOff, nullptr, 0);
+    motionPressedMask = 0xFFU;
+    setMenuPage(PAGE_DOOR);
+    return;
+  }
+  const bool momentary = mode == MODE_MOTION_CONTROL ||
+      (!PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS && mode == MODE_MOTION);
   if (momentary) {
     if (event == KeyEvent::Down) {
-      if (mode == MODE_MOTION_CONTROL) {
+      if (mode == MODE_MOTION || mode == MODE_MOTION_CONTROL) {
         // A physical second same-side key is the exit chord, never a transient
         // reverse command.  RF/host input cannot claim the chord path.
         if (source == InputEventSource::Physical &&
@@ -933,6 +904,10 @@ void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
           return;
         }
         now = millis();
+        if (mode == MODE_MOTION) {
+          relays.allOff(now);
+          modeManager.transitionTo(MODE_MOTION_CONTROL);
+        }
         const MotionKeyBinding binding =
             motionKeyBinding(static_cast<MenuAction>(bit));
         if (handleMotionPanelAction(bit, source == InputEventSource::Radio,
@@ -1013,16 +988,23 @@ void keyGesture(uint8_t bit, KeyEvent event, void *) {
 
 // Stops motion and exits its modal page after either side's two-key hold.
 void serviceMotionExit(uint32_t at) {
+  if (motionPressedMask == 0xFFU) {
+    if (!menuKeys[0].isPressed() && !menuKeys[1].isPressed() &&
+        !menuKeys[2].isPressed() && !menuKeys[3].isPressed()) {
+      motionPressedMask = 0;
+    }
+    return;
+  }
   const bool motionControl = modeManager.current() == MODE_MOTION_CONTROL;
+  const bool keyChord = modeManager.current() == MODE_MOTION &&
+                        (shiftRegisters.activeInputs() & 0x0FU) == 0x0FU;
   const bool sideAExit =
       menuKeys[0].isPressed() && menuKeys[1].isPressed();
   const bool sideBExit =
       menuKeys[2].isPressed() && menuKeys[3].isPressed();
-  if (!motionControl || (!sideAExit && !sideBExit)) {
+  if ((!motionControl && !keyChord) ||
+      (!keyChord && !sideAExit && !sideBExit)) {
     motionExitStartedAt = 0;
-    return;
-  }
-  if (motionExitStartedAt == 0xFFFFFFFFUL) {
     return;
   }
   if (motionExitStartedAt == 0) {
@@ -1052,8 +1034,9 @@ void serviceMotionExit(uint32_t at) {
   } else if (static_cast<uint32_t>(at - motionExitStartedAt) >=
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
-    setMenuPage(PAGE_KEYS);
-    motionExitStartedAt = 0xFFFFFFFFUL;
+    setMenuPage(PAGE_DOOR);
+    motionPressedMask = 0xFFU;
+    motionExitStartedAt = 0;
   }
 }
 

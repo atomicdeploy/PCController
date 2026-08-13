@@ -120,11 +120,6 @@ uint8_t editDisplayOptionsSnapshot = 0;
 ProgramMode editReturnMode = MODE_DOOR;
 bool editTransactionActive = false;
 bool flashMessageSaved = false;
-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
-    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
-uint8_t nextLocalMacroId = 1;
-bool suppressLocalMacroClassification = false;
-#endif
 uint8_t motionPressedMask = 0;
 
 ModeManager<ProgramMode> modeManager(MODE_BOOT);

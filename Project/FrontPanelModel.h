@@ -144,8 +144,8 @@ constexpr LeafDecreaseAction leafDecreaseAction(ProgramMode mode) {
 }
 
 // UnifiedInputIntent is the complete four-key policy for the single input
-// page.  In normal builds K3 handles capture/replay and K4 enters motion; in
-// diagnostics both leaf keys identify inputs and K1/K2 always exit.
+// page. Normal builds map all four keys to A/B Up/Down; diagnostics retain
+// direct navigation plus key identification.
 enum class UnifiedInputIntent : uint8_t {
   PreviousPage,
   NextPage,
@@ -156,39 +156,10 @@ enum class UnifiedInputIntent : uint8_t {
 
 constexpr UnifiedInputIntent unifiedInputIntent(MenuAction action,
                                                  bool identifyKeys) {
+  if (!identifyKeys) return UnifiedInputIntent::Motion;
   if (action == MENU_PREVIOUS) return UnifiedInputIntent::PreviousPage;
   if (action == MENU_NEXT) return UnifiedInputIntent::NextPage;
-  if (identifyKeys) return UnifiedInputIntent::Identify;
-  return action == MENU_DECREASE ? UnifiedInputIntent::Macro
-                                 : UnifiedInputIntent::Motion;
-}
-
-enum class UnifiedMacroGesture : uint8_t {
-  None,
-  ImmediateCapture,
-  Replay,
-  ReplaceCapture,
-  SuppressClassification,
-};
-
-constexpr UnifiedMacroGesture unifiedMacroGesture(KeyEvent event,
-                                                   bool hasCapture,
-                                                   bool suppressClassification) {
-  if (event == KeyEvent::Down && !hasCapture) {
-    return UnifiedMacroGesture::ImmediateCapture;
-  }
-  const bool classified = event == KeyEvent::Click ||
-                          event == KeyEvent::DoubleClick ||
-                          event == KeyEvent::HoldStart;
-  if (classified && suppressClassification) {
-    return UnifiedMacroGesture::SuppressClassification;
-  }
-  if (!hasCapture) return UnifiedMacroGesture::None;
-  if (event == KeyEvent::Click || event == KeyEvent::DoubleClick) {
-    return UnifiedMacroGesture::Replay;
-  }
-  return event == KeyEvent::HoldStart ? UnifiedMacroGesture::ReplaceCapture
-                                      : UnifiedMacroGesture::None;
+  return UnifiedInputIntent::Identify;
 }
 
 struct MotionKeyBinding {
