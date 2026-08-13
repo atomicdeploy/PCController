@@ -1,4 +1,4 @@
-import { getToken, responseErrorDetail, rpc } from './api'
+import { ControllerRPCError, getToken, responseErrorDetail, rpc } from './api'
 import { controllerHTTPURL } from './transport-config'
 
 /** Artifact classes accepted by the immutable host store. */
@@ -112,6 +112,8 @@ export interface PeerHostUpdateResult {
   peer: string
   artifact: ArtifactDescriptor
   operation: UpdateStatus
+  stage: 'remote-queued' | 'remote-staged'
+  terminal_verified: false
 }
 
 /** Remote download request with optional integrity and idempotency constraints. */
@@ -212,13 +214,83 @@ export function listBridgePeers(signal?: AbortSignal): Promise<BridgePeer[]> {
   return rpc<BridgePeer[]>('controller.bridge.list', {}, signal)
 }
 
-/** Transfers a verified executable over an authenticated bridge, then asks the remote coordinator to replace itself. */
-export function startPeerHostUpdate(peer: string, artifactSHA256: string, signal?: AbortSignal): Promise<PeerHostUpdateResult> {
-  return rpc<PeerHostUpdateResult>('controller.peer.update.host', {
-    peer,
-    artifact_sha256: artifactSHA256,
-    authorized: true,
-  }, signal)
+const peerHostIntentStoragePrefix = 'pccontroller.peer-update.intent.'
+
+function peerHostUpdateIntentStorageKey(peer: string, artifactSHA256: string): string {
+  return `${peerHostIntentStoragePrefix}${encodeURIComponent(peer.trim().toLowerCase())}.${artifactSHA256}`
+}
+
+function newPeerHostUpdateIntentKey(artifactSHA256: string): string {
+  const bytes = new Uint8Array(16)
+  globalThis.crypto.getRandomValues(bytes)
+  const random = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')
+  return `peer-host-${artifactSHA256.slice(0, 12)}-${random}`
+}
+
+/** Returns one logical browser-intent key, retained only while its outcome is transport-uncertain. */
+export function peerHostUpdateIdempotencyKey(peer: string, artifactSHA256: string): string {
+  if (!peer.trim()) throw new Error('Peer host update requires a peer')
+  const digest = artifactSHA256.trim().toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error('Peer host update requires an exact SHA-256 digest')
+  const storageKey = peerHostUpdateIntentStorageKey(peer, digest)
+  try {
+    const retained = sessionStorage.getItem(storageKey)?.trim() ?? ''
+    if (/^[A-Za-z0-9._:-]{1,128}$/.test(retained)) return retained
+  } catch {
+    // Storage can be disabled; the in-flight request still receives a unique key.
+  }
+  const idempotencyKey = newPeerHostUpdateIntentKey(digest)
+  try { sessionStorage.setItem(storageKey, idempotencyKey) } catch { /* optional retry persistence */ }
+  return idempotencyKey
+}
+
+function clearPeerHostUpdateIntent(peer: string, artifactSHA256: string, idempotencyKey: string): void {
+  const storageKey = peerHostUpdateIntentStorageKey(peer, artifactSHA256.trim().toLowerCase())
+  try {
+    if (sessionStorage.getItem(storageKey) === idempotencyKey) sessionStorage.removeItem(storageKey)
+  } catch { /* optional retry persistence */ }
+}
+
+/** Adopts the coordinator-published key after an uncertain remote acceptance. */
+export function adoptPeerHostUpdateIntent(peer: string, artifactSHA256: string, idempotencyKey: string): boolean {
+  const digest = artifactSHA256.trim().toLowerCase()
+  const key = idempotencyKey.trim()
+  if (!peer.trim() || !/^[0-9a-f]{64}$/.test(digest) || !/^[A-Za-z0-9._:-]{1,128}$/.test(key)) return false
+  try {
+    sessionStorage.setItem(peerHostUpdateIntentStorageKey(peer, digest), key)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Clears a coordinator-published intent only when this client retained that exact key. */
+export function settlePeerHostUpdateIntent(peer: string, artifactSHA256: string, idempotencyKey: string): void {
+  clearPeerHostUpdateIntent(peer, artifactSHA256, idempotencyKey.trim())
+}
+
+/** Transfers a verified executable and returns only the peer's queued/staged acceptance. */
+export async function startPeerHostUpdate(peer: string, artifactSHA256: string, signal?: AbortSignal): Promise<PeerHostUpdateResult> {
+  const digest = artifactSHA256.trim().toLowerCase()
+  const idempotencyKey = peerHostUpdateIdempotencyKey(peer, digest)
+  try {
+    const result = await rpc<PeerHostUpdateResult>('controller.peer.update.host', {
+      peer,
+      artifact_sha256: digest,
+      authorized: true,
+      idempotency_key: idempotencyKey,
+    }, signal)
+    clearPeerHostUpdateIntent(peer, digest, idempotencyKey)
+    return result
+  } catch (cause) {
+    // A normal RPC error is a definitive rejection, so a deliberate later
+    // attempt gets a fresh key. -32004 means the source lost the peer's final
+    // acknowledgement; retrying must keep the same target idempotency key.
+    if (cause instanceof ControllerRPCError && cause.code !== -32004) {
+      clearPeerHostUpdateIntent(peer, digest, idempotencyKey)
+    }
+    throw cause
+  }
 }
 
 /** Fetches the most recent update-operation status. */

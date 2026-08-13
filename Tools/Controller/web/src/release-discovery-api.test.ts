@@ -13,9 +13,12 @@ function installTransport(result: unknown) {
     configurable: true,
     value: { getItem: () => null, setItem: () => undefined, removeItem: () => undefined },
   })
-  return vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
-    jsonrpc: '2.0', id: 1, result,
-  }), { status: 200 }))
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+    const request = JSON.parse(String(init?.body)) as { id: number }
+    return new Response(JSON.stringify({
+      jsonrpc: '2.0', id: request.id, result,
+    }), { status: 200 })
+  })
 }
 
 function rpcRequest(fetchMock: ReturnType<typeof vi.spyOn>) {
@@ -45,9 +48,12 @@ describe('release discovery adapter', () => {
     expect(rpcRequest(fetchMock).method).toBe('controller.discovery.github.release')
 
     fetchMock.mockClear()
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({
-      jsonrpc: '2.0', id: 2, result: { status: 'newer', reason: 'candidate packed timestamp is newer' },
-    }), { status: 200 }))
+    fetchMock.mockImplementation(async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as { id: number }
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0', id: request.id, result: { status: 'newer', reason: 'candidate packed timestamp is newer' },
+      }), { status: 200 })
+    })
     await checkReleaseCandidate({ sha256: 'a'.repeat(64), packed_timestamp: 10 }, {
       id: 'candidate', source: 'manifest', kind: 'firmware', name: 'board.hex', url: 'https://example.invalid/board.hex', packed_timestamp: 11,
     })

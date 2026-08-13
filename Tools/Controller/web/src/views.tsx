@@ -1159,7 +1159,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 
         <HotkeyEditor locale={appearance.locale} />
 
-        <Card icon={ShieldCheck} iconTone="green" title={t('security')} eyebrow={tokenDirty ? copy('Token change pending', 'تغییر توکن در انتظار اعمال') : token ? copy('Session authenticated', 'نشست معتبر است') : copy('No session token', 'بدون توکن نشست')} className="settings-card">
+		{uiConfig?.auth_required === true && <Card icon={ShieldCheck} iconTone="green" title={t('security')} eyebrow={tokenDirty ? copy('Token change pending', 'تغییر توکن در انتظار اعمال') : token ? copy('Session authenticated', 'نشست معتبر است') : copy('No session token', 'بدون توکن نشست')} className="settings-card">
           <TextField
             label={t('authToken')}
             type="password"
@@ -1171,7 +1171,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
             hint={tokenDirty ? copy(`${normalizedToken.length} normalized characters · not applied`, `${normalizedToken.length} نویسهٔ نرمال‌شده · اعمال نشده`) : token ? copy('Applied to this browser tab.', 'در این زبانهٔ مرورگر اعمال شده است.') : copy('Enter a token if the host requires one.', 'اگر میزبان توکن می‌خواهد، آن را وارد کنید.')}
             action={<Button tone="primary" icon={ShieldCheck} disabled={!tokenDirty} onClick={() => { onToken(normalizedToken); setDraftToken(normalizedToken) }}>{t('apply')}</Button>}
           />
-        </Card>
+		</Card>}
 
         {snapshot.connected && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={snapshot.have_settings ? copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح') : boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Settings unavailable', 'تنظیمات در دسترس نیست')} className="settings-card">
           {!snapshot.have_settings ? <EmptyState

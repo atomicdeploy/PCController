@@ -67,4 +67,15 @@ func TestReleaseDiscoveryRPCAndRemotePolicy(t *testing.T) {
 	if recorder.Code != http.StatusForbidden || !strings.Contains(recorder.Body.String(), "programming") {
 		t.Fatalf("remote stage status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
+
+	service.AuthorizationDisabled = true
+	config.IPC.AuthToken = ""
+	request = httptest.NewRequest(http.MethodPost, "http://controller.example/api/discovery/stage", strings.NewReader(`{"candidate":{"source":"manifest","kind":"firmware","name":"board.hex","url":"`+manifestServer.URL+`/board.hex"}}`))
+	request.RemoteAddr = "198.51.100.10:43100"
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusAccepted ||
+		recorder.Header().Get("X-PCController-Authentication") != "disabled" {
+		t.Fatalf("credentialless alpha stage status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
 }

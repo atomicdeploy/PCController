@@ -75,14 +75,14 @@ func registerUPnPHTTP(mux *http.ServeMux, service *Service) {
 		case "getboardidentity":
 			writeSOAP(writer, "GetBoardIdentity", fmt.Sprintf("<BoardName>%s</BoardName><BuildHash>%08X</BuildHash><BuildStamp>%s</BuildStamp>", xmlEscape(snapshot.Hello.Name), snapshot.Hello.BuildHash, xmlEscape(snapshot.Hello.BuildStamp)))
 		case "getprotocolinfo":
-			writeSOAP(writer, "GetProtocolInfo", "<Protocol>PCController JSON-RPC 2.0 over HTTP/WebSocket/Socket.IO</Protocol><Authentication>Bearer token required for control</Authentication>")
+			writeSOAP(writer, "GetProtocolInfo", "<Protocol>PCController JSON-RPC 2.0 over HTTP/WebSocket/Socket.IO</Protocol><Authentication>"+xmlEscape(service.discoveryAuthenticationDescription())+"</Authentication>")
 		case "getcommandcatalog":
-			writeSOAP(writer, "GetCommandCatalog", fmt.Sprintf("<CommandCatalogURL>/api/commands</CommandCatalogURL><CommandCount>%d</CommandCount><Authentication>Bearer token required for control</Authentication>", len(service.Client.CommandCatalog())))
+			writeSOAP(writer, "GetCommandCatalog", fmt.Sprintf("<CommandCatalogURL>/api/commands</CommandCatalogURL><CommandCount>%d</CommandCount><Authentication>%s</Authentication>", len(service.Client.CommandCatalog()), xmlEscape(service.discoveryAuthenticationDescription())))
 		case "geteventinfo":
 			ipc := service.hostConfig().IPC
-			writeSOAP(writer, "GetEventInfo", "<WebSocketPath>"+xmlEscape(ipc.WebSocketPath)+"</WebSocketPath><SocketIOPath>"+xmlEscape(ipc.SocketIOPath)+"</SocketIOPath><Topics>events,state,debug,status,opcodes</Topics><Authentication>Bearer token required for control</Authentication>")
+			writeSOAP(writer, "GetEventInfo", "<WebSocketPath>"+xmlEscape(ipc.WebSocketPath)+"</WebSocketPath><SocketIOPath>"+xmlEscape(ipc.SocketIOPath)+"</SocketIOPath><Topics>events,state,debug,status,opcodes</Topics><Authentication>"+xmlEscape(service.discoveryAuthenticationDescription())+"</Authentication>")
 		case "getopcodeinfo":
-			writeSOAP(writer, "GetOpcodeInfo", "<OpcodeEndpoint>/api/opcode</OpcodeEndpoint><OpcodeRPC>controller.opcode.send,controller.opcode.exchange,controller.opcode.request</OpcodeRPC><OpcodeEvents>controller.opcode</OpcodeEvents><Authentication>Bearer token required for control</Authentication>")
+			writeSOAP(writer, "GetOpcodeInfo", "<OpcodeEndpoint>/api/opcode</OpcodeEndpoint><OpcodeRPC>controller.opcode.send,controller.opcode.exchange,controller.opcode.request</OpcodeRPC><OpcodeEvents>controller.opcode</OpcodeEvents><Authentication>"+xmlEscape(service.discoveryAuthenticationDescription())+"</Authentication>")
 		case "getpublicinfo":
 			info := publicInfo(service, request)
 			writeSOAP(writer, "GetPublicInfo", fmt.Sprintf("<PublicInfoURL>%s</PublicInfoURL><Hostname>%s</Hostname><InstanceID>%s</InstanceID><Connectable>%t</Connectable>", xmlEscape(info.Endpoints.PublicInfo), xmlEscape(info.Hostname), xmlEscape(info.InstanceID), info.Health.Connectable))
@@ -103,8 +103,15 @@ func registerUPnPHTTP(mux *http.ServeMux, service *Service) {
 	mux.HandleFunc("/upnp/events", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Allow", "SUBSCRIBE, UNSUBSCRIBE")
 		writer.WriteHeader(http.StatusNotImplemented)
-		writeSOAPFault(writer, "event subscriptions are delivered through authenticated WebSocket or Socket.IO")
+		writeSOAPFault(writer, "event subscriptions are delivered through WebSocket or Socket.IO")
 	})
+}
+
+func (service *Service) discoveryAuthenticationDescription() string {
+	if service.authorizationDisabled() {
+		return "No credential required in production alpha; exposure and safety gates remain active"
+	}
+	return "Bearer token required for control"
 }
 
 func upnpDeviceDescription(service *Service, request *http.Request) string {
@@ -145,6 +152,12 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 	}
 	httpBase := "http://" + request.Host
 	wsBase := "ws://" + request.Host
+	authMode := "bearer-session"
+	serverProof := httpBase + ServerProofPath
+	if service.authorizationDisabled() {
+		authMode = "disabled-alpha"
+		serverProof = ""
+	}
 	protocols := enabledDiscoveryProtocols(config.Integrations.Discovery)
 	broadcastPort := config.Integrations.Discovery.BroadcastPort
 	if broadcastPort == 0 {
@@ -157,7 +170,7 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 	info := discovery.PublicInfo{
 		Schema: discovery.PublicInfoSchema, Product: "PCController", Protocol: "pccontroller",
 		InstanceID: strings.TrimSpace(service.HostInstanceID), InstanceName: name, Hostname: hostname,
-		Health: discovery.PublicHealth{OK: true, Service: productidentity.ServiceName(config.UI.AppTitle, "IPC"), Connectable: config.IPC.RemoteConnectable(), Auth: "bearer-session"},
+		Health: discovery.PublicHealth{OK: true, Service: productidentity.ServiceName(config.UI.AppTitle, "IPC"), Connectable: config.IPC.RemoteConnectable(), Auth: authMode},
 		Host:   discovery.PublicHost{Version: strings.TrimSpace(service.HostVersion), SourceHash: strings.TrimSpace(service.HostSourceHash), BuildTime: strings.TrimSpace(service.HostBuildTime)},
 		Board: discovery.PublicBoard{
 			Connected: snapshot.Connected, ConnectionState: snapshot.ConnectionState, ConnectionReason: snapshot.ConnectionReason,
@@ -165,7 +178,7 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 			Port:     discovery.PublicPort{Name: snapshot.Port.Name, VID: snapshot.Port.VID, PID: snapshot.Port.PID, Product: snapshot.Port.Product, Manufacturer: snapshot.Port.Manufacturer, SerialNumber: snapshot.Port.SerialNumber, FriendlyName: snapshot.Port.FriendlyName, InstanceID: snapshot.Port.InstanceID},
 		},
 		Endpoints: discovery.PublicEndpoints{
-			Web: httpBase + "/", API: httpBase + "/api/snapshot", ServerProof: httpBase + ServerProofPath, Operations: httpBase + "/api/rpc", Commands: httpBase + "/api/commands", Events: wsBase + config.IPC.WebSocketPath, Opcodes: httpBase + "/api/opcode", WebSocket: wsBase + config.IPC.WebSocketPath, SocketIO: wsBase + config.IPC.SocketIOPath, PublicInfo: httpBase + discovery.PublicInfoPath,
+			Web: httpBase + "/", API: httpBase + "/api/snapshot", ServerProof: serverProof, Operations: httpBase + "/api/rpc", Commands: httpBase + "/api/commands", Events: wsBase + config.IPC.WebSocketPath, Opcodes: httpBase + "/api/opcode", WebSocket: wsBase + config.IPC.WebSocketPath, SocketIO: wsBase + config.IPC.SocketIOPath, PublicInfo: httpBase + discovery.PublicInfoPath,
 		},
 		Discovery: discovery.PublicDiscovery{Enabled: len(protocols) != 0, Protocols: protocols, BroadcastPort: broadcastPort},
 		UpdatedAt: time.Now().UTC(),

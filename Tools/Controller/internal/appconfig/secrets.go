@@ -202,9 +202,9 @@ func resolveConfigSecrets(value Config, resolver *secretstore.Resolver) (Config,
 		*plaintext, *reference = secret, ""
 		return nil
 	}
-	if err := resolve("ipc.auth_token", &result.IPC.AuthToken, &result.IPC.AuthTokenRef); err != nil {
-		return Config{}, err
-	}
+	// Inbound application authentication is dormant during alpha. Preserve the
+	// reference in the persisted view, but never resolve or inject it at runtime.
+	result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
 	for index := range result.Integrations.WebSocketClients {
 		peer := &result.Integrations.WebSocketClients[index]
 		if err := resolve(fmt.Sprintf("integrations.websocket_clients[%d].auth_token", index), &peer.AuthToken, &peer.AuthTokenRef); err != nil {
@@ -236,10 +236,7 @@ func resolveConfigSecrets(value Config, resolver *secretstore.Resolver) (Config,
 
 func failClosedRuntime(value Config) Config {
 	result := clone(value)
-	if result.IPC.AuthTokenRef != "" {
-		result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
-		result.IPC.AllowRemote = false
-	}
+	result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
 	for index := range result.Integrations.WebSocketClients {
 		peer := &result.Integrations.WebSocketClients[index]
 		if peer.AuthTokenRef != "" {

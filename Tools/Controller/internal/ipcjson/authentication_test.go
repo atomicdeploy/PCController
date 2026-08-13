@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,31 @@ func testAuthenticatedService(t *testing.T) (*Service, *controllerapi.Client) {
 	config.IPC.AuthToken = testAccessToken
 	config.IPC.RemotePrincipal = "test-operator"
 	return &Service{Client: client, HostConfig: func() appconfig.Config { return config }}, client
+}
+
+type syntheticRemoteConn struct{ net.Conn }
+
+func (connection syntheticRemoteConn) RemoteAddr() net.Addr {
+	return stringAddress("198.51.100.10:45000")
+}
+
+type syntheticRemoteListener struct{ net.Listener }
+
+func (listener syntheticRemoteListener) Accept() (net.Conn, error) {
+	connection, err := listener.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return syntheticRemoteConn{Conn: connection}, nil
+}
+
+func startSyntheticRemoteServer(t *testing.T, service *Service) *httptest.Server {
+	t.Helper()
+	server := httptest.NewUnstartedServer(websocketMux(context.Background(), service))
+	server.Listener = syntheticRemoteListener{Listener: server.Listener}
+	server.Start()
+	t.Cleanup(server.Close)
+	return server
 }
 
 func issueBrowserTicket(
@@ -363,6 +389,242 @@ func TestDurableURLCredentialsAndPreAuthSocketFramesAreRejected(t *testing.T) {
 	}
 	if err == nil || response == nil || response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated Socket.IO emitted a session err=%v response=%v", err, response)
+	}
+}
+
+func TestAuthorizationDisabledAllowsCredentiallessRemoteRESTJSONRPCWebSocketAndSocketIO(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	config := service.HostConfig()
+	config.IPC.AllowRemote = true
+	config.IPC.RemotePolicy = appconfig.RemoteAccessPolicy{}
+	service.HostConfig = func() appconfig.Config { return config }
+	service.AuthorizationDisabled = true
+	server := startSyntheticRemoteServer(t, service)
+
+	response, err := http.Get(server.URL + "/api/snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK ||
+		response.Header.Get("X-PCController-Authentication") != "disabled" ||
+		response.Header.Get("X-PCController-Principal") != "test-operator" {
+		t.Fatalf("credentialless REST status=%d headers=%v", response.StatusCode, response.Header)
+	}
+	uiResponse, err := http.Get(server.URL + "/api/ui-config")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer uiResponse.Body.Close()
+	var uiConfig struct {
+		AuthRequired bool `json:"auth_required"`
+	}
+	if err := json.NewDecoder(uiResponse.Body).Decode(&uiConfig); err != nil || uiConfig.AuthRequired {
+		t.Fatalf("alpha UI auth contract=%+v err=%v", uiConfig, err)
+	}
+	for _, authRoute := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, ServerProofPath},
+		{http.MethodPost, SessionTicketPath},
+	} {
+		request, err := http.NewRequest(authRoute.method, server.URL+authRoute.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusConflict {
+			t.Fatalf("dormant auth route %s status=%d", authRoute.path, response.StatusCode)
+		}
+	}
+	urlSecretResponse, err := http.Get(server.URL + "/api/snapshot?access_token=must-not-travel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer urlSecretResponse.Body.Close()
+	if urlSecretResponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("alpha URL secret status=%d", urlSecretResponse.StatusCode)
+	}
+
+	rpcRequest, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/ipc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"controller.peer.update.host","params":{"peer":"edge","artifact_sha256":"`+strings.Repeat("a", 64)+`","authorized":true,"idempotency_key":"intent:alpha-http"}}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpcRequest.Header.Set("Content-Type", "application/json")
+	rpcResponse, err := http.DefaultClient.Do(rpcRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rpcResponse.Body.Close()
+	var rpcEnvelope Response
+	if err := json.NewDecoder(rpcResponse.Body).Decode(&rpcEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if rpcResponse.StatusCode != http.StatusBadRequest || rpcEnvelope.Error == nil ||
+		rpcEnvelope.Error.Code == -32001 || rpcEnvelope.Error.Code == -32003 ||
+		!strings.Contains(rpcEnvelope.Error.Message, "artifact service") {
+		t.Fatalf("credentialless HTTP JSON-RPC status=%d response=%#v", rpcResponse.StatusCode, rpcEnvelope)
+	}
+
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ipc"
+	connection, dialResponse, err := websocket.Dial(context.Background(), websocketURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{server.URL}},
+	})
+	if err != nil {
+		t.Fatalf("credentialless WebSocket response=%v err=%v", dialResponse, err)
+	}
+	if err = connection.Write(context.Background(), websocket.MessageText, []byte(
+		`{"jsonrpc":"2.0","id":2,"method":"controller.peer.update.host","params":{"peer":"edge","artifact_sha256":"`+strings.Repeat("b", 64)+`","authorized":true,"idempotency_key":"intent:alpha-websocket"}}`,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	_, payload, err := connection.Read(context.Background())
+	_ = connection.CloseNow()
+	if err != nil || !strings.Contains(string(payload), "artifact service") ||
+		strings.Contains(string(payload), "authentication required") ||
+		strings.Contains(string(payload), "remote capability") {
+		t.Fatalf("credentialless WebSocket payload=%s err=%v", payload, err)
+	}
+
+	socketURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/socket.io/?EIO=4&transport=websocket"
+	socket, dialResponse, err := websocket.Dial(context.Background(), socketURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{server.URL}},
+	})
+	if err != nil {
+		t.Fatalf("credentialless Socket.IO response=%v err=%v", dialResponse, err)
+	}
+	defer socket.CloseNow()
+	if _, _, err = socket.Read(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err = socket.Write(context.Background(), websocket.MessageText, []byte("40")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = socket.Read(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	packet := `42["rpc",{"jsonrpc":"2.0","id":3,"method":"controller.peer.update.host","params":{"peer":"edge","artifact_sha256":"` + strings.Repeat("c", 64) + `","authorized":true,"idempotency_key":"intent:alpha-socketio"}}]`
+	if err = socket.Write(context.Background(), websocket.MessageText, []byte(packet)); err != nil {
+		t.Fatal(err)
+	}
+	_, payload, err = socket.Read(context.Background())
+	if err != nil || !strings.Contains(string(payload), `"rpc.response"`) ||
+		!strings.Contains(string(payload), "artifact service") ||
+		strings.Contains(string(payload), "authentication required") ||
+		strings.Contains(string(payload), "remote capability") {
+		t.Fatalf("credentialless Socket.IO payload=%s err=%v", payload, err)
+	}
+}
+
+func TestAuthorizationDisabledPreservesRemoteListenerOriginAndNoChainBoundaries(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	config := service.HostConfig()
+	config.IPC.AllowRemote = false
+	config.IPC.AllowedOrigins = []string{"controller.example:*"}
+	service.HostConfig = func() appconfig.Config { return config }
+	service.AuthorizationDisabled = true
+	handler := websocketMux(context.Background(), service)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"http://controller.example/api/rpc",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"controller.ping"}`),
+	)
+	request.RemoteAddr = "198.51.100.10:45000"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "remote network access is disabled") {
+		t.Fatalf("allow_remote bypassed: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	config.IPC.AllowRemote = true
+	request = httptest.NewRequest(http.MethodGet, "http://controller.example/api/snapshot", nil)
+	request.RemoteAddr = "198.51.100.10:45001"
+	request.Header.Set("Origin", "http://evil.example")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "origin is not allowed") {
+		t.Fatalf("Origin bypassed: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "http://rebind.attacker.invalid:8787/api/snapshot", nil)
+	request.RemoteAddr = "198.51.100.10:45002"
+	request.Host = "rebind.attacker.invalid:8787"
+	request.Header.Set("Origin", "http://rebind.attacker.invalid:8787")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "origin is not allowed") {
+		t.Fatalf("DNS-rebinding Origin bypassed: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "http://rebind.attacker.invalid:8787/api/snapshot", nil)
+	request.RemoteAddr = "127.0.0.1:45002"
+	request.Host = "rebind.attacker.invalid:8787"
+	request.Header.Set("Origin", "http://rebind.attacker.invalid:8787")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "origin is not allowed") {
+		t.Fatalf("loopback DNS-rebinding Origin bypassed: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "http://controller.example:8787/api/snapshot", nil)
+	request.RemoteAddr = "198.51.100.10:45003"
+	request.Header.Set("Origin", "http://controller.example:8787")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("explicit exact-host Origin rejected: status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	nested, _ := json.Marshal(map[string]any{
+		"peer":    "third",
+		"request": Request{JSONRPC: Version, Method: "controller.snapshot"},
+	})
+	bridgeResponse := service.DispatchRemote(context.Background(), Request{
+		JSONRPC: Version, Method: "controller.bridge.call", Params: nested,
+	}, "bridge")
+	if bridgeResponse.Error == nil || !strings.Contains(bridgeResponse.Error.Message, "recursive bridge calls") {
+		t.Fatalf("bridge no-chain bypassed: %#v", bridgeResponse)
+	}
+	for _, wrapped := range []Request{
+		{JSONRPC: Version, Method: "controller.command.execute", Params: json.RawMessage(`{"command":"bridge call third controller.snapshot"}`)},
+		{JSONRPC: Version, Method: "controller.app.action", Params: json.RawMessage(`{"kind":"command","value":"bridge call third controller.snapshot"}`)},
+	} {
+		bridgeResponse = service.DispatchRemote(context.Background(), wrapped, "bridge")
+		if bridgeResponse.Error == nil || !strings.Contains(bridgeResponse.Error.Message, "recursive bridge calls") {
+			t.Fatalf("wrapped bridge no-chain bypassed for %s: %#v", wrapped.Method, bridgeResponse)
+		}
+	}
+	peerUpdate, _ := json.Marshal(peerHostUpdateRequest{
+		Peer: "third", ArtifactSHA256: strings.Repeat("d", 64), Authorized: true,
+		IdempotencyKey: "intent:alpha-no-chain",
+	})
+	bridgeResponse = service.DispatchRemote(context.Background(), Request{
+		JSONRPC: Version, Method: "controller.peer.update.host", Params: peerUpdate,
+	}, "bridge")
+	if bridgeResponse.Error == nil || !strings.Contains(bridgeResponse.Error.Message, "may not be chained") {
+		t.Fatalf("peer-update no-chain bypassed: %#v", bridgeResponse)
+	}
+	peerCommand := "peer-update host third " + strings.Repeat("d", 64) + " intent:alpha-no-chain"
+	for _, wrapped := range []Request{
+		{JSONRPC: Version, Method: "controller.command.execute", Params: json.RawMessage(`{"command":` + strconv.Quote(peerCommand) + `}`)},
+		{JSONRPC: Version, Method: "controller.app.action", Params: json.RawMessage(`{"kind":"command","value":` + strconv.Quote(peerCommand) + `}`)},
+	} {
+		bridgeResponse = service.DispatchRemote(context.Background(), wrapped, "bridge")
+		if bridgeResponse.Error == nil || !strings.Contains(bridgeResponse.Error.Message, "may not be chained") {
+			t.Fatalf("wrapped peer-update no-chain bypassed for %s: %#v", wrapped.Method, bridgeResponse)
+		}
 	}
 }
 

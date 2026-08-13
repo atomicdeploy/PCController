@@ -48,7 +48,7 @@ class FakeWebSocket {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Web IPC transport', () => {
-  it('correlates RPC responses over the already-open event WebSocket', async () => {
+	it('correlates RPC responses over the already-open event WebSocket', async () => {
     const sockets: FakeWebSocket[] = []
     class CapturingSocket extends FakeWebSocket {
       constructor(url: string) { super(url); sockets.push(this) }
@@ -80,8 +80,33 @@ describe('Web IPC transport', () => {
       params: { id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' },
     })
     expect(events).toEqual([{ id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' }])
-    stop()
-  })
+		stop()
+	})
+
+	it('ignores a stale stored token when the alpha host reports auth disabled', async () => {
+		const sockets: FakeWebSocket[] = []
+		class CapturingSocket extends FakeWebSocket {
+			constructor(url: string, protocols?: string | string[]) { super(url, protocols); sockets.push(this) }
+		}
+		Object.defineProperty(CapturingSocket, 'OPEN', { value: 1 })
+		vi.stubGlobal('WebSocket', CapturingSocket)
+		vi.stubGlobal('location', { protocol: 'http:', host: '127.0.0.1:18887' })
+		vi.stubGlobal('sessionStorage', { getItem: () => 'stale-old-host-token', setItem: () => undefined, removeItem: () => undefined })
+		vi.stubGlobal('window', { setTimeout, clearTimeout })
+		const fetchSpy = vi.fn()
+		vi.stubGlobal('fetch', fetchSpy)
+
+		const stop = connectStream({
+			name: 'PCController', setup_complete: true, websocket_path: '/ipc',
+			session_ticket_path: '/api/session/ticket', auth_required: false,
+			appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+			appearance_etag: 'a'.repeat(64),
+		}, { status: () => undefined, event: () => undefined, state: () => undefined })
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(fetchSpy).not.toHaveBeenCalled()
+		expect(sockets[0]?.protocols).toEqual([])
+		stop()
+	})
 
   it('uses one validated external host for canonical REST and WebSocket paths', async () => {
     const sockets: FakeWebSocket[] = []
