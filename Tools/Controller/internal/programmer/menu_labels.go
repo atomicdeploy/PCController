@@ -15,7 +15,7 @@ type EEPROMByteWrite struct {
 func menuLabelsCRC(labels []byte) byte {
 	crc := EEPROMMenuLabelsFormatMarker
 	for _, label := range labels {
-		crc ^= label
+		crc = avrCRC8Update(crc, label)
 	}
 	return crc
 }

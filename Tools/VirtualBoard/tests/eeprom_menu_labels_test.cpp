@@ -2,6 +2,7 @@
 
 #include "Project/EepromLayout.h"
 #include "Project/EepromMenuLabels.h"
+#include "Project/ProtocolCodec.h"
 
 #include <cstdint>
 #include <iostream>
@@ -23,7 +24,8 @@ void require(bool condition, const char *message) {
 std::uint8_t labelCrc(const char *data, std::uint8_t length) {
 	std::uint8_t crc = EepromLayout::MenuLabelsFormatMarker;
 	while (length-- != 0) {
-		crc ^= static_cast<std::uint8_t>(*data++);
+		crc = ControllerProtocol::WireCodec::crc8Update(
+			crc, static_cast<std::uint8_t>(*data++));
 	}
 	return crc;
 }
@@ -75,7 +77,7 @@ void testVersionedRecordAndTornWriteStayUnavailable() {
 	EepromMenuLabels::begin();
 	require(EepromMenuLabels::available(),
 			"factory EEPROM label block did not validate");
-	require(labelCrc(kFactoryLabels, EepromLayout::MenuLabelBytes) == 0x8B,
+	require(labelCrc(kFactoryLabels, EepromLayout::MenuLabelBytes) == 0x06,
 			"factory CRC vector drifted from the Go-compatible contract");
 
 	char replacement[EepromLayout::MenuLabelBytes + 1] = {};
