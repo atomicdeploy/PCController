@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <new>
 #include <stdexcept>
 #include <string>
 
@@ -21,12 +22,36 @@ ControllerProtocol::Frame frame(std::uint8_t opcode, std::uint8_t sequence,
   return {opcode, sequence, length, payload};
 }
 
+// Firmware owns MacroQueue at static-storage duration, so the compact
+// MacroRing is zeroed before MacroQueue::initialize() assigns its wire tag.
+// Native tests must model that explicitly: a stack-allocated MacroQueue has
+// indeterminate ring bytes and can make this adapter test compiler-layout
+// dependent without representing the production object lifetime.
+class StaticStorageMacroQueue {
+public:
+  StaticStorageMacroQueue() : protocol_(serial_) {
+    arduino_mock::resetHardware();
+    // Keep all timing deterministic while the mock's micros() advances once
+    // per firmware call. The due record itself has a zero delta.
+    arduino_mock::nowMicros = 42000;
+    protocol_.begin(115200, nullptr);
+    queue_ = new (storage_) MacroQueue(protocol_);
+  }
+
+  ~StaticStorageMacroQueue() { queue_->~MacroQueue(); }
+
+  MacroQueue &queue() { return *queue_; }
+
+private:
+  HardwareSerial serial_;
+  ControllerProtocol::UartProtocol protocol_;
+  alignas(MacroQueue) std::uint8_t storage_[sizeof(MacroQueue)] = {};
+  MacroQueue *queue_ = nullptr;
+};
+
 void testAdapterUsesOrdinaryDispatchFrame() {
-  arduino_mock::resetHardware();
-  HardwareSerial serial;
-  ControllerProtocol::UartProtocol protocol(serial);
-  protocol.begin(115200, nullptr);
-  MacroQueue queue(protocol);
+  StaticStorageMacroQueue fixture;
+  MacroQueue &queue = fixture.queue();
 
   const std::uint8_t begin[] = {MacroQueue::Schema, 7, 0, 1, 0};
   require(queue.handle(frame(ControllerProtocol::MacroStart, 1, begin,
@@ -61,11 +86,8 @@ void testAdapterUsesOrdinaryDispatchFrame() {
 }
 
 void testAdapterRejectsNestedMacroDispatch() {
-  arduino_mock::resetHardware();
-  HardwareSerial serial;
-  ControllerProtocol::UartProtocol protocol(serial);
-  protocol.begin(115200, nullptr);
-  MacroQueue queue(protocol);
+  StaticStorageMacroQueue fixture;
+  MacroQueue &queue = fixture.queue();
 
   const std::uint8_t begin[] = {MacroQueue::Schema, 8, 0, 1, 0};
   const std::uint8_t append[] = {
