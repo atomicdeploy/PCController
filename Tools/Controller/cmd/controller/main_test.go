@@ -253,8 +253,8 @@ func TestCompileFeatureDryRunAcceptsOnlyNamedEEPROMGates(t *testing.T) {
 		{"--no-firmware-features"},
 	} {
 		args := []string{
-			"--method", "urclock", "--operation", "probe",
-			"--port", "DO_NOT_OPEN", "--dry-run",
+			"--method", "toolchain", "--operation", "core-info",
+			"--toolchain-cli", "arduino-cli", "--dry-run",
 		}
 		args = append(args, featureFlag...)
 		err := runProgramWithConfig(args, io.Discard, io.Discard, appconfig.Defaults())

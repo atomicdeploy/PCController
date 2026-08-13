@@ -96,6 +96,7 @@ func TestBoardInitializationRejectsFeaturesWhenItWillNotCompile(t *testing.T) {
 
 func TestBoardInitializationIgnoresInvalidFeatureDefaultsWithoutCompile(t *testing.T) {
 	t.Setenv(firmwareFeaturesEnvironment, "unknown")
+	t.Setenv(programmer.HostDataDirectoryEnvironment, t.TempDir())
 	project := t.TempDir()
 	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
 	if err != nil {
