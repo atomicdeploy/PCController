@@ -296,7 +296,7 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 		status.ResetCause != 0x0A || status.ResetCount != 0x12345678 {
 		t.Fatalf("unexpected STATUS: %#v", status)
 	}
-	if CapabilityProgramState != 1<<24 || SupportsHostMenuOverlay(Hello{Capabilities: CapabilityProgramState}) {
+	if CapabilityBluetoothAudio != 1<<11 || CapabilityProgramState != 1<<24 || SupportsHostMenuOverlay(Hello{Capabilities: CapabilityProgramState}) {
 		t.Fatal("capability bit 24 must identify PROGRAM_STATE, not host-menu overlay")
 	}
 	if got := ProgramStatePayload(false); !bytes.Equal(got, []byte{ProgramStateIdle}) {
@@ -307,6 +307,18 @@ func TestConfirmedResponseSchemas(t *testing.T) {
 	}
 	if _, err := ParseStatus(statusPayload[:StatusPayloadSize-1]); err == nil {
 		t.Fatal("STATUS without reset telemetry was accepted")
+	}
+}
+
+func TestStatusAvailabilityRejectsSentinelAndOutOfRangeMeasurements(t *testing.T) {
+	status := Status{
+		Flags:    StatusINA219Available | StatusTLEDAvailable | StatusTBTAvailable,
+		SupplyMV: -1, BusMV: -1, CurrentMA: -1, PowerMW: -1,
+		TLEDCenti: -32768, TBTCenti: 12501,
+	}
+	status.applyAvailability()
+	if status.INA219Available || status.TLEDAvailable || status.TBTAvailable {
+		t.Fatalf("invalid measurements advertised as available: %#v", status)
 	}
 }
 

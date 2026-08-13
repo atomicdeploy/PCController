@@ -351,6 +351,36 @@ controller tui --columns 144 --rows 44 --console-font "Cascadia Mono" --console-
 controller tui --console-management=false
 ```
 
+Attach the same full TUI to an authenticated primary without approaching this
+machine's serial ports:
+
+```console
+controller tui --ipc-addr cafe-pc.local:8787 --ipc-token-ref os:ipc.remote
+```
+
+Full TUIs attached to that primary synchronize their active page by default.
+Use `--sync-navigation=false` for an independent page in one process; explicit
+authenticated instance-targeted navigation remains available.
+
+The TUI treats the current board handshake and fetched state as authoritative.
+Optional rows, controls, and names do not appear until the board advertises the
+corresponding HELLO capability. A loading message appears only while an
+advertised STATUS or SETTINGS value is in flight; STATUS availability flags and
+bounded value validation then decide whether an individual measurement is safe
+to render. Synthetic preview frames explicitly inject their capabilities and
+values, so preview data cannot be mistaken for a connected board. Remote TUIs
+consume pushed live updates and use bounded snapshots only for initial state and
+reconnect convergence.
+
+When the dashboard says **DISCONNECTED**, press Enter or click the status at
+the right of the header to request an immediate authenticated reconnect. The
+local controller also retries in the background with a bounded exponential
+delay (one to thirty seconds); physical unplug/replug remains driven by device
+change notifications with a thirty-second safety retry. **CONNECTING** is shown
+only while the TUI has an active attempt. Disconnect clears peer-owned HELLO,
+STATUS, SETTINGS, front-panel, and LED values while retaining the last port
+identity used to find the same board again.
+
 The same values are persisted under `ui.tui_console` in JSON, YAML, or TOML,
 can be edited live on the TUI **HOST Settings** page, and can be changed with
 `config set ui.tui_console.columns 144` (likewise `rows`, `font_face`,
@@ -387,7 +417,14 @@ Ctrl+C    exit
 Up/Down  shell history
 Tab       command completion
 PgUp/Dn  scroll the event log
+D         on the Menus page, compose arbitrary segment/LCD text and timing
 ```
+
+The Menus-page display composer offers only targets confirmed by the current
+HELLO/STATUS state. It sends through the canonical `display` command, including
+speed, hold duration, repeat (`once`, `loop`, or `interval`), interval, and an
+explicit marquee switch. Text longer than the four-cell segment display
+scrolls automatically; forcing marquee also scrolls text that already fits.
 
 Automatic selection never trusts VID/PID or a friendly USB name alone. Every
 candidate must answer the native `HELLO` request with board kind `1` and the

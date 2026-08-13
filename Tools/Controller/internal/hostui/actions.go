@@ -12,11 +12,12 @@ import (
 )
 
 type AppAction struct {
-	Kind   string    `json:"kind"`
-	Value  string    `json:"value,omitempty"`
-	Source string    `json:"source,omitempty"`
-	Target string    `json:"target,omitempty"`
-	At     time.Time `json:"at"`
+	Kind     string            `json:"kind"`
+	Value    string            `json:"value,omitempty"`
+	Source   string            `json:"source,omitempty"`
+	Target   string            `json:"target,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+	At       time.Time         `json:"at"`
 }
 
 type ActionBroker struct {
@@ -64,6 +65,11 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 	if action.At.IsZero() {
 		action.At = time.Now()
 	}
+	metadata, err := normalizeAppActionMetadata(action.Metadata)
+	if err != nil {
+		return err
+	}
+	action.Metadata = metadata
 	switch action.Kind {
 	case "app.page":
 		if action.Value == "" {
@@ -104,22 +110,55 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 	broker.mu.RUnlock()
 	if !subscribed {
 		if observer != nil {
-			observer(action)
+			observer(cloneAppAction(action))
 		}
 		return nil
 	}
 	select {
-	case broker.events <- action:
+	case broker.events <- cloneAppAction(action):
 		if observer != nil {
-			observer(action)
+			observer(cloneAppAction(action))
 		}
 		return nil
 	default:
 		if observer != nil {
-			observer(action)
+			observer(cloneAppAction(action))
 		}
 		return errors.New("app action queue is full")
 	}
+}
+
+func normalizeAppActionMetadata(values map[string]string) (map[string]string, error) {
+	if len(values) > 16 {
+		return nil, errors.New("app action metadata exceeds 16 entries")
+	}
+	if len(values) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]string, len(values))
+	for rawKey, rawValue := range values {
+		key := strings.ToLower(strings.TrimSpace(rawKey))
+		value := strings.TrimSpace(rawValue)
+		if !instanceValuePattern.MatchString(key) || instanceSecretPattern.MatchString(key) {
+			return nil, errors.New("app action metadata key is invalid or credential-like")
+		}
+		if len(value) > 1024 || strings.ContainsAny(value, "\x00\r\n") {
+			return nil, errors.New("app action metadata value is too long or contains controls")
+		}
+		result[key] = value
+	}
+	return result, nil
+}
+
+func cloneAppAction(action AppAction) AppAction {
+	if action.Metadata != nil {
+		metadata := make(map[string]string, len(action.Metadata))
+		for key, value := range action.Metadata {
+			metadata[key] = value
+		}
+		action.Metadata = metadata
+	}
+	return action
 }
 
 func ParseAction(value, source string) (AppAction, error) {

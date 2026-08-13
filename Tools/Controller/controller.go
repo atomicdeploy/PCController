@@ -429,6 +429,22 @@ type Client struct {
 	events         chan Event
 	done           chan struct{}
 	doneOnce       sync.Once
+	statusHub      statusSubscriptionHub
+	statusFetch    func(context.Context) (Status, error)
+}
+
+type statusSubscriber struct {
+	interval time.Duration
+	next     time.Time
+	updates  chan StatusUpdate
+}
+
+type statusSubscriptionHub struct {
+	mu          sync.Mutex
+	subscribers map[uint64]*statusSubscriber
+	nextID      uint64
+	wake        chan struct{}
+	running     bool
 }
 
 // New creates a client that owns its serial and background-service lifecycle.
@@ -1002,36 +1018,124 @@ func (client *Client) SubscribeStatus(
 		return nil, errors.New("status subscription interval must be 50ms..1m")
 	}
 	updates := make(chan StatusUpdate, 1)
+	client.statusHub.mu.Lock()
+	if client.statusHub.subscribers == nil {
+		client.statusHub.subscribers = make(map[uint64]*statusSubscriber)
+		client.statusHub.wake = make(chan struct{}, 1)
+	}
+	client.statusHub.nextID++
+	id := client.statusHub.nextID
+	client.statusHub.subscribers[id] = &statusSubscriber{
+		interval: interval, next: time.Now(), updates: updates,
+	}
+	if !client.statusHub.running {
+		client.statusHub.running = true
+		go client.runStatusSubscriptionHub()
+	}
+	wake := client.statusHub.wake
+	client.statusHub.mu.Unlock()
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
 	go func() {
-		defer close(updates)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case at := <-ticker.C:
-				status, err := client.Status(ctx)
-				update := StatusUpdate{Time: at, Status: status}
-				if err != nil {
-					update.Error = err.Error()
-				}
-				select {
-				case updates <- update:
-				default:
-					select {
-					case <-updates:
-					default:
-					}
-					select {
-					case updates <- update:
-					default:
-					}
-				}
-			}
+		<-ctx.Done()
+		client.statusHub.mu.Lock()
+		if subscriber, ok := client.statusHub.subscribers[id]; ok {
+			delete(client.statusHub.subscribers, id)
+			close(subscriber.updates)
+		}
+		client.statusHub.mu.Unlock()
+		select {
+		case wake <- struct{}{}:
+		default:
 		}
 	}()
 	return updates, nil
+}
+
+// runStatusSubscriptionHub performs at most one physical status query at each
+// fastest requested cadence, then fans that authoritative result out according
+// to each subscriber's interval. Additional Web/TUI clients never multiply
+// serial traffic.
+func (client *Client) runStatusSubscriptionHub() {
+	for {
+		client.statusHub.mu.Lock()
+		if len(client.statusHub.subscribers) == 0 {
+			client.statusHub.running = false
+			client.statusHub.mu.Unlock()
+			return
+		}
+		now := time.Now()
+		next := now.Add(time.Minute)
+		for _, subscriber := range client.statusHub.subscribers {
+			if subscriber.next.Before(next) {
+				next = subscriber.next
+			}
+		}
+		wake := client.statusHub.wake
+		client.statusHub.mu.Unlock()
+
+		delay := time.Until(next)
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-wake:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				continue
+			}
+		}
+
+		at := time.Now()
+		requestContext, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		status, err := client.statusForSubscription(requestContext)
+		cancel()
+		update := StatusUpdate{Time: at, Status: status}
+		if err != nil {
+			update.Error = err.Error()
+		}
+		client.statusHub.mu.Lock()
+		for _, subscriber := range client.statusHub.subscribers {
+			if subscriber.next.After(at) {
+				continue
+			}
+			for !subscriber.next.After(at) {
+				subscriber.next = subscriber.next.Add(subscriber.interval)
+			}
+			if err != nil {
+				backoff := at.Add(time.Second)
+				if subscriber.next.Before(backoff) {
+					subscriber.next = backoff
+				}
+			}
+			select {
+			case subscriber.updates <- update:
+			default:
+				select {
+				case <-subscriber.updates:
+				default:
+				}
+				select {
+				case subscriber.updates <- update:
+				default:
+				}
+			}
+		}
+		client.statusHub.mu.Unlock()
+	}
+}
+
+func (client *Client) statusForSubscription(ctx context.Context) (Status, error) {
+	if client.statusFetch != nil {
+		return client.statusFetch(ctx)
+	}
+	return client.Status(ctx)
 }
 
 // ConfigureHistory updates bounded telemetry retention and persistence policy.
