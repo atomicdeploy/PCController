@@ -145,10 +145,23 @@ describe('offline and settings UI contracts', () => {
       snapshot={{ ...emptySnapshot, connection_reason: 'Serial controller is offline' }}
     />)
     expect(markup).toContain('href="#/dashboard"')
-    expect(markup).toContain('Controller offline — check the connection details below.')
+    expect(markup).toContain('Controller offline — the host is waiting for the board.')
     expect(markup).toContain('Serial controller is offline')
     expect(markup).not.toContain('Authentication required')
     expect(markup).not.toContain('The dashboard is ready')
+  })
+
+  it('distinguishes a lost host stream from an offline board', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      transport={{ ...shared().transport, streamState: 'waiting' }}
+      snapshot={{ ...emptySnapshot, connection_reason: 'WebSocket connection closed' }}
+    />)
+    expect(markup).toContain('Host connection unavailable — check the connection details below.')
+    expect(markup).toContain('WebSocket connection closed')
+    expect(markup).not.toContain('Controller offline')
+    expect(markup).not.toContain('Authentication required')
   })
 
   it('hides unavailable peripherals and their invalid readings', () => {
