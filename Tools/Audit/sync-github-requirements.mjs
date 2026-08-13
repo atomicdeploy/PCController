@@ -1367,6 +1367,7 @@ const PR_ORIGINAL_REQUESTS = {
   266: [PROMPT_EXCERPTS.displaysAudio, PROMPT_EXCERPTS.buzzerFallback],
   267: [PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.programmingEntrypoint],
   268: [PROMPT_EXCERPTS.displaysAudio, PROMPT_EXCERPTS.buzzerFallback, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.externalBeepFallback],
+  269: [PROMPT_EXCERPTS.authDefer, PROMPT_EXCERPTS.permissionAvailability, PROMPT_EXCERPTS.alphaEdgeReplacement, PROMPT_EXCERPTS.peerUpdateHardening],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
