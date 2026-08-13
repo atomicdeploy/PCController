@@ -42,7 +42,8 @@ export interface AudioEngine {
   toggleMuted(): boolean
   setVolume(value: number): void
   cue(name: AudioCue, direction?: NavigationDirection): boolean
-  playTone(frequencyHz: number, durationMS: number, delayMS?: number): boolean
+  playTone(frequencyHz: number, durationMS: number, delayMS?: number, source?: string): boolean
+  stopTone(source: string, delayMS?: number): boolean
   suspend(): Promise<void>
   resume(): Promise<boolean>
   dispose(): Promise<void>
@@ -96,6 +97,7 @@ class ProceduralAudioEngine implements AudioEngine {
   private listenerAttached = false
   private startPromise: Promise<boolean> | null = null
   private readonly sources = new Set<AudioScheduledSourceNode>()
+  private readonly toneSources = new Map<string, Set<AudioScheduledSourceNode>>()
   private readonly lastCueAt = new Map<AudioCue, number>()
 
   constructor(options: AudioEngineOptions = {}) {
@@ -178,14 +180,29 @@ class ProceduralAudioEngine implements AudioEngine {
     return true
   }
 
-  playTone(frequencyHz: number, durationMS: number, delayMS?: number): boolean {
+  playTone(frequencyHz: number, durationMS: number, delayMS?: number, source?: string): boolean {
     const context = this.context
     if (!context || !this.master || this.state !== 'running' || this.isMuted || this.masterVolume <= 0 ||
         !Number.isFinite(frequencyHz) || frequencyHz < 20 || frequencyHz > 20_000 ||
         !Number.isFinite(durationMS) || durationMS < 1 || durationMS > 60_000 ||
         (delayMS !== undefined && (!Number.isFinite(delayMS) || delayMS < 0))) return false
     const delaySeconds = delayMS === undefined ? 0.003 : delayMS / 1000
-    this.tone(context, context.currentTime + delaySeconds, durationMS / 1000, frequencyHz, frequencyHz, 0.024, 0, 'square')
+    this.tone(context, context.currentTime + delaySeconds, durationMS / 1000, frequencyHz, frequencyHz, 0.024, 0, 'square', source)
+    return true
+  }
+
+  stopTone(source: string, delayMS = 0): boolean {
+    const context = this.context
+    const key = source.trim()
+    if (!context || context.state === 'closed' || this.state === 'disposed' || !key ||
+        !Number.isFinite(delayMS) || delayMS < 0) return false
+    const group = this.toneSources.get(key)
+    if (!group?.size) return false
+    const stopAt = context.currentTime + delayMS / 1000
+    for (const oscillator of group) {
+      try { oscillator.stop(stopAt) } catch { /* source already ended */ }
+    }
+    this.toneSources.delete(key)
     return true
   }
 
@@ -230,6 +247,7 @@ class ProceduralAudioEngine implements AudioEngine {
       try { source.disconnect() } catch { /* source already released */ }
     }
     this.sources.clear()
+    this.toneSources.clear()
     const context = this.context
     this.context = null
     this.master = null
@@ -302,6 +320,7 @@ class ProceduralAudioEngine implements AudioEngine {
     peakGain: number,
     pan: number,
     type: OscillatorType,
+    source?: string,
   ): void {
     if (!this.master || context.state === 'closed' || this.state === 'disposed') return
     const oscillator = context.createOscillator()
@@ -324,8 +343,19 @@ class ProceduralAudioEngine implements AudioEngine {
       envelope.connect(this.master)
     }
     this.sources.add(oscillator)
+    const sourceKey = source?.trim()
+    if (sourceKey) {
+      const group = this.toneSources.get(sourceKey) ?? new Set<AudioScheduledSourceNode>()
+      group.add(oscillator)
+      this.toneSources.set(sourceKey, group)
+    }
     oscillator.addEventListener('ended', () => {
       this.sources.delete(oscillator)
+      if (sourceKey) {
+        const group = this.toneSources.get(sourceKey)
+        group?.delete(oscillator)
+        if (group?.size === 0) this.toneSources.delete(sourceKey)
+      }
       oscillator.disconnect()
       envelope.disconnect()
       panner?.disconnect()
