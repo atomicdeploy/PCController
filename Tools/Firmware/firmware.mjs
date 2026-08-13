@@ -526,23 +526,28 @@ function plannedProgramCommand(config, projectRoot, artifactPath = '', outputPat
 }
 
 export async function createCommandPlan(config, projectRoot) {
-	let firmwareFeatures
-	try {
-		firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures || [])
-	} catch (error) {
-		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
-	}
+	const rawFirmwareFeatures = config.firmwareFeatures ?? []
+	const hasFirmwareFeatureValues = Array.isArray(rawFirmwareFeatures)
+		? rawFirmwareFeatures.length !== 0
+		: true
 	const selectionExplicit = config.firmwareFeaturesExplicit === true ||
 		config.noFirmwareFeatures === true ||
-		(firmwareFeatures.length !== 0 && config.firmwareFeaturesFromEnvironment !== true)
-	if (selectionExplicit &&
-		!['build', 'upload', 'watch'].includes(config.command)) {
+		(hasFirmwareFeatureValues && config.firmwareFeaturesFromEnvironment !== true)
+	const firmwareBuildSelected = ['build', 'upload', 'watch'].includes(config.command)
+	if (selectionExplicit && !firmwareBuildSelected) {
 		throw new FirmwareToolError(
 			'explicit firmware-feature selection requires build, upload, or watch',
 			EXIT.USAGE
 		)
 	}
-	if (!['build', 'upload', 'watch'].includes(config.command)) firmwareFeatures = []
+	let firmwareFeatures
+	try {
+		firmwareFeatures = normalizeFirmwareFeatures(
+			firmwareBuildSelected ? rawFirmwareFeatures : []
+		)
+	} catch (error) {
+		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+	}
 	config = { ...config, firmwareFeatures }
 	const absolute = commandPlanPaths(projectRoot)
 	const paths = relativeCommandPlanPaths(projectRoot)
