@@ -68,6 +68,12 @@ import {
 } from './tab-channel'
 import { controllerChannelOrigin } from './transport-config'
 import { matchesAppTarget } from './instance-routing'
+import {
+  loadNavigationSync,
+  NavigationSession,
+  type NavigationOutcome,
+  saveNavigationSync,
+} from './navigation-sync'
 import type {
   Appearance,
   BoardSettingsReadState,
@@ -435,6 +441,12 @@ export default function App() {
   const [tabBusSupported, setTabBusSupported] = useState(false)
   const [tabPeers, setTabPeers] = useState(0)
   const [appInstanceID, setAppInstanceID] = useState('')
+  const [navigationSync, setNavigationSyncEnabled] = useState(loadNavigationSync)
+  const [navigationSyncStatus, setNavigationSyncStatus] = useState<{
+    state: 'idle' | 'pending' | 'error'
+    detail: string
+  }>({ state: 'idle', detail: '' })
+  const [navigationSession] = useState(() => new NavigationSession())
   const [relayedTerminal, setRelayedTerminal] = useState<RelayedTerminalEntry[]>([])
   const toastID = useRef(0)
   const goChordUntil = useRef(0)
@@ -448,6 +460,9 @@ export default function App() {
   const refreshAfterHostRestart = useRef(false)
   const startupConsoleShown = useRef(false)
   const pageRef = useRef(page)
+  const navigationSyncRef = useRef(navigationSync)
+  const reportAppInstanceRef = useRef<(catchUp?: boolean) => void>(() => undefined)
+  const historyNavigationRef = useRef<(page: PageID) => void>(() => undefined)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const snapshotRef = useRef(snapshot)
@@ -459,6 +474,7 @@ export default function App() {
     ? appearance.locale === 'fa' ? 'rtl' : 'ltr'
     : appearance.direction
   const drawerClosedOffset = resolvedDirection === 'rtl' ? '18px' : '-18px'
+  navigationSyncRef.current = navigationSync
 
   const applyLocalAppearance = useCallback((value: Appearance) => {
     setAppearance(value)
@@ -595,30 +611,50 @@ export default function App() {
     }
   }, [refreshHostAppearance])
 
+  const reportAppInstance = useCallback((state = document.hidden ? 'hidden' : 'active', catchUp = false) => {
+    if (demo || !startupProbeResolved || !appInstanceID) return Promise.resolve()
+    return rpc('controller.app.instance.report', {
+      id: appInstanceID,
+      surface: 'webui',
+      page: pageRef.current,
+      state,
+      lease_seconds: 45,
+      self: {
+        kind: 'browser',
+        vars: {
+          origin: window.location.origin,
+          platform: navigator.platform || 'unknown',
+          language: navigator.language || 'unknown',
+          user_agent: navigator.userAgent,
+        },
+      },
+      values: {
+        color_mode: appearance.theme,
+        locale: appearance.locale,
+        direction: resolvedDirection,
+        ...navigationSession.nextValues(navigationSync, catchUp),
+      },
+    })
+  }, [appInstanceID, appearance.locale, appearance.theme, demo, navigationSession, navigationSync, resolvedDirection, startupProbeResolved])
+
+  reportAppInstanceRef.current = (catchUp = false) => {
+    if (catchUp && navigationSyncRef.current) {
+      setNavigationSyncStatus({ state: 'pending', detail: '' })
+    }
+    void reportAppInstance(undefined, catchUp).catch((cause) => {
+      if (catchUp && navigationSyncRef.current) {
+        setNavigationSyncStatus({
+          state: 'error',
+          detail: cause instanceof Error ? cause.message : String(cause),
+        })
+      }
+    })
+  }
+
   useEffect(() => {
     if (demo || !startupProbeResolved || !appInstanceID) return
     const report = (state = document.hidden ? 'hidden' : 'active') => {
-      void rpc('controller.app.instance.report', {
-        id: appInstanceID,
-        surface: 'webui',
-        page,
-        state,
-        lease_seconds: 45,
-        self: {
-          kind: 'browser',
-          vars: {
-            origin: window.location.origin,
-            platform: navigator.platform || 'unknown',
-            language: navigator.language || 'unknown',
-            user_agent: navigator.userAgent,
-          },
-        },
-        values: {
-          color_mode: appearance.theme,
-          locale: appearance.locale,
-          direction: resolvedDirection,
-        },
-      }).catch(() => undefined)
+      void reportAppInstance(state).catch(() => undefined)
     }
     const onVisibility = () => report()
     report()
@@ -630,7 +666,7 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisibility)
       window.clearInterval(leaseRefresh)
     }
-  }, [appInstanceID, appearance.locale, appearance.theme, demo, page, resolvedDirection, startupProbeResolved, token])
+  }, [appInstanceID, demo, reportAppInstance, startupProbeResolved, token])
 
   useEffect(() => () => {
     if (!appInstanceID) return
@@ -790,17 +826,65 @@ export default function App() {
     setDialog({ ...value, open: true })
   }, [])
 
-  const navigate = useCallback((value: PageID) => {
+  const applyPage = useCallback((value: PageID, historyMode: 'push' | 'replace' | 'none' = 'push') => {
+    const changed = pageRef.current !== value
     const nextHash = canonicalPageHash(value)
-    if (pageRef.current !== value || location.hash !== nextHash) {
+    if (historyMode === 'push' && (pageRef.current !== value || location.hash !== nextHash)) {
       history.pushState({ page: value }, '', canonicalPageURL(value))
+    } else if (historyMode === 'replace' && (pageRef.current !== value || location.hash !== nextHash)) {
+      history.replaceState({ page: value }, '', canonicalPageURL(value))
     }
     pageRef.current = value
     setPage(value)
     setMobileNav(false)
     tabChannelRef.current?.publishPresence(document.hidden ? 'hidden' : 'active', value)
+    if (changed) reportAppInstanceRef.current()
     document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: appearance.reduceMotion ? 'auto' : 'smooth' })
   }, [appearance.reduceMotion])
+
+  const navigate = useCallback((value: PageID, historyMode: 'push' | 'none' = 'push') => {
+    applyPage(value, historyMode)
+    if (demo || !navigationSync || !startupProbeResolved || !appInstanceID) return
+    setNavigationSyncStatus({ state: 'pending', detail: '' })
+    let command
+    try {
+      command = navigationSession.nextCommit(appInstanceID, value)
+    } catch (cause) {
+      setNavigationSyncStatus({
+        state: 'error',
+        detail: cause instanceof Error ? cause.message : String(cause),
+      })
+      return
+    }
+    void rpc<NavigationOutcome>('controller.app.navigation.commit', command)
+      .then((outcome) => {
+        const settled = navigationSession.settle(outcome, command.operation_id)
+        if (settled) {
+          applyPage(settled, 'replace')
+          setNavigationSyncStatus({ state: 'idle', detail: '' })
+        }
+        else throw new Error(appearance.locale === 'fa' ? 'پاسخ هماهنگ‌کننده با درخواست فعلی مطابقت ندارد.' : 'The coordinator response did not match this request.')
+      })
+      .catch((cause) => {
+        reportAppInstanceRef.current(true)
+        setNavigationSyncStatus({
+          state: 'error',
+          detail: cause instanceof Error ? cause.message : String(cause),
+        })
+      })
+  }, [appInstanceID, appearance.locale, applyPage, demo, navigationSession, navigationSync, startupProbeResolved])
+
+  useEffect(() => {
+    historyNavigationRef.current = (value) => navigate(value, 'none')
+    return () => { historyNavigationRef.current = () => undefined }
+  }, [navigate])
+
+  const setNavigationSync = useCallback((value: boolean) => {
+    saveNavigationSync(value)
+    navigationSession.resetCoordinator()
+    setNavigationSyncStatus(value ? { state: 'pending', detail: '' } : { state: 'idle', detail: '' })
+    setNavigationSyncEnabled(value)
+  }, [navigationSession])
 
   const saveAppearance = useCallback((value: Appearance) => {
     const safeValue = normalizeAppearance(value, appearanceDesiredRef.current)
@@ -911,9 +995,7 @@ export default function App() {
     }
     const syncFromHistory = () => {
       const next = pageFromLocation()
-      pageRef.current = next
-      setPage(next)
-      setMobileNav(false)
+      historyNavigationRef.current(next)
     }
     window.addEventListener('hashchange', syncFromHistory)
     window.addEventListener('popstate', syncFromHistory)
@@ -1156,12 +1238,19 @@ export default function App() {
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
               if (destination) {
-                navigate(destination)
-                audioRef.current?.cue('navigation', 'forward')
+                const groupUpdate = event.metadata?.navigation_sync?.toLowerCase() === 'group'
+                const accepted = groupUpdate
+                  ? navigationSyncRef.current ? navigationSession.acceptAction(event.metadata, destination) : null
+                  : destination
+                if (accepted) {
+                  applyPage(accepted, 'replace')
+                  if (groupUpdate) setNavigationSyncStatus({ state: 'idle', detail: '' })
+                  audioRef.current?.cue('navigation', 'forward')
+                }
               }
             }
 			if (shouldNavigateToUpdates(event, pageRef.current)) {
-				navigate('updates')
+				applyPage('updates', 'replace')
 				audioRef.current?.cue('navigation', 'forward')
 			}
             if (/error|warning|hot|door/i.test(event.kind)) notify(eventToneForToast(event), event.kind, event.text)
@@ -1175,6 +1264,8 @@ export default function App() {
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
+              navigationSession.resetCoordinator()
+              reportAppInstanceRef.current(true)
               if (refreshAfterHostRestart.current) {
                 refreshAfterHostRestart.current = false
                 window.location.reload()
@@ -1210,7 +1301,7 @@ export default function App() {
       }
     })()
     return () => { abort.abort(); stopStream() }
-  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance, streamGeneration, token])
+  }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({
     hostRequiresAuthentication: uiConfig?.auth_required === true,
@@ -1243,7 +1334,7 @@ export default function App() {
   const view = (
     <Suspense fallback={<section className="page-loading" role="status" aria-live="polite"><span className="spinner" />{appearance.locale === 'fa' ? 'در حال بارگیری…' : 'Loading page…'}</section>}>
       {page === 'settings'
-        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} />
+        ? <PageView {...shared} appearance={appearance} onAppearance={saveAppearance} token={token} onToken={saveToken} onAppTitle={saveAppTitle} uiConfig={uiConfig} onBuzzerPath={setBuzzerPath} navigationSync={navigationSync} navigationSyncStatus={navigationSyncStatus} onNavigationSync={setNavigationSync} />
         : <PageView {...shared} />}
     </Suspense>
   )

@@ -218,7 +218,7 @@ func TestPrimaryAppPagePreservesTUIDeliveryAndFansOutRuntimeEvent(t *testing.T) 
 	}
 }
 
-func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T) {
+func TestPrimaryCoordinatesTUIAndWebUIInstancePagesAndMirrorsMetadata(t *testing.T) {
 	runtime := control.New(control.Options{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -228,9 +228,9 @@ func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T)
 	}
 	defer server.Close()
 	actions := server.AppActions()
-	makeInstance := func(id, epoch, page, revision string) hostui.AppInstance {
+	makeInstance := func(id, surface, epoch, page, revision string) hostui.AppInstance {
 		return hostui.AppInstance{
-			ID: id, Surface: "tui", Page: page, State: "active", LeaseSeconds: 45,
+			ID: id, Surface: surface, Page: page, State: "active", LeaseSeconds: 45,
 			Values: map[string]string{
 				hostui.NavigationSyncKey:  hostui.NavigationSyncFollow,
 				hostui.NavigationGroupKey: hostui.DefaultNavigationGroup,
@@ -238,9 +238,9 @@ func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T)
 			},
 		}
 	}
-	one := makeInstance("tui:one", "11111111111111111111111111111111", "dashboard", "1")
-	two := makeInstance("tui:two", "22222222222222222222222222222222", "controls", "1")
-	three := makeInstance("tui:three", "33333333333333333333333333333333", "settings", "1")
+	one := makeInstance("tui:one", "tui", "11111111111111111111111111111111", "dashboard", "1")
+	two := makeInstance("tab:web:one", "webui", "22222222222222222222222222222222", "controls", "1")
+	three := makeInstance("tui:three", "tui", "33333333333333333333333333333333", "settings", "1")
 	if _, err := server.instances.Upsert(one); err != nil {
 		t.Fatal(err)
 	}
@@ -259,14 +259,15 @@ func TestPrimaryCoordinatesThreeTUIInstancePagesAndMirrorsMetadata(t *testing.T)
 	}
 
 	afterID := runtime.LatestEventID()
-	one.Page, one.Values[hostui.NavigationRevisionKey] = "events", "2"
-	if _, err := server.instances.Upsert(one); err != nil {
-		t.Fatal(err)
+	outcome, err := server.navigationCommand(hostui.NavigationCommand{Group: hostui.DefaultNavigationGroup, Source: one.ID, Page: "events", OperationID: "test-op-1"})
+	if err != nil || outcome.Revision != 2 || outcome.Page != "events" || len(outcome.Actions) != 3 {
+		t.Fatalf("coordinator outcome=%#v err=%v", outcome, err)
 	}
-	for _, wantTarget := range []string{three.ID, two.ID} {
+	for _, wantTarget := range []string{two.ID, one.ID, three.ID} {
 		if action := <-actions; action.Target != wantTarget || action.Value != "events" ||
 			action.Metadata[hostui.NavigationSourceKey] != one.ID ||
-			action.Metadata[hostui.NavigationRevisionKey] != "2" {
+			action.Metadata[hostui.NavigationRevisionKey] != "2" ||
+			action.Metadata[hostui.NavigationOperationKey] != "test-op-1" {
 			t.Fatalf("fanout action target=%q action=%#v", wantTarget, action)
 		}
 	}
