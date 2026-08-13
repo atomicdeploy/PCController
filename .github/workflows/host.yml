@@ -92,13 +92,21 @@ jobs:
           printf '%s/bin\n' "$go_root" >> "$GITHUB_PATH"
           go version
 
-      - name: "🧪 Build the C ABI through CMake and run its C consumer"
+      - name: "🧪 Build the Windows C ABI through CMake and run installed C consumer"
         if: matrix.windows
         shell: bash
         run: |
           cmake -S Tools/Controller -B .build/controller-cabi -G Ninja \
             -DPCCONTROLLER_CABI_CC="$CC" -DBUILD_TESTING=ON
-          cmake --build .build/controller-cabi --target pccontroller_cabi_smoke --parallel
+          cmake --build .build/controller-cabi --target pccontroller_cabi_installed_smoke --parallel
+          ctest --test-dir .build/controller-cabi --output-on-failure
+
+      - name: "🧪 Build the Linux C ABI through CMake and run installed C consumer"
+        if: matrix.target == 'Linux-x64'
+        shell: bash
+        run: |
+          cmake -S Tools/Controller -B .build/controller-cabi -G Ninja -DBUILD_TESTING=ON
+          cmake --build .build/controller-cabi --target pccontroller_cabi_installed_smoke --parallel
           ctest --test-dir .build/controller-cabi --output-on-failure
 
       - name: "🟢 Install Node.js"
