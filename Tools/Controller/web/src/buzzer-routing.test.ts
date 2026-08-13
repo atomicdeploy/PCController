@@ -18,17 +18,25 @@ describe('BuzzerPlaybackTimeline', () => {
     const first = timeline.plan({
       source: 'board-a', frequencyHz: 440, durationMS: 100, deviceMicros: 0xFFFF_FF00,
     }, 1000)
-    expect(first).toEqual({ delayMS: 8, durationMS: 100, audible: true })
+    expect(first).toEqual({ delayMS: 8, durationMS: 100, audible: true, stop: false })
 
     const pause = timeline.plan({
       source: 'board-a', frequencyHz: 0, durationMS: 40, deviceMicros: 0x0001_85A0,
     }, 1118)
-    expect(pause).toEqual({ delayMS: 0, durationMS: 30, audible: false })
+    expect(pause).toEqual({ delayMS: 0, durationMS: 30, audible: false, stop: true })
 
     const late = timeline.plan({
       source: 'board-a', frequencyHz: 660, durationMS: 80, deviceMicros: 0x0002_21E0,
     }, 1165)
-    expect(late).toEqual({ delayMS: 0, durationMS: 63, audible: true })
+    expect(late).toEqual({ delayMS: 0, durationMS: 63, audible: true, stop: false })
+  })
+
+  it('accepts explicit stop markers and rejects zero-duration tones', () => {
+    const timeline = new BuzzerPlaybackTimeline()
+    expect(timeline.plan({
+      source: 'board-a', frequencyHz: 0, durationMS: 0, deviceMicros: 42,
+    }, 1000)).toEqual({ delayMS: 8, durationMS: 0, audible: false, stop: true })
+    expect(timeline.plan({ source: 'board-a', frequencyHz: 440, durationMS: 0 }, 1000)).toBeNull()
   })
 
   it('reanchors a restarted source and keeps independent boards separate', () => {

@@ -55,6 +55,7 @@ describe('procedural audio engine', () => {
   it('schedules every semantic cue only after gesture start and honors mute', async () => {
     let oscillatorCount = 0
     let lastOscillatorStart = 0
+    const oscillatorStops: number[] = []
     const parameter = () => ({
       value: 0,
       cancelScheduledValues: vi.fn(),
@@ -80,7 +81,8 @@ describe('procedural audio engine', () => {
         oscillatorCount += 1
         return {
           type: 'sine', frequency: parameter(), connect: vi.fn(), disconnect: vi.fn(),
-          addEventListener: vi.fn(), start: vi.fn((at: number) => { lastOscillatorStart = at }), stop: vi.fn(),
+          addEventListener: vi.fn(), start: vi.fn((at: number) => { lastOscillatorStart = at }),
+          stop: vi.fn((at: number) => { oscillatorStops.push(at) }),
         }
       }
       createStereoPanner() {
@@ -106,8 +108,11 @@ describe('procedural audio engine', () => {
     expect(audio.cue('disconnect')).toBe(true)
     expect(oscillatorCount).toBe(15)
 		expect(audio.playTone(440, 220)).toBe(true)
-		expect(audio.playTone(440, 220, 125)).toBe(true)
+		expect(audio.playTone(440, 220, 125, 'board-a')).toBe(true)
 		expect(lastOscillatorStart).toBeCloseTo(1.125)
+		expect(audio.stopTone('board-a', 25)).toBe(true)
+		expect(oscillatorStops.at(-1)).toBeCloseTo(1.025)
+		expect(audio.stopTone('board-a')).toBe(false)
 		expect(audio.playTone(0, 220)).toBe(false)
 		expect(oscillatorCount).toBe(17)
     audio.setMuted(true)

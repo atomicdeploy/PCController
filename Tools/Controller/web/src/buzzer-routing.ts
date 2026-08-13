@@ -11,6 +11,7 @@ export interface BuzzerPlaybackPlan {
   delayMS: number
   durationMS: number
   audible: boolean
+  stop: boolean
 }
 
 interface BuzzerTimelineAnchor {
@@ -29,7 +30,8 @@ export class BuzzerPlaybackTimeline {
 
   plan(input: BuzzerPlaybackInput, nowMS: number): BuzzerPlaybackPlan | null {
     if (!Number.isFinite(nowMS) || !Number.isFinite(input.frequencyHz) || input.frequencyHz < 0 ||
-        !Number.isFinite(input.durationMS) || input.durationMS < 1 || input.durationMS > 60_000) return null
+        !Number.isFinite(input.durationMS) || input.durationMS < 0 || input.durationMS > 60_000 ||
+        (input.durationMS === 0 && input.frequencyHz !== 0)) return null
     let startMS = nowMS + webAudioLookaheadMS
     if (input.deviceMicros !== undefined) {
       if (!Number.isInteger(input.deviceMicros) || input.deviceMicros < 0 || input.deviceMicros > 0xFFFF_FFFF) return null
@@ -48,6 +50,7 @@ export class BuzzerPlaybackTimeline {
       delayMS: Math.max(0, startMS - nowMS),
       durationMS,
       audible: input.frequencyHz >= 20 && input.frequencyHz <= 20_000 && durationMS >= 1,
+      stop: input.frequencyHz === 0,
     }
   }
 }

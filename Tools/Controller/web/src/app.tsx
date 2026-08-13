@@ -1076,8 +1076,11 @@ export default function App() {
               const plan = buzzerTimelineRef.current.plan({
                 source, frequencyHz, durationMS, deviceMicros,
               }, performance.now())
-              if (plan?.audible) {
-                audioRef.current?.playTone(frequencyHz, plan.durationMS, plan.delayMS)
+              if (plan?.stop) {
+                audioRef.current?.stopTone(source, plan.delayMS)
+              } else if (plan?.audible) {
+                audioRef.current?.stopTone(source, plan.delayMS)
+                audioRef.current?.playTone(frequencyHz, plan.durationMS, plan.delayMS, source)
               }
             }
             if (isSignificantControllerEvent(event)) {

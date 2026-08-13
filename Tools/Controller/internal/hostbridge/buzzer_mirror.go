@@ -3,6 +3,7 @@ package hostbridge
 import (
 	"context"
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -82,7 +83,8 @@ func buzzerMirrorJobFor(config appconfig.BuzzerMirror, event controller.Event) (
 	}
 	frequencyHz, frequencyErr := strconv.Atoi(event.Metadata["frequency_hz"])
 	durationMS, durationErr := strconv.Atoi(event.Metadata["duration_ms"])
-	if frequencyErr != nil || durationErr != nil || frequencyHz < 0 || durationMS <= 0 {
+	if frequencyErr != nil || durationErr != nil || frequencyHz < 0 || durationMS < 0 ||
+		(durationMS == 0 && frequencyHz != 0) {
 		return buzzerMirrorJob{}, false
 	}
 	job := buzzerMirrorJob{
@@ -132,36 +134,156 @@ func (manager *Manager) dispatchBuzzerMirror(config appconfig.Config, event cont
 func (manager *Manager) buzzerMirrorLoop() {
 	defer manager.wait.Done()
 	timeline := newBuzzerPlaybackTimeline()
+	type scheduledPlayback struct {
+		job   buzzerMirrorJob
+		plan  buzzerPlaybackPlan
+		order uint64
+	}
+	type activePlayback struct {
+		source string
+		cancel context.CancelFunc
+		done   chan error
+	}
+	var pending []scheduledPlayback
+	var replacement *scheduledPlayback
+	var active *activePlayback
+	var order uint64
+	var timer *time.Timer
+	var timerChannel <-chan time.Time
+	player := manager.buzzerPlay
+	if player == nil {
+		player = playNativeBuzzer
+	}
+	stopTimer := func() {
+		if timer != nil && !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timerChannel = nil
+	}
+	armTimer := func(at time.Time) {
+		stopTimer()
+		delay := time.Until(at)
+		if delay < 0 {
+			delay = 0
+		}
+		if timer == nil {
+			timer = time.NewTimer(delay)
+		} else {
+			timer.Reset(delay)
+		}
+		timerChannel = timer.C
+	}
+	start := func(next scheduledPlayback) bool {
+		remaining, audible := next.plan.remaining(time.Now())
+		if !audible || next.job.frequencyHz == 0 {
+			return false
+		}
+		next.job.durationMS = int((remaining + time.Millisecond - 1) / time.Millisecond)
+		playContext, cancel := context.WithDeadline(manager.ctx, next.plan.end)
+		done := make(chan error, 1)
+		active = &activePlayback{source: next.job.source, cancel: cancel, done: done}
+		go func() { done <- player(playContext, next.job) }()
+		return true
+	}
+	finishActive := func(err error) {
+		current := active
+		active = nil
+		current.cancel()
+		if (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) &&
+			manager.ctx.Err() == nil {
+			err = nil
+		}
+		if manager.ctx.Err() == nil {
+			manager.recordNativeBuzzerResult(err)
+		}
+	}
+	defer stopTimer()
 	for {
+		now := time.Now()
+		if active == nil {
+			if replacement != nil {
+				next := *replacement
+				replacement = nil
+				if start(next) {
+					continue
+				}
+			}
+			if len(pending) != 0 && !pending[0].plan.start.After(now) {
+				next := pending[0]
+				pending = pending[1:]
+				if start(next) {
+					continue
+				}
+				continue
+			}
+		}
+
+		var nextTransition time.Time
+		if active == nil {
+			if len(pending) != 0 {
+				nextTransition = pending[0].plan.start
+			}
+		} else {
+			for _, candidate := range pending {
+				if candidate.job.source == active.source {
+					nextTransition = candidate.plan.start
+					break
+				}
+			}
+		}
+		if nextTransition.IsZero() {
+			stopTimer()
+		} else {
+			armTimer(nextTransition)
+		}
+
+		var activeDone <-chan error
+		if active != nil {
+			activeDone = active.done
+		}
 		select {
 		case <-manager.ctx.Done():
+			if active != nil {
+				active.cancel()
+				<-active.done
+			}
 			return
 		case job := <-manager.buzzerJobs:
 			plan := timeline.plan(job, time.Now())
-			if delay := time.Until(plan.start); delay > 0 {
-				timer := time.NewTimer(delay)
-				select {
-				case <-manager.ctx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
+			order++
+			pending = append(pending, scheduledPlayback{job: job, plan: plan, order: order})
+			sort.SliceStable(pending, func(left, right int) bool {
+				if pending[left].plan.start.Equal(pending[right].plan.start) {
+					return pending[left].order < pending[right].order
 				}
-			}
-			remaining, audible := plan.remaining(time.Now())
-			if !audible || job.frequencyHz == 0 {
+				return pending[left].plan.start.Before(pending[right].plan.start)
+			})
+		case err := <-activeDone:
+			finishActive(err)
+		case <-timerChannel:
+			timerChannel = nil
+			if active == nil {
 				continue
 			}
-			job.durationMS = int((remaining + time.Millisecond - 1) / time.Millisecond)
-			playContext, cancel := context.WithDeadline(manager.ctx, plan.end)
-			err := playNativeBuzzer(playContext, job)
-			cancel()
-			if errors.Is(err, context.DeadlineExceeded) && manager.ctx.Err() == nil {
-				// The absolute source deadline intentionally cuts off backend
-				// startup/command overhead instead of extending the note.
-				err = nil
+			now = time.Now()
+			for index := 0; index < len(pending); {
+				candidate := pending[index]
+				if candidate.plan.start.After(now) {
+					break
+				}
+				if candidate.job.source != active.source {
+					index++
+					continue
+				}
+				selected := candidate
+				replacement = &selected
+				pending = append(pending[:index], pending[index+1:]...)
 			}
-			if manager.ctx.Err() == nil {
-				manager.recordNativeBuzzerResult(err)
+			if replacement != nil {
+				active.cancel()
 			}
 		}
 	}
