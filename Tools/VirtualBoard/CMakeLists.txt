@@ -241,4 +241,25 @@ if(BUILD_TESTING)
     target_compile_options(firmware_reset_telemetry_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_reset_telemetry_unit COMMAND firmware_reset_telemetry_tests)
+
+  # Validate the compile-gated EEPROM menu-label reader against a byte-accurate
+  # 1 KiB EEPROM double. This is intentionally a production-AVR component test,
+  # not a VirtualBoard runtime behavior fork.
+  add_executable(firmware_eeprom_menu_labels_tests
+    tests/eeprom_menu_labels_test.cpp
+    ../../Project/EepromMenuLabels.cpp
+  )
+  target_include_directories(firmware_eeprom_menu_labels_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_eeprom_menu_labels_tests PRIVATE
+    PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_eeprom_menu_labels_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_eeprom_menu_labels_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_eeprom_menu_labels_unit COMMAND firmware_eeprom_menu_labels_tests)
 endif()

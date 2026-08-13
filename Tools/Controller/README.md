@@ -798,18 +798,20 @@ bin\controller.exe exec peer-update host cafe-pc HOST_ARTIFACT_SHA256
 bin\controller.exe ipc call --method controller.peer.update.host --params "{\"peer\":\"cafe-pc\",\"artifact_sha256\":\"HOST_ARTIFACT_SHA256\",\"authorized\":true}"
 ```
 
-Enable an authenticated edge host on a trusted LAN with explicit browser
-origins, then use a vault reference from another machine without placing the
-bearer token on its command line:
+Enable an immediate-alpha edge host on a trusted LAN with explicit browser
+origins. #148 deliberately disables application authentication and
+authorization, so these commands neither generate nor require a bearer token:
 
 ```console
 bin\controller.exe network edge-enable --origin David-PC:* --origin 192.168.100.130:*
-bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --method controller.ping
-bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc --secret-ref os:edge/cafe-pc
-bin\controller.exe network probe --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --origin http://David-PC:8787
+bin\controller.exe ipc call --addr 192.168.100.155:8787 --method controller.ping
+bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc
+bin\controller.exe ipc call --method controller.network.peers.get
+bin\controller.exe ipc call --method controller.network.peers.set --params "{\"peers\":[{\"name\":\"cafe-pc\",\"enabled\":true,\"url\":\"ws://192.168.100.155:8787/ipc\",\"protocol\":\"jsonrpc\",\"topics\":[\"events\",\"state\",\"status\"],\"forward_events\":true,\"allow_commands\":true}]}"
+bin\controller.exe network probe --addr 192.168.100.155:8787 --origin http://David-PC:8787
 bin\controller.exe network discover --protocols dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios
 bin\controller.exe network list --timeout 3s
-bin\controller.exe network connect --target cafe-pc --token-ref os:edge/cafe-pc
+bin\controller.exe network connect --target cafe-pc
 bin\controller.exe network advertise --enabled=true --protocols all --broadcast-port 37889
 bin\controller.exe ipc call --method controller.discovery.scan --params "{\"protocols\":[\"dns-sd\",\"ssdp\",\"upnp\",\"ws-discovery\",\"broadcast\",\"netbios\"],\"timeout_ms\":3000}"
 ```
@@ -820,9 +822,9 @@ file. Discovery exposes one merged record per host: system hostname, persistent
 host identity/build, board firmware and serial-port identity, health and current
 voltage/current/power/temperature/door state, plus Web/API/operation/event/opcode
 endpoints. `GET /upnp/public.json` is intentionally bounded and secret-free.
-Finding a host never grants control: `ipc.allow_remote`, bearer/session
-authentication, allowed origins, and the remote capability policy remain
-separate and default to disabled remote access.
+Finding a host does not enable its listener: `ipc.allow_remote` and allowed
+origins remain explicit. Bearer/session credentials and remote capability
+policy are persisted only as dormant future-design fields during the alpha.
 
 The edge command enables the selected IPC, REST, WebSocket,
 Socket.IO, programming, and bridge capabilities. Shutdown, virtual-key, and
@@ -846,16 +848,17 @@ bounded. The important-event timeline is compacted at 8 MiB and defaults to
 500 retained events. Setting `ui.history_hours` to `0` clears and disables measurement
 retention without disabling the important-event timeline.
 
-The TCP listener rejects non-loopback addresses by default. Remote mode
-requires `ipc.allow_remote`, a token of at least 24 characters, a non-wildcard
-browser origin list, a stable `ipc.remote_principal` name, and explicit
-`ipc.remote_policy` capabilities. Its safe default permits read/event
-subscriptions only. Token possession alone does not grant board writes, reset,
-programming, shutdown, virtual keys, power actions, host-automation execution,
-or bridge calls.
+The TCP listener rejects non-loopback addresses by default. Remote mode still
+requires `ipc.allow_remote` and a non-wildcard browser origin list. The
+immediate-alpha contract in #148 disables all application auth/authZ gates;
+stored inbound tokens, principals, and `ipc.remote_policy` bits are not resolved
+or enforced until a replacement design is explicitly reactivated. An optional
+outbound peer bearer may still be resolved and sent solely so a new alpha host
+can reach and upgrade a still-authenticated older peer.
 
-HTTP and native socket clients authenticate with a Bearer or compatibility
-header. A client connecting from an unauthenticated discovery record first
+The following credential/session flow is retained as deferred design context,
+not current alpha behavior. When reactivated, HTTP and native socket clients
+would authenticate with a Bearer or compatibility header. A client connecting from an unauthenticated discovery record first
 calls `GET /api/auth/server-proof` with a fresh random nonce and verifies the
 returned address-bound HMAC locally; it sends the bearer only after proving
 that the exact reached listener knows it. This prevents a spoofed LAN
@@ -873,10 +876,18 @@ one-use ticket, never the durable token.
 
 Configured `integrations.websocket_clients` can subscribe to another primary,
 forward loop-safe typed events, and issue correlated `bridge call` requests.
-Each host still has exactly one local serial owner and the target reapplies its
-own remote policy and board safety guards.
+`controller.network.peers.get|set` exposes the same topology through any
+existing IPC/WebSocket/Socket.IO/bridge transport. Set replaces the list
+atomically and the configuration subscription hot-applies it. The schema has no
+plaintext token field: an optional `auth_token_ref` may name an existing vault
+entry for one-time compatibility with an older auth-on peer. Each host still has
+exactly one local serial owner; alpha auth policy is dormant, while board and OS
+safety guards remain active. New peers subscribe to `events`, `state`, and
+`status` by default. The `state` topic carries structured push updates such as
+`buzzer.note`; ingress provenance prevents those updates from being forwarded
+again through another bridge.
 
-Host upgrades use that same authenticated connection. A verified executable is
+Host upgrades use that same connected peer path. A verified executable is
 chunked below the RPC frame limit, validated again by the receiving artifact
 store, and passed to the receiving coordinator for graceful replacement and
 health-checked rollback. No SSH command is embedded in this path. The Updates
@@ -1265,7 +1276,7 @@ programming, while a command explicitly named build/watch-only remains unable
 to open COM or ISP hardware. Provider/peer bearer tokens are transient; proxy
 variables are inherited by the Go HTTP client and its dependencies.
 
-An authenticated peer can consume `GET /api/discovery/manifest`, whose
+A connected peer can consume `GET /api/discovery/manifest`, whose
 relative artifact links point at this host's immutable SHA-256 download routes.
 The same schema can be returned through `controller.discovery.local_manifest`;
 no local filesystem path or credential is published.

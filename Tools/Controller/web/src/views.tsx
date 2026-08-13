@@ -59,6 +59,7 @@ import {
   Sun,
   TableProperties,
   Thermometer,
+  TriangleAlert,
   TimerReset,
   ToggleRight,
   Unplug,
@@ -147,6 +148,7 @@ export interface SharedViewProps {
   transport: {
     streamState: 'connecting' | 'open' | 'waiting' | 'closed'
     authenticationRequired: boolean
+    boardState: 'loading' | 'ready' | 'unavailable'
     tabBusSupported: boolean
     tabPeers: number
   }
@@ -176,22 +178,32 @@ export function DashboardView(props: SharedViewProps) {
   const { appTitle, snapshot, samples, events, locale, t, command, refresh, openDialog } = props
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const status = snapshot.status
+  const boardReady = props.transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const available = peripheralAvailability(snapshot)
   const haveMeasurements = available.ina219 || available.temperatureLED || available.temperatureBTAudio
   const haveMetricCards = haveMeasurements || available.pwm
-  const connectedTone = snapshot.connected ? 'good' : snapshot.paused ? 'warn' : 'bad'
-  const authenticationRequired = !snapshot.connected && props.transport.authenticationRequired
+  const invalidMeasurements = [
+    available.invalidINA219 ? copy('Power measurements unavailable', 'اندازه‌گیری‌های توان در دسترس نیست') : '',
+    available.invalidTemperatureLED ? copy('LED temperature unavailable', 'دمای LED در دسترس نیست') : '',
+    available.invalidTemperatureBTAudio ? copy('Buzzer temperature unavailable', 'دمای بیزر در دسترس نیست') : '',
+  ].filter(Boolean)
+  const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
+  const authenticationRequired = !boardReady && props.transport.authenticationRequired
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
   const activeRelayCount = Array.from({ length: 8 }, (_, index) => Boolean(status.active_relays & (1 << index))).filter(Boolean).length
   const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
   const [hostUI, setHostUI] = useState<HostUISettings | null>(null)
   useEffect(() => {
+    if (!boardReady) {
+      setHostUI(null)
+      return
+    }
     let active = true
     void rpc<HostUISettings>('controller.ui.config.get')
       .then((value) => { if (active) setHostUI(value) })
       .catch(() => { if (active) setHostUI(null) })
     return () => { active = false }
-  }, [configurationEventID])
+  }, [boardReady, configurationEventID])
   const peripheralName = (key: string, fallback: string) => hostUI?.peripheral_names?.[key]?.trim() || fallback
   const relayDefaults = [
     copy('Side A direction', 'جهت سمت A'), copy('Side A output', 'خروجی سمت A'),
@@ -202,34 +214,34 @@ export function DashboardView(props: SharedViewProps) {
   return (
     <>
       <SectionTitle
-        eyebrow={snapshot.connected ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
+        eyebrow={boardReady ? t('liveTelemetry') : snapshot.paused ? copy('Connection paused', 'اتصال متوقف شده') : copy('Awaiting controller', 'در انتظار کنترلر')}
         title={t('dashboard')}
-        detail={authenticationRequired ? t('authenticationDashboardDetail') : pageDetail(snapshot, appTitle, locale)}
+        detail={authenticationRequired ? t('authenticationDashboardDetail') : boardReady ? pageDetail(snapshot, appTitle, locale) : snapshot.connection_reason || t('noHardware')}
         action={
           <div className="header-actions">
             <StatusBadge tone={connectedTone} pulse={snapshot.connection_state === 'connecting'}>
-              {snapshot.connected ? t('online') : snapshot.connection_state === 'connecting' ? t('connecting') : t('offline')}
+              {boardReady ? t('online') : props.transport.boardState === 'loading' ? t('connecting') : t('offline')}
             </StatusBadge>
-            {!snapshot.connected && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
+            {!boardReady && !authenticationRequired && <Button icon={Cable} compact onClick={() => void command('reconnect', t('reconnect'))}>{t('reconnect')}</Button>}
             <Button icon={RefreshCw} compact onClick={() => void refresh()}>{t('refresh')}</Button>
           </div>
         }
       />
 
-      <section className={`hero-panel${snapshot.connected ? ' is-online' : ''}`}>
+      <section className={`hero-panel${boardReady ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
-          <div className="eyebrow">{copy('Controller', 'کنترلر')} · {snapshot.connection_state}</div>
-          <h2>{snapshot.connected ? snapshot.hello.name || appTitle : t(authenticationRequired ? 'authenticationDashboard' : 'noHardware')}</h2>
-          <p>{snapshot.connected ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : snapshot.connection_reason || t('noHardware')}</p>
+          <div className="eyebrow">{boardReady ? `${copy('Controller', 'کنترلر')} · ${snapshot.connection_state}` : copy('Host connection', 'اتصال میزبان')}</div>
+          <h2>{boardReady ? snapshot.hello.name || appTitle : authenticationRequired ? t('authenticationDashboard') : props.transport.boardState === 'loading' ? copy('Loading controller state…', 'در حال بارگیری وضعیت کنترلر…') : t('noHardware')}</h2>
+          <p>{boardReady ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : authenticationRequired ? t('authenticationDashboardDetail') : snapshot.connection_reason || t('noHardware')}</p>
           {authenticationRequired && <Button icon={ShieldCheck} tone="primary" onClick={() => { window.location.hash = '#/settings' }}>{copy('Enter access token', 'ورود توکن دسترسی')}</Button>}
         </div>
-        <div className={`hero-panel__readout${snapshot.have_status ? '' : ' is-empty'}`} dir="ltr">
+        {boardReady && <div className="hero-panel__readout" dir="ltr">
           <span>{copy('BUILD', 'ساخت')}</span><strong>{hash}</strong>
           <span>{copy('UPTIME', 'زمان کارکرد')}</span><strong>{formatDuration(locale, status.uptime_ms)}</strong>
-        </div>
+        </div>}
       </section>
 
-      {snapshot.have_status && haveMetricCards && <section className="metric-grid">
+      {boardReady && haveMetricCards && <section className="metric-grid">
         {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
         {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
         {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" />}
@@ -237,25 +249,29 @@ export function DashboardView(props: SharedViewProps) {
         {available.pwm && <MetricCard icon={PlugZap} label="PWM" value={formatNumber(locale, status.pwm_value * 100 / 4095, 1)} unit="%" values={[]} tone="violet" detail={`${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}`} />}
       </section>}
 
-      {haveMeasurements && <Card
+      {boardReady && invalidMeasurements.length > 0 && <div className="measurement-alerts" role="status" aria-live="polite">
+        {invalidMeasurements.map((message) => <div className="measurement-alert" key={message}><TriangleAlert size={16} /><span>{message}</span></div>)}
+      </div>}
+
+      {boardReady && haveMeasurements && <Card
         icon={ChartNoAxesCombined}
         iconTone="violet"
-        title={snapshot.connected ? t('liveTelemetry') : copy('Telemetry history', 'تاریخچهٔ تله‌متری')}
-        eyebrow={snapshot.connected ? copy('REAL-TIME', 'هم‌زمان') : copy('LAST KNOWN', 'آخرین داده')}
+        title={t('liveTelemetry')}
+        eyebrow={copy('REAL-TIME', 'هم‌زمان')}
         className="telemetry-chart-card"
-        action={<StatusBadge tone={snapshot.connected ? 'good' : 'warn'}>{samples.length} {copy('samples', 'نمونه')}</StatusBadge>}
+        action={<StatusBadge tone="good">{samples.length} {copy('samples', 'نمونه')}</StatusBadge>}
         menu={[
           { label: copy('Refresh telemetry', 'تازه‌سازی تله‌متری'), icon: RefreshCw, onSelect: () => { void refresh() } },
           { label: copy('Open Workbench', 'بازکردن میزکار'), icon: SquareTerminal, onSelect: () => { window.location.hash = '#/workbench' } },
         ]}
       >
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
-          <TelemetryChart connected={snapshot.connected} locale={locale} samples={samples} />
+          <TelemetryChart connected locale={locale} samples={samples} />
         </Suspense>
       </Card>}
 
       <section className="dashboard-grid">
-        {snapshot.connected && <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
+        {boardReady && available.relays && <Card icon={ToggleRight} iconTone={activeRelayCount ? 'amber' : 'green'} title={t('outputs')} eyebrow="R1—R8" className="outputs-card" action={<StatusBadge tone={status.active_relays ? 'warn' : 'neutral'}>{status.active_relays ? `${activeRelayCount} ${copy('ACTIVE', 'فعال')}` : copy('SAFE', 'ایمن')}</StatusBadge>} menu={[
           { label: copy('Read controller status', 'خواندن وضعیت کنترلر'), icon: Gauge, onSelect: () => { void command('status') } },
           { label: copy('Release every output', 'آزادسازی همهٔ خروجی‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off'); await command('pwm off') } }) },
         ]}>
@@ -277,39 +293,37 @@ export function DashboardView(props: SharedViewProps) {
           <div className="safety-strip"><ShieldCheck size={17} /><span>{activeRelayCount ? copy(`${activeRelayCount} outputs active · confirmation required for emergency release`, `${activeRelayCount} خروجی فعال است · آزادسازی اضطراری به تأیید نیاز دارد`) : copy('All physical outputs are released', 'همهٔ خروجی‌های فیزیکی آزاد هستند')}</span></div>
         </Card>}
 
-        <Card icon={Gauge} iconTone={snapshot.connected ? 'green' : 'amber'} title={t('status')} eyebrow={t('device')} className="device-card" menu={snapshot.connected ? [
+        {boardReady && <Card icon={Gauge} iconTone="green" title={t('status')} eyebrow={t('device')} className="device-card" menu={[
           { label: copy('Read identity', 'خواندن شناسه'), icon: Cpu, onSelect: () => { void command('hello') } },
           { label: copy('Open controller controls', 'بازکردن کنترل‌های برد'), icon: CircuitBoard, onSelect: () => { window.location.hash = '#/controls' } },
-        ] : [
-          { label: t('reconnect'), icon: Cable, onSelect: () => { void command('reconnect') } },
         ]}>
           <div className="data-list">
             <DataRow label={t('device')} value={snapshot.port.friendly_name || snapshot.port.name || '—'} />
             <DataRow label={t('firmware')} value={snapshot.hello.build_timestamp || hash} mono />
             <DataRow label={t('door')} value={status.door_open ? t('open') : t('closed')} tone={status.door_open ? 'warn' : 'good'} />
-            <DataRow label={t('bluetooth')} value={status.bluetooth_audio_state === 2 ? t('online') : status.bluetooth_audio_state === 1 ? t('connecting') : t('offline')} />
+            {available.bluetoothAudio && <DataRow label={t('bluetooth')} value={status.bluetooth_audio_state === 2 ? t('online') : status.bluetooth_audio_state === 1 ? t('connecting') : t('offline')} />}
             <DataRow label={copy('UART CRC / framing', 'CRC / قاب‌بندی UART')} value={`${status.crc_errors} / ${status.framing_errors}`} mono tone={status.crc_errors || status.framing_errors ? 'warn' : 'good'} />
             <DataRow label={copy('Reset count', 'تعداد بازنشانی')} value={status.reset_count} mono />
           </div>
-        </Card>
+        </Card>}
 
-        {snapshot.connected && <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
+        {boardReady && <Card icon={Zap} iconTone="amber" title={t('quickActions')} eyebrow={copy('Confirmation protected', 'محافظت‌شده با تأیید')} className="actions-card">
           <div className="action-grid">
-            <Button icon={Unplug} tone="danger" onClick={() => openDialog({
+            {available.relays && <Button icon={Unplug} tone="danger" onClick={() => openDialog({
               tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'),
               action: async () => { await command('relay off', t('emergencyOff')); await command('pwm off') },
-            })}>{t('emergencyOff')}</Button>
+            })}>{t('emergencyOff')}</Button>}
             <Button icon={Gauge} onClick={() => void command('status')}>{copy('Read status', 'خواندن وضعیت')}</Button>
-            <Button icon={Lightbulb} onClick={() => void command('rgb effect play attention')}>{copy('Attention cue', 'اعلان توجه')}</Button>
+            {available.statusLED && <Button icon={Lightbulb} onClick={() => void command('rgb effect play attention')}>{copy('Attention cue', 'اعلان توجه')}</Button>}
           </div>
         </Card>}
 
-        <Card icon={Activity} iconTone="violet" title={t('events')} eyebrow={events.length ? `${formatClock(locale, events[0].time)} · ${events[0].kind}` : t('eventStream')} className="activity-card" action={<span className="count-chip">{events.length}</span>} menu={[
+        {boardReady && <Card icon={Activity} iconTone="violet" title={t('events')} eyebrow={events.length ? `${formatClock(locale, events[0].time)} · ${events[0].kind}` : t('eventStream')} className="activity-card" action={<span className="count-chip">{events.length}</span>} menu={[
           { label: copy('Open full timeline', 'بازکردن خط زمانی کامل'), icon: Activity, onSelect: () => { window.location.hash = '#/events' } },
           { label: copy('Refresh snapshot', 'تازه‌سازی وضعیت'), icon: RefreshCw, onSelect: () => { void refresh() } },
         ]}>
           <EventList events={events} locale={locale} t={t} />
-        </Card>
+        </Card>}
       </section>
     </>
   )
@@ -318,6 +332,8 @@ export function DashboardView(props: SharedViewProps) {
 export function ControlsView(props: SharedViewProps) {
   const { snapshot, locale, t, command, openDialog } = props
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
+  const boardReady = props.transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
+  const available = peripheralAvailability(snapshot)
   const initialPWM = () => Array.from({ length: 16 }, (_, index) => index === snapshot.status.pwm_channel ? snapshot.status.pwm_value : 0)
   const [pwmReported, setPWMReported] = useState<number[]>(initialPWM)
   const [pwmDraft, setPWMDraft] = useState<number[]>(initialPWM)
@@ -389,15 +405,19 @@ export function ControlsView(props: SharedViewProps) {
   useEffect(() => () => pwmSchedulerRef.current?.dispose(), [])
 
   useEffect(() => {
+    if (!boardReady) {
+      setHostUI(null)
+      return
+    }
     let active = true
     void rpc<HostUISettings>('controller.ui.config.get')
       .then((value) => { if (active) setHostUI(value) })
       .catch(() => { if (active) setHostUI(null) })
     return () => { active = false }
-  }, [configurationEventID])
+  }, [boardReady, configurationEventID])
 
   useEffect(() => {
-    if (!snapshot.connected || !snapshot.status.pwm_available) {
+    if (!boardReady || !available.pwm) {
       setPWMLoaded(false)
       return
     }
@@ -411,10 +431,10 @@ export function ControlsView(props: SharedViewProps) {
     })
     reconciler.start()
     return () => reconciler.stop()
-  }, [snapshot.connected, snapshot.status.pwm_available])
+  }, [available.pwm, boardReady])
 
   useEffect(() => {
-    if (!snapshot.have_status || snapshot.status.pwm_channel < 0 || snapshot.status.pwm_channel > 15) return
+    if (!boardReady || !available.pwm || snapshot.status.pwm_channel < 0 || snapshot.status.pwm_channel > 15) return
     const channel = snapshot.status.pwm_channel
     const value = snapshot.status.pwm_value
     pwmReportedRef.current = pwmReportedRef.current.map((candidate, index) => index === channel ? value : candidate)
@@ -422,7 +442,7 @@ export function ControlsView(props: SharedViewProps) {
     if (!pwmSchedulerRef.current?.pendingChannels().includes(channel)) {
       setPWMDraft((current) => current.map((candidate, index) => index === channel ? value : candidate))
     }
-  }, [snapshot.have_status, snapshot.status.pwm_channel, snapshot.status.pwm_value])
+  }, [available.pwm, boardReady, snapshot.status.pwm_channel, snapshot.status.pwm_value])
 
   const pwmDefaults = [
     'MOSFET 1', 'MOSFET 2', 'MOSFET 3', 'MOSFET 4',
@@ -456,11 +476,11 @@ export function ControlsView(props: SharedViewProps) {
     }
   }
 
-  if (!snapshot.connected) {
+  if (!boardReady) {
     return (
       <>
         <SectionTitle eyebrow={copy('Controller controls', 'کنترل‌های برد')} title={t('controls')} detail={snapshot.connection_reason || copy('Controller offline', 'کنترلر آفلاین است')} />
-        <Card icon={CircuitBoard} iconTone="amber" title={copy('Controller controls are unavailable', 'کنترل‌های برد در دسترس نیست')} eyebrow={copy('No authenticated controller', 'کنترلر معتبری متصل نیست')}>
+        <Card icon={CircuitBoard} iconTone="amber" title={props.transport.boardState === 'loading' ? copy('Loading controller controls', 'در حال بارگیری کنترل‌های برد') : copy('Controller controls are unavailable', 'کنترل‌های برد در دسترس نیست')} eyebrow={copy('Host connection', 'اتصال میزبان')}>
           <EmptyState
             icon={Cable}
             title={copy('Connect the controller to reveal its controls', 'برای نمایش کنترل‌ها، برد را متصل کنید')}
@@ -475,7 +495,7 @@ export function ControlsView(props: SharedViewProps) {
     <>
       <SectionTitle eyebrow={copy('Connected controller', 'کنترلر متصل')} title={t('controls')} detail={pageDetail(snapshot, props.appTitle, locale)} />
       <section className="control-layout">
-        <Card icon={CircuitBoard} iconTone={snapshot.status.active_relays ? 'amber' : 'green'} eyebrow={copy('Eight protected outputs', 'هشت خروجی محافظت‌شده')} title={copy('Relays & motion', 'رله‌ها و حرکت')} className="relay-control-card" action={<StatusBadge tone={snapshot.status.active_relays ? 'warn' : 'good'}>{snapshot.status.active_relays ? copy('ENERGIZED', 'برقدار') : copy('RELEASED', 'آزاد')}</StatusBadge>} menu={[
+        {available.relays && <Card icon={CircuitBoard} iconTone={snapshot.status.active_relays ? 'amber' : 'green'} eyebrow={copy('Eight protected outputs', 'هشت خروجی محافظت‌شده')} title={copy('Relays & motion', 'رله‌ها و حرکت')} className="relay-control-card" action={<StatusBadge tone={snapshot.status.active_relays ? 'warn' : 'good'}>{snapshot.status.active_relays ? copy('ENERGIZED', 'برقدار') : copy('RELEASED', 'آزاد')}</StatusBadge>} menu={[
           { label: copy('Refresh output state', 'تازه‌سازی وضعیت خروجی‌ها'), icon: RefreshCw, onSelect: () => { void command('status') } },
           { label: copy('Release every relay', 'آزادسازی همهٔ رله‌ها'), icon: Unplug, tone: 'danger', onSelect: () => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off') } }) },
         ]}>
@@ -501,9 +521,9 @@ export function ControlsView(props: SharedViewProps) {
             ))}
           </div>
           <Button icon={AlertOctagon} tone="danger" onClick={() => openDialog({ tone: 'danger', title: t('confirmEmergencyTitle'), body: t('confirmEmergencyBody'), confirmLabel: t('emergencyOff'), action: async () => { await command('relay off') } })}>{t('emergencyOff')}</Button>
-        </Card>
+        </Card>}
 
-        {snapshot.status.pwm_available && <Card icon={SlidersHorizontal} iconTone="violet" eyebrow={copy('11 user channels · acknowledged writes', '۱۱ کانال کاربر · نوشتن با تأیید')} title={copy('PWM mixer', 'میکسر PWM')} className="pwm-card" action={<StatusBadge tone={pwmError ? 'bad' : pwmPending.length ? 'warn' : pwmLoaded ? 'good' : 'neutral'}>{pwmError ? copy('ERROR', 'خطا') : pwmPending.length ? copy('SYNCING', 'همگام‌سازی') : pwmLoaded ? copy('CONFIRMED', 'تأییدشده') : copy('READING', 'در حال خواندن')}</StatusBadge>}>
+        {available.pwm && <Card icon={SlidersHorizontal} iconTone="violet" eyebrow={copy('11 user channels · acknowledged writes', '۱۱ کانال کاربر · نوشتن با تأیید')} title={copy('PWM mixer', 'میکسر PWM')} className="pwm-card" action={<StatusBadge tone={pwmError ? 'bad' : pwmPending.length ? 'warn' : pwmLoaded ? 'good' : 'neutral'}>{pwmError ? copy('ERROR', 'خطا') : pwmPending.length ? copy('SYNCING', 'همگام‌سازی') : pwmLoaded ? copy('CONFIRMED', 'تأییدشده') : copy('READING', 'در حال خواندن')}</StatusBadge>}>
           <div className="pwm-mixer">
             {USER_PWM_CHANNELS.map((channel) => {
               const reported = pwmReported[channel]
@@ -530,7 +550,7 @@ export function ControlsView(props: SharedViewProps) {
           <Button icon={Power} busy={pwmAllBusy} disabled={!pwmLoaded || pwmAllBusy || pwmPending.length > 0} onClick={() => void clearPWM()}>{copy('Clear all PWM channels', 'پاک‌کردن همهٔ کانال‌های PWM')}</Button>
         </Card>}
 
-        <Card icon={Lightbulb} iconTone="amber" eyebrow={copy('Color and effects', 'رنگ و افکت‌ها')} title={copy('Status lighting', 'نور وضعیت')} className="rgb-card">
+        {available.statusLED && <Card icon={Lightbulb} iconTone="amber" eyebrow={copy('Color and effects', 'رنگ و افکت‌ها')} title={copy('Status lighting', 'نور وضعیت')} className="rgb-card">
           <div className="status-led-previews">
 			<div className="color-preview" style={{ '--preview': chosenHex } as React.CSSProperties}>
 				<span />
@@ -562,7 +582,7 @@ export function ControlsView(props: SharedViewProps) {
 		  </div>
 		  <div className="inline-actions"><Button tone="primary" icon={Sparkles} disabled={!snapshot.connected} onClick={() => void command(statusCommand)}>{copy('Apply live', 'اعمال زنده')}</Button><Button disabled={!snapshot.connected} onClick={() => void command('rgb effect stop')}>{copy('Stop effect', 'توقف افکت')}</Button></div>
 		  <div className="rgb-profile-row"><label><span>{copy('EEPROM condition', 'شرط EEPROM')}</span><select value={statusProfile} onChange={(event) => setStatusProfile(event.target.value)}>{['off', 'boot', 'ready', 'learning', 'hot', 'fault', 'custom', 'bluetooth-connected', 'bluetooth-off', 'bluetooth-waiting', 'running', 'door-open', 'door-closed', 'bluetooth', 'menu', 'radio', 'save', 'discard', 'reset'].map((condition) => <option key={condition} value={condition}>{condition}</option>)}</select></label><Button icon={MemoryStick} disabled={!snapshot.connected} onClick={() => void command(profileCommand)}>{copy('Save profile (live when active)', 'ذخیره پروفایل (هنگام فعال‌شدن زنده)')}</Button></div>
-        </Card>
+        </Card>}
 
       </section>
     </>
@@ -727,7 +747,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, transport }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const available = peripheralAvailability(snapshot)
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
@@ -1052,13 +1072,35 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const appearanceThemeLabel = t(appearance.theme)
   const appearanceLocaleLabel = t(appearance.locale === 'fa' ? 'persian' : 'english')
   const appearanceDirectionLabel = t(appearance.direction === 'auto' ? 'auto' : appearance.direction === 'ltr' ? 'leftToRight' : 'rightToLeft')
+  const boardReady = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
+
+  if (transport.authenticationRequired) {
+    return <>
+      <SectionTitle eyebrow={copy('Host recovery', 'بازیابی میزبان')} title={t('settings')} detail={t('authenticationDashboardDetail')} />
+      <section className="settings-grid">
+        <Card icon={ShieldCheck} iconTone="amber" title={t('security')} eyebrow={copy('Authentication required', 'احراز هویت لازم است')} className="settings-card">
+          <TextField
+            label={t('authToken')}
+            type="password"
+            value={draftToken}
+            autoComplete="off"
+            spellCheck={false}
+            onInput={(event) => setDraftToken(normalizeSessionToken(event.currentTarget.value))}
+            onChange={(event) => setDraftToken(normalizeSessionToken(event.currentTarget.value))}
+            hint={tokenDirty ? copy(`${normalizedToken.length} normalized characters · not applied`, `${normalizedToken.length} نویسهٔ نرمال‌شده · اعمال نشده`) : copy('Enter this host’s access token.', 'توکن دسترسی این میزبان را وارد کنید.')}
+            action={<Button tone="primary" icon={ShieldCheck} disabled={!tokenDirty} onClick={() => { onToken(normalizedToken); setDraftToken(normalizedToken) }}>{t('apply')}</Button>}
+          />
+        </Card>
+      </section>
+    </>
+  }
 
   return (
     <>
       <SectionTitle
-        eyebrow={snapshot.connected ? copy('Host and controller settings', 'تنظیمات میزبان و کنترلر') : copy('Host settings', 'تنظیمات میزبان')}
+        eyebrow={boardReady ? copy('Host and controller settings', 'تنظیمات میزبان و کنترلر') : copy('Host settings', 'تنظیمات میزبان')}
         title={t('settings')}
-        detail={`${copy('Theme', 'پوسته')}: ${appearanceThemeLabel} · ${copy('Language', 'زبان')}: ${appearanceLocaleLabel} · ${copy('Direction', 'جهت')}: ${appearanceDirectionLabel}${snapshot.connected ? copy(' · controller available', ' · کنترلر در دسترس') : copy(' · controller offline', ' · کنترلر آفلاین')}`}
+        detail={`${copy('Theme', 'پوسته')}: ${appearanceThemeLabel} · ${copy('Language', 'زبان')}: ${appearanceLocaleLabel} · ${copy('Direction', 'جهت')}: ${appearanceDirectionLabel}${boardReady ? copy(' · controller available', ' · کنترلر در دسترس') : ''}`}
       />
       <section className="settings-grid">
         <Card icon={HardDrive} iconTone="violet" title={copy('PC host identity', 'هویت میزبان رایانه')} eyebrow={titleBusy ? copy('Saving', 'در حال ذخیره') : titleDirty ? copy('Unsaved change', 'تغییر ذخیره‌نشده') : copy('Saved', 'ذخیره‌شده')} className="settings-card">
@@ -1175,7 +1217,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 
         <HotkeyEditor locale={appearance.locale} />
 
-        <Card icon={ShieldCheck} iconTone="green" title={t('security')} eyebrow={tokenDirty ? copy('Token change pending', 'تغییر توکن در انتظار اعمال') : token ? copy('Session authenticated', 'نشست معتبر است') : copy('No session token', 'بدون توکن نشست')} className="settings-card">
+        {uiConfig?.auth_required === true && <Card icon={ShieldCheck} iconTone="green" title={t('security')} eyebrow={tokenDirty ? copy('Token change pending', 'تغییر توکن در انتظار اعمال') : token ? copy('Session authenticated', 'نشست معتبر است') : copy('No session token', 'بدون توکن نشست')} className="settings-card">
           <TextField
             label={t('authToken')}
             type="password"
@@ -1187,9 +1229,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
             hint={tokenDirty ? copy(`${normalizedToken.length} normalized characters · not applied`, `${normalizedToken.length} نویسهٔ نرمال‌شده · اعمال نشده`) : token ? copy('Applied to this browser tab.', 'در این زبانهٔ مرورگر اعمال شده است.') : copy('Enter a token if the host requires one.', 'اگر میزبان توکن می‌خواهد، آن را وارد کنید.')}
             action={<Button tone="primary" icon={ShieldCheck} disabled={!tokenDirty} onClick={() => { onToken(normalizedToken); setDraftToken(normalizedToken) }}>{t('apply')}</Button>}
           />
-        </Card>
+        </Card>}
 
-        {snapshot.connected && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={snapshot.have_settings ? copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح') : boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Settings unavailable', 'تنظیمات در دسترس نیست')} className="settings-card">
+        {boardReady && available.settings && <Card icon={CircuitBoard} iconTone="amber" title={copy('Board EEPROM settings', 'تنظیمات EEPROM برد')} eyebrow={snapshot.have_settings ? copy('Live draft · explicit write', 'پیش‌نویس زنده · نوشتن صریح') : boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Settings unavailable', 'تنظیمات در دسترس نیست')} className="settings-card">
           {!snapshot.have_settings ? <EmptyState
             icon={MemoryStick}
             title={boardSettingsReadState === 'loading' ? copy('Reading board settings', 'در حال خواندن تنظیمات برد') : copy('Board settings are unavailable', 'تنظیمات برد در دسترس نیست')}
@@ -1225,14 +1267,12 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           </>}
         </Card>}
 
-        <Card icon={snapshot.connected ? Usb : Cable} iconTone={snapshot.connected ? 'green' : 'amber'} title={t('connection')} eyebrow={snapshot.connected ? copy('Controller connected', 'کنترلر متصل است') : copy('Controller offline', 'کنترلر آفلاین است')} className="settings-card">
-          <div className="data-list"><DataRow label={copy('State', 'وضعیت')} value={snapshot.connection_state} tone={snapshot.connected ? 'good' : 'warn'} /><DataRow label={copy('Port', 'درگاه')} value={snapshot.port.name || copy('automatic', 'خودکار')} mono /><DataRow label="VID:PID" value={`${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'}`} mono /><DataRow label={copy('Serial', 'سریال')} value={snapshot.port.serial_number || '—'} mono /><DataRow label={copy('Baud', 'نرخ باد')} value="115200 8N1" mono /></div>
+        {boardReady && <Card icon={Usb} iconTone="green" title={t('connection')} eyebrow={copy('Controller connected', 'کنترلر متصل است')} className="settings-card">
+          <div className="data-list"><DataRow label={copy('State', 'وضعیت')} value={snapshot.connection_state} tone="good" /><DataRow label={copy('Port', 'درگاه')} value={snapshot.port.name || copy('automatic', 'خودکار')} mono /><DataRow label="VID:PID" value={`${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'}`} mono /><DataRow label={copy('Serial', 'سریال')} value={snapshot.port.serial_number || '—'} mono /><DataRow label={copy('Baud', 'نرخ باد')} value="115200 8N1" mono /></div>
           {snapshot.port_process && <div className="data-list"><DataRow label={copy('Port process', 'پردازش درگاه')} value={snapshot.port_process.state} tone={snapshot.port_process.state === 'free' ? 'good' : snapshot.port_process.state === 'owned' ? 'warn' : undefined} /><DataRow label={copy('Owner', 'مالک')} value={snapshot.port_process.pid ? `${snapshot.port_process.name || 'unknown'} · PID ${snapshot.port_process.pid}` : (snapshot.port_process.error || '—')} mono />{snapshot.port_process.executable && <DataRow label={copy('Executable', 'فایل اجرا')} value={snapshot.port_process.executable} mono />}<DataRow label={copy('Takeover', 'واگذاری')} value={snapshot.port_process.takeover_ready ? copy('armed when free', 'با آزادشدن آماده') : copy('not armed', 'مسلح نیست')} /></div>}
-          <div className="inline-actions">{snapshot.connected
-            ? <Button icon={Unplug} onClick={() => void command('close')}>{copy('Pause controller', 'توقف کنترلر')}</Button>
-            : <Button icon={Cable} tone="primary" onClick={() => void command('reconnect')}>{t('reconnect')}</Button>}
+          <div className="inline-actions"><Button icon={Unplug} onClick={() => void command('close')}>{copy('Pause controller', 'توقف کنترلر')}</Button>
           </div>
-        </Card>
+        </Card>}
 
         <Card icon={Network} iconTone="violet" title={copy('Host services and lifecycle', 'سرویس‌ها و چرخهٔ میزبان')} eyebrow={integrationsBusy ? copy('Synchronizing', 'در حال همگام‌سازی') : integrationsDirty ? copy('Unsaved changes', 'تغییرات ذخیره‌نشده') : integrationsNotice === 'Saved' ? copy('Saved', 'ذخیره‌شده') : copy('Up to date', 'به‌روز')} className="settings-card settings-card--wide">
           <form className="local-integrations-form" onSubmit={(event) => void saveLocalIntegrations(event)}>

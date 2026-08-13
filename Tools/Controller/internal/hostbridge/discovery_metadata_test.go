@@ -7,6 +7,7 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/native"
 )
 
 func TestDiscoveryMetadataIncludesWebAppAndCurrentBoardValues(t *testing.T) {
@@ -22,8 +23,12 @@ func TestDiscoveryMetadataIncludesWebAppAndCurrentBoardValues(t *testing.T) {
 	snapshot.Hello.Name = "PCController"
 	snapshot.Hello.BuildHash = 0xADFAEDAB
 	snapshot.Hello.BuildStamp = "260803042248"
+	snapshot.Hello.Capabilities = native.CapabilityINA219 |
+		native.CapabilityRelayMotion |
+		native.CapabilityPersistentSettings
 	snapshot.Port.Name = "COM18"
 	snapshot.Status.SupplyMV = 12280
+	snapshot.Status.INA219Available = true
 	snapshot.Status.DoorOpen = true
 	snapshot.Settings.Persisted = true
 	values := discoveryMetadata(config, snapshot)

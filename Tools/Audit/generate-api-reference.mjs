@@ -93,6 +93,7 @@ const capabilityGroups = {
     "controller.peripherals.set", "controller.hotkeys.set", "controller.os.configure",
     "controller.lcd.presentation.configure", "controller.app.page", "controller.app.navigate",
     "controller.app.instance.report", "controller.app.instance.remove",
+		"controller.network.peers.set",
   ],
   virtual_keys: ["controller.os.key", "controller.virtual_key"],
   power_actions: ["controller.os.power"],
@@ -123,6 +124,7 @@ const capabilityGroups = {
     "controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get",
 		"controller.integrations.status", "controller.pwm.values", "controller.port.owner", "controller.port.process",
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
+		"controller.network.peers.get",
   ],
   board_commands: [
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
@@ -145,11 +147,11 @@ const methodOverrides = {
   "controller.rf.map": "Replace one learned RF mapping and return board readback.",
   "controller.rf.transmit": "Transmit one validated RF waveform request.",
   "controller.restore.flash": "Restore a captured flash backup through the guarded restore path.",
-  "controller.artifact.upload.begin": "Begin a bounded authenticated peer artifact transfer.",
+  "controller.artifact.upload.begin": "Begin a bounded correlated peer artifact transfer.",
   "controller.artifact.upload.chunk": "Append one ordered bounded chunk to a peer artifact transfer.",
   "controller.artifact.upload.finish": "Revalidate and publish a completed peer artifact transfer.",
   "controller.artifact.upload.abort": "Abort and remove an incomplete peer artifact transfer.",
-  "controller.peer.update.host": "Transfer a verified executable through an authenticated peer and ask its coordinator to replace itself.",
+  "controller.peer.update.host": "Transfer a verified executable through a connected peer and ask its coordinator to replace itself.",
   "controller.webhooks.status": "Return bounded outbound queue and dead-letter counters.",
   "controller.webhooks.pending": "List bounded non-secret pending outbound deliveries.",
   "controller.webhooks.dead": "List bounded non-secret dead-letter deliveries.",
@@ -171,6 +173,8 @@ const methodOverrides = {
   "controller.discovery.config.get": "Return persistent network advertisement configuration.",
   "controller.discovery.config.set": "Persist and hot-apply network advertisement configuration.",
   "controller.integrations.status": "Return requested and effective buzzer routing and playback state.",
+	"controller.network.peers.get": "Return persistent peer topology with secret references and no plaintext credentials.",
+	"controller.network.peers.set": "Replace and hot-apply peer topology; events, state, and status topics are accepted, and only optional secret references may carry compatibility credentials.",
   "controller.unsubscribe": "Remove this WebSocket connection's active subscriptions.",
 };
 
@@ -216,8 +220,8 @@ const routes = [
   { path: "/healthz", methods: ["get"], public: true, capability: "public", summary: "Service liveness and API identity" },
   { path: "/upnp/public.json", methods: ["get"], public: true, capability: "public", summary: "Bounded public host, board, endpoint, health, and telemetry directory" },
   { path: "/api/ui-config", methods: ["get"], public: true, capability: "public", summary: "Non-secret browser bootstrap" },
-  { path: "/api/auth/server-proof", methods: ["get"], public: true, capability: "public", summary: "Nonce/address-bound proof that the reached LAN endpoint knows the configured bearer" },
-  { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Exchange a header credential for a short-lived one-use browser WebSocket ticket" },
+  { path: "/api/auth/server-proof", methods: ["get"], public: true, capability: "public", summary: "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled" },
+  { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled" },
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
   { path: "/api/peripherals", methods: ["get"], capability: "read", summary: "Peripheral descriptors and host-owned names" },
@@ -292,17 +296,12 @@ function operationFor(route, method) {
   if (route.public) operation.security = [];
 	if (route.path === "/api/session/ticket") {
     delete operation.responses["200"];
-    operation.responses["201"] = {
-      description: "One-use Origin-bound browser session ticket",
-      content: { "application/json": { schema: { $ref: "#/components/schemas/SessionTicket" } } },
-    };
+		operation.responses["409"] = { description: "Application authentication is disabled in the immediate alpha" };
 	}
 	if (route.path === "/api/auth/server-proof") {
 		operation.parameters = [{ name: "X-PCController-Nonce", in: "header", required: true, schema: { type: "string", minLength: 22, maxLength: 86 }, description: "16..64 random bytes encoded as unpadded base64url" }];
-		operation.responses["200"] = {
-			description: "Responder-bound HMAC proof verified locally before a client transmits its bearer",
-			content: { "application/json": { schema: { $ref: "#/components/schemas/ServerProof" } } },
-		};
+		delete operation.responses["200"];
+		operation.responses["409"] = { description: "Application authentication is disabled in the immediate alpha" };
 	}
 	if (route.path === "/api/opcode") {
 		operation.responses["200"] = {
@@ -393,10 +392,10 @@ const openapi = {
     title: product.httpTitle,
 		version: "unversioned",
 		summary: "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    description: "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS.",
+    description: "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS.",
   },
   servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
-  security: [{ bearerAuth: [] }, { tokenHeader: [] }],
+  security: [],
   paths: openAPIPaths,
   components: {
     securitySchemes: {
@@ -567,16 +566,13 @@ const asyncapi = {
   asyncapi: "3.0.0",
   info: {
 		title: product.eventTitle, version: "unversioned",
-    description: "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required.",
+    description: "Immediate-alpha unauthenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required; deferred security schemes are retained as non-active design metadata.",
   },
   servers: {
     loopback: {
       host: "127.0.0.1:8787", protocol: "ws", pathname: "/ipc",
-      description: "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
-	  security: [
-		{ $ref: "#/components/securitySchemes/durableHeader" },
-		{ $ref: "#/components/securitySchemes/browserTicket" },
-	  ],
+      description: "Default loopback primary. Remote exposure requires an explicit listener and allowed origin; alpha authentication is disabled under #148.",
+	  security: [],
     },
   },
   channels: {
@@ -638,7 +634,7 @@ const reference = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><title>${escapeHTML(product.referenceTitle)}</title>
 <style>:root{font-family:Inter,Segoe UI,system-ui,sans-serif;color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#172033;--muted:#647087;--line:#dfe3ec;--accent:#6d4aff}@media(prefers-color-scheme:dark){:root{--bg:#11131a;--panel:#191c25;--text:#edf0f7;--muted:#a8b0c2;--line:#303543;--accent:#a995ff}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{width:min(1180px,calc(100% - 32px));margin:auto;padding:48px 0 80px}header{display:grid;gap:12px;margin-bottom:34px}h1{font-size:clamp(2rem,5vw,4rem);letter-spacing:-.05em;margin:0}p{color:var(--muted);max-width:76ch;line-height:1.65}.pills{display:flex;flex-wrap:wrap;gap:8px}.pills a,.pills span,td span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--text);text-decoration:none;background:color-mix(in srgb,var(--panel) 88%,var(--accent) 12%)}section{margin-top:34px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 18px 55px color-mix(in srgb,var(--text) 8%,transparent)}section>div{padding:22px 24px 6px}h2{margin:0;font-size:1.25rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}code{font-family:Cascadia Code,ui-monospace,monospace;color:var(--accent);overflow-wrap:anywhere}@media(max-width:720px){main{width:min(100% - 20px,1180px);padding-top:26px}section{overflow:auto}table{min-width:760px}}</style></head>
-<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; every remote operation requires authentication and an explicit capability.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
+<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; immediate-alpha application authentication and authorization are disabled under issue #148.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
 <section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>; versioned aliases are rejected. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
 <section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved; host extensions use -32001 for authentication, -32003 for capability denial, and -32000 for runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
 <p>Contract digest <code>${digest}</code>. Generated by <code>Tools/Audit/generate-api-reference.mjs</code>.</p></main></body></html>\n`;

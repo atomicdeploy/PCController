@@ -360,6 +360,7 @@ func startPrimaryIPCAtWithIdentity(
 		SocketIOPath:          endpoint.SocketIOPath,
 		WebUI:                 webui.Handler(endpoint.WebSocketPath),
 		AuthToken:             endpoint.AuthToken,
+		AuthorizationDisabled: true,
 		AllowedOrigins:        append([]string(nil), endpoint.AllowedOrigins...),
 		InboundWebhooks:       endpoint.InboundWebhooks,
 		HostVersion:           version,
@@ -425,6 +426,7 @@ func startPrimaryIPCAtWithIdentity(
 		service.LocalDevice = server.localDevice
 		service.HostConfig = store.CurrentRuntime
 		service.PersistentHostConfig = store.Persistent
+		service.SubscribeHostConfig = store.SubscribeRuntime
 		service.BuzzerRuntimeStatus = func() appconfig.BuzzerRuntimeStatus {
 			return server.IntegrationStatus().BuzzerRuntime
 		}

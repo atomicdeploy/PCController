@@ -117,6 +117,8 @@
             "controller.menu.list",
             "controller.menu.page",
             "controller.message.send",
+            "controller.network.peers.get",
+            "controller.network.peers.set",
             "controller.opcode.exchange",
             "controller.opcode.request",
             "controller.opcode.send",
@@ -346,7 +348,7 @@
     },
     "controller.artifact.upload.begin": {
       "capability": "programming",
-      "summary": "Begin a bounded authenticated peer artifact transfer.",
+      "summary": "Begin a bounded correlated peer artifact transfer.",
       "idempotency": "non-idempotent"
     },
     "controller.artifact.upload.chunk": {
@@ -629,6 +631,16 @@
       "summary": "message send",
       "idempotency": "non-idempotent"
     },
+    "controller.network.peers.get": {
+      "capability": "read",
+      "summary": "Return persistent peer topology with secret references and no plaintext credentials.",
+      "idempotency": "safe"
+    },
+    "controller.network.peers.set": {
+      "capability": "host_configuration",
+      "summary": "Replace and hot-apply peer topology; events, state, and status topics are accepted, and only optional secret references may carry compatibility credentials.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
     "controller.opcode.exchange": {
       "capability": "board_commands",
       "summary": "Exchange an opaque versionless UART opcode and caller-selected response opcode.",
@@ -686,7 +698,7 @@
     },
     "controller.peer.update.host": {
       "capability": "programming",
-      "summary": "Transfer a verified executable through an authenticated peer and ask its coordinator to replace itself.",
+      "summary": "Transfer a verified executable through a connected peer and ask its coordinator to replace itself.",
       "idempotency": "non-idempotent"
     },
     "controller.peripherals": {

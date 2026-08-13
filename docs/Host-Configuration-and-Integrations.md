@@ -251,7 +251,7 @@ disconnect while the menu is open cannot launch a stale page.
 This is currently an in-process web-primary tray, not a Windows service. The
 tracked service split keeps a privileged, headless, session-independent serial
 owner separate from an unelevated per-user tray client. That client will attach
-through authenticated local IPC, launch or foreground Win32, TUI, or WebUI
+through local IPC, launch or foreground Win32, TUI, or WebUI
 surfaces, select among multiple ports, open/close/reconnect, navigate menus,
 edit quick settings, and exit independently from a separately guarded service
 stop. Until that requirement is implemented, do not register `controller web`
@@ -275,7 +275,7 @@ firmware's atomic all-relays-off command, while `leave` still releases held
 keyboard ownership. `refresh_on_resume` refreshes live telemetry or re-arms
 discovery after unlock, resume, and network change, but never cancels a manual
 connection pause. The same settings are editable on the responsive Settings
-page and persisted through the authenticated host-config RPC.
+page and persisted through the host-config RPC.
 
 The embedded responsive app includes the live dashboard and graphs, direct
 relay/motion/PWM controls, an advanced peripheral workbench, Activity history,
@@ -494,37 +494,28 @@ The default service is `127.0.0.1:8787`. One listener multiplexes:
 - a bounded Engine.IO v4 / Socket.IO WebSocket adapter at `/socket.io/`;
 - an optional inbound webhook.
 
-Use loopback without a token only for the same PC. A non-loopback listener is
-accepted only with deliberate remote enablement, an authentication token of at
-least 24 characters, a stable `ipc.remote_principal`, and an explicit
-non-wildcard origin allow-list. Native clients authenticate with a Bearer or
-`X-PCController-Token` header. Browser clients first send that header to
-`POST /api/session/ticket`, then offer the returned 30-second one-use ticket
-in `Sec-WebSocket-Protocol` while opening a clean WebSocket URL. The ticket is
-bound to the requesting Origin, peer, and WebSocket transport, and the server
-selects only the non-secret `pccontroller` protocol. Query-string
-credentials, ticket replay, an Origin mismatch, and application frames before
-successful authentication are rejected.
+Issue #148 is authoritative for the immediate alpha: application
+authentication and capability authorization are dormant on loopback and
+deliberately enabled LAN listeners. The server reports `auth_required: false`;
+native and browser clients do not need a bearer or session ticket. The retained
+credential/session/policy fields are compatibility data for a later complete
+permission design and do not grant or deny alpha operations.
 
-Origin-less native traffic is trusted without a token only on loopback. A
-non-loopback native client without `Origin` must present the durable header;
-browser ticket exchange and upgrade always require the same allowed Origin.
-Conflicting Bearer and `X-PCController-Token` values fail closed.
+Exposure controls remain active. A non-loopback listener requires deliberate
+`ipc.allow_remote: true` and an explicit non-wildcard Origin allow-list.
+Browser Origin checks and rejection of URL `access_token`/`ticket` parameters
+precede the alpha bypass. Hot-applying `ipc.allow_remote: false` rejects new
+remote HTTP, raw IPC, and WebSocket requests and immediately cancels existing
+remote standard-WebSocket and Socket.IO sessions through the pushed config
+subscription. Loopback sessions remain available.
 
-Authentication and authorization are separate. The default
-`ipc.remote_policy` permits authenticated read/event subscriptions only;
-messages, board commands, host configuration, port control, reset,
-programming, shutdown, virtual keys, power/display actions, bridge calls, and
-configured host-automation execution are independently opt-in. Remote
-programming also requires connection-control permission. Every denied or authorized mutating attempt is source-tagged in
-the host timeline, and generic `controller.command.execute` commands are classified so
-they cannot bypass a narrower gate. Audit events identify the stable principal,
-transport, authentication mechanism, remote scope, decision, capability, and
-operation without recording the credential. Local no-token IPC uses
-`local-operator`, the primary-instance credential uses its instance identity,
-remote HTTP/WebSocket/Socket.IO use `ipc.remote_principal`, and generic bridge
-dispatch currently uses `bridge-peer` because that boundary does not yet carry
-a configured peer name.
+Topology safety is also independent of auth: bridge ingress cannot call
+`controller.bridge.call`, `controller.peer.update.host`, or discovery-connect,
+including through generic command and app-action wrappers. Direct updates of
+the receiving peer remain available through its guarded update RPC. Ordinary
+motion, door, relay, numeric, OS-confirmation, and programming-ownership
+checks remain functional safety boundaries. Do not expose this alpha listener
+to an untrusted network.
 
 The exact methods, routes, frames, Socket.IO subset, and examples are in
 [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md).
@@ -552,8 +543,9 @@ endpoints. SOAP `GetStatus`, `GetBoardIdentity`, and `GetPublicInfo` expose the
 same public contract. Discovery metadata is refreshed from pushed runtime state
 at a coalesced cadence and never initiates board polling. Credentials,
 authorization values, token-like keys, and raw environment data are rejected.
-Discovery and the public document grant no command rights; authenticated remote
-access remains independently policy-gated. CLI, TUI, Web, configuration file,
+Discovery and the public document grant no command rights; remote control still
+requires an explicitly enabled alpha listener and operator-controlled topology.
+CLI, TUI, Web, configuration file,
 and typed RPC all read or change the same hot-applied advertisement settings;
 scan/device/config/connect activity uses the ordinary WebSocket and Socket.IO
 event fan-out. LAN public-document reads bypass Internet proxies and cannot be
@@ -565,8 +557,9 @@ Configured WebSocket clients let one host subscribe to another host and make
 correlated calls through `controller.bridge.call`, `/api/bridges/call`, or
 the `bridge call` shell command. They retry with bounded backoff and preserve
 the rule that exactly one local primary owns the attached serial port. The
-target host independently checks its remote policy and ordinary safety guards;
-recursive bridge calls are rejected. Remote programming still closes that
+target host independently checks its exposure and ordinary safety guards;
+bridge ingress cannot pivot to another peer directly or through command/action
+wrappers. Remote programming still closes that
 primary's UART, runs the guarded toolchain/Urclock workflow exclusively, and
 requires a fresh application `HELLO` afterward.
 
@@ -575,7 +568,7 @@ host upgrades. Board-originated `buzzer.note` events keep frequency, duration,
 pause, and MCU-clock metadata so an enabled PC buzzer on another instance can
 render the board timeline without accumulated network delay; an ingress marker
 prevents event cycles. `controller.peer.update.host` transfers a
-content-addressed executable through the authenticated bridge and invokes the
+content-addressed executable through the configured bridge and invokes the
 target's own graceful coordinator. SSH remains an operator test/deployment
 harness only and is not part of the application update implementation.
 
@@ -601,7 +594,8 @@ the broader Socket.IO ecosystem API are outside this bounded adapter.
 
 Loopback interoperability tests use package-independent raw RFC 6455 clients
 and servers rather than the production WebSocket library on both ends. They
-exercise standard and Socket.IO server/client roles, authentication, frame
+exercise standard and Socket.IO server/client roles, alpha credentialless
+access, retained legacy-auth compatibility, frame
 masking, correlation, subscriptions, typed message provenance, and Engine.IO
 open/connect/ping/pong. Outbound webhook tests deliver every supported method
 to an independent HTTP server. Cross-machine firewall/TLS commissioning and
@@ -632,13 +626,13 @@ native display command and emits the same source-tagged host event.
 Network routes assign the authoritative source (`ipc`, `rest`, `websocket`,
 `socket_io`, `bridge`, or `webhook`) instead of trusting a caller-supplied
 `board`/`host` identity. A different claimed source is retained as bounded
-metadata for diagnostics. Authenticated messages also carry the principal and
-authentication mechanism as bounded metadata.
+metadata for diagnostics. Inbound messages also carry their runtime principal
+and access mechanism as bounded metadata.
 
 `action` is descriptive and is never executed merely because it appeared in a
 message. An enabled host text mapping may turn a matching source/target/type/
 text pattern into an ordinary controller command. That command is logged and
-runs through authentication and motion/output safety; no untrusted message is
+runs through the current exposure and motion/output safety checks; no untrusted message is
 implicitly treated as shell text.
 
 ## RF presentation and record identity
