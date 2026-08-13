@@ -11,6 +11,7 @@ import (
 
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/portowner"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
 )
@@ -45,6 +46,21 @@ type Snapshot struct {
 	StatusLEDUpdated  time.Time
 	ProgramState      ProgramStateSnapshot
 	RFLearning        RFLearnState
+	PortProcess       PortProcessSnapshot `json:"port_process"`
+}
+
+type PortProcessSnapshot struct {
+	Supported        bool             `json:"supported"`
+	State            string           `json:"state"`
+	Port             string           `json:"port,omitempty"`
+	PID              uint32           `json:"pid,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	Executable       string           `json:"executable,omitempty"`
+	ProcessStartTime uint64           `json:"process_start_time_100ns,omitempty"`
+	Window           portowner.Window `json:"window,omitempty"`
+	ObservedAt       time.Time        `json:"observed_at"`
+	TakeoverReady    bool             `json:"takeover_ready"`
+	Error            string           `json:"error,omitempty"`
 }
 
 type Event struct {
@@ -188,6 +204,8 @@ type Runtime struct {
 	nextCommandObserver    uint64
 	hostMenuRequestMu      sync.RWMutex
 	hostMenuRequestHandler func(native.HostMenuContentRequest)
+	portProcess            PortProcessSnapshot
+	portMonitorStarted     bool
 }
 
 const programStateHeartbeatPeriod = 2 * time.Second
@@ -212,7 +230,75 @@ func New(options Options) *Runtime {
 		go runtime.syncProgramState(state, "changed")
 	})
 	runtime.lcdPresenter = NewLCDPresenter(runtime)
+	runtime.startPortProcessMonitor()
 	return runtime
+}
+
+func (runtime *Runtime) startPortProcessMonitor() {
+	runtime.mu.Lock()
+	if runtime.portMonitorStarted {
+		runtime.mu.Unlock()
+		return
+	}
+	runtime.portMonitorStarted = true
+	runtime.mu.Unlock()
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			runtime.refreshPortProcess()
+		}
+	}()
+}
+
+func (runtime *Runtime) refreshPortProcess() {
+	runtime.mu.RLock()
+	port, previous := runtime.port.Name, runtime.portProcess
+	paused, connected := runtime.paused, runtime.session != nil
+	runtime.mu.RUnlock()
+	if port == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	owner, found, err := portowner.FindOwner(ctx, port)
+	cancel()
+	next := PortProcessSnapshot{Supported: true, State: "free", Port: port, ObservedAt: time.Now(), TakeoverReady: !connected && !paused}
+	if err != nil {
+		next.State, next.Error = "unknown", err.Error()
+	}
+	if found {
+		next.State = "owned"
+		next.PID, next.Name, next.Executable, next.ProcessStartTime, next.Window = owner.PID, owner.Name, owner.Executable, owner.ProcessStartTime, owner.Window
+	}
+	if previous.State == next.State && previous.PID == next.PID && previous.Port == next.Port && previous.Error == next.Error {
+		runtime.mu.Lock()
+		runtime.portProcess = next
+		runtime.mu.Unlock()
+		return
+	}
+	runtime.mu.Lock()
+	runtime.portProcess = next
+	runtime.mu.Unlock()
+	metadata := map[string]string{"port": port, "state": next.State}
+	if next.PID != 0 {
+		metadata["pid"] = strconv.FormatUint(uint64(next.PID), 10)
+		metadata["process"] = next.Name
+		metadata["executable"] = next.Executable
+	}
+	runtime.publishEvent(Event{Kind: "port.process.changed", Lifecycle: "changed", Port: runtime.Snapshot().Port, State: next.State, Reason: next.Error, Metadata: metadata, Text: fmt.Sprintf("port %s process state: %s", port, next.State)})
+	if previous.State == "owned" && next.State == "free" && next.TakeoverReady {
+		runtime.publishEvent(Event{Kind: "port.takeover.ready", Lifecycle: "ready", Port: runtime.Snapshot().Port, State: "free", Text: fmt.Sprintf("port %s is free; authenticated takeover will be attempted", port)})
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			runtime.ResumeAuto()
+			if err := runtime.EnsureConnected(ctx); err != nil {
+				runtime.PublishHostEvent("port.takeover.failed", fmt.Sprintf("port %s takeover failed: %v", port, err))
+			} else {
+				runtime.PublishHostEvent("port.takeover.connected", fmt.Sprintf("port %s takeover connected", port))
+			}
+		}()
+	}
 }
 
 func (runtime *Runtime) LCDPresenter() *LCDPresenter {
@@ -450,6 +536,7 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		StatusLEDUpdated: runtime.statusLEDUpdated,
 		ProgramState:     programState,
 		RFLearning:       rfLearning,
+		PortProcess:      runtime.portProcess,
 	}
 }
 

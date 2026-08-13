@@ -671,6 +671,8 @@ func (service *Service) dispatch(
 		}
 	case "controller.snapshot":
 		result = service.Client.Snapshot()
+	case "controller.port.process", "controller.port.owner":
+		result = service.Client.Snapshot().PortProcess
 	case "controller.session.snapshot", "controller.session.snapshot.last":
 		if service.LastSessionSnapshot == nil {
 			err = errors.New("graceful-exit diagnostic snapshot is unavailable")
@@ -1214,13 +1216,42 @@ func (service *Service) dispatch(
 		}
 	case "controller.discovery.scan":
 		var params struct {
-			TimeoutMS int  `json:"timeout_ms,omitempty"`
-			MDNS      bool `json:"mdns,omitempty"`
-			SSDP      bool `json:"ssdp,omitempty"`
+			TimeoutMS   int      `json:"timeout_ms,omitempty"`
+			MDNS        bool     `json:"mdns,omitempty"`
+			DNSSD       bool     `json:"dns_sd,omitempty"`
+			SSDP        bool     `json:"ssdp,omitempty"`
+			UPnP        bool     `json:"upnp,omitempty"`
+			WSDiscovery bool     `json:"ws_discovery,omitempty"`
+			Broadcast   bool     `json:"broadcast,omitempty"`
+			NetBIOS     bool     `json:"netbios,omitempty"`
+			Protocols   []string `json:"protocols,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
-			if !params.MDNS && !params.SSDP {
-				params.MDNS, params.SSDP = true, true
+			if len(params.Protocols) > 0 {
+				for _, protocol := range params.Protocols {
+					switch strings.ToLower(strings.TrimSpace(protocol)) {
+					case "mdns", "dns-sd", "dnssd":
+						params.MDNS, params.DNSSD = true, true
+					case "ssdp":
+						params.SSDP = true
+					case "upnp":
+						params.SSDP, params.UPnP = true, true
+					case "ws-discovery", "ws_discovery", "wsd":
+						params.WSDiscovery = true
+					case "broadcast", "udp":
+						params.Broadcast = true
+					case "netbios", "nbns":
+						params.NetBIOS = true
+					default:
+						err = fmt.Errorf("unsupported discovery protocol %q", protocol)
+					}
+				}
+			}
+			if err != nil {
+				break
+			}
+			if !params.MDNS && !params.DNSSD && !params.SSDP && !params.UPnP && !params.WSDiscovery && !params.Broadcast && !params.NetBIOS {
+				params.MDNS, params.DNSSD, params.SSDP, params.UPnP, params.WSDiscovery, params.Broadcast, params.NetBIOS = true, true, true, true, true, true, true
 			}
 			if params.TimeoutMS == 0 {
 				params.TimeoutMS = 1500
@@ -1229,11 +1260,28 @@ func (service *Service) dispatch(
 				err = errors.New("discovery timeout_ms must be 100..30000")
 				break
 			}
+			service.Client.EmitHostEvent("discovery.scan.started", "network discovery scan started")
 			discoveryContext, cancel := context.WithTimeout(
 				ctx, time.Duration(params.TimeoutMS)*time.Millisecond,
 			)
-			result, err = discovery.Discover(discoveryContext, params.MDNS, params.SSDP)
+			result, err = discovery.DiscoverWithOptions(discoveryContext, discovery.Options{
+				MDNS: params.MDNS, DNSSD: params.DNSSD, SSDP: params.SSDP, UPnP: params.UPnP,
+				WSDiscovery: params.WSDiscovery, Broadcast: params.Broadcast, NetBIOS: params.NetBIOS,
+			})
 			cancel()
+			if err == nil {
+				count := 0
+				metadata := map[string]string{}
+				if instances, ok := result.([]discovery.Instance); ok {
+					count = len(instances)
+					for _, instance := range instances {
+						metadata["protocol."+instance.Protocol] = "true"
+					}
+				}
+				service.Client.EmitHostActionEvent("discovery.scan.completed", fmt.Sprintf("network discovery found %d instance(s)", count), "discovery", "scan", metadata)
+			} else {
+				service.Client.EmitHostEvent("discovery.scan.failed", err.Error())
+			}
 		}
 	case "controller.quit", "controller.exit":
 		if service.Shutdown == nil {
@@ -1689,7 +1737,7 @@ func requestCapability(method string, params json.RawMessage) string {
 			}
 		}
 		return capabilityHostConfig
-	case "controller.ping", "controller.snapshot", "controller.session.snapshot",
+	case "controller.ping", "controller.snapshot", "controller.port.process", "controller.port.owner", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.program_state.get", "controller.program-state.get",
@@ -2880,6 +2928,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	}
 	registerArtifactHTTP(mux, service)
 	registerReleaseDiscoveryHTTP(mux, service)
+	registerUPnPHTTP(mux, service)
 	if service.WebUI != nil && webSocketPath != "/" && socketIOPath != "/" {
 		mux.Handle("/", service.WebUI)
 	}

@@ -966,7 +966,7 @@ func primaryHostUIStatus(
 			LastError: status.LastError,
 		},
 		Discovery: hostui.ServiceStatus{
-			Name: "mDNS + SSDP", Enabled: status.DiscoveryActive,
+			Name: "DNS-SD + SSDP/UPnP + WS-Discovery + broadcast + NetBIOS", Enabled: status.DiscoveryActive,
 			State: state(status.DiscoveryActive),
 		},
 		Webhooks: hostui.ServiceStatus{

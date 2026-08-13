@@ -356,7 +356,7 @@ func TestLoadMergesNewUIDefaultsWithoutOverridingExplicitFalse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if value.UI.AppTitle != productidentity.DefaultAppTitle() || value.UI.TableLayout != "compact" || value.UI.HistoryHours != 24 ||
+	if value.UI.AppTitle != productidentity.DefaultAppTitle() || value.UI.TableLayout != "compact" || value.UI.HistoryHours != 6 ||
 		!value.UI.ShowCurrent || value.UI.ShowPower ||
 		!value.UI.LCDServiceEnabled || value.UI.MirrorPromptToLCD {
 		t.Fatalf("merged UI defaults=%#v", value.UI)
