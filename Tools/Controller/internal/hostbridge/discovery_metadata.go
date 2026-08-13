@@ -15,8 +15,9 @@ const discoveryMetadataMinimumInterval = 5 * time.Second
 
 // discoveryMetadata is deliberately bounded to non-secret values that help a
 // client identify the app, open its WebUI/API, and render useful board state
-// before establishing an authenticated session. It is refreshed from pushed
-// runtime events; it never initiates a board read.
+// before opening a control session. Production alpha authorization is
+// explicitly disabled, while exposure/topology/Origin/safety gates remain. It
+// is refreshed from pushed runtime events; it never initiates a board read.
 func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot, identities ...DiscoveryHostIdentity) []string {
 	appearance := config.UI.Appearance
 	hostname, _ := os.Hostname()
@@ -47,7 +48,6 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot, id
 		"protocol.discovery=" + strings.Join(configuredDiscoveryProtocols(config.Integrations.Discovery), ","),
 		"public=/upnp/public.json",
 		"api=/api",
-		"server_proof=/api/auth/server-proof",
 		"operations=/api/rpc",
 		"commands=/api/commands",
 		"events=ws:" + config.IPC.WebSocketPath + ",socketio:" + config.IPC.SocketIOPath,
@@ -58,7 +58,7 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot, id
 		"board.identity=/api/snapshot",
 		"ws=" + config.IPC.WebSocketPath,
 		"socketio=" + config.IPC.SocketIOPath,
-		"auth=required",
+		"auth=disabled-alpha",
 		"app.title=" + config.UI.AppTitle,
 		"app.locale=" + appearance.Locale,
 		"app.theme=" + appearance.Theme,

@@ -68,6 +68,10 @@ func serveServerProof(writer http.ResponseWriter, request *http.Request, service
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if service.authorizationDisabled() {
+		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "application authentication is disabled during alpha"})
+		return
+	}
 	token := strings.TrimSpace(service.currentAuthToken())
 	if !serverProofTokenEligible(token) {
 		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "server proof requires a 24-byte-or-stronger random base64url bearer"})
@@ -167,6 +171,16 @@ func (service *Service) currentRemotePrincipal() string {
 
 func (service *Service) authenticateAccess(access Access, token, mechanism string) (Access, bool) {
 	access = service.normalizeAccess(access)
+	if service.authorizationDisabled() {
+		access.authenticated = true
+		access.Authentication = "disabled"
+		if access.Remote {
+			access.Principal = service.currentRemotePrincipal()
+		} else {
+			access.Principal = "local-operator"
+		}
+		return access, true
+	}
 	provided := strings.TrimSpace(token)
 	expected := strings.TrimSpace(service.currentAuthToken())
 	delegation := strings.TrimSpace(service.HostInstanceToken)
@@ -428,8 +442,6 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		base = accessFromAddress(stringAddress(request.RemoteAddr), "rest")
 	}
 	base = service.normalizeAccess(base)
-
-	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
 	if request != nil && request.URL != nil &&
 		(request.URL.Query().Has("access_token") || request.URL.Query().Has("ticket")) {
 		writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
@@ -437,6 +449,29 @@ func (service *Service) authorizeHTTPRequest(writer http.ResponseWriter, request
 		})
 		return false
 	}
+	if service.authorizationDisabled() {
+		if !httpOriginAllowed(request, service.currentAllowedOrigins()) {
+			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "request origin is not allowed"})
+			return false
+		}
+		if base.Remote && !service.hostConfig().IPC.AllowRemote {
+			service.auditAccess(base, request.Method+" "+request.URL.Path, "remote-network", false)
+			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": "remote network access is disabled"})
+			return false
+		}
+		access, _ := service.authenticateAccess(base, "", "disabled")
+		if transport := websocketTransport(request, service); transport != "" {
+			access.Transport = transport
+		}
+		access = service.normalizeAccess(access)
+		requestWithAccess := request.WithContext(context.WithValue(request.Context(), authenticatedAccessKey{}, access))
+		*request = *requestWithAccess
+		writer.Header().Set("X-PCController-Principal", access.Principal)
+		writer.Header().Set("X-PCController-Authentication", access.Authentication)
+		return true
+	}
+
+	credential, mechanism, headerPresent, credentialErr := headerCredential(request)
 	if credentialErr != nil {
 		service.auditAccess(Access{Remote: base.Remote, Transport: base.Transport, Principal: "unauthenticated", Authentication: mechanism}, request.Method+" "+request.URL.Path, "authentication", false)
 		writeHTTPJSON(writer, http.StatusUnauthorized, map[string]string{"error": credentialErr.Error()})
@@ -502,6 +537,10 @@ func serveSessionTicket(writer http.ResponseWriter, request *http.Request, servi
 	if request.Method != http.MethodPost {
 		writer.Header().Set("Allow", http.MethodPost)
 		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if service.authorizationDisabled() {
+		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "application authentication is disabled during alpha"})
 		return
 	}
 	if !authorizeHTTPRequest(writer, request, service) {

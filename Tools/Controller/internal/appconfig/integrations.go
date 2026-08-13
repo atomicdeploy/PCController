@@ -466,26 +466,18 @@ func (value Config) validateIntegrations() error {
 		); err != nil {
 			return err
 		}
-		if peer.AllowCommands && !secretConfigured(peer.AuthToken, peer.AuthTokenRef) {
-			return fmt.Errorf("integrations.websocket_clients[%d] allowing commands requires auth_token", index)
-		}
-		host := strings.Trim(parsed.Hostname(), "[]")
-		loopback := strings.EqualFold(host, "localhost")
-		if address := net.ParseIP(host); address != nil {
-			loopback = address.IsLoopback()
-		}
-		if peer.ForwardEvents && !loopback && !secretConfigured(peer.AuthToken, peer.AuthTokenRef) {
-			return fmt.Errorf("integrations.websocket_clients[%d] forwarding events remotely requires auth_token", index)
-		}
+		// Application credentials and capability grants are deliberately dormant
+		// during alpha. Keep optional peer credentials valid only so a new host can
+		// replace an older auth-on peer without making them an ingress requirement.
 		topics := make(map[string]bool)
 		for topicIndex, topic := range peer.Topics {
 			topic = strings.ToLower(strings.TrimSpace(topic))
 			if topic == "telemetry" {
 				topic = "status"
 			}
-			if topic != "events" && topic != "status" {
+			if topic != "events" && topic != "state" && topic != "status" {
 				return fmt.Errorf(
-					"integrations.websocket_clients[%d].topics[%d] must be events or status",
+					"integrations.websocket_clients[%d].topics[%d] must be events, state, or status",
 					index, topicIndex,
 				)
 			}
@@ -706,12 +698,9 @@ func validateIPC(value IPC) error {
 	if err := validateSecretChoice("ipc.auth_token", value.AuthToken, value.AuthTokenRef); err != nil {
 		return err
 	}
-	if value.AllowRemote && !secretConfigured(value.AuthToken, value.AuthTokenRef) {
-		return fmt.Errorf("ipc.auth_token or ipc.auth_token_ref is required when remote access is enabled")
-	}
-	if value.AllowRemote && value.AuthTokenRef == "" && len(strings.TrimSpace(value.AuthToken)) < 24 {
-		return fmt.Errorf("ipc.auth_token must contain at least 24 characters when remote access is enabled")
-	}
+	// The complete login/session design is deferred. Deliberate listener
+	// exposure and exact Origin policy remain mandatory independently below;
+	// stored credentials and remote-policy bits are dormant during alpha.
 	if len(value.AuthToken) > 512 || !printableText(value.AuthToken) {
 		return fmt.Errorf("ipc.auth_token must be at most 512 printable characters")
 	}

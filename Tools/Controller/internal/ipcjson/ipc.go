@@ -37,6 +37,7 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
+	"pccontroller.local/controller/internal/shell"
 )
 
 const (
@@ -227,6 +228,8 @@ type Access struct {
 }
 
 const (
+	rpcErrorOutcomeUncertain = -32004
+
 	capabilityRead         = "read"
 	capabilityEvents       = "events"
 	capabilityMessages     = "messages"
@@ -244,16 +247,22 @@ const (
 )
 
 type Service struct {
-	Client                *controller.Client
-	WebSocketPath         string
-	SocketIOPath          string
-	WebUI                 http.Handler
-	IntegrationProxy      http.Handler
-	LocalDevice           LocalDeviceService
-	HostFacts             hostfacts.Provider
-	Artifacts             *artifacts.Service
-	ReleaseDiscovery      ReleaseDiscoveryService
-	AuthToken             string
+	Client           *controller.Client
+	WebSocketPath    string
+	SocketIOPath     string
+	WebUI            http.Handler
+	IntegrationProxy http.Handler
+	LocalDevice      LocalDeviceService
+	HostFacts        hostfacts.Provider
+	Artifacts        *artifacts.Service
+	ReleaseDiscovery ReleaseDiscoveryService
+	AuthToken        string
+	// AuthorizationDisabled is the explicit, non-configurable alpha escape
+	// hatch while durable remote login is deferred. Production constructors set
+	// it directly. It bypasses credentials and capability policy, but does not
+	// bypass listener exposure, Origin rules, peer topology, or bridge recursion
+	// checks. The future authorization feature replaces this flag.
+	AuthorizationDisabled bool
 	RemotePrincipal       string
 	AllowedOrigins        []string
 	InboundWebhooks       bool
@@ -1081,8 +1090,8 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &params); err == nil {
 			if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" {
 				err = errors.New("bridge peer and request.method are required")
-			} else if params.Request.Method == "controller.bridge.call" {
-				err = errors.New("recursive bridge calls are not permitted")
+			} else if bridgeErr := ValidateBridgeRequest(params.Request); bridgeErr != nil {
+				err = bridgeErr
 			} else if service.BridgeCall == nil {
 				err = errors.New("host bridge manager is unavailable")
 			} else {
@@ -1342,7 +1351,11 @@ func (service *Service) dispatch(
 				err = fmt.Errorf("read discovered host snapshot: %w", callErr)
 				break
 			}
-			service.Client.EmitHostActionEvent("discovery.connect.completed", "authenticated network host connection verified", "discovery", "connect", map[string]string{"address": params.Address})
+			detail := "network host connection verified"
+			if strings.TrimSpace(params.Auth) != "" && !service.authorizationDisabled() {
+				detail = "authenticated network host connection verified"
+			}
+			service.Client.EmitHostActionEvent("discovery.connect.completed", detail, "discovery", "connect", map[string]string{"address": params.Address})
 			result = map[string]any{"connected": true, "address": params.Address, "ping": ping.Result, "snapshot": snapshot.Result}
 		}
 	case "controller.discovery.config", "controller.discovery.config.get":
@@ -1645,8 +1658,120 @@ func (service *Service) authorizeAccess(
 	if !access.Remote {
 		return nil
 	}
+	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") &&
+		requestInvokesBridgeCall(method, params, 0) {
+		service.auditAccess(access, method, capabilityBridgeCalls, false)
+		return errors.New("recursive bridge calls are not permitted")
+	}
+	peerUpdate, bridgeChained := requestInvokesPeerHostUpdate(method, params, 0)
+	if peerUpdate {
+		if bridgeChained || strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") {
+			service.auditAccess(access, method, capabilityBridgeCalls, false)
+			return errors.New("peer host updates may not be chained through a bridge")
+		}
+		if err := service.authorizeCapability(access, method, capabilityProgramming); err != nil {
+			return err
+		}
+		return service.authorizeCapability(access, method, capabilityBridgeCalls)
+	}
 	capability := requestCapability(method, params)
 	return service.authorizeCapability(access, method, capability)
+}
+
+// ValidateBridgeRequest rejects direct or wrapped bridge recursion and any
+// direct or shell-wrapped peer update. Peer updates must begin on the source
+// host so its caller is checked for both programming and bridge-call authority
+// before credentials are used.
+func ValidateBridgeRequest(request Request) error {
+	if requestInvokesBridgeCall(request.Method, request.Params, 0) {
+		return errors.New("recursive bridge calls are not permitted")
+	}
+	if peerUpdate, _ := requestInvokesPeerHostUpdate(request.Method, request.Params, 0); peerUpdate {
+		return errors.New("peer host updates may not be chained through a bridge")
+	}
+	return nil
+}
+
+func requestInvokesBridgeCall(method string, params json.RawMessage, depth int) bool {
+	if depth > 4 {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.bridge.call":
+		return true
+	case "controller.command.execute":
+		var value struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(params, &value) == nil {
+			return commandInvokesBridgeCall(value.Command, depth+1)
+		}
+	case "controller.app.action":
+		var action hostui.AppAction
+		if json.Unmarshal(params, &action) == nil && strings.EqualFold(strings.TrimSpace(action.Kind), "command") {
+			return commandInvokesBridgeCall(action.Value, depth+1)
+		}
+	}
+	return false
+}
+
+func commandInvokesBridgeCall(command string, depth int) bool {
+	if depth > 4 {
+		return true
+	}
+	words, err := shell.Split(command)
+	return err == nil && len(words) >= 2 &&
+		strings.EqualFold(words[0], "bridge") && strings.EqualFold(words[1], "call")
+}
+
+func requestInvokesPeerHostUpdate(method string, params json.RawMessage, depth int) (bool, bool) {
+	if depth > 4 {
+		return true, true
+	}
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.peer.update.host":
+		return true, false
+	case "controller.command.execute":
+		var value struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(params, &value) == nil {
+			return commandInvokesPeerHostUpdate(value.Command, depth+1)
+		}
+	case "controller.app.action":
+		var action hostui.AppAction
+		if json.Unmarshal(params, &action) == nil && strings.EqualFold(strings.TrimSpace(action.Kind), "command") {
+			return commandInvokesPeerHostUpdate(action.Value, depth+1)
+		}
+	case "controller.bridge.call":
+		var value struct {
+			Request Request `json:"request"`
+		}
+		if json.Unmarshal(params, &value) == nil {
+			invokes, _ := requestInvokesPeerHostUpdate(value.Request.Method, value.Request.Params, depth+1)
+			return invokes, invokes
+		}
+	}
+	return false, false
+}
+
+func commandInvokesPeerHostUpdate(command string, depth int) (bool, bool) {
+	words, err := shell.Split(command)
+	if err != nil || len(words) == 0 {
+		return false, false
+	}
+	if strings.EqualFold(words[0], "peer-update") {
+		return true, false
+	}
+	if len(words) < 4 || !strings.EqualFold(words[0], "bridge") || !strings.EqualFold(words[1], "call") {
+		return false, false
+	}
+	nested := Request{Method: words[3]}
+	if len(words) >= 5 {
+		nested.Params = json.RawMessage(words[4])
+	}
+	invokes, _ := requestInvokesPeerHostUpdate(nested.Method, nested.Params, depth+1)
+	return invokes, invokes
 }
 
 func (service *Service) authorizeCapability(
@@ -1664,6 +1789,9 @@ func (service *Service) authorizeCapability(
 	if !config.IPC.AllowRemote {
 		service.auditAccess(access, operation, capability, false)
 		return errors.New("remote network access is disabled")
+	}
+	if service.authorizationDisabled() {
+		return nil
 	}
 	if !remoteCapabilityAllowed(config.IPC.RemotePolicy, capability) {
 		service.auditAccess(access, operation, capability, false)
@@ -1937,7 +2065,7 @@ func commandCapability(command string) string {
 		}
 		return capabilityProgramming
 	case "board", "boot", "program", "programmer", "firmware", "flash", "upload",
-		"restore", "query", "write":
+		"restore", "query", "write", "peer-update":
 		return capabilityProgramming
 	case "bridge":
 		if len(words) == 2 && words[1] == "list" {
@@ -2258,7 +2386,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"socket_io_path":      socketIOPath,
 			"session_ticket_path": SessionTicketPath,
 			"server_proof_path":   ServerProofPath,
-			"auth_required":       strings.TrimSpace(service.currentAuthToken()) != "",
+			"auth_required":       !service.authorizationDisabled() && strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device":          config.Integrations.LocalDevice.Enabled,
 				"data_hub":              config.Integrations.DataHub.Enabled,
@@ -2660,11 +2788,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		access := accessFromHTTPRequest(request, "rest")
-		if err := service.authorizeCapability(
-			access,
-			"REST "+request.URL.Path,
-			commandCapability(params.Command),
-		); err != nil {
+		encoded, _ := json.Marshal(params)
+		if err := service.authorizeAccess(access, "controller.command.execute", encoded); err != nil {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return
 		}
@@ -2880,18 +3005,24 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
-			return
-		}
-		if service.AppAction == nil {
-			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
-			return
-		}
 		var action hostui.AppAction
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&action); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		encoded, _ := json.Marshal(action)
+		if err := service.authorizeAccess(
+			accessFromHTTPRequest(request, "rest"),
+			"controller.app.action",
+			encoded,
+		); err != nil {
+			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
+		if service.AppAction == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
 			return
 		}
 		action.Source = "rest"
@@ -2946,10 +3077,15 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" ||
-			params.Request.Method == "controller.bridge.call" {
+		method := strings.TrimSpace(params.Request.Method)
+		bridgeErr := ValidateBridgeRequest(params.Request)
+		if strings.TrimSpace(params.Peer) == "" || method == "" || bridgeErr != nil {
+			detail := "bridge peer and non-recursive request.method are required"
+			if bridgeErr != nil {
+				detail = bridgeErr.Error()
+			}
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
-				"error": "bridge peer and non-recursive request.method are required",
+				"error": detail,
 			})
 			return
 		}
@@ -3649,6 +3785,10 @@ func (service *Service) currentAuthToken() string {
 		return service.HostConfig().IPC.AuthToken
 	}
 	return service.AuthToken
+}
+
+func (service *Service) authorizationDisabled() bool {
+	return service != nil && service.AuthorizationDisabled
 }
 
 func (service *Service) currentAllowedOrigins() []string {

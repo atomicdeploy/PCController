@@ -3,22 +3,15 @@
   "info": {
     "title": "PCController event and WebSocket API",
     "version": "unversioned",
-    "description": "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required."
+    "description": "Credentialless full-duplex JSON-RPC, event, state, status, and Socket.IO-compatible messaging in the current production alpha. ipc.allow_remote, non-wildcard browser Origin, configured topology, no-chain, and board safety gates remain active. WebSocket transport is required."
   },
   "servers": {
     "loopback": {
       "host": "127.0.0.1:8787",
       "protocol": "ws",
       "pathname": "/ipc",
-      "description": "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
-      "security": [
-        {
-          "$ref": "#/components/securitySchemes/durableHeader"
-        },
-        {
-          "$ref": "#/components/securitySchemes/browserTicket"
-        }
-      ]
+      "description": "Default loopback primary. Remote alpha exposure requires ipc.allow_remote and an allowed non-wildcard browser Origin; credentials and capability grants are dormant.",
+      "security": []
     }
   },
   "channels": {
@@ -120,13 +113,13 @@
         "type": "httpApiKey",
         "in": "header",
         "name": "Authorization",
-        "description": "Bearer credential for non-browser WebSocket and Socket.IO clients."
+        "description": "Retained future bearer scheme; dormant in the current production alpha."
       },
       "browserTicket": {
         "type": "httpApiKey",
         "in": "header",
         "name": "Sec-WebSocket-Protocol",
-        "description": "Browser clients first POST /api/session/ticket with a header credential, then offer pccontroller and pccontroller.ticket.<ticket>. The one-use ticket is Origin, peer, transport, and expiry bound; no credential appears in the URL."
+        "description": "Retained future one-use browser-ticket scheme; dormant in the current production alpha, where /api/session/ticket returns HTTP 409."
       }
     },
     "messages": {
@@ -370,5 +363,14 @@
       "controller.error",
       "error"
     ]
-  }
+  },
+  "x-alpha-authorization-disabled": true,
+  "x-active-remote-safety-gates": [
+    "ipc.allow_remote",
+    "non-wildcard browser Origin",
+    "configured bridge topology",
+    "no recursive bridge or peer-update pivot",
+    "board safety",
+    "single-owner programming"
+  ]
 }

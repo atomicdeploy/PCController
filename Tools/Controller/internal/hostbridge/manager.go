@@ -213,6 +213,7 @@ type Manager struct {
 	notifier           hostui.Notifier
 	notificationQueue  *notificationQueue
 	warningBeep        func() error
+	buzzerPlayer       func(context.Context, buzzerMirrorJob) error
 	runningDoorWarning bool
 	statusLED          *statusLEDArbiter
 	segmentScroll      *segmentScrollPresenter
@@ -254,6 +255,7 @@ func Start(
 		notifier:          hostui.NewNotifier(hostui.NotifierOptions{AppID: productidentity.StableAppID}),
 		notificationQueue: newNotificationQueue(16, 3*time.Second, 500*time.Millisecond),
 		warningBeep:       hostui.WarningBeep,
+		buzzerPlayer:      playNativeBuzzer,
 		buzzerJobs:        make(chan buzzerMirrorJob, 32),
 		discoveryRefresh:  make(chan struct{}, 1),
 	}
@@ -500,6 +502,9 @@ func (manager *Manager) CallBridge(
 	name string,
 	request ipcjson.Request,
 ) (ipcjson.Response, error) {
+	if err := ipcjson.ValidateBridgeRequest(request); err != nil {
+		return ipcjson.Response{}, err
+	}
 	manager.mu.RLock()
 	peer := manager.peers[strings.ToLower(strings.TrimSpace(name))]
 	manager.mu.RUnlock()
@@ -925,6 +930,14 @@ func (manager *Manager) ingestPeerEvent(peerName string, raw json.RawMessage) bo
 	return true
 }
 
+func peerSubscriptionTopics(config appconfig.WebSocketClient) []string {
+	topics := append([]string(nil), config.Topics...)
+	if len(topics) == 0 {
+		return []string{"events", "state"}
+	}
+	return topics
+}
+
 // observeRunningDoor combines the explicit HOST-owned Running state with the
 // live reed input. The door never changes ProgramState; it only raises/clears
 // this host warning and its configurable desktop sound/toast presentation.
@@ -1223,10 +1236,7 @@ func (manager *Manager) webSocketPeerSession(
 	rpcSession := newPeerRPCSession(writeJSON)
 	detach := peer.attach(rpcSession)
 	defer detach()
-	topics := append([]string(nil), config.Topics...)
-	if len(topics) == 0 {
-		topics = []string{"events"}
-	}
+	topics := peerSubscriptionTopics(config)
 	if err := writeJSON(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "controller.subscribe",
 		"params": map[string]any{"topics": topics},
@@ -1308,12 +1318,12 @@ func (manager *Manager) webSocketPeerSession(
 		if err := json.Unmarshal(data, &request); err != nil {
 			continue
 		}
-		if request.Method == "controller.event" {
+		if request.Method == "controller.event" || request.Method == "controller.state" {
 			if manager.ingestPeerEvent(config.Name, request.Params) {
 				continue
 			}
 		}
-		if request.Method == "controller.event" || request.Method == "controller.status" {
+		if request.Method == "controller.event" || request.Method == "controller.state" || request.Method == "controller.status" {
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
 				Text: string(request.Params),
@@ -1403,10 +1413,7 @@ func (manager *Manager) socketIOPeerSession(
 	})
 	detach := peer.attach(rpcSession)
 	defer detach()
-	topics := append([]string(nil), config.Topics...)
-	if len(topics) == 0 {
-		topics = []string{"events"}
-	}
+	topics := peerSubscriptionTopics(config)
 	if err := writeEvent("subscribe", map[string]any{"topics": topics}); err != nil {
 		return err
 	}
@@ -1469,7 +1476,7 @@ func (manager *Manager) socketIOPeerSession(
 			if json.Unmarshal(raw, &response) == nil {
 				_ = rpcSession.Resolve(response)
 			}
-		case "controller.event":
+		case "controller.event", "controller.state":
 			if manager.ingestPeerEvent(config.Name, raw) {
 				continue
 			}
@@ -1540,8 +1547,9 @@ func decodeSocketIOPacket(value string) (string, json.RawMessage, error) {
 
 func (manager *Manager) remotePeerService() ipcjson.Service {
 	return ipcjson.Service{
-		Client:     manager.client,
-		HostConfig: manager.store.Current,
+		Client:                manager.client,
+		AuthorizationDisabled: true,
+		HostConfig:            manager.store.Current,
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			_, err := manager.store.Update(change)
 			return err
