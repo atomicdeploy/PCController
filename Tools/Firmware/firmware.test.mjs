@@ -219,6 +219,14 @@ test('firmware studio forwards named EEPROM feature gates to the shared build pl
 			error => error.exitCode === EXIT.USAGE && /requires build, upload, or watch/.test(error.message)
 		)
 	}
+	const inheritedCheck = parseArguments(['check'], {})
+	inheritedCheck.firmwareFeatures = ['unknown']
+	inheritedCheck.firmwareFeaturesFromEnvironment = true
+	const inheritedCheckPlan = await createCommandPlan(inheritedCheck, root)
+	assert.ok(
+		inheritedCheckPlan.actions.some(action => action.id === 'validate'),
+		'direct non-build plans ignore invalid inherited firmware defaults'
+	)
 	await assert.rejects(
 		() => createBuildPlan({ ...config, firmwareFeatures: ['unknown'] }, root),
 		error => error.exitCode === EXIT.USAGE && /unsupported firmware feature/.test(error.message)
