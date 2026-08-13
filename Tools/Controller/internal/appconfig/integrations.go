@@ -485,9 +485,6 @@ func validateBuzzerMirror(value BuzzerMirror) error {
 		strings.ContainsAny(value.DriverDirectory, "\r\n\"") {
 		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is invalid")
 	}
-	if value.NativeEnabled && value.DriverDirectory == "" {
-		return fmt.Errorf("integrations.buzzer_mirror.driver_directory is required when native playback is enabled")
-	}
 	return nil
 }
 
