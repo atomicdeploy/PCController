@@ -34,8 +34,9 @@ export const messages = {
     reduceMotion: 'Reduce motion', compactNumbers: 'Compact large numbers', liveTelemetry: 'Live telemetry',
     outputSafety: 'Safety confirmation is required for destructive actions.',
     confirmEmergencyTitle: 'Stop every output?', confirmEmergencyBody: 'This releases all relays and clears PWM output through the same guarded controller command path.',
-    noHardware: 'Authentication required — open Settings to connect securely.',
-    noHardwareDetail: 'Apply the edge session access token; live board state and telemetry will load automatically.',
+    noHardware: 'The dashboard is ready; connect an authenticated controller to receive live telemetry.',
+    authenticationDashboard: 'Authentication required — open Settings to connect securely.',
+    authenticationDashboardDetail: 'Apply the edge session access token; live board state and telemetry will load automatically.',
     demoMode: 'Visual demonstration data', eventStream: 'Event stream', status: 'Status',
   },
   fa: {
@@ -68,8 +69,9 @@ export const messages = {
     reduceMotion: 'کاهش حرکت‌ها', compactNumbers: 'نمایش فشرده اعداد بزرگ', liveTelemetry: 'تله‌متری زنده',
     outputSafety: 'برای عملیات مخرب تأیید ایمنی لازم است.',
     confirmEmergencyTitle: 'همه خروجی‌ها متوقف شوند؟', confirmEmergencyBody: 'این کار همه رله‌ها را آزاد و PWM را از همان مسیر امن فرمان کنترلر پاک می‌کند.',
-    noHardware: 'احراز هویت لازم است — برای اتصال امن، تنظیمات را باز کنید.',
-    noHardwareDetail: 'توکن دسترسی نشست لبه را اعمال کنید؛ وضعیت زنده برد و تله‌متری به‌طور خودکار بارگیری می‌شود.',
+    noHardware: 'داشبورد آماده است؛ برای دریافت داده زنده، یک کنترلر معتبر متصل کنید.',
+    authenticationDashboard: 'احراز هویت لازم است — برای اتصال امن، تنظیمات را باز کنید.',
+    authenticationDashboardDetail: 'توکن دسترسی نشست لبه را اعمال کنید؛ وضعیت زنده برد و تله‌متری به‌طور خودکار بارگیری می‌شود.',
     demoMode: 'داده نمایشی رابط', eventStream: 'جریان رویدادها', status: 'وضعیت',
   },
 } as const

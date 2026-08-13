@@ -86,6 +86,7 @@ import { applyPushedOutputEvent } from './status-led-event'
 import type { BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
+import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -1122,7 +1123,18 @@ export default function App() {
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
-    transport: { streamState, tabBusSupported, tabPeers },
+    transport: {
+      streamState,
+      authenticationRequired: sessionAuthenticationGuidanceRequired({
+        hostRequiresAuthentication: uiConfig?.auth_required === true,
+        streamState,
+        token,
+        streamDetail,
+        connectionReason: snapshot.connection_reason,
+      }),
+      tabBusSupported,
+      tabPeers,
+    },
     relayedTerminal,
     broadcastTerminal: (entry) => { tabChannelRef.current?.publishTerminal(entry) },
   }
