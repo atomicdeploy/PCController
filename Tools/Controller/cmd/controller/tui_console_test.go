@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -119,6 +120,22 @@ func TestExplicitConsoleFlagMakesRemoteSkipActionable(t *testing.T) {
 	output.Reset()
 	if err := applyTUIConsole(settings, &output, true); err == nil || !strings.Contains(err.Error(), "SSH") {
 		t.Fatalf("strict output=%q err=%v", output.String(), err)
+	}
+}
+
+func TestUnavailableLinuxConsoleIsSilent(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-specific terminal-emulator behavior")
+	}
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+	settings := consolewindow.Settings{
+		Enabled: true, Columns: 132, Rows: 40, FontFace: "Consolas", FontSize: 18,
+	}
+	var output bytes.Buffer
+	if err := applyTUIConsole(settings, &output, false); err != nil || output.Len() != 0 {
+		t.Fatalf("output=%q err=%v", output.String(), err)
 	}
 }
 
