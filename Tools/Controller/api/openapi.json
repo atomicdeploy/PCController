@@ -4,7 +4,7 @@
     "title": "PCController HTTP API",
     "version": "unversioned",
     "summary": "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    "description": "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS."
+    "description": "Current production alpha deliberately disables credential and capability authorization. Remote exposure still requires ipc.allow_remote; browser requests still require an allowed non-wildcard Origin; configured topology, no-recursive-pivot rules, board safety, and single-owner programming remain active. The built-in listener does not terminate TLS."
   },
   "servers": [
     {
@@ -21,7 +21,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "public",
+        "x-future-required-capability": "public",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -58,7 +59,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "public",
+        "x-future-required-capability": "public",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -95,7 +97,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "public",
+        "x-future-required-capability": "public",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -128,11 +131,12 @@
     "/api/auth/server-proof": {
       "get": {
         "operationId": "get_api_auth_server_proof",
-        "summary": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
+        "summary": "Dormant future server-possession proof; current production alpha returns HTTP 409",
         "tags": [
           "server-proof"
         ],
-        "x-required-capability": "public",
+        "x-future-required-capability": "public",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "400": {
@@ -148,7 +152,14 @@
             "$ref": "#/components/responses/MethodNotAllowed"
           },
           "409": {
-            "description": "Application authentication is disabled in the immediate alpha"
+            "description": "Server-possession proof is disabled in the current production alpha",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "security": [],
@@ -164,17 +175,25 @@
             },
             "description": "16..64 random bytes encoded as unpadded base64url"
           }
-        ]
+        ],
+        "x-retained-future-success": {
+          "status": 200,
+          "description": "Responder-bound HMAC proof when authorization is enabled in a future phase",
+          "schema": {
+            "$ref": "#/components/schemas/ServerProof"
+          }
+        }
       }
     },
     "/api/session/ticket": {
       "post": {
         "operationId": "post_api_session_ticket",
-        "summary": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
+        "summary": "Dormant future browser-ticket exchange; current production alpha returns HTTP 409",
         "tags": [
           "ticket"
         ],
-        "x-required-capability": "session",
+        "x-future-required-capability": "session",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "400": {
@@ -190,7 +209,21 @@
             "$ref": "#/components/responses/MethodNotAllowed"
           },
           "409": {
-            "description": "Application authentication is disabled in the immediate alpha"
+            "description": "Session-ticket authentication is disabled in the current production alpha",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "x-retained-future-success": {
+          "status": 201,
+          "description": "One-use Origin-bound browser session ticket when authorization is enabled in a future phase",
+          "schema": {
+            "$ref": "#/components/schemas/SessionTicket"
           }
         },
         "requestBody": {
@@ -212,7 +245,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "dynamic",
+        "x-future-required-capability": "dynamic",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -258,7 +292,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -294,7 +329,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -328,7 +364,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "host_configuration",
+        "x-future-required-capability": "host_configuration",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -375,7 +412,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -409,7 +447,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "board_commands",
+        "x-future-required-capability": "board_commands",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -454,7 +493,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "board_commands",
+        "x-future-required-capability": "board_commands",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -490,7 +530,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -526,7 +567,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -560,7 +602,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "board_commands",
+        "x-future-required-capability": "board_commands",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -605,7 +648,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "board_commands",
+        "x-future-required-capability": "board_commands",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -652,7 +696,8 @@
         "tags": [
           "catalog"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -688,7 +733,8 @@
         "tags": [
           "layout"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -722,7 +768,8 @@
         "tags": [
           "layout"
         ],
-        "x-required-capability": "board_commands",
+        "x-future-required-capability": "board_commands",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -767,7 +814,8 @@
         "tags": [
           "layout"
         ],
-        "x-required-capability": "board_commands",
+        "x-future-required-capability": "board_commands",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -814,7 +862,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -848,7 +897,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "host_configuration",
+        "x-future-required-capability": "host_configuration",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -893,7 +943,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "host_configuration",
+        "x-future-required-capability": "host_configuration",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -940,7 +991,8 @@
         "tags": [
           "status"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -976,7 +1028,8 @@
         "tags": [
           "facts"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -1012,7 +1065,8 @@
         "tags": [
           "key"
         ],
-        "x-required-capability": "virtual_keys",
+        "x-future-required-capability": "virtual_keys",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1059,7 +1113,8 @@
         "tags": [
           "power"
         ],
-        "x-required-capability": "power_actions",
+        "x-future-required-capability": "power_actions",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1106,7 +1161,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "dynamic",
+        "x-future-required-capability": "dynamic",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1153,7 +1209,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "messages",
+        "x-future-required-capability": "messages",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1200,7 +1257,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "board_commands",
+        "x-future-required-capability": "board_commands",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1247,7 +1305,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "board_commands",
+        "x-future-required-capability": "board_commands",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1292,7 +1351,8 @@
         "tags": [
           "bridge"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -1327,7 +1387,8 @@
         "tags": [
           "instances"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -1381,7 +1442,8 @@
         "tags": [
           "instances"
         ],
-        "x-required-capability": "host_configuration",
+        "x-future-required-capability": "host_configuration",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1424,7 +1486,8 @@
         "tags": [
           "instances"
         ],
-        "x-required-capability": "host_configuration",
+        "x-future-required-capability": "host_configuration",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1471,7 +1534,8 @@
         "tags": [
           "action"
         ],
-        "x-required-capability": "host_configuration",
+        "x-future-required-capability": "host_configuration",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1518,7 +1582,8 @@
         "tags": [
           "navigate"
         ],
-        "x-required-capability": "host_configuration",
+        "x-future-required-capability": "host_configuration",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1564,7 +1629,8 @@
         "tags": [
           "launch"
         ],
-        "x-required-capability": "host_configuration",
+        "x-future-required-capability": "host_configuration",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1610,7 +1676,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -1646,7 +1713,8 @@
         "tags": [
           "call"
         ],
-        "x-required-capability": "bridge_calls",
+        "x-future-required-capability": "bridge_calls",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1693,7 +1761,8 @@
         "tags": [
           "manifest"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -1729,7 +1798,8 @@
         "tags": [
           "service"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -1765,7 +1835,8 @@
         "tags": [
           "upload"
         ],
-        "x-required-capability": "programming",
+        "x-future-required-capability": "programming",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1812,7 +1883,8 @@
         "tags": [
           "fetch"
         ],
-        "x-required-capability": "programming",
+        "x-future-required-capability": "programming",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1859,7 +1931,8 @@
         "tags": [
           "capture"
         ],
-        "x-required-capability": "programming",
+        "x-future-required-capability": "programming",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -1906,7 +1979,8 @@
         "tags": [
           "{kind}"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -1960,7 +2034,8 @@
         "tags": [
           "{kind}"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2016,7 +2091,8 @@
         "tags": [
           "current"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2061,7 +2137,8 @@
         "tags": [
           "current"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2108,7 +2185,8 @@
         "tags": [
           "{kind}"
         ],
-        "x-required-capability": "programming",
+        "x-future-required-capability": "programming",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2166,7 +2244,8 @@
         "tags": [
           "flash"
         ],
-        "x-required-capability": "programming",
+        "x-future-required-capability": "programming",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2213,7 +2292,8 @@
         "tags": [
           "status"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2260,7 +2340,8 @@
         "tags": [
           "github"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2307,7 +2388,8 @@
         "tags": [
           "github"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2354,7 +2436,8 @@
         "tags": [
           "manifest"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2388,7 +2471,8 @@
         "tags": [
           "manifest"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2435,7 +2519,8 @@
         "tags": [
           "check"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2482,7 +2567,8 @@
         "tags": [
           "stage"
         ],
-        "x-required-capability": "programming",
+        "x-future-required-capability": "programming",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2529,7 +2615,8 @@
         "tags": [
           "status"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2576,7 +2663,8 @@
         "tags": [
           "inbound"
         ],
-        "x-required-capability": "messages",
+        "x-future-required-capability": "messages",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2623,7 +2711,8 @@
         "tags": [
           "outbound"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2659,7 +2748,8 @@
         "tags": [
           "outbound"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2695,7 +2785,8 @@
         "tags": [
           "outbound"
         ],
-        "x-required-capability": "read",
+        "x-future-required-capability": "read",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2731,7 +2822,8 @@
         "tags": [
           "outbound"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2778,7 +2870,8 @@
         "tags": [
           "outbound"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2825,7 +2918,8 @@
         "tags": [
           "datahub"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2870,7 +2964,8 @@
         "tags": [
           "datahub"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -2915,7 +3010,8 @@
         "tags": [
           "datahub"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -2971,7 +3067,8 @@
         "tags": [
           "datahub"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -3027,7 +3124,8 @@
         "tags": [
           "datahub"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -3083,7 +3181,8 @@
         "tags": [
           "datahub"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -3130,7 +3229,8 @@
         "tags": [
           "device"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -3175,7 +3275,8 @@
         "tags": [
           "device"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "safe",
         "responses": {
           "200": {
@@ -3220,7 +3321,8 @@
         "tags": [
           "device"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -3276,7 +3378,8 @@
         "tags": [
           "device"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -3332,7 +3435,8 @@
         "tags": [
           "device"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -3388,7 +3492,8 @@
         "tags": [
           "device"
         ],
-        "x-required-capability": "integrations",
+        "x-future-required-capability": "integrations",
+        "x-alpha-capability-enforced": false,
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
           "200": {
@@ -3434,13 +3539,13 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Durable host access credential for HTTP and non-browser WebSocket clients. Never place it in a URL."
+        "description": "Retained future authorization scheme; dormant in the current production alpha. Never place a credential in a URL."
       },
       "tokenHeader": {
         "type": "apiKey",
         "in": "header",
         "name": "X-PCController-Token",
-        "description": "Header-only compatibility credential."
+        "description": "Retained future header-only compatibility scheme; dormant in the current production alpha."
       }
     },
     "schemas": {
@@ -3972,6 +4077,7 @@
               -32600,
               -32601,
               -32602,
+              -32004,
               -32003,
               -32001,
               -32000
@@ -4028,7 +4134,7 @@
         }
       },
       "Unauthorized": {
-        "description": "Authentication required",
+        "description": "Retained future authentication mode rejected the request",
         "content": {
           "application/json": {
             "schema": {
@@ -4050,7 +4156,7 @@
         }
       },
       "Forbidden": {
-        "description": "Capability or safety policy denied",
+        "description": "Active exposure, Origin, topology, no-chain, or safety policy denied the request",
         "content": {
           "application/json": {
             "schema": {
@@ -4103,6 +4209,15 @@
     }
   },
   "x-body-limit-bytes": 1048576,
+  "x-alpha-authorization-disabled": true,
+  "x-active-remote-safety-gates": [
+    "ipc.allow_remote",
+    "non-wildcard browser Origin",
+    "configured bridge topology",
+    "no recursive bridge or peer-update pivot",
+    "board safety",
+    "single-owner programming"
+  ],
   "x-unsupported-transports": [
     "versioned /api/v* paths",
     "built-in TLS termination",

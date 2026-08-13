@@ -13,9 +13,9 @@ func registerArtifactHTTP(mux *http.ServeMux, service *Service) {
 	}
 	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		access := accessFromHTTPRequest(request, "rest")
-		// Artifact bytes and update requests are never anonymously exposed off
-		// loopback, even if a deployment accidentally enables remote IPC without
-		// configuring a bearer token.
+		// The deferred authorization design fails closed without a token. The
+		// explicit production alpha escape hatch bypasses this precheck while
+		// listener, Origin, topology, and operation safety remain authoritative.
 		if !service.authorizationDisabled() && access.Remote && strings.TrimSpace(service.currentAuthToken()) == "" {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{
 				"error": "remote artifact access requires a configured authentication token",

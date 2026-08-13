@@ -18,7 +18,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +37,7 @@ import (
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/productidentity"
+	"pccontroller.local/controller/internal/shell"
 )
 
 const (
@@ -228,6 +228,8 @@ type Access struct {
 }
 
 const (
+	rpcErrorOutcomeUncertain = -32004
+
 	capabilityRead         = "read"
 	capabilityEvents       = "events"
 	capabilityMessages     = "messages"
@@ -255,11 +257,12 @@ type Service struct {
 	Artifacts        *artifacts.Service
 	ReleaseDiscovery ReleaseDiscoveryService
 	AuthToken        string
-	// AuthorizationDisabled is the product-wide alpha contract from #148.
-	// Configured credentials and remote capability bits remain readable so a
-	// future complete session design can adopt them, but they are dormant while
-	// this flag is set. This is intentionally selected by product entry points,
-	// not exposed as another end-user security mode.
+	// AuthorizationDisabled is the explicit product-wide alpha contract from
+	// #148. Production entry points select it directly; it is not another user
+	// security mode. Configured credentials and capability policy remain readable
+	// for a future session design, but are dormant while this flag is set. Listener
+	// exposure, exact Origin, topology, no-pivot, board safety, and single-owner
+	// programming checks remain authoritative.
 	AuthorizationDisabled bool
 	RemotePrincipal       string
 	AllowedOrigins        []string
@@ -1119,8 +1122,8 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &params); err == nil {
 			if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" {
 				err = errors.New("bridge peer and request.method are required")
-			} else if params.Request.Method == "controller.bridge.call" {
-				err = errors.New("recursive bridge calls are not permitted")
+			} else if bridgeErr := ValidateBridgeRequest(params.Request); bridgeErr != nil {
+				err = bridgeErr
 			} else if service.BridgeCall == nil {
 				err = errors.New("host bridge manager is unavailable")
 			} else {
@@ -1391,7 +1394,11 @@ func (service *Service) dispatch(
 				err = fmt.Errorf("read discovered host snapshot: %w", callErr)
 				break
 			}
-			service.Client.EmitHostActionEvent("discovery.connect.completed", "authenticated network host connection verified", "discovery", "connect", map[string]string{"address": params.Address})
+			detail := "network host connection verified"
+			if strings.TrimSpace(params.Auth) != "" && !service.authorizationDisabled() {
+				detail = "authenticated network host connection verified"
+			}
+			service.Client.EmitHostActionEvent("discovery.connect.completed", detail, "discovery", "connect", map[string]string{"address": params.Address})
 			result = map[string]any{"connected": true, "address": params.Address, "ping": ping.Result, "snapshot": snapshot.Result}
 		}
 	case "controller.discovery.config", "controller.discovery.config.get":
@@ -1747,42 +1754,184 @@ func (service *Service) authorizeAccess(
 	if !access.Remote {
 		return nil
 	}
-	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") &&
-		bridgeIngressCanPivot(method, params) {
-		return errors.New("bridge ingress may not pivot through another peer")
+	bridgeTransport := strings.EqualFold(strings.TrimSpace(access.Transport), "bridge")
+	if bridgeTransport && bridgeIngressCanPivot(method, params) {
+		service.auditAccess(access, method, capabilityBridgeCalls, false)
+		details := []string{"bridge ingress may not pivot through another peer"}
+		if requestInvokesBridgeCall(method, params, 0) {
+			details = append(details, "recursive bridge calls are not permitted")
+		}
+		if peerUpdate, _ := requestInvokesPeerHostUpdate(method, params, 0); peerUpdate {
+			details = append(details, "peer host updates may not be chained through a bridge")
+		}
+		if requestInvokesDiscoveryConnect(method, params, 0) {
+			details = append(details, "discovery connections may not be chained through a bridge")
+		}
+		return errors.New(strings.Join(details, ": "))
+	}
+	peerUpdate, bridgeChained := requestInvokesPeerHostUpdate(method, params, 0)
+	if peerUpdate {
+		if bridgeChained || bridgeTransport {
+			service.auditAccess(access, method, capabilityBridgeCalls, false)
+			return errors.New("peer host updates may not be chained through a bridge")
+		}
+		if err := service.authorizeCapability(access, method, capabilityProgramming); err != nil {
+			return err
+		}
+		return service.authorizeCapability(access, method, capabilityBridgeCalls)
 	}
 	capability := requestCapability(method, params)
 	return service.authorizeCapability(access, method, capability)
 }
 
 func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
+	if requestInvokesBridgeCall(method, params, 0) {
+		return true
+	}
+	if peerUpdate, _ := requestInvokesPeerHostUpdate(method, params, 0); peerUpdate {
+		return true
+	}
+	return requestInvokesDiscoveryConnect(method, params, 0)
+}
+
+// ValidateBridgeRequest rejects direct or wrapped bridge recursion and any
+// direct or shell-wrapped peer update or discovery connection. These operations
+// must begin on the source host so bridge ingress cannot pivot through another
+// configured peer.
+func ValidateBridgeRequest(request Request) error {
+	if requestInvokesBridgeCall(request.Method, request.Params, 0) {
+		return errors.New("recursive bridge calls are not permitted")
+	}
+	if peerUpdate, _ := requestInvokesPeerHostUpdate(request.Method, request.Params, 0); peerUpdate {
+		return errors.New("peer host updates may not be chained through a bridge")
+	}
+	if requestInvokesDiscoveryConnect(request.Method, request.Params, 0) {
+		return errors.New("discovery connections may not be chained through a bridge")
+	}
+	return nil
+}
+
+func requestInvokesBridgeCall(method string, params json.RawMessage, depth int) bool {
+	if depth > 4 {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(method)) {
-	case "controller.bridge.call", "controller.peer.update.host", "controller.discovery.connect":
+	case "controller.bridge.call":
 		return true
 	case "controller.command.execute":
 		var value struct {
 			Command string `json:"command"`
 		}
-		return json.Unmarshal(params, &value) == nil && bridgeCommandCanPivot(value.Command)
+		if json.Unmarshal(params, &value) == nil {
+			return commandInvokesBridgeCall(value.Command, depth+1)
+		}
 	case "controller.app.action":
 		var action hostui.AppAction
-		return json.Unmarshal(params, &action) == nil &&
-			strings.EqualFold(strings.TrimSpace(action.Kind), "command") &&
-			bridgeCommandCanPivot(action.Value)
-	default:
-		return false
+		if json.Unmarshal(params, &action) == nil && strings.EqualFold(strings.TrimSpace(action.Kind), "command") {
+			return commandInvokesBridgeCall(action.Value, depth+1)
+		}
 	}
+	return false
 }
 
-func bridgeCommandCanPivot(command string) bool {
-	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
-	if len(words) == 0 {
-		return false
-	}
-	if words[0] == "peer-update" {
+func commandInvokesBridgeCall(command string, depth int) bool {
+	if depth > 4 {
 		return true
 	}
-	return words[0] == "bridge" && (len(words) < 2 || words[1] != "list")
+	words, err := shell.Split(command)
+	return err == nil && len(words) >= 2 &&
+		strings.EqualFold(words[0], "bridge") && strings.EqualFold(words[1], "call")
+}
+
+func requestInvokesPeerHostUpdate(method string, params json.RawMessage, depth int) (bool, bool) {
+	if depth > 4 {
+		return true, true
+	}
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.peer.update.host":
+		return true, false
+	case "controller.command.execute":
+		var value struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(params, &value) == nil {
+			return commandInvokesPeerHostUpdate(value.Command, depth+1)
+		}
+	case "controller.app.action":
+		var action hostui.AppAction
+		if json.Unmarshal(params, &action) == nil && strings.EqualFold(strings.TrimSpace(action.Kind), "command") {
+			return commandInvokesPeerHostUpdate(action.Value, depth+1)
+		}
+	case "controller.bridge.call":
+		var value struct {
+			Request Request `json:"request"`
+		}
+		if json.Unmarshal(params, &value) == nil {
+			invokes, _ := requestInvokesPeerHostUpdate(value.Request.Method, value.Request.Params, depth+1)
+			return invokes, invokes
+		}
+	}
+	return false, false
+}
+
+func commandInvokesPeerHostUpdate(command string, depth int) (bool, bool) {
+	words, err := shell.Split(command)
+	if err != nil || len(words) == 0 {
+		return false, false
+	}
+	if strings.EqualFold(words[0], "peer-update") {
+		return true, false
+	}
+	if len(words) < 4 || !strings.EqualFold(words[0], "bridge") || !strings.EqualFold(words[1], "call") {
+		return false, false
+	}
+	nested := Request{Method: words[3]}
+	if len(words) >= 5 {
+		nested.Params = json.RawMessage(words[4])
+	}
+	invokes, _ := requestInvokesPeerHostUpdate(nested.Method, nested.Params, depth+1)
+	return invokes, invokes
+}
+
+func requestInvokesDiscoveryConnect(method string, params json.RawMessage, depth int) bool {
+	if depth > 4 {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.discovery.connect":
+		return true
+	case "controller.command.execute":
+		var value struct {
+			Command string `json:"command"`
+		}
+		if json.Unmarshal(params, &value) == nil {
+			return commandInvokesDiscoveryConnect(value.Command, depth+1)
+		}
+	case "controller.app.action":
+		var action hostui.AppAction
+		if json.Unmarshal(params, &action) == nil && strings.EqualFold(strings.TrimSpace(action.Kind), "command") {
+			return commandInvokesDiscoveryConnect(action.Value, depth+1)
+		}
+	case "controller.bridge.call":
+		var value struct {
+			Request Request `json:"request"`
+		}
+		if json.Unmarshal(params, &value) == nil {
+			return requestInvokesDiscoveryConnect(value.Request.Method, value.Request.Params, depth+1)
+		}
+	}
+	return false
+}
+
+func commandInvokesDiscoveryConnect(command string, depth int) bool {
+	if depth > 4 {
+		return true
+	}
+	words, err := shell.Split(command)
+	if err != nil || len(words) < 2 {
+		return false
+	}
+	return strings.EqualFold(words[0], "network") && strings.EqualFold(words[1], "connect")
 }
 
 func (service *Service) authorizeCapability(
@@ -2081,7 +2230,7 @@ func commandCapability(command string) string {
 		}
 		return capabilityProgramming
 	case "board", "boot", "program", "programmer", "firmware", "flash", "upload",
-		"restore", "query", "write":
+		"restore", "query", "write", "peer-update":
 		return capabilityProgramming
 	case "bridge":
 		if len(words) == 2 && words[1] == "list" {
@@ -2804,11 +2953,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		access := accessFromHTTPRequest(request, "rest")
-		if err := service.authorizeCapability(
-			access,
-			"REST "+request.URL.Path,
-			commandCapability(params.Command),
-		); err != nil {
+		encoded, _ := json.Marshal(params)
+		if err := service.authorizeAccess(access, "controller.command.execute", encoded); err != nil {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return
 		}
@@ -3054,18 +3200,24 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
-			return
-		}
-		if service.AppAction == nil {
-			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
-			return
-		}
 		var action hostui.AppAction
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&action); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		encoded, _ := json.Marshal(action)
+		if err := service.authorizeAccess(
+			accessFromHTTPRequest(request, "rest"),
+			"controller.app.action",
+			encoded,
+		); err != nil {
+			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
+			return
+		}
+		if service.AppAction == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
 			return
 		}
 		action.Source = "rest"
@@ -3126,10 +3278,15 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" ||
-			params.Request.Method == "controller.bridge.call" {
+		method := strings.TrimSpace(params.Request.Method)
+		bridgeErr := ValidateBridgeRequest(params.Request)
+		if strings.TrimSpace(params.Peer) == "" || method == "" || bridgeErr != nil {
+			detail := "bridge peer and non-recursive request.method are required"
+			if bridgeErr != nil {
+				detail = bridgeErr.Error()
+			}
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
-				"error": "bridge peer and non-recursive request.method are required",
+				"error": detail,
 			})
 			return
 		}
@@ -3891,9 +4048,10 @@ func authorizeHTTPRequest(
 }
 
 // httpOriginAllowed prevents a browser on an unrelated site from driving the
-// loopback control plane. Missing-Origin policy is explicit in the caller:
-// loopback native clients are allowed, while remote native clients must supply
-// a durable header credential and browser tickets remain Origin-bound.
+// loopback control plane. An Origin is accepted only from the explicit exact
+// host allow-list (with an optional :* port), never because the attacker-
+// controlled Host header happens to match. Missing-Origin policy is explicit
+// in the caller for native clients.
 func httpOriginAllowed(request *http.Request, allowedPatterns []string) bool {
 	origin := strings.TrimSpace(request.Header.Get("Origin"))
 	if origin == "" {
@@ -3905,28 +4063,25 @@ func httpOriginAllowed(request *http.Request, allowedPatterns []string) bool {
 		parsed.RawQuery != "" || parsed.Fragment != "" {
 		return false
 	}
-	originHost := strings.ToLower(parsed.Host)
-	if strings.EqualFold(originHost, strings.TrimSpace(request.Host)) {
-		return true
+	originName := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	originPort := parsed.Port()
+	if originPort == "" {
+		if parsed.Scheme == "https" {
+			originPort = "443"
+		} else {
+			originPort = "80"
+		}
 	}
 	if len(allowedPatterns) == 0 {
 		allowedPatterns = []string{"localhost:*", "127.0.0.1:*", "[::1]:*"}
 	}
 	for _, pattern := range allowedPatterns {
-		pattern = strings.ToLower(strings.TrimSpace(pattern))
-		if pattern == "*" || pattern == "*:*" {
+		patternHost, patternPort, splitErr := net.SplitHostPort(strings.TrimSpace(pattern))
+		if splitErr != nil || patternHost == "" || strings.ContainsAny(patternHost, "*?[]") {
 			continue
 		}
-		if strings.HasSuffix(pattern, ":*") {
-			hostPattern := strings.TrimSuffix(pattern, ":*")
-			originName := strings.ToLower(parsed.Hostname())
-			if strings.EqualFold(hostPattern, originName) ||
-				strings.EqualFold(hostPattern, "["+originName+"]") {
-				return true
-			}
-			continue
-		}
-		if match, matchErr := path.Match(pattern, originHost); matchErr == nil && match {
+		patternHost = strings.ToLower(strings.TrimSuffix(patternHost, "."))
+		if patternHost == originName && (patternPort == "*" || patternPort == originPort) {
 			return true
 		}
 	}

@@ -50,7 +50,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		listen := flags.String("listen", "0.0.0.0:8787", "LAN IPC/API/WebSocket listen address")
 		instance := flags.String("instance", "", "mDNS/SSDP instance name (hostname by default)")
 		origins := stringListFlag{}
-		flags.Var(&origins, "origin", "allowed browser origin host pattern, repeatable (for example David-PC:*)")
+		flags.Var(&origins, "origin", "allowed non-wildcard browser origin host and port, repeatable (for example David-PC:*)")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -61,12 +61,12 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if err != nil || strings.TrimSpace(host) == "" {
 			return errors.New("--listen must be a concrete host:port address")
 		}
+		hostname, _ := os.Hostname()
 		if len(origins) == 0 {
-			origins = append(origins, "localhost:*", "127.0.0.1:*", "[::1]:*")
+			origins = defaultEdgeOrigins(host, hostname)
 		}
 		if *instance == "" {
-			*instance, _ = os.Hostname()
-			*instance = boundedDiscoveryInstanceName(*instance)
+			*instance = boundedDiscoveryInstanceName(hostname)
 		}
 		_, err = store.Update(func(config *appconfig.Config) error {
 			config.IPC.Listen = *listen
@@ -91,10 +91,10 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(stdout, "LAN edge mode enabled with alpha authentication disabled.")
+		fmt.Fprintln(stdout, "LAN edge mode enabled with alpha application authentication disabled.")
 		fmt.Fprintln(stdout, "IPC/API/WebSocket:", *listen)
 		fmt.Fprintln(stdout, "Discovery: DNS-SD/mDNS + SSDP/UPnP + WS-Discovery + UDP broadcast + NetBIOS as", *instance)
-		fmt.Fprintln(stdout, "Remote programming is enabled; shutdown, virtual-key, and power-action capabilities remain disabled.")
+		fmt.Fprintln(stdout, "Alpha requests are credentialless and capability grants are dormant; allow_remote, Origin, topology, and bridge no-chain checks remain active.")
 		fmt.Fprintln(stdout, "Restart the controller host after applying the required private-profile firewall rule.")
 		return nil
 	case "peer-add", "add-peer":
@@ -112,7 +112,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return err
 		}
 		if flags.NArg() != 0 || strings.TrimSpace(*name) == "" || strings.TrimSpace(*url) == "" {
-			return errors.New("usage: controller network peer-add --name NAME --url ws://HOST:PORT/ipc [--topic events|state|status]")
+			return errors.New("usage: controller network peer-add --name NAME --url ws://HOST:PORT/ipc [--secret-ref REF] [--topic events|state|status]")
 		}
 		if len(topics) == 0 {
 			topics = []string{"events", "state", "status"}
@@ -178,7 +178,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return err
 		}
 		if flags.NArg() != 0 || strings.TrimSpace(*address) == "" {
-			return errors.New("usage: controller network probe --addr HOST:PORT [--origin URL]")
+			return errors.New("usage: controller network probe --addr HOST:PORT [--token-ref REF] [--origin URL]")
 		}
 		token := ""
 		if strings.TrimSpace(*tokenRef) != "" {
@@ -241,7 +241,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return err
 		}
 		fmt.Fprintf(stdout, "Network advertisement enabled=%t protocols=%s broadcast_port=%d\n", *enabled, strings.Join(enabledProtocolNames(configured), ","), configured.BroadcastPort)
-		fmt.Fprintln(stdout, "Remote command access remains governed separately by ipc.allow_remote, bearer authentication, and remote_policy.")
+		fmt.Fprintln(stdout, "Remote command access still requires ipc.allow_remote; alpha requests are credentialless while Origin, topology, and bridge no-chain checks remain active.")
 		return nil
 	case "discover", "list":
 		flags := flag.NewFlagSet("network discover", flag.ContinueOnError)
@@ -297,7 +297,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return err
 		}
 		if flags.NArg() != 0 || strings.TrimSpace(*target) == "" || *timeout < time.Second || *timeout > 30*time.Second {
-			return errors.New("usage: controller network connect --target NAME|HOST [--timeout 15s]")
+			return errors.New("usage: controller network connect --target NAME|HOST [--token-ref REF] [--timeout 15s]")
 		}
 		options, err := parseDiscoveryOptions(*protocols)
 		if err != nil {
@@ -336,6 +336,13 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return err
 		}
 		provenAddress := address
+		if token != "" {
+			var proveErr error
+			provenAddress, proveErr = verifyEdgeServerProof(ctx, lanProbeHTTPClient(), address, token)
+			if proveErr != nil {
+				return fmt.Errorf("revalidate server before publishing connection: %w", proveErr)
+			}
+		}
 		primaryContext, stopPrimary := context.WithTimeout(context.Background(), 5*time.Second)
 		if primaryAvailable(primaryContext) {
 			var observed map[string]any
@@ -370,7 +377,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 				return fmt.Errorf("LAN access disabled but token cleanup failed: %w", err)
 			}
 		}
-		fmt.Fprintln(stdout, "LAN edge mode disabled; IPC returned to loopback defaults.")
+		fmt.Fprintln(stdout, "LAN edge mode disabled; IPC returned to loopback-only defaults.")
 		return nil
 	default:
 		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|status")
@@ -387,6 +394,29 @@ func boundedDiscoveryInstanceName(value string) string {
 		return "PCController"
 	}
 	return value
+}
+
+func defaultEdgeOrigins(listenHost, hostname string) stringListFlag {
+	result := stringListFlag{"localhost:*", "127.0.0.1:*", "[::1]:*"}
+	appendHost := func(value string) {
+		value = strings.Trim(strings.TrimSpace(value), "[]")
+		if value == "" {
+			return
+		}
+		if parsed := net.ParseIP(value); parsed != nil && parsed.IsUnspecified() {
+			return
+		}
+		pattern := net.JoinHostPort(value, "*")
+		for _, existing := range result {
+			if strings.EqualFold(existing, pattern) {
+				return
+			}
+		}
+		result = append(result, pattern)
+	}
+	appendHost(hostname)
+	appendHost(listenHost)
+	return result
 }
 
 func optionsTimeoutMilliseconds(value time.Duration) int64 {

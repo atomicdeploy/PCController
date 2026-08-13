@@ -58,7 +58,7 @@ func TestAlphaNetworkConfigurationDoesNotRequireOrGenerateCredentials(t *testing
 	if !configured.IPC.AllowRemote || configured.IPC.AuthToken != "" || configured.IPC.AuthTokenRef != "" {
 		t.Fatalf("alpha edge config=%#v", configured.IPC)
 	}
-	if !bytes.Contains(output.Bytes(), []byte("alpha authentication disabled")) {
+	if !strings.Contains(output.String(), "authentication disabled") {
 		t.Fatalf("edge output=%q", output.String())
 	}
 
@@ -87,6 +87,17 @@ func TestBoundedDiscoveryInstanceName(t *testing.T) {
 	}
 	if got := boundedDiscoveryInstanceName("   "); got != "PCController" {
 		t.Fatalf("empty instance name=%q", got)
+	}
+}
+
+func TestDefaultEdgeOriginsPermitThisHostWithoutWildcardHostTrust(t *testing.T) {
+	origins := strings.Join(defaultEdgeOrigins("0.0.0.0", "server"), ",")
+	if !strings.Contains(origins, "server:*") || strings.Contains(origins, "0.0.0.0:*") || strings.Contains(origins, "*.*") {
+		t.Fatalf("default edge origins=%q", origins)
+	}
+	origins = strings.Join(defaultEdgeOrigins("192.0.2.20", "server"), ",")
+	if !strings.Contains(origins, "192.0.2.20:*") {
+		t.Fatalf("concrete listen origin missing: %q", origins)
 	}
 }
 

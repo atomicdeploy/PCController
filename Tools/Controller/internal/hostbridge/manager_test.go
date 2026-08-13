@@ -70,6 +70,9 @@ func TestEnabledTextMappingExecutesAllowlistedCommandOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !manager.remotePeerService().AuthorizationDisabled {
+		t.Fatal("production peer bridge did not activate the explicit alpha authorization contract")
+	}
 	defer func() {
 		cancel()
 		manager.Close()
@@ -172,6 +175,34 @@ func TestPeerRPCSessionCorrelatesResponseAndPreservesCallerID(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("correlated bridge call timed out")
+	}
+}
+
+func TestCallBridgeRejectsDirectAndShellWrappedPeerUpdateChains(t *testing.T) {
+	manager := &Manager{}
+	peerUpdate, _ := json.Marshal(map[string]string{
+		"command": "peer-update host second " + strings.Repeat("a", 64) + " intent:nested",
+	})
+	bridgeCommand, _ := json.Marshal(map[string]string{
+		"command": "bridge call second controller.snapshot",
+	})
+	bridgeAction, _ := json.Marshal(map[string]string{
+		"kind": "command", "value": "bridge call second controller.snapshot",
+	})
+	for _, test := range []struct {
+		request ipcjson.Request
+		detail  string
+	}{
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.peer.update.host"}, detail: "may not be chained"},
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.command.execute", Params: peerUpdate}, detail: "may not be chained"},
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.bridge.call"}, detail: "recursive bridge calls"},
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.command.execute", Params: bridgeCommand}, detail: "recursive bridge calls"},
+		{request: ipcjson.Request{JSONRPC: ipcjson.Version, Method: "controller.app.action", Params: bridgeAction}, detail: "recursive bridge calls"},
+	} {
+		if _, err := manager.CallBridge(context.Background(), "edge", test.request); err == nil ||
+			!strings.Contains(err.Error(), test.detail) {
+			t.Fatalf("request=%#v err=%v", test.request, err)
+		}
 	}
 }
 
