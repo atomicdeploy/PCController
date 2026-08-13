@@ -85,6 +85,21 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME firmware_protocol_codec_unit COMMAND firmware_protocol_codec_tests)
 
+  # Compile the persisted four-mode safety predicate as target-neutral C++11
+  # before either AVR or VirtualBoard adapters consume the common contract.
+  add_executable(firmware_motion_policy_contract_tests
+    tests/motion_policy_contract_test.cpp
+  )
+  target_include_directories(firmware_motion_policy_contract_tests PRIVATE ../..)
+  set_property(TARGET firmware_motion_policy_contract_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_motion_policy_contract_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_motion_policy_contract_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_motion_policy_contract_unit
+    COMMAND firmware_motion_policy_contract_tests)
+
   add_executable(virtual_board_tests tests/test_main.cpp)
   target_link_libraries(virtual_board_tests PRIVATE virtual_board_core)
   if(MSVC)
