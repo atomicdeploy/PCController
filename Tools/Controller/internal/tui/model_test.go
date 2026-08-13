@@ -261,6 +261,57 @@ func TestRemotePanelAndLCDReadbackRefreshInitiallyAndAfterReconnect(t *testing.T
 	}
 }
 
+func TestRemotePanelAndLCDReadbackRejectStaleAuthorityResults(t *testing.T) {
+	snapshot := control.Snapshot{
+		Connected:         true,
+		ConnectionUpdated: time.Unix(123, 0),
+		Port:              ports.Info{Name: "REMOTE-NEW", SerialNumber: "board-new"},
+		Hello: native.Hello{BuildHash: 0x12345678, Capabilities: native.CapabilityLCD |
+			native.CapabilityI2CTransfer | native.CapabilityFrontPanelSnapshot},
+	}
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Remote: &RemoteBackend{InitialSnapshot: snapshot}, DisableWelcome: true,
+	})
+	model.remoteAuthorityEpoch = 7
+	model.frontPanelRefreshRequired = true
+	currentKey := remoteDeviceKey(snapshot)
+	stalePanel := native.FrontPanel{Schema: 2, MenuPage: 9}
+	staleLCD := control.LCDPresentationState{Physical: true, Address: 0x3F}
+
+	for _, result := range []tea.Msg{
+		frontPanelResultMsg{panel: stalePanel, remote: true, peerKey: currentKey, epoch: 6},
+		lcdPresentationResultMsg{state: staleLCD, peerKey: currentKey, epoch: 6},
+		frontPanelResultMsg{panel: stalePanel, remote: true, peerKey: "old-peer", epoch: 7},
+		lcdPresentationResultMsg{state: staleLCD, peerKey: "old-peer", epoch: 7},
+	} {
+		updated, _ := model.Update(result)
+		model = updated.(Model)
+	}
+	if model.remoteSnapshot.HaveFrontPanel || model.haveLCDPresentation {
+		t.Fatalf("stale authority result was accepted: panel=%t LCD=%t", model.remoteSnapshot.HaveFrontPanel, model.haveLCDPresentation)
+	}
+	if !model.frontPanelRefreshRequired {
+		t.Fatal("stale panel result cleared the required authoritative refresh")
+	}
+
+	updated, _ := model.Update(frontPanelResultMsg{
+		panel:  native.FrontPanel{Schema: 2, MenuPage: 3},
+		remote: true, peerKey: currentKey, epoch: 7,
+	})
+	model = updated.(Model)
+	updated, _ = model.Update(lcdPresentationResultMsg{
+		state:   control.LCDPresentationState{Physical: true, Address: 0x27},
+		peerKey: currentKey, epoch: 7,
+	})
+	model = updated.(Model)
+	if !model.remoteSnapshot.HaveFrontPanel || model.remoteSnapshot.FrontPanel.MenuPage != 3 ||
+		!model.haveLCDPresentation || model.lcdPresentation.Address != 0x27 ||
+		model.frontPanelRefreshRequired {
+		t.Fatalf("current authority result was not accepted: panel=%#v LCD=%#v refresh=%t",
+			model.remoteSnapshot.FrontPanel, model.lcdPresentation, model.frontPanelRefreshRequired)
+	}
+}
+
 func TestUnavailablePeripheralsDoNotRenderInvalidDashboardValuesOrControls(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	snapshot := RichPreviewSnapshot()

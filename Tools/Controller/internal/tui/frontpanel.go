@@ -65,10 +65,12 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 	}
 	lcdPresentation, haveLCDPresentation := model.currentLCDPresentation(snapshot)
 	lcdAddress, haveLCD := model.lcdDisplayState(snapshot)
+	havePhysicalLCDPresentation := snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 &&
+		haveLCDPresentation && lcdPresentation.Physical
 	state.HaveLCD = haveLCD
 	if haveLCD {
 		switch {
-		case haveLCDPresentation && lcdPresentation.Physical:
+		case havePhysicalLCDPresentation:
 			state.LCDLine1 = lcdPresentation.PhysicalLine1
 			state.LCDLine2 = lcdPresentation.PhysicalLine2
 			state.LCDBacklight = true
@@ -96,7 +98,7 @@ func (model Model) currentFrontPanel(snapshot control.Snapshot) FrontPanelState 
 			state.LCDLine1, state.LCDLine2 = line1, line2
 		case !snapshot.Connected:
 			state.InputSource += " · USB offline; retained physical text unverified"
-		case haveLCDPresentation && lcdPresentation.Physical:
+		case havePhysicalLCDPresentation:
 			// The cap16 branch above uses only the PCF8574 driver's confirmed cache.
 		case haveLCDPresentation && lcdPresentation.FirmwareMirror:
 			state.LCDLine1 = lcdPresentation.FirmwareLine1

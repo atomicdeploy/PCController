@@ -186,6 +186,28 @@ func TestMenusPageRendersOnlyAdvertisedFetchedPanelAndDisplayControls(t *testing
 	rendered = ansi.Strip(strings.Join(lines, "\n"))
 	assertAbsent(t, rendered, "D · Send arbitrary message", "LCD prompt mirroring", "2×16 LCD")
 
+	panelLCD := control.Snapshot{
+		Connected: true,
+		Hello: native.Hello{Capabilities: native.CapabilityLCD |
+			native.CapabilityFrontPanelSnapshot},
+		HaveFrontPanel: true,
+		FrontPanel: native.FrontPanel{
+			Schema: 2, LCDAvailable: true, LCDAddress: 0x27,
+			LCDLine1: "Exact panel", LCDLine2: "readback", LCDBacklight: true,
+		},
+	}
+	remoteModel.remoteSnapshot = panelLCD
+	remoteModel.lcdPresentation = control.LCDPresentationState{
+		Physical: true, Address: 0x3F,
+		PhysicalLine1: "Stale presenter", PhysicalLine2: "must not win",
+	}
+	panelState := remoteModel.currentFrontPanel(panelLCD)
+	if strings.TrimSpace(panelState.LCDLine1) != "Exact panel" ||
+		strings.TrimSpace(panelState.LCDLine2) != "readback" ||
+		!strings.Contains(panelState.InputSource, "LCD 0x27") {
+		t.Fatalf("cap16-absent stale presenter overrode exact panel LCD: %#v", panelState)
+	}
+
 	disconnected := RichPreviewSnapshot()
 	disconnected.Connected = false
 	rendered, geometry = render(disconnected)
