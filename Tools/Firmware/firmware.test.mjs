@@ -458,6 +458,19 @@ test('studio validation preserves matching Controller compile identity', async (
 	assert.equal(validated.source.packedTimestamp, '35019D5D')
 	assert.deepEqual(validated.stackBudget, { estimatedFreeSRAMBytes: 287 })
 	assert.deepEqual(validated.patchRegions, controllerManifest.patchRegions)
+
+	const customManifestPath = join(root, '.build', 'validated', 'custom-manifest.json')
+	await main([
+		'manifest', '--manifest', customManifestPath, '--quiet', '--no-color'
+	], {}, root)
+	const custom = JSON.parse(await readFile(customManifestPath, 'utf8'))
+	assert.equal(custom.format, 'pccontroller-avr-firmware-manifest/v2')
+	assert.equal(custom.generatedUtc, '2026-08-01T16:12:58Z')
+	assert.deepEqual(custom.source.compileFeatures, ['eeprom-menu-labels'])
+	assert.equal(custom.source.buildHash, '1234ABCD')
+	assert.equal(custom.source.packedTimestamp, '35019D5D')
+	assert.deepEqual(custom.stackBudget, { estimatedFreeSRAMBytes: 287 })
+	assert.deepEqual(custom.patchRegions, controllerManifest.patchRegions)
 })
 
 test('one-shot watched dry-run is serialized and never starts a tool', async () => {

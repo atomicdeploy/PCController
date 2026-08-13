@@ -965,11 +965,35 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 			commandPlanPaths(projectRoot).manifest,
 		projectRoot
 	)
+	const canonicalPath = resolveFromProject(
+		commandPlanPaths(projectRoot).manifest,
+		projectRoot
+	)
+	const readPrior = async candidate => {
+		try {
+			return JSON.parse(await fs.readFile(candidate, 'utf8'))
+		} catch (error) {
+			if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+			return null
+		}
+	}
+	const matchesArtifacts = candidate =>
+		FIRMWARE_MANIFEST_FORMATS.includes(candidate?.format) &&
+		Array.isArray(candidate.artifacts) &&
+		candidate.artifacts.length === artifacts.length &&
+		artifacts.every(artifact => candidate.artifacts.some(previous =>
+			String(previous.path).replaceAll('\\', '/') === String(artifact.path).replaceAll('\\', '/') &&
+			String(previous.sha256).toLowerCase() === artifact.sha256.toLowerCase()
+		))
 	let prior = null
-	try {
-		prior = JSON.parse(await fs.readFile(path, 'utf8'))
-	} catch (error) {
-		if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
+	prior = await readPrior(path)
+	// A custom output path is a copy destination, not a second compiler identity
+	// source. Preserve the canonical Controller manifest whenever it describes
+	// these exact bytes, so v2 feature declarations and fixed build identity are
+	// not silently downgraded while writing the requested copy.
+	if (canonicalPath !== path) {
+		const canonicalPrior = await readPrior(canonicalPath)
+		if (matchesArtifacts(canonicalPrior)) prior = canonicalPrior
 	}
 	if (FIRMWARE_MANIFEST_FORMATS.includes(prior?.format)) {
 		let features
@@ -1000,13 +1024,7 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 			)
 		}
 	}
-	const identityMatches = FIRMWARE_MANIFEST_FORMATS.includes(prior?.format) &&
-		Array.isArray(prior.artifacts) &&
-		prior.artifacts.length === artifacts.length &&
-		artifacts.every(artifact => prior.artifacts.some(previous =>
-			String(previous.path).replaceAll('\\', '/') === String(artifact.path).replaceAll('\\', '/') &&
-			String(previous.sha256).toLowerCase() === artifact.sha256.toLowerCase()
-		))
+	const identityMatches = matchesArtifacts(prior)
 	const manifest = {
 		format: identityMatches ? prior.format : 'pccontroller-avr-firmware-manifest/v1',
 		generatedUtc: identityMatches && prior.generatedUtc
