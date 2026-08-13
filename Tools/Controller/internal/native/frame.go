@@ -5,13 +5,6 @@ import (
 	"fmt"
 )
 
-const (
-	Magic            byte = 0xA5
-	EnvelopeRevision byte = 0x01
-	MaxPayload       = 48
-	MaxRawFrame      = 5 + MaxPayload + 1
-)
-
 var (
 	ErrEmptyFrame      = errors.New("empty frame")
 	ErrMalformedCOBS   = errors.New("malformed COBS frame")

@@ -119,16 +119,6 @@ func BuzzerBusy(hello Hello, status Status) (busy bool, known bool) {
 	return status.Flags&StatusBuzzerBusy != 0, true
 }
 
-// Device error codes mirror ControllerProtocol::Error.
-const (
-	ErrorBadEnvelope byte = iota + 1
-	ErrorUnsupported
-	ErrorBadPayload
-	ErrorHardwareUnavailable
-	ErrorBusy
-	ErrorUnsafe
-)
-
 const (
 	TemperatureEntryPayloadSize = 11
 	temperatureMaximumEntries   = (MaxPayload - 2) / TemperatureEntryPayloadSize
