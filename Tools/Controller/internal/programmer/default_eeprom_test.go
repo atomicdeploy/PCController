@@ -28,6 +28,21 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 		inspection.MaximumAddress+1 != PCControllerEEPROMBytes {
 		t.Fatalf("default EEPROM coverage = %#v", inspection)
 	}
+	boot, err := image.BytesAt(EEPROMBootOpcodeAddress, EEPROMBootOpcodeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boot[0] != bootOpcodeMagic0 || boot[1] != bootOpcodeMagic1 ||
+		boot[2] != bootOpcodeSchema || int(boot[3]) != len(factoryBootOpcodeData) ||
+		boot[EEPROMBootOpcodeCommitOffset] != 0xA7 {
+		t.Fatalf("factory boot opcode metadata = % X", boot[:EEPROMBootOpcodeMetadataBytes])
+	}
+	checksumInput := append(append([]byte(nil), boot[:4]...),
+		boot[int(EEPROMBootOpcodeDataOffset):int(EEPROMBootOpcodeDataOffset)+int(boot[3])]...)
+	if boot[4] != avrCRC8(checksumInput) ||
+		!bytes.Equal(boot[int(EEPROMBootOpcodeDataOffset):int(EEPROMBootOpcodeDataOffset)+int(boot[3])], factoryBootOpcodeData[:]) {
+		t.Fatalf("factory boot opcode record = % X", boot)
+	}
 	record, err := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
 	if err != nil {
 		t.Fatal(err)

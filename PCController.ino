@@ -15,6 +15,9 @@
 #include "LocalLib/TonePlayer.h"
 #include "Project/AddressableLeds.h"
 #include "Project/BootMelody.h"
+#if PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES
+#include "Project/BootOpcodeSequence.h"
+#endif
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"
 #include "Project/FrontPanelModel.h"

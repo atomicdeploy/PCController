@@ -67,6 +67,18 @@
 #define PCCONTROLLER_MENU_LAYOUT_PROTOCOL 0
 #endif
 
+// Optional AVR profile: execute a compact, CRC-validated EEPROM boot script
+// after safety initialization. It is disabled in the byte-tight base image;
+// enable it only in a feature profile that has passed the exact AVR size gate.
+#ifndef PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES
+#define PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES 0
+#endif
+
+#if PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES != 0 && \
+    PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES != 1
+#error "PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES must be 0 or 1"
+#endif
+
 #if PCCONTROLLER_MENU_ORDERING && !PCCONTROLLER_MENU_VISIBILITY
 #error "Menu ordering requires persistent visibility"
 #endif

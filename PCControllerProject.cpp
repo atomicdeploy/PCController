@@ -1,6 +1,10 @@
 // Project-layer implementation aggregator for the root-level Project folder.
 #include "Project/AddressableLeds.cpp"
 #include "Project/BootMelody.cpp"
+#include "ProjectConfig.h"
+#if PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES
+#include "Project/BootOpcodeSequence.cpp"
+#endif
 #include "Project/CompactI2c.cpp"
 #include "Project/ControllerEvents.cpp"
 #include "Project/Core/MacroRing.cpp"

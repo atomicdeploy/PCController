@@ -204,4 +204,23 @@ if(BUILD_TESTING)
     target_compile_options(firmware_reset_telemetry_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_reset_telemetry_unit COMMAND firmware_reset_telemetry_tests)
+
+  # The optional EEPROM boot-opcode runner is production AVR code compiled
+  # against byte-accurate EEPROM/Arduino doubles. It does not link or alter
+  # VirtualBoard runtime behavior.
+  add_executable(firmware_boot_opcode_sequence_tests
+    tests/boot_opcode_sequence_test.cpp
+    ../../Project/BootOpcodeSequence.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_boot_opcode_sequence_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  if(MSVC)
+    target_compile_options(firmware_boot_opcode_sequence_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_boot_opcode_sequence_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_boot_opcode_sequence_unit COMMAND firmware_boot_opcode_sequence_tests)
 endif()
