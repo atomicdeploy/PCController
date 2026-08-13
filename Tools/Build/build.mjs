@@ -205,6 +205,7 @@ export function resolveBuildIdentity(options, env = process.env, now = new Date(
 }
 
 export function parseArguments(argv, env = process.env) {
+	const firmwareFeaturesEnvironment = environmentValue(env, 'PCCONTROLLER_FIRMWARE_FEATURES')
 	const options = {
 		firmware: true,
 		host: true,
@@ -239,11 +240,16 @@ export function parseArguments(argv, env = process.env) {
 		version: '',
 		appName: undefined,
 		tagline: undefined,
-	buildTime: '',
-	buildTimestamp: '',
-	firmwareFeatures: []
+		buildTime: '',
+		buildTimestamp: '',
+		firmwareFeatures: String(firmwareFeaturesEnvironment).trim() === ''
+			? [] : String(firmwareFeaturesEnvironment).split(','),
+		firmwareFeaturesFromEnvironment: String(firmwareFeaturesEnvironment).trim() !== '',
+		firmwareFeaturesExplicit: false,
+		noFirmwareFeatures: false
 	}
 	let substantive = false
+	let firmwareFeaturesExplicit = false
 	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index]
 		const equals = argument.indexOf('=')
@@ -334,16 +340,26 @@ export function parseArguments(argv, env = process.env) {
 			}
 			case '--firmware-feature': {
 				const [value, next] = valueAfter(argv, index, inline, name)
+				if (!firmwareFeaturesExplicit) options.firmwareFeatures = []
+				firmwareFeaturesExplicit = true
+				options.firmwareFeaturesExplicit = true
 				options.firmwareFeatures.push(value); index = next; break
 			}
+			case '--no-firmware-features': options.noFirmwareFeatures = true; break
 			default: throw new BuildError(`unknown option: ${argument}`, 2)
 		}
 	}
 	if (options.help) return options
-	try {
-		options.firmwareFeatures = normalizeFirmwareFeatures(options.firmwareFeatures)
-	} catch (error) {
-		throw new BuildError(error.message || String(error), error.exitCode || 2)
+	if (options.noFirmwareFeatures && firmwareFeaturesExplicit) {
+		throw new BuildError('--no-firmware-features cannot be combined with --firmware-feature', 2)
+	}
+	if (options.noFirmwareFeatures) options.firmwareFeatures = []
+	if (options.firmwareFeaturesExplicit) {
+		try {
+			options.firmwareFeatures = normalizeFirmwareFeatures(options.firmwareFeatures)
+		} catch (error) {
+			throw new BuildError(error.message || String(error), error.exitCode || 2)
+		}
 	}
 	if (!VIRTUAL_BOARD_PRESETS.includes(options.virtualBoardPreset)) {
 		throw new BuildError(`--virtual-board-preset must be one of ${VIRTUAL_BOARD_PRESETS.join(', ')}`, 2)
@@ -377,8 +393,15 @@ export function parseArguments(argv, env = process.env) {
 		throw new BuildError('--toolchain-config requires firmware compilation', 2)
 	}
 	options.cleanOnly = options.clean && !substantive
-	if (options.firmwareFeatures.length !== 0 && (!options.firmware || options.cleanOnly)) {
-		throw new BuildError('--firmware-feature requires firmware compilation', 2)
+	if ((options.firmwareFeaturesExplicit || options.noFirmwareFeatures) &&
+		(!options.firmware || options.cleanOnly)) {
+		throw new BuildError('explicit firmware-feature selection requires firmware compilation', 2)
+	}
+	if (!options.firmware || options.cleanOnly) options.firmwareFeatures = []
+	try {
+		options.firmwareFeatures = normalizeFirmwareFeatures(options.firmwareFeatures)
+	} catch (error) {
+		throw new BuildError(error.message || String(error), error.exitCode || 2)
 	}
 	return options
 }
@@ -394,9 +417,17 @@ export function createPlan(options, identity, platform = process.platform) {
 	} catch (error) {
 		throw new BuildError(error.message || String(error), error.exitCode || 2)
 	}
-	if (firmwareFeatures.length !== 0 && (!options.firmware || options.cleanOnly)) {
-		throw new BuildError('--firmware-feature requires firmware compilation', 2)
+	const selectionExplicit = options.firmwareFeaturesExplicit === true ||
+		options.noFirmwareFeatures === true ||
+		(firmwareFeatures.length !== 0 && options.firmwareFeaturesFromEnvironment !== true)
+	if (options.noFirmwareFeatures && firmwareFeatures.length !== 0) {
+		throw new BuildError('--no-firmware-features cannot be combined with --firmware-feature', 2)
 	}
+	if (selectionExplicit &&
+		(!options.firmware || options.cleanOnly)) {
+		throw new BuildError('explicit firmware-feature selection requires firmware compilation', 2)
+	}
+	if (!options.firmware || options.cleanOnly) firmwareFeatures = []
 	const actions = []
 	if (options.clean) actions.push({
 		id: 'clean',
@@ -427,7 +458,8 @@ export function createPlan(options, identity, platform = process.platform) {
 			outputDir: FIRMWARE_OUTPUT,
 			toolchainCLI: options.toolchainCLI,
 			toolchainConfig: options.toolchainConfig,
-			firmwareFeatures
+			firmwareFeatures,
+			noFirmwareFeatures: firmwareFeatures.length === 0
 		})
 		actions.push(commandAction(
 			'firmware-compile',
@@ -600,6 +632,7 @@ Safe build options:
   --build-time ISO          Freeze host build time for reproducible packaging
   --build-timestamp HEX     Freeze packed firmware timestamp
   --firmware-feature NAME  Repeatable Controller-validated compile feature
+  --no-firmware-features   Freeze the default-off firmware profile
   --toolchain-sync          Explicitly synchronize firmware dependencies
   --toolchain-cli PATH      Dependency CLI override (compile or sync)
   --toolchain-config PATH   Dependency CLI config override (compile)
@@ -1993,7 +2026,8 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 		outputDir: FIRMWARE_OUTPUT,
 		toolchainCLI: options.toolchainCLI,
 		toolchainConfig: options.toolchainConfig,
-		firmwareFeatures: options.firmwareFeatures
+		firmwareFeatures: options.firmwareFeatures,
+		noFirmwareFeatures: (options.firmwareFeatures || []).length === 0
 	})
 	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	log.stage('💾', 'Generating and validating the complete safe default EEPROM image')

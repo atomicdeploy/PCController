@@ -151,6 +151,25 @@ test('firmware studio forwards named EEPROM feature gates to the shared build pl
 		'--firmware-feature', 'eeprom-boot-opcodes',
 		'--firmware-feature', 'eeprom-menu-labels'
 	])
+	const environment = { PCCONTROLLER_FIRMWARE_FEATURES: 'eeprom-menu-labels' }
+	const inherited = parseArguments(['build'], environment)
+	assert.deepEqual(inherited.firmwareFeatures, ['eeprom-menu-labels'])
+	assert.deepEqual((await createBuildPlan(inherited, root)).args.slice(-2), [
+		'--firmware-feature', 'eeprom-menu-labels'
+	])
+	const replaced = parseArguments([
+		'build', '--firmware-feature', 'eeprom-boot-opcodes'
+	], environment)
+	assert.deepEqual(replaced.firmwareFeatures, ['eeprom-boot-opcodes'])
+	const defaultOff = parseArguments(['build', '--no-firmware-features'], environment)
+	assert.deepEqual(defaultOff.firmwareFeatures, [])
+	assert.equal((await createBuildPlan(defaultOff, root)).args.at(-1), '--no-firmware-features')
+	for (const malformed of ['eeprom-menu-labels,', 'eeprom-menu-labels,,eeprom-boot-opcodes']) {
+		assert.throws(
+			() => parseArguments(['build'], { PCCONTROLLER_FIRMWARE_FEATURES: malformed }),
+			/firmware feature must not be empty|invalid named firmware feature/
+		)
+	}
 	for (const command of ['build', 'upload', 'watch']) {
 		const args = [
 			command, '--firmware-feature', 'eeprom-menu-labels'
@@ -172,10 +191,31 @@ test('firmware studio forwards named EEPROM feature gates to the shared build pl
 		error => error.exitCode === EXIT.USAGE && /unsupported firmware feature/.test(error.message)
 	)
 	for (const command of ['check', 'manifest', 'backup', 'verify', 'probe', 'metadata']) {
+		const argsWithoutHardware = [command]
+		if (command === 'backup') argsWithoutHardware.push('--output', 'backup.hex')
+		if (['backup', 'verify', 'probe', 'metadata'].includes(command)) {
+			argsWithoutHardware.push('--port', 'DO_NOT_OPEN')
+		}
+		assert.deepEqual(
+			parseArguments(argsWithoutHardware, environment).firmwareFeatures,
+			[],
+			`${command} ignored environment selection`
+		)
+		assert.deepEqual(
+			parseArguments(argsWithoutHardware, {
+				PCCONTROLLER_FIRMWARE_FEATURES: 'unknown'
+			}).firmwareFeatures,
+			[],
+			`${command} ignored invalid environment selection`
+		)
 		assert.throws(
 			() => parseArguments([
 				command, '--firmware-feature', 'eeprom-menu-labels'
 			], {}),
+			error => error.exitCode === EXIT.USAGE && /requires build, upload, or watch/.test(error.message)
+		)
+		assert.throws(
+			() => parseArguments([...argsWithoutHardware, '--no-firmware-features'], environment),
 			error => error.exitCode === EXIT.USAGE && /requires build, upload, or watch/.test(error.message)
 		)
 	}

@@ -19,7 +19,7 @@ import (
 	"pccontroller.local/controller/internal/programmer"
 )
 
-const boardInitializeUsage = "usage: controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--firmware-feature NAME ...] [--bootloader-only] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
+const boardInitializeUsage = "usage: controller board initialize [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--firmware-feature NAME ...|--no-firmware-features] [--bootloader-only] [--skip-toolchain] [--portable-cli] | controller board blank --confirm NAME [--uart auto|PORT|none] | controller board name [get|set NAME|clear]"
 
 func runBoard(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	if len(args) == 0 {
@@ -171,11 +171,7 @@ func initializeBoard(
 	if runtime == nil || store == nil {
 		return errors.New("board initialization requires the primary runtime and configuration store")
 	}
-	configuredFeatures, err := configuredFirmwareFeatures(store.Current())
-	if err != nil {
-		return err
-	}
-	firmwareFeatures := newFirmwareFeatureSelection(configuredFeatures)
+	firmwareFeatures := newFirmwareFeatureSelection(nil)
 	flags := flag.NewFlagSet("board initialize", flag.ContinueOnError)
 	flags.SetOutput(output)
 	uart := flags.String("uart", "auto", "application UART port, auto, or none")
@@ -215,12 +211,11 @@ func initializeBoard(
 	if (firmwareFeatures.explicit || *noFirmwareFeatures) && !compileFirmware {
 		return errors.New("--firmware-feature and --no-firmware-features require board initialization to compile the application; omit --firmware and --bootloader-only")
 	}
-	selectedFeatures := []programmer.FirmwareFeature(nil)
-	if compileFirmware && !*noFirmwareFeatures {
-		selectedFeatures, err = firmwareFeatures.Resolve()
-		if err != nil {
-			return err
-		}
+	selectedFeatures, err := resolveCompileFirmwareFeatures(
+		store.Current(), firmwareFeatures, *noFirmwareFeatures, compileFirmware,
+	)
+	if err != nil {
+		return err
 	}
 	dataPaths, err := programmer.DefaultHostDataPaths()
 	if err != nil {

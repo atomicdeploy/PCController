@@ -132,6 +132,7 @@ function positiveInteger(value, option, { minimum = 1 } = {}) {
 }
 
 export function parseArguments(argv, env = process.env) {
+	const firmwareFeaturesEnvironment = env.PCCONTROLLER_FIRMWARE_FEATURES
 	const config = {
 		command: null,
 		port: env.PCCONTROLLER_PORT || '',
@@ -149,10 +150,17 @@ export function parseArguments(argv, env = process.env) {
 		uploadOnChange: false,
 		once: false,
 		pollMs: DEFAULT_POLL_MS,
-	debounceMs: DEFAULT_DEBOUNCE_MS,
-	firmwareFeatures: [],
-	help: false
+		debounceMs: DEFAULT_DEBOUNCE_MS,
+		firmwareFeatures: firmwareFeaturesEnvironment === undefined ||
+			String(firmwareFeaturesEnvironment).trim() === ''
+			? [] : String(firmwareFeaturesEnvironment).split(','),
+		firmwareFeaturesFromEnvironment: firmwareFeaturesEnvironment !== undefined &&
+			String(firmwareFeaturesEnvironment).trim() !== '',
+		firmwareFeaturesExplicit: false,
+		noFirmwareFeatures: false,
+		help: false
 	}
+	let firmwareFeaturesExplicit = false
 	const positional = []
 	const commands = new Set([
 		'build', 'upload', 'watch', 'check', 'manifest',
@@ -229,10 +237,16 @@ export function parseArguments(argv, env = process.env) {
 			}
 			case '--firmware-feature': {
 				const [value, next] = optionValue(argv, index, inlineValue, name)
+				if (!firmwareFeaturesExplicit) config.firmwareFeatures = []
+				firmwareFeaturesExplicit = true
+				config.firmwareFeaturesExplicit = true
 				config.firmwareFeatures.push(value)
 				index = next
 				break
 			}
+			case '--no-firmware-features':
+				config.noFirmwareFeatures = true
+				break
 			case '--clean':
 				config.clean = true
 				break
@@ -280,17 +294,34 @@ export function parseArguments(argv, env = process.env) {
 		)
 	}
 	if (config.help) return config
+	if (config.noFirmwareFeatures && firmwareFeaturesExplicit) {
+		throw new FirmwareToolError(
+			'--no-firmware-features cannot be combined with --firmware-feature',
+			EXIT.USAGE
+		)
+	}
+	if (config.noFirmwareFeatures) config.firmwareFeatures = []
+	if (config.firmwareFeaturesExplicit) {
+		try {
+			config.firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures)
+		} catch (error) {
+			throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+		}
+	}
+	if ((config.firmwareFeaturesExplicit || config.noFirmwareFeatures) &&
+		!['build', 'upload', 'watch'].includes(config.command)) {
+		throw new FirmwareToolError(
+			'explicit firmware-feature selection requires build, upload, or watch',
+			EXIT.USAGE
+		)
+	}
+	if (!['build', 'upload', 'watch'].includes(config.command)) {
+		config.firmwareFeatures = []
+	}
 	try {
 		config.firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures)
 	} catch (error) {
 		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
-	}
-	if (config.firmwareFeatures.length !== 0 &&
-		!['build', 'upload', 'watch'].includes(config.command)) {
-		throw new FirmwareToolError(
-			'--firmware-feature requires build, upload, or watch',
-			EXIT.USAGE
-		)
 	}
 	config.method ||= 'urclock'
 	if (!PROGRAMMING_METHODS.includes(config.method)) {
@@ -374,6 +405,7 @@ ${chalk.bold.yellowBright('Options')}
   --output FILE     Backup destination (backup only)
   --manifest FILE   Override manifest output
   --firmware-feature NAME  Repeatable Controller-validated compile feature
+  --no-firmware-features   Freeze the default-off firmware profile
   --clean           Clean before building
   --verbose         Show commands and verbose compiler output
   --dry-run         Print the exact action without executing it or opening a port
@@ -454,6 +486,7 @@ export async function createBuildPlan(config, projectRoot) {
 	if (config.clean) args.push('--clean')
 	if (config.verbose) args.push('--verbose')
 	for (const feature of firmwareFeatures) args.push('--firmware-feature', feature)
+	if (firmwareFeatures.length === 0) args.push('--no-firmware-features')
 	return { file, args, cwd: projectRoot, env }
 }
 
@@ -499,13 +532,17 @@ export async function createCommandPlan(config, projectRoot) {
 	} catch (error) {
 		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
 	}
-	if (firmwareFeatures.length !== 0 &&
+	const selectionExplicit = config.firmwareFeaturesExplicit === true ||
+		config.noFirmwareFeatures === true ||
+		(firmwareFeatures.length !== 0 && config.firmwareFeaturesFromEnvironment !== true)
+	if (selectionExplicit &&
 		!['build', 'upload', 'watch'].includes(config.command)) {
 		throw new FirmwareToolError(
-			'--firmware-feature requires build, upload, or watch',
+			'explicit firmware-feature selection requires build, upload, or watch',
 			EXIT.USAGE
 		)
 	}
+	if (!['build', 'upload', 'watch'].includes(config.command)) firmwareFeatures = []
 	config = { ...config, firmwareFeatures }
 	const absolute = commandPlanPaths(projectRoot)
 	const paths = relativeCommandPlanPaths(projectRoot)

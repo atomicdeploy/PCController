@@ -221,12 +221,18 @@ export function createControllerProgramCommand({
 	toolchainCLI = '',
 	toolchainConfig = '',
 	firmwareFeatures = [],
+	noFirmwareFeatures,
 	dryRun = false,
 	allowIncompleteBackup = false
 }) {
 	const normalizedMethod = String(method || '').toLowerCase()
 	const normalizedFeatures = normalizeFirmwareFeatures(firmwareFeatures)
+	const freezeDefaultOff = noFirmwareFeatures ??
+		(normalizedMethod === 'compile' && normalizedFeatures.length === 0)
 	if (normalizedMethod === 'compile') {
+		if (freezeDefaultOff && normalizedFeatures.length !== 0) {
+			throw new CommandPlanError('--no-firmware-features cannot be combined with --firmware-feature')
+		}
 		const args = [
 			'program', '--method', 'compile',
 			'--sketch', requireValue(sketch, 'compile sketch'),
@@ -237,6 +243,7 @@ export function createControllerProgramCommand({
 		for (const feature of normalizedFeatures) {
 			args.push('--firmware-feature', feature)
 		}
+		if (freezeDefaultOff) args.push('--no-firmware-features')
 		if (dryRun) args.push('--dry-run')
 		return controllerCommand(invocation, args)
 	}
@@ -245,8 +252,8 @@ export function createControllerProgramCommand({
 			`programming method ${JSON.stringify(method)} is unsupported; use ${PROGRAMMING_METHODS.join(' or ')}`
 		)
 	}
-	if (normalizedFeatures.length !== 0) {
-		throw new CommandPlanError('--firmware-feature is only valid with compile')
+	if (normalizedFeatures.length !== 0 || freezeDefaultOff) {
+		throw new CommandPlanError('--firmware-feature and --no-firmware-features are only valid with compile')
 	}
 	const normalizedOperation = String(operation || '').toLowerCase()
 	const knownOperations = Object.values(PROGRAMMING_OPERATIONS)

@@ -49,11 +49,8 @@ func runProgramWithConfig(
 	if normalizeErr != nil {
 		return normalizeErr
 	}
-	configuredFeatures, err := configuredFirmwareFeatures(config)
-	if err != nil {
-		return err
-	}
-	firmwareFeatures := newFirmwareFeatureSelection(configuredFeatures)
+	var err error
+	firmwareFeatures := newFirmwareFeatureSelection(nil)
 	flags := flag.NewFlagSet("program", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	defaultMethod := config.Programming.Method
@@ -163,8 +160,10 @@ func runProgramWithConfig(
 		options.Method != programmer.MethodCompile {
 		return errors.New("--firmware-feature and --no-firmware-features are only valid with --method compile")
 	}
-	if options.Method == programmer.MethodCompile && !*noFirmwareFeatures {
-		options.FirmwareFeatures, err = firmwareFeatures.Resolve()
+	if options.Method == programmer.MethodCompile {
+		options.FirmwareFeatures, err = resolveCompileFirmwareFeatures(
+			config, firmwareFeatures, *noFirmwareFeatures, true,
+		)
 		if err != nil {
 			return err
 		}

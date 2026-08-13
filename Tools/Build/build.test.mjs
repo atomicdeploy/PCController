@@ -541,9 +541,10 @@ test('build plan and execution share exact Controller programming argv construct
 		compile.args[compile.args.indexOf('--output-dir') + 1],
 		commandPlanPaths(PROJECT_ROOT).firmwareOutput
 	)
-	assert.deepEqual(compile.args.slice(-4), [
+	assert.deepEqual(compile.args.slice(-5), [
 		'--toolchain-cli', 'C:\\portable\\arduino-cli.exe',
-		'--toolchain-config', 'C:\\portable\\firmware-cli.yaml'
+		'--toolchain-config', 'C:\\portable\\firmware-cli.yaml',
+		'--no-firmware-features'
 	])
 
 	const packaged = canonicalControllerInvocation(PROJECT_ROOT, 'win32')
@@ -587,6 +588,34 @@ test('build forwards only named firmware features to the Controller compiler', (
 	assert.deepEqual(command.filter((value, index) => command[index - 1] === '--firmware-feature'), [
 		'eeprom-boot-opcodes', 'eeprom-menu-labels'
 	])
+	assert.ok(!command.includes('--no-firmware-features'))
+	const environment = {
+		PCCONTROLLER_FIRMWARE_FEATURES: 'eeprom-menu-labels'
+	}
+	const fromEnvironment = parseArguments(['--firmware-only'], environment)
+	assert.deepEqual(fromEnvironment.firmwareFeatures, ['eeprom-menu-labels'])
+	const environmentCommand = createPlan(
+		fromEnvironment, resolveBuildIdentity(fromEnvironment, {}), 'win32'
+	).actions.find(action => action.id === 'firmware-compile').command.args
+	assert.equal(environmentCommand.at(-2), '--firmware-feature')
+	assert.equal(environmentCommand.at(-1), 'eeprom-menu-labels')
+	const replaced = parseArguments([
+		'--firmware-only', '--firmware-feature', 'eeprom-boot-opcodes'
+	], environment)
+	assert.deepEqual(replaced.firmwareFeatures, ['eeprom-boot-opcodes'])
+	const defaultOff = parseArguments([
+		'--firmware-only', '--no-firmware-features'
+	], environment)
+	assert.deepEqual(defaultOff.firmwareFeatures, [])
+	assert.ok(createPlan(
+		defaultOff, resolveBuildIdentity(defaultOff, {}), 'win32'
+	).actions.find(action => action.id === 'firmware-compile').command.args.includes('--no-firmware-features'))
+	for (const malformed of ['eeprom-menu-labels,', 'eeprom-menu-labels,,eeprom-boot-opcodes']) {
+		assert.throws(
+			() => parseArguments(['--firmware-only'], { PCCONTROLLER_FIRMWARE_FEATURES: malformed }),
+			/firmware feature must not be empty|invalid named firmware feature/
+		)
+	}
 	assert.throws(
 		() => createControllerProgramCommand({
 			invocation: sourceControllerInvocation(PROJECT_ROOT), method: 'compile',
@@ -602,10 +631,21 @@ test('build forwards only named firmware features to the Controller compiler', (
 		error => error.exitCode === 2 && /unsupported firmware feature/.test(error.message)
 	)
 	for (const selection of [['--host-only'], ['--virtual-board-only'], ['--clean']]) {
+		const inherited = parseArguments(selection, environment)
+		assert.deepEqual(inherited.firmwareFeatures, [], `${selection} ignored environment selection`)
+		assert.deepEqual(
+			parseArguments(selection, { PCCONTROLLER_FIRMWARE_FEATURES: 'unknown' }).firmwareFeatures,
+			[],
+			`${selection} ignored invalid environment selection`
+		)
 		assert.throws(
 			() => parseArguments([
 				...selection, '--firmware-feature', 'eeprom-menu-labels'
 			], {}),
+			error => error.exitCode === 2 && /requires firmware compilation/.test(error.message)
+		)
+		assert.throws(
+			() => parseArguments([...selection, '--no-firmware-features'], environment),
 			error => error.exitCode === 2 && /requires firmware compilation/.test(error.message)
 		)
 	}

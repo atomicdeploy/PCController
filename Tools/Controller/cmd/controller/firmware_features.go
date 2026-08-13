@@ -69,3 +69,21 @@ func (selection *firmwareFeatureSelection) Resolve() (
 ) {
 	return programmer.NormalizeFirmwareFeatures(selection.values)
 }
+
+// resolveCompileFirmwareFeatures deliberately defers config/environment
+// validation until this invocation will actually compile firmware. Device
+// programming, precompiled initialization, and bootloader-only work must not
+// be blocked by an irrelevant compile-profile default.
+func resolveCompileFirmwareFeatures(
+	config appconfig.Config,
+	selection *firmwareFeatureSelection,
+	defaultOff, compile bool,
+) ([]programmer.FirmwareFeature, error) {
+	if !compile || defaultOff {
+		return nil, nil
+	}
+	if selection != nil && selection.explicit {
+		return selection.Resolve()
+	}
+	return configuredFirmwareFeatures(config)
+}
