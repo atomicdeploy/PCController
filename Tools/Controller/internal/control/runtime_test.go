@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"testing"
 	"time"
@@ -21,11 +22,14 @@ func TestPushedStatusKeepsFrontPanelMetadataCoherent(t *testing.T) {
 	runtime := New(Options{})
 	runtime.haveFrontPanel = true
 	runtime.frontPanel = native.FrontPanel{Schema: 2, MenuPage: 0, ProgramMode: 1}
-	status := native.Status{MenuPage: 9, ProgramMode: 13, ActiveKeys: 4}
-	payload, err := status.Payload()
-	if err != nil {
-		t.Fatal(err)
-	}
+	payload := make([]byte, native.StatusPayloadSize)
+	binary.LittleEndian.PutUint32(payload[4:8], uint32(0x80000000))
+	binary.LittleEndian.PutUint32(payload[8:12], uint32(0x80000000))
+	binary.LittleEndian.PutUint32(payload[12:16], uint32(0x80000000))
+	binary.LittleEndian.PutUint32(payload[16:20], uint32(0x80000000))
+	binary.LittleEndian.PutUint16(payload[20:22], uint16(0x8000))
+	binary.LittleEndian.PutUint16(payload[22:24], uint16(0x8000))
+	payload[27], payload[29], payload[30] = 4, 9, 13
 	runtime.observeLocked(native.Frame{Opcode: native.OpStatus, Payload: payload})
 	if runtime.frontPanel.MenuPage != 9 || runtime.frontPanel.ProgramMode != 13 ||
 		runtime.frontPanel.PressedKeys != 4 {
