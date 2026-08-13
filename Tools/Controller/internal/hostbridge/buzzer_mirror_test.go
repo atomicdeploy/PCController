@@ -69,6 +69,14 @@ func TestBuzzerMirrorJobRequiresOptInAndValidBoardNote(t *testing.T) {
 	if pause, ok := buzzerMirrorJobFor(config, event); !ok || pause.frequencyHz != 0 {
 		t.Fatal("explicit board pause was not retained as a host timeline marker")
 	}
+	event.Metadata["duration_ms"] = "0"
+	if stop, ok := buzzerMirrorJobFor(config, event); !ok || stop.frequencyHz != 0 || stop.durationMS != 0 {
+		t.Fatal("explicit board stop was not retained as a host timeline marker")
+	}
+	event.Metadata["frequency_hz"] = "440"
+	if _, ok := buzzerMirrorJobFor(config, event); ok {
+		t.Fatal("zero-duration non-stop buzzer state was accepted")
+	}
 }
 
 func TestBuzzerPlaybackTimelinePreservesDeviceCadenceAndTrimsLateNotes(t *testing.T) {
@@ -136,6 +144,45 @@ func TestBuzzerDispatchReusesResolvedExternalBackend(t *testing.T) {
 	if job.config.Backend != "external" || job.config.Executable != "/usr/local/bin/beep" {
 		t.Fatalf("resolved backend was not reused: %+v", job.config)
 	}
+}
+
+func TestBuzzerMirrorStopCancelsActiveSourcePlayback(t *testing.T) {
+	originalPlayer := playNativeBuzzer
+	defer func() { playNativeBuzzer = originalPlayer }()
+	started := make(chan struct{}, 1)
+	stopped := make(chan struct{}, 1)
+	playNativeBuzzer = func(ctx context.Context, _ buzzerMirrorJob) error {
+		started <- struct{}{}
+		<-ctx.Done()
+		stopped <- struct{}{}
+		return ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	manager := &Manager{
+		ctx: ctx, cancel: cancel, buzzerJobs: make(chan buzzerMirrorJob, 2),
+		status: Status{BuzzerNativeState: "ready"},
+	}
+	manager.wait.Add(1)
+	go manager.buzzerMirrorLoop()
+	manager.buzzerJobs <- buzzerMirrorJob{
+		frequencyHz: 440, durationMS: 5_000, observedAt: time.Now(), source: "board-a",
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("native buzzer playback did not start")
+	}
+	manager.buzzerJobs <- buzzerMirrorJob{
+		frequencyHz: 0, durationMS: 0, observedAt: time.Now(), source: "board-a",
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("explicit buzzer stop did not cancel active source playback")
+	}
+	cancel()
+	manager.wait.Wait()
 }
 
 func TestNativeBuzzerFailuresAreStateTransitionsNotPerNoteLogSpam(t *testing.T) {

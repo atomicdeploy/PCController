@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	controller "pccontroller.local/controller"
@@ -82,7 +83,8 @@ func buzzerMirrorJobFor(config appconfig.BuzzerMirror, event controller.Event) (
 	}
 	frequencyHz, frequencyErr := strconv.Atoi(event.Metadata["frequency_hz"])
 	durationMS, durationErr := strconv.Atoi(event.Metadata["duration_ms"])
-	if frequencyErr != nil || durationErr != nil || frequencyHz < 0 || durationMS <= 0 {
+	if frequencyErr != nil || durationErr != nil || frequencyHz < 0 || durationMS < 0 ||
+		(durationMS == 0 && frequencyHz != 0) {
 		return buzzerMirrorJob{}, false
 	}
 	job := buzzerMirrorJob{
@@ -132,37 +134,78 @@ func (manager *Manager) dispatchBuzzerMirror(config appconfig.Config, event cont
 func (manager *Manager) buzzerMirrorLoop() {
 	defer manager.wait.Done()
 	timeline := newBuzzerPlaybackTimeline()
+	type activePlayback struct {
+		cancel context.CancelFunc
+		id     uint64
+	}
+	var playback sync.WaitGroup
+	var activeMu sync.Mutex
+	active := make(map[string]activePlayback)
+	var nextID uint64
+	defer func() {
+		activeMu.Lock()
+		for _, current := range active {
+			current.cancel()
+		}
+		activeMu.Unlock()
+		playback.Wait()
+	}()
 	for {
 		select {
 		case <-manager.ctx.Done():
 			return
 		case job := <-manager.buzzerJobs:
 			plan := timeline.plan(job, time.Now())
-			if delay := time.Until(plan.start); delay > 0 {
-				timer := time.NewTimer(delay)
-				select {
-				case <-manager.ctx.Done():
-					timer.Stop()
-					return
-				case <-timer.C:
+			nextID++
+			id := nextID
+			playback.Add(1)
+			go func() {
+				defer playback.Done()
+				if delay := time.Until(plan.start); delay > 0 {
+					timer := time.NewTimer(delay)
+					select {
+					case <-manager.ctx.Done():
+						timer.Stop()
+						return
+					case <-timer.C:
+					}
 				}
-			}
-			remaining, audible := plan.remaining(time.Now())
-			if !audible || job.frequencyHz == 0 {
-				continue
-			}
-			job.durationMS = int((remaining + time.Millisecond - 1) / time.Millisecond)
-			playContext, cancel := context.WithDeadline(manager.ctx, plan.end)
-			err := playNativeBuzzer(playContext, job)
-			cancel()
-			if errors.Is(err, context.DeadlineExceeded) && manager.ctx.Err() == nil {
-				// The absolute source deadline intentionally cuts off backend
-				// startup/command overhead instead of extending the note.
-				err = nil
-			}
-			if manager.ctx.Err() == nil {
-				manager.recordNativeBuzzerResult(err)
-			}
+
+				// Each pushed state supersedes the prior physical state from the
+				// same board. This makes explicit stop/pause frames cancel a host
+				// tone immediately at their source timestamp.
+				activeMu.Lock()
+				if previous, ok := active[job.source]; ok {
+					previous.cancel()
+					delete(active, job.source)
+				}
+				remaining, audible := plan.remaining(time.Now())
+				if !audible || job.frequencyHz == 0 {
+					activeMu.Unlock()
+					return
+				}
+				job.durationMS = int((remaining + time.Millisecond - 1) / time.Millisecond)
+				playContext, cancel := context.WithDeadline(manager.ctx, plan.end)
+				active[job.source] = activePlayback{cancel: cancel, id: id}
+				activeMu.Unlock()
+
+				err := playNativeBuzzer(playContext, job)
+				cancel()
+				activeMu.Lock()
+				if current, ok := active[job.source]; ok && current.id == id {
+					delete(active, job.source)
+				}
+				activeMu.Unlock()
+				if (errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)) &&
+					manager.ctx.Err() == nil {
+					// Absolute deadlines and a newer source state intentionally cut
+					// off playback rather than extending or reporting a failure.
+					err = nil
+				}
+				if manager.ctx.Err() == nil {
+					manager.recordNativeBuzzerResult(err)
+				}
+			}()
 		}
 	}
 }
@@ -189,7 +232,7 @@ func (manager *Manager) recordNativeBuzzerResult(playbackErr error) {
 	}
 }
 
-func playNativeBuzzer(parent context.Context, job buzzerMirrorJob) error {
+var playNativeBuzzer = func(parent context.Context, job buzzerMirrorJob) error {
 	return pcspeaker.PlayConfigured(
 		parent, job.config.DriverDirectory, job.config.Backend,
 		job.config.Executable, job.frequencyHz, job.durationMS,
