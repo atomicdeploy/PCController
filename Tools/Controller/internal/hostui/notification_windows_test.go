@@ -75,9 +75,9 @@ func TestWindowsNotifierUsesBoundedNativeFallback(t *testing.T) {
 	notifier := newTestWindowsNotifier(t)
 	nativeErr := errors.New("WinRT unavailable")
 	notifier.deliver = func(context.Context, []byte, string) error { return nativeErr }
-	fallbackCalled := false
-	notifier.fallback = func(_ context.Context, notification Notification, reason error) error {
-		fallbackCalled = true
+	balloonCalled := false
+	notifier.balloon = func(_ context.Context, notification Notification, reason error) error {
+		balloonCalled = true
 		if notification.Title != "Test" || !errors.Is(reason, nativeErr) {
 			t.Fatalf("notification=%+v reason=%v", notification, reason)
 		}
@@ -87,8 +87,8 @@ func TestWindowsNotifierUsesBoundedNativeFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	status := notifier.Status()
-	if !fallbackCalled || status.Accepted != 1 || status.Backend != "task-dialog" || !status.Degraded {
-		t.Fatalf("fallback=%t status=%+v", fallbackCalled, status)
+	if !balloonCalled || status.Accepted != 1 || status.Backend != "legacy-balloon" || !status.Degraded || !status.Branded {
+		t.Fatalf("balloon=%t status=%+v", balloonCalled, status)
 	}
 	if status.LastFallback != nativeErr.Error() || status.LastError != "" {
 		t.Fatalf("status=%+v", status)
@@ -98,9 +98,10 @@ func TestWindowsNotifierUsesBoundedNativeFallback(t *testing.T) {
 func TestWindowsNotifierReportsBothNativeAndFallbackFailures(t *testing.T) {
 	notifier := newTestWindowsNotifier(t)
 	notifier.deliver = func(context.Context, []byte, string) error { return errors.New("native failed") }
-	notifier.fallback = func(context.Context, Notification, error) error { return errors.New("fallback failed") }
+	notifier.balloon = func(context.Context, Notification, error) error { return errors.New("balloon failed") }
+	notifier.dialog = func(context.Context, Notification, error) error { return errors.New("dialog failed") }
 	err := notifier.Notify(context.Background(), Notification{Title: "Test", Body: "Failure"})
-	if err == nil || !stringsContainAll(err.Error(), "native failed", "fallback failed") {
+	if err == nil || !stringsContainAll(err.Error(), "native failed", "balloon failed", "dialog failed") {
 		t.Fatalf("Notify error=%v", err)
 	}
 	if status := notifier.Status(); status.Available || status.Accepted != 0 || status.LastError == "" {
@@ -117,18 +118,33 @@ func stringsContainAll(value string, needles ...string) bool {
 	return true
 }
 
-func TestWindowsNotifierRefusesSilentUnbrandedToast(t *testing.T) {
+func TestWindowsNotifierUsesBrandedBalloonWhenLogoIsUnavailable(t *testing.T) {
 	notifier := newPlatformNotifier(NotifierOptions{
 		AppID: "PCController.Tests", LogoPath: filepath.Join(t.TempDir(), "missing.png"),
 	}).(*windowsNotifier)
 	delivered := false
 	notifier.deliver = func(context.Context, []byte, string) error { delivered = true; return nil }
-	notifier.fallback = func(context.Context, Notification, error) error { return nil }
+	notifier.balloon = func(context.Context, Notification, error) error { return nil }
 	if err := notifier.Notify(context.Background(), Notification{Title: "Test"}); err != nil {
 		t.Fatal(err)
 	}
 	status := notifier.Status()
-	if delivered || status.Branded || !status.Degraded || status.Backend != "task-dialog" {
+	if delivered || !status.Branded || !status.Degraded || status.Backend != "legacy-balloon" {
 		t.Fatalf("delivered=%t status=%+v", delivered, status)
+	}
+}
+
+func TestWindowsNotifierFallsBackFromBalloonToTaskDialog(t *testing.T) {
+	notifier := newTestWindowsNotifier(t)
+	notifier.deliver = func(context.Context, []byte, string) error { return errors.New("native failed") }
+	notifier.balloon = func(context.Context, Notification, error) error { return errors.New("balloon failed") }
+	dialogCalled := false
+	notifier.dialog = func(context.Context, Notification, error) error { dialogCalled = true; return nil }
+	if err := notifier.Notify(context.Background(), Notification{Title: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	status := notifier.Status()
+	if !dialogCalled || status.Branded || !status.Degraded || status.Backend != "task-dialog" {
+		t.Fatalf("dialog=%t status=%+v", dialogCalled, status)
 	}
 }
