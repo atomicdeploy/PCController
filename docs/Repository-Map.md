@@ -133,7 +133,7 @@ byte-tight layout remain predictable:
 |---|---|
 | `ProtocolContract.h`, `UartProtocol.*`, `ControllerEvents.*` | portable wire vocabulary; AVR framing, payloads, replies, and device events |
 | `EepromLayout.h`, `SettingsStore.*`, `RemoteLearningStore.*` | EEPROM layout, validated settings, RF records, and migrations |
-| `RelayController.*`, `MotionDoorPolicy.h`, `SafeResetController.*` | relay interlocks, motion/door decisions, safe reset behavior |
+| `RelayController.*`, `Core/MotionPolicy.h`, `MotionDoorPolicy.h`, `SafeResetController.*` | relay interlocks, shared persisted motion/door decision contract, AVR compatibility facade, safe reset behavior |
 | `PwmController.*`, `PwmExpanderDriver.*` | logical PWM ownership and optional PCA9685 transport |
 | `AddressableLeds.*`, `IlluminationController.*`, `StatusLedController.*` | strip, enclosure light, and status/effect rendering |
 | `CompactI2c.*`, `Ina219Sensor.*`, `SystemInputs.*`, `TemperatureRoles.h` | shared bus recovery, optional sensors, panel inputs, temperature roles |
