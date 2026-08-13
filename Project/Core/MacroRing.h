@@ -95,10 +95,9 @@ private:
 
   // This order is intentionally the previous AVR queue layout minus only the
   // UART reference. MacroQueue adds that reference before this object, keeping
-  // its static SRAM footprint exactly 157 bytes on ATmega328P.
+  // its static SRAM footprint bounded on ATmega328P.
   StatusEvent status_;
   uint8_t queue_[QueueSize];
-  uint32_t startedAtUs_;
   uint8_t head_;
   uint8_t used_;
   uint8_t options_;
@@ -106,7 +105,7 @@ private:
 };
 
 #if defined(__AVR__)
-static_assert(sizeof(MacroRing) == 155,
+static_assert(sizeof(MacroRing) == 151,
               "portable macro ring must preserve the AVR queue footprint");
 #endif
 
