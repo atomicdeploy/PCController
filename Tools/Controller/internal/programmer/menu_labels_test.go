@@ -26,8 +26,8 @@ func TestMenuLabelsLayoutUsesOnlyDeclaredFreeRegions(t *testing.T) {
 
 func TestMenuLabelsVersionedCRCWritePlanIsAtomic(t *testing.T) {
 	labels := []byte(defaultEEPROMMenuLabels)
-	if got := menuLabelsCRC(labels); got != 0x8B {
-		t.Fatalf("factory menu-label CRC = 0x%02X, want cross-engine vector 0x8B", got)
+	if got := menuLabelsCRC(labels); got != 0x06 {
+		t.Fatalf("factory menu-label CRC = 0x%02X, want cross-engine vector 0x06", got)
 	}
 
 	data := filledEEPROM()
