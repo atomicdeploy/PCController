@@ -695,6 +695,14 @@ the non-root graphical user and inherit `DISPLAY` or `WAYLAND_DISPLAY`; it does
 not search other users' sessions or use SSH. The TUI child attaches to the
 coordinator IPC endpoint and cannot become a second UART owner.
 
+Launch and registration are serialized per surface through the bounded
+registration wait, so a request cannot confirm a window started by another
+concurrent request. To prevent accidental window storms, the coordinator permits
+at most three new-window start attempts per surface in a rolling ten-second
+window; `ensure`/`focus` calls that reuse an existing instance do not consume
+that allowance. A limited request returns `effective=unavailable` with a
+rate-limit reason rather than invoking an OS launcher.
+
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded
 session uses `{"mode":"timer","timeout_ms":30000}` and continues accepting
@@ -809,6 +817,7 @@ All JSON endpoints share the IPC listener:
 | `DELETE /api/app/instances?id=...` | remove one instance report |
 | `POST /api/app/navigate` | navigate a page with optional target instance/surface |
 | `POST /api/app/action` | route a validated page/title/progress/OSC/command/lifecycle action with optional target instance/surface |
+| `POST /api/app/launch` | ensure, start, or focus the named TUI/WebUI surface without accepting process or shell input |
 | `GET /api/bridges` | configured peer names/protocols and live state |
 | `POST /api/bridges/call` | `peer` plus a nested JSON-RPC `request` |
 | `GET /api/artifacts/manifest` | artifact/default/current discovery and latest operation |

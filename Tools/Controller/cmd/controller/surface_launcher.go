@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
@@ -14,7 +15,16 @@ import (
 	"pccontroller.local/controller/internal/productidentity"
 )
 
-const surfaceRegistrationWait = 1500 * time.Millisecond
+const (
+	surfaceRegistrationWait     = 1500 * time.Millisecond
+	visibleSurfaceStartWindow   = 10 * time.Second
+	maximumVisibleSurfaceStarts = 3
+)
+
+type surfaceLaunchGate struct {
+	available    chan struct{}
+	recentStarts []time.Time
+}
 
 type visibleSurfaceSpec struct {
 	Surface     string
@@ -46,6 +56,8 @@ type namedSurfaceLauncher struct {
 	platform            visibleSurfacePlatform
 	registrationTimeout time.Duration
 	now                 func() time.Time
+	gatesMu             sync.Mutex
+	gates               map[string]*surfaceLaunchGate
 }
 
 func newNamedSurfaceLaunchCoordinator(
@@ -73,12 +85,20 @@ func (launcher *namedSurfaceLauncher) launch(
 	if err != nil {
 		return hostui.SurfaceLaunchResult{}, err
 	}
+	gate := launcher.surfaceGate(request.Surface)
+	select {
+	case <-ctx.Done():
+		return hostui.SurfaceLaunchResult{}, ctx.Err()
+	case <-gate.available:
+	}
+	defer func() { gate.available <- struct{}{} }()
+
 	before := launcher.instances.List()
 	existing, haveExisting := selectSurfaceInstance(before, request.Surface, request.Target)
 	if request.Target != "" && !haveExisting {
 		return unavailableSurfaceResult("target instance is not registered"), nil
 	}
-	if haveExisting && request.Page != "" {
+	if haveExisting && request.Page != "" && request.Mode != hostui.SurfaceLaunchLaunch {
 		if err := launcher.navigate(request.Page, existing.ID); err != nil {
 			return hostui.SurfaceLaunchResult{}, err
 		}
@@ -100,6 +120,9 @@ func (launcher *namedSurfaceLauncher) launch(
 		return surfaceProcessResult("focus-requested", focused, existing.ID, true), nil
 	}
 
+	if !gate.allowStart(launcher.now().UTC()) {
+		return unavailableSurfaceResult("surface launch rate limit reached; try again shortly"), nil
+	}
 	started := launcher.platform.Start(ctx, spec)
 	if !started.Accepted {
 		return surfaceProcessResult("unavailable", started, "", false), nil
@@ -116,6 +139,37 @@ func (launcher *namedSurfaceLauncher) launch(
 		result.Reason = "operating system accepted the launch; instance registration is pending"
 	}
 	return result, nil
+}
+
+func (launcher *namedSurfaceLauncher) surfaceGate(surface string) *surfaceLaunchGate {
+	launcher.gatesMu.Lock()
+	defer launcher.gatesMu.Unlock()
+	if launcher.gates == nil {
+		launcher.gates = make(map[string]*surfaceLaunchGate)
+	}
+	if gate := launcher.gates[surface]; gate != nil {
+		return gate
+	}
+	gate := &surfaceLaunchGate{available: make(chan struct{}, 1)}
+	gate.available <- struct{}{}
+	launcher.gates[surface] = gate
+	return gate
+}
+
+func (gate *surfaceLaunchGate) allowStart(now time.Time) bool {
+	cutoff := now.Add(-visibleSurfaceStartWindow)
+	starts := gate.recentStarts[:0]
+	for _, started := range gate.recentStarts {
+		if started.After(cutoff) {
+			starts = append(starts, started)
+		}
+	}
+	gate.recentStarts = starts
+	if len(gate.recentStarts) >= maximumVisibleSurfaceStarts {
+		return false
+	}
+	gate.recentStarts = append(gate.recentStarts, now)
+	return true
 }
 
 func (launcher *namedSurfaceLauncher) spec(
