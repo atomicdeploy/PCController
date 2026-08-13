@@ -23,10 +23,14 @@ import (
 )
 
 const (
-	MDNSService = "_pccontroller._tcp"
-	MDNSDomain  = "local."
-	SSDPType    = "urn:pccontroller-org:service:bridge:1"
-	ssdpAddress = "239.255.255.250:1900"
+	MDNSService            = "_pccontroller._tcp"
+	MDNSDomain             = "local."
+	SSDPType               = "urn:pccontroller-org:service:bridge:1"
+	WSDiscoveryType        = "urn:schemas-xmlsoap-org:ws:2005:04:discovery"
+	BroadcastPort          = 37889
+	NetBIOSNameServicePort = 137
+	ssdpAddress            = "239.255.255.250:1900"
+	wsDiscoveryAddress     = "239.255.255.250:3702"
 )
 
 type Instance struct {
@@ -41,13 +45,40 @@ type Instance struct {
 	SeenAt    time.Time `json:"seen_at"`
 }
 
+// Options selects the network discovery protocols. MDNS and DNSSD are the
+// same DNS-SD transport; DNSSD is retained as an explicit API name so callers
+// can describe their intent without losing compatibility with mDNS networks.
+type Options struct {
+	MDNS          bool
+	DNSSD         bool
+	SSDP          bool
+	UPnP          bool
+	WSDiscovery   bool
+	Broadcast     bool
+	NetBIOS       bool
+	BroadcastPort int
+}
+
+func (options Options) normalized() Options {
+	options.MDNS = options.MDNS || options.DNSSD
+	options.SSDP = options.SSDP || options.UPnP
+	if options.BroadcastPort == 0 {
+		options.BroadcastPort = BroadcastPort
+	}
+	return options
+}
+
 type Advertiser struct {
-	cancel  context.CancelFunc
-	done    chan struct{}
-	refresh chan struct{}
-	name    string
-	port    int
-	ssdp    bool
+	cancel        context.CancelFunc
+	done          chan struct{}
+	refresh       chan struct{}
+	name          string
+	port          int
+	ssdp          bool
+	wsDiscovery   bool
+	broadcast     bool
+	broadcastPort int
+	netbios       bool
 
 	mu     sync.RWMutex
 	closed bool
@@ -62,6 +93,17 @@ func Advertise(
 	mdnsEnabled, ssdpEnabled bool,
 	txt []string,
 ) (*Advertiser, error) {
+	return AdvertiseWithOptions(parent, name, port, Options{MDNS: mdnsEnabled, SSDP: ssdpEnabled}, txt)
+}
+
+func AdvertiseWithOptions(
+	parent context.Context,
+	name string,
+	port int,
+	options Options,
+	txt []string,
+) (*Advertiser, error) {
+	options = options.normalized()
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("discovery port %d is invalid", port)
 	}
@@ -73,9 +115,11 @@ func Advertise(
 	ctx, cancel := context.WithCancel(parent)
 	result := &Advertiser{
 		cancel: cancel, done: make(chan struct{}), refresh: make(chan struct{}, 1),
-		name: name, port: port, ssdp: ssdpEnabled, txt: append([]string(nil), txt...),
+		name: name, port: port, ssdp: options.SSDP, wsDiscovery: options.WSDiscovery,
+		broadcast: options.Broadcast, broadcastPort: options.BroadcastPort,
+		netbios: options.NetBIOS, txt: append([]string(nil), txt...),
 	}
-	if mdnsEnabled {
+	if options.MDNS {
 		server, err := zeroconf.Register(name, MDNSService, MDNSDomain, port, txt, nil)
 		if err != nil {
 			cancel()
@@ -85,11 +129,24 @@ func Advertise(
 	}
 	go func() {
 		defer close(result.done)
-		if ssdpEnabled {
-			runSSDPAdvertiser(ctx, result)
-			return
+		var wait sync.WaitGroup
+		if options.SSDP {
+			wait.Add(1)
+			go func() { defer wait.Done(); runSSDPAdvertiser(ctx, result) }()
 		}
-		<-ctx.Done()
+		if options.WSDiscovery {
+			wait.Add(1)
+			go func() { defer wait.Done(); runWSDiscoveryAdvertiser(ctx, result) }()
+		}
+		if options.Broadcast {
+			wait.Add(1)
+			go func() { defer wait.Done(); runBroadcastAdvertiser(ctx, result) }()
+		}
+		if options.NetBIOS {
+			wait.Add(1)
+			go func() { defer wait.Done(); runNetBIOSAdvertiser(ctx, result) }()
+		}
+		wait.Wait()
 	}()
 	return result, nil
 }
@@ -133,6 +190,8 @@ func (advertiser *Advertiser) UpdateText(txt []string) {
 	advertiser.txt = append(advertiser.txt[:0], txt...)
 	mdns := advertiser.mdns
 	ssdp := advertiser.ssdp
+	wsDiscovery := advertiser.wsDiscovery
+	broadcast := advertiser.broadcast
 	advertiser.mu.Unlock()
 	if mdns != nil {
 		mdns.SetText(txt)
@@ -142,6 +201,16 @@ func (advertiser *Advertiser) UpdateText(txt []string) {
 		case advertiser.refresh <- struct{}{}:
 		default:
 		}
+	}
+	if wsDiscovery || broadcast {
+		advertiser.signalRefresh()
+	}
+}
+
+func (advertiser *Advertiser) signalRefresh() {
+	select {
+	case advertiser.refresh <- struct{}{}:
+	default:
 	}
 }
 
@@ -200,6 +269,11 @@ func discoverySecretKey(key string) bool {
 }
 
 func Discover(ctx context.Context, useMDNS, useSSDP bool) ([]Instance, error) {
+	return DiscoverWithOptions(ctx, Options{MDNS: useMDNS, SSDP: useSSDP})
+}
+
+func DiscoverWithOptions(ctx context.Context, options Options) ([]Instance, error) {
+	options = options.normalized()
 	var mutex sync.Mutex
 	instances := make(map[string]Instance)
 	add := func(instance Instance) {
@@ -222,19 +296,31 @@ func Discover(ctx context.Context, useMDNS, useSSDP bool) ([]Instance, error) {
 		}
 		errorMu.Unlock()
 	}
-	if useMDNS {
+	if options.MDNS {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
 			recordError(browseMDNS(ctx, add))
 		}()
 	}
-	if useSSDP {
+	if options.SSDP {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
 			recordError(discoverSSDP(ctx, add))
 		}()
+	}
+	if options.WSDiscovery {
+		wait.Add(1)
+		go func() { defer wait.Done(); recordError(discoverWSDiscovery(ctx, add)) }()
+	}
+	if options.Broadcast {
+		wait.Add(1)
+		go func() { defer wait.Done(); recordError(discoverBroadcast(ctx, options.BroadcastPort, add)) }()
+	}
+	if options.NetBIOS {
+		wait.Add(1)
+		go func() { defer wait.Done(); recordError(discoverNetBIOS(ctx, add)) }()
 	}
 	wait.Wait()
 	result := make([]Instance, 0, len(instances))
@@ -337,7 +423,7 @@ func respondSSDP(
 			"HTTP/1.1 200 OK",
 			"CACHE-CONTROL: max-age=60",
 			"EXT:",
-			"LOCATION: http://" + net.JoinHostPort(locationHost, strconv.Itoa(port)) + "/healthz",
+			"LOCATION: http://" + net.JoinHostPort(locationHost, strconv.Itoa(port)) + "/upnp/device.xml",
 			"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
 			"ST: " + SSDPType,
 			"USN: " + ssdpUSN(name, port) + "::" + SSDPType,

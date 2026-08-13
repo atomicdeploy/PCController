@@ -19,12 +19,13 @@ import (
 	"github.com/coder/websocket"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/ipcjson"
 )
 
 func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	if len(args) == 0 {
-		return errors.New("usage: controller network edge-enable|edge-disable|peer-add|peer-remove|probe|status")
+		return errors.New("usage: controller network edge-enable|edge-disable|peer-add|peer-remove|probe|discover|status")
 	}
 	switch strings.ToLower(args[0]) {
 	case "status":
@@ -94,7 +95,12 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 				Programming: true, BridgeCalls: true, Integrations: true,
 			}
 			config.Integrations.Discovery.MDNSEnabled = true
+			config.Integrations.Discovery.DNSSDenabled = true
 			config.Integrations.Discovery.SSDPEnabled = true
+			config.Integrations.Discovery.UPnPEnabled = true
+			config.Integrations.Discovery.WSDiscoveryEnabled = true
+			config.Integrations.Discovery.BroadcastEnabled = true
+			config.Integrations.Discovery.NetBIOSEnabled = true
 			config.Integrations.Discovery.InstanceName = strings.TrimSpace(*instance)
 			return nil
 		})
@@ -104,7 +110,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		}
 		fmt.Fprintln(stdout, "LAN edge mode enabled with an OS-vault bearer token (value hidden).")
 		fmt.Fprintln(stdout, "IPC/API/WebSocket:", *listen)
-		fmt.Fprintln(stdout, "Discovery: mDNS + SSDP as", *instance)
+		fmt.Fprintln(stdout, "Discovery: DNS-SD/mDNS + SSDP/UPnP + WS-Discovery + UDP broadcast + NetBIOS as", *instance)
 		fmt.Fprintln(stdout, "Remote programming is enabled; shutdown, virtual-key, and power-action capabilities remain disabled.")
 		fmt.Fprintln(stdout, "Restart the controller host after applying the required private-profile firewall rule.")
 		return nil
@@ -205,6 +211,46 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return err
 		}
 		return nil
+	case "discover":
+		flags := flag.NewFlagSet("network discover", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios", "comma-separated protocols")
+		timeout := flags.Duration("timeout", 3*time.Second, "discovery timeout")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || *timeout < 100*time.Millisecond || *timeout > 30*time.Second {
+			return errors.New("usage: controller network discover [--protocols LIST] [--timeout 100ms..30s]")
+		}
+		options := discovery.Options{}
+		for _, protocol := range strings.Split(*protocols, ",") {
+			switch strings.ToLower(strings.TrimSpace(protocol)) {
+			case "mdns", "dns-sd", "dnssd":
+				options.MDNS, options.DNSSD = true, true
+			case "ssdp":
+				options.SSDP = true
+			case "upnp":
+				options.SSDP, options.UPnP = true, true
+			case "ws-discovery", "wsd":
+				options.WSDiscovery = true
+			case "broadcast", "udp":
+				options.Broadcast = true
+			case "netbios", "nbns":
+				options.NetBIOS = true
+			case "":
+			default:
+				return fmt.Errorf("unsupported discovery protocol %q", protocol)
+			}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		defer cancel()
+		instances, err := discovery.DiscoverWithOptions(ctx, options)
+		if err != nil {
+			return err
+		}
+		encoded, _ := json.MarshalIndent(instances, "", "  ")
+		fmt.Fprintln(stdout, string(encoded))
+		return nil
 	case "edge-disable", "disable-edge":
 		if len(args) != 1 {
 			return errors.New("usage: controller network edge-disable")
@@ -228,7 +274,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		fmt.Fprintln(stdout, "LAN edge mode disabled; IPC returned to authenticated-safe loopback defaults.")
 		return nil
 	default:
-		return errors.New("usage: controller network edge-enable|edge-disable|peer-add|peer-remove|probe|status")
+		return errors.New("usage: controller network edge-enable|edge-disable|peer-add|peer-remove|probe|discover|status")
 	}
 }
 

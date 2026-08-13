@@ -91,7 +91,8 @@ notifications, discovery, diagnostics, and desktop actions. Optional OS
 enrichment stays behind those adapters and an unavailable capability is
 reported explicitly.
 
-Optional mDNS and SSDP advertise the embedded WebUI/API locations, safe app
+Optional DNS-SD/mDNS, SSDP/UPnP, WS-Discovery, UDP broadcast, and NetBIOS host
+probes advertise or locate the embedded WebUI/API locations, safe app
 presentation values, and bounded current board values. Metadata refreshes are
 coalesced from pushed events and never poll the board; secret-like TXT/header
 keys are discarded before either multicast protocol is updated.
@@ -709,7 +710,8 @@ bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:87
 bin\controller.exe network probe --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --origin http://David-PC:8787
 ```
 
-The edge command enables mDNS/SSDP and the selected IPC, REST, WebSocket,
+The edge command enables DNS-SD/mDNS, SSDP/UPnP, WS-Discovery, UDP broadcast,
+NetBIOS probing, and the selected IPC, REST, WebSocket,
 Socket.IO, programming, and bridge capabilities. Shutdown, virtual-key, and
 host power-action access remain disabled. A LocalSubnet-only firewall rule is
 still an operating-system deployment step.
