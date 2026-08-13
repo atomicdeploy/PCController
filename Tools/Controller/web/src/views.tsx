@@ -217,8 +217,8 @@ export function DashboardView(props: SharedViewProps) {
       <section className={`hero-panel${snapshot.connected ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
           <div className="eyebrow">{copy('Controller', 'کنترلر')} · {snapshot.connection_state}</div>
-          <h2><a href="#/dashboard">{snapshot.connected ? snapshot.hello.name || appTitle : t('noHardware')}</a></h2>
-          <p>{snapshot.connected ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : snapshot.connection_reason || t('noHardware')}</p>
+          <h2><a href={snapshot.connected ? '#/dashboard' : '#/settings'}>{snapshot.connected ? snapshot.hello.name || appTitle : t('noHardware')}</a></h2>
+          <p>{snapshot.connected ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : snapshot.connection_reason || t('noHardwareDetail')}</p>
         </div>
         <div className={`hero-panel__readout${snapshot.have_status ? '' : ' is-empty'}`} dir="ltr">
           <span>{copy('BUILD', 'ساخت')}</span><strong>{hash}</strong>

@@ -5,6 +5,7 @@ import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } f
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
+import { translator } from './i18n'
 import { WorkbenchView } from './workbench'
 import {
   ControlsView,
@@ -100,6 +101,14 @@ describe('offline and settings UI contracts', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} />)
     expect(markup).not.toContain('Telemetry history')
     expect(markup).not.toMatch(/\bLive\b/)
+  })
+
+  it('routes an unauthenticated dashboard directly to secure session settings', () => {
+    const markup = renderToStaticMarkup(<DashboardView {...shared()} t={translator('en')} />)
+    expect(markup).toContain('href="#/settings"')
+    expect(markup).toContain('Authentication required — open Settings to connect securely.')
+    expect(markup).toContain('Apply the edge session access token')
+    expect(markup).not.toContain('The dashboard is ready')
   })
 
   it('hides unavailable peripherals and their invalid readings', () => {
