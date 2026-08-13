@@ -13,11 +13,7 @@ type EEPROMByteWrite struct {
 }
 
 func menuLabelsCRC(labels []byte) byte {
-	crc := EEPROMMenuLabelsFormatMarker
-	for _, label := range labels {
-		crc ^= label
-	}
-	return crc
+	return avrCRC8(append([]byte{EEPROMMenuLabelsFormatMarker}, labels...))
 }
 
 func validMenuLabelByte(value byte) bool {
@@ -78,9 +74,9 @@ func applyMenuLabelsWritePlan(data []byte, labels []byte) error {
 	return nil
 }
 
-// validMenuLabelsRecord is deliberately byte-for-byte equivalent to the AVR
-// reader: versioned final commit marker, printable payload, then CRC-8/ATM
-// seeded with that format marker and applied to all fixed-width label bytes.
+// validMenuLabelsRecord follows the AVR commit and CRC-8/ATM contract. The
+// host additionally rejects non-printable payload bytes before provisioning,
+// while the AVR validates the same versioned marker and CRC byte sequence.
 func validMenuLabelsRecord(data []byte) bool {
 	if uint32(len(data)) < EEPROMMenuLabelsEnd ||
 		data[EEPROMMenuLabelsCommitAddress] != EEPROMMenuLabelsFormatMarker {

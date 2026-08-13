@@ -20,10 +20,20 @@ void require(bool condition, const char *message) {
   }
 }
 
+std::uint8_t crc8Update(std::uint8_t crc, std::uint8_t value) {
+	crc ^= value;
+	for (std::uint8_t bit = 0; bit < 8; ++bit) {
+		crc = (crc & 0x80U) != 0
+		          ? static_cast<std::uint8_t>((crc << 1U) ^ 0x07U)
+		          : static_cast<std::uint8_t>(crc << 1U);
+	}
+	return crc;
+}
+
 std::uint8_t labelCrc(const char *data, std::uint8_t length) {
-	std::uint8_t crc = EepromLayout::MenuLabelsFormatMarker;
+	std::uint8_t crc = crc8Update(0, EepromLayout::MenuLabelsFormatMarker);
 	while (length-- != 0) {
-		crc ^= static_cast<std::uint8_t>(*data++);
+		crc = crc8Update(crc, static_cast<std::uint8_t>(*data++));
 	}
 	return crc;
 }
@@ -75,7 +85,7 @@ void testVersionedRecordAndTornWriteStayUnavailable() {
 	EepromMenuLabels::begin();
 	require(EepromMenuLabels::available(),
 			"factory EEPROM label block did not validate");
-	require(labelCrc(kFactoryLabels, EepromLayout::MenuLabelBytes) == 0x8B,
+	require(labelCrc(kFactoryLabels, EepromLayout::MenuLabelBytes) == 0x0A,
 			"factory CRC vector drifted from the Go-compatible contract");
 
 	char replacement[EepromLayout::MenuLabelBytes + 1] = {};
@@ -138,23 +148,6 @@ void testCrcRejectsPrintableXorCollisions() {
 	require(!EepromMenuLabels::available(),
 			"two-cell equal-delta corruption became valid");
 
-	char nonPrintable[EepromLayout::MenuLabelBytes + 1] = {};
-	for (std::uint8_t index = 0; index < EepromLayout::MenuLabelBytes;
-		 ++index) {
-		nonPrintable[index] = kFactoryLabels[index];
-	}
-	nonPrintable[7] = '\n';
-	beginLabelWrite(nonPrintable);
-	commitLabelWrite();
-	EepromMenuLabels::begin();
-	require(EepromMenuLabels::available(),
-			"CRC-valid record lost its integrity state");
-	require(EepromMenuLabels::read(1, 3) == '-',
-			"non-printable record cell did not use safe fallback");
-	char label[EepromMenuLabels::LabelWidth] = {};
-	EepromMenuLabels::copy(1, label);
-	require(label[3] == '-',
-			"copy/read disagreed on non-printable cell fallback");
 }
 
 void testFactoryBlockReadsEveryPackedCell() {

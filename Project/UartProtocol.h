@@ -47,6 +47,9 @@ public:
   uint8_t *framePayloadScratch();
 
   static uint8_t crc8(const uint8_t *data, uint8_t length);
+  // One-byte form of the same CRC-8/ATM contract. EEPROM readers use it to
+  // validate bytes in place without a second record-sized RAM buffer.
+  static uint8_t crc8Update(uint8_t crc, uint8_t value);
 
 private:
   static constexpr uint8_t RawOverhead = WireContract::RawFrameOverhead;

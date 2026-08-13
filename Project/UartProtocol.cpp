@@ -105,6 +105,10 @@ uint8_t UartProtocol::crc8(const uint8_t *data, uint8_t length) {
   return WireCodec::crc8(data, length);
 }
 
+uint8_t UartProtocol::crc8Update(uint8_t crc, uint8_t value) {
+  return WireCodec::crc8Update(crc, value);
+}
+
 bool UartProtocol::writeCobs(const uint8_t *input, uint8_t length) {
   static_assert(MaximumRaw < 254,
                 "Streaming COBS assumes every frame fits in one code block");

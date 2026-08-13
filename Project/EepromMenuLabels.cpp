@@ -7,26 +7,24 @@
 #include <EEPROM.h>
 
 #include "EepromLayout.h"
+#include "UartProtocol.h"
 namespace EepromMenuLabels {
 namespace {
 
 bool labelsAvailable = false;
 
-// The 7-segment renderer accepts these printable ASCII bytes. A per-cell check
-// keeps a checksum collision from rendering erased/control EEPROM bytes.
-bool printable(uint8_t value) { return value >= ' ' && value <= '~'; }
-
 } // namespace
 
 void begin() {
   const uint8_t commit = EEPROM.read(EepromLayout::MenuLabelsCommitAddress);
-  uint8_t checksum = EepromLayout::MenuLabelsFormatMarker;
+  uint8_t crc = ControllerProtocol::UartProtocol::crc8Update(
+      0, EepromLayout::MenuLabelsFormatMarker);
   for (uint8_t index = 0; index < EepromLayout::MenuLabelBytes; ++index) {
     const uint8_t value = EEPROM.read(EepromLayout::MenuLabelsAddress + index);
-    checksum ^= value;
+    crc = ControllerProtocol::UartProtocol::crc8Update(crc, value);
   }
   labelsAvailable = commit == EepromLayout::MenuLabelsFormatMarker &&
-                    checksum == EEPROM.read(EepromLayout::MenuLabelsCrcAddress);
+                    crc == EEPROM.read(EepromLayout::MenuLabelsCrcAddress);
 }
 
 bool available() { return labelsAvailable; }
@@ -40,9 +38,8 @@ void copy(uint8_t page, char output[LabelWidth]) {
   }
   const uint8_t offset = static_cast<uint8_t>(page << 2);
   for (uint8_t character = 0; character < LabelWidth; ++character) {
-    const uint8_t value = EEPROM.read(EepromLayout::MenuLabelsAddress +
-                                      offset + character);
-    output[character] = printable(value) ? static_cast<char>(value) : '-';
+    output[character] = static_cast<char>(EEPROM.read(
+        EepromLayout::MenuLabelsAddress + offset + character));
   }
 }
 
@@ -51,9 +48,9 @@ char read(uint8_t page, uint8_t character) {
       character >= LabelWidth) {
     return '-';
   }
-  const uint8_t value = EEPROM.read(EepromLayout::MenuLabelsAddress +
-                                    static_cast<uint8_t>((page << 2) + character));
-  return printable(value) ? static_cast<char>(value) : '-';
+  return static_cast<char>(EEPROM.read(
+      EepromLayout::MenuLabelsAddress +
+      static_cast<uint8_t>((page << 2) + character)));
 }
 
 } // namespace EepromMenuLabels

@@ -15,13 +15,13 @@ constexpr uint8_t LabelWidth = 4;
 // It never writes EEPROM and leaves the fallback active when validation fails.
 void begin();
 
-// Indicates that the format marker and CRC validate. read()/copy() still
-// sanitize every cell, so even a deliberately CRC-correct control byte cannot
-// reach the display. The host writer rejects such bytes before provisioning.
+// Indicates that the format marker and CRC validate. The canonical host writer
+// rejects non-printable cells before provisioning; a failed record exposes only
+// the four-dash fallback instead of arbitrary EEPROM bytes.
 bool available();
 
-// Copies one four-character label into caller-owned display storage. Missing,
-// corrupt, out-of-range, or non-printable cells become dashes without a cache.
+// Copies one four-character label into caller-owned display storage. A missing,
+// corrupt, or out-of-range record becomes dashes without an SRAM cache.
 void copy(uint8_t page, char output[LabelWidth]);
 
 // Returns one display-safe label byte or '-' when the block is unavailable or

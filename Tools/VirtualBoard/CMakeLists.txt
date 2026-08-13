@@ -248,6 +248,7 @@ if(BUILD_TESTING)
   add_executable(firmware_eeprom_menu_labels_tests
     tests/eeprom_menu_labels_test.cpp
     ../../Project/EepromMenuLabels.cpp
+    ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_eeprom_menu_labels_tests PRIVATE
     tests/arduino_mock

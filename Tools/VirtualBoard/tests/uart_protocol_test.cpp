@@ -184,6 +184,18 @@ void testMacroScratchCannotCorruptSplitSerialFrame() {
           "macro scratch corrupted a split serial frame");
 }
 
+void testStreamingCRCMatchesBatchContract() {
+  const std::vector<std::uint8_t> bytes{0xA1, 'd', 'o', 'o', 'r', 0x00,
+                                        0xFF, 0x21};
+  std::uint8_t streaming = 0;
+  for (const auto value : bytes) {
+    streaming = UartProtocol::crc8Update(streaming, value);
+  }
+  require(streaming == UartProtocol::crc8(
+                           bytes.data(), static_cast<std::uint8_t>(bytes.size())),
+          "streaming CRC-8 diverged from the canonical batch checksum");
+}
+
 } // namespace
 
 int main() {
@@ -192,6 +204,7 @@ int main() {
     testAdvisoryRevisionDoesNotBlockSemanticFrames();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
+    testStreamingCRCMatchesBatchContract();
     std::cout << "firmware_uart_protocol_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {
