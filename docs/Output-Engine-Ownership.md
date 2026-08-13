@@ -44,3 +44,24 @@ compact opcode after SRAM/flash measurement.
   separate design item because commands need strict allow-listing, bounded
   execution time, atomic storage, and a recovery path before they are safe to
   run before HELLO.
+
+## Front-panel production profile
+
+The active local directory is `door`, `VOLT`, `CURR`, `tLED`, `tBT`, `LItE`,
+`bEEP`, `rELY`, `KEY`, and `LErn`.
+
+- `rELY` is the only relay page. K4 enters the editor, K3/K4 select R1..R8,
+  and the value page applies Off/On. The former `r5-8` page is retired.
+- `KEY` is the only motion/key page. Its four physical inputs map to Side A Up,
+  Side A Down, Side B Up, and Side B Down. The former `MOVE` page is retired.
+- The raw `PWM` and `uPWM` editors are one disabled production surface; direct
+  host PWM controls remain available.
+- `LItE` keeps Off/Auto/On and brightness editing. With a host present, edits
+  remain live drafts for the host Save/Discard flow. Without a host they are
+  persisted automatically.
+- `bEEP` always provides K3 mute and K4 unmute. Extended local settings remain
+  host-owned.
+- `LErn` is visible and starts indefinite multi-code learning only while the
+  host is connected.
+- BT Audio LED detection is disabled in this profile; raw input cannot affect
+  telemetry or RGB policy.
