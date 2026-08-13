@@ -9,22 +9,27 @@ import (
 )
 
 const (
-	PCControllerEEPROMBytes        uint32 = generatedBoardEEPROMBytes
-	EEPROMSettingsAddress          uint32 = 32
-	EEPROMSettingsValueBytes       uint32 = 40
-	EEPROMSettingsRecordBytes      uint32 = EEPROMSettingsValueBytes + 1
-	EEPROMRemoteHeaderAddress      uint32 = 80
-	EEPROMRemoteEntriesAddress     uint32 = 84
-	EEPROMRemoteRecordSize         byte   = 12
-	EEPROMRemoteCapacity           byte   = 20
-	EEPROMRemoteRecordBytes        uint32 = 12
-	EEPROMResetJournalAddress      uint32 = 336
-	EEPROMResetJournalSlots        byte   = 64
-	EEPROMResetJournalRecordSize   uint32 = 6
-	EEPROMStatusProfileAddress     uint32 = EEPROMResetJournalAddress + uint32(EEPROMResetJournalSlots)*EEPROMResetJournalRecordSize
-	EEPROMStatusProfileCount       byte   = 19
-	EEPROMStatusProfileBytes       uint32 = 12
-	EEPROMStatusProfileRecordBytes uint32 = EEPROMStatusProfileBytes + 1
+	PCControllerEEPROMBytes         uint32 = generatedBoardEEPROMBytes
+	EEPROMSettingsAddress           uint32 = 32
+	EEPROMSettingsValueBytes        uint32 = 40
+	EEPROMSettingsRecordBytes       uint32 = EEPROMSettingsValueBytes + 1
+	EEPROMRemoteHeaderAddress       uint32 = 80
+	EEPROMRemoteEntriesAddress      uint32 = 84
+	EEPROMRemoteRecordSize          byte   = 12
+	EEPROMRemoteCapacity            byte   = 20
+	EEPROMRemoteRecordBytes         uint32 = 12
+	EEPROMResetJournalAddress       uint32 = 336
+	EEPROMResetJournalSlots         byte   = 64
+	EEPROMResetJournalRecordSize    uint32 = 6
+	EEPROMStatusProfileAddress      uint32 = EEPROMResetJournalAddress + uint32(EEPROMResetJournalSlots)*EEPROMResetJournalRecordSize
+	EEPROMStatusProfileCount        byte   = 19
+	EEPROMStatusProfileBytes        uint32 = 12
+	EEPROMStatusProfileRecordBytes  uint32 = EEPROMStatusProfileBytes + 1
+	EEPROMMenuLabelsAddress         uint32 = EEPROMStatusProfileAddress + uint32(EEPROMStatusProfileCount)*EEPROMStatusProfileRecordBytes
+	EEPROMMenuLabelCount            byte   = 14
+	EEPROMMenuLabelWidth            uint32 = 4
+	EEPROMMenuLabelBytes            uint32 = uint32(EEPROMMenuLabelCount) * EEPROMMenuLabelWidth
+	EEPROMMenuLabelsChecksumAddress uint32 = EEPROMMenuLabelsAddress + EEPROMMenuLabelBytes
 )
 
 type OfflineEEPROMDecode struct {
@@ -462,4 +467,15 @@ func avrCRC8(data []byte) byte {
 		}
 	}
 	return crc
+}
+
+// xorChecksum matches the compact AVR menu-label integrity byte. It detects
+// erased storage and every one-bit/cell corruption without carrying the much
+// larger generic CRC loop in this flash-constrained optional feature.
+func xorChecksum(data []byte) byte {
+	var checksum byte
+	for _, value := range data {
+		checksum ^= value
+	}
+	return checksum
 }

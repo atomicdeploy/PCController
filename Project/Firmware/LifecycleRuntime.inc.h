@@ -26,6 +26,9 @@ static inline __attribute__((always_inline)) void initializeController() {
   buzzer.begin();
   AddressableLeds::begin();
   loadIlluminationSettings();
+#if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
+  EepromMenuLabels::begin();
+#endif
   const ControllerSettings &settings = settingsStore.values();
   const bool programming = settings.programmingMode();
   menuPage = settings.defaultMenuPage;
