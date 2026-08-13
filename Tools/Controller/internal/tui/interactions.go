@@ -612,6 +612,7 @@ func (model *Model) switchPage(page Page) {
 		page += pageCount
 	}
 	page %= pageCount
+	changed := model.page != page
 	model.page = page
 	model.cursor = 0
 	model.pageOffset = 0
@@ -629,6 +630,19 @@ func (model *Model) switchPage(page Page) {
 	if model.remote != nil && model.remote.SetLiveInterval != nil {
 		model.remote.SetLiveInterval(model.remoteLiveInterval())
 	}
+	if changed && model.navigationSync && model.commitNavigation != nil &&
+		!model.suppressNavigationCommit {
+		model.commitNavigation(pageInstanceName(page))
+	}
+}
+
+// applySynchronizedPage renders a coordinator-owned page without echoing it
+// back as a fresh intent. Presence/title reporting still runs normally.
+func (model *Model) applySynchronizedPage(page Page) {
+	previous := model.suppressNavigationCommit
+	model.suppressNavigationCommit = true
+	model.switchPage(page)
+	model.suppressNavigationCommit = previous
 }
 
 func pageInstanceName(page Page) string {

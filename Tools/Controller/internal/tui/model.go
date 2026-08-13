@@ -155,10 +155,15 @@ type Model struct {
 	appActions               <-chan hostui.AppAction
 	instanceID               string
 	navigationSync           bool
+	setNavigationSync        func(bool)
+	navigationIdentity       func() (string, uint64)
 	navigationGroup          string
 	navigationCursor         hostui.NavigationCursor
 	reportPage               func(string) error
 	reportTerminal           func(page, title string) error
+	reportTerminalAsync      func(page, title string)
+	commitNavigation         func(page string)
+	suppressNavigationCommit bool
 	writeOSC                 func(string) error
 	terminalTitleOverride    string
 	terminalTitleDirty       bool
@@ -447,11 +452,15 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		integrations: options.Integrations, notifier: options.Notifier,
 		networkDiscovery: options.NetworkDiscovery, openNetwork: options.OpenNetwork,
 		appActions: options.AppActions, instanceID: options.InstanceID,
-		navigationSync:  options.NavigationSync,
-		navigationGroup: strings.ToLower(strings.TrimSpace(options.NavigationGroup)),
-		reportPage:      options.ReportPage, reportTerminal: options.ReportTerminal,
-		writeOSC:  options.WriteOSC,
-		hostMenus: options.HostMenus, pushHostPanel: options.PushHostPanel,
+		navigationSync:     options.NavigationSync,
+		setNavigationSync:  options.SetNavigationSync,
+		navigationIdentity: options.NavigationIdentity,
+		navigationGroup:    strings.ToLower(strings.TrimSpace(options.NavigationGroup)),
+		reportPage:         options.ReportPage, reportTerminal: options.ReportTerminal,
+		reportTerminalAsync: options.ReportTerminalAsync,
+		commitNavigation:    options.CommitNavigation,
+		writeOSC:            options.WriteOSC,
+		hostMenus:           options.HostMenus, pushHostPanel: options.PushHostPanel,
 		releaseHostPanel: options.ReleaseHostPanel,
 		prefs:            prefs, preview: options.Preview, welcome: welcome,
 		pwmDragChannel:   -1,
@@ -572,14 +581,18 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				if !model.navigationSync {
 					break
 				}
-				pageName, accepted := model.navigationCursor.Accept(action, model.navigationGroup)
+				pageName, accepted := model.acceptNavigationAction(action)
 				if !accepted {
 					break
 				}
 				action.Value = pageName
 			}
 			if page, ok := pageForName(action.Value); ok {
-				model.switchPage(page)
+				if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+					model.applySynchronizedPage(page)
+				} else {
+					model.switchPage(page)
+				}
 				model.setNotice("Opened " + pageDefinitions[page].Title)
 			} else {
 				model.appendLog("warn", "unknown app page: "+action.Value)
@@ -777,9 +790,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				Kind: event.Kind, Value: event.Metadata["page"], Source: event.Source,
 				Target: event.Metadata["target_instance"], Metadata: event.Metadata,
 			}
-			if pageName, accepted := model.navigationCursor.Accept(action, model.navigationGroup); accepted {
+			if pageName, accepted := model.acceptNavigationAction(action); accepted {
 				if page, ok := pageForName(pageName); ok {
-					model.switchPage(page)
+					model.applySynchronizedPage(page)
 				}
 			}
 		}

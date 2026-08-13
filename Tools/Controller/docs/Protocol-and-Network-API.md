@@ -566,10 +566,11 @@ request error.
 | `controller.app.instances` | `{}` | list live UI/automation instances and bounded non-secret state |
 | `controller.app.bridge` | `{}` | query the original coordinator bridge instance, including bounded process self-information |
 | `controller.app.instance.get` | `id` | query one exact live instance |
-| `controller.app.instance.report` | `id`, `surface`, `page`, optional `state`, `lease_seconds`, `values`, `self` | create or refresh an ephemeral instance report; TUI followers use bounded navigation mode/group/epoch/revision values |
+| `controller.app.instance.report` | `id`, `surface`, `page`, optional `state`, `lease_seconds`, `values`, `self` | create or refresh an ephemeral instance report; WebUI/TUI followers use bounded navigation mode/group/epoch/revision values |
 | `controller.app.instance.remove` | `id` | remove one instance report immediately |
 | `controller.app.navigate` | `page`, optional `target` | navigate `*`, a surface such as `webui`/`tui`, or one exact instance ID |
 | `controller.app.launch` | `surface`, optional `mode`, `target`, `page`, `idempotency_key` | ensure, launch, or focus only the named `tui` or `webui`; reports OS acceptance separately from live instance confirmation |
+| `controller.app.navigation.commit` | `group`, `source`, `page`, `operation_id` | commit a follower group's canonical page and return its epoch, revision, correlated operation ID, and ordered deliveries |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
 | `controller.history.timeline` | optional `since`, `limit` | durable important-event timeline |
 | `controller.os.facts.catalog`, `controller.host.facts.catalog` | `{}` | fixed read-only Windows profile descriptors, columns, and row limits |
@@ -597,22 +598,24 @@ request error.
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
 
-Full TUI instances follow the ephemeral `default` navigation group unless that
-process starts with navigation synchronization disabled. A follower reports
-`navigation_sync=follow`, `navigation_group`, a random process-session
-`navigation_epoch`, and a monotonically increasing `navigation_revision` in
-its instance values. The primary keeps one in-memory canonical page, epoch, and
-revision per live group. The first live follower seeds an empty group; later
-followers receive an exact-instance catch-up, and a fresh local page report is
-fanned out only to the other live followers. Receiver acknowledgements of the
-canonical page are no-ops. When the last lease leaves or expires the group is
-discarded, so active pages are never persisted as host configuration.
+Full TUI instances and each browser tab follow the ephemeral `default`
+navigation group unless that client opts out. Browser opt-out is scoped to the
+current tab; it is not host configuration and does not affect other clients.
+A lease reports only
+presence, capabilities, and a process-session epoch/revision; it never mutates
+the canonical page. A local page change calls `controller.app.navigation.commit`
+with a client operation ID. The primary commits exactly once, returns
+`group_epoch`, `revision`, `operation_id`, and canonical page, then publishes
+the same ordered action to the source and every live follower. A late title or
+lease callback is therefore unable to roll a source back. When the last lease
+leaves or expires the group is discarded, so active pages are never persisted
+as host configuration.
 After an event-session reconnect a follower adds
 `navigation_catch_up=true`; the coordinator then re-sends the canonical page
 instead of treating the client's potentially stale page as new intent.
 
 Coordinator navigation actions carry `navigation_sync=group`, group, epoch,
-revision, and source-instance metadata. Clients reject duplicate, older, or
+revision, source-instance, and operation-ID metadata. Clients reject duplicate, older, or
 foreign-epoch deliveries until an authoritative primary reconnect resets their
 acceptance cursor. Generic `controller.app.action` and `/api/app/action`
 callers cannot supply these coordinator-owned fields. Authenticated remote

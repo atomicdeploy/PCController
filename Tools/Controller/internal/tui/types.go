@@ -210,32 +210,41 @@ type RemoteBackend struct {
 }
 
 type Options struct {
-	UIConfig         func() appconfig.UI
-	SaveUI           func(appconfig.UI) error
-	ApplyTUIConsole  func(appconfig.TUIConsole) error
-	HostIntegrations func() appconfig.Integrations
-	SaveIntegrations func(appconfig.Integrations) error
-	BuzzerRuntime    func() appconfig.BuzzerRuntimeStatus
-	RFConfig         func() appconfig.RFConfig
-	SaveRF           func(appconfig.RFConfig) error
-	RFFetch          func(context.Context) ([]native.RFEntry, error)
-	RFApplyOrder     func(context.Context, []native.RFEntry) error
-	RFReplaceSupport func() control.RFReplaceSupport
-	RFProbeReplace   func(context.Context) (control.RFReplaceSupport, error)
-	HostMenus        *hostmenu.Manager
-	PushHostPanel    func(hostmenu.Snapshot) error
-	ReleaseHostPanel func() error
-	FrontPanel       func() FrontPanelState
-	FrontPanelKey    func(key int, phase string) error
-	MirrorLCD        func(line1, line2 string) error
-	Integrations     func() hostui.IntegrationStatus
-	Notifier         hostui.Notifier
-	AppActions       <-chan hostui.AppAction
-	InstanceID       string
-	NavigationSync   bool
-	NavigationGroup  string
-	ReportPage       func(string) error
-	ReportTerminal   func(page, title string) error
+	UIConfig           func() appconfig.UI
+	SaveUI             func(appconfig.UI) error
+	ApplyTUIConsole    func(appconfig.TUIConsole) error
+	HostIntegrations   func() appconfig.Integrations
+	SaveIntegrations   func(appconfig.Integrations) error
+	BuzzerRuntime      func() appconfig.BuzzerRuntimeStatus
+	RFConfig           func() appconfig.RFConfig
+	SaveRF             func(appconfig.RFConfig) error
+	RFFetch            func(context.Context) ([]native.RFEntry, error)
+	RFApplyOrder       func(context.Context, []native.RFEntry) error
+	RFReplaceSupport   func() control.RFReplaceSupport
+	RFProbeReplace     func(context.Context) (control.RFReplaceSupport, error)
+	HostMenus          *hostmenu.Manager
+	PushHostPanel      func(hostmenu.Snapshot) error
+	ReleaseHostPanel   func() error
+	FrontPanel         func() FrontPanelState
+	FrontPanelKey      func(key int, phase string) error
+	MirrorLCD          func(line1, line2 string) error
+	Integrations       func() hostui.IntegrationStatus
+	Notifier           hostui.Notifier
+	AppActions         <-chan hostui.AppAction
+	InstanceID         string
+	NavigationSync     bool
+	NavigationGroup    string
+	SetNavigationSync  func(bool)
+	NavigationIdentity func() (string, uint64)
+	ReportPage         func(string) error
+	ReportTerminal     func(page, title string) error
+	// ReportTerminalAsync keeps network-backed instance reporting out of the
+	// Bubble Tea update loop. The callback owns coalescing and error delivery.
+	ReportTerminalAsync func(page, title string)
+	// CommitNavigation asynchronously submits a local page intent to the
+	// coordinator. Presence reports and coordinator-applied pages must never
+	// pass through this callback.
+	CommitNavigation func(page string)
 	WriteOSC         func(payload string) error
 	Remote           *RemoteBackend
 	Preview          *control.Snapshot

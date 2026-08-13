@@ -340,6 +340,67 @@ func TestRemoteTUIInstanceLeaseReportsRefreshesAndRemoves(t *testing.T) {
 	}
 }
 
+func TestRemoteTUISeparatesPresenceFromNavigationIntent(t *testing.T) {
+	reporter, err := hostui.NewNavigationReporter(true, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &remoteTUIIPC{
+		ctx: context.Background(), events: make(chan control.Event, 4),
+		sessions: make(chan struct{}, 1),
+	}
+	var mu sync.Mutex
+	reports, commits := 0, 0
+	committed := make(chan hostui.NavigationCommand, 1)
+	client.callFn = func(_ context.Context, method string, params any, target any) error {
+		mu.Lock()
+		defer mu.Unlock()
+		switch method {
+		case "controller.app.instance.report":
+			reports++
+		case "controller.app.navigation.commit":
+			commits++
+			command := params.(hostui.NavigationCommand)
+			result := target.(*hostui.NavigationOutcome)
+			result.Page = command.Page
+			committed <- command
+		case "controller.app.instance.remove":
+		default:
+			return errors.New("unexpected method " + method)
+		}
+		return nil
+	}
+	lease := newRemoteTUIInstanceLease(client, reporter, time.Hour)
+	lease.QueueUpdate("events", "PCController — Activity")
+	deadline := time.Now().Add(time.Second)
+	for {
+		mu.Lock()
+		haveReport, haveCommit := reports > 0, commits > 0
+		mu.Unlock()
+		if haveReport {
+			if haveCommit {
+				t.Fatal("presence report was treated as navigation intent")
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("queued presence report was not sent")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	lease.QueueNavigation("settings")
+	select {
+	case command := <-committed:
+		if command.Page != "settings" || command.Source != reporter.InstanceID() ||
+			command.OperationID == "" {
+			t.Fatalf("navigation command=%#v", command)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued navigation intent was not committed")
+	}
+	lease.Close()
+}
+
 func TestRemoteTUIPollerEmitsAuthoritativeSessionResetBeforeNewEpoch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
