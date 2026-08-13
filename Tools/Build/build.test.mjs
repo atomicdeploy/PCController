@@ -182,7 +182,8 @@ test('Go test executables use deterministic project-owned names', () => {
 		stableTestBinaryName(importPath, 'win32'),
 		stableTestBinaryName(importPath, 'win32')
 	)
-	assert.match(stableTestBinaryName(importPath, 'win32'), /^github\.com_atomicdeploy_pccontroller_internal_ipc-[0-9a-f]{10}\.test\.exe$/)
+	assert.match(stableTestBinaryName(importPath, 'win32'), /^pccontroller-tests-github\.com_atomicdeploy_pccontroller_internal_ipc-[0-9a-f]{10}\.exe$/)
+	assert.doesNotMatch(stableTestBinaryName(importPath, 'win32'), /\.test\.exe$/i)
 	assert.doesNotMatch(stableTestBinaryName(importPath, 'win32'), /AppData|Temp/i)
 })
 

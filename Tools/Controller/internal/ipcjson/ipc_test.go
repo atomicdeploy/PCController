@@ -814,6 +814,7 @@ func TestRawJSONRPCAndWebSocketShareOneIPCListener(t *testing.T) {
 		path, contains string
 	}{
 		{path: "/healthz", contains: `"ok":true`},
+		{path: "/upnp/public.json", contains: `"schema":"pccontroller.public.v1"`},
 		{path: "/api/ui-config", contains: `"auth_required":false`},
 		{path: "/api/snapshot", contains: `"uptime_ms":0`},
 		{path: "/", contains: "data-pccontroller-shell"},

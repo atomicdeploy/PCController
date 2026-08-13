@@ -1207,6 +1207,13 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 }
 .advanced-toggle-stack--compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .advanced-toggle-stack--compact .toggle-row { min-height: 52px; }
+
+.network-device-directory { display: grid; gap: 10px; margin-top: 12px; }
+.network-device { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--panel) 84%, transparent); }
+.network-device strong, .network-device small { display: block; }
+.network-device small { color: var(--muted); margin-top: 3px; direction: ltr; }
+.network-device p { grid-column: 1 / -1; margin: 0; color: var(--muted); }
+.network-device .button { justify-self: end; }
 .advanced-nav-pad {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

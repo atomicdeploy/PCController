@@ -23,6 +23,7 @@ import (
 	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/consolewindow"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/installer"
@@ -903,8 +904,12 @@ func runTUIWithInitialAction(
 			Integrations: func() hostui.IntegrationStatus {
 				return primaryHostUIStatus(primary, store.Current())
 			},
-			AppActions: appActions,
-			InstanceID: tuiInstanceID,
+			NetworkDiscovery: func(ctx context.Context) ([]discovery.Instance, error) {
+				return discovery.DiscoverWithOptions(ctx, discovery.Options{MDNS: true, DNSSD: true, SSDP: true, UPnP: true, WSDiscovery: true, Broadcast: true, NetBIOS: true, BroadcastPort: store.Current().Integrations.Discovery.BroadcastPort})
+			},
+			OpenNetwork: openBrowser,
+			AppActions:  appActions,
+			InstanceID:  tuiInstanceID,
 			WriteOSC: func(payload string) error {
 				return hostui.WriteOSC(stdout, payload)
 			},

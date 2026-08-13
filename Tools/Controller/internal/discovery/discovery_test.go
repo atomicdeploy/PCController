@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/binary"
 	"net"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -81,6 +83,9 @@ func TestNetBIOSNodeStatusWireFormat(t *testing.T) {
 }
 
 func TestBroadcastAdvertiserAndScannerDiscoverEachOther(t *testing.T) {
+	if runtime.GOOS == "windows" && os.Getenv("PCCONTROLLER_TEST_LAN") != "1" {
+		t.Skip("Windows LAN acceptance uses the stable packaged controller.exe; set PCCONTROLLER_TEST_LAN=1 to opt in")
+	}
 	probe, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
 	if err != nil {
 		t.Skipf("UDP unavailable: %v", err)
@@ -133,6 +138,23 @@ func TestParseSSDPResponseRequiresControllerServiceType(t *testing.T) {
 	}
 }
 
+func TestParseSSDPResponseUsesPacketSourceNotAdvertisedRedirect(t *testing.T) {
+	data := strings.Join([]string{
+		"HTTP/1.1 200 OK",
+		"ST: " + SSDPType,
+		"LOCATION: http://127.0.0.1:9999/upnp/device.xml",
+		"X-PCController-Public: http://127.0.0.1:9999/upnp/public.json",
+		"", "",
+	}, "\r\n")
+	instance, ok := parseSSDPResponse([]byte(data), &net.UDPAddr{IP: net.ParseIP("192.0.2.15"), Port: 1900})
+	if !ok || instance.Host != "192.0.2.15" || instance.Port != 9999 {
+		t.Fatalf("parsed SSDP instance=%#v ok=%v", instance, ok)
+	}
+	if trustedDiscoveryURL(instance.Location, instance) || trustedDiscoveryURL(instance.PublicURL, instance) {
+		t.Fatal("SSDP response was allowed to redirect enrichment away from its packet source")
+	}
+}
+
 func TestDisabledAdvertiserHasDeterministicLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	advertiser, err := Advertise(ctx, "Test", 8787, false, false, nil)
@@ -141,4 +163,15 @@ func TestDisabledAdvertiserHasDeterministicLifecycle(t *testing.T) {
 	}
 	cancel()
 	advertiser.Close()
+}
+
+func TestMetadataRefreshSignalsEveryAnnouncementTransport(t *testing.T) {
+	advertiser := &Advertiser{
+		ssdp: true, broadcast: true,
+		ssdpRefresh: make(chan struct{}, 1), broadcastRefresh: make(chan struct{}, 1),
+	}
+	advertiser.UpdateText([]string{"board.connected=true"})
+	if len(advertiser.ssdpRefresh) != 1 || len(advertiser.broadcastRefresh) != 1 {
+		t.Fatalf("refresh signals ssdp=%d broadcast=%d", len(advertiser.ssdpRefresh), len(advertiser.broadcastRefresh))
+	}
 }

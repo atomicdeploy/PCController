@@ -626,7 +626,9 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		localDevice := startLocalDeviceHost(ctx, client, store)
 		defer localDevice.Close()
 		actions := hostui.NewActionBroker()
-		integrations, err := hostbridge.Start(ctx, client, store, actions)
+		integrations, err := hostbridge.Start(ctx, client, store, actions, hostbridge.DiscoveryHostIdentity{
+			Version: version, SourceHash: sourceHash, BuildTime: buildTime,
+		})
 		if err != nil {
 			return fmt.Errorf("start headless host integrations: %w", err)
 		}

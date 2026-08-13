@@ -41,4 +41,7 @@ func TestDiscoveryMetadataIncludesWebAppAndCurrentBoardValues(t *testing.T) {
 			t.Fatalf("metadata missing %q: %#v", expected, values)
 		}
 	}
+	if slices.Contains(values, "remote.connectable=true") {
+		t.Fatalf("loopback default must not advertise remote connectability: %#v", values)
+	}
 }

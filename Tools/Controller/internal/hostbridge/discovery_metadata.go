@@ -2,7 +2,9 @@ package hostbridge
 
 import (
 	"fmt"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	controller "pccontroller.local/controller"
@@ -15,12 +17,35 @@ const discoveryMetadataMinimumInterval = 5 * time.Second
 // client identify the app, open its WebUI/API, and render useful board state
 // before establishing an authenticated session. It is refreshed from pushed
 // runtime events; it never initiates a board read.
-func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot) []string {
+func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot, identities ...DiscoveryHostIdentity) []string {
 	appearance := config.UI.Appearance
+	hostname, _ := os.Hostname()
+	name := strings.TrimSpace(config.Integrations.Discovery.InstanceName)
+	if name == "" {
+		name = strings.TrimSpace(config.UI.AppTitle)
+	}
+	identity := DiscoveryHostIdentity{}
+	if len(identities) != 0 {
+		identity = identities[0]
+	}
+	instanceID := strings.TrimSpace(identity.InstanceID)
+	if instanceID == "" {
+		instanceID = strings.ToLower(hostname)
+	}
 	values := []string{
 		"product=PCController",
 		"protocol=pccontroller",
-		"protocol.discovery=dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios",
+		"health=ok",
+		"service=PCController IPC",
+		"host.hostname=" + hostname,
+		"instance.id=" + instanceID,
+		"instance.name=" + name,
+		"host.version=" + strings.TrimSpace(identity.Version),
+		"host.source_hash=" + strings.TrimSpace(identity.SourceHash),
+		"host.build_time=" + strings.TrimSpace(identity.BuildTime),
+		"remote.connectable=" + strconv.FormatBool(config.IPC.RemoteConnectable()),
+		"protocol.discovery=" + strings.Join(configuredDiscoveryProtocols(config.Integrations.Discovery), ","),
+		"public=/upnp/public.json",
 		"api=/api",
 		"operations=/api/rpc",
 		"commands=/api/commands",
@@ -92,6 +117,29 @@ func discoveryMetadata(config appconfig.Config, snapshot controller.Snapshot) []
 	return values
 }
 
+func configuredDiscoveryProtocols(value appconfig.Discovery) []string {
+	result := make([]string, 0, 7)
+	if value.MDNSEnabled || value.DNSSDenabled {
+		result = append(result, "dns-sd")
+	}
+	if value.SSDPEnabled {
+		result = append(result, "ssdp")
+	}
+	if value.UPnPEnabled {
+		result = append(result, "upnp")
+	}
+	if value.WSDiscoveryEnabled {
+		result = append(result, "ws-discovery")
+	}
+	if value.BroadcastEnabled {
+		result = append(result, "broadcast")
+	}
+	if value.NetBIOSEnabled {
+		result = append(result, "netbios")
+	}
+	return result
+}
+
 func (manager *Manager) requestDiscoveryMetadataRefresh() {
 	select {
 	case manager.discoveryRefresh <- struct{}{}:
@@ -147,5 +195,5 @@ func (manager *Manager) refreshDiscoveryMetadata() {
 		return
 	}
 	config := manager.store.Current()
-	advertiser.UpdateText(discoveryMetadata(config, manager.client.Snapshot()))
+	advertiser.UpdateText(discoveryMetadata(config, manager.client.Snapshot(), manager.discoveryIdentity))
 }

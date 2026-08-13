@@ -21,7 +21,9 @@ import { fileURLToPath } from 'node:url'
 
 const SCRIPT = fileURLToPath(import.meta.url)
 const DEFAULT_MODULE = resolve(dirname(SCRIPT), '..', 'Controller')
-const DEFAULT_OUTPUT = resolve(dirname(SCRIPT), '..', '..', '.build', 'tests', 'go')
+const DEFAULT_OUTPUT = process.platform === 'win32' && process.env.LOCALAPPDATA
+	? resolve(process.env.LOCALAPPDATA, 'PCController', 'test-programs', 'go')
+	: resolve(dirname(SCRIPT), '..', '..', '.build', 'tests', 'go')
 
 function parseArguments(argv) {
 	const options = {
@@ -130,7 +132,12 @@ export function goTestSourceIdentity(moduleRoot, goVersion) {
 export function stableTestBinaryName(importPath, platform = process.platform) {
 	const readable = importPath.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'go-package'
 	const suffix = sha256(importPath).slice(0, 10)
-	return `${readable}-${suffix}.test${platform === 'win32' ? '.exe' : ''}`
+	// Avoid Go's generic/randomized *.test.exe identity on Windows. The stable,
+	// product-prefixed filename and project-owned path keep one firewall identity
+	// across rebuilds while preserving a recognizable package suffix.
+	return platform === 'win32'
+		? `pccontroller-tests-${readable}-${suffix}.exe`
+		: `pccontroller-tests-${readable}-${suffix}`
 }
 
 function listTestPackages(go, moduleRoot, env) {

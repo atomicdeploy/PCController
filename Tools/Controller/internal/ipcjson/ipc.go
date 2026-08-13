@@ -1267,6 +1267,7 @@ func (service *Service) dispatch(
 			result, err = discovery.DiscoverWithOptions(discoveryContext, discovery.Options{
 				MDNS: params.MDNS, DNSSD: params.DNSSD, SSDP: params.SSDP, UPnP: params.UPnP,
 				WSDiscovery: params.WSDiscovery, Broadcast: params.Broadcast, NetBIOS: params.NetBIOS,
+				BroadcastPort: service.hostConfig().Integrations.Discovery.BroadcastPort,
 			})
 			cancel()
 			if err == nil {
@@ -1275,12 +1276,80 @@ func (service *Service) dispatch(
 				if instances, ok := result.([]discovery.Instance); ok {
 					count = len(instances)
 					for _, instance := range instances {
-						metadata["protocol."+instance.Protocol] = "true"
+						protocols := instance.Protocols
+						if len(protocols) == 0 {
+							protocols = []string{instance.Protocol}
+						}
+						for _, protocol := range protocols {
+							metadata["protocol."+protocol] = "true"
+						}
+						deviceMetadata := map[string]string{
+							"host": instance.Host, "port": strconv.Itoa(instance.Port),
+							"protocols": strings.Join(protocols, ","),
+						}
+						if instance.Public != nil {
+							deviceMetadata["instance_id"] = instance.Public.InstanceID
+							deviceMetadata["hostname"] = instance.Public.Hostname
+							deviceMetadata["board_connected"] = strconv.FormatBool(instance.Public.Board.Connected)
+						}
+						service.Client.EmitHostActionEvent("discovery.device.seen", instance.Name, "discovery", "observe", deviceMetadata)
 					}
 				}
 				service.Client.EmitHostActionEvent("discovery.scan.completed", fmt.Sprintf("network discovery found %d instance(s)", count), "discovery", "scan", metadata)
 			} else {
 				service.Client.EmitHostEvent("discovery.scan.failed", err.Error())
+			}
+		}
+	case "controller.discovery.connect":
+		var params struct {
+			Address   string `json:"address"`
+			Auth      string `json:"auth,omitempty"`
+			TimeoutMS int    `json:"timeout_ms,omitempty"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			params.Address = strings.TrimSpace(params.Address)
+			if _, _, splitErr := net.SplitHostPort(params.Address); splitErr != nil {
+				err = fmt.Errorf("discovery connect address must be host:port: %w", splitErr)
+				break
+			}
+			if params.TimeoutMS == 0 {
+				params.TimeoutMS = 5000
+			}
+			if params.TimeoutMS < 100 || params.TimeoutMS > 30_000 {
+				err = errors.New("discovery connect timeout_ms must be 100..30000")
+				break
+			}
+			connectContext, cancel := context.WithTimeout(ctx, time.Duration(params.TimeoutMS)*time.Millisecond)
+			defer cancel()
+			ping, callErr := Call(connectContext, params.Address, Request{Method: "controller.ping", Auth: params.Auth})
+			if callErr != nil {
+				err = fmt.Errorf("connect discovered host: %w", callErr)
+				break
+			}
+			snapshot, callErr := Call(connectContext, params.Address, Request{Method: "controller.snapshot", Auth: params.Auth})
+			if callErr != nil {
+				err = fmt.Errorf("read discovered host snapshot: %w", callErr)
+				break
+			}
+			service.Client.EmitHostActionEvent("discovery.connect.completed", "authenticated network host connection verified", "discovery", "connect", map[string]string{"address": params.Address})
+			result = map[string]any{"connected": true, "address": params.Address, "ping": ping.Result, "snapshot": snapshot.Result}
+		}
+	case "controller.discovery.config", "controller.discovery.config.get":
+		result = service.hostConfig().Integrations.Discovery
+	case "controller.discovery.config.set":
+		var params appconfig.Discovery
+		if err = decodeParams(request.Params, &params); err == nil {
+			if service.UpdateHostConfig == nil {
+				err = errors.New("persistent host configuration is unavailable")
+			} else {
+				err = service.UpdateHostConfig(func(config *appconfig.Config) error {
+					config.Integrations.Discovery = params
+					return nil
+				})
+				if err == nil {
+					result = service.hostConfig().Integrations.Discovery
+					service.Client.EmitHostActionEvent("discovery.config.changed", "network discovery advertisement configuration changed", "discovery", "configure", map[string]string{"enabled": strconv.FormatBool(len(enabledDiscoveryProtocols(service.hostConfig().Integrations.Discovery)) != 0)})
+				}
 			}
 		}
 	case "controller.quit", "controller.exit":
@@ -1748,8 +1817,12 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.history.timeline", "controller.lcd.presentation.status",
 		"controller.ports", "controller.os.status", "controller.system.status",
 		"controller.os.facts", "controller.host.facts",
-		"controller.discovery.scan", "controller.pwm.values":
+		"controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get", "controller.pwm.values":
 		return capabilityRead
+	case "controller.discovery.connect":
+		return capabilityBridgeCalls
+	case "controller.discovery.config.set":
+		return capabilityIntegrations
 	case "controller.program_state.set", "controller.program-state.set":
 		return capabilityBoard
 	default:

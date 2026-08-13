@@ -1,5 +1,5 @@
-// Package hostbridge runs opt-in host integrations around the one primary
-// controller client. It never opens the serial port itself.
+// Package hostbridge runs configurable host integrations around the one
+// primary controller client. It never opens the serial port itself.
 package hostbridge
 
 import (
@@ -214,6 +214,14 @@ type Manager struct {
 	segmentScroll      *segmentScrollPresenter
 	buzzerJobs         chan buzzerMirrorJob
 	discoveryRefresh   chan struct{}
+	discoveryIdentity  DiscoveryHostIdentity
+}
+
+type DiscoveryHostIdentity struct {
+	InstanceID string
+	Version    string
+	SourceHash string
+	BuildTime  string
 }
 
 const integrationShutdownTimeout = 8 * time.Second
@@ -223,6 +231,7 @@ func Start(
 	client *controller.Client,
 	store *appconfig.Store,
 	actions *hostui.ActionBroker,
+	identities ...DiscoveryHostIdentity,
 ) (*Manager, error) {
 	if client == nil || store == nil {
 		return nil, fmt.Errorf("host bridge requires controller client and configuration store")
@@ -243,6 +252,9 @@ func Start(
 		warningBeep:       hostui.WarningBeep,
 		buzzerJobs:        make(chan buzzerMirrorJob, 32),
 		discoveryRefresh:  make(chan struct{}, 1),
+	}
+	if len(identities) != 0 {
+		manager.discoveryIdentity = identities[0]
 	}
 	webhooks, err := newWebhookDeliveryQueue(webhookQueueOptions{
 		Path: defaultWebhookQueuePath(store.Path()),
@@ -726,8 +738,9 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 			MDNS: discoveryConfig.MDNSEnabled, DNSSD: discoveryConfig.DNSSDenabled,
 			SSDP: discoveryConfig.SSDPEnabled, UPnP: discoveryConfig.UPnPEnabled,
 			WSDiscovery: discoveryConfig.WSDiscoveryEnabled,
-			Broadcast:   discoveryConfig.BroadcastEnabled, NetBIOS: discoveryConfig.NetBIOSEnabled,
-		}, discoveryMetadata(config, manager.client.Snapshot()))
+			Broadcast:   discoveryConfig.BroadcastEnabled, BroadcastPort: discoveryConfig.BroadcastPort,
+			NetBIOS: discoveryConfig.NetBIOSEnabled,
+		}, discoveryMetadata(config, manager.client.Snapshot(), manager.discoveryIdentity))
 		if err != nil {
 			_ = hotkeys.Stop()
 			_ = keyboard.Stop("integration-start-failed")

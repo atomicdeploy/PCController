@@ -21,21 +21,23 @@ import (
 const broadcastMagic = "PCCONTROLLER-DISCOVERY/1"
 
 type broadcastPacket struct {
-	Magic    string   `json:"magic"`
-	Action   string   `json:"action"`
-	Name     string   `json:"name"`
-	Host     string   `json:"host"`
-	Port     int      `json:"port"`
-	Location string   `json:"location,omitempty"`
-	USN      string   `json:"usn,omitempty"`
-	TXT      []string `json:"txt,omitempty"`
+	Magic     string   `json:"magic"`
+	Action    string   `json:"action"`
+	Name      string   `json:"name"`
+	Host      string   `json:"host"`
+	Port      int      `json:"port"`
+	Location  string   `json:"location,omitempty"`
+	PublicURL string   `json:"public_url,omitempty"`
+	USN       string   `json:"usn,omitempty"`
+	TXT       []string `json:"txt,omitempty"`
 }
 
 func broadcastPacketFor(advertiser *Advertiser, action string) broadcastPacket {
 	host, _ := osHostName()
 	return broadcastPacket{Magic: broadcastMagic, Action: action, Name: advertiser.name,
 		Host: host, Port: advertiser.port, Location: "http://" + net.JoinHostPort(host, strconv.Itoa(advertiser.port)) + "/upnp/device.xml",
-		USN: ssdpUSN(advertiser.name, advertiser.port), TXT: advertiser.text()}
+		PublicURL: "http://" + net.JoinHostPort(host, strconv.Itoa(advertiser.port)) + PublicInfoPath,
+		USN:       ssdpUSN(advertiser.name, advertiser.port), TXT: advertiser.text()}
 }
 
 func osHostName() (string, error) {
@@ -76,7 +78,7 @@ func runBroadcastAdvertiser(ctx context.Context, advertiser *Advertiser) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-advertiser.refresh:
+		case <-advertiser.broadcastRefresh:
 			beacon(&net.UDPAddr{IP: net.IPv4bcast, Port: advertiser.broadcastPort})
 		case <-ticker.C:
 			beacon(&net.UDPAddr{IP: net.IPv4bcast, Port: advertiser.broadcastPort})
@@ -119,7 +121,7 @@ func discoverBroadcast(ctx context.Context, port int, add func(Instance)) error 
 			host = source.IP.String()
 		}
 		add(Instance{Protocol: "broadcast", Name: packet.Name, Host: host, Port: packet.Port,
-			Location: packet.Location, USN: packet.USN, TXT: normalizeTXT(packet.TXT), SeenAt: time.Now()})
+			Addresses: []string{host}, Location: packet.Location, PublicURL: packet.PublicURL, USN: packet.USN, TXT: normalizeTXT(packet.TXT), SeenAt: time.Now()})
 	}
 }
 
@@ -153,7 +155,8 @@ func wsProbeMessage() string {
 
 func wsProbeResponse(advertiser *Advertiser, target *net.UDPAddr) string {
 	host := localAddressFor(target)
-	return `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:d="http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01"><s:Header/><s:Body><d:ProbeMatches><d:ProbeMatch><d:Address>` + ssdpUSN(advertiser.name, advertiser.port) + `</d:Address><d:Types>` + WSDiscoveryType + `</d:Types><d:XAddrs>http://` + net.JoinHostPort(host, strconv.Itoa(advertiser.port)) + `/upnp/device.xml</d:XAddrs><d:MetadataVersion>1</d:MetadataVersion></d:ProbeMatch></d:ProbeMatches></s:Body></s:Envelope>`
+	base := "http://" + net.JoinHostPort(host, strconv.Itoa(advertiser.port))
+	return `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:d="http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01"><s:Header/><s:Body><d:ProbeMatches><d:ProbeMatch><d:Address>` + ssdpUSN(advertiser.name, advertiser.port) + `</d:Address><d:Types>` + WSDiscoveryType + `</d:Types><d:XAddrs>` + base + `/upnp/device.xml ` + base + PublicInfoPath + `</d:XAddrs><d:MetadataVersion>1</d:MetadataVersion></d:ProbeMatch></d:ProbeMatches></s:Body></s:Envelope>`
 }
 
 func runWSDiscoveryAdvertiser(ctx context.Context, advertiser *Advertiser) {
@@ -217,16 +220,25 @@ func discoverWSDiscovery(ctx context.Context, add func(Instance)) error {
 		if xml.Unmarshal(buffer[:count], &envelope) != nil || envelope.Body.Matches.Match.XAddrs == "" {
 			continue
 		}
-		location := strings.Fields(envelope.Body.Matches.Match.XAddrs)[0]
+		locations := strings.Fields(envelope.Body.Matches.Match.XAddrs)
+		location := locations[0]
+		publicURL := ""
+		for _, candidate := range locations {
+			if strings.HasSuffix(candidate, PublicInfoPath) {
+				publicURL = candidate
+			}
+		}
 		parsed, parseErr := neturlParse(location)
 		if parseErr != nil {
 			continue
 		}
 		host := parsed.host
-		if host == "" && source != nil {
+		addresses := []string{}
+		if source != nil {
 			host = source.IP.String()
+			addresses = append(addresses, host)
 		}
-		add(Instance{Protocol: "ws-discovery", Name: envelope.Body.Matches.Match.Address, Host: host, Port: parsed.port, Location: location, USN: envelope.Body.Matches.Match.Address, SeenAt: time.Now()})
+		add(Instance{Protocol: "ws-discovery", Name: envelope.Body.Matches.Match.Address, Host: host, Port: parsed.port, Addresses: addresses, Location: location, PublicURL: publicURL, USN: envelope.Body.Matches.Match.Address, SeenAt: time.Now()})
 	}
 }
 
@@ -311,7 +323,7 @@ func discoverNetBIOS(ctx context.Context, add func(Instance)) error {
 			continue
 		}
 		if probeController(ctx, source.IP.String(), 8787) {
-			add(Instance{Protocol: "netbios", Name: name, Host: source.IP.String(), Port: 8787, SeenAt: time.Now()})
+			add(Instance{Protocol: "netbios", Name: name, Host: source.IP.String(), Port: 8787, Addresses: []string{source.IP.String()}, SeenAt: time.Now()})
 		}
 	}
 }

@@ -57,6 +57,16 @@ build.cmd --clean
 
 On Bash, use the identical options with `./build.sh`.
 
+On Windows, `build.cmd --host-only` delegates Go tests to
+`Tools/Build/go-tests.mjs`. Do not run `go test` directly: temporary Go test
+paths can appear as a new application to Windows Firewall on every run. The
+project runner uses deterministic `pccontroller-tests-*.exe` names beneath
+`%LOCALAPPDATA%\PCController\test-programs\go` across every worktree, caches a
+source-identity pass, and keeps live LAN acceptance
+on the stable packaged `controller.exe` identity. Windows Go tests never opt
+into wildcard LAN broadcast unless `PCCONTROLLER_TEST_LAN=1` is explicitly set;
+normal builds leave that acceptance test to the packaged host.
+
 Generated outputs have one canonical location per product:
 
 - `Tools/Controller/bin/` contains `controller.exe` (or `controller`), the

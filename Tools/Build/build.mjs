@@ -50,7 +50,12 @@ const BUILD_ROOT = join(PROJECT_ROOT, '.build')
 const COMMAND_PATHS = commandPlanPaths(PROJECT_ROOT)
 const FIRMWARE_OUTPUT = COMMAND_PATHS.firmwareOutput
 const PACKAGE_ROOT = join(BUILD_ROOT, 'package')
-const STABLE_GO_TEST_ROOT = join(BUILD_ROOT, 'tests', 'go')
+// Windows Firewall keys application rules by executable path. Keep local test
+// programs at one product-owned, worktree-independent path so branch/worktree
+// changes cannot manufacture a stream of new application identities.
+const STABLE_GO_TEST_ROOT = process.platform === 'win32' && process.env.LOCALAPPDATA
+	? join(process.env.LOCALAPPDATA, 'PCController', 'test-programs', 'go')
+	: join(BUILD_ROOT, 'tests', 'go')
 const STABLE_GO_TEST_RUNNER = join(PROJECT_ROOT, 'Tools', 'Build', 'go-tests.mjs')
 const TOOLCHAIN_POLICY_GENERATOR = join(HOST_ROOT, 'internal', 'programmer', 'generate-toolchain-policy.mjs')
 const PRODUCT_IDENTITY_GENERATOR = join(HOST_ROOT, 'internal', 'productidentity', 'generate.mjs')

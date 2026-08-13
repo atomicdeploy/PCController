@@ -58,6 +58,43 @@
         "security": []
       }
     },
+    "/upnp/public.json": {
+      "get": {
+        "operationId": "get_upnp_public_json",
+        "summary": "Bounded public host, board, endpoint, health, and telemetry directory",
+        "tags": [
+          "service"
+        ],
+        "x-required-capability": "public",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "security": []
+      }
+    },
     "/api/ui-config": {
       "get": {
         "operationId": "get_api_ui_config",
@@ -3386,6 +3423,10 @@
               "controller.device.inspect",
               "controller.device.status",
               "controller.discovery.check",
+              "controller.discovery.config",
+              "controller.discovery.config.get",
+              "controller.discovery.config.set",
+              "controller.discovery.connect",
               "controller.discovery.github.release",
               "controller.discovery.github.workflow",
               "controller.discovery.local_manifest",

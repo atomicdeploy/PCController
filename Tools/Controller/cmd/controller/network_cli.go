@@ -12,7 +12,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +27,7 @@ import (
 
 func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
 	if len(args) == 0 {
-		return errors.New("usage: controller network edge-enable|edge-disable|peer-add|peer-remove|probe|discover|status")
+		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|status")
 	}
 	switch strings.ToLower(args[0]) {
 	case "status":
@@ -211,7 +213,40 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return err
 		}
 		return nil
-	case "discover":
+	case "advertise":
+		flags := flag.NewFlagSet("network advertise", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		enabled := flags.Bool("enabled", true, "enable or disable advertisement")
+		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios", "comma-separated protocols")
+		instance := flags.String("instance", "", "advertised instance name")
+		broadcastPort := flags.Int("broadcast-port", discovery.BroadcastPort, "UDP broadcast discovery port")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || *broadcastPort < 1024 || *broadcastPort > 65535 {
+			return errors.New("usage: controller network advertise [--enabled=true|false] [--protocols LIST] [--instance NAME] [--broadcast-port 37889]")
+		}
+		configured := appconfig.Discovery{BroadcastPort: *broadcastPort, InstanceName: strings.TrimSpace(*instance)}
+		if *enabled {
+			options, err := parseDiscoveryOptions(*protocols)
+			if err != nil {
+				return err
+			}
+			configured.MDNSEnabled, configured.DNSSDenabled = options.MDNS, options.DNSSD
+			configured.SSDPEnabled, configured.UPnPEnabled = options.SSDP, options.UPnP
+			configured.WSDiscoveryEnabled, configured.BroadcastEnabled = options.WSDiscovery, options.Broadcast
+			configured.NetBIOSEnabled = options.NetBIOS
+		}
+		if _, err := store.Update(func(config *appconfig.Config) error {
+			config.Integrations.Discovery = configured
+			return nil
+		}); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "Network advertisement enabled=%t protocols=%s broadcast_port=%d\n", *enabled, strings.Join(enabledProtocolNames(configured), ","), configured.BroadcastPort)
+		fmt.Fprintln(stdout, "Remote command access remains governed separately by ipc.allow_remote, bearer authentication, and remote_policy.")
+		return nil
+	case "discover", "list":
 		flags := flag.NewFlagSet("network discover", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios", "comma-separated protocols")
@@ -222,33 +257,72 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if flags.NArg() != 0 || *timeout < 100*time.Millisecond || *timeout > 30*time.Second {
 			return errors.New("usage: controller network discover [--protocols LIST] [--timeout 100ms..30s]")
 		}
-		options := discovery.Options{}
-		for _, protocol := range strings.Split(*protocols, ",") {
-			switch strings.ToLower(strings.TrimSpace(protocol)) {
-			case "mdns", "dns-sd", "dnssd":
-				options.MDNS, options.DNSSD = true, true
-			case "ssdp":
-				options.SSDP = true
-			case "upnp":
-				options.SSDP, options.UPnP = true, true
-			case "ws-discovery", "wsd":
-				options.WSDiscovery = true
-			case "broadcast", "udp":
-				options.Broadcast = true
-			case "netbios", "nbns":
-				options.NetBIOS = true
-			case "":
-			default:
-				return fmt.Errorf("unsupported discovery protocol %q", protocol)
-			}
+		options, err := parseDiscoveryOptions(*protocols)
+		if err != nil {
+			return err
 		}
+		options.BroadcastPort = store.Current().Integrations.Discovery.BroadcastPort
+		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+		defer cancel()
+		scanDuration := *timeout / 2
+		if scanDuration > 3*time.Second {
+			scanDuration = 3 * time.Second
+		}
+		scanContext, stopScan := context.WithTimeout(ctx, scanDuration)
+		instances, err := discovery.DiscoverWithOptions(scanContext, options)
+		stopScan()
+		if err != nil {
+			return err
+		}
+		encoded, _ := json.MarshalIndent(instances, "", "  ")
+		fmt.Fprintln(stdout, string(encoded))
+		return nil
+	case "connect":
+		flags := flag.NewFlagSet("network connect", flag.ContinueOnError)
+		flags.SetOutput(stderr)
+		target := flags.String("target", "", "discovered name, hostname, instance id, or address")
+		tokenRef := flags.String("token-ref", "", "OS-vault or environment bearer-token reference")
+		protocols := flags.String("protocols", "dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios", "comma-separated protocols")
+		timeout := flags.Duration("timeout", 15*time.Second, "discovery and connection timeout")
+		origin := flags.String("origin", "", "allowed HTTP origin (local hostname by default)")
+		if err := flags.Parse(args[1:]); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 || strings.TrimSpace(*target) == "" || strings.TrimSpace(*tokenRef) == "" || *timeout < time.Second || *timeout > 30*time.Second {
+			return errors.New("usage: controller network connect --target NAME|HOST --token-ref REF [--timeout 15s]")
+		}
+		options, err := parseDiscoveryOptions(*protocols)
+		if err != nil {
+			return err
+		}
+		options.BroadcastPort = store.Current().Integrations.Discovery.BroadcastPort
 		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 		defer cancel()
 		instances, err := discovery.DiscoverWithOptions(ctx, options)
 		if err != nil {
 			return err
 		}
-		encoded, _ := json.MarshalIndent(instances, "", "  ")
+		selected, err := resolveDiscoveredInstance(instances, *target)
+		if err != nil {
+			return err
+		}
+		address, err := discoveredAddress(selected)
+		if err != nil {
+			return err
+		}
+		token, err := store.ResolveSecret(*tokenRef)
+		if err != nil {
+			return fmt.Errorf("resolve discovered-host token: %w", err)
+		}
+		if *origin == "" {
+			hostname, _ := os.Hostname()
+			*origin = "http://" + hostname + ":8787"
+		}
+		fmt.Fprintf(stdout, "Connecting to %s at %s via %s...\n", selected.Name, address, strings.Join(selected.Protocols, ","))
+		if err := probeEdgeNetwork(ctx, address, strings.TrimSpace(*origin), token, stdout); err != nil {
+			return err
+		}
+		encoded, _ := json.MarshalIndent(selected, "", "  ")
 		fmt.Fprintln(stdout, string(encoded))
 		return nil
 	case "edge-disable", "disable-edge":
@@ -260,7 +334,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		_, err := store.Update(func(config *appconfig.Config) error {
 			defaults := appconfig.Defaults().IPC
 			config.IPC = defaults
-			config.Integrations.Discovery = appconfig.Discovery{}
+			config.Integrations.Discovery = appconfig.DefaultDiscovery()
 			return nil
 		})
 		if err != nil {
@@ -274,8 +348,99 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		fmt.Fprintln(stdout, "LAN edge mode disabled; IPC returned to authenticated-safe loopback defaults.")
 		return nil
 	default:
-		return errors.New("usage: controller network edge-enable|edge-disable|peer-add|peer-remove|probe|discover|status")
+		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|status")
 	}
+}
+
+func parseDiscoveryOptions(protocols string) (discovery.Options, error) {
+	options := discovery.Options{}
+	for _, protocol := range strings.Split(protocols, ",") {
+		switch strings.ToLower(strings.TrimSpace(protocol)) {
+		case "all":
+			options.MDNS, options.DNSSD, options.SSDP, options.UPnP = true, true, true, true
+			options.WSDiscovery, options.Broadcast, options.NetBIOS = true, true, true
+		case "mdns", "dns-sd", "dnssd":
+			options.MDNS, options.DNSSD = true, true
+		case "ssdp":
+			options.SSDP = true
+		case "upnp":
+			options.SSDP, options.UPnP = true, true
+		case "ws-discovery", "wsd":
+			options.WSDiscovery = true
+		case "broadcast", "udp":
+			options.Broadcast = true
+		case "netbios", "nbns":
+			options.NetBIOS = true
+		case "":
+		default:
+			return discovery.Options{}, fmt.Errorf("unsupported discovery protocol %q", protocol)
+		}
+	}
+	return options, nil
+}
+
+func enabledProtocolNames(value appconfig.Discovery) []string {
+	result := []string{}
+	if value.MDNSEnabled || value.DNSSDenabled {
+		result = append(result, "dns-sd")
+	}
+	if value.SSDPEnabled {
+		result = append(result, "ssdp")
+	}
+	if value.UPnPEnabled {
+		result = append(result, "upnp")
+	}
+	if value.WSDiscoveryEnabled {
+		result = append(result, "ws-discovery")
+	}
+	if value.BroadcastEnabled {
+		result = append(result, "broadcast")
+	}
+	if value.NetBIOSEnabled {
+		result = append(result, "netbios")
+	}
+	return result
+}
+
+func resolveDiscoveredInstance(instances []discovery.Instance, target string) (discovery.Instance, error) {
+	target = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(target), "."))
+	matches := make([]discovery.Instance, 0, 1)
+	for _, instance := range instances {
+		values := []string{instance.Name, instance.Host, instance.USN}
+		values = append(values, instance.Addresses...)
+		if instance.Public != nil {
+			values = append(values, instance.Public.Hostname, instance.Public.InstanceID, instance.Public.InstanceName)
+		}
+		for _, value := range values {
+			if strings.ToLower(strings.TrimSuffix(strings.TrimSpace(value), ".")) == target {
+				matches = append(matches, instance)
+				break
+			}
+		}
+	}
+	if len(matches) == 0 {
+		return discovery.Instance{}, fmt.Errorf("no discovered PCController matches %q", target)
+	}
+	if len(matches) > 1 {
+		return discovery.Instance{}, fmt.Errorf("%q matches %d discovered hosts; use the instance id or address", target, len(matches))
+	}
+	return matches[0], nil
+}
+
+func discoveredAddress(instance discovery.Instance) (string, error) {
+	if instance.Public != nil {
+		if endpoint, err := url.Parse(instance.Public.Endpoints.Operations); err == nil && endpoint.Host != "" {
+			return endpoint.Host, nil
+		}
+	}
+	host := strings.TrimSpace(instance.Host)
+	if len(instance.Addresses) != 0 {
+		host = instance.Addresses[0]
+	}
+	if host == "" || instance.Port < 1 {
+		return "", errors.New("discovered host has no connectable address")
+	}
+	return net.JoinHostPort(strings.TrimSuffix(host, "."), strconv.Itoa(instance.Port)), nil
 }
 
 func probeEdgeNetwork(ctx context.Context, address, origin, token string, output io.Writer) error {
