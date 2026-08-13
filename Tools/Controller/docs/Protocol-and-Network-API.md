@@ -51,6 +51,23 @@ next `GET_SETTINGS` response is the observable live state. The response's
 callers must surface it rather than claiming a reboot is required or that an
 ACK alone proves durability.
 
+The operator-assigned board name uses the same CRC-backed SETTINGS record and
+is automatically discovered after every authenticated USB connection. It is
+part of `controller.snapshot` as `board_name`/`have_board_name`, and a durable
+change publishes `board.name.changed` to every IPC, WebSocket, Socket.IO, Web,
+and TUI client. The canonical typed surfaces are:
+
+```text
+controller board name get|set NAME|clear
+controller.board.name.get|set|clear
+GET|PUT|DELETE /api/board/name
+```
+
+`PUT` and RPC `set` accept `{ "name": "CAFE" }`; names are 0–8 printable
+ASCII characters with no surrounding whitespace. Web edits the identity in
+the dashboard hero and TUI edits the `Board name` row on the Board page. A
+write returns only after independent readback reports `persisted=true`.
+
 ## Typed host notification envelope
 
 `controller.message.send` and `POST /api/messages` use the same bounded host
@@ -298,6 +315,13 @@ The current firmware implements both `RESET` targets as the same watchdog
 reset. Target `1` does not by itself guarantee that Urboot remains active;
 use a DTR/RTS reset pulse or the `urclock` programming workflow for reliable
 bootloader entry.
+
+After every authenticated connection generation, including a DTR reset where
+the WebSocket itself stays open, the host reads one authoritative
+`FRONT_PANEL_GET` snapshot and republishes it as a `front_panel.segment` state
+event. Existing Web, TUI, WebSocket, Socket.IO, bridge, and IPC consumers
+therefore recover the board name, live menu glyphs, and display brightness
+without polling or a manual page refresh.
 
 Legacy `DISPLAY_TEXT` targets are segments `0`, LCD `1`, both `2`, captured
 front panel `3`, and release `4`. Scheduled segment target `5` uses:
@@ -1010,6 +1034,12 @@ IPC, WebSocket, or bridge consumer requires it. Asynchronous board events keep
 flowing because they do not require polling. `controller.close` deliberately
 pauses automatic reconnect; a later `controller.open`/`controller.connect`
 clears that pause only after a transport has authenticated successfully.
+When reconnect is active, failures back off exponentially from configured
+`connection.reconnect_initial_ms` to `connection.reconnect_maximum_ms`
+(defaults 1000 ms and 15000 ms). After two failures the connection state is
+`unavailable`; `usb.reconnecting` and the retained USB identity remain visible
+to every API, TUI, Web, and bridge consumer until a real USB change or a
+successful HELLO resets the schedule.
 
 ## Socket.IO compatibility
 

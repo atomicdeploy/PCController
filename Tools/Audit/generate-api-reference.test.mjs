@@ -97,6 +97,8 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(openapi.components.schemas.OpcodeRequest.properties.opcode.maximum, 255);
   assert.equal(openapi.components.schemas.AppInstanceReport.properties.lease_seconds.maximum, 300);
   assert.equal(openapi.paths["/api/app/instances"].delete.parameters[0].required, true);
+	assert.deepEqual(Object.keys(openapi.paths["/api/board/name"]).sort(), ["delete", "get", "put"]);
+	assert.equal(openapi.components.schemas.JSONRPCRequest.properties.method.enum.includes("controller.board.name.set"), true);
   assert.equal(openapi.paths["/api/app/navigate"].post.requestBody.content["application/json"].schema.$ref, "#/components/schemas/AppNavigation");
   assert.equal(asyncapi.components.securitySchemes.browserTicket.name, "Sec-WebSocket-Protocol");
   assert.deepEqual(asyncapi.servers.loopback.security, []);

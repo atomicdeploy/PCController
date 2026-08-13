@@ -17,12 +17,18 @@ bool isMenuMode(ProgramMode mode) {
 
 // Converts a stable page ID to its contiguous top-level program mode.
 ProgramMode pageToMode(uint8_t page) {
+  if (page == PAGE_KEYS) {
+    return MODE_MOTION;
+  }
   return static_cast<ProgramMode>(
       static_cast<uint8_t>(MODE_DOOR) + page);
 }
 
 // Returns the stable page represented by an ordinary mode.
 uint8_t modeToPage(ProgramMode mode) {
+  if (mode == MODE_MOTION) {
+    return PAGE_KEYS;
+  }
   return isMenuMode(mode)
              ? static_cast<uint8_t>(mode) -
                    static_cast<uint8_t>(MODE_DOOR)
@@ -41,7 +47,7 @@ uint8_t nextCompiledMenuPage(uint8_t page, bool forward) {
       return candidate;
     }
   }
-  return PAGE_MOTION;
+  return PAGE_KEYS;
 }
 
 #if PCCONTROLLER_MENU_VISIBILITY
@@ -159,7 +165,7 @@ void moveMenuCategory(bool forward, uint32_t at) {
 void setMenuPage(uint8_t page) {
   menuPage = canonicalFrontPanelPage(page);
   if (!frontPanelPageCompiled(menuPage)) {
-    menuPage = PAGE_MOTION;
+    menuPage = PAGE_KEYS;
   }
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
   suppressLocalMacroClassification = false;
@@ -228,10 +234,6 @@ void programService(uint32_t at) {
         display.showText(commonText(settingsStore.values().programmingMode()
                                         ? TextProgram
                                         : TextBoot));
-        break;
-      case MODE_USER_RELAY_CONTROL:
-        display.showText(commonText(TextUserRelays));
-        menuLabelEndsAt = at + 450;
         break;
       case MODE_MOTION_CONTROL:
         relays.allOff(at);
@@ -340,26 +342,23 @@ void menuFeedback(bool fromRemote) {
   statusLeds.playCue(fromRemote ? StatusLedCue::Radio
                                 : StatusLedCue::Menu,
                      260, now);
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-  buzzer.beep();
-#endif
+  // Direct interaction acknowledgement belongs to the retained TonePlayer,
+  // not to the optional autonomous AudioCues policy. TonePlayer itself
+  // enforces silent mode, so an unmute action can confirm itself immediately.
+  if (!buzzer.muted()) {
+    buzzer.beep();
+  }
 }
 
-// Rolls an 8-bit brightness by the configured front-panel step.
-uint8_t adjustedBrightness(uint8_t value, bool increase) {
-  return TransitionMath::rollByte(value, ILLUMINATION_MENU_STEP, increase);
+// Rolls an 8-bit value by the press/hold acceleration step.
+uint8_t adjustedBrightness(uint8_t value, bool increase, uint8_t step = 1) {
+  return TransitionMath::rollByte(value, step, increase);
 }
 
 // Rolls Off/Auto/On and mirrors the result to the edit transaction.
 void adjustIlluminationMode(bool increase, uint32_t at) {
-  int8_t mode = static_cast<int8_t>(illumination.mode());
-  mode += increase ? 1 : -1;
-  if (mode < static_cast<int8_t>(IlluminationMode::Off)) {
-    mode = static_cast<int8_t>(IlluminationMode::On);
-  } else if (mode > static_cast<int8_t>(IlluminationMode::On)) {
-    mode = static_cast<int8_t>(IlluminationMode::Off);
-  }
-  illumination.setMode(static_cast<IlluminationMode>(mode));
+  illumination.setMode(static_cast<IlluminationMode>(rollMenuIndex(
+      static_cast<uint8_t>(illumination.mode()), 3, increase)));
   markIlluminationSettingsChanged(at);
 }
 
@@ -374,24 +373,15 @@ void setSelectedRelay(bool active, uint32_t at) {
                              at);
 }
 
-// Tests the selected general-purpose relay R5..R8.
-bool selectedUserRelayActive() {
-  return (relays.activeRelayMask() &
-          _BV(static_cast<uint8_t>(userRelayMenuIndex + 4))) != 0;
-}
-
-// Applies the selected general-purpose relay R5..R8.
-void setSelectedUserRelay(bool active, uint32_t at) {
-  relays.requestRelayForTest(
-      static_cast<uint8_t>(userRelayMenuIndex + 5), active, at);
-}
-
 // Updates EEPROM-owned silent state and the live Timer1 tone player.
 void setSilentMode(bool silent, uint32_t at) {
   settingsStore.values().setSilent(silent);
   if (!editTransactionActive) {
     settingsStore.markDirty(at);
   }
+  // Never retain silent feedback in the queue: otherwise rapid menu presses
+  // while muted can become a burst of stale tones after unmuting.
+  buzzer.stop();
   buzzer.setMuted(silent);
 }
 
@@ -548,7 +538,8 @@ void beginLocalMacroCapture() {
 #endif
 
 // Dispatches physical, RF, or host navigation through the modal menu state machine.
-void handleMenuAction(uint8_t action, bool fromRemote) {
+void handleMenuAction(uint8_t action, bool fromRemote,
+                      uint8_t adjustmentStep) {
   if (action > MENU_INCREASE) {
     return;
   }
@@ -623,11 +614,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   }
 
   switch (modeManager.current()) {
-#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
-    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+#if PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
     case MODE_ILLUMINATION_MODE_EDIT:
       if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_SAVE_PROMPT);
+        modeManager.transitionTo(MODE_ILLUMINATION);
       } else if (action == MENU_NEXT) {
         modeManager.transitionTo(MODE_ILLUMINATION_ON_EDIT);
       } else {
@@ -643,7 +633,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         modeManager.transitionTo(MODE_ILLUMINATION_OFF_EDIT);
       } else {
         illumination.setOnBrightness(adjustedBrightness(
-            illumination.onBrightness(), action == MENU_INCREASE));
+            illumination.onBrightness(), action == MENU_INCREASE,
+            adjustmentStep));
         markIlluminationSettingsChanged(actionNow);
       }
       menuFeedback(fromRemote);
@@ -653,10 +644,11 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       if (action == MENU_PREVIOUS) {
         modeManager.transitionTo(MODE_ILLUMINATION_ON_EDIT);
       } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_SAVE_PROMPT);
+        modeManager.transitionTo(MODE_ILLUMINATION);
       } else {
         illumination.setOffBrightness(adjustedBrightness(
-            illumination.offBrightness(), action == MENU_INCREASE));
+            illumination.offBrightness(), action == MENU_INCREASE,
+            adjustmentStep));
         markIlluminationSettingsChanged(actionNow);
       }
       menuFeedback(fromRemote);
@@ -700,7 +692,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
             break;
           case 3:
             settings.statusBrightness =
-                adjustedBrightness(settings.statusBrightness, increase);
+                adjustedBrightness(settings.statusBrightness, increase,
+                                   adjustmentStep);
             statusLeds.setBrightness(settings.statusBrightness);
             break;
           case 4:
@@ -752,13 +745,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (action == MENU_NEXT) {
         modeManager.transitionTo(MODE_USER_PWM_VALUE_EDIT);
       } else if (action == MENU_INCREASE) {
-        userPwmMenuIndex = static_cast<uint8_t>(
-            (userPwmMenuIndex + 1) % 8);
+        userPwmMenuIndex = rollMenuIndex(userPwmMenuIndex, 8, true);
       } else {
-        userPwmMenuIndex =
-            userPwmMenuIndex == 0
-                ? 7
-                : static_cast<uint8_t>(userPwmMenuIndex - 1);
+        userPwmMenuIndex = rollMenuIndex(userPwmMenuIndex, 8, false);
       }
       menuFeedback(fromRemote);
       return;
@@ -771,58 +760,14 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         uint8_t &value =
             settingsStore.values().userPwm[userPwmMenuIndex];
-        value = adjustedBrightness(value, action == MENU_INCREASE);
+        value = adjustedBrightness(value, action == MENU_INCREASE,
+                                   adjustmentStep);
         pwm.setLogical(userPwmMenuIndex, userPwm12(value));
       }
       menuFeedback(fromRemote);
       return;
     }
 #endif
-
-    case MODE_USER_RELAY_CHANNEL_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_USER_RELAYS);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_USER_RELAY_BEHAVIOR_EDIT);
-      } else if (action == MENU_INCREASE) {
-        userRelayMenuIndex =
-            static_cast<uint8_t>((userRelayMenuIndex + 1) % 4);
-      } else {
-        userRelayMenuIndex =
-            userRelayMenuIndex == 0
-                ? 3
-                : static_cast<uint8_t>(userRelayMenuIndex - 1);
-      }
-      menuFeedback(fromRemote);
-      return;
-
-    case MODE_USER_RELAY_BEHAVIOR_EDIT:
-      if (action == MENU_PREVIOUS) {
-        modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
-      } else if (action == MENU_NEXT) {
-        modeManager.transitionTo(MODE_USER_RELAY_CONTROL);
-      } else {
-        userRelayBehavior = action == MENU_INCREASE ? 1 : 0;
-      }
-      menuFeedback(fromRemote);
-      return;
-
-    case MODE_USER_RELAY_CONTROL:
-      if (action == MENU_PREVIOUS) {
-        setSelectedUserRelay(false, actionNow);
-        modeManager.transitionTo(MODE_USER_RELAY_BEHAVIOR_EDIT);
-      } else if (action == MENU_NEXT) {
-        setSelectedUserRelay(false, actionNow);
-        modeManager.transitionTo(MODE_USER_RELAYS);
-      } else if (action == MENU_DECREASE) {
-        setSelectedUserRelay(false, actionNow);
-      } else if (userRelayBehavior == 0) {
-        setSelectedUserRelay(!selectedUserRelayActive(), actionNow);
-      } else {
-        setSelectedUserRelay(true, actionNow);
-      }
-      menuFeedback(fromRemote);
-      return;
 
     case MODE_MOTION_CONTROL: {
       const uint8_t side = action >= MENU_DECREASE ? 1 : 0;
@@ -856,10 +801,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (action == MENU_NEXT) {
         modeManager.transitionTo(MODE_RELAY_VALUE_EDIT);
       } else if (action == MENU_INCREASE) {
-        relayMenuIndex = static_cast<uint8_t>((relayMenuIndex + 1) % 8);
+        relayMenuIndex = rollMenuIndex(relayMenuIndex, 8, true);
       } else {
-        relayMenuIndex =
-            relayMenuIndex == 0 ? 7 : static_cast<uint8_t>(relayMenuIndex - 1);
+        relayMenuIndex = rollMenuIndex(relayMenuIndex, 8, false);
       }
       menuFeedback(fromRemote);
       return;
@@ -892,7 +836,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       // the latency-sensitive input turn. K4 below performs the reciprocal
       // unmute, so a silent board can always be recovered from the TM1637.
       if (menuPage == PAGE_SOUND) {
-        setSilentMode(true, actionNow);
+        setSilentMode(!settingsStore.values().silent(), actionNow);
       // rELY owns immediate All-Off; the unified page handled its own K3.
       } else if (leafDecreaseAction(modeManager.current()) ==
           LeafDecreaseAction::AllRelaysOff) {
@@ -906,15 +850,13 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       break;
     case MENU_INCREASE:
-#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
-    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+#if PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
       if (menuPage == PAGE_ILLUMINATION) {
-        beginEditTransaction(MODE_ILLUMINATION);
         modeManager.transitionTo(MODE_ILLUMINATION_MODE_EDIT);
       } else
 #endif
       if (menuPage == PAGE_SOUND) {
-        setSilentMode(false, actionNow);
+        setSilentMode(!settingsStore.values().silent(), actionNow);
 #if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
       } else if (menuPage == PAGE_PWM) {
         beginEditTransaction(MODE_PWM);
@@ -933,16 +875,19 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         }
         modeManager.transitionTo(MODE_USER_PWM_CHANNEL_EDIT);
 #endif
-      } else if (menuPage == PAGE_USER_RELAYS) {
-        modeManager.transitionTo(MODE_USER_RELAY_CHANNEL_EDIT);
-      } else if (menuPage == PAGE_MOTION) {
+      } else if (menuPage == PAGE_KEYS) {
         if (relays.motionAllowed()) {
           modeManager.transitionTo(MODE_MOTION_CONTROL);
         } else {
           buzzer.error();
         }
       } else if (menuPage == PAGE_RF) {
-        beginLearning(RF_LEARN_INDEFINITE, 0);
+        if (!hostUnavailable()) {
+          beginLearning(RF_LEARN_INDEFINITE, 0);
+        } else {
+          display.showUnavailable();
+          menuLabelEndsAt = actionNow + 650;
+        }
       } else {
         display.showText(commonText(TextError));
         menuLabelEndsAt = actionNow + 650;
@@ -991,9 +936,7 @@ void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
   }
 #endif
 
-  const bool momentary = mode == MODE_MOTION_CONTROL ||
-                         (mode == MODE_USER_RELAY_CONTROL &&
-                          userRelayBehavior && bit == BoardPins::KeyIncrease);
+  const bool momentary = mode == MODE_MOTION_CONTROL;
   if (momentary) {
     if (event == KeyEvent::Down) {
       if (mode == MODE_MOTION_CONTROL) {
@@ -1017,32 +960,21 @@ void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
                            sizeof(payload));
           }
         }
-      } else {
-        handleMenuAction(bit, source == InputEventSource::Radio);
-        const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
-        if (emitEvidence) {
-          acceptedAction(source, ControllerProtocol::RemoteKeyGesture, payload,
-                         sizeof(payload));
-        }
       }
     } else if (event == KeyEvent::Up) {
       now = millis();
       const uint32_t releaseNow = now;
-      if (mode == MODE_MOTION_CONTROL) {
-        if ((motionPressedMask & _BV(bit)) == 0) {
-          return;
-        }
-        motionPressedMask &= static_cast<uint8_t>(~_BV(bit));
-        const MotionKeyBinding binding =
-            motionKeyBinding(static_cast<MenuAction>(bit));
-        relays.stopSide(static_cast<::RelaySide>(binding.side), releaseNow);
-        const uint8_t payload[] = {binding.side, 0};
-        if (emitEvidence) {
-          acceptedAction(source, ControllerProtocol::RelaySide, payload,
-                         sizeof(payload));
-        }
-      } else {
-        setSelectedUserRelay(false, releaseNow);
+      if ((motionPressedMask & _BV(bit)) == 0) {
+        return;
+      }
+      motionPressedMask &= static_cast<uint8_t>(~_BV(bit));
+      const MotionKeyBinding binding =
+          motionKeyBinding(static_cast<MenuAction>(bit));
+      relays.stopSide(static_cast<::RelaySide>(binding.side), releaseNow);
+      const uint8_t payload[] = {binding.side, 0};
+      if (emitEvidence) {
+        acceptedAction(source, ControllerProtocol::RelaySide, payload,
+                       sizeof(payload));
       }
     }
   } else if (keyEventRunsPrimaryAction(event) &&
@@ -1051,7 +983,12 @@ void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
     const bool recordingBefore = macroPlayback.recording();
 #endif
-    handleMenuAction(bit, source == InputEventSource::Radio);
+    const uint8_t adjustmentStep =
+        source == InputEventSource::Physical
+            ? keyAdjustmentStep(event, menuKeys[bit].heldForMs())
+            : 1;
+    handleMenuAction(bit, source == InputEventSource::Radio,
+                     adjustmentStep);
     const bool unifiedLifecycle = mode == MODE_MOTION &&
                                   bit >= BoardPins::KeyDecrease;
     const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};
@@ -1129,7 +1066,7 @@ void serviceMotionExit(uint32_t at) {
   } else if (static_cast<uint32_t>(at - motionExitStartedAt) >=
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {
-    setMenuPage(PAGE_MOTION);
+    setMenuPage(PAGE_KEYS);
 #if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     buzzer.success();
 #endif
@@ -1172,6 +1109,7 @@ void serviceSystemInputs(uint32_t at) {
       }
     }
   }
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
   // Clear the per-edge notification; the categorized state below is reported
   // only when it changes, so a blinking LED cannot flood the UART.
   systemInputs.consumeBluetoothEdge(value);
@@ -1187,6 +1125,7 @@ void serviceSystemInputs(uint32_t at) {
     appEvents.bluetooth(static_cast<uint8_t>(current));
     statusLeds.playCue(StatusLedCue::Bluetooth, 600, at);
   }
+#endif
 }
 
 // Polls both shift registers, then advances keys and motion-exit detection.
@@ -1204,8 +1143,7 @@ void serviceShiftRegisterAndKeys(uint32_t at) {
 }
 
 // Renders the current illumination mode from the packed flash text table.
-#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
-    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+#if PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
 void showIlluminationMode() {
   display.showText(commonText(pgm_read_byte(
       ModeTextOffsets + static_cast<uint8_t>(illumination.mode()))));
@@ -1424,8 +1362,7 @@ void serviceDisplay(uint32_t at) {
     display.showText(temperatureSegmentText[index]);
     return;
   }
-#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
-    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+#if PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
   if (currentMode == MODE_ILLUMINATION) {
     showIlluminationMode();
     return;
@@ -1481,11 +1418,6 @@ void serviceDisplay(uint32_t at) {
     return;
   }
 #endif
-  if (currentMode == MODE_USER_RELAYS) {
-    display.showInteger(static_cast<int32_t>(
-        relays.activeRelayMask() >> 4));
-    return;
-  }
   if (currentMode == MODE_MOTION) {
 #if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
     if (!timeReached(at, identifiedKeyEndsAt) && identifiedKey != 0) {
@@ -1500,10 +1432,10 @@ void serviceDisplay(uint32_t at) {
     } else if (macroPlayback.captured()) {
       display.showText(commonText(TextPlay));
     } else {
-      display.showText(commonText(TextSide));
+      display.showText(commonText(TextKey));
     }
 #else
-    display.showText(commonText(TextSide));
+    display.showText(commonText(TextKey));
 #endif
 #endif
     return;
@@ -1517,8 +1449,7 @@ void serviceDisplay(uint32_t at) {
     return;
   }
   switch (currentMode) {
-#if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && \
-    PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+#if PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
     case MODE_ILLUMINATION_MODE_EDIT:
       showIlluminationMode();
       return;
@@ -1583,17 +1514,6 @@ void serviceDisplay(uint32_t at) {
           settingsStore.values().userPwm[userPwmMenuIndex]);
       return;
 #endif
-    case MODE_USER_RELAY_CHANNEL_EDIT:
-      display.showInteger(static_cast<int32_t>(userRelayMenuIndex + 5));
-      return;
-    case MODE_USER_RELAY_BEHAVIOR_EDIT:
-      display.showText(commonText(userRelayBehavior == 0 ? TextToggle
-                                                        : TextPush));
-      return;
-    case MODE_USER_RELAY_CONTROL:
-      display.showText(
-          commonText(selectedUserRelayActive() ? TextOn : TextOff));
-      return;
     case MODE_MOTION_CONTROL: {
       const uint8_t mask = relays.activeRelayMask();
       const bool sideA = (mask & _BV(1)) != 0;

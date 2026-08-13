@@ -63,16 +63,18 @@ type Config struct {
 
 // Connection configures serial discovery, handshake timing, and reconnect behavior.
 type Connection struct {
-	Port             string          `json:"port,omitempty"`
-	VID              string          `json:"vid,omitempty"`
-	PID              string          `json:"pid,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	BaudRate         int             `json:"baud_rate"`
-	StartupWaitMS    int             `json:"startup_wait_ms"`
-	RequestTimeoutMS int             `json:"request_timeout_ms"`
-	HelloAttempts    int             `json:"hello_attempts"`
-	ResetOnReconnect bool            `json:"reset_on_reconnect"`
-	LastDevice       *DeviceIdentity `json:"last_device,omitempty"`
+	Port               string          `json:"port,omitempty"`
+	VID                string          `json:"vid,omitempty"`
+	PID                string          `json:"pid,omitempty"`
+	Name               string          `json:"name,omitempty"`
+	BaudRate           int             `json:"baud_rate"`
+	StartupWaitMS      int             `json:"startup_wait_ms"`
+	RequestTimeoutMS   int             `json:"request_timeout_ms"`
+	HelloAttempts      int             `json:"hello_attempts"`
+	ReconnectInitialMS int             `json:"reconnect_initial_ms"`
+	ReconnectMaximumMS int             `json:"reconnect_maximum_ms"`
+	ResetOnReconnect   bool            `json:"reset_on_reconnect"`
+	LastDevice         *DeviceIdentity `json:"last_device,omitempty"`
 }
 
 // DeviceIdentity records the last successfully connected USB serial device.
@@ -325,13 +327,15 @@ func Defaults() Config {
 	return Config{
 		Schema: SchemaVersion,
 		Connection: Connection{
-			VID:              "1A86",
-			PID:              "7523",
-			Name:             "USB-SERIAL CH340",
-			BaudRate:         115200,
-			StartupWaitMS:    1200,
-			RequestTimeoutMS: 1200,
-			HelloAttempts:    3,
+			VID:                "1A86",
+			PID:                "7523",
+			Name:               "USB-SERIAL CH340",
+			BaudRate:           115200,
+			StartupWaitMS:      1200,
+			RequestTimeoutMS:   1200,
+			HelloAttempts:      3,
+			ReconnectInitialMS: 1000,
+			ReconnectMaximumMS: 15_000,
 		},
 		UI: UI{
 			AppTitle: productidentity.DefaultAppTitle(),
@@ -561,6 +565,12 @@ func (value Config) Validate() error {
 	}
 	if connection.HelloAttempts < 1 || connection.HelloAttempts > 10 {
 		return fmt.Errorf("connection.hello_attempts must be 1..10")
+	}
+	if connection.ReconnectInitialMS < 100 || connection.ReconnectInitialMS > 60_000 {
+		return fmt.Errorf("connection.reconnect_initial_ms must be 100..60000")
+	}
+	if connection.ReconnectMaximumMS < connection.ReconnectInitialMS || connection.ReconnectMaximumMS > 300_000 {
+		return fmt.Errorf("connection.reconnect_maximum_ms must be reconnect_initial_ms..300000")
 	}
 	if title := strings.TrimSpace(value.UI.AppTitle); title == "" ||
 		utf8.RuneCountInString(title) > 64 || !printableText(title) {

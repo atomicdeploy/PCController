@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/installer"
@@ -290,6 +291,18 @@ func envInt(name string, fallback int) int {
 	return parsed
 }
 
+func envDuration(name string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
 func printUsage(output io.Writer, configuredTitle ...string) {
 	title := ""
 	if len(configuredTitle) != 0 {
@@ -323,7 +336,8 @@ Device, firmware and recovery:
 	controller program --operation DIAGNOSTIC [program flags]
   controller boot probe|info|metadata|backup|read|write|verify|start [flags]
 	controller toolchain check|update|bootstrap|lock|sync|profile|compile|core-info|install-bootloader [flags]
-	controller board provision [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--bootloader-only]
+	controller board initialize [--skip-toolchain]
+	controller board provision [--name NAME] [--uart auto|PORT|none] [--firmware HEX] [--force-initialize]
 	controller board blank --confirm NAME [--uart auto|PORT|none]
 	controller board name [get|set NAME|clear]
 	controller driver usbasp status | ensure | install [--package DIR] | zadig [--latest] [--download-only] [--exe FILE]

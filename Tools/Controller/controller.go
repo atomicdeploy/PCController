@@ -357,9 +357,12 @@ type Snapshot struct {
 	Hello             Hello                `json:"hello"`
 	Status            Status               `json:"status"`
 	Settings          Settings             `json:"settings"`
+	BoardName         BoardName            `json:"board_name"`
 	HaveStatus        bool                 `json:"have_status"`
 	HaveSettings      bool                 `json:"have_settings"`
+	HaveBoardName     bool                 `json:"have_board_name"`
 	StatusUpdated     time.Time            `json:"status_updated,omitempty"`
+	BoardNameUpdated  time.Time            `json:"board_name_updated,omitempty"`
 	ConnectionState   string               `json:"connection_state"`
 	ConnectionReason  string               `json:"connection_reason,omitempty"`
 	ConnectionUpdated time.Time            `json:"connection_updated,omitempty"`
@@ -1746,9 +1749,12 @@ func (client *Client) Snapshot() Snapshot {
 		Hello:             snapshot.Hello,
 		Status:            snapshot.Status,
 		Settings:          snapshot.Settings,
+		BoardName:         snapshot.BoardName,
 		HaveStatus:        snapshot.HaveStatus,
 		HaveSettings:      snapshot.HaveSettings,
+		HaveBoardName:     snapshot.HaveBoardName,
 		StatusUpdated:     snapshot.StatusUpdated,
+		BoardNameUpdated:  snapshot.BoardNameUpdated,
 		ConnectionState:   snapshot.ConnectionState,
 		ConnectionReason:  snapshot.ConnectionReason,
 		ConnectionUpdated: snapshot.ConnectionUpdated,

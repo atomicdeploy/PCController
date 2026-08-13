@@ -74,16 +74,9 @@ static_assert(PAGE_COUNT == PersistentMenuPageCount,
 constexpr bool BuildForcesSilent = PCCONTROLLER_FORCE_SILENT != 0;
 
 // Four-character labels are packed contiguously to avoid pointer tables in SRAM.
-// PAGE_KEYS is retained as an ID but is not rendered as an independent page.
-#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
-#define PCCONTROLLER_UNIFIED_PAGE_LABEL "KEY "
-#else
-#define PCCONTROLLER_UNIFIED_PAGE_LABEL "MOVE"
-#endif
 const char MenuLabels[] PROGMEM =
-    "doorVOLTCURRtLEDtBT LItEbEEPPWM rELY    uPWMr5-8"
-    PCCONTROLLER_UNIFIED_PAGE_LABEL "LErn";
-#undef PCCONTROLLER_UNIFIED_PAGE_LABEL
+    "door" "VOLT" "CURR" "tLED" "tBT " "LItE" "bEEP"
+    "PWM " "rELY" "KEY " "    " "    " "    " "LErn";
 static_assert(sizeof(MenuLabels) == PAGE_COUNT * 4U + 1U,
               "packed menu labels no longer match stable page IDs");
 const char EditLabels[] PROGMEM =

@@ -168,6 +168,21 @@ describe('offline and settings UI contracts', () => {
     }, 'en')).toEqual({ device: 'USB Serial COM4', firmware: 'v1.2.3 · #1234ABCD' })
   })
 
+  it('renders the detected EEPROM board name as an editable dashboard identity', () => {
+	const connected = {
+	  ...emptySnapshot,
+	  connected: true,
+	  have_board_name: true,
+	  board_name: { name: 'CAFE', persisted: true },
+	  hello: { ...emptySnapshot.hello, name: 'PCController', capabilities: 0x80000000 },
+	}
+	const markup = renderToStaticMarkup(<DashboardView {...shared()} snapshot={connected} />)
+	expect(markup).toContain('>CAFE</a>')
+	expect(markup).toContain('id="dashboard-board-name"')
+	expect(markup).toContain('value="CAFE"')
+	expect(markup).toContain('EEPROM')
+  })
+
   it('keeps the first-run synchronization phase truthful before a controller is known', () => {
     const markup = renderToStaticMarkup(<BootGate
       open

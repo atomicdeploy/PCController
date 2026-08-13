@@ -908,6 +908,16 @@ later candidate opens cannot create a reset storm, changing only this setting
 does not reconnect, acknowledged application resets do not consume/re-trigger
 the policy, and TCP endpoints are never pulsed.
 
+Serial authentication failures are not retried once per second. Configure
+`connection.reconnect_initial_ms` (default `1000`) and
+`connection.reconnect_maximum_ms` (default `15000`) in the same configuration
+file, or override one process with `PCCONTROLLER_RECONNECT_INITIAL` /
+`PCCONTROLLER_RECONNECT_MAX` (Go duration syntax) or `--reconnect-initial` /
+`--reconnect-max`. Delay doubles after each failed attempt up to the cap; after
+the second failure the shared snapshot/event state is `unavailable`, retaining
+the last USB identity. A real USB change or an authenticated HELLO resets the
+schedule. `close` remains the explicit way to pause reconnect completely.
+
 ## Programming
 
 Bootstrap the latest resolved, host-data-local firmware toolchain with
@@ -931,31 +941,35 @@ bin\controller.exe program flash ..\..\.build\firmware\PCController.ino.with_boo
 bin\controller.exe boot backup .\backups --device "USB-SERIAL CH340"
 ```
 
-For a blank ATmega328P board connected by USBasp, use the end-to-end
-initializer instead of composing fuse and flash commands manually:
+For a blank ATmega328P board connected by USBasp, use **initialize** for the
+ISP-only fuse/bootloader operation. Use **provision** afterward to inspect a
+healthy existing application or to upload an explicitly selected image:
 
 ```console
+bin\controller.exe board initialize --skip-toolchain
 bin\controller.exe board provision --uart auto
-bin\controller.exe board provision --uart none --bootloader-only
-bin\controller.exe board provision --portable-cli --uart COM4
-bin\controller.exe board provision --name EDGE-01 --uart auto
+bin\controller.exe board provision --firmware .\PCController.ino.hex --uart COM4
+bin\controller.exe board provision --force-initialize --firmware .\PCController.ino.hex --uart COM4
 bin\controller.exe board blank --confirm EDGE-01 --uart auto
 ```
 
-It installs or repairs the selected FQBN's exact toolchain, compiles before
-touching the MCU, validates the ISP signature, captures a complete backup,
-burns the stock core-provided bootloader/fuse/lock policy, and retries the first
+`board initialize` installs or repairs the selected FQBN's exact toolchain,
+validates the ISP signature, captures a complete backup, burns the stock
+core-provided bootloader/fuse/lock policy, and retries the first
 failed USBasp exchange at `-B32`. If slow discovery was required, the host first
 completes the mandatory backup, resolves the selected FQBN's own
 `bootloader.*_fuses` properties, and applies only those fuse bytes at `-B32`.
 It then retries a normal-speed probe and uses fast `usbasp` for the bootloader
 whenever the corrected clock policy permits; `usbasp_slow` remains the bounded
-fallback when that retry still fails. With UART it then programs with mandatory
-readback, authenticates the first application HELLO, persists factory settings,
-and probes available peripherals. Missing INA219, PCA9685, DS18B20, or LCD
-hardware is reported as a warning rather than preventing the present hardware
-from being commissioned. Without UART, bootloader installation succeeds and
-the serial/application phase is explicitly skipped.
+fallback when that retry still fails. It deliberately does not compile or write
+an application. `board provision --uart auto` authenticates existing firmware
+first and skips ISP initialization if that application is healthy. Supplying
+`--firmware HEX` uploads that exact image through the verified UART bootloader.
+If application authentication fails, Provision probes Urboot before it falls
+back to ISP setup, preserving a usable bootloader during application repair;
+`--force-initialize` explicitly requests ISP setup before the upload. Missing
+INA219, PCA9685, DS18B20, or LCD hardware is a warning, not a commissioning
+failure.
 
 The optional board name is at most eight printable ASCII characters with no
 surrounding whitespace. It is committed and read back after the first native

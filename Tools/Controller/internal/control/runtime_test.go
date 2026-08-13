@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"testing"
 	"time"
@@ -15,6 +16,69 @@ import (
 
 type reconnectTestPort struct {
 	closed chan struct{}
+}
+
+func TestPushedStatusKeepsFrontPanelMetadataCoherent(t *testing.T) {
+	runtime := New(Options{})
+	runtime.haveFrontPanel = true
+	runtime.frontPanel = native.FrontPanel{Schema: 2, MenuPage: 0, ProgramMode: 1}
+	payload := make([]byte, native.StatusPayloadSize)
+	binary.LittleEndian.PutUint32(payload[4:8], uint32(0x80000000))
+	binary.LittleEndian.PutUint32(payload[8:12], uint32(0x80000000))
+	binary.LittleEndian.PutUint32(payload[12:16], uint32(0x80000000))
+	binary.LittleEndian.PutUint32(payload[16:20], uint32(0x80000000))
+	binary.LittleEndian.PutUint16(payload[20:22], uint16(0x8000))
+	binary.LittleEndian.PutUint16(payload[22:24], uint16(0x8000))
+	payload[27], payload[29], payload[30] = 4, 9, 13
+	runtime.observeLocked(native.Frame{Opcode: native.OpStatus, Payload: payload})
+	if runtime.frontPanel.MenuPage != 9 || runtime.frontPanel.ProgramMode != 13 ||
+		runtime.frontPanel.PressedKeys != 4 {
+		t.Fatalf("front-panel metadata stayed stale: %+v", runtime.frontPanel)
+	}
+}
+
+func TestFrontPanelReconnectStateEventCarriesAuthoritativePresentation(t *testing.T) {
+	panel := native.FrontPanel{
+		RawSegments: [4]byte{0x3F, 0x73, 0x79, 0x54},
+		Brightness:  5,
+	}
+	event := frontPanelStateEvent(panel, time.Unix(123, 0))
+	if event.Kind != "front_panel.segment" || event.Stream != EventStreamState ||
+		event.Target != "app.clients" || event.Metadata["raw_segments"] != "3F737954" ||
+		event.Metadata["brightness"] != "5" {
+		t.Fatalf("front-panel reconnect event = %#v", event)
+	}
+}
+
+func TestExtendedSettingsDetectsAndPublishesBoardNameOncePerChange(t *testing.T) {
+	runtime := New(Options{})
+	payload, err := native.SettingsWithBoardNamePayload(native.DefaultSettings(), "CAFE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := append([]byte{}, payload[:15]...)
+	response = append(response, 1, 1, byte(len("CAFE")))
+	response = append(response, "CAFE"...)
+
+	runtime.mu.Lock()
+	runtime.observeLocked(native.Frame{Opcode: native.OpSettings, Payload: response})
+	runtime.mu.Unlock()
+	snapshot := runtime.Snapshot()
+	if !snapshot.HaveBoardName || snapshot.BoardName.Name != "CAFE" ||
+		!snapshot.BoardName.Persisted || snapshot.BoardNameUpdated.IsZero() {
+		t.Fatalf("board name snapshot = %#v", snapshot)
+	}
+	event, err := runtime.WaitEvent(context.Background(), 0, "board.name.changed")
+	if err != nil || event.State != "CAFE" || event.Metadata["persisted"] != "true" {
+		t.Fatalf("board name event = %#v, err=%v", event, err)
+	}
+	last := runtime.LatestEventID()
+	runtime.mu.Lock()
+	runtime.observeLocked(native.Frame{Opcode: native.OpSettings, Payload: response})
+	runtime.mu.Unlock()
+	if runtime.LatestEventID() != last {
+		t.Fatal("identical SETTINGS board name produced a duplicate change event")
+	}
 }
 
 func TestOldPumpFramesAreRejectedAfterSessionReplacement(t *testing.T) {
@@ -38,6 +102,17 @@ func TestOldPumpFramesAreRejectedAfterSessionReplacement(t *testing.T) {
 	}
 	if !runtime.sessionGenerationCurrent(newSession, 8) {
 		t.Fatal("replacement session generation was rejected")
+	}
+}
+
+func TestReconnectBackoffDefaultsAndCap(t *testing.T) {
+	defaults := normalizedOptions(Options{})
+	if defaults.ReconnectInitial != time.Second || defaults.ReconnectMaximum != 15*time.Second {
+		t.Fatalf("reconnect defaults=%s/%s, want 1s/15s", defaults.ReconnectInitial, defaults.ReconnectMaximum)
+	}
+	capped := normalizedOptions(Options{ReconnectInitial: 4 * time.Second, ReconnectMaximum: time.Second})
+	if capped.ReconnectMaximum != 4*time.Second {
+		t.Fatalf("reconnect cap=%s, want initial 4s", capped.ReconnectMaximum)
 	}
 }
 
@@ -551,7 +626,7 @@ func TestEventStreamClassification(t *testing.T) {
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
 		"rx": EventStreamDebug, "action.applied": EventStreamDebug,
 		"front_panel.segment": EventStreamState,
-		"status_led.changed":   EventStreamState, "buzzer.note": EventStreamState,
+		"status_led.changed":  EventStreamState, "buzzer.note": EventStreamState,
 		"app.instance.changed": EventStreamState, "relay.changed": EventStreamState,
 		"operation.applied": EventStreamState, "sensor.sample": EventStreamTelemetry,
 		"animation.frame": EventStreamState,

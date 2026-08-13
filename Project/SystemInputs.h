@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "../ProjectConfig.h"
+
 // BluetoothIndicatorState classifies the BT Audio indicator's steady/blink signal.
 enum class BluetoothIndicatorState : uint8_t {
   Off = 0,
@@ -46,15 +48,16 @@ private:
   static bool bitHigh(uint8_t value, uint8_t bit);
 
   DebouncedInput door_;
-  DebouncedInput bluetooth_;
-  // begin() seeds this before any consumer; zero initialization keeps the
-  // whole 39-byte singleton out of the flash-backed .data section.
+  // Always retained: raw diagnostics and the door input share this byte.
   uint8_t rawInputs_ = 0;
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
+  DebouncedInput bluetooth_;
   bool bluetoothHasTransitioned_ = false;
   bool bluetoothBlinkObserved_ = false;
   uint32_t lastBluetoothTransitionAt_ = 0;
   uint32_t lastBluetoothOnMs_ = 0;
   uint32_t lastBluetoothOffMs_ = 0;
+#endif
 };
 
 // systemInputs is the single debounced door and BT Audio input service.

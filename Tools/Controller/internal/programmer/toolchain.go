@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -168,6 +169,126 @@ type ToolchainBootstrapReport struct {
 	UserDir              string              `json:"user_dir"`
 	ProxyVariables       []string            `json:"proxy_variables,omitempty"`
 	Steps                []ToolchainSyncStep `json:"steps"`
+}
+
+// ToolchainAdoptReport describes a local, network-free migration from a
+// previously verified managed Arduino workspace into an existing shared
+// Arduino installation. It never downloads or invokes an external copier.
+type ToolchainAdoptReport struct {
+	SourceData string   `json:"source_data"`
+	TargetData string   `json:"target_data"`
+	TargetUser string   `json:"target_user"`
+	Packages   []string `json:"packages"`
+	Libraries  []string `json:"libraries"`
+}
+
+// AdoptToolchain installs complete package-vendor and library directories
+// from a verified managed workspace into shared Arduino roots. Each directory
+// is staged beside its destination and swapped only after a complete copy, so
+// an interrupted migration cannot leave the target with half a core.
+func AdoptToolchain(sourceData, sourceUser, targetData, targetUser string) (ToolchainAdoptReport, error) {
+	report := ToolchainAdoptReport{SourceData: sourceData, TargetData: targetData, TargetUser: targetUser}
+	for _, value := range []struct{ label, path string }{
+		{"source data", sourceData}, {"source user", sourceUser},
+		{"target data", targetData}, {"target user", targetUser},
+	} {
+		if strings.TrimSpace(value.path) == "" || !filepath.IsAbs(value.path) {
+			return report, fmt.Errorf("%s directory must be absolute", value.label)
+		}
+	}
+	packageRoot := filepath.Join(sourceData, "packages")
+	for _, vendor := range []string{"arduino", "builtin", "MiniCore"} {
+		source := filepath.Join(packageRoot, vendor)
+		if info, err := os.Stat(source); err != nil || !info.IsDir() {
+			return report, fmt.Errorf("verified source package %s is unavailable: %w", vendor, err)
+		}
+		if err := adoptDirectory(source, filepath.Join(targetData, "packages", vendor)); err != nil {
+			return report, fmt.Errorf("adopt package %s: %w", vendor, err)
+		}
+		report.Packages = append(report.Packages, vendor)
+	}
+	sourceLibraries := filepath.Join(sourceUser, "libraries")
+	entries, err := os.ReadDir(sourceLibraries)
+	if err != nil {
+		return report, fmt.Errorf("read verified source libraries: %w", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if err := adoptDirectory(
+			filepath.Join(sourceLibraries, entry.Name()),
+			filepath.Join(targetUser, "libraries", entry.Name()),
+		); err != nil {
+			return report, fmt.Errorf("adopt library %s: %w", entry.Name(), err)
+		}
+		report.Libraries = append(report.Libraries, entry.Name())
+	}
+	return report, nil
+}
+
+func adoptDirectory(source, target string) error {
+	parent := filepath.Dir(target)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(parent, ".pccontroller-adopt-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+	if err := filepath.WalkDir(source, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(source, path)
+		if err != nil {
+			return err
+		}
+		destination := filepath.Join(stage, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(destination, 0o755)
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		input, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		output, err := os.OpenFile(destination, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
+		if err != nil {
+			_ = input.Close()
+			return err
+		}
+		_, copyErr := io.Copy(output, input)
+		inputCloseErr := input.Close()
+		closeErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if inputCloseErr != nil {
+			return inputCloseErr
+		}
+		return closeErr
+	}); err != nil {
+		return err
+	}
+	backup := target + ".pccontroller-previous"
+	_ = os.RemoveAll(backup)
+	if _, err := os.Stat(target); err == nil {
+		if err := os.Rename(target, backup); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := os.Rename(stage, target); err != nil {
+		_ = os.Rename(backup, target)
+		return err
+	}
+	return os.RemoveAll(backup)
 }
 
 // BootstrapToolchain installs a pinned CLI into the host data directory, then

@@ -53,6 +53,11 @@ void testKeyGestures() {
               !keyEventRunsPrimaryAction(KeyEvent::Click) &&
               !keyEventRunsPrimaryAction(KeyEvent::HoldStart),
           "primary actions must run on Down/repeat, never deferred Click");
+  require(keyAdjustmentStep(KeyEvent::Down, 0) == 1 &&
+              keyAdjustmentStep(KeyEvent::HoldRepeat, 900) == 10 &&
+              keyAdjustmentStep(KeyEvent::HoldRepeat,
+                                KEY_HOLD_FAST_AFTER_MS) == 100,
+          "press/hold numeric acceleration must remain 1/10/100");
 
   {
     Key key(0);
@@ -111,6 +116,8 @@ void testKeyGestures() {
     key.update(2801);
     key.update(3801);
     key.update(3861);
+    require(key.heldForMs(3861) == 1860,
+            "held duration did not preserve the physical press edge");
     shiftRegisters.setVirtualInput(2, false);
     key.update(3900);
     key.update(3950);
@@ -346,6 +353,11 @@ void testMotionDoorPolicyMatrixAndEntryPaths() {
 
 void testTransitionsAndRollover() {
   using namespace TransitionMath;
+	require(rollMenuIndex(0, 8, false) == 7 &&
+			rollMenuIndex(7, 8, true) == 0 &&
+			rollMenuIndex(0, 3, false) == 2 &&
+			rollMenuIndex(2, 3, true) == 0,
+		"relay/illumination/PWM menu selectors did not roll both directions");
   require(rollByte(240, 16, true) == 255 &&
               rollByte(255, 16, true) == 0 &&
               rollByte(16, 16, false) == 0 &&
@@ -463,11 +475,21 @@ void testFrontPanelLeafDecreaseDispatch() {
             "leaf K3 dispatch no longer matches its page context");
   }
 
-  require(canonicalFrontPanelPage(PAGE_KEYS) == PAGE_MOTION &&
-              canonicalFrontPanelPage(PAGE_MOTION) == PAGE_MOTION &&
-              !frontPanelPageCompiled(PAGE_KEYS) &&
-              frontPanelPageCompiled(PAGE_MOTION),
-          "retired KEY page is no longer one canonical MOVE surface");
+  require(canonicalFrontPanelPage(PAGE_MOTION) == PAGE_KEYS &&
+              canonicalFrontPanelPage(PAGE_KEYS) == PAGE_KEYS &&
+              frontPanelPageCompiled(PAGE_KEYS) &&
+              !frontPanelPageCompiled(PAGE_MOTION),
+          "retired MOVE page is no longer one canonical KEY surface");
+  require(canonicalFrontPanelPage(PAGE_USER_RELAYS) == PAGE_RELAY &&
+              frontPanelPageCompiled(PAGE_RELAY) &&
+              !frontPanelPageCompiled(PAGE_USER_RELAYS),
+          "retired r5-8 page escaped the canonical relay controller");
+  require(canonicalFrontPanelPage(PAGE_USER_PWM) == PAGE_PWM &&
+              !frontPanelPageCompiled(PAGE_PWM) &&
+              !frontPanelPageCompiled(PAGE_USER_PWM),
+          "PWM/uPWM must remain one disabled production surface");
+  require(frontPanelPageCompiled(PAGE_ILLUMINATION),
+          "door-driven LItE page was not compiled independently of raw PWM");
   require(unifiedInputIntent(MENU_PREVIOUS, true) ==
                   UnifiedInputIntent::PreviousPage &&
               unifiedInputIntent(MENU_NEXT, true) ==

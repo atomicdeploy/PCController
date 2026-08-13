@@ -32,15 +32,22 @@ enum MenuPage : uint8_t {
   PAGE_COUNT
 };
 
-// PAGE_KEYS remains a stable protocol/EEPROM ID, but the AVR only presents a
-// single input page.  This prevents a key-ID page from trapping an operator or
-// spending bytes in the normal motion build.
+// Alpha aliases collapse retired duplicate pages into one relay controller,
+// one PWM controller, and one Key/motion controller. Only the canonical page
+// is navigable; host tooling may still normalize an old numeric page ID.
 constexpr uint8_t canonicalFrontPanelPage(uint8_t page) {
-  return page == PAGE_KEYS ? static_cast<uint8_t>(PAGE_MOTION) : page;
+  return page == PAGE_USER_RELAYS
+             ? static_cast<uint8_t>(PAGE_RELAY)
+             : (page == PAGE_USER_PWM
+                    ? static_cast<uint8_t>(PAGE_PWM)
+                    : (page == PAGE_MOTION
+                           ? static_cast<uint8_t>(PAGE_KEYS)
+                           : page));
 }
 
 constexpr bool frontPanelPageCompiled(uint8_t page) {
-  if (page >= PAGE_COUNT || page == PAGE_KEYS) {
+  if (page >= PAGE_COUNT || page == PAGE_USER_PWM ||
+      page == PAGE_USER_RELAYS || page == PAGE_MOTION) {
     return false;
   }
 #if !PCCONTROLLER_ENABLE_INA219
@@ -53,14 +60,21 @@ constexpr bool frontPanelPageCompiled(uint8_t page) {
     return false;
   }
 #endif
-#if !PCCONTROLLER_ENABLE_PCA9685 || !PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
-  if (page == PAGE_ILLUMINATION || page == PAGE_PWM || page == PAGE_USER_PWM) {
+#if !PCCONTROLLER_ENABLE_PCA9685
+  if (page == PAGE_ILLUMINATION || page == PAGE_PWM) {
     return false;
   }
-#elif !PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
+#else
+#if !PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
+  if (page == PAGE_PWM) {
+    return false;
+  }
+#endif
+#if !PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
   if (page == PAGE_ILLUMINATION) {
     return false;
   }
+#endif
 #endif
 #if !PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
   if (page == PAGE_RF) {
@@ -112,6 +126,17 @@ enum class LeafDecreaseAction : uint8_t {
   ParentCategory,
   AllRelaysOff,
 };
+
+// Rolls any zero-based modal selector in both directions. Relay number,
+// illumination mode, and optional PWM channel editors share this endpoint
+// contract so no profile can trap K3/K4 at its first or last value.
+constexpr uint8_t rollMenuIndex(uint8_t value, uint8_t count, bool increase) {
+  if (count == 0) return 0;
+  value = value < count ? value : static_cast<uint8_t>(count - 1U);
+  return increase
+             ? static_cast<uint8_t>(value + 1U == count ? 0 : value + 1U)
+             : static_cast<uint8_t>(value == 0 ? count - 1U : value - 1U);
+}
 
 constexpr LeafDecreaseAction leafDecreaseAction(ProgramMode mode) {
   return mode == MODE_RELAY ? LeafDecreaseAction::AllRelaysOff

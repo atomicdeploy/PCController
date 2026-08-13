@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -159,6 +160,22 @@ func (model Model) commitSettingEditor() (Model, tea.Cmd, bool) {
 
 func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 	editor := model.settingEditor
+	if editor.Key == "board.name" {
+		name := editor.Text
+		if err := native.ValidateBoardName(name); err != nil {
+			model.setNotice("Board name was not saved: " + err.Error())
+			return model, nil, true
+		}
+		if model.preview != nil {
+			model.preview.BoardName = native.BoardName{Name: name}
+			model.preview.HaveBoardName = true
+		}
+		model.settingEditor = nil
+		if name == "" {
+			return model.dispatchLine("board name clear")
+		}
+		return model.dispatchLine("board name set " + strconv.Quote(name))
+	}
 	settings := model.snapshot().Settings
 	var valueErr error
 	record := func(key string, err error) {

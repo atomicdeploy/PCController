@@ -30,7 +30,7 @@ static inline __attribute__((always_inline)) void initializeController() {
   const bool programming = settings.programmingMode();
   menuPage = canonicalFrontPanelPage(settings.defaultMenuPage);
   if (!frontPanelPageCompiled(menuPage)) {
-    menuPage = PAGE_MOTION;
+    menuPage = PAGE_KEYS;
   }
   buzzer.setMuted(effectiveSilentMode() || programming);
   streamPeriodMs = settings.streamPeriodMs;
@@ -209,6 +209,7 @@ static inline __attribute__((always_inline)) void serviceController() {
   } else if ((hostLcdFlags & HOST_PROGRAM_RUNNING) != 0) {
     desiredLedMode = StatusLedMode::Running;
   } else {
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
     const BluetoothIndicatorState btState = systemInputs.bluetoothState(loopNow);
     // A blinking indicator means powered but waiting for connection; keep it
     // distinct from the deliberate green/red powered-off indication.
@@ -217,6 +218,9 @@ static inline __attribute__((always_inline)) void serviceController() {
                          : (btState == BluetoothIndicatorState::Blinking
                                 ? StatusLedMode::Waiting
                                 : StatusLedMode::Disconnected);
+#else
+    desiredLedMode = StatusLedMode::Connected;
+#endif
   }
   if (statusLeds.mode() != desiredLedMode) {
     statusLeds.setMode(desiredLedMode, loopNow);

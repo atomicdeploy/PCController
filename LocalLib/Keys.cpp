@@ -41,6 +41,13 @@ bool Key::isPressed() const { return stableState_; }
 
 bool Key::isHeld() const { return holdActive_; }
 
+uint16_t Key::heldForMs(uint32_t now) const {
+  return stableState_
+             ? static_cast<uint16_t>(static_cast<uint16_t>(now) -
+                                     rawChangedAt_)
+             : 0;
+}
+
 uint8_t Key::inputBit() const { return bit_; }
 
 void Key::setEventCallback(KeyEventCallback callback, void *context) {

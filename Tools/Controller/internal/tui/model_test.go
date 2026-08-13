@@ -1173,10 +1173,31 @@ func TestTableColumnsUseVisibleCellPadding(t *testing.T) {
 
 func TestBoardPageShowsSafetyAndAudioCueSettings(t *testing.T) {
 	rendered := PreviewFrame(PageBoardSettings, 132, 42)
-	for _, expected := range []string{"Motion allowed by door state", "Door open/close buzzer cues", "Relay on/off buzzer cues"} {
+	for _, expected := range []string{"Motion allowed by door state", "Door open/close buzzer cues", "Relay on/off buzzer cues", "Board name", "DEMO"} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("board settings missing %q:\n%s", expected, rendered)
 		}
+	}
+}
+
+func TestBoardNameEditorUsesPersistentBoardCommand(t *testing.T) {
+	model := readyModel(t, PageBoardSettings)
+	for index, row := range model.boardSettingRows() {
+		if row.Key == "board.name" {
+			model.cursor = index
+			break
+		}
+	}
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if model.settingEditor == nil || !model.settingEditor.IsText || model.settingEditor.Text != "DEMO" {
+		t.Fatalf("board-name editor = %#v", model.settingEditor)
+	}
+	model.settingEditor.Text = "CAFE"
+	updated, command := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+	if command == nil || model.settingEditor != nil || model.preview.BoardName.Name != "CAFE" {
+		t.Fatalf("board-name save state = editor=%#v preview=%#v command=%v", model.settingEditor, model.preview.BoardName, command)
 	}
 }
 

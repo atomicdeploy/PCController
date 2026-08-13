@@ -21,6 +21,8 @@ type Options struct {
 	StartupWait      time.Duration
 	RequestTimeout   time.Duration
 	HelloAttempts    int
+	ReconnectInitial time.Duration
+	ReconnectMaximum time.Duration
 	ResetOnReconnect bool
 }
 
@@ -32,9 +34,12 @@ type Snapshot struct {
 	Hello             native.Hello
 	Status            native.Status
 	Settings          native.Settings
+	BoardName         native.BoardName
 	HaveStatus        bool
 	HaveSettings      bool
+	HaveBoardName     bool
 	StatusUpdated     time.Time
+	BoardNameUpdated  time.Time
 	ConnectionState   string
 	ConnectionReason  string
 	ConnectionUpdated time.Time
@@ -131,8 +136,11 @@ type Runtime struct {
 	hello                  native.Hello
 	status                 native.Status
 	settings               native.Settings
+	boardName              native.BoardName
 	haveStatus             bool
 	haveSettings           bool
+	haveBoardName          bool
+	boardNameUpdated       time.Time
 	frontPanel             native.FrontPanel
 	haveFrontPanel         bool
 	frontPanelUpdated      time.Time
@@ -274,6 +282,15 @@ func normalizedOptions(options Options) Options {
 	}
 	if options.HelloAttempts == 0 {
 		options.HelloAttempts = 3
+	}
+	if options.ReconnectInitial <= 0 {
+		options.ReconnectInitial = time.Second
+	}
+	if options.ReconnectMaximum <= 0 {
+		options.ReconnectMaximum = 15 * time.Second
+	}
+	if options.ReconnectMaximum < options.ReconnectInitial {
+		options.ReconnectMaximum = options.ReconnectInitial
 	}
 	return options
 }
@@ -482,9 +499,12 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		Hello:             runtime.hello,
 		Status:            runtime.status,
 		Settings:          runtime.settings,
+		BoardName:         runtime.boardName,
 		HaveStatus:        runtime.haveStatus,
 		HaveSettings:      runtime.haveSettings,
+		HaveBoardName:     runtime.haveBoardName,
 		StatusUpdated:     runtime.statusUpdated,
+		BoardNameUpdated:  runtime.boardNameUpdated,
 		ConnectionState:   runtime.connectionState,
 		ConnectionReason:  runtime.connectionReason,
 		ConnectionUpdated: runtime.connectionUpdated,
@@ -1159,6 +1179,9 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	runtime.hello = result.Hello
 	runtime.haveStatus = false
 	runtime.haveSettings = false
+	runtime.boardName = native.BoardName{}
+	runtime.haveBoardName = false
+	runtime.boardNameUpdated = time.Time{}
 	runtime.haveFrontPanel = false
 	runtime.frontPanel = native.FrontPanel{}
 	runtime.frontPanelUpdated = time.Time{}
@@ -1179,6 +1202,8 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	}
 	runtime.notifyConnectionReady(generation, result.Port, result.Hello)
 	go runtime.pump(result.Session, generation)
+	go runtime.refreshBoardName(generation)
+	go runtime.refreshFrontPanel(generation)
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
 	go runtime.programStateHeartbeat(generation)
@@ -1192,6 +1217,76 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 		result.Port,
 		"",
 	)
+}
+
+// refreshBoardName discovers the CRC-backed operator identity after every
+// authenticated connection. It is independent of status-profile provisioning,
+// so custom firmware profiles still populate the shared snapshot and clients.
+func (runtime *Runtime) refreshBoardName(generation uint64) {
+	runtime.mu.RLock()
+	if runtime.session == nil || runtime.generation != generation ||
+		runtime.hello.Capabilities&native.CapabilityBoardName == 0 {
+		runtime.mu.RUnlock()
+		return
+	}
+	timeout := runtime.options.RequestTimeout
+	runtime.mu.RUnlock()
+	if timeout <= 0 {
+		timeout = 1200 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	_, _ = runtime.requestAtGeneration(
+		ctx, generation, native.OpGetSettings, nil, native.OpSettings,
+	)
+	cancel()
+}
+
+// refreshFrontPanel closes the reset/reconnect race between the firmware's
+// changed-only segment publisher and a newly authenticated host session. The
+// board may have emitted its boot glyph before the serial pump was ready, so
+// every connection generation asks once for the authoritative presentation
+// and republishes it to all application clients.
+func (runtime *Runtime) refreshFrontPanel(generation uint64) {
+	runtime.mu.RLock()
+	if runtime.session == nil || runtime.generation != generation ||
+		runtime.hello.Capabilities&native.CapabilityFrontPanelSnapshot == 0 {
+		runtime.mu.RUnlock()
+		return
+	}
+	timeout := runtime.options.RequestTimeout
+	runtime.mu.RUnlock()
+	if timeout <= 0 {
+		timeout = 1200 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	frame, err := runtime.requestAtGeneration(
+		ctx, generation, native.OpFrontPanelGet, nil, native.OpFrontPanel,
+	)
+	cancel()
+	if err != nil {
+		return
+	}
+	panel, err := native.ParseFrontPanel(frame.Payload)
+	if err != nil {
+		return
+	}
+	runtime.publishEvent(frontPanelStateEvent(panel, time.Now()))
+}
+
+func frontPanelStateEvent(panel native.FrontPanel, at time.Time) Event {
+	return Event{
+		Kind: "front_panel.segment", Stream: EventStreamState,
+		Text: "seven-segment display synchronized", Time: at,
+		Source: "board", Target: "app.clients", MessageType: "state",
+		Metadata: map[string]string{
+			"raw_segments": fmt.Sprintf(
+				"%02X%02X%02X%02X",
+				panel.RawSegments[0], panel.RawSegments[1],
+				panel.RawSegments[2], panel.RawSegments[3],
+			),
+			"brightness": strconv.Itoa(int(panel.Brightness)),
+		},
+	}
 }
 
 // provisionDefaultStatusProfiles installs the Go-owned factory table only
@@ -1351,14 +1446,31 @@ func (runtime *Runtime) SetBoardName(ctx context.Context, name string) (native.B
 	if err := runtime.Command(ctx, native.OpSetSettings, payload); err != nil {
 		return native.BoardName{}, err
 	}
-	confirmed, err := runtime.BoardName(ctx)
-	if err != nil {
-		return native.BoardName{}, fmt.Errorf("read back board name: %w", err)
+	// EEPROM writes are deliberately cooperative.  The first SETTINGS response
+	// can already contain the new in-RAM name while Persisted remains false;
+	// keep that valid state observable, then wait for the durable record rather
+	// than declaring a protocol failure or reinitializing the board.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		confirmed, err := runtime.BoardName(ctx)
+		if err != nil {
+			return native.BoardName{}, fmt.Errorf("read back board name: %w", err)
+		}
+		if confirmed.Name != name {
+			return native.BoardName{}, fmt.Errorf("board name readback=%q; wanted %q", confirmed.Name, name)
+		}
+		if confirmed.Persisted {
+			return confirmed, nil
+		}
+		if !time.Now().Before(deadline) {
+			return native.BoardName{}, fmt.Errorf("board name %q was accepted but did not persist within 2s", name)
+		}
+		select {
+		case <-ctx.Done():
+			return native.BoardName{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
-	if !confirmed.Persisted || confirmed.Name != name {
-		return native.BoardName{}, fmt.Errorf("board name readback=%q persisted=%t; wanted %q", confirmed.Name, confirmed.Persisted, name)
-	}
-	return confirmed, nil
 }
 
 // syncProgramState mirrors the latest host-owned semantic state after HELLO
@@ -1719,13 +1831,21 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 	}
 	activityCheck := time.NewTicker(500 * time.Millisecond)
 	defer activityCheck.Stop()
-	safetyRetry := time.NewTimer(30 * time.Second)
-	defer safetyRetry.Stop()
+	runtime.mu.RLock()
+	initialRetryDelay := runtime.options.ReconnectInitial
+	runtime.mu.RUnlock()
+	retryDelay := initialRetryDelay
+	retry := time.NewTimer(time.Hour)
+	if !retry.Stop() {
+		<-retry.C
+	}
+	defer retry.Stop()
 	attempt := true
+	failures := 0
 	for {
 		runtime.mu.RLock()
 		active := runtime.reconnectEpoch == epoch &&
-			runtime.connectionState == "reconnecting" &&
+			(runtime.connectionState == "reconnecting" || runtime.connectionState == "unavailable") &&
 			!runtime.paused &&
 			runtime.session == nil
 		options := runtime.options
@@ -1748,20 +1868,35 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 			if err == nil && runtime.Snapshot().Connected {
 				return
 			}
+			failures++
 			if err != nil {
-				reason := err.Error()
+				reason := fmt.Sprintf("unavailable after %d failed authentication attempt(s); retry in %s: %v", failures, retryDelay, err)
 				runtime.mu.Lock()
 				changed := runtime.reconnectEpoch == epoch &&
-					runtime.connectionState == "reconnecting" &&
+					(runtime.connectionState == "reconnecting" || runtime.connectionState == "unavailable") &&
 					runtime.connectionReason != reason
 				if changed {
+					if failures >= 2 {
+						runtime.connectionState = "unavailable"
+					}
 					runtime.connectionReason = reason
 					runtime.connectionUpdated = time.Now()
 				}
 				port := runtime.port
 				runtime.mu.Unlock()
 				if changed {
-					runtime.publishConnection("reconnecting", port, reason)
+					lifecycle := "reconnecting"
+					if failures >= 2 {
+						lifecycle = "unavailable"
+					}
+					runtime.publishConnection(lifecycle, port, reason)
+				}
+			}
+			retry.Reset(retryDelay)
+			if retryDelay < options.ReconnectMaximum {
+				retryDelay *= 2
+				if retryDelay > options.ReconnectMaximum {
+					retryDelay = options.ReconnectMaximum
 				}
 			}
 		}
@@ -1772,11 +1907,12 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 				changes = nil
 			}
 			attempt = true
+			failures = 0
+			retryDelay = options.ReconnectInitial
 		case <-activityCheck.C:
 			// Re-check epoch/pause state without periodically enumerating.
-		case <-safetyRetry.C:
+		case <-retry.C:
 			attempt = true
-			safetyRetry.Reset(30 * time.Second)
 		}
 	}
 }
@@ -1806,11 +1942,36 @@ func (runtime *Runtime) observeLocked(frame native.Frame) {
 			runtime.haveStatus = true
 			runtime.statusUpdated = now
 			runtime.recordStatus(now, status)
+			// STATUS is the authoritative pushed menu/mode snapshot. SegmentChanged
+			// carries only cells/brightness, so keep the composite front-panel view
+			// coherent without polling FRONT_PANEL_GET after every physical key.
+			if runtime.haveFrontPanel {
+				runtime.frontPanel.MenuPage = status.MenuPage
+				runtime.frontPanel.ProgramMode = status.ProgramMode
+				runtime.frontPanel.PressedKeys = status.ActiveKeys
+				runtime.frontPanelUpdated = now
+			}
 		}
 	case native.OpSettings:
 		if settings, err := native.ParseSettings(frame.Payload); err == nil {
 			runtime.settings = settings
 			runtime.haveSettings = true
+		}
+		if name, err := native.ParseBoardNameFromSettings(frame.Payload); err == nil {
+			changed := !runtime.haveBoardName || runtime.boardName != name
+			runtime.boardName = name
+			runtime.haveBoardName = true
+			runtime.boardNameUpdated = time.Now()
+			if changed {
+				runtime.publishEvent(Event{
+					Kind: "board.name.changed", Stream: EventStreamState,
+					Text:  "board name is " + strconv.Quote(name.Name),
+					State: name.Name, Source: "board", Target: "app.clients",
+					Metadata: map[string]string{
+						"name": name.Name, "persisted": strconv.FormatBool(name.Persisted),
+					},
+				})
+			}
 		}
 	case native.OpFrontPanel:
 		if panel, err := native.ParseFrontPanel(frame.Payload); err == nil {

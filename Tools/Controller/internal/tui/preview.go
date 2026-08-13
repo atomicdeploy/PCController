@@ -29,7 +29,7 @@ func RichPreviewSnapshot() control.Snapshot {
 		Hello: native.Hello{
 			Name: "PCController", BoardKind: native.BoardKindPCController,
 			Capabilities: native.CapabilityFrontPanelSnapshot | native.CapabilityMenuDirectory | native.CapabilityRFLearnReplace |
-				native.CapabilityHostFrontPanel | native.CapabilityBuzzerBusy | native.CapabilityMenuLayout | native.CapabilityTimedMacroQueue,
+				native.CapabilityHostFrontPanel | native.CapabilityBuzzerBusy | native.CapabilityMenuLayout | native.CapabilityTimedMacroQueue | native.CapabilityBoardName,
 			IdentitySchema: native.IdentitySchemaCompact, BuildHash: 0x5DF10D05,
 			BuildTimestamp: 0x3501645C, BuildStamp: "260801123456",
 		},
@@ -50,6 +50,7 @@ func RichPreviewSnapshot() control.Snapshot {
 			MotionBreakMSValue: 1,
 		},
 		HaveStatus: true, HaveSettings: true, StatusUpdated: now,
+		BoardName: native.BoardName{Name: "DEMO", Persisted: true}, HaveBoardName: true, BoardNameUpdated: now,
 		ConnectionState: "connected", ConnectionUpdated: now,
 	}
 }

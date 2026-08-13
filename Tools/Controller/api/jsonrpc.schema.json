@@ -59,6 +59,12 @@
             "controller.artifact.list",
             "controller.artifact.manifest",
             "controller.artifact.upload",
+            "controller.board-name.clear",
+            "controller.board-name.get",
+            "controller.board-name.set",
+            "controller.board.name.clear",
+            "controller.board.name.get",
+            "controller.board.name.set",
             "controller.bridge.call",
             "controller.bridge.list",
             "controller.close",
@@ -340,6 +346,36 @@
     "controller.artifact.upload": {
       "capability": "programming",
       "summary": "artifact upload",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.board-name.clear": {
+      "capability": "board_commands",
+      "summary": "board name clear",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.board-name.get": {
+      "capability": "read",
+      "summary": "board name get",
+      "idempotency": "safe"
+    },
+    "controller.board-name.set": {
+      "capability": "board_commands",
+      "summary": "board name set",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.board.name.clear": {
+      "capability": "board_commands",
+      "summary": "Clear and independently verify the persistent operator board name.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.board.name.get": {
+      "capability": "read",
+      "summary": "Read the operator-assigned CRC-backed EEPROM board name.",
+      "idempotency": "safe"
+    },
+    "controller.board.name.set": {
+      "capability": "board_commands",
+      "summary": "Persist and independently verify an operator board name of up to eight printable ASCII characters.",
       "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.bridge.call": {

@@ -52,7 +52,7 @@ func TestMenuFallbackKeepsUnknownBuildOnCurrentCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if door.ID != 0 || len(pages) != 14 {
+	if door.ID != 0 || len(pages) != 10 {
 		t.Fatalf("unknown-build fallback door=%d pages=%d", door.ID, len(pages))
 	}
 	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
@@ -70,7 +70,7 @@ func TestMenuDirectoryCapabilityOverridesHistoricalBuildIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if door.ID != 0 || len(pages) != 14 {
+	if door.ID != 0 || len(pages) != 10 {
 		t.Fatalf("advertised current catalog door=%d pages=%d", door.ID, len(pages))
 	}
 	if _, err := ResolveMenuPageIn(pages, "status"); err == nil {
@@ -115,7 +115,7 @@ func TestCurrentCatalogRemovesStandaloneBluetoothPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page.Key != "settings" || len(current) != 14 {
+	if page.Key != "settings" || len(current) != 10 {
 		t.Fatalf("dense current page 6=%#v catalog=%#v", page, current)
 	}
 	for _, candidate := range current {
@@ -131,12 +131,12 @@ func TestMenuLayoutRequiresPermutationAndAtLeastOneVisiblePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if layout.VisibleMask != 0x3FFF || len(layout.Order) != 14 {
+	if layout.VisibleMask != 0x237F || len(layout.Order) != 10 {
 		t.Fatalf("default layout=%#v", layout)
 	}
 
 	moved, err := MoveMenuPage(pages, layout, 13, 1)
-	if err != nil || moved.Order[1] != 13 || moved.Order[13] != 12 {
+	if err != nil || moved.Order[1] != 13 || moved.Order[9] != 9 {
 		t.Fatalf("moved layout=%#v err=%v", moved, err)
 	}
 	hidden, err := SetMenuPageVisible(pages, moved, 8, false)

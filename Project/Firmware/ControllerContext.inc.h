@@ -100,8 +100,6 @@ uint8_t relayMenuIndex = 0;
 #if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
 uint8_t userPwmMenuIndex = 0;
 #endif
-uint8_t userRelayMenuIndex = 0;
-uint8_t userRelayBehavior = 0;
 #if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
 uint8_t settingsMenuItem = 0;
 #endif
@@ -207,7 +205,8 @@ constexpr uint8_t HOST_PANEL_CAPTURED = 1U << 4;
 // -----------------------------------------------------------------------------
 
 // Cross-domain entry points required before their ordered implementation fragments.
-void handleMenuAction(uint8_t action, bool fromRemote = false);
+void handleMenuAction(uint8_t action, bool fromRemote = false,
+                      uint8_t adjustmentStep = 1);
 void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
                      bool emitEvidence);
 void setMenuPage(uint8_t page);

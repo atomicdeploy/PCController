@@ -88,6 +88,11 @@ export interface ControllerSettings {
 	persisted?: boolean
 }
 
+export interface BoardName {
+  name: string
+  persisted: boolean
+}
+
 export interface ProgramState {
   mode?: string
   owner?: string
@@ -164,10 +169,13 @@ export interface Snapshot {
   port: PortInfo
   hello: Hello
   status: ControllerStatus
-  settings: ControllerSettings
-  have_status: boolean
-  have_settings: boolean
-  status_updated?: string
+	settings: ControllerSettings
+	board_name: BoardName
+	have_status: boolean
+	have_settings: boolean
+	have_board_name: boolean
+	status_updated?: string
+	board_name_updated?: string
   connection_state: string
   connection_reason?: string
   connection_updated?: string
@@ -564,7 +572,7 @@ export const emptySnapshot: Snapshot = {
   port: {},
   hello: {},
   status: emptyStatus,
-  settings: {
+	settings: {
     flags: 0,
     light_mode: 0,
     on_brightness: 0,
@@ -580,9 +588,11 @@ export const emptySnapshot: Snapshot = {
     extended_flags: 0,
     motion_break_ms: 1,
 	persisted: false,
-  },
-  have_status: false,
-  have_settings: false,
+	},
+	board_name: { name: '', persisted: false },
+	have_status: false,
+	have_settings: false,
+	have_board_name: false,
   front_panel: {
     schema: 0,
     raw_segments: [0, 0, 0, 0],

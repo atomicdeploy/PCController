@@ -37,12 +37,8 @@ var protocolMenuPages = []MenuPageInfo{
 	{4, "temperature-bt", "t-bt", "BT Audio Temperature", "BT-5.0-Pro Audio temperature sensor"},
 	{5, "illumination", "LItE", "Illumination", "Enclosure illumination mode and levels"},
 	{6, "settings", "bEEP", "Beep and Settings", "Beep, display, status color, and decimals"},
-	{7, "pwm-test", "PWM", "PWM Test", "PWM output test and channel selection"},
-	{8, "relay-test", "rELY", "Relay Test", "Individual relay output test"},
-	{9, "keys", "KEY", "Key Identification", "Identify K1 through K4"},
-	{10, "user-pwm", "uPWM", "User PWM", "Eight user MOSFET output values"},
-	{11, "user-relays", "r5-8", "User Relays", "R5 through R8 toggle or momentary control"},
-	{12, "motion", "MOVE", "Motion", "Side A and Side B direction/output control"},
+	{8, "relay", "rELY", "Relay Controller", "Select R1 through R8 and set its state"},
+	{9, "keys", "KEY", "Key Motion", "K1/K2 = Side A Up/Down; K3/K4 = Side B Up/Down"},
 	{13, "rf-learn", "LErn", "RF Learn", "Learn and map 433 MHz controls"},
 }
 
