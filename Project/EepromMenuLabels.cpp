@@ -7,6 +7,7 @@
 #include <EEPROM.h>
 
 #include "EepromLayout.h"
+#include "ProtocolCodec.h"
 namespace EepromMenuLabels {
 namespace {
 
@@ -16,17 +17,31 @@ bool labelsAvailable = false;
 // keeps a checksum collision from rendering erased/control EEPROM bytes.
 bool printable(uint8_t value) { return value >= ' ' && value <= '~'; }
 
+// Keep the CRC loop in one AVR function instead of expanding it into the
+// startup reader. The wire CRC stays canonical; this adapter only supplies
+// EEPROM bytes one at a time.
+#if defined(__AVR__)
+#define PCCONTROLLER_EEPROM_LABELS_NOINLINE __attribute__((noinline))
+#else
+#define PCCONTROLLER_EEPROM_LABELS_NOINLINE
+#endif
+PCCONTROLLER_EEPROM_LABELS_NOINLINE uint8_t crc8Update(uint8_t crc,
+                                                        uint8_t value) {
+  return ControllerProtocol::WireCodec::crc8Update(crc, value);
+}
+#undef PCCONTROLLER_EEPROM_LABELS_NOINLINE
+
 } // namespace
 
 void begin() {
   const uint8_t commit = EEPROM.read(EepromLayout::MenuLabelsCommitAddress);
-  uint8_t checksum = EepromLayout::MenuLabelsFormatMarker;
+  uint8_t crc = EepromLayout::MenuLabelsFormatMarker;
   for (uint8_t index = 0; index < EepromLayout::MenuLabelBytes; ++index) {
     const uint8_t value = EEPROM.read(EepromLayout::MenuLabelsAddress + index);
-    checksum ^= value;
+    crc = crc8Update(crc, value);
   }
   labelsAvailable = commit == EepromLayout::MenuLabelsFormatMarker &&
-                    checksum == EEPROM.read(EepromLayout::MenuLabelsCrcAddress);
+                    crc == EEPROM.read(EepromLayout::MenuLabelsCrcAddress);
 }
 
 bool available() { return labelsAvailable; }
