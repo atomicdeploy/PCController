@@ -121,7 +121,7 @@ const capabilityGroups = {
     "controller.lcd.presentation.status", "controller.ports", "controller.os.status",
     "controller.system.status", "controller.os.facts", "controller.host.facts",
     "controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get",
-		"controller.pwm.values", "controller.port.owner", "controller.port.process",
+		"controller.integrations.status", "controller.pwm.values", "controller.port.owner", "controller.port.process",
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
   ],
   board_commands: [
@@ -170,6 +170,7 @@ const methodOverrides = {
   "controller.discovery.config": "Return persistent network advertisement configuration.",
   "controller.discovery.config.get": "Return persistent network advertisement configuration.",
   "controller.discovery.config.set": "Persist and hot-apply network advertisement configuration.",
+  "controller.integrations.status": "Return requested and effective buzzer routing and playback state.",
   "controller.unsubscribe": "Remove this WebSocket connection's active subscriptions.",
 };
 
@@ -268,6 +269,7 @@ const routes = [
   { path: "/api/webhooks/outbound/dead", methods: ["get"], capability: "read", summary: "Bounded non-secret dead-letter list" },
   { path: "/api/webhooks/outbound/replay", methods: ["post"], capability: "integrations", summary: "Replay explicitly selected dead-letter deliveries" },
   { path: "/api/webhooks/outbound/clear", methods: ["post"], capability: "integrations", summary: "Clear explicitly selected dead-letter deliveries" },
+  { path: "/api/integrations/status", methods: ["get"], capability: "read", summary: "Requested and effective buzzer routing and playback state" },
   { path: "/api/integrations/datahub/{path}", methods: ["get", "head", "post", "put", "patch", "delete"], capability: "integrations", summary: "Sanitized loopback data-service proxy" },
   { path: "/api/integrations/device/{path}", methods: ["get", "head", "post", "put", "patch", "delete"], capability: "integrations", summary: "Fail-closed device route; use typed RPC" },
 ];

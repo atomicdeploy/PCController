@@ -2793,6 +2793,42 @@
         }
       }
     },
+    "/api/integrations/status": {
+      "get": {
+        "operationId": "get_api_integrations_status",
+        "summary": "Requested and effective buzzer routing and playback state",
+        "tags": [
+          "status"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        }
+      }
+    },
     "/api/integrations/datahub/{path}": {
       "get": {
         "operationId": "get_api_integrations_datahub_path",
@@ -3508,6 +3544,7 @@
               "controller.hotkeys.set",
               "controller.integrations.local.get",
               "controller.integrations.local.set",
+              "controller.integrations.status",
               "controller.lcd.presentation.configure",
               "controller.lcd.presentation.status",
               "controller.lcd.priority",

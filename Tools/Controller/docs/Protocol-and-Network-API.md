@@ -662,6 +662,7 @@ required `-32001`, remote capability denied `-32003`, and runtime/device error
 | `controller.device.inspect` | `resource` | sanitized `capabilities` or `snapshot` document only |
 | `controller.integrations.local.get` | `{}` | credential-free local-device and data-hub enable/URL settings |
 | `controller.integrations.local.set` | `local_device`, `data_hub` | validate and persist LAN-only device and loopback-only data roots |
+| `controller.integrations.status` | `{}` | requested and effective buzzer route, mirror backend, and board reconciliation state |
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
 
