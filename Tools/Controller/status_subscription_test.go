@@ -19,11 +19,11 @@ func TestStatusSubscriptionHubDoesNotMultiplyPhysicalPolling(t *testing.T) {
 	secondContext, stopSecond := context.WithCancel(context.Background())
 	defer stopFirst()
 	defer stopSecond()
-	first, err := client.SubscribeStatus(firstContext, 50*time.Millisecond)
+	first, err := client.SubscribeStatus(firstContext, 200*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := client.SubscribeStatus(secondContext, 50*time.Millisecond)
+	second, err := client.SubscribeStatus(secondContext, 200*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,8 +37,8 @@ func TestStatusSubscriptionHubDoesNotMultiplyPhysicalPolling(t *testing.T) {
 			t.Fatalf("subscriber %d did not receive shared status", index)
 		}
 	}
-	time.Sleep(125 * time.Millisecond)
+	time.Sleep(425 * time.Millisecond)
 	if got := fetches.Load(); got < 2 || got > 4 {
-		t.Fatalf("physical fetches=%d; two 20Hz clients must share one cadence", got)
+		t.Fatalf("physical fetches=%d; two 5Hz clients must share one cadence", got)
 	}
 }

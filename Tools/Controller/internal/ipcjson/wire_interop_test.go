@@ -18,6 +18,7 @@ import (
 	"time"
 
 	controller "pccontroller.local/controller"
+	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/ipcjson"
 	"pccontroller.local/controller/internal/native"
 )
@@ -381,6 +382,8 @@ type rawVirtualBoard struct {
 	listener    net.Listener
 	accepted    chan *rawBoardConnection
 	statusCount atomic.Int32
+	statusMu    sync.Mutex
+	statusTimes []time.Time
 	done        chan struct{}
 	wait        sync.WaitGroup
 }
@@ -449,6 +452,9 @@ func (board *rawVirtualBoard) acceptLoop() {
 					binary.LittleEndian.PutUint32(response.Payload[6:10], 0xA1B2C3D4)
 				case native.OpGetStatus:
 					count := board.statusCount.Add(1)
+					board.statusMu.Lock()
+					board.statusTimes = append(board.statusTimes, time.Now())
+					board.statusMu.Unlock()
 					response.Opcode = native.OpStatus
 					response.Payload = make([]byte, native.StatusPayloadSize)
 					binary.LittleEndian.PutUint32(response.Payload[0:4], uint32(count)*50)
@@ -462,6 +468,87 @@ func (board *rawVirtualBoard) acceptLoop() {
 				}
 			}
 		}()
+	}
+}
+
+func (board *rawVirtualBoard) statusRequestTimes() []time.Time {
+	board.statusMu.Lock()
+	defer board.statusMu.Unlock()
+	return append([]time.Time(nil), board.statusTimes...)
+}
+
+func awaitStatusUpdate(
+	t *testing.T,
+	updates <-chan controller.StatusUpdate,
+	label string,
+) controller.StatusUpdate {
+	t.Helper()
+	select {
+	case update, ok := <-updates:
+		if !ok {
+			t.Fatalf("%s subscription closed early", label)
+		}
+		if update.Error != "" {
+			t.Fatalf("%s status error: %s", label, update.Error)
+		}
+		return update
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s status", label)
+		return controller.StatusUpdate{}
+	}
+}
+
+func TestSharedStatusSchedulerFansOutMixedCadencesWithoutMultiplyingUART(t *testing.T) {
+	board := startRawVirtualBoard(t)
+	defer board.close()
+	client := controller.New(controller.Options{
+		RequestTimeout: 200 * time.Millisecond,
+		HelloAttempts:  1,
+	})
+	defer client.Shutdown()
+	if err := client.Open(context.Background(), board.endpoint()); err != nil {
+		t.Fatal(err)
+	}
+	_ = nextBoardConnection(t, board)
+
+	fastContext, cancelFast := context.WithCancel(context.Background())
+	slowContext, cancelSlow := context.WithCancel(context.Background())
+	fast, err := client.SubscribeStatus(fastContext, 200*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slow, err := client.SubscribeStatus(slowContext, 500*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 3; index++ {
+		awaitStatusUpdate(t, fast, "fast")
+	}
+	awaitStatusUpdate(t, slow, "slow")
+	for index := 0; index < 2; index++ {
+		awaitStatusUpdate(t, fast, "fast")
+	}
+	awaitStatusUpdate(t, slow, "slow")
+	cancelFast()
+	cancelSlow()
+	for range fast {
+	}
+	for range slow {
+	}
+
+	times := board.statusRequestTimes()
+	if len(times) < 5 || len(times) > 6 {
+		t.Fatalf("shared STATUS requests=%d want 5..6 for mixed 200/500ms subscribers", len(times))
+	}
+	for index := 1; index < len(times); index++ {
+		if gap := times[index].Sub(times[index-1]); gap < 150*time.Millisecond {
+			t.Fatalf("STATUS requests multiplied at %d: gap=%s times=%v", index, gap, times)
+		}
+	}
+	stable := board.statusCount.Load()
+	time.Sleep(250 * time.Millisecond)
+	if got := board.statusCount.Load(); got != stable {
+		t.Fatalf("shared sampler continued after final subscriber: before=%d after=%d", stable, got)
 	}
 }
 
@@ -577,7 +664,7 @@ func TestIndependentRawClientsInteroperateWithAllVersionedSocketSurfaces(t *test
 	}
 
 	subscribed := rawRPC(t, standard, 3, "controller.subscribe", map[string]any{
-		"topics": []string{"status"}, "interval_ms": 50,
+		"topics": []string{"status"}, "interval_ms": appconfig.MeasurementRefreshMinMS,
 	})
 	if !strings.Contains(string(subscribed["result"]), `"subscribed":true`) {
 		t.Fatalf("status subscribe response=%v", subscribed)

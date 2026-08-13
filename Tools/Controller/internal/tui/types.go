@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/discovery"
@@ -54,6 +55,7 @@ type Preferences struct {
 	AppTitle            string
 	Tagline             string
 	PollInterval        time.Duration
+	FreshnessWindow     time.Duration
 	EventLogLimit       int
 	HistoryWindow       time.Duration
 	VoltageDecimals     int
@@ -67,7 +69,8 @@ func defaultPreferences() Preferences {
 	return Preferences{
 		AppTitle:            productidentity.Title(""),
 		Tagline:             productidentity.DefaultFirstRunLine(),
-		PollInterval:        250 * time.Millisecond,
+		PollInterval:        time.Duration(appconfig.DefaultMeasurementRefreshMS) * time.Millisecond,
+		FreshnessWindow:     time.Duration(appconfig.DefaultMeasurementFreshnessMS) * time.Millisecond,
 		EventLogLimit:       500,
 		HistoryWindow:       6 * time.Hour,
 		VoltageDecimals:     2,
@@ -89,8 +92,13 @@ func preferencesFromUI(value appconfig.UI) Preferences {
 	if result.Tagline == "" {
 		result.Tagline = productidentity.DefaultFirstRunLine()
 	}
-	if value.StatusIntervalMS >= 100 {
+	if value.StatusIntervalMS >= appconfig.MeasurementRefreshMinMS &&
+		value.StatusIntervalMS <= appconfig.MeasurementRefreshMaxMS {
 		result.PollInterval = time.Duration(value.StatusIntervalMS) * time.Millisecond
+	}
+	if value.MeasurementFreshnessMS >= value.StatusIntervalMS+appconfig.MeasurementFreshnessHeadroomMS &&
+		value.MeasurementFreshnessMS <= appconfig.MeasurementFreshnessMaxMS {
+		result.FreshnessWindow = time.Duration(value.MeasurementFreshnessMS) * time.Millisecond
 	}
 	if value.EventLogLimit >= 50 {
 		result.EventLogLimit = value.EventLogLimit
@@ -211,6 +219,8 @@ type RemoteBackend struct {
 
 type Options struct {
 	UIConfig         func() appconfig.UI
+	UIConfigUpdates  <-chan appconfig.Config
+	StatusUpdates    <-chan controllerapi.StatusUpdate
 	SaveUI           func(appconfig.UI) error
 	ApplyTUIConsole  func(appconfig.TUIConsole) error
 	HostIntegrations func() appconfig.Integrations

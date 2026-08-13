@@ -33,6 +33,14 @@ const (
 	// DefaultWatchInterval bounds the polling fallback when file notifications
 	// are unavailable.
 	DefaultWatchInterval = 150 * time.Millisecond
+	// Live-measurement timing is host-owned so every local and remote surface
+	// uses the same real-time cadence and freshness boundary.
+	MeasurementRefreshMinMS        = 200
+	MeasurementRefreshMaxMS        = 500
+	DefaultMeasurementRefreshMS    = 250
+	DefaultMeasurementFreshnessMS  = 1500
+	MeasurementFreshnessHeadroomMS = 100
+	MeasurementFreshnessMaxMS      = 10_000
 )
 
 // Config is the persistent host-side configuration root; it never mirrors or
@@ -83,39 +91,42 @@ type DeviceIdentity struct {
 
 // UI configures host presentation, measurement visibility, and display mirroring.
 type UI struct {
-	AppTitle             string            `json:"app_title"`
-	Tagline              string            `json:"tagline"`
-	Appearance           Appearance        `json:"appearance"`
-	TUIConsole           TUIConsole        `json:"tui_console"`
-	SeparatePortButtons  bool              `json:"separate_port_buttons"`
-	TableLayout          string            `json:"table_layout"`
-	ControlValueColors   bool              `json:"control_value_colors"`
-	PeripheralNames      map[string]string `json:"peripheral_names,omitempty"`
-	SetupComplete        bool              `json:"setup_complete"`
-	WelcomeMelody        string            `json:"welcome_melody"`
-	StatusIntervalMS     int               `json:"status_interval_ms"`
-	IdleStatusIntervalMS int               `json:"idle_status_interval_ms"`
-	EventLogLimit        int               `json:"event_log_limit"`
-	HistoryHours         int               `json:"history_hours"`
-	HistorySampleMS      int               `json:"history_sample_ms"`
-	VoltageDecimals      int               `json:"voltage_decimals"`
-	CurrentDecimals      int               `json:"current_decimals"`
-	PowerDecimals        int               `json:"power_decimals"`
-	TemperatureDecimals  int               `json:"temperature_decimals"`
-	ShowSupplyVoltage    bool              `json:"show_supply_voltage"`
-	ShowBusVoltage       bool              `json:"show_bus_voltage"`
-	ShowCurrent          bool              `json:"show_current"`
-	ShowPower            bool              `json:"show_power"`
-	ShowTemperatureLED   bool              `json:"show_temperature_led"`
-	ShowTemperatureBT    bool              `json:"show_temperature_bt"`
-	ShowIO               bool              `json:"show_io"`
-	ShowDiagnostics      bool              `json:"show_diagnostics"`
-	ShowGraphs           bool              `json:"show_graphs"`
-	LCDServiceEnabled    bool              `json:"lcd_service_enabled"`
-	MirrorPromptToLCD    bool              `json:"mirror_prompt_to_lcd"`
-	LCDPromptDebounceMS  int               `json:"lcd_prompt_debounce_ms"`
-	LCDPriorityHoldMS    int               `json:"lcd_priority_hold_ms"`
-	SegmentScroll        SegmentScroll     `json:"segment_scroll"`
+	AppTitle               string            `json:"app_title"`
+	Tagline                string            `json:"tagline"`
+	Appearance             Appearance        `json:"appearance"`
+	TUIConsole             TUIConsole        `json:"tui_console"`
+	SeparatePortButtons    bool              `json:"separate_port_buttons"`
+	TableLayout            string            `json:"table_layout"`
+	ControlValueColors     bool              `json:"control_value_colors"`
+	PeripheralNames        map[string]string `json:"peripheral_names,omitempty"`
+	SetupComplete          bool              `json:"setup_complete"`
+	WelcomeMelody          string            `json:"welcome_melody"`
+	StatusIntervalMS       int               `json:"status_interval_ms"`
+	MeasurementFreshnessMS int               `json:"measurement_freshness_ms"`
+	// IdleStatusIntervalMS controls TUI repaint/reconnect housekeeping only;
+	// it never schedules a board STATUS request.
+	IdleStatusIntervalMS int           `json:"idle_status_interval_ms"`
+	EventLogLimit        int           `json:"event_log_limit"`
+	HistoryHours         int           `json:"history_hours"`
+	HistorySampleMS      int           `json:"history_sample_ms"`
+	VoltageDecimals      int           `json:"voltage_decimals"`
+	CurrentDecimals      int           `json:"current_decimals"`
+	PowerDecimals        int           `json:"power_decimals"`
+	TemperatureDecimals  int           `json:"temperature_decimals"`
+	ShowSupplyVoltage    bool          `json:"show_supply_voltage"`
+	ShowBusVoltage       bool          `json:"show_bus_voltage"`
+	ShowCurrent          bool          `json:"show_current"`
+	ShowPower            bool          `json:"show_power"`
+	ShowTemperatureLED   bool          `json:"show_temperature_led"`
+	ShowTemperatureBT    bool          `json:"show_temperature_bt"`
+	ShowIO               bool          `json:"show_io"`
+	ShowDiagnostics      bool          `json:"show_diagnostics"`
+	ShowGraphs           bool          `json:"show_graphs"`
+	LCDServiceEnabled    bool          `json:"lcd_service_enabled"`
+	MirrorPromptToLCD    bool          `json:"mirror_prompt_to_lcd"`
+	LCDPromptDebounceMS  int           `json:"lcd_prompt_debounce_ms"`
+	LCDPriorityHoldMS    int           `json:"lcd_priority_hold_ms"`
+	SegmentScroll        SegmentScroll `json:"segment_scroll"`
 }
 
 // TUIConsole contains local classic-console presentation preferences. These
@@ -328,33 +339,34 @@ func Defaults() Config {
 			Appearance: Appearance{
 				Theme: "system", Locale: "en", Direction: "auto", AudioVolume: 0.42,
 			},
-			TUIConsole:           productTUIConsoleDefaults(),
-			TableLayout:          "compact",
-			ControlValueColors:   true,
-			WelcomeMelody:        "notify",
-			StatusIntervalMS:     200,
-			IdleStatusIntervalMS: 0,
-			EventLogLimit:        500,
-			HistoryHours:         6,
-			HistorySampleMS:      1000,
-			VoltageDecimals:      2,
-			CurrentDecimals:      1,
-			PowerDecimals:        2,
-			TemperatureDecimals:  1,
-			ShowSupplyVoltage:    true,
-			ShowBusVoltage:       true,
-			ShowCurrent:          true,
-			ShowPower:            true,
-			ShowTemperatureLED:   true,
-			ShowTemperatureBT:    true,
-			ShowIO:               true,
-			ShowDiagnostics:      true,
-			ShowGraphs:           true,
-			LCDServiceEnabled:    true,
-			MirrorPromptToLCD:    false,
-			LCDPromptDebounceMS:  120,
-			LCDPriorityHoldMS:    2000,
-			SegmentScroll:        DefaultSegmentScroll(),
+			TUIConsole:             productTUIConsoleDefaults(),
+			TableLayout:            "compact",
+			ControlValueColors:     true,
+			WelcomeMelody:          "notify",
+			StatusIntervalMS:       DefaultMeasurementRefreshMS,
+			MeasurementFreshnessMS: DefaultMeasurementFreshnessMS,
+			IdleStatusIntervalMS:   0,
+			EventLogLimit:          500,
+			HistoryHours:           6,
+			HistorySampleMS:        1000,
+			VoltageDecimals:        2,
+			CurrentDecimals:        1,
+			PowerDecimals:          2,
+			TemperatureDecimals:    1,
+			ShowSupplyVoltage:      true,
+			ShowBusVoltage:         true,
+			ShowCurrent:            true,
+			ShowPower:              true,
+			ShowTemperatureLED:     true,
+			ShowTemperatureBT:      true,
+			ShowIO:                 true,
+			ShowDiagnostics:        true,
+			ShowGraphs:             true,
+			LCDServiceEnabled:      true,
+			MirrorPromptToLCD:      false,
+			LCDPromptDebounceMS:    120,
+			LCDPriorityHoldMS:      2000,
+			SegmentScroll:          DefaultSegmentScroll(),
 		},
 		IPC: IPC{
 			Listen:          "127.0.0.1:8787",
@@ -627,12 +639,29 @@ func (value Config) Validate() error {
 	if melody := strings.TrimSpace(value.UI.WelcomeMelody); melody == "" || len(melody) > 64 {
 		return errors.New("ui.welcome_melody must contain 1..64 characters")
 	}
-	if value.UI.StatusIntervalMS < 50 || value.UI.StatusIntervalMS > 60_000 {
-		return fmt.Errorf("ui.status_interval_ms must be 50..60000")
+	if value.UI.StatusIntervalMS < MeasurementRefreshMinMS ||
+		value.UI.StatusIntervalMS > MeasurementRefreshMaxMS {
+		return fmt.Errorf(
+			"ui.status_interval_ms must be %d..%d",
+			MeasurementRefreshMinMS, MeasurementRefreshMaxMS,
+		)
+	}
+	minimumFreshness := value.UI.StatusIntervalMS + MeasurementFreshnessHeadroomMS
+	if value.UI.MeasurementFreshnessMS < minimumFreshness {
+		return fmt.Errorf(
+			"ui.measurement_freshness_ms must be at least ui.status_interval_ms + %d",
+			MeasurementFreshnessHeadroomMS,
+		)
+	}
+	if value.UI.MeasurementFreshnessMS > MeasurementFreshnessMaxMS {
+		return fmt.Errorf(
+			"ui.measurement_freshness_ms must be at most %d",
+			MeasurementFreshnessMaxMS,
+		)
 	}
 	if value.UI.IdleStatusIntervalMS != 0 &&
 		(value.UI.IdleStatusIntervalMS < 100 || value.UI.IdleStatusIntervalMS > 60_000) {
-		return fmt.Errorf("ui.idle_status_interval_ms must be zero or 100..60000")
+		return fmt.Errorf("ui.idle_status_interval_ms housekeeping interval must be zero or 100..60000")
 	}
 	if value.UI.EventLogLimit < 50 || value.UI.EventLogLimit > 100_000 {
 		return fmt.Errorf("ui.event_log_limit must be 50..100000")
@@ -1013,16 +1042,18 @@ func printableText(value string) bool {
 
 // Store owns the current validated host configuration and its subscribers.
 type Store struct {
-	path               string
-	mu                 sync.RWMutex
-	value              Config
-	digest             [sha256.Size]byte
-	subscribers        map[uint64]chan Config
-	runtimeSubscribers map[uint64]chan Config
-	nextSubscriber     uint64
-	secrets            *secretstore.Resolver
-	appTitleOverride   string
-	taglineOverride    string
+	path                           string
+	mu                             sync.RWMutex
+	value                          Config
+	digest                         [sha256.Size]byte
+	subscribers                    map[uint64]chan Config
+	runtimeSubscribers             map[uint64]chan Config
+	nextSubscriber                 uint64
+	secrets                        *secretstore.Resolver
+	appTitleOverride               string
+	taglineOverride                string
+	statusIntervalOverrideMS       int
+	measurementFreshnessOverrideMS int
 }
 
 // Open resolves and loads a persistent configuration store, creating defaults
@@ -1090,15 +1121,47 @@ func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
 	return nil
 }
 
-func (store *Store) effectiveLocked() Config {
-	value := clone(store.value)
+// SetMeasurementTimingOverrides applies process-lifetime environment/flag
+// precedence without rewriting the watched host configuration. A zero value
+// leaves that individual field under persistent configuration ownership.
+func (store *Store) SetMeasurementTimingOverrides(refreshMS, freshnessMS int) error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	candidate := clone(store.value)
+	if refreshMS != 0 {
+		candidate.UI.StatusIntervalMS = refreshMS
+	}
+	if freshnessMS != 0 {
+		candidate.UI.MeasurementFreshnessMS = freshnessMS
+	}
+	if err := candidate.Validate(); err != nil {
+		return fmt.Errorf("measurement timing override: %w", err)
+	}
+	store.statusIntervalOverrideMS = refreshMS
+	store.measurementFreshnessOverrideMS = freshnessMS
+	store.notifyLocked(store.value)
+	store.notifyRuntimeLocked(store.value)
+	return nil
+}
+
+func (store *Store) applyOverridesLocked(value Config) Config {
 	if store.appTitleOverride != "" {
 		value.UI.AppTitle = store.appTitleOverride
 	}
 	if store.taglineOverride != "" {
 		value.UI.Tagline = store.taglineOverride
 	}
+	if store.statusIntervalOverrideMS != 0 {
+		value.UI.StatusIntervalMS = store.statusIntervalOverrideMS
+	}
+	if store.measurementFreshnessOverrideMS != 0 {
+		value.UI.MeasurementFreshnessMS = store.measurementFreshnessOverrideMS
+	}
 	return value
+}
+
+func (store *Store) effectiveLocked() Config {
+	return store.applyOverridesLocked(clone(store.value))
 }
 
 // Update applies one atomic PC-side configuration mutation and persists it.
@@ -1112,6 +1175,9 @@ func (store *Store) Update(change func(*Config) error) (Config, error) {
 	value := clone(store.value)
 	if err := change(&value); err != nil {
 		return clone(store.value), err
+	}
+	if err := store.applyOverridesLocked(clone(value)).Validate(); err != nil {
+		return clone(store.value), fmt.Errorf("effective configuration: %w", err)
 	}
 	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
 		return clone(store.value), fmt.Errorf("resolve configuration secrets: %w", err)
@@ -1177,12 +1243,7 @@ func (store *Store) SubscribeRuntime(ctx context.Context) <-chan Config {
 }
 
 func (store *Store) notifyLocked(value Config) {
-	if store.appTitleOverride != "" {
-		value.UI.AppTitle = store.appTitleOverride
-	}
-	if store.taglineOverride != "" {
-		value.UI.Tagline = store.taglineOverride
-	}
+	value = store.applyOverridesLocked(value)
 	for _, subscriber := range store.subscribers {
 		copyValue := clone(value)
 		select {
@@ -1201,12 +1262,7 @@ func (store *Store) notifyLocked(value Config) {
 }
 
 func (store *Store) notifyRuntimeLocked(value Config) {
-	if store.appTitleOverride != "" {
-		value.UI.AppTitle = store.appTitleOverride
-	}
-	if store.taglineOverride != "" {
-		value.UI.Tagline = store.taglineOverride
-	}
+	value = store.applyOverridesLocked(value)
 	runtime, err := resolveConfigSecrets(value, store.secrets)
 	if err != nil {
 		runtime = failClosedRuntime(value)
@@ -1245,6 +1301,12 @@ func (store *Store) UpdateUI(value UI) (Config, error) {
 	}
 	if store.taglineOverride != "" {
 		value.Tagline = store.value.UI.Tagline
+	}
+	if store.statusIntervalOverrideMS != 0 {
+		value.StatusIntervalMS = store.value.UI.StatusIntervalMS
+	}
+	if store.measurementFreshnessOverrideMS != 0 {
+		value.MeasurementFreshnessMS = store.value.UI.MeasurementFreshnessMS
 	}
 	store.mu.RUnlock()
 	return store.Update(func(config *Config) error {
@@ -1312,6 +1374,9 @@ func (store *Store) Reload() (Config, bool, error) {
 	}
 	if digest == store.digest {
 		return store.effectiveLocked(), false, nil
+	}
+	if err := store.applyOverridesLocked(clone(value)).Validate(); err != nil {
+		return Config{}, false, fmt.Errorf("effective configuration: %w", err)
 	}
 	if _, err := resolveConfigSecrets(value, store.secrets); err != nil {
 		return Config{}, false, fmt.Errorf("resolve configuration secrets: %w", err)

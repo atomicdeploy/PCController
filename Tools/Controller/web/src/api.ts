@@ -88,6 +88,11 @@ export async function getUIConfig(signal?: AbortSignal): Promise<UIConfig> {
       !/^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$/.test(config.session_ticket_path)) {
     throw new Error('UI configuration is missing a safe session-ticket path')
   }
+	if (!Number.isSafeInteger(config.status_interval_ms) || config.status_interval_ms < 200 || config.status_interval_ms > 500 ||
+		!Number.isSafeInteger(config.measurement_freshness_ms) ||
+		config.measurement_freshness_ms < config.status_interval_ms + 100 || config.measurement_freshness_ms > 10_000) {
+		throw new Error('UI configuration is missing valid live-measurement timing')
+	}
   return config
 }
 
@@ -196,6 +201,11 @@ async function websocketProtocols(config: UIConfig, signal?: AbortSignal): Promi
   return [ticket.protocol, `${browserTicketPrefix}${ticket.ticket}`]
 }
 
+export type StreamControl = (() => void) & {
+  /** Replaces only status cadence on the existing socket without restarting the app. */
+  updateStatusInterval(intervalMS: number): void
+}
+
 /** Calculates Socket.IO-style exponential reconnect delay with a hard cap. */
 export function streamRetryDelay(retry: number, random = Math.random): number {
   const exponential = 500 * 2 ** Math.min(Math.max(0, retry), 5)
@@ -203,13 +213,25 @@ export function streamRetryDelay(retry: number, random = Math.random): number {
 }
 
 /** Opens the reconnecting event stream and returns a function that closes it. */
-export function connectStream(config: UIConfig, handlers: StreamHandlers): () => void {
+export function connectStream(config: UIConfig, handlers: StreamHandlers): StreamControl {
   let socket: WebSocket | null = null
   let stopped = false
   let retry = 0
   let timer = 0
   let attempt = 0
   let ticketAbort: AbortController | null = null
+  let statusIntervalMS = config.status_interval_ms
+
+  const subscribe = (activeSocket: WebSocket, preserve = false) => {
+    activeSocket.send(JSON.stringify({
+      jsonrpc: '2.0',
+      id: nextID++,
+      method: 'controller.subscribe',
+      params: preserve
+        ? { topics: ['status'], interval_ms: statusIntervalMS, preserve: true }
+        : { topics: ['events', 'state', 'status'], interval_ms: statusIntervalMS, after_id: 0 },
+    }))
+  }
 
   const scheduleRetry = (detail: string) => {
     if (stopped) return
@@ -244,20 +266,17 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       const url = controllerWebSocketURL(config.websocket_path)
       activeSocket = protocols.length > 0 ? new WebSocket(url, protocols) : new WebSocket(url)
     } catch (cause) {
+		if (stopped || currentAttempt !== attempt) return
       scheduleRetry(cause instanceof Error ? cause.message : String(cause))
       return
     }
     socket = activeSocket
     activeSocket.addEventListener('open', () => {
+		if (activeSocket !== socket) return
       retry = 0
       streamSocket = activeSocket
       handlers.state('open')
-      activeSocket.send(JSON.stringify({
-        jsonrpc: '2.0',
-        id: nextID++,
-        method: 'controller.subscribe',
-		params: { topics: ['events', 'state', 'status'], interval_ms: 500, after_id: 0 },
-      }))
+		subscribe(activeSocket)
     })
     activeSocket.addEventListener('message', (message) => {
       try {
@@ -277,6 +296,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
             else pending.resolve(value.result)
           }
         }
+		if (activeSocket !== socket) return
         if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate)
 		if (value.method === 'controller.event' || value.method === 'controller.state') {
 			handlers.event(value.params as ControllerEvent)
@@ -291,20 +311,24 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       }
     })
     activeSocket.addEventListener('close', (event) => {
-      if (socket === activeSocket) socket = null
+		const wasCurrent = socket === activeSocket
+		if (wasCurrent) socket = null
       if (streamSocket === activeSocket) streamSocket = null
       rejectSocketRequests(activeSocket, event.reason || 'WebSocket RPC connection closed')
+		if (!wasCurrent) return
       if (stopped) {
         handlers.state('closed')
         return
       }
       scheduleRetry(event.reason || 'WebSocket connection closed')
     })
-    activeSocket.addEventListener('error', () => activeSocket.close())
+	activeSocket.addEventListener('error', () => {
+		if (activeSocket === socket) activeSocket.close()
+	})
   }
 
   void open()
-  return () => {
+	const stop = (() => {
     stopped = true
     attempt += 1
     ticketAbort?.abort()
@@ -316,7 +340,17 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       rejectSocketRequests(closed, 'WebSocket RPC view closed')
     }
     socket = null
-  }
+	}) as StreamControl
+	stop.updateStatusInterval = (intervalMS: number) => {
+		if (!Number.isSafeInteger(intervalMS) || intervalMS < 200 || intervalMS > 500) {
+			throw new RangeError('status interval must be 200..500 ms')
+		}
+		if (statusIntervalMS === intervalMS) return
+		statusIntervalMS = intervalMS
+		const activeSocket = socket
+		if (activeSocket && activeSocket.readyState === WebSocket.OPEN) subscribe(activeSocket, true)
+	}
+	return stop
 }
 
 /** Calls an authenticated HTTP endpoint owned by a configured integration. */

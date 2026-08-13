@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { connectStream, downloadIntegration, getUIConfig, rpc, streamRetryDelay } from './api'
+import type { StatusUpdate } from './types'
 
 type Listener = (event: any) => void
 
 class FakeWebSocket {
   static readonly OPEN = 1
   readonly sent: string[] = []
+  closeCalls = 0
   readyState = 0
   private readonly listeners = new Map<string, Listener[]>()
 
@@ -32,6 +34,7 @@ class FakeWebSocket {
 
   close(): void {
     if (this.readyState === 0) return
+	this.closeCalls += 1
     this.readyState = 0
     this.emit('close', { reason: 'closed by test' })
   }
@@ -40,12 +43,29 @@ class FakeWebSocket {
     this.emit('message', { data: JSON.stringify(value) })
   }
 
+  pushOpen(): void {
+    this.readyState = FakeWebSocket.OPEN
+    this.emit('open', {})
+  }
+
+  pushError(): void {
+    this.emit('error', {})
+  }
+
+  pushClose(reason = 'closed by test'): void {
+    this.readyState = 0
+    this.emit('close', { reason })
+  }
+
   private emit(type: string, event: unknown): void {
     for (const listener of this.listeners.get(type) ?? []) listener(event)
   }
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 describe('Web IPC transport', () => {
   it('uses bounded default exponential reconnect backoff with jitter', () => {
@@ -72,6 +92,7 @@ describe('Web IPC transport', () => {
     const events: Array<{ kind: string; stream?: string }> = []
     const stop = connectStream({
       name: 'PCController', setup_complete: false, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
+		status_interval_ms: 250, measurement_freshness_ms: 1500,
       appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
       appearance_etag: 'a'.repeat(64),
     }, { status: () => undefined, event: (value) => events.push(value), state: () => undefined })
@@ -82,6 +103,18 @@ describe('Web IPC transport', () => {
     expect(sockets).toHaveLength(1)
     expect(sockets[0].sent.map((raw) => JSON.parse(raw).method)).toEqual(['controller.subscribe', 'controller.command.execute'])
     expect(JSON.parse(sockets[0].sent[0]).params.topics).toEqual(['events', 'state', 'status'])
+		expect(JSON.parse(sockets[0].sent[0]).params.interval_ms).toBe(250)
+		stop.updateStatusInterval(300)
+		expect(sockets[0].sent.map((raw) => JSON.parse(raw).method)).toEqual([
+			'controller.subscribe', 'controller.command.execute', 'controller.subscribe',
+		])
+		expect(JSON.parse(sockets[0].sent[2]).params.interval_ms).toBe(300)
+		stop.updateStatusInterval(300)
+		expect(sockets[0].sent).toHaveLength(3)
+		expect(() => stop.updateStatusInterval(125)).toThrow('200..500')
+		expect(JSON.parse(sockets[0].sent[2]).params).toEqual({
+			topics: ['status'], interval_ms: 300, preserve: true,
+		})
     sockets[0].pushMessage({
       jsonrpc: '2.0',
       method: 'controller.state',
@@ -90,6 +123,58 @@ describe('Web IPC transport', () => {
     expect(events).toEqual([{ id: 7, kind: 'status_led.changed', stream: 'state', text: '#12AB34', time: '2026-08-03T00:00:00Z' }])
     stop()
   })
+
+	it('ignores late callbacks from a superseded socket generation', async () => {
+		vi.useFakeTimers()
+		vi.spyOn(Math, 'random').mockReturnValue(0)
+		const sockets: FakeWebSocket[] = []
+		class CapturingSocket extends FakeWebSocket {
+			constructor(url: string) { super(url); sockets.push(this) }
+		}
+		Object.defineProperty(CapturingSocket, 'OPEN', { value: 1 })
+		vi.stubGlobal('WebSocket', CapturingSocket)
+		vi.stubGlobal('location', { protocol: 'http:', host: '127.0.0.1:18887' })
+		vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: () => undefined, removeItem: () => undefined })
+		vi.stubGlobal('window', { setTimeout, clearTimeout })
+		vi.stubGlobal('fetch', vi.fn())
+
+		const statuses: StatusUpdate[] = []
+		const events: Array<{ id: number }> = []
+		const states: string[] = []
+		const stop = connectStream({
+			name: 'PCController', setup_complete: true, websocket_path: '/ipc',
+			session_ticket_path: '/api/session/ticket', auth_required: false,
+			status_interval_ms: 250, measurement_freshness_ms: 1500,
+			appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+			appearance_etag: 'a'.repeat(64),
+		}, {
+			status: (value) => statuses.push(value),
+			event: (value) => events.push({ id: value.id }),
+			state: (state) => states.push(state),
+		})
+		await vi.advanceTimersByTimeAsync(0)
+		expect(sockets).toHaveLength(1)
+		sockets[0].pushClose('first generation lost')
+		await vi.advanceTimersByTimeAsync(1000)
+		expect(sockets).toHaveLength(2)
+
+		const firstSent = sockets[0].sent.length
+		sockets[0].pushOpen()
+		sockets[0].pushMessage({ jsonrpc: '2.0', method: 'controller.status', params: { time: '2026-08-03T00:00:00Z', status: {} } })
+		sockets[0].pushMessage({ jsonrpc: '2.0', method: 'controller.event', params: { id: 41 } })
+		sockets[0].pushMessage({ jsonrpc: '2.0', method: 'controller.error', params: { error: 'stale' } })
+		sockets[0].pushError()
+		sockets[0].pushClose('late duplicate close')
+		await vi.advanceTimersByTimeAsync(12_000)
+
+		expect(sockets).toHaveLength(2)
+		expect(sockets[0].sent).toHaveLength(firstSent)
+		expect(sockets[0].closeCalls).toBe(0)
+		expect(statuses).toEqual([])
+		expect(events).toEqual([])
+		expect(states.at(-1)).toBe('open')
+		stop()
+	})
 
   it('uses one validated external host for canonical REST and WebSocket paths', async () => {
     const sockets: FakeWebSocket[] = []
@@ -104,6 +189,7 @@ describe('Web IPC transport', () => {
     vi.stubGlobal('window', { setTimeout, clearTimeout })
     const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       name: 'PCController', setup_complete: true, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
+		status_interval_ms: 250, measurement_freshness_ms: 1500,
       appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
       appearance_etag: 'a'.repeat(64),
     }), { status: 200 }))
@@ -114,6 +200,7 @@ describe('Web IPC transport', () => {
 
     const stop = connectStream({
       name: 'PCController', setup_complete: true, websocket_path: '/ipc', session_ticket_path: '/api/session/ticket', auth_required: false,
+		status_interval_ms: 250, measurement_freshness_ms: 1500,
       appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
       appearance_etag: 'a'.repeat(64),
     }, { status: () => undefined, event: () => undefined, state: () => undefined })
@@ -138,6 +225,7 @@ describe('Web IPC transport', () => {
 	const stop = connectStream({
 		name: 'PCController', setup_complete: true, websocket_path: '/ipc',
 		session_ticket_path: '/api/session/ticket', auth_required: false,
+		status_interval_ms: 250, measurement_freshness_ms: 1500,
 		appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
 		appearance_etag: 'a'.repeat(64),
 	}, { status: () => undefined, event: () => undefined, state: () => undefined })
@@ -191,6 +279,7 @@ describe('Web IPC transport', () => {
     const stop = connectStream({
       name: 'PCController', setup_complete: true, websocket_path: '/ipc',
       session_ticket_path: '/api/session/ticket', auth_required: true,
+		status_interval_ms: 250, measurement_freshness_ms: 1500,
       appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
       appearance_etag: 'a'.repeat(64),
     }, { status: () => undefined, event: () => undefined, state: () => undefined })
@@ -230,6 +319,7 @@ describe('Web IPC transport', () => {
     const stop = connectStream({
       name: 'PCController', setup_complete: true, websocket_path: '/ipc',
       session_ticket_path: '/api/session/ticket', auth_required: true,
+		status_interval_ms: 250, measurement_freshness_ms: 1500,
       appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
       appearance_etag: 'a'.repeat(64),
     }, { status: () => undefined, event: () => undefined, state: (state, detail) => states.push(`${state}:${detail ?? ''}`) })

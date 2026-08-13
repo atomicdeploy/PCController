@@ -31,14 +31,14 @@ func TestRemoteSnapshotPollingIsBackstopNotRenderLoop(t *testing.T) {
 		page:           PageDashboard,
 		prefs:          Preferences{PollInterval: 250 * time.Millisecond},
 	}
-	if interval := model.statusInterval(); interval != time.Second {
-		t.Fatalf("remote snapshot interval=%s, want 1s push-event backstop", interval)
+	if interval := model.statusInterval(); interval != 250*time.Millisecond {
+		t.Fatalf("remote snapshot interval=%s, want canonical 250ms cadence", interval)
 	}
 
 	model.remote = nil
 	model.preview = &snapshot
-	if interval := model.statusInterval(); interval != 125*time.Millisecond {
-		t.Fatalf("local door-open interval=%s, want 125ms", interval)
+	if interval := model.statusInterval(); interval != 250*time.Millisecond {
+		t.Fatalf("local door-open interval=%s, want canonical 250ms cadence", interval)
 	}
 }
 
@@ -49,7 +49,7 @@ func TestRemoteLiveRateFollowsActiveAndIdlePages(t *testing.T) {
 	}}, page: PageDashboard}
 	model.switchPage(PageConsole)
 	model.switchPage(PageDashboard)
-	if len(rates) != 2 || rates[0] != remoteIdleLiveInterval || rates[1] != remoteActiveLiveInterval {
+	if len(rates) != 2 || rates[0] != time.Second || rates[1] != 200*time.Millisecond {
 		t.Fatalf("live rates=%v", rates)
 	}
 }

@@ -409,42 +409,41 @@ type TextMessage struct {
 
 // Client owns one controller runtime, command engine, and host integration state.
 type Client struct {
-	runtime        *control.Runtime
-	engine         *shell.Engine
-	engineMu       sync.Mutex
-	optionsMu      sync.RWMutex
-	commandOptions control.CommandOptions
-	macroMu        sync.RWMutex
-	macros         []appconfig.Macro
-	outputMu       sync.RWMutex
-	melodies       []appconfig.Melody
-	statusEffects  []appconfig.StatusLEDEffect
-	outputs        *control.OutputScheduler
-	hostMu         sync.RWMutex
-	scripts        map[string]string
-	automations    []appconfig.Automation
-	safety         appconfig.Safety
-	rfConfig       appconfig.RFConfig
-	osPolicy       hostos.Policy
-	events         chan Event
-	done           chan struct{}
-	doneOnce       sync.Once
-	statusHub      statusSubscriptionHub
-	statusFetch    func(context.Context) (Status, error)
+	runtime              *control.Runtime
+	engine               *shell.Engine
+	engineMu             sync.Mutex
+	optionsMu            sync.RWMutex
+	commandOptions       control.CommandOptions
+	macroMu              sync.RWMutex
+	macros               []appconfig.Macro
+	outputMu             sync.RWMutex
+	melodies             []appconfig.Melody
+	statusEffects        []appconfig.StatusLEDEffect
+	outputs              *control.OutputScheduler
+	hostMu               sync.RWMutex
+	scripts              map[string]string
+	automations          []appconfig.Automation
+	safety               appconfig.Safety
+	rfConfig             appconfig.RFConfig
+	osPolicy             hostos.Policy
+	events               chan Event
+	done                 chan struct{}
+	doneOnce             sync.Once
+	statusMu             sync.Mutex
+	statusSubscribers    map[uint64]*statusSubscriber
+	nextStatusSubscriber uint64
+	statusWake           chan struct{}
+	statusHubOnce        sync.Once
+	statusPollCancel     context.CancelFunc
+	statusPollGeneration uint64
+	statusLastPoll       time.Time
+	statusFetch          func(context.Context) (Status, error)
 }
 
 type statusSubscriber struct {
+	updates  chan StatusUpdate
 	interval time.Duration
 	next     time.Time
-	updates  chan StatusUpdate
-}
-
-type statusSubscriptionHub struct {
-	mu          sync.Mutex
-	subscribers map[uint64]*statusSubscriber
-	nextID      uint64
-	wake        chan struct{}
-	running     bool
 }
 
 // New creates a client that owns its serial and background-service lifecycle.
@@ -960,8 +959,13 @@ func (client *Client) PulseResetFor(
 func (client *Client) Shutdown() error {
 	client.outputs.Close()
 	_ = hostos.DefaultExecutor.ReleaseAll()
-	err := client.runtime.Close()
 	client.doneOnce.Do(func() { close(client.done) })
+	client.statusMu.Lock()
+	if client.statusPollCancel != nil {
+		client.statusPollCancel()
+	}
+	client.statusMu.Unlock()
+	err := client.runtime.Close()
 	return err
 }
 
@@ -1008,79 +1012,115 @@ func (client *Client) Status(ctx context.Context) (Status, error) {
 	return client.runtime.RefreshStatus(ctx)
 }
 
-// SubscribeStatus polls only while the returned subscription context is
-// alive. Merely keeping the serial protocol connected never starts polling.
+// SubscribeStatus joins the client's shared, demand-driven status scheduler.
+// Concurrent Web/TUI consumers receive one shared board sample and never
+// multiply UART requests. The final subscriber cancels any in-flight poll.
 func (client *Client) SubscribeStatus(
 	ctx context.Context,
 	interval time.Duration,
 ) (<-chan StatusUpdate, error) {
-	if interval < 50*time.Millisecond || interval > time.Minute {
-		return nil, errors.New("status subscription interval must be 50ms..1m")
+	if interval < time.Duration(appconfig.MeasurementRefreshMinMS)*time.Millisecond ||
+		interval > time.Duration(appconfig.MeasurementRefreshMaxMS)*time.Millisecond {
+		return nil, fmt.Errorf(
+			"status subscription interval must be %d..%dms",
+			appconfig.MeasurementRefreshMinMS,
+			appconfig.MeasurementRefreshMaxMS,
+		)
 	}
 	updates := make(chan StatusUpdate, 1)
-	client.statusHub.mu.Lock()
-	if client.statusHub.subscribers == nil {
-		client.statusHub.subscribers = make(map[uint64]*statusSubscriber)
-		client.statusHub.wake = make(chan struct{}, 1)
+	client.statusMu.Lock()
+	if client.statusSubscribers == nil {
+		client.statusSubscribers = make(map[uint64]*statusSubscriber)
 	}
-	client.statusHub.nextID++
-	id := client.statusHub.nextID
-	client.statusHub.subscribers[id] = &statusSubscriber{
-		interval: interval, next: time.Now(), updates: updates,
+	if client.statusWake == nil {
+		client.statusWake = make(chan struct{}, 1)
 	}
-	if !client.statusHub.running {
-		client.statusHub.running = true
-		go client.runStatusSubscriptionHub()
+	client.nextStatusSubscriber++
+	id := client.nextStatusSubscriber
+	client.statusSubscribers[id] = &statusSubscriber{
+		updates: updates, interval: interval, next: time.Now().Add(interval),
 	}
-	wake := client.statusHub.wake
-	client.statusHub.mu.Unlock()
-	select {
-	case wake <- struct{}{}:
-	default:
-	}
+	client.statusHubOnce.Do(func() { go client.runStatusHub() })
+	client.signalStatusHubLocked()
+	client.statusMu.Unlock()
 	go func() {
-		<-ctx.Done()
-		client.statusHub.mu.Lock()
-		if subscriber, ok := client.statusHub.subscribers[id]; ok {
-			delete(client.statusHub.subscribers, id)
-			close(subscriber.updates)
-		}
-		client.statusHub.mu.Unlock()
 		select {
-		case wake <- struct{}{}:
-		default:
+		case <-ctx.Done():
+		case <-client.done:
 		}
+		client.removeStatusSubscriber(id)
 	}()
 	return updates, nil
 }
 
-// runStatusSubscriptionHub performs at most one physical status query at each
-// fastest requested cadence, then fans that authoritative result out according
-// to each subscriber's interval. Additional Web/TUI clients never multiply
-// serial traffic.
-func (client *Client) runStatusSubscriptionHub() {
+func (client *Client) signalStatusHubLocked() {
+	select {
+	case client.statusWake <- struct{}{}:
+	default:
+	}
+}
+
+func (client *Client) removeStatusSubscriber(id uint64) {
+	client.statusMu.Lock()
+	subscriber, ok := client.statusSubscribers[id]
+	if ok {
+		delete(client.statusSubscribers, id)
+		close(subscriber.updates)
+	}
+	if len(client.statusSubscribers) == 0 && client.statusPollCancel != nil {
+		client.statusPollCancel()
+	}
+	if len(client.statusSubscribers) == 0 {
+		client.statusLastPoll = time.Time{}
+	}
+	client.signalStatusHubLocked()
+	client.statusMu.Unlock()
+}
+
+func (client *Client) runStatusHub() {
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
 	for {
-		client.statusHub.mu.Lock()
-		if len(client.statusHub.subscribers) == 0 {
-			client.statusHub.running = false
-			client.statusHub.mu.Unlock()
-			return
-		}
-		now := time.Now()
-		next := now.Add(time.Minute)
-		for _, subscriber := range client.statusHub.subscribers {
-			if subscriber.next.Before(next) {
-				next = subscriber.next
+		client.statusMu.Lock()
+		var pollInterval time.Duration
+		for _, subscriber := range client.statusSubscribers {
+			if pollInterval == 0 || subscriber.interval < pollInterval {
+				pollInterval = subscriber.interval
 			}
 		}
-		wake := client.statusHub.wake
-		client.statusHub.mu.Unlock()
+		var next time.Time
+		if pollInterval > 0 {
+			if client.statusLastPoll.IsZero() {
+				client.statusLastPoll = time.Now()
+			}
+			next = client.statusLastPoll.Add(pollInterval)
+		}
+		wake := client.statusWake
+		client.statusMu.Unlock()
 
-		delay := time.Until(next)
-		if delay > 0 {
-			timer := time.NewTimer(delay)
+		if next.IsZero() {
 			select {
-			case <-timer.C:
+			case <-client.done:
+				return
+			case <-wake:
+				continue
+			}
+		}
+		wait := time.Until(next)
+		if wait > 0 {
+			timer.Reset(wait)
+			select {
+			case <-client.done:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				return
 			case <-wake:
 				if !timer.Stop() {
 					select {
@@ -1089,30 +1129,46 @@ func (client *Client) runStatusSubscriptionHub() {
 					}
 				}
 				continue
+			case <-timer.C:
 			}
 		}
 
-		at := time.Now()
-		requestContext, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
-		status, err := client.statusForSubscription(requestContext)
+		pollContext, cancel := context.WithCancel(context.Background())
+		client.statusMu.Lock()
+		if len(client.statusSubscribers) == 0 {
+			client.statusMu.Unlock()
+			cancel()
+			continue
+		}
+		client.statusPollGeneration++
+		generation := client.statusPollGeneration
+		client.statusPollCancel = cancel
+		client.statusMu.Unlock()
+
+		status, err := client.statusForSubscription(pollContext)
 		cancel()
-		update := StatusUpdate{Time: at, Status: status}
+		completed := time.Now()
+		update := StatusUpdate{Time: completed, Status: status}
 		if err != nil {
 			update.Error = err.Error()
 		}
-		client.statusHub.mu.Lock()
-		for _, subscriber := range client.statusHub.subscribers {
-			if subscriber.next.After(at) {
+
+		client.statusMu.Lock()
+		if client.statusPollGeneration == generation {
+			client.statusPollCancel = nil
+		}
+		if len(client.statusSubscribers) == 0 {
+			client.statusLastPoll = time.Time{}
+			client.statusMu.Unlock()
+			continue
+		}
+		client.statusLastPoll = completed
+		for _, subscriber := range client.statusSubscribers {
+			if subscriber.next.After(completed) {
 				continue
 			}
-			for !subscriber.next.After(at) {
+			for !subscriber.next.After(completed) {
 				subscriber.next = subscriber.next.Add(subscriber.interval)
-			}
-			if err != nil {
-				backoff := at.Add(time.Second)
-				if subscriber.next.Before(backoff) {
-					subscriber.next = backoff
-				}
 			}
 			select {
 			case subscriber.updates <- update:
@@ -1127,7 +1183,7 @@ func (client *Client) runStatusSubscriptionHub() {
 				}
 			}
 		}
-		client.statusHub.mu.Unlock()
+		client.statusMu.Unlock()
 	}
 }
 

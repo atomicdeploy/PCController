@@ -122,6 +122,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		if overrideErr := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); overrideErr != nil {
 			return overrideErr
 		}
+		if overrideErr := applyMeasurementTimingEnvironment(store); overrideErr != nil {
+			return overrideErr
+		}
 		runtimeConfig, runtimeErr := store.Runtime()
 		if runtimeErr != nil {
 			return runtimeErr
@@ -198,6 +201,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	if err := store.SetPresentationOverrides(presentation.AppName, presentation.Tagline); err != nil {
+		return err
+	}
+	if err := applyMeasurementTimingEnvironment(store); err != nil {
 		return err
 	}
 	runtimeConfig, runtimeErr := store.Runtime()
@@ -918,6 +924,9 @@ func runTUIWithInitialAction(
 			return err
 		}
 	}
+	statusUpdates := subscribeConfiguredStatus(
+		watchContext, primary.client, store.Subscribe(watchContext),
+	)
 	go watchConfiguration(watchContext, store, runtime, connection)
 	go func() {
 		for value := range store.Subscribe(watchContext) {
@@ -927,7 +936,9 @@ func runTUIWithInitialAction(
 	go control.RunAutomations(watchContext, runtime, engine, store.Current)
 	program := tea.NewProgram(
 		tui.NewApplicationWithOptions(runtime, engine, tui.Options{
-			UIConfig: func() appconfig.UI { return store.Current().UI },
+			UIConfig:        func() appconfig.UI { return store.Current().UI },
+			UIConfigUpdates: store.Subscribe(watchContext),
+			StatusUpdates:   statusUpdates,
 			SaveUI: func(value appconfig.UI) error {
 				_, err := store.UpdateUI(value)
 				return err

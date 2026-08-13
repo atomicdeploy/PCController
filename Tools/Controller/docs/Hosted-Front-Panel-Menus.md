@@ -76,14 +76,26 @@ still emits the normalized definition event but does not steal the display.
           {
             "id": "poll",
             "label": "POLL",
-            "title": "Polling ms",
+            "title": "Live refresh ms",
             "type": "number",
-            "value": "200",
-            "min": 100,
-            "max": 5000,
+            "value": "250",
+            "min": 200,
+            "max": 500,
             "step": 50,
             "read_action": "pc.ui.status_interval_ms",
             "write_action": "pc.ui.status_interval_ms"
+          },
+          {
+            "id": "fresh",
+            "label": "FRSH",
+            "title": "Fresh window ms",
+            "type": "number",
+            "value": "1500",
+            "min": 300,
+            "max": 10000,
+            "step": 100,
+            "read_action": "pc.ui.measurement_freshness_ms",
+            "write_action": "pc.ui.measurement_freshness_ms"
           },
           {
             "id": "profile",
@@ -105,7 +117,7 @@ still emits the normalized definition event but does not steal the display.
 ```
 
 Built-in read/write actions cover host/device status, current date/time,
-IP/API state, application title, polling period, LCD prompt mirroring, DTR
+IP/API state, application title, live refresh and freshness timing, LCD prompt mirroring, DTR
 reset-on-reconnect, and primary monitor brightness. A `shell:` or `command:`
 action routes through the existing
 validated controller shell. The default System Actions page contains `BRIT`,
