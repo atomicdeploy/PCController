@@ -100,6 +100,41 @@ if(BUILD_TESTING)
   add_test(NAME firmware_motion_policy_contract_unit
     COMMAND firmware_motion_policy_contract_tests)
 
+  # Exercise the target-neutral relay state machine with a deterministic sink
+  # before the AVR adapter or a future VirtualBoard adapter consumes it.
+  add_executable(firmware_relay_motion_machine_tests
+    tests/relay_motion_machine_test.cpp
+  )
+  target_include_directories(firmware_relay_motion_machine_tests PRIVATE ../..)
+  set_property(TARGET firmware_relay_motion_machine_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_relay_motion_machine_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_relay_motion_machine_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_relay_motion_machine_unit
+    COMMAND firmware_relay_motion_machine_tests)
+
+  # Compare the production ShiftRegisters/RelayController adapter against the
+  # same portable trace so AVR-only glue cannot drift from the safety core.
+  add_executable(firmware_relay_controller_adapter_tests
+    tests/relay_controller_adapter_test.cpp
+    ../../LocalLib/ShiftRegisters.cpp
+    ../../Project/RelayController.cpp
+  )
+  target_include_directories(firmware_relay_controller_adapter_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_relay_controller_adapter_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_relay_controller_adapter_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_relay_controller_adapter_unit
+    COMMAND firmware_relay_controller_adapter_tests)
+
   # The scheduler remains target-neutral: this C++11 trace suite compiles the
   # same bounded macro ring that the AVR/UART adapter uses, without linking or
   # altering the VirtualBoard runtime implementation.
