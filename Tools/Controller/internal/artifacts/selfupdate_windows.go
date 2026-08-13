@@ -58,6 +58,7 @@ func platformStartReplacementProcess(command *exec.Cmd) error {
 func (platformHelperLauncher) Launch(_ context.Context, helperPath, journalPath string) error {
 	command := exec.Command(helperPath, selfUpdateHelperCommand, journalPath)
 	command.Env = withoutSelfUpdateEnvironment(os.Environ())
+	inheritSelfUpdateIO(command)
 	if err := command.Start(); err != nil {
 		return err
 	}
