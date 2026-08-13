@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "ProtocolCodec.h"
 #include "ProtocolContract.h"
 
 namespace ControllerProtocol {
@@ -54,8 +55,6 @@ private:
       WireContract::MaximumEncodedFrame;
 
   bool writeCobs(const uint8_t *input, uint8_t length);
-  static uint8_t cobsDecode(const uint8_t *input, uint8_t length,
-                            uint8_t *output, uint8_t capacity);
   void processEncodedFrame();
 
   HardwareSerial &serial_;

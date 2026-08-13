@@ -71,6 +71,20 @@ if(BUILD_TESTING)
   endif()
   add_test(NAME firmware_protocol_contract_unit COMMAND firmware_protocol_contract_tests)
 
+  # Fixed-buffer codec vectors compile the same portable C++11 implementation
+  # used by the AVR UART adapter, without changing VirtualBoard runtime code.
+  add_executable(firmware_protocol_codec_tests
+    tests/protocol_codec_test.cpp
+  )
+  target_include_directories(firmware_protocol_codec_tests PRIVATE ../..)
+  set_property(TARGET firmware_protocol_codec_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_protocol_codec_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_protocol_codec_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_protocol_codec_unit COMMAND firmware_protocol_codec_tests)
+
   add_executable(virtual_board_tests tests/test_main.cpp)
   target_link_libraries(virtual_board_tests PRIVATE virtual_board_core)
   if(MSVC)
