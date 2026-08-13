@@ -392,6 +392,11 @@ func TestProgrammingLifecycleReassertNormalizesDefaultWait(t *testing.T) {
 		settings: original,
 	}
 	session := &ProgrammingSession{OriginalSettings: &original}
+	markerPath, err := persistProgrammingMarker(paths, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.RecoveryMarkerPath = markerPath
 	if err := reassertProgrammingSession(
 		context.Background(), device, session,
 		ProgrammingLifecycleOptions{DataPaths: paths, PersistenceDelay: time.Millisecond},
