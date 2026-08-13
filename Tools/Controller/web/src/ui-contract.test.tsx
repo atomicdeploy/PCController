@@ -54,9 +54,18 @@ describe('offline and settings UI contracts', () => {
       token: 'valid-looking-token',
     }
     expect(sessionAuthenticationGuidanceRequired({ ...base, hostRequiresAuthentication: false })).toBe(false)
+    expect(sessionAuthenticationGuidanceRequired({
+      ...base,
+      hostRequiresAuthentication: false,
+      streamDetail: 'HTTP 401: authentication required',
+    })).toBe(true)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamState: 'open' })).toBe(false)
     expect(sessionAuthenticationGuidanceRequired({ ...base, token: '' })).toBe(true)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'HTTP 401: authentication required' })).toBe(true)
+    expect(sessionAuthenticationGuidanceRequired({
+      ...base,
+      streamDetail: 'HTTP 403: remote read capability is disabled',
+    })).toBe(false)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'network timeout' })).toBe(false)
   })
 
