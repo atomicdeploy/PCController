@@ -23,6 +23,7 @@ import {
 } from 'node:fs'
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { loadProjectEnv } from './env.mjs'
 import { createChalk, renderUnicodeBanner, renderUnicodeTable } from './presentation.mjs'
 import { PRODUCT_METADATA, resolveProductTitle } from './product-metadata.mjs'
 import {
@@ -37,6 +38,8 @@ import {
 	relativeCommandPlanPaths,
 	sourceControllerInvocation
 } from '../CommandPlan/controller-command.mjs'
+
+loadProjectEnv()
 
 export { resolveProductTitle } from './product-metadata.mjs'
 

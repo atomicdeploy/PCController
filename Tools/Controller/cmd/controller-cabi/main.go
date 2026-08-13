@@ -18,6 +18,7 @@ import (
 	"unsafe"
 
 	controller "pccontroller.local/controller"
+	"pccontroller.local/controller/internal/envfile"
 )
 
 type libraryRequest struct {
@@ -49,6 +50,12 @@ var (
 	clientsMu  sync.RWMutex
 	clients    = make(map[uint64]*libraryClient)
 )
+
+func init() {
+	if _, err := envfile.LoadProcess(); err != nil {
+		panic(fmt.Errorf("environment: %w", err))
+	}
+}
 
 func main() {}
 

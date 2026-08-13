@@ -13,6 +13,9 @@ import {
 import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../../Build/env.mjs";
+
+loadProjectEnv();
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, "..", "..", "..");

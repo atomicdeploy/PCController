@@ -5,8 +5,10 @@ import react from '@vitejs/plugin-react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../../Build/env.mjs'
 
 const webRoot = fileURLToPath(new URL('.', import.meta.url))
+loadProjectEnv()
 const sourceManifest = JSON.parse(readFileSync(new URL('./public/manifest.webmanifest', import.meta.url), 'utf8')) as Record<string, unknown>
 const packageMetadata = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
 	version: string
