@@ -22,6 +22,17 @@ interface PendingSocketRPC {
 
 const pendingSocketRPC = new Map<number, PendingSocketRPC>()
 
+/** A JSON-RPC response error proves the server answered; transport failures use ordinary Error. */
+export class ControllerRPCError extends Error {
+  readonly code: number
+
+  constructor(code: number, message: string) {
+    super(message)
+    this.name = 'ControllerRPCError'
+    this.code = code
+  }
+}
+
 /** Returns the session-scoped bearer token used by authenticated transports. */
 export function getToken(): string {
   return sessionStorage.getItem(tokenKey) ?? ''
@@ -107,7 +118,7 @@ async function restRPC<T>(request: { jsonrpc: '2.0'; id: number; method: string;
     signal,
   })
   const envelope = await decode<RPCResponse<T>>(response)
-  if (envelope.error) throw new Error(envelope.error.message)
+  if (envelope.error) throw new ControllerRPCError(envelope.error.code, envelope.error.message)
   return envelope.result as T
 }
 
@@ -260,14 +271,17 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
           method?: string
           params?: unknown
           result?: unknown
-          error?: { message?: string }
+          error?: { code?: number; message?: string }
         }
         if (typeof value.id === 'number') {
           const pending = pendingSocketRPC.get(value.id)
           if (pending && pending.socket === activeSocket) {
             pendingSocketRPC.delete(value.id)
             pending.cleanup()
-            if (value.error) pending.reject(new Error(value.error.message || 'WebSocket RPC failed'))
+            if (value.error) pending.reject(new ControllerRPCError(
+              Number.isInteger(value.error.code) ? Number(value.error.code) : -32000,
+              value.error.message || 'WebSocket RPC failed',
+            ))
             else pending.resolve(value.result)
           }
         }

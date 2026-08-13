@@ -149,7 +149,7 @@ const methodOverrides = {
   "controller.artifact.upload.chunk": "Append one ordered bounded chunk to a peer artifact transfer.",
   "controller.artifact.upload.finish": "Revalidate and publish a completed peer artifact transfer.",
   "controller.artifact.upload.abort": "Abort and remove an incomplete peer artifact transfer.",
-  "controller.peer.update.host": "Transfer a verified executable through an authenticated peer and ask its coordinator to replace itself.",
+  "controller.peer.update.host": "Transfer a verified executable through an authenticated peer and request remote queued or staged acceptance; terminal replacement health is not asserted.",
   "controller.webhooks.status": "Return bounded outbound queue and dead-letter counters.",
   "controller.webhooks.pending": "List bounded non-secret pending outbound deliveries.",
   "controller.webhooks.dead": "List bounded non-secret dead-letter deliveries.",
@@ -191,18 +191,24 @@ const nonIdempotentMethods = new Set([
 ]);
 
 const safeCapabilities = new Set(["read", "events"]);
+const methodCapabilityOverrides = {
+  "controller.peer.update.host": "programming + bridge_calls",
+};
+const methodIdempotencyOverrides = {
+  "controller.peer.update.host": "retry-stable target operation",
+};
 const methods = [];
 for (const [capability, names] of Object.entries(capabilityGroups)) {
   for (const name of names) {
     methods.push({
       name,
-      capability,
+      capability: methodCapabilityOverrides[name] ?? capability,
       summary: methodOverrides[name] ?? name.replace(/^controller\./u, "").replaceAll(/[_.-]+/gu, " "),
-      idempotency: safeCapabilities.has(capability)
+      idempotency: methodIdempotencyOverrides[name] ?? (safeCapabilities.has(capability)
         ? "safe"
         : nonIdempotentMethods.has(name)
           ? "non-idempotent"
-          : "idempotent-with-authoritative-readback",
+          : "idempotent-with-authoritative-readback"),
     });
   }
 }

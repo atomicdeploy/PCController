@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } from './components'
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
-import { artifactUpdateAvailable, UpdatesView } from './updates-view'
+import { artifactUpdateAvailable, localUpdateEvent, peerUpdateStatusFromEvent, UpdatesView } from './updates-view'
 import { translator } from './i18n'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
 import { WorkbenchView } from './workbench'
@@ -216,6 +216,31 @@ describe('offline and settings UI contracts', () => {
     expect(markup).not.toContain('Review firmware programming')
     expect(markup).not.toContain('Review EEPROM restore')
     expect(markup).not.toContain('Review ISP programming')
+  })
+
+  it('does not mix a bridged peer update event into local update status', () => {
+    expect(localUpdateEvent({ kind: 'update.queued', source: 'host' })).toBe(true)
+    expect(localUpdateEvent({
+      kind: 'update.queued', source: 'bridge', metadata: { 'bridge.ingress': 'edge' },
+    })).toBe(false)
+    expect(localUpdateEvent({ kind: 'peer-update.remote-queued', source: 'bridge' })).toBe(false)
+  })
+
+  it('derives a separate shared peer staging status from pushed events', () => {
+    expect(peerUpdateStatusFromEvent({
+      kind: 'peer-update.remote-staged',
+      text: 'remote staging accepted',
+      metadata: {
+        peer: 'cafe-pc', state: 'remote-staged', progress_percent: '90',
+        operation_id: 'source-intent', remote_operation_id: 'remote-host-7',
+        terminal_verified: 'false',
+      },
+    })).toEqual({
+      peer: 'cafe-pc', state: 'remote-staged', progressPercent: 90,
+      operationID: 'remote-host-7', detail: 'remote staging accepted',
+      terminalVerified: false,
+    })
+    expect(peerUpdateStatusFromEvent({ kind: 'update.queued', text: 'local' })).toBeNull()
   })
 
   it('keeps settings actions in the field control and omits offline EEPROM controls', () => {

@@ -1086,18 +1086,24 @@ also emitted to the host timeline.
 
 An enabled `integrations.websocket_clients` entry makes the primary host a
 standard WebSocket or bounded Socket.IO client. It authenticates with a Bearer
-token, subscribes to validated `events`/`opcodes`/`status` topics, reconnects with bounded
+token, subscribes to validated `events`/`state`/`status` topics, reconnects with bounded
 backoff, and can forward local events as correlated `controller.message.send`
 calls. Transport/control/error events and remote-origin messages are not
 re-forwarded, preventing a direct two-host echo loop. Incoming remote
-events/status are re-emitted locally as source-tagged messages.
+activity/status are re-emitted locally as source-tagged messages. Structured
+changed-state notifications are ingested as state events so buzzer metadata and
+other live previews retain their typed payload. An omitted topic list defaults
+to both `events` and `state`; an explicit list is an opt-out.
 
 `controller.bridge.call`, `POST /api/bridges/call`, and
 `bridge call PEER METHOD [PARAMS_JSON]` use the existing persistent connection
 and an internal wire ID, then restore the caller's nested JSON-RPC ID in the
 response. The target host applies its own token, remote capability policy, and
 ordinary safety path. Recursive bridge calls are rejected, so this API is not
-an unrestricted network pivot. Incoming command requests on an outbound peer
+an unrestricted network pivot. A nested `controller.peer.update.host` is also
+rejected: an authenticated remote caller must invoke it on the source host with
+both `programming` and `bridge_calls` enabled, and the target independently
+requires `programming` for `controller.update.host`. Incoming command requests on an outbound peer
 connection additionally require that peer's `allow_commands` flag.
 
 `controller.opcode.exchange` may be used as the nested bridge method. Because
@@ -1214,21 +1220,31 @@ Artifact and update JSON-RPC methods are:
 | `controller.artifact.manifest` | `{}` | feature/default/current artifacts, board identity, policy, and latest update status |
 | `controller.artifact.list` | optional `kind` | SHA-256-sorted artifact descriptors |
 | `controller.artifact.fetch` | `url`, `kind`, optional `name`, `sha256`, `bytes`, build identity, `idempotency_key` | queue a verified proxy-aware HTTP download |
-| `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; incomplete transfers expire and never enter the immutable store |
+| `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; declared bytes/concurrency are reserved, idle transfers expire without another request, startup removes crash orphans, and incomplete transfers never enter the immutable store |
 | `controller.artifact.capture` | `components`, `authorized`, optional `method`, `port`, `idempotency_key` | explicitly read and verify current flash/EEPROM through the primary |
 | `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `allow_incomplete_backup`, `reinitialize_eeprom`, `idempotency_key` | guarded backup-then-flash; explicit reinitialization retains raw EEPROM, programs/readbacks the complete Go-owned factory image, and discards incompatible semantic settings |
 | `controller.restore.flash` | `artifact_sha256`, `authorized`, optional `method`, `port` | guarded restore of a `flash-backup`; Urclock by default, explicit USBasp fallback |
 | `controller.update.eeprom` | same | full pre-write capture, then confirmed EEPROM restore |
 | `controller.update.host` | `artifact_sha256`, `authorized` | stage a verified deferred self-update |
-| `controller.peer.update.host` | `peer`, host `artifact_sha256`, `authorized`, optional `idempotency_key` | transfer through the existing authenticated bridge, revalidate on the peer, then ask that peer coordinator to replace itself gracefully |
+| `controller.peer.update.host` | `peer`, host `artifact_sha256`, `authorized`, required caller-generated `idempotency_key` | requires remote `programming` plus `bridge_calls`, transfers through the existing authenticated bridge, revalidates on the peer, and returns only remote `queued`/`staged` acceptance with `terminal_verified: false` |
 | `controller.update.status` | optional operation `id` | latest or selected asynchronous status |
 
 Peer host replacement is an application protocol, not an SSH deployment
 recipe. The source streams a verified executable through its already-connected
 bridge in bounded chunks; the target rehashes and reparses it before its own
-coordinator performs the ordinary journaled self-update and rollback health
-check. Either host can be source or target. `allow_commands`, the target's
-`programming` policy, and explicit `authorized: true` are all required.
+coordinator accepts the ordinary journaled self-update. The source validates
+every transfer ID, next offset, declared total, finished artifact identity, and
+target staging-operation identity. Its result deliberately stops at
+`remote-queued` or `remote-staged`: process replacement, candidate health,
+rollback, reconnect, and active-SHA verification are not claimed by this call.
+Either host can be source or target. Explicit `authorized: true` is required;
+an authenticated remote source caller additionally needs both `programming`
+and `bridge_calls`, while the target independently reapplies its `programming`
+policy. Peer-update bridge chaining is rejected. A caller-generated
+`idempotency_key` is mandatory. The browser retains one random logical-intent
+key across transport-uncertain retries and rotates it after an authoritative
+response. The CLI generates a fresh intent unless the operator supplies a key;
+scripts must reuse their explicit key when retrying the same logical attempt.
 
 Provider and manifest discovery use a companion, product-neutral contract:
 

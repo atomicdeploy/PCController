@@ -47,7 +47,13 @@ func (manager *Manager) buzzerMirrorLoop() {
 		case <-manager.ctx.Done():
 			return
 		case job := <-manager.buzzerJobs:
-			if err := playNativeBuzzer(manager.ctx, job); manager.ctx.Err() == nil {
+			manager.mu.RLock()
+			player := manager.buzzerPlayer
+			manager.mu.RUnlock()
+			if player == nil {
+				player = playNativeBuzzer
+			}
+			if err := player(manager.ctx, job); manager.ctx.Err() == nil {
 				manager.recordNativeBuzzerResult(err)
 			}
 		}

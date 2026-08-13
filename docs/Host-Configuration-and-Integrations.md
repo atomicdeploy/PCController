@@ -566,7 +566,10 @@ correlated calls through `controller.bridge.call`, `/api/bridges/call`, or
 the `bridge call` shell command. They retry with bounded backoff and preserve
 the rule that exactly one local primary owns the attached serial port. The
 target host independently checks its remote policy and ordinary safety guards;
-recursive bridge calls are rejected. Remote programming still closes that
+recursive bridge calls and peer-update chaining are rejected. An authenticated
+remote caller needs both source-host `programming` and `bridge_calls` for a
+peer update; the target independently requires `programming`. Remote board
+programming still closes that
 primary's UART, runs the guarded toolchain/Urclock workflow exclusively, and
 requires a fresh application `HELLO` afterward.
 
@@ -574,9 +577,12 @@ The peer connection also carries structured changed-state events and guarded
 host upgrades. Board-originated `buzzer.note` events keep their metadata so an
 enabled PC buzzer on another instance can render them immediately; an ingress
 marker prevents event cycles. `controller.peer.update.host` transfers a
-content-addressed executable through the authenticated bridge and invokes the
-target's own graceful coordinator. SSH remains an operator test/deployment
-harness only and is not part of the application update implementation.
+content-addressed executable through the authenticated bridge and requests the
+target's journaled coordinator operation. Its response proves only remote
+`queued` or `staged` acceptance; restart health, rollback outcome, reconnect,
+and active executable SHA remain a separate terminal acceptance gate. SSH
+remains an operator test/deployment harness only and is not part of the
+application update implementation.
 
 ## HTTP, webhooks, WebSocket, and Socket.IO
 
@@ -588,9 +594,11 @@ template. Timeouts, response-size bounds, concurrency limits, loop prevention,
 and non-2xx event reporting keep a slow endpoint from blocking serial control.
 
 The standard WebSocket endpoint is bidirectional: clients submit JSON-RPC and
-subscribe to `events` and/or `status`; the server pushes correlated responses,
-events, status samples, and errors. A configured host can also act as an
-outbound WebSocket client/bridge.
+subscribe to `events`, changed `state`, and/or `status`; the server pushes
+correlated responses, events, state frames, status samples, and errors. A
+configured host can also act as an outbound WebSocket client/bridge. Outbound
+peer configuration defaults to `events` plus `state` when topics are omitted,
+so structured buzzer notes reach an independently enabled host renderer.
 
 Socket.IO is not an alias for ordinary WebSocket. The implemented compatibility
 surface uses Engine.IO 4 with `transport=websocket`, connection and ping/pong

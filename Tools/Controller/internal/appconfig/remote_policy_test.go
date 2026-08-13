@@ -78,7 +78,7 @@ func TestRemoteBridgeEventForwardingRequiresCredentials(t *testing.T) {
 	if err := config.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	config.Integrations.WebSocketClients[0].Topics = []string{"events", "telemetry"}
+	config.Integrations.WebSocketClients[0].Topics = []string{"events", "state", "telemetry"}
 	if err := config.Validate(); err != nil {
 		t.Fatal(err)
 	}

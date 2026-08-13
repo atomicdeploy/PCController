@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { compareBuildIdentity, sha256File, startFlashRestore, uploadArtifact } from './updates-api'
+import { compareBuildIdentity, sha256File, startFlashRestore, startPeerHostUpdate, uploadArtifact } from './updates-api'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -54,5 +54,42 @@ describe('firmware artifact adapter', () => {
     expect(request.method).toBe('controller.restore.flash')
     expect(request.method).not.toBe('controller.update.firmware')
     expect(request.params).toMatchObject({ authorized: true, method: 'urclock', port: 'COM18' })
+  })
+
+  it('retains one intent key across transport uncertainty and rotates after known success', async () => {
+    const stored = new Map<string, string>()
+    Object.defineProperty(globalThis, 'sessionStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+        removeItem: (key: string) => stored.delete(key),
+      },
+    })
+    const digest = 'c'.repeat(64)
+    let call = 0
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      call += 1
+      if (call === 1) throw new TypeError('connection closed before response')
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0', id: call,
+        result: {
+          peer: 'edge', stage: 'remote-queued', terminal_verified: false,
+          artifact: { kind: 'host-executable', sha256: digest },
+          operation: { id: `remote-${call}`, kind: 'host', state: 'queued', progress_percent: 0 },
+        },
+      }), { status: 200 })
+    })
+    await expect(startPeerHostUpdate('edge', digest)).rejects.toThrow('connection closed')
+    await startPeerHostUpdate('edge', digest)
+    await startPeerHostUpdate('edge', digest)
+    const keys = fetchMock.mock.calls.map(([, init]) => {
+      const request = JSON.parse(String(init?.body)) as { params: { idempotency_key: string } }
+      return request.params.idempotency_key
+    })
+    expect(keys[0]).toBe(keys[1])
+    expect(keys[2]).not.toBe(keys[1])
+    expect(keys[0]).toMatch(/^peer-host-[0-9a-f]{12}-[0-9a-f]{32}$/)
+    expect(stored.size).toBe(0)
   })
 })

@@ -713,8 +713,8 @@ bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"app title auto\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"
-bin\controller.exe exec peer-update host cafe-pc HOST_ARTIFACT_SHA256
-bin\controller.exe ipc call --method controller.peer.update.host --params "{\"peer\":\"cafe-pc\",\"artifact_sha256\":\"HOST_ARTIFACT_SHA256\",\"authorized\":true}"
+bin\controller.exe exec peer-update host cafe-pc HOST_ARTIFACT_SHA256 [IDEMPOTENCY_KEY]
+bin\controller.exe ipc call --method controller.peer.update.host --params "{\"peer\":\"cafe-pc\",\"artifact_sha256\":\"HOST_ARTIFACT_SHA256\",\"authorized\":true,\"idempotency_key\":\"INTENT_KEY\"}"
 ```
 
 Enable an authenticated edge host on a trusted LAN with explicit browser
@@ -797,9 +797,17 @@ own remote policy and board safety guards.
 
 Host upgrades use that same authenticated connection. A verified executable is
 chunked below the RPC frame limit, validated again by the receiving artifact
-store, and passed to the receiving coordinator for graceful replacement and
-health-checked rollback. No SSH command is embedded in this path. The Updates
-page exposes the same operation for every connected command-enabled peer.
+store, and passed to the receiving coordinator for journaled replacement. The
+source response stops at truthful remote `queued` or `staged` acceptance; it
+does not assert process restart, candidate health, rollback outcome, reconnect,
+or the final active executable SHA. Those remain a separate terminal acceptance
+gate on the target. No SSH command is embedded in this path. The Updates page
+exposes the same operation for every connected command-enabled peer and keeps
+that peer staging result separate from local update status. The browser retains
+one generated key only while a logical attempt has a transport-uncertain
+outcome, then rotates it after an authoritative response. The CLI creates a new
+intent by default; pass and reuse an explicit key for scripted retries. Raw API
+callers must always provide their own retry-stable `idempotency_key`.
 
 Go programs can import the module-root `controller` package directly:
 

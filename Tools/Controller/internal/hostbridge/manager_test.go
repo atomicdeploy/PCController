@@ -175,6 +175,22 @@ func TestPeerRPCSessionCorrelatesResponseAndPreservesCallerID(t *testing.T) {
 	}
 }
 
+func TestCallBridgeRejectsDirectAndShellWrappedPeerUpdateChains(t *testing.T) {
+	manager := &Manager{}
+	wrapped, _ := json.Marshal(map[string]string{
+		"command": "peer-update host second " + strings.Repeat("a", 64) + " intent:nested",
+	})
+	for _, request := range []ipcjson.Request{
+		{JSONRPC: ipcjson.Version, Method: "controller.peer.update.host"},
+		{JSONRPC: ipcjson.Version, Method: "controller.command.execute", Params: wrapped},
+	} {
+		if _, err := manager.CallBridge(context.Background(), "edge", request); err == nil ||
+			!strings.Contains(err.Error(), "may not be chained") {
+			t.Fatalf("request=%#v err=%v", request, err)
+		}
+	}
+}
+
 func TestOutboundBridgeCanCallRemoteJSONRPCService(t *testing.T) {
 	const token = "bridge-test-token"
 	forwarded := make(chan controller.TextMessage, 16)

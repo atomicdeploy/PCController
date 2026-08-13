@@ -480,9 +480,9 @@ func (value Config) validateIntegrations() error {
 			if topic == "telemetry" {
 				topic = "status"
 			}
-			if topic != "events" && topic != "status" {
+			if topic != "events" && topic != "state" && topic != "status" {
 				return fmt.Errorf(
-					"integrations.websocket_clients[%d].topics[%d] must be events or status",
+					"integrations.websocket_clients[%d].topics[%d] must be events, state, or status",
 					index, topicIndex,
 				)
 			}

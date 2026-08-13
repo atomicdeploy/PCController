@@ -5,19 +5,26 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
-const PeerUploadChunkBytes = 384 << 10
-const peerUploadTTL = 15 * time.Minute
+const (
+	PeerUploadChunkBytes       = 384 << 10
+	peerUploadTTL              = 15 * time.Minute
+	peerUploadCleanupInterval  = time.Minute
+	peerUploadMaximumTransfers = 8
+	peerUploadMaximumReserved  = 512 << 20
+)
 
 type peerUpload struct {
-	file     *os.File
-	path     string
-	options  PutOptions
-	received int64
-	created  time.Time
+	file      *os.File
+	path      string
+	options   PutOptions
+	received  int64
+	updated   time.Time
+	finishing bool
 }
 
 func (service *Service) BeginPeerUpload(request PeerUploadBeginRequest) (PeerUploadBeginResult, error) {
@@ -40,6 +47,8 @@ func (service *Service) BeginPeerUpload(request PeerUploadBeginRequest) (PeerUpl
 	if _, err := validateDescriptorMetadata(request.Metadata); err != nil {
 		return PeerUploadBeginResult{}, err
 	}
+	now := time.Now()
+	service.cleanupExpiredPeerUploads(now)
 	file, err := os.CreateTemp(service.store.Root(), ".peer-artifact-*.upload")
 	if err != nil {
 		return PeerUploadBeginResult{}, fmt.Errorf("create peer artifact staging file: %w", err)
@@ -50,7 +59,7 @@ func (service *Service) BeginPeerUpload(request PeerUploadBeginRequest) (PeerUpl
 		return PeerUploadBeginResult{}, err
 	}
 	id := newOperationID()
-	upload := &peerUpload{file: file, path: file.Name(), created: time.Now(), options: PutOptions{
+	upload := &peerUpload{file: file, path: file.Name(), updated: now, options: PutOptions{
 		Kind: request.Kind, Name: request.Name, Source: "authenticated-peer",
 		ExpectedSHA256: digest, ExpectedBytes: request.Bytes,
 		BuildHash: request.BuildHash, BuildTimestamp: request.BuildTimestamp,
@@ -58,19 +67,22 @@ func (service *Service) BeginPeerUpload(request PeerUploadBeginRequest) (PeerUpl
 		Metadata: request.Metadata,
 	}}
 	service.mu.Lock()
-	for transferID, existing := range service.peerUploads {
-		if time.Since(existing.created) <= peerUploadTTL {
-			continue
-		}
-		delete(service.peerUploads, transferID)
-		_ = existing.file.Close()
-		_ = os.Remove(existing.path)
+	reserved := int64(0)
+	for _, existing := range service.peerUploads {
+		reserved += existing.options.ExpectedBytes
 	}
-	if len(service.peerUploads) >= 8 {
+	if service.peerUploadsClosed {
 		service.mu.Unlock()
 		_ = file.Close()
 		_ = os.Remove(file.Name())
-		return PeerUploadBeginResult{}, errors.New("too many concurrent peer artifact transfers")
+		return PeerUploadBeginResult{}, errors.New("artifact service is closed")
+	}
+	if len(service.peerUploads) >= peerUploadMaximumTransfers ||
+		reserved+request.Bytes > peerUploadMaximumReserved {
+		service.mu.Unlock()
+		_ = file.Close()
+		_ = os.Remove(file.Name())
+		return PeerUploadBeginResult{}, errors.New("peer artifact transfer capacity is exhausted")
 	}
 	service.peerUploads[id] = upload
 	service.mu.Unlock()
@@ -87,9 +99,21 @@ func (service *Service) AppendPeerUpload(request PeerUploadChunkRequest) (PeerUp
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
+	if service.peerUploadsClosed {
+		return PeerUploadChunkResult{}, errors.New("artifact service is closed")
+	}
 	upload := service.peerUploads[id]
 	if upload == nil {
 		return PeerUploadChunkResult{}, os.ErrNotExist
+	}
+	if peerUploadExpired(upload, time.Now()) {
+		delete(service.peerUploads, id)
+		_ = upload.file.Close()
+		_ = os.Remove(upload.path)
+		return PeerUploadChunkResult{}, errors.New("peer artifact transfer expired")
+	}
+	if upload.finishing {
+		return PeerUploadChunkResult{}, errors.New("peer artifact transfer is finishing")
 	}
 	if request.Offset != upload.received {
 		return PeerUploadChunkResult{}, fmt.Errorf("peer upload offset is %d; expected %d", request.Offset, upload.received)
@@ -97,7 +121,7 @@ func (service *Service) AppendPeerUpload(request PeerUploadChunkRequest) (PeerUp
 	if upload.received+int64(len(request.Data)) > upload.options.ExpectedBytes {
 		return PeerUploadChunkResult{}, errors.New("peer upload exceeds declared size")
 	}
-	written, err := upload.file.Write(request.Data)
+	written, err := upload.file.WriteAt(request.Data, request.Offset)
 	if err != nil {
 		return PeerUploadChunkResult{}, fmt.Errorf("write peer upload: %w", err)
 	}
@@ -105,6 +129,7 @@ func (service *Service) AppendPeerUpload(request PeerUploadChunkRequest) (PeerUp
 		return PeerUploadChunkResult{}, io.ErrShortWrite
 	}
 	upload.received += int64(written)
+	upload.updated = time.Now()
 	return PeerUploadChunkResult{TransferID: id, NextOffset: upload.received, BytesTotal: upload.options.ExpectedBytes}, nil
 }
 
@@ -112,18 +137,46 @@ func (service *Service) FinishPeerUpload(request PeerUploadFinishRequest) (Opera
 	id := strings.TrimSpace(request.TransferID)
 	service.mu.Lock()
 	upload := service.peerUploads[id]
-	delete(service.peerUploads, id)
-	service.mu.Unlock()
 	if upload == nil {
+		service.mu.Unlock()
 		return OperationResult{}, os.ErrNotExist
 	}
-	defer os.Remove(upload.path)
-	if upload.received != upload.options.ExpectedBytes {
+	if service.peerUploadsClosed {
+		service.mu.Unlock()
+		return OperationResult{}, errors.New("artifact service is closed")
+	}
+	if upload.finishing {
+		service.mu.Unlock()
+		return OperationResult{}, errors.New("peer artifact transfer is already finishing")
+	}
+	if peerUploadExpired(upload, time.Now()) {
+		delete(service.peerUploads, id)
+		service.mu.Unlock()
 		_ = upload.file.Close()
+		_ = os.Remove(upload.path)
+		return OperationResult{}, errors.New("peer artifact transfer expired")
+	}
+	if upload.received != upload.options.ExpectedBytes {
+		delete(service.peerUploads, id)
+		service.mu.Unlock()
+		_ = upload.file.Close()
+		_ = os.Remove(upload.path)
 		return OperationResult{}, fmt.Errorf("peer upload received %d of %d bytes", upload.received, upload.options.ExpectedBytes)
 	}
-	if err := upload.file.Sync(); err != nil {
+	upload.finishing = true
+	service.peerUploadOps.Add(1)
+	service.mu.Unlock()
+	defer func() {
+		service.mu.Lock()
+		if service.peerUploads[id] == upload {
+			delete(service.peerUploads, id)
+		}
+		service.mu.Unlock()
 		_ = upload.file.Close()
+		_ = os.Remove(upload.path)
+		service.peerUploadOps.Done()
+	}()
+	if err := upload.file.Sync(); err != nil {
 		return OperationResult{}, err
 	}
 	if err := upload.file.Close(); err != nil {
@@ -141,10 +194,68 @@ func (service *Service) AbortPeerUpload(request PeerUploadFinishRequest) error {
 	id := strings.TrimSpace(request.TransferID)
 	service.mu.Lock()
 	upload := service.peerUploads[id]
-	delete(service.peerUploads, id)
-	service.mu.Unlock()
 	if upload == nil {
+		service.mu.Unlock()
 		return nil
 	}
+	if service.peerUploadsClosed {
+		service.mu.Unlock()
+		return errors.New("artifact service is closed")
+	}
+	if upload.finishing {
+		service.mu.Unlock()
+		return errors.New("peer artifact transfer is finishing")
+	}
+	delete(service.peerUploads, id)
+	service.mu.Unlock()
 	return errors.Join(upload.file.Close(), os.Remove(upload.path))
+}
+
+func peerUploadExpired(upload *peerUpload, now time.Time) bool {
+	return upload == nil || now.Sub(upload.updated) > peerUploadTTL
+}
+
+func (service *Service) cleanupExpiredPeerUploads(now time.Time) {
+	service.mu.Lock()
+	expired := make([]*peerUpload, 0)
+	for transferID, upload := range service.peerUploads {
+		if upload.finishing || !peerUploadExpired(upload, now) {
+			continue
+		}
+		delete(service.peerUploads, transferID)
+		expired = append(expired, upload)
+	}
+	service.mu.Unlock()
+	for _, upload := range expired {
+		_ = upload.file.Close()
+		_ = os.Remove(upload.path)
+	}
+}
+
+func (service *Service) peerUploadCleanupLoop() {
+	defer service.peerUploadWait.Done()
+	ticker := time.NewTicker(peerUploadCleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-service.ctx.Done():
+			return
+		case now := <-ticker.C:
+			service.cleanupExpiredPeerUploads(now)
+		}
+	}
+}
+
+func (service *Service) removeOrphanedPeerUploads() error {
+	paths, err := filepath.Glob(filepath.Join(service.store.Root(), ".peer-artifact-*.upload"))
+	if err != nil {
+		return err
+	}
+	var cleanupErr error
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("remove %s: %w", filepath.Base(path), err))
+		}
+	}
+	return cleanupErr
 }
