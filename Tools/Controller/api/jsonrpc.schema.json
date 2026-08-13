@@ -89,6 +89,7 @@
             "controller.event.latest",
             "controller.event.next",
             "controller.exit",
+            "controller.firmware.build",
             "controller.front_panel",
             "controller.front-panel",
             "controller.history.status",
@@ -491,6 +492,11 @@
       "capability": "shutdown",
       "summary": "exit",
       "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.firmware.build": {
+      "capability": "programming",
+      "summary": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",
+      "idempotency": "non-idempotent"
     },
     "controller.front_panel": {
       "capability": "read",

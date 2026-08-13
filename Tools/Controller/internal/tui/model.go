@@ -1286,7 +1286,9 @@ func (model Model) View() string {
 	if model.terminalIsVisible() {
 		parts = append(parts, model.completionView(), model.commandBar())
 	}
-	parts = append(parts, footer)
+	if footer != "" {
+		parts = append(parts, footer)
+	}
 	view := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return lipgloss.NewStyle().MaxWidth(model.width).Render(view)
 }
@@ -1782,17 +1784,13 @@ func (model Model) completionView() string {
 }
 
 func (model Model) footer() string {
-	left := "←/→ tabs or value  ↑/↓ navigate  Enter activate  ~ terminal  Ctrl+C quit  Mouse enabled"
-	if model.terminalIsVisible() {
-		left = "Terminal visible · ~ hide  Tab/→ complete  Ctrl+C quit  Mouse enabled"
-	}
 	if model.portOwner != nil {
-		left = "Serial busy · Ctrl+F show owner · Ctrl+W ask close · Ctrl+T twice to terminate · primary controller protected"
+		return errorStyle.Render("Serial busy · Ctrl+F show owner · Ctrl+W ask close · Ctrl+T twice to terminate · primary controller protected")
 	}
 	if model.notice != "" && time.Now().Before(model.noticeUntil) {
-		left = model.notice
+		return labelStyle.Render(model.notice)
 	}
-	return labelStyle.Render(left)
+	return ""
 }
 
 func intersperseStrings(values []string, separator string) []string {

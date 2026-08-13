@@ -76,6 +76,7 @@ const capabilityGroups = {
     "controller.event.next", "controller.event.latest", "controller.subscribe", "controller.unsubscribe",
   ],
   programming: [
+	"controller.firmware.build",
     "controller.artifact.fetch", "controller.artifact.upload", "controller.artifact.capture",
     "controller.artifact.upload.begin", "controller.artifact.upload.chunk",
     "controller.artifact.upload.finish", "controller.artifact.upload.abort",
@@ -142,6 +143,7 @@ const methodOverrides = {
 	"controller.ping": "Return service health and protocol identity.",
   "controller.snapshot": "Return the authoritative cached controller snapshot.",
   "controller.command.execute": "Run a shared command after semantic capability classification.",
+	"controller.firmware.build": "Compile the canonical host project with reviewed feature names and publish correlated ordered program progress events.",
   "controller.command.catalog": "Return the machine-readable shared command catalog.",
   "controller.event.next": "Long-poll the next retained event after an event ID, optionally selecting activity, state, telemetry, or debug.",
   "controller.rf.map": "Replace one learned RF mapping and return board readback.",
@@ -181,6 +183,7 @@ const methodOverrides = {
 
 const nonIdempotentMethods = new Set([
   "controller.reset.lines", "controller.reset", "controller.port.reset", "controller.command.execute",
+	"controller.firmware.build",
   "controller.rf.learn.start", "controller.rf.transmit", "controller.lcd.prompt", "controller.lcd.priority",
   "controller.message.send", "controller.bridge.call", "controller.os.key", "controller.os.power",
 	"controller.device.action", "controller.app.action", "controller.artifact.fetch",

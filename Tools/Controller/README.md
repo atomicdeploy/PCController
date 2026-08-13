@@ -780,6 +780,8 @@ Start cross-platform JSON-RPC IPC on loopback:
 bin\controller.exe ipc serve --port COM18
 bin\controller.exe ipc call --method controller.snapshot
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"rf list\"}"
+bin\controller.exe ipc monitor --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --kind program --after latest
+bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --timeout 15m --method controller.firmware.build --params "{}"
 bin\controller.exe ipc call --method controller.rf.map --params "{\"id\":3,\"action\":\"key\",\"target\":\"2\",\"behavior\":\"press\"}"
 bin\controller.exe ipc call --method controller.rf.transmit --params "{\"code\":1193046,\"bits\":24,\"protocol\":1,\"pulse_us\":350,\"repeats\":1}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"melody play notify\"}"

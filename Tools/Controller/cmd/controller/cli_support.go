@@ -311,6 +311,7 @@ Automation, monitoring and bridges:
   controller monitor [--interval 500ms] [--json] [connection flags]
   controller ipc serve [--listen 127.0.0.1:8787|--stdio] [connection flags]
   controller ipc call --method METHOD [--params JSON]
+	controller ipc monitor [--addr HOST:PORT] [--token-ref REF] [--kind program] [--after latest]
   controller ws serve --file firmware.hex [flags]
   controller ws client --url ws://host:3000/firmware [programmer flags]
 

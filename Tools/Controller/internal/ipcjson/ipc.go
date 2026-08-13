@@ -884,6 +884,11 @@ func (service *Service) dispatch(
 				}
 			}
 		}
+	case "controller.firmware.build":
+		var params controller.FirmwareBuildRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.Client.BuildFirmware(ctx, params)
+		}
 	case "controller.rf.list":
 		result, err = service.Client.ListLearnedDetailed(ctx)
 	case "controller.rf.presentation":
@@ -1912,7 +1917,8 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.artifact.upload.finish", "controller.artifact.upload.abort",
 		"controller.artifact.capture", "controller.peer.update.host",
 		"controller.update.firmware", "controller.restore.flash",
-		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage":
+		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage",
+		"controller.firmware.build":
 		return capabilityProgramming
 	case "controller.connect", "controller.open", "controller.port.open",
 		"controller.close", "controller.port.close":
@@ -1942,9 +1948,9 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.peripherals.set",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
-                        "controller.app.page", "controller.app.navigate", "controller.app.launch",
-                        "controller.app.instance.report", "controller.app.instance.remove",
-                        "controller.network.peers.set":
+		"controller.app.page", "controller.app.navigate", "controller.app.launch",
+		"controller.app.instance.report", "controller.app.instance.remove",
+		"controller.network.peers.set":
 		return capabilityHostConfig
 	case "controller.os.key", "controller.virtual_key":
 		return capabilityVirtualKeys

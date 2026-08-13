@@ -8,6 +8,7 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -380,6 +381,21 @@ type Event struct {
 	RFPulseUS   uint16            `json:"rf_pulse_us,omitempty"`
 	ResetCause  byte              `json:"reset_cause,omitempty"`
 	ResetCount  uint32            `json:"reset_count,omitempty"`
+}
+
+// FirmwareBuildRequest is the strict, typed alternative to sending a raw
+// shell command to a remote host. An empty request uses the host's configured
+// firmware feature profile.
+type FirmwareBuildRequest struct {
+	FirmwareFeatures   []string `json:"firmware_features,omitempty"`
+	NoFirmwareFeatures bool     `json:"no_firmware_features,omitempty"`
+}
+
+// FirmwareBuildResult correlates the final normalized log with the ordered
+// program.* events that WebSocket, Socket.IO, TUI, and long-poll clients see.
+type FirmwareBuildResult struct {
+	OperationID string `json:"operation_id"`
+	Output      string `json:"output"`
 }
 
 // OpcodeFrame is the raw, versionless UART exchange result. Payload is kept
@@ -970,6 +986,46 @@ func (client *Client) Execute(ctx context.Context, command string) (string, erro
 	client.engineMu.Lock()
 	defer client.engineMu.Unlock()
 	return client.engine.Execute(ctx, command)
+}
+
+// BuildFirmware compiles the configured canonical project without accepting
+// an arbitrary remote filesystem path or raw compiler flags.
+func (client *Client) BuildFirmware(
+	ctx context.Context,
+	request FirmwareBuildRequest,
+) (FirmwareBuildResult, error) {
+	if len(request.FirmwareFeatures) != 0 && request.NoFirmwareFeatures {
+		return FirmwareBuildResult{}, errors.New(
+			"firmware_features and no_firmware_features are mutually exclusive",
+		)
+	}
+	features, err := programmer.NormalizeFirmwareFeatures(request.FirmwareFeatures)
+	if err != nil {
+		return FirmwareBuildResult{}, err
+	}
+	operationBytes := make([]byte, 12)
+	if _, err := rand.Read(operationBytes); err != nil {
+		return FirmwareBuildResult{}, fmt.Errorf("create firmware build operation ID: %w", err)
+	}
+	operationID := "firmware-build-" + hex.EncodeToString(operationBytes)
+	words := []string{"program", "compile", "."}
+	if request.NoFirmwareFeatures {
+		words = append(words, "--no-firmware-features")
+	} else {
+		for _, feature := range programmer.FirmwareFeatureNames(features) {
+			words = append(words, "--firmware-feature", feature)
+		}
+	}
+	output, buildErr := client.Execute(
+		control.WithProgramOperationID(ctx, operationID),
+		strings.Join(words, " "),
+	)
+	options := client.currentCommandOptions()
+	result := FirmwareBuildResult{
+		OperationID: operationID,
+		Output:      control.NormalizeProgramOutput(output, options.ProjectPath),
+	}
+	return result, buildErr
 }
 
 // CommandCatalog exposes the same discoverable command contract used by the

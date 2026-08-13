@@ -3553,6 +3553,7 @@
               "controller.event.latest",
               "controller.event.next",
               "controller.exit",
+              "controller.firmware.build",
               "controller.front_panel",
               "controller.front-panel",
               "controller.history.status",
