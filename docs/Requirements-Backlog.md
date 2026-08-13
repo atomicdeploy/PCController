@@ -29,7 +29,7 @@ This is the canonical public map from normalized project requirements to GitHub 
 | `board-pin-map-inputs` | [#19](https://github.com/atomicdeploy/PCController/issues/19) | 🟡 open | Validate the complete board pin, shift-register, BT Audio, and reed mapping |
 | `measurement-sensors-i2c` | [#20](https://github.com/atomicdeploy/PCController/issues/20) | 🟡 open | Deliver stable INA219 and dual-DS18B20 measurements with conflict-free I2C discovery |
 | `pwm-lighting-rgb-strip` | [#21](https://github.com/atomicdeploy/PCController/issues/21) | 🟡 open | Complete PWM ownership, enclosure fade, status RGB, power light, and addressable strip behavior |
-| `displays-audio` | [#22](https://github.com/atomicdeploy/PCController/issues/22) | 🟡 open | Finish smooth TM1637, optional LCD, buzzer, melody, and configurable cue behavior |
+| `displays-audio` | [#22](https://github.com/atomicdeploy/PCController/issues/22) | 🟡 open | Finish display/audio: exact autonomous cues, host melody catalog, typed EEPROM editing, and selectable startup/event-opcode melodies |
 | `cooperative-host-i2c-profile` | [#23](https://github.com/atomicdeploy/PCController/issues/23) | ✅ closed | Measure and implement the cooperative host-driven I2C/LCD profile |
 
 ## [#3 — Relay and motion-control safety](https://github.com/atomicdeploy/PCController/issues/3)

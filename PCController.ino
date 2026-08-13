@@ -16,7 +16,7 @@
 #endif
 #include "LocalLib/TonePlayer.h"
 #include "Project/AddressableLeds.h"
-#include "Project/BootMelody.h"
+#include "Project/AudioCues.h"
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"
 #include "Project/FrontPanelModel.h"

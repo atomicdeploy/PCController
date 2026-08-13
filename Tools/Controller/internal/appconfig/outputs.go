@@ -12,6 +12,13 @@ const (
 	MaxMelodyNotes             = 64
 	PowerDownMelodyName        = "power-down"
 	ProgrammingReadyMelodyName = "programming-ready"
+	FinishMelodyName           = "finish"
+	LostMelodyName             = "lost"
+	IncorrectBeepMelodyName    = "incorrect-beep"
+	ErrorBeepMelodyName        = "error-beep"
+	FaultBeepMelodyName        = "fault-beep"
+	SuccessCueMelodyName       = "success-cue"
+	ErrorCueMelodyName         = "error-cue"
 )
 
 // Melody is PC-side configuration. The host streams one note at a time over
@@ -66,7 +73,85 @@ func DefaultMelodies() []Melody {
 		},
 		DefaultPowerDownMelody(),
 		DefaultProgrammingReadyMelody(),
+		DefaultFinishMelody(),
+		DefaultLostMelody(),
+		DefaultIncorrectBeepMelody(),
+		DefaultErrorBeepMelody(),
+		DefaultFaultBeepMelody(),
+		DefaultSuccessCueMelody(),
+		DefaultErrorCueMelody(),
 	}
+}
+
+func BuiltInLegacyFeedbackMelodies() []Melody {
+	return []Melody{
+		DefaultFinishMelody(),
+		DefaultLostMelody(),
+		DefaultIncorrectBeepMelody(),
+		DefaultErrorBeepMelody(),
+		DefaultFaultBeepMelody(),
+		DefaultSuccessCueMelody(),
+		DefaultErrorCueMelody(),
+	}
+}
+
+// The named legacy feedback catalog preserves the original project melodies
+// exactly on the host. They remain editable and playable through every shared
+// melody surface without consuming production MCU flash.
+func DefaultFinishMelody() Melody {
+	return Melody{Name: FinishMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 659, DurationMS: 100},
+		{FrequencyHz: 784, DurationMS: 100},
+		{FrequencyHz: 880, DurationMS: 250},
+	}}
+}
+
+func DefaultLostMelody() Melody {
+	return Melody{Name: LostMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 392, DurationMS: 100},
+		{FrequencyHz: 330, DurationMS: 100},
+		{FrequencyHz: 262, DurationMS: 100},
+		{FrequencyHz: 196, DurationMS: 100},
+	}}
+}
+
+func DefaultIncorrectBeepMelody() Melody {
+	return Melody{Name: IncorrectBeepMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 2000, DurationMS: 100, GapMS: 100},
+		{FrequencyHz: 2000, DurationMS: 100, GapMS: 100},
+		{FrequencyHz: 2000, DurationMS: 100, GapMS: 100},
+	}}
+}
+
+func DefaultErrorBeepMelody() Melody {
+	return Melody{Name: ErrorBeepMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+		{FrequencyHz: 2000, DurationMS: 10, GapMS: 10},
+	}}
+}
+
+func DefaultFaultBeepMelody() Melody {
+	return Melody{Name: FaultBeepMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 1000, DurationMS: 250},
+		{FrequencyHz: 500, DurationMS: 500, GapMS: 5000},
+	}}
+}
+
+func DefaultSuccessCueMelody() Melody {
+	return Melody{Name: SuccessCueMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 1047, DurationMS: 70, GapMS: 30},
+		{FrequencyHz: 1319, DurationMS: 110},
+	}}
+}
+
+func DefaultErrorCueMelody() Melody {
+	return Melody{Name: ErrorCueMelodyName, Notes: []MelodyNote{
+		{FrequencyHz: 330, DurationMS: 90, GapMS: 50},
+		{FrequencyHz: 262, DurationMS: 160},
+	}}
 }
 
 // DefaultPowerDownMelody is the deterministic short PC-streamed cue used by
@@ -112,10 +197,25 @@ func DefaultStatusLEDEffects() []StatusLEDEffect {
 	}
 }
 
-// Effective* returns the watched configuration exactly. Defaults are written
-// when a new configuration is created; an empty list is an intentional choice.
+// EffectiveMelodies preserves the historical feedback library as immutable
+// host fallbacks. A watched configuration may override any name, while
+// deleting an override restores the exact built-in definition instead of
+// losing a melody that was moved out of constrained MCU flash.
 func EffectiveMelodies(config Config) []Melody {
-	return cloneMelodies(config.Melodies)
+	result := cloneMelodies(config.Melodies)
+	for _, builtIn := range BuiltInLegacyFeedbackMelodies() {
+		found := false
+		for _, configured := range result {
+			if strings.EqualFold(configured.Name, builtIn.Name) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, builtIn)
+		}
+	}
+	return result
 }
 
 func EffectiveStatusLEDEffects(config Config) []StatusLEDEffect {

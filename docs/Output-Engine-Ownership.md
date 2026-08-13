@@ -9,6 +9,7 @@ small ATmega328P build can remain autonomous without duplicating host logic.
 | User MOSFET/PWM (PCA9685 0–10) | Direct logical-value writer | `pwm set`, `pwm fade`, and `pwm demo` stream normalized 12-bit values | Host interpolation uses the same linear/ease curves as legacy RGB rendering |
 | Enclosure illumination (PCA9685 11) | Door-aware Off/Auto/On controller, 20 ms nonblocking ease | Settings can change mode and endpoints | MCU reuses `TransitionMath::easedByte` |
 | Addressable strip (D6, 11 pixels) | Fixed, allocation-free WS281x buffer/transport | `strip pixel`, `strip fill`, and macros | The raw transport stays separate: it has strict 800 kHz timing and pixel state, unlike PCA register outputs |
+| Buzzer (D9/Timer1) | Cooperative ten-step `TonePlayer`; door and motion/output cue selection reads a CRC-backed EEPROM record | Direct `beep`, macros, and named host melodies share the acknowledged Buzzer opcode | Exact rich sequences live in the host catalog; the MCU engine and compact offline cue controller remain reusable |
 
 Merging the strip sender into the PCA status engine would not save flash: the
 protocol, timing, and storage shapes are different. The reusable boundary is
@@ -44,6 +45,8 @@ compact opcode after SRAM/flash measurement.
   separate design item because commands need strict allow-listing, bounded
   execution time, atomic storage, and a recovery path before they are safe to
   run before HELLO.
+- The exact audio split and the rule prohibiting silent feature removal are in
+  [Feature availability and removal ledger](Feature-Availability-and-Removal-Ledger.md).
 
 ## Front-panel production profile
 

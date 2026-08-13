@@ -19,7 +19,7 @@ and readback.
 | BT Audio indicator | 74HC165 bit 6 | Classifies the BT-5.0-Pro Audio LED as Off, On, or Blinking |
 | Door reed | 74HC165 bit 7 | Door events, illumination target, default-page return, motion handling |
 | Relays R1-R8 | Active-low 74HC595 outputs | Two interlocked motion sides plus four general outputs |
-| Buzzer | D9 / PB1 | Nonblocking Timer1 tones, boot melody, keys, door, relay, save/error cues |
+| Buzzer | D9 / PB1 | Nonblocking Timer1 engine, keys, CRC-backed door and relay/motion cues, direct host/macro tones |
 | Two DS18B20s | D10 / PB2 / CS | `Temperature LED` and `Temperature BT`; external 4.7 kOhm pull-up to VCC is required |
 | 433 MHz receive | D2 / INT0 | rc-switch receive, learning, repeat handling, mapped actions, events |
 | 433 MHz transmit | D3 / INT1 | Host/protocol transmission; receiver is paused only for the send |
@@ -81,8 +81,8 @@ The production target is an ATmega328P at 16 MHz with a 2 s watchdog. UART0 is
 started first so the host can receive an early `HELLO`; relay outputs are made
 safe before peripherals that can take longer to probe. The relevant startup
 order is UART/watchdog, shift registers and relays, system inputs, buzzer,
-addressable LEDs, EEPROM/display, recovered I2C plus PWM/INA219, temperatures,
-433 MHz, then the nonblocking boot melody.
+addressable LEDs, EEPROM/display/audio cues, recovered I2C plus PWM/INA219,
+temperatures, then 433 MHz.
 
 | Peripheral | Wiring/address | Active initialization | Startup state |
 |---|---|---|---|
@@ -93,7 +93,7 @@ addressable LEDs, EEPROM/display, recovered I2C plus PWM/INA219, temperatures,
 | 74HC165/74HC595 | A0-A3, D4, D5, D7, D8 | Active-low inputs and outputs, 5 ms service interval | `/OE` held inactive until an all-off frame has been latched |
 | 433 MHz | RX D2/INT0, TX D3/INT1 | rc-switch 2.6.4, receive tolerance 70%, transmit/receive enabled | Receiver active; temporarily paused only while transmitting |
 | Cooperative I2C/LCD | A4/A5; LCD commonly `0x27` or `0x3F` | Compact 100 kHz master; 25 ms reset-on-timeout; bounded 16-byte host transfers and 0-10 s leases | Host owns LCD discovery/rendering; MCU renderer is disabled |
-| Buzzer | D9/PB1/OC1A | Timer1 CTC hardware toggle, no audio-rate ISR, ten-step queue | Output low and queue empty, then EEPROM mute (factory audible), then boot melody |
+| Buzzer | D9/PB1/OC1A | Timer1 CTC hardware toggle, fixed /8 prescaler for 20..20,000 Hz, no audio-rate ISR, ten-step queue | Output low and queue empty, then EEPROM mute (factory audible) and CRC-backed core cue record |
 | Relays | Eight active-low 74HC595 outputs | R1/R3 direction, R2/R4 enable, R5-R8 general | Both enable relays off first, then every relay off |
 | PWM status LEDs | PWM 12-15 | Power signal on channel 12; RGB on 13-15 | Power signal on, RGB Boot mode; EEPROM brightness factory 128 |
 | Addressable LEDs | D6/PD6 | 11 pixels, 800 kHz; current build is WS2811/BRG | Pixel buffer cleared and one all-black frame sent |
@@ -441,7 +441,7 @@ not a debug-text console. Application frames use zero-delimited COBS, magic
 payload. Timed events and ACKs append the MCU `micros()` timestamp so the host
 can distinguish device execution time from USB/network arrival time. Firmware
 starts UART and emits an early `HELLO` before slower peripheral initialization,
-then sends final `HELLO` and telemetry after the boot melody is queued.
+then sends final `HELLO` and telemetry after peripheral initialization.
 
 The application limit is 32,384 bytes (`0x0000`-`0x7E7F`). The 384-byte UART0
 Urboot/urclock loader occupies `0x7E80`-`0x7FFF`; application opcodes and
@@ -946,8 +946,8 @@ protocol and host:
   display, menu, reset, and generic I2C commands;
 - graceful reboot sequence that stops the buzzer, RF momentary action, motion,
   relays, and user PWM outputs while playing the Reset RGB cue;
-- boot melody and boot/status RGB indication; door, BT Audio, RF, navigation,
-  save/discard, warning/hot, fault, and reset RGB cues;
+- boot/status RGB indication; door, BT Audio, RF, navigation, save/discard,
+  warning/hot, fault, and reset RGB cues; named host welcome/feedback melodies;
 - door and relay audio enable flags plus global Silent mode in EEPROM;
 - two DS18B20 ROM identities, role swap setting, asynchronous 11-bit
   conversion, and temperature smoothing; OneWire work pauses during RF learn;
@@ -1050,23 +1050,25 @@ The current logical EEPROM map is:
 
 | Range | Bytes | Owner |
 |---:|---:|---|
-| 0-31 | 32 | Unallocated |
-| 32-63 | 32 | Packed settings plus checksum |
-| 64-307 | 244 | RF header plus 20 learned records |
-| 308-319 | 12 | Unallocated |
-| 320-703 | 384 | 64-slot reset-count journal |
-| 704-950 | 247 | Nineteen status-effect condition descriptors plus CRCs |
-| 951-1023 | 73 | Unallocated |
+| 0-31 | 32 | Power-safe settings staging bank |
+| 32-63 | 32 | Canonical packed settings/name bank plus CRC |
+| 64-79 | 16 | DS18B20 ROM-to-role identity record |
+| 80-323 | 244 | RF header plus 20 learned records |
+| 324-335 | 12 | Unallocated |
+| 336-719 | 384 | 64-slot reset-count journal |
+| 720-966 | 247 | Nineteen status-effect condition descriptors plus CRCs |
+| 967-1010 | 44 | Unallocated; candidate space for a future bounded startup/event-opcode record |
+| 1011-1023 | 13 | Door-open, door-close, output/motion-on, output/motion-off frequency/duration triples plus CRC-8 |
 
-That leaves 117 logically unallocated bytes. The generated safe-default EEPROM
+That leaves 56 logically unallocated bytes. The generated safe-default EEPROM
 image still covers all 1,024 bytes so a programming/restore operation is
 deterministic; that does not make the erased regions owned records.
 
-The following requested behavior is **not** EEPROM-backed in this candidate:
+The following requested behavior is only partly EEPROM-backed in this candidate:
 
 | Area | What exists | What is still missing |
 |---|---|---|
-| Configurable buzzer cues | Global Silent plus door/relay enable bits; door and relay tones are fixed in flash | Persistent cue IDs or note/frequency/duration descriptors for door-open, door-close, relay-on, and relay-off |
+| Configurable buzzer cues | Global Silent plus door/relay enable bits; four single-step door and relay/motion cues are CRC-backed in EEPROM with immutable historical fallbacks | Typed cue read/write opcodes and UI editor; general multi-step startup/event actions remain tracked |
 | Board automation | Twenty RF records map codes directly to Key, Menu, Relay, Side, or PWM actions; host automations can consume events | A generic board rule table for door, BT Audio, relay, host-loss, temperature, RF transmit, macro start, or other opcode actions |
 
 Structured host-menu pull is also not implemented by the AVR: the current

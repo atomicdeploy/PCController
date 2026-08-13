@@ -81,6 +81,16 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 			t.Fatalf("status profile %d = % X, want % X (err=%v)", condition, record[:EEPROMStatusProfileBytes], encoded[1:], err)
 		}
 	}
+	audio, err := image.BytesAt(EEPROMAudioCueAddress, EEPROMAudioCueRecordBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAudio := []byte{0xA4, 0x06, 45, 0x4C, 0x04, 45,
+		0x6C, 0x07, 35, 0xE2, 0x04, 35}
+	if !bytes.Equal(audio[:len(wantAudio)], wantAudio) ||
+		audio[len(audio)-1] != avrCRC8(audio[:len(audio)-1]) {
+		t.Fatalf("factory audio cues = % X", audio)
+	}
 }
 
 func TestGenerateProgrammingEEPROMIntelHexArmsQuietVisibleLatch(t *testing.T) {

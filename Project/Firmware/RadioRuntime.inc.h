@@ -75,15 +75,7 @@ void endLearning(uint8_t state, int8_t feedback) {
 #endif
   appEvents.rfLearning(state, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, remaining);
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-  if (feedback > 0) {
-    buzzer.success();
-  } else if (feedback < 0) {
-    buzzer.error();
-  }
-#else
   (void)feedback;
-#endif
 }
 
 // Emits one MCU-timed timer update per changed second and closes at zero.
