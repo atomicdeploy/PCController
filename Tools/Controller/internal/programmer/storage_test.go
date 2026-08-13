@@ -37,7 +37,8 @@ func TestDefaultHostDataDirectoryUsesDurablePlatformLocations(t *testing.T) {
 
 func TestDefaultHostDataPathsHonorsGlobalToolchainOverrides(t *testing.T) {
 	base := t.TempDir()
-	t.Setenv(HostDataDirectoryEnvironment, filepath.Join(base, "data"))
+	dataDirectory := filepath.Join(base, "data")
+	t.Setenv(HostDataDirectoryEnvironment, dataDirectory)
 	t.Setenv(ToolchainDirectoryEnvironment, filepath.Join(base, "shared", "toolchain"))
 	paths, err := DefaultHostDataPaths()
 	if err != nil {
@@ -51,7 +52,11 @@ func TestDefaultHostDataPathsHonorsGlobalToolchainOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paths.ToolchainDir != filepath.Join(base, "data", "tools", "toolchain") {
+	fallback, err := HostDataPathsFor(dataDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.ToolchainDir != fallback.ToolchainDir {
 		t.Fatalf("fallback toolchain=%q", paths.ToolchainDir)
 	}
 }
