@@ -23,6 +23,26 @@ tests the exported ABI):
 build.cmd --host-only
 ```
 
+For a small developer-facing CMake build that produces only the library,
+generated header, and an external C consumer smoke test, configure the Go
+module itself:
+
+```console
+cmake -S Tools/Controller -B .build/controller-cabi -G Ninja ^
+  -DPCCONTROLLER_CABI_CC=C:\path\to\x86_64-w64-mingw32-gcc.exe
+cmake --build .build/controller-cabi --target pccontroller_cabi_smoke
+ctest --test-dir .build/controller-cabi --output-on-failure
+cmake --install .build/controller-cabi --prefix .build/controller-cabi/install
+```
+
+The CMake target delegates directly to `go build -buildmode=c-shared`; it does
+not replace the canonical package/provisioning tool. On Windows it verifies
+that the same compiler selected for CMake and CGO matches `go env GOARCH`,
+advertises native MinGW-w64 macros, and is neither MSYS nor Cygwin. Point
+`PCCONTROLLER_CABI_CC` at a native UCRT/MinGW-w64 compiler on a fresh build
+directory. The regular host packager remains the preferred path when automatic
+compiler discovery or provisioning is wanted.
+
 Go emits both `bin/pccontroller.dll` and `bin/pccontroller.h` on Windows
 (`.so` on Linux and `.dylib` on macOS). This requires `CGO_ENABLED=1` and a C
 compiler compatible with the target Go toolchain. On Windows the build script
