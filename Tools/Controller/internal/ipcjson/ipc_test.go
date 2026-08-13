@@ -462,6 +462,61 @@ func TestHostMenuConfigRPCAndRESTUsePersistentHostConfig(t *testing.T) {
 	}
 }
 
+func TestNetworkPeersRPCUsesSecretReferencesAndHotApplies(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	config := appconfig.Defaults()
+	config.Integrations.WebSocketClients = []appconfig.WebSocketClient{{
+		Name: "old", Enabled: true, URL: "ws://192.0.2.8:8787/ipc",
+		AuthToken: "resolved-plaintext-must-not-escape", AuthTokenRef: "os:bridge/old",
+		Topics: []string{"events"},
+	}}
+	updates := 0
+	service := Service{
+		Client:               client,
+		HostConfig:           func() appconfig.Config { return config },
+		PersistentHostConfig: func() appconfig.Config { return config },
+		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
+			candidate := config
+			if err := change(&candidate); err != nil {
+				return err
+			}
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			config = candidate
+			updates++
+			return nil
+		},
+	}
+
+	get := service.Dispatch(context.Background(), Request{Method: "controller.network.peers.get"})
+	encoded, _ := json.Marshal(get.Result)
+	if get.Error != nil || !strings.Contains(string(encoded), `"auth_token_ref":"os:bridge/old"`) ||
+		strings.Contains(string(encoded), "resolved-plaintext") {
+		t.Fatalf("secret-safe peer get=%s error=%v", encoded, get.Error)
+	}
+	params := json.RawMessage(`{"peers":[{"name":"cafe","enabled":true,"url":"ws://192.0.2.9:8787/ipc","protocol":"jsonrpc","auth_token_ref":"os:bridge/cafe","topics":["events","state","status"],"forward_events":true,"allow_commands":true}]}`)
+	set := service.Dispatch(context.Background(), Request{Method: "controller.network.peers.set", Params: params})
+	if set.Error != nil || updates != 1 || len(config.Integrations.WebSocketClients) != 1 ||
+		config.Integrations.WebSocketClients[0].Name != "cafe" ||
+		config.Integrations.WebSocketClients[0].AuthTokenRef != "os:bridge/cafe" ||
+		strings.Join(config.Integrations.WebSocketClients[0].Topics, ",") != "events,state,status" {
+		t.Fatalf("peer set=%#v error=%v updates=%d config=%#v", set.Result, set.Error, updates, config.Integrations.WebSocketClients)
+	}
+	plaintext := service.Dispatch(context.Background(), Request{
+		Method: "controller.network.peers.set",
+		Params: json.RawMessage(`{"peers":[{"name":"bad","enabled":true,"url":"ws://192.0.2.10:8787/ipc","auth_token":"plaintext"}]}`),
+	})
+	if plaintext.Error == nil || !strings.Contains(plaintext.Error.Message, "unknown field") || updates != 1 {
+		t.Fatalf("plaintext peer mutation was accepted: %#v updates=%d", plaintext, updates)
+	}
+	if requestCapability("controller.network.peers.get", nil) != capabilityRead ||
+		requestCapability("controller.network.peers.set", nil) != capabilityHostConfig {
+		t.Fatal("network peer RPC capabilities are not read/configuration separated")
+	}
+}
+
 func TestListenPolicyAllowsExplicitRemoteBindWithoutOpeningSocket(t *testing.T) {
 	address, err := validateListenAddress("0.0.0.0:8787", true)
 	if err != nil || address != "0.0.0.0:8787" {

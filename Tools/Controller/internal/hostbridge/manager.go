@@ -1543,8 +1543,11 @@ func decodeSocketIOPacket(value string) (string, json.RawMessage, error) {
 
 func (manager *Manager) remotePeerService() ipcjson.Service {
 	return ipcjson.Service{
-		Client:     manager.client,
-		HostConfig: manager.store.Current,
+		Client:                manager.client,
+		AuthorizationDisabled: true,
+		HostConfig:            manager.store.CurrentRuntime,
+		PersistentHostConfig:  manager.store.Current,
+		SubscribeHostConfig:   manager.store.SubscribeRuntime,
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			_, err := manager.store.Update(change)
 			return err

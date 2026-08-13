@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { connectStream, downloadIntegration, getUIConfig, rpc } from './api'
+import { connectStream, downloadIntegration, getUIConfig, rpc, streamRetryDelay } from './api'
 
 type Listener = (event: any) => void
 
@@ -48,6 +48,14 @@ class FakeWebSocket {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Web IPC transport', () => {
+  it('uses bounded default exponential reconnect backoff with jitter', () => {
+    expect(streamRetryDelay(1, () => 0)).toBe(1_000)
+    expect(streamRetryDelay(2, () => 0)).toBe(2_000)
+    expect(streamRetryDelay(4, () => 0.5)).toBe(8_125)
+    expect(streamRetryDelay(5, () => 0.999)).toBe(12_000)
+    expect(streamRetryDelay(100, () => 0.999)).toBe(12_000)
+  })
+
   it('correlates RPC responses over the already-open event WebSocket', async () => {
     const sockets: FakeWebSocket[] = []
     class CapturingSocket extends FakeWebSocket {
@@ -113,6 +121,30 @@ describe('Web IPC transport', () => {
     expect(String(sockets[0]?.url)).toBe('ws://127.0.0.1:8787/ipc')
     expect(String(sockets[0]?.url)).not.toContain('/api/')
     stop()
+  })
+
+  it('does not request a dormant ticket when an alpha host reports auth disabled', async () => {
+	const sockets: FakeWebSocket[] = []
+	class CapturingSocket extends FakeWebSocket {
+		constructor(url: string, protocols?: string | string[]) { super(url, protocols); sockets.push(this) }
+	}
+	Object.defineProperty(CapturingSocket, 'OPEN', { value: 1 })
+	vi.stubGlobal('WebSocket', CapturingSocket)
+	vi.stubGlobal('location', { protocol: 'http:', host: '127.0.0.1:18887' })
+	vi.stubGlobal('sessionStorage', { getItem: () => 'stale-old-host-token', setItem: () => undefined, removeItem: () => undefined })
+	vi.stubGlobal('window', { setTimeout, clearTimeout })
+	const fetchSpy = vi.fn()
+	vi.stubGlobal('fetch', fetchSpy)
+	const stop = connectStream({
+		name: 'PCController', setup_complete: true, websocket_path: '/ipc',
+		session_ticket_path: '/api/session/ticket', auth_required: false,
+		appearance: { theme: 'system', locale: 'en', direction: 'auto', reduceMotion: false, compactNumbers: false, audioMuted: false, audioVolume: 0.42 },
+		appearance_etag: 'a'.repeat(64),
+	}, { status: () => undefined, event: () => undefined, state: () => undefined })
+	await new Promise((resolve) => setTimeout(resolve, 0))
+	expect(fetchSpy).not.toHaveBeenCalled()
+	expect(sockets[0]?.protocols).toEqual([])
+	stop()
   })
 
   it('keeps download authorization in a header instead of a portable URL', async () => {

@@ -360,6 +360,7 @@ func startPrimaryIPCAtWithIdentity(
 		SocketIOPath:          endpoint.SocketIOPath,
 		WebUI:                 webui.Handler(endpoint.WebSocketPath),
 		AuthToken:             endpoint.AuthToken,
+		AuthorizationDisabled: true,
 		AllowedOrigins:        append([]string(nil), endpoint.AllowedOrigins...),
 		InboundWebhooks:       endpoint.InboundWebhooks,
 		HostVersion:           version,
@@ -424,6 +425,8 @@ func startPrimaryIPCAtWithIdentity(
 		server.localDevice = startLocalDeviceHost(ctx, sharedClient, store)
 		service.LocalDevice = server.localDevice
 		service.HostConfig = store.CurrentRuntime
+		service.PersistentHostConfig = store.Current
+		service.SubscribeHostConfig = store.SubscribeRuntime
 		service.UpdateHostConfig = func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err
