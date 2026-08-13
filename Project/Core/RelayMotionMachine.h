@@ -79,9 +79,8 @@ public:
 
   // Service at most one direction relay per pass, preserving the 5 ms interlock.
   void service(uint32_t now) {
-    bool directionChangedThisService = false;
-    serviceSide(RelaySide::A, now, directionChangedThisService);
-    serviceSide(RelaySide::B, now, directionChangedThisService);
+    const bool directionChanged = serviceSide(RelaySide::A, now, false);
+    serviceSide(RelaySide::B, now, directionChanged);
   }
 
   // Revoking motion policy immediately applies the configured safe stop path.
@@ -113,8 +112,7 @@ public:
     setRequestedDirection(state, direction);
     setRequestedEnabled(state, enabled);
 
-    bool directionChangedThisService = false;
-    serviceSide(side, now, directionChangedThisService);
+    serviceSide(side, now, false);
     return true;
   }
 
@@ -128,8 +126,7 @@ public:
     if (!flag(FlagRetainDirectionOnStop)) {
       setRequestedDirection(state, RelayDirection::Forward);
     }
-    bool directionChangedThisService = false;
-    serviceSide(side, now, directionChangedThisService);
+    serviceSide(side, now, false);
   }
 
   // General index 0..3 maps directly to R5..R8 and bypasses motion policy.
@@ -326,13 +323,13 @@ private:
 
   void commit(uint32_t now) { sink_.commitRelayMask(activeRelayMask_, now); }
 
-  void serviceSide(RelaySide side, uint32_t now,
-                   bool &directionChangedThisService) {
+  bool serviceSide(RelaySide side, uint32_t now,
+                   bool directionChangedThisService) {
     SideState &state = sides_[sideIndex(side)];
 
     if (phase(state) == RelaySequencePhase::BreakBeforeDirection) {
       if (!timeReached(now, state.phaseDeadline)) {
-        return;
+        return directionChangedThisService;
       }
       setPhase(state, RelaySequencePhase::Idle);
     }
@@ -346,14 +343,14 @@ private:
       setAppliedEnabled(state, false);
       setPhase(state, RelaySequencePhase::BreakBeforeDirection);
       state.phaseDeadline = now + breakBeforeDirectionMs_;
-      return;
+      return directionChangedThisService;
     }
 
     if (!appliedEnabled(state) &&
         requestedDirection(state) != appliedDirection(state)) {
       if (directionChangedThisService ||
           !timeReached(now, nextDirectionChangeAt_)) {
-        return;
+        return directionChangedThisService;
       }
       setBit(directionBit(side),
              requestedDirection(state) == RelayDirection::Reverse);
@@ -369,6 +366,7 @@ private:
       commit(now);
       setAppliedEnabled(state, true);
     }
+    return directionChangedThisService;
   }
 
   Sink &sink_;
