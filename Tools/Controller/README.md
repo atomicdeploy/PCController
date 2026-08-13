@@ -651,7 +651,10 @@ door presentation uses a 30-second interval rather than looping continuously.
 Board `BUZZER_CHANGED` frames are always available to event subscribers. When
 `integrations.buzzer_mirror.enabled` is true, the WebUI can play the reported
 frequency/duration with Web Audio and the native host path can play it through
-the motherboard speaker. Windows can open the optional `WinRing0x64.sys`
+the motherboard speaker. Current frames also carry the MCU start clock, so
+native, bridge, and browser renderers retain note/pause cadence and trim late
+notes instead of accumulating transport or helper-startup delay. Windows can
+open the optional `WinRing0x64.sys`
 device and drive PIT channel 2 directly; Linux first uses the kernel PC-speaker
 `KIOCSOUND` interface. If native access is unavailable, the host may discover
 an external `beep` command as an optional fallback. Linux is invoked as
@@ -669,6 +672,13 @@ or Web Audio from running. Native playback is disabled independently, exposes
 one retained state/error transition instead of one log entry per note, and can
 be replaced by another platform renderer without changing the versionless
 buzzer event contract.
+
+Automatic backend resolution happens at configuration time and is reused for
+each note. In particular, `auto` does not retry a failed native probe before
+every external Linux `beep` invocation. Board pushes are causal note-start
+events, so a receiver does not hold the first note while waiting to discover a
+future multi-tone sequence; the absolute source deadline bounds unavoidable
+per-process startup instead.
 
 The reusable hands-on attention sequence is `display both --duration 5s WAIT`, `melody
 play attention 0`, and `rgb effect play attention`. Acknowledgement stops both
