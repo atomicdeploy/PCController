@@ -59,11 +59,127 @@ func TestDashboardUsesExpandedNamesAndAdaptiveUnits(t *testing.T) {
 	for _, expected := range []string{
 		"Supply Voltage", "12.22 V", "Load Current", "286.0 mA",
 		"Load Power", "3.49 W", "Temperature · Illumination LED",
-		"Temperature · BT Audio", "BT Audio · disconnected /",
+		"Temperature · BT Audio", "Bluetooth audio", "disconnected or pairing",
 	} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("dashboard missing %q:\n%s", expected, rendered)
 		}
+	}
+}
+
+func TestDashboardWaitsOnlyForAdvertisedStateAndNeverRendersDefaultValues(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	snapshot := control.Snapshot{Connected: true, Hello: native.Hello{
+		Capabilities: native.CapabilityRelayMotion | native.CapabilityINA219 | native.CapabilityPersistentSettings,
+	}}
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	if !strings.Contains(dashboard, "Waiting for the first STATUS frame") {
+		t.Fatalf("advertised in-flight measurements did not render loading state:\n%s", dashboard)
+	}
+	for _, stale := range []string{"Device Uptime", "Enclosure Door", "Active Relays", "Bluetooth audio", "Supply Voltage", "0 ms"} {
+		if strings.Contains(dashboard, stale) {
+			t.Fatalf("dashboard rendered unfetched %q:\n%s", stale, dashboard)
+		}
+	}
+	if rows := model.controlTableRows(snapshot, 16); len(rows) != 0 {
+		t.Fatalf("control rows rendered before STATUS: %#v", rows)
+	}
+	model.preview = &snapshot
+	if rows := model.boardSettingRows(); len(rows) != 0 {
+		t.Fatalf("settings rows rendered before SETTINGS: %#v", rows)
+	}
+}
+
+func TestBluetoothAndInvalidMeasurementsRequireAdvertisedValidLiveState(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	snapshot := RichPreviewSnapshot()
+	snapshot.Hello.Capabilities &^= native.CapabilityBluetoothAudio
+	snapshot.Status.TLEDCenti = -32768
+	snapshot.Status.TBTCenti = 32767
+	snapshot.Status.SupplyMV = -2147483648
+	model.preview = &snapshot
+
+	dashboard := ansi.Strip(model.dashboardPage(snapshot))
+	for _, absent := range []string{"Bluetooth audio", "Temperature · BT Audio", "Temperature · Illumination LED", "Supply Voltage", "-32768", "327.67"} {
+		if strings.Contains(dashboard, absent) {
+			t.Fatalf("dashboard rendered unavailable or invalid %q:\n%s", absent, dashboard)
+		}
+	}
+	settings := model.appSettingRows()
+	for _, row := range settings {
+		if strings.Contains(strings.ToLower(row.Label), "bt audio") || strings.Contains(row.Key, "bt-") || strings.Contains(row.Key, "temperature-audio") {
+			t.Fatalf("settings exposed absent Bluetooth capability: %#v", row)
+		}
+	}
+}
+
+func TestIntegrationRowsStayEmptyUntilBackendsReportCapabilities(t *testing.T) {
+	model := readyModel(t, PageAutomations)
+	model.integrations = nil
+	if lines := model.integrationStatusLines(); len(lines) != 0 {
+		t.Fatalf("unfetched integrations rendered static rows: %#v", lines)
+	}
+	model.integrations = func() hostui.IntegrationStatus { return hostui.IntegrationStatus{} }
+	if lines := model.integrationStatusLines(); len(lines) != 0 {
+		t.Fatalf("unadvertised integrations rendered rows: %#v", lines)
+	}
+}
+
+func TestDisconnectedHeaderReconnectsByKeyboardAndMouseWithBoundedRetry(t *testing.T) {
+	newModel := func() Model {
+		model := New(control.New(control.Options{}), shell.New(10))
+		updated, _ := model.Update(tea.WindowSizeMsg{Width: 132, Height: 38})
+		return updated.(Model)
+	}
+
+	keyboard := newModel()
+	rendered := ansi.Strip(keyboard.header(keyboard.snapshot()))
+	for _, expected := range []string{"DISCONNECTED", "Enter or click to reconnect", "background retry armed"} {
+		if !strings.Contains(rendered, expected) {
+			t.Fatalf("disconnected header missing %q:\n%s", expected, rendered)
+		}
+	}
+	updated, command := keyboard.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	keyboard = updated.(Model)
+	if command == nil || !keyboard.connectPending {
+		t.Fatal("Enter on disconnected TUI did not start an immediate reconnect")
+	}
+	if header := ansi.Strip(keyboard.header(keyboard.snapshot())); !strings.Contains(header, "CONNECTING") || strings.Contains(header, "RECONNECTING") {
+		t.Fatalf("active attempt has an untruthful lifecycle label:\n%s", header)
+	}
+
+	mouse := newModel()
+	updated, command = mouse.Update(tea.MouseMsg{
+		X: 131, Y: 0, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+	})
+	mouse = updated.(Model)
+	if command == nil || !mouse.connectPending {
+		t.Fatal("clicking disconnected header did not start an immediate reconnect")
+	}
+
+	for attempt := 0; attempt < 8; attempt++ {
+		updated, _ = mouse.Update(connectResultMsg{err: errors.New("not present")})
+		mouse = updated.(Model)
+	}
+	if mouse.connectRetryDelay != 30*time.Second {
+		t.Fatalf("retry delay=%s, want bounded 30s", mouse.connectRetryDelay)
+	}
+	if !mouse.connectRetryAt.After(time.Now()) {
+		t.Fatalf("failed attempt did not schedule a future background retry: %s", mouse.connectRetryAt)
+	}
+}
+
+func TestDisconnectedRemoteSnapshotDropsPeerOwnedValues(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	snapshot.Connected = false
+	cleared := clearDisconnectedPeerState(snapshot)
+	if cleared.Hello != (native.Hello{}) || cleared.Status != (native.Status{}) ||
+		cleared.Settings != (native.Settings{}) || cleared.HaveStatus || cleared.HaveSettings ||
+		cleared.HaveFrontPanel || cleared.HaveStatusLED || !cleared.StatusUpdated.IsZero() {
+		t.Fatalf("disconnected snapshot retained peer-owned state: %#v", cleared)
+	}
+	if cleared.Port.Name != snapshot.Port.Name {
+		t.Fatalf("reconnect identity was discarded: got %#v, want %#v", cleared.Port, snapshot.Port)
 	}
 }
 
@@ -1320,7 +1436,7 @@ func TestPrimaryTablesFitRepresentativeNarrowAndWideWidths(t *testing.T) {
 }
 
 func TestDashboardLongValuesWrapInsideTheirValueColumn(t *testing.T) {
-	row := ansi.Strip(kvCard(55, 22, "Bluetooth", "BT Audio · disconnected / pairing (blinking indicator)"))
+	row := ansi.Strip(kvCard(55, 22, "Bluetooth", "disconnected or pairing · blinking indicator"))
 	lines := strings.Split(row, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("representative long value did not wrap: %q", row)
@@ -1555,8 +1671,8 @@ func TestAutomationPageShowsHostPlatformAndBridgeStatus(t *testing.T) {
 			t.Errorf("integration status missing %q:\n%s", expected, rendered)
 		}
 	}
-	if !strings.Contains(rendered, "actions require registered") {
-		t.Fatal("toast activation limitation is not visible")
+	if strings.Contains(rendered, "actions require registered") {
+		t.Fatal("automation page rendered a static capability hint before the backend supplied it")
 	}
 }
 

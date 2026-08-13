@@ -283,6 +283,9 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 		if line != "" {
 			return model.submitLine(line)
 		}
+		if model.page == PageDashboard && model.connectionCanReconnect(model.snapshot()) {
+			return model.reconnectNow()
+		}
 		return model.activateSelection()
 	case "tab":
 		if inputEmpty {
@@ -512,6 +515,25 @@ func (model Model) openPort() (Model, tea.Cmd, bool) {
 		return model, nil, true
 	}
 	model.connectPending = true
+	model.runtime.ResumeAuto()
+	return model, connect(model.runtime), true
+}
+
+func (model Model) reconnectNow() (Model, tea.Cmd, bool) {
+	if model.remote != nil {
+		model.setNotice("Requesting immediate reconnect from the remote serial owner…")
+		model.connectPending = true
+		return model.dispatchLine("reconnect")
+	}
+	if model.preview != nil {
+		return model, nil, true
+	}
+	if model.connectPending {
+		return model, nil, true
+	}
+	model.connectPending = true
+	model.connectRetryAt = time.Time{}
+	model.connectRetryDelay = 0
 	model.runtime.ResumeAuto()
 	return model, connect(model.runtime), true
 }
@@ -1765,6 +1787,10 @@ func (model Model) handleMouse(message tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if message.Button != tea.MouseButtonLeft {
 		return model, nil
+	}
+	if message.Y == 0 && message.X >= model.width/2 && model.connectionCanReconnect(model.snapshot()) {
+		updated, command, _ := model.reconnectNow()
+		return updated, command
 	}
 	// Header is row 0; bordered action buttons occupy rows 1..3.
 	if message.Y >= 1 && message.Y <= 3 {

@@ -978,6 +978,7 @@ func runRemoteTUI(
 
 	probeContext, probeCancel := context.WithTimeout(ctx, 8*time.Second)
 	initial, err := client.Snapshot(probeContext)
+	initialReceivedAt := time.Now()
 	if err == nil {
 		var engine *shell.Engine
 		engine, err = client.CommandEngine(probeContext)

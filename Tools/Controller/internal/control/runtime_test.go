@@ -232,6 +232,34 @@ func TestHotResetPolicyChangeDoesNotDropLiveConnection(t *testing.T) {
 	_ = runtime.Close()
 }
 
+func TestDisconnectedRuntimeDropsPeerOwnedSnapshotValues(t *testing.T) {
+	runtime := New(Options{})
+	runtime.mu.Lock()
+	runtime.port = ports.Info{Name: "COM18", SerialNumber: "controller-1"}
+	runtime.hello = native.Hello{Name: "PCController", Capabilities: native.CapabilityINA219}
+	runtime.status = native.Status{SupplyMV: 12220}
+	runtime.settings = native.DefaultSettings()
+	runtime.haveStatus = true
+	runtime.haveSettings = true
+	runtime.statusUpdated = time.Now()
+	runtime.frontPanel = native.FrontPanel{MenuPage: 3}
+	runtime.haveFrontPanel = true
+	runtime.statusLED = native.StatusLEDState{Brightness: 255}
+	runtime.haveStatusLED = true
+	runtime.clearPeerStateLocked()
+	runtime.mu.Unlock()
+
+	snapshot := runtime.Snapshot()
+	if snapshot.Hello != (native.Hello{}) || snapshot.Status != (native.Status{}) ||
+		snapshot.Settings != (native.Settings{}) || snapshot.HaveStatus || snapshot.HaveSettings ||
+		snapshot.HaveFrontPanel || snapshot.HaveStatusLED || !snapshot.StatusUpdated.IsZero() {
+		t.Fatalf("disconnected runtime retained peer-owned state: %#v", snapshot)
+	}
+	if snapshot.Port.Name != "COM18" || snapshot.Port.SerialNumber != "controller-1" {
+		t.Fatalf("reconnect identity was discarded: %#v", snapshot.Port)
+	}
+}
+
 func TestRememberedPreferredDeviceChangeDoesNotDropLiveConnection(t *testing.T) {
 	runtime := New(Options{})
 	port := newReconnectTestPort()

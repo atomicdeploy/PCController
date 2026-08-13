@@ -101,12 +101,15 @@ func (model Model) automationsPage() string {
 		lines[len(lines)-macroLibraryVisibleRows] = warnStyle.Render("  No macros match. Press / to change the search or N to create a draft.")
 	}
 
-	lines = append(lines, "", titleStyle.Render("HOST PLATFORM & BRIDGES"))
-	if model.width < 100 {
-		lines = append(lines, labelStyle.Render("Widen the terminal to inspect hotkeys, toasts, discovery, webhooks, messaging, and Socket.IO."))
-	} else {
-		for _, line := range model.integrationStatusLines() {
-			lines = append(lines, ansi.Truncate(line, model.width, "…"))
+	integrationLines := model.integrationStatusLines()
+	if len(integrationLines) != 0 {
+		lines = append(lines, "", titleStyle.Render("HOST PLATFORM & BRIDGES"))
+		if model.width < 100 {
+			lines = append(lines, labelStyle.Render("Widen the terminal to inspect the advertised host integrations."))
+		} else {
+			for _, line := range integrationLines {
+				lines = append(lines, ansi.Truncate(line, model.width, "…"))
+			}
 		}
 	}
 	return strings.Join(lines, "\n")

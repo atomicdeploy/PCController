@@ -71,6 +71,8 @@ type Model struct {
 	eventsExpanded           bool
 
 	connectPending           bool
+	connectRetryAt           time.Time
+	connectRetryDelay        time.Duration
 	rebootPending            bool
 	statusPending            bool
 	uiConfig                 func() appconfig.UI
@@ -511,7 +513,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 			model.previewPanel.LCDLine1 = "PC offline"
 			model.previewPanel.LCDLine2 = "Connect USB toPC"
 		}
-		model.recordSample(options.Preview.Status, options.Preview.StatusUpdated)
+		model.recordSample(*options.Preview)
 	}
 	return model
 }
@@ -657,11 +659,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if command := model.syncHostPanelCommand(); command != nil {
 			commands = append(commands, command)
 		}
-		sampleAt := snapshot.StatusUpdated
 		if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
-			sampleAt = model.remoteStatusReceivedAt
+			snapshot.StatusUpdated = model.remoteStatusReceivedAt
 		}
-		model.recordSample(snapshot.Status, sampleAt)
+		model.recordSample(snapshot)
 		if model.frontOverlayNeedsRestore && time.Now().After(model.frontOverlayUntil) {
 			model.frontOverlayNeedsRestore = false
 			model.frontOverlay1, model.frontOverlay2 = "", ""
@@ -688,7 +689,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				commands = append(commands, model.fetchRFEntriesCommand())
 			}
 		} else if model.preview == nil {
-			if !snapshot.Connected && !snapshot.Paused && !model.connectPending {
+			if !snapshot.Connected && !snapshot.Paused && !model.connectPending &&
+				snapshot.ConnectionState != "reconnecting" &&
+				(model.connectRetryAt.IsZero() || !time.Now().Before(model.connectRetryAt)) {
 				model.connectPending = true
 				commands = append(commands, connect(model.runtime))
 			}
@@ -852,7 +855,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.remoteSnapshot.Status = update.Status
 			model.remoteSnapshot.HaveStatus = true
 			model.remoteSnapshot.StatusUpdated = updatedAt
-			model.recordSample(update.Status, receivedAt)
+			sampleSnapshot := model.remoteSnapshot
+			sampleSnapshot.StatusUpdated = receivedAt
+			model.recordSample(sampleSnapshot)
 		}
 		if update.HaveStatusLED {
 			// A reconnect may replay the last composed frame. Preserve the current
@@ -881,7 +886,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.remoteSnapshotPending = false
 		if message.err != nil {
 			model.remoteSnapshotError = message.err.Error()
-			model.remoteSnapshot.Connected = false
+			model.remoteSnapshot = clearDisconnectedPeerState(model.remoteSnapshot)
 			model.remoteSnapshot.ConnectionState = "remote IPC unavailable"
 			model.remoteSnapshot.ConnectionReason = message.err.Error()
 			model.remoteSnapshot.ConnectionUpdated = time.Now()
@@ -896,6 +901,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.remoteSnapshot = mergeRemoteSnapshot(
 			model.remoteSnapshot, message.snapshot, acceptStatus, acceptLED,
 		)
+		if !model.remoteSnapshot.Connected {
+			model.remoteSnapshot = clearDisconnectedPeerState(model.remoteSnapshot)
+		}
 		model.remoteSnapshotError = ""
 		if strings.TrimSpace(model.remoteSnapshot.ConnectionState) == "" {
 			model.remoteSnapshot.ConnectionState = "remote IPC"
@@ -906,6 +914,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case commandResultMsg:
 		normalizedLine := strings.ToLower(strings.TrimSpace(message.line))
+		if normalizedLine == "reconnect" {
+			model.connectPending = false
+		}
 		if strings.EqualFold(strings.TrimSpace(message.line), "reset app") {
 			model.rebootPending = false
 		}
@@ -1010,6 +1021,12 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case connectResultMsg:
 		model.connectPending = false
 		if message.err != nil {
+			if model.connectRetryDelay <= 0 {
+				model.connectRetryDelay = time.Second
+			} else {
+				model.connectRetryDelay = min(model.connectRetryDelay*2, 30*time.Second)
+			}
+			model.connectRetryAt = time.Now().Add(model.connectRetryDelay)
 			model.portOwner = nil
 			var busy *portowner.BusyError
 			if errors.As(message.err, &busy) && busy.Owner != nil {
@@ -1019,6 +1036,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			model.appendLog("warn", "auto-connect: "+message.err.Error())
 		} else {
+			model.connectRetryAt = time.Time{}
+			model.connectRetryDelay = 0
 			model.portOwner = nil
 			model.ownerTerminateArmedUntil = time.Time{}
 			model.setNotice("Port opened and application protocol authenticated")
@@ -1041,7 +1060,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if message.err != nil {
 			model.appendLog("warn", "status: "+message.err.Error())
 		} else {
-			model.recordSample(message.status, time.Now())
+			snapshot := model.snapshot()
+			snapshot.Status = message.status
+			snapshot.HaveStatus = true
+			snapshot.StatusUpdated = time.Now()
+			model.recordSample(snapshot)
 		}
 
 	case menuCatalogResultMsg:
@@ -1174,9 +1197,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case spinner.TickMsg:
+		if !model.spinnerActive() {
+			break
+		}
 		var command tea.Cmd
 		model.spinner, command = model.spinner.Update(message)
-		commands = append(commands, command)
+		if command != nil {
+			commands = append(commands, command)
+		}
 	}
 
 	if model.terminalIsVisible() {
@@ -1196,6 +1224,9 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		model.terminalTitleDirty = false
 		commands = append(commands, tea.SetWindowTitle(model.terminalTitle()))
 		model.reportInstance()
+	}
+	if len(commands) == 0 {
+		return model, nil
 	}
 	return model, tea.Batch(commands...)
 }
@@ -1329,6 +1360,24 @@ func mergeRemoteSnapshot(current, incoming control.Snapshot, allowStatus, allowL
 		incoming.StatusLEDUpdated = current.StatusLEDUpdated
 	}
 	return incoming
+}
+
+func clearDisconnectedPeerState(snapshot control.Snapshot) control.Snapshot {
+	snapshot.Connected = false
+	snapshot.Hello = native.Hello{}
+	snapshot.Status = native.Status{}
+	snapshot.Settings = native.Settings{}
+	snapshot.HaveStatus = false
+	snapshot.HaveSettings = false
+	snapshot.StatusUpdated = time.Time{}
+	snapshot.FrontPanel = native.FrontPanel{}
+	snapshot.HaveFrontPanel = false
+	snapshot.FrontPanelUpdated = time.Time{}
+	snapshot.StatusLED = native.StatusLEDState{}
+	snapshot.HaveStatusLED = false
+	snapshot.StatusLEDUpdated = time.Time{}
+	snapshot.RFLearning = control.RFLearnState{}
+	return snapshot
 }
 
 func (model Model) statusFreshnessLabel(snapshot control.Snapshot, now time.Time) string {
@@ -1470,7 +1519,8 @@ func (model *Model) syncUIConfig(value appconfig.UI) {
 	}
 }
 
-func (model *Model) recordSample(status native.Status, at time.Time) {
+func (model *Model) recordSample(snapshot control.Snapshot) {
+	status, at := snapshot.Status, snapshot.StatusUpdated
 	if at.IsZero() || at.Equal(model.lastSample) ||
 		(!model.lastSample.IsZero() && at.Sub(model.lastSample) < 100*time.Millisecond) {
 		return
@@ -1483,6 +1533,14 @@ func (model *Model) recordSample(status native.Status, at time.Time) {
 		At: at, SupplyMV: status.SupplyMV, BusMV: status.BusMV,
 		CurrentMA: status.CurrentMA, PowerMW: status.PowerMW,
 		TLEDCenti: status.TLEDCenti, TBTCenti: status.TBTCenti,
+		HaveSupply:  snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validVoltageReading(status.SupplyMV),
+		HaveBus:     snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validVoltageReading(status.BusMV),
+		HaveCurrent: snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validCurrentReading(status.CurrentMA),
+		HavePower:   snapshot.Connected && snapshot.HaveStatus && status.INA219Available && validPowerReading(status.PowerMW),
+		HaveTLED:    snapshot.Connected && snapshot.HaveStatus && status.TLEDAvailable && validTemperatureReading(status.TLEDCenti),
+		HaveTBT: snapshot.Connected && snapshot.HaveStatus &&
+			snapshot.Hello.Capabilities&native.CapabilityBluetoothAudio != 0 &&
+			status.TBTAvailable && validTemperatureReading(status.TBTCenti),
 	})
 	cutoff := at.Add(-model.prefs.HistoryWindow)
 	first := 0
@@ -1536,7 +1594,7 @@ func (model *Model) setFrontPanelEvent(event control.Event) bool {
 func (model Model) header(snapshot control.Snapshot) string {
 	status := "DISCONNECTED"
 	style := errorStyle
-	detail := "authenticated device discovery"
+	detail := "Enter or click to reconnect · background retry armed"
 	if model.preview != nil {
 		status = "PREVIEW"
 		style = warnStyle.Copy().Bold(true)
@@ -1556,13 +1614,13 @@ func (model Model) header(snapshot control.Snapshot) string {
 	} else if snapshot.Paused {
 		status = "CLOSED"
 		detail = "auto-reconnect paused"
-	} else if snapshot.ConnectionState == "reconnecting" {
-		status = model.spinnerView() + " RECONNECTING"
+	} else if model.connectPending {
+		status = model.spinnerView() + " CONNECTING"
 		style = warnStyle
 		detail = strings.TrimSpace(snapshot.Port.Name + " · " + snapshot.ConnectionReason)
-	} else if model.connectPending {
-		status = model.spinnerView() + " SCANNING"
-		style = warnStyle
+		if detail == "" {
+			detail = "authenticated device discovery"
+		}
 	}
 	left := titleStyle.Render("◆ " + model.prefs.AppTitle)
 	statusRendered := style.Render(status)
@@ -1580,6 +1638,10 @@ func (model Model) header(snapshot control.Snapshot) string {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+func (model Model) connectionCanReconnect(snapshot control.Snapshot) bool {
+	return model.preview == nil && !snapshot.Connected && !snapshot.Paused && !model.connectPending
 }
 
 type actionBarItem struct {
@@ -1804,6 +1866,13 @@ func (model Model) statusInterval() time.Duration {
 		interval = time.Second
 	}
 	return interval
+}
+
+func (model Model) spinnerActive() bool {
+	return model.connectPending || model.rebootPending || model.portLoading ||
+		model.remoteSnapshotPending || model.statusPending || model.pwmPending ||
+		model.rfPending || model.frontPanelPending || model.networkDiscoveryPending ||
+		model.hostPanelPending || model.menuCatalogPending
 }
 
 const (
