@@ -5,6 +5,12 @@
 // Canonical MCU-owned layout. Invalid records are replaced with defaults;
 // firmware never carries a chain of development-layout migration handlers.
 namespace EepromLayout {
+// A fixed 32-byte boot-script slot is deliberately isolated from the
+// settings/RF/reset/profile regions. It is [magic,schema,used,crc] at 0..4,
+// 26 data bytes at 5..30, then a commit marker at 31. The optional feature
+// validates it before dispatching and never writes it during ordinary boot.
+constexpr int BootOpcodeAddress = 0;
+constexpr uint8_t BootOpcodeBytes = 32;
 constexpr int SettingsAddress = 32;
 constexpr int RemoteHeaderAddress = 80;
 constexpr int RemoteEntriesAddress = RemoteHeaderAddress + 4;
@@ -29,6 +35,8 @@ constexpr int StatusProfileEnd =
 
 static_assert(RemoteEnd <= ResetJournalAddress,
               "RF records overlap reset journal");
+static_assert(BootOpcodeAddress + BootOpcodeBytes <= SettingsAddress,
+              "boot opcodes overlap settings");
 static_assert(ResetJournalEnd <= E2END + 1,
               "EEPROM layout exceeds ATmega328P EEPROM");
 static_assert(StatusProfileEnd <= E2END + 1,

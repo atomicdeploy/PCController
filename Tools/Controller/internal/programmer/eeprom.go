@@ -10,6 +10,12 @@ import (
 
 const (
 	PCControllerEEPROMBytes        uint32 = generatedBoardEEPROMBytes
+	EEPROMBootOpcodeAddress        uint32 = 0
+	EEPROMBootOpcodeBytes          uint32 = 32
+	EEPROMBootOpcodeMetadataBytes  uint32 = 5
+	EEPROMBootOpcodeDataOffset     uint32 = EEPROMBootOpcodeMetadataBytes
+	EEPROMBootOpcodeCommitOffset   uint32 = EEPROMBootOpcodeBytes - 1
+	EEPROMBootOpcodeDataBytes      uint32 = EEPROMBootOpcodeCommitOffset - EEPROMBootOpcodeDataOffset
 	EEPROMSettingsAddress          uint32 = 32
 	EEPROMSettingsValueBytes       uint32 = 40
 	EEPROMSettingsRecordBytes      uint32 = EEPROMSettingsValueBytes + 1

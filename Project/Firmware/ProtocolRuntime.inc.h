@@ -418,15 +418,28 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
 }
 
 // Central synchronous opcode dispatcher; every path ACKs, responds, or errors.
-void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
+void handleProtocolFrame(const ControllerProtocol::Frame &frame,
+                         void *context) {
   using namespace ControllerProtocol;
   const uint8_t *payload = frame.payload;
   const uint8_t length = frame.payloadLength;
   now = millis();
   const uint32_t frameNow = now;
-  lastHostActivityAt = frameNow;
-  hostLcdFlags = static_cast<uint8_t>(
-      (hostLcdFlags | HOST_SEEN) & ~HOST_LCD_OFFLINE);
+  // Internal boot records intentionally share normal opcode validation and
+  // peripheral dispatch, but they are not UART traffic and must neither forge
+  // host activity nor emit unsolicited ACK/error frames during startup.
+#if PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES
+  const bool internalBootFrame =
+      BootOpcodeSequence::isExecutionContext(context);
+#else
+  static_cast<void>(context);
+  const bool internalBootFrame = false;
+#endif
+  if (!internalBootFrame) {
+    lastHostActivityAt = frameNow;
+    hostLcdFlags = static_cast<uint8_t>(
+        (hostLcdFlags | HOST_SEEN) & ~HOST_LCD_OFFLINE);
+  }
 
   if (!firmwareReady && frame.opcode != Hello) {
     goto busy;
@@ -831,20 +844,32 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
   }
 
 acknowledged:
-  appProtocol.sendAck(frame.sequence, frame.opcode);
+  if (!internalBootFrame) {
+    appProtocol.sendAck(frame.sequence, frame.opcode);
+  }
   return;
 badPayload:
-  appProtocol.sendError(frame.sequence, frame.opcode, BadPayload);
+  if (!internalBootFrame) {
+    appProtocol.sendError(frame.sequence, frame.opcode, BadPayload);
+  }
   return;
 hardwareUnavailable:
-  appProtocol.sendError(frame.sequence, frame.opcode, HardwareUnavailable);
+  if (!internalBootFrame) {
+    appProtocol.sendError(frame.sequence, frame.opcode, HardwareUnavailable);
+  }
   return;
 unsafe:
-  appProtocol.sendError(frame.sequence, frame.opcode, Unsafe);
+  if (!internalBootFrame) {
+    appProtocol.sendError(frame.sequence, frame.opcode, Unsafe);
+  }
   return;
 busy:
-  appProtocol.sendError(frame.sequence, frame.opcode, Busy);
+  if (!internalBootFrame) {
+    appProtocol.sendError(frame.sequence, frame.opcode, Busy);
+  }
   return;
 unsupported:
-  appProtocol.sendError(frame.sequence, frame.opcode, Unsupported);
+  if (!internalBootFrame) {
+    appProtocol.sendError(frame.sequence, frame.opcode, Unsupported);
+  }
 }
