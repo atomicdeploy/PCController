@@ -110,16 +110,35 @@ func (model Model) appSettingRows() []settingRow {
 	appearance := appconfig.NormalizeAppearance(ui.Appearance)
 	status := model.hostIntegrationValue.StatusLED
 	buzzer := model.hostIntegrationValue.BuzzerMirror
-	buzzerPath := tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
 	snapshot := model.snapshot()
 	bluetoothAudio := snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityBluetoothAudio != 0
+	buzzerPath := appconfig.BuzzerPathUnknown
+	if snapshot.HaveSettings {
+		buzzerPath = tuiBuzzerPath(snapshot.Settings.Flags&native.SettingsSilent != 0, !buzzer.Enabled)
+	}
+	requestedPath := buzzer.Path
+	if requestedPath == "" && snapshot.HaveSettings {
+		requestedPath = buzzerPath
+	}
+	if requestedPath == "" {
+		requestedPath = appconfig.BuzzerPathUnknown
+	}
+	buzzerRuntime := appconfig.BuzzerRuntimeStatus{RequestedPath: requestedPath, EffectivePath: buzzerPath}
+	if model.buzzerRuntime != nil {
+		buzzerRuntime = model.buzzerRuntime()
+	}
+	pathSummary := strings.ToUpper(buzzerRuntime.EffectivePath)
+	if buzzerRuntime.RequestedPath != "" && buzzerRuntime.RequestedPath != buzzerRuntime.EffectivePath {
+		pathSummary = strings.ToUpper(buzzerRuntime.RequestedPath + " → " + buzzerRuntime.EffectivePath)
+	}
 	rows := []settingRow{
 		{Key: "app.title", Group: "APPLICATION", Label: "Title", Value: model.prefs.AppTitle, Editable: true},
 		{Key: "app.tagline", Group: "", Label: "First-run tagline", Value: model.prefs.Tagline, Editable: true},
 		{Key: "network.advertisement", Group: "NETWORK", Label: "Discovery advertisement", Value: discoverySummary(model.hostIntegrationValue.Discovery), Editable: true},
 		{Key: "network.instance", Group: "", Label: "Advertised instance name", Value: defaultText(model.hostIntegrationValue.Discovery.InstanceName, "system hostname / app title"), Editable: true},
-		{Key: "buzzer.renderers", Group: "BUZZER", Label: "Host renderers", Value: fmt.Sprintf("PC %s · WEB %s", onOff(buzzer.NativeEnabled), onOff(buzzer.WebAudioEnabled)), Editable: true},
-		{Key: "buzzer.backend", Group: "", Label: "PC speaker backend", Value: strings.ToUpper(defaultText(buzzer.Backend, "auto")), Editable: true},
+		{Key: "buzzer.path", Group: "BUZZER", Label: "Playback path", Value: pathSummary, Editable: true},
+		{Key: "buzzer.renderers", Group: "", Label: "Host renderers", Value: fmt.Sprintf("PC %s · WEB %s", onOff(buzzer.NativeEnabled), onOff(buzzer.WebAudioEnabled)), Editable: true},
+		{Key: "buzzer.backend", Group: "", Label: "PC speaker backend", Value: strings.ToUpper(defaultText(buzzerRuntime.BackendRequested, "auto") + " → " + defaultText(buzzerRuntime.BackendEffective, "unavailable")), Editable: true},
 		{Key: "buzzer.executable", Group: "", Label: "Beep executable", Value: defaultText(buzzer.Executable, "PATH lookup"), Editable: true},
 		{Key: "appearance.identity", Group: "APPEARANCE", Label: "Theme · language · direction", Value: fmt.Sprintf("%s · %s · %s", appearanceThemeLabel(appearance.Theme), appearanceLocaleLabel(appearance.Locale), strings.ToUpper(appearance.Direction)), Editable: true},
 		{Key: "appearance.accessibility", Group: "", Label: "Motion · number density", Value: fmt.Sprintf("%s · %s", boolWord(appearance.ReduceMotion, "REDUCED", "FULL"), boolWord(appearance.CompactNumbers, "COMPACT", "DETAILED")), Editable: true},
@@ -443,7 +462,21 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 		editor.IsText = true
 		editor.Text = model.hostIntegrationValue.Discovery.InstanceName
 	case "buzzer.path":
-		path := tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
+		path := model.hostIntegrationValue.BuzzerMirror.Path
+		if path == "" && model.snapshot().HaveSettings {
+			path = tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
+		}
+		if path == "" {
+			path = appconfig.BuzzerPathNone
+		}
+		if model.buzzerRuntime != nil {
+			runtime := model.buzzerRuntime()
+			if runtime.EffectivePath != "" && runtime.EffectivePath != appconfig.BuzzerPathUnknown {
+				path = runtime.EffectivePath
+			} else if runtime.RequestedPath != "" && runtime.RequestedPath != appconfig.BuzzerPathUnknown {
+				path = runtime.RequestedPath
+			}
+		}
 		editor.Fields = []settingEditorField{{
 			Key: "path", Label: "Buzzer path", Value: map[string]int{"board": 0, "host": 1, "both": 2, "none": 3}[path],
 			Options: []settingOption{{0, "Board"}, {1, "PC host"}, {2, "Both"}, {3, "None"}},
@@ -455,8 +488,8 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			boolean("web", "Web browser renderer", buzzer.WebAudioEnabled),
 		}
 	case "buzzer.backend":
-		backend := map[string]int{"auto": 0, "native": 1, "external": 2}[strings.ToLower(model.hostIntegrationValue.BuzzerMirror.Backend)]
-		editor.Fields = []settingEditorField{{Key: "backend", Label: "PC speaker backend", Value: backend, Options: []settingOption{{0, "Automatic"}, {1, "Native"}, {2, "External command"}}}}
+		backend := map[string]int{"auto": 0, "native": 1, "external": 2, "off": 3}[strings.ToLower(model.hostIntegrationValue.BuzzerMirror.Backend)]
+		editor.Fields = []settingEditorField{{Key: "backend", Label: "PC speaker backend", Value: backend, Options: []settingOption{{0, "Automatic"}, {1, "Native"}, {2, "External command"}, {3, "Off"}}}}
 	case "buzzer.executable":
 		editor.IsText = true
 		editor.Text = model.hostIntegrationValue.BuzzerMirror.Executable

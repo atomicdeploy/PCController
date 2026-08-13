@@ -106,6 +106,7 @@
             "controller.hotkeys.set",
             "controller.integrations.local.get",
             "controller.integrations.local.set",
+            "controller.integrations.status",
             "controller.lcd.presentation.configure",
             "controller.lcd.presentation.status",
             "controller.lcd.priority",
@@ -575,6 +576,11 @@
       "capability": "integrations",
       "summary": "integrations local set",
       "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.integrations.status": {
+      "capability": "read",
+      "summary": "Return requested and effective buzzer routing and playback state.",
+      "idempotency": "safe"
     },
     "controller.lcd.presentation.configure": {
       "capability": "host_configuration",

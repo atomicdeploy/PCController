@@ -494,6 +494,54 @@ func TestPresentationOverridesRemainRuntimeOnlyAndSurviveUIUpdates(t *testing.T)
 	}
 }
 
+func TestBuzzerRuntimeOverridesRemainProcessOnlyAndSurviveUpdates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	value := Defaults()
+	value.Integrations.BuzzerMirror.Enabled = false
+	value.Integrations.BuzzerMirror.NativeEnabled = true
+	value.Integrations.BuzzerMirror.Backend = "auto"
+	value.Integrations.BuzzerMirror.Executable = "configured-beep"
+	if err := Write(path, value); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirror := true
+	executable := "runtime-beep"
+	if err := store.SetBuzzerRuntimeOverrides(BuzzerRuntimeOverrides{
+		Path: BuzzerPathHost, Mirror: &mirror, Backend: "external", Executable: &executable,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	effective := store.Current().Integrations.BuzzerMirror
+	if !effective.Enabled || effective.Backend != "external" || effective.Executable != "runtime-beep" {
+		t.Fatalf("effective buzzer=%+v", effective)
+	}
+	persistent := store.Persistent().Integrations.BuzzerMirror
+	if persistent.Enabled || persistent.Backend != "auto" || persistent.Executable != "configured-beep" {
+		t.Fatalf("persistent buzzer absorbed runtime values: %+v", persistent)
+	}
+	if _, err := store.Update(func(config *Config) error {
+		config.UI.ShowGraphs = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Integrations.BuzzerMirror != persistent || reloaded.UI.ShowGraphs {
+		t.Fatalf("persisted=%+v", reloaded.Integrations.BuzzerMirror)
+	}
+	status := store.BuzzerRuntimeState().Status(true, false, "external", "runtime-beep", "")
+	if status.RequestedPath != BuzzerPathHost || status.EffectivePath != BuzzerPathBoth || !status.BoardChangeRequired {
+		t.Fatalf("runtime status=%+v", status)
+	}
+}
+
 func TestDefaultsUseBuildPresentationVariables(t *testing.T) {
 	oldTitle := productidentity.DefaultTitle
 	oldTagline := productidentity.DefaultFirstRunTagline

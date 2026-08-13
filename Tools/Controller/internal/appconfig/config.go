@@ -1023,6 +1023,7 @@ type Store struct {
 	secrets            *secretstore.Resolver
 	appTitleOverride   string
 	taglineOverride    string
+	buzzerOverride     BuzzerRuntimeOverrides
 }
 
 // Open resolves and loads a persistent configuration store, creating defaults
@@ -1090,6 +1091,65 @@ func (store *Store) SetPresentationOverrides(appTitle, tagline string) error {
 	return nil
 }
 
+// SetBuzzerRuntimeOverrides applies flags/environment choices for this process
+// without writing the watched configuration. The owning bridge separately
+// reconciles an explicit Path to board EEPROM.
+func (store *Store) SetBuzzerRuntimeOverrides(override BuzzerRuntimeOverrides) error {
+	path, err := NormalizeBuzzerPath(override.Path)
+	if err != nil {
+		return err
+	}
+	backend, err := NormalizeBuzzerBackend(override.Backend)
+	if err != nil {
+		return err
+	}
+	override.Path = path
+	override.Backend = backend
+	if override.Executable != nil {
+		value := strings.TrimSpace(*override.Executable)
+		override.Executable = &value
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	candidate := clone(store.value)
+	applyBuzzerRuntimeOverrides(&candidate, override)
+	if err := candidate.Validate(); err != nil {
+		return fmt.Errorf("buzzer runtime override: %w", err)
+	}
+	store.buzzerOverride = override
+	store.notifyLocked(store.value)
+	store.notifyRuntimeLocked(store.value)
+	return nil
+}
+
+// Persistent returns the watched configuration without process-lifetime
+// presentation or buzzer overrides. Editors use this to avoid copying env/flag values
+// into the JSON file when another field is saved.
+func (store *Store) Persistent() Config {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	return clone(store.value)
+}
+
+func (store *Store) BuzzerRuntimeState() BuzzerRuntimeState {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	effective := store.effectiveLocked().Integrations.BuzzerMirror
+	requested := store.buzzerOverride.Path
+	if requested != "" && store.buzzerOverride.Mirror != nil {
+		desiredSilent, _ := buzzerPathParts(requested)
+		requested = BuzzerPath(desiredSilent, *store.buzzerOverride.Mirror)
+	}
+	return BuzzerRuntimeState{
+		Configured: store.value.Integrations.BuzzerMirror,
+		Effective:  effective, RequestedPath: requested,
+		PathOverridden:       store.buzzerOverride.Path != "",
+		MirrorOverridden:     store.buzzerOverride.Mirror != nil,
+		BackendOverridden:    store.buzzerOverride.Backend != "",
+		ExecutableOverridden: store.buzzerOverride.Executable != nil,
+	}
+}
+
 func (store *Store) effectiveLocked() Config {
 	value := clone(store.value)
 	if store.appTitleOverride != "" {
@@ -1098,6 +1158,7 @@ func (store *Store) effectiveLocked() Config {
 	if store.taglineOverride != "" {
 		value.UI.Tagline = store.taglineOverride
 	}
+	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
 	return value
 }
 
@@ -1183,6 +1244,7 @@ func (store *Store) notifyLocked(value Config) {
 	if store.taglineOverride != "" {
 		value.UI.Tagline = store.taglineOverride
 	}
+	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
 	for _, subscriber := range store.subscribers {
 		copyValue := clone(value)
 		select {
@@ -1207,6 +1269,7 @@ func (store *Store) notifyRuntimeLocked(value Config) {
 	if store.taglineOverride != "" {
 		value.UI.Tagline = store.taglineOverride
 	}
+	applyBuzzerRuntimeOverrides(&value, store.buzzerOverride)
 	runtime, err := resolveConfigSecrets(value, store.secrets)
 	if err != nil {
 		runtime = failClosedRuntime(value)

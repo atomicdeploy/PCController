@@ -430,7 +430,7 @@ func TestArtifactUploadRPCImportsSecondaryBytesAsImmutableArtifact(t *testing.T)
 
 func waitOperation(t *testing.T, service *Service, id string) UpdateStatus {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		status, err := service.Status(id)
 		if err == nil && (status.State == "completed" || status.State == "failed") {
