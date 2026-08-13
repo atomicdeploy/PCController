@@ -384,6 +384,26 @@ func TestProgrammingLifecycleReassertsSafeStateAfterReset(t *testing.T) {
 	}
 }
 
+func TestProgrammingLifecycleReassertNormalizesDefaultWait(t *testing.T) {
+	paths, _ := programmingLifecycleFixture(t)
+	original := native.Settings{LightMode: 2, DisplayBrightness: 5, MotionBreakMSValue: 1}
+	device := &fakeProgrammingDevice{
+		snapshot: connectedProgrammingSnapshot(0),
+		settings: original,
+	}
+	session := &ProgrammingSession{OriginalSettings: &original}
+	if err := reassertProgrammingSession(
+		context.Background(), device, session,
+		ProgrammingLifecycleOptions{DataPaths: paths, PersistenceDelay: time.Millisecond},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if device.settings.Flags&native.SettingsProgrammingMode == 0 ||
+		device.settings.Flags&native.SettingsSilent == 0 {
+		t.Fatalf("default recovery options did not latch safe settings: %+v", device.settings)
+	}
+}
+
 func TestProgrammingLifecycleRejectsAnUnownedActiveSafetyLatch(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	device := &fakeProgrammingDevice{
