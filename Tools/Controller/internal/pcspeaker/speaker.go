@@ -12,6 +12,17 @@ import (
 )
 
 const (
+	BackendAuto     = "auto"
+	BackendNative   = "native"
+	BackendExternal = "external"
+)
+
+type BackendStatus struct {
+	Backend    string `json:"backend"`
+	Executable string `json:"executable,omitempty"`
+}
+
+const (
 	MinFrequencyHz = 20
 	MaxFrequencyHz = 20000
 	MaxDurationMS  = 60000
@@ -19,6 +30,12 @@ const (
 
 // Play drives PIT channel 2 and the system-speaker gate through WinRing0.
 func Play(ctx context.Context, driverDirectory string, frequencyHz, durationMS int) error {
+	return PlayConfigured(ctx, driverDirectory, BackendAuto, "", frequencyHz, durationMS)
+}
+
+// PlayConfigured honors the persisted backend preference. Auto is the only
+// mode that falls back; explicit native/external choices fail truthfully.
+func PlayConfigured(ctx context.Context, driverDirectory, backend, executable string, frequencyHz, durationMS int) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -28,20 +45,54 @@ func Play(ctx context.Context, driverDirectory string, frequencyHz, durationMS i
 	if durationMS < 1 || durationMS > MaxDurationMS {
 		return fmt.Errorf("speaker duration must be 1..%d ms", MaxDurationMS)
 	}
+	backend = strings.ToLower(strings.TrimSpace(backend))
+	if backend == "" {
+		backend = BackendAuto
+	}
+	if backend != BackendAuto && backend != BackendNative && backend != BackendExternal {
+		return fmt.Errorf("unknown PC-speaker backend %q", backend)
+	}
 	var nativeErr error
-	if err := validateDriverDirectory(driverDirectory); err != nil {
-		nativeErr = err
-	} else {
-		nativeErr = play(ctx, driverDirectory, uint32(frequencyHz), uint32(durationMS))
-		if nativeErr == nil {
-			return nil
+	if backend != BackendExternal {
+		if err := validateDriverDirectory(driverDirectory); err != nil {
+			nativeErr = err
+		} else {
+			nativeErr = play(ctx, driverDirectory, uint32(frequencyHz), uint32(durationMS))
+			if nativeErr == nil {
+				return nil
+			}
+		}
+		if backend == BackendNative {
+			return nativeErr
 		}
 	}
-	if fallbackErr := playExternalBeep(ctx, driverDirectory, frequencyHz, durationMS); fallbackErr == nil {
+	if fallbackErr := playExternalBeep(ctx, driverDirectory, executable, frequencyHz, durationMS); fallbackErr == nil {
 		return nil
 	} else {
 		return errors.Join(nativeErr, fallbackErr)
 	}
+}
+
+// ResolveBackend selects the startup backend without emitting a tone. Auto
+// prefers an already-usable native device and otherwise resolves the configured
+// executable or the platform's PATH beep command once.
+func ResolveBackend(driverDirectory, backend, executable string) (BackendStatus, error) {
+	backend = strings.ToLower(strings.TrimSpace(backend))
+	if backend == "" {
+		backend = BackendAuto
+	}
+	if backend != BackendExternal {
+		if err := probeNative(driverDirectory); err == nil {
+			return BackendStatus{Backend: BackendNative}, nil
+		} else if backend == BackendNative {
+			return BackendStatus{}, err
+		}
+	}
+	path, err := findExternalBeep(driverDirectory, executable)
+	if err != nil {
+		return BackendStatus{}, err
+	}
+	return BackendStatus{Backend: BackendExternal, Executable: path}, nil
 }
 
 func IsHelperInvocation(args []string) bool {

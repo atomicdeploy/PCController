@@ -77,7 +77,12 @@ func (manager *Manager) recordNativeBuzzerResult(playbackErr error) {
 }
 
 func playNativeBuzzer(parent context.Context, job buzzerMirrorJob) error {
-	return pcspeaker.Play(
-		parent, job.config.DriverDirectory, job.frequencyHz, job.durationMS,
+	return pcspeaker.PlayConfigured(
+		parent, job.config.DriverDirectory, job.config.Backend,
+		job.config.Executable, job.frequencyHz, job.durationMS,
 	)
+}
+
+func resolveNativeBuzzer(config appconfig.BuzzerMirror) (pcspeaker.BackendStatus, error) {
+	return pcspeaker.ResolveBackend(config.DriverDirectory, config.Backend, config.Executable)
 }

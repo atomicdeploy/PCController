@@ -1233,7 +1233,7 @@ func encodeLiveSettingsExport(settings native.Settings) (string, error) {
 }
 
 func hostConfigCommand(options CommandOptions, args []string) (string, error) {
-	const usage = "config get PATH | config set PATH VALUE; PATH is ui.app_title, ui.tagline, ui.appearance.*, ui.tui_console.*, or integrations.buzzer_mirror.{enabled,native_enabled,web_audio_enabled,driver_directory}"
+	const usage = "config get PATH | config set PATH VALUE; every persisted JSON setting path is supported (including array indexes such as integrations.websocket_clients[0].enabled)"
 	if len(args) < 2 {
 		return "", errors.New(usage)
 	}
@@ -1285,10 +1285,14 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 			return fmt.Sprintf("integrations.buzzer_mirror.native_enabled=%t", buzzer.NativeEnabled), nil
 		case "integrations.buzzer_mirror.web_audio_enabled":
 			return fmt.Sprintf("integrations.buzzer_mirror.web_audio_enabled=%t", buzzer.WebAudioEnabled), nil
+		case "integrations.buzzer_mirror.backend":
+			return "integrations.buzzer_mirror.backend=" + buzzer.Backend, nil
+		case "integrations.buzzer_mirror.executable":
+			return fmt.Sprintf("integrations.buzzer_mirror.executable=%q", buzzer.Executable), nil
 		case "integrations.buzzer_mirror.driver_directory":
 			return fmt.Sprintf("integrations.buzzer_mirror.driver_directory=%q", buzzer.DriverDirectory), nil
 		default:
-			return "", fmt.Errorf("unsupported host setting %q", args[1])
+			return genericHostConfigGet(config, path)
 		}
 	case "set":
 		if len(args) < 3 {
@@ -1389,10 +1393,27 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 				return "", fmt.Errorf("integrations.buzzer_mirror.web_audio_enabled: %w", err)
 			}
 			candidate.Integrations.BuzzerMirror.WebAudioEnabled = value
+		case "integrations.buzzer_mirror.backend":
+			candidate.Integrations.BuzzerMirror.Backend = strings.ToLower(raw)
+		case "integrations.buzzer_mirror.executable":
+			candidate.Integrations.BuzzerMirror.Executable = raw
 		case "integrations.buzzer_mirror.driver_directory":
 			candidate.Integrations.BuzzerMirror.DriverDirectory = raw
 		default:
-			return "", fmt.Errorf("unsupported host setting %q", args[1])
+			updated, err := genericHostConfigSet(candidate, path, raw)
+			if err != nil {
+				return "", err
+			}
+			if reflect.DeepEqual(candidate, updated) {
+				return path + " unchanged", nil
+			}
+			if err := options.UpdateHostConfig(func(config *appconfig.Config) error {
+				*config = updated
+				return config.Validate()
+			}); err != nil {
+				return "", err
+			}
+			return path + " saved and hot-reload queued", nil
 		}
 		candidate.UI.Appearance = appconfig.NormalizeAppearance(candidate.UI.Appearance)
 		if err := candidate.Validate(); err != nil {

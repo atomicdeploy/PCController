@@ -43,12 +43,18 @@ func TestLocalIntegrationRPCPersistsLifecycleSafety(t *testing.T) {
 		"lifecycle_safety": map[string]any{
 			"session_lock": "all-off", "suspend": "stop-motion", "refresh_on_resume": false,
 		},
+		"buzzer_mirror": map[string]any{
+			"enabled": true, "native_enabled": true, "web_audio_enabled": false,
+			"backend": "external", "executable": "/usr/local/bin/beep",
+		},
 	})
 	set := service.Dispatch(context.Background(), Request{
 		Method: "controller.integrations.local.set", Params: params,
 	})
 	if set.Error != nil || config.Integrations.Lifecycle.SessionLock != appconfig.LifecycleActionAllOff ||
-		config.Integrations.Lifecycle.RefreshOnResume {
+		config.Integrations.Lifecycle.RefreshOnResume ||
+		config.Integrations.BuzzerMirror.Backend != "external" ||
+		config.Integrations.BuzzerMirror.Executable != "/usr/local/bin/beep" {
 		t.Fatalf("set=%#v lifecycle=%+v", set, config.Integrations.Lifecycle)
 	}
 

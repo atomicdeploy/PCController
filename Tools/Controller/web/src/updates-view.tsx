@@ -34,17 +34,20 @@ import {
   fetchRemoteArtifact,
   getArtifactManifest,
   getUpdateStatus,
+  listBridgePeers,
   listArtifacts,
   sha256File,
   startEEPROMUpdate,
   startFlashRestore,
   startFirmwareUpdate,
   startHostUpdate,
+  startPeerHostUpdate,
   uploadArtifact,
   type ArtifactDescriptor,
   type ArtifactKind,
   type ArtifactManifest,
   type ArtifactOperationResult,
+  type BridgePeer,
   type UpdateStatus,
 } from './updates-api'
 
@@ -94,6 +97,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
   const [artifacts, setArtifacts] = useState<ArtifactDescriptor[]>([])
   const [selectedSHA, setSelectedSHA] = useState('')
   const [status, setStatus] = useState<UpdateStatus | null>(null)
+  const [peers, setPeers] = useState<BridgePeer[]>([])
   const [busy, setBusy] = useState('')
   const [notice, setNotice] = useState('')
   const [serviceError, setServiceError] = useState('')
@@ -111,10 +115,11 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
   const load = useCallback(async () => {
     setBusy((current) => current || 'refresh')
     try {
-      const [nextManifest, nextList] = await Promise.all([getArtifactManifest(), listArtifacts()])
+      const [nextManifest, nextList, nextPeers] = await Promise.all([getArtifactManifest(), listArtifacts(), listBridgePeers()])
       setManifest(nextManifest)
       setArtifacts(nextList.artifacts)
       setStatus(nextManifest.update ?? null)
+      setPeers(nextPeers)
       setServiceError('')
       setSelectedSHA((current) => current && nextList.artifacts.some((item) => item.sha256 === current)
         ? current
@@ -122,6 +127,7 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
     } catch (cause) {
       setManifest(null)
       setArtifacts([])
+      setPeers([])
       setServiceError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy((current) => current === 'refresh' ? '' : current)
@@ -238,6 +244,28 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
     })
   }
 
+  const confirmPeerUpdate = (peer: BridgePeer, artifact: ArtifactDescriptor) => {
+    if (!peer.connected || !peer.allow_commands) {
+      setNotice(copy(`Peer ${peer.name} is not connected for commands.`, `همتای ${peer.name} برای فرمان‌ها متصل نیست.`))
+      return
+    }
+    openDialog({
+      tone: 'danger',
+      title: copy(`Upgrade ${peer.name}?`, `به‌روزرسانی ${peer.name}؟`),
+      body: `${artifact.name}\nSHA-256 ${artifact.sha256}\n\n${copy('The primary instance will transfer the verified executable over its authenticated bridge. The remote coordinator will validate it again, gracefully close its surfaces, replace itself, and roll back if health acknowledgement fails.', 'نمونهٔ اصلی فایل اجرایی تأییدشده را از پل معتبر منتقل می‌کند. هماهنگ‌کنندهٔ راه‌دور دوباره آن را بررسی، رابط‌های خود را با نرمی می‌بندد، خود را جایگزین و در صورت شکست سلامت عقب‌گرد می‌کند.')}`,
+      confirmLabel: copy('Authorize peer upgrade', 'اجازهٔ به‌روزرسانی همتا'),
+      action: async () => {
+        setBusy('peer-update')
+        try {
+          const result = await startPeerHostUpdate(peer.name, artifact.sha256)
+          setStatus(result.operation)
+          setNotice(copy(`${peer.name} accepted remote host update ${result.operation.id}.`, `${peer.name} به‌روزرسانی راه‌دور ${result.operation.id} را پذیرفت.`))
+        } catch (cause) { setNotice(cause instanceof Error ? cause.message : String(cause)) }
+        finally { setBusy('') }
+      },
+    })
+  }
+
   const confirmCapture = (method: 'urclock' | 'usbasp' = 'urclock') => {
     if (!snapshot.connected) {
       setNotice(copy('Connect and authenticate the controller before capturing its memories.', 'پیش از ثبت حافظه‌ها، کنترلر را متصل و احراز هویت کنید.'))
@@ -337,6 +365,11 @@ export function UpdatesView({ appTitle, snapshot, events, locale, openDialog }: 
           openDialog={openDialog}
           onArtifactsChanged={() => void load()}
         />
+
+        <Card icon={Server} iconTone="accent" title={copy('Update an authenticated peer', 'به‌روزرسانی همتای معتبر')} eyebrow={copy('Bridge-native · verified · coordinated', 'پل بومی · تأییدشده · هماهنگ')} action={<StatusBadge tone={peers.some((peer) => peer.connected) ? 'good' : 'warn'}>{peers.filter((peer) => peer.connected).length} {copy('CONNECTED', 'متصل')}</StatusBadge>}>
+          <p className="card-copy">{copy('Transfer the selected verified host executable over the existing authenticated bridge, then ask that peer coordinator to replace itself gracefully. No SSH command or shared filesystem is used.', 'فایل اجرایی تأییدشدهٔ میزبان را از همان پل معتبر منتقل می‌کند و سپس از هماهنگ‌کنندهٔ همتا می‌خواهد خود را به‌شکل امن جایگزین کند. هیچ فرمان SSH یا فایل مشترکی استفاده نمی‌شود.')}</p>
+          {peers.length ? <div className="data-list">{peers.map((peer) => <div key={peer.name}><DataRow label={peer.name} value={peer.connected ? copy('Connected', 'متصل') : peer.last_error || copy('Disconnected', 'قطع')} tone={peer.connected ? 'good' : 'bad'} /><div className="inline-actions"><Button icon={RotateCcw} tone="primary" disabled={!peer.connected || !peer.allow_commands || selected?.kind !== 'host-executable' || busy === 'peer-update'} busy={busy === 'peer-update'} onClick={() => selected && void confirmPeerUpdate(peer, selected)}>{copy('Review peer host update', 'بازبینی به‌روزرسانی میزبان همتا')}</Button></div></div>)}</div> : <EmptyState icon={Server} title={copy('No bridge peers configured', 'هیچ همتای پلی پیکربندی نشده')} detail={copy('Add an authenticated peer in integration settings; connected peers appear here immediately.', 'یک همتای معتبر را در تنظیمات یکپارچه‌سازی بیفزایید؛ همتایان متصل فوراً اینجا ظاهر می‌شوند.')} />}
+        </Card>
 
         <Card icon={ArchiveRestore} iconTone="green" title={copy('Embedded first-board recovery', 'بازیابی تعبیه‌شدهٔ نخستین برد')} eyebrow={copy('Verified build defaults', 'پیش‌فرض‌های تأییدشدهٔ ساخت')} action={<StatusBadge tone={manifest?.defaults_enabled ? 'good' : 'warn'}>{manifest?.defaults_enabled ? copy('AVAILABLE', 'موجود') : copy('NOT PACKAGED', 'بسته‌بندی نشده')}</StatusBadge>}>
           <p className="card-copy">{copy('Enabled automatically only when the release contains both a real firmware image and a generated valid default EEPROM image. It is never auto-flashed—even a non-responsive, corrupt, or older board still requires your grant.', 'فقط وقتی خودکار فعال می‌شود که انتشار هم تصویر واقعی میان‌افزار و هم تصویر معتبرِ تولیدشده برای EEPROM پیش‌فرض داشته باشد. هرگز خودکار فلش نمی‌شود؛ حتی برد پاسخ‌گو‌نبود‌ه، خراب یا قدیمی نیز به اجازهٔ شما نیاز دارد.')}</p>
