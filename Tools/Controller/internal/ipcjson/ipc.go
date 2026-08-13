@@ -281,15 +281,19 @@ type Service struct {
 	// resolved plaintext values.
 	PersistentHostConfig func() appconfig.Config
 	UpdateHostConfig     func(func(*appconfig.Config) error) error
-	BridgeList           func() any
-	BridgeCall           func(context.Context, string, Request) (Response, error)
-	WebhookAdmin         func() WebhookAdminService
-	HotkeyStatus         func() any
-	LastSessionSnapshot  func() (any, error)
-	commandMu            sync.Mutex
-	sessionMu            sync.Mutex
-	sessionTickets       map[[sha256.Size]byte]sessionTicket
-	sessionClock         func() time.Time
+	// SubscribeHostConfig delivers the current effective host configuration and
+	// every hot-applied replacement. Long-lived remote transports use it to
+	// revoke already-open sessions as soon as ipc.allow_remote becomes false.
+	SubscribeHostConfig func(context.Context) <-chan appconfig.Config
+	BridgeList          func() any
+	BridgeCall          func(context.Context, string, Request) (Response, error)
+	WebhookAdmin        func() WebhookAdminService
+	HotkeyStatus        func() any
+	LastSessionSnapshot func() (any, error)
+	commandMu           sync.Mutex
+	sessionMu           sync.Mutex
+	sessionTickets      map[[sha256.Size]byte]sessionTicket
+	sessionClock        func() time.Time
 }
 
 // browserUISettings is the narrow persistent host-owned subset exposed to the
@@ -1733,8 +1737,42 @@ func (service *Service) authorizeAccess(
 	if !access.Remote {
 		return nil
 	}
+	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") &&
+		bridgeIngressCanPivot(method, params) {
+		return errors.New("bridge ingress may not pivot through another peer")
+	}
 	capability := requestCapability(method, params)
 	return service.authorizeCapability(access, method, capability)
+}
+
+func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.bridge.call", "controller.peer.update.host", "controller.discovery.connect":
+		return true
+	case "controller.command.execute":
+		var value struct {
+			Command string `json:"command"`
+		}
+		return json.Unmarshal(params, &value) == nil && bridgeCommandCanPivot(value.Command)
+	case "controller.app.action":
+		var action hostui.AppAction
+		return json.Unmarshal(params, &action) == nil &&
+			strings.EqualFold(strings.TrimSpace(action.Kind), "command") &&
+			bridgeCommandCanPivot(action.Value)
+	default:
+		return false
+	}
+}
+
+func bridgeCommandCanPivot(command string) bool {
+	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+	if len(words) == 0 {
+		return false
+	}
+	if words[0] == "peer-update" {
+		return true
+	}
+	return words[0] == "bridge" && (len(words) < 2 || words[1] != "list")
 }
 
 func (service *Service) authorizeCapability(
@@ -3418,6 +3456,7 @@ func serveWebSocket(
 	// be used afterward. The server-owned context keeps shutdown deterministic.
 	ctx, cancel := context.WithCancel(serverContext)
 	defer cancel()
+	cancelWhenRemoteAccessDisabled(ctx, service, access, cancel)
 	var writeMu sync.Mutex
 	writeJSON := func(value any) error {
 		encoded, encodeErr := json.Marshal(value)
@@ -3552,6 +3591,7 @@ func serveSocketIO(
 	// be used afterward. The server-owned context keeps shutdown deterministic.
 	ctx, cancel := context.WithCancel(serverContext)
 	defer cancel()
+	cancelWhenRemoteAccessDisabled(ctx, service, access, cancel)
 
 	var writeMu sync.Mutex
 	writePacket := func(packet string) error {
@@ -3729,6 +3769,37 @@ func serveSocketIO(
 			}
 		}
 	}
+}
+
+func cancelWhenRemoteAccessDisabled(
+	ctx context.Context,
+	service *Service,
+	access Access,
+	cancel context.CancelFunc,
+) {
+	if service == nil || !access.Remote || service.SubscribeHostConfig == nil {
+		return
+	}
+	updates := service.SubscribeHostConfig(ctx)
+	if updates == nil {
+		return
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case config, ok := <-updates:
+				if !ok {
+					return
+				}
+				if !config.IPC.AllowRemote {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 }
 
 func decodeSocketIOEvent(payload string) (string, json.RawMessage, error) {

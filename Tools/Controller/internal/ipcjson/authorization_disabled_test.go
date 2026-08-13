@@ -103,6 +103,37 @@ func TestAlphaAuthorizationDisabledAcrossHTTPRawIPCAndWebSocket(t *testing.T) {
 	if err != nil || !strings.Contains(string(payload), `"ok":true`) {
 		t.Fatalf("WebSocket payload=%s err=%v", payload, err)
 	}
+
+	socketIO, response, err := websocket.Dial(
+		ctx,
+		"ws"+strings.TrimPrefix(server.URL, "http")+"/socket.io/?EIO=4&transport=websocket",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unauthenticated Socket.IO response=%v err=%v", response, err)
+	}
+	defer socketIO.CloseNow()
+	_, packet, err := socketIO.Read(ctx)
+	if err != nil || !strings.HasPrefix(string(packet), "0{") {
+		t.Fatalf("Socket.IO open packet=%q err=%v", packet, err)
+	}
+	if err = socketIO.Write(ctx, websocket.MessageText, []byte("40")); err != nil {
+		t.Fatal(err)
+	}
+	_, packet, err = socketIO.Read(ctx)
+	if err != nil || !strings.HasPrefix(string(packet), "40{") {
+		t.Fatalf("Socket.IO connect packet=%q err=%v", packet, err)
+	}
+	if err = socketIO.Write(ctx, websocket.MessageText, []byte(
+		`42["rpc",{"jsonrpc":"2.0","id":4,"method":"controller.ping"}]`,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	_, packet, err = socketIO.Read(ctx)
+	if err != nil || !strings.Contains(string(packet), `"rpc.response"`) ||
+		!strings.Contains(string(packet), `"ok":true`) {
+		t.Fatalf("credentialless Socket.IO RPC packet=%q err=%v", packet, err)
+	}
 }
 
 func TestAlphaAuthorizationBypassStillHonorsHotDisabledRemoteAccess(t *testing.T) {
@@ -136,5 +167,111 @@ func TestAlphaAuthorizationBypassStillHonorsHotDisabledRemoteAccess(t *testing.T
 	handler.ServeHTTP(websocketResponse, websocketRequest)
 	if websocketResponse.Code != http.StatusForbidden || !strings.Contains(websocketResponse.Body.String(), "remote network access is disabled") {
 		t.Fatalf("hot-disabled WebSocket status=%d body=%s", websocketResponse.Code, websocketResponse.Body.String())
+	}
+}
+
+func TestAlphaRemoteSubscriptionsCloseWhenAllowRemoteIsHotDisabled(t *testing.T) {
+	for _, transport := range []string{"websocket", "socket_io"} {
+		t.Run(transport, func(t *testing.T) {
+			service, client := testAuthenticatedService(t)
+			defer client.Shutdown()
+			service.AuthorizationDisabled = true
+			config := appconfig.Defaults()
+			config.IPC.AllowRemote = true
+			service.HostConfig = func() appconfig.Config { return config }
+			updates := make(chan appconfig.Config, 1)
+			service.SubscribeHostConfig = func(context.Context) <-chan appconfig.Config {
+				return updates
+			}
+			serverContext, stopServer := context.WithCancel(context.Background())
+			defer stopServer()
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				access := Access{
+					Remote: true, Transport: transport, Principal: "alpha-peer",
+					Authentication: "disabled-alpha", authenticated: true,
+				}
+				if transport == "socket_io" {
+					serveSocketIO(serverContext, writer, request, service, access)
+					return
+				}
+				serveWebSocket(serverContext, writer, request, service, access)
+			}))
+			defer server.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			path := "/ipc"
+			if transport == "socket_io" {
+				path = "/socket.io/?EIO=4&transport=websocket"
+			}
+			connection, response, err := websocket.Dial(
+				ctx, "ws"+strings.TrimPrefix(server.URL, "http")+path, nil,
+			)
+			if err != nil {
+				t.Fatalf("dial response=%v err=%v", response, err)
+			}
+			defer connection.CloseNow()
+			if transport == "socket_io" {
+				if _, _, err = connection.Read(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err = connection.Write(ctx, websocket.MessageText, []byte("40")); err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err = connection.Read(ctx); err != nil {
+					t.Fatal(err)
+				}
+				if err = connection.Write(ctx, websocket.MessageText, []byte(`42["subscribe",{"topics":["events"]}]`)); err != nil {
+					t.Fatal(err)
+				}
+			} else if err = connection.Write(ctx, websocket.MessageText, []byte(`{"jsonrpc":"2.0","id":8,"method":"controller.subscribe","params":{"topics":["events"]}}`)); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err = connection.Read(ctx); err != nil {
+				t.Fatalf("subscription acknowledgement: %v", err)
+			}
+
+			disabled := config
+			disabled.IPC.AllowRemote = false
+			updates <- disabled
+			if _, _, err = connection.Read(ctx); err == nil {
+				t.Fatal("remote subscription remained open after ipc.allow_remote was hot-disabled")
+			}
+		})
+	}
+}
+
+func TestAlphaBridgeIngressCannotPivotThroughAnotherPeer(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	service.AuthorizationDisabled = true
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	service.HostConfig = func() appconfig.Config { return config }
+
+	tests := []struct {
+		name   string
+		method string
+		params string
+	}{
+		{"bridge call", "controller.bridge.call", `{"peer":"third","request":{"method":"controller.snapshot"}}`},
+		{"peer host update", "controller.peer.update.host", `{"peer":"third","artifact_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{"discovery connect", "controller.discovery.connect", `{"endpoint":"third"}`},
+		{"command bridge call", "controller.command.execute", `{"command":"bridge call third controller.snapshot"}`},
+		{"command peer update", "controller.command.execute", `{"command":"peer-update host third aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{"app command bridge call", "controller.app.action", `{"kind":"command","value":"bridge call third controller.snapshot"}`},
+		{"app command peer update", "controller.app.action", `{"kind":"command","value":"peer-update host third aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			response := service.DispatchRemote(context.Background(), Request{
+				JSONRPC: Version, ID: json.RawMessage("1"), Method: test.method,
+				Params: json.RawMessage(test.params),
+			}, "bridge")
+			if response.Error == nil || response.Error.Code != -32003 ||
+				!strings.Contains(response.Error.Message, "may not pivot") {
+				t.Fatalf("response=%#v", response)
+			}
+		})
 	}
 }

@@ -160,6 +160,7 @@ const EXTRA_ISSUE_REQUIRED_LABELS = {
   252: ['🖥️ host', '🔌 protocol-api', '🛡️ safety', '🧪 testing'],
   255: ['🖥️ host', '🔌 protocol-api', '🧪 testing', '✨ ux', '🔒 security'],
   258: ['🖥️ host', '🧪 testing'],
+  265: ['⚡ priority: high', '🧩 firmware', '🧪 testing', '🏗️ tooling-build', '🐛 regression'],
 };
 
 // Supplemental issues retain their independently authored bodies, but a small
@@ -1040,6 +1041,7 @@ const PROMPT_EXCERPTS = {
   deterministicBuildHelpers: prompt(SESSION.issueLedger, 248, 'Keep Windows builds compatible with the deny-execute Go temp policy by compiling helpers to deterministic product-owned paths; do not weaken the security guard.'),
   peerUpdateHardening: prompt(SESSION.issueLedger, 252, 'Harden peer host update transfer integrity and terminal truth without recursive bridge pivots; keep capability authorization dormant while #148 disables alpha auth, with exposure constrained by allow_remote, Origin rules, and operator-controlled topology.'),
   macOSWatcherCleanup: prompt(SESSION.issueLedger, 258, 'Stabilize macOS watched-menu test cleanup by cancelling and joining the config watcher before temporary-directory removal, with focused evidence that no watcher or file descriptor leaks remain.'),
+  nativeBuildParity: prompt(SESSION.current, 2, 'Make CGO working and consider Make, Makefile, CMake, and the other native build paths.'),
   highCpu: prompt(SESSION.cafe, 2, 'Investigate and fix the host process high CPU usage without discarding the evidence needed to identify the cause.'),
   usbLifecycleBroadcast: prompt(SESSION.cafe, 3, 'Reconnect to the same USB board after unplug and replug even if its COM port changes, and broadcast normalized disconnect and reconnect state to every client surface.'),
   urbootHandoff: prompt(SESSION.cafe, 4, 'Make the Urboot flashing handoff safe and recoverable, preserving silent mode and recovering cleanly when the application or COM identity changes.'),
@@ -1235,6 +1237,7 @@ const EXTRA_ISSUE_ORIGINAL_REQUESTS = {
   252: [PROMPT_EXCERPTS.peerUpdateHardening],
   255: [PROMPT_EXCERPTS.permissionAvailability, PROMPT_EXCERPTS.authDefer],
   258: [PROMPT_EXCERPTS.macOSWatcherCleanup],
+  265: [PROMPT_EXCERPTS.nativeBuildParity],
 };
 
 const PR_ORIGINAL_REQUESTS = {
@@ -1360,6 +1363,10 @@ const PR_ORIGINAL_REQUESTS = {
   261: [PROMPT_EXCERPTS.authDefer, PROMPT_EXCERPTS.permissionAvailability, PROMPT_EXCERPTS.alphaEdgeReplacement, PROMPT_EXCERPTS.peerUpdateHardening],
   262: [PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.fullRemoteTui, PROMPT_EXCERPTS.instanceCoordination],
   263: [PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.fullRemoteTui, PROMPT_EXCERPTS.instanceCoordination],
+  264: [PROMPT_EXCERPTS.hardwareFrontPanel, PROMPT_EXCERPTS.relaySafety],
+  266: [PROMPT_EXCERPTS.displaysAudio, PROMPT_EXCERPTS.buzzerFallback],
+  267: [PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.programmingEntrypoint],
+  268: [PROMPT_EXCERPTS.displaysAudio, PROMPT_EXCERPTS.buzzerFallback, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.externalBeepFallback],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';

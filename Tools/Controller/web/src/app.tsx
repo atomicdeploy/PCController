@@ -229,6 +229,28 @@ function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
   }
 }
 
+export function controllerSnapshotIdentity(snapshot: Snapshot): string {
+  if (!snapshot.connected) return ''
+  return JSON.stringify([
+    snapshot.port.instance_id || '', snapshot.port.serial_number || '', snapshot.port.name || '',
+    snapshot.hello.board_kind ?? null, snapshot.hello.name || '',
+    snapshot.hello.build_hash ?? null, snapshot.hello.build_timestamp || '',
+    snapshot.hello.capabilities ?? null,
+  ])
+}
+
+export function metricSamplesAfterSnapshot(
+  current: MetricSample[],
+  previous: Snapshot,
+  next: Snapshot,
+  at = Date.now(),
+): MetricSample[] {
+  if (!next.connected || !next.have_status) return []
+  const sample = sampleFrom(next, at)
+  if (controllerSnapshotIdentity(previous) !== controllerSnapshotIdentity(next)) return [sample]
+  return [...current.slice(-71), sample]
+}
+
 function samplesFromHistory(history: HistorySample[], hello: Snapshot['hello']): MetricSample[] {
   return history
     .filter((sample): sample is HistorySample & { status: Snapshot['status'] } => Boolean(sample.status))
@@ -427,6 +449,7 @@ export default function App() {
   const pageRef = useRef(page)
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
+  const snapshotRef = useRef(snapshot)
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
@@ -652,14 +675,18 @@ export default function App() {
   const refresh = useCallback(async () => {
     if (demo) {
       const value = demoSnapshot()
+      const previous = snapshotRef.current
+      snapshotRef.current = value
       setSnapshot(value)
-      setSamples((current) => [...current.slice(-71), sampleFrom(value)])
+      setSamples((current) => metricSamplesAfterSnapshot(current, previous, value))
       return
     }
     try {
       const value = await getSnapshot()
+      const previous = snapshotRef.current
+      snapshotRef.current = value
       setSnapshot(value)
-      if (value.have_status) setSamples((current) => [...current.slice(-71), sampleFrom(value)])
+      setSamples((current) => metricSamplesAfterSnapshot(current, previous, value))
     } catch (cause) {
       notify('warning', 'Snapshot unavailable', cause instanceof Error ? cause.message : String(cause))
     }
@@ -1035,8 +1062,10 @@ export default function App() {
       setBootTarget(100)
       const timer = window.setInterval(() => {
         const value = demoSnapshot()
+        const previous = snapshotRef.current
+        snapshotRef.current = value
         setSnapshot(value)
-        setSamples((current) => [...current.slice(-71), sampleFrom(value)])
+        setSamples((current) => metricSamplesAfterSnapshot(current, previous, value))
       }, 1000)
       return () => window.clearInterval(timer)
     }
@@ -1054,6 +1083,7 @@ export default function App() {
         setBootResolved(true)
         setBootTarget(70)
         const value = await getSnapshot(abort.signal)
+        snapshotRef.current = value
         setSnapshot(value)
         setStartupProbeResolved(true)
         if (value.have_status) setSamples([sampleFrom(value)])
@@ -1084,13 +1114,20 @@ export default function App() {
             // Keeping the old detail made the live badge expose stale offline
             // text through its tooltip after the transport had recovered.
             setStreamDetail('')
-            setSnapshot((current) => ({ ...current, connected: true, have_status: true, status: update.status, status_updated: update.time }))
-            setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, connected: true, have_status: true, hello: value.hello, status: update.status }, new Date(update.time).getTime())])
+            const previous = snapshotRef.current
+            const next = { ...previous, connected: true, have_status: true, status: update.status, status_updated: update.time }
+            snapshotRef.current = next
+            setSnapshot(next)
+            setSamples((current) => metricSamplesAfterSnapshot(current, previous, next, new Date(update.time).getTime()))
           },
           event: (event) => {
 			const eventKind = event.kind.toLowerCase()
 			if (event.kind.toLowerCase() === 'status_led.changed' || event.kind.toLowerCase() === 'front_panel.segment') {
-				setSnapshot((current) => applyPushedOutputEvent(current, event))
+				setSnapshot((current) => {
+					const next = applyPushedOutputEvent(current, event)
+					snapshotRef.current = next
+					return next
+				})
 			}
 						if (config.integrations?.buzzer_web_audio && event.kind.toLowerCase() === 'buzzer.note') {
 							const frequencyHz = Number(event.metadata?.frequency_hz)
@@ -1131,7 +1168,11 @@ export default function App() {
               }
               void refresh()
             } else {
-              setSnapshot((current) => snapshotAfterTransportLoss(current, state, detail))
+              setSnapshot((current) => {
+                const next = snapshotAfterTransportLoss(current, state, detail)
+                snapshotRef.current = next
+                return next
+              })
               setSamples([])
               setEvents([])
             }
@@ -1144,7 +1185,11 @@ export default function App() {
         setBootResolved(true)
         setStreamState('waiting')
         setStreamDetail(cause instanceof Error ? cause.message : String(cause))
-        setSnapshot((current) => snapshotAfterTransportLoss(current, 'waiting', cause instanceof Error ? cause.message : String(cause)))
+        setSnapshot((current) => {
+          const next = snapshotAfterTransportLoss(current, 'waiting', cause instanceof Error ? cause.message : String(cause))
+          snapshotRef.current = next
+          return next
+        })
         setSamples([])
         setEvents([])
         setBootTarget(100)

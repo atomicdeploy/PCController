@@ -660,6 +660,7 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			LastSessionSnapshot:   sessionSnapshot.read,
 			HostConfig:            store.CurrentRuntime,
 			PersistentHostConfig:  store.Current,
+			SubscribeHostConfig:   store.SubscribeRuntime,
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err

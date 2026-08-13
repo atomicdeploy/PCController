@@ -182,6 +182,11 @@ export function DashboardView(props: SharedViewProps) {
   const available = peripheralAvailability(snapshot)
   const haveMeasurements = available.ina219 || available.temperatureLED || available.temperatureBTAudio
   const haveMetricCards = haveMeasurements || available.pwm
+  const invalidMeasurements = [
+    available.invalidINA219 ? copy('Power measurements unavailable', 'اندازه‌گیری‌های توان در دسترس نیست') : '',
+    available.invalidTemperatureLED ? copy('LED temperature unavailable', 'دمای LED در دسترس نیست') : '',
+    available.invalidTemperatureBTAudio ? copy('Buzzer temperature unavailable', 'دمای بیزر در دسترس نیست') : '',
+  ].filter(Boolean)
   const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !boardReady && props.transport.authenticationRequired
   const hash = snapshot.hello.build_hash ? snapshot.hello.build_hash.toString(16).toUpperCase().padStart(8, '0') : '—'
@@ -244,9 +249,9 @@ export function DashboardView(props: SharedViewProps) {
         {available.pwm && <MetricCard icon={PlugZap} label="PWM" value={formatNumber(locale, status.pwm_value * 100 / 4095, 1)} unit="%" values={[]} tone="violet" detail={`${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}`} />}
       </section>}
 
-      {boardReady && (available.invalidINA219 || available.invalidTemperatureLED || available.invalidTemperatureBTAudio) && <Card icon={TriangleAlert} iconTone="amber" title={copy('Measurement unavailable', 'اندازه‌گیری در دسترس نیست')} eyebrow={copy('Invalid controller sample', 'نمونه نامعتبر کنترلر')}>
-        <p>{copy('The controller advertised a sensor but its latest value was outside the supported range. No stale or sentinel value is shown.', 'کنترلر حسگر را اعلام کرد، اما آخرین مقدار خارج از محدوده پشتیبانی‌شده بود. مقدار قدیمی یا نشانه‌ای نمایش داده نمی‌شود.')}</p>
-      </Card>}
+      {boardReady && invalidMeasurements.length > 0 && <div className="measurement-alerts" role="status" aria-live="polite">
+        {invalidMeasurements.map((message) => <div className="measurement-alert" key={message}><TriangleAlert size={16} /><span>{message}</span></div>)}
+      </div>}
 
       {boardReady && haveMeasurements && <Card
         icon={ChartNoAxesCombined}

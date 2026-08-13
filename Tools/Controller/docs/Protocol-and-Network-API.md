@@ -480,6 +480,10 @@ Loopback remains the default listener. Selecting a non-loopback listener still
 requires the explicit `ipc.allow_remote` configuration choice and a valid
 non-wildcard Origin list so exposure cannot happen accidentally through a bind
 typo. These are configuration/exposure checks, not caller authentication. An
+already-open remote standard-WebSocket or Socket.IO session is cancelled from
+the pushed configuration subscription as soon as `ipc.allow_remote` becomes
+false; a hot edge-disable therefore revokes both new requests and live event
+delivery without waiting for a listener restart. An
 optional *outbound* peer secret reference may be resolved only to contact and
 upgrade an older host that still enforces the superseded bearer flow. New alpha
 peers work without it.
@@ -564,7 +568,7 @@ request error.
 | `controller.lcd.priority` | `kind`, `line1`, `line2`, optional `hold_ms` | display a priority overlay, then restore the prompt |
 | `controller.message.send` | typed message envelope below | route/log a message and optionally display it on the board LCD |
 | `controller.bridge.list` | `{}` | configured peers and live connection state, without URLs or credentials |
-| `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; recursive bridge calls are rejected |
+| `controller.bridge.call` | `peer`, nested JSON-RPC `request` | correlated call through that peer; bridge ingress cannot invoke this method or pivot through command/app-action wrappers |
 | `controller.network.peers.get` | `{}` | persistent peer topology including optional secret references but never resolved or plaintext credentials |
 | `controller.network.peers.set` | `peers` array | atomically replace and hot-apply peer topology; unknown fields and plaintext `auth_token` are rejected, and `host_configuration` classifies remote policy when permissions return |
 | `controller.artifact.manifest`, `controller.artifact.list` | optional artifact `kind` | update capability/default/current discovery and content-addressed catalog |

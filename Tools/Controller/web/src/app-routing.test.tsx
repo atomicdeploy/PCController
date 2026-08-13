@@ -3,6 +3,7 @@ import {
   canonicalPageHash,
   canonicalPageURL,
   connectionTransitionCue,
+  metricSamplesAfterSnapshot,
   controllerConnectionLabel,
   isCompletedHostUpdate,
   navigation,
@@ -54,6 +55,27 @@ describe('transport truth', () => {
     expect(waiting.hello).toEqual({})
     expect(waiting.status).toEqual(emptySnapshot.status)
     expect(snapshotAfterTransportLoss(connected, 'connecting').connected).toBe(false)
+  })
+
+  it('replaces telemetry with the newly advertised peer identity after reconnect', () => {
+    const first = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      port: { name: 'COM4', serial_number: 'board-a' },
+      hello: { capabilities: 1 << 0, build_hash: 0x11111111 },
+      status: { ...emptySnapshot.status, supply_mv: 12_000, flags: 1 << 0 },
+    }
+    const second = {
+      ...first,
+      port: { name: 'COM8', serial_number: 'board-b' },
+      hello: { capabilities: 1 << 1, build_hash: 0x22222222 },
+      status: { ...emptySnapshot.status, temperature_led_centi_c: 3250, flags: 1 << 2 },
+    }
+    const samples = metricSamplesAfterSnapshot(
+      [{ at: 1, supply: 12 }], first, second, 2,
+    )
+    expect(samples).toEqual([{ at: 2, ledTemp: 32.5 }])
   })
 
   it('offers immediate reconnect only while transport is genuinely disconnected', () => {

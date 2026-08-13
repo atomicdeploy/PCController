@@ -426,6 +426,7 @@ func startPrimaryIPCAtWithIdentity(
 		service.LocalDevice = server.localDevice
 		service.HostConfig = store.CurrentRuntime
 		service.PersistentHostConfig = store.Current
+		service.SubscribeHostConfig = store.SubscribeRuntime
 		service.UpdateHostConfig = func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err

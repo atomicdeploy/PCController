@@ -481,6 +481,8 @@ kbd { padding: 3px 6px; border: 1px solid var(--line-strong); border-bottom-colo
 .output-cell.is-active i::after { width: 100%; background: var(--green); box-shadow: 0 0 8px var(--green); }
 .safety-strip { display: flex; align-items: center; gap: 8px; margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--green); }
 .safety-strip span { color: var(--text-muted); font-size: 10px; }
+.measurement-alerts { display: flex; flex-wrap: wrap; gap: 8px; }
+.measurement-alert { display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--amber) 35%, transparent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--amber) 8%, transparent); color: var(--amber); font-size: 10px; }
 .data-list { display: flex; flex-direction: column; }
 .data-row { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 8px 0; border-bottom: 1px solid var(--line); }
 .data-row:last-child { border-bottom: 0; }

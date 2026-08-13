@@ -1547,6 +1547,7 @@ func (manager *Manager) remotePeerService() ipcjson.Service {
 		AuthorizationDisabled: true,
 		HostConfig:            manager.store.CurrentRuntime,
 		PersistentHostConfig:  manager.store.Current,
+		SubscribeHostConfig:   manager.store.SubscribeRuntime,
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			_, err := manager.store.Update(change)
 			return err
