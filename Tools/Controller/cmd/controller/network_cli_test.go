@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"pccontroller.local/controller/internal/appconfig"
@@ -41,6 +42,47 @@ func TestNetworkPeerAddUsesSecretReferenceAndCanBeRemoved(t *testing.T) {
 	}
 	if got := len(store.Current().Integrations.WebSocketClients); got != 0 {
 		t.Fatalf("peer count after removal=%d want 0", got)
+	}
+}
+
+func TestAlphaNetworkConfigurationDoesNotRequireOrGenerateCredentials(t *testing.T) {
+	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := runNetwork([]string{"edge-enable", "--listen", "0.0.0.0:18787", "--origin", "controller.local:*"}, &output, &output, store); err != nil {
+		t.Fatal(err)
+	}
+	configured := store.Current()
+	if !configured.IPC.AllowRemote || configured.IPC.AuthToken != "" || configured.IPC.AuthTokenRef != "" {
+		t.Fatalf("alpha edge config=%#v", configured.IPC)
+	}
+	if !strings.Contains(output.String(), "authentication disabled") {
+		t.Fatalf("edge output=%q", output.String())
+	}
+
+	output.Reset()
+	if err := runNetwork([]string{"peer-add", "--name", "lab", "--url", "ws://192.168.1.2:8787/ipc"}, &output, &output, store); err != nil {
+		t.Fatal(err)
+	}
+	peer := store.Current().Integrations.WebSocketClients[0]
+	if peer.AuthToken != "" || peer.AuthTokenRef != "" || !peer.Enabled || !peer.AllowCommands {
+		t.Fatalf("credentialless alpha peer=%#v", peer)
+	}
+	if got := strings.Join(peer.Topics, ","); got != "events,state,status" {
+		t.Fatalf("default peer topics=%q", got)
+	}
+}
+
+func TestDefaultEdgeOriginsPermitThisHostWithoutWildcardHostTrust(t *testing.T) {
+	origins := strings.Join(defaultEdgeOrigins("0.0.0.0", "server"), ",")
+	if !strings.Contains(origins, "server:*") || strings.Contains(origins, "0.0.0.0:*") || strings.Contains(origins, "*.*") {
+		t.Fatalf("default edge origins=%q", origins)
+	}
+	origins = strings.Join(defaultEdgeOrigins("192.0.2.20", "server"), ",")
+	if !strings.Contains(origins, "192.0.2.20:*") {
+		t.Fatalf("concrete listen origin missing: %q", origins)
 	}
 }
 

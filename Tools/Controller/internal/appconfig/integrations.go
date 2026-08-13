@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -466,26 +467,18 @@ func (value Config) validateIntegrations() error {
 		); err != nil {
 			return err
 		}
-		if peer.AllowCommands && !secretConfigured(peer.AuthToken, peer.AuthTokenRef) {
-			return fmt.Errorf("integrations.websocket_clients[%d] allowing commands requires auth_token", index)
-		}
-		host := strings.Trim(parsed.Hostname(), "[]")
-		loopback := strings.EqualFold(host, "localhost")
-		if address := net.ParseIP(host); address != nil {
-			loopback = address.IsLoopback()
-		}
-		if peer.ForwardEvents && !loopback && !secretConfigured(peer.AuthToken, peer.AuthTokenRef) {
-			return fmt.Errorf("integrations.websocket_clients[%d] forwarding events remotely requires auth_token", index)
-		}
+		// Application credentials and capability grants are deliberately dormant
+		// during alpha. Keep optional peer credentials valid only so a new host can
+		// replace an older auth-on peer without making them an ingress requirement.
 		topics := make(map[string]bool)
 		for topicIndex, topic := range peer.Topics {
 			topic = strings.ToLower(strings.TrimSpace(topic))
 			if topic == "telemetry" {
 				topic = "status"
 			}
-			if topic != "events" && topic != "status" {
+			if topic != "events" && topic != "state" && topic != "status" {
 				return fmt.Errorf(
-					"integrations.websocket_clients[%d].topics[%d] must be events or status",
+					"integrations.websocket_clients[%d].topics[%d] must be events, state, or status",
 					index, topicIndex,
 				)
 			}
@@ -706,12 +699,9 @@ func validateIPC(value IPC) error {
 	if err := validateSecretChoice("ipc.auth_token", value.AuthToken, value.AuthTokenRef); err != nil {
 		return err
 	}
-	if value.AllowRemote && !secretConfigured(value.AuthToken, value.AuthTokenRef) {
-		return fmt.Errorf("ipc.auth_token or ipc.auth_token_ref is required when remote access is enabled")
-	}
-	if value.AllowRemote && value.AuthTokenRef == "" && len(strings.TrimSpace(value.AuthToken)) < 24 {
-		return fmt.Errorf("ipc.auth_token must contain at least 24 characters when remote access is enabled")
-	}
+	// The complete login/session design is deferred. Deliberate listener
+	// exposure and exact Origin policy remain mandatory independently below;
+	// stored credentials and remote-policy bits are dormant during alpha.
 	if len(value.AuthToken) > 512 || !printableText(value.AuthToken) {
 		return fmt.Errorf("ipc.auth_token must be at most 512 printable characters")
 	}
@@ -724,11 +714,8 @@ func validateIPC(value IPC) error {
 		return fmt.Errorf("ipc.allowed_origins is required when remote access is enabled")
 	}
 	for index, origin := range value.AllowedOrigins {
-		if strings.TrimSpace(origin) == "" || strings.ContainsAny(origin, "\r\n") {
-			return fmt.Errorf("ipc.allowed_origins[%d] is invalid", index)
-		}
-		if value.AllowRemote && strings.TrimSpace(origin) == "*" {
-			return fmt.Errorf("ipc.allowed_origins[%d] cannot allow every origin", index)
+		if err := validateAllowedOriginPattern(origin); err != nil {
+			return fmt.Errorf("ipc.allowed_origins[%d] is invalid: %w", index, err)
 		}
 	}
 	for name, path := range map[string]string{
@@ -744,6 +731,42 @@ func validateIPC(value IPC) error {
 	}
 	if value.RemotePolicy.Programming && !value.RemotePolicy.ConnectionControl {
 		return fmt.Errorf("ipc.remote_policy.programming requires connection_control")
+	}
+	return nil
+}
+
+func validateAllowedOriginPattern(value string) error {
+	if value == "" || value != strings.TrimSpace(value) || strings.ContainsAny(value, " \t\r\n/?#@\\") {
+		return fmt.Errorf("use an exact HOST:PORT or HOST:* value")
+	}
+	host, port, err := net.SplitHostPort(value)
+	if err != nil || host == "" || strings.ContainsAny(host, "*?[]") {
+		return fmt.Errorf("use a non-wildcard host and an exact port or *")
+	}
+	if parsed := net.ParseIP(host); parsed == nil {
+		if strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") {
+			return fmt.Errorf("hostname must not start or end with a dot")
+		}
+		for _, label := range strings.Split(host, ".") {
+			if label == "" || strings.HasPrefix(label, "-") || strings.HasSuffix(label, "-") {
+				return fmt.Errorf("hostname contains an invalid label")
+			}
+			for _, character := range label {
+				if (character >= 'a' && character <= 'z') ||
+					(character >= 'A' && character <= 'Z') ||
+					(character >= '0' && character <= '9') || character == '-' {
+					continue
+				}
+				return fmt.Errorf("hostname contains an invalid character")
+			}
+		}
+	}
+	if port == "*" {
+		return nil
+	}
+	numericPort, err := strconv.Atoi(port)
+	if err != nil || numericPort < 1 || numericPort > 65535 {
+		return fmt.Errorf("port must be 1..65535 or *")
 	}
 	return nil
 }

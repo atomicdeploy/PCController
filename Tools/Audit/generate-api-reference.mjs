@@ -149,7 +149,7 @@ const methodOverrides = {
   "controller.artifact.upload.chunk": "Append one ordered bounded chunk to a peer artifact transfer.",
   "controller.artifact.upload.finish": "Revalidate and publish a completed peer artifact transfer.",
   "controller.artifact.upload.abort": "Abort and remove an incomplete peer artifact transfer.",
-  "controller.peer.update.host": "Transfer a verified executable through an authenticated peer and ask its coordinator to replace itself.",
+  "controller.peer.update.host": "Transfer a verified executable through an authenticated peer and request remote queued or staged acceptance; terminal replacement health is not asserted.",
   "controller.webhooks.status": "Return bounded outbound queue and dead-letter counters.",
   "controller.webhooks.pending": "List bounded non-secret pending outbound deliveries.",
   "controller.webhooks.dead": "List bounded non-secret dead-letter deliveries.",
@@ -191,18 +191,24 @@ const nonIdempotentMethods = new Set([
 ]);
 
 const safeCapabilities = new Set(["read", "events"]);
+const methodCapabilityOverrides = {
+  "controller.peer.update.host": "programming + bridge_calls",
+};
+const methodIdempotencyOverrides = {
+  "controller.peer.update.host": "retry-stable target operation",
+};
 const methods = [];
 for (const [capability, names] of Object.entries(capabilityGroups)) {
   for (const name of names) {
     methods.push({
       name,
-      capability,
+      capability: methodCapabilityOverrides[name] ?? capability,
       summary: methodOverrides[name] ?? name.replace(/^controller\./u, "").replaceAll(/[_.-]+/gu, " "),
-      idempotency: safeCapabilities.has(capability)
+      idempotency: methodIdempotencyOverrides[name] ?? (safeCapabilities.has(capability)
         ? "safe"
         : nonIdempotentMethods.has(name)
           ? "non-idempotent"
-          : "idempotent-with-authoritative-readback",
+          : "idempotent-with-authoritative-readback"),
     });
   }
 }
@@ -215,8 +221,8 @@ const routes = [
   { path: "/healthz", methods: ["get"], public: true, capability: "public", summary: "Service liveness and API identity" },
   { path: "/upnp/public.json", methods: ["get"], public: true, capability: "public", summary: "Bounded public host, board, endpoint, health, and telemetry directory" },
   { path: "/api/ui-config", methods: ["get"], public: true, capability: "public", summary: "Non-secret browser bootstrap" },
-  { path: "/api/auth/server-proof", methods: ["get"], public: true, capability: "public", summary: "Nonce/address-bound proof that the reached LAN endpoint knows the configured bearer" },
-  { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Exchange a header credential for a short-lived one-use browser WebSocket ticket" },
+  { path: "/api/auth/server-proof", methods: ["get"], public: true, capability: "public", summary: "Dormant future server-possession proof; current production alpha returns HTTP 409" },
+  { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Dormant future browser-ticket exchange; current production alpha returns HTTP 409" },
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
   { path: "/api/peripherals", methods: ["get"], capability: "read", summary: "Peripheral descriptors and host-owned names" },
@@ -277,7 +283,8 @@ function operationFor(route, method) {
     operationId: `${method}_${route.path.replaceAll(/[^a-zA-Z0-9]+/gu, "_").replaceAll(/^_|_$/gu, "")}`,
     summary: route.summary,
     tags: [route.path.split("/").filter(Boolean)[2] ?? "service"],
-    "x-required-capability": route.capability,
+    "x-future-required-capability": route.capability,
+		"x-alpha-capability-enforced": false,
     "x-idempotency": ["get", "head"].includes(method) ? "safe" : "see operation semantics and idempotency keys",
     responses: {
       "200": { description: "Accepted response", content: { "application/json": { schema: { type: "object", additionalProperties: true } } } },
@@ -290,16 +297,27 @@ function operationFor(route, method) {
   if (route.public) operation.security = [];
 	if (route.path === "/api/session/ticket") {
     delete operation.responses["200"];
-    operation.responses["201"] = {
-      description: "One-use Origin-bound browser session ticket",
-      content: { "application/json": { schema: { $ref: "#/components/schemas/SessionTicket" } } },
-    };
+		operation.responses["409"] = {
+			description: "Session-ticket authentication is disabled in the current production alpha",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+		};
+		operation["x-retained-future-success"] = {
+			status: 201,
+			description: "One-use Origin-bound browser session ticket when authorization is enabled in a future phase",
+			schema: { $ref: "#/components/schemas/SessionTicket" },
+		};
 	}
 	if (route.path === "/api/auth/server-proof") {
 		operation.parameters = [{ name: "X-PCController-Nonce", in: "header", required: true, schema: { type: "string", minLength: 22, maxLength: 86 }, description: "16..64 random bytes encoded as unpadded base64url" }];
-		operation.responses["200"] = {
-			description: "Responder-bound HMAC proof verified locally before a client transmits its bearer",
-			content: { "application/json": { schema: { $ref: "#/components/schemas/ServerProof" } } },
+		delete operation.responses["200"];
+		operation.responses["409"] = {
+			description: "Server-possession proof is disabled in the current production alpha",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+		};
+		operation["x-retained-future-success"] = {
+			status: 200,
+			description: "Responder-bound HMAC proof when authorization is enabled in a future phase",
+			schema: { $ref: "#/components/schemas/ServerProof" },
 		};
 	}
 	if (route.path === "/api/opcode") {
@@ -391,15 +409,15 @@ const openapi = {
     title: product.httpTitle,
 		version: "unversioned",
 		summary: "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    description: "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS.",
+		description: "Current production alpha deliberately disables credential and capability authorization. Remote exposure still requires ipc.allow_remote; browser requests still require an allowed non-wildcard Origin; configured topology, no-recursive-pivot rules, board safety, and single-owner programming remain active. The built-in listener does not terminate TLS.",
   },
   servers: [{ url: "http://127.0.0.1:8787", description: "Default loopback primary" }],
-  security: [{ bearerAuth: [] }, { tokenHeader: [] }],
+  security: [],
   paths: openAPIPaths,
   components: {
     securitySchemes: {
-      bearerAuth: { type: "http", scheme: "bearer", description: "Durable host access credential for HTTP and non-browser WebSocket clients. Never place it in a URL." },
-      tokenHeader: { type: "apiKey", in: "header", name: "X-PCController-Token", description: "Header-only compatibility credential." },
+      bearerAuth: { type: "http", scheme: "bearer", description: "Retained future authorization scheme; dormant in the current production alpha. Never place a credential in a URL." },
+      tokenHeader: { type: "apiKey", in: "header", name: "X-PCController-Token", description: "Retained future header-only compatibility scheme; dormant in the current production alpha." },
     },
     schemas: {
       JSONRPCID: { oneOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
@@ -499,19 +517,21 @@ const openapi = {
 		},
       JSONRPCError: {
         type: "object", required: ["code", "message"], additionalProperties: false,
-        properties: { code: { type: "integer", enum: [-32700, -32600, -32601, -32602, -32003, -32001, -32000] }, message: { type: "string" } },
+        properties: { code: { type: "integer", enum: [-32700, -32600, -32601, -32602, -32004, -32003, -32001, -32000] }, message: { type: "string" } },
         examples: [{ code: -32003, message: "remote capability board_commands is disabled" }],
       },
       Error: errorSchema,
     },
     responses: {
       BadRequest: { description: "Invalid request or parameters", content: { "application/json": { schema: errorSchema } } },
-      Unauthorized: { description: "Authentication required", content: { "application/json": { schema: errorSchema } } },
-      Forbidden: { description: "Capability or safety policy denied", content: { "application/json": { schema: errorSchema } } },
+      Unauthorized: { description: "Retained future authentication mode rejected the request", content: { "application/json": { schema: errorSchema } } },
+      Forbidden: { description: "Active exposure, Origin, topology, no-chain, or safety policy denied the request", content: { "application/json": { schema: errorSchema } } },
       MethodNotAllowed: { description: "Unsupported method", headers: { Allow: { schema: { type: "string" } } }, content: { "application/json": { schema: errorSchema } } },
     },
   },
   "x-body-limit-bytes": 1048576,
+	"x-alpha-authorization-disabled": true,
+	"x-active-remote-safety-gates": ["ipc.allow_remote", "non-wildcard browser Origin", "configured bridge topology", "no recursive bridge or peer-update pivot", "board safety", "single-owner programming"],
 	"x-unsupported-transports": ["versioned /api/v* paths", "built-in TLS termination", "Socket.IO long-polling", "Socket.IO namespaces", "Socket.IO rooms", "binary Socket.IO attachments"],
 };
 
@@ -557,24 +577,23 @@ const rpcSchema = {
   "x-error-codes": {
     "-32700": "parse error", "-32600": "invalid request", "-32601": "method not found",
     "-32602": "invalid params", "-32001": "authentication required",
+    "-32004": "outcome uncertain; retry with the same idempotency key",
     "-32003": "remote capability denied", "-32000": "runtime or device error",
   },
+	"x-alpha-authorization-disabled": true,
 };
 
 const asyncapi = {
   asyncapi: "3.0.0",
   info: {
 		title: product.eventTitle, version: "unversioned",
-    description: "Authenticated full-duplex JSON-RPC, event, status, and Socket.IO-compatible messaging. WebSocket transport is required.",
+    description: "Credentialless full-duplex JSON-RPC, event, state, status, and Socket.IO-compatible messaging in the current production alpha. ipc.allow_remote, non-wildcard browser Origin, configured topology, no-chain, and board safety gates remain active. WebSocket transport is required.",
   },
   servers: {
     loopback: {
       host: "127.0.0.1:8787", protocol: "ws", pathname: "/ipc",
-      description: "Default loopback primary. Remote exposure requires explicit origin, authentication, and capability policy.",
-	  security: [
-		{ $ref: "#/components/securitySchemes/durableHeader" },
-		{ $ref: "#/components/securitySchemes/browserTicket" },
-	  ],
+      description: "Default loopback primary. Remote alpha exposure requires ipc.allow_remote and an allowed non-wildcard browser Origin; credentials and capability grants are dormant.",
+	  security: [],
     },
   },
   channels: {
@@ -601,8 +620,8 @@ const asyncapi = {
   },
   components: {
     securitySchemes: {
-	  durableHeader: { type: "httpApiKey", in: "header", name: "Authorization", description: "Bearer credential for non-browser WebSocket and Socket.IO clients." },
-	  browserTicket: { type: "httpApiKey", in: "header", name: "Sec-WebSocket-Protocol", description: "Browser clients first POST /api/session/ticket with a header credential, then offer pccontroller and pccontroller.ticket.<ticket>. The one-use ticket is Origin, peer, transport, and expiry bound; no credential appears in the URL." },
+	  durableHeader: { type: "httpApiKey", in: "header", name: "Authorization", description: "Retained future bearer scheme; dormant in the current production alpha." },
+	  browserTicket: { type: "httpApiKey", in: "header", name: "Sec-WebSocket-Protocol", description: "Retained future one-use browser-ticket scheme; dormant in the current production alpha, where /api/session/ticket returns HTTP 409." },
     },
     messages: {
       JSONRPCRequest: { payload: { $ref: "./jsonrpc.schema.json#/$defs/request" } },
@@ -620,6 +639,8 @@ const asyncapi = {
     incoming: ["subscribe", "unsubscribe", "message", "command", "rpc"],
 		outgoing: ["subscribed", "unsubscribed", "message.accepted", "command.response", "rpc.response", "controller.event", "controller.state", "controller.debug", "controller.opcode", "controller.status", "controller.error", "error"],
   },
+	"x-alpha-authorization-disabled": true,
+	"x-active-remote-safety-gates": ["ipc.allow_remote", "non-wildcard browser Origin", "configured bridge topology", "no recursive bridge or peer-update pivot", "board safety", "single-owner programming"],
 };
 
 const outputs = new Map([
@@ -636,9 +657,9 @@ const reference = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><title>${escapeHTML(product.referenceTitle)}</title>
 <style>:root{font-family:Inter,Segoe UI,system-ui,sans-serif;color-scheme:light dark;--bg:#f6f7fb;--panel:#fff;--text:#172033;--muted:#647087;--line:#dfe3ec;--accent:#6d4aff}@media(prefers-color-scheme:dark){:root{--bg:#11131a;--panel:#191c25;--text:#edf0f7;--muted:#a8b0c2;--line:#303543;--accent:#a995ff}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}main{width:min(1180px,calc(100% - 32px));margin:auto;padding:48px 0 80px}header{display:grid;gap:12px;margin-bottom:34px}h1{font-size:clamp(2rem,5vw,4rem);letter-spacing:-.05em;margin:0}p{color:var(--muted);max-width:76ch;line-height:1.65}.pills{display:flex;flex-wrap:wrap;gap:8px}.pills a,.pills span,td span{border:1px solid var(--line);border-radius:999px;padding:6px 10px;color:var(--text);text-decoration:none;background:color-mix(in srgb,var(--panel) 88%,var(--accent) 12%)}section{margin-top:34px;background:color-mix(in srgb,var(--panel) 92%,transparent);border:1px solid var(--line);border-radius:20px;overflow:hidden;box-shadow:0 18px 55px color-mix(in srgb,var(--text) 8%,transparent)}section>div{padding:22px 24px 6px}h2{margin:0;font-size:1.25rem}table{border-collapse:collapse;width:100%;font-size:.9rem}th,td{text-align:left;padding:13px 16px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--muted);font-weight:600}code{font-family:Cascadia Code,ui-monospace,monospace;color:var(--accent);overflow-wrap:anywhere}@media(max-width:720px){main{width:min(100% - 20px,1180px);padding-top:26px}section{overflow:auto}table{min-width:760px}}</style></head>
-<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Loopback is the default; every remote operation requires authentication and an explicit capability.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
-<section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>; versioned aliases are rejected. JSON bodies are capped at 1 MiB.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
-<section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved; host extensions use -32001 for authentication, -32003 for capability denial, and -32000 for runtime or device failures.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
+<body><main><header><span>OFFLINE CONTRACT · LIVING API</span><h1>${escapeHTML(product.referenceHeading)}</h1><p>The primary host exposes one unversioned, safety-gated living surface across REST, JSON-RPC, WebSocket, and the bounded Socket.IO adapter. Current production alpha is credentialless: credentials and capability grants are dormant. Remote exposure still requires <code>ipc.allow_remote</code>; browser requests still require an allowed non-wildcard Origin; configured topology, no-recursive-pivot rules, board safety, and single-owner programming remain active.</p><div class="pills"><a href="openapi.json">OpenAPI 3.1</a><a href="asyncapi.json">AsyncAPI 3.0</a><a href="jsonrpc.schema.json">JSON-RPC schema</a><span>Alpha authorization disabled</span><span>${methods.length} RPC methods</span><span>${routes.reduce((count, route) => count + route.methods.length, 0)} HTTP operations</span></div></header>
+<section><div><h2>HTTP operations</h2><p>Canonical routes live directly under <code>/api/</code>; versioned aliases are rejected. JSON bodies are capped at 1 MiB. Listed capabilities are the retained future authorization contract, not alpha credential requirements. Server-proof and session-ticket routes return HTTP 409 during alpha.</p></div><table><thead><tr><th>Method</th><th>Path</th><th>Purpose</th><th>Future capability</th></tr></thead><tbody>${routeRows}</tbody></table></section>
+<section><div><h2>JSON-RPC methods</h2><p>Standard JSON-RPC errors are preserved. Current alpha uses -32004 for an uncertain nested outcome that must retain its idempotency key and -32000 for runtime or device failures. Authentication -32001 and capability -32003 remain documented for the dormant future authorization phase.</p></div><table><thead><tr><th>Method</th><th>Purpose</th><th>Future capability</th><th>Idempotency</th></tr></thead><tbody>${methodRows}</tbody></table></section>
 <p>Contract digest <code>${digest}</code>. Generated by <code>Tools/Audit/generate-api-reference.mjs</code>.</p></main></body></html>\n`;
 outputs.set("reference.html", reference);
 

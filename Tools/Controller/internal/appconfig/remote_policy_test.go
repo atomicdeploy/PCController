@@ -33,16 +33,21 @@ func TestRemoteProgrammingRequiresConnectionControl(t *testing.T) {
 func TestRemoteAccessRejectsMissingOrWildcardBrowserOrigins(t *testing.T) {
 	config := Defaults()
 	config.IPC.AllowRemote = true
-	config.IPC.AuthToken = "0123456789abcdefghijklmn"
 	config.IPC.AllowedOrigins = nil
 	if err := config.Validate(); err == nil {
 		t.Fatal("expected missing remote origin allow-list to be rejected")
 	}
-	config.IPC.AllowedOrigins = []string{"*"}
-	if err := config.Validate(); err == nil {
-		t.Fatal("expected wildcard remote origin to be rejected")
+	for _, invalid := range []string{"*", "*.example:*", "controller?.example:*", "https://controller.example", "controller.example"} {
+		config.IPC.AllowedOrigins = []string{invalid}
+		if err := config.Validate(); err == nil {
+			t.Fatalf("expected wildcard or malformed remote origin %q to be rejected", invalid)
+		}
 	}
 	config.IPC.AllowedOrigins = []string{"controller.example:*"}
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	config.IPC.AllowedOrigins = []string{"controller.example:8787", "[2001:db8::1]:8787"}
 	if err := config.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -65,20 +70,20 @@ func TestRemotePrincipalIsStableAndMachineSafe(t *testing.T) {
 	}
 }
 
-func TestRemoteBridgeEventForwardingRequiresCredentials(t *testing.T) {
+func TestAlphaRemoteBridgeAcceptsCredentiallessStateSubscriptions(t *testing.T) {
 	config := Defaults()
 	config.Integrations.WebSocketClients = []WebSocketClient{{
 		Name: "remote", Enabled: true, URL: "ws://192.0.2.10:8787/ipc",
-		ForwardEvents: true, Topics: []string{"events"},
+		ForwardEvents: true, AllowCommands: true, Topics: []string{"events", "state", "status"},
 	}}
-	if err := config.Validate(); err == nil {
-		t.Fatal("expected unauthenticated remote event forwarding to be rejected")
+	if err := config.Validate(); err != nil {
+		t.Fatalf("credentialless alpha peer rejected: %v", err)
 	}
 	config.Integrations.WebSocketClients[0].AuthToken = "peer-secret"
 	if err := config.Validate(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("optional compatibility credential rejected: %v", err)
 	}
-	config.Integrations.WebSocketClients[0].Topics = []string{"events", "telemetry"}
+	config.Integrations.WebSocketClients[0].Topics = []string{"events", "state", "telemetry"}
 	if err := config.Validate(); err != nil {
 		t.Fatal(err)
 	}

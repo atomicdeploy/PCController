@@ -679,9 +679,9 @@
       "idempotency": "safe"
     },
     "controller.peer.update.host": {
-      "capability": "programming",
-      "summary": "Transfer a verified executable through an authenticated peer and ask its coordinator to replace itself.",
-      "idempotency": "non-idempotent"
+      "capability": "programming + bridge_calls",
+      "summary": "Transfer a verified executable through an authenticated peer and request remote queued or staged acceptance; terminal replacement health is not asserted.",
+      "idempotency": "retry-stable target operation"
     },
     "controller.peripherals": {
       "capability": "read",
@@ -945,7 +945,9 @@
     "-32601": "method not found",
     "-32602": "invalid params",
     "-32001": "authentication required",
+    "-32004": "outcome uncertain; retry with the same idempotency key",
     "-32003": "remote capability denied",
     "-32000": "runtime or device error"
-  }
+  },
+  "x-alpha-authorization-disabled": true
 }

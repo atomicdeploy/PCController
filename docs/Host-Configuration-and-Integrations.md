@@ -494,10 +494,15 @@ The default service is `127.0.0.1:8787`. One listener multiplexes:
 - a bounded Engine.IO v4 / Socket.IO WebSocket adapter at `/socket.io/`;
 - an optional inbound webhook.
 
-Use loopback without a token only for the same PC. A non-loopback listener is
-accepted only with deliberate remote enablement, an authentication token of at
-least 24 characters, a stable `ipc.remote_principal`, and an explicit
-non-wildcard origin allow-list. Native clients authenticate with a Bearer or
+Use loopback by default. A non-loopback listener requires deliberate remote
+enablement and an explicit non-wildcard origin allow-list. Current production
+alpha constructors set a non-configurable authorization-disabled flag, so no
+inbound token is created, resolved, or required and
+native/HTTP/WebSocket/Socket.IO requests do not present a credential. Capability
+grants are dormant. `ipc.allow_remote`, Origin rules, configured
+peer topology, bridge no-chain validation, and operational safety remain
+enforced. The following token/session behavior is retained and tested for the
+deferred authorization phase. Native clients then authenticate with a Bearer or
 `X-PCController-Token` header. Browser clients first send that header to
 `POST /api/session/ticket`, then offer the returned 30-second one-use ticket
 in `Sec-WebSocket-Protocol` while opening a clean WebSocket URL. The ticket is
@@ -506,10 +511,11 @@ selects only the non-secret `pccontroller` protocol. Query-string
 credentials, ticket replay, an Origin mismatch, and application frames before
 successful authentication are rejected.
 
-Origin-less native traffic is trusted without a token only on loopback. A
-non-loopback native client without `Origin` must present the durable header;
-browser ticket exchange and upgrade always require the same allowed Origin.
-Conflicting Bearer and `X-PCController-Token` values fail closed.
+During alpha, Origin-less native traffic is credentialless; the deliberate
+listener/`allow_remote` boundary remains the exposure gate. Browser requests
+with an Origin must match the configured allow-list. URL credentials remain
+rejected, and dormant server-proof/session-ticket routes return HTTP 409. The
+stricter native-header and ticket rules below belong to the deferred design.
 
 Authentication and authorization are separate. The default
 `ipc.remote_policy` permits authenticated read/event subscriptions only;
@@ -552,8 +558,9 @@ endpoints. SOAP `GetStatus`, `GetBoardIdentity`, and `GetPublicInfo` expose the
 same public contract. Discovery metadata is refreshed from pushed runtime state
 at a coalesced cadence and never initiates board polling. Credentials,
 authorization values, token-like keys, and raw environment data are rejected.
-Discovery and the public document grant no command rights; authenticated remote
-access remains independently policy-gated. CLI, TUI, Web, configuration file,
+Discovery and the public document do not create a configured bridge or bypass
+`allow_remote`; current alpha command access is credentialless and capability
+grants are dormant. CLI, TUI, Web, configuration file,
 and typed RPC all read or change the same hot-applied advertisement settings;
 scan/device/config/connect activity uses the ordinary WebSocket and Socket.IO
 event fan-out. LAN public-document reads bypass Internet proxies and cannot be
@@ -565,8 +572,11 @@ Configured WebSocket clients let one host subscribe to another host and make
 correlated calls through `controller.bridge.call`, `/api/bridges/call`, or
 the `bridge call` shell command. They retry with bounded backoff and preserve
 the rule that exactly one local primary owns the attached serial port. The
-target host independently checks its remote policy and ordinary safety guards;
-recursive bridge calls are rejected. Remote programming still closes that
+target host independently checks exposure, topology/no-chain, and ordinary
+safety guards; recursive bridge calls and direct or shell-wrapped peer-update
+chaining are rejected. Programming/bridge capability classification is retained
+only for the deferred authorization phase. Remote board
+programming still closes that
 primary's UART, runs the guarded toolchain/Urclock workflow exclusively, and
 requires a fresh application `HELLO` afterward.
 
@@ -574,9 +584,12 @@ The peer connection also carries structured changed-state events and guarded
 host upgrades. Board-originated `buzzer.note` events keep their metadata so an
 enabled PC buzzer on another instance can render them immediately; an ingress
 marker prevents event cycles. `controller.peer.update.host` transfers a
-content-addressed executable through the authenticated bridge and invokes the
-target's own graceful coordinator. SSH remains an operator test/deployment
-harness only and is not part of the application update implementation.
+content-addressed executable through the authenticated bridge and requests the
+target's journaled coordinator operation. Its response proves only remote
+`queued` or `staged` acceptance; restart health, rollback outcome, reconnect,
+and active executable SHA remain a separate terminal acceptance gate. SSH
+remains an operator test/deployment harness only and is not part of the
+application update implementation.
 
 ## HTTP, webhooks, WebSocket, and Socket.IO
 
@@ -588,9 +601,11 @@ template. Timeouts, response-size bounds, concurrency limits, loop prevention,
 and non-2xx event reporting keep a slow endpoint from blocking serial control.
 
 The standard WebSocket endpoint is bidirectional: clients submit JSON-RPC and
-subscribe to `events` and/or `status`; the server pushes correlated responses,
-events, status samples, and errors. A configured host can also act as an
-outbound WebSocket client/bridge.
+subscribe to `events`, changed `state`, and/or `status`; the server pushes
+correlated responses, events, state frames, status samples, and errors. A
+configured host can also act as an outbound WebSocket client/bridge. Outbound
+peer configuration defaults to `events` plus `state` when topics are omitted,
+so structured buzzer notes reach an independently enabled host renderer.
 
 Socket.IO is not an alias for ordinary WebSocket. The implemented compatibility
 surface uses Engine.IO 4 with `transport=websocket`, connection and ping/pong
