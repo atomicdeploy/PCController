@@ -50,6 +50,8 @@ build.cmd --dry-run
 build.cmd --plan-json
 build.cmd --host-only
 build.cmd --firmware-only
+build.cmd --virtual-board-only
+build.cmd --virtual-board-only --virtual-board-preset debug
 build.cmd --toolchain-sync
 build.cmd --firmware-only --toolchain-cli C:\path\to\arduino-cli.exe --toolchain-config C:\path\to\firmware-cli.yaml
 build.cmd --clean
@@ -67,6 +69,40 @@ with a machine-wide lock, and keeps live LAN acceptance
 on the stable packaged `controller.exe` identity. Windows Go tests never opt
 into wildcard LAN broadcast unless `PCCONTROLLER_TEST_LAN=1` is explicitly set;
 normal builds leave that acceptance test to the packaged host.
+
+## Virtual board and Make convenience targets
+
+The virtual board remains a separate native target: its build directory, CMake
+presets, and test inventory belong to `Tools/VirtualBoard`. The root build
+utility only delegates to those existing presets; it does not duplicate CMake
+policy, start the simulator, open TCP or UART, or touch physical hardware.
+
+```console
+build.cmd --virtual-board-only
+build.cmd --virtual-board-only --virtual-board-preset relwithdebinfo
+build.cmd --virtual-board --host-only
+```
+
+`--virtual-board` adds the native target to a host/firmware selection;
+`--virtual-board-only` selects just it. `--skip-tests` skips its `ctest`
+stage as well as the selected host test stages. All three CMake presets are
+accepted: `debug`, `release` (the default), and `relwithdebinfo`.
+
+For developers who already use GNU Make, the root `Makefile` is a deliberately
+thin façade over the same launchers:
+
+```console
+make virtual-board
+make virtual-board-debug
+make firmware ARGS=--dry-run
+mingw32-make host ARGS=--no-upx
+```
+
+On Windows, either `make` or `mingw32-make` may be used when available; the
+facade invokes `build.cmd` through `cmd.exe` and never shells through
+PowerShell. On Bash-like environments it invokes `./build.sh`. `make` is not
+required: the canonical `build.cmd` and `build.sh` entry points remain fully
+supported.
 
 Generated outputs have one canonical location per product:
 
