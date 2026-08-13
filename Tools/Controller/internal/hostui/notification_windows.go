@@ -18,14 +18,15 @@ import (
 )
 
 type windowsNotifier struct {
-	mu       sync.RWMutex
-	appID    string
-	logoURI  string
-	logoErr  error
-	status   NotificationStatus
-	deliver  func(context.Context, []byte, string) error
-	fallback func(context.Context, Notification, error) error
-	gate     chan struct{}
+	mu      sync.RWMutex
+	appID   string
+	logoURI string
+	logoErr error
+	status  NotificationStatus
+	deliver func(context.Context, []byte, string) error
+	balloon func(context.Context, Notification, error) error
+	dialog  func(context.Context, Notification, error) error
+	gate    chan struct{}
 }
 
 func newPlatformNotifier(options NotifierOptions) Notifier {
@@ -35,13 +36,14 @@ func newPlatformNotifier(options NotifierOptions) Notifier {
 	}
 	logoURI, logoErr := resolveWindowsToastLogo(options.LogoPath)
 	return &windowsNotifier{
-		appID:    appID,
-		logoURI:  logoURI,
-		logoErr:  logoErr,
-		status:   NotificationStatus{Supported: true, Available: logoErr == nil, Branded: logoErr == nil, Backend: "winrt-toast"},
-		deliver:  deliverWindowsToast,
-		fallback: showWindowsNotificationDialog,
-		gate:     make(chan struct{}, 1),
+		appID:   appID,
+		logoURI: logoURI,
+		logoErr: logoErr,
+		status:  NotificationStatus{Supported: true, Available: true, Branded: logoErr == nil, Backend: "winrt-toast"},
+		deliver: deliverWindowsToast,
+		balloon: showWindowsBalloon,
+		dialog:  showWindowsNotificationDialog,
+		gate:    make(chan struct{}, 1),
 	}
 }
 
@@ -102,35 +104,31 @@ func (notifier *windowsNotifier) Notify(ctx context.Context, notification Notifi
 	if err == nil {
 		payload, err = buildToastXML(notification, notifier.logoURI)
 	}
-	if err != nil {
-		fallbackErr := notifier.fallback(ctx, notification, err)
-		if fallbackErr != nil {
-			return errors.Join(err, fallbackErr)
-		}
-		notifier.mu.Lock()
-		notifier.status.Accepted++
-		notifier.status.Available = true
-		notifier.status.Backend = "task-dialog"
-		notifier.status.Degraded = true
-		notifier.status.Branded = false
-		notifier.status.LastFallback = err.Error()
-		notifier.status.LastAt = time.Now()
-		notifier.mu.Unlock()
-		return nil
+	if err == nil {
+		err = notifier.deliver(ctx, payload, notifier.appID)
 	}
-	err = notifier.deliver(ctx, payload, notifier.appID)
 	backend := "winrt-toast"
 	degraded := false
+	branded := true
 	fallbackReason := ""
 	if err != nil {
 		fallbackReason = err.Error()
-		fallbackErr := notifier.fallback(ctx, notification, err)
-		if fallbackErr != nil {
-			err = errors.Join(err, fallbackErr)
-		} else {
+		balloonErr := notifier.balloon(ctx, notification, err)
+		if balloonErr == nil {
 			err = nil
-			backend = "task-dialog"
+			backend = "legacy-balloon"
 			degraded = true
+		} else {
+			fallbackReason = errors.Join(err, balloonErr).Error()
+			dialogErr := notifier.dialog(ctx, notification, errors.Join(err, balloonErr))
+			if dialogErr != nil {
+				err = errors.Join(err, balloonErr, dialogErr)
+			} else {
+				err = nil
+				backend = "task-dialog"
+				degraded = true
+				branded = false
+			}
 		}
 	}
 	notifier.mu.Lock()
@@ -144,7 +142,7 @@ func (notifier *windowsNotifier) Notify(ctx context.Context, notification Notifi
 	notifier.status.Available = true
 	notifier.status.Backend = backend
 	notifier.status.Degraded = degraded
-	notifier.status.Branded = !degraded
+	notifier.status.Branded = branded
 	notifier.status.LastFallback = fallbackReason
 	notifier.status.LastAt = time.Now()
 	notifier.status.LastError = ""
