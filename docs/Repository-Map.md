@@ -19,7 +19,7 @@ documentation.
 | You want to change… | Start here | Keep in sync |
 |---|---|---|
 | MCU behavior, safety, menus, keys, RF, sensors, or outputs | [`PCController.ino`](../PCController.ino), [`Project/`](../Project), [`LocalLib/`](../LocalLib) | Native protocol mirrors, Virtual Board behavior, hardware docs, firmware build |
-| Board/host wire frames or opcodes | [`Project/UartProtocol.h`](../Project/UartProtocol.h), [`Tools/Controller/internal/native/`](../Tools/Controller/internal/native), [`Tools/VirtualBoard/include/virtual_board/protocol.hpp`](../Tools/VirtualBoard/include/virtual_board/protocol.hpp) | API contracts, golden tests, capability matrix; these are currently cross-language mirrors and must be reviewed together |
+| Board/host wire frames or opcodes | [`Project/ProtocolContract.h`](../Project/ProtocolContract.h), [`Project/UartProtocol.h`](../Project/UartProtocol.h), [`Tools/Controller/internal/native/`](../Tools/Controller/internal/native) | The AVR-owned fixed-width C++ vocabulary is canonical; Go and VirtualBoard mirrors remain migration work under #125 and must be checked against it before a wire change |
 | Public Go API | [`Tools/Controller/controller.go`](../Tools/Controller/controller.go) | `controller_test.go`, C ABI, protocol/API docs |
 | CLI, startup, primary ownership, programming commands | [`Tools/Controller/cmd/controller/`](../Tools/Controller/cmd/controller) | Go tests beside the changed file, user docs, command help |
 | TUI | [`Tools/Controller/internal/tui/`](../Tools/Controller/internal/tui) | Shared control dispatcher, capability matrix, TUI tests |
@@ -131,7 +131,7 @@ byte-tight layout remain predictable:
 
 | File family | Responsibility |
 |---|---|
-| `UartProtocol.*`, `ControllerEvents.*` | native frame constants, payloads, replies, and device events |
+| `ProtocolContract.h`, `UartProtocol.*`, `ControllerEvents.*` | portable wire vocabulary; AVR framing, payloads, replies, and device events |
 | `EepromLayout.h`, `SettingsStore.*`, `RemoteLearningStore.*` | EEPROM layout, validated settings, RF records, and migrations |
 | `RelayController.*`, `MotionDoorPolicy.h`, `SafeResetController.*` | relay interlocks, motion/door decisions, safe reset behavior |
 | `PwmController.*`, `PwmExpanderDriver.*` | logical PWM ownership and optional PCA9685 transport |
