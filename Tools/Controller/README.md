@@ -53,8 +53,8 @@ build.cmd --host-only
 ```
 
 Run that command from the repository root. The shared project-owned Node build
-runs the locked web typecheck/tests/build before `go mod download`,
-`go test ./...`, and `go vet ./...`, embeds and verifies
+runs the locked web typecheck/tests/build before `go mod download`, the
+project-owned stable-path Go test runner, and `go vet ./...`, embeds and verifies
 Windows icon/manifest/version resources, strips the Go binary, UPX-packs and
 tests it, builds and smoke-tests the C ABI, and publishes:
 
@@ -91,11 +91,13 @@ notifications, discovery, diagnostics, and desktop actions. Optional OS
 enrichment stays behind those adapters and an unavailable capability is
 reported explicitly.
 
-Optional DNS-SD/mDNS, SSDP/UPnP, WS-Discovery, UDP broadcast, and NetBIOS host
-probes advertise or locate the embedded WebUI/API locations, safe app
-presentation values, and bounded current board values. Metadata refreshes are
-coalesced from pushed events and never poll the board; secret-like TXT/header
-keys are discarded before either multicast protocol is updated.
+DNS-SD/mDNS, SSDP/UPnP, WS-Discovery, UDP broadcast, and NetBIOS advertisement
+and querying are enabled by default and remain independently configurable.
+They locate and merge one device-directory record containing the embedded
+WebUI/API locations, safe app presentation values, and bounded current board
+values. Metadata refreshes are coalesced from pushed events and never poll the
+board; secret-like TXT/header keys are discarded before a network transport is
+updated. Discovery never enables remote command access by itself.
 
 Windows desktop integration has no internal PowerShell dependency. Web-host
 startup establishes its current executable's per-user AppUserModelID and
@@ -127,10 +129,20 @@ npm test
 npm run build
 cd ..
 go mod download
-go test ./...
+node ..\Build\go-tests.mjs
 go vet ./...
 go build -buildvcs=false -trimpath -o bin\controller.exe ./cmd/controller
 ```
+
+On Windows, do not invoke `go test` directly: Go executes package test
+programs from changing temporary paths, which can cause repeated Firewall
+prompts. `build.cmd --host-only` and `node Tools/Build/go-tests.mjs` compile
+deterministically named `pccontroller-tests-*.exe` programs under the
+worktree-independent `%LOCALAPPDATA%\PCController\test-programs\go` directory
+and reuse the passed source cache.
+Real multicast/broadcast acceptance runs through the named packaged
+`controller.exe`, never a test process. The Windows test suite skips its live
+LAN broadcast case unless `PCCONTROLLER_TEST_LAN=1` is explicitly set.
 
 The default root package also builds `pccontroller.dll` and its generated C
 header. That target needs `CGO_ENABLED=1` and a native MinGW-w64 compiler
@@ -713,11 +725,23 @@ bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe
 bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc --secret-ref os:edge/cafe-pc
 bin\controller.exe network probe --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --origin http://David-PC:8787
 bin\controller.exe network discover --protocols dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios
+bin\controller.exe network list --timeout 3s
+bin\controller.exe network connect --target cafe-pc --token-ref os:edge/cafe-pc
+bin\controller.exe network advertise --enabled=true --protocols all --broadcast-port 37889
 bin\controller.exe ipc call --method controller.discovery.scan --params "{\"protocols\":[\"dns-sd\",\"ssdp\",\"upnp\",\"ws-discovery\",\"broadcast\",\"netbios\"],\"timeout_ms\":3000}"
 ```
 
-The edge command enables DNS-SD/mDNS, SSDP/UPnP, WS-Discovery, UDP broadcast,
-NetBIOS probing, and the selected IPC, REST, WebSocket,
+Public discovery advertisement is enabled on first run and can be changed with
+`network advertise`, the TUI HOST Settings network editor, or the configuration
+file. Discovery exposes one merged record per host: system hostname, persistent
+host identity/build, board firmware and serial-port identity, health and current
+voltage/current/power/temperature/door state, plus Web/API/operation/event/opcode
+endpoints. `GET /upnp/public.json` is intentionally bounded and secret-free.
+Finding a host never grants control: `ipc.allow_remote`, bearer/session
+authentication, allowed origins, and the remote capability policy remain
+separate and default to disabled remote access.
+
+The edge command enables the selected IPC, REST, WebSocket,
 Socket.IO, programming, and bridge capabilities. Shutdown, virtual-key, and
 host power-action access remain disabled. A LocalSubnet-only firewall rule is
 still an operating-system deployment step.
@@ -748,7 +772,14 @@ programming, shutdown, virtual keys, power actions, host-automation execution,
 or bridge calls.
 
 HTTP and native socket clients authenticate with a Bearer or compatibility
-header. The Web UI exchanges that header credential at
+header. A client connecting from an unauthenticated discovery record first
+calls `GET /api/auth/server-proof` with a fresh random nonce and verifies the
+returned address-bound HMAC locally; it sends the bearer only after proving
+that the exact reached listener knows it. This prevents a spoofed LAN
+advertisement, redirect, proxy, or hostname rebind from collecting the token.
+The proof route requires at least 24 decoded random base64url bytes because the
+proof endpoint intentionally demonstrates token possession without accepting
+the token itself. The Web UI exchanges that header credential at
 `POST /api/session/ticket` for a 15-second, one-use, Origin/peer/transport-
 bound WebSocket subprotocol ticket. Durable tokens are rejected in URLs, and
 unauthorized standard WebSocket or Socket.IO handshakes emit no application

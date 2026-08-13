@@ -534,13 +534,14 @@
       }
     },
     "discovery": {
-      "mdns_enabled": false,
-      "dns_sd_enabled": false,
-      "ssdp_enabled": false,
-      "upnp_enabled": false,
-      "ws_discovery_enabled": false,
-      "broadcast_enabled": false,
-      "netbios_enabled": false
+      "mdns_enabled": true,
+      "dns_sd_enabled": true,
+      "ssdp_enabled": true,
+      "upnp_enabled": true,
+      "ws_discovery_enabled": true,
+      "broadcast_enabled": true,
+      "netbios_enabled": true,
+      "broadcast_port": 37889
     },
     "inbound_webhooks_enabled": false,
     "local_device": {

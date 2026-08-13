@@ -7,11 +7,11 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,10 +23,11 @@ import (
 )
 
 const (
-	MDNSService            = "_pccontroller._tcp"
-	MDNSDomain             = "local."
-	SSDPType               = "urn:pccontroller-org:service:bridge:1"
-	WSDiscoveryType        = "urn:schemas-xmlsoap-org:ws:2005:04:discovery"
+	MDNSService = "_pccontroller._tcp"
+	MDNSDomain  = "local."
+	// SSDPType must exactly match the serviceType in /upnp/device.xml.
+	SSDPType               = "urn:pccontroller-org:service:Controller:1"
+	WSDiscoveryType        = "pc:PCControllerBridge"
 	BroadcastPort          = 37889
 	NetBIOSNameServicePort = 137
 	ssdpAddress            = "239.255.255.250:1900"
@@ -34,15 +35,19 @@ const (
 )
 
 type Instance struct {
-	Protocol  string    `json:"protocol"`
-	Name      string    `json:"name"`
-	Host      string    `json:"host"`
-	Port      int       `json:"port"`
-	Addresses []string  `json:"addresses,omitempty"`
-	TXT       []string  `json:"txt,omitempty"`
-	Location  string    `json:"location,omitempty"`
-	USN       string    `json:"usn,omitempty"`
-	SeenAt    time.Time `json:"seen_at"`
+	Protocol  string      `json:"protocol"`
+	Protocols []string    `json:"protocols,omitempty"`
+	Sources   []Source    `json:"sources,omitempty"`
+	Name      string      `json:"name"`
+	Host      string      `json:"host"`
+	Port      int         `json:"port"`
+	Addresses []string    `json:"addresses,omitempty"`
+	TXT       []string    `json:"txt,omitempty"`
+	Location  string      `json:"location,omitempty"`
+	PublicURL string      `json:"public_url,omitempty"`
+	Public    *PublicInfo `json:"public,omitempty"`
+	USN       string      `json:"usn,omitempty"`
+	SeenAt    time.Time   `json:"seen_at"`
 }
 
 // Options selects the network discovery protocols. MDNS and DNSSD are the
@@ -69,21 +74,36 @@ func (options Options) normalized() Options {
 }
 
 type Advertiser struct {
-	cancel        context.CancelFunc
-	done          chan struct{}
-	refresh       chan struct{}
-	name          string
-	port          int
-	ssdp          bool
-	wsDiscovery   bool
-	broadcast     bool
-	broadcastPort int
-	netbios       bool
+	cancel           context.CancelFunc
+	done             chan struct{}
+	ssdpRefresh      chan struct{}
+	broadcastRefresh chan struct{}
+	name             string
+	port             int
+	ssdp             bool
+	wsDiscovery      bool
+	broadcast        bool
+	broadcastPort    int
+	netbios          bool
+	ssdpListener     *net.UDPConn
+	wsListener       *net.UDPConn
+	broadcastConn    *net.UDPConn
+	netbiosConn      *net.UDPConn
 
-	mu     sync.RWMutex
-	closed bool
-	mdns   *zeroconf.Server
-	txt    []string
+	mu       sync.RWMutex
+	closed   bool
+	mdns     *zeroconf.Server
+	txt      []string
+	active   []string
+	failures []TransportFailure
+}
+
+// TransportFailure reports a configured discovery responder that could not
+// start. Other transports remain available, so callers can expose degraded
+// discovery without incorrectly claiming every configured responder is live.
+type TransportFailure struct {
+	Protocol string `json:"protocol"`
+	Error    string `json:"error"`
 }
 
 func Advertise(
@@ -114,41 +134,124 @@ func AdvertiseWithOptions(
 	txt = normalizeTXT(txt)
 	ctx, cancel := context.WithCancel(parent)
 	result := &Advertiser{
-		cancel: cancel, done: make(chan struct{}), refresh: make(chan struct{}, 1),
+		cancel: cancel, done: make(chan struct{}), ssdpRefresh: make(chan struct{}, 1), broadcastRefresh: make(chan struct{}, 1),
 		name: name, port: port, ssdp: options.SSDP, wsDiscovery: options.WSDiscovery,
 		broadcast: options.Broadcast, broadcastPort: options.BroadcastPort,
 		netbios: options.NetBIOS, txt: append([]string(nil), txt...),
 	}
+	enabled := 0
+	recordFailure := func(protocol string, err error) {
+		if err != nil {
+			result.failures = append(result.failures, TransportFailure{Protocol: protocol, Error: err.Error()})
+		}
+	}
 	if options.MDNS {
+		enabled++
 		server, err := zeroconf.Register(name, MDNSService, MDNSDomain, port, txt, nil)
 		if err != nil {
-			cancel()
-			return nil, fmt.Errorf("advertise mDNS: %w", err)
+			recordFailure("dns-sd", err)
+		} else {
+			result.mdns = server
+			result.active = append(result.active, "dns-sd")
 		}
-		result.mdns = server
+	}
+	if options.SSDP {
+		enabled++
+		group, err := net.ResolveUDPAddr("udp4", ssdpAddress)
+		if err == nil {
+			result.ssdpListener, err = net.ListenMulticastUDP("udp4", nil, group)
+		}
+		if err != nil {
+			recordFailure("ssdp-responder", err)
+		}
+		// NOTIFY remains useful even where the OS owns multicast port 1900.
+		result.active = append(result.active, "ssdp")
+	}
+	if options.WSDiscovery {
+		enabled++
+		group, err := net.ResolveUDPAddr("udp4", wsDiscoveryAddress)
+		if err == nil {
+			result.wsListener, err = net.ListenMulticastUDP("udp4", nil, group)
+		}
+		if err != nil {
+			recordFailure("ws-discovery", err)
+			result.wsDiscovery = false
+		} else {
+			result.active = append(result.active, "ws-discovery")
+		}
+	}
+	if options.Broadcast {
+		enabled++
+		connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: options.BroadcastPort})
+		if err != nil {
+			recordFailure("broadcast", err)
+			result.broadcast = false
+		} else {
+			result.broadcastConn = connection
+			result.active = append(result.active, "broadcast")
+		}
+	}
+	if options.NetBIOS {
+		enabled++
+		connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: NetBIOSNameServicePort})
+		if err != nil {
+			recordFailure("netbios", err)
+			result.netbios = false
+		} else {
+			result.netbiosConn = connection
+			result.active = append(result.active, "netbios")
+		}
+	}
+	if enabled > 0 && len(result.active) == 0 {
+		cancel()
+		messages := make([]error, 0, len(result.failures))
+		for _, failure := range result.failures {
+			messages = append(messages, fmt.Errorf("%s: %s", failure.Protocol, failure.Error))
+		}
+		return nil, errors.Join(messages...)
 	}
 	go func() {
 		defer close(result.done)
 		var wait sync.WaitGroup
-		if options.SSDP {
+		if result.ssdp {
 			wait.Add(1)
 			go func() { defer wait.Done(); runSSDPAdvertiser(ctx, result) }()
 		}
-		if options.WSDiscovery {
+		if result.wsDiscovery {
 			wait.Add(1)
 			go func() { defer wait.Done(); runWSDiscoveryAdvertiser(ctx, result) }()
 		}
-		if options.Broadcast {
+		if result.broadcast {
 			wait.Add(1)
 			go func() { defer wait.Done(); runBroadcastAdvertiser(ctx, result) }()
 		}
-		if options.NetBIOS {
+		if result.netbios {
 			wait.Add(1)
 			go func() { defer wait.Done(); runNetBIOSAdvertiser(ctx, result) }()
 		}
 		wait.Wait()
 	}()
 	return result, nil
+}
+
+// ActiveProtocols returns the responders/advertisers that actually started.
+func (advertiser *Advertiser) ActiveProtocols() []string {
+	if advertiser == nil {
+		return nil
+	}
+	advertiser.mu.RLock()
+	defer advertiser.mu.RUnlock()
+	return append([]string(nil), advertiser.active...)
+}
+
+// Failures returns configured transports that could not bind or register.
+func (advertiser *Advertiser) Failures() []TransportFailure {
+	if advertiser == nil {
+		return nil
+	}
+	advertiser.mu.RLock()
+	defer advertiser.mu.RUnlock()
+	return append([]TransportFailure(nil), advertiser.failures...)
 }
 
 func (advertiser *Advertiser) Close() {
@@ -175,8 +278,9 @@ func (advertiser *Advertiser) Close() {
 }
 
 // UpdateText publishes a changed, bounded set of non-secret discovery values.
-// mDNS announces the new TXT record immediately and SSDP sends one changed-only
-// alive packet; callers therefore update from pushed state rather than polling.
+// mDNS announces the new TXT record immediately, SSDP sends one changed-only
+// alive packet, and UDP broadcast sends one changed-only beacon; callers
+// therefore update from pushed state rather than polling.
 func (advertiser *Advertiser) UpdateText(txt []string) {
 	if advertiser == nil {
 		return
@@ -190,7 +294,6 @@ func (advertiser *Advertiser) UpdateText(txt []string) {
 	advertiser.txt = append(advertiser.txt[:0], txt...)
 	mdns := advertiser.mdns
 	ssdp := advertiser.ssdp
-	wsDiscovery := advertiser.wsDiscovery
 	broadcast := advertiser.broadcast
 	advertiser.mu.Unlock()
 	if mdns != nil {
@@ -198,19 +301,15 @@ func (advertiser *Advertiser) UpdateText(txt []string) {
 	}
 	if ssdp {
 		select {
-		case advertiser.refresh <- struct{}{}:
+		case advertiser.ssdpRefresh <- struct{}{}:
 		default:
 		}
 	}
-	if wsDiscovery || broadcast {
-		advertiser.signalRefresh()
-	}
-}
-
-func (advertiser *Advertiser) signalRefresh() {
-	select {
-	case advertiser.refresh <- struct{}{}:
-	default:
+	if broadcast {
+		select {
+		case advertiser.broadcastRefresh <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -233,7 +332,9 @@ func equalText(left, right []string) bool {
 }
 
 func normalizeTXT(values []string) []string {
-	const maximumRecords = 48
+	// Sixty-four records retain the complete live status block after host and
+	// board identity fields while remaining bounded for every wire adapter.
+	const maximumRecords = 64
 	result := make([]string, 0, min(len(values), maximumRecords))
 	for _, raw := range values {
 		value := strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(raw))
@@ -276,12 +377,35 @@ func DiscoverWithOptions(ctx context.Context, options Options) ([]Instance, erro
 	options = options.normalized()
 	var mutex sync.Mutex
 	instances := make(map[string]Instance)
+	seen := make(map[string]bool)
+	enrichSlots := make(chan struct{}, 8)
+	var enrich sync.WaitGroup
 	add := func(instance Instance) {
-		key := instance.Protocol + "|" + instance.USN + "|" + instance.Host +
+		rawKey := instance.Protocol + "|" + instance.USN + "|" + instance.Host +
 			"|" + strconv.Itoa(instance.Port)
 		mutex.Lock()
-		instances[key] = instance
+		if seen[rawKey] {
+			mutex.Unlock()
+			return
+		}
+		seen[rawKey] = true
 		mutex.Unlock()
+		select {
+		case enrichSlots <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		enrich.Add(1)
+		go func() {
+			defer enrich.Done()
+			defer func() { <-enrichSlots }()
+			instance = enrichInstance(ctx, instance)
+			key := instance.Protocol + "|" + instance.USN + "|" + instance.Host +
+				"|" + strconv.Itoa(instance.Port)
+			mutex.Lock()
+			instances[key] = instance
+			mutex.Unlock()
+		}()
 	}
 	var wait sync.WaitGroup
 	var firstError error
@@ -323,16 +447,12 @@ func DiscoverWithOptions(ctx context.Context, options Options) ([]Instance, erro
 		go func() { defer wait.Done(); recordError(discoverNetBIOS(ctx, add)) }()
 	}
 	wait.Wait()
+	enrich.Wait()
 	result := make([]Instance, 0, len(instances))
 	for _, instance := range instances {
 		result = append(result, instance)
 	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Name == result[j].Name {
-			return result[i].Protocol < result[j].Protocol
-		}
-		return result[i].Name < result[j].Name
-	})
+	result = mergeInstances(result)
 	if len(result) == 0 && firstError != nil {
 		return nil, firstError
 	}
@@ -366,6 +486,8 @@ func browseMDNS(ctx context.Context, add func(Instance)) error {
 	}()
 	err = resolver.Browse(ctx, MDNSService, MDNSDomain, entries)
 	if err != nil {
+		close(entries)
+		<-done
 		return fmt.Errorf("browse mDNS: %w", err)
 	}
 	<-ctx.Done()
@@ -374,8 +496,7 @@ func browseMDNS(ctx context.Context, add func(Instance)) error {
 }
 
 func runSSDPAdvertiser(ctx context.Context, advertiser *Advertiser) {
-	group, _ := net.ResolveUDPAddr("udp4", ssdpAddress)
-	listener, _ := net.ListenMulticastUDP("udp4", nil, group)
+	listener := advertiser.ssdpListener
 	if listener != nil {
 		_ = listener.SetReadBuffer(64 * 1024)
 		go func() {
@@ -392,7 +513,7 @@ func runSSDPAdvertiser(ctx context.Context, advertiser *Advertiser) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-advertiser.refresh:
+		case <-advertiser.ssdpRefresh:
 			sendSSDPNotify(advertiser, "ssdp:alive")
 		case <-ticker.C:
 			sendSSDPNotify(advertiser, "ssdp:alive")
@@ -424,9 +545,10 @@ func respondSSDP(
 			"CACHE-CONTROL: max-age=60",
 			"EXT:",
 			"LOCATION: http://" + net.JoinHostPort(locationHost, strconv.Itoa(port)) + "/upnp/device.xml",
+			"X-PCController-Public: http://" + net.JoinHostPort(locationHost, strconv.Itoa(port)) + PublicInfoPath,
 			"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
 			"ST: " + SSDPType,
-			"USN: " + ssdpUSN(name, port) + "::" + SSDPType,
+			"USN: " + ssdpUSNWithText(name, port, advertiser.text()) + "::" + SSDPType,
 			"X-PCController-Name: " + sanitizeHeader(name),
 		}
 		lines = append(lines, ssdpMetadataHeaders(advertiser.text())...)
@@ -467,7 +589,7 @@ func ssdpNotify(name string, port int, nts string) string {
 }
 
 func ssdpNotifyWithText(name string, port int, nts string, txt []string) string {
-	usn := ssdpUSN(name, port)
+	usn := ssdpUSNWithText(name, port, txt)
 	hostname, _ := os.Hostname()
 	if strings.TrimSpace(hostname) == "" {
 		hostname = "127.0.0.1"
@@ -477,6 +599,7 @@ func ssdpNotifyWithText(name string, port int, nts string, txt []string) string 
 		"HOST: " + ssdpAddress,
 		"CACHE-CONTROL: max-age=60",
 		"LOCATION: http://" + net.JoinHostPort(hostname, strconv.Itoa(port)) + "/upnp/device.xml",
+		"X-PCController-Public: http://" + net.JoinHostPort(hostname, strconv.Itoa(port)) + PublicInfoPath,
 		"NT: " + SSDPType,
 		"NTS: " + nts,
 		"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
@@ -498,6 +621,16 @@ func ssdpMetadataHeaders(txt []string) []string {
 }
 
 func ssdpUSN(name string, port int) string {
+	return ssdpUSNWithText(name, port, nil)
+}
+
+func ssdpUSNWithText(name string, port int, txt []string) string {
+	for _, value := range normalizeTXT(txt) {
+		key, instanceID, ok := strings.Cut(value, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "instance.id") && strings.TrimSpace(instanceID) != "" {
+			return "uuid:" + sanitizeHeader(strings.TrimSpace(instanceID))
+		}
+	}
 	digest := sha256.Sum256([]byte(name + ":" + strconv.Itoa(port)))
 	return fmt.Sprintf("uuid:%x-%x-%x-%x-%x", digest[:4], digest[4:6], digest[6:8], digest[8:10], digest[10:16])
 }
@@ -556,19 +689,23 @@ func parseSSDPResponse(data []byte, source *net.UDPAddr) (Instance, bool) {
 		return Instance{}, false
 	}
 	host := ""
+	addresses := []string{}
 	if source != nil {
 		host = source.IP.String()
+		addresses = append(addresses, host)
 	}
 	port := 0
 	if location := request.Header.Get("Location"); location != "" {
 		if parsed, err := neturlParse(location); err == nil {
-			host = parsed.host
+			if host == "" {
+				host = parsed.host
+			}
 			port = parsed.port
 		}
 	}
 	return Instance{
 		Protocol: "ssdp", Name: request.Header.Get("X-PCController-Name"),
-		Host: host, Port: port, Location: request.Header.Get("Location"),
+		Host: host, Port: port, Addresses: addresses, Location: request.Header.Get("Location"), PublicURL: request.Header.Get("X-PCController-Public"),
 		USN: request.Header.Get("USN"),
 		TXT: normalizeTXT(request.Header.Values("X-PCController-Meta")), SeenAt: time.Now(),
 	}, true
