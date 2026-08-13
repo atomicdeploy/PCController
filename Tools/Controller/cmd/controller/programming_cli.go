@@ -49,6 +49,8 @@ func runProgramWithConfig(
 	if normalizeErr != nil {
 		return normalizeErr
 	}
+	var err error
+	firmwareFeatures := newFirmwareFeatureSelection(nil)
 	flags := flag.NewFlagSet("program", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	defaultMethod := config.Programming.Method
@@ -86,6 +88,8 @@ func runProgramWithConfig(
 	baud := flags.Int("baud", 115200, "urclock baud rate")
 	toolchainCLI := flags.String("toolchain-cli", config.Programming.ToolchainCLI, "firmware dependency CLI executable")
 	toolchainConfig := flags.String("toolchain-config", config.Programming.ToolchainConfig, "firmware dependency CLI configuration file")
+	flags.Var(firmwareFeatures, "firmware-feature", "repeatable named firmware feature (supported: eeprom-boot-opcodes, eeprom-menu-labels)")
+	noFirmwareFeatures := flags.Bool("no-firmware-features", false, "override configured compile features with the default-off profile")
 	avrdude := flags.String("avrdude", config.Programming.Avrdude, "avrdude executable")
 	avrdudeConf := flags.String("avrdude-conf", config.Programming.AvrdudeConf, "avrdude.conf path")
 	usbaspBitClock := flags.Float64("usbasp-bitclock-us", 0, "force USBasp AVRDUDE -B bit-clock period in microseconds")
@@ -113,6 +117,12 @@ func runProgramWithConfig(
 	)
 	if err := flags.Parse(args); err != nil {
 		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("unexpected program argument %q", flags.Arg(0))
+	}
+	if *noFirmwareFeatures && firmwareFeatures.explicit {
+		return errors.New("--no-firmware-features cannot be combined with --firmware-feature")
 	}
 	if *reinitializeEEPROM && *allowIncompleteBackup {
 		return errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
@@ -145,6 +155,18 @@ func runProgramWithConfig(
 	}
 	if options.Operation == programmer.OperationChipErase {
 		return errors.New("raw chip erase is disabled; use 'controller board blank' for mandatory backup, EEPROM clearing, and full readback")
+	}
+	if (firmwareFeatures.explicit || *noFirmwareFeatures) &&
+		options.Method != programmer.MethodCompile {
+		return errors.New("--firmware-feature and --no-firmware-features are only valid with --method compile")
+	}
+	if options.Method == programmer.MethodCompile {
+		options.FirmwareFeatures, err = resolveCompileFirmwareFeatures(
+			config, firmwareFeatures, *noFirmwareFeatures, true,
+		)
+		if err != nil {
+			return err
+		}
 	}
 	if options.USBaspBitClockUS < 0 {
 		return errors.New("--usbasp-bitclock-us must be zero or positive")
@@ -331,7 +353,6 @@ func runProgramWithConfig(
 		)
 	}
 	var command programmer.Command
-	var err error
 	if options.Operation == programmer.OperationBackup {
 		fmt.Fprintf(
 			stdout,

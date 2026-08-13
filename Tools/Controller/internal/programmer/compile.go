@@ -23,6 +23,7 @@ type CompileIdentity struct {
 	SourceHash      uint32
 	SourceSHA256    string
 	SourceFiles     int
+	Features        []FirmwareFeature
 	PackedTimestamp uint32
 	SourceRoot      string
 	SketchPath      string
@@ -36,7 +37,26 @@ func PlanCompile(options Options) (Options, CompileIdentity, error) {
 	if options.Method != MethodCompile {
 		return options, CompileIdentity{}, errors.New("compile planning requires method compile")
 	}
+	featureValues := firmwareFeatureNames(options.FirmwareFeatures)
+	features, err := NormalizeFirmwareFeatures(featureValues)
+	if err != nil {
+		return options, CompileIdentity{}, err
+	}
+	options.FirmwareFeatures = features
 	if options.compilePlanned {
+		currentHash, currentSHA256, currentFiles, currentErr := firmwareCompileInputDigest(
+			options.CompileSourceRoot, features,
+		)
+		if currentErr != nil {
+			return options, CompileIdentity{}, currentErr
+		}
+		if currentHash != options.FirmwareSourceHash ||
+			currentSHA256 != options.FirmwareSourceSHA256 ||
+			currentFiles != options.FirmwareSourceFiles {
+			return options, CompileIdentity{}, errors.New(
+				"firmware sources or compile features changed after planning; create a new compile plan",
+			)
+		}
 		return options, compileIdentity(options), nil
 	}
 	if strings.TrimSpace(options.SketchPath) == "" {
@@ -60,7 +80,7 @@ func PlanCompile(options Options) (Options, CompileIdentity, error) {
 		return options, CompileIdentity{}, fmt.Errorf("firmware source root requires PCController.ino: %w", err)
 	}
 
-	sourceHash, sourceSHA256, sourceFiles, err := firmwareSourceDigest(sourceRoot)
+	sourceHash, sourceSHA256, sourceFiles, err := firmwareCompileInputDigest(sourceRoot, features)
 	if err != nil {
 		return options, CompileIdentity{}, err
 	}
@@ -101,7 +121,7 @@ func StageCompile(options Options) (Options, CompileIdentity, error) {
 	if err != nil {
 		return options, CompileIdentity{}, err
 	}
-	currentHash, err := firmwareSourceHash(identity.SourceRoot)
+	currentHash, err := firmwareCompileInputHash(identity.SourceRoot, planned.FirmwareFeatures)
 	if err != nil {
 		return options, CompileIdentity{}, err
 	}
@@ -150,7 +170,7 @@ func StageCompile(options Options) (Options, CompileIdentity, error) {
 			return options, CompileIdentity{}, err
 		}
 	}
-	stagedHash, err := firmwareSourceHash(identity.SketchPath)
+	stagedHash, err := firmwareCompileInputHash(identity.SketchPath, planned.FirmwareFeatures)
 	if err != nil {
 		return options, CompileIdentity{}, fmt.Errorf("verify staged firmware sources: %w", err)
 	}
@@ -169,6 +189,7 @@ func compileIdentity(options Options) CompileIdentity {
 	return CompileIdentity{
 		SourceHash: options.FirmwareSourceHash, PackedTimestamp: options.FirmwareBuildTimestamp,
 		SourceSHA256: options.FirmwareSourceSHA256, SourceFiles: options.FirmwareSourceFiles,
+		Features:   append([]FirmwareFeature(nil), options.FirmwareFeatures...),
 		SourceRoot: options.CompileSourceRoot, SketchPath: options.SketchPath,
 		BuildPath: options.BuildPath, OutputDir: options.OutputDir,
 	}
@@ -218,6 +239,30 @@ func requestedBuildTimestamp(now time.Time) (uint32, error) {
 func firmwareSourceHash(root string) (uint32, error) {
 	hash, _, _, err := firmwareSourceDigest(root)
 	return hash, err
+}
+
+// firmwareCompileInputHash includes the reviewed feature selection because it
+// changes the generated image despite leaving source files untouched.
+func firmwareCompileInputHash(root string, features []FirmwareFeature) (uint32, error) {
+	hash, _, _, err := firmwareCompileInputDigest(root, features)
+	return hash, err
+}
+
+// firmwareCompileInputDigest preserves the historic source-only digest for a
+// feature-off build. Enabled feature names are then added canonically, so an
+// image cannot be mistaken for the same source compiled with different gates.
+func firmwareCompileInputDigest(root string, features []FirmwareFeature) (uint32, string, int, error) {
+	sourceHash, sourceSHA256, sourceFiles, err := firmwareSourceDigest(root)
+	if err != nil || len(features) == 0 {
+		return sourceHash, sourceSHA256, sourceFiles, err
+	}
+	manifest := sha256.New()
+	_, _ = fmt.Fprintf(manifest, "pccontroller-avr-compile-input/v1\nsource-sha256:%s\n", sourceSHA256)
+	for _, feature := range features {
+		_, _ = fmt.Fprintf(manifest, "feature:%s\n", feature)
+	}
+	digest := manifest.Sum(nil)
+	return binary.BigEndian.Uint32(digest[:4]), fmt.Sprintf("%x", digest), sourceFiles, nil
 }
 
 func firmwareSourceDigest(root string) (uint32, string, int, error) {
