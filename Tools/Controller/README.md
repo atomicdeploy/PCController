@@ -154,10 +154,12 @@ building without the ABI. See
 For a focused library-only CMake/CTest workflow, configure
 `Tools/Controller` with a native compiler passed as
 `-DPCCONTROLLER_CABI_CC=...`; its `pccontroller_cabi` and
-`pccontroller_cabi_smoke` targets use that compiler for both CGO and the
-external C consumer. The CMake project validates the Windows target/macros and
-rejects MSYS/Cygwin before invoking Go; it intentionally delegates package
-selection and provisioning to the canonical host packager.
+`pccontroller_cabi_installed_smoke` targets use that compiler for both CGO and
+external C consumers, including one compiled against the CMake-staged install
+tree. The CMake project validates the Windows target/macros and rejects
+MSYS/Cygwin before invoking Go; it intentionally delegates package selection
+and provisioning to the canonical host packager. Its output is developer-only
+verification material, never a deployable host package.
 
 ## Embedded web control center
 
