@@ -11,6 +11,9 @@ enum MenuAction : uint8_t {
 };
 
 // Stable EEPROM/protocol page IDs; presentation order is stored separately.
+// PAGE_MOTION remains a wire-compatible selector for pre-unified clients. It
+// is never a separately browsable local page: canonicalMenuPage() resolves it
+// to the unified KEY motion surface.
 enum MenuPage : uint8_t {
   PAGE_DOOR = 0,
   PAGE_VOLTAGE,
@@ -28,6 +31,14 @@ enum MenuPage : uint8_t {
   PAGE_RF,
   PAGE_COUNT
 };
+
+constexpr uint8_t canonicalMenuPage(uint8_t page) {
+  return page == PAGE_MOTION ? static_cast<uint8_t>(PAGE_KEYS) : page;
+}
+
+constexpr bool retiredMenuPageAlias(uint8_t page) {
+  return page == PAGE_MOTION;
+}
 
 // Top-level pages and modal editors consumed by ModeManager.
 enum ProgramMode : uint8_t {

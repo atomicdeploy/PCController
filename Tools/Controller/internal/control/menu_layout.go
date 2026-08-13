@@ -21,8 +21,9 @@ type MenuLayout struct {
 	Order       []byte `json:"order"`
 }
 
-// DefaultMenuLayout preserves catalog order and makes every reported page
-// visible. It is the truthful read-only fallback for older firmware.
+// DefaultMenuLayout preserves catalog order and makes every browsable page
+// visible. Retired wire aliases remain in the complete order but are never
+// locally visible. It is the truthful read-only fallback for older firmware.
 func DefaultMenuLayout(pages []MenuPageInfo) (MenuLayout, error) {
 	layout := MenuLayout{
 		Schema: MenuLayoutSchema,
@@ -34,7 +35,9 @@ func DefaultMenuLayout(pages []MenuPageInfo) (MenuLayout, error) {
 			return MenuLayout{}, fmt.Errorf("menu page ID %d cannot be represented by the 16-bit visibility mask", page.ID)
 		}
 		layout.Order[index] = page.ID
-		layout.VisibleMask |= uint16(1) << page.ID
+		if _, retired := retiredMenuAliasTarget(pages, page.ID); !retired {
+			layout.VisibleMask |= uint16(1) << page.ID
+		}
 	}
 	if _, err := CanonicalMenuLayout(pages, layout); err != nil {
 		return MenuLayout{}, err
@@ -79,11 +82,12 @@ func CanonicalMenuLayout(pages []MenuPageInfo, layout MenuLayout) (MenuLayout, e
 	if extra := layout.VisibleMask &^ allowedMask; extra != 0 {
 		return MenuLayout{}, fmt.Errorf("menu visibility mask sets out-of-catalog bits 0x%04X", extra)
 	}
+	layout.Order = append([]byte(nil), layout.Order...)
+	layout = normalizeRetiredMenuAliases(pages, layout)
 	if layout.VisibleMask&allowedMask == 0 {
 		return MenuLayout{}, errors.New("menu visibility mask must leave at least one page visible")
 	}
 	layout.Schema = MenuLayoutSchema
-	layout.Order = append([]byte(nil), layout.Order...)
 	return layout, nil
 }
 
@@ -121,6 +125,9 @@ func OrderedMenuPages(pages []MenuPageInfo, layout MenuLayout) ([]MenuPageInfo, 
 // MoveMenuPage returns a validated layout with one stable ID moved to the
 // requested zero-based rank.
 func MoveMenuPage(pages []MenuPageInfo, layout MenuLayout, id byte, rank int) (MenuLayout, error) {
+	if _, retired := retiredMenuAliasTarget(pages, id); retired {
+		return MenuLayout{}, fmt.Errorf("menu page ID %d is a retired KEY alias and cannot be reordered", id)
+	}
 	layout, err := CanonicalMenuLayout(pages, layout)
 	if err != nil {
 		return MenuLayout{}, err
@@ -144,6 +151,9 @@ func MoveMenuPage(pages []MenuPageInfo, layout MenuLayout, id byte, rank int) (M
 }
 
 func SetMenuPageVisible(pages []MenuPageInfo, layout MenuLayout, id byte, visible bool) (MenuLayout, error) {
+	if _, retired := retiredMenuAliasTarget(pages, id); retired {
+		return MenuLayout{}, fmt.Errorf("menu page ID %d is a retired KEY alias and cannot be shown or hidden", id)
+	}
 	layout, err := CanonicalMenuLayout(pages, layout)
 	if err != nil {
 		return MenuLayout{}, err
@@ -158,4 +168,50 @@ func SetMenuPageVisible(pages []MenuPageInfo, layout MenuLayout, id byte, visibl
 		layout.VisibleMask &^= bit
 	}
 	return CanonicalMenuLayout(pages, layout)
+}
+
+// retiredMenuAliasTarget identifies aliases only in the current production
+// catalog. Historical firmware retains a genuine MOVE page at the same ID,
+// and its compatibility catalog deliberately keeps a different description.
+func retiredMenuAliasTarget(pages []MenuPageInfo, id byte) (byte, bool) {
+	if id != menuPageMotionAlias {
+		return 0, false
+	}
+	for _, page := range pages {
+		if page.ID == id && page.Description == retiredMotionAliasDetails {
+			return menuPageKeys, true
+		}
+	}
+	return 0, false
+}
+
+// normalizeRetiredMenuAliases accepts legacy persisted masks without allowing
+// ID 12 to become a second local KEY page. When an old layout showed only
+// MOVE, swapping IDs 9 and 12 preserves the user's effective rank while RF
+// and every other stable page retain their order.
+func normalizeRetiredMenuAliases(pages []MenuPageInfo, layout MenuLayout) MenuLayout {
+	for _, page := range pages {
+		target, retired := retiredMenuAliasTarget(pages, page.ID)
+		if !retired {
+			continue
+		}
+		aliasBit := uint16(1) << page.ID
+		if layout.VisibleMask&aliasBit == 0 {
+			continue
+		}
+		targetBit := uint16(1) << target
+		targetWasVisible := layout.VisibleMask&targetBit != 0
+		layout.VisibleMask = layout.VisibleMask&^aliasBit | targetBit
+		if !targetWasVisible {
+			for rank, id := range layout.Order {
+				switch id {
+				case page.ID:
+					layout.Order[rank] = target
+				case target:
+					layout.Order[rank] = page.ID
+				}
+			}
+		}
+	}
+	return layout
 }

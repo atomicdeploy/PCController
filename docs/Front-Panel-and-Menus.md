@@ -532,12 +532,18 @@ additional stable page IDs:
 | 9 | `KEY` | `KEY`, then live relay mask while moving | K1-K4 control Side A Forward/Reverse and Side B Forward/Reverse |
 | 10 | `uPWM` | Alternates user channel 1-8 and its stored 8-bit value | K3 Back; K4 opens persistent user-PWM editor |
 | 11 | `r5-8` | Active R5-R8 mask as 0-15 | K3 Back; K4 opens general-relay control |
-| 12 | `MOVE` | Retired alias; never separately navigable | Firmware normalizes it to page 9 `KEY` |
+| 12 | `MOVE` | Retired wire alias; never separately browsable | Direct `MENU_SET_PAGE 12` selects page 9 `KEY` |
 | 13 | `LErn` | Learned RF count, or unavailable dashes | K3 Back; K4 starts the default indefinite, multi-code learning session |
 
 The board-authoritative `MenuList` opcode returns these 14 dense IDs,
-program-mode IDs, and four-character labels in pages. Category membership is
-the fixed mapping above and is not part of that six-byte entry. The retired
+program-mode IDs, and four-character labels in pages. ID 12 remains `MOVE`
+for cursor and client compatibility, but reports the `KEY` program-mode ID;
+it is a direct selector alias rather than a second local page. The persistent
+layout always clears visibility bit 12. On an older persisted/layout-write
+mask that sets bit 12, firmware promotes it to bit 9 and, when 9 was hidden,
+swaps the stored 9/12 ranks so the effective `KEY` position is preserved
+without moving `LErn`/RF or any other page. Category membership is the fixed
+mapping above and is not part of that six-byte entry. The retired
 `bt` page was the redundant BT Audio **connection-state** page and remains
 removed: BT input sensing, telemetry/events, automations, host monitoring, and
 RGB status convey that state. The distinct `tBT` page above is intentionally

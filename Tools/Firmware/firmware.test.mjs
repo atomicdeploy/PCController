@@ -398,6 +398,28 @@ test('production KEY dispatches first Down to motion and exits outside KEY', asy
 	assert.doesNotMatch(frontPanel, /case MODE_MOTION_CONTROL:\s*relays\.allOff\(at\);/u)
 })
 
+test('retired MOVE remains a direct KEY alias, never a persisted second page', async () => {
+	const [model, settings, frontPanel, protocol, defaults] = await Promise.all([
+		readFile(new URL('../../Project/FrontPanelModel.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/SettingsStore.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/ProtocolRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../Controller/internal/programmer/default_eeprom.go', import.meta.url), 'utf8')
+	])
+	assert.match(model, /canonicalMenuPage\(uint8_t page\)[^]*?PAGE_MOTION[^]*?PAGE_KEYS/u)
+	assert.match(settings, /!retiredMenuPageAlias\(page\)/u)
+	assert.match(settings, /normalizeMenuLayout\(\)/u)
+	assert.match(frontPanel, /pageToMode\(uint8_t page\)[^]*?canonicalMenuPage\(page\)/u)
+	assert.match(
+		frontPanel,
+		/adjacentBuiltInMenuPage[^]*?PAGE_USER_RELAYS[^]*?PAGE_RF[^]*?PAGE_RF[^]*?PAGE_USER_RELAYS/u
+	)
+	assert.match(frontPanel, /case MODE_MOTION_CONTROL:[^]*?setMenuPage\(PAGE_DOOR\);/u)
+	assert.match(protocol, /settingsStore\.normalizeMenuLayout\(\);/u)
+	assert.match(protocol, /const uint8_t defaultMenuPage = canonicalMenuPage\(payload\[10\]\);/u)
+	assert.match(defaults, /DefaultMenuPageMotionAlias\s*=\s*12/u)
+})
+
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
         const runtimeFiles = [
                 'ControllerContext.inc.h',

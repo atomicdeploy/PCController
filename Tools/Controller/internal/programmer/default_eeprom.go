@@ -13,7 +13,8 @@ import (
 
 const (
 	DefaultPersistentMenuPageCount = 14
-	DefaultVisibleMenuMask         = uint16(1<<DefaultPersistentMenuPageCount) - 1
+	DefaultMenuPageMotionAlias     = 12
+	DefaultVisibleMenuMask         = uint16((1<<DefaultPersistentMenuPageCount)-1) &^ (uint16(1) << DefaultMenuPageMotionAlias)
 	defaultEEPROMCompileArtifact   = "safe-default-eeprom.hex"
 )
 

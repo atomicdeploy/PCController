@@ -18,7 +18,7 @@ bool isMenuMode(ProgramMode mode) {
 // Converts a stable page ID to its contiguous top-level program mode.
 ProgramMode pageToMode(uint8_t page) {
   return static_cast<ProgramMode>(
-      static_cast<uint8_t>(MODE_DOOR) + page);
+      static_cast<uint8_t>(MODE_DOOR) + canonicalMenuPage(page));
 }
 
 // Returns the stable page represented by an ordinary mode.
@@ -140,9 +140,28 @@ void moveMenuCategory(bool forward, uint32_t at) {
 #endif
 #endif
 
+#if !PCCONTROLLER_MENU_VISIBILITY
+// The production-size menu has no persisted presentation layout.  Keep the
+// wire-compatible MOVE selector out of its cyclic order as well: it aliases
+// KEY and must never make KEY appear twice or push RF behind an extra stop.
+uint8_t adjacentBuiltInMenuPage(uint8_t page, bool forward) {
+  page = canonicalMenuPage(page);
+  if (forward) {
+    if (page == PAGE_USER_RELAYS) {
+      return PAGE_RF;
+    }
+    return page == PAGE_RF ? PAGE_DOOR : static_cast<uint8_t>(page + 1U);
+  }
+  if (page == PAGE_RF) {
+    return PAGE_USER_RELAYS;
+  }
+  return page == PAGE_DOOR ? PAGE_RF : static_cast<uint8_t>(page - 1U);
+}
+#endif
+
 // Activates a stable page and optionally persists it as the boot default.
 void setMenuPage(uint8_t page) {
-  menuPage = page == PAGE_MOTION ? static_cast<uint8_t>(PAGE_KEYS) : page;
+  menuPage = canonicalMenuPage(page);
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
 #endif
@@ -238,7 +257,7 @@ void programService(uint32_t at) {
     case MODE_MOTION_CONTROL:
       if (!relays.motionAllowed()) {
         relays.allOff(at);
-        modeManager.transitionTo(MODE_MOTION);
+        setMenuPage(PAGE_DOOR);
       }
       break;
 
@@ -770,7 +789,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
           ));
 #else
-      setMenuPage(menuPage == 0 ? PAGE_COUNT - 1 : menuPage - 1);
+      setMenuPage(adjacentBuiltInMenuPage(menuPage, false));
 #endif
       break;
     case MENU_NEXT:
@@ -782,7 +801,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
           ));
 #else
-      setMenuPage(static_cast<uint8_t>((menuPage + 1) % PAGE_COUNT));
+      setMenuPage(adjacentBuiltInMenuPage(menuPage, true));
 #endif
       break;
     case MENU_DECREASE:
