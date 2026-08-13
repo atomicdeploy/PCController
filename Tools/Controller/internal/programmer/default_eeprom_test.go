@@ -70,6 +70,20 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 			t.Fatalf("status profile %d = % X, want % X (err=%v)", condition, record[:EEPROMStatusProfileBytes], encoded[1:], err)
 		}
 	}
+	labels, err := image.BytesAt(EEPROMMenuLabelsAddress, EEPROMMenuLabelBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(labels), defaultEEPROMMenuLabels; got != want {
+		t.Fatalf("factory menu labels = %q, want %q", got, want)
+	}
+	checksum, err := image.BytesAt(EEPROMMenuLabelsChecksumAddress, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checksum[0] != xorChecksum(labels) {
+		t.Fatalf("factory menu-label checksum = 0x%02X, want 0x%02X", checksum[0], xorChecksum(labels))
+	}
 }
 
 func TestGenerateProgrammingEEPROMIntelHexArmsQuietVisibleLatch(t *testing.T) {

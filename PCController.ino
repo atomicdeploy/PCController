@@ -17,6 +17,9 @@
 #include "Project/BootMelody.h"
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"
+#if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
+#include "Project/EepromMenuLabels.h"
+#endif
 #include "Project/FrontPanelModel.h"
 #include "Project/IlluminationController.h"
 #include "Project/Ina219Sensor.h"
