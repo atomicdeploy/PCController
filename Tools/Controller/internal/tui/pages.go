@@ -168,10 +168,18 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 }
 
 func portProcessSummary(process control.PortProcessSnapshot) string {
-	if !process.Supported { return "unsupported" }
-	if process.State == "owned" { return fmt.Sprintf("%s · PID %d", process.Name, process.PID) }
-	if process.State == "unknown" && process.Error != "" { return "unknown: " + process.Error }
-	if process.State == "free" && process.TakeoverReady { return "FREE · takeover armed" }
+	if !process.Supported {
+		return "unsupported"
+	}
+	if process.State == "owned" {
+		return fmt.Sprintf("%s · PID %d", process.Name, process.PID)
+	}
+	if process.State == "unknown" && process.Error != "" {
+		return "unknown: " + process.Error
+	}
+	if process.State == "free" && process.TakeoverReady {
+		return "FREE · takeover armed"
+	}
 	return strings.ToUpper(process.State)
 }
 
@@ -377,9 +385,15 @@ func (model Model) appSettingsPage() string {
 	for _, row := range rows {
 		tableRows = append(tableRows, []string{row.Group, row.Label, row.Value})
 	}
+	status := "D discover · select a DISCOVERED row + Enter/C to connect"
+	if model.networkDiscoveryPending {
+		status = model.spinner.View() + " discovering over all enabled network transports…"
+	} else if model.networkDiscoveryError != "" {
+		status = "discovery error: " + model.networkDiscoveryError
+	}
 	return strings.Join([]string{
-		sectionHeader(model.width, "HOST SETTINGS", "saved in host JSON · never board EEPROM"),
-		labelStyle.Render("↑/↓ select · Enter edits · F2 quick-renames peripheral rows · Ctrl+U restores their default"),
+		sectionHeader(model.width, "HOST SETTINGS", "host JSON · "+status),
+		labelStyle.Render("↑/↓ select · Enter edits/connects · D discover · F2 quick-renames · Ctrl+U restores default"),
 		model.centeredDataTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, settingsTableColumns(tableWidth), tableRows),
 	}, "\n")
 }

@@ -182,7 +182,8 @@ test('Go test executables use deterministic project-owned names', () => {
 		stableTestBinaryName(importPath, 'win32'),
 		stableTestBinaryName(importPath, 'win32')
 	)
-	assert.match(stableTestBinaryName(importPath, 'win32'), /^github\.com_atomicdeploy_pccontroller_internal_ipc-[0-9a-f]{10}\.test\.exe$/)
+	assert.match(stableTestBinaryName(importPath, 'win32'), /^pccontroller-tests-github\.com_atomicdeploy_pccontroller_internal_ipc-[0-9a-f]{10}\.exe$/)
+	assert.doesNotMatch(stableTestBinaryName(importPath, 'win32'), /\.test\.exe$/i)
 	assert.doesNotMatch(stableTestBinaryName(importPath, 'win32'), /AppData|Temp/i)
 })
 
@@ -210,6 +211,22 @@ test('stable Go test identity includes embedded web assets', async t => {
 	const after = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64')
 	assert.notEqual(after.sha256, before.sha256)
 	assert.equal(after.files, before.files)
+})
+
+test('stable Go test identity includes embedded defaults and build environment', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'controller-go-default-identity-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const assets = join(root, 'internal', 'defaultassets', 'assets')
+	await mkdir(assets, { recursive: true })
+	await writeFile(join(root, 'go.mod'), 'module example.invalid/controller\n\ngo 1.26\n')
+	await writeFile(join(root, 'main_test.go'), 'package controller\n')
+	await writeFile(join(assets, 'default.hex'), ':00000001FF\n')
+	const before = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '0' })
+	await writeFile(join(assets, 'default.hex'), ':0100000000FF\n')
+	const afterAsset = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '0' })
+	const afterEnvironment = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '1' })
+	assert.notEqual(afterAsset.sha256, before.sha256)
+	assert.notEqual(afterEnvironment.sha256, afterAsset.sha256)
 })
 
 test('package publishing tolerates a shell holding the canonical directory', async t => {
@@ -393,8 +410,46 @@ test('safe default builds both targets without touching hardware', () => {
 	const options = parseArguments([], {})
 	assert.equal(options.host, true)
 	assert.equal(options.firmware, true)
+	assert.equal(options.virtualBoard, false)
 	assert.equal(options.upload, false)
 	assert.equal(options.installBootloader, false)
+})
+
+test('virtual-board-only delegates to the existing CMake presets without hardware', () => {
+	const options = parseArguments(['--virtual-board-only', '--virtual-board-preset', 'debug'], {})
+	assert.equal(options.host, false)
+	assert.equal(options.firmware, false)
+	assert.equal(options.virtualBoard, true)
+	assert.equal(options.virtualBoardPreset, 'debug')
+	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	assert.deepEqual(plan.actions.map(action => action.id), [
+		'virtual-board-configure', 'virtual-board-build', 'virtual-board-test'
+	])
+	assert.deepEqual(plan.actions.map(action => action.command.args), [
+		['--preset', 'debug'],
+		['--build', '--preset', 'debug', '--parallel'],
+		['--preset', 'debug']
+	])
+	assert.ok(plan.actions.every(action => action.hardware === false))
+	assert.ok(plan.actions.every(action => action.command.cwd.replaceAll('\\', '/').endsWith('Tools/VirtualBoard')))
+})
+
+test('virtual-board selection validates CMake presets and keeps focused cleanup contained', () => {
+	assert.throws(
+		() => parseArguments(['--virtual-board-only', '--virtual-board-preset', 'fast'], {}),
+		error => error instanceof BuildError && /virtual-board-preset/.test(error.message)
+	)
+	assert.throws(
+		() => parseArguments(['--virtual-board-preset', 'debug'], {}),
+		error => error instanceof BuildError && /requires --virtual-board/.test(error.message)
+	)
+	assert.throws(
+		() => parseArguments(['--host-only', '--virtual-board-only'], {}),
+		error => error instanceof BuildError && /choose either/.test(error.message)
+	)
+	const options = parseArguments(['--virtual-board-only', '--clean'], {})
+	const targets = generatedCleanTargets(options).map(path => path.replaceAll('\\', '/'))
+	assert.deepEqual(targets, [join(PROJECT_ROOT, 'Tools', 'VirtualBoard', '.build').replaceAll('\\', '/')])
 })
 
 test('host plan reproducibly builds the web application before Go embedding', () => {
@@ -632,6 +687,16 @@ test('root wrappers contain no PowerShell policy or invocation', async () => {
 		'utf8'
 	)
 	assert.doesNotMatch(firmwareSource, /powershell|pwsh|build\.ps1|arduino-cli[^\n]*upload/i)
+})
+
+test('root Makefile delegates only to canonical safe build entry points', async () => {
+	const source = await readFile(join(PROJECT_ROOT, 'Makefile'), 'utf8')
+	assert.match(source, /cmd\.exe \/d \/c call build\.cmd/u)
+	assert.match(source, /\.\/build\.sh/u)
+	assert.match(source, /^virtual-board:/mu)
+	assert.match(source, /^virtual-board-relwithdebinfo:/mu)
+	assert.match(source, /--virtual-board-only/u)
+	assert.doesNotMatch(source, /--upload|--install-bootloader|powershell|pwsh/i)
 })
 
 test('all public launchers advertise the shared Node runtime floor', async () => {

@@ -48,12 +48,20 @@ export const PROJECT_ROOT = resolve(dirname(SCRIPT), '..', '..')
 const HOST_ROOT = join(PROJECT_ROOT, 'Tools', 'Controller')
 const WEB_ROOT = join(HOST_ROOT, 'web')
 const WEB_DIST = join(HOST_ROOT, 'internal', 'webui', 'dist')
+const VIRTUAL_BOARD_ROOT = join(PROJECT_ROOT, 'Tools', 'VirtualBoard')
+const VIRTUAL_BOARD_BUILD_ROOT = join(VIRTUAL_BOARD_ROOT, '.build')
+const VIRTUAL_BOARD_PRESETS = Object.freeze(['debug', 'release', 'relwithdebinfo'])
 const WEB_LOCK = join(WEB_ROOT, 'package-lock.json')
 const BUILD_ROOT = join(PROJECT_ROOT, '.build')
 const COMMAND_PATHS = commandPlanPaths(PROJECT_ROOT)
 const FIRMWARE_OUTPUT = COMMAND_PATHS.firmwareOutput
 const PACKAGE_ROOT = join(BUILD_ROOT, 'package')
-const STABLE_GO_TEST_ROOT = join(BUILD_ROOT, 'tests', 'go')
+// Windows Firewall keys application rules by executable path. Keep local test
+// programs at one product-owned, worktree-independent path so branch/worktree
+// changes cannot manufacture a stream of new application identities.
+const STABLE_GO_TEST_ROOT = process.platform === 'win32' && process.env.LOCALAPPDATA
+	? join(process.env.LOCALAPPDATA, 'PCController', 'test-programs', 'go')
+	: join(BUILD_ROOT, 'tests', 'go')
 const STABLE_GO_TEST_RUNNER = join(PROJECT_ROOT, 'Tools', 'Build', 'go-tests.mjs')
 const TOOLCHAIN_POLICY_GENERATOR = join(HOST_ROOT, 'internal', 'programmer', 'generate-toolchain-policy.mjs')
 const PRODUCT_IDENTITY_GENERATOR = join(HOST_ROOT, 'internal', 'productidentity', 'generate.mjs')
@@ -196,6 +204,9 @@ export function parseArguments(argv, env = process.env) {
 	const options = {
 		firmware: true,
 		host: true,
+		virtualBoard: false,
+		virtualBoardPreset: 'release',
+		virtualBoardPresetSet: false,
 		selection: '',
 		clean: false,
 		cleanOnly: false,
@@ -236,13 +247,26 @@ export function parseArguments(argv, env = process.env) {
 		switch (name.toLowerCase()) {
 			case '--help':
 			case '-h': options.help = true; break
-			case '--all': substantive = true; options.selection = 'all'; options.firmware = true; options.host = true; break
+			case '--all':
+				if (options.selection === 'virtual-board') throw new BuildError('choose either --virtual-board-only or --all', 2)
+				substantive = true; options.selection = 'all'; options.firmware = true; options.host = true; break
 			case '--firmware-only':
-				if (options.selection === 'host') throw new BuildError('choose either --firmware-only or --host-only', 2)
+				if (options.selection === 'host' || options.selection === 'virtual-board') throw new BuildError('choose either --firmware-only, --host-only, or --virtual-board-only', 2)
 				substantive = true; options.selection = 'firmware'; options.firmware = true; options.host = false; break
 			case '--host-only':
-				if (options.selection === 'firmware') throw new BuildError('choose either --firmware-only or --host-only', 2)
+				if (options.selection === 'firmware' || options.selection === 'virtual-board') throw new BuildError('choose either --firmware-only, --host-only, or --virtual-board-only', 2)
 				substantive = true; options.selection = 'host'; options.firmware = false; options.host = true; break
+			case '--virtual-board':
+				substantive = true; options.virtualBoard = true; break
+			case '--virtual-board-only':
+				if (options.selection === 'firmware' || options.selection === 'host' || options.selection === 'all') {
+					throw new BuildError('choose either --firmware-only, --host-only, or --virtual-board-only', 2)
+				}
+				substantive = true; options.selection = 'virtual-board'; options.firmware = false; options.host = false; options.virtualBoard = true; break
+			case '--virtual-board-preset': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.virtualBoardPreset = value.toLowerCase(); options.virtualBoardPresetSet = true; index = next; break
+			}
 			case '--clean': options.clean = true; break
 			case '--skip-tests': options.tests = false; options.vet = false; break
 			case '--retest': options.retest = true; break
@@ -307,6 +331,12 @@ export function parseArguments(argv, env = process.env) {
 		}
 	}
 	if (options.help) return options
+	if (!VIRTUAL_BOARD_PRESETS.includes(options.virtualBoardPreset)) {
+		throw new BuildError(`--virtual-board-preset must be one of ${VIRTUAL_BOARD_PRESETS.join(', ')}`, 2)
+	}
+	if (options.virtualBoardPresetSet && !options.virtualBoard) {
+		throw new BuildError('--virtual-board-preset requires --virtual-board or --virtual-board-only', 2)
+	}
 	if (!PROGRAMMING_METHODS.includes(options.method)) {
 		throw new BuildError('--method must be urclock or usbasp; direct dependency upload is intentionally disabled', 2)
 	}
@@ -452,6 +482,23 @@ export function createPlan(options, identity, platform = process.platform) {
 		})
 		actions.push({ id: 'host-publish', stage: 'Publish canonical host package', hardware: false })
 	}
+	if (!options.cleanOnly && options.virtualBoard) {
+		actions.push(commandAction(
+			'virtual-board-configure',
+			`Configure the native virtual board with the ${options.virtualBoardPreset} CMake preset`,
+			'cmake', ['--preset', options.virtualBoardPreset], VIRTUAL_BOARD_ROOT
+		))
+		actions.push(commandAction(
+			'virtual-board-build',
+			'Build the native virtual board through its project-owned CMake preset',
+			'cmake', ['--build', '--preset', options.virtualBoardPreset, '--parallel'], VIRTUAL_BOARD_ROOT
+		))
+		if (options.tests) actions.push(commandAction(
+			'virtual-board-test',
+			'Run virtual-board CTest through its project-owned CMake preset',
+			'ctest', ['--preset', options.virtualBoardPreset], VIRTUAL_BOARD_ROOT
+		))
+	}
 	if (!options.cleanOnly && options.installBootloader) {
 		const command = createControllerProgramCommand({
 			invocation: canonicalControllerInvocation(PROJECT_ROOT, platform),
@@ -509,6 +556,9 @@ Safe build options:
   --all                     Build/package host and compile firmware (default)
   --firmware-only           Compile firmware through current Controller source
   --host-only               Test, vet, resource-stamp, package, UPX-test host
+  --virtual-board           Add native virtual-board configure/build/test
+  --virtual-board-only      Build/test only the native virtual board
+  --virtual-board-preset P  CMake preset: debug, release (default), relwithdebinfo
   --clean                   Remove generated output; alone, then stop
   --skip-tests              Explicitly skip Go tests and vet
   --retest                  Re-run unchanged stable Go test binaries
@@ -963,8 +1013,12 @@ export function removeGeneratedWinResources(controllerSource = join(HOST_ROOT, '
 }
 
 export function generatedCleanTargets(options) {
-	if (options.firmware && !options.host && !options.cleanOnly) return [FIRMWARE_OUTPUT]
-	return [BUILD_ROOT, CANONICAL_HOST_OUTPUT, ...STALE_HOST_OUTPUTS, DEFAULT_FIRMWARE, DEFAULT_EEPROM, DEFAULT_METADATA]
+	let targets
+	if (options.firmware && !options.host && !options.cleanOnly) targets = [FIRMWARE_OUTPUT]
+	else if (!options.firmware && !options.host && options.virtualBoard) targets = []
+	else targets = [BUILD_ROOT, CANONICAL_HOST_OUTPUT, ...STALE_HOST_OUTPUTS, DEFAULT_FIRMWARE, DEFAULT_EEPROM, DEFAULT_METADATA]
+	if (options.virtualBoard) targets.push(VIRTUAL_BOARD_BUILD_ROOT)
+	return targets
 }
 
 function cleanGenerated(log, options) {
@@ -1954,6 +2008,20 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 	return manifest
 }
 
+function buildVirtualBoard(options, env, log) {
+	const cmake = requireTool('cmake', env)
+	const ctest = requireTool('ctest', env)
+	const preset = options.virtualBoardPreset
+	log.stage('🧪', `Configuring native virtual board (${preset})`)
+	run(cmake, ['--preset', preset], { cwd: VIRTUAL_BOARD_ROOT, env, verbose: options.verbose })
+	log.stage('🔨', 'Building native virtual board through CMake')
+	run(cmake, ['--build', '--preset', preset, '--parallel'], { cwd: VIRTUAL_BOARD_ROOT, env, verbose: options.verbose })
+	if (options.tests) {
+		log.stage('🧪', 'Running virtual-board CTest')
+		run(ctest, ['--preset', preset], { cwd: VIRTUAL_BOARD_ROOT, env, verbose: options.verbose })
+	} else log.warning('Virtual-board CTest was explicitly skipped.')
+}
+
 function syncToolchain(options, env, controllerPath, log) {
 	log.stage('🌐', 'Synchronizing firmware indexes, cores, and libraries through Controller')
 	const args = ['toolchain', 'sync']
@@ -2048,6 +2116,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
 		if (!embeddedDefaults.enabled) log.warning(`Embedded board defaults disabled: ${embeddedDefaults.reason}`)
 		controllerPath = buildHost(options, identity, refreshed, log, embeddedDefaults)
 	}
+	if (options.virtualBoard) buildVirtualBoard(options, refreshed, log)
 	if (options.installBootloader || options.upload) executeProgramming(options, refreshed, controllerPath, manifest, log)
 	log.success(`All selected operations completed in ${((Date.now() - started) / 1000).toFixed(1)}s.`)
 	return 0

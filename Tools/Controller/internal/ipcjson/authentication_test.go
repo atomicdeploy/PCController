@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,7 @@ import (
 )
 
 const testAccessToken = "browser-session-ticket-test-token"
+const testServerProofToken = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
 
 func testAuthenticatedService(t *testing.T) (*Service, *controllerapi.Client) {
 	t.Helper()
@@ -120,6 +122,51 @@ func TestBrowserSessionTicketAuthenticatesCleanURLOnce(t *testing.T) {
 	}
 	if replayErr == nil || replayResponse == nil || replayResponse.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("replayed ticket err=%v response=%v", replayErr, replayResponse)
+	}
+}
+
+func TestServerProofAuthenticatesExactListenerBeforeBearerUse(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	config := service.HostConfig()
+	config.IPC.AuthToken = testServerProofToken
+	service.HostConfig = func() appconfig.Config { return config }
+	service.HostInstanceID = "edge-instance"
+	server := httptest.NewServer(websocketMux(context.Background(), service))
+	defer server.Close()
+
+	nonce := strings.Repeat("A", 43)
+	request, err := http.NewRequest(http.MethodGet, server.URL+ServerProofPath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("X-PCController-Nonce", nonce)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	var proof ServerProof
+	if err := json.NewDecoder(response.Body).Decode(&proof); err != nil {
+		t.Fatal(err)
+	}
+	listenerAddress := strings.TrimPrefix(server.URL, "http://")
+	if response.StatusCode != http.StatusOK || proof.Nonce != nonce || proof.Audience != listenerAddress ||
+		proof.InstanceID != "edge-instance" || !VerifyServerProof(testServerProofToken, proof) || VerifyServerProof("wrong-token", proof) {
+		t.Fatalf("server proof status=%d value=%#v", response.StatusCode, proof)
+	}
+}
+
+func TestServerProofRejectsLowEntropyCompatibilityToken(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	request := httptest.NewRequest(http.MethodGet, "http://controller.test"+ServerProofPath, nil)
+	request.Header.Set("X-PCController-Nonce", strings.Repeat("A", 43))
+	request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, &net.TCPAddr{IP: net.ParseIP("192.0.2.5"), Port: 8787}))
+	response := httptest.NewRecorder()
+	serveServerProof(response, request, service)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "random base64url") {
+		t.Fatalf("weak-token proof status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

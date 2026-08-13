@@ -50,12 +50,59 @@ build.cmd --dry-run
 build.cmd --plan-json
 build.cmd --host-only
 build.cmd --firmware-only
+build.cmd --virtual-board-only
+build.cmd --virtual-board-only --virtual-board-preset debug
 build.cmd --toolchain-sync
 build.cmd --firmware-only --toolchain-cli C:\path\to\arduino-cli.exe --toolchain-config C:\path\to\firmware-cli.yaml
 build.cmd --clean
 ```
 
 On Bash, use the identical options with `./build.sh`.
+
+On Windows, `build.cmd --host-only` delegates Go tests to
+`Tools/Build/go-tests.mjs`. Do not run `go test` directly: temporary Go test
+paths can appear as a new application to Windows Firewall on every run. The
+project runner uses deterministic `pccontroller-tests-*.exe` names beneath
+`%LOCALAPPDATA%\PCController\test-programs\go` across every worktree, caches a
+source/toolchain/environment identity pass, serializes concurrent worktrees
+with a machine-wide lock, and keeps live LAN acceptance
+on the stable packaged `controller.exe` identity. Windows Go tests never opt
+into wildcard LAN broadcast unless `PCCONTROLLER_TEST_LAN=1` is explicitly set;
+normal builds leave that acceptance test to the packaged host.
+
+## Virtual board and Make convenience targets
+
+The virtual board remains a separate native target: its build directory, CMake
+presets, and test inventory belong to `Tools/VirtualBoard`. The root build
+utility only delegates to those existing presets; it does not duplicate CMake
+policy, start the simulator, open TCP or UART, or touch physical hardware.
+
+```console
+build.cmd --virtual-board-only
+build.cmd --virtual-board-only --virtual-board-preset relwithdebinfo
+build.cmd --virtual-board --host-only
+```
+
+`--virtual-board` adds the native target to a host/firmware selection;
+`--virtual-board-only` selects just it. `--skip-tests` skips its `ctest`
+stage as well as the selected host test stages. All three CMake presets are
+accepted: `debug`, `release` (the default), and `relwithdebinfo`.
+
+For developers who already use GNU Make, the root `Makefile` is a deliberately
+thin façade over the same launchers:
+
+```console
+make virtual-board
+make virtual-board-debug
+make firmware ARGS=--dry-run
+mingw32-make host ARGS=--no-upx
+```
+
+On Windows, either `make` or `mingw32-make` may be used when available; the
+facade invokes `build.cmd` through `cmd.exe` and never shells through
+PowerShell. On Bash-like environments it invokes `./build.sh`. `make` is not
+required: the canonical `build.cmd` and `build.sh` entry points remain fully
+supported.
 
 Generated outputs have one canonical location per product:
 
@@ -205,8 +252,18 @@ launcher pairs emit byte-equivalent JSON plans, compile/program through
 Controller, preserve the explicit USBasp method-selection boundary, and never
 introduce a PowerShell or direct dependency-upload action.
 
-Go tests are compiled to stable names under `.build/tests/go/` and then run
-from those project-owned paths. A content/toolchain identity reuses an existing
+On Windows, Go tests are compiled to stable names beneath
+`%LOCALAPPDATA%\PCController\test-programs\go`; other platforms use
+`.build/tests/go/`. A content/toolchain/environment identity reuses an existing
 passing result; `--retest` runs the same binaries again without inventing new
-temporary executable names. This keeps IPC/network test identities stable and
-avoids repeated Windows Firewall prompts.
+temporary executable names. The cache identity includes embedded WebUI and
+default-recovery assets, and the shared lock prevents concurrent worktrees from
+overwriting one another's binary/cache pair.
+
+For a machine-level Windows backstop, this workstation sets Go's `GOTMPDIR` to
+`%LOCALAPPDATA%\PCController\go-noexec-temp` and grants the interactive user an
+object-inherit-only deny-execute ACL there. That makes a mistakenly invoked
+temporary `*.test.exe` non-executable while leaving the supported stable output
+directory executable. To intentionally remove the workstation guard, remove
+that explicit deny ACL with `icacls` and run `go env -u GOTMPDIR`; do not do so
+for normal project work.

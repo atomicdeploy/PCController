@@ -195,6 +195,26 @@ func TestMacroValidation(t *testing.T) {
 	}
 }
 
+func TestIPCRemoteConnectableRequiresRemoteNonLoopbackListener(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ipc  IPC
+		want bool
+	}{
+		{"disabled wildcard", IPC{Listen: "0.0.0.0:8787"}, false},
+		{"enabled loopback", IPC{Listen: "127.0.0.1:8787", AllowRemote: true}, false},
+		{"enabled localhost", IPC{Listen: "localhost:8787", AllowRemote: true}, false},
+		{"enabled wildcard", IPC{Listen: "0.0.0.0:8787", AllowRemote: true}, true},
+		{"enabled LAN address", IPC{Listen: "192.0.2.8:8787", AllowRemote: true}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := test.ipc.RemoteConnectable(); got != test.want {
+				t.Fatalf("RemoteConnectable()=%t want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func TestUIAppTitleCountsUnicodeCharacters(t *testing.T) {
 	value := Defaults()
 	value.UI.AppTitle = "مرکز کنترل رایانه"
@@ -440,6 +460,21 @@ func TestDefaultsUseBuildPresentationVariables(t *testing.T) {
 	defaults := Defaults()
 	if defaults.UI.AppTitle != "Build Controller" || defaults.UI.Tagline != "Build-time first-run line" {
 		t.Fatalf("build presentation defaults=%#v", defaults.UI)
+	}
+}
+
+func TestDiscoveryAdvertisementDefaultsOnWithoutRemoteControl(t *testing.T) {
+	value := Defaults()
+	discovery := value.Integrations.Discovery
+	if !discovery.MDNSEnabled || !discovery.DNSSDenabled || !discovery.SSDPEnabled || !discovery.UPnPEnabled ||
+		!discovery.WSDiscoveryEnabled || !discovery.BroadcastEnabled || !discovery.NetBIOSEnabled || discovery.BroadcastPort != 37889 {
+		t.Fatalf("discovery defaults=%#v", discovery)
+	}
+	if value.IPC.AllowRemote {
+		t.Fatal("public advertisement must not enable authenticated remote control")
+	}
+	if err := value.Validate(); err != nil {
+		t.Fatalf("safe discovery defaults: %v", err)
 	}
 }
 

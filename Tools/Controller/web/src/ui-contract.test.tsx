@@ -5,6 +5,8 @@ import { BootGate, Card, HoldActionButton, HotkeyHelp, RangeField, TextField } f
 import type { Appearance } from './types'
 import { emptySnapshot } from './types'
 import { artifactUpdateAvailable, UpdatesView } from './updates-view'
+import { translator } from './i18n'
+import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
 import { WorkbenchView } from './workbench'
 import {
   ControlsView,
@@ -37,7 +39,7 @@ function shared(): SharedViewProps {
     command: vi.fn(async () => ''),
     refresh: vi.fn(async () => undefined),
     openDialog: vi.fn(),
-    transport: { streamState: 'open', tabBusSupported: true, tabPeers: 0 },
+    transport: { streamState: 'open', authenticationRequired: false, tabBusSupported: true, tabPeers: 0 },
     relayedTerminal: [],
     broadcastTerminal: vi.fn(),
     boardSettingsReadState: 'idle',
@@ -45,6 +47,28 @@ function shared(): SharedViewProps {
 }
 
 describe('offline and settings UI contracts', () => {
+  it('distinguishes missing or rejected credentials from ordinary authenticated transport loss', () => {
+    const base = {
+      hostRequiresAuthentication: true,
+      streamState: 'waiting' as const,
+      token: 'valid-looking-token',
+    }
+    expect(sessionAuthenticationGuidanceRequired({ ...base, hostRequiresAuthentication: false })).toBe(false)
+    expect(sessionAuthenticationGuidanceRequired({
+      ...base,
+      hostRequiresAuthentication: false,
+      streamDetail: 'HTTP 401: authentication required',
+    })).toBe(true)
+    expect(sessionAuthenticationGuidanceRequired({ ...base, streamState: 'open' })).toBe(false)
+    expect(sessionAuthenticationGuidanceRequired({ ...base, token: '' })).toBe(true)
+    expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'HTTP 401: authentication required' })).toBe(true)
+    expect(sessionAuthenticationGuidanceRequired({
+      ...base,
+      streamDetail: 'HTTP 403: remote read capability is disabled',
+    })).toBe(false)
+    expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'network timeout' })).toBe(false)
+  })
+
   it('keeps neutral field guidance contextual while validation feedback stays visible', () => {
     const neutral = renderToStaticMarkup(<TextField label="Address" hint="Use a private service root" />)
     const invalid = renderToStaticMarkup(<TextField label="Address" hint="Use a private service root" error="Address is invalid" />)
@@ -100,6 +124,44 @@ describe('offline and settings UI contracts', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} />)
     expect(markup).not.toContain('Telemetry history')
     expect(markup).not.toMatch(/\bLive\b/)
+  })
+
+  it('routes an unauthenticated dashboard directly to secure session settings', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      transport={{ ...shared().transport, streamState: 'waiting', authenticationRequired: true }}
+    />)
+    expect(markup).toContain('href="#/settings"')
+    expect(markup).toContain('Authentication required — open Settings to connect securely.')
+    expect(markup).toContain('Apply the edge session access token')
+    expect(markup).not.toContain('The dashboard is ready')
+  })
+
+  it('does not mislabel an authenticated host with an offline board as an authentication failure', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      snapshot={{ ...emptySnapshot, connection_reason: 'Serial controller is offline' }}
+    />)
+    expect(markup).toContain('href="#/dashboard"')
+    expect(markup).toContain('Controller offline — the host is waiting for the board.')
+    expect(markup).toContain('Serial controller is offline')
+    expect(markup).not.toContain('Authentication required')
+    expect(markup).not.toContain('The dashboard is ready')
+  })
+
+  it('distinguishes a lost host stream from an offline board', () => {
+    const markup = renderToStaticMarkup(<DashboardView
+      {...shared()}
+      t={translator('en')}
+      transport={{ ...shared().transport, streamState: 'waiting' }}
+      snapshot={{ ...emptySnapshot, connection_reason: 'WebSocket connection closed' }}
+    />)
+    expect(markup).toContain('Host connection unavailable — check the connection details below.')
+    expect(markup).toContain('WebSocket connection closed')
+    expect(markup).not.toContain('Controller offline')
+    expect(markup).not.toContain('Authentication required')
   })
 
   it('hides unavailable peripherals and their invalid readings', () => {

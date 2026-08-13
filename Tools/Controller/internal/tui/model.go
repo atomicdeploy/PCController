@@ -17,6 +17,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
@@ -129,6 +130,11 @@ type Model struct {
 	frontOverlayUntil        time.Time
 	frontOverlayNeedsRestore bool
 	integrations             func() hostui.IntegrationStatus
+	networkDiscovery         func(context.Context) ([]discovery.Instance, error)
+	openNetwork              func(string) error
+	networkDevices           []discovery.Instance
+	networkDiscoveryPending  bool
+	networkDiscoveryError    string
 	notifier                 hostui.Notifier
 	appActions               <-chan hostui.AppAction
 	instanceID               string
@@ -237,6 +243,14 @@ type hostPanelResultMsg struct {
 	revision uint64
 	released bool
 	err      error
+}
+type networkDiscoveryResultMsg struct {
+	instances []discovery.Instance
+	err       error
+}
+type networkConnectResultMsg struct {
+	name string
+	err  error
 }
 
 func New(
@@ -399,6 +413,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		frontPanel: options.FrontPanel, frontPanelKey: options.FrontPanelKey,
 		mirrorLCD: options.MirrorLCD, lcdMirror: uiValue.MirrorPromptToLCD,
 		integrations: options.Integrations, notifier: options.Notifier,
+		networkDiscovery: options.NetworkDiscovery, openNetwork: options.OpenNetwork,
 		appActions: options.AppActions, instanceID: options.InstanceID,
 		reportPage: options.ReportPage, reportTerminal: options.ReportTerminal,
 		writeOSC:  options.WriteOSC,
@@ -913,6 +928,31 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			model.hostPanelCaptured = true
 			model.hostPanelRevision = message.revision
 			model.hostPanelLastPush = time.Now()
+		}
+
+	case networkDiscoveryResultMsg:
+		model.networkDiscoveryPending = false
+		if message.err != nil {
+			model.networkDiscoveryError = message.err.Error()
+			model.appendLog("warn", "network discovery: "+message.err.Error())
+		} else {
+			model.networkDiscoveryError = ""
+			model.networkDevices = append([]discovery.Instance(nil), message.instances...)
+			for index, row := range model.appSettingRows() {
+				if strings.HasPrefix(row.Key, "network.device.") {
+					model.cursor = index
+					break
+				}
+			}
+			model.setNotice(fmt.Sprintf("Discovered %d merged PCController host(s)", len(message.instances)))
+		}
+
+	case networkConnectResultMsg:
+		if message.err != nil {
+			model.appendLog("error", "open network host: "+message.err.Error())
+			model.setNotice("Network host was not opened: " + message.err.Error())
+		} else {
+			model.setNotice("Opened network host " + message.name)
 		}
 
 	case spinner.TickMsg:
