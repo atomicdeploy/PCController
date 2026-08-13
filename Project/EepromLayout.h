@@ -27,10 +27,21 @@ constexpr uint8_t StatusProfileRecordBytes = StatusProfilePayloadBytes + 1;
 constexpr int StatusProfileEnd =
     StatusProfileAddress + StatusProfileCount * StatusProfileRecordBytes;
 
+// Optional host-provisioned, packed 4-character front-panel labels occupy the
+// final unused EEPROM bytes. The boot opcode script deliberately owns 0..31,
+// so the two independently gated features never overlap.
+constexpr int MenuLabelsAddress = StatusProfileEnd;
+constexpr uint8_t MenuLabelCount = 14;
+constexpr uint8_t MenuLabelBytes = MenuLabelCount * 4;
+constexpr int MenuLabelsChecksumAddress = MenuLabelsAddress + MenuLabelBytes;
+constexpr int MenuLabelsEnd = MenuLabelsChecksumAddress + 1;
+
 static_assert(RemoteEnd <= ResetJournalAddress,
               "RF records overlap reset journal");
 static_assert(ResetJournalEnd <= E2END + 1,
               "EEPROM layout exceeds ATmega328P EEPROM");
 static_assert(StatusProfileEnd <= E2END + 1,
               "status profiles exceed ATmega328P EEPROM");
+static_assert(MenuLabelsEnd <= E2END + 1,
+              "menu labels exceed ATmega328P EEPROM");
 } // namespace EepromLayout
