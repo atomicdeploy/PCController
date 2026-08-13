@@ -101,12 +101,15 @@ func (model Model) automationsPage() string {
 		lines[len(lines)-macroLibraryVisibleRows] = warnStyle.Render("  No macros match. Press / to change the search or N to create a draft.")
 	}
 
-	lines = append(lines, "", titleStyle.Render("HOST PLATFORM & BRIDGES"))
-	if model.width < 100 {
-		lines = append(lines, labelStyle.Render("Widen the terminal to inspect hotkeys, toasts, discovery, webhooks, messaging, and Socket.IO."))
-	} else {
-		for _, line := range model.integrationStatusLines() {
-			lines = append(lines, ansi.Truncate(line, model.width, "…"))
+	integrationLines := model.integrationStatusLines()
+	if len(integrationLines) != 0 {
+		lines = append(lines, "", titleStyle.Render("HOST PLATFORM & BRIDGES"))
+		if model.width < 100 {
+			lines = append(lines, labelStyle.Render("Widen the terminal to inspect the advertised host integrations."))
+		} else {
+			for _, line := range integrationLines {
+				lines = append(lines, ansi.Truncate(line, model.width, "…"))
+			}
 		}
 	}
 	return strings.Join(lines, "\n")
@@ -121,6 +124,9 @@ func (model Model) macroLibrary() []appconfig.Macro {
 		sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 		return result
 	}
+	if model.remote != nil {
+		return nil
+	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.List()
 	}
@@ -131,6 +137,9 @@ func (model Model) macroState() control.MacroState {
 	if model.preview != nil {
 		return model.previewMacroState
 	}
+	if model.remote != nil {
+		return control.MacroState{}
+	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.State()
 	}
@@ -140,6 +149,9 @@ func (model Model) macroState() control.MacroState {
 func (model Model) macroRecordingState() control.MacroRecordingState {
 	if model.preview != nil {
 		return model.previewMacroRecording
+	}
+	if model.remote != nil {
+		return control.MacroRecordingState{}
 	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.RecordingState()

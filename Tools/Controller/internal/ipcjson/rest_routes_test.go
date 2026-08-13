@@ -12,6 +12,7 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/releaseplane"
 	"pccontroller.local/controller/internal/shell"
 	"pccontroller.local/controller/internal/webui"
@@ -21,6 +22,43 @@ type inventoryRoundTripper func(*http.Request) (*http.Response, error)
 
 func (roundTrip inventoryRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
 	return roundTrip(request)
+}
+
+func TestRESTAppActionCannotInjectCoordinatorNavigationMetadata(t *testing.T) {
+	runtime := control.New(control.Options{})
+	broker := hostui.NewActionBroker()
+	actions := broker.Events()
+	handler := websocketMux(context.Background(), &Service{
+		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		AppAction: broker.Publish,
+	})
+	spoof := httptest.NewRequest(http.MethodPost, "/api/app/action", strings.NewReader(
+		`{"kind":"app.page","value":"settings","target":"tui:one","metadata":{"navigation_sync":"group","navigation_group":"default","navigation_epoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","navigation_revision":"99","navigation_source":"tui:attacker"}}`,
+	))
+	spoof.RemoteAddr = "127.0.0.1:43210"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, spoof)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "coordinator-owned") {
+		t.Fatalf("spoof status=%d body=%s", response.Code, response.Body.String())
+	}
+	select {
+	case action := <-actions:
+		t.Fatalf("spoof reached broker: %#v", action)
+	default:
+	}
+
+	explicit := httptest.NewRequest(http.MethodPost, "/api/app/navigate", strings.NewReader(
+		`{"page":"settings","target":"tui:one"}`,
+	))
+	explicit.RemoteAddr = "127.0.0.1:43210"
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, explicit)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("explicit status=%d body=%s", response.Code, response.Body.String())
+	}
+	if action := <-actions; action.Target != "tui:one" || hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
+		t.Fatalf("explicit action=%#v", action)
+	}
 }
 
 // TestCanonicalRESTRouteInventory exercises every implemented REST group through
