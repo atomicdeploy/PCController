@@ -77,10 +77,14 @@ func upnpDeviceDescription(service *Service, request *http.Request) string {
 		name = productidentity.DefaultAppTitle()
 	}
 	base := "http://" + request.Host
+	udn := strings.TrimSpace(service.HostInstanceID)
+	if udn == "" {
+		udn = "pccontroller-" + strings.NewReplacer(":", "-", ".", "-", "[", "", "]", "").Replace(request.Host)
+	}
 	return `<?xml version="1.0" encoding="utf-8"?>` +
 		`<root xmlns="urn:schemas-upnp-org:device-1-0"><specVersion><major>1</major><minor>1</minor></specVersion>` +
 		`<device><deviceType>urn:schemas-upnp-org:device:Basic:1</deviceType><friendlyName>` + xmlEscape(name) + `</friendlyName>` +
-		`<manufacturer>AtomicDeploy</manufacturer><modelName>PCController</modelName><UDN>uuid:` + xmlEscape(service.HostInstanceID) + `</UDN>` +
+		`<manufacturer>AtomicDeploy</manufacturer><modelName>PCController</modelName><UDN>uuid:` + xmlEscape(udn) + `</UDN>` +
 		`<serviceList><service><serviceType>` + upnpServiceType + `</serviceType><serviceId>urn:upnp-org:serviceId:Controller</serviceId>` +
 		`<controlURL>` + base + `/upnp/control</controlURL><eventSubURL>` + base + `/upnp/events</eventSubURL><SCPDURL>` + base + `/upnp/scpd.xml</SCPDURL></service></serviceList>` +
 		`</device></root>`

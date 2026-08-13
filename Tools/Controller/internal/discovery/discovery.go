@@ -476,7 +476,7 @@ func ssdpNotifyWithText(name string, port int, nts string, txt []string) string 
 		"NOTIFY * HTTP/1.1",
 		"HOST: " + ssdpAddress,
 		"CACHE-CONTROL: max-age=60",
-		"LOCATION: http://" + net.JoinHostPort(hostname, strconv.Itoa(port)) + "/healthz",
+		"LOCATION: http://" + net.JoinHostPort(hostname, strconv.Itoa(port)) + "/upnp/device.xml",
 		"NT: " + SSDPType,
 		"NTS: " + nts,
 		"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
