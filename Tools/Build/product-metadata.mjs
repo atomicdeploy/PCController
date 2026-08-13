@@ -4,6 +4,9 @@
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from './env.mjs'
+
+loadProjectEnv()
 
 const here = dirname(fileURLToPath(import.meta.url))
 export const PRODUCT_METADATA_PATH = resolve(here, '..', 'Controller', 'web', 'package.json')
@@ -74,7 +77,9 @@ function environmentValue(environment, wanted) {
 
 // Resolve the process-visible title while keeping stable technical IDs unchanged.
 export function resolveProductTitle(environment = process.env, metadata = PRODUCT_METADATA) {
-	const value = environmentValue(environment, 'APP_TITLE')
+	const value = environmentValue(environment, 'PCCONTROLLER_BUILD_APP_NAME') ||
+		environmentValue(environment, 'APP_NAME') ||
+		environmentValue(environment, 'APP_TITLE')
 	if (value) return value
 	const configured = String(metadata.productName || metadata.displayName || '').trim()
 	if (configured) return configured

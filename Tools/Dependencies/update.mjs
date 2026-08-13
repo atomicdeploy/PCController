@@ -18,9 +18,12 @@ import { arch, platform } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { loadProjectEnv } from '../Build/env.mjs'
 import { createChalk, renderUnicodeTable } from '../Build/presentation.mjs'
 import { PRODUCT_METADATA, resolveProductTitle } from '../Build/product-metadata.mjs'
 import { configuredProxyNames, withDirectFallback } from './network.mjs'
+
+loadProjectEnv()
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repo = resolve(here, '..', '..')

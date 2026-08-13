@@ -5,6 +5,9 @@ import { spawnSync } from 'node:child_process'
 import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 const here = dirname(fileURLToPath(import.meta.url))
 const repository = resolve(here, '..', '..')
