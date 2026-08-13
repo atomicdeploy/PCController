@@ -105,6 +105,40 @@ There are therefore 108 logically unallocated EEPROM bytes. Reducing RF or
 reset-journal capacity would free EEPROM only; it would not materially solve
 the application-flash ceiling.
 
+### Draft EEPROM boot-opcode profile
+
+The default delivery profile keeps the hard-coded startup melody and leaves
+`0..31` unallocated. The experimental, disabled-by-default
+`eeprom-boot-opcodes` profile reserves that 32-byte slot for a CRC-validated,
+commit-last record:
+
+```text
+0..4    magic, schema, used-byte count, CRC-8
+5..30   compact presentation-only opcode groups
+31      commit marker, written last
+```
+
+It runs only after normal watchdog, safe-output, settings, display, sensor,
+and radio initialization, and it is skipped in Programming Mode. A valid
+record may issue only Buzzer, Status RGB, or Status Effect frames through the
+ordinary opcode dispatcher. Blank, torn, corrupt, malformed, or unsafe data
+is a quiet no-op; boot reads never write EEPROM. The factory image stores the
+existing six-step welcome melody in the 26-byte data area.
+
+This is a configurability experiment, **not** a current flash-saving profile.
+On the fixed-identity `0x5EED0001` source build, the base image measured
+32,364/32,384 application bytes and 1,470 static SRAM bytes. The enabled
+measurement-only image measured 32,746 application bytes (+382) and 1,471
+static SRAM bytes (+1), which is 362 bytes above the delivery ceiling. The
+normal enabled build therefore fails its identity/link gate as intended and
+must not be flashed. A future feature profile needs a measured ≥382-byte
+flash recovery before this source can become release-ready.
+
+The host tool accepts only named feature selections, for example
+`--firmware-feature eeprom-boot-opcodes`; the selection is included in the
+source identity, cache path, build hash, and firmware manifest. Arbitrary raw
+compiler flags are intentionally rejected.
+
 ## Current measured symbol envelope
 
 AVR LTO folds and inlines page branches, so symbol size is not the same as
@@ -199,7 +233,7 @@ EEPROM layout did not change.
 | EEPROM-configurable buzzer cues | Door and relay cue families have EEPROM enable bits, but their tones are fixed: door open/closed are 1,700/1,100 Hz for 45 ms; relay on/off are 1,900/1,250 Hz for 35 ms. | Persistent selectable cue IDs or note/frequency/duration definitions for door-open, door-close, relay-on, and relay-off, plus settings/protocol/menu fields. | Two retained A/B measurements bound the choice: the compact five-byte choice-table candidate used 33,032 program, 1,442 static-SRAM, and 5 EEPROM bytes; the full four-descriptor candidate used 33,238 program, 1,455 static-SRAM, and 13 EEPROM bytes. Against the current 32,244-byte fixed-identity boundary, they exceed it by 788 and 994 bytes respectively. Neither candidate is shippable in the shared image layout. |
 | Board EEPROM automation | Twenty learned RF records can directly map one code to Key/Menu/Relay/Side/PWM behavior. Host automations can react to all events. | There is no generic EEPROM event-to-action rule table for door, BT Audio, relay, host loss, temperature, or other events; no board rule can invoke RF transmit or a macro on those events. Host-loss handling is fixed, not programmable. | 700-1,400 flash, 16-24 SRAM, and about 108 EEPROM bytes for eight compact rules plus an atomic header and CRC that reuse ordinary opcode validation. |
 
-The current 117-byte unallocated EEPROM area can hold compact cue and
+The current 108-byte unallocated EEPROM area can hold compact cue and
 automation records. Flash, not EEPROM, is the limiting resource.
 
 ## Menu migration candidates and exact losses
