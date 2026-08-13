@@ -267,9 +267,9 @@ func publicInfoFromTXT(values []string) PublicInfo {
 			UpdatedAt: parseTime(items["board.status_at"]), UptimeMS: parseUint32(items["board.uptime_ms"], 10),
 			SupplyMV: parseInt32(items["board.supply_mv"]), BusMV: parseInt32(items["board.bus_mv"]), CurrentMA: parseInt32(items["board.current_ma"]), PowerMW: parseInt32(items["board.power_mw"]),
 			TemperatureLEDCentiC: parseInt16(items["board.temperature_led_centi_c"]), TemperatureBTAudioCentiC: parseInt16(items["board.temperature_bt_audio_centi_c"]),
-			DoorOpen: parseBool(items["board.door_open"]), BluetoothAudioState: byte(parseUint32(items["board.bluetooth_audio_state"], 10)), ActiveRelays: byte(parseUint32(items["board.active_relays"], 10)), ActiveKeys: byte(parseUint32(items["board.active_keys"], 10)),
-			MenuPage: byte(parseUint32(items["board.menu_page"], 10)), ProgramMode: byte(parseUint32(items["board.program_mode"], 10)), ProgramRunning: parseBool(items["board.program_running"]), HostOffline: parseBool(items["board.host_offline"]), Hot: parseBool(items["board.hot"]),
-			PWMAvailable: parseBool(items["board.pwm_available"]), PWMChannel: byte(parseUint32(items["board.pwm_channel"], 10)), PWMValue: uint16(parseUint32(items["board.pwm_value"], 10)), LCDAddress: byte(parseUint32(items["board.lcd_address"], 10)), ResetCount: parseUint32(items["board.reset_count"], 10),
+			DoorOpen: parseBool(items["board.door_open"]), BluetoothAudioState: parseUint8(items["board.bluetooth_audio_state"], 10), ActiveRelays: parseUint8(items["board.active_relays"], 10), ActiveKeys: parseUint8(items["board.active_keys"], 10),
+			MenuPage: parseUint8(items["board.menu_page"], 10), ProgramMode: parseUint8(items["board.program_mode"], 10), ProgramRunning: parseBool(items["board.program_running"]), HostOffline: parseBool(items["board.host_offline"]), Hot: parseBool(items["board.hot"]),
+			PWMAvailable: parseBool(items["board.pwm_available"]), PWMChannel: parseUint8(items["board.pwm_channel"], 10), PWMValue: parseUint16(items["board.pwm_value"], 10), LCDAddress: parseUint8(items["board.lcd_address"], 10), ResetCount: parseUint32(items["board.reset_count"], 10),
 		}},
 		Endpoints: PublicEndpoints{Web: items["web"], API: items["api"], Operations: items["operations"], Commands: items["commands"], Events: items["events"], Opcodes: items["opcodes"], WebSocket: items["ws"], SocketIO: items["socketio"], PublicInfo: items["public"]},
 	}
@@ -307,6 +307,22 @@ func absolutizePublicInfo(info *PublicInfo, instance Instance) {
 func parseUint32(value string, base int) uint32 {
 	parsed, _ := strconv.ParseUint(strings.TrimSpace(value), base, 32)
 	return uint32(parsed)
+}
+
+func parseUint16(value string, base int) uint16 {
+	parsed, err := strconv.ParseUint(strings.TrimSpace(value), base, 16)
+	if err != nil || parsed > 1<<16-1 {
+		return 0
+	}
+	return uint16(parsed)
+}
+
+func parseUint8(value string, base int) uint8 {
+	parsed, err := strconv.ParseUint(strings.TrimSpace(value), base, 8)
+	if err != nil || parsed > 1<<8-1 {
+		return 0
+	}
+	return uint8(parsed)
 }
 
 func parseInt32(value string) int32 {

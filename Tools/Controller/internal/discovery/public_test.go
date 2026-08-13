@@ -64,6 +64,28 @@ func TestPublicInfoFromTXTPreservesFallbackIdentityTelemetryAndEndpoints(t *test
 	}
 }
 
+func TestNarrowUnsignedTXTValuesRejectOverflowInsteadOfWrapping(t *testing.T) {
+	info := publicInfoFromTXT([]string{
+		"product=PCController", "host.hostname=workshop",
+		"board.bluetooth_audio_state=256", "board.active_relays=257", "board.active_keys=-1",
+		"board.menu_page=999", "board.program_mode=invalid", "board.pwm_channel=256",
+		"board.pwm_value=65536", "board.lcd_address=256",
+	})
+	telemetry := info.Board.Telemetry
+	if telemetry.BluetoothAudioState != 0 || telemetry.ActiveRelays != 0 || telemetry.ActiveKeys != 0 ||
+		telemetry.MenuPage != 0 || telemetry.ProgramMode != 0 || telemetry.PWMChannel != 0 ||
+		telemetry.PWMValue != 0 || telemetry.LCDAddress != 0 {
+		t.Fatalf("out-of-range TXT values wrapped: %#v", telemetry)
+	}
+
+	if got := parseUint8("255", 10); got != 255 {
+		t.Fatalf("uint8 boundary=%d", got)
+	}
+	if got := parseUint16("65535", 10); got != 65535 {
+		t.Fatalf("uint16 boundary=%d", got)
+	}
+}
+
 func TestTrustedDiscoveryURLCannotRedirectEnrichmentAwayFromResponder(t *testing.T) {
 	instance := Instance{Host: "192.0.2.5", Addresses: []string{"192.0.2.5"}, Port: 8787}
 	for _, candidate := range []string{
