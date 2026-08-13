@@ -222,7 +222,7 @@ struct ControllerSettings {
         (MenuSettingsFlags::encodeDecimals(value)
          << MenuSettingsFlags::CurrentDecimalsShift));
   }
-#if PCCONTROLLER_MENU_LAYOUT_STORAGE
+#if PCCONTROLLER_MENU_VISIBILITY
   bool menuPageVisible(uint8_t page) const {
     return page < PersistentMenuPageCount && !retiredMenuPageAlias(page) &&
            (visibleMenuMask & static_cast<uint16_t>(1U << page)) != 0;

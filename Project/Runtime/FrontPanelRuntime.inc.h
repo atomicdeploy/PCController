@@ -156,25 +156,6 @@ void moveMenuCategory(bool forward, uint32_t at) {
 #endif
 #endif
 
-#if !PCCONTROLLER_MENU_VISIBILITY
-// The production-size menu has no persisted presentation layout.  Keep the
-// wire-compatible MOVE selector out of its cyclic order as well: it aliases
-// KEY and must never make KEY appear twice or push RF behind an extra stop.
-uint8_t adjacentBuiltInMenuPage(uint8_t page, bool forward) {
-  page = canonicalMenuPage(page);
-  if (forward) {
-    if (page == PAGE_USER_RELAYS) {
-      return PAGE_RF;
-    }
-    return page == PAGE_RF ? PAGE_DOOR : static_cast<uint8_t>(page + 1U);
-  }
-  if (page == PAGE_RF) {
-    return PAGE_USER_RELAYS;
-  }
-  return page == PAGE_DOOR ? PAGE_RF : static_cast<uint8_t>(page - 1U);
-}
-#endif
-
 // Activates a stable page and optionally persists it as the boot default.
 void setMenuPage(uint8_t page) {
   menuPage = canonicalMenuPage(page);
@@ -805,7 +786,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
           ));
 #else
-      setMenuPage(adjacentBuiltInMenuPage(menuPage, false));
+      setMenuPage(menuPage == PAGE_DOOR
+                      ? PAGE_RF
+                      : (menuPage == PAGE_RF ? PAGE_USER_RELAYS
+                                             : menuPage - 1));
 #endif
       break;
     case MENU_NEXT:
@@ -817,7 +801,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
           ));
 #else
-      setMenuPage(adjacentBuiltInMenuPage(menuPage, true));
+      setMenuPage(menuPage == PAGE_USER_RELAYS
+                      ? PAGE_RF
+                      : static_cast<uint8_t>((menuPage + 1U) % PAGE_COUNT));
 #endif
       break;
     case MENU_DECREASE:

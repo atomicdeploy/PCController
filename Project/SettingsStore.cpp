@@ -110,37 +110,39 @@ bool SettingsStore::normalizeMenuLayout() {
     changed = true;
   }
 
+#if PCCONTROLLER_MENU_VISIBILITY
   const uint16_t aliasBit = static_cast<uint16_t>(1U << PAGE_MOTION);
-  const uint16_t keyBit = static_cast<uint16_t>(1U << PAGE_KEYS);
-  if ((settings_.visibleMenuMask & aliasBit) == 0) {
-    return changed;
-  }
-
-  const bool keyWasVisible = (settings_.visibleMenuMask & keyBit) != 0;
-  settings_.visibleMenuMask = static_cast<uint16_t>(
-      (settings_.visibleMenuMask & static_cast<uint16_t>(~aliasBit)) | keyBit);
+  if ((settings_.visibleMenuMask & aliasBit) != 0) {
+    const uint16_t keyBit = static_cast<uint16_t>(1U << PAGE_KEYS);
+    const bool keyWasVisible = (settings_.visibleMenuMask & keyBit) != 0;
+    settings_.visibleMenuMask = static_cast<uint16_t>(
+        (settings_.visibleMenuMask & static_cast<uint16_t>(~aliasBit)) |
+        keyBit);
+    changed = true;
 #if PCCONTROLLER_MENU_ORDERING
-  // A layout that showed only MOVE meant to place the motion surface at that
-  // rank. Swap the two unique IDs so RF and every other stored rank stay put;
-  // the old MOVE slot remains hidden compatibility data.
-  if (!keyWasVisible) {
-    for (uint8_t rank = 0; rank < PersistentMenuPageCount; ++rank) {
-      uint8_t &packed = settings_.menuOrder[rank >> 1];
-      const uint8_t shift = (rank & 1U) == 0 ? 0 : 4;
-      const uint8_t page = static_cast<uint8_t>((packed >> shift) & 0x0FU);
-      if (page != PAGE_KEYS && page != PAGE_MOTION) {
-        continue;
+    // A layout that showed only MOVE meant to place the motion surface at that
+    // rank. Swap the two unique IDs so RF and every other stored rank stay
+    // put; the old MOVE slot remains hidden compatibility data.
+    if (!keyWasVisible) {
+      for (uint8_t rank = 0; rank < PersistentMenuPageCount; ++rank) {
+        uint8_t &packed = settings_.menuOrder[rank >> 1];
+        const uint8_t shift = (rank & 1U) == 0 ? 0 : 4;
+        const uint8_t page = static_cast<uint8_t>((packed >> shift) & 0x0FU);
+        if (page != PAGE_KEYS && page != PAGE_MOTION) {
+          continue;
+        }
+        const uint8_t replacement =
+            page == PAGE_KEYS ? static_cast<uint8_t>(PAGE_MOTION)
+                             : static_cast<uint8_t>(PAGE_KEYS);
+        packed = static_cast<uint8_t>(
+            (packed & static_cast<uint8_t>(~(0x0FU << shift))) |
+            static_cast<uint8_t>(replacement << shift));
       }
-      const uint8_t replacement =
-          page == PAGE_KEYS ? static_cast<uint8_t>(PAGE_MOTION)
-                           : static_cast<uint8_t>(PAGE_KEYS);
-      packed = static_cast<uint8_t>(
-          (packed & static_cast<uint8_t>(~(0x0FU << shift))) |
-          static_cast<uint8_t>(replacement << shift));
     }
+#endif
   }
 #endif
-  return true;
+  return changed;
 #else
   return false;
 #endif
