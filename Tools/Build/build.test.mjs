@@ -649,6 +649,17 @@ test('build forwards only named firmware features to the Controller compiler', (
 			error => error.exitCode === 2 && /requires firmware compilation/.test(error.message)
 		)
 	}
+	const inheritedHostOnly = parseArguments(['--host-only'], {})
+	inheritedHostOnly.firmwareFeatures = ['unknown']
+	inheritedHostOnly.firmwareFeaturesFromEnvironment = true
+	const inheritedHostPlan = createPlan(
+		inheritedHostOnly, resolveBuildIdentity(inheritedHostOnly, {}), 'win32'
+	)
+	assert.equal(
+		inheritedHostPlan.actions.some(action => action.id === 'firmware-compile'),
+		false,
+		'direct host-only plans ignore invalid inherited firmware defaults'
+	)
 	assert.throws(
 		() => createControllerProgramCommand({
 			invocation: canonicalControllerInvocation(PROJECT_ROOT, 'win32'),
