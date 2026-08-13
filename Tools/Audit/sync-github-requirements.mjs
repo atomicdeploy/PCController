@@ -1264,6 +1264,7 @@ const PR_ORIGINAL_REQUESTS = {
   206: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
   207: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
   224: [PROMPT_EXCERPTS.buzzerFallback, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.externalBeepFallback],
+  231: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.stuckUpdate],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
