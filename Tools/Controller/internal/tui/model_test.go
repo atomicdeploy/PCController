@@ -742,6 +742,39 @@ func TestTUINavigationCommitsLocalIntentWithoutEchoingCoordinatorPage(t *testing
 	}
 }
 
+func TestTUIExactTypedPageDoesNotCommitOrFanOutNavigation(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var commits []string
+	var acknowledgements []hostui.ActionAck
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:exact",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		CommitNavigation: func(page string) { commits = append(commits, page) },
+		AckAppAction: func(ack hostui.ActionAck) error {
+			acknowledgements = append(acknowledgements, ack)
+			return nil
+		},
+	})
+	action := hostui.AppAction{
+		Kind: "app.page", Value: "events", Target: model.instanceID,
+		OperationID: "exact-page", Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "exact-delivery",
+			hostui.ActionExpiresAtKey:  time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano),
+		},
+	}
+	updated, command := model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.page != PageEvents || len(commits) != 0 {
+		t.Fatalf("exact page=%v navigation commits=%#v", model.page, commits)
+	}
+	if len(acknowledgements) != 1 || acknowledgements[0].OperationID != action.OperationID ||
+		acknowledgements[0].DeliveryID != "exact-delivery" ||
+		acknowledgements[0].State != hostui.ActionStateApplied {
+		t.Fatalf("acknowledgements=%#v", acknowledgements)
+	}
+}
+
 func TestTUISettingsCanOptThisInstanceOutAndReportMembershipImmediately(t *testing.T) {
 	model := readyModel(t, PageAppSettings)
 	model.navigationSync = true
@@ -888,6 +921,207 @@ func TestTUITerminalTitleAndOSCAppActions(t *testing.T) {
 	if len(payloads) != 1 || payloads[0] != "9;4;4;73" {
 		t.Fatalf("terminal OSC payloads=%#v", payloads)
 	}
+}
+
+func TestTUITypedActionAcknowledgesActualResultAndDeduplicates(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var acknowledgements []hostui.ActionAck
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "host:tui",
+		WriteOSC: func(string) error { return nil },
+		AckAppAction: func(ack hostui.ActionAck) error {
+			acknowledgements = append(acknowledgements, ack)
+			return nil
+		},
+	})
+	expiresAt := time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)
+	titleAction := hostui.AppAction{
+		Kind: "app.title", Value: "Bench", Target: "host:tui", OperationID: "title-one",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "title-delivery", hostui.ActionExpiresAtKey: expiresAt,
+		},
+	}
+	updated, command := model.Update(appActionMsg(titleAction))
+	model = updated.(Model)
+	if receipt := model.actionReceipts[hostui.AppActionReceiptKey(titleAction)]; receipt.State != hostui.ActionStateApplied ||
+		model.terminalTitle() != "Bench" {
+		t.Fatalf("receipt=%#v title=%q", receipt, model.terminalTitle())
+	}
+	runTeaCommandTree(command)
+	if len(acknowledgements) != 1 || acknowledgements[0].OperationID != "title-one" ||
+		acknowledgements[0].DeliveryID != "title-delivery" {
+		t.Fatalf("acknowledgements=%#v", acknowledgements)
+	}
+
+	titleAction.Value = "must-not-reapply"
+	updated, command = model.Update(appActionMsg(titleAction))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Bench" || len(acknowledgements) != 2 ||
+		acknowledgements[1] != acknowledgements[0] {
+		t.Fatalf("duplicate title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	progressAction := hostui.AppAction{
+		Kind: "app.progress", Value: "warning 73", Target: "host:tui", OperationID: "progress-one",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "progress-delivery", hostui.ActionExpiresAtKey: expiresAt,
+		},
+	}
+	updated, command = model.Update(appActionMsg(progressAction))
+	model = updated.(Model)
+	messages := runTeaCommandTree(command)
+	var terminalResult terminalOSCResultMsg
+	for _, message := range messages {
+		if result, ok := message.(terminalOSCResultMsg); ok {
+			terminalResult = result
+		}
+	}
+	if terminalResult.ack == nil || terminalResult.ack.OperationID != "progress-one" {
+		t.Fatalf("terminal result=%#v messages=%#v", terminalResult, messages)
+	}
+	updated, command = model.Update(terminalResult)
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if receipt := model.actionReceipts[hostui.AppActionReceiptKey(progressAction)]; receipt.State != hostui.ActionStateApplied ||
+		len(acknowledgements) != 3 || acknowledgements[2].OperationID != "progress-one" ||
+		acknowledgements[2].DeliveryID != "progress-delivery" {
+		t.Fatalf("receipt=%#v acknowledgements=%#v", receipt, acknowledgements)
+	}
+}
+
+func TestTUITypedActionReceiptIdentityIncludesDeliveryAndDropsExpiredReplay(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var acknowledgements []hostui.ActionAck
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "host:tui",
+		AckAppAction: func(ack hostui.ActionAck) error {
+			acknowledgements = append(acknowledgements, ack)
+			return nil
+		},
+	})
+	firstDeadline := time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano)
+	secondDeadline := time.Now().Add(2 * time.Minute).UTC().Format(time.RFC3339Nano)
+	action := hostui.AppAction{
+		Kind: "app.title", Value: "First", Target: "host:tui", OperationID: "reusable-id",
+		Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "delivery-first", hostui.ActionExpiresAtKey: firstDeadline,
+		},
+	}
+	updated, command := model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	action.Value = "duplicate-must-not-apply"
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "First" || len(acknowledgements) != 2 {
+		t.Fatalf("same delivery title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	action.Value = "Reused later"
+	action.Metadata[hostui.ActionDeliveryIDKey] = "delivery-second"
+	action.Metadata[hostui.ActionExpiresAtKey] = secondDeadline
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Reused later" || len(acknowledgements) != 3 {
+		t.Fatalf("reused delivery title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	action.Value = "expired-must-not-apply"
+	action.OperationID = "expired-id"
+	action.Metadata[hostui.ActionDeliveryIDKey] = "delivery-expired"
+	action.Metadata[hostui.ActionExpiresAtKey] = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Reused later" || len(acknowledgements) != 3 {
+		t.Fatalf("expired delivery title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	action.Value = "missing-deadline-must-not-apply"
+	action.OperationID = "missing-deadline"
+	action.Metadata[hostui.ActionDeliveryIDKey] = "delivery-without-deadline"
+	delete(action.Metadata, hostui.ActionExpiresAtKey)
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Reused later" || len(acknowledgements) != 3 {
+		t.Fatalf("unbounded delivery title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	action.Value = "missing-delivery-must-not-apply"
+	action.OperationID = "missing-delivery"
+	delete(action.Metadata, hostui.ActionDeliveryIDKey)
+	action.Metadata[hostui.ActionExpiresAtKey] = secondDeadline
+	updated, command = model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Reused later" || len(acknowledgements) != 3 {
+		t.Fatalf("delivery-less title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+}
+
+func TestTUIAppActionAcknowledgementRetriesBoundedlyAndLogsOnlyFinalFailure(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	attempts := 0
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "host:tui",
+		AckAppAction: func(hostui.ActionAck) error {
+			attempts++
+			if attempts < maximumAppActionAckAttempts {
+				return errors.New("temporarily unavailable")
+			}
+			return nil
+		},
+	})
+	ack := hostui.ActionAck{
+		OperationID: "retry-operation", DeliveryID: "retry-delivery",
+		InstanceID: "host:tui", State: hostui.ActionStateApplied,
+	}
+	result := acknowledgeAppAction(model.ackAppAction, ack)().(appActionAckResultMsg)
+	for result.err != nil && result.attempt < maximumAppActionAckAttempts {
+		before := len(model.logs)
+		updated, retryCommand := model.Update(result)
+		model = updated.(Model)
+		if retryCommand == nil || len(model.logs) != before {
+			t.Fatalf("attempt %d retry=%v logs=%#v", result.attempt, retryCommand != nil, model.logs[before:])
+		}
+		retry := appActionAckRetryMsg{ack: result.ack, attempt: result.attempt + 1}
+		updated, command := model.Update(retry)
+		model = updated.(Model)
+		result = command().(appActionAckResultMsg)
+	}
+	updated, command := model.Update(result)
+	model = updated.(Model)
+	if command != nil || attempts != maximumAppActionAckAttempts || logsContain(model.logs, "app action acknowledgement failed") {
+		t.Fatalf("recovered attempts=%d command=%v logs=%#v", attempts, command != nil, model.logs)
+	}
+
+	finalFailure := appActionAckResultMsg{
+		ack: ack, attempt: maximumAppActionAckAttempts, err: errors.New("still unavailable"),
+	}
+	updated, command = model.Update(finalFailure)
+	model = updated.(Model)
+	if command != nil || !logsContain(model.logs, "app action acknowledgement failed: still unavailable") {
+		t.Fatalf("final failure command=%v logs=%#v", command != nil, model.logs)
+	}
+}
+
+func runTeaCommandTree(command tea.Cmd) []tea.Msg {
+	if command == nil {
+		return nil
+	}
+	message := command()
+	if batch, ok := message.(tea.BatchMsg); ok {
+		var result []tea.Msg
+		for _, nested := range batch {
+			result = append(result, runTeaCommandTree(nested)...)
+		}
+		return result
+	}
+	return []tea.Msg{message}
 }
 
 func TestUpdateEventsOpenProgrammingPageAndTrackVisibleProgress(t *testing.T) {

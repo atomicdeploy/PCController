@@ -794,6 +794,8 @@ bin\controller.exe ipc call --method controller.app.launch --params "{\"surface\
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.progress\",\"value\":\"normal 42\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.osc\",\"value\":\"9;4;4;73\",\"target\":\"tui\"}"
+bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"webui\",\"operation_id\":\"bench-title-1\",\"timeout_ms\":5000}"
+bin\controller.exe ipc call --method controller.app.action.outcome --params "{\"operation_id\":\"bench-title-1\"}"
 bin\controller.exe ipc call --method controller.command.execute --params "{\"command\":\"app title auto\"}"
 bin\controller.exe ipc call --method controller.bridge.list
 bin\controller.exe ipc call --method controller.bridge.call --params "{\"peer\":\"lab\",\"request\":{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"controller.snapshot\"}}"

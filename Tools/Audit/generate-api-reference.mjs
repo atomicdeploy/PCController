@@ -93,7 +93,7 @@ const capabilityGroups = {
     "controller.peripherals.set", "controller.hotkeys.set", "controller.os.configure",
     "controller.lcd.presentation.configure", "controller.app.page", "controller.app.navigate",
     "controller.app.launch", "controller.app.navigation.commit",
-    "controller.app.instance.report", "controller.app.instance.remove",
+    "controller.app.instance.report", "controller.app.instance.remove", "controller.app.action.ack",
 		"controller.network.peers.set",
   ],
   virtual_keys: ["controller.os.key", "controller.virtual_key"],
@@ -125,7 +125,7 @@ const capabilityGroups = {
     "controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get",
 		"controller.integrations.status", "controller.pwm.values", "controller.port.owner", "controller.port.process",
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
-		"controller.network.peers.get",
+		"controller.network.peers.get", "controller.app.action.outcome",
   ],
   board_commands: [
     "controller.program_state.set", "controller.program-state.set", "controller.menu.layout.set",
@@ -165,7 +165,9 @@ const methodOverrides = {
 	"controller.app.navigate": "Navigate all, one surface, or one exact live application instance.",
 	"controller.app.launch": "Ensure, launch, or focus a named TUI or WebUI surface without arbitrary process execution.",
 	"controller.app.navigation.commit": "Commit one follower group's canonical page and return its correlated coordinator outcome.",
-	"controller.app.action": "Route a validated page, title, OSC progress, raw OSC, port, command, or lifecycle action to live application instances.",
+	"controller.app.action": "Freeze a validated action to exact live targets and return its correlated per-target delivery operation.",
+	"controller.app.action.ack": "Acknowledge one exact app-action target as applied or rejected.",
+	"controller.app.action.outcome": "Return one bounded app-action operation and its exact per-target outcomes.",
   "controller.app.instances": "List live application instances and their bounded non-secret state.",
   "controller.app.bridge": "Return the original coordinator bridge instance and its bounded process self-information.",
   "controller.app.instance.get": "Read one live application instance by ID.",
@@ -250,7 +252,9 @@ const routes = [
   { path: "/api/app/bridge", methods: ["get"], capability: "read", summary: "Original coordinator bridge instance and process identity" },
   { path: "/api/app/instances", methods: ["get"], capability: "read", summary: "List or query live application instances" },
   { path: "/api/app/instances", methods: ["post", "delete"], capability: "host_configuration", summary: "Report or remove one live application instance" },
-	{ path: "/api/app/action", methods: ["post"], capability: "host_configuration", summary: "Route a validated action to all, one surface, or one live application instance" },
+	{ path: "/api/app/action", methods: ["post"], capability: "host_configuration", summary: "Freeze and route a correlated action to exact live application instances" },
+	{ path: "/api/app/action/ack", methods: ["post"], capability: "host_configuration", summary: "Acknowledge one exact app-action target outcome" },
+	{ path: "/api/app/action/outcome", methods: ["get"], capability: "read", summary: "Read one bounded app-action operation outcome" },
   { path: "/api/app/navigate", methods: ["post"], capability: "host_configuration", summary: "Navigate all, one surface, or one exact application instance" },
   { path: "/api/app/launch", methods: ["post"], capability: "host_configuration", summary: "Ensure, launch, or focus a named TUI or WebUI surface" },
   { path: "/api/bridges", methods: ["get"], capability: "read", summary: "Configured bridge state" },
@@ -281,6 +285,114 @@ const routes = [
   { path: "/api/integrations/datahub/{path}", methods: ["get", "head", "post", "put", "patch", "delete"], capability: "integrations", summary: "Sanitized loopback data-service proxy" },
   { path: "/api/integrations/device/{path}", methods: ["get", "head", "post", "put", "patch", "delete"], capability: "integrations", summary: "Fail-closed device route; use typed RPC" },
 ];
+
+const actionIdentifierSchema = { type: "string", pattern: "^[A-Za-z0-9._:-]{1,180}$" };
+const actionSelectorSchema = { type: "string", pattern: "^(?:\\*|[A-Za-z0-9._:-]{1,180})$", default: "*" };
+const actionKindSchema = {
+	type: "string",
+	enum: ["app.page", "app.title", "app.progress", "app.osc", "app.quit", "app.port.open", "app.port.close", "command"],
+};
+
+function actionSchemas(refPrefix) {
+	const ref = (name) => ({ $ref: `${refPrefix}${name}` });
+	const actionProperties = {
+		kind: actionKindSchema,
+		value: { type: "string" },
+		source: { type: "string" },
+		target: actionSelectorSchema,
+		operation_id: actionIdentifierSchema,
+		metadata: {
+			type: "object", maxProperties: 16,
+			propertyNames: { pattern: "^[A-Za-z0-9._-]{1,64}$" },
+			properties: {
+				operation_delivery_id: actionIdentifierSchema,
+				operation_expires_at: { type: "string", format: "date-time" },
+			},
+			additionalProperties: { type: "string", maxLength: 1024, pattern: "^[^\\u0000\\r\\n]*$" },
+			description: "Bounded non-secret action metadata. Exact-target pushes include coordinator-owned operation_delivery_id and operation_expires_at values. Credential-shaped keys are rejected by the host.",
+		},
+		at: { type: "string", format: "date-time" },
+	};
+	return {
+		AppAction: {
+			type: "object", required: ["kind"], additionalProperties: false,
+			properties: actionProperties,
+		},
+		AppActionRequest: {
+			type: "object", required: ["kind"], additionalProperties: false,
+			properties: {
+				...actionProperties,
+				timeout_ms: {
+					type: "integer", minimum: 0, maximum: 30000, default: 5000,
+					description: "Acknowledgement deadline in milliseconds; zero or omission selects the 5000 ms host default.",
+				},
+			},
+		},
+		ActionAck: {
+			type: "object", required: ["operation_id", "delivery_id", "instance_id", "state"], additionalProperties: false,
+			properties: {
+				operation_id: actionIdentifierSchema,
+				delivery_id: actionIdentifierSchema,
+				instance_id: actionIdentifierSchema,
+				state: { type: "string", enum: ["applied", "rejected"] },
+				reason: { type: "string", maxLength: 256, pattern: "^[^\\u0000-\\u001f\\u007f]*$" },
+			},
+		},
+		ActionOutcomeRequest: {
+			type: "object", required: ["operation_id"], additionalProperties: false,
+			properties: { operation_id: actionIdentifierSchema },
+		},
+		ActionTargetOutcome: {
+			type: "object", required: ["instance_id", "surface", "state", "updated_at"], additionalProperties: false,
+			properties: {
+				instance_id: actionIdentifierSchema,
+				surface: { type: "string", pattern: "^[A-Za-z0-9._-]{1,64}$" },
+				state: { type: "string", enum: ["queued", "applied", "rejected", "timeout"] },
+				reason: { type: "string", maxLength: 256 },
+				updated_at: { type: "string", format: "date-time" },
+			},
+		},
+		ActionOperation: {
+			type: "object",
+			required: ["operation_id", "kind", "selector", "state", "created_at", "expires_at", "targets"],
+			additionalProperties: false,
+			properties: {
+				operation_id: actionIdentifierSchema,
+				kind: actionKindSchema,
+				source: { type: "string" },
+				selector: actionSelectorSchema,
+				state: { type: "string", enum: ["queued", "applied", "rejected", "timeout", "partial"] },
+				reason: { type: "string", maxLength: 256 },
+				created_at: { type: "string", format: "date-time" },
+				expires_at: { type: "string", format: "date-time" },
+				targets: { type: "array", items: ref("ActionTargetOutcome") },
+			},
+		},
+		ActionOperationEnvelope: {
+			type: "object", required: ["accepted", "operation"], additionalProperties: false,
+			properties: {
+				accepted: { type: "boolean" },
+				operation: ref("ActionOperation"),
+			},
+		},
+		AppActionSubmitEnvelope: {
+			type: "object", required: ["accepted"], additionalProperties: false,
+			properties: {
+				accepted: { type: "boolean" },
+				operation: ref("ActionOperation"),
+			},
+			description: "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation.",
+		},
+	};
+}
+
+const openAPIActionSchemas = actionSchemas("#/components/schemas/");
+const rpcActionSchemas = actionSchemas("#/$defs/");
+const rpcActionMethodContracts = {
+	"controller.app.action": { params: "AppActionRequest", result: "AppActionSubmitEnvelope" },
+	"controller.app.action.ack": { params: "ActionAck", result: "ActionOperationEnvelope" },
+	"controller.app.action.outcome": { params: "ActionOutcomeRequest", result: "ActionOperationEnvelope" },
+};
 
 function operationFor(route, method) {
   const operation = {
@@ -313,6 +425,37 @@ function operationFor(route, method) {
 			content: { "application/json": { schema: { $ref: "#/components/schemas/OpcodeFrame" } } },
 		};
 	}
+	if (route.path === "/api/app/action" && method === "post") {
+		delete operation.responses["200"];
+		operation.responses["202"] = {
+			description: "Action frozen to its exact live target set",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/AppActionSubmitEnvelope" } } },
+		};
+		operation.responses["409"] = {
+			description: "The selector resolved only to rejected targets",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
+		};
+	}
+	if (route.path === "/api/app/action/ack" && method === "post") {
+		operation.responses["200"] = {
+			description: "Updated correlated operation",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
+		};
+		operation.responses["409"] = {
+			description: "Unknown, expired, foreign, offline, or conflicting acknowledgement",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+		};
+	}
+	if (route.path === "/api/app/action/outcome" && method === "get") {
+		operation.responses["200"] = {
+			description: "Current bounded per-target operation outcome",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ActionOperationEnvelope" } } },
+		};
+		operation.responses["404"] = {
+			description: "Operation is unknown or expired",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } },
+		};
+	}
   if (route.path === "/api/app/instances" && method === "get") {
     operation.responses["200"] = {
       description: "One exact instance when id is supplied, otherwise all live instances",
@@ -342,10 +485,14 @@ function operationFor(route, method) {
 			? { $ref: "#/components/schemas/JSONRPCRequest" }
 			: route.path === "/api/session/ticket"
 				? { $ref: "#/components/schemas/SessionTicketRequest" }
-				: route.path === "/api/opcode"
+			: route.path === "/api/opcode"
 					? { $ref: "#/components/schemas/OpcodeRequest" }
 					: route.path === "/api/app/instances"
 						? { $ref: "#/components/schemas/AppInstanceReport" }
+						: route.path === "/api/app/action"
+							? { $ref: "#/components/schemas/AppActionRequest" }
+							: route.path === "/api/app/action/ack"
+								? { $ref: "#/components/schemas/ActionAck" }
 						: route.path === "/api/app/navigate"
 							? { $ref: "#/components/schemas/AppNavigation" }
 							: route.path === "/api/app/launch"
@@ -376,6 +523,14 @@ function operationFor(route, method) {
       schema: { type: "string", pattern: "^[A-Za-z0-9._:-]{1,180}$" },
     });
   }
+	if (route.path === "/api/app/action/outcome" && method === "get") {
+		operation.parameters ??= [];
+		operation.parameters.push({
+			name: "operation_id", in: "query", required: true,
+			schema: actionIdentifierSchema,
+			description: "Correlated app-action operation identifier.",
+		});
+	}
   return operation;
 }
 
@@ -515,6 +670,7 @@ const openapi = {
 			},
 			description: "Named product surface only. Executables, arguments, environment, shell text, and credentials are not accepted.",
 		},
+		...openAPIActionSchemas,
       JSONRPCError: {
         type: "object", required: ["code", "message"], additionalProperties: false,
         properties: { code: { type: "integer", enum: [-32700, -32600, -32601, -32602, -32003, -32001, -32000] }, message: { type: "string" } },
@@ -540,7 +696,8 @@ const rpcSchema = {
   oneOf: [
     { $ref: "#/$defs/request" }, { $ref: "#/$defs/success" }, { $ref: "#/$defs/error" }, { $ref: "#/$defs/notification" },
   ],
-  $defs: {
+	$defs: {
+		...rpcActionSchemas,
     id: { oneOf: [{ type: "string" }, { type: "integer" }, { type: "null" }] },
     request: {
       type: "object", required: ["jsonrpc", "method"], additionalProperties: false,
@@ -549,6 +706,10 @@ const rpcSchema = {
         method: { enum: methods.map(({ name }) => name) }, params: { type: ["object", "array", "null"] },
         auth: { type: "string", writeOnly: true },
       },
+		allOf: Object.entries(rpcActionMethodContracts).map(([method, contract]) => ({
+			if: { properties: { method: { const: method } }, required: ["method"] },
+			then: { required: ["params"], properties: { params: { $ref: `#/$defs/${contract.params}` } } },
+		})),
     },
     success: {
       type: "object", required: ["jsonrpc", "id", "result"], additionalProperties: false,
@@ -571,7 +732,15 @@ const rpcSchema = {
       },
     },
   },
-  "x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => [name, metadata])),
+	"x-methods": Object.fromEntries(methods.map(({ name, ...metadata }) => {
+		const contract = rpcActionMethodContracts[name];
+		if (!contract) return [name, metadata];
+		return [name, {
+			...metadata,
+			params_schema: { $ref: `#/$defs/${contract.params}` },
+			result_schema: { $ref: `#/$defs/${contract.result}` },
+		}];
+	})),
   "x-error-codes": {
     "-32700": "parse error", "-32600": "invalid request", "-32601": "method not found",
     "-32602": "invalid params", "-32001": "authentication required",

@@ -17,6 +17,327 @@
     }
   ],
   "$defs": {
+    "AppAction": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "app.page",
+            "app.title",
+            "app.progress",
+            "app.osc",
+            "app.quit",
+            "app.port.open",
+            "app.port.close",
+            "command"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+          "default": "*"
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "metadata": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "properties": {
+            "operation_delivery_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            },
+            "operation_expires_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[^\\u0000\\r\\n]*$"
+          },
+          "description": "Bounded non-secret action metadata. Exact-target pushes include coordinator-owned operation_delivery_id and operation_expires_at values. Credential-shaped keys are rejected by the host."
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "AppActionRequest": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "app.page",
+            "app.title",
+            "app.progress",
+            "app.osc",
+            "app.quit",
+            "app.port.open",
+            "app.port.close",
+            "command"
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+          "default": "*"
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "metadata": {
+          "type": "object",
+          "maxProperties": 16,
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9._-]{1,64}$"
+          },
+          "properties": {
+            "operation_delivery_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+            },
+            "operation_expires_at": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 1024,
+            "pattern": "^[^\\u0000\\r\\n]*$"
+          },
+          "description": "Bounded non-secret action metadata. Exact-target pushes include coordinator-owned operation_delivery_id and operation_expires_at values. Credential-shaped keys are rejected by the host."
+        },
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30000,
+          "default": 5000,
+          "description": "Acknowledgement deadline in milliseconds; zero or omission selects the 5000 ms host default."
+        }
+      }
+    },
+    "ActionAck": {
+      "type": "object",
+      "required": [
+        "operation_id",
+        "delivery_id",
+        "instance_id",
+        "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "delivery_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "instance_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "applied",
+            "rejected"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+        }
+      }
+    },
+    "ActionOutcomeRequest": {
+      "type": "object",
+      "required": [
+        "operation_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        }
+      }
+    },
+    "ActionTargetOutcome": {
+      "type": "object",
+      "required": [
+        "instance_id",
+        "surface",
+        "state",
+        "updated_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "instance_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "surface": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._-]{1,64}$"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "applied",
+            "rejected",
+            "timeout"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "ActionOperation": {
+      "type": "object",
+      "required": [
+        "operation_id",
+        "kind",
+        "selector",
+        "state",
+        "created_at",
+        "expires_at",
+        "targets"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "app.page",
+            "app.title",
+            "app.progress",
+            "app.osc",
+            "app.quit",
+            "app.port.open",
+            "app.port.close",
+            "command"
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string",
+          "pattern": "^(?:\\*|[A-Za-z0-9._:-]{1,180})$",
+          "default": "*"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "applied",
+            "rejected",
+            "timeout",
+            "partial"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionTargetOutcome"
+          }
+        }
+      }
+    },
+    "ActionOperationEnvelope": {
+      "type": "object",
+      "required": [
+        "accepted",
+        "operation"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "operation": {
+          "$ref": "#/$defs/ActionOperation"
+        }
+      }
+    },
+    "AppActionSubmitEnvelope": {
+      "type": "object",
+      "required": [
+        "accepted"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "operation": {
+          "$ref": "#/$defs/ActionOperation"
+        }
+      },
+      "description": "Backward-compatible acceptance result. Outcome-capable actions also include the correlated operation."
+    },
     "id": {
       "oneOf": [
         {
@@ -47,6 +368,8 @@
         "method": {
           "enum": [
             "controller.app.action",
+            "controller.app.action.ack",
+            "controller.app.action.outcome",
             "controller.app.bridge",
             "controller.app.instance.get",
             "controller.app.instance.remove",
@@ -197,7 +520,75 @@
           "type": "string",
           "writeOnly": true
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.app.action"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/AppActionRequest"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.app.action.ack"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/ActionAck"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "controller.app.action.outcome"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "required": [
+              "params"
+            ],
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/ActionOutcomeRequest"
+              }
+            }
+          }
+        }
+      ]
     },
     "success": {
       "type": "object",
@@ -280,8 +671,36 @@
   "x-methods": {
     "controller.app.action": {
       "capability": "dynamic",
-      "summary": "Route a validated page, title, OSC progress, raw OSC, port, command, or lifecycle action to live application instances.",
-      "idempotency": "non-idempotent"
+      "summary": "Freeze a validated action to exact live targets and return its correlated per-target delivery operation.",
+      "idempotency": "non-idempotent",
+      "params_schema": {
+        "$ref": "#/$defs/AppActionRequest"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/AppActionSubmitEnvelope"
+      }
+    },
+    "controller.app.action.ack": {
+      "capability": "host_configuration",
+      "summary": "Acknowledge one exact app-action target as applied or rejected.",
+      "idempotency": "idempotent-with-authoritative-readback",
+      "params_schema": {
+        "$ref": "#/$defs/ActionAck"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/ActionOperationEnvelope"
+      }
+    },
+    "controller.app.action.outcome": {
+      "capability": "read",
+      "summary": "Return one bounded app-action operation and its exact per-target outcomes.",
+      "idempotency": "safe",
+      "params_schema": {
+        "$ref": "#/$defs/ActionOutcomeRequest"
+      },
+      "result_schema": {
+        "$ref": "#/$defs/ActionOperationEnvelope"
+      }
     },
     "controller.app.bridge": {
       "capability": "read",

@@ -86,6 +86,7 @@ type primaryIPC struct {
 	integrations          atomic.Pointer[hostbridge.Manager]
 	localDevice           *localDeviceHost
 	actions               *hostui.ActionBroker
+	actionCoordinator     *hostui.ActionCoordinator
 	instances             *hostui.InstanceRegistry
 	artifacts             *artifacts.Service
 	ipc                   *ipcjson.Service
@@ -306,6 +307,10 @@ func startPrimaryIPCAtWithIdentity(
 	}
 	server.actions = hostui.NewActionBroker()
 	server.instances = hostui.NewInstanceRegistry()
+	server.actionCoordinator = hostui.NewActionCoordinator(server.instances, server.actions.Publish)
+	server.actionCoordinator.SetObserver(func(change hostui.ActionOutcomeChange) {
+		runtime.PublishStructuredEvent(appActionOutcomeEvent(change))
+	})
 	navigation := hostui.NewNavigationCoordinator()
 	server.instances.SetObserver(func(change hostui.InstanceChange) {
 		runtime.PublishStructuredEvent(control.Event{
@@ -387,6 +392,9 @@ func startPrimaryIPCAtWithIdentity(
 		CoordinatorInstanceID: server.coordinatorInstanceID,
 		AppAction:             server.actions.Publish,
 		NavigationCommand:     commitNavigation,
+		AppActionSubmit:       server.actionCoordinator.Submit,
+		AppActionAck:          server.actionCoordinator.Ack,
+		AppActionOutcome:      server.actionCoordinator.Outcome,
 		AppInstances:          server.instances,
 		Shutdown: func() {
 			server.quitOnce.Do(func() { close(server.quit) })
@@ -502,6 +510,9 @@ func browserAppActionEvent(action hostui.AppAction) (control.Event, bool) {
 	}
 	metadata["value"] = value
 	metadata["target_instance"] = target
+	if action.OperationID != "" {
+		metadata["operation_id"] = action.OperationID
+	}
 	actionName := verb
 	if kind == "app.page" {
 		metadata["page"] = value
@@ -516,6 +527,32 @@ func browserAppActionEvent(action hostui.AppAction) (control.Event, bool) {
 		Action:   actionName,
 		Metadata: metadata,
 	}, true
+}
+
+func appActionOutcomeEvent(change hostui.ActionOutcomeChange) control.Event {
+	stream := control.EventStreamState
+	if change.State == hostui.ActionStateRejected || change.State == hostui.ActionStateTimeout {
+		stream = control.EventStreamActivity
+	}
+	metadata := map[string]string{
+		"operation_id": change.OperationID,
+		"kind":         change.Kind,
+		"instance_id":  change.InstanceID,
+		"surface":      change.Surface,
+		"state":        change.State,
+	}
+	if change.Reason != "" {
+		metadata["reason"] = change.Reason
+	}
+	text := change.Kind + " " + change.State
+	if change.InstanceID != "" {
+		text += " on " + change.InstanceID
+	}
+	return control.Event{
+		Kind: "app.action.outcome", Stream: stream, Text: text,
+		Source: "host", Target: "app.clients", MessageType: "state",
+		Action: "outcome", Metadata: metadata,
+	}
 }
 
 func (server *primaryIPC) QuitRequested() <-chan struct{} {
@@ -618,6 +655,9 @@ func (server *primaryIPC) close() error {
 	}
 	if server.artifacts != nil {
 		server.artifacts.Close()
+	}
+	if server.actionCoordinator != nil {
+		server.actionCoordinator.Close()
 	}
 	server.cancel()
 	_ = server.listener.Close()

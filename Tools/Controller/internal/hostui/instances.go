@@ -154,6 +154,13 @@ func (registry *InstanceRegistry) Upsert(value AppInstance) (AppInstance, error)
 		if len(raw) > 1024 || strings.ContainsAny(raw, "\x00\r\n") {
 			return AppInstance{}, errors.New("instance value is too long or contains controls")
 		}
+		if key == ActionCapabilitiesKey {
+			capabilities, capabilityErr := ActionCapabilities(strings.Split(raw, ",")...)
+			if capabilityErr != nil {
+				return AppInstance{}, capabilityErr
+			}
+			raw = capabilities
+		}
 		cleanValues[key] = raw
 	}
 	value.Values = cleanValues
