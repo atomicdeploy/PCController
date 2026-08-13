@@ -270,11 +270,11 @@ test('persistent Ready profile remains host-owned with a compact firmware fallba
 
 test('physical, injected, and RF key actions retain the immediate dispatch contract', async () => {
 	const [configuration, keys, frontPanel, protocol, radio] = await Promise.all([
-		readFile(new URL('../../Project/Firmware/ControllerConfiguration.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/ControllerConfiguration.inc.h', import.meta.url), 'utf8'),
 		readFile(new URL('../../LocalLib/Keys.h', import.meta.url), 'utf8'),
-		readFile(new URL('../../Project/Firmware/FrontPanelRuntime.inc.h', import.meta.url), 'utf8'),
-		readFile(new URL('../../Project/Firmware/ProtocolRuntime.inc.h', import.meta.url), 'utf8'),
-		readFile(new URL('../../Project/Firmware/RadioRuntime.inc.h', import.meta.url), 'utf8')
+		readFile(new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/ProtocolRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/RadioRuntime.inc.h', import.meta.url), 'utf8')
 	])
 	assert.match(keys, /KEY_DEBOUNCE_MS = 20;/u)
 	assert.match(configuration, /SHIFT_POLL_MS \+ KEY_DEBOUNCE_MS <=\s*\n?\s*KEY_PRIMARY_ACTION_BUDGET_MS/u)
@@ -302,7 +302,7 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
                 'FrontPanelRuntime.inc.h'
         ]
         const sources = await Promise.all(runtimeFiles.map(file => readFile(
-                new URL(`../../Project/Firmware/${file}`, import.meta.url),
+			new URL(`../../Project/Runtime/${file}`, import.meta.url),
                 'utf8'
         )))
         const helperSources = await Promise.all([
@@ -310,7 +310,7 @@ test('firmware runtime owns one shared ordinary-service clock snapshot', async (
                 'RadioRuntime.inc.h',
                 'SensorRuntime.inc.h'
         ].map(file => readFile(
-                new URL(`../../Project/Firmware/${file}`, import.meta.url),
+			new URL(`../../Project/Runtime/${file}`, import.meta.url),
                 'utf8'
         )))
         assert.match(sources[0], /static uint32_t now = 0;/u)

@@ -74,8 +74,8 @@ const SOURCE_EXTENSIONS = new Set([
 ])
 const SOURCE_ROOTS = Object.freeze([
 	'PCController.ino',
-	'PCControllerLocalLib.cpp',
-	'PCControllerProject.cpp',
+	'BoardSupportSources.cpp',
+	'ControllerDomainSources.cpp',
 	'ProjectConfig.h',
 	'LocalLib',
 	'Project',
