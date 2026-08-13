@@ -165,6 +165,9 @@ type Model struct {
 	commitNavigation         func(page string)
 	suppressNavigationCommit bool
 	writeOSC                 func(string) error
+	ackAppAction             func(hostui.ActionAck) error
+	actionReceipts           map[string]hostui.ActionAck
+	actionReceiptOrder       []string
 	terminalTitleOverride    string
 	terminalTitleDirty       bool
 	update                   updatePresentation
@@ -459,8 +462,9 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		reportPage:         options.ReportPage, reportTerminal: options.ReportTerminal,
 		reportTerminalAsync: options.ReportTerminalAsync,
 		commitNavigation:    options.CommitNavigation,
-		writeOSC:            options.WriteOSC,
-		hostMenus:           options.HostMenus, pushHostPanel: options.PushHostPanel,
+		writeOSC:            options.WriteOSC, ackAppAction: options.AckAppAction,
+		actionReceipts: make(map[string]hostui.ActionAck),
+		hostMenus:      options.HostMenus, pushHostPanel: options.PushHostPanel,
 		releaseHostPanel: options.ReleaseHostPanel,
 		prefs:            prefs, preview: options.Preview, welcome: welcome,
 		pwmDragChannel:   -1,
@@ -575,59 +579,16 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
-		switch action.Kind {
-		case "app.page":
-			if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
-				if !model.navigationSync {
-					break
-				}
-				pageName, accepted := model.acceptNavigationAction(action)
-				if !accepted {
-					break
-				}
-				action.Value = pageName
+		if receipt, duplicate := model.actionReceipts[action.OperationID]; action.OperationID != "" && duplicate {
+			commands = append(commands, acknowledgeAppAction(model.ackAppAction, receipt))
+		} else {
+			var actionCommands []tea.Cmd
+			var quit bool
+			model, actionCommands, quit = model.applyAppAction(action)
+			commands = append(commands, actionCommands...)
+			if quit {
+				return model, tea.Quit
 			}
-			if page, ok := pageForName(action.Value); ok {
-				if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
-					model.applySynchronizedPage(page)
-				} else {
-					model.switchPage(page)
-				}
-				model.setNotice("Opened " + pageDefinitions[page].Title)
-			} else {
-				model.appendLog("warn", "unknown app page: "+action.Value)
-			}
-		case "app.quit":
-			return model, tea.Quit
-		case "app.title":
-			if strings.EqualFold(action.Value, "auto") {
-				model.terminalTitleOverride = ""
-			} else {
-				model.terminalTitleOverride = action.Value
-			}
-			model.terminalTitleDirty = true
-			model.setNotice("Terminal title updated")
-		case "app.osc":
-			commands = append(commands, terminalOSCCommand(model.writeOSC, action.Value, "OSC"))
-		case "app.progress":
-			progress, err := hostui.ParseTerminalProgress(action.Value)
-			if err != nil {
-				model.appendLog("warn", "terminal progress: "+err.Error())
-			} else if payload, payloadErr := progress.OSCPayload(); payloadErr != nil {
-				model.appendLog("warn", "terminal progress: "+payloadErr.Error())
-			} else {
-				commands = append(commands, terminalOSCCommand(model.writeOSC, payload, "terminal progress"))
-			}
-		case "app.port.open":
-			commands = append(commands, execute(model.engine, "port open"))
-		case "app.port.close":
-			commands = append(commands, execute(model.engine, "port close"))
-		case "command":
-			if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") {
-				model.rebootPending = true
-				model.setNotice("Rebooting controller…")
-			}
-			commands = append(commands, execute(model.engine, action.Value))
 		}
 		if model.appActions != nil {
 			commands = append(commands, waitAppAction(model.appActions))
@@ -775,7 +736,22 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if command := model.observeUpdateEvent(event); command != nil {
 			commands = append(commands, command)
 		}
+		if operationID := strings.TrimSpace(event.Metadata["operation_id"]); operationID != "" &&
+			isAcknowledgedAppActionKind(event.Kind) &&
+			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
+			value := event.Metadata["value"]
+			if strings.EqualFold(event.Kind, "app.page") {
+				value = event.Metadata["page"]
+			}
+			action := hostui.AppAction{
+				Kind: event.Kind, Value: value, Source: event.Source,
+				Target: event.Metadata["target_instance"], OperationID: operationID,
+				Metadata: event.Metadata, At: event.Time,
+			}
+			commands = append(commands, func() tea.Msg { return appActionMsg(action) })
+		}
 		if event.Source == "board" && strings.EqualFold(event.Kind, "app.page") &&
+			strings.TrimSpace(event.Metadata["operation_id"]) == "" &&
 			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
 			if page, ok := pageForName(event.Metadata["page"]); ok {
 				model.switchPage(page)
@@ -783,6 +759,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if strings.EqualFold(event.Kind, "app.page") &&
+			strings.TrimSpace(event.Metadata["operation_id"]) == "" &&
 			strings.EqualFold(event.Metadata[hostui.NavigationSyncKey], hostui.NavigationSyncGroupUpdate) &&
 			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") &&
 			model.navigationSync {
@@ -797,6 +774,7 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if model.remote != nil && strings.EqualFold(event.Kind, "app.page") &&
+			strings.TrimSpace(event.Metadata["operation_id"]) == "" &&
 			!strings.EqualFold(event.Source, "board") &&
 			!hostui.HasCoordinatorNavigationMetadata(event.Metadata) &&
 			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
@@ -1030,8 +1008,22 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case terminalOSCResultMsg:
 		if message.err != nil {
 			model.appendLog("warn", message.kind+": "+message.err.Error())
-		} else {
+		} else if message.ack == nil {
 			model.setNotice(message.kind + " emitted")
+		}
+		if message.ack != nil {
+			ack := *message.ack
+			if message.err != nil {
+				ack.State = hostui.ActionStateRejected
+				ack.Reason = "terminal_output_unavailable"
+			}
+			model.rememberActionReceipt(ack)
+			commands = append(commands, acknowledgeAppAction(model.ackAppAction, ack))
+		}
+
+	case appActionAckResultMsg:
+		if message.err != nil {
+			model.appendLog("warn", "app action acknowledgement failed: "+message.err.Error())
 		}
 
 	case connectResultMsg:
@@ -1245,6 +1237,132 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return model, nil
 	}
 	return model, tea.Batch(commands...)
+}
+
+func (model Model) applyAppAction(action hostui.AppAction) (Model, []tea.Cmd, bool) {
+	var commands []tea.Cmd
+	acknowledge := func(state, reason string) {
+		if action.OperationID == "" {
+			return
+		}
+		ack := hostui.ActionAck{
+			OperationID: action.OperationID, InstanceID: model.instanceID,
+			State: state, Reason: reason,
+		}
+		model.rememberActionReceipt(ack)
+		commands = append(commands, acknowledgeAppAction(model.ackAppAction, ack))
+	}
+
+	switch action.Kind {
+	case "app.page":
+		coordinatorNavigation := hostui.HasCoordinatorNavigationMetadata(action.Metadata)
+		if coordinatorNavigation {
+			if !model.navigationSync {
+				acknowledge(hostui.ActionStateRejected, "navigation_sync_disabled")
+				return model, commands, false
+			}
+			pageName, accepted := model.acceptNavigationAction(action)
+			if !accepted {
+				acknowledge(hostui.ActionStateRejected, "stale_navigation")
+				return model, commands, false
+			}
+			action.Value = pageName
+		}
+		if page, ok := pageForName(action.Value); ok {
+			if coordinatorNavigation || action.OperationID != "" {
+				// Both coordinator navigation and exact typed app.page deliveries
+				// are remote application, not a fresh local group-navigation intent.
+				model.applySynchronizedPage(page)
+			} else {
+				model.switchPage(page)
+			}
+			if action.OperationID == "" {
+				model.setNotice("Opened " + pageDefinitions[page].Title)
+			}
+			acknowledge(hostui.ActionStateApplied, "")
+		} else {
+			model.appendLog("warn", "unknown app page: "+action.Value)
+			acknowledge(hostui.ActionStateRejected, "unknown_page")
+		}
+	case "app.quit":
+		return model, commands, true
+	case "app.title":
+		if strings.EqualFold(action.Value, "auto") {
+			model.terminalTitleOverride = ""
+		} else {
+			model.terminalTitleOverride = action.Value
+		}
+		model.terminalTitleDirty = true
+		if action.OperationID == "" {
+			model.setNotice("Terminal title updated")
+		}
+		acknowledge(hostui.ActionStateApplied, "")
+	case "app.osc":
+		ack := model.pendingActionAck(action)
+		commands = append(commands, terminalOSCCommand(model.writeOSC, action.Value, "OSC", ack))
+	case "app.progress":
+		progress, err := hostui.ParseTerminalProgress(action.Value)
+		if err != nil {
+			model.appendLog("warn", "terminal progress: "+err.Error())
+			acknowledge(hostui.ActionStateRejected, "invalid_progress")
+		} else if payload, payloadErr := progress.OSCPayload(); payloadErr != nil {
+			model.appendLog("warn", "terminal progress: "+payloadErr.Error())
+			acknowledge(hostui.ActionStateRejected, "invalid_progress")
+		} else {
+			ack := model.pendingActionAck(action)
+			commands = append(commands, terminalOSCCommand(model.writeOSC, payload, "terminal progress", ack))
+		}
+	case "app.port.open":
+		commands = append(commands, execute(model.engine, "port open"))
+	case "app.port.close":
+		commands = append(commands, execute(model.engine, "port close"))
+	case "command":
+		if strings.EqualFold(strings.TrimSpace(action.Value), "reset app") {
+			model.rebootPending = true
+			model.setNotice("Rebooting controller…")
+		}
+		commands = append(commands, execute(model.engine, action.Value))
+	default:
+		acknowledge(hostui.ActionStateRejected, "unsupported_action")
+	}
+	return model, commands, false
+}
+
+func isAcknowledgedAppActionKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "app.page", "app.title", "app.progress", "app.osc":
+		return true
+	default:
+		return false
+	}
+}
+
+func (model Model) pendingActionAck(action hostui.AppAction) *hostui.ActionAck {
+	if action.OperationID == "" {
+		return nil
+	}
+	return &hostui.ActionAck{
+		OperationID: action.OperationID, InstanceID: model.instanceID,
+		State: hostui.ActionStateApplied,
+	}
+}
+
+func (model *Model) rememberActionReceipt(ack hostui.ActionAck) {
+	if model == nil || ack.OperationID == "" {
+		return
+	}
+	if model.actionReceipts == nil {
+		model.actionReceipts = make(map[string]hostui.ActionAck)
+	}
+	if _, exists := model.actionReceipts[ack.OperationID]; !exists {
+		model.actionReceiptOrder = append(model.actionReceiptOrder, ack.OperationID)
+	}
+	model.actionReceipts[ack.OperationID] = ack
+	for len(model.actionReceiptOrder) > hostui.MaximumActionOperations {
+		oldest := model.actionReceiptOrder[0]
+		model.actionReceiptOrder = model.actionReceiptOrder[1:]
+		delete(model.actionReceipts, oldest)
+	}
 }
 
 func waitAppAction(actions <-chan hostui.AppAction) tea.Cmd {

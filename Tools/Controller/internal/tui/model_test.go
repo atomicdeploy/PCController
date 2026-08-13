@@ -890,6 +890,78 @@ func TestTUITerminalTitleAndOSCAppActions(t *testing.T) {
 	}
 }
 
+func TestTUITypedActionAcknowledgesActualResultAndDeduplicates(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var acknowledgements []hostui.ActionAck
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "host:tui",
+		WriteOSC: func(string) error { return nil },
+		AckAppAction: func(ack hostui.ActionAck) error {
+			acknowledgements = append(acknowledgements, ack)
+			return nil
+		},
+	})
+	updated, command := model.Update(appActionMsg(hostui.AppAction{
+		Kind: "app.title", Value: "Bench", Target: "host:tui", OperationID: "title-one",
+	}))
+	model = updated.(Model)
+	if receipt := model.actionReceipts["title-one"]; receipt.State != hostui.ActionStateApplied ||
+		model.terminalTitle() != "Bench" {
+		t.Fatalf("receipt=%#v title=%q", receipt, model.terminalTitle())
+	}
+	runTeaCommandTree(command)
+	if len(acknowledgements) != 1 || acknowledgements[0].OperationID != "title-one" {
+		t.Fatalf("acknowledgements=%#v", acknowledgements)
+	}
+
+	updated, command = model.Update(appActionMsg(hostui.AppAction{
+		Kind: "app.title", Value: "must-not-reapply", Target: "host:tui", OperationID: "title-one",
+	}))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.terminalTitle() != "Bench" || len(acknowledgements) != 2 ||
+		acknowledgements[1] != acknowledgements[0] {
+		t.Fatalf("duplicate title=%q acknowledgements=%#v", model.terminalTitle(), acknowledgements)
+	}
+
+	updated, command = model.Update(appActionMsg(hostui.AppAction{
+		Kind: "app.progress", Value: "warning 73", Target: "host:tui", OperationID: "progress-one",
+	}))
+	model = updated.(Model)
+	messages := runTeaCommandTree(command)
+	var terminalResult terminalOSCResultMsg
+	for _, message := range messages {
+		if result, ok := message.(terminalOSCResultMsg); ok {
+			terminalResult = result
+		}
+	}
+	if terminalResult.ack == nil || terminalResult.ack.OperationID != "progress-one" {
+		t.Fatalf("terminal result=%#v messages=%#v", terminalResult, messages)
+	}
+	updated, command = model.Update(terminalResult)
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if receipt := model.actionReceipts["progress-one"]; receipt.State != hostui.ActionStateApplied ||
+		len(acknowledgements) != 3 || acknowledgements[2].OperationID != "progress-one" {
+		t.Fatalf("receipt=%#v acknowledgements=%#v", receipt, acknowledgements)
+	}
+}
+
+func runTeaCommandTree(command tea.Cmd) []tea.Msg {
+	if command == nil {
+		return nil
+	}
+	message := command()
+	if batch, ok := message.(tea.BatchMsg); ok {
+		var result []tea.Msg
+		for _, nested := range batch {
+			result = append(result, runTeaCommandTree(nested)...)
+		}
+		return result
+	}
+	return []tea.Msg{message}
+}
+
 func TestUpdateEventsOpenProgrammingPageAndTrackVisibleProgress(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	model.writeOSC = func(string) error { return nil }

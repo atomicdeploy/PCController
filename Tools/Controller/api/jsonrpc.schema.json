@@ -47,6 +47,8 @@
         "method": {
           "enum": [
             "controller.app.action",
+            "controller.app.action.ack",
+            "controller.app.action.outcome",
             "controller.app.bridge",
             "controller.app.instance.get",
             "controller.app.instance.remove",
@@ -280,8 +282,18 @@
   "x-methods": {
     "controller.app.action": {
       "capability": "dynamic",
-      "summary": "Route a validated page, title, OSC progress, raw OSC, port, command, or lifecycle action to live application instances.",
+      "summary": "Freeze a validated action to exact live targets and return its correlated per-target delivery operation.",
       "idempotency": "non-idempotent"
+    },
+    "controller.app.action.ack": {
+      "capability": "host_configuration",
+      "summary": "Acknowledge one exact app-action target as applied or rejected.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.app.action.outcome": {
+      "capability": "read",
+      "summary": "Return one bounded app-action operation and its exact per-target outcomes.",
+      "idempotency": "safe"
     },
     "controller.app.bridge": {
       "capability": "read",

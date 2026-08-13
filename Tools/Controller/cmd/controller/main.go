@@ -1080,6 +1080,10 @@ func runTUIWithInitialAction(
 			WriteOSC: func(payload string) error {
 				return hostui.WriteOSC(stdout, payload)
 			},
+			AckAppAction: func(ack hostui.ActionAck) error {
+				_, ackErr := primary.actionCoordinator.Ack(ack)
+				return ackErr
+			},
 			ReportTerminal: func(page, title string) error {
 				ui := store.Current().UI
 				values := navigationReporter.NextValues()
@@ -1088,6 +1092,7 @@ func runTUIWithInitialAction(
 				values["terminal_title"] = title
 				values["terminal_osc"] = "enabled"
 				values["terminal_progress"] = "osc-9-4"
+				values[hostui.ActionCapabilitiesKey] = hostui.TUIActionCapabilities
 				_, err := primary.instances.Upsert(hostui.AppInstance{
 					ID: tuiInstanceID, Surface: "tui", Page: page, State: "active",
 					Self: &tuiSelf, Values: values,

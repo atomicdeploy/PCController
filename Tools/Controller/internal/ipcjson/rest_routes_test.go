@@ -93,6 +93,56 @@ func TestRESTAppLaunchReturnsTruthfulTypedOutcome(t *testing.T) {
 	}
 }
 
+func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	registry := hostui.NewInstanceRegistry()
+	if _, err := registry.Upsert(hostui.AppInstance{
+		ID: "web:one", Surface: "webui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.WebActionCapabilities},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	broker := hostui.NewActionBroker()
+	coordinator := hostui.NewActionCoordinator(registry, broker.Publish)
+	defer coordinator.Close()
+	handler := websocketMux(context.Background(), &Service{
+		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		AppAction: broker.Publish, AppActionSubmit: coordinator.Submit,
+		AppActionAck: coordinator.Ack, AppActionOutcome: coordinator.Outcome,
+		AppInstances: registry,
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/api/app/action", strings.NewReader(
+		`{"kind":"app.title","value":"Bench","target":"web:one","operation_id":"rest-operation","timeout_ms":1000}`,
+	))
+	request.RemoteAddr = "127.0.0.1:43210"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"accepted":true`) ||
+		!strings.Contains(response.Body.String(), `"operation_id":"rest-operation"`) {
+		t.Fatalf("submit status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/api/app/action/ack", strings.NewReader(
+		`{"operation_id":"rest-operation","instance_id":"web:one","state":"applied"}`,
+	))
+	request.RemoteAddr = "127.0.0.1:43210"
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"applied"`) {
+		t.Fatalf("ack status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/app/action/outcome?operation_id=rest-operation", nil)
+	request.RemoteAddr = "127.0.0.1:43210"
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"state":"applied"`) {
+		t.Fatalf("outcome status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 // TestCanonicalRESTRouteInventory exercises every implemented REST group through
 // the real top-level multiplexer. A missing registration therefore fails here
 // before a browser client, peer, or updater can silently drift from the server.
@@ -197,6 +247,8 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 		{name: "message", method: http.MethodPost, path: "/api/messages", body: `{"source":"client","target":"host","type":"operator.notice","text":"inventory"}`},
 		{name: "display", method: http.MethodPost, path: "/api/display", body: `{"target":"segments","text":"TEST","repeat":"once"}`},
 		{name: "app action", method: http.MethodPost, path: "/api/app/action", body: `{"kind":"app.progress","value":"normal 42","target":"tui"}`},
+		{name: "app action ack", method: http.MethodPost, path: "/api/app/action/ack", body: `{}`},
+		{name: "app action outcome", method: http.MethodGet, path: "/api/app/action/outcome?operation_id=inventory"},
 		{name: "app launch", method: http.MethodPost, path: "/api/app/launch", body: `{"surface":"webui","mode":"ensure"}`},
 		{name: "bridge list", method: http.MethodGet, path: "/api/bridges"},
 		{name: "bridge call", method: http.MethodPost, path: "/api/bridges/call", body: `{}`},

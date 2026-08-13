@@ -329,7 +329,8 @@ func TestRemoteTUIInstanceLeaseReportsRefreshesAndRemoves(t *testing.T) {
 		first.LeaseSeconds != remoteTUIInstanceLeaseSeconds || first.Self == nil ||
 		first.Values[hostui.NavigationSyncKey] != hostui.NavigationSyncFollow ||
 		first.Values[hostui.NavigationGroupKey] != hostui.DefaultNavigationGroup ||
-		first.Values["terminal_title"] != "PCController — Activity" {
+		first.Values["terminal_title"] != "PCController — Activity" ||
+		first.Values[hostui.ActionCapabilitiesKey] != hostui.TUIActionCapabilities {
 		t.Fatalf("first report=%#v", first)
 	}
 	if first.Values[hostui.NavigationRevisionKey] >= last.Values[hostui.NavigationRevisionKey] {
@@ -399,6 +400,31 @@ func TestRemoteTUISeparatesPresenceFromNavigationIntent(t *testing.T) {
 		t.Fatal("queued navigation intent was not committed")
 	}
 	lease.Close()
+}
+
+func TestRemoteTUIAcknowledgesTypedAppActionThroughCoordinatorRPC(t *testing.T) {
+	client := &remoteTUIIPC{}
+	var received hostui.ActionAck
+	client.callFn = func(_ context.Context, method string, params any, target any) error {
+		if method != "controller.app.action.ack" {
+			t.Fatalf("method=%q", method)
+		}
+		received = params.(hostui.ActionAck)
+		result := target.(*struct {
+			Accepted bool `json:"accepted"`
+		})
+		result.Accepted = true
+		return nil
+	}
+	want := hostui.ActionAck{
+		OperationID: "remote-action", InstanceID: "tui:remote", State: hostui.ActionStateApplied,
+	}
+	if err := client.AckAppAction(context.Background(), want); err != nil {
+		t.Fatal(err)
+	}
+	if received != want {
+		t.Fatalf("received=%#v want=%#v", received, want)
+	}
 }
 
 func TestRemoteTUIPollerEmitsAuthoritativeSessionResetBeforeNewEpoch(t *testing.T) {

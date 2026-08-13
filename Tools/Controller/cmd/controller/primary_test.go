@@ -312,3 +312,49 @@ func TestTerminalAppActionFansOutWithoutInterpretingOSC(t *testing.T) {
 		t.Fatalf("terminal app event=%#v", event)
 	}
 }
+
+func TestPrimaryPublishesTypedAppActionTargetOutcomesWithoutSuccessLogSpam(t *testing.T) {
+	runtime := control.New(control.Options{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := startPrimaryIPCAt(ctx, "127.0.0.1:0", runtime, shell.New(4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	if _, err := server.instances.Upsert(hostui.AppInstance{
+		ID: "tui:outcome", Surface: "tui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	afterID := runtime.LatestEventID()
+	operation, err := server.actionCoordinator.Submit(hostui.AppAction{
+		Kind: "app.title", Value: "Bench", Target: "tui:outcome",
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitContext, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	queued, err := runtime.WaitEvent(waitContext, afterID, "app.action.outcome")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.Stream != control.EventStreamState || queued.Metadata["state"] != hostui.ActionStateQueued ||
+		queued.Metadata["operation_id"] != operation.OperationID || queued.Metadata["instance_id"] != "tui:outcome" {
+		t.Fatalf("queued outcome=%#v", queued)
+	}
+	if _, err := server.actionCoordinator.Ack(hostui.ActionAck{
+		OperationID: operation.OperationID, InstanceID: "tui:outcome", State: hostui.ActionStateApplied,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := runtime.WaitEvent(waitContext, queued.ID, "app.action.outcome")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied.Stream != control.EventStreamState || applied.Metadata["state"] != hostui.ActionStateApplied {
+		t.Fatalf("applied outcome=%#v", applied)
+	}
+}

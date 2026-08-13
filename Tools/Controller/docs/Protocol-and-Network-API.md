@@ -571,6 +571,9 @@ request error.
 | `controller.app.navigate` | `page`, optional `target` | navigate `*`, a surface such as `webui`/`tui`, or one exact instance ID |
 | `controller.app.launch` | `surface`, optional `mode`, `target`, `page`, `idempotency_key` | ensure, launch, or focus only the named `tui` or `webui`; reports OS acceptance separately from live instance confirmation |
 | `controller.app.navigation.commit` | `group`, `source`, `page`, `operation_id` | commit a follower group's canonical page and return its epoch, revision, correlated operation ID, and ordered deliveries |
+| `controller.app.action` | `kind`, optional `value`, `target`, `operation_id`, `timeout_ms` | freeze the selector to exact live clients, push one correlated delivery per target, and return queued/rejected outcomes |
+| `controller.app.action.ack` | `operation_id`, `instance_id`, `state`, optional `reason` | acknowledge one exact target as `applied` or `rejected`; duplicate identical terminal acknowledgements are idempotent |
+| `controller.app.action.outcome` | `operation_id` | read the bounded current operation with per-target `queued`, `applied`, `rejected`, or `timeout` state |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
 | `controller.history.timeline` | optional `since`, `limit` | durable important-event timeline |
 | `controller.os.facts.catalog`, `controller.host.facts.catalog` | `{}` | fixed read-only Windows profile descriptors, columns, and row limits |
@@ -646,6 +649,20 @@ at most three new-window start attempts per surface in a rolling ten-second
 window; `ensure`/`focus` calls that reuse an existing instance do not consume
 that allowance. A limited request returns `effective=unavailable` with a
 rate-limit reason rather than invoking an OS launcher.
+
+Typed application actions are resolved once against the pruned live instance
+registry. The returned operation records the exact instance IDs and surfaces;
+an unknown or offline selector is rejected with an empty target set rather than
+inventing an instance. Clients advertise the bounded `app_actions` enum in
+their presence values, apply only an exact matching pushed action, deduplicate
+its `operation_id`, and acknowledge the actual application result. A legacy
+TUI/WebUI without the new advertisement may still receive an action through a
+known delivery path, but it remains `queued` until acknowledgement and becomes
+`timeout` after the bounded deadline. Operation history is bounded and expires;
+ordinary delivery and outcome transitions use the existing event streams and
+bridge fan-out, never polling. Successful queued/applied transitions use the
+state stream so they do not flood operator activity logs, while rejection and
+timeout remain visible one-shot activity events.
 
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded
@@ -760,7 +777,9 @@ All JSON endpoints share the IPC listener:
 | `POST /api/app/instances` | create/refresh an instance report |
 | `DELETE /api/app/instances?id=...` | remove one instance report |
 | `POST /api/app/navigate` | navigate a page with optional target instance/surface |
-| `POST /api/app/action` | route a validated page/title/progress/OSC/command/lifecycle action with optional target instance/surface |
+| `POST /api/app/action` | freeze and route a correlated page/title/progress/OSC/command/lifecycle action to exact live targets; response includes `accepted` plus the operation |
+| `POST /api/app/action/ack` | acknowledge one exact target as applied/rejected |
+| `GET /api/app/action/outcome?operation_id=...` | read one bounded per-target operation outcome |
 | `POST /api/app/launch` | ensure, start, or focus the named TUI/WebUI surface without accepting process or shell input |
 | `GET /api/bridges` | configured peer names/protocols and live state |
 | `POST /api/bridges/call` | `peer` plus a nested JSON-RPC `request` |

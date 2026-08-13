@@ -23,7 +23,13 @@ type updatePresentation struct {
 
 type terminalOSCResultMsg struct {
 	kind string
+	ack  *hostui.ActionAck
 	err  error
+}
+
+type appActionAckResultMsg struct {
+	operationID string
+	err         error
 }
 
 func (model Model) terminalTitle() string {
@@ -71,12 +77,31 @@ func (model *Model) acceptNavigationAction(action hostui.AppAction) (string, boo
 	return model.navigationCursor.AcceptFor(action, model.navigationGroup, epoch, revision)
 }
 
-func terminalOSCCommand(write func(string) error, payload, kind string) tea.Cmd {
+func terminalOSCCommand(
+	write func(string) error,
+	payload, kind string,
+	ack *hostui.ActionAck,
+) tea.Cmd {
 	return func() tea.Msg {
 		if write == nil {
-			return terminalOSCResultMsg{kind: kind, err: fmt.Errorf("terminal OSC output is unavailable")}
+			return terminalOSCResultMsg{kind: kind, ack: ack, err: fmt.Errorf("terminal OSC output is unavailable")}
 		}
-		return terminalOSCResultMsg{kind: kind, err: write(payload)}
+		return terminalOSCResultMsg{kind: kind, ack: ack, err: write(payload)}
+	}
+}
+
+func acknowledgeAppAction(
+	acknowledge func(hostui.ActionAck) error,
+	ack hostui.ActionAck,
+) tea.Cmd {
+	return func() tea.Msg {
+		if acknowledge == nil {
+			return appActionAckResultMsg{
+				operationID: ack.OperationID,
+				err:         fmt.Errorf("app action acknowledgement is unavailable"),
+			}
+		}
+		return appActionAckResultMsg{operationID: ack.OperationID, err: acknowledge(ack)}
 	}
 }
 
@@ -121,7 +146,7 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	if payloadErr != nil {
 		return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
 	}
-	return terminalOSCCommand(model.writeOSC, payload, "update progress")
+	return terminalOSCCommand(model.writeOSC, payload, "update progress", nil)
 }
 
 func (model Model) updateProgressLines() []string {

@@ -264,6 +264,74 @@ func TestAppBridgeReturnsCoordinatorSelfInformation(t *testing.T) {
 	}
 }
 
+func TestTypedAppActionRPCSubmitsAcknowledgesAndQueriesExactOutcome(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	registry := hostui.NewInstanceRegistry()
+	if _, err := registry.Upsert(hostui.AppInstance{
+		ID: "tui:one", Surface: "tui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	broker := hostui.NewActionBroker()
+	deliveries := broker.Events()
+	coordinator := hostui.NewActionCoordinator(registry, broker.Publish)
+	defer coordinator.Close()
+	service := Service{
+		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		AppAction: broker.Publish, AppActionSubmit: coordinator.Submit,
+		AppActionAck: coordinator.Ack, AppActionOutcome: coordinator.Outcome,
+		AppInstances: registry,
+	}
+	params, _ := json.Marshal(map[string]any{
+		"kind": "app.progress", "value": "normal 42", "target": "tui:one",
+		"operation_id": "rpc-operation", "timeout_ms": 1000,
+	})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.app.action", Params: params})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	envelope, ok := response.Result.(appActionOperationEnvelope)
+	if !ok || !envelope.Accepted || envelope.Operation.OperationID != "rpc-operation" ||
+		len(envelope.Operation.Targets) != 1 || envelope.Operation.Targets[0].State != hostui.ActionStateQueued {
+		t.Fatalf("submit response=%#v", response.Result)
+	}
+	select {
+	case delivery := <-deliveries:
+		if delivery.OperationID != "rpc-operation" || delivery.Target != "tui:one" {
+			t.Fatalf("delivery=%#v", delivery)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("typed app action was not delivered")
+	}
+
+	ack, _ := json.Marshal(hostui.ActionAck{
+		OperationID: "rpc-operation", InstanceID: "tui:one", State: hostui.ActionStateApplied,
+	})
+	response = service.Dispatch(context.Background(), Request{Method: "controller.app.action.ack", Params: ack})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	envelope, ok = response.Result.(appActionOperationEnvelope)
+	if !ok || envelope.Operation.State != hostui.ActionStateApplied {
+		t.Fatalf("ack response=%#v", response.Result)
+	}
+	query, _ := json.Marshal(map[string]string{"operation_id": "rpc-operation"})
+	response = service.Dispatch(context.Background(), Request{Method: "controller.app.action.outcome", Params: query})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	envelope, ok = response.Result.(appActionOperationEnvelope)
+	if !ok || envelope.Operation.Targets[0].State != hostui.ActionStateApplied {
+		t.Fatalf("query response=%#v", response.Result)
+	}
+	if requestCapability("controller.app.action.ack", ack) != capabilityHostConfig ||
+		requestCapability("controller.app.action.outcome", query) != capabilityRead {
+		t.Fatal("typed app action capabilities are not mutation/read separated")
+	}
+}
+
 func TestExecuteRoutesAppPageThroughTypedActionBroker(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

@@ -1467,7 +1467,7 @@
     "/api/app/action": {
       "post": {
         "operationId": "post_api_app_action",
-        "summary": "Route a validated action to all, one surface, or one live application instance",
+        "summary": "Freeze and route a correlated action to exact live application instances",
         "tags": [
           "action"
         ],
@@ -1507,6 +1507,89 @@
                 "additionalProperties": true
               }
             }
+          }
+        }
+      }
+    },
+    "/api/app/action/ack": {
+      "post": {
+        "operationId": "post_api_app_action_ack",
+        "summary": "Acknowledge one exact app-action target outcome",
+        "tags": [
+          "action"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/app/action/outcome": {
+      "get": {
+        "operationId": "get_api_app_action_outcome",
+        "summary": "Read one bounded app-action operation outcome",
+        "tags": [
+          "action"
+        ],
+        "x-required-capability": "read",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
           }
         }
       }
@@ -3511,6 +3594,8 @@
             "type": "string",
             "enum": [
               "controller.app.action",
+              "controller.app.action.ack",
+              "controller.app.action.outcome",
               "controller.app.bridge",
               "controller.app.instance.get",
               "controller.app.instance.remove",

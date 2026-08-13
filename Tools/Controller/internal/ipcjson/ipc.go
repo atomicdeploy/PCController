@@ -273,6 +273,9 @@ type Service struct {
 	HostSurface           string
 	CoordinatorInstanceID string
 	AppAction             func(hostui.AppAction) error
+	AppActionSubmit       func(hostui.AppAction, time.Duration) (hostui.ActionOperation, error)
+	AppActionAck          func(hostui.ActionAck) (hostui.ActionOperation, error)
+	AppActionOutcome      func(string) (hostui.ActionOperation, error)
 	AppLaunch             func(context.Context, hostui.SurfaceLaunchRequest) (hostui.SurfaceLaunchResult, error)
 	NavigationCommand     func(hostui.NavigationCommand) (hostui.NavigationOutcome, error)
 	AppInstances          *hostui.InstanceRegistry
@@ -297,6 +300,40 @@ type Service struct {
 	sessionMu           sync.Mutex
 	sessionTickets      map[[sha256.Size]byte]sessionTicket
 	sessionClock        func() time.Time
+}
+
+type appActionRequest struct {
+	hostui.AppAction
+	TimeoutMS int `json:"timeout_ms,omitempty"`
+}
+
+type appActionOperationEnvelope struct {
+	Accepted  bool                   `json:"accepted"`
+	Operation hostui.ActionOperation `json:"operation"`
+}
+
+func appActionTimeout(milliseconds int) (time.Duration, error) {
+	if milliseconds == 0 {
+		return 0, nil
+	}
+	if milliseconds < 1 || int64(milliseconds) > hostui.MaximumActionTimeout.Milliseconds() {
+		return 0, fmt.Errorf(
+			"app action timeout_ms must be 1..%d",
+			hostui.MaximumActionTimeout.Milliseconds(),
+		)
+	}
+	return time.Duration(milliseconds) * time.Millisecond, nil
+}
+
+func appActionEnvelope(operation hostui.ActionOperation) appActionOperationEnvelope {
+	accepted := false
+	for _, target := range operation.Targets {
+		if target.State != hostui.ActionStateRejected {
+			accepted = true
+			break
+		}
+	}
+	return appActionOperationEnvelope{Accepted: accepted, Operation: operation}
 }
 
 // browserUISettings is the narrow persistent host-owned subset exposed to the
@@ -1146,16 +1183,56 @@ func (service *Service) dispatch(
 			result, err = service.updatePeerHost(ctx, params)
 		}
 	case "controller.app.action":
-		var action hostui.AppAction
-		if err = decodeParams(request.Params, &action); err == nil {
+		var params appActionRequest
+		if err = decodeParams(request.Params, &params); err == nil {
+			action := params.AppAction
 			if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
 				err = errors.New("navigation synchronization metadata is coordinator-owned; use controller.app.navigate")
+			} else if service.AppActionSubmit != nil {
+				action.Source = firstNonempty(action.Source, "ipc")
+				var timeout time.Duration
+				timeout, err = appActionTimeout(params.TimeoutMS)
+				if err == nil {
+					var operation hostui.ActionOperation
+					operation, err = service.AppActionSubmit(action, timeout)
+					if err == nil {
+						result = appActionEnvelope(operation)
+					}
+				}
 			} else if service.AppAction == nil {
 				err = errors.New("primary app action routing is unavailable")
 			} else {
 				action.Source = firstNonempty(action.Source, "ipc")
 				err = service.AppAction(action)
 				result = map[string]bool{"accepted": err == nil}
+			}
+		}
+	case "controller.app.action.ack":
+		var params hostui.ActionAck
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppActionAck == nil {
+				err = errors.New("app action acknowledgement routing is unavailable")
+			} else {
+				var operation hostui.ActionOperation
+				operation, err = service.AppActionAck(params)
+				if err == nil {
+					result = appActionOperationEnvelope{Accepted: true, Operation: operation}
+				}
+			}
+		}
+	case "controller.app.action.outcome":
+		var params struct {
+			OperationID string `json:"operation_id"`
+		}
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppActionOutcome == nil {
+				err = errors.New("app action outcome routing is unavailable")
+			} else {
+				var operation hostui.ActionOperation
+				operation, err = service.AppActionOutcome(params.OperationID)
+				if err == nil {
+					result = appActionOperationEnvelope{Accepted: true, Operation: operation}
+				}
 			}
 		}
 	case "controller.app.page":
@@ -1941,7 +2018,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.host.facts.catalog", "controller.hotkeys.get",
 		"controller.bridge.list", "controller.network.peers.get",
 		"controller.app.instances", "controller.app.instance.get",
-		"controller.app.bridge",
+		"controller.app.bridge", "controller.app.action.outcome",
 		"controller.webhooks.status",
 		"controller.webhooks.pending", "controller.webhooks.dead":
 		return capabilityRead
@@ -1950,9 +2027,9 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.peripherals.set",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
-                        "controller.app.page", "controller.app.navigate", "controller.app.launch",
-                        "controller.app.instance.report", "controller.app.instance.remove",
-                        "controller.network.peers.set":
+		"controller.app.page", "controller.app.navigate", "controller.app.action.ack", "controller.app.launch",
+		"controller.app.instance.report", "controller.app.instance.remove",
+		"controller.network.peers.set":
 		return capabilityHostConfig
 	case "controller.os.key", "controller.virtual_key":
 		return capabilityVirtualKeys
@@ -3090,17 +3167,18 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
 			return
 		}
-		if service.AppAction == nil {
+		if service.AppActionSubmit == nil && service.AppAction == nil {
 			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
 			return
 		}
-		var action hostui.AppAction
+		var params appActionRequest
 		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
 		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&action); err != nil {
+		if err := decoder.Decode(&params); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		action := params.AppAction
 		action.Source = "rest"
 		if hostui.HasCoordinatorNavigationMetadata(action.Metadata) {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
@@ -3108,11 +3186,83 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			})
 			return
 		}
+		if service.AppActionSubmit != nil {
+			timeout, timeoutErr := appActionTimeout(params.TimeoutMS)
+			if timeoutErr != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": timeoutErr.Error()})
+				return
+			}
+			operation, submitErr := service.AppActionSubmit(action, timeout)
+			if submitErr != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": submitErr.Error()})
+				return
+			}
+			envelope := appActionEnvelope(operation)
+			status := http.StatusAccepted
+			if !envelope.Accepted {
+				status = http.StatusConflict
+			}
+			writeHTTPJSON(writer, status, envelope)
+			return
+		}
 		if err := service.AppAction(action); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		writeHTTPJSON(writer, http.StatusAccepted, map[string]bool{"accepted": true})
+	})
+	mux.HandleFunc("/api/app/action/ack", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		if service.AppActionAck == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "app action acknowledgement routing is unavailable"})
+			return
+		}
+		var params hostui.ActionAck
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		operation, err := service.AppActionAck(params)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, appActionOperationEnvelope{Accepted: true, Operation: operation})
+	})
+	mux.HandleFunc("/api/app/action/outcome", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+			return
+		}
+		if service.AppActionOutcome == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "app action outcome routing is unavailable"})
+			return
+		}
+		operation, err := service.AppActionOutcome(request.URL.Query().Get("operation_id"))
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusNotFound, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, appActionOperationEnvelope{Accepted: true, Operation: operation})
 	})
 	mux.HandleFunc("/api/bridges", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {

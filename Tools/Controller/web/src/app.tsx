@@ -92,6 +92,13 @@ import { BuzzerPlaybackTimeline, type BuzzerPath } from './buzzer-routing'
 import { emptySnapshot } from './types'
 import type { SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
+import {
+  AppActionReceiptCache,
+  applyWebAppAction,
+  pushedAppAction,
+  type AppActionAck,
+  type WebActionProgress,
+} from './app-actions'
 
 const DashboardPage = lazy(() => import('./views').then(({ DashboardView }) => ({ default: DashboardView })))
 const ControlsPage = lazy(() => import('./views').then(({ ControlsView }) => ({ default: ControlsView })))
@@ -447,6 +454,8 @@ export default function App() {
     detail: string
   }>({ state: 'idle', detail: '' })
   const [navigationSession] = useState(() => new NavigationSession())
+	const [remoteTitleOverride, setRemoteTitleOverride] = useState<string | null>(null)
+	const [remoteActionProgress, setRemoteActionProgress] = useState<WebActionProgress | null>(null)
   const [relayedTerminal, setRelayedTerminal] = useState<RelayedTerminalEntry[]>([])
   const toastID = useRef(0)
   const goChordUntil = useRef(0)
@@ -466,6 +475,7 @@ export default function App() {
   const boardSettingsReadGate = useRef(new BoardSettingsReadGate())
   const boardSettingsRequestGeneration = useRef('')
   const snapshotRef = useRef(snapshot)
+  const appActionReceipts = useRef(new AppActionReceiptCache())
   const t = useMemo(() => translator(appearance.locale), [appearance.locale])
   const productTitle = effectiveProductTitle(uiConfig?.name, __PRODUCT_NAME__)
   const productShortName = productMark(productTitle, __PRODUCT_SHORT_NAME__)
@@ -500,8 +510,8 @@ export default function App() {
 
   useEffect(() => {
 	const pageTitle = t(navigation.find((item) => item.id === page)?.label ?? 'dashboard')
-	document.title = `${productTitle} — ${pageTitle}`
-	}, [page, productTitle, t])
+	document.title = remoteTitleOverride ?? `${productTitle} — ${pageTitle}`
+	}, [page, productTitle, remoteTitleOverride, t])
 
   useEffect(() => {
     updateRuntimeFavicon(demo ? 'offline' : controllerFaviconState(snapshot))
@@ -632,6 +642,7 @@ export default function App() {
         color_mode: appearance.theme,
         locale: appearance.locale,
         direction: resolvedDirection,
+		app_actions: 'app.page,app.progress,app.title',
         ...navigationSession.nextValues(navigationSync, catchUp),
       },
     })
@@ -1234,7 +1245,36 @@ export default function App() {
               setEvents((current) => prependSignificantControllerEvent(current, event))
               tabChannelRef.current?.publishControllerEvent(event)
             }
-            if (event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
+			const typedAction = pushedAppAction(event, appInstanceID)
+			if (typedAction) {
+				let acknowledgement = appActionReceipts.current.get(typedAction.operationID)
+				if (!acknowledgement) {
+					const effect = applyWebAppAction(typedAction)
+					acknowledgement = {
+						operation_id: typedAction.operationID,
+						instance_id: appInstanceID,
+						state: effect.outcome,
+						...(effect.outcome === 'rejected' ? { reason: effect.reason } : {}),
+					} satisfies AppActionAck
+					if (effect.outcome === 'applied') {
+						if ('page' in effect) {
+							applyPage(effect.page, 'replace')
+							audioRef.current?.cue('navigation', 'forward')
+						} else if ('title' in effect) {
+							setRemoteTitleOverride(effect.title)
+						} else if ('progress' in effect) {
+							setRemoteActionProgress(effect.progress)
+						}
+					}
+					appActionReceipts.current.remember(acknowledgement)
+				}
+				void rpc('controller.app.action.ack', acknowledgement).catch((cause) => {
+					notify('warning',
+						appearance.locale === 'fa' ? 'تأیید فرمان ارسال نشد' : 'Action not confirmed',
+						cause instanceof Error ? cause.message : String(cause))
+				})
+			}
+            if (!event.metadata?.operation_id && event.kind.toLowerCase() === 'app.page' && isFreshAppAction(event.time) &&
                 matchesAppTarget(event.metadata?.target_instance, appInstanceID, 'webui')) {
               const destination = pageFromAppAction(event.metadata?.page ?? event.metadata?.value ?? event.text)
               if (destination) {
@@ -1398,6 +1438,18 @@ export default function App() {
       inert={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
       aria-hidden={!bootResolved || bootOpen || hotkeyHelp ? true : undefined}
     >
+	  {remoteActionProgress && (
+		<div
+		  className={`app-action-progress app-action-progress--${remoteActionProgress.state}`}
+		  role="progressbar"
+		  aria-label={appearance.locale === 'fa' ? 'پیشرفت فرمان راه دور' : 'Remote action progress'}
+		  aria-valuemin={0}
+		  aria-valuemax={100}
+		  aria-valuenow={remoteActionProgress.percent}
+		>
+		  <span style={remoteActionProgress.percent === undefined ? undefined : { width: `${remoteActionProgress.percent}%` }} />
+		</div>
+	  )}
       <aside className="sidebar" aria-label={t('primaryNavigation')}>
         <div className="brand">
           <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><span aria-hidden="true">{productShortName}</span><i /><i /></a>
