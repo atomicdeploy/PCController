@@ -196,6 +196,28 @@ struct MotionKeyBinding {
   bool reverse;
 };
 
+// MotionPresentation is derived from the electrically applied relay mask, so
+// the TM1637 reports the same side/direction for physical, RF, host, and macro
+// commands. When both sides run, alternateSide selects the one to display.
+struct MotionPresentation {
+  uint8_t side;
+  bool reverse;
+  bool active;
+};
+
+constexpr MotionPresentation motionPresentation(uint8_t relayMask,
+                                                  bool alternateSide) {
+  const bool sideA = (relayMask & (1U << 1)) != 0;
+  const bool sideB = (relayMask & (1U << 3)) != 0;
+  if (!sideA && !sideB) return {0, false, false};
+  const uint8_t side = sideA && sideB
+                           ? static_cast<uint8_t>(alternateSide)
+                           : static_cast<uint8_t>(sideB);
+  return {side,
+          (relayMask & (1U << static_cast<uint8_t>(side * 2U))) != 0,
+          true};
+}
+
 constexpr MotionKeyBinding motionKeyBinding(MenuAction action) {
   return {static_cast<uint8_t>(action >= MENU_DECREASE),
           action == MENU_NEXT || action == MENU_INCREASE};
