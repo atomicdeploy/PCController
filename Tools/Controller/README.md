@@ -151,6 +151,14 @@ rejects MSYS-only targets. Use `--no-shared-library` only when intentionally
 building without the ABI. See
 [C Library API](docs/C-Library-API.md).
 
+For a focused library-only CMake/CTest workflow, configure
+`Tools/Controller` with a native compiler passed as
+`-DPCCONTROLLER_CABI_CC=...`; its `pccontroller_cabi` and
+`pccontroller_cabi_smoke` targets use that compiler for both CGO and the
+external C consumer. The CMake project validates the Windows target/macros and
+rejects MSYS/Cygwin before invoking Go; it intentionally delegates package
+selection and provisioning to the canonical host packager.
+
 ## Embedded web control center
 
 Launch the full primary host lifecycle and open the same-origin app:
