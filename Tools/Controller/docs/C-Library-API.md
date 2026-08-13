@@ -8,7 +8,7 @@ The normal reusable API is the Go package at the module root:
 import controller "pccontroller.local/controller"
 ```
 
-For other languages, `cmd/controllerlib` exposes a deliberately small,
+For other languages, `cmd/controller-cabi` exposes a deliberately small,
 language-neutral JSON ABI:
 
 ```c
