@@ -29,6 +29,12 @@ enum MenuPage : uint8_t {
   PAGE_COUNT
 };
 
+// PAGE_MOTION remains a stable direct-navigation compatibility alias, but the
+// production directory and local browsing expose only the unified KEY page.
+constexpr bool menuPageNavigable(uint8_t page) {
+  return page < PAGE_COUNT && page != PAGE_MOTION;
+}
+
 // Top-level pages and modal editors consumed by ModeManager.
 enum ProgramMode : uint8_t {
   MODE_BOOT = 0,

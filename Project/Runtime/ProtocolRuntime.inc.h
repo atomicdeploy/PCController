@@ -227,9 +227,13 @@ void serviceStatusLedPush() {
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
 // Reports one built-in page's stable ID, parent category, flags, and label.
 void sendMenuList(uint8_t sequence, uint8_t cursor) {
-  uint8_t payload[46] = {1, PAGE_COUNT, 0xFF, 0};
+  uint8_t payload[46] = {1, PAGE_COUNT - 1U, 0xFF, 0};
   uint8_t index = 4;
   while (cursor < PAGE_COUNT && payload[3] < 7) {
+    if (!menuPageNavigable(cursor)) {
+      ++cursor;
+      continue;
+    }
     payload[index++] = cursor;
     payload[index++] = static_cast<uint8_t>(pageToMode(cursor));
     for (uint8_t character = 0; character < 4; ++character) {

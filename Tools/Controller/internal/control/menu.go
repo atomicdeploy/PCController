@@ -42,7 +42,6 @@ var protocolMenuPages = []MenuPageInfo{
 	{9, "keys", "KEY", "Motion Keys", "K1/K2 control Side A; K3/K4 control Side B"},
 	{10, "user-pwm", "uPWM", "User PWM", "Eight user MOSFET output values"},
 	{11, "user-relays", "r5-8", "User Relays", "R5 through R8 toggle or momentary control"},
-	{12, "motion", "MOVE", "Motion", "Side A and Side B direction/output control"},
 	{13, "rf-learn", "LErn", "RF Learn", "Learn and map 433 MHz controls"},
 }
 
@@ -194,10 +193,20 @@ func queryMenuLayoutForCatalog(
 	if err != nil {
 		return MenuLayout{}, err
 	}
+	order := make([]byte, 0, len(pages))
+	var allowedMask uint16
+	for _, page := range pages {
+		allowedMask |= uint16(1) << page.ID
+	}
+	for _, id := range decoded.Order {
+		if allowedMask&(uint16(1)<<id) != 0 {
+			order = append(order, id)
+		}
+	}
 	return CanonicalMenuLayout(pages, MenuLayout{
 		Schema: decoded.Schema, Supported: true, Persistent: true,
-		Source: "board EEPROM MENU_LAYOUT", VisibleMask: decoded.VisibleMask,
-		Order: decoded.Order,
+		Source: "board EEPROM MENU_LAYOUT", VisibleMask: decoded.VisibleMask & allowedMask,
+		Order: order,
 	})
 }
 
@@ -225,9 +234,15 @@ func PersistMenuLayout(ctx context.Context, runtime *Runtime, requested MenuLayo
 	if err != nil {
 		return MenuLayout{}, err
 	}
+	wireOrder := append([]byte(nil), requested.Order...)
+	if len(catalog.Pages) == 13 {
+		// Stable page 12 is the retired MOVE alias. The AVR storage schema still
+		// reserves all 14 stable IDs, so keep it hidden in the wire permutation.
+		wireOrder = append(wireOrder, 12)
+	}
 	payload, err := native.EncodeMenuLayout(native.MenuLayout{
 		Schema: native.MenuLayoutSchema, VisibleMask: requested.VisibleMask,
-		Order: requested.Order,
+		Order: wireOrder,
 	})
 	if err != nil {
 		return MenuLayout{}, err
