@@ -221,7 +221,9 @@ export function parseArguments(argv, env = process.env) {
 		appName: undefined,
 		tagline: undefined,
 		buildTime: '',
-		buildTimestamp: ''
+		buildTimestamp: '',
+		firmwareProfile: environmentValue(env, 'PCCONTROLLER_FIRMWARE_PROFILE') || 'source',
+		firmwareFeatures: (environmentValue(env, 'PCCONTROLLER_FIRMWARE_FEATURES') || '').trim().split(/\s+/u).filter(Boolean)
 	}
 	let substantive = false
 	for (let index = 0; index < argv.length; index += 1) {
@@ -298,6 +300,14 @@ export function parseArguments(argv, env = process.env) {
 				const [value, next] = valueAfter(argv, index, inline, name)
 				options.buildTimestamp = value; index = next; break
 			}
+			case '--firmware-profile': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.firmwareProfile = value.toLowerCase(); index = next; break
+			}
+			case '--firmware-feature': {
+				const [value, next] = valueAfter(argv, index, inline, name)
+				options.firmwareFeatures.push(value); index = next; break
+			}
 			default: throw new BuildError(`unknown option: ${argument}`, 2)
 		}
 	}
@@ -365,7 +375,9 @@ export function createPlan(options, identity, platform = process.platform) {
 			sketch: PROJECT_ROOT,
 			outputDir: FIRMWARE_OUTPUT,
 			toolchainCLI: options.toolchainCLI,
-			toolchainConfig: options.toolchainConfig
+			toolchainConfig: options.toolchainConfig,
+			firmwareProfile: options.firmwareProfile,
+			firmwareFeatures: options.firmwareFeatures
 		})
 		actions.push(commandAction(
 			'firmware-compile',
@@ -516,6 +528,8 @@ Safe build options:
   --tagline TEXT            Embed the default first-run host/WebUI tagline
   --build-time ISO          Freeze host build time for reproducible packaging
   --build-timestamp HEX     Freeze packed firmware timestamp
+  --firmware-profile NAME   source|full-peripheral|motion-macro|key-diagnostic|custom
+  --firmware-feature X=on   Repeatable compile-gate override by documented ID
   --toolchain-sync          Explicitly synchronize firmware dependencies
   --toolchain-cli PATH      Dependency CLI override (compile or sync)
   --toolchain-config PATH   Dependency CLI config override (compile)
@@ -1861,6 +1875,16 @@ function firmwareArtifact(manifest, role) {
 	return { ...artifact, absolutePath: path }
 }
 
+export function compactFirmwareFeatureRows(build) {
+	if (!build || !Array.isArray(build.features)) return []
+	return build.features.map(feature => [
+		feature.enabled ? '✓ included' : '— excluded',
+		feature.macro,
+		Array.isArray(feature.runtime) && feature.runtime.length ? feature.runtime.join(', ') : '—',
+		feature.label
+	])
+}
+
 function compileFirmware(options, identity, env, controllerPath, log) {
 	log.stage('🔧', 'Compiling AVR firmware through the Controller interface')
 	const command = createControllerProgramCommand({
@@ -1869,7 +1893,9 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 		sketch: PROJECT_ROOT,
 		outputDir: FIRMWARE_OUTPUT,
 		toolchainCLI: options.toolchainCLI,
-		toolchainConfig: options.toolchainConfig
+		toolchainConfig: options.toolchainConfig,
+		firmwareProfile: options.firmwareProfile,
+		firmwareFeatures: options.firmwareFeatures
 	})
 	run(command.file, command.args, { cwd: command.cwd, env, verbose: options.verbose })
 	log.stage('💾', 'Generating and validating the complete safe default EEPROM image')
@@ -1894,6 +1920,18 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 		['Source', `${manifest.source?.buildHash || shortHash(manifest.source?.sha256)} (${manifest.source?.files || '?'} files)`],
 		['Packed build time', manifest.source?.buildTimestamp || identity.packedTimestamp]
 	])
+	if (manifest.build?.profile && compactFirmwareFeatureRows(manifest.build).length) {
+		log.table(
+			`🧩 Firmware profile · ${manifest.build.profile.id} (${manifest.build.profile.value}) · HELLO ${manifest.build.buildFlagsHex} · caps ${manifest.build.capabilitiesHex}`,
+			[
+				{ label: 'State' },
+				{ label: 'Compile gate' },
+				{ label: 'Runtime' },
+				{ label: 'Feature' }
+			],
+			compactFirmwareFeatureRows(manifest.build)
+		)
+	}
 	log.table('💾 Firmware memory map', [
 		{ label: 'Image' },
 		{ label: 'Used', align: 'right' },

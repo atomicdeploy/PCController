@@ -107,6 +107,39 @@ test("native summaries print target-correct checksum commands", () => {
   }
 });
 
+test("firmware summary links every compile gate and capability to exact source", () => {
+  const directory = mkdtempSync(join(tmpdir(), "pccontroller-firmware-summary-"));
+  try {
+    const archive = resolve(directory, "PCController-Firmware-test-AVR-ATmega328P.tar.gz");
+    const manifest = resolve(directory, "firmware-manifest.json");
+    const dependencies = resolve(directory, "toolchain-lock.json");
+    const packageRoot = resolve(directory, "package");
+    writeFileSync(archive, "firmware archive", "utf8");
+    writeFileSync(dependencies, JSON.stringify({ libraries: [] }), "utf8");
+    writeFileSync(resolve(directory, "application.hex"), "hex", "utf8");
+    writeFileSync(manifest, JSON.stringify({
+      target: { mcu: "atmega328p", clockHz: 16000000, bootloader: "Urboot", baud: 115200, fqbn: "test" },
+      source: { files: 3, sha256: "a".repeat(64), buildHash: "12345678", packedTimestamp: "12345678" },
+      build: {
+        profile: { label: "Full peripheral", value: 0, docs: "docs/Firmware-Features-and-Profiles.md#profiles" },
+        buildFlagsHex: "0xD9", capabilitiesHex: "0x957DFFBF",
+        features: [{ enabled: true, macro: "PCCONTROLLER_ENABLE_INA219", runtime: ["cap b0"], label: "INA219 telemetry", description: "Supply telemetry.", docs: "docs/Firmware-Features-and-Profiles.md#ina219", source: "ProjectConfig.h" }],
+        capabilities: [{ enabled: true, bit: 0, label: "INA219", description: "Supply telemetry.", docs: "docs/Firmware-Features-and-Profiles.md#runtime-capabilities", source: "Project/Firmware/ProtocolRuntime.inc.h" }],
+      },
+      artifacts: [{ role: "application", path: resolve(directory, "application.hex"), dataBytes: 32000, capacityBytes: 32384, freeBytes: 384, usagePercent: 98.81, sha256: "b".repeat(64), containerBytes: 3 }],
+      stackBudget: { staticSramBytes: 1400, sramCapacityBytes: 2048, estimatedPeakSramBytes: 1700, estimatedFreeSramBytes: 348, rfInterruptAllowanceBytes: 60, minimumFreeSramBytes: 96, staticSections: [], serialPath: [] },
+    }), "utf8");
+    const summary = runSummary(directory, ["firmware", manifest, archive, "", "", dependencies, packageRoot]);
+    assert.match(summary, /Firmware profile, compile gates, and capabilities/u);
+    assert.match(summary, /`PCCONTROLLER_ENABLE_INA219`/u);
+    assert.match(summary, /blob\/0123456789abcdef0123456789abcdef01234567\/ProjectConfig\.h/u);
+    assert.match(summary, /docs\/Firmware-Features-and-Profiles\.md#ina219/u);
+    assert.match(summary, /Runtime capability bits/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("catalog presents AVR separately with live artifact links", () => {
   const directory = mkdtempSync(join(tmpdir(), "pccontroller-catalog-"));
   try {

@@ -352,6 +352,12 @@ test('studio validation preserves matching Controller compile identity', async (
 	controllerManifest.source.packedTimestamp = '35019D5D'
 	controllerManifest.source.buildTimestamp = '2026-08-01 19:42:58'
 	controllerManifest.stackBudget = { estimatedFreeSRAMBytes: 287 }
+	controllerManifest.build = {
+		format: 'pccontroller-firmware-feature-matrix/v1',
+		profile: { id: 'full-peripheral', value: 0 },
+		buildFlagsHex: '0xD9', capabilitiesHex: '0x957DFFBF'
+	}
+	controllerManifest.eepromLayout = { schema: 1, settingsAddress: 32 }
 	controllerManifest.patchRegions = [{
 		name: 'firmware-identity', start: 0x7E74, length: 12,
 		schema: 1, magic: 'PCI1'
@@ -363,6 +369,8 @@ test('studio validation preserves matching Controller compile identity', async (
 	assert.equal(validated.source.buildHash, '1234ABCD')
 	assert.equal(validated.source.packedTimestamp, '35019D5D')
 	assert.deepEqual(validated.stackBudget, { estimatedFreeSRAMBytes: 287 })
+	assert.deepEqual(validated.build, controllerManifest.build)
+	assert.deepEqual(validated.eepromLayout, controllerManifest.eepromLayout)
 	assert.deepEqual(validated.patchRegions, controllerManifest.patchRegions)
 })
 

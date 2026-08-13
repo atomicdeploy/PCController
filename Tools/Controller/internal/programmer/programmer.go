@@ -76,6 +76,7 @@ type Options struct {
 	FirmwareSourceSHA256       string
 	FirmwareSourceFiles        int
 	FirmwareBuildTimestamp     uint32
+	FirmwareDefines            []string
 	compilePlanned             bool
 	compileStaged              bool
 	// USBaspBitClockUS forces AVRDUDE's -B bit-clock period. USBaspAutoSlow
@@ -155,6 +156,14 @@ func Build(options Options) (Command, error) {
 			return Command{}, err
 		}
 		args := []string{"compile", "--fqbn", options.FQBN}
+		defines := ""
+		if len(options.FirmwareDefines) != 0 {
+			parts := make([]string, 0, len(options.FirmwareDefines))
+			for _, define := range options.FirmwareDefines {
+				parts = append(parts, "-D"+define)
+			}
+			defines = " " + strings.Join(parts, " ")
+		}
 		args = append(
 			args,
 			"--build-property",
@@ -164,10 +173,11 @@ func Build(options Options) (Command, error) {
 					"-DPCCONTROLLER_IDENTITY_ADDRESS=0x%XUL -mcall-prologues "+
 					"-fmerge-all-constants -fno-split-wide-types -fno-tree-scev-cprop "+
 					"-fipa-pta -fstack-usage -fno-partial-inlining "+
-					"-fno-inline-functions-called-once -fno-tree-ccp -fno-tree-fre",
+					"-fno-inline-functions-called-once -fno-tree-ccp -fno-tree-fre%s",
 				options.FirmwareSourceHash,
 				options.FirmwareBuildTimestamp,
 				FirmwareIdentityAddress,
+				defines,
 			),
 			"--build-property",
 			fmt.Sprintf(

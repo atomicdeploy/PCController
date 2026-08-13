@@ -27,6 +27,7 @@ type compileManifest struct {
 	GeneratedUTC time.Time                    `json:"generatedUtc"`
 	Target       compileManifestTarget        `json:"target"`
 	Source       compileManifestSource        `json:"source"`
+	Build        FirmwareFeatureMatrix        `json:"build"`
 	EEPROMLayout compileManifestEEPROMLayout  `json:"eepromLayout"`
 	StackBudget  compileManifestStackBudget   `json:"stackBudget"`
 	PatchRegions []compileManifestPatchRegion `json:"patchRegions"`
@@ -45,8 +46,8 @@ type compileManifestEEPROMLayout struct {
 	Generation             string `json:"generation"`
 	TemperatureRoleAddress uint32 `json:"temperatureRoleAddress"`
 	TemperatureRoleBytes   uint32 `json:"temperatureRoleBytes"`
-	AudioCueAddress         uint32 `json:"audioCueAddress"`
-	AudioCueBytes           uint32 `json:"audioCueBytes"`
+	AudioCueAddress        uint32 `json:"audioCueAddress"`
+	AudioCueBytes          uint32 `json:"audioCueBytes"`
 	Checksum               string `json:"checksum"`
 }
 
@@ -179,6 +180,10 @@ func writeCompileManifest(
 	if decoded, decodeErr := DecodeFirmwareTimestamp(identity.PackedTimestamp); decodeErr == nil {
 		buildTimestamp = decoded.Compact
 	}
+	build, err := ResolveFirmwareFeatureMatrixWithDefines(identity.SourceRoot, options.FirmwareDefines)
+	if err != nil {
+		return "", err
+	}
 	manifest := compileManifest{
 		Format: firmwareManifestFormat, GeneratedUTC: time.Now().UTC(),
 		Target: compileManifestTarget{
@@ -193,6 +198,7 @@ func writeCompileManifest(
 			PackedTimestamp: fmt.Sprintf("%08X", identity.PackedTimestamp),
 			BuildTimestamp:  buildTimestamp,
 		},
+		Build: build,
 		EEPROMLayout: compileManifestEEPROMLayout{
 			Schema: EEPROMSettingsRecordSchema, SettingsAddress: EEPROMSettingsAddress,
 			SettingsStagingAddress: EEPROMSettingsStagingAddress,
@@ -203,8 +209,8 @@ func writeCompileManifest(
 			Generation:             "board-name metadata high nibble, modulo 16; delta 1..7 is newer",
 			TemperatureRoleAddress: EEPROMTemperatureRoleAddress,
 			TemperatureRoleBytes:   EEPROMTemperatureRoleBytes,
-			AudioCueAddress:         EEPROMAudioCueAddress,
-			AudioCueBytes:           EEPROMAudioCueRecordBytes,
+			AudioCueAddress:        EEPROMAudioCueAddress,
+			AudioCueBytes:          EEPROMAudioCueRecordBytes,
 			Checksum:               "CRC-8/ATM (poly 0x07)",
 		},
 		StackBudget:  stackBudget,

@@ -8,10 +8,36 @@ on:
         required: false
         default: ""
         type: string
+      firmware_profile:
+        description: Resolved source profile or named compile preset
+        required: false
+        default: source
+        type: choice
+        options:
+          - source
+          - full-peripheral
+          - motion-macro
+          - key-diagnostic
+          - custom
+      firmware_features:
+        description: Space-separated documented feature IDs as NAME=on|off
+        required: false
+        default: ""
+        type: string
   workflow_call:
     inputs:
       version:
         description: Version associated with the firmware package
+        required: false
+        default: ""
+        type: string
+      firmware_profile:
+        description: Resolved source profile or named compile preset
+        required: false
+        default: source
+        type: string
+      firmware_features:
+        description: Space-separated documented feature IDs as NAME=on|off
         required: false
         default: ""
         type: string
@@ -38,6 +64,8 @@ jobs:
       FORCE_COLOR: "1"
       PCCONTROLLER_VERSION: ${{ inputs.version || format('0.0.0-ci.{0}', github.run_number) }}
       TZ: UTC
+      PCCONTROLLER_FIRMWARE_PROFILE: ${{ inputs.firmware_profile || 'source' }}
+      PCCONTROLLER_FIRMWARE_FEATURES: ${{ inputs.firmware_features || '' }}
 
     steps:
       - name: "📥 Check out source"
@@ -95,11 +123,13 @@ jobs:
           execFileSync("arduino-cli", ["lib", "install", library], { stdio: "inherit" });'
 
       - name: "🚀 Build and validate AVR firmware"
-        run: >-
-          ./build.sh
-          --firmware-only
-          --clean
-          --version "$PCCONTROLLER_VERSION"
+        run: |
+          set -euo pipefail
+          args=(--firmware-only --clean --version "$PCCONTROLLER_VERSION" --firmware-profile "$PCCONTROLLER_FIRMWARE_PROFILE")
+          for feature in $PCCONTROLLER_FIRMWARE_FEATURES; do
+            args+=(--firmware-feature "$feature")
+          done
+          ./build.sh "${args[@]}"
 
       - name: "💾 Assert the safe 1 KiB default EEPROM image"
         run: >-

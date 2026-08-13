@@ -60,7 +60,7 @@ func PlanCompile(options Options) (Options, CompileIdentity, error) {
 		return options, CompileIdentity{}, fmt.Errorf("firmware source root requires PCController.ino: %w", err)
 	}
 
-	sourceHash, sourceSHA256, sourceFiles, err := firmwareSourceDigest(sourceRoot)
+	sourceHash, sourceSHA256, sourceFiles, err := firmwareConfiguredSourceDigest(sourceRoot, options.FirmwareDefines)
 	if err != nil {
 		return options, CompileIdentity{}, err
 	}
@@ -101,7 +101,7 @@ func StageCompile(options Options) (Options, CompileIdentity, error) {
 	if err != nil {
 		return options, CompileIdentity{}, err
 	}
-	currentHash, err := firmwareSourceHash(identity.SourceRoot)
+	currentHash, _, _, err := firmwareConfiguredSourceDigest(identity.SourceRoot, planned.FirmwareDefines)
 	if err != nil {
 		return options, CompileIdentity{}, err
 	}
@@ -150,7 +150,7 @@ func StageCompile(options Options) (Options, CompileIdentity, error) {
 			return options, CompileIdentity{}, err
 		}
 	}
-	stagedHash, err := firmwareSourceHash(identity.SketchPath)
+	stagedHash, _, _, err := firmwareConfiguredSourceDigest(identity.SketchPath, planned.FirmwareDefines)
 	if err != nil {
 		return options, CompileIdentity{}, fmt.Errorf("verify staged firmware sources: %w", err)
 	}
@@ -218,6 +218,17 @@ func requestedBuildTimestamp(now time.Time) (uint32, error) {
 func firmwareSourceHash(root string) (uint32, error) {
 	hash, _, _, err := firmwareSourceDigest(root)
 	return hash, err
+}
+
+func firmwareConfiguredSourceDigest(root string, defines []string) (uint32, string, int, error) {
+	baseHash, baseSHA, files, err := firmwareSourceDigest(root)
+	if err != nil || len(defines) == 0 {
+		return baseHash, baseSHA, files, err
+	}
+	canonical := append([]string(nil), defines...)
+	sort.Strings(canonical)
+	digest := sha256.Sum256([]byte(baseSHA + "\ncompile-defines:" + strings.Join(canonical, ",") + "\n"))
+	return binary.BigEndian.Uint32(digest[:4]), fmt.Sprintf("%x", digest[:]), files, nil
 }
 
 func firmwareSourceDigest(root string) (uint32, string, int, error) {

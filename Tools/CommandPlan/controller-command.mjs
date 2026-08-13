@@ -211,6 +211,8 @@ export function createControllerProgramCommand({
 	outputDir = '',
 	toolchainCLI = '',
 	toolchainConfig = '',
+	firmwareProfile = '',
+	firmwareFeatures = [],
 	dryRun = false
 }) {
 	const normalizedMethod = String(method || '').toLowerCase()
@@ -222,6 +224,8 @@ export function createControllerProgramCommand({
 		]
 		if (String(toolchainCLI).trim()) args.push('--toolchain-cli', String(toolchainCLI))
 		if (String(toolchainConfig).trim()) args.push('--toolchain-config', String(toolchainConfig))
+		if (String(firmwareProfile).trim()) args.push('--firmware-profile', String(firmwareProfile))
+		for (const feature of firmwareFeatures || []) args.push('--firmware-feature', String(feature))
 		if (dryRun) args.push('--dry-run')
 		return controllerCommand(invocation, args)
 	}
