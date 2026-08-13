@@ -540,6 +540,23 @@ func (runtime *Runtime) Snapshot() Snapshot {
 	}
 }
 
+// clearPeerStateLocked removes values whose authority ended with the serial
+// session while retaining the last port identity needed for reconnect.
+func (runtime *Runtime) clearPeerStateLocked() {
+	runtime.hello = native.Hello{}
+	runtime.status = native.Status{}
+	runtime.settings = native.Settings{}
+	runtime.haveStatus = false
+	runtime.haveSettings = false
+	runtime.statusUpdated = time.Time{}
+	runtime.frontPanel = native.FrontPanel{}
+	runtime.haveFrontPanel = false
+	runtime.frontPanelUpdated = time.Time{}
+	runtime.statusLED = native.StatusLEDState{}
+	runtime.haveStatusLED = false
+	runtime.statusLEDUpdated = time.Time{}
+}
+
 func (runtime *Runtime) SetFilter(filter ports.Filter) {
 	runtime.mu.Lock()
 	runtime.options.Filter = filter
@@ -895,11 +912,17 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	runtime.session = result.Session
 	runtime.port = result.Port
 	runtime.hello = result.Hello
+	runtime.status = native.Status{}
+	runtime.settings = native.Settings{}
 	runtime.haveStatus = false
 	runtime.haveSettings = false
+	runtime.statusUpdated = time.Time{}
 	runtime.haveFrontPanel = false
 	runtime.frontPanel = native.FrontPanel{}
 	runtime.frontPanelUpdated = time.Time{}
+	runtime.statusLED = native.StatusLEDState{}
+	runtime.haveStatusLED = false
+	runtime.statusLEDUpdated = time.Time{}
 	runtime.connectionState = "connected"
 	runtime.connectionReason = ""
 	runtime.connectionUpdated = time.Now()
@@ -1195,7 +1218,7 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 	port := runtime.port
 	runtime.generation++
 	runtime.session = nil
-	runtime.hello = native.Hello{}
+	runtime.clearPeerStateLocked()
 	runtime.paused = pause
 	runtime.reconnectEpoch++
 	runtime.connectionState = "disconnected"
@@ -1388,7 +1411,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				owned = true
 				port = runtime.port
 				runtime.session = nil
-				runtime.hello = native.Hello{}
+				runtime.clearPeerStateLocked()
 				runtime.connectionState = "reconnecting"
 				runtime.connectionReason = disconnectReason
 				runtime.connectionUpdated = time.Now()

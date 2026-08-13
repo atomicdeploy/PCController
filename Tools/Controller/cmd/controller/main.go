@@ -733,6 +733,11 @@ func runTUIWithInitialAction(
 		return err
 	}
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
+	ipcAddress := flags.String("ipc-addr", "", "attach the full TUI to an existing controller IPC host:port")
+	ipcToken := flags.String("ipc-token", "", "bearer token for --ipc-addr (prefer --ipc-token-ref)")
+	ipcTokenReference := flags.String("ipc-token-ref", "", "resolve the remote IPC bearer token from an OS-vault or environment reference")
+	simpleMode := flags.Bool("simple", false, "use the minimal line-oriented IPC fallback instead of the full TUI")
+	syncNavigation := flags.Bool("sync-navigation", true, "synchronize this full TUI's active page with other TUI instances")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -740,11 +745,39 @@ func runTUIWithInitialAction(
 	if err := consoleOptions.captureOverrides(flags); err != nil {
 		return err
 	}
+	ipcTokenWasSet := false
+	flags.Visit(func(value *flag.Flag) {
+		ipcTokenWasSet = ipcTokenWasSet || value.Name == "ipc-token"
+	})
+	if strings.TrimSpace(*ipcTokenReference) != "" {
+		if ipcTokenWasSet {
+			return errors.New("--ipc-token and --ipc-token-ref are mutually exclusive")
+		}
+		resolved, resolveErr := store.ResolveSecret(*ipcTokenReference)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve remote IPC bearer token: %w", resolveErr)
+		}
+		*ipcToken = resolved
+	}
 	if err := applyTUIConsole(
 		consoleOptions.resolve(store.Current().UI.TUIConsole), stderr,
 		consoleOptions.haveRuntimeFlag(),
 	); err != nil {
 		return fmt.Errorf("apply local TUI console settings: %w", err)
+	}
+	if address := strings.TrimSpace(*ipcAddress); address != "" {
+		auth := *ipcToken
+		configured := currentPrimaryEndpoint()
+		if auth == "" && strings.EqualFold(address, strings.TrimSpace(configured.Listen)) {
+			auth = configured.AuthToken
+		}
+		if *simpleMode {
+			return runSecondaryConsoleAt(
+				os.Stdin, stdout, stderr, store.Current().UI.AppTitle,
+				address, auth,
+			)
+		}
+		return runRemoteTUI(address, auth, stdout, store, consoleOptions, *syncNavigation)
 	}
 	claim, havePrimary, err := preparePrimaryMode("tui")
 	if err != nil {
@@ -754,13 +787,20 @@ func runTUIWithInitialAction(
 		if initial.Kind != "" {
 			return deliverExistingAppAction(context.Background(), initial, stdout)
 		}
-		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		if *simpleMode {
+			return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		}
+		configured := currentPrimaryEndpoint()
+		return runRemoteTUI(configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation)
 	}
 	defer func() {
 		if claim != nil {
 			_ = claim.Close()
 		}
 	}()
+	if *simpleMode {
+		return errors.New("--simple requires an existing IPC primary; start without --simple to own the local runtime")
+	}
 	if err := selectInteractiveDevice(
 		connection,
 		os.Stdin,
@@ -830,7 +870,8 @@ func runTUIWithInitialAction(
 	primary, err := startPrimaryIPCClaimed(watchContext, runtime, engine, store, claim)
 	if errors.Is(err, errPrimaryAlreadyRunning) {
 		_ = runtime.Close()
-		return runSecondaryConsole(os.Stdin, stdout, stderr, store.Current().UI.AppTitle)
+		configured := currentPrimaryEndpoint()
+		return runRemoteTUI(configured.Listen, configured.AuthToken, stdout, store, consoleOptions, *syncNavigation)
 	}
 	if err != nil {
 		_ = runtime.Close()
@@ -839,7 +880,11 @@ func runTUIWithInitialAction(
 	claim = nil
 	defer primary.Close()
 	appActions := primary.AppActions()
-	tuiInstanceID := primary.hostInstanceID + ":tui"
+	navigationReporter, err := hostui.NewNavigationReporter(*syncNavigation, "")
+	if err != nil {
+		return fmt.Errorf("create TUI instance identity: %w", err)
+	}
+	tuiInstanceID := navigationReporter.InstanceID()
 	processStartedAt := time.Time{}
 	if primary.instanceClaim != nil {
 		processStartedAt = primary.instanceClaim.startedAt
@@ -928,24 +973,25 @@ func runTUIWithInitialAction(
 				}, &instances)
 				return instances, err
 			},
-			OpenNetwork: openBrowser,
-			AppActions:  appActions,
-			InstanceID:  tuiInstanceID,
+			OpenNetwork:     openBrowser,
+			AppActions:      appActions,
+			InstanceID:      tuiInstanceID,
+			NavigationSync:  *syncNavigation,
+			NavigationGroup: hostui.DefaultNavigationGroup,
 			WriteOSC: func(payload string) error {
 				return hostui.WriteOSC(stdout, payload)
 			},
 			ReportTerminal: func(page, title string) error {
 				ui := store.Current().UI
+				values := navigationReporter.NextValues()
+				values["color_mode"] = ui.Appearance.Theme
+				values["locale"] = ui.Appearance.Locale
+				values["terminal_title"] = title
+				values["terminal_osc"] = "enabled"
+				values["terminal_progress"] = "osc-9-4"
 				_, err := primary.instances.Upsert(hostui.AppInstance{
 					ID: tuiInstanceID, Surface: "tui", Page: page, State: "active",
-					Self: &tuiSelf,
-					Values: map[string]string{
-						"color_mode":        ui.Appearance.Theme,
-						"locale":            ui.Appearance.Locale,
-						"terminal_title":    title,
-						"terminal_osc":      "enabled",
-						"terminal_progress": "osc-9-4",
-					},
+					Self: &tuiSelf, Values: values,
 				})
 				return err
 			},

@@ -20,6 +20,9 @@ func (model Model) pageView(snapshot control.Snapshot) string {
 	if model.settingEditor != nil {
 		return model.fitContent(renderSettingEditor(model.settingEditor, model.width))
 	}
+	if model.displayEditor != nil {
+		return model.fitContent(renderDisplayEditor(model.displayEditor, model.width))
+	}
 	var content string
 	switch model.page {
 	case PageDashboard:
@@ -52,7 +55,7 @@ func (model Model) portPickerPage(snapshot control.Snapshot) string {
 		labelStyle.Render("Friendly name, COM ID, VID/PID and serial identity are shown; authentication still verifies HELLO before use."),
 	}
 	if model.portLoading {
-		lines = append(lines, warnStyle.Render(model.spinner.View()+" querying Windows serial devices…"))
+		lines = append(lines, warnStyle.Render(model.spinnerView()+" querying Windows serial devices…"))
 	}
 	if model.portError != "" {
 		lines = append(lines, errorStyle.Render(model.portError))
@@ -77,17 +80,20 @@ func (model Model) portPickerPage(snapshot control.Snapshot) string {
 
 func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	status := snapshot.Status
+	haveStatus := snapshot.Connected && snapshot.HaveStatus
+	capabilities := snapshot.Hello.Capabilities
 	pageWidth := model.width
 	if pageWidth <= 0 {
 		pageWidth = 132
 	}
 	lcdStatus := ""
 	lcdAvailable := false
-	if snapshot.Connected && status.LCDAddress != 0 {
+	if haveStatus && capabilities&native.CapabilityLCD != 0 && status.LCDAddress != 0 {
 		lcdAvailable = true
 		lcdStatus = fmt.Sprintf("available · 0x%02X", status.LCDAddress)
 	}
-	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityI2CTransfer != 0 && model.runtime != nil {
+	if haveStatus && capabilities&native.CapabilityLCD != 0 &&
+		capabilities&native.CapabilityI2CTransfer != 0 && model.remote == nil && model.runtime != nil {
 		lcd := model.runtime.LCDPresenter().State()
 		lcdStatus = "not detected"
 		if lcd.Physical {
@@ -101,54 +107,80 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 		sectionWidth = outerCardWidth - cardStyle.GetHorizontalFrameSize()
 	}
 	measurementLines := []string{
-		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", freshnessLabel(snapshot.StatusUpdated, time.Now())),
+		sectionHeader(sectionWidth, "LIVE MEASUREMENTS", model.statusFreshnessLabel(snapshot, time.Now())),
 	}
-	if !snapshot.HaveStatus {
+	if warning := model.remoteClockWarning(); warning != "" {
+		measurementLines = append(measurementLines, warnStyle.Render(truncateDisplayText(warning, sectionWidth)))
+	}
+	measurementAdvertised := snapshot.Connected && capabilities&(native.CapabilityINA219|native.CapabilityTemperatures) != 0
+	if measurementAdvertised && !snapshot.HaveStatus {
 		measurementLines = append(measurementLines, warnStyle.Render("Waiting for the first STATUS frame…"))
 	}
-	if status.INA219Available && model.prefs.Visible["supply"] {
+	if haveStatus && capabilities&native.CapabilityINA219 != 0 && status.INA219Available &&
+		validVoltageReading(status.SupplyMV) && model.prefs.Visible["supply"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.supply-voltage", "Supply Voltage"), formatVoltage(status.SupplyMV, model.prefs.VoltageDecimals)))
 	}
-	if status.INA219Available && model.prefs.Visible["bus"] {
+	if haveStatus && capabilities&native.CapabilityINA219 != 0 && status.INA219Available &&
+		validVoltageReading(status.BusMV) && model.prefs.Visible["bus"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.bus-voltage", "Bus Voltage"), formatVoltage(status.BusMV, model.prefs.VoltageDecimals)))
 	}
-	if status.INA219Available && model.prefs.Visible["current"] {
+	if haveStatus && capabilities&native.CapabilityINA219 != 0 && status.INA219Available &&
+		validCurrentReading(status.CurrentMA) && model.prefs.Visible["current"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.current", "Load Current"), formatCurrent(status.CurrentMA, model.prefs.CurrentDecimals)))
 	}
-	if status.INA219Available && model.prefs.Visible["power"] {
+	if haveStatus && capabilities&native.CapabilityINA219 != 0 && status.INA219Available &&
+		validPowerReading(status.PowerMW) && model.prefs.Visible["power"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.power", "Load Power"), formatPower(status.PowerMW, model.prefs.PowerDecimals)))
 	}
-	if status.TLEDAvailable && model.prefs.Visible["temperature_led"] {
+	if haveStatus && capabilities&native.CapabilityTemperatures != 0 && status.TLEDAvailable &&
+		validTemperatureReading(status.TLEDCenti) && model.prefs.Visible["temperature_led"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-led", "Temperature · Illumination LED"), formatTemperature(status.TLEDCenti, model.prefs.TemperatureDecimals)))
 	}
-	if status.TBTAvailable && model.prefs.Visible["temperature_bt"] {
+	if haveStatus && capabilities&native.CapabilityTemperatures != 0 &&
+		capabilities&native.CapabilityBluetoothAudio != 0 && status.TBTAvailable &&
+		validTemperatureReading(status.TBTCenti) && model.prefs.Visible["temperature_bt"] {
 		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
 	}
 
-	stateLines := []string{
-		sectionHeader(sectionWidth, "BOARD STATE", model.menuPageByID(status.MenuPage).Name),
-		lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			buttonStyle.Render("I · Idle"), " ",
-			buttonGoodStyle.Render("R · Running"),
-		),
-		kvCard(sectionWidth, 22, "PC Program State", programStateSummary(snapshot.ProgramState)),
-		kvCard(sectionWidth, 22, "Port Process", portProcessSummary(snapshot.PortProcess)),
-		kvCard(sectionWidth, 22, "Device Uptime", formatUptime(status.UptimeMS)),
-		kvCard(sectionWidth, 22, "Enclosure Door", boolWord(status.DoorOpen, "OPEN", "CLOSED")),
-		kvCard(sectionWidth, 22, "BT Audio", bluetoothAudioState(status.BluetoothState)),
-		kvCard(sectionWidth, 22, "Active Keys", fmt.Sprintf("0x%02X", status.ActiveKeys)),
-		kvCard(sectionWidth, 22, "Active Relays", relaySummary(status.ActiveRelays)),
-		kvCard(sectionWidth, 22, model.peripheralName("display.segment", "Display Menu"), fmt.Sprintf("%d · %s", status.MenuPage, model.menuPageByID(status.MenuPage).Name)),
-		kvCard(sectionWidth, 22, "Menu / Submode", fmt.Sprintf("%d · %s", status.ProgramMode, model.programModeName(status.ProgramMode))),
+	stateTitle := ""
+	if haveStatus && capabilities&native.CapabilityMenuRemote != 0 {
+		stateTitle = model.menuPageByID(status.MenuPage).Name
 	}
-	if status.PWMAvailable {
+	stateLines := []string{sectionHeader(sectionWidth, "BOARD STATE", stateTitle)}
+	if haveStatus && capabilities&native.CapabilityProgramState != 0 {
+		stateLines = append(stateLines,
+			lipgloss.JoinHorizontal(lipgloss.Top, buttonStyle.Render("I · Idle"), " ", buttonGoodStyle.Render("R · Running")),
+			kvCard(sectionWidth, 22, "PC Program State", programStateSummary(snapshot.ProgramState)),
+		)
+	}
+	if haveStatus {
+		stateLines = append(stateLines, kvCard(sectionWidth, 22, "Device Uptime", formatUptime(status.UptimeMS)))
+		if capabilities&native.CapabilityRelayMotion != 0 {
+			stateLines = append(stateLines,
+				kvCard(sectionWidth, 22, "Enclosure Door", boolWord(status.DoorOpen, "OPEN", "CLOSED")),
+				kvCard(sectionWidth, 22, "Active Relays", relaySummary(status.ActiveRelays)),
+			)
+		}
+		if capabilities&native.CapabilityBluetoothAudio != 0 {
+			stateLines = append(stateLines, kvCard(sectionWidth, 22, "Bluetooth audio", bluetoothAudioState(status.BluetoothState)))
+		}
+		if capabilities&native.CapabilityRemoteKeys != 0 {
+			stateLines = append(stateLines, kvCard(sectionWidth, 22, "Active Keys", fmt.Sprintf("0x%02X", status.ActiveKeys)))
+		}
+		if capabilities&native.CapabilitySegments != 0 && capabilities&native.CapabilityMenuRemote != 0 {
+			stateLines = append(stateLines,
+				kvCard(sectionWidth, 22, model.peripheralName("display.segment", "Display Menu"), fmt.Sprintf("%d · %s", status.MenuPage, model.menuPageByID(status.MenuPage).Name)),
+				kvCard(sectionWidth, 22, "Menu / Submode", fmt.Sprintf("%d · %s", status.ProgramMode, model.programModeName(status.ProgramMode))),
+			)
+		}
+	}
+	if haveStatus && capabilities&native.CapabilityPWM != 0 && status.PWMAvailable {
 		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName(fmt.Sprintf("pwm.%d", status.PWMChannel), "PWM"), fmt.Sprintf("channel %d · %d%%", status.PWMChannel, int(status.PWMValue)*100/4095)))
 	}
 	if lcdAvailable {
 		stateLines = append(stateLines, kvCard(sectionWidth, 22, model.peripheralName("display.lcd", "I2C LCD"), lcdStatus))
 	}
-	if model.prefs.Visible["diagnostics"] {
+	if haveStatus && model.prefs.Visible["diagnostics"] {
 		stateLines = append(stateLines,
 			kvCard(sectionWidth, 22, "Last Reset", fmt.Sprintf("cause 0x%02X", status.ResetCause)),
 			kvCard(sectionWidth, 22, "Reset Count", fmt.Sprintf("%d", status.ResetCount)),
@@ -203,15 +235,24 @@ func (model Model) outputsPage(snapshot control.Snapshot) string {
 	columns := outputTableColumns(tableWidth)
 	rows := model.controlTableRows(snapshot, max(8, columns[1].Width-7))
 	tableView := renderControlTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, columns, rows, model.uiValue.ControlValueColors)
-	return strings.Join([]string{
+	parts := []string{
 		sectionHeader(model.width, "CONTROL", "↑/↓ select · ←/→ adjust · Home/End limits · Enter activate · F2 rename"),
-		lipgloss.PlaceHorizontal(model.width, lipgloss.Center, tableView),
-	}, "\n")
+	}
+	if snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityRelayMotion != 0 && !snapshot.HaveStatus {
+		parts = append(parts, warnStyle.Render(model.spinner.View()+" loading advertised relay and motion state…"))
+	}
+	if len(rows) != 0 {
+		parts = append(parts, lipgloss.PlaceHorizontal(model.width, lipgloss.Center, tableView))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) []controlTableRow {
 	status := snapshot.Status
 	rows := make([]controlTableRow, 0, 27)
+	if !snapshot.Connected || !snapshot.HaveStatus || snapshot.Hello.Capabilities&native.CapabilityRelayMotion == 0 {
+		return rows
+	}
 	for index := 0; index < 8; index++ {
 		key := fmt.Sprintf("relay.%d", index+1)
 		fallback, _ := appconfig.PeripheralDefaultName(key)
@@ -242,7 +283,7 @@ func (model Model) controlTableRows(snapshot control.Snapshot, levelWidth int) [
 		controlTableRow{Name: motionB + " · STOP", Value: "Stop", Tone: controlToneAction},
 		controlTableRow{Name: motionB + " · DOWN", Value: "Run", Tone: controlToneAction},
 	)
-	if status.PWMAvailable {
+	if snapshot.HaveStatus && snapshot.Hello.Capabilities&native.CapabilityPWM != 0 && status.PWMAvailable {
 		for channel := 0; channel <= 10; channel++ {
 			value := uint16(0)
 			if model.havePWMValues {
@@ -315,11 +356,16 @@ func (model Model) menuPagePrefix(snapshot control.Snapshot) ([]string, menuPage
 	geometry := menuPageGeometry{frontPanelStart: lipgloss.Height(strings.Join(lines, "\n"))}
 	lines = append(lines,
 		renderFrontPanelButtons(),
+	)
+	geometry.frontPanelEnd = geometry.frontPanelStart + lipgloss.Height(renderFrontPanelButtons())
+	if displayTargetsFor(snapshot) != nil {
+		lines = append(lines, buttonGoodStyle.Render("D · Send arbitrary message"))
+	}
+	lines = append(lines,
 		renderHostMenuDirectory(model.hostMenus, model.width),
 		fmt.Sprintf("LCD prompt mirroring  %s  %s", valueStyle.Render(boolWord(model.lcdMirror, "ON", "OFF")), labelStyle.Render("M toggles · priority events temporarily override and restore")),
 		labelStyle.Render(fmt.Sprintf("Catalog: %s · Layout: %s · Host overlay: %s · Search: %s · Sort: %s", model.menuCatalogSource, layoutState, overlayState, searchState, model.menuLayoutSort)),
 	)
-	geometry.frontPanelEnd = geometry.frontPanelStart + lipgloss.Height(renderFrontPanelButtons())
 	geometry.entriesStart = lipgloss.Height(strings.Join(lines, "\n"))
 	return lines, geometry
 }
@@ -371,11 +417,18 @@ func (model Model) boardSettingsPage(snapshot control.Snapshot) string {
 		}
 		tableRows = append(tableRows, []string{row.Group, row.Label, value})
 	}
-	return strings.Join([]string{
-		sectionHeader(model.width, "BOARD EEPROM SETTINGS", boolWord(snapshot.HaveSettings, "live + persisted on MCU", "not queried yet")),
-		labelStyle.Render("↑/↓ select · Enter opens an isolated draft · ←/→ quick-adjusts · MCU and host settings remain separate"),
-		model.centeredDataTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, settingsTableColumns(tableWidth), tableRows),
-	}, "\n")
+	lines := []string{sectionHeader(model.width, "BOARD EEPROM SETTINGS", "")}
+	advertised := snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityPersistentSettings != 0
+	if advertised && !snapshot.HaveSettings {
+		lines = append(lines, warnStyle.Render(model.spinner.View()+" loading advertised EEPROM settings…"))
+	}
+	if len(rows) != 0 {
+		lines = append(lines,
+			labelStyle.Render("↑/↓ select · Enter opens an isolated draft · ←/→ quick-adjusts · MCU and host settings remain separate"),
+			model.centeredDataTable(tableWidth, tableBodyRows(model.contentHeight()), model.cursor, settingsTableColumns(tableWidth), tableRows),
+		)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (model Model) appSettingsPage() string {
@@ -403,7 +456,7 @@ func (model Model) rfPrimaryItems() []actionBarItem {
 		{label: "L Learn", action: "rf-learn", style: buttonGoodStyle},
 		{label: "Y Timed learn · 30s", action: "rf-timer", style: buttonStyle},
 	}
-	if model.preview == nil && model.runtime.RFLearnState().Active {
+	if model.preview == nil && model.rfLearnState().Active {
 		items = []actionBarItem{{label: "C Cancel learning", action: "rf-cancel", style: buttonBadStyle}}
 	}
 	return append(items,
@@ -427,7 +480,7 @@ func (model Model) rfPage() string {
 	}
 	learnState := "idle"
 	if model.preview == nil {
-		state := model.runtime.RFLearnState()
+		state := model.rfLearnState()
 		if state.Active {
 			if state.Mode == control.RFLearnTimer {
 				configured := time.Duration(state.ConfiguredMS) * time.Millisecond
@@ -478,7 +531,7 @@ func (model Model) rfPage() string {
 		titleStyle.Render("ID  CODE        BITS  PROTO  NAME / CATEGORY                 BOARD MAPPING"),
 	}
 	if model.rfPending {
-		lines = append(lines, warnStyle.Render(model.spinner.View()+" loading live RF list…"))
+		lines = append(lines, warnStyle.Render(model.spinnerView()+" loading live RF list…"))
 	}
 	if model.rfError != "" {
 		lines = append(lines, errorStyle.Render("RF list: "+model.rfError))
@@ -553,59 +606,49 @@ func (model Model) programmingPage(snapshot control.Snapshot) string {
 
 func (model Model) integrationStatusLines() []string {
 	if model.integrations == nil {
-		return []string{
-			serviceLine("Global hotkeys", "not configured", "desktop registrar not wired"),
-			serviceLine("Keyboard control", "not configured", "low-level hook not wired"),
-			serviceLine("Desktop toasts", "not configured", "notifier not wired"),
-			serviceLine("Text messaging", "not configured", "backend status unavailable"),
-			serviceLine("Device discovery", "not configured", "backend status unavailable"),
-			serviceLine("Webhooks", "not configured", "backend status unavailable"),
-			serviceLine("Socket.IO", "not configured", "optional adapter unavailable"),
-		}
+		return nil
 	}
 	status := model.integrations()
-	hotkeyState := "stopped"
-	if !status.Hotkeys.Supported {
-		hotkeyState = "unsupported"
-	} else if status.Hotkeys.Running {
-		hotkeyState = fmt.Sprintf("active · %d bindings", len(status.Hotkeys.Bindings))
+	lines := make([]string, 0, 7)
+	if status.Hotkeys.Supported {
+		hotkeyState := "stopped"
+		if status.Hotkeys.Running {
+			hotkeyState = fmt.Sprintf("active · %d bindings", len(status.Hotkeys.Bindings))
+		}
+		hotkeyDetail := status.Hotkeys.LastError
+		if hotkeyDetail == "" && len(status.Hotkeys.Bindings) != 0 {
+			hotkeyDetail = status.Hotkeys.Bindings[0].Accelerator + " → " + status.Hotkeys.Bindings[0].Command
+		}
+		lines = append(lines, serviceLine("Global hotkeys", hotkeyState, hotkeyDetail))
 	}
-	hotkeyDetail := status.Hotkeys.LastError
-	if hotkeyDetail == "" && len(status.Hotkeys.Bindings) != 0 {
-		hotkeyDetail = status.Hotkeys.Bindings[0].Accelerator + " → " + status.Hotkeys.Bindings[0].Command
+	if status.Keyboard.Supported {
+		keyboardState := "stopped"
+		if status.Keyboard.Running {
+			keyboardState = fmt.Sprintf("active · %d bindings", len(status.Keyboard.Bindings))
+		}
+		keyboardDetail := status.Keyboard.LastError
+		if keyboardDetail == "" && len(status.Keyboard.Bindings) != 0 {
+			keyboardDetail = status.Keyboard.Bindings[0].Key + " → " + status.Keyboard.Bindings[0].Name
+		}
+		lines = append(lines, serviceLine("Keyboard control", keyboardState, keyboardDetail))
 	}
-	keyboardState := "stopped"
-	if !status.Keyboard.Supported {
-		keyboardState = "unsupported"
-	} else if status.Keyboard.Running {
-		keyboardState = fmt.Sprintf("active · %d bindings", len(status.Keyboard.Bindings))
-	}
-	keyboardDetail := status.Keyboard.LastError
-	if keyboardDetail == "" && len(status.Keyboard.Bindings) != 0 {
-		keyboardDetail = status.Keyboard.Bindings[0].Key + " → " + status.Keyboard.Bindings[0].Name
-	}
-	if keyboardDetail == "" {
-		keyboardDetail = "disabled by default; momentary actions release on focus loss"
-	}
-	toastState := "unavailable"
 	if status.Notifications.Available {
-		toastState = fmt.Sprintf("ready · %d accepted", status.Notifications.Accepted)
-	} else if !status.Notifications.Supported {
-		toastState = "unsupported"
+		lines = append(lines, serviceLine("Desktop toasts", fmt.Sprintf("ready · %d accepted", status.Notifications.Accepted), status.Notifications.LastError))
 	}
-	toastDetail := status.Notifications.LastError
-	if toastDetail == "" {
-		toastDetail = "WinRT acceptance only; actions require registered pccontroller:// handler"
+	for _, item := range []struct {
+		label  string
+		status hostui.ServiceStatus
+	}{
+		{"Text messaging", status.Messaging},
+		{"Device discovery", status.Discovery},
+		{"Webhooks", status.Webhooks},
+		{"Socket.IO", status.SocketIO},
+	} {
+		if strings.TrimSpace(item.status.Name) != "" {
+			lines = append(lines, serviceFromStatus(item.label, item.status))
+		}
 	}
-	return []string{
-		serviceLine("Global hotkeys", hotkeyState, hotkeyDetail),
-		serviceLine("Keyboard control", keyboardState, keyboardDetail),
-		serviceLine("Desktop toasts", toastState, toastDetail),
-		serviceFromStatus("Text messaging", status.Messaging),
-		serviceFromStatus("Device discovery", status.Discovery),
-		serviceFromStatus("Webhooks", status.Webhooks),
-		serviceFromStatus("Socket.IO", status.SocketIO),
-	}
+	return lines
 }
 
 func serviceFromStatus(label string, status hostui.ServiceStatus) string {
@@ -994,15 +1037,18 @@ func (model Model) graphTable(width int) string {
 		format func(float64) string
 	}
 	metrics := []metric{
-		{"Supply Voltage", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.SupplyMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
-		{"Bus Voltage", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.BusMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
-		{"Load Current", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.CurrentMA) }), func(value float64) string { return formatCurrent(int32(value), model.prefs.CurrentDecimals) }},
-		{"Load Power", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.PowerMW) }), func(value float64) string { return formatPower(int32(value), model.prefs.PowerDecimals) }},
-		{"Illumination Temperature", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.TLEDCenti) }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
-		{"BT Audio Temperature", sampleValues(model.samples, func(sample measurementSample) float64 { return float64(sample.TBTCenti) }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
+		{"Supply Voltage", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveSupply }, func(sample measurementSample) float64 { return float64(sample.SupplyMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
+		{"Bus Voltage", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveBus }, func(sample measurementSample) float64 { return float64(sample.BusMV) }), func(value float64) string { return formatVoltage(int32(value), model.prefs.VoltageDecimals) }},
+		{"Load Current", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveCurrent }, func(sample measurementSample) float64 { return float64(sample.CurrentMA) }), func(value float64) string { return formatCurrent(int32(value), model.prefs.CurrentDecimals) }},
+		{"Load Power", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HavePower }, func(sample measurementSample) float64 { return float64(sample.PowerMW) }), func(value float64) string { return formatPower(int32(value), model.prefs.PowerDecimals) }},
+		{"Illumination Temperature", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveTLED }, func(sample measurementSample) float64 { return float64(sample.TLEDCenti) }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
+		{"Bluetooth Audio Temperature", availableSampleValues(model.samples, func(sample measurementSample) bool { return sample.HaveTBT }, func(sample measurementSample) float64 { return float64(sample.TBTCenti) }), func(value float64) string { return formatTemperature(int16(value), model.prefs.TemperatureDecimals) }},
 	}
 	rows := make([][]string, 0, len(metrics))
 	for _, item := range metrics {
+		if len(item.values) == 0 {
+			continue
+		}
 		rows = append(rows, []string{item.label, sparkline(item.values, trendWidth), graphRange(item.values, item.format)})
 	}
 	return renderDataTable(width, len(rows), -1, []dataColumn{
@@ -1052,7 +1098,9 @@ func programModeNameForCapabilities(value byte, capabilities uint32) string {
 		"Edit · user relay channel", "Edit · user relay behavior", "Control · user relays",
 		"Control · motion", "Confirm · save or discard", "Flash message", "RF learning", "Fault",
 	}
-	_ = capabilities
+	if value == 5 && capabilities&native.CapabilityBluetoothAudio == 0 {
+		return fmt.Sprintf("Unknown mode %d", value)
+	}
 	names := current
 	if int(value) < len(names) {
 		return names[value]
@@ -1098,6 +1146,16 @@ func sampleValues(samples []measurementSample, value func(measurementSample) flo
 	result := make([]float64, len(samples))
 	for index, sample := range samples {
 		result[index] = value(sample)
+	}
+	return result
+}
+
+func availableSampleValues(samples []measurementSample, available func(measurementSample) bool, value func(measurementSample) float64) []float64 {
+	result := make([]float64, 0, len(samples))
+	for _, sample := range samples {
+		if available(sample) {
+			result = append(result, value(sample))
+		}
 	}
 	return result
 }
