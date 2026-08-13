@@ -82,6 +82,7 @@ type Model struct {
 	uiValue                  appconfig.UI
 	hostIntegrations         func() appconfig.Integrations
 	saveHostIntegrations     func(appconfig.Integrations) error
+	buzzerRuntime            func() appconfig.BuzzerRuntimeStatus
 	hostIntegrationValue     appconfig.Integrations
 	rfConfig                 func() appconfig.RFConfig
 	saveRF                   func(appconfig.RFConfig) error
@@ -435,6 +436,7 @@ func NewWithOptions(runtime *control.Runtime, engine *shell.Engine, options Opti
 		saveUI: options.SaveUI, applyTUIConsole: options.ApplyTUIConsole, uiValue: uiValue,
 		hostIntegrations:     options.HostIntegrations,
 		saveHostIntegrations: options.SaveIntegrations,
+		buzzerRuntime:        options.BuzzerRuntime,
 		hostIntegrationValue: hostIntegrationValue,
 		rfConfig:             options.RFConfig, saveRF: options.SaveRF, rfValue: rfValue,
 		rfFetch: options.RFFetch, rfApplyOrder: options.RFApplyOrder,

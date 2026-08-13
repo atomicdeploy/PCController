@@ -673,6 +673,30 @@ one retained state/error transition instead of one log entry per note, and can
 be replaced by another platform renderer without changing the versionless
 buzzer event contract.
 
+Primary `web` and `tui` processes accept process-lifetime buzzer overrides with
+the precedence flags > environment > watched JSON configuration > packaged
+defaults:
+
+```text
+controller web --buzzer-path both --buzzer-mirror=true --buzzer-backend auto
+controller tui --buzzer-path host --buzzer-backend external --buzzer-executable /usr/local/bin/beep
+
+PCCONTROLLER_BUZZER_PATH=board|host|both|none
+PCCONTROLLER_BUZZER_MIRROR=true|false
+PCCONTROLLER_BUZZER_BACKEND=auto|native|external|off
+PCCONTROLLER_BUZZER_EXECUTABLE=/path/to/beep
+```
+
+Startup flags and environment never write the watched JSON file. An explicit
+path from flags, environment, or `integrations.buzzer_mirror.path` reconciles
+and verifies the MCU Silent bit once SETTINGS is available; an unspecified path
+never writes board EEPROM. Use `buzzer path host` to persist the choice and
+apply it immediately. `buzzer status`, `controller.integrations.status`,
+`GET /api/integrations/status`, the Web settings page, and the TUI settings page
+report the requested and effective path/backend so that distinction stays
+visible. Backend `off` disables only the PC-speaker renderer; Web Audio remains
+independently configurable.
+
 Automatic backend resolution happens at configuration time and is reused for
 each note. In particular, `auto` does not retry a failed native probe before
 every external Linux `beep` invocation. Board pushes are causal note-start

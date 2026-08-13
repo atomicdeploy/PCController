@@ -874,6 +874,35 @@ func (runtime *Runtime) RefreshStatus(ctx context.Context) (native.Status, error
 	return native.ParseStatus(frame.Payload)
 }
 
+// SetBoardSilent updates only the MCU Silent bit and verifies the resulting
+// SETTINGS frame. Callers must invoke it only for an explicit routing policy.
+func (runtime *Runtime) SetBoardSilent(ctx context.Context, silent bool) (native.Settings, error) {
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	current := settings.Flags&native.SettingsSilent != 0
+	if current == silent {
+		return settings, nil
+	}
+	if silent {
+		settings.Flags |= native.SettingsSilent
+	} else {
+		settings.Flags &^= native.SettingsSilent
+	}
+	if err := storeSettings(ctx, runtime, settings); err != nil {
+		return native.Settings{}, err
+	}
+	verified, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	if (verified.Flags&native.SettingsSilent != 0) != silent {
+		return native.Settings{}, errors.New("board silent-state readback did not match requested state")
+	}
+	return verified, nil
+}
+
 func (runtime *Runtime) currentSession() *link.Session {
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()

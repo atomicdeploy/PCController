@@ -790,18 +790,26 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [integrationsBusy, setIntegrationsBusy] = useState(true)
   const [integrationsLoaded, setIntegrationsLoaded] = useState(false)
   const [integrationsNotice, setIntegrationsNotice] = useState('')
+	const [buzzerRuntime, setBuzzerRuntime] = useState<LocalIntegrationSettings['buzzer_runtime']>(uiConfig?.buzzer_runtime)
   const updateAppearance = <K extends keyof Appearance>(key: K, value: Appearance[K]) => onAppearance({ ...appearance, [key]: value })
   const titleValidation = useMemo(() => validateAppTitle(draftAppTitle), [draftAppTitle])
   const normalizedToken = useMemo(() => normalizeSessionToken(draftToken), [draftToken])
-	const boardSilent = (snapshot.settings.flags & 0x01) !== 0
-	const hostSilent = !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
-	const buzzerPath = buzzerPathFromState(boardSilent, hostSilent)
+	const boardStateKnown = snapshot.connected && snapshot.have_settings
+	const boardSilent = boardStateKnown && (snapshot.settings.flags & 0x01) !== 0
+	const effectiveBuzzerRuntime = buzzerRuntime ?? uiConfig?.buzzer_runtime
+	const hostSilent = effectiveBuzzerRuntime ? !effectiveBuzzerRuntime.host_mirror : !(uiConfig?.integrations?.buzzer_host_enabled ?? false)
+	const fallbackBuzzerPath = boardStateKnown ? buzzerPathFromState(boardSilent, hostSilent) : null
+	const buzzerPath = effectiveBuzzerRuntime?.effective_path && effectiveBuzzerRuntime.effective_path !== 'unknown'
+		? effectiveBuzzerRuntime.effective_path
+		: fallbackBuzzerPath
 	const applyBuzzerPath = async (value: BuzzerPath) => {
 		setBuzzerPathBusy(true)
 		setBuzzerPathNotice('')
 		try {
 			await onBuzzerPath(value)
-			setBuzzerPathNotice(copy('Applied immediately to board and host.', 'فوراً روی برد و میزبان اعمال شد.'))
+			const status = await rpc<{ buzzer_runtime: LocalIntegrationSettings['buzzer_runtime'] }>('controller.integrations.status')
+			setBuzzerRuntime(status.buzzer_runtime)
+			setBuzzerPathNotice(copy('Applied and verified.', 'اعمال و تأیید شد.'))
 		} catch (cause) {
 			setBuzzerPathNotice(cause instanceof Error ? cause.message : String(cause))
 		} finally {
@@ -983,7 +991,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           buzzer_mirror: value.buzzer_mirror ?? {
             enabled: false, native_enabled: false, web_audio_enabled: true, backend: 'auto', executable: '', driver_directory: '',
           },
+			buzzer_runtime: value.buzzer_runtime,
         }
+		setBuzzerRuntime(value.buzzer_runtime)
         setLocalIntegrations(normalized)
         setSavedIntegrations(normalized)
         setIntegrationsLoaded(true)
@@ -1021,7 +1031,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         data_hub: { ...saved.data_hub, base_url: normalizeRootURLInput(saved.data_hub.base_url ?? '') },
         lifecycle_safety: saved.lifecycle_safety,
         buzzer_mirror: saved.buzzer_mirror,
+		buzzer_runtime: saved.buzzer_runtime,
       }
+		setBuzzerRuntime(saved.buzzer_runtime)
       setLocalIntegrations(canonical)
       setSavedIntegrations(canonical)
       setIntegrationsNotice('Saved')
@@ -1117,10 +1129,10 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           </form>
         </Card>
 
-		<Card icon={Volume2} iconTone="green" title={copy('Buzzer routing', 'مسیر بیزر')} eyebrow={buzzerPath.toUpperCase()} className="settings-card settings-card--wide">
+		<Card icon={Volume2} iconTone="green" title={copy('Buzzer routing', 'مسیر بیزر')} eyebrow={(buzzerPath ?? copy('Pending', 'در انتظار')).toUpperCase()} className="settings-card settings-card--wide">
 			<div className="setting-group">
 				<label>{copy('Playback path', 'مسیر پخش')}</label>
-				<Segmented value={buzzerPath} label={copy('Buzzer playback path', 'مسیر پخش بیزر')} options={[
+				<Segmented value={buzzerPath ?? effectiveBuzzerRuntime?.requested_path ?? localIntegrations.buzzer_mirror.path ?? 'none'} label={copy('Buzzer playback path', 'مسیر پخش بیزر')} options={[
 					{ value: 'board', label: copy('Board', 'برد') },
 					{ value: 'host', label: copy('PC', 'رایانه') },
 					{ value: 'both', label: copy('Both', 'هر دو') },
@@ -1128,16 +1140,20 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
 				]} onChange={(value) => void applyBuzzerPath(value as BuzzerPath)} />
 			</div>
 			<div className="settings-inline-status">
-				<StatusBadge tone={boardSilent ? 'neutral' : 'good'}>{copy(`Board ${boardSilent ? 'silent' : 'active'}`, `برد ${boardSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
+				{boardStateKnown
+					? <StatusBadge tone={boardSilent ? 'neutral' : 'good'}>{copy(`Board ${boardSilent ? 'silent' : 'active'}`, `برد ${boardSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
+					: <StatusBadge tone="neutral">{copy('Board state unavailable', 'وضعیت برد در دسترس نیست')}</StatusBadge>}
 				<StatusBadge tone={hostSilent ? 'neutral' : 'good'}>{copy(`PC ${hostSilent ? 'silent' : 'active'}`, `رایانه ${hostSilent ? 'بی‌صدا' : 'فعال'}`)}</StatusBadge>
 				{buzzerPathBusy && <StatusBadge tone="warn">{copy('Applying…', 'در حال اعمال…')}</StatusBadge>}
+				{effectiveBuzzerRuntime?.requested_path && effectiveBuzzerRuntime.requested_path !== 'unknown' && effectiveBuzzerRuntime.requested_path !== effectiveBuzzerRuntime.effective_path && <StatusBadge tone={effectiveBuzzerRuntime.board_apply_state === 'error' ? 'warn' : 'neutral'}>{`${effectiveBuzzerRuntime.requested_path} · ${effectiveBuzzerRuntime.board_apply_state}`}</StatusBadge>}
+				{effectiveBuzzerRuntime && <StatusBadge tone={effectiveBuzzerRuntime.backend_error ? 'warn' : 'neutral'}>{`${effectiveBuzzerRuntime.backend_requested} → ${effectiveBuzzerRuntime.backend_effective}`}</StatusBadge>}
 			</div>
-			<Toggle checked={localIntegrations.buzzer_mirror.enabled} onChange={(enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, enabled } })) }} label={copy('Mirror board beeps on this host', 'بازپخش بوق‌های برد روی این میزبان')} detail={copy('Applies to this instance and synchronizes through the shared host configuration.', 'روی این نمونه اعمال می‌شود و از تنظیمات مشترک میزبان همگام می‌ماند.')} />
+			<Toggle checked={localIntegrations.buzzer_mirror.enabled} onChange={(enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => { const path = current.buzzer_mirror.path; const boardSilent = path === 'host' || path === 'none'; return { ...current, buzzer_mirror: { ...current.buzzer_mirror, enabled, path: path ? buzzerPathFromState(boardSilent, !enabled) : path } } }) }} label={copy('Mirror board beeps on this host', 'بازپخش بوق‌های برد روی این میزبان')} />
 			{localIntegrations.buzzer_mirror.enabled && <>
-				<Toggle checked={localIntegrations.buzzer_mirror.native_enabled} onChange={(native_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, native_enabled } })) }} label={copy('PC speaker renderer', 'پخش‌کنندهٔ بلندگوی رایانه')} detail={copy('Uses the selected native or external beep backend.', 'از پشتیبان بوق بومی یا خارجی انتخاب‌شده استفاده می‌کند.')} />
-				<Toggle checked={localIntegrations.buzzer_mirror.web_audio_enabled} onChange={(web_audio_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, web_audio_enabled } })) }} label={copy('Web browser renderer', 'پخش‌کنندهٔ مرورگر وب')} detail={copy('Lets each connected WebUI render the pushed note with WebAudio.', 'هر WebUI متصل می‌تواند نت دریافتی را با WebAudio پخش کند.')} />
-				<div className="setting-group"><label>{copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')}</label><Segmented value={localIntegrations.buzzer_mirror.backend} label={copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')} options={[{ value: 'auto', label: copy('Auto', 'خودکار') }, { value: 'native', label: copy('Native', 'بومی') }, { value: 'external', label: copy('Command', 'فرمان') }]} onChange={(backend) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, backend: backend as 'auto' | 'native' | 'external' } })) }} /></div>
-				{localIntegrations.buzzer_mirror.backend !== 'native' && <TextField label={copy('Beep executable (optional)', 'فایل اجرایی بوق (اختیاری)')} dir="ltr" spellCheck={false} value={localIntegrations.buzzer_mirror.executable ?? ''} placeholder={copy('Blank uses beep from PATH', 'خالی: استفاده از beep در PATH')} onChange={(event) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, executable: event.currentTarget.value } })) }} />}
+				<Toggle checked={localIntegrations.buzzer_mirror.native_enabled} onChange={(native_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, native_enabled, backend: native_enabled && current.buzzer_mirror.backend === 'off' ? 'auto' : current.buzzer_mirror.backend } })) }} label={copy('PC speaker renderer', 'پخش‌کنندهٔ بلندگوی رایانه')} />
+				<Toggle checked={localIntegrations.buzzer_mirror.web_audio_enabled} onChange={(web_audio_enabled) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, web_audio_enabled } })) }} label={copy('Web browser renderer', 'پخش‌کنندهٔ مرورگر وب')} />
+				<div className="setting-group"><label>{copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')}</label><Segmented value={localIntegrations.buzzer_mirror.backend} label={copy('PC speaker backend', 'پشتیبان بلندگوی رایانه')} options={[{ value: 'auto', label: copy('Auto', 'خودکار') }, { value: 'native', label: copy('Native', 'بومی') }, { value: 'external', label: copy('Command', 'فرمان') }, { value: 'off', label: copy('Off', 'خاموش') }]} onChange={(backend) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, backend: backend as 'auto' | 'native' | 'external' | 'off', native_enabled: backend === 'off' ? false : current.buzzer_mirror.native_enabled } })) }} /></div>
+				{localIntegrations.buzzer_mirror.backend !== 'native' && localIntegrations.buzzer_mirror.backend !== 'off' && <TextField label={copy('Beep executable (optional)', 'فایل اجرایی بوق (اختیاری)')} dir="ltr" spellCheck={false} value={localIntegrations.buzzer_mirror.executable ?? ''} placeholder={copy('Blank uses beep from PATH', 'خالی: استفاده از beep در PATH')} onChange={(event) => { setIntegrationsNotice(''); setLocalIntegrations((current) => ({ ...current, buzzer_mirror: { ...current.buzzer_mirror, executable: event.currentTarget.value } })) }} />}
 			</>}
 			<div className="inline-actions"><Button icon={ShieldCheck} tone="primary" busy={integrationsBusy} disabled={!integrationsDirty} onClick={() => void persistLocalIntegrations()}>{copy('Save PC buzzer settings', 'ذخیرهٔ تنظیمات بیزر رایانه')}</Button></div>
 			{buzzerPathNotice && <p className="settings-action-feedback" role="status">{buzzerPathNotice}</p>}
