@@ -17,6 +17,9 @@ import {
 } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+
+loadProjectEnv();
 import { gzipSync } from "node:zlib";
 import { PRODUCT_METADATA } from "../../Tools/Build/product-metadata.mjs";
 import { repositoryWebUrl, resolveRepository } from "./repository-context.mjs";

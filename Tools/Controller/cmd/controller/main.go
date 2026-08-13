@@ -24,6 +24,7 @@ import (
 	"pccontroller.local/controller/internal/consolewindow"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/discovery"
+	"pccontroller.local/controller/internal/envfile"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/installer"
@@ -46,6 +47,10 @@ var (
 )
 
 func main() {
+	if _, err := envfile.LoadProcess(); err != nil {
+		fmt.Fprintln(os.Stderr, "environment:", err)
+		os.Exit(1)
+	}
 	// A console can be created by conhost before Windows consults the named
 	// executable icon resource. Explicitly apply the packaged product icon so
 	// direct launches and inherited build/terminal consoles do not retain the

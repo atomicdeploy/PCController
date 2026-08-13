@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveRepository } from "./repository-context.mjs";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
 import {
   actionPinFindings,
   isGeneratedOrBinaryPath,
@@ -10,6 +11,8 @@ import {
   privacyFindings,
   readOrdinaryTextFile,
 } from "./repository-policy.mjs";
+
+loadProjectEnv();
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const errors = [];

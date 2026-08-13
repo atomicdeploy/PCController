@@ -12,6 +12,9 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../../Tools/Build/env.mjs";
+
+loadProjectEnv();
 
 export const TARGETS = Object.freeze([
   Object.freeze({ id: "Linux-x64", runner: "ubuntu-24.04 · x64" }),

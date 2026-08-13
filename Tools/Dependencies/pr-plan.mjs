@@ -5,6 +5,9 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../Build/env.mjs'
+
+loadProjectEnv()
 
 function escapeCell(value) {
   return String(value ?? '').replaceAll('|', '\\|').replaceAll('\n', ' ')

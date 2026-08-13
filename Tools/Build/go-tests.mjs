@@ -20,6 +20,9 @@ import {
 } from 'node:fs'
 import { basename, dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from './env.mjs'
+
+loadProjectEnv()
 
 const SCRIPT = fileURLToPath(import.meta.url)
 const DEFAULT_MODULE = resolve(dirname(SCRIPT), '..', 'Controller')
