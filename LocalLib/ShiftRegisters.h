@@ -39,6 +39,8 @@ public:
   uint8_t rawInputs() const;
 
   void setOutput(uint8_t bit, bool active);
+  // Applies all logical relay outputs in one cache update before service().
+  void setActiveOutputs(uint8_t activeMask);
   void allOutputsOff();
   uint8_t activeOutputs() const;
 

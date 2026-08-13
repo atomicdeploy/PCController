@@ -133,6 +133,10 @@ void ShiftRegisters::setOutput(uint8_t bit, bool active) {
   }
 }
 
+void ShiftRegisters::setActiveOutputs(uint8_t activeMask) {
+  outputRegister_ = static_cast<uint8_t>(~activeMask);
+}
+
 void ShiftRegisters::allOutputsOff() { outputRegister_ = 0xFF; }
 
 uint8_t ShiftRegisters::activeOutputs() const {
