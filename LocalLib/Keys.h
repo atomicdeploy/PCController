@@ -31,6 +31,16 @@ constexpr bool keyEventRunsPrimaryAction(KeyEvent event) {
   return event == KeyEvent::Down || event == KeyEvent::HoldRepeat;
 }
 
+// Numeric front-panel editors advance one unit on the initial press, ten
+// units during an ordinary hold, and one hundred units after the fast-repeat
+// threshold. Navigation and binary selectors deliberately ignore this value.
+constexpr uint8_t keyAdjustmentStep(KeyEvent event, uint16_t heldMs) {
+  if (event != KeyEvent::HoldRepeat) {
+    return 1;
+  }
+  return heldMs >= KEY_HOLD_FAST_AFTER_MS ? 100 : 10;
+}
+
 using KeyEventCallback =
     void (*)(uint8_t bit, KeyEvent event, void *context);
 
@@ -43,6 +53,7 @@ public:
 
   bool isPressed() const;
   bool isHeld() const;
+  uint16_t heldForMs(uint32_t now = millis()) const;
   uint8_t inputBit() const;
 
   // Down/Up remain immediate after debounce; Click is deferred for telemetry

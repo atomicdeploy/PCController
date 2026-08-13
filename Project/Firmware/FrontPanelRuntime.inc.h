@@ -342,14 +342,17 @@ void menuFeedback(bool fromRemote) {
   statusLeds.playCue(fromRemote ? StatusLedCue::Radio
                                 : StatusLedCue::Menu,
                      260, now);
-#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
-  buzzer.beep();
-#endif
+  // Direct interaction acknowledgement belongs to the retained TonePlayer,
+  // not to the optional autonomous AudioCues policy. TonePlayer itself
+  // enforces silent mode, so an unmute action can confirm itself immediately.
+  if (!buzzer.muted()) {
+    buzzer.beep();
+  }
 }
 
-// Rolls an 8-bit brightness by the configured front-panel step.
-uint8_t adjustedBrightness(uint8_t value, bool increase) {
-  return TransitionMath::rollByte(value, ILLUMINATION_MENU_STEP, increase);
+// Rolls an 8-bit value by the press/hold acceleration step.
+uint8_t adjustedBrightness(uint8_t value, bool increase, uint8_t step = 1) {
+  return TransitionMath::rollByte(value, step, increase);
 }
 
 // Rolls Off/Auto/On and mirrors the result to the edit transaction.
@@ -382,6 +385,9 @@ void setSilentMode(bool silent, uint32_t at) {
   if (!editTransactionActive) {
     settingsStore.markDirty(at);
   }
+  // Never retain silent feedback in the queue: otherwise rapid menu presses
+  // while muted can become a burst of stale tones after unmuting.
+  buzzer.stop();
   buzzer.setMuted(silent);
 }
 
@@ -538,7 +544,8 @@ void beginLocalMacroCapture() {
 #endif
 
 // Dispatches physical, RF, or host navigation through the modal menu state machine.
-void handleMenuAction(uint8_t action, bool fromRemote) {
+void handleMenuAction(uint8_t action, bool fromRemote,
+                      uint8_t adjustmentStep) {
   if (action > MENU_INCREASE) {
     return;
   }
@@ -632,7 +639,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         modeManager.transitionTo(MODE_ILLUMINATION_OFF_EDIT);
       } else {
         illumination.setOnBrightness(adjustedBrightness(
-            illumination.onBrightness(), action == MENU_INCREASE));
+            illumination.onBrightness(), action == MENU_INCREASE,
+            adjustmentStep));
         markIlluminationSettingsChanged(actionNow);
       }
       menuFeedback(fromRemote);
@@ -645,7 +653,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         modeManager.transitionTo(MODE_ILLUMINATION);
       } else {
         illumination.setOffBrightness(adjustedBrightness(
-            illumination.offBrightness(), action == MENU_INCREASE));
+            illumination.offBrightness(), action == MENU_INCREASE,
+            adjustmentStep));
         markIlluminationSettingsChanged(actionNow);
       }
       menuFeedback(fromRemote);
@@ -689,7 +698,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
             break;
           case 3:
             settings.statusBrightness =
-                adjustedBrightness(settings.statusBrightness, increase);
+                adjustedBrightness(settings.statusBrightness, increase,
+                                   adjustmentStep);
             statusLeds.setBrightness(settings.statusBrightness);
             break;
           case 4:
@@ -760,7 +770,8 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         uint8_t &value =
             settingsStore.values().userPwm[userPwmMenuIndex];
-        value = adjustedBrightness(value, action == MENU_INCREASE);
+        value = adjustedBrightness(value, action == MENU_INCREASE,
+                                   adjustmentStep);
         pwm.setLogical(userPwmMenuIndex, userPwm12(value));
       }
       menuFeedback(fromRemote);
@@ -836,7 +847,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       // the latency-sensitive input turn. K4 below performs the reciprocal
       // unmute, so a silent board can always be recovered from the TM1637.
       if (menuPage == PAGE_SOUND) {
-        setSilentMode(true, actionNow);
+        setSilentMode(!settingsStore.values().silent(), actionNow);
       // rELY owns immediate All-Off; the unified page handled its own K3.
       } else if (leafDecreaseAction(modeManager.current()) ==
           LeafDecreaseAction::AllRelaysOff) {
@@ -856,7 +867,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else
 #endif
       if (menuPage == PAGE_SOUND) {
-        setSilentMode(false, actionNow);
+        setSilentMode(!settingsStore.values().silent(), actionNow);
 #if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
       } else if (menuPage == PAGE_PWM) {
         beginEditTransaction(MODE_PWM);
@@ -983,7 +994,12 @@ void applyKeyGesture(uint8_t bit, KeyEvent event, InputEventSource source,
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
     const bool recordingBefore = macroPlayback.recording();
 #endif
-    handleMenuAction(bit, source == InputEventSource::Radio);
+    const uint8_t adjustmentStep =
+        source == InputEventSource::Physical
+            ? keyAdjustmentStep(event, menuKeys[bit].heldForMs())
+            : 1;
+    handleMenuAction(bit, source == InputEventSource::Radio,
+                     adjustmentStep);
     const bool unifiedLifecycle = mode == MODE_MOTION &&
                                   bit >= BoardPins::KeyDecrease;
     const uint8_t payload[] = {bit, static_cast<uint8_t>(event)};

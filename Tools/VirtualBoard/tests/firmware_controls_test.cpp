@@ -53,6 +53,11 @@ void testKeyGestures() {
               !keyEventRunsPrimaryAction(KeyEvent::Click) &&
               !keyEventRunsPrimaryAction(KeyEvent::HoldStart),
           "primary actions must run on Down/repeat, never deferred Click");
+  require(keyAdjustmentStep(KeyEvent::Down, 0) == 1 &&
+              keyAdjustmentStep(KeyEvent::HoldRepeat, 900) == 10 &&
+              keyAdjustmentStep(KeyEvent::HoldRepeat,
+                                KEY_HOLD_FAST_AFTER_MS) == 100,
+          "press/hold numeric acceleration must remain 1/10/100");
 
   {
     Key key(0);
@@ -111,6 +116,8 @@ void testKeyGestures() {
     key.update(2801);
     key.update(3801);
     key.update(3861);
+    require(key.heldForMs(3861) == 1860,
+            "held duration did not preserve the physical press edge");
     shiftRegisters.setVirtualInput(2, false);
     key.update(3900);
     key.update(3950);
