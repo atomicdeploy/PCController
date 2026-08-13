@@ -110,6 +110,47 @@ func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
 	}
 }
 
+func TestAppLaunchRPCUsesTypedBoundedCallback(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	defer client.Shutdown()
+	var received hostui.SurfaceLaunchRequest
+	service := Service{
+		Client: client,
+		AppLaunch: func(
+			_ context.Context,
+			request hostui.SurfaceLaunchRequest,
+		) (hostui.SurfaceLaunchResult, error) {
+			received = request
+			return hostui.SurfaceLaunchResult{
+				Surface: request.Surface, Requested: request.Mode,
+				Effective: "started", Accepted: true,
+			}, nil
+		},
+	}
+	params := json.RawMessage(`{"surface":"tui","mode":"launch","page":"updates","idempotency_key":"test-launch"}`)
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.app.launch", Params: params,
+	})
+	if response.Error != nil {
+		t.Fatal(response.Error)
+	}
+	result, ok := response.Result.(hostui.SurfaceLaunchResult)
+	if !ok || !result.Accepted || result.Effective != "started" ||
+		received.Surface != "tui" || received.Page != "updates" ||
+		received.IdempotencyKey != "test-launch" {
+		t.Fatalf("received=%#v result=%#v", received, response.Result)
+	}
+
+	response = service.Dispatch(context.Background(), Request{
+		Method: "controller.app.launch",
+		Params: json.RawMessage(`{"surface":"tui","command":"cmd.exe /c whoami"}`),
+	})
+	if response.Error == nil || !strings.Contains(response.Error.Message, "unknown field") {
+		t.Fatalf("arbitrary execution field accepted: %#v", response)
+	}
+}
+
 func TestRemoteAppNavigationRejectsCoordinatorMetadataAndKeepsExplicitPath(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

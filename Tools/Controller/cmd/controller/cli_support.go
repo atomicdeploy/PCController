@@ -331,6 +331,7 @@ Device, firmware and recovery:
 
 Host configuration and integration:
 	controller [--app-name NAME] [--tagline TEXT] COMMAND...
+	controller app launch tui|webui [--mode ensure|launch|focus] [--target INSTANCE] [--page PAGE] [--peer NAME]
 	controller config path [config|data] | open [config|data] | clear --confirm | show|validate
 	controller config secrets status|set REF (--from-env NAME|--stdin)|clear REF
 	controller network edge-enable|edge-disable|peer-add|peer-remove|probe|status

@@ -1557,6 +1557,52 @@
         }
       }
     },
+    "/api/app/launch": {
+      "post": {
+        "operationId": "post_api_app_launch",
+        "summary": "Ensure, launch, or focus a named TUI or WebUI surface",
+        "tags": [
+          "launch"
+        ],
+        "x-required-capability": "host_configuration",
+        "x-idempotency": "see operation semantics and idempotency keys",
+        "responses": {
+          "200": {
+            "description": "Accepted response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppSurfaceLaunch"
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/bridges": {
       "get": {
         "operationId": "get_api_bridges",
@@ -3434,6 +3480,7 @@
               "controller.app.instance.remove",
               "controller.app.instance.report",
               "controller.app.instances",
+              "controller.app.launch",
               "controller.app.navigate",
               "controller.app.page",
               "controller.artifact.capture",
@@ -3863,7 +3910,7 @@
         "properties": {
           "page": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._/-]{1,96}$"
+            "pattern": "^[A-Za-z0-9._-]{1,96}$"
           },
           "target": {
             "type": "string",
@@ -3871,6 +3918,44 @@
             "default": "*"
           }
         }
+      },
+      "AppSurfaceLaunch": {
+        "type": "object",
+        "required": [
+          "surface"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "surface": {
+            "type": "string",
+            "enum": [
+              "tui",
+              "webui"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "ensure",
+              "launch",
+              "focus"
+            ],
+            "default": "ensure"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          },
+          "page": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._/-]{1,96}$"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._:-]{1,180}$"
+          }
+        },
+        "description": "Named product surface only. Executables, arguments, environment, shell text, and credentials are not accepted."
       },
       "JSONRPCError": {
         "type": "object",
