@@ -163,11 +163,10 @@ type CaptureRequest struct {
 
 // UpdateRequest authorizes one immutable artifact application transaction.
 type UpdateRequest struct {
-	ArtifactSHA256        string `json:"artifact_sha256"`
-	Authorized            bool   `json:"authorized"`
-	Method                string `json:"method,omitempty"`
-	Port                  string `json:"port,omitempty"`
-	AllowIncompleteBackup bool   `json:"allow_incomplete_backup,omitempty"`
+	ArtifactSHA256 string `json:"artifact_sha256"`
+	Authorized     bool   `json:"authorized"`
+	Method         string `json:"method,omitempty"`
+	Port           string `json:"port,omitempty"`
 	// ReinitializeEEPROM is an explicit development data-loss exception.
 	// The primary retains the raw pre-flash EEPROM backup but does not restore
 	// incompatible semantic settings after the new firmware authenticates.

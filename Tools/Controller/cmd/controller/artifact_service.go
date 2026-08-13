@@ -204,9 +204,6 @@ func (executor *primaryArtifactExecutor) ProgramFirmware(
 	request artifacts.UpdateRequest,
 	progress artifacts.ProgressFunc,
 ) error {
-	if request.ReinitializeEEPROM && request.AllowIncompleteBackup {
-		return errors.New("development EEPROM reinitialization requires a complete verified raw backup")
-	}
 	method, err := executor.method(request.Method)
 	if err != nil {
 		return err
@@ -225,9 +222,6 @@ func (executor *primaryArtifactExecutor) ProgramFirmware(
 			)
 		}
 		words = append(words, port)
-	}
-	if request.AllowIncompleteBackup {
-		words = append(words, "--allow-incomplete-backup")
 	}
 	if request.ReinitializeEEPROM {
 		words = append(words, "--reinitialize-eeprom")

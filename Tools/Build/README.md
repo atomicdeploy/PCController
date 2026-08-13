@@ -129,7 +129,7 @@ optional backend-ID override for different ISP hardware. Controller owns
 pre-flash backup, artifact validation, write/verify, and application
 reauthentication. On standalone USBasp writes, `--port` supplies the separate
 application lifecycle selector and is never sent to ISP. The advanced
-`--allow-incomplete-backup` override is never implied.
+Application-only UART updates continue when optional capture regions are unavailable; EEPROM replacement still requires a complete backup.
 
 Use `--dry-run` to inspect the full ordered plan without starting a
 subprocess, changing a file, or opening a device. `--plan-json` is intended

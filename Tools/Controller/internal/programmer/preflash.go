@@ -13,14 +13,19 @@ type FlashOperation func(context.Context, string, io.Writer) error
 type PostBackupOperation func(context.Context, AutomaticPreflashResult, io.Writer) error
 
 type AutomaticPreflashOptions struct {
-	FirmwarePath                string
-	Backup                      Options
-	DataPaths                   HostDataPaths
-	AllowFlashWithoutFullBackup bool
-	// AfterBackup runs only after the raw backup is complete (or an explicit
-	// incomplete-backup override was accepted) and before firmware is
-	// reinspected or written. Controller uses this boundary to arm durable
-	// board-side programming state without contaminating the original backup.
+	FirmwarePath string
+	Backup       Options
+	DataPaths    HostDataPaths
+	// RequireCompleteBackup is reserved for operations that will deliberately
+	// replace or reinterpret EEPROM. A normal application-only update attempts
+	// a UART backup, but a transport-limited backup is advisory and never
+	// invents an ISP/USBasp prerequisite.
+	RequireCompleteBackup bool
+	// AfterBackup runs after the best available pre-update capture and before
+	// firmware is reinspected or written. When RequireCompleteBackup is true,
+	// this boundary is reached only after a complete verified capture.
+	// Controller uses it to arm durable board-side programming state without
+	// contaminating the original backup.
 	AfterBackup PostBackupOperation
 }
 
@@ -35,11 +40,11 @@ type AutomaticPreflashResult struct {
 	Warnings        []string `json:"warnings,omitempty"`
 }
 
-// AutomaticBackupThenFlash is the mandatory safety gate for host-managed
-// firmware writes. It backs up metadata, flash, and EEPROM through Urclock by
-// default, verifies the completed manifest, and only then invokes the caller's
-// flash operation. USBasp remains an explicit method choice; bypassing a
-// complete backup is a separate, explicit recovery decision.
+// AutomaticBackupThenFlash is the shared UART-first gate for host-managed
+// firmware writes. It attempts a content-addressed pre-update capture using the
+// selected transport, but an application-only update does not require fuses,
+// ISP hardware, or an EEPROM read. Operations that intentionally replace or
+// reinterpret EEPROM opt into RequireCompleteBackup.
 func AutomaticBackupThenFlash(
 	ctx context.Context,
 	options AutomaticPreflashOptions,
@@ -116,10 +121,10 @@ func AutomaticBackupThenFlash(
 		if backupErr == nil {
 			backupErr = errors.New("automatic backup did not produce a complete validated manifest")
 		}
-		if !options.AllowFlashWithoutFullBackup {
+		if options.RequireCompleteBackup {
 			return result, fmt.Errorf("refusing to flash without complete backup: %w", backupErr)
 		}
-		warning := "explicit override accepted: flashing without a complete backup: " + backupErr.Error()
+		warning := "pre-update capture unavailable; continuing application-only UART update and retaining the previous backup: " + backupErr.Error()
 		result.Warnings = append(result.Warnings, warning)
 		if output != nil {
 			fmt.Fprintln(output, "WARNING:", warning)

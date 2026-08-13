@@ -28,7 +28,15 @@ func TestProgramFlashUsesAutomaticBackupGate(t *testing.T) {
 			for _, prefix := range []string{"-Uflash:r:", "-Ueeprom:r:"} {
 				if strings.HasPrefix(argument, prefix) && strings.HasSuffix(argument, ":i") {
 					path := strings.TrimSuffix(strings.TrimPrefix(argument, prefix), ":i")
-					return os.WriteFile(path, []byte(image), 0o600)
+					content := []byte(image)
+					if prefix == "-Ueeprom:r:" {
+						var encodeErr error
+						content, encodeErr = programmer.GenerateDefaultEEPROMIntelHex()
+						if encodeErr != nil {
+							return encodeErr
+						}
+					}
+					return os.WriteFile(path, content, 0o600)
 				}
 			}
 		}

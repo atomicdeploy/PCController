@@ -652,14 +652,20 @@ selected ISP recovery, host self-update, and flash/EEPROM artifacts through
 one guarded lifecycle:
 
 - every ordinary compile/flash operation is initiated by the host UI/API;
-- before a write, the primary captures flash and EEPROM into the host data
-  directory; ISP is offered only after the ordinary bootloader route is
-  unavailable and the operator selects it explicitly;
-- a failed backup blocks programming unless the operator gives an explicit,
-  logged override;
+- before an ordinary application write, the primary attempts a UART
+  flash/EEPROM/metadata capture; unavailable optional regions do not invent an
+  ISP requirement or block a firmware-only update;
+- ISP is offered only after the ordinary bootloader route is unavailable, or
+  for explicit board initialization/provisioning;
+- operations that intentionally replace EEPROM require a complete
+  EEPROM-capable backup; there is no incomplete-backup override;
+- flash, EEPROM, and programmer metadata payloads are content-addressed by
+  SHA-256. The current
+  and previous operation are protected, while older operation manifests obey
+  `programming.backup_retention_days` (30 by default);
 - an explicit `reinitialize_eeprom` firmware-update request is forwarded from
-  a secondary client to the primary and is mutually exclusive with that backup
-  override; it is a development data-loss exception, not migration;
+  a secondary client to the primary; it is a development data-loss exception,
+  not migration, and therefore requires the complete backup above;
 - live settings export is distinct from parsing an offline EEPROM image;
 - named Intel HEX regions can be inspected and boundedly patched with checksum,
   address, before/after SHA-256, retained-original, and read-back verification;

@@ -1255,7 +1255,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "program",
-		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom] | program OPERATION METHOD PATH [PORT]",
+		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--reinitialize-eeprom] | program OPERATION METHOD PATH [PORT]",
 		Summary: "guarded backup-then-flash, or non-write programmer diagnostics",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			resolved := resolveCommandOptions(options)
@@ -4123,7 +4123,7 @@ func safeFlashCommand(
 	options CommandOptions,
 	args []string,
 ) (string, error) {
-	const usage = "usage: program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom]"
+	const usage = "usage: program flash HEX [PORT] [--method urclock|usbasp] [--reinitialize-eeprom]"
 	if len(args) == 0 {
 		return "", errors.New(usage)
 	}
@@ -4133,14 +4133,11 @@ func safeFlashCommand(
 	}
 	method := programmer.MethodUrclock
 	port := ""
-	allowIncomplete := false
 	reinitializeEEPROM := false
 	for index := 1; index < len(args); index++ {
 		argument := strings.TrimSpace(args[index])
 		lower := strings.ToLower(argument)
 		switch {
-		case lower == "--allow-incomplete-backup":
-			allowIncomplete = true
 		case lower == "--reinitialize-eeprom":
 			reinitializeEEPROM = true
 		case lower == "--method":
@@ -4160,9 +4157,6 @@ func safeFlashCommand(
 	}
 	if method != programmer.MethodUrclock && method != programmer.MethodUSBasp {
 		return "", fmt.Errorf("guarded flash method must be urclock or usbasp, got %q", method)
-	}
-	if reinitializeEEPROM && allowIncomplete {
-		return "", errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
 	}
 	if runtime == nil {
 		return "", errors.New("guarded flash requires an application runtime")
@@ -4228,6 +4222,9 @@ func safeFlashCommand(
 		USBaspAutoSlow:            true,
 		ApplicationHash:           snapshot.Hello.BuildHash,
 		ApplicationIdentitySchema: snapshot.Hello.IdentitySchema,
+	}
+	if options.HostConfig != nil {
+		backup.BackupRetention = time.Duration(options.HostConfig().Programming.BackupRetentionDays) * 24 * time.Hour
 	}
 	writeOptions := backup
 	writeOptions.Operation = programmer.OperationWriteFlash
@@ -4351,8 +4348,8 @@ func safeFlashCommand(
 		programmer.AutomaticPreflashOptions{
 			FirmwarePath: firmwarePath,
 			Backup:       backup, DataPaths: dataPaths,
-			AllowFlashWithoutFullBackup: allowIncomplete,
-			AfterBackup:                 afterBackup,
+			RequireCompleteBackup: reinitializeEEPROM,
+			AfterBackup:           afterBackup,
 		},
 		runner,
 		func(flashContext context.Context, path string, writer io.Writer) error {
