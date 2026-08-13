@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   AppActionReceiptCache,
   acknowledgeWebAppAction,
+  applyExactTargetWebActionEffect,
   applyWebAppAction,
   parseWebProgress,
   processWebAppAction,
@@ -131,5 +132,25 @@ describe('typed web app actions', () => {
 			throw new Error('still-offline')
 		}, async () => {})).rejects.toThrow('still-offline')
 		expect(attempts).toBe(3)
+	})
+
+	it('applies exact-target pages locally without a navigation commit or fan-out', () => {
+		const replacedPages: string[] = []
+		const titles: Array<string | null> = []
+		const progress: Array<unknown> = []
+		const handlers = {
+			replacePage: (page: string) => { replacedPages.push(page) },
+			setTitle: (title: string | null) => { titles.push(title) },
+			setProgress: (value: unknown) => { progress.push(value) },
+		}
+		expect('commitNavigation' in handlers).toBe(false)
+		const effect = applyWebAppAction({
+			operationID: 'exact-page', deliveryID: 'exact-delivery', receiptKey: 'exact',
+			kind: 'app.page', value: 'events',
+		})
+		expect(applyExactTargetWebActionEffect(effect, handlers)).toBe(true)
+		expect(replacedPages).toEqual(['events'])
+		expect(titles).toEqual([])
+		expect(progress).toEqual([])
 	})
 })

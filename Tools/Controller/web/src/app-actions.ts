@@ -35,6 +35,12 @@ export type WebActionEffect =
   | { outcome: 'applied'; progress: WebActionProgress | null }
   | { outcome: 'rejected'; reason: string }
 
+export interface ExactTargetWebActionHandlers {
+  replacePage: (page: PageID) => void
+  setTitle: (title: string | null) => void
+  setProgress: (progress: WebActionProgress | null) => void
+}
+
 export type ProcessedWebAppAction =
   | { action: PushedAppAction; effect: WebActionEffect; acknowledgement: AppActionAck; duplicate: false }
   | { action: PushedAppAction; acknowledgement: AppActionAck; duplicate: true }
@@ -85,6 +91,20 @@ export function applyWebAppAction(action: PushedAppAction): WebActionEffect {
         : { outcome: 'applied', progress }
     }
   }
+}
+
+// Apply an exact-target effect only through local setters. In particular,
+// app.page is a remote application result and must never enter the follower
+// navigation commit/fan-out path.
+export function applyExactTargetWebActionEffect(
+  effect: WebActionEffect,
+  handlers: ExactTargetWebActionHandlers,
+): boolean {
+  if (effect.outcome !== 'applied') return false
+  if ('page' in effect) handlers.replacePage(effect.page)
+  else if ('title' in effect) handlers.setTitle(effect.title)
+  else handlers.setProgress(effect.progress)
+  return true
 }
 
 export function parseWebProgress(value: string): WebActionProgress | null | undefined {

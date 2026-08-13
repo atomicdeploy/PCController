@@ -95,6 +95,7 @@ import { sessionAuthenticationGuidanceRequired } from './authentication-guidance
 import {
   AppActionReceiptCache,
   acknowledgeWebAppAction,
+  applyExactTargetWebActionEffect,
   processWebAppAction,
   type WebActionProgress,
 } from './app-actions'
@@ -1249,16 +1250,14 @@ export default function App() {
 				const { acknowledgement } = processedAction
 				if (!processedAction.duplicate) {
 					const { effect } = processedAction
-					if (effect.outcome === 'applied') {
-						if ('page' in effect) {
-							applyPage(effect.page, 'replace')
+					applyExactTargetWebActionEffect(effect, {
+						replacePage: (page) => {
+							applyPage(page, 'replace')
 							audioRef.current?.cue('navigation', 'forward')
-						} else if ('title' in effect) {
-							setRemoteTitleOverride(effect.title)
-						} else if ('progress' in effect) {
-							setRemoteActionProgress(effect.progress)
-						}
-					}
+						},
+						setTitle: setRemoteTitleOverride,
+						setProgress: setRemoteActionProgress,
+					})
 				}
 				void acknowledgeWebAppAction(
 					acknowledgement,

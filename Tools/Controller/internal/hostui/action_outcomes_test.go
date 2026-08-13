@@ -110,6 +110,41 @@ func TestActionCoordinatorDeduplicatesAndRejectsConflictingOperationID(t *testin
 	}
 }
 
+func TestActionCoordinatorReusedOperationGetsFreshDeliveryAfterRetention(t *testing.T) {
+	registry := NewInstanceRegistry()
+	liveActionInstance(t, registry, "web:one", "webui", WebActionCapabilities)
+	now := time.Date(2026, 8, 14, 0, 0, 0, 0, time.UTC)
+	var deliveries []AppAction
+	coordinator := NewActionCoordinator(registry, func(action AppAction) error {
+		deliveries = append(deliveries, action)
+		return nil
+	})
+	defer coordinator.Close()
+	coordinator.now = func() time.Time { return now }
+	ids := []string{"delivery-one", "delivery-two"}
+	coordinator.newID = func() (string, error) {
+		value := ids[0]
+		ids = ids[1:]
+		return value, nil
+	}
+	action := AppAction{
+		Kind: "app.title", Value: "Bench", Target: "web:one", OperationID: "reusable-operation",
+	}
+	if _, err := coordinator.Submit(action, MaximumActionTimeout); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(MaximumActionTimeout + ActionOperationRetention + time.Second)
+	if _, err := coordinator.Submit(action, MaximumActionTimeout); err != nil {
+		t.Fatal(err)
+	}
+	if len(deliveries) != 2 ||
+		deliveries[0].Metadata[ActionDeliveryIDKey] != "delivery-one" ||
+		deliveries[1].Metadata[ActionDeliveryIDKey] != "delivery-two" ||
+		AppActionReceiptKey(deliveries[0]) == AppActionReceiptKey(deliveries[1]) {
+		t.Fatalf("reused deliveries=%#v", deliveries)
+	}
+}
+
 func TestActionCoordinatorRejectsCallerOwnedDeliveryMetadata(t *testing.T) {
 	registry := NewInstanceRegistry()
 	liveActionInstance(t, registry, "tui:one", "tui", TUIActionCapabilities)

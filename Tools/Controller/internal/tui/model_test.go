@@ -742,6 +742,39 @@ func TestTUINavigationCommitsLocalIntentWithoutEchoingCoordinatorPage(t *testing
 	}
 }
 
+func TestTUIExactTypedPageDoesNotCommitOrFanOutNavigation(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	var commits []string
+	var acknowledgements []hostui.ActionAck
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:exact",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		CommitNavigation: func(page string) { commits = append(commits, page) },
+		AckAppAction: func(ack hostui.ActionAck) error {
+			acknowledgements = append(acknowledgements, ack)
+			return nil
+		},
+	})
+	action := hostui.AppAction{
+		Kind: "app.page", Value: "events", Target: model.instanceID,
+		OperationID: "exact-page", Metadata: map[string]string{
+			hostui.ActionDeliveryIDKey: "exact-delivery",
+			hostui.ActionExpiresAtKey:  time.Now().Add(time.Minute).UTC().Format(time.RFC3339Nano),
+		},
+	}
+	updated, command := model.Update(appActionMsg(action))
+	model = updated.(Model)
+	runTeaCommandTree(command)
+	if model.page != PageEvents || len(commits) != 0 {
+		t.Fatalf("exact page=%v navigation commits=%#v", model.page, commits)
+	}
+	if len(acknowledgements) != 1 || acknowledgements[0].OperationID != action.OperationID ||
+		acknowledgements[0].DeliveryID != "exact-delivery" ||
+		acknowledgements[0].State != hostui.ActionStateApplied {
+		t.Fatalf("acknowledgements=%#v", acknowledgements)
+	}
+}
+
 func TestTUISettingsCanOptThisInstanceOutAndReportMembershipImmediately(t *testing.T) {
 	model := readyModel(t, PageAppSettings)
 	model.navigationSync = true
