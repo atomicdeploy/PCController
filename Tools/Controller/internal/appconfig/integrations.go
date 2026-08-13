@@ -207,7 +207,39 @@ type Discovery struct {
 	WSDiscoveryEnabled bool   `json:"ws_discovery_enabled"`
 	BroadcastEnabled   bool   `json:"broadcast_enabled"`
 	NetBIOSEnabled     bool   `json:"netbios_enabled"`
+	BroadcastPort      int    `json:"broadcast_port,omitempty"`
 	InstanceName       string `json:"instance_name,omitempty"`
+}
+
+// DefaultDiscovery keeps bounded public advertisement and active discovery
+// available on first run. It does not enable remote control or weaken IPC auth.
+func DefaultDiscovery() Discovery {
+	return Discovery{
+		MDNSEnabled: true, DNSSDenabled: true, SSDPEnabled: true, UPnPEnabled: true,
+		WSDiscoveryEnabled: true, BroadcastEnabled: true, NetBIOSEnabled: true,
+		BroadcastPort: 37889,
+	}
+}
+
+// RemoteConnectable reports whether the configured IPC listener is actually
+// reachable beyond loopback. Advertisement remains independent from remote
+// control, but consumers need this exact distinction before offering Connect.
+func (value IPC) RemoteConnectable() bool {
+	if !value.AllowRemote {
+		return false
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(value.Listen))
+	if err != nil {
+		return false
+	}
+	host = strings.Trim(host, "[]")
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if parsed := net.ParseIP(host); parsed != nil {
+		return !parsed.IsLoopback()
+	}
+	return host != ""
 }
 
 type Webhook struct {
@@ -304,10 +336,8 @@ func (value Config) validateIntegrations() error {
 		return fmt.Errorf("integrations.discovery.instance_name must be at most 63 characters")
 	}
 	discovery := value.Integrations.Discovery
-	if (discovery.MDNSEnabled || discovery.DNSSDenabled || discovery.SSDPEnabled ||
-		discovery.UPnPEnabled || discovery.WSDiscoveryEnabled || discovery.BroadcastEnabled ||
-		discovery.NetBIOSEnabled) && !value.IPC.AllowRemote {
-		return fmt.Errorf("network discovery requires ipc.allow_remote and authenticated remote access")
+	if discovery.BroadcastPort != 0 && (discovery.BroadcastPort < 1024 || discovery.BroadcastPort > 65535) {
+		return fmt.Errorf("integrations.discovery.broadcast_port must be 1024..65535")
 	}
 	names := make(map[string]bool)
 	if len(value.Integrations.OutboundWebhooks) > 64 {

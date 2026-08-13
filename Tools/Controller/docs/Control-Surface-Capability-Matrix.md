@@ -31,7 +31,9 @@ consume `state`, so frame/measurement traffic cannot spam or evict one-shot
 activity. Subscription is observation, not a second command implementation.
 
 Native HTTP/WebSocket clients retain Bearer and `X-PCController-Token`
-authentication. Browser WebSocket and Socket.IO clients exchange that durable
+authentication. A native client following an unauthenticated discovery record
+first verifies the responder-bound `/api/auth/server-proof` HMAC before sending
+that bearer. Browser WebSocket and Socket.IO clients exchange that durable
 header credential at `POST /api/session/ticket`, then use the returned
 short-lived one-use `Sec-WebSocket-Protocol` ticket on a credential-free URL.
 Every subsequent capability decision retains the authenticated principal and

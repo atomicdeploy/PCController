@@ -446,7 +446,7 @@ Arduino compile scratch data defaults under the platform user cache at
 | Change | Minimum hardware-free checks |
 |---|---|
 | Markdown/docs/Wiki publisher | `node .github/scripts/repository-check.mjs`; `node Tools/Audit/publish-wiki.mjs --preview` |
-| Go host/internal package | from `Tools/Controller`: `go test ./...` and `go vet ./...` |
+| Go host/internal package | from the repository root: `node Tools/Build/go-tests.mjs`; then from `Tools/Controller`: `go vet ./...` |
 | WebUI | from `Tools/Controller/web`: `npm ci`, `npm run typecheck`, `npm test`, `npm run build` |
 | Firmware | `firmware.cmd build` and `firmware.cmd check` (or POSIX equivalents) |
 | Virtual Board | CMake `release` configure/build plus `ctest --preset release` |

@@ -109,6 +109,8 @@ func (model Model) appSettingRows() []settingRow {
 	rows := []settingRow{
 		{Key: "app.title", Group: "APPLICATION", Label: "Title", Value: model.prefs.AppTitle, Editable: true},
 		{Key: "app.tagline", Group: "", Label: "First-run tagline", Value: model.prefs.Tagline, Editable: true},
+		{Key: "network.advertisement", Group: "NETWORK", Label: "Discovery advertisement", Value: discoverySummary(model.hostIntegrationValue.Discovery), Editable: true},
+		{Key: "network.instance", Group: "", Label: "Advertised instance name", Value: defaultText(model.hostIntegrationValue.Discovery.InstanceName, "system hostname / app title"), Editable: true},
 		{Key: "buzzer.path", Group: "BUZZER", Label: "Playback path", Value: strings.ToUpper(buzzerPath), Editable: true},
 		{Key: "appearance.identity", Group: "APPEARANCE", Label: "Theme · language · direction", Value: fmt.Sprintf("%s · %s · %s", appearanceThemeLabel(appearance.Theme), appearanceLocaleLabel(appearance.Locale), strings.ToUpper(appearance.Direction)), Editable: true},
 		{Key: "appearance.accessibility", Group: "", Label: "Motion · number density", Value: fmt.Sprintf("%s · %s", boolWord(appearance.ReduceMotion, "REDUCED", "FULL"), boolWord(appearance.CompactNumbers, "COMPACT", "DETAILED")), Editable: true},
@@ -131,6 +133,42 @@ func (model Model) appSettingRows() []settingRow {
 		{Key: "led.rf_hold", Group: "", Label: "RF activity hold", Value: fmt.Sprintf("%d ms", status.RFHoldMS), Editable: true},
 		{Key: "led.door_hold", Group: "", Label: "Door cue hold", Value: fmt.Sprintf("%d ms", status.DoorCueHoldMS), Editable: true},
 		{Key: "led.hot", Group: "", Label: "HOT threshold", Value: fmt.Sprintf("%.2f °C", float64(status.HotThresholdCentiC)/100), Editable: true},
+	}
+	for index, device := range model.networkDevices {
+		hostname, state := device.Host, "host discovered"
+		detail := make([]string, 0, 9)
+		if device.Public != nil {
+			hostname = device.Public.Hostname
+			state = boolWord(device.Public.Health.Connectable, "connectable", "advertisement only")
+			if device.Public.Host.Version != "" {
+				detail = append(detail, "host "+device.Public.Host.Version)
+			}
+			if device.Public.Board.Connected {
+				board := defaultText(device.Public.Board.Identity.Name, "board")
+				if device.Public.Board.Identity.BuildHash != "" {
+					board += "@" + device.Public.Board.Identity.BuildHash
+				}
+				detail = append(detail, board)
+				if device.Public.Board.Port.Name != "" {
+					detail = append(detail, "port "+device.Public.Board.Port.Name)
+				}
+			}
+			telemetry := device.Public.Board.Telemetry
+			if telemetry.INA219Available {
+				detail = append(detail, fmt.Sprintf("%.3f V · %.3f A", float64(telemetry.SupplyMV)/1000, float64(telemetry.CurrentMA)/1000))
+			}
+			if telemetry.TemperatureLEDAvailable {
+				detail = append(detail, fmt.Sprintf("T1 %.2f °C", float64(telemetry.TemperatureLEDCentiC)/100))
+			}
+			if telemetry.TemperatureBTAvailable {
+				detail = append(detail, fmt.Sprintf("T2 %.2f °C", float64(telemetry.TemperatureBTAudioCentiC)/100))
+			}
+		}
+		prefix := fmt.Sprintf("%s · %s · %s", hostname, strings.Join(device.Protocols, "+"), state)
+		if len(detail) != 0 {
+			prefix += " · " + strings.Join(detail, " · ")
+		}
+		rows = append(rows, settingRow{Key: fmt.Sprintf("network.device.%d", index), Group: "DISCOVERED", Label: device.Name, Value: prefix, Editable: true})
 	}
 	for _, item := range []struct {
 		key, label string
@@ -307,6 +345,19 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 	case "app.tagline":
 		editor.IsText = true
 		editor.Text = ui.Tagline
+	case "network.advertisement":
+		discovery := model.hostIntegrationValue.Discovery
+		editor.Fields = []settingEditorField{
+			boolean("dns-sd", "mDNS / DNS-SD", discovery.MDNSEnabled || discovery.DNSSDenabled),
+			boolean("ssdp", "SSDP / UPnP", discovery.SSDPEnabled || discovery.UPnPEnabled),
+			boolean("ws-discovery", "WS-Discovery", discovery.WSDiscoveryEnabled),
+			boolean("broadcast", "UDP broadcast", discovery.BroadcastEnabled),
+			boolean("netbios", "NetBIOS", discovery.NetBIOSEnabled),
+			rangeField("broadcast-port", "Broadcast port", discovery.BroadcastPort, 1024, 65535, 1, "", false),
+		}
+	case "network.instance":
+		editor.IsText = true
+		editor.Text = model.hostIntegrationValue.Discovery.InstanceName
 	case "buzzer.path":
 		path := tuiBuzzerPath(model.snapshot().Settings.Flags&native.SettingsSilent != 0, !model.hostIntegrationValue.BuzzerMirror.Enabled)
 		editor.Fields = []settingEditorField{{
@@ -406,6 +457,36 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 			}
 		}
 	}
+}
+
+func discoverySummary(value appconfig.Discovery) string {
+	protocols := make([]string, 0, 5)
+	if value.MDNSEnabled || value.DNSSDenabled {
+		protocols = append(protocols, "DNS-SD")
+	}
+	if value.SSDPEnabled || value.UPnPEnabled {
+		protocols = append(protocols, "UPnP")
+	}
+	if value.WSDiscoveryEnabled {
+		protocols = append(protocols, "WSD")
+	}
+	if value.BroadcastEnabled {
+		protocols = append(protocols, "broadcast")
+	}
+	if value.NetBIOSEnabled {
+		protocols = append(protocols, "NetBIOS")
+	}
+	if len(protocols) == 0 {
+		return "DISABLED"
+	}
+	return "ENABLED · " + strings.Join(protocols, "+")
+}
+
+func defaultText(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
 }
 
 func tuiBuzzerPath(boardSilent, hostSilent bool) string {

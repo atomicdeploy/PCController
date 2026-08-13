@@ -5,7 +5,9 @@ package discovery
 // access, and all API/WebSocket operations still require the configured token.
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"encoding/xml"
@@ -15,27 +17,43 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 const broadcastMagic = "PCCONTROLLER-DISCOVERY/1"
 
+const (
+	soap12Namespace       = "http://www.w3.org/2003/05/soap-envelope"
+	wsAddressingNamespace = "http://www.w3.org/2005/08/addressing"
+	wsDiscoveryNamespace  = "http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01"
+	wsDiscoveryTo         = "urn:docs-oasis-open-org:ws-dd:ns:discovery:2009:01"
+	wsProbeAction         = wsDiscoveryNamespace + "/Probe"
+	wsProbeMatchesAction  = wsDiscoveryNamespace + "/ProbeMatches"
+	wsAnonymousRole       = wsAddressingNamespace + "/anonymous"
+	wsControllerNamespace = "urn:pccontroller-org:ws-discovery:1"
+)
+
+var wsMessageSequence atomic.Uint64
+
 type broadcastPacket struct {
-	Magic    string   `json:"magic"`
-	Action   string   `json:"action"`
-	Name     string   `json:"name"`
-	Host     string   `json:"host"`
-	Port     int      `json:"port"`
-	Location string   `json:"location,omitempty"`
-	USN      string   `json:"usn,omitempty"`
-	TXT      []string `json:"txt,omitempty"`
+	Magic     string   `json:"magic"`
+	Action    string   `json:"action"`
+	Name      string   `json:"name"`
+	Host      string   `json:"host"`
+	Port      int      `json:"port"`
+	Location  string   `json:"location,omitempty"`
+	PublicURL string   `json:"public_url,omitempty"`
+	USN       string   `json:"usn,omitempty"`
+	TXT       []string `json:"txt,omitempty"`
 }
 
 func broadcastPacketFor(advertiser *Advertiser, action string) broadcastPacket {
 	host, _ := osHostName()
 	return broadcastPacket{Magic: broadcastMagic, Action: action, Name: advertiser.name,
 		Host: host, Port: advertiser.port, Location: "http://" + net.JoinHostPort(host, strconv.Itoa(advertiser.port)) + "/upnp/device.xml",
-		USN: ssdpUSN(advertiser.name, advertiser.port), TXT: advertiser.text()}
+		PublicURL: "http://" + net.JoinHostPort(host, strconv.Itoa(advertiser.port)) + PublicInfoPath,
+		USN:       ssdpUSNWithText(advertiser.name, advertiser.port, advertiser.text()), TXT: advertiser.text()}
 }
 
 func osHostName() (string, error) {
@@ -47,8 +65,8 @@ func osHostName() (string, error) {
 }
 
 func runBroadcastAdvertiser(ctx context.Context, advertiser *Advertiser) {
-	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: advertiser.broadcastPort})
-	if err != nil {
+	connection := advertiser.broadcastConn
+	if connection == nil {
 		return
 	}
 	defer connection.Close()
@@ -76,7 +94,7 @@ func runBroadcastAdvertiser(ctx context.Context, advertiser *Advertiser) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-advertiser.refresh:
+		case <-advertiser.broadcastRefresh:
 			beacon(&net.UDPAddr{IP: net.IPv4bcast, Port: advertiser.broadcastPort})
 		case <-ticker.C:
 			beacon(&net.UDPAddr{IP: net.IPv4bcast, Port: advertiser.broadcastPort})
@@ -119,50 +137,107 @@ func discoverBroadcast(ctx context.Context, port int, add func(Instance)) error 
 			host = source.IP.String()
 		}
 		add(Instance{Protocol: "broadcast", Name: packet.Name, Host: host, Port: packet.Port,
-			Location: packet.Location, USN: packet.USN, TXT: normalizeTXT(packet.TXT), SeenAt: time.Now()})
+			Addresses: []string{host}, Location: packet.Location, PublicURL: packet.PublicURL, USN: packet.USN, TXT: normalizeTXT(packet.TXT), SeenAt: time.Now()})
 	}
 }
 
 type wsProbeEnvelope struct {
-	Body wsProbeBody `xml:"Body"`
+	XMLName xml.Name      `xml:"http://www.w3.org/2003/05/soap-envelope Envelope"`
+	Header  wsProbeHeader `xml:"http://www.w3.org/2003/05/soap-envelope Header"`
+	Body    wsProbeBody   `xml:"http://www.w3.org/2003/05/soap-envelope Body"`
+}
+type wsProbeHeader struct {
+	Action    string `xml:"http://www.w3.org/2005/08/addressing Action"`
+	MessageID string `xml:"http://www.w3.org/2005/08/addressing MessageID"`
+	To        string `xml:"http://www.w3.org/2005/08/addressing To"`
 }
 type wsProbeBody struct {
-	Probe wsProbe `xml:"Probe"`
+	Probe wsProbe `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 Probe"`
 }
 type wsProbe struct {
-	Types string `xml:"Types"`
+	XMLName xml.Name `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 Probe"`
+	Types   string   `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 Types"`
 }
 type wsMatchEnvelope struct {
-	Body wsMatchBody `xml:"Body"`
+	XMLName xml.Name      `xml:"http://www.w3.org/2003/05/soap-envelope Envelope"`
+	Header  wsProbeHeader `xml:"http://www.w3.org/2003/05/soap-envelope Header"`
+	Body    wsMatchBody   `xml:"http://www.w3.org/2003/05/soap-envelope Body"`
 }
 type wsMatchBody struct {
-	Matches wsMatches `xml:"ProbeMatches"`
+	Matches wsMatches `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 ProbeMatches"`
 }
 type wsMatches struct {
-	Match wsMatch `xml:"ProbeMatch"`
+	Match wsMatch `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 ProbeMatch"`
 }
 type wsMatch struct {
-	Address string `xml:"Address"`
-	Types   string `xml:"Types"`
-	XAddrs  string `xml:"XAddrs"`
+	Endpoint wsEndpointReference `xml:"http://www.w3.org/2005/08/addressing EndpointReference"`
+	Types    string              `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 Types"`
+	XAddrs   string              `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 XAddrs"`
+}
+type wsEndpointReference struct {
+	Address string `xml:"http://www.w3.org/2005/08/addressing Address"`
 }
 
 func wsProbeMessage() string {
-	return `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:d="http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01"><s:Header/><s:Body><d:Probe><d:Types>` + WSDiscoveryType + `</d:Types></d:Probe></s:Body></s:Envelope>`
+	messageID := newWSMessageID("probe")
+	return `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="` + soap12Namespace + `" xmlns:a="` + wsAddressingNamespace + `" xmlns:d="` + wsDiscoveryNamespace + `" xmlns:pc="` + wsControllerNamespace + `"><s:Header><a:Action s:mustUnderstand="1">` + wsProbeAction + `</a:Action><a:MessageID>` + messageID + `</a:MessageID><a:To s:mustUnderstand="1">` + wsDiscoveryTo + `</a:To></s:Header><s:Body><d:Probe><d:Types>` + WSDiscoveryType + `</d:Types></d:Probe></s:Body></s:Envelope>`
 }
 
-func wsProbeResponse(advertiser *Advertiser, target *net.UDPAddr) string {
+func wsProbeResponse(advertiser *Advertiser, target *net.UDPAddr, relatesTo ...string) string {
 	host := localAddressFor(target)
-	return `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:d="http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01"><s:Header/><s:Body><d:ProbeMatches><d:ProbeMatch><d:Address>` + ssdpUSN(advertiser.name, advertiser.port) + `</d:Address><d:Types>` + WSDiscoveryType + `</d:Types><d:XAddrs>http://` + net.JoinHostPort(host, strconv.Itoa(advertiser.port)) + `/upnp/device.xml</d:XAddrs><d:MetadataVersion>1</d:MetadataVersion></d:ProbeMatch></d:ProbeMatches></s:Body></s:Envelope>`
+	base := "http://" + net.JoinHostPort(host, strconv.Itoa(advertiser.port))
+	relation := ""
+	if len(relatesTo) != 0 {
+		relation = strings.TrimSpace(relatesTo[0])
+	}
+	udn := ssdpUSNWithText(advertiser.name, advertiser.port, advertiser.text())
+	return `<?xml version="1.0" encoding="UTF-8"?><s:Envelope xmlns:s="` + soap12Namespace + `" xmlns:a="` + wsAddressingNamespace + `" xmlns:d="` + wsDiscoveryNamespace + `" xmlns:pc="` + wsControllerNamespace + `"><s:Header><a:Action s:mustUnderstand="1">` + wsProbeMatchesAction + `</a:Action><a:MessageID>` + newWSMessageID(udn) + `</a:MessageID><a:RelatesTo>` + escapeXMLText(relation) + `</a:RelatesTo><a:To s:mustUnderstand="1">` + wsAnonymousRole + `</a:To><d:AppSequence InstanceId="` + strconv.FormatUint(wsInstanceID(udn), 10) + `" MessageNumber="` + strconv.FormatUint(wsMessageSequence.Add(1), 10) + `"/></s:Header><s:Body><d:ProbeMatches><d:ProbeMatch><a:EndpointReference><a:Address>` + escapeXMLText(udn) + `</a:Address></a:EndpointReference><d:Types>` + WSDiscoveryType + `</d:Types><d:XAddrs>` + escapeXMLText(base+`/upnp/device.xml `+base+PublicInfoPath) + `</d:XAddrs><d:MetadataVersion>1</d:MetadataVersion></d:ProbeMatch></d:ProbeMatches></s:Body></s:Envelope>`
+}
+
+func parseWSProbe(data []byte) (wsProbeEnvelope, bool) {
+	var envelope wsProbeEnvelope
+	if xml.Unmarshal(data, &envelope) != nil || envelope.XMLName.Space != soap12Namespace ||
+		envelope.Header.Action != wsProbeAction || strings.TrimSpace(envelope.Header.MessageID) == "" ||
+		envelope.Header.To != wsDiscoveryTo ||
+		envelope.Body.Probe.XMLName.Space != wsDiscoveryNamespace {
+		return wsProbeEnvelope{}, false
+	}
+	types := strings.Fields(envelope.Body.Probe.Types)
+	if len(types) != 0 {
+		matched := false
+		for _, value := range types {
+			if value == WSDiscoveryType || strings.HasSuffix(value, ":PCControllerBridge") {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return wsProbeEnvelope{}, false
+		}
+	}
+	return envelope, true
+}
+
+func newWSMessageID(seed string) string {
+	sequence := wsMessageSequence.Add(1)
+	digest := sha256.Sum256([]byte(seed + ":" + strconv.FormatInt(time.Now().UnixNano(), 10) + ":" + strconv.FormatUint(sequence, 10)))
+	return fmt.Sprintf("urn:uuid:%x-%x-%x-%x-%x", digest[:4], digest[4:6], digest[6:8], digest[8:10], digest[10:16])
+}
+
+func wsInstanceID(value string) uint64 {
+	digest := sha256.Sum256([]byte(value))
+	return binary.BigEndian.Uint64(digest[:8])
+}
+
+func escapeXMLText(value string) string {
+	var output bytes.Buffer
+	_ = xml.EscapeText(&output, []byte(value))
+	return output.String()
 }
 
 func runWSDiscoveryAdvertiser(ctx context.Context, advertiser *Advertiser) {
-	group, err := net.ResolveUDPAddr("udp4", wsDiscoveryAddress)
-	if err != nil {
-		return
-	}
-	connection, err := net.ListenMulticastUDP("udp4", nil, group)
-	if err != nil {
+	connection := advertiser.wsListener
+	if connection == nil {
 		return
 	}
 	defer connection.Close()
@@ -171,8 +246,11 @@ func runWSDiscoveryAdvertiser(ctx context.Context, advertiser *Advertiser) {
 	for {
 		_ = connection.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		count, source, readErr := connection.ReadFromUDP(buffer)
-		if readErr == nil && strings.Contains(string(buffer[:count]), "Probe") {
-			_, _ = connection.WriteToUDP([]byte(wsProbeResponse(advertiser, source)), source)
+		if readErr == nil {
+			probe, ok := parseWSProbe(buffer[:count])
+			if ok {
+				_, _ = connection.WriteToUDP([]byte(wsProbeResponse(advertiser, source, probe.Header.MessageID)), source)
+			}
 		} else if readErr != nil {
 			if netErr, ok := readErr.(net.Error); !ok || !netErr.Timeout() {
 				return
@@ -214,19 +292,30 @@ func discoverWSDiscovery(ctx context.Context, add func(Instance)) error {
 			return readErr
 		}
 		var envelope wsMatchEnvelope
-		if xml.Unmarshal(buffer[:count], &envelope) != nil || envelope.Body.Matches.Match.XAddrs == "" {
+		if xml.Unmarshal(buffer[:count], &envelope) != nil || envelope.XMLName.Space != soap12Namespace ||
+			envelope.Header.Action != wsProbeMatchesAction || envelope.Body.Matches.Match.XAddrs == "" {
 			continue
 		}
-		location := strings.Fields(envelope.Body.Matches.Match.XAddrs)[0]
+		locations := strings.Fields(envelope.Body.Matches.Match.XAddrs)
+		location := locations[0]
+		publicURL := ""
+		for _, candidate := range locations {
+			if strings.HasSuffix(candidate, PublicInfoPath) {
+				publicURL = candidate
+			}
+		}
 		parsed, parseErr := neturlParse(location)
 		if parseErr != nil {
 			continue
 		}
 		host := parsed.host
-		if host == "" && source != nil {
+		addresses := []string{}
+		if source != nil {
 			host = source.IP.String()
+			addresses = append(addresses, host)
 		}
-		add(Instance{Protocol: "ws-discovery", Name: envelope.Body.Matches.Match.Address, Host: host, Port: parsed.port, Location: location, USN: envelope.Body.Matches.Match.Address, SeenAt: time.Now()})
+		address := envelope.Body.Matches.Match.Endpoint.Address
+		add(Instance{Protocol: "ws-discovery", Name: address, Host: host, Port: parsed.port, Addresses: addresses, Location: location, PublicURL: publicURL, USN: address, SeenAt: time.Now()})
 	}
 }
 
@@ -234,9 +323,8 @@ func runNetBIOSAdvertiser(ctx context.Context, advertiser *Advertiser) {
 	// NBNS is normally owned by the operating system. If it is unavailable we
 	// leave the OS service untouched; discovery still works through DNS-SD,
 	// SSDP/UPnP, WS-Discovery, and the authenticated-safe UDP broadcast.
-	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: NetBIOSNameServicePort})
-	if err != nil {
-		<-ctx.Done()
+	connection := advertiser.netbiosConn
+	if connection == nil {
 		return
 	}
 	defer connection.Close()
@@ -245,7 +333,7 @@ func runNetBIOSAdvertiser(ctx context.Context, advertiser *Advertiser) {
 	for {
 		_ = connection.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 		count, source, readErr := connection.ReadFromUDP(buffer)
-		if readErr == nil && count >= 50 && binary.BigEndian.Uint16(buffer[46:48]) == 0x0021 {
+		if readErr == nil && isNetBIOSNodeStatusQuery(buffer[:count]) {
 			_, _ = connection.WriteToUDP(netbiosNodeStatusResponse(buffer[:count], advertiser.name), source)
 		} else if readErr != nil {
 			if netErr, ok := readErr.(net.Error); !ok || !netErr.Timeout() {
@@ -266,20 +354,37 @@ func netbiosNodeStatusResponse(query []byte, name string) []byte {
 		name = name[:15]
 	}
 	name = fmt.Sprintf("%-15s", name)
-	response := make([]byte, 81)
-	copy(response[0:2], query[0:2])
-	binary.BigEndian.PutUint16(response[2:4], 0x8500)
+	if !isNetBIOSNodeStatusQuery(query) {
+		return nil
+	}
+	const rdataLength = 65 // name count + one 18-byte name + RFC 1002's 46-byte statistics block
+	response := make([]byte, len(query)+12+rdataLength)
+	copy(response, query)
+	binary.BigEndian.PutUint16(response[2:4], 0x8400)
+	binary.BigEndian.PutUint16(response[4:6], 1)
 	binary.BigEndian.PutUint16(response[6:8], 1)
-	response[12], response[13] = 0xC0, 0x0C
-	binary.BigEndian.PutUint16(response[14:16], 0x0021)
-	binary.BigEndian.PutUint16(response[16:18], 1)
-	binary.BigEndian.PutUint32(response[18:22], 0)
-	binary.BigEndian.PutUint16(response[22:24], 19)
-	response[24] = 1
-	copy(response[25:40], []byte(name))
-	response[40] = 0
-	// The final six statistics bytes are reserved and zero-filled.
+	binary.BigEndian.PutUint16(response[8:10], 0)
+	binary.BigEndian.PutUint16(response[10:12], 0)
+	index := len(query)
+	response[index], response[index+1] = 0xC0, 0x0C
+	binary.BigEndian.PutUint16(response[index+2:index+4], 0x0021)
+	binary.BigEndian.PutUint16(response[index+4:index+6], 1)
+	binary.BigEndian.PutUint32(response[index+6:index+10], 0)
+	binary.BigEndian.PutUint16(response[index+10:index+12], rdataLength)
+	response[index+12] = 1
+	copy(response[index+13:index+28], []byte(name))
+	response[index+28] = 0 // workstation service suffix
+	binary.BigEndian.PutUint16(response[index+29:index+31], 0x0400)
+	// The final 46 node-statistics bytes are zero-filled when unavailable.
 	return response
+}
+
+func isNetBIOSNodeStatusQuery(packet []byte) bool {
+	if len(packet) < 12 || binary.BigEndian.Uint16(packet[2:4])&0x8000 != 0 || binary.BigEndian.Uint16(packet[4:6]) == 0 {
+		return false
+	}
+	index, ok := skipDNSName(packet, 12)
+	return ok && index+4 <= len(packet) && binary.BigEndian.Uint16(packet[index:index+2]) == 0x0021 && binary.BigEndian.Uint16(packet[index+2:index+4]) == 1
 }
 
 func discoverNetBIOS(ctx context.Context, add func(Instance)) error {
@@ -311,7 +416,7 @@ func discoverNetBIOS(ctx context.Context, add func(Instance)) error {
 			continue
 		}
 		if probeController(ctx, source.IP.String(), 8787) {
-			add(Instance{Protocol: "netbios", Name: name, Host: source.IP.String(), Port: 8787, SeenAt: time.Now()})
+			add(Instance{Protocol: "netbios", Name: name, Host: source.IP.String(), Port: 8787, Addresses: []string{source.IP.String()}, SeenAt: time.Now()})
 		}
 	}
 }
@@ -321,10 +426,9 @@ func netbiosNodeStatusQuery() []byte {
 	binary.BigEndian.PutUint16(packet[0:2], uint16(time.Now().UnixNano()))
 	binary.BigEndian.PutUint16(packet[4:6], 1)
 	packet[12] = 0x20
-	for index, value := range []byte("*                              ") {
-		if index >= 16 {
-			break
-		}
+	var wildcard [16]byte
+	wildcard[0] = '*'
+	for index, value := range wildcard {
 		packet[13+index*2] = 'A' + (value >> 4)
 		packet[14+index*2] = 'A' + (value & 0xf)
 	}
@@ -335,29 +439,64 @@ func netbiosNodeStatusQuery() []byte {
 }
 
 func parseNetBIOSNodeStatus(packet []byte) string {
-	if len(packet) < 57 || binary.BigEndian.Uint16(packet[2:4])&0x8000 == 0 {
+	if len(packet) < 12 || binary.BigEndian.Uint16(packet[2:4])&0x8000 == 0 {
 		return ""
 	}
 	index := 12
-	if index >= len(packet) || packet[index] == 0 {
-		return ""
+	questions := int(binary.BigEndian.Uint16(packet[4:6]))
+	for range questions {
+		var ok bool
+		index, ok = skipDNSName(packet, index)
+		if !ok || index+4 > len(packet) {
+			return ""
+		}
+		index += 4
 	}
-	index += int(packet[index]) + 2 // length byte, encoded name, terminator
-	if index+4 > len(packet) {
-		return ""
+	answers := int(binary.BigEndian.Uint16(packet[6:8]))
+	for range answers {
+		var ok bool
+		index, ok = skipDNSName(packet, index)
+		if !ok || index+10 > len(packet) {
+			return ""
+		}
+		typeCode := binary.BigEndian.Uint16(packet[index : index+2])
+		rdataLength := int(binary.BigEndian.Uint16(packet[index+8 : index+10]))
+		index += 10
+		if index+rdataLength > len(packet) {
+			return ""
+		}
+		if typeCode == 0x0021 && rdataLength >= 19 {
+			count := int(packet[index])
+			if count > 0 && 1+count*18 <= rdataLength {
+				return strings.TrimRight(strings.TrimSpace(string(packet[index+1:index+16])), "\x00 ")
+			}
+		}
+		index += rdataLength
 	}
-	index += 4 // QTYPE + QCLASS
-	if index+12 > len(packet) {
-		return ""
+	return ""
+}
+
+func skipDNSName(packet []byte, index int) (int, bool) {
+	for {
+		if index >= len(packet) {
+			return 0, false
+		}
+		length := int(packet[index])
+		if length&0xC0 == 0xC0 {
+			if index+2 > len(packet) {
+				return 0, false
+			}
+			return index + 2, true
+		}
+		index++
+		if length == 0 {
+			return index, true
+		}
+		if length > 63 || index+length > len(packet) {
+			return 0, false
+		}
+		index += length
 	}
-	index += 12 // answer name/type/class/TTL/RDLENGTH
-	count := int(packet[index])
-	index++
-	if count == 0 || index+18 > len(packet) {
-		return ""
-	}
-	name := strings.TrimSpace(string(packet[index : index+15]))
-	return strings.TrimRight(name, "\x00 ")
 }
 
 func probeController(ctx context.Context, host string, port int) bool {
@@ -367,7 +506,7 @@ func probeController(ctx context.Context, host string, port int) bool {
 	if err != nil {
 		return false
 	}
-	response, err := http.DefaultClient.Do(request)
+	response, err := (&http.Client{Transport: publicHTTPTransport}).Do(request)
 	if err != nil {
 		return false
 	}

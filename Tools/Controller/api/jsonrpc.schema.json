@@ -69,6 +69,10 @@
             "controller.device.inspect",
             "controller.device.status",
             "controller.discovery.check",
+            "controller.discovery.config",
+            "controller.discovery.config.get",
+            "controller.discovery.config.set",
+            "controller.discovery.connect",
             "controller.discovery.github.release",
             "controller.discovery.github.workflow",
             "controller.discovery.local_manifest",
@@ -378,6 +382,26 @@
       "capability": "read",
       "summary": "discovery check",
       "idempotency": "safe"
+    },
+    "controller.discovery.config": {
+      "capability": "read",
+      "summary": "Return persistent network advertisement configuration.",
+      "idempotency": "safe"
+    },
+    "controller.discovery.config.get": {
+      "capability": "read",
+      "summary": "Return persistent network advertisement configuration.",
+      "idempotency": "safe"
+    },
+    "controller.discovery.config.set": {
+      "capability": "integrations",
+      "summary": "Persist and hot-apply network advertisement configuration.",
+      "idempotency": "idempotent-with-authoritative-readback"
+    },
+    "controller.discovery.connect": {
+      "capability": "bridge_calls",
+      "summary": "Verify an authenticated discovered host and return its health and snapshot.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.discovery.github.release": {
       "capability": "read",

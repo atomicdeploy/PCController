@@ -23,6 +23,7 @@ import (
 	"pccontroller.local/controller/internal/artifacts"
 	"pccontroller.local/controller/internal/consolewindow"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/envfile"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
@@ -879,6 +880,16 @@ func runTUIWithInitialAction(
 				return store.Current().Integrations
 			},
 			SaveIntegrations: func(value appconfig.Integrations) error {
+				if value.Discovery != store.Current().Integrations.Discovery {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					var persisted appconfig.Discovery
+					err := callPrimary(ctx, "controller.discovery.config.set", value.Discovery, &persisted)
+					cancel()
+					if err != nil {
+						return fmt.Errorf("save discovery settings through primary: %w", err)
+					}
+					value.Discovery = persisted
+				}
 				_, err := store.Update(func(config *appconfig.Config) error {
 					config.Integrations = value
 					return nil
@@ -908,8 +919,18 @@ func runTUIWithInitialAction(
 			Integrations: func() hostui.IntegrationStatus {
 				return primaryHostUIStatus(primary, store.Current())
 			},
-			AppActions: appActions,
-			InstanceID: tuiInstanceID,
+			NetworkDiscovery: func(ctx context.Context) ([]discovery.Instance, error) {
+				var instances []discovery.Instance
+				err := callPrimary(ctx, "controller.discovery.scan", map[string]any{
+					"timeout_ms": 3000,
+					"mdns":       true, "dns_sd": true, "ssdp": true, "upnp": true,
+					"ws_discovery": true, "broadcast": true, "netbios": true,
+				}, &instances)
+				return instances, err
+			},
+			OpenNetwork: openBrowser,
+			AppActions:  appActions,
+			InstanceID:  tuiInstanceID,
 			WriteOSC: func(payload string) error {
 				return hostui.WriteOSC(stdout, payload)
 			},

@@ -371,6 +371,7 @@ func Defaults() Config {
 			Lifecycle:    DefaultLifecycleSafety(),
 			StatusLED:    DefaultStatusLEDPolicy(),
 			BuzzerMirror: DefaultBuzzerMirror(),
+			Discovery:    DefaultDiscovery(),
 			Hotkeys: []Hotkey{
 				{Name: "open-dashboard", Enabled: true, Chord: "F13", Command: "app page dashboard"},
 				{Name: "open-controls", Enabled: true, Chord: "F14", Command: "app page controls"},

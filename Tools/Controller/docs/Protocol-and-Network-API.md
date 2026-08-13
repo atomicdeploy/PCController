@@ -497,6 +497,27 @@ discovery advertisements and responses never contain a durable token. The
 server retains only a SHA-256 digest of each outstanding ticket, never the raw
 ticket returned to the browser.
 
+An authenticated client following an unauthenticated LAN discovery record must
+prove the reached server before transmitting its durable credential:
+
+1. Generate 16–64 random bytes and send them as unpadded base64url in
+   `X-PCController-Nonce` to `GET /api/auth/server-proof` using a direct,
+   no-proxy HTTP client that rejects redirects.
+2. Verify the returned `pccontroller-server-proof/v1` HMAC-SHA256 using the
+   configured token, including the exact nonce, listener `IP:port`, and
+   instance identity.
+3. Require that the signed listener address is the packet source (or an IP
+   resolved directly for the requested hostname), then pin raw IPC, HTTP,
+   WebSocket, and Socket.IO to that proven address.
+
+The endpoint never receives the bearer. It is public by design and therefore
+requires at least 24 decoded random base64url bytes; low-entropy compatibility
+tokens receive HTTP 409. It is a possession proof,
+not a replacement for the authenticated session ticket or capability checks.
+Discovery public information advertises the proof path as
+`endpoints.server_proof`, and CLI `network connect` performs this exchange
+automatically before any bearer-bearing request.
+
 Missing-Origin handling is explicit. Loopback native clients may omit
 `Origin`; non-loopback native requests may omit it only when they present a
 durable Authorization/token header. Browser session tickets always require and
@@ -1335,17 +1356,35 @@ runtime board identity. During alpha, successive version builds do not gain
 layout migrations or compatibility aliases; those are reserved for distinct
 profile/feature builds that are intentionally supported concurrently.
 
-## mDNS and SSDP discovery
+## Network device directory and discovery
 
-When enabled, mDNS advertises `_pccontroller._tcp.local.` with non-secret TXT
-metadata for the WebSocket path, Socket.IO path, and authentication requirement.
-SSDP advertises and discovers
-`urn:pccontroller-org:service:bridge:1`, responds to its own type and
-`ssdp:all` searches, sends alive/byebye notifications, and publishes a
-`/healthz` location. Instance discovery returns protocol, name, host, port,
-addresses/TXT or SSDP location/USN, and observation time.
+Advertisement is enabled by default for mDNS/DNS-SD, SSDP/UPnP,
+WS-Discovery, bounded UDP broadcast, and NetBIOS. SSDP advertises
+`urn:pccontroller-org:service:bridge:1`, answers its type and `ssdp:all`, and
+publishes the UPnP device description. `GET /upnp/public.json` is the canonical
+secret-free document containing hostname, host build, board firmware and port
+identity, service/connection health, current public telemetry, and API/Web/
+WebSocket/Socket.IO/operation/event/opcode endpoints. SOAP `GetPublicInfo`
+locates that document and `GetStatus` returns the principal health/telemetry
+fields directly.
 
-Discovery is optional because multicast can be blocked by Windows Firewall,
+`controller.discovery.scan` and `controller network discover|list` query any
+combination of the transports and return one merged `Instance` per host.
+`protocols` identifies every successful path and `sources` retains each raw
+transport observation. `controller.discovery.connect` verifies authenticated
+raw IPC and reads the remote snapshot; `controller network connect --target
+NAME --token-ref REF` also probes HTTP, WebSocket, and Socket.IO. The TUI HOST
+Settings page uses `D` to scan and Enter/C on a discovered row to open its Web
+endpoint. The Web workbench renders the same merged directory and Connect
+navigates to the selected authenticated host.
+
+Advertisement can be disabled or narrowed per protocol through host config,
+`controller.discovery.config.get|set`, the Web workbench, the TUI network
+editor, or `controller network advertise`. Scan start, each merged device,
+completion/failure, connection, and configuration-change events fan out through
+the ordinary WebSocket and Socket.IO event subscriptions. Public-document HTTP
+enrichment bypasses Internet proxies and is pinned to the discovery responder's
+exact host and port. Discovery can still be blocked by Windows Firewall,
 VLANs, VPNs, or Wi-Fi isolation. Finding an instance does not authenticate the
 client and never grants command authority.
 

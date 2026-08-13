@@ -1,5 +1,5 @@
-// Package hostbridge runs opt-in host integrations around the one primary
-// controller client. It never opens the serial port itself.
+// Package hostbridge runs configurable host integrations around the one
+// primary controller client. It never opens the serial port itself.
 package hostbridge
 
 import (
@@ -29,6 +29,8 @@ import (
 
 type Status struct {
 	DiscoveryActive          bool                            `json:"discovery_active"`
+	DiscoveryProtocols       []string                        `json:"discovery_protocols,omitempty"`
+	DiscoveryFailures        []discovery.TransportFailure    `json:"discovery_failures,omitempty"`
 	HotkeysActive            int                             `json:"hotkeys_active"`
 	KeyboardActive           int                             `json:"keyboard_control_active"`
 	Notifications            bool                            `json:"notifications_active"`
@@ -214,6 +216,14 @@ type Manager struct {
 	segmentScroll      *segmentScrollPresenter
 	buzzerJobs         chan buzzerMirrorJob
 	discoveryRefresh   chan struct{}
+	discoveryIdentity  DiscoveryHostIdentity
+}
+
+type DiscoveryHostIdentity struct {
+	InstanceID string
+	Version    string
+	SourceHash string
+	BuildTime  string
 }
 
 const integrationShutdownTimeout = 8 * time.Second
@@ -223,6 +233,7 @@ func Start(
 	client *controller.Client,
 	store *appconfig.Store,
 	actions *hostui.ActionBroker,
+	identities ...DiscoveryHostIdentity,
 ) (*Manager, error) {
 	if client == nil || store == nil {
 		return nil, fmt.Errorf("host bridge requires controller client and configuration store")
@@ -243,6 +254,9 @@ func Start(
 		warningBeep:       hostui.WarningBeep,
 		buzzerJobs:        make(chan buzzerMirrorJob, 32),
 		discoveryRefresh:  make(chan struct{}, 1),
+	}
+	if len(identities) != 0 {
+		manager.discoveryIdentity = identities[0]
 	}
 	webhooks, err := newWebhookDeliveryQueue(webhookQueueOptions{
 		Path: defaultWebhookQueuePath(store.Path()),
@@ -445,6 +459,8 @@ func (manager *Manager) Status() Status {
 		result.WebhooksDropped = stats.Dropped
 	}
 	result.WSClientsActive = append([]string(nil), result.WSClientsActive...)
+	result.DiscoveryProtocols = append([]string(nil), result.DiscoveryProtocols...)
+	result.DiscoveryFailures = append([]discovery.TransportFailure(nil), result.DiscoveryFailures...)
 	return result
 }
 
@@ -726,21 +742,33 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 			MDNS: discoveryConfig.MDNSEnabled, DNSSD: discoveryConfig.DNSSDenabled,
 			SSDP: discoveryConfig.SSDPEnabled, UPnP: discoveryConfig.UPnPEnabled,
 			WSDiscovery: discoveryConfig.WSDiscoveryEnabled,
-			Broadcast:   discoveryConfig.BroadcastEnabled, NetBIOS: discoveryConfig.NetBIOSEnabled,
-		}, discoveryMetadata(config, manager.client.Snapshot()))
+			Broadcast:   discoveryConfig.BroadcastEnabled, BroadcastPort: discoveryConfig.BroadcastPort,
+			NetBIOS: discoveryConfig.NetBIOSEnabled,
+		}, discoveryMetadata(config, manager.client.Snapshot(), manager.discoveryIdentity))
 		if err != nil {
 			_ = hotkeys.Stop()
 			_ = keyboard.Stop("integration-start-failed")
 			return err
 		}
 		advertiser = created
-		status.DiscoveryActive = true
+		status.DiscoveryProtocols = created.ActiveProtocols()
+		status.DiscoveryFailures = created.Failures()
+		status.DiscoveryActive = len(status.DiscoveryProtocols) != 0
+		if len(status.DiscoveryFailures) != 0 && status.LastError == "" {
+			parts := make([]string, 0, len(status.DiscoveryFailures))
+			for _, failure := range status.DiscoveryFailures {
+				parts = append(parts, failure.Protocol+": "+failure.Error)
+			}
+			status.LastError = "discovery degraded: " + strings.Join(parts, "; ")
+		}
 		manager.client.EmitHostActionEvent("discovery.started", "network discovery advertiser started", "discovery", "advertise", map[string]string{
-			"mdns":         strconv.FormatBool(discoveryConfig.MDNSEnabled || discoveryConfig.DNSSDenabled),
-			"ssdp":         strconv.FormatBool(discoveryConfig.SSDPEnabled || discoveryConfig.UPnPEnabled),
-			"ws_discovery": strconv.FormatBool(discoveryConfig.WSDiscoveryEnabled),
-			"broadcast":    strconv.FormatBool(discoveryConfig.BroadcastEnabled),
-			"netbios":      strconv.FormatBool(discoveryConfig.NetBIOSEnabled),
+			"active":        strings.Join(status.DiscoveryProtocols, ","),
+			"failure_count": strconv.Itoa(len(status.DiscoveryFailures)),
+			"mdns":          strconv.FormatBool(discoveryConfig.MDNSEnabled || discoveryConfig.DNSSDenabled),
+			"ssdp":          strconv.FormatBool(discoveryConfig.SSDPEnabled || discoveryConfig.UPnPEnabled),
+			"ws_discovery":  strconv.FormatBool(discoveryConfig.WSDiscoveryEnabled),
+			"broadcast":     strconv.FormatBool(discoveryConfig.BroadcastEnabled),
+			"netbios":       strconv.FormatBool(discoveryConfig.NetBIOSEnabled),
 		})
 	}
 	peers := make(map[string]*peerState)

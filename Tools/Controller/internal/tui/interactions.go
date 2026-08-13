@@ -667,6 +667,9 @@ func (model Model) activateSelection() (Model, tea.Cmd, bool) {
 		updated, handled := model.beginSettingEditor()
 		return updated, nil, handled
 	case PageAppSettings:
+		if row, ok := model.selectedSettingRow(); ok && strings.HasPrefix(row.Key, "network.device.") {
+			return model.connectSelectedNetworkDevice()
+		}
 		updated, handled := model.beginSettingEditor()
 		return updated, nil, handled
 	case PageRF:
@@ -1319,6 +1322,13 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		}
 	case PageAutomations:
 		return model.macroShortcut(key)
+	case PageAppSettings:
+		switch key {
+		case "d":
+			return model.discoverNetworkDevices()
+		case "c":
+			return model.connectSelectedNetworkDevice()
+		}
 	case PageMenus:
 		switch key {
 		case "/":
@@ -1394,6 +1404,55 @@ func (model Model) pageShortcut(key string) (Model, tea.Cmd, bool) {
 		}
 	}
 	return model, nil, false
+}
+
+func (model Model) discoverNetworkDevices() (Model, tea.Cmd, bool) {
+	if model.networkDiscovery == nil {
+		model.setNotice("Network discovery is unavailable in this TUI host")
+		return model, nil, true
+	}
+	if model.networkDiscoveryPending {
+		return model, nil, true
+	}
+	model.networkDiscoveryPending = true
+	model.networkDiscoveryError = ""
+	return model, func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		instances, err := model.networkDiscovery(ctx)
+		return networkDiscoveryResultMsg{instances: instances, err: err}
+	}, true
+}
+
+func (model Model) connectSelectedNetworkDevice() (Model, tea.Cmd, bool) {
+	row, ok := model.selectedSettingRow()
+	if !ok || !strings.HasPrefix(row.Key, "network.device.") {
+		model.setNotice("Select a DISCOVERED network host first")
+		return model, nil, true
+	}
+	index, err := strconv.Atoi(strings.TrimPrefix(row.Key, "network.device."))
+	if err != nil || index < 0 || index >= len(model.networkDevices) {
+		model.setNotice("The selected network host is no longer available; discover again")
+		return model, nil, true
+	}
+	device := model.networkDevices[index]
+	endpoint := ""
+	connectable := false
+	if device.Public != nil {
+		endpoint = device.Public.Endpoints.Web
+		connectable = device.Public.Health.Connectable
+	}
+	if !connectable {
+		model.setNotice("Host is discoverable but authenticated remote control is disabled")
+		return model, nil, true
+	}
+	if endpoint == "" || model.openNetwork == nil {
+		model.setNotice("Discovered host has no Web endpoint")
+		return model, nil, true
+	}
+	return model, func() tea.Msg {
+		return networkConnectResultMsg{name: device.Name, err: model.openNetwork(endpoint)}
+	}, true
 }
 
 func (model Model) menuPageInfoValues() []control.MenuPageInfo {

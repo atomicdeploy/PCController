@@ -7,6 +7,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostmenu"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/native"
@@ -192,5 +193,7 @@ type Options struct {
 	MarkWelcomed     func()
 	WelcomeMelody    func(context.Context) error
 	PortOwnerActions portowner.Actions
+	NetworkDiscovery func(context.Context) ([]discovery.Instance, error)
+	OpenNetwork      func(string) error
 	Debug            bool
 }

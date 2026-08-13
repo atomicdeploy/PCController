@@ -62,7 +62,8 @@ The checked-in [configuration example](../Tools/Controller/examples/config.examp
 contains the full schema. Important safe defaults are:
 
 - `connection.reset_on_reconnect` is `false`;
-- discovery and remote listening are opt-in;
+- bounded public discovery advertisement is enabled by default, while remote
+  command access and non-loopback IPC listening remain opt-in;
 - the serial application connection remains alive even when there is no
   telemetry subscriber;
 - `safety.motion_door_policy` is `always`, matching the requested factory
@@ -537,17 +538,26 @@ REST, TUI, and hotkey clients to reconcile to one authoritative state.
 
 ## Discovery and remote bridges
 
-Optional mDNS/DNS-SD announces `_pccontroller._tcp.local.`. Optional SSDP uses
-`urn:pccontroller-org:service:bridge:1`, answers `M-SEARCH`, sends alive/byebye
-notifications, and points to `/healthz`. Advertisements expose the instance
-name, WebUI/API/snapshot paths, relevant app presentation values, and a bounded
-set of non-secret current board identity/status/settings values. The bridge
-updates those records from pushed runtime state at a coalesced maximum cadence;
-discovery never starts recurring board polling. SSDP uses repeated metadata
-headers and mDNS uses equivalent TXT entries, including a freshness timestamp.
-Credentials, authorization values, token-like keys, and raw environment data
-are rejected. Multicast discovery only finds a service; it grants no control
-rights.
+Default-on discovery uses mDNS/DNS-SD (`_pccontroller._tcp.local.`), SSDP/UPnP
+(`urn:pccontroller-org:service:bridge:1`), WS-Discovery, bounded UDP broadcast,
+and NetBIOS node-status/probing. Every transport resolves to the same
+`/upnp/public.json` document and the scanner merges matches by persistent host
+identity, USN, and endpoint while retaining a `protocols` list and auditable
+per-transport `sources`.
+
+The public document contains system hostname, host version/source/build,
+board firmware/capabilities and serial-port identity, service health, current
+voltage/current/power/temperature/door state, and Web/API/operation/event/opcode
+endpoints. SOAP `GetStatus`, `GetBoardIdentity`, and `GetPublicInfo` expose the
+same public contract. Discovery metadata is refreshed from pushed runtime state
+at a coalesced cadence and never initiates board polling. Credentials,
+authorization values, token-like keys, and raw environment data are rejected.
+Discovery and the public document grant no command rights; authenticated remote
+access remains independently policy-gated. CLI, TUI, Web, configuration file,
+and typed RPC all read or change the same hot-applied advertisement settings;
+scan/device/config/connect activity uses the ordinary WebSocket and Socket.IO
+event fan-out. LAN public-document reads bypass Internet proxies and cannot be
+redirected away from the responder's exact host and port.
 Firewall, VLAN, multicast, and corporate-network policy can still prevent
 discovery even when the service is healthy.
 

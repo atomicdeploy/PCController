@@ -78,6 +78,42 @@ interface AdvancedWorkbenchProps extends SharedViewProps {
   busy: string
 }
 
+interface DiscoveredDevice {
+  protocol: string
+  protocols?: string[]
+  name: string
+  host: string
+  port: number
+  public_url?: string
+  public?: {
+    instance_id: string
+    instance_name: string
+    hostname: string
+    health: { ok: boolean; connectable: boolean; auth: string }
+    host: { version?: string; source_hash?: string; build_time?: string }
+    board: {
+      connected: boolean
+      connection_state: string
+      identity: { name?: string; build_hash?: string; build_timestamp?: string }
+      port: { name?: string; product?: string; vid?: string; pid?: string }
+      telemetry: { available: boolean; ina219_available: boolean; temperature_led_available: boolean; temperature_bt_audio_available: boolean; supply_mv?: number; current_ma?: number; power_mw?: number; temperature_led_centi_c?: number; temperature_bt_audio_centi_c?: number; door_open: boolean }
+    }
+    endpoints: { web: string; operations: string; websocket: string; socket_io: string }
+  }
+}
+
+interface DiscoveryConfig {
+  mdns_enabled: boolean
+  dns_sd_enabled: boolean
+  ssdp_enabled: boolean
+  upnp_enabled: boolean
+  ws_discovery_enabled: boolean
+  broadcast_enabled: boolean
+  netbios_enabled: boolean
+  broadcast_port: number
+  instance_name: string
+}
+
 type ReviewRisk = 'normal' | 'caution' | 'danger'
 
 interface ReviewState {
@@ -235,7 +271,13 @@ export function AdvancedWorkbench({
   const [messageLine2, setMessageLine2] = useState('')
   const [discoverMDNS, setDiscoverMDNS] = useState(true)
   const [discoverSSDP, setDiscoverSSDP] = useState(true)
+  const [discoverWS, setDiscoverWS] = useState(true)
+  const [discoverBroadcast, setDiscoverBroadcast] = useState(true)
+  const [discoverNetBIOS, setDiscoverNetBIOS] = useState(true)
   const [discoverTimeout, setDiscoverTimeout] = useState(1500)
+  const [discoveryInstanceName, setDiscoveryInstanceName] = useState('')
+  const [discoveryBroadcastPort, setDiscoveryBroadcastPort] = useState(37889)
+  const [networkDevices, setNetworkDevices] = useState<DiscoveredDevice[]>([])
   const [historyMinutes, setHistoryMinutes] = useState(60)
   const [historyLimit, setHistoryLimit] = useState(100)
   const [serviceOutput, setServiceOutput] = useState(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
@@ -286,6 +328,24 @@ export function AdvancedWorkbench({
   useEffect(() => {
     setServiceOutput(copy('No service query yet.', 'هنوز پرس‌وجوی سرویسی انجام نشده است.'))
   }, [locale])
+
+  useEffect(() => {
+    let active = true
+    void rpc<DiscoveryConfig>('controller.discovery.config.get').then((value) => {
+      if (!active) return
+      setDiscoverMDNS(value.mdns_enabled || value.dns_sd_enabled)
+      setDiscoverSSDP(value.ssdp_enabled || value.upnp_enabled)
+      setDiscoverWS(value.ws_discovery_enabled)
+      setDiscoverBroadcast(value.broadcast_enabled)
+      setDiscoverNetBIOS(value.netbios_enabled)
+      setDiscoveryBroadcastPort(value.broadcast_port || 37889)
+      setDiscoveryInstanceName(value.instance_name || '')
+    }).catch(() => {
+      // Keep the documented default-on values when an older/unavailable host
+      // cannot return the persistent discovery contract.
+    })
+    return () => { active = false }
+  }, [])
 
   const rfMapCommand = useMemo(() => {
     const id = rfID.trim() || '1'
@@ -377,6 +437,60 @@ export function AdvancedWorkbench({
     const method = kind === 'status' ? 'controller.history.status' : 'controller.history.timeline'
     const params = kind === 'status' ? { since } : { since, limit: historyLimit }
     void performRPC(`history-${kind}`, () => rpc(method, params))
+  }
+
+  const discoverNetworkDevices = async () => {
+    setServiceBusy('discovery')
+    try {
+      const value = await rpc<DiscoveredDevice[]>('controller.discovery.scan', {
+        timeout_ms: discoverTimeout,
+        mdns: discoverMDNS,
+        dns_sd: discoverMDNS,
+        ssdp: discoverSSDP,
+        upnp: discoverSSDP,
+        ws_discovery: discoverWS,
+        broadcast: discoverBroadcast,
+        netbios: discoverNetBIOS,
+      })
+      setNetworkDevices(value)
+      setServiceOutput(JSON.stringify(value, null, 2))
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      setServiceOutput(`! ${detail}`)
+    } finally {
+      setServiceBusy('')
+    }
+  }
+
+  const saveDiscoveryAdvertisement = () => {
+    void performRPC('discovery-config', async () => {
+      const value = await rpc<DiscoveryConfig>('controller.discovery.config.set', {
+        mdns_enabled: discoverMDNS,
+        dns_sd_enabled: discoverMDNS,
+        ssdp_enabled: discoverSSDP,
+        upnp_enabled: discoverSSDP,
+        ws_discovery_enabled: discoverWS,
+        broadcast_enabled: discoverBroadcast,
+        netbios_enabled: discoverNetBIOS,
+        broadcast_port: discoveryBroadcastPort,
+        instance_name: discoveryInstanceName.trim(),
+      })
+      setDiscoveryInstanceName(value.instance_name || '')
+      setDiscoveryBroadcastPort(value.broadcast_port || 37889)
+      return value
+    })
+  }
+
+  const connectDiscoveredDevice = (device: DiscoveredDevice) => {
+    const candidate = device.public?.endpoints.web || `http://${device.host}:${device.port}/`
+    try {
+      const endpoint = new URL(candidate)
+      if (endpoint.protocol !== 'http:' && endpoint.protocol !== 'https:') throw new Error('unsupported endpoint protocol')
+      window.location.assign(endpoint.href)
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause)
+      setServiceOutput(`! Cannot connect to ${device.name}: ${detail}`)
+    }
   }
 
   const setRFDefaults = (kind: typeof rfKind) => {
@@ -807,11 +921,41 @@ export function AdvancedWorkbench({
           </form>
           <div className="advanced-divider" />
           <div className="advanced-toggle-stack advanced-toggle-stack--compact">
-            <Toggle checked={discoverMDNS} onChange={setDiscoverMDNS} label="mDNS" />
-            <Toggle checked={discoverSSDP} onChange={setDiscoverSSDP} label="SSDP" />
+            <Toggle checked={discoverMDNS} onChange={setDiscoverMDNS} label="mDNS / DNS-SD" />
+            <Toggle checked={discoverSSDP} onChange={setDiscoverSSDP} label="SSDP / UPnP + SOAP" />
+            <Toggle checked={discoverWS} onChange={setDiscoverWS} label="WS-Discovery" />
+            <Toggle checked={discoverBroadcast} onChange={setDiscoverBroadcast} label="UDP broadcast" />
+            <Toggle checked={discoverNetBIOS} onChange={setDiscoverNetBIOS} label="NetBIOS" />
           </div>
+          <div className="advanced-fields advanced-fields--split">
+            <TextField label={copy('Advertised instance name', 'نام تبلیغ‌شده نمونه')} hint={copy('Blank uses the configured app title', 'خالی یعنی عنوان برنامه')} value={discoveryInstanceName} maxLength={63} onChange={(event) => setDiscoveryInstanceName(event.target.value)} />
+            <TextField label={copy('UDP broadcast port', 'درگاه پخش UDP')} type="number" min={1024} max={65535} value={discoveryBroadcastPort} onChange={(event) => setDiscoveryBroadcastPort(boundedInteger(event.target.value, 37889, 1024, 65535))} />
+          </div>
+          <Button icon={Save} busy={serviceBusy === 'discovery-config'} onClick={saveDiscoveryAdvertisement}>{copy('Save advertisement settings', 'ذخیره تنظیمات معرفی')}</Button>
+          <p className="advanced-note advanced-note--safe">{copy('Advertisement is enabled by default and publishes only bounded public identity, health and telemetry. Remote commands still require an authenticated, remotely enabled IPC policy.', 'معرفی شبکه به‌طور پیش‌فرض فعال است و فقط هویت، سلامت و تله‌متری عمومی محدود را منتشر می‌کند. فرمان‌های راه‌دور همچنان به IPC فعال و احراز هویت‌شده نیاز دارند.')}</p>
           <RangeField label={copy('Discovery timeout', 'مهلت کشف')} value={discoverTimeout} min={100} max={5000} step={100} unit="ms" onChange={setDiscoverTimeout} />
-          <Button icon={ScanSearch} busy={serviceBusy === 'discovery'} disabled={!discoverMDNS && !discoverSSDP} onClick={() => void performRPC('discovery', () => rpc('controller.discovery.scan', { timeout_ms: discoverTimeout, mdns: discoverMDNS, ssdp: discoverSSDP }))}>{copy('Discover trusted hosts', 'کشف میزبان‌ها')}</Button>
+          <Button icon={ScanSearch} busy={serviceBusy === 'discovery'} disabled={!discoverMDNS && !discoverSSDP && !discoverWS && !discoverBroadcast && !discoverNetBIOS} onClick={() => void discoverNetworkDevices()}>{copy('Discover network hosts', 'کشف میزبان‌های شبکه')}</Button>
+          {networkDevices.length > 0 && <div className="network-device-directory" aria-live="polite">
+            {networkDevices.map((device) => {
+              const info = device.public
+              const telemetry = info?.board.telemetry
+              const telemetryParts: string[] = []
+              if (telemetry?.ina219_available) {
+                telemetryParts.push(`${((telemetry.supply_mv ?? 0) / 1000).toFixed(2)} V`)
+                telemetryParts.push(`${(telemetry.current_ma ?? 0).toFixed(0)} mA`)
+              }
+              if (telemetry?.temperature_led_available) telemetryParts.push(`${((telemetry.temperature_led_centi_c ?? 0) / 100).toFixed(1)} °C LED`)
+              if (telemetry?.temperature_bt_audio_available) telemetryParts.push(`${((telemetry.temperature_bt_audio_centi_c ?? 0) / 100).toFixed(1)} °C BT`)
+              if (telemetry?.available) telemetryParts.push(telemetry.door_open ? copy('door open', 'درب باز') : copy('door closed', 'درب بسته'))
+              return <article className="network-device" key={info?.instance_id || `${device.host}:${device.port}`}>
+                <div><strong>{info?.instance_name || device.name}</strong><small>{info?.hostname || device.host}:{device.port} · {(device.protocols || [device.protocol]).join(' + ')}</small></div>
+                <StatusBadge tone={info?.health.ok ? (info.health.connectable ? 'good' : 'warn') : 'bad'}>{info?.health.connectable ? copy('CONNECTABLE', 'قابل اتصال') : copy('DISCOVERABLE', 'قابل کشف')}</StatusBadge>
+                <p>{info?.board.connected ? `${info.board.identity.name || 'PCController'} · ${info.board.identity.build_hash || 'firmware'} · ${info.board.port.name || info.board.port.product || 'serial'}` : copy('Host online · board disconnected', 'میزبان آنلاین · برد قطع است')}</p>
+                {telemetryParts.length > 0 && <p>{telemetryParts.join(' · ')}</p>}
+                <Button tone="primary" icon={Plug} disabled={!info?.health.connectable} onClick={() => connectDiscoveredDevice(device)}>{copy('Connect to host', 'اتصال به میزبان')}</Button>
+              </article>
+            })}
+          </div>}
           <div className="advanced-divider" />
           <div className="advanced-fields advanced-fields--history">
             <TextField label={copy('Look back · minutes', 'بازه گذشته · دقیقه')} type="number" min={1} max={43200} value={historyMinutes} onChange={(event) => setHistoryMinutes(boundedInteger(event.target.value, 60, 1, 43200))} />

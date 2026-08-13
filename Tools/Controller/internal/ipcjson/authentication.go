@@ -2,9 +2,11 @@ package ipcjson
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -21,12 +24,84 @@ const (
 	// SessionTicketPath exchanges a header credential for a one-use browser
 	// WebSocket credential. Durable credentials are never put in a URL.
 	SessionTicketPath = "/api/session/ticket"
+	// ServerProofPath proves that a directly reached LAN endpoint knows the
+	// configured bearer before a discovery client transmits that bearer.
+	ServerProofPath = "/api/auth/server-proof"
 
 	browserWebSocketProtocol = "pccontroller"
 	browserTicketPrefix      = "pccontroller.ticket."
 	sessionTicketLifetime    = 15 * time.Second
 	maxSessionTickets        = 256
 )
+
+const serverProofFormat = "pccontroller-server-proof/v1"
+
+// ServerProof is a nonce-bound, address-bound proof returned before a LAN
+// discovery client transmits its durable bearer credential.
+type ServerProof struct {
+	Format     string `json:"format"`
+	Nonce      string `json:"nonce"`
+	Audience   string `json:"audience"`
+	InstanceID string `json:"instance_id"`
+	Proof      string `json:"proof"`
+}
+
+// VerifyServerProof authenticates a bounded proof with the caller-held bearer.
+func VerifyServerProof(token string, value ServerProof) bool {
+	provided, err := base64.RawURLEncoding.DecodeString(value.Proof)
+	if err != nil || len(provided) != sha256.Size || value.Format != serverProofFormat {
+		return false
+	}
+	expected := serverProofMAC(token, value.Nonce, value.Audience, value.InstanceID)
+	return hmac.Equal(expected, provided)
+}
+
+func serverProofMAC(token, nonce, audience, instanceID string) []byte {
+	mac := hmac.New(sha256.New, []byte(token))
+	_, _ = io.WriteString(mac, serverProofFormat+"\n"+nonce+"\n"+audience+"\n"+instanceID)
+	return mac.Sum(nil)
+}
+
+func serveServerProof(writer http.ResponseWriter, request *http.Request, service *Service) {
+	if request.Method != http.MethodGet {
+		writer.Header().Set("Allow", http.MethodGet)
+		http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	token := strings.TrimSpace(service.currentAuthToken())
+	if !serverProofTokenEligible(token) {
+		writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": "server proof requires a 24-byte-or-stronger random base64url bearer"})
+		return
+	}
+	nonce := strings.TrimSpace(request.Header.Get("X-PCController-Nonce"))
+	rawNonce, err := base64.RawURLEncoding.DecodeString(nonce)
+	if err != nil || len(rawNonce) < 16 || len(rawNonce) > 64 {
+		writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": "X-PCController-Nonce must be 16..64 random bytes in base64url form"})
+		return
+	}
+	local, ok := request.Context().Value(http.LocalAddrContextKey).(net.Addr)
+	if !ok || local == nil || strings.TrimSpace(local.String()) == "" {
+		writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "local endpoint binding is unavailable"})
+		return
+	}
+	audience := local.String()
+	instanceID := strings.TrimSpace(service.HostInstanceID)
+	if instanceID == "" {
+		instanceID, _ = os.Hostname()
+		instanceID = strings.ToLower(strings.TrimSpace(instanceID))
+	}
+	value := ServerProof{
+		Format: serverProofFormat, Nonce: nonce, Audience: audience, InstanceID: instanceID,
+	}
+	value.Proof = base64.RawURLEncoding.EncodeToString(serverProofMAC(token, nonce, audience, instanceID))
+	writer.Header().Set("Cache-Control", "no-store")
+	writeHTTPJSON(writer, http.StatusOK, value)
+}
+
+func serverProofTokenEligible(token string) bool {
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(token))
+	return err == nil && len(raw) >= 24
+}
 
 type authenticatedAccessKey struct{}
 
