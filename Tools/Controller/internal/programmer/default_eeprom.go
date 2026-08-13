@@ -15,6 +15,7 @@ const (
 	DefaultPersistentMenuPageCount = 14
 	DefaultVisibleMenuMask         = uint16(1<<DefaultPersistentMenuPageCount) - 1
 	defaultEEPROMCompileArtifact   = "safe-default-eeprom.hex"
+	defaultEEPROMMenuLabels        = "doorVOLTCURRtLEDtBT LItEbEEPPWM rELYKEY uPWMr5-8MOVELErn"
 )
 
 type EEPROMProgramOperation func(context.Context, Options, io.Writer) error
@@ -102,6 +103,16 @@ func generateEEPROMIntelHex(factory native.Settings) ([]byte, error) {
 		copy(record, descriptor[1:])
 		record[EEPROMStatusProfileBytes] = avrCRC8(record[:EEPROMStatusProfileBytes])
 	}
+
+	// The optional EEPROM-label firmware build reads this exact packed table
+	// from the final 57 EEPROM bytes. Provision it in every factory image so a
+	// later feature-enabled flash does not require a second EEPROM write.
+	labels := []byte(defaultEEPROMMenuLabels)
+	if len(labels) != int(EEPROMMenuLabelBytes) {
+		return nil, fmt.Errorf("factory menu labels are %d bytes, require %d", len(labels), EEPROMMenuLabelBytes)
+	}
+	copy(data[EEPROMMenuLabelsAddress:EEPROMMenuLabelsChecksumAddress], labels)
+	data[EEPROMMenuLabelsChecksumAddress] = xorChecksum(labels)
 
 	image := &IntelHexImage{data: make(map[uint32]byte, PCControllerEEPROMBytes)}
 	for address, value := range data {

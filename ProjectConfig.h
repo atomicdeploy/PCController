@@ -49,6 +49,13 @@
 #define PCCONTROLLER_MENU_LAYOUT_STORAGE 1
 #endif
 
+// Keep the fixed 4-character front-panel menu labels in the factory EEPROM
+// image instead of program flash. The feature is deliberately opt-in because
+// an unprovisioned/corrupt EEPROM must fall back to the built-in labels.
+#ifndef PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
+#define PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS 0
+#endif
+
 // AVR-owned persistent front-panel catalog. Stable page IDs remain protocol
 // identities while EEPROM stores a separate visibility mask and packed rank.
 #ifndef PCCONTROLLER_MENU_VISIBILITY
