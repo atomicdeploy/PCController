@@ -463,11 +463,21 @@ void testFrontPanelLeafDecreaseDispatch() {
             "leaf K3 dispatch no longer matches its page context");
   }
 
-  require(canonicalFrontPanelPage(PAGE_KEYS) == PAGE_MOTION &&
-              canonicalFrontPanelPage(PAGE_MOTION) == PAGE_MOTION &&
-              !frontPanelPageCompiled(PAGE_KEYS) &&
-              frontPanelPageCompiled(PAGE_MOTION),
-          "retired KEY page is no longer one canonical MOVE surface");
+  require(canonicalFrontPanelPage(PAGE_MOTION) == PAGE_KEYS &&
+              canonicalFrontPanelPage(PAGE_KEYS) == PAGE_KEYS &&
+              frontPanelPageCompiled(PAGE_KEYS) &&
+              !frontPanelPageCompiled(PAGE_MOTION),
+          "retired MOVE page is no longer one canonical KEY surface");
+  require(canonicalFrontPanelPage(PAGE_USER_RELAYS) == PAGE_RELAY &&
+              frontPanelPageCompiled(PAGE_RELAY) &&
+              !frontPanelPageCompiled(PAGE_USER_RELAYS),
+          "retired r5-8 page escaped the canonical relay controller");
+  require(canonicalFrontPanelPage(PAGE_USER_PWM) == PAGE_PWM &&
+              !frontPanelPageCompiled(PAGE_PWM) &&
+              !frontPanelPageCompiled(PAGE_USER_PWM),
+          "PWM/uPWM must remain one disabled production surface");
+  require(frontPanelPageCompiled(PAGE_ILLUMINATION),
+          "door-driven LItE page was not compiled independently of raw PWM");
   require(unifiedInputIntent(MENU_PREVIOUS, true) ==
                   UnifiedInputIntent::PreviousPage &&
               unifiedInputIntent(MENU_NEXT, true) ==

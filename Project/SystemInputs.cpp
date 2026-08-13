@@ -7,7 +7,9 @@ namespace {
 
 // Input debounce and BT Audio blink-retention windows in milliseconds.
 constexpr uint16_t SenseDebounceMs = 40;
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
 constexpr uint16_t BluetoothBlinkHoldMs = 2500;
+#endif
 
 bool interpretedLevel(bool rawHigh, bool activeWhenRawHigh) {
   return activeWhenRawHigh ? rawHigh : !rawHigh;
@@ -30,6 +32,7 @@ void SystemInputs::begin(uint8_t rawInputs, uint32_t now) {
   door_.stableChangedAt = now;
   door_.changedPending = false;
 
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
   const bool bluetoothSample =
       interpretedLevel(bitHigh(rawInputs_, BoardPins::BluetoothLedSense),
                        PCCONTROLLER_BT_LED_ON_RAW_HIGH != 0);
@@ -45,6 +48,7 @@ void SystemInputs::begin(uint8_t rawInputs, uint32_t now) {
   lastBluetoothTransitionAt_ = now;
   lastBluetoothOnMs_ = 0;
   lastBluetoothOffMs_ = 0;
+#endif
 }
 
 void SystemInputs::update(uint8_t rawInputs, uint32_t now) {
@@ -55,6 +59,7 @@ void SystemInputs::update(uint8_t rawInputs, uint32_t now) {
                        PCCONTROLLER_DOOR_OPEN_RAW_HIGH != 0);
   updateInput(door_, doorSample, now);
 
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
   const bool bluetoothSample =
       interpretedLevel(bitHigh(rawInputs_, BoardPins::BluetoothLedSense),
                        PCCONTROLLER_BT_LED_ON_RAW_HIGH != 0);
@@ -73,14 +78,22 @@ void SystemInputs::update(uint8_t rawInputs, uint32_t now) {
     bluetoothHasTransitioned_ = true;
     lastBluetoothTransitionAt_ = now;
   }
+#endif
 }
 
 bool SystemInputs::doorOpen() const { return door_.stable; }
 
-bool SystemInputs::bluetoothLedOn() const { return bluetooth_.stable; }
+bool SystemInputs::bluetoothLedOn() const {
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
+  return bluetooth_.stable;
+#else
+  return false;
+#endif
+}
 
 BluetoothIndicatorState
 SystemInputs::bluetoothState(uint32_t now) const {
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
   if (bluetoothBlinkObserved_ &&
       static_cast<uint32_t>(now - lastBluetoothTransitionAt_) <=
           BluetoothBlinkHoldMs) {
@@ -88,6 +101,10 @@ SystemInputs::bluetoothState(uint32_t now) const {
   }
   return bluetooth_.stable ? BluetoothIndicatorState::On
                            : BluetoothIndicatorState::Off;
+#else
+  (void)now;
+  return BluetoothIndicatorState::Off;
+#endif
 }
 
 bool SystemInputs::doorRawHigh() const {
@@ -95,7 +112,11 @@ bool SystemInputs::doorRawHigh() const {
 }
 
 bool SystemInputs::bluetoothRawHigh() const {
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
   return bitHigh(rawInputs_, BoardPins::BluetoothLedSense);
+#else
+  return false;
+#endif
 }
 
 uint8_t SystemInputs::rawInputs() const { return rawInputs_; }
@@ -110,20 +131,33 @@ bool SystemInputs::consumeDoorChange(bool &doorOpenValue) {
 }
 
 bool SystemInputs::consumeBluetoothEdge(bool &ledOnValue) {
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
   if (!bluetooth_.changedPending) {
     return false;
   }
   bluetooth_.changedPending = false;
   ledOnValue = bluetooth_.stable;
   return true;
+#else
+  (void)ledOnValue;
+  return false;
+#endif
 }
 
 uint32_t SystemInputs::lastBluetoothOnMs() const {
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
   return lastBluetoothOnMs_;
+#else
+  return 0;
+#endif
 }
 
 uint32_t SystemInputs::lastBluetoothOffMs() const {
+#if PCCONTROLLER_ENABLE_BT_LED_DETECTION
   return lastBluetoothOffMs_;
+#else
+  return 0;
+#endif
 }
 
 bool SystemInputs::updateInput(DebouncedInput &input, bool sample,

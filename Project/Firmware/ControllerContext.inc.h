@@ -100,8 +100,6 @@ uint8_t relayMenuIndex = 0;
 #if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
 uint8_t userPwmMenuIndex = 0;
 #endif
-uint8_t userRelayMenuIndex = 0;
-uint8_t userRelayBehavior = 0;
 #if PCCONTROLLER_ENABLE_LOCAL_SETTINGS_EDITOR
 uint8_t settingsMenuItem = 0;
 #endif

@@ -22,6 +22,7 @@ import (
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/programmer"
 	"pccontroller.local/controller/internal/shell"
+	"pccontroller.local/controller/internal/transition"
 )
 
 const (
@@ -724,8 +725,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "pwm", Usage: "pwm get|off|set CHANNEL VALUE",
-		Summary: "query/control logical PWM output values",
+		Name: "pwm", Usage: "pwm get|off|set CHANNEL VALUE|fade CHANNEL VALUE DURATION_MS [linear|ease]|demo [DURATION_MS] [linear|ease]",
+		Summary: "query/control or smoothly stream logical PWM output values",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return pwmCommand(ctx, runtime, args)
 		},
@@ -3384,7 +3385,128 @@ func pwmCommand(ctx context.Context, runtime *Runtime, args []string) (string, e
 		return fmt.Sprintf("PWM channel %d logical value %d", channel, value),
 			command(ctx, runtime, native.OpPWMSet, payload)
 	}
-	return "", fmt.Errorf("usage: pwm get | pwm off | pwm set CHANNEL VALUE")
+	if len(args) >= 4 && len(args) <= 5 && strings.EqualFold(args[0], "fade") {
+		channel, err := parsePWMChannel(args[1])
+		if err != nil {
+			return "", err
+		}
+		target, duration, curve, err := parsePWMFade(args[2:])
+		if err != nil {
+			return "", err
+		}
+		frame, err := request(ctx, runtime, native.OpPWMGet, nil, native.OpPWMValues)
+		if err != nil {
+			return "", err
+		}
+		values, err := native.ParsePWMValues(frame.Payload)
+		if err != nil {
+			return "", err
+		}
+		if !values.Available {
+			return "", errors.New("PWM controller is unavailable")
+		}
+		if err := streamPWMFade(ctx, runtime, channel, values.Values[channel], target, duration, curve); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("PWM channel %d faded to %d over %s (%s)", channel, target, duration, curve), nil
+	}
+	if len(args) >= 1 && len(args) <= 3 && strings.EqualFold(args[0], "demo") {
+		duration := 600 * time.Millisecond
+		curve := "ease"
+		var err error
+		if len(args) >= 2 {
+			duration, err = parsePWMDuration(args[1])
+			if err != nil {
+				return "", err
+			}
+		}
+		if len(args) == 3 {
+			curve, err = parsePWMCurve(args[2])
+			if err != nil {
+				return "", err
+			}
+		}
+		if err := command(ctx, runtime, native.OpPWMAllOff, nil); err != nil {
+			return "", err
+		}
+		for channel := byte(0); channel <= 10; channel++ {
+			if err := streamPWMFade(ctx, runtime, channel, 0, 4095, duration, curve); err != nil {
+				return "", err
+			}
+			if err := streamPWMFade(ctx, runtime, channel, 4095, 0, duration, curve); err != nil {
+				return "", err
+			}
+		}
+		return fmt.Sprintf("PWM user-channel demo completed (user1..user11, %s per leg, %s)", duration, curve), nil
+	}
+	return "", fmt.Errorf("usage: pwm get | pwm off | pwm set CHANNEL VALUE | pwm fade CHANNEL VALUE DURATION_MS [linear|ease] | pwm demo [DURATION_MS] [linear|ease]")
+}
+
+const pwmFadeFrame = 20 * time.Millisecond
+
+func parsePWMFade(args []string) (uint16, time.Duration, string, error) {
+	target, err := strconv.ParseUint(args[0], 0, 16)
+	if err != nil || target > 4095 {
+		return 0, 0, "", fmt.Errorf("PWM target must be 0..4095")
+	}
+	duration, err := parsePWMDuration(args[1])
+	if err != nil {
+		return 0, 0, "", err
+	}
+	curve := "ease"
+	if len(args) == 3 {
+		curve, err = parsePWMCurve(args[2])
+	}
+	return uint16(target), duration, curve, err
+}
+
+func parsePWMDuration(value string) (time.Duration, error) {
+	milliseconds, err := strconv.ParseUint(value, 10, 32)
+	if err != nil || milliseconds < 20 || milliseconds > 60000 {
+		return 0, fmt.Errorf("PWM fade duration must be 20..60000 ms")
+	}
+	return time.Duration(milliseconds) * time.Millisecond, nil
+}
+
+func parsePWMCurve(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value != "linear" && value != "ease" {
+		return "", fmt.Errorf("PWM fade curve must be linear or ease")
+	}
+	return value, nil
+}
+
+func pwmFadeValue(from, to uint16, elapsed, duration time.Duration, curve string) uint16 {
+	amount := float64(elapsed) / float64(duration)
+	if curve == "ease" {
+		amount = transition.SmoothStep(amount)
+	}
+	return transition.Uint16(from, to, amount)
+}
+
+func streamPWMFade(ctx context.Context, runtime *Runtime, channel byte, from, to uint16, duration time.Duration, curve string) error {
+	started := time.Now()
+	ticker := time.NewTicker(pwmFadeFrame)
+	defer ticker.Stop()
+	for {
+		elapsed := time.Since(started)
+		if elapsed > duration {
+			elapsed = duration
+		}
+		value := pwmFadeValue(from, to, elapsed, duration, curve)
+		payload, _ := native.PWMSetPayload(channel, value)
+		if err := command(ctx, runtime, native.OpPWMSet, payload); err != nil {
+			return err
+		}
+		if elapsed == duration {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 func parsePWMChannel(value string) (byte, error) {

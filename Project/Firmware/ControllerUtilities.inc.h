@@ -67,13 +67,17 @@ void loadIlluminationSettings() {
   illumination.setOffBrightness(settings.illuminationOffBrightness);
 }
 
-// Copies edited illumination values back to MCU-owned settings and marks them dirty.
+bool hostUnavailable();
+
+// Copies edited illumination values back to MCU-owned settings. Offline edits
+// are automatically durable; while a host is present, Save/Discard belongs to
+// the host settings surface and the board keeps the draft live in RAM.
 void markIlluminationSettingsChanged(uint32_t at) {
   ControllerSettings &settings = settingsStore.values();
   settings.illuminationMode = static_cast<uint8_t>(illumination.mode());
   settings.illuminationOnBrightness = illumination.onBrightness();
   settings.illuminationOffBrightness = illumination.offBrightness();
-  if (!editTransactionActive) {
+  if (!editTransactionActive && hostUnavailable()) {
     settingsStore.markDirty(at);
   }
 }

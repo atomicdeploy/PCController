@@ -9,6 +9,7 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/transition"
 )
 
 const (
@@ -423,10 +424,10 @@ func interpolateStatusLEDFrame(
 	amount float64,
 ) statusLEDFrame {
 	return statusLEDFrame{
-		red:        interpolateByte(from.red, to.red, amount),
-		green:      interpolateByte(from.green, to.green, amount),
-		blue:       interpolateByte(from.blue, to.blue, amount),
-		brightness: interpolateByte(from.brightness, to.brightness, amount),
+		red:        transition.Uint8(from.red, to.red, amount),
+		green:      transition.Uint8(from.green, to.green, amount),
+		blue:       transition.Uint8(from.blue, to.blue, amount),
+		brightness: transition.Uint8(from.brightness, to.brightness, amount),
 	}
 }
 
@@ -444,7 +445,7 @@ func easeStatusLEDTransition(
 		return from
 	}
 	return interpolateStatusLEDFrame(
-		from, to, smoothStep(float64(elapsed)/float64(duration)),
+		from, to, transition.SmoothStep(float64(elapsed)/float64(duration)),
 	)
 }
 
@@ -457,23 +458,11 @@ func interpolateRGB(from, to appconfig.RGBColor, amount float64) appconfig.RGBCo
 }
 
 func interpolateByte(from, to byte, amount float64) byte {
-	if amount <= 0 {
-		return from
-	}
-	if amount >= 1 {
-		return to
-	}
-	return byte(math.Round(float64(from) + (float64(to)-float64(from))*amount))
+	return transition.Uint8(from, to, amount)
 }
 
 func smoothStep(value float64) float64 {
-	if value <= 0 {
-		return 0
-	}
-	if value >= 1 {
-		return 1
-	}
-	return value * value * (3 - 2*value)
+	return transition.SmoothStep(value)
 }
 
 func resetStatusLEDTimer(timer *time.Timer, stepMS int) {

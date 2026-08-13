@@ -65,7 +65,7 @@
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION
-#define PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION 0
+#define PCCONTROLLER_ENABLE_ILLUMINATION_AUTOMATION 1
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES
@@ -73,7 +73,14 @@
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI
-#define PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI 0
+#define PCCONTROLLER_ENABLE_LOCAL_RF_LEARNING_UI 1
+#endif
+
+// The BT Audio indicator input is board/profile-specific. Production keeps it
+// disabled until that signal is commissioned; the pin is ignored and cannot
+// influence telemetry or the autonomous RGB policy.
+#ifndef PCCONTROLLER_ENABLE_BT_LED_DETECTION
+#define PCCONTROLLER_ENABLE_BT_LED_DETECTION 0
 #endif
 
 #ifndef PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
@@ -155,6 +162,10 @@
 #endif
 #if PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES && !PCCONTROLLER_ENABLE_PCA9685
 #error "PCCONTROLLER_ENABLE_LOCAL_PCA_PAGES requires PCA9685"
+#endif
+#if (PCCONTROLLER_ENABLE_BT_LED_DETECTION != 0) && \
+    (PCCONTROLLER_ENABLE_BT_LED_DETECTION != 1)
+#error "PCCONTROLLER_ENABLE_BT_LED_DETECTION must be 0 or 1"
 #endif
 
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the
