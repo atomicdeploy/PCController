@@ -212,11 +212,12 @@ export function AdvancedWorkbench({
   locale,
   run,
   busy,
+  transport,
 }: AdvancedWorkbenchProps) {
   const available = peripheralAvailability(snapshot)
   const isPersian = locale === 'fa'
   const copy = (english: string, persian: string) => isPersian ? persian : english
-  const online = snapshot.connected
+  const online = transport.boardState === 'ready' && snapshot.connected && snapshot.have_status
   const boardBusy = busy.length > 0
 
   const [port, setPort] = useState('')

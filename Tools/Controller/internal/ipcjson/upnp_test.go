@@ -2,6 +2,7 @@ package ipcjson
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/discovery"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -32,6 +35,43 @@ func TestSOAPActionCatalogIncludesBoardOperationsEventsAndOpcodes(t *testing.T) 
 	}
 	if strings.Contains(soapActionFromBody([]byte("<u:Unknown/>")), "Unknown") {
 		t.Fatal("unknown SOAP action was accepted")
+	}
+}
+
+func TestPublicTelemetryOmitsUnadvertisedKeysButPreservesValidZero(t *testing.T) {
+	encoded, err := json.Marshal(discovery.PublicTelemetry{
+		Available: true, INA219Present: true, INA219Available: true,
+		BluetoothAudioState: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := string(encoded)
+	if !strings.Contains(value, `"supply_mv":0`) || !strings.Contains(value, `"ina219_available":true`) {
+		t.Fatalf("advertised valid zero disappeared: %s", value)
+	}
+	for _, absent := range []string{"bluetooth_audio_state", "door_open", "pwm_available", "temperature_led_centi_c"} {
+		if strings.Contains(value, absent) {
+			t.Fatalf("unadvertised key %q escaped: %s", absent, value)
+		}
+	}
+}
+
+func TestSOAPStatusOmitsCapabilitySpecificValuesUntilAdvertised(t *testing.T) {
+	unknown := soapStatusBody("host", controllerapi.Snapshot{
+		Connected: true, HaveStatus: true,
+		Status: native.Status{SupplyMV: 12000, DoorOpen: true},
+	})
+	if strings.Contains(unknown, "SupplyMV") || strings.Contains(unknown, "DoorOpen") {
+		t.Fatalf("unadvertised SOAP status leaked capability values: %s", unknown)
+	}
+	advertised := soapStatusBody("host", controllerapi.Snapshot{
+		Connected: true, HaveStatus: true,
+		Hello:  native.Hello{Capabilities: native.CapabilityINA219 | native.CapabilityRelayMotion},
+		Status: native.Status{INA219Available: true, SupplyMV: 0, DoorOpen: false},
+	})
+	if !strings.Contains(advertised, "<SupplyMV>0</SupplyMV>") || !strings.Contains(advertised, "<DoorOpen>false</DoorOpen>") {
+		t.Fatalf("advertised SOAP valid zero/false disappeared: %s", advertised)
 	}
 }
 

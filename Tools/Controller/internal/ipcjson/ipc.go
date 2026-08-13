@@ -245,16 +245,22 @@ const (
 )
 
 type Service struct {
-	Client                *controller.Client
-	WebSocketPath         string
-	SocketIOPath          string
-	WebUI                 http.Handler
-	IntegrationProxy      http.Handler
-	LocalDevice           LocalDeviceService
-	HostFacts             hostfacts.Provider
-	Artifacts             *artifacts.Service
-	ReleaseDiscovery      ReleaseDiscoveryService
-	AuthToken             string
+	Client           *controller.Client
+	WebSocketPath    string
+	SocketIOPath     string
+	WebUI            http.Handler
+	IntegrationProxy http.Handler
+	LocalDevice      LocalDeviceService
+	HostFacts        hostfacts.Provider
+	Artifacts        *artifacts.Service
+	ReleaseDiscovery ReleaseDiscoveryService
+	AuthToken        string
+	// AuthorizationDisabled is the product-wide alpha contract from #148.
+	// Configured credentials and remote capability bits remain readable so a
+	// future complete session design can adopt them, but they are dormant while
+	// this flag is set. This is intentionally selected by product entry points,
+	// not exposed as another end-user security mode.
+	AuthorizationDisabled bool
 	RemotePrincipal       string
 	AllowedOrigins        []string
 	InboundWebhooks       bool
@@ -271,16 +277,24 @@ type Service struct {
 	AppInstances          *hostui.InstanceRegistry
 	Shutdown              func()
 	HostConfig            func() appconfig.Config
-	UpdateHostConfig      func(func(*appconfig.Config) error) error
-	BridgeList            func() any
-	BridgeCall            func(context.Context, string, Request) (Response, error)
-	WebhookAdmin          func() WebhookAdminService
-	HotkeyStatus          func() any
-	LastSessionSnapshot   func() (any, error)
-	commandMu             sync.Mutex
-	sessionMu             sync.Mutex
-	sessionTickets        map[[sha256.Size]byte]sessionTicket
-	sessionClock          func() time.Time
+	// PersistentHostConfig returns the unresolved file-backed view. It is used
+	// only by contracts that must return secret references while never exposing
+	// resolved plaintext values.
+	PersistentHostConfig func() appconfig.Config
+	UpdateHostConfig     func(func(*appconfig.Config) error) error
+	// SubscribeHostConfig delivers the current effective host configuration and
+	// every hot-applied replacement. Long-lived remote transports use it to
+	// revoke already-open sessions as soon as ipc.allow_remote becomes false.
+	SubscribeHostConfig func(context.Context) <-chan appconfig.Config
+	BridgeList          func() any
+	BridgeCall          func(context.Context, string, Request) (Response, error)
+	WebhookAdmin        func() WebhookAdminService
+	HotkeyStatus        func() any
+	LastSessionSnapshot func() (any, error)
+	commandMu           sync.Mutex
+	sessionMu           sync.Mutex
+	sessionTickets      map[[sha256.Size]byte]sessionTicket
+	sessionClock        func() time.Time
 }
 
 // browserUISettings is the narrow persistent host-owned subset exposed to the
@@ -304,6 +318,24 @@ type browserUISettings struct {
 type peripheralSettings struct {
 	Names       map[string]string                `json:"peripheral_names"`
 	Peripherals []appconfig.PeripheralDescriptor `json:"peripherals"`
+}
+
+// networkPeerConfig is the versionless bridge topology contract. Deliberately
+// do not add an auth_token field: callers may store or read only an opaque
+// secret reference, never plaintext credential material.
+type networkPeerConfig struct {
+	Name          string   `json:"name"`
+	Enabled       bool     `json:"enabled"`
+	URL           string   `json:"url"`
+	Protocol      string   `json:"protocol,omitempty"`
+	AuthTokenRef  string   `json:"auth_token_ref,omitempty"`
+	Topics        []string `json:"topics,omitempty"`
+	ForwardEvents bool     `json:"forward_events"`
+	AllowCommands bool     `json:"allow_commands"`
+}
+
+type networkPeersConfig struct {
+	Peers []networkPeerConfig `json:"peers"`
 }
 
 type hostFactsParams struct {
@@ -403,9 +435,9 @@ func (service *Service) Dispatch(ctx context.Context, request Request) Response 
 	return service.dispatch(ctx, request, Access{Transport: "ipc"})
 }
 
-// DispatchRemote applies the current file-watched remote capability policy in
-// addition to request authentication. Outbound host bridges use this entry
-// point for requests arriving from their authenticated peer.
+// DispatchRemote identifies requests arriving through a configured peer. Alpha
+// auth/authZ is dormant; the semantic capability classification remains for
+// the deferred complete permission design.
 func (service *Service) DispatchRemote(
 	ctx context.Context,
 	request Request,
@@ -646,6 +678,10 @@ func (service *Service) dispatch(
 		} else {
 			result, err = service.applyHotkeyMutation(params)
 		}
+	case "controller.network.peers.get":
+		result = service.networkPeersConfig()
+	case "controller.network.peers.set":
+		result, err = service.setNetworkPeers(request.Params)
 	case "controller.connect", "controller.open", "controller.port.open":
 		var params struct {
 			Port string `json:"port"`
@@ -1434,6 +1470,59 @@ func (service *Service) hostConfig() appconfig.Config {
 	return appconfig.Defaults()
 }
 
+func (service *Service) persistentHostConfig() appconfig.Config {
+	if service.PersistentHostConfig != nil {
+		return service.PersistentHostConfig()
+	}
+	return appconfig.Redacted(service.hostConfig())
+}
+
+func networkPeerFromConfig(peer appconfig.WebSocketClient) networkPeerConfig {
+	return networkPeerConfig{
+		Name: strings.TrimSpace(peer.Name), Enabled: peer.Enabled,
+		URL: strings.TrimSpace(peer.URL), Protocol: strings.TrimSpace(peer.Protocol),
+		AuthTokenRef:  strings.TrimSpace(peer.AuthTokenRef),
+		Topics:        append([]string(nil), peer.Topics...),
+		ForwardEvents: peer.ForwardEvents, AllowCommands: peer.AllowCommands,
+	}
+}
+
+func (service *Service) networkPeersConfig() networkPeersConfig {
+	configured := service.persistentHostConfig().Integrations.WebSocketClients
+	result := networkPeersConfig{Peers: make([]networkPeerConfig, 0, len(configured))}
+	for _, peer := range configured {
+		result.Peers = append(result.Peers, networkPeerFromConfig(peer))
+	}
+	return result
+}
+
+func (service *Service) setNetworkPeers(raw json.RawMessage) (networkPeersConfig, error) {
+	if service.UpdateHostConfig == nil {
+		return networkPeersConfig{}, errors.New("persistent host configuration is unavailable")
+	}
+	var params networkPeersConfig
+	if err := decodeStrictParams(raw, &params); err != nil {
+		return networkPeersConfig{}, &RPCError{Code: -32602, Message: err.Error()}
+	}
+	configured := make([]appconfig.WebSocketClient, 0, len(params.Peers))
+	for _, peer := range params.Peers {
+		configured = append(configured, appconfig.WebSocketClient{
+			Name: strings.TrimSpace(peer.Name), Enabled: peer.Enabled,
+			URL: strings.TrimSpace(peer.URL), Protocol: strings.TrimSpace(peer.Protocol),
+			AuthTokenRef:  strings.TrimSpace(peer.AuthTokenRef),
+			Topics:        append([]string(nil), peer.Topics...),
+			ForwardEvents: peer.ForwardEvents, AllowCommands: peer.AllowCommands,
+		})
+	}
+	if err := service.UpdateHostConfig(func(value *appconfig.Config) error {
+		value.Integrations.WebSocketClients = configured
+		return nil
+	}); err != nil {
+		return networkPeersConfig{}, err
+	}
+	return service.networkPeersConfig(), nil
+}
+
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
 	return browserUISettings{
@@ -1658,8 +1747,42 @@ func (service *Service) authorizeAccess(
 	if !access.Remote {
 		return nil
 	}
+	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") &&
+		bridgeIngressCanPivot(method, params) {
+		return errors.New("bridge ingress may not pivot through another peer")
+	}
 	capability := requestCapability(method, params)
 	return service.authorizeCapability(access, method, capability)
+}
+
+func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case "controller.bridge.call", "controller.peer.update.host", "controller.discovery.connect":
+		return true
+	case "controller.command.execute":
+		var value struct {
+			Command string `json:"command"`
+		}
+		return json.Unmarshal(params, &value) == nil && bridgeCommandCanPivot(value.Command)
+	case "controller.app.action":
+		var action hostui.AppAction
+		return json.Unmarshal(params, &action) == nil &&
+			strings.EqualFold(strings.TrimSpace(action.Kind), "command") &&
+			bridgeCommandCanPivot(action.Value)
+	default:
+		return false
+	}
+}
+
+func bridgeCommandCanPivot(command string) bool {
+	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+	if len(words) == 0 {
+		return false
+	}
+	if words[0] == "peer-update" {
+		return true
+	}
+	return words[0] == "bridge" && (len(words) < 2 || words[1] != "list")
 }
 
 func (service *Service) authorizeCapability(
@@ -1668,6 +1791,9 @@ func (service *Service) authorizeCapability(
 ) error {
 	access = service.normalizeAccess(access)
 	if !access.Remote {
+		if service.authorizationDisabled() {
+			return nil
+		}
 		if capability != capabilityRead && capability != capabilityEvents {
 			service.auditAccess(access, operation, capability, true)
 		}
@@ -1677,6 +1803,9 @@ func (service *Service) authorizeCapability(
 	if !config.IPC.AllowRemote {
 		service.auditAccess(access, operation, capability, false)
 		return errors.New("remote network access is disabled")
+	}
+	if service.authorizationDisabled() {
+		return nil
 	}
 	if !remoteCapabilityAllowed(config.IPC.RemotePolicy, capability) {
 		service.auditAccess(access, operation, capability, false)
@@ -1789,7 +1918,8 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.peripherals", "controller.peripherals.get",
 		"controller.os.policy", "controller.os.facts.catalog",
 		"controller.host.facts.catalog", "controller.hotkeys.get",
-		"controller.bridge.list", "controller.app.instances", "controller.app.instance.get",
+		"controller.bridge.list", "controller.network.peers.get",
+		"controller.app.instances", "controller.app.instance.get",
 		"controller.app.bridge",
 		"controller.webhooks.status",
 		"controller.webhooks.pending", "controller.webhooks.dead":
@@ -1799,8 +1929,9 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.peripherals.set",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
-		"controller.app.page", "controller.app.navigate", "controller.app.launch",
-		"controller.app.instance.report", "controller.app.instance.remove":
+                        "controller.app.page", "controller.app.navigate", "controller.app.launch",
+                        "controller.app.instance.report", "controller.app.instance.remove",
+                        "controller.network.peers.set":
 		return capabilityHostConfig
 	case "controller.os.key", "controller.virtual_key":
 		return capabilityVirtualKeys
@@ -2271,7 +2402,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"socket_io_path":      socketIOPath,
 			"session_ticket_path": SessionTicketPath,
 			"server_proof_path":   ServerProofPath,
-			"auth_required":       strings.TrimSpace(service.currentAuthToken()) != "",
+			"auth_required":       !service.authorizationDisabled() && strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device":          config.Integrations.LocalDevice.Enabled,
 				"data_hub":              config.Integrations.DataHub.Enabled,
@@ -3365,6 +3496,7 @@ func serveWebSocket(
 	// be used afterward. The server-owned context keeps shutdown deterministic.
 	ctx, cancel := context.WithCancel(serverContext)
 	defer cancel()
+	cancelWhenRemoteAccessDisabled(ctx, service, access, cancel)
 	var writeMu sync.Mutex
 	writeJSON := func(value any) error {
 		encoded, encodeErr := json.Marshal(value)
@@ -3499,6 +3631,7 @@ func serveSocketIO(
 	// be used afterward. The server-owned context keeps shutdown deterministic.
 	ctx, cancel := context.WithCancel(serverContext)
 	defer cancel()
+	cancelWhenRemoteAccessDisabled(ctx, service, access, cancel)
 
 	var writeMu sync.Mutex
 	writePacket := func(packet string) error {
@@ -3678,6 +3811,37 @@ func serveSocketIO(
 	}
 }
 
+func cancelWhenRemoteAccessDisabled(
+	ctx context.Context,
+	service *Service,
+	access Access,
+	cancel context.CancelFunc,
+) {
+	if service == nil || !access.Remote || service.SubscribeHostConfig == nil {
+		return
+	}
+	updates := service.SubscribeHostConfig(ctx)
+	if updates == nil {
+		return
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case config, ok := <-updates:
+				if !ok {
+					return
+				}
+				if !config.IPC.AllowRemote {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+}
+
 func decodeSocketIOEvent(payload string) (string, json.RawMessage, error) {
 	var values []json.RawMessage
 	if err := json.Unmarshal([]byte(payload), &values); err != nil {
@@ -3698,6 +3862,10 @@ func (service *Service) currentAuthToken() string {
 		return service.HostConfig().IPC.AuthToken
 	}
 	return service.AuthToken
+}
+
+func (service *Service) authorizationDisabled() bool {
+	return service != nil && service.AuthorizationDisabled
 }
 
 func (service *Service) currentAllowedOrigins() []string {

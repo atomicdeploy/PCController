@@ -11,8 +11,10 @@ import (
 	"strings"
 	"time"
 
+	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/discovery"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -26,6 +28,28 @@ var upnpActions = map[string]string{
 	"geteventinfo":      "GetEventInfo",
 	"getopcodeinfo":     "GetOpcodeInfo",
 	"getpublicinfo":     "GetPublicInfo",
+}
+
+func soapStatusBody(hostname string, snapshot controller.Snapshot) string {
+	var body strings.Builder
+	fmt.Fprintf(&body, "<Healthy>true</Healthy><Hostname>%s</Hostname><Connected>%t</Connected><ConnectionState>%s</ConnectionState><Port>%s</Port>", xmlEscape(hostname), snapshot.Connected, xmlEscape(snapshot.ConnectionState), xmlEscape(snapshot.Port.Name))
+	if !snapshot.Connected || !snapshot.HaveStatus {
+		return body.String()
+	}
+	status, capabilities := snapshot.Status, snapshot.Hello.Capabilities
+	if capabilities&native.CapabilityINA219 != 0 && status.INA219Available {
+		fmt.Fprintf(&body, "<SupplyMV>%d</SupplyMV><BusMV>%d</BusMV><CurrentMA>%d</CurrentMA><PowerMW>%d</PowerMW>", status.SupplyMV, status.BusMV, status.CurrentMA, status.PowerMW)
+	}
+	if capabilities&native.CapabilityTemperatures != 0 && status.TLEDAvailable {
+		fmt.Fprintf(&body, "<TemperatureLEDCentiC>%d</TemperatureLEDCentiC>", status.TLEDCenti)
+	}
+	if capabilities&native.CapabilityTemperatures != 0 && status.TBTAvailable {
+		fmt.Fprintf(&body, "<TemperatureBTAudioCentiC>%d</TemperatureBTAudioCentiC>", status.TBTCenti)
+	}
+	if capabilities&native.CapabilityRelayMotion != 0 {
+		fmt.Fprintf(&body, "<DoorOpen>%t</DoorOpen>", status.DoorOpen)
+	}
+	return body.String()
 }
 
 func registerUPnPHTTP(mux *http.ServeMux, service *Service) {
@@ -71,18 +95,18 @@ func registerUPnPHTTP(mux *http.ServeMux, service *Service) {
 		switch strings.ToLower(actionName) {
 		case "getstatus":
 			hostname, _ := os.Hostname()
-			writeSOAP(writer, "GetStatus", fmt.Sprintf("<Healthy>true</Healthy><Hostname>%s</Hostname><Connected>%t</Connected><ConnectionState>%s</ConnectionState><Port>%s</Port><SupplyMV>%d</SupplyMV><BusMV>%d</BusMV><CurrentMA>%d</CurrentMA><PowerMW>%d</PowerMW><TemperatureLEDCentiC>%d</TemperatureLEDCentiC><TemperatureBTAudioCentiC>%d</TemperatureBTAudioCentiC><DoorOpen>%t</DoorOpen>", xmlEscape(hostname), snapshot.Connected, xmlEscape(snapshot.ConnectionState), xmlEscape(snapshot.Port.Name), snapshot.Status.SupplyMV, snapshot.Status.BusMV, snapshot.Status.CurrentMA, snapshot.Status.PowerMW, snapshot.Status.TLEDCenti, snapshot.Status.TBTCenti, snapshot.Status.DoorOpen))
+			writeSOAP(writer, "GetStatus", soapStatusBody(hostname, snapshot))
 		case "getboardidentity":
 			writeSOAP(writer, "GetBoardIdentity", fmt.Sprintf("<BoardName>%s</BoardName><BuildHash>%08X</BuildHash><BuildStamp>%s</BuildStamp>", xmlEscape(snapshot.Hello.Name), snapshot.Hello.BuildHash, xmlEscape(snapshot.Hello.BuildStamp)))
 		case "getprotocolinfo":
-			writeSOAP(writer, "GetProtocolInfo", "<Protocol>PCController JSON-RPC 2.0 over HTTP/WebSocket/Socket.IO</Protocol><Authentication>Bearer token required for control</Authentication>")
+			writeSOAP(writer, "GetProtocolInfo", "<Protocol>PCController JSON-RPC 2.0 over HTTP/WebSocket/Socket.IO</Protocol><Authentication>disabled-alpha</Authentication>")
 		case "getcommandcatalog":
-			writeSOAP(writer, "GetCommandCatalog", fmt.Sprintf("<CommandCatalogURL>/api/commands</CommandCatalogURL><CommandCount>%d</CommandCount><Authentication>Bearer token required for control</Authentication>", len(service.Client.CommandCatalog())))
+			writeSOAP(writer, "GetCommandCatalog", fmt.Sprintf("<CommandCatalogURL>/api/commands</CommandCatalogURL><CommandCount>%d</CommandCount><Authentication>disabled-alpha</Authentication>", len(service.Client.CommandCatalog())))
 		case "geteventinfo":
 			ipc := service.hostConfig().IPC
-			writeSOAP(writer, "GetEventInfo", "<WebSocketPath>"+xmlEscape(ipc.WebSocketPath)+"</WebSocketPath><SocketIOPath>"+xmlEscape(ipc.SocketIOPath)+"</SocketIOPath><Topics>events,state,debug,status,opcodes</Topics><Authentication>Bearer token required for control</Authentication>")
+			writeSOAP(writer, "GetEventInfo", "<WebSocketPath>"+xmlEscape(ipc.WebSocketPath)+"</WebSocketPath><SocketIOPath>"+xmlEscape(ipc.SocketIOPath)+"</SocketIOPath><Topics>events,state,debug,status,opcodes</Topics><Authentication>disabled-alpha</Authentication>")
 		case "getopcodeinfo":
-			writeSOAP(writer, "GetOpcodeInfo", "<OpcodeEndpoint>/api/opcode</OpcodeEndpoint><OpcodeRPC>controller.opcode.send,controller.opcode.exchange,controller.opcode.request</OpcodeRPC><OpcodeEvents>controller.opcode</OpcodeEvents><Authentication>Bearer token required for control</Authentication>")
+			writeSOAP(writer, "GetOpcodeInfo", "<OpcodeEndpoint>/api/opcode</OpcodeEndpoint><OpcodeRPC>controller.opcode.send,controller.opcode.exchange,controller.opcode.request</OpcodeRPC><OpcodeEvents>controller.opcode</OpcodeEvents><Authentication>disabled-alpha</Authentication>")
 		case "getpublicinfo":
 			info := publicInfo(service, request)
 			writeSOAP(writer, "GetPublicInfo", fmt.Sprintf("<PublicInfoURL>%s</PublicInfoURL><Hostname>%s</Hostname><InstanceID>%s</InstanceID><Connectable>%t</Connectable>", xmlEscape(info.Endpoints.PublicInfo), xmlEscape(info.Hostname), xmlEscape(info.InstanceID), info.Health.Connectable))
@@ -157,7 +181,7 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 	info := discovery.PublicInfo{
 		Schema: discovery.PublicInfoSchema, Product: "PCController", Protocol: "pccontroller",
 		InstanceID: strings.TrimSpace(service.HostInstanceID), InstanceName: name, Hostname: hostname,
-		Health: discovery.PublicHealth{OK: true, Service: productidentity.ServiceName(config.UI.AppTitle, "IPC"), Connectable: config.IPC.RemoteConnectable(), Auth: "bearer-session"},
+		Health: discovery.PublicHealth{OK: true, Service: productidentity.ServiceName(config.UI.AppTitle, "IPC"), Connectable: config.IPC.RemoteConnectable(), Auth: "disabled-alpha"},
 		Host:   discovery.PublicHost{Version: strings.TrimSpace(service.HostVersion), SourceHash: strings.TrimSpace(service.HostSourceHash), BuildTime: strings.TrimSpace(service.HostBuildTime)},
 		Board: discovery.PublicBoard{
 			Connected: snapshot.Connected, ConnectionState: snapshot.ConnectionState, ConnectionReason: snapshot.ConnectionReason,
@@ -173,8 +197,9 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 	if info.InstanceID == "" {
 		info.InstanceID = strings.ToLower(strings.TrimSpace(hostname))
 	}
-	if snapshot.HaveStatus {
+	if snapshot.Connected && snapshot.HaveStatus {
 		status := snapshot.Status
+		capabilities := snapshot.Hello.Capabilities
 		info.Board.Telemetry = discovery.PublicTelemetry{
 			Available: true, INA219Available: status.INA219Available, TemperatureLEDAvailable: status.TLEDAvailable, TemperatureBTAvailable: status.TBTAvailable,
 			UpdatedAt: snapshot.StatusUpdated.UTC(), UptimeMS: status.UptimeMS,
@@ -185,6 +210,15 @@ func publicInfo(service *Service, request *http.Request) discovery.PublicInfo {
 			ProgramMode: status.ProgramMode, ProgramRunning: status.ProgramRunning, HostOffline: status.HostOffline,
 			Hot: status.Hot, PWMAvailable: status.PWMAvailable, PWMChannel: status.PWMChannel,
 			PWMValue: status.PWMValue, LCDAddress: status.LCDAddress, ResetCount: status.ResetCount,
+			INA219Present:         capabilities&native.CapabilityINA219 != 0,
+			TemperatureLEDPresent: capabilities&native.CapabilityTemperatures != 0,
+			TemperatureBTPresent:  capabilities&native.CapabilityTemperatures != 0,
+			RelayMotionPresent:    capabilities&native.CapabilityRelayMotion != 0,
+			BluetoothAudioPresent: capabilities&native.CapabilityBluetoothAudio != 0,
+			RemoteKeysPresent:     capabilities&native.CapabilityRemoteKeys != 0,
+			MenuPresent:           capabilities&native.CapabilityMenuRemote != 0,
+			PWMPresent:            capabilities&native.CapabilityPWM != 0,
+			LCDPresent:            capabilities&native.CapabilityLCD != 0,
 		}
 	}
 	return info

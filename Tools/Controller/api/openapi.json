@@ -4,7 +4,7 @@
     "title": "PCController HTTP API",
     "version": "unversioned",
     "summary": "Unversioned living REST and JSON-RPC surface of the primary controller host.",
-    "description": "Loopback is the safe default. Remote requests require authentication and an explicit capability. The built-in listener does not terminate TLS."
+    "description": "Loopback is the safe default. Immediate-alpha authentication and authorization are disabled under issue #148. The built-in listener does not terminate TLS."
   },
   "servers": [
     {
@@ -12,14 +12,7 @@
       "description": "Default loopback primary"
     }
   ],
-  "security": [
-    {
-      "bearerAuth": []
-    },
-    {
-      "tokenHeader": []
-    }
-  ],
+  "security": [],
   "paths": {
     "/healthz": {
       "get": {
@@ -135,23 +128,13 @@
     "/api/auth/server-proof": {
       "get": {
         "operationId": "get_api_auth_server_proof",
-        "summary": "Nonce/address-bound proof that the reached LAN endpoint knows the configured bearer",
+        "summary": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
         "tags": [
           "server-proof"
         ],
         "x-required-capability": "public",
         "x-idempotency": "safe",
         "responses": {
-          "200": {
-            "description": "Responder-bound HMAC proof verified locally before a client transmits its bearer",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerProof"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
@@ -163,6 +146,9 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "409": {
+            "description": "Application authentication is disabled in the immediate alpha"
           }
         },
         "security": [],
@@ -184,23 +170,13 @@
     "/api/session/ticket": {
       "post": {
         "operationId": "post_api_session_ticket",
-        "summary": "Exchange a header credential for a short-lived one-use browser WebSocket ticket",
+        "summary": "Dormant alpha compatibility endpoint; returns 409 while application authentication is disabled",
         "tags": [
           "ticket"
         ],
         "x-required-capability": "session",
         "x-idempotency": "see operation semantics and idempotency keys",
         "responses": {
-          "201": {
-            "description": "One-use Origin-bound browser session ticket",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionTicket"
-                }
-              }
-            }
-          },
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
@@ -212,6 +188,9 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "409": {
+            "description": "Application authentication is disabled in the immediate alpha"
           }
         },
         "requestBody": {
@@ -3566,6 +3545,8 @@
               "controller.menu.list",
               "controller.menu.page",
               "controller.message.send",
+              "controller.network.peers.get",
+              "controller.network.peers.set",
               "controller.opcode.exchange",
               "controller.opcode.request",
               "controller.opcode.send",
