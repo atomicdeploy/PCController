@@ -155,8 +155,10 @@ if(BUILD_TESTING)
   # trace confirms that replay still reaches the ordinary protocol dispatcher.
   add_executable(firmware_macro_queue_adapter_tests
     tests/macro_queue_adapter_test.cpp
+    ../../LocalLib/ShiftRegisters.cpp
     ../../Project/Core/MacroRing.cpp
     ../../Project/MacroQueue.cpp
+    ../../Project/RelayController.cpp
     ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_macro_queue_adapter_tests PRIVATE
