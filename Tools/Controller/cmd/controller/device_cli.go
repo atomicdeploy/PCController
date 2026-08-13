@@ -585,7 +585,11 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			defer listener.Close()
 		}
 		currentConfig := store.Current()
-		client := controllerapi.New(apiOptions(currentConfig, connection))
+		clientOptions, err := apiOptions(currentConfig, connection)
+		if err != nil {
+			return err
+		}
+		client := controllerapi.New(clientOptions)
 		if err := client.ConfigureHistory(configuredHistoryOptions(store)); err != nil {
 			return err
 		}
@@ -599,7 +603,12 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			ctx,
 			appconfig.DefaultWatchInterval,
 			func(value appconfig.Config) {
-				client.ApplyHostOptions(apiOptions(value, connection))
+				clientOptions, optionsErr := apiOptions(value, connection)
+				if optionsErr != nil {
+					fmt.Fprintln(stderr, "configuration reload rejected:", optionsErr)
+					return
+				}
+				client.ApplyHostOptions(clientOptions)
 				if historyErr := client.ConfigureHistory(
 					configuredHistoryOptions(store),
 				); historyErr != nil {
@@ -635,20 +644,23 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		defer integrations.Close()
 		service := &ipcjson.Service{
 			Client: client, WebSocketPath: *websocketPath,
-			SocketIOPath:        serverConfig.IPC.SocketIOPath,
-			WebUI:               webui.Handler(*websocketPath),
-			IntegrationProxy:    integrationProxy,
-			LocalDevice:         localDevice,
-			AuthToken:           serverConfig.IPC.AuthToken,
-			AllowedOrigins:      append([]string(nil), serverConfig.IPC.AllowedOrigins...),
-			InboundWebhooks:     serverConfig.Integrations.InboundWebhooksEnabled,
-			HostVersion:         version,
-			HostSourceHash:      sourceHash,
-			HostBuildTime:       buildTime,
-			AppAction:           actions.Publish,
-			Shutdown:            cancel,
-			LastSessionSnapshot: sessionSnapshot.read,
-			HostConfig:          store.CurrentRuntime,
+			SocketIOPath:          serverConfig.IPC.SocketIOPath,
+			WebUI:                 webui.Handler(*websocketPath),
+			IntegrationProxy:      integrationProxy,
+			LocalDevice:           localDevice,
+			AuthToken:             serverConfig.IPC.AuthToken,
+			AuthorizationDisabled: true,
+			AllowedOrigins:        append([]string(nil), serverConfig.IPC.AllowedOrigins...),
+			InboundWebhooks:       serverConfig.Integrations.InboundWebhooksEnabled,
+			HostVersion:           version,
+			HostSourceHash:        sourceHash,
+			HostBuildTime:         buildTime,
+			AppAction:             actions.Publish,
+			Shutdown:              cancel,
+			LastSessionSnapshot:   sessionSnapshot.read,
+			HostConfig:            store.CurrentRuntime,
+			PersistentHostConfig:  store.Current,
+			SubscribeHostConfig:   store.SubscribeRuntime,
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err

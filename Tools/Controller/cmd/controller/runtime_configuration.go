@@ -233,15 +233,18 @@ func (options *connectionFlags) fromConfig(
 
 func commandOptions(store *appconfig.Store, fallbackProject string) control.CommandOptions {
 	config := store.Current()
+	firmwareFeatures, firmwareFeaturesErr := configuredFirmwareFeatures(config)
 	options := control.CommandOptions{
-		ProjectPath:   configuredProject(config, fallbackProject),
-		FQBN:          configuredFQBN(config),
-		ArduinoCLI:    config.Programming.ToolchainCLI,
-		ArduinoConfig: config.Programming.ToolchainConfig,
-		Avrdude:       config.Programming.Avrdude,
-		AvrdudeConf:   config.Programming.AvrdudeConf,
-		Programmer:    configuredProgrammer(config),
-		HostConfig:    store.Current,
+		ProjectPath:           configuredProject(config, fallbackProject),
+		FQBN:                  configuredFQBN(config),
+		FirmwareFeatures:      firmwareFeatures,
+		FirmwareFeaturesError: firmwareFeaturesErr,
+		ArduinoCLI:            config.Programming.ToolchainCLI,
+		ArduinoConfig:         config.Programming.ToolchainConfig,
+		Avrdude:               config.Programming.Avrdude,
+		AvrdudeConf:           config.Programming.AvrdudeConf,
+		Programmer:            configuredProgrammer(config),
+		HostConfig:            store.Current,
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err
@@ -271,20 +274,23 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 	}
 	options.Resolve = func() control.CommandOptions {
 		current := store.Current()
+		currentFeatures, currentFeaturesErr := configuredFirmwareFeatures(current)
 		return control.CommandOptions{
-			ProjectPath:      configuredProject(current, fallbackProject),
-			FQBN:             configuredFQBN(current),
-			ArduinoCLI:       current.Programming.ToolchainCLI,
-			ArduinoConfig:    current.Programming.ToolchainConfig,
-			Avrdude:          current.Programming.Avrdude,
-			AvrdudeConf:      current.Programming.AvrdudeConf,
-			Programmer:       configuredProgrammer(current),
-			HostConfig:       store.Current,
-			UpdateHostConfig: options.UpdateHostConfig,
-			Macros:           options.Macros,
-			InitializeBoard:  options.InitializeBoard,
-			BlankBoard:       options.BlankBoard,
-			USBaspDriver:     options.USBaspDriver,
+			ProjectPath:           configuredProject(current, fallbackProject),
+			FQBN:                  configuredFQBN(current),
+			FirmwareFeatures:      currentFeatures,
+			FirmwareFeaturesError: currentFeaturesErr,
+			ArduinoCLI:            current.Programming.ToolchainCLI,
+			ArduinoConfig:         current.Programming.ToolchainConfig,
+			Avrdude:               current.Programming.Avrdude,
+			AvrdudeConf:           current.Programming.AvrdudeConf,
+			Programmer:            configuredProgrammer(current),
+			HostConfig:            store.Current,
+			UpdateHostConfig:      options.UpdateHostConfig,
+			Macros:                options.Macros,
+			InitializeBoard:       options.InitializeBoard,
+			BlankBoard:            options.BlankBoard,
+			USBaspDriver:          options.USBaspDriver,
 		}
 	}
 	return options
@@ -380,7 +386,11 @@ func apiAutomations(source []appconfig.Automation) []controllerapi.Automation {
 func apiOptions(
 	config appconfig.Config,
 	connection *connectionFlags,
-) controllerapi.Options {
+) (controllerapi.Options, error) {
+	firmwareFeatures, err := configuredFirmwareFeatures(config)
+	if err != nil {
+		return controllerapi.Options{}, err
+	}
 	resolved := connection.fromConfig(config.Connection)
 	return controllerapi.Options{
 		Port: resolved.Filter.Port, VID: resolved.Filter.VID,
@@ -391,7 +401,9 @@ func apiOptions(
 		ResetOnReconnect: resolved.ResetOnReconnect,
 		PreferredDevice:  publicPreferredDevice(config.Connection.LastDevice),
 		ProjectPath:      configuredProject(config, findProjectRoot()),
-		FQBN:             configuredFQBN(config), Macros: apiMacros(config.Macros),
+		FQBN:             configuredFQBN(config),
+		FirmwareFeatures: programmer.FirmwareFeatureNames(firmwareFeatures),
+		Macros:           apiMacros(config.Macros),
 		Melodies:         config.Melodies,
 		StatusEffects:    config.StatusEffects,
 		ToolchainCLI:     config.Programming.ToolchainCLI,
@@ -408,7 +420,7 @@ func apiOptions(
 		},
 		Scripts:     config.Scripts,
 		Automations: apiAutomations(config.Automations),
-	}
+	}, nil
 }
 
 func publicPreferredDevice(
