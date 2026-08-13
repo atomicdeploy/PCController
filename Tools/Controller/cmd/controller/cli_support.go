@@ -341,7 +341,7 @@ Host configuration and integration:
 	controller repair [--package DIR] [--expected-package-sha256 SHA256] [--desktop]
 	controller installation status
 	controller uninstall [--purge-data [--preview-purge | --confirm-purge {{PURGE_CONFIRMATION}}]]
-  controller desktop [install|ensure|uninstall|remove]
+  controller desktop [install|ensure|test|uninstall|remove]
   controller uri {{SCHEME}}://ACTION
   controller version
 
