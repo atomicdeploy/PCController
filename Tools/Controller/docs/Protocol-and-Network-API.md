@@ -182,6 +182,11 @@ firmware receives one compact `STATUS_EFFECT` descriptor and renders the
 animation locally; the rate-limited `STATUS_RGB` stream remains only as a
 bounded older-firmware compatibility path.
 
+Every buzzer state from one source supersedes its preceding state. A zero-
+frequency positive-duration record is a timed pause; zero frequency and zero
+duration is an authoritative stop. Both cancel an active mirrored tone at the
+mapped MCU timestamp and never start a host speaker backend.
+
 At the command/API layer a melody repeat count of zero means repeat until an
 explicit stop, while 1..20 remains the bounded mode. This is the reusable
 continuous `WAIT`/attention-ringtone path; it does not change the `BUZZER`
