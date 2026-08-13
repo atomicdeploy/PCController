@@ -153,7 +153,7 @@ the same guarded runtime instead of forking behavior.
 | Path | Produced tool |
 |---|---|
 | `cmd/controller/` | primary `controller` executable: CLI, TUI, WebUI host, shell, IPC, programming, desktop/tray, and lifecycle wiring |
-| `cmd/controllerlib/` | C-compatible shared-library build entry |
+| `cmd/controller-cabi/` | C-compatible shared-library build entry |
 | `cmd/default-assets/` | packaging-only generator for a complete safe-default EEPROM image |
 | `cmd/toolchain-resolver/` | isolated firmware dependency resolver; no serial/UI packages |
 | `cmd/tui-preview/` | hardware-free TUI rendering/interaction preview |

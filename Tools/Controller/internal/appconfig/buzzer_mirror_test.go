@@ -20,11 +20,11 @@ func TestBuzzerMirrorRejectsInvalidDriverDirectory(t *testing.T) {
 	}
 }
 
-func TestBuzzerMirrorRequiresDriverDirectoryOnlyForNativePlayback(t *testing.T) {
+func TestBuzzerMirrorAllowsPlatformNativeOrExternalPlaybackWithoutDriver(t *testing.T) {
 	value := DefaultBuzzerMirror()
 	value.NativeEnabled = true
-	if err := validateBuzzerMirror(value); err == nil {
-		t.Fatal("native playback accepted an empty driver directory")
+	if err := validateBuzzerMirror(value); err != nil {
+		t.Fatal(err)
 	}
 	value.DriverDirectory = `C:\optional\winring0`
 	if err := validateBuzzerMirror(value); err != nil {

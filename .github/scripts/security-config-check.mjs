@@ -280,13 +280,13 @@ export function validateCodeql(source, sourceLanguages) {
       "go test ./...",
       "go run ./winres/generate_icon.go",
       "-buildmode=c-shared",
-      "./cmd/controllerlib",
+      "./cmd/controller-cabi",
     ]],
     ["go-windows", [
       "../Build/go-tests.mjs --module . --output ../../.build/tests/go",
       "go run ./winres/generate_icon.go",
       "-buildmode=c-shared",
-      "./cmd/controllerlib",
+      "./cmd/controller-cabi",
     ]],
     ["cpp-avr-linux", [
       "./build.sh --firmware-only --clean",

@@ -1030,6 +1030,7 @@ const PROMPT_EXCERPTS = {
   ledClientExperience: prompt(SESSION.cafe, 17, 'Keep WebUI and TUI synchronized for status LED ownership, profiles, effects, live preview, stream ordering, accessibility, RTL and LTR, and responsive dark-mode behavior.'),
   buzzerFallback: prompt(SESSION.recovery, 177, 'Add a fallback for audio-frequency generation when port 0x61 is unavailable.'),
   linuxParity: prompt(SESSION.recovery, 178, 'Introduce Linux host parity, including buzzer playback support.'),
+  externalBeepFallback: prompt(SESSION.tonight, 13, 'Allow an external beep command as a fallback. Linux and Windows beep tools use different parameters, so inspect and honor each tool own help contract.'),
   rgbEffects: prompt(SESSION.recovery, 160, 'Send parameterized status-LED colors and effects to the board, including breathing, flashing, cycling, and transitions, while keeping the AVR implementation compact and mirroring it in the UI.'),
   instanceCoordination: prompt(SESSION.recovery, 169, 'Let instances communicate, control one another, navigate pages and tabs, query running-instance information, and keep settings and UI state synchronized.'),
   redis: prompt(SESSION.recovery, 170, 'Add direct Redis support to the Go tooling where it is relevant.'),
@@ -1262,6 +1263,8 @@ const PR_ORIGINAL_REQUESTS = {
   205: [PROMPT_EXCERPTS.instanceCoordination, PROMPT_EXCERPTS.apiRace, PROMPT_EXCERPTS.fullDuplexTracking],
   206: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
   207: [PROMPT_EXCERPTS.programmingEntrypoint, PROMPT_EXCERPTS.stuckUpdate, PROMPT_EXCERPTS.emptyBoardAcceptance],
+  224: [PROMPT_EXCERPTS.buzzerFallback, PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.externalBeepFallback],
+  231: [PROMPT_EXCERPTS.linuxParity, PROMPT_EXCERPTS.stuckUpdate],
 };
 
 const TRACE_START = '<!-- prompt-provenance:v1 -->';
