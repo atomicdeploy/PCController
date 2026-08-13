@@ -113,6 +113,12 @@ product toast. `desktop test` sends a branded, actionable end-to-end
 diagnostic. `desktop uninstall` removes only entries whose ownership still
 matches that executable.
 
+Notification delivery selects the strongest available Windows surface in a
+fixed order: branded WinRT toast, legacy notification-area balloon with the
+product icon, then a bounded TaskDialog. `desktop test` succeeds only when the
+first, image-bearing WinRT backend is active; runtime status reports the
+selected backend and whether it was branded.
+
 ```console
 Tools\Controller\bin\controller.exe desktop ensure
 Tools\Controller\bin\controller.exe desktop test
