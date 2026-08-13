@@ -34,6 +34,7 @@ import {
 	commandPlanPaths,
 	controllerCommand as createControllerCommand,
 	createControllerProgramCommand,
+	normalizeFirmwareFeatures,
 	programmingArtifact,
 	relativeCommandPlanPaths,
 	sourceControllerInvocation
@@ -82,7 +83,10 @@ const STALE_HOST_OUTPUTS = [
 	join(HOST_ROOT, 'controller')
 ]
 const HOST_MANIFEST_FORMAT = 'pccontroller-host-package-manifest/v1'
-const FIRMWARE_MANIFEST_FORMAT = 'pccontroller-avr-firmware-manifest/v1'
+const FIRMWARE_MANIFEST_FORMATS = Object.freeze([
+	'pccontroller-avr-firmware-manifest/v1',
+	'pccontroller-avr-firmware-manifest/v2'
+])
 const WINDOWS_GNU_PACKAGE_ID = 'BrechtSanders.WinLibs.POSIX.UCRT'
 const MINIMUM_NODE = [22, 12, 0]
 const MINIMUM_WEB_NODE = [22, 12, 0]
@@ -336,6 +340,11 @@ export function parseArguments(argv, env = process.env) {
 		}
 	}
 	if (options.help) return options
+	try {
+		options.firmwareFeatures = normalizeFirmwareFeatures(options.firmwareFeatures)
+	} catch (error) {
+		throw new BuildError(error.message || String(error), error.exitCode || 2)
+	}
 	if (!VIRTUAL_BOARD_PRESETS.includes(options.virtualBoardPreset)) {
 		throw new BuildError(`--virtual-board-preset must be one of ${VIRTUAL_BOARD_PRESETS.join(', ')}`, 2)
 	}
@@ -368,6 +377,9 @@ export function parseArguments(argv, env = process.env) {
 		throw new BuildError('--toolchain-config requires firmware compilation', 2)
 	}
 	options.cleanOnly = options.clean && !substantive
+	if (options.firmwareFeatures.length !== 0 && (!options.firmware || options.cleanOnly)) {
+		throw new BuildError('--firmware-feature requires firmware compilation', 2)
+	}
 	return options
 }
 
@@ -376,6 +388,15 @@ function commandAction(id, stage, file, args, cwd, hardware = false) {
 }
 
 export function createPlan(options, identity, platform = process.platform) {
+	let firmwareFeatures
+	try {
+		firmwareFeatures = normalizeFirmwareFeatures(options.firmwareFeatures || [])
+	} catch (error) {
+		throw new BuildError(error.message || String(error), error.exitCode || 2)
+	}
+	if (firmwareFeatures.length !== 0 && (!options.firmware || options.cleanOnly)) {
+		throw new BuildError('--firmware-feature requires firmware compilation', 2)
+	}
 	const actions = []
 	if (options.clean) actions.push({
 		id: 'clean',
@@ -406,7 +427,7 @@ export function createPlan(options, identity, platform = process.platform) {
 			outputDir: FIRMWARE_OUTPUT,
 			toolchainCLI: options.toolchainCLI,
 			toolchainConfig: options.toolchainConfig,
-			firmwareFeatures: options.firmwareFeatures
+			firmwareFeatures
 		})
 		actions.push(commandAction(
 			'firmware-compile',
@@ -1929,7 +1950,24 @@ function readFirmwareManifest() {
 	try { manifest = JSON.parse(readFileSync(path, 'utf8')) } catch (error) {
 		throw new BuildError(`decode firmware manifest: ${error.message}`)
 	}
-	if (manifest.format !== FIRMWARE_MANIFEST_FORMAT) throw new BuildError(`unexpected firmware manifest format: ${manifest.format}`)
+	if (!FIRMWARE_MANIFEST_FORMATS.includes(manifest.format)) {
+		throw new BuildError(`unexpected firmware manifest format: ${manifest.format}`)
+	}
+	let features
+	try {
+		features = normalizeFirmwareFeatures(manifest.source?.compileFeatures || [])
+	} catch (error) {
+		throw new BuildError(`invalid firmware manifest compile features: ${error.message}`)
+	}
+	if (JSON.stringify(features) !== JSON.stringify(manifest.source?.compileFeatures || [])) {
+		throw new BuildError('firmware manifest compile features must be unique and sorted canonically')
+	}
+	if (manifest.format.endsWith('/v1') && features.length !== 0) {
+		throw new BuildError('firmware manifest v1 cannot declare compile features')
+	}
+	if (manifest.format.endsWith('/v2') && features.length === 0) {
+		throw new BuildError('firmware manifest v2 requires at least one compile feature')
+	}
 	if (!Array.isArray(manifest.artifacts) || !manifest.artifacts.some(artifact => artifact.role === 'application')) {
 		throw new BuildError('firmware manifest has no canonical application artifact')
 	}
@@ -1967,6 +2005,12 @@ function compileFirmware(options, identity, env, controllerPath, log) {
 		cwd: PROJECT_ROOT, env, verbose: options.verbose
 	})
 	const manifest = readFirmwareManifest()
+	if (JSON.stringify(manifest.source?.compileFeatures || []) !==
+		JSON.stringify(options.firmwareFeatures || [])) {
+		throw new BuildError(
+			'firmware manifest compile features differ from the frozen build plan'
+		)
+	}
 	if (String(manifest.source?.packedTimestamp).toUpperCase() !== identity.packedTimestamp) {
 		throw new BuildError('firmware manifest packed timestamp differs from the frozen build plan')
 	}

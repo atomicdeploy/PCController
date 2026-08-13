@@ -130,6 +130,73 @@ func TestCompileFeatureDryRunAcceptsOnlyNamedEEPROMGates(t *testing.T) {
 	); err == nil || !strings.Contains(err.Error(), "unsupported firmware feature") {
 		t.Fatalf("unsafe raw feature error=%v", err)
 	}
+
+	configured := appconfig.Defaults()
+	configured.Programming.FirmwareFeatures = []programmer.FirmwareFeature{
+		programmer.FirmwareFeatureEEPROMMenuLabels,
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--dry-run",
+		},
+		&stdout, &stderr, configured,
+	); err != nil || !strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1") {
+		t.Fatalf("configured feature output=%q err=%v", stdout.String(), err)
+	}
+	stdout.Reset()
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(),
+			"--firmware-feature", "eeprom-boot-opcodes", "--dry-run",
+		},
+		&stdout, &stderr, configured,
+	); err != nil || !strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1") ||
+		strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1") {
+		t.Fatalf("explicit replacement output=%q err=%v", stdout.String(), err)
+	}
+	stdout.Reset()
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--no-firmware-features", "--dry-run",
+		},
+		&stdout, &stderr, configured,
+	); err != nil || strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_") {
+		t.Fatalf("default-off output=%q err=%v", stdout.String(), err)
+	}
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--dry-run", "EXTRA",
+		},
+		io.Discard, io.Discard, appconfig.Defaults(),
+	); err == nil || !strings.Contains(err.Error(), "unexpected program argument") {
+		t.Fatalf("leftover argument error=%v", err)
+	}
+
+	t.Setenv(firmwareFeaturesEnvironment, "eeprom-menu-labels,eeprom-boot-opcodes")
+	stdout.Reset()
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--dry-run",
+		},
+		&stdout, &stderr, appconfig.Defaults(),
+	); err != nil || !strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1") ||
+		!strings.Contains(stdout.String(), "PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1") {
+		t.Fatalf("environment feature output=%q err=%v", stdout.String(), err)
+	}
+	t.Setenv(firmwareFeaturesEnvironment, "unknown")
+	if err := runProgramWithConfig(
+		[]string{"--method", "compile", "--dry-run"},
+		io.Discard, io.Discard, appconfig.Defaults(),
+	); err == nil || !strings.Contains(err.Error(), firmwareFeaturesEnvironment) {
+		t.Fatalf("invalid environment error=%v", err)
+	}
 }
 
 func TestRuntimeCommandStillValidatesRuntimeConfig(t *testing.T) {

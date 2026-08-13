@@ -575,9 +575,13 @@ test('build plan and execution share exact Controller programming argv construct
 test('build forwards only named firmware features to the Controller compiler', () => {
 	const options = parseArguments([
 		'--firmware-only',
-		'--firmware-feature', 'eeprom-boot-opcodes',
-		'--firmware-feature=eeprom-menu-labels'
+		'--firmware-feature', 'EEPROM-MENU-LABELS',
+		'--firmware-feature=eeprom-boot-opcodes',
+		'--firmware-feature', 'eeprom-menu-labels'
 	], {})
+	assert.deepEqual(options.firmwareFeatures, [
+		'eeprom-boot-opcodes', 'eeprom-menu-labels'
+	])
 	const command = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
 		.actions.find(action => action.id === 'firmware-compile').command.args
 	assert.deepEqual(command.filter((value, index) => command[index - 1] === '--firmware-feature'), [
@@ -590,6 +594,31 @@ test('build forwards only named firmware features to the Controller compiler', (
 			firmwareFeatures: ['-DUNSAFE=1']
 		}),
 		/invalid named firmware feature/
+	)
+	assert.throws(
+		() => parseArguments([
+			'--firmware-only', '--firmware-feature', 'unknown'
+		], {}),
+		error => error.exitCode === 2 && /unsupported firmware feature/.test(error.message)
+	)
+	for (const selection of [['--host-only'], ['--virtual-board-only'], ['--clean']]) {
+		assert.throws(
+			() => parseArguments([
+				...selection, '--firmware-feature', 'eeprom-menu-labels'
+			], {}),
+			error => error.exitCode === 2 && /requires firmware compilation/.test(error.message)
+		)
+	}
+	assert.throws(
+		() => createControllerProgramCommand({
+			invocation: canonicalControllerInvocation(PROJECT_ROOT, 'win32'),
+			method: 'urclock',
+			operation: PROGRAMMING_OPERATIONS.upload,
+			device: 'DO_NOT_OPEN',
+			hex: 'firmware.hex',
+			firmwareFeatures: ['eeprom-menu-labels']
+		}),
+		/only valid with compile/
 	)
 })
 

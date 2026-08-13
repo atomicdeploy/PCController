@@ -69,6 +69,28 @@ func TestFirmwareFeaturesAreIdentityBoundAndBecomeOnlyKnownDefines(t *testing.T)
 	if got := firmwareFeatureNames(enabledIdentity.Features); strings.Join(got, ",") != "eeprom-boot-opcodes,eeprom-menu-labels" {
 		t.Fatalf("identity features=%v", got)
 	}
+	permuted, permutedIdentity, err := PlanCompile(Options{
+		Method: MethodCompile, SketchPath: root, ArduinoCLI: executable,
+		FirmwareFeatures: []FirmwareFeature{
+			FirmwareFeatureEEPROMBootOpcodes,
+			FirmwareFeatureEEPROMMenuLabels,
+			FirmwareFeatureEEPROMBootOpcodes,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permutedIdentity.SourceHash != enabledIdentity.SourceHash ||
+		permutedIdentity.SourceSHA256 != enabledIdentity.SourceSHA256 ||
+		permutedIdentity.BuildPath != enabledIdentity.BuildPath ||
+		permutedIdentity.SketchPath != enabledIdentity.SketchPath {
+		t.Fatalf("permuted identity=%#v enabled=%#v", permutedIdentity, enabledIdentity)
+	}
+	permuted.FirmwareFeatures = []FirmwareFeature{FirmwareFeatureEEPROMMenuLabels}
+	if _, err := Build(permuted); err == nil ||
+		!strings.Contains(err.Error(), "changed after planning") {
+		t.Fatalf("planned feature mutation error=%v", err)
+	}
 
 	baselineCommand, err := Build(baseline)
 	if err != nil {

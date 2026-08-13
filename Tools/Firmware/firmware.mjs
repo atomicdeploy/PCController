@@ -29,6 +29,7 @@ import {
 	commandPlanPaths,
 	createControllerProgramCommand,
 	loadToolchainPolicy,
+	normalizeFirmwareFeatures,
 	parseToolchainPolicy,
 	programmingArtifact,
 	relativeCommandPlanPaths,
@@ -84,6 +85,10 @@ const SOURCE_ROOTS = Object.freeze([
 const DEFAULT_POLL_MS = 250
 const DEFAULT_DEBOUNCE_MS = 500
 const MINIMUM_NODE = Object.freeze({ major: 22, minor: 12 })
+const FIRMWARE_MANIFEST_FORMATS = Object.freeze([
+	'pccontroller-avr-firmware-manifest/v1',
+	'pccontroller-avr-firmware-manifest/v2'
+])
 
 class FirmwareToolError extends Error {
 	constructor(message, exitCode = EXIT.TOOL, options = {}) {
@@ -275,6 +280,18 @@ export function parseArguments(argv, env = process.env) {
 		)
 	}
 	if (config.help) return config
+	try {
+		config.firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures)
+	} catch (error) {
+		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+	}
+	if (config.firmwareFeatures.length !== 0 &&
+		!['build', 'upload', 'watch'].includes(config.command)) {
+		throw new FirmwareToolError(
+			'--firmware-feature requires build, upload, or watch',
+			EXIT.USAGE
+		)
+	}
 	config.method ||= 'urclock'
 	if (!PROGRAMMING_METHODS.includes(config.method)) {
 		throw new FirmwareToolError(
@@ -420,6 +437,12 @@ function commandText(plan) {
 }
 
 export async function createBuildPlan(config, projectRoot) {
+	let firmwareFeatures
+	try {
+		firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures || [])
+	} catch (error) {
+		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+	}
 	const packedTimestamp = buildTimestampEnvironment()
 	const env = { PCCONTROLLER_BUILD_TIMESTAMP: packedTimestamp }
 	const file = process.execPath
@@ -430,7 +453,7 @@ export async function createBuildPlan(config, projectRoot) {
 	]
 	if (config.clean) args.push('--clean')
 	if (config.verbose) args.push('--verbose')
-	for (const feature of config.firmwareFeatures) args.push('--firmware-feature', feature)
+	for (const feature of firmwareFeatures) args.push('--firmware-feature', feature)
 	return { file, args, cwd: projectRoot, env }
 }
 
@@ -470,6 +493,20 @@ function plannedProgramCommand(config, projectRoot, artifactPath = '', outputPat
 }
 
 export async function createCommandPlan(config, projectRoot) {
+	let firmwareFeatures
+	try {
+		firmwareFeatures = normalizeFirmwareFeatures(config.firmwareFeatures || [])
+	} catch (error) {
+		throw new FirmwareToolError(error.message || String(error), error.exitCode || EXIT.USAGE)
+	}
+	if (firmwareFeatures.length !== 0 &&
+		!['build', 'upload', 'watch'].includes(config.command)) {
+		throw new FirmwareToolError(
+			'--firmware-feature requires build, upload, or watch',
+			EXIT.USAGE
+		)
+	}
+	config = { ...config, firmwareFeatures }
 	const absolute = commandPlanPaths(projectRoot)
 	const paths = relativeCommandPlanPaths(projectRoot)
 	const actions = []
@@ -897,7 +934,36 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 	} catch (error) {
 		if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error
 	}
-	const identityMatches = prior?.format === 'pccontroller-avr-firmware-manifest/v1' &&
+	if (FIRMWARE_MANIFEST_FORMATS.includes(prior?.format)) {
+		let features
+		try {
+			features = normalizeFirmwareFeatures(prior.source?.compileFeatures || [])
+		} catch (error) {
+			throw new FirmwareToolError(
+				`Invalid prior manifest compile features: ${error.message}`,
+				EXIT.VALIDATION
+			)
+		}
+		if (JSON.stringify(features) !== JSON.stringify(prior.source?.compileFeatures || [])) {
+			throw new FirmwareToolError(
+				'Prior manifest compile features must be unique and sorted canonically',
+				EXIT.VALIDATION
+			)
+		}
+		if (prior.format.endsWith('/v1') && features.length !== 0) {
+			throw new FirmwareToolError(
+				'Prior firmware manifest v1 cannot declare compile features',
+				EXIT.VALIDATION
+			)
+		}
+		if (prior.format.endsWith('/v2') && features.length === 0) {
+			throw new FirmwareToolError(
+				'Prior firmware manifest v2 requires at least one compile feature',
+				EXIT.VALIDATION
+			)
+		}
+	}
+	const identityMatches = FIRMWARE_MANIFEST_FORMATS.includes(prior?.format) &&
 		Array.isArray(prior.artifacts) &&
 		prior.artifacts.length === artifacts.length &&
 		artifacts.every(artifact => prior.artifacts.some(previous =>
@@ -905,7 +971,7 @@ async function writeManifest(config, projectRoot, artifacts, source, logger) {
 			String(previous.sha256).toLowerCase() === artifact.sha256.toLowerCase()
 		))
 	const manifest = {
-		format: 'pccontroller-avr-firmware-manifest/v1',
+		format: identityMatches ? prior.format : 'pccontroller-avr-firmware-manifest/v1',
 		generatedUtc: identityMatches && prior.generatedUtc
 			? prior.generatedUtc
 			: new Date().toISOString(),
