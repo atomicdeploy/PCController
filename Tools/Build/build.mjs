@@ -411,23 +411,28 @@ function commandAction(id, stage, file, args, cwd, hardware = false) {
 }
 
 export function createPlan(options, identity, platform = process.platform) {
+	const rawFirmwareFeatures = options.firmwareFeatures ?? []
+	const hasFirmwareFeatureValues = Array.isArray(rawFirmwareFeatures)
+		? rawFirmwareFeatures.length !== 0
+		: true
+	const selectionExplicit = options.firmwareFeaturesExplicit === true ||
+		options.noFirmwareFeatures === true ||
+		(hasFirmwareFeatureValues && options.firmwareFeaturesFromEnvironment !== true)
+	const firmwareCompilationSelected = options.firmware && !options.cleanOnly
+	if (selectionExplicit && !firmwareCompilationSelected) {
+		throw new BuildError('explicit firmware-feature selection requires firmware compilation', 2)
+	}
 	let firmwareFeatures
 	try {
-		firmwareFeatures = normalizeFirmwareFeatures(options.firmwareFeatures || [])
+		firmwareFeatures = normalizeFirmwareFeatures(
+			firmwareCompilationSelected ? rawFirmwareFeatures : []
+		)
 	} catch (error) {
 		throw new BuildError(error.message || String(error), error.exitCode || 2)
 	}
-	const selectionExplicit = options.firmwareFeaturesExplicit === true ||
-		options.noFirmwareFeatures === true ||
-		(firmwareFeatures.length !== 0 && options.firmwareFeaturesFromEnvironment !== true)
 	if (options.noFirmwareFeatures && firmwareFeatures.length !== 0) {
 		throw new BuildError('--no-firmware-features cannot be combined with --firmware-feature', 2)
 	}
-	if (selectionExplicit &&
-		(!options.firmware || options.cleanOnly)) {
-		throw new BuildError('explicit firmware-feature selection requires firmware compilation', 2)
-	}
-	if (!options.firmware || options.cleanOnly) firmwareFeatures = []
 	const actions = []
 	if (options.clean) actions.push({
 		id: 'clean',
