@@ -202,6 +202,7 @@ const routes = [
   { path: "/healthz", methods: ["get"], public: true, capability: "public", summary: "Service liveness and API identity" },
   { path: "/upnp/public.json", methods: ["get"], public: true, capability: "public", summary: "Bounded public host, board, endpoint, health, and telemetry directory" },
   { path: "/api/ui-config", methods: ["get"], public: true, capability: "public", summary: "Non-secret browser bootstrap" },
+  { path: "/api/auth/server-proof", methods: ["get"], public: true, capability: "public", summary: "Nonce/address-bound proof that the reached LAN endpoint knows the configured bearer" },
   { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Exchange a header credential for a short-lived one-use browser WebSocket ticket" },
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
@@ -280,6 +281,13 @@ function operationFor(route, method) {
       description: "One-use Origin-bound browser session ticket",
       content: { "application/json": { schema: { $ref: "#/components/schemas/SessionTicket" } } },
     };
+	}
+	if (route.path === "/api/auth/server-proof") {
+		operation.parameters = [{ name: "X-PCController-Nonce", in: "header", required: true, schema: { type: "string", minLength: 22, maxLength: 86 }, description: "16..64 random bytes encoded as unpadded base64url" }];
+		operation.responses["200"] = {
+			description: "Responder-bound HMAC proof verified locally before a client transmits its bearer",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ServerProof" } } },
+		};
 	}
 	if (route.path === "/api/opcode") {
 		operation.responses["200"] = {
@@ -396,6 +404,16 @@ const openapi = {
         type: "object", required: ["transport"], additionalProperties: false,
         properties: { transport: { type: "string", enum: ["websocket", "socket_io"] } },
       },
+		ServerProof: {
+			type: "object", required: ["format", "nonce", "audience", "instance_id", "proof"], additionalProperties: false,
+			properties: {
+				format: { type: "string", const: "pccontroller-server-proof/v1" },
+				nonce: { type: "string", description: "The caller-supplied unpadded base64url nonce." },
+				audience: { type: "string", description: "The IP:port of the exact local listener that accepted the request." },
+				instance_id: { type: "string", minLength: 1 },
+				proof: { type: "string", description: "Unpadded base64url HMAC-SHA256 over format, nonce, audience, and instance identity." },
+			},
+		},
 		SessionTicket: {
         type: "object", required: ["ticket", "protocol", "expires_at", "expires_in_ms", "principal"], additionalProperties: false,
         properties: {

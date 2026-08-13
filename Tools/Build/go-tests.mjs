@@ -8,6 +8,8 @@ import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
 	existsSync,
+	closeSync,
+	openSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -108,12 +110,13 @@ function sha256(value) {
 	return createHash('sha256').update(value).digest('hex')
 }
 
-export function goTestSourceIdentity(moduleRoot, goVersion) {
+export function goTestSourceIdentity(moduleRoot, goVersion, environment = {}) {
 	const files = []
 	walkGoFiles(moduleRoot, moduleRoot, files)
 	// Go's compiler embeds these generated web assets into internal/webui. They
 	// must invalidate the stable test cache just like a changed .go source file.
 	walkEmbeddedFiles(join(moduleRoot, 'internal', 'webui', 'dist'), files)
+	walkEmbeddedFiles(join(moduleRoot, 'internal', 'defaultassets', 'assets'), files)
 	for (const name of ['go.mod', 'go.sum']) {
 		const path = join(moduleRoot, name)
 		if (existsSync(path)) files.push(path)
@@ -123,7 +126,9 @@ export function goTestSourceIdentity(moduleRoot, goVersion) {
 		`${relative(moduleRoot, path).replaceAll('\\', '/')}:${sha256(readFileSync(path))}\n`
 	).join('')
 	return {
-		sha256: sha256(`${goVersion.trim()}\n${manifest}`),
+		sha256: sha256(`${goVersion.trim()}\n${[
+			'GOOS', 'GOARCH', 'GOFLAGS', 'CGO_ENABLED', 'CC', 'CXX'
+		].map(key => `${key}=${environment[key] || ''}`).join('\n')}\n${manifest}`),
 		files: files.length,
 		goVersion: goVersion.trim()
 	}
@@ -173,6 +178,44 @@ function writeJSON(path, value) {
 	}
 }
 
+function waitMilliseconds(milliseconds) {
+	Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds)
+}
+
+function withOutputLock(output, action) {
+	mkdirSync(output, { recursive: true })
+	const lockPath = join(output, '.pccontroller-go-tests.lock')
+	const deadline = Date.now() + 10 * 60 * 1000
+	let descriptor
+	while (descriptor === undefined) {
+		try {
+			descriptor = openSync(lockPath, 'wx')
+			writeFileSync(descriptor, `${JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() })}\n`, 'utf8')
+		} catch (error) {
+			if (error?.code !== 'EEXIST') throw error
+			try {
+				if (Date.now() - statSync(lockPath).mtimeMs > 15 * 60 * 1000) {
+					rmSync(lockPath, { force: true })
+					continue
+				}
+			} catch (lockError) {
+				if (lockError?.code === 'ENOENT') continue
+				throw lockError
+			}
+			if (Date.now() >= deadline) {
+				throw new Error(`timed out waiting for stable Go test runner lock: ${lockPath}`)
+			}
+			waitMilliseconds(200)
+		}
+	}
+	try {
+		return action()
+	} finally {
+		closeSync(descriptor)
+		rmSync(lockPath, { force: true })
+	}
+}
+
 export function createStableTestPlan(packages, output, platform = process.platform) {
 	return packages.map(value => ({
 		...value,
@@ -190,7 +233,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 		throw new Error(`Go module directory does not exist: ${options.module}`)
 	}
 	const goVersion = run(options.go, ['version'], { cwd: options.module, env, capture: true })
-	const identity = goTestSourceIdentity(options.module, goVersion)
+	const identity = goTestSourceIdentity(options.module, goVersion, env)
 	const packages = listTestPackages(options.go, options.module, env)
 	const plan = createStableTestPlan(packages, options.output)
 	const cachePath = join(options.output, 'passed.json')
@@ -204,35 +247,40 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 		process.stdout.write(current && !options.retest ? '  cached pass would be reused\n' : '  tests would be built/run\n')
 		return 0
 	}
-	if (current && !options.retest) {
-		process.stdout.write(`✅ Go test cache matches ${identity.sha256.slice(0, 12)}; no test executable was rebuilt or run.\n`)
-		return 0
-	}
-
-	mkdirSync(options.output, { recursive: true })
-	if (!current) {
-		for (const item of plan) {
-			process.stdout.write(`🔨 ${item.importPath} -> ${item.binary}\n`)
-			run(options.go, ['test', '-c', '-o', item.binary, item.importPath], {
-				cwd: options.module, env
-			})
+	return withOutputLock(options.output, () => {
+		// Re-read after acquiring the machine-wide lock: another worktree may
+		// have populated the stable cache while this process was waiting.
+		const lockedCache = loadCache(cachePath)
+		const lockedCurrent = lockedCache?.sourceSHA256 === identity.sha256 &&
+			plan.every(item => existsSync(item.binary))
+		if (lockedCurrent && !options.retest) {
+			process.stdout.write(`✅ Go test cache matches ${identity.sha256.slice(0, 12)}; no test executable was rebuilt or run.\n`)
+			return 0
 		}
-	} else {
-		process.stdout.write('♻️ Reusing unchanged stable test executables.\n')
-	}
-	for (const item of plan) {
-		process.stdout.write(`🧪 ${item.importPath}\n`)
-		run(item.binary, ['-test.count=1'], { cwd: item.directory, env })
-	}
-	writeJSON(cachePath, {
-		format: 'pccontroller-stable-go-test-cache/v1',
-		sourceSHA256: identity.sha256,
-		goVersion: identity.goVersion,
-		sourceFiles: identity.files,
-		packages: plan.map(item => ({ importPath: item.importPath, binary: basename(item.binary) }))
+		if (!lockedCurrent) {
+			for (const item of plan) {
+				process.stdout.write(`🔨 ${item.importPath} -> ${item.binary}\n`)
+				run(options.go, ['test', '-c', '-o', item.binary, item.importPath], {
+					cwd: options.module, env
+				})
+			}
+		} else {
+			process.stdout.write('♻️ Reusing unchanged stable test executables.\n')
+		}
+		for (const item of plan) {
+			process.stdout.write(`🧪 ${item.importPath}\n`)
+			run(item.binary, ['-test.count=1'], { cwd: item.directory, env })
+		}
+		writeJSON(cachePath, {
+			format: 'pccontroller-stable-go-test-cache/v1',
+			sourceSHA256: identity.sha256,
+			goVersion: identity.goVersion,
+			sourceFiles: identity.files,
+			packages: plan.map(item => ({ importPath: item.importPath, binary: basename(item.binary) }))
+		})
+		process.stdout.write(`✅ Stable-path Go tests passed; cache ${cachePath}\n`)
+		return 0
 	})
-	process.stdout.write(`✅ Stable-path Go tests passed; cache ${cachePath}\n`)
-	return 0
 }
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(SCRIPT)

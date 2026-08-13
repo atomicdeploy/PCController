@@ -427,6 +427,7 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 		WebSocketPath string `json:"websocket_path"`
 		SocketIOPath  string `json:"socket_io_path"`
 		TicketPath    string `json:"session_ticket_path"`
+		ProofPath     string `json:"server_proof_path"`
 		AuthRequired  bool   `json:"auth_required"`
 		HostVersion   string `json:"host_version"`
 		SourceHash    string `json:"source_hash"`
@@ -437,7 +438,7 @@ func TestUIConfigIsUnauthenticatedAndReportsActiveBrowserContract(t *testing.T) 
 	}
 	if response.StatusCode != http.StatusOK || result.Name != "Controller Lab" ||
 		result.WebSocketPath != "/control" ||
-		result.SocketIOPath != "/engine.io/" || result.TicketPath != SessionTicketPath || !result.AuthRequired ||
+		result.SocketIOPath != "/engine.io/" || result.TicketPath != SessionTicketPath || result.ProofPath != ServerProofPath || !result.AuthRequired ||
 		result.HostVersion != "1.2.3" || result.SourceHash != "0123456789abcdef" ||
 		result.BuildTime != "2026-08-02T00:00:00Z" {
 		t.Fatalf("UI config status=%d result=%+v", response.StatusCode, result)

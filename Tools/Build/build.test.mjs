@@ -213,6 +213,22 @@ test('stable Go test identity includes embedded web assets', async t => {
 	assert.equal(after.files, before.files)
 })
 
+test('stable Go test identity includes embedded defaults and build environment', async t => {
+	const root = await mkdtemp(join(tmpdir(), 'controller-go-default-identity-'))
+	t.after(() => rm(root, { recursive: true, force: true }))
+	const assets = join(root, 'internal', 'defaultassets', 'assets')
+	await mkdir(assets, { recursive: true })
+	await writeFile(join(root, 'go.mod'), 'module example.invalid/controller\n\ngo 1.26\n')
+	await writeFile(join(root, 'main_test.go'), 'package controller\n')
+	await writeFile(join(assets, 'default.hex'), ':00000001FF\n')
+	const before = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '0' })
+	await writeFile(join(assets, 'default.hex'), ':0100000000FF\n')
+	const afterAsset = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '0' })
+	const afterEnvironment = goTestSourceIdentity(root, 'go version go1.26.5 windows/amd64', { CGO_ENABLED: '1' })
+	assert.notEqual(afterAsset.sha256, before.sha256)
+	assert.notEqual(afterEnvironment.sha256, afterAsset.sha256)
+})
+
 test('package publishing tolerates a shell holding the canonical directory', async t => {
         const root = await mkdtemp(join(tmpdir(), 'pccontroller-package-lock-'))
         t.after(() => rm(root, { recursive: true, force: true }))

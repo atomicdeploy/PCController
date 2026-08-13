@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"encoding/binary"
+	"encoding/xml"
 	"net"
 	"os"
 	"runtime"
@@ -43,17 +44,47 @@ func TestDiscoveryOptionsNormalizeDNSAndUPnPAliases(t *testing.T) {
 func TestBroadcastAndWSDiscoveryPacketsAreSafe(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	advertiser, err := AdvertiseWithOptions(ctx, "Workshop", 8787, Options{}, []string{"board.name=Alpha", "auth_token=hidden"})
+	advertiser, err := AdvertiseWithOptions(ctx, "Workshop", 8787, Options{}, []string{"instance.id=0123456789abcdef0123456789abcdef", "board.name=Alpha", "auth_token=hidden"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer advertiser.Close()
 	packet := broadcastPacketFor(advertiser, "announce")
-	if packet.Magic != broadcastMagic || packet.Port != 8787 || packet.Name != "Workshop" || len(packet.TXT) != 1 {
+	if packet.Magic != broadcastMagic || packet.Port != 8787 || packet.Name != "Workshop" || len(packet.TXT) != 2 {
 		t.Fatalf("broadcast packet=%#v", packet)
 	}
-	if !strings.Contains(wsProbeMessage(), WSDiscoveryType) || !strings.Contains(wsProbeResponse(advertiser, &net.UDPAddr{IP: net.ParseIP("192.0.2.10")}), "/upnp/device.xml") {
+	probe, ok := parseWSProbe([]byte(wsProbeMessage()))
+	if !ok {
+		t.Fatal("generated WS-Discovery probe is not standards-valid")
+	}
+	response := wsProbeResponse(advertiser, &net.UDPAddr{IP: net.ParseIP("192.0.2.10")}, probe.Header.MessageID)
+	for _, expected := range []string{wsProbeMatchesAction, "<a:RelatesTo>" + probe.Header.MessageID + "</a:RelatesTo>", "<a:EndpointReference>", "<d:AppSequence", "/upnp/device.xml", "uuid:0123456789abcdef0123456789abcdef"} {
+		if !strings.Contains(response, expected) {
+			t.Fatalf("WS-Discovery response missing %q:\n%s", expected, response)
+		}
+	}
+	if !strings.Contains(wsProbeMessage(), WSDiscoveryType) {
 		t.Fatal("WS-Discovery probe/response missing service metadata")
+	}
+	var match wsMatchEnvelope
+	if err := xml.Unmarshal([]byte(response), &match); err != nil || match.Header.Action != wsProbeMatchesAction ||
+		match.Body.Matches.Match.Endpoint.Address != "uuid:0123456789abcdef0123456789abcdef" || match.Body.Matches.Match.XAddrs == "" {
+		t.Fatalf("generated WS-Discovery match is not consumable: match=%#v err=%v", match, err)
+	}
+}
+
+func TestWSDiscoveryRejectsLooseOrUnrelatedProbePayloads(t *testing.T) {
+	valid := wsProbeMessage()
+	for _, payload := range []string{
+		`<Probe/>`,
+		strings.Replace(valid, wsProbeAction, wsProbeMatchesAction, 1),
+		strings.Replace(valid, `<a:To s:mustUnderstand="1">`+wsDiscoveryTo+`</a:To>`, "", 1),
+		strings.Replace(valid, WSDiscoveryType, "other:UnrelatedDevice", 1),
+		strings.Replace(valid, wsDiscoveryNamespace, "urn:wrong-discovery", 1),
+	} {
+		if _, ok := parseWSProbe([]byte(payload)); ok {
+			t.Fatalf("accepted invalid WS-Discovery probe: %s", payload)
+		}
 	}
 }
 
@@ -62,23 +93,50 @@ func TestNetBIOSNodeStatusWireFormat(t *testing.T) {
 	if len(query) != 50 || binary.BigEndian.Uint16(query[46:48]) != 0x0021 || binary.BigEndian.Uint16(query[48:50]) != 1 {
 		t.Fatalf("invalid NBNS query: % X", query)
 	}
-	response := make([]byte, 84)
-	binary.BigEndian.PutUint16(response[2:4], 0x8500)
-	response[12] = 0x20
-	for i := 0; i < 32; i++ {
-		response[13+i] = 'A'
+	if query[13] != 'C' || query[14] != 'K' || strings.Trim(string(query[15:45]), "A") != "" {
+		t.Fatalf("NBNS wildcard name is not RFC 1002 encoded: % X", query[12:46])
 	}
-	response[45] = 0
-	binary.BigEndian.PutUint16(response[46:48], 0x0021)
-	binary.BigEndian.PutUint16(response[48:50], 1)
-	response[50], response[51] = 0xC0, 0x0C
-	binary.BigEndian.PutUint16(response[52:54], 0x0021)
-	binary.BigEndian.PutUint16(response[54:56], 1)
-	binary.BigEndian.PutUint16(response[60:62], 21)
-	response[62] = 1
-	copy(response[63:78], []byte("PCCONTROLLER    "))
+	if !isNetBIOSNodeStatusQuery(query) {
+		t.Fatal("generated NBNS query is not recognized")
+	}
+	response := netbiosNodeStatusResponse(query, "PCController")
+	if len(response) != 127 || binary.BigEndian.Uint16(response[60:62]) != 65 {
+		t.Fatalf("invalid NBNS node-status response size: len=%d packet=% X", len(response), response)
+	}
 	if got := parseNetBIOSNodeStatus(response); got != "PCCONTROLLER" {
-		t.Fatalf("node status name=%q", got)
+		t.Fatalf("node status name=%q packet=% X", got, response)
+	}
+	if parseNetBIOSNodeStatus(response[:len(response)-1]) != "" {
+		t.Fatal("accepted truncated NBNS response")
+	}
+}
+
+func TestSSDPIdentityMatchesUPnPDescriptionContract(t *testing.T) {
+	const instanceID = "0123456789abcdef0123456789abcdef"
+	packet := ssdpNotifyWithText("Workshop", 8787, "ssdp:alive", []string{"instance.id=" + instanceID})
+	for _, expected := range []string{
+		"NT: urn:pccontroller-org:service:Controller:1",
+		"USN: uuid:" + instanceID + "::" + SSDPType,
+	} {
+		if !strings.Contains(packet, expected) {
+			t.Fatalf("SSDP packet missing canonical identity %q:\n%s", expected, packet)
+		}
+	}
+}
+
+func TestAdvertiserReportsSoleResponderStartupFailure(t *testing.T) {
+	occupied, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	if err != nil {
+		t.Skipf("UDP unavailable: %v", err)
+	}
+	defer occupied.Close()
+	port := occupied.LocalAddr().(*net.UDPAddr).Port
+	advertiser, err := AdvertiseWithOptions(context.Background(), "blocked", 8787, Options{Broadcast: true, BroadcastPort: port}, nil)
+	if err == nil || advertiser != nil {
+		if advertiser != nil {
+			advertiser.Close()
+		}
+		t.Fatalf("sole blocked responder advertiser=%#v err=%v", advertiser, err)
 	}
 }
 

@@ -136,11 +136,39 @@ func (model Model) appSettingRows() []settingRow {
 	}
 	for index, device := range model.networkDevices {
 		hostname, state := device.Host, "host discovered"
+		detail := make([]string, 0, 9)
 		if device.Public != nil {
 			hostname = device.Public.Hostname
 			state = boolWord(device.Public.Health.Connectable, "connectable", "advertisement only")
+			if device.Public.Host.Version != "" {
+				detail = append(detail, "host "+device.Public.Host.Version)
+			}
+			if device.Public.Board.Connected {
+				board := defaultText(device.Public.Board.Identity.Name, "board")
+				if device.Public.Board.Identity.BuildHash != "" {
+					board += "@" + device.Public.Board.Identity.BuildHash
+				}
+				detail = append(detail, board)
+				if device.Public.Board.Port.Name != "" {
+					detail = append(detail, "port "+device.Public.Board.Port.Name)
+				}
+			}
+			telemetry := device.Public.Board.Telemetry
+			if telemetry.INA219Available {
+				detail = append(detail, fmt.Sprintf("%.3f V · %.3f A", float64(telemetry.SupplyMV)/1000, float64(telemetry.CurrentMA)/1000))
+			}
+			if telemetry.TemperatureLEDAvailable {
+				detail = append(detail, fmt.Sprintf("T1 %.2f °C", float64(telemetry.TemperatureLEDCentiC)/100))
+			}
+			if telemetry.TemperatureBTAvailable {
+				detail = append(detail, fmt.Sprintf("T2 %.2f °C", float64(telemetry.TemperatureBTAudioCentiC)/100))
+			}
 		}
-		rows = append(rows, settingRow{Key: fmt.Sprintf("network.device.%d", index), Group: "DISCOVERED", Label: device.Name, Value: fmt.Sprintf("%s · %s · %s", hostname, strings.Join(device.Protocols, "+"), state), Editable: true})
+		prefix := fmt.Sprintf("%s · %s · %s", hostname, strings.Join(device.Protocols, "+"), state)
+		if len(detail) != 0 {
+			prefix += " · " + strings.Join(detail, " · ")
+		}
+		rows = append(rows, settingRow{Key: fmt.Sprintf("network.device.%d", index), Group: "DISCOVERED", Label: device.Name, Value: prefix, Editable: true})
 	}
 	for _, item := range []struct {
 		key, label string

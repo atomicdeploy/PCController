@@ -132,6 +132,55 @@
         "security": []
       }
     },
+    "/api/auth/server-proof": {
+      "get": {
+        "operationId": "get_api_auth_server_proof",
+        "summary": "Nonce/address-bound proof that the reached LAN endpoint knows the configured bearer",
+        "tags": [
+          "server-proof"
+        ],
+        "x-required-capability": "public",
+        "x-idempotency": "safe",
+        "responses": {
+          "200": {
+            "description": "Responder-bound HMAC proof verified locally before a client transmits its bearer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerProof"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          }
+        },
+        "security": [],
+        "parameters": [
+          {
+            "name": "X-PCController-Nonce",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 22,
+              "maxLength": 86
+            },
+            "description": "16..64 random bytes encoded as unpadded base64url"
+          }
+        ]
+      }
+    },
     "/api/session/ticket": {
       "post": {
         "operationId": "post_api_session_ticket",
@@ -3565,6 +3614,39 @@
               "websocket",
               "socket_io"
             ]
+          }
+        }
+      },
+      "ServerProof": {
+        "type": "object",
+        "required": [
+          "format",
+          "nonce",
+          "audience",
+          "instance_id",
+          "proof"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "type": "string",
+            "const": "pccontroller-server-proof/v1"
+          },
+          "nonce": {
+            "type": "string",
+            "description": "The caller-supplied unpadded base64url nonce."
+          },
+          "audience": {
+            "type": "string",
+            "description": "The IP:port of the exact local listener that accepted the request."
+          },
+          "instance_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "proof": {
+            "type": "string",
+            "description": "Unpadded base64url HMAC-SHA256 over format, nonce, audience, and instance identity."
           }
         }
       },

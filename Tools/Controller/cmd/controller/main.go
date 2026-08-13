@@ -875,6 +875,16 @@ func runTUIWithInitialAction(
 				return store.Current().Integrations
 			},
 			SaveIntegrations: func(value appconfig.Integrations) error {
+				if value.Discovery != store.Current().Integrations.Discovery {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					var persisted appconfig.Discovery
+					err := callPrimary(ctx, "controller.discovery.config.set", value.Discovery, &persisted)
+					cancel()
+					if err != nil {
+						return fmt.Errorf("save discovery settings through primary: %w", err)
+					}
+					value.Discovery = persisted
+				}
 				_, err := store.Update(func(config *appconfig.Config) error {
 					config.Integrations = value
 					return nil
@@ -905,7 +915,13 @@ func runTUIWithInitialAction(
 				return primaryHostUIStatus(primary, store.Current())
 			},
 			NetworkDiscovery: func(ctx context.Context) ([]discovery.Instance, error) {
-				return discovery.DiscoverWithOptions(ctx, discovery.Options{MDNS: true, DNSSD: true, SSDP: true, UPnP: true, WSDiscovery: true, Broadcast: true, NetBIOS: true, BroadcastPort: store.Current().Integrations.Discovery.BroadcastPort})
+				var instances []discovery.Instance
+				err := callPrimary(ctx, "controller.discovery.scan", map[string]any{
+					"timeout_ms": 3000,
+					"mdns":       true, "dns_sd": true, "ssdp": true, "upnp": true,
+					"ws_discovery": true, "broadcast": true, "netbios": true,
+				}, &instances)
+				return instances, err
 			},
 			OpenNetwork: openBrowser,
 			AppActions:  appActions,

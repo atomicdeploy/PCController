@@ -772,7 +772,14 @@ programming, shutdown, virtual keys, power actions, host-automation execution,
 or bridge calls.
 
 HTTP and native socket clients authenticate with a Bearer or compatibility
-header. The Web UI exchanges that header credential at
+header. A client connecting from an unauthenticated discovery record first
+calls `GET /api/auth/server-proof` with a fresh random nonce and verifies the
+returned address-bound HMAC locally; it sends the bearer only after proving
+that the exact reached listener knows it. This prevents a spoofed LAN
+advertisement, redirect, proxy, or hostname rebind from collecting the token.
+The proof route requires at least 24 decoded random base64url bytes because the
+proof endpoint intentionally demonstrates token possession without accepting
+the token itself. The Web UI exchanges that header credential at
 `POST /api/session/ticket` for a 15-second, one-use, Origin/peer/transport-
 bound WebSocket subprotocol ticket. Durable tokens are rejected in URLs, and
 unauthorized standard WebSocket or Socket.IO handshakes emit no application

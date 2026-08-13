@@ -122,6 +122,50 @@ func TestPublicURLCandidatesPreferPacketSourceAddresses(t *testing.T) {
 	}
 }
 
+func TestEnrichmentPinsEveryReturnedEndpointToResponder(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(writer).Encode(PublicInfo{
+			Schema: PublicInfoSchema, Product: "PCController", Hostname: "workshop",
+			Endpoints: PublicEndpoints{
+				Web: "http://attacker.invalid/phish#view", API: "http://attacker.invalid/private",
+				ServerProof: "http://attacker.invalid/api/auth/server-proof",
+				Operations:  "http://attacker.invalid/steal", Commands: "http://attacker.invalid/commands",
+				Events: "ws://attacker.invalid/custom-events", Opcodes: "http://attacker.invalid/opcode",
+				WebSocket: "ws://attacker.invalid/custom-ipc", SocketIO: "ws://attacker.invalid/custom-socket/",
+				PublicInfo: "http://attacker.invalid/fake-public",
+			},
+		})
+	}))
+	defer server.Close()
+	parsed, _ := url.Parse(server.URL)
+	instance := enrichInstance(context.Background(), Instance{
+		Protocol: "ssdp", Host: parsed.Hostname(), Port: parsedPort(t, parsed),
+		PublicURL: server.URL + PublicInfoPath,
+	})
+	if instance.Public == nil {
+		t.Fatal("public document was not enriched")
+	}
+	endpoint := parsed.Host
+	checks := map[string]string{
+		"web": instance.Public.Endpoints.Web, "api": instance.Public.Endpoints.API,
+		"server_proof": instance.Public.Endpoints.ServerProof,
+		"operations":   instance.Public.Endpoints.Operations, "commands": instance.Public.Endpoints.Commands,
+		"events": instance.Public.Endpoints.Events, "opcodes": instance.Public.Endpoints.Opcodes,
+		"websocket": instance.Public.Endpoints.WebSocket, "socket_io": instance.Public.Endpoints.SocketIO,
+		"public": instance.Public.Endpoints.PublicInfo,
+	}
+	for name, raw := range checks {
+		value, err := url.Parse(raw)
+		if err != nil || value.Host != endpoint || value.Hostname() == "attacker.invalid" {
+			t.Errorf("%s endpoint was not responder-pinned: %q (%v)", name, raw, err)
+		}
+	}
+	if instance.Public.Endpoints.WebSocket != "ws://"+endpoint+"/custom-ipc" ||
+		instance.Public.Endpoints.SocketIO != "ws://"+endpoint+"/custom-socket/" {
+		t.Fatalf("custom transport paths were not preserved: %#v", instance.Public.Endpoints)
+	}
+}
+
 func TestEnrichInstanceRejectsCrossPortRedirect(t *testing.T) {
 	targetCalled := false
 	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

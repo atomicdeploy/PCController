@@ -29,6 +29,8 @@ import (
 
 type Status struct {
 	DiscoveryActive          bool                            `json:"discovery_active"`
+	DiscoveryProtocols       []string                        `json:"discovery_protocols,omitempty"`
+	DiscoveryFailures        []discovery.TransportFailure    `json:"discovery_failures,omitempty"`
 	HotkeysActive            int                             `json:"hotkeys_active"`
 	KeyboardActive           int                             `json:"keyboard_control_active"`
 	Notifications            bool                            `json:"notifications_active"`
@@ -457,6 +459,8 @@ func (manager *Manager) Status() Status {
 		result.WebhooksDropped = stats.Dropped
 	}
 	result.WSClientsActive = append([]string(nil), result.WSClientsActive...)
+	result.DiscoveryProtocols = append([]string(nil), result.DiscoveryProtocols...)
+	result.DiscoveryFailures = append([]discovery.TransportFailure(nil), result.DiscoveryFailures...)
 	return result
 }
 
@@ -747,13 +751,24 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 			return err
 		}
 		advertiser = created
-		status.DiscoveryActive = true
+		status.DiscoveryProtocols = created.ActiveProtocols()
+		status.DiscoveryFailures = created.Failures()
+		status.DiscoveryActive = len(status.DiscoveryProtocols) != 0
+		if len(status.DiscoveryFailures) != 0 && status.LastError == "" {
+			parts := make([]string, 0, len(status.DiscoveryFailures))
+			for _, failure := range status.DiscoveryFailures {
+				parts = append(parts, failure.Protocol+": "+failure.Error)
+			}
+			status.LastError = "discovery degraded: " + strings.Join(parts, "; ")
+		}
 		manager.client.EmitHostActionEvent("discovery.started", "network discovery advertiser started", "discovery", "advertise", map[string]string{
-			"mdns":         strconv.FormatBool(discoveryConfig.MDNSEnabled || discoveryConfig.DNSSDenabled),
-			"ssdp":         strconv.FormatBool(discoveryConfig.SSDPEnabled || discoveryConfig.UPnPEnabled),
-			"ws_discovery": strconv.FormatBool(discoveryConfig.WSDiscoveryEnabled),
-			"broadcast":    strconv.FormatBool(discoveryConfig.BroadcastEnabled),
-			"netbios":      strconv.FormatBool(discoveryConfig.NetBIOSEnabled),
+			"active":        strings.Join(status.DiscoveryProtocols, ","),
+			"failure_count": strconv.Itoa(len(status.DiscoveryFailures)),
+			"mdns":          strconv.FormatBool(discoveryConfig.MDNSEnabled || discoveryConfig.DNSSDenabled),
+			"ssdp":          strconv.FormatBool(discoveryConfig.SSDPEnabled || discoveryConfig.UPnPEnabled),
+			"ws_discovery":  strconv.FormatBool(discoveryConfig.WSDiscoveryEnabled),
+			"broadcast":     strconv.FormatBool(discoveryConfig.BroadcastEnabled),
+			"netbios":       strconv.FormatBool(discoveryConfig.NetBIOSEnabled),
 		})
 	}
 	peers := make(map[string]*peerState)

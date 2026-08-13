@@ -939,11 +939,19 @@ export function AdvancedWorkbench({
             {networkDevices.map((device) => {
               const info = device.public
               const telemetry = info?.board.telemetry
+              const telemetryParts: string[] = []
+              if (telemetry?.ina219_available) {
+                telemetryParts.push(`${((telemetry.supply_mv ?? 0) / 1000).toFixed(2)} V`)
+                telemetryParts.push(`${(telemetry.current_ma ?? 0).toFixed(0)} mA`)
+              }
+              if (telemetry?.temperature_led_available) telemetryParts.push(`${((telemetry.temperature_led_centi_c ?? 0) / 100).toFixed(1)} °C LED`)
+              if (telemetry?.temperature_bt_audio_available) telemetryParts.push(`${((telemetry.temperature_bt_audio_centi_c ?? 0) / 100).toFixed(1)} °C BT`)
+              if (telemetry?.available) telemetryParts.push(telemetry.door_open ? copy('door open', 'درب باز') : copy('door closed', 'درب بسته'))
               return <article className="network-device" key={info?.instance_id || `${device.host}:${device.port}`}>
                 <div><strong>{info?.instance_name || device.name}</strong><small>{info?.hostname || device.host}:{device.port} · {(device.protocols || [device.protocol]).join(' + ')}</small></div>
                 <StatusBadge tone={info?.health.ok ? (info.health.connectable ? 'good' : 'warn') : 'bad'}>{info?.health.connectable ? copy('CONNECTABLE', 'قابل اتصال') : copy('DISCOVERABLE', 'قابل کشف')}</StatusBadge>
                 <p>{info?.board.connected ? `${info.board.identity.name || 'PCController'} · ${info.board.identity.build_hash || 'firmware'} · ${info.board.port.name || info.board.port.product || 'serial'}` : copy('Host online · board disconnected', 'میزبان آنلاین · برد قطع است')}</p>
-                {telemetry?.available && <p>{`${((telemetry.supply_mv || 0) / 1000).toFixed(2)} V · ${(telemetry.current_ma || 0).toFixed(0)} mA · ${((telemetry.temperature_led_centi_c || 0) / 100).toFixed(1)} °C / ${((telemetry.temperature_bt_audio_centi_c || 0) / 100).toFixed(1)} °C · ${telemetry.door_open ? copy('door open', 'درب باز') : copy('door closed', 'درب بسته')}`}</p>}
+                {telemetryParts.length > 0 && <p>{telemetryParts.join(' · ')}</p>}
                 <Button tone="primary" icon={Plug} disabled={!info?.health.connectable} onClick={() => connectDiscoveredDevice(device)}>{copy('Connect to host', 'اتصال به میزبان')}</Button>
               </article>
             })}

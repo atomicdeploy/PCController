@@ -497,6 +497,27 @@ discovery advertisements and responses never contain a durable token. The
 server retains only a SHA-256 digest of each outstanding ticket, never the raw
 ticket returned to the browser.
 
+An authenticated client following an unauthenticated LAN discovery record must
+prove the reached server before transmitting its durable credential:
+
+1. Generate 16–64 random bytes and send them as unpadded base64url in
+   `X-PCController-Nonce` to `GET /api/auth/server-proof` using a direct,
+   no-proxy HTTP client that rejects redirects.
+2. Verify the returned `pccontroller-server-proof/v1` HMAC-SHA256 using the
+   configured token, including the exact nonce, listener `IP:port`, and
+   instance identity.
+3. Require that the signed listener address is the packet source (or an IP
+   resolved directly for the requested hostname), then pin raw IPC, HTTP,
+   WebSocket, and Socket.IO to that proven address.
+
+The endpoint never receives the bearer. It is public by design and therefore
+requires at least 24 decoded random base64url bytes; low-entropy compatibility
+tokens receive HTTP 409. It is a possession proof,
+not a replacement for the authenticated session ticket or capability checks.
+Discovery public information advertises the proof path as
+`endpoints.server_proof`, and CLI `network connect` performs this exchange
+automatically before any bearer-bearing request.
+
 Missing-Origin handling is explicit. Loopback native clients may omit
 `Origin`; non-loopback native requests may omit it only when they present a
 durable Authorization/token header. Browser session tickets always require and

@@ -116,15 +116,16 @@ type PublicTelemetry struct {
 }
 
 type PublicEndpoints struct {
-	Web        string `json:"web"`
-	API        string `json:"api"`
-	Operations string `json:"operations"`
-	Commands   string `json:"commands"`
-	Events     string `json:"events"`
-	Opcodes    string `json:"opcodes"`
-	WebSocket  string `json:"websocket"`
-	SocketIO   string `json:"socket_io"`
-	PublicInfo string `json:"public_info"`
+	Web         string `json:"web"`
+	API         string `json:"api"`
+	ServerProof string `json:"server_proof"`
+	Operations  string `json:"operations"`
+	Commands    string `json:"commands"`
+	Events      string `json:"events"`
+	Opcodes     string `json:"opcodes"`
+	WebSocket   string `json:"websocket"`
+	SocketIO    string `json:"socket_io"`
+	PublicInfo  string `json:"public_info"`
 }
 
 type PublicDiscovery struct {
@@ -226,6 +227,7 @@ func enrichInstance(ctx context.Context, instance Instance) Instance {
 		if response.StatusCode < 200 || response.StatusCode >= 300 || decodeErr != nil || !info.Valid() {
 			continue
 		}
+		pinPublicInfoEndpoints(&info, instance)
 		instance.Public = &info
 		instance.PublicURL = candidate
 		if info.InstanceName != "" {
@@ -271,11 +273,19 @@ func publicInfoFromTXT(values []string) PublicInfo {
 			MenuPage: parseUint8(items["board.menu_page"], 10), ProgramMode: parseUint8(items["board.program_mode"], 10), ProgramRunning: parseBool(items["board.program_running"]), HostOffline: parseBool(items["board.host_offline"]), Hot: parseBool(items["board.hot"]),
 			PWMAvailable: parseBool(items["board.pwm_available"]), PWMChannel: parseUint8(items["board.pwm_channel"], 10), PWMValue: parseUint16(items["board.pwm_value"], 10), LCDAddress: parseUint8(items["board.lcd_address"], 10), ResetCount: parseUint32(items["board.reset_count"], 10),
 		}},
-		Endpoints: PublicEndpoints{Web: items["web"], API: items["api"], Operations: items["operations"], Commands: items["commands"], Events: items["events"], Opcodes: items["opcodes"], WebSocket: items["ws"], SocketIO: items["socketio"], PublicInfo: items["public"]},
+		Endpoints: PublicEndpoints{Web: items["web"], API: items["api"], ServerProof: items["server_proof"], Operations: items["operations"], Commands: items["commands"], Events: items["events"], Opcodes: items["opcodes"], WebSocket: items["ws"], SocketIO: items["socketio"], PublicInfo: items["public"]},
 	}
 }
 
 func absolutizePublicInfo(info *PublicInfo, instance Instance) {
+	pinPublicInfoEndpoints(info, instance)
+}
+
+// pinPublicInfoEndpoints preserves the responder-provided route while forcing
+// every endpoint back onto the packet source and advertised service port. A
+// valid public document can therefore describe custom routes without using a
+// discovered credential or browser navigation to redirect a client elsewhere.
+func pinPublicInfoEndpoints(info *PublicInfo, instance Instance) {
 	if info == nil || instance.Port < 1 {
 		return
 	}
@@ -286,22 +296,28 @@ func absolutizePublicInfo(info *PublicInfo, instance Instance) {
 	if host == "" {
 		return
 	}
-	httpBase := "http://" + net.JoinHostPort(strings.TrimSuffix(host, "."), strconv.Itoa(instance.Port))
-	wsBase := "ws://" + net.JoinHostPort(strings.TrimSuffix(host, "."), strconv.Itoa(instance.Port))
-	absolute := func(value, base string) string {
-		if strings.HasPrefix(value, "/") {
-			return base + value
+	endpoint := net.JoinHostPort(strings.TrimSuffix(host, "."), strconv.Itoa(instance.Port))
+	pin := func(value, scheme, fallbackPath string) string {
+		path, query, fragment := fallbackPath, "", ""
+		if parsed, err := url.Parse(strings.TrimSpace(value)); err == nil && parsed.User == nil {
+			if parsed.Path != "" && strings.HasPrefix(parsed.Path, "/") {
+				path = parsed.Path
+			}
+			query, fragment = parsed.RawQuery, parsed.Fragment
 		}
-		return value
+		pinned := &url.URL{Scheme: scheme, Host: endpoint, Path: path, RawQuery: query, Fragment: fragment}
+		return pinned.String()
 	}
-	info.Endpoints.Web = absolute(info.Endpoints.Web, httpBase)
-	info.Endpoints.API = absolute(info.Endpoints.API, httpBase)
-	info.Endpoints.Operations = absolute(info.Endpoints.Operations, httpBase)
-	info.Endpoints.Commands = absolute(info.Endpoints.Commands, httpBase)
-	info.Endpoints.Opcodes = absolute(info.Endpoints.Opcodes, httpBase)
-	info.Endpoints.WebSocket = absolute(info.Endpoints.WebSocket, wsBase)
-	info.Endpoints.SocketIO = absolute(info.Endpoints.SocketIO, wsBase)
-	info.Endpoints.PublicInfo = absolute(info.Endpoints.PublicInfo, httpBase)
+	info.Endpoints.Web = pin(info.Endpoints.Web, "http", "/")
+	info.Endpoints.API = pin(info.Endpoints.API, "http", "/api/snapshot")
+	info.Endpoints.ServerProof = pin(info.Endpoints.ServerProof, "http", "/api/auth/server-proof")
+	info.Endpoints.Operations = pin(info.Endpoints.Operations, "http", "/api/rpc")
+	info.Endpoints.Commands = pin(info.Endpoints.Commands, "http", "/api/commands")
+	info.Endpoints.Events = pin(info.Endpoints.Events, "ws", "/ipc")
+	info.Endpoints.Opcodes = pin(info.Endpoints.Opcodes, "http", "/api/opcode")
+	info.Endpoints.WebSocket = pin(info.Endpoints.WebSocket, "ws", "/ipc")
+	info.Endpoints.SocketIO = pin(info.Endpoints.SocketIO, "ws", "/socket.io/")
+	info.Endpoints.PublicInfo = pin(info.Endpoints.PublicInfo, "http", PublicInfoPath)
 }
 
 func parseUint32(value string, base int) uint32 {

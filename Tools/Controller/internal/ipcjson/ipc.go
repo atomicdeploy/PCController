@@ -2243,6 +2243,7 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			"websocket_path":      webSocketPath,
 			"socket_io_path":      socketIOPath,
 			"session_ticket_path": SessionTicketPath,
+			"server_proof_path":   ServerProofPath,
 			"auth_required":       strings.TrimSpace(service.currentAuthToken()) != "",
 			"integrations": map[string]bool{
 				"local_device":          config.Integrations.LocalDevice.Enabled,
@@ -2255,6 +2256,9 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 	})
 	mux.HandleFunc(SessionTicketPath, func(writer http.ResponseWriter, request *http.Request) {
 		serveSessionTicket(writer, request, service)
+	})
+	mux.HandleFunc(ServerProofPath, func(writer http.ResponseWriter, request *http.Request) {
+		serveServerProof(writer, request, service)
 	})
 	mux.HandleFunc("/api/rpc", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {

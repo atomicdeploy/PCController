@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -22,10 +23,11 @@ import (
 )
 
 const (
-	MDNSService            = "_pccontroller._tcp"
-	MDNSDomain             = "local."
-	SSDPType               = "urn:pccontroller-org:service:bridge:1"
-	WSDiscoveryType        = "urn:schemas-xmlsoap-org:ws:2005:04:discovery"
+	MDNSService = "_pccontroller._tcp"
+	MDNSDomain  = "local."
+	// SSDPType must exactly match the serviceType in /upnp/device.xml.
+	SSDPType               = "urn:pccontroller-org:service:Controller:1"
+	WSDiscoveryType        = "pc:PCControllerBridge"
 	BroadcastPort          = 37889
 	NetBIOSNameServicePort = 137
 	ssdpAddress            = "239.255.255.250:1900"
@@ -83,11 +85,25 @@ type Advertiser struct {
 	broadcast        bool
 	broadcastPort    int
 	netbios          bool
+	ssdpListener     *net.UDPConn
+	wsListener       *net.UDPConn
+	broadcastConn    *net.UDPConn
+	netbiosConn      *net.UDPConn
 
-	mu     sync.RWMutex
-	closed bool
-	mdns   *zeroconf.Server
-	txt    []string
+	mu       sync.RWMutex
+	closed   bool
+	mdns     *zeroconf.Server
+	txt      []string
+	active   []string
+	failures []TransportFailure
+}
+
+// TransportFailure reports a configured discovery responder that could not
+// start. Other transports remain available, so callers can expose degraded
+// discovery without incorrectly claiming every configured responder is live.
+type TransportFailure struct {
+	Protocol string `json:"protocol"`
+	Error    string `json:"error"`
 }
 
 func Advertise(
@@ -123,34 +139,119 @@ func AdvertiseWithOptions(
 		broadcast: options.Broadcast, broadcastPort: options.BroadcastPort,
 		netbios: options.NetBIOS, txt: append([]string(nil), txt...),
 	}
-	if options.MDNS {
-		server, err := zeroconf.Register(name, MDNSService, MDNSDomain, port, txt, nil)
-		if err == nil {
-			result.mdns = server
+	enabled := 0
+	recordFailure := func(protocol string, err error) {
+		if err != nil {
+			result.failures = append(result.failures, TransportFailure{Protocol: protocol, Error: err.Error()})
 		}
+	}
+	if options.MDNS {
+		enabled++
+		server, err := zeroconf.Register(name, MDNSService, MDNSDomain, port, txt, nil)
+		if err != nil {
+			recordFailure("dns-sd", err)
+		} else {
+			result.mdns = server
+			result.active = append(result.active, "dns-sd")
+		}
+	}
+	if options.SSDP {
+		enabled++
+		group, err := net.ResolveUDPAddr("udp4", ssdpAddress)
+		if err == nil {
+			result.ssdpListener, err = net.ListenMulticastUDP("udp4", nil, group)
+		}
+		if err != nil {
+			recordFailure("ssdp-responder", err)
+		}
+		// NOTIFY remains useful even where the OS owns multicast port 1900.
+		result.active = append(result.active, "ssdp")
+	}
+	if options.WSDiscovery {
+		enabled++
+		group, err := net.ResolveUDPAddr("udp4", wsDiscoveryAddress)
+		if err == nil {
+			result.wsListener, err = net.ListenMulticastUDP("udp4", nil, group)
+		}
+		if err != nil {
+			recordFailure("ws-discovery", err)
+			result.wsDiscovery = false
+		} else {
+			result.active = append(result.active, "ws-discovery")
+		}
+	}
+	if options.Broadcast {
+		enabled++
+		connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: options.BroadcastPort})
+		if err != nil {
+			recordFailure("broadcast", err)
+			result.broadcast = false
+		} else {
+			result.broadcastConn = connection
+			result.active = append(result.active, "broadcast")
+		}
+	}
+	if options.NetBIOS {
+		enabled++
+		connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: NetBIOSNameServicePort})
+		if err != nil {
+			recordFailure("netbios", err)
+			result.netbios = false
+		} else {
+			result.netbiosConn = connection
+			result.active = append(result.active, "netbios")
+		}
+	}
+	if enabled > 0 && len(result.active) == 0 {
+		cancel()
+		messages := make([]error, 0, len(result.failures))
+		for _, failure := range result.failures {
+			messages = append(messages, fmt.Errorf("%s: %s", failure.Protocol, failure.Error))
+		}
+		return nil, errors.Join(messages...)
 	}
 	go func() {
 		defer close(result.done)
 		var wait sync.WaitGroup
-		if options.SSDP {
+		if result.ssdp {
 			wait.Add(1)
 			go func() { defer wait.Done(); runSSDPAdvertiser(ctx, result) }()
 		}
-		if options.WSDiscovery {
+		if result.wsDiscovery {
 			wait.Add(1)
 			go func() { defer wait.Done(); runWSDiscoveryAdvertiser(ctx, result) }()
 		}
-		if options.Broadcast {
+		if result.broadcast {
 			wait.Add(1)
 			go func() { defer wait.Done(); runBroadcastAdvertiser(ctx, result) }()
 		}
-		if options.NetBIOS {
+		if result.netbios {
 			wait.Add(1)
 			go func() { defer wait.Done(); runNetBIOSAdvertiser(ctx, result) }()
 		}
 		wait.Wait()
 	}()
 	return result, nil
+}
+
+// ActiveProtocols returns the responders/advertisers that actually started.
+func (advertiser *Advertiser) ActiveProtocols() []string {
+	if advertiser == nil {
+		return nil
+	}
+	advertiser.mu.RLock()
+	defer advertiser.mu.RUnlock()
+	return append([]string(nil), advertiser.active...)
+}
+
+// Failures returns configured transports that could not bind or register.
+func (advertiser *Advertiser) Failures() []TransportFailure {
+	if advertiser == nil {
+		return nil
+	}
+	advertiser.mu.RLock()
+	defer advertiser.mu.RUnlock()
+	return append([]TransportFailure(nil), advertiser.failures...)
 }
 
 func (advertiser *Advertiser) Close() {
@@ -276,11 +377,28 @@ func DiscoverWithOptions(ctx context.Context, options Options) ([]Instance, erro
 	options = options.normalized()
 	var mutex sync.Mutex
 	instances := make(map[string]Instance)
+	seen := make(map[string]bool)
+	enrichSlots := make(chan struct{}, 8)
 	var enrich sync.WaitGroup
 	add := func(instance Instance) {
+		rawKey := instance.Protocol + "|" + instance.USN + "|" + instance.Host +
+			"|" + strconv.Itoa(instance.Port)
+		mutex.Lock()
+		if seen[rawKey] {
+			mutex.Unlock()
+			return
+		}
+		seen[rawKey] = true
+		mutex.Unlock()
+		select {
+		case enrichSlots <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
 		enrich.Add(1)
 		go func() {
 			defer enrich.Done()
+			defer func() { <-enrichSlots }()
 			instance = enrichInstance(ctx, instance)
 			key := instance.Protocol + "|" + instance.USN + "|" + instance.Host +
 				"|" + strconv.Itoa(instance.Port)
@@ -378,8 +496,7 @@ func browseMDNS(ctx context.Context, add func(Instance)) error {
 }
 
 func runSSDPAdvertiser(ctx context.Context, advertiser *Advertiser) {
-	group, _ := net.ResolveUDPAddr("udp4", ssdpAddress)
-	listener, _ := net.ListenMulticastUDP("udp4", nil, group)
+	listener := advertiser.ssdpListener
 	if listener != nil {
 		_ = listener.SetReadBuffer(64 * 1024)
 		go func() {
@@ -431,7 +548,7 @@ func respondSSDP(
 			"X-PCController-Public: http://" + net.JoinHostPort(locationHost, strconv.Itoa(port)) + PublicInfoPath,
 			"SERVER: " + productidentity.ProtocolToken() + "/1 UPnP/1.1",
 			"ST: " + SSDPType,
-			"USN: " + ssdpUSN(name, port) + "::" + SSDPType,
+			"USN: " + ssdpUSNWithText(name, port, advertiser.text()) + "::" + SSDPType,
 			"X-PCController-Name: " + sanitizeHeader(name),
 		}
 		lines = append(lines, ssdpMetadataHeaders(advertiser.text())...)
@@ -472,7 +589,7 @@ func ssdpNotify(name string, port int, nts string) string {
 }
 
 func ssdpNotifyWithText(name string, port int, nts string, txt []string) string {
-	usn := ssdpUSN(name, port)
+	usn := ssdpUSNWithText(name, port, txt)
 	hostname, _ := os.Hostname()
 	if strings.TrimSpace(hostname) == "" {
 		hostname = "127.0.0.1"
@@ -504,6 +621,16 @@ func ssdpMetadataHeaders(txt []string) []string {
 }
 
 func ssdpUSN(name string, port int) string {
+	return ssdpUSNWithText(name, port, nil)
+}
+
+func ssdpUSNWithText(name string, port int, txt []string) string {
+	for _, value := range normalizeTXT(txt) {
+		key, instanceID, ok := strings.Cut(value, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(key), "instance.id") && strings.TrimSpace(instanceID) != "" {
+			return "uuid:" + sanitizeHeader(strings.TrimSpace(instanceID))
+		}
+	}
 	digest := sha256.Sum256([]byte(name + ":" + strconv.Itoa(port)))
 	return fmt.Sprintf("uuid:%x-%x-%x-%x-%x", digest[:4], digest[4:6], digest[6:8], digest[8:10], digest[10:16])
 }
