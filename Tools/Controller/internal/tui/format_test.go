@@ -25,14 +25,14 @@ func TestAdaptiveEngineeringUnits(t *testing.T) {
 	}
 }
 
-func TestFreshnessRemainsLiveAcrossRemoteConvergenceWindow(t *testing.T) {
+func TestFreshnessUsesHostWindowAcrossRemoteConvergence(t *testing.T) {
 	now := time.Unix(100, 0)
-	for _, age := range []time.Duration{0, 250 * time.Millisecond, 500 * time.Millisecond, time.Second, freshnessLiveThreshold - time.Millisecond} {
-		if got := freshnessLabel(now.Add(-age), now); got != "live" {
+	for _, age := range []time.Duration{0, 250 * time.Millisecond, 500 * time.Millisecond, time.Second, 1499 * time.Millisecond} {
+		if got := freshnessLabel(now.Add(-age), now, 1500*time.Millisecond); got != "live" {
 			t.Errorf("age %s=%q", age, got)
 		}
 	}
-	if got := freshnessLabel(now.Add(-freshnessLiveThreshold), now); got != "1.5 s ago" {
+	if got := freshnessLabel(now.Add(-1500*time.Millisecond), now, 1500*time.Millisecond); got != "1.5 s ago" {
 		t.Fatalf("stale age=%q", got)
 	}
 }

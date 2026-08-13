@@ -288,20 +288,22 @@ type Service struct {
 // browserUISettings is the narrow persistent host-owned subset exposed to the
 // browser. Board EEPROM settings remain on the independent board command path.
 type browserUISettings struct {
-	AppTitle        string                           `json:"app_title"`
-	Tagline         string                           `json:"tagline"`
-	SetupComplete   bool                             `json:"setup_complete"`
-	WelcomeMelody   string                           `json:"welcome_melody"`
-	Appearance      browserAppearance                `json:"appearance"`
-	AppearanceETag  string                           `json:"appearance_etag"`
-	SegmentScroll   appconfig.SegmentScroll          `json:"segment_scroll"`
-	PeripheralNames map[string]string                `json:"peripheral_names"`
-	Peripherals     []appconfig.PeripheralDescriptor `json:"peripherals"`
-	Controls        []appconfig.ControlDescriptor    `json:"controls"`
-	Changed         *bool                            `json:"changed,omitempty"`
-	ChangedFields   []string                         `json:"changed_fields,omitempty"`
-	Before          map[string]any                   `json:"before,omitempty"`
-	After           map[string]any                   `json:"after,omitempty"`
+	AppTitle               string                           `json:"app_title"`
+	Tagline                string                           `json:"tagline"`
+	SetupComplete          bool                             `json:"setup_complete"`
+	WelcomeMelody          string                           `json:"welcome_melody"`
+	StatusIntervalMS       int                              `json:"status_interval_ms"`
+	MeasurementFreshnessMS int                              `json:"measurement_freshness_ms"`
+	Appearance             browserAppearance                `json:"appearance"`
+	AppearanceETag         string                           `json:"appearance_etag"`
+	SegmentScroll          appconfig.SegmentScroll          `json:"segment_scroll"`
+	PeripheralNames        map[string]string                `json:"peripheral_names"`
+	Peripherals            []appconfig.PeripheralDescriptor `json:"peripherals"`
+	Controls               []appconfig.ControlDescriptor    `json:"controls"`
+	Changed                *bool                            `json:"changed,omitempty"`
+	ChangedFields          []string                         `json:"changed_fields,omitempty"`
+	Before                 map[string]any                   `json:"before,omitempty"`
+	After                  map[string]any                   `json:"after,omitempty"`
 }
 
 type peripheralSettings struct {
@@ -1305,16 +1307,18 @@ func (service *Service) hostConfig() appconfig.Config {
 func (service *Service) browserUISettings() browserUISettings {
 	ui := service.hostConfig().UI
 	return browserUISettings{
-		AppTitle:        productidentity.Title(ui.AppTitle),
-		Tagline:         ui.Tagline,
-		SetupComplete:   ui.SetupComplete,
-		WelcomeMelody:   ui.WelcomeMelody,
-		Appearance:      browserAppearanceFromConfig(ui.Appearance),
-		AppearanceETag:  appearanceETag(ui.Appearance),
-		SegmentScroll:   ui.SegmentScroll,
-		PeripheralNames: clonePeripheralNames(ui.PeripheralNames),
-		Peripherals:     appconfig.PeripheralDescriptors(),
-		Controls:        appconfig.ControlDescriptors(ui.PeripheralNames),
+		AppTitle:               productidentity.Title(ui.AppTitle),
+		Tagline:                ui.Tagline,
+		SetupComplete:          ui.SetupComplete,
+		WelcomeMelody:          ui.WelcomeMelody,
+		StatusIntervalMS:       ui.StatusIntervalMS,
+		MeasurementFreshnessMS: ui.MeasurementFreshnessMS,
+		Appearance:             browserAppearanceFromConfig(ui.Appearance),
+		AppearanceETag:         appearanceETag(ui.Appearance),
+		SegmentScroll:          ui.SegmentScroll,
+		PeripheralNames:        clonePeripheralNames(ui.PeripheralNames),
+		Peripherals:            appconfig.PeripheralDescriptors(),
+		Controls:               appconfig.ControlDescriptors(ui.PeripheralNames),
 	}
 }
 

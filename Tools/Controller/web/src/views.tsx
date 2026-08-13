@@ -915,7 +915,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, openAppPreferences, transport, sessionAccessRequest = 0 }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void>; sessionAccessRequest?: number }) {
+export function SettingsView({ appTitle, snapshot, events, locale, t, command, appearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, openAppPreferences, transport, sessionAccessRequest = 0 }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void>; sessionAccessRequest?: number }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
     'Application title is required.': 'عنوان برنامه الزامی است.',
@@ -962,6 +962,11 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   const [segmentScrollBusy, setSegmentScrollBusy] = useState(true)
   const [segmentScrollNotice, setSegmentScrollNotice] = useState('')
   const [segmentScrollError, setSegmentScrollError] = useState(false)
+  const [measurementRefreshMS, setMeasurementRefreshMS] = useState(250)
+  const [measurementFreshnessMS, setMeasurementFreshnessMS] = useState(1500)
+  const [savedMeasurementTiming, setSavedMeasurementTiming] = useState({ refresh: 250, freshness: 1500 })
+  const [measurementTimingBusy, setMeasurementTimingBusy] = useState(true)
+  const [measurementTimingNotice, setMeasurementTimingNotice] = useState('')
   const [localIntegrations, setLocalIntegrations] = useState<LocalIntegrationSettings>({
     local_device: { enabled: false, base_url: '' },
     data_hub: { enabled: false, base_url: 'http://127.0.0.1:8080' },
@@ -1031,6 +1036,9 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
   }), [segmentClosedValidation.normalized, segmentOpenValidation.normalized, segmentPagesValidation.pages, segmentScroll])
   const segmentScrollValid = segmentPagesValidation.valid && segmentOpenValidation.valid && segmentClosedValidation.valid
   const segmentScrollDirty = savedSegmentScroll !== null && !segmentScrollSettingsEqual(segmentScrollDraft, savedSegmentScroll)
+  const measurementTimingValid = measurementRefreshMS >= 200 && measurementRefreshMS <= 500 && measurementFreshnessMS >= measurementRefreshMS + 100
+  const measurementTimingDirty = measurementRefreshMS !== savedMeasurementTiming.refresh || measurementFreshnessMS !== savedMeasurementTiming.freshness
+  const configurationEventID = events.find((event) => event.kind === 'config')?.id ?? 0
   const lifecycleOptions: { value: LifecycleSafetyAction; label: string }[] = [
     { value: 'leave', label: copy('Release keys', 'رهاسازی کلیدها') },
     { value: 'stop-motion', label: copy('Stop motion', 'توقف حرکت') },
@@ -1066,6 +1074,10 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         setSegmentPages(pages.join(' '))
         setSegmentScrollNotice('')
         setSegmentScrollError(false)
+		setMeasurementRefreshMS(value.status_interval_ms)
+		setMeasurementFreshnessMS(value.measurement_freshness_ms)
+		setSavedMeasurementTiming({ refresh: value.status_interval_ms, freshness: value.measurement_freshness_ms })
+		setMeasurementTimingNotice('')
       })
       .catch((cause) => {
         if (!active) return
@@ -1074,7 +1086,7 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
       })
       .finally(() => { if (active) setSegmentScrollBusy(false) })
     return () => { active = false }
-  }, [])
+  }, [configurationEventID])
   useEffect(() => {
     setDisplayBrightness(snapshot.settings.display_brightness)
     setDisplayClosedBrightness(snapshot.settings.display_closed_brightness)
@@ -1140,6 +1152,27 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
       setSegmentScrollError(true)
     } finally {
       setSegmentScrollBusy(false)
+    }
+  }
+
+  const saveMeasurementTiming = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!measurementTimingValid || !measurementTimingDirty) return
+    setMeasurementTimingBusy(true)
+    setMeasurementTimingNotice('')
+    try {
+      const saved = await rpc<HostUISettings>('controller.ui.config.set', {
+        status_interval_ms: measurementRefreshMS,
+        measurement_freshness_ms: measurementFreshnessMS,
+      })
+      setMeasurementRefreshMS(saved.status_interval_ms)
+      setMeasurementFreshnessMS(saved.measurement_freshness_ms)
+      setSavedMeasurementTiming({ refresh: saved.status_interval_ms, freshness: saved.measurement_freshness_ms })
+      setMeasurementTimingNotice(copy('Saved and broadcast to every controller client.', 'ذخیره و فوراً به همهٔ کلاینت‌های کنترلر فرستاده شد.'))
+    } catch (cause) {
+      setMeasurementTimingNotice(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      setMeasurementTimingBusy(false)
     }
   }
 
@@ -1251,6 +1284,21 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
         </Card>
 
         <PeripheralNamesEditor locale={locale} />
+
+        <Card icon={Gauge} iconTone="green" title={copy('Live measurements', 'اندازه‌گیری‌های زنده')} eyebrow={measurementTimingBusy ? copy('Synchronizing', 'در حال همگام‌سازی') : measurementTimingDirty ? copy('Unsaved change', 'تغییر ذخیره‌نشده') : copy(`${Math.round(1000 / measurementRefreshMS)} Hz · shared host policy`, `${Math.round(1000 / measurementRefreshMS)} هرتز · سیاست مشترک میزبان`)} className="settings-card settings-card--wide">
+          <form className="segment-scroll-settings" onSubmit={(event) => void saveMeasurementTiming(event)}>
+            <RangeField label={copy('Refresh rate', 'نرخ تازه‌سازی')} value={measurementRefreshMS} min={200} max={500} step={10} unit="ms" onChange={(value) => { setMeasurementTimingNotice(''); setMeasurementRefreshMS(value) }} />
+            <RangeField label={copy('Freshness window', 'پنجرهٔ تازگی')} value={measurementFreshnessMS} min={measurementRefreshMS + 100} max={10000} step={50} unit="ms" onChange={(value) => { setMeasurementTimingNotice(''); setMeasurementFreshnessMS(value) }} />
+            <div className="local-integrations-form__footer">
+              <span className={`segment-scroll-settings__notice${!measurementTimingValid ? ' is-error' : ''}`} role="status" aria-live="polite">
+                {!measurementTimingValid
+                  ? copy(`Freshness must be at least ${measurementRefreshMS + 100} ms so a late real-time sample is not marked stale.`, `تازگی باید دست‌کم ${measurementRefreshMS + 100} میلی‌ثانیه باشد تا نمونهٔ بلادرنگِ دیررس کهنه تلقی نشود.`)
+                  : measurementTimingNotice || copy('Host-owned: changes persist and are pushed to WebUI and local or remote TUI clients.', 'متعلق به میزبان: تغییرات ذخیره و به رابط وب و TUI محلی یا راه‌دور فرستاده می‌شوند.')}
+              </span>
+              <Button type="submit" tone="primary" icon={ShieldCheck} busy={measurementTimingBusy} disabled={!measurementTimingDirty || !measurementTimingValid}>{copy('Apply live timing', 'اعمال زمان‌بندی زنده')}</Button>
+            </div>
+          </form>
+        </Card>
 
         <Card icon={Binary} iconTone="accent" title={copy('HOST display scrolling', 'پیمایش نمایشگر میزبان')} eyebrow={segmentScroll.enabled ? copy('Enabled', 'فعال') : copy('Disabled', 'غیرفعال')} className="settings-card settings-card--wide">
           <form className="segment-scroll-settings" onSubmit={(event) => void saveSegmentScroll(event)}>

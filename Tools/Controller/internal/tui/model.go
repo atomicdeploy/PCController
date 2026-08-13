@@ -36,6 +36,7 @@ type Model struct {
 	remoteStatusReceivedAt time.Time
 	remoteClockOffset      time.Duration
 	remoteEventsClosed     bool
+	remoteUIConfigPending  bool
 
 	width  int
 	height int
@@ -221,6 +222,10 @@ type remoteSnapshotResultMsg struct {
 	snapshot   control.Snapshot
 	err        error
 	receivedAt time.Time
+}
+type remoteUIConfigResultMsg struct {
+	ui  appconfig.UI
+	err error
 }
 type portsResultMsg struct {
 	values []ports.Info
@@ -715,6 +720,11 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if command := model.observeUpdateEvent(event); command != nil {
 			commands = append(commands, command)
 		}
+		if model.remote != nil && strings.EqualFold(event.Kind, "config") &&
+			model.remote.LoadHostUI != nil && !model.remoteUIConfigPending {
+			model.remoteUIConfigPending = true
+			commands = append(commands, refreshRemoteUIConfig(model.remote.LoadHostUI))
+		}
 		if event.Source == "board" && strings.EqualFold(event.Kind, "app.page") &&
 			hostui.TargetsInstance(event.Metadata["target_instance"], model.instanceID, "tui") {
 			if page, ok := pageForName(event.Metadata["page"]); ok {
@@ -806,6 +816,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if wasUnavailable {
 			model.appendLog("info", "remote IPC connection restored")
 		}
+
+	case remoteUIConfigResultMsg:
+		model.remoteUIConfigPending = false
+		if message.err != nil {
+			model.appendLog("warn", "refresh remote host configuration: "+message.err.Error())
+			break
+		}
+		model.syncUIConfig(message.ui)
 
 	case commandResultMsg:
 		normalizedLine := strings.ToLower(strings.TrimSpace(message.line))
@@ -1192,7 +1210,7 @@ func (model Model) statusFreshnessLabel(snapshot control.Snapshot, now time.Time
 	if model.remote != nil && !model.remoteStatusReceivedAt.IsZero() {
 		updated = model.remoteStatusReceivedAt
 	}
-	return freshnessLabel(updated, now)
+	return freshnessLabel(updated, now, model.prefs.FreshnessWindow)
 }
 
 func (model Model) remoteClockWarning() string {
@@ -1867,6 +1885,15 @@ func refreshRemoteSnapshot(fetch func(context.Context) (control.Snapshot, error)
 		defer cancel()
 		snapshot, err := fetch(ctx)
 		return remoteSnapshotResultMsg{snapshot: snapshot, err: err, receivedAt: time.Now()}
+	}
+}
+
+func refreshRemoteUIConfig(fetch func(context.Context) (appconfig.UI, error)) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		ui, err := fetch(ctx)
+		return remoteUIConfigResultMsg{ui: ui, err: err}
 	}
 }
 

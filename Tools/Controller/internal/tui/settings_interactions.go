@@ -355,6 +355,8 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		ui.TUIConsole.FontSize = editorField(editor, "pixels")
 	case "poll.active":
 		ui.StatusIntervalMS = editorField(editor, "interval")
+	case "measurement.freshness":
+		ui.MeasurementFreshnessMS = editorField(editor, "window")
 	case "history.retention":
 		ui.HistoryHours = editorField(editor, "hours")
 	case "display.decimals":
@@ -384,7 +386,8 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	}
 	ui.Appearance = appconfig.NormalizeAppearance(ui.Appearance)
 	ui.SetupComplete = true
-	if model.remote != nil && (editor.Key == "app.title" || editor.Key == "app.tagline") {
+	if model.remote != nil && (editor.Key == "app.title" || editor.Key == "app.tagline" ||
+		editor.Key == "poll.active" || editor.Key == "measurement.freshness") {
 		if model.remote.SaveHostUI == nil {
 			model.setNotice("Remote host configuration is unavailable; no local setting was changed")
 			return model, nil, true
