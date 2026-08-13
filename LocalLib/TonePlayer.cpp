@@ -4,6 +4,8 @@
 
 static_assert(BoardPins::Buzzer == PIN_PB1,
               "Timer1 OC1A buzzer output must remain on PB1 / Arduino D9");
+static_assert(F_CPU == 16000000UL,
+              "TonePlayer's compact Timer1 divider assumes the 16 MHz profile");
 
 TonePlayer buzzer(BoardPins::Buzzer);
 
@@ -113,9 +115,11 @@ bool TonePlayer::startHardwareTone(uint16_t frequencyHz) {
     stopHardwareTone();
     return false;
   }
-  const uint32_t denominator = 16UL * frequencyHz;
+  // With F_CPU=16 MHz and the fixed /8 prescaler, the toggle frequency is
+  // 1,000,000 / (OCR1A + 1). Keeping that reduced constant avoids a second
+  // 32-bit multiply/divide path while preserving nearest-integer rounding.
   const uint16_t top = static_cast<uint16_t>(
-      (static_cast<uint32_t>(F_CPU) + denominator / 2UL) / denominator - 1UL);
+      (1000000UL + frequencyHz / 2U) / frequencyHz - 1UL);
 
   const uint8_t savedStatus = SREG;
   cli();
