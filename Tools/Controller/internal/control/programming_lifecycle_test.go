@@ -423,6 +423,31 @@ func TestProgrammingLifecycleReassertsSafeStateAfterReset(t *testing.T) {
 	}
 }
 
+func TestProgrammingLifecycleRecoverySuppliesDefaultWait(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	before := &fakeProgrammingDevice{
+		snapshot: connectedProgrammingSnapshot(native.CapabilityHostFrontPanel),
+		settings: native.Settings{LightMode: 2, DisplayBrightness: 5, MotionBreakMSValue: 1},
+	}
+	session, err := prepareProgrammingSession(
+		context.Background(), before, firmware,
+		ProgrammingLifecycleOptions{DataPaths: paths, Wait: noProgrammingWait}, io.Discard,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := &fakeProgrammingDevice{
+		snapshot: connectedProgrammingSnapshot(native.CapabilityHostFrontPanel),
+		settings: native.Settings{LightMode: 2, DisplayBrightness: 5, MotionBreakMSValue: 1},
+	}
+	if err := reassertProgrammingSession(
+		context.Background(), after, session,
+		ProgrammingLifecycleOptions{DataPaths: paths, PersistenceDelay: time.Nanosecond},
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProgrammingLifecycleRejectsAnUnownedActiveSafetyLatch(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	device := &fakeProgrammingDevice{

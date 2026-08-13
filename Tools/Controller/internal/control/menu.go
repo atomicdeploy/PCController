@@ -39,7 +39,7 @@ var protocolMenuPages = []MenuPageInfo{
 	{6, "settings", "bEEP", "Beep and Settings", "Beep, display, status color, and decimals"},
 	{7, "pwm-test", "PWM", "PWM Test", "PWM output test and channel selection"},
 	{8, "relay-test", "rELY", "Relay Test", "Individual relay output test"},
-	{9, "keys", "KEY", "Key Identification", "Identify K1 through K4"},
+	{9, "keys", "KEY", "Motion Keys", "K1/K2 control Side A; K3/K4 control Side B"},
 	{10, "user-pwm", "uPWM", "User PWM", "Eight user MOSFET output values"},
 	{11, "user-relays", "r5-8", "User Relays", "R5 through R8 toggle or momentary control"},
 	{12, "motion", "MOVE", "Motion", "Side A and Side B direction/output control"},
