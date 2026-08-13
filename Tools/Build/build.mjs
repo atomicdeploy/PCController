@@ -443,7 +443,7 @@ export function createPlan(options, identity, platform = process.platform) {
 		if (options.sharedLibrary) actions.push(commandAction('c-abi', 'Build and smoke-test C ABI', 'go', [
 			'build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib',
 			'-ldflags', '<embedded presentation defaults>',
-			'-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controllerlib'
+			'-buildmode=c-shared', '-o', '<staging>/pccontroller', './cmd/controller-cabi'
 		], HOST_ROOT))
 		actions.push({ id: 'licenses', stage: 'Collect project and Go-module notices', hardware: false })
 		actions.push({ id: 'host-manifest', stage: 'Write canonical host package manifest', hardware: false })
@@ -1432,7 +1432,7 @@ function buildSharedLibrary(go, stage, env, goArch, options, log, ldflags) {
 	run(go, [
 		'build', '-buildvcs=false', '-trimpath', '-tags', 'controllerlib',
 		'-ldflags', ldflags,
-		'-buildmode=c-shared', '-o', output, './cmd/controllerlib'
+		'-buildmode=c-shared', '-o', output, './cmd/controller-cabi'
 	], { cwd: HOST_ROOT, env: { ...compiler.env, CGO_ENABLED: '1' }, verbose: options.verbose })
 	const header = join(stage, 'pccontroller.h')
 	if (!existsSync(output) || !existsSync(header)) throw new BuildError('C ABI build did not produce both library and header')
