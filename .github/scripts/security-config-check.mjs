@@ -299,7 +299,8 @@ export function validateCodeql(source, sourceLanguages) {
     ["cpp-windows", [
       "-S Tools/VirtualBoard",
       "cmake --build .build/codeql-virtual-board",
-      "Tools\\Controller\\examples\\c_abi_smoke.c",
+      "-S Tools\\Controller",
+      "pccontroller_cabi_installed_smoke",
     ]],
   ]);
   const initIndex = source.indexOf("github/codeql-action/init@");
