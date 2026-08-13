@@ -7,8 +7,6 @@
 #include <EEPROM.h>
 
 #include "EepromLayout.h"
-#include "ProtocolCodec.h"
-
 namespace EepromMenuLabels {
 namespace {
 
@@ -21,13 +19,14 @@ bool printable(uint8_t value) { return value >= ' ' && value <= '~'; }
 } // namespace
 
 void begin() {
-  uint8_t checksum = 0;
+  const uint8_t commit = EEPROM.read(EepromLayout::MenuLabelsCommitAddress);
+  uint8_t checksum = EepromLayout::MenuLabelsFormatMarker;
   for (uint8_t index = 0; index < EepromLayout::MenuLabelBytes; ++index) {
     const uint8_t value = EEPROM.read(EepromLayout::MenuLabelsAddress + index);
     checksum ^= value;
   }
-  labelsAvailable =
-      checksum == EEPROM.read(EepromLayout::MenuLabelsChecksumAddress);
+  labelsAvailable = commit == EepromLayout::MenuLabelsFormatMarker &&
+                    checksum == EEPROM.read(EepromLayout::MenuLabelsCrcAddress);
 }
 
 bool available() { return labelsAvailable; }
@@ -43,13 +42,7 @@ void copy(uint8_t page, char output[LabelWidth]) {
   for (uint8_t character = 0; character < LabelWidth; ++character) {
     const uint8_t value = EEPROM.read(EepromLayout::MenuLabelsAddress +
                                       offset + character);
-    if (!printable(value)) {
-      for (uint8_t fallback = 0; fallback < LabelWidth; ++fallback) {
-        output[fallback] = '-';
-      }
-      return;
-    }
-    output[character] = static_cast<char>(value);
+    output[character] = printable(value) ? static_cast<char>(value) : '-';
   }
 }
 
