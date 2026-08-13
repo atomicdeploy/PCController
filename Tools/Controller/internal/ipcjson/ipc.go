@@ -273,6 +273,7 @@ type Service struct {
 	HostSurface           string
 	CoordinatorInstanceID string
 	AppAction             func(hostui.AppAction) error
+	AppLaunch             func(context.Context, hostui.SurfaceLaunchRequest) (hostui.SurfaceLaunchResult, error)
 	AppInstances          *hostui.InstanceRegistry
 	Shutdown              func()
 	HostConfig            func() appconfig.Config
@@ -1185,6 +1186,15 @@ func (service *Service) dispatch(
 				result = map[string]bool{"accepted": err == nil}
 			}
 		}
+	case "controller.app.launch":
+		var params hostui.SurfaceLaunchRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			if service.AppLaunch == nil {
+				err = errors.New("application surface launcher is unavailable")
+			} else {
+				result, err = service.AppLaunch(ctx, params)
+			}
+		}
 	case "controller.app.instances":
 		if service.AppInstances == nil {
 			err = errors.New("app instance registry is unavailable")
@@ -1919,9 +1929,9 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.peripherals.set",
 		"controller.hotkeys.set",
 		"controller.os.configure", "controller.lcd.presentation.configure",
-		"controller.app.page", "controller.app.navigate",
-		"controller.app.instance.report", "controller.app.instance.remove",
-		"controller.network.peers.set":
+                        "controller.app.page", "controller.app.navigate", "controller.app.launch",
+                        "controller.app.instance.report", "controller.app.instance.remove",
+                        "controller.network.peers.set":
 		return capabilityHostConfig
 	case "controller.os.key", "controller.virtual_key":
 		return capabilityVirtualKeys
@@ -2968,6 +2978,36 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		writeHTTPJSON(writer, http.StatusOK, instance)
+	})
+	mux.HandleFunc("/api/app/launch", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method != http.MethodPost {
+			writer.Header().Set("Allow", http.MethodPost)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
+			return
+		}
+		if service.AppLaunch == nil {
+			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "application surface launcher is unavailable"})
+			return
+		}
+		var params hostui.SurfaceLaunchRequest
+		decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&params); err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		result, err := service.AppLaunch(request.Context(), params)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, result)
 	})
 	mux.HandleFunc("/api/app/navigate", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {

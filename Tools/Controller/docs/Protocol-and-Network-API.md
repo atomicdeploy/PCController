@@ -558,6 +558,7 @@ request error.
 | `controller.app.instance.report` | `id`, `surface`, `page`, optional `state`, `lease_seconds`, `values`, `self` | create or refresh an ephemeral instance report; TUI followers use bounded navigation mode/group/epoch/revision values |
 | `controller.app.instance.remove` | `id` | remove one instance report immediately |
 | `controller.app.navigate` | `page`, optional `target` | navigate `*`, a surface such as `webui`/`tui`, or one exact instance ID |
+| `controller.app.launch` | `surface`, optional `mode`, `target`, `page`, `idempotency_key` | ensure, launch, or focus only the named `tui` or `webui`; reports OS acceptance separately from live instance confirmation |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
 | `controller.history.timeline` | optional `since`, `limit` | durable important-event timeline |
 | `controller.os.facts.catalog`, `controller.host.facts.catalog` | `{}` | fixed read-only Windows profile descriptors, columns, and row limits |
@@ -608,6 +609,28 @@ individually authorized and audited under `host_configuration`. An explicit
 navigation can still target an opted-out instance, but does not enroll it in a
 group or make it follow later broadcasts. Prompt input, cursor/editor/modal
 state, terminal visibility, and serial ownership always remain local.
+
+`controller.app.launch` and `/api/app/launch` are coordinator-owned graphical
+entry points, not process execution APIs. They accept only `tui` or `webui` and
+the modes `ensure`, `launch`, or `focus`; there is no executable, argument,
+environment, command, or shell field. `ensure` reuses a matching live instance
+when one is registered. `focus` never creates a duplicate and truthfully returns
+`unavailable` where the desktop/compositor has no safe focusing primitive.
+`launch` creates a new surface. An optional exact instance ID targets only
+`ensure` or `focus`, and an idempotency key deduplicates retries. The result
+distinguishes an OS-accepted request (`accepted`) from a subsequently registered
+live app instance (`confirmed`). On Linux the coordinator must already run as
+the non-root graphical user and inherit `DISPLAY` or `WAYLAND_DISPLAY`; it does
+not search other users' sessions or use SSH. The TUI child attaches to the
+coordinator IPC endpoint and cannot become a second UART owner.
+
+Launch and registration are serialized per surface through the bounded
+registration wait, so a request cannot confirm a window started by another
+concurrent request. To prevent accidental window storms, the coordinator permits
+at most three new-window start attempts per surface in a rolling ten-second
+window; `ensure`/`focus` calls that reuse an existing instance do not consume
+that allowance. A limited request returns `effective=unavailable` with a
+rate-limit reason rather than invoking an OS launcher.
 
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded
@@ -723,6 +746,7 @@ All JSON endpoints share the IPC listener:
 | `DELETE /api/app/instances?id=...` | remove one instance report |
 | `POST /api/app/navigate` | navigate a page with optional target instance/surface |
 | `POST /api/app/action` | route a validated page/title/progress/OSC/command/lifecycle action with optional target instance/surface |
+| `POST /api/app/launch` | ensure, start, or focus the named TUI/WebUI surface without accepting process or shell input |
 | `GET /api/bridges` | configured peer names/protocols and live state |
 | `POST /api/bridges/call` | `peer` plus a nested JSON-RPC `request` |
 | `GET /api/artifacts/manifest` | artifact/default/current discovery and latest operation |

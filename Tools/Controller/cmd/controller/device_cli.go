@@ -635,6 +635,23 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 		localDevice := startLocalDeviceHost(ctx, client, store)
 		defer localDevice.Close()
 		actions := hostui.NewActionBroker()
+		instances := hostui.NewInstanceRegistry()
+		coordinatorID := fmt.Sprintf("ipc:%d:bridge", os.Getpid())
+		listenValue := "stdio"
+		if listener != nil {
+			listenValue = listener.Addr().String()
+		}
+		process := hostui.CurrentProcessSelf(time.Now().UTC())
+		if _, registerErr := instances.Upsert(hostui.AppInstance{
+			ID: coordinatorID, Surface: "bridge", State: "background",
+			Values: map[string]string{
+				"role": "coordinator", "version": version, "source_hash": sourceHash,
+				"listen": listenValue, "websocket_path": *websocketPath,
+			},
+			Self: &process,
+		}); registerErr != nil {
+			return fmt.Errorf("register headless coordinator instance: %w", registerErr)
+		}
 		integrations, err := hostbridge.Start(ctx, client, store, actions, hostbridge.DiscoveryHostIdentity{
 			Version: version, SourceHash: sourceHash, BuildTime: buildTime,
 		})
@@ -649,18 +666,23 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			IntegrationProxy:      integrationProxy,
 			LocalDevice:           localDevice,
 			AuthToken:             serverConfig.IPC.AuthToken,
-			AuthorizationDisabled: true,
+                        AuthorizationDisabled: true,
 			AllowedOrigins:        append([]string(nil), serverConfig.IPC.AllowedOrigins...),
 			InboundWebhooks:       serverConfig.Integrations.InboundWebhooksEnabled,
 			HostVersion:           version,
 			HostSourceHash:        sourceHash,
 			HostBuildTime:         buildTime,
+                        HostInstanceID:        strings.TrimSuffix(coordinatorID, ":bridge"),
+                        HostProcessID:         os.Getpid(),
+                        HostSurface:           "ipc",
+			CoordinatorInstanceID: coordinatorID,
 			AppAction:             actions.Publish,
-			Shutdown:              cancel,
-			LastSessionSnapshot:   sessionSnapshot.read,
-			HostConfig:            store.CurrentRuntime,
-			PersistentHostConfig:  store.Current,
-			SubscribeHostConfig:   store.SubscribeRuntime,
+			AppInstances:          instances,
+                        Shutdown:              cancel,
+                        LastSessionSnapshot:   sessionSnapshot.read,
+                        HostConfig:            store.CurrentRuntime,
+                        PersistentHostConfig:  store.Current,
+                        SubscribeHostConfig:   store.SubscribeRuntime,
 			UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 				_, err := store.Update(change)
 				return err
@@ -671,6 +693,12 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 				return integrations
 			},
 			HotkeyStatus: func() any { return integrations.HotkeyStatus() },
+		}
+		if listener != nil {
+			launches := newNamedSurfaceLaunchCoordinator(
+				store, instances, actions.Publish, listener.Addr().String(),
+			)
+			service.AppLaunch = launches.Launch
 		}
 		artifactService, err := newArtifactHostService(client, store, service.Shutdown)
 		if err != nil {
