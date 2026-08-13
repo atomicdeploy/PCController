@@ -65,6 +65,213 @@ func TestBuzzerMirrorJobRequiresOptInAndValidBoardNote(t *testing.T) {
 	if _, ok := buzzerMirrorJobFor(config, event); !ok {
 		t.Fatal("board-silent note did not reach the independently enabled host path")
 	}
+	event.Metadata["frequency_hz"] = "0"
+	if pause, ok := buzzerMirrorJobFor(config, event); !ok || pause.frequencyHz != 0 {
+		t.Fatal("explicit board pause was not retained as a host timeline marker")
+	}
+	event.Metadata["duration_ms"] = "0"
+	if stop, ok := buzzerMirrorJobFor(config, event); !ok || stop.frequencyHz != 0 || stop.durationMS != 0 {
+		t.Fatal("explicit board stop was not retained as a host timeline marker")
+	}
+	event.Metadata["frequency_hz"] = "440"
+	if _, ok := buzzerMirrorJobFor(config, event); ok {
+		t.Fatal("zero-duration non-stop buzzer state was accepted")
+	}
+}
+
+func TestBuzzerPlaybackTimelinePreservesDeviceCadenceAndTrimsLateNotes(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	first := timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 0xFFFFFF00, timed: true,
+		observedAt: base, source: "board-a",
+	}, base)
+	if !first.start.Equal(base) || !first.end.Equal(base.Add(100*time.Millisecond)) {
+		t.Fatalf("first plan=%+v", first)
+	}
+	// uint32 subtraction deliberately preserves the MCU clock across wrap.
+	second := timeline.plan(buzzerMirrorJob{
+		durationMS: 80, deviceMicros: 0x0001D3C0, timed: true,
+		observedAt: base.Add(145 * time.Millisecond), source: "board-a",
+	}, base.Add(145*time.Millisecond))
+	wantStart := base.Add(120 * time.Millisecond)
+	if !second.start.Equal(wantStart) {
+		t.Fatalf("second start=%v want=%v", second.start, wantStart)
+	}
+	remaining, ok := second.remaining(base.Add(150 * time.Millisecond))
+	if !ok || remaining != 50*time.Millisecond {
+		t.Fatalf("late remaining=%v ok=%t", remaining, ok)
+	}
+	if remaining, ok := second.remaining(base.Add(250 * time.Millisecond)); ok || remaining != 0 {
+		t.Fatalf("expired note remaining=%v ok=%t", remaining, ok)
+	}
+}
+
+func TestBuzzerPlaybackTimelineReanchorsAfterDeviceRestart(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{
+		durationMS: 10, deviceMicros: 9_000_000, timed: true,
+		observedAt: base, source: "board-a",
+	}, base)
+	restarted := timeline.plan(buzzerMirrorJob{
+		durationMS: 10, deviceMicros: 1_000, timed: true,
+		observedAt: base.Add(time.Second), source: "board-a",
+	}, base.Add(time.Second))
+	if !restarted.start.Equal(base.Add(time.Second)) {
+		t.Fatalf("restart did not re-anchor to observation: %+v", restarted)
+	}
+}
+
+func TestBuzzerPlaybackTimelineReanchorsAfterWholeMicrosWrapOfSilence(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 1_000, timed: true,
+		observedAt: base, source: "board-a",
+	}, base)
+	observedAt := base.Add(time.Duration(uint64(1)<<32) * time.Microsecond).Add(30 * time.Second)
+	fresh := timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 30_001_000, timed: true,
+		observedAt: observedAt, source: "board-a",
+	}, observedAt)
+	if !fresh.start.Equal(observedAt) {
+		t.Fatalf("full-wrap silence did not re-anchor to observation: %+v", fresh)
+	}
+	remaining, ok := fresh.remaining(observedAt)
+	if !ok || remaining != 100*time.Millisecond {
+		t.Fatalf("fresh note remaining=%v ok=%t", remaining, ok)
+	}
+}
+
+func TestBuzzerDispatchReusesResolvedExternalBackend(t *testing.T) {
+	manager := &Manager{
+		buzzerJobs: make(chan buzzerMirrorJob, 1),
+		status: Status{
+			BuzzerNativeState: "ready", BuzzerNativeBackend: "external",
+			BuzzerNativeExecutable: "/usr/local/bin/beep",
+		},
+	}
+	config := appconfig.Config{}
+	config.Integrations.BuzzerMirror = appconfig.DefaultBuzzerMirror()
+	config.Integrations.BuzzerMirror.Enabled = true
+	config.Integrations.BuzzerMirror.NativeEnabled = true
+	manager.dispatchBuzzerMirror(config, controller.Event{
+		Kind: "buzzer.note", Metadata: map[string]string{
+			"frequency_hz": "440", "duration_ms": "80",
+		},
+	})
+	job := <-manager.buzzerJobs
+	if job.config.Backend != "external" || job.config.Executable != "/usr/local/bin/beep" {
+		t.Fatalf("resolved backend was not reused: %+v", job.config)
+	}
+}
+
+func TestBuzzerMirrorTransitionsCancelSameSourceWithoutConcurrentPlayback(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	type playbackEvent struct {
+		frequency int
+		started   bool
+	}
+	events := make(chan playbackEvent, 8)
+	activeCalls, maxActive := 0, 0
+	manager := &Manager{
+		ctx: ctx, cancel: cancel, buzzerJobs: make(chan buzzerMirrorJob, 8),
+		status: Status{BuzzerNativeState: "ready"},
+		buzzerPlay: func(playContext context.Context, job buzzerMirrorJob) error {
+			activeCalls++
+			if activeCalls > maxActive {
+				maxActive = activeCalls
+			}
+			events <- playbackEvent{frequency: job.frequencyHz, started: true}
+			<-playContext.Done()
+			activeCalls--
+			events <- playbackEvent{frequency: job.frequencyHz}
+			return playContext.Err()
+		},
+	}
+	manager.wait.Add(1)
+	go manager.buzzerMirrorLoop()
+	send := func(source string, frequency, duration int) {
+		manager.buzzerJobs <- buzzerMirrorJob{
+			frequencyHz: frequency, durationMS: duration,
+			observedAt: time.Now(), source: source,
+		}
+	}
+	waitEvent := func(want playbackEvent) {
+		t.Helper()
+		select {
+		case got := <-events:
+			if got != want {
+				t.Fatalf("playback event=%+v want=%+v", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for playback event %+v", want)
+		}
+	}
+
+	send("board-a", 440, 5_000)
+	waitEvent(playbackEvent{frequency: 440, started: true})
+	send("board-a", 660, 5_000)
+	waitEvent(playbackEvent{frequency: 440})
+	waitEvent(playbackEvent{frequency: 660, started: true})
+	send("board-a", 0, 40)
+	waitEvent(playbackEvent{frequency: 660})
+	select {
+	case unexpected := <-events:
+		t.Fatalf("pause started another playback: %+v", unexpected)
+	case <-time.After(25 * time.Millisecond):
+	}
+	send("board-a", 880, 5_000)
+	waitEvent(playbackEvent{frequency: 880, started: true})
+	send("board-a", 0, 0)
+	waitEvent(playbackEvent{frequency: 880})
+	select {
+	case unexpected := <-events:
+		t.Fatalf("stop started another playback: %+v", unexpected)
+	case <-time.After(25 * time.Millisecond):
+	}
+	if maxActive != 1 {
+		t.Fatalf("maximum concurrent native playbacks=%d want=1", maxActive)
+	}
+	cancel()
+	manager.wait.Wait()
+}
+
+func TestBuzzerMirrorStopDoesNotCancelAnotherSource(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{}, 1)
+	stopped := make(chan struct{}, 1)
+	manager := &Manager{
+		ctx: ctx, cancel: cancel, buzzerJobs: make(chan buzzerMirrorJob, 4),
+		status: Status{BuzzerNativeState: "ready"},
+		buzzerPlay: func(playContext context.Context, _ buzzerMirrorJob) error {
+			started <- struct{}{}
+			<-playContext.Done()
+			stopped <- struct{}{}
+			return playContext.Err()
+		},
+	}
+	manager.wait.Add(1)
+	go manager.buzzerMirrorLoop()
+	manager.buzzerJobs <- buzzerMirrorJob{
+		frequencyHz: 440, durationMS: 5_000, observedAt: time.Now(), source: "board-a",
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("source A playback did not start")
+	}
+	manager.buzzerJobs <- buzzerMirrorJob{
+		frequencyHz: 0, durationMS: 0, observedAt: time.Now(), source: "board-b",
+	}
+	select {
+	case <-stopped:
+		t.Fatal("source B stop canceled source A")
+	case <-time.After(25 * time.Millisecond):
+	}
+	cancel()
+	manager.wait.Wait()
 }
 
 func TestNativeBuzzerFailuresAreStateTransitionsNotPerNoteLogSpam(t *testing.T) {

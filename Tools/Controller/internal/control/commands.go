@@ -49,6 +49,7 @@ type CommandOptions struct {
 	AvrdudeConf           string
 	Programmer            string
 	HostConfig            func() appconfig.Config
+	BuzzerRuntime         func(native.Settings, bool) appconfig.BuzzerRuntimeStatus
 	HostFacts             hostfacts.Provider
 	UpdateHostConfig      func(func(*appconfig.Config) error) error
 	Resolve               func() CommandOptions
@@ -1413,12 +1414,19 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 				return "", fmt.Errorf("integrations.buzzer_mirror.enabled: %w", err)
 			}
 			candidate.Integrations.BuzzerMirror.Enabled = value
+			if candidate.Integrations.BuzzerMirror.Path != "" {
+				boardSilent, _ := buzzerPathPartsForCommand(candidate.Integrations.BuzzerMirror.Path)
+				candidate.Integrations.BuzzerMirror.Path = appconfig.BuzzerPath(boardSilent, value)
+			}
 		case "integrations.buzzer_mirror.native_enabled":
 			value, err := parseHostConfigBool(raw)
 			if err != nil {
 				return "", fmt.Errorf("integrations.buzzer_mirror.native_enabled: %w", err)
 			}
 			candidate.Integrations.BuzzerMirror.NativeEnabled = value
+			if value && strings.EqualFold(candidate.Integrations.BuzzerMirror.Backend, "off") {
+				candidate.Integrations.BuzzerMirror.Backend = "auto"
+			}
 		case "integrations.buzzer_mirror.web_audio_enabled":
 			value, err := parseHostConfigBool(raw)
 			if err != nil {
@@ -1427,6 +1435,9 @@ func hostConfigCommand(options CommandOptions, args []string) (string, error) {
 			candidate.Integrations.BuzzerMirror.WebAudioEnabled = value
 		case "integrations.buzzer_mirror.backend":
 			candidate.Integrations.BuzzerMirror.Backend = strings.ToLower(raw)
+			if candidate.Integrations.BuzzerMirror.Backend == "off" {
+				candidate.Integrations.BuzzerMirror.NativeEnabled = false
+			}
 		case "integrations.buzzer_mirror.executable":
 			candidate.Integrations.BuzzerMirror.Executable = raw
 		case "integrations.buzzer_mirror.driver_directory":
@@ -2201,16 +2212,26 @@ func buzzerRoutingCommand(
 	if options.HostConfig == nil {
 		return "", errors.New("host buzzer configuration is unavailable")
 	}
-	settings, err := querySettings(ctx, runtime)
-	if err != nil {
-		return "", err
-	}
 	config := options.HostConfig()
 	if len(args) == 1 {
 		if !strings.EqualFold(args[0], "status") {
 			return "", errors.New("usage: buzzer status | buzzer path board|host|both|none")
 		}
+		snapshot := runtime.Snapshot()
+		settings, haveBoard := snapshot.Settings, snapshot.HaveSettings
+		if refreshed, refreshErr := querySettings(ctx, runtime); refreshErr == nil {
+			settings, haveBoard = refreshed, true
+		} else if options.BuzzerRuntime == nil && !haveBoard {
+			return "", refreshErr
+		}
+		if options.BuzzerRuntime != nil {
+			return formatBuzzerRuntimeStatus(options.BuzzerRuntime(settings, haveBoard), config), nil
+		}
 		return formatBuzzerRouting(settings, config), nil
+	}
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return "", err
 	}
 
 	desiredPath := strings.ToLower(strings.TrimSpace(args[1]))
@@ -2228,20 +2249,11 @@ func buzzerRoutingCommand(
 		return "", errors.New("buzzer path must be board, host, both, or none")
 	}
 
-	beforeMirror := config.Integrations.BuzzerMirror
-	hostChanged := beforeMirror.Enabled != hostEnabled
-	if hostChanged {
-		if options.UpdateHostConfig == nil {
-			return "", errors.New("host buzzer configuration is read-only")
-		}
-		if err := options.UpdateHostConfig(func(value *appconfig.Config) error {
-			value.Integrations.BuzzerMirror.Enabled = hostEnabled
-			return value.Validate()
-		}); err != nil {
-			return "", fmt.Errorf("set host buzzer path: %w", err)
-		}
+	if options.UpdateHostConfig == nil {
+		return "", errors.New("host buzzer configuration is read-only")
 	}
 
+	originalSettings := settings
 	boardChanged := settings.Flags&native.SettingsSilent != 0 != boardSilent
 	if boardChanged {
 		if boardSilent {
@@ -2250,12 +2262,6 @@ func buzzerRoutingCommand(
 			settings.Flags &^= native.SettingsSilent
 		}
 		if err := storeSettings(ctx, runtime, settings); err != nil {
-			if hostChanged {
-				_ = options.UpdateHostConfig(func(value *appconfig.Config) error {
-					value.Integrations.BuzzerMirror = beforeMirror
-					return value.Validate()
-				})
-			}
 			return "", fmt.Errorf("set board silent state: %w", err)
 		}
 	}
@@ -2267,7 +2273,42 @@ func buzzerRoutingCommand(
 	if (verified.Flags&native.SettingsSilent != 0) != boardSilent {
 		return "", errors.New("board silent-state readback did not match the requested buzzer path")
 	}
-	return formatBuzzerRouting(verified, options.HostConfig()) + " applied live", nil
+	if err := options.UpdateHostConfig(func(value *appconfig.Config) error {
+		value.Integrations.BuzzerMirror.Path = desiredPath
+		value.Integrations.BuzzerMirror.Enabled = hostEnabled
+		return value.Validate()
+	}); err != nil {
+		if boardChanged {
+			_ = storeSettings(ctx, runtime, originalSettings)
+		}
+		return "", fmt.Errorf("set host buzzer path: %w", err)
+	}
+	config = options.HostConfig()
+	if options.BuzzerRuntime != nil {
+		return formatBuzzerRuntimeStatus(options.BuzzerRuntime(verified, true), config) + " applied live", nil
+	}
+	return formatBuzzerRouting(verified, config) + " applied live", nil
+}
+
+func formatBuzzerRuntimeStatus(status appconfig.BuzzerRuntimeStatus, config appconfig.Config) string {
+	board := "board_state=unavailable"
+	if status.BoardStateKnown {
+		board = fmt.Sprintf("board_silent=%t board_change_required=%t", status.BoardSilent, status.BoardChangeRequired)
+	}
+	return fmt.Sprintf(
+		"buzzer_path=%s requested_path=%s %s board_apply_state=%s board_apply_error=%q host_silent=%t native=%t web_audio=%t backend_requested=%s backend_effective=%s executable=%q",
+		status.EffectivePath,
+		status.RequestedPath,
+		board,
+		status.BoardApplyState,
+		status.BoardApplyError,
+		!status.HostMirror,
+		status.HostMirror && config.Integrations.BuzzerMirror.NativeEnabled,
+		status.HostMirror && config.Integrations.BuzzerMirror.WebAudioEnabled,
+		status.BackendRequested,
+		status.BackendEffective,
+		status.ExecutableEffective,
+	)
 }
 
 func formatBuzzerRouting(settings native.Settings, config appconfig.Config) string {
@@ -2320,6 +2361,10 @@ func silentCommand(
 			silent := action == "on"
 			if err := options.UpdateHostConfig(func(value *appconfig.Config) error {
 				value.Integrations.BuzzerMirror.Enabled = !silent
+				if value.Integrations.BuzzerMirror.Path != "" {
+					boardSilent, _ := buzzerPathPartsForCommand(value.Integrations.BuzzerMirror.Path)
+					value.Integrations.BuzzerMirror.Path = appconfig.BuzzerPath(boardSilent, !silent)
+				}
 				return value.Validate()
 			}); err != nil {
 				return "", err
@@ -2345,6 +2390,7 @@ func silentCommand(
 	if err != nil {
 		return "", err
 	}
+	beforeSilent := settings.Flags&native.SettingsSilent != 0
 	switch strings.ToLower(strings.TrimSpace(args[0])) {
 	case "status":
 		return fmt.Sprintf("silent=%t board_silent=%t", settings.Flags&native.SettingsSilent != 0, settings.Flags&native.SettingsSilent != 0), nil
@@ -2355,6 +2401,9 @@ func silentCommand(
 	default:
 		return "", errors.New(usage)
 	}
+	if (settings.Flags&native.SettingsSilent != 0) == beforeSilent {
+		return fmt.Sprintf("silent=%t board_silent=%t already applied", beforeSilent, beforeSilent), nil
+	}
 	if err := storeSettings(ctx, runtime, settings); err != nil {
 		return "", err
 	}
@@ -2363,6 +2412,19 @@ func silentCommand(
 		settings.Flags&native.SettingsSilent != 0,
 		settings.Flags&native.SettingsSilent != 0,
 	), nil
+}
+
+func buzzerPathPartsForCommand(path string) (boardSilent, hostEnabled bool) {
+	switch strings.ToLower(strings.TrimSpace(path)) {
+	case appconfig.BuzzerPathBoard:
+		return false, false
+	case appconfig.BuzzerPathHost:
+		return true, true
+	case appconfig.BuzzerPathBoth:
+		return false, true
+	default:
+		return true, false
+	}
 }
 
 func refresh(ctx context.Context, runtime *Runtime) (native.Status, error) {

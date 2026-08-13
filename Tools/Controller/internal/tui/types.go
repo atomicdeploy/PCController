@@ -215,6 +215,7 @@ type Options struct {
 	ApplyTUIConsole  func(appconfig.TUIConsole) error
 	HostIntegrations func() appconfig.Integrations
 	SaveIntegrations func(appconfig.Integrations) error
+	BuzzerRuntime    func() appconfig.BuzzerRuntimeStatus
 	RFConfig         func() appconfig.RFConfig
 	SaveRF           func(appconfig.RFConfig) error
 	RFFetch          func(context.Context) ([]native.RFEntry, error)

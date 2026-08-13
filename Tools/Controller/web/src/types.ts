@@ -253,6 +253,7 @@ export interface UIConfig {
 		buzzer_native_enabled: boolean
 		buzzer_web_audio: boolean
   }
+	buzzer_runtime?: BuzzerRuntimeStatus
   host_version?: string
   source_hash?: string
   build_time?: string
@@ -318,13 +319,35 @@ export interface LocalIntegrationSettings {
     refresh_on_resume: boolean
   }
   buzzer_mirror: {
+		path?: 'board' | 'host' | 'both' | 'none'
     enabled: boolean
     native_enabled: boolean
     web_audio_enabled: boolean
-    backend: 'auto' | 'native' | 'external'
+		backend: 'auto' | 'native' | 'external' | 'off'
     executable?: string
     driver_directory?: string
   }
+	buzzer_runtime?: BuzzerRuntimeStatus
+}
+
+export interface BuzzerRuntimeStatus {
+	requested_path: 'board' | 'host' | 'both' | 'none' | 'unknown'
+	effective_path: 'board' | 'host' | 'both' | 'none' | 'unknown'
+	board_state_known: boolean
+	board_silent: boolean
+	board_change_required: boolean
+	board_apply_state: 'unspecified' | 'pending' | 'applying' | 'verified' | 'error'
+	board_apply_error?: string
+	host_mirror: boolean
+	backend_requested: 'auto' | 'native' | 'external' | 'off'
+	backend_effective: 'native' | 'external' | 'off' | 'unavailable'
+	executable_requested?: string
+	executable_effective?: string
+	backend_error?: string
+	path_overridden: boolean
+	mirror_overridden: boolean
+	backend_overridden: boolean
+	executable_overridden: boolean
 }
 
 export type LifecycleSafetyAction = 'leave' | 'stop-motion' | 'all-off'

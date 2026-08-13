@@ -25,6 +25,7 @@ import (
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
 	"pccontroller.local/controller/internal/lanresolver"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -48,6 +49,7 @@ type Status struct {
 	BuzzerNativeBackend      string                          `json:"buzzer_native_backend,omitempty"`
 	BuzzerNativeExecutable   string                          `json:"buzzer_native_executable,omitempty"`
 	BuzzerNativeLastError    string                          `json:"buzzer_native_last_error,omitempty"`
+	BuzzerRuntime            appconfig.BuzzerRuntimeStatus   `json:"buzzer_runtime"`
 	WebhooksActive           int                             `json:"webhooks_active"`
 	WebhookQueuePending      int                             `json:"webhook_queue_pending"`
 	WebhookDeadLetters       int                             `json:"webhook_dead_letters"`
@@ -195,31 +197,41 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu                 sync.RWMutex
-	closing            bool
-	digest             [sha256.Size]byte
-	advertiser         *discovery.Advertiser
-	peers              map[string]*peerState
-	status             Status
-	webhooks           *webhookDeliveryQueue
-	wait               sync.WaitGroup
-	actions            *hostui.ActionBroker
-	hotkeys            hostui.HotkeyRegistrar
-	keyboard           hostui.KeyboardRegistrar
-	keyboardLatchMu    sync.Mutex
-	keyboardLatches    map[string]keyboardLatch
-	lastPWMReconcile   time.Time
-	keyboardActuator   func(context.Context, keyboardOperation) error
-	lifecycleActuator  func(context.Context, string) error
-	notifier           hostui.Notifier
-	notificationQueue  *notificationQueue
-	warningBeep        func() error
-	runningDoorWarning bool
-	statusLED          *statusLEDArbiter
-	segmentScroll      *segmentScrollPresenter
-	buzzerJobs         chan buzzerMirrorJob
-	discoveryRefresh   chan struct{}
-	discoveryIdentity  DiscoveryHostIdentity
+	mu                  sync.RWMutex
+	closing             bool
+	digest              [sha256.Size]byte
+	advertiser          *discovery.Advertiser
+	peers               map[string]*peerState
+	status              Status
+	webhooks            *webhookDeliveryQueue
+	wait                sync.WaitGroup
+	actions             *hostui.ActionBroker
+	hotkeys             hostui.HotkeyRegistrar
+	keyboard            hostui.KeyboardRegistrar
+	keyboardLatchMu     sync.Mutex
+	keyboardLatches     map[string]keyboardLatch
+	lastPWMReconcile    time.Time
+	keyboardActuator    func(context.Context, keyboardOperation) error
+	lifecycleActuator   func(context.Context, string) error
+	notifier            hostui.Notifier
+	notificationQueue   *notificationQueue
+	warningBeep         func() error
+	runningDoorWarning  bool
+	statusLED           *statusLEDArbiter
+	segmentScroll       *segmentScrollPresenter
+	buzzerJobs          chan buzzerMirrorJob
+	buzzerPlay          func(context.Context, buzzerMirrorJob) error
+	buzzerRouteWake     chan struct{}
+	buzzerRouteMu       sync.RWMutex
+	buzzerRoutePath     string
+	buzzerRouteState    string
+	buzzerRouteError    string
+	buzzerRouteRevision uint64
+	buzzerRouteAttempts int
+	buzzerRouteSnapshot func() controller.Snapshot
+	buzzerRouteExecute  func(context.Context, bool) error
+	discoveryRefresh    chan struct{}
+	discoveryIdentity   DiscoveryHostIdentity
 }
 
 type DiscoveryHostIdentity struct {
@@ -256,7 +268,13 @@ func Start(
 		notificationQueue: newNotificationQueue(16, 3*time.Second, 500*time.Millisecond),
 		warningBeep:       hostui.WarningBeep,
 		buzzerJobs:        make(chan buzzerMirrorJob, 32),
+		buzzerRouteWake:   make(chan struct{}, 1),
 		discoveryRefresh:  make(chan struct{}, 1),
+	}
+	manager.buzzerRouteSnapshot = client.Snapshot
+	manager.buzzerRouteExecute = func(ctx context.Context, silent bool) error {
+		_, err := client.SetBoardSilent(ctx, silent)
+		return err
 	}
 	if len(identities) != 0 {
 		manager.discoveryIdentity = identities[0]
@@ -343,7 +361,7 @@ func Start(
 	// published immediately after Start returns can land between the goroutine
 	// launch and its first LatestEventID call and be skipped forever.
 	afterID := client.LatestEventID()
-	manager.wait.Add(8)
+	manager.wait.Add(9)
 	manager.webhooks.Start()
 	go func() {
 		defer manager.wait.Done()
@@ -361,6 +379,7 @@ func Start(
 	}()
 	go manager.notificationLoop()
 	go manager.buzzerMirrorLoop()
+	go manager.buzzerRouteLoop()
 	go manager.discoveryMetadataLoop()
 	return manager, nil
 }
@@ -463,6 +482,22 @@ func (manager *Manager) Status() Status {
 	}
 	result.WSClientsActive = append([]string(nil), result.WSClientsActive...)
 	result.DiscoveryProtocols = append([]string(nil), result.DiscoveryProtocols...)
+	if manager.store != nil && manager.client != nil {
+		snapshot := manager.client.Snapshot()
+		result.BuzzerRuntime = manager.store.BuzzerRuntimeState().Status(
+			snapshot.HaveSettings,
+			snapshot.Settings.Flags&native.SettingsSilent != 0,
+			result.BuzzerNativeBackend,
+			result.BuzzerNativeExecutable,
+			result.BuzzerNativeLastError,
+		)
+		manager.buzzerRouteMu.RLock()
+		if manager.buzzerRouteState != "" && manager.buzzerRoutePath == manager.store.BuzzerRuntimeState().Effective.Path {
+			result.BuzzerRuntime.BoardApplyState = manager.buzzerRouteState
+			result.BuzzerRuntime.BoardApplyError = manager.buzzerRouteError
+		}
+		manager.buzzerRouteMu.RUnlock()
+	}
 	result.DiscoveryFailures = append([]discovery.TransportFailure(nil), result.DiscoveryFailures...)
 	return result
 }
@@ -632,6 +667,7 @@ func integrationDigest(config appconfig.Config) [sha256.Size]byte {
 
 func (manager *Manager) reconcile(config appconfig.Config) error {
 	manager.client.ConfigureRFPresentation(config.RF)
+	manager.observeBuzzerRoute(config.Integrations.BuzzerMirror.Path, false)
 	manager.segmentScroll.Observe(config.UI.SegmentScroll, manager.client.Snapshot())
 	digest := integrationDigest(config)
 	manager.mu.RLock()
@@ -876,6 +912,13 @@ func (manager *Manager) eventLoop(afterID uint64) {
 					manager.recordError("keyboard " + reason + ": " + releaseErr.Error())
 				}
 			}
+		}
+		if event.Opcode == native.OpSettings ||
+			(event.Kind == "connection" && event.State == "connected") {
+			manager.observeBuzzerRoute(
+				manager.store.Current().Integrations.BuzzerMirror.Path,
+				event.Kind == "connection",
+			)
 		}
 		config := manager.store.Current()
 		manager.observeRunningDoor(config)
