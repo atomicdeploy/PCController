@@ -12,8 +12,9 @@ uint16_t read16(const uint8_t *value) {
 } // namespace
 
 MacroQueue::MacroQueue(ControllerProtocol::UartProtocol &protocol)
-    : protocol_(protocol),
-      ring_(static_cast<uint8_t>(ControllerEventType::Macro)) {}
+    : protocol_(protocol) {
+  ring_.initialize(static_cast<uint8_t>(ControllerEventType::Macro));
+}
 
 void MacroQueue::sendStatus(uint8_t opcode, uint8_t sequence) {
   // Events and query replies deliberately share one self-describing envelope.

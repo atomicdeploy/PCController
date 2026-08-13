@@ -5,10 +5,13 @@
 
 namespace ControllerCore {
 
-MacroRing::MacroRing(uint8_t eventType)
-    : status_{eventType, {Schema, Idle, 0, 0, 0, 0, 0, 0, 0, 0, 0}},
-      startedAtUs_(0), head_(0), used_(0), options_(0),
-      safeStopRequested_(false) {}
+void MacroRing::initialize(uint8_t eventType) {
+  // Static storage is already zero-filled; only the wire invariants require
+  // explicit initialization. Keeping this small matters on the AVR's global
+  // constructor path and does not change a freshly constructed ring's state.
+  status_.type = eventType;
+  status_.report.schema = Schema;
+}
 
 uint8_t MacroRing::peek(uint8_t offset) const {
   return queue_[static_cast<uint8_t>(head_ + offset) & QueueMask];
