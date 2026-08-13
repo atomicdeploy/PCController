@@ -136,9 +136,10 @@ describe('offline and settings UI contracts', () => {
       snapshot={{ ...emptySnapshot, connection_reason: 'Serial controller is offline' }}
     />)
     expect(markup).toContain('href="#/dashboard"')
-    expect(markup).toContain('The dashboard is ready')
+    expect(markup).toContain('Controller offline — the authenticated host is waiting for the board.')
     expect(markup).toContain('Serial controller is offline')
     expect(markup).not.toContain('Authentication required')
+    expect(markup).not.toContain('The dashboard is ready')
   })
 
   it('hides unavailable peripherals and their invalid readings', () => {
