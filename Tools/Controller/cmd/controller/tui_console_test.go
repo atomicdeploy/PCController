@@ -137,6 +137,9 @@ func TestUnavailableLinuxConsoleIsSilent(t *testing.T) {
 	if err := applyTUIConsole(settings, &output, false); err != nil || output.Len() != 0 {
 		t.Fatalf("output=%q err=%v", output.String(), err)
 	}
+	if err := applyTUIConsole(settings, &output, true); err == nil || !strings.Contains(err.Error(), "unavailable on linux") {
+		t.Fatalf("strict output=%q err=%v", output.String(), err)
+	}
 }
 
 func TestInvalidTUIConsoleEnvironmentFailsClearly(t *testing.T) {
