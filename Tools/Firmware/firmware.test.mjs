@@ -429,7 +429,10 @@ test('retired MOVE remains a direct KEY alias, never a persisted second page', a
 	assert.match(settings, /normalizeMenuLayout\(\)/u)
 	assert.match(frontPanel, /pageToMode\(uint8_t page\)[^]*?canonicalMenuPage\(page\)/u)
 	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
-	assert.match(frontPanel, /menuPage == PAGE_USER_RELAYS[^]*?\? PAGE_RF/u)
+	assert.match(
+		frontPanel,
+		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+	)
 	assert.match(frontPanel, /case MODE_MOTION_CONTROL:[^]*?setMenuPage\(PAGE_DOOR\);/u)
 	assert.match(protocol, /settingsStore\.normalizeMenuLayout\(\);/u)
 	assert.match(protocol, /const uint8_t defaultMenuPage = canonicalMenuPage\(payload\[10\]\);/u)
