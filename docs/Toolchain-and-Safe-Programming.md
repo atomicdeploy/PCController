@@ -542,6 +542,40 @@ SCK. A successful report therefore proves a *factory blank*—not merely a
 blanked deployed board. When UART identity is genuinely unavailable, the
 deliberately conspicuous fallback is `--uart none --confirm ERASE-BOARD`.
 
+### USBasp recovery evidence and speed policy
+
+Use a read-only backup before deciding whether a target requires recovery:
+
+```console
+controller program --method usbasp --operation backup --output backups\audit
+controller firmware identity --input backups\audit\firmware\sha256\..\firmware-sha256-....hex
+controller eeprom inspect --input backups\audit\operations\...\eeprom.hex
+```
+
+For a fresh ATmega328P the first normal-speed ISP attempt can fail while its
+clock fuses still select the slow factory clock. The managed USBasp path then
+retries just that exchange at `-B32`; it must **not** retain the slow bit clock
+after the selected FQBN fuses have been written and verified. A subsequent
+normal-speed full backup is the acceptance proof. Do not force `-B32` for
+ordinary application updates when the normal-speed probe works.
+
+An all-`FF` flash image has no PCController firmware identity and an all-`FF`
+EEPROM image has no valid settings record. That is a raw blank state, not a
+factory-initialized PCController board. It is safe to use as a recovery baseline
+only after retaining the manifest, hashes, signature, and fuse evidence. The
+factory fuse values read from one physical unit are evidence for that unit, not
+a substitute for the selected FQBN's validated fuse policy.
+
+`controller boot probe` and `controller boot backup` exercise the separate
+UART Urboot/Urclock path. A successful USBasp application read or native HELLO
+does not prove that this UART bootloader handoff works; record a failed UART
+probe separately and investigate it before claiming normal-update acceptance.
+
+Top-level `controller version` reports the host build. `controller exec` is the
+board-control command surface; it currently has no `version` command. Use
+`hello` for MCU build identity until the shared host-identity resource is
+implemented across exec, IPC, REST, and bridge transports.
+
 ## Persistence ownership and artifacts
 
 MCU EEPROM and PC host configuration remain separate:
