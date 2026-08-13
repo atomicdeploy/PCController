@@ -84,7 +84,7 @@ jobs:
         run: node Tools\Dependencies\select-windows-compiler.mjs
 
       - name: "🐹 Install Go from go.mod"
-        if: startsWith(matrix.key, 'go-') || matrix.key == 'cpp-avr-linux'
+        if: startsWith(matrix.key, 'go-') || matrix.key == 'cpp-avr-linux' || matrix.key == 'cpp-windows'
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: Tools/Controller/go.mod
@@ -181,7 +181,7 @@ jobs:
           cmake --build .build/codeql-virtual-board --parallel
           ctest --test-dir .build/codeql-virtual-board --output-on-failure
 
-      - name: "🪟 Build Windows Virtual Board and C ABI smoke source"
+      - name: "🪟 Build Windows Virtual Board and installed C ABI consumer"
         if: matrix.key == 'cpp-windows'
         shell: cmd
         run: |
@@ -192,7 +192,11 @@ jobs:
           if errorlevel 1 exit /b 1
           ctest --test-dir .build/codeql-virtual-board -C Release --output-on-failure
           if errorlevel 1 exit /b 1
-          gcc.exe Tools\Controller\examples\c_abi_smoke.c -o "%RUNNER_TEMP%\host-c-abi-smoke.exe"
+          cmake -S Tools\Controller -B .build\codeql-controller-cabi -G Ninja -DPCCONTROLLER_CABI_CC="%CC%" -DBUILD_TESTING=ON
+          if errorlevel 1 exit /b 1
+          cmake --build .build\codeql-controller-cabi --target pccontroller_cabi_installed_smoke --parallel
+          if errorlevel 1 exit /b 1
+          ctest --test-dir .build\codeql-controller-cabi --output-on-failure
           if errorlevel 1 exit /b 1
 
       - name: "🔬 Analyze and upload CodeQL results"
