@@ -55,6 +55,7 @@ virtual-mcu-eeprom.bin
 .env
 .env.*
 !.env.example
+.env.bak
 pccontroller.json
 pccontroller.yaml
 pccontroller.yml
@@ -76,6 +77,7 @@ pccontroller.toml
 .DS_Store
 Thumbs.db
 Desktop.ini
+!/Desktop.ini
 *.swp
 *.swo
 *~

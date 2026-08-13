@@ -114,10 +114,26 @@ Useful focused builds:
 ```console
 build.cmd --host-only
 build.cmd --firmware-only
+build.cmd --virtual-board-only
 build.cmd --dry-run
 ```
 
-Build and test the Virtual Board independently:
+Build and test the Virtual Board through the same project-owned build plan:
+
+```console
+build.cmd --virtual-board-only
+build.cmd --virtual-board-only --virtual-board-preset debug
+```
+
+Developers with GNU Make may use the thin root façade; it delegates to the
+same CMD/Bash launchers and CMake presets, and never programs hardware:
+
+```console
+make virtual-board
+mingw32-make virtual-board-debug
+```
+
+The direct CMake equivalent remains available:
 
 ```console
 cd Tools\VirtualBoard
@@ -129,6 +145,31 @@ ctest --preset release
 See the [build guide](Tools/Build/README.md) and
 [toolchain safety guide](docs/Toolchain-and-Safe-Programming.md) before the
 first physical deployment.
+
+### Local environment and checkout defaults
+
+Copy [`.env.example`](.env.example) to a local `.env` when development or
+build inputs need to be shared across this checkout. Root build, firmware,
+dependency, audit, WebUI/Vite, and Go command entrypoints load it without shell
+evaluation. An already-inherited process, CI, or service-manager value always
+wins; set `PCCONTROLLER_ENV_FILE` to use an explicit file instead. Relative
+explicit paths are canonicalized before child tools change directories. The
+root build/update launchers also load the file before their first locked
+`npm ci`, so proxy and registry settings apply on a clean checkout. `.env` and
+`.env.bak` are intentionally ignored, while `.env.example` is tracked.
+
+The tracked [`.editorconfig`](.editorconfig), [`.gitattributes`](.gitattributes),
+and [`.gitmessage`](.gitmessage) provide consistent text and commit defaults.
+On Windows, run the following once after cloning to apply those local Git
+settings and enable the tracked PCController folder icon from
+[`Desktop.ini`](Desktop.ini):
+
+```powershell
+.\Tools\Developer\configure-worktree.ps1
+```
+
+Git cannot version the Windows folder `system` attribute itself, which is why
+the one-time setup step is required for Explorer to honor `Desktop.ini`.
 
 ### Launch the control surface
 

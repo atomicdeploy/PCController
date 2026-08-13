@@ -2,6 +2,9 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 import { loadProductMetadata } from '../../../Build/product-metadata.mjs'
+import { loadProjectEnv } from '../../../Build/env.mjs'
+
+loadProjectEnv()
 
 const directory = fileURLToPath(new URL('.', import.meta.url))
 const packagePath = fileURLToPath(new URL('../../web/package.json', import.meta.url))

@@ -7,7 +7,10 @@ import { spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadProjectEnv } from '../Build/env.mjs';
 import { repositoryWebUrl, resolveRepository } from '../../.github/scripts/repository-context.mjs';
+
+loadProjectEnv();
 
 const APPLY = process.argv.includes('--apply');
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');

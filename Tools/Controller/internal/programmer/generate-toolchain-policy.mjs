@@ -1,5 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../../../Build/env.mjs'
+
+loadProjectEnv()
 
 const policyURL = new URL('../../toolchain-profile.json', import.meta.url)
 const lockURL = new URL('../../toolchain-lock.json', import.meta.url)

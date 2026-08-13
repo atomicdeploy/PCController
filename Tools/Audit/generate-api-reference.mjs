@@ -4,6 +4,9 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadProjectEnv } from "../Build/env.mjs";
+
+loadProjectEnv();
 
 /** Resolve the public API identity from the shared product manifest. */
 export function productIdentity(metadata) {

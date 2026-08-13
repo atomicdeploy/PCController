@@ -5,8 +5,10 @@ import react from '@vitejs/plugin-react'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../../Build/env.mjs'
 
 const webRoot = fileURLToPath(new URL('.', import.meta.url))
+loadProjectEnv()
 const sourceManifest = JSON.parse(readFileSync(new URL('./public/manifest.webmanifest', import.meta.url), 'utf8')) as Record<string, unknown>
 const packageMetadata = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as {
 	version: string
@@ -41,7 +43,7 @@ export function escapeProductHTML(value: string): string {
 }
 
 export default defineConfig(() => {
-  const productName = presentation(process.env.PCCONTROLLER_BUILD_APP_NAME || process.env.APP_TITLE || packageMetadata.productName, 'productName', 64)
+  const productName = presentation(process.env.PCCONTROLLER_BUILD_APP_NAME || process.env.APP_NAME || process.env.APP_TITLE || packageMetadata.productName, 'productName', 64)
   const productShortName = metadata(packageMetadata.productShortName, 'productShortName')
   const productTagline = presentation(process.env.PCCONTROLLER_BUILD_TAGLINE || process.env.APP_TAGLINE || packageMetadata.productFirstRunTagline, 'productFirstRunTagline', 96)
   const productProtocol = metadata(packageMetadata.productProtocol, 'productProtocol').toLowerCase()

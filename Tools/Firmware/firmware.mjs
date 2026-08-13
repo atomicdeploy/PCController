@@ -14,6 +14,7 @@ import {
 } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
+import { loadProjectEnv } from '../Build/env.mjs'
 import {
         createChalk,
         renderUnicodeBanner
@@ -33,6 +34,8 @@ import {
 	relativeCommandPlanPaths,
 	resolveCanonicalControllerInvocation
 } from '../CommandPlan/controller-command.mjs'
+
+loadProjectEnv()
 
 export { BOARD, EXIT, loadToolchainPolicy, parseToolchainPolicy }
 
