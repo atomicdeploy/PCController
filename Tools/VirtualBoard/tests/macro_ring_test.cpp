@@ -16,8 +16,14 @@ void require(bool condition, const std::string &message) {
   }
 }
 
+MacroRing makeRing(uint8_t eventType = 6) {
+  MacroRing ring{};
+  ring.initialize(eventType);
+  return ring;
+}
+
 void testSchemaTwoLifecycleAndRollover() {
-  MacroRing ring(6);
+  MacroRing ring = makeRing();
   require(ring.status().type == 6 && ring.status().report.schema == 2 &&
               ring.status().report.state == MacroRing::Idle,
           "schema-2 macro status envelope drifted");
@@ -56,7 +62,7 @@ void testSchemaTwoLifecycleAndRollover() {
 }
 
 void testBoundedQueueAndStartGate() {
-  MacroRing ring(6);
+  MacroRing ring = makeRing();
   ring.begin(1, 0, 2);
   std::array<std::uint8_t, 64> initial{};
   initial[4] = 0x40;
@@ -67,7 +73,7 @@ void testBoundedQueueAndStartGate() {
   require(ring.canStart(),
           "schema-2 streaming threshold did not allow a 64-byte buffer");
 
-  MacroRing capacity(6);
+  MacroRing capacity = makeRing();
   capacity.begin(2, 0, 0);
   std::array<std::uint8_t, MacroRing::Capacity> bytes{};
   require(capacity.append(0, 0, bytes.data(),
@@ -80,7 +86,7 @@ void testBoundedQueueAndStartGate() {
 }
 
 void testMalformedRecordAndSafeStop() {
-  MacroRing ring(6);
+  MacroRing ring = makeRing();
   ring.begin(3, 0, 1);
   std::array<std::uint8_t, 55> malformed{};
   malformed[4] = 0x41;
@@ -101,7 +107,7 @@ void testMalformedRecordAndSafeStop() {
 }
 
 void testCancelOptions() {
-  MacroRing keepOutputs(6);
+  MacroRing keepOutputs = makeRing();
   keepOutputs.begin(4, MacroRing::KeepOutputsOnCancel, 1);
   require(keepOutputs.defaultKeepOutputsOnCancel() &&
               keepOutputs.cancel(keepOutputs.defaultKeepOutputsOnCancel()) &&
@@ -109,7 +115,7 @@ void testCancelOptions() {
               !keepOutputs.takeSafeStopRequest(),
           "keep-output cancellation changed the safe-stop contract");
 
-  MacroRing safeStop(6);
+  MacroRing safeStop = makeRing();
   safeStop.begin(5, 0, 1);
   require(safeStop.cancel(false) && safeStop.takeSafeStopRequest(),
           "ordinary cancellation no longer requests the dispatcher safe-stop");

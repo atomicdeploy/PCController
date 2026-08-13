@@ -64,7 +64,10 @@ public:
     Malformed = 2,
   };
 
-  explicit MacroRing(uint8_t eventType);
+  // The ring is deliberately trivial at static-storage duration. The adapter
+  // supplies its event tag once during setup, avoiding a second AVR global
+  // constructor while keeping the same zeroed idle state.
+  void initialize(uint8_t eventType);
 
   void begin(uint8_t id, uint8_t options, uint16_t totalSteps);
   bool append(uint16_t streamOffset, uint16_t completeStepIndex,
