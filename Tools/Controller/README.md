@@ -591,11 +591,15 @@ door presentation uses a 30-second interval rather than looping continuously.
 
 Board `BUZZER_CHANGED` frames are always available to event subscribers. When
 `integrations.buzzer_mirror.enabled` is true, the WebUI can play the reported
-frequency/duration with Web Audio and Windows can play it through WinRing0. The
-native implementation is inside the Go controller: it opens the
-`WinRing0x64.sys` device and drives PIT channel 2 directly; it loads no wrapper
-DLL and never launches the old `beep.exe`, SSH, or a UAC prompt. Elevated SSH
-is an operator-only test harness, not an application transport. `buzzer path`
+frequency/duration with Web Audio and the native host path can play it through
+the motherboard speaker. Windows can open the optional `WinRing0x64.sys`
+device and drive PIT channel 2 directly; Linux first uses the kernel PC-speaker
+`KIOCSOUND` interface. If native access is unavailable, the host may discover
+an external `beep` command as an optional fallback. Linux is invoked as
+`beep -f HZ -l MS`; Windows `beep.exe`/`pc-beep.exe` is invoked as
+`-f HZ -d MS`, matching each tool's own help contract. No SSH path is embedded
+and the application never prompts for elevation. Elevated SSH is an
+operator-only test harness, not an application transport. `buzzer path`
 independently selects the board, host, both, or neither; board silent and host
 silent remain distinct.
 
