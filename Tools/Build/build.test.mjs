@@ -393,8 +393,46 @@ test('safe default builds both targets without touching hardware', () => {
 	const options = parseArguments([], {})
 	assert.equal(options.host, true)
 	assert.equal(options.firmware, true)
+	assert.equal(options.virtualBoard, false)
 	assert.equal(options.upload, false)
 	assert.equal(options.installBootloader, false)
+})
+
+test('virtual-board-only delegates to the existing CMake presets without hardware', () => {
+	const options = parseArguments(['--virtual-board-only', '--virtual-board-preset', 'debug'], {})
+	assert.equal(options.host, false)
+	assert.equal(options.firmware, false)
+	assert.equal(options.virtualBoard, true)
+	assert.equal(options.virtualBoardPreset, 'debug')
+	const plan = createPlan(options, resolveBuildIdentity(options, {}), 'win32')
+	assert.deepEqual(plan.actions.map(action => action.id), [
+		'virtual-board-configure', 'virtual-board-build', 'virtual-board-test'
+	])
+	assert.deepEqual(plan.actions.map(action => action.command.args), [
+		['--preset', 'debug'],
+		['--build', '--preset', 'debug', '--parallel'],
+		['--preset', 'debug']
+	])
+	assert.ok(plan.actions.every(action => action.hardware === false))
+	assert.ok(plan.actions.every(action => action.command.cwd.replaceAll('\\', '/').endsWith('Tools/VirtualBoard')))
+})
+
+test('virtual-board selection validates CMake presets and keeps focused cleanup contained', () => {
+	assert.throws(
+		() => parseArguments(['--virtual-board-only', '--virtual-board-preset', 'fast'], {}),
+		error => error instanceof BuildError && /virtual-board-preset/.test(error.message)
+	)
+	assert.throws(
+		() => parseArguments(['--virtual-board-preset', 'debug'], {}),
+		error => error instanceof BuildError && /requires --virtual-board/.test(error.message)
+	)
+	assert.throws(
+		() => parseArguments(['--host-only', '--virtual-board-only'], {}),
+		error => error instanceof BuildError && /choose either/.test(error.message)
+	)
+	const options = parseArguments(['--virtual-board-only', '--clean'], {})
+	const targets = generatedCleanTargets(options).map(path => path.replaceAll('\\', '/'))
+	assert.deepEqual(targets, [join(PROJECT_ROOT, 'Tools', 'VirtualBoard', '.build').replaceAll('\\', '/')])
 })
 
 test('host plan reproducibly builds the web application before Go embedding', () => {
@@ -632,6 +670,16 @@ test('root wrappers contain no PowerShell policy or invocation', async () => {
 		'utf8'
 	)
 	assert.doesNotMatch(firmwareSource, /powershell|pwsh|build\.ps1|arduino-cli[^\n]*upload/i)
+})
+
+test('root Makefile delegates only to canonical safe build entry points', async () => {
+	const source = await readFile(join(PROJECT_ROOT, 'Makefile'), 'utf8')
+	assert.match(source, /cmd\.exe \/d \/c call build\.cmd/u)
+	assert.match(source, /\.\/build\.sh/u)
+	assert.match(source, /^virtual-board:/mu)
+	assert.match(source, /^virtual-board-relwithdebinfo:/mu)
+	assert.match(source, /--virtual-board-only/u)
+	assert.doesNotMatch(source, /--upload|--install-bootloader|powershell|pwsh/i)
 })
 
 test('all public launchers advertise the shared Node runtime floor', async () => {
