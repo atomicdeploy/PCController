@@ -91,7 +91,7 @@ const capabilityGroups = {
   host_configuration: [
     "controller.host_menu.configure", "controller.host_menu.config.set", "controller.ui.config.set",
     "controller.peripherals.set", "controller.hotkeys.set", "controller.os.configure",
-    "controller.lcd.presentation.configure", "controller.app.page", "controller.app.navigate",
+    "controller.lcd.presentation.configure", "controller.app.page", "controller.app.navigate", "controller.app.launch",
     "controller.app.instance.report", "controller.app.instance.remove",
 		"controller.network.peers.set",
   ],
@@ -162,6 +162,7 @@ const methodOverrides = {
 	"controller.opcode.request": "Alias for an opaque versionless UART opcode exchange.",
 	"controller.opcode.send": "Send an opaque versionless UART opcode; ACK is expected by default.",
 	"controller.app.navigate": "Navigate all, one surface, or one exact live application instance.",
+	"controller.app.launch": "Ensure, launch, or focus a named TUI or WebUI surface without arbitrary process execution.",
 	"controller.app.action": "Route a validated page, title, OSC progress, raw OSC, port, command, or lifecycle action to live application instances.",
   "controller.app.instances": "List live application instances and their bounded non-secret state.",
   "controller.app.bridge": "Return the original coordinator bridge instance and its bounded process self-information.",
@@ -249,6 +250,7 @@ const routes = [
   { path: "/api/app/instances", methods: ["post", "delete"], capability: "host_configuration", summary: "Report or remove one live application instance" },
 	{ path: "/api/app/action", methods: ["post"], capability: "host_configuration", summary: "Route a validated action to all, one surface, or one live application instance" },
   { path: "/api/app/navigate", methods: ["post"], capability: "host_configuration", summary: "Navigate all, one surface, or one exact application instance" },
+  { path: "/api/app/launch", methods: ["post"], capability: "host_configuration", summary: "Ensure, launch, or focus a named TUI or WebUI surface" },
   { path: "/api/bridges", methods: ["get"], capability: "read", summary: "Configured bridge state" },
   { path: "/api/bridges/call", methods: ["post"], capability: "bridge_calls", summary: "Correlated bridge call" },
   { path: "/api/artifacts/manifest", methods: ["get"], capability: "read", summary: "Artifact/default/current manifest" },
@@ -344,6 +346,8 @@ function operationFor(route, method) {
 						? { $ref: "#/components/schemas/AppInstanceReport" }
 						: route.path === "/api/app/navigate"
 							? { $ref: "#/components/schemas/AppNavigation" }
+							: route.path === "/api/app/launch"
+								? { $ref: "#/components/schemas/AppSurfaceLaunch" }
 				: { type: "object", additionalProperties: true } },
       },
     };
@@ -494,9 +498,20 @@ const openapi = {
 		AppNavigation: {
 			type: "object", required: ["page"], additionalProperties: false,
 			properties: {
-				page: { type: "string", pattern: "^[A-Za-z0-9._/-]{1,96}$" },
+				page: { type: "string", pattern: "^[A-Za-z0-9._-]{1,96}$" },
 				target: { type: "string", pattern: "^(?:\\*|[A-Za-z0-9._:-]{1,180})$", default: "*" },
 			},
+		},
+		AppSurfaceLaunch: {
+			type: "object", required: ["surface"], additionalProperties: false,
+			properties: {
+				surface: { type: "string", enum: ["tui", "webui"] },
+				mode: { type: "string", enum: ["ensure", "launch", "focus"], default: "ensure" },
+				target: { type: "string", pattern: "^[A-Za-z0-9._:-]{1,180}$" },
+				page: { type: "string", pattern: "^[A-Za-z0-9._/-]{1,96}$" },
+				idempotency_key: { type: "string", pattern: "^[A-Za-z0-9._:-]{1,180}$" },
+			},
+			description: "Named product surface only. Executables, arguments, environment, shell text, and credentials are not accepted.",
 		},
       JSONRPCError: {
         type: "object", required: ["code", "message"], additionalProperties: false,

@@ -61,6 +61,38 @@ func TestRESTAppActionCannotInjectCoordinatorNavigationMetadata(t *testing.T) {
 	}
 }
 
+func TestRESTAppLaunchReturnsTruthfulTypedOutcome(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	defer client.Shutdown()
+	var received hostui.SurfaceLaunchRequest
+	handler := websocketMux(context.Background(), &Service{
+		Client: client,
+		AppLaunch: func(
+			_ context.Context,
+			request hostui.SurfaceLaunchRequest,
+		) (hostui.SurfaceLaunchResult, error) {
+			received = request
+			return hostui.SurfaceLaunchResult{
+				Surface: request.Surface, Requested: request.Mode,
+				Effective: "unavailable", Reason: "no graphical session",
+				IdempotencyKey: request.IdempotencyKey,
+			}, nil
+		},
+	})
+	request := httptest.NewRequest(
+		http.MethodPost, "/api/app/launch",
+		strings.NewReader(`{"surface":"webui","mode":"ensure","idempotency_key":"rest-launch"}`),
+	)
+	request.RemoteAddr = "127.0.0.1:43210"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"effective":"unavailable"`) ||
+		received.Surface != "webui" || received.IdempotencyKey != "rest-launch" {
+		t.Fatalf("status=%d body=%s received=%#v", response.Code, response.Body.String(), received)
+	}
+}
+
 // TestCanonicalRESTRouteInventory exercises every implemented REST group through
 // the real top-level multiplexer. A missing registration therefore fails here
 // before a browser client, peer, or updater can silently drift from the server.
@@ -106,6 +138,15 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 	config.Integrations.InboundWebhooksEnabled = true
 	service := &Service{
 		Client: client,
+		AppLaunch: func(
+			_ context.Context,
+			request hostui.SurfaceLaunchRequest,
+		) (hostui.SurfaceLaunchResult, error) {
+			return hostui.SurfaceLaunchResult{
+				Surface: request.Surface, Requested: request.Mode,
+				Effective: "existing", Accepted: true, Confirmed: true,
+			}, nil
+		},
 		WebhookAdmin: func() WebhookAdminService {
 			return &fakeWebhookAdmin{}
 		},
@@ -156,6 +197,7 @@ func TestCanonicalRESTRouteInventory(t *testing.T) {
 		{name: "message", method: http.MethodPost, path: "/api/messages", body: `{"source":"client","target":"host","type":"operator.notice","text":"inventory"}`},
 		{name: "display", method: http.MethodPost, path: "/api/display", body: `{"target":"segments","text":"TEST","repeat":"once"}`},
 		{name: "app action", method: http.MethodPost, path: "/api/app/action", body: `{"kind":"app.progress","value":"normal 42","target":"tui"}`},
+		{name: "app launch", method: http.MethodPost, path: "/api/app/launch", body: `{"surface":"webui","mode":"ensure"}`},
 		{name: "bridge list", method: http.MethodGet, path: "/api/bridges"},
 		{name: "bridge call", method: http.MethodPost, path: "/api/bridges/call", body: `{}`},
 		{name: "outbound webhook status", method: http.MethodGet, path: "/api/webhooks/outbound/status"},

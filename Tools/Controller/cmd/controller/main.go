@@ -240,6 +240,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runNetwork(args[1:], stdout, stderr, store)
 	case "desktop":
 		return runDesktop(args[1:], stdout, store)
+	case "app":
+		return runApp(args[1:], stdout, stderr, store)
 	case "uri", "action":
 		return runURIAction(args[1:], stdout, stderr, store)
 	default:

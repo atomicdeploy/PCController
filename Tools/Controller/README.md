@@ -788,6 +788,9 @@ bin\controller.exe ipc call --method controller.app.instances
 bin\controller.exe ipc call --method controller.app.bridge
 bin\controller.exe ipc call --method controller.app.instance.get --params "{\"id\":\"webui:EXAMPLE\"}"
 bin\controller.exe ipc call --method controller.app.navigate --params "{\"page\":\"settings\",\"target\":\"webui\"}"
+bin\controller.exe app launch webui --mode ensure --page settings --idempotency-key open-settings-1
+bin\controller.exe app launch tui --mode launch --page updates --peer server --idempotency-key server-tui-1
+bin\controller.exe ipc call --method controller.app.launch --params "{\"surface\":\"tui\",\"mode\":\"ensure\",\"page\":\"updates\",\"idempotency_key\":\"ensure-updates-1\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.title\",\"value\":\"Bench update\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.progress\",\"value\":\"normal 42\",\"target\":\"tui\"}"
 bin\controller.exe ipc call --method controller.app.action --params "{\"kind\":\"app.osc\",\"value\":\"9;4;4;73\",\"target\":\"tui\"}"

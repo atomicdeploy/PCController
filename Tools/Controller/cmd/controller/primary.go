@@ -413,6 +413,10 @@ func startPrimaryIPCAtWithIdentity(
 	server.ipc = service
 	if len(stores) > 0 && stores[0] != nil {
 		store := stores[0]
+		launches := newNamedSurfaceLaunchCoordinator(
+			store, server.instances, server.actions.Publish, listener.Addr().String(),
+		)
+		service.AppLaunch = launches.Launch
 		server.sessionSnapshot = newHostSessionRecorder(sharedClient, store)
 		service.LastSessionSnapshot = server.sessionSnapshot.read
 		proxy, proxyErr := newIntegrationProxy(store)
