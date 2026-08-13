@@ -202,11 +202,14 @@ func resolveConfigSecrets(value Config, resolver *secretstore.Resolver) (Config,
 		*plaintext, *reference = secret, ""
 		return nil
 	}
-	if err := resolve("ipc.auth_token", &result.IPC.AuthToken, &result.IPC.AuthTokenRef); err != nil {
-		return Config{}, err
-	}
+	// #148 keeps every application authentication mechanism dormant during the
+	// immediate alpha. Preserve references in persisted configuration for a
+	// future explicit migration, but never resolve or inject them at runtime.
+	result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
 	for index := range result.Integrations.WebSocketClients {
 		peer := &result.Integrations.WebSocketClients[index]
+		// Outbound bearer credentials remain optional for the bounded transition
+		// where a new alpha host must connect to and replace an older auth-on peer.
 		if err := resolve(fmt.Sprintf("integrations.websocket_clients[%d].auth_token", index), &peer.AuthToken, &peer.AuthTokenRef); err != nil {
 			return Config{}, err
 		}
@@ -236,10 +239,7 @@ func resolveConfigSecrets(value Config, resolver *secretstore.Resolver) (Config,
 
 func failClosedRuntime(value Config) Config {
 	result := clone(value)
-	if result.IPC.AuthTokenRef != "" {
-		result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
-		result.IPC.AllowRemote = false
-	}
+	result.IPC.AuthToken, result.IPC.AuthTokenRef = "", ""
 	for index := range result.Integrations.WebSocketClients {
 		peer := &result.Integrations.WebSocketClients[index]
 		if peer.AuthTokenRef != "" {

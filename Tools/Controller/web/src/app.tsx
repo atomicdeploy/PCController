@@ -30,7 +30,6 @@ import {
   PackageOpen,
   Search,
   Settings,
-  ShieldCheck,
   Sun,
   Volume2,
   VolumeX,
@@ -230,11 +229,11 @@ function sampleFrom(snapshot: Snapshot, at = Date.now()): MetricSample {
   }
 }
 
-function samplesFromHistory(history: HistorySample[]): MetricSample[] {
+function samplesFromHistory(history: HistorySample[], hello: Snapshot['hello']): MetricSample[] {
   return history
     .filter((sample): sample is HistorySample & { status: Snapshot['status'] } => Boolean(sample.status))
     .map((sample) => sampleFrom(
-      { ...emptySnapshot, status: sample.status },
+      { ...emptySnapshot, connected: true, have_status: true, hello, status: sample.status },
       sample.time ? new Date(sample.time).getTime() : Date.now(),
     ))
     .filter((sample) => Number.isFinite(sample.at))
@@ -328,11 +327,30 @@ export function snapshotAfterTransportLoss(
   detail = '',
 ): Snapshot {
   return {
-    ...current,
-    connected: false,
+    ...emptySnapshot,
+    paused: current.paused,
     connection_state: current.paused ? 'paused' : state === 'connecting' ? 'connecting' : 'disconnected',
     connection_reason: detail || (state === 'connecting' ? 'Re-establishing the host event stream' : 'Host event stream unavailable'),
   }
+}
+
+export function controllerConnectionLabel(
+  snapshot: Pick<Snapshot, 'connected' | 'connection_state'>,
+  streamState: 'connecting' | 'open' | 'waiting' | 'closed',
+  boardState: SharedViewProps['transport']['boardState'],
+  locale: Appearance['locale'],
+): string {
+  const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
+  if (streamState === 'connecting') return copy('Connecting', 'در حال اتصال')
+  if (streamState !== 'open') return copy('Disconnected', 'قطع ارتباط')
+  if (boardState === 'loading') return copy('Synchronizing', 'در حال همگام‌سازی')
+  if (snapshot.connected) return copy('Controller connected', 'برد متصل')
+  const controllerState = snapshot.connection_state.trim().toLowerCase()
+  if (controllerState === 'paused') return copy('Paused', 'متوقف')
+  if (['connecting', 'discovering', 'scanning', 'searching'].includes(controllerState)) {
+    return copy('Searching', 'در حال جستجو')
+  }
+  return copy('No controller', 'بدون برد')
 }
 
 export function isCompletedHostUpdate(event: Pick<ControllerEvent, 'kind' | 'metadata'>): boolean {
@@ -358,8 +376,15 @@ export function connectionTransitionCue(
   return connected ? 'connect' : 'disconnect'
 }
 
+export function transportReconnectAvailable(
+  state: 'connecting' | 'open' | 'waiting' | 'closed',
+  demonstration = false,
+): boolean {
+  return !demonstration && (state === 'waiting' || state === 'closed')
+}
+
 export default function App() {
-  const demo = new URLSearchParams(location.search).get('demo') === '1'
+  const demo = import.meta.env.DEV && new URLSearchParams(location.search).get('demo') === '1'
   const [appearance, setAppearance] = useState(loadAppearance)
   const [page, setPage] = useState<PageID>(pageFromLocation)
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -371,6 +396,7 @@ export default function App() {
   const [uiConfig, setUIConfig] = useState<UIConfig | null>(null)
   const [streamState, setStreamState] = useState<'connecting' | 'open' | 'waiting' | 'closed'>(demo ? 'open' : 'connecting')
   const [streamDetail, setStreamDetail] = useState('')
+  const [streamGeneration, setStreamGeneration] = useState(0)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [dialog, setDialog] = useState<DialogState>({ open: false, title: '', body: '', confirmLabel: '' })
   const [dialogBusy, setDialogBusy] = useState(false)
@@ -641,7 +667,7 @@ export default function App() {
 
   useEffect(() => {
     const shouldRead = boardSettingsReadGate.current.shouldRead(snapshot, page === 'settings')
-    if (!snapshot.connected) {
+    if (streamState !== 'open' || !snapshot.connected || !snapshot.have_status) {
       boardSettingsRequestGeneration.current = ''
       setBoardSettingsReadState('idle')
       return
@@ -667,12 +693,14 @@ export default function App() {
     page,
     refresh,
     snapshot.connected,
+    snapshot.have_status,
     snapshot.have_settings,
     snapshot.hello.build_hash,
     snapshot.hello.build_timestamp,
     snapshot.port.instance_id,
     snapshot.port.name,
     snapshot.port.serial_number,
+    streamState,
   ])
 
   const dispatchCommand = useCallback(async (command: string, success?: string): Promise<string> => {
@@ -1035,7 +1063,7 @@ export default function App() {
           rpc<ControllerEvent[]>('controller.history.timeline', { since, limit: 500 }, abort.signal),
         ])
         if (statusHistory.status === 'fulfilled') {
-          const historical = samplesFromHistory(statusHistory.value)
+          const historical = samplesFromHistory(statusHistory.value, value.hello)
           setSamples((current) => [...historical, ...current].slice(-360))
         }
         if (eventHistory.status === 'fulfilled') {
@@ -1057,7 +1085,7 @@ export default function App() {
             // text through its tooltip after the transport had recovered.
             setStreamDetail('')
             setSnapshot((current) => ({ ...current, connected: true, have_status: true, status: update.status, status_updated: update.time }))
-            setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, status: update.status }, new Date(update.time).getTime())])
+            setSamples((current) => [...current.slice(-71), sampleFrom({ ...emptySnapshot, connected: true, have_status: true, hello: value.hello, status: update.status }, new Date(update.time).getTime())])
           },
           event: (event) => {
 			const eventKind = event.kind.toLowerCase()
@@ -1104,6 +1132,8 @@ export default function App() {
               void refresh()
             } else {
               setSnapshot((current) => snapshotAfterTransportLoss(current, state, detail))
+              setSamples([])
+              setEvents([])
             }
           },
         })
@@ -1114,24 +1144,35 @@ export default function App() {
         setBootResolved(true)
         setStreamState('waiting')
         setStreamDetail(cause instanceof Error ? cause.message : String(cause))
+        setSnapshot((current) => snapshotAfterTransportLoss(current, 'waiting', cause instanceof Error ? cause.message : String(cause)))
+        setSamples([])
+        setEvents([])
         setBootTarget(100)
       }
     })()
     return () => { abort.abort(); stopStream() }
-  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance, token])
+  }, [adoptHostAppearance, appInstanceID, demo, navigate, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
+  const authenticationRequired = sessionAuthenticationGuidanceRequired({
+    hostRequiresAuthentication: uiConfig?.auth_required === true,
+    streamState,
+    token,
+    streamDetail,
+    connectionReason: snapshot.connection_reason,
+  })
+  const boardState: SharedViewProps['transport']['boardState'] = demo ||
+    (streamState === 'open' && snapshot.connected && snapshot.have_status)
+    ? 'ready'
+    : !startupProbeResolved || streamState === 'connecting'
+      ? 'loading'
+      : 'unavailable'
   const shared: SharedViewProps = {
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
     transport: {
       streamState,
-      authenticationRequired: sessionAuthenticationGuidanceRequired({
-        hostRequiresAuthentication: uiConfig?.auth_required === true,
-        streamState,
-        token,
-        streamDetail,
-        connectionReason: snapshot.connection_reason,
-      }),
+      authenticationRequired,
+      boardState,
       tabBusSupported,
       tabPeers,
     },
@@ -1172,11 +1213,7 @@ export default function App() {
       : streamState === 'open'
         ? 'neutral'
         : 'warn'
-  const transportLabel = snapshot.connected
-    ? streamState === 'open' ? t('live') : streamState
-    : streamState === 'open'
-      ? appearance.locale === 'fa' ? 'میزبان آماده' : 'Host ready'
-      : t('offline')
+  const transportLabel = controllerConnectionLabel(snapshot, streamState, boardState, appearance.locale)
   const quickCommands = snapshot.connected
     ? [
         ['status', `${snapshot.port.name || (appearance.locale === 'fa' ? 'کنترلر' : 'Controller')} · ${snapshot.status_updated ? formatClock(appearance.locale, snapshot.status_updated) : t('online')}`],
@@ -1196,6 +1233,13 @@ export default function App() {
   const footerTransport = appearance.locale === 'fa'
     ? `WS ${streamState === 'open' ? 'باز' : streamState === 'connecting' ? 'در حال اتصال' : streamState === 'closed' ? 'بسته' : streamState} · ${localizeDigits('fa', tabPeers + 1)} زبانه`
     : `WS ${streamState} · ${tabPeers + 1} ${tabPeers === 0 ? 'tab' : 'tabs'}`
+  const reconnectAvailable = transportReconnectAvailable(streamState, demo)
+  const reconnectTransport = () => {
+    if (!reconnectAvailable) return
+    setStreamDetail('')
+    setStreamState('connecting')
+    setStreamGeneration((currentGeneration) => currentGeneration + 1)
+  }
 
   return (
     <MotionConfig reducedMotion={appearance.reduceMotion ? 'always' : 'user'}>
@@ -1226,7 +1270,7 @@ export default function App() {
           ))}
         </nav>
 
-        <div className="sidebar__footer"><ShieldCheck size={17} /><div><strong>{snapshot.connected ? (appearance.locale === 'fa' ? 'برد متصل' : 'Controller connected') : (appearance.locale === 'fa' ? 'میزبان آماده' : 'Host ready')}</strong><span>{footerTransport}</span></div></div>
+        <div className="sidebar__footer"><Cpu size={17} /><div><strong>{transportLabel}</strong><span>{footerTransport}</span></div></div>
       </aside>
 
       <header className="topbar">
@@ -1235,7 +1279,9 @@ export default function App() {
         <button className="command-trigger" aria-keyshortcuts="Control+K Meta+K" onClick={() => { setPaletteIndex(0); setPalette(true) }}><Search size={16} /><span>{t('searchCommands')}</span><KeyCombo keys={[["Ctrl", "⌘"], "K"]} /></button>
         <div className="topbar__actions">
           {demo && <StatusBadge tone="warn">{t('demoMode')}</StatusBadge>}
-          <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>
+          {reconnectAvailable
+            ? <button className="transport-reconnect" title={streamDetail || undefined} aria-label={appearance.locale === 'fa' ? 'اتصال مجدد فوری میزبان' : 'Reconnect host now'} onClick={reconnectTransport}><StatusBadge tone={transportTone}>{transportLabel}</StatusBadge></button>
+            : <span title={streamDetail || undefined}><StatusBadge tone={transportTone} pulse={streamState === 'connecting'}>{transportLabel}</StatusBadge></span>}
           <button className="topbar-icon" aria-label={t('toggleTheme')} onClick={() => saveAppearance({ ...appearance, theme: (document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark') })}>{document.documentElement.dataset.theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}</button>
           <button className="topbar-icon" aria-label={t('switchLanguage')} onClick={() => saveAppearance({ ...appearance, locale: appearance.locale === 'en' ? 'fa' : 'en' })}><Languages size={18} /></button>
           <button className="topbar-icon topbar-audio" aria-label={t(appearance.audioMuted ? 'enableAudio' : 'muteAudio')} aria-pressed={appearance.audioMuted} aria-keyshortcuts="M" onClick={toggleAudio}>{appearance.audioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}</button>

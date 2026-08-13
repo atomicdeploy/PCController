@@ -3,6 +3,7 @@ import {
   canonicalPageHash,
   canonicalPageURL,
   connectionTransitionCue,
+  controllerConnectionLabel,
   isCompletedHostUpdate,
   navigation,
   normalizeAppearance,
@@ -11,6 +12,7 @@ import {
   shouldOpenSetup,
 	shouldNavigateToUpdates,
   snapshotAfterTransportLoss,
+  transportReconnectAvailable,
 } from './app'
 import { pageOrder } from './hotkeys'
 import { emptySnapshot } from './types'
@@ -48,7 +50,29 @@ describe('transport truth', () => {
     expect(waiting.connected).toBe(false)
     expect(waiting.connection_state).toBe('disconnected')
     expect(waiting.connection_reason).toBe('retrying')
+    expect(waiting.have_status).toBe(false)
+    expect(waiting.hello).toEqual({})
+    expect(waiting.status).toEqual(emptySnapshot.status)
     expect(snapshotAfterTransportLoss(connected, 'connecting').connected).toBe(false)
+  })
+
+  it('offers immediate reconnect only while transport is genuinely disconnected', () => {
+    expect(transportReconnectAvailable('waiting')).toBe(true)
+    expect(transportReconnectAvailable('closed')).toBe(true)
+    expect(transportReconnectAvailable('connecting')).toBe(false)
+    expect(transportReconnectAvailable('open')).toBe(false)
+    expect(transportReconnectAvailable('waiting', true)).toBe(false)
+  })
+
+  it('uses factual no-board state and never claims the alpha host is ready', () => {
+    const label = controllerConnectionLabel(
+      { connected: false, connection_state: 'disconnected' },
+      'open',
+      'unavailable',
+      'en',
+    )
+    expect(label).toBe('No controller')
+    expect(label).not.toBe('Host ready')
   })
 
   it('refreshes embedded resources only after a completed host replacement', () => {
