@@ -225,7 +225,9 @@ void serviceStatusLedPush() {
 }
 
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
-// Reports one built-in page's stable ID, parent category, flags, and label.
+// Reports every stable direct-selector ID. PAGE_MOTION is a non-browsable
+// compatibility alias, but stays in the complete directory so persisted
+// layout clients retain their 14-ID permutation; pageToMode() reports KEY.
 void sendMenuList(uint8_t sequence, uint8_t cursor) {
   uint8_t payload[46] = {1, PAGE_COUNT, 0xFF, 0};
   uint8_t index = 4;

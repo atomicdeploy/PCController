@@ -179,7 +179,7 @@ interface SessionTicket {
 
 async function websocketProtocols(config: UIConfig, signal?: AbortSignal): Promise<string[]> {
   const token = getToken()
-  if (!config.auth_required && !token) return []
+  if (!config.auth_required) return []
   const response = await fetch(controllerHTTPURL(config.session_ticket_path), {
     method: 'POST',
     headers: headers(true),
@@ -196,6 +196,12 @@ async function websocketProtocols(config: UIConfig, signal?: AbortSignal): Promi
   return [ticket.protocol, `${browserTicketPrefix}${ticket.ticket}`]
 }
 
+/** Calculates Socket.IO-style exponential reconnect delay with a hard cap. */
+export function streamRetryDelay(retry: number, random = Math.random): number {
+  const exponential = 500 * 2 ** Math.min(Math.max(0, retry), 5)
+  return Math.min(12_000, exponential + Math.floor(Math.max(0, Math.min(0.999, random())) * 250))
+}
+
 /** Opens the reconnecting event stream and returns a function that closes it. */
 export function connectStream(config: UIConfig, handlers: StreamHandlers): () => void {
   let socket: WebSocket | null = null
@@ -208,7 +214,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
   const scheduleRetry = (detail: string) => {
     if (stopped) return
     retry += 1
-    const delay = Math.min(12_000, 500 * 2 ** Math.min(retry, 5)) + Math.floor(Math.random() * 250)
+    const delay = streamRetryDelay(retry)
     handlers.state('waiting', detail || `retrying in ${Math.ceil(delay / 1000)}s`)
     window.clearTimeout(timer)
     timer = window.setTimeout(() => { void open() }, delay)

@@ -1018,6 +1018,11 @@ func reassertProgrammingSession(
 	session *ProgrammingSession,
 	options ProgrammingLifecycleOptions,
 ) error {
+	var err error
+	options, err = normalizeProgrammingLifecycleOptions(options)
+	if err != nil {
+		return fmt.Errorf("normalize programming recovery options: %w", err)
+	}
 	if err := device.EnterSafeProgrammingState(ctx); err != nil {
 		return fmt.Errorf("reassert safe relays/PWM/macro state: %w", err)
 	}

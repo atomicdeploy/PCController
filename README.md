@@ -316,7 +316,7 @@ for electrical assumptions, mappings, and safe alternatives.
 | Connection | Device controls are available only after authenticated board connection; host-only tools remain usable offline. |
 | Motion | Host starts perform a fresh door-policy check; firmware retains reed gating and break-before-make sequencing. Stop/off operations remain reachable. |
 | Programming | Selection and download are inert. A separate review authorizes each write, backup failure blocks by default, and the primary process owns the programming lifecycle. |
-| Remote access | Loopback is the default. Remote mode requires a long token, explicit origins, and capability policy; token possession does not imply write, reset, programming, power, or bridge authority. |
+| Remote access | Loopback is the default. During the immediate alpha, application authentication and authorization are deliberately disabled by #148 across IPC, HTTP, WebSocket, Socket.IO, peers, and UI configuration. Credential and policy fields remain dormant until an explicit replacement design is approved. |
 | Artifacts | Intel HEX bounds, identity, SHA-256, backup manifests, and post-write readback are validated before success is reported. |
 | Process ownership | Secondary instances route through IPC. Desktop owner actions are explicit, guarded, and never terminate a process automatically. |
 

@@ -391,10 +391,24 @@ test('production KEY dispatches first Down to motion and exits outside KEY', asy
 		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),
 		'utf8'
 	)
+	const model = await readFile(
+		new URL('../../Project/FrontPanelModel.h', import.meta.url),
+		'utf8'
+	)
+	const protocol = await readFile(
+		new URL('../../Project/Runtime/ProtocolRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
 	assert.match(frontPanel, /const bool momentary = mode == MODE_KEYS \|\| mode == MODE_MOTION_CONTROL/u)
 	assert.match(frontPanel, /if \(modeManager\.current\(\) == MODE_KEYS\)[^]*?relays\.allOff\(actionNow\);[^]*?modeManager\.transitionTo\(MODE_MOTION_CONTROL\);/u)
 	assert.match(frontPanel, /mode == MODE_MOTION_CONTROL && event == KeyEvent::Down[^]*?shiftRegisters\.inputActive\(bit \^ 1U\)/u)
 	assert.match(frontPanel, /setMenuPage\(PAGE_DOOR\);/u)
+	assert.match(frontPanel, /!menuPageNavigable\(candidate\)/u)
+	assert.match(frontPanel, /menuPageNavigable\(page\)[^]*?menuCategory\(page\) == category/u)
+	assert.match(frontPanel, /adjacentBuiltInMenuPage[^]*?PAGE_USER_RELAYS[^]*?PAGE_RF[^]*?PAGE_RF[^]*?PAGE_USER_RELAYS/u)
+	assert.match(model, /page < PAGE_COUNT && page != PAGE_MOTION/u)
+	assert.match(protocol, /\{1, PAGE_COUNT, 0xFF, 0\}/u)
+	assert.match(protocol, /pageToMode\(cursor\)/u)
 	assert.doesNotMatch(frontPanel, /case MODE_MOTION_CONTROL:\s*relays\.allOff\(at\);/u)
 })
 

@@ -85,7 +85,8 @@ uint8_t nextConfiguredMenuPage(uint8_t page, bool forward,
       rank = static_cast<uint8_t>(rank - PAGE_COUNT);
     }
     const uint8_t candidate = configuredMenuPageAt(rank);
-    if (!settingsStore.values().menuPageVisible(candidate)) {
+    if (!menuPageNavigable(candidate) ||
+        !settingsStore.values().menuPageVisible(candidate)) {
       continue;
     }
 #if PCCONTROLLER_MENU_HIERARCHY
@@ -106,7 +107,8 @@ uint8_t nextConfiguredMenuPage(uint8_t page, bool forward,
 uint8_t firstConfiguredMenuPage(uint8_t category) {
   for (uint8_t rank = 0; rank < PAGE_COUNT; ++rank) {
     const uint8_t page = configuredMenuPageAt(rank);
-    if (settingsStore.values().menuPageVisible(page) &&
+    if (menuPageNavigable(page) &&
+        settingsStore.values().menuPageVisible(page) &&
         menuCategory(page) == category) {
       return page;
     }
