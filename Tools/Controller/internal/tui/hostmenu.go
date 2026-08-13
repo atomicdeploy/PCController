@@ -132,7 +132,7 @@ func hostMenuPanelState(snapshot hostmenu.Snapshot) FrontPanelState {
 	}
 }
 
-func renderHostMenuDirectory(manager *hostmenu.Manager, width int) string {
+func renderHostMenuDirectory(manager *hostmenu.Manager, width int, keyControlsAvailable bool) string {
 	if manager == nil {
 		return labelStyle.Render("Host-owned menus unavailable in this frontend.")
 	}
@@ -142,8 +142,12 @@ func renderHostMenuDirectory(manager *hostmenu.Manager, width int) string {
 	if active.Active {
 		lines = append(lines,
 			valueStyle.Render(fmt.Sprintf("ACTIVE · %s / %s · %d of %d", active.MenuTitle, active.ItemTitle, active.Cursor+1, active.Count)),
-			labelStyle.Render("K1/K2 navigate · K3/K4 adjust · hold K3 back · guarded actions require hold K4"),
 		)
+		if keyControlsAvailable {
+			lines = append(lines, labelStyle.Render("K1/K2 navigate · K3/K4 adjust · hold K3 back · guarded actions require hold K4"))
+		} else {
+			lines = append(lines, warnStyle.Render("Front-panel key controls unavailable · waiting for exact panel and RemoteKeys readback"))
+		}
 	} else {
 		lines = append(lines, labelStyle.Render("inactive · default "+config.DefaultMenu))
 	}
