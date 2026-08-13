@@ -70,6 +70,24 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 			t.Fatalf("status profile %d = % X, want % X (err=%v)", condition, record[:EEPROMStatusProfileBytes], encoded[1:], err)
 		}
 	}
+	labels, err := image.BytesAt(EEPROMMenuLabelsAddress, EEPROMMenuLabelBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(labels), defaultEEPROMMenuLabels; got != want {
+		t.Fatalf("factory menu labels = %q, want %q", got, want)
+	}
+	all, err := image.BytesAt(0, PCControllerEEPROMBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !validMenuLabelsRecord(all) {
+		t.Fatal("factory menu-label record did not pass versioned CRC validation")
+	}
+	if all[EEPROMMenuLabelsCommitAddress] != EEPROMMenuLabelsFormatMarker ||
+		all[EEPROMMenuLabelsCRCAddress] != menuLabelsCRC(labels) {
+		t.Fatalf("factory menu-label header = % X", all[EEPROMMenuLabelsHeaderAddress:EEPROMMenuLabelsHeaderEnd])
+	}
 }
 
 func TestGenerateProgrammingEEPROMIntelHexArmsQuietVisibleLatch(t *testing.T) {
