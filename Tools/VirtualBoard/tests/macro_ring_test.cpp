@@ -106,6 +106,34 @@ void testMalformedRecordAndSafeStop() {
           "malformed record did not fail closed with one safe-stop request");
 }
 
+void testOversizedHeaderCannotStarvePlayback() {
+  MacroRing ring = makeRing();
+  ring.begin(4, 0, 2);
+  const std::array<std::uint8_t, 12> records{{
+      0, 0, 0, 0, 0x40, 0,
+      0, 0, 0, 0, 0x41, 0xFF,
+  }};
+  require(ring.append(0, 2, records.data(),
+                      static_cast<std::uint8_t>(records.size()), 0) &&
+              ring.start(0),
+          "oversized-header fixture could not enter playback");
+
+  MacroRing::Command command{};
+  std::array<std::uint8_t, 48> payload{};
+  require(ring.dequeueDue(0, command, payload.data(),
+                          static_cast<std::uint8_t>(payload.size())) ==
+              MacroRing::Ready &&
+              !ring.completeStep(true),
+          "valid record before oversized header did not complete");
+  require(ring.dequeueDue(0, command, payload.data(),
+                          static_cast<std::uint8_t>(payload.size())) ==
+              MacroRing::Malformed &&
+              ring.status().report.state == MacroRing::Failed &&
+              ring.status().report.dispatchErrors == 1 &&
+              ring.takeSafeStopRequest() && !ring.takeSafeStopRequest(),
+          "oversized header starved playback instead of failing safe once");
+}
+
 void testCancelOptions() {
   MacroRing keepOutputs = makeRing();
   keepOutputs.begin(4, MacroRing::KeepOutputsOnCancel, 1);
@@ -128,6 +156,7 @@ int main() {
     testSchemaTwoLifecycleAndRollover();
     testBoundedQueueAndStartGate();
     testMalformedRecordAndSafeStop();
+    testOversizedHeaderCannotStarvePlayback();
     testCancelOptions();
     std::cout << "firmware_macro_ring_tests: all checks passed\n";
     return 0;

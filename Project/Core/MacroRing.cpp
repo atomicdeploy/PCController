@@ -92,7 +92,7 @@ MacroRing::DequeueResult MacroRing::dequeueDue(uint32_t nowUs,
                                                 uint8_t payloadCapacity) {
   Report &report = status_.report;
   while (report.state == Playing && report.executedSteps < report.totalSteps) {
-    if (!recordReady()) {
+    if (used_ < RecordHeaderBytes) {
       return NotDue;
     }
     const uint8_t payloadLength = peek(5);
@@ -101,6 +101,9 @@ MacroRing::DequeueResult MacroRing::dequeueDue(uint32_t nowUs,
       ++report.dispatchErrors;
       fail();
       return Malformed;
+    }
+    if (!recordReady()) {
+      return NotDue;
     }
     if (static_cast<int32_t>(nowUs - (report.startedAtUs + peekU32(0))) < 0) {
       return NotDue;
