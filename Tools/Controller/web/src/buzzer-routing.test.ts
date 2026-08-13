@@ -45,4 +45,17 @@ describe('BuzzerPlaybackTimeline', () => {
     expect(timeline.plan({ source: 'a', frequencyHz: 440, durationMS: 10, deviceMicros: 1_000 }, 20)?.delayMS).toBe(8)
     expect(timeline.plan({ source: 'b', frequencyHz: 440, durationMS: 10, deviceMicros: 2_000 }, 30)?.delayMS).toBe(8)
   })
+
+  it('reanchors a fresh note after a whole micros wrap of silence', () => {
+    const timeline = new BuzzerPlaybackTimeline()
+    expect(timeline.plan({
+      source: 'board-a', frequencyHz: 440, durationMS: 100, deviceMicros: 10_000,
+    }, 1000)?.delayMS).toBe(8)
+    const afterWholeWrapAndThirtySecondsMS = 1000 + 0x1_0000_0000 / 1000 + 30_000
+    expect(timeline.plan({
+      source: 'board-a', frequencyHz: 440, durationMS: 100, deviceMicros: 30_010_000,
+    }, afterWholeWrapAndThirtySecondsMS)).toEqual({
+      delayMS: 8, durationMS: 100, audible: true, stop: false,
+    })
+  })
 })
