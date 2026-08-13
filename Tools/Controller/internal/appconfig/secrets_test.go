@@ -3,7 +3,6 @@ package appconfig
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,7 +42,7 @@ func secretReferenceConfig() Config {
 	value := Defaults()
 	value.IPC.AllowRemote = true
 	value.IPC.Listen = "0.0.0.0:8787"
-	value.IPC.AllowedOrigins = []string{"https://controller.example"}
+	value.IPC.AllowedOrigins = []string{"controller.example:443"}
 	value.IPC.AuthTokenRef = "os:ipc.remote"
 	value.Integrations.OutboundWebhooks = []Webhook{{
 		Name: "events", Enabled: true, URL: "https://events.example/hook", Method: "POST",
@@ -80,8 +79,8 @@ func TestStoreResolvesReferencesOnlyForRuntimeViews(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runtime.IPC.AuthToken != backend.values["ipc.remote"] || runtime.IPC.AuthTokenRef != "" {
-		t.Fatalf("runtime IPC secret was not isolated: %#v", runtime.IPC)
+	if runtime.IPC.AuthToken != "" || runtime.IPC.AuthTokenRef != "" {
+		t.Fatalf("dormant alpha IPC credential reached runtime: %#v", runtime.IPC)
 	}
 	if secret, err := store.ResolveSecret("os:ipc.remote"); err != nil || secret != backend.values["ipc.remote"] {
 		t.Fatalf("explicit secret resolution failed: value=%q err=%v", secret, err)
@@ -156,8 +155,8 @@ func TestSecretMutationNotifiesRuntimeAndRejectsReferencedDelete(t *testing.T) {
 	}
 	select {
 	case update := <-updates:
-		if update.IPC.AuthToken != "abcdefghijklmnopqrstuvwx" {
-			t.Fatalf("runtime update token was not refreshed")
+		if update.IPC.AuthToken != "" || update.IPC.AuthTokenRef != "" || !update.IPC.AllowRemote {
+			t.Fatalf("dormant alpha credential changed runtime: %#v", update.IPC)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("runtime subscriber was not notified")
@@ -181,7 +180,7 @@ func TestSecretMutationNotifiesRuntimeAndRejectsReferencedDelete(t *testing.T) {
 	}
 }
 
-func TestReloadRejectsMissingReferenceAndRetainsLastGoodConfig(t *testing.T) {
+func TestReloadAcceptsMissingDormantAuthenticationReference(t *testing.T) {
 	backend := &configSecretBackend{values: map[string]string{}}
 	path := filepath.Join(t.TempDir(), "config.json")
 	base := Defaults()
@@ -197,11 +196,11 @@ func TestReloadRejectsMissingReferenceAndRetainsLastGoodConfig(t *testing.T) {
 	if err := Write(path, candidate); err != nil {
 		t.Fatal(err)
 	}
-	if _, changed, err := store.Reload(); err == nil || changed || !errors.Is(err, secretstore.ErrNotFound) {
+	if _, changed, err := store.Reload(); err != nil || !changed {
 		t.Fatalf("reload changed=%t err=%v", changed, err)
 	}
-	if store.Current().IPC.AuthTokenRef != "" {
-		t.Fatal("missing-reference config replaced last good value")
+	if store.Current().IPC.AuthTokenRef != "os:missing" || store.CurrentRuntime().IPC.AuthTokenRef != "" || store.CurrentRuntime().IPC.AuthToken != "" {
+		t.Fatalf("dormant reference was not persisted-only: current=%#v runtime=%#v", store.Current().IPC, store.CurrentRuntime().IPC)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)

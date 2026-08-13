@@ -90,6 +90,9 @@ func TestHostInstanceRecordResolvesAuthenticatedPrimaryAtDifferentEndpoint(t *te
 		t.Fatal(err)
 	}
 	defer server.Close()
+	if server.ipc == nil || !server.ipc.AuthorizationDisabled {
+		t.Fatal("production primary did not activate the explicit alpha authorization contract")
+	}
 	if err := os.WriteFile(paths.RecordPath, []byte("stale"), 0o600); err != nil {
 		t.Fatal(err)
 	}

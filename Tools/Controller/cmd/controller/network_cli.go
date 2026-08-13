@@ -47,12 +47,9 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		flags := flag.NewFlagSet("network edge-enable", flag.ContinueOnError)
 		flags.SetOutput(stderr)
 		listen := flags.String("listen", "0.0.0.0:8787", "LAN IPC/API/WebSocket listen address")
-		principal := flags.String("principal", "lan-operator", "remote audit principal")
-		secretRef := flags.String("secret-ref", "os:ipc/edge-lan", "OS-vault reference for the generated bearer token")
 		instance := flags.String("instance", "", "mDNS/SSDP instance name (hostname by default)")
-		tokenEnvironment := flags.String("token-env", "", "read an existing bearer token from this environment variable instead of generating one")
 		origins := stringListFlag{}
-		flags.Var(&origins, "origin", "allowed browser origin host pattern, repeatable (for example David-PC:*)")
+		flags.Var(&origins, "origin", "allowed non-wildcard browser origin host and port, repeatable (for example David-PC:*)")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -63,33 +60,17 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if err != nil || strings.TrimSpace(host) == "" {
 			return errors.New("--listen must be a concrete host:port address")
 		}
+		hostname, _ := os.Hostname()
 		if len(origins) == 0 {
-			origins = append(origins, "localhost:*", "127.0.0.1:*", "[::1]:*")
+			origins = defaultEdgeOrigins(host, hostname)
 		}
 		if *instance == "" {
-			*instance, _ = os.Hostname()
-		}
-		var token string
-		if name := strings.TrimSpace(*tokenEnvironment); name != "" {
-			token = strings.TrimSpace(os.Getenv(name))
-			if len(token) < 24 || len(token) > 512 || strings.ContainsAny(token, "\r\n\t ") {
-				return fmt.Errorf("%s must contain a 24..512 byte bearer token without whitespace", name)
-			}
-		} else {
-			tokenBytes := make([]byte, 32)
-			if _, err := rand.Read(tokenBytes); err != nil {
-				return fmt.Errorf("generate LAN bearer token: %w", err)
-			}
-			token = base64.RawURLEncoding.EncodeToString(tokenBytes)
-		}
-		if err := store.SetSecret(*secretRef, token); err != nil {
-			return fmt.Errorf("store LAN bearer token: %w", err)
+			*instance = hostname
 		}
 		_, err = store.Update(func(config *appconfig.Config) error {
 			config.IPC.Listen = *listen
 			config.IPC.AllowRemote = true
-			config.IPC.AuthToken, config.IPC.AuthTokenRef = "", *secretRef
-			config.IPC.RemotePrincipal = *principal
+			config.IPC.AuthToken, config.IPC.AuthTokenRef = "", ""
 			config.IPC.AllowedOrigins = append([]string(nil), origins...)
 			config.IPC.RemotePolicy = appconfig.RemoteAccessPolicy{
 				Read: true, Events: true, Messages: true, BoardCommands: true,
@@ -107,13 +88,12 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return nil
 		})
 		if err != nil {
-			_ = store.DeleteSecret(*secretRef)
 			return err
 		}
-		fmt.Fprintln(stdout, "LAN edge mode enabled with an OS-vault bearer token (value hidden).")
+		fmt.Fprintln(stdout, "LAN edge mode enabled with alpha application authentication disabled.")
 		fmt.Fprintln(stdout, "IPC/API/WebSocket:", *listen)
 		fmt.Fprintln(stdout, "Discovery: DNS-SD/mDNS + SSDP/UPnP + WS-Discovery + UDP broadcast + NetBIOS as", *instance)
-		fmt.Fprintln(stdout, "Remote programming is enabled; shutdown, virtual-key, and power-action capabilities remain disabled.")
+		fmt.Fprintln(stdout, "Alpha requests are credentialless and capability grants are dormant; allow_remote, Origin, topology, and bridge no-chain checks remain active.")
 		fmt.Fprintln(stdout, "Restart the controller host after applying the required private-profile firewall rule.")
 		return nil
 	case "peer-add", "add-peer":
@@ -126,15 +106,15 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		forwardEvents := flags.Bool("forward-events", true, "forward loop-safe typed events")
 		allowCommands := flags.Bool("allow-commands", true, "permit correlated bridge calls")
 		topics := stringListFlag{}
-		flags.Var(&topics, "topic", "events or status subscription, repeatable")
+		flags.Var(&topics, "topic", "events, state, or status subscription, repeatable")
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		if flags.NArg() != 0 || strings.TrimSpace(*name) == "" || strings.TrimSpace(*url) == "" || strings.TrimSpace(*secretRef) == "" {
-			return errors.New("usage: controller network peer-add --name NAME --url ws://HOST:PORT/ipc --secret-ref REF [--topic events|status]")
+		if flags.NArg() != 0 || strings.TrimSpace(*name) == "" || strings.TrimSpace(*url) == "" {
+			return errors.New("usage: controller network peer-add --name NAME --url ws://HOST:PORT/ipc [--secret-ref REF] [--topic events|state|status]")
 		}
 		if len(topics) == 0 {
-			topics = []string{"events", "status"}
+			topics = []string{"events", "state", "status"}
 		}
 		peer := appconfig.WebSocketClient{
 			Name: strings.TrimSpace(*name), Enabled: true, URL: strings.TrimSpace(*url),
@@ -196,12 +176,16 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		if flags.NArg() != 0 || strings.TrimSpace(*address) == "" || strings.TrimSpace(*tokenRef) == "" {
-			return errors.New("usage: controller network probe --addr HOST:PORT --token-ref REF [--origin URL]")
+		if flags.NArg() != 0 || strings.TrimSpace(*address) == "" {
+			return errors.New("usage: controller network probe --addr HOST:PORT [--token-ref REF] [--origin URL]")
 		}
-		token, err := store.ResolveSecret(*tokenRef)
-		if err != nil {
-			return fmt.Errorf("resolve LAN probe token: %w", err)
+		token := ""
+		if strings.TrimSpace(*tokenRef) != "" {
+			resolved, err := store.ResolveSecret(*tokenRef)
+			if err != nil {
+				return fmt.Errorf("resolve LAN probe token: %w", err)
+			}
+			token = resolved
 		}
 		if *origin == "" {
 			hostname, _ := os.Hostname()
@@ -256,7 +240,7 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 			return err
 		}
 		fmt.Fprintf(stdout, "Network advertisement enabled=%t protocols=%s broadcast_port=%d\n", *enabled, strings.Join(enabledProtocolNames(configured), ","), configured.BroadcastPort)
-		fmt.Fprintln(stdout, "Remote command access remains governed separately by ipc.allow_remote, bearer authentication, and remote_policy.")
+		fmt.Fprintln(stdout, "Remote command access still requires ipc.allow_remote; alpha requests are credentialless while Origin, topology, and bridge no-chain checks remain active.")
 		return nil
 	case "discover", "list":
 		flags := flag.NewFlagSet("network discover", flag.ContinueOnError)
@@ -311,8 +295,8 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if err := flags.Parse(args[1:]); err != nil {
 			return err
 		}
-		if flags.NArg() != 0 || strings.TrimSpace(*target) == "" || strings.TrimSpace(*tokenRef) == "" || *timeout < time.Second || *timeout > 30*time.Second {
-			return errors.New("usage: controller network connect --target NAME|HOST --token-ref REF [--timeout 15s]")
+		if flags.NArg() != 0 || strings.TrimSpace(*target) == "" || *timeout < time.Second || *timeout > 30*time.Second {
+			return errors.New("usage: controller network connect --target NAME|HOST [--token-ref REF] [--timeout 15s]")
 		}
 		options, err := parseDiscoveryOptions(*protocols)
 		if err != nil {
@@ -333,9 +317,13 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if err != nil {
 			return err
 		}
-		token, err := store.ResolveSecret(*tokenRef)
-		if err != nil {
-			return fmt.Errorf("resolve discovered-host token: %w", err)
+		token := ""
+		if strings.TrimSpace(*tokenRef) != "" {
+			resolved, err := store.ResolveSecret(*tokenRef)
+			if err != nil {
+				return fmt.Errorf("resolve discovered-host token: %w", err)
+			}
+			token = resolved
 		}
 		if *origin == "" {
 			hostname, _ := os.Hostname()
@@ -346,9 +334,13 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 		if err := probeEdgeNetworkWithEndpoints(ctx, endpoints, strings.TrimSpace(*origin), token, stdout); err != nil {
 			return err
 		}
-		provenAddress, proveErr := verifyEdgeServerProof(ctx, lanProbeHTTPClient(), address, token)
-		if proveErr != nil {
-			return fmt.Errorf("revalidate server before publishing connection: %w", proveErr)
+		provenAddress := address
+		if token != "" {
+			var proveErr error
+			provenAddress, proveErr = verifyEdgeServerProof(ctx, lanProbeHTTPClient(), address, token)
+			if proveErr != nil {
+				return fmt.Errorf("revalidate server before publishing connection: %w", proveErr)
+			}
 		}
 		primaryContext, stopPrimary := context.WithTimeout(context.Background(), 5*time.Second)
 		if primaryAvailable(primaryContext) {
@@ -384,11 +376,34 @@ func runNetwork(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 				return fmt.Errorf("LAN access disabled but token cleanup failed: %w", err)
 			}
 		}
-		fmt.Fprintln(stdout, "LAN edge mode disabled; IPC returned to authenticated-safe loopback defaults.")
+		fmt.Fprintln(stdout, "LAN edge mode disabled; IPC returned to loopback-only defaults.")
 		return nil
 	default:
 		return errors.New("usage: controller network advertise|discover|list|connect|probe|edge-enable|edge-disable|peer-add|peer-remove|status")
 	}
+}
+
+func defaultEdgeOrigins(listenHost, hostname string) stringListFlag {
+	result := stringListFlag{"localhost:*", "127.0.0.1:*", "[::1]:*"}
+	appendHost := func(value string) {
+		value = strings.Trim(strings.TrimSpace(value), "[]")
+		if value == "" {
+			return
+		}
+		if parsed := net.ParseIP(value); parsed != nil && parsed.IsUnspecified() {
+			return
+		}
+		pattern := net.JoinHostPort(value, "*")
+		for _, existing := range result {
+			if strings.EqualFold(existing, pattern) {
+				return
+			}
+		}
+		result = append(result, pattern)
+	}
+	appendHost(hostname)
+	appendHost(listenHost)
+	return result
 }
 
 func optionsTimeoutMilliseconds(value time.Duration) int64 {
@@ -543,14 +558,16 @@ func probeEdgeNetworkWithEndpoints(ctx context.Context, endpoints edgeProbeEndpo
 		return fmt.Errorf("probe address must be host:port: %w", err)
 	}
 	httpClient := lanProbeHTTPClient()
-	provenAddress, err := verifyEdgeServerProof(ctx, httpClient, address, token)
-	if err != nil {
-		return err
+	if token != "" {
+		provenAddress, err := verifyEdgeServerProof(ctx, httpClient, address, token)
+		if err != nil {
+			return err
+		}
+		address = provenAddress
+		fmt.Fprintln(output, "✅ responder-bound server authentication proof")
 	}
-	address = provenAddress
 	endpoints.WebSocketURL = pinnedWebSocketURL(address, endpoints.WebSocketURL, "/ipc")
 	endpoints.SocketIOURL = pinnedWebSocketURL(address, endpoints.SocketIOURL, "/socket.io/")
-	fmt.Fprintln(output, "✅ responder-bound server authentication proof")
 	response, err := ipcjson.Call(ctx, address, ipcjson.Request{Method: "controller.ping", Auth: token})
 	if err != nil {
 		return fmt.Errorf("raw IPC probe: %w", err)
@@ -558,18 +575,25 @@ func probeEdgeNetworkWithEndpoints(ctx context.Context, endpoints edgeProbeEndpo
 	if response.Error != nil {
 		return fmt.Errorf("raw IPC probe: %w", response.Error)
 	}
-	fmt.Fprintln(output, "✅ authenticated raw IPC")
+	fmt.Fprintln(output, "✅ raw IPC")
 
-	ticket, err := requestProbeTicket(ctx, httpClient, address, origin, token, "websocket")
-	if err != nil {
-		return err
+	var ticket probeTicket
+	if token != "" {
+		ticket, err = requestProbeTicket(ctx, httpClient, address, origin, token, "websocket")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(output, "✅ protected HTTP API ticket exchange")
 	}
-	fmt.Fprintln(output, "✅ protected HTTP API ticket exchange")
+	protocols := []string(nil)
+	if ticket.Ticket != "" {
+		protocols = []string{ticket.Protocol, "pccontroller.ticket." + ticket.Ticket}
+	}
 
 	connection, handshake, err := websocket.Dial(ctx, endpoints.WebSocketURL, &websocket.DialOptions{
 		HTTPClient:   httpClient,
 		HTTPHeader:   http.Header{"Origin": []string{origin}},
-		Subprotocols: []string{ticket.Protocol, "pccontroller.ticket." + ticket.Ticket},
+		Subprotocols: protocols,
 	})
 	if err != nil {
 		if handshake != nil {
@@ -588,16 +612,19 @@ func probeEdgeNetworkWithEndpoints(ctx context.Context, endpoints edgeProbeEndpo
 	if !bytes.Contains(payload, []byte(`"ok":true`)) {
 		return fmt.Errorf("WebSocket JSON-RPC probe returned an unexpected response: %s", payload)
 	}
-	fmt.Fprintln(output, "✅ one-use-ticket WebSocket JSON-RPC")
+	fmt.Fprintln(output, "✅ WebSocket JSON-RPC")
 
-	socketTicket, err := requestProbeTicket(ctx, httpClient, address, origin, token, "socket_io")
-	if err != nil {
-		return err
+	var socketTicket probeTicket
+	if token != "" {
+		socketTicket, err = requestProbeTicket(ctx, httpClient, address, origin, token, "socket_io")
+		if err != nil {
+			return err
+		}
 	}
 	if err := probeSocketIO(ctx, httpClient, endpoints.SocketIOURL, origin, socketTicket); err != nil {
 		return err
 	}
-	fmt.Fprintln(output, "✅ one-use-ticket Socket.IO RPC")
+	fmt.Fprintln(output, "✅ Socket.IO RPC")
 	fmt.Fprintln(output, "LAN IPC/API/WebSocket/Socket.IO probe complete; no credential value was printed.")
 	return nil
 }
@@ -711,9 +738,13 @@ func probeSocketIO(ctx context.Context, client *http.Client, endpoint, origin st
 	query.Set("EIO", "4")
 	query.Set("transport", "websocket")
 	target.RawQuery = query.Encode()
+	protocols := []string(nil)
+	if ticket.Ticket != "" {
+		protocols = []string{ticket.Protocol, "pccontroller.ticket." + ticket.Ticket}
+	}
 	connection, handshake, err := websocket.Dial(ctx, target.String(), &websocket.DialOptions{
 		HTTPClient: client, HTTPHeader: http.Header{"Origin": []string{origin}},
-		Subprotocols: []string{ticket.Protocol, "pccontroller.ticket." + ticket.Ticket},
+		Subprotocols: protocols,
 	})
 	if err != nil {
 		if handshake != nil {

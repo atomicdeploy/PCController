@@ -468,7 +468,18 @@ still interoperate.
 ### Authentication and exposure
 
 Loopback-only use is the safe default. When `ipc.allow_remote` is false, a
-non-loopback bind is rejected. Remote access requires all of the following:
+non-loopback bind is rejected. Current production alpha constructors set an
+explicit, non-configurable `AuthorizationDisabled` flag. In that mode
+credentials and `ipc.remote_policy` grants are deliberately dormant, while
+`ipc.allow_remote`, browser Origin checks, configured bridge topology,
+no-recursive-pivot rules, board safety, and single-owner programming remain
+active. The runtime does not resolve a configured inbound token, and the
+server-proof/session-ticket routes return HTTP 409. The remainder of this
+section describes the retained future
+authorization contract and its tests; it is not an alpha runtime requirement.
+
+When the deferred authorization phase is enabled, remote access requires all
+of the following:
 
 - `ipc.allow_remote: true`;
 - an `ipc.auth_token` containing at least 24 characters, or a resolvable
@@ -589,8 +600,14 @@ subscriptions use cached/thread-safe paths.
 
 Standard codes are parse error `-32700`, invalid request `-32600`, method not
 found `-32601`, and invalid params `-32602`. Host extensions use authentication
-required `-32001`, remote capability denied `-32003`, and runtime/device error
-`-32000`. The request ID is preserved on every parsed request error.
+required `-32001`, remote capability denied `-32003`, uncertain nested outcome
+`-32004`, and runtime/device error `-32000`. A caller receiving `-32004` must
+retry the same logical operation with the same idempotency key because the peer
+may have accepted it before the source lost its acknowledgement. The source
+also publishes that non-secret key in the corresponding
+`peer-update.outcome-uncertain` event so another client or reload can recover
+the same logical retry. The request ID is preserved on every parsed request
+error.
 
 ### RPC methods
 
@@ -1111,18 +1128,25 @@ also emitted to the host timeline.
 
 An enabled `integrations.websocket_clients` entry makes the primary host a
 standard WebSocket or bounded Socket.IO client. It authenticates with a Bearer
-token, subscribes to validated `events`/`opcodes`/`status` topics, reconnects with bounded
+token, subscribes to validated `events`/`state`/`status` topics, reconnects with bounded
 backoff, and can forward local events as correlated `controller.message.send`
 calls. Transport/control/error events and remote-origin messages are not
 re-forwarded, preventing a direct two-host echo loop. Incoming remote
-events/status are re-emitted locally as source-tagged messages.
+activity/status are re-emitted locally as source-tagged messages. Structured
+changed-state notifications are ingested as state events so buzzer metadata and
+other live previews retain their typed payload. An omitted topic list defaults
+to both `events` and `state`; an explicit list is an opt-out.
 
 `controller.bridge.call`, `POST /api/bridges/call`, and
 `bridge call PEER METHOD [PARAMS_JSON]` use the existing persistent connection
 and an internal wire ID, then restore the caller's nested JSON-RPC ID in the
-response. The target host applies its own token, remote capability policy, and
-ordinary safety path. Recursive bridge calls are rejected, so this API is not
-an unrestricted network pivot. Incoming command requests on an outbound peer
+response. During the current alpha, the target bypasses token and remote
+capability checks but still applies listener exposure, configured topology,
+no-chain validation, and the ordinary safety path. Recursive bridge calls are rejected, so this API is not
+an unrestricted network pivot. A nested `controller.peer.update.host` is also
+rejected: an authenticated remote caller must invoke it on the source host with
+both `programming` and `bridge_calls` enabled, and the target independently
+requires `programming` for `controller.update.host`. Incoming command requests on an outbound peer
 connection additionally require that peer's `allow_commands` flag.
 
 `controller.opcode.exchange` may be used as the nested bridge method. Because
@@ -1239,21 +1263,32 @@ Artifact and update JSON-RPC methods are:
 | `controller.artifact.manifest` | `{}` | feature/default/current artifacts, board identity, policy, and latest update status |
 | `controller.artifact.list` | optional `kind` | SHA-256-sorted artifact descriptors |
 | `controller.artifact.fetch` | `url`, `kind`, optional `name`, `sha256`, `bytes`, build identity, `idempotency_key` | queue a verified proxy-aware HTTP download |
-| `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; incomplete transfers expire and never enter the immutable store |
+| `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; declared bytes/concurrency are reserved, idle transfers expire without another request, startup removes crash orphans, and incomplete transfers never enter the immutable store |
 | `controller.artifact.capture` | `components`, `authorized`, optional `method`, `port`, `idempotency_key` | explicitly read and verify current flash/EEPROM through the primary |
 | `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `allow_incomplete_backup`, `reinitialize_eeprom`, `idempotency_key` | guarded backup-then-flash; explicit reinitialization retains raw EEPROM, programs/readbacks the complete Go-owned factory image, and discards incompatible semantic settings |
 | `controller.restore.flash` | `artifact_sha256`, `authorized`, optional `method`, `port` | guarded restore of a `flash-backup`; Urclock by default, explicit USBasp fallback |
 | `controller.update.eeprom` | same | full pre-write capture, then confirmed EEPROM restore |
 | `controller.update.host` | `artifact_sha256`, `authorized` | stage a verified deferred self-update |
-| `controller.peer.update.host` | `peer`, host `artifact_sha256`, `authorized`, optional `idempotency_key` | transfer through the existing authenticated bridge, revalidate on the peer, then ask that peer coordinator to replace itself gracefully |
+| `controller.peer.update.host` | `peer`, host `artifact_sha256`, `authorized`, required caller-generated `idempotency_key` | preserves dormant future `programming` plus `bridge_calls` classification, transfers through the configured bridge, rejects bridge ingress/pivots, revalidates on the peer, and returns only remote `queued`/`staged` acceptance with `terminal_verified: false` |
 | `controller.update.status` | optional operation `id` | latest or selected asynchronous status |
 
 Peer host replacement is an application protocol, not an SSH deployment
 recipe. The source streams a verified executable through its already-connected
 bridge in bounded chunks; the target rehashes and reparses it before its own
-coordinator performs the ordinary journaled self-update and rollback health
-check. Either host can be source or target. `allow_commands`, the target's
-`programming` policy, and explicit `authorized: true` are all required.
+coordinator accepts the ordinary journaled self-update. The source validates
+every transfer ID, next offset, declared total, finished artifact identity, and
+target staging-operation identity. Its result deliberately stops at
+`remote-queued` or `remote-staged`: process replacement, candidate health,
+rollback, reconnect, and active-SHA verification are not claimed by this call.
+Either host can be source or target. Explicit `authorized: true` is required.
+During alpha, credentials and capability grants are dormant, but peer-update
+bridge ingress, generic pivots, and direct or shell-wrapped chaining are still
+rejected. The source/target capability classifiers remain tested for the
+deferred authorization phase. A caller-generated
+`idempotency_key` is mandatory. The browser retains one random logical-intent
+key across transport-uncertain retries and rotates it after an authoritative
+response. The CLI generates a fresh intent unless the operator supplies a key;
+scripts must reuse their explicit key when retrying the same logical attempt.
 
 Provider and manifest discovery use a companion, product-neutral contract:
 
@@ -1333,9 +1368,10 @@ metadata. Status also carries typed `programming_method`,
 therefore reports `timed_out` and explicitly suggests ISP recovery without a UI
 parsing AVRDUDE prose; USBasp/host jobs report `not_attempted`. A secondary
 local process or authenticated bridge peer calls these
-same RPC methods; it never opens the port itself. Remote artifact bytes require
-a configured bearer token even when read access is enabled, and applying or
-capturing memory additionally requires the remote `programming` capability.
+same RPC methods; it never opens the port itself. The future authorization
+contract requires a configured bearer token for remote artifact bytes and the
+remote `programming` capability for applying or capturing memory; those two
+gates are deliberately dormant in the current alpha.
 
 Discovery/staging publishes `artifact.discovery.queued`,
 `artifact.discovery.downloading`, `artifact.discovery.completed`, and

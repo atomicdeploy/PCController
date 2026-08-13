@@ -115,3 +115,26 @@ func TestArtifactHTTPRequiresRemoteAuthenticationAndProgrammingPolicy(t *testing
 		t.Fatalf("remote flash restore status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestAuthorizationDisabledAllowsCredentiallessRemoteArtifactProgramming(t *testing.T) {
+	artifactService, client := newIPCArtifactService(t)
+	config := appconfig.Defaults()
+	config.IPC.AllowRemote = true
+	service := &Service{
+		Client: client, Artifacts: artifactService, AuthorizationDisabled: true,
+		HostConfig: func() appconfig.Config { return config },
+	}
+	handler := websocketMux(context.Background(), service)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"http://controller.example/api/artifacts/upload?kind=firmware&name=alpha.hex",
+		strings.NewReader(":00000001FF\n"),
+	)
+	request.RemoteAddr = "198.51.100.10:43100"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated ||
+		response.Header().Get("X-PCController-Authentication") != "disabled" {
+		t.Fatalf("credentialless alpha upload status=%d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+	}
+}

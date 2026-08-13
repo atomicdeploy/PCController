@@ -166,6 +166,23 @@ func TestEnrichmentPinsEveryReturnedEndpointToResponder(t *testing.T) {
 	}
 }
 
+func TestAlphaDiscoveryDoesNotInventDormantServerProofEndpoint(t *testing.T) {
+	info := PublicInfo{
+		Health: PublicHealth{Auth: "disabled-alpha"},
+		Endpoints: PublicEndpoints{
+			ServerProof: "http://attacker.invalid/api/auth/server-proof",
+			Operations:  "http://attacker.invalid/api/rpc",
+		},
+	}
+	pinPublicInfoEndpoints(&info, Instance{Host: "192.0.2.5", Port: 8787})
+	if info.Endpoints.ServerProof != "" {
+		t.Fatalf("alpha discovery advertised dormant proof endpoint %q", info.Endpoints.ServerProof)
+	}
+	if info.Endpoints.Operations != "http://192.0.2.5:8787/api/rpc" {
+		t.Fatalf("active operations endpoint was not responder-pinned: %q", info.Endpoints.Operations)
+	}
+}
+
 func TestEnrichInstanceRejectsCrossPortRedirect(t *testing.T) {
 	targetCalled := false
 	target := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
