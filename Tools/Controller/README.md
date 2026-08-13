@@ -708,6 +708,8 @@ bin\controller.exe network edge-enable --origin David-PC:* --origin 192.168.100.
 bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --method controller.ping
 bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc --secret-ref os:edge/cafe-pc
 bin\controller.exe network probe --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --origin http://David-PC:8787
+bin\controller.exe network discover --protocols dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios
+bin\controller.exe ipc call --method controller.discovery.scan --params "{\"protocols\":[\"dns-sd\",\"ssdp\",\"upnp\",\"ws-discovery\",\"broadcast\",\"netbios\"],\"timeout_ms\":3000}"
 ```
 
 The edge command enables DNS-SD/mDNS, SSDP/UPnP, WS-Discovery, UDP broadcast,
@@ -725,11 +727,12 @@ method and REST route table.
 
 `controller.history.status` reads the same retained measurement series before
 and after a host restart. The default host configuration samples once per
-second for 24 hours. Compact samples live in `measurements.jsonl` in the host
+second for 6 hours. Compact samples live in `measurements.jsonl` in the host
 data directory, separately from important-event `timeline.jsonl`; startup
 prunes expired, duplicate, and corrupt-tail records. Owner-only permissions,
 atomic compaction, and a 32 MiB hard ceiling keep that local telemetry store
-bounded. Setting `ui.history_hours` to `0` clears and disables measurement
+bounded. The important-event timeline is compacted at 8 MiB and defaults to
+500 retained events. Setting `ui.history_hours` to `0` clears and disables measurement
 retention without disabling the important-event timeline.
 
 The TCP listener rejects non-loopback addresses by default. Remote mode
