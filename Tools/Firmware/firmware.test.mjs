@@ -135,6 +135,19 @@ test('all upload methods use a hardware-free canonical build phase', async () =>
 	}
 })
 
+test('firmware studio forwards named EEPROM feature gates to the shared build plan', async () => {
+	const root = await mkdtemp(join(tmpdir(), 'pccontroller-feature-plan-'))
+	const config = parseArguments([
+		'build', '--firmware-feature', 'eeprom-boot-opcodes',
+		'--firmware-feature=eeprom-menu-labels'
+	], {})
+	const plan = await createBuildPlan(config, root)
+	assert.deepEqual(plan.args.slice(-4), [
+		'--firmware-feature', 'eeprom-boot-opcodes',
+		'--firmware-feature', 'eeprom-menu-labels'
+	])
+})
+
 test('program plans select USBasp by method and keep programmer as an override', async () => {
 	const root = await mkdtemp(join(tmpdir(), 'pccontroller-program-plan-'))
 	const bin = join(root, 'Tools', 'Controller', 'bin')

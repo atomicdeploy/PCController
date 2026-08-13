@@ -97,6 +97,41 @@ func TestCompileDryRunDoesNotRequireToolchainOnPATH(t *testing.T) {
 	}
 }
 
+func TestCompileFeatureDryRunAcceptsOnlyNamedEEPROMGates(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(),
+			"--firmware-feature", "eeprom-menu-labels",
+			"--firmware-feature", "eeprom-boot-opcodes",
+			"--dry-run",
+		},
+		&stdout, &stderr, appconfig.Defaults(),
+	)
+	if err != nil {
+		t.Fatalf("compile feature dry-run: %v\\nstderr: %s", err, stderr.String())
+	}
+	for _, expected := range []string{
+		"PCCONTROLLER_ENABLE_EEPROM_BOOT_OPCODES=1",
+		"PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS=1",
+	} {
+		if !strings.Contains(stdout.String(), expected) {
+			t.Fatalf("compile command missing %q: %s", expected, stdout.String())
+		}
+	}
+	if err := runProgramWithConfig(
+		[]string{
+			"--method", "compile", "--sketch", findProjectRoot(),
+			"--output-dir", t.TempDir(), "--firmware-feature", "-DUNSAFE=1", "--dry-run",
+		},
+		io.Discard, io.Discard, appconfig.Defaults(),
+	); err == nil || !strings.Contains(err.Error(), "unsupported firmware feature") {
+		t.Fatalf("unsafe raw feature error=%v", err)
+	}
+}
+
 func TestRuntimeCommandStillValidatesRuntimeConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := os.WriteFile(

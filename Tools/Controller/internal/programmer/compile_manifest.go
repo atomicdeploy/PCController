@@ -58,11 +58,12 @@ type compileManifestTarget struct {
 }
 
 type compileManifestSource struct {
-	SHA256          string `json:"sha256"`
-	Files           int    `json:"files"`
-	BuildHash       string `json:"buildHash"`
-	PackedTimestamp string `json:"packedTimestamp"`
-	BuildTimestamp  string `json:"buildTimestamp,omitempty"`
+	SHA256          string   `json:"sha256"`
+	Files           int      `json:"files"`
+	CompileFeatures []string `json:"compileFeatures,omitempty"`
+	BuildHash       string   `json:"buildHash"`
+	PackedTimestamp string   `json:"packedTimestamp"`
+	BuildTimestamp  string   `json:"buildTimestamp,omitempty"`
 }
 
 type compileManifestRange struct {
@@ -169,6 +170,7 @@ func writeCompileManifest(
 		},
 		Source: compileManifestSource{
 			SHA256: identity.SourceSHA256, Files: identity.SourceFiles,
+			CompileFeatures: firmwareFeatureNames(identity.Features),
 			BuildHash:       fmt.Sprintf("%08X", identity.SourceHash),
 			PackedTimestamp: fmt.Sprintf("%08X", identity.PackedTimestamp),
 			BuildTimestamp:  buildTimestamp,

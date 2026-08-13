@@ -214,6 +214,7 @@ export function createControllerProgramCommand({
 	outputDir = '',
 	toolchainCLI = '',
 	toolchainConfig = '',
+	firmwareFeatures = [],
 	dryRun = false,
 	allowIncompleteBackup = false
 }) {
@@ -226,6 +227,9 @@ export function createControllerProgramCommand({
 		]
 		if (String(toolchainCLI).trim()) args.push('--toolchain-cli', String(toolchainCLI))
 		if (String(toolchainConfig).trim()) args.push('--toolchain-config', String(toolchainConfig))
+		for (const feature of normalizeFirmwareFeatures(firmwareFeatures)) {
+			args.push('--firmware-feature', feature)
+		}
 		if (dryRun) args.push('--dry-run')
 		return controllerCommand(invocation, args)
 	}
@@ -268,6 +272,20 @@ export function createControllerProgramCommand({
 	}
 	if (dryRun) args.push('--dry-run')
 	return controllerCommand(invocation, args)
+}
+
+// normalizeFirmwareFeatures only transports well-formed named feature tokens.
+// The Controller is the single semantic authority and rejects unsupported
+// names before any compiler or device action is attempted.
+function normalizeFirmwareFeatures(features) {
+	if (!Array.isArray(features)) throw new CommandPlanError('firmware features must be an array')
+	return features.map(feature => {
+		const normalized = String(feature || '').trim().toLowerCase()
+		if (!/^[a-z0-9][a-z0-9-]*$/.test(normalized)) {
+			throw new CommandPlanError(`invalid named firmware feature ${JSON.stringify(feature)}`)
+		}
+		return normalized
+	})
 }
 
 export function programmingArtifact(paths, method) {
