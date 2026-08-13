@@ -14,8 +14,8 @@ import (
 var externalBeepLookPath = exec.LookPath
 var externalBeepCommand = exec.CommandContext
 
-func playExternalBeep(ctx context.Context, driverDirectory string, frequencyHz, durationMS int) error {
-	path, err := findExternalBeep(driverDirectory)
+func playExternalBeep(ctx context.Context, driverDirectory, executable string, frequencyHz, durationMS int) error {
+	path, err := findExternalBeep(driverDirectory, executable)
 	if err != nil {
 		return err
 	}
@@ -30,7 +30,18 @@ func playExternalBeep(ctx context.Context, driverDirectory string, frequencyHz, 
 	return nil
 }
 
-func findExternalBeep(driverDirectory string) (string, error) {
+func findExternalBeep(driverDirectory, executable string) (string, error) {
+	if explicit := strings.TrimSpace(executable); explicit != "" {
+		path, err := filepath.Abs(explicit)
+		if err != nil {
+			return "", fmt.Errorf("resolve external beep command: %w", err)
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			return "", fmt.Errorf("external beep command %s is not a regular file", path)
+		}
+		return path, nil
+	}
 	names := []string{"beep"}
 	if runtime.GOOS == "windows" {
 		names = []string{"beep.exe", "pc-beep.exe", "beep"}

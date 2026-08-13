@@ -583,12 +583,14 @@ func (service *Service) dispatch(
 			"local_device":     config.LocalDevice,
 			"data_hub":         config.DataHub,
 			"lifecycle_safety": config.Lifecycle,
+			"buzzer_mirror":    config.BuzzerMirror,
 		}
 	case "controller.integrations.local.set":
 		var params struct {
 			LocalDevice     appconfig.LocalDevice      `json:"local_device"`
 			DataHub         appconfig.DataHub          `json:"data_hub"`
 			LifecycleSafety *appconfig.LifecycleSafety `json:"lifecycle_safety,omitempty"`
+			BuzzerMirror    *appconfig.BuzzerMirror    `json:"buzzer_mirror,omitempty"`
 		}
 		if err = decodeParams(request.Params, &params); err == nil {
 			if service.UpdateHostConfig == nil {
@@ -600,6 +602,9 @@ func (service *Service) dispatch(
 					if params.LifecycleSafety != nil {
 						value.Integrations.Lifecycle = *params.LifecycleSafety
 					}
+					if params.BuzzerMirror != nil {
+						value.Integrations.BuzzerMirror = *params.BuzzerMirror
+					}
 					return nil
 				})
 				if err == nil {
@@ -608,6 +613,7 @@ func (service *Service) dispatch(
 						"local_device":     config.LocalDevice,
 						"data_hub":         config.DataHub,
 						"lifecycle_safety": config.Lifecycle,
+						"buzzer_mirror":    config.BuzzerMirror,
 					}
 				}
 			}

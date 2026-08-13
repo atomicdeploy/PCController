@@ -44,6 +44,8 @@ type Status struct {
 	SegmentText              string                          `json:"segment_scroll_text,omitempty"`
 	BuzzerMirror             bool                            `json:"buzzer_mirror_active"`
 	BuzzerNativeState        string                          `json:"buzzer_native_state,omitempty"`
+	BuzzerNativeBackend      string                          `json:"buzzer_native_backend,omitempty"`
+	BuzzerNativeExecutable   string                          `json:"buzzer_native_executable,omitempty"`
 	BuzzerNativeLastError    string                          `json:"buzzer_native_last_error,omitempty"`
 	WebhooksActive           int                             `json:"webhooks_active"`
 	WebhookQueuePending      int                             `json:"webhook_queue_pending"`
@@ -649,6 +651,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	segmentScrollActive := manager.status.SegmentScroll
 	segmentScrollText := manager.status.SegmentText
 	buzzerNativeState := manager.status.BuzzerNativeState
+	buzzerNativeBackend := manager.status.BuzzerNativeBackend
+	buzzerNativeExecutable := manager.status.BuzzerNativeExecutable
 	buzzerNativeLastError := manager.status.BuzzerNativeLastError
 	doorWarning := manager.runningDoorWarning
 	manager.advertiser, manager.hotkeys, manager.keyboard = nil, nil, nil
@@ -668,21 +672,36 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	}
 
 	status := Status{
-		Notifications:         config.Integrations.Notifications.Enabled,
-		BuzzerMirror:          config.Integrations.BuzzerMirror.Enabled,
-		BuzzerNativeState:     buzzerNativeState,
-		BuzzerNativeLastError: buzzerNativeLastError,
-		Desktop:               desktopStatus,
-		StatusLEDState:        statusLEDState,
-		SegmentScroll:         segmentScrollActive,
-		SegmentText:           segmentScrollText,
-		DoorWarning:           doorWarning,
+		Notifications:          config.Integrations.Notifications.Enabled,
+		BuzzerMirror:           config.Integrations.BuzzerMirror.Enabled,
+		BuzzerNativeState:      buzzerNativeState,
+		BuzzerNativeBackend:    buzzerNativeBackend,
+		BuzzerNativeExecutable: buzzerNativeExecutable,
+		BuzzerNativeLastError:  buzzerNativeLastError,
+		Desktop:                desktopStatus,
+		StatusLEDState:         statusLEDState,
+		SegmentScroll:          segmentScrollActive,
+		SegmentText:            segmentScrollText,
+		DoorWarning:            doorWarning,
 	}
 	if !config.Integrations.BuzzerMirror.Enabled || !config.Integrations.BuzzerMirror.NativeEnabled {
 		status.BuzzerNativeState = "disabled"
+		status.BuzzerNativeBackend = ""
+		status.BuzzerNativeExecutable = ""
 		status.BuzzerNativeLastError = ""
-	} else if status.BuzzerNativeState == "" || status.BuzzerNativeState == "disabled" {
-		status.BuzzerNativeState = "untested"
+	} else {
+		resolved, resolveErr := resolveNativeBuzzer(config.Integrations.BuzzerMirror)
+		if resolveErr != nil {
+			status.BuzzerNativeState = "failed"
+			status.BuzzerNativeBackend = ""
+			status.BuzzerNativeExecutable = ""
+			status.BuzzerNativeLastError = resolveErr.Error()
+		} else {
+			status.BuzzerNativeState = "ready"
+			status.BuzzerNativeBackend = resolved.Backend
+			status.BuzzerNativeExecutable = resolved.Executable
+			status.BuzzerNativeLastError = ""
+		}
 	}
 	hotkeys := hostui.NewHotkeyRegistrar()
 	var hotkeyBindings []hostui.HotkeyBinding
