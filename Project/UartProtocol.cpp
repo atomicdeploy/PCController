@@ -46,8 +46,8 @@ bool UartProtocol::send(uint8_t opcode, uint8_t sequence,
   const bool timedEvent = opcode == Event && payloadLength != 0;
   // BUZZER_CHANGED is a pushed state frame rather than an EVENT envelope, but
   // it still needs the MCU clock. Host speakers use this suffix to preserve
-  // note and pause cadence across USB/network jitter. Legacy five-byte buzzer
-  // frames remain valid on the host.
+  // note and pause cadence across USB/network jitter. Alpha hosts require this
+  // exact timestamped schema and must be upgraded with the matching firmware.
   const bool timedBuzzer = opcode == BuzzerChanged;
   const bool timed = timedEvent || timedBuzzer || opcode == Ack ||
                      (opcode == ErrorResponse && sequence == 0xFE);
