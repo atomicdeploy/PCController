@@ -23,6 +23,20 @@ export interface PortInfo {
   instance_id?: string
 }
 
+export interface PortProcessSnapshot {
+  supported: boolean
+  state: 'free' | 'owned' | 'unknown' | string
+  port?: string
+  pid?: number
+  name?: string
+  executable?: string
+  process_start_time_100ns?: number
+  window?: { handle?: number; title?: string; class?: string; visible?: boolean }
+  observed_at?: string
+  takeover_ready?: boolean
+  error?: string
+}
+
 export interface Hello {
   firmware_major?: number
   firmware_minor?: number
@@ -149,6 +163,7 @@ export interface Snapshot {
   connection_state: string
   connection_reason?: string
   connection_updated?: string
+  port_process?: PortProcessSnapshot
   program_state?: ProgramState
   rf_learning?: RFLearnState
   front_panel?: FrontPanelState

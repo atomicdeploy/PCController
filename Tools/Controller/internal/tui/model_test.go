@@ -1060,7 +1060,7 @@ func TestClearCommandClearsTranscript(t *testing.T) {
 
 func TestPreviewUsesCurrentConfigDefaults(t *testing.T) {
 	model := readyModel(t, PageAppSettings)
-	if model.prefs.CurrentDecimals != 1 || model.prefs.EventLogLimit != 2000 {
+	if model.prefs.CurrentDecimals != 1 || model.prefs.EventLogLimit != 500 {
 		t.Fatalf("preview defaults current decimals=%d event limit=%d", model.prefs.CurrentDecimals, model.prefs.EventLogLimit)
 	}
 	if model.preview.Settings.DefaultPage != 0 || model.preview.Status.MenuPage != 0 {

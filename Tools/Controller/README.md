@@ -91,7 +91,8 @@ notifications, discovery, diagnostics, and desktop actions. Optional OS
 enrichment stays behind those adapters and an unavailable capability is
 reported explicitly.
 
-Optional mDNS and SSDP advertise the embedded WebUI/API locations, safe app
+Optional DNS-SD/mDNS, SSDP/UPnP, WS-Discovery, UDP broadcast, and NetBIOS host
+probes advertise or locate the embedded WebUI/API locations, safe app
 presentation values, and bounded current board values. Metadata refreshes are
 coalesced from pushed events and never poll the board; secret-like TXT/header
 keys are discarded before either multicast protocol is updated.
@@ -254,12 +255,13 @@ not require remote assets.
 
 The bundled manifest lets supported desktop and mobile browsers install the
 same-origin UI in standalone presentation and provides shortcuts to Overview,
-Workbench, Activity, and Settings. Its service worker always uses the network
-and stores no offline response cache. Closing the Controller host therefore
-becomes visible immediately instead of leaving an obsolete control panel. When
-optional interaction cues are enabled, supported visible-page mobile clients
-may also use restrained vibration for select, success, and warning feedback;
-no workflow depends on haptics.
+Workbench, Activity, and Settings. Its service worker retains only the
+versioned UI shell and immutable bundles; it never caches controller API,
+WebSocket, health, or generated configuration responses. Closing the Controller
+host therefore leaves an explicitly offline shell, never an obsolete “live”
+control panel. When optional interaction cues are enabled, supported
+visible-page mobile clients may also use restrained vibration for select,
+success, and warning feedback; no workflow depends on haptics.
 
 The exact embedded distribution also has a deterministic, secret-free ZIP
 export contract for trusted static hosting. See
@@ -706,9 +708,12 @@ bin\controller.exe network edge-enable --origin David-PC:* --origin 192.168.100.
 bin\controller.exe ipc call --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --method controller.ping
 bin\controller.exe network peer-add --name cafe-pc --url ws://192.168.100.155:8787/ipc --secret-ref os:edge/cafe-pc
 bin\controller.exe network probe --addr 192.168.100.155:8787 --token-ref os:edge/cafe-pc --origin http://David-PC:8787
+bin\controller.exe network discover --protocols dns-sd,ssdp,upnp,ws-discovery,broadcast,netbios
+bin\controller.exe ipc call --method controller.discovery.scan --params "{\"protocols\":[\"dns-sd\",\"ssdp\",\"upnp\",\"ws-discovery\",\"broadcast\",\"netbios\"],\"timeout_ms\":3000}"
 ```
 
-The edge command enables mDNS/SSDP and the selected IPC, REST, WebSocket,
+The edge command enables DNS-SD/mDNS, SSDP/UPnP, WS-Discovery, UDP broadcast,
+NetBIOS probing, and the selected IPC, REST, WebSocket,
 Socket.IO, programming, and bridge capabilities. Shutdown, virtual-key, and
 host power-action access remain disabled. A LocalSubnet-only firewall rule is
 still an operating-system deployment step.
@@ -722,11 +727,12 @@ method and REST route table.
 
 `controller.history.status` reads the same retained measurement series before
 and after a host restart. The default host configuration samples once per
-second for 24 hours. Compact samples live in `measurements.jsonl` in the host
+second for 6 hours. Compact samples live in `measurements.jsonl` in the host
 data directory, separately from important-event `timeline.jsonl`; startup
 prunes expired, duplicate, and corrupt-tail records. Owner-only permissions,
 atomic compaction, and a 32 MiB hard ceiling keep that local telemetry store
-bounded. Setting `ui.history_hours` to `0` clears and disables measurement
+bounded. The important-event timeline is compacted at 8 MiB and defaults to
+500 retained events. Setting `ui.history_hours` to `0` clears and disables measurement
 retention without disabling the important-event timeline.
 
 The TCP listener rejects non-loopback addresses by default. Remote mode

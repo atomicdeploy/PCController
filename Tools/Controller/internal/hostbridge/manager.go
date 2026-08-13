@@ -707,7 +707,9 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 
 	var advertiser *discovery.Advertiser
 	discoveryConfig := config.Integrations.Discovery
-	if discoveryConfig.MDNSEnabled || discoveryConfig.SSDPEnabled {
+	if discoveryConfig.MDNSEnabled || discoveryConfig.DNSSDenabled || discoveryConfig.SSDPEnabled ||
+		discoveryConfig.UPnPEnabled || discoveryConfig.WSDiscoveryEnabled || discoveryConfig.BroadcastEnabled ||
+		discoveryConfig.NetBIOSEnabled {
 		_, rawPort, err := net.SplitHostPort(config.IPC.Listen)
 		if err != nil {
 			return err
@@ -720,11 +722,12 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		if name == "" {
 			name = config.UI.AppTitle
 		}
-		created, err := discovery.Advertise(
-			manager.ctx, name, port,
-			discoveryConfig.MDNSEnabled, discoveryConfig.SSDPEnabled,
-			discoveryMetadata(config, manager.client.Snapshot()),
-		)
+		created, err := discovery.AdvertiseWithOptions(manager.ctx, name, port, discovery.Options{
+			MDNS: discoveryConfig.MDNSEnabled, DNSSD: discoveryConfig.DNSSDenabled,
+			SSDP: discoveryConfig.SSDPEnabled, UPnP: discoveryConfig.UPnPEnabled,
+			WSDiscovery: discoveryConfig.WSDiscoveryEnabled,
+			Broadcast:   discoveryConfig.BroadcastEnabled, NetBIOS: discoveryConfig.NetBIOSEnabled,
+		}, discoveryMetadata(config, manager.client.Snapshot()))
 		if err != nil {
 			_ = hotkeys.Stop()
 			_ = keyboard.Stop("integration-start-failed")
@@ -732,6 +735,13 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		}
 		advertiser = created
 		status.DiscoveryActive = true
+		manager.client.EmitHostActionEvent("discovery.started", "network discovery advertiser started", "discovery", "advertise", map[string]string{
+			"mdns":         strconv.FormatBool(discoveryConfig.MDNSEnabled || discoveryConfig.DNSSDenabled),
+			"ssdp":         strconv.FormatBool(discoveryConfig.SSDPEnabled || discoveryConfig.UPnPEnabled),
+			"ws_discovery": strconv.FormatBool(discoveryConfig.WSDiscoveryEnabled),
+			"broadcast":    strconv.FormatBool(discoveryConfig.BroadcastEnabled),
+			"netbios":      strconv.FormatBool(discoveryConfig.NetBIOSEnabled),
+		})
 	}
 	peers := make(map[string]*peerState)
 	for _, peerConfig := range config.Integrations.WebSocketClients {

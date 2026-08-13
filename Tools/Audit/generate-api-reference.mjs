@@ -114,7 +114,7 @@ const capabilityGroups = {
     "controller.rf.learn.status", "controller.history.status", "controller.history.timeline",
     "controller.lcd.presentation.status", "controller.ports", "controller.os.status",
     "controller.system.status", "controller.os.facts", "controller.host.facts",
-    "controller.discovery.scan", "controller.pwm.values",
+    "controller.discovery.scan", "controller.pwm.values", "controller.port.owner", "controller.port.process",
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
   ],
   board_commands: [

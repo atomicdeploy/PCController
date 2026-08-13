@@ -19,6 +19,7 @@ import (
 
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
+	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
@@ -97,6 +98,9 @@ type (
 	ProgramStateOwner         = control.ProgramStateOwner
 	ProgramStateSnapshot      = control.ProgramStateSnapshot
 	ProgramStateLease         = control.ProgramStateLease
+	PortProcessSnapshot       = control.PortProcessSnapshot
+	DiscoveryInstance         = discovery.Instance
+	DiscoveryOptions          = discovery.Options
 )
 
 // RF learning modes select indefinite multi-code or bounded timer operation.
@@ -341,6 +345,7 @@ type Snapshot struct {
 	StatusLED         StatusLEDState       `json:"status_led"`
 	HaveStatusLED     bool                 `json:"have_status_led"`
 	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
+	PortProcess       PortProcessSnapshot  `json:"port_process"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -1543,7 +1548,15 @@ func (client *Client) Snapshot() Snapshot {
 		StatusLED:         snapshot.StatusLED,
 		HaveStatusLED:     snapshot.HaveStatusLED,
 		StatusLEDUpdated:  snapshot.StatusLEDUpdated,
+		PortProcess:       snapshot.PortProcess,
 	}
+}
+
+// Discover scans the local network using DNS-SD/mDNS, SSDP/UPnP,
+// WS-Discovery, authenticated-safe UDP broadcast, and optional NetBIOS host
+// probing selected by options. Discovery never grants API access.
+func (client *Client) Discover(ctx context.Context, options DiscoveryOptions) ([]DiscoveryInstance, error) {
+	return discovery.DiscoverWithOptions(ctx, options)
 }
 
 // SetSegmentText presents static or scrolling text through the firmware's

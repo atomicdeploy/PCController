@@ -535,7 +535,12 @@
     },
     "discovery": {
       "mdns_enabled": false,
-      "ssdp_enabled": false
+      "dns_sd_enabled": false,
+      "ssdp_enabled": false,
+      "upnp_enabled": false,
+      "ws_discovery_enabled": false,
+      "broadcast_enabled": false,
+      "netbios_enabled": false
     },
     "inbound_webhooks_enabled": false,
     "local_device": {
