@@ -107,6 +107,20 @@ paths. Later Controller compile, core-info, bootloader, and programming
 operations reuse this configuration. `toolchain sync` remains a separate
 operation for auditing/updating an explicitly selected existing installation.
 
+When a verified managed workspace already exists and the shared Arduino
+installation is incomplete or duplicated, adopt it without another download:
+
+```console
+controller toolchain adopt --source-data C:\path\to\managed\data --source-user C:\path\to\managed\user --target-data C:\Users\USER\AppData\Local\Arduino15 --target-user C:\Users\USER\Documents\Arduino --cli "C:\Program Files\Arduino CLI\arduino-cli.exe" --toolchain-config C:\Users\USER\AppData\Local\Arduino15\pccontroller-firmware-cli.yaml
+```
+
+This project-owned operation atomically replaces complete package-vendor
+trees (`arduino`, `builtin`, and `MiniCore`), copies verified libraries, and
+saves the shared CLI/config paths. It specifically repairs installations that
+claim MiniCore is installed but lack `cores/MCUdude_corefiles/Arduino.h` or a
+board `variants/` directory. It is network-free and never creates another CLI
+installation.
+
 At the time of this documentation update, the exact lock resolves:
 
 | Area | Stable lock |

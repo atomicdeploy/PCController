@@ -1171,6 +1171,9 @@ func runToolchain(
 	if len(args) != 0 && strings.EqualFold(args[0], "sync") {
 		return runToolchainSync(args[1:], stdout, stderr, store)
 	}
+	if len(args) != 0 && strings.EqualFold(args[0], "adopt") {
+		return runToolchainAdopt(args[1:], stdout, stderr, store)
+	}
 	if len(args) != 0 && strings.EqualFold(args[0], "bootstrap") {
 		return runToolchainBootstrap(args[1:], stdout, stderr, store)
 	}
@@ -1191,6 +1194,39 @@ func runToolchain(
 		return err
 	}
 	return runProgram(translated, stdout, stderr, store)
+}
+
+func runToolchainAdopt(args []string, stdout, stderr io.Writer, store *appconfig.Store) error {
+	flags := flag.NewFlagSet("toolchain adopt", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	sourceData := flags.String("source-data", "", "verified managed Arduino data directory")
+	sourceUser := flags.String("source-user", "", "verified managed Arduino user directory")
+	targetData := flags.String("target-data", "", "shared Arduino data directory")
+	targetUser := flags.String("target-user", "", "shared Arduino user/sketchbook directory")
+	firmwareCLI := flags.String("cli", "", "shared firmware dependency CLI executable")
+	targetConfig := flags.String("toolchain-config", "", "shared firmware dependency CLI config")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 || *sourceData == "" || *sourceUser == "" ||
+		*targetData == "" || *targetUser == "" || *firmwareCLI == "" || *targetConfig == "" {
+		return errors.New("usage: controller toolchain adopt --source-data DIR --source-user DIR --target-data DIR --target-user DIR --cli PATH --toolchain-config FILE")
+	}
+	report, err := programmer.AdoptToolchain(*sourceData, *sourceUser, *targetData, *targetUser)
+	if err != nil {
+		return err
+	}
+	if _, err := store.Update(func(config *appconfig.Config) error {
+		config.Programming.ToolchainCLI = *firmwareCLI
+		config.Programming.ToolchainConfig = *targetConfig
+		return nil
+	}); err != nil {
+		return fmt.Errorf("save adopted shared toolchain paths: %w", err)
+	}
+	encoded, _ := json.MarshalIndent(report, "", "  ")
+	fmt.Fprintln(stdout, string(encoded))
+	fmt.Fprintln(stdout, "Adopted verified toolchain into the shared Arduino installation and saved its paths.")
+	return nil
 }
 
 func runToolchainSync(
