@@ -3,54 +3,44 @@
 #include <Arduino.h>
 
 #include "../LocalLib/ShiftRegisters.h"
+#include "Core/RelayMotionMachine.h"
 
+// Preserve the firmware-facing names while the sequencing implementation lives
+// in the target-neutral ControllerCore namespace.
 namespace RelayOutputs {
-
-// The 74HC595 and relay stages are active-low. ShiftRegisters::setOutput()
-// already translates logical active=true into a cleared output bit.
-constexpr uint8_t R1SideADirection = 0;
-constexpr uint8_t R2SideAEnable = 1;
-constexpr uint8_t R3SideBDirection = 2;
-constexpr uint8_t R4SideBEnable = 3;
-constexpr uint8_t R5General1 = 4;
-constexpr uint8_t R6General2 = 5;
-constexpr uint8_t R7General3 = 6;
-constexpr uint8_t R8General4 = 7;
-constexpr uint8_t GeneralCount = 4;
-
+constexpr uint8_t R1SideADirection = ControllerCore::RelayOutputs::SideADirection;
+constexpr uint8_t R2SideAEnable = ControllerCore::RelayOutputs::SideAEnable;
+constexpr uint8_t R3SideBDirection = ControllerCore::RelayOutputs::SideBDirection;
+constexpr uint8_t R4SideBEnable = ControllerCore::RelayOutputs::SideBEnable;
+constexpr uint8_t R5General1 = ControllerCore::RelayOutputs::GeneralFirst;
+constexpr uint8_t R6General2 = R5General1 + 1U;
+constexpr uint8_t R7General3 = R5General1 + 2U;
+constexpr uint8_t R8General4 = R5General1 + 3U;
+constexpr uint8_t GeneralCount = ControllerCore::RelayOutputs::GeneralCount;
 } // namespace RelayOutputs
 
-// RelaySide identifies motion group A or B.
-enum class RelaySide : uint8_t {
-  A = 0,
-  B = 1,
+using RelaySide = ControllerCore::RelaySide;
+using RelayDirection = ControllerCore::RelayDirection;
+using RelaySequencePhase = ControllerCore::RelaySequencePhase;
+using RelaySideStatus = ControllerCore::RelaySideStatus;
+
+// ShiftRegisterRelaySink is the AVR-only output adapter for the shared core.
+class ShiftRegisterRelaySink {
+public:
+  explicit ShiftRegisterRelaySink(ShiftRegisters &registers)
+      : registers_(registers) {}
+
+  uint8_t activeRelayMask() const { return registers_.activeOutputs(); }
+  void commitRelayMask(uint8_t activeMask, uint32_t) {
+    registers_.setActiveOutputs(activeMask);
+    registers_.service();
+  }
+
+private:
+  ShiftRegisters &registers_;
 };
 
-// Forward is the de-energized direction-relay state. Reverse energizes the
-// direction relay. Neither direction is powered unless the side enable relay
-// is also active.
-// RelayDirection is the requested direction-relay state before enable is applied.
-enum class RelayDirection : uint8_t {
-  Forward = 0,
-  Reverse,
-};
-
-// RelaySequencePhase exposes whether a side is idle or inside reversal break time.
-enum class RelaySequencePhase : uint8_t {
-  Idle = 0,
-  BreakBeforeDirection,
-};
-
-// RelaySideStatus is a snapshot of requested and electrically applied side state.
-struct RelaySideStatus {
-  RelayDirection requestedDirection;
-  RelayDirection appliedDirection;
-  RelaySequencePhase phase;
-  bool requestedEnabled;
-  bool appliedEnabled;
-};
-
-// RelayController owns R1..R8 state and nonblocking two-side motion interlocks.
+// RelayController is the thin AVR adapter for the portable motion sequencer.
 class RelayController {
 public:
   explicit RelayController(ShiftRegisters &registers);
@@ -61,12 +51,12 @@ public:
   void service(uint32_t now = millis());
   // Revoking policy is fail-safe and immediately drops both motion enables.
   void setMotionAllowed(bool allowed, uint32_t now = millis());
-  bool motionAllowed() const { return motionAllowed_; }
+  bool motionAllowed() const { return machine_.motionAllowed(); }
   void setBreakBeforeDirectionMs(uint8_t value) {
-    breakBeforeDirectionMs_ = value == 0 ? 1 : value;
+    machine_.setBreakBeforeDirectionMs(value);
   }
   void setRetainDirectionOnStop(bool retain) {
-    retainDirectionOnStop_ = retain;
+    machine_.setRetainDirectionOnStop(retain);
   }
 
   // Requests are nonblocking. A live reversal is sequenced strictly as
@@ -89,33 +79,12 @@ public:
   bool anySideBusy() const;
   uint8_t activeRelayMask() const;
 
-  static constexpr uint8_t BreakBeforeDirectionMs = 1;
-  static constexpr uint8_t DirectionInterlockMs = 5;
+  static constexpr uint8_t BreakBeforeDirectionMs =
+      ControllerCore::RelayBreakBeforeDirectionMs;
+  static constexpr uint8_t DirectionInterlockMs =
+      ControllerCore::RelayDirectionInterlockMs;
 
 private:
-  // SideState keeps requested and applied direction/enable sequencing state.
-  struct SideState {
-    RelayDirection requestedDirection = RelayDirection::Forward;
-    RelayDirection appliedDirection = RelayDirection::Forward;
-    RelaySequencePhase phase = RelaySequencePhase::Idle;
-    bool requestedEnabled = false;
-    bool appliedEnabled = false;
-    uint32_t phaseDeadline = 0;
-  };
-
-  static uint8_t sideIndex(RelaySide side);
-  static uint8_t directionBit(RelaySide side);
-  static uint8_t enableBit(RelaySide side);
-
-  void serviceSide(RelaySide side, uint32_t now,
-                   bool &directionChangedThisService);
-  void setRelay(uint8_t bit, bool active);
-  void commit();
-
-  ShiftRegisters &registers_;
-  SideState sides_[2];
-  uint32_t nextDirectionChangeAt_ = 0;
-  uint8_t breakBeforeDirectionMs_ = BreakBeforeDirectionMs;
-  bool motionAllowed_ = true;
-  bool retainDirectionOnStop_ = false;
+  ShiftRegisterRelaySink sink_;
+  ControllerCore::RelayMotionMachine<ShiftRegisterRelaySink> machine_;
 };
