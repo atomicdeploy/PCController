@@ -92,7 +92,7 @@ bytes, but the firmware does not semantically own every byte:
 
 | EEPROM range | Bytes | Current owner |
 |---|---:|---|
-| `0..31` | 32 | Unallocated |
+| `0..31` | 32 | Semantically free; factory EEPROM pre-provisions an ignored boot record |
 | `32..72` | 41 | 31-byte `ControllerSettings`, one name length, eight name bytes, and CRC |
 | `73..79` | 7 | Unallocated alignment gap |
 | `80..323` | 244 | Four-byte RF header plus 20 checksummed 12-byte learned-code records |
@@ -101,14 +101,16 @@ bytes, but the firmware does not semantically own every byte:
 | `720..966` | 247 | Nineteen 12-byte status-effect condition descriptors, each with CRC |
 | `967..1023` | 57 | Unallocated |
 
-There are therefore 108 logically unallocated EEPROM bytes. Reducing RF or
-reset-journal capacity would free EEPROM only; it would not materially solve
-the application-flash ceiling.
+There are therefore 108 semantically free EEPROM bytes. The generated factory
+image deliberately pre-provisions `0..31` for the optional boot profile, but
+feature-off firmware ignores that record; it is not an active default-layout
+owner. Reducing RF or reset-journal capacity would free EEPROM only; it would
+not materially solve the application-flash ceiling.
 
 ### Draft EEPROM boot-opcode profile
 
-The default delivery profile keeps the hard-coded startup melody and leaves
-`0..31` unallocated. The experimental, disabled-by-default
+The default delivery profile keeps the hard-coded startup melody and ignores
+the pre-provisioned `0..31` record. The experimental, disabled-by-default
 `eeprom-boot-opcodes` profile reserves that 32-byte slot for a CRC-validated,
 commit-last record:
 
