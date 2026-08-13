@@ -1742,10 +1742,10 @@ func (service *Service) authorizeCapability(
 	operation, capability string,
 ) error {
 	access = service.normalizeAccess(access)
-	if service.authorizationDisabled() {
-		return nil
-	}
 	if !access.Remote {
+		if service.authorizationDisabled() {
+			return nil
+		}
 		if capability != capabilityRead && capability != capabilityEvents {
 			service.auditAccess(access, operation, capability, true)
 		}
@@ -1755,6 +1755,9 @@ func (service *Service) authorizeCapability(
 	if !config.IPC.AllowRemote {
 		service.auditAccess(access, operation, capability, false)
 		return errors.New("remote network access is disabled")
+	}
+	if service.authorizationDisabled() {
+		return nil
 	}
 	if !remoteCapabilityAllowed(config.IPC.RemotePolicy, capability) {
 		service.auditAccess(access, operation, capability, false)

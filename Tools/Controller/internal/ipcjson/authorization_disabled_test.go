@@ -20,6 +20,7 @@ func TestAlphaAuthorizationDisabledAcrossHTTPRawIPCAndWebSocket(t *testing.T) {
 	defer client.Shutdown()
 	service.AuthorizationDisabled = true
 	alphaConfig := appconfig.Defaults()
+	alphaConfig.IPC.AllowRemote = true
 	alphaConfig.IPC.AllowedOrigins = []string{"allowed.example:*"}
 	service.HostConfig = func() appconfig.Config { return alphaConfig }
 	handler := websocketMux(context.Background(), service)
@@ -101,5 +102,39 @@ func TestAlphaAuthorizationDisabledAcrossHTTPRawIPCAndWebSocket(t *testing.T) {
 	_, payload, err := connection.Read(ctx)
 	if err != nil || !strings.Contains(string(payload), `"ok":true`) {
 		t.Fatalf("WebSocket payload=%s err=%v", payload, err)
+	}
+}
+
+func TestAlphaAuthorizationBypassStillHonorsHotDisabledRemoteAccess(t *testing.T) {
+	service, client := testAuthenticatedService(t)
+	defer client.Shutdown()
+	service.AuthorizationDisabled = true
+	alphaConfig := appconfig.Defaults()
+	alphaConfig.IPC.AllowRemote = true
+	service.HostConfig = func() appconfig.Config { return alphaConfig }
+	handler := websocketMux(context.Background(), service)
+
+	// Model `network edge-disable` hot-applying AllowRemote=false while the old
+	// LAN listener remains bound for the lifetime of the primary process.
+	alphaConfig.IPC.AllowRemote = false
+	request := httptest.NewRequest(http.MethodPost, "http://controller.example/api/rpc", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"controller.ping"}`))
+	request.RemoteAddr = "198.51.100.10:45000"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "remote network access is disabled") {
+		t.Fatalf("hot-disabled alpha HTTP status=%d body=%s", response.Code, response.Body.String())
+	}
+	if err := service.authorizeCapability(Access{Remote: true, Transport: "ipc"}, "controller.ping", capabilityRead); err == nil || !strings.Contains(err.Error(), "remote network access is disabled") {
+		t.Fatalf("hot-disabled raw/bridge capability error=%v", err)
+	}
+
+	websocketRequest := httptest.NewRequest(http.MethodGet, "http://controller.example/ipc", nil)
+	websocketRequest.RemoteAddr = "198.51.100.10:45001"
+	websocketRequest.Header.Set("Connection", "Upgrade")
+	websocketRequest.Header.Set("Upgrade", "websocket")
+	websocketResponse := httptest.NewRecorder()
+	handler.ServeHTTP(websocketResponse, websocketRequest)
+	if websocketResponse.Code != http.StatusForbidden || !strings.Contains(websocketResponse.Body.String(), "remote network access is disabled") {
+		t.Fatalf("hot-disabled WebSocket status=%d body=%s", websocketResponse.Code, websocketResponse.Body.String())
 	}
 }
