@@ -106,12 +106,16 @@ is connected, and both automatic launch and tray actions refuse to open a page
 while offline. Connect/Reconnect and Exit remain available in either state.
 
 Windows desktop integration is explicit and reversible. `desktop ensure`
-installs the current executable's per-user protocol and Start-menu entries;
-`desktop uninstall` removes only entries whose ownership still matches that
-executable.
+installs the current executable's per-user protocol, Start-menu entry, and
+hash-bound `toast-logo.png` identity. Every WinRT toast uses that local PNG as
+its `appLogoOverride`; Windows is never asked to silently render a text-only
+product toast. `desktop test` sends a branded, actionable end-to-end
+diagnostic. `desktop uninstall` removes only entries whose ownership still
+matches that executable.
 
 ```console
 Tools\Controller\bin\controller.exe desktop ensure
+Tools\Controller\bin\controller.exe desktop test
 Tools\Controller\bin\controller.exe desktop uninstall
 ```
 

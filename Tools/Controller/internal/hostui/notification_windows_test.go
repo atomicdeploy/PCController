@@ -5,6 +5,8 @@ package hostui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,8 +14,17 @@ import (
 	"time"
 )
 
+func newTestWindowsNotifier(t *testing.T) *windowsNotifier {
+	t.Helper()
+	logo := filepath.Join(t.TempDir(), ToastLogoFileName)
+	if err := os.WriteFile(logo, append([]byte("\x89PNG\r\n\x1a\n"), 0), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return newPlatformNotifier(NotifierOptions{AppID: "PCController.Tests", LogoPath: logo}).(*windowsNotifier)
+}
+
 func TestWindowsNotifierRunnerCanBeInjectedWithoutDisplayingToast(t *testing.T) {
-	notifier := newPlatformNotifier(NotifierOptions{AppID: "PCController.Tests"}).(*windowsNotifier)
+	notifier := newTestWindowsNotifier(t)
 	called := false
 	notifier.deliver = func(context.Context, []byte, string) error { called = true; return nil }
 	if err := notifier.Notify(context.Background(), Notification{Title: "Test", Body: "No real toast"}); err != nil {
@@ -26,7 +37,7 @@ func TestWindowsNotifierRunnerCanBeInjectedWithoutDisplayingToast(t *testing.T) 
 }
 
 func TestWindowsNotifierSerializesNativeDelivery(t *testing.T) {
-	notifier := newPlatformNotifier(NotifierOptions{AppID: "PCController.Tests"}).(*windowsNotifier)
+	notifier := newTestWindowsNotifier(t)
 	var active atomic.Int32
 	var maximum atomic.Int32
 	notifier.deliver = func(context.Context, []byte, string) error {
@@ -61,7 +72,7 @@ func TestWindowsNotifierSerializesNativeDelivery(t *testing.T) {
 }
 
 func TestWindowsNotifierUsesBoundedNativeFallback(t *testing.T) {
-	notifier := newPlatformNotifier(NotifierOptions{AppID: "PCController.Tests"}).(*windowsNotifier)
+	notifier := newTestWindowsNotifier(t)
 	nativeErr := errors.New("WinRT unavailable")
 	notifier.deliver = func(context.Context, []byte, string) error { return nativeErr }
 	fallbackCalled := false
@@ -85,7 +96,7 @@ func TestWindowsNotifierUsesBoundedNativeFallback(t *testing.T) {
 }
 
 func TestWindowsNotifierReportsBothNativeAndFallbackFailures(t *testing.T) {
-	notifier := newPlatformNotifier(NotifierOptions{AppID: "PCController.Tests"}).(*windowsNotifier)
+	notifier := newTestWindowsNotifier(t)
 	notifier.deliver = func(context.Context, []byte, string) error { return errors.New("native failed") }
 	notifier.fallback = func(context.Context, Notification, error) error { return errors.New("fallback failed") }
 	err := notifier.Notify(context.Background(), Notification{Title: "Test", Body: "Failure"})
@@ -104,4 +115,20 @@ func stringsContainAll(value string, needles ...string) bool {
 		}
 	}
 	return true
+}
+
+func TestWindowsNotifierRefusesSilentUnbrandedToast(t *testing.T) {
+	notifier := newPlatformNotifier(NotifierOptions{
+		AppID: "PCController.Tests", LogoPath: filepath.Join(t.TempDir(), "missing.png"),
+	}).(*windowsNotifier)
+	delivered := false
+	notifier.deliver = func(context.Context, []byte, string) error { delivered = true; return nil }
+	notifier.fallback = func(context.Context, Notification, error) error { return nil }
+	if err := notifier.Notify(context.Background(), Notification{Title: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	status := notifier.Status()
+	if delivered || status.Branded || !status.Degraded || status.Backend != "task-dialog" {
+		t.Fatalf("delivered=%t status=%+v", delivered, status)
+	}
 }

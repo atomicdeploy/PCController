@@ -1765,7 +1765,12 @@ function buildHost(options, identity, env, log, embeddedDefaults = { enabled: fa
 
 	log.stage('📜', 'Collecting project and dependency notices')
 	const notices = collectModuleNotices(go, stage, goEnv, options)
-	const artifacts = [executable, ...shared.paths].map(path => artifactRecord(path, stage))
+	let toastLogo = ''
+	if (process.platform === 'win32') {
+		toastLogo = join(stage, 'toast-logo.png')
+		copyFileSync(join(HOST_ROOT, 'winres', 'icon.png'), toastLogo)
+	}
+	const artifacts = [executable, ...(toastLogo ? [toastLogo] : []), ...shared.paths].map(path => artifactRecord(path, stage))
 	const manifest = {
 		format: HOST_MANIFEST_FORMAT,
 		generatedUtc: identity.hostBuildTime,
