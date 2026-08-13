@@ -29,6 +29,10 @@ func TestDiscoveryMetadataIncludesWebAppAndCurrentBoardValues(t *testing.T) {
 	values := discoveryMetadata(config, snapshot)
 	for _, expected := range []string{
 		"web=/", "webui=embedded", "api=/api", "snapshot=/api/snapshot",
+		"operations=/api/rpc", "commands=/api/commands",
+		"events=ws:/ipc,socketio:/socket.io/",
+		"opcodes=controller.opcode.send,controller.opcode.exchange,controller.opcode.request",
+		"board.identity=/api/snapshot",
 		"app.title=Lab Controller", "app.locale=fa-ir", "board.connected=true",
 		"board.build_hash=ADFAEDAB", "board.supply_mv=12280", "board.door_open=true",
 		"board.settings_persisted=true",

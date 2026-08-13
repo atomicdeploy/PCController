@@ -49,6 +49,12 @@ func registerUPnPHTTP(mux *http.ServeMux, service *Service) {
 			writeSOAP(writer, "GetBoardIdentity", fmt.Sprintf("<BoardName>%s</BoardName><BuildHash>%08X</BuildHash><BuildStamp>%s</BuildStamp>", xmlEscape(snapshot.Hello.Name), snapshot.Hello.BuildHash, xmlEscape(snapshot.Hello.BuildStamp)))
 		case "getprotocolinfo":
 			writeSOAP(writer, "GetProtocolInfo", "<Protocol>PCController JSON-RPC 2.0 over HTTP/WebSocket/Socket.IO</Protocol><Authentication>Bearer token required for control</Authentication>")
+		case "getcommandcatalog":
+			writeSOAP(writer, "GetCommandCatalog", fmt.Sprintf("<CommandCatalogURL>/api/commands</CommandCatalogURL><CommandCount>%d</CommandCount><Authentication>Bearer token required for control</Authentication>", len(service.Client.CommandCatalog())))
+		case "geteventinfo":
+			writeSOAP(writer, "GetEventInfo", "<WebSocketPath>/ipc</WebSocketPath><SocketIOPath>/socket.io/</SocketIOPath><Topics>events,state,debug,status,opcodes</Topics><Authentication>Bearer token required for control</Authentication>")
+		case "getopcodeinfo":
+			writeSOAP(writer, "GetOpcodeInfo", "<OpcodeEndpoint>/api/opcode</OpcodeEndpoint><OpcodeRPC>controller.opcode.send,controller.opcode.exchange,controller.opcode.request</OpcodeRPC><OpcodeEvents>controller.opcode</OpcodeEvents><Authentication>Bearer token required for control</Authentication>")
 		default:
 			writer.WriteHeader(http.StatusInternalServerError)
 			writeSOAPFault(writer, "Invalid Action")
@@ -61,7 +67,7 @@ func registerUPnPHTTP(mux *http.ServeMux, service *Service) {
 			return
 		}
 		writer.Header().Set("Content-Type", "application/xml; charset=utf-8")
-		_, _ = io.WriteString(writer, `<?xml version="1.0" encoding="utf-8"?><scpd xmlns="urn:schemas-upnp-org:service-1-0"><specVersion><major>1</major><minor>0</minor></specVersion><actionList><action><name>GetStatus</name></action><action><name>GetBoardIdentity</name></action><action><name>GetProtocolInfo</name></action></actionList></scpd>`)
+		_, _ = io.WriteString(writer, `<?xml version="1.0" encoding="utf-8"?><scpd xmlns="urn:schemas-upnp-org:service-1-0"><specVersion><major>1</major><minor>0</minor></specVersion><actionList><action><name>GetStatus</name></action><action><name>GetBoardIdentity</name></action><action><name>GetProtocolInfo</name></action><action><name>GetCommandCatalog</name></action><action><name>GetEventInfo</name></action><action><name>GetOpcodeInfo</name></action></actionList></scpd>`)
 	})
 	mux.HandleFunc("/upnp/events", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Allow", "SUBSCRIBE, UNSUBSCRIBE")
@@ -92,7 +98,7 @@ func upnpDeviceDescription(service *Service, request *http.Request) string {
 
 func soapActionFromBody(body []byte) string {
 	text := string(body)
-	for _, action := range []string{"GetStatus", "GetBoardIdentity", "GetProtocolInfo"} {
+	for _, action := range []string{"GetStatus", "GetBoardIdentity", "GetProtocolInfo", "GetCommandCatalog", "GetEventInfo", "GetOpcodeInfo"} {
 		if strings.Contains(text, action) {
 			return action
 		}
