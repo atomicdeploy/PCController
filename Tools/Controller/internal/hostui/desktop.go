@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const ToastLogoFileName = "toast-logo.png"
+
 type DesktopIntegrationOptions struct {
 	AppID       string
 	DisplayName string
@@ -20,7 +22,18 @@ type DesktopIntegrationStatus struct {
 	ShortcutReady bool   `json:"shortcut_ready"`
 	Executable    string `json:"executable,omitempty"`
 	Shortcut      string `json:"shortcut,omitempty"`
+	Logo          string `json:"logo,omitempty"`
 	LastError     string `json:"last_error,omitempty"`
+}
+
+// ResolveToastLogoPath returns the stable product image installed beside the
+// exact controller executable. Install/package verification owns its digest.
+func ResolveToastLogoPath(executable string) (string, error) {
+	resolved, err := resolveDesktopExecutable(executable)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(resolved), ToastLogoFileName), nil
 }
 
 // DesktopIntegrationCleanupStatus reports only artifacts that were positively

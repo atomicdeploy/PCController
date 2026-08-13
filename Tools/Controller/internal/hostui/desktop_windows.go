@@ -64,7 +64,17 @@ func ensurePlatformDesktopIntegration(
 		return DesktopIntegrationStatus{Supported: true, LastError: err.Error()}, err
 	}
 	status := DesktopIntegrationStatus{Supported: true, Executable: executable}
-	if err := ensureProtocolRegistry(windowsRegistryWriter{}, executable, appID, displayName); err != nil {
+	logo, err := ResolveToastLogoPath(executable)
+	if err != nil {
+		status.LastError = err.Error()
+		return status, err
+	}
+	if _, err := resolveWindowsToastLogo(logo); err != nil {
+		status.LastError = err.Error()
+		return status, err
+	}
+	status.Logo = logo
+	if err := ensureProtocolRegistry(windowsRegistryWriter{}, executable, logo, appID, displayName); err != nil {
 		status.LastError = err.Error()
 		return status, err
 	}
@@ -157,7 +167,7 @@ func removeOwnedRegistryIntegration(
 	identityPath := `Software\Classes\AppUserModelId\` + appID
 	iconURI, identityErr := registry.String(identityPath, "IconUri")
 	switch {
-	case identityErr == nil && sameWindowsPath(iconURI, executable):
+	case identityErr == nil && (sameWindowsPath(iconURI, executable) || sameWindowsPath(iconURI, filepath.Join(filepath.Dir(executable), ToastLogoFileName))):
 		if deleteErr := registry.DeleteTree(identityPath); deleteErr != nil && !isNotExist(deleteErr) {
 			err = errors.Join(err, fmt.Errorf("remove application identity: %w", deleteErr))
 		} else if deleteErr == nil {
@@ -265,7 +275,7 @@ func isNotExist(err error) bool {
 
 func ensureProtocolRegistry(
 	registry registryWriter,
-	executable, appID, displayName string,
+	executable, logo, appID, displayName string,
 ) error {
 	values := []struct{ path, name, value string }{
 		{`Software\Classes\` + productidentity.ProtocolScheme, "", "URL:" + displayName + " Protocol"},
@@ -273,7 +283,7 @@ func ensureProtocolRegistry(
 		{`Software\Classes\` + productidentity.ProtocolScheme + `\DefaultIcon`, "", quoteWindowsArgument(executable) + ",0"},
 		{`Software\Classes\` + productidentity.ProtocolScheme + `\shell\open\command`, "", protocolCommand(executable)},
 		{`Software\Classes\AppUserModelId\` + appID, "DisplayName", displayName},
-		{`Software\Classes\AppUserModelId\` + appID, "IconUri", executable},
+		{`Software\Classes\AppUserModelId\` + appID, "IconUri", logo},
 	}
 	for _, value := range values {
 		if err := registry.Set(value.path, value.name, value.value); err != nil {

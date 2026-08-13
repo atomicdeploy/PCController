@@ -860,6 +860,13 @@ test('Windows installation inventory follows the final packed host manifest', ()
 	assert.equal(linux.actions.some(action => action.id === 'installation-inventory'), false)
 })
 
+test('Windows package carries the hash-bound toast logo before inventory generation', async () => {
+	const source = await readFile(join(PROJECT_ROOT, 'Tools', 'Build', 'build.mjs'), 'utf8')
+	assert.match(source, /copyFileSync\(join\(HOST_ROOT, 'winres', 'icon\.png'\), toastLogo\)/)
+	assert.match(source, /\[executable, \.\.\.\(toastLogo \? \[toastLogo\] : \[\]\), \.\.\.shared\.paths\]/)
+	assert.ok(source.indexOf("toastLogo = join(stage, 'toast-logo.png')") < source.indexOf("'installation-package.json'"))
+})
+
 test('Win32 resource configuration retains icon, manifest, and version data', async () => {
 	const source = await readFile(
 		join(PROJECT_ROOT, 'Tools', 'Controller', 'winres', 'winres.json'),
