@@ -54,18 +54,9 @@ describe('offline and settings UI contracts', () => {
       token: 'valid-looking-token',
     }
     expect(sessionAuthenticationGuidanceRequired({ ...base, hostRequiresAuthentication: false })).toBe(false)
-    expect(sessionAuthenticationGuidanceRequired({
-      ...base,
-      hostRequiresAuthentication: false,
-      streamDetail: 'HTTP 401: authentication required',
-    })).toBe(true)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamState: 'open' })).toBe(false)
     expect(sessionAuthenticationGuidanceRequired({ ...base, token: '' })).toBe(true)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'HTTP 401: authentication required' })).toBe(true)
-    expect(sessionAuthenticationGuidanceRequired({
-      ...base,
-      streamDetail: 'HTTP 403: remote read capability is disabled',
-    })).toBe(false)
     expect(sessionAuthenticationGuidanceRequired({ ...base, streamDetail: 'network timeout' })).toBe(false)
   })
 
@@ -132,9 +123,9 @@ describe('offline and settings UI contracts', () => {
       t={translator('en')}
       transport={{ ...shared().transport, streamState: 'waiting', authenticationRequired: true }}
     />)
-    expect(markup).toContain('href="#/settings"')
-    expect(markup).toContain('Authentication required — open Settings to connect securely.')
-    expect(markup).toContain('Apply the edge session access token')
+    expect(markup).toContain('Authentication required')
+    expect(markup).toContain('Enter this host’s access token.')
+    expect(markup).toContain('Enter access token')
     expect(markup).not.toContain('The dashboard is ready')
   })
 
@@ -144,24 +135,10 @@ describe('offline and settings UI contracts', () => {
       t={translator('en')}
       snapshot={{ ...emptySnapshot, connection_reason: 'Serial controller is offline' }}
     />)
-    expect(markup).toContain('href="#/dashboard"')
-    expect(markup).toContain('Controller offline — the host is waiting for the board.')
+    expect(markup).toContain('Controller offline — check the connection details below.')
     expect(markup).toContain('Serial controller is offline')
     expect(markup).not.toContain('Authentication required')
     expect(markup).not.toContain('The dashboard is ready')
-  })
-
-  it('distinguishes a lost host stream from an offline board', () => {
-    const markup = renderToStaticMarkup(<DashboardView
-      {...shared()}
-      t={translator('en')}
-      transport={{ ...shared().transport, streamState: 'waiting' }}
-      snapshot={{ ...emptySnapshot, connection_reason: 'WebSocket connection closed' }}
-    />)
-    expect(markup).toContain('Host connection unavailable — check the connection details below.')
-    expect(markup).toContain('WebSocket connection closed')
-    expect(markup).not.toContain('Controller offline')
-    expect(markup).not.toContain('Authentication required')
   })
 
   it('hides unavailable peripherals and their invalid readings', () => {

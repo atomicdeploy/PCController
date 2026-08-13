@@ -44,6 +44,8 @@ type Status struct {
 	SegmentText              string                          `json:"segment_scroll_text,omitempty"`
 	BuzzerMirror             bool                            `json:"buzzer_mirror_active"`
 	BuzzerNativeState        string                          `json:"buzzer_native_state,omitempty"`
+	BuzzerNativeBackend      string                          `json:"buzzer_native_backend,omitempty"`
+	BuzzerNativeExecutable   string                          `json:"buzzer_native_executable,omitempty"`
 	BuzzerNativeLastError    string                          `json:"buzzer_native_last_error,omitempty"`
 	WebhooksActive           int                             `json:"webhooks_active"`
 	WebhookQueuePending      int                             `json:"webhook_queue_pending"`
@@ -649,6 +651,8 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	segmentScrollActive := manager.status.SegmentScroll
 	segmentScrollText := manager.status.SegmentText
 	buzzerNativeState := manager.status.BuzzerNativeState
+	buzzerNativeBackend := manager.status.BuzzerNativeBackend
+	buzzerNativeExecutable := manager.status.BuzzerNativeExecutable
 	buzzerNativeLastError := manager.status.BuzzerNativeLastError
 	doorWarning := manager.runningDoorWarning
 	manager.advertiser, manager.hotkeys, manager.keyboard = nil, nil, nil
@@ -668,21 +672,36 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 	}
 
 	status := Status{
-		Notifications:         config.Integrations.Notifications.Enabled,
-		BuzzerMirror:          config.Integrations.BuzzerMirror.Enabled,
-		BuzzerNativeState:     buzzerNativeState,
-		BuzzerNativeLastError: buzzerNativeLastError,
-		Desktop:               desktopStatus,
-		StatusLEDState:        statusLEDState,
-		SegmentScroll:         segmentScrollActive,
-		SegmentText:           segmentScrollText,
-		DoorWarning:           doorWarning,
+		Notifications:          config.Integrations.Notifications.Enabled,
+		BuzzerMirror:           config.Integrations.BuzzerMirror.Enabled,
+		BuzzerNativeState:      buzzerNativeState,
+		BuzzerNativeBackend:    buzzerNativeBackend,
+		BuzzerNativeExecutable: buzzerNativeExecutable,
+		BuzzerNativeLastError:  buzzerNativeLastError,
+		Desktop:                desktopStatus,
+		StatusLEDState:         statusLEDState,
+		SegmentScroll:          segmentScrollActive,
+		SegmentText:            segmentScrollText,
+		DoorWarning:            doorWarning,
 	}
 	if !config.Integrations.BuzzerMirror.Enabled || !config.Integrations.BuzzerMirror.NativeEnabled {
 		status.BuzzerNativeState = "disabled"
+		status.BuzzerNativeBackend = ""
+		status.BuzzerNativeExecutable = ""
 		status.BuzzerNativeLastError = ""
-	} else if status.BuzzerNativeState == "" || status.BuzzerNativeState == "disabled" {
-		status.BuzzerNativeState = "untested"
+	} else {
+		resolved, resolveErr := resolveNativeBuzzer(config.Integrations.BuzzerMirror)
+		if resolveErr != nil {
+			status.BuzzerNativeState = "failed"
+			status.BuzzerNativeBackend = ""
+			status.BuzzerNativeExecutable = ""
+			status.BuzzerNativeLastError = resolveErr.Error()
+		} else {
+			status.BuzzerNativeState = "ready"
+			status.BuzzerNativeBackend = resolved.Backend
+			status.BuzzerNativeExecutable = resolved.Executable
+			status.BuzzerNativeLastError = ""
+		}
 	}
 	hotkeys := hostui.NewHotkeyRegistrar()
 	var hotkeyBindings []hostui.HotkeyBinding
@@ -884,6 +903,9 @@ func (manager *Manager) eventLoop(afterID uint64) {
 }
 
 func bridgeEventForwardable(event controller.Event) bool {
+	if strings.TrimSpace(event.Metadata["bridge.ingress"]) != "" {
+		return false
+	}
 	kind := strings.ToLower(strings.TrimSpace(event.Kind))
 	if kind == "integration.error" || strings.HasPrefix(kind, "bridge.") ||
 		strings.HasPrefix(kind, "security.remote.") {
@@ -892,6 +914,15 @@ func bridgeEventForwardable(event controller.Event) bool {
 	return kind != "message" ||
 		(!strings.EqualFold(event.Source, "bridge") &&
 			!strings.EqualFold(event.Source, "websocket"))
+}
+
+func (manager *Manager) ingestPeerEvent(peerName string, raw json.RawMessage) bool {
+	var event controller.Event
+	if json.Unmarshal(raw, &event) != nil || strings.TrimSpace(event.Kind) == "" {
+		return false
+	}
+	manager.client.IngestBridgeEvent(peerName, event)
+	return true
 }
 
 // observeRunningDoor combines the explicit HOST-owned Running state with the
@@ -1277,6 +1308,11 @@ func (manager *Manager) webSocketPeerSession(
 		if err := json.Unmarshal(data, &request); err != nil {
 			continue
 		}
+		if request.Method == "controller.event" {
+			if manager.ingestPeerEvent(config.Name, request.Params) {
+				continue
+			}
+		}
 		if request.Method == "controller.event" || request.Method == "controller.status" {
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
@@ -1433,7 +1469,12 @@ func (manager *Manager) socketIOPeerSession(
 			if json.Unmarshal(raw, &response) == nil {
 				_ = rpcSession.Resolve(response)
 			}
-		case "controller.event", "controller.status", "message.accepted":
+		case "controller.event":
+			if manager.ingestPeerEvent(config.Name, raw) {
+				continue
+			}
+			fallthrough
+		case "controller.status", "message.accepted":
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
 				Text: string(raw),

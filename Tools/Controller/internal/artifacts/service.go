@@ -51,6 +51,7 @@ type Service struct {
 	idempotency   map[string]idempotencyRecord
 	operationMeta map[string]operationJournal
 	transaction   chan struct{}
+	peerUploads   map[string]*peerUpload
 }
 
 // NewService validates its dependencies and restores durable operation state.
@@ -65,7 +66,7 @@ func NewService(options Options) (*Service, error) {
 		remote: options.RemoteProgrammingEnabled, ctx: ctx, cancel: cancel,
 		operations: make(map[string]UpdateStatus), defaults: make(map[Kind]string),
 		idempotency: make(map[string]idempotencyRecord), operationMeta: make(map[string]operationJournal),
-		transaction: make(chan struct{}, 1),
+		transaction: make(chan struct{}, 1), peerUploads: make(map[string]*peerUpload),
 	}
 	service.transaction <- struct{}{}
 	if service.downloader == nil {
@@ -79,7 +80,16 @@ func NewService(options Options) (*Service, error) {
 }
 
 // Close cancels in-flight background operations owned by the service.
-func (service *Service) Close() { service.cancel() }
+func (service *Service) Close() {
+	service.cancel()
+	service.mu.Lock()
+	for id, upload := range service.peerUploads {
+		_ = upload.file.Close()
+		_ = os.Remove(upload.path)
+		delete(service.peerUploads, id)
+	}
+	service.mu.Unlock()
+}
 
 // Store returns the immutable content-addressed store used by the service.
 func (service *Service) Store() *Store { return service.store }
@@ -530,6 +540,34 @@ func (service *Service) DispatchRPC(ctx context.Context, method string, params j
 			Platform: request.Platform,
 		})
 		return value, true, err
+	case "controller.artifact.upload.begin":
+		var request PeerUploadBeginRequest
+		if err := decodeRPCParams(params, &request); err != nil {
+			return nil, true, err
+		}
+		value, err := service.BeginPeerUpload(request)
+		return value, true, err
+	case "controller.artifact.upload.chunk":
+		var request PeerUploadChunkRequest
+		if err := decodeRPCParams(params, &request); err != nil {
+			return nil, true, err
+		}
+		value, err := service.AppendPeerUpload(request)
+		return value, true, err
+	case "controller.artifact.upload.finish":
+		var request PeerUploadFinishRequest
+		if err := decodeRPCParams(params, &request); err != nil {
+			return nil, true, err
+		}
+		value, err := service.FinishPeerUpload(request)
+		return value, true, err
+	case "controller.artifact.upload.abort":
+		var request PeerUploadFinishRequest
+		if err := decodeRPCParams(params, &request); err != nil {
+			return nil, true, err
+		}
+		err := service.AbortPeerUpload(request)
+		return map[string]bool{"aborted": err == nil}, true, err
 	case "controller.artifact.capture":
 		var request CaptureRequest
 		if err := decodeRPCParams(params, &request); err != nil {

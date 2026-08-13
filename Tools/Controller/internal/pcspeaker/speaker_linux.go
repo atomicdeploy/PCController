@@ -58,3 +58,11 @@ func openLinuxSpeaker() (int, string, error) {
 	}
 	return -1, "", fmt.Errorf("open Linux PC speaker (%s): %w", linuxSpeakerDevices, last)
 }
+
+func probeNative(string) error {
+	fd, _, err := openLinuxSpeaker()
+	if err == nil {
+		err = unix.Close(fd)
+	}
+	return err
+}

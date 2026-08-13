@@ -288,6 +288,44 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		model.settingEditor = nil
 		return model.dispatchLine("buzzer path " + paths[selected])
 	}
+	if strings.HasPrefix(editor.Key, "buzzer.") {
+		value := model.hostIntegrationValue
+		switch editor.Key {
+		case "buzzer.renderers":
+			value.BuzzerMirror.NativeEnabled = editorField(editor, "native") != 0
+			value.BuzzerMirror.WebAudioEnabled = editorField(editor, "web") != 0
+			if value.BuzzerMirror.Enabled && !value.BuzzerMirror.NativeEnabled && !value.BuzzerMirror.WebAudioEnabled {
+				model.setNotice("Select at least one host buzzer renderer")
+				return model, nil, true
+			}
+		case "buzzer.backend":
+			backends := []string{"auto", "native", "external"}
+			selected := editorField(editor, "backend")
+			if selected < 0 || selected >= len(backends) {
+				model.setNotice("Unknown PC speaker backend")
+				return model, nil, true
+			}
+			value.BuzzerMirror.Backend = backends[selected]
+		case "buzzer.executable":
+			executable := strings.TrimSpace(editor.Text)
+			if len(executable) > 1024 || strings.ContainsAny(executable, "\r\n\x00") {
+				model.setNotice("Beep executable path is invalid")
+				return model, nil, true
+			}
+			value.BuzzerMirror.Executable = executable
+		}
+		if model.saveHostIntegrations != nil {
+			if err := model.saveHostIntegrations(value); err != nil {
+				model.appendLog("error", "save PC buzzer settings: "+err.Error())
+				model.setNotice("PC buzzer setting was not saved: " + err.Error())
+				return model, nil, true
+			}
+		}
+		model.hostIntegrationValue = value
+		model.settingEditor = nil
+		model.setNotice("PC buzzer setting saved and hot-applied")
+		return model, nil, true
+	}
 	ui := model.uiValue
 	switch editor.Key {
 	case "app.title":

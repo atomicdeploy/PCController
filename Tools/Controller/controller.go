@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1797,6 +1798,33 @@ func (client *Client) EmitHostActionEvent(
 		Metadata: metadata,
 	})
 	return publicEvent(event)
+}
+
+// IngestBridgeEvent republishes one authenticated peer event through the
+// local runtime without flattening its kind or metadata into a text message.
+// The ingress marker prevents bridge cycles while allowing local integrations
+// such as the optional PC buzzer mirror to react immediately.
+func (client *Client) IngestBridgeEvent(peer string, event Event) Event {
+	peer = strings.TrimSpace(peer)
+	metadata := cloneStringMap(event.Metadata)
+	if metadata == nil {
+		metadata = make(map[string]string)
+	}
+	metadata["bridge.ingress"] = peer
+	metadata["bridge.event_id"] = strconv.FormatUint(event.ID, 10)
+	if source := strings.TrimSpace(event.Source); source != "" {
+		metadata["bridge.original_source"] = source
+	}
+	forwarded := client.runtime.PublishStructuredEvent(control.Event{
+		Kind: event.Kind, Stream: event.Stream, Text: event.Text,
+		Frame:     native.Frame{Opcode: event.Opcode, Seq: event.Seq, Payload: append([]byte(nil), event.Payload...)},
+		Lifecycle: event.Lifecycle, Reason: event.Reason, State: event.State,
+		Gesture: event.Gesture, Source: "bridge", Target: event.Target,
+		MessageType: event.MessageType, Action: event.Action, Metadata: metadata,
+		RFCode: event.RFCode, RFBits: event.RFBits, RFProtocol: event.RFProtocol,
+		RFPulseUS: event.RFPulseUS, ResetCause: event.ResetCause, ResetCount: event.ResetCount,
+	})
+	return publicEvent(forwarded)
 }
 
 // SyncToolchain updates installed cores/libraries and ensures every
