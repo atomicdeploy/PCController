@@ -23,6 +23,7 @@ import {
 } from 'node:fs'
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { loadProjectEnv } from './env.mjs'
 import { createChalk, renderUnicodeBanner, renderUnicodeTable } from './presentation.mjs'
 import { PRODUCT_METADATA, resolveProductTitle } from './product-metadata.mjs'
 import {
@@ -37,6 +38,8 @@ import {
 	relativeCommandPlanPaths,
 	sourceControllerInvocation
 } from '../CommandPlan/controller-command.mjs'
+
+loadProjectEnv()
 
 export { resolveProductTitle } from './product-metadata.mjs'
 
@@ -162,7 +165,7 @@ export function resolveBuildIdentity(options, env = process.env, now = new Date(
 	}
 	const appName = normalizeBuildPresentation(
 		options.appName !== undefined ? options.appName : environmentValue(env, 'PCCONTROLLER_BUILD_APP_NAME') ||
-			environmentValue(env, 'APP_TITLE') || PRODUCT_METADATA.productName,
+			environmentValue(env, 'APP_NAME') || environmentValue(env, 'APP_TITLE') || PRODUCT_METADATA.productName,
 		'build application name', 64
 	)
 	const tagline = normalizeBuildPresentation(

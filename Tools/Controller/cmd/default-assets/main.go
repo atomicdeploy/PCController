@@ -8,10 +8,15 @@ import (
 	"os"
 	"path/filepath"
 
+	"pccontroller.local/controller/internal/envfile"
 	"pccontroller.local/controller/internal/programmer"
 )
 
 func main() {
+	if _, err := envfile.LoadProcess(); err != nil {
+		fmt.Fprintln(os.Stderr, "environment:", err)
+		os.Exit(1)
+	}
 	output := flag.String("output", "", "destination Intel HEX EEPROM image")
 	flag.Parse()
 	if *output == "" {

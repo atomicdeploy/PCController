@@ -48,7 +48,16 @@ test('build presentation metadata matches runtime length and text bounds', () =>
 	}
 })
 
-test('APP_TITLE overrides the canonical product name', () => {
+test('build, runtime, and legacy environment titles use one precedence contract', () => {
+	assert.equal(resolveProductTitle({
+		PCCONTROLLER_BUILD_APP_NAME: 'Build Console',
+		APP_NAME: 'Runtime Console',
+		APP_TITLE: 'Legacy Console'
+	}), 'Build Console')
+	assert.equal(resolveProductTitle({
+		APP_NAME: 'Runtime Console',
+		APP_TITLE: 'Legacy Console'
+	}), 'Runtime Console')
 	assert.equal(resolveProductTitle({
 		APP_TITLE: 'Operator Console'
 	}), 'Operator Console')

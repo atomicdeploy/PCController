@@ -18,6 +18,7 @@ import (
 	"unsafe"
 
 	controller "pccontroller.local/controller"
+	"pccontroller.local/controller/internal/envfile"
 )
 
 type libraryRequest struct {
@@ -45,10 +46,15 @@ type libraryClient struct {
 }
 
 var (
-	nextHandle atomic.Uint64
-	clientsMu  sync.RWMutex
-	clients    = make(map[uint64]*libraryClient)
+	nextHandle     atomic.Uint64
+	clientsMu      sync.RWMutex
+	clients        = make(map[uint64]*libraryClient)
+	environmentErr error
 )
+
+func init() {
+	_, environmentErr = envfile.LoadProcess()
+}
 
 func main() {}
 
@@ -59,6 +65,9 @@ func main() {}
 func PCControllerInvoke(input *C.char) *C.char {
 	if input == nil {
 		return encodeCString(libraryResponse{Error: "request pointer is null"})
+	}
+	if environmentErr != nil {
+		return encodeCString(libraryResponse{Error: "environment: " + environmentErr.Error()})
 	}
 	var request libraryRequest
 	if err := json.Unmarshal([]byte(C.GoString(input)), &request); err != nil {
