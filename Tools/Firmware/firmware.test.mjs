@@ -405,6 +405,8 @@ test('production KEY dispatches first Down to motion and exits outside KEY', asy
 	assert.match(frontPanel, /setMenuPage\(PAGE_DOOR\);/u)
 	assert.match(frontPanel, /!menuPageNavigable\(candidate\)/u)
 	assert.match(frontPanel, /menuPageNavigable\(page\)[^]*?menuCategory\(page\) == category/u)
+	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
+	assert.match(frontPanel, /menuPage == PAGE_USER_RELAYS[^]*?\? PAGE_RF/u)
 	assert.match(model, /page < PAGE_COUNT && page != PAGE_MOTION/u)
 	assert.match(protocol, /\{1, PAGE_COUNT - 1U, 0xFF, 0\}/u)
 	assert.match(protocol, /if \(!menuPageNavigable\(cursor\)\)[^]*?\+\+cursor;/u)

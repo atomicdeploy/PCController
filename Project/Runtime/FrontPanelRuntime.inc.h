@@ -772,7 +772,10 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
           ));
 #else
-      setMenuPage(menuPage == 0 ? PAGE_COUNT - 1 : menuPage - 1);
+      setMenuPage(menuPage == 0
+                      ? PAGE_COUNT - 1
+                      : (menuPage == PAGE_RF ? PAGE_USER_RELAYS
+                                             : menuPage - 1));
 #endif
       break;
     case MENU_NEXT:
@@ -784,7 +787,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 #endif
           ));
 #else
-      setMenuPage(static_cast<uint8_t>((menuPage + 1) % PAGE_COUNT));
+      setMenuPage(menuPage == PAGE_USER_RELAYS
+                      ? PAGE_RF
+                      : static_cast<uint8_t>((menuPage + 1) % PAGE_COUNT));
 #endif
       break;
     case MENU_DECREASE:
