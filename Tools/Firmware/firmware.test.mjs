@@ -281,6 +281,18 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 	)
 })
 
+test('production KEY dispatches first Down to motion and exits outside KEY', async () => {
+	const frontPanel = await readFile(
+		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(frontPanel, /const bool momentary = mode == MODE_KEYS \|\| mode == MODE_MOTION_CONTROL/u)
+	assert.match(frontPanel, /if \(modeManager\.current\(\) == MODE_KEYS\)[^]*?relays\.allOff\(actionNow\);[^]*?modeManager\.transitionTo\(MODE_MOTION_CONTROL\);/u)
+	assert.match(frontPanel, /mode == MODE_MOTION_CONTROL && event == KeyEvent::Down[^]*?shiftRegisters\.inputActive\(bit \^ 1U\)/u)
+	assert.match(frontPanel, /setMenuPage\(PAGE_DOOR\);/u)
+	assert.doesNotMatch(frontPanel, /case MODE_MOTION_CONTROL:\s*relays\.allOff\(at\);/u)
+})
+
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
         const runtimeFiles = [
                 'ControllerContext.inc.h',
