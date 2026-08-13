@@ -213,7 +213,7 @@ func startRawPeerManager(
 		config.Integrations.WebSocketClients = []appconfig.WebSocketClient{{
 			Name: "raw-peer", Enabled: true,
 			URL:      "ws://" + listener.Addr().String() + path,
-			Protocol: protocol, AuthToken: token, Topics: []string{"events"},
+			Protocol: protocol, AuthToken: token, Topics: []string{"events", "state", "status"},
 			ForwardEvents: true, AllowCommands: true,
 		}}
 		return nil
@@ -240,7 +240,7 @@ func TestOutboundWebSocketClientsInteroperateWithRawRFC6455Servers(t *testing.T)
 			t.Fatal(err)
 		}
 		defer listener.Close()
-		manager, _, runtime, cancel := startRawPeerManager(t, listener, "jsonrpc", token)
+		manager, client, runtime, cancel := startRawPeerManager(t, listener, "jsonrpc", token)
 		defer func() {
 			cancel()
 			manager.Close()
@@ -251,9 +251,21 @@ func TestOutboundWebSocketClientsInteroperateWithRawRFC6455Servers(t *testing.T)
 
 		var subscription ipcjson.Request
 		if packet := peer.readText(t); json.Unmarshal([]byte(packet), &subscription) != nil ||
-			subscription.JSONRPC != ipcjson.Version || subscription.Method != "controller.subscribe" {
+			subscription.JSONRPC != ipcjson.Version || subscription.Method != "controller.subscribe" ||
+			!strings.Contains(string(subscription.Params), `"state"`) {
 			t.Fatalf("JSON-RPC subscription=%s", packet)
 		}
+		cursor := client.LatestEventID()
+		stateEvent := controller.Event{
+			ID: 71, Kind: "buzzer.note", Stream: "state", Source: "board",
+			Metadata: map[string]string{"frequency_hz": "880", "duration_ms": "125"},
+		}
+		stateParams, _ := json.Marshal(stateEvent)
+		notification, _ := json.Marshal(ipcjson.Request{
+			JSONRPC: ipcjson.Version, Method: "controller.event", Params: stateParams,
+		})
+		peer.writeText(t, string(notification))
+		assertSinglePeerBuzzerEvent(t, client, cursor, "raw-peer")
 
 		result := make(chan ipcjson.Response, 1)
 		errors := make(chan error, 1)
@@ -351,9 +363,17 @@ func TestOutboundWebSocketClientsInteroperateWithRawRFC6455Servers(t *testing.T)
 		}
 		peer.writeText(t, `40{"sid":"raw-peer"}`)
 		name, payload := rawPeerEvent(t, peer.readText(t))
-		if name != "subscribe" || !strings.Contains(string(payload), `"events"`) {
+		if name != "subscribe" || !strings.Contains(string(payload), `"events"`) ||
+			!strings.Contains(string(payload), `"state"`) {
 			t.Fatalf("Socket.IO subscription name=%q payload=%s", name, payload)
 		}
+		cursor := client.LatestEventID()
+		statePacket, _ := json.Marshal([]any{"controller.event", controller.Event{
+			ID: 72, Kind: "buzzer.note", Stream: "state", Source: "board",
+			Metadata: map[string]string{"frequency_hz": "660", "duration_ms": "90"},
+		}})
+		peer.writeText(t, "42"+string(statePacket))
+		assertSinglePeerBuzzerEvent(t, client, cursor, "raw-peer")
 
 		result := make(chan ipcjson.Response, 1)
 		errors := make(chan error, 1)
@@ -408,7 +428,7 @@ func TestOutboundWebSocketClientsInteroperateWithRawRFC6455Servers(t *testing.T)
 			t.Fatalf("Socket.IO forwarded event name=%q payload=%s", name, payload)
 		}
 
-		cursor := client.LatestEventID()
+		cursor = client.LatestEventID()
 		messagePacket, _ := json.Marshal([]any{"message", controller.TextMessage{
 			Source: "client", Target: "host", Type: "actionable.notice",
 			Text: "open events", Action: "app.page:events",
@@ -436,4 +456,28 @@ func TestOutboundWebSocketClientsInteroperateWithRawRFC6455Servers(t *testing.T)
 			}
 		}
 	})
+}
+
+func assertSinglePeerBuzzerEvent(
+	t *testing.T,
+	client *controller.Client,
+	afterID uint64,
+	peerName string,
+) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	event, err := client.NextEvent(ctx, afterID, "buzzer.note")
+	cancel()
+	if err != nil || event.Stream != "state" || event.Source != "bridge" ||
+		event.Metadata["bridge.ingress"] != peerName {
+		t.Fatalf("peer buzzer event=%#v err=%v", event, err)
+	}
+	duplicateContext, stop := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer stop()
+	if duplicate, duplicateErr := client.NextEvent(duplicateContext, event.ID, "buzzer.note"); duplicateErr == nil {
+		t.Fatalf("peer buzzer event was delivered more than once: %#v", duplicate)
+	}
+	if bridgeEventForwardable(event) {
+		t.Fatal("ingressed buzzer event remained eligible for bridge forwarding")
+	}
 }

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	// PublicInfoPath is the bounded, unauthenticated device-directory document.
-	// It contains health and identity data only; control remains authenticated.
+	// PublicInfoPath is the bounded device-directory document. During the
+	// immediate alpha, application auth/authZ is disabled; capability and live
+	// availability still determine whether board-specific keys are present.
 	PublicInfoPath   = "/upnp/public.json"
 	PublicInfoSchema = "pccontroller.public.v1"
 )
@@ -113,6 +114,77 @@ type PublicTelemetry struct {
 	PWMValue                 uint16    `json:"pwm_value,omitempty"`
 	LCDAddress               byte      `json:"lcd_address,omitempty"`
 	ResetCount               uint32    `json:"reset_count,omitempty"`
+	INA219Present            bool      `json:"-"`
+	TemperatureLEDPresent    bool      `json:"-"`
+	TemperatureBTPresent     bool      `json:"-"`
+	RelayMotionPresent       bool      `json:"-"`
+	BluetoothAudioPresent    bool      `json:"-"`
+	RemoteKeysPresent        bool      `json:"-"`
+	MenuPresent              bool      `json:"-"`
+	PWMPresent               bool      `json:"-"`
+	LCDPresent               bool      `json:"-"`
+}
+
+// MarshalJSON omits capability-specific keys entirely until the board has
+// advertised them. Valid zero and false values remain representable once a
+// capability is present; omitempty alone cannot express that distinction.
+func (value PublicTelemetry) MarshalJSON() ([]byte, error) {
+	result := map[string]any{"available": value.Available}
+	if !value.Available {
+		return json.Marshal(result)
+	}
+	result["updated_at"] = value.UpdatedAt
+	result["uptime_ms"] = value.UptimeMS
+	result["program_mode"] = value.ProgramMode
+	result["program_running"] = value.ProgramRunning
+	result["host_offline"] = value.HostOffline
+	result["hot"] = value.Hot
+	result["reset_count"] = value.ResetCount
+	if value.INA219Present {
+		result["ina219_available"] = value.INA219Available
+		if value.INA219Available {
+			result["supply_mv"] = value.SupplyMV
+			result["bus_mv"] = value.BusMV
+			result["current_ma"] = value.CurrentMA
+			result["power_mw"] = value.PowerMW
+		}
+	}
+	if value.TemperatureLEDPresent {
+		result["temperature_led_available"] = value.TemperatureLEDAvailable
+		if value.TemperatureLEDAvailable {
+			result["temperature_led_centi_c"] = value.TemperatureLEDCentiC
+		}
+	}
+	if value.TemperatureBTPresent {
+		result["temperature_bt_audio_available"] = value.TemperatureBTAvailable
+		if value.TemperatureBTAvailable {
+			result["temperature_bt_audio_centi_c"] = value.TemperatureBTAudioCentiC
+		}
+	}
+	if value.RelayMotionPresent {
+		result["door_open"] = value.DoorOpen
+		result["active_relays"] = value.ActiveRelays
+	}
+	if value.BluetoothAudioPresent {
+		result["bluetooth_audio_state"] = value.BluetoothAudioState
+	}
+	if value.RemoteKeysPresent {
+		result["active_keys"] = value.ActiveKeys
+	}
+	if value.MenuPresent {
+		result["menu_page"] = value.MenuPage
+	}
+	if value.PWMPresent {
+		result["pwm_available"] = value.PWMAvailable
+		if value.PWMAvailable {
+			result["pwm_channel"] = value.PWMChannel
+			result["pwm_value"] = value.PWMValue
+		}
+	}
+	if value.LCDPresent && value.LCDAddress != 0 {
+		result["lcd_address"] = value.LCDAddress
+	}
+	return json.Marshal(result)
 }
 
 type PublicEndpoints struct {
