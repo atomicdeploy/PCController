@@ -165,17 +165,28 @@ normal low-latency path.
 The board pushes changed physical outputs instead of requiring the host to poll
 the active front panel. `SEGMENT_CHANGED` (`9C`) carries four raw TM1637 segment
 bytes followed by `u8 brightness`. `BUZZER_CHANGED` (`9D`) carries
-`u16 frequency_hz, u16 duration_ms, u8 muted`. Both use sequence zero and are
-emitted only when the corresponding physical output changes. The host may
-still request `FRONT_PANEL_GET` during connection, manual refresh, or recovery.
+the exact nine-byte schema `u16 frequency_hz, u16 duration_ms, u8 muted,
+u32 device_micros`. Hosts reject obsolete five-byte frames; during alpha work,
+install matching firmware instead of adding a compatibility parser. These frames
+use sequence zero and are emitted only when the
+corresponding physical output changes. The host may still request
+`FRONT_PANEL_GET` during connection, manual refresh, or recovery.
 
-The host's melody scheduler sends acknowledged `BUZZER` frames. Each accepted
-firmware note is mirrored through `BUZZER_CHANGED`, then published immediately
-through IPC, WebSocket, Socket.IO, bridge peers, optional native WinRing0
-motherboard-speaker playback, and optional Web Audio. Current firmware receives
-one compact `STATUS_EFFECT` descriptor and renders the animation locally; the
-rate-limited `STATUS_RGB` stream remains only as a bounded older-firmware
-compatibility path.
+The host's melody scheduler sends acknowledged `BUZZER` frames on one monotonic
+deadline sequence; command/ACK latency is not added to every note interval.
+Each accepted firmware note or explicit pause is mirrored through
+`BUZZER_CHANGED`, then published immediately through IPC, WebSocket, Socket.IO,
+bridge peers, optional native motherboard-speaker playback, and optional Web
+Audio. Host renderers map `device_micros` onto their local monotonic clocks;
+late notes are shortened or discarded instead of shifting later notes. Current
+firmware receives one compact `STATUS_EFFECT` descriptor and renders the
+animation locally; the rate-limited `STATUS_RGB` stream remains only as a
+bounded older-firmware compatibility path.
+
+Every buzzer state from one source supersedes its preceding state. A zero-
+frequency positive-duration record is a timed pause; zero frequency and zero
+duration is an authoritative stop. Both cancel an active mirrored tone at the
+mapped MCU timestamp and never start a host speaker backend.
 
 At the command/API layer a melody repeat count of zero means repeat until an
 explicit stop, while 1..20 remains the bounded mode. This is the reusable
@@ -238,7 +249,7 @@ off only outputs claimed by that macro.
 | TEMPERATURES | `95` | named temperature records below |
 | MENU_LIST | `97` | paginated firmware-owned menu entries below |
 | SEGMENT_CHANGED | `9C` | `u8 raw_segments[4], u8 brightness`; unsolicited, changed-only |
-| BUZZER_CHANGED | `9D` | `u16 frequency_hz, u16 duration_ms, u8 muted`; unsolicited, changed-only |
+| BUZZER_CHANGED | `9D` | exact nine-byte `u16 frequency_hz, u16 duration_ms, u8 muted, u32 device_micros`; unsolicited, changed-only |
 | EVENT | `A0` | `u8 eventType, event-specific data...` |
 
 `MENU_LIST` schema `1` starts with `u8 schema, u8 total, u8 nextCursor,
@@ -583,6 +594,7 @@ request error.
 | `controller.device.inspect` | `resource` | sanitized `capabilities` or `snapshot` document only |
 | `controller.integrations.local.get` | `{}` | credential-free local-device and data-hub enable/URL settings |
 | `controller.integrations.local.set` | `local_device`, `data_hub` | validate and persist LAN-only device and loopback-only data roots |
+| `controller.integrations.status` | `{}` | requested and effective buzzer route, mirror backend, and board reconciliation state |
 | `controller.ports` | `{}` | current serial devices with stable identity fields |
 | `controller.quit`, `controller.exit` | `{}` | close the primary and emit lifecycle shutdown |
 
@@ -1094,12 +1106,13 @@ local serial owner. Programming through a remote primary requires the target's
 application-UART close, guarded toolchain/Urclock run, and fresh `HELLO`
 recovery as local programming.
 
-Subscribed peer state remains structured. In particular, an unsolicited
-`buzzer.note` retains its frequency/duration metadata so an independently
-enabled host renderer can play it immediately. The receiver stamps
-`bridge.ingress` and never forwards an ingressed event again; this gives
-server-to-edge mirroring exactly once without polling or bridge cycles. Both
-JSON-RPC and Socket.IO peers must include `state` in their configured topics.
+Subscribed peer events and state remain structured. In particular, an
+unsolicited `buzzer.note` retains its frequency, duration, and optional
+MCU-clock metadata so an independently enabled host renderer can reconstruct
+its source timeline. The receiver stamps `bridge.ingress` and never forwards
+an ingressed event again; this gives server-to-edge mirroring exactly once
+without polling or bridge cycles. Both JSON-RPC and Socket.IO peers must
+include `state` in their configured topics.
 
 ## Artifact distribution and remote updates
 

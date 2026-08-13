@@ -361,6 +361,10 @@ func runWebWithInitialAction(
 	flags := flag.NewFlagSet("web", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
+	buzzerOptions, err := addBuzzerRuntimeFlags(flags, store.Persistent().Integrations.BuzzerMirror)
+	if err != nil {
+		return err
+	}
 	noAuto := flags.Bool("no-auto", false, "start with automatic connection paused")
 	noOpen := flags.Bool("no-open", false, "serve the web app without opening a browser")
 	noTray := flags.Bool("no-tray", false, "serve the web app without a native system-tray menu")
@@ -371,6 +375,12 @@ func runWebWithInitialAction(
 		return errors.New("usage: controller web [--no-open] [--no-tray] [--no-auto] [connection flags]")
 	}
 	connection.captureOverrides(flags)
+	if err := buzzerOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	if err := buzzerOptions.apply(store); err != nil {
+		return err
+	}
 	claimContext, claimCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	claim, existing, err := claimOrResolveHostInstance(claimContext, "web")
 	claimCancel()
@@ -752,6 +762,10 @@ func runTUIWithInitialAction(
 	flags := flag.NewFlagSet("tui", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	connection := addConnectionFlags(flags, store.Current().Connection)
+	buzzerOptions, err := addBuzzerRuntimeFlags(flags, store.Persistent().Integrations.BuzzerMirror)
+	if err != nil {
+		return err
+	}
 	consoleOptions, err := addTUIConsoleFlags(flags, store.Current().UI.TUIConsole)
 	if err != nil {
 		return err
@@ -766,6 +780,12 @@ func runTUIWithInitialAction(
 		return err
 	}
 	connection.captureOverrides(flags)
+	if err := buzzerOptions.captureOverrides(flags); err != nil {
+		return err
+	}
+	if err := buzzerOptions.apply(store); err != nil {
+		return err
+	}
 	if err := consoleOptions.captureOverrides(flags); err != nil {
 		return err
 	}
@@ -996,10 +1016,13 @@ func runTUIWithInitialAction(
 				return nil
 			},
 			HostIntegrations: func() appconfig.Integrations {
-				return store.Current().Integrations
+				return store.Persistent().Integrations
+			},
+			BuzzerRuntime: func() appconfig.BuzzerRuntimeStatus {
+				return primary.IntegrationStatus().BuzzerRuntime
 			},
 			SaveIntegrations: func(value appconfig.Integrations) error {
-				if value.Discovery != store.Current().Integrations.Discovery {
+				if value.Discovery != store.Persistent().Integrations.Discovery {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					var persisted appconfig.Discovery
 					err := callPrimary(ctx, "controller.discovery.config.set", value.Discovery, &persisted)

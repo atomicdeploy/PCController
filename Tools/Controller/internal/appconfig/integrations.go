@@ -18,8 +18,9 @@ import (
 	"pccontroller.local/controller/internal/secretstore"
 )
 
-// Integrations contains PC-host integrations only. None of these values is
-// mirrored into MCU EEPROM.
+// Integrations contains host integration policy. BuzzerMirror.Path is the one
+// explicit exception that may reconcile the MCU Silent bit through the owning
+// runtime; no other integration value is mirrored into EEPROM.
 type Integrations struct {
 	Hotkeys                []Hotkey          `json:"hotkeys,omitempty"`
 	Keyboard               KeyboardControl   `json:"keyboard_control"`
@@ -39,6 +40,7 @@ type Integrations struct {
 // BuzzerMirror controls optional host playback of board-generated tones. The
 // board event is always forwarded; these switches affect presentation only.
 type BuzzerMirror struct {
+	Path            string `json:"path,omitempty"`
 	Enabled         bool   `json:"enabled"`
 	NativeEnabled   bool   `json:"native_enabled"`
 	WebAudioEnabled bool   `json:"web_audio_enabled"`
@@ -502,12 +504,25 @@ func (value Config) validateIntegrations() error {
 }
 
 func validateBuzzerMirror(value BuzzerMirror) error {
+	path, err := NormalizeBuzzerPath(value.Path)
+	if err != nil {
+		return fmt.Errorf("integrations.buzzer_mirror.path: %w", err)
+	}
+	if path != "" {
+		_, hostEnabled := buzzerPathParts(path)
+		if hostEnabled != value.Enabled {
+			return fmt.Errorf("integrations.buzzer_mirror.path and enabled must select the same host route")
+		}
+	}
 	backend := strings.ToLower(strings.TrimSpace(value.Backend))
 	if backend == "" {
 		backend = "auto"
 	}
-	if backend != "auto" && backend != "native" && backend != "external" {
-		return fmt.Errorf("integrations.buzzer_mirror.backend must be auto, native, or external")
+	if backend != "auto" && backend != "native" && backend != "external" && backend != "off" {
+		return fmt.Errorf("integrations.buzzer_mirror.backend must be auto, native, external, or off")
+	}
+	if backend == "off" && value.NativeEnabled {
+		return fmt.Errorf("integrations.buzzer_mirror.native_enabled must be false when backend is off")
 	}
 	if strings.ContainsAny(value.Executable, "\r\n\x00") {
 		return fmt.Errorf("integrations.buzzer_mirror.executable is invalid")

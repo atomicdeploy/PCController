@@ -444,8 +444,11 @@ func startPrimaryIPCAtWithIdentity(
 		server.localDevice = startLocalDeviceHost(ctx, sharedClient, store)
 		service.LocalDevice = server.localDevice
 		service.HostConfig = store.CurrentRuntime
-		service.PersistentHostConfig = store.Current
+		service.PersistentHostConfig = store.Persistent
 		service.SubscribeHostConfig = store.SubscribeRuntime
+		service.BuzzerRuntimeStatus = func() appconfig.BuzzerRuntimeStatus {
+			return server.IntegrationStatus().BuzzerRuntime
+		}
 		service.UpdateHostConfig = func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err
