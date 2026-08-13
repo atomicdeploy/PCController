@@ -34,6 +34,9 @@ describe('PWA and touch capability contract', () => {
     expect(worker).toContain("pathname === '/controller-config.js'")
     expect(worker).toContain("request.mode === 'navigate'")
     expect(worker).toContain("url.pathname.startsWith('/assets/')")
+    expect(worker).toContain('function trustedMessage(event)')
+    expect(worker).toContain('event.origin !== self.location.origin')
+    expect(worker).toContain("event.data?.type === 'SKIP_WAITING'")
   })
 
   it('registers the worker, removes the first-paint shell after render, and installs touch-down activation', () => {

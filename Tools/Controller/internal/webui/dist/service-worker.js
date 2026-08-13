@@ -14,6 +14,18 @@ function sameOrigin(url) {
   return url.origin === self.location.origin
 }
 
+// Only same-origin pages that actually control this worker may request lifecycle actions.
+function trustedMessage(event) {
+  if (event.origin !== self.location.origin) return false
+  const source = event.source
+  if (!source || !('url' in source) || typeof source.url !== 'string' || source.url === '') return false
+  try {
+    return sameOrigin(new URL(source.url))
+  } catch {
+    return false
+  }
+}
+
 function isLiveControllerPath(pathname) {
   return pathname === '/ipc' || pathname.startsWith('/ipc/') ||
     pathname === '/api' || pathname.startsWith('/api/') ||
@@ -61,7 +73,7 @@ self.addEventListener('activate', (event) => {
 })
 
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
+  if (trustedMessage(event) && event.data?.type === 'SKIP_WAITING') self.skipWaiting()
 })
 
 self.addEventListener('fetch', (event) => {
