@@ -114,10 +114,26 @@ Useful focused builds:
 ```console
 build.cmd --host-only
 build.cmd --firmware-only
+build.cmd --virtual-board-only
 build.cmd --dry-run
 ```
 
-Build and test the Virtual Board independently:
+Build and test the Virtual Board through the same project-owned build plan:
+
+```console
+build.cmd --virtual-board-only
+build.cmd --virtual-board-only --virtual-board-preset debug
+```
+
+Developers with GNU Make may use the thin root façade; it delegates to the
+same CMD/Bash launchers and CMake presets, and never programs hardware:
+
+```console
+make virtual-board
+mingw32-make virtual-board-debug
+```
+
+The direct CMake equivalent remains available:
 
 ```console
 cd Tools\VirtualBoard
