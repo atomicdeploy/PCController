@@ -17,6 +17,22 @@ type reconnectTestPort struct {
 	closed chan struct{}
 }
 
+func TestPushedStatusKeepsFrontPanelMetadataCoherent(t *testing.T) {
+	runtime := New(Options{})
+	runtime.haveFrontPanel = true
+	runtime.frontPanel = native.FrontPanel{Schema: 2, MenuPage: 0, ProgramMode: 1}
+	status := native.Status{MenuPage: 9, ProgramMode: 13, ActiveKeys: 4}
+	payload, err := status.Payload()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.observeLocked(native.Frame{Opcode: native.OpStatus, Payload: payload})
+	if runtime.frontPanel.MenuPage != 9 || runtime.frontPanel.ProgramMode != 13 ||
+		runtime.frontPanel.PressedKeys != 4 {
+		t.Fatalf("front-panel metadata stayed stale: %+v", runtime.frontPanel)
+	}
+}
+
 func TestOldPumpFramesAreRejectedAfterSessionReplacement(t *testing.T) {
 	runtime := New(Options{})
 	oldSession := &link.Session{}

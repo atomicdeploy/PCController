@@ -1858,6 +1858,15 @@ func (runtime *Runtime) observeLocked(frame native.Frame) {
 			runtime.haveStatus = true
 			runtime.statusUpdated = now
 			runtime.recordStatus(now, status)
+			// STATUS is the authoritative pushed menu/mode snapshot. SegmentChanged
+			// carries only cells/brightness, so keep the composite front-panel view
+			// coherent without polling FRONT_PANEL_GET after every physical key.
+			if runtime.haveFrontPanel {
+				runtime.frontPanel.MenuPage = status.MenuPage
+				runtime.frontPanel.ProgramMode = status.ProgramMode
+				runtime.frontPanel.PressedKeys = status.ActiveKeys
+				runtime.frontPanelUpdated = now
+			}
 		}
 	case native.OpSettings:
 		if settings, err := native.ParseSettings(frame.Payload); err == nil {
