@@ -118,6 +118,14 @@ build.cmd --virtual-board-only
 build.cmd --dry-run
 ```
 
+Optional AVR profiles are finite, named, and default-off. Select one or more
+with repeated `--firmware-feature eeprom-menu-labels` /
+`--firmware-feature eeprom-boot-opcodes`, or freeze the default-off build with
+`--no-firmware-features`. Persistent
+`programming.firmware_features` configuration is overridden by the
+comma-separated `PCCONTROLLER_FIRMWARE_FEATURES` environment value; an explicit
+CLI selection overrides both. Unknown names and raw compiler flags are rejected.
+
 Build and test the Virtual Board through the same project-owned build plan:
 
 ```console

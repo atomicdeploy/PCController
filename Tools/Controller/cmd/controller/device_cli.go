@@ -585,7 +585,11 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			defer listener.Close()
 		}
 		currentConfig := store.Current()
-		client := controllerapi.New(apiOptions(currentConfig, connection))
+		clientOptions, err := apiOptions(currentConfig, connection)
+		if err != nil {
+			return err
+		}
+		client := controllerapi.New(clientOptions)
 		if err := client.ConfigureHistory(configuredHistoryOptions(store)); err != nil {
 			return err
 		}
@@ -599,7 +603,12 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			ctx,
 			appconfig.DefaultWatchInterval,
 			func(value appconfig.Config) {
-				client.ApplyHostOptions(apiOptions(value, connection))
+				clientOptions, optionsErr := apiOptions(value, connection)
+				if optionsErr != nil {
+					fmt.Fprintln(stderr, "configuration reload rejected:", optionsErr)
+					return
+				}
+				client.ApplyHostOptions(clientOptions)
 				if historyErr := client.ConfigureHistory(
 					configuredHistoryOptions(store),
 				); historyErr != nil {
