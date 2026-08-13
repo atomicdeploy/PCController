@@ -414,7 +414,7 @@ test('virtual-board-only delegates to the existing CMake presets without hardwar
 		['--preset', 'debug']
 	])
 	assert.ok(plan.actions.every(action => action.hardware === false))
-	assert.ok(plan.actions.every(action => action.command.cwd.endsWith('Tools\\VirtualBoard')))
+	assert.ok(plan.actions.every(action => action.command.cwd.replaceAll('\\', '/').endsWith('Tools/VirtualBoard')))
 })
 
 test('virtual-board selection validates CMake presets and keeps focused cleanup contained', () => {
