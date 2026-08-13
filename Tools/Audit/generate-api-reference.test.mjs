@@ -91,6 +91,8 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(reference.includes(`<h1>${expected.referenceHeading}</h1>`), true);
   assert.equal(openapi.components.securitySchemes.tokenHeader.name, "X-PCController-Token");
   assert.equal(openapi.paths["/api/session/ticket"].post.responses["201"].description.includes("One-use"), true);
+  assert.equal(openapi.paths["/api/auth/server-proof"].get.security.length, 0);
+  assert.equal(openapi.paths["/api/auth/server-proof"].get.parameters[0].name, "X-PCController-Nonce");
   assert.equal(openapi.components.schemas.SessionTicket.properties.ticket.writeOnly, true);
   assert.equal(openapi.components.schemas.OpcodeRequest.properties.opcode.maximum, 255);
   assert.equal(openapi.components.schemas.AppInstanceReport.properties.lease_seconds.maximum, 300);

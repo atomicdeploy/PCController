@@ -59,6 +59,17 @@ build.cmd --clean
 
 On Bash, use the identical options with `./build.sh`.
 
+On Windows, `build.cmd --host-only` delegates Go tests to
+`Tools/Build/go-tests.mjs`. Do not run `go test` directly: temporary Go test
+paths can appear as a new application to Windows Firewall on every run. The
+project runner uses deterministic `pccontroller-tests-*.exe` names beneath
+`%LOCALAPPDATA%\PCController\test-programs\go` across every worktree, caches a
+source/toolchain/environment identity pass, serializes concurrent worktrees
+with a machine-wide lock, and keeps live LAN acceptance
+on the stable packaged `controller.exe` identity. Windows Go tests never opt
+into wildcard LAN broadcast unless `PCCONTROLLER_TEST_LAN=1` is explicitly set;
+normal builds leave that acceptance test to the packaged host.
+
 ## Virtual board and Make convenience targets
 
 The virtual board remains a separate native target: its build directory, CMake
@@ -241,8 +252,18 @@ launcher pairs emit byte-equivalent JSON plans, compile/program through
 Controller, preserve the explicit USBasp method-selection boundary, and never
 introduce a PowerShell or direct dependency-upload action.
 
-Go tests are compiled to stable names under `.build/tests/go/` and then run
-from those project-owned paths. A content/toolchain identity reuses an existing
+On Windows, Go tests are compiled to stable names beneath
+`%LOCALAPPDATA%\PCController\test-programs\go`; other platforms use
+`.build/tests/go/`. A content/toolchain/environment identity reuses an existing
 passing result; `--retest` runs the same binaries again without inventing new
-temporary executable names. This keeps IPC/network test identities stable and
-avoids repeated Windows Firewall prompts.
+temporary executable names. The cache identity includes embedded WebUI and
+default-recovery assets, and the shared lock prevents concurrent worktrees from
+overwriting one another's binary/cache pair.
+
+For a machine-level Windows backstop, this workstation sets Go's `GOTMPDIR` to
+`%LOCALAPPDATA%\PCController\go-noexec-temp` and grants the interactive user an
+object-inherit-only deny-execute ACL there. That makes a mistakenly invoked
+temporary `*.test.exe` non-executable while leaving the supported stable output
+directory executable. To intentionally remove the workstation guard, remove
+that explicit deny ACL with `icacls` and run `go env -u GOTMPDIR`; do not do so
+for normal project work.

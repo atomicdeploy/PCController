@@ -272,6 +272,9 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		}
 		return updated, nil, true
 	}
+	if strings.HasPrefix(editor.Key, "network.") {
+		return model.commitDiscoverySettingEditor()
+	}
 	if strings.HasPrefix(editor.Key, "led.") {
 		return model.commitStatusLEDSettingEditor()
 	}
@@ -397,6 +400,42 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	model.lcdMirror = ui.MirrorPromptToLCD
 	model.settingEditor = nil
 	model.setNotice("Host setting saved and hot-applied")
+	return model, nil, true
+}
+
+func (model Model) commitDiscoverySettingEditor() (Model, tea.Cmd, bool) {
+	editor := model.settingEditor
+	value := model.hostIntegrationValue
+	switch editor.Key {
+	case "network.advertisement":
+		value.Discovery.MDNSEnabled = editorField(editor, "dns-sd") != 0
+		value.Discovery.DNSSDenabled = value.Discovery.MDNSEnabled
+		value.Discovery.SSDPEnabled = editorField(editor, "ssdp") != 0
+		value.Discovery.UPnPEnabled = value.Discovery.SSDPEnabled
+		value.Discovery.WSDiscoveryEnabled = editorField(editor, "ws-discovery") != 0
+		value.Discovery.BroadcastEnabled = editorField(editor, "broadcast") != 0
+		value.Discovery.NetBIOSEnabled = editorField(editor, "netbios") != 0
+		value.Discovery.BroadcastPort = editorField(editor, "broadcast-port")
+	case "network.instance":
+		name := strings.TrimSpace(editor.Text)
+		if len([]rune(name)) > 63 || strings.ContainsAny(name, "\r\n\t") {
+			model.setNotice("Network instance name must be at most 63 printable characters")
+			return model, nil, true
+		}
+		value.Discovery.InstanceName = name
+	default:
+		return model, nil, true
+	}
+	if model.saveHostIntegrations != nil {
+		if err := model.saveHostIntegrations(value); err != nil {
+			model.appendLog("error", "save network discovery settings: "+err.Error())
+			model.setNotice("Network discovery setting was not saved: " + err.Error())
+			return model, nil, true
+		}
+	}
+	model.hostIntegrationValue = value
+	model.settingEditor = nil
+	model.setNotice("Network discovery setting saved and hot-applied")
 	return model, nil, true
 }
 

@@ -143,7 +143,9 @@ func startPrimaryIPCClaimed(
 		_ = claim.Close()
 		return nil, err
 	}
-	manager, err := hostbridge.Start(parent, server.client, store, server.actions)
+	manager, err := hostbridge.Start(parent, server.client, store, server.actions, hostbridge.DiscoveryHostIdentity{
+		InstanceID: claim.identity.ID, Version: version, SourceHash: sourceHash, BuildTime: buildTime,
+	})
 	if err != nil {
 		_ = server.Close()
 		_ = claim.Close()

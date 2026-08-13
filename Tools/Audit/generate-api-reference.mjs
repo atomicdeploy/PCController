@@ -94,11 +94,12 @@ const capabilityGroups = {
   ],
   virtual_keys: ["controller.os.key", "controller.virtual_key"],
   power_actions: ["controller.os.power"],
-  bridge_calls: ["controller.bridge.call"],
+  bridge_calls: ["controller.bridge.call", "controller.discovery.connect"],
   integrations: [
     "controller.device.status", "controller.device.action", "controller.device.inspect",
     "controller.integrations.local.get", "controller.integrations.local.set",
     "controller.webhooks.replay", "controller.webhooks.clear",
+		"controller.discovery.config.set",
   ],
   read: [
     "controller.artifact.manifest", "controller.artifact.list", "controller.update.status",
@@ -117,7 +118,8 @@ const capabilityGroups = {
     "controller.rf.learn.status", "controller.history.status", "controller.history.timeline",
     "controller.lcd.presentation.status", "controller.ports", "controller.os.status",
     "controller.system.status", "controller.os.facts", "controller.host.facts",
-    "controller.discovery.scan", "controller.pwm.values", "controller.port.owner", "controller.port.process",
+    "controller.discovery.scan", "controller.discovery.config", "controller.discovery.config.get",
+		"controller.pwm.values", "controller.port.owner", "controller.port.process",
     "controller.app.instances", "controller.app.instance.get", "controller.app.bridge",
   ],
   board_commands: [
@@ -157,6 +159,10 @@ const methodOverrides = {
   "controller.app.instance.get": "Read one live application instance by ID.",
   "controller.app.instance.report": "Create or refresh one leased application-instance report.",
   "controller.app.instance.remove": "Remove one application instance from the live registry.",
+  "controller.discovery.connect": "Verify an authenticated discovered host and return its health and snapshot.",
+  "controller.discovery.config": "Return persistent network advertisement configuration.",
+  "controller.discovery.config.get": "Return persistent network advertisement configuration.",
+  "controller.discovery.config.set": "Persist and hot-apply network advertisement configuration.",
   "controller.unsubscribe": "Remove this WebSocket connection's active subscriptions.",
 };
 
@@ -197,7 +203,9 @@ if (new Set(methods.map(({ name }) => name)).size !== methods.length) {
 
 const routes = [
   { path: "/healthz", methods: ["get"], public: true, capability: "public", summary: "Service liveness and API identity" },
+  { path: "/upnp/public.json", methods: ["get"], public: true, capability: "public", summary: "Bounded public host, board, endpoint, health, and telemetry directory" },
   { path: "/api/ui-config", methods: ["get"], public: true, capability: "public", summary: "Non-secret browser bootstrap" },
+  { path: "/api/auth/server-proof", methods: ["get"], public: true, capability: "public", summary: "Nonce/address-bound proof that the reached LAN endpoint knows the configured bearer" },
   { path: "/api/session/ticket", methods: ["post"], capability: "session", summary: "Exchange a header credential for a short-lived one-use browser WebSocket ticket" },
   { path: "/api/rpc", methods: ["post"], capability: "dynamic", summary: "JSON-RPC 2.0 request" },
   { path: "/api/snapshot", methods: ["get"], capability: "read", summary: "Authoritative cached controller snapshot" },
@@ -276,6 +284,13 @@ function operationFor(route, method) {
       description: "One-use Origin-bound browser session ticket",
       content: { "application/json": { schema: { $ref: "#/components/schemas/SessionTicket" } } },
     };
+	}
+	if (route.path === "/api/auth/server-proof") {
+		operation.parameters = [{ name: "X-PCController-Nonce", in: "header", required: true, schema: { type: "string", minLength: 22, maxLength: 86 }, description: "16..64 random bytes encoded as unpadded base64url" }];
+		operation.responses["200"] = {
+			description: "Responder-bound HMAC proof verified locally before a client transmits its bearer",
+			content: { "application/json": { schema: { $ref: "#/components/schemas/ServerProof" } } },
+		};
 	}
 	if (route.path === "/api/opcode") {
 		operation.responses["200"] = {
@@ -392,6 +407,16 @@ const openapi = {
         type: "object", required: ["transport"], additionalProperties: false,
         properties: { transport: { type: "string", enum: ["websocket", "socket_io"] } },
       },
+		ServerProof: {
+			type: "object", required: ["format", "nonce", "audience", "instance_id", "proof"], additionalProperties: false,
+			properties: {
+				format: { type: "string", const: "pccontroller-server-proof/v1" },
+				nonce: { type: "string", description: "The caller-supplied unpadded base64url nonce." },
+				audience: { type: "string", description: "The IP:port of the exact local listener that accepted the request." },
+				instance_id: { type: "string", minLength: 1 },
+				proof: { type: "string", description: "Unpadded base64url HMAC-SHA256 over format, nonce, audience, and instance identity." },
+			},
+		},
 		SessionTicket: {
         type: "object", required: ["ticket", "protocol", "expires_at", "expires_in_ms", "principal"], additionalProperties: false,
         properties: {
@@ -626,13 +651,14 @@ validateMethodCatalog({
 
 const routeSourceFiles = [
   "Tools/Controller/internal/ipcjson/ipc.go",
+	"Tools/Controller/internal/ipcjson/upnp.go",
   "Tools/Controller/internal/ipcjson/artifacts_http.go",
   "Tools/Controller/internal/releaseplane/http.go",
 ];
 const routeLiterals = new Set();
 for (const file of routeSourceFiles) {
   const source = readFileSync(resolve(root, file), "utf8");
-	for (const match of source.matchAll(/"(\/(?:healthz|api)[^"? ]*)"/gu)) routeLiterals.add(match[1]);
+	for (const match of source.matchAll(/"(\/(?:healthz|api[^"? ]*|upnp\/public\.json))"/gu)) routeLiterals.add(match[1]);
 }
 const documentedPaths = Object.keys(openAPIPaths);
 const routeCovered = (literal) => {
@@ -649,7 +675,7 @@ const routeCovered = (literal) => {
 const missingRoutes = [...routeLiterals].filter((literal) => !routeCovered(literal)).sort();
 if (missingRoutes.length > 0) throw new Error(`OpenAPI catalog is missing source route families: ${missingRoutes.join(", ")}`);
 for (const path of documentedPaths) {
-	if (path !== "/healthz" && !path.startsWith("/api/")) throw new Error(`OpenAPI route is outside the living /api surface: ${path}`);
+	if (path !== "/healthz" && path !== "/upnp/public.json" && !path.startsWith("/api/")) throw new Error(`OpenAPI route is outside the living /api surface: ${path}`);
 }
 
 function normalize(content) {
