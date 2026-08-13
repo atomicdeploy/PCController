@@ -54,6 +54,7 @@
             "controller.app.instances",
             "controller.app.launch",
             "controller.app.navigate",
+            "controller.app.navigation.commit",
             "controller.app.page",
             "controller.artifact.capture",
             "controller.artifact.fetch",
@@ -314,6 +315,11 @@
     "controller.app.navigate": {
       "capability": "host_configuration",
       "summary": "Navigate all, one surface, or one exact live application instance.",
+      "idempotency": "non-idempotent"
+    },
+    "controller.app.navigation.commit": {
+      "capability": "host_configuration",
+      "summary": "Commit one follower group's canonical page and return its correlated coordinator outcome.",
       "idempotency": "non-idempotent"
     },
     "controller.app.page": {

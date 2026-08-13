@@ -927,6 +927,56 @@ func runTUIWithInitialAction(
 		}
 	}()
 	go control.RunAutomations(watchContext, runtime, engine, store.Current)
+	navigationCommits := make(chan string, 1)
+	queueNavigationCommit := func(page string) {
+		page = strings.ToLower(strings.TrimSpace(page))
+		if page == "" {
+			return
+		}
+		select {
+		case navigationCommits <- page:
+			return
+		default:
+		}
+		// Keep only the latest local intent while a prior coordinator call is in
+		// flight. Bubble Tea's update loop never waits for IPC or fan-out.
+		select {
+		case <-navigationCommits:
+		default:
+		}
+		select {
+		case navigationCommits <- page:
+		default:
+		}
+	}
+	go func() {
+		for {
+			select {
+			case page := <-navigationCommits:
+				for {
+					select {
+					case latest := <-navigationCommits:
+						page = latest
+					default:
+						goto commit
+					}
+				}
+			commit:
+				_, commitErr := primary.navigationCommand(hostui.NavigationCommand{
+					Group: hostui.DefaultNavigationGroup, Source: tuiInstanceID,
+					Page: page, OperationID: navigationReporter.NextOperationID(),
+				})
+				if commitErr != nil {
+					runtime.PublishHostEvent(
+						"app.navigation.commit.rejected",
+						"navigation change was not synchronized: "+commitErr.Error(),
+					)
+				}
+			case <-watchContext.Done():
+				return
+			}
+		}
+	}()
 	program := tea.NewProgram(
 		tui.NewApplicationWithOptions(runtime, engine, tui.Options{
 			UIConfig: func() appconfig.UI { return store.Current().UI },
@@ -997,11 +1047,13 @@ func runTUIWithInitialAction(
 				}, &instances)
 				return instances, err
 			},
-			OpenNetwork:     openBrowser,
-			AppActions:      appActions,
-			InstanceID:      tuiInstanceID,
-			NavigationSync:  *syncNavigation,
-			NavigationGroup: hostui.DefaultNavigationGroup,
+			OpenNetwork:        openBrowser,
+			AppActions:         appActions,
+			InstanceID:         tuiInstanceID,
+			NavigationSync:     *syncNavigation,
+			NavigationGroup:    hostui.DefaultNavigationGroup,
+			SetNavigationSync:  navigationReporter.SetFollow,
+			NavigationIdentity: navigationReporter.Identity,
 			WriteOSC: func(payload string) error {
 				return hostui.WriteOSC(stdout, payload)
 			},
@@ -1019,6 +1071,7 @@ func runTUIWithInitialAction(
 				})
 				return err
 			},
+			CommitNavigation: queueNavigationCommit,
 		}),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),

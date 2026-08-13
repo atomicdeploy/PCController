@@ -11,12 +11,15 @@ import (
 )
 
 const (
-	NavigationSyncKey     = "navigation_sync"
-	NavigationGroupKey    = "navigation_group"
-	NavigationEpochKey    = "navigation_epoch"
-	NavigationRevisionKey = "navigation_revision"
-	NavigationSourceKey   = "navigation_source"
-	NavigationCatchUpKey  = "navigation_catch_up"
+	NavigationSyncKey           = "navigation_sync"
+	NavigationGroupKey          = "navigation_group"
+	NavigationEpochKey          = "navigation_epoch"
+	NavigationRevisionKey       = "navigation_revision"
+	NavigationSourceKey         = "navigation_source"
+	NavigationCatchUpKey        = "navigation_catch_up"
+	NavigationOperationKey      = "navigation_operation_id"
+	NavigationTargetEpochKey    = "navigation_target_epoch"
+	NavigationTargetRevisionKey = "navigation_target_revision"
 
 	NavigationSyncFollow      = "follow"
 	NavigationSyncIndependent = "independent"
@@ -27,6 +30,7 @@ const (
 var navigationMetadataKeys = map[string]struct{}{
 	NavigationSyncKey: {}, NavigationGroupKey: {}, NavigationEpochKey: {},
 	NavigationRevisionKey: {}, NavigationSourceKey: {}, NavigationCatchUpKey: {},
+	NavigationOperationKey: {}, NavigationTargetEpochKey: {}, NavigationTargetRevisionKey: {},
 }
 
 // HasCoordinatorNavigationMetadata reports whether an action contains state
@@ -42,14 +46,15 @@ func HasCoordinatorNavigationMetadata(metadata map[string]string) bool {
 }
 
 // NavigationReporter supplies one process-session epoch and a monotonically
-// increasing source revision for an ephemeral TUI instance lease. It does not
+// increasing source revision for an ephemeral client instance lease. It does not
 // persist page selection or any terminal/editor state.
 type NavigationReporter struct {
-	mu       sync.Mutex
-	epoch    string
-	group    string
-	mode     string
-	revision uint64
+	mu        sync.Mutex
+	epoch     string
+	group     string
+	mode      string
+	revision  uint64
+	operation uint64
 }
 
 func NewNavigationReporter(follow bool, group string) (*NavigationReporter, error) {
@@ -81,6 +86,21 @@ func (reporter *NavigationReporter) InstanceID() string {
 	return "tui:" + reporter.epoch
 }
 
+// SetFollow changes only this client instance's ephemeral membership. It does
+// not persist UI navigation or alter another instance's opt-out choice.
+func (reporter *NavigationReporter) SetFollow(follow bool) {
+	if reporter == nil {
+		return
+	}
+	reporter.mu.Lock()
+	if follow {
+		reporter.mode = NavigationSyncFollow
+	} else {
+		reporter.mode = NavigationSyncIndependent
+	}
+	reporter.mu.Unlock()
+}
+
 func (reporter *NavigationReporter) NextValues() map[string]string {
 	return reporter.nextValues(false)
 }
@@ -90,6 +110,32 @@ func (reporter *NavigationReporter) NextValues() map[string]string {
 // interpreting a possibly stale local page as a new navigation intent.
 func (reporter *NavigationReporter) NextCatchUpValues() map[string]string {
 	return reporter.nextValues(true)
+}
+
+// NextOperationID creates a bounded session-scoped correlation ID for a
+// coordinator command. It is distinct from lease reports and survives neither
+// process restart nor a reconnect to a different primary epoch.
+func (reporter *NavigationReporter) NextOperationID() string {
+	if reporter == nil {
+		return ""
+	}
+	reporter.mu.Lock()
+	reporter.operation++
+	value := reporter.epoch + "-" + strconv.FormatUint(reporter.operation, 10)
+	reporter.mu.Unlock()
+	return value
+}
+
+// Identity returns the current report identity used to reject deliveries
+// queued before a newer reconnect/catch-up presence report.
+func (reporter *NavigationReporter) Identity() (string, uint64) {
+	if reporter == nil {
+		return "", 0
+	}
+	reporter.mu.Lock()
+	epoch, revision := reporter.epoch, reporter.revision
+	reporter.mu.Unlock()
+	return epoch, revision
 }
 
 func (reporter *NavigationReporter) nextValues(catchUp bool) map[string]string {
@@ -120,7 +166,8 @@ type navigationParticipant struct {
 }
 
 func parseNavigationParticipant(instance AppInstance) (navigationParticipant, bool) {
-	if !strings.EqualFold(strings.TrimSpace(instance.Surface), "tui") ||
+	surface := strings.ToLower(strings.TrimSpace(instance.Surface))
+	if (surface != "tui" && surface != "webui") ||
 		!strings.EqualFold(strings.TrimSpace(instance.Values[NavigationSyncKey]), NavigationSyncFollow) {
 		return navigationParticipant{}, false
 	}
@@ -144,11 +191,15 @@ func parseNavigationParticipant(instance AppInstance) (navigationParticipant, bo
 }
 
 type navigationMember struct {
-	group    string
-	epoch    string
-	revision uint64
-	page     string
-	pending  bool
+	group             string
+	epoch             string
+	revision          uint64
+	page              string
+	pending           bool
+	operationID       string
+	operationPage     string
+	operationEpoch    string
+	operationRevision uint64
 }
 
 type navigationGroup struct {
@@ -157,6 +208,27 @@ type navigationGroup struct {
 	page     string
 	source   string
 	members  map[string]struct{}
+}
+
+// NavigationCommand is an explicit, correlated request to change one group’s
+// canonical page. Instance leases only establish membership and presence.
+type NavigationCommand struct {
+	Group       string `json:"group"`
+	Source      string `json:"source"`
+	Page        string `json:"page"`
+	OperationID string `json:"operation_id"`
+}
+
+// NavigationOutcome is returned to the requesting client before it treats an
+// optimistic page change as settled. Actions are the exact ordered deliveries
+// the primary must publish to the source and every follower.
+type NavigationOutcome struct {
+	Group       string      `json:"group"`
+	Epoch       string      `json:"group_epoch"`
+	Revision    uint64      `json:"revision"`
+	OperationID string      `json:"operation_id"`
+	Page        string      `json:"page"`
+	Actions     []AppAction `json:"-"`
 }
 
 // NavigationCoordinator serializes the canonical active page for each live
@@ -212,6 +284,8 @@ func (coordinator *NavigationCoordinator) Observe(
 			return nil
 		}
 		previous.revision = participant.revision
+		// A lease refresh is presence only. In particular, a late terminal-title
+		// callback must never mutate canonical navigation or roll its source back.
 		previous.page = participant.page
 		group := coordinator.groups[participant.group]
 		if group == nil {
@@ -232,13 +306,7 @@ func (coordinator *NavigationCoordinator) Observe(
 			return []AppAction{coordinator.action(group, participant.group, participant.id)}
 		}
 		coordinator.members[participant.id] = previous
-		if group.page == participant.page {
-			return nil
-		}
-		group.revision++
-		group.page = participant.page
-		group.source = participant.id
-		return coordinator.fanout(group, participant.group, participant.id)
+		return nil
 	}
 
 	group := coordinator.groups[participant.group]
@@ -254,6 +322,75 @@ func (coordinator *NavigationCoordinator) Observe(
 	// Every late join receives the current epoch/revision, even when its
 	// default page happens to match, so its acceptance cursor is initialized.
 	return []AppAction{coordinator.action(group, participant.group, participant.id)}
+}
+
+// Commit serializes a source command and returns an acknowledgement plus the
+// immediate source-and-follower deliveries. It deliberately does not read a
+// lease’s page field, which makes delayed lease reports harmless.
+func (coordinator *NavigationCoordinator) Commit(command NavigationCommand, live []AppInstance) (NavigationOutcome, error) {
+	if coordinator == nil {
+		return NavigationOutcome{}, errors.New("navigation coordinator is unavailable")
+	}
+	command.Group = strings.ToLower(strings.TrimSpace(command.Group))
+	if command.Group == "" {
+		command.Group = DefaultNavigationGroup
+	}
+	command.Source = strings.TrimSpace(command.Source)
+	command.Page = strings.ToLower(strings.TrimSpace(command.Page))
+	command.OperationID = strings.TrimSpace(command.OperationID)
+	if !instanceValuePattern.MatchString(command.Group) || !instanceIDPattern.MatchString(command.Source) ||
+		!instancePagePattern.MatchString(command.Page) || command.Page == "" ||
+		!instanceValuePattern.MatchString(command.OperationID) {
+		return NavigationOutcome{}, errors.New("navigation command is invalid")
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	coordinator.reconcile(live)
+	member, ok := coordinator.members[command.Source]
+	if !ok || member.group != command.Group {
+		return NavigationOutcome{}, errors.New("navigation source is not an active follower in this group")
+	}
+	group := coordinator.groups[command.Group]
+	if group == nil {
+		return NavigationOutcome{}, errors.New("navigation group is unavailable")
+	}
+	if member.operationID == command.OperationID {
+		if member.operationPage != command.Page {
+			return NavigationOutcome{}, errors.New("navigation operation ID was reused with a different page")
+		}
+		return NavigationOutcome{
+			Group: command.Group, Epoch: member.operationEpoch,
+			Revision: member.operationRevision, OperationID: command.OperationID,
+			Page: member.operationPage,
+		}, nil
+	}
+	changed := group.page != command.Page
+	if changed {
+		group.page = command.Page
+		group.source = command.Source
+		group.revision++
+	}
+	outcome := NavigationOutcome{Group: command.Group, Epoch: group.epoch, Revision: group.revision, OperationID: command.OperationID, Page: group.page}
+	member.operationID = command.OperationID
+	member.operationPage = outcome.Page
+	member.operationEpoch = outcome.Epoch
+	member.operationRevision = outcome.Revision
+	coordinator.members[command.Source] = member
+	if !changed {
+		return outcome, nil
+	}
+	targets := make([]string, 0, len(group.members))
+	for id := range group.members {
+		targets = append(targets, id)
+	}
+	sort.Strings(targets)
+	outcome.Actions = make([]AppAction, 0, len(targets))
+	for _, target := range targets {
+		action := coordinator.action(group, command.Group, target)
+		action.Metadata[NavigationOperationKey] = command.OperationID
+		outcome.Actions = append(outcome.Actions, action)
+	}
+	return outcome, nil
 }
 
 func (coordinator *NavigationCoordinator) seed(participant navigationParticipant) []AppAction {
@@ -326,13 +463,16 @@ func (coordinator *NavigationCoordinator) action(
 	group *navigationGroup,
 	groupName, target string,
 ) AppAction {
+	member := coordinator.members[target]
 	return AppAction{
 		Kind: "app.page", Value: group.page, Source: "navigation-sync", Target: target,
 		Metadata: map[string]string{
 			NavigationSyncKey: NavigationSyncGroupUpdate, NavigationGroupKey: groupName,
-			NavigationEpochKey:    group.epoch,
-			NavigationRevisionKey: strconv.FormatUint(group.revision, 10),
-			NavigationSourceKey:   group.source,
+			NavigationEpochKey:          group.epoch,
+			NavigationRevisionKey:       strconv.FormatUint(group.revision, 10),
+			NavigationSourceKey:         group.source,
+			NavigationTargetEpochKey:    member.epoch,
+			NavigationTargetRevisionKey: strconv.FormatUint(member.revision, 10),
 		},
 	}
 }
@@ -347,8 +487,8 @@ func findNavigationParticipant(values []AppInstance, id string) (navigationParti
 }
 
 type NavigationUpdate struct {
-	Page, Group, Epoch, Source string
-	Revision                   uint64
+	Page, Group, Epoch, Source, TargetEpoch string
+	Revision, TargetRevision                uint64
 }
 
 func ParseNavigationUpdate(action AppAction) (NavigationUpdate, bool) {
@@ -357,15 +497,25 @@ func ParseNavigationUpdate(action AppAction) (NavigationUpdate, bool) {
 		return NavigationUpdate{}, false
 	}
 	revision, err := strconv.ParseUint(strings.TrimSpace(action.Metadata[NavigationRevisionKey]), 10, 64)
+	targetEpoch := strings.ToLower(strings.TrimSpace(action.Metadata[NavigationTargetEpochKey]))
+	targetRevisionText := strings.TrimSpace(action.Metadata[NavigationTargetRevisionKey])
+	hasTargetIdentity := targetEpoch != "" || targetRevisionText != ""
+	var targetRevision uint64
+	var targetErr error
+	if targetEpoch != "" || targetRevisionText != "" {
+		targetRevision, targetErr = strconv.ParseUint(targetRevisionText, 10, 64)
+	}
 	update := NavigationUpdate{
 		Page:   strings.ToLower(strings.TrimSpace(action.Value)),
 		Group:  strings.ToLower(strings.TrimSpace(action.Metadata[NavigationGroupKey])),
 		Epoch:  strings.ToLower(strings.TrimSpace(action.Metadata[NavigationEpochKey])),
 		Source: strings.TrimSpace(action.Metadata[NavigationSourceKey]), Revision: revision,
+		TargetEpoch: targetEpoch, TargetRevision: targetRevision,
 	}
 	if err != nil || update.Revision == 0 || !instancePagePattern.MatchString(update.Page) ||
 		update.Page == "" || !instanceValuePattern.MatchString(update.Group) ||
-		!validNavigationEpoch(update.Epoch) || !instanceIDPattern.MatchString(update.Source) {
+		!validNavigationEpoch(update.Epoch) || !instanceIDPattern.MatchString(update.Source) ||
+		(hasTargetIdentity && (targetErr != nil || !validNavigationEpoch(update.TargetEpoch) || update.TargetRevision == 0)) {
 		return NavigationUpdate{}, false
 	}
 	return update, true
@@ -380,6 +530,15 @@ type NavigationCursor struct {
 }
 
 func (cursor *NavigationCursor) Accept(action AppAction, group string) (string, bool) {
+	return cursor.AcceptFor(action, group, "", 0)
+}
+
+// AcceptFor additionally rejects a pushed action created for an older
+// presence generation. Missing target identity remains accepted for rolling
+// compatibility with an older coordinator.
+func (cursor *NavigationCursor) AcceptFor(
+	action AppAction, group, targetEpoch string, targetRevision uint64,
+) (string, bool) {
 	update, ok := ParseNavigationUpdate(action)
 	if !ok || !strings.EqualFold(strings.TrimSpace(group), update.Group) {
 		return "", false
@@ -388,6 +547,11 @@ func (cursor *NavigationCursor) Accept(action AppAction, group string) (string, 
 		return "", false
 	}
 	if cursor.Epoch == update.Epoch && update.Revision <= cursor.Revision {
+		return "", false
+	}
+	targetEpoch = strings.ToLower(strings.TrimSpace(targetEpoch))
+	if update.TargetEpoch != "" && (targetEpoch == "" || update.TargetEpoch != targetEpoch ||
+		update.TargetRevision < targetRevision) {
 		return "", false
 	}
 	cursor.Epoch, cursor.Revision = update.Epoch, update.Revision

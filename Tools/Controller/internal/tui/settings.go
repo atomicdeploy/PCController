@@ -116,6 +116,7 @@ func (model Model) appSettingRows() []settingRow {
 	rows := []settingRow{
 		{Key: "app.title", Group: "APPLICATION", Label: "Title", Value: model.prefs.AppTitle, Editable: true},
 		{Key: "app.tagline", Group: "", Label: "First-run tagline", Value: model.prefs.Tagline, Editable: true},
+		{Key: "instance.navigation", Group: "INSTANCE", Label: "Synchronize navigation", Value: onOff(model.navigationSync), Editable: true},
 		{Key: "network.advertisement", Group: "NETWORK", Label: "Discovery advertisement", Value: discoverySummary(model.hostIntegrationValue.Discovery), Editable: true},
 		{Key: "network.instance", Group: "", Label: "Advertised instance name", Value: defaultText(model.hostIntegrationValue.Discovery.InstanceName, "system hostname / app title"), Editable: true},
 		{Key: "buzzer.renderers", Group: "BUZZER", Label: "Host renderers", Value: fmt.Sprintf("PC %s · WEB %s", onOff(buzzer.NativeEnabled), onOff(buzzer.WebAudioEnabled)), Editable: true},
@@ -429,6 +430,8 @@ func (model Model) buildAppSettingEditor(editor *settingEditor) {
 	case "app.tagline":
 		editor.IsText = true
 		editor.Text = ui.Tagline
+	case "instance.navigation":
+		editor.Fields = []settingEditorField{boolean("enabled", "Synchronize navigation", model.navigationSync)}
 	case "network.advertisement":
 		discovery := model.hostIntegrationValue.Discovery
 		editor.Fields = []settingEditorField{
