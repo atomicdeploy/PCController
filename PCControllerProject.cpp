@@ -3,6 +3,7 @@
 #include "Project/BootMelody.cpp"
 #include "Project/CompactI2c.cpp"
 #include "Project/ControllerEvents.cpp"
+#include "Project/Core/MacroRing.cpp"
 #include "Project/FeedbackMelodies.cpp"
 #include "Project/IlluminationController.cpp"
 #include "Project/Ina219Sensor.cpp"

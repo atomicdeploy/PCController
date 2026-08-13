@@ -100,6 +100,42 @@ if(BUILD_TESTING)
   add_test(NAME firmware_motion_policy_contract_unit
     COMMAND firmware_motion_policy_contract_tests)
 
+  # The scheduler remains target-neutral: this C++11 trace suite compiles the
+  # same bounded macro ring that the AVR/UART adapter uses, without linking or
+  # altering the VirtualBoard runtime implementation.
+  add_executable(firmware_macro_ring_tests
+    tests/macro_ring_test.cpp
+    ../../Project/Core/MacroRing.cpp
+  )
+  target_include_directories(firmware_macro_ring_tests PRIVATE ../..)
+  set_property(TARGET firmware_macro_ring_tests PROPERTY CXX_STANDARD 11)
+  if(MSVC)
+    target_compile_options(firmware_macro_ring_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_macro_ring_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_macro_ring_unit COMMAND firmware_macro_ring_tests)
+
+  # Compile the production UART adapter against the native serial double. Its
+  # trace confirms that replay still reaches the ordinary protocol dispatcher.
+  add_executable(firmware_macro_queue_adapter_tests
+    tests/macro_queue_adapter_test.cpp
+    ../../Project/Core/MacroRing.cpp
+    ../../Project/MacroQueue.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_macro_queue_adapter_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  if(MSVC)
+    target_compile_options(firmware_macro_queue_adapter_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_macro_queue_adapter_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_macro_queue_adapter_unit
+           COMMAND firmware_macro_queue_adapter_tests)
+
   add_executable(virtual_board_tests tests/test_main.cpp)
   target_link_libraries(virtual_board_tests PRIVATE virtual_board_core)
   if(MSVC)
