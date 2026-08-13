@@ -77,8 +77,10 @@ const capabilityGroups = {
   ],
   programming: [
     "controller.artifact.fetch", "controller.artifact.upload", "controller.artifact.capture",
+    "controller.artifact.upload.begin", "controller.artifact.upload.chunk",
+    "controller.artifact.upload.finish", "controller.artifact.upload.abort",
     "controller.update.firmware", "controller.restore.flash", "controller.update.eeprom",
-    "controller.update.host", "controller.discovery.stage",
+    "controller.update.host", "controller.peer.update.host", "controller.discovery.stage",
   ],
   connection_control: [
     "controller.connect", "controller.open", "controller.port.open", "controller.close", "controller.port.close",
@@ -143,6 +145,11 @@ const methodOverrides = {
   "controller.rf.map": "Replace one learned RF mapping and return board readback.",
   "controller.rf.transmit": "Transmit one validated RF waveform request.",
   "controller.restore.flash": "Restore a captured flash backup through the guarded restore path.",
+  "controller.artifact.upload.begin": "Begin a bounded authenticated peer artifact transfer.",
+  "controller.artifact.upload.chunk": "Append one ordered bounded chunk to a peer artifact transfer.",
+  "controller.artifact.upload.finish": "Revalidate and publish a completed peer artifact transfer.",
+  "controller.artifact.upload.abort": "Abort and remove an incomplete peer artifact transfer.",
+  "controller.peer.update.host": "Transfer a verified executable through an authenticated peer and ask its coordinator to replace itself.",
   "controller.webhooks.status": "Return bounded outbound queue and dead-letter counters.",
   "controller.webhooks.pending": "List bounded non-secret pending outbound deliveries.",
   "controller.webhooks.dead": "List bounded non-secret dead-letter deliveries.",
@@ -176,7 +183,10 @@ const nonIdempotentMethods = new Set([
   "controller.app.page", "controller.app.navigate", "controller.app.instance.report",
   "controller.app.instance.remove",
   "controller.artifact.capture", "controller.update.firmware", "controller.restore.flash",
-  "controller.update.eeprom", "controller.update.host", "controller.discovery.stage",
+  "controller.artifact.upload.begin", "controller.artifact.upload.chunk",
+  "controller.artifact.upload.finish", "controller.artifact.upload.abort",
+  "controller.update.eeprom", "controller.update.host", "controller.peer.update.host",
+  "controller.discovery.stage",
   "controller.webhooks.replay",
 ]);
 

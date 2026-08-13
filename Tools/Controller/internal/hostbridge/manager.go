@@ -884,6 +884,9 @@ func (manager *Manager) eventLoop(afterID uint64) {
 }
 
 func bridgeEventForwardable(event controller.Event) bool {
+	if strings.TrimSpace(event.Metadata["bridge.ingress"]) != "" {
+		return false
+	}
 	kind := strings.ToLower(strings.TrimSpace(event.Kind))
 	if kind == "integration.error" || strings.HasPrefix(kind, "bridge.") ||
 		strings.HasPrefix(kind, "security.remote.") {
@@ -892,6 +895,15 @@ func bridgeEventForwardable(event controller.Event) bool {
 	return kind != "message" ||
 		(!strings.EqualFold(event.Source, "bridge") &&
 			!strings.EqualFold(event.Source, "websocket"))
+}
+
+func (manager *Manager) ingestPeerEvent(peerName string, raw json.RawMessage) bool {
+	var event controller.Event
+	if json.Unmarshal(raw, &event) != nil || strings.TrimSpace(event.Kind) == "" {
+		return false
+	}
+	manager.client.IngestBridgeEvent(peerName, event)
+	return true
 }
 
 // observeRunningDoor combines the explicit HOST-owned Running state with the
@@ -1277,6 +1289,11 @@ func (manager *Manager) webSocketPeerSession(
 		if err := json.Unmarshal(data, &request); err != nil {
 			continue
 		}
+		if request.Method == "controller.event" {
+			if manager.ingestPeerEvent(config.Name, request.Params) {
+				continue
+			}
+		}
 		if request.Method == "controller.event" || request.Method == "controller.status" {
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
@@ -1433,7 +1450,12 @@ func (manager *Manager) socketIOPeerSession(
 			if json.Unmarshal(raw, &response) == nil {
 				_ = rpcSession.Resolve(response)
 			}
-		case "controller.event", "controller.status", "message.accepted":
+		case "controller.event":
+			if manager.ingestPeerEvent(config.Name, raw) {
+				continue
+			}
+			fallthrough
+		case "controller.status", "message.accepted":
 			_, _ = manager.client.SendTextMessage(ctx, controller.TextMessage{
 				Source: "websocket", Target: "host", Type: "remote-event",
 				Text: string(raw),

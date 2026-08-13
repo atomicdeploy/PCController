@@ -1111,6 +1111,12 @@ local serial owner. Programming through a remote primary requires the target's
 application-UART close, guarded toolchain/Urclock run, and fresh `HELLO`
 recovery as local programming.
 
+Subscribed peer events remain structured. In particular, an unsolicited
+`buzzer.note` retains its frequency/duration metadata so an independently
+enabled host renderer can play it immediately. The receiver stamps
+`bridge.ingress` and never forwards an ingressed event again; this gives
+server-to-edge mirroring without polling or bridge cycles.
+
 ## Artifact distribution and remote updates
 
 Firmware distribution and hardware programming are deliberately separate
@@ -1208,12 +1214,21 @@ Artifact and update JSON-RPC methods are:
 | `controller.artifact.manifest` | `{}` | feature/default/current artifacts, board identity, policy, and latest update status |
 | `controller.artifact.list` | optional `kind` | SHA-256-sorted artifact descriptors |
 | `controller.artifact.fetch` | `url`, `kind`, optional `name`, `sha256`, `bytes`, build identity, `idempotency_key` | queue a verified proxy-aware HTTP download |
+| `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; incomplete transfers expire and never enter the immutable store |
 | `controller.artifact.capture` | `components`, `authorized`, optional `method`, `port`, `idempotency_key` | explicitly read and verify current flash/EEPROM through the primary |
 | `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `allow_incomplete_backup`, `reinitialize_eeprom`, `idempotency_key` | guarded backup-then-flash; explicit reinitialization retains raw EEPROM, programs/readbacks the complete Go-owned factory image, and discards incompatible semantic settings |
 | `controller.restore.flash` | `artifact_sha256`, `authorized`, optional `method`, `port` | guarded restore of a `flash-backup`; Urclock by default, explicit USBasp fallback |
 | `controller.update.eeprom` | same | full pre-write capture, then confirmed EEPROM restore |
 | `controller.update.host` | `artifact_sha256`, `authorized` | stage a verified deferred self-update |
+| `controller.peer.update.host` | `peer`, host `artifact_sha256`, `authorized`, optional `idempotency_key` | transfer through the existing authenticated bridge, revalidate on the peer, then ask that peer coordinator to replace itself gracefully |
 | `controller.update.status` | optional operation `id` | latest or selected asynchronous status |
+
+Peer host replacement is an application protocol, not an SSH deployment
+recipe. The source streams a verified executable through its already-connected
+bridge in bounded chunks; the target rehashes and reparses it before its own
+coordinator performs the ordinary journaled self-update and rollback health
+check. Either host can be source or target. `allow_commands`, the target's
+`programming` policy, and explicit `authorized: true` are all required.
 
 Provider and manifest discovery use a companion, product-neutral contract:
 

@@ -1090,6 +1090,11 @@ func (service *Service) dispatch(
 				}
 			}
 		}
+	case "controller.peer.update.host":
+		var params peerHostUpdateRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.updatePeerHost(ctx, params)
+		}
 	case "controller.app.action":
 		var action hostui.AppAction
 		if err = decodeParams(request.Params, &action); err == nil {
@@ -1741,7 +1746,10 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.discovery.manifest", "controller.discovery.local_manifest",
 		"controller.discovery.check", "controller.discovery.status":
 		return capabilityRead
-	case "controller.artifact.fetch", "controller.artifact.upload", "controller.artifact.capture",
+	case "controller.artifact.fetch", "controller.artifact.upload",
+		"controller.artifact.upload.begin", "controller.artifact.upload.chunk",
+		"controller.artifact.upload.finish", "controller.artifact.upload.abort",
+		"controller.artifact.capture", "controller.peer.update.host",
 		"controller.update.firmware", "controller.restore.flash",
 		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage":
 		return capabilityProgramming

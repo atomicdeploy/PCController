@@ -151,6 +151,43 @@ type UploadRequest struct {
 	Platform       string `json:"platform,omitempty"`
 }
 
+// PeerUploadBeginRequest starts a bounded artifact transfer over an
+// authenticated bridge. Chunks keep host executables below the transport
+// message limit without exposing another HTTP credential.
+type PeerUploadBeginRequest struct {
+	Kind            Kind              `json:"kind"`
+	Name            string            `json:"name,omitempty"`
+	SHA256          string            `json:"sha256"`
+	Bytes           int64             `json:"bytes"`
+	BuildHash       string            `json:"build_hash,omitempty"`
+	BuildTimestamp  string            `json:"build_timestamp,omitempty"`
+	PackedTimestamp uint32            `json:"packed_timestamp,omitempty"`
+	Platform        string            `json:"platform,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+}
+
+type PeerUploadBeginResult struct {
+	TransferID string `json:"transfer_id"`
+	NextOffset int64  `json:"next_offset"`
+	ChunkBytes int    `json:"chunk_bytes"`
+}
+
+type PeerUploadChunkRequest struct {
+	TransferID string `json:"transfer_id"`
+	Offset     int64  `json:"offset"`
+	Data       []byte `json:"data"`
+}
+
+type PeerUploadChunkResult struct {
+	TransferID string `json:"transfer_id"`
+	NextOffset int64  `json:"next_offset"`
+	BytesTotal int64  `json:"bytes_total"`
+}
+
+type PeerUploadFinishRequest struct {
+	TransferID string `json:"transfer_id"`
+}
+
 // CaptureRequest authorizes a primary-host readback of selected device memory
 // components through the requested programming transport.
 type CaptureRequest struct {
