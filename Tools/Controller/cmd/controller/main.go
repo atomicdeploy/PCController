@@ -272,7 +272,7 @@ func runDesktop(
 	store *appconfig.Store,
 ) error {
 	if len(args) > 1 {
-		return errors.New("usage: desktop install|ensure|uninstall|remove")
+		return errors.New("usage: desktop install|ensure|test|uninstall|remove")
 	}
 	action := "ensure"
 	if len(args) == 1 {
@@ -287,10 +287,38 @@ func runDesktop(
 	switch action {
 	case "install", "ensure":
 		status, integrationErr = hostui.EnsureDesktopIntegration(options)
+	case "test":
+		integration, err := hostui.EnsureDesktopIntegration(options)
+		if err != nil {
+			status, integrationErr = integration, err
+			break
+		}
+		notifier := hostui.NewNotifier(hostui.NotifierOptions{
+			AppID: productidentity.StableAppID, LogoPath: integration.Logo,
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = notifier.Notify(ctx, hostui.Notification{
+			Title:     productidentity.Title(store.Current().UI.AppTitle) + " · Notification test",
+			Body:      "The installed Windows notification logo and action route are working.",
+			LaunchURI: productidentity.ProtocolScheme + "://page/events",
+			Actions: []hostui.NotificationAction{{
+				Label: "Open events", URI: productidentity.ProtocolScheme + "://page/events",
+			}},
+		})
+		cancel()
+		notificationStatus := notifier.Status()
+		status = struct {
+			Desktop      hostui.DesktopIntegrationStatus `json:"desktop"`
+			Notification hostui.NotificationStatus       `json:"notification"`
+		}{integration, notificationStatus}
+		integrationErr = err
+		if integrationErr == nil && (!notificationStatus.Branded || notificationStatus.Backend != "winrt-toast") {
+			integrationErr = errors.New("Windows notification test did not use the branded WinRT toast backend")
+		}
 	case "uninstall", "remove":
 		status, integrationErr = hostui.RemoveDesktopIntegration(options)
 	default:
-		return errors.New("usage: desktop install|ensure|uninstall|remove")
+		return errors.New("usage: desktop install|ensure|test|uninstall|remove")
 	}
 	encoded, _ := json.MarshalIndent(status, "", "  ")
 	fmt.Fprintln(stdout, string(encoded))
