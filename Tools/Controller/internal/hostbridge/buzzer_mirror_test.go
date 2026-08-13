@@ -65,6 +65,77 @@ func TestBuzzerMirrorJobRequiresOptInAndValidBoardNote(t *testing.T) {
 	if _, ok := buzzerMirrorJobFor(config, event); !ok {
 		t.Fatal("board-silent note did not reach the independently enabled host path")
 	}
+	event.Metadata["frequency_hz"] = "0"
+	if pause, ok := buzzerMirrorJobFor(config, event); !ok || pause.frequencyHz != 0 {
+		t.Fatal("explicit board pause was not retained as a host timeline marker")
+	}
+}
+
+func TestBuzzerPlaybackTimelinePreservesDeviceCadenceAndTrimsLateNotes(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	first := timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 0xFFFFFF00, timed: true,
+		observedAt: base, source: "board-a",
+	}, base)
+	if !first.start.Equal(base) || !first.end.Equal(base.Add(100*time.Millisecond)) {
+		t.Fatalf("first plan=%+v", first)
+	}
+	// uint32 subtraction deliberately preserves the MCU clock across wrap.
+	second := timeline.plan(buzzerMirrorJob{
+		durationMS: 80, deviceMicros: 0x0001D3C0, timed: true,
+		observedAt: base.Add(145 * time.Millisecond), source: "board-a",
+	}, base.Add(145*time.Millisecond))
+	wantStart := base.Add(120 * time.Millisecond)
+	if !second.start.Equal(wantStart) {
+		t.Fatalf("second start=%v want=%v", second.start, wantStart)
+	}
+	remaining, ok := second.remaining(base.Add(150 * time.Millisecond))
+	if !ok || remaining != 50*time.Millisecond {
+		t.Fatalf("late remaining=%v ok=%t", remaining, ok)
+	}
+	if remaining, ok := second.remaining(base.Add(250 * time.Millisecond)); ok || remaining != 0 {
+		t.Fatalf("expired note remaining=%v ok=%t", remaining, ok)
+	}
+}
+
+func TestBuzzerPlaybackTimelineReanchorsAfterDeviceRestart(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{
+		durationMS: 10, deviceMicros: 9_000_000, timed: true,
+		observedAt: base, source: "board-a",
+	}, base)
+	restarted := timeline.plan(buzzerMirrorJob{
+		durationMS: 10, deviceMicros: 1_000, timed: true,
+		observedAt: base.Add(time.Second), source: "board-a",
+	}, base.Add(time.Second))
+	if !restarted.start.Equal(base.Add(time.Second)) {
+		t.Fatalf("restart did not re-anchor to observation: %+v", restarted)
+	}
+}
+
+func TestBuzzerDispatchReusesResolvedExternalBackend(t *testing.T) {
+	manager := &Manager{
+		buzzerJobs: make(chan buzzerMirrorJob, 1),
+		status: Status{
+			BuzzerNativeState: "ready", BuzzerNativeBackend: "external",
+			BuzzerNativeExecutable: "/usr/local/bin/beep",
+		},
+	}
+	config := appconfig.Config{}
+	config.Integrations.BuzzerMirror = appconfig.DefaultBuzzerMirror()
+	config.Integrations.BuzzerMirror.Enabled = true
+	config.Integrations.BuzzerMirror.NativeEnabled = true
+	manager.dispatchBuzzerMirror(config, controller.Event{
+		Kind: "buzzer.note", Metadata: map[string]string{
+			"frequency_hz": "440", "duration_ms": "80",
+		},
+	})
+	job := <-manager.buzzerJobs
+	if job.config.Backend != "external" || job.config.Executable != "/usr/local/bin/beep" {
+		t.Fatalf("resolved backend was not reused: %+v", job.config)
+	}
 }
 
 func TestNativeBuzzerFailuresAreStateTransitionsNotPerNoteLogSpam(t *testing.T) {

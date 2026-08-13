@@ -710,6 +710,13 @@ func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
 	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 2}); err == nil {
 		t.Fatal("invalid BUZZER_CHANGED muted flag was accepted")
 	}
+	timed, err := ParseBuzzerState([]byte{0x70, 0x03, 125, 0, 1, 0x78, 0x56, 0x34, 0x12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !timed.Timed || timed.DeviceMicros != 0x12345678 || timed.FrequencyHz != 880 || timed.DurationMS != 125 || !timed.Muted {
+		t.Fatalf("timed buzzer state=%+v", timed)
+	}
 }
 
 func TestStatusProfilePayloadPreservesLivingPrefixAndPersistenceSuffix(t *testing.T) {

@@ -184,6 +184,32 @@ void testMacroScratchCannotCorruptSplitSerialFrame() {
           "macro scratch corrupted a split serial frame");
 }
 
+void testBuzzerPushCarriesMCUTimestamp() {
+  HardwareSerial serial;
+  UartProtocol protocol(serial);
+  protocol.begin(115200, nullptr);
+  arduino_mock::nowMicros = 0x12345677;
+  const std::uint8_t buzzer[] = {0x70, 0x03, 125, 0, 0};
+  require(protocol.send(ControllerProtocol::BuzzerChanged, 0, buzzer,
+                        sizeof(buzzer)),
+          "timestamped buzzer push failed");
+
+  const auto &encoded = serial.written();
+  require(encoded.size() > 1 && encoded.back() == 0,
+          "buzzer push omitted its frame delimiter");
+  std::uint8_t raw[ControllerProtocol::WireContract::MaximumRawFrame]{};
+  const auto length = ControllerProtocol::WireCodec::cobsDecode(
+      encoded.data(), static_cast<std::uint8_t>(encoded.size() - 1), raw,
+      sizeof(raw));
+  require(length == 15 && raw[2] == ControllerProtocol::BuzzerChanged &&
+              raw[4] == 9,
+          "buzzer push did not use the optional nine-byte timed payload");
+  require(raw[5] == 0x70 && raw[6] == 0x03 && raw[7] == 125 &&
+              raw[8] == 0 && raw[9] == 0 && raw[10] == 0x78 &&
+              raw[11] == 0x56 && raw[12] == 0x34 && raw[13] == 0x12,
+          "buzzer push changed its state prefix or MCU timestamp suffix");
+}
+
 } // namespace
 
 int main() {
@@ -192,6 +218,7 @@ int main() {
     testAdvisoryRevisionDoesNotBlockSemanticFrames();
     testInvalidFramesAreRejected();
     testMacroScratchCannotCorruptSplitSerialFrame();
+    testBuzzerPushCarriesMCUTimestamp();
     std::cout << "firmware_uart_protocol_tests: all checks passed\n";
     return 0;
   } catch (const std::exception &error) {
