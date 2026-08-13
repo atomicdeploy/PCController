@@ -326,6 +326,7 @@ export function DashboardView(props: SharedViewProps) {
   const [lcdLine2, setLCDLine2] = useState('')
   const [buzzerFrequency, setBuzzerFrequency] = useState(1000)
   const [buzzerDuration, setBuzzerDuration] = useState(80)
+	const [boardNameDraft, setBoardNameDraft] = useState(() => snapshot.have_board_name ? snapshot.board_name.name : '')
   const [peripheralBusy, setPeripheralBusy] = useState('')
   const [peripheralNotice, setPeripheralNotice] = useState('')
   const [clock, setClock] = useState(() => Date.now())
@@ -355,6 +356,10 @@ export function DashboardView(props: SharedViewProps) {
     })
     return () => abort.abort()
   }, [snapshot.connected, snapshot.hello.build_hash, snapshot.port.instance_id])
+	useEffect(() => {
+		if (snapshot.have_board_name) setBoardNameDraft(snapshot.board_name.name)
+		else if (!snapshot.connected) setBoardNameDraft('')
+	}, [snapshot.board_name.name, snapshot.connected, snapshot.have_board_name])
   useEffect(() => {
     const current = snapshot.have_front_panel && snapshot.front_panel
       ? snapshot.front_panel.menu_page
@@ -414,6 +419,19 @@ export function DashboardView(props: SharedViewProps) {
 		copy('Beep command accepted.', 'فرمان بوق پذیرفته شد.'),
     )
   }
+	const saveBoardName = (event: FormEvent) => {
+		event.preventDefault()
+		const name = boardNameDraft
+		if (name.trim() !== name || name.length > 8 || !/^[\x20-\x7E]*$/.test(name)) {
+			setPeripheralNotice(copy('Board name must be 0–8 printable ASCII characters without outer spaces.', 'نام برد باید ۰ تا ۸ نویسهٔ ASCII چاپ‌پذیر و بدون فاصلهٔ کناری باشد.'))
+			return
+		}
+		void performPeripheral(
+			'board-name',
+			() => rpc('controller.board.name.set', { name }),
+			name ? copy(`Board renamed to ${name}.`, `نام برد به ${name} تغییر کرد.`) : copy('Board name cleared.', 'نام برد پاک شد.'),
+		)
+	}
   const updateLayout = (change: (current: ReturnType<typeof loadDashboardLayout>) => ReturnType<typeof loadDashboardLayout>) => {
     setLayout((current) => {
       const next = change(current)
@@ -452,9 +470,15 @@ export function DashboardView(props: SharedViewProps) {
       <section className={`hero-panel${snapshot.connected ? ' is-online' : ''}`}>
         <div className="hero-panel__identity">
           <div className="eyebrow">{copy('Controller', 'کنترلر')} · {snapshot.connection_state}</div>
-          <h2><a href="#/dashboard">{snapshot.connected ? snapshot.hello.name || appTitle : t('noHardware')}</a></h2>
-          <p>{snapshot.connected ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : snapshot.connection_reason || t('noHardware')}</p>
-        </div>
+		  <h2><a href="#/dashboard">{snapshot.connected ? snapshot.board_name?.name || snapshot.hello.name || appTitle : t('noHardware')}</a></h2>
+		  <p>{snapshot.connected ? `USB ${snapshot.port.vid || '—'}:${snapshot.port.pid || '—'} · ${snapshot.port.name || copy('automatic port', 'درگاه خودکار')}` : snapshot.connection_reason || t('noHardware')}</p>
+		  {snapshot.connected && ((((snapshot.hello.capabilities ?? 0) >>> 0) & 0x80000000) !== 0) && <form className="hero-panel__board-name" onSubmit={saveBoardName}>
+			<label htmlFor="dashboard-board-name">{copy('Board name', 'نام برد')}</label>
+			<input id="dashboard-board-name" maxLength={8} value={boardNameDraft} placeholder={snapshot.have_board_name ? copy('Not assigned', 'تعیین نشده') : copy('Detecting…', 'در حال شناسایی…')} onChange={(event) => setBoardNameDraft(event.target.value)} />
+			<Button compact type="submit" icon={CheckCircle2} disabled={peripheralBusy === 'board-name' || !snapshot.have_board_name}>{copy('Apply', 'اعمال')}</Button>
+			{snapshot.have_board_name && <span>{snapshot.board_name.persisted ? copy('EEPROM', 'EEPROM') : copy('Saving…', 'در حال ذخیره…')}</span>}
+		  </form>}
+		</div>
         <div className={`hero-panel__readout${snapshot.have_status ? '' : ' is-empty'}`} dir="ltr">
           <span>{copy('BUILD', 'ساخت')}</span><strong>{hash}</strong>
           <span>{copy('UPTIME', 'زمان کارکرد')}</span><strong>{formatDuration(locale, status.uptime_ms)}</strong>

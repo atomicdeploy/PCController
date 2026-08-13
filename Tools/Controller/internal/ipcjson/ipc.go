@@ -681,6 +681,17 @@ func (service *Service) dispatch(
 		}
 	case "controller.snapshot":
 		result = service.Client.Snapshot()
+	case "controller.board.name.get", "controller.board-name.get":
+		result, err = service.Client.BoardName(ctx)
+	case "controller.board.name.set", "controller.board-name.set":
+		var params struct {
+			Name string `json:"name"`
+		}
+		if err = decodeParams(request.Params, &params); err == nil {
+			result, err = service.Client.SetBoardName(ctx, params.Name)
+		}
+	case "controller.board.name.clear", "controller.board-name.clear":
+		result, err = service.Client.SetBoardName(ctx, "")
 	case "controller.session.snapshot", "controller.session.snapshot.last":
 		if service.LastSessionSnapshot == nil {
 			err = errors.New("graceful-exit diagnostic snapshot is unavailable")
@@ -1930,6 +1941,9 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.display.send", "controller.opcode.send",
 		"controller.opcode.exchange", "controller.opcode.request":
 		return capabilityBoard
+	case "controller.board.name.set", "controller.board-name.set",
+		"controller.board.name.clear", "controller.board-name.clear":
+		return capabilityBoard
 	case "controller.macro.snapshot", "controller.macro.list", "controller.macro.status":
 		return capabilityRead
 	case "controller.macro.create", "controller.macro.update", "controller.macro.delete",
@@ -1989,6 +2003,7 @@ func requestCapability(method string, params json.RawMessage) string {
 		return capabilityHostConfig
 	case "controller.ping", "controller.snapshot", "controller.session.snapshot",
 		"controller.session.snapshot.last", "controller.status",
+		"controller.board.name.get", "controller.board-name.get",
 		"controller.front_panel", "controller.front-panel",
 		"controller.command.catalog", "controller.program_state.get", "controller.program-state.get",
 		"controller.temperatures", "controller.menu.list", "controller.menu.current",
@@ -2451,6 +2466,50 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		writeHTTPJSON(writer, http.StatusOK, service.Client.Snapshot())
+	})
+	mux.HandleFunc("/api/board/name", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPRequest(writer, request, service) {
+			return
+		}
+		if request.Method == http.MethodGet {
+			if !authorizeHTTPCapability(writer, request, service, capabilityRead) {
+				return
+			}
+			value, err := service.Client.BoardName(request.Context())
+			if err != nil {
+				writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+				return
+			}
+			writeHTTPJSON(writer, http.StatusOK, value)
+			return
+		}
+		if request.Method != http.MethodPut && request.Method != http.MethodDelete {
+			writer.Header().Set("Allow", http.MethodGet+", "+http.MethodPut+", "+http.MethodDelete)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !authorizeHTTPCapability(writer, request, service, capabilityBoard) {
+			return
+		}
+		name := ""
+		if request.Method == http.MethodPut {
+			var params struct {
+				Name string `json:"name"`
+			}
+			decoder := json.NewDecoder(http.MaxBytesReader(writer, request.Body, maxMessage))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&params); err != nil {
+				writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			name = params.Name
+		}
+		value, err := service.Client.SetBoardName(request.Context(), name)
+		if err != nil {
+			writeHTTPJSON(writer, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, value)
 	})
 	mux.HandleFunc("/api/peripherals", func(writer http.ResponseWriter, request *http.Request) {
 		if !authorizeHTTPRequest(writer, request, service) {

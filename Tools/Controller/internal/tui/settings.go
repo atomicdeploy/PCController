@@ -76,7 +76,18 @@ func peripheralDescriptorForSettingKey(key string) (appconfig.PeripheralDescript
 }
 
 func (model Model) boardSettingRows() []settingRow {
+	snapshot := model.snapshot()
 	settings := model.snapshot().Settings
+	boardName := "Detecting…"
+	if snapshot.HaveBoardName {
+		boardName = snapshot.BoardName.Name
+		if boardName == "" {
+			boardName = "Not assigned"
+		}
+		if !snapshot.BoardName.Persisted {
+			boardName += " · pending EEPROM"
+		}
+	}
 	return []settingRow{
 		{Key: "sound.silent", Group: "BUZZER", Label: "Board silent mode", Value: boolWord(settings.Flags&native.SettingsSilent != 0, "ON", "OFF"), Editable: true},
 		{Key: "programming.lock", Group: "", Label: "Programming lock", Value: boolWord(settings.Flags&native.SettingsProgrammingMode != 0, "ACTIVE", "CLEAR")},
@@ -98,6 +109,7 @@ func (model Model) boardSettingRows() []settingRow {
 		{Key: "motion.break", Group: "", Label: "Direction dead-time", Value: fmt.Sprintf("%d ms", settings.MotionBreakMS()), Editable: true},
 		{Key: "audio.door", Group: "CUES", Label: "Door open/close buzzer cues", Value: boolWord(settings.DoorAudioEnabled(), "ENABLED", "DISABLED"), Editable: true},
 		{Key: "audio.relay", Group: "", Label: "Relay on/off buzzer cues", Value: boolWord(settings.RelayAudioEnabled(), "ENABLED", "DISABLED"), Editable: true},
+		{Key: "board.name", Group: "IDENTITY", Label: "Board name", Value: boardName, Editable: snapshot.Connected && snapshot.Hello.Capabilities&native.CapabilityBoardName != 0},
 	}
 }
 
@@ -250,6 +262,11 @@ func (model Model) buildBoardSettingEditor(editor *settingEditor) {
 		return settingEditorField{Key: key, Label: label, Value: boolInt(value), Options: onOffOptions()}
 	}
 	switch editor.Key {
+	case "board.name":
+		editor.IsText = true
+		if model.snapshot().HaveBoardName {
+			editor.Text = model.snapshot().BoardName.Name
+		}
 	case "sound.silent":
 		editor.Fields = []settingEditorField{boolean("enabled", "Silent", settings.Flags&native.SettingsSilent != 0)}
 	case "illumination.mode":

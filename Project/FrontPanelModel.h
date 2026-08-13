@@ -127,6 +127,17 @@ enum class LeafDecreaseAction : uint8_t {
   AllRelaysOff,
 };
 
+// Rolls any zero-based modal selector in both directions. Relay number,
+// illumination mode, and optional PWM channel editors share this endpoint
+// contract so no profile can trap K3/K4 at its first or last value.
+constexpr uint8_t rollMenuIndex(uint8_t value, uint8_t count, bool increase) {
+  if (count == 0) return 0;
+  value = value < count ? value : static_cast<uint8_t>(count - 1U);
+  return increase
+             ? static_cast<uint8_t>(value + 1U == count ? 0 : value + 1U)
+             : static_cast<uint8_t>(value == 0 ? count - 1U : value - 1U);
+}
+
 constexpr LeafDecreaseAction leafDecreaseAction(ProgramMode mode) {
   return mode == MODE_RELAY ? LeafDecreaseAction::AllRelaysOff
                             : LeafDecreaseAction::ParentCategory;

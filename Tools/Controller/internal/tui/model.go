@@ -1336,6 +1336,9 @@ func (model Model) actionBar(snapshot control.Snapshot) string {
 	connectionStyle := labelStyle
 	if snapshot.Connected {
 		connectionText = snapshot.Port.Name
+		if snapshot.HaveBoardName && snapshot.BoardName.Name != "" {
+			connectionText = snapshot.BoardName.Name + " · " + connectionText
+		}
 		if snapshot.Port.FriendlyName != "" && snapshot.Port.FriendlyName != snapshot.Port.Name {
 			connectionText += " · " + snapshot.Port.FriendlyName
 		}

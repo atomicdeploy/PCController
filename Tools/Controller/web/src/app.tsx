@@ -336,11 +336,14 @@ export function snapshotAfterTransportLoss(
     // surface wait for a new authoritative snapshot.
     have_status: false,
     have_settings: false,
+	have_board_name: false,
     have_front_panel: false,
     have_status_led: false,
     hello: emptySnapshot.hello,
     status: emptySnapshot.status,
     settings: emptySnapshot.settings,
+	board_name: emptySnapshot.board_name,
+	board_name_updated: undefined,
     connection_state: current.paused ? 'paused' : state === 'connecting' ? 'connecting' : 'disconnected',
     connection_reason: detail || (state === 'connecting' ? 'Re-establishing the host event stream' : 'Host event stream unavailable'),
   }
@@ -1303,7 +1306,7 @@ export default function App() {
               refreshAfterHostRestart.current = true
             }
             if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
-            if (/device|connection|settings/i.test(event.kind)) void refresh()
+			if (/device|connection|settings|board\.name/i.test(event.kind)) void refresh()
           },
           state: (state, detail) => {
             setStreamState(state)

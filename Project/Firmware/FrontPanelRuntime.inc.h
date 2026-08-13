@@ -357,14 +357,8 @@ uint8_t adjustedBrightness(uint8_t value, bool increase, uint8_t step = 1) {
 
 // Rolls Off/Auto/On and mirrors the result to the edit transaction.
 void adjustIlluminationMode(bool increase, uint32_t at) {
-  int8_t mode = static_cast<int8_t>(illumination.mode());
-  mode += increase ? 1 : -1;
-  if (mode < static_cast<int8_t>(IlluminationMode::Off)) {
-    mode = static_cast<int8_t>(IlluminationMode::On);
-  } else if (mode > static_cast<int8_t>(IlluminationMode::On)) {
-    mode = static_cast<int8_t>(IlluminationMode::Off);
-  }
-  illumination.setMode(static_cast<IlluminationMode>(mode));
+  illumination.setMode(static_cast<IlluminationMode>(rollMenuIndex(
+      static_cast<uint8_t>(illumination.mode()), 3, increase)));
   markIlluminationSettingsChanged(at);
 }
 
@@ -751,13 +745,9 @@ void handleMenuAction(uint8_t action, bool fromRemote,
       } else if (action == MENU_NEXT) {
         modeManager.transitionTo(MODE_USER_PWM_VALUE_EDIT);
       } else if (action == MENU_INCREASE) {
-        userPwmMenuIndex = static_cast<uint8_t>(
-            (userPwmMenuIndex + 1) % 8);
+        userPwmMenuIndex = rollMenuIndex(userPwmMenuIndex, 8, true);
       } else {
-        userPwmMenuIndex =
-            userPwmMenuIndex == 0
-                ? 7
-                : static_cast<uint8_t>(userPwmMenuIndex - 1);
+        userPwmMenuIndex = rollMenuIndex(userPwmMenuIndex, 8, false);
       }
       menuFeedback(fromRemote);
       return;
@@ -811,10 +801,9 @@ void handleMenuAction(uint8_t action, bool fromRemote,
       } else if (action == MENU_NEXT) {
         modeManager.transitionTo(MODE_RELAY_VALUE_EDIT);
       } else if (action == MENU_INCREASE) {
-        relayMenuIndex = static_cast<uint8_t>((relayMenuIndex + 1) % 8);
+        relayMenuIndex = rollMenuIndex(relayMenuIndex, 8, true);
       } else {
-        relayMenuIndex =
-            relayMenuIndex == 0 ? 7 : static_cast<uint8_t>(relayMenuIndex - 1);
+        relayMenuIndex = rollMenuIndex(relayMenuIndex, 8, false);
       }
       menuFeedback(fromRemote);
       return;

@@ -34,9 +34,12 @@ type Snapshot struct {
 	Hello             native.Hello
 	Status            native.Status
 	Settings          native.Settings
+	BoardName         native.BoardName
 	HaveStatus        bool
 	HaveSettings      bool
+	HaveBoardName     bool
 	StatusUpdated     time.Time
+	BoardNameUpdated  time.Time
 	ConnectionState   string
 	ConnectionReason  string
 	ConnectionUpdated time.Time
@@ -133,8 +136,11 @@ type Runtime struct {
 	hello                  native.Hello
 	status                 native.Status
 	settings               native.Settings
+	boardName              native.BoardName
 	haveStatus             bool
 	haveSettings           bool
+	haveBoardName          bool
+	boardNameUpdated       time.Time
 	frontPanel             native.FrontPanel
 	haveFrontPanel         bool
 	frontPanelUpdated      time.Time
@@ -493,9 +499,12 @@ func (runtime *Runtime) Snapshot() Snapshot {
 		Hello:             runtime.hello,
 		Status:            runtime.status,
 		Settings:          runtime.settings,
+		BoardName:         runtime.boardName,
 		HaveStatus:        runtime.haveStatus,
 		HaveSettings:      runtime.haveSettings,
+		HaveBoardName:     runtime.haveBoardName,
 		StatusUpdated:     runtime.statusUpdated,
+		BoardNameUpdated:  runtime.boardNameUpdated,
 		ConnectionState:   runtime.connectionState,
 		ConnectionReason:  runtime.connectionReason,
 		ConnectionUpdated: runtime.connectionUpdated,
@@ -1170,6 +1179,9 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	runtime.hello = result.Hello
 	runtime.haveStatus = false
 	runtime.haveSettings = false
+	runtime.boardName = native.BoardName{}
+	runtime.haveBoardName = false
+	runtime.boardNameUpdated = time.Time{}
 	runtime.haveFrontPanel = false
 	runtime.frontPanel = native.FrontPanel{}
 	runtime.frontPanelUpdated = time.Time{}
@@ -1190,6 +1202,8 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	}
 	runtime.notifyConnectionReady(generation, result.Port, result.Hello)
 	go runtime.pump(result.Session, generation)
+	go runtime.refreshBoardName(generation)
+	go runtime.refreshFrontPanel(generation)
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
 	go runtime.programStateHeartbeat(generation)
@@ -1203,6 +1217,76 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 		result.Port,
 		"",
 	)
+}
+
+// refreshBoardName discovers the CRC-backed operator identity after every
+// authenticated connection. It is independent of status-profile provisioning,
+// so custom firmware profiles still populate the shared snapshot and clients.
+func (runtime *Runtime) refreshBoardName(generation uint64) {
+	runtime.mu.RLock()
+	if runtime.session == nil || runtime.generation != generation ||
+		runtime.hello.Capabilities&native.CapabilityBoardName == 0 {
+		runtime.mu.RUnlock()
+		return
+	}
+	timeout := runtime.options.RequestTimeout
+	runtime.mu.RUnlock()
+	if timeout <= 0 {
+		timeout = 1200 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	_, _ = runtime.requestAtGeneration(
+		ctx, generation, native.OpGetSettings, nil, native.OpSettings,
+	)
+	cancel()
+}
+
+// refreshFrontPanel closes the reset/reconnect race between the firmware's
+// changed-only segment publisher and a newly authenticated host session. The
+// board may have emitted its boot glyph before the serial pump was ready, so
+// every connection generation asks once for the authoritative presentation
+// and republishes it to all application clients.
+func (runtime *Runtime) refreshFrontPanel(generation uint64) {
+	runtime.mu.RLock()
+	if runtime.session == nil || runtime.generation != generation ||
+		runtime.hello.Capabilities&native.CapabilityFrontPanelSnapshot == 0 {
+		runtime.mu.RUnlock()
+		return
+	}
+	timeout := runtime.options.RequestTimeout
+	runtime.mu.RUnlock()
+	if timeout <= 0 {
+		timeout = 1200 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	frame, err := runtime.requestAtGeneration(
+		ctx, generation, native.OpFrontPanelGet, nil, native.OpFrontPanel,
+	)
+	cancel()
+	if err != nil {
+		return
+	}
+	panel, err := native.ParseFrontPanel(frame.Payload)
+	if err != nil {
+		return
+	}
+	runtime.publishEvent(frontPanelStateEvent(panel, time.Now()))
+}
+
+func frontPanelStateEvent(panel native.FrontPanel, at time.Time) Event {
+	return Event{
+		Kind: "front_panel.segment", Stream: EventStreamState,
+		Text: "seven-segment display synchronized", Time: at,
+		Source: "board", Target: "app.clients", MessageType: "state",
+		Metadata: map[string]string{
+			"raw_segments": fmt.Sprintf(
+				"%02X%02X%02X%02X",
+				panel.RawSegments[0], panel.RawSegments[1],
+				panel.RawSegments[2], panel.RawSegments[3],
+			),
+			"brightness": strconv.Itoa(int(panel.Brightness)),
+		},
+	}
 }
 
 // provisionDefaultStatusProfiles installs the Go-owned factory table only
@@ -1872,6 +1956,22 @@ func (runtime *Runtime) observeLocked(frame native.Frame) {
 		if settings, err := native.ParseSettings(frame.Payload); err == nil {
 			runtime.settings = settings
 			runtime.haveSettings = true
+		}
+		if name, err := native.ParseBoardNameFromSettings(frame.Payload); err == nil {
+			changed := !runtime.haveBoardName || runtime.boardName != name
+			runtime.boardName = name
+			runtime.haveBoardName = true
+			runtime.boardNameUpdated = time.Now()
+			if changed {
+				runtime.publishEvent(Event{
+					Kind: "board.name.changed", Stream: EventStreamState,
+					Text:  "board name is " + strconv.Quote(name.Name),
+					State: name.Name, Source: "board", Target: "app.clients",
+					Metadata: map[string]string{
+						"name": name.Name, "persisted": strconv.FormatBool(name.Persisted),
+					},
+				})
+			}
 		}
 	case native.OpFrontPanel:
 		if panel, err := native.ParseFrontPanel(frame.Payload); err == nil {

@@ -353,6 +353,11 @@ void testMotionDoorPolicyMatrixAndEntryPaths() {
 
 void testTransitionsAndRollover() {
   using namespace TransitionMath;
+	require(rollMenuIndex(0, 8, false) == 7 &&
+			rollMenuIndex(7, 8, true) == 0 &&
+			rollMenuIndex(0, 3, false) == 2 &&
+			rollMenuIndex(2, 3, true) == 0,
+		"relay/illumination/PWM menu selectors did not roll both directions");
   require(rollByte(240, 16, true) == 255 &&
               rollByte(255, 16, true) == 0 &&
               rollByte(16, 16, false) == 0 &&

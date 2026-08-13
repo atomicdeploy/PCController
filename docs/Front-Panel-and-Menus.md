@@ -342,6 +342,15 @@ and B direction relays cannot change in the same service pass and are separated
 by at least 5 ms. Motion door policy is an EEPROM setting: Always (factory),
 Closed Only, Open Only, or Never. R5-R8 are independent general outputs.
 
+Every editable front-panel selector has one rollover contract in both
+directions: Relay 1 follows Relay 8 and vice versa; illumination mode rolls
+Off → On → Auto → Off (and backward); byte brightness values visit 0 and 255
+before wrapping; the optional PWM profile visits 0 and 4095 before wrapping
+and its first/last channel selectors are adjacent. A press changes by one,
+normal hold repeats by ten, and the fast hold tier changes byte settings by
+one hundred without skipping electrical endpoints. Disabled pages stay
+disabled rather than accepting invisible edits.
+
 Enclosure illumination is PWM channel 11. Auto mode targets the configured On
 brightness while the debounced door is open and Off brightness while closed;
 factory values are 128 and 0. It moves by four 8-bit levels every 20 ms and
