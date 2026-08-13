@@ -329,11 +329,18 @@ func TestPrimaryPublishesTypedAppActionTargetOutcomesWithoutSuccessLogSpam(t *te
 		t.Fatal(err)
 	}
 	afterID := runtime.LatestEventID()
+	actions := server.AppActions()
 	operation, err := server.actionCoordinator.Submit(hostui.AppAction{
 		Kind: "app.title", Value: "Bench", Target: "tui:outcome",
 	}, time.Second)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var delivery hostui.AppAction
+	select {
+	case delivery = <-actions:
+	case <-time.After(time.Second):
+		t.Fatal("typed app action delivery was not queued")
 	}
 	waitContext, stop := context.WithTimeout(context.Background(), time.Second)
 	defer stop()
@@ -346,7 +353,8 @@ func TestPrimaryPublishesTypedAppActionTargetOutcomesWithoutSuccessLogSpam(t *te
 		t.Fatalf("queued outcome=%#v", queued)
 	}
 	if _, err := server.actionCoordinator.Ack(hostui.ActionAck{
-		OperationID: operation.OperationID, InstanceID: "tui:outcome", State: hostui.ActionStateApplied,
+		OperationID: operation.OperationID, DeliveryID: delivery.Metadata[hostui.ActionDeliveryIDKey],
+		InstanceID: "tui:outcome", State: hostui.ActionStateApplied,
 	}); err != nil {
 		t.Fatal(err)
 	}

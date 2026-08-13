@@ -94,9 +94,8 @@ import type { SharedViewProps } from './views'
 import { sessionAuthenticationGuidanceRequired } from './authentication-guidance'
 import {
   AppActionReceiptCache,
-  applyWebAppAction,
-  pushedAppAction,
-  type AppActionAck,
+  acknowledgeWebAppAction,
+  processWebAppAction,
   type WebActionProgress,
 } from './app-actions'
 
@@ -1245,17 +1244,11 @@ export default function App() {
               setEvents((current) => prependSignificantControllerEvent(current, event))
               tabChannelRef.current?.publishControllerEvent(event)
             }
-			const typedAction = pushedAppAction(event, appInstanceID)
-			if (typedAction) {
-				let acknowledgement = appActionReceipts.current.get(typedAction.operationID)
-				if (!acknowledgement) {
-					const effect = applyWebAppAction(typedAction)
-					acknowledgement = {
-						operation_id: typedAction.operationID,
-						instance_id: appInstanceID,
-						state: effect.outcome,
-						...(effect.outcome === 'rejected' ? { reason: effect.reason } : {}),
-					} satisfies AppActionAck
+			const processedAction = processWebAppAction(event, appInstanceID, appActionReceipts.current)
+			if (processedAction) {
+				const { acknowledgement } = processedAction
+				if (!processedAction.duplicate) {
+					const { effect } = processedAction
 					if (effect.outcome === 'applied') {
 						if ('page' in effect) {
 							applyPage(effect.page, 'replace')
@@ -1266,11 +1259,14 @@ export default function App() {
 							setRemoteActionProgress(effect.progress)
 						}
 					}
-					appActionReceipts.current.remember(acknowledgement)
 				}
-				void rpc('controller.app.action.ack', acknowledgement).catch((cause) => {
+				void acknowledgeWebAppAction(
+					acknowledgement,
+					(value) => rpc('controller.app.action.ack', value),
+				).catch((cause) => {
+					const locale = appearanceDesiredRef.current.locale
 					notify('warning',
-						appearance.locale === 'fa' ? 'تأیید فرمان ارسال نشد' : 'Action not confirmed',
+						locale === 'fa' ? 'تأیید فرمان ارسال نشد' : 'Action not confirmed',
 						cause instanceof Error ? cause.message : String(cause))
 				})
 			}

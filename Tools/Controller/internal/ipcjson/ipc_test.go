@@ -297,8 +297,10 @@ func TestTypedAppActionRPCSubmitsAcknowledgesAndQueriesExactOutcome(t *testing.T
 		len(envelope.Operation.Targets) != 1 || envelope.Operation.Targets[0].State != hostui.ActionStateQueued {
 		t.Fatalf("submit response=%#v", response.Result)
 	}
+	var delivered hostui.AppAction
 	select {
 	case delivery := <-deliveries:
+		delivered = delivery
 		if delivery.OperationID != "rpc-operation" || delivery.Target != "tui:one" {
 			t.Fatalf("delivery=%#v", delivery)
 		}
@@ -307,7 +309,8 @@ func TestTypedAppActionRPCSubmitsAcknowledgesAndQueriesExactOutcome(t *testing.T
 	}
 
 	ack, _ := json.Marshal(hostui.ActionAck{
-		OperationID: "rpc-operation", InstanceID: "tui:one", State: hostui.ActionStateApplied,
+		OperationID: "rpc-operation", DeliveryID: delivered.Metadata[hostui.ActionDeliveryIDKey],
+		InstanceID: "tui:one", State: hostui.ActionStateApplied,
 	})
 	response = service.Dispatch(context.Background(), Request{Method: "controller.app.action.ack", Params: ack})
 	if response.Error != nil {
@@ -329,6 +332,70 @@ func TestTypedAppActionRPCSubmitsAcknowledgesAndQueriesExactOutcome(t *testing.T
 	if requestCapability("controller.app.action.ack", ack) != capabilityHostConfig ||
 		requestCapability("controller.app.action.outcome", query) != capabilityRead {
 		t.Fatal("typed app action capabilities are not mutation/read separated")
+	}
+}
+
+func TestTypedCoordinatorPreservesLegacyAppActions(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	registry := hostui.NewInstanceRegistry()
+	if _, err := registry.Upsert(hostui.AppInstance{
+		ID: "tui:legacy-actions", Surface: "tui", State: "active", LeaseSeconds: 45,
+		Values: map[string]string{hostui.ActionCapabilitiesKey: hostui.TUIActionCapabilities},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	broker := hostui.NewActionBroker()
+	deliveries := broker.Events()
+	coordinator := hostui.NewActionCoordinator(registry, broker.Publish)
+	defer coordinator.Close()
+	service := Service{
+		Client:    controllerapi.AttachSharedRuntime(runtime, shell.New(8)),
+		AppAction: broker.Publish, AppActionSubmit: coordinator.Submit,
+	}
+
+	tests := []hostui.AppAction{
+		{Kind: "command", Value: "status", Target: "tui:legacy-actions"},
+		{Kind: "app.quit", Target: "tui:legacy-actions"},
+		{Kind: "app.port.open", Target: "tui:legacy-actions"},
+		{Kind: "app.port.close", Target: "tui:legacy-actions"},
+	}
+	for _, action := range tests {
+		params, _ := json.Marshal(action)
+		response := service.Dispatch(context.Background(), Request{
+			Method: "controller.app.action", Params: params,
+		})
+		if response.Error != nil {
+			t.Fatalf("%s legacy response=%#v", action.Kind, response)
+		}
+		accepted, ok := response.Result.(map[string]bool)
+		if !ok || !accepted["accepted"] {
+			t.Fatalf("%s legacy result=%#v", action.Kind, response.Result)
+		}
+		select {
+		case delivery := <-deliveries:
+			if delivery.Kind != action.Kind || delivery.Value != action.Value || delivery.OperationID != "" {
+				t.Fatalf("%s delivery=%#v", action.Kind, delivery)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s was not delivered through legacy broker", action.Kind)
+		}
+	}
+
+	trackedLegacy, _ := json.Marshal(map[string]any{
+		"kind": "command", "value": "status", "target": "tui:legacy-actions",
+		"operation_id": "unsupported-tracking",
+	})
+	response := service.Dispatch(context.Background(), Request{
+		Method: "controller.app.action", Params: trackedLegacy,
+	})
+	if response.Error == nil || !strings.Contains(response.Error.Message, "outcome-capable") {
+		t.Fatalf("legacy action fabricated tracking=%#v", response)
+	}
+	select {
+	case delivery := <-deliveries:
+		t.Fatalf("invalid tracked legacy action was delivered: %#v", delivery)
+	default:
 	}
 }
 

@@ -1,12 +1,15 @@
 package ipcjson
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	controllerapi "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
@@ -104,6 +107,7 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	broker := hostui.NewActionBroker()
+	deliveries := broker.Events()
 	coordinator := hostui.NewActionCoordinator(registry, broker.Publish)
 	defer coordinator.Close()
 	handler := websocketMux(context.Background(), &Service{
@@ -123,10 +127,18 @@ func TestRESTTypedAppActionOutcomeLifecycle(t *testing.T) {
 		!strings.Contains(response.Body.String(), `"operation_id":"rest-operation"`) {
 		t.Fatalf("submit status=%d body=%s", response.Code, response.Body.String())
 	}
+	var delivery hostui.AppAction
+	select {
+	case delivery = <-deliveries:
+	case <-time.After(time.Second):
+		t.Fatal("REST typed action was not delivered")
+	}
 
-	request = httptest.NewRequest(http.MethodPost, "/api/app/action/ack", strings.NewReader(
-		`{"operation_id":"rest-operation","instance_id":"web:one","state":"applied"}`,
-	))
+	ackBody, _ := json.Marshal(hostui.ActionAck{
+		OperationID: "rest-operation", DeliveryID: delivery.Metadata[hostui.ActionDeliveryIDKey],
+		InstanceID: "web:one", State: hostui.ActionStateApplied,
+	})
+	request = httptest.NewRequest(http.MethodPost, "/api/app/action/ack", bytes.NewReader(ackBody))
 	request.RemoteAddr = "127.0.0.1:43210"
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)

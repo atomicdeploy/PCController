@@ -417,7 +417,8 @@ func TestRemoteTUIAcknowledgesTypedAppActionThroughCoordinatorRPC(t *testing.T) 
 		return nil
 	}
 	want := hostui.ActionAck{
-		OperationID: "remote-action", InstanceID: "tui:remote", State: hostui.ActionStateApplied,
+		OperationID: "remote-action", DeliveryID: "remote-delivery",
+		InstanceID: "tui:remote", State: hostui.ActionStateApplied,
 	}
 	if err := client.AckAppAction(context.Background(), want); err != nil {
 		t.Fatal(err)

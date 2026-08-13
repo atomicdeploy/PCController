@@ -18,6 +18,21 @@ func liveActionInstance(t *testing.T, registry *InstanceRegistry, id, surface, c
 	}
 }
 
+func actionDeliveryID(t *testing.T, deliveries []AppAction, instanceID string) string {
+	t.Helper()
+	for _, delivery := range deliveries {
+		if delivery.Target == instanceID {
+			value := delivery.Metadata[ActionDeliveryIDKey]
+			if value == "" {
+				t.Fatalf("delivery for %s has no delivery id: %#v", instanceID, delivery)
+			}
+			return value
+		}
+	}
+	t.Fatalf("no delivery for %s in %#v", instanceID, deliveries)
+	return ""
+}
+
 func TestActionCoordinatorFreezesExactTargetsAndTracksAcks(t *testing.T) {
 	registry := NewInstanceRegistry()
 	liveActionInstance(t, registry, "tui:one", "tui", TUIActionCapabilities)
@@ -46,17 +61,22 @@ func TestActionCoordinatorFreezesExactTargetsAndTracksAcks(t *testing.T) {
 		if delivery.OperationID != operation.OperationID || delivery.Target != operation.Targets[index].InstanceID {
 			t.Fatalf("delivery[%d]=%#v target=%#v", index, delivery, operation.Targets[index])
 		}
+		if expiresAt, parseErr := time.Parse(time.RFC3339Nano, delivery.Metadata[ActionExpiresAtKey]); parseErr != nil || !expiresAt.Equal(operation.ExpiresAt) {
+			t.Fatalf("delivery[%d] expiry=%q err=%v want=%s", index, delivery.Metadata[ActionExpiresAtKey], parseErr, operation.ExpiresAt)
+		}
 	}
 
 	operation, err = coordinator.Ack(ActionAck{
-		OperationID: operation.OperationID, InstanceID: "tui:one", State: ActionStateApplied,
+		OperationID: operation.OperationID, DeliveryID: actionDeliveryID(t, deliveries, "tui:one"),
+		InstanceID: "tui:one", State: ActionStateApplied,
 	})
 	if err != nil || operation.State != ActionStateQueued {
 		t.Fatalf("first ack operation=%#v err=%v", operation, err)
 	}
 	operation, err = coordinator.Ack(ActionAck{
-		OperationID: operation.OperationID, InstanceID: "web:one",
-		State: ActionStateRejected, Reason: "browser_policy",
+		OperationID: operation.OperationID, DeliveryID: actionDeliveryID(t, deliveries, "web:one"),
+		InstanceID: "web:one",
+		State:      ActionStateRejected, Reason: "browser_policy",
 	})
 	if err != nil || operation.State != ActionStatePartial {
 		t.Fatalf("second ack operation=%#v err=%v", operation, err)
@@ -87,6 +107,47 @@ func TestActionCoordinatorDeduplicatesAndRejectsConflictingOperationID(t *testin
 	action.Value = "normal 43"
 	if _, err := coordinator.Submit(action, time.Second); err == nil {
 		t.Fatal("conflicting operation id was accepted")
+	}
+}
+
+func TestActionCoordinatorRejectsCallerOwnedDeliveryMetadata(t *testing.T) {
+	registry := NewInstanceRegistry()
+	liveActionInstance(t, registry, "tui:one", "tui", TUIActionCapabilities)
+	published := 0
+	coordinator := NewActionCoordinator(registry, func(AppAction) error { published++; return nil })
+	defer coordinator.Close()
+
+	for _, key := range []string{ActionDeliveryIDKey, ActionExpiresAtKey} {
+		t.Run(key, func(t *testing.T) {
+			_, err := coordinator.Submit(AppAction{
+				Kind: "app.title", Value: "Bench", Target: "tui:one",
+				Metadata: map[string]string{key: "caller-owned"},
+			}, time.Second)
+			if err == nil {
+				t.Fatalf("caller-supplied %s was accepted", key)
+			}
+		})
+	}
+	if published != 0 {
+		t.Fatalf("published=%d after rejected coordinator metadata", published)
+	}
+}
+
+func TestActionCoordinatorRejectsSubMillisecondTimeout(t *testing.T) {
+	registry := NewInstanceRegistry()
+	liveActionInstance(t, registry, "tui:one", "tui", TUIActionCapabilities)
+	published := 0
+	coordinator := NewActionCoordinator(registry, func(AppAction) error { published++; return nil })
+	defer coordinator.Close()
+
+	_, err := coordinator.Submit(AppAction{
+		Kind: "app.title", Value: "Bench", Target: "tui:one",
+	}, time.Millisecond-time.Nanosecond)
+	if err == nil {
+		t.Fatal("sub-millisecond timeout was accepted")
+	}
+	if published != 0 {
+		t.Fatalf("published=%d after rejected timeout", published)
 	}
 }
 
@@ -127,7 +188,11 @@ func TestActionCoordinatorAckIsExactAndIdempotent(t *testing.T) {
 	registry := NewInstanceRegistry()
 	liveActionInstance(t, registry, "tui:one", "tui", TUIActionCapabilities)
 	liveActionInstance(t, registry, "tui:two", "tui", TUIActionCapabilities)
-	coordinator := NewActionCoordinator(registry, func(AppAction) error { return nil })
+	var deliveries []AppAction
+	coordinator := NewActionCoordinator(registry, func(action AppAction) error {
+		deliveries = append(deliveries, action)
+		return nil
+	})
 	defer coordinator.Close()
 	operation, err := coordinator.Submit(AppAction{
 		Kind: "app.progress", Value: "warning 73", Target: "tui:one",
@@ -136,13 +201,21 @@ func TestActionCoordinatorAckIsExactAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreign := ActionAck{
-		OperationID: operation.OperationID, InstanceID: "tui:two", State: ActionStateApplied,
+		OperationID: operation.OperationID, DeliveryID: actionDeliveryID(t, deliveries, "tui:one"),
+		InstanceID: "tui:two", State: ActionStateApplied,
 	}
 	if _, err := coordinator.Ack(foreign); err == nil {
 		t.Fatal("foreign target acknowledgement was accepted")
 	}
+	forged := foreign
+	forged.InstanceID = "tui:one"
+	forged.DeliveryID = "forged-delivery"
+	if _, err := coordinator.Ack(forged); err == nil {
+		t.Fatal("forged delivery acknowledgement was accepted")
+	}
 	ack := ActionAck{
-		OperationID: operation.OperationID, InstanceID: "tui:one", State: ActionStateApplied,
+		OperationID: operation.OperationID, DeliveryID: actionDeliveryID(t, deliveries, "tui:one"),
+		InstanceID: "tui:one", State: ActionStateApplied,
 	}
 	first, err := coordinator.Ack(ack)
 	if err != nil || first.State != ActionStateApplied {
@@ -155,6 +228,33 @@ func TestActionCoordinatorAckIsExactAndIdempotent(t *testing.T) {
 	ack.State = ActionStateRejected
 	if _, err := coordinator.Ack(ack); err == nil {
 		t.Fatal("conflicting terminal acknowledgement was accepted")
+	}
+}
+
+func TestActionCoordinatorAcceptsInFlightAckAfterLeaseDeparture(t *testing.T) {
+	registry := NewInstanceRegistry()
+	liveActionInstance(t, registry, "tui:departing", "tui", TUIActionCapabilities)
+	var deliveries []AppAction
+	coordinator := NewActionCoordinator(registry, func(action AppAction) error {
+		deliveries = append(deliveries, action)
+		return nil
+	})
+	defer coordinator.Close()
+	operation, err := coordinator.Submit(AppAction{
+		Kind: "app.title", Value: "Still in flight", Target: "tui:departing",
+	}, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !registry.Remove("tui:departing") {
+		t.Fatal("target lease was not removed")
+	}
+	operation, err = coordinator.Ack(ActionAck{
+		OperationID: operation.OperationID, DeliveryID: actionDeliveryID(t, deliveries, "tui:departing"),
+		InstanceID: "tui:departing", State: ActionStateApplied,
+	})
+	if err != nil || operation.State != ActionStateApplied {
+		t.Fatalf("in-flight departure ack operation=%#v err=%v", operation, err)
 	}
 }
 

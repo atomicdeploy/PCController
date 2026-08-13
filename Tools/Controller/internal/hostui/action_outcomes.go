@@ -15,6 +15,8 @@ import (
 
 const (
 	ActionCapabilitiesKey = "app_actions"
+	ActionDeliveryIDKey   = "operation_delivery_id"
+	ActionExpiresAtKey    = "operation_expires_at"
 	TUIActionCapabilities = "app.osc,app.page,app.progress,app.title"
 	WebActionCapabilities = "app.page,app.progress,app.title"
 
@@ -32,6 +34,27 @@ const (
 
 var supportedActionCapabilities = map[string]struct{}{
 	"app.page": {}, "app.title": {}, "app.progress": {}, "app.osc": {},
+}
+
+// TracksAppActionOutcome reports whether kind has a bounded client capability
+// and actual-result acknowledgement contract. Older lifecycle and command
+// actions remain on the legacy validated delivery path until their side
+// effects can report a factual terminal result.
+func TracksAppActionOutcome(kind string) bool {
+	_, ok := supportedActionCapabilities[strings.ToLower(strings.TrimSpace(kind))]
+	return ok
+}
+
+// HasCoordinatorActionDeliveryMetadata reports whether a caller attempted to
+// manufacture the exact-target nonce or deadline added only by Submit.
+func HasCoordinatorActionDeliveryMetadata(metadata map[string]string) bool {
+	for key := range metadata {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case ActionDeliveryIDKey, ActionExpiresAtKey:
+			return true
+		}
+	}
+	return false
 }
 
 // ActionCapabilities is the canonical bounded presence value advertised by a
@@ -76,9 +99,47 @@ type ActionOperation struct {
 
 type ActionAck struct {
 	OperationID string `json:"operation_id"`
+	DeliveryID  string `json:"delivery_id"`
 	InstanceID  string `json:"instance_id"`
 	State       string `json:"state"`
 	Reason      string `json:"reason,omitempty"`
+	// ReceiptKey is client-local deduplication identity. It deliberately never
+	// crosses the wire; a reused operation ID with a later deadline must not
+	// replay an acknowledgement for an expired delivery.
+	ReceiptKey string `json:"-"`
+}
+
+// AppActionReceiptKey distinguishes bounded reuse of a caller-supplied
+// operation ID after the previous coordinator record has expired.
+func AppActionReceiptKey(action AppAction) string {
+	operationID := strings.TrimSpace(action.OperationID)
+	if operationID == "" {
+		return ""
+	}
+	if deliveryID := strings.TrimSpace(action.Metadata[ActionDeliveryIDKey]); deliveryID != "" {
+		return operationID + "\x00" + deliveryID
+	}
+	expiresAt := strings.TrimSpace(action.Metadata[ActionExpiresAtKey])
+	if expiresAt == "" {
+		return operationID
+	}
+	return operationID + "\x00" + expiresAt
+}
+
+// AppActionExpired rejects delayed/replayed pushed actions after their exact
+// coordinator deadline. A malformed advertised deadline is never actionable.
+func AppActionExpired(action AppAction, now time.Time) bool {
+	operationID := strings.TrimSpace(action.OperationID)
+	deliveryID := strings.TrimSpace(action.Metadata[ActionDeliveryIDKey])
+	raw := strings.TrimSpace(action.Metadata[ActionExpiresAtKey])
+	if operationID == "" {
+		return false
+	}
+	if deliveryID == "" || raw == "" {
+		return true
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, raw)
+	return err != nil || !now.Before(expiresAt)
 }
 
 type ActionOutcomeChange struct {
@@ -94,6 +155,7 @@ type ActionOutcomeChange struct {
 type actionOperationRecord struct {
 	operation   ActionOperation
 	fingerprint string
+	deliveries  map[string]string
 	retainUntil time.Time
 	timer       *time.Timer
 }
@@ -136,10 +198,13 @@ func (coordinator *ActionCoordinator) Submit(action AppAction, timeout time.Dura
 	if HasCoordinatorNavigationMetadata(action.Metadata) {
 		return ActionOperation{}, errors.New("navigation synchronization metadata is coordinator-owned")
 	}
+	if HasCoordinatorActionDeliveryMetadata(action.Metadata) {
+		return ActionOperation{}, errors.New("app action delivery metadata is coordinator-owned")
+	}
 	if timeout == 0 {
 		timeout = DefaultActionTimeout
 	}
-	if timeout < 0 || timeout > MaximumActionTimeout {
+	if timeout < time.Millisecond || timeout > MaximumActionTimeout {
 		return ActionOperation{}, fmt.Errorf("app action timeout must be 1..%d milliseconds", MaximumActionTimeout.Milliseconds())
 	}
 	normalized, err := NormalizeAppAction(action)
@@ -194,8 +259,17 @@ func (coordinator *ActionCoordinator) Submit(action AppAction, timeout time.Dura
 		operation.State = ActionStateRejected
 		operation.Reason = "target_not_live"
 	}
+	deliveries := make(map[string]string, len(matched))
 	for _, instance := range matched {
 		state, reason := actionDeliveryState(instance, normalized.Kind)
+		if state == ActionStateQueued {
+			deliveryID, idErr := coordinator.newID()
+			if idErr != nil {
+				coordinator.mu.Unlock()
+				return ActionOperation{}, fmt.Errorf("create app action delivery id: %w", idErr)
+			}
+			deliveries[instance.ID] = deliveryID
+		}
 		operation.Targets = append(operation.Targets, ActionTargetOutcome{
 			InstanceID: instance.ID, Surface: instance.Surface,
 			State: state, Reason: reason, UpdatedAt: now,
@@ -204,6 +278,7 @@ func (coordinator *ActionCoordinator) Submit(action AppAction, timeout time.Dura
 	operation.State, operation.Reason = aggregateActionOperation(operation)
 	record := &actionOperationRecord{
 		operation: operation, fingerprint: fingerprint,
+		deliveries:  deliveries,
 		retainUntil: operation.ExpiresAt.Add(ActionOperationRetention),
 	}
 	coordinator.values[operation.OperationID] = record
@@ -221,6 +296,11 @@ func (coordinator *ActionCoordinator) Submit(action AppAction, timeout time.Dura
 		}
 		delivery := cloneAppAction(normalized)
 		delivery.Target = target.InstanceID
+		if delivery.Metadata == nil {
+			delivery.Metadata = make(map[string]string, 2)
+		}
+		delivery.Metadata[ActionDeliveryIDKey] = deliveries[target.InstanceID]
+		delivery.Metadata[ActionExpiresAtKey] = operation.ExpiresAt.Format(time.RFC3339Nano)
 		if publishErr := coordinator.publish(delivery); publishErr != nil {
 			coordinator.rejectDelivery(operation.OperationID, target.InstanceID, "delivery_unavailable")
 		}
@@ -229,14 +309,17 @@ func (coordinator *ActionCoordinator) Submit(action AppAction, timeout time.Dura
 }
 
 func (coordinator *ActionCoordinator) Ack(value ActionAck) (ActionOperation, error) {
-	if coordinator == nil || coordinator.registry == nil {
+	if coordinator == nil {
 		return ActionOperation{}, errors.New("app action outcome coordinator is unavailable")
 	}
 	value.OperationID = strings.TrimSpace(value.OperationID)
+	value.DeliveryID = strings.TrimSpace(value.DeliveryID)
 	value.InstanceID = strings.TrimSpace(value.InstanceID)
 	value.State = strings.ToLower(strings.TrimSpace(value.State))
 	value.Reason = strings.TrimSpace(value.Reason)
-	if !instanceIDPattern.MatchString(value.OperationID) || !instanceIDPattern.MatchString(value.InstanceID) {
+	if !instanceIDPattern.MatchString(value.OperationID) ||
+		!instanceIDPattern.MatchString(value.DeliveryID) ||
+		!instanceIDPattern.MatchString(value.InstanceID) {
 		return ActionOperation{}, errors.New("app action acknowledgement identity is invalid")
 	}
 	if value.State != ActionStateApplied && value.State != ActionStateRejected {
@@ -244,9 +327,6 @@ func (coordinator *ActionCoordinator) Ack(value ActionAck) (ActionOperation, err
 	}
 	if err := validateActionReason(value.Reason); err != nil {
 		return ActionOperation{}, err
-	}
-	if _, live := coordinator.registry.Get(value.InstanceID); !live {
-		return ActionOperation{}, fmt.Errorf("app action target %q is not live", value.InstanceID)
 	}
 	now := coordinator.now().UTC()
 	coordinator.mu.Lock()
@@ -260,6 +340,10 @@ func (coordinator *ActionCoordinator) Ack(value ActionAck) (ActionOperation, err
 	if index < 0 {
 		coordinator.mu.Unlock()
 		return ActionOperation{}, errors.New("app action acknowledgement instance was not an exact operation target")
+	}
+	if record.deliveries[value.InstanceID] != value.DeliveryID {
+		coordinator.mu.Unlock()
+		return ActionOperation{}, errors.New("app action acknowledgement delivery does not match the exact operation target")
 	}
 	current := record.operation.Targets[index]
 	if current.State != ActionStateQueued {

@@ -572,7 +572,7 @@ request error.
 | `controller.app.launch` | `surface`, optional `mode`, `target`, `page`, `idempotency_key` | ensure, launch, or focus only the named `tui` or `webui`; reports OS acceptance separately from live instance confirmation |
 | `controller.app.navigation.commit` | `group`, `source`, `page`, `operation_id` | commit a follower group's canonical page and return its epoch, revision, correlated operation ID, and ordered deliveries |
 | `controller.app.action` | `kind`, optional `value`, `target`, `operation_id`, `timeout_ms` | freeze the selector to exact live clients, push one correlated delivery per target, and return queued/rejected outcomes |
-| `controller.app.action.ack` | `operation_id`, `instance_id`, `state`, optional `reason` | acknowledge one exact target as `applied` or `rejected`; duplicate identical terminal acknowledgements are idempotent |
+| `controller.app.action.ack` | `operation_id`, `delivery_id`, `instance_id`, `state`, optional `reason` | acknowledge one exact delivery as `applied` or `rejected`; duplicate identical terminal acknowledgements are idempotent |
 | `controller.app.action.outcome` | `operation_id` | read the bounded current operation with per-target `queued`, `applied`, `rejected`, or `timeout` state |
 | `controller.history.status` | optional ISO-8601 `since` | retained measurement samples, including samples restored from the bounded host data store after restart |
 | `controller.history.timeline` | optional `since`, `limit` | durable important-event timeline |
@@ -654,15 +654,21 @@ Typed application actions are resolved once against the pruned live instance
 registry. The returned operation records the exact instance IDs and surfaces;
 an unknown or offline selector is rejected with an empty target set rather than
 inventing an instance. Clients advertise the bounded `app_actions` enum in
-their presence values, apply only an exact matching pushed action, deduplicate
-its `operation_id`, and acknowledge the actual application result. A legacy
-TUI/WebUI without the new advertisement may still receive an action through a
-known delivery path, but it remains `queued` until acknowledgement and becomes
-`timeout` after the bounded deadline. Operation history is bounded and expires;
-ordinary delivery and outcome transitions use the existing event streams and
-bridge fan-out, never polling. Successful queued/applied transitions use the
-state stream so they do not flood operator activity logs, while rejection and
-timeout remain visible one-shot activity events.
+their presence values and apply only a push addressed to their exact instance
+ID. Each target push carries coordinator-owned `operation_delivery_id` and
+`operation_expires_at` metadata. Callers cannot supply or override either
+field. The client rejects an expired or malformed deadline, deduplicates the
+operation-plus-delivery receipt, and returns that delivery nonce as the
+required `delivery_id` in its acknowledgement. The coordinator accepts only a
+nonce issued for that exact operation target, then records the factual
+`applied` or `rejected` result. A legacy TUI/WebUI without the new advertisement
+may still receive an action through a known delivery path, but it remains
+`queued` until acknowledgement and becomes `timeout` after the bounded
+deadline. Operation history is bounded and expires; ordinary delivery and
+outcome transitions use the existing event streams and bridge fan-out, never
+polling. Successful queued/applied transitions use the state stream so they do
+not flood operator activity logs, while rejection and timeout remain visible
+one-shot activity events.
 
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded

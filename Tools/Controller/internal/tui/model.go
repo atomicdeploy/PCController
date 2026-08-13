@@ -579,7 +579,14 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			break
 		}
-		if receipt, duplicate := model.actionReceipts[action.OperationID]; action.OperationID != "" && duplicate {
+		if hostui.AppActionExpired(action, time.Now()) {
+			if model.appActions != nil {
+				commands = append(commands, waitAppAction(model.appActions))
+			}
+			break
+		}
+		receiptKey := hostui.AppActionReceiptKey(action)
+		if receipt, duplicate := model.actionReceipts[receiptKey]; receiptKey != "" && duplicate {
 			commands = append(commands, acknowledgeAppAction(model.ackAppAction, receipt))
 		} else {
 			var actionCommands []tea.Cmd
@@ -1023,8 +1030,15 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case appActionAckResultMsg:
 		if message.err != nil {
-			model.appendLog("warn", "app action acknowledgement failed: "+message.err.Error())
+			if message.attempt < maximumAppActionAckAttempts {
+				commands = append(commands, retryAppActionAcknowledgement(message.ack, message.attempt+1))
+			} else {
+				model.appendLog("warn", "app action acknowledgement failed: "+message.err.Error())
+			}
 		}
+
+	case appActionAckRetryMsg:
+		commands = append(commands, acknowledgeAppAction(model.ackAppAction, message.ack, message.attempt))
 
 	case connectResultMsg:
 		model.connectPending = false
@@ -1246,8 +1260,9 @@ func (model Model) applyAppAction(action hostui.AppAction) (Model, []tea.Cmd, bo
 			return
 		}
 		ack := hostui.ActionAck{
-			OperationID: action.OperationID, InstanceID: model.instanceID,
-			State: state, Reason: reason,
+			OperationID: action.OperationID, DeliveryID: action.Metadata[hostui.ActionDeliveryIDKey],
+			InstanceID: model.instanceID,
+			State:      state, Reason: reason, ReceiptKey: hostui.AppActionReceiptKey(action),
 		}
 		model.rememberActionReceipt(ack)
 		commands = append(commands, acknowledgeAppAction(model.ackAppAction, ack))
@@ -1342,8 +1357,9 @@ func (model Model) pendingActionAck(action hostui.AppAction) *hostui.ActionAck {
 		return nil
 	}
 	return &hostui.ActionAck{
-		OperationID: action.OperationID, InstanceID: model.instanceID,
-		State: hostui.ActionStateApplied,
+		OperationID: action.OperationID, DeliveryID: action.Metadata[hostui.ActionDeliveryIDKey],
+		InstanceID: model.instanceID,
+		State:      hostui.ActionStateApplied, ReceiptKey: hostui.AppActionReceiptKey(action),
 	}
 }
 
@@ -1354,10 +1370,14 @@ func (model *Model) rememberActionReceipt(ack hostui.ActionAck) {
 	if model.actionReceipts == nil {
 		model.actionReceipts = make(map[string]hostui.ActionAck)
 	}
-	if _, exists := model.actionReceipts[ack.OperationID]; !exists {
-		model.actionReceiptOrder = append(model.actionReceiptOrder, ack.OperationID)
+	key := strings.TrimSpace(ack.ReceiptKey)
+	if key == "" {
+		key = ack.OperationID
 	}
-	model.actionReceipts[ack.OperationID] = ack
+	if _, exists := model.actionReceipts[key]; !exists {
+		model.actionReceiptOrder = append(model.actionReceiptOrder, key)
+	}
+	model.actionReceipts[key] = ack
 	for len(model.actionReceiptOrder) > hostui.MaximumActionOperations {
 		oldest := model.actionReceiptOrder[0]
 		model.actionReceiptOrder = model.actionReceiptOrder[1:]

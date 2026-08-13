@@ -28,9 +28,20 @@ type terminalOSCResultMsg struct {
 }
 
 type appActionAckResultMsg struct {
-	operationID string
-	err         error
+	ack     hostui.ActionAck
+	attempt int
+	err     error
 }
+
+type appActionAckRetryMsg struct {
+	ack     hostui.ActionAck
+	attempt int
+}
+
+const (
+	maximumAppActionAckAttempts = 3
+	appActionAckRetryDelay      = 100 * time.Millisecond
+)
 
 func (model Model) terminalTitle() string {
 	if model.terminalTitleOverride != "" {
@@ -93,16 +104,28 @@ func terminalOSCCommand(
 func acknowledgeAppAction(
 	acknowledge func(hostui.ActionAck) error,
 	ack hostui.ActionAck,
+	attempts ...int,
 ) tea.Cmd {
+	attempt := 1
+	if len(attempts) > 0 && attempts[0] > 1 {
+		attempt = attempts[0]
+	}
 	return func() tea.Msg {
 		if acknowledge == nil {
 			return appActionAckResultMsg{
-				operationID: ack.OperationID,
-				err:         fmt.Errorf("app action acknowledgement is unavailable"),
+				ack: ack, attempt: attempt,
+				err: fmt.Errorf("app action acknowledgement is unavailable"),
 			}
 		}
-		return appActionAckResultMsg{operationID: ack.OperationID, err: acknowledge(ack)}
+		return appActionAckResultMsg{ack: ack, attempt: attempt, err: acknowledge(ack)}
 	}
+}
+
+func retryAppActionAcknowledgement(ack hostui.ActionAck, attempt int) tea.Cmd {
+	delay := time.Duration(attempt-1) * appActionAckRetryDelay
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return appActionAckRetryMsg{ack: ack, attempt: attempt}
+	})
 }
 
 func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {

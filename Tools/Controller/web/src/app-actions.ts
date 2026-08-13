@@ -7,16 +7,22 @@ export type WebProgressState = 'normal' | 'error' | 'indeterminate' | 'warning'
 
 export interface PushedAppAction {
   operationID: string
+  deliveryID: string
+  receiptKey: string
   kind: 'app.page' | 'app.title' | 'app.progress'
   value: string
 }
 
 export interface AppActionAck {
   operation_id: string
+  delivery_id: string
   instance_id: string
   state: AppActionOutcomeState
   reason?: string
 }
+
+export type AppActionAckSender = (acknowledgement: AppActionAck) => Promise<unknown>
+export type AppActionAckWait = (milliseconds: number) => Promise<void>
 
 export interface WebActionProgress {
   state: WebProgressState
@@ -29,6 +35,10 @@ export type WebActionEffect =
   | { outcome: 'applied'; progress: WebActionProgress | null }
   | { outcome: 'rejected'; reason: string }
 
+export type ProcessedWebAppAction =
+  | { action: PushedAppAction; effect: WebActionEffect; acknowledgement: AppActionAck; duplicate: false }
+  | { action: PushedAppAction; acknowledgement: AppActionAck; duplicate: true }
+
 const supportedKinds = new Set<PushedAppAction['kind']>([
   'app.page', 'app.title', 'app.progress',
 ])
@@ -36,13 +46,20 @@ const supportedKinds = new Set<PushedAppAction['kind']>([
 export function pushedAppAction(
   event: ControllerEvent,
   instanceID: string,
+  now = Date.now(),
 ): PushedAppAction | null {
   const operationID = event.metadata?.operation_id?.trim() ?? ''
+  const deliveryID = event.metadata?.operation_delivery_id?.trim() ?? ''
+  const expiresAt = event.metadata?.operation_expires_at?.trim() ?? ''
   const kind = event.kind.trim().toLowerCase() as PushedAppAction['kind']
-  if (!operationID || !supportedKinds.has(kind) ||
+  if (!operationID || !deliveryID || !expiresAt || !supportedKinds.has(kind) ||
       !matchesAppTarget(event.metadata?.target_instance, instanceID, 'webui')) return null
+  const deadline = Date.parse(expiresAt)
+  if (!Number.isFinite(deadline) || deadline <= now) return null
   return {
     operationID,
+    deliveryID,
+    receiptKey: `${operationID}\u0000${deliveryID}`,
     kind,
     value: (kind === 'app.page' ? event.metadata?.page : event.metadata?.value)?.trim() ?? '',
   }
@@ -97,15 +114,72 @@ export class AppActionReceiptCache {
 
   constructor(private readonly maximum = 256) {}
 
-  get(operationID: string): AppActionAck | undefined {
-    return this.values.get(operationID)
+  get(receiptKey: string): AppActionAck | undefined {
+    return this.values.get(receiptKey)
   }
 
-  remember(value: AppActionAck): void {
-    if (!this.values.has(value.operation_id) && this.values.size >= this.maximum) {
+  remember(receiptKey: string, value: AppActionAck): void {
+    if (!this.values.has(receiptKey) && this.values.size >= this.maximum) {
       const oldest = this.values.keys().next().value as string | undefined
       if (oldest) this.values.delete(oldest)
     }
-    this.values.set(value.operation_id, value)
+    this.values.set(receiptKey, value)
   }
+}
+
+// Process one pushed Web action from event selection through factual effect,
+// deduplication, and acknowledgement construction. The app owns only the
+// actual DOM/router side effects and RPC transport around this pure contract.
+export function processWebAppAction(
+  event: ControllerEvent,
+  instanceID: string,
+  receipts: AppActionReceiptCache,
+  now = Date.now(),
+): ProcessedWebAppAction | null {
+  const action = pushedAppAction(event, instanceID, now)
+  if (!action) return null
+  const existing = receipts.get(action.receiptKey)
+  if (existing) {
+    return { action, acknowledgement: existing, duplicate: true }
+  }
+  const effect = applyWebAppAction(action)
+  const acknowledgement: AppActionAck = {
+    operation_id: action.operationID,
+    delivery_id: action.deliveryID,
+    instance_id: instanceID,
+    state: effect.outcome,
+    ...(effect.outcome === 'rejected' ? { reason: effect.reason } : {}),
+  }
+  receipts.remember(action.receiptKey, acknowledgement)
+  return { action, effect, acknowledgement, duplicate: false }
+}
+
+const maximumAppActionAckAttempts = 3
+const appActionAckRetryDelayMilliseconds = 100
+
+function waitForAppActionAckRetry(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, milliseconds))
+}
+
+// A pushed action's effect is applied once and cached before this transport
+// helper runs. Retry only the idempotent acknowledgement, and surface nothing
+// unless all bounded attempts fail.
+export async function acknowledgeWebAppAction(
+  acknowledgement: AppActionAck,
+  send: AppActionAckSender,
+  wait: AppActionAckWait = waitForAppActionAckRetry,
+): Promise<void> {
+  let failure: unknown
+  for (let attempt = 1; attempt <= maximumAppActionAckAttempts; attempt += 1) {
+    try {
+      await send(acknowledgement)
+      return
+    } catch (cause) {
+      failure = cause
+      if (attempt < maximumAppActionAckAttempts) {
+        await wait(attempt * appActionAckRetryDelayMilliseconds)
+      }
+    }
+  }
+  throw failure
 }
