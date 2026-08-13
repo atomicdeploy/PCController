@@ -52,6 +52,7 @@
             "controller.app.instance.remove",
             "controller.app.instance.report",
             "controller.app.instances",
+            "controller.app.launch",
             "controller.app.navigate",
             "controller.app.page",
             "controller.artifact.capture",
@@ -302,6 +303,11 @@
       "capability": "read",
       "summary": "List live application instances and their bounded non-secret state.",
       "idempotency": "safe"
+    },
+    "controller.app.launch": {
+      "capability": "host_configuration",
+      "summary": "Ensure, launch, or focus a named TUI or WebUI surface without arbitrary process execution.",
+      "idempotency": "idempotent-with-authoritative-readback"
     },
     "controller.app.navigate": {
       "capability": "host_configuration",
