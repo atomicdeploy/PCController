@@ -178,7 +178,14 @@ Each accepted firmware note or explicit pause is mirrored through
 bridge peers, optional native motherboard-speaker playback, and optional Web
 Audio. Host renderers map `device_micros` onto their local monotonic clocks;
 late notes are shortened or discarded instead of shifting later notes. Current
-firmware receives one compact `STATUS_EFFECT` descriptor and renders the
+host events also include `connection_generation`, which changes with each live
+board session. Renderers re-anchor when that generation changes or when a
+mapped start differs from local receipt by more than 250 ms; older peers that
+omit the generation remain compatible through the same bounded-time fallback.
+This prevents MCU reset, a whole 32-bit microsecond wrap during silence, or a
+malformed future clock jump from replaying stale notes or delaying sound by
+minutes. The current firmware receives one compact `STATUS_EFFECT` descriptor
+and renders the
 animation locally; the rate-limited `STATUS_RGB` stream remains only as a
 bounded older-firmware compatibility path.
 

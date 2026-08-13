@@ -311,12 +311,8 @@ void testBoardAndPersistence() {
     const auto *buzzerPush =
         findOpcode(pushed, pccontroller::wire::BuzzerChanged);
     require(buzzerPush != nullptr &&
-                buzzerPush->payload.size() == 9 &&
-                std::equal(buzzerPush->payload.begin(),
-                           buzzerPush->payload.begin() + 5,
-                           std::vector<std::uint8_t>(
-                               {0xB8, 0x01, 40, 0, 0})
-                               .begin()),
+                buzzerPush->payload ==
+                    std::vector<std::uint8_t>({0xB8, 0x01, 40, 0, 0}),
             "buzzer frequency and duration were not pushed to the host");
 
     response = board.handle(

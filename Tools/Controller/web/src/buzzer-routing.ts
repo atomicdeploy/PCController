@@ -5,6 +5,7 @@ export interface BuzzerPlaybackInput {
   frequencyHz: number
   durationMS: number
   deviceMicros?: number
+  generation?: string
 }
 
 export interface BuzzerPlaybackPlan {
@@ -17,9 +18,11 @@ export interface BuzzerPlaybackPlan {
 interface BuzzerTimelineAnchor {
   deviceMicros: number
   startMS: number
+  generation: string
 }
 
 const maxBuzzerSourceGapUS = 5 * 60 * 1_000_000
+const maxBuzzerObservedSkewMS = 250
 const webAudioLookaheadMS = 8
 
 // Maps each board's wrapping 32-bit MCU clock onto the browser's monotonic
@@ -36,12 +39,18 @@ export class BuzzerPlaybackTimeline {
     if (input.deviceMicros !== undefined) {
       if (!Number.isInteger(input.deviceMicros) || input.deviceMicros < 0 || input.deviceMicros > 0xFFFF_FFFF) return null
       const currentMicros = input.deviceMicros >>> 0
+      const generation = input.generation?.trim() ?? ''
       const previous = this.anchors.get(input.source)
       if (previous) {
         const deltaUS = (currentMicros - previous.deviceMicros) >>> 0
-        if (deltaUS <= maxBuzzerSourceGapUS) startMS = previous.startMS + deltaUS / 1000
+        const candidateMS = previous.startMS + deltaUS / 1000
+        const withinObservedWindow = candidateMS >= nowMS - maxBuzzerObservedSkewMS &&
+          candidateMS <= nowMS + maxBuzzerObservedSkewMS
+        if (previous.generation === generation && deltaUS <= maxBuzzerSourceGapUS && withinObservedWindow) {
+          startMS = candidateMS
+        }
       }
-      this.anchors.set(input.source, { deviceMicros: currentMicros, startMS })
+      this.anchors.set(input.source, { deviceMicros: currentMicros, startMS, generation })
     }
     const endMS = startMS + input.durationMS
     const effectiveStartMS = Math.max(startMS, nowMS)

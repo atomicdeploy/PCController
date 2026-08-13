@@ -653,8 +653,12 @@ Board `BUZZER_CHANGED` frames are always available to event subscribers. When
 frequency/duration with Web Audio and the native host path can play it through
 the motherboard speaker. Current frames also carry the MCU start clock, so
 native, bridge, and browser renderers retain note/pause cadence and trim late
-notes instead of accumulating transport or helper-startup delay. Windows can
-open the optional `WinRing0x64.sys`
+notes instead of accumulating transport or helper-startup delay. Each host
+event identifies the live board connection generation; a reconnect, MCU-clock
+reset, or mapped start outside a bounded local-receipt window re-anchors the
+timeline immediately. Older five-byte firmware and peers that omit this
+metadata remain compatible. Windows can open the optional
+`WinRing0x64.sys`
 device and drive PIT channel 2 directly; Linux first uses the kernel PC-speaker
 `KIOCSOUND` interface. If native access is unavailable, the host may discover
 an external `beep` command as an optional fallback. Linux is invoked as

@@ -14,16 +14,25 @@ import (
 )
 
 type buzzerMirrorJob struct {
-	config       appconfig.BuzzerMirror
-	frequencyHz  int
-	durationMS   int
-	deviceMicros uint32
-	timed        bool
-	observedAt   time.Time
-	source       string
+	config         appconfig.BuzzerMirror
+	frequencyHz    int
+	durationMS     int
+	deviceMicros   uint32
+	timed          bool
+	generation     uint64
+	haveGeneration bool
+	observedAt     time.Time
+	source         string
 }
 
-const maxBuzzerSourceGap = 5 * time.Minute
+const (
+	maxBuzzerSourceGap = 5 * time.Minute
+	// Device timestamps preserve short melody cadence, but they are never
+	// allowed to move playback far away from the local receipt time. This also
+	// gives older peers without connection-generation metadata a bounded reset
+	// fallback instead of replaying a stale or minutes-future tone.
+	maxBuzzerObservedSkew = 250 * time.Millisecond
+)
 
 type buzzerPlaybackPlan struct {
 	start time.Time
@@ -31,8 +40,10 @@ type buzzerPlaybackPlan struct {
 }
 
 type buzzerTimelineAnchor struct {
-	deviceMicros uint32
-	start        time.Time
+	deviceMicros   uint32
+	start          time.Time
+	generation     uint64
+	haveGeneration bool
 }
 
 type buzzerPlaybackTimeline struct {
@@ -52,13 +63,20 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 	if job.timed {
 		if previous, ok := timeline.anchors[job.source]; ok {
 			delta := time.Duration(uint32(job.deviceMicros-previous.deviceMicros)) * time.Microsecond
-			if delta <= maxBuzzerSourceGap {
-				start = previous.start.Add(delta)
+			candidate := previous.start.Add(delta)
+			sameGeneration := previous.haveGeneration == job.haveGeneration &&
+				(!job.haveGeneration || previous.generation == job.generation)
+			withinObservedWindow := !candidate.Before(observedAt.Add(-maxBuzzerObservedSkew)) &&
+				!candidate.After(observedAt.Add(maxBuzzerObservedSkew))
+			if sameGeneration && delta <= maxBuzzerSourceGap && withinObservedWindow {
+				start = candidate
 			}
 		}
 		timeline.anchors[job.source] = buzzerTimelineAnchor{
-			deviceMicros: job.deviceMicros,
-			start:        start,
+			deviceMicros:   job.deviceMicros,
+			start:          start,
+			generation:     job.generation,
+			haveGeneration: job.haveGeneration,
 		}
 	}
 	return buzzerPlaybackPlan{
@@ -102,6 +120,13 @@ func buzzerMirrorJobFor(config appconfig.BuzzerMirror, event controller.Event) (
 		job.deviceMicros = uint32(deviceMicros)
 		job.timed = true
 	}
+	if raw := strings.TrimSpace(event.Metadata["connection_generation"]); raw != "" {
+		generation, err := strconv.ParseUint(raw, 10, 64)
+		if err == nil {
+			job.generation = generation
+			job.haveGeneration = true
+		}
+	}
 	return job, true
 }
 
@@ -110,6 +135,9 @@ func (manager *Manager) dispatchBuzzerMirror(config appconfig.Config, event cont
 	if !ok {
 		return
 	}
+	// Event.Time may originate on a bridged host with a skewed wall clock.
+	// Anchor against this host's monotonic receipt time instead.
+	job.observedAt = time.Now()
 	// Configure-time resolution is authoritative for auto mode. Reusing it
 	// avoids probing the native device before launching the already-selected
 	// optional external helper for every pushed note.

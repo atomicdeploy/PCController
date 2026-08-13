@@ -1075,6 +1075,7 @@ export default function App() {
                 : 'local-board'
               const plan = buzzerTimelineRef.current.plan({
                 source, frequencyHz, durationMS, deviceMicros,
+                generation: event.metadata?.connection_generation,
               }, performance.now())
               if (plan?.stop) {
                 audioRef.current?.stopTone(source, plan.delayMS)

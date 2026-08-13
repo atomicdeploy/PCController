@@ -484,6 +484,26 @@ func TestEventStreamClassification(t *testing.T) {
 	}
 }
 
+func TestBuzzerEventMetadataCarriesConnectionGeneration(t *testing.T) {
+	timed := buzzerEventMetadata(native.BuzzerState{
+		FrequencyHz: 880, DurationMS: 125, Muted: true,
+		DeviceMicros: 0x12345678, Timed: true,
+	}, 42)
+	if timed["frequency_hz"] != "880" || timed["duration_ms"] != "125" ||
+		timed["muted"] != "true" || timed["device_micros"] != "305419896" ||
+		timed["connection_generation"] != "42" {
+		t.Fatalf("timed buzzer metadata=%#v", timed)
+	}
+
+	legacy := buzzerEventMetadata(native.BuzzerState{
+		FrequencyHz: 440, DurationMS: 40,
+	}, 43)
+	if _, exists := legacy["device_micros"]; exists ||
+		legacy["connection_generation"] != "43" {
+		t.Fatalf("legacy buzzer metadata=%#v", legacy)
+	}
+}
+
 func activeRFState(
 	t *testing.T,
 	runtime *Runtime,
