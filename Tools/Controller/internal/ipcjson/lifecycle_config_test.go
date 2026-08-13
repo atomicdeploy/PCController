@@ -73,3 +73,34 @@ func TestLocalIntegrationRPCPersistsLifecycleSafety(t *testing.T) {
 		t.Fatalf("bad=%#v lifecycle=%+v", bad, config.Integrations.Lifecycle)
 	}
 }
+
+func TestLocalIntegrationRPCSeparatesPersistentBuzzerConfigFromRuntimeStatus(t *testing.T) {
+	runtime := control.New(control.Options{})
+	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))
+	persistent := appconfig.Defaults()
+	effective := persistent
+	effective.Integrations.BuzzerMirror.Enabled = true
+	status := appconfig.BuzzerRuntimeStatus{
+		RequestedPath: "host", EffectivePath: "both", BoardStateKnown: true,
+		BoardChangeRequired: true, HostMirror: true, BackendRequested: "auto", BackendEffective: "native",
+	}
+	service := &Service{
+		Client:               client,
+		HostConfig:           func() appconfig.Config { return effective },
+		PersistentHostConfig: func() appconfig.Config { return persistent },
+		BuzzerRuntimeStatus:  func() appconfig.BuzzerRuntimeStatus { return status },
+	}
+	get := service.Dispatch(context.Background(), Request{Method: "controller.integrations.local.get"})
+	encoded, _ := json.Marshal(get.Result)
+	if get.Error != nil || strings.Contains(string(encoded), `"enabled":true`) || !strings.Contains(string(encoded), `"board_change_required":true`) {
+		t.Fatalf("get=%s error=%v", encoded, get.Error)
+	}
+	statusResult := service.Dispatch(context.Background(), Request{Method: "controller.integrations.status"})
+	statusJSON, _ := json.Marshal(statusResult.Result)
+	if statusResult.Error != nil || !strings.Contains(string(statusJSON), `"backend_effective":"native"`) {
+		t.Fatalf("status=%s error=%v", statusJSON, statusResult.Error)
+	}
+	if requestCapability("controller.integrations.status", nil) != capabilityIntegrations {
+		t.Fatal("runtime integration status is not protected by the integrations capability")
+	}
+}

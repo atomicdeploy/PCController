@@ -286,6 +286,7 @@ type Service struct {
 	// every hot-applied replacement. Long-lived remote transports use it to
 	// revoke already-open sessions as soon as ipc.allow_remote becomes false.
 	SubscribeHostConfig func(context.Context) <-chan appconfig.Config
+	BuzzerRuntimeStatus func() appconfig.BuzzerRuntimeStatus
 	BridgeList          func() any
 	BridgeCall          func(context.Context, string, Request) (Response, error)
 	WebhookAdmin        func() WebhookAdminService
@@ -612,13 +613,16 @@ func (service *Service) dispatch(
 			}
 		}
 	case "controller.integrations.local.get":
-		config := service.hostConfig().Integrations
+		config := service.persistentHostConfig().Integrations
 		result = map[string]any{
 			"local_device":     config.LocalDevice,
 			"data_hub":         config.DataHub,
 			"lifecycle_safety": config.Lifecycle,
 			"buzzer_mirror":    config.BuzzerMirror,
+			"buzzer_runtime":   service.buzzerRuntimeStatus(),
 		}
+	case "controller.integrations.status":
+		result = map[string]any{"buzzer_runtime": service.buzzerRuntimeStatus()}
 	case "controller.integrations.local.set":
 		var params struct {
 			LocalDevice     appconfig.LocalDevice      `json:"local_device"`
@@ -642,12 +646,13 @@ func (service *Service) dispatch(
 					return nil
 				})
 				if err == nil {
-					config := service.hostConfig().Integrations
+					config := service.persistentHostConfig().Integrations
 					result = map[string]any{
 						"local_device":     config.LocalDevice,
 						"data_hub":         config.DataHub,
 						"lifecycle_safety": config.Lifecycle,
 						"buzzer_mirror":    config.BuzzerMirror,
+						"buzzer_runtime":   service.buzzerRuntimeStatus(),
 					}
 				}
 			}
@@ -1482,6 +1487,14 @@ func (service *Service) persistentHostConfig() appconfig.Config {
 	return appconfig.Redacted(service.hostConfig())
 }
 
+func (service *Service) buzzerRuntimeStatus() appconfig.BuzzerRuntimeStatus {
+	if service.BuzzerRuntimeStatus != nil {
+		return service.BuzzerRuntimeStatus()
+	}
+	config := service.hostConfig().Integrations.BuzzerMirror
+	return appconfig.BuzzerRuntimeState{Configured: config, Effective: config}.Status(false, false, "", "", "")
+}
+
 func networkPeerFromConfig(peer appconfig.WebSocketClient) networkPeerConfig {
 	return networkPeerConfig{
 		Name: strings.TrimSpace(peer.Name), Enabled: peer.Enabled,
@@ -1948,7 +1961,7 @@ func requestCapability(method string, params json.RawMessage) string {
 	case "controller.webhooks.replay", "controller.webhooks.clear":
 		return capabilityIntegrations
 	case "controller.device.status", "controller.device.action",
-		"controller.device.inspect", "controller.integrations.local.get",
+		"controller.device.inspect", "controller.integrations.local.get", "controller.integrations.status",
 		"controller.integrations.local.set":
 		return capabilityIntegrations
 	case "controller.command.execute":
@@ -2416,7 +2429,19 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 				"buzzer_native_enabled": config.Integrations.BuzzerMirror.Enabled && config.Integrations.BuzzerMirror.NativeEnabled,
 				"buzzer_web_audio":      config.Integrations.BuzzerMirror.Enabled && config.Integrations.BuzzerMirror.WebAudioEnabled,
 			},
+			"buzzer_runtime": service.buzzerRuntimeStatus(),
 		})
+	})
+	mux.HandleFunc("/api/integrations/status", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizeHTTPCapability(writer, request, service, capabilityIntegrations) {
+			return
+		}
+		if request.Method != http.MethodGet {
+			writer.Header().Set("Allow", http.MethodGet)
+			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		writeHTTPJSON(writer, http.StatusOK, map[string]any{"buzzer_runtime": service.buzzerRuntimeStatus()})
 	})
 	mux.HandleFunc(SessionTicketPath, func(writer http.ResponseWriter, request *http.Request) {
 		serveSessionTicket(writer, request, service)

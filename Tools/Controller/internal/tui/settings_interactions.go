@@ -302,18 +302,24 @@ func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 		case "buzzer.renderers":
 			value.BuzzerMirror.NativeEnabled = editorField(editor, "native") != 0
 			value.BuzzerMirror.WebAudioEnabled = editorField(editor, "web") != 0
+			if value.BuzzerMirror.NativeEnabled && strings.EqualFold(value.BuzzerMirror.Backend, "off") {
+				value.BuzzerMirror.Backend = "auto"
+			}
 			if value.BuzzerMirror.Enabled && !value.BuzzerMirror.NativeEnabled && !value.BuzzerMirror.WebAudioEnabled {
 				model.setNotice("Select at least one host buzzer renderer")
 				return model, nil, true
 			}
 		case "buzzer.backend":
-			backends := []string{"auto", "native", "external"}
+			backends := []string{"auto", "native", "external", "off"}
 			selected := editorField(editor, "backend")
 			if selected < 0 || selected >= len(backends) {
 				model.setNotice("Unknown PC speaker backend")
 				return model, nil, true
 			}
 			value.BuzzerMirror.Backend = backends[selected]
+			if value.BuzzerMirror.Backend == "off" {
+				value.BuzzerMirror.NativeEnabled = false
+			}
 		case "buzzer.executable":
 			executable := strings.TrimSpace(editor.Text)
 			if len(executable) > 1024 || strings.ContainsAny(executable, "\r\n\x00") {

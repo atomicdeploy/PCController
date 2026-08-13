@@ -1064,6 +1064,12 @@ func (client *Client) Status(ctx context.Context) (Status, error) {
 	return client.runtime.RefreshStatus(ctx)
 }
 
+// SetBoardSilent applies and verifies the MCU Silent bit through the sole
+// serial-owning runtime.
+func (client *Client) SetBoardSilent(ctx context.Context, silent bool) (Settings, error) {
+	return client.runtime.SetBoardSilent(ctx, silent)
+}
+
 // SubscribeStatus polls only while the returned subscription context is
 // alive. Merely keeping the serial protocol connected never starts polling.
 func (client *Client) SubscribeStatus(

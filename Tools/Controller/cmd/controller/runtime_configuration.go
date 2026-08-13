@@ -15,6 +15,7 @@ import (
 	"pccontroller.local/controller/internal/appconfig"
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/native"
+	"pccontroller.local/controller/internal/pcspeaker"
 	"pccontroller.local/controller/internal/ports"
 	"pccontroller.local/controller/internal/programmer"
 )
@@ -245,6 +246,23 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 		AvrdudeConf:           config.Programming.AvrdudeConf,
 		Programmer:            configuredProgrammer(config),
 		HostConfig:            store.Current,
+		BuzzerRuntime: func(settings native.Settings, haveBoard bool) appconfig.BuzzerRuntimeStatus {
+			state := store.BuzzerRuntimeState()
+			var backend, executable, backendError string
+			if state.Effective.Enabled && state.Effective.NativeEnabled && !strings.EqualFold(state.Effective.Backend, "off") {
+				resolved, err := pcspeaker.ResolveBackend(
+					state.Effective.DriverDirectory,
+					state.Effective.Backend,
+					state.Effective.Executable,
+				)
+				if err != nil {
+					backendError = err.Error()
+				} else {
+					backend, executable = resolved.Backend, resolved.Executable
+				}
+			}
+			return state.Status(haveBoard, settings.Flags&native.SettingsSilent != 0, backend, executable, backendError)
+		},
 		UpdateHostConfig: func(change func(*appconfig.Config) error) error {
 			_, err := store.Update(change)
 			return err
@@ -286,6 +304,7 @@ func commandOptions(store *appconfig.Store, fallbackProject string) control.Comm
 			AvrdudeConf:           current.Programming.AvrdudeConf,
 			Programmer:            configuredProgrammer(current),
 			HostConfig:            store.Current,
+			BuzzerRuntime:         options.BuzzerRuntime,
 			UpdateHostConfig:      options.UpdateHostConfig,
 			Macros:                options.Macros,
 			InitializeBoard:       options.InitializeBoard,

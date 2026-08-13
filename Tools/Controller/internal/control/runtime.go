@@ -874,6 +874,35 @@ func (runtime *Runtime) RefreshStatus(ctx context.Context) (native.Status, error
 	return native.ParseStatus(frame.Payload)
 }
 
+// SetBoardSilent updates only the MCU Silent bit and verifies the resulting
+// SETTINGS frame. Callers must invoke it only for an explicit routing policy.
+func (runtime *Runtime) SetBoardSilent(ctx context.Context, silent bool) (native.Settings, error) {
+	settings, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	current := settings.Flags&native.SettingsSilent != 0
+	if current == silent {
+		return settings, nil
+	}
+	if silent {
+		settings.Flags |= native.SettingsSilent
+	} else {
+		settings.Flags &^= native.SettingsSilent
+	}
+	if err := storeSettings(ctx, runtime, settings); err != nil {
+		return native.Settings{}, err
+	}
+	verified, err := querySettings(ctx, runtime)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	if (verified.Flags&native.SettingsSilent != 0) != silent {
+		return native.Settings{}, errors.New("board silent-state readback did not match requested state")
+	}
+	return verified, nil
+}
+
 func (runtime *Runtime) currentSession() *link.Session {
 	runtime.mu.RLock()
 	defer runtime.mu.RUnlock()
@@ -1351,14 +1380,18 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						},
 					})
 				} else if parsedBuzzer != nil {
+					metadata := map[string]string{
+						"frequency_hz": strconv.Itoa(int(parsedBuzzer.FrequencyHz)),
+						"duration_ms":  strconv.Itoa(int(parsedBuzzer.DurationMS)),
+						"muted":        strconv.FormatBool(parsedBuzzer.Muted),
+					}
+					if parsedBuzzer.Timed {
+						metadata["device_micros"] = strconv.FormatUint(uint64(parsedBuzzer.DeviceMicros), 10)
+					}
 					runtime.publishEvent(Event{
 						Kind: kind, Text: text, Frame: event.Frame,
 						Source: "board", Target: "host", MessageType: "event",
-						Metadata: map[string]string{
-							"frequency_hz": strconv.Itoa(int(parsedBuzzer.FrequencyHz)),
-							"duration_ms":  strconv.Itoa(int(parsedBuzzer.DurationMS)),
-							"muted":        strconv.FormatBool(parsedBuzzer.Muted),
-						},
+						Metadata: metadata,
 					})
 				} else if parsedStatusLED != nil {
 					runtime.publishEvent(Event{
