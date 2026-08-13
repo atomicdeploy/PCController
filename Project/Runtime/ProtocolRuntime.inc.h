@@ -17,6 +17,7 @@ void sendHello(uint8_t sequence) {
       (1UL << 8) |  // persistent settings
       (1UL << 9) |  // menu remote control
       (1UL << 10) | // named temperature identities
+      (1UL << 11) | // BT Audio indicator state is wired and reported
       (1UL << 12) | // host display text and asynchronous events
       (1UL << 13) | // exact front-panel snapshot
       (1UL << 14) | // host-injected key lifecycle; Down acts immediately
