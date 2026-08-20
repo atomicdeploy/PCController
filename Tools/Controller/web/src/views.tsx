@@ -748,7 +748,7 @@ export function EventsView({ events, locale, t }: SharedViewProps) {
   )
 }
 
-export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, transport }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void> }) {
+export function SettingsView({ appTitle, snapshot, locale, t, command, appearance, onAppearance, token, onToken, onAppTitle, boardSettingsReadState, uiConfig, onBuzzerPath, transport, navigationSync, navigationSyncStatus = { state: 'idle', detail: '' }, onNavigationSync }: SharedViewProps & { appearance: Appearance; onAppearance: (value: Appearance) => void; token: string; onToken: (value: string) => void; onAppTitle: (value: string) => Promise<string>; uiConfig: UIConfig | null; onBuzzerPath: (value: BuzzerPath) => Promise<void>; navigationSync: boolean; navigationSyncStatus?: { state: 'idle' | 'pending' | 'error'; detail: string }; onNavigationSync: (value: boolean) => void }) {
   const copy = (english: string, persian: string) => locale === 'fa' ? persian : english
   const available = peripheralAvailability(snapshot)
   const validationMessage = (message: string) => locale !== 'fa' ? message : ({
@@ -1262,6 +1262,16 @@ export function SettingsView({ appTitle, snapshot, locale, t, command, appearanc
           <div className="setting-group"><label>{t('direction')}</label><Segmented value={appearance.direction} label={t('direction')} options={[{ value: 'auto', label: t('auto') }, { value: 'ltr', label: t('leftToRight') }, { value: 'rtl', label: t('rightToLeft') }]} onChange={(value) => updateAppearance('direction', value)} /></div>
           <Toggle checked={appearance.reduceMotion} onChange={(value) => updateAppearance('reduceMotion', value)} label={t('reduceMotion')} detail={appearance.reduceMotion ? copy('Nonessential motion is off.', 'حرکت‌های غیرضروری خاموش‌اند.') : copy('Smooth interface transitions are on.', 'گذارهای نرم رابط فعال‌اند.')} />
           <Toggle checked={appearance.compactNumbers} onChange={(value) => updateAppearance('compactNumbers', value)} label={t('compactNumbers')} detail={appearance.compactNumbers ? copy('Large values use compact notation.', 'مقادیر بزرگ به‌صورت فشرده نمایش داده می‌شوند.') : copy('Large values use full notation.', 'مقادیر بزرگ به‌صورت کامل نمایش داده می‌شوند.')} />
+          <Toggle
+            checked={navigationSync}
+            onChange={onNavigationSync}
+            label={copy('Sync this tab with other instances', 'همگام‌سازی این زبانه با نمونه‌های دیگر')}
+            detail={navigationSyncStatus.state === 'pending'
+              ? <span role="status">{copy('Synchronizing…', 'در حال همگام‌سازی…')}</span>
+              : navigationSyncStatus.state === 'error'
+                ? <span role="alert">{navigationSyncStatus.detail}</span>
+                : undefined}
+          />
           <Toggle checked={!appearance.audioMuted} onChange={(value) => updateAppearance('audioMuted', !value)} label={<span className="setting-icon-label"><Volume2 size={16} />{copy('Interaction audio', 'صدای تعامل')}</span>} detail={appearance.audioMuted ? copy('Audio cues are off.', 'نشانه‌های صوتی خاموش‌اند.') : copy(`Audio cues are at ${Math.round(appearance.audioVolume * 100)}%.`, `بلندی نشانه‌های صوتی ${Math.round(appearance.audioVolume * 100)}٪ است.`)} />
           {!appearance.audioMuted && <RangeField label={copy('Cue volume', 'بلندی نشانه‌ها')} value={Math.round(appearance.audioVolume * 100)} min={0} max={100} unit="%" onChange={(value) => updateAppearance('audioVolume', value / 100)} />}
           {!appearance.audioMuted && <Button icon={Volume2} onClick={() => window.dispatchEvent(new Event('pccontroller:test-feedback'))}>{copy('Test notification', 'آزمایش اعلان')}</Button>}

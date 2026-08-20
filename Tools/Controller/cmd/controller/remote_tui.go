@@ -38,6 +38,8 @@ type remoteTUIIPC struct {
 	retry   time.Duration
 
 	events                chan control.Event
+	eventsMu              sync.RWMutex
+	eventsClosed          bool
 	live                  chan tui.RemoteLiveUpdate
 	liveRaw               chan tui.RemoteLiveUpdate
 	liveRates             chan time.Duration
@@ -370,6 +372,14 @@ func (client *remoteTUIIPC) ReportInstance(
 	return result, err
 }
 
+func (client *remoteTUIIPC) CommitNavigation(
+	ctx context.Context, command hostui.NavigationCommand,
+) (hostui.NavigationOutcome, error) {
+	var result hostui.NavigationOutcome
+	err := client.call(ctx, "controller.app.navigation.commit", command, &result)
+	return result, err
+}
+
 func (client *remoteTUIIPC) RemoveInstance(ctx context.Context, id string) error {
 	return client.call(
 		ctx, "controller.app.instance.remove", map[string]string{"id": id}, nil,
@@ -382,14 +392,17 @@ type remoteTUIInstanceLease struct {
 	self     hostui.InstanceSelf
 	refresh  time.Duration
 
-	mu       sync.Mutex
-	reportMu sync.Mutex
-	page     string
-	title    string
-	have     bool
-	stop     chan struct{}
-	done     chan struct{}
-	once     sync.Once
+	mu         sync.Mutex
+	reportMu   sync.Mutex
+	page       string
+	title      string
+	have       bool
+	queued     chan struct{}
+	commit     chan struct{}
+	commitPage string
+	stop       chan struct{}
+	done       chan struct{}
+	once       sync.Once
 }
 
 func newRemoteTUIInstanceLease(
@@ -402,7 +415,8 @@ func newRemoteTUIInstanceLease(
 	}
 	lease := &remoteTUIInstanceLease{
 		client: client, reporter: reporter, self: hostui.CurrentProcessSelf(time.Now()),
-		refresh: refresh, stop: make(chan struct{}), done: make(chan struct{}),
+		refresh: refresh, queued: make(chan struct{}, 1), commit: make(chan struct{}, 1),
+		stop: make(chan struct{}), done: make(chan struct{}),
 	}
 	go lease.run()
 	return lease
@@ -418,6 +432,89 @@ func (lease *remoteTUIInstanceLease) Update(page, title string) error {
 	lease.have = true
 	lease.mu.Unlock()
 	return lease.report(false)
+}
+
+// QueueUpdate is the non-blocking UI path. Rapid title/page redraws coalesce
+// to the latest presence values while one bounded report is already in flight.
+func (lease *remoteTUIInstanceLease) QueueUpdate(page, title string) {
+	if lease == nil || lease.client == nil || lease.reporter == nil {
+		return
+	}
+	lease.mu.Lock()
+	lease.page = strings.ToLower(strings.TrimSpace(page))
+	lease.title = strings.TrimSpace(title)
+	lease.have = true
+	lease.mu.Unlock()
+	select {
+	case lease.queued <- struct{}{}:
+	default:
+	}
+}
+
+func (lease *remoteTUIInstanceLease) flushUpdate() {
+	if err := lease.report(false); err != nil {
+		lease.client.publishActivity("app.instance.report.failed", err.Error())
+	}
+}
+
+// QueueNavigation submits local intent separately from presence reporting.
+// Coordinator-applied pages deliberately call only QueueUpdate, preventing
+// an acknowledgement from becoming a new command loop.
+func (lease *remoteTUIInstanceLease) QueueNavigation(page string) {
+	if lease == nil || lease.client == nil || lease.reporter == nil {
+		return
+	}
+	page = strings.ToLower(strings.TrimSpace(page))
+	if page == "" {
+		return
+	}
+	lease.mu.Lock()
+	lease.commitPage = page
+	lease.page = page
+	lease.have = true
+	lease.mu.Unlock()
+	select {
+	case lease.commit <- struct{}{}:
+	default:
+	}
+}
+
+func (lease *remoteTUIInstanceLease) flushNavigation() {
+	lease.mu.Lock()
+	page := lease.commitPage
+	lease.mu.Unlock()
+	if page == "" {
+		return
+	}
+	// Ensure the coordinator has current follower membership before accepting
+	// the intent, including an immediate key press after process startup.
+	if err := lease.report(false); err != nil {
+		lease.client.publishActivity("app.instance.report.failed", err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	outcome, err := lease.client.CommitNavigation(ctx, hostui.NavigationCommand{
+		Group: hostui.DefaultNavigationGroup, Source: lease.reporter.InstanceID(), Page: page,
+		OperationID: lease.reporter.NextOperationID(),
+	})
+	cancel()
+	if err != nil {
+		lease.client.publishActivity("app.navigation.commit.rejected", err.Error())
+		return
+	}
+	settledPage := strings.ToLower(strings.TrimSpace(outcome.Page))
+	if settledPage == "" {
+		lease.client.publishActivity(
+			"app.navigation.commit.rejected",
+			"navigation coordinator returned an empty page",
+		)
+		return
+	}
+	lease.mu.Lock()
+	if lease.commitPage == page {
+		lease.page = settledPage
+	}
+	lease.mu.Unlock()
 }
 
 func (lease *remoteTUIInstanceLease) report(catchUp bool) error {
@@ -454,6 +551,10 @@ func (lease *remoteTUIInstanceLease) run() {
 	defer ticker.Stop()
 	for {
 		select {
+		case <-lease.queued:
+			lease.flushUpdate()
+		case <-lease.commit:
+			lease.flushNavigation()
 		case <-ticker.C:
 			_ = lease.report(false)
 		case <-lease.client.sessions:
@@ -498,7 +599,7 @@ func mergeRemoteHostUI(local appconfig.UI, remote remoteUISettingsWire) appconfi
 
 func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 	defer close(client.done)
-	defer close(client.events)
+	defer client.closeEvents()
 	var cursor uint64
 	haveCursor := false
 	connectedOnce := false
@@ -577,6 +678,42 @@ func (client *remoteTUIIPC) pollEvents(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+func (client *remoteTUIIPC) closeEvents() {
+	if client == nil || client.events == nil {
+		return
+	}
+	client.eventsMu.Lock()
+	defer client.eventsMu.Unlock()
+	if client.eventsClosed {
+		return
+	}
+	client.eventsClosed = true
+	close(client.events)
+}
+
+func (client *remoteTUIIPC) publishActivity(kind, detail string) {
+	if client == nil || client.events == nil {
+		return
+	}
+	client.eventsMu.RLock()
+	defer client.eventsMu.RUnlock()
+	if client.eventsClosed {
+		return
+	}
+	event := control.Event{
+		Time: time.Now(), Kind: strings.TrimSpace(kind), Stream: "activity",
+		Text: strings.TrimSpace(detail), Source: "remote-ipc", Target: "tui",
+	}
+	if client.ctx == nil {
+		client.events <- event
+		return
+	}
+	select {
+	case client.events <- event:
+	case <-client.ctx.Done():
 	}
 }
 
@@ -1066,11 +1203,14 @@ func runRemoteTUI(
 					Integrations: func() hostui.IntegrationStatus {
 						return remoteTUIIntegrationStatus(address)
 					},
-					InstanceID:      navigationReporter.InstanceID(),
-					NavigationSync:  syncNavigation,
-					NavigationGroup: hostui.DefaultNavigationGroup,
-					ReportTerminal:  instanceLease.Update,
-					WriteOSC:        func(payload string) error { return hostui.WriteOSC(stdout, payload) },
+					InstanceID:          navigationReporter.InstanceID(),
+					NavigationSync:      syncNavigation,
+					NavigationGroup:     hostui.DefaultNavigationGroup,
+					SetNavigationSync:   navigationReporter.SetFollow,
+					NavigationIdentity:  navigationReporter.Identity,
+					ReportTerminalAsync: instanceLease.QueueUpdate,
+					CommitNavigation:    instanceLease.QueueNavigation,
+					WriteOSC:            func(payload string) error { return hostui.WriteOSC(stdout, payload) },
 					Remote: &tui.RemoteBackend{
 						Endpoint:                  strings.TrimSpace(address),
 						InitialSnapshot:           initial,

@@ -277,6 +277,8 @@ describe('offline and settings UI contracts', () => {
       onAppTitle={vi.fn(async (value: string) => value)}
 			uiConfig={null}
 			onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
     />)
     expect(markup).toContain('text-field__control')
     expect(markup).toContain('text-field__action')
@@ -284,11 +286,30 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Peripheral names')
     expect(markup).toContain('Global shortcuts')
     expect(markup).toContain('Record shortcut')
+    expect(markup).toContain('Sync this tab with other instances')
+    expect(markup).not.toContain('This tab follows the live default navigation group')
     expect(markup).not.toContain('TM1637')
     expect(markup).not.toContain('Write controller settings')
     expect(markup).not.toContain('Security')
     expect(markup).not.toContain('authToken')
     expect(markup).not.toContain('No session token')
+  })
+
+  it('shows navigation synchronization state only while it is factual and actionable', () => {
+    const pending = renderToStaticMarkup(<SettingsView
+      {...shared()} appearance={appearance} onAppearance={vi.fn()} token="" onToken={vi.fn()}
+      onAppTitle={vi.fn(async (value: string) => value)} uiConfig={null}
+      onBuzzerPath={vi.fn(async () => undefined)} navigationSync
+      navigationSyncStatus={{ state: 'pending', detail: '' }} onNavigationSync={vi.fn()}
+    />)
+    expect(pending).toContain('Synchronizing')
+    const failed = renderToStaticMarkup(<SettingsView
+      {...shared()} appearance={appearance} onAppearance={vi.fn()} token="" onToken={vi.fn()}
+      onAppTitle={vi.fn(async (value: string) => value)} uiConfig={null}
+      onBuzzerPath={vi.fn(async () => undefined)} navigationSync
+      navigationSyncStatus={{ state: 'error', detail: 'Coordinator unavailable' }} onNavigationSync={vi.fn()}
+    />)
+    expect(failed).toContain('Coordinator unavailable')
   })
 
   it('never presents empty board settings as an authoritative EEPROM report', () => {
@@ -311,6 +332,8 @@ describe('offline and settings UI contracts', () => {
       onAppTitle={vi.fn(async (value: string) => value)}
 			uiConfig={null}
 			onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
     />)
     expect(markup).toContain('Reading board settings')
     expect(markup).toContain('Waiting for the controller to return its live EEPROM settings')
@@ -347,6 +370,8 @@ describe('offline and settings UI contracts', () => {
 		onAppTitle={vi.fn(async (value: string) => value)}
 		uiConfig={null}
 		onBuzzerPath={vi.fn(async () => undefined)}
+		navigationSync
+		onNavigationSync={vi.fn()}
 	/>)
 	expect(markup).toContain('Enclosure illumination')
 	expect(markup).toContain('Auto · door')
@@ -370,6 +395,8 @@ describe('offline and settings UI contracts', () => {
       onAppTitle={vi.fn(async (value: string) => value)}
 			uiConfig={null}
 			onBuzzerPath={vi.fn(async () => undefined)}
+      navigationSync
+      onNavigationSync={vi.fn()}
     />)
     expect(controls).toContain('کنترل‌های برد در دسترس نیست')
     expect(settings).toContain('هویت میزبان رایانه')

@@ -3518,6 +3518,7 @@
               "controller.app.instances",
               "controller.app.launch",
               "controller.app.navigate",
+              "controller.app.navigation.commit",
               "controller.app.page",
               "controller.artifact.capture",
               "controller.artifact.fetch",

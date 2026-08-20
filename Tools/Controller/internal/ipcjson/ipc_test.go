@@ -71,6 +71,23 @@ func TestAppPageRPCPublishesValidatedTUIAction(t *testing.T) {
 	}
 }
 
+func TestNavigationCommitRPCReturnsCorrelatedCoordinatorOutcome(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	service := Service{Client: controllerapi.AttachSharedRuntime(runtime, shell.New(8)), NavigationCommand: func(command hostui.NavigationCommand) (hostui.NavigationOutcome, error) {
+		if command.Group != "default" || command.Source != "tui:one" || command.Page != "events" || command.OperationID != "op-1" {
+			t.Fatalf("command=%#v", command)
+		}
+		return hostui.NavigationOutcome{Group: "default", Epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Revision: 7, OperationID: command.OperationID, Page: "events"}, nil
+	}}
+	params, _ := json.Marshal(hostui.NavigationCommand{Group: "default", Source: "tui:one", Page: "events", OperationID: "op-1"})
+	response := service.Dispatch(context.Background(), Request{Method: "controller.app.navigation.commit", Params: params})
+	outcome, ok := response.Result.(hostui.NavigationOutcome)
+	if response.Error != nil || !ok || outcome.Revision != 7 || outcome.OperationID != "op-1" || outcome.Page != "events" {
+		t.Fatalf("response=%#v error=%+v", response, response.Error)
+	}
+}
+
 func TestAppInstanceRPCQueriesAndTargetsNavigation(t *testing.T) {
 	runtime := control.New(control.Options{})
 	client := controllerapi.AttachSharedRuntime(runtime, shell.New(8))

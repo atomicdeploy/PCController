@@ -46,6 +46,10 @@ func (model Model) terminalTitle() string {
 func (model *Model) reportInstance() {
 	page := pageInstanceName(model.page)
 	title := model.terminalTitle()
+	if model.reportTerminalAsync != nil {
+		model.reportTerminalAsync(page, title)
+		return
+	}
 	if model.reportTerminal != nil {
 		if err := model.reportTerminal(page, title); err != nil {
 			model.appendLog("warn", "app instance report failed: "+err.Error())
@@ -57,6 +61,14 @@ func (model *Model) reportInstance() {
 			model.appendLog("warn", "app instance report failed: "+err.Error())
 		}
 	}
+}
+
+func (model *Model) acceptNavigationAction(action hostui.AppAction) (string, bool) {
+	if model.navigationIdentity == nil {
+		return model.navigationCursor.Accept(action, model.navigationGroup)
+	}
+	epoch, revision := model.navigationIdentity()
+	return model.navigationCursor.AcceptFor(action, model.navigationGroup, epoch, revision)
 }
 
 func terminalOSCCommand(write func(string) error, payload, kind string) tea.Cmd {

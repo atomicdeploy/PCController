@@ -257,6 +257,22 @@ func (model Model) commitBoardSettingEditor() (Model, tea.Cmd, bool) {
 
 func (model Model) commitAppSettingEditor() (Model, tea.Cmd, bool) {
 	editor := model.settingEditor
+	if editor.Key == "instance.navigation" {
+		enabled := editorField(editor, "enabled") != 0
+		model.navigationSync = enabled
+		model.navigationCursor.Reset()
+		if model.setNavigationSync != nil {
+			model.setNavigationSync(enabled)
+		}
+		model.settingEditor = nil
+		model.reportInstance()
+		if enabled {
+			model.setNotice("Navigation synchronization enabled for this TUI")
+		} else {
+			model.setNotice("This TUI now navigates independently")
+		}
+		return model, nil, true
+	}
 	if descriptor, ok := peripheralDescriptorForSettingKey(editor.Key); ok {
 		if model.remote != nil && model.remote.SaveHostUI == nil {
 			model.setNotice("Remote peripheral naming is unavailable from this host")

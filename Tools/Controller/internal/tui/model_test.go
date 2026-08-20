@@ -718,6 +718,80 @@ func TestTUINavigationSyncRejectsReplayAndResetsOnlyOnRemoteSession(t *testing.T
 	}
 }
 
+func TestTUINavigationCommitsLocalIntentWithoutEchoingCoordinatorPage(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	commits := make([]string, 0, 2)
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		CommitNavigation: func(page string) { commits = append(commits, page) },
+	})
+	model.switchPage(PageEvents)
+	if len(commits) != 1 || commits[0] != "events" {
+		t.Fatalf("local navigation commits=%#v", commits)
+	}
+	updated, _ := model.Update(appActionMsg(navigationSyncAction(
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "2", "settings",
+	)))
+	model = updated.(Model)
+	if model.page != PageAppSettings {
+		t.Fatalf("coordinator page=%v", model.page)
+	}
+	if len(commits) != 1 {
+		t.Fatalf("coordinator page echoed as new commit: %#v", commits)
+	}
+}
+
+func TestTUISettingsCanOptThisInstanceOutAndReportMembershipImmediately(t *testing.T) {
+	model := readyModel(t, PageAppSettings)
+	model.navigationSync = true
+	var modes []bool
+	reports := 0
+	model.setNavigationSync = func(value bool) { modes = append(modes, value) }
+	model.reportTerminalAsync = func(_, _ string) { reports++ }
+	for index, row := range model.appSettingRows() {
+		if row.Key == "instance.navigation" {
+			model.cursor = index
+			break
+		}
+	}
+	var opened bool
+	model, opened = model.beginSettingEditor()
+	if !opened || model.settingEditor == nil || model.settingEditor.Key != "instance.navigation" {
+		t.Fatalf("navigation editor=%#v", model.settingEditor)
+	}
+	model.settingEditor.Fields[0].Value = 0
+	model, _, _ = model.commitAppSettingEditor()
+	if model.navigationSync || len(modes) != 1 || modes[0] || reports != 1 {
+		t.Fatalf("sync=%t modes=%#v reports=%d", model.navigationSync, modes, reports)
+	}
+}
+
+func TestTUIRejectsNavigationQueuedBeforeLatestPresenceReport(t *testing.T) {
+	snapshot := RichPreviewSnapshot()
+	model := NewWithOptions(control.New(control.Options{}), shell.New(10), Options{
+		Preview: &snapshot, DisableWelcome: true, InstanceID: "tui:one",
+		NavigationSync: true, NavigationGroup: hostui.DefaultNavigationGroup,
+		NavigationIdentity: func() (string, uint64) {
+			return "11111111111111111111111111111111", 2
+		},
+	})
+	stale := navigationSyncAction("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "1", "events")
+	stale.Metadata[hostui.NavigationTargetEpochKey] = "11111111111111111111111111111111"
+	stale.Metadata[hostui.NavigationTargetRevisionKey] = "1"
+	updated, _ := model.Update(appActionMsg(stale))
+	model = updated.(Model)
+	if model.page != PageDashboard {
+		t.Fatalf("stale target generation page=%v", model.page)
+	}
+	stale.Metadata[hostui.NavigationRevisionKey] = "2"
+	stale.Metadata[hostui.NavigationTargetRevisionKey] = "2"
+	updated, _ = model.Update(appActionMsg(stale))
+	if got := updated.(Model).page; got != PageEvents {
+		t.Fatalf("current target generation page=%v", got)
+	}
+}
+
 func TestTUIOptOutIgnoresGroupSyncButAcceptsExplicitRemoteNavigation(t *testing.T) {
 	model := readyModel(t, PageDashboard)
 	model.instanceID = "tui:private"
