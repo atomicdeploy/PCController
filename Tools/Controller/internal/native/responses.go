@@ -340,22 +340,28 @@ type Hello struct {
 	BuildHash      uint32 `json:"build_hash"`
 	BuildTimestamp uint32 `json:"build_timestamp_packed,omitempty"`
 	BuildStamp     string `json:"build_timestamp,omitempty"`
+	FeatureProfile byte   `json:"feature_profile,omitempty"`
+	BuildFeatures  byte   `json:"build_features,omitempty"`
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	if len(payload) != 14 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14", len(payload))
+	if len(payload) != 14 && len(payload) != 16 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need 14 or 16", len(payload))
 	}
-	if payload[0] != IdentitySchemaCompact {
+	if payload[0] != IdentitySchemaCompact && !(len(payload) == 16 && payload[0] == 4) {
 		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
 	}
 	hello := Hello{
 		BoardKind:      payload[1],
 		Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
 		Name:           "PCController",
-		IdentitySchema: IdentitySchemaCompact,
+		IdentitySchema: payload[0],
 		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
 		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
+	}
+	if len(payload) == 16 {
+		hello.FeatureProfile = payload[14]
+		hello.BuildFeatures = payload[15]
 	}
 	stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
 	if err != nil {

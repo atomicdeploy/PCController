@@ -230,6 +230,13 @@ func TestParseHelloCompactIdentitySchema3(t *testing.T) {
 	if _, err := ParseHello(payload[:13]); err == nil {
 		t.Fatal("truncated compact HELLO was accepted")
 	}
+	profileAware := append(append([]byte(nil), payload...), 0x00, 0xD9)
+	profileAware[0] = 4
+	profileHello, err := ParseHello(profileAware)
+	if err != nil || profileHello.IdentitySchema != 4 ||
+		profileHello.FeatureProfile != 0 || profileHello.BuildFeatures != 0xD9 {
+		t.Fatalf("unexpected profile-aware HELLO: %#v err=%v", profileHello, err)
+	}
 	wrongSchema := append([]byte(nil), payload...)
 	wrongSchema[0] = 2
 	if _, err := ParseHello(wrongSchema); err == nil {

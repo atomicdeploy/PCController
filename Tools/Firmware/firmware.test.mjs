@@ -386,6 +386,77 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 	)
 })
 
+test('production KEY dispatches first Down to motion and exits outside KEY', async () => {
+	const frontPanel = await readFile(
+		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	const model = await readFile(
+		new URL('../../Project/FrontPanelModel.h', import.meta.url),
+		'utf8'
+	)
+	const protocol = await readFile(
+		new URL('../../Project/Runtime/ProtocolRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(frontPanel, /const bool momentary = mode == MODE_KEYS \|\| mode == MODE_MOTION_CONTROL/u)
+	assert.match(frontPanel, /if \(modeManager\.current\(\) == MODE_KEYS\)[^]*?relays\.allOff\(actionNow\);[^]*?modeManager\.transitionTo\(MODE_MOTION_CONTROL\);/u)
+	assert.match(frontPanel, /mode == MODE_MOTION_CONTROL && event == KeyEvent::Down[^]*?shiftRegisters\.inputActive\(bit \^ 1U\)/u)
+	assert.match(
+		frontPanel,
+		/case MODE_MOTION_CONTROL:\s*if \(!relays\.motionAllowed\(\)\) \{\s*relays\.allOff\(at\);\s*modeManager\.transitionTo\(MODE_DOOR\);/u
+	)
+	assert.match(frontPanel, /!menuPageNavigable\(candidate\)/u)
+	assert.match(frontPanel, /menuPageNavigable\(page\)[^]*?menuCategory\(page\) == category/u)
+	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
+	assert.match(
+		frontPanel,
+		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+	)
+	assert.match(model, /page < PAGE_COUNT && page != PAGE_MOTION/u)
+	assert.match(protocol, /\{1, PAGE_COUNT, 0xFF, 0\}/u)
+	assert.match(protocol, /pageToMode\(cursor\)/u)
+	assert.doesNotMatch(frontPanel, /case MODE_MOTION_CONTROL:\s*relays\.allOff\(at\);/u)
+})
+
+test('retired MOVE remains a direct KEY alias, never a persisted second page', async () => {
+	const [model, settings, frontPanel, protocol, defaults] = await Promise.all([
+		readFile(new URL('../../Project/FrontPanelModel.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/SettingsStore.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../../Project/Runtime/ProtocolRuntime.inc.h', import.meta.url), 'utf8'),
+		readFile(new URL('../Controller/internal/programmer/default_eeprom.go', import.meta.url), 'utf8')
+	])
+	assert.match(model, /canonicalMenuPage\(uint8_t page\)[^]*?PAGE_MOTION[^]*?PAGE_KEYS/u)
+	assert.match(settings, /!retiredMenuPageAlias\(page\)/u)
+	assert.match(settings, /normalizeMenuLayout\(\)/u)
+	assert.match(frontPanel, /pageToMode\(uint8_t page\)[^]*?canonicalMenuPage\(page\)/u)
+	assert.match(frontPanel, /menuPage == PAGE_RF \? PAGE_USER_RELAYS/u)
+	assert.match(
+		frontPanel,
+		/menuPage == PAGE_USER_RELAYS[^]*?\? static_cast<uint8_t>\(PAGE_RF\)/u
+	)
+	assert.match(
+		frontPanel,
+		/case MODE_MOTION_CONTROL:\s*if \(!relays\.motionAllowed\(\)\) \{\s*relays\.allOff\(at\);\s*modeManager\.transitionTo\(MODE_DOOR\);/u
+	)
+	assert.match(protocol, /settingsStore\.normalizeMenuLayout\(\);/u)
+	assert.match(protocol, /const uint8_t defaultMenuPage = canonicalMenuPage\(payload\[10\]\);/u)
+	assert.match(defaults, /DefaultMenuPageMotionAlias\s*=\s*12/u)
+})
+
+test('unused cooperative task engine remains an explicit larger-MCU gate', async () => {
+	const config = await readFile(
+		new URL('../../ProjectConfig.h', import.meta.url), 'utf8'
+	)
+	const lifecycle = await readFile(
+		new URL('../../Project/Runtime/LifecycleRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(config, /#define PCCONTROLLER_ENABLE_TASK_SCHEDULER 0/u)
+	assert.match(lifecycle, /#if PCCONTROLLER_ENABLE_TASK_SCHEDULER\s+taskManager\.update\(loopNow\);/u)
+})
+
 test('firmware runtime owns one shared ordinary-service clock snapshot', async () => {
         const runtimeFiles = [
                 'ControllerContext.inc.h',

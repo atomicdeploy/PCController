@@ -11,6 +11,14 @@ import (
 
 const menuUsage = "menu list|current|layout [reset|set MASK PAGE...]|show PAGE|hide PAGE|move PAGE RANK|order PAGE...|page PAGE|prev|next|dec|inc"
 
+const (
+	menuPageKeys              byte = 9
+	menuPageMotionAlias       byte = 12
+	unifiedKeyMotionMode      byte = 10
+	retiredMotionAliasDetails      = "Retired direct selector alias for unified KEY motion; never locally browsable"
+	legacyMotionDetails            = "Side A and Side B direction/output control"
+)
+
 type MenuPageInfo struct {
 	ID          byte   `json:"id"`
 	Key         string `json:"key"`
@@ -39,10 +47,10 @@ var protocolMenuPages = []MenuPageInfo{
 	{6, "settings", "bEEP", "Beep and Settings", "Beep, display, status color, and decimals"},
 	{7, "pwm-test", "PWM", "PWM Test", "PWM output test and channel selection"},
 	{8, "relay-test", "rELY", "Relay Test", "Individual relay output test"},
-	{9, "keys", "KEY", "Key Identification", "Identify K1 through K4"},
+	{9, "keys", "KEY", "Motion Keys", "K1-K4 directly control Side A/B forward and reverse motion"},
 	{10, "user-pwm", "uPWM", "User PWM", "Eight user MOSFET output values"},
 	{11, "user-relays", "r5-8", "User Relays", "R5 through R8 toggle or momentary control"},
-	{12, "motion", "MOVE", "Motion", "Side A and Side B direction/output control"},
+	{12, "motion", "MOVE", "Motion (KEY alias)", retiredMotionAliasDetails},
 	{13, "rf-learn", "LErn", "RF Learn", "Learn and map 433 MHz controls"},
 }
 
@@ -65,7 +73,7 @@ var voltageFirstMenuPages = []MenuPageInfo{
 	{9, "keys", "KEY", "Key Identification", "Identify K1 through K4"},
 	{10, "user-pwm", "uPWM", "User PWM", "Eight user MOSFET output values"},
 	{11, "user-relays", "r5-8", "User Relays", "R5 through R8 toggle or momentary control"},
-	{12, "motion", "MOVE", "Motion", "Side A and Side B direction/output control"},
+	{12, "motion", "MOVE", "Motion", legacyMotionDetails},
 	{13, "rf-learn", "LErn", "RF Learn", "Learn and map 433 MHz controls"},
 	{14, "status", "STAT", "Status", "Incoming events and controller status"},
 }
@@ -194,10 +202,20 @@ func queryMenuLayoutForCatalog(
 	if err != nil {
 		return MenuLayout{}, err
 	}
+	order := make([]byte, 0, len(pages))
+	var allowedMask uint16
+	for _, page := range pages {
+		allowedMask |= uint16(1) << page.ID
+	}
+	for _, id := range decoded.Order {
+		if allowedMask&(uint16(1)<<id) != 0 {
+			order = append(order, id)
+		}
+	}
 	return CanonicalMenuLayout(pages, MenuLayout{
 		Schema: decoded.Schema, Supported: true, Persistent: true,
-		Source: "board EEPROM MENU_LAYOUT", VisibleMask: decoded.VisibleMask,
-		Order: decoded.Order,
+		Source: "board EEPROM MENU_LAYOUT", VisibleMask: decoded.VisibleMask & allowedMask,
+		Order: order,
 	})
 }
 
@@ -225,9 +243,15 @@ func PersistMenuLayout(ctx context.Context, runtime *Runtime, requested MenuLayo
 	if err != nil {
 		return MenuLayout{}, err
 	}
+	wireOrder := append([]byte(nil), requested.Order...)
+	if len(catalog.Pages) == 13 {
+		// Stable page 12 is the retired MOVE alias. The AVR storage schema still
+		// reserves all 14 stable IDs, so keep it hidden in the wire permutation.
+		wireOrder = append(wireOrder, 12)
+	}
 	payload, err := native.EncodeMenuLayout(native.MenuLayout{
 		Schema: native.MenuLayoutSchema, VisibleMask: requested.VisibleMask,
-		Order: requested.Order,
+		Order: wireOrder,
 	})
 	if err != nil {
 		return MenuLayout{}, err
