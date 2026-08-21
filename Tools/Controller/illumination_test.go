@@ -5,6 +5,23 @@ import (
 	"time"
 )
 
+func TestIlluminationPWMIsBoundedAndMonotonic(t *testing.T) {
+	previous := uint16(0)
+	for brightness := 0; brightness <= 255; brightness++ {
+		got := illuminationPWM(byte(brightness))
+		if got > 4095 {
+			t.Fatalf("brightness %d produced out-of-range PWM %d", brightness, got)
+		}
+		if brightness != 0 && got <= previous {
+			t.Fatalf("brightness %d produced non-increasing PWM %d after %d", brightness, got, previous)
+		}
+		previous = got
+	}
+	if illuminationPWM(0) != 0 || illuminationPWM(255) != 4095 {
+		t.Fatalf("unexpected endpoints: 0=%d 255=%d", illuminationPWM(0), illuminationPWM(255))
+	}
+}
+
 func TestIlluminationStateUsesDoorPolicyAndExactAppliedPWM(t *testing.T) {
 	settings := Settings{
 		LightMode: 1, OnBrightness: 128, OffBrightness: 16, Persisted: true,

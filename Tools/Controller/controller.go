@@ -429,30 +429,30 @@ type TextMessage struct {
 
 // Client owns one controller runtime, command engine, and host integration state.
 type Client struct {
-	runtime        *control.Runtime
-	engine         *shell.Engine
-	engineMu       sync.Mutex
-	optionsMu      sync.RWMutex
-	commandOptions control.CommandOptions
-	macroMu        sync.RWMutex
-	macros         []appconfig.Macro
-	outputMu       sync.RWMutex
-	melodies       []appconfig.Melody
-	statusEffects  []appconfig.StatusLEDEffect
-	outputs        *control.OutputScheduler
-	hostMu         sync.RWMutex
-	scripts        map[string]string
-	automations    []appconfig.Automation
-	safety         appconfig.Safety
-	rfConfig       appconfig.RFConfig
-	osPolicy       hostos.Policy
-	events         chan Event
-	done           chan struct{}
-	doneOnce       sync.Once
-	statusHub      statusSubscriptionHub
-	statusFetch    func(context.Context) (Status, error)
-	illuminationMu sync.RWMutex
-	illumination   IlluminationState
+	runtime            *control.Runtime
+	engine             *shell.Engine
+	engineMu           sync.Mutex
+	optionsMu          sync.RWMutex
+	commandOptions     control.CommandOptions
+	macroMu            sync.RWMutex
+	macros             []appconfig.Macro
+	outputMu           sync.RWMutex
+	melodies           []appconfig.Melody
+	statusEffects      []appconfig.StatusLEDEffect
+	outputs            *control.OutputScheduler
+	hostMu             sync.RWMutex
+	scripts            map[string]string
+	automations        []appconfig.Automation
+	safety             appconfig.Safety
+	rfConfig           appconfig.RFConfig
+	osPolicy           hostos.Policy
+	events             chan Event
+	done               chan struct{}
+	doneOnce           sync.Once
+	statusHub          statusSubscriptionHub
+	statusFetch        func(context.Context) (Status, error)
+	illuminationMu     sync.RWMutex
+	illumination       IlluminationState
 	illuminationPollAt time.Time
 }
 
@@ -1173,7 +1173,15 @@ func (client *Client) statusForSubscription(ctx context.Context) (Status, error)
 const enclosureIlluminationPWMChannel byte = 11
 
 func illuminationPWM(brightness byte) uint16 {
-	return uint16(brightness)*16 + uint16(brightness)/16
+	scaled := uint32(brightness)*16 + uint32(brightness)/16
+	// Brightness is an 8-bit value, so scaled is mathematically bounded by
+	// the PCA9685 full-scale value. Keep the bound explicit at the narrowing
+	// point so callers, static analysis, and future type changes all preserve
+	// the hardware contract.
+	if scaled > 4095 {
+		return 4095
+	}
+	return uint16(scaled)
 }
 
 func illuminationBrightness(pwm uint16) byte {
