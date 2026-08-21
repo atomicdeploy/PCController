@@ -25,6 +25,31 @@ struct TraceSink {
 
 using CoreMachine = ControllerCore::RelayMotionMachine<TraceSink>;
 
+void testPhysicalKeyWiringOrder() {
+  arduino_mock::resetHardware();
+  ShiftRegisters registers;
+  registers.begin();
+
+  for (std::uint8_t physical = 0; physical < 4; ++physical) {
+    arduino_mock::shiftInput = static_cast<std::uint8_t>(~_BV(physical));
+    registers.service();
+    const std::uint8_t logical = static_cast<std::uint8_t>(3U - physical);
+    require(registers.activeInputs() == _BV(logical),
+            "physical K1..K4 wiring was not reversed into logical order");
+  }
+
+  arduino_mock::shiftInput = static_cast<std::uint8_t>(~_BV(4));
+  registers.service();
+  require(registers.activeInputs() == _BV(4),
+          "reversing front keys disturbed the first system input");
+
+  arduino_mock::shiftInput = 0xFF;
+  registers.service();
+  registers.setVirtualInput(0, true);
+  require(registers.activeInputs() == _BV(0),
+          "virtual key injection was incorrectly reversed with hardware");
+}
+
 void requireStatusEqual(const RelaySideStatus &actual,
                         const ControllerCore::RelaySideStatus &expected,
                         const char *message) {
@@ -112,6 +137,7 @@ void testProductionAdapterMatchesCoreTrace() {
 
 int main() {
   try {
+    testPhysicalKeyWiringOrder();
     testProductionAdapterMatchesCoreTrace();
     std::cout << "relay_controller_adapter_tests: all checks passed\n";
     return 0;
