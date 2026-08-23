@@ -33,18 +33,15 @@ to the same source tree.
 | Evidence | Current value |
 |---|---:|
 | Embedded build identity | `6B075495` |
-| Independently aggregated source SHA-256 | `6b075495cb0d270ca8e5b65b86354fda18e66fd5605d765e9960abf5c2c0ac13` |
-| Application HEX SHA-256 | `7fc43de5c342cd02a9c0d604e84972c4a3614d8192da85fc25f62dd922487cbd` |
-| `.text` | 32,140 bytes |
-| Initialized `.data` image | 204 bytes |
-| Linker-reported sketch program | 32,344 bytes (`.text + .data`) |
+| Independently aggregated source SHA-256 | `c31ff9889d48d822885e51f30212edb6b691a0b4ef0a1b0b2ec6cf564add8706` |
+| Application HEX SHA-256 | `90e0027b4f022a6f8b49642e792823987c5de9332bba5012976b21fa2e26dfc4` |
+| Linker-reported sketch program | 32,248 bytes |
 | Profile-derived firmware identity | 12 bytes at `0x7E74..0x7E7F` |
-| Application HEX data | 32,356 bytes; highest address `0x7E7F` |
-| Stock 32,384-byte application-range free | 28 bytes |
-| Immediately linkable before identity | 28 bytes |
-| Static SRAM | 1,474 bytes (`.data` 204 + `.bss` 1,269 + `.noinit` 1) |
-| Estimated peak SRAM | 1,779/2,048 bytes |
-| Estimated free SRAM | 269 bytes, against the enforced 96-byte minimum |
+| Application HEX data | 32,260 bytes; highest address `0x7E7F` |
+| Stock 32,384-byte application-range free | 124 bytes |
+| Static SRAM | 1,460 bytes (`.data` 204 + `.bss` 1,255 + `.noinit` 1) |
+| Estimated peak SRAM | 1,765/2,048 bytes |
+| Estimated free SRAM | 283 bytes, against the enforced 96-byte minimum |
 
 The peak estimate includes a measured 245-byte serial response path and a
 60-byte concurrent INT0/RF allowance. The 574-byte difference between static
@@ -77,10 +74,10 @@ it is not a universal address shared with every bootloader profile:
 
 | Boot profile | Application range | Data-byte headroom | Immediately linkable headroom | Consequence |
 |---|---:|---:|---:|---|
-| Stock 384-byte Urboot | 0..32,383 | 28 bytes | 28 bytes before `0x7E74` | Current selected profile; the identity occupies the final 12 application bytes. |
-| 512-byte Urboot-Custom | 0..32,255 | Does not fit | At least 100 bytes must be reclaimed | A custom feature profile must link at or below 32,244 bytes so its own 12-byte identity can occupy `0x7DF4..0x7DFF`. |
+| Stock 384-byte Urboot | 0..32,383 | 124 bytes | 124 bytes | Current selected profile; the identity occupies the final 12 application bytes. |
+| 512-byte Urboot-Custom | 0..32,255 | Does not fit as compiled for stock | At least 4 linked bytes must be reclaimed | A custom feature profile must link at or below 32,244 bytes so its own 12-byte identity can occupy `0x7DF4..0x7DFF`. |
 
-Thus the stock profile has 28 bytes of practical growth. Urboot-Custom itself
+Thus the stock profile has 124 bytes of practical growth. Urboot-Custom itself
 occupies 510 meaningful bytes in a 512-byte allocation; its two erased bytes do
 not increase the application ceiling. It remains a separate feature profile,
 not a compatibility promise for this alpha version build.
@@ -92,16 +89,19 @@ bytes, but the firmware does not semantically own every byte:
 
 | EEPROM range | Bytes | Current owner |
 |---|---:|---|
-| `0..31` | 32 | Unallocated |
-| `32..72` | 41 | 31-byte `ControllerSettings`, one name length, eight name bytes, and CRC |
-| `73..79` | 7 | Unallocated alignment gap |
+| `0..12` | 13 | Four autonomous `{frequencyLE16,duration8}` cue descriptors plus CRC-8 |
+| `13..31` | 19 | Reserved for the broader startup/boot-opcode executor |
+| `32..72` | 41 | 40-byte `ControllerSettings`/board-name values plus CRC-8 |
+| `73` | 1 | Optional menu-label record CRC header |
+| `74..79` | 6 | Unallocated alignment gap |
 | `80..323` | 244 | Four-byte RF header plus 20 checksummed 12-byte learned-code records |
 | `324..335` | 12 | Unallocated alignment gap |
 | `336..719` | 384 | 64-slot, six-byte reset-count journal |
 | `720..966` | 247 | Nineteen 12-byte status-effect condition descriptors, each with CRC |
-| `967..1023` | 57 | Unallocated |
+| `967..1023` | 57 | Fourteen packed four-character menu labels plus transactional commit byte |
 
-There are therefore 108 logically unallocated EEPROM bytes. Reducing RF or
+There are therefore 37 bytes reserved or unallocated outside current records.
+Reducing RF or
 reset-journal capacity would free EEPROM only; it would not materially solve
 the application-flash ceiling.
 
@@ -196,11 +196,38 @@ EEPROM layout did not change.
 | Requested board capability | What exists now | Exact missing portion | Cost/evidence |
 |---|---|---|---:|
 | Board-pull hosted menus | The host has six file-watched menu definitions. The AVR supports pushed `DisplayText` capture/release, forwards physical keys, and releases capture after host loss. | AVR opcodes `0x42..0x44` and events `0x9A..0x9B`, the eight-entry RAM directory, generation/state, content request on selection, retry timing, `----`, and terminal failure presentation are not in `ControllerProtocol::Opcode` and no capability advertises them. | 450-850 flash, 30-40 SRAM. The directory alone is exactly 24 bytes for eight `{id,parent,flags}` entries; existing 4+32 display buffers can be reused. |
-| EEPROM-configurable buzzer cues | Door and relay cue families have EEPROM enable bits, but their tones are fixed: door open/closed are 1,700/1,100 Hz for 45 ms; relay on/off are 1,900/1,250 Hz for 35 ms. | Persistent selectable cue IDs or note/frequency/duration definitions for door-open, door-close, relay-on, and relay-off, plus settings/protocol/menu fields. | Two retained A/B measurements bound the choice: the compact five-byte choice-table candidate used 33,032 program, 1,442 static-SRAM, and 5 EEPROM bytes; the full four-descriptor candidate used 33,238 program, 1,455 static-SRAM, and 13 EEPROM bytes. Against the current 32,244-byte fixed-identity boundary, they exceed it by 788 and 994 bytes respectively. Neither candidate is shippable in the shared image layout. |
+| Generic EEPROM startup/event opcodes | Door and output cues now use a validated 13-byte EEPROM record with immutable fallbacks; the ordinary `TonePlayer` remains the sole playback engine. | A bounded general executor for startup/event-triggered relay, PWM, display, RF, macro, and multi-note actions in the remaining/repurposed EEPROM budget. | The audio-only recovery fits now; the general executor remains the separately estimated 700-1,400 flash / 16-24 SRAM design. |
 | Board EEPROM automation | Twenty learned RF records can directly map one code to Key/Menu/Relay/Side/PWM behavior. Host automations can react to all events. | There is no generic EEPROM event-to-action rule table for door, BT Audio, relay, host loss, temperature, or other events; no board rule can invoke RF transmit or a macro on those events. Host-loss handling is fixed, not programmable. | 700-1,400 flash, 16-24 SRAM, and about 108 EEPROM bytes for eight compact rules plus an atomic header and CRC that reuse ordinary opcode validation. |
 
-The current 117-byte unallocated EEPROM area can hold compact cue and
-automation records. Flash, not EEPROM, is the limiting resource.
+The current map has 37 reserved/unallocated bytes outside owned records.
+Expanding the general executor therefore needs a deliberate record trade-off,
+not an overlapping alpha layout. Flash remains the limiting resource.
+
+### Audio ownership and measured recovery
+
+`TonePlayer` is the cooperative Timer1 engine. `AudioCueStore` is the compact
+controller that decides which physical-state tone to play and optionally reads
+its parameters from EEPROM. The host melody catalog sequences rich named
+melodies by sending the ordinary buzzer opcode; it does not replace the engine.
+
+| Feedback | Owner | Exact retained definition |
+|---|---|---|
+| Front-panel navigation | Board, autonomous | 2,000 Hz for 40 ms; obeys global Silent |
+| Door open / closed | Board, autonomous | 1,700 / 1,100 Hz for 45 ms |
+| Motion or general output on / off | Board, autonomous | 1,900 / 1,250 Hz for 35 ms; preempts queued generic feedback |
+| Welcome | Board, autonomous | Existing three-note boot melody; suppressed by Silent/programming mode |
+| `finish`, `lost`, `incorrect-beep`, `error-beep`, `fault-beep`, `success-cue`, `error-cue` | Host named melody catalog | Exact historical definitions are immutable fallbacks but remain user-overridable by name |
+
+The EEPROM record at `0..12` stores four frequency/duration triples and CRC-8.
+Blank, corrupt, torn, zero-duration, or out-of-range data rejects the whole
+record and uses the exact compiled fallback. The factory image writes the same
+defaults. The current-main A/B build used the identical locked stock profile:
+
+| Candidate | Application data | Free below 32,384 | Static SRAM | Estimated free SRAM |
+|---|---:|---:|---:|---:|
+| `b99571f` before recovery (`0E4829B6`) | 32,284 B | 100 B | 1,459 B | 284 B |
+| Recovered audio controller (`C31FF988`) | 32,260 B | 124 B | 1,460 B | 283 B |
+| Net | **-24 B** | **+24 B** | **+1 B** | **-1 B** |
 
 ## Menu migration candidates and exact losses
 

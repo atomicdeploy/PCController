@@ -386,6 +386,21 @@ test('physical, injected, and RF key actions retain the immediate dispatch contr
 	)
 })
 
+test('actuator-specific feedback is not preceded by the generic menu beep', async () => {
+	const frontPanel = await readFile(
+		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),
+		'utf8'
+	)
+	assert.match(frontPanel, /void menuVisualFeedback\(bool fromRemote\)/u)
+	assert.match(frontPanel, /case MODE_USER_RELAYS:[^]*?menuVisualFeedback\(fromRemote\);/u)
+	assert.match(frontPanel, /case MODE_MOTION_CONTROL:[^]*?menuVisualFeedback\(fromRemote\);/u)
+	assert.match(
+		frontPanel,
+		/case MODE_RELAY:[^]*?if \(action == MENU_PREVIOUS \|\| action == MENU_NEXT\)[^]*?menuFeedback\(fromRemote\);[^]*?else[^]*?menuVisualFeedback\(fromRemote\);/u
+	)
+	assert.match(frontPanel, /LeafDecreaseAction::AllRelaysOff[^]*?menuVisualFeedback\(fromRemote\);/u)
+})
+
 test('production KEY dispatches first Down to motion and exits outside KEY', async () => {
 	const frontPanel = await readFile(
 		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),

@@ -10,12 +10,12 @@ func TestToastXMLIsEscapedAndActionsAreProtocolActivated(t *testing.T) {
 		Title: "Door <OPEN>", Body: "R5 & R6 changed",
 		LaunchURI: "pccontroller://page/events",
 		Actions:   []NotificationAction{{Label: "Open & inspect", URI: "pccontroller://page/outputs"}},
-	})
+	}, "file:///C:/Program%20Files/PCController/toast-logo.png")
 	if err != nil {
 		t.Fatal(err)
 	}
 	value := string(payload)
-	for _, expected := range []string{"Door &lt;OPEN&gt;", "R5 &amp; R6", `<toast launch="pccontroller://page/events" activationType="protocol">`, "pccontroller://page/outputs"} {
+	for _, expected := range []string{"Door &lt;OPEN&gt;", "R5 &amp; R6", `<toast launch="pccontroller://page/events" activationType="protocol">`, "pccontroller://page/outputs", `placement="appLogoOverride"`, `src="file:///C:/Program%20Files/PCController/toast-logo.png"`} {
 		if !strings.Contains(value, expected) {
 			t.Errorf("toast XML missing %q: %s", expected, value)
 		}
@@ -25,9 +25,17 @@ func TestToastXMLIsEscapedAndActionsAreProtocolActivated(t *testing.T) {
 func TestToastRejectsUntrustedActionSchemes(t *testing.T) {
 	_, err := buildToastXML(Notification{
 		Title: "test", Actions: []NotificationAction{{Label: "run", URI: "file:///tmp/test"}},
-	})
+	}, "")
 	if err == nil {
 		t.Fatal("file action URI unexpectedly accepted")
+	}
+}
+
+func TestToastRejectsRemoteOrNonFileLogo(t *testing.T) {
+	for _, logo := range []string{"https://example.invalid/logo.png", "file://server/share/logo.png"} {
+		if _, err := buildToastXML(Notification{Title: "test"}, logo); err == nil {
+			t.Fatalf("logo URI %q unexpectedly accepted", logo)
+		}
 	}
 }
 

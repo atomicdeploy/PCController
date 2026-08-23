@@ -52,7 +52,6 @@ func (model Model) pageView(snapshot control.Snapshot) string {
 func (model Model) portPickerPage(snapshot control.Snapshot) string {
 	lines := []string{
 		sectionHeader(model.width, "SELECT SERIAL DEVICE", "↑/↓ select · Enter open · Esc cancel"),
-		labelStyle.Render("Friendly name, COM ID, VID/PID and serial identity are shown; authentication still verifies HELLO before use."),
 	}
 	if model.portLoading {
 		lines = append(lines, warnStyle.Render(model.spinnerView()+" querying Windows serial devices…"))
@@ -139,7 +138,7 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	if haveStatus && capabilities&native.CapabilityTemperatures != 0 &&
 		capabilities&native.CapabilityBluetoothAudio != 0 && status.TBTAvailable &&
 		validTemperatureReading(status.TBTCenti) && model.prefs.Visible["temperature_bt"] {
-		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "BT Amplifier temperature"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
 	}
 
 	stateTitle := ""

@@ -10,6 +10,10 @@ import (
 
 const (
 	PCControllerEEPROMBytes        uint32 = generatedBoardEEPROMBytes
+	EEPROMAudioCueAddress          uint32 = 0
+	EEPROMAudioCueCount            byte   = 4
+	EEPROMAudioCueDescriptorBytes  uint32 = 3
+	EEPROMAudioCueRecordBytes      uint32 = uint32(EEPROMAudioCueCount)*EEPROMAudioCueDescriptorBytes + 1
 	EEPROMSettingsAddress          uint32 = 32
 	EEPROMSettingsValueBytes       uint32 = 40
 	EEPROMSettingsRecordBytes      uint32 = EEPROMSettingsValueBytes + 1

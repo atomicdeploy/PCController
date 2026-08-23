@@ -271,4 +271,28 @@ if(BUILD_TESTING)
     target_compile_options(firmware_eeprom_menu_labels_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
   endif()
   add_test(NAME firmware_eeprom_menu_labels_unit COMMAND firmware_eeprom_menu_labels_tests)
+
+  # Compile the production Timer1 engine and compact EEPROM-backed cue policy
+  # together. This catches exact door/output tones, atomic CRC fallback,
+  # specific-cue preemption, and the global Silent electrical invariant.
+  add_executable(firmware_audio_cue_tests
+    tests/audio_cue_test.cpp
+    ../../LocalLib/TonePlayer.cpp
+    ../../Project/AudioCues.cpp
+    ../../Project/UartProtocol.cpp
+  )
+  target_include_directories(firmware_audio_cue_tests PRIVATE
+    tests/arduino_mock
+    ../..
+  )
+  target_compile_definitions(firmware_audio_cue_tests PRIVATE
+    PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES=1
+    PCCONTROLLER_ENABLE_EEPROM_AUDIO_CUES=1
+  )
+  if(MSVC)
+    target_compile_options(firmware_audio_cue_tests PRIVATE /W4 /permissive-)
+  else()
+    target_compile_options(firmware_audio_cue_tests PRIVATE ${VIRTUAL_BOARD_WARNINGS})
+  endif()
+  add_test(NAME firmware_audio_cue_unit COMMAND firmware_audio_cue_tests)
 endif()

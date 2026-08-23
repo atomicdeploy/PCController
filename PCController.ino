@@ -16,6 +16,9 @@
 #endif
 #include "LocalLib/TonePlayer.h"
 #include "Project/AddressableLeds.h"
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+#include "Project/AudioCues.h"
+#endif
 #include "Project/BootMelody.h"
 #include "Project/ControllerEvents.h"
 #include "Project/CompactI2c.h"

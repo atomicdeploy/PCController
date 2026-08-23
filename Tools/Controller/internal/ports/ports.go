@@ -255,6 +255,64 @@ func PreferredCandidate(candidates []Info, preferred Identity) (Info, bool) {
 	return Info{}, false
 }
 
+// ReconnectCandidates relaxes only a stale COM-name constraint after an
+// authenticated USB transport disappears. Strong serial/PnP identity wins
+// when it survives the move. Bridges such as CH340 often expose neither, so a
+// unique VID/PID/friendly-name match may rebind to the new COM assignment.
+// Ambiguous matches are returned unchanged and remain subject to the ordinary
+// explicit-selection rule; an arbitrary serial device is never guessed.
+func ReconnectCandidates(all []Info, filter Filter) []Info {
+	if strings.TrimSpace(filter.Port) == "" {
+		return nil
+	}
+
+	base := filter
+	base.Port = ""
+	if base.SerialNumber == "" && base.InstanceID == "" {
+		if serial := strings.TrimSpace(filter.Preferred.SerialNumber); serial != "" {
+			strong := base
+			strong.SerialNumber = serial
+			if candidates := Candidates(all, strong); len(candidates) != 0 {
+				return candidates
+			}
+		}
+		if instance := strings.TrimSpace(filter.Preferred.InstanceID); instance != "" {
+			strong := base
+			strong.InstanceID = instance
+			if candidates := Candidates(all, strong); len(candidates) != 0 {
+				return candidates
+			}
+		}
+	}
+
+	if base.VID != "" || base.PID != "" || base.Name != "" ||
+		base.SerialNumber != "" || base.InstanceID != "" {
+		if candidates := Candidates(all, base); len(candidates) != 0 {
+			return candidates
+		}
+	}
+
+	// Moving a non-serialized bridge can change its Windows instance ID. Retain
+	// descriptive identity from the last authenticated transport and relax only
+	// the identifiers that are known to change with the physical USB path.
+	loose := base
+	loose.SerialNumber = ""
+	loose.InstanceID = ""
+	if loose.VID == "" {
+		loose.VID = filter.Preferred.VID
+	}
+	if loose.PID == "" {
+		loose.PID = filter.Preferred.PID
+	}
+	if loose.Name == "" {
+		loose.Name = filter.Preferred.Name
+	}
+	if loose.VID == "" && loose.PID == "" && loose.Name == "" {
+		return nil
+	}
+	return Candidates(all, loose)
+}
+
 // ParseSelector accepts a COM device ID, tcp endpoint, VID:PID pair,
 // VID_xxxx&PID_yyyy token, serial:VALUE, instance:VALUE, or a human-friendly
 // name substring.

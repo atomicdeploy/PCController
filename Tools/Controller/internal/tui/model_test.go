@@ -30,6 +30,81 @@ func readyModel(t *testing.T, page Page) Model {
 	return model
 }
 
+func TestQQuitsEveryNormalTUIPage(t *testing.T) {
+	for page := PageDashboard; page < pageCount; page++ {
+		t.Run(pageDefinitions[page].Short, func(t *testing.T) {
+			model := readyModel(t, page)
+			model.input.SetValue("")
+			updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+			if command == nil {
+				t.Fatal("q did not return a quit command")
+			}
+			if _, ok := command().(tea.QuitMsg); !ok {
+				t.Fatalf("q command returned %T, want tea.QuitMsg", command())
+			}
+			if updated.(Model).page != page {
+				t.Fatalf("q changed page from %v to %v before quitting", page, updated.(Model).page)
+			}
+		})
+	}
+}
+
+func TestQPreservesFocusedTextAndModalInput(t *testing.T) {
+	t.Run("nonempty terminal", func(t *testing.T) {
+		model := readyModel(t, PageConsole)
+		model.input.SetValue("bee")
+		model.input.CursorEnd()
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if command != nil {
+			if _, quits := command().(tea.QuitMsg); quits {
+				t.Fatal("q quit while the command input contained text")
+			}
+		}
+		if got := updated.(Model).input.Value(); got != "beeq" {
+			t.Fatalf("terminal input=%q, want %q", got, "beeq")
+		}
+	})
+
+	t.Run("display editor", func(t *testing.T) {
+		model := readyModel(t, PageMenus)
+		model.displayEditor = &displayEditor{Targets: []string{"segments"}}
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if command != nil {
+			if _, quits := command().(tea.QuitMsg); quits {
+				t.Fatal("q quit while the display editor owned keyboard focus")
+			}
+		}
+		if got := updated.(Model).displayEditor.Text; got != "q" {
+			t.Fatalf("display editor text=%q, want q", got)
+		}
+	})
+
+	t.Run("port picker", func(t *testing.T) {
+		model := readyModel(t, PageDashboard)
+		model.portPicker = true
+		updated, command := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+		if command != nil {
+			if _, quits := command().(tea.QuitMsg); quits {
+				t.Fatal("q quit while the port picker owned keyboard focus")
+			}
+		}
+		if !updated.(Model).portPicker {
+			t.Fatal("q unexpectedly closed the port picker")
+		}
+	})
+}
+
+func TestPortPickerOmitsRedundantAuthenticationHint(t *testing.T) {
+	model := readyModel(t, PageDashboard)
+	rendered := ansi.Strip(model.portPickerPage(model.snapshot()))
+	if strings.Contains(strings.ToLower(rendered), "authentication") {
+		t.Fatalf("port picker retained redundant authentication copy:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "SELECT SERIAL DEVICE") {
+		t.Fatalf("port picker lost its actionable heading:\n%s", rendered)
+	}
+}
+
 func TestPreviewFramesCoverEveryDomainPage(t *testing.T) {
 	expected := map[Page]string{
 		PageDashboard:     "LIVE MEASUREMENTS",
@@ -59,7 +134,7 @@ func TestDashboardUsesExpandedNamesAndAdaptiveUnits(t *testing.T) {
 	for _, expected := range []string{
 		"Supply Voltage", "12.22 V", "Load Current", "286.0 mA",
 		"Load Power", "3.49 W", "Temperature · Illumination LED",
-		"Temperature · BT Audio", "Bluetooth audio", "disconnected or pairing",
+		"BT Amplifier temperature", "Bluetooth audio", "disconnected or pairing",
 	} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("dashboard missing %q:\n%s", expected, rendered)
@@ -100,7 +175,7 @@ func TestBluetoothAndInvalidMeasurementsRequireAdvertisedValidLiveState(t *testi
 	model.preview = &snapshot
 
 	dashboard := ansi.Strip(model.dashboardPage(snapshot))
-	for _, absent := range []string{"Bluetooth audio", "Temperature · BT Audio", "Temperature · Illumination LED", "Supply Voltage", "-32768", "327.67"} {
+	for _, absent := range []string{"Bluetooth audio", "BT Amplifier temperature", "Temperature · Illumination LED", "Supply Voltage", "-32768", "327.67"} {
 		if strings.Contains(dashboard, absent) {
 			t.Fatalf("dashboard rendered unavailable or invalid %q:\n%s", absent, dashboard)
 		}

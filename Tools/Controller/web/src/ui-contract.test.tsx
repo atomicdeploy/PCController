@@ -188,7 +188,7 @@ describe('offline and settings UI contracts', () => {
     const markup = renderToStaticMarkup(<DashboardView {...shared()} snapshot={snapshot} />)
     expect(markup).toContain('Power measurements unavailable')
     expect(markup).toContain('LED temperature unavailable')
-    expect(markup).toContain('Buzzer temperature unavailable')
+    expect(markup).toContain('BT Amplifier temperature unavailable')
     expect(markup).not.toContain('Measurement unavailable')
     expect(markup).not.toContain('Invalid controller sample')
     expect(markup).not.toContain('The controller advertised')
@@ -233,7 +233,7 @@ describe('offline and settings UI contracts', () => {
     expect(dashboard).not.toContain('-32768')
     expect(dashboard).not.toContain('Power measurements unavailable')
     expect(dashboard).not.toContain('LED temperature unavailable')
-    expect(dashboard).not.toContain('Buzzer temperature unavailable')
+    expect(dashboard).not.toContain('BT Amplifier temperature unavailable')
 
     const workbench = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={connected} />)
     expect(workbench).toContain('TM1637')

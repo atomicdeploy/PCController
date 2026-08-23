@@ -20,8 +20,12 @@ func (registry recordingRegistry) Set(path, name, value string) error {
 func TestDesktopRegistryUsesCurrentExecutableAndQuotedURIArgument(t *testing.T) {
 	record := recordingRegistry{}
 	executable := `C:\Program Files\PCController\controller.exe`
-	if err := ensureProtocolRegistry(record, executable, "Test.PCController", "Test Controller"); err != nil {
+	logo := `C:\Program Files\PCController\toast-logo.png`
+	if err := ensureProtocolRegistry(record, executable, logo, "Test.PCController", "Test Controller"); err != nil {
 		t.Fatal(err)
+	}
+	if got := record[`Software\Classes\AppUserModelId\Test.PCController|IconUri`]; got != logo {
+		t.Fatalf("AppUserModelID IconUri=%q; want %q", got, logo)
 	}
 	command := record[`Software\Classes\pccontroller\shell\open\command|`]
 	if !strings.Contains(command, `"C:\Program Files\PCController\controller.exe"`) ||

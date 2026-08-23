@@ -109,6 +109,59 @@ func TestPreferredIdentityResolvesOnlyStrongUniqueMatch(t *testing.T) {
 	}
 }
 
+func TestReconnectCandidatesRebindCOMByUniqueIdentity(t *testing.T) {
+	all := []Info{
+		{
+			Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523",
+			FriendlyName: "USB-SERIAL CH340",
+			InstanceID:   `USB\VID_1A86&PID_7523\NEW-PATH`,
+		},
+		{Name: "COM8", IsUSB: true, VID: "2341", PID: "0043", FriendlyName: "Arduino"},
+	}
+	candidates := ReconnectCandidates(all, Filter{
+		Port: "COM4", VID: "1A86", PID: "7523", Name: "USB-SERIAL CH340",
+		Preferred: Identity{
+			Port: "COM4", VID: "1A86", PID: "7523", Name: "USB-SERIAL CH340",
+			InstanceID: `USB\VID_1A86&PID_7523\OLD-PATH`,
+		},
+	})
+	if len(candidates) != 1 || candidates[0].Name != "COM3" {
+		t.Fatalf("COM4 -> COM3 reconnect candidates = %#v", candidates)
+	}
+}
+
+func TestReconnectCandidatesPreferStrongIdentity(t *testing.T) {
+	all := []Info{
+		{Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523", SerialNumber: "BOARD-A"},
+		{Name: "COM5", IsUSB: true, VID: "1A86", PID: "7523", SerialNumber: "BOARD-B"},
+	}
+	candidates := ReconnectCandidates(all, Filter{
+		Port: "COM4", Preferred: Identity{SerialNumber: "BOARD-A"},
+	})
+	if len(candidates) != 1 || candidates[0].Name != "COM3" {
+		t.Fatalf("strong reconnect identity = %#v", candidates)
+	}
+}
+
+func TestReconnectCandidatesDoNotGuessAmbiguousOrUnidentifiedPorts(t *testing.T) {
+	matching := []Info{
+		{Name: "COM3", IsUSB: true, VID: "1A86", PID: "7523"},
+		{Name: "COM5", IsUSB: true, VID: "1A86", PID: "7523"},
+	}
+	candidates := ReconnectCandidates(matching, Filter{
+		Port: "COM4", VID: "1A86", PID: "7523",
+	})
+	if len(candidates) != 2 {
+		t.Fatalf("ambiguous identity was hidden: %#v", candidates)
+	}
+	if candidates := ReconnectCandidates(
+		[]Info{{Name: "COM3", IsUSB: true}},
+		Filter{Port: "COM4"},
+	); candidates != nil {
+		t.Fatalf("unidentified USB port was guessed: %#v", candidates)
+	}
+}
+
 func TestDeviceChangeWatcherCancels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	changes, err := WatchChanges(ctx)
