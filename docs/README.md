@@ -81,6 +81,10 @@ device identity or interface settings.
 - [Requirements Backlog](Requirements-Backlog.md) — issue-linked open work.
 - [Project Acceptance](Project-Checklist.md) — current software gates and
   hardware work that remains deliberately unclaimed.
+- [Alpha Delivery Ledger](Alpha-Delivery-Ledger.md) — time-scoped requirements,
+  delivery evidence, corrections, and unresolved work imported from the former
+  operator master tracker. It is an audit record, not a replacement for the
+  maintained product guides or current acceptance contract.
 
 ## ✍️ Documentation rules
 
