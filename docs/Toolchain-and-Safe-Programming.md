@@ -264,6 +264,15 @@ settings is fatal while retaining the recovery marker. A normally returned
 failed flash still records its final host outcome, then attempts reconnection
 and exact restoration.
 
+On Windows, the Urclock flash and EEPROM backup reads run as separate AVRDUDE
+processes. If AVRDUDE explicitly reports that the serial handle is still busy,
+sharing-violated, or access-denied after the preceding read, Controller waits
+250 ms and then 750 ms before the two bounded retries. Protocol failures,
+timeouts, verification errors, and generic nonzero exits are never retried by
+this path. Exhausting the retries still leaves the manifest incomplete and
+prevents the guarded firmware write; the retry does not weaken the mandatory
+backup gate.
+
 An interrupted operation leaves a marker under the host `state` directory. On
 every authenticated reboot before host completion is recorded, the primary
 reasserts relay/PWM-off, the safe EEPROM image, and `Prog`; it deliberately does
