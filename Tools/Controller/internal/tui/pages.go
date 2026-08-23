@@ -52,7 +52,6 @@ func (model Model) pageView(snapshot control.Snapshot) string {
 func (model Model) portPickerPage(snapshot control.Snapshot) string {
 	lines := []string{
 		sectionHeader(model.width, "SELECT SERIAL DEVICE", "↑/↓ select · Enter open · Esc cancel"),
-		labelStyle.Render("Friendly name, COM ID, VID/PID and serial identity are shown; authentication still verifies HELLO before use."),
 	}
 	if model.portLoading {
 		lines = append(lines, warnStyle.Render(model.spinnerView()+" querying Windows serial devices…"))

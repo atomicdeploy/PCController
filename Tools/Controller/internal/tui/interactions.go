@@ -211,6 +211,15 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return updated, command, true
 		}
 	}
+	// q is the conventional fast exit while the TUI itself owns the keyboard.
+	// Focused editors, searches, and pickers keep ownership so entering a literal
+	// q or operating a modal can never close the application unexpectedly.
+	if key == "q" && inputEmpty && !model.modalOwnsKeyboard() {
+		if model.preview == nil && model.remote == nil {
+			_ = model.runtime.Close()
+		}
+		return model, tea.Quit, true
+	}
 	if model.portPicker {
 		switch key {
 		case "esc", "ctrl+p":
@@ -386,6 +395,19 @@ func (model Model) handleKey(message tea.KeyMsg) (Model, tea.Cmd, bool) {
 	}
 	model.completion = nil
 	return model, nil, false
+}
+
+func (model Model) modalOwnsKeyboard() bool {
+	return model.settingEditor != nil ||
+		model.displayEditor != nil ||
+		model.renameTarget != "" ||
+		model.macroSearchEditing ||
+		model.menuLayoutSearchEditing ||
+		model.rfActionPicker ||
+		model.rfCategoryPicker ||
+		model.rfEditMode != "" ||
+		model.rfGuideActive ||
+		model.portPicker
 }
 
 func (model Model) showPortPicker() (Model, tea.Cmd, bool) {
