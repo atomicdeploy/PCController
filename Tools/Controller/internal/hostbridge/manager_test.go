@@ -19,6 +19,7 @@ import (
 	"pccontroller.local/controller/internal/control"
 	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/ipcjson"
+	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/shell"
 )
 
@@ -129,6 +130,87 @@ func TestRunningDoorWarningRequiresConnectedLiveDoorAndExplicitRunningState(t *t
 				t.Fatalf("%s state incorrectly warned: %#v", name, candidate)
 			}
 		})
+	}
+}
+
+func physicalDoorEvent(open bool) controller.Event {
+	return controller.Event{
+		Kind: "door", Source: "board", Target: "host", MessageType: "event",
+		Opcode: native.OpEvent,
+		Device: &controller.DeviceEvent{Type: native.EventDoor, DoorOpen: open},
+	}
+}
+
+func TestDoorNotificationRequiresDirectLocalBoardTransition(t *testing.T) {
+	event := physicalDoorEvent(true)
+	if open, ok := directBoardDoorTransition(event); !ok || !open {
+		t.Fatalf("direct physical event open=%t ok=%t", open, ok)
+	}
+	tests := map[string]func(*controller.Event){
+		"host source":    func(value *controller.Event) { value.Source = "host" },
+		"bridge source":  func(value *controller.Event) { value.Source = "bridge" },
+		"wrong target":   func(value *controller.Event) { value.Target = "clients" },
+		"wrong type":     func(value *controller.Event) { value.MessageType = "reaction" },
+		"not opcode":     func(value *controller.Event) { value.Opcode = native.OpStatus },
+		"missing device": func(value *controller.Event) { value.Device = nil },
+		"wrong device": func(value *controller.Event) {
+			value.Device = &controller.DeviceEvent{Type: native.EventBluetooth}
+		},
+		"bridge ingress": func(value *controller.Event) {
+			value.Metadata = map[string]string{"bridge.ingress": "remote"}
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			candidate := event
+			mutate(&candidate)
+			if _, ok := directBoardDoorTransition(candidate); ok {
+				t.Fatalf("untrusted event accepted: %#v", candidate)
+			}
+		})
+	}
+}
+
+func TestDoorNotificationJobsKeepTransitionsDistinctAndAvoidRunningDuplicate(t *testing.T) {
+	config := appconfig.Defaults()
+	config.Integrations.Notifications.Actions = nil
+	snapshot := controller.Snapshot{
+		Connected: true, HaveStatus: true,
+		Port:         controller.PortInfo{Name: "COM3", FriendlyName: "CAFE controller"},
+		Hello:        controller.Hello{Name: "PCController"},
+		ProgramState: controller.ProgramStateSnapshot{Mode: controller.ProgramIdle},
+	}
+	opened, ok, err := notificationJobForEvent(config, physicalDoorEvent(true), snapshot)
+	if err != nil || !ok || opened.key != "door.opened" ||
+		opened.notification.Title != "PCController · Enclosure door opened" ||
+		!strings.Contains(opened.notification.Body, "CAFE controller (COM3)") {
+		t.Fatalf("opened job=%#v ok=%t err=%v", opened, ok, err)
+	}
+	closed, ok, err := notificationJobForEvent(config, physicalDoorEvent(false), snapshot)
+	if err != nil || !ok || closed.key != "door.closed" || opened.key == closed.key {
+		t.Fatalf("closed job=%#v ok=%t err=%v", closed, ok, err)
+	}
+
+	snapshot.Status.DoorOpen = true
+	snapshot.ProgramState.Mode = controller.ProgramRunning
+	if duplicate, ok, err := notificationJobForEvent(
+		config, physicalDoorEvent(true), snapshot,
+	); err != nil || ok {
+		t.Fatalf("running physical duplicate job=%#v ok=%t err=%v", duplicate, ok, err)
+	}
+	warning, ok, err := notificationJobForEvent(config, controller.Event{
+		Kind: "warning.door-open-running",
+	}, snapshot)
+	if err != nil || !ok || warning.key != "warning.door-open-running" ||
+		warning.notification.Title != "PCController · Door open during operation" ||
+		len(warning.notification.Actions) != 2 {
+		t.Fatalf("running warning job=%#v ok=%t err=%v", warning, ok, err)
+	}
+
+	config.Integrations.Notifications.DoorRunningToast = false
+	fallback, ok, err := notificationJobForEvent(config, physicalDoorEvent(true), snapshot)
+	if err != nil || !ok || fallback.key != "door.opened" {
+		t.Fatalf("disabled warning fallback=%#v ok=%t err=%v", fallback, ok, err)
 	}
 }
 

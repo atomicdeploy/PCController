@@ -493,6 +493,26 @@ guards as every other command source. The TUI reports whether the notifier and
 action handler are actually available; accepting toast XML alone is not proof
 that a button activation is installed.
 
+Door notifications use the normalized physical-device event, not status-poll
+text. The host accepts a door toast only when the local serial runtime produced
+an `OpEvent` door record with `board -> host` event provenance. Initial status,
+reconnect snapshots, host-generated text, and bridge-replayed events still
+update their appropriate state/event surfaces, but cannot impersonate a local
+reed transition and cannot create a native door notification.
+
+| Physical transition | Native presentation | Queue behavior |
+| --- | --- | --- |
+| Door opened while Idle | Device/friendly name, current COM port, open state, and current program state; **Open Events** action | `door.opened` |
+| Door closed | Device/friendly name, current COM port, closed state, and current program state; **Open Events** action | `door.closed` |
+| Door opened while Running | One host-owned **Door open during operation** warning with dynamic device/port details plus **Open Events** and **Stop outputs** actions | `warning.door-open-running` |
+
+Open and close use different coalescing keys, so a quick close does not get
+discarded as a duplicate open notification. When the Running warning toast is
+enabled, it owns the single open presentation and the ordinary open toast is
+suppressed; disabling that warning leaves the ordinary physical-open toast in
+place. The corresponding warning-cleared event remains available to history,
+scripts, IPC, WebSocket, and UI clients without creating a second native toast.
+
 ## Local API and primary IPC
 
 The default service is `127.0.0.1:8787`. One listener multiplexes:

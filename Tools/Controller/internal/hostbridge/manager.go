@@ -1038,28 +1038,77 @@ func (manager *Manager) dispatchNotification(
 	event controller.Event,
 ) {
 	if !config.Integrations.Notifications.Enabled || manager.notifier == nil ||
-		strings.HasPrefix(event.Kind, "notification.") {
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Kind)), "notification.") {
 		return
 	}
-	if event.Kind == "warning.door-open-running" &&
-		!config.Integrations.Notifications.DoorRunningToast {
+	job, ok, err := notificationJobForEvent(config, event, manager.client.Snapshot())
+	if err != nil {
+		manager.recordError("notification actions: " + err.Error())
 		return
+	}
+	if ok {
+		manager.notificationQueue.enqueue(job)
+	}
+}
+
+func notificationJobForEvent(
+	config appconfig.Config,
+	event controller.Event,
+	snapshot controller.Snapshot,
+) (notificationJob, bool, error) {
+	kind := strings.ToLower(strings.TrimSpace(event.Kind))
+	if kind == "warning.door-open-running" &&
+		!config.Integrations.Notifications.DoorRunningToast {
+		return notificationJob{}, false, nil
 	}
 	matched := false
-	for _, kind := range config.Integrations.Notifications.ImportantKinds {
-		if eventKindMatches(kind, event.Kind) {
+	for _, pattern := range config.Integrations.Notifications.ImportantKinds {
+		if eventKindMatches(pattern, kind) {
 			matched = true
 			break
 		}
 	}
 	if !matched {
-		return
+		return notificationJob{}, false, nil
 	}
-	notification, ok := hostui.NotificationForImportantEvent(hostui.ImportantEvent{
-		Kind: event.Kind, Message: event.Text, AppTitle: config.UI.AppTitle,
-	})
-	if !ok {
-		return
+	jobKey := kind
+	priority := notificationPriority(kind)
+	var notification hostui.Notification
+	if kind == "door" {
+		open, physical := directBoardDoorTransition(event)
+		if !physical {
+			return notificationJob{}, false, nil
+		}
+		// The derived Running-door event owns the one safety toast. If that
+		// presentation is disabled, retain the ordinary physical-door toast.
+		if open && runningDoorCondition(snapshot) &&
+			config.Integrations.Notifications.DoorRunningToast &&
+			configuredImportantKind(
+				config.Integrations.Notifications.ImportantKinds,
+				"warning.door-open-running",
+			) {
+			return notificationJob{}, false, nil
+		}
+		notification = hostui.NotificationForDoorTransition(
+			doorNotification(snapshot, open, false, config.UI.AppTitle),
+		)
+		if open {
+			jobKey = "door.opened"
+		} else {
+			jobKey = "door.closed"
+		}
+	} else if kind == "warning.door-open-running" {
+		notification = hostui.NotificationForDoorTransition(
+			doorNotification(snapshot, true, true, config.UI.AppTitle),
+		)
+	} else {
+		var ok bool
+		notification, ok = hostui.NotificationForImportantEvent(hostui.ImportantEvent{
+			Kind: event.Kind, Message: event.Text, AppTitle: config.UI.AppTitle,
+		})
+		if !ok {
+			return notificationJob{}, false, nil
+		}
 	}
 	if len(config.Integrations.Notifications.Actions) != 0 {
 		configured, err := configuredNotificationActions(
@@ -1067,15 +1116,58 @@ func (manager *Manager) dispatchNotification(
 			config.Integrations.Notifications.Actions,
 		)
 		if err != nil {
-			manager.recordError("notification actions: " + err.Error())
-			return
+			return notificationJob{}, false, err
 		}
 		notification = configured
 	}
-	manager.notificationQueue.enqueue(notificationJob{
-		key: event.Kind, notification: notification,
-		priority: notificationPriority(event.Kind),
-	})
+	return notificationJob{
+		key: jobKey, notification: notification, priority: priority,
+	}, true, nil
+}
+
+func configuredImportantKind(patterns []string, kind string) bool {
+	for _, pattern := range patterns {
+		if eventKindMatches(pattern, kind) {
+			return true
+		}
+	}
+	return false
+}
+
+func directBoardDoorTransition(event controller.Event) (bool, bool) {
+	if !strings.EqualFold(strings.TrimSpace(event.Kind), "door") ||
+		!strings.EqualFold(strings.TrimSpace(event.Source), "board") ||
+		!strings.EqualFold(strings.TrimSpace(event.Target), "host") ||
+		!strings.EqualFold(strings.TrimSpace(event.MessageType), "event") ||
+		strings.TrimSpace(event.Metadata["bridge.ingress"]) != "" ||
+		event.Opcode != native.OpEvent || event.Device == nil ||
+		event.Device.Type != native.EventDoor {
+		return false, false
+	}
+	return event.Device.DoorOpen, true
+}
+
+func doorNotification(
+	snapshot controller.Snapshot,
+	open bool,
+	running bool,
+	appTitle string,
+) hostui.DoorNotification {
+	device := strings.TrimSpace(snapshot.Port.FriendlyName)
+	if device == "" {
+		device = strings.TrimSpace(snapshot.Port.Product)
+	}
+	if device == "" {
+		device = strings.TrimSpace(snapshot.Hello.Name)
+	}
+	programState := strings.TrimSpace(string(snapshot.ProgramState.Mode))
+	if running {
+		programState = string(controller.ProgramRunning)
+	}
+	return hostui.DoorNotification{
+		Open: open, Running: running, AppTitle: appTitle, Device: device,
+		Port: snapshot.Port.Name, ProgramState: programState,
+	}
 }
 
 func (manager *Manager) notificationLoop() {
