@@ -31,6 +31,8 @@ type connectionFlags struct {
 	requestTimeout   time.Duration
 	helloAttempts    int
 	resetOnReconnect bool
+	reconnectInitial time.Duration
+	reconnectMaximum time.Duration
 	overrides        map[string]bool
 	preferred        ports.Identity
 }
@@ -84,7 +86,43 @@ func addConnectionFlags(
 		config.ResetOnReconnect,
 		"pulse DTR once when a disconnected USB board reappears",
 	)
+	flags.DurationVar(
+		&options.reconnectInitial,
+		"reconnect-initial",
+		time.Duration(envInt(
+			"PCCONTROLLER_RECONNECT_INITIAL_MS",
+			config.ReconnectInitialMS,
+		))*time.Millisecond,
+		"initial automatic USB reconnect delay",
+	)
+	flags.DurationVar(
+		&options.reconnectMaximum,
+		"reconnect-maximum",
+		time.Duration(envInt(
+			"PCCONTROLLER_RECONNECT_MAXIMUM_MS",
+			config.ReconnectMaximumMS,
+		))*time.Millisecond,
+		"maximum automatic USB reconnect delay",
+	)
+	markConnectionEnvironmentOverrides(options)
 	return options
+}
+
+func markConnectionEnvironmentOverrides(options *connectionFlags) {
+	for flagName, environment := range map[string]string{
+		"device":            "PCCONTROLLER_DEVICE",
+		"port":              "PCCONTROLLER_PORT",
+		"vid":               "PCCONTROLLER_VID",
+		"pid":               "PCCONTROLLER_PID",
+		"name":              "PCCONTROLLER_NAME",
+		"baud":              "PCCONTROLLER_BAUD",
+		"reconnect-initial": "PCCONTROLLER_RECONNECT_INITIAL_MS",
+		"reconnect-maximum": "PCCONTROLLER_RECONNECT_MAXIMUM_MS",
+	} {
+		if strings.TrimSpace(os.Getenv(environment)) != "" {
+			options.overrides[flagName] = true
+		}
+	}
 }
 
 func (options *connectionFlags) captureOverrides(flags *flag.FlagSet) {
@@ -113,12 +151,14 @@ func (options connectionFlags) filter() ports.Filter {
 
 func runtimeOptions(options *connectionFlags) control.Options {
 	return control.Options{
-		Filter:           options.filter(),
-		BaudRate:         options.baud,
-		StartupWait:      options.startupWait,
-		RequestTimeout:   options.requestTimeout,
-		HelloAttempts:    options.helloAttempts,
-		ResetOnReconnect: options.resetOnReconnect,
+		Filter:                options.filter(),
+		BaudRate:              options.baud,
+		StartupWait:           options.startupWait,
+		RequestTimeout:        options.requestTimeout,
+		HelloAttempts:         options.helloAttempts,
+		ResetOnReconnect:      options.resetOnReconnect,
+		ReconnectInitialDelay: options.reconnectInitial,
+		ReconnectMaximumDelay: options.reconnectMaximum,
 	}
 }
 
@@ -178,6 +218,8 @@ func (options *connectionFlags) fromConfig(
 	requestTimeout := time.Duration(config.RequestTimeoutMS) * time.Millisecond
 	helloAttempts := config.HelloAttempts
 	resetOnReconnect := config.ResetOnReconnect
+	reconnectInitial := time.Duration(config.ReconnectInitialMS) * time.Millisecond
+	reconnectMaximum := time.Duration(config.ReconnectMaximumMS) * time.Millisecond
 	if options.overrides["port"] {
 		port = options.port
 	}
@@ -224,11 +266,19 @@ func (options *connectionFlags) fromConfig(
 	if options.overrides["reset-on-reconnect"] {
 		resetOnReconnect = options.resetOnReconnect
 	}
+	if options.overrides["reconnect-initial"] {
+		reconnectInitial = options.reconnectInitial
+	}
+	if options.overrides["reconnect-maximum"] {
+		reconnectMaximum = options.reconnectMaximum
+	}
 	return control.Options{
 		Filter:   filter,
 		BaudRate: baud, StartupWait: startupWait,
 		RequestTimeout: requestTimeout, HelloAttempts: helloAttempts,
-		ResetOnReconnect: resetOnReconnect,
+		ResetOnReconnect:      resetOnReconnect,
+		ReconnectInitialDelay: reconnectInitial,
+		ReconnectMaximumDelay: reconnectMaximum,
 	}
 }
 
@@ -415,23 +465,25 @@ func apiOptions(
 		Port: resolved.Filter.Port, VID: resolved.Filter.VID,
 		PID: resolved.Filter.PID, Name: resolved.Filter.Name,
 		BaudRate: resolved.BaudRate, StartupWait: resolved.StartupWait,
-		RequestTimeout:   resolved.RequestTimeout,
-		HelloAttempts:    resolved.HelloAttempts,
-		ResetOnReconnect: resolved.ResetOnReconnect,
-		PreferredDevice:  publicPreferredDevice(config.Connection.LastDevice),
-		ProjectPath:      configuredProject(config, findProjectRoot()),
-		FQBN:             configuredFQBN(config),
-		FirmwareFeatures: programmer.FirmwareFeatureNames(firmwareFeatures),
-		Macros:           apiMacros(config.Macros),
-		Melodies:         config.Melodies,
-		StatusEffects:    config.StatusEffects,
-		ToolchainCLI:     config.Programming.ToolchainCLI,
-		Avrdude:          config.Programming.Avrdude,
-		AvrdudeConf:      config.Programming.AvrdudeConf,
-		Programmer:       configuredProgrammer(config),
-		MotionDoorPolicy: config.Safety.MotionDoorPolicy,
-		RF:               config.RF,
-		OSActions:        config.OSActions,
+		RequestTimeout:        resolved.RequestTimeout,
+		HelloAttempts:         resolved.HelloAttempts,
+		ResetOnReconnect:      resolved.ResetOnReconnect,
+		ReconnectInitialDelay: resolved.ReconnectInitialDelay,
+		ReconnectMaximumDelay: resolved.ReconnectMaximumDelay,
+		PreferredDevice:       publicPreferredDevice(config.Connection.LastDevice),
+		ProjectPath:           configuredProject(config, findProjectRoot()),
+		FQBN:                  configuredFQBN(config),
+		FirmwareFeatures:      programmer.FirmwareFeatureNames(firmwareFeatures),
+		Macros:                apiMacros(config.Macros),
+		Melodies:              config.Melodies,
+		StatusEffects:         config.StatusEffects,
+		ToolchainCLI:          config.Programming.ToolchainCLI,
+		Avrdude:               config.Programming.Avrdude,
+		AvrdudeConf:           config.Programming.AvrdudeConf,
+		Programmer:            configuredProgrammer(config),
+		MotionDoorPolicy:      config.Safety.MotionDoorPolicy,
+		RF:                    config.RF,
+		OSActions:             config.OSActions,
 		LCDPresentation: controllerapi.LCDPresentationOptions{
 			Enabled:      config.UI.LCDServiceEnabled,
 			Debounce:     time.Duration(config.UI.LCDPromptDebounceMS) * time.Millisecond,

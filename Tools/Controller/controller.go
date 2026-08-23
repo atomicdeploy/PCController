@@ -187,32 +187,34 @@ type StatusUpdate struct {
 
 // Options configures discovery, transport, tooling, automation, and host policy.
 type Options struct {
-	Port             string                 `json:"port,omitempty"`
-	VID              string                 `json:"vid,omitempty"`
-	PID              string                 `json:"pid,omitempty"`
-	Name             string                 `json:"name,omitempty"`
-	PreferredDevice  *PortInfo              `json:"preferred_device,omitempty"`
-	BaudRate         int                    `json:"baud_rate,omitempty"`
-	StartupWait      time.Duration          `json:"startup_wait,omitempty"`
-	RequestTimeout   time.Duration          `json:"request_timeout,omitempty"`
-	HelloAttempts    int                    `json:"hello_attempts,omitempty"`
-	ResetOnReconnect bool                   `json:"reset_on_reconnect,omitempty"`
-	ProjectPath      string                 `json:"project_path,omitempty"`
-	FQBN             string                 `json:"fqbn,omitempty"`
-	FirmwareFeatures []string               `json:"firmware_features,omitempty"`
-	ToolchainCLI     string                 `json:"toolchain_cli,omitempty"`
-	Avrdude          string                 `json:"avrdude,omitempty"`
-	AvrdudeConf      string                 `json:"avrdude_conf,omitempty"`
-	Programmer       string                 `json:"programmer,omitempty"`
-	Macros           []Macro                `json:"macros,omitempty"`
-	Melodies         []Melody               `json:"melodies,omitempty"`
-	StatusEffects    []StatusLEDEffect      `json:"status_effects,omitempty"`
-	Scripts          map[string]string      `json:"scripts,omitempty"`
-	Automations      []Automation           `json:"automations,omitempty"`
-	MotionDoorPolicy string                 `json:"motion_door_policy,omitempty"`
-	LCDPresentation  LCDPresentationOptions `json:"lcd_presentation,omitempty"`
-	RF               RFConfig               `json:"rf"`
-	OSActions        OSPolicy               `json:"os_actions"`
+	Port                  string                 `json:"port,omitempty"`
+	VID                   string                 `json:"vid,omitempty"`
+	PID                   string                 `json:"pid,omitempty"`
+	Name                  string                 `json:"name,omitempty"`
+	PreferredDevice       *PortInfo              `json:"preferred_device,omitempty"`
+	BaudRate              int                    `json:"baud_rate,omitempty"`
+	StartupWait           time.Duration          `json:"startup_wait,omitempty"`
+	RequestTimeout        time.Duration          `json:"request_timeout,omitempty"`
+	HelloAttempts         int                    `json:"hello_attempts,omitempty"`
+	ResetOnReconnect      bool                   `json:"reset_on_reconnect,omitempty"`
+	ReconnectInitialDelay time.Duration          `json:"reconnect_initial_delay,omitempty"`
+	ReconnectMaximumDelay time.Duration          `json:"reconnect_maximum_delay,omitempty"`
+	ProjectPath           string                 `json:"project_path,omitempty"`
+	FQBN                  string                 `json:"fqbn,omitempty"`
+	FirmwareFeatures      []string               `json:"firmware_features,omitempty"`
+	ToolchainCLI          string                 `json:"toolchain_cli,omitempty"`
+	Avrdude               string                 `json:"avrdude,omitempty"`
+	AvrdudeConf           string                 `json:"avrdude_conf,omitempty"`
+	Programmer            string                 `json:"programmer,omitempty"`
+	Macros                []Macro                `json:"macros,omitempty"`
+	Melodies              []Melody               `json:"melodies,omitempty"`
+	StatusEffects         []StatusLEDEffect      `json:"status_effects,omitempty"`
+	Scripts               map[string]string      `json:"scripts,omitempty"`
+	Automations           []Automation           `json:"automations,omitempty"`
+	MotionDoorPolicy      string                 `json:"motion_door_policy,omitempty"`
+	LCDPresentation       LCDPresentationOptions `json:"lcd_presentation,omitempty"`
+	RF                    RFConfig               `json:"rf"`
+	OSActions             OSPolicy               `json:"os_actions"`
 }
 
 // Macro describes a host-owned, MCU-timed sequence of peripheral operations.
@@ -491,11 +493,13 @@ func New(options Options) *Client {
 			Name:      options.Name,
 			Preferred: internalPortIdentity(options.PreferredDevice),
 		},
-		BaudRate:         baud,
-		StartupWait:      options.StartupWait,
-		RequestTimeout:   options.RequestTimeout,
-		HelloAttempts:    options.HelloAttempts,
-		ResetOnReconnect: options.ResetOnReconnect,
+		BaudRate:              baud,
+		StartupWait:           options.StartupWait,
+		RequestTimeout:        options.RequestTimeout,
+		HelloAttempts:         options.HelloAttempts,
+		ResetOnReconnect:      options.ResetOnReconnect,
+		ReconnectInitialDelay: options.ReconnectInitialDelay,
+		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
 	})
 	client := &Client{
 		runtime:  runtime,
@@ -601,9 +605,11 @@ func (client *Client) ApplyHostOptions(options Options) bool {
 			Preferred: internalPortIdentity(options.PreferredDevice),
 		},
 		BaudRate: baud, StartupWait: options.StartupWait,
-		RequestTimeout:   options.RequestTimeout,
-		HelloAttempts:    options.HelloAttempts,
-		ResetOnReconnect: options.ResetOnReconnect,
+		RequestTimeout:        options.RequestTimeout,
+		HelloAttempts:         options.HelloAttempts,
+		ResetOnReconnect:      options.ResetOnReconnect,
+		ReconnectInitialDelay: options.ReconnectInitialDelay,
+		ReconnectMaximumDelay: options.ReconnectMaximumDelay,
 	})
 	client.SetMacros(options.Macros)
 	client.SetOutputDefinitions(options.Melodies, options.StatusEffects)
