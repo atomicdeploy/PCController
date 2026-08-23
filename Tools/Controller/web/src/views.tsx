@@ -186,7 +186,7 @@ export function DashboardView(props: SharedViewProps) {
   const invalidMeasurements = [
     available.invalidINA219 ? copy('Power measurements unavailable', 'اندازه‌گیری‌های توان در دسترس نیست') : '',
     available.invalidTemperatureLED ? copy('LED temperature unavailable', 'دمای LED در دسترس نیست') : '',
-    available.invalidTemperatureBTAudio ? copy('Buzzer temperature unavailable', 'دمای بیزر در دسترس نیست') : '',
+    available.invalidTemperatureBTAudio ? copy('BT Amplifier temperature unavailable', 'دمای آمپلی‌فایر بلوتوث در دسترس نیست') : '',
   ].filter(Boolean)
   const connectedTone = boardReady ? 'good' : snapshot.paused ? 'warn' : 'bad'
   const authenticationRequired = !boardReady && props.transport.authenticationRequired
@@ -246,7 +246,7 @@ export function DashboardView(props: SharedViewProps) {
         {available.ina219 && <MetricCard icon={Zap} label={peripheralName('sensor.supply-voltage', t('voltage'))} value={formatNumber(locale, status.supply_mv / 1000, 2)} unit="V" values={values(samples, 'supply')} tone="accent" detail={`${peripheralName('sensor.bus-voltage', copy('Bus voltage', 'ولتاژ باس'))} · ${formatNumber(locale, status.bus_mv / 1000, 2)} V`} />}
         {available.ina219 && <MetricCard icon={Waves} label={peripheralName('sensor.current', t('current'))} value={formatNumber(locale, status.current_ma, 0)} unit="mA" values={values(samples, 'current')} tone="green" detail={`${peripheralName('sensor.power', copy('Load power', 'توان بار'))} · ${formatNumber(locale, status.power_mw / 1000, 2)} W`} />}
         {available.temperatureLED && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-led', `${t('temperature')} · LED`)} value={formatNumber(locale, status.temperature_led_centi_c / 100, 1)} unit="°C" values={values(samples, 'ledTemp')} tone="amber" />}
-        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('Buzzer temperature', 'دمای بیزر'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
+        {available.temperatureBTAudio && <MetricCard icon={Thermometer} label={peripheralName('sensor.temperature-audio', copy('BT Amplifier temperature', 'دمای آمپلی‌فایر بلوتوث'))} value={formatNumber(locale, status.temperature_bt_audio_centi_c / 100, 1)} unit="°C" values={values(samples, 'btTemp')} tone="violet" />}
         {available.pwm && <MetricCard icon={PlugZap} label="PWM" value={formatNumber(locale, status.pwm_value * 100 / 4095, 1)} unit="%" values={[]} tone="violet" detail={`${copy('CH', 'کانال')} ${status.pwm_channel + 1} · ${copy('ready', 'آماده')}`} />}
       </section>}
 

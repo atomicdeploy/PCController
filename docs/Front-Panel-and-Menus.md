@@ -524,7 +524,7 @@ additional stable page IDs:
 | 1 | `VOLT` | INA219 supply voltage using 0-2 configured decimals | K3 Back; K4 read-only error cue |
 | 2 | `CURR` | INA219 current using 0-2 configured decimals | K3 Back; K4 read-only error cue |
 | 3 | `tLED` | Enclosure-light sensor as `LxxC` | K3 Back; K4 read-only error cue |
-| 4 | `tBT` | BT Audio sensor as `bxxC` | K3 Back; K4 read-only error cue |
+| 4 | `tBT` | BT Amplifier temperature sensor as `bxxC` | K3 Back; K4 read-only error cue |
 | 5 | `LItE` | Illumination `oFF`, `Auto`, or `on` | K3 Back; K4 opens Illumination editor |
 | 6 | `bEEP` | `Mute` or `bEEP` | K3 Back; K4 opens Board Settings editor |
 | 7 | `PWM` | Alternates channel (`P-00`..`P-15`) and current 0-4095 value | K3 Back; K4 opens all-channel commissioning editor |

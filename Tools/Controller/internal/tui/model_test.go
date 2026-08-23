@@ -134,7 +134,7 @@ func TestDashboardUsesExpandedNamesAndAdaptiveUnits(t *testing.T) {
 	for _, expected := range []string{
 		"Supply Voltage", "12.22 V", "Load Current", "286.0 mA",
 		"Load Power", "3.49 W", "Temperature · Illumination LED",
-		"Temperature · BT Audio", "Bluetooth audio", "disconnected or pairing",
+		"BT Amplifier temperature", "Bluetooth audio", "disconnected or pairing",
 	} {
 		if !strings.Contains(rendered, expected) {
 			t.Errorf("dashboard missing %q:\n%s", expected, rendered)
@@ -175,7 +175,7 @@ func TestBluetoothAndInvalidMeasurementsRequireAdvertisedValidLiveState(t *testi
 	model.preview = &snapshot
 
 	dashboard := ansi.Strip(model.dashboardPage(snapshot))
-	for _, absent := range []string{"Bluetooth audio", "Temperature · BT Audio", "Temperature · Illumination LED", "Supply Voltage", "-32768", "327.67"} {
+	for _, absent := range []string{"Bluetooth audio", "BT Amplifier temperature", "Temperature · Illumination LED", "Supply Voltage", "-32768", "327.67"} {
 		if strings.Contains(dashboard, absent) {
 			t.Fatalf("dashboard rendered unavailable or invalid %q:\n%s", absent, dashboard)
 		}

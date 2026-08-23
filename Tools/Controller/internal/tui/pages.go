@@ -138,7 +138,7 @@ func (model Model) dashboardPage(snapshot control.Snapshot) string {
 	if haveStatus && capabilities&native.CapabilityTemperatures != 0 &&
 		capabilities&native.CapabilityBluetoothAudio != 0 && status.TBTAvailable &&
 		validTemperatureReading(status.TBTCenti) && model.prefs.Visible["temperature_bt"] {
-		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "Temperature · BT Audio"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
+		measurementLines = append(measurementLines, kvCard(sectionWidth, 33, model.peripheralName("sensor.temperature-audio", "BT Amplifier temperature"), formatTemperature(status.TBTCenti, model.prefs.TemperatureDecimals)))
 	}
 
 	stateTitle := ""

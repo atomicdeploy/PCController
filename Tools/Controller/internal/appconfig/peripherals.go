@@ -80,7 +80,7 @@ func buildPeripheralDescriptors() []PeripheralDescriptor {
 		{"sensor.current", "current", "Load current"},
 		{"sensor.power", "power", "Load power"},
 		{"sensor.temperature-led", "temperature-led", "Lighting temperature"},
-		{"sensor.temperature-audio", "temperature-audio", "Audio temperature"},
+		{"sensor.temperature-audio", "temperature-audio", "BT Amplifier temperature"},
 	} {
 		descriptors = append(descriptors, PeripheralDescriptor{
 			Key: sensor.key, Kind: "sensor", Role: sensor.role, Index: index,
