@@ -225,7 +225,9 @@ void serviceStatusLedPush() {
 }
 
 #if PCCONTROLLER_ENABLE_MENU_DIRECTORY
-// Reports one built-in page's stable ID, parent category, flags, and label.
+// Reports every stable direct-selector ID. PAGE_MOTION is a non-browsable
+// compatibility alias, but stays in the complete directory so persisted
+// layout clients retain their 14-ID permutation; pageToMode() reports KEY.
 void sendMenuList(uint8_t sequence, uint8_t cursor) {
   uint8_t payload[46] = {1, PAGE_COUNT, 0xFF, 0};
   uint8_t index = 4;
@@ -272,14 +274,18 @@ bool applyMenuLayout(const uint8_t *payload, uint8_t length, uint32_t at) {
     return false;
   }
   const uint16_t visibleMask = readU16(payload + 2);
-  const uint8_t firstVisible =
-      firstVisiblePersistentMenuPage(visibleMask, payload + 4);
-  if (firstVisible == 0xFF) {
+  if (firstVisiblePersistentMenuPage(visibleMask, payload + 4) == 0xFF) {
     return false;
   }
   ControllerSettings &settings = settingsStore.values();
   settings.visibleMenuMask = visibleMask;
   memcpy(settings.menuOrder, payload + 4, PersistentMenuOrderWireBytes);
+  settingsStore.normalizeMenuLayout();
+  const uint8_t firstVisible = firstVisiblePersistentMenuPage(
+      settings.visibleMenuMask, settings.menuOrder);
+  if (firstVisible == 0xFF) {
+    return false;
+  }
   if (!settings.menuPageVisible(settings.defaultMenuPage)) {
     settings.defaultMenuPage = firstVisible;
   }
@@ -377,15 +383,16 @@ void sendLearnedRemotes(uint8_t sequence, uint8_t cursor) {
 // tail; all other positional tails are rejected.
 bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
   const bool hasBoardName = length != 15;
+  const uint8_t defaultMenuPage = canonicalMenuPage(payload[10]);
   if ((hasBoardName &&
        (length < 16 || length != static_cast<uint8_t>(16 + payload[15]))) ||
       payload[0] != 3 || payload[2] > 2 || payload[5] > 7 ||
       payload[14] == 0 ||
       (payload[7] & ~OutputPersistence::AllowedMask) != 0
 #if PCCONTROLLER_MENU_VISIBILITY
-      || !settingsStore.values().menuPageVisible(payload[10])
+      || !settingsStore.values().menuPageVisible(defaultMenuPage)
 #endif
-      || payload[10] >= PAGE_COUNT
+      || defaultMenuPage >= PAGE_COUNT
       ) {
     return false;
   }
@@ -409,7 +416,7 @@ bool applySettings(const uint8_t *payload, uint8_t length, uint32_t at) {
       SettingsFlags::DoorAudioDisabled |
       SettingsFlags::RelayAudioDisabled;
   settings.streamPeriodMs = newStreamPeriod;
-  settings.defaultMenuPage = payload[10];
+  settings.defaultMenuPage = defaultMenuPage;
   settings.menuFlags = payload[11];
   settings.displayOptions = payload[12];
   settings.relayRestoreMask = payload[13];

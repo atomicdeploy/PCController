@@ -475,6 +475,7 @@ func TestEventStreamClassification(t *testing.T) {
 		"door": EventStreamActivity, "telemetry": EventStreamTelemetry,
 		"rx": EventStreamDebug, "front_panel.segment": EventStreamState,
 		"status_led.changed": EventStreamState, "buzzer.note": EventStreamState,
+		"illumination.changed": EventStreamState, "settings.changed": EventStreamState,
 		"sensor.sample": EventStreamTelemetry, "animation.frame": EventStreamState,
 	}
 	for kind, expected := range tests {

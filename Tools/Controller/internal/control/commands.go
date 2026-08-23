@@ -2029,6 +2029,13 @@ func describeLiveMenuEntry(entry native.MenuEntry) (MenuPageInfo, bool) {
 	for _, page := range protocolMenuPages {
 		if normalizeMenuName(page.Label) == label {
 			page.ID = entry.ID
+			// MENU_LIST retains ID 12/MOVE for cursor and wire compatibility.
+			// Only the unified firmware reports it with KEY's program mode; an
+			// older board's real MOVE page must remain configurable.
+			if page.ID == menuPageMotionAlias && entry.Mode != unifiedKeyMotionMode {
+				page.Name = "Motion"
+				page.Description = legacyMotionDetails
+			}
 			return page, true
 		}
 	}
@@ -2470,11 +2477,8 @@ func storeSettings(
 	runtime *Runtime,
 	settings native.Settings,
 ) error {
-	payload, err := settings.Payload()
-	if err != nil {
-		return err
-	}
-	return command(ctx, runtime, native.OpSetSettings, payload)
+	_, err := runtime.SetSettings(ctx, settings)
+	return err
 }
 
 func settingsFromSetArgs(args []string) (native.Settings, error) {

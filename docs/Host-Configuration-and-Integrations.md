@@ -286,6 +286,15 @@ WebSocket. Incoming event lines also appear in the bounded terminal transcript,
 so command and event traffic remain visible together without losing the full
 filterable timeline.
 
+Board Settings includes a dedicated enclosure-illumination surface. It edits
+the persisted Off/Auto/On policy plus door-open/On and door-closed/Off
+brightness without rewriting unrelated settings. The host independently reads
+PWM channel 11, shows the door-selected target and exact applied 0..4095 value,
+and publishes changed-only `illumination.changed` state events. Every connected
+Web/TUI/API consumer therefore sees fades and settings changes without a manual
+refresh or one serial poll per browser tab. A successful write is reported only
+after live application and EEPROM durability have both been read back.
+
 Supported browsers may install this same URL as a standalone desktop or mobile
 app. The manifest includes shortcuts to Overview, Workbench, Activity, and
 Settings. The worker retains only the versioned application shell and never

@@ -160,11 +160,13 @@ func TestPeripheralNamesRESTUsesTheSameTypedContract(t *testing.T) {
 
 func TestPeripheralAndPWMCapabilitiesSeparateReadConfigurationAndBoardWrites(t *testing.T) {
 	checks := map[string]string{
-		"controller.peripherals.get": capabilityRead,
-		"controller.peripherals.set": capabilityHostConfig,
-		"controller.pwm.values":      capabilityRead,
-		"controller.pwm.set":         capabilityBoard,
-		"controller.pwm.off":         capabilityBoard,
+		"controller.peripherals.get":  capabilityRead,
+		"controller.peripherals.set":  capabilityHostConfig,
+		"controller.pwm.values":       capabilityRead,
+		"controller.pwm.set":          capabilityBoard,
+		"controller.pwm.off":          capabilityBoard,
+		"controller.illumination.get": capabilityRead,
+		"controller.illumination.set": capabilityBoard,
 	}
 	for method, want := range checks {
 		if got := requestCapability(method, nil); got != want {

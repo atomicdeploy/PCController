@@ -484,7 +484,7 @@ func EventStreamForKind(kind string) string {
 		return EventStreamTelemetry
 	case "rx", "tx", "opcode":
 		return EventStreamDebug
-	case "front_panel.segment", "status_led.changed", "buzzer.note":
+	case "front_panel.segment", "status_led.changed", "buzzer.note", "illumination.changed", "settings.changed":
 		return EventStreamState
 	}
 	if strings.HasPrefix(kind, "measurement.") || strings.HasSuffix(kind, ".measurement") ||
@@ -495,6 +495,62 @@ func EventStreamForKind(kind string) string {
 		return EventStreamState
 	}
 	return EventStreamActivity
+}
+
+// Settings reads the authoritative live EEPROM settings and updates the shared
+// runtime snapshot through the ordinary response observer.
+func (runtime *Runtime) Settings(ctx context.Context) (native.Settings, error) {
+	frame, err := runtime.Request(ctx, native.OpGetSettings, nil, native.OpSettings)
+	if err != nil {
+		return native.Settings{}, err
+	}
+	return native.ParseSettings(frame.Payload)
+}
+
+// SetSettings applies a complete settings record, waits for durable readback,
+// then publishes one shared state event so every client converges without
+// polling. Callers must first read and preserve fields they do not own.
+func (runtime *Runtime) SetSettings(
+	ctx context.Context,
+	settings native.Settings,
+) (native.Settings, error) {
+	payload, err := settings.Payload()
+	if err != nil {
+		return native.Settings{}, err
+	}
+	if err := runtime.Command(ctx, native.OpSetSettings, payload); err != nil {
+		return native.Settings{}, err
+	}
+	wanted := settings
+	wanted.Persisted = true
+	deadline := time.Now().Add(1700 * time.Millisecond)
+	for {
+		confirmed, readErr := runtime.Settings(ctx)
+		if readErr == nil && confirmed == wanted {
+			runtime.PublishStructuredEvent(Event{
+				Kind: "settings.changed", Stream: EventStreamState,
+				Text: "board settings applied live and verified durable",
+				Metadata: map[string]string{
+					"light_mode":     strconv.Itoa(int(confirmed.LightMode)),
+					"on_brightness":  strconv.Itoa(int(confirmed.OnBrightness)),
+					"off_brightness": strconv.Itoa(int(confirmed.OffBrightness)),
+					"persisted":      strconv.FormatBool(confirmed.Persisted),
+				},
+			})
+			return confirmed, nil
+		}
+		if time.Now().After(deadline) {
+			if readErr != nil {
+				return native.Settings{}, fmt.Errorf("verify settings persistence: %w", readErr)
+			}
+			return native.Settings{}, errors.New("settings were applied but EEPROM persistence was not confirmed")
+		}
+		select {
+		case <-ctx.Done():
+			return native.Settings{}, ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 func IsActivityEvent(event Event) bool {

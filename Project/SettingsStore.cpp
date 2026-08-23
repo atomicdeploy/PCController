@@ -14,8 +14,13 @@ struct __attribute__((packed)) StoredSettings {
   uint8_t checksum;
 };
 
+#if !defined(PCCONTROLLER_SETTINGS_TEST_LAYOUT)
 static_assert(sizeof(StoredSettings) == EepromLayout::SettingsRecordBytes,
               "settings/name EEPROM record layout changed");
+#else
+// Native contract tests deliberately enable the optional layout fields. Their
+// desktop ABI padding is not an AVR EEPROM-layout assertion.
+#endif
 
 static_assert(SettingsStore::EepromAddress + sizeof(StoredSettings) <=
                   EepromLayout::RemoteHeaderAddress,
@@ -62,6 +67,7 @@ bool SettingsStore::begin(uint32_t now) {
   if (loadCurrent()) {
     persisted_ = true;
 #if PCCONTROLLER_MENU_VISIBILITY
+    bool rewriteLayout = normalizeMenuLayout();
     if (!settings_.menuPageVisible(settings_.defaultMenuPage)) {
       for (uint8_t rank = 0; rank < PersistentMenuPageCount; ++rank) {
 #if PCCONTROLLER_MENU_ORDERING
@@ -71,10 +77,13 @@ bool SettingsStore::begin(uint32_t now) {
 #endif
         if (settings_.menuPageVisible(page)) {
           settings_.defaultMenuPage = page;
-          markDirty(now);
+          rewriteLayout = true;
           break;
         }
       }
+    }
+    if (rewriteLayout) {
+      markDirty(now);
     }
 #endif
     return true;
@@ -92,6 +101,52 @@ bool SettingsStore::begin(uint32_t now) {
 ControllerSettings &SettingsStore::values() { return settings_; }
 
 const ControllerSettings &SettingsStore::values() const { return settings_; }
+
+bool SettingsStore::normalizeMenuLayout() {
+#if PCCONTROLLER_MENU_LAYOUT_STORAGE
+  bool changed = false;
+  if (settings_.defaultMenuPage == PAGE_MOTION) {
+    settings_.defaultMenuPage = PAGE_KEYS;
+    changed = true;
+  }
+
+#if PCCONTROLLER_MENU_VISIBILITY
+  const uint16_t aliasBit = static_cast<uint16_t>(1U << PAGE_MOTION);
+  if ((settings_.visibleMenuMask & aliasBit) != 0) {
+    const uint16_t keyBit = static_cast<uint16_t>(1U << PAGE_KEYS);
+    const bool keyWasVisible = (settings_.visibleMenuMask & keyBit) != 0;
+    settings_.visibleMenuMask = static_cast<uint16_t>(
+        (settings_.visibleMenuMask & static_cast<uint16_t>(~aliasBit)) |
+        keyBit);
+    changed = true;
+#if PCCONTROLLER_MENU_ORDERING
+    // A layout that showed only MOVE meant to place the motion surface at that
+    // rank. Swap the two unique IDs so RF and every other stored rank stay
+    // put; the old MOVE slot remains hidden compatibility data.
+    if (!keyWasVisible) {
+      for (uint8_t rank = 0; rank < PersistentMenuPageCount; ++rank) {
+        uint8_t &packed = settings_.menuOrder[rank >> 1];
+        const uint8_t shift = (rank & 1U) == 0 ? 0 : 4;
+        const uint8_t page = static_cast<uint8_t>((packed >> shift) & 0x0FU);
+        if (page != PAGE_KEYS && page != PAGE_MOTION) {
+          continue;
+        }
+        const uint8_t replacement =
+            page == PAGE_KEYS ? static_cast<uint8_t>(PAGE_MOTION)
+                             : static_cast<uint8_t>(PAGE_KEYS);
+        packed = static_cast<uint8_t>(
+            (packed & static_cast<uint8_t>(~(0x0FU << shift))) |
+            static_cast<uint8_t>(replacement << shift));
+      }
+    }
+#endif
+  }
+#endif
+  return changed;
+#else
+  return false;
+#endif
+}
 
 void SettingsStore::markDirty(uint32_t now) {
   dirty_ = true;

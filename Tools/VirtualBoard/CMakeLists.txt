@@ -126,7 +126,7 @@ if(BUILD_TESTING)
     tests/arduino_mock
     ../..
   )
-  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 11)
+  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 17)
   if(MSVC)
     target_compile_options(firmware_relay_controller_adapter_tests PRIVATE /W4 /permissive-)
   else()
@@ -209,10 +209,19 @@ if(BUILD_TESTING)
     ../../LocalLib/ShiftRegisters.cpp
     ../../LocalLib/TonePlayer.cpp
     ../../Project/RelayController.cpp
+    ../../Project/SettingsStore.cpp
+    ../../Project/UartProtocol.cpp
   )
   target_include_directories(firmware_controls_tests PRIVATE
     tests/arduino_mock
     ../..
+  )
+  # Exercise the persisted page-rank compatibility path without linking or
+  # changing the VirtualBoard runtime.
+  target_compile_definitions(firmware_controls_tests PRIVATE
+    PCCONTROLLER_MENU_VISIBILITY=1
+    PCCONTROLLER_MENU_ORDERING=1
+    PCCONTROLLER_SETTINGS_TEST_LAYOUT=1
   )
   if(MSVC)
     target_compile_options(firmware_controls_tests PRIVATE /W4 /permissive-)

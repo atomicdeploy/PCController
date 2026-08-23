@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <EEPROM.h>
 #include <avr/interrupt.h>
 
 #include "LocalLib/DallasTemperatureBus.h"
@@ -440,6 +441,48 @@ void testFrontPanelLeafDecreaseDispatch() {
           "KEY-page K3 identification no longer resolves to key 3");
 }
 
+void testRetiredMotionMenuAlias() {
+  require(canonicalMenuPage(PAGE_MOTION) == PAGE_KEYS &&
+              !retiredMenuPageAlias(PAGE_KEYS) &&
+              retiredMenuPageAlias(PAGE_MOTION),
+          "MOVE did not remain a direct-only KEY alias");
+
+  ControllerSettings visible{};
+  visible.visibleMenuMask = static_cast<std::uint16_t>(
+      _BV(PAGE_KEYS) | _BV(PAGE_MOTION));
+  require(visible.menuPageVisible(PAGE_KEYS) &&
+              !visible.menuPageVisible(PAGE_MOTION),
+          "retired MOVE stayed locally navigable beside KEY");
+
+  EEPROM.fill(0xFF);
+  SettingsStore legacy;
+  ControllerSettings &stored = legacy.values();
+  stored.displayBrightness = 5;
+  stored.motionBreakMs = 1;
+  stored.defaultMenuPage = PAGE_MOTION;
+  stored.visibleMenuMask = static_cast<std::uint16_t>(
+      _BV(PAGE_MOTION) | _BV(PAGE_RF));
+  const std::uint8_t packedOrder[] = {0x10, 0x32, 0x54, 0x76,
+                                      0x98, 0xBA, 0xDC};
+  std::copy(packedOrder,
+            packedOrder + sizeof(packedOrder) / sizeof(packedOrder[0]),
+            stored.menuOrder);
+  require(legacy.saveNow(), "legacy MENU fixture could not be persisted");
+
+  SettingsStore normalized;
+  require(normalized.begin(17), "legacy MENU fixture was rejected");
+  const ControllerSettings &settings = normalized.values();
+  require(settings.defaultMenuPage == PAGE_KEYS &&
+              settings.menuPageVisible(PAGE_KEYS) &&
+              !settings.menuPageVisible(PAGE_MOTION),
+          "persisted MOVE alias was not normalized to hidden KEY compatibility data");
+  require(settings.menuPageAtRank(9) == PAGE_MOTION &&
+              settings.menuPageAtRank(12) == PAGE_KEYS &&
+              settings.menuPageAtRank(13) == PAGE_RF,
+          "MOVE-to-KEY normalization disturbed the RF rank or duplicated KEY");
+  require(normalized.dirty(), "normalized legacy MENU record was not scheduled for rewrite");
+}
+
 void testDallasAbsentPullupBound() {
   arduino_mock::resetHardware();
   arduino_mock::portInput = 0; // Missing pull-up/stuck-low bus.
@@ -494,6 +537,7 @@ int main() {
     testDisplayBrightnessFade();
     testSemanticProtocolAndTemperatureRoles();
     testFrontPanelLeafDecreaseDispatch();
+    testRetiredMotionMenuAlias();
     testDallasAbsentPullupBound();
     testBuzzerTimerAndQueue();
     std::cout << "firmware_controls_tests: all checks passed\n";

@@ -46,7 +46,10 @@ func TestGenerateDefaultEEPROMIntelHexCreatesSafeCurrentSettings(t *testing.T) {
 		t.Fatalf("default motion break=%d ms, want 1", record[30])
 	}
 	decoded := decodeOfflineSettings(image)
-	if !decoded.Valid || decoded.Values.DefaultMenuPage != 0 || decoded.Values.VisibleMenuMask != DefaultVisibleMenuMask {
+	if !decoded.Valid || decoded.Values.DefaultMenuPage != 0 ||
+		decoded.Values.VisibleMenuMask != DefaultVisibleMenuMask ||
+		decoded.Values.VisibleMenuMask&(uint16(1)<<DefaultMenuPageMotionAlias) != 0 ||
+		decoded.Values.VisibleMenuMask&(uint16(1)<<9) == 0 {
 		t.Fatalf("generated default settings = %#v", decoded)
 	}
 	remotes := decodeOfflineRemotes(image)

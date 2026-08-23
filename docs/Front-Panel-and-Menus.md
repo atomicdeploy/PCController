@@ -484,8 +484,8 @@ reported as `Down`, not as the later physical `Click` classification.
 
 Motion and Push-relay control use true down/up behavior rather than repeated
 menu actions, so their output starts immediately after debounce and stops on
-release. The KEY identification page reports one classified press and
-suppresses ordinary hold repeat.
+release. The production `KEY` page maps the four keys directly to Side A/B
+Forward/Reverse motion.
 
 This is a non-negotiable responsiveness invariant. Future work must not move
 the initial action back to `Click`/`HoldStart`, debounce it twice, wait for a
@@ -502,7 +502,7 @@ latency regression.
 
 The current hierarchy has four category parents. On an ordinary leaf, K1/K2
 move through visible pages in that category, K3 goes Back, and K4 enters the
-page's editor/action. `KEY` owns all four keys for identification and `rELY`
+page's editor/action. `KEY` owns all four keys for motion and `rELY`
 owns K3 as immediate All Off. On a category parent, K1/K2 move among non-empty
 categories, K4 enters the first visible child in EEPROM order, and K3 returns
 to the previously active leaf. Navigation wraps. A page/category label is
@@ -515,10 +515,10 @@ additional stable page IDs:
 |---|---|---|
 | Monitoring | `door` | 0 `door`, 1 `VOLT`, 2 `CURR`, 3 `tLED`, 4 `tBT` |
 | Environment | `LItE` | 5 `LItE`, 6 `bEEP` |
-| Outputs | `PWM` | 7 `PWM`, 8 `rELY`, 10 `uPWM`, 11 `r5-8`, 12 `MOVE` |
+| Outputs | `PWM` | 7 `PWM`, 8 `rELY`, 10 `uPWM`, 11 `r5-8` |
 | Inputs/RF | `KEY` | 9 `KEY`, 13 `LErn` |
 
-| ID | Label | What the display shows | K3/K4 behavior |
+| ID | Label | What the display shows | Key behavior |
 |---:|---|---|---|
 | 0 | `door` | Door `OPEN` or `CLSd` | K3 Back; K4 currently gives the common read-only error cue |
 | 1 | `VOLT` | INA219 supply voltage using 0-2 configured decimals | K3 Back; K4 read-only error cue |
@@ -529,15 +529,21 @@ additional stable page IDs:
 | 6 | `bEEP` | `Mute` or `bEEP` | K3 Back; K4 opens Board Settings editor |
 | 7 | `PWM` | Alternates channel (`P-00`..`P-15`) and current 0-4095 value | K3 Back; K4 opens all-channel commissioning editor |
 | 8 | `rELY` | Alternates selected R1-R8 and Off/On | K3 immediately turns all relays off; K4 first turns all relays off, then opens commissioning |
-| 9 | `KEY` | `KEY`, then the identified number for about 900 ms | K1-K4 identify 1-4; double-click K1 returns to the configured default page |
+| 9 | `KEY` | `KEY`, then live relay mask while moving | K1-K4 control Side A Forward/Reverse and Side B Forward/Reverse |
 | 10 | `uPWM` | Alternates user channel 1-8 and its stored 8-bit value | K3 Back; K4 opens persistent user-PWM editor |
 | 11 | `r5-8` | Active R5-R8 mask as 0-15 | K3 Back; K4 opens general-relay control |
-| 12 | `MOVE` | Door `OPEN` or `CLSd` | K3 Back; K4 enters motion if the configured door policy permits it |
+| 12 | `MOVE` | Retired wire alias; never separately browsable | Direct `MENU_SET_PAGE 12` selects page 9 `KEY` |
 | 13 | `LErn` | Learned RF count, or unavailable dashes | K3 Back; K4 starts the default indefinite, multi-code learning session |
 
 The board-authoritative `MenuList` opcode returns these 14 dense IDs,
-program-mode IDs, and four-character labels in pages. Category membership is
-the fixed mapping above and is not part of that six-byte entry. The retired
+program-mode IDs, and four-character labels in pages. ID 12 remains `MOVE`
+for cursor and client compatibility, but reports the `KEY` program-mode ID;
+it is a direct selector alias rather than a second local page. The persistent
+layout always clears visibility bit 12. On an older persisted/layout-write
+mask that sets bit 12, firmware promotes it to bit 9 and, when 9 was hidden,
+swaps the stored 9/12 ranks so the effective `KEY` position is preserved
+without moving `LErn`/RF or any other page. Category membership is the fixed
+mapping above and is not part of that six-byte entry. The retired
 `bt` page was the redundant BT Audio **connection-state** page and remains
 removed: BT input sensing, telemetry/events, automations, host monitoring, and
 RGB status convey that state. The distinct `tBT` page above is intentionally
@@ -680,7 +686,8 @@ menu state, not an EEPROM setting.
 
 ### Two-side motion control
 
-Enter from `MOVE` with K4 when the EEPROM motion-door policy allows it:
+Enter the unified `KEY` page when the EEPROM motion-door policy allows it.
+The first physical Down enters motion and actuates immediately:
 
 | Key | While held |
 |---:|---|
@@ -689,12 +696,14 @@ Enter from `MOVE` with K4 when the EEPROM motion-door policy allows it:
 | 3 | Side B Forward |
 | 4 | Side B Reverse |
 
-Release stops that side. Hold K1+K2 or K3+K4 together for 600 ms to stop all
-relays and exit. A door-close edge exits a local motion session and returns to
+Release stops that side. Hold any single key, K1+K2, K3+K4, or all four for
+the configured motion-exit duration (factory 2 seconds) to stop all relays and
+return to `door`. Opposing-key chords stop immediately while the exit timer
+completes. A door-close edge exits a local motion session and returns to
 the default page. The locally and host-configurable policy is Always, Closed
 only, Open only, or Never; the erased/factory default is Always. Edit it as
 item 8 (`SAFE`) in Board Settings. Host/API motion that is not running through
-the local MOVE page follows the same selected policy.
+the local KEY page follows the same selected policy.
 
 ### Save and discard
 
@@ -804,7 +813,7 @@ independently false. New/default configurations get both `CFG` items. Existing
 user-customized `host_menus` arrays are not silently rewritten, so users may
 add the service item explicitly if they want it on an older custom panel.
 
-Local `door`, measurements, lighting, key identification, user relays, motion,
+Local `door`, measurements, lighting, user relays, motion,
 and RF learning remain available without a PC. The host adds richer labels,
 search, graphs, exact numeric controls, and automation without replacing the
 firmware's offline safety behavior. Future size tradeoffs must follow
