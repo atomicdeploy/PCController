@@ -1795,9 +1795,9 @@ func (model Model) completionView() string {
 }
 
 func (model Model) footer() string {
-	left := "←/→ tabs or value  ↑/↓ navigate  Enter activate  ~ terminal  Ctrl+C quit  Mouse enabled"
+	left := "←/→ tabs or value  ↑/↓ navigate  Enter activate  ~ terminal  q/Ctrl+C quit  Mouse enabled"
 	if model.terminalIsVisible() {
-		left = "Terminal visible · ~ hide  Tab/→ complete  Ctrl+C quit  Mouse enabled"
+		left = "Terminal visible · ~ hide  Tab/→ complete  q/Ctrl+C quit  Mouse enabled"
 	}
 	if model.portOwner != nil {
 		left = "Serial busy · Ctrl+F show owner · Ctrl+W ask close · Ctrl+T twice to terminate · primary controller protected"

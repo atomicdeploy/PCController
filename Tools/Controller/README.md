@@ -413,7 +413,8 @@ Ctrl+R    pulse DTR and RTS
 Ctrl+F    bring a diagnosed serial-port owner window to the foreground
 Ctrl+W    ask a diagnosed serial-port owner window to close gracefully
 Ctrl+T    press twice within five seconds to terminate a diagnosed owner
-Ctrl+C    exit
+q         exit when the TUI command prompt is empty and no editor/picker owns focus
+Ctrl+C    exit from any TUI state
 Up/Down  shell history
 Tab       command completion
 PgUp/Dn  scroll the event log
