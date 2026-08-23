@@ -232,7 +232,6 @@ void programService(uint32_t at) {
         break;
       case MODE_FAULT:
         display.showText(commonText(TextError));
-        buzzer.error();
         break;
       default:
         break;
@@ -477,10 +476,8 @@ void finishEditTransaction(bool save, uint32_t at) {
   flashMessageSaved = save;
   flashMessageEndsAt = at + 900;
   if (save) {
-    buzzer.success();
     statusLeds.playCue(StatusLedCue::Save, 900, at);
   } else {
-    buzzer.error();
     statusLeds.playCue(StatusLedCue::Discard, 900, at);
   }
   modeManager.transitionTo(MODE_FLASH_MESSAGE);
@@ -536,7 +533,6 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   // RF, and host actions.
   if (modeManager.current() == MODE_KEYS) {
     if (!relays.motionAllowed()) {
-      buzzer.error();
       return;
     }
     relays.allOff(actionNow);
@@ -755,6 +751,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       // Motion feedback is emitted when the relay sequencer commits the new
       // state; do not start a generic menu tone ahead of it.
       menuVisualFeedback(fromRemote);
+      if (!accepted) {
+        buzzer.beep();
+      }
       return;
     }
 
@@ -800,6 +799,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       break;
   }
 
+  bool outputAction = false;
   switch (action) {
     case MENU_PREVIOUS:
 #if PCCONTROLLER_MENU_VISIBILITY
@@ -860,6 +860,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (menuPage == PAGE_RELAY) {
         relays.allOff(actionNow);
         modeManager.transitionTo(MODE_RELAY_CHANNEL_EDIT);
+        outputAction = true;
       } else if (menuPage == PAGE_USER_PWM) {
         beginEditTransaction(MODE_USER_PWM);
         for (uint8_t channel = 0; channel < 8; ++channel) {
@@ -876,12 +877,14 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         display.showText(commonText(TextError));
         menuLabelEndsAt = actionNow + 650;
         statusLeds.playCue(StatusLedCue::Discard, 650, actionNow);
-        buzzer.error();
         return;
       }
       break;
   }
-  menuFeedback(fromRemote);
+  menuVisualFeedback(fromRemote);
+  if (!outputAction) {
+    buzzer.beep();
+  }
 }
 
 // Applies one physical or injected lifecycle without duplicating the local
@@ -976,9 +979,11 @@ void serviceSystemInputs(uint32_t at) {
   bool value;
   if (systemInputs.consumeDoorChange(value)) {
     appEvents.door(value);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().doorAudioEnabled()) {
-      buzzer.beep(45, value ? 1700 : 1100);
+      audioCues.play(value ? AudioCue::DoorOpen : AudioCue::DoorClosed);
     }
+#endif
     static_assert(static_cast<uint8_t>(StatusLedCue::DoorClosed) ==
                       static_cast<uint8_t>(StatusLedCue::DoorOpen) + 1U,
                   "door cues must remain adjacent");

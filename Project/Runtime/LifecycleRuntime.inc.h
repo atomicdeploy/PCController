@@ -24,6 +24,9 @@ static inline __attribute__((always_inline)) void initializeController() {
   relays.begin(startupNow);
   systemInputs.begin(shiftRegisters.rawInputs(), startupNow);
   buzzer.begin();
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
+  audioCues.begin();
+#endif
   AddressableLeds::begin();
   loadIlluminationSettings();
 #if PCCONTROLLER_ENABLE_EEPROM_MENU_LABELS
@@ -151,7 +154,6 @@ static inline __attribute__((always_inline)) void serviceController() {
   static uint32_t lastHotAlertAt = 0;
   if (hot && (!hotReported ||
               static_cast<uint32_t>(loopNow - lastHotAlertAt) >= 10000UL)) {
-    buzzer.error();
     lastHotAlertAt = loopNow;
   }
   if (hot != hotReported) {
@@ -204,10 +206,14 @@ static inline __attribute__((always_inline)) void serviceController() {
   const uint8_t relayMask = relays.activeRelayMask();
   if (relayMask != lastRelayMask) {
     appEvents.relay(relayMask);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().relayAudioEnabled() &&
         ((relayMask ^ lastRelayMask) & 0xFAU) != 0) {
-      buzzer.beep(35, (relayMask & ~lastRelayMask) != 0 ? 1900 : 1250);
+      audioCues.play((relayMask & ~lastRelayMask) != 0
+                         ? AudioCue::OutputOn
+                         : AudioCue::OutputOff);
     }
+#endif
     settingsStore.values().relayRestoreMask = relayMask;
     settingsStore.markDirty(loopNow);
     lastRelayMask = relayMask;
