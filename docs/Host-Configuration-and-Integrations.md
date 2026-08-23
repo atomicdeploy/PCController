@@ -79,15 +79,28 @@ or Windows PnP instance ID. The shipped defaults identify the observed CH340
 as VID `1A86`, PID `7523`, and friendly name `USB-SERIAL CH340`; flags and the
 host file can override all three. After a successful native `HELLO`, the host
 stores the stable identity and prefers it on the next launch. A unique match is
-selected automatically; ambiguous matches are shown for selection.
+selected automatically; ambiguous matches are shown for selection. After an
+authenticated USB device disappears, its stale COM name may be rebound to a
+new assignment only when its serial/PnP identity still matches or its
+VID/PID/friendly-name combination has exactly one present match. Initial and
+user-requested explicit opens remain strict.
 
 The first long-running host becomes the primary process and is the only process
 that opens the serial port. Later CLI or UI instances use its IPC service. An
 explicit Close pauses reconnect until Open is requested. On Windows, registry
 change notifications from the Plug-and-Play serial map drive arrival/removal;
-the fallback retry is used only when native notification cannot be established.
+the retry path is exponential from `connection.reconnect_initial_ms` (500 ms by
+default) through `connection.reconnect_maximum_ms` (15 seconds by default).
+`--reconnect-initial` / `--reconnect-maximum` override the file, and
+`PCCONTROLLER_RECONNECT_INITIAL_MS` /
+`PCCONTROLLER_RECONNECT_MAXIMUM_MS` provide the environment layer. A PnP
+change wakes discovery immediately and resets the delay. Repeated identical
+connection states are not broadcast, preventing disconnected/scanning flicker.
 Connection lifecycle events are available to the TUI, scripts, IPC, WebSocket,
 and host automations.
+
+Live acceptance and remaining platform verification are tracked by
+[#51](https://github.com/atomicdeploy/PCController/issues/51).
 
 The serial driver opens with DTR and RTS inactive. If
 `reset_on_reconnect=true`, only a genuine physical reappearance may issue one

@@ -17,12 +17,14 @@ import (
 )
 
 type Options struct {
-	Filter           ports.Filter
-	BaudRate         int
-	StartupWait      time.Duration
-	RequestTimeout   time.Duration
-	HelloAttempts    int
-	ResetOnReconnect bool
+	Filter                ports.Filter
+	BaudRate              int
+	StartupWait           time.Duration
+	RequestTimeout        time.Duration
+	HelloAttempts         int
+	ResetOnReconnect      bool
+	ReconnectInitialDelay time.Duration
+	ReconnectMaximumDelay time.Duration
 }
 
 type Snapshot struct {
@@ -129,6 +131,17 @@ type rfClickState struct {
 	event      native.DeviceEvent
 }
 
+type connectionEventSignature struct {
+	Lifecycle  string
+	State      string
+	Reason     string
+	Port       string
+	VID        string
+	PID        string
+	Serial     string
+	InstanceID string
+}
+
 type Runtime struct {
 	options Options
 
@@ -155,6 +168,7 @@ type Runtime struct {
 	connectionUpdated      time.Time
 	reconnectEpoch         uint64
 	resetIssued            bool
+	portRebindAllowed      bool
 	deviceObserver         func(ports.Info, native.Hello)
 	connectionReadyHandler func(ports.Info, native.Hello)
 	beforeDisconnect       func(string)
@@ -206,15 +220,22 @@ type Runtime struct {
 	hostMenuRequestHandler func(native.HostMenuContentRequest)
 	portProcess            PortProcessSnapshot
 	portMonitorStarted     bool
+	connectionEventMu      sync.Mutex
+	connectionEvents       map[string]connectionEventSignature
 }
 
-const programStateHeartbeatPeriod = 2 * time.Second
+const (
+	programStateHeartbeatPeriod  = 2 * time.Second
+	defaultReconnectInitialDelay = 500 * time.Millisecond
+	defaultReconnectMaximumDelay = 15 * time.Second
+)
 
 func New(options Options) *Runtime {
 	options = normalizedOptions(options)
 	runtime := &Runtime{
 		options: options, events: make(chan Event, 512),
 		eventNotify:        make(chan struct{}),
+		connectionEvents:   make(map[string]connectionEventSignature),
 		connectionState:    "disconnected",
 		connectionUpdated:  time.Now(),
 		historyRetention:   24 * time.Hour,
@@ -343,6 +364,15 @@ func normalizedOptions(options Options) Options {
 	}
 	if options.HelloAttempts == 0 {
 		options.HelloAttempts = 3
+	}
+	if options.ReconnectInitialDelay <= 0 {
+		options.ReconnectInitialDelay = defaultReconnectInitialDelay
+	}
+	if options.ReconnectMaximumDelay <= 0 {
+		options.ReconnectMaximumDelay = defaultReconnectMaximumDelay
+	}
+	if options.ReconnectMaximumDelay < options.ReconnectInitialDelay {
+		options.ReconnectMaximumDelay = options.ReconnectInitialDelay
 	}
 	return options
 }
@@ -659,14 +689,23 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 	}
 	previous.ResetOnReconnect = options.ResetOnReconnect
 	previous.Filter.Preferred = options.Filter.Preferred
+	previous.ReconnectInitialDelay = options.ReconnectInitialDelay
+	previous.ReconnectMaximumDelay = options.ReconnectMaximumDelay
 	if previous == options {
 		runtime.mu.Lock()
 		runtime.options.ResetOnReconnect = options.ResetOnReconnect
 		runtime.options.Filter.Preferred = options.Filter.Preferred
+		runtime.options.ReconnectInitialDelay = options.ReconnectInitialDelay
+		runtime.options.ReconnectMaximumDelay = options.ReconnectMaximumDelay
 		runtime.mu.Unlock()
 		runtime.publish(
 			"config",
-			fmt.Sprintf("reset_on_reconnect=%t applied without reconnect", options.ResetOnReconnect),
+			fmt.Sprintf(
+				"connection retry policy applied without reconnect: reset_on_reconnect=%t initial=%s maximum=%s",
+				options.ResetOnReconnect,
+				options.ReconnectInitialDelay,
+				options.ReconnectMaximumDelay,
+			),
 			native.Frame{},
 		)
 		return true
@@ -681,6 +720,7 @@ func (runtime *Runtime) ApplyOptions(options Options) bool {
 	runtime.reconnectEpoch++
 	epoch := runtime.reconnectEpoch
 	runtime.resetIssued = true // A configuration reload is not a USB reappearance.
+	runtime.portRebindAllowed = false
 	runtime.mu.Unlock()
 	runtime.publish(
 		"config",
@@ -719,6 +759,7 @@ func (runtime *Runtime) Reconnect(ctx context.Context, reason string) error {
 	runtime.reconnectEpoch++
 	epoch := runtime.reconnectEpoch
 	runtime.resetIssued = true
+	runtime.portRebindAllowed = false
 	port := runtime.port
 	runtime.mu.Unlock()
 	runtime.publishConnection("reconnecting", port, reason)
@@ -966,12 +1007,54 @@ func (runtime *Runtime) currentSession() *link.Session {
 }
 
 func (runtime *Runtime) discoveryOptions(options Options) link.DiscoveryOptions {
-	return link.DiscoveryOptions{
-		Filter: options.Filter, BaudRate: options.BaudRate,
-		StartupWait: options.StartupWait, RequestTimeout: options.RequestTimeout,
-		HelloAttempts:  options.HelloAttempts,
-		ResetAfterOpen: runtime.resetAfterOpen,
+	runtime.mu.RLock()
+	allowPortRebind := runtime.connectionState == "reconnecting" &&
+		runtime.session == nil && runtime.portRebindAllowed && runtime.port.IsUSB
+	lastPort := runtime.port
+	runtime.mu.RUnlock()
+	filter := options.Filter
+	if allowPortRebind {
+		filter.Preferred = mergeObservedDeviceIdentity(filter.Preferred, lastPort)
 	}
+	return link.DiscoveryOptions{
+		Filter: filter, BaudRate: options.BaudRate,
+		StartupWait: options.StartupWait, RequestTimeout: options.RequestTimeout,
+		HelloAttempts:   options.HelloAttempts,
+		ResetAfterOpen:  runtime.resetAfterOpen,
+		AllowPortRebind: allowPortRebind,
+	}
+}
+
+func mergeObservedDeviceIdentity(
+	preferred ports.Identity,
+	observed ports.Info,
+) ports.Identity {
+	if value := strings.TrimSpace(observed.Name); value != "" {
+		preferred.Port = value
+	}
+	if value := strings.TrimSpace(observed.VID); value != "" {
+		preferred.VID = value
+	}
+	if value := strings.TrimSpace(observed.PID); value != "" {
+		preferred.PID = value
+	}
+	if value := strings.TrimSpace(observed.SerialNumber); value != "" {
+		preferred.SerialNumber = value
+	}
+	if value := strings.TrimSpace(observed.InstanceID); value != "" {
+		preferred.InstanceID = value
+	}
+	for _, value := range []string{
+		observed.FriendlyName,
+		observed.Product,
+		observed.Manufacturer,
+	} {
+		if value = strings.TrimSpace(value); value != "" {
+			preferred.Name = value
+			break
+		}
+	}
+	return preferred
 }
 
 // resetAfterOpen consumes the reconnect reset permit before pulsing. Failed
@@ -1012,9 +1095,22 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	runtime.connectionReason = ""
 	runtime.connectionUpdated = time.Now()
 	runtime.reconnectEpoch++
+	runtime.portRebindAllowed = false
 	observer := runtime.deviceObserver
 	ready := runtime.connectionReadyHandler
 	runtime.mu.Unlock()
+
+	lifecycle := "connect"
+	if reconnected {
+		lifecycle = "reconnected"
+	}
+	// Publish the authoritative connected state before callbacks or the pump can
+	// observe a rapidly disappearing transport. This prevents an older
+	// reconnecting event from landing after the new connected generation.
+	runtime.publishConnection(lifecycle, result.Port, "")
+	if result.Port.IsUSB {
+		runtime.publishUSBConnection("usb.reconnected", lifecycle, result.Port, "", "connected")
+	}
 
 	if observer != nil {
 		observer(result.Port, result.Hello)
@@ -1026,16 +1122,6 @@ func (runtime *Runtime) attach(result link.OpenResult) {
 	go runtime.syncProgramState(runtime.ProgramState(), "connected")
 	go runtime.provisionDefaultStatusProfiles(generation)
 	go runtime.programStateHeartbeat(generation)
-
-	lifecycle := "connect"
-	if reconnected {
-		lifecycle = "reconnected"
-	}
-	runtime.publishConnection(
-		lifecycle,
-		result.Port,
-		"",
-	)
 }
 
 // provisionDefaultStatusProfiles installs the Go-owned factory table only
@@ -1309,12 +1395,16 @@ func (runtime *Runtime) detachReason(pause bool, reason string) error {
 	runtime.connectionState = "disconnected"
 	runtime.connectionReason = reason
 	runtime.connectionUpdated = time.Now()
+	runtime.portRebindAllowed = false
 	runtime.mu.Unlock()
 	if session == nil {
 		return nil
 	}
 	err := session.Close()
 	runtime.publishConnection("disconnect", port, reason)
+	if port.IsUSB {
+		runtime.publishUSBConnection("usb.disconnected", "disconnect", port, reason, "disconnected")
+	}
 	return err
 }
 
@@ -1507,11 +1597,20 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				runtime.reconnectEpoch++
 				epoch = runtime.reconnectEpoch
 				runtime.resetIssued = false
+				runtime.portRebindAllowed = port.IsUSB
 			}
 			runtime.mu.Unlock()
 			if owned {
 				runtime.markRFLearningDisconnected("device disconnected")
-				runtime.publishConnection("disconnect", port, disconnectReason)
+				if port.IsUSB {
+					runtime.publishUSBConnection(
+						"usb.disconnected", "disconnect", port,
+						disconnectReason, "disconnected",
+					)
+				}
+				// The runtime transitions directly to reconnecting. Publishing a
+				// transient generic disconnected state made TUI/Web clients flicker
+				// even though automatic recovery was already active.
 				runtime.publishConnection("reconnecting", port, disconnectReason)
 				go runtime.autoReconnect(epoch)
 			}
@@ -1527,15 +1626,20 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 	if watchErr != nil {
 		runtime.publish(
 			"error",
-			"serial device notifications unavailable; using safety retry: "+
+			"serial device notifications unavailable; using bounded retry: "+
 				watchErr.Error(),
 			native.Frame{},
 		)
 	}
 	activityCheck := time.NewTicker(500 * time.Millisecond)
 	defer activityCheck.Stop()
-	safetyRetry := time.NewTimer(30 * time.Second)
-	defer safetyRetry.Stop()
+	retryTimer := time.NewTimer(time.Hour)
+	if !retryTimer.Stop() {
+		<-retryTimer.C
+	}
+	defer retryTimer.Stop()
+	var retry <-chan time.Time
+	delay := time.Duration(0)
 	attempt := true
 	for {
 		runtime.mu.RLock()
@@ -1564,21 +1668,15 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 				return
 			}
 			if err != nil {
-				reason := err.Error()
-				runtime.mu.Lock()
-				changed := runtime.reconnectEpoch == epoch &&
-					runtime.connectionState == "reconnecting" &&
-					runtime.connectionReason != reason
-				if changed {
-					runtime.connectionReason = reason
-					runtime.connectionUpdated = time.Now()
-				}
-				port := runtime.port
-				runtime.mu.Unlock()
-				if changed {
-					runtime.publishConnection("reconnecting", port, reason)
-				}
+				runtime.publishReconnectFailure(epoch, err.Error())
 			}
+			delay = nextReconnectDelay(
+				delay,
+				options.ReconnectInitialDelay,
+				options.ReconnectMaximumDelay,
+			)
+			retryTimer.Reset(delay)
+			retry = retryTimer.C
 		}
 
 		select {
@@ -1586,14 +1684,63 @@ func (runtime *Runtime) autoReconnect(epoch uint64) {
 			if !ok {
 				changes = nil
 			}
+			if retry != nil && !retryTimer.Stop() {
+				select {
+				case <-retryTimer.C:
+				default:
+				}
+			}
+			retry = nil
+			delay = 0
 			attempt = true
 		case <-activityCheck.C:
 			// Re-check epoch/pause state without periodically enumerating.
-		case <-safetyRetry.C:
+		case <-retry:
+			retry = nil
 			attempt = true
-			safetyRetry.Reset(30 * time.Second)
 		}
 	}
+}
+
+func nextReconnectDelay(current, initial, maximum time.Duration) time.Duration {
+	if initial <= 0 {
+		initial = defaultReconnectInitialDelay
+	}
+	if maximum <= 0 {
+		maximum = defaultReconnectMaximumDelay
+	}
+	if maximum < initial {
+		maximum = initial
+	}
+	if current < initial {
+		return initial
+	}
+	if current >= maximum || current > maximum/2 {
+		return maximum
+	}
+	next := current * 2
+	if next > maximum {
+		return maximum
+	}
+	return next
+}
+
+// publishReconnectFailure updates and emits one failure only while its epoch
+// still owns the reconnecting state. Keeping the runtime lock through event
+// publication prevents a stale failure from landing after a successful attach.
+func (runtime *Runtime) publishReconnectFailure(epoch uint64, reason string) bool {
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	if runtime.reconnectEpoch != epoch ||
+		runtime.connectionState != "reconnecting" ||
+		runtime.paused || runtime.session != nil ||
+		runtime.connectionReason == reason {
+		return false
+	}
+	runtime.connectionReason = reason
+	runtime.connectionUpdated = time.Now()
+	runtime.publishConnection("reconnecting", runtime.port, reason)
+	return true
 }
 
 func (runtime *Runtime) observe(frame native.Frame) {
@@ -1965,13 +2112,55 @@ func (runtime *Runtime) publish(kind, text string, frame native.Frame) {
 	runtime.publishEvent(event)
 }
 
-func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, reason string) {
+func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, reason string) bool {
 	state := lifecycle
 	if lifecycle == "connect" || lifecycle == "reconnected" {
 		state = "connected"
 	} else if lifecycle == "disconnect" {
 		state = "disconnected"
 	}
+	return runtime.publishConnectionEvent(
+		"connection", lifecycle, port, reason, state,
+	)
+}
+
+func (runtime *Runtime) publishUSBConnection(
+	kind string,
+	lifecycle string,
+	port ports.Info,
+	reason string,
+	state string,
+) bool {
+	return runtime.publishConnectionEvent(kind, lifecycle, port, reason, state)
+}
+
+func (runtime *Runtime) publishConnectionEvent(
+	kind string,
+	lifecycle string,
+	port ports.Info,
+	reason string,
+	state string,
+) bool {
+	signature := connectionEventSignature{
+		Lifecycle: lifecycle, State: state, Reason: reason,
+		Port: port.Name, VID: port.VID, PID: port.PID,
+		Serial: port.SerialNumber, InstanceID: port.InstanceID,
+	}
+	deduplicationKey := kind
+	if strings.HasPrefix(kind, "usb.") {
+		deduplicationKey = "usb"
+	}
+	runtime.connectionEventMu.Lock()
+	if runtime.connectionEvents == nil {
+		runtime.connectionEvents = make(map[string]connectionEventSignature)
+	}
+	if previous, ok := runtime.connectionEvents[deduplicationKey]; ok && previous == signature {
+		runtime.connectionEventMu.Unlock()
+		return false
+	}
+	runtime.connectionEvents[deduplicationKey] = signature
+	runtime.connectionEventMu.Unlock()
+
 	text := lifecycle
 	if port.Name != "" {
 		text += " " + port.Name
@@ -1979,10 +2168,16 @@ func (runtime *Runtime) publishConnection(lifecycle string, port ports.Info, rea
 	if reason != "" {
 		text += ": " + reason
 	}
-	runtime.publishEvent(Event{
-		Kind: "connection", Text: text,
+	event := Event{
+		Kind: kind, Text: text,
 		Lifecycle: lifecycle, Port: port, Reason: reason, State: state,
-	})
+	}
+	if strings.HasPrefix(kind, "usb.") {
+		event.Source = "host"
+		event.Target = "app.clients"
+	}
+	runtime.publishEvent(event)
+	return true
 }
 
 func (runtime *Runtime) publishEvent(event Event) Event {
