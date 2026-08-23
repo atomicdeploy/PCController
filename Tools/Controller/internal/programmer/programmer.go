@@ -853,7 +853,9 @@ func BackupWithRunner(
 			return
 		}
 		fmt.Fprintln(output, command.String())
-		if runErr := runner.Run(ctx, command, output); runErr != nil {
+		if runErr := runBackupCommandWithPortReleaseRetry(
+			ctx, options.Method, command, output, runner,
+		); runErr != nil {
 			failures = append(failures, fmt.Errorf("%s: %w", kind, runErr))
 			manifest.Errors = append(manifest.Errors, failures[len(failures)-1].Error())
 			return
