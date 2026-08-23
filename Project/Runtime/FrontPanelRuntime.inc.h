@@ -232,7 +232,6 @@ void programService(uint32_t at) {
         break;
       case MODE_FAULT:
         display.showText(commonText(TextError));
-        buzzer.error();
         break;
       default:
         break;
@@ -304,11 +303,13 @@ void programService(uint32_t at) {
 }
 
 // Emits one canonical audio acknowledgement for physical, RF, and host input.
-void menuFeedback(bool fromRemote) {
+void menuFeedback(bool fromRemote, bool audio = true) {
   statusLeds.playCue(fromRemote ? StatusLedCue::Radio
                                 : StatusLedCue::Menu,
                      260, now);
-  buzzer.beep();
+  if (audio) {
+    buzzer.beep();
+  }
 }
 
 // Rolls an 8-bit brightness by the configured front-panel step.
@@ -466,10 +467,8 @@ void finishEditTransaction(bool save, uint32_t at) {
   flashMessageSaved = save;
   flashMessageEndsAt = at + 900;
   if (save) {
-    buzzer.success();
     statusLeds.playCue(StatusLedCue::Save, 900, at);
   } else {
-    buzzer.error();
     statusLeds.playCue(StatusLedCue::Discard, 900, at);
   }
   modeManager.transitionTo(MODE_FLASH_MESSAGE);
@@ -525,7 +524,6 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
   // RF, and host actions.
   if (modeManager.current() == MODE_KEYS) {
     if (!relays.motionAllowed()) {
-      buzzer.error();
       return;
     }
     relays.allOff(actionNow);
@@ -724,7 +722,9 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         setSelectedUserRelay(true, actionNow);
       }
-      menuFeedback(fromRemote);
+      // Relay edge feedback is emitted from the authoritative output mask.
+      // Do not enqueue an earlier generic key beep ahead of that exact cue.
+      menuFeedback(fromRemote, false);
       return;
 
     case MODE_MOTION_CONTROL: {
@@ -739,7 +739,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         remoteMomentaryValue = side;
         remoteMomentaryEndsAt = actionNow + 350;
       }
-      menuFeedback(fromRemote);
+      menuFeedback(fromRemote, !accepted);
       return;
     }
 
@@ -774,13 +774,15 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         setSelectedRelay(action == MENU_INCREASE, actionNow);
       }
-      menuFeedback(fromRemote);
+      menuFeedback(fromRemote,
+                   action == MENU_PREVIOUS || action == MENU_NEXT);
       return;
 
     default:
       break;
   }
 
+  bool outputAction = false;
   switch (action) {
     case MENU_PREVIOUS:
 #if PCCONTROLLER_MENU_VISIBILITY
@@ -817,6 +819,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       if (leafDecreaseAction(modeManager.current()) ==
           LeafDecreaseAction::AllRelaysOff) {
         relays.allOff(actionNow);
+        outputAction = true;
 #if PCCONTROLLER_MENU_HIERARCHY
       } else {
         menuTreeState = static_cast<uint8_t>(
@@ -839,6 +842,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else if (menuPage == PAGE_RELAY) {
         relays.allOff(actionNow);
         modeManager.transitionTo(MODE_RELAY_CHANNEL_EDIT);
+        outputAction = true;
       } else if (menuPage == PAGE_USER_PWM) {
         beginEditTransaction(MODE_USER_PWM);
         for (uint8_t channel = 0; channel < 8; ++channel) {
@@ -855,12 +859,11 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
         display.showText(commonText(TextError));
         menuLabelEndsAt = actionNow + 650;
         statusLeds.playCue(StatusLedCue::Discard, 650, actionNow);
-        buzzer.error();
         return;
       }
       break;
   }
-  menuFeedback(fromRemote);
+  menuFeedback(fromRemote, !outputAction);
 }
 
 // Applies one physical or injected lifecycle without duplicating the local
@@ -955,9 +958,11 @@ void serviceSystemInputs(uint32_t at) {
   bool value;
   if (systemInputs.consumeDoorChange(value)) {
     appEvents.door(value);
+#if PCCONTROLLER_ENABLE_LOCAL_AUDIO_CUES
     if (settingsStore.values().doorAudioEnabled()) {
-      buzzer.beep(45, value ? 1700 : 1100);
+      audioCues.play(value ? AudioCue::DoorOpen : AudioCue::DoorClosed);
     }
+#endif
     statusLeds.playCue(value ? StatusLedCue::DoorOpen
                              : StatusLedCue::DoorClosed,
                        720, at);

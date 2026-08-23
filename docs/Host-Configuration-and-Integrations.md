@@ -223,6 +223,22 @@ implementation preference.
 }
 ```
 
+The host keeps the historical rich feedback catalog as immutable named
+fallbacks. Watched configuration may override a name, but omission restores
+the exact definition instead of losing a melody that was moved out of AVR
+flash. Availability does not force playback: buzzer routing and global board
+Silent remain authoritative.
+
+| Name | Exact host-owned sequence |
+|---|---|
+| `finish` | 659 Hz/100 ms, 784 Hz/100 ms, 880 Hz/250 ms |
+| `lost` | 392, 330, 262, 196 Hz; 100 ms each |
+| `incorrect-beep` | Three 2,000 Hz/100 ms notes with 100 ms gaps |
+| `error-beep` | Five 2,000 Hz/10 ms notes with 10 ms gaps |
+| `fault-beep` | 1,000 Hz/250 ms, 500 Hz/500 ms, then 5 s gap |
+| `success-cue` | 1,047 Hz/70 ms, 30 ms gap, 1,319 Hz/110 ms |
+| `error-cue` | 330 Hz/90 ms, 50 ms gap, 262 Hz/160 ms |
+
 The optional Windows native path calls the controller's Go WinRing0
 implementation directly and uses an explicitly configured directory containing
 `WinRing0x64.sys`; no

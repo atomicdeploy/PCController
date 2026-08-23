@@ -60,12 +60,31 @@ func TestOutputDefinitionValidation(t *testing.T) {
 	}
 }
 
-func TestEmptyOutputDefinitionsRemainEmpty(t *testing.T) {
+func TestMissingLegacyFeedbackMelodiesRecoverWithoutOverridingConfig(t *testing.T) {
 	value := Defaults()
-	value.Melodies = nil
+	value.Melodies = []Melody{{
+		Name:  FinishMelodyName,
+		Notes: []MelodyNote{{FrequencyHz: 440, DurationMS: 25}},
+	}}
 	value.StatusEffects = nil
-	if len(EffectiveMelodies(value)) != 0 ||
-		len(EffectiveStatusLEDEffects(value)) != 0 {
-		t.Fatal("empty output definitions were replaced with implicit defaults")
+	effective := EffectiveMelodies(value)
+	if len(effective) != len(BuiltInLegacyFeedbackMelodies()) ||
+		effective[0].Notes[0].FrequencyHz != 440 {
+		t.Fatalf("legacy catalog recovery replaced an override: %#v", effective)
+	}
+	if len(EffectiveStatusLEDEffects(value)) != 0 {
+		t.Fatal("empty status effects were replaced with implicit defaults")
+	}
+	foundErrorBeep := false
+	for _, melody := range effective {
+		if melody.Name == ErrorBeepMelodyName {
+			foundErrorBeep = len(melody.Notes) == 5 &&
+				melody.Notes[0].FrequencyHz == 2000 &&
+				melody.Notes[0].DurationMS == 10 &&
+				melody.Notes[0].GapMS == 10
+		}
+	}
+	if !foundErrorBeep {
+		t.Fatal("exact host-owned error-beep melody was not recovered")
 	}
 }

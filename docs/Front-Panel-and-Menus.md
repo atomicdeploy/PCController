@@ -19,7 +19,7 @@ and readback.
 | BT Audio indicator | 74HC165 bit 6 | Classifies the BT-5.0-Pro Audio LED as Off, On, or Blinking |
 | Door reed | 74HC165 bit 7 | Door events, illumination target, default-page return, motion handling |
 | Relays R1-R8 | Active-low 74HC595 outputs | Two interlocked motion sides plus four general outputs |
-| Buzzer | D9 / PB1 | Nonblocking Timer1 tones, boot melody, keys, door, relay, save/error cues |
+| Buzzer | D9 / PB1 | Nonblocking Timer1 engine; autonomous boot/key/door/output cues plus host-streamed named melodies |
 | Two DS18B20s | D10 / PB2 / CS | `Temperature LED` and `Temperature BT`; external 4.7 kOhm pull-up to VCC is required |
 | 433 MHz receive | D2 / INT0 | rc-switch receive, learning, repeat handling, mapped actions, events |
 | 433 MHz transmit | D3 / INT1 | Host/protocol transmission; receiver is paused only for the send |
@@ -325,8 +325,9 @@ and host presentation defaults in
 ### Buzzer, relays, illumination, and status-light profile
 
 The buzzer is fixed to D9/PB1/OC1A. Timer1 runs CTC with OCR1A as TOP and
-hardware-toggles OC1A, selecting the first usable prescaler from 1, 8, 64, 256,
-or 1024. No audio-rate interrupt runs, so tones cannot starve INT0/INT1 radio
+hardware-toggles OC1A with the fixed `/8` prescaler. At the required 16 MHz
+clock that covers the entire validated 20..20,000 Hz command range. No
+audio-rate interrupt runs, so tones cannot starve INT0/INT1 radio
 edges; Timer0 (`millis`/`micros`) and Timer2 remain untouched. The nonblocking
 queue holds ten frequency/duration steps, including zero-frequency pauses.
 The ordinary key cue is 40 ms at 2 kHz. Silent mode stops electrical tone
@@ -357,7 +358,7 @@ toward their new color instead of inserting a black or unrelated frame.
 |---|---|
 | Programming latch | Power indicator and RGB remain off until the host completes verify/reconnect/restore |
 | Fault, host offline, or Running with door open | Immediate hard red flash |
-| HOT | Orange/red breathing plus the configured audio warning |
+| HOT | Orange/red breathing plus a host-routable warning event |
 | RF learning | Violet breathing; received RF activity overlays a smooth violet cue |
 | Host status override | Host-supplied color/effect |
 | Running with door closed | Orange/yellow |
@@ -386,6 +387,8 @@ Safe changes:
   all-off logic together.
 
 Canonical sources: [TonePlayer.cpp](../LocalLib/TonePlayer.cpp),
+[AudioCues.cpp](../Project/AudioCues.cpp),
+[EepromLayout.h](../Project/EepromLayout.h),
 [RelayController.cpp](../Project/RelayController.cpp),
 [IlluminationController.cpp](../Project/IlluminationController.cpp), and
 [StatusLedController.cpp](../Project/StatusLedController.cpp).
@@ -715,8 +718,9 @@ entry. At the confirmation display:
 - A default-page double-click is accepted only on an ordinary leaf, so it
   cannot bypass an active editor or its Save/Discard decision.
 - `SAVE` or `diSC` flashes for about 900 ms.
-- Save uses a rising audio/RGB cue; Discard uses an error/descending cue.
-- Silent mode mutes the audio but not the visual cue.
+- Save and Discard keep their distinct RGB/result presentation. Their exact
+  `success-cue` and `error-cue` melodies are host-owned named definitions.
+- Silent mode mutes every board tone but never suppresses the visual cue.
 
 ### 433 MHz learning and mappings
 
@@ -1033,23 +1037,27 @@ The current logical EEPROM map is:
 
 | Range | Bytes | Owner |
 |---:|---:|---|
-| 0-31 | 32 | Unallocated |
-| 32-63 | 32 | Packed settings plus checksum |
-| 64-307 | 244 | RF header plus 20 learned records |
-| 308-319 | 12 | Unallocated |
-| 320-703 | 384 | 64-slot reset-count journal |
-| 704-950 | 247 | Nineteen status-effect condition descriptors plus CRCs |
-| 951-1023 | 73 | Unallocated |
+| 0-12 | 13 | Four autonomous audio descriptors plus CRC-8 |
+| 13-31 | 19 | Reserved for the broader startup/boot-opcode executor |
+| 32-72 | 41 | Current packed settings/board-name values plus CRC-8 |
+| 73 | 1 | Optional menu-label CRC header |
+| 74-79 | 6 | Unallocated alignment gap |
+| 80-323 | 244 | RF header plus 20 learned records |
+| 324-335 | 12 | Unallocated alignment gap |
+| 336-719 | 384 | 64-slot reset-count journal |
+| 720-966 | 247 | Nineteen status-effect condition descriptors plus CRCs |
+| 967-1023 | 57 | Fourteen packed menu labels plus commit byte |
 
-That leaves 117 logically unallocated bytes. The generated safe-default EEPROM
+That leaves 37 reserved or unallocated bytes outside current records. The
+generated safe-default EEPROM
 image still covers all 1,024 bytes so a programming/restore operation is
 deterministic; that does not make the erased regions owned records.
 
-The following requested behavior is **not** EEPROM-backed in this candidate:
+The following broader behavior is **not** EEPROM-backed in this candidate:
 
 | Area | What exists | What is still missing |
 |---|---|---|
-| Configurable buzzer cues | Global Silent plus door/relay enable bits; door and relay tones are fixed in flash | Persistent cue IDs or note/frequency/duration descriptors for door-open, door-close, relay-on, and relay-off |
+| Generic startup/event opcode executor | Door-open, door-close, output-on, and output-off frequency/duration values are already CRC-backed in EEPROM with exact compiled fallbacks | Bounded multi-step relay, PWM, display, RF, macro, and rich-melody actions triggered by startup or other events |
 | Board automation | Twenty RF records map codes directly to Key, Menu, Relay, Side, or PWM actions; host automations can consume events | A generic board rule table for door, BT Audio, relay, host-loss, temperature, RF transmit, macro start, or other opcode actions |
 
 Structured host-menu pull is also not implemented by the AVR: the current

@@ -70,11 +70,9 @@ void endLearning(uint8_t state, int8_t feedback) {
   }
   appEvents.rfLearning(state, learnedRemotes.count(), learningMode,
                        learningTotalSeconds, remaining);
-  if (feedback > 0) {
-    buzzer.success();
-  } else if (feedback < 0) {
-    buzzer.error();
-  }
+  // Rich completion/error melodies are host-owned; state remains explicit so
+  // connected clients can select and route the named melody consistently.
+  (void)feedback;
 }
 
 // Emits one MCU-timed timer update per changed second and closes at zero.

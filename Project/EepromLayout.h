@@ -5,6 +5,12 @@
 // Canonical MCU-owned layout. Invalid records are replaced with defaults;
 // firmware never carries a chain of development-layout migration handlers.
 namespace EepromLayout {
+// Compact autonomous door/output cues occupy the first startup-parameter
+// record. Bytes 13..31 remain reserved for the broader boot-opcode executor;
+// keeping the cue record here avoids the menu-label record at the EEPROM tail.
+constexpr int AudioCueAddress = 0;
+constexpr uint8_t AudioCueBytes = 13;
+constexpr int AudioCueEnd = AudioCueAddress + AudioCueBytes;
 constexpr int SettingsAddress = 32;
 constexpr uint8_t SettingsValueBytes = 40;
 constexpr uint8_t SettingsRecordBytes = SettingsValueBytes + 1;
@@ -52,6 +58,8 @@ constexpr int MenuLabelsEnd = MenuLabelsCommitAddress + 1;
 
 static_assert(SettingsEnd <= MenuLabelsHeaderAddress,
               "settings overlap menu-label header");
+static_assert(AudioCueEnd <= SettingsAddress,
+              "audio cues overlap canonical settings");
 static_assert(MenuLabelsHeaderEnd <= RemoteHeaderAddress,
               "menu-label header overlaps RF records");
 static_assert(RemoteEnd <= ResetJournalAddress,
