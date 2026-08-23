@@ -391,14 +391,14 @@ test('actuator-specific feedback is not preceded by the generic menu beep', asyn
 		new URL('../../Project/Runtime/FrontPanelRuntime.inc.h', import.meta.url),
 		'utf8'
 	)
-	assert.match(frontPanel, /void menuFeedback\(bool fromRemote, bool audio = true\)/u)
-	assert.match(frontPanel, /case MODE_USER_RELAYS:[^]*?menuFeedback\(fromRemote, false\);/u)
-	assert.match(frontPanel, /case MODE_MOTION_CONTROL:[^]*?menuFeedback\(fromRemote, false\);/u)
+	assert.match(frontPanel, /void menuVisualFeedback\(bool fromRemote\)/u)
+	assert.match(frontPanel, /case MODE_USER_RELAYS:[^]*?menuVisualFeedback\(fromRemote\);/u)
+	assert.match(frontPanel, /case MODE_MOTION_CONTROL:[^]*?menuVisualFeedback\(fromRemote\);/u)
 	assert.match(
 		frontPanel,
-		/case MODE_RELAY:[^]*?menuFeedback\(fromRemote,\s*action == MENU_PREVIOUS \|\| action == MENU_NEXT\);/u
+		/case MODE_RELAY:[^]*?if \(action == MENU_PREVIOUS \|\| action == MENU_NEXT\)[^]*?menuFeedback\(fromRemote\);[^]*?else[^]*?menuVisualFeedback\(fromRemote\);/u
 	)
-	assert.match(frontPanel, /LeafDecreaseAction::AllRelaysOff[^]*?menuFeedback\(fromRemote, false\);/u)
+	assert.match(frontPanel, /LeafDecreaseAction::AllRelaysOff[^]*?menuVisualFeedback\(fromRemote\);/u)
 })
 
 test('production KEY dispatches first Down to motion and exits outside KEY', async () => {

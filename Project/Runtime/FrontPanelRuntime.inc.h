@@ -303,14 +303,19 @@ void programService(uint32_t at) {
   }
 }
 
-// Emits one canonical audio acknowledgement for physical, RF, and host input.
-void menuFeedback(bool fromRemote, bool audio = true) {
+// Emits the visual acknowledgement shared by generic and actuator-specific
+// feedback. Relay/motion actions use this path while their committed output
+// transition owns the distinct audio cue.
+void menuVisualFeedback(bool fromRemote) {
   statusLeds.playCue(fromRemote ? StatusLedCue::Radio
                                 : StatusLedCue::Menu,
                      260, now);
-  if (audio) {
-    buzzer.beep();
-  }
+}
+
+// Emits one canonical generic acknowledgement for menu navigation/editing.
+void menuFeedback(bool fromRemote) {
+  menuVisualFeedback(fromRemote);
+  buzzer.beep();
 }
 
 // Rolls an 8-bit brightness by the configured front-panel step.
@@ -728,7 +733,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       // Relay state commit owns the actuator-specific tone. Starting the
       // generic menu beep here makes it audibly precede that feedback.
-      menuFeedback(fromRemote, false);
+      menuVisualFeedback(fromRemote);
       return;
 
     case MODE_MOTION_CONTROL: {
@@ -745,7 +750,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       }
       // Motion feedback is emitted when the relay sequencer commits the new
       // state; do not start a generic menu tone ahead of it.
-      menuFeedback(fromRemote, false);
+      menuVisualFeedback(fromRemote);
       return;
     }
 
@@ -780,8 +785,11 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       } else {
         setSelectedRelay(action == MENU_INCREASE, actionNow);
       }
-      menuFeedback(fromRemote,
-                   action == MENU_PREVIOUS || action == MENU_NEXT);
+      if (action == MENU_PREVIOUS || action == MENU_NEXT) {
+        menuFeedback(fromRemote);
+      } else {
+        menuVisualFeedback(fromRemote);
+      }
       return;
 
     default:
@@ -824,7 +832,7 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       if (leafDecreaseAction(modeManager.current()) ==
           LeafDecreaseAction::AllRelaysOff) {
         relays.allOff(actionNow);
-        menuFeedback(fromRemote, false);
+        menuVisualFeedback(fromRemote);
         return;
 #if PCCONTROLLER_MENU_HIERARCHY
       } else {

@@ -99,8 +99,7 @@ connection states are not broadcast, preventing disconnected/scanning flicker.
 Connection lifecycle events are available to the TUI, scripts, IPC, WebSocket,
 and host automations.
 
-Live acceptance and remaining platform verification are tracked by
-[#51](https://github.com/atomicdeploy/PCController/issues/51).
+Live acceptance and remaining platform verification are tracked by issue #51.
 
 The serial driver opens with DTR and RTS inactive. If
 `reset_on_reconnect=true`, only a genuine physical reappearance may issue one
