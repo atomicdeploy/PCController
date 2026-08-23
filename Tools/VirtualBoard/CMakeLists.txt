@@ -126,7 +126,7 @@ if(BUILD_TESTING)
     tests/arduino_mock
     ../..
   )
-  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 11)
+  set_property(TARGET firmware_relay_controller_adapter_tests PROPERTY CXX_STANDARD 17)
   if(MSVC)
     target_compile_options(firmware_relay_controller_adapter_tests PRIVATE /W4 /permissive-)
   else()
