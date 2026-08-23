@@ -229,6 +229,7 @@ function parseArgs(argv) {
     const argument = argv[index]
     if (argument === '--check') options.mode = 'check'
     else if (argument === '--apply') options.mode = 'apply'
+    else if (argument === '--sync-npm-lock-hashes') options.mode = 'sync-npm-lock-hashes'
     else if (argument === '--validate') options.validate = true
     else if (argument === '--require-current') options.requireCurrent = true
     else if (argument === '--no-direct-retry') options.directRetry = false
@@ -240,10 +241,13 @@ function parseArgs(argv) {
 
   update-dependencies.cmd --check [--require-current]
   update-dependencies.cmd --apply [--validate]
+  update-dependencies.cmd --sync-npm-lock-hashes
 
 Options:
   --check             Resolve and report; never modify source-controlled files
   --apply             Update exact locks, Go modules, and compatible npm packages
+  --sync-npm-lock-hashes
+                      Bind the canonical host-tool lock to reviewed npm locks without network access
   --validate          Run firmware, Urboot-Custom, VirtualBoard, Go, web, and package tests
   --require-current   Return a failure when check mode finds an update
   --report FILE       Machine-readable report path (default: .build/dependencies/update-report.json)
@@ -564,6 +568,52 @@ function writeJSONAtomic(path, value) {
   const temporary = `${path}.tmp`
   writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
   renameSync(temporary, path)
+}
+
+function validateNpmLockRoot(directory, label) {
+  const manifest = readJSON(join(directory, 'package.json'))
+  const lock = readJSON(join(directory, 'package-lock.json'))
+  if (!manifest || !lock || lock.lockfileVersion !== 3 || !lock.packages?.['']) {
+    throw new Error(`${label} package lock is missing or is not lockfileVersion 3`)
+  }
+  for (const field of ['dependencies', 'devDependencies']) {
+    const rootEntries = Object.entries(lock.packages[''][field] ?? {}).sort(([left], [right]) => left.localeCompare(right))
+    const manifestEntries = Object.entries(manifest[field] ?? {}).sort(([left], [right]) => left.localeCompare(right))
+    if (JSON.stringify(rootEntries) !== JSON.stringify(manifestEntries)) {
+      throw new Error(`${label} package lock ${field} do not match package.json`)
+    }
+  }
+  return sha256File(join(directory, 'package-lock.json'))
+}
+
+function synchronizeNpmLockHashes(lock, webHash, buildHash, resolvedAt = new Date().toISOString()) {
+  for (const [label, hash] of [['Web', webHash], ['Build', buildHash]]) {
+    if (!/^[0-9a-f]{64}$/u.test(hash)) throw new Error(`${label} package lock hash is not SHA-256`)
+  }
+  const updated = structuredClone(lock)
+  const changes = []
+  const synchronize = (name, section, hash) => {
+    const current = updated[section]?.package_lock_sha256
+    if (current === hash) return
+    changes.push({ area: 'host-lock', name, current: String(current ?? '<missing>'), resolved: hash })
+    updated[section] = { ...(updated[section] ?? {}), package_lock_sha256: hash }
+  }
+  synchronize('web package lock', 'web', webHash)
+  synchronize('build package lock', 'build', buildHash)
+  if (changes.length) updated.resolved_at_utc = resolvedAt
+  return { lock: updated, changes }
+}
+
+function syncNpmLockHashes() {
+  validateHostSourcePolicy()
+  const current = validateHostToolsLock(readJSON(toolsLockPath))
+  const synchronized = synchronizeNpmLockHashes(
+    current,
+    validateNpmLockRoot(web, 'Web'),
+    validateNpmLockRoot(build, 'Build'),
+  )
+  if (synchronized.changes.length) writeJSONAtomic(toolsLockPath, synchronized.lock)
+  return synchronized.changes
 }
 
 function resolveHostTools(directRetry) {
@@ -981,6 +1031,21 @@ function main() {
     validation: [],
   }
   try {
+    if (options.mode === 'sync-npm-lock-hashes') {
+      if (options.validate || options.requireCurrent) {
+        throw new Error('--sync-npm-lock-hashes cannot be combined with --validate or --require-current')
+      }
+      report.changes = syncNpmLockHashes()
+      report.updates_available = report.changes.length !== 0
+      report.updates_applied = report.updates_available
+      report.completed_at_utc = new Date().toISOString()
+      report.status = 'passed'
+      writeJSONAtomic(options.report, report)
+      printChangeTable(report.changes)
+      console.log('NPM_LOCK_HASHES_SYNCHRONIZED=true')
+      log('✅', 'Report', options.report, chalk.green)
+      return
+    }
     log('🔎', 'Dependencies', `resolving stable channels (${report.proxy_variables.length ? `proxy variables: ${report.proxy_variables.join(', ')}` : 'direct network'})`)
     const toolchain = resolveToolchain(options.mode, options.directRetry)
     report.canary = toolchain.canary
@@ -1065,6 +1130,7 @@ export {
   parseWingetCompilerManifest,
   sameSubstantive,
   stableParts,
+  synchronizeNpmLockHashes,
   run,
   validateHostSourcePolicy,
   validateHostToolsLock,

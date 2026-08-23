@@ -76,6 +76,7 @@ update-dependencies.cmd --check
 update-dependencies.cmd --check --require-current
 update-dependencies.cmd --apply
 update-dependencies.cmd --apply --validate
+update-dependencies.cmd --sync-npm-lock-hashes
 ```
 
 The equivalent POSIX commands are:
@@ -85,6 +86,7 @@ The equivalent POSIX commands are:
 ./update-dependencies.sh --check --require-current
 ./update-dependencies.sh --apply
 ./update-dependencies.sh --apply --validate
+./update-dependencies.sh --sync-npm-lock-hashes
 ```
 
 - `--check` resolves registries and prints changes without modifying tracked
@@ -93,6 +95,11 @@ The equivalent POSIX commands are:
   source dependency is stale; it is suitable for a no-device CI gate.
 - `--apply` refreshes exact locks plus compatible Go/npm source requirements.
 - `--validate` runs the complete hardware-free candidate gate after applying.
+- `--sync-npm-lock-hashes` is an offline reconciliation path for an already
+  reviewed npm lock change (for example, a Dependabot PR). It validates that
+  each lock's root dependency declarations match its `package.json`, then
+  updates only the Web/build lock hashes and resolution time in the canonical
+  host-tool lock. It does not resolve or change dependency versions.
 - `--report FILE` writes the structured JSON result used by CI.
 - `--no-direct-retry` enforces proxy-only network access.
 
