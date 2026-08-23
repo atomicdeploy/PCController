@@ -307,9 +307,13 @@ void programService(uint32_t at) {
 // feedback. Relay/motion actions use this path while their committed output
 // transition owns the distinct audio cue.
 void menuVisualFeedback(bool fromRemote) {
-  statusLeds.playCue(fromRemote ? StatusLedCue::Radio
-                                : StatusLedCue::Menu,
-                     260, now);
+  static_assert(static_cast<uint8_t>(StatusLedCue::Radio) ==
+                    static_cast<uint8_t>(StatusLedCue::Menu) + 1U,
+                "menu/radio cues must remain adjacent");
+  statusLeds.playCue(
+      static_cast<StatusLedCue>(static_cast<uint8_t>(StatusLedCue::Menu) +
+                                static_cast<uint8_t>(fromRemote)),
+      260, now);
 }
 
 // Emits one canonical generic acknowledgement for menu navigation/editing.
@@ -975,9 +979,14 @@ void serviceSystemInputs(uint32_t at) {
     if (settingsStore.values().doorAudioEnabled()) {
       buzzer.beep(45, value ? 1700 : 1100);
     }
-    statusLeds.playCue(value ? StatusLedCue::DoorOpen
-                             : StatusLedCue::DoorClosed,
-                       720, at);
+    static_assert(static_cast<uint8_t>(StatusLedCue::DoorClosed) ==
+                      static_cast<uint8_t>(StatusLedCue::DoorOpen) + 1U,
+                  "door cues must remain adjacent");
+    statusLeds.playCue(
+        static_cast<StatusLedCue>(
+            static_cast<uint8_t>(StatusLedCue::DoorClosed) -
+            static_cast<uint8_t>(value)),
+        720, at);
     relays.setMotionAllowed(motionPolicyAllows(), at);
     if (!relays.motionAllowed()) {
       if (modeManager.current() == MODE_MOTION_CONTROL) {
