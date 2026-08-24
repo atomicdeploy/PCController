@@ -70,7 +70,7 @@ func (model Model) automationsPage() string {
 	}
 
 	lines := []string{
-		sectionHeader(model.width, "AUTOMATIONS & MACROS", "searchable PC library · MCU-timed queue · exact acknowledgement deltas"),
+		sectionHeader(model.width, "AUTOMATIONS & MACROS", "searchable PC library · basic HOST or precise MCU playback"),
 		renderMacroButtonRow(macroPrimaryButtons),
 		renderMacroButtonRow(macroSecondaryButtons),
 		ansi.Truncate(searchLine, model.width, "…"),
@@ -80,7 +80,7 @@ func (model Model) automationsPage() string {
 		model.macroKV("Steps / Queue", macroProgressSummary(state, model.width)),
 		model.macroKV("Timing", macroTimingSummary(state)),
 		model.macroKV("Result", macroResultSummary(state)),
-		sectionHeader(model.width, "RECORDING", boolWord(recording.Active, "ACTIVE · MCU acknowledgements are authoritative", "idle")),
+		sectionHeader(model.width, "RECORDING", boolWord(recording.Active, "ACTIVE · "+strings.ToUpper(recording.Mode)+" clock", "idle")),
 		model.macroKV("Recorder", macroRecordingSummary(recording, time.Now())),
 		ansi.Truncate(macroRecordingHelp(recording), model.width, "…"),
 		sectionHeader(model.width, "MACRO LIBRARY", fmt.Sprintf("%d of %d match · ID-sorted · metadata stays on PC", len(filtered), len(allMacros))),
@@ -455,7 +455,7 @@ func macroRecordingSummary(state control.MacroRecordingState, now time.Time) str
 	if elapsed < 0 {
 		elapsed = 0
 	}
-	return fmt.Sprintf("%d · %s · %s · %d steps · %s", state.ID, state.Name, state.Category, state.Steps, formatMacroDuration(elapsed))
+	return fmt.Sprintf("%d · %s · %s · %s · %d steps · %s", state.ID, state.Name, state.Mode, state.Category, state.Steps, formatMacroDuration(elapsed))
 }
 
 func macroRecordingHelp(state control.MacroRecordingState) string {
@@ -463,9 +463,12 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 		return errorStyle.Render("Recorder error: " + state.LastError)
 	}
 	if state.Active {
-		return warnStyle.Render("Operate any queueable relay, motion, PWM, buzzer, display, RF, RGB, LED, or menu command; S saves, D discards.")
+		if state.Mode == "host" {
+			return warnStyle.Render("Operate relay or motion controls; the basic host recorder ignores housekeeping traffic. S saves, D discards.")
+		}
+		return warnStyle.Render("MCU mode records acknowledged queueable commands. S saves, D discards.")
 	}
-	return labelStyle.Render("R starts a named recording; exact MCU acknowledgement timestamps become step offsets. N creates an editable empty draft.")
+	return labelStyle.Render("R starts a basic host recording (100 ms tolerance); CLI start-mcu selects precise MCU capture. N creates a draft.")
 }
 
 func macroTableHeader(width int) string {
