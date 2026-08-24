@@ -154,9 +154,10 @@ uint32_t lastRemoteActionAt = 0;
 uint32_t lastRemoteActionCode = 0;
 uint8_t lastRelayMask = 0;
 bool firmwareReady = false;
+#if PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
+uint8_t lastPushedSegmentRevision = 0;
+#endif
 #if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
-uint8_t lastPushedSegments[4] = {};
-uint8_t lastPushedSegmentBrightness = 0;
 uint8_t lastPushedBuzzerRevision = 0;
 #if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
 uint8_t lastPushedStatusLed[6] = {};

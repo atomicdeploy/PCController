@@ -243,7 +243,7 @@ static inline __attribute__((always_inline)) void serviceController() {
                                 : displaySettings.displayClosedBrightness(),
                             loopNow);
   serviceDisplay(loopNow);
-#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
+#if PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
   serviceSegmentPush();
 #endif
   if (!i2cReserved) {

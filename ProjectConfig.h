@@ -81,6 +81,13 @@
 #define PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS 0
 #endif
 
+// The 328P production image can publish the four-cell presentation without
+// carrying the much larger buzzer/status-RGB mirror. Keep the legacy aggregate
+// flag as the default for custom profiles, but split the capabilities on wire.
+#ifndef PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
+#define PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS 1
+#endif
+
 #ifndef PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
 #define PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS 0
 #endif

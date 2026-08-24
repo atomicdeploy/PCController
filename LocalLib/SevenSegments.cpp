@@ -185,6 +185,7 @@ void SevenSegments::setBrightness(uint8_t brightness) {
     return;
   }
   brightness_ = brightness;
+  ++revision_;
   if (begun_) {
     // Zero is a true display-off level; values 1..7 retain their prior TM1637
     // intensity mapping so existing nonzero EEPROM settings do not get dimmer.
@@ -347,6 +348,7 @@ void SevenSegments::commit(const uint8_t segments[4]) {
   }
   writeSegments(segments);
   memcpy(cachedSegments_, segments, sizeof(cachedSegments_));
+  ++revision_;
 }
 
 void SevenSegments::sendCommand(uint8_t command) {

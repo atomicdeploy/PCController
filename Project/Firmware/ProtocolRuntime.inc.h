@@ -50,8 +50,10 @@ void sendHello(uint8_t sequence) {
 #if PCCONTROLLER_ENABLE_SCHEDULED_SEGMENTS
       (1UL << 25) | // scheduled segment once/loop/interval presentation
 #endif
-#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
+#if PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
       (1UL << 26) | // unsolicited changed-only TM1637 state frames
+#endif
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
       (1UL << 27) | // unsolicited buzzer frequency/duration frames
 #endif
 #if PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_STATUS_LED_ENGINE
@@ -224,25 +226,22 @@ void sendFrontPanel(uint8_t sequence) {
 
 // Pushes only the changed TM1637 state. The full front-panel request remains
 // available for initial synchronization and explicit refreshes.
-#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
+#if PCCONTROLLER_ENABLE_ASYNC_SEGMENT_EVENTS
 void serviceSegmentPush() {
-  const uint8_t *segments = display.rawSegments();
-  const uint8_t brightness = display.brightness();
-  if (brightness == lastPushedSegmentBrightness &&
-      memcmp(segments, lastPushedSegments, 4) == 0) {
-    return;
-  }
-  uint8_t payload[5];
-  memcpy(payload, segments, 4);
-  payload[4] = brightness;
-  memcpy(lastPushedSegments, segments, 4);
-  lastPushedSegmentBrightness = brightness;
-  appProtocol.send(ControllerProtocol::SegmentChanged, 0, payload,
-                   sizeof(payload));
+  const uint8_t revision = display.revision();
+  if (revision == lastPushedSegmentRevision) return;
+  lastPushedSegmentRevision = revision;
+  // cachedSegments_[4] and brightness_ are the driver's first contiguous
+  // fields. Reuse that immutable five-byte state instead of spending another
+  // AVR stack buffer and copy on every display commit.
+  appProtocol.send(ControllerProtocol::SegmentChanged, 0,
+                   display.rawSegments(), 5);
 }
+#endif
 
 // Mirrors the exact note/pause dequeued by Timer1 playback. This event never
 // drives local audio and therefore cannot add jitter to the hardware waveform.
+#if PCCONTROLLER_ENABLE_ASYNC_PRESENTATION_EVENTS
 void serviceBuzzerPush() {
   const uint8_t revision = buzzer.revision();
   if (revision == lastPushedBuzzerRevision) {
