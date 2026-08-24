@@ -932,23 +932,30 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "reset", Usage: "reset lines|app|bootloader",
+		Name: "reset", Usage: "reset lines [PORT]|app|bootloader",
 		Summary: "pulse DTR or request a device reset",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			if len(args) != 1 {
-				return "", fmt.Errorf("usage: reset lines|app|bootloader")
+			if len(args) < 1 || len(args) > 2 {
+				return "", fmt.Errorf("usage: reset lines [PORT]|app|bootloader")
 			}
 			switch strings.ToLower(args[0]) {
 			case "lines", "dtr", "rts":
-				if err := runtime.PulseReset(ctx); err != nil {
+				port := ""
+				if len(args) == 2 {
+					port = strings.TrimSpace(args[1])
+				}
+				if err := runtime.PulseResetPortFor(ctx, port, 120*time.Millisecond); err != nil {
 					return "", err
 				}
 				reconnectContext, cancel := context.WithTimeout(ctx, 12*time.Second)
 				defer cancel()
-				if err := runtime.Reconnect(
-					reconnectContext,
-					"DTR reset pulse completed",
-				); err != nil {
+				var err error
+				if port == "" {
+					err = runtime.Reconnect(reconnectContext, "DTR reset pulse completed")
+				} else {
+					err = runtime.Open(reconnectContext, port)
+				}
+				if err != nil {
 					return "", err
 				}
 				return "DTR reset complete; application HELLO reauthenticated", nil
@@ -974,7 +981,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "reset requested; use DTR/urclock for guaranteed bootloader entry",
 					command(ctx, runtime, native.OpReset, []byte{native.ResetBootloader})
 			default:
-				return "", fmt.Errorf("usage: reset lines|app|bootloader")
+				return "", fmt.Errorf("usage: reset lines [PORT]|app|bootloader")
 			}
 		},
 	})
@@ -1220,7 +1227,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "program",
-		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom] | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]",
+		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom] | program recover HEX [PORT] | program abandon TARGET_SHA256 ABANDON | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]",
 		Summary: "guarded backup-then-flash, or non-write programmer diagnostics",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			resolved := resolveCommandOptions(options)
@@ -3872,6 +3879,9 @@ func programCommand(
 	if len(args) != 0 && strings.EqualFold(args[0], "recover") {
 		return recoverProgrammingCommand(ctx, runtime, options, args[1:])
 	}
+	if len(args) != 0 && strings.EqualFold(args[0], "abandon") {
+		return abandonProgrammingCommand(ctx, runtime, options, args[1:])
+	}
 	if len(args) < 2 {
 		return "", fmt.Errorf("usage: program flash HEX [PORT] [advanced flags] | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]")
 	}
@@ -4053,6 +4063,74 @@ func programCommand(
 	}
 	if programErr != nil {
 		return strings.TrimSpace(output.String()), programErr
+	}
+	return strings.TrimSpace(output.String()), nil
+}
+
+// abandonProgrammingCommand is the explicit escape hatch for a failed
+// transaction whose exact staging HEX no longer exists. It never reads or
+// writes flash. The caller must name the durable target hash, the currently
+// authenticated physical board must match, and the full settings/live-state
+// snapshot must be restorable before the marker can be removed.
+func abandonProgrammingCommand(
+	ctx context.Context,
+	runtime *Runtime,
+	options CommandOptions,
+	args []string,
+) (string, error) {
+	const usage = "usage: program abandon TARGET_SHA256 ABANDON"
+	if runtime == nil || len(args) != 2 || args[1] != "ABANDON" {
+		return "", errors.New(usage)
+	}
+	target := strings.ToLower(strings.TrimSpace(args[0]))
+	decoded, err := hex.DecodeString(target)
+	if err != nil || len(decoded) != 32 {
+		return "", errors.New("programming target SHA-256 must be exactly 64 hexadecimal characters")
+	}
+
+	runtime.programmingMu.Lock()
+	defer runtime.programmingMu.Unlock()
+	snapshot := runtime.Snapshot()
+	if !snapshot.Connected || strings.TrimSpace(snapshot.Port.Name) == "" {
+		return "", errors.New("programming abandonment requires the authenticated application device")
+	}
+	paths := options.ProgramDataPaths
+	if strings.TrimSpace(paths.DataDir) == "" {
+		paths, err = programmer.DefaultHostDataPaths()
+		if err != nil {
+			return "", err
+		}
+	}
+	if err := programmer.EnsureHostDataPaths(paths); err != nil {
+		return "", err
+	}
+	session, err := findNewestProgrammingSession(paths, programmingIdentity(snapshot.Port))
+	if err != nil {
+		return "", fmt.Errorf("locate failed programming transaction: %w", err)
+	}
+	if session == nil {
+		return "", errors.New("no pending programming transaction matches this authenticated device")
+	}
+	if !strings.EqualFold(session.TargetFirmwareSHA256, target) {
+		return "", fmt.Errorf("pending programming target is %s, not %s", session.TargetFirmwareSHA256, target)
+	}
+	if session.HostResult != "failed" || !session.SafeStateApplied {
+		return "", fmt.Errorf("programming transaction in phase %s is not an abandonable failed transaction", session.Phase)
+	}
+	lifecycleOptions := ProgrammingLifecycleOptions{
+		DataPaths: paths, Outputs: options.Outputs, HostConfig: options.HostConfig,
+		ReinitializeEEPROM: session.ReinitializeEEPROM,
+	}
+	if err := reassertProgrammingSession(
+		ctx, runtimeProgrammingDevice{runtime: runtime, options: lifecycleOptions},
+		session, lifecycleOptions,
+	); err != nil {
+		return "", fmt.Errorf("reassert programming abandonment safe state: %w", err)
+	}
+	var output bytes.Buffer
+	fmt.Fprintf(&output, "abandoning failed programming target SHA-256 %s without reading or writing flash\n", target)
+	if err := AbandonProgrammingSession(ctx, runtime, session, lifecycleOptions, &output); err != nil {
+		return strings.TrimSpace(output.String()), err
 	}
 	return strings.TrimSpace(output.String()), nil
 }

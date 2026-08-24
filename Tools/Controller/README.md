@@ -1142,6 +1142,17 @@ delegate it through IPC. Verification or identity failure retains safe outputs
 and the recovery marker; an absent optional LCD is only a presentation warning.
 Do not substitute a direct programmer invocation or another COM port.
 
+`reset lines [PORT]` also works while the primary is paused after a failed
+bootloader attempt: it opens only the remembered or explicitly selected
+physical port, pulses DTR, closes that temporary handle, and then performs the
+normal authenticated reconnect.
+
+If that exact staging HEX was lost after a failed transaction, use
+`program abandon TARGET_SHA256 ABANDON`. The target hash must exactly match the
+newest marker for the currently authenticated physical board. This path never
+reads or writes flash: it reasserts safe outputs, restores the captured EEPROM
+settings and live state, verifies them, and only then removes the marker.
+
 The direct USBasp workflow writes only the selected flash image. It does not
 invent a sibling `.eep` filename and does not use the unsafe
 dependency-backend `upload --programmer ... --input-file ...with_bootloader.hex`
@@ -1152,6 +1163,7 @@ Inside the TUI/shell, the compact equivalent is:
 ```text
 program flash ..\..\.build\firmware\PCController.ino.hex COM18
 program recover ..\..\.build\firmware\PCController.ino.hex [PORT]
+program abandon TARGET_SHA256 ABANDON
 program flash ..\..\.build\firmware\PCController.ino.with_bootloader.hex --method usbasp
 boot backup .\backups
 ```

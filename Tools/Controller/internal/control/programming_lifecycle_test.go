@@ -917,6 +917,39 @@ func TestProgrammingLifecycleFailedProgrammerResultRetainsLatchAndMarker(t *test
 	}
 }
 
+func TestProgrammingLifecycleExplicitAbandonRestoresFailedTransaction(t *testing.T) {
+	paths, firmware := programmingLifecycleFixture(t)
+	original := native.Settings{
+		Flags: native.SettingsSilent, LightMode: 2, OnBrightness: 128,
+		DisplayBrightness: 5, StatusBrightness: 128, MotionBreakMSValue: 1,
+	}
+	device := &fakeProgrammingDevice{
+		snapshot: connectedProgrammingSnapshot(0), settings: original,
+	}
+	session, err := prepareProgrammingSession(
+		context.Background(), device, firmware,
+		ProgrammingLifecycleOptions{DataPaths: paths, Wait: noProgrammingWait}, io.Discard,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := MarkProgrammingSessionComplete(session, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreProgrammingSessionWithDisposition(
+		context.Background(), device, session,
+		ProgrammingLifecycleOptions{DataPaths: paths, Wait: noProgrammingWait}, io.Discard, true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if device.settings != original || device.settings.Flags&native.SettingsProgrammingMode != 0 {
+		t.Fatalf("abandonment did not restore original settings: got=%+v want=%+v", device.settings, original)
+	}
+	if _, statErr := os.Stat(session.RecoveryMarkerPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("abandonment retained recovery marker: %v", statErr)
+	}
+}
+
 func TestProgrammingLifecycleLiveRestoreFailureRelatchesSafeOutputs(t *testing.T) {
 	paths, firmware := programmingLifecycleFixture(t)
 	original := native.Settings{LightMode: 2, OnBrightness: 180, DisplayBrightness: 6, MotionBreakMSValue: 1}

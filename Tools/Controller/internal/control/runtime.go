@@ -224,6 +224,8 @@ type Runtime struct {
 	connectionEvents       map[string]connectionEventSignature
 }
 
+var openResetSession = link.OpenContext
+
 const (
 	programStateHeartbeatPeriod  = 2 * time.Second
 	defaultReconnectInitialDelay = 500 * time.Millisecond
@@ -955,12 +957,41 @@ func (runtime *Runtime) PulseReset(ctx context.Context) error {
 }
 
 func (runtime *Runtime) PulseResetFor(ctx context.Context, duration time.Duration) error {
+	return runtime.PulseResetPortFor(ctx, "", duration)
+}
+
+func (runtime *Runtime) PulseResetPortFor(ctx context.Context, name string, duration time.Duration) error {
 	session := runtime.currentSession()
-	if session == nil {
-		return errors.New("device is not connected")
+	snapshot := runtime.Snapshot()
+	name = strings.TrimSpace(name)
+	if session != nil && (name == "" || strings.EqualFold(name, snapshot.Port.Name)) {
+		runtime.publish("tx", "pulsing DTR reset", native.Frame{})
+		return session.PulseReset(ctx, duration)
 	}
-	runtime.publish("tx", "pulsing DTR reset", native.Frame{})
-	return session.PulseReset(ctx, duration)
+
+	// A failed Urclock attempt can leave the primary intentionally paused with
+	// no authenticated session. DTR is precisely the recovery mechanism for
+	// that state, so use the remembered physical port without requiring HELLO.
+	if name == "" {
+		name = strings.TrimSpace(snapshot.Port.Name)
+	}
+	if name == "" {
+		return errors.New("DTR reset requires a connected or remembered serial port")
+	}
+	if link.IsNetworkEndpoint(name) {
+		return link.ErrControlLinesUnsupported
+	}
+	runtime.mu.RLock()
+	baudRate := runtime.options.BaudRate
+	runtime.mu.RUnlock()
+	temporary, err := openResetSession(ctx, name, baudRate)
+	if err != nil {
+		return fmt.Errorf("open remembered port %s for DTR reset: %w", name, err)
+	}
+	runtime.publish("tx", "pulsing DTR reset before application authentication", native.Frame{})
+	pulseErr := temporary.PulseReset(ctx, duration)
+	closeErr := temporary.Close()
+	return errors.Join(pulseErr, closeErr)
 }
 
 func (runtime *Runtime) RefreshStatus(ctx context.Context) (native.Status, error) {

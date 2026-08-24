@@ -320,6 +320,7 @@ Device, firmware and recovery:
 	controller firmware inspect|identity|patch-identity [artifact flags]
 	controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--allow-incomplete-backup] [--reinitialize-eeprom]
 	controller program recover HEX [PORT]  fresh readback + durable restore; never rewrites flash
+	controller program abandon TARGET_SHA256 ABANDON  restore a failed transaction when its exact staging HEX was lost; never reads/writes flash
 	controller program --operation DIAGNOSTIC [program flags]
 	controller program --method compile --sketch PROJECT [--firmware-feature NAME ...|--no-firmware-features]
   controller boot probe|info|metadata|backup|read|write|verify|start [flags]
