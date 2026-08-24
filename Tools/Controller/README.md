@@ -1142,6 +1142,11 @@ delegate it through IPC. Verification or identity failure retains safe outputs
 and the recovery marker; an absent optional LCD is only a presentation warning.
 Do not substitute a direct programmer invocation or another COM port.
 
+`reset lines [PORT]` also works while the primary is paused after a failed
+bootloader attempt: it opens only the remembered or explicitly selected
+physical port, pulses DTR, closes that temporary handle, and then performs the
+normal authenticated reconnect.
+
 If that exact staging HEX was lost after a failed transaction, use
 `program abandon TARGET_SHA256 ABANDON`. The target hash must exactly match the
 newest marker for the currently authenticated physical board. This path never

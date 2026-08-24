@@ -932,23 +932,30 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "reset", Usage: "reset lines|app|bootloader",
+		Name: "reset", Usage: "reset lines [PORT]|app|bootloader",
 		Summary: "pulse DTR or request a device reset",
 		Run: func(ctx context.Context, args []string) (string, error) {
-			if len(args) != 1 {
-				return "", fmt.Errorf("usage: reset lines|app|bootloader")
+			if len(args) < 1 || len(args) > 2 {
+				return "", fmt.Errorf("usage: reset lines [PORT]|app|bootloader")
 			}
 			switch strings.ToLower(args[0]) {
 			case "lines", "dtr", "rts":
-				if err := runtime.PulseReset(ctx); err != nil {
+				port := ""
+				if len(args) == 2 {
+					port = strings.TrimSpace(args[1])
+				}
+				if err := runtime.PulseResetPortFor(ctx, port, 120*time.Millisecond); err != nil {
 					return "", err
 				}
 				reconnectContext, cancel := context.WithTimeout(ctx, 12*time.Second)
 				defer cancel()
-				if err := runtime.Reconnect(
-					reconnectContext,
-					"DTR reset pulse completed",
-				); err != nil {
+				var err error
+				if port == "" {
+					err = runtime.Reconnect(reconnectContext, "DTR reset pulse completed")
+				} else {
+					err = runtime.Open(reconnectContext, port)
+				}
+				if err != nil {
 					return "", err
 				}
 				return "DTR reset complete; application HELLO reauthenticated", nil
@@ -974,7 +981,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 				return "reset requested; use DTR/urclock for guaranteed bootloader entry",
 					command(ctx, runtime, native.OpReset, []byte{native.ResetBootloader})
 			default:
-				return "", fmt.Errorf("usage: reset lines|app|bootloader")
+				return "", fmt.Errorf("usage: reset lines [PORT]|app|bootloader")
 			}
 		},
 	})
