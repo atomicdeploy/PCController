@@ -391,7 +391,7 @@ func apiMacros(source []appconfig.Macro) []controllerapi.Macro {
 	for index, macro := range source {
 		result[index] = controllerapi.Macro{
 			ID: macro.ID, Name: macro.Name, Category: macro.Category,
-			Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
+			Mode: macro.Mode, Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
 			Steps:               make([]controllerapi.MacroStep, len(macro.Steps)),

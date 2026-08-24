@@ -551,7 +551,7 @@ silent board|host|both status|on|off
 display segments|lcd|both [--speed 220ms] [--duration 5s]
   [--repeat once|loop|interval] [--interval 30s] [--scroll] [--] [TEXT]
 macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID
-macro record start NAME [CATEGORY [COLOR]]|record status|record save|record discard
+macro record start NAME [CATEGORY [COLOR]]|record start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard
 macro play NAME_OR_ID|status|cancel [keep]
 automation list|run NAME
 rf send CODE BITS PROTOCOL [PULSE_US]  # protocol 1..12
