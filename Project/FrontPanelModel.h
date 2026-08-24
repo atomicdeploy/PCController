@@ -2,6 +2,9 @@
 
 #include <stdint.h>
 
+#include "../LocalLib/Keys.h"
+#include "../ProjectConfig.h"
+
 // Physical, RF, and host keys share these stable four action IDs.
 enum MenuAction : uint8_t {
   MENU_PREVIOUS = 0,
@@ -37,7 +40,26 @@ constexpr uint8_t canonicalFrontPanelPage(uint8_t page) {
 }
 
 constexpr bool frontPanelPageCompiled(uint8_t page) {
-  return page < PAGE_COUNT && page != PAGE_KEYS;
+  if (page >= PAGE_COUNT || page == PAGE_KEYS) {
+    return false;
+  }
+#if !PCCONTROLLER_ENABLE_INA219
+  if (page == PAGE_VOLTAGE || page == PAGE_CURRENT) {
+    return false;
+  }
+#endif
+#if !PCCONTROLLER_ENABLE_DS18B20
+  if (page == PAGE_TLED || page == PAGE_TBT) {
+    return false;
+  }
+#endif
+#if !PCCONTROLLER_ENABLE_PCA9685
+  if (page == PAGE_ILLUMINATION || page == PAGE_PWM ||
+      page == PAGE_USER_PWM) {
+    return false;
+  }
+#endif
+  return true;
 }
 
 // Top-level pages and modal editors consumed by ModeManager.
@@ -113,6 +135,40 @@ constexpr UnifiedInputIntent unifiedInputIntent(MenuAction action,
   }
   return action == MENU_DECREASE ? UnifiedInputIntent::Macro
                                  : UnifiedInputIntent::Motion;
+}
+
+// The local macro key is immediate while starting/stopping capture. Once data
+// exists it deliberately becomes a classified key: Click replays and the
+// one-shot HoldStart replaces the old capture without first playing outputs.
+enum class UnifiedMacroGesture : uint8_t {
+  None,
+  ImmediateCapture,
+  Replay,
+  ReplaceCapture,
+  SuppressClassification,
+};
+
+constexpr UnifiedMacroGesture unifiedMacroGesture(KeyEvent event,
+                                                   bool hasCapture,
+                                                   bool suppressClassification) {
+  if (event == KeyEvent::Down && !hasCapture) {
+    return UnifiedMacroGesture::ImmediateCapture;
+  }
+  const bool classified = event == KeyEvent::Click ||
+                          event == KeyEvent::DoubleClick ||
+                          event == KeyEvent::HoldStart;
+  if (classified && suppressClassification) {
+    return UnifiedMacroGesture::SuppressClassification;
+  }
+  if (!hasCapture) {
+    return UnifiedMacroGesture::None;
+  }
+  if (event == KeyEvent::Click || event == KeyEvent::DoubleClick) {
+    return UnifiedMacroGesture::Replay;
+  }
+  return event == KeyEvent::HoldStart
+             ? UnifiedMacroGesture::ReplaceCapture
+             : UnifiedMacroGesture::None;
 }
 
 // One immutable mapping is consumed by physical, injected, and native tests.

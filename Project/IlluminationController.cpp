@@ -1,5 +1,7 @@
 #include "IlluminationController.h"
 
+#if PCCONTROLLER_ENABLE_PCA9685
+
 #include "PwmController.h"
 #include "TransitionMath.h"
 
@@ -98,3 +100,6 @@ IlluminationController::targetBrightness(bool doorOpen) const {
   }
   return offBrightness_;
 }
+#else
+IlluminationController illumination;
+#endif

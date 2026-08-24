@@ -12,8 +12,6 @@ constexpr uint8_t Magic = 0xA5;
 // magic/length/CRC shape and opcode payload semantics instead of rejecting an
 // otherwise understandable peer solely because this byte differs.
 constexpr uint8_t EnvelopeRevision = 1;
-constexpr uint8_t MaximumPayload = 48;
-
 // Frame is a validated zero-copy view of one decoded native packet.
 struct Frame {
   uint8_t opcode;

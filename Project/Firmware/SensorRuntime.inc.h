@@ -47,6 +47,7 @@ bool prepareI2cBus() {
 }
 
 // Restores the active-high/low MODE2 contract after PWM startup.
+#if PCCONTROLLER_ENABLE_PCA9685
 bool normalizePwmMode2() {
   constexpr uint8_t expectedMode2 = PwmController::recommendedMode2();
   constexpr uint8_t PwmMode2Register = 0x01;
@@ -56,8 +57,10 @@ bool normalizePwmMode2() {
   i2cBus.write(expectedMode2);
   return i2cBus.endTransmission() == 0;
 }
+#endif
 
 // Low-pass a completed INA219 sample in-place without another history buffer.
+#if PCCONTROLLER_ENABLE_INA219
 __attribute__((noinline)) int32_t
 smoothInaValue(int32_t previous, int32_t sample, bool currentOrPower) {
   if (previous == INVALID_I32) {
@@ -92,8 +95,10 @@ void sampleIna219(uint32_t at) {
                                      index >= 2);
   }
 }
+#endif
 
 // Gives DS18B20 probes a deterministic ROM order before role assignment.
+#if PCCONTROLLER_ENABLE_DS18B20
 void sortTemperatureAddresses() {
   if (temperatureAddressCount < 2 ||
       memcmp(temperatureAddresses[0], temperatureAddresses[1], 8) <= 0) {
@@ -193,3 +198,4 @@ void serviceTemperatures(uint32_t at) {
     requestTemperatures(at);
   }
 }
+#endif

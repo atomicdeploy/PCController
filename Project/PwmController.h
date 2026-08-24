@@ -4,7 +4,11 @@
 
 #include "../LocalLib/BoardPins.h"
 #include "../ProjectConfig.h"
+#if PCCONTROLLER_ENABLE_PCA9685
 #include "PwmExpanderDriver.h"
+#else
+class PwmExpanderDriver;
+#endif
 
 #ifndef PCCONTROLLER_PWM_ACTIVE_LOW
 #define PCCONTROLLER_PWM_ACTIVE_LOW 0
@@ -44,6 +48,7 @@ enum class PwmChannelRole : uint8_t {
 // Logical values always use 0 = electrically inactive and 4095 = fully
 // active. The optional polarity mapping keeps callers independent of register
 // FULL_ON/FULL_OFF details if a later board revision inverts the stages.
+#if PCCONTROLLER_ENABLE_PCA9685
 class PwmController {
 public:
   explicit PwmController(PwmExpanderDriver &driver);
@@ -106,6 +111,41 @@ private:
   uint8_t consecutiveWriteErrors_ = 0;
   bool available_ = false;
 };
+#else
+// API-compatible zero-cost facade for profiles without a PCA9685. Callers
+// keep one controller contract while result-bearing operations truthfully fail.
+class PwmController {
+public:
+  PwmController() = default;
+  explicit PwmController(PwmExpanderDriver &) {}
+  void begin(bool, uint32_t = millis()) {}
+  void setChannel(uint8_t, uint32_t = millis()) {}
+  void adjustChannel(int8_t, uint32_t = millis()) {}
+  uint8_t channel() const { return 0; }
+  void setValue(uint16_t, uint32_t = millis()) {}
+  void adjustValue(int16_t, uint32_t = millis()) {}
+  uint16_t value() const { return 0; }
+  bool available() const { return false; }
+  uint8_t errorCount() const { return 0; }
+  bool tryAllOff() { return false; }
+  bool clearMask(uint16_t) { return false; }
+  bool stopUserOutputs() { return false; }
+  bool setLogical(uint8_t, uint16_t) { return false; }
+  uint16_t logicalValue(uint8_t) const { return 0; }
+  bool cacheValid(uint8_t) const { return false; }
+  PwmChannelRole role(uint8_t) const { return PwmChannelRole::Invalid; }
+  bool setUserLight(uint8_t, uint16_t) { return false; }
+  bool setUserPwm(uint8_t, uint16_t) { return false; }
+  bool setEnclosureIllumination(uint16_t) { return false; }
+  bool setPowerSignal(bool) { return false; }
+  bool setStatusRgb12(uint16_t, uint16_t, uint16_t) { return false; }
+  bool setStatusRgb8(uint8_t, uint8_t, uint8_t) { return false; }
+  static constexpr uint8_t PwmI2cAddress = 0x41;
+  static constexpr uint8_t CurrentSensorI2cAddress = 0x40;
+  static constexpr float PwmFrequencyHz = 1000.0F;
+  static constexpr uint8_t recommendedMode2() { return 0x04; }
+};
+#endif
 
 static_assert(BoardPins::PwmAddress == PwmController::PwmI2cAddress,
               "PWM driver must use I2C address 0x41");

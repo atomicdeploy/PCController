@@ -6,6 +6,16 @@
 #include "MacroAction.h"
 #include "UartProtocol.h"
 
+#if defined(_MSC_VER)
+#define PCCONTROLLER_PACK_PUSH __pragma(pack(push, 1))
+#define PCCONTROLLER_PACK_POP __pragma(pack(pop))
+#define PCCONTROLLER_PACKED
+#else
+#define PCCONTROLLER_PACK_PUSH
+#define PCCONTROLLER_PACK_POP
+#define PCCONTROLLER_PACKED __attribute__((packed))
+#endif
+
 // Buffers ordinary protocol commands against USB/network jitter and releases
 // them from the AVR microsecond clock without duplicating peripheral guards.
 class MacroQueue {
@@ -13,6 +23,7 @@ public:
   static constexpr uint8_t Schema = 3;
   static constexpr uint8_t ExecutionSequence = 0xFE;
   static constexpr uint8_t KeepOutputsOnCancel = 1U << 0;
+  static constexpr uint8_t CaptureExportAcknowledged = 1U << 7;
   static constexpr uint8_t QueueSize = 128;
   static constexpr uint8_t QueueCapacity = QueueSize - 1U;
 
@@ -26,6 +37,7 @@ public:
     Failed = 5,
     Recording = 6,
     Captured = 7,
+    Exported = 8,
   };
 
   explicit MacroQueue(ControllerProtocol::UartProtocol &protocol);
@@ -58,8 +70,10 @@ public:
 private:
   static constexpr uint8_t QueueMask = QueueSize - 1;
 
-  // Report is the synchronous macro status response payload.
-  struct __attribute__((packed)) Report {
+  // Report is the synchronous macro status response payload. Keep the packing
+  // portable because this shared core is compiled by AVR-GCC and MSVC.
+  PCCONTROLLER_PACK_PUSH
+  struct PCCONTROLLER_PACKED Report {
     uint8_t schema;
     uint8_t state;
     uint8_t id;
@@ -75,15 +89,21 @@ private:
   };
 
   // EventReport records MCU timing fidelity for one dispatched step.
-  struct __attribute__((packed)) EventReport {
+  struct PCCONTROLLER_PACKED EventReport {
     uint8_t type;
     Report report;
   } wire_;
+  PCCONTROLLER_PACK_POP
+
+  static_assert(sizeof(Report) == 20,
+                "macro report wire shape changed unexpectedly");
+  static_assert(sizeof(EventReport) == 21,
+                "macro event wire shape changed unexpectedly");
 
   uint8_t peek(uint8_t offset) const;
   uint32_t peekU32(uint8_t offset) const;
   bool recordReady() const;
-  bool bufferedRecordsValid() const;
+  bool bufferedRecordsValid(uint16_t completeSteps) const;
   void appendByte(uint8_t value);
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
   void sendCaptureChunk(uint8_t sequence, uint16_t offset);
@@ -102,7 +122,6 @@ private:
   bool safeStopRequested_ = false;
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
   uint16_t retainedSteps_ = 0;
-  uint32_t capturePlaybackOffsetUs_ = 0;
   uint8_t capturedHead_ = 0;
   uint8_t capturedUsed_ = 0;
   uint16_t capturedSteps_ = 0;
@@ -119,3 +138,7 @@ static_assert(MacroQueue::QueueSize >=
               "macro byte ring must retain at least two maximum actions");
 static_assert(MacroQueue::QueueCapacity < 0x80U,
               "macro used/head arithmetic requires a seven-bit capacity");
+
+#undef PCCONTROLLER_PACKED
+#undef PCCONTROLLER_PACK_POP
+#undef PCCONTROLLER_PACK_PUSH

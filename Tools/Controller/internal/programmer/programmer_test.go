@@ -157,7 +157,7 @@ func TestCompilePlanMatchesManifestAndStagesOnlyCuratedRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := fmt.Sprintf(
-		"LocalLib/value.cpp:%X\nMenuLogic.cpp:%X\nPCController.ino:%X\nProject/Firmware/Domain.inc.h:%X\nProject/MacroActions.def:%X\nProjectConfig.h:%X\n",
+		"LocalLib/value.cpp:%X\nMenuLogic.cpp:%X\nPCController.ino:%X\nProject/Firmware/Domain.inc.h:%X\nProject/MacroActions.inc.h:%X\nProjectConfig.h:%X\n",
 		sha256.Sum256([]byte("int value = 1;\n")),
 		sha256.Sum256([]byte("void menuLogic() {}\n")),
 		sha256.Sum256([]byte("void setup() {}\nvoid loop() {}\n")),
@@ -187,7 +187,7 @@ func TestCompilePlanMatchesManifestAndStagesOnlyCuratedRoots(t *testing.T) {
 		"PCController.ino", "ProjectConfig.h", "MenuLogic.cpp",
 		filepath.Join("LocalLib", "value.cpp"),
 		filepath.Join("Project", "Firmware", "Domain.inc.h"),
-		filepath.Join("Project", "MacroActions.def"),
+		filepath.Join("Project", "MacroActions.inc.h"),
 	} {
 		if _, err := os.Stat(filepath.Join(staged.SketchPath, relative)); err != nil {
 			t.Fatalf("missing staged source %s: %v", relative, err)
@@ -222,7 +222,7 @@ func firmwareCompileFixture(t *testing.T) string {
 		"MenuLogic.cpp":                        "void menuLogic() {}\n",
 		filepath.Join("LocalLib", "value.cpp"): "int value = 1;\n",
 		filepath.Join("Project", "Firmware", "Domain.inc.h"): "void firmwareDomain() {}\n",
-		filepath.Join("Project", "MacroActions.def"):         "PCCONTROLLER_MACRO_ACTION(Buzzer, 4)\n",
+		filepath.Join("Project", "MacroActions.inc.h"):       "PCCONTROLLER_MACRO_ACTION(Buzzer, 4)\n",
 		filepath.Join(".cache", "poison.cpp"):                "#error must not be staged\n",
 	}
 	for name, content := range files {

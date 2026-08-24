@@ -38,6 +38,23 @@
 #define PCCONTROLLER_ENABLE_I2C_LCD 0
 #endif
 
+// The current motion/macro boards intentionally omit these optional I2C and
+// OneWire modules. Keeping them as independent build features lets a later
+// full-peripheral FQBN/profile restore the exact drivers without source edits,
+// while the default deployment image spends its 328P flash on input latency,
+// relay/RF safety, and timed macro capture.
+#ifndef PCCONTROLLER_ENABLE_INA219
+#define PCCONTROLLER_ENABLE_INA219 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_DS18B20
+#define PCCONTROLLER_ENABLE_DS18B20 0
+#endif
+
+#ifndef PCCONTROLLER_ENABLE_PCA9685
+#define PCCONTROLLER_ENABLE_PCA9685 0
+#endif
+
 // The production front panel has one input/output page. In the normal build it
 // is the four-key motion surface (Side A up/down, Side B up/down). A diagnostic
 // image may compile the same page as a key identifier without adding a second
@@ -81,6 +98,21 @@
 #if (PCCONTROLLER_BLANK_EEPROM_SILENT != 0) && \
     (PCCONTROLLER_BLANK_EEPROM_SILENT != 1)
 #error "PCCONTROLLER_BLANK_EEPROM_SILENT must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_INA219 != 0) && \
+    (PCCONTROLLER_ENABLE_INA219 != 1)
+#error "PCCONTROLLER_ENABLE_INA219 must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_DS18B20 != 0) && \
+    (PCCONTROLLER_ENABLE_DS18B20 != 1)
+#error "PCCONTROLLER_ENABLE_DS18B20 must be 0 or 1"
+#endif
+
+#if (PCCONTROLLER_ENABLE_PCA9685 != 0) && \
+    (PCCONTROLLER_ENABLE_PCA9685 != 1)
+#error "PCCONTROLLER_ENABLE_PCA9685 must be 0 or 1"
 #endif
 
 // Rich catalog/layout presentation is host-owned. Stable page IDs and the

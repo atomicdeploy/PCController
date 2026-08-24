@@ -1,8 +1,9 @@
 // name, fixed board-capture payload length (0xFF = playback-only/variable)
 //
 // This file is deliberately an X-macro/data source without include guards.
-// C++, VirtualBoard, and the Go contract generator consume these exact rows so
-// the raw macro allow-list cannot drift among execution surfaces.
+// Its header extension makes Arduino copy it into the compiled sketch. C++,
+// VirtualBoard, and the Go contract generator consume these exact rows so the
+// raw macro allow-list cannot drift among execution surfaces.
 PCCONTROLLER_MACRO_ACTION(Buzzer, 4)
 PCCONTROLLER_MACRO_ACTION(PwmSet, 3)
 PCCONTROLLER_MACRO_ACTION(PwmAllOff, 0)

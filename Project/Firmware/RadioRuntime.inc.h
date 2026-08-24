@@ -113,6 +113,7 @@ void stopRemoteMomentary(uint32_t at) {
       break;
     }
     case RemoteActionKind::Pwm: {
+#if PCCONTROLLER_ENABLE_PCA9685
       pwm.setChannel(remoteMomentaryValue, at);
       pwm.setValue(0, at);
       storeUserPwmValue(remoteMomentaryValue, 0);
@@ -121,6 +122,7 @@ void stopRemoteMomentary(uint32_t at) {
         acceptedAction(InputEventSource::Radio, ControllerProtocol::PwmSet,
                        payload, sizeof(payload));
       }
+#endif
       break;
     }
     default:
@@ -157,15 +159,15 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
       appEvents.key(remote.actionValue,
                     static_cast<uint8_t>(KeyEvent::Down),
                     InputEventSource::Radio, remote.id);
-      handleMenuAction(remote.actionValue, true);
-      {
-        const uint8_t payload[] = {remote.actionValue};
-        acceptedAction(InputEventSource::Radio,
-                       ControllerProtocol::MenuAction, payload,
-                       sizeof(payload));
-      }
+      applyKeyGesture(remote.actionValue, KeyEvent::Down,
+                      InputEventSource::Radio, true);
       return;
     case RemoteActionKind::Menu:
+      if (modeManager.current() == MODE_MOTION_CONTROL) {
+        applyKeyGesture(remote.actionValue, KeyEvent::Down,
+                        InputEventSource::Radio, true);
+        return;
+      }
       handleMenuAction(remote.actionValue, true);
       {
         const uint8_t payload[] = {remote.actionValue};
@@ -228,6 +230,7 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
       }
       return;
     case RemoteActionKind::Pwm: {
+#if PCCONTROLLER_ENABLE_PCA9685
       pwm.setChannel(remote.actionValue, at);
       const bool active = pwm.logicalValue(remote.actionValue) != 0;
       const uint16_t value = behavior == RemoteBehavior::Momentary
@@ -247,6 +250,7 @@ void executeLearnedRemote(const LearnedRemote &remote, uint32_t at) {
         remoteMomentaryValue = remote.actionValue;
         remoteMomentaryEndsAt = at + 350;
       }
+#endif
       return;
     }
     case RemoteActionKind::None:

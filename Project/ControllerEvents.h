@@ -5,38 +5,13 @@
 #include "MacroAction.h"
 #include "UartProtocol.h"
 
-// ControllerEventType identifies one asynchronous native event payload shape.
-enum class ControllerEventType : uint8_t {
-  Key = 1,
-  Door = 2,
-  Bluetooth = 3,
-  PwmChannel = 4,
-  RfLearned = 5,
-  Macro = 6,
-  Fault = 7,
-  RfReceived = 8,
-  RfLearning = 9,
-  Relay = 10,
-  Alert = 11,
-  // Host-routed page navigation: [type, target, ASCII page...]. Target is
-  // 0=all, 1=WebUI, 2=TUI. Firmware may emit it without knowing host UI APIs.
-  AppNavigation = 12,
-  // Accepted ordinary opcode evidence. UartProtocol appends the exact MCU
-  // timestamp: [type, source, opcode, length, payload..., micros LE32].
-  Action = 13,
-};
+using ControllerEventType = ControllerProtocol::EventType;
+using InputEventSource = ControllerProtocol::InputEventSource;
 
 // ControllerAlertKind classifies board-generated warning notifications.
 enum class ControllerAlertKind : uint8_t {
   Fault = 1,
   Hot = 2,
-};
-
-// InputEventSource records whether a gesture originated physically, by RF, or by host.
-enum class InputEventSource : uint8_t {
-  Physical = 0,
-  Radio = 1,
-  Host = 2,
 };
 
 // Owns the compact asynchronous event wire format. Keeping event encoding in

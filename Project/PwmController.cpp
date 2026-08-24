@@ -1,5 +1,7 @@
 #include "PwmController.h"
 
+#if PCCONTROLLER_ENABLE_PCA9685
+
 namespace {
 
 // Repeated transport failures mark the shared PWM expander unavailable.
@@ -289,3 +291,5 @@ uint16_t PwmController::from8Bit(uint8_t value) {
   return static_cast<uint16_t>(static_cast<uint16_t>(value) * 16U +
                                value / 16U);
 }
+
+#endif // PCCONTROLLER_ENABLE_PCA9685

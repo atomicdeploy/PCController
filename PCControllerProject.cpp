@@ -5,10 +5,14 @@
 #include "Project/ControllerEvents.cpp"
 #include "Project/FeedbackMelodies.cpp"
 #include "Project/IlluminationController.cpp"
+#if PCCONTROLLER_ENABLE_INA219
 #include "Project/Ina219Sensor.cpp"
+#endif
 #include "Project/MacroQueue.cpp"
+#if PCCONTROLLER_ENABLE_PCA9685
 #include "Project/PwmController.cpp"
 #include "Project/PwmExpanderDriver.cpp"
+#endif
 #include "Project/RelayController.cpp"
 #include "Project/RemoteLearningStore.cpp"
 #include "Project/ResetTelemetry.cpp"

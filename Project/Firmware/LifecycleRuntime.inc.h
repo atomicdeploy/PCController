@@ -28,7 +28,10 @@ static inline __attribute__((always_inline)) void initializeController() {
   loadIlluminationSettings();
   const ControllerSettings &settings = settingsStore.values();
   const bool programming = settings.programmingMode();
-  menuPage = settings.defaultMenuPage;
+  menuPage = canonicalFrontPanelPage(settings.defaultMenuPage);
+  if (!frontPanelPageCompiled(menuPage)) {
+    menuPage = PAGE_MOTION;
+  }
   buzzer.setMuted(BuildForcesSilent || settings.silent() || programming);
   streamPeriodMs = settings.streamPeriodMs;
   display.begin(programming || systemInputs.doorOpen()
@@ -47,6 +50,7 @@ static inline __attribute__((always_inline)) void initializeController() {
     i2cBus.begin();
     // Reset the TWI peripheral if any state remains blocked for 25 ms.
     i2cBus.setWireTimeout(25000UL, true);
+#if PCCONTROLLER_ENABLE_PCA9685
     pwmAvailable = pwmDriver.begin();
     if (pwmAvailable) {
       pwmAvailable =
@@ -54,9 +58,12 @@ static inline __attribute__((always_inline)) void initializeController() {
               static_cast<uint16_t>(BoardPins::PwmFrequencyHz)) &&
           normalizePwmMode2();
     }
-
+#endif
+#if PCCONTROLLER_ENABLE_INA219
     ina219Available = ina219.begin();
+#endif
   }
+#if PCCONTROLLER_ENABLE_PCA9685
   pwm.begin(pwmAvailable, startupNow);
   if (programming) {
     // A durable programming latch must not briefly restore an On/Auto light
@@ -67,14 +74,17 @@ static inline __attribute__((always_inline)) void initializeController() {
   illumination.begin(pwm, systemInputs.doorOpen(), startupNow);
   statusLeds.begin(pwm, programming ? 0 : settings.statusBrightness, startupNow,
                    !programming);
+#endif
   applyStoredSettings(startupNow);
   restoreStoredOutputs(startupNow);
   appProtocol.service();
   wdt_reset();
 
+#if PCCONTROLLER_ENABLE_DS18B20
   temperatureBus.begin();
   discoverTemperatureSensors();
   requestTemperatures(startupNow);
+#endif
   appProtocol.service();
   wdt_reset();
 
@@ -135,10 +145,14 @@ static inline __attribute__((always_inline)) void serviceController() {
   }
   serviceShiftRegisterAndKeys(loopNow);
   serviceRemoteMomentary(loopNow);
+#if PCCONTROLLER_ENABLE_DS18B20
   serviceTemperatures(loopNow);
+#endif
+#if PCCONTROLLER_ENABLE_INA219
   if (!i2cReserved) {
     sampleIna219(loopNow);
   }
+#endif
   programService(loopNow);
 
   // Edge state suppresses duplicate events while a cadence allows repeated

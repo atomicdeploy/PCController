@@ -160,6 +160,12 @@ void moveMenuCategory(bool forward, uint32_t at) {
 // Activates a stable page and optionally persists it as the boot default.
 void setMenuPage(uint8_t page) {
   menuPage = canonicalFrontPanelPage(page);
+  if (!frontPanelPageCompiled(menuPage)) {
+    menuPage = PAGE_MOTION;
+  }
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+  suppressLocalMacroClassification = false;
+#endif
 #if PCCONTROLLER_MENU_HIERARCHY
   menuTreeState = menuCategory(menuPage);
 #endif
@@ -507,6 +513,20 @@ bool handleMotionPanelAction(uint8_t action, bool fromRemote,
   return accepted;
 }
 
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
+    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+void beginLocalMacroCapture() {
+  const uint8_t id = nextLocalMacroId;
+  if (!macroPlayback.beginCapture(id, micros())) {
+    return;
+  }
+  ++nextLocalMacroId;
+  if (nextLocalMacroId == 0) {
+    nextLocalMacroId = 1;
+  }
+}
+#endif
+
 // Dispatches physical, RF, or host navigation through the modal menu state machine.
 void handleMenuAction(uint8_t action, bool fromRemote) {
   if (action > MENU_INCREASE) {
@@ -569,23 +589,13 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
       identifiedKeyEndsAt = actionNow + 900;
 #else
     } else if (intent == UnifiedInputIntent::Macro) {
-#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
-      if (macroPlayback.recording()) {
-        macroPlayback.finishCapture();
-      } else if (macroPlayback.captured()) {
-        macroPlayback.playCapture(micros());
-      } else {
-        const uint8_t id = nextLocalMacroId++;
-        if (nextLocalMacroId == 0) {
-          nextLocalMacroId = 1;
-        }
-        macroPlayback.beginCapture(id, micros());
-      }
-#endif
+      // Local capture lifecycle is handled from the physical classified key
+      // path below. RF/host MenuAction K3 is intentionally a no-op here.
     } else if (relays.motionAllowed()) {
       modeManager.transitionTo(MODE_MOTION_CONTROL);
     } else {
       buzzer.error();
+    }
 #endif
     menuFeedback(fromRemote);
     return;
@@ -892,9 +902,37 @@ void handleMenuAction(uint8_t action, bool fromRemote) {
 // safety path in protocol dispatch. Primary actions run on Down; Click remains
 // deferred classification only and must never sit on the control path.
 void applyKeyGesture(uint8_t bit, KeyEvent event,
-                     InputEventSource source = InputEventSource::Physical,
-                     bool emitEvidence = true) {
+                     InputEventSource source, bool emitEvidence) {
   const ProgramMode mode = modeManager.current();
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE && \
+    !PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+  if (source == InputEventSource::Physical && mode == MODE_MOTION &&
+      bit == BoardPins::KeyDecrease) {
+    const UnifiedMacroGesture gesture = unifiedMacroGesture(
+        event, macroPlayback.captured(), suppressLocalMacroClassification);
+    switch (gesture) {
+      case UnifiedMacroGesture::ImmediateCapture:
+        suppressLocalMacroClassification = true;
+        if (macroPlayback.recording()) {
+          macroPlayback.finishCapture();
+        } else {
+          beginLocalMacroCapture();
+        }
+        return;
+      case UnifiedMacroGesture::Replay:
+        macroPlayback.playCapture(micros());
+        return;
+      case UnifiedMacroGesture::ReplaceCapture:
+        beginLocalMacroCapture();
+        return;
+      case UnifiedMacroGesture::SuppressClassification:
+        suppressLocalMacroClassification = false;
+        return;
+      case UnifiedMacroGesture::None:
+        return;
+    }
+  }
+#endif
   const bool momentary = mode == MODE_MOTION_CONTROL ||
                          (mode == MODE_USER_RELAY_CONTROL &&
                           userRelayBehavior && bit == BoardPins::KeyIncrease);
@@ -950,7 +988,8 @@ void applyKeyGesture(uint8_t bit, KeyEvent event,
       }
     }
   } else if (keyEventRunsPrimaryAction(event) &&
-             (event != KeyEvent::HoldRepeat || mode != MODE_KEYS)) {
+             (event != KeyEvent::HoldRepeat ||
+              (mode != MODE_KEYS && mode != MODE_MOTION))) {
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
     const bool recordingBefore = macroPlayback.recording();
 #endif
@@ -1002,14 +1041,28 @@ void serviceMotionExit(uint32_t at) {
     motionExitStartedAt = 0;
     return;
   }
-  if (motionControl) {
-    relays.allOff(at);
-  }
   if (motionExitStartedAt == 0xFFFFFFFFUL) {
     return;
   }
   if (motionExitStartedAt == 0) {
-    motionExitStartedAt = at;
+    for (uint8_t side = 0; side < 2; ++side) {
+      const ::RelaySide relaySide = static_cast<::RelaySide>(side);
+      const RelaySideStatus status = relays.sideStatus(relaySide);
+      if (!status.requestedEnabled && !status.appliedEnabled &&
+          status.phase == RelaySequencePhase::Idle) {
+        continue;
+      }
+      relays.stopSide(relaySide, at);
+      const uint8_t payload[] = {side, 0};
+      acceptedAction(InputEventSource::Physical,
+                     ControllerProtocol::RelaySide, payload,
+                     sizeof(payload));
+    }
+    relays.allOff(at);
+    acceptedAction(InputEventSource::Physical,
+                   ControllerProtocol::RelayAllOff, nullptr, 0);
+    motionPressedMask = 0;
+    motionExitStartedAt = at == 0 ? 1 : at;
   } else if (static_cast<uint32_t>(at - motionExitStartedAt) >=
              static_cast<uint16_t>(
                  settingsStore.values().motionExitHoldSeconds()) * 1000U) {

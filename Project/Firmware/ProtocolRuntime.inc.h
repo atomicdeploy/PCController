@@ -6,17 +6,30 @@
 // Reports build identity, record shape, and independently testable capabilities.
 void sendHello(uint8_t sequence) {
   constexpr uint32_t capabilities =
+#if PCCONTROLLER_ENABLE_INA219
       (1UL << 0) |  // INA219
+#endif
+#if PCCONTROLLER_ENABLE_DS18B20
       (1UL << 1) |  // two DS18B20 sensors
+#endif
+#if PCCONTROLLER_ENABLE_PCA9685
       (1UL << 2) |  // 16-channel PWM
+#endif
       (1UL << 3) |  // relay safety controller
       (1UL << 4) |  // 433 MHz RX/TX, learning, and action mapping
       (1UL << 5) |  // TM1637
-      (1UL << 6) |  // I2C LCD
+#if PCCONTROLLER_ENABLE_I2C_LCD
+      (1UL << 6) |  // MCU-rendered I2C LCD
+#endif
       (1UL << 7) |  // addressable LEDs
       (1UL << 8) |  // persistent settings
       (1UL << 9) |  // menu remote control
+#if PCCONTROLLER_ENABLE_DS18B20
       (1UL << 10) | // named temperature identities
+#endif
+#if PCCONTROLLER_ENABLE_MACRO_CAPTURE
+      (1UL << 11) | // board-local bounded capture/replay/export
+#endif
       (1UL << 12) | // host display text and asynchronous events
       (1UL << 13) | // exact front-panel snapshot
       (1UL << 14) | // host-injected key lifecycle; Down acts immediately
@@ -29,7 +42,7 @@ void sendHello(uint8_t sequence) {
       (1UL << 19) | // host-captured front-panel session (DisplayText targets 3/4)
       (1UL << 20) | // status bit 12 means buzzer queue/voice is busy
       (1UL << 21) | // EEPROM-selectable 1..255 ms motion break time
-      (1UL << 22) | // MCU-timed events/ACKs and queued macro schema 2
+      (1UL << 22) | // MCU-timed events/ACKs and queued macro schema 3
 #if PCCONTROLLER_MENU_LAYOUT_PROTOCOL
       (1UL << 23) | // persistent visible-mask and stable-ID rank permutation
 #endif
@@ -37,21 +50,50 @@ void sendHello(uint8_t sequence) {
       (1UL << 25) | // scheduled segment once/loop/interval presentation
       (1UL << 26) | // unsolicited changed-only TM1637 state frames
       (1UL << 27) | // unsolicited buzzer frequency/duration frames
+#if PCCONTROLLER_ENABLE_PCA9685
       (1UL << 28) | // MCU-owned procedural status LED effects
       (1UL << 29) | // unsolicited rendered status LED state frames
       (1UL << 30) | // EEPROM-resident condition status profiles
+#endif
       (1UL << 31) | // checksum-backed operator board name (up to 8 ASCII chars)
       0;
-  // HelloPayload is the fixed build identity and capability response.
+  constexpr uint8_t featureProfile =
+#if PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+      ControllerProtocol::KeyDiagnosticProfile;
+#elif PCCONTROLLER_ENABLE_INA219 && PCCONTROLLER_ENABLE_DS18B20 && \
+    PCCONTROLLER_ENABLE_PCA9685 && PCCONTROLLER_ENABLE_I2C_LCD
+      ControllerProtocol::FullPeripheralProfile;
+#elif !PCCONTROLLER_ENABLE_INA219 && !PCCONTROLLER_ENABLE_DS18B20 && \
+    !PCCONTROLLER_ENABLE_PCA9685 && !PCCONTROLLER_ENABLE_I2C_LCD
+      ControllerProtocol::MotionMacroProfile;
+#else
+      ControllerProtocol::CustomFeatureProfile;
+#endif
+  constexpr uint8_t buildFlags =
+      (PCCONTROLLER_ENABLE_MACRO_CAPTURE
+           ? ControllerProtocol::LocalMacroCapture
+           : 0) |
+      (PCCONTROLLER_UNIFIED_PAGE_IDENTIFIES_KEYS
+           ? ControllerProtocol::UnifiedPageIdentifiesKeys
+           : 0) |
+      (PCCONTROLLER_FORCE_SILENT ? ControllerProtocol::ForceSilent : 0) |
+      (PCCONTROLLER_BLANK_EEPROM_SILENT
+           ? ControllerProtocol::BlankEepromSilent
+           : 0);
+  // Schema 4 preserves the prior identity prefix and appends explicit profile
+  // truth so a host never guesses compile-time behavior from runtime absence.
   struct __attribute__((packed)) HelloPayload {
     uint8_t schema;
     uint8_t boardKind;
     uint32_t capabilities;
     uint32_t buildHash;
     uint32_t buildTimestamp;
-  } payload = {3, 1, capabilities,
+    uint8_t featureProfile;
+    uint8_t buildFlags;
+  } payload = {4, 1, capabilities,
                pgm_read_dword(&firmwareIdentity.sourceHash),
-               pgm_read_dword(&firmwareIdentity.packedTimestamp)};
+               pgm_read_dword(&firmwareIdentity.packedTimestamp),
+               featureProfile, buildFlags};
   appProtocol.send(ControllerProtocol::HelloResponse, sequence,
                    reinterpret_cast<const uint8_t *>(&payload),
                    sizeof(payload));
@@ -108,6 +150,7 @@ void sendSettings(uint8_t sequence) {
 }
 
 // Reports all logical PWM values plus controller availability and selection.
+#if PCCONTROLLER_ENABLE_PCA9685
 void sendPwmValues(uint8_t sequence) {
   uint8_t payload[34];
   uint8_t index = 0;
@@ -119,8 +162,10 @@ void sendPwmValues(uint8_t sequence) {
   appProtocol.send(ControllerProtocol::PwmValuesResponse, sequence, payload,
                    index);
 }
+#endif
 
 // Pages detected DS18B20 ROM identities, roles, and current readings.
+#if PCCONTROLLER_ENABLE_DS18B20
 void sendTemperatureList(uint8_t sequence) {
   uint8_t payload[24] = {1, temperatureAddressCount};
   uint8_t index = 2;
@@ -135,6 +180,7 @@ void sendTemperatureList(uint8_t sequence) {
   appProtocol.send(ControllerProtocol::TemperatureListResponse, sequence,
                    payload, index);
 }
+#endif
 
 // Mirrors physical/host panel segments, keys, LCD metadata, and macro progress.
 void sendFrontPanel(uint8_t sequence) {
@@ -471,8 +517,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case TemperatureList:
+#if !PCCONTROLLER_ENABLE_DS18B20
+      goto hardwareUnavailable;
+#else
       sendTemperatureList(frame.sequence);
       return;
+#endif
 
     case FrontPanelGet:
       sendFrontPanel(frame.sequence);
@@ -519,6 +569,9 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case PwmSet: {
+#if !PCCONTROLLER_ENABLE_PCA9685
+      goto hardwareUnavailable;
+#else
       const uint16_t value = length >= 3 ? readU16(payload + 1) : 0;
       if (length < 3 || payload[0] >= PwmChannels::Count || value > 4095) {
         goto badPayload;
@@ -530,15 +583,23 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
         storeUserPwmValue(payload[0], value);
       }
       goto acknowledged;
+#endif
     }
 
     case PwmAllOff:
+#if !PCCONTROLLER_ENABLE_PCA9685
+      goto hardwareUnavailable;
+#else
       if (!pwm.tryAllOff()) {
         goto hardwareUnavailable;
       }
       goto acknowledged;
+#endif
 
     case StatusRgb:
+#if !PCCONTROLLER_ENABLE_PCA9685
+      goto hardwareUnavailable;
+#else
       if (length < 4) {
         goto badPayload;
       }
@@ -546,8 +607,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       statusLeds.setBrightness(payload[3]);
       statusLeds.setCustom(payload[0], payload[1], payload[2]);
       goto acknowledged;
+#endif
 
     case StatusEffect:
+#if !PCCONTROLLER_ENABLE_PCA9685
+      goto hardwareUnavailable;
+#else
       // [kind][RGB A][RGB B][brightness][minimum brightness][period u16]
       // [repeats]. Repeats zero loops; 1..255 are MCU-counted cycles.
       if (length == 1 && payload[0] == 0) {
@@ -564,8 +629,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       }
       hostLcdFlags |= HOST_STATUS_OVERRIDE;
       goto acknowledged;
+#endif
 
     case StatusProfileGet: {
+#if !PCCONTROLLER_ENABLE_PCA9685
+      goto hardwareUnavailable;
+#else
       if (length < 1 || payload[0] >= StatusLedController::ProfileCount) {
         goto badPayload;
       }
@@ -576,14 +645,19 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       appProtocol.send(ControllerProtocol::StatusProfileResponse,
                        frame.sequence, response, sizeof(response));
       return;
+#endif
     }
 
     case StatusProfileSet:
+#if !PCCONTROLLER_ENABLE_PCA9685
+      goto hardwareUnavailable;
+#else
       if (length < 1 + StatusLedController::ProfilePayloadBytes ||
           !statusLeds.setProfile(payload[0], payload + 1, frameNow)) {
         goto badPayload;
       }
       goto acknowledged;
+#endif
 
     case ProgramState:
       // Only the semantic one-byte prefix is required; future appended state
@@ -601,8 +675,12 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case PwmGet:
+#if !PCCONTROLLER_ENABLE_PCA9685
+      goto hardwareUnavailable;
+#else
       sendPwmValues(frame.sequence);
       return;
+#endif
 
     case AddressableLed: {
       // [pixel 0..10, or 0xFF=fill][R][G][B][brightness].
@@ -692,7 +770,8 @@ void handleProtocolFrame(const ControllerProtocol::Frame &frame, void *) {
       goto acknowledged;
 
     case MenuSetPage:
-      if (length < 1 || payload[0] >= PAGE_COUNT) {
+      if (length < 1 || payload[0] >= PAGE_COUNT ||
+          !frontPanelPageCompiled(canonicalFrontPanelPage(payload[0]))) {
         goto badPayload;
       }
       if (modeManager.current() == MODE_MOTION_CONTROL) {

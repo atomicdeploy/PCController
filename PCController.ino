@@ -6,7 +6,9 @@
 #include <RCSwitch.h>
 
 #include "LocalLib/BoardPins.h"
+#if PCCONTROLLER_ENABLE_DS18B20
 #include "LocalLib/DallasTemperatureBus.h"
+#endif
 #include "LocalLib/Keys.h"
 #include "LocalLib/ModeManager.h"
 #include "LocalLib/SevenSegments.h"
@@ -19,10 +21,14 @@
 #include "Project/CompactI2c.h"
 #include "Project/FrontPanelModel.h"
 #include "Project/IlluminationController.h"
+#if PCCONTROLLER_ENABLE_INA219
 #include "Project/Ina219Sensor.h"
+#endif
 #include "Project/MacroQueue.h"
 #include "Project/PwmController.h"
+#if PCCONTROLLER_ENABLE_PCA9685
 #include "Project/PwmExpanderDriver.h"
+#endif
 #include "Project/RelayController.h"
 #include "Project/RemoteLearningStore.h"
 #include "Project/ResetTelemetry.h"

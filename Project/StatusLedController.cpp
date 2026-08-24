@@ -1,5 +1,7 @@
 #include "StatusLedController.h"
 
+#if PCCONTROLLER_ENABLE_PCA9685
+
 #include <EEPROM.h>
 #include <string.h>
 
@@ -310,3 +312,6 @@ uint8_t StatusLedController::scale(uint8_t value, uint8_t level) {
       (static_cast<uint16_t>(value) * (static_cast<uint16_t>(level) + 1U)) >>
       8);
 }
+#else
+StatusLedController statusLeds;
+#endif

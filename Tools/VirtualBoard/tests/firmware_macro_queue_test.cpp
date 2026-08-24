@@ -30,6 +30,8 @@ void testSharedActionRegistry() {
   require(!MacroAction::macroQueueableOpcode(Reset) &&
               !MacroAction::macroQueueableOpcode(MacroStart) &&
               MacroAction::playbackAllowed(StatusEffect) &&
+              MacroAction::validPlaybackPayload(RelaySide, 2) &&
+              !MacroAction::validPlaybackPayload(RelaySide, 1) &&
               !MacroAction::recordable(StatusEffect, 48) &&
               !MacroAction::recordable(Buzzer, 3),
           "control-plane or truncated action entered the macro allow-list");
@@ -52,12 +54,13 @@ void testBoardCaptureAndExactPlayback() {
               queue.captured(),
           "board capture did not retain two exact ordinary actions");
 
-  require(queue.playCapture(5000), "captured macro did not enter playback");
+  require(queue.playCapture(5000) && !queue.hostDependent(),
+          "local capture playback incorrectly depends on a live host");
   ControllerProtocol::Frame frame{};
-  arduino_mock::nowMicros = 4998;
+  arduino_mock::nowMicros = 5098;
   require(!queue.dequeueDue(frame),
           "rebased first captured action ran before its playback epoch");
-  arduino_mock::nowMicros = 4999;
+  arduino_mock::nowMicros = 5099;
   require(queue.dequeueDue(frame) &&
               frame.opcode == ControllerProtocol::RelaySide &&
               frame.payloadLength == sizeof(side) && frame.payload[0] == 1 &&
@@ -65,10 +68,10 @@ void testBoardCaptureAndExactPlayback() {
           "first captured ordinary opcode/payload changed during playback");
   queue.completeStep(true);
 
-  arduino_mock::nowMicros = 5248;
+  arduino_mock::nowMicros = 5348;
   require(!queue.dequeueDue(frame),
           "second captured action ran before its exact 250 us delta");
-  arduino_mock::nowMicros = 5249;
+  arduino_mock::nowMicros = 5349;
   require(queue.dequeueDue(frame) &&
               frame.opcode == ControllerProtocol::Buzzer &&
               frame.payloadLength == sizeof(buzzer),
@@ -80,12 +83,12 @@ void testBoardCaptureAndExactPlayback() {
 
   require(queue.playCapture(7000),
           "captured macro could not replay a second time offline");
-  arduino_mock::nowMicros = 6999;
+  arduino_mock::nowMicros = 7099;
   require(queue.dequeueDue(frame) &&
               frame.opcode == ControllerProtocol::RelaySide,
           "second replay changed the first retained action");
   queue.completeStep(true);
-  arduino_mock::nowMicros = 7249;
+  arduino_mock::nowMicros = 7349;
   require(queue.dequeueDue(frame) &&
               frame.opcode == ControllerProtocol::Buzzer,
           "second replay changed the exact retained timing");
@@ -145,6 +148,80 @@ void testHostileRawStreamIsRejected() {
                 queue.takeSafeStopRequest(),
             "hostile raw macro opcode survived firmware validation");
   }
+
+  HardwareSerial serial;
+  ControllerProtocol::UartProtocol protocol(serial);
+  MacroQueue malformed(protocol);
+  const std::uint8_t start[] = {MacroQueue::Schema, 1, 0, 1, 0};
+  const ControllerProtocol::Frame startFrame{
+      ControllerProtocol::MacroStart, 1, sizeof(start), start};
+  require(malformed.handle(startFrame),
+          "malformed-length fixture could not start");
+  const std::uint8_t shortSide[] = {
+      0, 0, 0, 1, 0, 0, 0, 0, 0, ControllerProtocol::RelaySide, 1, 0};
+  const ControllerProtocol::Frame shortSideFrame{
+      ControllerProtocol::MacroStep, 2, sizeof(shortSide), shortSide};
+  require(malformed.handle(shortSideFrame) && !malformed.active() &&
+              malformed.takeSafeStopRequest(),
+          "wrong-length RelaySide raw record survived APPEND validation");
+}
+
+void testLifecycleAndStreamingStateValidation() {
+  HardwareSerial serial;
+  ControllerProtocol::UartProtocol protocol(serial);
+  MacroQueue queue(protocol);
+
+  const std::uint8_t emptyStart[] = {MacroQueue::Schema, 1, 0, 0, 0};
+  const ControllerProtocol::Frame emptyStartFrame{
+      ControllerProtocol::MacroStart, 1, sizeof(emptyStart), emptyStart};
+  require(queue.handle(emptyStartFrame) && !queue.active(),
+          "zero-step host macro entered an infinite Playing path");
+
+  require(queue.beginCapture(2, 10),
+          "recording-state APPEND fixture could not start");
+  const std::uint8_t appendDuringCapture[] = {
+      0, 0, 0, 1, 0, 0, 0, 0, 0, ControllerProtocol::RelayAllOff, 0};
+  const ControllerProtocol::Frame appendDuringCaptureFrame{
+      ControllerProtocol::MacroStep, 2, sizeof(appendDuringCapture),
+      appendDuringCapture};
+  require(queue.handle(appendDuringCaptureFrame) && queue.recording() &&
+              queue.retainedSteps() == 0,
+          "host APPEND mutated the board-owned Recording ring");
+  const std::uint8_t side[] = {0, 1};
+  require(queue.captureAction(ControllerProtocol::RelaySide, side,
+                              sizeof(side), 20) &&
+              queue.finishCapture(),
+          "rejected host fragment damaged the local capture lifecycle");
+
+  MacroQueue empty(protocol);
+  require(empty.beginCapture(3, 0) && empty.finishCapture() &&
+              empty.captured() && !empty.active() &&
+              empty.beginCapture(4, 1),
+          "empty capture did not publish a replaceable terminal state");
+  require(!empty.captureAction(ControllerProtocol::RelayAllOff, nullptr, 0,
+                               0x80000001UL) &&
+              empty.captured(),
+          "capture accepted a due time outside the signed scheduler window");
+
+  for (const bool badCount : {false, true}) {
+    MacroQueue streamed(protocol);
+    const std::uint8_t start[] = {MacroQueue::Schema, 5, 0, 2, 0};
+    const ControllerProtocol::Frame startFrame{
+        ControllerProtocol::MacroStart, 3, sizeof(start), start};
+    require(streamed.handle(startFrame), "stream validation could not start");
+    std::uint8_t append[] = {
+        0, 0, 0, static_cast<std::uint8_t>(badCount ? 2 : 1), 0,
+        0, 0, 0, 0, ControllerProtocol::RelayAllOff, 0};
+    if (!badCount) {
+      append[8] = 0x80; // due=0x80000000, outside signed window
+    }
+    const ControllerProtocol::Frame appendFrame{
+        ControllerProtocol::MacroStep, 4, sizeof(append), append};
+    require(streamed.handle(appendFrame) && !streamed.active() &&
+                streamed.takeSafeStopRequest(),
+            badCount ? "forged complete-step count survived APPEND validation"
+                     : "out-of-window raw due time survived APPEND validation");
+  }
 }
 
 void testFrontPanelMotionCapturesSemanticSideActions() {
@@ -166,13 +243,13 @@ void testFrontPanelMotionCapturesSemanticSideActions() {
               queue.finishCapture() && queue.playCapture(1000),
           "front-panel A up/down did not enter semantic capture");
   ControllerProtocol::Frame frame{};
-  arduino_mock::nowMicros = 999;
+  arduino_mock::nowMicros = 1009;
   require(queue.dequeueDue(frame) &&
               frame.opcode == ControllerProtocol::RelaySide &&
               frame.payload[0] == 0 && frame.payload[1] == 1,
           "front-panel A-up replay depends on menu/key mode");
   queue.completeStep(true);
-  arduino_mock::nowMicros = 1049;
+  arduino_mock::nowMicros = 1059;
   require(queue.dequeueDue(frame) &&
               frame.opcode == ControllerProtocol::RelaySide &&
               frame.payload[0] == 0 && frame.payload[1] == 2,
@@ -192,19 +269,64 @@ void testCaptureClockRollover() {
               queue.finishCapture() && queue.playCapture(1000),
           "rollover capture fixture could not start");
   ControllerProtocol::Frame frame{};
-  arduino_mock::nowMicros = 999;
+  arduino_mock::nowMicros = 1007;
   require(queue.dequeueDue(frame) &&
               frame.opcode == ControllerProtocol::RelayAllOff,
           "first rollover action was not rebased to playback start");
   queue.completeStep(true);
-  arduino_mock::nowMicros = 1038;
+  arduino_mock::nowMicros = 1046;
   require(!queue.dequeueDue(frame),
           "rollover delta fired one microsecond early");
-  arduino_mock::nowMicros = 1039;
+  arduino_mock::nowMicros = 1047;
   require(queue.dequeueDue(frame) &&
               frame.opcode == ControllerProtocol::PwmAllOff,
           "uint32 rollover changed the exact 40 us action delta");
   queue.completeStep(true);
+}
+
+void testCapturePersistenceAcknowledgementIsIdentityGuarded() {
+  HardwareSerial serial;
+  ControllerProtocol::UartProtocol protocol(serial);
+  MacroQueue queue(protocol);
+  require(queue.beginCapture(7, 100),
+          "capture ACK fixture could not start");
+  const std::uint8_t side[] = {1, 1};
+  require(queue.captureAction(ControllerProtocol::RelaySide, side,
+                              sizeof(side), 120) &&
+              queue.finishCapture(),
+          "capture ACK fixture could not seal");
+
+  std::uint8_t clear[] = {4, 7, 99, 0, 0, 0};
+  ControllerProtocol::Frame clearFrame{
+      ControllerProtocol::MacroStep, 8, sizeof(clear), clear};
+  require(queue.handle(clearFrame) && queue.captured(),
+          "stale capture ACK cleared a retained recording");
+  clear[2] = 100;
+  require(queue.handle(clearFrame) && queue.captured() &&
+              queue.playCapture(1000),
+          "matching export ACK destroyed board-local replay data");
+  ControllerProtocol::Frame replay{};
+  arduino_mock::nowMicros = 1019;
+  require(queue.dequeueDue(replay),
+          "export-acknowledged capture could not replay");
+  queue.completeStep(true);
+  require(queue.captured(),
+          "export state was lost after local replay");
+
+  clear[0] = 5;
+  require(queue.handle(clearFrame) && !queue.captured() &&
+              queue.takeSafeStopRequest(),
+          "explicit identity-guarded clear retained capture/outputs");
+
+  require(queue.beginCapture(7, 200) &&
+              queue.captureAction(ControllerProtocol::RelaySide, side,
+                                  sizeof(side), 220) &&
+              queue.finishCapture(),
+          "ID-reuse capture fixture could not seal");
+  clear[0] = 4;
+  clear[2] = 100;
+  require(queue.handle(clearFrame) && queue.captured(),
+          "old ID/start ACK deleted a newer reused-ID capture");
 }
 
 } // namespace
@@ -215,7 +337,9 @@ int main() {
     testBoardCaptureAndExactPlayback();
     testCaptureNeverOverwrites();
     testCaptureClockRollover();
+    testCapturePersistenceAcknowledgementIsIdentityGuarded();
     testHostileRawStreamIsRejected();
+    testLifecycleAndStreamingStateValidation();
     testFrontPanelMotionCapturesSemanticSideActions();
     std::cout << "firmware_macro_queue_tests: all checks passed\n";
     return 0;

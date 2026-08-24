@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "../ProjectConfig.h"
+
 class PwmController;
 
 // StatusLedMode selects the persistent operational RGB presentation.
@@ -43,6 +45,7 @@ enum class StatusLedEffect : uint8_t {
 };
 
 // Composes base state and transient cues onto PWM RGB channels 13..15.
+#if PCCONTROLLER_ENABLE_PCA9685
 class StatusLedController {
 public:
   static constexpr uint8_t ProfileCount = 19;
@@ -114,6 +117,38 @@ private:
   uint32_t cueEndsAt_; // millis() deadline; zero means no active cue.
   StatusLedCue cue_;
 };
+#else
+class StatusLedController {
+public:
+  static constexpr uint8_t ProfileCount = 19;
+  static constexpr uint8_t ProfilePayloadBytes = 12;
+  static constexpr uint8_t ManualCondition = 0xFF;
+  void begin(PwmController &, uint8_t, uint32_t = millis(), bool = true) {}
+  void service(uint32_t = millis()) {}
+  void setMode(StatusLedMode, uint32_t = millis()) {}
+  StatusLedMode mode() const { return StatusLedMode::Off; }
+  void setBrightness(uint8_t) {}
+  uint8_t brightness() const { return 0; }
+  void setCustom(uint8_t, uint8_t, uint8_t) {}
+  bool setEffect(StatusLedEffect, uint8_t, uint8_t, uint8_t, uint8_t,
+                 uint8_t, uint8_t, uint8_t, uint8_t, uint16_t, uint8_t,
+                 uint32_t = millis()) {
+    return false;
+  }
+  void cancelEffect() {}
+  StatusLedEffect effect() const { return StatusLedEffect::None; }
+  uint8_t renderedRed() const { return 0; }
+  uint8_t renderedGreen() const { return 0; }
+  uint8_t renderedBlue() const { return 0; }
+  uint8_t condition() const { return 0; }
+  bool profile(uint8_t, uint8_t *) const { return false; }
+  bool setProfile(uint8_t, const uint8_t *, uint32_t = millis()) {
+    return false;
+  }
+  void setPowerSignal(bool) {}
+  void playCue(StatusLedCue, uint16_t, uint32_t = millis()) {}
+};
+#endif
 
 // statusLeds is the board-wide RGB state and cue compositor.
 extern StatusLedController statusLeds;

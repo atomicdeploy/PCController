@@ -449,6 +449,19 @@ void testFrontPanelLeafDecreaseDispatch() {
               unifiedInputIntent(MENU_INCREASE, false) ==
                   UnifiedInputIntent::Motion,
           "normal unified page no longer exposes macro/motion actions");
+  require(unifiedMacroGesture(KeyEvent::Down, false, false) ==
+                  UnifiedMacroGesture::ImmediateCapture &&
+              unifiedMacroGesture(KeyEvent::HoldRepeat, false, false) ==
+                  UnifiedMacroGesture::None &&
+              unifiedMacroGesture(KeyEvent::Down, true, false) ==
+                  UnifiedMacroGesture::None &&
+              unifiedMacroGesture(KeyEvent::Click, true, false) ==
+                  UnifiedMacroGesture::Replay &&
+              unifiedMacroGesture(KeyEvent::HoldStart, true, false) ==
+                  UnifiedMacroGesture::ReplaceCapture &&
+              unifiedMacroGesture(KeyEvent::Click, true, true) ==
+                  UnifiedMacroGesture::SuppressClassification,
+          "unified macro key lost one-shot replay/replace classification");
 
   const MotionKeyBinding expectedMotion[] = {
       {0, false}, {0, true}, {1, false}, {1, true}};

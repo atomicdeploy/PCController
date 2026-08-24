@@ -161,6 +161,7 @@ uint32_t readU32(const uint8_t *buffer) {
 void safeStopMacroOutputs() {
   relays.allOff(now);
   pwm.clearMask(PwmChannels::UserTestMask);
+  buzzer.stop();
   hostLcdFlags &= static_cast<uint8_t>(~HOST_STATUS_OVERRIDE);
   statusLeds.cancelEffect();
 }
@@ -174,8 +175,12 @@ bool hostUnavailable() {
 
 // Collapses both named temperature channels into the safety warning state.
 bool temperatureHot() {
+#if PCCONTROLLER_ENABLE_DS18B20
   return sensors.temperatureCentiC[0] >= HOT_TEMPERATURE_CENTI_C ||
          sensors.temperatureCentiC[1] >= HOT_TEMPERATURE_CENTI_C;
+#else
+  return false;
+#endif
 }
 
 // Composes the compact availability/activity bitmap used by StatusResponse.

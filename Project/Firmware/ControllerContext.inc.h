@@ -47,11 +47,19 @@ static_assert(sizeof(TelemetryPayload) == ControllerProtocol::MaximumPayload,
               "Native telemetry wire layout changed");
 
 // Long-lived hardware drivers and protocol-domain coordinators.
+#if PCCONTROLLER_ENABLE_PCA9685
 PwmExpanderDriver pwmDriver(BoardPins::PwmAddress);
 PwmController pwm(pwmDriver);
+#else
+PwmController pwm;
+#endif
+#if PCCONTROLLER_ENABLE_INA219
 Ina219Sensor ina219(BoardPins::Ina219Address);
+#endif
+#if PCCONTROLLER_ENABLE_DS18B20
 DallasTemperatureBus temperatureBus(BoardPins::OneWireData);
 Ds18b20Address temperatureAddresses[2];
+#endif
 RCSwitch radioReceiver;
 RCSwitch radioTransmitter;
 RelayController relays(shiftRegisters);
@@ -81,10 +89,22 @@ int16_t smoothTemperature(int16_t filtered, int16_t sample) {
 }
 
 // Peripheral availability, asynchronous conversion, and RF-learning state.
+#if PCCONTROLLER_ENABLE_INA219
 bool ina219Available = false;
+#else
+constexpr bool ina219Available = false;
+#endif
+#if PCCONTROLLER_ENABLE_PCA9685
 bool pwmAvailable = false;
+#else
+constexpr bool pwmAvailable = false;
+#endif
+#if PCCONTROLLER_ENABLE_DS18B20
 uint8_t temperatureAddressCount = 0;
 bool temperatureConversionPending = false;
+#else
+constexpr uint8_t temperatureAddressCount = 0;
+#endif
 bool learningActive = false;
 uint8_t learningMode = RF_LEARN_INDEFINITE;
 uint8_t learningTotalSeconds = 0;
@@ -115,6 +135,7 @@ uint8_t motionPressedMask = 0;
 uint32_t flashMessageEndsAt = 0;
 #if PCCONTROLLER_ENABLE_MACRO_CAPTURE
 uint8_t nextLocalMacroId = 1;
+bool suppressLocalMacroClassification = false;
 #endif
 // Presentation visibility/order is configured independently over UART and is
 // not rolled back by a local edit. The late display-options byte is captured
@@ -137,8 +158,12 @@ uint16_t streamPeriodMs = 0;
 // Cooperative task timestamps; each service owns one cadence/deadline.
 uint32_t lastShiftPollAt = 0;
 uint32_t lastDisplayRefreshAt = 0;
+#if PCCONTROLLER_ENABLE_INA219
 uint32_t lastIna219SampleAt = 0;
+#endif
+#if PCCONTROLLER_ENABLE_DS18B20
 uint32_t lastTemperatureRequestAt = 0;
+#endif
 uint32_t lastTelemetryAt = 0;
 
 // RF momentary actions expire locally even if repeats or the host disappear.
@@ -196,6 +221,9 @@ constexpr uint8_t HOST_PANEL_CAPTURED = 1U << 4;
 
 // Cross-domain entry points required before their ordered implementation fragments.
 void handleMenuAction(uint8_t action, bool fromRemote = false);
+void applyKeyGesture(uint8_t bit, KeyEvent event,
+                     InputEventSource source = InputEventSource::Physical,
+                     bool emitEvidence = true);
 void setMenuPage(uint8_t page);
 void sendTelemetry(uint8_t sequence);
 void endLearning(uint8_t state, int8_t feedback);

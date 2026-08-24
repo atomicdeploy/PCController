@@ -22,7 +22,7 @@ constexpr uint8_t payloadLength(uint8_t opcode) {
 #define PCCONTROLLER_MACRO_ACTION(name, captureLength)                       \
     case name:                                                               \
       return captureLength;
-#include "MacroActions.def"
+#include "MacroActions.inc.h"
 #undef PCCONTROLLER_MACRO_ACTION
     default:
       return 0xFF;
@@ -33,12 +33,24 @@ constexpr bool playbackAllowed(uint8_t opcode) {
   using namespace ControllerProtocol;
   switch (opcode) {
 #define PCCONTROLLER_MACRO_ACTION(name, captureLength) case name:
-#include "MacroActions.def"
+#include "MacroActions.inc.h"
 #undef PCCONTROLLER_MACRO_ACTION
       return true;
     default:
       return false;
   }
+}
+
+// Fixed-shape actions must use their exact canonical payload on raw playback.
+// Variable-shape rows remain bounded by the native frame and are validated by
+// the ordinary opcode dispatcher immediately before touching hardware.
+constexpr bool validPlaybackPayload(uint8_t opcode, uint8_t payloadBytes) {
+  if (!playbackAllowed(opcode) ||
+      payloadBytes > ControllerProtocol::MaximumPayload) {
+    return false;
+  }
+  const uint8_t fixed = payloadLength(opcode);
+  return fixed == 0xFF || payloadBytes == fixed;
 }
 
 constexpr bool recordable(uint8_t opcode, uint8_t availablePayload) {
