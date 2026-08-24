@@ -407,8 +407,8 @@ export function AdvancedWorkbench({
     'macro update',
     quoteArgument(macroRef.trim()),
     quoteArgument(macroName.trim()),
-    quoteArgument(macroCategory.trim()),
-    quoteArgument(macroColor.trim()),
+    quoteArgument(macroCategory.trim() || '-'),
+    quoteArgument(macroColor.trim() || '-'),
   ].join(' ')
   const messageByteLength = new TextEncoder().encode(messageText.trim()).byteLength
   const lcdMessageValid = Boolean(messageLine1 || messageLine2) &&

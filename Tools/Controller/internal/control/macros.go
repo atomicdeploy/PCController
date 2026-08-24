@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -76,6 +77,7 @@ type boardCaptureToken struct {
 	Generation  uint64
 	ID          byte
 	StartedAtUS uint32
+	Board       string
 }
 
 type MacroRunner struct {
@@ -108,6 +110,7 @@ type MacroRunner struct {
 	boardCaptureFinished   map[boardCaptureToken]struct{}
 	fetchCapture           func(boardCaptureToken) ([]byte, error)
 	queryCaptureStatus     func(uint64) (native.MacroStatus, error)
+	ackCapture             func(boardCaptureToken) error
 }
 
 // MacroRecordingState describes a HOST-owned recording session. Each captured
@@ -148,6 +151,7 @@ func NewMacroRunner(
 	}
 	runner.fetchCapture = runner.fetchBoardCapture
 	runner.queryCaptureStatus = runner.queryBoardMacroStatus
+	runner.ackCapture = runner.ackBoardCaptureExport
 	if runtime != nil {
 		runtime.ObserveMacroStatuses(runner.handleBoardMacroStatus)
 		runtime.ObserveConnectionReady(runner.recoverBoardCaptureOnConnect)
@@ -202,7 +206,10 @@ func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (a
 
 // UpdateMetadata keeps names/categories/colors host-owned, including for a
 // provisional `Board capture N` recovered from the MCU ring.
-func (runner *MacroRunner) UpdateMetadata(reference, name, category, color string) (appconfig.Macro, error) {
+func (runner *MacroRunner) UpdateMetadata(
+	reference, name string,
+	category, color *string,
+) (appconfig.Macro, error) {
 	if runner.updateHostConfig == nil {
 		return appconfig.Macro{}, errors.New("macro persistence is unavailable")
 	}
@@ -214,15 +221,24 @@ func (runner *MacroRunner) UpdateMetadata(reference, name, category, color strin
 	if name == "" {
 		return appconfig.Macro{}, errors.New("macro name is required")
 	}
-	if category == "-" {
-		category = ""
+	var nextCategory, nextColor *string
+	if category != nil {
+		value := strings.TrimSpace(*category)
+		if value == "-" {
+			value = ""
+		}
+		nextCategory = &value
 	}
-	if color == "-" {
-		color = ""
-	}
-	color = normalizedMacroColor(color)
-	if !validMacroColor(color) {
-		return appconfig.Macro{}, fmt.Errorf("macro color %q is not red, blue, violet, green, white, or empty", color)
+	if color != nil {
+		value := strings.TrimSpace(*color)
+		if value == "-" {
+			value = ""
+		}
+		value = normalizedMacroColor(value)
+		if !validMacroColor(value) {
+			return appconfig.Macro{}, fmt.Errorf("macro color %q is not red, blue, violet, green, white, or empty", value)
+		}
+		nextColor = &value
 	}
 	err = runner.updateHostConfig(func(config *appconfig.Config) error {
 		for index, existing := range config.Macros {
@@ -231,8 +247,12 @@ func (runner *MacroRunner) UpdateMetadata(reference, name, category, color strin
 			}
 			if existing.ID == macro.ID {
 				config.Macros[index].Name = name
-				config.Macros[index].Category = strings.TrimSpace(category)
-				config.Macros[index].Color = color
+				if nextCategory != nil {
+					config.Macros[index].Category = *nextCategory
+				}
+				if nextColor != nil {
+					config.Macros[index].Color = *nextColor
+				}
 				macro = config.Macros[index]
 				return nil
 			}
@@ -390,7 +410,7 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 	// observers. Their synchronous ACK already supplied the authoritative MCU
 	// timestamp, so the echo must not become a duplicate recorded step.
 	if (evidence.BoardOrigin && evidence.Source == native.InputSourceHost) ||
-		!evidence.Timed || !native.MacroQueueableOpcode(evidence.Opcode) {
+		!evidence.Timed || !native.MacroPlaybackAllowed(evidence.Opcode) {
 		return
 	}
 	step, ok := recordedMacroStep(evidence)
@@ -446,20 +466,27 @@ func (runner *MacroRunner) captureAction(evidence ActionEvidence) {
 	}
 }
 
-func (runner *MacroRunner) handleBoardMacroStatus(status native.MacroStatus) {
+func (runner *MacroRunner) handleBoardMacroStatus(
+	status native.MacroStatus,
+	generation uint64,
+) {
+	snapshot := runner.runtime.Snapshot()
+	if snapshot.Generation != generation {
+		return
+	}
 	runner.handleBoardMacroStatusAtGeneration(
-		status,
-		runner.runtime.Snapshot().Generation,
+		status, generation, captureBoardIdentity(snapshot.Port, snapshot.Hello),
 	)
 }
 
 func (runner *MacroRunner) handleBoardMacroStatusAtGeneration(
 	status native.MacroStatus,
 	generation uint64,
+	board string,
 ) {
 	token := boardCaptureToken{
 		Generation: generation,
-		ID:         status.ID, StartedAtUS: status.StartedAtUS,
+		ID:         status.ID, StartedAtUS: status.StartedAtUS, Board: board,
 	}
 	switch status.State {
 	case native.MacroRecording:
@@ -500,14 +527,16 @@ func (runner *MacroRunner) handleBoardMacroStatusAtGeneration(
 				Reason: err.Error(), Text: fmt.Sprintf("start board capture %d: %v", status.ID, err),
 			})
 		}
-	case native.MacroCaptured:
+	case native.MacroCaptured, native.MacroExported:
 		runner.beginBoardCaptureFinalization(token, status)
+	case native.MacroIdle, native.MacroCancelled, native.MacroFailed:
+		runner.finishBoardRecordingLifecycle(token, status.State)
 	}
 }
 
 func (runner *MacroRunner) recoverBoardCaptureOnConnect(
 	generation uint64,
-	_ ports.Info,
+	port ports.Info,
 	hello native.Hello,
 ) {
 	if hello.Capabilities&native.CapabilityTimedMacroQueue == 0 {
@@ -521,8 +550,11 @@ func (runner *MacroRunner) recoverBoardCaptureOnConnect(
 		})
 		return
 	}
-	if status.State == native.MacroRecording || status.State == native.MacroCaptured {
-		runner.handleBoardMacroStatusAtGeneration(status, generation)
+	if status.State == native.MacroRecording || status.State == native.MacroCaptured ||
+		status.State == native.MacroExported {
+		runner.handleBoardMacroStatusAtGeneration(
+			status, generation, captureBoardIdentity(port, hello),
+		)
 	}
 }
 
@@ -547,6 +579,58 @@ func (runner *MacroRunner) prepareBoardCaptureGenerationLocked(generation uint64
 	runner.boardCaptureGeneration = generation
 	runner.boardCaptureFinalizing = make(map[boardCaptureToken]struct{})
 	runner.boardCaptureFinished = make(map[boardCaptureToken]struct{})
+}
+
+func captureBoardIdentity(port ports.Info, hello native.Hello) string {
+	transport := strings.TrimSpace(port.SerialNumber)
+	if transport == "" {
+		transport = strings.TrimSpace(port.InstanceID)
+	}
+	if transport == "" {
+		transport = strings.TrimSpace(port.Name)
+	}
+	if transport == "" {
+		transport = "unknown"
+	}
+	return fmt.Sprintf(
+		"transport=%s;vid=%s;pid=%s;kind=%d;build=%08X",
+		transport, strings.ToUpper(port.VID), strings.ToUpper(port.PID),
+		hello.BoardKind, hello.BuildHash,
+	)
+}
+
+func (runner *MacroRunner) finishBoardRecordingLifecycle(
+	token boardCaptureToken,
+	state byte,
+) {
+	runner.boardCaptureMu.Lock()
+	defer runner.boardCaptureMu.Unlock()
+	recording := runner.RecordingState()
+	if !recording.Active || !recording.BoardOwned {
+		return
+	}
+	runner.recordMu.RLock()
+	active := runner.recordCapture
+	runner.recordMu.RUnlock()
+	if active.Generation != token.Generation || active.ID != token.ID ||
+		(token.StartedAtUS != 0 && active.StartedAtUS != token.StartedAtUS) {
+		return
+	}
+	macro, err := runner.StopRecording(false)
+	if err != nil {
+		return
+	}
+	lifecycle := "discarded"
+	if state == native.MacroFailed {
+		lifecycle = "failed"
+	}
+	runner.runtime.PublishStructuredEvent(Event{
+		Kind: "macro.recording", Lifecycle: lifecycle, State: lifecycle,
+		Text: fmt.Sprintf(
+			"board capture %d/%s ended in state %d and was %s",
+			macro.ID, macro.Name, state, lifecycle,
+		),
+	})
 }
 
 // beginBoardCaptureFinalization freezes the Action subscription synchronously
@@ -770,8 +854,8 @@ func decodeMacroCaptureStream(stream []byte) ([]appconfig.MacroStep, error) {
 		opcode := stream[offset+4]
 		length := int(stream[offset+5])
 		end := offset + native.MacroRecordHeaderSize + length
-		if length > native.MacroBoardActionMaximumPayload || end > len(stream) ||
-			!native.MacroQueueableOpcode(opcode) {
+		required, recordable := native.MacroBoardActionPayloadLength(opcode)
+		if !recordable || length != int(required) || end > len(stream) {
 			return nil, fmt.Errorf("invalid captured record at byte %d", offset)
 		}
 		step, ok := recordedMacroStep(ActionEvidence{
@@ -1433,7 +1517,7 @@ func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 		}
 		return native.OpMenuAction, []byte{step.Target}, nil
 	case "raw", "opcode":
-		if !native.MacroQueueableOpcode(step.Opcode) {
+		if !native.MacroPlaybackAllowed(step.Opcode) {
 			return 0, nil, fmt.Errorf("opcode 0x%02X is not a queueable acknowledged command", step.Opcode)
 		}
 		payload, err := decodeMacroHex(step.PayloadHex)
@@ -1458,6 +1542,10 @@ func decodeMacroHex(value string) ([]byte, error) {
 func recordedMacroStep(evidence ActionEvidence) (appconfig.MacroStep, bool) {
 	payload := evidence.Payload
 	step := appconfig.MacroStep{}
+	required, recordable := native.MacroBoardActionPayloadLength(evidence.Opcode)
+	if !recordable || len(payload) != int(required) {
+		return step, false
+	}
 	switch evidence.Opcode {
 	case native.OpRelaySet:
 		if len(payload) != 2 {

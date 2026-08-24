@@ -1,5 +1,7 @@
 package native
 
+//go:generate go run ./cmd/genmacrocontract -protocol ../../../../Project/ProtocolContract.h -actions ../../../../Project/MacroActions.def -output macro_contract_generated.go
+
 import (
 	"encoding/binary"
 	"errors"
@@ -13,6 +15,7 @@ const (
 	MacroAppendHeaderSize       = 5
 	MacroRecordHeaderSize       = 6
 	MacroMaximumFragment        = MaxPayload - MacroAppendHeaderSize
+	MacroCaptureChunkMaximum    = 40
 	// EventAction is intentionally smaller than an ordinary host command. It
 	// covers every board-generated physical/RF action without consuming a
 	// second MaximumPayload-sized AVR buffer.
@@ -28,6 +31,7 @@ const (
 	MacroFailed
 	MacroRecording
 	MacroCaptured
+	MacroExported
 )
 
 // MacroStatus is the common schema-2 envelope returned by MACRO_STATUS and
@@ -121,6 +125,17 @@ func MacroCaptureQueryPayload(offset uint16) []byte {
 	return []byte{3, byte(offset), byte(offset >> 8)}
 }
 
+// MacroCaptureAcknowledgePayload marks one identity-guarded retained capture
+// durably exported. Firmware keeps the ring replayable/fetchable; only the
+// explicit user-only command 5 may clear it.
+func MacroCaptureAcknowledgePayload(id byte, startedAtUS uint32) []byte {
+	return []byte{
+		4, id,
+		byte(startedAtUS), byte(startedAtUS >> 8),
+		byte(startedAtUS >> 16), byte(startedAtUS >> 24),
+	}
+}
+
 // MacroCaptureChunk is a bounded recovery page from the board-owned capture
 // ring. Data contains whole/partial stream bytes; callers concatenate pages
 // and validate complete records only after TotalBytes have arrived.
@@ -150,6 +165,12 @@ func ParseMacroCaptureChunk(payload []byte) (MacroCaptureChunk, error) {
 		Offset:     binary.LittleEndian.Uint16(payload[5:7]),
 		Data:       append([]byte(nil), payload[8:]...),
 	}
+	if chunk.TotalBytes > MacroQueueCapacity || len(chunk.Data) > MacroCaptureChunkMaximum {
+		return MacroCaptureChunk{}, fmt.Errorf(
+			"macro capture exceeds ring/page bounds: total=%d page=%d",
+			chunk.TotalBytes, len(chunk.Data),
+		)
+	}
 	if chunk.Offset > chunk.TotalBytes ||
 		int(chunk.Offset)+len(chunk.Data) > int(chunk.TotalBytes) {
 		return MacroCaptureChunk{}, fmt.Errorf(
@@ -174,7 +195,7 @@ func MacroQueueCancelPayload(keepOutputs bool) []byte {
 // EncodeMacroRecord stores one ordinary opcode command against an MCU-clock
 // due offset. Macro-control recursion is rejected before it reaches firmware.
 func EncodeMacroRecord(dueUS uint32, opcode byte, payload []byte) ([]byte, error) {
-	if !MacroQueueableOpcode(opcode) {
+	if !MacroPlaybackAllowed(opcode) {
 		return nil, fmt.Errorf("opcode 0x%02X is not a queueable acknowledged command", opcode)
 	}
 	if len(payload) > MaxPayload {
@@ -188,24 +209,26 @@ func EncodeMacroRecord(dueUS uint32, opcode byte, payload []byte) ([]byte, error
 	return record, nil
 }
 
-// MacroQueueableOpcode is the one host-side policy shared by persisted macro
-// validation, board-origin action-event parsing, and stream compilation. The
-// firmware dispatcher remains the final peripheral/safety authority.
-func MacroQueueableOpcode(opcode byte) bool {
-	switch opcode {
-	case OpSetStream, OpSetSettings,
-		OpBuzzer, OpPWMSet, OpPWMAllOff,
-		OpStatusRGB, OpStatusEffect, OpStatusProfileSet,
-		OpAddressableLED, OpRFTx,
-		OpRFLearnStart, OpRFLearnCancel, OpRFLearnClear,
-		OpRFLearnRemove, OpRFLearnReplace,
-		OpMenuAction, OpRelaySet, OpRelaySide,
-		OpRelayAllOff, OpRelayTest, OpMenuSetPage,
-		OpDisplayText, OpRemoteKeyGesture:
-		return true
-	default:
-		return false
+type macroActionContract struct {
+	captureLength byte
+}
+
+// MacroPlaybackAllowed is generated from Project/MacroActions.* and is the
+// exact safe ordinary-action allowlist enforced by the production AVR queue.
+func MacroPlaybackAllowed(opcode byte) bool {
+	_, exists := macroActionContracts[opcode]
+	return exists
+}
+
+// MacroBoardActionPayloadLength returns the exact fixed evidence prefix. A
+// 0xFF canonical row is playback-only/variable and cannot enter board capture.
+func MacroBoardActionPayloadLength(opcode byte) (byte, bool) {
+	contract, exists := macroActionContracts[opcode]
+	if !exists || contract.captureLength == 0xFF ||
+		contract.captureLength > MacroBoardActionMaximumPayload {
+		return 0, false
 	}
+	return contract.captureLength, true
 }
 
 // ResponseDeviceMicros extracts the schema-2 MCU timestamp appended to ACKs

@@ -812,7 +812,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]",
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]",
 		Summary: "manage and play MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
@@ -4427,7 +4427,7 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4510,12 +4510,12 @@ func macroCommand(
 		if len(args) < 3 || len(args) > 5 {
 			return "", fmt.Errorf("usage: macro update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]")
 		}
-		category, color := "", ""
+		var category, color *string
 		if len(args) >= 4 {
-			category = args[3]
+			category = &args[3]
 		}
 		if len(args) == 5 {
-			color = args[4]
+			color = &args[4]
 		}
 		macro, err := runner.UpdateMetadata(args[1], args[2], category, color)
 		if err != nil {

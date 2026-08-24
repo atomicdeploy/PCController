@@ -816,7 +816,8 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 				length, len(payload), MacroBoardActionMaximumPayload,
 			)
 		}
-		if !MacroQueueableOpcode(payload[2]) {
+		required, recordable := MacroBoardActionPayloadLength(payload[2])
+		if !recordable || byte(length) != required {
 			return DeviceEvent{}, fmt.Errorf("action EVENT opcode 0x%02X is not recordable", payload[2])
 		}
 		event.Source = payload[1]

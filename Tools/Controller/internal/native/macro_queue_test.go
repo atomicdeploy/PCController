@@ -1,9 +1,47 @@
 package native
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+func TestGeneratedMacroContractMatchesCanonicalCXXSources(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate macro contract test")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", ".."))
+	protocol, err := os.ReadFile(filepath.Join(root, "Project", "ProtocolContract.h"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	actions, err := os.ReadFile(filepath.Join(root, "Project", "MacroActions.def"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.New()
+	_, _ = hash.Write(protocol)
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write(actions)
+	if got := fmt.Sprintf("%x", hash.Sum(nil)); got != macroContractSourceSHA256 {
+		t.Fatalf("generated macro contract is stale: got source %s, generated %s; run go generate ./internal/native", got, macroContractSourceSHA256)
+	}
+	if !MacroPlaybackAllowed(OpRelaySide) || MacroPlaybackAllowed(OpSetSettings) ||
+		MacroPlaybackAllowed(OpRFLearnStart) || MacroPlaybackAllowed(OpRelayTest) {
+		t.Fatal("generated playback allowlist differs from the AVR safety registry")
+	}
+	if length, recordable := MacroBoardActionPayloadLength(OpRelayAllOff); !recordable || length != 0 {
+		t.Fatalf("zero-payload capture contract=%d/%t", length, recordable)
+	}
+	if _, recordable := MacroBoardActionPayloadLength(OpStatusEffect); recordable {
+		t.Fatal("variable playback-only action entered board evidence")
+	}
+}
 
 func TestMacroStatusSchemaTwoRoundTripLayout(t *testing.T) {
 	payload := []byte{
@@ -95,6 +133,8 @@ func TestBoardActionEventUsesOrdinaryMacroOpcodeContract(t *testing.T) {
 func TestBoardActionEventRejectsControlAndOversizedPayload(t *testing.T) {
 	for _, payload := range [][]byte{
 		{EventAction, InputSourcePhysical, OpMacroStart, 0},
+		{EventAction, InputSourcePhysical, OpRelayAllOff, 1, 0},
+		{EventAction, InputSourceRF, OpRelaySet, 1, 0},
 		{EventAction, InputSourceRF, OpRelaySet, MacroBoardActionMaximumPayload + 1,
 			0, 0, 0, 0, 0, 0, 0, 0, 0},
 	} {

@@ -469,7 +469,8 @@ func TestCaptureStreamDecodeMergeAndMetadataUpdate(t *testing.T) {
 			return config.Validate()
 		},
 	)
-	updated, err := runner.UpdateMetadata("7", "Night lift", "motion", "purple")
+	category, color := "motion", "purple"
+	updated, err := runner.UpdateMetadata("7", "Night lift", &category, &color)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,10 +479,38 @@ func TestCaptureStreamDecodeMergeAndMetadataUpdate(t *testing.T) {
 		len(updated.Steps) != 2 {
 		t.Fatalf("metadata update changed capture data: %#v", updated)
 	}
+	preserved, err := runner.UpdateMetadata("7", "Night lift renamed", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preserved.Category != "motion" || preserved.Color != "violet" {
+		t.Fatalf("rename erased omitted metadata: %#v", preserved)
+	}
+	clear := "-"
+	cleared, err := runner.UpdateMetadata("7", "Night lift renamed", &clear, &clear)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Category != "" || cleared.Color != "" {
+		t.Fatalf("explicit metadata clear was ignored: %#v", cleared)
+	}
 }
 
 func TestMacroExplicitSafeCancelOverridesBeginKeepPreference(t *testing.T) {
 	if payload := native.MacroQueueCancelPayload(false); len(payload) != 1 || payload[0] != 0 {
 		t.Fatalf("safe cancel must be explicit zero, got %v", payload)
+	}
+}
+
+func TestRecordedMacroStepRequiresCanonicalFixedPayloadShape(t *testing.T) {
+	for _, evidence := range []ActionEvidence{
+		{Opcode: native.OpRelayAllOff, Payload: []byte{1}},
+		{Opcode: native.OpPWMAllOff, Payload: []byte{0}},
+		{Opcode: native.OpRelaySet, Payload: []byte{5}},
+		{Opcode: native.OpStatusEffect, Payload: []byte{1, 2, 3}},
+	} {
+		if step, ok := recordedMacroStep(evidence); ok {
+			t.Fatalf("malformed/playback-only evidence accepted: %#v => %#v", evidence, step)
+		}
 	}
 }
