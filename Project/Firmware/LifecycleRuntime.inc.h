@@ -113,6 +113,22 @@ static inline __attribute__((always_inline)) void serviceController() {
   const uint32_t loopNow = now;
   wdt_reset();
 
+  // A due macro step is timestamped against the MCU clock. Run one before
+  // accepting an ordinary UART frame so a continuous HOST presentation stream
+  // cannot turn a precise macro delta into serial-backlog latency. Physical
+  // key/RF work still receives its own turn below; macro dispatch is bounded
+  // to one ordinary opcode per controller pass.
+  ControllerProtocol::Frame queuedMacroFrame;
+  if (macroPlayback.dequeueDue(queuedMacroFrame)) {
+    const uint16_t errors = appProtocol.responseErrors();
+    handleProtocolFrame(queuedMacroFrame, nullptr);
+    macroPlayback.completeStep(errors == appProtocol.responseErrors());
+    wdt_reset();
+  }
+  if (macroPlayback.takeSafeStopRequest()) {
+    safeStopMacroOutputs();
+  }
+
   appProtocol.service();
   // I2cTransfer is dispatched above and may establish/release a lease in this
   // same controller turn. Snapshot only after UART dispatch so no firmware-
@@ -133,16 +149,6 @@ static inline __attribute__((always_inline)) void serviceController() {
   // the cooperative fairness contract for physical, RF, and virtual input.
   serviceShiftRegisterAndKeys(loopNow);
   serviceRemoteMomentary(loopNow);
-  ControllerProtocol::Frame queuedMacroFrame;
-  if (macroPlayback.dequeueDue(queuedMacroFrame)) {
-    const uint16_t errors = appProtocol.responseErrors();
-    handleProtocolFrame(queuedMacroFrame, nullptr);
-    macroPlayback.completeStep(errors == appProtocol.responseErrors());
-    wdt_reset();
-  }
-  if (macroPlayback.takeSafeStopRequest()) {
-    safeStopMacroOutputs();
-  }
   const bool hostOffline = hostUnavailable();
   servicePowerSignalFallback(hostOffline, i2cReserved, loopNow);
   if (hostOffline && (hostLcdFlags & HOST_LCD_OFFLINE) == 0 &&
