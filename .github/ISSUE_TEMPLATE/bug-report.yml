@@ -51,8 +51,8 @@ body:
     id: identity
     attributes:
       label: Build and device identity
-      description: Provide the firmware hash/timestamp, host hash/version, board, port identity, and reset telemetry when applicable.
-      placeholder: Firmware hash, host hash, COM identity, reset count/cause...
+      description: Use short linked build/commit identities in prose; attach machine evidence when full integrity digests are needed. Omit private machine identity.
+      placeholder: Firmware build/timestamp, host version, public USB identity, reset count/cause...
 
   - type: textarea
     id: safety
@@ -65,6 +65,12 @@ body:
     attributes:
       label: Logs and evidence
       description: Attach concise logs, screenshots, protocol traces, or simulator output. Remove secrets first.
+
+  - type: textarea
+    id: coordination
+    attributes:
+      label: Coordination and request provenance
+      description: Link related issues/PRs, note claimed WIP or dependencies, and preserve only a short publication-safe request excerpt or normalized requirement. Never paste private transcripts.
 
   - type: checkboxes
     id: checks
