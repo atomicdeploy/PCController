@@ -727,8 +727,27 @@ func RestoreProgrammingSession(
 	if runtime == nil {
 		return errors.New("programming restore requires an application runtime")
 	}
-	return restoreProgrammingSession(
-		ctx, runtimeProgrammingDevice{runtime: runtime, options: options}, session, options, output,
+	return restoreProgrammingSessionWithDisposition(
+		ctx, runtimeProgrammingDevice{runtime: runtime, options: options}, session, options, output, false,
+	)
+}
+
+// AbandonProgrammingSession restores a fully captured failed transaction when
+// its exact staging HEX has been lost. It deliberately makes no claim about
+// flash contents and is permitted only after the authenticated physical board
+// and target hash have been checked by the command layer.
+func AbandonProgrammingSession(
+	ctx context.Context,
+	runtime *Runtime,
+	session *ProgrammingSession,
+	options ProgrammingLifecycleOptions,
+	output io.Writer,
+) error {
+	if runtime == nil {
+		return errors.New("programming abandonment requires an application runtime")
+	}
+	return restoreProgrammingSessionWithDisposition(
+		ctx, runtimeProgrammingDevice{runtime: runtime, options: options}, session, options, output, true,
 	)
 }
 
@@ -739,10 +758,21 @@ func restoreProgrammingSession(
 	options ProgrammingLifecycleOptions,
 	output io.Writer,
 ) error {
+	return restoreProgrammingSessionWithDisposition(ctx, device, session, options, output, false)
+}
+
+func restoreProgrammingSessionWithDisposition(
+	ctx context.Context,
+	device programmingDevice,
+	session *ProgrammingSession,
+	options ProgrammingLifecycleOptions,
+	output io.Writer,
+	abandonFailed bool,
+) error {
 	if session == nil {
 		return nil
 	}
-	if session.HostResult != "succeeded" {
+	if session.HostResult != "succeeded" && !(abandonFailed && session.HostResult == "failed") {
 		return fmt.Errorf(
 			"programming host result is %q, not verified success; safety latch and recovery marker retained",
 			session.HostResult,
@@ -825,7 +855,7 @@ func restoreProgrammingSession(
 				"physical LCD completion message unavailable: "+err.Error())
 		}
 	}
-	if original.Flags&native.SettingsSilent == 0 {
+	if !abandonFailed && original.Flags&native.SettingsSilent == 0 {
 		if err := device.PlayProgrammingMelody(
 			ctx, programmingReadyMelody(options.HostConfig),
 		); err != nil {
@@ -838,7 +868,11 @@ func restoreProgrammingSession(
 	}
 	writeProgrammingWarningsFrom(output, session, warningStart)
 	if output != nil {
-		fmt.Fprintln(output, "MCU EEPROM settings restored and verified; programming recovery marker cleared")
+		if abandonFailed {
+			fmt.Fprintln(output, "failed programming transaction abandoned; MCU EEPROM settings/live state restored and recovery marker cleared")
+		} else {
+			fmt.Fprintln(output, "MCU EEPROM settings restored and verified; programming recovery marker cleared")
+		}
 	}
 	return nil
 }
