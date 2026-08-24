@@ -646,7 +646,6 @@ func runIPC(args []string, stdout, stderr io.Writer, store *appconfig.Store) err
 			IntegrationProxy:      integrationProxy,
 			LocalDevice:           localDevice,
 			AuthToken:             serverConfig.IPC.AuthToken,
-			AuthorizationDisabled: true,
 			AllowedOrigins:        append([]string(nil), serverConfig.IPC.AllowedOrigins...),
 			InboundWebhooks:       serverConfig.Integrations.InboundWebhooksEnabled,
 			HostVersion:           version,
