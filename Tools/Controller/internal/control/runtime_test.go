@@ -8,6 +8,7 @@ import (
 
 	"go.bug.st/serial"
 
+	"pccontroller.local/controller/internal/hostui"
 	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 	"pccontroller.local/controller/internal/ports"
@@ -45,6 +46,53 @@ func (port *reconnectTestPort) Close() error {
 	return nil
 }
 func (*reconnectTestPort) Break(time.Duration) error { return nil }
+
+func TestBuzzerChangedEventPreservesCompactAndTimestampedSemantics(t *testing.T) {
+	compact := buzzerChangedEvent(native.Frame{
+		Opcode:  native.OpBuzzerChanged,
+		Payload: []byte{0xB8, 0x01, 0xDC, 0x00, 0},
+	})
+	if compact.Kind != "buzzer.note" || compact.Stream != EventStreamState ||
+		compact.Metadata["frequency_hz"] != "440" ||
+		compact.Metadata["duration_ms"] != "220" ||
+		compact.Metadata["muted"] != "false" ||
+		compact.Metadata["timed"] != "false" {
+		t.Fatalf("compact buzzer event=%#v", compact)
+	}
+	if _, exists := compact.Metadata["device_micros"]; exists {
+		t.Fatalf("compact buzzer event invented a device timestamp: %#v", compact.Metadata)
+	}
+
+	timestamped := buzzerChangedEvent(native.Frame{
+		Opcode:  native.OpBuzzerChanged,
+		Payload: []byte{0x70, 0x03, 125, 0, 1, 0x78, 0x56, 0x34, 0x12},
+	})
+	if timestamped.Kind != "buzzer.note" ||
+		timestamped.Metadata["frequency_hz"] != "880" ||
+		timestamped.Metadata["duration_ms"] != "125" ||
+		timestamped.Metadata["muted"] != "true" ||
+		timestamped.Metadata["timed"] != "true" ||
+		timestamped.Metadata["device_micros"] != "305419896" {
+		t.Fatalf("timestamped buzzer event=%#v", timestamped)
+	}
+}
+
+func TestMalformedBuzzerPushIsDebugDiagnosticNotNotificationSpam(t *testing.T) {
+	event := buzzerChangedEvent(native.Frame{
+		Opcode:  native.OpBuzzerChanged,
+		Payload: []byte{0xB8, 0x01, 0xDC, 0x00, 0, 0},
+	})
+	if event.Kind != "protocol.invalid" || event.Stream != EventStreamDebug ||
+		event.Metadata["opcode"] != "BUZZER_CHANGED" ||
+		event.Metadata["payload_bytes"] != "6" {
+		t.Fatalf("malformed buzzer diagnostic=%#v", event)
+	}
+	if _, important := hostui.NotificationForImportantEvent(hostui.ImportantEvent{
+		Kind: event.Kind, Message: event.Text, AppTitle: "PCController",
+	}); important {
+		t.Fatal("malformed repeated buzzer push became an operator toast")
+	}
+}
 
 func TestDoorEventUpdatesSnapshotAndWakesWaiters(t *testing.T) {
 	runtime := New(Options{})

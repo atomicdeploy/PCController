@@ -178,6 +178,12 @@ func ParseSegmentState(payload []byte) (SegmentState, error) {
 
 // BuzzerState describes the tone most recently started by firmware. Duration
 // lets every host surface stop its local mirror without a second board event.
+//
+// BUZZER_CHANGED has a stable five-byte state prefix. Firmware that can expose
+// its monotonic clock appends device_micros. Treating the suffix as optional is
+// important during an ordinary host-first update: the compact state is still
+// complete and truthful, but renderers must schedule it from observation time
+// instead of inventing a device timestamp.
 type BuzzerState struct {
 	FrequencyHz  uint16 `json:"frequency_hz"`
 	DurationMS   uint16 `json:"duration_ms"`
@@ -187,19 +193,22 @@ type BuzzerState struct {
 }
 
 func ParseBuzzerState(payload []byte) (BuzzerState, error) {
-	if len(payload) != 9 {
-		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED payload is %d bytes, need 9", len(payload))
+	if len(payload) != 5 && len(payload) != 9 {
+		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED payload is %d bytes, need exactly 5 or 9", len(payload))
 	}
 	if payload[4] > 1 {
 		return BuzzerState{}, fmt.Errorf("BUZZER_CHANGED muted flag is %d, need 0 or 1", payload[4])
 	}
-	return BuzzerState{
-		FrequencyHz:  binary.LittleEndian.Uint16(payload[:2]),
-		DurationMS:   binary.LittleEndian.Uint16(payload[2:4]),
-		Muted:        payload[4] != 0,
-		DeviceMicros: binary.LittleEndian.Uint32(payload[5:9]),
-		Timed:        true,
-	}, nil
+	state := BuzzerState{
+		FrequencyHz: binary.LittleEndian.Uint16(payload[:2]),
+		DurationMS:  binary.LittleEndian.Uint16(payload[2:4]),
+		Muted:       payload[4] != 0,
+	}
+	if len(payload) == 9 {
+		state.DeviceMicros = binary.LittleEndian.Uint32(payload[5:9])
+		state.Timed = true
+	}
+	return state, nil
 }
 
 // StatusLEDState is the changed-only physical RGB result pushed after the MCU

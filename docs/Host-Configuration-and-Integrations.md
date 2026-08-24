@@ -622,9 +622,11 @@ requires a fresh application `HELLO` afterward.
 
 The peer connection also carries structured changed-state events and guarded
 host upgrades. Board-originated `buzzer.note` events keep frequency, duration,
-pause, and MCU-clock metadata so an enabled PC buzzer on another instance can
-render the board timeline without accumulated network delay; an ingress marker
-prevents event cycles. `controller.peer.update.host` transfers a
+pause, and any available MCU-clock metadata so an enabled PC buzzer on another
+instance can render the board timeline without accumulated network delay. A
+compact five-byte board event truthfully omits that clock and is rendered from
+observation time; an ingress marker prevents event cycles.
+`controller.peer.update.host` transfers a
 content-addressed executable through the configured bridge and invokes the
 target's own graceful coordinator. SSH remains an operator test/deployment
 harness only and is not part of the application update implementation.

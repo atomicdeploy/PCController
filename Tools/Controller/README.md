@@ -652,9 +652,12 @@ door presentation uses a 30-second interval rather than looping continuously.
 Board `BUZZER_CHANGED` frames are always available to event subscribers. When
 `integrations.buzzer_mirror.enabled` is true, the WebUI can play the reported
 frequency/duration with Web Audio and the native host path can play it through
-the motherboard speaker. Current frames also carry the MCU start clock, so
+the motherboard speaker. The five-byte state is sufficient for observation-
+time playback; current nine-byte frames also carry the MCU start clock, so
 native, bridge, and browser renderers retain note/pause cadence and trim late
-notes instead of accumulating transport or helper-startup delay. Windows can
+notes instead of accumulating transport or helper-startup delay. The host does
+not invent `device_micros` when an attached board sends the compact state.
+Windows can
 open the optional `WinRing0x64.sys`
 device and drive PIT channel 2 directly; Linux first uses the kernel PC-speaker
 `KIOCSOUND` interface. If native access is unavailable, the host may discover

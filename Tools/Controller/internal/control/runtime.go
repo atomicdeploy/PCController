@@ -521,10 +521,48 @@ func EventStreamForKind(kind string) string {
 		strings.HasSuffix(kind, ".sample") {
 		return EventStreamTelemetry
 	}
+	if strings.HasPrefix(kind, "protocol.") {
+		return EventStreamDebug
+	}
 	if strings.HasSuffix(kind, ".frame") {
 		return EventStreamState
 	}
 	return EventStreamActivity
+}
+
+// buzzerChangedEvent normalizes both wire forms of BUZZER_CHANGED into the
+// same state event. The five-byte form has no board clock, so device_micros is
+// deliberately absent and every renderer falls back to observation time. A
+// malformed frame remains available to protocol diagnostics without becoming
+// a generic, operator-actionable error notification for every attempted note.
+func buzzerChangedEvent(frame native.Frame) Event {
+	state, err := native.ParseBuzzerState(frame.Payload)
+	if err != nil {
+		return Event{
+			Kind: "protocol.invalid", Stream: EventStreamDebug,
+			Text: err.Error(), Frame: frame,
+			Source: "board", Target: "host", MessageType: "event",
+			Metadata: map[string]string{
+				"opcode":        native.OpcodeName(frame.Opcode),
+				"payload_bytes": strconv.Itoa(len(frame.Payload)),
+			},
+		}
+	}
+	metadata := map[string]string{
+		"frequency_hz": strconv.Itoa(int(state.FrequencyHz)),
+		"duration_ms":  strconv.Itoa(int(state.DurationMS)),
+		"muted":        strconv.FormatBool(state.Muted),
+		"timed":        strconv.FormatBool(state.Timed),
+	}
+	if state.Timed {
+		metadata["device_micros"] = strconv.FormatUint(uint64(state.DeviceMicros), 10)
+	}
+	return Event{
+		Kind: "buzzer.note", Stream: EventStreamState,
+		Text:  fmt.Sprintf("buzzer note %d Hz for %d ms", state.FrequencyHz, state.DurationMS),
+		Frame: frame, Source: "board", Target: "host", MessageType: "event",
+		Metadata: metadata,
+	}
 }
 
 // Settings reads the authoritative live EEPROM settings and updates the shared
@@ -1427,7 +1465,7 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 				)
 				var parsedDevice *native.DeviceEvent
 				var parsedSegments *native.SegmentState
-				var parsedBuzzer *native.BuzzerState
+				var parsedBuzzerEvent *Event
 				var parsedStatusLED *native.StatusLEDState
 				var rfMappingRequired bool
 				var rfCaptured uint32
@@ -1461,13 +1499,9 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 						kind, text = "error", err.Error()
 					}
 				} else if event.Frame.Opcode == native.OpBuzzerChanged {
-					if state, err := native.ParseBuzzerState(event.Frame.Payload); err == nil {
-						kind = "buzzer.note"
-						text = fmt.Sprintf("buzzer note %d Hz for %d ms", state.FrequencyHz, state.DurationMS)
-						parsedBuzzer = &state
-					} else {
-						kind, text = "error", err.Error()
-					}
+					parsed := buzzerChangedEvent(event.Frame)
+					kind, text = parsed.Kind, parsed.Text
+					parsedBuzzerEvent = &parsed
 				} else if event.Frame.Opcode == native.OpStatusLEDChanged {
 					if state, err := native.ParseStatusLEDState(event.Frame.Payload); err == nil {
 						kind = "status_led.changed"
@@ -1525,20 +1559,8 @@ func (runtime *Runtime) pump(session *link.Session, generation uint64) {
 							"brightness":   strconv.Itoa(int(parsedSegments.Brightness)),
 						},
 					})
-				} else if parsedBuzzer != nil {
-					metadata := map[string]string{
-						"frequency_hz": strconv.Itoa(int(parsedBuzzer.FrequencyHz)),
-						"duration_ms":  strconv.Itoa(int(parsedBuzzer.DurationMS)),
-						"muted":        strconv.FormatBool(parsedBuzzer.Muted),
-					}
-					if parsedBuzzer.Timed {
-						metadata["device_micros"] = strconv.FormatUint(uint64(parsedBuzzer.DeviceMicros), 10)
-					}
-					runtime.publishEvent(Event{
-						Kind: kind, Text: text, Frame: event.Frame,
-						Source: "board", Target: "host", MessageType: "event",
-						Metadata: metadata,
-					})
+				} else if parsedBuzzerEvent != nil {
+					runtime.publishEvent(*parsedBuzzerEvent)
 				} else if parsedStatusLED != nil {
 					runtime.publishEvent(Event{
 						Kind: kind, Text: text, Frame: event.Frame,

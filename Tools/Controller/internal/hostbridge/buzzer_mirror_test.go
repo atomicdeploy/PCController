@@ -144,6 +144,30 @@ func TestBuzzerPlaybackTimelineReanchorsAfterWholeMicrosWrapOfSilence(t *testing
 	}
 }
 
+func TestBuzzerPlaybackTimelineCompactStateBreaksDeviceClockChain(t *testing.T) {
+	timeline := newBuzzerPlaybackTimeline()
+	base := time.Unix(1700000000, 0)
+	_ = timeline.plan(buzzerMirrorJob{
+		durationMS: 100, deviceMicros: 1_000, timed: true,
+		observedAt: base, source: "board-a",
+	}, base)
+	compactAt := base.Add(2 * time.Second)
+	compact := timeline.plan(buzzerMirrorJob{
+		durationMS: 80, observedAt: compactAt, source: "board-a",
+	}, compactAt)
+	if !compact.start.Equal(compactAt) {
+		t.Fatalf("compact event start=%v want observation=%v", compact.start, compactAt)
+	}
+	resumedAt := base.Add(3 * time.Second)
+	resumed := timeline.plan(buzzerMirrorJob{
+		durationMS: 60, deviceMicros: 2_000, timed: true,
+		observedAt: resumedAt, source: "board-a",
+	}, resumedAt)
+	if !resumed.start.Equal(resumedAt) {
+		t.Fatalf("resumed timestamp used stale pre-compact anchor: %+v", resumed)
+	}
+}
+
 func TestBuzzerDispatchReusesResolvedExternalBackend(t *testing.T) {
 	manager := &Manager{
 		buzzerJobs: make(chan buzzerMirrorJob, 1),

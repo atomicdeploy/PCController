@@ -164,11 +164,15 @@ normal low-latency path.
 
 The board pushes changed physical outputs instead of requiring the host to poll
 the active front panel. `SEGMENT_CHANGED` (`9C`) carries four raw TM1637 segment
-bytes followed by `u8 brightness`. `BUZZER_CHANGED` (`9D`) carries
-the exact nine-byte schema `u16 frequency_hz, u16 duration_ms, u8 muted,
-u32 device_micros`. Hosts reject obsolete five-byte frames; during alpha work,
-install matching firmware instead of adding a compatibility parser. These frames
-use sequence zero and are emitted only when the
+bytes followed by `u8 brightness`. `BUZZER_CHANGED` (`9D`) has a complete,
+stable five-byte state prefix `u16 frequency_hz, u16 duration_ms, u8 muted`.
+Current firmware appends `u32 device_micros`, producing nine bytes. Hosts accept
+exactly those two lengths: the compact form is scheduled from observation time,
+while the timestamped form preserves the board's monotonic timing. No timestamp
+is inferred for a compact frame, and arbitrary intermediate or extended lengths
+remain invalid. This bounded optional suffix lets a host-first alpha deployment
+continue controlling an attached board without introducing a schema registry or
+migration layer. These frames use sequence zero and are emitted only when the
 corresponding physical output changes. The host may still request
 `FRONT_PANEL_GET` during connection, manual refresh, or recovery.
 
@@ -177,11 +181,12 @@ deadline sequence; command/ACK latency is not added to every note interval.
 Each accepted firmware note or explicit pause is mirrored through
 `BUZZER_CHANGED`, then published immediately through IPC, WebSocket, Socket.IO,
 bridge peers, optional native motherboard-speaker playback, and optional Web
-Audio. Host renderers map `device_micros` onto their local monotonic clocks;
-late notes are shortened or discarded instead of shifting later notes. Current
-firmware receives one compact `STATUS_EFFECT` descriptor and renders the
-animation locally; the rate-limited `STATUS_RGB` stream remains only as a
-bounded older-firmware compatibility path.
+Audio. Host renderers map a present `device_micros` onto their local monotonic
+clocks; late notes are shortened or discarded instead of shifting later notes.
+When it is absent, renderers use receipt time for that note and do not carry a
+false timing claim across the network. Current firmware receives one compact
+`STATUS_EFFECT` descriptor and renders the animation locally; the rate-limited
+`STATUS_RGB` stream remains only as a bounded older-firmware compatibility path.
 
 Every buzzer state from one source supersedes its preceding state. A zero-
 frequency positive-duration record is a timed pause; zero frequency and zero
@@ -249,7 +254,7 @@ off only outputs claimed by that macro.
 | TEMPERATURES | `95` | named temperature records below |
 | MENU_LIST | `97` | paginated firmware-owned menu entries below |
 | SEGMENT_CHANGED | `9C` | `u8 raw_segments[4], u8 brightness`; unsolicited, changed-only |
-| BUZZER_CHANGED | `9D` | exact nine-byte `u16 frequency_hz, u16 duration_ms, u8 muted, u32 device_micros`; unsolicited, changed-only |
+| BUZZER_CHANGED | `9D` | five-byte `u16 frequency_hz, u16 duration_ms, u8 muted`, optionally followed by `u32 device_micros` (nine bytes total); unsolicited, changed-only |
 | EVENT | `A0` | `u8 eventType, event-specific data...` |
 
 `MENU_LIST` schema `1` starts with `u8 schema, u8 total, u8 nextCursor,
@@ -936,8 +941,10 @@ as connection, door, RF, macro, automation, and fault changes. It has its own
 retention ring, so animation frames and measurements cannot evict useful
 one-shot activity. `state` carries changed-only display, status-light, buzzer,
 and other continuous output frames for immediate UI mirrors without writing
-them to activity consoles. `debug` is an explicit opt-in for raw `rx`, `tx`, and
-opcode trace events. Subscribe to `opcodes` for opaque unsolicited frames and
+them to activity consoles. `debug` is an explicit opt-in for raw `rx`, `tx`,
+opcode traces, and `protocol.invalid` diagnostics. A malformed high-rate state
+frame therefore remains inspectable without producing a desktop/browser toast
+for every sample. Subscribe to `opcodes` for opaque unsolicited frames and
 `status` for the independently paced live measurement stream. Durable timeline
 storage and ordinary TUI, WebUI, and secondary-console logs consume `activity`
 only; diagnostic monitors may deliberately request the noisier streams.

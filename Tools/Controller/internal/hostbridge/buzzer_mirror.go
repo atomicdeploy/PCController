@@ -61,6 +61,12 @@ func (timeline *buzzerPlaybackTimeline) plan(job buzzerMirrorJob, now time.Time)
 			deviceMicros: job.deviceMicros,
 			start:        start,
 		}
+	} else {
+		// A compact BUZZER_CHANGED state is scheduled from observation time.
+		// It also breaks the device-clock chain: if timestamped events resume
+		// after a reset/update, their first timestamp must establish a new
+		// anchor rather than continuing from stale pre-compact state.
+		delete(timeline.anchors, job.source)
 	}
 	return buzzerPlaybackPlan{
 		start: start,

@@ -43,6 +43,11 @@ export class BuzzerPlaybackTimeline {
         if (deltaUS <= maxBuzzerSourceGapUS && candidateMS >= nowMS - maxBuzzerSourceGapUS / 1000) startMS = candidateMS
       }
       this.anchors.set(input.source, { deviceMicros: currentMicros, startMS })
+    } else {
+      // Compact board events are valid observation-timed state, but they
+      // cannot continue an MCU-clock mapping. Clear a previous anchor so the
+      // first timestamp after a reset/update establishes a fresh timeline.
+      this.anchors.delete(input.source)
     }
     const endMS = startMS + input.durationMS
     const effectiveStartMS = Math.max(startMS, nowMS)

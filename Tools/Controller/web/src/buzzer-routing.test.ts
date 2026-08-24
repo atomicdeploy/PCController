@@ -55,4 +55,13 @@ describe('BuzzerPlaybackTimeline', () => {
       source: 'a', frequencyHz: 440, durationMS: 100, deviceMicros: 30_001_000,
     }, observedMS)).toEqual({ delayMS: 8, durationMS: 100, audible: true, stop: false })
   })
+
+  it('uses observation time for compact state and breaks a stale device-clock chain', () => {
+    const timeline = new BuzzerPlaybackTimeline()
+    timeline.plan({ source: 'a', frequencyHz: 440, durationMS: 100, deviceMicros: 1_000 }, 1000)
+    expect(timeline.plan({ source: 'a', frequencyHz: 660, durationMS: 80 }, 3000))
+      .toEqual({ delayMS: 8, durationMS: 80, audible: true, stop: false })
+    expect(timeline.plan({ source: 'a', frequencyHz: 880, durationMS: 60, deviceMicros: 2_000 }, 4000))
+      .toEqual({ delayMS: 8, durationMS: 60, audible: true, stop: false })
+  })
 })
