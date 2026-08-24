@@ -4,6 +4,8 @@
 
 namespace ControllerProtocol {
 
+constexpr uint8_t MaximumPayload = 48;
+
 // Opcode is the platform-neutral native request, response, and event registry.
 // AVR transport and VirtualBoard/shared policy code include this one contract.
 enum Opcode : uint8_t {
@@ -84,6 +86,50 @@ enum Error : uint8_t {
   HardwareUnavailable = 4,
   Busy = 5,
   Unsafe = 6,
+};
+
+// EventType is the byte at the beginning of an asynchronous Event payload.
+// It lives beside Opcode so the AVR, VirtualBoard, and host generators consume
+// one platform-neutral registry instead of maintaining parallel definitions.
+enum class EventType : uint8_t {
+  Key = 1,
+  Door = 2,
+  Bluetooth = 3,
+  PwmChannel = 4,
+  RfLearned = 5,
+  Macro = 6,
+  Fault = 7,
+  RfReceived = 8,
+  RfLearning = 9,
+  Relay = 10,
+  Alert = 11,
+  AppNavigation = 12,
+  Action = 13,
+};
+
+// InputEventSource identifies the origin of accepted action evidence.
+enum class InputEventSource : uint8_t {
+  Physical = 0,
+  Radio = 1,
+  Host = 2,
+};
+
+enum FeatureProfile : uint8_t {
+  FullPeripheralProfile = 0,
+  MotionMacroProfile = 1,
+  KeyDiagnosticProfile = 2,
+  CustomFeatureProfile = 3,
+};
+
+enum BuildFeatureFlag : uint8_t {
+  LocalMacroCapture = 1U << 0,
+  UnifiedPageIdentifiesKeys = 1U << 1,
+  ForceSilent = 1U << 2,
+  BlankEepromSilent = 1U << 3,
+  McuLcdRenderer = 1U << 4,
+  LocalPcaPages = 1U << 5,
+  StatusLedEngine = 1U << 6,
+  IlluminationAutomation = 1U << 7,
 };
 
 } // namespace ControllerProtocol

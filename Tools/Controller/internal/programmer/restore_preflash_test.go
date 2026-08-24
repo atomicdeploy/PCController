@@ -115,16 +115,18 @@ func TestBackupManifestContentAddressingValidationAndRestorePlan(t *testing.T) {
 	}
 }
 
-func TestValidateBackupAcceptsCurrentPackedIdentitySchema(t *testing.T) {
+func TestValidateBackupAcceptsCurrentAndMigrationPackedIdentitySchemas(t *testing.T) {
 	date := uint32((2026-2000)<<9 | 8<<5 | 1)
 	clock := uint32(19<<11 | 42<<5 | 58>>1)
-	options := fakeBackupOptions(t.TempDir())
-	options.ApplicationIdentitySchema = 4
-	options.ApplicationPackedTimestamp = date<<16 | clock
-	if err := ValidateBackup(options); err != nil {
-		t.Fatalf("schema 4: %v", err)
+	for _, schema := range []byte{3, 4} {
+		options := fakeBackupOptions(t.TempDir())
+		options.ApplicationIdentitySchema = schema
+		options.ApplicationPackedTimestamp = date<<16 | clock
+		if err := ValidateBackup(options); err != nil {
+			t.Fatalf("schema %d: %v", schema, err)
+		}
 	}
-	for _, schema := range []byte{1, 2, 3} {
+	for _, schema := range []byte{1, 2} {
 		options := fakeBackupOptions(t.TempDir())
 		options.ApplicationIdentitySchema = schema
 		options.ApplicationPackedTimestamp = date<<16 | clock

@@ -248,6 +248,21 @@ func TestParseHelloCompactIdentitySchema4(t *testing.T) {
 	}
 }
 
+func TestParseHelloLegacySchema3OnlyForMigration(t *testing.T) {
+	payload := []byte{
+		0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x94,
+		0x7A, 0xE5, 0x45, 0xE0, 0x6B, 0x06, 0x35,
+	}
+	hello, err := ParseHello(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hello.IsPCController() || hello.IdentitySchema != 3 ||
+		hello.FeatureProfile != 0 || hello.BuildFeatures != 0 {
+		t.Fatalf("unexpected legacy HELLO: %#v", hello)
+	}
+}
+
 func TestConfirmedResponseSchemas(t *testing.T) {
 	settings := Settings{
 		Flags: 3, LightMode: 1, OnBrightness: 128, OffBrightness: 4,

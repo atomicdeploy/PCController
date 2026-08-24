@@ -344,21 +344,34 @@ type Hello struct {
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	if len(payload) != 16 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 16", len(payload))
+	// The 14-byte identity is accepted only by the host-side guarded updater
+	// while migrating an already-backed-up board to the current 16-byte
+	// profile-aware identity.  It is not a firmware compatibility mode: the
+	// legacy shape has no feature/profile fields, so callers cannot infer new
+	// macro or page capabilities from it.
+	if len(payload) != 14 && len(payload) != 16 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need 14 or 16", len(payload))
 	}
-	if payload[0] != IdentitySchemaCompact {
+	legacyIdentity := len(payload) == 14 && payload[0] == 3
+	if payload[0] != IdentitySchemaCompact && !legacyIdentity {
 		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
 	}
 	hello := Hello{
 		BoardKind:      payload[1],
 		Capabilities:   binary.LittleEndian.Uint32(payload[2:6]),
 		Name:           "PCController",
-		IdentitySchema: IdentitySchemaCompact,
+		IdentitySchema: payload[0],
 		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
 		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
-		FeatureProfile: payload[14],
-		BuildFeatures:  payload[15],
+	}
+	if len(payload) == 16 {
+		hello.FeatureProfile = payload[14]
+		hello.BuildFeatures = payload[15]
+	}
+	if len(payload) == 14 {
+		// Unknown/legacy profile.  The migration lifecycle uses only the
+		// stable identity/settings path and will replace it atomically.
+		return hello, nil
 	}
 	if FeatureProfileName(hello.FeatureProfile) == "" {
 		return Hello{}, fmt.Errorf("unsupported firmware feature profile %d", hello.FeatureProfile)
