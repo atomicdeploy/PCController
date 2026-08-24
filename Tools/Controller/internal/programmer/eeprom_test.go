@@ -23,13 +23,11 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		copy(values[9:17], []byte{1, 2, 3, 4, 5, 6, 7, 8})
 		values[17] = 13
 		values[18] = 0x01 | 0x06 | 0x10 | 0xC0
-		binary.LittleEndian.PutUint16(values[19:21], 0x3FFF)
-		copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})
-		values[28] = (9 << 3) | 2
-		values[29] = 0xF0
-		values[30] = 100
-		values[31] = 7
-		copy(values[32:40], []byte("EDGE-01"))
+		values[19] = (9 << 3) | 2
+		values[20] = 0xF0
+		values[21] = 100
+		values[22] = 7
+		copy(values[23:31], []byte("EDGE-01"))
 		settings[EEPROMSettingsValueBytes] = avrCRC8(values)
 
 		header := data[EEPROMRemoteHeaderAddress : EEPROMRemoteHeaderAddress+4]
@@ -61,10 +59,10 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	if decoded.SourceKind != "offline-eeprom-hex" ||
-		decoded.Layout != "settings-name-unversioned-40/rf-record12-cap20/reset-journal-336" ||
+		decoded.Layout != "settings-schema1-core22-record32/rf-record12-cap20/reset-journal-336" ||
 		!decoded.Settings.Supported || !decoded.Settings.Valid ||
-		decoded.Settings.Format != "current/unversioned-40+crc8" ||
-		decoded.Settings.ValueBytes != 40 {
+		decoded.Settings.Format != "schema1/core22+name9+crc8" ||
+		decoded.Settings.Schema != EEPROMSettingsRecordSchema || decoded.Settings.ValueBytes != 31 {
 		t.Fatalf("settings decode invalid: %#v", decoded.Settings)
 	}
 	settings := decoded.Settings.Values
@@ -73,7 +71,6 @@ func TestDecodeOfflineEEPROMCurrentSemanticLayout(t *testing.T) {
 		settings.UserPWM[7] != 8 || settings.DefaultMenuPage != 13 ||
 		settings.VoltageDecimals != 0 || settings.CurrentDecimals != 2 ||
 		settings.StatusColor != 3 || !settings.SaveLastMenuPage ||
-		settings.VisibleMenuMask != 0x3FFF || settings.MenuOrder[6] != 0xDC ||
 		settings.DisplayClosedBrightness != 2 || settings.MotionExitHoldSeconds != 9 ||
 		settings.OutputPersistence != 0x06 || settings.RelayRestoreMask != 0xF0 ||
 		settings.BoardName != "EDGE-01" {
@@ -105,10 +102,8 @@ func TestDecodeOfflineEEPROMReportsCRCAndHeaderDamage(t *testing.T) {
 		values[1] = 1
 		values[4] = 5
 		binary.LittleEndian.PutUint16(values[7:9], 500)
-		binary.LittleEndian.PutUint16(values[19:21], 0x3FFF)
-		copy(values[21:28], []byte{0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC})
-		values[28] = 0
-		values[30] = 1
+		values[19] = 0
+		values[21] = 1
 		settings[EEPROMSettingsValueBytes] = 0x99
 		header := data[EEPROMRemoteHeaderAddress : EEPROMRemoteHeaderAddress+4]
 		binary.LittleEndian.PutUint16(header[0:2], 0x4C52)
@@ -199,8 +194,8 @@ func TestDecodeOfflineEEPROMRejectsInvalidCurrentMenuLayout(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := writeEEPROMFixture(t, func(data []byte) {
-				record := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMSettingsRecordBytes]
-				values := record[:EEPROMSettingsValueBytes]
+				record := data[EEPROMSettingsAddress : EEPROMSettingsAddress+EEPROMMenuLayoutRecordBytes]
+				values := record[:EEPROMMenuLayoutValueBytes]
 				values[1] = 1
 				values[4] = 5
 				values[5] = 128
@@ -213,7 +208,7 @@ func TestDecodeOfflineEEPROMRejectsInvalidCurrentMenuLayout(t *testing.T) {
 				for index := 31; index < int(EEPROMSettingsValueBytes); index++ {
 					values[index] = 0
 				}
-				record[EEPROMSettingsValueBytes] = avrCRC8(values)
+				record[EEPROMMenuLayoutValueBytes] = avrCRC8(values)
 			})
 			decoded, err := DecodeOfflineEEPROMHex(path)
 			if err != nil {

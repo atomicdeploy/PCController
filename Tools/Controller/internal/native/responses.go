@@ -12,7 +12,7 @@ import (
 const (
 	BoardKindPCController byte = 1
 	SettingsShape         byte = 3
-	IdentitySchemaCompact byte = 3
+	IdentitySchemaCompact byte = 4
 	RFEntriesSchema       byte = 1
 	MenuListSchema        byte = 1
 	TemperatureSchema     byte = 1
@@ -42,6 +42,15 @@ const (
 )
 
 const MaximumBoardNameLength = 8
+
+func FeatureProfileName(profile byte) string {
+	return map[byte]string{
+		FeatureProfileFullPeripheral: "full-peripheral",
+		FeatureProfileMotionMacro:    "motion-macro",
+		FeatureProfileKeyDiagnostic:  "key-diagnostic",
+		FeatureProfileCustom:         "custom",
+	}[profile]
+}
 
 type BoardName struct {
 	Name      string `json:"name"`
@@ -327,11 +336,13 @@ type Hello struct {
 	BuildHash      uint32 `json:"build_hash"`
 	BuildTimestamp uint32 `json:"build_timestamp_packed,omitempty"`
 	BuildStamp     string `json:"build_timestamp,omitempty"`
+	FeatureProfile byte   `json:"feature_profile"`
+	BuildFeatures  byte   `json:"build_features"`
 }
 
 func ParseHello(payload []byte) (Hello, error) {
-	if len(payload) != 14 {
-		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 14", len(payload))
+	if len(payload) != 16 {
+		return Hello{}, fmt.Errorf("HELLO payload is %d bytes, need exactly 16", len(payload))
 	}
 	if payload[0] != IdentitySchemaCompact {
 		return Hello{}, fmt.Errorf("unsupported HELLO identity schema %d", payload[0])
@@ -343,6 +354,11 @@ func ParseHello(payload []byte) (Hello, error) {
 		IdentitySchema: IdentitySchemaCompact,
 		BuildHash:      binary.LittleEndian.Uint32(payload[6:10]),
 		BuildTimestamp: binary.LittleEndian.Uint32(payload[10:14]),
+		FeatureProfile: payload[14],
+		BuildFeatures:  payload[15],
+	}
+	if FeatureProfileName(hello.FeatureProfile) == "" {
+		return Hello{}, fmt.Errorf("unsupported firmware feature profile %d", hello.FeatureProfile)
 	}
 	stamp, err := FormatBuildTimestamp(hello.BuildTimestamp)
 	if err != nil {
@@ -795,6 +811,32 @@ func ParseDeviceEvent(payload []byte) (DeviceEvent, error) {
 			AppNavigationAll: "*", AppNavigationWebUI: "webui", AppNavigationTUI: "tui",
 		}[payload[1]]
 		event.AppPage = strings.ToLower(page)
+<<<<<<< HEAD
+=======
+	case EventAction:
+		// [type, source, ordinary opcode, payload length, payload...]. The
+		// high-bit event marker and trailing MCU timestamp are removed above.
+		if len(payload) < 4 {
+			return DeviceEvent{}, fmt.Errorf("action EVENT is %d bytes, need at least 4", len(payload))
+		}
+		if payload[1] > InputSourceHost {
+			return DeviceEvent{}, fmt.Errorf("action EVENT source %d is invalid", payload[1])
+		}
+		length := int(payload[3])
+		if length > MacroBoardActionMaximumPayload || len(payload) != 4+length {
+			return DeviceEvent{}, fmt.Errorf(
+				"action EVENT payload length %d/body %d is invalid; maximum is %d",
+				length, len(payload), MacroBoardActionMaximumPayload,
+			)
+		}
+		required, recordable := MacroBoardActionPayloadLength(payload[2])
+		if !recordable || byte(length) != required {
+			return DeviceEvent{}, fmt.Errorf("action EVENT opcode 0x%02X is not recordable", payload[2])
+		}
+		event.Source = payload[1]
+		event.ActionOpcode = payload[2]
+		event.ActionPayload = append([]byte(nil), payload[4:]...)
+>>>>>>> e2958b6 (feat(macros): recover timed capture and safe schema migration)
 	}
 	return event, nil
 }

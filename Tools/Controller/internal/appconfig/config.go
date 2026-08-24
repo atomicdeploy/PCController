@@ -231,6 +231,16 @@ type Macro struct {
 	LCDMessage          string      `json:"lcd_message,omitempty"`
 	TimingToleranceUS   uint32      `json:"timing_tolerance_us,omitempty"`
 	KeepOutputsOnCancel bool        `json:"keep_outputs_on_cancel,omitempty"`
+<<<<<<< HEAD
+=======
+	RecordingSource     string      `json:"recording_source,omitempty"`
+	CaptureDroppedSteps uint16      `json:"capture_dropped_steps,omitempty"`
+	CaptureMissingSteps uint16      `json:"capture_missing_steps,omitempty"`
+	CaptureImportKey    string      `json:"capture_import_key,omitempty"`
+	CaptureBoard        string      `json:"capture_board,omitempty"`
+	CaptureID           byte        `json:"capture_id,omitempty"`
+	CaptureStartedAtUS  uint32      `json:"capture_started_at_us,omitempty"`
+>>>>>>> e2958b6 (feat(macros): recover timed capture and safe schema migration)
 	Steps               []MacroStep `json:"steps"`
 }
 
@@ -691,6 +701,15 @@ func (value Config) Validate() error {
 		}
 		if macro.TimingToleranceUS > 1_000_000 {
 			return fmt.Errorf("macros[%d].timing_tolerance_us must be 0..1000000", index)
+		}
+		if macro.CaptureImportKey != "" {
+			decoded, err := hex.DecodeString(macro.CaptureImportKey)
+			if err != nil || len(decoded) != sha256.Size {
+				return fmt.Errorf("macros[%d].capture_import_key must be a 64-character SHA-256 hex digest", index)
+			}
+		}
+		if len(macro.CaptureBoard) > 256 || !printableASCII(macro.CaptureBoard) {
+			return fmt.Errorf("macros[%d].capture_board must be at most 256 printable ASCII bytes", index)
 		}
 		if len(macro.Label) > 4 || !printableASCII(macro.Label) {
 			return fmt.Errorf("macros[%d].label must be at most four printable ASCII bytes", index)

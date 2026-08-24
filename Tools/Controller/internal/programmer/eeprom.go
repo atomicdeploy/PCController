@@ -2,6 +2,7 @@ package programmer
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,22 +10,28 @@ import (
 )
 
 const (
-	PCControllerEEPROMBytes        uint32 = generatedBoardEEPROMBytes
-	EEPROMSettingsAddress          uint32 = 32
-	EEPROMSettingsValueBytes       uint32 = 40
-	EEPROMSettingsRecordBytes      uint32 = EEPROMSettingsValueBytes + 1
-	EEPROMRemoteHeaderAddress      uint32 = 80
-	EEPROMRemoteEntriesAddress     uint32 = 84
-	EEPROMRemoteRecordSize         byte   = 12
-	EEPROMRemoteCapacity           byte   = 20
-	EEPROMRemoteRecordBytes        uint32 = 12
-	EEPROMResetJournalAddress      uint32 = 336
-	EEPROMResetJournalSlots        byte   = 64
-	EEPROMResetJournalRecordSize   uint32 = 6
-	EEPROMStatusProfileAddress     uint32 = EEPROMResetJournalAddress + uint32(EEPROMResetJournalSlots)*EEPROMResetJournalRecordSize
-	EEPROMStatusProfileCount       byte   = 19
-	EEPROMStatusProfileBytes       uint32 = 12
-	EEPROMStatusProfileRecordBytes uint32 = EEPROMStatusProfileBytes + 1
+	PCControllerEEPROMBytes         uint32 = generatedBoardEEPROMBytes
+	EEPROMSettingsAddress           uint32 = 32
+	EEPROMSettingsRecordSchema      byte   = 1
+	EEPROMSettingsControllerBytes   uint32 = 22
+	EEPROMSettingsValueBytes        uint32 = EEPROMSettingsControllerBytes + 1 + native.MaximumBoardNameLength
+	EEPROMSettingsRecordBytes       uint32 = EEPROMSettingsValueBytes + 1
+	EEPROMMenuLayoutRecordSchema    byte   = 2
+	EEPROMMenuLayoutControllerBytes uint32 = 31
+	EEPROMMenuLayoutValueBytes      uint32 = EEPROMMenuLayoutControllerBytes + 1 + native.MaximumBoardNameLength
+	EEPROMMenuLayoutRecordBytes     uint32 = EEPROMMenuLayoutValueBytes + 1
+	EEPROMRemoteHeaderAddress       uint32 = 80
+	EEPROMRemoteEntriesAddress      uint32 = 84
+	EEPROMRemoteRecordSize          byte   = 12
+	EEPROMRemoteCapacity            byte   = 20
+	EEPROMRemoteRecordBytes         uint32 = 12
+	EEPROMResetJournalAddress       uint32 = 336
+	EEPROMResetJournalSlots         byte   = 64
+	EEPROMResetJournalRecordSize    uint32 = 6
+	EEPROMStatusProfileAddress      uint32 = EEPROMResetJournalAddress + uint32(EEPROMResetJournalSlots)*EEPROMResetJournalRecordSize
+	EEPROMStatusProfileCount        byte   = 19
+	EEPROMStatusProfileBytes        uint32 = 12
+	EEPROMStatusProfileRecordBytes  uint32 = EEPROMStatusProfileBytes + 1
 )
 
 type OfflineEEPROMDecode struct {
@@ -75,6 +82,7 @@ type OfflineSettingsDecode struct {
 	Supported        bool               `json:"supported"`
 	Valid            bool               `json:"valid"`
 	Format           string             `json:"format"`
+	Schema           byte               `json:"schema"`
 	ValueBytes       uint32             `json:"value_bytes"`
 	Issue            string             `json:"issue,omitempty"`
 	StoredChecksum   byte               `json:"stored_checksum"`
@@ -151,7 +159,7 @@ func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
 	decoded := OfflineEEPROMDecode{
 		SourceKind: "offline-eeprom-hex",
 		SourcePath: path, SourceSHA256: document.SourceSHA256,
-		Layout: "settings-name-unversioned-40/rf-record12-cap20/reset-journal-336",
+		Layout: "settings-schema1-core22-record32/rf-record12-cap20/reset-journal-336",
 	}
 	decoded.Settings = decodeOfflineSettings(document.Image)
 	decoded.Remotes = decodeOfflineRemotes(document.Image)
@@ -160,32 +168,58 @@ func DecodeOfflineEEPROMHex(path string) (OfflineEEPROMDecode, error) {
 }
 
 func decodeOfflineSettings(image *IntelHexImage) OfflineSettingsDecode {
-	record, err := image.BytesAt(
-		EEPROMSettingsAddress,
-		EEPROMSettingsRecordBytes,
-	)
-	if err != nil {
+	currentRecord, currentErr := image.BytesAt(EEPROMSettingsAddress, EEPROMSettingsRecordBytes)
+	legacyRecord, legacyErr := image.BytesAt(EEPROMSettingsAddress, EEPROMMenuLayoutRecordBytes)
+	var current, legacy OfflineSettingsDecode
+	if currentErr == nil {
+		current = decodeOfflineSettingsRecord(currentRecord, false)
+	}
+	if legacyErr == nil {
+		legacy = decodeOfflineSettingsRecord(legacyRecord, true)
+	}
+	switch {
+	case current.Valid && !legacy.Valid:
+		return current
+	case legacy.Valid && !current.Valid:
+		return legacy
+	case current.Valid && legacy.Valid:
+		current.Valid = false
+		current.Issue = "ambiguous settings record validates as both schema 1 and schema 2"
+		return current
+	case currentErr == nil:
+		if legacyErr == nil && legacy.Issue != "" {
+			current.Issue += "; schema 2: " + legacy.Issue
+		}
+		return current
+	default:
 		_, present := image.data[EEPROMSettingsAddress]
 		return OfflineSettingsDecode{
 			Present: present,
-			Format:  "current/unversioned-40+crc8",
+			Format:  "unsupported",
 			Issue: fmt.Sprintf(
-				"unsupported settings layout: require 40 value bytes plus CRC-8 at EEPROM 0x%04X..0x%04X: %v",
-				EEPROMSettingsAddress,
-				EEPROMSettingsAddress+EEPROMSettingsRecordBytes-1,
-				err,
+				"unsupported settings layout: require schema 1 record (%d bytes) at EEPROM 0x%04X..0x%04X: %v",
+				EEPROMSettingsRecordBytes, EEPROMSettingsAddress,
+				EEPROMSettingsAddress+EEPROMSettingsRecordBytes-1, currentErr,
 			),
 		}
 	}
-	return decodeOfflineSettingsRecord(record)
 }
 
-func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
+func decodeOfflineSettingsRecord(record []byte, menuLayout bool) OfflineSettingsDecode {
+	valueBytes := EEPROMSettingsValueBytes
+	format := "schema1/core22+name9+crc8"
+	schema := EEPROMSettingsRecordSchema
+	if menuLayout {
+		valueBytes = EEPROMMenuLayoutValueBytes
+		format = "schema2/menu-layout31+name9+crc8"
+		schema = EEPROMMenuLayoutRecordSchema
+	}
 	result := OfflineSettingsDecode{
 		Present:          true,
 		Supported:        true,
-		Format:           "current/unversioned-40+crc8",
-		ValueBytes:       EEPROMSettingsValueBytes,
+		Format:           format,
+		Schema:           schema,
+		ValueBytes:       valueBytes,
 		StoredChecksum:   record[len(record)-1],
 		ComputedChecksum: avrCRC8(record[:len(record)-1]),
 	}
@@ -207,23 +241,35 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 	values.MotionDoorPolicy = (values.Flags >> 3) & 0x03
 	values.DoorAudioEnabled = values.Flags&0x20 == 0
 	values.RelayAudioEnabled = values.Flags&0x40 == 0
-	values.MotionBreakMS = uint16(settings[30])
 	values.SaveLastMenuPage = values.MenuFlags&0x01 != 0
 	values.StatusColor = (values.MenuFlags >> 1) & 0x07
 	values.VoltageDecimals = decodeDecimalBits((values.MenuFlags >> 4) & 0x03)
 	values.CurrentDecimals = decodeDecimalBits((values.MenuFlags >> 6) & 0x03)
-	values.VisibleMenuMask = binary.LittleEndian.Uint16(settings[19:21])
-	copy(values.MenuOrder[:], settings[21:28])
-	displayOptions := settings[28]
+	displayOptionsOffset := 19
+	relayRestoreOffset := 20
+	motionBreakOffset := 21
+	nameLengthOffset := 22
+	nameOffset := 23
+	if menuLayout {
+		values.VisibleMenuMask = binary.LittleEndian.Uint16(settings[19:21])
+		copy(values.MenuOrder[:], settings[21:28])
+		displayOptionsOffset = 28
+		relayRestoreOffset = 29
+		motionBreakOffset = 30
+		nameLengthOffset = 31
+		nameOffset = 32
+	}
+	displayOptions := settings[displayOptionsOffset]
 	values.DisplayClosedBrightness = displayOptions & 0x07
 	values.MotionExitHoldSeconds = displayOptions >> 3
 	if values.MotionExitHoldSeconds == 0 {
 		values.MotionExitHoldSeconds = 2
 	}
-	values.RelayRestoreMask = settings[29]
-	nameLength := settings[31]
+	values.RelayRestoreMask = settings[relayRestoreOffset]
+	values.MotionBreakMS = uint16(settings[motionBreakOffset])
+	nameLength := settings[nameLengthOffset]
 	if nameLength <= native.MaximumBoardNameLength {
-		values.BoardName = string(settings[32 : 32+nameLength])
+		values.BoardName = string(settings[nameOffset : nameOffset+int(nameLength)])
 	}
 	result.Values = values
 
@@ -254,10 +300,73 @@ func decodeOfflineSettingsRecord(record []byte) OfflineSettingsDecode {
 	} else if err := native.ValidateBoardName(values.BoardName); err != nil {
 		issues = append(issues, err.Error())
 	}
-	issues = append(issues, validateOfflineMenuLayout(values)...)
+	if menuLayout {
+		issues = append(issues, validateOfflineMenuLayout(values)...)
+	}
 	result.Valid = len(issues) == 0
 	result.Issue = strings.Join(issues, "; ")
 	return result
+}
+
+func controllerSettingsFromNative(settings native.Settings) ControllerSettings {
+	return ControllerSettings{
+		Flags:                     settings.Flags,
+		IlluminationMode:          settings.LightMode,
+		IlluminationOnBrightness:  settings.OnBrightness,
+		IlluminationOffBrightness: settings.OffBrightness,
+		DisplayBrightness:         settings.DisplayBrightness,
+		StatusBrightness:          settings.StatusBrightness,
+		OutputPersistence:         settings.OutputPersistence,
+		StreamPeriodMS:            settings.StreamPeriodMS,
+		DefaultMenuPage:           settings.DefaultPage,
+		MenuFlags:                 settings.ExtendedFlags,
+		DisplayClosedBrightness:   settings.DisplayClosedBrightness,
+		MotionExitHoldSeconds:     settings.MotionExitHoldSeconds,
+		RelayRestoreMask:          settings.RelayRestoreMask,
+		MotionBreakMS:             uint16(settings.MotionBreakMSValue),
+	}
+}
+
+// encodeCurrentEEPROMSettingsRecord is the only host encoder for the
+// production schema-1 record. Menu-layout fields intentionally do not enter
+// this alpha layout; they are independent protocol data when compiled in.
+func encodeCurrentEEPROMSettingsRecord(values ControllerSettings) ([]byte, error) {
+	if values.MotionBreakMS == 0 || values.MotionBreakMS > 255 {
+		return nil, errors.New("motion break is outside 1..255 ms")
+	}
+	if err := native.ValidateBoardName(values.BoardName); err != nil {
+		return nil, err
+	}
+	if values.MotionExitHoldSeconds > native.SettingsMaximumMotionExitHoldSeconds {
+		return nil, fmt.Errorf("motion exit hold %d seconds exceeds %d", values.MotionExitHoldSeconds, native.SettingsMaximumMotionExitHoldSeconds)
+	}
+	record := make([]byte, EEPROMSettingsRecordBytes)
+	record[0] = values.Flags
+	record[1] = values.IlluminationMode
+	record[2] = values.IlluminationOnBrightness
+	record[3] = values.IlluminationOffBrightness
+	record[4] = values.DisplayBrightness
+	record[5] = values.StatusBrightness
+	record[6] = values.OutputPersistence
+	binary.LittleEndian.PutUint16(record[7:9], values.StreamPeriodMS)
+	copy(record[9:17], values.UserPWM[:])
+	record[17] = values.DefaultMenuPage
+	record[18] = values.MenuFlags
+	hold := values.MotionExitHoldSeconds
+	if hold == native.SettingsDefaultMotionExitHoldSeconds {
+		hold = 0
+	}
+	record[19] = values.DisplayClosedBrightness | hold<<3
+	record[20] = values.RelayRestoreMask
+	record[21] = byte(values.MotionBreakMS)
+	record[22] = byte(len(values.BoardName))
+	copy(record[23:31], []byte(values.BoardName))
+	record[EEPROMSettingsValueBytes] = avrCRC8(record[:EEPROMSettingsValueBytes])
+	decoded := decodeOfflineSettingsRecord(record, false)
+	if !decoded.Valid {
+		return nil, fmt.Errorf("encode schema-1 EEPROM settings: %s", decoded.Issue)
+	}
+	return record, nil
 }
 
 func validateOfflineMenuLayout(values ControllerSettings) []string {

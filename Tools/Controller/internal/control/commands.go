@@ -812,7 +812,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]",
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]",
 		Summary: "manage and play MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
@@ -3990,7 +3990,7 @@ func safeFlashCommand(
 	if serialWasOpen && programmingSession != nil && reinitializeEEPROM {
 		afterBackup = func(
 			backupContext context.Context,
-			_ programmer.AutomaticPreflashResult,
+			backupResult programmer.AutomaticPreflashResult,
 			writer io.Writer,
 		) error {
 			reconnectContext, reconnectCancel := context.WithTimeout(
@@ -4017,6 +4017,13 @@ func safeFlashCommand(
 			if closeErr != nil {
 				return fmt.Errorf("release application UART after arming programming latch: %w", closeErr)
 			}
+			if err := programmer.ProgramMigratedProgrammingEEPROM(
+				context.WithoutCancel(backupContext), backupResult.BackupManifest,
+				dataPaths, writeOptions, programmer.EEPROMProgramOperation(execute), writer,
+			); err != nil {
+				return fmt.Errorf("preseed migrated Silent/Prog EEPROM before flash: %w", err)
+			}
+			fmt.Fprintln(writer, "semantic EEPROM migration programmed and verified before firmware write")
 			return nil
 		}
 	}
@@ -4049,19 +4056,6 @@ func safeFlashCommand(
 		fmt.Fprintln(&output, "guarded firmware flash completed")
 	}
 	verifiedProgram := flashErr == nil && result.Flashed
-	if verifiedProgram && reinitializeEEPROM {
-		factoryErr := programmer.ProgramLatchedFactoryEEPROM(
-			context.WithoutCancel(ctx), dataPaths, writeOptions,
-			programmer.EEPROMProgramOperation(execute), &output,
-		)
-		if factoryErr != nil {
-			flashErr = errors.Join(flashErr, factoryErr)
-			verifiedProgram = false
-		} else {
-			fmt.Fprintln(&output,
-				"host-owned Silent/Prog factory EEPROM programmed and independently read back")
-		}
-	}
 	if programmingSession != nil {
 		if markerErr := MarkProgrammingSessionComplete(
 			programmingSession, verifiedProgram,
@@ -4385,11 +4379,14 @@ func formatHello(hello native.Hello) string {
 			stamp = "unknown"
 		}
 		return fmt.Sprintf(
-			"%s build=%08X timestamp=%s packed=0x%08X",
+			"%s build=%08X timestamp=%s packed=0x%08X profile=%s(%d) build_features=0x%02X",
 			base,
 			hello.BuildHash,
 			stamp,
 			hello.BuildTimestamp,
+			native.FeatureProfileName(hello.FeatureProfile),
+			hello.FeatureProfile,
+			hello.BuildFeatures,
 		)
 	}
 	return base + " build identity unavailable"
@@ -4427,7 +4424,7 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4477,12 +4474,16 @@ func macroCommand(
 			macro.Label, len(macro.Steps), time.Duration(compiled.durationUS)*time.Microsecond,
 			len(compiled.stream), macro.TimingToleranceUS, macro.KeepOutputsOnCancel,
 		)}
+		previousDue := uint32(0)
 		for index, step := range macro.Steps {
 			due, _ := macroStepDueUS(step)
+			delta := due - previousDue
 			lines = append(lines, fmt.Sprintf(
-				"%3d  +%-12s %-12s target=%d value=%d",
-				index+1, time.Duration(due)*time.Microsecond, step.Kind, step.Target, step.Value,
+				"%3d  at_us=%-10d delta_us=%-10d (+%-12s) %-12s target=%d value=%d",
+				index+1, due, delta, time.Duration(due)*time.Microsecond,
+				step.Kind, step.Target, step.Value,
 			))
+			previousDue = due
 		}
 		return strings.Join(lines, "\n"), nil
 	case "create":
@@ -4505,6 +4506,25 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf("macro %d/%s draft created; add steps in the watched host config or record a new macro", macro.ID, macro.Name), nil
+<<<<<<< HEAD
+=======
+	case "update", "rename":
+		if len(args) < 3 || len(args) > 5 {
+			return "", fmt.Errorf("usage: macro update NAME_OR_ID NEW_NAME [CATEGORY [COLOR]]")
+		}
+		var category, color *string
+		if len(args) >= 4 {
+			category = &args[3]
+		}
+		if len(args) == 5 {
+			color = &args[4]
+		}
+		macro, err := runner.UpdateMetadata(args[1], args[2], category, color)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d renamed to %q category=%q color=%q", macro.ID, macro.Name, macro.Category, macro.Color), nil
+>>>>>>> e2958b6 (feat(macros): recover timed capture and safe schema migration)
 	case "delete", "remove":
 		if len(args) != 2 {
 			return "", fmt.Errorf("usage: macro delete NAME_OR_ID")
@@ -4542,7 +4562,11 @@ func macroCommand(
 			if !state.Active && state.Name == "" {
 				return "no macro has been recorded in this session", nil
 			}
+<<<<<<< HEAD
 			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+=======
+			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d host=%d panel=%d rf=%d last_at_us=%d last_delta_us=%d last_opcode=0x%02X last_source=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.HostSteps, state.PanelSteps, state.RFSteps, state.LastAtUS, state.LastDeltaUS, state.LastOpcode, state.LastSource, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+>>>>>>> e2958b6 (feat(macros): recover timed capture and safe schema migration)
 		case "save", "stop":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record save")

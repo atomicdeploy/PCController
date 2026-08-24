@@ -62,6 +62,8 @@ func TestCompileManifestAtomicallyReplacesStaleMetadataFromActualArtifacts(t *te
 		manifest.Source.PackedTimestamp != "35019D5D" ||
 		manifest.Source.BuildTimestamp != "260801194258" ||
 		manifest.StackBudget.EstimatedFreeSRAMBytes != 408 ||
+		manifest.EEPROMLayout.Schema != EEPROMSettingsRecordSchema ||
+		manifest.EEPROMLayout.ControllerBytes != 22 || manifest.EEPROMLayout.RecordBytes != 32 ||
 		len(manifest.Artifacts) != 4 || len(manifest.PatchRegions) != 1 {
 		t.Fatalf("manifest=%#v", manifest)
 	}

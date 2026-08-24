@@ -963,7 +963,7 @@ func ValidateBackup(options Options) error {
 	}
 	if options.ApplicationPackedTimestamp != 0 {
 		if !currentIdentitySchema(options.ApplicationIdentitySchema) {
-			return errors.New("packed firmware timestamp requires compact identity schema 3")
+			return errors.New("packed firmware timestamp requires compact identity schema 4")
 		}
 		if _, err := DecodeFirmwareTimestamp(options.ApplicationPackedTimestamp); err != nil {
 			return err
@@ -972,7 +972,7 @@ func ValidateBackup(options Options) error {
 	return nil
 }
 
-func currentIdentitySchema(schema byte) bool { return schema == 3 }
+func currentIdentitySchema(schema byte) bool { return schema == 4 }
 
 func createBackupDirectory(root string, timestamp time.Time) (string, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
