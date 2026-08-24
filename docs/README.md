@@ -14,6 +14,7 @@ host-owned JSON configuration are documented separately on purpose.
 |---|---|
 | Build or run PCController for the first time | [Getting Started and Operations](Getting-Started-and-Operations.md) |
 | Find the authoritative code, test, asset, tool, or generated output | [Repository and File Map](Repository-Map.md) |
+| Coordinate issues, pull requests, WIP, and machine handoffs | [GitHub Collaboration and Handoffs](GitHub-Collaboration-and-Handoffs.md) |
 | Understand the physical panel | [Front Panel and Menus](Front-Panel-and-Menus.md) |
 | Configure the host, WebUI, hotkeys, notifications, or integrations | [Host Configuration and Integrations](Host-Configuration-and-Integrations.md) |
 | Integrate through UART, JSON-RPC, REST, WebSocket, Go, or C | [Protocol and Network API](../Tools/Controller/docs/Protocol-and-Network-API.md), [machine-readable contracts](../Tools/Controller/api/reference.html), and [C Library API](../Tools/Controller/docs/C-Library-API.md) |
@@ -45,6 +46,9 @@ host-owned JSON configuration are documented separately on purpose.
    — feature reachability across firmware, WebUI, TUI, CLI, IPC, and libraries.
 9. [Portable WebUI](../Tools/Controller/docs/Portable-WebUI.md) — deterministic
    export, controller-origin validation, CORS, tokens, and static-host rules.
+10. [GitHub Collaboration and Handoffs](GitHub-Collaboration-and-Handoffs.md)
+    — source-of-truth, lane ownership, WIP checkpoint, issue/PR, privacy,
+    generated-artifact, merge, and resumable-handoff rules.
 
 ## 🔐 Runtime ownership
 

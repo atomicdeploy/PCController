@@ -415,8 +415,9 @@ WEBUI REMEDIATION PROGRAM (parent #101)
   through generated canonical contracts rather than one-off code paths.
 
 ## RULES FOR ALL NEW WORK
-1. Create/update the relevant GitHub issue first; use linked Draft/WIP PRs for
-   unfinished work. Keep comments two-way: read, respond, disposition, evidence.
+1. Follow the canonical [GitHub Collaboration and Handoffs](GitHub-Collaboration-and-Handoffs.md)
+   policy for issue/PR ownership, two-way synchronization, WIP preservation,
+   prompt provenance, privacy, generated artifacts, merging, and handoff.
 2. Keep interfaces synchronized: Web, TUI, CLI, IPC, API, bridge, and firmware
    use one normalized contract where applicable.
 3. Board EEPROM writes must be immediately applied, then reported as persisted;
@@ -426,9 +427,7 @@ WEBUI REMEDIATION PROGRAM (parent #101)
 5. Every accepted state/command change must be fanned out through the host event
    stream to all subscribed clients; refresh is recovery-only, never the normal
    synchronization mechanism.
-6. Do not publish secrets, local-machine paths, credentials, logs, or private
-   transcripts to GitHub.
-7. Keep board silent until the user explicitly asks to change it. Do not actuate
+6. Keep board silent until the user explicitly asks to change it. Do not actuate
    physical outputs when hardware safety/temperature state is not suitable.
 
 ## ORIGIN-HOST RECONCILIATION
