@@ -226,10 +226,13 @@ type Programming struct {
 	AvrdudeConf      string                     `json:"avrdude_conf,omitempty"`
 }
 
-// Macro defines a named, host-persisted sequence streamed to the MCU executor.
+// Macro defines a named, host-persisted sequence. Mode "host" schedules
+// ordinary commands from the controller process; mode "mcu" (and the legacy
+// empty value) streams the sequence to the firmware timing engine.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
+	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
@@ -710,6 +713,11 @@ func (value Config) Validate() error {
 		}
 		if len(macro.Category) > 64 || !printableASCII(macro.Category) {
 			return fmt.Errorf("macros[%d].category must be at most 64 printable ASCII bytes", index)
+		}
+		switch strings.ToLower(strings.TrimSpace(macro.Mode)) {
+		case "", "mcu", "host":
+		default:
+			return fmt.Errorf("macros[%d].mode must be host or mcu", index)
 		}
 		switch strings.ToLower(strings.TrimSpace(macro.Color)) {
 		case "", "red", "blue", "purple", "violet", "green", "white":

@@ -4753,7 +4753,7 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4766,7 +4766,7 @@ func macroCommand(
 		if len(macros) == 0 {
 			return "no macros configured", nil
 		}
-		lines := []string{"ID  NAME                 CATEGORY       COLOR   STEPS  DURATION"}
+		lines := []string{"ID  NAME                 MODE  CATEGORY       COLOR   STEPS  DURATION"}
 		for _, macro := range macros {
 			var duration time.Duration
 			if len(macro.Steps) != 0 {
@@ -4775,9 +4775,10 @@ func macroCommand(
 				}
 			}
 			lines = append(lines, fmt.Sprintf(
-				"%-3d %-20s %-14s %-7s %-6d %s",
+				"%-3d %-20s %-5s %-14s %-7s %-6d %s",
 				macro.ID,
 				macro.Name,
+				normalizedMacroMode(macro.Mode),
 				macro.Category,
 				normalizedMacroColor(macro.Color),
 				len(macro.Steps),
@@ -4798,8 +4799,8 @@ func macroCommand(
 			return "", err
 		}
 		lines := []string{fmt.Sprintf(
-			"macro id=%d name=%q category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t",
-			macro.ID, macro.Name, macro.Category, normalizedMacroColor(macro.Color),
+			"macro id=%d name=%q mode=%s category=%q color=%q label=%q steps=%d duration=%s encoded=%dB tolerance=%dus keep_on_cancel=%t",
+			macro.ID, macro.Name, normalizedMacroMode(macro.Mode), macro.Category, normalizedMacroColor(macro.Color),
 			macro.Label, len(macro.Steps), time.Duration(compiled.durationUS)*time.Microsecond,
 			len(compiled.stream), macro.TimingToleranceUS, macro.KeepOutputsOnCancel,
 		)}
@@ -4841,12 +4842,12 @@ func macroCommand(
 		return "macro deleted from HOST configuration", nil
 	case "record":
 		if len(args) < 2 {
-			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|discard")
+			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 		switch strings.ToLower(args[1]) {
-		case "start":
+		case "start", "start-mcu":
 			if len(args) < 3 || len(args) > 5 {
-				return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]")
+				return "", fmt.Errorf("usage: macro record %s NAME [CATEGORY [COLOR]]", args[1])
 			}
 			category, color := "", ""
 			if len(args) >= 4 {
@@ -4855,11 +4856,20 @@ func macroCommand(
 			if len(args) == 5 {
 				color = args[4]
 			}
-			state, err := runner.StartRecording(args[2], category, color)
+			var state MacroRecordingState
+			var err error
+			if strings.EqualFold(args[1], "start-mcu") {
+				state, err = runner.StartMCURecording(args[2], category, color)
+			} else {
+				state, err = runner.StartRecording(args[2], category, color)
+			}
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("recording macro %d/%s; acknowledged board commands will use exact MCU deltas", state.ID, state.Name), nil
+			if state.Mode == macroModeHost {
+				return fmt.Sprintf("recording macro %d/%s in basic host mode; relay and motion commands use host deltas (100ms tolerance)", state.ID, state.Name), nil
+			}
+			return fmt.Sprintf("recording macro %d/%s in MCU mode; acknowledged board commands use MCU deltas", state.ID, state.Name), nil
 		case "status":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record status")
@@ -4868,7 +4878,7 @@ func macroCommand(
 			if !state.Active && state.Name == "" {
 				return "no macro has been recorded in this session", nil
 			}
-			return fmt.Sprintf("macro recording active=%t id=%d name=%q category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
+			return fmt.Sprintf("macro recording active=%t id=%d name=%q mode=%s category=%q color=%q steps=%d started=%s error=%q", state.Active, state.ID, state.Name, state.Mode, state.Category, state.Color, state.Steps, state.StartedAt.Format(time.RFC3339), state.LastError), nil
 		case "save", "stop":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record save")
@@ -4877,7 +4887,7 @@ func macroCommand(
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("macro %d/%s saved with %d exact MCU-timed steps", macro.ID, macro.Name, len(macro.Steps)), nil
+			return fmt.Sprintf("macro %d/%s saved with %d %s-timed steps", macro.ID, macro.Name, len(macro.Steps), normalizedMacroMode(macro.Mode)), nil
 		case "discard", "cancel":
 			if len(args) != 2 {
 				return "", fmt.Errorf("usage: macro record discard")
@@ -4888,7 +4898,7 @@ func macroCommand(
 			}
 			return fmt.Sprintf("macro %d/%s recording discarded", macro.ID, macro.Name), nil
 		default:
-			return "", fmt.Errorf("usage: macro record start NAME [CATEGORY [COLOR]]|status|save|discard")
+			return "", fmt.Errorf("usage: macro record start|start-mcu NAME [CATEGORY [COLOR]]|status|save|discard")
 		}
 	case "play", "run", "start":
 		if len(args) != 2 {
@@ -4899,9 +4909,10 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf(
-			"macro %d/%s buffered for MCU-timed playback with %d steps",
+			"macro %d/%s started in %s mode with %d steps",
 			state.ID,
 			state.Name,
+			state.Mode,
 			state.StepCount,
 		), nil
 	case "status":
@@ -4913,9 +4924,10 @@ func macroCommand(
 			return "no macro has run in this session", nil
 		}
 		return fmt.Sprintf(
-			"macro id=%d name=%q lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
+			"macro id=%d name=%q mode=%s lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
 			state.ID,
 			state.Name,
+			state.Mode,
 			state.Lifecycle,
 			state.Running,
 			state.Step,

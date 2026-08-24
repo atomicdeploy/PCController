@@ -359,14 +359,21 @@ The action keys are:
   PC-side metadata, and `A` opens the automation rules list.
 
 Playback reads the same `MacroRunner` instance used by shell, IPC, and API
-commands. The page therefore reports live macro identity, elapsed/duration,
-step progress, MCU circular-buffer fill out of 127 bytes, accepted bytes,
-last/maximum device timing delta, configured tolerance, violations, underruns,
-dispatch errors, lifecycle, and final faithfulness. Recording offsets come from
-MCU acknowledgement timestamps, not variable USB/network arrival time. Macro
-definitions remain PC configuration; only the active timing queue occupies AVR
-RAM. The deterministic preview contains a safe representative library for UI
-inspection and never opens serial.
+commands. Newly recorded macros use the basic `host` mode: it records only
+relay on/off, side-motion, and all-relays-off acknowledgements, ignores status
+LED/telemetry housekeeping, and schedules ordinary commands from the host's
+monotonic clock with a 100 ms acceptance tolerance. This is the quick
+prototyping path and works without the MCU timed-queue capability. Use
+`macro record start-mcu NAME ...` for the stricter MCU acknowledgement-clocked
+recorder and firmware queue. Existing macros whose `mode` is absent retain MCU
+semantics; the host never silently changes their executor.
+
+The page reports the selected mode plus live identity, elapsed/duration, step
+progress, timing delta/tolerance, lifecycle, and final faithfulness. MCU mode
+additionally reports circular-buffer fill, accepted bytes, underruns, and
+dispatch errors. Macro definitions remain PC configuration. The deterministic
+preview contains a safe representative library for UI inspection and never
+opens serial.
 
 The same library is now available as the default HOST-presented physical
 `MACR` submenu. Its selector is rebuilt from the watched macro array and sorted

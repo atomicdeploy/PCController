@@ -743,3 +743,36 @@ their contents were consolidated here.
 - A read-only size inventory found that accumulated source worktrees dominate
   local application storage. None was moved or modified; their lifecycle is
   part of the storage-retention follow-up above.
+
+## 2026-08-24 — Connected client identity and administrative inventory
+
+- Existing tracker #108 owns the live instance/client registry; related
+  transport, bridge, single-owner, surface-parity, and deferred authentication
+  boundaries remain #46, #47, #52, #124, and #148.
+- Every Web/PWA tab, native/tray process, service, TUI, CLI, script, IPC/RPC
+  consumer, WebSocket/Socket.IO client, bridge, and remote instance must
+  register a stable client identity plus a distinct connection/session ID and
+  generation. A stale generation must never mutate or disconnect its
+  replacement.
+- The bounded, typed, privacy-safe record includes surface/client kind,
+  display name, application/build/protocol identity, process/service mode,
+  OS/platform/architecture, browser/device/PWA details, endpoint/transport,
+  board or hardware affinity, capabilities/subscriptions, connection time,
+  last-seen freshness, and eventual authentication state. Secrets,
+  credentials, tokens, unrestricted environment/configuration, and
+  unnecessary persistent hardware identifiers are excluded or redacted.
+- The host owns one authoritative registry exposed through versionless
+  `clients.list`, `clients.get`, and guarded `clients.disconnect` operations,
+  with normalized connected/updated/disconnected events on every interface.
+- WebUI must add a live **Clients & Instances** inventory with equivalent
+  TUI/native access, details/search/filter, and push-only convergence across
+  all clients without manual refresh.
+- Disconnect targets exactly one session generation and is distinct from
+  graceful process exit, stopping a service, or releasing board/serial
+  ownership. Remote, self, last-administrator, service, and primary-owner
+  operations require explicit policy/confirmation and a correlated audited
+  outcome.
+- Acceptance requires independent real clients observing the same registry,
+  targeted disconnect affecting only the selected generation, stale-request
+  rejection after reconnect, lifecycle/freshness convergence, privacy and
+  malformed-input tests, and service/interactive coexistence.

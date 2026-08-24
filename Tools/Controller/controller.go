@@ -217,10 +217,12 @@ type Options struct {
 	OSActions             OSPolicy               `json:"os_actions"`
 }
 
-// Macro describes a host-owned, MCU-timed sequence of peripheral operations.
+// Macro describes a host-owned sequence of peripheral operations. Mode chooses
+// host-clocked alpha playback or the stricter MCU timing engine.
 type Macro struct {
 	ID                  byte        `json:"id"`
 	Name                string      `json:"name"`
+	Mode                string      `json:"mode,omitempty"`
 	Category            string      `json:"category,omitempty"`
 	Color               string      `json:"color,omitempty"`
 	Label               string      `json:"label,omitempty"`
@@ -795,7 +797,7 @@ func toAppMacros(macros []Macro) []appconfig.Macro {
 	for index, macro := range macros {
 		result[index] = appconfig.Macro{
 			ID: macro.ID, Name: macro.Name, Category: macro.Category,
-			Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
+			Mode: macro.Mode, Color: macro.Color, Label: macro.Label, LCDMessage: macro.LCDMessage,
 			TimingToleranceUS:   macro.TimingToleranceUS,
 			KeepOutputsOnCancel: macro.KeepOutputsOnCancel,
 			Steps:               make([]appconfig.MacroStep, len(macro.Steps)),
