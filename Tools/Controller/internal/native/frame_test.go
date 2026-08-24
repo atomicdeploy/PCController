@@ -719,8 +719,12 @@ func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
 		t.Fatal("truncated SEGMENT_CHANGED payload was accepted")
 	}
 
-	if _, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0}); err == nil {
-		t.Fatal("obsolete five-byte BUZZER_CHANGED payload was accepted")
+	compact, err := ParseBuzzerState([]byte{0xB8, 0x01, 0xDC, 0x00, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compact.Timed || compact.DeviceMicros != 0 || compact.FrequencyHz != 440 || compact.DurationMS != 220 || compact.Muted {
+		t.Fatalf("compact buzzer state=%+v", compact)
 	}
 	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 2, 0, 0, 0, 0}); err == nil {
 		t.Fatal("invalid BUZZER_CHANGED muted flag was accepted")
@@ -731,6 +735,9 @@ func TestParseChangedDisplayAndBuzzerPushes(t *testing.T) {
 	}
 	if !timed.Timed || timed.DeviceMicros != 0x12345678 || timed.FrequencyHz != 880 || timed.DurationMS != 125 || !timed.Muted {
 		t.Fatalf("timed buzzer state=%+v", timed)
+	}
+	if _, err := ParseBuzzerState([]byte{0, 0, 0, 0, 0, 0}); err == nil {
+		t.Fatal("invalid six-byte BUZZER_CHANGED payload was accepted")
 	}
 }
 

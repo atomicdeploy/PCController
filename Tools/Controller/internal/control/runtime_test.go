@@ -15,6 +15,7 @@ import (
 
 type reconnectTestPort struct {
 	closed chan struct{}
+	dtr    []bool
 }
 
 func newReconnectTestPort() *reconnectTestPort {
@@ -30,8 +31,11 @@ func (*reconnectTestPort) Write(data []byte) (int, error) { return len(data), ni
 func (*reconnectTestPort) Drain() error                   { return nil }
 func (*reconnectTestPort) ResetInputBuffer() error        { return nil }
 func (*reconnectTestPort) ResetOutputBuffer() error       { return nil }
-func (*reconnectTestPort) SetDTR(bool) error              { return nil }
-func (*reconnectTestPort) SetRTS(bool) error              { return nil }
+func (port *reconnectTestPort) SetDTR(value bool) error {
+	port.dtr = append(port.dtr, value)
+	return nil
+}
+func (*reconnectTestPort) SetRTS(bool) error { return nil }
 func (*reconnectTestPort) GetModemStatusBits() (*serial.ModemStatusBits, error) {
 	return &serial.ModemStatusBits{}, nil
 }
@@ -45,6 +49,26 @@ func (port *reconnectTestPort) Close() error {
 	return nil
 }
 func (*reconnectTestPort) Break(time.Duration) error { return nil }
+
+func TestPulseResetUsesRememberedPortBeforeAuthentication(t *testing.T) {
+	port := newReconnectTestPort()
+	previous := openResetSession
+	openResetSession = func(context.Context, string, int) (*link.Session, error) {
+		return link.NewForPort("COM4", port), nil
+	}
+	defer func() { openResetSession = previous }()
+
+	runtime := New(Options{BaudRate: link.DefaultBaudRate})
+	runtime.mu.Lock()
+	runtime.paused = true
+	runtime.mu.Unlock()
+	if err := runtime.PulseResetPortFor(context.Background(), "COM4", time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if len(port.dtr) != 2 || !port.dtr[0] || port.dtr[1] {
+		t.Fatalf("unexpected DTR sequence: %v", port.dtr)
+	}
+}
 
 func TestDoorEventUpdatesSnapshotAndWakesWaiters(t *testing.T) {
 	runtime := New(Options{})
