@@ -1249,7 +1249,7 @@ Artifact and update JSON-RPC methods are:
 | `controller.artifact.fetch` | `url`, `kind`, optional `name`, `sha256`, `bytes`, build identity, `idempotency_key` | queue a verified proxy-aware HTTP download |
 | `controller.artifact.upload.begin`, `.chunk`, `.finish`, `.abort` | bounded transfer descriptor, ordered binary chunks, or `transfer_id` | authenticated bridge artifact transport; incomplete transfers expire and never enter the immutable store |
 | `controller.artifact.capture` | `components`, `authorized`, optional `method`, `port`, `idempotency_key` | explicitly read and verify current flash/EEPROM through the primary |
-| `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `allow_incomplete_backup`, `reinitialize_eeprom`, `idempotency_key` | guarded backup-then-flash; explicit reinitialization retains raw EEPROM, programs/readbacks the complete Go-owned factory image, and discards incompatible semantic settings |
+| `controller.update.firmware` | `artifact_sha256`, `authorized`, optional `method`, `port`, `deployment`, `reinitialize_eeprom`, `idempotency_key` | guarded flash; explicit development workflow skips new raw capture, production defaults to verified backup; reinitialization always retains raw EEPROM, programs/readbacks the Go-owned factory image, and discards incompatible semantic settings |
 | `controller.restore.flash` | `artifact_sha256`, `authorized`, optional `method`, `port` | guarded restore of a `flash-backup`; Urclock by default, explicit USBasp fallback |
 | `controller.update.eeprom` | same | full pre-write capture, then confirmed EEPROM restore |
 | `controller.update.host` | `artifact_sha256`, `authorized` | stage a verified deferred self-update |
@@ -1378,8 +1378,8 @@ growing EEPROM.
 
 For an unpublished development board whose settings payload cannot be decoded,
 the authorized firmware-update request may set `reinitialize_eeprom: true`.
-This option is mutually exclusive with `allow_incomplete_backup`: the primary
-must first retain a complete verified raw EEPROM image. The marker records the
+The primary must first retain a complete verified raw EEPROM image even when
+`deployment: "development"` is selected. The marker records the
 query error and partial live-state result, outputs are forced safe, and after
 flashing only the new firmware's current settings schema is accepted. Silent
 is cleared, illumination/persistence/relay restore are disabled, outputs and

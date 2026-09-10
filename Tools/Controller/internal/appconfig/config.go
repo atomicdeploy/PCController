@@ -21,6 +21,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"pccontroller.local/controller/internal/deployment"
 	"pccontroller.local/controller/internal/firmwarefeatures"
 	"pccontroller.local/controller/internal/hostos"
 	"pccontroller.local/controller/internal/productidentity"
@@ -216,6 +217,7 @@ type Paths struct {
 
 // Programming selects the host toolchain and default programming transport.
 type Programming struct {
+	Deployment       string                     `json:"deployment,omitempty"`
 	Method           string                     `json:"method,omitempty"`
 	FQBN             string                     `json:"fqbn,omitempty"`
 	Programmer       string                     `json:"programmer,omitempty"`
@@ -550,6 +552,9 @@ func Write(path string, value Config) error {
 
 // Validate rejects unsafe, ambiguous, or unsupported host configuration values.
 func (value Config) Validate() error {
+	if _, err := deployment.Normalize(value.Programming.Deployment); err != nil {
+		return fmt.Errorf("programming.deployment: %w", err)
+	}
 	if value.Schema != SchemaVersion {
 		return fmt.Errorf("unsupported schema %d", value.Schema)
 	}
@@ -1002,6 +1007,11 @@ func (value Config) Validate() error {
 }
 
 func normalizeProgramming(value *Programming) error {
+	classification, err := deployment.Normalize(value.Deployment)
+	if err != nil {
+		return err
+	}
+	value.Deployment = classification
 	features, err := firmwarefeatures.Normalize(
 		firmwarefeatures.Names(value.FirmwareFeatures),
 	)
