@@ -51,7 +51,7 @@ func (model Model) terminalTitle() string {
 	if base == "" {
 		base = "PCController"
 	}
-	if model.update.State != "" && model.update.State != "completed" {
+	if model.update.State != "" && model.update.State != "completed" && model.update.State != "idle" {
 		if model.update.State == "failed" || model.update.State == "cancelled" {
 			return fmt.Sprintf("%s — Update %s — %s", base, strings.ToUpper(model.update.State), pageDefinitions[model.page].Short)
 		}
@@ -145,6 +145,15 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	if state == "" {
 		state = strings.TrimPrefix(strings.ToLower(event.Kind), "update.")
 	}
+	if strings.EqualFold(state, "idle") {
+		model.update = updatePresentation{}
+		model.terminalTitleDirty = true
+		payload, payloadErr := (hostui.TerminalProgress{State: 0, Percent: 0}).OSCPayload()
+		if payloadErr != nil {
+			return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
+		}
+		return terminalOSCCommand(model.writeOSC, payload, "update progress")
+	}
 	model.update = updatePresentation{
 		OperationID: event.Metadata["operation_id"], Kind: event.Metadata["kind"],
 		State: state, Detail: event.Text, Progress: progress, UpdatedAt: event.Time,
@@ -173,14 +182,12 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 }
 
 func (model Model) updateProgressLines() []string {
-	if model.update.State == "" {
-		return []string{
-			kv("Update state", "idle"),
-			kv("Update progress", strings.Repeat("─", 36)+"   0%"),
-		}
+	if model.update.State == "" || strings.EqualFold(model.update.State, "idle") {
+		return nil
 	}
 	width := 36
-	filled := model.update.Progress * width / 100
+	progress := max(0, min(100, model.update.Progress))
+	filled := progress * width / 100
 	bar := strings.Repeat("━", filled) + strings.Repeat("─", width-filled)
 	identity := strings.TrimSpace(model.update.Kind)
 	if model.update.OperationID != "" {
@@ -189,7 +196,10 @@ func (model Model) updateProgressLines() []string {
 	lines := []string{
 		kv("Update operation", strings.Trim(identity, " ·")),
 		kv("Update state", strings.ToUpper(model.update.State)),
-		kv("Update progress", fmt.Sprintf("%s %3d%%", bar, model.update.Progress)),
+	}
+	switch strings.ToLower(model.update.State) {
+	case "queued", "downloading", "reading", "backing-up", "programming", "staging", "verifying":
+		lines = append(lines, kv("Update progress", fmt.Sprintf("%s %3d%%", bar, progress)))
 	}
 	if model.update.Detail != "" {
 		lines = append(lines, kv("Update detail", model.update.Detail))

@@ -552,6 +552,7 @@ request error.
 | `controller.menu.list`, `controller.menu.current` | `{}` | live board catalog when advertised, otherwise the canonical capability-limited manifest |
 | `controller.menu.jump`, `controller.menu.page` | `page` ID or name | select a board menu page |
 | `controller.command.execute` | `command` | run any ordinary controller command; `quit`/`exit` requests primary shutdown |
+| `controller.firmware.build` | optional `firmware_features` array or `no_firmware_features: true` | compile only the host's canonical configured project; returns an operation ID and normalized final log; requires `programming` |
 | `controller.program_state.get` | `{}` | current host-owned Idle/Running owners, reason, and revision |
 | `controller.program_state.set` | `mode`, optional `owner`, `reason` | set/clear one host-owned Running claim and mirror it to capable firmware |
 | `controller.rf.list` | `{}` | all learned records |
@@ -655,14 +656,14 @@ rate-limit reason rather than invoking an OS launcher.
 Typed application actions are resolved once against the pruned live instance
 registry. The returned operation records the exact instance IDs and surfaces;
 an unknown or offline selector is rejected with an empty target set rather than
-inventing an instance. Clients advertise the bounded `app_actions` enum in
+inventing an instance. Clients advertise a bounded `app_actions` list in
 their presence values and apply only a push addressed to their exact instance
 ID. Each target push carries coordinator-owned `operation_delivery_id` and
 `operation_expires_at` metadata. Callers cannot supply or override either
 field. The client rejects an expired or malformed deadline, deduplicates the
 operation-plus-delivery receipt, and returns that delivery nonce as the
 required `delivery_id` in its acknowledgement. The coordinator accepts only a
-nonce issued for that exact operation target, then records the factual
+nonce issued for that exact operation target before its deadline, then records the client-reported
 `applied` or `rejected` result. A legacy TUI/WebUI without the new advertisement
 may still receive an action through a known delivery path, but it remains
 `queued` until acknowledgement and becomes `timeout` after the bounded
@@ -671,6 +672,14 @@ outcome transitions use the existing event streams and bridge fan-out, never
 polling. Successful queued/applied transitions use the state stream so they do
 not flood operator activity logs, while rejection and timeout remain visible
 one-shot activity events.
+
+Unknown well-formed optional action capabilities remain visible in discovery
+without rejecting the whole instance; only implemented action names execute.
+These receipts provide correlation and deduplication, **not responder
+authentication**: alpha clients share a trusted event fabric and authorization
+is disabled by policy. Transport-session identity binding remains tracked in
+#108 and must be implemented with the future auth work, not inferred from a
+delivery nonce visible to event subscribers.
 
 RF learning has two mutually exclusive modes. An omitted mode or
 `{"mode":"indefinite"}` keeps accepting codes until cancellation. A bounded

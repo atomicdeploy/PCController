@@ -64,6 +64,7 @@ type Response struct {
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+	Data    any    `json:"data,omitempty"`
 }
 
 type opcodeExchangeParams struct {
@@ -946,6 +947,14 @@ func (service *Service) dispatch(
 				if err == nil {
 					result = map[string]string{"output": output}
 				}
+			}
+		}
+	case "controller.firmware.build":
+		var params controller.FirmwareBuildRequest
+		if err = decodeStrictParams(request.Params, &params); err == nil {
+			result, err = service.Client.BuildFirmware(ctx, params)
+			if err != nil {
+				err = &RPCError{Code: -32000, Message: err.Error(), Data: result}
 			}
 		}
 	case "controller.rf.list":
@@ -2027,7 +2036,8 @@ func requestCapability(method string, params json.RawMessage) string {
 		"controller.artifact.upload.finish", "controller.artifact.upload.abort",
 		"controller.artifact.capture", "controller.peer.update.host",
 		"controller.update.firmware", "controller.restore.flash",
-		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage":
+		"controller.update.eeprom", "controller.update.host", "controller.discovery.stage",
+		"controller.firmware.build":
 		return capabilityProgramming
 	case "controller.connect", "controller.open", "controller.port.open",
 		"controller.close", "controller.port.close":
@@ -3196,9 +3206,6 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			http.Error(writer, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !authorizeHTTPCapability(writer, request, service, capabilityHostConfig) {
-			return
-		}
 		if service.AppActionSubmit == nil && service.AppAction == nil {
 			writeHTTPJSON(writer, http.StatusServiceUnavailable, map[string]string{"error": "primary app action routing is unavailable"})
 			return
@@ -3208,6 +3215,11 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&params); err != nil {
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		encoded, _ := json.Marshal(params)
+		if err := service.authorizeAccess(accessFromHTTPRequest(request, "rest"), "controller.app.action", encoded); err != nil {
+			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return
 		}
 		action := params.AppAction
