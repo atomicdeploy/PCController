@@ -119,9 +119,13 @@ func newProgramEventWriter(
 	sort.SliceStable(replacements, func(left, right int) bool {
 		return len(replacements[left].value) > len(replacements[right].value)
 	})
+	operation := string(options.Operation)
+	if options.Method == programmer.MethodCompile {
+		operation = "compile"
+	}
 	return &programEventWriter{
 		runtime: runtime, operationID: operationID,
-		operation: string(options.Operation), method: string(options.Method),
+		operation: operation, method: string(options.Method),
 		replacements: replacements,
 	}
 }
@@ -322,6 +326,9 @@ func publishProgramPhase(
 		"operation":    string(options.Operation),
 		"method":       string(options.Method),
 		"state":        state,
+	}
+	if options.Method == programmer.MethodCompile {
+		metadata["operation"] = "compile"
 	}
 	if err != nil {
 		writer := newProgramEventWriter(runtime, operationID, options)

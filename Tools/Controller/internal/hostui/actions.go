@@ -24,6 +24,11 @@ type AppAction struct {
 	At          time.Time         `json:"at"`
 }
 
+// ErrPartialActionDelivery means the local queue overflowed, but the observer
+// still received the action. A correlated operation must await its receipt or
+// deadline rather than claiming all delivery paths rejected it.
+var ErrPartialActionDelivery = errors.New("app action queue is full; observer delivery remains active")
+
 type ActionBroker struct {
 	events     chan AppAction
 	mu         sync.RWMutex
@@ -84,6 +89,7 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 	default:
 		if observer != nil {
 			observer(cloneAppAction(action))
+			return ErrPartialActionDelivery
 		}
 		return errors.New("app action queue is full")
 	}

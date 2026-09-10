@@ -551,6 +551,10 @@ func (service *Service) dispatch(
 			response.Error = &RPCError{Code: -32602, Message: err.Error()}
 			return response
 		}
+		if params.TimeoutMS < 0 || params.TimeoutMS > int((24*time.Hour)/time.Millisecond) {
+			response.Error = &RPCError{Code: -32602, Message: "timeout_ms must be 0..86400000"}
+			return response
+		}
 		timeout := time.Duration(params.TimeoutMS) * time.Millisecond
 		if timeout <= 0 {
 			timeout = 30 * time.Second

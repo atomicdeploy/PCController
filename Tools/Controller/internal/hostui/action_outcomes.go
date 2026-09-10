@@ -304,7 +304,7 @@ func (coordinator *ActionCoordinator) Submit(action AppAction, timeout time.Dura
 		}
 		delivery.Metadata[ActionDeliveryIDKey] = deliveries[target.InstanceID]
 		delivery.Metadata[ActionExpiresAtKey] = operation.ExpiresAt.Format(time.RFC3339Nano)
-		if publishErr := coordinator.publish(delivery); publishErr != nil {
+		if publishErr := coordinator.publish(delivery); publishErr != nil && !errors.Is(publishErr, ErrPartialActionDelivery) {
 			coordinator.rejectDelivery(operation.OperationID, target.InstanceID, "delivery_unavailable")
 		}
 	}

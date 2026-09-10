@@ -342,3 +342,27 @@ func TestActionCoordinatorRejectsAckAtExactDeadline(t *testing.T) {
 		t.Fatalf("outcome=%#v err=%v", current, err)
 	}
 }
+
+func TestActionCoordinatorWaitsForObserverReceiptWhenLocalQueueFull(t *testing.T) {
+	registry := NewInstanceRegistry()
+	liveActionInstance(t, registry, "web:overflow", "webui", WebActionCapabilities)
+	broker := NewActionBroker()
+	_ = broker.Events()
+	for index := 0; index < cap(broker.events); index++ {
+		if err := broker.Publish(AppAction{Kind: "app.title", Value: "fill"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var delivery AppAction
+	broker.SetObserver(func(action AppAction) { delivery = action })
+	coordinator := NewActionCoordinator(registry, broker.Publish)
+	defer coordinator.Close()
+	operation, err := coordinator.Submit(AppAction{Kind: "app.title", Value: "delivered over events", Target: "web:overflow"}, MaximumActionTimeout)
+	if err != nil || operation.State != ActionStateQueued {
+		t.Fatalf("false delivery rejection: %#v %v", operation, err)
+	}
+	operation, err = coordinator.Ack(ActionAck{OperationID: operation.OperationID, DeliveryID: delivery.Metadata[ActionDeliveryIDKey], InstanceID: "web:overflow", State: ActionStateApplied})
+	if err != nil || operation.State != ActionStateApplied {
+		t.Fatalf("observer receipt lost: %#v %v", operation, err)
+	}
+}
