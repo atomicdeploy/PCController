@@ -1,9 +1,7 @@
 # Peer executable update contract
 
-Related: [#252](https://github.com/atomicdeploy/PCController/issues/252),
-[#272](https://github.com/atomicdeploy/PCController/pull/272),
-[#110](https://github.com/atomicdeploy/PCController/issues/110),
-[#297](https://github.com/atomicdeploy/PCController/issues/297).
+Related GitHub records: #252 (contract), #272 (preserved predecessor),
+#110 (live replacement acceptance), #297 (tolerant integration).
 
 | Boundary | Contract |
 |---|---|

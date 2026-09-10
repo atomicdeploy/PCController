@@ -109,8 +109,9 @@ func TestPeerDefaultStateSubscriptionIngestsBuzzerWithoutThirdHop(t *testing.T) 
 			peer := &peerState{name: "test-peer", events: make(chan controller.Event, 4)}
 			config := appconfig.WebSocketClient{Name: "test-peer", URL: strings.Replace(remote.URL, "http:", "ws:", 1), Protocol: protocol}
 			finished := make(chan error, 1)
+			after := runtime.LatestEventID()
 			go func() { finished <- manager.webSocketPeerSession(ctx, peer, config) }()
-			event, err := runtime.WaitEvent(ctx, runtime.LatestEventID(), "buzzer.note")
+			event, err := runtime.WaitEvent(ctx, after, "buzzer.note")
 			if err != nil {
 				select {
 				case cause := <-errors:
