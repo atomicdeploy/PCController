@@ -14,9 +14,20 @@ Rejected commands are not recorded. This mode records host command evidence;
 it does not claim to capture physical-key or incoming RF actions.
 
 Times are monotonic host offsets from the first acknowledged action. They are
-not MCU execution timestamps. Playback schedules each step against one epoch,
-then waits for the normal command acknowledgement. The live result reports
-maximum error and tolerance violations rather than claiming perfect timing.
+not MCU execution timestamps. Playback preserves an explicit leading delay,
+then anchors its relative timeline once at the first successful acknowledgement.
+Later steps retain their recorded offsets from that boundary; a slow first ACK
+must not compress the recorded gaps. The clock is not reset after later ACKs.
+
+`startup_delay_us` reports the first command's completion lateness against its
+original deadline, including host scheduling, transport/ACK and observation
+latency. It remains included in maximum error, violation count and the final
+faithful result. Later steps still use the configured tolerance (100 ms for new
+host recordings); startup anchoring does not conceal later overruns. CLI/TUI/Web
+show startup delay separately so a completed macro is not mistaken for faithful
+timing. Exact physical actuation timing still requires MCU execution evidence:
+a delayed ACK can arrive after an output has already changed, and host-side
+acknowledgement timing is not a hard real-time motor-control guarantee.
 
 ## Quick record / save / play
 

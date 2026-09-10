@@ -782,7 +782,7 @@ export function AdvancedWorkbench({
             {snapshot.macros?.recording.active
               ? `${copy('Recording', 'در حال ضبط')}: ${snapshot.macros.recording.name} · ${snapshot.macros.recording.mode} · ${snapshot.macros.recording.steps} ${copy('steps', 'گام')}`
               : copy('Recorder idle', 'ضبط غیرفعال')}
-            {snapshot.macros?.playback.name && <p>{snapshot.macros.playback.name} · {snapshot.macros.playback.mode} · {snapshot.macros.playback.lifecycle} · {snapshot.macros.playback.step}/{snapshot.macros.playback.step_count} · {copy('maximum timing error', 'بیشینه خطای زمان')}: {(snapshot.macros.playback.maximum_timing_error_us / 1000).toFixed(1)} ms</p>}
+            {snapshot.macros?.playback.name && <p>{snapshot.macros.playback.name} · {snapshot.macros.playback.mode} · {snapshot.macros.playback.lifecycle} · {snapshot.macros.playback.step}/{snapshot.macros.playback.step_count} · {copy('maximum timing error', 'بیشینه خطای زمان')}: {(snapshot.macros.playback.maximum_timing_error_us / 1000).toFixed(1)} ms{snapshot.macros.playback.mode === 'host' && <> · {copy('startup delay', 'تأخیر شروع')}: {((snapshot.macros.playback.startup_delay_us ?? 0) / 1000).toFixed(1)} ms</>}</p>}
             {(snapshot.macros?.recording.last_error || snapshot.macros?.playback.last_error) && <p role="alert">{snapshot.macros?.recording.last_error || snapshot.macros?.playback.last_error}</p>}
           </div>
           <div className="advanced-actions">

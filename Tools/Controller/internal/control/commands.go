@@ -4977,7 +4977,7 @@ func macroCommand(
 			return "no macro has run in this session", nil
 		}
 		return fmt.Sprintf(
-			"macro id=%d name=%q mode=%s lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
+			"macro id=%d name=%q mode=%s lifecycle=%s running=%t step=%d/%d buffer=%dB timing=%dus max=%dus startup_delay_us=%d violations=%d underruns=%d dispatch_errors=%d faithful=%t started=%s error=%q",
 			state.ID,
 			state.Name,
 			state.Mode,
@@ -4988,6 +4988,7 @@ func macroCommand(
 			state.BufferFill,
 			state.LastTimingDeltaUS,
 			state.MaximumTimingErrorUS,
+			state.StartupDelayUS,
 			state.TimingViolations,
 			state.Underruns,
 			state.DispatchErrors,

@@ -48,6 +48,7 @@ type MacroState struct {
 	TimingViolations     int                `json:"timing_violations"`
 	LastTimingDeltaUS    int32              `json:"last_timing_delta_us"`
 	MaximumTimingErrorUS uint32             `json:"maximum_timing_error_us"`
+	StartupDelayUS       uint32             `json:"startup_delay_us"`
 	TimingToleranceUS    uint32             `json:"timing_tolerance_us"`
 	Faithful             bool               `json:"faithful"`
 	Lifecycle            string             `json:"lifecycle,omitempty"`
@@ -819,38 +820,69 @@ func runHostMacro(
 	command hostMacroCommand,
 	observe func(int, int32, bool),
 ) (int, error) {
-	epoch := time.Now()
+	return runHostMacroWithClock(ctx, compiled, command, observe, time.Now, waitHostMacroDeadline)
+}
+
+// The recorder stores offsets relative to its first acknowledged command.
+// Anchor playback to that same boundary once, without clearing startup evidence
+// or hiding later overruns by resetting the clock after every command.
+func runHostMacroWithClock(
+	ctx context.Context,
+	compiled compiledMacro,
+	command hostMacroCommand,
+	observe func(int, int32, bool),
+	now func() time.Time,
+	waitUntil func(context.Context, time.Time) error,
+) (int, error) {
+	epoch := now()
 	for index, step := range compiled.steps {
 		if err := ctx.Err(); err != nil {
 			return index, err
 		}
 		due := epoch.Add(time.Duration(step.dueUS) * time.Microsecond)
-		wait := time.Until(due)
-		if wait > 0 {
-			timer := time.NewTimer(wait)
-			select {
-			case <-ctx.Done():
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-				return index, ctx.Err()
-			case <-timer.C:
-			}
-		}
-		if err := command(ctx, step.opcode, step.payload); err != nil {
-			observe(index, hostTimingDelta(epoch, step.dueUS), false)
+		if err := waitUntil(ctx, due); err != nil {
 			return index, err
 		}
-		observe(index, hostTimingDelta(epoch, step.dueUS), true)
+		if err := ctx.Err(); err != nil {
+			return index, err
+		}
+		err := command(ctx, step.opcode, step.payload)
+		acknowledgedAt := now()
+		delta := hostTimingDeltaAt(epoch, step.dueUS, acknowledgedAt)
+		if err != nil {
+			observe(index, delta, false)
+			return index, err
+		}
+		if index == 0 {
+			// Preserve any explicit leading wait, and measure the first command
+			// against the original deadline before choosing the relative epoch.
+			epoch = acknowledgedAt.Add(-time.Duration(step.dueUS) * time.Microsecond)
+		}
+		observe(index, delta, true)
 	}
 	return len(compiled.steps), nil
 }
 
-func hostTimingDelta(epoch time.Time, dueUS uint32) int32 {
-	delta := time.Since(epoch)/time.Microsecond - time.Duration(dueUS)
+func waitHostMacroDeadline(ctx context.Context, due time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	wait := time.Until(due)
+	if wait <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func hostTimingDeltaAt(epoch time.Time, dueUS uint32, acknowledgedAt time.Time) int32 {
+	delta := acknowledgedAt.Sub(epoch)/time.Microsecond - time.Duration(dueUS)
 	if delta > time.Duration(int64(^uint32(0)>>1)) {
 		return int32(^uint32(0) >> 1)
 	}
@@ -996,6 +1028,9 @@ func (runner *MacroRunner) recordEvidence(index int, delta int32, succeeded bool
 	if delta < 0 {
 		absolute = uint32(-int64(delta))
 	}
+	if index == 0 && runner.state.Mode == macroModeHost {
+		runner.state.StartupDelayUS = absolute
+	}
 	if absolute > runner.state.MaximumTimingErrorUS {
 		runner.state.MaximumTimingErrorUS = absolute
 	}
@@ -1014,6 +1049,7 @@ func (runner *MacroRunner) recordEvidence(index int, delta int32, succeeded bool
 		metadata["mcu_delta_us"] = strconv.FormatInt(int64(delta), 10)
 	} else {
 		metadata["host_delta_us"] = strconv.FormatInt(int64(delta), 10)
+		metadata["startup_delay_us"] = strconv.FormatUint(uint64(state.StartupDelayUS), 10)
 	}
 	runner.runtime.PublishStructuredEvent(Event{
 		Kind: "macro.step", Lifecycle: "executed", State: map[bool]string{true: "acknowledged", false: "rejected"}[succeeded],
@@ -1127,10 +1163,11 @@ func (runner *MacroRunner) publishLifecycle(lifecycle string, state MacroState, 
 			"macro_mode": state.Mode,
 			"category":   state.Category, "color": state.Color,
 			"step": strconv.Itoa(state.Step), "steps": strconv.Itoa(state.StepCount),
-			"faithful":        strconv.FormatBool(state.Faithful),
-			"timing_error_us": strconv.FormatUint(uint64(state.MaximumTimingErrorUS), 10),
-			"underruns":       strconv.Itoa(int(state.Underruns)),
-			"dispatch_errors": strconv.Itoa(int(state.DispatchErrors)),
+			"faithful":         strconv.FormatBool(state.Faithful),
+			"timing_error_us":  strconv.FormatUint(uint64(state.MaximumTimingErrorUS), 10),
+			"startup_delay_us": strconv.FormatUint(uint64(state.StartupDelayUS), 10),
+			"underruns":        strconv.Itoa(int(state.Underruns)),
+			"dispatch_errors":  strconv.Itoa(int(state.DispatchErrors)),
 		},
 	})
 	runner.queueMacroPresentation(state)
