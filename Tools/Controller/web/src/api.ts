@@ -1,7 +1,6 @@
 import type {
   CommandResult,
   ControllerEvent,
-  RPCResponse,
   Snapshot,
   StatusUpdate,
   UIConfig,
@@ -21,6 +20,17 @@ interface PendingSocketRPC {
 }
 
 const pendingSocketRPC = new Map<number, PendingSocketRPC>()
+
+/** A JSON-RPC response error proves the server answered; transport failures use ordinary Error. */
+export class ControllerRPCError extends Error {
+  readonly code: number
+
+  constructor(code: number, message: string) {
+    super(message)
+    this.name = 'ControllerRPCError'
+    this.code = code
+  }
+}
 
 /** Returns the session-scoped bearer token used by authenticated transports. */
 export function getToken(): string {
@@ -55,7 +65,7 @@ export function responseErrorDetail(value: unknown, statusText: string, status: 
   return statusText || `HTTP ${status}`
 }
 
-async function decode<T>(response: Response): Promise<T> {
+async function responseBody(response: Response): Promise<unknown> {
   const raw = await response.text()
   let value: unknown = null
   if (raw) {
@@ -65,11 +75,47 @@ async function decode<T>(response: Response): Promise<T> {
       value = raw
     }
   }
+  return value
+}
+
+async function decode<T>(response: Response): Promise<T> {
+  const value = await responseBody(response)
   if (!response.ok) {
     const detail = responseErrorDetail(value, response.statusText, response.status)
     throw new Error(detail || `HTTP ${response.status}`)
   }
   return value as T
+}
+
+type ParsedRPCResponse<T> =
+  | { result: T; error?: never }
+  | { result?: never; error: ControllerRPCError }
+
+function parseRPCResponse<T>(value: unknown, expectedID: number): ParsedRPCResponse<T> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Controller returned an invalid JSON-RPC response')
+  }
+  const envelope = value as Record<string, unknown>
+  if (envelope.jsonrpc !== '2.0' || envelope.id !== expectedID) {
+    throw new Error('Controller returned a mismatched JSON-RPC response')
+  }
+  const hasResult = Object.prototype.hasOwnProperty.call(envelope, 'result')
+  const hasError = Object.prototype.hasOwnProperty.call(envelope, 'error')
+  if (hasResult === hasError) {
+    throw new Error('Controller returned an invalid JSON-RPC response')
+  }
+  if (hasError) {
+    const error = envelope.error
+    if (!error || typeof error !== 'object' || Array.isArray(error)) {
+      throw new Error('Controller returned an invalid JSON-RPC error')
+    }
+    const detail = error as Record<string, unknown>
+    if (!Number.isInteger(detail.code) || typeof detail.message !== 'string') {
+      throw new Error('Controller returned an invalid JSON-RPC error')
+    }
+    return { error: new ControllerRPCError(detail.code as number, detail.message) }
+  }
+  return { result: envelope.result as T }
 }
 
 /** Fetches the bootstrap UI configuration required before opening live transports. */
@@ -106,9 +152,14 @@ async function restRPC<T>(request: { jsonrpc: '2.0'; id: number; method: string;
     body: JSON.stringify(request),
     signal,
   })
-  const envelope = await decode<RPCResponse<T>>(response)
-  if (envelope.error) throw new Error(envelope.error.message)
-  return envelope.result as T
+  const value = await responseBody(response)
+  const envelope = parseRPCResponse<T>(value, request.id)
+  if (envelope.error) throw envelope.error
+  if (!response.ok) {
+    const detail = responseErrorDetail(value, response.statusText, response.status)
+    throw new Error(detail || `HTTP ${response.status}`)
+  }
+  return envelope.result
 }
 
 function rejectSocketRequests(socket: WebSocket, detail: string): void {
@@ -248,7 +299,9 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       return
     }
     socket = activeSocket
+    const isActive = () => !stopped && currentAttempt === attempt && socket === activeSocket
     activeSocket.addEventListener('open', () => {
+      if (!isActive()) return
       retry = 0
       streamSocket = activeSocket
       handlers.state('open')
@@ -260,21 +313,27 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       }))
     })
     activeSocket.addEventListener('message', (message) => {
+      if (!isActive()) return
       try {
         const value = JSON.parse(String(message.data)) as {
           id?: number
           method?: string
           params?: unknown
           result?: unknown
-          error?: { message?: string }
+          error?: { code?: number; message?: string }
         }
         if (typeof value.id === 'number') {
           const pending = pendingSocketRPC.get(value.id)
           if (pending && pending.socket === activeSocket) {
             pendingSocketRPC.delete(value.id)
             pending.cleanup()
-            if (value.error) pending.reject(new Error(value.error.message || 'WebSocket RPC failed'))
-            else pending.resolve(value.result)
+            try {
+              const envelope = parseRPCResponse(value, value.id)
+              if (envelope.error) pending.reject(envelope.error)
+              else pending.resolve(envelope.result)
+            } catch (cause) {
+              pending.reject(cause instanceof Error ? cause : new Error(String(cause)))
+            }
           }
         }
         if (value.method === 'controller.status') handlers.status(value.params as StatusUpdate)
@@ -291,6 +350,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       }
     })
     activeSocket.addEventListener('close', (event) => {
+      if (!isActive()) return
       if (socket === activeSocket) socket = null
       if (streamSocket === activeSocket) streamSocket = null
       rejectSocketRequests(activeSocket, event.reason || 'WebSocket RPC connection closed')
@@ -300,7 +360,7 @@ export function connectStream(config: UIConfig, handlers: StreamHandlers): () =>
       }
       scheduleRetry(event.reason || 'WebSocket connection closed')
     })
-    activeSocket.addEventListener('error', () => activeSocket.close())
+    activeSocket.addEventListener('error', () => { if (isActive()) activeSocket.close() })
   }
 
   void open()
