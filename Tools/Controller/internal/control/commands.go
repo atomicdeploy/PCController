@@ -4229,9 +4229,6 @@ func safeFlashCommand(
 	if err != nil {
 		return "", err
 	}
-	if runtime != nil && classification == deployment.Development && !runtime.Snapshot().Connected {
-		return "", errors.New("development upload requires an authenticated application; use board initialize for blank-device recovery")
-	}
 	if runtime == nil {
 		return "", errors.New("guarded flash requires an application runtime")
 	}
@@ -4242,6 +4239,12 @@ func safeFlashCommand(
 		return "", fmt.Errorf("inspect firmware before releasing UART: %w", err)
 	}
 	snapshot := runtime.Snapshot()
+	// This is the transaction snapshot that decides whether semantic capture
+	// runs below. A preflight snapshot taken before programmingMu may belong to
+	// a session that disconnected while this command waited for another job.
+	if classification == deployment.Development && !snapshot.Connected {
+		return "", errors.New("development upload requires an authenticated application; use board initialize for blank-device recovery")
+	}
 	if reinitializeEEPROM && !snapshot.Connected {
 		return "", errors.New("--reinitialize-eeprom requires an authenticated application connection so the post-backup Prog latch can be armed and the final settings can be verified")
 	}
