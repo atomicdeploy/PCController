@@ -1416,13 +1416,24 @@ func (store *Store) Watch(
 	if interval <= 0 {
 		interval = DefaultWatchInterval
 	}
-	watcher, err := fsnotify.NewWatcher()
-	if err == nil {
-		err = watcher.Add(filepath.Dir(store.path))
-	}
-	if err != nil {
-		if watcher != nil {
+	var watcher *fsnotify.Watcher
+	err := retryWatchRegistration(ctx, func() error {
+		var err error
+		watcher, err = fsnotify.NewWatcher()
+		if err == nil {
+			err = watcher.Add(filepath.Dir(store.path))
+		}
+		if err != nil && watcher != nil {
+			// kqueue may have registered part of the directory before a
+			// temporary entry disappeared. Retry with an entirely fresh watch.
 			_ = watcher.Close()
+			watcher = nil
+		}
+		return err
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return
 		}
 		if onError != nil {
 			onError(fmt.Errorf("filesystem watcher unavailable; using polling fallback: %w", err))
