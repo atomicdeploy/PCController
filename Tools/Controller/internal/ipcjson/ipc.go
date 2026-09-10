@@ -1140,8 +1140,8 @@ func (service *Service) dispatch(
 		if err = decodeParams(request.Params, &params); err == nil {
 			if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" {
 				err = errors.New("bridge peer and request.method are required")
-			} else if params.Request.Method == "controller.bridge.call" {
-				err = errors.New("recursive bridge calls are not permitted")
+			} else if bridgeErr := ValidateBridgeRequest(params.Request); bridgeErr != nil {
+				err = bridgeErr
 			} else if service.BridgeCall == nil {
 				err = errors.New("host bridge manager is unavailable")
 			} else {
@@ -1783,9 +1783,19 @@ func (service *Service) authorizeAccess(
 	if !access.Remote {
 		return nil
 	}
-	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") &&
-		bridgeIngressCanPivot(method, params) {
-		return errors.New("bridge ingress may not pivot through another peer")
+	if strings.EqualFold(strings.TrimSpace(access.Transport), "bridge") {
+		if err := ValidateBridgeRequest(Request{Method: method, Params: params}); err != nil {
+			return err
+		}
+	}
+	if peerUpdate, chained := requestInvokesPeerHostUpdate(method, params, 0); peerUpdate {
+		if chained {
+			return errors.New("peer host updates may not be chained through a bridge")
+		}
+		if err := service.authorizeCapability(access, method, capabilityProgramming); err != nil {
+			return err
+		}
+		return service.authorizeCapability(access, method, capabilityBridgeCalls)
 	}
 	capability := requestCapability(method, params)
 	return service.authorizeCapability(access, method, capability)
@@ -1794,6 +1804,9 @@ func (service *Service) authorizeAccess(
 func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
 	switch strings.ToLower(strings.TrimSpace(method)) {
 	case "controller.bridge.call", "controller.peer.update.host", "controller.discovery.connect":
+		return true
+	case "controller.network.peers.set", "controller.integrations.local.set", "controller.hotkeys.set",
+		"controller.host_menu.configure", "controller.host_menu.config.set", "controller.host_menu.directory.replace", "controller.host_menu.content.push":
 		return true
 	case "controller.command.execute":
 		var value struct {
@@ -1811,11 +1824,14 @@ func bridgeIngressCanPivot(method string, params json.RawMessage) bool {
 }
 
 func bridgeCommandCanPivot(command string) bool {
-	words := strings.Fields(strings.ToLower(strings.TrimSpace(command)))
+	words := bridgeCommandWords(command)
 	if len(words) == 0 {
 		return false
 	}
 	if words[0] == "peer-update" {
+		return true
+	}
+	if words[0] == "config" && len(words) >= 2 && words[1] == "set" {
 		return true
 	}
 	return words[0] == "bridge" && (len(words) < 2 || words[1] != "list")
@@ -2854,11 +2870,8 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			return
 		}
 		access := accessFromHTTPRequest(request, "rest")
-		if err := service.authorizeCapability(
-			access,
-			"REST "+request.URL.Path,
-			commandCapability(params.Command),
-		); err != nil {
+		encoded, _ := json.Marshal(params)
+		if err := service.authorizeAccess(access, "controller.command.execute", encoded); err != nil {
 			writeHTTPJSON(writer, http.StatusForbidden, map[string]string{"error": err.Error()})
 			return
 		}
@@ -3176,10 +3189,14 @@ func websocketMux(serverContext context.Context, service *Service) http.Handler 
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" ||
-			params.Request.Method == "controller.bridge.call" {
+		bridgeErr := ValidateBridgeRequest(params.Request)
+		if strings.TrimSpace(params.Peer) == "" || strings.TrimSpace(params.Request.Method) == "" || bridgeErr != nil {
+			detail := "bridge peer and non-recursive request.method are required"
+			if bridgeErr != nil {
+				detail = bridgeErr.Error()
+			}
 			writeHTTPJSON(writer, http.StatusBadRequest, map[string]string{
-				"error": "bridge peer and non-recursive request.method are required",
+				"error": detail,
 			})
 			return
 		}
