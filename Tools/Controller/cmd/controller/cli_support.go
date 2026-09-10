@@ -319,7 +319,7 @@ Device, firmware and recovery:
   controller reset [connection flags]
 	controller eeprom inspect|export|import|restore [file-only backup flags]
 	controller firmware inspect|identity|patch-identity [artifact flags]
-	controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--allow-incomplete-backup] [--reinitialize-eeprom]
+	controller program flash HEX [PORT] [--method urclock|usbasp] [--app-device SELECTOR] [--deployment production|development] [--reinitialize-eeprom]
 	controller program recover HEX [PORT]  fresh readback + durable restore; never rewrites flash
 	controller program abandon TARGET_SHA256 ABANDON  restore a failed transaction when its exact staging HEX was lost; never reads/writes flash
 	controller program --operation DIAGNOSTIC [program flags]

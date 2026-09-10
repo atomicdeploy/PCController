@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/deployment"
 	"pccontroller.local/controller/internal/discovery"
 	"pccontroller.local/controller/internal/hostfacts"
 	"pccontroller.local/controller/internal/hostos"
@@ -1227,7 +1228,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name:    "program",
-		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom] | program recover HEX [PORT] | program abandon TARGET_SHA256 ABANDON | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]",
+		Usage:   "program flash HEX [PORT] [--method urclock|usbasp] [--deployment production|development] [--reinitialize-eeprom] | program recover HEX [PORT] | program abandon TARGET_SHA256 ABANDON | program compile SKETCH [--firmware-feature NAME ...|--no-firmware-features] | program OPERATION METHOD PATH [PORT]",
 		Summary: "guarded backup-then-flash, or non-write programmer diagnostics",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			resolved := resolveCommandOptions(options)
@@ -4170,7 +4171,7 @@ func safeFlashCommand(
 	options CommandOptions,
 	args []string,
 ) (string, error) {
-	const usage = "usage: program flash HEX [PORT] [--method urclock|usbasp] [--allow-incomplete-backup] [--reinitialize-eeprom]"
+	const usage = "usage: program flash HEX [PORT] [--method urclock|usbasp] [--deployment production|development] [--reinitialize-eeprom]"
 	if len(args) == 0 {
 		return "", errors.New(usage)
 	}
@@ -4180,14 +4181,26 @@ func safeFlashCommand(
 	}
 	method := programmer.MethodUrclock
 	port := ""
-	allowIncomplete := false
+	explicitDeployment := ""
 	reinitializeEEPROM := false
 	for index := 1; index < len(args); index++ {
 		argument := strings.TrimSpace(args[index])
 		lower := strings.ToLower(argument)
 		switch {
-		case lower == "--allow-incomplete-backup":
-			allowIncomplete = true
+		case lower == "--deployment":
+			if index+1 >= len(args) {
+				return "", errors.New(usage)
+			}
+			index++
+			explicitDeployment = args[index]
+			if strings.TrimSpace(explicitDeployment) == "" {
+				return "", errors.New(usage)
+			}
+		case strings.HasPrefix(lower, "--deployment="):
+			explicitDeployment = strings.TrimPrefix(lower, "--deployment=")
+			if strings.TrimSpace(explicitDeployment) == "" {
+				return "", errors.New(usage)
+			}
 		case lower == "--reinitialize-eeprom":
 			reinitializeEEPROM = true
 		case lower == "--method":
@@ -4208,8 +4221,13 @@ func safeFlashCommand(
 	if method != programmer.MethodUrclock && method != programmer.MethodUSBasp {
 		return "", fmt.Errorf("guarded flash method must be urclock or usbasp, got %q", method)
 	}
-	if reinitializeEEPROM && allowIncomplete {
-		return "", errors.New("--reinitialize-eeprom requires a complete verified raw flash, EEPROM, and metadata backup; it cannot be combined with --allow-incomplete-backup")
+	configuredDeployment := ""
+	if options.HostConfig != nil {
+		configuredDeployment = options.HostConfig().Programming.Deployment
+	}
+	classification, err := deployment.Resolve(configuredDeployment, explicitDeployment)
+	if err != nil {
+		return "", err
 	}
 	if runtime == nil {
 		return "", errors.New("guarded flash requires an application runtime")
@@ -4221,6 +4239,12 @@ func safeFlashCommand(
 		return "", fmt.Errorf("inspect firmware before releasing UART: %w", err)
 	}
 	snapshot := runtime.Snapshot()
+	// This is the transaction snapshot that decides whether semantic capture
+	// runs below. A preflight snapshot taken before programmingMu may belong to
+	// a session that disconnected while this command waited for another job.
+	if classification == deployment.Development && !snapshot.Connected {
+		return "", errors.New("development upload requires an authenticated application; use board initialize for blank-device recovery")
+	}
 	if reinitializeEEPROM && !snapshot.Connected {
 		return "", errors.New("--reinitialize-eeprom requires an authenticated application connection so the post-backup Prog latch can be armed and the final settings can be verified")
 	}
@@ -4380,8 +4404,9 @@ func safeFlashCommand(
 		programmer.AutomaticPreflashOptions{
 			FirmwarePath: firmwarePath,
 			Backup:       backup, DataPaths: dataPaths,
-			AllowFlashWithoutFullBackup: allowIncomplete,
-			AfterBackup:                 afterBackup,
+			Deployment:         classification,
+			ReinitializeEEPROM: reinitializeEEPROM,
+			AfterBackup:        afterBackup,
 		},
 		runner,
 		func(flashContext context.Context, path string, writer io.Writer) error {

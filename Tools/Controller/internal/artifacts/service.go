@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"pccontroller.local/controller/internal/deployment"
 )
 
 const (
@@ -31,6 +33,7 @@ type Options struct {
 	Events                   EventSink
 	BoardIdentity            func() BoardIdentity
 	RemoteProgrammingEnabled func() bool
+	Deployment               func() string
 }
 
 // Service coordinates content-addressed artifacts and serialized update
@@ -42,6 +45,7 @@ type Service struct {
 	events                 EventSink
 	board                  func() BoardIdentity
 	remote                 func() bool
+	deployment             func() string
 	ctx                    context.Context
 	cancel                 context.CancelFunc
 	mu                     sync.RWMutex
@@ -69,7 +73,7 @@ func NewService(options Options) (*Service, error) {
 	service := &Service{
 		store: options.Store, downloader: options.Downloader, executor: options.Executor,
 		events: options.Events, board: options.BoardIdentity,
-		remote: options.RemoteProgrammingEnabled, ctx: ctx, cancel: cancel,
+		remote: options.RemoteProgrammingEnabled, deployment: options.Deployment, ctx: ctx, cancel: cancel,
 		operations: make(map[string]UpdateStatus), defaults: make(map[Kind]string),
 		idempotency: make(map[string]idempotencyRecord), operationMeta: make(map[string]operationJournal),
 		transaction: make(chan struct{}, 1), peerUploads: make(map[string]*peerUpload),
@@ -397,6 +401,14 @@ func (service *Service) startUpdate(operationKind string, request UpdateRequest)
 	}
 	method := ProgrammingMethodNone
 	if operationKind != "host" {
+		configured := ""
+		if service.deployment != nil {
+			configured = service.deployment()
+		}
+		request.Deployment, err = deployment.Resolve(configured, request.Deployment)
+		if err != nil {
+			return OperationResult{}, err
+		}
 		method, err = service.resolveProgrammingMethod(request.Method)
 		if err != nil {
 			return OperationResult{}, err

@@ -36,19 +36,22 @@ one serial owner. Do not operate relays, motors or PWM loads until they are safe
 
 | Command | Purpose |
 |---|---|
-| `controller.exe exec "macro record start cinema-demo examples green"` | Start a named host take |
-| `controller.exe exec "display segments --duration 500ms TEST"` | Send a display action (or use the normal UI controls) |
-| `controller.exe exec "macro record status"` | Inspect captured count and any error |
-| `controller.exe exec "macro record save"` | Persist the take; `record stop` is equivalent |
-| `controller.exe exec "macro record discard"` | Explicitly discard instead |
-| `controller.exe exec "macro list"` | List saved IDs, names, modes and categories |
-| `controller.exe exec "macro show cinema-demo"` | Inspect ordered steps before playback |
-| `controller.exe exec "macro rename cinema-demo cinema-ready"` | Rename without changing ID or steps |
-| `controller.exe exec "macro category cinema-ready cinema"` | Set the category |
-| `controller.exe exec "macro play cinema-ready"` | Play the saved definition using its recorded mode |
-| `controller.exe exec "macro monitor"` | Combined playback and recorder snapshot |
-| `controller.exe exec "macro cancel"` | Cancel and switch relays/PWM off; report cleanup failures |
-| `controller.exe exec "macro cancel keep"` | Explicit opt-in to preserve current outputs |
+| `controller.exe exec macro record start cinema-demo examples green` | Start a named host take |
+| `controller.exe exec display segments --duration 500ms TEST` | Send a display action (or use the normal UI controls) |
+| `controller.exe exec macro record status` | Inspect captured count and any error |
+| `controller.exe exec macro record save` | Persist the take; `record stop` is equivalent |
+| `controller.exe exec macro record discard` | Explicitly discard instead |
+| `controller.exe exec macro list` | List saved IDs, names, modes and categories |
+| `controller.exe exec macro show cinema-demo` | Inspect ordered steps before playback |
+| `controller.exe exec macro rename cinema-demo cinema-ready` | Rename without changing ID or steps |
+| `controller.exe exec macro category cinema-ready cinema` | Set the category |
+| `controller.exe exec macro play cinema-ready` | Play the saved definition using its recorded mode |
+| `controller.exe exec macro monitor` | Combined playback and recorder snapshot |
+| `controller.exe exec macro cancel` | Cancel and switch relays/PWM off; report cleanup failures |
+| `controller.exe exec macro cancel keep` | Explicit opt-in to preserve current outputs |
+
+Pass command words as separate CLI arguments; quote only an individual name or
+text argument containing spaces, not the entire command after `exec`.
 
 The Web macro panel lists saved macros, records with a chosen name/category,
 plays a selected definition after its physical-output confirmation, and updates
