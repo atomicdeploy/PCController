@@ -4807,8 +4807,9 @@ func macroCommand(
 		for index, step := range macro.Steps {
 			due, _ := macroStepDueUS(step)
 			lines = append(lines, fmt.Sprintf(
-				"%3d  +%-12s %-12s target=%d value=%d",
+				"%3d  +%-12s %-12s target=%d value=%d opcode=0x%02X payload=%X text=%q frequency=%dHz duration=%dms",
 				index+1, time.Duration(due)*time.Microsecond, step.Kind, step.Target, step.Value,
+				compiled.steps[index].opcode, compiled.steps[index].payload, step.Text, step.FrequencyHz, step.DurationMS,
 			))
 		}
 		return strings.Join(lines, "\n"), nil

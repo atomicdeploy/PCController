@@ -671,7 +671,7 @@ export function AdvancedWorkbench({
               <Button key={key} compact disabled={!online} busy={busy === `host-menu key ${key} press`} onClick={() => void run(`host-menu key ${key} press`)}>{copy(`${key} · ${label}`, `${key} · ${label}`)}</Button>
             ))}
           </div>
-          <p className="advanced-note advanced-note--safe">{copy('The Macro front-panel page lists the file-watched library, records MCU acknowledgement deltas, shows playback progress, and offers safe cancel or guarded keep-output cancel.', 'صفحه ماکروی پنل، فهرست تحت پایش فایل، ضبط زمان‌بندی MCU، پیشرفت اجرا و لغو امن یا لغو با حفظ خروجی را ارائه می‌کند.')}</p>
+          <p className="advanced-note advanced-note--safe">{copy('The Macro front-panel page uses the shared host library, records host command timing by default, shows playback progress, and offers safe cancel or guarded keep-output cancel.', 'صفحه ماکروی پنل از کتابخانه مشترک میزبان استفاده می‌کند، زمان فرمان‌های میزبان را ضبط می‌کند و پیشرفت اجرا و لغو امن را نشان می‌دهد.')}</p>
           <div className="advanced-fields">
             <TextField
               label={copy('Firmware page ID or key', 'شناسه یا کلید صفحه میان‌افزار')}
@@ -774,9 +774,9 @@ export function AdvancedWorkbench({
 
         <AdvancedPanel
           icon={Workflow}
-          eyebrow={copy('HOST RECORDING · MCU PLAYBACK AVAILABLE', 'ضبط میزبان · اجرای MCU نیز موجود است')}
+          eyebrow={copy('HOST RECORDING', 'ضبط میزبان')}
           title={copy('Macro inspection & recording', 'بررسی و ضبط ماکرو')}
-          detail={copy('Inspect compiled timing, record acknowledged board commands, then save or discard deliberately.', 'زمان‌بندی کامپایل‌شده را ببینید، فرمان‌های تأییدشده برد را ضبط و آگاهانه ذخیره یا دور بریزید.')}
+          detail={copy('Record host-issued commands with a 100 ms alpha timing tolerance. Physical-key and incoming RF recording remain a separate MCU workflow.', 'فرمان‌های میزبان را با تلورانس زمانی ۱۰۰ میلی‌ثانیه ضبط کنید. ضبط کلید فیزیکی و دریافت RF بخشی از مسیر جداگانه MCU است.')}
         >
           <div aria-live="polite" className="advanced-note">
             {snapshot.macros?.recording.active
