@@ -152,7 +152,7 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 		if payloadErr != nil {
 			return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
 		}
-		return terminalOSCCommand(model.writeOSC, payload, "update progress")
+		return terminalOSCCommand(model.writeOSC, payload, "update progress", nil)
 	}
 	model.update = updatePresentation{
 		OperationID: event.Metadata["operation_id"], Kind: event.Metadata["kind"],
