@@ -350,28 +350,29 @@ type IlluminationState struct {
 
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
-	Connected         bool                 `json:"connected"`
-	Paused            bool                 `json:"paused"`
-	Port              PortInfo             `json:"port"`
-	Hello             Hello                `json:"hello"`
-	Status            Status               `json:"status"`
-	Settings          Settings             `json:"settings"`
-	HaveStatus        bool                 `json:"have_status"`
-	HaveSettings      bool                 `json:"have_settings"`
-	StatusUpdated     time.Time            `json:"status_updated,omitempty"`
-	ConnectionState   string               `json:"connection_state"`
-	ConnectionReason  string               `json:"connection_reason,omitempty"`
-	ConnectionUpdated time.Time            `json:"connection_updated,omitempty"`
-	ProgramState      ProgramStateSnapshot `json:"program_state"`
-	RFLearning        RFLearnState         `json:"rf_learning"`
-	FrontPanel        FrontPanel           `json:"front_panel"`
-	HaveFrontPanel    bool                 `json:"have_front_panel"`
-	FrontPanelUpdated time.Time            `json:"front_panel_updated,omitempty"`
-	StatusLED         StatusLEDState       `json:"status_led"`
-	HaveStatusLED     bool                 `json:"have_status_led"`
-	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
-	Illumination      IlluminationState    `json:"illumination"`
-	PortProcess       PortProcessSnapshot  `json:"port_process"`
+	Connected         bool                  `json:"connected"`
+	Paused            bool                  `json:"paused"`
+	Port              PortInfo              `json:"port"`
+	Hello             Hello                 `json:"hello"`
+	Status            Status                `json:"status"`
+	Settings          Settings              `json:"settings"`
+	HaveStatus        bool                  `json:"have_status"`
+	HaveSettings      bool                  `json:"have_settings"`
+	StatusUpdated     time.Time             `json:"status_updated,omitempty"`
+	ConnectionState   string                `json:"connection_state"`
+	ConnectionReason  string                `json:"connection_reason,omitempty"`
+	ConnectionUpdated time.Time             `json:"connection_updated,omitempty"`
+	ProgramState      ProgramStateSnapshot  `json:"program_state"`
+	RFLearning        RFLearnState          `json:"rf_learning"`
+	Macros            control.MacroSnapshot `json:"macros"`
+	FrontPanel        FrontPanel            `json:"front_panel"`
+	HaveFrontPanel    bool                  `json:"have_front_panel"`
+	FrontPanelUpdated time.Time             `json:"front_panel_updated,omitempty"`
+	StatusLED         StatusLEDState        `json:"status_led"`
+	HaveStatusLED     bool                  `json:"have_status_led"`
+	StatusLEDUpdated  time.Time             `json:"status_led_updated,omitempty"`
+	Illumination      IlluminationState     `json:"illumination"`
+	PortProcess       PortProcessSnapshot   `json:"port_process"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -1848,6 +1849,11 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns the latest cached connection and board state without polling.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
+	// Library snapshots belong to client queries, not the hot board-status
+	// path: copying a long take for every internal status check is unnecessary.
+	if runner := client.runtime.MacroRunner(); runner != nil {
+		snapshot.Macros = runner.Snapshot()
+	}
 	client.illuminationMu.RLock()
 	illumination := client.illumination
 	client.illuminationMu.RUnlock()
@@ -1878,6 +1884,7 @@ func (client *Client) Snapshot() Snapshot {
 		ConnectionUpdated: snapshot.ConnectionUpdated,
 		ProgramState:      snapshot.ProgramState,
 		RFLearning:        snapshot.RFLearning,
+		Macros:            snapshot.Macros,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,
 		FrontPanelUpdated: snapshot.FrontPanelUpdated,

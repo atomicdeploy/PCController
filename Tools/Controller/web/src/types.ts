@@ -165,6 +165,12 @@ export interface IlluminationState {
   updated_at?: string
 }
 
+export interface MacroSnapshot {
+  library: Array<{ id: number; name: string; mode?: string; category?: string; steps: Array<{ kind: string; at_us?: number }> }>
+  playback: { running: boolean; name: string; mode: string; step: number; step_count: number; lifecycle?: string; last_error?: string; faithful: boolean; maximum_timing_error_us: number }
+  recording: { active: boolean; name: string; mode: string; steps: number; last_error?: string }
+}
+
 export interface Snapshot {
   connected: boolean
   paused: boolean
@@ -181,6 +187,7 @@ export interface Snapshot {
   port_process?: PortProcessSnapshot
   program_state?: ProgramState
   rf_learning?: RFLearnState
+  macros?: MacroSnapshot
   front_panel?: FrontPanelState
   have_front_panel?: boolean
   front_panel_updated?: string

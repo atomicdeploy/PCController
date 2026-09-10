@@ -765,6 +765,10 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runtimeEventMsg:
 		event := control.Event(message)
+		if strings.HasPrefix(event.Kind, "macro") && model.remote != nil && model.remote.Snapshot != nil && !model.remoteSnapshotPending {
+			model.remoteSnapshotPending = true
+			commands = append(commands, refreshRemoteSnapshot(model.remote.Snapshot, model.remoteStatusSequence, model.remoteLEDSequence))
+		}
 		if event.Kind == "client.navigation.session.reset" {
 			model.navigationCursor.Reset()
 			if model.remote != nil && model.remote.Events != nil && !model.remoteEventsClosed {
