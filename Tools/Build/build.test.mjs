@@ -7,8 +7,8 @@ import { delimiter, join, resolve, sep } from 'node:path'
 import test from 'node:test'
 
 test('deployment is explicit and validated by the build wrapper', () => {
-	assert.equal(parseArguments(['--upload', '--deployment', 'development']).deployment, 'development')
-	assert.equal(parseArguments(['--upload', '--deployment=production']).deployment, 'production')
+	assert.equal(parseArguments(['--upload', '--port', 'COM18', '--deployment', 'development']).deployment, 'development')
+	assert.equal(parseArguments(['--upload', '--port', 'COM18', '--deployment=production']).deployment, 'production')
 	assert.throws(() => parseArguments(['--upload', '--deployment', 'skip-all']), /production or development/)
 	assert.throws(() => parseArguments(['--upload', '--allow-incomplete-backup']), /unknown|unsupported/i)
 })
