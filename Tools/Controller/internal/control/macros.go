@@ -225,6 +225,9 @@ func (runner *MacroRunner) CreateDraft(id byte, name, category, color string) (a
 		config.Macros = append(config.Macros, macro)
 		return nil
 	})
+	if err == nil {
+		runner.runtime.PublishStructuredEvent(Event{Kind: "macro.library", Lifecycle: "created", Text: fmt.Sprintf("macro %d/%s created", macro.ID, macro.Name)})
+	}
 	return macro, err
 }
 
@@ -240,7 +243,7 @@ func (runner *MacroRunner) Delete(reference string) error {
 	if state.Running && state.ID == macro.ID {
 		return errors.New("cannot delete the macro currently playing")
 	}
-	return runner.updateHostConfig(func(config *appconfig.Config) error {
+	err = runner.updateHostConfig(func(config *appconfig.Config) error {
 		for index, existing := range config.Macros {
 			if existing.ID == macro.ID {
 				config.Macros = append(config.Macros[:index], config.Macros[index+1:]...)
@@ -249,6 +252,10 @@ func (runner *MacroRunner) Delete(reference string) error {
 		}
 		return fmt.Errorf("macro %q disappeared before it could be deleted", reference)
 	})
+	if err == nil {
+		runner.runtime.PublishStructuredEvent(Event{Kind: "macro.library", Lifecycle: "deleted", Text: fmt.Sprintf("macro %d/%s deleted", macro.ID, macro.Name)})
+	}
+	return err
 }
 
 func (runner *MacroRunner) StartRecording(name, category, color string) (MacroRecordingState, error) {
@@ -718,7 +725,7 @@ func (runner *MacroRunner) play(
 					}
 					observed++
 				}
-				status.ExecutedSteps = uint16(observed + 1)
+				status.ExecutedSteps = uint16(observed)
 				runner.applyDeviceStatus(status)
 			}
 			continue
@@ -1162,6 +1169,9 @@ func compileMacroCommand(step appconfig.MacroStep) (byte, []byte, error) {
 		}
 		return native.OpRelaySet, payload, err
 	case "motion", "side":
+		if step.Value > 2 {
+			return 0, nil, fmt.Errorf("motion value %d is outside 0..2", step.Value)
+		}
 		payload, err := native.RelaySidePayload(step.Target, byte(step.Value))
 		return native.OpRelaySide, payload, err
 	case "pwm", "mosfet":

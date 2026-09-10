@@ -222,6 +222,26 @@ func RichPreviewSnapshotForRemoteTest() control.Snapshot {
 	}
 }
 
+func TestRemoteTUISnapshotRetainsMacroLifecycle(t *testing.T) {
+	client := &remoteTUIIPC{}
+	client.callFn = func(_ context.Context, method string, _ any, target any) error {
+		if method != "controller.snapshot" {
+			return errors.New("unexpected method")
+		}
+		wire := target.(*remoteSnapshotWire)
+		wire.Macros.Playback = control.MacroState{Name: "remote take", Running: true, Step: 2, StepCount: 3, Mode: "host"}
+		wire.Macros.Recording = control.MacroRecordingState{Name: "recorded take", Steps: 7}
+		return nil
+	}
+	snapshot, err := client.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Macros.Playback.Name != "remote take" || snapshot.Macros.Playback.Step != 2 || snapshot.Macros.Recording.Steps != 7 {
+		t.Fatal(snapshot.Macros)
+	}
+}
+
 func TestRemoteTUIPollEventsBacksOffAndRediscoversAfterTransportFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &remoteTUIIPC{

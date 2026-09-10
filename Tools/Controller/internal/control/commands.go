@@ -876,7 +876,7 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 	})
 	mustRegister(shell.Command{
 		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]",
-		Summary: "manage and play MCU-timed multi-peripheral macros",
+		Summary: "record and play named host or MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
 		},
