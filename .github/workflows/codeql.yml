@@ -132,7 +132,7 @@ jobs:
           node -e 'const { execFileSync } = require("node:child_process"); for (const library of JSON.parse(process.env.ARDUINO_LIBRARIES_JSON)) execFileSync("arduino-cli", ["lib", "install", library], { stdio: "inherit" });'
 
       - name: "🛡️ Initialize CodeQL"
-        uses: github/codeql-action/init@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build_mode }}
@@ -200,7 +200,7 @@ jobs:
           if errorlevel 1 exit /b 1
 
       - name: "🔬 Analyze and upload CodeQL results"
-        uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           category: ${{ matrix.category }}
 
