@@ -28,8 +28,11 @@ copy in the update view was corrected without resuming the deferred login work.
 - Issues #110/#252: real peer process replacement, rollback, reconnect and active
   image identity require a second live installation, not merely a staged ACK.
 - Issues #154/#155/#216: the failed UART attempt reported access denied and did
-  not write firmware. Port ownership, exact settings recovery, fresh HELLO and
-  clearing the programming latch must be verified before claiming board delivery.
+  not write firmware. Subsequent project-owned DTR reset received a fresh HELLO;
+  `program abandon` restored and verified original EEPROM/live settings, cleared
+  the recovery marker and left `programming_latch=false`. This recovers operation,
+  but does not deliver the new firmware. Repeating the CLI upload returned its
+  old failed idempotent operation; explicit safe retry remains to be addressed.
   The stale helper mechanism is fixed, but it alone does not prove the cause of
   every busy-port failure. USBasp is not assumed present.
 - Issue #216: UART-first/capability-aware backup policy and removal of the old
@@ -37,6 +40,29 @@ copy in the update view was corrected without resuming the deferred login work.
 - Issues #64/#75: stamped executable identity, current embedded Web, installation,
   startup, multi-client state and live record/save/play/cancel evidence remain
   explicit final deployment gates.
+
+## Refined firmware checkpoint policy
+
+The operator clarified that a live board can run disposable development builds.
+Production status belongs to a known-good firmware checkpoint, not automatically
+to every image installed on that board. Successful flashing alone must not
+promote a build to known-good; defined acceptance or explicit operator confirmation
+is required.
+
+| Evidence | Intended optimized behavior | Current delivery status |
+|---|---|---|
+| Exact prior firmware retained and reliably matched to device | Reuse the verified artifact instead of reading identical flash again | Tracked in #216; not yet implemented |
+| Mutable settings | Capture semantic settings with firmware/layout identity; restore and verify after update | Existing guarded programming captures settings; durable portable JSON/history needs completion |
+| Raw EEPROM required for rollback | Pair with exact firmware/layout, content-deduplicate and apply retention | Complete capability-aware strategy remains in #216 |
+| Explicit development iteration | Skip new archival raw backup, preserve settings and write-safety checks | Separate implementation lane underway |
+| Missing or ambiguous prior identity | Read back or request explicit disposition; never claim unverified rollback | Conservative fallback remains required |
+
+Reuse the existing Go `firmware identity` / `firmware patch-identity` tooling and
+evaluate Urboot metadata. A short build hash alone is not proof of exact artifact
+identity: use the retained full digest and validated identity manifest. Keep
+protected known-good checkpoints while removing duplicate content, not useful
+history. Do not interpret this policy as permission to bypass target verification
+or erase settings.
 
 All other unresolved requirements remain in the [canonical backlog](Requirements-Backlog.md)
 and [chronological delivery ledger](Alpha-Delivery-Ledger.md). Local source moves,
