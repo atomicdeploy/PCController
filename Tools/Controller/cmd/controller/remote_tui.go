@@ -386,6 +386,13 @@ func (client *remoteTUIIPC) RemoveInstance(ctx context.Context, id string) error
 	)
 }
 
+func (client *remoteTUIIPC) AckAppAction(ctx context.Context, ack hostui.ActionAck) error {
+	var result struct {
+		Accepted bool `json:"accepted"`
+	}
+	return client.call(ctx, "controller.app.action.ack", ack, &result)
+}
+
 type remoteTUIInstanceLease struct {
 	client   *remoteTUIIPC
 	reporter *hostui.NavigationReporter
@@ -536,6 +543,7 @@ func (lease *remoteTUIInstanceLease) report(catchUp bool) error {
 	values["terminal_title"] = title
 	values["terminal_osc"] = "enabled"
 	values["terminal_progress"] = "osc-9-4"
+	values[hostui.ActionCapabilitiesKey] = hostui.TUIActionCapabilities
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err := lease.client.ReportInstance(ctx, hostui.AppInstance{
@@ -1211,6 +1219,11 @@ func runRemoteTUI(
 					ReportTerminalAsync: instanceLease.QueueUpdate,
 					CommitNavigation:    instanceLease.QueueNavigation,
 					WriteOSC:            func(payload string) error { return hostui.WriteOSC(stdout, payload) },
+					AckAppAction: func(ack hostui.ActionAck) error {
+						ackContext, ackCancel := context.WithTimeout(ctx, 3*time.Second)
+						defer ackCancel()
+						return client.AckAppAction(ackContext, ack)
+					},
 					Remote: &tui.RemoteBackend{
 						Endpoint:                  strings.TrimSpace(address),
 						InitialSnapshot:           initial,

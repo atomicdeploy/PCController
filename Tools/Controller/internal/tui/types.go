@@ -246,6 +246,7 @@ type Options struct {
 	// pass through this callback.
 	CommitNavigation func(page string)
 	WriteOSC         func(payload string) error
+	AckAppAction     func(hostui.ActionAck) error
 	Remote           *RemoteBackend
 	Preview          *control.Snapshot
 	ForceWelcome     bool
