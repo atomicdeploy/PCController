@@ -18,7 +18,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -4163,28 +4162,25 @@ func httpOriginAllowed(request *http.Request, allowedPatterns []string) bool {
 		parsed.RawQuery != "" || parsed.Fragment != "" {
 		return false
 	}
-	originHost := strings.ToLower(parsed.Host)
-	if strings.EqualFold(originHost, strings.TrimSpace(request.Host)) {
-		return true
+	originName := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	originPort := parsed.Port()
+	if originPort == "" {
+		if parsed.Scheme == "https" {
+			originPort = "443"
+		} else {
+			originPort = "80"
+		}
 	}
 	if len(allowedPatterns) == 0 {
 		allowedPatterns = []string{"localhost:*", "127.0.0.1:*", "[::1]:*"}
 	}
 	for _, pattern := range allowedPatterns {
-		pattern = strings.ToLower(strings.TrimSpace(pattern))
-		if pattern == "*" || pattern == "*:*" {
+		patternHost, patternPort, splitErr := net.SplitHostPort(strings.TrimSpace(pattern))
+		if splitErr != nil || patternHost == "" || strings.ContainsAny(patternHost, "*?[]") {
 			continue
 		}
-		if strings.HasSuffix(pattern, ":*") {
-			hostPattern := strings.TrimSuffix(pattern, ":*")
-			originName := strings.ToLower(parsed.Hostname())
-			if strings.EqualFold(hostPattern, originName) ||
-				strings.EqualFold(hostPattern, "["+originName+"]") {
-				return true
-			}
-			continue
-		}
-		if match, matchErr := path.Match(pattern, originHost); matchErr == nil && match {
+		patternHost = strings.ToLower(strings.TrimSuffix(patternHost, "."))
+		if patternHost == originName && (patternPort == "*" || patternPort == originPort) {
 			return true
 		}
 	}

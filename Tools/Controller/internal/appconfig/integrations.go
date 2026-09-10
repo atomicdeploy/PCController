@@ -728,11 +728,8 @@ func validateIPC(value IPC) error {
 		return fmt.Errorf("ipc.allowed_origins is required when remote access is enabled")
 	}
 	for index, origin := range value.AllowedOrigins {
-		if strings.TrimSpace(origin) == "" || strings.ContainsAny(origin, "\r\n") {
-			return fmt.Errorf("ipc.allowed_origins[%d] is invalid", index)
-		}
-		if value.AllowRemote && strings.TrimSpace(origin) == "*" {
-			return fmt.Errorf("ipc.allowed_origins[%d] cannot allow every origin", index)
+		if err := validateAllowedOriginPattern(origin); err != nil {
+			return fmt.Errorf("ipc.allowed_origins[%d] is invalid: %w", index, err)
 		}
 	}
 	for name, path := range map[string]string{
