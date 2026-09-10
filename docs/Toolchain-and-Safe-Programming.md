@@ -521,7 +521,7 @@ controller program flash candidate.hex COM18 --deployment production --dry-run
 build.cmd --upload --port COM18 --deployment development
 ```
 
-**Remaining checkpoint strategy — [issue #216](https://github.com/atomicdeploy/PCController/issues/216):**
+**Remaining checkpoint strategy — issue #216 in the [requirements backlog](Requirements-Backlog.md):**
 reuse an already available firmware artifact only when reliable full-SHA and
 manifest identity match the installed image; a short build hash is insufficient.
 Capture mutable semantic EEPROM state separately; pair optional raw EEPROM with
