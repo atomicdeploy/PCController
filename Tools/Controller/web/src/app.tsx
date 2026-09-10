@@ -59,7 +59,7 @@ import {
   prependSignificantControllerEvent,
   significantControllerEvents,
 } from './significant-events'
-import { embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
+import { createResourceReconnectCheck, embeddedResourcesMismatch, hostResourceIdentity } from './resource-version'
 import { emitStartupConsoleIntroduction } from './startup-console'
 import {
   createTabChannel,
@@ -1164,6 +1164,10 @@ export default function App() {
       return () => window.clearInterval(timer)
     }
     const abort = new AbortController()
+    const resourceCheck = createResourceReconnectCheck(getUIConfig, reloadForResourceMismatch, {
+      signal: abort.signal,
+      onError: (cause) => setStreamDetail(`Host resource check: ${cause instanceof Error ? cause.message : String(cause)}`),
+    })
     let stopStream = () => {}
     void (async () => {
       try {
@@ -1296,6 +1300,7 @@ export default function App() {
             if (/device|connection|settings|illumination|^macro/i.test(event.kind)) void refresh()
           },
           state: (state, detail) => {
+            resourceCheck.state(state)
             setStreamState(state)
             setStreamDetail(detail ?? '')
             if (state === 'open') {
@@ -1335,7 +1340,7 @@ export default function App() {
         setBootTarget(100)
       }
     })()
-    return () => { abort.abort(); stopStream() }
+    return () => { abort.abort(); resourceCheck.dispose(); stopStream() }
   }, [adoptHostAppearance, appInstanceID, applyPage, demo, navigate, navigationSession, notify, refresh, refreshHostAppearance, streamGeneration, token])
 
   const authenticationRequired = sessionAuthenticationGuidanceRequired({

@@ -389,6 +389,25 @@ page and embedded web workbench open and drive this exact shared menu manager,
 so their four virtual keys preview the same TM1637/LCD text and actions as the
 physical keys.
 
+## Web client resources after host replacement
+
+An open Web UI checks the serving host's version and build time on every live
+transport attachment, including reconnects after an external installer or
+service restart. A changed identity uses the existing once-per-identity reload
+guard so the client loads the new entry point and lazy page bundles without a
+manual refresh. Matching identities do not reload. The canonical build stamps
+the host and embedded Web UI together; an unstamped development build is not
+release evidence.
+
+The identity request bypasses the browser cache and has a five-second timeout
+with one retry after 250 ms. Disconnecting or disposing the view cancels the
+request and retry; late replies from an earlier connection cannot reload the
+current view. This is reconnect-driven, not background polling. If browser
+session storage is unavailable, automatic mismatch reload stays disabled to
+avoid an unbounded reload loop. A client already running an older bundle that
+lacks this reconnect check needs the existing updater-completion reload path
+or one initial manual reload before it can gain this behavior.
+
 ## Global hotkeys
 
 Windows builds use `RegisterHotKey`; registration is process-global and does
