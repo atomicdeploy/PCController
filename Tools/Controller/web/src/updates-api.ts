@@ -215,8 +215,16 @@ export function listBridgePeers(signal?: AbortSignal): Promise<BridgePeer[]> {
 }
 
 const peerHostIntentStoragePrefix = 'pccontroller.peer-update.intent.'
+const peerHostIntents = new Map<string, string>()
+let peerHostIntentStorage: Storage | undefined
 
 function peerHostUpdateIntentStorageKey(peer: string, artifactSHA256: string): string {
+  try {
+    if (sessionStorage !== peerHostIntentStorage) {
+      peerHostIntents.clear()
+      peerHostIntentStorage = sessionStorage
+    }
+  } catch { /* storage-denied browsers retain the in-memory retry identity */ }
   return `${peerHostIntentStoragePrefix}${encodeURIComponent(peer.trim().toLowerCase())}.${artifactSHA256}`
 }
 
@@ -233,19 +241,23 @@ export function peerHostUpdateIdempotencyKey(peer: string, artifactSHA256: strin
   const digest = artifactSHA256.trim().toLowerCase()
   if (!/^[0-9a-f]{64}$/.test(digest)) throw new Error('Peer host update requires an exact SHA-256 digest')
   const storageKey = peerHostUpdateIntentStorageKey(peer, digest)
+  const inMemory = peerHostIntents.get(storageKey)
+  if (inMemory) return inMemory
   try {
     const retained = sessionStorage.getItem(storageKey)?.trim() ?? ''
-    if (/^[A-Za-z0-9._:-]{1,128}$/.test(retained)) return retained
+    if (/^[A-Za-z0-9._:-]{1,128}$/.test(retained)) { peerHostIntents.set(storageKey, retained); return retained }
   } catch {
     // Storage can be disabled; the in-flight request still receives a unique key.
   }
   const idempotencyKey = newPeerHostUpdateIntentKey(digest)
+  peerHostIntents.set(storageKey, idempotencyKey)
   try { sessionStorage.setItem(storageKey, idempotencyKey) } catch { /* optional retry persistence */ }
   return idempotencyKey
 }
 
 function clearPeerHostUpdateIntent(peer: string, artifactSHA256: string, idempotencyKey: string): void {
   const storageKey = peerHostUpdateIntentStorageKey(peer, artifactSHA256.trim().toLowerCase())
+  if (peerHostIntents.get(storageKey) === idempotencyKey) peerHostIntents.delete(storageKey)
   try {
     if (sessionStorage.getItem(storageKey) === idempotencyKey) sessionStorage.removeItem(storageKey)
   } catch { /* optional retry persistence */ }
@@ -256,11 +268,12 @@ export function adoptPeerHostUpdateIntent(peer: string, artifactSHA256: string, 
   const digest = artifactSHA256.trim().toLowerCase()
   const key = idempotencyKey.trim()
   if (!peer.trim() || !/^[0-9a-f]{64}$/.test(digest) || !/^[A-Za-z0-9._:-]{1,128}$/.test(key)) return false
+  peerHostIntents.set(peerHostUpdateIntentStorageKey(peer, digest), key)
   try {
     sessionStorage.setItem(peerHostUpdateIntentStorageKey(peer, digest), key)
     return true
   } catch {
-    return false
+    return true
   }
 }
 

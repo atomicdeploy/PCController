@@ -5,6 +5,13 @@ import { adoptPeerHostUpdateIntent, compareBuildIdentity, peerHostUpdateIdempote
 afterEach(() => vi.restoreAllMocks())
 
 describe('firmware artifact adapter', () => {
+  it('keeps uncertain retry identity in memory when browser storage is denied', () => {
+    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: {
+      getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') }, removeItem: () => { throw new Error('denied') },
+    } })
+    const first = peerHostUpdateIdempotencyKey('storage-denied-peer', '8'.repeat(64))
+    expect(peerHostUpdateIdempotencyKey('storage-denied-peer', '8'.repeat(64))).toBe(first)
+  })
   it('computes the digest before an artifact is staged', async () => {
     const file = new Blob(['controller-image'])
     expect(await sha256File(file)).toBe('3abac84d0fbac67d5a4e1abd07d22a4c73841c61ef523da81bfc04844c3cbc40')
