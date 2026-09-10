@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/link"
 	"pccontroller.local/controller/internal/native"
 )
 
@@ -202,6 +203,25 @@ func TestRawMacroMotionRequiresSamePermission(t *testing.T) {
 		if !macroNeedsMotionPermission(appconfig.Macro{Steps: []appconfig.MacroStep{step}}) {
 			t.Fatalf("raw safety bypass: %#v", step)
 		}
+	}
+}
+
+func TestHostMacroNeverDispatchesOrCleansUpOnReplacementSession(t *testing.T) {
+	runtime := New(Options{})
+	runtime.session = &link.Session{}
+	command := boundHostMacroCommand(runtime)
+	// An empty Session would panic if Request were reached; replacement must
+	// be rejected before any physical transport operation, including cleanup.
+	runtime.session = &link.Session{}
+	if err := command(context.Background(), native.OpRelaySet, []byte{5, 1}); err == nil || !strings.Contains(err.Error(), "replaced") {
+		t.Fatalf("replacement dispatch: %v", err)
+	}
+	if err := safeStopHostWithCommand(command); err == nil || !strings.Contains(err.Error(), "replaced") {
+		t.Fatalf("replacement cleanup: %v", err)
+	}
+	runtime.session = nil
+	if err := command(context.Background(), native.OpRelayAllOff, nil); err == nil {
+		t.Fatal("disconnected session accepted command")
 	}
 }
 

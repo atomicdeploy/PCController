@@ -5,7 +5,7 @@
 | Named library, categories, recorded command deltas | 🖥️ Host | CLI, TUI, Web, IPC, API, WebSocket/Socket.IO command path |
 | Host scheduler and acknowledged output commands | 🖥️ Host | Default for new recordings; 100 ms alpha tolerance |
 | Firmware-timed queue | 🔌 Board | Explicit MCU-mode macros; firmware capability required |
-| Physical/RF-origin capture, exact MCU timing and offline recovery | 🔬 Acceptance pending | Tracked in [#44](https://github.com/atomicdeploy/PCController/issues/44) and [#74](https://github.com/atomicdeploy/PCController/issues/74) |
+| Physical/RF-origin capture, exact MCU timing and offline recovery | 🔬 Acceptance pending | Issues #44 and #74 in the [canonical requirements backlog](Requirements-Backlog.md) |
 
 New host recordings capture accepted **relay, motion, PWM/MOSFET, beep,
 display/message, RF transmit and addressable-strip** commands. Automatic status
@@ -53,6 +53,9 @@ Empty saves and storage failures retain the take for retry or explicit discard.
 Recording cannot start during playback. Cancellation is checked before every
 dispatch, including simultaneous steps. Raw relay/motion opcodes still use the
 host motion-permission check. Existing output interlocks remain authoritative.
+Playback and its cancellation cleanup stay bound to the session captured at
+start. If USB disconnects or another board/session replaces it, playback fails
+instead of redirecting output commands to the replacement.
 
 Use `macro record start-mcu NAME` only for the explicit firmware-clock workflow.
 Existing definitions without `mode` retain their MCU behavior. Neither this

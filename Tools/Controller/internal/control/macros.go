@@ -519,6 +519,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		return runner.State(), cause
 	}
 	if mode == macroModeHost {
+		command := boundHostMacroCommand(runner.runtime)
 		if err := runner.showMacroIdentity(ctx, compiled); err != nil {
 			runner.runtime.PublishHostEvent("macro.display", "macro identity display unavailable: "+err.Error())
 		}
@@ -532,7 +533,7 @@ func (runner *MacroRunner) Start(ctx context.Context, reference string) (MacroSt
 		state := runner.state
 		runner.mu.Unlock()
 		runner.publishLifecycle("started", state, nil)
-		go runner.playHost(playContext, done, compiled, lease)
+		go runner.playHost(playContext, done, compiled, lease, command)
 		return state, nil
 	}
 
@@ -767,11 +768,12 @@ func (runner *MacroRunner) playHost(
 	done chan struct{},
 	compiled compiledMacro,
 	lease *ProgramStateLease,
+	command hostMacroCommand,
 ) {
 	defer close(done)
 	defer lease.Release()
 
-	observed, err := runHostMacro(ctx, compiled, runner.runtime.Command, runner.recordEvidence)
+	observed, err := runHostMacro(ctx, compiled, command, runner.recordEvidence)
 	cancelled := ctx.Err() != nil
 	if cancelled && errors.Is(err, context.Canceled) {
 		err = nil
@@ -781,7 +783,7 @@ func (runner *MacroRunner) playHost(
 		keep := runner.cancelKeep
 		runner.mu.RUnlock()
 		if !keep {
-			if cleanupErr := runner.safeStopHost(); cleanupErr != nil {
+			if cleanupErr := safeStopHostWithCommand(command); cleanupErr != nil {
 				err = errors.Join(err, fmt.Errorf("macro safe-stop cleanup: %w", cleanupErr))
 			}
 		}
@@ -790,6 +792,26 @@ func (runner *MacroRunner) playHost(
 }
 
 type hostMacroCommand func(context.Context, byte, []byte) error
+
+// Bind both playback and cleanup to one serial session. An unplug/reconnect
+// must not silently redirect a scheduled output command to a replacement board.
+func boundHostMacroCommand(runtime *Runtime) hostMacroCommand {
+	session := runtime.currentSession()
+	return func(ctx context.Context, opcode byte, payload []byte) error {
+		if session == nil || runtime.currentSession() != session {
+			return errors.New("macro board session disconnected or replaced; playback stopped")
+		}
+		frame, err := session.Request(ctx, opcode, payload, native.OpACK)
+		if err != nil {
+			return err
+		}
+		if runtime.currentSession() != session {
+			return errors.New("macro board session changed while acknowledging a step")
+		}
+		runtime.observe(frame)
+		return nil
+	}
+}
 
 func runHostMacro(
 	ctx context.Context,
@@ -839,10 +861,14 @@ func hostTimingDelta(epoch time.Time, dueUS uint32) int32 {
 }
 
 func (runner *MacroRunner) safeStopHost() error {
+	return safeStopHostWithCommand(runner.runtime.Command)
+}
+
+func safeStopHostWithCommand(command hostMacroCommand) error {
 	ctx, cancel := context.WithTimeout(context.Background(), macroRequestTimeout)
 	defer cancel()
-	relayErr := runner.runtime.Command(ctx, native.OpRelayAllOff, nil)
-	pwmErr := runner.runtime.Command(ctx, native.OpPWMAllOff, nil)
+	relayErr := command(ctx, native.OpRelayAllOff, nil)
+	pwmErr := command(ctx, native.OpPWMAllOff, nil)
 	return errors.Join(relayErr, pwmErr)
 }
 
