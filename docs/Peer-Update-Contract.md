@@ -30,10 +30,26 @@ configured browser Origins, topology and programming safety remain enforced.
 ## Reconciliation and remaining acceptance
 
 The old #272 aggregate is preserved, not merged wholesale. Its transfer,
-retry, bridge-state and UI slices are being extracted onto current main;
+retry, bridge-state and UI slices are extracted onto current main;
 current-main alpha authentication and newer buzzer scheduling are retained.
 The obsolete generated Web/API files from that branch are not restored.
 Regenerate outputs from the integrated source before delivery.
+
+| Predecessor work | Reconciliation |
+|---|---|
+| Upload reservation, TTL, startup cleanup, Close/Finish serialization | Retained with deterministic tests. |
+| Transfer/staging ACKs, idempotency, truthful progress | Retained across service, CLI and Web; optional presentation progress is not an integrity gate. |
+| Immediate/wrapped/persisted peer pivots | Canonical bridge guard; harmless non-routing configuration remains usable. |
+| State-stream buzzer delivery | Both JSON-RPC and Socket.IO subscribe to state; current native timeline implementation is retained, not replaced by the older scheduler. |
+| Alpha credentials/discovery | Current disabled-alpha constructors and newer telemetry retained; dormant proof advertisements removed. |
+| Origin protection | Exact configured host/port identity; attacker-controlled Host does not grant browser authority. |
+| Web transports | Current stream RPC retained with strict reply correlation and stale-socket guards; uncertain retry keys also work without browser storage. |
+| Old generated artifacts | Regenerated from reconciled source; no stale bundles or metadata restored. |
+| Older macOS test failure | Short deterministic semaphore test identity fits Darwin limits; cross-platform CI verifies it. |
+
+Origin entries use `HOST:PORT` or `HOST:*`, without a URL scheme. Include each
+intended LAN hostname/address explicitly. Native clients that omit Origin
+still use the listener exposure policy; application login remains dormant.
 
 No live peer replacement, physical board operation or deployment is performed
 by these software tests. #110 still owns multi-instance candidate health,
