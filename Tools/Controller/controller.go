@@ -1046,7 +1046,7 @@ func (client *Client) BuildFirmware(
 	phase("started", nil)
 	defer func() {
 		if buildErr != nil {
-			buildErr = errors.New(control.NormalizeProgramOutput(buildErr.Error(), options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig))
+			buildErr = errors.New(control.NormalizeProgramError(buildErr.Error(), options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig))
 			phase("failed", buildErr)
 		} else {
 			phase("completed", nil)

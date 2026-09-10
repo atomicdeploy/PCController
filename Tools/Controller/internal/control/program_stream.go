@@ -235,7 +235,7 @@ func stripTerminalControls(value string) string {
 		}
 		current := value[index]
 		index++
-		if current == '\t' || current >= 0x20 {
+		if current == '\t' || (current >= 0x20 && current != 0x7f) {
 			result.WriteByte(current)
 		}
 	}
@@ -297,6 +297,16 @@ func NormalizeProgramOutput(output string, paths ...string) string {
 		result += programOutputTruncated
 	}
 	return result
+}
+
+// NormalizeProgramError is small enough for terminal event metadata as well
+// as the RPC error message. Detailed bounded diagnostics stay in output.
+func NormalizeProgramError(message string, paths ...string) string {
+	message = NormalizeProgramOutput(message, paths...)
+	if len(message) > maximumProgramLineBytes {
+		message = message[:maximumProgramLineBytes] + " [error truncated]"
+	}
+	return message
 }
 
 func publishProgramPhase(
