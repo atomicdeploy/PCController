@@ -1935,8 +1935,14 @@ func bridgeCommandCanPivot(command string) bool {
 	if words[0] == "peer-update" {
 		return true
 	}
-	if words[0] == "config" && len(words) >= 2 && words[1] == "set" {
-		return true
+	if words[0] == "config" && len(words) >= 3 && words[1] == "set" {
+		root := strings.FieldsFunc(words[2], func(character rune) bool { return character == '.' || character == '[' })
+		if len(root) != 0 {
+			switch root[0] {
+			case "integrations", "host_menu", "host_menus", "hotkeys", "automations":
+				return true
+			}
+		}
 	}
 	return words[0] == "bridge" && (len(words) < 2 || words[1] != "list")
 }

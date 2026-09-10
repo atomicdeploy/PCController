@@ -327,6 +327,19 @@ func TestPeerHostUpdateIdempotencyKeyIsRetryStable(t *testing.T) {
 	}
 }
 
+func TestBridgeConfigurationGuardPreservesNonRoutingSettings(t *testing.T) {
+	for _, command := range []string{"config get integrations", "config set ui.app_title Display", "config set ui.appearance.theme dark", "bridge list"} {
+		if bridgeCommandCanPivot(command) {
+			t.Fatalf("non-routing command unnecessarily blocked: %s", command)
+		}
+	}
+	for _, command := range []string{"config set integrations.websocket_clients[0].enabled true", "config set host_menu.entries []", "\"config\" set integrations {}"} {
+		if !bridgeCommandCanPivot(command) {
+			t.Fatalf("persisted pivot admitted: %s", command)
+		}
+	}
+}
+
 func TestPeerUploadFinishRequiresExactDescriptorAndOperationIdentity(t *testing.T) {
 	descriptor := artifacts.Descriptor{
 		Kind: artifacts.KindHostExecutable, SHA256: strings.Repeat("a", 64),
