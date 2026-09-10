@@ -12,12 +12,16 @@ import (
 )
 
 type AppAction struct {
-	Kind     string            `json:"kind"`
-	Value    string            `json:"value,omitempty"`
-	Source   string            `json:"source,omitempty"`
-	Target   string            `json:"target,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-	At       time.Time         `json:"at"`
+	Kind   string `json:"kind"`
+	Value  string `json:"value,omitempty"`
+	Source string `json:"source,omitempty"`
+	Target string `json:"target,omitempty"`
+	// OperationID correlates an exact-target delivery with its coordinator
+	// outcome. Navigation synchronization keeps its independent coordinator
+	// operation metadata and must not manufacture this field.
+	OperationID string            `json:"operation_id,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	At          time.Time         `json:"at"`
 }
 
 type ActionBroker struct {
@@ -56,53 +60,10 @@ func (broker *ActionBroker) SetObserver(observer func(AppAction)) {
 }
 
 func (broker *ActionBroker) Publish(action AppAction) error {
-	action.Kind = strings.ToLower(strings.TrimSpace(action.Kind))
-	action.Value = strings.TrimSpace(action.Value)
-	action.Target = strings.TrimSpace(action.Target)
-	if action.Target != "" && action.Target != "*" && !instanceIDPattern.MatchString(action.Target) {
-		return errors.New("app action target must be *, or a valid instance id or surface")
-	}
-	if action.At.IsZero() {
-		action.At = time.Now()
-	}
-	metadata, err := normalizeAppActionMetadata(action.Metadata)
+	var err error
+	action, err = NormalizeAppAction(action)
 	if err != nil {
 		return err
-	}
-	action.Metadata = metadata
-	switch action.Kind {
-	case "app.page":
-		if action.Value == "" {
-			return errors.New("app.page requires a page name")
-		}
-	case "app.title":
-		if !strings.EqualFold(action.Value, "auto") {
-			var err error
-			action.Value, err = ValidateTerminalTitle(action.Value)
-			if err != nil {
-				return err
-			}
-		}
-	case "app.osc":
-		var err error
-		action.Value, err = ValidateOSCPayload(action.Value)
-		if err != nil {
-			return err
-		}
-	case "app.progress":
-		if _, err := ParseTerminalProgress(action.Value); err != nil {
-			return err
-		}
-	case "app.quit", "app.port.open", "app.port.close":
-		if action.Value != "" {
-			return fmt.Errorf("%s does not accept a value", action.Kind)
-		}
-	case "command":
-		if action.Value == "" {
-			return errors.New("command action requires a command")
-		}
-	default:
-		return fmt.Errorf("unsupported app action %q", action.Kind)
 	}
 	broker.mu.RLock()
 	observer := broker.watch
@@ -126,6 +87,66 @@ func (broker *ActionBroker) Publish(action AppAction) error {
 		}
 		return errors.New("app action queue is full")
 	}
+}
+
+// NormalizeAppAction validates one living, versionless application action and
+// returns the exact normalized value which will be delivered. Coordinators use
+// this before freezing a target set so an invalid command cannot create a
+// partially published operation.
+func NormalizeAppAction(action AppAction) (AppAction, error) {
+	action.Kind = strings.ToLower(strings.TrimSpace(action.Kind))
+	action.Value = strings.TrimSpace(action.Value)
+	action.Target = strings.TrimSpace(action.Target)
+	action.OperationID = strings.TrimSpace(action.OperationID)
+	if action.Target != "" && action.Target != "*" && !instanceIDPattern.MatchString(action.Target) {
+		return AppAction{}, errors.New("app action target must be *, or a valid instance id or surface")
+	}
+	if action.OperationID != "" && !instanceIDPattern.MatchString(action.OperationID) {
+		return AppAction{}, errors.New("app action operation_id is invalid")
+	}
+	if action.At.IsZero() {
+		action.At = time.Now()
+	}
+	metadata, err := normalizeAppActionMetadata(action.Metadata)
+	if err != nil {
+		return AppAction{}, err
+	}
+	action.Metadata = metadata
+	switch action.Kind {
+	case "app.page":
+		if action.Value == "" {
+			return AppAction{}, errors.New("app.page requires a page name")
+		}
+	case "app.title":
+		if !strings.EqualFold(action.Value, "auto") {
+			var err error
+			action.Value, err = ValidateTerminalTitle(action.Value)
+			if err != nil {
+				return AppAction{}, err
+			}
+		}
+	case "app.osc":
+		var err error
+		action.Value, err = ValidateOSCPayload(action.Value)
+		if err != nil {
+			return AppAction{}, err
+		}
+	case "app.progress":
+		if _, err := ParseTerminalProgress(action.Value); err != nil {
+			return AppAction{}, err
+		}
+	case "app.quit", "app.port.open", "app.port.close":
+		if action.Value != "" {
+			return AppAction{}, fmt.Errorf("%s does not accept a value", action.Kind)
+		}
+	case "command":
+		if action.Value == "" {
+			return AppAction{}, errors.New("command action requires a command")
+		}
+	default:
+		return AppAction{}, fmt.Errorf("unsupported app action %q", action.Kind)
+	}
+	return action, nil
 }
 
 func normalizeAppActionMetadata(values map[string]string) (map[string]string, error) {

@@ -102,6 +102,58 @@ test("derives public API titles and schema ID from product metadata", () => {
   assert.equal(JSON.stringify(asyncapi).includes("access_token"), false);
 });
 
+test("generates typed app action requests and per-target outcomes", () => {
+	const openapi = JSON.parse(readFileSync(join(outputDirectory, "openapi.json"), "utf8"));
+	const rpcSchema = JSON.parse(readFileSync(join(outputDirectory, "jsonrpc.schema.json"), "utf8"));
+
+	assert.equal(openapi.components.schemas.AppActionRequest.properties.operation_id.pattern, "^[A-Za-z0-9._:-]{1,180}$");
+	assert.equal(openapi.components.schemas.AppActionRequest.properties.timeout_ms.maximum, 30000);
+	assert.equal(openapi.components.schemas.AppAction.properties.metadata.properties.operation_delivery_id.pattern, "^[A-Za-z0-9._:-]{1,180}$");
+	assert.equal(openapi.components.schemas.AppAction.properties.metadata.properties.operation_expires_at.format, "date-time");
+	assert.equal(openapi.components.schemas.ActionAck.required.includes("delivery_id"), true);
+	assert.equal(openapi.components.schemas.ActionAck.properties.delivery_id.pattern, "^[A-Za-z0-9._:-]{1,180}$");
+	assert.equal(openapi.components.schemas.ActionAck.properties.state.enum.includes("timeout"), false);
+	assert.equal(openapi.components.schemas.ActionTargetOutcome.properties.state.enum.includes("timeout"), true);
+	assert.equal(openapi.components.schemas.ActionOperation.properties.state.enum.includes("partial"), true);
+	assert.equal(
+		openapi.paths["/api/app/action"].post.requestBody.content["application/json"].schema.$ref,
+		"#/components/schemas/AppActionRequest",
+	);
+	assert.equal(
+		openapi.paths["/api/app/action"].post.responses["202"].content["application/json"].schema.$ref,
+		"#/components/schemas/AppActionSubmitEnvelope",
+	);
+	assert.deepEqual(openapi.components.schemas.AppActionSubmitEnvelope.required, ["accepted"]);
+	assert.equal(openapi.components.schemas.AppActionSubmitEnvelope.properties.operation.$ref, "#/components/schemas/ActionOperation");
+	assert.equal(openapi.components.schemas.ActionOperationEnvelope.required.includes("operation"), true);
+	assert.equal(
+		openapi.paths["/api/app/action/ack"].post.requestBody.content["application/json"].schema.$ref,
+		"#/components/schemas/ActionAck",
+	);
+	assert.equal(
+		openapi.paths["/api/app/action/ack"].post.responses["200"].content["application/json"].schema.$ref,
+		"#/components/schemas/ActionOperationEnvelope",
+	);
+	assert.deepEqual(openapi.paths["/api/app/action/outcome"].get.parameters.map(({ name, required }) => ({ name, required })), [
+		{ name: "operation_id", required: true },
+	]);
+	assert.equal(
+		openapi.paths["/api/app/action/outcome"].get.responses["200"].content["application/json"].schema.$ref,
+		"#/components/schemas/ActionOperationEnvelope",
+	);
+	assert.equal(rpcSchema.$defs.AppActionRequest.properties.timeout_ms.maximum, 30000);
+	assert.equal(rpcSchema.$defs.ActionAck.required.includes("delivery_id"), true);
+	assert.equal(rpcSchema.$defs.ActionOutcomeRequest.required.includes("operation_id"), true);
+	const actionRequestRule = rpcSchema.$defs.request.allOf.find((rule) =>
+		rule.if?.properties?.method?.const === "controller.app.action");
+	assert.equal(actionRequestRule.then.properties.params.$ref, "#/$defs/AppActionRequest");
+	assert.equal(actionRequestRule.then.required.includes("params"), true);
+	assert.equal(rpcSchema["x-methods"]["controller.app.action"].params_schema.$ref, "#/$defs/AppActionRequest");
+	assert.equal(rpcSchema["x-methods"]["controller.app.action"].result_schema.$ref, "#/$defs/AppActionSubmitEnvelope");
+	assert.equal(rpcSchema["x-methods"]["controller.app.action.ack"].params_schema.$ref, "#/$defs/ActionAck");
+	assert.equal(rpcSchema["x-methods"]["controller.app.action.outcome"].result_schema.$ref, "#/$defs/ActionOperationEnvelope");
+});
+
 test("--check is read-only and stable across repeated runs", () => {
   const run = () => spawnSync(process.execPath, [script, "--check"], {
     cwd: root,

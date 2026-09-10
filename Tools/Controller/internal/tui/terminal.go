@@ -23,8 +23,25 @@ type updatePresentation struct {
 
 type terminalOSCResultMsg struct {
 	kind string
+	ack  *hostui.ActionAck
 	err  error
 }
+
+type appActionAckResultMsg struct {
+	ack     hostui.ActionAck
+	attempt int
+	err     error
+}
+
+type appActionAckRetryMsg struct {
+	ack     hostui.ActionAck
+	attempt int
+}
+
+const (
+	maximumAppActionAckAttempts = 3
+	appActionAckRetryDelay      = 100 * time.Millisecond
+)
 
 func (model Model) terminalTitle() string {
 	if model.terminalTitleOverride != "" {
@@ -71,13 +88,44 @@ func (model *Model) acceptNavigationAction(action hostui.AppAction) (string, boo
 	return model.navigationCursor.AcceptFor(action, model.navigationGroup, epoch, revision)
 }
 
-func terminalOSCCommand(write func(string) error, payload, kind string) tea.Cmd {
+func terminalOSCCommand(
+	write func(string) error,
+	payload, kind string,
+	ack *hostui.ActionAck,
+) tea.Cmd {
 	return func() tea.Msg {
 		if write == nil {
-			return terminalOSCResultMsg{kind: kind, err: fmt.Errorf("terminal OSC output is unavailable")}
+			return terminalOSCResultMsg{kind: kind, ack: ack, err: fmt.Errorf("terminal OSC output is unavailable")}
 		}
-		return terminalOSCResultMsg{kind: kind, err: write(payload)}
+		return terminalOSCResultMsg{kind: kind, ack: ack, err: write(payload)}
 	}
+}
+
+func acknowledgeAppAction(
+	acknowledge func(hostui.ActionAck) error,
+	ack hostui.ActionAck,
+	attempts ...int,
+) tea.Cmd {
+	attempt := 1
+	if len(attempts) > 0 && attempts[0] > 1 {
+		attempt = attempts[0]
+	}
+	return func() tea.Msg {
+		if acknowledge == nil {
+			return appActionAckResultMsg{
+				ack: ack, attempt: attempt,
+				err: fmt.Errorf("app action acknowledgement is unavailable"),
+			}
+		}
+		return appActionAckResultMsg{ack: ack, attempt: attempt, err: acknowledge(ack)}
+	}
+}
+
+func retryAppActionAcknowledgement(ack hostui.ActionAck, attempt int) tea.Cmd {
+	delay := time.Duration(attempt-1) * appActionAckRetryDelay
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return appActionAckRetryMsg{ack: ack, attempt: attempt}
+	})
 }
 
 func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
@@ -121,7 +169,7 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	if payloadErr != nil {
 		return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
 	}
-	return terminalOSCCommand(model.writeOSC, payload, "update progress")
+	return terminalOSCCommand(model.writeOSC, payload, "update progress", nil)
 }
 
 func (model Model) updateProgressLines() []string {
