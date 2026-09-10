@@ -84,6 +84,8 @@ device identity or interface settings.
 - [Virtual Board](../Tools/VirtualBoard/README.md) — hardware-free native
   simulator setup and protocol testing.
 - [Requirements Backlog](Requirements-Backlog.md) — issue-linked open work.
+- [September Delivery Checkpoint](September-Delivery-Checkpoint.md) — reconciled
+  pull requests, verification evidence, and outstanding live-delivery gates.
 - [Project Acceptance](Project-Checklist.md) — current software gates and
   hardware work that remains deliberately unclaimed.
 - [Alpha Delivery Ledger](Alpha-Delivery-Ledger.md) — time-scoped requirements,
