@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -17,6 +18,7 @@ const (
 	ownerHelperVersion    = 1
 	maxOwnerHelperOutput  = 16 * 1024
 	maxOwnerHelperError   = 2 * 1024
+	ownerHelperLifetime   = 2 * time.Second
 )
 
 type ownerHelperResult struct {
@@ -58,7 +60,7 @@ func runHelperInvocationWith(
 	if stdout == nil || scan == nil {
 		return errors.New("internal serial-owner helper is not initialized")
 	}
-	owner, found, scanErr := scan(ctx, port)
+	owner, found, scanErr := boundedHelperLookup(ctx, port, scan)
 	result := ownerHelperResult{Version: ownerHelperVersion, Port: port, Found: found}
 	if found && scanErr == nil {
 		owner = boundedOwner(owner)
@@ -77,6 +79,38 @@ func runHelperInvocationWith(
 	}
 	_, err := stdout.Write(encoded.Bytes())
 	return err
+}
+
+// This worker exists only in the disposable helper invocation, never in the
+// long-running host's native scan path. Context checks cannot interrupt a
+// driver-blocked NtQueryObject call. Returning to helper main on this local
+// deadline terminates the entire helper process and releases its duplicated
+// handles, even when its parent has already exited and cannot kill it.
+func boundedHelperLookup(ctx context.Context, port string, scan ownerLookupFunc) (Owner, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, ownerHelperLifetime)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return Owner{}, false, err
+	}
+	type lookupResult struct {
+		owner Owner
+		found bool
+		err   error
+	}
+	result := make(chan lookupResult, 1)
+	go func() {
+		owner, found, err := scan(ctx, port)
+		result <- lookupResult{owner: owner, found: found, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return Owner{}, false, ctx.Err()
+	case value := <-result:
+		if err := ctx.Err(); err != nil {
+			return Owner{}, false, err
+		}
+		return value.owner, value.found, value.err
+	}
 }
 
 func decodeOwnerHelperResult(port string, encoded []byte) (Owner, bool, error) {
