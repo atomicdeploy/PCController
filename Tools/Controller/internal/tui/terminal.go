@@ -23,8 +23,25 @@ type updatePresentation struct {
 
 type terminalOSCResultMsg struct {
 	kind string
+	ack  *hostui.ActionAck
 	err  error
 }
+
+type appActionAckResultMsg struct {
+	ack     hostui.ActionAck
+	attempt int
+	err     error
+}
+
+type appActionAckRetryMsg struct {
+	ack     hostui.ActionAck
+	attempt int
+}
+
+const (
+	maximumAppActionAckAttempts = 3
+	appActionAckRetryDelay      = 100 * time.Millisecond
+)
 
 func (model Model) terminalTitle() string {
 	if model.terminalTitleOverride != "" {
@@ -34,7 +51,7 @@ func (model Model) terminalTitle() string {
 	if base == "" {
 		base = "PCController"
 	}
-	if model.update.State != "" && model.update.State != "completed" {
+	if model.update.State != "" && model.update.State != "completed" && model.update.State != "idle" {
 		if model.update.State == "failed" || model.update.State == "cancelled" {
 			return fmt.Sprintf("%s — Update %s — %s", base, strings.ToUpper(model.update.State), pageDefinitions[model.page].Short)
 		}
@@ -71,13 +88,44 @@ func (model *Model) acceptNavigationAction(action hostui.AppAction) (string, boo
 	return model.navigationCursor.AcceptFor(action, model.navigationGroup, epoch, revision)
 }
 
-func terminalOSCCommand(write func(string) error, payload, kind string) tea.Cmd {
+func terminalOSCCommand(
+	write func(string) error,
+	payload, kind string,
+	ack *hostui.ActionAck,
+) tea.Cmd {
 	return func() tea.Msg {
 		if write == nil {
-			return terminalOSCResultMsg{kind: kind, err: fmt.Errorf("terminal OSC output is unavailable")}
+			return terminalOSCResultMsg{kind: kind, ack: ack, err: fmt.Errorf("terminal OSC output is unavailable")}
 		}
-		return terminalOSCResultMsg{kind: kind, err: write(payload)}
+		return terminalOSCResultMsg{kind: kind, ack: ack, err: write(payload)}
 	}
+}
+
+func acknowledgeAppAction(
+	acknowledge func(hostui.ActionAck) error,
+	ack hostui.ActionAck,
+	attempts ...int,
+) tea.Cmd {
+	attempt := 1
+	if len(attempts) > 0 && attempts[0] > 1 {
+		attempt = attempts[0]
+	}
+	return func() tea.Msg {
+		if acknowledge == nil {
+			return appActionAckResultMsg{
+				ack: ack, attempt: attempt,
+				err: fmt.Errorf("app action acknowledgement is unavailable"),
+			}
+		}
+		return appActionAckResultMsg{ack: ack, attempt: attempt, err: acknowledge(ack)}
+	}
+}
+
+func retryAppActionAcknowledgement(ack hostui.ActionAck, attempt int) tea.Cmd {
+	delay := time.Duration(attempt-1) * appActionAckRetryDelay
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return appActionAckRetryMsg{ack: ack, attempt: attempt}
+	})
 }
 
 func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
@@ -96,6 +144,15 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	state := strings.TrimSpace(event.Metadata["state"])
 	if state == "" {
 		state = strings.TrimPrefix(strings.ToLower(event.Kind), "update.")
+	}
+	if strings.EqualFold(state, "idle") {
+		model.update = updatePresentation{}
+		model.terminalTitleDirty = true
+		payload, payloadErr := (hostui.TerminalProgress{State: 0, Percent: 0}).OSCPayload()
+		if payloadErr != nil {
+			return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
+		}
+		return terminalOSCCommand(model.writeOSC, payload, "update progress", nil)
 	}
 	model.update = updatePresentation{
 		OperationID: event.Metadata["operation_id"], Kind: event.Metadata["kind"],
@@ -121,18 +178,16 @@ func (model *Model) observeUpdateEvent(event control.Event) tea.Cmd {
 	if payloadErr != nil {
 		return func() tea.Msg { return terminalOSCResultMsg{kind: "update progress", err: payloadErr} }
 	}
-	return terminalOSCCommand(model.writeOSC, payload, "update progress")
+	return terminalOSCCommand(model.writeOSC, payload, "update progress", nil)
 }
 
 func (model Model) updateProgressLines() []string {
-	if model.update.State == "" {
-		return []string{
-			kv("Update state", "idle"),
-			kv("Update progress", strings.Repeat("─", 36)+"   0%"),
-		}
+	if model.update.State == "" || strings.EqualFold(model.update.State, "idle") {
+		return nil
 	}
 	width := 36
-	filled := model.update.Progress * width / 100
+	progress := max(0, min(100, model.update.Progress))
+	filled := progress * width / 100
 	bar := strings.Repeat("━", filled) + strings.Repeat("─", width-filled)
 	identity := strings.TrimSpace(model.update.Kind)
 	if model.update.OperationID != "" {
@@ -141,7 +196,10 @@ func (model Model) updateProgressLines() []string {
 	lines := []string{
 		kv("Update operation", strings.Trim(identity, " ·")),
 		kv("Update state", strings.ToUpper(model.update.State)),
-		kv("Update progress", fmt.Sprintf("%s %3d%%", bar, model.update.Progress)),
+	}
+	switch strings.ToLower(model.update.State) {
+	case "queued", "downloading", "reading", "backing-up", "programming", "staging", "verifying":
+		lines = append(lines, kv("Update progress", fmt.Sprintf("%s %3d%%", bar, progress)))
 	}
 	if model.update.Detail != "" {
 		lines = append(lines, kv("Update detail", model.update.Detail))

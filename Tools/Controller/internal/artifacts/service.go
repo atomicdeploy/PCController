@@ -36,22 +36,28 @@ type Options struct {
 // Service coordinates content-addressed artifacts and serialized update
 // operations without opening hardware outside its injected Executor.
 type Service struct {
-	store         *Store
-	downloader    *Downloader
-	executor      Executor
-	events        EventSink
-	board         func() BoardIdentity
-	remote        func() bool
-	ctx           context.Context
-	cancel        context.CancelFunc
-	mu            sync.RWMutex
-	operations    map[string]UpdateStatus
-	order         []string
-	defaults      map[Kind]string
-	idempotency   map[string]idempotencyRecord
-	operationMeta map[string]operationJournal
-	transaction   chan struct{}
-	peerUploads   map[string]*peerUpload
+	store                  *Store
+	downloader             *Downloader
+	executor               Executor
+	events                 EventSink
+	board                  func() BoardIdentity
+	remote                 func() bool
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	mu                     sync.RWMutex
+	operations             map[string]UpdateStatus
+	order                  []string
+	defaults               map[Kind]string
+	idempotency            map[string]idempotencyRecord
+	operationMeta          map[string]operationJournal
+	transaction            chan struct{}
+	peerUploads            map[string]*peerUpload
+	peerUploadWait         sync.WaitGroup
+	peerUploadOps          sync.WaitGroup
+	peerUploadsClosed      bool
+	peerUploadPending      int
+	peerUploadPendingBytes int64
+	peerUploadCreateTemp   func(string, string) (*os.File, error)
 }
 
 // NewService validates its dependencies and restores durable operation state.
@@ -67,6 +73,7 @@ func NewService(options Options) (*Service, error) {
 		operations: make(map[string]UpdateStatus), defaults: make(map[Kind]string),
 		idempotency: make(map[string]idempotencyRecord), operationMeta: make(map[string]operationJournal),
 		transaction: make(chan struct{}, 1), peerUploads: make(map[string]*peerUpload),
+		peerUploadCreateTemp: os.CreateTemp,
 	}
 	service.transaction <- struct{}{}
 	if service.downloader == nil {
@@ -76,12 +83,23 @@ func NewService(options Options) (*Service, error) {
 		cancel()
 		return nil, fmt.Errorf("load artifact operation journal: %w", err)
 	}
+	if err := service.removeOrphanedPeerUploads(); err != nil {
+		cancel()
+		return nil, fmt.Errorf("remove orphaned peer artifact uploads: %w", err)
+	}
+	service.peerUploadWait.Add(1)
+	go service.peerUploadCleanupLoop()
 	return service, nil
 }
 
 // Close cancels in-flight background operations owned by the service.
 func (service *Service) Close() {
+	service.mu.Lock()
+	service.peerUploadsClosed = true
+	service.mu.Unlock()
 	service.cancel()
+	service.peerUploadWait.Wait()
+	service.peerUploadOps.Wait()
 	service.mu.Lock()
 	for id, upload := range service.peerUploads {
 		_ = upload.file.Close()

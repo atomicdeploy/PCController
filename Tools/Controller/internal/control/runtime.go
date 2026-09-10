@@ -48,6 +48,7 @@ type Snapshot struct {
 	StatusLEDUpdated  time.Time
 	ProgramState      ProgramStateSnapshot
 	RFLearning        RFLearnState
+	Macros            MacroSnapshot
 	PortProcess       PortProcessSnapshot `json:"port_process"`
 }
 

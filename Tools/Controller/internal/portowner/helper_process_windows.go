@@ -175,6 +175,10 @@ func runOwnerHelperCommand(
 	ctx context.Context,
 	executable, port string,
 ) ([]byte, []byte, error) {
+	// Bound direct callers too; the child has its own independent deadline so
+	// this parent process is not the sole owner of helper cleanup.
+	ctx, cancel := context.WithTimeout(ctx, ownerHelperLifetime)
+	defer cancel()
 	command := exec.CommandContext(ctx, executable, ownerHelperArgument, port)
 	command.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,

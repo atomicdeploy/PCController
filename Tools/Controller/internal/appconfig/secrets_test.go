@@ -42,7 +42,7 @@ func secretReferenceConfig() Config {
 	value := Defaults()
 	value.IPC.AllowRemote = true
 	value.IPC.Listen = "0.0.0.0:8787"
-	value.IPC.AllowedOrigins = []string{"https://controller.example"}
+	value.IPC.AllowedOrigins = []string{"controller.example:443"}
 	value.IPC.AuthTokenRef = "os:ipc.remote"
 	value.Integrations.OutboundWebhooks = []Webhook{{
 		Name: "events", Enabled: true, URL: "https://events.example/hook", Method: "POST",

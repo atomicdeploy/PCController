@@ -762,7 +762,7 @@ func (value Config) Validate() error {
 				if step.Target != 0 || step.Value != 0 {
 					return fmt.Errorf("macros[%d].steps[%d] all-off target/value must be zero", index, stepIndex)
 				}
-			case "buzzer", "tone":
+			case "beep", "buzzer", "tone":
 				frequency := step.FrequencyHz
 				if frequency == 0 {
 					frequency = step.Value

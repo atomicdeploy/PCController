@@ -8,6 +8,7 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -350,28 +351,29 @@ type IlluminationState struct {
 
 // Snapshot is a point-in-time view of connection, board, and front-panel state.
 type Snapshot struct {
-	Connected         bool                 `json:"connected"`
-	Paused            bool                 `json:"paused"`
-	Port              PortInfo             `json:"port"`
-	Hello             Hello                `json:"hello"`
-	Status            Status               `json:"status"`
-	Settings          Settings             `json:"settings"`
-	HaveStatus        bool                 `json:"have_status"`
-	HaveSettings      bool                 `json:"have_settings"`
-	StatusUpdated     time.Time            `json:"status_updated,omitempty"`
-	ConnectionState   string               `json:"connection_state"`
-	ConnectionReason  string               `json:"connection_reason,omitempty"`
-	ConnectionUpdated time.Time            `json:"connection_updated,omitempty"`
-	ProgramState      ProgramStateSnapshot `json:"program_state"`
-	RFLearning        RFLearnState         `json:"rf_learning"`
-	FrontPanel        FrontPanel           `json:"front_panel"`
-	HaveFrontPanel    bool                 `json:"have_front_panel"`
-	FrontPanelUpdated time.Time            `json:"front_panel_updated,omitempty"`
-	StatusLED         StatusLEDState       `json:"status_led"`
-	HaveStatusLED     bool                 `json:"have_status_led"`
-	StatusLEDUpdated  time.Time            `json:"status_led_updated,omitempty"`
-	Illumination      IlluminationState    `json:"illumination"`
-	PortProcess       PortProcessSnapshot  `json:"port_process"`
+	Connected         bool                  `json:"connected"`
+	Paused            bool                  `json:"paused"`
+	Port              PortInfo              `json:"port"`
+	Hello             Hello                 `json:"hello"`
+	Status            Status                `json:"status"`
+	Settings          Settings              `json:"settings"`
+	HaveStatus        bool                  `json:"have_status"`
+	HaveSettings      bool                  `json:"have_settings"`
+	StatusUpdated     time.Time             `json:"status_updated,omitempty"`
+	ConnectionState   string                `json:"connection_state"`
+	ConnectionReason  string                `json:"connection_reason,omitempty"`
+	ConnectionUpdated time.Time             `json:"connection_updated,omitempty"`
+	ProgramState      ProgramStateSnapshot  `json:"program_state"`
+	RFLearning        RFLearnState          `json:"rf_learning"`
+	Macros            control.MacroSnapshot `json:"macros"`
+	FrontPanel        FrontPanel            `json:"front_panel"`
+	HaveFrontPanel    bool                  `json:"have_front_panel"`
+	FrontPanelUpdated time.Time             `json:"front_panel_updated,omitempty"`
+	StatusLED         StatusLEDState        `json:"status_led"`
+	HaveStatusLED     bool                  `json:"have_status_led"`
+	StatusLEDUpdated  time.Time             `json:"status_led_updated,omitempty"`
+	Illumination      IlluminationState     `json:"illumination"`
+	PortProcess       PortProcessSnapshot   `json:"port_process"`
 }
 
 // Event is the normalized event envelope shared by embedders and bridge clients.
@@ -404,6 +406,21 @@ type Event struct {
 	RFPulseUS   uint16            `json:"rf_pulse_us,omitempty"`
 	ResetCause  byte              `json:"reset_cause,omitempty"`
 	ResetCount  uint32            `json:"reset_count,omitempty"`
+}
+
+// FirmwareBuildRequest is the strict, typed alternative to sending a raw
+// shell command to a remote host. An empty request uses the host's configured
+// firmware feature profile.
+type FirmwareBuildRequest struct {
+	FirmwareFeatures   []string `json:"firmware_features,omitempty"`
+	NoFirmwareFeatures bool     `json:"no_firmware_features,omitempty"`
+}
+
+// FirmwareBuildResult correlates the final normalized log with the ordered
+// program.* events that WebSocket, Socket.IO, TUI, and long-poll clients see.
+type FirmwareBuildResult struct {
+	OperationID string `json:"operation_id"`
+	Output      string `json:"output"`
 }
 
 // OpcodeFrame is the raw, versionless UART exchange result. Payload is kept
@@ -1001,6 +1018,64 @@ func (client *Client) Execute(ctx context.Context, command string) (string, erro
 	client.engineMu.Lock()
 	defer client.engineMu.Unlock()
 	return client.engine.Execute(ctx, command)
+}
+
+// BuildFirmware compiles the configured canonical project without accepting
+// an arbitrary remote filesystem path or raw compiler flags.
+func (client *Client) BuildFirmware(
+	ctx context.Context,
+	request FirmwareBuildRequest,
+) (result FirmwareBuildResult, buildErr error) {
+	operationBytes := make([]byte, 12)
+	if _, err := rand.Read(operationBytes); err != nil {
+		return result, fmt.Errorf("create firmware build operation ID: %w", err)
+	}
+	operationID := "firmware-build-" + hex.EncodeToString(operationBytes)
+	result.OperationID = operationID
+	options := client.currentCommandOptions()
+	phase := func(state string, failure error) {
+		if client.runtime == nil {
+			return
+		}
+		metadata := map[string]string{"operation_id": operationID, "operation": "compile", "method": "compile", "state": state}
+		if failure != nil {
+			metadata["error"] = failure.Error()
+		}
+		client.runtime.PublishStructuredEvent(control.Event{Kind: "program." + state, Stream: control.EventStreamActivity,
+			Text: "firmware compile " + state, Metadata: metadata})
+	}
+	phase("started", nil)
+	defer func() {
+		if buildErr != nil {
+			buildErr = errors.New(control.NormalizeProgramError(buildErr.Error(), options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig))
+			phase("failed", buildErr)
+		} else {
+			phase("completed", nil)
+		}
+	}()
+	if len(request.FirmwareFeatures) != 0 && request.NoFirmwareFeatures {
+		return result, errors.New(
+			"firmware_features and no_firmware_features are mutually exclusive",
+		)
+	}
+	features, err := programmer.NormalizeFirmwareFeatures(request.FirmwareFeatures)
+	if err != nil {
+		return result, err
+	}
+	words := []string{"program", "compile", "."}
+	if request.NoFirmwareFeatures {
+		words = append(words, "--no-firmware-features")
+	} else {
+		for _, feature := range programmer.FirmwareFeatureNames(features) {
+			words = append(words, "--firmware-feature", feature)
+		}
+	}
+	output, buildErr := client.Execute(
+		control.WithProgramOperationID(ctx, operationID),
+		strings.Join(words, " "),
+	)
+	result.Output = control.NormalizeProgramOutput(output, options.ProjectPath, options.ArduinoCLI, options.ArduinoConfig)
+	return result, buildErr
 }
 
 // CommandCatalog exposes the same discoverable command contract used by the
@@ -1848,6 +1923,11 @@ func (client *Client) MapLearnedRF(
 // Snapshot returns the latest cached connection and board state without polling.
 func (client *Client) Snapshot() Snapshot {
 	snapshot := client.runtime.Snapshot()
+	// Library snapshots belong to client queries, not the hot board-status
+	// path: copying a long take for every internal status check is unnecessary.
+	if runner := client.runtime.MacroRunner(); runner != nil {
+		snapshot.Macros = runner.Snapshot()
+	}
 	client.illuminationMu.RLock()
 	illumination := client.illumination
 	client.illuminationMu.RUnlock()
@@ -1878,6 +1958,7 @@ func (client *Client) Snapshot() Snapshot {
 		ConnectionUpdated: snapshot.ConnectionUpdated,
 		ProgramState:      snapshot.ProgramState,
 		RFLearning:        snapshot.RFLearning,
+		Macros:            snapshot.Macros,
 		FrontPanel:        snapshot.FrontPanel,
 		HaveFrontPanel:    snapshot.HaveFrontPanel,
 		FrontPanelUpdated: snapshot.FrontPanelUpdated,
