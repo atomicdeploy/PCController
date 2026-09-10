@@ -35,6 +35,8 @@ function parseArguments(argv) {
 		module: DEFAULT_MODULE,
 		output: DEFAULT_OUTPUT,
 		go: 'go',
+		packages: [],
+		run: '',
 		retest: false,
 		dryRun: false,
 		help: false
@@ -50,6 +52,8 @@ function parseArguments(argv) {
 			case '--module': options.module = resolve(take(argument)); break
 			case '--output': options.output = resolve(take(argument)); break
 			case '--go': options.go = take(argument); break
+			case '--package': options.packages.push(take(argument)); break
+			case '--run': options.run = take(argument); break
 			case '--retest': options.retest = true; break
 			case '--dry-run': options.dryRun = true; break
 			case '--help':
@@ -68,6 +72,8 @@ Usage: node Tools/Build/go-tests.mjs [options]
   --module DIR   Go module root (default: Tools/Controller)
   --output DIR   Stable test executable/cache directory
   --go PATH      Go executable override
+  --package NAME Only test this import path or module-relative package (repeatable)
+  --run REGEXP   Only run tests matching this Go test expression
   --retest       Re-run unchanged binaries without rebuilding them
   --dry-run      Show the stable plan without compiling or running tests`
 }
@@ -226,6 +232,23 @@ export function createStableTestPlan(packages, output, platform = process.platfo
 	}))
 }
 
+export function selectTestPackages(packages, requested) {
+	if (requested.length === 0) return packages
+	const selected = new Set()
+	for (const name of requested) {
+		const normalized = name.replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/$/, '')
+		const matches = packages.filter(value => value.importPath === normalized || value.importPath.endsWith(`/${normalized}`))
+		if (matches.length !== 1) throw new Error(`--package ${name} matched ${matches.length} test packages; use an exact import path`)
+		selected.add(matches[0])
+	}
+	return packages.filter(value => selected.has(value))
+}
+
+export function selectedTestCacheName(packages, run) {
+	return packages.length === 0 && !run ? 'passed.json'
+		: `passed-selected-${sha256(JSON.stringify([packages.slice().sort(), run])).slice(0, 16)}.json`
+}
+
 export function main(argv = process.argv.slice(2), env = process.env) {
 	const options = parseArguments(argv)
 	if (options.help) {
@@ -237,9 +260,9 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 	}
 	const goVersion = run(options.go, ['version'], { cwd: options.module, env, capture: true })
 	const identity = goTestSourceIdentity(options.module, goVersion, env)
-	const packages = listTestPackages(options.go, options.module, env)
+	const packages = selectTestPackages(listTestPackages(options.go, options.module, env), options.packages)
 	const plan = createStableTestPlan(packages, options.output)
-	const cachePath = join(options.output, 'passed.json')
+	const cachePath = join(options.output, selectedTestCacheName(options.packages, options.run))
 	const cache = loadCache(cachePath)
 	const binariesExist = plan.every(item => existsSync(item.binary))
 	const current = cache?.sourceSHA256 === identity.sha256 && binariesExist
@@ -272,7 +295,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
 		}
 		for (const item of plan) {
 			process.stdout.write(`🧪 ${item.importPath}\n`)
-			run(item.binary, ['-test.count=1'], { cwd: item.directory, env })
+			run(item.binary, ['-test.count=1', ...(options.run ? ['-test.run', options.run] : [])], { cwd: item.directory, env })
 		}
 		writeJSON(cachePath, {
 			format: 'pccontroller-stable-go-test-cache/v1',
