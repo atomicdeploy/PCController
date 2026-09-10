@@ -639,7 +639,8 @@
             },
             "message": {
               "type": "string"
-            }
+            },
+            "data": true
           }
         }
       }
@@ -1147,7 +1148,7 @@
     },
     "controller.peer.update.host": {
       "capability": "programming",
-      "summary": "Transfer a verified executable through a connected peer and ask its coordinator to replace itself.",
+      "summary": "Transfer a verified executable using a caller-generated idempotency_key; report remote queued/staged acceptance, not terminal replacement health. Retry uncertain outcomes with the same key.",
       "idempotency": "non-idempotent"
     },
     "controller.peripherals": {
@@ -1413,6 +1414,7 @@
     "-32602": "invalid params",
     "-32001": "authentication required",
     "-32003": "remote capability denied",
-    "-32000": "runtime or device error"
+    "-32000": "runtime or device error",
+    "-32004": "peer outcome uncertain; retry with the same idempotency key"
   }
 }

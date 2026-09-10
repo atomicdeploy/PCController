@@ -154,7 +154,7 @@ const methodOverrides = {
   "controller.artifact.upload.chunk": "Append one ordered bounded chunk to a peer artifact transfer.",
   "controller.artifact.upload.finish": "Revalidate and publish a completed peer artifact transfer.",
   "controller.artifact.upload.abort": "Abort and remove an incomplete peer artifact transfer.",
-  "controller.peer.update.host": "Transfer a verified executable through a connected peer and ask its coordinator to replace itself.",
+  "controller.peer.update.host": "Transfer a verified executable using a caller-generated idempotency_key; report remote queued/staged acceptance, not terminal replacement health. Retry uncertain outcomes with the same key.",
   "controller.webhooks.status": "Return bounded outbound queue and dead-letter counters.",
   "controller.webhooks.pending": "List bounded non-secret pending outbound deliveries.",
   "controller.webhooks.dead": "List bounded non-secret dead-letter deliveries.",
@@ -678,7 +678,7 @@ const openapi = {
 		...openAPIActionSchemas,
       JSONRPCError: {
         type: "object", required: ["code", "message"], additionalProperties: false,
-        properties: { code: { type: "integer", enum: [-32700, -32600, -32601, -32602, -32003, -32001, -32000] }, message: { type: "string" } },
+        properties: { code: { type: "integer", enum: [-32700, -32600, -32601, -32602, -32004, -32003, -32001, -32000] }, message: { type: "string" }, data: true },
         examples: [{ code: -32003, message: "remote capability board_commands is disabled" }],
       },
       Error: errorSchema,
@@ -726,7 +726,7 @@ const rpcSchema = {
         jsonrpc: { const: "2.0" }, id: { $ref: "#/$defs/id" },
         error: {
           type: "object", required: ["code", "message"], additionalProperties: false,
-          properties: { code: { type: "integer" }, message: { type: "string" } },
+          properties: { code: { type: "integer" }, message: { type: "string" }, data: true },
         },
       },
     },
@@ -750,6 +750,7 @@ const rpcSchema = {
     "-32700": "parse error", "-32600": "invalid request", "-32601": "method not found",
     "-32602": "invalid params", "-32001": "authentication required",
     "-32003": "remote capability denied", "-32000": "runtime or device error",
+    "-32004": "peer outcome uncertain; retry with the same idempotency key",
   },
 };
 
