@@ -359,14 +359,19 @@ The action keys are:
   PC-side metadata, and `A` opens the automation rules list.
 
 Playback reads the same `MacroRunner` instance used by shell, IPC, and API
-commands. Newly recorded macros use the basic `host` mode: it records only
-relay on/off, side-motion, and all-relays-off acknowledgements, ignores status
+commands. Newly recorded macros use the basic `host` mode: it records
+relay on/off, side-motion, PWM/MOSFET, beep, display/message, RF transmit,
+addressable-strip and all-off acknowledgements, ignores status
 LED/telemetry housekeeping, and schedules ordinary commands from the host's
 monotonic clock with a 100 ms acceptance tolerance. This is the quick
 prototyping path and works without the MCU timed-queue capability. Use
 `macro record start-mcu NAME ...` for the stricter MCU acknowledgement-clocked
 recorder and firmware queue. Existing macros whose `mode` is absent retain MCU
 semantics; the host never silently changes their executor.
+
+See [Host macro recording and playback](Host-Macro-Recording.md) for the
+CLI walkthrough, live Web/remote-TUI state, rename/category operations, and
+explicit outstanding MCU/physical-input acceptance boundaries.
 
 The page reports the selected mode plus live identity, elapsed/duration, step
 progress, timing delta/tolerance, lifecycle, and final faithfulness. MCU mode

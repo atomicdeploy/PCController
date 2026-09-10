@@ -875,8 +875,8 @@ func NewCommandEngine(runtime *Runtime, options CommandOptions) *shell.Engine {
 		},
 	})
 	mustRegister(shell.Command{
-		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]",
-		Summary: "manage and play MCU-timed multi-peripheral macros",
+		Name: "macro", Usage: "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]",
+		Summary: "record and play named host or MCU-timed multi-peripheral macros",
 		Run: func(ctx context.Context, args []string) (string, error) {
 			return macroCommand(ctx, macroRunner, args)
 		},
@@ -4782,7 +4782,7 @@ func macroCommand(
 	runner *MacroRunner,
 	args []string,
 ) (string, error) {
-	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|cancel [keep]"
+	const usage = "macro list|show NAME_OR_ID|create ID NAME [CATEGORY [COLOR]]|rename NAME_OR_ID NEW_NAME|category NAME_OR_ID CATEGORY|delete NAME_OR_ID|record start|start-mcu NAME [CATEGORY [COLOR]]|record status|record save|record discard|play NAME_OR_ID|status|monitor|cancel [keep]"
 	if len(args) < 1 {
 		return "", fmt.Errorf("usage: %s", usage)
 	}
@@ -4836,8 +4836,9 @@ func macroCommand(
 		for index, step := range macro.Steps {
 			due, _ := macroStepDueUS(step)
 			lines = append(lines, fmt.Sprintf(
-				"%3d  +%-12s %-12s target=%d value=%d",
+				"%3d  +%-12s %-12s target=%d value=%d opcode=0x%02X payload=%X text=%q frequency=%dHz duration=%dms",
 				index+1, time.Duration(due)*time.Microsecond, step.Kind, step.Target, step.Value,
+				compiled.steps[index].opcode, compiled.steps[index].payload, step.Text, step.FrequencyHz, step.DurationMS,
 			))
 		}
 		return strings.Join(lines, "\n"), nil
@@ -4861,6 +4862,19 @@ func macroCommand(
 			return "", err
 		}
 		return fmt.Sprintf("macro %d/%s draft created; add steps in the watched host config or record a new macro", macro.ID, macro.Name), nil
+	case "rename", "category":
+		if len(args) != 3 {
+			return "", fmt.Errorf("usage: macro %s NAME_OR_ID VALUE", args[0])
+		}
+		field := "category"
+		if strings.EqualFold(args[0], "rename") {
+			field = "name"
+		}
+		macro, err := runner.UpdateMetadata(args[1], field, args[2])
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("macro %d/%s category=%q updated", macro.ID, macro.Name, macro.Category), nil
 	case "delete", "remove":
 		if len(args) != 2 {
 			return "", fmt.Errorf("usage: macro delete NAME_OR_ID")
@@ -4896,7 +4910,7 @@ func macroCommand(
 				return "", err
 			}
 			if state.Mode == macroModeHost {
-				return fmt.Sprintf("recording macro %d/%s in basic host mode; relay and motion commands use host deltas (100ms tolerance)", state.ID, state.Name), nil
+				return fmt.Sprintf("recording macro %d/%s in host mode; relay/motion, PWM, beep, display, RF and strip commands use host deltas (100ms tolerance)", state.ID, state.Name), nil
 			}
 			return fmt.Sprintf("recording macro %d/%s in MCU mode; acknowledged board commands use MCU deltas", state.ID, state.Name), nil
 		case "status":
@@ -4944,6 +4958,16 @@ func macroCommand(
 			state.Mode,
 			state.StepCount,
 		), nil
+	case "monitor":
+		if len(args) != 1 {
+			return "", fmt.Errorf("usage: macro monitor")
+		}
+		state, err := macroCommand(ctx, runner, []string{"status"})
+		if err != nil {
+			return "", err
+		}
+		recording, err := macroCommand(ctx, runner, []string{"record", "status"})
+		return state + "\n" + recording, err
 	case "status":
 		if len(args) != 1 {
 			return "", fmt.Errorf("usage: macro status")

@@ -1293,7 +1293,7 @@ export default function App() {
               refreshAfterHostRestart.current = true
             }
             if (/config/i.test(event.kind)) void refreshHostAppearance().catch(() => undefined)
-            if (/device|connection|settings|illumination/i.test(event.kind)) void refresh()
+            if (/device|connection|settings|illumination|^macro/i.test(event.kind)) void refresh()
           },
           state: (state, detail) => {
             setStreamState(state)

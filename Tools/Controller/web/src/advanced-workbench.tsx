@@ -671,7 +671,7 @@ export function AdvancedWorkbench({
               <Button key={key} compact disabled={!online} busy={busy === `host-menu key ${key} press`} onClick={() => void run(`host-menu key ${key} press`)}>{copy(`${key} · ${label}`, `${key} · ${label}`)}</Button>
             ))}
           </div>
-          <p className="advanced-note advanced-note--safe">{copy('The Macro front-panel page lists the file-watched library, records MCU acknowledgement deltas, shows playback progress, and offers safe cancel or guarded keep-output cancel.', 'صفحه ماکروی پنل، فهرست تحت پایش فایل، ضبط زمان‌بندی MCU، پیشرفت اجرا و لغو امن یا لغو با حفظ خروجی را ارائه می‌کند.')}</p>
+          <p className="advanced-note advanced-note--safe">{copy('The Macro front-panel page uses the shared host library, records host command timing by default, shows playback progress, and offers safe cancel or guarded keep-output cancel.', 'صفحه ماکروی پنل از کتابخانه مشترک میزبان استفاده می‌کند، زمان فرمان‌های میزبان را ضبط می‌کند و پیشرفت اجرا و لغو امن را نشان می‌دهد.')}</p>
           <div className="advanced-fields">
             <TextField
               label={copy('Firmware page ID or key', 'شناسه یا کلید صفحه میان‌افزار')}
@@ -774,24 +774,31 @@ export function AdvancedWorkbench({
 
         <AdvancedPanel
           icon={Workflow}
-          eyebrow={copy('MCU-TIMED', 'زمان‌بندی‌شده روی MCU')}
+          eyebrow={copy('HOST RECORDING', 'ضبط میزبان')}
           title={copy('Macro inspection & recording', 'بررسی و ضبط ماکرو')}
-          detail={copy('Inspect compiled timing, record acknowledged board commands, then save or discard deliberately.', 'زمان‌بندی کامپایل‌شده را ببینید، فرمان‌های تأییدشده برد را ضبط و آگاهانه ذخیره یا دور بریزید.')}
+          detail={copy('Record host-issued commands with a 100 ms alpha timing tolerance. Physical-key and incoming RF recording remain a separate MCU workflow.', 'فرمان‌های میزبان را با تلورانس زمانی ۱۰۰ میلی‌ثانیه ضبط کنید. ضبط کلید فیزیکی و دریافت RF بخشی از مسیر جداگانه MCU است.')}
         >
+          <div aria-live="polite" className="advanced-note">
+            {snapshot.macros?.recording.active
+              ? `${copy('Recording', 'در حال ضبط')}: ${snapshot.macros.recording.name} · ${snapshot.macros.recording.mode} · ${snapshot.macros.recording.steps} ${copy('steps', 'گام')}`
+              : copy('Recorder idle', 'ضبط غیرفعال')}
+            {snapshot.macros?.playback.name && <p>{snapshot.macros.playback.name} · {snapshot.macros.playback.mode} · {snapshot.macros.playback.lifecycle} · {snapshot.macros.playback.step}/{snapshot.macros.playback.step_count} · {copy('maximum timing error', 'بیشینه خطای زمان')}: {(snapshot.macros.playback.maximum_timing_error_us / 1000).toFixed(1)} ms</p>}
+            {(snapshot.macros?.recording.last_error || snapshot.macros?.playback.last_error) && <p role="alert">{snapshot.macros?.recording.last_error || snapshot.macros?.playback.last_error}</p>}
+          </div>
           <div className="advanced-actions">
             <Button icon={List} busy={busy === 'macro list'} onClick={() => void run('macro list')}>{copy('List', 'فهرست')}</Button>
             <Button icon={Play} busy={busy === 'macro status'} onClick={() => void run('macro status')}>{copy('Playback status', 'وضعیت اجرا')}</Button>
             <Button icon={CircleDot} busy={busy === 'macro record status'} onClick={() => void run('macro record status')}>{copy('Recording status', 'وضعیت ضبط')}</Button>
           </div>
           <div className="advanced-fields">
-            <TextField
-              label={copy('Macro name or ID', 'نام یا شناسه ماکرو')}
-              value={macroRef}
-              dir="ltr"
-              spellCheck={false}
-              onChange={(event) => setMacroRef(event.target.value)}
-              action={<Button icon={ListChecks} disabled={!macroRef.trim()} busy={busy === `macro show ${quoteArgument(macroRef.trim())}`} onClick={() => void run(`macro show ${quoteArgument(macroRef.trim())}`)}>{copy('Inspect exact steps', 'بررسی گام‌های دقیق')}</Button>}
-            />
+            <label className="advanced-field">{copy('Saved macro', 'ماکروی ذخیره‌شده')}
+              <select value={macroRef} onChange={(event) => setMacroRef(event.target.value)}>
+                <option value="">{copy('Choose a macro', 'انتخاب ماکرو')}</option>
+                {(snapshot.macros?.library ?? []).map((macro) => <option key={macro.id} value={String(macro.id)}>{macro.name} · {macro.mode || 'mcu'} · {macro.steps.length} {copy('steps', 'گام')}</option>)}
+              </select>
+            </label>
+            <Button icon={ListChecks} disabled={!macroRef} onClick={() => void run(`macro show ${macroRef}`)}>{copy('Inspect steps', 'بررسی گام‌ها')}</Button>
+            <Button icon={Play} disabled={!online || !macroRef || snapshot.macros?.recording.active || snapshot.macros?.playback.running || !snapshot.macros?.library.find((macro) => String(macro.id) === macroRef)?.steps.length} onClick={() => prepare(`macro play ${macroRef}`, copy('Playback runs the saved physical output commands.', 'اجرا، فرمان‌های خروجی فیزیکی ذخیره‌شده را انجام می‌دهد.'), 'danger', true)}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
           </div>
           <div className="advanced-fields advanced-fields--record">
             <TextField label={copy('New recording name', 'نام ضبط جدید')} value={macroName} dir="ltr" spellCheck={false} onChange={(event) => setMacroName(event.target.value)} />
@@ -806,11 +813,13 @@ export function AdvancedWorkbench({
                 { value: 'white', label: copy('White', 'سفید') },
               ]} onChange={setMacroColor} />
             </div>
-            <Button tone="primary" icon={CircleDot} disabled={!online || !macroName.trim() || (!!macroColor.trim() && !macroCategory.trim())} busy={busy === macroRecordCommand} onClick={() => void run(macroRecordCommand)}>{copy('Start recording', 'شروع ضبط')}</Button>
+            <Button tone="primary" icon={CircleDot} disabled={!online || !macroName.trim() || snapshot.macros?.recording.active || snapshot.macros?.playback.running || (!!macroColor.trim() && !macroCategory.trim())} busy={busy === macroRecordCommand} onClick={() => void run(macroRecordCommand)}>{copy('Start recording', 'شروع ضبط')}</Button>
           </div>
           <div className="advanced-actions">
-            <Button icon={Save} busy={busy === 'macro record save'} onClick={() => void run('macro record save')}>{copy('Save recording', 'ذخیره ضبط')}</Button>
-            <Button icon={Trash2} busy={busy === 'macro record discard'} onClick={() => void run('macro record discard')}>{copy('Discard recording', 'حذف ضبط')}</Button>
+            <Button icon={Save} disabled={!snapshot.macros?.recording.active} busy={busy === 'macro record save'} onClick={() => void run('macro record save')}>{copy('Save recording', 'ذخیره ضبط')}</Button>
+            <Button icon={Trash2} disabled={!snapshot.macros?.recording.active} busy={busy === 'macro record discard'} onClick={() => void run('macro record discard')}>{copy('Discard recording', 'حذف ضبط')}</Button>
+            <Button disabled={!macroRef || !macroName.trim()} onClick={() => void run(`macro rename ${macroRef} ${quoteArgument(macroName.trim())}`)}>{copy('Rename selected', 'تغییر نام انتخاب‌شده')}</Button>
+            <Button disabled={!macroRef} onClick={() => void run(`macro category ${macroRef} ${quoteArgument(macroCategory.trim())}`)}>{copy('Set selected category', 'دسته‌بندی انتخاب‌شده')}</Button>
             <Button icon={CircleStop} disabled={!online} busy={busy === 'macro cancel'} onClick={() => void run('macro cancel')}>{copy('Cancel safely', 'لغو امن')}</Button>
             <Button tone="danger" icon={ShieldAlert} disabled={!online} onClick={() => prepare('macro cancel keep', copy('Cancelling with keep deliberately leaves current physical outputs unchanged.', 'لغو با حفظ خروجی، وضعیت فعلی خروجی‌های فیزیکی را عمداً نگه می‌دارد.'), 'danger', true)}>{copy('Prepare cancel + keep', 'آماده‌سازی لغو با حفظ خروجی')}</Button>
           </div>

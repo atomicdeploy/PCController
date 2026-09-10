@@ -2293,6 +2293,25 @@ func TestTUIUsesCommandEngineMacroRunner(t *testing.T) {
 	}
 }
 
+func TestRemoteTUIMacroWorkspaceUsesAuthoritativeSnapshot(t *testing.T) {
+	model := Model{remote: &RemoteBackend{}, remoteSnapshot: control.Snapshot{
+		Macros: control.MacroSnapshot{
+			Library:   []appconfig.Macro{{ID: 9, Name: "remote take"}},
+			Playback:  control.MacroState{Name: "remote take", Mode: "host", Running: true, Step: 2, StepCount: 3},
+			Recording: control.MacroRecordingState{Name: "next take", Steps: 4},
+		},
+	}}
+	if got := model.macroLibrary(); len(got) != 1 || got[0].Name != "remote take" {
+		t.Fatal(got)
+	}
+	if got := model.macroState(); !got.Running || got.Step != 2 {
+		t.Fatal(got)
+	}
+	if got := model.macroRecordingState(); got.Name != "next take" || got.Steps != 4 {
+		t.Fatal(got)
+	}
+}
+
 func logsContain(logs []string, expected string) bool {
 	for _, line := range logs {
 		if strings.Contains(line, expected) {

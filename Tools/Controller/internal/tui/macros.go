@@ -125,7 +125,7 @@ func (model Model) macroLibrary() []appconfig.Macro {
 		return result
 	}
 	if model.remote != nil {
-		return nil
+		return model.remoteSnapshot.Macros.Library
 	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.List()
@@ -138,7 +138,7 @@ func (model Model) macroState() control.MacroState {
 		return model.previewMacroState
 	}
 	if model.remote != nil {
-		return control.MacroState{}
+		return model.remoteSnapshot.Macros.Playback
 	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.State()
@@ -151,7 +151,7 @@ func (model Model) macroRecordingState() control.MacroRecordingState {
 		return model.previewMacroRecording
 	}
 	if model.remote != nil {
-		return control.MacroRecordingState{}
+		return model.remoteSnapshot.Macros.Recording
 	}
 	if runner := model.runtime.MacroRunner(); runner != nil {
 		return runner.RecordingState()
@@ -277,7 +277,7 @@ func (model Model) macroShortcut(key string) (Model, tea.Cmd, bool) {
 		model.input.SetValue("macro record start ")
 		model.input.CursorEnd()
 		model.revealTerminal()
-		model.setNotice("Complete NAME [CATEGORY [COLOR]], then operate relays/PWM/etc.; MCU ACK deltas set timing")
+		model.setNotice("Complete NAME [CATEGORY [COLOR]], then operate relay/motion, PWM, beep or display controls; host timing is used")
 		return model, nil, true
 	case "s":
 		if !model.macroRecordingState().Active {
@@ -464,7 +464,7 @@ func macroRecordingHelp(state control.MacroRecordingState) string {
 	}
 	if state.Active {
 		if state.Mode == "host" {
-			return warnStyle.Render("Operate relay or motion controls; the basic host recorder ignores housekeeping traffic. S saves, D discards.")
+			return warnStyle.Render("Operate relay/motion, PWM, beep or display controls; housekeeping is ignored. S saves, D discards.")
 		}
 		return warnStyle.Render("MCU mode records acknowledged queueable commands. S saves, D discards.")
 	}
