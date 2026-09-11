@@ -465,7 +465,7 @@ func runWebWithInitialAction(
 	// prevents a notification registration write.
 	if status, desktopErr := ensureWebDesktopIntegration(store); desktopErr != nil {
 		fmt.Fprintln(stderr, "desktop notification identity:", desktopErr)
-	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady) {
+	} else if status.Supported && (!status.ProtocolReady || !status.ShortcutReady || !status.DesktopShortcutReady) {
 		fmt.Fprintln(stderr, "desktop notification identity is incomplete")
 	}
 	runtime := newRuntime(connection, store)

@@ -122,7 +122,7 @@ func TestNativeShortcutRoundTripAndOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" {
+	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" || !sameWindowsPath(link.Icon, executable) || link.IconIndex != 0 {
 		t.Fatalf("shortcut=%+v executable=%q", link, executable)
 	}
 	if !shortcutOwnedBy(executable, link) {
@@ -149,7 +149,7 @@ func TestRemoveOwnedShortcutUsesNativeInspection(t *testing.T) {
 	if err := createWindowsShortcut(executable, shortcut, "Tests.Controller", "Controller Tests"); err != nil {
 		t.Fatal(err)
 	}
-	removed, preserved, err := removeOwnedShortcut(executable, shortcut)
+	removed, preserved, err := removeOwnedShortcut(executable, shortcut, "Tests.Controller")
 	if err != nil || !removed || preserved {
 		t.Fatalf("remove=(removed=%t preserved=%t error=%v)", removed, preserved, err)
 	}

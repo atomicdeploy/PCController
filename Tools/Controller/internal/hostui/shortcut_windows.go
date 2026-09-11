@@ -44,6 +44,8 @@ type propVariant struct {
 type windowsShortcut struct {
 	Target    string
 	Arguments string
+	Icon      string
+	IconIndex int32
 }
 
 func createWindowsShortcut(executable, shortcut, appID, displayName string) error {
@@ -205,6 +207,11 @@ func inspectWindowsShortcut(shortcut string) (windowsShortcut, error) {
 		}
 		result.Target = windows.UTF16ToString(target)
 		result.Arguments = windows.UTF16ToString(arguments)
+		icon := make([]uint16, windows.MAX_PATH)
+		if err := callCOM(link, 16, uintptr(unsafe.Pointer(&icon[0])), uintptr(len(icon)), uintptr(unsafe.Pointer(&result.IconIndex))).error("read shortcut icon"); err != nil {
+			return err
+		}
+		result.Icon = windows.UTF16ToString(icon)
 		return nil
 	})
 	return result, err

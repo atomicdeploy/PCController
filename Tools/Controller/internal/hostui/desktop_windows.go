@@ -10,8 +10,10 @@ import (
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	"pccontroller.local/controller/internal/installer"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -79,24 +81,14 @@ func ensurePlatformDesktopIntegration(
 		return status, err
 	}
 	status.ProtocolReady = true
-	appData := os.Getenv("APPDATA")
-	if strings.TrimSpace(appData) == "" {
-		err := fmt.Errorf("APPDATA is unavailable")
+	status.Shortcut, err = desktopShortcutPath(displayName)
+	desktopPath, desktopErr := userDesktopShortcutPath(displayName)
+	status.DesktopShortcut = desktopPath
+	err = errors.Join(err, desktopErr, ensureWindowsShortcuts(&status, appID, displayName))
+	if err != nil {
 		status.LastError = err.Error()
-		return status, err
 	}
-	shortcut := filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs", shortcutFileName(displayName)+".lnk")
-	if err := os.MkdirAll(filepath.Dir(shortcut), 0o755); err != nil {
-		status.LastError = err.Error()
-		return status, err
-	}
-	if err := createWindowsShortcut(executable, shortcut, appID, displayName); err != nil {
-		status.Shortcut = shortcut
-		status.LastError = err.Error()
-		return status, err
-	}
-	status.Shortcut, status.ShortcutReady = shortcut, true
-	return status, nil
+	return status, err
 }
 
 func removePlatformDesktopIntegration(
@@ -131,10 +123,22 @@ func removePlatformDesktopIntegration(
 		cleanupErr = errors.Join(cleanupErr, shortcutErr)
 	} else {
 		status.Shortcut = shortcut
-		removed, preserved, removeErr := removeOwnedShortcut(executable, shortcut)
+		removed, preserved, removeErr := removeOwnedShortcut(executable, shortcut, appID)
 		status.ShortcutRemoved = removed
 		if preserved {
 			status.Skipped = append(status.Skipped, "start-menu-shortcut-not-owned")
+		}
+		cleanupErr = errors.Join(cleanupErr, removeErr)
+	}
+	desktopShortcut, desktopErr := userDesktopShortcutPath(displayName)
+	if desktopErr != nil {
+		cleanupErr = errors.Join(cleanupErr, desktopErr)
+	} else {
+		status.DesktopShortcut = desktopShortcut
+		removed, preserved, removeErr := removeOwnedShortcut(executable, desktopShortcut, appID)
+		status.DesktopShortcutRemoved = removed
+		if preserved {
+			status.Skipped = append(status.Skipped, "desktop-shortcut-not-owned")
 		}
 		cleanupErr = errors.Join(cleanupErr, removeErr)
 	}
@@ -186,47 +190,190 @@ func desktopShortcutPath(displayName string) (string, error) {
 	if appData == "" {
 		return "", errors.New("APPDATA is unavailable")
 	}
-	programs, err := filepath.Abs(filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs"))
+	return shortcutPathInDirectory(filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs"), displayName)
+}
+
+func userDesktopShortcutPath(displayName string) (string, error) {
+	desktop, err := windows.KnownFolderPath(windows.FOLDERID_Desktop, 0)
 	if err != nil {
-		return "", fmt.Errorf("resolve Start Menu programs directory: %w", err)
+		return "", fmt.Errorf("resolve user Desktop known folder: %w", err)
+	}
+	return shortcutPathInDirectory(desktop, displayName)
+}
+
+func shortcutPathInDirectory(directory, displayName string) (string, error) {
+	if strings.TrimSpace(directory) == "" {
+		return "", errors.New("shortcut directory is unavailable")
+	}
+	programs, err := filepath.Abs(directory)
+	if err != nil {
+		return "", fmt.Errorf("resolve shortcut directory: %w", err)
 	}
 	shortcut := filepath.Join(programs, shortcutFileName(displayName)+".lnk")
 	relative, err := filepath.Rel(programs, shortcut)
 	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(os.PathSeparator)) {
-		return "", errors.New("resolved shortcut is outside the Start Menu programs directory")
+		return "", errors.New("resolved shortcut is outside its designated directory")
 	}
 	return shortcut, nil
 }
 
-func removeOwnedShortcut(executable, shortcut string) (removed, preserved bool, err error) {
+type shortcutPredecessorCheck func(executable, candidate string) (bool, error)
+
+func managedShortcutPredecessor(executable, candidate string) (bool, error) {
+	service, err := installer.NewService()
+	if err != nil {
+		return false, err
+	}
+	return service.OwnsDesktopPredecessor(executable, candidate)
+}
+
+func shortcutOwnership(executable, shortcut, appID string) (exists, owned bool, err error) {
+	return shortcutOwnershipWithPredecessor(executable, shortcut, appID, managedShortcutPredecessor)
+}
+
+func shortcutOwnershipWithPredecessor(executable, shortcut, appID string, predecessor shortcutPredecessorCheck) (exists, owned bool, err error) {
 	info, statErr := os.Lstat(shortcut)
 	if isNotExist(statErr) {
 		return false, false, nil
 	}
 	if statErr != nil {
-		return false, false, fmt.Errorf("inspect Start Menu shortcut: %w", statErr)
+		return false, false, fmt.Errorf("inspect shortcut: %w", statErr)
 	}
 	if info.IsDir() || info.Mode()&os.ModeSymlink != 0 || isWindowsReparsePoint(info) {
-		return false, true, nil
+		return true, false, nil
 	}
 	link, inspectErr := inspectWindowsShortcut(shortcut)
 	if inspectErr != nil {
-		return false, false, fmt.Errorf("inspect Start-menu shortcut ownership: %w", inspectErr)
+		return true, false, fmt.Errorf("inspect shortcut ownership: %w", inspectErr)
 	}
-	if !shortcutOwnedBy(executable, link) {
+	// Validate launch semantics even when the target is a legitimate old slot.
+	if !shortcutOwnedBy(link.Target, link) {
+		return true, false, nil
+	}
+	identity, identityErr := shortcutAppUserModelID(shortcut)
+	if identityErr != nil {
+		return true, false, fmt.Errorf("inspect shortcut AppUserModelID: %w", identityErr)
+	}
+	if identity != appID {
+		return true, false, nil
+	}
+	if sameWindowsPath(link.Target, executable) {
+		return true, true, nil
+	}
+	if appID != productidentity.StableAppID || predecessor == nil {
+		return true, false, nil
+	}
+	owned, err = predecessor(executable, link.Target)
+	return true, owned, err
+}
+
+func removeOwnedShortcut(executable, shortcut, appID string) (removed, preserved bool, err error) {
+	exists, owned, inspectErr := shortcutOwnership(executable, shortcut, appID)
+	if inspectErr != nil {
+		return false, false, inspectErr
+	}
+	if !exists {
+		return false, false, nil
+	}
+	if !owned {
 		return false, true, nil
 	}
 	if removeErr := os.Remove(shortcut); removeErr != nil {
-		return false, false, fmt.Errorf("remove owned Start-menu shortcut: %w", removeErr)
+		return false, false, fmt.Errorf("remove owned shortcut: %w", removeErr)
 	}
-	_, statErr = os.Lstat(shortcut)
+	_, statErr := os.Lstat(shortcut)
 	if isNotExist(statErr) {
 		return true, false, nil
 	}
 	if statErr != nil {
-		return false, false, fmt.Errorf("verify Start Menu shortcut removal: %w", statErr)
+		return false, false, fmt.Errorf("verify shortcut removal: %w", statErr)
 	}
 	return false, true, nil
+}
+
+// Paths are supplied separately so tests exercise real Shell links only inside
+// temporary folders, never the current user's actual Desktop or Start Menu.
+func ensureWindowsShortcuts(status *DesktopIntegrationStatus, appID, displayName string) error {
+	return ensureWindowsShortcutsWithPredecessor(status, appID, displayName, managedShortcutPredecessor)
+}
+
+func ensureWindowsShortcutsWithPredecessor(status *DesktopIntegrationStatus, appID, displayName string, predecessor shortcutPredecessorCheck) error {
+	var result error
+	for _, target := range []struct {
+		name, path string
+		ready      *bool
+	}{
+		{"start-menu", status.Shortcut, &status.ShortcutReady},
+		{"desktop", status.DesktopShortcut, &status.DesktopShortcutReady},
+	} {
+		if target.path == "" {
+			continue
+		}
+		ready, preserved, err := ensureOwnedShortcutWithPredecessor(status.Executable, target.path, appID, displayName, predecessor)
+		*target.ready = ready
+		if preserved {
+			status.Skipped = append(status.Skipped, target.name+"-shortcut-not-owned")
+			err = errors.Join(err, fmt.Errorf("%s shortcut is not owned; existing link preserved", target.name))
+		}
+		if err != nil {
+			result = errors.Join(result, fmt.Errorf("%s shortcut: %w", target.name, err))
+		}
+	}
+	return result
+}
+
+func ensureOwnedShortcut(executable, shortcut, appID, displayName string) (ready, preserved bool, err error) {
+	return ensureOwnedShortcutWithPredecessor(executable, shortcut, appID, displayName, managedShortcutPredecessor)
+}
+
+func ensureOwnedShortcutWithPredecessor(executable, shortcut, appID, displayName string, predecessor shortcutPredecessorCheck) (ready, preserved bool, err error) {
+	exists, owned, err := shortcutOwnershipWithPredecessor(executable, shortcut, appID, predecessor)
+	if err != nil {
+		return false, false, err
+	}
+	if exists && !owned {
+		return false, true, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(shortcut), 0o755); err != nil {
+		return false, false, err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(shortcut), ".pccontroller-link-*.lnk")
+	if err != nil {
+		return false, false, err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Close(); err != nil {
+		return false, false, err
+	}
+	if err := createWindowsShortcut(executable, temporaryPath, appID, displayName); err != nil {
+		return false, false, err
+	}
+	link, err := inspectWindowsShortcut(temporaryPath)
+	if err != nil {
+		return false, false, err
+	}
+	identity, err := shortcutAppUserModelID(temporaryPath)
+	if err != nil {
+		return false, false, err
+	}
+	if !sameWindowsPath(link.Target, executable) || link.Arguments != "web" ||
+		!sameWindowsPath(link.Icon, executable) || link.IconIndex != 0 || identity != appID {
+		return false, false, errors.New("shortcut target, web launch, embedded icon or identity verification failed")
+	}
+	// Recheck before replacing an existing file; creation failure never leaves
+	// a partial link at the user's final path.
+	exists, owned, err = shortcutOwnershipWithPredecessor(executable, shortcut, appID, predecessor)
+	if err != nil {
+		return false, false, err
+	}
+	if exists && !owned {
+		return false, true, nil
+	}
+	if err := os.Rename(temporaryPath, shortcut); err != nil {
+		return false, false, err
+	}
+	return true, false, nil
 }
 
 func isWindowsReparsePoint(info os.FileInfo) bool {
