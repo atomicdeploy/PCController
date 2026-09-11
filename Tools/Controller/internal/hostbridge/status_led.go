@@ -144,6 +144,9 @@ func (arbiter *statusLEDArbiter) Run() {
 		case <-arbiter.wake:
 		case <-timer.C:
 		}
+		if arbiter.ctx.Err() != nil {
+			return
+		}
 
 		now := time.Now()
 		policy, snapshot, rfUntil, doorCueUntil, doorCueOpen, macroActive, requestTimeout :=

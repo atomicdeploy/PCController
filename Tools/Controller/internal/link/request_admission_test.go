@@ -82,10 +82,17 @@ func TestRequestCancelledBehindRawWriterDoesNotWriteLater(t *testing.T) {
 		t.Fatal("cancelled request remained blocked behind raw writer")
 	}
 	unblock()
-	if err := <-rawDone; err != nil {
-		t.Fatal(err)
+	select {
+	case err := <-rawDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("raw writer did not finish after release")
 	}
-	if err := session.WriteRaw([]byte{2}); err != nil {
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer writeCancel()
+	if err := session.writeRawContext(writeCtx, []byte{2}); err != nil {
 		t.Fatal(err)
 	}
 	if writes.Load() != 2 {
@@ -106,6 +113,8 @@ func (port *notifyingDTRPort) SetDTR(value bool) error {
 
 func TestPulseDTRCancellationRestoresLineAndWriteGate(t *testing.T) {
 	port := &notifyingDTRPort{fakePort: newFakePort(), changes: make(chan bool, 2)}
+	var writes atomic.Int32
+	port.onWrite = func([]byte) { writes.Add(1) }
 	session := NewForPort("TEST", port)
 	defer session.Close()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -121,10 +130,19 @@ func TestPulseDTRCancellationRestoresLineAndWriteGate(t *testing.T) {
 		t.Fatal("DTR pulse did not start")
 	}
 	// Raw writes and resets must share the same exclusion gate.
-	blocked, release := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	select {
+	case session.writeGate <- struct{}{}:
+		<-session.writeGate
+		t.Fatal("DTR did not hold the write gate")
+	default:
+	}
+	blocked, release := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer release()
 	if err := session.writeRawContext(blocked, []byte{1}); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expired write during reset: %v", err)
+		t.Fatalf("live write was not excluded during reset: %v", err)
+	}
+	if writes.Load() != 0 {
+		t.Fatal("write reached the port during DTR reset")
 	}
 	cancel()
 	select {
@@ -135,11 +153,21 @@ func TestPulseDTRCancellationRestoresLineAndWriteGate(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("DTR did not stop on cancellation")
 	}
-	if released := <-port.changes; released {
-		t.Fatal("DTR was not restored")
+	select {
+	case released := <-port.changes:
+		if released {
+			t.Fatal("DTR was not restored")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("DTR restoration was not observed")
 	}
-	if err := session.WriteRaw([]byte{2}); err != nil {
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer writeCancel()
+	if err := session.writeRawContext(writeCtx, []byte{2}); err != nil {
 		t.Fatalf("write gate not released: %v", err)
+	}
+	if writes.Load() != 1 {
+		t.Fatalf("writes=%d, want only the post-reset write", writes.Load())
 	}
 }
 
