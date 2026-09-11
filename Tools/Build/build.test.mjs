@@ -33,7 +33,12 @@ import {
 	windowsCompilerProvisionArguments,
 	windowsSmokeSource
 } from './build.mjs'
-import { createStableTestPlan, goTestSourceIdentity, stableTestBinaryName } from './go-tests.mjs'
+import {
+	createStableTestPlan,
+	goTestSourceIdentity,
+	stableTestBinaryName,
+	stableTestOutput
+} from './go-tests.mjs'
 import { PRODUCT_METADATA } from './product-metadata.mjs'
 import {
 	BOARD,
@@ -196,6 +201,17 @@ test('stable Go test plan keeps every binary below its persistent output root', 
 	assert.equal(plan.length, 2)
 	assert.ok(plan.every(item => item.binary.startsWith(`${output}${sep}`)))
 	assert.equal(new Set(plan.map(item => item.binary)).size, plan.length)
+})
+
+test('Windows Go tests cannot create per-task firewall identities', () => {
+	const environment = { LOCALAPPDATA: 'C:\\Users\\tester\\AppData\\Local' }
+	const canonical = 'C:\\Users\\tester\\AppData\\Local\\PCController\\test-programs\\go'
+	assert.equal(stableTestOutput(undefined, 'win32', environment), canonical)
+	assert.equal(stableTestOutput(canonical, 'win32', environment), canonical)
+	assert.throws(
+		() => stableTestOutput(`${canonical}\\worktree-123`, 'win32', environment),
+		/per-task or per-worktree output paths are forbidden/
+	)
 })
 
 test('stable Go test identity includes embedded web assets', async t => {

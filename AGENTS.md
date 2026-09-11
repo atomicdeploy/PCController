@@ -12,6 +12,10 @@
   `%LOCALAPPDATA%\PCController\go-noexec-temp`; files created there inherit a
   deny-execute ACL. Do not remove that guard to work around a direct-test
   failure—use the stable runner.
+- On Windows, do not pass `--output` to the stable runner, override `GOTMPDIR`,
+  invoke `go test -c -o`, or copy/rename a test executable for a focused run.
+  Directory and filename are both part of the Windows Firewall identity; use
+  the canonical runner even when only one package changed.
 - Exercise real LAN discovery only with the named packaged
   `Tools/Controller/bin/controller.exe`; unit tests should use loopback or
   side-effect-free wire parsing.

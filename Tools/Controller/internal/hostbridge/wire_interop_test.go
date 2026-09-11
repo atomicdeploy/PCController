@@ -11,7 +11,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -197,19 +196,13 @@ func startRawPeerManager(
 	token string,
 ) (*Manager, *controller.Client, *control.Runtime, context.CancelFunc) {
 	t.Helper()
-	store, err := appconfig.Open(filepath.Join(t.TempDir(), "config.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	path := "/peer"
 	if protocol == "socketio" {
 		path = "/socket.io/"
 	}
-	_, err = store.Update(func(config *appconfig.Config) error {
+	store := openHostBridgeTestStore(t, func(config *appconfig.Config) error {
 		config.IPC.AllowRemote = true
 		config.IPC.AuthToken = token
-		config.Integrations.Hotkeys = nil
-		config.Integrations.Notifications.Enabled = false
 		config.Integrations.WebSocketClients = []appconfig.WebSocketClient{{
 			Name: "raw-peer", Enabled: true,
 			URL:      "ws://" + listener.Addr().String() + path,
@@ -218,9 +211,6 @@ func startRawPeerManager(
 		}}
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	runtime := control.New(control.Options{})
 	client := controller.AttachSharedRuntime(runtime, shell.New(8))
 	ctx, cancel := context.WithCancel(context.Background())

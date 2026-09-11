@@ -20,6 +20,11 @@ const windowsStillActive = 259
 
 var setConsoleCtrlHandler = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetConsoleCtrlHandler")
 
+var (
+	setReplacementConsoleCtrlIgnored = setConsoleCtrlIgnored
+	startReplacementCommand          = func(command *exec.Cmd) error { return command.Start() }
+)
+
 // PrepareSelfUpdateHelperProcess prevents a Ctrl+C intended to finish the
 // outgoing interactive host from terminating the transaction coordinator
 // that is waiting to replace it. The replacement child is started with this
@@ -39,11 +44,11 @@ func setConsoleCtrlIgnored(ignored bool) error {
 }
 
 func platformStartReplacementProcess(command *exec.Cmd) error {
-	if err := setConsoleCtrlIgnored(false); err != nil {
+	if err := setReplacementConsoleCtrlIgnored(false); err != nil {
 		return err
 	}
-	startErr := command.Start()
-	restoreErr := setConsoleCtrlIgnored(true)
+	startErr := startReplacementCommand(command)
+	restoreErr := setReplacementConsoleCtrlIgnored(true)
 	if startErr != nil {
 		return startErr
 	}

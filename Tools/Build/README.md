@@ -260,6 +260,14 @@ temporary executable names. The cache identity includes embedded WebUI and
 default-recovery assets, and the shared lock prevents concurrent worktrees from
 overwriting one another's binary/cache pair.
 
+The Windows output root is mandatory and worktree-independent. The runner
+rejects `--output` values outside that exact directory so ad-hoc validation,
+parallel agents, and old per-task conventions cannot create new firewall
+identities. Custom `--output` directories remain available on non-Windows hosts.
+Focused Windows checks must also stay on that runner: do not substitute an
+executable `GOTMPDIR`, `go test -c -o`, or a copied/renamed test binary. Windows
+keys firewall consent to the complete executable path, including its filename.
+
 For a machine-level Windows backstop, this workstation sets Go's `GOTMPDIR` to
 `%LOCALAPPDATA%\PCController\go-noexec-temp` and grants the interactive user an
 object-inherit-only deny-execute ACL there. That makes a mistakenly invoked
