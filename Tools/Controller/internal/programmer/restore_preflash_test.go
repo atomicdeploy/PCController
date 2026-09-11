@@ -281,15 +281,15 @@ func TestAutomaticBackupThenFlashRequiresCompleteBackup(t *testing.T) {
 	flashed = 0
 	overrideResult, err := AutomaticBackupThenFlash(
 		context.Background(), AutomaticPreflashOptions{
-			FirmwarePath:                firmware,
-			Backup:                      fakeBackupOptions(filepath.Join(root, "override-backups")),
-			AllowFlashWithoutFullBackup: true,
+			FirmwarePath: firmware,
+			Backup:       fakeBackupOptions(filepath.Join(root, "override-backups")),
+			Deployment:   "development",
 		}, override,
 		func(context.Context, string, io.Writer) error { flashed++; return nil },
 		io.Discard,
 	)
 	if err != nil || flashed != 1 || !overrideResult.Flashed ||
-		overrideResult.BackupComplete || len(overrideResult.Warnings) != 1 {
+		overrideResult.BackupComplete || !overrideResult.BackupSkipped || len(overrideResult.Warnings) != 1 {
 		t.Fatalf("override result=%#v flashed=%d err=%v", overrideResult, flashed, err)
 	}
 }

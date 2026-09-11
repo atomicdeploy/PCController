@@ -7,19 +7,21 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+
+	"pccontroller.local/controller/internal/deployment"
 )
 
 type FlashOperation func(context.Context, string, io.Writer) error
 type PostBackupOperation func(context.Context, AutomaticPreflashResult, io.Writer) error
 
 type AutomaticPreflashOptions struct {
-	FirmwarePath                string
-	Backup                      Options
-	DataPaths                   HostDataPaths
-	AllowFlashWithoutFullBackup bool
-	// AfterBackup runs only after the raw backup is complete (or an explicit
-	// incomplete-backup override was accepted) and before firmware is
-	// reinspected or written. Controller uses this boundary to arm durable
+	FirmwarePath       string
+	Backup             Options
+	DataPaths          HostDataPaths
+	Deployment         string
+	ReinitializeEEPROM bool
+	// AfterBackup runs after the selected capture policy, before firmware is
+	// reinspected or written. EEPROM-reset callers require a raw backup here to arm durable
 	// board-side programming state without contaminating the original backup.
 	AfterBackup PostBackupOperation
 }
@@ -27,6 +29,8 @@ type AutomaticPreflashOptions struct {
 type AutomaticPreflashResult struct {
 	FirmwarePath    string   `json:"firmware_path"`
 	FirmwareSHA256  string   `json:"firmware_sha256"`
+	Deployment      string   `json:"deployment"`
+	BackupSkipped   bool     `json:"backup_skipped"`
 	BackupDirectory string   `json:"backup_directory,omitempty"`
 	BackupManifest  string   `json:"backup_manifest,omitempty"`
 	BackupReference string   `json:"backup_reference,omitempty"`
@@ -35,11 +39,9 @@ type AutomaticPreflashResult struct {
 	Warnings        []string `json:"warnings,omitempty"`
 }
 
-// AutomaticBackupThenFlash is the mandatory safety gate for host-managed
-// firmware writes. It backs up metadata, flash, and EEPROM through Urclock by
-// default, verifies the completed manifest, and only then invokes the caller's
-// flash operation. USBasp remains an explicit method choice; bypassing a
-// complete backup is a separate, explicit recovery decision.
+// AutomaticBackupThenFlash protects production writes with a complete backup.
+// Explicit development uploads skip only new archival capture. EEPROM resets
+// always require capture; target integrity and write verification are unchanged.
 func AutomaticBackupThenFlash(
 	ctx context.Context,
 	options AutomaticPreflashOptions,
@@ -48,6 +50,11 @@ func AutomaticBackupThenFlash(
 	output io.Writer,
 ) (AutomaticPreflashResult, error) {
 	result := AutomaticPreflashResult{FirmwarePath: options.FirmwarePath}
+	classification, err := deployment.Normalize(options.Deployment)
+	if err != nil {
+		return result, err
+	}
+	result.Deployment = classification
 	if runner == nil {
 		return result, errors.New("automatic pre-flash backup requires a command runner")
 	}
@@ -83,46 +90,44 @@ func AutomaticBackupThenFlash(
 			backupOptions.Method,
 		)
 	}
-	paths := options.DataPaths
-	if strings.TrimSpace(backupOptions.OutputPath) == "" {
-		if strings.TrimSpace(paths.DataDir) == "" {
-			paths, err = DefaultHostDataPaths()
-			if err != nil {
+	if !deployment.RequiresBackup(classification, options.ReinitializeEEPROM) {
+		result.BackupSkipped = true
+		result.Warnings = append(result.Warnings, "explicit development deployment: no new archival backup; existing backups retained")
+	} else {
+		paths := options.DataPaths
+		if strings.TrimSpace(backupOptions.OutputPath) == "" {
+			if strings.TrimSpace(paths.DataDir) == "" {
+				paths, err = DefaultHostDataPaths()
+				if err != nil {
+					return result, err
+				}
+			}
+			if err := EnsureHostDataPaths(paths); err != nil {
 				return result, err
 			}
+			backupOptions.OutputPath = paths.BackupsDir
 		}
-		if err := EnsureHostDataPaths(paths); err != nil {
-			return result, err
+		backupDirectory, backupErr := BackupWithRunner(
+			ctx, backupOptions, output, runner,
+		)
+		result.BackupDirectory = backupDirectory
+		if backupDirectory != "" {
+			result.BackupManifest = joinManifestPath(backupDirectory)
 		}
-		backupOptions.OutputPath = paths.BackupsDir
-	}
-	backupDirectory, backupErr := BackupWithRunner(
-		ctx, backupOptions, output, runner,
-	)
-	result.BackupDirectory = backupDirectory
-	if backupDirectory != "" {
-		result.BackupManifest = joinManifestPath(backupDirectory)
-	}
-	if backupErr == nil {
-		validated, validateErr := ValidateBackupManifest(result.BackupManifest)
-		if validateErr == nil {
-			result.BackupComplete = true
-			result.BackupReference = validated.Manifest.Reference
-		} else {
-			backupErr = fmt.Errorf("validate automatic backup: %w", validateErr)
-		}
-	}
-	if !result.BackupComplete {
 		if backupErr == nil {
-			backupErr = errors.New("automatic backup did not produce a complete validated manifest")
+			validated, validateErr := ValidateBackupManifest(result.BackupManifest)
+			if validateErr == nil {
+				result.BackupComplete = true
+				result.BackupReference = validated.Manifest.Reference
+			} else {
+				backupErr = fmt.Errorf("validate automatic backup: %w", validateErr)
+			}
 		}
-		if !options.AllowFlashWithoutFullBackup {
+		if !result.BackupComplete {
+			if backupErr == nil {
+				backupErr = errors.New("automatic backup did not produce a complete validated manifest")
+			}
 			return result, fmt.Errorf("refusing to flash without complete backup: %w", backupErr)
-		}
-		warning := "explicit override accepted: flashing without a complete backup: " + backupErr.Error()
-		result.Warnings = append(result.Warnings, warning)
-		if output != nil {
-			fmt.Fprintln(output, "WARNING:", warning)
 		}
 	}
 	if err := ctx.Err(); err != nil {

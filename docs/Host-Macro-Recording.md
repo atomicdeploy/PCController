@@ -14,9 +14,20 @@ Rejected commands are not recorded. This mode records host command evidence;
 it does not claim to capture physical-key or incoming RF actions.
 
 Times are monotonic host offsets from the first acknowledged action. They are
-not MCU execution timestamps. Playback schedules each step against one epoch,
-then waits for the normal command acknowledgement. The live result reports
-maximum error and tolerance violations rather than claiming perfect timing.
+not MCU execution timestamps. Playback preserves an explicit leading delay,
+then anchors its relative timeline once at the first successful acknowledgement.
+Later steps retain their recorded offsets from that boundary; a slow first ACK
+must not compress the recorded gaps. The clock is not reset after later ACKs.
+
+`startup_delay_us` reports the first command's completion lateness against its
+original deadline, including host scheduling, transport/ACK and observation
+latency. It remains included in maximum error, violation count and the final
+faithful result. Later steps still use the configured tolerance (100 ms for new
+host recordings); startup anchoring does not conceal later overruns. CLI/TUI/Web
+show startup delay separately so a completed macro is not mistaken for faithful
+timing. Exact physical actuation timing still requires MCU execution evidence:
+a delayed ACK can arrive after an output has already changed, and host-side
+acknowledgement timing is not a hard real-time motor-control guarantee.
 
 ## Quick record / save / play
 
@@ -25,19 +36,22 @@ one serial owner. Do not operate relays, motors or PWM loads until they are safe
 
 | Command | Purpose |
 |---|---|
-| `controller.exe exec "macro record start cinema-demo examples green"` | Start a named host take |
-| `controller.exe exec "display segments --duration 500ms TEST"` | Send a display action (or use the normal UI controls) |
-| `controller.exe exec "macro record status"` | Inspect captured count and any error |
-| `controller.exe exec "macro record save"` | Persist the take; `record stop` is equivalent |
-| `controller.exe exec "macro record discard"` | Explicitly discard instead |
-| `controller.exe exec "macro list"` | List saved IDs, names, modes and categories |
-| `controller.exe exec "macro show cinema-demo"` | Inspect ordered steps before playback |
-| `controller.exe exec "macro rename cinema-demo cinema-ready"` | Rename without changing ID or steps |
-| `controller.exe exec "macro category cinema-ready cinema"` | Set the category |
-| `controller.exe exec "macro play cinema-ready"` | Play the saved definition using its recorded mode |
-| `controller.exe exec "macro monitor"` | Combined playback and recorder snapshot |
-| `controller.exe exec "macro cancel"` | Cancel and switch relays/PWM off; report cleanup failures |
-| `controller.exe exec "macro cancel keep"` | Explicit opt-in to preserve current outputs |
+| `controller.exe exec macro record start cinema-demo examples green` | Start a named host take |
+| `controller.exe exec display segments --duration 500ms TEST` | Send a display action (or use the normal UI controls) |
+| `controller.exe exec macro record status` | Inspect captured count and any error |
+| `controller.exe exec macro record save` | Persist the take; `record stop` is equivalent |
+| `controller.exe exec macro record discard` | Explicitly discard instead |
+| `controller.exe exec macro list` | List saved IDs, names, modes and categories |
+| `controller.exe exec macro show cinema-demo` | Inspect ordered steps before playback |
+| `controller.exe exec macro rename cinema-demo cinema-ready` | Rename without changing ID or steps |
+| `controller.exe exec macro category cinema-ready cinema` | Set the category |
+| `controller.exe exec macro play cinema-ready` | Play the saved definition using its recorded mode |
+| `controller.exe exec macro monitor` | Combined playback and recorder snapshot |
+| `controller.exe exec macro cancel` | Cancel and switch relays/PWM off; report cleanup failures |
+| `controller.exe exec macro cancel keep` | Explicit opt-in to preserve current outputs |
+
+Pass command words as separate CLI arguments; quote only an individual name or
+text argument containing spaces, not the entire command after `exec`.
 
 The Web macro panel lists saved macros, records with a chosen name/category,
 plays a selected definition after its physical-output confirmation, and updates
