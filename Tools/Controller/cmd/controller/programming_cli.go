@@ -30,11 +30,17 @@ func runProgram(args []string, stdout, stderr io.Writer, store *appconfig.Store)
 	if len(args) == 0 {
 		return errors.New("usage: controller program flash HEX [PORT] | recover HEX [PORT] | --operation DIAGNOSTIC [program flags]")
 	}
-	if len(args) != 0 && strings.EqualFold(args[0], "recover") {
+	if programUsesSharedEngine(args) {
 		command := append([]string{"program"}, args...)
 		return runExec(command, stdout, stderr, store)
 	}
 	return runProgramWithConfig(args, stdout, stderr, store.Current())
+}
+
+// Recovery commands depend on the primary's authenticated device and durable
+// transaction state; they must not enter the low-level programmer flag parser.
+func programUsesSharedEngine(args []string) bool {
+	return len(args) > 0 && (strings.EqualFold(args[0], "recover") || strings.EqualFold(args[0], "abandon"))
 }
 
 // runProgramWithConfig executes an already-selected programming command using
