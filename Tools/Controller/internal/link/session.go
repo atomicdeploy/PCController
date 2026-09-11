@@ -37,11 +37,11 @@ type Session struct {
 	name string
 	port sessionPort
 
-	writeMu sync.Mutex
-	stateMu sync.RWMutex
-	waiters map[byte]*pendingRequest
-	nextSeq byte
-	hello   native.Hello
+	writeGate chan struct{}
+	stateMu   sync.RWMutex
+	waiters   map[byte]*pendingRequest
+	nextSeq   byte
+	hello     native.Hello
 
 	events chan Event
 	done   chan struct{}
@@ -113,12 +113,13 @@ func NewForPort(name string, port serial.Port) *Session {
 
 func newForTransport(name string, port sessionPort) *Session {
 	session := &Session{
-		name:    name,
-		port:    port,
-		waiters: make(map[byte]*pendingRequest),
-		nextSeq: 1,
-		events:  make(chan Event, 256),
-		done:    make(chan struct{}),
+		name:      name,
+		port:      port,
+		writeGate: make(chan struct{}, 1),
+		waiters:   make(map[byte]*pendingRequest),
+		nextSeq:   1,
+		events:    make(chan Event, 256),
+		done:      make(chan struct{}),
 	}
 	session.readDone.Add(1)
 	go session.readLoop()
@@ -228,17 +229,24 @@ func (s *Session) Request(
 	payload []byte,
 	expected ...byte,
 ) (native.Frame, error) {
+	if err := ctx.Err(); err != nil {
+		return native.Frame{}, err
+	}
 	sequence, waiter, err := s.reserveSequence(opcode, expected)
 	if err != nil {
 		return native.Frame{}, err
 	}
 	defer s.releaseSequence(sequence, waiter)
 
-	if err := s.WriteFrame(native.Frame{
+	encoded, err := native.Encode(native.Frame{
 		Opcode:  opcode,
 		Seq:     sequence,
 		Payload: append([]byte(nil), payload...),
-	}); err != nil {
+	})
+	if err != nil {
+		return native.Frame{}, err
+	}
+	if err := s.writeRawContext(ctx, encoded); err != nil {
 		return native.Frame{}, err
 	}
 
@@ -281,13 +289,42 @@ func (s *Session) WriteFrame(frame native.Frame) error {
 }
 
 func (s *Session) WriteRaw(data []byte) error {
+	return s.writeRawContext(context.Background(), data)
+}
+
+// All writers, including raw access and DTR, share this gate. A request that
+// expires while queued must never issue its stale mutation after the prior
+// writer finishes. Once port.Write begins its transport result remains final;
+// cancellation cannot safely retract bytes already given to the OS.
+func (s *Session) acquireWrite(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case s.writeGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.done:
+		return ErrClosed
+	}
+	if err := ctx.Err(); err != nil {
+		<-s.writeGate
+		return err
+	}
 	select {
 	case <-s.done:
+		<-s.writeGate
 		return ErrClosed
 	default:
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	return nil
+}
+
+func (s *Session) writeRawContext(ctx context.Context, data []byte) error {
+	if err := s.acquireWrite(ctx); err != nil {
+		return err
+	}
+	defer func() { <-s.writeGate }()
 	written, err := s.port.Write(data)
 	if err != nil {
 		return fmt.Errorf("write %s: %w", s.name, err)
@@ -322,8 +359,10 @@ func (s *Session) PulseDTR(ctx context.Context, lowTime time.Duration) error {
 	if lowTime <= 0 {
 		lowTime = 120 * time.Millisecond
 	}
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	if err := s.acquireWrite(ctx); err != nil {
+		return err
+	}
+	defer func() { <-s.writeGate }()
 	if err := s.port.SetDTR(true); err != nil {
 		return fmt.Errorf("assert DTR: %w", err)
 	}

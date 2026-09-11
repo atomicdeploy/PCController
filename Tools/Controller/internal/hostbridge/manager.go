@@ -874,6 +874,7 @@ func (manager *Manager) reconcile(config appconfig.Config) error {
 		config.Integrations.StatusLED,
 		manager.client.Snapshot(),
 		controller.Event{Kind: "config"},
+		time.Duration(config.Connection.RequestTimeoutMS)*time.Millisecond,
 	)
 	return nil
 }
@@ -930,6 +931,7 @@ func (manager *Manager) eventLoop(afterID uint64) {
 			config.Integrations.StatusLED,
 			manager.client.Snapshot(),
 			event,
+			time.Duration(config.Connection.RequestTimeoutMS)*time.Millisecond,
 		)
 		manager.dispatchWebhooks(config, event)
 		manager.dispatchTextMappings(config, event)
