@@ -3,7 +3,7 @@
 GitHub is the shared coordination record. Use short commit identifiers in prose,
 retain recovery branches, and distinguish merged source, installed packages,
 running processes, and physical acceptance. Do not publish credentials or private
-machine inventories. Owners should reply on [#327](https://github.com/atomicdeploy/PCController/issues/327)
+machine inventories. Owners should reply on coordination issue #327
 with their branch, uncommitted work, verified behavior, blockers and successor.
 
 ## Recovered work
