@@ -36,6 +36,15 @@ export function Icon({ icon: Icon, size = 18 }: { icon: LucideIcon; size?: numbe
   return <Icon aria-hidden="true" size={size} strokeWidth={1.8} />
 }
 
+export function BrandIcon({ fallback }: { fallback: string }) {
+  const [failed, setFailed] = useState(false)
+  return failed ? <span aria-hidden="true">{fallback}</span> : <img src="/favicon.svg" alt="" onError={() => setFailed(true)} />
+}
+
+export function RelayToggle({ active, disabled, label, onToggle }: { active: boolean; disabled: boolean; label: string; onToggle: () => void }) {
+  return <button type="button" className="relay-switch__toggle" aria-label={label} aria-pressed={active} disabled={disabled} onClick={onToggle}><i aria-hidden="true"><b /></i></button>
+}
+
 export function KeyCombo({ keys, separator = '+' }: { keys: Array<string | string[]>; separator?: string }) {
   const label = keys.map((group) => Array.isArray(group) ? group.join(interfaceCopy(' or ', ' یا ')) : group).join(separator === '+' ? interfaceCopy(' plus ', ' به‌علاوهٔ ') : ` ${separator} `)
   return (
@@ -766,7 +775,7 @@ export function BootGate({
             <span className="boot-fuji__trace" />
           </div>
           <div className="boot-identity">
-            <div className="brand__mark" aria-hidden="true"><span>{productShortName}</span><i /><i /></div>
+            <div className="brand__mark" aria-hidden="true"><BrandIcon fallback={productShortName} /></div>
             <div>
               <span>{productTitle.toUpperCase()} / {productTagline}</span>
               <h1 id="boot-title">{locale === 'fa' ? 'مرکز کنترل یکپارچه' : productTitle}</h1>

@@ -79,6 +79,7 @@ import {
   Icon,
   MetricCard,
   RangeField,
+  RelayToggle,
   SectionTitle,
   Segmented,
   StatusBadge,
@@ -505,7 +506,7 @@ export function ControlsView(props: SharedViewProps) {
               const active = Boolean(snapshot.status.active_relays & (1 << index))
               return (
                 <article key={index} className={`relay-switch${active ? ' is-active' : ''}`}>
-                  <span>R{index + 1}</span><i aria-hidden="true"><b /></i><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
+                  <span>R{index + 1}</span><RelayToggle active={active} disabled={!snapshot.connected} label={copy(`Toggle relay ${index + 1}`, `تغییر وضعیت رله ${index + 1}`)} onToggle={() => void command(`relay ${index + 1} ${active ? 'off' : 'on'}`)} /><small>{peripheralName(`relay.${index + 1}`, relayDefaults[index])}</small>
                   <div className="relay-switch__actions"><Button compact disabled={active} onClick={() => void command(`relay ${index + 1} on`)}>{t('on')}</Button><Button compact disabled={!active} onClick={() => void command(`relay ${index + 1} off`)}>{t('off')}</Button></div>
                 </article>
               )

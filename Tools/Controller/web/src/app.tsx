@@ -39,7 +39,7 @@ import {
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
 import { createAudioEngine, type AudioCue, type AudioEngine } from './audio-engine'
 import { BoardSettingsReadGate, boardSettingsGeneration } from './board-settings-read'
-import { BootGate, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
+import { BootGate, BrandIcon, Button, HotkeyHelp, Icon, KeyCombo, Modal, NavButton, PageTransition, StatusBadge, ToastStack } from './components'
 import { connectStream, execute, getSnapshot, getToken, getUIConfig, rpc, setToken as storeToken } from './api'
 import {
   adjacentPageHotkey,
@@ -1452,7 +1452,7 @@ export default function App() {
 	  )}
       <aside className="sidebar" aria-label={t('primaryNavigation')}>
         <div className="brand">
-          <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><span aria-hidden="true">{productShortName}</span><i /><i /></a>
+          <a className="brand__mark" href="#/dashboard" aria-label={`${productTitle} ${t('dashboardLink')}`}><BrandIcon fallback={productShortName} /></a>
           <a className="brand__copy" href="#/dashboard"><strong>{productTitle}</strong><span>{productTagline}</span></a>
           <button className="sidebar-toggle" aria-label={t(sidebarOpen ? 'collapseNavigation' : 'expandNavigation')} onClick={() => setSidebarOpen((value) => !value)}>{sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}</button>
         </div>
@@ -1511,7 +1511,7 @@ export default function App() {
               exit={{ x: drawerClosedOffset, opacity: 0 }}
               transition={{ duration: .32, ease: [0.22, 1, 0.36, 1] }}
             >
-              <header><div className="brand__mark"><span>{productShortName}</span><i /><i /></div><strong>{productTitle}</strong><button type="button" aria-label={t('closeNavigation')} onClick={() => setMobileNav(false)}><X size={19} /></button></header>
+              <header><div className="brand__mark"><BrandIcon fallback={productShortName} /></div><strong>{productTitle}</strong><button type="button" aria-label={t('closeNavigation')} onClick={() => setMobileNav(false)}><X size={19} /></button></header>
               {navigation.map((item) => <NavButton key={item.id} icon={item.icon} label={t(item.label)} active={page === item.id} onClick={() => navigate(item.id)} />)}
             </motion.aside>
           </motion.div>
