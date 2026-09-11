@@ -106,20 +106,20 @@ func TestStatusLEDDoorObservationUsesConfiguredHoldAndDirection(t *testing.T) {
 	policy.DoorCueHoldMS = 2750
 	arbiter := newStatusLEDArbiter(context.Background(), nil, nil, nil)
 	snapshot := controller.Snapshot{Connected: true, HaveStatus: true}
-	arbiter.Observe(policy, snapshot, controller.Event{Kind: "config"})
+	arbiter.Observe(policy, snapshot, controller.Event{Kind: "config"}, time.Second)
 
 	snapshot.Status.DoorOpen = true
 	before := time.Now()
-	arbiter.Observe(policy, snapshot, controller.Event{Kind: "door"})
-	_, _, _, cueUntil, cueOpen, _ := arbiter.currentObservation()
+	arbiter.Observe(policy, snapshot, controller.Event{Kind: "door"}, time.Second)
+	_, _, _, cueUntil, cueOpen, _, _ := arbiter.currentObservation()
 	remaining := cueUntil.Sub(before)
 	if !cueOpen || remaining < 2750*time.Millisecond || remaining > 2850*time.Millisecond {
 		t.Fatalf("open cue duration/direction mismatch: open=%t remaining=%s", cueOpen, remaining)
 	}
 
 	snapshot.Status.DoorOpen = false
-	arbiter.Observe(policy, snapshot, controller.Event{Kind: "door"})
-	_, _, _, cueUntil, cueOpen, _ = arbiter.currentObservation()
+	arbiter.Observe(policy, snapshot, controller.Event{Kind: "door"}, time.Second)
+	_, _, _, cueUntil, cueOpen, _, _ = arbiter.currentObservation()
 	if cueOpen || time.Until(cueUntil) < 2650*time.Millisecond {
 		t.Fatalf("close cue duration/direction mismatch: open=%t until=%s", cueOpen, cueUntil)
 	}

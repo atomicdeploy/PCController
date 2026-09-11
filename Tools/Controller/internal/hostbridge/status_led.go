@@ -45,15 +45,16 @@ type statusLEDArbiter struct {
 	onError func(error)
 	wake    chan struct{}
 
-	mu           sync.Mutex
-	policy       appconfig.StatusLEDPolicy
-	snapshot     controller.Snapshot
-	rfUntil      time.Time
-	macroActive  bool
-	doorKnown    bool
-	doorOpen     bool
-	doorCueOpen  bool
-	doorCueUntil time.Time
+	mu             sync.Mutex
+	policy         appconfig.StatusLEDPolicy
+	snapshot       controller.Snapshot
+	rfUntil        time.Time
+	macroActive    bool
+	doorKnown      bool
+	doorOpen       bool
+	doorCueOpen    bool
+	doorCueUntil   time.Time
+	requestTimeout time.Duration
 }
 
 func newStatusLEDArbiter(
@@ -74,11 +75,13 @@ func (arbiter *statusLEDArbiter) Observe(
 	policy appconfig.StatusLEDPolicy,
 	snapshot controller.Snapshot,
 	event controller.Event,
+	requestTimeout time.Duration,
 ) {
 	now := time.Now()
 	arbiter.mu.Lock()
 	arbiter.policy = policy
 	arbiter.snapshot = snapshot
+	arbiter.requestTimeout = requestTimeout
 	if snapshot.Connected && snapshot.HaveStatus {
 		changed := arbiter.doorKnown && arbiter.doorOpen != snapshot.Status.DoorOpen
 		if changed || event.Kind == "door" {
@@ -141,9 +144,12 @@ func (arbiter *statusLEDArbiter) Run() {
 		case <-arbiter.wake:
 		case <-timer.C:
 		}
+		if arbiter.ctx.Err() != nil {
+			return
+		}
 
 		now := time.Now()
-		policy, snapshot, rfUntil, doorCueUntil, doorCueOpen, macroActive :=
+		policy, snapshot, rfUntil, doorCueUntil, doorCueOpen, macroActive, requestTimeout :=
 			arbiter.currentObservation()
 		nextState, visual := selectStatusLEDState(
 			policy, snapshot, rfUntil, doorCueUntil, doorCueOpen, now,
@@ -198,7 +204,7 @@ func (arbiter *statusLEDArbiter) Run() {
 		current = frame
 		haveCurrent = true
 		if !haveLastSent || frame != lastSent {
-			requestContext, cancel := context.WithTimeout(arbiter.ctx, 500*time.Millisecond)
+			requestContext, cancel := context.WithTimeout(arbiter.ctx, requestTimeout)
 			err := sendStatusLEDFrame(
 				requestContext, arbiter.target, state, frame,
 			)
@@ -241,11 +247,16 @@ func (arbiter *statusLEDArbiter) currentObservation() (
 	time.Time,
 	bool,
 	bool,
+	time.Duration,
 ) {
 	arbiter.mu.Lock()
 	defer arbiter.mu.Unlock()
+	timeout := arbiter.requestTimeout
+	if timeout <= 0 {
+		timeout = time.Duration(appconfig.Defaults().Connection.RequestTimeoutMS) * time.Millisecond
+	}
 	return arbiter.policy, arbiter.snapshot, arbiter.rfUntil,
-		arbiter.doorCueUntil, arbiter.doorCueOpen, arbiter.macroActive
+		arbiter.doorCueUntil, arbiter.doorCueOpen, arbiter.macroActive, timeout
 }
 
 func selectStatusLEDState(

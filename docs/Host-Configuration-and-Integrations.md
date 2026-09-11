@@ -16,6 +16,25 @@ DTR or reset the board merely because the application started. Use the visible
 Open, Close, and Reset controls or the matching commands when you intend those
 actions.
 
+## Serial request budgets and cancellation
+
+`connection.request_timeout_ms` is the shared configured response budget
+(1200 ms by default). The status-RGB policy uses that current setting instead
+of a separate 500 ms deadline. Changing the budget does not lower the configured
+animation cadence, bypass safety ownership, or suppress actual I/O failures.
+Caller/operation deadlines still apply; the existing base-output scheduler also
+caps its operation at two seconds.
+
+Serial requests, raw writes and DTR pulses share one write-admission gate.
+A request cancelled before writing, including while waiting behind another
+writer, does not subsequently send stale bytes. Cancellation cannot retract
+bytes already handed to the operating system: a timeout after sending does
+not prove the board ignored the command, so non-idempotent commands must not be
+blindly retried. DTR cancellation restores an asserted line before releasing
+the gate. These transport rules apply to the shared Go command path used by
+CLI, TUI, IPC, API and Web clients. See RGB follow-up issue #277
+for the remaining visual ownership and frame-rate acceptance work.
+
 ## Keep PC and MCU settings separate
 
 There are two independent persistence domains:
