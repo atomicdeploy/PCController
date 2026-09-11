@@ -77,7 +77,7 @@ func TestMCURecorderIgnoresBackgroundRGBButPreservesExplicitCommands(t *testing.
 			wantSteps := 2
 			if explicitRGB {
 				wantSteps = 3
-				if len(macro.Steps) != wantSteps || macro.Steps[1].Kind != "rgb" || macro.Steps[1].AtUS != 250 {
+				if len(macro.Steps) != wantSteps || macro.Steps[1].Kind != "status-led" || macro.Steps[1].AtUS != 250 {
 					t.Fatalf("explicit user RGB was filtered or mistimed: %#v", macro.Steps)
 				}
 			}
