@@ -650,8 +650,32 @@ func (runner *MacroRunner) play(
 	if watchdog < 15*time.Second {
 		watchdog = 15 * time.Second
 	}
-	deadline := time.Now().Add(watchdog)
+	completion := macroCompletionWindow{watchdog: watchdog, watchdogDeadline: time.Now().Add(watchdog)}
 	cancelled := false
+	consume := func(event Event) {
+		afterID = event.ID
+		if event.Frame.Seq == native.MacroExecutionSequence {
+			if observed < len(compiled.steps) {
+				actualUS, timed := native.ResponseDeviceMicros(event.Frame)
+				if timed {
+					step := compiled.steps[observed]
+					delta := int32(actualUS - (status.StartedAtUS + step.dueUS))
+					runner.recordEvidence(observed, delta, event.Frame.Opcode == native.OpACK)
+					observed++
+					status = acknowledgeMacroDeviceStatus(status, observed, step.recordLength)
+					runner.applyDeviceStatus(status)
+				}
+			}
+			return
+		}
+		if event.Frame.Opcode == native.OpEvent {
+			deviceEvent, parseErr := native.ParseDeviceEvent(event.Frame.Payload)
+			if parseErr == nil && deviceEvent.Macro != nil && deviceEvent.Macro.ID == compiled.definition.ID && deviceEvent.Macro.State != native.MacroBuffering {
+				status = mergeMacroDeviceStatus(status, *deviceEvent.Macro)
+				runner.applyDeviceStatus(status)
+			}
+		}
+	}
 	for err == nil {
 		if ctx.Err() != nil {
 			cancelled = true
@@ -664,8 +688,12 @@ func (runner *MacroRunner) play(
 			}
 			break
 		}
-		if time.Now().After(deadline) {
-			err = fmt.Errorf("macro playback exceeded its %s watchdog", watchdog)
+		if event, pending := runner.runtime.pendingMacroEvent(afterID, compiled.definition.ID); pending {
+			consume(event)
+			continue
+		}
+		if terminal, terminalErr := completion.terminal(status, observed, len(compiled.steps), time.Now()); terminal {
+			err = terminalErr
 			break
 		}
 
@@ -681,20 +709,21 @@ func (runner *MacroRunner) play(
 			runner.applyDeviceStatus(status)
 		}
 
-		if macroTerminal(status.State) {
-			if observed >= len(compiled.steps) || status.State != native.MacroCompleted {
-				break
-			}
-			// The final ACK precedes the completion event on the wire, but the
-			// session pump can publish them on adjacent scheduler turns.
-			deadline = minTime(deadline, time.Now().Add(150*time.Millisecond))
-		}
-
 		wait := macroStatusPollInterval - time.Since(lastQuery)
+		if status.State == native.MacroCompleted {
+			// Execution is finished. Wait only for evidence; another blocking
+			// query cannot supply missing per-step timestamps.
+			wait = min(macroStatusPollInterval, time.Until(completion.evidenceDeadline))
+		}
 		if wait <= 0 {
-			status, err = runner.queryBoard(ctx)
+			if status.State == native.MacroCompleted {
+				continue
+			}
+			var reported native.MacroStatus
+			reported, err = runner.queryBoard(ctx)
 			lastQuery = time.Now()
 			if err == nil {
+				status = mergeMacroDeviceStatus(status, reported)
 				runner.applyDeviceStatus(status)
 			}
 			continue
@@ -712,35 +741,7 @@ func (runner *MacroRunner) play(
 			err = waitErr
 			break
 		}
-		afterID = event.ID
-		if event.Frame.Seq == native.MacroExecutionSequence {
-			if observed < len(compiled.steps) {
-				actualUS, timed := native.ResponseDeviceMicros(event.Frame)
-				if timed {
-					step := compiled.steps[observed]
-					delta := int32(actualUS - (status.StartedAtUS + step.dueUS))
-					runner.recordEvidence(observed, delta, event.Frame.Opcode == native.OpACK)
-					if int(status.Fill) >= step.recordLength {
-						status.Fill -= byte(step.recordLength)
-					} else {
-						status.Fill = 0
-					}
-					observed++
-				}
-				status.ExecutedSteps = uint16(observed)
-				runner.applyDeviceStatus(status)
-			}
-			continue
-		}
-		if event.Frame.Opcode == native.OpEvent {
-			deviceEvent, parseErr := native.ParseDeviceEvent(event.Frame.Payload)
-			if parseErr == nil && deviceEvent.Macro != nil &&
-				deviceEvent.Macro.ID == compiled.definition.ID &&
-				deviceEvent.Macro.State != native.MacroBuffering {
-				status = *deviceEvent.Macro
-				runner.applyDeviceStatus(status)
-			}
-		}
+		consume(event)
 	}
 	if ctx.Err() != nil && !cancelled {
 		cancelled = true
@@ -756,7 +757,8 @@ func (runner *MacroRunner) play(
 		}
 	}
 
-	if err != nil && !cancelled {
+	var evidenceError *macroTimingEvidenceError
+	if err != nil && !cancelled && !errors.As(err, &evidenceError) {
 		if cleanupErr := runner.cancelBoard(false); cleanupErr != nil {
 			err = errors.Join(err, fmt.Errorf("macro safe-stop cleanup: %w", cleanupErr))
 		}
@@ -1007,6 +1009,7 @@ func (runner *MacroRunner) showMacroIdentity(ctx context.Context, compiled compi
 
 func (runner *MacroRunner) applyDeviceStatus(status native.MacroStatus) {
 	runner.mu.Lock()
+	runner.state.Step = max(runner.state.Step, int(status.ExecutedSteps))
 	runner.state.Device = status
 	runner.state.DeviceStartedAtUS = status.StartedAtUS
 	runner.state.AcceptedBytes = status.AcceptedBytes
@@ -1021,7 +1024,7 @@ func (runner *MacroRunner) recordEvidence(index int, delta int32, succeeded bool
 	if !succeeded && runner.state.DispatchErrors < 255 {
 		runner.state.DispatchErrors++
 	}
-	runner.state.Step = index + 1
+	runner.state.Step = max(runner.state.Step, index+1)
 	runner.state.EvidenceSteps = index + 1
 	runner.state.LastTimingDeltaUS = delta
 	absolute := uint32(delta)
@@ -1079,11 +1082,16 @@ func (runner *MacroRunner) finishPlayback(
 	runner.state.DispatchErrors = status.DispatchErrors
 	runner.state.BufferFill = status.Fill
 	runner.state.AcceptedBytes = status.AcceptedBytes
+	runner.state.Step = max(runner.state.Step, int(status.ExecutedSteps))
 	runner.state.Faithful = err == nil && !cancelled &&
 		status.State == native.MacroCompleted &&
 		status.Underruns == 0 && status.DispatchErrors == 0 &&
 		observed == len(macro.Steps) && runner.state.TimingViolations == 0
+	var evidenceError *macroTimingEvidenceError
 	switch {
+	case err != nil && errors.As(err, &evidenceError) && status.State == native.MacroCompleted:
+		runner.state.Lifecycle = "completed"
+		runner.state.LastError = err.Error()
 	case err != nil:
 		runner.state.Lifecycle = "failed"
 		runner.state.LastError = err.Error()
@@ -1467,11 +1475,4 @@ func validMacroColor(value string) bool {
 
 func macroTerminal(state byte) bool {
 	return state == native.MacroCancelled || state == native.MacroCompleted || state == native.MacroFailed
-}
-
-func minTime(first, second time.Time) time.Time {
-	if first.Before(second) {
-		return first
-	}
-	return second
 }

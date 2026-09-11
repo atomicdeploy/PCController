@@ -106,6 +106,16 @@ it does not prove streamed circular refill, physical/RF recording, cross-host
 clock synchronization, loaded motion timing, or MCU reset/session-replacement
 safety. Those remain separate acceptance work under the macro backlog.
 
+MCU completion and timing proof are tracked separately. The host drains queued
+execution evidence before querying or evaluating a timeout, never lets older
+events reduce authoritative executed counts, and allows a separate bounded
+2-second grace for missing timestamps after the board reports completion.
+`macro status`/`monitor` reports both `step` and `evidence` counts. A completed
+board with incomplete timestamps stays completed but explicitly reports timing
+unverified and `faithful=false`; it is not a fictitious 15-second playback
+timeout. Complete timestamp evidence takes precedence over an elapsed evidence
+grace. The ordinary playback watchdog and cancellation policies remain active.
+
 To reproduce the isolated playback independently of recording, first choose an
 unused ID/name and create a draft through the packaged Go controller. The
 following PowerShell example uses ID 4 **only after verifying it is unused**:
