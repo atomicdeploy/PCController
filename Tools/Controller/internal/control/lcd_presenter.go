@@ -142,7 +142,6 @@ func (presenter *LCDPresenter) Configure(options LCDPresentationOptions) error {
 		presenter.send(version, prompt[0], prompt[1])
 	} else if presenter.physical != nil {
 		presenter.physical.reset()
-		presenter.ReportPhysicalError("HOST-controlled LCD", nil)
 	}
 	return nil
 }
@@ -171,19 +170,20 @@ func (presenter *LCDPresenter) State() LCDPresentationState {
 	return state
 }
 
-// ReportPhysicalError publishes only state changes. A missing optional LCD is
-// kept visible in LCDPresentationState while background probes stay quiet.
+// ReportPhysicalError publishes once per outage, not once per error string.
+// A nil error must represent confirmed physical recovery, never a config reset.
 func (presenter *LCDPresenter) ReportPhysicalError(scope string, err error) bool {
 	message := ""
 	if err != nil {
 		message = err.Error()
 	}
 	presenter.mu.Lock()
-	if message == presenter.physicalError {
+	changed := (message == "") != (presenter.physicalError == "")
+	presenter.physicalError = message
+	if !changed {
 		presenter.mu.Unlock()
 		return false
 	}
-	presenter.physicalError = message
 	presenter.mu.Unlock()
 	if message != "" && presenter.runtime != nil {
 		presenter.runtime.PublishHostEvent("lcd.error", scope+": "+message)
@@ -209,8 +209,10 @@ func (presenter *LCDPresenter) RescanPhysical(ctx context.Context) (byte, error)
 	presenter.mu.RUnlock()
 	presenter.physical.reset()
 	if err := presenter.physical.render(ctx, lcdDeviceKey(snapshot), prompt[0], prompt[1]); err != nil {
+		presenter.ReportPhysicalError("HOST-controlled LCD", err)
 		return 0, err
 	}
+	presenter.ReportPhysicalError("HOST-controlled LCD", nil)
 	return presenter.physical.state().Address, nil
 }
 
@@ -352,7 +354,9 @@ func (presenter *LCDPresenter) ensurePhysicalHome() {
 	}
 	defer presenter.releaseSend()
 	if err := presenter.physical.ensureHome(ctx, lcdDeviceKey(snapshot)); err != nil {
-		presenter.runtime.PublishHostEvent("lcd.error", "HOST-controlled LCD home: "+err.Error())
+		presenter.ReportPhysicalError("HOST-controlled LCD home", err)
+	} else if presenter.physical.state().Available {
+		presenter.ReportPhysicalError("HOST-controlled LCD home", nil)
 	}
 }
 
@@ -377,7 +381,6 @@ func (presenter *LCDPresenter) clearConnectionState() {
 	presenter.mu.Lock()
 	presenter.firmwareLines = [2]string{}
 	presenter.firmwareDevice = ""
-	presenter.physicalError = ""
 	presenter.mu.Unlock()
 	if presenter.physical != nil {
 		presenter.physical.reset()
@@ -467,7 +470,9 @@ func (presenter *LCDPresenter) RenderPhysical(ctx context.Context, line1, line2 
 	if !snapshot.Connected || snapshot.Hello.Capabilities&native.CapabilityI2CTransfer == 0 {
 		return fmt.Errorf("connected firmware does not expose the HOST-controlled LCD transport")
 	}
-	return presenter.physical.render(ctx, lcdDeviceKey(snapshot), line1, line2)
+	err := presenter.physical.render(ctx, lcdDeviceKey(snapshot), line1, line2)
+	presenter.ReportPhysicalError("HOST-controlled LCD", err)
+	return err
 }
 
 // PrepareDisconnect presents the fixed offline fallback while UART/I2C is

@@ -37,6 +37,11 @@ for the remaining visual ownership and frame-rate acceptance work.
 
 ## Keep PC and MCU settings separate
 
+Physical LCD outage notifications are emitted once per outage. Changing probe
+errors, USB reconnects, and disabling presentation do not re-arm the warning.
+A successful physical render or detection re-arms it for the next failure;
+current diagnostic state remains available while repeated warnings stay quiet.
+
 There are two independent persistence domains:
 
 | Owner | Stored data | Storage |
