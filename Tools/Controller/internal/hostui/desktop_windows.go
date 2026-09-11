@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 
+	"pccontroller.local/controller/internal/installer"
 	"pccontroller.local/controller/internal/productidentity"
 )
 
@@ -216,7 +217,21 @@ func shortcutPathInDirectory(directory, displayName string) (string, error) {
 	return shortcut, nil
 }
 
+type shortcutPredecessorCheck func(executable, candidate string) (bool, error)
+
+func managedShortcutPredecessor(executable, candidate string) (bool, error) {
+	service, err := installer.NewService()
+	if err != nil {
+		return false, err
+	}
+	return service.OwnsDesktopPredecessor(executable, candidate)
+}
+
 func shortcutOwnership(executable, shortcut, appID string) (exists, owned bool, err error) {
+	return shortcutOwnershipWithPredecessor(executable, shortcut, appID, managedShortcutPredecessor)
+}
+
+func shortcutOwnershipWithPredecessor(executable, shortcut, appID string, predecessor shortcutPredecessorCheck) (exists, owned bool, err error) {
 	info, statErr := os.Lstat(shortcut)
 	if isNotExist(statErr) {
 		return false, false, nil
@@ -231,14 +246,25 @@ func shortcutOwnership(executable, shortcut, appID string) (exists, owned bool, 
 	if inspectErr != nil {
 		return true, false, fmt.Errorf("inspect shortcut ownership: %w", inspectErr)
 	}
-	if !shortcutOwnedBy(executable, link) {
+	// Validate launch semantics even when the target is a legitimate old slot.
+	if !shortcutOwnedBy(link.Target, link) {
 		return true, false, nil
 	}
 	identity, identityErr := shortcutAppUserModelID(shortcut)
 	if identityErr != nil {
 		return true, false, fmt.Errorf("inspect shortcut AppUserModelID: %w", identityErr)
 	}
-	return true, identity == appID, nil
+	if identity != appID {
+		return true, false, nil
+	}
+	if sameWindowsPath(link.Target, executable) {
+		return true, true, nil
+	}
+	if appID != productidentity.StableAppID || predecessor == nil {
+		return true, false, nil
+	}
+	owned, err = predecessor(executable, link.Target)
+	return true, owned, err
 }
 
 func removeOwnedShortcut(executable, shortcut, appID string) (removed, preserved bool, err error) {
@@ -268,6 +294,10 @@ func removeOwnedShortcut(executable, shortcut, appID string) (removed, preserved
 // Paths are supplied separately so tests exercise real Shell links only inside
 // temporary folders, never the current user's actual Desktop or Start Menu.
 func ensureWindowsShortcuts(status *DesktopIntegrationStatus, appID, displayName string) error {
+	return ensureWindowsShortcutsWithPredecessor(status, appID, displayName, managedShortcutPredecessor)
+}
+
+func ensureWindowsShortcutsWithPredecessor(status *DesktopIntegrationStatus, appID, displayName string, predecessor shortcutPredecessorCheck) error {
 	var result error
 	for _, target := range []struct {
 		name, path string
@@ -279,7 +309,7 @@ func ensureWindowsShortcuts(status *DesktopIntegrationStatus, appID, displayName
 		if target.path == "" {
 			continue
 		}
-		ready, preserved, err := ensureOwnedShortcut(status.Executable, target.path, appID, displayName)
+		ready, preserved, err := ensureOwnedShortcutWithPredecessor(status.Executable, target.path, appID, displayName, predecessor)
 		*target.ready = ready
 		if preserved {
 			status.Skipped = append(status.Skipped, target.name+"-shortcut-not-owned")
@@ -293,7 +323,11 @@ func ensureWindowsShortcuts(status *DesktopIntegrationStatus, appID, displayName
 }
 
 func ensureOwnedShortcut(executable, shortcut, appID, displayName string) (ready, preserved bool, err error) {
-	exists, owned, err := shortcutOwnership(executable, shortcut, appID)
+	return ensureOwnedShortcutWithPredecessor(executable, shortcut, appID, displayName, managedShortcutPredecessor)
+}
+
+func ensureOwnedShortcutWithPredecessor(executable, shortcut, appID, displayName string, predecessor shortcutPredecessorCheck) (ready, preserved bool, err error) {
+	exists, owned, err := shortcutOwnershipWithPredecessor(executable, shortcut, appID, predecessor)
 	if err != nil {
 		return false, false, err
 	}
@@ -329,7 +363,7 @@ func ensureOwnedShortcut(executable, shortcut, appID, displayName string) (ready
 	}
 	// Recheck before replacing an existing file; creation failure never leaves
 	// a partial link at the user's final path.
-	exists, owned, err = shortcutOwnership(executable, shortcut, appID)
+	exists, owned, err = shortcutOwnershipWithPredecessor(executable, shortcut, appID, predecessor)
 	if err != nil {
 		return false, false, err
 	}

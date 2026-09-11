@@ -125,6 +125,15 @@ uninstall removes only links with the expected target, launch arguments and
 AppUserModelID. Taskbar pinning remains a Windows-shell/user action and is not
 claimed by either readiness flag.
 
+A stale link to the immediately previous installed slot can also be repaired
+from the active slot: the installer must validate the current user's root
+ownership marker, active/previous state and complete digests of both packages,
+and the link must retain the expected AppUserModelID and allowed web/TUI launch
+arguments. A stale process cannot retarget a current link backward. Arbitrary
+same-directory files and older retained slots are not automatically adopted;
+their disposition remains explicit. Normal journaled updates still remove
+their precisely owned prior links before creating the new ones.
+
 Notification delivery selects the strongest available Windows surface in a
 fixed order: branded WinRT toast, legacy notification-area balloon with the
 product icon, then a bounded TaskDialog. `desktop test` succeeds only when the
