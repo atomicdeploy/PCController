@@ -970,6 +970,14 @@ func (manager *Manager) ingestPeerEvent(peerName string, raw json.RawMessage) bo
 	if json.Unmarshal(raw, &event) != nil || strings.TrimSpace(event.Kind) == "" {
 		return false
 	}
+	// Peer subscriptions also contain events that this host previously sent.
+	// Consume those envelopes without publishing them again: guarding only the
+	// outbound queue does not stop two reciprocal subscription readers echoing.
+	if strings.TrimSpace(event.Metadata["bridge.ingress"]) != "" ||
+		strings.EqualFold(strings.TrimSpace(event.Source), "bridge") ||
+		strings.EqualFold(strings.TrimSpace(event.Source), "websocket") {
+		return true
+	}
 	manager.client.IngestBridgeEvent(peerName, event)
 	return true
 }
