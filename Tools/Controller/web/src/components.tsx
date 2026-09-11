@@ -675,7 +675,7 @@ export function DataRow({ label, value, mono, tone }: { label: ReactNode; value:
 
 export function NavButton({ icon, label, active, badge, onClick }: { icon: LucideIcon; label: string; active?: boolean; badge?: string; onClick: () => void }) {
   return (
-    <button className={`nav-button${active ? ' is-active' : ''}`} onClick={onClick} aria-current={active ? 'page' : undefined}>
+    <button className={`nav-button${active ? ' is-active' : ''}`} onClick={onClick} aria-label={label} aria-current={active ? 'page' : undefined}>
       <span className="nav-button__icon"><Icon icon={icon} size={20} /></span>
       <span className="nav-button__label">{label}</span>
       {badge && <span className="nav-button__badge">{badge}</span>}

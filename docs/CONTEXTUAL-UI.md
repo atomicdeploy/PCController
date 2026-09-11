@@ -42,4 +42,8 @@ Model the interaction as a state system, not a collection of accumulated control
 
 For UI changes, verify relevant transitions, authoritative object binding, applicable permissions, keyboard/focus behavior and stable layout. Inspect real rendered results in supported themes and narrow layouts. Documentation or a screenshot of one state alone does not prove runtime acceptance.
 
+Collapsed icon-only navigation uses square 44 px hit targets. Remove hidden labels,
+badges and chevrons from grid layout, not just visual opacity, and keep explicit
+accessible button names. Verify expanded/mobile layouts and both text directions.
+
 Shorthands: **Contextual** means truthful state-aware semantics with stable usable structure. **No narration** means no specification leakage or explanations of obvious interface mechanics.
