@@ -106,12 +106,24 @@ is connected, and both automatic launch and tray actions refuse to open a page
 while offline. Connect/Reconnect and Exit remain available in either state.
 
 Windows desktop integration is explicit and reversible. `desktop ensure`
-installs the current executable's per-user protocol, Start-menu entry, and
+installs the current executable's per-user protocol, Start-menu and Desktop entries, and
 hash-bound `toast-logo.png` identity. Every WinRT toast uses that local PNG as
 its `appLogoOverride`; Windows is never asked to silently render a text-only
 product toast. `desktop test` sends a branded, actionable end-to-end
 diagnostic. `desktop uninstall` removes only entries whose ownership still
-matches that executable.
+matches that executable and AppUserModelID. Both launch links target the
+packaged `.exe` with `web` arguments and use icon index zero from that same
+executable, never a separate `.ico` file. The Desktop location comes from the
+Windows per-user known folder, including a redirected Desktop.
+
+`shortcut_ready`/`shortcut` describe the Start Menu entry;
+`desktop_shortcut_ready`/`desktop_shortcut` independently report the actual
+Desktop entry. A conflicting user/other-application link is preserved and
+reported in `skipped`; incomplete integration is an error, not successful
+installation. Owned links are staged and verified before replacement, and
+uninstall removes only links with the expected target, launch arguments and
+AppUserModelID. Taskbar pinning remains a Windows-shell/user action and is not
+claimed by either readiness flag.
 
 Notification delivery selects the strongest available Windows surface in a
 fixed order: branded WinRT toast, legacy notification-area balloon with the
@@ -143,6 +155,10 @@ installed digest is healthy and rebuilds a damaged slot only from a verified
 package. Enabling native desktop integration or changing its display name also
 journals the prior and desired identities before mutation; interrupted cleanup
 or activation is retried idempotently before status can report healthy. The
+matching-package install/repair path also rechecks native integration and
+recreates a deleted owned Desktop link; no package-version change is required.
+`desktop_managed` records installer management intent, not proof that a user
+has not subsequently removed a link or that Windows has pinned the app. The
 default uninstall preserves both roaming configuration and local host data,
 including board backups. Data removal is deliberately separate:
 
