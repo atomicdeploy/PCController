@@ -96,6 +96,23 @@ describe('offline and settings UI contracts', () => {
     expect(markup).toContain('Show text')
   })
 
+  it.each([null, undefined, []])('renders an empty macro draft without crashing when steps is %s', (steps) => {
+    const snapshot = {
+      ...emptySnapshot,
+      connected: true,
+      have_status: true,
+      macros: {
+        library: [{ id: 4, name: 'New draft', mode: 'host', steps }],
+        playback: { running: false, name: '', mode: 'host', step: 0, step_count: 0, faithful: false, maximum_timing_error_us: 0 },
+        recording: { active: false, name: '', mode: 'host', steps: 0 },
+      },
+    }
+    const markup = renderToStaticMarkup(<WorkbenchView {...shared()} snapshot={snapshot} />)
+    expect(markup).toContain('New draft · host · 0 steps')
+    expect(markup).toContain('Macro inspection &amp; recording')
+    expect(markup).toContain('Play selected')
+  })
+
   it('renders only user PWM channels in the generic mixer and keeps system channels role-specific', () => {
     const connected = {
       ...emptySnapshot,
