@@ -758,6 +758,9 @@ func (runner *MacroRunner) play(
 	}
 
 	var evidenceError *macroTimingEvidenceError
+	// A completed queue has already executed its intended final output state.
+	// Missing host timestamps are a proof failure, not unfinished execution;
+	// do not issue another cancellation/output action merely to repair evidence.
 	if err != nil && !cancelled && !errors.As(err, &evidenceError) {
 		if cleanupErr := runner.cancelBoard(false); cleanupErr != nil {
 			err = errors.Join(err, fmt.Errorf("macro safe-stop cleanup: %w", cleanupErr))
