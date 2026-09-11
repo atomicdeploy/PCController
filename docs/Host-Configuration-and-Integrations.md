@@ -32,7 +32,7 @@ bytes already handed to the operating system: a timeout after sending does
 not prove the board ignored the command, so non-idempotent commands must not be
 blindly retried. DTR cancellation restores an asserted line before releasing
 the gate. These transport rules apply to the shared Go command path used by
-CLI, TUI, IPC, API and Web clients. See [RGB follow-up #277](https://github.com/atomicdeploy/PCController/issues/277)
+CLI, TUI, IPC, API and Web clients. See RGB follow-up issue #277
 for the remaining visual ownership and frame-rate acceptance work.
 
 ## Keep PC and MCU settings separate
