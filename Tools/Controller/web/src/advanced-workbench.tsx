@@ -794,11 +794,11 @@ export function AdvancedWorkbench({
             <label className="advanced-field">{copy('Saved macro', 'ماکروی ذخیره‌شده')}
               <select value={macroRef} onChange={(event) => setMacroRef(event.target.value)}>
                 <option value="">{copy('Choose a macro', 'انتخاب ماکرو')}</option>
-                {(snapshot.macros?.library ?? []).map((macro) => <option key={macro.id} value={String(macro.id)}>{macro.name} · {macro.mode || 'mcu'} · {macro.steps.length} {copy('steps', 'گام')}</option>)}
+                {(snapshot.macros?.library ?? []).map((macro) => <option key={macro.id} value={String(macro.id)}>{macro.name} · {macro.mode || 'mcu'} · {macro.steps?.length ?? 0} {copy('steps', 'گام')}</option>)}
               </select>
             </label>
             <Button icon={ListChecks} disabled={!macroRef} onClick={() => void run(`macro show ${macroRef}`)}>{copy('Inspect steps', 'بررسی گام‌ها')}</Button>
-            <Button icon={Play} disabled={!online || !macroRef || snapshot.macros?.recording.active || snapshot.macros?.playback.running || !snapshot.macros?.library.find((macro) => String(macro.id) === macroRef)?.steps.length} onClick={() => prepare(`macro play ${macroRef}`, copy('Playback runs the saved physical output commands.', 'اجرا، فرمان‌های خروجی فیزیکی ذخیره‌شده را انجام می‌دهد.'), 'danger', true)}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
+            <Button icon={Play} disabled={!online || !macroRef || snapshot.macros?.recording.active || snapshot.macros?.playback.running || !snapshot.macros?.library.find((macro) => String(macro.id) === macroRef)?.steps?.length} onClick={() => prepare(`macro play ${macroRef}`, copy('Playback runs the saved physical output commands.', 'اجرا، فرمان‌های خروجی فیزیکی ذخیره‌شده را انجام می‌دهد.'), 'danger', true)}>{copy('Play selected', 'اجرای انتخاب‌شده')}</Button>
           </div>
           <div className="advanced-fields advanced-fields--record">
             <TextField label={copy('New recording name', 'نام ضبط جدید')} value={macroName} dir="ltr" spellCheck={false} onChange={(event) => setMacroName(event.target.value)} />

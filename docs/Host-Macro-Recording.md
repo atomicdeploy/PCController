@@ -13,6 +13,14 @@ RGB animation and stream/settings housekeeping are intentionally excluded.
 Rejected commands are not recorded. This mode records host command evidence;
 it does not claim to capture physical-key or incoming RF actions.
 
+Both recorders exclude commands explicitly marked as automatic background
+presentation, including the status-policy RGB animation, safety-status frames,
+and restoration of the policy base after an overlay. MCU mode still captures
+deliberately requested RGB and other queueable commands; it does not discard an
+opcode merely because the status engine also uses it. MCU offsets come from
+timestamped command acknowledgements, with a default tolerance of 2500 µs.
+This provenance filter does not disable the status engine or its safety cues.
+
 Times are monotonic host offsets from the first acknowledged action. They are
 not MCU execution timestamps. Playback preserves an explicit leading delay,
 then anchors its relative timeline once at the first successful acknowledgement.
@@ -61,13 +69,15 @@ client. Its console accepts the identical commands. `controller.snapshot` and
 `/api/snapshot` expose `macros.library`, `macros.recording` and `macros.playback`;
 command transports use the existing `controller.command.execute` route rather
 than a second macro engine. All clients refresh host snapshots on macro events;
-no board polling or manual page refresh is required for macro progress.
+the UI needs no polling or manual page refresh for macro progress. The MCU
+streaming runner also retains a 100 ms status-query fallback alongside its
+execution/status-event handling; it is not an entirely poll-free board path.
 
 Empty saves and storage failures retain the take for retry or explicit discard.
-Recording cannot start during playback. Cancellation is checked before every
-dispatch, including simultaneous steps. Raw relay/motion opcodes still use the
+Recording cannot start during playback. Host cancellation is checked before
+every dispatch, including simultaneous steps. Raw relay/motion opcodes still use the
 host motion-permission check. Existing output interlocks remain authoritative.
-Playback and its cancellation cleanup stay bound to the session captured at
+Host playback and its cancellation cleanup stay bound to the session captured at
 start. If USB disconnects or another board/session replaces it, playback fails
 instead of redirecting output commands to the replacement.
 
@@ -75,3 +85,53 @@ Use `macro record start-mcu NAME` only for the explicit firmware-clock workflow.
 Existing definitions without `mode` retain their MCU behavior. Neither this
 guide nor a successful host playback closes the separate precise timing,
 retained circular-buffer, loaded-motion and physical-input acceptance gates.
+
+## Verified bounded MCU playback
+
+The existing firmware-timed queue was exercised on the connected board with
+three display-only commands at 0, 500000 and 1000000 µs. All 42 encoded bytes
+fit in the 127-byte queue before playback starts. The firmware reported all
+three commands executed in each of three runs, with no underruns, dispatch
+errors or timing violations at the unchanged 2500 µs tolerance.
+
+| Run | Maximum MCU ACK lateness | Result |
+|---|---:|---|
+| 1 | 1060 µs | 3/3, faithful |
+| 2 | 884 µs | 3/3, faithful |
+| 3 | 868 µs | 3/3, faithful |
+
+These are MCU dispatcher-acknowledgement timestamps, not measured display/GPIO
+edges. No firmware update was needed. This verifies small preloaded playback;
+it does not prove streamed circular refill, physical/RF recording, cross-host
+clock synchronization, loaded motion timing, or MCU reset/session-replacement
+safety. Those remain separate acceptance work under the macro backlog.
+
+To reproduce the isolated playback independently of recording, first choose an
+unused ID/name and create a draft through the packaged Go controller. The
+following PowerShell example uses ID 4 **only after verifying it is unused**:
+
+```powershell
+& '.\Tools\Controller\bin\controller.exe' exec macro list
+& '.\Tools\Controller\bin\controller.exe' exec macro create 4 mcu-display-check verification blue
+& '.\Tools\Controller\bin\controller.exe' exec config get macros
+```
+
+Check the returned array: an array index is not a macro ID. Continue with
+`macros[4]` below only if index 4 is the newly created ID 4/name; otherwise use
+its actual index. Never overwrite an existing user macro or the whole library.
+
+```powershell
+$macroDefinition='{"id":4,"name":"mcu-display-check","mode":"mcu","category":"verification","color":"blue","timing_tolerance_us":2500,"steps":[{"at_us":0,"kind":"display","destination":"segments","duration_ms":400,"text":"M001"},{"at_us":500000,"kind":"display","destination":"segments","duration_ms":400,"text":"M002"},{"at_us":1000000,"kind":"display","destination":"segments","duration_ms":400,"text":"DONE"}]}'
+& '.\Tools\Controller\bin\controller.exe' exec config set 'macros[4]' $macroDefinition
+& '.\Tools\Controller\bin\controller.exe' exec macro show mcu-display-check
+& '.\Tools\Controller\bin\controller.exe' exec macro play mcu-display-check
+& '.\Tools\Controller\bin\controller.exe' exec macro monitor
+```
+
+Before playback, `show` must confirm MCU mode, three display/`0x38` steps,
+42 bytes and 2500 µs tolerance. Keep the host connected; firmware cancels an
+active queue when the host goes offline. The normal cancel/error policy turns
+relays and user PWM outputs off; `macro cancel keep` is an explicit cancel
+option preserving their current values. Perform this diagnostic only when
+that failure-safe behavior is acceptable. The same validated configuration
+and macro commands are available through the existing command API/IPC paths.

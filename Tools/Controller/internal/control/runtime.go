@@ -97,11 +97,12 @@ type Event struct {
 // MCU timestamp lets recorders preserve activation deltas without trusting
 // host USB/network arrival time.
 type CommandEvidence struct {
-	Opcode       byte      `json:"opcode"`
-	Payload      []byte    `json:"payload,omitempty"`
-	DeviceMicros uint32    `json:"device_micros"`
-	Timed        bool      `json:"timed"`
-	ObservedAt   time.Time `json:"observed_at"`
+	Opcode       byte          `json:"opcode"`
+	Payload      []byte        `json:"payload,omitempty"`
+	DeviceMicros uint32        `json:"device_micros"`
+	Timed        bool          `json:"timed"`
+	ObservedAt   time.Time     `json:"observed_at"`
+	Source       CommandSource `json:"source,omitempty"`
 }
 
 type rfGestureKey struct {
@@ -915,12 +916,17 @@ func (runtime *Runtime) Command(
 	if err != nil {
 		return err
 	}
+	runtime.publishCommandEvidence(acknowledgedCommandEvidence(ctx, opcode, payload, frame))
+	return nil
+}
+
+func acknowledgedCommandEvidence(ctx context.Context, opcode byte, payload []byte, frame native.Frame) CommandEvidence {
 	deviceMicros, timed := native.ResponseDeviceMicros(frame)
-	runtime.publishCommandEvidence(CommandEvidence{
+	return CommandEvidence{
 		Opcode: opcode, Payload: append([]byte(nil), payload...),
 		DeviceMicros: deviceMicros, Timed: timed, ObservedAt: time.Now(),
-	})
-	return nil
+		Source: CommandSourceFromContext(ctx),
+	}
 }
 
 func (runtime *Runtime) publishCommandEvidence(evidence CommandEvidence) {

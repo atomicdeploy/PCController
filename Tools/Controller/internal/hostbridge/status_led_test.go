@@ -7,6 +7,7 @@ import (
 
 	controller "pccontroller.local/controller"
 	"pccontroller.local/controller/internal/appconfig"
+	"pccontroller.local/controller/internal/control"
 )
 
 func TestStatusLEDStatePriority(t *testing.T) {
@@ -161,6 +162,20 @@ func TestStatusLEDRunningDoorOpenRemainsPersistentCritical(t *testing.T) {
 	if target.direct != 1 || target.base != 1 {
 		t.Fatalf("ordinary door cue unexpectedly cancelled overlays: %#v", target)
 	}
+	if len(target.sources) != 2 || target.sources[0] != control.CommandSourceBackground || target.sources[1] != control.CommandSourceBackground {
+		t.Fatalf("automatic policy/safety frames lack recorder provenance: %v", target.sources)
+	}
+}
+
+func TestStatusLEDPrepareDisconnectIsBackground(t *testing.T) {
+	target := &statusLEDTargetRecorder{}
+	arbiter := newStatusLEDArbiter(context.Background(), target, nil, nil)
+	if err := arbiter.PrepareDisconnect(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if target.direct != 1 || len(target.sources) != 1 || target.sources[0] != control.CommandSourceBackground {
+		t.Fatalf("planned-disconnect status frame lost provenance: %#v", target)
+	}
 }
 
 func assertStatusLEDState(
@@ -180,22 +195,25 @@ func assertStatusLEDState(
 }
 
 type statusLEDTargetRecorder struct {
-	base   int
-	direct int
+	base    int
+	direct  int
+	sources []control.CommandSource
 }
 
 func (target *statusLEDTargetRecorder) SetStatusRGBBase(
-	context.Context,
-	byte, byte, byte, byte,
+	ctx context.Context,
+	_, _, _, _ byte,
 ) error {
 	target.base++
+	target.sources = append(target.sources, control.CommandSourceFromContext(ctx))
 	return nil
 }
 
 func (target *statusLEDTargetRecorder) SetStatusRGB(
-	context.Context,
-	byte, byte, byte, byte,
+	ctx context.Context,
+	_, _, _, _ byte,
 ) error {
 	target.direct++
+	target.sources = append(target.sources, control.CommandSourceFromContext(ctx))
 	return nil
 }
