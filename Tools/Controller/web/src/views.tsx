@@ -138,6 +138,7 @@ import { buzzerPathFromState, type BuzzerPath } from './buzzer-routing'
 import { peripheralAvailability } from './peripheral-availability'
 
 export interface SharedViewProps {
+  reduceMotion?: boolean
   appTitle: string
   snapshot: Snapshot
   samples: MetricSample[]
@@ -267,7 +268,7 @@ export function DashboardView(props: SharedViewProps) {
         ]}
       >
         <Suspense fallback={<div className="telemetry-chart__empty" role="status"><Activity size={22} /><span>{locale === 'fa' ? 'در حال آماده‌سازی نمودار…' : 'Preparing chart…'}</span></div>}>
-          <TelemetryChart connected locale={locale} samples={samples} reduceMotion={props.appearance.reduceMotion} />
+          <TelemetryChart connected locale={locale} samples={samples} reduceMotion={props.reduceMotion} />
         </Suspense>
       </Card>}
 

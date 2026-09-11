@@ -1357,6 +1357,7 @@ export default function App() {
       ? 'loading'
       : 'unavailable'
   const shared: SharedViewProps = {
+    reduceMotion: appearance.reduceMotion,
     appTitle: productTitle, snapshot, samples, events, locale: appearance.locale, t, command: runCommand, refresh, openDialog,
     boardSettingsReadState,
     transport: {
