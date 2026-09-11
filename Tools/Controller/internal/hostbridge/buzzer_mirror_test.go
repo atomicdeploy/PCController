@@ -12,6 +12,27 @@ import (
 	"pccontroller.local/controller/internal/shell"
 )
 
+func TestPeerSubscriptionEchoIsConsumedWithoutRepublishing(t *testing.T) {
+	runtime := control.New(control.Options{})
+	defer runtime.Close()
+	client := controller.AttachSharedRuntime(runtime, shell.New(1))
+	manager := &Manager{client: client}
+	for _, event := range []controller.Event{
+		{Kind: "status_led.changed", Source: "bridge"},
+		{Kind: "message", Source: "websocket"},
+		{Kind: "door", Source: "board", Metadata: map[string]string{"bridge.ingress": "peer"}},
+	} {
+		before := runtime.LatestEventID()
+		raw, _ := json.Marshal(event)
+		if !manager.ingestPeerEvent("peer", raw) {
+			t.Fatal("echo must be consumed, not passed to text fallback")
+		}
+		if runtime.LatestEventID() != before {
+			t.Fatalf("echo republished: %+v", event)
+		}
+	}
+}
+
 func TestAuthenticatedPeerBuzzerEventStaysStructuredAndLoopSafe(t *testing.T) {
 	runtime := control.New(control.Options{})
 	defer runtime.Close()
