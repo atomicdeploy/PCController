@@ -42,6 +42,11 @@ errors, USB reconnects, and disabling presentation do not re-arm the warning.
 A successful physical render or detection re-arms it for the next failure;
 current diagnostic state remains available while repeated warnings stay quiet.
 
+Reciprocal peer subscriptions consume already-bridged events without publishing
+them again. This ingress check complements outbound forwarding guards: otherwise
+subscription echoes can flood activity history and repeat old notifications.
+Direct peer events retain their structured payload and provenance.
+
 There are two independent persistence domains:
 
 | Owner | Stored data | Storage |
