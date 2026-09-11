@@ -263,6 +263,13 @@ temporary executable names. The cache identity includes embedded WebUI and
 default-recovery assets, and the shared lock prevents concurrent worktrees from
 overwriting one another's binary/cache pair.
 
+Windows output is fixed at `%LOCALAPPDATA%\PCController\test-programs\go`.
+The runner rejects alternate `--output` directories, including per-task child
+directories, because the complete executable path determines firewall identity.
+Do not override `GOTMPDIR` or copy/rename test binaries to bypass this policy.
+Use `--package` and `--run` for focused checks; non-Windows output remains
+configurable. This recovers the unfinished runner policy tracked in issue #344.
+
 For a machine-level Windows backstop, this workstation sets Go's `GOTMPDIR` to
 `%LOCALAPPDATA%\PCController\go-noexec-temp` and grants the interactive user an
 object-inherit-only deny-execute ACL there. That makes a mistakenly invoked
